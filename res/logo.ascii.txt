@@ -1,0 +1,6 @@
+
+ PPP   H   H  Y   Y  L     L   Y   Y
+ P  P  H   H   Y Y   L     L    Y Y
+ PPP   HHHHH    Y    L     L     Y
+ P     H   H    Y    L     L     Y
+ P     H   H    Y    LLLL  LLLL  Y
