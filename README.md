@@ -26,6 +26,8 @@ PhyloPhere is a Nextflow pipeline designed to facilitate a comprehensive and rep
 - [Contributing](#contributing)
 - [License](#license)
 - [Usage](#usage)
+- [Future Steps](#future_steps)
+- [Disclaimer](#Disclaimer)
 
 
 ## Getting Started
@@ -169,7 +171,7 @@ wait
 
 ```
 
-## Future steps
+## Future Steps
 
 As of today, this workflow extends support for only continuous trait exploration.  By harmonizing multiple analytical approaches, Phylophere streamlines the study of complex genome-phenome analyses. This not only saves time and effort but also ensures methodological consistency throughout the analytical process. 
 Looking ahead, the roadmap includes the integration of the complete RERConverge package and other commonly used PCMs, such as PGLS analysis. The idea is to further expand the pipeline's capabilities by incorporating subsequent steps in our downstream analysis,
