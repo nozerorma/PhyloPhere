@@ -41,7 +41,7 @@ To get started with PhyloPhere, follow these steps:
 
 ## Configuration
 
-The configuration files are located in the `conf` directory. The `base.config` file contains the basic configuration parameters, while the `modules.config` file defines module-specific configurations.
+The configuration files are located in the `conf` directory. The `base.config` file contains the basic configuration parameters, while the `modules.config` file defines module-specific configurations.`nextflow.config` contains parameterization and profile settings, among other things.
 
 ## Documentation
 
@@ -170,6 +170,8 @@ done
 wait
 
 ```
+
+`remove_workdir_sbatch.sh` is also included in the repository as a quick'n dirty way to clean the work directory in an HPC environment using Slurm queue manager, which should be done through SBATCH operation for convenient resource allocation.
 
 ## Future Steps
 
