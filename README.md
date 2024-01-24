@@ -26,7 +26,7 @@ PhyloPhere is a Nextflow pipeline designed to facilitate a comprehensive and rep
 - [Contributing](#contributing)
 - [License](#license)
 - [Usage](#usage)
-- [Future Steps](#future_steps)
+- [Future Steps](#future-steps)
 - [Disclaimer](#Disclaimer)
 
 
