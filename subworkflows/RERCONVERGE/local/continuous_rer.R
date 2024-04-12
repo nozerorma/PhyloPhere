@@ -42,8 +42,8 @@ rdsPath <- args[4]
 traitRERw <- readRDS(rdsPath)
 
 # Perform continuous RER analysis
-res <- correlateWithContinuousPhenotype(traitRERw, charpaths, min.sp = args[6],
-    winsorizeRER = args[7], winsorizetrait = args[8])
+res <- correlateWithContinuousPhenotype(traitRERw, charpaths, min.sp = as.numeric(args[6]),
+    winsorizeRER = as.numeric(args[7]), winsorizetrait = as.numeric(args[8]))
 
 saveRDS(res, args[5])
 

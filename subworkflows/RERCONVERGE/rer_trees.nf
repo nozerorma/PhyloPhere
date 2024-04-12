@@ -33,7 +33,7 @@ process RER_TREES {
     tag "$gene_trees_file"
 
     // Uncomment the following lines to assign workload priority.
-    label 'process_rer' // have to tell it that only if using cluster!!!!!!!
+    label 'process_rer_med' // have to tell it that only if using cluster!!!!!!!
 
 
     input:

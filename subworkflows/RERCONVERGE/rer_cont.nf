@@ -60,6 +60,9 @@ process RER_CONT {
         ${ params.traitname }.char2path.output \\
         ${ rer_matrix } \\
         ${ params.traitname }.continuous.output \\
-        $args
+        ${params.rer_minsp} \\
+        ${params.winsorizeRER} \\
+        ${params.winsorizeTrait}
+
     """
 }

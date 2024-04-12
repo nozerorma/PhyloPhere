@@ -6,8 +6,9 @@
 ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
 ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
 ```
-
-# A Nextflow pipeline including a complete set of phylogenetic comparative tools and analyses for Phenome-Genome studies
+                                                                                                                                                                                                                               
+ # PHYLOPHERE 
+ ### A Nextflow pipeline including a complete set of phylogenetic comparative tools and analyses for Phenome-Genome studies
 
  **Github:** https://github.com/nozerorma/caastools/nf-phylophere
 
@@ -26,8 +27,6 @@ PhyloPhere is a Nextflow pipeline designed to facilitate a comprehensive and rep
 - [Contributing](#contributing)
 - [License](#license)
 - [Usage](#usage)
-- [Future Steps](#future-steps)
-- [Disclaimer](#Disclaimer)
 
 
 ## Getting Started
@@ -41,7 +40,7 @@ To get started with PhyloPhere, follow these steps:
 
 ## Configuration
 
-The configuration files are located in the `conf` directory. The `base.config` file contains the basic configuration parameters, while the `modules.config` file defines module-specific configurations.`nextflow.config` contains parameterization and profile settings, among other things.
+The configuration files are located in the `conf` directory. The `base.config` file contains the basic configuration parameters, while the `modules.config` file defines module-specific configurations.
 
 ## Documentation
 
@@ -171,13 +170,16 @@ wait
 
 ```
 
-`remove_workdir_sbatch.sh` is also included in the repository as a quick'n dirty way to clean the work directory in an HPC environment using Slurm queue manager, which should be done through SBATCH operation for convenient resource allocation.
-
-## Future Steps
+## Future steps
 
 As of today, this workflow extends support for only continuous trait exploration.  By harmonizing multiple analytical approaches, Phylophere streamlines the study of complex genome-phenome analyses. This not only saves time and effort but also ensures methodological consistency throughout the analytical process. 
+
+
 Looking ahead, the roadmap includes the integration of the complete RERConverge package and other commonly used PCMs, such as PGLS analysis. The idea is to further expand the pipeline's capabilities by incorporating subsequent steps in our downstream analysis,
 specifically the binary trait exploration and a comprehensive functional analysis.
 
 ## Disclaimer
-The current pipeline is in its early stages and will undergo continuous enhancements. For substantial tasks, it's recommended to utilize CAAStools for CAAS and RERConverge for RER analysis. The Nextflow pipeline has been crafted adhering to the best practices of DSL2.
+Note: The current pipeline is in its early stages and will undergo continuous enhancements. For substantial tasks, it's recommended to utilize CAAStools for CAAS and RERConverge for RER analysis. The Nextflow pipeline has been crafted adhering to the best practices of DSL2.
+
+
+

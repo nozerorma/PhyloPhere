@@ -33,7 +33,7 @@ process RER_TRAIT {
     tag "$my_traitfile"
 
     // Uncomment the following lines to assign workload priority.
-    // label 'big_mem'
+    label 'process_rer_low'
 
 
     input:

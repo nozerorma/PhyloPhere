@@ -30,6 +30,7 @@
 
 
 // Define the alignment channel align_tuple
+// **/* defines a double level folder structure, modify accordingly and annotate it in documentation
 align_tuple = Channel
                 .fromPath("${params.alignment}/**/*")
                 .filter { it.isFile() } // Filter out directories
@@ -47,7 +48,7 @@ include { BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_bootstrap"
 // Main workflow
 
 workflow CT {
-    if (params.rer_tool) {
+    if (params.ct_tool) {
 
         def toolsToRun = params.ct_tool.split(',')
 

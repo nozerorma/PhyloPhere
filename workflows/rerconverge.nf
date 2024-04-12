@@ -60,8 +60,8 @@ workflow RER_MAIN {
         def toolsToRun = params.rer_tool.split(',')
     // Conditionally run the 'build_trait' tool
     if (params.rer_tool && params.rer_tool.contains('build_trait')) {
-        //trait_out = RER_TRAIT(my_traitfile)
-        //trees_out = RER_TREES(gene_trees_file, trait_out)
+        trait_out = RER_TRAIT(my_traitfile)
+        trees_out = RER_TREES(gene_trees_file, trait_out)
         matrix_out = RER_MATRIX(trait_out ?: params.trait_out, trees_out ?: params.trees_out)
     }
 

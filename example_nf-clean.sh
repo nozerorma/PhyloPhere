@@ -1,5 +1,4 @@
 #!/bin/bash
-
 #
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -17,21 +16,20 @@
 #
 # Author:         Miguel Ramon (miguel.ramon@upf.edu)
 #
-# File: remove_workdir_sbatch.sh
+# File: SBATCH_nf-clean.sh
 #
 
-#SBATCH --job-name=rm-work-debris
-#SBATCH -p haswell 
+# change parameters according to cluster
+
+#SBATCH --job-name=clean-nf-debris
+#SBATCH -p normal
 #SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=1
-#SBATCH --mem-per-cpu=4G
-#SBATCH -e slurm-%j.err
-#SBATCH -o slurm-%j.out
-#SBATCH --time=8:00:00
-
-# send mail if needed
+#SBATCH -e slurm-%A_%a.err
+#SBATCH -o slurm-%A_%a.out
 #SBATCH --mail-type=START,END,FAIL
-#SBATCH --mail-user=miguel.ramon@upf.edu
+#SBATCH --mail-user=user@mail.edu
 
-# Remove nextflow work debris
-rm -rf /gpfs42/robbyfs/scratch/lab_anavarro/mramon/nf_caastools/work
+module load Nextflow
+nextflow clean -f 

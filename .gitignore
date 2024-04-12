@@ -20,3 +20,6 @@ singularity
 slurm*
 .vscode/settings.json
 subworkflows/RERCONVERGE/scripts/phylophere.code-workspace
+.directory
+SBATCH_discovery-array.sh
+nextflow.config
