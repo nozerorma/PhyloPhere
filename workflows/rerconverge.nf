@@ -52,26 +52,35 @@ include { RER_CONT } from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
 workflow RER_MAIN {
 
     // Define trait_out, trees_out, and matrix_out
-    trait_out = null
-    trees_out = null
-    matrix_out = null
+    trait_out = params.trait_out
+    trees_out = params.trees_out
+    matrix_out = params.matrix_out
 
     if (params.rer_tool) {
         def toolsToRun = params.rer_tool.split(',')
-    // Conditionally run the 'build_trait' tool
-    if (params.rer_tool && params.rer_tool.contains('build_trait')) {
-        trait_out = RER_TRAIT(my_traitfile)
-        trees_out = RER_TREES(gene_trees_file, trait_out)
-        matrix_out = RER_MATRIX(trait_out ?: params.trait_out, trees_out ?: params.trees_out)
-    }
 
-    // Conditionally run the 'continuous' tool
-    if (params.rer_tool && params.rer_tool.contains('continuous')) {
-        // Use outputs from the 'build_trait' tool if available, otherwise use defaults from nextflow.config
-        continuous_out = RER_CONT(trait_out ?: params.trait_out, trees_out ?: params.trees_out, matrix_out ?: params.matrix_out)
-    }
-    /*     if (toolsToRun.contains('enrichment')) {
-            enrichment_out = RER_ENRICH()
-        } */
+        // Conditionally run the 'build_trait' tool
+        if (toolsToRun.contains('build_trait')) {
+            trait_out = RER_TRAIT(my_traitfile)
+        }
+
+        // Conditionally run the 'build_tree' tool
+        if (toolsToRun.contains('build_trait')) {
+            trees_out = RER_TREES(gene_trees_file)
+        }
+
+        // Conditionally run the 'build_matrix' tool
+        if (toolsToRun.contains('build_matrix')) {
+            matrix_out = RER_MATRIX(trait_out, trees_out)
+        }
+
+        // Conditionally run the 'continuous' tool
+        if (toolsToRun.contains('continuous')) {
+            // Use outputs from the 'build_trait' tool if available, otherwise use defaults from nextflow.config
+            continuous_out = RER_CONT(trait_out, trees_out, matrix_out)
+        }
+        /*     if (toolsToRun.contains('enrichment')) {
+                enrichment_out = RER_ENRICH()
+            } */
     }
 }
