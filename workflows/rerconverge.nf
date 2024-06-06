@@ -5,12 +5,12 @@
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
 #  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗  
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝  
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
 #  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
 #  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#                                                                                    
-#                                      
+#
+#
 # PHYLOPHERE: A Nextflow pipeline including a complete set
 # of phylogenetic comparative tools and analyses for Phenome-Genome studies
 #
@@ -41,8 +41,8 @@ my_traitfile = file( params.my_traits )
 
 // Import local modules/subworkflows
 include { RER_TRAIT } from "${baseDir}/subworkflows/RERCONVERGE/rer_trait"
-include { RER_TREES } from "${baseDir}/subworkflows/RERCONVERGE/rer_trees" 
-include { RER_MATRIX } from "${baseDir}/subworkflows/RERCONVERGE/rer_matrix" 
+include { RER_TREES } from "${baseDir}/subworkflows/RERCONVERGE/rer_trees"
+include { RER_MATRIX } from "${baseDir}/subworkflows/RERCONVERGE/rer_matrix"
 include { RER_CONT } from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
 //include { RER_ENRICH } from "${baseDir}/subworkflows/RERCONVERGE/rer_enrich" addParams(TREE_TUPLE: tree_tuple)
 
@@ -53,7 +53,7 @@ workflow RER_MAIN {
 
     // Define trait_out, trees_out, and matrix_out
     trait_out = params.trait_out
-    trees_out = params.trees_out
+    masterTrees_out = params.trees_out
     matrix_out = params.matrix_out
 
     if (params.rer_tool) {
@@ -65,19 +65,26 @@ workflow RER_MAIN {
         }
 
         // Conditionally run the 'build_tree' tool
-        if (toolsToRun.contains('build_trait')) {
-            trees_out = RER_TREES(gene_trees_file)
+        if (toolsToRun.contains('build_tree')) {
+            trees_out = RER_TREES(my_traitfile, gene_trees_file)
+            trees_out.view { file ->
+                println "Output tree file: ${file}"
+            }
+
+            prunedTrees_out = trees_out[1]  // Capturing pruned trees file
+            masterTrees_out = trees_out[0]   // Capturing master tree output
         }
+
 
         // Conditionally run the 'build_matrix' tool
         if (toolsToRun.contains('build_matrix')) {
-            matrix_out = RER_MATRIX(trait_out, trees_out)
+            matrix_out = RER_MATRIX(trait_out, masterTrees_out)
         }
 
         // Conditionally run the 'continuous' tool
         if (toolsToRun.contains('continuous')) {
             // Use outputs from the 'build_trait' tool if available, otherwise use defaults from nextflow.config
-            continuous_out = RER_CONT(trait_out, trees_out, matrix_out)
+            continuous_out = RER_CONT(trait_out, masterTrees_out, matrix_out)
         }
         /*     if (toolsToRun.contains('enrichment')) {
                 enrichment_out = RER_ENRICH()

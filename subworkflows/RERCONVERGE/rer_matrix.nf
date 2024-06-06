@@ -33,12 +33,12 @@ process RER_MATRIX {
     tag "$gene_trees_file"
 
     // Uncomment the following lines to assign workload priority.
-    label 'process_rer'
+    label 'process_medium' // have to tell it that only if using cluster!!!!!!!
 
 
     input:
-    path gene_trees_file
     path trait_file
+    path gene_trees_file
 
     output:
     file("${params.traitname}.RERmatrix.output")
@@ -52,8 +52,8 @@ process RER_MATRIX {
     """
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/rer_matrix.R' \\
-        ${ gene_trees_file } \\
         ${ trait_file } \\
+        ${ gene_trees_file } \\
         ${ outputName } \\
         $args
     """

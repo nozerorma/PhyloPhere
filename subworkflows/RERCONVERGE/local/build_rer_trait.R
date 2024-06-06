@@ -2,12 +2,12 @@
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
 #  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗  
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝  
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
 #  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
 #  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#                                                                                    
-#                                      
+#
+#
 # PHYLOPHERE: A Nextflow pipeline including a complete set
 # of phylogenetic comparative tools and analyses for Phenome-Genome studies
 #
@@ -35,22 +35,25 @@ ori_traits <- read.csv(args[1])
 ## Remove whitespaces
 ori_traits[] <- lapply(ori_traits, function(col) trimws(col))
 
+# Specify column name for species
+sp_colname <- args[2]
+
 ## Binarize names if not performed already
-ori_traits$species <- gsub(" ", "_", ori_traits$species)
+ori_traits$species <- gsub(" ", "_", ori_traits[[sp_colname]])
 
 # Reorder and filter species
-selected_column <- args[2]
+selected_column <- args[3]
 
 ori_traits <- ori_traits %>%
   select(species, !!as.name(selected_column)) %>%
   filter(!is.na(!!as.name(selected_column)))
 
 # Select only those columns of interest and build named vector
-trait_vector <- setNames(as.numeric(ori_traits[[selected_column]]), ori_traits$species)
+trait_vector <- setNames(as.numeric(ori_traits[[selected_column]]), ori_traits[[sp_colname]])
 
 # Write the generated vector
 ## Parameterize to traits_continuous
-traitPath <- args[3]
+traitPath <- args[4]
 print(traitPath)
 save(trait_vector, file = traitPath)
 

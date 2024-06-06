@@ -5,12 +5,12 @@
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
 #  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
-#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗  
-#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝  
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
 #  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
 #  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
-#                                                                                    
-#                                      
+#
+#
 # PHYLOPHERE: A Nextflow pipeline including a complete set
 # of phylogenetic comparative tools and analyses for Phenome-Genome studies
 #
@@ -33,27 +33,30 @@ process RER_TREES {
     tag "$gene_trees_file"
 
     // Uncomment the following lines to assign workload priority.
-    label 'process_rer_med' // have to tell it that only if using cluster!!!!!!!
+    label 'process_medium' // have to tell it that only if using cluster!!!!!!!
 
 
     input:
+    path my_traitfile
     path gene_trees_file
-    path cancer_trait
 
     output:
-    file("${gene_trees_file}.masterTree.output")
-
+    file("${gene_trees_file}.masterTree.output") into outputNameChannel
+    file("${gene_trees_file}.pruned.txt") into prunedTreesChannel
 
     script:
-    // Define extra discovery arguments from params.file
     def args = task.ext.args ?: ''
-    def outputName = "${gene_trees_file}.masterTree.output"
+    def pruned_trees_out = "${gene_trees_file}.pruned.txt"
+    def masterTrees_out = "${gene_trees_file}.masterTree.output"
 
     """
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/rer_master_tree.R' \\
         ${ gene_trees_file } \\
-        ${ outputName } \\
+        ${ my_traitfile } \\
+        ${ params.sp_colname } \\
+        ${ pruned_trees_out } \\
+        ${ masterTrees_out } \\
         $args
     """
 }

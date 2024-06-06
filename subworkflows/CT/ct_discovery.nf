@@ -32,7 +32,7 @@ process DISCOVERY {
     tag "$alignmentID"
 
     // Uncomment the following lines to assign workload priority.
-    label 'process_single'
+    // label 'process_single'
 
     input:
     tuple val(alignmentID), file(alignmentFile)

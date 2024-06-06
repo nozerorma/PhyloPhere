@@ -32,7 +32,7 @@
 // Define the alignment channel align_tuple
 // **/* defines a double level folder structure, modify accordingly and annotate it in documentation
 align_tuple = Channel
-                .fromPath("${params.alignment}/**/*")
+                .fromPath("${params.alignment}/*")
                 .filter { it.isFile() } // Filter out directories
                 .map { file -> tuple(file.baseName, file) }
 
