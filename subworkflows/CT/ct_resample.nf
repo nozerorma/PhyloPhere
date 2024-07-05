@@ -37,6 +37,7 @@ process RESAMPLE {
 
     input:
     path nw_tree
+    path trait_val
 
     output:
     file("${nw_tree}.resampled.output")
@@ -58,11 +59,22 @@ process RESAMPLE {
         exit 1, "Invalid strategy: ${params.strategy}"
     }
 
+//     """
+//     /usr/local/bin/_entrypoint.sh ct resample \\
+//         -p ${nw_tree} \\
+//         -o ${nw_tree}.resampled.output \\
+//         ${strategyCommand} \\
+//         $args
+//     """
+
     """
-    /usr/local/bin/_entrypoint.sh ct resample \\
-        -p ${nw_tree} \\
-        -o ${nw_tree}.resampled.output \\
-        ${strategyCommand} \\
-        $args
+        /usr/local/bin/_entrypoint.sh Rscript \\
+        '$baseDir/subworkflows/CT/local/permulations.R' \\
+        ${nw_tree} \\
+        ${params.traitfile} \\
+        ${params.cycles} \\
+        ${params.strategy} \\
+        ${trait_val} \\
+        ${nw_tree}.resampled.output
     """
 }

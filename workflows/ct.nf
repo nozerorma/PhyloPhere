@@ -38,6 +38,8 @@ align_tuple = Channel
 
 // Define the tree file channel
 nw_tree = file(params.tree)
+trait_val = file(params.traitvalues)
+
 
 // Import local modules/subworkflows
 include { DISCOVERY } from "${baseDir}/subworkflows/CT/ct_discovery"
@@ -56,10 +58,10 @@ workflow CT {
             discovery_out = DISCOVERY(align_tuple)
         }
         if (toolsToRun.contains('resample')) {
-            resample_out = RESAMPLE(nw_tree)
+            resample_out = RESAMPLE(nw_tree, trait_val)
         }
         if (toolsToRun.contains('bootstrap')) {
-            boostrap_out = BOOTSTRAP(align_tuple, resample_out) // Add a way in here to softinput specific alignments (for example interesting genes)
+            boostrap_out = BOOTSTRAP(align_tuple, resample_out)
         }
     }    
 }
