@@ -1,6 +1,3 @@
-#!/usr/bin/env nextflow
-
-/*
 #
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -18,49 +15,23 @@
 #
 # Author:         Miguel Ramon (miguel.ramon@upf.edu)
 #
-# File: rer_analysis.R
+# File: rer_objects.R
 #
-*/
 
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  DISCOVERY module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
+# Set up variable to control command line arguments
+args <- commandArgs(TRUE)
 
+# Load libraries
+library(dplyr)
+library(RERconverge)
 
-process RER_TRAIT {
-    tag "$alignmentID"
+# Reading in gene trees with `readTrees`
+geneTreesPath <- args[1]
 
-    // Uncomment the following lines to assign workload priority.
-    // label 'big_mem'
+## Generating masterTree
+geneTrees <- readTrees(geneTreesPath) # Set max.read = 100 to toy-up
 
+## Write our masterTree to path
+saveRDS(geneTrees, args[2])
 
-    input:
-    tuple val(alignmentID), file(alignmentFile)
-
-    output:
-    tuple val(alignmentID), file("${alignmentID}.output"), optional: true
-
-    script:
-    // Define extra discovery arguments from params.file
-    def args = task.ext.args ?: ''
-
-    if (params.singularity.enabled) {
-        """
-        /usr/local/bin/_entrypoint.sh Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    } else {
-        """
-        Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    }
-
-
-}
+### DONE ###

@@ -49,12 +49,24 @@ process RER_MATRIX {
     def args = task.ext.args ?: ''
     def outputName = "${params.traitname}.RERmatrix.output"
 
-    """
+    if (params.singularity.enabled) {
+        """
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/rer_matrix.R' \\
         ${ trait_file } \\
         ${ gene_trees_file } \\
         ${ outputName } \\
         $args
-    """
+        """
+    } else {
+        """
+        Rscript \\
+        '$baseDir/subworkflows/RERCONVERGE/local/rer_matrix.R' \\
+        ${ trait_file } \\
+        ${ gene_trees_file } \\
+        ${ outputName } \\
+        $args
+        """
+    }
+
 }

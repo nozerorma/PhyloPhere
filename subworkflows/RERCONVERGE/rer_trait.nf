@@ -46,8 +46,9 @@ process RER_TRAIT {
     // Define extra discovery arguments from params.file
     // def args = task.ext.args ?: ''
     def outputName = "${params.traitname}.polished.output"
-
-    """
+    
+    if (params.singularity.enabled) {
+        """
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R' \\
         ${ my_traitfile } \\
@@ -55,5 +56,17 @@ process RER_TRAIT {
         ${ params.traitname } \\
         ${ outputName } \\
         $args
-    """
+        """
+    } else {
+        """    
+        Rscript \\
+        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R' \\
+        ${ my_traitfile } \\
+        ${ params.sp_colname } \\
+        ${ params.traitname } \\
+        ${ outputName } \\
+        $args
+        """
+    }
+
 }

@@ -1,0 +1,11 @@
+.Rproj.user
+caastools.Rproj
+.RData
+.Rhistory
+workspace
+.venv
+.nextflow/*
+.nextflow*
+work
+results
+log/nextflow.log

@@ -1,6 +1,3 @@
-#!/usr/bin/env nextflow
-
-/*
 #
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -14,53 +11,62 @@
 # PHYLOPHERE: A Nextflow pipeline including a complete set
 # of phylogenetic comparative tools and analyses for Phenome-Genome studies
 #
-# Github: https://github.com/nozerorma/caastools/nf-phylophere
+# Github: https://github.com/nozerorma/PhyloPhere
 #
 # Author:         Miguel Ramon (miguel.ramon@upf.edu)
 #
-# File: rer_analysis.R
+# File: Dockerfile
 #
-*/
 
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  DISCOVERY module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
+# Set image origin to micromamba for a stripped down, immutable Debian-Conda environment.
+FROM mambaorg/micromamba:1.5.1
 
+LABEL image.author.name "Miguel Ramon"
+LABEL image.author.email "miguel.ramon@upf.edu"
 
-process RER_TRAIT {
-    tag "$alignmentID"
+# Set root as default user due to some funky behavour when using $MAMBA_USER.
+USER root
 
-    // Uncomment the following lines to assign workload priority.
-    // label 'big_mem'
+# Download some basic debian tools + procps (Nextflow dependency).
+RUN apt-get update \
+    && DEBIAN_FRONTEND=noninteractive \
+    apt-get install -qq -y --no-install-recommends \
+        software-properties-common \
+        dirmngr \
+        ed \
+        gpg-agent \
+		less \
+		locales \
+		vim-tiny \
+		ca-certificates \
+        procps
 
+# Add environment file to the Docker image.
+COPY env.yml /tmp/env.yml
 
-    input:
-    tuple val(alignmentID), file(alignmentFile)
+# Create micromamba environment with the specifics from env.yml.
+RUN micromamba install -y -n base -f /tmp/env.yml && \
+    micromamba clean --all --yes
 
-    output:
-    tuple val(alignmentID), file("${alignmentID}.output"), optional: true
+# Set CAASTools as WD and create build directory structure.
+# Add all the requirements for CAAStools.
+WORKDIR /ct
 
-    script:
-    // Define extra discovery arguments from params.file
-    def args = task.ext.args ?: ''
+RUN mkdir -p ./modules ./scripts
 
-    if (params.singularity.enabled) {
-        """
-        /usr/local/bin/_entrypoint.sh Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    } else {
-        """
-        Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    }
+ADD  modules/ ./modules/
+ADD  scripts/ ./scripts/
 
+# Add ct maintool to wd
+ADD ct .
 
-}
+# Make ct and scripts executable
+RUN chmod +x ./ct
+RUN chmod +x ./scripts/*
+
+# Add ct and conda binary to $PATH
+ENV PATH=/ct:$PATH
+ENV PATH /opt/conda/envs/base/bin:$PATH
+
+# Set the image to be run inside base environment directly
+ENTRYPOINT ["/usr/local/bin/_entrypoint.sh"]

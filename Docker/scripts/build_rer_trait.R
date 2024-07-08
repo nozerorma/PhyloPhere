@@ -1,6 +1,3 @@
-#!/usr/bin/env nextflow
-
-/*
 #
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -18,49 +15,39 @@
 #
 # Author:         Miguel Ramon (miguel.ramon@upf.edu)
 #
-# File: rer_analysis.R
+# File: build_rer_trait.R
 #
-*/
 
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  DISCOVERY module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
+# Set up variable to control command line arguments
+args <- commandArgs(TRUE)
 
+# Load libraries
+library(dplyr)
+library(RERconverge)
 
-process RER_TRAIT {
-    tag "$alignmentID"
+# Load traitfile
+## Pass as arg from nextflow config, should be
+cancer_traits <- read.csv(args[1])
 
-    // Uncomment the following lines to assign workload priority.
-    // label 'big_mem'
+## Remove whitespaces
+cancer_traits[] <- lapply(cancer_traits, function(col) trimws(col))
 
+## Binarize names
+cancer_traits$species <- gsub(" ", "_", cancer_traits$species)
 
-    input:
-    tuple val(alignmentID), file(alignmentFile)
+## Reorder and filter species
+cancer_traits <- cancer_traits %>%
+  select(species,neoplasia_prevalence) %>%
+  filter(!is.na(neoplasia_prevalence))
 
-    output:
-    tuple val(alignmentID), file("${alignmentID}.output"), optional: true
+# Select only those columns of interest and build named vector
+neoplasia_vector <- setNames(as.numeric(cancer_traits$neoplasia_prevalence), cancer_traits$species)
+head(neoplasia_vector)
 
-    script:
-    // Define extra discovery arguments from params.file
-    def args = task.ext.args ?: ''
+# Write the generated vector
+## Parameterize to traits_continuous
+neoplasiaPath <- args[2]
+print(neoplasiaPath)
+save(neoplasia_vector, file = neoplasiaPath)
 
-    if (params.singularity.enabled) {
-        """
-        /usr/local/bin/_entrypoint.sh Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    } else {
-        """
-        Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    }
-
-
-}
+### DONE ###

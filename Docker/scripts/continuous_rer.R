@@ -1,6 +1,3 @@
-#!/usr/bin/env nextflow
-
-/*
 #
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -18,49 +15,58 @@
 #
 # Author:         Miguel Ramon (miguel.ramon@upf.edu)
 #
-# File: rer_analysis.R
+# File: continuous_rer.R
 #
-*/
 
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  DISCOVERY module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
+# Set up variable to control command line arguments
+args <- commandArgs(TRUE)
 
+# Load libraries
+library(dplyr)
+library(RERconverge)
 
-process RER_TRAIT {
-    tag "$alignmentID"
+# Load traitfile
+neoplasiaPath <- args[1]
+load(neoplasiaPath) # As neoplasia_vector
 
-    // Uncomment the following lines to assign workload priority.
-    // label 'big_mem'
+# Load RER matrix
+treePath <- args[2]
+geneTrees <- readRDS(treePath)
 
+# Convert the trait vector to paths comparable to the paths in the RER matrix.
+charpaths <- char2Paths(neoplasia_vector, geneTrees)
 
-    input:
-    tuple val(alignmentID), file(alignmentFile)
+# Load RERs
+rdsPath <- args[3]
+primRERw <- readRDS(rdsPath)
 
-    output:
-    tuple val(alignmentID), file("${alignmentID}.output"), optional: true
+# Perform continuous RER analysis
+res <- correlateWithContinuousPhenotype(primRERw, charpaths, min.sp = 10, 
+    winsorizeRER = 3, winsorizetrait = 3)
 
-    script:
-    // Define extra discovery arguments from params.file
-    def args = task.ext.args ?: ''
-
-    if (params.singularity.enabled) {
-        """
-        /usr/local/bin/_entrypoint.sh Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    } else {
-        """
-        Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    }
+saveRDS(res, args[4])
 
 
-}
+## Visualize the results
+head(res[order(res$p.adj),])
+
+## Check how P-values are sorted
+pdf(args[5])
+p1 <- hist(res$P, breaks=100, main = "P-value distribution in RERs")
+dev.off()
+
+## Check how correlation is affected by individual clades
+### Probably this should be performed in a streamlined way in a different script
+x <- charpaths
+y <- primRERw['A1BG',] # example
+pathNames <- namePathsWSpecies(geneTrees$masterTree) 
+
+pdf(args[6])
+names(y) <- pathNames
+plot(x,y, cex.axis=1, cex.lab=1, cex.main=1, xlab="Weight Change", 
+    ylab="Evolutionary Rate", main="Gene A1BG Pearson Correlation (Example)",
+    pch=19, cex=1, xlim=c(-2,2))
+
+text(x, y, labels = names(y), pos=4)
+abline(lm(y~x), col='red',lwd=3)
+dev.off()

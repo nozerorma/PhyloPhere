@@ -42,13 +42,25 @@ process BOOTSTRAP {
     script:
     def args = task.ext.args ?: ''
 
-    """    
-    /usr/local/bin/_entrypoint.sh ct bootstrap \\
-        -a ${alignmentFile} \\
-        -t ${params.traitfile} \\
-        -s ${resampledFile} \\
-        -o ${alignmentID}.bootstraped.output \\
-        --fmt ${params.ali_format} \\
-        ${args.replaceAll('\n', ' ')}
-    """
+    if (params.singularity.enabled) {
+        """    
+        /usr/local/bin/_entrypoint.sh ct bootstrap \\
+            -a ${alignmentFile} \\
+            -t ${params.traitfile} \\
+            -s ${resampledFile} \\
+            -o ${alignmentID}.bootstraped.output \\
+            --fmt ${params.ali_format} \\
+            ${args.replaceAll('\n', ' ')}
+        """
+    } else {
+        """    
+        /usr/local/bin/_entrypoint.sh ct bootstrap \\
+            -a ${alignmentFile} \\
+            -t ${params.traitfile} \\
+            -s ${resampledFile} \\
+            -o ${alignmentID}.bootstraped.output \\
+            --fmt ${params.ali_format} \\
+            ${args.replaceAll('\n', ' ')}
+        """
+    }
 }

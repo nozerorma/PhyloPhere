@@ -14,7 +14,6 @@ null
 .history
 .history
 test
-Docker
 Data
 Out
 singularity
@@ -23,4 +22,3 @@ slurm*
 subworkflows/RERCONVERGE/scripts/phylophere.code-workspace
 .directory
 SBATCH_discovery-array.sh
-nextflow.config

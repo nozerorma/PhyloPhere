@@ -44,12 +44,24 @@ process DISCOVERY {
     // Define extra discovery arguments from params.file
     def args = task.ext.args ?: ''
 
-    """
+    script:
+    if (params.singularity.enabled) {
+        """
         /usr/local/bin/_entrypoint.sh ct discovery \\
         -a ${alignmentFile} \\
         -t ${params.traitfile} \\
         -o ${alignmentID}.output \\
         --fmt ${params.ali_format} \\
         ${args.replaceAll('\n', ' ')}
-    """
+        """
+    } else {
+        """
+        ct discovery \\
+        -a ${alignmentFile} \\
+        -t ${params.traitfile} \\
+        -o ${alignmentID}.output} \\
+        --fmt ${params.ali_format} \\
+        ${args.replaceAll('\n', ' ')}
+        """
+    }
 }

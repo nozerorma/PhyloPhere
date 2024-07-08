@@ -1,6 +1,3 @@
-#!/usr/bin/env nextflow
-
-/*
 #
 #
 #  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
@@ -18,49 +15,31 @@
 #
 # Author:         Miguel Ramon (miguel.ramon@upf.edu)
 #
-# File: rer_analysis.R
+# File: rer_matrix.R
 #
-*/
 
-/*
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  DISCOVERY module: This module is responsible for the discovery process based on input alignments.
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
+# Set up variable to control command line arguments
+args <- commandArgs(TRUE)
 
+# Load libraries
+library(dplyr)
+library(RERconverge)
 
-process RER_TRAIT {
-    tag "$alignmentID"
+# Load our traits
+neoplasiaPath <- args[1]
+load(neoplasiaPath) # As neoplasia_vector
 
-    // Uncomment the following lines to assign workload priority.
-    // label 'big_mem'
+# Load our trees
+treePath <- args[2]
+geneTrees <- readRDS(treePath)
 
+# Get residuals from our traitfile
+primRERw <- getAllResiduals(geneTrees,useSpecies=names(neoplasia_vector), 
+    transform = "sqrt", weighted = T, scale = T)
 
-    input:
-    tuple val(alignmentID), file(alignmentFile)
+# Now we save our RERs
 
-    output:
-    tuple val(alignmentID), file("${alignmentID}.output"), optional: true
+## Save to path
+saveRDS(primRERw, args[3])
 
-    script:
-    // Define extra discovery arguments from params.file
-    def args = task.ext.args ?: ''
-
-    if (params.singularity.enabled) {
-        """
-        /usr/local/bin/_entrypoint.sh Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    } else {
-        """
-        Rscript \\
-        '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
-        ${params.cancer_traits} \\
-        ${args.replaceAll('\n', ' ')}
-        """
-    }
-
-
-}
+### DONE ###
