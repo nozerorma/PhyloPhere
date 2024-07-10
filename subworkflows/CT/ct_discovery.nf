@@ -45,8 +45,9 @@ process DISCOVERY {
     def args = task.ext.args ?: ''
 
     script:
-    if (params.singularity.enabled) {
+    if (params.use_singularity) {
         """
+        echo "Using Singularity"
         /usr/local/bin/_entrypoint.sh ct discovery \\
         -a ${alignmentFile} \\
         -t ${params.traitfile} \\
@@ -56,6 +57,7 @@ process DISCOVERY {
         """
     } else {
         """
+        echo "Running locally"
         ct discovery \\
         -a ${alignmentFile} \\
         -t ${params.traitfile} \\

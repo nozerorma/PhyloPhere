@@ -42,8 +42,9 @@ process BOOTSTRAP {
     script:
     def args = task.ext.args ?: ''
 
-    if (params.singularity.enabled) {
+    if (params.use_singularity) {
         """    
+        echo "Using Singularity"
         /usr/local/bin/_entrypoint.sh ct bootstrap \\
             -a ${alignmentFile} \\
             -t ${params.traitfile} \\
@@ -54,6 +55,7 @@ process BOOTSTRAP {
         """
     } else {
         """    
+        echo "Running locally"
         /usr/local/bin/_entrypoint.sh ct bootstrap \\
             -a ${alignmentFile} \\
             -t ${params.traitfile} \\

@@ -49,8 +49,9 @@ process RER_TREES {
     def pruned_trees_out = "${gene_trees_file}.pruned.txt"
     def masterTrees_out = "${gene_trees_file}.masterTree.output"
     
-    if (params.singularity.enabled) {
-        """    
+    if (params.use_singularity) {
+        """
+        echo "Using Singularity"
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/rer_master_tree.R' \\
         ${ gene_trees_file } \\
@@ -61,7 +62,8 @@ process RER_TREES {
         $args
         """
     } else {
-        """    
+        """
+        echo "Running locally"
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/rer_master_tree.R' \\
         ${ gene_trees_file } \\

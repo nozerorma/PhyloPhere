@@ -47,8 +47,9 @@ process RER_TRAIT {
     // def args = task.ext.args ?: ''
     def outputName = "${params.traitname}.polished.output"
     
-    if (params.singularity.enabled) {
+    if (params.use_singularity) {
         """
+        echo "Using Singularity"
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R' \\
         ${ my_traitfile } \\
@@ -58,7 +59,8 @@ process RER_TRAIT {
         $args
         """
     } else {
-        """    
+        """
+        echo "Running locally"
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R' \\
         ${ my_traitfile } \\

@@ -52,32 +52,34 @@ process RER_CONT {
     // Define extra discovery arguments from params.file
     def args = task.ext.args ?: ''
 
-    if (params.singularity.enabled) {
+    if (params.use_singularity) {
 
         """
-            /usr/local/bin/_entrypoint.sh Rscript \\
-            '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
-            ${ trait_file } \\
-            ${ rer_master_tree } \\
-            ${ params.traitname }.char2path.output \\
-            ${ rer_matrix } \\
-            ${ params.traitname }.continuous.output \\
-            ${params.rer_minsp} \\
-            ${params.winsorizeRER} \\
-            ${params.winsorizeTrait}
+        echo "Using Singularity"
+        /usr/local/bin/_entrypoint.sh Rscript \\
+        '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
+        ${ trait_file } \\
+        ${ rer_master_tree } \\
+        ${ params.traitname }.char2path.output \\
+        ${ rer_matrix } \\
+        ${ params.traitname }.continuous.output \\
+        ${params.rer_minsp} \\
+        ${params.winsorizeRER} \\
+        ${params.winsorizeTrait}
         """
     } else {
         """
-            Rscript \\
-            '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
-            ${ trait_file } \\
-            ${ rer_master_tree } \\
-            ${ params.traitname }.char2path.output \\
-            ${ rer_matrix } \\
-            ${ params.traitname }.continuous.output \\
-            ${params.rer_minsp} \\
-            ${params.winsorizeRER} \\
-            ${params.winsorizeTrait}
+        echo "Running locally"
+        Rscript \\
+        '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
+        ${ trait_file } \\
+        ${ rer_master_tree } \\
+        ${ params.traitname }.char2path.output \\
+        ${ rer_matrix } \\
+        ${ params.traitname }.continuous.output \\
+        ${params.rer_minsp} \\
+        ${params.winsorizeRER} \\
+        ${params.winsorizeTrait}
         """
     }
 

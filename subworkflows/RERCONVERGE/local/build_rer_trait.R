@@ -45,8 +45,8 @@ ori_traits$species <- gsub(" ", "_", ori_traits[[sp_colname]])
 selected_column <- args[3]
 
 ori_traits <- ori_traits %>%
-  select(species, !!as.name(selected_column)) %>%
-  filter(!is.na(!!as.name(selected_column)))
+  dplyr::select(species, !!as.name(selected_column)) %>%
+  dplyr::filter(!is.na(!!as.name(selected_column)))
 
 # Select only those columns of interest and build named vector
 trait_vector <- setNames(as.numeric(ori_traits[[selected_column]]), ori_traits[[sp_colname]])

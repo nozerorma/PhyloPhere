@@ -8,7 +8,7 @@
 #   | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
 #   \___\__,_|\__,_|___/\__\___/ \___/|_|___/
 #
-# A Convergent Amino Acid Substitution identification 
+# A Convergent Amino Acid Substitution identification
 # and analysis toolbox
 #
 # Author:         Fabio Barteri (fabio.barteri@upf.edu)
@@ -41,11 +41,11 @@ process RESAMPLE {
 
     output:
     file("${nw_tree}.resampled.output")
-    
+
     script:
     def args = task.ext.args ?: ''
     def strategyCommand = ""
-    
+
     // Determine the strategy command based on the provided strategy
     if (params.strategy == "FGBG") {
         strategyCommand = "-f ${params.fgsize} -b ${params.bgsize} -m random"
@@ -59,8 +59,9 @@ process RESAMPLE {
         exit 1, "Invalid strategy: ${params.strategy}"
     }
 
-    if (params.singularity.enabled) {
+    if (params.use_singularity) {
         """
+        echo "Using Singularity"
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
@@ -72,6 +73,7 @@ process RESAMPLE {
         """
     } else {
         """
+        echo "Running locally"
         Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
@@ -83,17 +85,18 @@ process RESAMPLE {
         """
     }
 
+
     // Could probably be changed to so I can use the ct logic:
-    // if (params.singularity.enabled) {
-    // """ 
+    // if (params.use_singularity = true) {
+    // """
     //  /usr/local/bin/_entrypoint.sh ct resample \\
     //  -p ${nw_tree} \\
     //  -o ${nw_tree}.resampled.output \\
     //  ${strategyCommand} \\
     //  $args
     // """
-    // } else 
-    // """ 
+    // } else
+    // """
     // ct resample \\
     //  -p ${nw_tree} \\
     //  -o ${nw_tree}.resampled.output \\

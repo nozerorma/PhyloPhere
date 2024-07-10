@@ -20,16 +20,16 @@
 #
 # This script is part of CAASTOOLS.
 
-# A Convergent Amino Acid Substitution identification 
+# A Convergent Amino Acid Substitution identification
 # and analysis toolbox
-# 
+#
 # Author:         Fabio Barteri (fabio.barteri@upf.edu)
-# 
+#
 # Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
 #                 Xavier Farré (xfarrer@igtp.cat),
 #                 David de Juan (david.juan@upf.edu),
 #                 Miguel Ramon (miguel.ramon@upf.edu).
-# 
+#
 # SCRIPT NAME: permulations.r
 # DESCRIPTION: Permulation script from RERconverge
 # DEPENDENCIES: modules in modules/simulation folder
@@ -41,10 +41,32 @@ library(readr)
 library(ape)
 library(geiger)
 
-# Set of RERconverge functions
-source("simpermvec.R")
+# Set of RERConverge functions used by CT Resample
+simulatevec <- function(namedvec, treewithbranchlengths) {
+  rm = ratematrix(treewithbranchlengths, namedvec)
+  sims = sim.char(treewithbranchlengths, rm, nsim = 1)
+  nam = rownames(sims)
+  s = as.data.frame(sims)
+  simulatedvec = s[, 1]
+  names(simulatedvec) = nam
+  vec = simulatedvec
+  vec
+}
+## Simpermvec
+simpermvec <- function(namedvec, treewithbranchlengths) {
+  vec = simulatevec(namedvec, treewithbranchlengths)
+  simsorted = sort(vec)
+  realsorted = sort(namedvec)
+  l = length(simsorted)
+  c = 1
+  while (c <= l) {
+    simsorted[c] = realsorted[c]
+    c = c + 1
+  }
+  simsorted
+}
 
-# Inputs 
+# Inputs
 
 args = commandArgs(trailingOnly=TRUE)
 
@@ -69,7 +91,7 @@ tree.o <- read.tree(tree)
 trait <- tree.o$tip.label
 l <- length(trait)
 
-# Read the config file 
+# Read the config file
 
 cfg <- read.table(config.file, sep ="\t", header = F)
 
@@ -106,16 +128,16 @@ calculate_patristic_distances <- function(tree, species_list) {
 
   # Prune the tree
   pruned_tree <- drop.tip(tree, setdiff(tree$tip.label, species_list))
-  
+
   # Calculate patristic distances
   patristic_distances <- cophenetic(pruned_tree)
-  
+
   # Convert distances to dataframe
   distances_df <- as.data.frame(as.matrix(patristic_distances))
-  
+
   # Filter out species not in the list (if needed)
   distances_df <- distances_df[species_list, species_list]
-  
+
   return(distances_df)
 }
 
@@ -125,12 +147,13 @@ for (j in 1:as.integer(number.of.cycles)){
   cycle.tag = paste("b", as.character(counter), sep = "_")
   permulated_phenotype <- simpermvec(starting.values, pruned.tree.o)
   x <- enframe(permulated_phenotype)
-  
+
   if (selection.strategy == "random") {
+    print("Using strategy: Random")
     # Select potential foreground and background species
     potential.fg.df <- subset(x, value %in% foreground.values)
     potential.bg.df <- subset(x, value %in% background.values)
-    
+
     potential.fg <- potential.fg.df$name
     potential.bg <- potential.bg.df$name
 
@@ -140,36 +163,37 @@ for (j in 1:as.integer(number.of.cycles)){
   }
 
   else if (selection.strategy == "phylogeny") {
+    print("Using strategy: Phylogeny")
     # Establish tops and bottoms
     x <- x %>%
-      mutate(global_label = case_when(
+      dplyr::mutate(global_label = dplyr::case_when(
         value <= quantile(value, 0.25, na.rm=TRUE) ~ "low_extreme",
         value >= quantile(value, 0.75, na.rm=TRUE) ~ "high_extreme",
         TRUE ~ "normal"
       )) %>%
-      ungroup()
-    
+      dplyr::ungroup()
+
     species_list_high <- x %>%
-      filter(global_label == "high_extreme") %>%
-      pull(name)
+      dplyr::filter(global_label == "high_extreme") %>%
+      dplyr::pull(name)
     species_list_low <- x %>%
-      filter(global_label == "low_extreme") %>%
-      pull(name)
-    
+      dplyr::filter(global_label == "low_extreme") %>%
+      dplyr::pull(name)
+
     # Calculate patristic distances
     sp_distances_high <- calculate_patristic_distances(pruned.tree.o, species_list_high)
     sp_distances_low <- calculate_patristic_distances(pruned.tree.o, species_list_low)
-    
+
     # Correct the distances
     correct_distance <- function(distance_matrix, traits, correction_type = "high") {
       species <- rownames(distance_matrix)
-      
+
       for (i in seq_along(species)) {
         for (j in seq_along(species)) {
           if (i != j) {
             species1 <- species[i]
             species2 <- species[j]
-            
+
             trait1 <- traits[traits$name == species1, "value"]
             trait2 <- traits[traits$name == species2, "value"]
             total <- trait1 + trait2
@@ -178,11 +202,11 @@ for (j in 1:as.integer(number.of.cycles)){
             if (total == 0) {
               distance_matrix[i, j] <- distance_matrix[i, j]^2
             } else {
-              
+
               # Calculate weights
               weight1 <- trait1
               weight2 <- trait2
-              
+
               # Apply the correction formula with weighted distances based on the correction type
               if (correction_type == "high") {
                 weighted_distance <- (weight1 + weight2) * distance_matrix[i, j]^2
@@ -191,7 +215,7 @@ for (j in 1:as.integer(number.of.cycles)){
               } else {
                 stop("Invalid correction type. Please choose 'high' or 'low'.")
               }
-              
+
               # Store the weighted distance in the matrix
               distance_matrix[i, j] <- weighted_distance
             }
@@ -200,11 +224,11 @@ for (j in 1:as.integer(number.of.cycles)){
       }
       return(distance_matrix)
     }
-    
+
     # Apply the correction function to the distance matrix
     corrected_distances_high <- correct_distance(sp_distances_high, x, correction_type = "high")
     corrected_distances_low <- correct_distance(sp_distances_low, x, correction_type = "low")
-    
+
     # Function to rank species based on their divergence from the provided list
     rank_species <- function(distances_df, species_list) {
       ranked_species <- c()
@@ -218,7 +242,7 @@ for (j in 1:as.integer(number.of.cycles)){
       # Now extract rest of the species
       while (length(ranked_species) < length(species_list)) {
         temp_df <- distances_df %>%
-          filter(!(rownames(.) %in% ranked_species)) %>%
+          dplyr::filter(!(rownames(.) %in% ranked_species)) %>%
           dplyr::select(all_of(ranked_species))
         # Calculate the sum of distances for each species
         total_distances <- rowSums(temp_df)
@@ -227,7 +251,7 @@ for (j in 1:as.integer(number.of.cycles)){
         # Add the species with the maximum sum of distances to the ranked list
         ranked_species <- c(ranked_species, max_distance_species)
       }
-      
+
       # Convert in ranked dataframe
       ranked_species <- data.frame(ranked_species)
       # Add numeric rank as column
@@ -236,11 +260,11 @@ for (j in 1:as.integer(number.of.cycles)){
       ranked_species <- ranked_species %>%
         dplyr::rename(species = ranked_species) %>%
         # Add trait data
-        left_join(x, by = c("species" = "name")) %>%
+        dplyr::left_join(x, by = c("species" = "name")) %>%
         dplyr::rename("name" = "species")
       return(ranked_species)
     }
-    
+
     # Rank using corrected
     rankedList_high_corr <- rank_species(corrected_distances_high, species_list_high)
     rankedList_low_corr <- rank_species(corrected_distances_low, species_list_low)
@@ -249,23 +273,23 @@ for (j in 1:as.integer(number.of.cycles)){
     fg.species <- rankedList_high_corr$name[1:foreground.size]
     bg.species <- rankedList_low_corr$name[1:background.size]
   }
-  
+
   else {
 
     paste("Wrong species selection options for permulations. Please select between 'random', 'inner' and 'edges'.")
-  
+
   }
 
 
   # Create the output
   fg.species.tag = paste(fg.species, collapse=",")
   bg.species.tag = paste(bg.species, collapse=",")
-  
+
   logline = paste("Processing permulation", as.character(counter), "of", as.character(number.of.cycles))
   outline = c(cycle.tag, fg.species.tag, bg.species.tag)
   #simulated.traits.df <- rbind(simulated.traits.df, outline)
   simulated.traits.df[nrow(simulated.traits.df) +1,] <- outline
-  
+
   write(logline, stdout())
 }
 

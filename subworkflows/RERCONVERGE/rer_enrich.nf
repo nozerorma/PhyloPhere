@@ -46,8 +46,9 @@ process RER_TRAIT {
     // Define extra discovery arguments from params.file
     def args = task.ext.args ?: ''
 
-    if (params.singularity.enabled) {
+    if (params.use_singularity) {
         """
+        echo "Using Singularity"
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
         ${params.cancer_traits} \\
@@ -55,6 +56,7 @@ process RER_TRAIT {
         """
     } else {
         """
+        echo "Running locally"
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R \\
         ${params.cancer_traits} \\

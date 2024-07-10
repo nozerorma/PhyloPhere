@@ -20,16 +20,16 @@
 #
 # This script is part of CAASTOOLS.
 
-# A Convergent Amino Acid Substitution identification 
+# A Convergent Amino Acid Substitution identification
 # and analysis toolbox
-# 
+#
 # Author:         Fabio Barteri (fabio.barteri@upf.edu)
-# 
+#
 # Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
 #                 Xavier Farré (xfarrer@igtp.cat),
 #                 David de Juan (david.juan@upf.edu),
 #                 Miguel Ramon (miguel.ramon@upf.edu).
-# 
+#
 # SCRIPT NAME: permulations.r
 # DESCRIPTION: Permulation script from RERconverge
 # DEPENDENCIES: modules in modules/simulation folder
@@ -41,10 +41,36 @@ library(readr)
 library(ape)
 library(geiger)
 
-# Set of RERconverge functions
-source("simpermvec.R")
+# Set of RERConverge functions used by CT Resample
+## Simulatevec
+function (namedvec, treewithbranchlengths)
+{
+  library("geiger")
+  rm = ratematrix(treewithbranchlengths, namedvec)
+  sims = sim.char(treewithbranchlengths, rm, nsim = 1)
+  nam = rownames(sims)
+  s = as.data.frame(sims)
+  simulatedvec = s[, 1]
+  names(simulatedvec) = nam
+  vec = simulatedvec
+  vec
+}
+## Simpermvec
+function (namedvec, treewithbranchlengths)
+{
+  vec = simulatevec(namedvec, treewithbranchlengths)
+  simsorted = sort(vec)
+  realsorted = sort(namedvec)
+  l = length(simsorted)
+  c = 1
+  while (c <= l) {
+    simsorted[c] = realsorted[c]
+    c = c + 1
+  }
+  simsorted
+}
 
-# Inputs 
+# Inputs
 
 args = commandArgs(trailingOnly=TRUE)
 
@@ -69,7 +95,7 @@ tree.o <- read.tree(tree)
 trait <- tree.o$tip.label
 l <- length(trait)
 
-# Read the config file 
+# Read the config file
 
 cfg <- read.table(config.file, sep ="\t", header = F)
 
@@ -103,7 +129,7 @@ counter = 0
 simulated.traits.df <- data.frame(matrix(ncol = 3, nrow = 0))
 
 calculate_patristic_distances <- function(tree, species_list) {
-
+  
   # Prune the tree
   pruned_tree <- drop.tip(tree, setdiff(tree$tip.label, species_list))
   
@@ -133,12 +159,12 @@ for (j in 1:as.integer(number.of.cycles)){
     
     potential.fg <- potential.fg.df$name
     potential.bg <- potential.bg.df$name
-
+    
     fg.species <- sample(potential.fg, foreground.size)
     bg.species <- sample(potential.bg, background.size)
-
+    
   }
-
+  
   else if (selection.strategy == "phylogeny") {
     # Establish tops and bottoms
     x <- x %>%
@@ -173,7 +199,7 @@ for (j in 1:as.integer(number.of.cycles)){
             trait1 <- traits[traits$name == species1, "value"]
             trait2 <- traits[traits$name == species2, "value"]
             total <- trait1 + trait2
-
+            
             # If neoplasia prevalence is 0 for both species, set the distance to its standard value squared and normalized
             if (total == 0) {
               distance_matrix[i, j] <- distance_matrix[i, j]^2
@@ -244,19 +270,19 @@ for (j in 1:as.integer(number.of.cycles)){
     # Rank using corrected
     rankedList_high_corr <- rank_species(corrected_distances_high, species_list_high)
     rankedList_low_corr <- rank_species(corrected_distances_low, species_list_low)
-
+    
     # Subset the ranked list to foreground and background species
     fg.species <- rankedList_high_corr$name[1:foreground.size]
     bg.species <- rankedList_low_corr$name[1:background.size]
   }
   
   else {
-
+    
     paste("Wrong species selection options for permulations. Please select between 'random', 'inner' and 'edges'.")
-  
+    
   }
-
-
+  
+  
   # Create the output
   fg.species.tag = paste(fg.species, collapse=",")
   bg.species.tag = paste(bg.species, collapse=",")
