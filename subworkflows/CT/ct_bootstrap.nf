@@ -56,7 +56,7 @@ process BOOTSTRAP {
     } else {
         """    
         echo "Running locally"
-        /usr/local/bin/_entrypoint.sh ct bootstrap \\
+        $baseDir/ct bootstrap \\
             -a ${alignmentFile} \\
             -t ${params.traitfile} \\
             -s ${resampledFile} \\

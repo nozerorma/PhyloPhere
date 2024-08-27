@@ -58,7 +58,7 @@ process DISCOVERY {
     } else {
         """
         echo "Running locally"
-        ct discovery \\
+        $baseDir/ct discovery \\
         -a ${alignmentFile} \\
         -t ${params.traitfile} \\
         -o ${alignmentID}.output} \\

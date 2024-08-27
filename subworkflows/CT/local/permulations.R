@@ -40,6 +40,7 @@ library(tibble)
 library(readr)
 library(ape)
 library(geiger)
+library(dplyr)
 
 # Set of RERConverge functions used by CT Resample
 simulatevec <- function(namedvec, treewithbranchlengths) {
