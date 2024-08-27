@@ -28,19 +28,6 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-
-// Define the alignment channel align_tuple
-// **/* defines a double level folder structure, modify accordingly and annotate it in documentation
-align_tuple = Channel
-                .fromPath("${params.alignment}/*")
-                .filter { it.isFile() } // Filter out directories
-                .map { file -> tuple(file.baseName, file) }
-
-// Define the tree file channel
-nw_tree = file(params.tree)
-trait_val = file(params.traitvalues)
-
-
 // Import local modules/subworkflows
 include { DISCOVERY } from "${baseDir}/subworkflows/CT/ct_discovery"
 include { RESAMPLE } from "${baseDir}/subworkflows/CT/ct_resample"
@@ -54,14 +41,34 @@ workflow CT {
 
         def toolsToRun = params.ct_tool.split(',')
 
+        // Initialize variables
+        def discovery_out
+        def resample_out = params.resample_out ?: null
+        def bootstrap_out
+
         if (toolsToRun.contains('discovery')) {
+            // Define the alignment channel align_tuple
+            align_tuple = Channel
+                    .fromPath("${params.alignment}") // Recursively search all subdirectories
+                    .filter { it.isFile() } // Filter out directories
+                    .map { file -> tuple(file.baseName, file) }
+
             discovery_out = DISCOVERY(align_tuple)
         }
         if (toolsToRun.contains('resample')) {
+            // Define the tree file channel
+            nw_tree = file(params.tree)
+            trait_val = file(params.traitvalues)
+
             resample_out = RESAMPLE(nw_tree, trait_val)
         }
         if (toolsToRun.contains('bootstrap')) {
-            boostrap_out = BOOTSTRAP(align_tuple, resample_out)
+            align_tuple = Channel
+                    .fromPath("${params.alignment}") // Recursively search all subdirectories
+                    .filter { it.isFile() } // Filter out directories
+                    .map { file -> tuple(file.baseName, file) }
+
+            bootstrap_out = BOOTSTRAP(align_tuple, resample_out)
         }
-    }    
+    }
 }
