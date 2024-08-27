@@ -36,21 +36,20 @@ process.container           = 'miralnso/caastools-micromamba:latest'
 
 // Global default params, used in configs
 params {
-    // Use singularity flipper. DO NOT MODIFY, it initializes the parameter.
+    // Use singularity flipper
     use_singularity             = use_singularity           ?: false
 
     // CT general option
     ct_tool                     = ct_tool                   ?:  "discovery" //"discovery,resample,bootstrap"
 
-    // Common CT DISCOVERY and BOOTSTRAP options
-    alignment                   = alignment                 ?:  "$baseDir/Data/protein_alignments/**/*" // carefull with directory substructure
-    traitfile                   = traitfile                 ?:  "$baseDir/Data/CAAS_traitfiles/traitfile.tab"
+    // Common DISCOVERY and BOOTSTRAP options
+    alignment                   = alignment                 ?:  "$baseDir/Data/2.Alignments/*" //
+    disc_description            = disc_description          ?:  "TBD"
+    traitfile                   = traitfile                 ?:  "$baseDir/Data/6.CAAS_traitfiles/config-t3.tab"
     ali_format                  = ali_format                ?:  "phylip-relaxed"
     // clustal, emboss, fasta, fasta-m10, ig, maf, mauve, msf, nexus, phylip, phylip-sequential, phylip-relaxed, stockholm
     patterns                    = patterns                  ?:  "1,2,3" // Pattern 4 can be added adhoc as a parameter in the run command
-
-    // Check CAASTOOLS DOCUMENTATION for description of these parameters
-    maxbggaps                   = maxbggaps                 ?:  "NO" // From NO (no filtering) to int
+    maxbggaps                   = maxbggaps                 ?:  "NO"
     maxfggaps                   = maxfggaps                 ?:  "NO"
     maxgaps                     = maxgaps                   ?:  "NO"
     maxgapsperposition          = maxgapsperposition        ?:  "0.5"
@@ -58,37 +57,38 @@ params {
     maxfgmiss                   = maxfgmiss                 ?:  "0"
     maxmiss                     = maxmiss                   ?:  "NO"
 
-    // CT RESAMPLE options
-    tree                       = tree                       ?:  "$baseDir/Data/Phylogeny/tree.nwk"      // Required
-    strategy                   = strategy                   ?:  "BM"                                    // Choose from random resampling or BM driven
-    perm_strategy              = perm_strategy              ?:  "phylogeny"                             // If BM, choose from random perm_strategy or phylogeny driven perm_strategy
-    // This is all quite confusing
-    fgsize                     = fgsize                     ?:  "6"                                     // If random resampling
-    bgsize                     = bgsize                     ?:  "6"                                     // If random resampling
-    template                   = template                   ?:  "TBD"                                   // If random resampling
-    bygroup                    = bygroup                    ?:  "TBD"                                   // If random resampling
-    // Up to here Confusing
-    traitvalues                = traitvalues                ?:  "TBD"                                   // If BM
-    cycles                     = cycles                     ?:  "500"                                   // Number of bootstrap cycles
+    // RESAMPLE options
+    tree                       = tree                       ?:  "$baseDir/Data/5.Phylogeny/science.abn7829_data_s4.nex.tree"
+    strategy                   = strategy                   ?:  "BM"
+    perm_strategy              = perm_strategy              ?:  "phylogeny"
+    fgsize                     = fgsize                     ?:  "6"
+    bgsize                     = bgsize                     ?:  "6"
+    template                   = template                   ?:  "TBD"
+    bygroup                    = bygroup                    ?:  "TBD"
+    traitvalues                = traitvalues                ?:  "TBD"
+    cycles                     = cycles                     ?:  "500"
 
     // BOOTSTRAP options
-    resample_out               = resample_out               ?:  null                                    // If resample has been run, specify here resample files location
+    resample_out               = resample_out               ?:  null
 
     // RERCONVERGE options
     // General options
     rer_tool                   = rer_tool                   ?:  "build_trait, build_tree, build_matrix, binary, continuous"
-    gene_trees                 = gene_trees                 ?:  "$baseDir/Data/Gene_trees/geneTrees.txt"
-    my_traits                  = my_traits                  ?:  "$baseDir/Data/Cancer_data/traits.csv"      // Must be a csv file with the specified columns present
-    traitname                  = traitname                  ?:  "trait"                      // How your traitcolumn is named in your dataset
-    sp_colname                 = sp_colname                 ?:  "species"                                     // How your species column is named in your dataset
-    trait_out                  = trait_out                  ?:  "$baseDir/Data/RER/RER_Traits/${params.traitname}.polished.output"
-    trees_out                  = trees_out                  ?:  "$baseDir/Data/RER/RER_Objects/geneTrees.masterTree.pruned.output"
+    gene_trees                 = gene_trees                 ?:  "$baseDir/Data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
+    my_traits                  = my_traits                  ?:  "$baseDir/Data/1.Cancer_data/clean_primate_traits.csv"
+    traitname                  = traitname                  ?:  "neoplasia_prevalence" // How your traitcolumn is named in your dataset
+    sp_colname                 = sp_colname                 ?:  "label" // How your species column is named in your dataset
+    trait_out                  = trait_out                  ?:  "$baseDir/Data/8.RER/RER_Traits/${params.traitname}.polished.output"
+    trees_out                  = trees_out                  ?:  "$baseDir/Data/8.RER/RER_Objects/ALL_FEB23_geneTrees.txt.masterTree.pruned.output"
     matrix_out                 = matrix_out                 ?:  "${params.outdir}/RER_Objects/${params.traitname}.RERmatrix.output"
 
-    // Continuous analysis options. Check RERConverge documentation
+    // Continuous analysis options
     rer_minsp                  = rer_minsp                  ?: "10"
     winsorizeRER               = winsorizeRER               ?: "3"
     winsorizeTrait             = winsorizeTrait             ?: "3"
+
+    // Traitfile must have two columns including the names of the species to analyze and the trait values
+
 
     // ORA (not working aon)
     // ora                        = ora                        ?: "GO-CC,GO-BP,GO-MF,KEGG,DO,DGN,REACTOME,WP,NCG"
