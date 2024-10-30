@@ -41,8 +41,8 @@ process RER_TREES {
     path gene_trees_file
 
     output:
-    file("${gene_trees_file}.masterTree.output") into outputNameChannel
-    file("${gene_trees_file}.pruned.txt") into prunedTreesChannel
+    file("${gene_trees_file}.masterTree.output")
+    file("${gene_trees_file}.pruned.txt")
 
     script:
     def args = task.ext.args ?: ''

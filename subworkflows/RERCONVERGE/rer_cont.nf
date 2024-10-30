@@ -31,7 +31,7 @@ process RER_CONT {
     tag "$rer_matrix"
 
     // Uncomment the following lines to assign workload priority.
-    label 'process_rer_med' // have to tell it that only if using cluster!!!!!!!
+    label 'process_medium' // have to tell it that only if using cluster!!!!!!!
 
 
     input:
