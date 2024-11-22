@@ -47,7 +47,7 @@ process RER_MATRIX {
     script:
     // Define extra discovery arguments from params.file
     def args = task.ext.args ?: ''
-    def outputName = "${params.traitname}.RERmatrix.output"
+    def matrix_out = "${params.traitname}.RERmatrix.output"
 
     if (params.use_singularity) {
         """
@@ -56,7 +56,7 @@ process RER_MATRIX {
         '$baseDir/subworkflows/RERCONVERGE/local/rer_matrix.R' \\
         ${ trait_file } \\
         ${ gene_trees_file } \\
-        ${ outputName } \\
+        ${ matrix_out } \\
         $args
         """
     } else {
@@ -66,7 +66,7 @@ process RER_MATRIX {
         '$baseDir/subworkflows/RERCONVERGE/local/rer_matrix.R' \\
         ${ trait_file } \\
         ${ gene_trees_file } \\
-        ${ outputName } \\
+        ${ matrix_out } \\
         $args
         """
     }
