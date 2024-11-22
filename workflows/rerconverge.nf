@@ -44,6 +44,7 @@ include { RER_TRAIT } from "${baseDir}/subworkflows/RERCONVERGE/rer_trait"
 include { RER_TREES } from "${baseDir}/subworkflows/RERCONVERGE/rer_trees"
 include { RER_MATRIX } from "${baseDir}/subworkflows/RERCONVERGE/rer_matrix"
 include { RER_CONT } from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
+//include { RER_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_bin" addParams(TREE_TUPLE: tree_tuple)
 //include { RER_ENRICH } from "${baseDir}/subworkflows/RERCONVERGE/rer_enrich" addParams(TREE_TUPLE: tree_tuple)
 
 // Main workflow
@@ -86,8 +87,5 @@ workflow RER_MAIN {
             // Use outputs from the 'build_trait' tool if available, otherwise use defaults from nextflow.config
             continuous_out = RER_CONT(trait_out, masterTrees_out, matrix_out)
         }
-        /*     if (toolsToRun.contains('enrichment')) {
-                enrichment_out = RER_ENRICH()
-            } */
     }
 }
