@@ -1,0 +1,36 @@
+name: tfm-primates-analysis
+channels:
+    - bioconda
+    - conda-forge
+dependencies:
+    - conda-forge::numpy
+    - conda-forge::scipy
+    - conda-forge::biopython=1.79
+    - bioconda::dendropy
+    - bioconda::rerconverge=0.3.0 # think about taking this out, as it installs an old ver of R
+    - conda-forge::radian
+    - bioconductor-enrichplot
+    - bioconductor-ggtree
+    - cgr-lab::bioconductor-microviz
+    - bioconductor-pathview
+    - r-base
+    - r-castor
+    - r-corrplot
+    - r-dplyr
+    - r-geiger
+    - r-ggplot2
+    - r-ggpubr
+    - r-ggrepel
+    - r-ggsignif
+    - r-gplots
+    - r-gt
+    - r-msigdbr
+    - r-pheatmap
+    - r-phytools
+    - r-reactable
+    - r-reshape
+    - r-svglite
+    - r-tidyr
+    - r-weights
+    - rstudio-desktop
+

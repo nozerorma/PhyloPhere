@@ -29,8 +29,7 @@
 
 process BOOTSTRAP {
     tag "$alignmentID"
-    //label 'big_mem'
-
+    label 'process_boot'
     
     input:
     tuple val(alignmentID), file(alignmentFile)
@@ -42,9 +41,9 @@ process BOOTSTRAP {
     script:
     def args = task.ext.args ?: ''
 
-    if (params.use_singularity) {
-        """    
-        echo "Using Singularity"
+    if (params.use_singularity | params.use_apptainer) {
+        """
+        echo "Using Singularity/Apptainer"
         /usr/local/bin/_entrypoint.sh ct bootstrap \\
             -a ${alignmentFile} \\
             -t ${params.traitfile} \\

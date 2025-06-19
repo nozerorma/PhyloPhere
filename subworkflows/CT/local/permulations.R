@@ -42,6 +42,7 @@ library(ape)
 library(geiger)
 library(dplyr)
 
+
 # Set of RERConverge functions used by CT Resample
 simulatevec <- function(namedvec, treewithbranchlengths) {
   rm = ratematrix(treewithbranchlengths, namedvec)
@@ -110,7 +111,6 @@ background.species <- background.df$V1
 phenotype.df <- read.table(phenotypes, sep = "\t")
 foreground.values <- subset(phenotype.df, phenotype.df$V1 %in% foreground.species)$V2
 background.values <- subset(phenotype.df, phenotype.df$V1 %in% background.species)$V2
-
 
 # SEED AND PRUNE
 starting.values <- phenotype.df$V2
@@ -217,81 +217,115 @@ for (j in 1:as.integer(number.of.cycles)){
       # Filter out low and high species and arrange by corrected distance
       distance_df <- distance_df %>%
         filter(!(species1 %in% species_list_low | species2 %in% species_list_high)) %>%
-        arrange(distance)
-      
+        # Round distance and diff
+        mutate(distance = round(distance, 4),
+              diff = round(diff, 4),
+              corr_dist = round(corr_dist, 4)) %>%
+        # Arrange by shortest distance. If same, arrange by maximum phenotypic difference
+        arrange(distance, desc(diff))
+
       # Initialize results variables
-      pair_reference <- data.frame()
-      selected_species_top <- c()
-      selected_species_bottom <- c()
-      
-      # REFERENCE PAIR. Find the top pair based (solely, for now) on distance
+      selected_pairs <- data.frame()
+
+      # Find the top pair based on distance
       top_pair <- distance_df %>%
-        slice_head(n = 1)
+        slice_head(n = 1) %>%
+        # Create cluster column and give it a value of 1
+        mutate(cluster = 1)
+
       # Add top pair to the reference dataframe
-      pair_reference <- rbind(pair_reference, top_pair)
-      
+      selected_pairs <- rbind(selected_pairs, top_pair)
+
       # Update the list of selected species
-      selected_species_top <- top_pair$species1
-      selected_species_bottom <- top_pair$species2
-      
-      # Remove rows involving selected species
-      distance_df <- distance_df %>%
-        filter(!(species1 %in% c(selected_species_top) | species2 %in% c(selected_species_bottom)))
-      
+      selected_species <- data.frame(top = top_pair$species1, bottom = top_pair$species2, diff = top_pair$diff, cluster = top_pair$cluster)
+
       # Establish the cluster matrix for calculating the Dunn index
       mat <- as.matrix(distance_matrix)
-      dist_mat <- as.dist(mat)
-      
+
       # Initialize results for Dunn index
-      dunn_results <- data.frame(species1 = character(), species2 = character(), Dunn_index = numeric())
+      dunn_results <- data.frame(species1 = character(), species2 = character(), Dunn_index = numeric(), diff = numeric(), cluster = numeric())
       dunn_result_cummulative <- data.frame()
+
+      # Initialize variables
+      current_dunn_index <- Inf  # Start with a very high value to ensure the loop runs
+      iteration_limit <- 100
+      iteration_count <- 0
       
       # Start loop to find the most convergent-divergent pairs
-      while (nrow(distance_df) > 0) {
-        # Apply across rows to compute Dunn index for all pairs
-        dunn_result <- apply(distance_df, 1, function(row) {
+      while (current_dunn_index >= 1 && iteration_count < iteration_limit) {
+        iteration_count <- iteration_count + 1
+        query_cluster <- iteration_count + 1 # Twice the iteration count
+
+        # Evaluate Dunn index for all candidate pairs
+        dunn_candidates <- apply(distance_df, 1, function(row) {
+          # Initialize cluster matrix
           query_species1 <- row["species1"]
           query_species2 <- row["species2"]
-          
-          # Restrict the matrix to queried species
-          queried_species <- unique(c(query_species1, query_species2, selected_species_top, selected_species_bottom))
-          restricted_matrix <- mat[queried_species, queried_species, drop = FALSE]
-          
-          # Convert the restricted matrix into a distance object
-          restricted_dist <- as.dist(restricted_matrix)
-          
-          # Dynamically assign clusters
-          cluster <- rep(2, length(queried_species))  # Default to cluster 2
-          names(cluster) <- queried_species
-          cluster[c(query_species1, query_species2)] <- 1
-          
-          # Compute Dunn index
-          dunn_value <- dunn(restricted_dist, cluster, method = "complete")
-          
-          return(data.frame(species1 = query_species1, species2 = query_species2, Dunn_index = dunn_value))
+          query_diff <- row["diff"]
+
+          # Dynamically assign selected species clusters
+          selected_species <- rbind(selected_species, data.frame(top = query_species1, bottom = query_species2, diff = query_diff, cluster = query_cluster))
+
+          # Build the cluster as a vector of integers, using as objects the cluster definitions and as names the species
+          selected_species.str <- selected_species %>%
+            # Pivot species in top and bottom to a single column
+            pivot_longer(cols = c(top, bottom),
+                        names_to = "label",
+                        values_to = "species") %>%
+            # Pull cluster number
+            pull(cluster) %>%
+            # Set names to species
+            setNames(., selected_species %>%
+                      pivot_longer(cols = c(top, bottom),
+                                    names_to = "label",
+                                    values_to = "species") %>%
+                      pull(species))
+
+          clusters <- as.integer(selected_species.str)
+
+          # print(selected_species.str)
+          # print(names(selected_species.str))
+
+          # Rebuild distance matrix
+          matrix <- mat[names(selected_species.str), names(selected_species.str)]
+          dist_mat <- as.dist(matrix)
+
+          # Compute Dunn index.
+          # Use the modified version which computes intra-cluster distances only for a subset of clusters
+          dunn_value <- mod_dunn(dist_mat, clusters, selected_cluster = query_cluster, verbose = FALSE)
+
+          # Round Dunn index
+          dunn_value <- round(dunn_value, 4)
+
+          return(data.frame(species1 = query_species1, species2 = query_species2, Dunn_index = dunn_value, diff = query_diff, cluster = query_cluster))
         })
-        
-        # Combine results into a dataframe
-        dunn_result <- do.call(rbind, dunn_result)
-        
-        ## DEBUG Combine into cummulative dataframe
-        #dunn_result_cummulative <- rbind(dunn_result_cummulative, dunn_result)
-        
-        # Select the top result by Dunn index
-        top_result <- dunn_result %>%
-          arrange(desc(Dunn_index)) %>%
+
+        # Combine results into a data frame
+        dunn_candidates <- do.call(rbind, dunn_candidates)
+
+        # Accumulate results for debug
+        dunn_result_cummulative <- rbind(dunn_result_cummulative, dunn_candidates)
+        dunn_result_cummulative <- dunn_result_cummulative %>%
+          arrange(desc(cluster), desc(Dunn_index), desc(diff))
+
+        # Select the top result with the highest Dunn index
+        dunn_best <- dunn_candidates %>%
+          arrange(desc(Dunn_index), desc(diff)) %>%
           slice_head(n = 1)
-        
-        # Add to Dunn results
-        dunn_results <- rbind(dunn_results, top_result)
-        
-        # Update selected species lists
-        selected_species_top <- unique(c(selected_species_top, top_result$species1))
-        selected_species_bottom <- unique(c(selected_species_bottom, top_result$species2))
-        
-        # Remove rows involving the selected species
-        distance_df <- distance_df %>%
-          filter(!(species1 %in% selected_species_top | species2 %in% selected_species_bottom))
+
+        # Update current Dunn index
+        current_dunn_index <- dunn_best$Dunn_index
+
+        # If the Dunn index is below 1, break the loop
+        if (current_dunn_index < 1) {
+          break
+        }
+
+        # Add the top result to cumulative results
+        dunn_results <- rbind(dunn_results, dunn_best)
+
+        # Update selected species
+        selected_species <- rbind(selected_species, data.frame(top = dunn_best$species1, bottom = dunn_best$species2, diff = dunn_best$diff, cluster = dunn_best$cluster))
       }
       
       # Prepare output with final reference and Dunn results

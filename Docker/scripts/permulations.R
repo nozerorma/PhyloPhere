@@ -40,12 +40,10 @@ library(tibble)
 library(readr)
 library(ape)
 library(geiger)
+library(dplyr)
 
 # Set of RERConverge functions used by CT Resample
-## Simulatevec
-function (namedvec, treewithbranchlengths)
-{
-  library("geiger")
+simulatevec <- function(namedvec, treewithbranchlengths) {
   rm = ratematrix(treewithbranchlengths, namedvec)
   sims = sim.char(treewithbranchlengths, rm, nsim = 1)
   nam = rownames(sims)
@@ -56,8 +54,7 @@ function (namedvec, treewithbranchlengths)
   vec
 }
 ## Simpermvec
-function (namedvec, treewithbranchlengths)
-{
+simpermvec <- function(namedvec, treewithbranchlengths) {
   vec = simulatevec(namedvec, treewithbranchlengths)
   simsorted = sort(vec)
   realsorted = sort(namedvec)
@@ -129,19 +126,20 @@ counter = 0
 simulated.traits.df <- data.frame(matrix(ncol = 3, nrow = 0))
 
 calculate_patristic_distances <- function(tree, species_list) {
-  
+
   # Prune the tree
   pruned_tree <- drop.tip(tree, setdiff(tree$tip.label, species_list))
-  
+
   # Calculate patristic distances
   patristic_distances <- cophenetic(pruned_tree)
-  
+
   # Convert distances to dataframe
   distances_df <- as.data.frame(as.matrix(patristic_distances))
-  
+  colnames(distances_df) <- rownames(distances_df)
+
   # Filter out species not in the list (if needed)
   distances_df <- distances_df[species_list, species_list]
-  
+
   return(distances_df)
 }
 
@@ -151,147 +149,192 @@ for (j in 1:as.integer(number.of.cycles)){
   cycle.tag = paste("b", as.character(counter), sep = "_")
   permulated_phenotype <- simpermvec(starting.values, pruned.tree.o)
   x <- enframe(permulated_phenotype)
-  
+
   if (selection.strategy == "random") {
+    print("Using strategy: Random")
     # Select potential foreground and background species
     potential.fg.df <- subset(x, value %in% foreground.values)
     potential.bg.df <- subset(x, value %in% background.values)
-    
+
     potential.fg <- potential.fg.df$name
     potential.bg <- potential.bg.df$name
-    
+
     fg.species <- sample(potential.fg, foreground.size)
     bg.species <- sample(potential.bg, background.size)
-    
+
   }
-  
+
   else if (selection.strategy == "phylogeny") {
+    print("Using strategy: Phylogeny")
     # Establish tops and bottoms
     x <- x %>%
-      mutate(global_label = case_when(
+      dplyr::mutate(trait_label = dplyr::case_when(
         value <= quantile(value, 0.25, na.rm=TRUE) ~ "low_extreme",
         value >= quantile(value, 0.75, na.rm=TRUE) ~ "high_extreme",
         TRUE ~ "normal"
       )) %>%
-      ungroup()
-    
+      dplyr::ungroup()
+
+    # Keep record of the species in the high and low extremes of the trait distribution
     species_list_high <- x %>%
-      filter(global_label == "high_extreme") %>%
-      pull(name)
+      dplyr::filter(trait_label == "high_extreme") %>%
+      dplyr::pull(name)
     species_list_low <- x %>%
-      filter(global_label == "low_extreme") %>%
-      pull(name)
-    
+      dplyr::filter(trait_label == "low_extreme") %>%
+      dplyr::pull(name)
+    # Combine them to work with a rectangular distance matrix
+    species_list_combined <- c(species_list_high, species_list_low)
+
     # Calculate patristic distances
-    sp_distances_high <- calculate_patristic_distances(pruned.tree.o, species_list_high)
-    sp_distances_low <- calculate_patristic_distances(pruned.tree.o, species_list_low)
-    
+    # sp_distances_high <- calculate_patristic_distances(pruned.tree.o, species_list_high)
+    # sp_distances_low <- calculate_patristic_distances(pruned.tree.o, species_list_low)
+    sp_distances <- calculate_patristic_distances(pruned.tree.o, species_list_combined)
+
     # Correct the distances
-    correct_distance <- function(distance_matrix, traits, correction_type = "high") {
-      species <- rownames(distance_matrix)
+    pair_selection <- function(distance_matrix, traits_df) {
       
-      for (i in seq_along(species)) {
-        for (j in seq_along(species)) {
-          if (i != j) {
-            species1 <- species[i]
-            species2 <- species[j]
-            
-            trait1 <- traits[traits$name == species1, "value"]
-            trait2 <- traits[traits$name == species2, "value"]
-            total <- trait1 + trait2
-            
-            # If neoplasia prevalence is 0 for both species, set the distance to its standard value squared and normalized
-            if (total == 0) {
-              distance_matrix[i, j] <- distance_matrix[i, j]^2
-            } else {
-              
-              # Calculate weights
-              weight1 <- trait1
-              weight2 <- trait2
-              
-              # Apply the correction formula with weighted distances based on the correction type
-              if (correction_type == "high") {
-                weighted_distance <- (weight1 + weight2) * distance_matrix[i, j]^2
-              } else if (correction_type == "low") {
-                weighted_distance <- (2 - (weight1 + weight2)) * distance_matrix[i, j]^2
-              } else {
-                stop("Invalid correction type. Please choose 'high' or 'low'.")
-              }
-              
-              # Store the weighted distance in the matrix
-              distance_matrix[i, j] <- weighted_distance
-            }
-          }
-        }
+      # Transform the distance matrix into a data frame
+      distance_df <- as.data.frame(as.matrix(distance_matrix)) %>%
+        # Separate matrix components in a long format
+        rownames_to_column(var = "species1") %>%
+        gather(key = "species2", value = "distance", -species1) %>%
+        # Remove self-distances
+        filter(distance != 0)
+        # # Add trait data. Not needed now but will be in future iterations of the algorithm.
+        # %>%
+        # left_join(phenotype.df, by = c("species1" = "V1")) %>%
+        # dplyr::rename(value1 = value) %>%
+        # left_join(phenotype.df, by = c("species2" = "V1")) %>%
+        # dplyr::rename(value2 = value) %>%
+        ## For phenotypes with 0 values, add a small value to avoid division by 0
+        # mutate(value2 = ifelse(value2 == 0, 1e-10, value2),
+        ## Calculate the distance between the two species
+        #   diff = abs(value1 - value2),
+        ## Correct the distance using the trait value (i.e.corr_dist = diff * distance)
+        ## This is naive. If phenotype is correction factor, it must be weighted to understand hwo relevant it might be.
+        #   corr_dist = diff * distance)
+      
+      # Filter out low and high species and arrange by corrected distance
+      distance_df <- distance_df %>%
+        filter(!(species1 %in% species_list_low | species2 %in% species_list_high)) %>%
+        arrange(distance)
+      
+      # Initialize results variables
+      pair_reference <- data.frame()
+      selected_species_top <- c()
+      selected_species_bottom <- c()
+      
+      # REFERENCE PAIR. Find the top pair based (solely, for now) on distance
+      top_pair <- distance_df %>%
+        slice_head(n = 1)
+      # Add top pair to the reference dataframe
+      pair_reference <- rbind(pair_reference, top_pair)
+      
+      # Update the list of selected species
+      selected_species_top <- top_pair$species1
+      selected_species_bottom <- top_pair$species2
+      
+      # Remove rows involving selected species
+      distance_df <- distance_df %>%
+        filter(!(species1 %in% c(selected_species_top) | species2 %in% c(selected_species_bottom)))
+      
+      # Establish the cluster matrix for calculating the Dunn index
+      mat <- as.matrix(distance_matrix)
+      dist_mat <- as.dist(mat)
+      
+      # Initialize results for Dunn index
+      dunn_results <- data.frame(species1 = character(), species2 = character(), Dunn_index = numeric())
+      dunn_result_cummulative <- data.frame()
+      
+      # Start loop to find the most convergent-divergent pairs
+      while (nrow(distance_df) > 0) {
+        # Apply across rows to compute Dunn index for all pairs
+        dunn_result <- apply(distance_df, 1, function(row) {
+          query_species1 <- row["species1"]
+          query_species2 <- row["species2"]
+          
+          # Restrict the matrix to queried species
+          queried_species <- unique(c(query_species1, query_species2, selected_species_top, selected_species_bottom))
+          restricted_matrix <- mat[queried_species, queried_species, drop = FALSE]
+          
+          # Convert the restricted matrix into a distance object
+          restricted_dist <- as.dist(restricted_matrix)
+          
+          # Dynamically assign clusters
+          cluster <- rep(2, length(queried_species))  # Default to cluster 2
+          names(cluster) <- queried_species
+          cluster[c(query_species1, query_species2)] <- 1
+          
+          # Compute Dunn index
+          dunn_value <- dunn(restricted_dist, cluster, method = "complete")
+          
+          return(data.frame(species1 = query_species1, species2 = query_species2, Dunn_index = dunn_value))
+        })
+        
+        # Combine results into a dataframe
+        dunn_result <- do.call(rbind, dunn_result)
+        
+        ## DEBUG Combine into cummulative dataframe
+        #dunn_result_cummulative <- rbind(dunn_result_cummulative, dunn_result)
+        
+        # Select the top result by Dunn index
+        top_result <- dunn_result %>%
+          arrange(desc(Dunn_index)) %>%
+          slice_head(n = 1)
+        
+        # Add to Dunn results
+        dunn_results <- rbind(dunn_results, top_result)
+        
+        # Update selected species lists
+        selected_species_top <- unique(c(selected_species_top, top_result$species1))
+        selected_species_bottom <- unique(c(selected_species_bottom, top_result$species2))
+        
+        # Remove rows involving the selected species
+        distance_df <- distance_df %>%
+          filter(!(species1 %in% selected_species_top | species2 %in% selected_species_bottom))
       }
-      return(distance_matrix)
+      
+      # Prepare output with final reference and Dunn results
+      pair_reference <- pair_reference %>%
+        dplyr::select(species1, species2)
+      
+      dunn_out <- dunn_results %>%
+        dplyr::select(species1, species2)
+      
+      pair_out <- rbind(pair_reference, dunn_out)
+      
+      # Remove ugly rownames
+      rownames(pair_out) <- NULL
+  
+      ## DEBUG 
+      #return(list(dunn_results = dunn_results, pair_reference = pair_reference, dunn_result_cummulative = dunn_result_cummulative, pair_out = pair_out))
+      
+      return(pair_out)
     }
-    
+
     # Apply the correction function to the distance matrix
-    corrected_distances_high <- correct_distance(sp_distances_high, x, correction_type = "high")
-    corrected_distances_low <- correct_distance(sp_distances_low, x, correction_type = "low")
-    
-    # Function to rank species based on their divergence from the provided list
-    rank_species <- function(distances_df, species_list) {
-      ranked_species <- c()
-      # Extract the most diverged species and use it as startpoint for calculating the others
-      # Calculate the sum of distances for each species
-      total_distances <- rowSums(distances_df)
-      # Find the species with the maximum sum of distances
-      max_distance_species <- names(total_distances)[which.max(total_distances)]
-      # Add the species with the maximum sum of distances to the ranked list
-      ranked_species <- c(ranked_species, max_distance_species)
-      # Now extract rest of the species
-      while (length(ranked_species) < length(species_list)) {
-        temp_df <- distances_df %>%
-          filter(!(rownames(.) %in% ranked_species)) %>%
-          dplyr::select(all_of(ranked_species))
-        # Calculate the sum of distances for each species
-        total_distances <- rowSums(temp_df)
-        # Find the species with the maximum sum of distances
-        max_distance_species <- names(total_distances)[which.max(total_distances)]
-        # Add the species with the maximum sum of distances to the ranked list
-        ranked_species <- c(ranked_species, max_distance_species)
-      }
-      
-      # Convert in ranked dataframe
-      ranked_species <- data.frame(ranked_species)
-      # Add numeric rank as column
-      ranked_species$rank <- 1:length(ranked_species$ranked_species)
-      # Rename column to species for merge
-      ranked_species <- ranked_species %>%
-        dplyr::rename(species = ranked_species) %>%
-        # Add trait data
-        left_join(x, by = c("species" = "name")) %>%
-        dplyr::rename("name" = "species")
-      return(ranked_species)
-    }
-    
-    # Rank using corrected
-    rankedList_high_corr <- rank_species(corrected_distances_high, species_list_high)
-    rankedList_low_corr <- rank_species(corrected_distances_low, species_list_low)
-    
+    selected_pairs <- correct_distance(sp_distances, x)
+
     # Subset the ranked list to foreground and background species
-    fg.species <- rankedList_high_corr$name[1:foreground.size]
-    bg.species <- rankedList_low_corr$name[1:background.size]
+    fg.species <- selected_pairs$species1[1:foreground.size]
+    bg.species <- selected_pairs$species2[1:background.size]
   }
-  
+
   else {
-    
-    paste("Wrong species selection options for permulations. Please select between 'random', 'inner' and 'edges'.")
-    
+
+    paste("Wrong species selection options for permulations. Please select between 'random' and 'phylogeny'.")
+
   }
-  
-  
+
   # Create the output
   fg.species.tag = paste(fg.species, collapse=",")
   bg.species.tag = paste(bg.species, collapse=",")
-  
+
   logline = paste("Processing permulation", as.character(counter), "of", as.character(number.of.cycles))
   outline = c(cycle.tag, fg.species.tag, bg.species.tag)
   #simulated.traits.df <- rbind(simulated.traits.df, outline)
   simulated.traits.df[nrow(simulated.traits.df) +1,] <- outline
-  
+
   write(logline, stdout())
 }
 

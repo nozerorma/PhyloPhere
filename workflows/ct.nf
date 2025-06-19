@@ -49,7 +49,7 @@ workflow CT {
         if (toolsToRun.contains('discovery')) {
             // Define the alignment channel align_tuple
             align_tuple = Channel
-                    .fromPath("${params.alignment}") // Recursively search all subdirectories
+                    .fromPath("${params.alignment}/*") // Recursively search all subdirectories
                     .filter { it.isFile() } // Filter out directories
                     .map { file -> tuple(file.baseName, file) }
 
@@ -64,7 +64,7 @@ workflow CT {
         }
         if (toolsToRun.contains('bootstrap')) {
             align_tuple = Channel
-                    .fromPath("${params.alignment}") // Recursively search all subdirectories
+                    .fromPath("${params.alignment}/*") // Recursively search all subdirectories
                     .filter { it.isFile() } // Filter out directories
                     .map { file -> tuple(file.baseName, file) }
 

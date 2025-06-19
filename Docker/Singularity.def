@@ -1,0 +1,86 @@
+Bootstrap: docker
+From: mambaorg/micromamba:1.5.1
+Stage: spython-base
+
+%files
+env.yml /tmp/env.yml
+modules/ ./modules/
+scripts/ ./scripts/
+ct .
+%labels
+image.author.name "Miguel Ramon"
+image.author.email "miguel.ramon@upf.edu"
+%post
+#
+#
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗  
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝  
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+#                                                                                    
+#                                      
+# PHYLOPHERE: A Nextflow pipeline including a complete set
+# of phylogenetic comparative tools and analyses for Phenome-Genome studies
+#
+# Github: https://github.com/nozerorma/PhyloPhere
+#
+# Author:         Miguel Ramon (miguel.ramon@upf.edu)
+#
+# File: Dockerfile
+#
+
+# Set image origin to micromamba for a stripped down, immutable Debian-Conda environment.
+
+
+# Set root as default user due to some funky behavour when using $MAMBA_USER.
+su -  root # USER root
+
+# Download some basic debian tools + procps (Nextflow dependency).
+apt-get update \
+&& DEBIAN_FRONTEND=noninteractive \
+apt-get install -qq -y --no-install-recommends \
+software-properties-common \
+dirmngr \
+ed \
+gpg-agent \
+less \
+locales \
+ca-certificates \
+procps
+
+# Add environment file to the Docker image.
+
+# Create micromamba environment with the specifics from env.yml.
+micromamba install -y -n base -f /tmp/env.yml && \
+micromamba clean --all --yes
+
+# Set CAASTools as WD and create build directory structure.
+# Add all the requirements for CAAStools.
+mkdir -p /ct
+cd /ct
+
+mkdir -p ./modules ./scripts
+
+
+# Add ct maintool to wd
+
+# Make ct and scripts executable
+chmod +x ./ct
+chmod +x ./scripts/*
+
+# Add ct and conda binary to $PATH
+PATH=/ct:$PATH
+PATH=/opt/conda/envs/base/bin:$PATH
+
+# Set the image to be run inside base environment directly
+%environment
+export PATH=/ct:$PATH
+export PATH=/opt/conda/envs/base/bin:$PATH
+%runscript
+cd /ct
+exec /usr/local/bin/_entrypoint.sh "$@"
+%startscript
+cd /ct
+exec /usr/local/bin/_entrypoint.sh "$@"
