@@ -30,6 +30,7 @@ CALLED BY: ct
 from modules.init_bootstrap import *
 from modules.disco import process_position
 from modules.caas_id import iscaas
+from modules.caap_id import check_caap_pattern, GS0, GS1, GS2, GS3, GS4
 from modules.alimport import *
 
 from os.path import exists
@@ -204,8 +205,12 @@ def filter_for_missings(max_m_bg, max_m_fg, max_m_all, mfg, mbg):
 
 
 
-def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all, cycles, multiconfig, miss_pair=False, max_conserved=0, admitted_patterns=["1","2","3"], chunk_size=1000):
-    """Chunked bootstrap - processes traits in batches to handle large resample files"""
+def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all, cycles, multiconfig, miss_pair=False, max_conserved=0, admitted_patterns=["1","2","3"], chunk_size=1000, caap_mode=False):
+    """Chunked bootstrap - processes traits in batches to handle large resample files
+    
+    Args:
+        caap_mode: If True, test all CAAP grouping schemes (GS0-GS4) instead of classical CAAS
+    """
     
     a = set(list_of_traits)
     b = set(processed_position.trait2aas_fg.keys())
@@ -214,8 +219,17 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
     
     if len(valid_traits) == 0:
         position_name = genename + "@" + str(processed_position.position)
-        outline = "\t".join([position_name, "0", str(cycles), "0.0"])
-        return outline
+        if caap_mode:
+            # Return one line per scheme with zero counts
+            schemes = [("GS0", GS0), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
+            outlines = []
+            for scheme_name, _ in schemes:
+                outline = "\t".join([position_name, scheme_name, "0", str(cycles), "0.0"])
+                outlines.append(outline)
+            return "\n".join(outlines)
+        else:
+            outline = "\t".join([position_name, "0", str(cycles), "0.0"])
+            return outline
     
     # Process traits in chunks to avoid memory issues with large files
     total_output_traits = []
@@ -279,47 +293,100 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             filtered_traits = pair_filtered
         
         # Pattern check
-        for trait in filtered_traits:
-            fg_species = processed_position.trait2ungapped_fg[trait][:]
-            bg_species = processed_position.trait2ungapped_bg[trait][:]
+        if caap_mode:
+            # CAAP mode: test all grouping schemes for each trait
+            # Track counts per scheme: scheme_name -> list of matching traits
+            scheme_counts = {"GS0": [], "GS1": [], "GS2": [], "GS3": [], "GS4": []}
+            schemes = [("GS0", GS0), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
             
-            # Sort species by pair number if in paired mode, otherwise alphabetically
-            if multiconfig.paired_mode:
-                def pair_sort_key(sp):
-                    pair_id = multiconfig.get_pair(sp)
-                    if pair_id:
-                        try:
-                            return (int(pair_id), sp)
-                        except (ValueError, TypeError):
-                            return (float('inf'), sp)
-                    return (float('inf'), sp)
+            for trait in filtered_traits:
+                fg_species = processed_position.trait2ungapped_fg[trait][:]
+                bg_species = processed_position.trait2ungapped_bg[trait][:]
                 
-                fg_species.sort(key=pair_sort_key)
-                bg_species.sort(key=pair_sort_key)
-            else:
-                fg_species.sort()
-                bg_species.sort()
+                # Sort species by pair number if in paired mode, otherwise alphabetically
+                if multiconfig.paired_mode:
+                    def pair_sort_key(sp):
+                        pair_id = multiconfig.get_pair(sp)
+                        if pair_id:
+                            try:
+                                return (int(pair_id), sp)
+                            except (ValueError, TypeError):
+                                return (float('inf'), sp)
+                        return (float('inf'), sp)
+                    
+                    fg_species.sort(key=pair_sort_key)
+                    bg_species.sort(key=pair_sort_key)
+                else:
+                    fg_species.sort()
+                    bg_species.sort()
+                
+                # Extract amino acids per species
+                fg_aas = [processed_position.d[sp].split("@")[0] for sp in fg_species]
+                bg_aas = [processed_position.d[sp].split("@")[0] for sp in bg_species]
+                
+                # Test each grouping scheme
+                for scheme_name, scheme_dict in schemes:
+                    is_caap, pattern, _, _ = check_caap_pattern(
+                        fg_aas, bg_aas, scheme_dict, max_conserved,
+                        multiconfig, fg_species, bg_species
+                    )
+                    
+                    if is_caap and pattern in admitted_patterns:
+                        scheme_counts[scheme_name].append(trait)
             
-            aa_tag_fg = "".join([processed_position.d[sp].split("@")[0] for sp in fg_species])
-            aa_tag_bg = "".join([processed_position.d[sp].split("@")[0] for sp in bg_species])
-            tag = "/".join([aa_tag_fg, aa_tag_bg])
+            # Return one line per scheme
+            position_name = genename + "@" + str(processed_position.position)
+            outlines = []
+            for scheme_name in ["GS0", "GS1", "GS2", "GS3", "GS4"]:
+                count = str(len(scheme_counts[scheme_name]))
+                empval = str(len(scheme_counts[scheme_name])/cycles)
+                outline = "\t".join([position_name, scheme_name, count, str(cycles), empval])
+                outlines.append(outline)
             
-            check = iscaas(tag, multiconfig, processed_position.d, max_conserved, trait, fg_species, bg_species)
-            if check.caas == True and check.pattern in admitted_patterns:
-                total_output_traits.append(trait)
-    
-    # Return aggregated result
-    position_name = genename + "@" + str(processed_position.position)
-    count = str(len(total_output_traits))
-    empval = str(int(count)/cycles)
-    outline = "\t".join([position_name, count, str(cycles), empval])
-    
-    return outline
+            return "\n".join(outlines)
+        else:
+            # Classical CAAS mode
+            for trait in filtered_traits:
+                fg_species = processed_position.trait2ungapped_fg[trait][:]
+                bg_species = processed_position.trait2ungapped_bg[trait][:]
+                
+                # Sort species by pair number if in paired mode, otherwise alphabetically
+                if multiconfig.paired_mode:
+                    def pair_sort_key(sp):
+                        pair_id = multiconfig.get_pair(sp)
+                        if pair_id:
+                            try:
+                                return (int(pair_id), sp)
+                            except (ValueError, TypeError):
+                                return (float('inf'), sp)
+                        return (float('inf'), sp)
+                    
+                    fg_species.sort(key=pair_sort_key)
+                    bg_species.sort(key=pair_sort_key)
+                else:
+                    fg_species.sort()
+                    bg_species.sort()
+                
+                aa_tag_fg = "".join([processed_position.d[sp].split("@")[0] for sp in fg_species])
+                aa_tag_bg = "".join([processed_position.d[sp].split("@")[0] for sp in bg_species])
+                tag = "/".join([aa_tag_fg, aa_tag_bg])
+                
+                check = iscaas(tag, multiconfig, processed_position.d, max_conserved, trait, fg_species, bg_species)
+                if check.caas == True and check.pattern in admitted_patterns:
+                    total_output_traits.append(trait)
+            
+            # Return aggregated result
+            position_name = genename + "@" + str(processed_position.position)
+            count = str(len(total_output_traits))
+            empval = str(int(count)/cycles)
+            outline = "\t".join([position_name, count, str(cycles), empval])
+            
+            return outline
 
 # FUNCTION boot_on_single_alignment()
 # Launches the bootstrap in several lines. Returns a dictionary gene@position --> pvalue
 
-def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None):
+def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False):
     """
     Run bootstrap analysis on a single alignment.
     
@@ -330,6 +397,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
     Args:
         resampled_traits: multicfg object OR directory path (str) containing resample_*.tab files
         progress_log: Optional file path for logging progress
+        caap_mode: If True, test all CAAP grouping schemes (GS0-GS4) instead of classical CAAS
         ... (other parameters as before)
     """
     the_genename = sliced_object.genename
@@ -412,20 +480,36 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                     miss_pair=miss_pair,
                     max_conserved=max_conserved,
                     admitted_patterns=the_admitted_patterns,
-                    cycles=file_config.cycles
+                    cycles=file_config.cycles,
+                    caap_mode=caap_mode
                 ),
                 processed_positions
             )
             
             # Accumulate counts for each position
-            for line in output_lines:
-                parts = line.split("\t")
-                position_name = parts[0]
-                count = int(parts[1])
-                
-                if position_name not in position_counts:
-                    position_counts[position_name] = 0
-                position_counts[position_name] += count
+            # In CAAP mode, each position returns multiple lines (one per scheme)
+            for line_output in output_lines:
+                if caap_mode:
+                    # Multiple lines separated by newline
+                    for line in line_output.split("\n"):
+                        parts = line.split("\t")
+                        position_name = parts[0]
+                        scheme_name = parts[1]
+                        count = int(parts[2])
+                        
+                        key = (position_name, scheme_name)
+                        if key not in position_counts:
+                            position_counts[key] = 0
+                        position_counts[key] += count
+                else:
+                    # Single line per position
+                    parts = line_output.split("\t")
+                    position_name = parts[0]
+                    count = int(parts[1])
+                    
+                    if position_name not in position_counts:
+                        position_counts[position_name] = 0
+                    position_counts[position_name] += count
             
             file_elapsed = time.time() - file_start
             print(f"  → File completed in {format_time(file_elapsed)}\n")
@@ -436,11 +520,21 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
         print(f"{'='*80}\n")
         
         with open(output_file, "w") as ooout:
-            for position_name in sorted(position_counts.keys()):
-                count = position_counts[position_name]
-                empval = count / total_cycles
-                outline = "\t".join([position_name, str(count), str(total_cycles), str(empval)])
-                print(outline, file=ooout)
+            if caap_mode:
+                # Sort by position then scheme
+                for key in sorted(position_counts.keys()):
+                    position_name, scheme_name = key
+                    count = position_counts[key]
+                    empval = count / total_cycles
+                    outline = "\t".join([position_name, scheme_name, str(count), str(total_cycles), str(empval)])
+                    print(outline, file=ooout)
+            else:
+                # Classical CAAS mode
+                for position_name in sorted(position_counts.keys()):
+                    count = position_counts[position_name]
+                    empval = count / total_cycles
+                    outline = "\t".join([position_name, str(count), str(total_cycles), str(empval)])
+                    print(outline, file=ooout)
         
         total_elapsed = time.time() - start_time
         print(f"✓ Bootstrap complete in {format_time(total_elapsed)}")
@@ -500,15 +594,23 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 miss_pair = miss_pair,
                 max_conserved = max_conserved,
                 admitted_patterns = the_admitted_patterns,
-                cycles = resampled_traits.cycles) ,processed_positions
+                cycles = resampled_traits.cycles,
+                caap_mode = caap_mode) ,processed_positions
         )
 
         output_lines = list(output_lines)
 
         ooout = open(output_file, "w")
 
-        for line in output_lines:
-            print(line, file=ooout)
+        if caap_mode:
+            # Each line may contain multiple scheme results separated by newlines
+            for line_output in output_lines:
+                for line in line_output.split("\n"):
+                    print(line, file=ooout)
+        else:
+            # Classical CAAS mode
+            for line in output_lines:
+                print(line, file=ooout)
         
         ooout.close()
         

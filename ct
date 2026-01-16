@@ -186,6 +186,12 @@ if tool.lower() == "discovery":
                     help="Maximum number of pairs allowed to share the same amino acid between FG and BG (only works with --paired_mode). \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
+    ###     1.4.9 CAAP mode (detect property-based convergence)
+    parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
+                    help="Enable CAAP (Convergent Amino Acid Properties) mode. \
+                        Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
+                        Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
+
 
     ### 1.5 Usage
 
@@ -252,6 +258,8 @@ if tool.lower() == "discovery":
                 paired_mode = options.paired_mode,
                 miss_pair = options.miss_pair,
                 max_conserved = int(options.max_conserved),
+
+                caap_mode = options.caap_mode,
 
                 admitted_patterns = options.patterns_string,
                 output_file = options.output_file)
@@ -578,6 +586,10 @@ if tool.lower() == "bootstrap":
     parser.add_option("--progress_log", dest="progress_log",
                     help="Path to file for logging progress with timestamps and ETA. Especially useful for directory-based bootstrap. Default = stdout only.", default = "none")
 
+    parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
+                    help="Enable CAAP (Convergent Amino Acid Properties) mode. \
+                        Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
+                        Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
 
     ### 3.5 Usage
 
@@ -670,7 +682,8 @@ if tool.lower() == "bootstrap":
                     the_admitted_patterns = options.patterns_string,
                     output_file = options.output_file,
                     discovery_file = discovery_input,
-                    progress_log = progress_log_input
+                    progress_log = progress_log_input,
+                    caap_mode = options.caap_mode
                     )
     
     ###     3.9.4 Final output

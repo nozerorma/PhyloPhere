@@ -51,7 +51,7 @@ def pstate(iterable, freq_dictionary, set_size, contrast_size, mode = "independe
     Mn = IL MAZZO DI CARTE SAPENDO CHE L'AVVERSARIO (FOREGROUND) HA COLTO LE SUE (M - CONTRAST_SIZE)
     N = IL NUMERO DI CARTE CHE VUOI NEL MAZZO = sum of the frequences of the iterable
     n = LE CARTE CHE HAI IN MANO (SET_SIZE)
-    k LE CARTE CHE HAI IN MANO E CHE COINCIDONO CON (N) -----> n = k (SET_SIZE)
+    k = LE CARTE CHE HAI IN MANO E CHE COINCIDONO CON (N) -----> n = k (SET_SIZE)
 
 
     '''

@@ -229,23 +229,35 @@ def iscaas(input_string, multiconfig=None, position_dict=None, max_conserved=0, 
     fg_unique = list(set(fg_string))
     bg_unique = list(set(bg_string))
 
-    # Standard CAAS check (no overlap allowed)
+    # String overlap logic: count how many characters from fg_string match bg_string (with multiplicity)
+    # For example: AAA/ASS has overlap=1 (min(3 A's, 1 A) = 1)
+    #              AAA/AAS has overlap=2 (min(3 A's, 2 A's) = 2)
+    from collections import Counter
+    
+    fg_counter = Counter(fg_string)
+    bg_counter = Counter(bg_string)
+    overlap = sum(min(fg_counter[aa], bg_counter[aa]) for aa in fg_counter)
+    
+    total_fg = len(fg_string)
+    total_bg = len(bg_string)
+    non_overlapping_fg = total_fg - overlap
+    non_overlapping_bg = total_bg - overlap
+    
+    # Standard CAAS check
     if max_conserved == 0 or not multiconfig or not multiconfig.paired_mode:
-        # Original logic: strict no-overlap
-        for x in fg_unique:
-            if x in bg_unique:
-                z.caas = False
-                break
+        # Strict mode: no overlap allowed and need at least 2 changes on one side
+        if overlap == 0 and (non_overlapping_fg >= 2 or non_overlapping_bg >= 2):
+            z.caas = True
+        else:
+            z.caas = False
     else:
-        # Simplified position-by-position conserved counting
-        # Count how many positions have matching amino acids and track which pairs
-        num_conserved_positions = 0
+        # Pair-aware mode: allow some overlap based on max_conserved
+        # Track conserved pairs for reporting
         conserved_pair_indices = []
         min_len = min(len(fg_string), len(bg_string))
         
         for i in range(min_len):
             if fg_string[i] == bg_string[i]:
-                num_conserved_positions += 1
                 # Track which pair this position corresponds to
                 if fg_species_list and bg_species_list and i < len(fg_species_list) and i < len(bg_species_list):
                     fg_sp = fg_species_list[i]
@@ -253,18 +265,16 @@ def iscaas(input_string, multiconfig=None, position_dict=None, max_conserved=0, 
                     if pair_id:
                         conserved_pair_indices.append(pair_id)
         
-        # Check if conserved positions exceed threshold
-        if num_conserved_positions > max_conserved:
-            z.caas = False
+        # Check if overlap is within threshold and we have enough changes
+        if overlap <= max_conserved and (non_overlapping_fg >= 2 or non_overlapping_bg >= 2):
+            z.caas = True
+            pair_list = ",".join(conserved_pair_indices) if conserved_pair_indices else ""
+            z.conserved_pairs = f"{overlap}:{pair_list}"
         else:
-            # Need to ensure at least 2 species changed on at least one side
-            # Build species-to-AA mapping from position_dict
-            species2aa = {}
-            if position_dict:
-                for species, aa_info in position_dict.items():
-                    aa = aa_info.split("@")[0]
-                    species2aa[species] = aa
+            z.caas = False
             
+        # Old complex logic removed - now using simple string overlap
+        if False:  # Placeholder to maintain indentation of old code below
             # Get FG and BG species for this trait (only those present at this position)
             if trait and multiconfig:
                 # Only consider species that are actually present (not gapped/missing) at this position
@@ -441,37 +451,10 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
 
         # Print the output
 
-        header_fields = [
-            "Gene",
-            "Trait",
-            "Position",
-            "Substitution",
-            "Pvalue",
-            "Pattern",
-            "FFGN",
-            "FBGN",
-            "GFG",
-            "GBG",
-            "MFG",
-            "MBG",
-            "FFG",
-            "FBG",
-            "MS"
-        ]
-        
-        # Add conserved pair columns in paired mode
-        if multiconfig.paired_mode and max_conserved > 0:
-            header_fields.extend(["ConservedPair", "ConservedPairs"])
-        
-        header = "\t".join(header_fields)
-
+        # Header is now written in disco.py
+        # Just append output if we have traits to write
         if len(output_traits) > 0:
-
-            if exists(output_file):
-                out = open(output_file, "a")
-            else:
-                out = open(output_file, "w")
-                print(header, file=out)
+            out = open(output_file, "a")
 
             for trait in output_traits:
 
@@ -525,6 +508,7 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
 
                 output_fields = [
                     genename,
+                    "CAAS",  # Mode column
                     traitname,
                     processed_position.position,
                     change,
