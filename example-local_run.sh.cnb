@@ -42,14 +42,24 @@ CT_PATH="./ct"                                      # Path to the CAASTOOLS bina
 
 ### If using Singularity, add the -with-singularity flag and the -profile singularity flag
 ### If using Nextflow Tower, add the -with-tower flag
-### If running in Marvin normal partition, add the -profile normal flag
-### If running in Marvin haswell partition, add the -profile haswell flag
-##### IF WE WANT TO USE SLURM AS EXECUTOR, ADD THE -profile normal_slurm OR -profile haswell_slurm FLAG AND MODIFY SBATCH PARAMETERS ACCORDINGLY
 
-#nextflow run main.nf -with-singularity -with-tower -profile singularity,haswell \
+# Apptainer run
+## nextflow run main.nf -with-tower -with-apptainer -profile local,apptainer
 
-# Singularity is legacy. Use apptainer for recent Nextflow version.
+# Local run
+## nextflow run main.nf -with-tower -profile local
 
+# Slurm localized run (using haswell, with apptainer)
+## nextflow run main.nf -with-tower -with-apptainer -profile local,apptainer
+
+# Slurm delocalized run (using haswell, using slurm, with apptainer). Careful with slurm queueing, not very efficient due to overhead.
+# Queue should be set in the sbatch directly.
+## nextflow run main.nf -with-tower -with-apptainer -profile slurm,apptainer
+
+# Singularity is legacy. Apptainer should be used unless necessary.
+# For some reason, Nextflow does not mount HOME directly no more. We need to flag it.
+export NXF_APPTAINER_HOME_MOUNT=true
+export NXF_SINGULARITY_HOME_MOUNT=true
 
 for TRAIT_FILE in $(find $TRAIT_DIR -type f -name "*.tab"); do
 
@@ -75,6 +85,6 @@ for TRAIT_FILE in $(find $TRAIT_DIR -type f -name "*.tab"); do
         --traitvalues $TRAIT_VALUES \
         --cycles "1000"
 
-    nextflow clean -f
+    nextflow clean -f # This flag should be disabled if debugging
 
 done

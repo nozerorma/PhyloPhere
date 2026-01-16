@@ -19,11 +19,13 @@ Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
                 Xavier Farré (xfarrer@igtp.cat),
                 David de Juan (david.juan@upf.edu).
 
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
+
 MODULE NAME:    ct
 DESCRIPTION:    Launcher script. Calls the different tools.
 DEPENDENCIES:   Directly or indirectly, all the modules are connected to this script
 
-Version 0.9.1 - May 2023
+Version 2.0.0-paired - January 2026
 
 '''
 
@@ -35,7 +37,7 @@ Version 0.9.1 - May 2023
 ### Application info and general help
 
 application_info = '''
-CAASTOOLS version 0.9 (beta)
+CAASTools version 2.0.0-paired
 Convergent Amino Acid Substitution detection and analysis TOOLbox
 '''
 
@@ -169,6 +171,21 @@ if tool.lower() == "discovery":
                     help="Filter by number of miss in foreground and background.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
 
+    ###     1.4.6 Paired mode (enables pair-aware features)
+    parser.add_option("--paired_mode", dest="paired_mode", action="store_true",
+                    help="Enable paired_mode for 3-column config files (species, trait, pair). \
+                        Required for pair-aware filtering and conserved-pair tolerance. Default = disabled.", default = False)
+
+    ###     1.4.7 Pair-aware missing/gap filtering
+    parser.add_option("--miss_pair", dest="miss_pair", action="store_true",
+                    help="Enable pair-aware missing/gap filtering (only works with --paired_mode). \
+                        When enabled and max thresholds are equal, validates that missing/gapped species come from matching pairs. Default = disabled.", default = False)
+
+    ###     1.4.8 Conserved pair tolerance
+    parser.add_option("--max_conserved", dest="max_conserved",
+                    help="Maximum number of pairs allowed to share the same amino acid between FG and BG (only works with --paired_mode). \
+                        Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
+
 
     ### 1.5 Usage
 
@@ -231,6 +248,10 @@ if tool.lower() == "discovery":
                 max_fg_miss = options.max_fg_miss_string,
                 max_bg_miss = options.max_bg_miss_string,
                 max_overall_miss = options.max_miss_string,
+
+                paired_mode = options.paired_mode,
+                miss_pair = options.miss_pair,
+                max_conserved = int(options.max_conserved),
 
                 admitted_patterns = options.patterns_string,
                 output_file = options.output_file)
@@ -299,14 +320,14 @@ if tool.lower() == "resample":
     ###     2.5.4 How many bootstrap cycles?
     parser.add_option("--cycles", dest="cycles",
                     help="number of cycles", default = "1000")
-    
-    ###     2.5.5 Permulation strategy?
-    parser.add_option("--perm_strategy", dest="permulation_selection_strategy",
-                    help="How to select the species for permulation. 'random' for random selection, 'phylogeny' for phylogeny-based selection.", default = "random")
+
+    ###     2.5.5 Chunk size for file writing
+    parser.add_option("--chunk_size", dest="chunk_size",
+                    help="Number of cycles per output file. Default: 500. Output will be a directory with multiple resample_*.tab files.", default = "500")
 
     ### 2.6 Usage
 
-    parser.usage = "ct resample -p $phylogenetic_tree (newick format) -f $foreground_size -b $background_size / --bytemp $trait_file -o $output_file\n\nNOTE: to use --mode bm or phylogeny restriction you MUST provide a template (--bytemp)"
+    parser.usage = "ct resample -p $phylogenetic_tree (newick format) -f $foreground_size -b $background_size / --bytemp $trait_file -o $output_directory --cycles $N --chunk_size $M\n\nNOTE: to use --mode bm or phylogeny restriction you MUST provide a template (--bytemp)\nNOTE: Output will be a directory containing resample_*.tab files (one file per chunk_size cycles)"
 
     ### 2.7 Parse the options
 
@@ -425,28 +446,28 @@ if tool.lower() == "resample":
         mode = normalised_mode,
         groupfile = options.groupfile,
         phenotype_values_file = options.trait_values,
-        permulation_selection_strategy = options.permulation_selection_strategy,
         cycles = int(options.cycles),
-        simtraits_outfile = options.output_file
+        simtraits_outfile = options.output_file,
+        chunk_size = int(options.chunk_size)
     )
 
     # Output information (recaps the simulation and the settings)
 
     if normalised_mode == "random":
-        print("\n\nTrait simulation in", options.bootstrap_mode, "mode with", options.cycles, "cycles is done. Simulation file is avaiable at:\n\n\t" + options.output_file) 
+        print("\n\nTrait simulation in", options.bootstrap_mode, "mode with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file) 
 
     elif normalised_mode == "phylogeny-restricted-byfams":
-        print("\n\nTrait simulation in", options.bootstrap_mode, "mode, restricted by family information from", options.groupfile, "with", options.cycles, "cycles is done. Simulation file is avaiable at:\n\n\t" + options.output_file)
+        print("\n\nTrait simulation in", options.bootstrap_mode, "mode, restricted by family information from", options.groupfile, "with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file)
 
     elif normalised_mode == "phylogeny-restricted-bypd":
-        print("\n\nTrait simulation in", options.bootstrap_mode, "mode, restricted by phylogenetic consistency based on patristic distance intervals", options.groupfile, "with", options.cycles, "cycles is done. Simulation file is avaiable at:\n\n\t" + options.output_file)
+        print("\n\nTrait simulation in", options.bootstrap_mode, "mode, restricted by phylogenetic consistency based on patristic distance intervals", options.groupfile, "with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file)
     
     elif normalised_mode == "bm":
         if exists(options.output_file):
-            print("\n\nTrait simulation in", options.bootstrap_mode, "mode, based on", options.groupfile, "template and ", options.trait_values, "trait values with", options.cycles, "cycles is done. Simulation file is avaiable at:\n\n\t" + options.output_file)
+            print("\n\nTrait simulation in", options.bootstrap_mode, "mode, based on", options.groupfile, "template and ", options.trait_values, "trait values with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file)
         else:
-            print("\n\n****ERROR: resampled traits file not generated. See R interpreter output.\n\n")
-    print("\nThis file can be used as input for the bootstrap tool\n\n")
+            print("\n\n****ERROR: resampled traits directory not generated. See R interpreter output.\n\n")
+    print("\nThis directory can be used as input for the bootstrap tool\n\n")
 
 
 
@@ -468,9 +489,9 @@ if tool.lower() == "bootstrap":
     parser.add_option("-t", "--traitfile", dest="config_file",
                     help="The trait config file (read documentation for file formatting)", default = "none")
 
-    ###     3.3.2 Resampled traits File (phylogenetic tree for permulations)
+    ###     3.3.2 Resampled traits File or Directory
     parser.add_option("-s", "--simtraits", dest="simtraits",
-                    help="The resampled traits file", default = "none")
+                    help="The resampled traits file (legacy) or directory containing resample_*.tab files (recommended for large analyses)", default = "none")
 
     ###     3.3.3 Input alignment
     parser.add_option("-a", "--alignment", dest="single_alignment",
@@ -533,10 +554,34 @@ if tool.lower() == "bootstrap":
                     help="Filter by number of miss in foreground and background.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
 
+    ###     3.4.6 Paired mode (enables pair-aware features)
+    parser.add_option("--paired_mode", dest="paired_mode", action="store_true",
+                    help="Enable paired_mode for 3-column config files (species, trait, pair). \
+                        Required for pair-aware filtering and conserved-pair tolerance. Default = disabled.", default = False)
+
+    ###     3.4.7 Pair-aware missing/gap filtering
+    parser.add_option("--miss_pair", dest="miss_pair", action="store_true",
+                    help="Enable pair-aware missing/gap filtering (only works with --paired_mode). \
+                        When enabled and max thresholds are equal, validates that missing/gapped species come from matching pairs. Default = disabled.", default = False)
+
+    ###     3.4.8 Conserved pair tolerance
+    parser.add_option("--max_conserved", dest="max_conserved",
+                    help="Maximum number of pairs allowed to share the same amino acid between FG and BG (only works with --paired_mode). \
+                        Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
+
+    ###     3.4.9 Discovery file for position filtering (optimization)
+    parser.add_option("--discovery", dest="discovery_file",
+                    help="Path to discovery output file. When provided, bootstrap will only test positions that had CAAS in discovery, \
+                        resulting in massive speedup (typically 100-1000x). Highly recommended for large alignments. Default = test all positions.", default = "none")
+
+    ###     3.4.10 Progress logging
+    parser.add_option("--progress_log", dest="progress_log",
+                    help="Path to file for logging progress with timestamps and ETA. Especially useful for directory-based bootstrap. Default = stdout only.", default = "none")
+
 
     ### 3.5 Usage
 
-    parser.usage = "ct bootstrap -a $alignment_file -t $trait_config_file -s $resampled_traits_file -o $output_file --fmt $alignment_format (default:clustal)"
+    parser.usage = "ct bootstrap -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA"
 
     ### 3.6 Parse the options
 
@@ -572,8 +617,9 @@ if tool.lower() == "bootstrap":
     ### 3.8 Import the modules
 
     from modules.boot import *
-    from modules.init_bootstrap import simtrait_revive
+    from modules.init_bootstrap import simtrait_revive, get_resample_info
     from modules.runslice import runslice
+    import os
 
     ### 3.9 PROCEDURE 
 
@@ -586,14 +632,28 @@ if tool.lower() == "bootstrap":
 
     sliced_alignment = runslice(options)
 
-    ###     3.9.2 - Read the resampled traits file
-
-    bootstrap_object = simtrait_revive(options.simtraits)
+    ###     3.9.2 - Detect if input is directory or file, load accordingly
+    
+    if os.path.isdir(options.simtraits):
+        # Directory mode: pass directory path directly, boot_on_single_alignment will handle loading
+        print(f"Detected directory-based resampled traits: {options.simtraits}")
+        bootstrap_input = options.simtraits
+    else:
+        # Single file mode: load into memory (backward compatibility)
+        print(f"Detected single-file resampled traits: {options.simtraits}")
+        bootstrap_input = simtrait_revive(options.simtraits)
 
     ###     3.9.3 - Boot on the alignment file
+    
+    # Prepare discovery file parameter (None if not provided)
+    discovery_input = None if options.discovery_file == "none" else options.discovery_file
+    
+    # Prepare progress log parameter
+    progress_log_input = None if options.progress_log == "none" else options.progress_log
+    
     boot_on_single_alignment(
                     trait_config_file= options.config_file,
-                    resampled_traits= bootstrap_object,
+                    resampled_traits= bootstrap_input,
                     sliced_object = sliced_alignment,
 
                     max_fg_gaps = options.max_fg_gaps_string,
@@ -604,8 +664,13 @@ if tool.lower() == "bootstrap":
                     max_bg_miss = options.max_bg_miss_string,
                     max_overall_miss = options.max_miss_string,
 
+                    miss_pair = options.miss_pair,
+                    max_conserved = int(options.max_conserved),
+
                     the_admitted_patterns = options.patterns_string,
-                    output_file = options.output_file
+                    output_file = options.output_file,
+                    discovery_file = discovery_input,
+                    progress_log = progress_log_input
                     )
     
     ###     3.9.4 Final output

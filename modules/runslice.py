@@ -5,6 +5,7 @@
 # | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
 #  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
 
+__version__ = "2.0.0-paired"
 
 '''
 A Convergent Amino Acid Substitution identification 
@@ -16,18 +17,23 @@ Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
                 Xavier Farré (xfarrer@igtp.cat),
                 David de Juan (david.juan@upf.edu).
 
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
+
 MODULE NAME:    runslice.py
 DESCRIPTION:    The slicer function.
 DEPENDENCIES:   TBD
 '''
 from modules.alimport import *
 
-### Function runslice (collects the )
+### Function runslice (collects the slicer inputs and runs it)
 def runslice(options_object):
 
     # Inputs (transferring parsed options_object to variables)
     the_alignment = options_object.single_alignment
     alignment_format = options_object.ali_format
+    
+    # Get paired_mode flag (default to False for backward compatibility)
+    paired_mode = getattr(options_object, 'paired_mode', False)
 
     # Alignment slice: 1- Calculate column treshold
 
@@ -39,7 +45,12 @@ def runslice(options_object):
     for x in cfg_list:
         try:
             c = x.split("\t")
-            values.append(c[1])
+            if paired_mode and len(c) >= 3:
+                # In paired mode, use the trait column (index 1)
+                values.append(c[1])
+            elif not paired_mode and len(c) >= 2:
+                # In legacy mode, use the second column (index 1)
+                values.append(c[1])
         except:
             pass
     

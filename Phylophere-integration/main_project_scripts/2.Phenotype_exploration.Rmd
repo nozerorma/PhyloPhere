@@ -1,0 +1,1047 @@
+---
+title: "Exploring Phenotypic Traits in Primate Neoplasia"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Phenotype Exploration
+This script explores phenotypic traits related to neoplasia in primates for the Primates' Neoplasia Project. It visualizes trait distributions, phylogenetic patterns, and correlations, focusing on malignancy and neoplasia prevalence, body mass, and longevity. The script includes contrast plots, phylogenetic trees, and phylogenetic generalized least squares (PGLS) analyses to assess trait relationships.
+
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Suppress warnings and messages in output
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Set the root directory for the project
+knitr::opts_knit$set(root.dir = "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES")
+# Display current working directory
+getwd()
+# Set seed for reproducibility
+set.seed(1998)
+
+```
+
+```{r dirdef, message=FALSE, warning=FALSE}
+
+# Define working, data, and results directories
+workingDir <- getwd()
+dataDir <- file.path(workingDir, "Data")
+resultsDir <- file.path(workingDir, "Malignancy_Primates/Out")
+
+# Load libraries, common functions, primate-specific functions and objects
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/libraries.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/commons.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_functions.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_objects.R"))
+
+# Note that all variables may be changed from COMMONS and PRIMATE_OBJECTS scripts.
+
+```
+
+## 1. Cancer Trait Data Import
+This section imports processed cancer-related trait data for primates, including longevity information from a previous pipeline.
+
+```{r trait_import}
+
+# 1. TRAIT IMPORT  ------------------------------------------------------
+# Load processed cancer traits data with longevity quotient (LQ)
+cancer_traits_processed <- read.csv(file.path(trait_dir, "cancer_traits_processed-LQ.csv"))
+
+# Excerpt of the cancer traits data
+head(cancer_traits_processed)
+
+```
+
+## 2. Load Melted Trait Data
+This section loads pre-processed trait data in a long (melted) format and adds common names for species.
+
+```{r, stat_visualization, fig.width=10, fig.height=5, dev="png"}
+
+# 2. LOAD MELTED TRAIT DATA  ------------------------------------------------------
+# Load melted traits data
+melted_traits <- read.csv(file.path(trait_dir, "melted_traits.csv"))
+
+# Excerpt of the melted traits data
+head(melted_traits)
+
+```
+
+# 3. Contrast Plots
+This section generates contrast plots to visualize malignant prevalence across primate families, highlighting extreme values and outliers.
+
+```{r phenoplot, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, dev='png'}
+
+createDir(file.path(resultsDir, "1.Data-exploration/2.Extreme_plots"))
+
+# 3. CONTRAST PLOTS  ------------------------------------------------------
+# Filter necropsy counts for easy recording
+necropsy_melt <- melted_traits %>%
+  dplyr::filter(trait == "adult_necropsy_count") %>%
+  dplyr::rename(necropsy_counts = value) %>%
+  dplyr::mutate(necropsy_counts = as.numeric(necropsy_counts)) %>%
+  dplyr::ungroup() %>%
+  dplyr::select(species, necropsy_counts)
+
+# Merge necropsy counts with melted traits
+melt_new <- merge(melted_traits, necropsy_melt, by = "species", all.x = TRUE, all.y = FALSE)
+
+# Calculate global and family-level labels and outliers
+melt_new2 <- melt_new %>%
+  dplyr::group_by(family, trait) %>%
+  dplyr::mutate(
+    z_score_fam = (value - mean(value, na.rm = TRUE)) / sd(value, na.rm = TRUE),
+    family_label = dplyr::case_when(
+      value < quantile(value, 0.25, na.rm = TRUE) & value < median(value, na.rm = TRUE) ~ "low_extreme",
+      value > quantile(value, 0.75, na.rm = TRUE) & value > median(value, na.rm = TRUE) ~ "high_extreme",
+      TRUE ~ "normal"
+    )
+  ) %>%
+  dplyr::ungroup()
+
+# Function to generate contrast plots
+gen_contrast_g <- function(contrast_t, my_trait, family_plot) {
+  # Ensure species order matches phylogeny
+  ordered_species <- pruned_tree$tip.label
+  contrast_t$species <- factor(contrast_t$species, levels = ordered_species)
+  
+  # Prepare data based on global or family-level categorization
+  if (family_plot == 1) {
+    contrast_t <- contrast_t %>%
+      dplyr::group_by(species) %>%
+      dplyr::arrange(family, .by_group = TRUE) %>%
+      dplyr::filter(trait == my_trait) %>%
+      dplyr::mutate(Value = value, Category = global_label, Outlier = outlier) %>%
+      dplyr::select(family, species, necropsy_counts, common_name, Value, Category, Outlier, median, median_fam) %>%
+      dplyr::rename(Family = family, Species = species)
+  } else {
+    contrast_t <- contrast_t %>%
+      dplyr::group_by(species) %>%
+      dplyr::arrange(family, .by_group = TRUE) %>%
+      dplyr::filter(trait == my_trait) %>%
+      dplyr::mutate(Value = value, Category = family_label, Outlier = outlier) %>%
+      dplyr::select(family, species, necropsy_counts, common_name, Value, Category, Outlier, median, median_fam) %>%
+      dplyr::rename(Family = family, Species = species)
+  }
+  
+  # Define ordered families for plotting
+  ordered_families <- unique(contrast_t$Family)
+  
+  # Calculate median value for reference line
+  median_value <- median(contrast_t$Value, na.rm = TRUE) * 100
+  
+  # Create contrast plot
+  graph <- ggplot2::ggplot(data = contrast_t, aes(x = Value * 100, y = Family)) +
+    ggplot2::scale_y_discrete(limits = ordered_families) +
+    ggplot2::geom_point(
+      data = subset(contrast_t, Category %in% c("mid_low_extreme", "mid_high_extreme")),
+      aes(shape = Category, color = Family), size = 5
+    ) +
+    ggplot2::geom_point(
+      data = subset(contrast_t, Category %in% c("low_extreme", "high_extreme")),
+      aes(shape = Category, color = Family, fill = Family), size = 5
+    ) +
+    ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "mid_low_extreme" = 1, "mid_high_extreme" = 1, "high_extreme" = 17)) +
+    ggplot2::scale_fill_manual(values = primate_family_colors) +
+    ggplot2::scale_color_manual(values = primate_family_colors) +
+    ggplot2::geom_vline(aes(xintercept = median_value), linewidth = 1.5, color = "salmon3", linetype = "longdash", alpha = 0.8) +
+    ggplot2::stat_summary(
+      fun = median, geom = "errorbar",
+      aes(xmax = after_stat(x), xmin = after_stat(x)),
+      linewidth = 1.5, color = "skyblue4", alpha = 0.8
+    ) +
+    ggplot2::labs(x = "Malignant prevalence (%)", y = "Primate families") +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = 15),
+      axis.title.x = ggplot2::element_text(size = 15, hjust = 0.5, margin = ggplot2::margin(t = 20, b = 20)),
+      axis.title.y = ggplot2::element_text(size = 15, angle = 90, hjust = 0.5, margin = ggplot2::margin(l = 20, r = 20)),
+      legend.text = ggplot2::element_text(size = 15),
+      legend.position = "right"
+    ) +
+    ggrepel::geom_text_repel(
+      data = subset(contrast_t, Category %in% c("low_extreme", "high_extreme")),
+      aes(label = Species), size = 5, hjust = 0, vjust = 0, family = "Inter",
+      segment.size = 0.3, nudge_x = 0.010, nudge_y = 0.5, max.overlaps = Inf,
+      force = 1, direction = "y", max.iter = 10000, label.padding = 20,
+      min.segment.length = 0.06, seed = 2000, show.legend = FALSE
+    )
+  
+  return(graph)
+}
+
+# Generate and save contrast plots
+global_contrast_graph <- gen_contrast_g(melt_new2, "malignant_prevalence", 1)
+ggplot2::ggsave(
+  file.path(resultsDir, "1.Data-exploration/2.Extreme_plots/malignant_prevalence_global_plot.png"),
+  global_contrast_graph, device = "png", width = 15, height = 10, dpi = "retina"
+)
+
+family_contrast_graph <- gen_contrast_g(melt_new2, "malignant_prevalence", 0)
+ggplot2::ggsave(
+  file.path(resultsDir, "1.Data-exploration/2.Extreme_plots/malignant_prevalence_family_plot.png"),
+  family_contrast_graph, device = "png", width = 15, height = 10, dpi = "retina"
+)
+
+# Display plots
+global_contrast_graph
+family_contrast_graph
+
+```
+
+## 4. Trait Distribution (Phylogenetic Tree)
+This section generates a phylogenetic tree visualizing the distribution of malignant prevalence using ancestral state reconstruction (ASR). Using CI computation from ASR.
+
+```{r lambda_bm_trait modeling, fig.height = 20, fig.width = 17, dev = 'png', dpi = 320}
+
+# Required packages: ape, phytools, geiger (optional), dplyr, tidyr
+# Install if necessary: install.packages(c("ape","phytools","geiger","dplyr","tidyr"))
+gen_ast_tree_model <- function(contrast_t, prim_tree, my_trait,
+                               verbose = TRUE,
+                               plot = TRUE) {
+  # --- Packages ---
+  for (pkg in c("ape","phytools","dplyr","tidyr","phylolm")) {
+    if (!requireNamespace(pkg, quietly = TRUE)) stop(sprintf("Package '%s' required.", pkg))
+  }
+  library(ape); library(phytools); library(dplyr); library(tidyr); library(phylolm)
+  
+  # --- Trait vector ---
+  tr <- contrast_t[[my_trait]]; names(tr) <- contrast_t$species
+  tr <- tr[!is.na(tr) & is.finite(tr)]
+  if(length(tr)<3) stop("Need >=3 non-missing species.")
+  
+  prim_tree <- ape::drop.tip(prim_tree, setdiff(prim_tree$tip.label, names(tr)))
+  prim_tree <- ape::reorder.phylo(prim_tree, "cladewise")
+  Ntip <- length(prim_tree$tip.label)
+  Nnode <- prim_tree$Nnode
+  node_indices <- (Ntip+1):(Ntip+Nnode)
+  
+  # --- Fit BM / lambda ---
+  fit_model <- function(tree, trait, model=c("BM","lambda")) {
+    model <- match.arg(model)
+    df <- data.frame(trait=trait, species=names(trait))
+    fit <- phylolm(trait~1, data=df, phy=tree, model=ifelse(model=="BM","BM","lambda"))
+    aic <- fit$aic; k <- fit$p
+    aicc <- aic + (2*k*(k+1))/(length(trait)-k-1)
+    list(lnL=fit$logLik, sigma2=fit$sigma2, lambda=fit$optpar, aicc=aicc, raw=fit)
+  }
+  
+  fit_bm <- fit_model(prim_tree, tr, "BM")
+  fit_lambda <- fit_model(prim_tree, tr, "lambda")
+  
+  delta_aicc <- fit_bm$aicc - fit_lambda$aicc
+  chosen_model <- ifelse(fit_lambda$aicc < fit_bm$aicc, "lambda", "BM")
+  if(abs(delta_aicc)<2 && !is.null(fit_lambda$lambda) && abs(fit_lambda$lambda-1)<0.05) chosen_model <- "BM"
+  
+  # --- Rescale tree & ASR ---
+  if(chosen_model=="lambda"){
+    lambda_hat <- fit_lambda$lambda %||% 1
+    sigma2_used <- fit_lambda$sigma2
+    rescaled_tree <- phytools::rescale(prim_tree,"lambda",lambda=lambda_hat)
+  } else {
+    sigma2_used <- fit_bm$sigma2
+    rescaled_tree <- phytools::rescale(prim_tree,"BM")
+  }
+  
+  ace_res <- tryCatch(ape::ace(tr, rescaled_tree, type="continuous", method="REML"),
+                      error=function(e) ape::ace(tr,rescaled_tree,type="continuous",method="ML"))
+  
+  node_est <- ace_res$ace
+  node_ci <- ace_res$CI95
+  tip_est <- tr[rescaled_tree$tip.label]
+  
+  # --- Node table ---
+  node_df <- data.frame(
+    node=node_indices,
+    estimate=node_est[as.character(node_indices)],
+    ci_lower=node_ci[,1],
+    ci_upper=node_ci[,2],
+    stringsAsFactors=FALSE
+  )
+  
+  # --- Tip table ---
+  tip_df <- data.frame(
+    tip=rescaled_tree$tip.label,
+    estimate=tip_est,
+    immediate_parent=NA,
+    cumulative_derived=NA,
+    direction=NA,
+    parent_ci_lower=NA,
+    parent_ci_upper=NA,
+    stringsAsFactors=FALSE
+  )
+  
+  # Parent map
+  parent_map <- integer(Ntip+Nnode); parent_map[] <- NA_integer_
+  for(j in 1:nrow(rescaled_tree$edge)){
+    parent_map[rescaled_tree$edge[j,2]] <- rescaled_tree$edge[j,1]
+  }
+  
+  # --- Derivedness & parental CIs for diverged tips ---
+  for(i in seq_len(Ntip)){
+    tip_idx <- i
+    parent_id <- parent_map[tip_idx]
+    if(!is.na(parent_id)){
+      if(parent_id <= Ntip){
+        parent_val <- tip_est[parent_id]
+        parent_l <- parent_val
+        parent_u <- parent_val
+      } else {
+        parent_row <- node_df[node_df$node==parent_id,]
+        parent_val <- parent_row$estimate
+        parent_l <- parent_row$ci_lower
+        parent_u <- parent_row$ci_upper
+      }
+      tip_df$immediate_parent[i] <- (tip_df$estimate[i] > parent_u) || (tip_df$estimate[i] < parent_l)
+      tip_df$direction[i] <- ifelse(tip_df$estimate[i] > parent_u,"up",
+                                    ifelse(tip_df$estimate[i] < parent_l,"down","none"))
+      if(tip_df$immediate_parent[i]){
+        tip_df$parent_ci_lower[i] <- parent_l
+        tip_df$parent_ci_upper[i] <- parent_u
+      }
+    }
+    # Cumulative derivedness
+    anc_list <- integer(0); cur <- tip_idx
+    while(!is.na(parent_map[cur])) { cur <- parent_map[cur]; anc_list <- c(anc_list, cur) }
+    anc_nodes <- anc_list[anc_list > Ntip]
+    tip_df$cumulative_derived[i] <- length(anc_nodes)>0 && all((tip_df$estimate[i] > node_df$ci_upper[node_df$node %in% anc_nodes]) | 
+                                                               (tip_df$estimate[i] < node_df$ci_lower[node_df$node %in% anc_nodes]))
+  }
+  
+  # --- Plot ---
+  if(plot){
+    cont_obj <- phytools::contMap(rescaled_tree, tr, plot=FALSE)
+    cont_obj <- phytools::setMap(cont_obj, colors=colorRampPalette(c("white","salmon3"))(100))
+    h <- max(phytools::nodeHeights(cont_obj$tree))
+
+    par(mar=c(5,5,10,7), oma=c(0,0,2,0)) # Increased top margin and added outer margin
+
+    plot(cont_obj, fsize=1.8, lwd=6, res=320, legend=FALSE,
+        xlim=c(-0.2*h, 2*h),
+        cex.main=2.5)
+
+    lwd_bar <- 10
+    root_est_str <- sprintf("%.2f(%.2f-%.2f)", node_df$estimate[1], node_df$ci_lower[1], node_df$ci_upper[1])
+    
+    phytools::add.color.bar(
+      Ntip - 1, 
+      cont_obj$cols, 
+      title = paste0(my_trait, " (", chosen_model, " - ATR Distribution)"),
+      subtitle = "", # Removed root estimate from subtitle
+      lims=NULL,
+      lwd=lwd_bar, 
+      direction="upwards",
+      x=-0.2*h, 
+      y=1,
+      prompt=FALSE, 
+      fsize=1.5
+    )
+    
+    # Add ticks and labels to color bar
+    tick_x <- -0.2*h + lwd_bar / 20
+    lines(x = rep(tick_x, 2), y = c(1, Ntip))
+    nticks <- 10
+    
+    Y <- seq(1, Ntip, length.out = nticks)
+    X <- cbind(rep(tick_x, nticks), rep(tick_x + 0.02*h, nticks))
+    for (i in 1:length(Y)) lines(X[i, ], Y = c(Y[i], Y[i]))
+    ticks <- seq(cont_obj$lims[1], cont_obj$lims[2], length.out = nticks)
+    text(x = X[, 2], y = Y, labels = round(ticks, 3), pos = 4, cex = 1.5)
+    
+    # Add root annotation to the right of the root node
+    text(x = 0.02*h, y = Ntip/1.45, labels = root_est_str, pos = 4, cex = 1.5, col = "black")
+      
+    for(i in seq_len(Ntip)){
+      tip_pos <- i
+      # Tip symbol
+      if(tip_df$immediate_parent[i]){
+        pch_val <- ifelse(tip_df$direction[i]=="up",24,25)
+        bg_val <- ifelse(tip_df$direction[i]=="up","salmon3","skyblue3")
+        ape::tiplabels(pch=pch_val,bg=bg_val,tip=tip_pos,cex=2,offset=58)
+        # Numeric value
+        ape::tiplabels(text=sprintf("%.2f", tip_df$estimate[i]), tip=tip_pos, frame="none", cex=1.5, offset=40)
+        # Parent CI numerically
+        ape::tiplabels(text=sprintf("(%.2f-%.2f)", tip_df$parent_ci_lower[i], tip_df$parent_ci_upper[i]),
+                       tip=tip_pos, frame="none", cex=1.5, offset=48, col="gray30")
+        # Add line connecting tip symbol to numeric value
+        segments(x0 = h, y0 = tip_pos-0.4, x1 = h + 70, y1 = tip_pos-0.4, col = "gray50", lty = 2)
+      }
+      # Cumulative derived green
+      if(tip_df$cumulative_derived[i]){
+        pch_val <- ifelse(tip_df$direction[i]=="up",22,22)
+        ape::tiplabels(pch=pch_val, bg="forestgreen", tip=tip_pos, cex=2, offset=62)
+      }
+    }
+    
+    mtext("Symbols: ▲ Tip Up, ▼ Tip Down, ■ Cumulatively derived; Color bar shows trait values as per ATR. Tip CIs represented from immediate parent node ATR.",
+      side=3, line=-2, cex=1.2, adj=0.35)
+    
+  }
+  
+  # --- Return ---
+  list(
+    chosen_model=chosen_model,
+    node_table=node_df,
+    tip_table=tip_df,
+    sigma2_used=sigma2_used,
+    ace=ace_res,
+    rescaled_tree=rescaled_tree
+  )
+}
+
+# Generate ASR tree for malignant prevalence
+ast_tree <- list()
+trait_names <- list("malignant_prevalence" = "malignant_prevalence", "neoplasia_prevalence" = "neoplasia_prevalence")
+
+# Save the tree
+plotDir <- file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution/ASR")
+createDir(plotDir)
+  
+for (trait in trait_names) {
+  png(
+    filename = file.path(plotDir, paste0(trait, "-tree.png")),
+    width = 17, height = 20, res = 320, bg = "white", units = "in"
+  )
+  ast_tree[[trait]] <- gen_ast_tree_model(cancer_traits_processed, primate_tree, trait)
+  dev.off()
+  
+  gen_ast_tree_model(cancer_traits_processed, primate_tree, trait)
+}
+
+```
+
+##### Using Permulations to compute the CIs (empirical CIs)
+```{r lambda_bm_trait2 modeling, fig.height = 20, fig.width = 17, dev = 'png', dpi = 320}
+
+# Required packages: ape, phytools, geiger (optional), dplyr, tidyr
+# Install if necessary: install.packages(c("ape","phytools","geiger","dplyr","tidyr"))
+gen_ast_tree_model <- function(contrast_t, prim_tree, my_trait,
+                               nsim = 10000,           # bootstrap replicates
+                               alpha = 0.05,         # CI level
+                               test_ou = FALSE,      # not used in this version; keep FALSE to avoid complexity
+                               verbose = TRUE,
+                               plot = TRUE) {
+  # --- Packages ---
+  for (pkg in c("ape","phytools","dplyr","tidyr","phylolm")) {
+    if (!requireNamespace(pkg, quietly = TRUE)) stop(sprintf("Package '%s' required.", pkg))
+  }
+  library(ape); library(phytools); library(dplyr); library(tidyr); library(phylolm)
+  
+  # --- Trait vector ---
+  tr <- contrast_t[[my_trait]]; names(tr) <- contrast_t$species
+  tr <- tr[!is.na(tr) & is.finite(tr)]
+  if(length(tr)<3) stop("Need >=3 non-missing species.")
+  
+  prim_tree <- ape::drop.tip(prim_tree, setdiff(prim_tree$tip.label, names(tr)))
+  prim_tree <- ape::reorder.phylo(prim_tree, "cladewise")
+  Ntip <- length(prim_tree$tip.label)
+  Nnode <- prim_tree$Nnode
+  node_indices <- (Ntip+1):(Ntip+Nnode)
+  
+  # --- Fit BM / lambda ---
+  fit_model <- function(tree, trait, model=c("BM","lambda")) {
+    model <- match.arg(model)
+    df <- data.frame(trait=trait, species=names(trait))
+    fit <- phylolm(trait~1, data=df, phy=tree, model=ifelse(model=="BM","BM","lambda"))
+    aic <- fit$aic; k <- fit$p
+    aicc <- aic + (2*k*(k+1))/(length(trait)-k-1)
+    list(lnL=fit$logLik, sigma2=fit$sigma2, lambda=fit$optpar, aicc=aicc, raw=fit)
+  }
+  
+  fit_bm <- fit_model(prim_tree, tr, "BM")
+  fit_lambda <- fit_model(prim_tree, tr, "lambda")
+  
+  delta_aicc <- fit_bm$aicc - fit_lambda$aicc
+  chosen_model <- ifelse(fit_lambda$aicc < fit_bm$aicc, "lambda", "BM")
+  if(abs(delta_aicc)<2 && !is.null(fit_lambda$lambda) && abs(fit_lambda$lambda-1)<0.05) chosen_model <- "BM"
+  
+  # --- Rescale tree & ASR ---
+  if(chosen_model=="lambda"){
+    lambda_hat <- fit_lambda$lambda %||% 1
+    sigma2_used <- fit_lambda$sigma2
+    rescaled_tree <- phytools::rescale(prim_tree,"lambda",lambda=lambda_hat)
+  } else {
+    sigma2_used <- fit_bm$sigma2
+    rescaled_tree <- phytools::rescale(prim_tree,"BM")
+  }
+  
+  # --- Compute empirical CIs by parametric bootstrap under chosen model ---
+  p_lower <- alpha/2; p_upper <- 1 - alpha/2
+  sim_cols <- c(rescaled_tree$tip.label, paste0("node_", node_indices))
+  sims_mat <- matrix(NA_real_, nrow = nsim, ncol = length(sim_cols), dimnames = list(NULL, sim_cols))
+  # Use phytools::fastBM to simulate BM on rescaled_tree
+  root_val <- mean(tr, na.rm = TRUE)
+  if (verbose) message(sprintf("Simulating %d datasets under chosen model (%s) with sigma2=%.5g and root=%.5g", nsim, chosen_model, sigma2_used, root_val))
+  for (i in seq_len(nsim)) {
+    simtrait <- phytools::fastBM(rescaled_tree, sig2 = sigma2_used, a = root_val)
+    anc <- phytools::fastAnc(rescaled_tree, simtrait, vars = FALSE, CI = FALSE)
+    sims_mat[i, rescaled_tree$tip.label] <- simtrait[rescaled_tree$tip.label]
+    sims_mat[i, paste0("node_", node_indices)] <- anc[as.character(node_indices)]
+  }
+  # Empirical CIs
+  ci_lower <- apply(sims_mat, 2, quantile, probs = p_lower, na.rm = TRUE)
+  ci_upper <- apply(sims_mat, 2, quantile, probs = p_upper, na.rm = TRUE)
+  # Point estimates: for nodes use ape::ace on rescaled_tree, for tips use observed tr
+  ace_res <- tryCatch(ape::ace(x = tr, phy = rescaled_tree, type = "continuous", method = "REML"),
+                      error = function(e) tryCatch(ape::ace(x = tr, phy = rescaled_tree, type = "continuous", method = "ML"),
+                                                   error = function(e2) stop("ace failed on rescaled tree.")))
+  node_est <- ace_res$ace
+  tip_est <- tr[rescaled_tree$tip.label]
+  
+  node_df <- data.frame(
+    node = node_indices,
+    estimate = as.numeric(node_est[as.character(node_indices)]),
+    ci_lower = as.numeric(ci_lower[paste0("node_", node_indices)]),
+    ci_upper = as.numeric(ci_upper[paste0("node_", node_indices)]),
+    stringsAsFactors = FALSE
+  )
+  tip_df <- data.frame(
+    tip = rescaled_tree$tip.label,
+    estimate = as.numeric(tip_est[rescaled_tree$tip.label]),
+    ci_lower = as.numeric(ci_lower[rescaled_tree$tip.label]),
+    ci_upper = as.numeric(ci_upper[rescaled_tree$tip.label]),
+    immediate_parent = NA,
+    cumulative_derived = NA,
+    direction = NA,
+    parent_ci_lower = NA,
+    parent_ci_upper = NA,
+    stringsAsFactors = FALSE
+  )
+  
+  # --- Derivedness tests: immediate-parent and cumulative-ancestors ---
+  # Build parent map
+  parent_map <- integer(Ntip + Nnode); parent_map[] <- NA_integer_
+  for (j in seq_len(nrow(rescaled_tree$edge))) {
+    p <- rescaled_tree$edge[j,1]; ch <- rescaled_tree$edge[j,2]; parent_map[ch] <- p
+  }
+  # Tips
+  for (i in seq_len(nrow(tip_df))) {
+    this_tip <- tip_df$tip[i]
+    this_est <- tip_df$estimate[i]; this_l <- tip_df$ci_lower[i]; this_u <- tip_df$ci_upper[i]
+    tip_idx <- which(rescaled_tree$tip.label == this_tip)
+    parent_id <- parent_map[tip_idx]
+  
+    if (!is.na(parent_id)) {
+      if (parent_id <= Ntip) {
+        parent_l <- tip_df$ci_lower[which(tip_df$tip == rescaled_tree$tip.label[parent_id])]
+        parent_u <- tip_df$ci_upper[which(tip_df$tip == rescaled_tree$tip.label[parent_id])]
+      } else {
+        parent_row <- node_df[node_df$node == parent_id, ]
+        parent_l <- parent_row$ci_lower; parent_u <- parent_row$ci_upper
+      }
+      # Immediate-parent derivedness
+      tip_df$immediate_parent[i] <- (this_est > parent_u) || (this_est < parent_l)
+      if (this_est > parent_u) tip_df$direction[i] <- "up"
+      else if (this_est < parent_l) tip_df$direction[i] <- "down"
+      else tip_df$direction[i] <- "none"
+      if (tip_df$immediate_parent[i]) {
+        tip_df$parent_ci_lower[i] <- parent_l
+        tip_df$parent_ci_upper[i] <- parent_u
+      }
+    }
+    # Cumulative derivedness
+    anc_list <- integer(0); cur <- tip_idx
+    while (!is.na(parent_map[cur])) { cur <- parent_map[cur]; anc_list <- c(anc_list, cur) }
+    anc_nodes <- anc_list[anc_list > Ntip]
+    if (length(anc_nodes) == 0) tip_df$cumulative_derived[i] <- FALSE
+    else {
+      anc_rows <- node_df[node_df$node %in% anc_nodes, ]
+      if (nrow(anc_rows) == 0) tip_df$cumulative_derived[i] <- NA
+      else tip_df$cumulative_derived[i] <- all((this_est > anc_rows$ci_upper) | (this_est < anc_rows$ci_lower))
+    }
+  }
+
+  node_df$immediate_parent <- NA; node_df$direction <- NA
+  for (i in seq_len(nrow(node_df))) {
+    this_node <- node_df$node[i]
+    this_l <- node_df$ci_lower[i]; this_u <- node_df$ci_upper[i]
+    parent_id <- parent_map[this_node]
+    if (is.na(parent_id)) { node_df$immediate_parent[i] <- NA; node_df$direction[i] <- "none"; next }
+    if (parent_id <= Ntip) {
+      parent_row <- tip_df[tip_df$tip == rescaled_tree$tip.label[parent_id], ]
+      parent_l <- parent_row$ci_lower; parent_u <- parent_row$ci_upper
+    } else {
+      parent_row <- node_df[node_df$node == parent_id, ]
+      parent_l <- parent_row$ci_lower; parent_u <- parent_row$ci_upper
+    }
+    node_df$immediate_parent[i] <- (node_df$estimate[i] > parent_u) || (node_df$estimate[i] < parent_l)
+    if (node_df$estimate[i] > parent_u) node_df$direction[i] <- "up"
+    else if (node_df$estimate[i] < parent_l) node_df$direction[i] <- "down"
+    else node_df$direction[i] <- "none"
+  }
+  
+  # --- Plot ---
+  if(plot){
+    cont_obj <- phytools::contMap(rescaled_tree, tr, plot=FALSE)
+    cont_obj <- phytools::setMap(cont_obj, colors=colorRampPalette(c("white","salmon3"))(100))
+    h <- max(phytools::nodeHeights(cont_obj$tree))
+    par(mar=c(5,5,12,7), oma=c(0,0,4,0)) # Increased top margin and outer margin further
+    plot(cont_obj, fsize=1.8, lwd=6, res=320, legend=FALSE,
+         xlim=c(-0.2*h, 2*h),
+         cex.main=2.5)
+    
+    title(main = paste0(my_trait, " - Ancestral Trait Reconstruction"), cex.main = 1.5, line = 8)
+    
+    lwd_bar <- 10
+    root_est_str <- sprintf("%.2f(%.2f-%.2f)", node_df$estimate[1], node_df$ci_lower[1], node_df$ci_upper[1])
+    
+    phytools::add.color.bar(
+      Ntip - 1, 
+      cont_obj$cols, 
+      title = paste0(my_trait, " (", chosen_model, " - ATR Distribution)"),
+      subtitle = "",
+      lims=NULL,
+      lwd=lwd_bar, 
+      direction="upwards",
+      x=-0.2*h, 
+      y=1,
+      prompt=FALSE, 
+      fsize=1.5
+    )
+    
+    # Add ticks and labels to color bar
+    tick_x <- -0.2*h + lwd_bar / 20
+    lines(x = rep(tick_x, 2), y = c(1, Ntip))
+    nticks <- 10
+    
+    Y <- seq(1, Ntip, length.out = nticks)
+    X <- cbind(rep(tick_x, nticks), rep(tick_x + 0.02*h, nticks))
+    for (i in 1:length(Y)) lines(X[i, ], Y = c(Y[i], Y[i]))
+    ticks <- seq(cont_obj$lims[1], cont_obj$lims[2], length.out = nticks)
+    text(x = X[, 2], y = Y, labels = round(ticks, 3), pos = 4, cex = 1.5)
+    
+    # Add root annotation to the right of the root node
+    text(x = 0.02*h, y = Ntip/1.45, labels = root_est_str, pos = 4, cex = 1.5, col = "black")
+      
+    for(i in seq_len(Ntip)){
+      tip_pos <- i
+      # Tip symbol
+      if(tip_df$immediate_parent[i]){
+        pch_val <- ifelse(tip_df$direction[i]=="up",24,25)
+        bg_val <- ifelse(tip_df$direction[i]=="up","salmon3","skyblue3")
+        ape::tiplabels(pch=pch_val,bg=bg_val,tip=tip_pos,cex=2,offset=58)
+        # Numeric value
+        ape::tiplabels(text=sprintf("%.2f", tip_df$estimate[i]), tip=tip_pos, frame="none", cex=1.5, offset=40)
+        # Parent CI numerically
+        ape::tiplabels(text=sprintf("(%.2f-%.2f)", tip_df$parent_ci_lower[i], tip_df$parent_ci_upper[i]),
+                       tip=tip_pos, frame="none", cex=1.5, offset=48, col="gray30")
+        # Add line connecting tip symbol to numeric value
+        segments(x0 = h, y0 = tip_pos-0.4, x1 = h + 70, y1 = tip_pos-0.4, col = "gray50", lty = 2)
+      }
+      # Cumulative derived green
+      if(tip_df$cumulative_derived[i]){
+        pch_val <- ifelse(tip_df$direction[i]=="up",22,22)
+        ape::tiplabels(pch=pch_val, bg="forestgreen", tip=tip_pos, cex=2, offset=62)
+      }
+    }
+    
+    # Custom time axis under the tree only, starting at root
+    time_range <- pretty(c(0, h))
+    at_pos <- time_range
+    axis(1, at = at_pos, labels = time_range, cex.axis = 1.5)
+    graphics::mtext("Time (relative units)", side=1, line=3, cex=2.2)
+    
+    mtext("Symbols: ▲ Tip Up, ▼ Tip Down, ■ Cumulatively derived; Color bar shows trait values as per ATR. Tip CIs represented from immediate parent node ATR.",
+          side=3, line=-2, cex=1.2, adj=0.35)
+    
+  }
+  
+  # --- Return ---
+  list(
+    chosen_model=chosen_model,
+    node_table=node_df,
+    tip_table=tip_df,
+    sigma2_used=sigma2_used,
+    ace=ace_res,
+    rescaled_tree=rescaled_tree
+  )
+}
+
+# Generate ASR tree for malignant prevalence
+ast_tree <- list()
+trait_names <- list("malignant_prevalence" = "malignant_prevalence", "neoplasia_prevalence" = "neoplasia_prevalence")
+
+# Save the tree
+plotDir <- file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution/ASR_empirical")
+createDir(plotDir)
+  
+for (trait in trait_names) {
+  png(
+    filename = file.path(plotDir, paste0(trait, "-tree.png")),
+    width = 17, height = 20, res = 320, bg = "white", units = "in"
+  )
+  ast_tree[[trait]] <- gen_ast_tree_model(cancer_traits_processed, primate_tree, trait)
+  dev.off()
+  
+  gen_ast_tree_model(cancer_traits_processed, primate_tree, trait)
+}
+
+```
+
+## 5. Extreme Value Plots
+This section generates violin plots to visualize malignant prevalence distributions, highlighting extreme values without removing outliers.
+
+```{r extremes_plots, fig.height=10, fig.width=7, message=FALSE, warning=FALSE, dev='png', dpi = 320}
+
+# 5. EXTREME VALUE PLOTS  ------------------------------------------------------
+# Define darkened color palette for plotting
+dark_family_palette <- colorspace::darken(primate_family_colors, amount = 0.5)
+
+# Function to generate contrast plots with violin distributions
+gen_contrast_g <- function(contrast_t, my_trait, family_plot) {
+  # Ensure species order matches phylogeny
+  ordered_species <- pruned_tree$tip.label
+  contrast_t$species <- factor(contrast_t$species, levels = ordered_species)
+  
+  # Prepare data based on global or family-level categorization
+  if (family_plot == 0) {
+    contrast_t <- contrast_t %>%
+      dplyr::group_by(species) %>%
+      dplyr::arrange(family, .by_group = TRUE) %>%
+      dplyr::filter(trait == my_trait) %>%
+      dplyr::mutate(Value = value, Category = global_label, Outlier = outlier) %>%
+      dplyr::select(family, species, necropsy_counts, common_name, Value, Category, Outlier, median, median_fam) %>%
+      dplyr::rename(Family = family, Species = species)
+  } else {
+    contrast_t <- contrast_t %>%
+      dplyr::group_by(species) %>%
+      dplyr::arrange(family, .by_group = TRUE) %>%
+      dplyr::filter(trait == my_trait) %>%
+      dplyr::mutate(Value = value, Category = family_label, Outlier = outlier) %>%
+      dplyr::select(family, species, necropsy_counts, common_name, Value, Category, Outlier, median, median_fam) %>%
+      dplyr::rename(Family = family, Species = species)
+  }
+  
+  # Define ordered families for plotting
+  ordered_families <- c(
+    "Lorisidae", "Galagidae", "Indriidae", "Cheirogaleidae", "Lemuridae",
+    "Atelidae", "Cebidae", "Aotidae", "Callitrichidae", "Hylobatidae",
+    "Hominidae", "Cercopithecidae"
+  )
+  
+  # Calculate median value for reference line
+  median_value <- median(contrast_t$Value, na.rm = TRUE) * 100
+  
+  # Create violin plot
+  graph <- ggplot2::ggplot(data = contrast_t, aes(x = Value * 100, y = Family)) +
+    ggplot2::scale_y_discrete(limits = rev(ordered_families)) +
+    ggplot2::geom_violin(
+      aes(fill = Family, alpha = 0.1), color = "black", width = 0.5, trim = TRUE, scale = "width"
+    ) +
+    ggplot2::scale_fill_manual(values = primate_family_colors) +
+    ggnewscale::new_scale_fill() +
+    ggstar::geom_star(
+      data = subset(contrast_t, Outlier == "no_outlier"),
+      aes(starshape = Category, color = Family, fill = Family),
+      size = 3, position = ggplot2::position_jitter(height = 0.25)
+    ) +
+    ggstar::scale_starshape_manual(
+      values = c("low_extreme" = 21, "mid_low_extreme" = 15, "mid_high_extreme" = 15, "high_extreme" = 29),
+      na.translate = FALSE
+    ) +
+    ggstar::geom_star(
+      data = subset(contrast_t, Outlier != "no_outlier"),
+      aes(color = Family, fill = Family),
+      size = 3, position = ggplot2::position_jitter(height = 0.25)
+    ) +
+    ggplot2::scale_fill_manual(values = dark_family_palette) +
+    ggplot2::scale_color_manual(values = dark_family_palette) +
+    ggplot2::geom_vline(
+      aes(xintercept = median_value), linewidth = 1, color = "salmon3", alpha = 0.5
+    ) +
+    ggplot2::stat_summary(
+      fun = median, geom = "errorbar",
+      aes(xmax = after_stat(x), xmin = after_stat(x)),
+      linewidth = 1.5, color = "black", alpha = 0.6, width = 0.75
+    ) +
+    ggplot2::labs(x = "Malignant prevalence (%)") +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = 17, hjust = 0.5, face = "bold"),
+      axis.title.x = ggplot2::element_text(size = 17, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 20, b = 20)),
+      axis.title.y = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 15),
+      legend.position = "none"
+    )
+  
+  return(graph)
+}
+
+# Generate and save violin plot
+global_contrast_graph <- gen_contrast_g(melt_new2, "malignant_prevalence", 0)
+ggplot2::ggsave(
+  file.path(resultsDir, "1.Data-exploration/2.Extreme_plots/malignant_prevalence_violin_plot.png"),
+  global_contrast_graph, device = "png", width = 7, height = 10, dpi = "retina"
+)
+
+# Display plot
+global_contrast_graph
+```
+
+## 6. Fan Plot for Family and Cancer Distribution
+This section creates a fan-shaped phylogenetic tree with overlaid data on neoplasia and malignant prevalence, family membership, and necropsy counts.
+
+```{r visual_distribution, fig.height = 15, fig.width = 15, dev = 'png', dpi = 320}
+
+# 6. FAN PLOT FOR FAMILY AND CANCER DISTRIBUTION  ------------------------------------------------------
+# Prune phy and plot the complete phylogeny in fan shape
+big_tree <- ggtree(pruned_tree,
+              layout="fan",
+              open.angle=15, 
+              size=2)
+
+plotDir <- file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution")
+ggsave(file.path(plotDir, "big_tree.png"), big_tree, device = "png", width = 15, height = 15, dpi = "retina")
+
+ordered_species <- rev(pruned_tree$tip.label)
+row.names(cancer_traits_processed) <- cancer_traits_processed$species
+
+# mapping external data to the tree structure
+spread_df <- melt_new2 %>%
+  spread(trait, value) %>%
+  dplyr::rename(label = species) 
+
+# Use LQ instead of LQ
+
+primates_traits2 <- spread_df
+primates_traits2 <- primates_traits2 %>%
+  dplyr::select(label, family, necropsy_counts, malignant_prevalence, neoplasia_prevalence, LQ) %>%
+  mutate(malignant_prevalence = malignant_prevalence * 100) %>%
+  mutate(neoplasia_prevalence = neoplasia_prevalence * 100) %>%
+  group_by(label, family)  %>%
+  summarize(
+    malignant_prevalence = sum(malignant_prevalence, na.rm = TRUE),
+    neoplasia_prevalence = sum(neoplasia_prevalence, na.rm = TRUE),
+    LQ = sum(LQ, na.rm = TRUE),
+    .groups = "drop") %>%
+  ungroup() %>%
+  # Re-add necropsy_counts, join by species cancer_traits
+  left_join(cancer_traits_processed %>% dplyr::select(species, adult_necropsy_count), by = c("label" = "species")) %>%
+  dplyr::rename(necropsy_count = adult_necropsy_count) %>%
+  mutate(LQ = LQ)
+
+# Perform an AST of the LQ trait
+LQ_vec <- primates_traits2$LQ
+names(LQ_vec) <- primates_traits2$label
+LQ_fit <- phytools::fastAnc(pruned_tree, LQ_vec, vars = TRUE, CI = TRUE)
+
+td <- data.frame(node = nodeid(pruned_tree, names(LQ_vec)),
+               LQ = LQ_vec)
+nd <- data.frame(node = names(LQ_fit$ace), LQ = LQ_fit$ace)
+d <- rbind(td, nd)
+d$node <- as.numeric(d$node)
+
+primates_tree2 <- treeio::as_tibble(pruned_tree)
+
+primates_tree2 <- full_join(primates_tree2, primates_traits2, by = 'label')
+primates_tree2.5 <- full_join(primates_tree2, d, by = 'node') %>%
+  mutate(LQ = ifelse(is.na(LQ.y), LQ.x, LQ.y)) %>%
+  dplyr::select(-LQ.x, -LQ.y)
+
+# the tbl_tree object is converted to a treedata object
+primates_tree3 <- tidytree::as.treedata(primates_tree2.5)
+
+pruned_plot <- ggtree(primates_tree3,
+                      layout = "fan",
+                      open.angle = 15,
+                      size = 2) +
+  geom_text2(aes(label = node), hjust = -0.5, vjust = -0.5, size = 6) +
+  aes(color = family) +  # Color branches by family
+  scale_color_manual(values = primate_family_colors)
+
+pruned_plot
+
+p <- ggtree(primates_tree3, aes(color = LQ),
+            layout="fan",
+            open.angle=15, 
+            size=2) +
+            scale_color_gradient(low = "skyblue", high = "salmon3",     
+                                 guide = guide_colorbar(order = 3)) +  # LQ last
+            new_scale_color()
+p
+
+# Add neoplasia data info with gradient and black contour
+p1 <- p + 
+  # Second set of bars for neoplasia_prevalence
+  geom_fruit(
+    geom = geom_col,
+    mapping = aes(y = species, x = neoplasia_prevalence, fill = neoplasia_prevalence, width = 0.5),
+    alpha = 0.5,  # Set transparency for lighter appearance
+    show.legend = TRUE,
+    pwidth = 0.75,
+    color = "black",  # Add black contour
+    size = 0.7,
+    axis.params = list(
+      axis = 'x',
+      text.size = 8,
+      nbreak = 2,
+      text.angle = 270,
+      vjust = 0.5,
+      hjust = 0,
+      limits = c(0, 40)
+    ),
+    grid.params = list()
+  ) +
+  scale_fill_gradient2(
+    name = "% Neoplasia Prevalence", 
+    low = "white", 
+    high = "darkseagreen",  # Different gradient color for distinction
+    guide = guide_colorbar(order = 2),  # Neoplasia second 
+    aesthetics = "fill"
+  ) +
+  new_scale_fill() +  # Reset fill scale for the second set of bars
+    # First set of bars for malignant_prevalence
+  geom_fruit(
+    geom = geom_col,
+    offset = -0.75,
+    mapping = aes(y = species, x = malignant_prevalence, fill = malignant_prevalence, width = 0.5),
+    show.legend = TRUE,
+    pwidth = 0.75,
+    alpha = 0.75,
+    color = "black",  # Add black contour
+    size = 0.7,
+    axis.params = list(
+      axis = 'x',
+      text.size = 0,
+      nbreak = 1,
+      text.angle = 270,
+      vjust = 0.5,
+      hjust = 0,
+      limits = c(0, 20)
+  )) +
+  scale_fill_gradient2(
+    name = "% Malignant Prevalence", 
+    low = "white", 
+    high = "salmon3", 
+     guide = guide_colorbar(order = 1),  # Malignant first
+    aesthetics = "fill"
+  ) +
+  new_scale_fill()
+  # Arrange the legend to show first Malignant Prevalence, then Neoplasia Prevalence, then LQ
+  
+
+p1
+
+# Add clade information
+p2 <- p1 +
+    geom_fruit(geom = geom_col, 
+               mapping = aes(y = species, x = 1, fill = family, width = 1),
+               pwidth = 0.1, color = "black", linewidth = 0.5, offset = 0) +
+    scale_fill_manual(values = primate_family_colors, breaks = 0) +
+    new_scale_fill() +
+    theme_tree() +
+    theme(panel.background = element_rect(fill = "transparent", colour = NA),  
+      plot.background = element_rect(fill = "transparent", colour = NA),
+      legend.position = "none",
+      plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
+      plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
+  )
+
+p2
+
+# Add counts information in an informative way
+p3 <- p2 +
+  geom_text(aes(label = necropsy_count), nudge_x = 42.5, fontface = "bold", size = 7, vjust = 0.5)
+
+p3
+
+## This commented bit must only be run once in order to create the family_node_positions.csv file.
+## Parent nodes must be manually added to the family_node_positions.csv file. This is why we are reading it directly, as it has already been manually edited.
+# Create dataframe with topmost node per family from primates_tree2
+# family_node_positions <- primates_tree2 %>%
+#   group_by(family) %>%
+#   mutate(family_size = n()) %>%
+#   mutate(angle = ifelse(family_size > 1, 0, 90)) %>%  # Horizontal if more than 1 species, vertical otherwise
+#   filter(parent == min(parent)) %>%
+#   dplyr::select(parent, family, family_size, angle) %>%
+#   distinct() %>%
+#   drop_na()
+# 
+# Get phylopic data
+# family_node_positions <- family_node_positions %>%
+#   rowwise() %>%  # Apply function row by row
+#   mutate(phylopic_UUID = get_uuid(name = family, n = 1)) %>%
+#   mutate(fams = family)
+# 
+# write.csv(family_node_positions, file.path(family_node_dir, "family_node_positions.csv"), row.names = FALSE)
+##
+
+# Read node data and UUID from phylopic
+family_node_dir <- file.path(dataDir, "5.Phylogeny/")
+family_node_positions <- read.csv(file.path(family_node_dir, "family_node_positions.csv"))
+
+# Separate single and multiple family nodes
+single_family_node_positions <- family_node_positions[family_node_positions$family_size == 1, ]
+multiple_family_node_positions <- family_node_positions[family_node_positions$family_size > 1, ]
+
+
+# Now use this to set dynamic label angles in geom_cladelab
+# p0 <- ggtree(primates_tree3,
+#             layout="fan",
+#             open.angle=15, 
+#             size=0)
+
+p4 <- p3 +
+  geom_cladelab(data = family_node_positions,
+      mapping = aes(
+        node = parent,
+        label = fams,
+        image = phylopic_UUID,
+        color = fams),  # Use dynamic angles
+      geom="phylopic",
+      barsize = NA,
+      offset = 80,
+      imagesize = 0.05,
+      alpha = 0.75) +
+  scale_color_manual(values = primate_family_colors, breaks = 0) +
+  geom_cladelab(data = family_node_positions,
+      mapping = aes(
+        node = parent,
+        label = fams),
+      show.legend = FALSE,
+      color = "black",  # Black labels
+      angle = "auto",
+      horizontal = TRUE,
+      offset = 55,
+      barsize = NA,
+      fontsize = 9.5,
+      fontface = "bold") +
+  theme_tree() +
+  theme(panel.background = element_rect(fill = "transparent", colour = NA),  
+      plot.background = element_rect(fill = "transparent", colour = NA),
+      legend.position = "right",
+      legend.spacing.y = unit(1.5, 'cm'),
+      legend.title = element_text(
+        size = 15, face = "bold", 
+        margin = margin(b = 15)),
+      legend.key.size = unit(1, 'cm'),
+      legend.text = element_text(size = 13),
+      plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
+      plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
+  )
+
+p4
+
+dir <- "1.Data-exploration/3.Phylogenetic_distribution"
+createDir(file.path(resultsDir, dir))
+
+# Save p1
+ggsave(file.path(resultsDir, dir, "neoplasia_prevalence_tree1.png"), p1, device = "png", width = 15, height = 15, dpi = "retina")
+
+# Save p2
+ggsave(file.path(resultsDir, dir, "neoplasia_prevalence_tree2.png"), p2, device = "png", width = 15, height = 15, dpi = "retina")
+
+# Save p3
+ggsave(file.path(resultsDir, dir, "neoplasia_prevalence_tree3.png"), p3, device = "png", width = 17, height = 17, dpi = "retina")
+
+# Save p4
+ggsave(file.path(resultsDir, dir, "neoplasia_prevalence_tree4.png"), p4, device = "png", width = 20, height = 17, dpi = "retina")
+
+
+```

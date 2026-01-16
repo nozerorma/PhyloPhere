@@ -1,0 +1,821 @@
+---
+title: "model_exploration"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+citations:  
+output:
+  html_document: default
+  pdf_document: default
+---
+# Overview
+  
+  This document explores different evolutionary models (BM, BM_bounded, OU, etc.) applied to malignant prevalence in primates. The workflow is divided into these parts:
+  
+  Setup & Directory Definition: Establish directories and load common functions.
+  Library Loading: Load the required libraries.
+  Model Exploration & Data Preparation: Load model results, observed data, compute difference matrices, and create significance matrices.
+  Integrated Heatmaps for Model Comparisons: Build heatmaps with significance markers. Plot objects are saved for later reuse.
+  Collapsing Significance Results: Create simplified (one‐triangle) heatmaps comparing BM vs. alternative models.
+  Model Testing & Likelihood Comparisons: Fit models to observed data, compare fits (LRT), and save results.
+  Simulation Studies: Run heavy simulations under each model, generate phenograms and distributions of estimates. Simulation objects are saved for later reuse.
+
+## 1. Setup & Directory Definition
+
+This section sets the working directory, loads common functions, and defines data and results folders.
+
+```{r setup}
+
+knitr::opts_knit$set(root.dir = "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES")
+getwd()
+
+```
+
+```{r dirdef, message=FALSE, warning=FALSE}
+
+workingDir <- getwd()
+dataDir <- file.path(workingDir, "Data")
+resultsDir <- file.path(workingDir,"Malignancy_Primates/Out/")
+
+# Load common objects, functions and libraries
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/libraries.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/commons.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_functions.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_objects.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/dunn_modified.R"))
+
+```
+
+## 2. Load Libraries
+
+Here we load the libraries for phylogenetic analysis, heatmap generation, and custom graphics.
+
+```{r,warning=FALSE,message=FALSE}
+
+# Libraries for phylogenetic analysis using evolutionary models
+library(geiger)
+library(phytools)
+library(phylolm)
+library(DescTools)
+
+library(phylogram)         # For tree to dendrogram conversion
+library(ape)               # For phylogenetic tree handling
+library(ComplexHeatmap)    # For integrated heatmaps and annotations
+library(circlize)          # For color mapping
+library(grid)              # For custom drawing (cell_fun)
+
+```
+
+## 3. Model Exploration & Data Preparation. Alt implementation of PhyloQ.
+
+In this section, we:
+  
+  - Define the models and load observed cancer trait data.
+- Perform simulations to extract significant pairs.
+- Compute the observed phenotype difference matrix and reorder data to match the phylogenetic tree.
+- Build significance matrices from pairwise comparison files.
+
+```{r models_prep,warning=FALSE,message=FALSE}
+# Define the model directories and models to explore.
+model_dir <- file.path(resultsDir, "1.Data-exploration", "9.Model-exploration")
+rds_dir <- file.path(model_dir, "model_obj")
+
+# Now we are going to implement the phyloq function to extract the significant pairs from the simulations. We are going to use a modified version, where we are going to compute the pairs by simulating using all the different models, extracting the confidence intervals for the simulations using the simulated phenotype and the observed sample size, and then we are going to keep the pairs for which the observed phenotypic difference surpasses the simulated phenotypic difference in at least 95% of the simulations.
+
+# --- 1. Select the best model ---
+set.seed(1998)
+phenotype <- cancer_traits_processed$malignant_prevalence
+phenotype <- setNames(phenotype, cancer_traits_processed$species)
+
+phylolm_data <- data.frame(trait = phenotype, species = names(phenotype))
+
+# Fit the models with 1000 bootstraps
+model.l <- c("BM", "OUrandomRoot", "OUfixedRoot", "EB", "lambda", "delta", "kappa")
+
+fit_data <- function(model) {
+  fit <- phylolm(trait ~ 1, data = phylolm_data, phy = pruned_tree, model = model, boot = 1000, REML = TRUE)
+  return(fit)
+} # Fit helper function
+
+# Fit the models
+fit_data <- lapply(model.l, fit_data)
+names(fit_data) <- model.l
+
+# Fit a white noise model for the null hypothesis
+fit_white <- fitContinuous(tree, phenotype, model = "white")$opt # White noise model for null hypothesis
+fit_white <- data.frame(fit_white) %>%
+  dplyr::rename(logLik = lnL, p = k)
+
+# Function to extract model summary (lnL, parameter count, AIC).
+data_summary <- function(model) {
+  c(logLik = model$logLik, p = model$p, aic = model$aic)
+}
+
+data_df <- sapply(fit_data, data_summary)
+
+# Add white noise model to the data frame
+data_df <- cbind(data_df, data_summary(fit_white))
+data_df <- data.frame(data_df) %>%
+  dplyr::rename(white_noise = V8)
+
+# Save data to CSV
+write.csv(data_df, file = file.path(model_dir, "best_model_selection.csv"), row.names = FALSE)
+
+print("Model selection results:")
+print(data_df)
+
+# Pivot the data frame to swap columns and rows
+data_df2 <- data_df %>%
+  rownames_to_column(var = "metric") %>%
+  pivot_longer(cols = -metric, names_to = "model", values_to = "value")
+
+# Function to perform Likelihood Ratio Tests comparing BM with alternative models.
+# We exclude the white noise model from the comparison because it has nothing to do with the evolutionary models.
+compareBMvsAlt <- function(altModel, fitBM) {
+  LRT <- 2 * (altModel$logLik - fitBM$logLik)
+  df_diff <- altModel$p - fitBM$p
+  p_value <- if(df_diff == 1) {
+    0.5 * (1 - pchisq(LRT, df = 1))
+  } else {
+    1 - pchisq(LRT, df = df_diff)
+  }
+  return(data.frame(Model = altModel$model, LRT = LRT, df_diff = df_diff, p_value = p_value))
+}
+
+comparisonResults <- lapply(fit_data, compareBMvsAlt, fitBM = fit_data$BM)
+# Bind the results into a data frame
+comparisonResults <- do.call(rbind, comparisonResults)
+
+print("Likelihood Ratio Test results:")
+print(comparisonResults)
+
+# Save LRT results to CSV.
+write.csv(comparisonResults, file = file.path(model_dir, "BM_vs_alt_LRT.csv"), row.names = FALSE)
+
+# Best model
+# By AIC
+best_model <- data_df2 %>%
+  filter(metric == "aic") %>%
+  arrange(value) %>%
+  slice_head(n = 1)
+
+second_best_model <- data_df2 %>%
+  filter(metric == "aic") %>%
+  arrange(value) %>%
+  slice_head(n = 2) %>%
+  arrange(desc(value)) %>%
+  slice_head(n = 1)
+
+cat("Best model by AIC: \"", best_model$model,"\" with AIC", best_model$value, "\n")
+cat("Second best model by AIC: \"", second_best_model$model, "\" with AIC", second_best_model$value, "\n")
+
+# By lnL
+best_model <- data_df2 %>%
+  filter(metric == "lnL") %>%
+  arrange(desc(value)) %>%
+  slice_head(n = 1)
+
+second_best_model <- data_df2 %>%
+  filter(metric == "lnL") %>%
+  arrange(value) %>%
+  slice_head(n = 2) %>%
+  arrange(desc(value)) %>%
+  slice_head(n = 1)
+
+cat("Best model by lnL:", best_model$model, "with lnL", best_model$value, "\n")
+cat("Second best model by lnL:", second_best_model$model, "with lnL", second_best_model$value, "\n")
+
+# Best model by LRT
+cat("Best model by LRT:", comparisonResults[which.min(comparisonResults$p_value), "Model"], "\n")
+
+```
+
+```{r phylo_q truncate, fig.width=10, fig.height=6, dpi = 320}
+# --- 2. Perform the simulations to assess the confidence of the contrasts ---
+# The logic underneath belongs to that followed in PhyloQ
+# https://github.com/linudz/nyu.git
+
+# Order the results by p-value
+ordered_results <- comparisonResults[order(comparisonResults$p_value), ]
+
+# Get the best model and the candidate for second best
+best_model <- ordered_results[1, "Model"]
+second_candidate <- ordered_results[2, "Model"]
+third_candidate <- ordered_results[3, "Model"]
+
+# If both the best and the second candidate are OU models, choose the next non-OU model as the second best
+if (grepl("^OU", best_model) && grepl("^OU", second_candidate)) {
+  # Find the first model that does not start with "OU"
+  nonOU_models <- ordered_results[!grepl("^OU", ordered_results$Model), ]
+  if (nrow(nonOU_models) > 0) {
+    second_best_model <- nonOU_models[1, "Model"]
+  } else {
+    # In case there are no non-OU models, fall back to the original second candidate
+    second_best_model <- second_candidate
+  }
+} else {
+  second_best_model <- second_candidate
+}
+
+# Best model: lambda (AIC: -110.83535, LRT: 20.039612, p-value: 3.792723e-06)
+# Second best model: OU_fixed (practically the same as randomRoot) (AIC: -104.42526, LRT: 13.629525, p-value: 1.113281e-04)
+
+# For reference: BM (AIC: -92.79574) and white_noise model (AIC: -99.6572), both with two params
+
+# Number of simulations
+n_sims <- 1000
+set.seed(1998)
+
+# Estimate root acestral state using ace. This is not functionalized because the input parameters are specific to the models, which sucks but it is what it is.
+lambda_tree <- rescale(tree, "lambda", lambda = fit_data$lambda[["optpar"]], sigsq = fit_data$lambda[["sigma2"]]) # Rescale the tree to lambda
+lambda_root <- ace(phenotype, lambda_tree, type = "continuous", method = "REML")$ace[1][1] # Take the first element of the first element of the ace list as the root value
+
+# Do the same for the second best model, in this case OU
+OU_tree <- rescale(tree, "OU", alpha = fit_data$OUfixed[["optpar"]], sigsq = fit_data$OUfixed[["sigma2"]])
+OU_root <- ace(phenotype, OU_tree, type = "continuous", method = "REML")$ace[1][1]
+
+# And for BM
+BM_tree <- rescale(tree, "BM", sigsq = fit_data$BM[["sigma2"]])
+BM_root <- ace(phenotype, BM_tree, type = "continuous", method = "REML")$ace[1][1]
+
+# For lambda it should be easy as we just need to apply a Brownian motion model to a lambda transformed tree
+lambda_sims <- fastBM(lambda_tree, a = lambda_root, nsim = n_sims) # Not fixing the parameters as they are already estimated within the lambda model
+ou_sims <- fastBM(tree, a = OU_root, sig2 = fit_data$OUfixed[["sigma2"]], alpha = fit_data$OUfixed[["optpar"]], theta = fit_data$OUfixed[["coefficients"]][[1]], nsim = n_sims)
+bm_sims <- fastBM(tree, a = BM_root, sig2 = fit_data$BM[["sigma2"]], nsim = n_sims)
+
+# Now I need to truncate the simulations to the amplitude of the phenotype, as negative values cannot be used for CI estimation
+# To understand how the distribution vary, I want to extract the distribution of means and standard deviations for each model, both truncated and untruncated, and see how that compares to the observed data.
+
+# --- 4. Truncate the simulations and assess the distribution ---
+# Truncate the simulations to the observed range
+lambda_sims_trunc <- data.frame(lambda_sims) %>%
+  # If values are below 0, set them to 0; else if they are above 1, set them to 1.
+  mutate(across(starts_with("X"), ~ ifelse(. < 0, 0, ifelse(. > 1, 1, .))))
+ou_sims_trunc <- data.frame(ou_sims) %>%
+  mutate(across(starts_with("X"), ~ ifelse(. < 0, 0, ifelse(. > 1, 1, .))))
+bm_sims_trunc <- data.frame(bm_sims) %>%
+  mutate(across(starts_with("X"), ~ ifelse(. < 0, 0, ifelse(. > 1, 1, .))))
+
+# Compute the mean and standard deviation for each simulation
+stats <- function(sims) {
+  stats <- data.frame(
+    mean = apply(sims, 1, mean),
+    sd = apply(sims, 1, sd)
+  )
+  return(stats)
+}
+
+raw_stats <- list(
+  lambda = stats(lambda_sims),
+  ou = stats(ou_sims),
+  bm = stats(bm_sims)
+)
+
+trunc_stats <- list(
+  lambda = stats(lambda_sims_trunc),
+  ou = stats(ou_sims_trunc),
+  bm = stats(bm_sims_trunc)
+)
+
+# Compute the observed mean and standard deviation
+observed_stats <- data.frame(
+  mean = mean(phenotype),
+  sd = sd(phenotype)
+)
+
+# Plot a complex histogram with superimposed truncated and untruncated simulations, and locate the observed mean and standard deviation
+
+# Convert the lists to data frames for easier plotting
+raw_df <- do.call(rbind, lapply(names(raw_stats), function(model) {
+  data.frame(mean = raw_stats[[model]]$mean, sd = raw_stats[[model]]$sd, Model = model, Type = "Untruncated")
+}))
+
+trunc_df <- do.call(rbind, lapply(names(trunc_stats), function(model) {
+  data.frame(mean = trunc_stats[[model]]$mean, sd = raw_stats[[model]]$sd, Model = model, Type = "Truncated")
+}))
+
+plot_df <- rbind(raw_df, trunc_df)
+
+# Plot
+dist_plot <- ggplot(plot_df, aes(x = mean, fill = Type)) +
+  geom_histogram(alpha = 0.5, bins = 30, position = "identity") +
+  geom_vline(aes(xintercept = observed_stats$mean), color = "red", linetype = "dashed", size = 1) +
+  geom_vline(data = plot_df %>% group_by(Model, Type) %>% summarise(
+    mean = mean(mean),
+    sd = mean(sd)
+  ), aes(xintercept = mean + sd, color = Type), linetype = "dotted") +
+  geom_vline(data = plot_df %>% group_by(Model, Type) %>% summarise(
+    mean = mean(mean),
+    sd = mean(sd)
+  ), aes(xintercept = mean - sd, color = Type), linetype = "dotted") +
+  facet_wrap(~ Model, scales = "free") +
+  labs(title = "Histogram with ±1 SD Range",
+       x = "Mean Value",
+       y = "Count") +
+  theme_minimal()
+
+
+dist_plot
+
+# Save the plot
+ggsave(file.path(model_dir, "simulated_means_histogram.png"), dist_plot, width = 10, height = 6, dpi = 320)
+
+```
+
+
+```{r phylo_q test}
+# --- 4. Merge observed counts and adjust simulated values ---
+# Add the confidence intervals and sample counts
+cancer_traits_filt_ci <- read.csv(file.path(resultsDir, "1.Data-exploration/7.CI_overlaps/cancer_traits_CI.csv"))
+
+lambda_sims_n <- lambda_sims_trunc %>%
+  mutate(species = rownames(lambda_sims)) %>%
+  left_join(cancer_traits_filt_ci, by = "species") %>%
+  # Keep key columns and then adjust all simulation columns (named X1, X2, …)
+  select(species, adult_necropsy_count, malignant_prevalence, malignant_CI_lb, malignant_CI_ub, everything()) %>%
+  mutate_at(vars(starts_with("X")), ~ . * adult_necropsy_count)
+
+lambda_long <- lambda_sims_n %>%
+  select(species, adult_necropsy_count, starts_with("X")) %>%
+  pivot_longer(cols = starts_with("X"), names_to = "sim", values_to = "malignant_count_sim")
+
+ou_sims_n <- ou_sims_trunc %>%
+  mutate(species = rownames(ou_sims)) %>%
+  left_join(cancer_traits_filt_ci, by = "species") %>%
+  # Keep key columns and then adjust all simulation columns (named X1, X2, …)
+  select(species, adult_necropsy_count, malignant_prevalence, malignant_CI_lb, malignant_CI_ub, everything()) %>%
+  mutate_at(vars(starts_with("X")), ~ . * adult_necropsy_count)
+
+ou_long <- ou_sims_n %>%
+  select(species, adult_necropsy_count, starts_with("X")) %>%
+  pivot_longer(cols = starts_with("X"), names_to = "sim", values_to = "malignant_count_sim")
+
+bm_sims_n <- bm_sims_trunc %>%
+  mutate(species = rownames(bm_sims)) %>%
+  left_join(cancer_traits_filt_ci, by = "species") %>%
+  # Keep key columns and then adjust all simulation columns (named X1, X2, …)
+  select(species, adult_necropsy_count, malignant_prevalence, malignant_CI_lb, malignant_CI_ub, everything()) %>%
+  mutate_at(vars(starts_with("X")), ~ . * adult_necropsy_count)
+
+bm_long <- bm_sims_n %>%
+  select(species, adult_necropsy_count, starts_with("X")) %>%
+  pivot_longer(cols = starts_with("X"), names_to = "sim", values_to = "malignant_count_sim")
+
+# --- 3. Get observed non-overlapping species pairs ---
+pairwise_dir <- file.path(resultsDir, "1.Data-exploration/7.CI_overlaps")
+overlap_data <- read.csv(file.path(pairwise_dir, "pairwise_data-CI.csv"), header = TRUE, sep = ",") %>%
+  filter(malignant_overlap == FALSE)
+
+# For each pair, keep species1, species2 and the observed difference (you can take the absolute difference if desired)
+overlap_pairs <- overlap_data %>%
+  mutate(observed_diff = abs(malignant_prevalence1 - malignant_prevalence2)) %>% 
+  select(species1, species2, observed_diff)
+
+# --- 4. For each species pair, merge the simulation replicates ---
+# Join nyu_long twice (once per species) so that for a given simulation replicate (sim) we have counts for both species
+pair_sim_data_lambda <- overlap_pairs %>%
+  left_join(lambda_long, by = c("species1" = "species")) %>%
+  dplyr::rename(n1 = adult_necropsy_count, count1 = malignant_count_sim) %>%
+  left_join(lambda_long, by = c("species2" = "species", "sim" = "sim")) %>%
+  dplyr::rename(n2 = adult_necropsy_count, count2 = malignant_count_sim)
+
+pair_sim_data_ou <- overlap_pairs %>%
+  left_join(ou_long, by = c("species1" = "species")) %>%
+  dplyr::rename(n1 = adult_necropsy_count, count1 = malignant_count_sim) %>%
+  left_join(ou_long, by = c("species2" = "species", "sim" = "sim")) %>%
+  dplyr::rename(n2 = adult_necropsy_count, count2 = malignant_count_sim)
+
+pair_sim_data_bm <- overlap_pairs %>%
+  left_join(bm_long, by = c("species1" = "species")) %>%
+  dplyr::rename(n1 = adult_necropsy_count, count1 = malignant_count_sim) %>%
+  left_join(bm_long, by = c("species2" = "species", "sim" = "sim")) %>%
+  dplyr::rename(n2 = adult_necropsy_count, count2 = malignant_count_sim)
+
+# --- 5. Compute CIs per simulation replicate and flag non–overlap with sufficient difference ---
+# Define a helper function to compute the Wilson CI (returns lower and upper bounds)
+compute_ci <- function(count, n) {
+  # If count is negative, set it to 0 (truncation)
+  count <- ifelse(count < 0, 0, count)
+  ci <- BinomCI(count, n, conf.level = 0.95, method = "wilson", rand = 1998)
+  # ci[2] is lower bound; ci[3] is upper bound.
+  return(c(lower = ci[2], upper = ci[3]))
+}
+
+pair_sim_data_lambda2 <- pair_sim_data_lambda %>%
+  rowwise() %>%
+  mutate(
+    ci1 = list(compute_ci(count1, n1)),
+    ci2 = list(compute_ci(count2, n2)),
+    ci1_lower = ci1["lower"],
+    ci1_upper = ci1["upper"],
+    ci2_lower = ci2["lower"],
+    ci2_upper = ci2["upper"],
+    # Two CIs do NOT overlap if one’s lower bound is greater than the other’s upper bound.
+    no_overlap = (ci1_lower > ci2_upper) | (ci2_lower > ci1_upper),
+    # Compute simulated difference (here as difference in proportions)
+    sim_diff = abs((count1 / n1) - (count2 / n2))
+  ) %>%
+  ungroup()
+
+pair_sim_data_ou2 <- pair_sim_data_ou %>%
+  rowwise() %>%
+  mutate(
+    ci1 = list(compute_ci(count1, n1)),
+    ci2 = list(compute_ci(count2, n2)),
+    ci1_lower = ci1["lower"],
+    ci1_upper = ci1["upper"],
+    ci2_lower = ci2["lower"],
+    ci2_upper = ci2["upper"],
+    # Two CIs do NOT overlap if one’s lower bound is greater than the other’s upper bound.
+    no_overlap = (ci1_lower > ci2_upper) | (ci2_lower > ci1_upper),
+    # Compute simulated difference (here as difference in proportions)
+    sim_diff = abs((count1 / n1) - (count2 / n2))
+  ) %>%
+  ungroup()
+
+pair_sim_data_bm2 <- pair_sim_data_bm %>%
+  rowwise() %>%
+  mutate(
+    ci1 = list(compute_ci(count1, n1)),
+    ci2 = list(compute_ci(count2, n2)),
+    ci1_lower = ci1["lower"],
+    ci1_upper = ci1["upper"],
+    ci2_lower = ci2["lower"],
+    ci2_upper = ci2["upper"],
+    # Two CIs do NOT overlap if one’s lower bound is greater than the other’s upper bound.
+    no_overlap = (ci1_lower > ci2_upper) | (ci2_lower > ci1_upper),
+    # Compute simulated difference (here as difference in proportions)
+    sim_diff = abs((count1 / n1) - (count2 / n2))
+  ) %>%
+  ungroup()
+
+# --- 6. Summarize per species pair ---
+# For each species pair, calculate the proportion of simulation replicates where
+# (a) the simulated CIs do not overlap AND (b) the simulated difference exceeds the observed difference.
+pair_summary_lambda <- pair_sim_data_lambda2 %>%
+  group_by(species1, species2, observed_diff) %>%
+  summarize(prop_non_overlap = mean(no_overlap & (sim_diff > observed_diff)),
+            .groups = "drop")
+
+pair_summary_ou <- pair_sim_data_ou2 %>%
+  group_by(species1, species2, observed_diff) %>%
+  summarize(prop_non_overlap = mean(no_overlap & (sim_diff > observed_diff)),
+            .groups = "drop")
+
+pair_summary_bm <- pair_sim_data_bm2 %>%
+  group_by(species1, species2, observed_diff) %>%
+  summarize(prop_non_overlap = mean(no_overlap & (sim_diff > observed_diff)),
+            .groups = "drop")
+
+# --- 7. Keep pairs where less than 5% of simulation replicates meet the criteria ---
+# This I have to give it a look to understand whether I'm taking the 5% of the overall
+final_pairs_lambda <- pair_summary_lambda %>% 
+  filter(prop_non_overlap <= 0.05)
+final_pairs_ou <- pair_summary_ou %>% 
+  filter(prop_non_overlap <= 0.05)
+final_pairs_bm <- pair_summary_bm %>%
+  filter(prop_non_overlap <= 0.05)
+
+print("Final pairs for each model")
+print(paste0("Lambda: ", length(final_pairs_lambda$species1)/2))
+print(paste0("OU: ", length(final_pairs_ou$species1)/2))
+print(paste0("BM: ", length(final_pairs_bm$species1)/2))
+
+# "Final pairs for each model"
+# [1] "Lambda: 41"
+# [1] "OU: 38"
+# [1] "BM: 1"
+
+```
+
+
+
+## 7. Simulation Studies
+
+This section performs simulations under different evolutionary models (BM, BM_bounded, OU, Lambda). It computes phenograms, fits models for each simulated dataset (with replication), and produces histograms of parameter estimates (sig² and AIC). Because simulations are heavy computations, the simulation results are saved as RDS objects for later reuse.
+
+```{r sim_study, warning=FALSE, message=FALSE, fig.width=10, fig.height=8, dev="png", dpi = 320}
+
+## Optimized Simulation Study 
+set.seed(1998)
+
+# Define directories (assuming these variables are set)
+phenogram_dir <- file.path(model_dir, "model_comp_phenograms")
+hist_dir     <- file.path(model_dir, "model_comp_hist")
+
+# Helper function to truncate simulated trait values to [0,1]
+truncate_sim <- function(sim_data) {
+  data.frame(sim_data) %>% 
+    mutate(across(starts_with("X"), ~ pmax(0, pmin(1, .))))
+  
+  return(sim_data)
+}
+
+# Helper function to save a phenogram plot
+save_phenogram <- function(tree_used, sim_data, file_path, title) {
+  png(file_path, width = 10, height = 8, units = "in", res = 320)
+  phenogram(tree_used, sim_data, col = "skyblue3", main = title)
+  dev.off()
+}
+
+# Function to simulate and plot a model
+simulate_and_plot <- function(sim_name, tree_used, root, fastBM_args = list(), pheno_dir) {
+  # First plot the true phenograms
+  save_phenogram(tree_used, phenotype, file.path(pheno_dir, paste0(sim_name, "_true.png")), paste(sim_name, "True"))
+  sim_data <- do.call(fastBM, c(list(tree = tree_used, a = root), fastBM_args))
+  sim_data <- truncate_sim(sim_data)
+  file_path <- file.path(pheno_dir, paste0(sim_name, "_simulation.png"))
+  # Then the sim specific phenograms
+  save_phenogram(tree_used, sim_data, file_path, paste(sim_name, "Simulation"))
+  return(sim_data)
+}
+
+# 1. Single Simulations for Each Model ---------------------------------------
+# BM simulation
+sigma2_val <- fit_data$BM[["sigma2"]]
+BM_root <- ace(phenotype, tree, type = "continuous", method = "REML")$ace[1][1]
+simBM <- simulate_and_plot("BM", tree, BM_root, list(sig2 = sigma2_val), phenogram_dir)
+
+# BM bounded simulation
+simBM_bounded <- simulate_and_plot("BM_bounded", tree, BM_root, list(sig2 = sigma2_val, bounds = c(0, 1)), phenogram_dir)
+
+# OU random simulation
+sigma2_val <- fit_data$OUrandomRoot[["sigma2"]]
+alpha_val  <- fit_data$OUrandomRoot[["optpar"]]
+theta_val  <- fit_data$OUrandomRoot[["coefficients"]][1]
+OU_tree    <- rescale(tree, "OU", alpha = alpha_val, sigsq = sigma2_val)
+OU_root    <- ace(phenotype, OU_tree, type = "continuous", method = "REML")$ace[1][1]
+simOU_random <- simulate_and_plot("OUrandom", tree, OU_root, list(sig2 = sigma2_val, alpha = alpha_val, theta = theta_val), phenogram_dir)
+
+# OU fixed simulation
+sigma2_val <- fit_data$OUfixedRoot[["sigma2"]]
+alpha_val  <- fit_data$OUfixedRoot[["optpar"]]
+theta_val  <- fit_data$OUfixedRoot[["coefficients"]][1]
+# Note: In the original code, fitOU_fixed was used for rescaling. We use it consistently here.
+OU_tree_fixed <- rescale(tree, "OU", alpha = alpha_val, sigsq = sigma2_val)
+OU_root_fixed <- ace(phenotype, OU_tree_fixed, type = "continuous", method = "REML")$ace[1][1]
+simOU_fixed <- simulate_and_plot("OUfixed", tree, OU_root_fixed, list(sig2 = sigma2_val, alpha = alpha_val, theta = theta_val), phenogram_dir)
+
+# EB simulation
+sigma2_val <- fit_data$EB[["sigma2"]]
+a_val      <- fit_data$EB[["optpar"]]
+EB_tree    <- rescale(tree, "EB", a = a_val, sigsq = sigma2_val)
+EB_root    <- ace(phenotype, EB_tree, type = "continuous", method = "REML")$ace[1][1]
+simEB <- simulate_and_plot("EB", EB_tree, EB_root, list(sig2 = sigma2_val), phenogram_dir)
+
+# Lambda simulation
+sigma2_val <- fit_data$lambda[["sigma2"]]
+lambda_val <- fit_data$lambda[["optpar"]]
+lambda_tree <- rescale(tree, model = "lambda", lambda = lambda_val, sigsq = sigma2_val)
+lambda_root <- ace(phenotype, lambda_tree, type = "continuous", method = "REML")$ace[1][1]
+simLambda <- simulate_and_plot("lambda", lambda_tree, lambda_root, list(), phenogram_dir)
+
+# Delta simulation
+sigma2_val <- fit_data$delta[["sigma2"]]
+delta_val  <- fit_data$delta[["optpar"]]
+delta_tree <- rescale(tree, model = "delta", delta = delta_val, sigsq = sigma2_val)
+delta_root <- ace(phenotype, delta_tree, type = "continuous", method = "REML")$ace[1][1]
+simDelta <- simulate_and_plot("delta", delta_tree, delta_root, list(), phenogram_dir)
+
+# Kappa simulation
+sigma2_val <- fit_data$kappa[["sigma2"]]
+kappa_val  <- fit_data$kappa[["optpar"]]
+kappa_tree <- rescale(tree, model = "kappa", kappa = kappa_val, sigsq = sigma2_val)
+kappa_root <- ace(phenotype, kappa_tree, type = "continuous", method = "REML")$ace[1][1]
+simKappa <- simulate_and_plot("kappa", kappa_tree, kappa_root, list(), phenogram_dir)
+
+# Save the single simulation objects for later reuse.
+saveRDS(simBM, file = file.path(rds_dir, "simBM.rds"))
+saveRDS(simBM_bounded, file = file.path(rds_dir, "simBM_bounded.rds"))
+saveRDS(simOU_random, file = file.path(rds_dir, "simOU_random.rds"))
+saveRDS(simOU_fixed, file = file.path(rds_dir, "simOU_fixed.rds"))
+saveRDS(simEB, file = file.path(rds_dir, "simEB.rds"))
+saveRDS(simLambda, file = file.path(rds_dir, "simLambda.rds"))
+saveRDS(simDelta, file = file.path(rds_dir, "simDelta.rds"))
+saveRDS(simKappa, file = file.path(rds_dir, "simKappa.rds"))
+
+# Visualize all the trees in the report
+sim_list  <- list(simBM, simBM_bounded, simOU_random, simOU_fixed, simEB, simLambda, simDelta, simKappa)
+sim_titles <- c("BM Simulation", "BM_bounded Simulation", "OU random root Simulation", 
+                "OU fixed root Simulation", "EB Simulation", "Lambda Simulation", 
+                "Delta Simulation", "Kappa Simulation")
+#png(file.path(phenogram_dir, "mfrow_phenogram.png") , width = 10, height = 8, units = "in", res = 320)
+par(mfrow = c(3, 3))
+for(i in seq_along(sim_list)) {
+  # Note: the original code used 'tree' for plotting in all cases.
+  phenogram(tree, sim_list[[i]], col = "skyblue3", main = sim_titles[i])
+}
+
+# 2. Simulation Study with Replication ----------------------------------------
+nSim <- 1000  # Number of replicates
+
+# Helper function for simulation replication and model fitting.
+simulate_fit <- function(sim_params) {
+  sim_data <- do.call(fastBM, c(list(tree = sim_params$tree, a = sim_params$root), sim_params$fastBM_args))
+  df <- data.frame(trait = sim_data, species = names(sim_data))
+  fit <- phylolm(trait ~ 1, data = df, phy = sim_params$phy, model = sim_params$model, boot = 0)
+  return(fit)
+}
+
+# Build a list of model-specific settings for replication.
+models <- list(
+  BM = list(tree = tree, root = BM_root, fastBM_args = list(sig2 = fit_data$BM[["sigma2"]]), phy = tree, model = "BM"),
+  BM_bounded = list(tree = tree, root = BM_root, fastBM_args = list(sig2 = fit_data$BM[["sigma2"]], bounds = c(0,1)), phy = tree, model = "BM"),
+  OU_random = list(tree = tree, root = OU_root, fastBM_args = list(sig2 = fit_data$OUrandomRoot[["sigma2"]], alpha = fit_data$OUrandomRoot[["optpar"]], theta = fit_data$OUrandomRoot[["coefficients"]][1]), phy = tree, model = "OUrandomRoot"),
+  OU_fixed = list(tree = tree, root = OU_root_fixed, fastBM_args = list(sig2 = fit_data$OUfixedRoot[["sigma2"]], alpha = fit_data$OUfixedRoot[["optpar"]], theta = fit_data$OUfixedRoot[["coefficients"]][1]), phy = tree, model = "OUfixedRoot"),
+  EB = list(tree = EB_tree, root = EB_root, fastBM_args = list(sig2 = fit_data$EB[["sigma2"]]), phy = EB_tree, model = "EB"),
+  Lambda = list(tree = lambda_tree, root = lambda_root, fastBM_args = list(), phy = lambda_tree, model = "lambda"),
+  Delta = list(tree = delta_tree, root = delta_root, fastBM_args = list(), phy = delta_tree, model = "delta"),
+  Kappa = list(tree = kappa_tree, root = kappa_root, fastBM_args = list(), phy = kappa_tree, model = "kappa")
+)
+
+# Initialize results list.
+results <- lapply(models, function(x) vector("list", nSim))
+
+set.seed(1998)
+for(i in 1:nSim) {
+  for(modelName in names(models)) {
+    results[[modelName]][[i]] <- simulate_fit(models[[modelName]])
+  }
+}
+
+# Save the full simulation results.
+#saveRDS(results, file = file.path(rds_dir, "simulation_results.rds"))
+results <- readRDS(file.path(rds_dir, "simulation_results.rds"))
+
+# Extract estimates (sigma2, AIC, lnL, and first parameter [optpar])
+get_metric <- function(metric, res) sapply(res, function(x) x[[metric]])
+
+BM_sig2         <- get_metric("sigma2", results$BM)
+BM_bounded_sig2 <- get_metric("sigma2", results$BM_bounded)
+OU_random_sig2  <- get_metric("sigma2", results$OU_random)
+OU_fixed_sig2   <- get_metric("sigma2", results$OU_fixed)
+EB_sig2         <- get_metric("sigma2", results$EB)
+Lambda_sig2     <- get_metric("sigma2", results$Lambda)
+Delta_sig2      <- get_metric("sigma2", results$Delta)
+Kappa_sig2      <- get_metric("sigma2", results$Kappa)
+
+BM_aic         <- get_metric("aic", results$BM)
+BM_bounded_aic <- get_metric("aic", results$BM_bounded)
+OU_random_aic  <- get_metric("aic", results$OU_random)
+OU_fixed_aic   <- get_metric("aic", results$OU_fixed)
+EB_aic         <- get_metric("aic", results$EB)
+Lambda_aic     <- get_metric("aic", results$Lambda)
+Delta_aic      <- get_metric("aic", results$Delta)
+Kappa_aic      <- get_metric("aic", results$Kappa)
+
+BM_lnL         <- mean(get_metric("logLik", results$BM))
+BM_bounded_lnL <- mean(get_metric("logLik", results$BM_bounded))
+OU_random_lnL  <- mean(get_metric("logLik", results$OU_random))
+OU_fixed_lnL   <- mean(get_metric("logLik", results$OU_fixed))
+EB_lnL         <- mean(get_metric("logLik", results$EB))
+Lambda_lnL     <- mean(get_metric("logLik", results$Lambda))
+Delta_lnL      <- mean(get_metric("logLik", results$Delta))
+Kappa_lnL      <- mean(get_metric("logLik", results$Kappa))
+
+# Plot histograms for sig2 estimates.
+png(file.path(hist_dir, "sig2_estimates.png"), width = 10, height = 8, units = "in", res = 320)
+par(mfrow = c(3, 3))
+hist(BM_sig2, main = "BM Model: sig² Estimates", xlab = "sig²", col = "skyblue3", border = "white")
+abline(v = fit_data$BM[["sigma2"]], col = "red", lwd = 2, lty = 2)
+hist(BM_bounded_sig2, main = "BM_bounded Model: sig² Estimates", xlab = "sig²", col = "darkseagreen3", border = "white")
+abline(v = fit_data$BM[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(EB_sig2, main = "EB Model: sig² Estimates", xlab = "sig²", col = "darkorchid4", border = "white")
+abline(v = fit_data$EB[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_random_sig2, main = "OU_random Model: sig² Estimates", xlab = "sig²", col = "salmon1", border = "white")
+abline(v = fit_data$OUrandomRoot[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_fixed_sig2, main = "OU_fixed Model: sig² Estimates", xlab = "sig²", col = "salmon3", border = "white")
+abline(v = fit_data$OUfixedRoot[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(Lambda_sig2, main = "Lambda Model: sig² Estimates", xlab = "sig²", col = "lightgoldenrod1", border = "white")
+abline(v = fit_data$lambda[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(Delta_sig2, main = "Delta Model: sig² Estimates", xlab = "sig²", col = "lightgoldenrod3", border = "white")
+abline(v = fit_data$delta[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(Kappa_sig2, main = "Kappa Model: sig² Estimates", xlab = "sig²", col = "lightgoldenrod4", border = "white")
+abline(v = fit_data$kappa[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+dev.off()
+
+# Plot histograms for AIC estimates.
+png(file.path(hist_dir, "aic_estimates.png"), width = 10, height = 8, units = "in", res = 320)
+par(mfrow = c(3, 3))
+hist(BM_aic, main = "BM Model: AIC Estimates", xlab = "AIC",
+     col = "skyblue3", border = "white")
+abline(v = fit_data$BM[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(BM_bounded_aic, main = "BM_bounded Model: AIC Estimates", xlab = "AIC",
+     col = "darkseagreen3", border = "white")
+abline(v = fit_data$BM[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(EB_aic, main = "EB Model: AIC Estimates", xlab = "AIC",
+     col = "darkorchid4", border = "white")
+abline(v = fit_data$EB[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_random_aic, main = "OU_random Model: AIC Estimates", xlab = "AIC",
+     col = "salmon1", border = "white")
+abline(v = fit_data$OUrandomRoot[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_fixed_aic, main = "OU_fixed Model: AIC Estimates", xlab = "AIC",
+     col = "salmon3", border = "white")
+abline(v = fit_data$OUfixedRoot[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(Lambda_aic, main = "lambda Model: AIC Estimates", xlab = "AIC",
+     col = "lightgoldenrod1", border = "white")
+abline(v = fit_data$lambda[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(Delta_aic, main = "delta Model: AIC Estimates", xlab = "AIC",
+     col = "lightgoldenrod3", border = "white")
+abline(v = fit_data$delta[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(Kappa_aic, main = "kappa Model: AIC Estimates", xlab = "AIC",
+     col = "lightgoldenrod4", border = "white")
+abline(v = fit_data$kappa[["aic"]], col = "red2", lwd = 2, lty = 2)
+dev.off()
+
+# Also plot in the knitr report (using the same code as above)
+par(mfrow = c(3, 3))
+par(mfrow = c(3, 3))
+hist(BM_sig2, main = "BM Model: sig² Estimates", xlab = "sig²", col = "skyblue3", border = "white")
+abline(v = fit_data$BM[["sigma2"]], col = "red", lwd = 2, lty = 2)
+hist(BM_bounded_sig2, main = "BM_bounded Model: sig² Estimates", xlab = "sig²", col = "darkseagreen3", border = "white")
+abline(v = fit_data$BM[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(EB_sig2, main = "EB Model: sig² Estimates", xlab = "sig²", col = "darkorchid4", border = "white")
+abline(v = fit_data$EB[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_random_sig2, main = "OU_random Model: sig² Estimates", xlab = "sig²", col = "salmon1", border = "white")
+abline(v = fit_data$OUrandomRoot[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_fixed_sig2, main = "OU_fixed Model: sig² Estimates", xlab = "sig²", col = "salmon3", border = "white")
+abline(v = fit_data$OUfixedRoot[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(Lambda_sig2, main = "Lambda Model: sig² Estimates", xlab = "sig²", col = "lightgoldenrod1", border = "white")
+abline(v = fit_data$lambda[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(Delta_sig2, main = "Delta Model: sig² Estimates", xlab = "sig²", col = "lightgoldenrod3", border = "white")
+abline(v = fit_data$delta[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+hist(Kappa_sig2, main = "Kappa Model: sig² Estimates", xlab = "sig²", col = "lightgoldenrod4", border = "white")
+abline(v = fit_data$kappa[["sigma2"]], col = "red2", lwd = 2, lty = 2)
+
+par(mfrow = c(3, 3))
+hist(BM_aic, main = "BM Model: AIC Estimates", xlab = "AIC",
+     col = "skyblue3", border = "white")
+abline(v = fit_data$BM[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(BM_bounded_aic, main = "BM_bounded Model: AIC Estimates", xlab = "AIC",
+     col = "darkseagreen3", border = "white")
+abline(v = fit_data$BM[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(EB_aic, main = "EB Model: AIC Estimates", xlab = "AIC",
+     col = "darkorchid4", border = "white")
+abline(v = fit_data$EB[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_random_aic, main = "OU_random Model: AIC Estimates", xlab = "AIC",
+     col = "salmon1", border = "white")
+abline(v = fit_data$OUrandomRoot[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(OU_fixed_aic, main = "OU_fixed Model: AIC Estimates", xlab = "AIC",
+     col = "salmon3", border = "white")
+abline(v = fit_data$OUfixedRoot[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(Lambda_aic, main = "lambda Model: AIC Estimates", xlab = "AIC",
+     col = "lightgoldenrod1", border = "white")
+abline(v = fit_data$lambda[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(Delta_aic, main = "delta Model: AIC Estimates", xlab = "AIC",
+     col = "lightgoldenrod3", border = "white")
+abline(v = fit_data$delta[["aic"]], col = "red2", lwd = 2, lty = 2)
+hist(Kappa_aic, main = "kappa Model: AIC Estimates", xlab = "AIC",
+     col = "lightgoldenrod4", border = "white")
+abline(v = fit_data$kappa[["aic"]], col = "red2", lwd = 2, lty = 2)
+
+
+# Compute mean lnL estimates.
+BM_lnL         <- BM_lnL
+BM_bounded_lnL <- BM_bounded_lnL
+OU_random_lnL  <- OU_random_lnL
+OU_fixed_lnL   <- OU_fixed_lnL
+EB_lnL         <- EB_lnL
+Lambda_lnL     <- Lambda_lnL
+Delta_lnL      <- Delta_lnL
+Kappa_lnL      <- Kappa_lnL
+
+# Summary table of means.
+sim_summary <- data.frame(
+  Model   = c("BM", "BM_bounded", "OU_random", "OU_fixed", "EB", "Lambda", "Delta", "Kappa"),
+  lnL     = c(BM_lnL, BM_bounded_lnL, OU_random_lnL, OU_fixed_lnL, EB_lnL, Lambda_lnL, Delta_lnL, Kappa_lnL),
+  AIC     = c(mean(BM_aic), mean(BM_bounded_aic), mean(OU_random_aic), mean(OU_fixed_aic),
+              mean(EB_aic), mean(Lambda_aic), mean(Delta_aic), mean(Kappa_aic)),
+  sigsq   = c(mean(BM_sig2), mean(BM_bounded_sig2), mean(OU_random_sig2), mean(OU_fixed_sig2),
+              mean(EB_sig2), mean(Lambda_sig2), mean(Delta_sig2), mean(Kappa_sig2))
+)
+
+# Save simulation summary to CSV.
+write.csv(sim_summary, file = file.path(model_dir, "simulation_summary.csv"), row.names = FALSE)
+
+# Compare BM versus alternative models using likelihood ratio tests.
+compareBMvsAlt <- function(BM_lnL_val, altModels_lnL) {
+  results <- data.frame(Model = character(), LRT = numeric(), p_value = numeric(), stringsAsFactors = FALSE)
+  for(modelName in names(altModels_lnL)) {
+    LRT <- 2 * (altModels_lnL[[modelName]] - BM_lnL_val)
+    p_value <- 0.5 * (1 - pchisq(LRT, df = 1))
+    results <- rbind(results, data.frame(Model = modelName, LRT = LRT, p_value = p_value, stringsAsFactors = FALSE))
+  }
+  results
+}
+
+altModels_lnL <- list(
+  BM_bounded = BM_bounded_lnL,
+  OU_random  = OU_random_lnL,
+  OU_fixed   = OU_fixed_lnL,
+  EB         = EB_lnL,
+  Lambda     = Lambda_lnL,
+  Delta      = Delta_lnL,
+  Kappa      = Kappa_lnL
+)
+comparisonResults <- compareBMvsAlt(BM_lnL, altModels_lnL)
+print(comparisonResults)
+
+# Save LRT results to CSV.
+write.csv(comparisonResults, file = file.path(model_dir, "BM_vs_alt_LRT_simulation.csv"), row.names = FALSE)
+
+```

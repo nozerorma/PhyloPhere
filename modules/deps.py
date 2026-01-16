@@ -5,6 +5,7 @@
 # | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
 #  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
 
+__version__ = "2.0.0-paired"
 
 '''
 A Convergent Amino Acid Substitution identification 
@@ -15,6 +16,8 @@ Author:         Fabio Barteri (fabio.barteri@upf.edu)
 Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
                 Xavier Farré (xfarrer@igtp.cat),
                 David de Juan (david.juan@upf.edu).
+                
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
 MODULE NAME:    dep.py
 DESCRIPTION:    checks the dependencies for a specific tools (packages and inputs)
@@ -26,6 +29,10 @@ import pkg_resources
 def check_dependencies(tool, list_of_deps):
     
     missing_dependencies = []
+
+    # Add numpy and scipy for optimized bootstrap processing
+    if tool == "boot" and "numpy" not in list_of_deps:
+        list_of_deps = list_of_deps + ["numpy", "scipy"]
 
     for package in list_of_deps:
         try:

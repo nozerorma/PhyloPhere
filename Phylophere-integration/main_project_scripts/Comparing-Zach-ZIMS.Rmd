@@ -1,0 +1,371 @@
+---
+title: "Comparing-ACE-ZIMS"
+output: html_document
+---
+## 1.Setup & Directory Definition
+
+This section sets the working directory, loads common functions, and defines data and results folders.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+knitr::opts_knit$set(root.dir = "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES")
+getwd()
+
+```
+
+```{r dirdef, message=FALSE, warning=FALSE}
+
+workingDir <- getwd()
+dataDir <- file.path(workingDir, "Data")
+resultsDir <- file.path(workingDir,"Malignancy_Primates/Out/")
+
+# Load common objects, functions and libraries
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/libraries.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/commons.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_functions.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_objects.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/dunn_modified.R"))
+
+```
+
+# This document will be focused on comparing the cancer data present in the ZIMS dataset to that in the ACE analysis.
+
+```{r comparison, fig.width=10, fig.height=8, dev = "png", dpi = 320}
+# Load ACE dataset
+
+ACE <- read.csv("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/NeoplasiaAcrossVertebrates/cancerAcrossVertebrates/species-cancer-prevalence-data.csv")
+
+data_zims <- read.csv("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/1.Cancer_data/Neoplasia_species360/CIs/bayes11/cancer_traits_CI-alt_bayes.csv")
+
+data_zims <- data_zims %>%
+  dplyr::rename(
+    malignant_CI_lb = malignant_CI_lb.jeff, 
+    malignant_CI_ub = malignant_CI_ub.jeff,
+    neoplasia_CI_lb = neoplasia_CI_lb.jeff,
+    neoplasia_CI_ub = neoplasia_CI_ub.jeff
+    )
+
+# Binomize species in ACE's data
+ACE$Species <- gsub(" ", "_", ACE$Species)
+
+# Compute CIs in ACE's data
+ACE_ci <- ACE %>%
+  group_by(Species) %>%
+  mutate(
+    # Malignant prevalence CI
+    malignant_CI_lb2 = binom.confint(Malignant, RecordsWithDenominators, method = "bayes", priors=c(1,1))[, 5],
+    malignant_CI_ub2 = binom.confint(Malignant, RecordsWithDenominators, method = "bayes", priors=c(1,1))[, 6],
+    malignant_CI2 = paste0("[", round(malignant_CI_lb2, 2), "-", round(malignant_CI_ub2, 2), "]"),
+    neoplasia_CI_lb2 = binom.confint(NeoplasiaWithDenominators, RecordsWithDenominators, method = "bayes", priors=c(1,1))[, 5],
+    neoplasia_CI_ub2 = binom.confint(NeoplasiaWithDenominators, RecordsWithDenominators, method = "bayes", priors=c(1,1))[, 6],
+    neoplasia_CI2 = paste0("[", round(neoplasia_CI_lb2, 2), "-", round(neoplasia_CI_ub2, 2), "]")) %>%
+  dplyr::select(Orders, Family, Species, RecordsWithDenominators, MalignancyPrevalence, malignant_CI_lb2, malignant_CI_ub2, malignant_CI2, NeoplasiaPrevalence, neoplasia_CI_lb2, neoplasia_CI_ub2, neoplasia_CI2) %>%
+  dplyr::rename(species = Species) %>%
+  dplyr::filter(Orders == "Primates")
+
+# Merge both datasets
+merged_data <- ACE_ci %>%
+  left_join(data_zims, by = "species") %>%
+  dplyr::select(species, Family, RecordsWithDenominators, MalignancyPrevalence, malignant_CI_lb2, malignant_CI_ub2, NeoplasiaPrevalence, neoplasia_CI_lb2, neoplasia_CI_ub2, adult_necropsy_count, malignant_prevalence, malignant_CI_lb, malignant_CI_ub, neoplasia_prevalence, neoplasia_CI_lb, neoplasia_CI_ub) %>%
+  dplyr::rename(count.z = RecordsWithDenominators, mp.z = MalignancyPrevalence, mp_lb.z = malignant_CI_lb2, mp_ub.z = malignant_CI_ub2, np.z = NeoplasiaPrevalence, np_lb.z = neoplasia_CI_lb2, np_ub.z = neoplasia_CI_ub2, count.zims = adult_necropsy_count, mp.zims = malignant_prevalence, mp_lb.zims = malignant_CI_lb, mp_ub.zims = malignant_CI_ub, np.zims = neoplasia_prevalence, np_lb.zims = neoplasia_CI_lb, np_ub.zims = neoplasia_CI_ub) %>%
+  drop_na()
+
+merged_data.100 <- merged_data %>%
+  mutate(
+    mp.z = mp.z * 100,
+    mp_lb.z = mp_lb.z * 100,
+    mp_ub.z = mp_ub.z * 100,
+    np.z = np.z * 100,
+    np_lb.z = np_lb.z * 100,
+    np_ub.z = np_ub.z * 100,
+    mp.zims = mp.zims * 100,
+    mp_lb.zims = mp_lb.zims * 100,
+    mp_ub.zims = mp_ub.zims * 100,
+    np.zims = np.zims * 100,
+    np_lb.zims = np_lb.zims * 100,
+    np_ub.zims = np_ub.zims * 100
+  )
+
+# Barplot the prevalences from the two datasets
+# We will plot the malignant prevalence first
+# We will compare .z to .zims
+# We will plot the prevalence and the CI
+# The plot will be ordered by species name
+# We will use the same color for the same species in both datasets
+# Stack the bars
+# Color the bars differently for the two datasets, also the CI
+
+mp_bars <- ggplot(merged_data.100, aes(x = species)) +
+  geom_bar(aes(y = mp.z, fill = "ACE"), stat = "identity", position = "stack", color = "black", alpha = 0.5) +
+  geom_bar(aes(y = mp.zims, fill = "ZIMS"), stat = "identity", position = "stack", color = "black", alpha = 0.5) +
+  geom_errorbar(aes(ymin = mp_lb.z, ymax = mp_ub.z, color = "CI - ACE"), width = 0.5, position = position_dodge(0.9), linewidth = 1.25) +
+  geom_errorbar(aes(ymin = mp_lb.zims, ymax = mp_ub.zims, color = "CI - ZIMS"), width = 0.5, position = position_dodge(0.9), linewidth = 1.25) +
+  
+  # Add text labels showing the sample size per species
+  geom_text(aes(y = pmax(mp.z, mp.zims) + 0.02, 
+                label = paste0("ACE: ", count.z, "\nZIMS: ", count.zims)), 
+            size = 3, color = "black", hjust = 0.5, vjust = -3.1) +
+  
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    title = "Comparison of Malignant Prevalence Across Datasets",
+    x = "Species",
+    y = "Malignant Prevalence",
+    fill = "Dataset  ",
+    color = "Confidence Interval  "
+  ) +
+  scale_fill_manual(values = c("ACE" = "skyblue2", "ZIMS" = "salmon2")) +
+  scale_color_manual(values = c("CI - ACE" = "skyblue4", "CI - ZIMS" = "salmon4")) +
+  theme(legend.position = "top")
+
+mp_bars
+
+
+np_bars <- ggplot(merged_data.100, aes(x = species)) +
+  geom_bar(aes(y = np.z, fill = "ACE"), stat = "identity", position = "stack", color = "black", alpha = 0.5) +
+  geom_bar(aes(y = np.zims, fill = "ZIMS"), stat = "identity", position = "stack", color = "black", alpha = 0.5) +
+  geom_errorbar(aes(ymin = np_lb.z, ymax = np_ub.z, color = "CI - ACE"), width = 0.5, position = position_dodge(0.9), linewidth = 1.25) +
+  geom_errorbar(aes(ymin = np_lb.zims, ymax = np_ub.zims, color = "CI - ZIMS"), width = 0.5, position = position_dodge(0.9), linewidth = 1.25) +
+  
+  # Add text labels showing the sample size per species
+  geom_text(aes(y = pmax(np.z, np.zims) + 0.02, 
+                label = paste0("ACE: ", count.z, "\nZIMS: ", count.zims)), 
+            size = 3, color = "black", hjust = 0.5, vjust = -3.1) +
+  
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(
+    title = "Comparison of Neoplasia Prevalence Across Datasets",
+    x = "Species",
+    y = "Neoplasia Prevalence",
+    fill = "Dataset  ",
+    color = "Confidence Interval  "
+  ) +
+  scale_fill_manual(values = c("ACE" = "skyblue2", "ZIMS" = "salmon2")) +
+  scale_color_manual(values = c("CI - ACE" = "skyblue4", "CI - ZIMS" = "salmon4")) +
+  theme(legend.position = "top")
+
+np_bars
+
+# Save the individual plots
+ggsave("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/NeoplasiaAcrossVertebrates/mp_bars.png", mp_bars, width = 10, height = 8, dpi = 320)
+ggsave("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/NeoplasiaAcrossVertebrates/np_bars.png", np_bars, width = 10, height = 8, dpi = 320)
+
+```
+
+
+```{r comparison_stack, fig.width=10, fig.height=16, dev = "png", dpi = 320}
+# Stack the two plots
+comparison_plot <- gridExtra::grid.arrange(mp_bars, np_bars, ncol = 1)
+
+comparison_plot
+
+# Save comparison plot
+ggsave("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/NeoplasiaAcrossVertebrates/comparison_plot.png", comparison_plot, width = 10, height = 16, dpi = 320)
+
+
+```
+
+```{r regression, fig.width=10, fig.height=10, dev = "png", dpi = 320}
+
+# Packages from Vincze
+library(ape)
+library(geiger)
+library(car)
+library(nlme)
+library(phylolm)
+library(emmeans)
+library(caper)
+
+# Set phylodir
+phylo_dir <- file.path(dataDir, "5.Phylogeny/")
+
+# Open tree file
+phy <- read.newick(file.path(phylo_dir,"science.abn7829_data_s4.nex.tree"))
+
+# Prune tree to merged_data
+phy_pruned <- drop.tip(phy, phy$tip.label[!phy$tip.label %in% merged_data$species])
+
+# Give a name to species name attribute
+tree_species <- phy$tip.label
+
+# Extract the mp and np vectors from both datasets. Then name them.
+mp_ACE <- merged_data$mp.z; names(mp_ACE) <- merged_data$species
+mp_zims <- merged_data$mp.zims; names(mp_zims) <- merged_data$species
+np_ACE <- merged_data$np.z; names(np_ACE) <- merged_data$species
+np_zims <- merged_data$np.zims; names(np_zims) <- merged_data$species
+
+# Add the mp and np vectors to the tree
+phylo_mp.ACE <- geiger::treedata(phy_pruned, mp_ACE, warnings = FALSE)$phy
+phylo_mp.zims <- geiger::treedata(phy_pruned, mp_zims, warnings = FALSE)$phy
+phylo_np.ACE <- geiger::treedata(phy_pruned, np_ACE, warnings = FALSE)$phy
+phylo_np.zims <- geiger::treedata(phy_pruned, np_zims, warnings = FALSE)$phy
+
+# Calculate phylogenetic signal for the two datasets
+phylo_signal_mp.ACE <- phylosig(phy_pruned, mp_ACE, method = "lambda", test = TRUE)
+phylo_signal_mp.zims <- phylosig(phy_pruned, mp_zims, method = "lambda", test = TRUE)
+phylo_signal_np.ACE <- phylosig(phy_pruned, np_ACE, method = "lambda", test = TRUE)
+phylo_signal_np.zims <- phylosig(phy_pruned, np_zims, method = "lambda", test = TRUE)
+
+# Create a data frame with the results
+phylo_signal_results <- data.frame(
+  Dataset = c("ACE", "ZIMS"),
+  Malignant_Phylogenetic_Signal = c(phylo_signal_mp.ACE$lambda, phylo_signal_mp.zims$lambda),
+  MP_p.value = c(phylo_signal_mp.ACE$P, phylo_signal_mp.zims$P),
+  Neoplasia_Phylogenetic_Signal = c(phylo_signal_np.ACE$lambda, phylo_signal_np.zims$lambda),
+  NP_p.value = c(phylo_signal_np.ACE$P, phylo_signal_np.zims$P)
+)
+
+# phylo_signal_results
+# Dataset   Malignant_Phylogenetic_Signal   Neoplasia_Phylogenetic_Signal   MP_p.value    NP_p.value
+# ACE      0.4180307	                      0.3375589	                      0.29239232	  0.5332068
+# ZIMS	    0.6892787	                      0.3147908	                      0.05000779    0.6720834
+
+# Perform PGLS and plot the correlation
+pgls.df <- data.frame(
+  species = names(mp_ACE),
+  mp_ACE = mp_ACE,
+  mp_zims = mp_zims,
+  np_ACE = np_ACE,
+  np_zims = np_zims
+)
+row.names(pgls.df) <- pgls.df$species
+
+# Add family information to the data frame
+pgls.df$family <- merged_data$Family[match(pgls.df$species, merged_data$species)]
+
+# Merge CI information to the data frame
+pgls.df$mp_lb.z <- merged_data.100$mp_lb.z[match(pgls.df$species, merged_data.100$species)]
+pgls.df$mp_ub.z <- merged_data.100$mp_ub.z[match(pgls.df$species, merged_data.100$species)]
+pgls.df$mp_lb.zims <- merged_data.100$mp_lb.zims[match(pgls.df$species, merged_data.100$species)]
+pgls.df$mp_ub.zims <- merged_data.100$mp_ub.zims[match(pgls.df$species, merged_data.100$species)]
+pgls.df$np_lb.z <- merged_data.100$np_lb.z[match(pgls.df$species, merged_data.100$species)]
+pgls.df$np_ub.z <- merged_data.100$np_ub.z[match(pgls.df$species, merged_data.100$species)]
+pgls.df$np_lb.zims <- merged_data.100$np_lb.zims[match(pgls.df$species, merged_data.100$species)]
+pgls.df$np_ub.zims <- merged_data.100$np_ub.zims[match(pgls.df$species, merged_data.100$species)]
+
+pgls.df$occ_mp.ACE <- ifelse(pgls.df$mp_ACE==0,0,1)
+pgls.df$occ_mp.zims <- ifelse(pgls.df$mp_zims==0,0,1)
+pgls.df$occ_np.ACE <- ifelse(pgls.df$np_ACE==0,0,1)
+pgls.df$occ_np.zims <- ifelse(pgls.df$np_zims==0,0,1)
+pgls.df <- pgls.df[as.character(phylo_mp.ACE$tip.label), ] # organise data to follow same order as phylogeny
+
+comp.data<-comparative.data(phy_pruned, pgls.df,
+    names.col="species",vcv.dim=2,warn.dropped=TRUE)
+
+# Perform the PGLS regression
+w_mp <- pgls(mp_zims~mp_ACE,data=comp.data, lambda = "ML")
+sum_mp <- summary(w_mp)
+
+w_np <- pgls(np_zims~np_ACE,data=comp.data, lambda = "ML")
+sum_np <- summary(w_np)
+
+# Use the data to plot the correlation
+pgls.df$mp_ACE <- pgls.df$mp_ACE * 100
+pgls.df$mp_zims <- pgls.df$mp_zims * 100
+pgls.df$np_ACE <- pgls.df$np_ACE * 100
+pgls.df$np_zims <- pgls.df$np_zims * 100
+
+# Plot the correlation
+intercept_mp <- w_mp$model$coef[1]
+slope_mp <- w_mp$model$coef[2]
+
+x_min_mp <- min(pgls.df$mp_ACE)
+x_max_mp <- max(pgls.df$mp_ACE)
+y_min_mp <- (intercept_mp + slope_mp * x_min_mp)
+y_max_mp <- (intercept_mp + slope_mp * x_max_mp)
+
+mp_corr <- ggplot(pgls.df, aes(x = mp_ACE, y = mp_zims)) +
+    geom_point(aes(color = family), size = 3, show.legend = TRUE) +
+    scale_color_manual(values = primate_family_colors, breaks = 0) +
+    geom_text_repel(aes(label = species), hjust = 0, vjust = 0, 
+                    family = "Inter", max.overlaps = 50, 
+                    position = position_nudge_repel(x = 0.005, y = 0.01), force = 0.1, 
+                    direction = "both", box.padding = 0.5, seed = 1998, 
+                    alpha = 1, show.legend = FALSE) +
+    geom_segment(aes(x = x_min_mp, y = y_min_mp, xend = x_max_mp, yend = y_max_mp), 
+                 color = "black") +
+    # Diagonal line
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey80") +
+    geom_errorbar(aes(ymin = mp_lb.zims,
+                  ymax = mp_ub.zims), alpha = 0.1) +
+    geom_errorbar(aes(xmin = mp_lb.z,
+                  xmax = mp_ub.z), alpha = 0.1) +
+    labs(
+      title = "Malignant Prevalence Correlation",
+      x = paste0("Malignant Prevalence (ACE) (%)"), 
+      y = paste0("Malignant Prevalence (ZIMS) (%)"), 
+      caption = paste("PGLS adj.r2 =", round(sum_mp$adj.r.squared, 3), "\n",
+                      "lambda = ", round(w_mp$param[1], 3), "\n",
+                      "PGLS AICC = ", round(w_mp$aicc, 3), "\n",
+                      "PGLS Slope =", round(w_mp$model$coef[2], 3), "\n",
+                      "Dashed line: diagonal\n",
+                      "Solid line: phylogenetic linear regression\n")
+    ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.position = "right",
+    panel.grid.major = element_line(color = "white"),
+    panel.grid.minor = element_line(color = "white"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12)
+  )
+
+# Plot the correlation
+intercept_np <- w_np$model$coef[1]
+slope_np <- w_np$model$coef[2]
+
+x_min_np <- min(pgls.df$np_ACE)
+x_max_np <- max(pgls.df$np_ACE)
+y_min_np <- (intercept_np + slope_np * x_min_np)
+y_max_np <- (intercept_np + slope_np * x_max_np)
+
+np_corr <- ggplot(pgls.df, aes(x = np_ACE, y = np_zims)) +
+    geom_point(aes(color = family), size = 3, show.legend = TRUE) +
+    scale_color_manual(values = primate_family_colors, breaks = 0) +
+    geom_text_repel(aes(label = species), hjust = 0, vjust = 0, 
+                    family = "Inter", max.overlaps = 50, 
+                    position = position_nudge_repel(x = 0.005, y = 0.01), force = 0.1, 
+                    direction = "both", box.padding = 0.5, seed = 1998, 
+                    alpha = 1, show.legend = FALSE) +
+    geom_segment(aes(x = x_min_np, y = y_min_np, xend = x_max_np, yend = y_max_np), 
+                 color = "black") +
+    # Add simple linear regression line
+    # Diagonal line
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "grey80") +    
+    geom_errorbar(aes(ymin = np_lb.zims,
+                  ymax = np_ub.zims), alpha = 0.1) +
+    geom_errorbar(aes(xmin = np_lb.z,
+                  xmax = np_ub.z), alpha = 0.1) +
+    labs(
+      title = "Neoplasia Prevalence Correlation",
+      x = paste0("Neoplasia Prevalence (ACE) (%)"), 
+      y = paste0("Neoplasia Prevalence (ZIMS) (%)"), 
+      caption = paste("PGLS adj.r2 =", round(sum_np$adj.r.squared, 3), "\n",
+                      "lambda = ", round(w_np$param[1], 3), "\n",
+                      "PGLS AICC = ", round(w_np$aicc, 3), "\n",
+                      "PGLS Slope =", round(w_np$model$coef[2], 3), "\n",
+                      "Dashed line: diagonal\n",
+                      "Solid line: phylogenetic linear regression\n")
+    ) +
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    axis.title.x = element_text(size = 16),
+    axis.title.y = element_text(size = 16),
+    legend.position = "right",
+    panel.grid.major = element_line(color = "white"),
+    panel.grid.minor = element_line(color = "white"),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12)
+  )
+
+# Save the two plots
+ggsave("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/NeoplasiaAcrossVertebrates/mp_corr.png", mp_corr, width = 10, height = 10, dpi = 320)
+ggsave("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/NeoplasiaAcrossVertebrates/np_corr.png", np_corr, width = 10, height = 10, dpi = 320)
+
+# Print both for report
+print(mp_corr)
+print(np_corr)
+
+```

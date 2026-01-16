@@ -77,7 +77,14 @@ config.file <- args[2]
 number.of.cycles <- args[3]
 selection.strategy <- args[4]
 phenotypes <- args[5]
-outfile <- args[6]
+outdir <- args[6]
+chunk.size <- ifelse(length(args) >= 7, as.integer(args[7]), 500)
+
+# Create output directory if it doesn't exist
+if (!dir.exists(outdir)) {
+  dir.create(outdir, recursive = TRUE)
+  write(paste("[INFO]", Sys.time(), "Created output directory:", outdir), stdout())
+}
 
 # tree <- "Data/5.Phylogeny/science.abn7829_data_s4.nex.pruned.tree"
 # config.file <-"Out/2.CAAS/20240703-def/4.Traitfiles/df4_sp.tab"
@@ -122,8 +129,15 @@ names(starting.values) <- all.species
 
 ### SIMULATE
 counter = 0
+chunk.counter = 1
+file.counter = 1
 
 simulated.traits.df <- data.frame(matrix(ncol = 3, nrow = 0))
+
+# Start timing
+start.time <- Sys.time()
+write(paste("[START]", start.time, "Beginning permulation generation..."), stdout())
+write(paste("[INFO] Total cycles:", number.of.cycles, "| Chunk size:", chunk.size), stdout())
 
 calculate_patristic_distances <- function(tree, species_list) {
 
@@ -364,14 +378,49 @@ for (j in 1:as.integer(number.of.cycles)){
   fg.species.tag = paste(fg.species, collapse=",")
   bg.species.tag = paste(bg.species, collapse=",")
 
-  logline = paste("Processing permulation", as.character(counter), "of", as.character(number.of.cycles))
   outline = c(cycle.tag, fg.species.tag, bg.species.tag)
-  #simulated.traits.df <- rbind(simulated.traits.df, outline)
   simulated.traits.df[nrow(simulated.traits.df) +1,] <- outline
-
-  write(logline, stdout())
+  
+  chunk.counter = chunk.counter + 1
+  
+  # Write chunk to file when chunk size is reached or on final cycle
+  if (chunk.counter > chunk.size || counter == as.integer(number.of.cycles)) {
+    # Generate filename with zero-padded file number
+    filename <- sprintf("resample_%03d.tab", file.counter)
+    filepath <- file.path(outdir, filename)
+    
+    # Write the chunk
+    write.table(simulated.traits.df, sep="\t", col.names=FALSE, row.names=FALSE, file=filepath, quote=FALSE)
+    
+    # Calculate progress and timing
+    elapsed <- as.numeric(difftime(Sys.time(), start.time, units="secs"))
+    pct.complete <- (counter / as.integer(number.of.cycles)) * 100
+    cycles.per.sec <- counter / elapsed
+    remaining.cycles <- as.integer(number.of.cycles) - counter
+    eta.secs <- remaining.cycles / cycles.per.sec
+    eta.mins <- eta.secs / 60
+    
+    logline <- sprintf("[%s] File %d: %s | Cycles %d-%d | Progress: %.1f%% | Elapsed: %.1f min | ETA: %.1f min",
+                      format(Sys.time(), "%H:%M:%S"),
+                      file.counter,
+                      filename,
+                      counter - nrow(simulated.traits.df) + 1,
+                      counter,
+                      pct.complete,
+                      elapsed / 60,
+                      eta.mins)
+    write(logline, stdout())
+    
+    # Reset for next chunk
+    simulated.traits.df <- data.frame(matrix(ncol = 3, nrow = 0))
+    chunk.counter = 1
+    file.counter = file.counter + 1
+  }
 }
 
-# Export the result
-write.table(simulated.traits.df, sep="\t",col.names=FALSE, row.names = FALSE, file=outfile, quote=FALSE)
+# Final summary
+end.time <- Sys.time()
+total.elapsed <- as.numeric(difftime(end.time, start.time, units="mins"))
+write(paste("[COMPLETE]", end.time, "|", number.of.cycles, "cycles in", round(total.elapsed, 2), "minutes"), stdout())
+write(paste("[OUTPUT] Generated", file.counter - 1, "files in:", outdir), stdout())
 

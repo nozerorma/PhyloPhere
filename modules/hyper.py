@@ -5,6 +5,7 @@
 # | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
 #  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
 
+__version__ = "2.0.0-paired"
 
 '''
 A Convergent Amino Acid Substitution identification 
@@ -15,6 +16,8 @@ Author:         Fabio Barteri (fabio.barteri@upf.edu)
 Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
                 Xavier Farré (xfarrer@igtp.cat),
                 David de Juan (david.juan@upf.edu).
+
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
 MODULE NAME:    hyper.py
 DESCRIPTION:    Pvalue assignment to CAAS prediction based on hypergeometric probability function.

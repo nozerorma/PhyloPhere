@@ -1,0 +1,25 @@
+Warning message:
+package ‘ape’ was built under R version 4.4.2 
+Loading required package: phytools
+Loading required package: maps
+
+Attaching package: ‘dplyr’
+
+The following object is masked from ‘package:ape’:
+
+    where
+
+The following objects are masked from ‘package:stats’:
+
+    filter, lag
+
+The following objects are masked from ‘package:base’:
+
+    intersect, setdiff, setequal, union
+
+Error in file(file, "rt") : cannot open the connection
+Calls: read.table -> file
+In addition: Warning message:
+In file(file, "rt") :
+  cannot open file '/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Out/2.CAAS/1.Discovery/1.Traitfiles/ranked/df4_sp.tab': No such file or directory
+Execution halted

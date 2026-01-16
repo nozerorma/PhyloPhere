@@ -1,0 +1,133 @@
+---
+title: "Data Visualization for trait analysis"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r header}
+
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+
+## PHYLOPHERE: A Nextflow pipeline including a complete set
+## of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+### Github: https://github.com/nozerorma/caastools/nf-phylophere
+### Author: Miguel Ramon (miguel.ramon@upf.edu)
+
+#### File: dataset_exploration.Rmd
+
+```
+
+# Data Visualization and Processing
+
+Script to visualize and process data. It generates family distribution plots, summary tables, and a processed dataset.
+
+---
+
+## Setup and Directory Configuration
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Suppress warnings and messages in output
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Set the root directory for the project. Useful to set report outputs. Don't know if necessary.
+knitr::opts_knit$set(root.dir = getwd())
+
+# Define working, data, and results directories
+workingDir <- getwd()
+# Display current working directory
+getwd()
+
+```
+
+```{r dirdef}
+
+# Load libraries, common functions, primate-specific functions and objects
+source(file.path(workingDir, "lib/libraries.R")) # Contains the different libraries used in the analysis. Would be nice to include dinamically. Maybe force an object in the function script.
+
+source(file.path(workingDir, "obj/commons.R")) # Contains the main objects for the analysis. Modify as needed.
+source(file.path(workingDir, "obj/palettes.R")) # Contains the different color palettes. Modify accordingly.
+source(file.path(workingDir, "fun/common_fun.R")) # Common small functions used all around (does arreu come from all around?)
+source(file.path(workingDir, "fun/trait_stats.R")) # Function to compute statistical analysis for the trait of interest
+
+```
+
+## 1. Dataset Visualization
+This section visualizes the distribution of species across families to provide an overview of the dataset.
+
+```{r dataset_visualization, fig.height=7, fig.width=7, dev='png', dpi=320}
+
+# Objects
+color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
+color.sym <- sym(color_palette) # Symbol for the color palette
+taxa.sym <- sym(taxon_of_interest) # Symbol for the taxon of interest
+trait.sym <- sym(trait) # Symbol for the trait of interest
+
+# 1. DATA VISUALIZATION  ------------------------------------------------------
+# Calculate species count per taxon_of_interest
+taxa_distribution <- trait_df %>%
+  dplyr::group_by(!!sym(taxon_of_interest)) %>%
+  dplyr::summarise(count = n())
+
+# Create bar plot for taxa distribution
+p1 <- ggplot2::ggplot(taxa_distribution, 
+                        aes(x = !!taxa.sym, y = count, fill = !!taxa.sym)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = count), 
+            vjust = 0.5, hjust = -1.5, 
+            color = "black", fontface = "bold", 
+            size = 6) +
+  labs(x = paste(capitalized_taxon, "-", clade_name), 
+       y = "Number of species", 
+       title = paste(capitalized_taxon, "distribution in", clade_name)) +
+  scale_fill_manual(values = !!color.sym, breaks = NULL) + # 
+  scale_y_continuous(limits = c(0, nrow(family_distribution)), expand = c(0, 0)) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(hjust = 1, size = 18, face = "bold", color = "black"),
+    axis.text.x = element_blank(),
+    plot.title = element_blank(),
+    axis.title.x = element_text(size = 18, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  ) +
+  coord_flip()
+
+# Save the plot to the results directory
+plot_dir <- file.path(resultsDir, "1.Data-exploration/1.Species_distribution")
+createDir(plot_dir)
+
+ggplot2::ggsave(file.path(plot_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution.png")), p1, 
+                device = "png", width = 10, height = 10, dpi = "retina")
+
+# Display the plot
+p1
+
+```
+
+## 2. Data Processing and statistical overview
+
+```{r stats_overview}
+
+# Apply stats.f to trait_df
+stats_df <- stats.f(trait_df)
+
+# Save the melted dataframe
+save_path <- file.path(resultsDir, "1.Data-exploration/1.Species_distribution/trait_stats.csv")
+write.csv(stats_df, save_path, row.names = FALSE)
+
+# Print an excerpt
+print(head(stats_df))
+
+```

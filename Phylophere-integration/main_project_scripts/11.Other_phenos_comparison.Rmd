@@ -1,0 +1,1517 @@
+---
+title: "Exploring other phenotypes"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Phenotype Exploration
+This script explores phenotypic traits related to neoplasia in primates for the Primates' Neoplasia Project. It visualizes trait distributions, phylogenetic patterns, and correlations, focusing on malignancy and neoplasia prevalence, body mass, and longevity. The script includes contrast plots, phylogenetic trees, and phylogenetic generalized least squares (PGLS) analyses to assess trait relationships.
+
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Suppress warnings and messages in output
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Set the root directory for the project
+knitr::opts_knit$set(root.dir = "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES")
+# Display current working directory
+getwd()
+# Set seed for reproducibility
+set.seed(1998)
+
+```
+
+```{r dirdef, message=FALSE, warning=FALSE}
+
+# Define working, data, and results directories
+workingDir <- getwd()
+dataDir <- file.path(workingDir, "Data")
+resultsDir <- file.path(workingDir, "Malignancy_Primates/Out")
+
+# Load libraries, common functions, primate-specific functions and objects
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/libraries.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/commons.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_functions.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_objects.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/selection_algorithm.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/dunn_modified.R"))
+
+# Note that all variables may be changed from COMMONS and PRIMATE_OBJECTS scripts.
+# 
+# library(conflicted); conflict_prefer("map", "purrr"); conflict_prefer("map_int", "purrr")
+# library(conflicted); conflict_prefer("filter", "dplyr"); conflict_prefer("select", "dplyr"); conflict_prefer("rename", "dplyr")
+# library(conflicted); conflict_prefer("as.phylo", "phylogram"); conflict_prefer("drop.tip", "ape")
+# library(conflicted); conflict_prefer("read.newick", "phytools")
+# 
+
+```
+
+## 1. Data Preparation
+This section loads pre-processed trait data in a "melted" format, which is structured for easier analysis or visualization. This data will be used in subsequent ranking steps. We also load the processed cancer traits data, which includes a longevity quotient (LQ) for each species. And finally, we load Alejandro's other traits data, which includes various phenotypic traits for non-human primates.
+
+```{r, stat_visualization, fig.width=10, fig.height=5, dev="png"}
+
+# Load processed cancer traits data with longevity quotient (LQ)
+cancer_traits_processed <- read.csv(file.path(trait_dir, "cancer_traits_processed-LQ.csv"))
+
+# Load melted traits data
+melted_traits <- read.csv(file.path(trait_dir, "melted_traits.csv"))
+
+# Other traits
+other_traits <- read_tsv(file.path(dataDir, "6.Other-primate-phenotypes/Supplementary_Tables_1_-_Non-human_primates_phenomic_dataset 2.tsv"))
+
+# Family data
+family_data <- read_tsv(file.path(dataDir, "5.Phylogeny/taxid_species_family.tsv"))
+
+# Your primate tree
+primate_tree <- as.phylo(primate_tree)
+
+# Map species in the tree to the tax_ids
+tree_ids <- data.frame(
+  species = primate_tree$tip.label,
+  tax_id = sapply(primate_tree$tip.label, function(x) {
+    row <- family_data %>% filter(gsub(" ", "_", species) == x)
+    if (nrow(row) == 1) {
+      return(row$tax_id)
+    } else {
+      return(NA)
+    }
+  })
+)
+
+# Contradictory species from ACE paper
+contradictory.f <- file.path(resultsDir, "1.Data-exploration/5.Data-curation_ZIMS-ACE/Compared_data_ZIMS-ACE.csv")
+contradictory <- read.csv(contradictory.f)
+
+# Separate malignant_prevalence* columns from neoplasia_prevalence* columns
+contradictory_neoplasia <- contradictory %>%
+  select(species, contains("neoplasia_label")) %>%
+  # Drop rows with NA
+  drop_na() %>%
+  # Drop rows where value is INTERMEDIATE
+  filter(.[[2]] != "INTERMEDIATE" & .[[3]] != "INTERMEDIATE") %>%
+  # Check if column 2 and column 3 are contradictory
+  filter(.[[2]] != .[[3]]) %>%
+  pull(species)
+
+contradictory_malignant <- contradictory %>%
+  select(species, contains("malignant_label")) %>%
+  # Drop rows with NA
+  drop_na() %>%
+  # Drop rows where value is INTERMEDIATE
+  filter(.[[2]] != "INTERMEDIATE" & .[[3]] != "INTERMEDIATE") %>%
+  # Check if column 2 and column 3 are contradictory
+  filter(.[[2]] != .[[3]]) %>%
+  pull(species)
+
+# Remove contradictory species from cancer traits processed
+cancer_traits_processed.pr <- cancer_traits_processed %>%
+  # For species with contradictory labels, set prevalences to NA
+  mutate(
+    neoplasia_prevalence = if_else(species %in% contradictory_neoplasia, NA_real_, neoplasia_prevalence),
+    malignant_prevalence = if_else(species %in% contradictory_malignant, NA_real_, malignant_prevalence)
+  )
+
+# ACE cancer traits
+cancer_ACE <- read.csv("/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/NeoplasiaAcrossVertebrates/cancerAcrossVertebrates/min20-2022.05.16.csv")
+cancer_ACE <- cancer_ACE %>%
+  rename(species = Species) %>%
+  # Make species names binomial with underscore
+  mutate(species = gsub(" ", "_", species)) %>%
+  filter(Orders == "Primates") %>%
+  select(species, RecordsWithDenominators, NeoplasiaWithDenominators, Malignant) %>%
+  # Compute prevalence
+  mutate(
+    neoplasia_prevalence.ACE = NeoplasiaWithDenominators / RecordsWithDenominators,
+    malignant_prevalence.ACE = Malignant / RecordsWithDenominators
+  )
+
+# Remove contradictory species from cancer traits processed
+cancer_ACE.pr <- cancer_ACE %>%
+  # For species with contradictory labels, set prevalences to NA
+  mutate(
+    neoplasia_prevalence.ACE = if_else(species %in% contradictory_neoplasia, NA_real_, neoplasia_prevalence.ACE),
+    neoplasia_prevalence.ACE = if_else(species %in% contradictory_malignant, NA_real_, malignant_prevalence.ACE)
+  )
+
+# Save as csv
+write_csv(cancer_traits_processed.pr, file.path(trait_dir, "cancer_traits_processed_no_contr_ACE.csv"))
+write_csv(cancer_ACE.pr, file.path(trait_dir, "cancer_traits_ACE_no_contr.csv"))
+
+# Add Haldane-Anscombe tranformation to the prevalences to prevent 0s
+## Only used for visualization and correlation analysis, not for the ranking
+## Haldane prevalence = (ki + 0.5) / (n + 1)
+cancer_traits_processed.ha <- cancer_traits_processed.pr %>%
+  mutate(
+    neoplasia_prevalence_ha   = (neoplasia_necropsy + 0.5) / (adult_necropsy_count + 1),
+    malignant_prevalence_ha   = (malignant_count + 0.5) / (adult_necropsy_count + 1)
+  ) %>%
+  mutate(
+    neoplasia_prevalence_ha   = if_else(species %in% contradictory_neoplasia, NA_real_, neoplasia_prevalence_ha),
+    malignant_prevalence_ha   = if_else(species %in% contradictory_malignant, NA_real_, malignant_prevalence_ha),
+  )
+
+cancer_ACE.ha <- cancer_ACE.pr %>%
+  mutate(
+    neoplasia_prevalence_ACE_ha = (NeoplasiaWithDenominators + 0.5) / (RecordsWithDenominators + 1),
+    malignant_prevalence_ACE_ha = (Malignant + 0.5) / (RecordsWithDenominators + 1)
+  ) %>%
+  mutate(
+    neoplasia_prevalence_ACE_ha = if_else(species %in% contradictory_neoplasia, NA_real_, neoplasia_prevalence_ACE_ha),
+    malignant_prevalence_ACE_ha = if_else(species %in% contradictory_malignant, NA_real_, malignant_prevalence_ACE_ha)
+  )
+
+# Save as csv
+write_csv(cancer_traits_processed, file.path(trait_dir, "cancer_traits_processed_HA.csv"))
+
+other_traits.pruned <- other_traits %>%
+  rename(species = SpeciesBROAD) %>%
+  left_join(family_data, by = "species") %>%
+  select(tax_id, species, family, everything()) %>%
+  # Filter rows with no phenotypic information (no tax_id)
+  filter(!is.na(tax_id)) %>%
+  # Filter not in tree by tax_id
+  filter(tax_id %in% tree_ids$tax_id) %>%
+  mutate(
+    species = gsub(" ", "_", species),
+    # Overwrite lifespan for Propithecus_coquereli
+    Maximum.lifespan..y. = if_else(
+      species == "Propithecus_coquereli",
+      30.6,
+      Maximum.lifespan..y.
+    )
+  ) %>%
+  mutate(
+    LQ = Maximum.lifespan..y. / (6.47 * (BodyMass_kg*1000)^0.189)
+  ) %>%
+  select(-GroupName) %>%
+  left_join(
+    cancer_traits_processed.ha %>%
+      select(species, neoplasia_prevalence, malignant_prevalence, adult_necropsy_count, neoplasia_prevalence_ha, malignant_prevalence_ha),
+    by = "species"
+  ) %>%
+  left_join(
+    cancer_ACE.ha %>%
+      select(species, neoplasia_prevalence.ACE, malignant_prevalence.ACE, neoplasia_prevalence_ACE_ha, malignant_prevalence_ACE_ha),
+    by = "species"
+  )
+
+# Re-write the csv
+write_csv(other_traits.pruned, file.path(dataDir, "6.Other-primate-phenotypes/other_traits_pruned_with_LQ.csv"))
+
+
+# Trait columns
+trait_cols <- setdiff(names(other_traits.pruned), c("species", "family"))
+
+# Utility: check if a trait is numeric
+is_numeric_trait <- function(x) {
+  suppressWarnings(all(!is.na(as.numeric(x)) | is.na(x)))
+}
+
+# === 3. Build List of Trait DataFrames ===
+other_traits_list <- purrr::map(trait_cols, function(trait) {
+  t_sym <- sym(trait)
+
+  df <- other_traits.pruned %>%
+    select(species, family, !!t_sym) %>%
+    filter(!is.na(!!t_sym))
+
+  if (nrow(df) < 4) {
+    message("Skipping ", trait, " (fewer than 4 rows after NA filtering)")
+    return(NULL)
+  }
+
+  # Numeric branch
+  if (is_numeric_trait(df[[trait]])) {
+    message("Encoding numeric trait: ", trait)
+
+    # normalize to numeric once
+    df_num <- df %>% mutate(!!trait := as.numeric(!!t_sym))
+
+    # global stats (computed once)
+    g_mean   <- mean(df_num[[trait]],   na.rm = TRUE)
+    g_median <- median(df_num[[trait]], na.rm = TRUE)
+    g_sd     <- sd(df_num[[trait]],     na.rm = TRUE)
+
+    g_q25 <- quantile(df_num[[trait]], 0.25, na.rm = TRUE)
+    g_q75 <- quantile(df_num[[trait]], 0.75, na.rm = TRUE)
+
+    # family stats separately, then join
+    family_stats <- df_num %>%
+      group_by(family) %>%
+      summarise(
+        family_mean   = mean(!!t_sym, na.rm = TRUE),
+        family_median = median(!!t_sym, na.rm = TRUE),
+        family_sd     = sd(!!t_sym, na.rm = TRUE),
+        .groups = "drop"
+      )
+
+    df_num <- df_num %>%
+      left_join(family_stats, by = "family") %>%
+      mutate(
+        # global outlier by 3*SD rule
+        outlier = (!!t_sym > (g_mean + 3 * g_sd)) | (!!t_sym < (g_mean - 3 * g_sd)),
+        # labels using precomputed global quantiles/median
+        global_label = case_when(
+          (!!t_sym < g_q25) & (!!t_sym < g_median) ~ "low_extreme",
+          (!!t_sym > g_q75) & (!!t_sym > g_median) ~ "high_extreme",
+          TRUE ~ "normal"
+        )
+      ) %>%
+      # family labels: compute per-family quantiles; do it within group
+      group_by(family) %>%
+      mutate(
+        family_q25   = quantile(!!t_sym, 0.25, na.rm = TRUE),
+        family_q75   = quantile(!!t_sym, 0.75, na.rm = TRUE),
+        family_label = case_when(
+          (!!t_sym < family_q25) & (!!t_sym < family_median) ~ "low_extreme",
+          (!!t_sym > family_q75) & (!!t_sym > family_median) ~ "high_extreme",
+          TRUE ~ "normal"
+        ),
+        family_outlier = (!!t_sym > (family_mean + 3 * family_sd)) |
+                         (!!t_sym < (family_mean - 3 * family_sd))
+      ) %>%
+      ungroup() %>%
+      mutate(value = !!t_sym) %>%
+      select(-family_q25, -family_q75) # drop helper columns
+
+    return(df_num)
+  }
+
+  # Categorical branch: keep raw values as 'value' (numeric encoding happens later)
+  message("Summarizing categorical trait for plot visualization: ", trait)
+  # Categorical traits: pivot counts per category
+  df <- df %>%
+    group_by(family, !!t_sym) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    pivot_wider(names_from = !!t_sym, values_from = n, values_fill = 0)
+}) %>%
+  set_names(trait_cols) %>%
+  compact()
+
+trait_cols <- names(other_traits_list %>% keep(~ nrow(.) >= 4))
+
+```
+
+## 2. Visualization Functions
+This section defines functions to generate contrast plots for numeric and categorical traits, visualizing their distributions across primate families.
+
+```{r trait_distribution, fig.height = 15, fig.width = 20, dev = 'png', dpi = 320}
+
+# === 4. Contrast Plot Functions ===
+
+# Numeric trait plotting
+gen_contrast_numeric <- function(df, trait_label) {
+  stopifnot(all(c("species","family","value") %in% names(df)))
+  df <- df %>%
+    mutate(family = factor(family, levels = rev(names(sort(tapply(value, family, median, na.rm = TRUE))))))
+
+  global_median <- median(df$value, na.rm = TRUE)
+
+  ggplot(df, aes(x = value, y = family)) +
+    geom_point(aes(shape = outlier, color = family, fill = family), size = 3.5, alpha = 0.8) +
+    geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = "salmon3") +
+    stat_summary(fun = median, geom = "errorbar",
+                 aes(xmax = after_stat(x), xmin = after_stat(x), y = family),
+                 linewidth = 1.2) +
+    scale_shape_manual(values = c(`FALSE` = 21, `TRUE` = 24), drop = FALSE) +
+    scale_fill_manual(values = primate_family_colors) +
+    scale_color_manual(values = primate_family_colors) +
+    labs(x = trait_label, y = "Primate families") +
+    theme_minimal() +
+    theme(axis.text.y = element_text(size = 12),
+          axis.title.x = element_text(size = 14, margin = margin(t = 12)),
+          axis.title.y = element_text(size = 14, margin = margin(r = 12)))
+}
+
+# Categorical trait plotting
+gen_contrast_categorical <- function(df_counts, trait_label) {
+  stopifnot("family" %in% names(df_counts))
+  df_long <- df_counts %>%
+    tidyr::pivot_longer(-family, names_to = "Category", values_to = "Count") %>%
+    group_by(family) %>% mutate(Total = sum(Count, na.rm = TRUE)) %>% ungroup() %>%
+    mutate(family = factor(family, levels = unique(family[order(-Total)])))
+
+  ggplot(df_long, aes(x = family, y = Count, fill = Category)) +
+    geom_col(position = "stack") +
+    labs(x = "Primate families", y = paste0(trait_label, " counts")) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+
+# HEAVY DUTY. RUN WHEN NEEDED.
+# === 5. Generate Plots ===
+plotDir <- file.path(resultsDir, "1.Data-exploration/11.Phylogenetic_distribution_others")
+if (!dir.exists(plotDir)) dir.create(plotDir, recursive = TRUE)
+
+contrast_plots <- list()
+
+# # Subet other_traits_list to keep only LQ
+# LQ_plots <- other_traits_list["LQ"]
+
+for (trait in names(other_traits_list)) {
+  message("Processing trait: ", trait)
+  df <- other_traits_list[[trait]]
+  if (is.null(df) || nrow(df) < 4) next
+
+  plot_file <- file.path(plotDir, paste0(trait, "_contrast.png"))
+
+  if (is_numeric_trait(other_traits.pruned[[trait]])) {
+    contrast_plots[[trait]] <- gen_contrast_numeric(df, trait)
+  } else {
+    contrast_plots[[trait]] <- gen_contrast_categorical(df, trait)
+  }
+
+  ggsave(plot_file, contrast_plots[[trait]], device = "png", width = 15, height = 10, dpi = "retina")
+}
+
+```
+
+## 3. Re-encoding of the categorical traits
+Repetitive code to encode categorical traits as numeric for downstream analysis. Numeric traits are processed to compute global and family statistics, while categorical traits are retained for later encoding.
+
+```{r trait_encoding, fig.height = 15, fig.width = 20, dev = 'png', dpi = 320}
+
+# === 5. Build List of Trait DataFrames, now encoding categorical traits as numeric ===
+other_traits_encoded <- purrr::map(trait_cols, function(trait) {
+  t_sym <- sym(trait)
+
+  df <- other_traits.pruned %>%
+    select(species, family, !!t_sym) %>%
+    filter(!is.na(!!t_sym))
+
+  if (nrow(df) < 4) {
+    message("Skipping ", trait, " (fewer than 4 rows after NA filtering)")
+    return(NULL)
+  }
+
+  # Numeric branch
+  if (is_numeric_trait(df[[trait]])) {
+    message("Encoding numeric trait: ", trait)
+
+    # normalize to numeric once
+    df_num <- df %>% mutate(!!trait := as.numeric(!!t_sym))
+
+    # global stats (computed once)
+    g_mean   <- mean(df_num[[trait]],   na.rm = TRUE)
+    g_median <- median(df_num[[trait]], na.rm = TRUE)
+    g_sd     <- sd(df_num[[trait]],     na.rm = TRUE)
+
+    g_q25 <- quantile(df_num[[trait]], 0.25, na.rm = TRUE)
+    g_q75 <- quantile(df_num[[trait]], 0.75, na.rm = TRUE)
+
+    # family stats separately, then join
+    family_stats <- df_num %>%
+      group_by(family) %>%
+      summarise(
+        family_mean   = mean(!!t_sym, na.rm = TRUE),
+        family_median = median(!!t_sym, na.rm = TRUE),
+        family_sd     = sd(!!t_sym, na.rm = TRUE),
+        .groups = "drop"
+      )
+
+    df_num <- df_num %>%
+      left_join(family_stats, by = "family") %>%
+      mutate(
+        # global outlier by 3*SD rule
+        outlier = (!!t_sym > (g_mean + 3 * g_sd)) | (!!t_sym < (g_mean - 3 * g_sd)),
+        # labels using precomputed global quantiles/median
+        global_label = case_when(
+          (!!t_sym < g_q25) & (!!t_sym < g_median) ~ "low_extreme",
+          (!!t_sym > g_q75) & (!!t_sym > g_median) ~ "high_extreme",
+          TRUE ~ "normal"
+        )
+      ) %>%
+      # family labels: compute per-family quantiles; do it within group
+      group_by(family) %>%
+      mutate(
+        family_q25   = quantile(!!t_sym, 0.25, na.rm = TRUE),
+        family_q75   = quantile(!!t_sym, 0.75, na.rm = TRUE),
+        family_label = case_when(
+          (!!t_sym < family_q25) & (!!t_sym < family_median) ~ "low_extreme",
+          (!!t_sym > family_q75) & (!!t_sym > family_median) ~ "high_extreme",
+          TRUE ~ "normal"
+        ),
+        family_outlier = (!!t_sym > (family_mean + 3 * family_sd)) |
+                         (!!t_sym < (family_mean - 3 * family_sd))
+      ) %>%
+      ungroup() %>%
+      mutate(value = !!t_sym) %>%
+      select(-family_q25, -family_q75) # drop helper columns
+
+    return(df_num)
+  }
+
+  # Categorical branch: keep raw values as 'value' (numeric encoding happens later)
+  message("Passing categorical trait as-is (will encode downstream): ", trait)
+  df %>%
+    mutate(value = !!t_sym)
+}) %>%
+  set_names(trait_cols) %>%
+  compact()
+
+```
+
+## 4. Applying the selection algorithm
+Here we apply the selection algorithm to identify phylogenetically independent pairs of species for each trait. We calculate patristic distances, build pairwise data, and use a modified selection function to select pairs based on distance and trait differences.
+
+```{r distance_matrices, fig.height = 15, fig.width = 20, dev = 'png', dpi = 320}
+
+# === 6. Calculate Patristic Distances ===
+# Calculate patristic distances for filtered cancer traits
+distance_matrix.l <- lapply(other_traits_encoded, function(df) {
+  distance_matrix <- calculate_patristic_distances(primate_tree, df)
+  return(distance_matrix)
+})
+
+```
+
+```{r, ranking, dev="png", fig.width=16, fig.height=8, dpi=320}
+
+# === 7. Build Pairwise Data ===
+# Build pairwise data for all traits
+# Helper: keep only one direction (A–B, not B–A), and no self-pairs
+
+dedup_pairs <- function(df) {
+  df %>%
+    dplyr::filter(species1 != species2) %>%
+    dplyr::filter(diff > 0 | (diff == 0 & species1 < species2))
+}
+
+# Here's where the actual encoding for categorical traits happens
+
+pairwise_construction_cat <- purrr::map(trait_cols, function(trait) {
+  df <- other_traits_encoded[[trait]]
+
+  if (is.numeric(df$value)) {
+    message("Pairwise (numeric): ", trait)
+    df1 <- df %>% dplyr::filter(global_label == "high_extreme") %>%
+      transmute(species1 = species, value1 = value)
+    df2 <- df %>% dplyr::filter(global_label == "low_extreme") %>%
+      transmute(species2 = species, value2 = value)
+
+    tidyr::crossing(df1, df2) %>%
+      dplyr::mutate(diff = value1 - value2,
+             absdiff = abs(diff)) %>%
+      dedup_pairs()
+  } else {
+    message("Pairwise (categorical, random encoding): ", trait)
+    set.seed(1998)
+    levels_shuffled <- sample(unique(df$value))
+    encoding <- setNames(sample(1000, length(levels_shuffled)), levels_shuffled)
+
+    tmp <- df %>% dplyr::mutate(trait_encoded = as.numeric(encoding[as.character(value)]))
+    df1 <- tmp %>% transmute(species1 = species, trait_encoded1 = trait_encoded)
+    df2 <- tmp %>% transmute(species2 = species, trait_encoded2 = trait_encoded)
+
+    tidyr::crossing(df1, df2) %>%
+      dplyr::mutate(diff = trait_encoded1 - trait_encoded2,
+             absdiff = abs(diff)) %>%
+      dedup_pairs()
+  }
+}) %>%
+  set_names(trait_cols) %>%
+  purrr::compact()
+
+# Remove categorical traits
+pairwise_construction <- purrr::map(trait_cols, function(trait) {
+  df <- other_traits_encoded[[trait]]
+
+  if (is.numeric(df$value)) {
+    message("Pairwise (numeric): ", trait)
+    df1 <- df %>% dplyr::filter(global_label == "high_extreme") %>%
+      transmute(species1 = species, value1 = value)
+    df2 <- df %>% dplyr::filter(global_label == "low_extreme") %>%
+      transmute(species2 = species, value2 = value)
+
+    tidyr::crossing(df1, df2) %>%
+      dplyr::mutate(diff = value1 - value2,
+             absdiff = abs(diff)) %>%
+      dedup_pairs()
+  } else {
+    message("Categorical, skip.")
+  }
+}) %>%
+  set_names(trait_cols) %>%
+  purrr::compact()
+
+```
+
+```{r, ranking2, dev="png", fig.width=16, fig.height=8, dpi=320}
+# We need to slightly adapt the pair_sel.f function to work with our data
+pair_sel.f.mod <- function(distance_matrix, overlap_df, traits_df) {
+  # Transform the distance matrix into a dataframe
+  # Very slight modification of the original species to address dataframe structure differences
+  trait_df <- traits_df %>%
+    dplyr::select(species, value)
+  
+  distance_df <- as.data.frame(as.matrix(distance_matrix)) %>%
+    rownames_to_column(var = "species1") %>%
+    gather(key = "species2", value = "distance", -species1) %>%
+    filter(distance != 0) %>%
+    left_join(trait_df, by = c("species1" = "species")) %>%
+    dplyr::rename(value1 = value) %>%
+    left_join(trait_df, by = c("species2" = "species")) %>%
+    dplyr::rename(value2 = value)
+
+  # Filter out pairs not in the overlap dataframe
+  distance_df <- distance_df %>%
+    left_join(overlap_df, by = c("species1", "species2")) %>%
+    mutate(distance = round(distance, 4),
+           diff = round(abs(absdiff), 4)) %>%
+    arrange(distance, desc(diff)) %>%
+    filter(!is.na(diff)) %>%
+    select(species1, species2, distance, diff)
+
+  # Initialize results variables
+  selected_pairs <- data.frame()
+
+  # Find the top pair based on distance
+  top_pair <- distance_df %>%
+    arrange(distance) %>%
+    slice_head(n = 1) %>%
+    mutate(cluster = 1)
+  
+  print(paste0("Top pair selected: ", top_pair$species1, " - ", top_pair$species2, " with distance ", top_pair$distance, " and diff ", top_pair$diff))
+
+  selected_pairs <- rbind(selected_pairs, top_pair)
+  selected_species <- data.frame(top = top_pair$species1, bottom = top_pair$species2, diff = top_pair$diff, cluster = top_pair$cluster)
+  mat <- as.matrix(distance_matrix)
+
+  # Initialize results for Dunn index
+  dunn_results <- data.frame(species1 = character(), species2 = character(), Dunn_index = numeric(), diff = numeric(), cluster = numeric())
+  dunn_result_cummulative <- data.frame()
+
+  # Initialize variables
+  current_dunn_index <- Inf
+  iteration_limit <- 15
+  iteration_count <- 0
+
+  # Begin loop
+  while (current_dunn_index >= 1 && iteration_count < iteration_limit) {
+    iteration_count <- iteration_count + 1
+    querry_cluster <- iteration_count + 1
+
+    print(paste0("Iteration: ", iteration_count))
+
+    dunn_candidates <- apply(distance_df, 1, function(row) {
+      query_species1 <- row["species1"]
+      query_species2 <- row["species2"]
+      query_diff <- row["diff"]
+
+      selected_species <- rbind(selected_species, data.frame(top = query_species1, bottom = query_species2, diff = query_diff, cluster = querry_cluster))
+
+      selected_species.str <- selected_species %>%
+        pivot_longer(cols = c(top, bottom), names_to = "label", values_to = "species") %>%
+        pull(cluster) %>%
+        setNames(., selected_species %>%
+                   pivot_longer(cols = c(top, bottom), names_to = "label", values_to = "species") %>%
+                   pull(species))
+
+      clusters <- as.integer(selected_species.str)
+      matrix <- mat[names(selected_species.str), names(selected_species.str)]
+      dist_mat <- as.dist(matrix)
+
+      dunn_value <- mod_dunn(dist_mat, clusters, selected_cluster = querry_cluster, verbose = FALSE)
+      dunn_value <- round(dunn_value, 4)
+
+      return(data.frame(species1 = query_species1, species2 = query_species2, Dunn_index = dunn_value, diff = query_diff, cluster = querry_cluster))
+    })
+
+    dunn_candidates <- do.call(rbind, dunn_candidates)
+    dunn_result_cummulative <- rbind(dunn_result_cummulative, dunn_candidates) %>%
+      arrange(desc(cluster), desc(Dunn_index), desc(diff))
+
+    dunn_best <- dunn_candidates %>%
+      arrange(desc(Dunn_index), desc(diff)) %>%
+      slice_head(n = 1)
+
+    current_dunn_index <- dunn_best$Dunn_index
+
+    if (current_dunn_index < 1) {
+      break
+    }
+
+    dunn_results <- rbind(dunn_results, dunn_best)
+    selected_species <- rbind(selected_species, data.frame(top = dunn_best$species1, bottom = dunn_best$species2, diff = dunn_best$diff, cluster = dunn_best$cluster))
+  }
+
+  selected_pairs <- selected_pairs %>%
+    dplyr::select(species1, species2)
+
+  dunn_out <- dunn_results %>%
+    dplyr::select(species1, species2)
+
+  selected_pairs <- bind_rows(selected_pairs, dunn_out)
+
+  if (iteration_count == iteration_limit) {
+    warning("Iteration limit reached before Dunn index dropped below 1.")
+  }
+
+  return(list(dunn_results = dunn_results,
+              selected_pairs = selected_pairs,
+              dunn_result_cummulative = dunn_result_cummulative,
+              distance_df = distance_df,
+              distance_matrix = distance_matrix))
+}
+
+```
+
+```{r, ranking3, dev="png", fig.width=16, fig.height=8, dpi=320}
+
+trait_cols <- pairwise_construction |> purrr::keep(~ nrow(.x) >= 4) |> names()
+
+# Subsample trait_cols keeping only LQ
+new_trait_cols <- trait_cols[trait_cols %in% c("LQ")]
+
+selected_pairs_results <-
+  new_trait_cols |>
+  purrr::set_names() |>
+  purrr::map(function(trait) {
+    df <- other_traits_encoded[[trait]]
+
+    if (is.null(df)) {
+      print(paste("Skipping", trait, "- no dataframe found")); return(NULL)
+    }
+    if (nrow(df) < 4) {
+      print(paste("Skipping", trait, "- fewer than 4 rows")); return(NULL)
+    }
+    if (!isTRUE(is_numeric_trait(df$value))) {
+      print(paste("Skipping", trait, "- non-numeric trait")); return(NULL)
+    }
+
+    dm <- distance_matrix.l[[trait]]
+    ov <- pairwise_construction[[trait]]
+    if (is.null(dm) || is.null(ov)) {
+      print(paste("Skipping", trait, "- missing distance matrix or overlap df")); return(NULL)
+    }
+
+    print(paste("Processing numeric trait:", trait))
+    res <- pair_sel.f.mod(distance_matrix = dm, overlap_df = ov, traits_df = df)
+
+    if (is.list(res) && is.data.frame(res$selected_pairs)) {
+      print(paste(" → Selected", nrow(res$selected_pairs), "pairs for", trait))
+      return(res)
+    } else {
+      print(paste(" → No 'selected_pairs' for", trait))
+      return(NULL)
+    }
+
+    res
+  }) |>
+  purrr::compact()
+
+selected_pairs_list <- selected_pairs_results |> purrr::map("selected_pairs") |> purrr::compact()
+pairs_overview <- dplyr::bind_rows(selected_pairs_list, .id = "trait")
+pairs_summary  <- pairs_overview |> dplyr::count(trait, name = "n_pairs") |> dplyr::arrange(dplyr::desc(n_pairs))
+
+# Print the selected pairs
+print(selected_pairs_list)
+
+# Remove df with less than 2 rows
+selected_pairs_pruned <- selected_pairs_list |> purrr::keep(~ nrow(.x) >= 2)
+
+# Save selected pairs to results directory
+
+out_dir <- file.path(resultsDir, "1.Data-exploration/11.Phylogenetic_distribution_others/other_traitfiles")
+createDir(out_dir)
+
+# Save selected pairs list
+saveRDS(selected_pairs_pruned, file.path(out_dir, "selected_pairs_other_traits.rds"))
+# Save pairs overview and summary
+write_tsv(pairs_overview, file.path(out_dir, "pairs_overview_other_traits.tsv"))
+write_tsv(pairs_summary,  file.path(out_dir, "pairs_summary_other_traits.tsv"))
+
+```
+
+## 5. Check overlap between our cancer pairs and selected pairs in rest of the traits
+Here we compare the selected pairs from other traits with cancer-related pairs to identify overlaps. We build hypotheses based on cancer data and evaluate their presence in the selected pairs for other traits.
+
+```{r overlap_cancer_pairs, fig.height = 20, fig.width = 10, dev = 'png', dpi = 320}
+# === 8. Comparing to cancer data ===
+# Load cancer pairs from resultsDir/2.CAAS/1.Discovery/1.Traitfiles
+## We will load files ended in _paired_species.tab
+cancer_pairs_files <- list.files(file.path(resultsDir, "2.CAAS/1.Discovery/1.Traitfiles"), pattern = "_paired_species.tab$", full.names = TRUE, recursive = TRUE)
+
+cancer_pairs_list <- lapply(cancer_pairs_files, function(file) {
+  df <- read_tsv(file, col_types = cols()) %>%
+    mutate(across(everything(), ~ gsub(" ", "_", .)))  # Ensure species names match format
+  return(df)
+})
+
+names(cancer_pairs_list) <- gsub("_paired_species.tab$", "", basename(cancer_pairs_files))
+
+# We want to see many times we observe the species in our cancer traits represented as global_extremes in the other traits.
+## For this we will use other_traits_encoded to get the global extremes species for each trait. 
+### In the cancer traitfiles, species are encoded as 1 (high) and 0 (low).
+### Pairs represent the couple of species with high and low values for the trait, that were extracted using the algorithm. This means that they should be the best contrast candidates given their phylogenetic distance and trait difference.
+### Contrasts represent the hypothesis, where a pair is tested for association between the trait and the presence of cancer-related mutations, against another pair.
+
+# Helper: from a cancer df (species, contrast, trait[0/1], pair) build:
+#  - map pair -> (top, bottom)
+#  - all 2-combinations of pairs per contrast (the hypotheses)
+.build_hypotheses <- function(cancer_df) {
+  cancer_df <- cancer_df %>%
+    mutate(
+      across(where(is.character), ~ gsub(" ", "_", .x)),
+      trait    = as.integer(trait),
+      pair     = as.character(pair),
+      contrast = as.character(contrast)
+    )
+
+  # Map: pair id -> (top, bottom)
+  pair_map <- cancer_df %>%
+    group_by(pair) %>%
+    summarise(
+      top    = unique(species[trait == 1])[1],
+      bottom = unique(species[trait == 0])[1],
+      .groups = "drop"
+    )
+
+  # Unique pairs per contrast
+  contr_pairs <- cancer_df %>%
+    distinct(contrast, pair) %>%
+    arrange(contrast, pair)
+
+  # Build all 2-combinations of pairs within each contrast
+  spl <- split(contr_pairs$pair, contr_pairs$contrast)
+
+  hypos <- purrr::imap_dfr(spl, function(pairs_vec, contrast_id) {
+    pairs_vec <- unique(pairs_vec)
+    if (length(pairs_vec) < 2) return(tibble())
+    cmb <- combn(pairs_vec, 2, simplify = FALSE)
+    tibble(
+      contrast = contrast_id,
+      pairA = vapply(cmb, function(x) x[1], character(1)),
+      pairB = vapply(cmb, function(x) x[2], character(1))
+    )
+  })
+
+  hypos %>%
+    left_join(pair_map %>% dplyr::rename(pairA = pair, topA = top, bottomA = bottom), by = "pairA") %>%
+    left_join(pair_map %>% dplyr::rename(pairB = pair, topB = top, bottomB = bottom), by = "pairB")
+}
+
+# Presence evaluator against your pairwise_construction (named list of data.frames
+# with columns species1 (high_extreme) and species2 (low_extreme))
+.has_pair <- function(tbl, top, bottom) {
+  "species1" %in% names(tbl) && "species2" %in% names(tbl) &&
+    any(tbl$species1 == top & tbl$species2 == bottom)
+}
+
+.eval_hypothesis <- function(topA, bottomA, topB, bottomB, pwc) {
+  vA <- vapply(pwc, .has_pair, logical(1), top = topA, bottom = bottomA)
+  vB <- vapply(pwc, .has_pair, logical(1), top = topB, bottom = bottomB)
+  both <- vA & vB
+  trait_names <- names(pwc)
+  list(
+    n_traits_both = sum(both),
+    traits_both   = trait_names[both],
+    n_traits_A    = sum(vA),
+    traits_A      = trait_names[vA],
+    n_traits_B    = sum(vB),
+    traits_B      = trait_names[vB]
+  )
+}
+
+per_hypothesis_presence <-
+  purrr::imap_dfr(cancer_pairs_list, function(cancer_df, cancer_name) {
+    hypos <- .build_hypotheses(cancer_df)
+    if (nrow(hypos) == 0) return(tibble())
+
+    res <- purrr::pmap(
+      list(hypos$topA, hypos$bottomA, hypos$topB, hypos$bottomB),
+      .eval_hypothesis,
+      pwc = pairwise_construction
+    )
+
+    hypos %>%
+      dplyr::bind_cols(tibble(res = res)) %>%
+      dplyr::mutate(
+        cancer_file    = cancer_name,
+        n_traits_both  = purrr::map_int(res, "n_traits_both"),
+        traits_both    = purrr::map(res, "traits_both"),
+        n_traits_A     = purrr::map_int(res, "n_traits_A"),
+        traits_A       = purrr::map(res, "traits_A"),
+        n_traits_B     = purrr::map_int(res, "n_traits_B"),
+        traits_B       = purrr::map(res, "traits_B")
+      ) %>%
+      dplyr::select(
+        cancer_file, contrast, pairA, topA, bottomA, pairB, topB, bottomB,
+        n_traits_both, traits_both, n_traits_A, traits_A, n_traits_B, traits_B
+      ) %>%
+      dplyr::arrange(cancer_file, contrast, pairA, pairB)
+  })
+
+# ---- Run per cancer file; bind results
+# Universe of "other" traits to check against
+trait_universe <- names(pairwise_construction)
+
+# Human-readable hypothesis id
+per_hypothesis_presence <- per_hypothesis_presence %>%
+  dplyr::mutate(
+    hypothesis_id = sprintf(
+      "%s | c%s | %s[%s↑/%s↓] vs %s[%s↑/%s↓]",
+      cancer_file, contrast,
+      pairA, topA, bottomA,
+      pairB, topB, bottomB
+    )
+  )
+
+# Long normalized table: one row per hypothesis × trait
+hypothesis_trait_presence <-
+  per_hypothesis_presence %>%
+  dplyr::transmute(
+    cancer_file, contrast, hypothesis_id,
+    pairA, topA, bottomA, pairB, topB, bottomB,
+    traits_A, traits_B
+  ) %>%
+  dplyr::mutate(
+    presence_tbl = purrr::pmap(list(traits_A, traits_B), function(A, B) {
+      A <- unique(A %||% character(0))
+      B <- unique(B %||% character(0))
+      tibble(
+        trait = trait_universe,
+        presence = dplyr::case_when(
+          trait %in% A & trait %in% B ~ "both",
+          trait %in% A               ~ "A_only",
+          trait %in% B               ~ "B_only",
+          TRUE                       ~ "none"
+        )
+      )
+    })
+  ) %>%
+  dplyr::select(-traits_A, -traits_B) %>%
+  tidyr::unnest(presence_tbl)
+
+# Optional ordering: traits by frequency of "both"; hypotheses by their "both" count
+trait_order <- hypothesis_trait_presence %>%
+  dplyr::summarise(n_both = sum(presence == "both"), .by = trait) %>%
+  dplyr::arrange(dplyr::desc(n_both)) %>%
+  dplyr::pull(trait)
+
+hypo_order <- hypothesis_trait_presence %>%
+  dplyr::summarise(n_both = sum(presence == "both"), .by = hypothesis_id) %>%
+  dplyr::arrange(dplyr::desc(n_both)) %>%
+  dplyr::pull(hypothesis_id)
+
+hypothesis_trait_presence <- hypothesis_trait_presence %>%
+  dplyr::mutate(
+    trait = factor(trait, levels = trait_order),
+    hypothesis_id = factor(hypothesis_id, levels = hypo_order),
+    presence = factor(presence, levels = c("none","A_only","B_only","both"))
+  )
+
+# ---------- Exports ----------
+out_dir <- file.path(resultsDir, "1.Data-exploration/11.Phylogenetic_distribution_others/cancer_pairs_vs_other_traits")
+if (!dir.exists(out_dir)) dir.create(out_dir, recursive = TRUE)
+
+# Long table (fully explicit)
+readr::write_csv(hypothesis_trait_presence,
+  file.path(out_dir, "hypothesis_trait_presence_long.csv")
+)
+
+# Wide numeric matrix for spreadsheets / external plotting (0 none, 1 A-only, 2 B-only, 3 both)
+presence_wide <- hypothesis_trait_presence %>%
+  dplyr::mutate(code = dplyr::recode(presence, none = 0L, A_only = 1L, B_only = 2L, both = 3L)) %>%
+  dplyr::select(hypothesis_id, trait, code) %>%
+  tidyr::pivot_wider(names_from = trait, values_from = code, values_fill = 0L)
+
+readr::write_csv(presence_wide,
+  file.path(out_dir, "hypothesis_trait_presence_wide.csv")
+)
+
+# ---------- Heatmap ----------
+# Custom ordering function for traits (columns)
+order_traits_custom <- function(traits_chr) {
+  priority <- c("malignant_prevalence", "neoplasia_prevalence",
+                "adult_necropsy_count", "necropsy_counts")
+  traits_chr <- as.character(traits_chr)
+  c(intersect(priority, traits_chr),
+    setdiff(sort(traits_chr), priority))
+}
+
+order_hypos_by_file <- function(df_with_labels) {
+  priority <- c("malignant_prevalence", "neoplasia_prevalence",
+                "adult_necropsy_count", "necropsy_counts")
+  df_with_labels %>%
+    dplyr::distinct(hypo_label, cancer_file, contrast) %>%
+    dplyr::mutate(
+      file_rank = match(cancer_file, priority),
+      file_rank = ifelse(is.na(file_rank), length(priority) + 1L, file_rank),
+      # try numeric contrast if it’s like "1", else fall back to alpha
+      contrast_rank = suppressWarnings(as.numeric(contrast)),
+      contrast_rank = ifelse(is.na(contrast_rank), Inf, contrast_rank)
+    ) %>%
+    dplyr::arrange(file_rank, contrast_rank, hypo_label) %>%
+    dplyr::pull(hypo_label)
+}
+
+# 1) Keep only traits (columns) that have at least one non-"none" presence
+traits_keep <- hypothesis_trait_presence %>%
+  summarise(any_present = any(presence != "none"), .by = trait) %>%
+  filter(any_present) %>%
+  pull(trait)
+
+heatmap_df <- hypothesis_trait_presence %>%
+  dplyr::filter(trait %in% traits_keep) %>%
+  dplyr::mutate(
+    hypo_label = sprintf(
+      "c%s · %s\n%s[%s↑/%s↓]\n%s[%s↑/%s↓]",
+      contrast, cancer_file,
+      pairA, topA, bottomA,
+      pairB, topB, bottomB
+    )
+  )
+
+trait_levels <- order_traits_custom(unique(heatmap_df$trait))
+hypo_levels  <- order_hypos_by_file(heatmap_df)
+
+heatmap_df <- heatmap_df %>%
+  dplyr::mutate(
+    trait      = factor(trait, levels = trait_levels),
+    hypo_label = factor(hypo_label, levels = hypo_levels),
+    presence   = factor(presence, levels = c("none","A_only","B_only","both"))
+  )
+
+# 3) Heatmap
+ggplot(heatmap_df, aes(x = trait, y = hypo_label, fill = presence)) +
+  geom_tile(colour = "black") +
+  scale_fill_manual(
+    values = c(none = "#F2F2F2", A_only = "#6BAED6", B_only = "#FB6A4A", both = "#542788"),
+    drop = FALSE
+  ) +
+  labs(
+    title = "Presence of phylogenetically independent contrast pairs \nfrom other traits in cancer hypotheses",
+    x = "Other traits (filtered to any presence)",
+    y = "Cancer hypothesis (contrast · file, pairs on separate lines)",
+    fill = "Presence"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9),
+        axis.text.y = element_text(size = 12, lineheight = 0.9),
+        # Add some colored grid
+        panel.grid.major.x = element_line(color = "black", size = 0.2),
+        panel.grid.minor.x = element_line(color = "black", size = 0.1),
+        panel.grid.major.y = element_line(color = "black", size = 0.1),
+        panel.grid.minor.y = element_line(color = "black", size = 0.05),
+        legend.position = "top") + 
+  # Swap axes
+  coord_flip()
+
+ggsave(
+  file.path(out_dir, "hypothesis_trait_presence_heatmap.png"),
+  width = 8, height = 12, dpi = 320, device = "png"
+)
+
+# Build per-trait extreme sets from your canonical tables
+# (Assumes numeric traits in other_traits_list carry `global_label`.)
+extreme_tbl <- tibble(
+  trait = names(other_traits_list)
+) %>%
+  mutate(
+    high = purrr::map(trait, ~ {
+      df <- other_traits_list[[.x]]
+      if (is.null(df) || !"global_label" %in% names(df)) return(character(0))
+      unique(df$species[df$global_label == "high_extreme"])
+    }),
+    low  = purrr::map(trait, ~ {
+      df <- other_traits_list[[.x]]
+      if (is.null(df) || !"global_label" %in% names(df)) return(character(0))
+      unique(df$species[df$global_label == "low_extreme"])
+    })
+  )
+
+# Hypothesis label on multiple lines (same style you used for the heatmap)
+hypo_labels <- per_hypothesis_presence %>%
+  mutate(
+    hypo_label = sprintf(
+      "c%s · %s\n%s[%s↑/%s↓]\n%s[%s↑/%s↓]",
+      contrast, cancer_file,
+      pairA, topA, bottomA,
+      pairB, topB, bottomB
+    )
+  ) %>%
+  select(cancer_file, contrast, hypo_label, pairA, topA, bottomA, pairB, topB, bottomB)
+
+# Long table: hypothesis × trait with co-presence of two tops / two bottoms
+tops_bottoms_presence <- hypo_labels %>%
+  crossing(extreme_tbl) %>%
+  mutate(
+    tops2    = pmap_lgl(list(high, topA, topB),     ~ all(c(..2, ..3) %in% ..1)),
+    bottoms2 = pmap_lgl(list(low,  bottomA, bottomB), ~ all(c(..2, ..3) %in% ..1)),
+    status2  = case_when(
+      tops2 & bottoms2 ~ "tops_and_bottoms",
+      tops2            ~ "tops_both",
+      bottoms2         ~ "bottoms_both",
+      TRUE             ~ "none"
+    )
+  )
+
+tops_bottoms_presence.1 <- hypo_labels %>%
+  crossing(extreme_tbl) %>%
+  mutate(
+    # membership flags
+    tops2                 = pmap_lgl(list(high, topA, topB), ~ all(c(..2, ..3) %in% ..1)),
+    topA_is_high          = pmap_lgl(list(high, topA),       ~  ..2 %in% ..1),
+    topB_is_high          = pmap_lgl(list(high, topB),       ~  ..2 %in% ..1),
+    topA_is_low           = pmap_lgl(list(low,  topA),       ~  ..2 %in% ..1),
+    topB_is_low           = pmap_lgl(list(low,  topB),       ~  ..2 %in% ..1),
+    topA_is_normal        = pmap_lgl(list(high, low, topA),  ~ !(..3 %in% ..1) & !(..3 %in% ..2)),
+    topB_is_normal        = pmap_lgl(list(high, low, topB),  ~ !(..3 %in% ..1) & !(..3 %in% ..2)),
+
+    bottoms2              = pmap_lgl(list(low, bottomA, bottomB), ~ all(c(..2, ..3) %in% ..1)),
+    bottomA_is_low        = pmap_lgl(list(low,  bottomA),    ~  ..2 %in% ..1),
+    bottomB_is_low        = pmap_lgl(list(low,  bottomB),    ~  ..2 %in% ..1),
+    bottomA_is_high       = pmap_lgl(list(high, bottomA),    ~  ..2 %in% ..1),
+    bottomB_is_high       = pmap_lgl(list(high, bottomB),    ~  ..2 %in% ..1),
+    bottomA_is_normal     = pmap_lgl(list(high, low, bottomA), ~ !(..3 %in% ..1) & !(..3 %in% ..2)),
+    bottomB_is_normal     = pmap_lgl(list(high, low, bottomB), ~ !(..3 %in% ..1) & !(..3 %in% ..2))
+  )
+
+# Encode each member as T/B/N and build an exhaustive status
+encode_tbn <- function(is_high, is_low) {
+  dplyr::case_when(
+    is_high ~ "T",
+    is_low  ~ "B",
+    TRUE    ~ "N"
+  )
+}
+
+tops_bottoms_presence.1 <- tops_bottoms_presence.1 %>%
+  mutate(
+    code_topA = encode_tbn(topA_is_high, topA_is_low),
+    code_topB = encode_tbn(topB_is_high, topB_is_low),
+    code_botA = encode_tbn(bottomA_is_high, bottomA_is_low),
+    code_botB = encode_tbn(bottomB_is_high, bottomB_is_low),
+    status1   = paste0(code_topA, code_topB, "-", code_botA, code_botB)
+  )
+
+
+
+# Filter traits (columns) to those with at least one co-presence
+traits_keep_2tops  <- tops_bottoms_presence %>% summarise(any_hit = any(tops2),    .by = trait) %>% filter(any_hit) %>% pull(trait)
+traits_keep_2bots  <- tops_bottoms_presence %>% summarise(any_hit = any(bottoms2), .by = trait) %>% filter(any_hit) %>% pull(trait)
+traits_keep_any2   <- tops_bottoms_presence %>% summarise(any_hit = any(status2 != "none"), .by = trait) %>% filter(any_hit) %>% pull(trait)
+
+# Optional ordering by frequency of hits
+trait_order_2 <- tops_bottoms_presence %>%
+  filter(trait %in% traits_keep_any2) %>%
+  summarise(n_hits = sum(status2 != "none"), .by = trait) %>%
+  arrange(desc(n_hits)) %>% pull(trait)
+
+hypo_order_2 <- tops_bottoms_presence %>%
+  filter(trait %in% traits_keep_any2) %>%
+  summarise(n_hits = sum(status2 != "none"), .by = hypo_label) %>%
+  arrange(desc(n_hits)) %>% pull(hypo_label)
+
+plot_df2 <- tops_bottoms_presence %>%
+  filter(trait %in% traits_keep_any2) %>%
+  mutate(
+    trait      = factor(trait, levels = trait_order_2),
+    hypo_label = factor(hypo_label, levels = hypo_order_2),
+    status2    = factor(status2, levels = c("none","tops_both","bottoms_both","tops_and_bottoms"))
+  )
+
+trait_levels2 <- order_traits_custom(unique(plot_df2$trait))
+hypo_levels2  <- order_hypos_by_file(plot_df2)
+
+plot_df2 <- plot_df2 %>%
+  dplyr::mutate(
+    trait      = factor(trait, levels = trait_levels2),
+    hypo_label = factor(hypo_label, levels = hypo_levels2),
+    status2    = factor(status2, levels = c("none","tops_both","bottoms_both","tops_and_bottoms"))
+  )
+
+# If you also draw the separate tops/bottoms maps:
+plot_df2_tops <- plot_df2 %>% dplyr::mutate(flag = ifelse(tops2, "present", "absent"))
+plot_df2_bots <- plot_df2 %>% dplyr::mutate(flag = ifelse(bottoms2, "present", "absent"))
+
+
+# ---- Heatmap (combined status) ----
+ggplot(plot_df2, aes(x = trait, y = hypo_label, fill = status2)) +
+  geom_tile(colour = "black") +
+  scale_fill_manual(
+    values = c(
+      none             = "#F2F2F2",
+      tops_both        = "#2C7FB8",
+      bottoms_both     = "#D95F0E",
+      tops_and_bottoms = "#542788"
+    ),
+    drop = FALSE
+  ) +
+  labs(
+    title = "Co-presence of both tops or both bottoms across other traits",
+    x = "Other traits (filtered to ≥1 co-presence)",
+    y = "Cancer hypothesis (contrast · file; pairs on separate lines)",
+    fill = "Co-presence"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9),
+        axis.text.y = element_text(size = 12, lineheight = 0.9),
+        # Add some colored grid
+        panel.grid.major.x = element_line(color = "black", size = 0.2),
+        panel.grid.minor.x = element_line(color = "black", size = 0.1),
+        panel.grid.major.y = element_line(color = "black", size = 0.1),
+        panel.grid.minor.y = element_line(color = "black", size = 0.05),
+        legend.position = "top") + 
+  # Swap axes
+  coord_flip()
+
+ggsave(
+  file.path(out_dir, "hypothesis_tops_bottoms_copresence_heatmap.png"),
+  width = 10, height = 14, dpi = 320, device = "png"
+)
+
+# Optionally, separate heatmaps for tops2 and bottoms2
+plot_df2_tops <- plot_df2 %>% mutate(flag = ifelse(tops2, "present", "absent"))
+plot_df2_bots <- plot_df2 %>% mutate(flag = ifelse(bottoms2, "present", "absent"))
+
+ggplot(plot_df2_tops, aes(x = trait, y = hypo_label, fill = flag)) +
+  geom_tile(colour = "black") +
+  scale_fill_manual(values = c(absent = "#F2F2F2", present = "#2C7FB8")) +
+  labs(title = "Both tops present as high_extreme", x = NULL, y = NULL, fill = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9),
+        axis.text.y = element_text(size = 12, lineheight = 0.9),
+        # Add some colored grid
+        panel.grid.major.x = element_line(color = "black", size = 0.2),
+        panel.grid.minor.x = element_line(color = "black", size = 0.1),
+        panel.grid.major.y = element_line(color = "black", size = 0.1),
+        panel.grid.minor.y = element_line(color = "black", size = 0.05),
+        legend.position = "top") + 
+ # Swap axes
+  coord_flip()
+
+ggsave(
+  file.path(out_dir, "hypothesis_tops2_copresence_heatmap.png"),
+  width = 10, height = 14, dpi = 320, device = "png"
+)
+
+ggplot(plot_df2_bots, aes(x = trait, y = hypo_label, fill = flag)) +
+  geom_tile(colour = "black") +
+  scale_fill_manual(values = c(absent = "#F2F2F2", present = "#D95F0E")) +
+  labs(title = "Both bottoms present as low_extreme", x = NULL, y = NULL, fill = NULL) +
+  theme_minimal(base_size = 11) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1, size = 9),
+        axis.text.y = element_text(size = 12, lineheight = 0.9),
+        # Add some colored grid
+        panel.grid.major.x = element_line(color = "black", size = 0.2),
+        panel.grid.minor.x = element_line(color = "black", size = 0.1),
+        panel.grid.major.y = element_line(color = "black", size = 0.1),
+        panel.grid.minor.y = element_line(color = "black", size = 0.05),
+        legend.position = "top") + 
+  # Swap axes
+  coord_flip()
+
+ggsave(
+  file.path(out_dir, "hypothesis_bottoms2_copresence_heatmap.png"),
+  width = 10, height = 14, dpi = 320, device = "png"
+)
+
+# Long table with explicit status
+plot_df2_export <- plot_df2 %>%
+  dplyr::mutate(
+    high_members = purrr::map_chr(high, ~ paste(sort(unique(.x)), collapse = "|")),
+    low_members  = purrr::map_chr(low,  ~ paste(sort(unique(.x)), collapse = "|"))
+  ) %>%
+  dplyr::select(-high, -low)  # drop list-cols; keep flattened copies
+
+readr::write_csv(
+  plot_df2_export,
+  file.path(out_dir, "hypothesis_tops_bottoms_copresence_long.csv")
+)
+
+# Wide matrices (0/1) for tops2 and bottoms2
+tops2_wide <- plot_df2 %>%
+  transmute(hypo_label, trait, val = as.integer(tops2)) %>%
+  tidyr::pivot_wider(names_from = trait, values_from = val, values_fill = 0L)
+
+bottoms2_wide <- plot_df2 %>%
+  transmute(hypo_label, trait, val = as.integer(bottoms2)) %>%
+  tidyr::pivot_wider(names_from = trait, values_from = val, values_fill = 0L)
+
+readr::write_csv(tops2_wide,   file.path(out_dir, "hypothesis_tops2_wide.csv"))
+readr::write_csv(bottoms2_wide, file.path(out_dir, "hypothesis_bottoms2_wide.csv"))
+```
+
+## 6. Enhanced heatmap with traffic-light scheme
+Here we create an enhanced heatmap that categorizes the presence statuses into a traffic-light color scheme for better visualization.
+
+```{r overlap_cancer_pairs, fig.height = 13, fig.width = 17, dev = 'png', dpi = 320}
+
+# ============ 1) Order axes# ============ 
+
+order_traits_custom <- function(traits_chr) {
+  priority <- c("malignant_prevalence", "neoplasia_prevalence",
+                "adult_necropsy_count", "necropsy_counts")
+  traits_chr <- as.character(traits_chr)
+  c(intersect(priority, traits_chr),
+    setdiff(sort(traits_chr), priority))
+}
+
+order_hypos_by_file <- function(df_with_labels) {
+  priority <- c("malignant_prevalence", "neoplasia_prevalence",
+                "adult_necropsy_count", "necropsy_counts")
+  df_with_labels %>%
+    distinct(hypo_label, cancer_file, contrast) %>%
+    mutate(
+      file_rank = match(cancer_file, priority),
+      file_rank = ifelse(is.na(file_rank), length(priority) + 1L, file_rank),
+      contrast_rank = suppressWarnings(as.numeric(contrast)),
+      contrast_rank = ifelse(is.na(contrast_rank), Inf, contrast_rank)
+    ) %>%
+    arrange(file_rank, contrast_rank, hypo_label) %>%
+    pull(hypo_label)
+}
+
+# ensure the multi-line label exists
+tops_bottoms_presence.1 <- tops_bottoms_presence.1 %>%
+  mutate(
+    hypo_label = factor(hypo_label, levels = order_hypos_by_file(cur_data())),
+    trait      = factor(trait,      levels = order_traits_custom(unique(trait)))
+  )
+
+# ============ 2) Categorize statuses into the traffic-light scheme ============
+# Opposite-direction helpers (to mark the symmetric swaps)
+swap_tb_2 <- function(s) chartr("TB","BT", s)
+opposite_code <- function(code) {
+  parts <- strsplit(code, "-", fixed = TRUE)[[1]]
+  paste0(swap_tb_2(parts[1]), "-", swap_tb_2(parts[2]))
+}
+
+amber   <- c("TT-BN","TT-NB","TN-BB","NT-BB")
+amber_op <- vapply(amber,   opposite_code, character(1))
+green   <- c("TT-NN","NN-BB")
+green_op <- vapply(green,   opposite_code, character(1))
+blue    <- c("TN-BN","NT-BN","NT-NB","TN-NB")
+blue_op  <- vapply(blue,    opposite_code, character(1))
+
+# Map each status to a color category; add a † mark for opposite direction
+tb_raw <- tops_bottoms_presence.1 %>%
+  mutate(
+    category = case_when(
+      status1 == "NN-NN" ~ "WHITE",
+      status1 == "TT-BB" ~ "RED",
+      status1 == "BB-TT" ~ "RED_mark",
+      status1 %in% amber     ~ "AMBER",
+      status1 %in% amber_op  ~ "AMBER_mark",
+      status1 %in% blue      ~ "BLUE",
+      status1 %in% blue_op   ~ "BLUE_mark",
+      status1 %in% green     ~ "GREEN",
+      status1 %in% green_op  ~ "GREEN_mark",
+      TRUE ~ "GRAY"  # all other mixed/partial cases (including the neutrals)
+    ),
+    marked          = category %in% c("RED_mark","AMBER_mark","BLUE_mark","GREEN_mark"),
+    category_simple = sub("_mark$", "", category),
+    status1_label   = ifelse(marked, paste0(status1, "†"), status1)
+  )
+
+# ===== 2) Canonical palettes and legend labels (consistent across all panels) =====
+fill_map <- c(
+  WHITE = "#FFFFFF",
+  RED   = "salmon2",
+  AMBER = "goldenrod1",
+  BLUE  = "skyblue2",
+  GREEN = "darkseagreen3",
+  GRAY  = "lightgrey"
+)
+legend_labs <- c(
+  WHITE = "Ambiguous",
+  RED   = "Complete overlap",
+  AMBER = "Partial overlap",
+  GREEN = "One-leg overlap",
+  BLUE  = "Questionable",
+  GRAY  = "Other mixed/partial"
+)
+text_col <- c(WHITE="black", RED="white", AMBER="black", BLUE="black", GREEN="black", GRAY="black")
+
+# Keep the axes order deterministic (your priority + alphanumeric for traits; block by file for hypos)
+tb_raw <- tb_raw %>%
+  mutate(
+    trait      = factor(trait, levels = order_traits_custom(unique(trait))),
+    hypo_label = factor(hypo_label, levels = order_hypos_by_file(cur_data()))
+  )
+
+cat_levels_all <- c("WHITE","RED","AMBER","BLUE","GREEN","GRAY")
+tb_raw <- tb_raw %>%
+  dplyr::mutate(category_simple = factor(category_simple, levels = cat_levels_all))
+
+# ===== 3) Split traits into 3 chunks (left → right), preserving order =====
+split_traits_3 <- function(traits_chr) {
+  traits_chr <- as.character(traits_chr)
+  n <- length(traits_chr)
+  n <- max(n, 1L)
+  idx <- ceiling(seq_len(n) * 3 / n)  # chunk ids 1..3
+  unname(split(traits_chr, idx))
+}
+
+trait_chunks <- split_traits_3(levels(tb_raw$trait))
+
+
+# =========================
+# 4) Panel builder
+# =========================
+
+NEUTRAL_CATS <- c("GRAY","WHITE","BLUE")
+INTEREST_CATS <- NULL  # will be derived from fill_map names at runtime
+
+# Helper: categories for legend depending on mode
+cats_for_legend <- function(include_neutrals, fill_names) {
+  if (include_neutrals) fill_names else setdiff(fill_names, NEUTRAL_CATS)
+}
+
+# Helper: split vector into 3 chunks (keeps order)
+split_into_three <- function(x) {
+  n <- length(x)
+  if (n == 0) return(rep(list(character(0)), 3))
+  idx <- ceiling(seq_len(n) * 3 / n)
+  split(x, idx)
+}
+
+build_panel <- function(df, traits_subset, include_neutrals,
+                        cats_legend, legend_labs_all,
+                        neutral_fill_off = FALSE) {
+
+  df <- df %>%
+    dplyr::filter(trait %in% traits_subset) %>%
+    dplyr::mutate(
+      trait = factor(trait, levels = traits_subset),
+      # Create plotting fill: if neutral_fill_off, turn neutral cells into NA (unfilled)
+      fill_plot = dplyr::if_else(
+        neutral_fill_off & category_simple %in% NEUTRAL_CATS,
+        NA_character_,
+        as.character(category_simple)
+      )
+    ) %>%
+    dplyr::mutate(hypo_label = droplevels(hypo_label))
+
+  ggplot(df, aes(x = trait, y = hypo_label)) +
+    # Tiles: keep borders so neutral tiles remain visible even without fill
+    geom_tile(aes(fill = fill_plot), color = "grey80", linewidth = 0.25) +
+    # Labels: always present; you can switch to a fixed color if preferred
+    geom_text(aes(label = status1_label, colour = category_simple),
+              size = 2.6, fontface = "bold") +
+    scale_fill_manual(
+      values = fill_map[cats_legend],
+      limits = cats_legend,
+      breaks = cats_legend,
+      labels = legend_labs_all[cats_legend],
+      drop   = FALSE,
+      name   = "Interpretation",
+      na.value = NA  # ensure neutral (NA) stays transparent
+    ) +
+    scale_color_manual(values = text_col[cats_legend %||% names(text_col)],
+                       guide = "none") +
+    scale_x_discrete(drop = !include_neutrals) +
+    scale_y_discrete(drop = TRUE) +
+    coord_flip() +
+    labs(x = NULL, y = NULL) +
+    theme_minimal(base_size = 11) +
+    theme(
+      axis.text.x     = element_text(angle = 45, hjust = 1, vjust = 1, size = 8),
+      axis.text.y     = element_text(size = 8, lineheight = 0.9),
+      panel.grid      = element_blank(),
+      legend.position = "none",
+      plot.title      = element_blank()
+    )
+}
+
+# ==========================================
+# 5) Compose three panels with single legend
+# ==========================================
+
+compose_three <- function(df, include_neutrals = TRUE, title = NULL) {
+  fill_names <- names(fill_map)
+  if (is.null(INTEREST_CATS)) {
+    INTEREST_CATS <<- setdiff(fill_names, NEUTRAL_CATS)
+  }
+  cats_legend <- cats_for_legend(include_neutrals, fill_names)
+
+  df_use <- df
+
+  # --- Trait restriction logic for the restricted plot ---
+  # Keep only traits that have at least one interesting (R/G/A) anywhere.
+  if (!include_neutrals) {
+    keep_traits <- df_use %>%
+      dplyr::filter(category_simple %in% INTEREST_CATS) %>%
+      dplyr::distinct(trait) %>%
+      dplyr::pull(trait) %>%
+      as.character()
+
+    df_use <- df_use %>%
+      dplyr::filter(trait %in% keep_traits) %>%
+      dplyr::mutate(
+        trait      = factor(trait, levels = order_traits_custom(keep_traits)),
+        hypo_label = factor(hypo_label, levels = order_hypos_by_file(dplyr::cur_data()))
+      )
+  } else {
+    # Preserve all traits; order with your helper
+    all_traits <- unique(df_use$trait)
+    df_use <- df_use %>%
+      dplyr::mutate(
+        trait      = factor(trait, levels = order_traits_custom(all_traits)),
+        hypo_label = factor(hypo_label, levels = order_hypos_by_file(dplyr::cur_data()))
+      )
+  }
+
+  # Split traits into 3 columns after filtering
+  traits_lvl <- levels(df_use$trait)
+  chunks <- split_into_three(traits_lvl)
+
+  # Build panels; in restricted mode we turn off neutral fill but keep labels
+  p_list <- purrr::map(chunks, function(trs) {
+    if (length(trs) == 0) return(ggplot() + theme_void() + theme(legend.position = "none"))
+    build_panel(
+      df              = df_use,
+      traits_subset   = trs,
+      include_neutrals = include_neutrals,
+      cats_legend     = cats_legend,
+      legend_labs_all = legend_labs,
+      neutral_fill_off = !include_neutrals
+    )
+  })
+
+combined <- (p_list[[1]] +
+               theme(
+                 legend.position      = "bottom",     # top-right corner of plot area
+                 legend.margin      = unit(0.2, "cm"),
+                 legend.direction     = "horizontal",
+                 legend.location = "plot",
+                 legend.key.size      = unit(0.8, "cm")
+               )
+             + p_list[[2]] + theme(legend.position = "none")
+             + p_list[[3]]) + labs(caption = "† = opposite direction") + theme(legend.position = "none")
+
+  combined + patchwork::plot_annotation(title = title) 
+}
+
+# ==========================
+# 6) Build and save outputs
+# ==========================
+title_all    <- "Hypothesis × trait membership (traffic-light)"
+title_strict <- "Hypothesis × trait membership (interesting traits only; neutral tiles unfilled)"
+
+combined_all    <- compose_three(tb_raw, include_neutrals = TRUE,  title = title_all)
+combined_strict <- compose_three(tb_raw, include_neutrals = FALSE, title = title_strict)
+
+# Draw (optional)
+combined_all
+combined_strict
+
+# Save
+height_inches <- max(10, nlevels(tb_raw$hypo_label) * 0.25) + 2
+ggsave(file.path(out_dir, "status1_traffic_light_3panels_ALL.png"),
+       combined_all, width = 21, height = height_inches, dpi = 320)
+ggsave(file.path(out_dir, "status1_traffic_light_3panels_RESTRICTED.png"),
+       combined_strict, width = 21, height = height_inches, dpi = 320)
+
+```
+

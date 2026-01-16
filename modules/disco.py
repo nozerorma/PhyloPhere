@@ -5,6 +5,7 @@
 # | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
 #  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
 
+__version__ = "2.0.0-paired"
 
 '''
 A Convergent Amino Acid Substitution identification 
@@ -15,6 +16,8 @@ Author:         Fabio Barteri (fabio.barteri@upf.edu)
 Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
                 Xavier Farré (xfarrer@igtp.cat),
                 David de Juan (david.juan@upf.edu).
+
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
 MODULE NAME: disco.py
 DESCRIPTION: runs the caas discovery on one single alignment. Returns non-validated caas candidate positions.
@@ -33,10 +36,10 @@ from os.path import exists
 ### FUNCTION discovery()
 ### Scans one single alignment to identify the CAAS
 
-def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, admitted_patterns, output_file):
+def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, admitted_patterns, output_file, paired_mode=False, miss_pair=False, max_conserved=0):
 
     # Step 1: import the trait into a trait object (load_cfg from pindex.py)
-    trait_object = load_cfg(input_cfg)
+    trait_object = load_cfg(input_cfg, paired_mode=paired_mode)
 
     # Step 2: import the alignment int a processed position object (slice from alimport.py)
     p = sliced_object
@@ -44,7 +47,7 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
     # Step 3: processes the positions from imported alignment (process_position() from caas_id.py)
     processed_positions = map(functools.partial(process_position, multiconfig = trait_object, species_in_alignment = p.species), p.d)
 
-    # Step 5: Overwrite the output file
+    # Step 4: Overwrite the output file
 
     if exists(output_file):
         os.system("rm -r " + output_file)
@@ -62,6 +65,10 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
                     maxmiss_bg= max_bg_miss,
                     maxmiss_fg= max_fg_miss,
                     maxmiss_all= max_overall_miss,
+                    
+                    multiconfig= trait_object,
+                    miss_pair= miss_pair,
+                    max_conserved= max_conserved,
 
                     admitted_patterns=admitted_patterns,
                     output_file = output_file
