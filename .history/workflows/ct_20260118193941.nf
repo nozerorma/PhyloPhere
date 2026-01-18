@@ -44,8 +44,7 @@ workflow CT {
 
         // Initialize variables
         def discovery_out = Channel.empty()
-        // resample_out may be a directory (new default) or a legacy single file when running bootstrap only
-        def resample_out = params.resample_out ? Channel.value(file(params.resample_out)) : null
+        def resample_out = params.resample_out ?: null
         def bootstrap_out
 
         if (toolsToRun.contains('discovery')) {
@@ -83,16 +82,20 @@ workflow CT {
                     .filter { it.isFile() }
                     .map { file -> tuple(file.baseName, file) }
 
-            // If discovery was run, join with discovery output; otherwise add empty file placeholder
+            // If discovery was run, join with discovery output; otherwise add null
             if (toolsToRun.contains('discovery')) {
                 // Join align_tuple with discovery_out by alignmentID
                 align_with_discovery = align_tuple.join(discovery_out)
             } else {
-                // Add empty file as the third element (no discovery file)
-                align_with_discovery = align_tuple.map { id, file -> tuple(id, file, []) }
+                // Add null as the third element (no discovery file)
+                align_with_discovery = align_tuple.map { id, file -> tuple(id, file, null) }
             }
             
-            bootstrap_out = BOOTSTRAP(align_with_discovery, resample_out)
+            // resample_out can be a string (from params.resample_out parameter) or a channel
+            // Convert channel to string path for consistency
+            def resample_path = resample_out instanceof String ? resample_out : resample_out?.map { it.toString() }
+            
+            bootstrap_out = BOOTSTRAP(align_with_discovery, resample_path)
             
             // Concatenate all bootstrap outputs from the published directory
             CONCAT_BOOTSTRAP(

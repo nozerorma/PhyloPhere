@@ -454,8 +454,8 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
         # Header is now written in disco.py
         # Just append output if we have traits to write
         if len(output_traits) > 0:
-            result_lines = []
-            
+            out = open(output_file, "a")
+
             for trait in output_traits:
 
                 traitname = trait.split("@")[0]            
@@ -537,18 +537,8 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
                     else:
                         output_fields.extend(["FALSE", "0:"])
                 
-                result_line = "\t".join(output_fields)
-                result_lines.append(result_line)
+                #pvalue_string = pvdict[genename + "@" + processed_position.position]
+                print("\t".join(output_fields), file = out)
             
-            # Return results or write to file
-            if return_results:
-                return result_lines
-            elif output_file:
-                out = open(output_file, "a")
-                for line in result_lines:
-                    print(line, file = out)
-                out.close()
-    
-    # Return empty list if no results and return_results=True
-    if return_results:
-        return []
+
+            out.close()

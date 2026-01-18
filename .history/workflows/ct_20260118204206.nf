@@ -83,13 +83,13 @@ workflow CT {
                     .filter { it.isFile() }
                     .map { file -> tuple(file.baseName, file) }
 
-            // If discovery was run, join with discovery output; otherwise add empty file placeholder
+            // If discovery was run, join with discovery output; otherwise add null
             if (toolsToRun.contains('discovery')) {
                 // Join align_tuple with discovery_out by alignmentID
                 align_with_discovery = align_tuple.join(discovery_out)
             } else {
-                // Add empty file as the third element (no discovery file)
-                align_with_discovery = align_tuple.map { id, file -> tuple(id, file, []) }
+                // Add null as the third element (no discovery file)
+                align_with_discovery = align_tuple.map { id, file -> tuple(id, file, null) }
             }
             
             bootstrap_out = BOOTSTRAP(align_with_discovery, resample_out)

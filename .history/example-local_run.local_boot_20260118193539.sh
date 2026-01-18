@@ -74,7 +74,7 @@ mkdir -p $RESULTS_DIR
 
 nextflow run main.nf -with-tower -profile local \
     -w $WORK_DIR \
-    --ct_tool "discovery,resample,bootstrap" \
+    --ct_tool "bootstrap" \
     --paired_mode \
     --alignment $ALI_DIR \
     --ali_format "phylip-relaxed" \
@@ -92,6 +92,8 @@ nextflow run main.nf -with-tower -profile local \
     --perm_strategy "random" \
     --traitvalues $TRAIT_VALUES \
     --cycles "1000000" \
-    --chunk_size "$CHUNK_SIZE"
+    --chunk_size "$CHUNK_SIZE" \
+    --discovery_out $RESULTS_DIR/discovery \
+    --resample_out $RESULTS_DIR/resample/science.abn7829_data_s4.nex.resampled.output
 
 nextflow clean -f # This flag should be disabled if debugging

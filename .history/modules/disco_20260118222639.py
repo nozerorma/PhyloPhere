@@ -75,8 +75,7 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
                         max_conserved = max_conserved,
                         species_in_alignment = p.species,
                         allowed_patterns = admitted_patterns,
-                        multiconfig = trait_object,
-                        return_results = True  # Get results instead of writing
+                        multiconfig = trait_object
                         )
             if caap_results:
                 results_to_write.extend(caap_results)

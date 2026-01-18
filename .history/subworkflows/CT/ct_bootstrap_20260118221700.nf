@@ -32,8 +32,8 @@ process BOOTSTRAP {
     label 'process_boot'
     
     input:
-    tuple val(alignmentID), file(alignmentFile), path(discoveryFile, stageAs: 'discovery_*')
-    path(resampledPath, stageAs: 'resample_*')  // Can be either directory or file
+    tuple val(alignmentID), file(alignmentFile), path(discoveryFile, stageAs: 'discovery_*', optional: true)
+    path(resampledPath)  // Can be either directory or file
     
     output:
     tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), optional: true
@@ -41,9 +41,7 @@ process BOOTSTRAP {
     script:
     def args = task.ext.args ?: ''
     // Allow discovery input from this run or a legacy single file / directory provided via params.discovery_out
-    // discoveryFile will be an empty list [] when running bootstrap-only mode
-    def discoveryCandidate = (discoveryFile && discoveryFile.name != '[]') ? discoveryFile : 
-                             (params.discovery_out != "none" ? file(params.discovery_out) : null)
+    def discoveryCandidate = discoveryFile ?: (params.discovery_out != "none" ? file(params.discovery_out) : null)
     def discovery_arg = ''
 
     if (discoveryCandidate) {

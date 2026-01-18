@@ -41,9 +41,7 @@ process BOOTSTRAP {
     script:
     def args = task.ext.args ?: ''
     // Allow discovery input from this run or a legacy single file / directory provided via params.discovery_out
-    // discoveryFile will be an empty list [] when running bootstrap-only mode
-    def discoveryCandidate = (discoveryFile && discoveryFile.name != '[]') ? discoveryFile : 
-                             (params.discovery_out != "none" ? file(params.discovery_out) : null)
+    def discoveryCandidate = discoveryFile ?: (params.discovery_out != "none" ? file(params.discovery_out) : null)
     def discovery_arg = ''
 
     if (discoveryCandidate) {

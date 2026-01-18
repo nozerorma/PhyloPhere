@@ -29,48 +29,28 @@
 
 process BOOTSTRAP {
     tag "$alignmentID"
-    label 'process_boot'
+    //label 'big_mem'
+
     
     input:
-    tuple val(alignmentID), file(alignmentFile), path(discoveryFile, stageAs: 'discovery_*')
-    path(resampledPath, stageAs: 'resample_*')  // Can be either directory or file
+    tuple val(alignmentID), file(alignmentFile)
+    file(resampledFile)
     
     output:
     tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), optional: true
 
     script:
     def args = task.ext.args ?: ''
-    // Allow discovery input from this run or a legacy single file / directory provided via params.discovery_out
-    // discoveryFile will be an empty list [] when running bootstrap-only mode
-    def discoveryCandidate = (discoveryFile && discoveryFile.name != '[]') ? discoveryFile : 
-                             (params.discovery_out != "none" ? file(params.discovery_out) : null)
-    def discovery_arg = ''
 
-    if (discoveryCandidate) {
-        def candidatePath = discoveryCandidate instanceof java.nio.file.Path ? discoveryCandidate : file(discoveryCandidate)
-
-        if (java.nio.file.Files.isDirectory(candidatePath)) {
-            def nested = candidatePath.resolve("${alignmentID}.output")
-            if (java.nio.file.Files.exists(nested)) {
-                discovery_arg = "--discovery ${nested}"
-            }
-        } else if (java.nio.file.Files.exists(candidatePath)) {
-            discovery_arg = "--discovery ${candidatePath}"
-        }
-    }
-    def progress_log_arg = params.progress_log != "none" ? "--progress_log ${alignmentID}.progress.log" : ""
-
-    if (params.use_singularity | params.use_apptainer) {
-        """
-        echo "Using Singularity/Apptainer"
+    if (params.use_singularity) {
+        """    
+        echo "Using Singularity"
         /usr/local/bin/_entrypoint.sh ct bootstrap \\
             -a ${alignmentFile} \\
             -t ${params.traitfile} \\
-            -s ${resampledPath} \\
+            -s ${resampledFile} \\
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\
-            ${discovery_arg} \\
-            ${progress_log_arg} \\
             ${args.replaceAll('\n', ' ')}
         """
     } else {
@@ -79,11 +59,9 @@ process BOOTSTRAP {
         $baseDir/ct bootstrap \\
             -a ${alignmentFile} \\
             -t ${params.traitfile} \\
-            -s ${resampledPath} \\
+            -s ${resampledFile} \\
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\
-            ${discovery_arg} \\
-            ${progress_log_arg} \\
             ${args.replaceAll('\n', ' ')}
         """
     }
