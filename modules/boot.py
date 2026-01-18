@@ -117,14 +117,18 @@ def log_progress(current, total, start_time, log_file=None, prefix="Progress"):
 
 def parse_discovery_positions(discovery_file, genename):
     """
-    Parse discovery output file and extract positions that have CAAS.
+    Parse discovery output file and extract positions that have CAAS/CAAP.
+    Handles both classical CAAS and CAAP formats.
+    
+    Classical CAAS format: Gene\tMode\tTrait\tPosition\t...
+    CAAP format:          Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
     
     Args:
         discovery_file: Path to discovery output file
         genename: Gene name to match (e.g., "BRCA1")
     
     Returns:
-        set of position numbers (as strings) that had CAAS in discovery
+        set of position numbers (as strings) that had CAAS/CAAP in discovery
     """
     if not exists(discovery_file):
         print(f"Warning: Discovery file {discovery_file} not found. Processing all positions.")
@@ -140,14 +144,30 @@ def parse_discovery_positions(discovery_file, genename):
                     continue
                 
                 try:
-                    # Discovery output format: Gene\tTrait\tPosition\t...
                     fields = line.split('\t')
-                    if len(fields) >= 3:
-                        gene = fields[0]
-                        position = fields[2]
-                        
-                        # Match gene name and extract position number
-                        if gene == genename:
+                    if len(fields) < 3:
+                        continue
+                    
+                    gene = fields[0]
+                    
+                    # Match gene name first
+                    if gene != genename:
+                        continue
+                    
+                    # Detect format based on mode column
+                    mode = fields[1] if len(fields) > 1 else ""
+                    
+                    if mode == "CAAP":
+                        # CAAP format: Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
+                        # Position is at index 4
+                        if len(fields) >= 5:
+                            position = fields[4]
+                            caas_positions.add(position)
+                    elif mode == "CAAS":
+                        # Classical CAAS format: Gene\tMode\tTrait\tPosition\t...
+                        # Position is at index 3
+                        if len(fields) >= 4:
+                            position = fields[3]
                             caas_positions.add(position)
                 except:
                     continue

@@ -32,32 +32,36 @@ process BOOTSTRAP {
     label 'process_boot'
     
     input:
-    tuple val(alignmentID), file(alignmentFile), path(discoveryFile, stageAs: 'discovery_*')
-    path(resampledPath, stageAs: 'resample_*')  // Can be either directory or file
+    tuple val(alignmentID), file(alignmentFile), path(discoveryFile)
+    path(resampledPath)  // Can be either directory or file
     
     output:
     tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), optional: true
 
     script:
     def args = task.ext.args ?: ''
-    // Allow discovery input from this run or a legacy single file / directory provided via params.discovery_out
-    // discoveryFile will be an empty list [] when running bootstrap-only mode
-    def discoveryCandidate = (discoveryFile && discoveryFile.name != '[]') ? discoveryFile : 
-                             (params.discovery_out != "none" ? file(params.discovery_out) : null)
+    // Use discovery file from pipeline join first; fall back to params.discovery_out for standalone mode
+    // discoveryFile will be an empty list [] when discovery doesn't run in the pipeline
     def discovery_arg = ''
-
-    if (discoveryCandidate) {
-        def candidatePath = discoveryCandidate instanceof java.nio.file.Path ? discoveryCandidate : file(discoveryCandidate)
-
-        if (java.nio.file.Files.isDirectory(candidatePath)) {
-            def nested = candidatePath.resolve("${alignmentID}.output")
-            if (java.nio.file.Files.exists(nested)) {
+    
+    if (discoveryFile && discoveryFile.toString() != '[]') {
+        // Discovery file from pipeline join - use directly
+        discovery_arg = "--discovery ${discoveryFile}"
+    } else if (params.discovery_out != "none") {
+        // Standalone mode: discovery output from params
+        def discoveryPath = file(params.discovery_out)
+        if (discoveryPath.isDirectory()) {
+            // Directory mode: look for alignment-specific output
+            def nested = discoveryPath.resolve("${alignmentID}.output")
+            if (nested.exists()) {
                 discovery_arg = "--discovery ${nested}"
             }
-        } else if (java.nio.file.Files.exists(candidatePath)) {
-            discovery_arg = "--discovery ${candidatePath}"
+        } else if (discoveryPath.exists()) {
+            // Single file mode: use directly
+            discovery_arg = "--discovery ${discoveryPath}"
         }
     }
+    
     def progress_log_arg = params.progress_log != "none" ? "--progress_log ${alignmentID}.progress.log" : ""
 
     if (params.use_singularity | params.use_apptainer) {

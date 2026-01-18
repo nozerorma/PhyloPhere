@@ -33,7 +33,7 @@ TRAIT_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2
 ## CAASTOOLS RESAMPLE
 TREE_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/5.Phylogeny/science.abn7829_data_s4.nex.tree" # Path to the tree file
 TRAIT_VALUES="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Discovery/1.5.Bootstrap_traitfiles/$TRAIT/boot_traitfile.tab" # Path to the trait values file
-CHUNK_SIZE="1000" # Cycles per file (creates directory with multiple resample_*.tab files)
+CHUNK_SIZE="500" # Cycles per file (creates directory with multiple resample_*.tab files)
 
 ## CAASTOOLS BOOTSTRAP
 #RESAMPLED_DIR="/path/goes/here/user/Resampled_files"                # If resample already done, path to the resampled directory
@@ -74,7 +74,7 @@ mkdir -p $RESULTS_DIR
 
 nextflow run main.nf -with-tower -profile local \
     -w $WORK_DIR \
-    --ct_tool "discovery,resample,bootstrap" \
+    --ct_tool "discovery,bootstrap" \
     --paired_mode \
     --alignment $ALI_DIR \
     --ali_format "phylip-relaxed" \
@@ -91,7 +91,8 @@ nextflow run main.nf -with-tower -profile local \
     --strategy "BM" \
     --perm_strategy "random" \
     --traitvalues $TRAIT_VALUES \
-    --cycles "1000000" \
-    --chunk_size "$CHUNK_SIZE"
+    --cycles "100000" \
+    --chunk_size "$CHUNK_SIZE" \
+    --resample_out "$RESULTS_DIR/resample/science.abn7829_data_s4.nex.resampled.output" 
 
-nextflow clean -f # This flag should be disabled if debugging
+# nextflow clean -f # This flag should be disabled if debugging

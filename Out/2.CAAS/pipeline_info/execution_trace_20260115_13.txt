@@ -1,2 +1,0 @@
-task_id	hash	native_id	name	status	exit	submit	duration	realtime	%cpu	peak_rss	peak_vmem	rchar	wchar
-1	d1/d92504	1545796	CT:RESAMPLE (science.abn7829_data_s4.nex.pruned.tree)	COMPLETED	0	2026-01-15 13:05:23.209	2.8s	2.8s	127.9%	238.2 MB	2 GB	24.9 MB	174.2 KB
