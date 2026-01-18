@@ -43,6 +43,17 @@ encode_to_groups()          Encode amino acid string to group string for a given
 build_group_line_dictionary() Transform position data to group-level format for p-value calc
 check_caap_pattern()        Check if a pattern is CAAP for a given scheme
 fetch_caap()                Main function: identifies CAAP for all traits at a position
+
+----------
+
+CAAP grouping follows the same logic found in:
+
+Chen, S., & Zou, Z. (2025). Detecting Convergence of Amino Acid Physicochemical
+Properties Underlying the Organismal Adaptive Convergent Evolution.
+*Molecular Ecology Resources*, 25(1), e70052.
+https://doi.org/10.1111/1755-0998.70052
+
+
 '''
 
 from modules.pindex import *
