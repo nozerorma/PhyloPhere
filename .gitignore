@@ -4,3 +4,4 @@ run_scripts
 .directory
 apptainer
 .Rproj.user
+.history
