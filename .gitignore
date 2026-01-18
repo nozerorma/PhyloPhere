@@ -4,3 +4,6 @@ run_scripts
 .directory
 apptainer
 .Rproj.user
+work
+.history
+.git
