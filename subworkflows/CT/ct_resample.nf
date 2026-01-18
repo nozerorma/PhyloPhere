@@ -32,7 +32,7 @@ process RESAMPLE {
     tag "$nw_tree"
 
     // Uncomment the following lines to assign workload priority.
-    //label 'big_mem'
+    label 'process_resample'
 
 
     input:
@@ -40,7 +40,7 @@ process RESAMPLE {
     path trait_val
 
     output:
-    file("${nw_tree}.resampled.output")
+    path("${nw_tree.baseName}.resampled.output/")
 
     script:
     def args = task.ext.args ?: ''
@@ -59,9 +59,10 @@ process RESAMPLE {
         exit 1, "Invalid strategy: ${params.strategy}"
     }
 
-    if (params.use_singularity) {
+    if (params.use_singularity | params.use_apptainer) {
         """
-        echo "Using Singularity"
+        echo "Using Singularity/Apptainer"
+        mkdir -p ${nw_tree.baseName}.resampled.output
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
@@ -69,11 +70,13 @@ process RESAMPLE {
         ${params.cycles} \\
         ${params.perm_strategy} \\
         ${trait_val} \\
-        ${nw_tree}.resampled.output
+        ${nw_tree.baseName}.resampled.output \\
+        ${params.chunk_size}
         """
     } else {
         """
         echo "Running locally"
+        mkdir -p ${nw_tree.baseName}.resampled.output
         Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
@@ -81,7 +84,8 @@ process RESAMPLE {
         ${params.cycles} \\
         ${params.perm_strategy} \\
         ${trait_val} \\
-        ${nw_tree}.resampled.output
+        ${nw_tree.baseName}.resampled.output \\
+        ${params.chunk_size}
         """
     }
 

@@ -85,6 +85,9 @@ Usage:
 --bygroup               <"grouping_file">                       null
 --traitvalues           <"traitvalues_file">                    null
 --cycles                <"INTEGER">                             "1000"
+--chunk_size            <"INTEGER">                             "500"
+
+Output: Directory containing resample_*.tab files (one per chunk_size cycles)
 
 Strategy requirements:
 FGBG                    --fgsize --bgsize
@@ -98,7 +101,13 @@ Bootstrap Tool Help
 =============================================
 Runs CAAS bootstrap analysis on a single MSA.
 Usage:
---resample_out          <"resampledFile">                       null
+--resample_out          <"resampleDir|resampleFile">            null
+--progress_log          <"progress_log_file">                   "none"
+--discovery_out         <"discovery_output_dir">                "none"
+
+NOTE: resample_out can be either a directory (recommended, contains resample_*.tab files) or a legacy single file
+NOTE: discovery_out enables position filtering optimization (typically 100-1000× speedup)
+NOTE: progress_log creates timestamped progress tracking with ETA
 
 # Common parameters with alignment tool
 --alignment             <"input_dir">                           null

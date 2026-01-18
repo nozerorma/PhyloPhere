@@ -21,11 +21,14 @@
 # Set image origin to micromamba for a stripped down, immutable Debian-Conda environment.
 FROM mambaorg/micromamba:1.5.1
 
-LABEL image.author.name "Miguel Ramon"
-LABEL image.author.email "miguel.ramon@upf.edu"
+LABEL image.author.name="Miguel Ramon"
+LABEL image.author.email="miguel.ramon@upf.edu"
 
 # Set root as default user due to some funky behavour when using $MAMBA_USER.
 USER root
+
+# Reset SHELL to avoid conflicts with micromamba's entrypoint during apt operations
+SHELL ["/bin/bash", "-c"]
 
 # Download some basic debian tools + procps (Nextflow dependency).
 RUN apt-get update \
@@ -37,7 +40,6 @@ RUN apt-get update \
         gpg-agent \
 		less \
 		locales \
-		vim-tiny \
 		ca-certificates \
         procps
 
@@ -66,7 +68,7 @@ RUN chmod +x ./scripts/*
 
 # Add ct and conda binary to $PATH
 ENV PATH=/ct:$PATH
-ENV PATH /opt/conda/envs/base/bin:$PATH
+ENV PATH=/opt/conda/envs/base/bin:$PATH
 
 # Set the image to be run inside base environment directly
 ENTRYPOINT ["/usr/local/bin/_entrypoint.sh"]

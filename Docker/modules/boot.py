@@ -156,7 +156,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
     traitline = ",".join(output_traits)
     empval = str(int(count)/cycles)
 
-    outline = "\t".join([position_name, count, str(cycles), empval, traitline])
+    outline = "\t".join([position_name, count, str(cycles), empval])
 
     return outline
         
@@ -196,7 +196,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
     ooout = open(output_file, "w")
 
     for line in output_lines:
-        print(line + "\t" + trait_config_file, file=ooout)
+        print(line, file=ooout)
     
     ooout.close()
 

@@ -1,0 +1,275 @@
+---
+title: "WebGestalt ORA analysis for CAAS gene lists"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+citations:  
+  output: 
+  html_document: default
+pdf_document: default
+---
+
+# WebGestalt ORA analysis for CAAS gene lists
+  
+This document performs an Over-Representation Analysis (ORA) on gene lists derived from the CAAS (Cancer Associated Allele Selection) project, focusing on malignant and neoplasia prevalence in primates. It includes setup, directory definitions, library loading, gene list parsing, and GO analysis. It uses WebGestalt for ORA and visualizes results through various plots.
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Suppress warnings and messages in output
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Set the root directory for the project
+knitr::opts_knit$set(root.dir = "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES")
+# Display current working directory
+getwd()
+# Set seed for reproducibility
+set.seed(1998)
+
+```
+
+```{r dirdef, message=FALSE, warning=FALSE}
+
+# Define working, data, and results directories
+workingDir <- getwd()
+dataDir <- file.path(workingDir, "Data")
+resultsDir <- file.path(workingDir, "Malignancy_Primates/Out")
+
+# Load libraries, common functions, primate-specific functions and objects
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/libraries.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/commons.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_functions.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_objects.R"))
+
+# Note that all variables may be changed from COMMONS and PRIMATE_OBJECTS scripts.
+
+```
+
+## Library loading
+
+```{r message=FALSE, warning=FALSE, r,warning=FALSE}
+# install.packages("devtools") # run if devtools not already installed
+# Note: Requires RUST in system
+# My fork removes zip functionality which for me at least is broken
+#devtools::install_github("nozerorma/WebGestaltR")
+library(WebGestaltR)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+
+```
+
+## ORA ANALYSIS
+### 1. GeneList parsing
+This section parses gene lists from the results directory, converting gene symbols to ENTREZ IDs using the `bitr` function from the `clusterProfiler` package. It prepares the gene lists for further analysis.
+
+```{r genList_parse, message=FALSE}
+
+# Load the gene_lists
+geneUniverse_dir <- file.path(resultsDir, "2.CAAS/1.Discovery/1.Traitfiles/malignant_prevalence/bg")
+geneUniverse_files <- list.files(path = geneUniverse_dir, pattern = "global_background_no_duplicates.txt", full.names = TRUE, recursive = TRUE)
+new_geneUniverse_mp <- lapply(geneUniverse_files, read_table, col_names = FALSE)
+names(new_geneUniverse_mp) <- geneUniverse_files %>%
+  gsub("^.*/([^/]+)/([^/]+).txt$", "\\1_\\2", .) %>%
+  # Paste the name of the scenario
+  paste0(., "_", "malignant_prevalence")
+
+geneUniverse_dir <- file.path(resultsDir, "2.CAAS/1.Discovery/1.Traitfiles/neoplasia_prevalence/bg")
+geneUniverse_files <- list.files(path = geneUniverse_dir, pattern = "global_background_no_duplicates.txt", full.names = TRUE, recursive = TRUE)
+new_geneUniverse_np <- lapply(geneUniverse_files, read_table, col_names = FALSE)
+names(new_geneUniverse_np) <- geneUniverse_files %>%
+  gsub("^.*/([^/]+)/([^/]+).txt$", "\\1_\\2", .) %>%
+  # Paste the name of the scenario
+  paste0(., "_", "neoplasia_prevalence")
+
+# Remove empty gene lists
+new_geneUniverse_mp <- new_geneUniverse_mp[sapply(new_geneUniverse_mp, function(x) nrow(x) > 0)]
+new_geneUniverse_np <- new_geneUniverse_np[sapply(new_geneUniverse_np, function(x) nrow(x) > 0)]
+
+new_geneUniverse <- c(new_geneUniverse_mp, new_geneUniverse_np)
+
+# Lapply the bitr function to convert the gene symbols from new_geneList to entrez ids
+geneUniverse <- lapply(new_geneUniverse, function(x) {
+  bitr(x$X1, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db, drop = TRUE)
+})
+
+names(geneUniverse) <- c("malignant_prevalence", "neoplasia_prevalence")
+
+# Save these two lists
+# for (name in names(geneUniverse)) {
+#   write.table(geneUniverse[[name]]$ENTREZID, file.path(geneUniverse_dir, paste0(name, "_genelist_def_entrez.txt")))
+# }
+
+```
+
+### 2. WebGestalt driven analysis
+Here we perform the Over-Representation Analysis (ORA) using the WebGestaltR package. The analysis is done for both malignant and neoplasia prevalence traits, utilizing the gene lists parsed earlier.
+
+```{r go_analysis, fig.height=8, fig.width=10, message=FALSE, warning=FALSE, dev="png", include=FALSE}
+# 
+# Initialize the result directory
+ora_result_dir <- file.path(resultsDir, "2.CAAS/6.CAAS_WEBGESTALT/")
+createDir(ora_result_dir)
+
+# Define a helper function to save results to files
+perform_ora <- function(gene_l, name, trait, gene_uni) {
+  
+  print(paste0("Performing ORA for: ", name))
+  print(paste0("Number of genes in interest gene list: ", nrow(gene_l)))
+  print(paste0("Number of genes in reference gene list: ", nrow(gene_uni)))
+
+  # Vectorize the lists
+  gene_l <- as.vector(gene_l$ENTREZID)
+  gene_uni <- as.vector(gene_uni$ENTREZID)
+  
+  # Print first few genes for debugging
+  print(head(gene_l))
+  print(head(gene_uni))
+  
+  # Outpath
+  dir <- gsub(" ", "_", name)
+  outDir <- file.path(ora_result_dir, trait, dir)
+  createDir(outDir)
+  
+  cacheDir <- file.path(ora_result_dir, ".cache")
+  createDir(cacheDir)
+  
+  print(paste0("Output directory: ", outDir))
+
+  # Introduce new webgestalt logic
+  wgt_results <- WebGestaltR(
+      enrichMethod = "ORA",
+      organism = "hsapiens",
+      enrichDatabase = c(
+  "geneontology_Biological_Process_noRedundant",
+  "geneontology_Cellular_Component_noRedundant",
+  "geneontology_Molecular_Function_noRedundant",
+  "pathway_KEGG",
+  "pathway_Panther",
+  "pathway_Reactome",
+  "pathway_WP_Pathway_Figure_OCR",
+  "pathway_WikiPathways",
+  "pathway_WikiPathways_cancer",
+  "pathway_mitocarta",
+  "network_CORUMA",
+  "network_Transcription_Factor_target",
+  "network_miRNA_target",
+  "disease_Disgenet",
+  "disease_OMIM",
+  "phenotype_Human_Phenotype_Ontology",
+  "chromosomalLocation_CytogeneticBand"
+),
+      interestGene = gene_l,
+      interestGeneType = "entrezgene",
+      collapseMethod = "mean",
+      referenceGene = gene_uni,
+      referenceGeneType = "entrezgene",
+      minNum = 10,
+      maxNum = 500,
+      sigMethod = "fdr",
+      fdrMethod = "BH",
+      fdrThr = 0.05,
+      topThr = 10,
+      reportNum = 20,
+      perNum = 1000,
+      # isOutput = TRUE,
+      outputDirectory = outDir,
+      projectName = name,
+      dagColor = "continuous",
+      setCoverNum = 10,
+      nThreads = 6,
+      cache = cacheDir
+    )
+  
+  return(wgt_results)
+}
+
+# Load the gene_lists
+geneList_dir <- file.path(resultsDir, "2.CAAS/5.AntiCAAS_filtout/malignant_prevalence/true_caas")
+geneList_files <- list.files(path = geneList_dir, pattern = "\\.genes$", full.names = TRUE, recursive = TRUE)
+new_geneList_mp <- lapply(geneList_files, read_table, col_names = FALSE)
+names(new_geneList_mp) <- geneList_files %>%
+  gsub("^.*/([^/]+)/([^/]+).genes$", "\\1_\\2", .) %>%
+  paste0(., "_", "malignant_prevalence")
+
+geneList_dir <- file.path(resultsDir, "2.CAAS/5.AntiCAAS_filtout/neoplasia_prevalence/true_caas")
+geneList_files <- list.files(path = geneList_dir, pattern = "\\.genes$", full.names = TRUE, recursive = TRUE)
+new_geneList_np <- lapply(geneList_files, read_table, col_names=FALSE)
+names(new_geneList_np) <- geneList_files %>%
+  gsub("^.*/([^/]+)/([^/]+).genes$", "\\1_\\2", .) %>%
+  paste0(., "_", "neoplasia_prevalence")
+
+# Remove empty gene lists
+new_geneList_mp <- new_geneList_mp[sapply(new_geneList_mp, function(x) nrow(x) > 0)]
+new_geneList_np <- new_geneList_np[sapply(new_geneList_np, function(x) nrow(x) > 0)]
+
+# Convert gene symbols to ENTREZ IDs using bitr
+geneLists_mp <- lapply(new_geneList_mp, function(x) {
+  bitr(x$X1, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db, drop = TRUE)
+})
+
+geneLists_np <- lapply(new_geneList_np, function(x) {
+  bitr(x$X1, fromType = "SYMBOL", toType = "ENTREZID", OrgDb = org.Hs.eg.db, drop = TRUE)
+})
+
+# Run ORA for malignant prevalence
+ora_results_mp <- list()
+for (name in names(geneLists_mp)) {
+  # If number of genes in gene_l is less than 5, skip to the next
+  if (nrow(geneLists_mp[[name]]) < 5) {
+    print(paste0("Skipping ", name, " due to insufficient genes (<5)."))
+    next
+  }
+  ora_results_mp[[name]] <- perform_ora(geneLists_mp[[name]], name = name, trait = "malignant_prevalence", gene_uni = geneUniverse$malignant_prevalence)
+}
+
+# Run ORA for neoplasia prevalence
+ora_results_np <- list()
+for (name in names(geneLists_np)) {
+  # If number of genes in gene_l is less than 5, skip to the next
+  if (nrow(geneLists_np[[name]]) < 5) {
+    print(paste0("Skipping ", name, " due to insufficient genes (<5)."))
+    next
+  }
+  ora_results_np[[name]] <- perform_ora(geneLists_np[[name]], name = name, trait = "neoplasia_prevalence", gene_uni = geneUniverse$neoplasia_prevalence)
+}
+
+```
+
+# Debris
+
+```{r}
+  # "network_TCGA_RNASeq_ACC",
+  # "network_TCGA_RNASeq_BLCA",
+  # "network_TCGA_RNASeq_BRCA",
+  # "network_TCGA_RNASeq_CESC",
+  # "network_TCGA_RNASeq_CHOL",
+  # "network_TCGA_RNASeq_COADREAD",
+  # "network_TCGA_RNASeq_DLBC",
+  # "network_TCGA_RNASeq_ESCA",
+  # "network_TCGA_RNASeq_GBM",
+  # "network_TCGA_RNASeq_GBMLGG",
+  # "network_TCGA_RNASeq_HNSC",
+  # "network_TCGA_RNASeq_KICH",
+  # "network_TCGA_RNASeq_KIRP",
+  # "network_TCGA_RNASeq_LAML",
+  # "network_TCGA_RNASeq_LGG",
+  # "network_TCGA_RNASeq_LIHC",
+  # "network_TCGA_RNASeq_LUAD",
+  # "network_TCGA_RNASeq_LUSC",
+  # "network_TCGA_RNASeq_MESO",
+  # "network_TCGA_RNASeq_OV",
+  # "network_TCGA_RNASeq_PAAD",
+  # "network_TCGA_RNASeq_PCPG",
+  # "network_TCGA_RNASeq_PRAD",
+  # "network_TCGA_RNASeq_SARC",
+  # "network_TCGA_RNASeq_SKCM",
+  # "network_TCGA_RNASeq_STAD",
+  # "network_TCGA_RNASeq_STES",
+  # "network_TCGA_RNASeq_TGCT",
+  # "network_TCGA_RNASeq_THCA",
+  # "network_TCGA_RNASeq_THYM",
+  # "network_TCGA_RNASeq_UCEC",
+  # "network_TCGA_RNASeq_UCS",
+  # "network_TCGA_RNASeq_UVM",
+```

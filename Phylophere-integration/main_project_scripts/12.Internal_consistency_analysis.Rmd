@@ -1,0 +1,270 @@
+---
+title: "Internal consistency analysis"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+citations:  
+  output: 
+  html_document: default
+pdf_document: default
+---
+
+# Internal consistency analysis
+After analyzing the directionality of the amino acid change (whether the transition has occurred from an ancestral bottom to a derived top or vice-versa), I performed a PGLS and Phylo-wilcoxon analysis in order to understand the consistency of the change, not only across the phenotype of interest, but across other phenotypes that might be, either co-related, or interesting to look at in relation to cancer prevalence.
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Suppress warnings and messages in output
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Set the root directory for the project
+knitr::opts_knit$set(root.dir = "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES")
+# Display current working directory
+getwd()
+# Set seed for reproducibility
+set.seed(1998)
+
+```
+
+```{r dirdef, message=FALSE, warning=FALSE}
+
+# Define working, data, and results directories
+workingDir <- getwd()
+dataDir <- file.path(workingDir, "Data")
+resultsDir <- file.path(workingDir, "Malignancy_Primates/Out")
+
+# Load libraries, common functions, primate-specific functions and objects
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/libraries.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/commons.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_functions.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_objects.R"))
+
+# Note that all variables may be changed from COMMONS and PRIMATE_OBJECTS scripts.
+
+```
+
+## Seed and library loading
+
+```{r message=FALSE, warning=FALSE, r,warning=FALSE}
+
+```
+
+## 1. Load the intval and pgls dataframes
+
+```{r rand_analysis, message=FALSE, warning=FALSE, fig.width=10, fig.height=7, dev = "png", res = 320}
+
+intval_dir <- file.path(resultsDir, "2.CAAS/8.Internal_validation")
+
+# List files for malignant_prevalence and neoplasia_prevalence
+mp_intval_files <- list.files(
+  path = file.path(intval_dir, "malignant_prevalence/perm"), 
+  pattern = ".tsv", 
+  full.names = TRUE, 
+  recursive = TRUE
+)
+
+np_intval_files <- list.files(
+  path = file.path(intval_dir, "neoplasia_prevalence/perm"), 
+  pattern = ".tsv", 
+  full.names = TRUE, 
+  recursive = TRUE
+)
+
+# Process files by approach and pattern type
+process_files_by_approach_and_pattern <- function(file_list, rand_dir, caas_dir) {
+  approach_data <- list()
+  
+  for (x in file_list) {
+    # Extract approach and contrast number from file path
+    subdir_full <- gsub(paste0(rand_dir, "/"), "", x)
+    parts <- strsplit(subdir_full, "/")[[1]]
+    trait <- parts[1]  # e.g., "malignant_prevalence"
+    approach <- parts[2]  # e.g., "perm"
+    contrast_dir <- parts[3]  # e.g., "top_bottom"
+    # Filename
+    filename <- gsub(".tsv", "", parts[4])
+
+    # Print parts
+    print(paste("Trait:", trait, "Approach:", approach, "Contrast direction:", contrast_dir, "Filename:", filename))
+
+    # Read randomization results
+    data <- read_tsv(x)
+
+    # Store data
+    approach_data[[paste0("contrast_", contrast_dir)]][[filename]] <- data
+  }
+    return(approach_data)
+}
+
+# --- Process files ---
+mp_intval_dfs <- process_files_by_approach_and_pattern(mp_intval_files, intval_dir)
+np_intval_dfs <- process_files_by_approach_and_pattern(np_intval_files, intval_dir)
+
+# --- Prepare pgls filtered lists ---
+mp_pgls <- list()
+for (contrast in names(mp_intval_dfs)) {
+  mp_pgls[[contrast]] <- list()
+  for (filename in names(mp_intval_dfs[[contrast]])) {
+    df <- mp_intval_dfs[[contrast]]$pgls
+    
+    df_filtered <- df %>%
+      filter(n_used >= 10) %>%
+      mutate(GenePos = paste0(Gene, "_", Position)) %>%
+      group_by(GenePos) %>%
+      mutate(
+        is_sig_mal = any(trait == "malignant_prevalence" & (p_wald <= 0.05 | p_pw_perm <= 0.05)),
+        keep_row = if_else(trait == "malignant_prevalence", TRUE, is_sig_mal)
+      ) %>%
+      ungroup() %>%
+      filter(keep_row)
+    
+    mp_pgls[[contrast]] <- df_filtered
+  }
+}
+
+np_pgls <- list()
+for (contrast in names(np_intval_dfs)) {
+  np_pgls[[contrast]] <- list()
+  for (filename in names(np_intval_dfs[[contrast]])) {
+    df <- np_intval_dfs[[contrast]]$pgls
+    
+    df_filtered <- df %>%
+      filter(n_used >= 10) %>%
+      mutate(GenePos = paste0(Gene, "_", Position)) %>%
+      group_by(GenePos) %>%
+      mutate(
+        is_sig_neo = any(trait == "neoplasia_prevalence" & (p_wald <= 0.05 | p_pw_perm <= 0.05)),
+        keep_row = if_else(trait == "neoplasia_prevalence", TRUE, is_sig_neo)
+      ) %>%
+      ungroup() %>%
+      filter(keep_row) %>%
+      select(-GenePos, -is_sig_neo, -keep_row)
+    
+    np_pgls[[contrast]] <- df_filtered
+  }
+}
+
+plot_focal_vs_overlap <- function(df, focal_trait, title_focal, title_overlap) {
+
+  # --- p1: focal trait significance (unstacked, independent p-values) ---
+  p1_df <- df %>%
+    filter(trait == focal_trait) %>%
+    mutate(GenePos = paste0(Gene, "_", Position)) %>%
+    pivot_longer(
+      cols = c(p_wald, p_pw_perm),
+      names_to = "test_type",
+      values_to = "pval"
+    ) %>%
+    mutate(sig_type = case_when(
+      test_type == "p_wald" & pval <= 0.05 ~ "Wald",
+      test_type == "p_pw_perm" & pval <= 0.05 ~ "Perm. Wilcoxon",
+      TRUE ~ "Not significant"
+    )) %>%
+    group_by(test_type, sig_type) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    group_by(test_type) %>%
+    mutate(ratio = n / sum(n),
+           trait = focal_trait)
+
+  p1 <- ggplot(p1_df, aes(x = test_type, y = ratio, fill = sig_type)) +
+    geom_bar(stat="identity", position = "dodge", width = 0.7) +
+    scale_fill_manual(values=c("Wald"="salmon4",
+                               "Perm. Wilcoxon"="skyblue4",
+                               "Not significant"="gray80")) +
+    geom_text(aes(label = n),
+              position = position_dodge(width = 0.7),
+              vjust = 0.5,
+              hjust = 0,
+              color = "black",
+              face = "bold",
+              size = 4) +
+    coord_flip() +
+    labs(title = title_focal, x = "Test Type", y = "Proportion of CAAS", fill = "Significance") +
+    theme_minimal(base_size=14) +
+    geom_hline(yintercept = 0.05, linetype="dashed", color="black")
+
+  # --- p2: other traits conditional on focal-significant loci ---
+  focal_sig_loci <- df %>%
+    filter(trait == focal_trait,
+           p_wald <= 0.05 | p_pw_perm <= 0.05) %>%
+    mutate(GenePos = paste0(Gene, "_", Position)) %>%
+    pull(GenePos)
+
+  p2_df <- df %>%
+    filter(trait != focal_trait) %>%
+    mutate(GenePos = paste0(Gene, "_", Position)) %>%
+    filter(GenePos %in% focal_sig_loci) %>%
+    pivot_longer(
+      cols = c(p_wald, p_pw_perm),
+      names_to = "test_type",
+      values_to = "pval"
+    ) %>%
+    mutate(sig_type = case_when(
+      test_type == "p_wald" & pval <= 0.05 ~ "Wald",
+      test_type == "p_pw_perm" & pval <= 0.05 ~ "Perm. Wilcoxon",
+      TRUE ~ "Not significant"
+    )) %>%
+    group_by(trait, test_type, sig_type) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    group_by(trait, test_type) %>%
+    mutate(ratio = n / sum(n))
+
+  p2 <- ggplot(p2_df, aes(x = trait, y = ratio, fill = sig_type)) +
+    geom_bar(stat="identity", position = "dodge", width = 0.7) +
+    scale_fill_manual(values=c("Wald"="salmon4",
+                               "Perm. Wilcoxon"="skyblue4",
+                               "Not significant"="gray80")) +
+  geom_text(aes(label = n),
+            position = position_dodge(width = 0.7),
+            vjust = 0.5,
+            hjust = 0,
+            color = "black",
+            face = "bold",
+            size = 4) +
+    coord_flip() +
+    labs(title = title_overlap, x = "Trait", y = "Proportion of CAAS", fill = "Significance") +
+    theme_minimal(base_size=14) +
+    geom_hline(yintercept = 0.05, linetype="dashed", color="black")
+
+  # --- Combine plots vertically ---
+  p_combined <- cowplot::plot_grid(
+  p1, p2,
+  ncol = 1, nrow = 2,
+  labels = c("A", "B"),
+  rel_heights = c(1, 2)  # make p2 twice as tall as p1
+)
+
+  return(p_combined)
+}
+
+
+# Plot
+mp_plots_top_bottom <- plot_focal_vs_overlap(mp_pgls$contrast_sign_top_bottom,
+                                             "malignant_prevalence",
+                                             "Malignant Prevalence - Top vs Bottom",
+                                             "Other Traits Overlap - Top vs Bottom")
+
+mp_plots_bottom_top <- plot_focal_vs_overlap(mp_pgls$contrast_sign_bottom_top,
+                                             "malignant_prevalence",
+                                             "Malignant Prevalence - Bottom vs Top",
+                                             "Other Traits Overlap - Bottom vs Top")
+
+np_plots_top_bottom <- plot_focal_vs_overlap(np_pgls$contrast_sign_top_bottom,
+                                             "neoplasia_prevalence",
+                                             "Neoplasia Prevalence - Top vs Bottom",
+                                             "Other Traits Overlap - Top vs Bottom")
+
+np_plots_bottom_top <- plot_focal_vs_overlap(np_pgls$contrast_sign_bottom_top,
+                                             "neoplasia_prevalence",
+                                             "Neoplasia Prevalence - Bottom vs Top",
+                                             "Other Traits Overlap - Bottom vs Top")
+
+# Print plots
+print(mp_plots_top_bottom)
+print(mp_plots_bottom_top)
+print(np_plots_top_bottom)
+print(np_plots_bottom_top)
+
+```

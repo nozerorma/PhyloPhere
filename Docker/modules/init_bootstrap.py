@@ -104,7 +104,7 @@ def readtree(tree_file, tree_schema = "newick"):
 
 # FUNCTION simtrait() Resample trait function
 
-def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_values_file, cycles, simtraits_outfile, permulation_selection_strategy):
+def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_values_file, cycles, simtraits_outfile, permulation_selection_strategy = "random"):
     
     # Class multicfg
     class multicfg():
@@ -315,19 +315,22 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
             print("ERROR: for brownian motion simulation you must provide a tsv file with phenotype values (1/0 for binary traits).")
             print("See documentation.")
             exit()
-            
-        rscript_path = os.path.realpath('./scripts/permulations.R')
+        
+        script_path = os.path.realpath(sys.argv[0]).split("/")
+        script_path.remove(script_path[-1])
+        rscript_path = "/".join(script_path) + "/permulations.r"
+
         os.system("ln -s " + rscript_path)
         
         r_line = " ".join([
             
-            "./scripts/permulations.R",             # Rscript path in the scripts directory            
+            "./permulations.r",                     # Rscript
             tree_file,                              # args[1]
             template,                               # args[2]
             str(cycles),                            # args[3]
             permulation_selection_strategy,         # args[4]
             phenotype_values_file,                  # args[5]
-            simtraits_outfile                       # args[6]
+            simtraits_outfile                          # args[6]
         ])
         os.system(r_line)
 

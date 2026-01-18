@@ -32,6 +32,7 @@
 include { DISCOVERY } from "${baseDir}/subworkflows/CT/ct_discovery"
 include { RESAMPLE } from "${baseDir}/subworkflows/CT/ct_resample"
 include { BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_bootstrap"
+include { CONCAT_DISCOVERY; CONCAT_RESAMPLE; CONCAT_BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_concat"
 
 
 // Main workflow
@@ -42,18 +43,25 @@ workflow CT {
         def toolsToRun = params.ct_tool.split(',')
 
         // Initialize variables
-        def discovery_out
-        def resample_out = params.resample_out ?: null
+        def discovery_out = Channel.empty()
+        // resample_out may be a directory (new default) or a legacy single file when running bootstrap only
+        def resample_out = params.resample_out ? Channel.value(file(params.resample_out)) : null
         def bootstrap_out
 
         if (toolsToRun.contains('discovery')) {
             // Define the alignment channel align_tuple
             align_tuple = Channel
-                    .fromPath("${params.alignment}") // Recursively search all subdirectories
+                    .fromPath("${params.alignment}/*") // Recursively search all subdirectories
                     .filter { it.isFile() } // Filter out directories
                     .map { file -> tuple(file.baseName, file) }
 
             discovery_out = DISCOVERY(align_tuple)
+            
+            // Concatenate all discovery outputs from the published directory
+            // Wait for all DISCOVERY processes to complete, then collect from publishDir
+            CONCAT_DISCOVERY(
+                discovery_out.collect().map { "${params.outdir}/discovery" }
+            )
         }
         if (toolsToRun.contains('resample')) {
             // Define the tree file channel
@@ -61,14 +69,35 @@ workflow CT {
             trait_val = file(params.traitvalues)
 
             resample_out = RESAMPLE(nw_tree, trait_val)
+            
+            // Concatenate all resample outputs from the published directory
+            // The resample output is a directory, so we need to look inside it
+            CONCAT_RESAMPLE(
+                resample_out.map { "${params.outdir}/resample/${it.name}" }
+            )
         }
         if (toolsToRun.contains('bootstrap')) {
+            // Define the alignment channel
             align_tuple = Channel
-                    .fromPath("${params.alignment}") // Recursively search all subdirectories
-                    .filter { it.isFile() } // Filter out directories
+                    .fromPath("${params.alignment}/*")
+                    .filter { it.isFile() }
                     .map { file -> tuple(file.baseName, file) }
 
-            bootstrap_out = BOOTSTRAP(align_tuple, resample_out)
+            // If discovery was run, join with discovery output; otherwise add empty file placeholder
+            if (toolsToRun.contains('discovery')) {
+                // Join align_tuple with discovery_out by alignmentID
+                align_with_discovery = align_tuple.join(discovery_out)
+            } else {
+                // Add empty file as the third element (no discovery file)
+                align_with_discovery = align_tuple.map { id, file -> tuple(id, file, []) }
+            }
+            
+            bootstrap_out = BOOTSTRAP(align_with_discovery, resample_out)
+            
+            // Concatenate all bootstrap outputs from the published directory
+            CONCAT_BOOTSTRAP(
+                bootstrap_out.collect().map { "${params.outdir}/bootstrap" }
+            )
         }
     }
 }

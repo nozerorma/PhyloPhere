@@ -26,20 +26,20 @@ library(dplyr)
 library(RERconverge)
 
 # Load our traits
-neoplasiaPath <- args[1]
-load(neoplasiaPath) # As neoplasia_vector
+traitPath <- args[1]
+load(traitPath) # As trait_vector
 
 # Load our trees
 treePath <- args[2]
 geneTrees <- readRDS(treePath)
 
 # Get residuals from our traitfile
-primRERw <- getAllResiduals(geneTrees,useSpecies=names(neoplasia_vector), 
+traitRERw <- getAllResiduals(geneTrees,useSpecies=names(trait_vector), 
     transform = "sqrt", weighted = T, scale = T)
 
 # Now we save our RERs
 
 ## Save to path
-saveRDS(primRERw, args[3])
+saveRDS(traitRERw, args[3])
 
 ### DONE ###

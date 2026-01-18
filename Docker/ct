@@ -533,6 +533,10 @@ if tool.lower() == "bootstrap":
                     help="Filter by number of miss in foreground and background.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
 
+    ###     3.4.6 Discovery file for position filtering
+    parser.add_option("--discovery", dest="discovery_file",
+                    help="Discovery output file. If provided, only positions with CAAS in discovery will be tested (major speedup).", default = None)
+
 
     ### 3.5 Usage
 
@@ -605,7 +609,8 @@ if tool.lower() == "bootstrap":
                     max_overall_miss = options.max_miss_string,
 
                     the_admitted_patterns = options.patterns_string,
-                    output_file = options.output_file
+                    output_file = options.output_file,
+                    discovery_file = options.discovery_file
                     )
     
     ###     3.9.4 Final output

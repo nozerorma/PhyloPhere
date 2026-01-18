@@ -1,0 +1,214 @@
+---
+title: "Data Visualization for Neoplasia Analysis in Primates"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# Data Visualization and Processing
+This script visualizes and processes data for the Primates' Neoplasia Project, focusing on malignancy prevalence across primate species. It generates family distribution plots, summary tables, and a processed dataset with longevity and statistical annotations.
+
+---
+
+## Setup and Directory Configuration
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+# Suppress warnings and messages in output
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Set the root directory for the project
+knitr::opts_knit$set(root.dir = "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES")
+# Display current working directory
+getwd()
+# Set seed for reproducibility
+set.seed(1998)
+```
+
+```{r dirdef, message=FALSE, warning=FALSE}
+# Define working, data, and results directories
+workingDir <- getwd()
+dataDir <- file.path(workingDir, "Data")
+resultsDir <- file.path(workingDir, "Malignancy_Primates/Out")
+
+# Load libraries, common functions, primate-specific functions and objects
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/libraries.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/commons.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_functions.R"))
+source(file.path(workingDir, "Malignancy_Primates/Scripts/functions/primate_objects.R"))
+
+# Note that all variables may be changed from COMMONS and PRIMATE_OBJECTS scripts.
+```
+
+## 1. Dataset Visualization
+This section visualizes the distribution of primate species across families to provide an overview of the dataset.
+
+```{r dataset_visualization, fig.height=7, fig.width=10, dev='png', dpi=320}
+# 1. DATA VISUALIZATION  ------------------------------------------------------
+# Family data
+family_data <- read_tsv(file.path(dataDir, "5.Phylogeny/taxid_species_family.tsv"))
+
+# Calculate species count per family
+family_distribution <- traits %>%
+  dplyr::group_by(family) %>%
+  dplyr::summarise(count = n()) 
+
+# Create bar plot for family distribution
+family_plot <- ggplot2::ggplot(family_distribution, aes(x = family, y = count, fill = family)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = count), vjust = 0.5, hjust = -1.5, color = "black", fontface = "bold", size = 6) +
+  labs(x = "Family", y = "Count", title = "Family Distribution") +
+  theme_minimal() +
+  scale_fill_manual(values = primate_family_colors, breaks = NULL) +
+  scale_y_continuous(limits = c(0, 17), expand = c(0, 0)) +
+  theme(
+    axis.text.y = element_text(hjust = 1, size = 18, face = "bold", color = "black"),
+    axis.text.x = element_blank(),
+    plot.title = element_blank(),
+    axis.title.x = element_text(size = 18, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
+    axis.title.y = element_blank(),
+    legend.position = "none"
+  ) +
+  coord_flip()
+
+# Save the plot to the results directory
+compare_plot_path <- file.path(resultsDir, "1.Data-exploration/1.Species_distribution")
+createDir(compare_plot_path)
+
+ggplot2::ggsave(file.path(compare_plot_path, "family_distribution.png"), family_plot, 
+                device = "png", width = 13, height = 10, dpi = "retina")
+
+# Display the plot
+family_plot
+
+```
+
+## 2. Data Processing
+This section prepares the dataset for analysis by merging with AnAge longevity data, melting the dataframe into long format, and adding statistical summaries and labels.
+
+```{r treating the data}
+
+# 2. DATA PROCESSING ---------------------------------------------------------
+# Set up directory for cancer traits data
+cancer_dir <- file.path(dataDir, "1.Cancer_data/Neoplasia_species360")
+
+# Load AnAge data (build 15) for longevity information
+anage_data <- read.csv(file.path(dataDir, "10.AnAge/build_15/anage_data.txt"), sep = "\t")
+
+# Filter AnAge data for primates and prepare longevity information
+anage_data_primates <- anage_data %>%
+  dplyr::filter(Class == "Mammalia" & Order == "Primates") %>%
+  dplyr::select(Genus, Species, Maximum.longevity..yrs.) %>%
+  dplyr::mutate(species = paste(Genus, Species, sep = "_")) %>%
+  dplyr::rename(MLS.anage = Maximum.longevity..yrs.) %>%
+  dplyr::select(species, MLS.anage) %>%
+  # Add Propithecus_coquereli data from
+  ### J. of Zoo and Wildlife Medicine, 49(2):315-323 (2018). https://doi.org/10.1638/2017-0242.1
+  dplyr::bind_rows(data.frame(species = "Propithecus_coquereli", MLS.anage = 30.6))
+
+# Merge longevity data with filtered cancer traits
+cancer_traits_filt <- traits[traits$species %in% common_names,]
+cancer_traits_filt <- cancer_traits_filt %>%
+  select(-rank, -name_class) %>%
+  # Format numeric columns as such
+  # This HAS to be modified according to the dataset structure
+  mutate_at(vars(1, 5:ncol(.)), as.numeric)
+
+cancer_traits_processed <- merge(cancer_traits_filt, anage_data_primates, by = "species", all.x = TRUE) %>%
+  dplyr::mutate(LQ = MLS.anage / (6.47 * mass_g^0.189))  # Calculate Longevity Quotient (LQ)
+
+# Save the processed dataset
+cancer_traits_processed_path <- file.path(cancer_dir, "cancer_traits_processed-LQ.csv")
+write.csv(cancer_traits_processed, cancer_traits_processed_path, row.names = FALSE)
+
+# Calculate global statistics (means, medians, standard deviations)
+means <- t(cancer_traits_processed[, -which(colnames(cancer_traits_processed) %in% c("family", "label"))] %>% 
+             dplyr::summarize_all(mean))
+medians <- t(cancer_traits_processed[, -which(colnames(cancer_traits_processed) %in% c("family", "label"))] %>% 
+               dplyr::summarize_all(median))
+sds <- t(cancer_traits_processed[, -which(colnames(cancer_traits_processed) %in% c("family", "label"))] %>% 
+           dplyr::summarize_all(sd))
+
+# Melt the dataframe into long format
+melted_dataframe_traits <- reshape2::melt(
+  cancer_traits_processed,
+  id.vars = c("family", "species", "common_name"),
+  measure.vars = c("adult_necropsy_count", "neoplasia_necropsy", "neoplasia_prevalence",
+                   "benign_count", "benign_prevalence", "malignant_count", "malignant_prevalence",
+                   "body_mass", "mass_g", "log_body_mass", "MLS.anage", "LQ",
+                   "mature_f", "mature_m", "mature_age")
+) %>%
+  dplyr::rename(trait = variable, value = value)
+
+# Add global statistics to the melted dataframe
+for (i in seq_along(melted_dataframe_traits$species)) {
+  trait <- as.character(melted_dataframe_traits$trait[i])
+  if (trait %in% rownames(medians)) {
+    melted_dataframe_traits$median[i] <- as.numeric(medians[trait, ])
+    melted_dataframe_traits$mean[i] <- as.numeric(means[trait, ])
+    melted_dataframe_traits$sd[i] <- as.numeric(sds[trait, ])
+  }
+}
+
+# Calculate family-level statistics
+calculate_stat <- function(stat_fn) {
+  lapply(unique(cancer_traits_filt$family), function(fam) {
+    subset_df <- cancer_traits_filt[cancer_traits_filt$family == fam, ]
+    stats <- subset_df[, -which(colnames(subset_df) %in% c("species", "family"))] %>% 
+             dplyr::summarize_all(stat_fn)
+    data.frame(family = fam, stats)
+  })
+}
+
+fam_means_list <- calculate_stat(mean)
+fam_medians_list <- calculate_stat(median)
+fam_sds_list <- calculate_stat(sd)
+
+# Combine family-level statistics
+bind_rows_df <- function(list_data) {
+  do.call(rbind, list_data)
+}
+
+fam_means <- bind_rows_df(fam_means_list)
+fam_medians <- bind_rows_df(fam_medians_list)
+fam_sds <- bind_rows_df(fam_sds_list)
+
+# Add family-level statistics to the melted dataframe
+for (i in seq_along(melted_dataframe_traits$species)) {
+  current_family <- melted_dataframe_traits$family[i]
+  current_trait <- as.character(melted_dataframe_traits$trait[i])
+  
+  if (current_trait %in% colnames(fam_means)) {
+    melted_dataframe_traits$mean_fam[i] <- fam_means[fam_means$family == current_family, current_trait]
+    melted_dataframe_traits$median_fam[i] <- fam_medians[fam_medians$family == current_family, current_trait]
+    melted_dataframe_traits$sd_fam[i] <- fam_sds[fam_sds$family == current_family, current_trait]
+  }
+}
+
+# Add quantile-based labels and outlier detection
+melted_dataframe_traits <- melted_dataframe_traits %>%
+  dplyr::group_by(trait) %>%
+  dplyr::mutate(
+    global_label = dplyr::case_when(
+      value < quantile(value, 0.25, na.rm = TRUE) ~ "low_extreme",
+      value >= quantile(value, 0.25, na.rm = TRUE) & value < quantile(value, 0.5, na.rm = TRUE) ~ "mid_low_extreme",
+      value >= quantile(value, 0.5, na.rm = TRUE) & value <= quantile(value, 0.75, na.rm = TRUE) ~ "mid_high_extreme",
+      value > quantile(value, 0.75, na.rm = TRUE) ~ "high_extreme",
+      TRUE ~ "undefined"
+    ),
+    outlier = dplyr::case_when(
+      value < quantile(value, 0.25, na.rm = TRUE) - 1.5 * IQR(value, na.rm = TRUE) ~ paste0("low_outlier_", trait),
+      value > quantile(value, 0.75, na.rm = TRUE) + 1.5 * IQR(value, na.rm = TRUE) ~ paste0("high_outlier_", trait),
+      TRUE ~ "no_outlier"
+    )
+  ) %>%
+  dplyr::ungroup()
+
+# Save the melted dataframe
+melted_dataframe_traits_path <- file.path(cancer_dir, "melted_traits.csv")
+write.csv(melted_dataframe_traits, melted_dataframe_traits_path, row.names = FALSE)
+
+# Excerpt the first few rows of the melted dataframe
+head(melted_dataframe_traits)
+```
