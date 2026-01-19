@@ -42,31 +42,41 @@ workflow CT {
 
         def toolsToRun = params.ct_tool.split(',')
 
+        // Define the alignment channel (used by discovery and bootstrap)
+        align_tuple = Channel
+                .fromPath("${params.alignment}/*") // Recursively search all subdirectories
+                .filter { it.isFile() } // Filter out directories
+                .map { file -> tuple(file.baseName, file) }
+
         // Initialize variables
         def discovery_out = Channel.empty()
+        def discovery_done = Channel.value(true)
         // resample_out may be a directory (new default) or a legacy single file when running bootstrap only
-        def resample_out = params.resample_out ? Channel.value(file(params.resample_out)) : null
+        def resample_out = Channel.empty()
+        if (params.resample_out) {
+            def resample_path = file(params.resample_out)
+            if (resample_path.isDirectory()) {
+                resample_out = Channel.value(file(params.resample_out, type: 'dir'))
+            } else {
+                resample_out = Channel.value(resample_path)
+            }
+        }
         def bootstrap_out
 
         if (toolsToRun.contains('discovery')) {
-            // Define the alignment channel align_tuple
-            align_tuple = Channel
-                    .fromPath("${params.alignment}/*") // Recursively search all subdirectories
-                    .filter { it.isFile() } // Filter out directories
-                    .map { file -> tuple(file.baseName, file) }
-
             discovery_out = DISCOVERY(align_tuple)
+            discovery_done = discovery_out.collect()
             
             // Concatenate all discovery outputs from the published directory
             // Wait for all DISCOVERY processes to complete, then collect from publishDir
             CONCAT_DISCOVERY(
-                discovery_out.collect().map { "${params.outdir}/discovery" }
+                discovery_done.map { "${params.outdir}/discovery" }
             )
         }
         if (toolsToRun.contains('resample')) {
             // Define the tree file channel
-            nw_tree = file(params.tree)
-            trait_val = file(params.traitvalues)
+            nw_tree = discovery_done.map { file(params.tree) }
+            trait_val = discovery_done.map { file(params.traitvalues) }
 
             resample_out = RESAMPLE(nw_tree, trait_val)
             
@@ -77,39 +87,36 @@ workflow CT {
             )
         }
         if (toolsToRun.contains('bootstrap')) {
-            // Bootstrap must run AFTER discovery completes (if discovery runs)
             if (toolsToRun.contains('discovery')) {
-                // Wait for CONCAT_DISCOVERY to complete before proceeding
-                CONCAT_DISCOVERY.out.tap { discovery_done }
-                
-                // Define the alignment channel
-                align_tuple = Channel
-                        .fromPath("${params.alignment}/*")
-                        .filter { it.isFile() }
-                        .map { file -> tuple(file.baseName, file) }
+                align_with_discovery = align_tuple
+                        .join(discovery_out)
+                        .map { row -> tuple(row[0], row[1], row[2]) }
+            } else if (params.discovery_out && params.discovery_out != "none") {
+                def discovery_path = file(params.discovery_out)
+                if (discovery_path.isDirectory()) {
+                    def discovery_files = Channel
+                            .fromPath("${params.discovery_out}/*")
+                            .filter { it.isFile() }
+                            .map { file -> tuple(file.baseName, file) }
 
-                // Join align_tuple with discovery output from published directory
-                // discovery_done ensures CONCAT_DISCOVERY has completed
-                align_with_discovery = align_tuple.combine(discovery_done).map { 
-                    id_file, done -> 
-                    def id = id_file[0]
-                    def file = id_file[1]
-                    def discovery_file = new File("${params.outdir}/discovery/${id}.output")
-                    tuple(id, file, discovery_file.exists() ? discovery_file : [])
+                    align_with_discovery = align_tuple
+                            .join(discovery_files)
+                            .map { row -> tuple(row[0], row[1], row[2]) }
+                } else {
+                    def discovery_file_ch = Channel.value(discovery_path)
+                    align_with_discovery = align_tuple
+                            .combine(discovery_file_ch)
+                            .map { row -> tuple(row[0], row[1], row[2]) }
                 }
             } else {
-                // Discovery not running; use bootstrap-only mode
-                // Define the alignment channel
-                align_tuple = Channel
-                        .fromPath("${params.alignment}/*")
-                        .filter { it.isFile() }
-                        .map { file -> tuple(file.baseName, file) }
-
-                // Add empty file as the third element (no discovery file)
-                align_with_discovery = align_tuple.map { id, file -> tuple(id, file, []) }
+                align_with_discovery = align_tuple.map { id, alignmentFile -> tuple(id, alignmentFile, []) }
             }
-            
-            bootstrap_out = BOOTSTRAP(align_with_discovery, resample_out)
+
+            bootstrap_in = align_with_discovery
+                    .combine(resample_out)
+                    .map { row -> tuple(row[0], row[1], row[2] ?: [], row[3]) }
+
+            bootstrap_out = BOOTSTRAP(bootstrap_in)
             
             // Concatenate all bootstrap outputs from the published directory
             CONCAT_BOOTSTRAP(

@@ -19,21 +19,37 @@
 # File: discovery-local.sh
 #
 
+set -Eeuo pipefail
+
+timestamp=$(date +%Y%m%d%H%M%S)
+
+isToy=TRUE
+
+# Alignment dir in the specified format. Toy is just subset.
+if [ $isToy = TRUE ]; then
+    tag="_toy"
+    ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Ali_toy"
+    CYCLES="100"
+else
+    tag=""
+    ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Primate_alignments"
+    CYCLES="1000000"
+fi
+
 BASEDIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/caas_new_algorithm"
 
 TRAIT="malignant_prevalence"
-WORK_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Work"
+WORK_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Work/${tag}/$timestamp"
 mkdir -p $WORK_DIR
 
 
 ## CAASTOOLS DISCOVERY
-ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Primate_alignments" # Alignment dir in the specified format
 TRAIT_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Discovery/1.Traitfiles/$TRAIT/traitfile.tab" # Directory where your trait files are located
 
 ## CAASTOOLS RESAMPLE
 TREE_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/5.Phylogeny/science.abn7829_data_s4.nex.tree" # Path to the tree file
 TRAIT_VALUES="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Discovery/1.5.Bootstrap_traitfiles/$TRAIT/boot_traitfile.tab" # Path to the trait values file
-CHUNK_SIZE="1000" # Cycles per file (creates directory with multiple resample_*.tab files)
+CHUNK_SIZE="500" # Cycles per file (creates directory with multiple resample_*.tab files)
 
 ## CAASTOOLS BOOTSTRAP
 #RESAMPLED_DIR="/path/goes/here/user/Resampled_files"                # If resample already done, path to the resampled directory
@@ -68,7 +84,7 @@ export NXF_APPTAINER_HOME_MOUNT=true
 export NXF_SINGULARITY_HOME_MOUNT=true
 # CAASTOOLS DISCOVERY
 echo "Running CAASTOOLS DISCOVERY for trait: $TRAIT"
-RESULTS_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/1.Discovery/$TRAIT"   # Directory where results will be stored
+RESULTS_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/1.Discovery/${TRAIT}${tag}_BOOTTEST/$timestamp"   # Directory where results will be stored
 
 mkdir -p $RESULTS_DIR
 
@@ -91,9 +107,9 @@ nextflow run main.nf -with-tower -profile local \
     --strategy "BM" \
     --perm_strategy "random" \
     --traitvalues $TRAIT_VALUES \
-    --cycles "1000000" \
+    --cycles "100" \
     --chunk_size "$CHUNK_SIZE" \
-    --discovery_out $RESULTS_DIR/discovery \
-    --resample_out $RESULTS_DIR/resample/science.abn7829_data_s4.nex.resampled.output
+    --discovery_out "/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/1.Discovery/malignant_prevalence_toy/20260119160214/discovery" \
+    --resample_out "/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/1.Discovery/malignant_prevalence_toy/20260119160214/resample/science.abn7829_data_s4.nex.resampled.output"
 
 nextflow clean -f # This flag should be disabled if debugging

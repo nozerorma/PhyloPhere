@@ -32,36 +32,14 @@ process BOOTSTRAP {
     label 'process_boot'
     
     input:
-    tuple val(alignmentID), file(alignmentFile), path(discoveryFile)
-    path(resampledPath)  // Can be either directory or file
+    tuple val(alignmentID), path(alignmentFile), path(discoveryFile), path(resampledPath) // resampledPath can be either directory or file
     
     output:
     tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), optional: true
 
     script:
     def args = task.ext.args ?: ''
-    // Use discovery file from pipeline join first; fall back to params.discovery_out for standalone mode
-    // discoveryFile will be an empty list [] when discovery doesn't run in the pipeline
-    def discovery_arg = ''
-    
-    if (discoveryFile && discoveryFile.toString() != '[]') {
-        // Discovery file from pipeline join - use directly
-        discovery_arg = "--discovery ${discoveryFile}"
-    } else if (params.discovery_out != "none") {
-        // Standalone mode: discovery output from params
-        def discoveryPath = file(params.discovery_out)
-        if (discoveryPath.isDirectory()) {
-            // Directory mode: look for alignment-specific output
-            def nested = discoveryPath.resolve("${alignmentID}.output")
-            if (nested.exists()) {
-                discovery_arg = "--discovery ${nested}"
-            }
-        } else if (discoveryPath.exists()) {
-            // Single file mode: use directly
-            discovery_arg = "--discovery ${discoveryPath}"
-        }
-    }
-    
+    def discovery_arg = discoveryFile ? "--discovery ${discoveryFile}" : ""
     def progress_log_arg = params.progress_log != "none" ? "--progress_log ${alignmentID}.progress.log" : ""
 
     if (params.use_singularity | params.use_apptainer) {

@@ -19,15 +19,31 @@
 # File: discovery-local.sh
 #
 
+set -Eeuo pipefail
+
+timestamp=$(date +%Y%m%d%H%M%S)
+
+isToy=TRUE
+
+# Alignment dir in the specified format. Toy is just subset.
+if [ $isToy = TRUE ]; then
+    tag="_toy"
+    ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Ali_toy"
+    CYCLES="100"
+else
+    tag=""
+    ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Primate_alignments"
+    CYCLES="1000000"
+fi
+
 BASEDIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/caas_new_algorithm"
 
 TRAIT="malignant_prevalence"
-WORK_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Work"
+WORK_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Work/${tag}/$timestamp"
 mkdir -p $WORK_DIR
 
 
 ## CAASTOOLS DISCOVERY
-ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Primate_alignments" # Alignment dir in the specified format
 TRAIT_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Discovery/1.Traitfiles/$TRAIT/traitfile.tab" # Directory where your trait files are located
 
 ## CAASTOOLS RESAMPLE
@@ -68,13 +84,13 @@ export NXF_APPTAINER_HOME_MOUNT=true
 export NXF_SINGULARITY_HOME_MOUNT=true
 # CAASTOOLS DISCOVERY
 echo "Running CAASTOOLS DISCOVERY for trait: $TRAIT"
-RESULTS_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/1.Discovery/$TRAIT"   # Directory where results will be stored
+RESULTS_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/1.Discovery/${TRAIT}${tag}/$timestamp"   # Directory where results will be stored
 
 mkdir -p $RESULTS_DIR
 
 nextflow run main.nf -with-tower -profile local \
     -w $WORK_DIR \
-    --ct_tool "discovery,bootstrap" \
+    --ct_tool "discovery,resample,bootstrap" \
     --paired_mode \
     --alignment $ALI_DIR \
     --ali_format "phylip-relaxed" \
@@ -91,8 +107,7 @@ nextflow run main.nf -with-tower -profile local \
     --strategy "BM" \
     --perm_strategy "random" \
     --traitvalues $TRAIT_VALUES \
-    --cycles "100000" \
-    --chunk_size "$CHUNK_SIZE" \
-    --resample_out "$RESULTS_DIR/resample/science.abn7829_data_s4.nex.resampled.output" 
-
-# nextflow clean -f # This flag should be disabled if debugging
+    --cycles "100" \
+    --chunk_size "$CHUNK_SIZE"
+nextflow clean -f # This flag should be disabled if debugging
+echo "Pipeline finished successfully."
