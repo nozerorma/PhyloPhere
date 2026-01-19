@@ -77,17 +77,34 @@ workflow CT {
             )
         }
         if (toolsToRun.contains('bootstrap')) {
-            // Define the alignment channel
-            align_tuple = Channel
-                    .fromPath("${params.alignment}/*")
-                    .filter { it.isFile() }
-                    .map { file -> tuple(file.baseName, file) }
-
-            // If discovery was run, join with discovery output; otherwise add empty file placeholder
+            // Bootstrap must run AFTER discovery completes (if discovery runs)
             if (toolsToRun.contains('discovery')) {
-                // Join align_tuple with discovery_out by alignmentID
-                align_with_discovery = align_tuple.join(discovery_out)
+                // Wait for CONCAT_DISCOVERY to complete before proceeding
+                CONCAT_DISCOVERY.out.tap { discovery_done }
+                
+                // Define the alignment channel
+                align_tuple = Channel
+                        .fromPath("${params.alignment}/*")
+                        .filter { it.isFile() }
+                        .map { file -> tuple(file.baseName, file) }
+
+                // Join align_tuple with discovery output from published directory
+                // discovery_done ensures CONCAT_DISCOVERY has completed
+                align_with_discovery = align_tuple.combine(discovery_done).map { 
+                    id_file, done -> 
+                    def id = id_file[0]
+                    def file = id_file[1]
+                    def discovery_file = new File("${params.outdir}/discovery/${id}.output")
+                    tuple(id, file, discovery_file.exists() ? discovery_file : [])
+                }
             } else {
+                // Discovery not running; use bootstrap-only mode
+                // Define the alignment channel
+                align_tuple = Channel
+                        .fromPath("${params.alignment}/*")
+                        .filter { it.isFile() }
+                        .map { file -> tuple(file.baseName, file) }
+
                 // Add empty file as the third element (no discovery file)
                 align_with_discovery = align_tuple.map { id, file -> tuple(id, file, []) }
             }
