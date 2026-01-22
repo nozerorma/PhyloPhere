@@ -90,12 +90,21 @@ def process_position(position, multiconfig, species_in_alignment):
     z.missing = list(set(multiconfig.s2t.keys()) -  confirmed_species)
 
     # Load aas2species
+    # Define standard amino acids (20 standard AAs + gap)
+    STANDARD_AAS = set('ACDEFGHIKLMNPQRSTVWY-')
+    
     for x in position.keys():
         z.position = position[x].split("@")[1]
+        aa = position[x].split("@")[0].upper()
+
+        # Treat non-standard amino acids as gaps
+        if aa not in STANDARD_AAS:
+            aa = "-"
+        
         try:
-            z.aas2species[position[x].split("@")[0]].append(x)
+            z.aas2species[aa].append(x)
         except:
-            z.aas2species[position[x].split("@")[0]] = [x]
+            z.aas2species[aa] = [x]
 
     # Load aas2traits    
     for key in z.aas2species.keys():
@@ -225,87 +234,62 @@ def iscaas(input_string, multiconfig=None, position_dict=None, max_conserved=0, 
     fg_string = twosides[0]
     bg_string = twosides[1]
     
+    # Filter out non-standard amino acids before processing
+    # Only allow 20 standard amino acids (no gaps in this context)
+    # NOTE: this is weird. why do i have two logics for filtering gaps? check original author's intent
+    STANDARD_AAS = set('ACDEFGHIKLMNPQRSTVWY')
+    fg_string_filtered = ''.join([aa for aa in fg_string if aa in STANDARD_AAS])
+    bg_string_filtered = ''.join([aa for aa in bg_string if aa in STANDARD_AAS])
+    
+    # If either side has no valid amino acids after filtering, not a CAAS
+    if len(fg_string_filtered) == 0 or len(bg_string_filtered) == 0:
+        z.caas = False
+        return z
+    
     # Convert to unique amino acids for pattern determination
-    fg_unique = list(set(fg_string))
-    bg_unique = list(set(bg_string))
+    fg_unique = list(set(fg_string_filtered))
+    bg_unique = list(set(bg_string_filtered))
 
-    # String overlap logic: count how many characters from fg_string match bg_string (with multiplicity)
-    # For example: AAA/ASS has overlap=1 (min(3 A's, 1 A) = 1)
-    #              AAA/AAS has overlap=2 (min(3 A's, 2 A's) = 2)
-    from collections import Counter
-    
-    fg_counter = Counter(fg_string)
-    bg_counter = Counter(bg_string)
-    overlap = sum(min(fg_counter[aa], bg_counter[aa]) for aa in fg_counter)
-    
-    total_fg = len(fg_string)
-    total_bg = len(bg_string)
-    non_overlapping_fg = total_fg - overlap
-    non_overlapping_bg = total_bg - overlap
+    # String overlap logic based on membership in the opposite side
+    # Examples:
+    #   AAA/ASS -> non_overlapping_bg=2 (S,S), non_overlapping_fg=0
+    #   VM/VVV  -> non_overlapping_bg=0 (all V shared), non_overlapping_fg=1 (M)
+    shared_types = set(fg_unique).intersection(set(bg_unique))
+    shared_fg = sum(1 for aa in fg_string_filtered if aa in shared_types)
+    shared_bg = sum(1 for aa in bg_string_filtered if aa in shared_types)
+    overlap = min(shared_fg, shared_bg)
+    non_overlapping_fg = sum(1 for aa in fg_string_filtered if aa not in bg_unique)
+    non_overlapping_bg = sum(1 for aa in bg_string_filtered if aa not in fg_unique)
     
     # Standard CAAS check
-    if max_conserved == 0 or not multiconfig or not multiconfig.paired_mode:
+    if max_conserved == 0:
         # Strict mode: no overlap allowed and need at least 2 changes on one side
         if overlap == 0 and (non_overlapping_fg >= 2 or non_overlapping_bg >= 2):
             z.caas = True
         else:
             z.caas = False
     else:
-        # Pair-aware mode: allow some overlap based on max_conserved
-        # Track conserved pairs for reporting
-        conserved_pair_indices = []
-        min_len = min(len(fg_string), len(bg_string))
-        
-        for i in range(min_len):
-            if fg_string[i] == bg_string[i]:
-                # Track which pair this position corresponds to
-                if fg_species_list and bg_species_list and i < len(fg_species_list) and i < len(bg_species_list):
-                    fg_sp = fg_species_list[i]
-                    pair_id = multiconfig.get_pair(fg_sp)
-                    if pair_id:
-                        conserved_pair_indices.append(pair_id)
-        
-        # Check if overlap is within threshold and we have enough changes
+        # Allow overlap up to max_conserved regardless of paired mode
         if overlap <= max_conserved and (non_overlapping_fg >= 2 or non_overlapping_bg >= 2):
             z.caas = True
-            pair_list = ",".join(conserved_pair_indices) if conserved_pair_indices else ""
-            z.conserved_pairs = f"{overlap}:{pair_list}"
         else:
             z.caas = False
+
+        # Track conserved pairs only when paired mode is enabled
+        if z.caas and multiconfig and multiconfig.paired_mode:
+            conserved_pair_indices = []
+            min_len = min(len(fg_string), len(bg_string))
             
-        # Old complex logic removed - now using simple string overlap
-        if False:  # Placeholder to maintain indentation of old code below
-            # Get FG and BG species for this trait (only those present at this position)
-            if trait and multiconfig:
-                # Only consider species that are actually present (not gapped/missing) at this position
-                fg_species_all = [sp for sp in multiconfig.trait2fg.get(trait, []) if sp in species2aa]
-                bg_species_all = [sp for sp in multiconfig.trait2bg.get(trait, []) if sp in species2aa]
-                
-                # Find overlapping amino acids (those that appear in both FG and BG)
-                fg_aas = set(species2aa[sp] for sp in fg_species_all)
-                bg_aas = set(species2aa[sp] for sp in bg_species_all)
-                overlap_aas = fg_aas.intersection(bg_aas)
-                
-                # Count species with non-overlapping amino acids (actual changes)
-                # We need at least 2 species to have changed on one side for meaningful divergence
-                fg_changed_count = sum(1 for sp in fg_species_all 
-                                      if species2aa[sp] not in overlap_aas)
-                bg_changed_count = sum(1 for sp in bg_species_all 
-                                      if species2aa[sp] not in overlap_aas)
-                
-                # At least one side must have 2+ species that changed (have non-overlapping AAs)
-                if fg_changed_count < 2 and bg_changed_count < 2:
-                    # Not enough changes - need at least 2 species changed on one side
-                    z.caas = False
-                else:
-                    z.caas = True
-                    # Format: "count:pair1,pair2,..."
-                    pair_list = ",".join(conserved_pair_indices) if conserved_pair_indices else ""
-                    z.conserved_pairs = f"{num_conserved_positions}:{pair_list}"
-            else:
-                z.caas = True
-                pair_list = ",".join(conserved_pair_indices) if conserved_pair_indices else ""
-                z.conserved_pairs = f"{num_conserved_positions}:{pair_list}"
+            for i in range(min_len):
+                if fg_string[i] == bg_string[i]:
+                    if fg_species_list and bg_species_list and i < len(fg_species_list) and i < len(bg_species_list):
+                        fg_sp = fg_species_list[i]
+                        pair_id = multiconfig.get_pair(fg_sp)
+                        if pair_id:
+                            conserved_pair_indices.append(pair_id)
+            
+            pair_list = ",".join(conserved_pair_indices) if conserved_pair_indices else ""
+            z.conserved_pairs = f"{overlap}:{pair_list}"
 
     # What is the pattern?
     if len(fg_unique) == 1 and len(bg_unique) == 1:
@@ -384,8 +368,10 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
                     miss_pairs_fg = set(processed_position.trait2miss_pairs_fg.get(trait, []))
                     miss_pairs_bg = set(processed_position.trait2miss_pairs_bg.get(trait, []))
                     
-                    # Check if missing pairs match
-                    if miss_pairs_fg != miss_pairs_bg:
+                    # Only check pairs when BOTH FG and BG have missing species
+                    # If only one side missing → always OK (don't check pairs)
+                    # If both missing → only reject if from different pairs
+                    if miss_pairs_fg and miss_pairs_bg and miss_pairs_fg != miss_pairs_bg:
                         valid_traits.remove(trait)
                         continue
                 
@@ -401,8 +387,10 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
                     gap_pairs_fg = set(processed_position.trait2gap_pairs_fg.get(trait, []))
                     gap_pairs_bg = set(processed_position.trait2gap_pairs_bg.get(trait, []))
                     
-                    # Check if gapped pairs match
-                    if gap_pairs_fg != gap_pairs_bg:
+                    # Only check pairs when BOTH FG and BG have gapped species
+                    # If only one side gapped → always OK (don't check pairs)
+                    # If both gapped → only reject if from different pairs
+                    if gap_pairs_fg and gap_pairs_bg and gap_pairs_fg != gap_pairs_bg:
                         if trait in valid_traits:
                             valid_traits.remove(trait)
                         continue

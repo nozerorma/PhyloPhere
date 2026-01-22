@@ -71,7 +71,8 @@ process RESAMPLE {
         ${params.perm_strategy} \\
         ${trait_val} \\
         ${nw_tree.baseName}.resampled.output \\
-        ${params.chunk_size}
+        ${params.chunk_size} \\
+        ${params.include_b0}
         """
     } else {
         """
@@ -85,7 +86,8 @@ process RESAMPLE {
         ${params.perm_strategy} \\
         ${trait_val} \\
         ${nw_tree.baseName}.resampled.output \\
-        ${params.chunk_size}
+        ${params.chunk_size} \\
+        ${params.include_b0}
         """
     }
 

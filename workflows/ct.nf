@@ -91,6 +91,8 @@ workflow CT {
                 align_with_discovery = align_tuple
                         .join(discovery_out)
                         .map { row -> tuple(row[0], row[1], row[2]) }
+                        .combine(discovery_done)
+                        .map { row -> tuple(row[0], row[1], row[2]) }
             } else if (params.discovery_out && params.discovery_out != "none") {
                 def discovery_path = file(params.discovery_out)
                 if (discovery_path.isDirectory()) {
@@ -119,9 +121,12 @@ workflow CT {
             bootstrap_out = BOOTSTRAP(bootstrap_in)
             
             // Concatenate all bootstrap outputs from the published directory
-            CONCAT_BOOTSTRAP(
-                bootstrap_out.collect().map { "${params.outdir}/bootstrap" }
-            )
+            def bootstrap_done = bootstrap_out.bootstrap_out.ifEmpty { Channel.value(null) }.collect()
+            // If discovery was run, ensure CONCAT_BOOTSTRAP waits for discovery completion too
+            def concat_trigger = toolsToRun.contains('discovery') ? 
+                bootstrap_done.combine(discovery_done).map { "${params.outdir}/bootstrap" } :
+                bootstrap_done.map { "${params.outdir}/bootstrap" }
+            CONCAT_BOOTSTRAP(concat_trigger)
         }
     }
 }

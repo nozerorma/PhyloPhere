@@ -5,6 +5,7 @@
 # | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
 #  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
 
+__version__ = "2.0.0-paired"
 
 '''
 A Convergent Amino Acid Substitution identification 
@@ -15,6 +16,8 @@ Author:         Fabio Barteri (fabio.barteri@upf.edu)
 Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
                 Xavier Farré (xfarrer@igtp.cat),
                 David de Juan (david.juan@upf.edu).
+
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
 MODULE NAME:    hyper.py
 DESCRIPTION:    Pvalue assignment to CAAS prediction based on hypergeometric probability function.
@@ -48,7 +51,7 @@ def pstate(iterable, freq_dictionary, set_size, contrast_size, mode = "independe
     Mn = IL MAZZO DI CARTE SAPENDO CHE L'AVVERSARIO (FOREGROUND) HA COLTO LE SUE (M - CONTRAST_SIZE)
     N = IL NUMERO DI CARTE CHE VUOI NEL MAZZO = sum of the frequences of the iterable
     n = LE CARTE CHE HAI IN MANO (SET_SIZE)
-    k LE CARTE CHE HAI IN MANO E CHE COINCIDONO CON (N) -----> n = k (SET_SIZE)
+    k = LE CARTE CHE HAI IN MANO E CHE COINCIDONO CON (N) -----> n = k (SET_SIZE)
 
 
     '''

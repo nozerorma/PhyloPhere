@@ -79,6 +79,10 @@ selection.strategy <- args[4]
 phenotypes <- args[5]
 outdir <- args[6]
 chunk.size <- ifelse(length(args) >= 7, as.integer(args[7]), 500)
+include.b0 <- TRUE
+if (length(args) >= 8) {
+  include.b0 <- tolower(as.character(args[8])) %in% c("1", "true", "t", "yes", "y")
+}
 
 # Create output directory if it doesn't exist
 if (!dir.exists(outdir)) {
@@ -138,6 +142,22 @@ simulated.traits.df <- data.frame(matrix(ncol = 3, nrow = 0))
 start.time <- Sys.time()
 write(paste("[START]", start.time, "Beginning permulation generation..."), stdout())
 write(paste("[INFO] Total cycles:", number.of.cycles, "| Chunk size:", chunk.size), stdout())
+
+if (include.b0) {
+  # Write b_0 (original trait configuration) as resample_000.tab
+  write(paste("[INFO]", Sys.time(), "Writing b_0 (original trait configuration) to resample_000.tab"), stdout())
+  b0.df <- data.frame(matrix(ncol = 3, nrow = 1))
+  b0.cycle.tag <- "b_0"
+  b0.fg.species.tag <- paste(foreground.species, collapse=",")
+  b0.bg.species.tag <- paste(background.species, collapse=",")
+  b0.outline <- c(b0.cycle.tag, b0.fg.species.tag, b0.bg.species.tag)
+  b0.df[1,] <- b0.outline
+  b0.filepath <- file.path(outdir, "resample_000.tab")
+  write.table(b0.df, sep="\t", col.names=FALSE, row.names=FALSE, file=b0.filepath, quote=FALSE)
+  write(paste("[COMPLETE] b_0 written to:", b0.filepath), stdout())
+} else {
+  write(paste("[INFO]", Sys.time(), "Skipping b_0 (include_b0=FALSE)"), stdout())
+}
 
 calculate_patristic_distances <- function(tree, species_list) {
 
@@ -422,5 +442,4 @@ for (j in 1:as.integer(number.of.cycles)){
 end.time <- Sys.time()
 total.elapsed <- as.numeric(difftime(end.time, start.time, units="mins"))
 write(paste("[COMPLETE]", end.time, "|", number.of.cycles, "cycles in", round(total.elapsed, 2), "minutes"), stdout())
-write(paste("[OUTPUT] Generated", file.counter - 1, "files in:", outdir), stdout())
-
+write(paste("[OUTPUT] Generated", file.counter, "permuted trait files + 1 original (b_0) =", file.counter, "total files in:", outdir), stdout())

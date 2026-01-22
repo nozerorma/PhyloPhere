@@ -104,7 +104,7 @@ def readtree(tree_file, tree_schema = "newick"):
 
 # FUNCTION simtrait() Resample trait function
 
-def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_values_file, cycles, simtraits_outfile, permulation_selection_strategy = "random"):
+def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_values_file, cycles, simtraits_outfile, permulation_selection_strategy = "random", chunk_size = 500):
     
     # Class multicfg
     class multicfg():
@@ -114,6 +114,18 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
             self.alltraits = []
             self.trait2fg = {}
             self.trait2bg = {}
+            self.paired_mode = False  # Bootstrap doesn't use paired mode
+            
+            # Pair-aware attributes (for compatibility with caas_id.py)
+            self.species2pair = {}
+            self.pair2fg_species = {}
+            self.pair2bg_species = {}
+            self.allpairs = []
+            self._pair_cache = {}
+
+        def get_pair(self, species):
+            """Get the pair for a species (for compatibility with caas_id.py)"""
+            return self.species2pair.get(species, None)
 
         def update_dictionary(self, traitname, species, group):
             try:
@@ -316,6 +328,11 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
             print("See documentation.")
             exit()
         
+        # Create output directory if it doesn't exist
+        if not os.path.exists(simtraits_outfile):
+            os.makedirs(simtraits_outfile)
+            print(f"Created output directory: {simtraits_outfile}")
+        
         script_path = os.path.realpath(sys.argv[0]).split("/")
         script_path.remove(script_path[-1])
         rscript_path = "/".join(script_path) + "/permulations.r"
@@ -330,13 +347,15 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
             str(cycles),                            # args[3]
             permulation_selection_strategy,         # args[4]
             phenotype_values_file,                  # args[5]
-            simtraits_outfile                          # args[6]
+            simtraits_outfile,                      # args[6] - now directory
+            str(chunk_size)                         # args[7] - chunk size
         ])
         os.system(r_line)
 
 # FUNCTION simtrait_revive() revive resampled trait from
 
 def simtrait_revive(traitfile):
+    """Load resampled traits from a single file (backward compatibility)"""
     
     # Class multicfg
 
@@ -348,6 +367,18 @@ def simtrait_revive(traitfile):
             self.trait2fg = {}
             self.trait2bg = {}
             self.cycles = 0
+            self.paired_mode = False  # Bootstrap doesn't use paired mode
+            
+            # Pair-aware attributes (for compatibility with caas_id.py)
+            self.species2pair = {}
+            self.pair2fg_species = {}
+            self.pair2bg_species = {}
+            self.allpairs = []
+            self._pair_cache = {}
+
+        def get_pair(self, species):
+            """Get the pair for a species (for compatibility with caas_id.py)"""
+            return self.species2pair.get(species, None)
 
         def update_dictionary(self, traitname, species, group):
             try:
@@ -410,8 +441,100 @@ def simtrait_revive(traitfile):
 
         except:
             pass
+    
+    # Deduplicate alltraits list (preserves order)
+    z.alltraits = list(dict.fromkeys(z.alltraits))
 
     return z
+
+
+# FUNCTION simtrait_revive_from_dir() Load resampled traits from directory of chunked files
+
+def simtrait_revive_from_dir(resample_dir):
+    """Load resampled traits from a directory containing chunked resample files.
+    
+    Returns a generator that yields (file_path, multicfg_object) tuples for sequential processing.
+    This allows memory-efficient processing of large resample sets.
+    
+    Args:
+        resample_dir: Path to directory containing resample_*.tab files
+        
+    Yields:
+        tuple: (file_path, multicfg_object) for each resample file
+    """
+    import glob
+    import re
+    
+    # Find all resample files
+    pattern = os.path.join(resample_dir, "resample_*.tab")
+    resample_files = glob.glob(pattern)
+    
+    if len(resample_files) == 0:
+        print(f"ERROR: No resample files found in {resample_dir}")
+        print(f"Expected files matching pattern: resample_*.tab")
+        exit()
+    
+    # Sort files by number (resample_001.tab, resample_002.tab, ...)
+    def extract_number(filepath):
+        match = re.search(r'resample_(\d+)\.tab$', filepath)
+        return int(match.group(1)) if match else 0
+    
+    resample_files.sort(key=extract_number)
+    
+    print(f"Found {len(resample_files)} resample files in {resample_dir}")
+    
+    # Yield each file with its loaded multicfg object
+    for file_path in resample_files:
+        yield file_path, simtrait_revive(file_path)
+
+
+# FUNCTION get_resample_info() Get information about resampled traits without loading all data
+
+def get_resample_info(resample_path):
+    """Get information about resampled traits (total cycles, files) without loading all data.
+    
+    Args:
+        resample_path: Path to resample file or directory
+        
+    Returns:
+        dict: {'total_cycles': int, 'num_files': int, 'is_directory': bool, 'files': list}
+    """
+    import glob
+    import re
+    
+    if os.path.isdir(resample_path):
+        # Directory mode: count files and cycles
+        pattern = os.path.join(resample_path, "resample_*.tab")
+        resample_files = glob.glob(pattern)
+        
+        def extract_number(filepath):
+            match = re.search(r'resample_(\d+)\.tab$', filepath)
+            return int(match.group(1)) if match else 0
+        
+        resample_files.sort(key=extract_number)
+        
+        total_cycles = 0
+        for file_path in resample_files:
+            with open(file_path) as f:
+                total_cycles += len(f.read().splitlines())
+        
+        return {
+            'total_cycles': total_cycles,
+            'num_files': len(resample_files),
+            'is_directory': True,
+            'files': resample_files
+        }
+    else:
+        # Single file mode
+        with open(resample_path) as f:
+            total_cycles = len(f.read().splitlines())
+        
+        return {
+            'total_cycles': total_cycles,
+            'num_files': 1,
+            'is_directory': False,
+            'files': [resample_path]
+        }
 
 
 

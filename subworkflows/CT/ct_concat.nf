@@ -97,13 +97,13 @@ process CONCAT_RESAMPLE {
     echo "Line count: \$(wc -l < "\${resample_files[0]}")"
     echo ""
     
-    # Copy first file completely (header + data)
+    # Copy first file completely
     cat "\${resample_files[0]}" > resample.tab
     
-    # Append remaining files without their headers
+    # Append all remaining files (resample files don't have headers, all lines are data)
     for ((i=1; i<\${#resample_files[@]}; i++)); do
         echo "Appending file \$((i+1))/\${#resample_files[@]}: \${resample_files[\$i]} (\$(wc -l < "\${resample_files[\$i]}") lines)"
-        tail -n +2 "\${resample_files[\$i]}" >> resample.tab
+        cat "\${resample_files[\$i]}" >> resample.tab
     done
     
     echo ""
@@ -134,7 +134,7 @@ process CONCAT_BOOTSTRAP {
     echo ""
     
     # Find all .output files in the published directory and sort them
-    mapfile -t bootstrap_files < <(find "${bootstrap_dir}" -type f -name "*.output" | sort)
+    mapfile -t bootstrap_files < <(find "${bootstrap_dir}" -type f -name "*.bootstraped.output" | sort)
     
     echo "Found \${#bootstrap_files[@]} bootstrap files:"
     printf '%s\n' "\${bootstrap_files[@]}"
@@ -152,13 +152,13 @@ process CONCAT_BOOTSTRAP {
     echo "Line count: \$(wc -l < "\${bootstrap_files[0]}")"
     echo ""
     
-    # Copy first file completely (header + data)
+    # Copy first file completely
     cat "\${bootstrap_files[0]}" > bootstrap.tab
     
-    # Append remaining files without their headers
+    # Append all remaining files (bootstrap files don't have headers, all lines are data)
     for ((i=1; i<\${#bootstrap_files[@]}; i++)); do
         echo "Appending file \$((i+1))/\${#bootstrap_files[@]}: \${bootstrap_files[\$i]} (\$(wc -l < "\${bootstrap_files[\$i]}") lines)"
-        tail -n +2 "\${bootstrap_files[\$i]}" >> bootstrap.tab
+        cat "\${bootstrap_files[\$i]}" >> bootstrap.tab
     done
     
     echo ""

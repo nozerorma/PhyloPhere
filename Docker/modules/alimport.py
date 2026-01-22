@@ -5,6 +5,7 @@
 # | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
 #  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
 
+__version__ = "2.0.0-paired"
 
 '''
 A Convergent Amino Acid Substitution identification 
@@ -16,6 +17,7 @@ Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
                 Xavier Farré (xfarrer@igtp.cat),
                 David de Juan (david.juan@upf.edu).
 
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
 MODULE NAME: alimport.py
 DESCRIPTION: MSA importation from various format through BioPython
@@ -51,7 +53,8 @@ def import_position(position, imported_alignment):
 
 
 
-# FUNCTION filter_position()                       #devnote TO BE EXPORTED IN FILE, GAPSRATIO INCLUDED
+# FUNCTION filter_position()                       
+# #devnote TO BE EXPORTED IN FILE, GAPSRATIO INCLUDED
 # This function is designed to exclude those positions that are so conserved
 # that it is impossible (or unlikely) for them to return a CAAS.
 

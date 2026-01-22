@@ -86,6 +86,7 @@ Usage:
 --traitvalues           <"traitvalues_file">                    null
 --cycles                <"INTEGER">                             "1000"
 --chunk_size            <"INTEGER">                             "500"
+--include_b0            <"true|false">                          true
 
 Output: Directory containing resample_*.tab files (one per chunk_size cycles)
 
@@ -104,6 +105,8 @@ Usage:
 --resample_out          <"resampleDir|resampleFile">            null
 --progress_log          <"progress_log_file">                   "none"
 --discovery_out         <"discovery_output_dir">                "none"
+--export_groups         <"output_file">                         "none"
+--export_perm_discovery <"output_file">                         "none"
 
 NOTE: resample_out can be either a directory (recommended, contains resample_*.tab files) or a legacy single file
 NOTE: discovery_out enables position filtering optimization (typically 100-1000× speedup)

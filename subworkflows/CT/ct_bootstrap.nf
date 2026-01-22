@@ -35,12 +35,16 @@ process BOOTSTRAP {
     tuple val(alignmentID), path(alignmentFile), path(discoveryFile), path(resampledPath) // resampledPath can be either directory or file
     
     output:
-    tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), optional: true
+    tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), emit: bootstrap_out, optional: true
+    tuple val(alignmentID), file("${alignmentID}.bootstrap.groups.output"), emit: bootstrap_groups, optional: true
+    tuple val(alignmentID), file("${alignmentID}.bootstrap.discovery.output"), emit: bootstrap_perm_discovery, optional: true
 
     script:
     def args = task.ext.args ?: ''
     def discovery_arg = discoveryFile ? "--discovery ${discoveryFile}" : ""
     def progress_log_arg = params.progress_log != "none" ? "--progress_log ${alignmentID}.progress.log" : ""
+    def export_groups_arg = params.export_groups != "none" ? "--export_groups ${alignmentID}.bootstrap.groups.output" : ""
+    def export_perm_discovery_arg = params.export_perm_discovery != "none" ? "--export_perm_discovery ${alignmentID}.bootstrap.discovery.output" : ""
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -53,6 +57,8 @@ process BOOTSTRAP {
             --fmt ${params.ali_format} \\
             ${discovery_arg} \\
             ${progress_log_arg} \\
+            ${export_groups_arg} \\
+            ${export_perm_discovery_arg} \\
             ${args.replaceAll('\n', ' ')}
         """
     } else {
@@ -66,6 +72,8 @@ process BOOTSTRAP {
             --fmt ${params.ali_format} \\
             ${discovery_arg} \\
             ${progress_log_arg} \\
+            ${export_groups_arg} \\
+            ${export_perm_discovery_arg} \\
             ${args.replaceAll('\n', ' ')}
         """
     }

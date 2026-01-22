@@ -513,6 +513,14 @@ if tool.lower() == "bootstrap":
     parser.add_option("-o", "--output", dest="output_file",
                     help="The output file, where the bootstrap table will be printed", default = "none")
     
+    ###     3.3.6 Optional export of detected groups per permulation
+    parser.add_option("--export_groups", dest="export_groups",
+                    help="Optional output file to write detected groups per permulation (Cycle, Gene, Position, Mode, Group). Default = none.", default = "none")
+    
+    ###     3.3.7 Optional export of per-permulation discoveries
+    parser.add_option("--export_perm_discovery", dest="export_perm_discovery",
+                    help="Optional output file to write per-permulation CAAS/CAAP detections (Cycle-prefixed discovery-like output). Default = none.", default = "none")
+    
 
 
     ### 3.4 Optional and filtering inputs
@@ -683,11 +691,11 @@ if tool.lower() == "bootstrap":
                     output_file = options.output_file,
                     discovery_file = discovery_input,
                     progress_log = progress_log_input,
-                    caap_mode = options.caap_mode
+                    caap_mode = options.caap_mode,
+                    export_groups = None if options.export_groups == "none" else options.export_groups,
+                    export_perm_discovery = None if options.export_perm_discovery == "none" else options.export_perm_discovery
                     )
     
     ###     3.9.4 Final output
     print("\n\nBootstrap information available in", options.output_file)
-
-
 

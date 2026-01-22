@@ -441,6 +441,9 @@ def simtrait_revive(traitfile):
 
         except:
             pass
+    
+    # Deduplicate alltraits list (preserves order)
+    z.alltraits = list(dict.fromkeys(z.alltraits))
 
     return z
 

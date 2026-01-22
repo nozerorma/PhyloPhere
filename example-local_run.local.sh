@@ -38,17 +38,17 @@ fi
 
 BASEDIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/caas_new_algorithm"
 
-TRAIT="malignant_prevalence"
-WORK_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Work/${tag}/$timestamp"
+TRAIT="neoplasia_prevalence"
+WORK_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Work${tag}/$timestamp"
 mkdir -p $WORK_DIR
 
 
 ## CAASTOOLS DISCOVERY
-TRAIT_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Discovery/1.Traitfiles/$TRAIT/traitfile.tab" # Directory where your trait files are located
+TRAIT_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Traitfiles/$TRAIT/traitfile.tab" # Directory where your trait files are located
 
 ## CAASTOOLS RESAMPLE
 TREE_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/5.Phylogeny/science.abn7829_data_s4.nex.tree" # Path to the tree file
-TRAIT_VALUES="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Discovery/1.5.Bootstrap_traitfiles/$TRAIT/boot_traitfile.tab" # Path to the trait values file
+TRAIT_VALUES="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.5.Bootstrap_traitfiles/$TRAIT/boot_traitfile.tab" # Path to the trait values file
 CHUNK_SIZE="500" # Cycles per file (creates directory with multiple resample_*.tab files)
 
 ## CAASTOOLS BOOTSTRAP
@@ -90,14 +90,13 @@ mkdir -p $RESULTS_DIR
 
 nextflow run main.nf -with-tower -profile local \
     -w $WORK_DIR \
-    --ct_tool "discovery,resample,bootstrap" \
+    --ct_tool "discovery,bootstrap" \
     --paired_mode \
     --alignment $ALI_DIR \
     --ali_format "phylip-relaxed" \
     --traitfile $TRAIT_FILE \
     --outdir $RESULTS_DIR \
-    --maxfgmiss "1" \
-    --maxbgmiss "1" \
+    --maxmiss "0" \
     --maxgaps "0" \
     --miss_pair \
     --max_conserved "1" \
@@ -107,7 +106,17 @@ nextflow run main.nf -with-tower -profile local \
     --strategy "BM" \
     --perm_strategy "random" \
     --traitvalues $TRAIT_VALUES \
-    --cycles "100" \
-    --chunk_size "$CHUNK_SIZE"
-nextflow clean -f # This flag should be disabled if debugging
+    --cycles $CYCLES \
+    --chunk_size $CHUNK_SIZE \
+    --include_b0
+
+#debug flags
+# --export_groups  # Export the groups used in the bootstrap resample for debugging
+# --export_perm_discovery  # Export the discovery results for each permutation in the resample for debugging
+# --include_b0 # Export b_0 (hypothesis test) in the resample for debugging
+# --resample_out # Path where resampled files are stored for independent bootstrap runs
+# --discovery_out # Path where discovery output files are stored for independent bootstrap runs
+#    --resample_out "/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/1.Discovery/neoplasia_prevalence_toy/20260122183425/resample/science.abn7829_data_s4.nex.resampled.output"
+
+# nextflow clean -f # This flag should be disabled if debugging
 echo "Pipeline finished successfully."
