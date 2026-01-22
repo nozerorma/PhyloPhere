@@ -44,16 +44,6 @@ process RESAMPLE {
 
     script:
     def args = task.ext.args ?: ''
-    def strategyCommand = ""
-
-    // Determine the strategy command based on the provided strategy
-    if (params.strategy == "FGBG") {
-        strategyCommand = "-f ${params.fgsize} -b ${params.bgsize} -m random"
-    } else if (params.strategy == "BM") {
-        strategyCommand = "--bytemp ${params.template} --traitvalues ${params.traitvalues} --mode bm --perm_strategy random"
-    } else {
-        exit 1, "Invalid strategy: ${params.strategy}"
-    }
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -64,6 +54,7 @@ process RESAMPLE {
         ${nw_tree} \\
         ${params.caas_config} \\
         ${params.cycles} \\
+        ${params.perm_strategy} \\
         ${trait_val} \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
@@ -78,6 +69,7 @@ process RESAMPLE {
         ${nw_tree} \\
         ${params.caas_config} \\
         ${params.cycles} \\
+        ${params.perm_strategy} \\
         ${trait_val} \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\

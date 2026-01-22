@@ -94,7 +94,7 @@ nextflow run main.nf -with-tower -profile local \
     --paired_mode \
     --alignment $ALI_DIR \
     --ali_format "phylip-relaxed" \
-    --traitfile $TRAIT_FILE \
+    --caas_config $TRAIT_FILE \
     --outdir $RESULTS_DIR \
     --maxmiss "0" \
     --maxgaps "0" \

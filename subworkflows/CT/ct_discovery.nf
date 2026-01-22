@@ -47,7 +47,7 @@ process DISCOVERY {
         echo "Using Singularity/Apptainer"
         /usr/local/bin/_entrypoint.sh ct discovery \\
         -a ${alignmentFile} \\
-        -t ${params.traitfile} \\
+        -t ${params.caas_config} \\
         -o ${alignmentID}.output \\
         --fmt ${params.ali_format} \\
         ${args.replaceAll('\n', ' ')}
@@ -57,7 +57,7 @@ process DISCOVERY {
         echo "Running locally"
         $baseDir/subworkflows/CT/local/ct discovery \\
         -a ${alignmentFile} \\
-        -t ${params.traitfile} \\
+        -t ${params.caas_config} \\
         -o ${alignmentID}.output \\
         --fmt ${params.ali_format} \\
         ${args.replaceAll('\n', ' ')}

@@ -90,8 +90,6 @@ Output: Directory containing resample_*.tab files (one per chunk_size cycles)
 
 Strategy requirements:
 FGBG                    --fgsize --bgsize
-TEMPLATE                --template
-PHYLORESTRICTED         --bytemp --limit_by_group
 BM                      --bytemp --traitvalues
 '''
 
