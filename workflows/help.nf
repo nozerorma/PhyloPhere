@@ -78,11 +78,9 @@ Resamples virtual phenotypes for CAAS bootstrap analysis.
 
 Usage:
 --tree                  <"nwtree_file">                         ${params.tree}
---strategy              <"FGBG|TEMPLATE|PHYLORESTRICTED|BM">    ${params.strategy}
+--strategy              <"FGBG|BM">                             ${params.strategy}
 --fgsize                <"INTEGER">                             ${params.fgsize}
 --bgsize                <"INTEGER">                             null
---template              <"template_file">                       null
---bygroup               <"grouping_file">                       null
 --traitvalues           <"traitvalues_file">                    null
 --cycles                <"INTEGER">                             "1000"
 --chunk_size            <"INTEGER">                             "500"

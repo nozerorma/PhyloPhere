@@ -55,7 +55,7 @@ process DISCOVERY {
     } else {
         """
         echo "Running locally"
-        $baseDir/ct discovery \\
+        $baseDir/subworkflows/CT/local/ct discovery \\
         -a ${alignmentFile} \\
         -t ${params.traitfile} \\
         -o ${alignmentID}.output \\

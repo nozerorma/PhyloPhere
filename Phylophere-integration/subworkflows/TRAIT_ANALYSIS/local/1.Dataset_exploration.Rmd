@@ -35,29 +35,18 @@ Script to visualize and process data. It generates family distribution plots, su
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
 ```{r setup, message=FALSE, warning=FALSE}
+# Call the setup function from commons.R
+source("./obj/commons.R")
+setup_rmd()
 
-# Suppress warnings and messages in output
-knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+# Load necessary libraries
+library(dplyr)
+library(ggplot2)
+library(readr)
+library(reshape2)
 
-# Set the root directory for the project. Useful to set report outputs. Don't know if necessary.
-knitr::opts_knit$set(root.dir = getwd())
-
-# Define working, data, and results directories
-workingDir <- getwd()
-# Display current working directory
-getwd()
-
-```
-
-```{r dirdef}
-
-# Load libraries, common functions, primate-specific functions and objects
-source(file.path(workingDir, "lib/libraries.R")) # Contains the different libraries used in the analysis. Would be nice to include dinamically. Maybe force an object in the function script.
-
-source(file.path(workingDir, "obj/commons.R")) # Contains the main objects for the analysis. Modify as needed.
-source(file.path(workingDir, "obj/palettes.R")) # Contains the different color palettes. Modify accordingly.
-source(file.path(workingDir, "fun/common_fun.R")) # Common small functions used all around (does arreu come from all around?)
-source(file.path(workingDir, "fun/trait_stats.R")) # Function to compute statistical analysis for the trait of interest
+# Create directories for outputs
+createDir(species_distribution_dir)
 
 ```
 
@@ -70,45 +59,21 @@ This section visualizes the distribution of species across families to provide a
 color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
 capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
 capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
-color.sym <- sym(color_palette) # Symbol for the color palette
-taxa.sym <- sym(taxon_of_interest) # Symbol for the taxon of interest
-trait.sym <- sym(trait) # Symbol for the trait of interest
+color.sym <- rlang::sym(color_palette) # Symbol for the color palette
+taxa.sym <- rlang::sym(taxon_of_interest) # Symbol for the taxon of interest
+trait.sym <- rlang::sym(trait) # Symbol for the trait of interest
 
 # 1. DATA VISUALIZATION  ------------------------------------------------------
 # Calculate species count per taxon_of_interest
 taxa_distribution <- trait_df %>%
-  dplyr::group_by(!!sym(taxon_of_interest)) %>%
+  dplyr::group_by(!!taxa.sym) %>%
   dplyr::summarise(count = n())
 
 # Create bar plot for taxa distribution
-p1 <- ggplot2::ggplot(taxa_distribution, 
-                        aes(x = !!taxa.sym, y = count, fill = !!taxa.sym)) +
-  geom_bar(stat = "identity") +
-  geom_text(aes(label = count), 
-            vjust = 0.5, hjust = -1.5, 
-            color = "black", fontface = "bold", 
-            size = 6) +
-  labs(x = paste(capitalized_taxon, "-", clade_name), 
-       y = "Number of species", 
-       title = paste(capitalized_taxon, "distribution in", clade_name)) +
-  scale_fill_manual(values = !!color.sym, breaks = NULL) + # 
-  scale_y_continuous(limits = c(0, nrow(family_distribution)), expand = c(0, 0)) +
-  theme_minimal() +
-  theme(
-    axis.text.y = element_text(hjust = 1, size = 18, face = "bold", color = "black"),
-    axis.text.x = element_blank(),
-    plot.title = element_blank(),
-    axis.title.x = element_text(size = 18, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
-    axis.title.y = element_blank(),
-    legend.position = "none"
-  ) +
-  coord_flip()
+p1 <- taxa_plot.f(taxa_distribution)
 
 # Save the plot to the results directory
-plot_dir <- file.path(resultsDir, "1.Data-exploration/1.Species_distribution")
-createDir(plot_dir)
-
-ggplot2::ggsave(file.path(plot_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution.png")), p1, 
+ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution.png")), p1, 
                 device = "png", width = 10, height = 10, dpi = "retina")
 
 # Display the plot
@@ -124,10 +89,20 @@ p1
 stats_df <- stats.f(trait_df)
 
 # Save the melted dataframe
-save_path <- file.path(resultsDir, "1.Data-exploration/1.Species_distribution/trait_stats.csv")
-write.csv(stats_df, save_path, row.names = FALSE)
+save_path <- file.path(species_distribution_dir, "trait_stats.csv")
+if (!is.null(stats_df)) {
+  write.csv(stats_df, save_path, row.names = FALSE)
+}
 
 # Print an excerpt
-print(head(stats_df))
+if (!is.null(stats_df)) {
+  print(head(stats_df))
+}
 
+```
+
+## Session Information
+
+```{r session_info}
+sessionInfo()
 ```

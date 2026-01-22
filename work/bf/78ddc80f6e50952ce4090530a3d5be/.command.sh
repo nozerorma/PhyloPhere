@@ -1,0 +1,4 @@
+#!/bin/bash -euo pipefail
+cp -R /home/miguel/IBE-UPF/PhD/PhyloPhere/Phylophere-integration/subworkflows/TRAIT_ANALYSIS/local/* .
+mkdir -p reporting
+Rscript -e "rmarkdown::render('1.Dataset_exploration.Rmd', output_dir='.', quiet=TRUE)" --args           '/home/miguel/IBE-UPF/PhD/PhyloPhere/Data/1.Cancer_data/cancer_traits-FINAL-DATASET-120424.csv'           '/home/miguel/IBE-UPF/PhD/PhyloPhere/Data/Phylogeny/tree.nwk'           'reporting'           '1998'           'primates'           'family'           'neoplasia_prevalence'           'adult_necropsy_count'           '/home/miguel/IBE-UPF/PhD/PhyloPhere/Data/5.Phylogeny/taxid_species_family.tsv'

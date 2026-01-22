@@ -1,0 +1,13 @@
+Read 1 item
+Error in `ggplot2::ggsave()`:
+! Cannot find directory 'reporting/1.Data-exploration/2.Extreme_plots'.
+ℹ Please supply an existing directory or use `create.dir = TRUE`.
+Backtrace:
+    ▆
+ 1. └─ggplot2::ggsave(...)
+ 2.   └─ggplot2:::check_path(path, filename, create.dir)
+ 3.     └─cli::cli_abort(...)
+ 4.       └─rlang::abort(...)
+
+Quitting from 2.Phenotype_exploration.Rmd:83-105 [phenoplot]
+Execution halted

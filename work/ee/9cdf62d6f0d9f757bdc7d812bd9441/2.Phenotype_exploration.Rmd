@@ -1,0 +1,554 @@
+---
+title: "Exploring the phenotype"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r header}
+
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+
+## PHYLOPHERE: A Nextflow pipeline including a complete set
+## of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+### Github: https://github.com/nozerorma/caastools/nf-phylophere
+### Author: Miguel Ramon (miguel.ramon@upf.edu)
+
+#### File: phenotype_exploration.Rmd
+
+```
+
+# Phenotype Exploration
+This script allows for the visualization of trait distributions and phylogenetic patterns. The script includes contrast plots and phylogenetic trees to assess trait relationships.
+
+## Setup and Directory Configuration
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+
+# Suppress warnings and messages in output
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+# Set the root directory for the project. Useful to set report outputs. Don't know if necessary.
+knitr::opts_knit$set(root.dir = getwd())
+
+# Define working, data, and results directories
+workingDir <- getwd()
+# Display current working directory
+getwd()
+
+```
+
+```{r dirdef}
+
+# Load libraries, common functions, primate-specific functions and objects
+source(file.path(workingDir, "lib/libraries.R")) # Contains the different libraries used in the analysis. Would be nice to include dinamically. Maybe force an object in the function script.
+
+source(file.path(workingDir, "obj/commons.R")) # Contains the main objects for the analysis. Modify as needed.
+source(file.path(workingDir, "obj/palettes.R")) # Contains the different color palettes. Modify accordingly.
+source(file.path(workingDir, "fun/common_fun.R")) # Common small functions used all around (does arreu come from all around?)
+source(file.path(workingDir, "fun/trait_stats.R")) # Function to compute statistical analysis for the trait of interest
+source(file.path(workingDir, "fun/plotting_functions.R")) # Plotting utilities for trait analysis
+
+```
+
+## 1. Data Import
+This section imports trait summary data from the dataset exploration stage.
+
+```{r trait_import}
+# Load summary stats from Dataset Exploration
+stats_path <- file.path(resultsDir, "1.Data-exploration/1.Species_distribution/trait_stats.csv")
+if (!file.exists(stats_path)) {
+  stop("Missing trait stats file: ", stats_path)
+}
+stats_df <- read.csv(stats_path, stringsAsFactors = FALSE)
+```
+
+## 1. Load Melted Trait Data
+This section loads pre-processed trait data in a long (melted) format and adds common names for species.
+
+```{r, stat_visualization, fig.width=10, fig.height=5, dev="png"}
+
+# 1. LOAD STATS ------------------------------------------------------
+# Excerpt of the trait stats data
+head(stats_df)
+
+```
+
+# 3. Contrast Plots
+This section generates contrast plots to visualize the trait across taxa, highlighting extreme values and outliers.
+
+```{r phenoplot, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, dev='png'}
+
+# Objects
+color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
+color.sym <- sym(color_palette) # Symbol for the color palette
+taxa.sym <- sym(taxon_of_interest) # Symbol for the taxon of interest
+trait.sym <- sym(trait) # Symbol for the trait of interest
+
+# Now we will check whether their is a sampling attribute in the dataframe (an N). If there is, it will allow for more in-depth insights of the phenotype.
+# Check if N_trait is present in stats_df, and boolean flag has.N
+has.N <- FALSE
+if (nzchar(N_trait) && N_trait %in% names(stats_df)) {
+  has.N <- TRUE
+  N.sym <- sym(N_trait)
+}
+
+# 3. CONTRAST PLOTS  ------------------------------------------------------
+# Function to generate contrast plots
+# Generate and save contrast plot
+contrast_graph <- contrast_plot.f(stats_df)
+ggplot2::ggsave(
+  file.path(resultsDir, "1.Data-exploration/2.Extreme_plots", paste0(trait, "_contrast_plot.png")),
+  contrast_graph, device = "png", width = 15, height = 10, dpi = "retina"
+)
+
+# Display plots
+contrast_graph
+
+```
+
+## 4. Trait Distribution (Phylogenetic Tree)
+This section generates a phylogenetic tree visualizing the distribution of malignant prevalence using ancestral state reconstruction (ASR).
+
+```{r trait_distribution, fig.height = 15, fig.width = 20, dev = 'png', dpi = 320}
+
+# 4. TRAIT DISTRIBUTION  ------------------------------------------------------
+# Function to generate ASR tree for a trait
+gen_ast_tree <- function(contrast_t, prim_tree, my_trait) {
+  # Extract my_trait values and align with species
+  tr <- contrast_t[[my_trait]]
+  names(tr) <- contrast_t$species
+  
+  # Remove missing trait values
+  keep <- !is.na(tr) & is.finite(tr)
+  tr <- tr[keep]
+  
+  # Prune phylogeny to match species with my_trait data
+  prim_tree <- ape::drop.tip(prim_tree, setdiff(prim_tree$tip.label, names(tr)))
+  
+  # Perform continuous mapping for ASR
+  obj <- phytools::contMap(prim_tree, tr, plot = FALSE)
+  obj <- phytools::setMap(obj, colors = colorRampPalette(c("white", "salmon3"))(100))
+  
+  # Plot the tree
+  h <- max(phytools::nodeHeights(obj$tree))
+  plot(
+    obj, fsize = 2, lwd = 6, res = 600, legend = FALSE,
+    xlim = c(-0.25 * h, 1.75 * h),
+    main = paste(capitalized_trait, "-", clade_name), cex.main = 2
+  )
+  
+  # Add time axis
+  ape::axisPhylo(1)
+  graphics::mtext("Branch length", side = 1, line = 3, cex = 1.5)
+  
+  # Add vertical color bar
+  phytools::add.color.bar(
+    Ntip(obj$tree), obj$cols, title = paste(capitalized_trait, "-", clade_name),
+    lims = NULL, digits = 3, direction = "upwards", lwd = 15,
+    x = -0.2 * h, y = 2, prompt = FALSE, fsize = 2
+  )
+  
+  # Add ticks to color bar
+  LWD <- diff(par()$usr[1:2] / dev.size("px")[1])
+  graphics::lines(x = rep(-0.2 * h + LWD * 15 / 2, 2), y = c(2, Ntip(obj$tree) - 1))
+  nticks <- 10
+  Y <- cbind(
+    seq(2, Ntip(obj$tree) - 1, length.out = nticks),
+    seq(2, Ntip(obj$tree) - 1, length.out = nticks)
+  )
+  X <- cbind(
+    rep(-0.2 * h + LWD * 15 / 2, nticks),
+    rep(-0.2 * h + LWD * 15 / 2 + 0.02 * h, nticks)
+  )
+  for (i in 1:nrow(Y)) graphics::lines(X[i, ], Y[i, ])
+  ticks <- seq(obj$lims[1], obj$lims[2], length.out = nticks)
+  graphics::text(x = X[, 2], y = Y[, 2], round(ticks, 3), pos = 4, cex = 1.5)
+  
+  return(obj)
+}
+
+# Generate ASR tree for the selected trait
+ast_tree <- list()
+trait_names <- list(trait)
+
+# Save the tree
+plotDir <- file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution")
+createDir(plotDir)
+  
+for (trait_name in trait_names) {
+  png(
+    filename = file.path(plotDir, paste0(trait_name, "-tree.png")),
+    width = 18, height = 20, res = 320, bg = "white", units = "in"
+  )
+  ast_tree[[trait_name]] <- gen_ast_tree(trait_df, pruned_tree, trait_name)
+  dev.off()
+  
+  gen_ast_tree(trait_df, pruned_tree, trait_name)
+}
+
+```
+
+## 5. Extreme Value Plots
+This section is pending a trait-naive port (requires long-format trait inputs for generic traits).
+
+```{r extremes_plots, fig.height=10, fig.width=7, message=FALSE, warning=FALSE, dev='png', dpi = 320, eval=FALSE}
+
+# 5. EXTREME VALUE PLOTS  ------------------------------------------------------
+# Define darkened color palette for plotting
+dark_family_palette <- colorspace::darken(primate_family_colors, amount = 0.5)
+
+# Function to generate contrast plots with violin distributions
+gen_contrast_g <- function(contrast_t, my_trait, family_plot) {
+  # Ensure species order matches phylogeny
+  ordered_species <- tree$tip.label
+  contrast_t$species <- factor(contrast_t$species, levels = ordered_species)
+  
+  # Prepare data based on global or family-level categorization
+  if (family_plot == 0) {
+    contrast_t <- contrast_t %>%
+      dplyr::group_by(species) %>%
+      dplyr::arrange(family, .by_group = TRUE) %>%
+      dplyr::filter(trait == my_trait) %>%
+      dplyr::mutate(Value = value, Category = global_label, Outlier = outlier) %>%
+      dplyr::select(family, species, necropsy_counts, common_name, Value, Category, Outlier, median, median_fam) %>%
+      dplyr::rename(Family = family, Species = species)
+  } else {
+    contrast_t <- contrast_t %>%
+      dplyr::group_by(species) %>%
+      dplyr::arrange(family, .by_group = TRUE) %>%
+      dplyr::filter(trait == my_trait) %>%
+      dplyr::mutate(Value = value, Category = family_label, Outlier = outlier) %>%
+      dplyr::select(family, species, necropsy_counts, common_name, Value, Category, Outlier, median, median_fam) %>%
+      dplyr::rename(Family = family, Species = species)
+  }
+  
+  # Define ordered families for plotting
+  ordered_families <- c(
+    "Lorisidae", "Galagidae", "Indriidae", "Cheirogaleidae", "Lemuridae",
+    "Atelidae", "Cebidae", "Aotidae", "Callitrichidae", "Hylobatidae",
+    "Hominidae", "Cercopithecidae"
+  )
+  
+  # Calculate median value for reference line
+  median_value <- median(contrast_t$Value, na.rm = TRUE) * 100
+  
+  # Create violin plot
+  graph <- ggplot2::ggplot(data = contrast_t, aes(x = Value * 100, y = Family)) +
+    ggplot2::scale_y_discrete(limits = rev(ordered_families)) +
+    ggplot2::geom_violin(
+      aes(fill = Family, alpha = 0.1), color = "black", width = 0.5, trim = TRUE, scale = "width"
+    ) +
+    ggplot2::scale_fill_manual(values = primate_family_colors) +
+    ggnewscale::new_scale_fill() +
+    ggstar::geom_star(
+      data = subset(contrast_t, Outlier == "no_outlier"),
+      aes(starshape = Category, color = Family, fill = Family),
+      size = 3, position = ggplot2::position_jitter(height = 0.25)
+    ) +
+    ggstar::scale_starshape_manual(
+      values = c("low_extreme" = 21, "mid_low_extreme" = 15, "mid_high_extreme" = 15, "high_extreme" = 29),
+      na.translate = FALSE
+    ) +
+    ggstar::geom_star(
+      data = subset(contrast_t, Outlier != "no_outlier"),
+      aes(color = Family, fill = Family),
+      size = 3, position = ggplot2::position_jitter(height = 0.25)
+    ) +
+    ggplot2::scale_fill_manual(values = dark_family_palette) +
+    ggplot2::scale_color_manual(values = dark_family_palette) +
+    ggplot2::geom_vline(
+      aes(xintercept = median_value), linewidth = 1, color = "salmon3", alpha = 0.5
+    ) +
+    ggplot2::stat_summary(
+      fun = median, geom = "errorbar",
+      aes(xmax = after_stat(x), xmin = after_stat(x)),
+      linewidth = 1.5, color = "black", alpha = 0.6, width = 0.75
+    ) +
+    ggplot2::labs(x = "Malignant prevalence (%)") +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = 17, hjust = 0.5, face = "bold"),
+      axis.title.x = ggplot2::element_text(size = 17, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 20, b = 20)),
+      axis.title.y = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 15),
+      legend.position = "none"
+    )
+  
+  return(graph)
+}
+
+# Generate and save violin plot
+global_contrast_graph <- gen_contrast_g(melt_new2, "malignant_prevalence", 0)
+ggplot2::ggsave(
+  file.path(resultsDir, "1.Data-exploration/2.Extreme_plots/malignant_prevalence_violin_plot.png"),
+  global_contrast_graph, device = "png", width = 7, height = 10, dpi = "retina"
+)
+
+# Display plot
+global_contrast_graph
+```
+
+## 6. Fan Plot for Family and Cancer Distribution
+This section is pending a trait-naive port (requires trait-specific overlays).
+
+```{r visual_distribution, fig.height = 15, fig.width = 15, dev = 'png', dpi = 320, eval=FALSE}
+
+# 6. FAN PLOT FOR FAMILY AND CANCER DISTRIBUTION  ------------------------------------------------------
+# Prune phy and plot the complete phylogeny in fan shape
+big_tree <- ggtree(tree,
+              layout="fan",
+              open.angle=15, 
+              size=2)
+
+plotDir <- file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution")
+ggsave(file.path(plotDir, "big_tree.png"), big_tree, device = "png", width = 15, height = 15, dpi = "retina")
+
+ordered_species <- rev(tree$tip.label)
+row.names(cancer_traits_processed) <- cancer_traits_processed$species
+
+# mapping external data to the tree structure
+spread_df <- melt_new2 %>%
+  spread(trait, value) %>%
+  dplyr::rename(label = species) 
+
+# Use LQ instead of LQ
+
+primates_traits2 <- spread_df
+primates_traits2 <- primates_traits2 %>%
+  dplyr::select(label, family, necropsy_counts, malignant_prevalence, neoplasia_prevalence, LQ) %>%
+  mutate(malignant_prevalence = malignant_prevalence * 100) %>%
+  mutate(neoplasia_prevalence = neoplasia_prevalence * 100) %>%
+  group_by(label, family)  %>%
+  summarize(
+    malignant_prevalence = sum(malignant_prevalence, na.rm = TRUE),
+    neoplasia_prevalence = sum(neoplasia_prevalence, na.rm = TRUE),
+    LQ = sum(LQ, na.rm = TRUE),
+    .groups = "drop") %>%
+  ungroup() %>%
+  # Re-add necropsy_counts, join by species cancer_traits
+  left_join(cancer_traits_processed %>% dplyr::select(species, adult_necropsy_count), by = c("label" = "species")) %>%
+  dplyr::rename(necropsy_count = adult_necropsy_count) %>%
+  mutate(LQ = LQ)
+
+# Perform an AST of the LQ trait
+LQ_vec <- primates_traits2$LQ
+names(LQ_vec) <- primates_traits2$label
+LQ_fit <- phytools::fastAnc(tree, LQ_vec, vars = TRUE, CI = TRUE)
+
+td <- data.frame(node = nodeid(tree, names(LQ_vec)),
+               LQ = LQ_vec)
+nd <- data.frame(node = names(LQ_fit$ace), LQ = LQ_fit$ace)
+d <- rbind(td, nd)
+d$node <- as.numeric(d$node)
+
+primates_tree2 <- treeio::as_tibble(tree)
+
+primates_tree2 <- full_join(primates_tree2, primates_traits2, by = 'label')
+primates_tree2.5 <- full_join(primates_tree2, d, by = 'node') %>%
+  mutate(LQ = ifelse(is.na(LQ.y), LQ.x, LQ.y)) %>%
+  dplyr::select(-LQ.x, -LQ.y)
+
+# the tbl_tree object is converted to a treedata object
+primates_tree3 <- tidytree::as.treedata(primates_tree2.5)
+
+pruned_plot <- ggtree(primates_tree3,
+                      layout = "fan",
+                      open.angle = 15,
+                      size = 2) +
+  geom_text2(aes(label = node), hjust = -0.5, vjust = -0.5, size = 6) +
+  aes(color = family) +  # Color branches by family
+  scale_color_manual(values = primate_family_colors)
+
+pruned_plot
+
+p <- ggtree(primates_tree3, aes(color = LQ),
+            layout="fan",
+            open.angle=15, 
+            size=2) +
+            scale_color_gradient(low = "skyblue", high = "salmon3", guide = "colorbar") +
+            new_scale_color()
+p
+
+# Add neoplasia data info with gradient and black contour
+p1 <- p + 
+  # Second set of bars for neoplasia_prevalence
+  geom_fruit(
+    geom = geom_col,
+    mapping = aes(y = species, x = neoplasia_prevalence, fill = neoplasia_prevalence, width = 0.5),
+    alpha = 0.5,  # Set transparency for lighter appearance
+    show.legend = TRUE,
+    pwidth = 0.75,
+    color = "black",  # Add black contour
+    size = 0.7,
+    axis.params = list(
+      axis = 'x',
+      text.size = 8,
+      nbreak = 2,
+      text.angle = 270,
+      vjust = 0.5,
+      hjust = 0,
+      limits = c(0, 40)
+    ),
+    grid.params = list()
+  ) +
+  scale_fill_gradient2(
+    name = "% Neoplasia Prevalence", 
+    low = "white", 
+    high = "darkseagreen",  # Different gradient color for distinction
+    guide = "colourbar", 
+    aesthetics = "fill"
+  ) +
+  new_scale_fill() +  # Reset fill scale for the second set of bars
+    # First set of bars for malignant_prevalence
+  geom_fruit(
+    geom = geom_col,
+    offset = -0.75,
+    mapping = aes(y = species, x = malignant_prevalence, fill = malignant_prevalence, width = 0.5),
+    show.legend = TRUE,
+    pwidth = 0.75,
+    alpha = 0.75,
+    color = "black",  # Add black contour
+    size = 0.7,
+    axis.params = list(
+      axis = 'x',
+      text.size = 0,
+      nbreak = 1,
+      text.angle = 270,
+      vjust = 0.5,
+      hjust = 0,
+      limits = c(0, 20)
+  )) +
+  scale_fill_gradient2(
+    name = "% Malignant Prevalence", 
+    low = "white", 
+    high = "salmon3", 
+    guide = "colourbar", 
+    aesthetics = "fill"
+  ) +
+  new_scale_fill()
+
+p1
+
+
+# Add clade information
+p2 <- p1 +
+    geom_fruit(geom = geom_col, 
+               mapping = aes(y = species, x = 1, fill = family, width = 1),
+               pwidth = 0.1, color = "black", linewidth = 0.5, offset = 0) +
+    scale_fill_manual(values = primate_family_colors, breaks = 0) +
+    new_scale_fill() +
+    theme_tree() +
+    theme(panel.background = element_rect(fill = "transparent", colour = NA),  
+      plot.background = element_rect(fill = "transparent", colour = NA),
+      legend.position = "none",
+      plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
+      plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
+  )
+
+p2
+
+# Add counts information in an informative way
+p3 <- p2 +
+  geom_text(aes(label = necropsy_count), nudge_x = 42.5, fontface = "bold", size = 7, vjust = 0.5)
+
+p3
+
+## This commented bit must only be run once in order to create the family_node_positions.csv file.
+## Parent nodes must be manually added to the family_node_positions.csv file. This is why we are reading it directly, as it has already been manually edited.
+# Create dataframe with topmost node per family from primates_tree2
+# family_node_positions <- primates_tree2 %>%
+#   group_by(family) %>%
+#   mutate(family_size = n()) %>%
+#   mutate(angle = ifelse(family_size > 1, 0, 90)) %>%  # Horizontal if more than 1 species, vertical otherwise
+#   filter(parent == min(parent)) %>%
+#   dplyr::select(parent, family, family_size, angle) %>%
+#   distinct() %>%
+#   drop_na()
+# 
+# Get phylopic data
+# family_node_positions <- family_node_positions %>%
+#   rowwise() %>%  # Apply function row by row
+#   mutate(phylopic_UUID = get_uuid(name = family, n = 1)) %>%
+#   mutate(fams = family)
+# 
+# write.csv(family_node_positions, file.path(family_node_dir, "family_node_positions.csv"), row.names = FALSE)
+##
+
+# Read node data and UUID from phylopic
+family_node_dir <- file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution")
+family_node_positions <- read.csv(file.path(family_node_dir, "family_node_positions.csv"))
+
+# Separate single and multiple family nodes
+single_family_node_positions <- family_node_positions[family_node_positions$family_size == 1, ]
+multiple_family_node_positions <- family_node_positions[family_node_positions$family_size > 1, ]
+
+
+# Now use this to set dynamic label angles in geom_cladelab
+# p0 <- ggtree(primates_tree3,
+#             layout="fan",
+#             open.angle=15, 
+#             size=0)
+
+p4 <- p3 +
+  geom_cladelab(data = family_node_positions,
+      mapping = aes(
+        node = parent,
+        label = fams,
+        image = phylopic_UUID,
+        color = fams),  # Use dynamic angles
+      geom="phylopic",
+      barsize = NA,
+      offset = 80,
+      imagesize = 0.05,
+      alpha = 0.75) +
+  scale_color_manual(values = primate_family_colors, breaks = 0) +
+  geom_cladelab(data = family_node_positions,
+      mapping = aes(
+        node = parent,
+        label = fams),
+      show.legend = FALSE,
+      color = "black",  # Black labels
+      angle = "auto",
+      horizontal = TRUE,
+      offset = 55,
+      barsize = NA,
+      fontsize = 9.5,
+      fontface = "bold") +
+  theme_tree() +
+  theme(panel.background = element_rect(fill = "transparent", colour = NA),  
+      plot.background = element_rect(fill = "transparent", colour = NA),
+      legend.position = "right",
+      plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
+      plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
+  )
+
+p4
+
+# Save p1
+ggsave(file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution/neoplasia_prevalence_tree1.png"), p1, device = "png", width = 15, height = 15, dpi = "retina")
+
+# Save p2
+ggsave(file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution/neoplasia_prevalence_tree2.png"), p2, device = "png", width = 15, height = 15, dpi = "retina")
+
+# Save p3
+createDir(file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution"))
+ggsave(file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution/neoplasia_prevalence_tree3.png"), p3, device = "png", width = 17, height = 17, dpi = "retina")
+
+# Save p4
+ggsave(file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution/neoplasia_prevalence_tree4.png"), p4, device = "png", width = 20, height = 17, dpi = "retina")
+
+# Save p5
+#ggsave(file.path(resultsDir, "1.Data-exploration/3.Phylogenetic_distribution/neoplasia_prevalence_text.png"), p5, device = "svg", width = 23, height = 23, dpi = "retina")
+
+```

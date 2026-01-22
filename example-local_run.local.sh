@@ -58,7 +58,7 @@ CHUNK_SIZE="500" # Cycles per file (creates directory with multiple resample_*.t
 
 
 ## If running locally (not using Singularity)
-CT_PATH="./ct"                                      # Path to the CAASTOOLS binary
+CT_PATH="./caastools/ct"                                      # Path to the CAASTOOLS binary
 
 # Pipeline execution
 
@@ -90,7 +90,7 @@ mkdir -p $RESULTS_DIR
 
 nextflow run main.nf -with-tower -profile local \
     -w $WORK_DIR \
-    --ct_tool "discovery,bootstrap" \
+    --ct_tool "discovery,resample,bootstrap" \
     --paired_mode \
     --alignment $ALI_DIR \
     --ali_format "phylip-relaxed" \
@@ -104,7 +104,6 @@ nextflow run main.nf -with-tower -profile local \
     --patterns "1,2,3" \
     --tree $TREE_FILE \
     --strategy "BM" \
-    --perm_strategy "random" \
     --traitvalues $TRAIT_VALUES \
     --cycles $CYCLES \
     --chunk_size $CHUNK_SIZE \

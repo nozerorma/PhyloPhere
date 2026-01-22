@@ -49,12 +49,8 @@ process RESAMPLE {
     // Determine the strategy command based on the provided strategy
     if (params.strategy == "FGBG") {
         strategyCommand = "-f ${params.fgsize} -b ${params.bgsize} -m random"
-    } else if (params.strategy == "TEMPLATE") {
-        strategyCommand = "--bytemp ${params.template} -m random"
-    } else if (params.strategy == "PHYLORESTRICTED") {
-        strategyCommand = "--bytemp ${params.template} --limit_by_group ${params.bygroup} -m random"
     } else if (params.strategy == "BM") {
-        strategyCommand = "--bytemp ${params.template} --traitvalues ${params.traitvalues} --mode bm --perm_strategy ${params.perm_strategy}"
+        strategyCommand = "--bytemp ${params.template} --traitvalues ${params.traitvalues} --mode bm --perm_strategy random"
     } else {
         exit 1, "Invalid strategy: ${params.strategy}"
     }
@@ -66,9 +62,8 @@ process RESAMPLE {
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
-        ${params.traitfile} \\
+        ${params.caas_config} \\
         ${params.cycles} \\
-        ${params.perm_strategy} \\
         ${trait_val} \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
@@ -81,32 +76,12 @@ process RESAMPLE {
         Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
-        ${params.traitfile} \\
+        ${params.caas_config} \\
         ${params.cycles} \\
-        ${params.perm_strategy} \\
         ${trait_val} \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0}
         """
     }
-
-
-    // Could probably be changed to so I can use the ct logic:
-    // if (params.use_singularity = true) {
-    // """
-    //  /usr/local/bin/_entrypoint.sh ct resample \\
-    //  -p ${nw_tree} \\
-    //  -o ${nw_tree}.resampled.output \\
-    //  ${strategyCommand} \\
-    //  $args
-    // """
-    // } else
-    // """
-    // ct resample \\
-    //  -p ${nw_tree} \\
-    //  -o ${nw_tree}.resampled.output \\
-    //  ${strategyCommand} \\
-    //  $args
-    // """
 }

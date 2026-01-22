@@ -58,6 +58,7 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
 include {HELP} from './workflows/help.nf'
 include {CT} from './workflows/ct.nf'
 include {RER_MAIN} from './workflows/rerconverge.nf'
+include {REPORTING} from './workflows/reporting.nf'
 //include {ORA} from './workflows/ora.nf'
 
 /*
@@ -75,6 +76,8 @@ workflow {
         CT ()
     } else if (params.rer_tool) {
         RER_MAIN()
+    } else if (params.reporting) {
+        REPORTING()
     } /* else if (params.ora) {
         ORA()
     } */

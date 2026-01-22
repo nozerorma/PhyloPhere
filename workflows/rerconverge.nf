@@ -32,13 +32,6 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-
-// Define the gene tree channel tree_tuple
-gene_trees_file = file( params.gene_trees )
-
-// Define the trait file channel
-my_traitfile = file( params.my_traits )
-
 // Import local modules/subworkflows
 include { RER_TRAIT } from "${baseDir}/subworkflows/RERCONVERGE/rer_trait"
 include { RER_TREES } from "${baseDir}/subworkflows/RERCONVERGE/rer_trees"
@@ -47,9 +40,12 @@ include { RER_CONT } from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
 //include { RER_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_bin" addParams(TREE_TUPLE: tree_tuple)
 //include { RER_ENRICH } from "${baseDir}/subworkflows/RERCONVERGE/rer_enrich" addParams(TREE_TUPLE: tree_tuple)
 
-// Main workflow
-// def toolsToRun = params.ct_tool.split(',') NOT NEEDED UNTIL OTHER STUFF FROM RERCONVERGE IS INCLUDED
+// Define the gene tree channel tree_tuple
+gene_trees_file = file( params.gene_trees )
+// Define the trait file channel
+my_traitfile = file( params.my_traits )
 
+// Main workflow
 workflow RER_MAIN {
 
     // Define trait_out, trees_out, and matrix_out

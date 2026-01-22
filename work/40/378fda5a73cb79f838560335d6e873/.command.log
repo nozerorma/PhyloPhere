@@ -1,0 +1,8 @@
+Error:
+! object 'color.sym' not found
+Backtrace:
+    ▆
+ 1. └─base::exists(color.sym)
+
+Quitting from 1.Dataset_exploration.Rmd:37-48 [setup]
+Execution halted

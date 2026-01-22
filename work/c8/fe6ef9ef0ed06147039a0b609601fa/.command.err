@@ -1,0 +1,9 @@
+Read 1 item
+Error in `taxa_plot.f()`:
+! object 'fill_scale' not found
+Backtrace:
+    ▆
+ 1. └─global taxa_plot.f(taxa_distribution)
+
+Quitting from 1.Dataset_exploration.Rmd:53-82 [dataset_visualization]
+Execution halted

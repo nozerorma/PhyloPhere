@@ -1,0 +1,6 @@
+Read 1 item
+Error:
+! Missing trait stats file: reporting/1.Data-exploration/1.Species_distribution/trait_stats.csv
+
+Quitting from 2.Phenotype_exploration.Rmd:60-67 [trait_import]
+Execution halted

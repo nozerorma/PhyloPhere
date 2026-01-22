@@ -105,7 +105,6 @@ nextflow run main.nf -with-tower -profile local \
     --patterns "1,2,3" \
     --tree $TREE_FILE \
     --strategy "BM" \
-    --perm_strategy "random" \
     --traitvalues $TRAIT_VALUES \
     --cycles "100" \
     --chunk_size "$CHUNK_SIZE" \

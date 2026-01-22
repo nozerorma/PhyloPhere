@@ -1,0 +1,9 @@
+Read 1 item
+Error in `contrast_plot.f()`:
+! object 'pruned_tree' not found
+Backtrace:
+    ▆
+ 1. └─global contrast_plot.f(stats_df)
+
+Quitting from 2.Phenotype_exploration.Rmd:83-105 [phenoplot]
+Execution halted

@@ -51,7 +51,7 @@ process BOOTSTRAP {
         echo "Using Singularity/Apptainer"
         /usr/local/bin/_entrypoint.sh ct bootstrap \\
             -a ${alignmentFile} \\
-            -t ${params.traitfile} \\
+            -t ${params.caas_config} \\
             -s ${resampledPath} \\
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\
@@ -64,9 +64,9 @@ process BOOTSTRAP {
     } else {
         """    
         echo "Running locally"
-        $baseDir/ct bootstrap \\
+        $baseDir/subworkflows/CT/local/ct bootstrap \\
             -a ${alignmentFile} \\
-            -t ${params.traitfile} \\
+            -t ${params.caas_config} \\
             -s ${resampledPath} \\
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\

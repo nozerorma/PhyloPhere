@@ -1,0 +1,9 @@
+Error in `file()`:
+! cannot open the connection
+Backtrace:
+    ▆
+ 1. └─base::source(file.path(objDir, "stats.R"))
+ 2.   └─base::file(filename, "r", encoding = encoding)
+
+Quitting from 1.Dataset_exploration.Rmd:37-48 [setup]
+Execution halted
