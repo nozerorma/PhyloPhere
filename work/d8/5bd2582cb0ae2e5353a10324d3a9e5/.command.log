@@ -1,9 +1,0 @@
-Read 1 item
-Error in `is_numeric_trait()`:
-! could not find function "is_numeric_trait"
-Backtrace:
-    ▆
- 1. └─global stats.f(trait_df)
-
-Quitting from 1.Dataset_exploration.Rmd:86-102 [stats_overview]
-Execution halted

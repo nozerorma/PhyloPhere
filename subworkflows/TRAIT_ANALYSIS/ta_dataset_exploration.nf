@@ -17,13 +17,15 @@ process DATASET_EXPLORATION {
     path "reporting"
 
     script:
-    def local_dir = "${baseDir}/Phylophere-integration/subworkflows/TRAIT_ANALYSIS/local"
+    def local_dir = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local"
     def seed = params.seed ?: ''
     def clade = params.clade_name ?: ''
     def taxon = params.taxon_of_interest ?: ''
     def trait = params.traitname ?: ''
     def n_trait = params.n_trait ?: ''
     def tax_id = params.tax_id ?: ''
+    def branch_trait = params.branch_trait ?: ''
+    def secondary_trait = params.secondary_trait ?: ''
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -38,7 +40,9 @@ process DATASET_EXPLORATION {
           '${taxon}' \
           '${trait}' \
           '${n_trait}'  \
-          '${tax_id}'
+          '${tax_id}' \
+          '${secondary_trait}' \
+          '${branch_trait}'
 
         """
     } else {
@@ -54,7 +58,9 @@ process DATASET_EXPLORATION {
           '${taxon}' \
           '${trait}' \
           '${n_trait}' \
-          '${tax_id}'
+          '${tax_id}' \
+          '${secondary_trait}' \
+          '${branch_trait}'
         """
     }
 }
