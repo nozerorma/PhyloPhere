@@ -1,0 +1,34 @@
+Read 1 item
+Error in `dplyr::rename()`:
+! Can't rename columns that don't exist.
+✖ Column `value` doesn't exist.
+Backtrace:
+     ▆
+  1. ├─global selected_pairs.f(trait)
+  2. │ └─global pair_sel.f(...)
+  3. │   └─... %>% ...
+  4. ├─dplyr::rename(., value2 = value)
+  5. ├─dplyr::left_join(., trait_df, by = c(species2 = "species"))
+  6. ├─dplyr::rename(., value1 = value)
+  7. ├─dplyr:::rename.data.frame(., value1 = value)
+  8. │ └─tidyselect::eval_rename(expr(c(...)), .data)
+  9. │   └─tidyselect:::rename_impl(...)
+ 10. │     └─tidyselect:::eval_select_impl(...)
+ 11. │       ├─tidyselect:::with_subscript_errors(...)
+ 12. │       │ └─base::withCallingHandlers(...)
+ 13. │       └─tidyselect:::vars_select_eval(...)
+ 14. │         └─tidyselect:::walk_data_tree(expr, data_mask, context_mask)
+ 15. │           └─tidyselect:::eval_c(expr, data_mask, context_mask)
+ 16. │             └─tidyselect:::reduce_sels(node, data_mask, context_mask, init = init)
+ 17. │               └─tidyselect:::walk_data_tree(new, data_mask, context_mask)
+ 18. │                 └─tidyselect:::as_indices_sel_impl(...)
+ 19. │                   └─tidyselect:::as_indices_impl(...)
+ 20. │                     └─tidyselect:::chr_as_locations(x, vars, call = call, arg = arg)
+ 21. │                       └─vctrs::vec_as_location(...)
+ 22. └─vctrs (local) `<fn>`()
+ 23.   └─vctrs:::stop_subscript_oob(...)
+ 24.     └─vctrs:::stop_subscript(...)
+ 25.       └─rlang::abort(...)
+
+Quitting from 4.Independent_contrasts.Rmd:98-138 [pair_selection]
+Execution halted

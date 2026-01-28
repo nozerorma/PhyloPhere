@@ -14,7 +14,7 @@ process DATASET_EXPLORATION {
     path tree_file
 
     output:
-    path "reporting"
+    path "data_exploration"
 
     script:
     def local_dir = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local"
@@ -22,6 +22,7 @@ process DATASET_EXPLORATION {
     def clade = params.clade_name ?: ''
     def taxon = params.taxon_of_interest ?: ''
     def trait = params.traitname ?: ''
+    def p_trait = params.p_trait ?: ''
     def n_trait = params.n_trait ?: ''
     def tax_id = params.tax_id ?: ''
     def branch_trait = params.branch_trait ?: ''
@@ -30,15 +31,16 @@ process DATASET_EXPLORATION {
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
-        mkdir -p reporting/HTML_reports
-        /usr/local/bin/_entrypoint.sh Rscript -e "rmarkdown::render('1.Dataset_exploration.Rmd', output_dir='reporting/HTML_reports', quiet=TRUE)" --args \
+        mkdir -p data_exploration/HTML_reports
+        /usr/local/bin/_entrypoint.sh Rscript -e "rmarkdown::render('1.Dataset_exploration.Rmd', output_dir='data_exploration/HTML_reports', quiet=TRUE)" --args \
           '${trait_file}' \
           '${tree_file}' \
-          'reporting' \
+          'data_exploration' \
           '${seed}' \
           '${clade}' \
           '${taxon}' \
           '${trait}' \
+          '${p_trait}' \
           '${n_trait}'  \
           '${tax_id}' \
           '${secondary_trait}' \
@@ -48,15 +50,16 @@ process DATASET_EXPLORATION {
     } else {
         """
         cp -R ${local_dir}/* .
-        mkdir -p reporting/HTML_reports
-        Rscript -e "rmarkdown::render('1.Dataset_exploration.Rmd', output_dir='reporting/HTML_reports', quiet=TRUE)" --args \
+        mkdir -p data_exploration/HTML_reports
+        Rscript -e "rmarkdown::render('1.Dataset_exploration.Rmd', output_dir='data_exploration/HTML_reports', quiet=TRUE)" --args \
           '${trait_file}' \
           '${tree_file}' \
-          'reporting' \
+          'data_exploration' \
           '${seed}' \
           '${clade}' \
           '${taxon}' \
           '${trait}' \
+          '${p_trait}' \
           '${n_trait}' \
           '${tax_id}' \
           '${secondary_trait}' \

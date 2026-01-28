@@ -1,0 +1,13 @@
+Read 1 item
+Error in `selected_pairs.f()`:
+! object 'stats_df' not found
+Backtrace:
+    ▆
+ 1. └─global selected_pairs.f(trait)
+ 2.   └─global pair_sel.f(...)
+ 3.     ├─"n" %in% colnames(traits_df)
+ 4.     └─base::colnames(traits_df)
+ 5.       └─base::is.data.frame(x)
+
+Quitting from 4.Independent_contrasts.Rmd:98-123 [pair_selection]
+Execution halted

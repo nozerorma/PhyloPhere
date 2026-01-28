@@ -59,6 +59,7 @@ include {HELP} from './workflows/help.nf'
 include {CT} from './workflows/ct.nf'
 include {RER_MAIN} from './workflows/rerconverge.nf'
 include {REPORTING} from './workflows/reporting.nf'
+include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
 //include {ORA} from './workflows/ora.nf'
 
 /*
@@ -72,17 +73,36 @@ workflow {
     // Check if --help is provided
     if (params.help) {
         HELP ()
-    } else if (params.ct_tool){
-        CT ()
-    } else if (params.rer_tool) {
-        RER_MAIN()
-    } else if (params.reporting) {
-        REPORTING()
-    } /* else if (params.ora) {
-        ORA()
-    } */
-}
+    } else {
+        // Run any combination of tools requested
+        def ran_any = false
 
+        if (params.reporting && !params.contrast_selection) {
+            REPORTING()
+            ran_any = true
+        }
+        if (params.contrast_selection) {
+            CONTRAST_SELECTION()
+            ran_any = true
+        }
+        if (params.ct_tool) {
+            CT ()
+            ran_any = true
+        }
+        if (params.rer_tool) {
+            RER_MAIN()
+            ran_any = true
+        }
+        /* if (params.ora) {
+            ORA()
+            ran_any = true
+        } */
+
+        if (!ran_any) {
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, or --rer_tool."
+        }
+    }
+}
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

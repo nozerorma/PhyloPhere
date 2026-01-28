@@ -1,0 +1,11 @@
+Read 1 item
+Error in `if (.) ...`:
+! the condition has length > 1
+Backtrace:
+    ▆
+ 1. └─global selected_pairs.f(trait)
+ 2.   └─global pair_sel.f(...)
+ 3.     └─traits_df %>% ...
+
+Quitting from 4.Independent_contrasts.Rmd:98-138 [pair_selection]
+Execution halted

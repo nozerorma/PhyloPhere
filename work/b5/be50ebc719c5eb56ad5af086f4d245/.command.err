@@ -1,0 +1,10 @@
+Read 1 item
+Error in `file()`:
+! cannot open the connection
+Backtrace:
+    ▆
+ 1. └─base::source("./functions/selection_algorithm.R")
+ 2.   └─base::file(filename, "r", encoding = encoding)
+
+Quitting from 4.Independent_contrasts.Rmd:37-72 [setup]
+Execution halted

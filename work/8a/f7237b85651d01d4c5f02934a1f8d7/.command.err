@@ -1,0 +1,9 @@
+Error in `file()`:
+! cannot open the connection
+Backtrace:
+    ▆
+ 1. └─base::source("./functions/commons.R")
+ 2.   └─base::file(filename, "r", encoding = encoding)
+
+Quitting from 3.CI-composition.Rmd:39-57 [setup]
+Execution halted

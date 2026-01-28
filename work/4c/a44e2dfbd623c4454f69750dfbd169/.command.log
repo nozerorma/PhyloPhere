@@ -1,0 +1,14 @@
+Read 1 item
+Error in `ggsave()`:
+! Cannot find directory
+  'data_exploration/1.Data-exploration/3.Phylogenetic_distribution'.
+ℹ Please supply an existing directory or use `create.dir = TRUE`.
+Backtrace:
+    ▆
+ 1. └─ggplot2::ggsave(...)
+ 2.   └─ggplot2:::check_path(path, filename, create.dir)
+ 3.     └─cli::cli_abort(...)
+ 4.       └─rlang::abort(...)
+
+Quitting from 2.Phenotype_exploration.Rmd:681-918 [visual_distribution]
+Execution halted

@@ -1,0 +1,24 @@
+Read 1 item
+Error in `mutate()`:
+ℹ In argument: `diff = round(abs(absdiff), 4)`.
+Caused by error:
+! object 'absdiff' not found
+Backtrace:
+     ▆
+  1. ├─global selected_pairs.f(trait)
+  2. │ └─global pair_sel.f(...)
+  3. │   └─... %>% ...
+  4. ├─dplyr::filter(., !is.na(diff))
+  5. ├─dplyr::mutate(...)
+  6. ├─dplyr:::mutate.data.frame(...)
+  7. │ └─dplyr:::mutate_cols(.data, dplyr_quosures(...), by)
+  8. │   ├─base::withCallingHandlers(...)
+  9. │   └─dplyr:::mutate_col(dots[[i]], data, mask, new_columns)
+ 10. │     └─mask$eval_all_mutate(quo)
+ 11. │       └─dplyr (local) eval()
+ 12. └─base::.handleSimpleError(...)
+ 13.   └─dplyr (local) h(simpleError(msg, call))
+ 14.     └─rlang::abort(message, class = error_class, parent = parent, call = error_call)
+
+Quitting from 4.Independent_contrasts.Rmd:98-138 [pair_selection]
+Execution halted

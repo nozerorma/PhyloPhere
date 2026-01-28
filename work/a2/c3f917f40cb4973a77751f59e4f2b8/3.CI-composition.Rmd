@@ -1,0 +1,403 @@
+---
+title: "CI Composition and Statistical Overview"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r header}
+
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+
+## PHYLOPHERE: A Nextflow pipeline including a complete set
+## of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+### Github: https://github.com/nozerorma/caastools/nf-phylophere
+### Author: Miguel Ramon (miguel.ramon@upf.edu)
+
+#### File: CI-composition.Rmd
+
+```
+
+# Computing Credibility Intervals using Jeffreys Method
+This script computes 95% credibility intervals (CIs) for the trait of interest:
+
+- **Jeffreys beta method**: Bayesian approach using Beta(0.5,0.5) prior. Deals well with extreme proportions.
+
+---
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=TRUE, warning=TRUE}
+# Call the setup function from commons.R
+source("./obj/commons.R")
+setup_rmd()
+
+# Debug helper (prints into HTML output)
+if (is.null(getOption("phylo_debug"))) {
+  options(phylo_debug = TRUE)
+}
+if (!exists("phylo_debug_log", envir = .GlobalEnv)) {
+  phylo_debug_log <- character()
+}
+if (!exists("debug_log", inherits = TRUE)) {
+  debug_log <- function(...) {
+    msg <- sprintf(...)
+    phylo_debug_log <<- c(phylo_debug_log, msg)
+    cat("[DEBUG] ", msg, "\n", sep = "")
+  }
+}
+
+# Load additional libraries
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+library(ggtext)
+
+color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
+capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
+
+createDir(ci_dir)
+
+```
+
+## 1. Confidence Interval Computation
+
+This section calculates 95% confidence intervals for malignant and neoplasia prevalence per species using both Wilson and Jeffreys methods.
+
+```{r compute_CI, message=TRUE, warning=TRUE}
+# Compute CIs directly using DescTools and binom packages
+trait_ci <- trait_df %>%
+  group_by(species) %>%
+  dplyr::rename(n_population = .data[[p_trait]],
+                n_observation = .data[[n_trait]],
+                trait = .data[[trait]]) %>%
+  dplyr::mutate(
+    # Jeffreys method CIs
+    trait_ci_lb = binom::binom.confint(n_observation, n_population, 
+                                            method = "bayes", priors = c(0.5, 0.5), 
+                                            conf.level = 0.95)[, 5],
+    trait_ci_ub = binom::binom.confint(n_observation, n_population, 
+                                            method = "bayes", priors = c(0.5, 0.5), 
+                                            conf.level = 0.95)[, 6],
+    trait_ci = paste0("[", round(trait_ci_lb, 2), "-", round(trait_ci_ub, 2), "]")
+  ) %>%
+  ungroup()
+
+# Save results
+write.csv(trait_ci, file.path(ci_dir, "trait_CI.csv"), 
+          quote = FALSE, row.names = FALSE)
+
+# Display preview
+head(trait_ci)
+```
+
+## 3. Pairwise Comparison Preparation
+
+This section prepares data for comparing cancer prevalence between all pairs of species.
+
+```{r prep_CI, paged.print=TRUE, message=TRUE, warning=TRUE}
+# Helper function to create pairwise comparisons for a given method
+create_pairwise_data <- function(ci_data) {
+  # Define column names for lower and upper bounds  
+  ci_subset <- ci_data %>%
+    dplyr::select(species, n_population, 
+          n_observation, trait, 
+          trait_ci_lb, trait_ci_ub)
+  
+  # Generate all pairwise species combinations
+  pairwise <- expand.grid(species1 = ci_subset$species,
+                          species2 = ci_subset$species,
+                          stringsAsFactors = FALSE)
+  
+  # Merge species data for each pair
+  pairwise <- pairwise %>%
+    left_join(ci_subset %>% rename_with(~paste0(.x, "1"), .cols = -species),
+              by = c("species1" = "species")) %>%
+    left_join(ci_subset %>% rename_with(~paste0(.x, "2"), .cols = -species),
+              by = c("species2" = "species"))
+  
+  pairwise <- pairwise %>%
+    mutate(
+      trait_diff = trait1 - trait2,
+      trait_overlap = ci_overlap(
+        trait_ci_lb1, trait_ci_ub1, trait_ci_lb2, trait_ci_ub2
+      ),
+      diff_value = trait_diff,
+      overlap_use = trait_overlap
+    )
+  
+  return(pairwise)
+}
+
+# Create pairwise data
+pairwise_data <- create_pairwise_data(trait_ci)
+
+# Save results
+write.csv(pairwise_data, file.path(ci_dir, "pairwise_data.csv"), 
+          quote = FALSE, row.names = FALSE)
+
+# Display preview
+head(pairwise_data)
+```
+
+## 4. Difference Matrix Creation
+
+This section transforms pairwise data into matrix format for visualization.
+
+```{r diff_matrix, paged.print=TRUE, message=TRUE, warning=TRUE}
+# Helper function to build difference matrix
+build_diff_matrix <- function(pairwise_data) {
+  pairwise_data %>%
+    select(species1, species2, diff_value) %>%
+    pivot_wider(names_from = species2, values_from = diff_value) %>%
+    column_to_rownames("species1") %>%
+    as.matrix()
+}
+
+# Create matrices
+matrix <- build_diff_matrix(pairwise_data)
+
+# Save matrices
+write.csv(matrix, file.path(ci_dir, "diff_matrix-CI.csv"), 
+          quote = FALSE, row.names = TRUE)
+
+# Display preview
+head(matrix)
+```
+
+## 5. Heatmap Visualization
+
+This section creates heatmaps to visualize pairwise differences in prevalence. Species labels are colored based on prevalence quantiles.
+
+```{r plot_CI, fig.height=12, fig.width=15, message=TRUE, warning=TRUE, dev="png", dpi=320}
+# Helper function to categorize species by quantile
+categorize_species_by_quantile <- function(trait_data) {
+  # Calculate quantiles
+  top_trait <- quantile(trait_data$trait, 0.75, na.rm = TRUE)
+  bot_trait <- quantile(trait_data$trait, 0.25, na.rm = TRUE)
+  
+  # Identify species in each quantile
+  list(
+    top_trait = trait_data$species[trait_data$trait >= top_trait],
+    bot_trait = trait_data$species[trait_data$trait <= bot_trait]
+  )
+}
+
+# Helper function to create colored labels
+create_colored_labels <- function(species_list, quantile_cats) {
+  color_map <- c(
+    "Top"     = "#D73027",
+    "Bottom"  = "#1A9850"
+  )
+  
+  sapply(species_list, function(sp) {
+    in_top_trait <- sp %in% quantile_cats$top_trait
+    in_bot_trait <- sp %in% quantile_cats$bot_trait
+    
+
+    if (in_top_trait) {
+      paste0("<span style='color:", color_map["Top"], ";'>", sp, "</span>")
+    } else if (in_bot_trait) {
+      paste0("<span style='color:", color_map["Bottom"], ";'>", sp, "</span>")
+    } else {
+      paste0("<span style='color:#000000;'>", sp, "</span>")
+    }
+  })
+}
+
+# Helper function to create legend plot
+create_legend_plot <- function() {
+  legend_df <- tibble(
+    category = c("Top", "Bottom"),
+    color = c("#D73027", "#1A9850")
+  )
+  
+  ggplot(legend_df, aes(x = 1, y = category, color = category)) +
+    geom_point(size = 0) +
+    scale_color_manual(
+      values = setNames(legend_df$color, legend_df$category),
+      guide = guide_legend(override.aes = list(size = 5))
+    ) +
+    labs(color = "Trait Categories") +
+    theme_void() +
+    theme(
+      legend.position = "right",
+      legend.title = element_text(size = 12),
+      legend.text = element_text(size = 10)
+    )
+}
+
+# Helper function to create heatmap
+create_heatmap <- function(pairwise_data, colored_labels, 
+                          highlight_nonoverlap = TRUE) {
+  # Ensure label mapping is stable across axes
+  if (is.null(names(colored_labels))) {
+    stop("colored_labels must be a named vector with species names.")
+  }
+  pairwise_data <- pairwise_data %>%
+    mutate(
+      species1 = factor(species1, levels = names(colored_labels)),
+      species2 = factor(species2, levels = names(colored_labels))
+    )
+
+  p <- ggplot(pairwise_data, aes(x = species2, y = species1, fill = abs(diff_value))) +
+    geom_tile(color = "black", size = 0.25) +
+    geom_text(aes(label = sprintf("%.2f", abs(diff_value))), size = 3) +
+    scale_fill_gradient(low = "white", high = "salmon3", name = "Difference") +
+    scale_x_discrete(labels = function(x) colored_labels[x]) +
+    scale_y_discrete(labels = function(y) colored_labels[y]) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_markdown(angle = 45, hjust = 1),
+      axis.text.y = element_markdown(angle = 0),
+      panel.grid = element_blank(),
+      legend.position = "none"
+    )
+  
+  # Add bold border for non-overlapping CIs if requested
+  if (highlight_nonoverlap) {
+    p <- p + 
+      geom_tile(data = filter(pairwise_data, !overlap_use), 
+                fill = NA, color = "black", size = 1.5) +
+      labs(
+        x = "Species", y = "Species",
+        title = paste("Pairwise Differences in trait: ", capitalized_trait, " with Non-overlapping CIs", sep = ""),
+        caption = "Bold border: non-overlapping CIs."
+      )
+  } else {
+    p <- p +
+      labs(
+        x = "Species", y = "Species",
+        title = paste("Pairwise Differences in trait: ", capitalized_trait, sep = ""),
+        caption = "Bold border: non-overlapping CIs."
+      )
+  }
+  
+  return(p)
+}
+
+# Prepare colored labels
+quantile_cats <- categorize_species_by_quantile(trait_df)
+my_labels <- unique(c(pairwise_data$species1, pairwise_data$species2))
+my_labels_colored <- setNames(create_colored_labels(my_labels, quantile_cats), my_labels)
+
+# Save colored labels
+write.csv(my_labels_colored, file.path(ci_dir, "my_labels_colored.csv"), 
+          quote = FALSE, row.names = TRUE)
+
+# Create legend
+legend_plot <- create_legend_plot()
+
+# Create heatmaps with non-overlapping CI highlights
+p_overlap <- create_heatmap(pairwise_data, my_labels_colored, highlight_nonoverlap = TRUE) + 
+  legend_plot + plot_layout(ncol = 2, widths = c(1000, 1))
+
+p_flat <- create_heatmap(pairwise_data, my_labels_colored, highlight_nonoverlap = FALSE) + 
+  legend_plot + plot_layout(ncol = 2, widths = c(1000, 1))
+
+# Save heatmaps
+ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap, 
+       width = 15, height = 12, dpi = "retina")
+ggsave(file.path(ci_dir, "visual_matrix_flat.png"), p_flat, 
+       width = 15, height = 12, dpi = "retina")
+
+# Display plots
+p_overlap
+p_flat
+```
+
+## 6. Polished Tables Preparation
+
+This section creates readable summary tables for cancer traits and pairwise comparisons.
+
+```{r polished_tables, message=FALSE, warning=FALSE}
+# Polished table for cancer traits
+trait_ci_polished <- trait_ci %>%
+  mutate(
+    trait = round(trait, 3),
+  ) %>%
+  dplyr::select(species, n_population, n_observation, 
+        trait, trait_ci_lb, trait_ci_ub, trait_ci) %>%
+  dplyr::rename(
+    "Trait" = trait,
+    "Trait CI Lower Bound" = trait_ci_lb,
+    "Trait CI Upper Bound" = trait_ci_ub,
+    "Trait CI" = trait_ci
+  )
+
+write.csv(trait_ci_polished, 
+          file.path(ci_dir, "trait_CI_polished.csv"), 
+          quote = FALSE, row.names = FALSE)
+
+# Polished pairwise table - recreate from original data with all CI columns
+trait_diff <- trait_ci %>%
+  dplyr::select(species, n_population , n_observation, trait,
+        trait_ci_lb, trait_ci_ub, trait_ci)
+
+# Generate all pairwise species combinations
+pairwise_data_full <- expand.grid(species1 = trait_diff$species,
+                                   species2 = trait_diff$species,
+                                   stringsAsFactors = FALSE) %>%
+  left_join(trait_diff %>% rename_with(~paste0(.x, "1"), .cols = -species),
+            by = c("species1" = "species")) %>%
+  left_join(trait_diff %>% rename_with(~paste0(.x, "2"), .cols = -species),
+            by = c("species2" = "species"))
+
+# Create polished pairwise table
+pairwise_data_end_polished <- pairwise_data_full %>%
+  dplyr::mutate(
+    trait_diff = abs(trait1 - trait2),
+    trait_diff = round(trait_diff, 3),
+    # Format CIs for both Wilson and Jeffreys methods
+    trait_CI1 = sprintf("[%.2f-%.2f]", 
+                                 as.numeric(trait_ci_lb1), 
+                                 as.numeric(trait_ci_ub1)),
+    trait_CI2 = sprintf("[%.2f-%.2f]", 
+                                 as.numeric(trait_ci_lb2), 
+                                 as.numeric(trait_ci_ub2)),
+    diff_value = trait_diff
+  ) %>%
+  dplyr::select(species1, species2, 
+         trait_diff, trait_CI1, trait_CI2) %>%
+  dplyr::rename(
+    "Trait Difference" = trait_diff,
+    "Trait CI1" = trait_CI1,        
+    "Trait CI2" = trait_CI2
+  )
+
+write.csv(pairwise_data_end_polished, 
+          file.path(ci_dir, "pairwise_data_end_polished.csv"), 
+          quote = FALSE, row.names = FALSE)
+
+# Display preview
+head(trait_ci_polished)
+
+```
+
+## Session Information
+
+```{r debug_dump, results='asis'}
+
+if (length(phylo_debug_log) > 0) {
+  cat("### Debug log\n")
+  cat(paste0("[DEBUG] ", phylo_debug_log, "\n"))
+}
+
+```
+
+```{r session_info}
+sessionInfo()
+```

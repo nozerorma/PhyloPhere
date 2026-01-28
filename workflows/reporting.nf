@@ -40,5 +40,9 @@ workflow REPORTING {
 
     dataset_out = DATASET_EXPLORATION(trait_file, tree_file)
     phenotype_out = PHENOTYPE_EXPLORATION(trait_file, tree_file, dataset_out)
+
+    emit:
+        dataset_out
+        phenotype_out
     
 }

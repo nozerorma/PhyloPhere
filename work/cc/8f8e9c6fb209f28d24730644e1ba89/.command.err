@@ -1,0 +1,10 @@
+Read 1 item
+Error:
+! object 'stats_df' not found
+Backtrace:
+    ▆
+ 1. ├─stats_df %>% dplyr::filter(tax_id %in% common_tax_ids)
+ 2. └─dplyr::filter(., tax_id %in% common_tax_ids)
+
+Quitting from 1.Dataset_exploration.Rmd:37-55 [setup]
+Execution halted

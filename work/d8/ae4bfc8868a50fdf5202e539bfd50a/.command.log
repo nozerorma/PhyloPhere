@@ -1,0 +1,10 @@
+Read 1 item
+Error:
+! object 'ci_dir' not found
+Backtrace:
+    ▆
+ 1. ├─utils::write.table(...)
+ 2. └─base::file.path(ci_dir, "trait_CI.csv")
+
+Quitting from 3.CI-composition.Rmd:78-103 [compute_CI]
+Execution halted

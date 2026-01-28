@@ -1,0 +1,17 @@
+nextflow.trace/v2
+realtime=3044
+%cpu=1278
+cpu_model=13th Gen Intel(R) Core(TM) i5-1335U
+rchar=34729154
+wchar=1933333
+syscr=4592
+syscw=1318
+read_bytes=9388032
+write_bytes=1601536
+%mem=28
+vmem=2376212
+rss=449920
+peak_vmem=2376212
+peak_rss=449920
+vol_ctxt=175
+inv_ctxt=98

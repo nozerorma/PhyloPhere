@@ -1,0 +1,22 @@
+Read 1 item
+Error in `dplyr::filter()`:
+ℹ In argument: `tax_id %in% common_tax_ids`.
+Caused by error:
+! object 'tax_id' not found
+Backtrace:
+     ▆
+  1. ├─stats_df %>% dplyr::filter(tax_id %in% common_tax_ids)
+  2. ├─dplyr::filter(., tax_id %in% common_tax_ids)
+  3. ├─dplyr:::filter.data.frame(., tax_id %in% common_tax_ids)
+  4. │ └─dplyr:::filter_rows(.data, dots, by)
+  5. │   └─dplyr:::filter_eval(...)
+  6. │     ├─base::withCallingHandlers(...)
+  7. │     └─mask$eval_all_filter(dots, env_filter)
+  8. │       └─dplyr (local) eval()
+  9. ├─tax_id %in% common_tax_ids
+ 10. └─base::.handleSimpleError(...)
+ 11.   └─dplyr (local) h(simpleError(msg, call))
+ 12.     └─rlang::abort(message, class = error_class, parent = parent, call = error_call)
+
+Quitting from 2.Phenotype_exploration.Rmd:97-158 [stat_visualization]
+Execution halted
