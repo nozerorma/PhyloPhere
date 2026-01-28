@@ -1,6 +1,0 @@
-Read 1 item
-Error:
-! Missing pairwise overlap file: data_exploration/1.Data-exploration/4.CI_overlaps/pairwise_overlap.csv
-
-Quitting from 4.Independent_contrasts.Rmd:98-138 [pair_selection]
-Execution halted
