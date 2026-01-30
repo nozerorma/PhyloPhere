@@ -1,2 +1,0 @@
-task_id	hash	native_id	name	status	exit	submit	duration	realtime	%cpu	peak_rss	peak_vmem	rchar	wchar
-1	a0/e66b10	217015	REPORTING:DATASET_EXPLORATION (dataset_exploration)	FAILED	1	2026-01-22 21:50:34.622	615ms	573ms	-	-	-	-	-

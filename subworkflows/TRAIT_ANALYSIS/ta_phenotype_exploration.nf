@@ -23,8 +23,8 @@ process PHENOTYPE_EXPLORATION {
     def clade = params.clade_name ?: ''
     def taxon = params.taxon_of_interest ?: ''
     def trait = params.traitname ?: ''
-    def p_trait = params.p_trait ?: ''
     def n_trait = params.n_trait ?: ''
+    def c_trait = params.c_trait ?: ''
     def tax_id = params.tax_id ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
@@ -42,11 +42,11 @@ process PHENOTYPE_EXPLORATION {
           '${clade}' \
           '${taxon}' \
           '${trait}' \
-          '${p_trait}' \
           '${n_trait}' \
+          '${c_trait}' \
           '${tax_id}' \
           '${secondary_trait}' \
-          '${branch_trait}' 
+          '${branch_trait}'
         """
     } else {
         """
@@ -60,8 +60,8 @@ process PHENOTYPE_EXPLORATION {
           '${clade}' \
           '${taxon}' \
           '${trait}' \
-          '${p_trait}' \
           '${n_trait}' \
+          '${c_trait}' \
           '${tax_id}' \
           '${secondary_trait}' \
           '${branch_trait}'

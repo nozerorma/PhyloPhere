@@ -121,6 +121,9 @@ if tool.lower() == "discovery":
     ###     1.3.4 Output file (the table)
     parser.add_option("-o", "--output", dest="output_file",
                     help="The output file, where the CAAS discovery table will be printed", default = "none")
+    ###     1.3.5 Background coverage output
+    parser.add_option("--background_output", dest="background_output",
+                    help="Output file with tested positions per gene (background coverage)", default = "background.output")
 
 
 
@@ -262,7 +265,8 @@ if tool.lower() == "discovery":
                 caap_mode = options.caap_mode,
 
                 admitted_patterns = options.patterns_string,
-                output_file = options.output_file)
+                output_file = options.output_file,
+                background_output_file = options.background_output)
 
     if exists(options.output_file):
         print("\n\nDone. CAAS discovery table is available at:\n\n\t" + options.output_file + "\n\n")
@@ -688,6 +692,5 @@ if tool.lower() == "bootstrap":
 
     ###     3.9.4 Final output
     print("\n\nBootstrap information available in", options.output_file)
-
 
 

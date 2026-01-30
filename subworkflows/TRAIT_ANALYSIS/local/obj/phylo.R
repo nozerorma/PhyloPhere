@@ -97,18 +97,21 @@ if (has.TAX_ID) {
 }
 
 # Update trait_df to only include species present in the pruned tree
-# NOTE: Should I actually do this? Probably in the dataset exploration I want to see all species even if not in the tree.
 if (has.TAX_ID) {
+  trait_df_ori <- trait_df # Save original for reference
   trait_df <- trait_df %>%
     dplyr::filter(tax_id %in% common_tax_ids)
   debug_log("trait_df after TAX_ID tree filter rows = %d", nrow(trait_df))
 } else {
+  trait_df_ori <- trait_df # Save original for reference
   trait_df <- trait_df %>%
     dplyr::filter(gsub(" ", "_", species) %in% pruned_tree$tip.label)
   debug_log("trait_df after species tree filter rows = %d", nrow(trait_df))
 }
 
-################### 
+# ----------------------------------------
+# Node MRCA Identification
+# ----------------------------------------
 
 # Now we are going to identify the deepest common node for each taxon
 # and prepare data for clade labels

@@ -63,7 +63,10 @@ This section visualizes the distribution of species across families to provide a
 
 # 1. DATA VISUALIZATION  ------------------------------------------------------
 # Calculate species count per taxon_of_interest
-taxa_distribution <- trait_df %>%
+# Note that for this section we use the original trait dataframe (trait_df_ori), and will generate two plots
+# : one for the pruned tree species, and another for all species in the original dataframe.
+
+taxa_distribution <- trait_df_ori %>%
   dplyr::rename(taxa = !!taxon_of_interest) %>%
   dplyr::group_by(taxa) %>%
   dplyr::summarise(count = n())
@@ -80,9 +83,9 @@ print(ordered_species)
 # Define ordered taxa for plotting based on phylogeny order
 ordered_taxa <- ordered_species %>%
   sapply(function(sp) {
-    idx <- which(trait_df$species == sp)
+    idx <- which(trait_df_ori$species == sp)
     if (length(idx) == 0) return(NA_character_)
-    trait_df[[taxon_of_interest]][idx[1]]
+    trait_df_ori[[taxon_of_interest]][idx[1]]
   }) %>%
   unname() %>%
   na.omit() %>%
@@ -90,13 +93,8 @@ ordered_taxa <- ordered_species %>%
 
 print(ordered_taxa)
 
-# Arrange taxa_distribution by taxa
-taxa_distribution <- taxa_distribution %>%
-  dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa)) %>%
-  dplyr::arrange(taxa, .by_group = TRUE)
-
 ## PLOT FUNCTION --------------------------------------------------------------
-taxa_plot.f <- function(df){
+taxa_plot.f <- function(df, ordered_taxa_levels){
   max_count <- max(df$count, na.rm = TRUE)
   palette_values <- get_palette_values()
   debug_log("taxa_plot.f rows = %d, palette_values = %s", nrow(df), ifelse(is.null(palette_values), "<none>", "ok"))
@@ -107,7 +105,7 @@ taxa_plot.f <- function(df){
   }
   ggplot2::ggplot(df, 
                 aes(x = taxa, y = count, fill = taxa)) +
-  scale_x_discrete(limits = rev(ordered_taxa)) +
+  scale_x_discrete(limits = rev(ordered_taxa_levels)) +
   geom_bar(stat = "identity") +
   geom_text(aes(label = count), 
             vjust = 0.5, hjust = -1.5, 
@@ -131,15 +129,42 @@ taxa_plot.f <- function(df){
 }
 
 
-# Create bar plot for taxa distribution
-p1 <- taxa_plot.f(taxa_distribution)
+# Order taxa for the full dataset using original data order
+ordered_taxa_all <- unique(taxa_distribution$taxa)
+
+# Create bar plot for taxa distribution (all taxa)
+taxa_distribution_all <- taxa_distribution %>%
+  dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa_all)) %>%
+  dplyr::arrange(taxa, .by_group = TRUE)
+
+p1 <- taxa_plot.f(taxa_distribution_all, ordered_taxa_all)
 
 # Save the plot to the results directory
-ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution.png")), p1, 
+ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution_original.png")), p1, 
                 device = "png", width = 10, height = 10, dpi = "retina")
 
 # Display the plot
 p1
+
+# Prune taxa distribution to only include species in the pruned tree
+pruned_taxa_distribution <- taxa_distribution %>%
+  dplyr::filter(taxa %in% (trait_df %>%
+                             dplyr::pull(!!sym(taxon_of_interest)) %>%
+                             unique()))
+
+# Create bar plot for pruned taxa distribution
+pruned_taxa_distribution <- pruned_taxa_distribution %>%
+  dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa)) %>%
+  dplyr::arrange(taxa, .by_group = TRUE)
+
+p2 <- taxa_plot.f(pruned_taxa_distribution, ordered_taxa)
+
+# Save the plot to the results directory
+ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution_pruned.png")), p2, 
+                device = "png", width = 10, height = 10, dpi = "retina")
+
+# Display the plot
+p2
 
 ```
 
@@ -148,6 +173,7 @@ p1
 ```{r stats_overview}
 
 # Apply stats.f to trait_df
+# Here we directly use trait_df from the global environment, already loaded and pruned using the phylogeny
 stats_df <- stats.f(trait_df)
 
 # Save the melted dataframe

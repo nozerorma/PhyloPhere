@@ -12,6 +12,7 @@ process CONCAT_DISCOVERY {
 
     output:
     path("discovery.tab"), emit: discovery_concat
+    path("background.output"), emit: background_concat
 
     script:
     """
@@ -55,6 +56,28 @@ process CONCAT_DISCOVERY {
     echo "Final concatenated file line count: \$(wc -l < discovery.tab)"
     echo "Final file preview:"
     head -10 discovery.tab
+
+    echo ""
+    echo "=== CONCAT_DISCOVERY BACKGROUND ==="
+    # Find all background coverage files
+    mapfile -t background_files < <(find "${discovery_dir}" -type f -name "*.background.tsv" | sort)
+    echo "Found \${#background_files[@]} background files:"
+    printf '%s\n' "\${background_files[@]}"
+
+    if [ \${#background_files[@]} -eq 0 ]; then
+        echo "WARNING: No background files found - creating empty background.output"
+        : > background.output
+        exit 0
+    fi
+
+    # Concatenate background coverage files (no header)
+    cat "\${background_files[0]}" > background.output
+    for ((i=1; i<\${#background_files[@]}; i++)); do
+        cat "\${background_files[\$i]}" >> background.output
+    done
+
+    echo "Final background file line count: \$(wc -l < background.output)"
+    head -10 background.output
     """
 }
 

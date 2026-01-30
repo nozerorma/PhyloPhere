@@ -36,7 +36,65 @@ from os.path import exists
 ### FUNCTION discovery()
 ### Scans one single alignment to identify the CAAS or CAAP
 
-def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, admitted_patterns, output_file, paired_mode=False, miss_pair=False, max_conserved=0, caap_mode=False):
+def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, admitted_patterns, output_file, paired_mode=False, miss_pair=False, max_conserved=0, caap_mode=False, background_output_file=None):
+
+    def _valid_traits_for_position(processed_position, trait_list, multiconfig,
+                                   max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                                   max_fg_miss, max_bg_miss, max_overall_miss,
+                                   miss_pair):
+        valid_traits = []
+
+        for trait in trait_list:
+            if trait not in processed_position.trait2aas_fg:
+                continue
+            if trait not in processed_position.trait2aas_bg:
+                continue
+
+            # Gap filtering
+            if max_fg_gaps != "NO" and processed_position.trait2gaps_fg.get(trait, 0) > int(max_fg_gaps):
+                continue
+            if max_bg_gaps != "NO" and processed_position.trait2gaps_bg.get(trait, 0) > int(max_bg_gaps):
+                continue
+            if max_overall_gaps != "NO" and processed_position.trait2gaps_fg.get(trait, 0) + processed_position.trait2gaps_bg.get(trait, 0) > int(max_overall_gaps):
+                continue
+
+            # Missing filtering
+            if max_fg_miss != "NO" and processed_position.trait2miss_fg.get(trait, 0) > int(max_fg_miss):
+                continue
+            if max_bg_miss != "NO" and processed_position.trait2miss_bg.get(trait, 0) > int(max_bg_miss):
+                continue
+            if max_overall_miss != "NO" and processed_position.trait2miss_fg.get(trait, 0) + processed_position.trait2miss_bg.get(trait, 0) > int(max_overall_miss):
+                continue
+
+            # Pair-aware filtering (only in paired mode with miss_pair enabled)
+            if multiconfig.paired_mode and miss_pair:
+                miss_thresholds_equal = False
+                if max_fg_miss != "NO" and max_bg_miss != "NO" and max_fg_miss == max_bg_miss:
+                    miss_thresholds_equal = True
+                elif max_fg_miss == "NO" and max_bg_miss == "NO" and max_overall_miss != "NO":
+                    miss_thresholds_equal = True
+
+                if miss_thresholds_equal:
+                    miss_pairs_fg = set(processed_position.trait2miss_pairs_fg.get(trait, []))
+                    miss_pairs_bg = set(processed_position.trait2miss_pairs_bg.get(trait, []))
+                    if miss_pairs_fg and miss_pairs_bg and miss_pairs_fg != miss_pairs_bg:
+                        continue
+
+                gap_thresholds_equal = False
+                if max_fg_gaps != "NO" and max_bg_gaps != "NO" and max_fg_gaps == max_bg_gaps:
+                    gap_thresholds_equal = True
+                elif max_fg_gaps == "NO" and max_bg_gaps == "NO" and max_overall_gaps != "NO":
+                    gap_thresholds_equal = True
+
+                if gap_thresholds_equal:
+                    gap_pairs_fg = set(processed_position.trait2gap_pairs_fg.get(trait, []))
+                    gap_pairs_bg = set(processed_position.trait2gap_pairs_bg.get(trait, []))
+                    if gap_pairs_fg and gap_pairs_bg and gap_pairs_fg != gap_pairs_bg:
+                        continue
+
+            valid_traits.append(trait)
+
+        return valid_traits
 
     # Step 1: import the trait into a trait object (load_cfg from pindex.py)
     trait_object = load_cfg(input_cfg, paired_mode=paired_mode)
@@ -49,6 +107,7 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
 
     # Step 4: Collect results before writing to file
     results_to_write = []
+    tested_positions = set()
 
     # Step 5: extract the raw caas or caap
     if caap_mode:
@@ -57,6 +116,20 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
         
         # CAAP mode: detect property-based convergence
         for position in processed_positions:
+            valid_traits = _valid_traits_for_position(
+                position,
+                trait_object.alltraits,
+                trait_object,
+                max_fg_gaps,
+                max_bg_gaps,
+                max_overall_gaps,
+                max_fg_miss,
+                max_bg_miss,
+                max_overall_miss,
+                miss_pair
+            )
+            if valid_traits:
+                tested_positions.add(position.position)
             caap_results = fetch_caap( genename = p.genename,
                         position_obj = position,
                         trait_list = trait_object.alltraits,
@@ -83,6 +156,20 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
     else:
         # CAAS mode: classical detection
         for position in processed_positions:
+            valid_traits = _valid_traits_for_position(
+                position,
+                trait_object.alltraits,
+                trait_object,
+                max_fg_gaps,
+                max_bg_gaps,
+                max_overall_gaps,
+                max_fg_miss,
+                max_bg_miss,
+                max_overall_miss,
+                miss_pair
+            )
+            if valid_traits:
+                tested_positions.add(position.position)
             caas_results = fetch_caas( p.genename,
                         position,
                         trait_object.alltraits,
@@ -106,7 +193,16 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
             if caas_results:
                 results_to_write.extend(caas_results)
     
-    # Step 6: Only write output file if CAAS/CAAP were found
+    # Step 6: Write background coverage file (positions tested)
+    if background_output_file:
+        if tested_positions:
+            positions_sorted = ",".join(map(str, sorted(tested_positions, key=lambda x: int(x))))
+        else:
+            positions_sorted = "NULL"
+        with open(background_output_file, "w") as bkg_out:
+            bkg_out.write(f"{p.genename}\t{positions_sorted}\n")
+
+    # Step 7: Only write output file if CAAS/CAAP were found
     if len(results_to_write) > 0:
         # Delete existing file if present
         if exists(output_file):

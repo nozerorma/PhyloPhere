@@ -1,3 +1,0 @@
-task_id	hash	native_id	name	status	exit	submit	duration	realtime	%cpu	peak_rss	peak_vmem	rchar	wchar
-1	cd/12dca8	718616	REPORTING:DATASET_EXPLORATION (dataset_exploration)	COMPLETED	0	2026-01-24 17:59:08.099	3.3s	3.2s	122.0%	461.9 MB	2.3 GB	32.6 MB	2 MB
-2	9c/126967	718963	REPORTING:PHENOTYPE_EXPLORATION (phenotype_exploration)	COMPLETED	0	2026-01-24 17:59:11.467	4.6s	4.5s	124.0%	464 MB	2.5 GB	38.1 MB	3.5 MB

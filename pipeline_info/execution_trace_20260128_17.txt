@@ -1,0 +1,4 @@
+task_id	hash	native_id	name	status	exit	submit	duration	realtime	%cpu	peak_rss	peak_vmem	rchar	wchar
+1	20/98b6b4	908387	REPORTING:DATASET_PRUNE (dataset_prune)	COMPLETED	0	2026-01-28 17:59:00.044	36.9s	36.8s	95.4%	1.4 GB	3.3 GB	59.1 MB	32.6 MB
+2	b2/0d66ae	909607	REPORTING:DATASET_EXPLORATION (dataset_exploration)	COMPLETED	0	2026-01-28 17:59:37.057	4.2s	4.2s	127.0%	526.6 MB	2.4 GB	33.3 MB	2.2 MB
+3	f6/0a7149	909955	REPORTING:PHENOTYPE_EXPLORATION (phenotype_exploration)	ABORTED	-	2026-01-28 17:59:41.329	-	-	-	-	-	-	-

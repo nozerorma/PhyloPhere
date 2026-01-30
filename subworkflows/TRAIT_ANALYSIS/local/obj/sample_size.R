@@ -14,21 +14,12 @@ if (!exists("debug_log", inherits = TRUE)) {
 ####### specify it here, as it will allow for a more in-depth analysis.                     #######
 ###################################################################################################
 
-p_trait <- get_arg(args, 8, "")
-n_trait <- get_arg(args, 9, "")
+n_trait <- get_arg(args, 8, "") # Trait with number of individuals sampled (population size)
+c_trait <- get_arg(args, 9, "") # Trait with number of observed cases (e.g., number of diseased individuals)
 debug_log("n_trait = %s", ifelse(nzchar(n_trait), n_trait, "<none>"))
-debug_log("p_trait = %s", ifelse(nzchar(p_trait), p_trait, "<none>"))
+debug_log("c_trait = %s", ifelse(nzchar(c_trait), c_trait, "<none>"))
 
 # Check if sample size trait is provided and valid
-has.p <- FALSE
-if (nzchar(p_trait) && p_trait %in% names(trait_df)) {
-  has.p <- TRUE
-  debug_log("has.p = TRUE, p missing = %d", sum(is.na(trait_df[[p_trait]])))
-} else {
-  message("No valid sample size trait provided; proceeding without it.")
-  debug_log("has.p = FALSE")
-}
-
 has.n <- FALSE
 if (nzchar(n_trait) && n_trait %in% names(trait_df)) {
   has.n <- TRUE
@@ -37,3 +28,13 @@ if (nzchar(n_trait) && n_trait %in% names(trait_df)) {
   message("No valid count trait provided; proceeding without it.")
   debug_log("has.n = FALSE")
 }
+
+has.c <- FALSE
+if (nzchar(c_trait) && c_trait %in% names(trait_df)) {
+  has.c <- TRUE
+  debug_log("has.c = TRUE, c missing = %d", sum(is.na(trait_df[[c_trait]])))
+} else {
+  message("No valid sample size trait provided; proceeding without it.")
+  debug_log("has.c = FALSE")
+}
+

@@ -37,6 +37,7 @@ process DISCOVERY {
 
     output:
     tuple val(alignmentID), file("${alignmentID}.output"), optional: true
+    path("${alignmentID}.background.tsv"), emit: background_out, optional: true
 
     script:
     // Define extra discovery arguments from params.file
@@ -49,6 +50,7 @@ process DISCOVERY {
         -a ${alignmentFile} \\
         -t ${params.caas_config} \\
         -o ${alignmentID}.output \\
+        --background_output ${alignmentID}.background.tsv \\
         --fmt ${params.ali_format} \\
         ${args.replaceAll('\n', ' ')}
         """
@@ -59,6 +61,7 @@ process DISCOVERY {
         -a ${alignmentFile} \\
         -t ${params.caas_config} \\
         -o ${alignmentID}.output \\
+        --background_output ${alignmentID}.background.tsv \\
         --fmt ${params.ali_format} \\
         ${args.replaceAll('\n', ' ')}
         """

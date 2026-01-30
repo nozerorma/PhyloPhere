@@ -29,6 +29,7 @@
 
 // Import local modules/subworkflows
 include { DATASET_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration"
+include { DATASET_PRUNE } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_data_prune"
 include { REPORTING } from "${baseDir}/workflows/reporting"
 include { CI_COMPOSITION_REPORT } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ct_ci"
 include { CONTRAST_ALGORITHM } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ct_independent-contrasts"
@@ -42,17 +43,23 @@ workflow CONTRAST_SELECTION {
 
     def dataset_out
 
-    if (params.reporting) {
+    if (params.reporting){
         log.info "stats_df generated during reporting"
         def reporting_out = REPORTING()
         dataset_out = reporting_out.dataset_out
+    } else if (params.prune_data) {
+        log.info "Pruning selected; running data pruning module before contrast selection."
+        prune_out = DATASET_PRUNE(trait_file, tree_file)
+        trait_file = prune_out.pruned_trait_file
+        tree_file = prune_out.pruned_tree_file
+        dataset_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
     } else {
         log.info "No stats_df provided. Rerunning dataset exploration for stats generation."
-        dataset_out = DATASET_EXPLORATION(trait_file, tree_file)
+        dataset_out = DATASET_EXPLORATION(trait_file, tree_file, file('NO_FILE'))
     }
 
-    if (params.p_trait) {
-        log.info "Running contrast selection with population data: ${params.p_trait}. Computing CIs."
+    if (params.n_trait && params.c_trait) {
+        log.info "Running contrast selection with population data: ${params.n_trait}, cases: ${params.c_trait}. Computing CIs."
         ci_out = CI_COMPOSITION_REPORT(trait_file, tree_file, dataset_out)
     } else {
         log.info "Running contrast selection without population data. Skipping CI computation."

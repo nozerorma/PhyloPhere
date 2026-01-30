@@ -1,5 +1,5 @@
 ---
-title: "Exploring the phenotype"
+title: "Optional data pruning using a list of species"
 date: "`r Sys.Date()`"
 output:
   html_document: default
@@ -21,14 +21,18 @@ output:
 ### Github: https://github.com/nozerorma/caastools/nf-phylophere
 ### Author: Miguel Ramon (miguel.ramon@upf.edu)
 
-#### File: phenotype_exploration.Rmd
+#### File: .data_pruning.Rmd
 
 ```
 
-# Phenotype Exploration
-This script allows for the visualization of trait distributions and phylogenetic patterns. The script includes contrast plots and phylogenetic trees to assess trait relationships.
+# Optional Data Pruning for Trait Analysis
+This document describes the process of optionally pruning the dataset based on a user-provided list of species. 
+This step ensures that only specified species are included in subsequent analyses.
+
+Fast and easy.
 
 ## Setup and Directory Configuration
+
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
 ```{r setup, message=TRUE, warning=TRUE}
@@ -69,31 +73,98 @@ library(ggtreeExtra)
 library(geiger)
 library(rphylopic)
 
-# Objects
 color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
 capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
 capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
 capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
+
+createDir(data_pruning_dir)
+
+# Create subdirectories for the new plots
+
+extreme_plots_dir <- file.path(data_pruning_dir, "1.Extreme_plots")
+asr_trees <- file.path(data_pruning_dir, "2.ASR_trees")
+phylo_distribution_dir <- file.path(data_pruning_dir, "3.Phylo_distribution")
 
 createDir(extreme_plots_dir)
 createDir(asr_trees)
 createDir(phylo_distribution_dir)
 
 ```
+## Data Pruning Process
+This section loads the prune list, prunes the trait data frame and phylogenetic tree, and saves the pruned data for downstream analyses.
+```{r set_ourdirs, message=TRUE, warning=TRUE}
 
-## 1. Data Import
-This section imports trait summary data from the dataset exploration stage.
+prune_list <- get_arg(args, 13, "")
+prune_list_secondary <- get_arg(args, 14, "")
 
-```{r trait_import, message=TRUE, warning=TRUE}
+print(paste("Prune list primary:", prune_list))
+print(paste("Prune list secondary:", prune_list_secondary))
 
-# Load summary stats from Dataset Exploration
-stats_path <- file.path(species_distribution_dir, "trait_stats.csv")
-if (!file.exists(stats_path)) {
-  stop("Missing trait stats file: ", stats_path)
+# Load the prune list
+if (prune_list != "") {
+  prune_species_primary <- readLines(prune_list)
+  cat("Loaded prune list with", length(prune_species_primary), "species\n")
+} else {
+  stop("No prune list provided. Please provide a valid list of species to prune.")
 }
-stats_df <- read.csv(stats_path, stringsAsFactors = FALSE)
+
+# Optional secondary prune list (e.g., for secondary trait)
+if (prune_list_secondary != "") {
+  prune_species_secondary <- readLines(prune_list_secondary)
+  cat("Loaded secondary prune list with", length(prune_species_secondary), "species\n")
+}
+
+# Generate stats_df
+stats_df <- stats.f(trait_df)
+
+# Cleanup data frame and tree
+`%ni%` <- Negate(`%in%`)
+
+pruned_trait_df <- trait_df[trait_df$species %ni% prune_species_primary, ]
+clean_tree <- ape::drop.tip(pruned_tree, prune_species_primary)
+pruned_stats <- stats_df[stats_df$species %ni% prune_species_primary, ]
+
+cat("Pruned trait data frame has", nrow(pruned_trait_df), "species\n")
+cat("Pruned tree has", length(clean_tree$tip.label), "species\n")
+cat("Pruned stats data frame has", nrow(pruned_stats), "species\n")
+
+# Save pruned data
+pruned_trait_file <- file.path(data_pruning_dir, "pruned_trait_file.tsv")
+write.table(pruned_trait_df, file = pruned_trait_file, sep = "\t", row.names = FALSE, quote = FALSE)
+pruned_tree_file <- file.path(data_pruning_dir, "pruned_tree_file.nwk")
+ape::write.tree(clean_tree, file = pruned_tree_file)
+pruned_stats_file <- file.path(data_pruning_dir, "pruned_trait_stats.csv")
+write.csv(pruned_stats, file = pruned_stats_file, row.names = FALSE)
+
+# Nullify trait values for downstream plots (do not affect emitted pruned files)
+nulled_trait_df <- trait_df
+nulled_stats_df <- stats_df
+
+if (length(prune_species_primary) > 0 && trait %in% names(nulled_trait_df)) {
+  nulled_trait_df[nulled_trait_df$species %in% prune_species_primary, trait] <- NA
+  nulled_stats_df[nulled_stats_df$species %in% prune_species_primary, trait] <- NA
+  cat("Nulled primary trait for", sum(nulled_trait_df$species %in% prune_species_primary), "species\n")
+}
+
+if (length(prune_species_secondary) > 0 && nzchar(secondary_trait) && secondary_trait %in% names(nulled_trait_df)) {
+  nulled_trait_df[nulled_trait_df$species %in% prune_species_secondary, secondary_trait] <- NA
+  nulled_stats_df[nulled_stats_df$species %in% prune_species_secondary, secondary_trait] <- NA
+  cat("Nulled secondary trait for", sum(nulled_trait_df$species %in% prune_species_secondary), "species\n")
+}
+
+# Rename the variables for downstream use (plots use nulled data, tree stays pruned)
+trait_df <- nulled_trait_df
+stats_df <- nulled_stats_df
+
+# Save files for debug
+debug_log("Data pruning completed. Pruned trait file: %s, Pruned tree file: %s", pruned_trait_file, pruned_tree_file)
+write.csv(stats_df, file = file.path(data_pruning_dir, "debug_pruned_stats.csv"), row.names = FALSE)
+write.csv(trait_df, file = file.path(data_pruning_dir, "debug_pruned_trait_df.csv"), row.names = FALSE)
 
 ```
+
+# Rebuild figures
 
 ## 1. Load Melted Trait Data
 This section loads pre-processed trait data in a long (melted) format and adds common names for species.
@@ -740,8 +811,10 @@ if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secon
     dplyr::rename(secondary_value = .data[[secondary_trait]]) %>%
     summarize(
       trait_sum = sum(value, na.rm = TRUE),
+      trait_is_na = all(is.na(value)),
       n_sum = sum(N, na.rm = TRUE),
       secondary_sum = sum(secondary_value, na.rm = TRUE),
+      secondary_is_na = all(is.na(secondary_value)),
       .groups = "drop"
     ) %>%
     ungroup()
@@ -749,6 +822,7 @@ if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secon
   tree_trait_data <- tree_trait_data %>%
     summarize(
       trait_sum = sum(value, na.rm = TRUE),
+      trait_is_na = all(is.na(value)),
       p_sum = sum(p, na.rm = TRUE),
       .groups = "drop") %>%
     ungroup()
@@ -757,15 +831,34 @@ if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secon
     dplyr::rename(secondary_value = .data[[secondary_trait]]) %>%
     summarize(
       trait_sum = sum(value, na.rm = TRUE),
+      trait_is_na = all(is.na(value)),
       secondary_sum = sum(secondary_value, na.rm = TRUE),
+      secondary_is_na = all(is.na(secondary_value)),
       .groups = "drop") %>%
     ungroup()
 } else { # If neither is TRUE  
   tree_trait_data <- tree_trait_data %>%
     summarize(
       trait_sum = sum(value, na.rm = TRUE),
+      trait_is_na = all(is.na(value)),
       .groups = "drop") %>%
     ungroup()
+}
+
+tree_trait_data <- tree_trait_data %>%
+  mutate(
+    trait_sum_plot = ifelse(trait_is_na, 0, trait_sum),
+    trait_fill = ifelse(trait_is_na, 0, trait_sum),
+    trait_asterisk = ifelse(trait_is_na, "*", "")
+  )
+
+if (isTRUE(has.secondary)) {
+  tree_trait_data <- tree_trait_data %>%
+    mutate(
+      secondary_sum_plot = ifelse(secondary_is_na, 0, secondary_sum),
+      secondary_fill = ifelse(secondary_is_na, 0, secondary_sum),
+      secondary_asterisk = ifelse(secondary_is_na, "*", "")
+    )
 }
 
 # Convert tree to tibble and join with trait data
@@ -822,11 +915,11 @@ if (isTRUE(has.branch)) {
                                   size=2)
 }  
 
-tree_plot_step1 <- tree_plot_step1 +
+  tree_plot_step1 <- tree_plot_step1 +
   # Trait bars
   geom_fruit(
     geom = geom_col,
-    mapping = aes(y = species, x = trait_sum, fill = trait_sum, width = 0.5),
+    mapping = aes(y = species, x = trait_sum_plot, fill = trait_fill, width = 0.5),
     alpha = 0.5,  # Set transparency for lighter appearance
     show.legend = TRUE,
     pwidth = 0.75,
@@ -842,7 +935,7 @@ tree_plot_step1 <- tree_plot_step1 +
       limits = c(0, 40)
     ),
     grid.params = list()
-  ) +
+    ) +
   scale_fill_gradient2(
     name = capitalized_trait, 
     low = "white", 
@@ -860,7 +953,7 @@ if (isTRUE(has.secondary)) {
     geom_fruit(
       geom = geom_col,
       offset = -0.75,
-      mapping = aes(y = species, x = secondary_sum, fill = secondary_sum, width = 0.5),
+      mapping = aes(y = species, x = secondary_sum_plot, fill = secondary_fill, width = 0.5),
       alpha = 0.5,  # Set transparency for lighter appearance
       show.legend = TRUE,
       pwidth = 0.75,
@@ -912,6 +1005,25 @@ if(isTRUE(has.n)){
     geom_text(aes(label = n_sum), nudge_x = 7.5, fontface = "bold", size = 6, vjust = 0.5)
 } else {
   tree_plot_step3 <- tree_plot_step2
+}
+
+# Add asterisks for nulled traits
+tree_plot_step3 <- tree_plot_step3 +
+  geom_text(aes(label = trait_asterisk),
+            nudge_x = 6, nudge_y = 0.15,
+            color = "darkseagreen4",
+            fontface = "bold",
+            size = 7,
+            vjust = 0.5)
+
+if (isTRUE(has.secondary)) {
+  tree_plot_step3 <- tree_plot_step3 +
+    geom_text(aes(label = secondary_asterisk),
+              nudge_x = 6, nudge_y = -0.15,
+              color = "salmon3",
+              fontface = "bold",
+              size = 7,
+              vjust = 0.5)
 }
 
 tree_plot_step3
@@ -969,7 +1081,10 @@ final_tree_plot <- tree_plot_step3 +
         legend.text = element_text(size = 13),
         plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
         plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
-  )
+  ) +
+            # Add caption for asterisks
+  labs(caption = "\"*\" indicates that species was removed for this trait as part of the data pruning process\n(following color conventions)") +
+  theme(plot.caption = element_text(size = 15, hjust = 0, face = "italic", margin = margin(b = 10)))
 
 final_tree_plot
 
@@ -995,7 +1110,5 @@ if (length(phylo_debug_log) > 0) {
 ```
 
 ```{r session_info}
-
 sessionInfo()
-
 ```

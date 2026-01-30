@@ -22,6 +22,7 @@ debug_log("Results Directory: %s", resultsDir)
 
 
 # Results subdirectories
+data_pruning_dir <- file.path(resultsDir, "0.Data-pruning")
 data_exploration_dir <- file.path(resultsDir, "1.Data-exploration")
 species_distribution_dir <- file.path(data_exploration_dir, "1.Species_distribution")
 extreme_plots_dir <- file.path(data_exploration_dir, "2.Extreme_plots")
@@ -35,9 +36,9 @@ traitfile_dir <- file.path(caas_dir, "1.Traitfiles")
 bootstrap_traitfile_dir <- file.path(caas_dir, "2.Bootstrap_traitfiles")
 
 debug_log("data_exploration_dir = %s", data_exploration_dir)
+debug_log("data_pruning_dir = %s", data_pruning_dir)
 debug_log("species_distribution_dir = %s", species_distribution_dir)
 debug_log("extreme_plots_dir = %s", extreme_plots_dir)
 debug_log("asr_trees = %s", asr_trees)
 debug_log("phylo_distribution_dir = %s", phylo_distribution_dir)
 debug_log("ci_dir = %s", ci_dir)
-

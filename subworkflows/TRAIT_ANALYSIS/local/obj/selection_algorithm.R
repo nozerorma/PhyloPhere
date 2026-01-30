@@ -177,17 +177,17 @@ mod_dunn <- function(distance = NULL, clusters, Data = NULL, method = "euclidean
 pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
   # Transform distance matrix into long-format dataframe with trait values
   # Keep optional sampling column `n` if provided to support tertiary tie-breaking
-  if (has.p) {
+  if (has.n) {
     debug_log("pair_sel.f has population data")
   } else {
     debug_log("pair_sel.f does not have population data")
   }
 
   trait_df <- traits_df
-  if (has.p) {
+  if (has.n) {
     trait_df <- trait_df %>%
       dplyr::filter(trait == my_trait) %>%
-      dplyr::select(species, trait, value, p_data = p_trait)
+      dplyr::select(species, trait, value, n_data = n_trait)
   } else {
     trait_df <- trait_df %>%
       dplyr::filter(trait == my_trait) %>%
@@ -204,9 +204,9 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     left_join(trait_df, by = c("species2" = "species")) %>%
     dplyr::rename(value2 = value) %>%
     {
-      if (has.p) {
-        dplyr::rename(., p1 = p_data.x, p2 = p_data.y) %>%
-          dplyr::mutate(pair_p = ifelse(is.na(p1) | is.na(p2), NA_real_, p1 + p2))
+      if (has.n) {
+        dplyr::rename(., n1 = n_data.x, n2 = n_data.y) %>%
+          dplyr::mutate(pair_n = ifelse(is.na(n1) | is.na(n2), NA_real_, n1 + n2))
       } else {
         .
       }
@@ -218,11 +218,11 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     mutate(distance = round(distance, 4),
            diff = round(abs(trait_diff), 4)) %>%
     {
-      if (has.p) arrange(., distance, desc(diff), desc(pair_p)) else arrange(., distance, desc(diff))
+      if (has.n) arrange(., distance, desc(diff), desc(pair_n)) else arrange(., distance, desc(diff))
     } %>%
     filter(!is.na(diff)) %>%
     {
-      if (has.p) select(., species1, species2, distance, diff, pair_p) else select(., species1, species2, distance, diff)
+      if (has.n) select(., species1, species2, distance, diff, pair_n) else select(., species1, species2, distance, diff)
     }
   debug_log("pair_sel.f candidate pairs = %d", nrow(distance_df))
 
@@ -231,7 +231,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
 
   top_pair <- distance_df %>%
     {
-      if (has.p) arrange(., distance, desc(diff), desc(pair_p)) else arrange(., distance, desc(diff))
+      if (has.n) arrange(., distance, desc(diff), desc(pair_n)) else arrange(., distance, desc(diff))
     } %>%
     slice_head(n = 1) %>%
     mutate(cluster = 1)
@@ -255,7 +255,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     cluster = numeric(),
     stringsAsFactors = FALSE
   )
-  if (has.p) dunn_results$pair_p <- numeric()
+  if (has.n) dunn_results$pair_n <- numeric()
   dunn_result_cummulative <- data.frame()
 
   current_dunn_index <- Inf
@@ -274,7 +274,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
       query_species1 <- row["species1"]
       query_species2 <- row["species2"]
       query_diff <- row["diff"]
-      query_pair_p <- if (has.p) row["pair_p"] else NA_real_
+      query_pair_n <- if (has.n) row["pair_n"] else NA_real_
 
       # Temporarily add candidate pair as new cluster
       selected_species <- rbind(
@@ -317,7 +317,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
         stringsAsFactors = FALSE
       )
 
-      if (has.p) out$pair_p <- as.numeric(query_pair_p)
+      if (has.n) out$pair_n <- as.numeric(query_pair_n)
 
       return(out)
     })
@@ -325,13 +325,13 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     dunn_candidates <- do.call(rbind, dunn_candidates)
     dunn_result_cummulative <- rbind(dunn_result_cummulative, dunn_candidates) %>%
       {
-        if (has.p) arrange(., desc(cluster), desc(Dunn_index), desc(diff), desc(pair_p)) else arrange(., desc(cluster), desc(Dunn_index), desc(diff))
+        if (has.n) arrange(., desc(cluster), desc(Dunn_index), desc(diff), desc(pair_n)) else arrange(., desc(cluster), desc(Dunn_index), desc(diff))
       }
 
     # Select best candidate: highest Dunn index, then largest trait difference
     dunn_best <- dunn_candidates %>%
       {
-        if (has.p) arrange(., desc(Dunn_index), desc(diff), desc(pair_p)) else arrange(., desc(Dunn_index), desc(diff))
+        if (has.n) arrange(., desc(Dunn_index), desc(diff), desc(pair_n)) else arrange(., desc(Dunn_index), desc(diff))
       } %>%
       slice_head(n = 1)
 
