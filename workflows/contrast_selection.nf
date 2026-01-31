@@ -67,5 +67,10 @@ workflow CONTRAST_SELECTION {
     }
 
     contrast_out = CONTRAST_ALGORITHM(trait_file, tree_file, ci_out)
-    
+
+    emit:
+        trait_file_out = contrast_out.trait_file_out
+        bootstrap_trait_file_out = contrast_out.bootstrap_trait_file_out
+        tree_file_out = contrast_out.tree_file_out
+        contrast_results_dir = contrast_out.contrast_results_dir
 }

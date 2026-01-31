@@ -81,12 +81,20 @@ workflow {
             REPORTING()
             ran_any = true
         }
-        if (params.contrast_selection) {
-            CONTRAST_SELECTION()
+        if (params.ct_tool) {
+            if (params.contrast_selection) {
+                def contrast_out = CONTRAST_SELECTION()
+                CT(contrast_out.trait_file_out, contrast_out.bootstrap_trait_file_out, contrast_out.tree_file_out)
+            } else {
+                def trait_file_in = null
+                def bootstrap_trait_file_in = null
+                def tree_file_in = null
+                CT (trait_file_in, bootstrap_trait_file_in, tree_file_in)
+            }
             ran_any = true
         }
-        if (params.ct_tool) {
-            CT ()
+        if (params.contrast_selection && !params.ct_tool) {
+            CONTRAST_SELECTION()
             ran_any = true
         }
         if (params.rer_tool) {

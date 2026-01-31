@@ -8,24 +8,24 @@ process CONCAT_DISCOVERY {
     publishDir "${params.outdir}/caastools", mode: 'copy'
 
     input:
-    val(discovery_dir)
+    path(discovery_files, stageAs: "discovery_*")
 
     output:
     path("discovery.tab"), emit: discovery_concat
-    path("background.output"), emit: background_concat
 
     script:
     """
     #!/usr/bin/env bash
     set -euo pipefail
     
-    echo "=== CONCAT_DISCOVERY DEBUG ==="
+    echo "=== CONCAT_DISCOVERY ==="
     echo "Working directory: \$(pwd)"
-    echo "Discovery directory: ${discovery_dir}"
+    echo "Staged files:"
+    ls -la
     echo ""
     
-    # Find all .output files in the published directory and sort them
-    mapfile -t discovery_files < <(find "${discovery_dir}" -type f -name "*.output" | sort)
+    # Find all discovery_* files in the staged directory (files or symlinks)
+    mapfile -t discovery_files < <(find . -maxdepth 1 -name "discovery_*" ! -name ".*" | sort)
     
     echo "Found \${#discovery_files[@]} discovery files:"
     printf '%s\n' "\${discovery_files[@]}"
@@ -56,27 +56,54 @@ process CONCAT_DISCOVERY {
     echo "Final concatenated file line count: \$(wc -l < discovery.tab)"
     echo "Final file preview:"
     head -10 discovery.tab
+    """
+}
 
+process CONCAT_BACKGROUND {
+    tag "Concatenating background outputs"
+    publishDir "${params.outdir}/caastools", mode: 'copy'
+
+    input:
+    path(background_files, stageAs: "background_*")
+
+    output:
+    path("background.output"), emit: background_concat
+
+    script:
+    """
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    echo "=== CONCAT_BACKGROUND ==="
+    echo "Working directory: \$(pwd)"
+    echo "Staged files:"
+    ls -la
     echo ""
-    echo "=== CONCAT_DISCOVERY BACKGROUND ==="
-    # Find all background coverage files
-    mapfile -t background_files < <(find "${discovery_dir}" -type f -name "*.background.tsv" | sort)
+    
+    # Find all background_* files in the staged directory (files or symlinks)
+    mapfile -t background_files < <(find . -maxdepth 1 -name "background_*" ! -name ".*" | sort)
+    
     echo "Found \${#background_files[@]} background files:"
     printf '%s\n' "\${background_files[@]}"
+    echo ""
 
+    # Check if we have any files
     if [ \${#background_files[@]} -eq 0 ]; then
-        echo "WARNING: No background files found - creating empty background.output"
-        : > background.output
+        echo "WARNING: No background files found - creating header-only file"
+        echo "Gene\tPosition" > background.output
         exit 0
     fi
 
-    # Concatenate background coverage files (no header)
-    cat "\${background_files[0]}" > background.output
-    for ((i=1; i<\${#background_files[@]}; i++)); do
-        cat "\${background_files[\$i]}" >> background.output
-    done
+    echo "First file preview (\${background_files[0]}):"
+    head -5 "\${background_files[0]}" || echo "ERROR: Cannot read first file"
+    echo "Line count: \$(wc -l < "\${background_files[0]}")"
+    echo ""
+
+    # Concatenate all background files (no headers to strip)
+    cat "\${background_files[@]}" > background.output
 
     echo "Final background file line count: \$(wc -l < background.output)"
+    echo "Final file preview:"
     head -10 background.output
     """
 }
@@ -86,7 +113,7 @@ process CONCAT_RESAMPLE {
     publishDir "${params.outdir}/caastools", mode: 'copy'
 
     input:
-    val(resample_dir)
+    path(resample_dir)
 
     output:
     path("resample.tab"), emit: resample_concat
@@ -96,13 +123,15 @@ process CONCAT_RESAMPLE {
     #!/usr/bin/env bash
     set -euo pipefail
     
-    echo "=== CONCAT_RESAMPLE DEBUG ==="
+    echo "=== CONCAT_RESAMPLE ==="
     echo "Working directory: \$(pwd)"
-    echo "Resample directory: ${resample_dir}"
+    echo "Staged directory: ${resample_dir}"
+    echo "Contents of staged directory:"
+    ls -la ${resample_dir}/
     echo ""
     
-    # Find all resample_*.tab files in the published directory and sort them numerically
-    mapfile -t resample_files < <(find "${resample_dir}" -type f -name "resample_*.tab" | sort -V)
+    # Find all resample_*.tab files in the staged directory and sort them numerically
+    mapfile -t resample_files < <(find ${resample_dir}/ -type f -name "resample_*.tab" | sort -V)
     
     echo "Found \${#resample_files[@]} resample files:"
     printf '%s\n' "\${resample_files[@]}"
@@ -141,7 +170,7 @@ process CONCAT_BOOTSTRAP {
     publishDir "${params.outdir}/caastools", mode: 'copy'
 
     input:
-    val(bootstrap_dir)
+    path(bootstrap_files, stageAs: "bootstrap_*")
 
     output:
     path("bootstrap.tab"), emit: bootstrap_concat
@@ -151,13 +180,14 @@ process CONCAT_BOOTSTRAP {
     #!/usr/bin/env bash
     set -euo pipefail
     
-    echo "=== CONCAT_BOOTSTRAP DEBUG ==="
+    echo "=== CONCAT_BOOTSTRAP ==="
     echo "Working directory: \$(pwd)"
-    echo "Bootstrap directory: ${bootstrap_dir}"
+    echo "Staged files:"
+    ls -la
     echo ""
     
-    # Find all .output files in the published directory and sort them
-    mapfile -t bootstrap_files < <(find "${bootstrap_dir}" -type f -name "*.bootstraped.output" | sort)
+    # Find all bootstrap_* files in the staged directory (files or symlinks)
+    mapfile -t bootstrap_files < <(find . -maxdepth 1 -name "bootstrap_*" ! -name ".*" | sort)
     
     echo "Found \${#bootstrap_files[@]} bootstrap files:"
     printf '%s\n' "\${bootstrap_files[@]}"

@@ -1,0 +1,92 @@
+Running PhyloPhere for trait: neoplasia_prevalence
+
+ N E X T F L O W   ~  version 25.10.3
+
+Launching `main.nf` [pensive_edison] DSL2 - revision: 6a28815860
+
+
+
+PHYLOPHERE - NF PIPELINE  ~  version 0.0.1
+=============================================
+
+PHYLOPHERE: A Nextflow pipeline including a complete set
+of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+Author:         Miguel Ramon (miguel.ramon@upf.edu)
+
+
+
+No contrast selection output provided for CT analyses.
+[-        ] CT:DISCOVERY         -
+[-        ] CT:CONCAT_DISCOVERY  -
+[-        ] CT:CONCAT_BACKGROUND -
+[-        ] CT:RESAMPLE          -
+[-        ] CT:CONCAT_RESAMPLE   -
+[-        ] CT:BOOTSTRAP         -
+[-        ] CT:CONCAT_BOOTSTRAP  -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/dDeyyGVRpTzbx
+[-        ] CT:DISCOVERY         -
+[-        ] CT:CONCAT_DISCOVERY  -
+[-        ] CT:CONCAT_BACKGROUND -
+[-        ] CT:RESAMPLE          -
+[-        ] CT:CONCAT_RESAMPLE   -
+[-        ] CT:BOOTSTRAP         -
+[-        ] CT:CONCAT_BOOTSTRAP  -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/dDeyyGVRpTzbx
+executor >  local (5)
+[05/9bb336] CT:DISCOVERY (CCDC106.Homo_sapiens.filter2) [  0%] 0 of 5
+[-        ] CT:CONCAT_DISCOVERY                         -
+[-        ] CT:CONCAT_BACKGROUND                        -
+[-        ] CT:RESAMPLE                                 -
+[-        ] CT:CONCAT_RESAMPLE                          -
+[-        ] CT:BOOTSTRAP                                -
+[-        ] CT:CONCAT_BOOTSTRAP                         -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/dDeyyGVRpTzbx
+executor >  local (5)
+[05/9bb336] CT:DISCOVERY (CCDC106.Homo_sapiens.filter2) [ 40%] 2 of 5
+[-        ] CT:CONCAT_DISCOVERY                         -
+[-        ] CT:CONCAT_BACKGROUND                        -
+[-        ] CT:RESAMPLE                                 -
+[-        ] CT:CONCAT_RESAMPLE                          -
+[-        ] CT:BOOTSTRAP                                -
+[-        ] CT:CONCAT_BOOTSTRAP                         -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/dDeyyGVRpTzbx
+executor >  local (5)
+[d3/17fb78] CT:DISCOVERY (A2M.Homo_sapiens.filter2)     [ 80%] 4 of 5
+[-        ] CT:CONCAT_DISCOVERY                         -
+[-        ] CT:CONCAT_BACKGROUND                        -
+[-        ] CT:RESAMPLE                                 -
+[-        ] CT:CONCAT_RESAMPLE                          -
+[-        ] CT:BOOTSTRAP                                -
+[-        ] CT:CONCAT_BOOTSTRAP                         -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/dDeyyGVRpTzbx
+executor >  local (5)
+[1b/2a94e1] CT:DISCOVERY (BRCA1.Homo_sapiens.filter2)   [100%] 5 of 5 ✔
+[-        ] CT:CONCAT_DISCOVERY                         [  0%] 0 of 1
+[-        ] CT:CONCAT_BACKGROUND                        [  0%] 0 of 1
+[-        ] CT:RESAMPLE                                 -
+[-        ] CT:CONCAT_RESAMPLE                          -
+[-        ] CT:BOOTSTRAP                                -
+[-        ] CT:CONCAT_BOOTSTRAP                         -
+ERROR ~ Execution aborted due to an unexpected error
+
+ -- Check '.nextflow.log' file for details
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/dDeyyGVRpTzbx
+executor >  local (6)
+[1b/2a94e1] CT:DISCOVERY (BRCA1.Homo_sapiens.filter2)             [100%] 5 of 5 ✔
+[2f/e3fbd1] CT:CONCAT_DISCOVERY (Concatenating discovery outputs) [  0%] 0 of 1
+[-        ] CT:CONCAT_BACKGROUND                                  [  0%] 0 of 1
+[-        ] CT:RESAMPLE                                           -
+[-        ] CT:CONCAT_RESAMPLE                                    -
+[-        ] CT:BOOTSTRAP                                          -
+[-        ] CT:CONCAT_BOOTSTRAP                                   -
+WARN: Killing running tasks (1)
+ERROR ~ Execution aborted due to an unexpected error
+
+ -- Check '.nextflow.log' file for details

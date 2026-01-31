@@ -1,0 +1,120 @@
+Running PhyloPhere for trait: neoplasia_prevalence
+
+ N E X T F L O W   ~  version 25.10.3
+
+Launching `main.nf` [deadly_poitras] DSL2 - revision: 6a28815860
+
+
+
+PHYLOPHERE - NF PIPELINE  ~  version 0.0.1
+=============================================
+
+PHYLOPHERE: A Nextflow pipeline including a complete set
+of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+Author:         Miguel Ramon (miguel.ramon@upf.edu)
+
+
+
+No contrast selection output provided for CT analyses.
+[-        ] CT:DISCOVERY        -
+[-        ] CT:CONCAT_DISCOVERY -
+
+[-        ] CT:DISCOVERY         -
+[-        ] CT:CONCAT_DISCOVERY  -
+[-        ] CT:CONCAT_BACKGROUND -
+[-        ] CT:RESAMPLE          -
+[-        ] CT:CONCAT_RESAMPLE   -
+[-        ] CT:BOOTSTRAP         -
+[-        ] CT:CONCAT_BOOTSTRAP  -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+[-        ] CT:DISCOVERY         -
+[-        ] CT:CONCAT_DISCOVERY  -
+[-        ] CT:CONCAT_BACKGROUND -
+[-        ] CT:RESAMPLE          -
+[-        ] CT:CONCAT_RESAMPLE   -
+[-        ] CT:BOOTSTRAP         -
+[-        ] CT:CONCAT_BOOTSTRAP  -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+executor >  local (4)
+[5a/4eb82e] CT:DISCOVERY (BRCA1.Homo_sapiens.filter2) [  0%] 0 of 5
+[-        ] CT:CONCAT_DISCOVERY                       -
+[-        ] CT:CONCAT_BACKGROUND                      -
+[-        ] CT:RESAMPLE                               -
+[-        ] CT:CONCAT_RESAMPLE                        -
+[-        ] CT:BOOTSTRAP                              -
+[-        ] CT:CONCAT_BOOTSTRAP                       -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+executor >  local (5)
+[0c/6ead12] CT:DISCOVERY (CBY3.Homo_sapiens.filter2)  [  0%] 0 of 5
+[-        ] CT:CONCAT_DISCOVERY                       -
+[-        ] CT:CONCAT_BACKGROUND                      -
+[-        ] CT:RESAMPLE                               -
+[-        ] CT:CONCAT_RESAMPLE                        -
+[-        ] CT:BOOTSTRAP                              -
+[-        ] CT:CONCAT_BOOTSTRAP                       -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+executor >  local (5)
+[0c/6ead12] CT:DISCOVERY (CBY3.Homo_sapiens.filter2)  [ 40%] 2 of 5
+[-        ] CT:CONCAT_DISCOVERY                       -
+[-        ] CT:CONCAT_BACKGROUND                      -
+[-        ] CT:RESAMPLE                               -
+[-        ] CT:CONCAT_RESAMPLE                        -
+[-        ] CT:BOOTSTRAP                              -
+[-        ] CT:CONCAT_BOOTSTRAP                       -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+executor >  local (5)
+[9d/d322d1] CT:DISCOVERY (A1BG.Homo_sapiens.filter2)  [ 60%] 3 of 5
+[-        ] CT:CONCAT_DISCOVERY                       -
+[-        ] CT:CONCAT_BACKGROUND                      -
+[-        ] CT:RESAMPLE                               -
+[-        ] CT:CONCAT_RESAMPLE                        -
+[-        ] CT:BOOTSTRAP                              -
+[-        ] CT:CONCAT_BOOTSTRAP                       -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+executor >  local (5)
+[a2/b2dd2a] CT:DISCOVERY (A2M.Homo_sapiens.filter2)   [ 80%] 4 of 5
+[-        ] CT:CONCAT_DISCOVERY                       -
+[-        ] CT:CONCAT_BACKGROUND                      -
+[-        ] CT:RESAMPLE                               -
+[-        ] CT:CONCAT_RESAMPLE                        -
+[-        ] CT:BOOTSTRAP                              -
+[-        ] CT:CONCAT_BOOTSTRAP                       -
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+executor >  local (5)
+[5a/4eb82e] CT:DISCOVERY (BRCA1.Homo_sapiens.filter2) [100%] 5 of 5 ✔
+[-        ] CT:CONCAT_DISCOVERY                       [  0%] 0 of 1
+[-        ] CT:CONCAT_BACKGROUND                      -
+[-        ] CT:RESAMPLE                               -
+[-        ] CT:CONCAT_RESAMPLE                        -
+[-        ] CT:BOOTSTRAP                              -
+[-        ] CT:CONCAT_BOOTSTRAP                       -
+ERROR ~ Execution aborted due to an unexpected error
+
+ -- Check '.nextflow.log' file for details
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/2mYkBdnqUfCPLB
+executor >  local (6)
+[5a/4eb82e] CT:DISCOVERY (BRCA1.Homo_sapiens.filter2)             [100%] 5 of 5 ✔
+[13/dde8df] CT:CONCAT_DISCOVERY (Concatenating discovery outputs) [  0%] 0 of 1
+[-        ] CT:CONCAT_BACKGROUND                                  [  0%] 0 of 1
+[-        ] CT:RESAMPLE                                           -
+[-        ] CT:CONCAT_RESAMPLE                                    -
+[-        ] CT:BOOTSTRAP                                          -
+[-        ] CT:CONCAT_BOOTSTRAP                                   -
+WARN: Killing running tasks (1)
+ERROR ~ Execution aborted due to an unexpected error
+
+ -- Check '.nextflow.log' file for details
+WARN: Failed to render execution report -- see the log file for details
+WARN: Failed to render execution timeline -- see the log file for details
+WARN: Failed to render execution report -- see the log file for details
+WARN: Failed to render execution timeline -- see the log file for details
+

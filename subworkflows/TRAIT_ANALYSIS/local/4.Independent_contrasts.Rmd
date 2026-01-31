@@ -185,7 +185,7 @@ gen_traitfiles <- function(df) {
 traits_res <- gen_traitfiles(selected_pairs)
 
 # Save trait files
-trait_path <- file.path(traitfile_dir, trait)
+trait_path <- file.path(traitfile_dir)
 createDir(trait_path)
 write.table(  
   traits_res, 
@@ -211,7 +211,7 @@ bootstrap_traitfile <- trait_df %>%
   dplyr::select(species, trait) 
 
 # Save malignant traitfile
-boot_path <- file.path(bootstrap_traitfile_dir, trait)
+boot_path <- file.path(bootstrap_traitfile_dir)
 createDir(boot_path)
 write.table(
   bootstrap_traitfile, 

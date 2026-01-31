@@ -37,7 +37,8 @@ process RESAMPLE {
 
     input:
     path nw_tree
-    path trait_val
+    file caas_config
+    file trait_val
 
     output:
     path("${nw_tree.baseName}.resampled.output/")
@@ -52,7 +53,7 @@ process RESAMPLE {
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
-        ${params.caas_config} \\
+        ${caas_config} \\
         ${params.cycles} \\
         ${params.perm_strategy} \\
         ${trait_val} \\
@@ -67,7 +68,7 @@ process RESAMPLE {
         Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
         ${nw_tree} \\
-        ${params.caas_config} \\
+        ${caas_config} \\
         ${params.cycles} \\
         ${params.perm_strategy} \\
         ${trait_val} \\

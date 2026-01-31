@@ -32,12 +32,16 @@
 include { DISCOVERY } from "${baseDir}/subworkflows/CT/ct_discovery"
 include { RESAMPLE } from "${baseDir}/subworkflows/CT/ct_resample"
 include { BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_bootstrap"
-include { CONCAT_DISCOVERY; CONCAT_RESAMPLE; CONCAT_BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_concat"
-
+include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE; CONCAT_BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_concat"
 
 // Main workflow
 
 workflow CT {
+    take:
+        trait_file_in
+        bootstrap_trait_file_in
+        tree_file_in
+    main:
     if (params.ct_tool) {
 
         def toolsToRun = params.ct_tool.split(',')
@@ -49,8 +53,10 @@ workflow CT {
                 .map { file -> tuple(file.baseName, file) }
 
         // Initialize variables
+        def trait_file_out
+        def bootstrap_trait_file_out
+
         def discovery_out = Channel.empty()
-        def discovery_done = Channel.value(true)
         // resample_out may be a directory (new default) or a legacy single file when running bootstrap only
         def resample_out = Channel.empty()
         if (params.resample_out) {
@@ -63,35 +69,68 @@ workflow CT {
         }
         def bootstrap_out
 
+        if (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) {
+            log.info "Using contrast selection output for CT analyses."
+            trait_file_out = trait_file_in
+            trait_val = bootstrap_trait_file_in
+            tree_file_out = tree_file_in
+        } else {
+            log.info "No contrast selection output provided for CT analyses."
+            assert params.caas_config : "CT workflow requires --caas_config."
+            trait_file_out = file(params.caas_config)
+            if (toolsToRun.contains('resample') || toolsToRun.contains('bootstrap')) {
+                if (params.traitvalues) {
+                    trait_val = file(params.traitvalues)
+                    tree_file_out = file(params.tree)
+                }
+            }
+        }
+
         if (toolsToRun.contains('discovery')) {
-            discovery_out = DISCOVERY(align_tuple)
-            discovery_done = discovery_out.collect()
+            discovery_out = DISCOVERY(align_tuple, trait_file_out)
             
-            // Concatenate all discovery outputs from the published directory
-            // Wait for all DISCOVERY processes to complete, then collect from publishDir
-            CONCAT_DISCOVERY(
-                discovery_done.map { "${params.outdir}/discovery" }
-            )
+            // Concatenate discovery outputs - collect actual files for staging
+            discovery_out.discovery_out
+                .map { id, file -> file }
+                .collect()
+                .ifEmpty([])
+                .set { discovery_files_to_concat }
+            CONCAT_DISCOVERY(discovery_files_to_concat)
+            
+            // Concatenate background outputs - collect actual files for staging
+            discovery_out.background_out
+                .collect()
+                .ifEmpty([])
+                .set { background_files_to_concat }
+            CONCAT_BACKGROUND(background_files_to_concat)
         }
         if (toolsToRun.contains('resample')) {
             // Define the tree file channel
-            nw_tree = discovery_done.map { file(params.tree) }
-            trait_val = discovery_done.map { file(params.traitvalues) }
+            def resample_trigger = toolsToRun.contains('discovery')
+                ? discovery_out.discovery_out.ifEmpty { Channel.value(null) }.collect()
+                : Channel.value(true)
 
-            resample_out = RESAMPLE(nw_tree, trait_val)
+            // Handle channels differently based on whether they come from contrast_selection
+            if (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) {
+                // tree_file_out, trait_file_out, and trait_val are already channels from CONTRAST_SELECTION
+                nw_tree = tree_file_out
+                caas_config = trait_file_out
+                trait_values = trait_val
+            } else {
+                // tree_file_out, trait_file_out, and trait_val are file objects that need to be channelized
+                nw_tree = resample_trigger.map { tree_file_out }
+                caas_config = resample_trigger.map { trait_file_out }
+                trait_values = resample_trigger.map { trait_val }
+            }
+            resample_out = RESAMPLE(nw_tree, caas_config, trait_values)
             
-            // Concatenate all resample outputs from the published directory
-            // The resample output is a directory, so we need to look inside it
-            CONCAT_RESAMPLE(
-                resample_out.map { "${params.outdir}/resample/${it.name}" }
-            )
+            // Concatenate all resample outputs - pass directory for staging
+            CONCAT_RESAMPLE(resample_out)
         }
         if (toolsToRun.contains('bootstrap')) {
             if (toolsToRun.contains('discovery')) {
                 align_with_discovery = align_tuple
-                        .join(discovery_out)
-                        .map { row -> tuple(row[0], row[1], row[2]) }
-                        .combine(discovery_done)
+                        .join(discovery_out.discovery_out)
                         .map { row -> tuple(row[0], row[1], row[2]) }
             } else if (params.discovery_out && params.discovery_out != "none") {
                 def discovery_path = file(params.discovery_out)
@@ -118,15 +157,15 @@ workflow CT {
                     .combine(resample_out)
                     .map { row -> tuple(row[0], row[1], row[2] ?: [], row[3]) }
 
-            bootstrap_out = BOOTSTRAP(bootstrap_in)
+            bootstrap_out = BOOTSTRAP(bootstrap_in, trait_file_out)
             
-            // Concatenate all bootstrap outputs from the published directory
-            def bootstrap_done = bootstrap_out.bootstrap_out.ifEmpty { Channel.value(null) }.collect()
-            // If discovery was run, ensure CONCAT_BOOTSTRAP waits for discovery completion too
-            def concat_trigger = toolsToRun.contains('discovery') ? 
-                bootstrap_done.combine(discovery_done).map { "${params.outdir}/bootstrap" } :
-                bootstrap_done.map { "${params.outdir}/bootstrap" }
-            CONCAT_BOOTSTRAP(concat_trigger)
+            // Concatenate all bootstrap outputs - collect actual files for staging
+            bootstrap_out.bootstrap_out
+                .map { id, file -> file }
+                .collect()
+                .ifEmpty([])
+                .set { bootstrap_files }
+            CONCAT_BOOTSTRAP(bootstrap_files)
         }
     }
 }
