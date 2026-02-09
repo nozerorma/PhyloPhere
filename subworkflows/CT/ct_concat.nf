@@ -68,6 +68,7 @@ process CONCAT_BACKGROUND {
 
     output:
     path("background.output"), emit: background_concat
+    path("background_genes.output"), emit: background_genes
 
     script:
     """
@@ -91,6 +92,7 @@ process CONCAT_BACKGROUND {
     if [ \${#background_files[@]} -eq 0 ]; then
         echo "WARNING: No background files found - creating header-only file"
         echo "Gene\tPosition" > background.output
+        touch background_genes.output
         exit 0
     fi
 
@@ -105,6 +107,12 @@ process CONCAT_BACKGROUND {
     echo "Final background file line count: \$(wc -l < background.output)"
     echo "Final file preview:"
     head -10 background.output
+    
+    # Generate background_genes.output: unique gene list where Position is not empty
+    echo ""
+    echo "Generating background_genes.output..."
+    awk -F'\t' 'NF >= 2 && \$2 != "" && \$2 != "Position" {print \$1}' background.output | sort -u > background_genes.output
+    echo "Unique genes with positions: \$(wc -l < background_genes.output)"
     """
 }
 
@@ -196,7 +204,7 @@ process CONCAT_BOOTSTRAP {
     # Check if we have any files
     if [ \${#bootstrap_files[@]} -eq 0 ]; then
         echo "WARNING: No bootstrap files found - creating header-only file"
-        echo "Gene\tPosition\tCount\tProportion" > bootstrap.tab
+        echo "Gene@Position\tCount\tTotal\tProportion" > bootstrap.tab
         exit 0
     fi
     

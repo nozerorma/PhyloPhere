@@ -1,0 +1,2717 @@
+---
+title: "CAAS Post-Processing"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# CAAS Post-Processing and Declustering Analysis
+
+This script processes CAAS (Context-Aware Amino Acid Substitutions) discovery results to remove false positives caused by high-density position clusters ("trains") and statistical outliers. The workflow includes gap filtering, outlier detection, cluster identification, and generation of cleaned CAAS datasets for downstream analysis.
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+# Source commons.R for setup
+source("./functions/commons.R")
+setup_rmd()
+
+# Load additional libraries
+library(stringr)
+library(purrr)
+library(tibble)
+library(patchwork)
+library(scales)
+library(ggplot2)
+library(forcats)
+library(ggvenn)
+library(patchwork)
+library(knitr)
+library(kableExtra)
+library(paletteer)
+
+# Define CAAS-specific directories
+caas_results_dir <- file.path(resultsDir, "2.CAAS/2.Results")
+caas_postproc_dir <- file.path(resultsDir, "2.CAAS/3.CAAS_postproc")
+
+# Consistent colorblind-friendly palette used across plots
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "mauve", "gray"
+)
+
+category_palette <- c(
+  "Normal" = tableau_10[["gray"]],
+  "Dubious" = tableau_10[["blue"]],
+  "Extreme" = tableau_10[["vermillion"]],
+  "Both" = tableau_10[["reddish_purple"]]
+)
+
+category_levels <- c("Extreme", "Dubious", "Both", "Normal")
+
+removal_palette <- c(
+  "Removed by window" = tableau_10[["orange"]],
+  "Removed (Extreme)" = tableau_10[["vermillion"]],
+  "Removed (Dubious cluster)" = tableau_10[["blue"]]
+)
+
+trait_palette <- c(
+  "malignant_prevalence" = tableau_10[["vermillion"]],
+  "neoplasia_prevalence" = tableau_10[["bluish_green"]]
+)
+
+removed_category_palette <- c(
+  "Extreme" = category_palette[["Extreme"]],
+  "Dubious" = category_palette[["Dubious"]],
+  "Other" = category_palette[["Normal"]]
+)
+
+manhattan_color_levels <- c(names(category_palette), names(removal_palette))
+manhattan_color_map <- unname(c(category_palette, removal_palette))
+names(manhattan_color_map) <- manhattan_color_levels
+
+category_shapes <- c(
+  "Normal" = 16,
+  "Dubious" = 16,
+  "Extreme" = 16,
+  "Both" = 17
+)
+removal_shapes <- c(
+  "Removed by window" = 4,
+  "Removed (Extreme)" = 4,
+  "Removed (Dubious cluster)" = 4
+)
+shape_levels <- c(names(category_shapes), names(removal_shapes))
+shape_map <- c(category_shapes, removal_shapes)
+
+min_density_display <- 0.008
+```
+
+## 1. Gap Filtering and Gene Length Annotation
+
+This section loads CAAS discovery results, filters out positions with gaps in foreground or background, and annotates genes with their alignment lengths.
+
+```{r gap_filtering, message=FALSE, warning=FALSE}
+# Load CAAS discovery files
+caas_files <- list.files(
+  path = caas_results_dir,
+  pattern = "\\.tab.caas$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+caas_files_discovery <- caas_files[grepl("/discovery/", caas_files, ignore.case = TRUE)]
+
+# Read and organize CAAS files by trait
+setup_dfs <- lapply(caas_files_discovery, read_tsv)
+names(setup_dfs) <- gsub("_sp.tab.caas", "", basename(caas_files_discovery))
+
+# Filter positions with no gaps (GFG == 0 & GBG == 0)
+setup_dfs <- lapply(setup_dfs, function(df) {
+  df %>% filter(GFG == 0 & GBG == 0)
+})
+
+# Load gene lengths from alignment metadata
+gene_length <- read_tsv(
+  file.path(dataDir, "2.Alignments/gene_lengths.tab"),
+  col_names = c("Gene_file", "Length")
+) %>%
+  extract(
+    col = Gene_file,
+    into = c("Gene", "Map", "Map2"),
+    regex = "^([^.]+)\\.([^.]+)\\.([^\\.]+)",
+    remove = FALSE
+  ) %>%
+  mutate(Map = if_else(str_detect(Map, "^[0-9]+$"), Map2, Map)) %>%
+  select(Gene, Length, Map)
+
+# Annotate CAAS with gene lengths and create GenePos identifier
+setup_dfs <- lapply(setup_dfs, function(df) {
+  df %>%
+    left_join(gene_length, by = "Gene") %>%
+    mutate(
+      Position = as.integer(Position),
+      Length = as.integer(Length),
+      GenePos = paste(Gene, Position, sep = "@")
+    )
+})
+
+cat("Loaded", length(setup_dfs), "CAAS discovery files\n")
+cat("Total CAAS positions (gap-filtered):", sum(sapply(setup_dfs, nrow)), "\n")
+```
+
+## 2. Resampling Distribution Analysis
+
+This section analyzes how species and families are distributed across CAAS discovery resampling replicates, ensuring balanced representation of high and low trait extremes across phylogenetic groups.
+
+```{r resampling_analysis, fig.height=15, fig.width=15, message=FALSE, warning=FALSE, dev='png', dpi=320}
+# Load resampling files
+resamp_files <- list.files(
+  path = caas_results_dir,
+  pattern = "\\.resample$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+# Read resampling data
+resamp_dfs <- lapply(resamp_files, read_tsv, col_names = c("Round", "Top", "Bottom"))
+names(resamp_dfs) <- gsub("\\.resample$", "", basename(resamp_files))
+
+# Load family taxonomy
+family_data <- read_tsv(file.path(dataDir, "5.Phylogeny/taxid_species_family.tsv"))
+
+# Define phylogenetic ordering
+ordered_species <- pruned_tree$tip.label
+ordered_families <- family_data %>%
+  filter(species %in% ordered_species) %>%
+  mutate(family = as.character(family)) %>%
+  distinct(species, family) %>%
+  arrange(match(species, ordered_species)) %>%
+  pull(family) %>%
+  unique()
+
+# Process resampling data: split pairs and count occurrences
+resamp_dfs_long <- lapply(resamp_dfs, function(df) {
+  df %>%
+    separate(Top, into = c("Top1", "Top2"), sep = ",") %>%
+    separate(Bottom, into = c("Bottom1", "Bottom2"), sep = ",") %>%
+    pivot_longer(
+      cols = c(Top1, Top2, Bottom1, Bottom2),
+      names_to = "Group", 
+      values_to = "Species"
+    ) %>%
+    mutate(Group = if_else(Group %in% c("Top1", "Top2"), "Top", "Bottom")) %>%
+    group_by(Species, Group) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    pivot_wider(names_from = Group, values_from = n, values_fill = 0) %>%
+    left_join(family_data, by = c("Species" = "species")) %>%
+    select(-rank, -name_class) %>%
+    mutate(Species = factor(Species, levels = ordered_species))
+})
+
+# Aggregate by family
+resamp_df_fam <- lapply(resamp_dfs_long, function(df) {
+  df %>%
+    group_by(family) %>%
+    summarise(
+      n_Top = sum(Top, na.rm = TRUE),
+      n_Bottom = sum(Bottom, na.rm = TRUE),
+      .groups = "drop"
+    )
+})
+
+# Prepare species-level plot data
+species_long <- imap_dfr(resamp_dfs_long, ~ .x %>%
+  select(Species, Top, Bottom) %>%
+  pivot_longer(c(Top, Bottom), names_to = "Group", values_to = "count") %>%
+  mutate(dataset = .y)
+) %>%
+  mutate(
+    trait = case_when(
+      str_starts(dataset, "malignant_prevalence") ~ "Malignant prevalence",
+      str_starts(dataset, "neoplasia_prevalence") ~ "Neoplasia prevalence",
+      TRUE ~ "Unknown"
+    ),
+    replicate = as.integer(str_extract(str_remove(dataset, "\\.tab$"), "\\d+$")),
+    Group = factor(Group, levels = c("Top", "Bottom")),
+    grp_rep = factor(
+      paste0(Group, " h", replicate),
+      levels = c("Top h1", "Top h2", "Top h3", 
+                 "Bottom h1", "Bottom h2", "Bottom h3")
+    ),
+    Species_plot = factor(Species, levels = ordered_species)
+  )
+
+# Species-level plot
+p_species <- ggplot(
+  species_long, 
+  aes(x = Species_plot, y = count, fill = grp_rep, group = grp_rep)
+) +
+  geom_col(
+    position = position_dodge2(preserve = "single", width = 0.8, reverse = TRUE), 
+    width = 0.7
+  ) +
+  coord_flip() +
+  facet_wrap(~ trait, ncol = 1, scales = "free_y") +
+  labs(
+    x = NULL, 
+    y = "Resampling Count",
+    fill = "Species–Hypothesis",
+    title = "Resampling Distribution: Species Across Hypotheses"
+  ) +
+  scale_fill_paletteer_d("ggthemes::Tableau_10") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right")
+
+# Prepare family-level plot data
+family_long <- imap_dfr(resamp_df_fam, ~ .x %>%
+  rename(Top = n_Top, Bottom = n_Bottom) %>%
+  pivot_longer(c(Top, Bottom), names_to = "Group", values_to = "count") %>%
+  mutate(dataset = .y)
+) %>%
+  mutate(
+    trait = case_when(
+      str_starts(dataset, "malignant_prevalence") ~ "Malignant prevalence",
+      str_starts(dataset, "neoplasia_prevalence") ~ "Neoplasia prevalence",
+      TRUE ~ "Unknown"
+    ),
+    replicate = as.integer(str_extract(str_remove(dataset, "\\.tab$"), "\\d+$")),
+    Group = factor(Group, levels = c("Top", "Bottom")),
+    grp_rep = factor(
+      paste0(Group, " h", replicate),
+      levels = c("Top h1", "Top h2", "Top h3", 
+                 "Bottom h1", "Bottom h2", "Bottom h3")
+    ),
+    family_plot = factor(family, levels = ordered_families)
+  )
+
+# Family-level plot
+p_family <- ggplot(
+  family_long,
+  aes(x = family_plot, y = count, fill = grp_rep, group = grp_rep)
+) +
+  geom_col(
+    position = position_dodge2(preserve = "single", width = 0.8, reverse = TRUE),
+    width = 0.7
+  ) +
+  coord_flip() +
+  facet_wrap(~ trait, ncol = 1, scales = "free_y") +
+  labs(
+    x = NULL, 
+    y = "Resampling Count",
+    fill = "Family–Hypothesis",
+    title = "Resampling Distribution: Families Across Hypotheses"
+  ) +
+  scale_fill_paletteer_d("ggthemes::Tableau_10") +
+  theme_minimal(base_size = 15) +
+  theme(legend.position = "right")
+
+# Save plots
+resampling_dir <- file.path(caas_postproc_dir, "0.Resampling")
+createDir(resampling_dir)
+
+ggsave(
+  filename = file.path(resampling_dir, "resampling_species.png"),
+  plot = p_species, 
+  width = 15, 
+  height = 15, 
+  dpi = 320, 
+  dev = "png"
+)
+
+ggsave(
+  filename = file.path(resampling_dir, "resampling_family.png"),
+  plot = p_family, 
+  width = 15, 
+  height = 15, 
+  dpi = 320, 
+  dev = "png"
+)
+
+# Display plots
+p_species
+p_family
+
+cat("\nResampling analysis complete\n")
+cat("Species analyzed:", length(unique(species_long$Species)), "\n")
+cat("Families analyzed:", length(unique(family_long$family)), "\n")
+```
+
+## 3. Outlier Gene Detection
+
+This section identifies genes with unusually high CAAS counts using two methods: IQR-based extreme outliers (Tukey's fences at 3×IQR) and top 1% by CAAS density (CAAS per gene length).
+
+```{r outlier_detection, message=FALSE, warning=FALSE, fig.height=12, fig.width=10, dev='png', dpi=320}
+# Load genomic coordinates (needed later for Manhattan plot and chromosomal analysis)
+genomic_info <- read_tsv(
+  file.path(dataDir, "2.Alignments/ensembl_genes.output"),
+  show_col_types = FALSE
+)
+
+# Separate malignant and neoplasia datasets
+malignant_caas <- setup_dfs[grepl("malignant", names(setup_dfs))]
+neoplasia_caas <- setup_dfs[grepl("neoplasia", names(setup_dfs))]
+
+# Merge all replicates per trait
+malignant_df <- bind_rows(malignant_caas, .id = "Trait")
+neoplasia_df <- bind_rows(neoplasia_caas, .id = "Trait")
+
+# Summarize CAAS counts and density by gene
+summarize_genes <- function(df) {
+  df %>%
+    # Group by Trait, Gene, Position to get unique positions only
+    group_by(Trait, Gene, Position) %>%
+    slice(1) %>%  # Keep only one occurrence of each position
+    ungroup() %>%
+    group_by(Gene, Length) %>%
+    summarise(n_CAAS = n(), .groups = "drop") %>%
+    mutate(
+      n_CAAS = as.integer(n_CAAS),
+      n_CAAS_per_length = (n_CAAS / Length) * 100
+    )
+}
+
+malignant_distribution <- summarize_genes(malignant_df) %>% 
+  mutate(Trait = "malignant_prevalence")
+
+neoplasia_distribution <- summarize_genes(neoplasia_df) %>% 
+  mutate(Trait = "neoplasia_prevalence")
+
+df_all <- bind_rows(malignant_distribution, neoplasia_distribution)
+
+# Calculate IQR-based extreme outlier thresholds (3×IQR)
+percentiles_df <- df_all %>%
+  group_by(Trait) %>%
+  summarise(
+    Q1 = quantile(n_CAAS, 0.25),
+    Q3 = quantile(n_CAAS, 0.75),
+    IQR = Q3 - Q1,
+    iqr_high = Q3 + 3 * IQR,
+    .groups = "drop"
+  )
+
+# Calculate top 1% threshold by CAAS density
+top_1_percent_threshold <- df_all %>%
+  group_by(Trait) %>%
+  summarise(top_1_percent = quantile(n_CAAS_per_length, 0.99), .groups = "drop")
+
+# Annotate genes as Extreme (top 1% density) and/or Dubious (IQR outlier)
+df_all_annotated <- df_all %>%
+  left_join(top_1_percent_threshold, by = "Trait") %>%
+  left_join(percentiles_df, by = "Trait") %>%
+  mutate(
+    Extreme = n_CAAS_per_length > top_1_percent,
+    Dubious = n_CAAS > iqr_high
+  ) %>%
+  select(Trait, Gene, Length, n_CAAS, n_CAAS_per_length, Extreme, Dubious)
+
+# Full-scale CAAS count distribution plot
+p_full <- ggplot(df_all, aes(x = n_CAAS)) +
+  geom_histogram(binwidth = 0.05, color = "black", fill = "grey80", alpha = 0.8) +
+  geom_vline(
+    data = percentiles_df, 
+    aes(xintercept = iqr_high), 
+    color = tableau_10[["green"]], 
+    linetype = "solid", 
+    linewidth = 1
+  ) +
+  scale_x_log10(breaks = c(1, 2, 5, 10, 20, 50, 100, 200)) +
+  facet_wrap(~Trait, scales = "free_y") +
+  labs(
+    title = "CAAS Count Distribution\nIQR Extreme-Outlier Threshold (Dubious Genes)",
+    x = "CAAS Count (log scale)",
+    y = "Gene Count"
+  ) +
+  theme_minimal()
+
+# Zoomed view focusing on typical range
+p_zoom_caas <- p_full + 
+  coord_cartesian(ylim = c(0, 100)) +
+  labs(title = "Zoomed View (y ≤ 100)")
+
+# CAAS density distribution plot
+p_density <- ggplot(df_all_annotated, aes(x = n_CAAS_per_length)) +
+  geom_histogram(binwidth = 0.05, color = "black", fill = "grey80", alpha = 0.8) +
+  geom_vline(
+    data = top_1_percent_threshold, 
+    aes(xintercept = top_1_percent), 
+    color = tableau_10[["vermillion"]], 
+    linetype = "dashed", 
+    linewidth = 1
+  ) +
+  scale_x_log10(breaks = c(0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100)) +
+  facet_wrap(~Trait, scales = "free_y") +
+  labs(
+    title = "CAAS Density Distribution\nTop 1% Threshold (Extreme Genes)",
+    x = "CAAS per Gene Length (%, log scale)",
+    y = "Gene Count"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Zoomed density view
+p_zoom_density <- p_density + 
+  coord_cartesian(ylim = c(0, 50)) +
+  labs(title = "Zoomed View (y ≤ 50)")
+
+# Combined plot layout
+(p_full | p_density) / (p_zoom_caas | p_zoom_density)
+
+# Save outputs
+outliers_dir <- file.path(caas_postproc_dir, "3.Outliers")
+createDir(outliers_dir)
+
+write_tsv(df_all_annotated, file.path(outliers_dir, "caas_outliers.tsv"))
+
+ggsave(
+  filename = file.path(outliers_dir, "caas_outliers_combined.png"),
+  plot = (p_full | p_density) / (p_zoom_caas | p_zoom_density),
+  width = 14, 
+  height = 12, 
+  dpi = 320, 
+  dev = "png"
+)
+
+cat("\nOutlier summary:\n")
+cat("Extreme genes (top 1% density):", sum(df_all_annotated$Extreme), "\n")
+cat("Dubious genes (IQR outliers):", sum(df_all_annotated$Dubious), "\n")
+cat("Both Extreme and Dubious:", sum(df_all_annotated$Extreme & df_all_annotated$Dubious), "\n")
+```
+
+## 4. CAAS Cluster Analysis
+
+This section loads cluster detection results from the Python script (`filter_caas_clusters-param.py`) and evaluates the impact of different parameter combinations on CAAS filtering.
+
+```{r cluster_analysis, message=FALSE, warning=FALSE, fig.height=6, fig.width=10, dev='png', dpi=320}
+# Load cluster filtering results
+cluster_dir <- file.path(caas_postproc_dir, "2.NoTrains")
+
+cluster_files <- list.files(
+  path = cluster_dir,
+  pattern = "\\.tsv$",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+# Read cluster files
+cluster_dfs <- lapply(cluster_files, read_tsv)
+names(cluster_dfs) <- gsub("\\.tsv$", "", basename(cluster_files))
+
+# Remove summary files
+cluster_dfs <- cluster_dfs[!grepl("discarded_summary", names(cluster_dfs))]
+
+# Summarize discarded CAAS by parameter combination
+discarded_summary <- data.frame(
+  Approach = names(cluster_dfs),
+  Discarded_CAAS = sapply(cluster_dfs, function(df) {
+    sum(df$ClusteringFlag == "Discarded", na.rm = TRUE)
+  }),
+  minlength = as.integer(gsub(".*minlen(\\d+).*", "\\1", names(cluster_dfs))),
+  maxcaas = as.integer(gsub(".*maxcaas(\\d+).*", "\\1", names(cluster_dfs)))
+) %>%
+  as_tibble() %>%
+  mutate(Trait = sub("^(([^_]+)_([^_]+))_.*$", "\\1", Approach)) %>%
+  select(Trait, Discarded_CAAS, minlength, maxcaas) %>%
+  arrange(Trait, minlength, maxcaas) %>%
+  # Filter to only malignant_prevalence and neoplasia_prevalence
+  filter(Trait %in% c("malignant_prevalence", "neoplasia_prevalence"))
+
+# Plot parameter sweep results
+p_param_sweep <- ggplot(
+  discarded_summary, 
+  aes(x = factor(minlength), y = Discarded_CAAS, fill = factor(maxcaas))
+) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(y = Discarded_CAAS / 2, label = Discarded_CAAS),
+    position = position_dodge(width = 0.9),
+    vjust = 0.5, 
+    size = 3.5, 
+    color = "black", 
+    fontface = "bold", 
+    angle = 90
+  ) +
+  facet_wrap(~ Trait, scales = "free_x") +
+  scale_fill_paletteer_d("ggthemes::Tableau_10") +
+  labs(
+    title = "CAAS Cluster Filtering: Discarded Positions by Parameter Combination",
+    x = "Minimum Cluster Length",
+    y = "Number of Discarded CAAS",
+    fill = "Max Density\n(%)"
+  ) +
+  theme_minimal()
+
+p_param_sweep
+
+# Save results
+ggsave(
+  filename = file.path(cluster_dir, "parameter_sweep_summary.png"),
+  plot = p_param_sweep,
+  width = 10, 
+  height = 6, 
+  dpi = 320, 
+  dev = "png"
+)
+
+write_tsv(discarded_summary, file.path(cluster_dir, "discarded_summary.tsv"))
+
+cat("\nParameter sweep summary saved\n")
+```
+
+### 4.1. Parameter Comparison Analysis: 2×50 through 4×70
+
+This section performs an in-depth comparison of the primary parameter combinations (span 2–4 × density 50–70%) to understand their overlap, unique filtering behavior, and biological implications.
+
+**Strictness guide (approximate, most to least strict):** 2×60 → 3×60 → 4×60 → 2×70 → 3×70 → 4×70.
+
+- **2×60 / 2×70** catch short trains (span ≥2) and test progressively lenient density thresholds.
+- **3×60 / 3×70** require longer runs (span ≥3) but share the same density grid.
+- **4×60 / 4×70** preserve at least 3-position patterns before discarding and are the most permissive.
+
+```{r param_comparison, message=FALSE, warning=FALSE, fig.height=14, fig.width=18, dev='png', dpi=320}
+# Parameter combinations tracked downstream (minlen × density)
+param_names <- c(
+  "2x60" = "minlen2.*maxcaas60",
+  "2x70" = "minlen2.*maxcaas70",
+  "3x60" = "minlen3.*maxcaas60",
+  "3x70" = "minlen3.*maxcaas70",
+  "4x60" = "minlen4.*maxcaas60",
+  "4x70" = "minlen4.*maxcaas70"
+)
+param_order <- names(param_names)
+param_cols <- param_order
+
+# Define function to analyze parameters for a specific trait
+analyze_trait_params <- function(trait_name, trait_pattern) {
+  cat(sprintf("\n\n========================================\n"))
+  cat(sprintf("ANALYZING TRAIT: %s\n", toupper(trait_name)))
+  cat(sprintf("========================================\n\n"))
+  
+  # Extract discarded positions for each parameter set
+  param_sets <- lapply(names(param_names), function(pname) {
+    pattern <- param_names[[pname]]
+    matching_dfs <- cluster_dfs[grepl(pattern, names(cluster_dfs)) &
+                                 grepl(trait_pattern, names(cluster_dfs))]
+    
+    if (length(matching_dfs) == 0) {
+      warning(sprintf("No files found for %s in %s", pname, trait_name))
+      return(tibble(GenePos = character(), Gene = character(), Position = integer()))
+    }
+    
+    bind_rows(matching_dfs, .id = "source") %>%
+      filter(ClusteringFlag == "Discarded") %>%
+      mutate(GenePos = paste(Gene, Position, sep = "@")) %>%
+      select(GenePos, Gene, Position) %>%
+      distinct() %>%
+      mutate(param = pname) %>%
+      arrange(Gene, Position)
+  })
+  names(param_sets) <- names(param_names)
+  
+  # Counts
+  param_counts <- sapply(param_sets, function(df) nrow(df))
+  cat(sprintf("=== UNIQUE DISCARDED POSITIONS (%s) ===\n", trait_name))
+  print(data.frame(Parameter = names(param_counts), Count = param_counts))
+  
+  all_positions <- unique(unlist(lapply(param_sets, function(df) df$GenePos)))
+  if (length(all_positions) == 0) {
+    cat("No positions found. Skipping...\n")
+    return(NULL)
+  }
+  
+  # Membership matrix
+  membership_mat <- sapply(names(param_names), function(pname) {
+    all_positions %in% param_sets[[pname]]$GenePos
+  })
+  colnames(membership_mat) <- names(param_names)
+  
+  # Containment analysis
+  containment_analysis <- map_dfr(param_order, function(p1) {
+    map_dfr(setdiff(param_order, p1), function(p2) {
+      set1 <- param_sets[[p1]]$GenePos
+      set2 <- param_sets[[p2]]$GenePos
+      overlap <- length(intersect(set1, set2))
+      p1_in_p2 <- if(length(set2) > 0) overlap / length(set2) else 0
+      p2_in_p1 <- if(length(set1) > 0) overlap / length(set1) else 0
+      tibble(
+        Strict = p1, Loose = p2,
+        Overlap = overlap,
+        `%_Loose_in_Strict` = round(p2_in_p1 * 100, 1),
+        `%_Strict_in_Loose` = round(p1_in_p2 * 100, 1)
+      )
+    })
+  })
+  
+  # Best parameter (only consider parameters with positions)
+  params_with_positions <- param_order[param_counts[param_order] > 0]
+  catch_power <- map_dfr(params_with_positions, function(p1) {
+    others <- setdiff(params_with_positions, p1)
+    if (length(others) == 0) {
+      # Only one parameter with positions
+      coverage <- 100
+    } else {
+      coverage <- sapply(others, function(p2) {
+        if (length(param_sets[[p2]]$GenePos) == 0) return(NA)  # Should not happen
+        length(intersect(param_sets[[p1]]$GenePos, param_sets[[p2]]$GenePos)) /
+        length(param_sets[[p2]]$GenePos)
+      })
+      coverage <- coverage[!is.na(coverage)]  # Remove any NAs
+      if (length(coverage) == 0) {
+        coverage <- 0
+      }
+    }
+    tibble(
+      Parameter = p1,
+      Avg_Coverage = round(mean(coverage) * 100, 1),
+      Min_Coverage = round(min(coverage) * 100, 1)
+    )
+  }) %>% arrange(desc(Avg_Coverage))
+  
+  cat(sprintf("\n🏆 BEST PARAMETER: %s (%.1f%% coverage)\n", 
+              catch_power$Parameter[1], catch_power$Avg_Coverage[1]))
+  
+  # === PARAMETER COMPARISON PLOT ===
+  # Create bar plot showing discarded positions per parameter
+  param_plot_data <- data.frame(
+    Parameter = names(param_counts),
+    Discarded_Positions = param_counts
+  )
+
+  param_plot <- ggplot(param_plot_data, aes(x = reorder(Parameter, Discarded_Positions),
+                                           y = Discarded_Positions)) +
+    geom_col(fill = tableau_10[["blue"]], color = "black", size = 0.3, width = 0.7) +
+    geom_text(aes(label = Discarded_Positions), vjust = -0.5, size = 4, fontface = "bold") +
+    labs(title = sprintf("Parameter Comparison: %s", trait_name),
+         subtitle = "Discarded positions per cluster detection parameter",
+         x = "Parameter", y = "Discarded Positions") +
+    theme_minimal(base_size = 12) +
+    coord_flip() +
+    ylim(0, max(param_plot_data$Discarded_Positions) * 1.1)
+
+  # Save parameter comparison plot
+  param_filename <- file.path(cluster_dir, sprintf("parameter_comparison_%s.png",
+                                                   gsub("[^A-Za-z0-9]", "_", tolower(trait_name))))
+  ggsave(filename = param_filename, plot = param_plot,
+         width = 10, height = 6, dpi = 150)
+  cat(sprintf("✅ Parameter comparison plot saved: %s\n", param_filename))
+  
+  # === DETAILED PATTERNS (with MAXIMUM label space) ===
+  membership_df <- as_tibble(membership_mat) %>%
+    mutate(GenePos = all_positions) %>%
+    separate(GenePos, into = c("Gene", "Position"), sep = "@", remove = FALSE) %>%
+    mutate(Position = as.integer(Position))
+
+  # Dynamically build a readable pattern string and parameter count for each row
+  param_cols <- names(param_names)
+  membership_df <- membership_df %>%
+    mutate(
+      pattern = pmap_chr(across(all_of(param_cols)), function(...) {
+        vals <- c(...)
+        present <- param_cols[which(unlist(vals))]
+        if (length(present) == 0) return("None")
+        paste(present, collapse = "+")
+      }),
+      n_params = rowSums(across(all_of(param_cols)))
+    )
+
+  # Export positions that are unique to a single parameter (helpful for sensitivity checks)
+  counts_per_position <- rowSums(membership_mat)
+  unique_idx <- which(counts_per_position == 1)
+  unique_positions <- all_positions[unique_idx]
+  safe_trait_name <- gsub("[^A-Za-z0-9]", "_", tolower(trait_name))
+  export_dir <- file.path(cluster_dir, "parameter_comparison", safe_trait_name)
+  dir.create(export_dir, showWarnings = FALSE, recursive = TRUE)
+
+  if (length(unique_positions) > 0) {
+    unique_df <- tibble(GenePos = unique_positions) %>%
+      separate(GenePos, into = c("Gene", "Position"), sep = "@", remove = FALSE) %>%
+      mutate(Position = as.integer(Position),
+             OwnedBy = apply(membership_mat[unique_idx, , drop = FALSE], 1, function(r) param_cols[which(r)][1]))
+    write_tsv(unique_df, file.path(export_dir, "unique_positions.tsv"))
+  } else {
+    write_tsv(tibble(), file.path(export_dir, "unique_positions.tsv"))
+  }
+
+  # === Per-parameter removed-position category counts (Extreme/Dubious/Other) ===
+  gene_flags <- df_all_annotated %>% filter(Trait == trait_name) %>% select(Gene, Extreme, Dubious)
+  param_category_counts <- map_dfr(param_cols, function(pname) {
+    gp <- param_sets[[pname]]$GenePos
+    if (length(gp) == 0) {
+      tibble(Parameter = pname, category = c('Extreme','Dubious','Other'), n = 0)
+    } else {
+      dfp <- tibble(GenePos = gp) %>% separate(GenePos, into = c('Gene','Position'), sep = '@', remove = FALSE) %>%
+        left_join(gene_flags, by = 'Gene') %>%
+        mutate(category = case_when(Extreme ~ 'Extreme', Dubious ~ 'Dubious', TRUE ~ 'Other')) %>%
+        count(category) %>% mutate(Parameter = pname) %>%
+        right_join(tibble(category = c('Extreme','Dubious','Other')), by = 'category') %>%
+        mutate(Parameter = pname, n = replace_na(n, 0))
+      dfp %>% select(Parameter, category, n)
+    }
+  })
+
+  p_param_removed <- ggplot(param_category_counts, aes(x = Parameter, y = n, fill = category)) +
+    geom_col(position = 'stack', color = 'black', size = 0.2) +
+    scale_fill_manual(values = removed_category_palette) +
+    labs(title = 'Removed Positions by Filtering Parameter and Gene Category',
+         subtitle = sprintf('Counts of positions flagged as removed by each parameter (trait = %s)', trait_name),
+         x = 'Filtering Parameter', y = 'Number of Removed Positions', fill = 'Gene Category') +
+    theme_minimal(base_size = 12)
+
+  ggsave(filename = file.path(export_dir, sprintf('removed_positions_by_parameter_%s.png', safe_trait_name)),
+         plot = p_param_removed, width = 8, height = 5, dpi = 320)
+  
+  pattern_summary <- membership_df %>%
+    filter(pattern != "None") %>%
+    count(pattern, n_params, sort = TRUE) %>%
+    mutate(
+      percentage = round(100 * n / sum(n), 1),
+      label = sprintf("%d (%.0f%%)", n, percentage)
+    )
+  
+  # 🏷️ MAXIMUM LABEL SPACE BAR CHART
+  p_patterns <- ggplot(pattern_summary,
+                       aes(x = reorder(pattern, n), y = n, fill = factor(n_params))) +
+    geom_col(color = "black", size = 0.15, width = 0.85, alpha = 0.85) +
+    geom_text(aes(label = label),
+          hjust = -0.02,
+          size = 4.0,
+          fontface = "bold",
+          nudge_y = max(pattern_summary$n) * 0.03) +
+    coord_flip(clip = "off") +
+    scale_fill_paletteer_d("ggthemes::Tableau_10") +
+    labs(
+      title = "📊 Venn Regions",
+      subtitle = "Detailed intersection patterns"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = "bottom",
+      axis.text.y = element_text(size = 11, hjust = 1),
+      axis.title.y = element_blank(),
+      plot.title = element_text(size = 16, face = "bold"),
+      plot.subtitle = element_text(size = 12)
+    ) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.35)))
+  
+  # Compact coverage plot
+  p_coverage <- ggplot(catch_power, aes(x = reorder(Parameter, Avg_Coverage),
+                                        y = Avg_Coverage, fill = Parameter)) +
+    geom_col(color = "black", size = 0.5, width = 0.7) +
+    geom_text(aes(label = sprintf("%.1f%%", Avg_Coverage)),
+              vjust = 0.5, hjust = -0.05, size = 5.5, fontface = "bold") +
+    coord_flip() +
+    scale_fill_paletteer_d("ggthemes::Tableau_10")
+    labs(title = "🏆 Coverage Power", y = "Average Coverage (%)") +
+    theme_minimal(base_size = 17) +
+    theme(legend.position = "none")
+  
+  # Compact gene plot
+  gene_sets <- lapply(param_sets, function(df) unique(df$Gene))
+  genes_per_param <- map_dfr(param_order, function(pname) {
+    tibble(
+      Parameter = pname,
+      Total = length(gene_sets[[pname]]),
+      Unique = length(setdiff(gene_sets[[pname]], 
+                             unlist(gene_sets[setdiff(param_order, pname)])))
+    )
+  }) %>% mutate(Parameter = factor(Parameter, levels = param_order))
+  
+  p_genes <- ggplot(genes_per_param, aes(x = Parameter)) +
+    geom_col(aes(y = Total), fill = tableau_10[["blue"]], alpha = 0.8, width = 0.7) +
+    geom_col(aes(y = Unique), fill = tableau_10[["vermillion"]], width = 0.7, alpha = 0.8) +
+    geom_text(aes(y = Total, label = Total), vjust = 2.5, size = 4.5, fontface = "bold") +
+    geom_text(aes(y = Unique, label = Unique), vjust = 2.5, size = 4.5, color = "white", fontface = "bold") +
+    labs(title = "🧬 Genes", subtitle = "Blue=Total | Vermillion=Unique") +
+    theme_minimal(base_size = 17) +
+    theme(legend.position = "none", axis.text.x = element_text(angle = 45, hjust = 1, size = 12))
+  
+  # === SPATIAL CLUSTERING (Singlets, Doublets, etc.) ===
+  detect_runs <- function(positions) {
+    if (length(positions) == 0) return(integer(0))
+    positions <- sort(unique(positions))
+    if (length(positions) == 0) return(integer(0))
+    breaks <- c(0, which(diff(positions) > 1), length(positions))
+    return(diff(breaks))
+  }
+  
+  spatial_by_param <- membership_df %>%
+    pivot_longer(cols = all_of(names(param_names)), 
+                 names_to = "parameter", values_to = "discarded") %>%
+    filter(discarded) %>%
+    group_by(parameter, Gene) %>%
+    summarise(positions = list(Position), .groups = "drop") %>%
+    mutate(run_lengths = map(positions, detect_runs)) %>%
+    unnest(run_lengths, keep_empty = TRUE)
+  
+  spatial_summary <- spatial_by_param %>%
+    mutate(
+      cluster_type = case_when(
+        run_lengths == 1 ~ "Singlet (1)",
+        run_lengths == 2 ~ "Doublet (2)", 
+        run_lengths == 3 ~ "Triplet (3)",
+        run_lengths == 4 ~ "Quad (4)",
+        run_lengths == 5 ~ "Quint (5)",
+        run_lengths >= 6 ~ "6+ Long",
+        TRUE ~ "Other"
+      )
+    ) %>%
+    count(parameter, cluster_type) %>%
+    complete(parameter, cluster_type, fill = list(n = 0)) %>%
+    group_by(parameter) %>%
+    mutate(percentage = round(100 * n / sum(n), 1)) %>%
+    ungroup() %>%
+    mutate(parameter = factor(parameter, levels = param_order))
+  
+  p_spatial <- ggplot(spatial_summary, aes(x = parameter, y = percentage/100, fill = cluster_type)) +
+    geom_col(position = "fill", color = "black", size = 0.2) +
+    scale_fill_paletteer_d("ggthemes::Tableau_10") +
+    scale_y_continuous(labels = scales::percent) +
+    labs(title = "🔗 Spatial Clustering", 
+         subtitle = "Singlets/Doublets/Triplets removed per parameter",
+         fill = "Cluster Type") +
+    theme_minimal(base_size = 17) +
+    theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
+  
+  # === GG-VENN PANELS ===
+  get_param_set <- function(pname) {
+    if (is.null(param_sets[[pname]])) return(character(0))
+    param_sets[[pname]]$GenePos
+  }
+  union_sets <- function(keys) {
+    unique(unlist(lapply(keys, get_param_set), use.names = FALSE))
+  }
+  venn_colors_three <- c(tableau_10["blue"], tableau_10["bluish_green"], tableau_10["vermillion"])
+  venn_colors_two <- c(tableau_10["blue"], tableau_10["vermillion"])
+  venn_theme <- theme(plot.title = element_text(size = 12, face = "bold"))
+
+  venn_x60 <- ggvenn(
+    list(`2×60` = get_param_set("2x60"), `3×60` = get_param_set("3x60"), `4×60` = get_param_set("4x60")),
+    fill_color = venn_colors_three,
+    fill_alpha = 0.6,
+    stroke_size = 0.9,
+    stroke_color = "black",
+    set_name_size = 4,
+    text_size = 3
+  ) + ggtitle("Density 60% (2/3/4)") + venn_theme
+
+  venn_x70 <- ggvenn(
+    list(`2×70` = get_param_set("2x70"), `3×70` = get_param_set("3x70"), `4×70` = get_param_set("4x70")),
+    fill_color = venn_colors_three,
+    fill_alpha = 0.6,
+    stroke_size = 0.9,
+    stroke_color = "black",
+    set_name_size = 4,
+    text_size = 3
+  ) + ggtitle("Density 70% (2/3/4)") + venn_theme
+
+  venn_x6070 <- ggvenn(
+    list(`All x60` = union_sets(c("2x60", "3x60", "4x60")),
+         `All x70` = union_sets(c("2x70", "3x70", "4x70"))),
+    fill_color = venn_colors_two,
+    fill_alpha = 0.6,
+    stroke_size = 0.9,
+    stroke_color = "black",
+    set_name_size = 4,
+    text_size = 3
+  ) + ggtitle("x60 vs x70 (all lengths)") + venn_theme
+
+  venn_pair_plot <- function(keys_a, keys_b, title, label_a, label_b) {
+    venn_sets <- list(union_sets(keys_a), union_sets(keys_b))
+    names(venn_sets) <- c(label_a, label_b)
+    ggvenn(
+      venn_sets,
+      fill_color = venn_colors_two,
+      fill_alpha = 0.6,
+      stroke_size = 0.9,
+      stroke_color = "black",
+      set_name_size = 4,
+      text_size = 3
+    ) + ggtitle(title) + venn_theme
+  }
+
+  venn_len23 <- venn_pair_plot(c("2x60", "2x70"), c("3x60", "3x70"),
+                                "Span 2 vs Span 3", "Span 2", "Span 3")
+  venn_len34 <- venn_pair_plot(c("3x60", "3x70"), c("4x60", "4x70"),
+                                "Span 3 vs Span 4", "Span 3", "Span 4")
+  venn_len24 <- venn_pair_plot(c("2x60", "2x70"), c("4x60", "4x70"),
+                                "Span 2 vs Span 4", "Span 2", "Span 4")
+
+  venn_top <- venn_x60 | venn_x70 | venn_x6070
+  venn_bottom <- venn_len23 | venn_len24 | venn_len34
+
+  p_venn_arranged <- (p_patterns / venn_top / venn_bottom) +
+    plot_layout(heights = c(0.5, 0.8, 0.8)) +
+    plot_annotation(
+      title = sprintf("🧩 Venn Landscape: %s", trait_name),
+      subtitle = "Bar = observed Venn regions; panels = requested overlaps",
+      theme = theme(
+        plot.title = element_text(size = 17, face = "bold"),
+        plot.subtitle = element_text(size = 12)
+      )
+    )
+
+  # === SUMMARY PANELS (non-Venn) ===
+  p_stats_combined <- (p_genes / p_coverage / p_spatial) +
+    plot_layout(heights = c(0.35, 0.35, 0.3)) +
+    plot_annotation(
+      title = sprintf("🎯 Parameter Overview: %s", trait_name),
+      subtitle = sprintf("Total positions: %d | 🏆 Best: %s (%.1f%% coverage)",
+                        length(all_positions),
+                        catch_power$Parameter[1], catch_power$Avg_Coverage[1]),
+      theme = theme(
+        plot.title = element_text(size = 18, face = "bold"),
+        plot.subtitle = element_text(size = 13)
+      )
+    )
+
+  print(p_stats_combined)
+  print(p_venn_arranged)
+
+  # SAVE
+  safe_trait_name <- gsub("[^A-Za-z0-9]", "_", tolower(trait_name))
+  ggsave(filename = file.path(cluster_dir, sprintf("parameter_overview_%s.png", safe_trait_name)),
+         plot = p_stats_combined, width = 12, height = 12, dpi = 320, bg = "white")
+  ggsave(filename = file.path(cluster_dir, sprintf("parameter_venn_panels_%s.png", safe_trait_name)),
+         plot = p_venn_arranged, width = 18, height = 18, dpi = 320, bg = "white")
+  
+  # Export tables
+  export_dir <- file.path(cluster_dir, "parameter_comparison", safe_trait_name)
+  dir.create(export_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  write_tsv(pattern_summary, file.path(export_dir, "venn_patterns.tsv"))
+  write_tsv(catch_power, file.path(export_dir, "best_parameters.tsv"))
+  write_tsv(genes_per_param, file.path(export_dir, "genes_summary.tsv"))
+  
+  cat(sprintf("\n✅ ANALYSIS COMPLETE for %s\n", trait_name))
+  cat(sprintf("🏆 RECOMMENDED: %s\n\n", catch_power$Parameter[1]))
+  
+  return(list(
+    best_parameter = catch_power$Parameter[1],
+    coverage = catch_power$Avg_Coverage[1]
+  ))
+}
+
+# RUN
+cat("🚀 VENN analysis...\n\n")
+results_malignant <- analyze_trait_params("Malignant Prevalence", "malignant_prevalence")
+results_neoplasia <- analyze_trait_params("Neoplasia Prevalence", "neoplasia_prevalence")
+
+cat("\n🎉 ANALYSIS COMPLETE ✅\n")
+```
+
+### 4.2. Per-Parameter Removed Positions (Faceted)
+This section creates a faceted bar plot showing the counts of removed positions by filtering parameter and gene category (Extreme/Dubious/Other) for both traits.
+
+```{r per_parameter_removed_facet, message=FALSE, warning=FALSE, fig.height=6, fig.width=12, dev='png', dpi=320}
+# Create a faceted per-parameter removed-position plot (both traits)
+cat('\n=== Per-parameter removed positions (faceted by trait) ===\n')
+
+param_cols <- names(param_names)
+traits <- c('malignant_prevalence','neoplasia_prevalence')
+
+# Helper: collect gene positions removed by each parameter for a given trait
+collect_param_positions <- function(trait) {
+  map_dfr(param_cols, function(pname) {
+    pattern <- param_names[[pname]]
+    matching <- cluster_dfs[grepl(pattern, names(cluster_dfs)) & grepl(trait, names(cluster_dfs))]
+    gp <- if (length(matching) == 0) character(0) else unique(unlist(lapply(matching, function(df) {
+      df %>% filter(ClusteringFlag == 'Discarded') %>% mutate(GenePos = paste(Gene, Position, sep='@')) %>% pull(GenePos)
+    }), use.names = FALSE))
+
+    tibble(Trait = trait, Parameter = pname, GenePos = gp)
+  })
+}
+
+all_param_positions <- bind_rows(lapply(traits, collect_param_positions))
+
+# Annotate categories using df_all_annotated gene flags
+gene_flags <- df_all_annotated %>% select(Gene, Extreme, Dubious)
+
+param_category_counts <- all_param_positions %>%
+  separate(GenePos, into = c('Gene','Pos'), sep = '@', remove = FALSE) %>%
+  left_join(gene_flags, by = 'Gene') %>%
+  mutate(category = case_when(Extreme ~ 'Extreme', Dubious ~ 'Dubious', TRUE ~ 'Other')) %>%
+  group_by(Trait, Parameter, category) %>%
+  summarise(n = n(), .groups = 'drop') %>%
+  complete(Trait, Parameter, category = c('Extreme','Dubious','Other'), fill = list(n = 0))
+
+# Plot
+p_param_facet <- ggplot(param_category_counts, aes(x = Parameter, y = n, fill = category)) +
+  geom_col(position = 'stack', color = 'black', size = 0.2) +
+  facet_wrap(~ Trait, scales = 'free_y') +
+  scale_fill_manual(values = removed_category_palette) +
+  labs(title = 'Removed Positions by Filtering Parameter and Gene Category',
+       subtitle = sprintf('Counts of positions flagged as removed by each parameter (%s)', paste(param_cols, collapse = ', ')),
+       x = 'Filtering Parameter', y = 'Number of Removed Positions', fill = 'Gene Category',
+       caption = 'Positions are those marked as Discarded by the sliding-window cluster test for each parameter set; categories come from gene-level flags.') +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+print(p_param_facet)
+
+removed_dir <- file.path(caas_postproc_dir, '4.Removed_lists')
+ggsave(filename = file.path(removed_dir, 'removed_positions_by_parameter_facet.png'), plot = p_param_facet, width = 12, height = 6, dpi = 320)
+
+```
+
+```{r per_parameter_removed_pct, message=FALSE, warning=FALSE, fig.height=6, fig.width=12, dev='png', dpi=320}
+# For each trait and category, compute the percentage of positions removed by each parameter
+cat('\n=== Per-parameter percentage removed by gene category ===\n')
+
+# Total positions in each trait/category (denominator)
+total_by_cat <- map_dfr(traits, function(trait) {
+  orig_positions <- bind_rows(setup_dfs[grepl(trait, names(setup_dfs))], .id = 'src') %>%
+    mutate(GenePos = paste(Gene, Position, sep = '@')) %>%
+    distinct(GenePos, Gene) %>%
+    left_join(gene_flags, by = 'Gene') %>%
+    mutate(category = case_when(Extreme ~ 'Extreme', Dubious ~ 'Dubious', TRUE ~ 'Other')) %>%
+    count(category) %>% mutate(Trait = trait)
+  orig_positions %>% select(Trait, category, n)
+})
+
+# Join with removed counts (param_category_counts) to compute percent removed per parameter
+percent_df <- param_category_counts %>%
+  left_join(total_by_cat, by = c('Trait','category')) %>%
+  rename(removed_n = n.x, total_n = n.y) %>%
+  mutate(total_n = replace_na(total_n, 0),
+         percent_removed = ifelse(total_n > 0, 100 * removed_n / total_n, NA))
+
+# Plot percentages faceted by category
+p_param_pct <- ggplot(percent_df, aes(x = Parameter, y = percent_removed, fill = category)) +
+  geom_col(position = 'dodge', color = 'black', size = 0.2) +
+  facet_grid(category ~ Trait, scales = 'free_y') +
+  scale_fill_manual(values = removed_category_palette) +
+  labs(title = 'Percentage of Positions Removed by Parameter (by Gene Category)',
+       subtitle = 'Percentage = removed positions (by parameter & category) / total positions in that category',
+       x = 'Filtering Parameter', y = 'Percent Removed (%)', fill = 'Category',
+       caption = 'NA indicates category had zero positions in the original dataset for that trait') +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal(base_size = 12) +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5))
+
+print(p_param_pct)
+ggsave(filename = file.path(removed_dir, 'removed_positions_by_parameter_pct_facet.png'), plot = p_param_pct, width = 12, height = 6, dpi = 320)
+
+```
+
+```{r per_parameter_genes_all_positions, message=FALSE, warning=FALSE, fig.height=6, fig.width=12, dev='png', dpi=320}
+# For each trait and parameter, compute how many genes have ALL their original CAAS positions removed by that parameter
+cat('\n=== Genes with ALL positions removed by parameter (counts & percent) ===\n')
+
+compute_genes_all_removed <- function(trait) {
+  # Original positions per gene for this trait
+  orig <- bind_rows(setup_dfs[grepl(trait, names(setup_dfs))], .id = 'src') %>%
+    mutate(Position = as.character(Position)) %>%
+    group_by(Gene) %>%
+    summarise(orig_pos = list(unique(Position)), .groups = 'drop')
+
+  # For each parameter, collect discarded positions per gene
+  res <- map_dfr(names(param_names), function(pname) {
+    pattern <- param_names[[pname]]
+    matching <- cluster_dfs[grepl(pattern, names(cluster_dfs)) & grepl(trait, names(cluster_dfs))]
+
+    if (length(matching) == 0) {
+      discarded <- tibble(Gene = character(), disc_pos = list())
+    } else {
+      discarded <- bind_rows(matching, .id = 'src') %>%
+        filter(ClusteringFlag == 'Discarded') %>%
+        mutate(Position = as.character(Position)) %>%
+        group_by(Gene) %>%
+        summarise(disc_pos = list(unique(Position)), .groups = 'drop')
+    }
+
+    # Join with orig genes and test if all orig positions are in discarded positions
+    df <- orig %>% left_join(discarded, by = 'Gene') %>%
+      mutate(disc_pos = map(disc_pos, ~ if (is.null(.x)) character(0) else .x)) %>%
+      mutate(all_removed = map2_lgl(orig_pos, disc_pos, ~ length(.x) > 0 && all(.x %in% .y))) %>%
+      select(Gene, all_removed)
+
+    df %>% mutate(Parameter = pname, Trait = trait)
+  })
+
+  return(res)
+}
+
+genes_all_removed <- bind_rows(lapply(traits, compute_genes_all_removed))
+
+# Annotate categories and summarize counts per parameter
+gene_flags <- df_all_annotated %>% select(Gene, Extreme, Dubious)
+
+genes_all_summary <- genes_all_removed %>%
+  left_join(gene_flags, by = 'Gene') %>%
+  mutate(category = case_when(Extreme ~ 'Extreme', Dubious ~ 'Dubious', TRUE ~ 'Other')) %>%
+  group_by(Trait, Parameter, category) %>%
+  summarise(n_genes_all_removed = sum(all_removed, na.rm = TRUE), .groups = 'drop') %>%
+  complete(Trait, Parameter, category = c('Extreme','Dubious','Other'), fill = list(n_genes_all_removed = 0))
+
+# Totals per trait/category (unique genes) reused from earlier total_genes_by_cat if available; recompute safe fallback
+if (!exists('total_genes_by_cat')) {
+  total_genes_by_cat <- map_dfr(traits, function(trait) {
+    bind_rows(setup_dfs[grepl(trait, names(setup_dfs))], .id = 'src') %>%
+      distinct(Gene) %>%
+      left_join(df_all_annotated %>% filter(Trait == trait) %>% select(Gene, Extreme, Dubious), by = 'Gene') %>%
+      mutate(category = case_when(Extreme ~ 'Extreme', Dubious ~ 'Dubious', TRUE ~ 'Other')) %>%
+      count(category) %>% mutate(Trait = trait) %>% select(Trait, category, n)
+  })
+}
+
+genes_all_summary <- genes_all_summary %>% left_join(total_genes_by_cat, by = c('Trait','category')) %>%
+  rename(total_genes = n) %>%
+  mutate(percent_all_removed = ifelse(total_genes > 0, 100 * n_genes_all_removed / total_genes, NA))
+
+# Plot counts
+p_all_counts <- ggplot(genes_all_summary, aes(x = Parameter, y = n_genes_all_removed, fill = category)) +
+  geom_col(position = 'stack', color = 'black', size = 0.2) +
+  facet_wrap(~ Trait, scales = 'free_y') +
+  scale_fill_manual(values = removed_category_palette) +
+  labs(title = 'Genes with ALL positions removed (counts)',
+       subtitle = 'Genes where every original CAAS position is discarded by the parameter',
+       x = 'Filtering Parameter', y = 'Number of Genes (all positions removed)', fill = 'Gene Category') +
+  theme_minimal(base_size = 12)
+
+print(p_all_counts)
+ggsave(filename = file.path(removed_dir, 'genes_all_positions_removed_by_parameter.png'), plot = p_all_counts, width = 12, height = 6, dpi = 320)
+
+# Plot percent
+p_all_pct <- ggplot(genes_all_summary, aes(x = Parameter, y = percent_all_removed, fill = category)) +
+  geom_col(position = 'dodge', color = 'black', size = 0.2) +
+  facet_grid(category ~ Trait, scales = 'free_y') +
+  scale_fill_manual(values = removed_category_palette) +
+  labs(title = 'Percentage of Genes with ALL positions removed by parameter',
+       subtitle = 'Percent = genes with all positions removed / total genes in that category',
+       x = 'Filtering Parameter', y = 'Percent Removed (%)', fill = 'Category') +
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+  theme_minimal(base_size = 12)
+
+print(p_all_pct)
+ggsave(filename = file.path(removed_dir, 'genes_all_positions_removed_by_parameter_pct.png'), plot = p_all_pct, width = 12, height = 8, dpi = 320)
+
+```
+
+## 5. CAAS Declustering
+
+This section applies the chosen filtering strategy to remove both clustered positions and outlier genes. Two approaches are evaluated:
+
+- **Approach i**: Remove Extreme genes (top 1% density) entirely, plus Dubious genes with clusters
+- **Approach ii**: Keep Extreme genes, only remove Dubious genes with clusters
+
+```{r declustering, message=FALSE, warning=FALSE, fig.height=6, fig.width=10, dev='png', dpi=320}
+# Select optimal parameter combination (minlength=2, maxcaas=60)
+# Note: Adjust based on parameter sweep results if needed
+selected_params <- cluster_dfs[grepl("minlen2.*maxcaas60", names(cluster_dfs))]
+
+if (length(selected_params) == 0) {
+  warning("Selected parameters (2x60) not found, using minlen3.maxcaas60 as fallback")
+  selected_params <- cluster_dfs[grepl("minlen3.*maxcaas60", names(cluster_dfs))]
+  
+  if (length(selected_params) == 0) {
+    stop("Could not find any parameter combinations matching minlen4 and maxcaas60")
+  }
+}
+
+# Extract clustered positions (GenePos format)
+cluster_filtered <- lapply(selected_params, function(df) {
+  df %>%
+    mutate(GenePos = paste(Gene, Position, sep = "@")) %>%
+    filter(ClusteringFlag == "Discarded") %>%
+    pull(GenePos)
+})
+
+# Declustering function with configurable approach
+decluster_caas <- function(prefix, remove_extreme = TRUE) {
+  # Select datasets for this trait
+  df_list <- setup_dfs[grepl(prefix, names(setup_dfs))]
+  
+  # Get cluster positions (unlist without names to avoid %in% issues)
+  clust_vec <- unlist(
+    cluster_filtered[grepl(prefix, names(cluster_filtered))], 
+    use.names = FALSE
+  )
+  
+  # Get genes flagged as Extreme/Dubious for this trait
+  extreme_vec <- df_all_annotated %>%
+    filter(Trait == prefix, Extreme) %>%
+    pull(Gene) %>%
+    unique()
+  
+  dubious_vec <- df_all_annotated %>%
+    filter(Trait == prefix, Dubious) %>%
+    pull(Gene) %>%
+    unique()
+  
+  # Find Dubious genes that have clusters
+  pooled <- bind_rows(df_list, .id = "src")
+  
+  genes_with_cluster <- pooled %>%
+    filter(
+      Gene %in% dubious_vec,
+      GenePos %in% clust_vec
+    ) %>%
+    distinct(Gene) %>%
+    pull(Gene)
+  
+  # Apply filtering
+  out_list <- lapply(df_list, function(df) {
+    df_filtered <- df
+    
+    # Approach i: Remove Extreme genes entirely
+    if (remove_extreme) {
+      df_filtered <- df_filtered %>%
+        filter(!(Gene %in% extreme_vec))
+    }
+    
+    # Both approaches: Remove Dubious genes with clusters
+    df_filtered <- df_filtered %>%
+      filter(!(Gene %in% genes_with_cluster))
+    
+    # Both approaches: Remove clustered positions from remaining genes
+    df_filtered <- df_filtered %>%
+      filter(is.na(GenePos) | !(GenePos %in% clust_vec))
+    
+    return(df_filtered)
+  })
+  
+  return(out_list)
+}
+
+# Apply both approaches
+malignant_declust_i <- decluster_caas("malignant_prevalence", remove_extreme = TRUE)
+neoplasia_declust_i <- decluster_caas("neoplasia_prevalence", remove_extreme = TRUE)
+
+malignant_declust_ii <- decluster_caas("malignant_prevalence", remove_extreme = FALSE)
+neoplasia_declust_ii <- decluster_caas("neoplasia_prevalence", remove_extreme = FALSE)
+
+# Save declustered datasets
+save_declustered <- function(declust_list, prefix, approach) {
+  declustered_dir <- file.path(caas_postproc_dir, paste0("4.Declustered_", approach), prefix)
+  createDir(declustered_dir)
+  
+  for (name in names(declust_list)) {
+    write_tsv(
+      declust_list[[name]], 
+      file.path(declustered_dir, paste0(name, ".declust.tsv"))
+    )
+  }
+}
+
+# Save Approach i outputs
+save_declustered(malignant_declust_i, "malignant_prevalence", "i")
+save_declustered(neoplasia_declust_i, "neoplasia_prevalence", "i")
+
+# Save Approach ii outputs  
+save_declustered(malignant_declust_ii, "malignant_prevalence", "ii")
+save_declustered(neoplasia_declust_ii, "neoplasia_prevalence", "ii")
+
+cat("\nDeclustered datasets saved for both approaches\n")
+
+# Export lists of removed genes and positions
+# These are shared between both approaches except for Extreme genes (only in approach i)
+
+removed_dir <- file.path(caas_postproc_dir, "4.Removed_lists")
+createDir(removed_dir)
+
+# 1. Extreme genes (removed ONLY in Approach i)
+# First, get all CAAS positions for extreme genes from the original data
+extreme_gene_positions <- bind_rows(setup_dfs, .id = "source") %>%
+  mutate(Trait = sub("^(([^_]+)_([^_]+))_.*$", "\\1", source)) %>%
+  inner_join(
+    df_all_annotated %>% filter(Extreme) %>% select(Trait, Gene),
+    by = c("Trait", "Gene")
+  ) %>%
+  # Group by Trait, Gene, Position to get unique positions only
+  group_by(Trait, Gene, Position) %>%
+  slice(1) %>%  # Keep only one occurrence of each position
+  ungroup() %>%
+  group_by(Trait, Gene) %>%
+  summarise(
+    n_unique = n(),
+    CAAS_positions = paste(sort(unique(Position)), collapse = ","),
+    .groups = "drop"
+  )
+
+extreme_genes <- df_all_annotated %>%
+  filter(Extreme) %>%
+  select(Trait, Gene, Length, n_CAAS, n_CAAS_per_length) %>%
+  left_join(extreme_gene_positions, by = c("Trait", "Gene")) %>%
+  left_join(
+    genomic_info %>% select(gene, chr, start, end),
+    by = c("Gene" = "gene")
+  ) %>%
+  mutate(chr = if_else(is.na(chr), "unknown", chr)) %>%
+  select(Trait, Gene, chr, start, end, Length, n_CAAS, n_CAAS_per_length, 
+         n_unique, CAAS_positions) %>%
+  arrange(Trait, desc(n_CAAS_per_length))
+
+write_tsv(extreme_genes, file.path(removed_dir, "extreme_genes.tsv"))
+cat(sprintf("\nExtreme genes (top 1%% by density, removed in Approach i only): %d genes\n", 
+            nrow(extreme_genes)))
+
+# Identify chromosomes with most extreme genes
+extreme_chr_counts <- extreme_genes %>%
+  filter(chr != "unknown") %>%
+  count(chr, name = "n_extreme_genes") %>%
+  arrange(desc(n_extreme_genes))
+
+if (nrow(extreme_chr_counts) > 0) {
+  cat("\nChromosomes with most extreme genes:\n")
+  print(extreme_chr_counts %>% head(5))
+  
+  # Show details for top chromosome
+  top_chr <- extreme_chr_counts$chr[1]
+  top_chr_genes <- extreme_genes %>% 
+    filter(chr == top_chr) %>%
+    arrange(desc(n_CAAS_per_length))
+  
+  cat(sprintf("\nTop %d extreme genes on %s:\n", min(5, nrow(top_chr_genes)), top_chr))
+  print(top_chr_genes %>% 
+        head(5) %>% 
+        select(Gene, Trait, n_CAAS, n_CAAS_per_length, CAAS_positions))
+}
+
+# 2. Dubious genes with clusters (removed in BOTH approaches)
+# For each trait, identify which Dubious genes have clusters
+for (trait in c("malignant_prevalence", "neoplasia_prevalence")) {
+  # Get data for this trait
+  df_list <- setup_dfs[grepl(trait, names(setup_dfs))]
+  pooled <- bind_rows(df_list, .id = "src")
+  
+  # Get cluster positions for this trait
+  clust_vec <- unlist(
+    cluster_filtered[grepl(trait, names(cluster_filtered))], 
+    use.names = FALSE
+  )
+  
+  # Get dubious genes
+  dubious_vec <- df_all_annotated %>%
+    filter(Trait == trait, Dubious) %>%
+    pull(Gene) %>%
+    unique()
+  
+  # Find which dubious genes have clusters
+  dubious_with_clusters <- pooled %>%
+    filter(
+      Gene %in% dubious_vec,
+      GenePos %in% clust_vec
+    ) %>%
+    group_by(Gene) %>%
+    summarise(
+      n_clustered_positions = n(),
+      clustered_positions = paste(sort(unique(Position)), collapse = ","),
+      .groups = "drop"
+    ) %>%
+    left_join(
+      df_all_annotated %>% filter(Trait == trait) %>% 
+        select(Gene, Length, n_CAAS, n_CAAS_per_length, Dubious, Extreme),
+      by = "Gene"
+    ) %>%
+    left_join(
+      genomic_info %>% select(gene, chr, start, end),
+      by = c("Gene" = "gene")
+    ) %>%
+    mutate(chr = if_else(is.na(chr), "unknown", chr)) %>%
+    select(Gene, chr, start, end, Length, n_CAAS, n_CAAS_per_length, 
+           n_clustered_positions, clustered_positions, Dubious, Extreme) %>%
+    arrange(desc(n_clustered_positions))
+  
+  write_tsv(dubious_with_clusters, 
+            file.path(removed_dir, paste0(trait, "_dubious_genes_with_clusters.tsv")))
+  
+  cat(sprintf("  %s: %d Dubious genes with clusters (removed in both approaches)\n", 
+              trait, nrow(dubious_with_clusters)))
+  
+  # Identify chromosomes with most dubious genes
+  dubious_chr_counts <- dubious_with_clusters %>%
+    filter(chr != "unknown") %>%
+    count(chr, name = "n_dubious_genes") %>%
+    arrange(desc(n_dubious_genes))
+  
+  if (nrow(dubious_chr_counts) > 0 && dubious_chr_counts$n_dubious_genes[1] > 1) {
+    cat(sprintf("    - Top chromosomes: %s\n", 
+                paste(head(dubious_chr_counts, 3)$chr, 
+                      " (", head(dubious_chr_counts, 3)$n_dubious_genes, ")",
+                      sep = "", collapse = ", ")))
+    
+    # Show top genes from most affected chromosome
+    top_chr <- dubious_chr_counts$chr[1]
+    top_chr_genes <- dubious_with_clusters %>% 
+      filter(chr == top_chr) %>%
+      head(3)
+    
+    if (nrow(top_chr_genes) > 0) {
+      cat(sprintf("    - Example genes on %s: %s\n", 
+                  top_chr,
+                  paste(top_chr_genes$Gene, collapse = ", ")))
+    }
+  }
+}
+
+# 3. All clustered positions (removed from remaining genes in BOTH approaches)
+clustered_positions_summary <- bind_rows(
+  lapply(names(cluster_filtered), function(name) {
+    cluster_filtered[[name]] %>%
+      tibble(GenePos = .) %>%
+      separate(GenePos, into = c("Gene", "Position"), sep = "@", remove = FALSE) %>%
+      mutate(
+        Trait = sub("^(([^_]+)_([^_]+))_.*$", "\\1", name),
+        Position = as.integer(Position)
+      ) %>%
+      select(Trait, Gene, Position, GenePos)
+  })
+) %>%
+  group_by(Trait) %>%
+  arrange(Trait, Gene, Position)
+
+write_tsv(clustered_positions_summary, 
+          file.path(removed_dir, "all_clustered_positions.tsv"))
+
+cat(sprintf("\nTotal clustered positions identified: %d\n", 
+            nrow(clustered_positions_summary)))
+cat(sprintf("  malignant_prevalence: %d positions\n", 
+            sum(grepl("malignant", clustered_positions_summary$Trait))))
+cat(sprintf("  neoplasia_prevalence: %d positions\n", 
+            sum(grepl("neoplasia", clustered_positions_summary$Trait))))
+
+# 4. Summary of removal reasons
+removal_summary <- tibble(
+  Trait = c(rep("malignant_prevalence", 3), rep("neoplasia_prevalence", 3)),
+  Removal_Category = rep(c("Extreme genes (Approach i only)", 
+                           "Dubious genes with clusters (both approaches)", 
+                           "Clustered positions (both approaches)"), 2),
+  Count = c(
+    # Malignant
+    sum(df_all_annotated$Trait == "malignant_prevalence" & df_all_annotated$Extreme),
+    nrow(read_tsv(file.path(removed_dir, "malignant_prevalence_dubious_genes_with_clusters.tsv"), 
+                  show_col_types = FALSE)),
+    sum(grepl("malignant", clustered_positions_summary$Trait)),
+    # Neoplasia
+    sum(df_all_annotated$Trait == "neoplasia_prevalence" & df_all_annotated$Extreme),
+    nrow(read_tsv(file.path(removed_dir, "neoplasia_prevalence_dubious_genes_with_clusters.tsv"), 
+                  show_col_types = FALSE)),
+    sum(grepl("neoplasia", clustered_positions_summary$Trait))
+  )
+)
+
+write_tsv(removal_summary, file.path(removed_dir, "removal_summary.tsv"))
+
+cat("\n=== Removal Summary ===\n")
+print(removal_summary)
+```
+
+## 6. Declustering Impact Summary
+
+This section quantifies the impact of declustering on CAAS counts and tests for statistical significance.
+
+```{r decluster_summary, message=FALSE, warning=FALSE, fig.height=8, fig.width=12, dev='png', dpi=320}
+# Function to extract summary statistics
+extract_summary <- function(df_list, label) {
+  tibble(
+    Approach = names(df_list),
+    n_CAAS = sapply(df_list, nrow),
+    source = label,
+    Trait = sub("^(([^_]+)_([^_]+))_.*$", "\\1", names(df_list)),
+    Hypothesis_ID = as.integer(gsub(".*_pair_(\\d+).*", "\\1", names(df_list)))
+  )
+}
+
+# Generate comparison for Approach i
+original_summary <- extract_summary(setup_dfs, "original")
+
+declust_summary_i <- extract_summary(
+  c(malignant_declust_i, neoplasia_declust_i), 
+  "declustered_i"
+)
+
+declust_summary_ii <- extract_summary(
+  c(malignant_declust_ii, neoplasia_declust_ii), 
+  "declustered_ii"
+)
+
+# Combine for Approach i comparison
+combined_i <- full_join(
+  original_summary %>% rename(n_CAAS_original = n_CAAS) %>% select(-source),
+  declust_summary_i %>% rename(n_CAAS_declust = n_CAAS) %>% select(-source),
+  by = c("Approach", "Trait", "Hypothesis_ID")
+)
+
+# Calculate statistics
+summary_stats_i <- combined_i %>%
+  mutate(
+    percent_diff = 100 * (n_CAAS_original - n_CAAS_declust) / n_CAAS_original,
+    p_value = mapply(function(o, d) {
+      prop.test(c(d, o - d), c(o, o))$p.value
+    }, n_CAAS_original, n_CAAS_declust),
+    significant = p_value < 0.05
+  )
+
+# Prepare data for plotting
+plot_data_i <- summary_stats_i %>%
+  select(Hypothesis_ID, Trait, n_CAAS_original, n_CAAS_declust, percent_diff, significant) %>%
+  pivot_longer(
+    cols = c(n_CAAS_original, n_CAAS_declust),
+    names_to = "source", 
+    values_to = "n_CAAS"
+  ) %>%
+  mutate(
+    source = recode(source,
+      "n_CAAS_original" = "Original",
+      "n_CAAS_declust" = "Declustered (i)"
+    )
+  )
+
+# Plot Approach i comparison
+p_declust_i <- ggplot(plot_data_i, aes(x = factor(Hypothesis_ID), y = n_CAAS, fill = source)) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(y = n_CAAS / 2, label = n_CAAS),
+    position = position_dodge(width = 0.9),
+    vjust = 0.5, 
+    size = 3.5, 
+    color = "black", 
+    fontface = "bold", 
+    angle = 90
+  ) +
+  geom_text(
+    data = summary_stats_i,
+    aes(
+      x = factor(Hypothesis_ID), 
+      y = pmax(n_CAAS_original, n_CAAS_declust) + max(n_CAAS_original) * 0.05,
+      label = paste0(round(percent_diff, 1), "%", ifelse(significant, "*", ""))
+    ),
+    inherit.aes = FALSE,
+    size = 4,
+    color = "black"
+  ) +
+  facet_wrap(~ Trait, scales = "free_x") +
+  scale_fill_paletteer_d("ggthemes::Tableau_10") +
+  labs(
+    title = "Approach i: CAAS Before and After Declustering",
+    subtitle = "Removes Extreme genes (top 1%) + Dubious genes with clusters + all clustered positions\n* indicates significant reduction (p < 0.05)",
+    x = "Hypothesis ID",
+    y = "Number of CAAS",
+    fill = "Dataset"
+  ) +
+  theme_minimal(base_size = 11)
+
+# Repeat for Approach ii
+combined_ii <- full_join(
+  original_summary %>% rename(n_CAAS_original = n_CAAS) %>% select(-source),
+  declust_summary_ii %>% rename(n_CAAS_declust = n_CAAS) %>% select(-source),
+  by = c("Approach", "Trait", "Hypothesis_ID")
+)
+
+summary_stats_ii <- combined_ii %>%
+  mutate(
+    percent_diff = 100 * (n_CAAS_original - n_CAAS_declust) / n_CAAS_original,
+    p_value = mapply(function(o, d) {
+      prop.test(c(d, o - d), c(o, o))$p.value
+    }, n_CAAS_original, n_CAAS_declust),
+    significant = p_value < 0.05
+  )
+
+plot_data_ii <- summary_stats_ii %>%
+  select(Hypothesis_ID, Trait, n_CAAS_original, n_CAAS_declust, percent_diff, significant) %>%
+  pivot_longer(
+    cols = c(n_CAAS_original, n_CAAS_declust),
+    names_to = "source", 
+    values_to = "n_CAAS"
+  ) %>%
+  mutate(
+    source = recode(source,
+      "n_CAAS_original" = "Original",
+      "n_CAAS_declust" = "Declustered (ii)"
+    )
+  )
+
+tab10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
+tab10_dark <- colorspace::darken(tab10, amount = 0.2)
+
+p_declust_ii <- ggplot(
+  plot_data_ii,
+  aes(x = factor(Hypothesis_ID), y = n_CAAS, fill = source)
+) +
+  geom_col(position = "dodge") +
+  geom_text(
+    aes(y = n_CAAS / 2, label = n_CAAS),
+    position = position_dodge(width = 0.9),
+    vjust = 0.5, 
+    size = 3.5, 
+    color = "black", 
+    fontface = "bold", 
+    angle = 90
+  ) +
+  geom_text(
+    data = summary_stats_ii,
+    aes(
+      x = factor(Hypothesis_ID), 
+      y = pmax(n_CAAS_original, n_CAAS_declust) + max(n_CAAS_original) * 0.05,
+      label = paste0(round(percent_diff, 1), "%", ifelse(significant, "*", ""))
+    ),
+    inherit.aes = FALSE,
+    size = 4,
+    color = "black"
+  ) +
+  facet_wrap(~ Trait, scales = "free_x") +
+  scale_fill_manual(values = tab10_dark) +
+  labs(
+    title = "Approach ii: CAAS Before and After Declustering",
+    subtitle = "Keeps Extreme genes, removes Dubious genes with clusters + all clustered positions\n* indicates significant reduction (p < 0.05)",
+    x = "Hypothesis ID",
+    y = "Number of CAAS",
+    fill = "Dataset"
+  ) +
+  theme_minimal(base_size = 11)
+
+# Display plots
+p_declust_i
+p_declust_ii
+
+# Save plots
+ggsave(
+  filename = file.path(caas_postproc_dir, "4.Declustered_i/declustering_summary.png"),
+  plot = p_declust_i,
+  width = 12, 
+  height = 6, 
+  dpi = 320, 
+  dev = "png"
+)
+
+ggsave(
+  filename = file.path(caas_postproc_dir, "4.Declustered_ii/declustering_summary.png"),
+  plot = p_declust_ii,
+  width = 12, 
+  height = 6, 
+  dpi = 320, 
+  dev = "png"
+)
+
+# Print summary
+cat("\n=== Declustering Summary ===\n\n")
+cat("Approach i (remove Extreme + Dubious with clusters):\n")
+print(summary_stats_i %>% select(Trait, Hypothesis_ID, n_CAAS_original, n_CAAS_declust, percent_diff, significant))
+
+cat("\n\nApproach ii (keep Extreme, remove Dubious with clusters):\n")
+print(summary_stats_ii %>% select(Trait, Hypothesis_ID, n_CAAS_original, n_CAAS_declust, percent_diff, significant))
+
+# Overall summary statistics
+cat("\n\n=== Overall Impact ===\n")
+cat("\nApproach i:\n")
+cat(sprintf("  Total CAAS (original): %d\n", sum(summary_stats_i$n_CAAS_original)))
+cat(sprintf("  Total CAAS (after filtering): %d\n", sum(summary_stats_i$n_CAAS_declust)))
+cat(sprintf("  Total removed: %d (%.1f%%)\n", 
+            sum(summary_stats_i$n_CAAS_original) - sum(summary_stats_i$n_CAAS_declust),
+            100 * (sum(summary_stats_i$n_CAAS_original) - sum(summary_stats_i$n_CAAS_declust)) / sum(summary_stats_i$n_CAAS_original)))
+cat(sprintf("  Significant reductions: %d/%d hypotheses\n", 
+            sum(summary_stats_i$significant), nrow(summary_stats_i)))
+
+cat("\nApproach ii:\n")
+cat(sprintf("  Total CAAS (original): %d\n", sum(summary_stats_ii$n_CAAS_original)))
+cat(sprintf("  Total CAAS (after filtering): %d\n", sum(summary_stats_ii$n_CAAS_declust)))
+cat(sprintf("  Total removed: %d (%.1f%%)\n", 
+            sum(summary_stats_ii$n_CAAS_original) - sum(summary_stats_ii$n_CAAS_declust),
+            100 * (sum(summary_stats_ii$n_CAAS_original) - sum(summary_stats_ii$n_CAAS_declust)) / sum(summary_stats_ii$n_CAAS_original)))
+cat(sprintf("  Significant reductions: %d/%d hypotheses\n", 
+            sum(summary_stats_ii$significant), nrow(summary_stats_ii)))
+
+cat("\n=== Comparison Between Approaches ===\n")
+cat(sprintf("  Difference in retained CAAS: %d (Approach i retains %.1f%% of what Approach ii retains)\n",
+            sum(summary_stats_ii$n_CAAS_declust) - sum(summary_stats_i$n_CAAS_declust),
+            100 * sum(summary_stats_i$n_CAAS_declust) / sum(summary_stats_ii$n_CAAS_declust)))
+```
+
+
+### 6.1. Removed CAAS by Gene Category
+This section analyzes the categories of genes (Extreme, Dubious, Other) from which CAAS positions were removed under each declustering approach.
+
+```{r removed_by_category, message=FALSE, warning=FALSE, fig.height=6, fig.width=12, dev='png', dpi=320}
+# Compare number of CAAS removed that belong to Extreme vs Dubious genes per Approach
+cat('\n=== Removed CAAS by Gene Category and Approach ===\n')
+compute_removed_counts <- function(trait_name) {
+  # Original positions for this trait
+  orig <- bind_rows(setup_dfs[grepl(trait_name, names(setup_dfs))], .id = 'src') %>%
+    mutate(Trait = trait_name, GenePos = paste(Gene, Position, sep = '@')) %>%
+    distinct(Trait, Gene, GenePos)
+
+  # Declustered positions for Approach i and ii
+  decl_i_list <- if (trait_name == 'malignant_prevalence') malignant_declust_i else neoplasia_declust_i
+  decl_ii_list <- if (trait_name == 'malignant_prevalence') malignant_declust_ii else neoplasia_declust_ii
+
+  decl_i <- bind_rows(decl_i_list, .id = 'src') %>% mutate(GenePos = paste(Gene, Position, sep = '@')) %>% distinct(GenePos)
+  decl_ii <- bind_rows(decl_ii_list, .id = 'src') %>% mutate(GenePos = paste(Gene, Position, sep = '@')) %>% distinct(GenePos)
+
+  # Removed positions = orig \ declustered
+  removed_i <- anti_join(orig, decl_i, by = 'GenePos')
+  removed_ii <- anti_join(orig, decl_ii, by = 'GenePos')
+
+  # Annotate gene-level Extreme/Dubious
+  gene_flags <- df_all_annotated %>% filter(Trait == trait_name) %>% select(Gene, Extreme, Dubious)
+
+  summarize_removed <- function(df_removed, approach) {
+    df_removed %>%
+      left_join(gene_flags, by = 'Gene') %>%
+      mutate(category = case_when(
+        Extreme == TRUE ~ 'Extreme',
+        Dubious == TRUE ~ 'Dubious',
+        TRUE ~ 'Other'
+      )) %>%
+      count(category) %>%
+      mutate(Approach = approach, Trait = trait_name)
+  }
+
+  out_i <- summarize_removed(removed_i, 'Approach i')
+  out_ii <- summarize_removed(removed_ii, 'Approach ii')
+
+  bind_rows(out_i, out_ii)
+}
+
+removed_counts <- bind_rows(
+  compute_removed_counts('malignant_prevalence'),
+  compute_removed_counts('neoplasia_prevalence')
+)
+
+removed_counts <- removed_counts %>%
+  mutate(category = factor(category, levels = c('Extreme','Dubious','Other')))
+
+# Plot
+library(ggplot2)
+p_removed <- ggplot(removed_counts, aes(x = Approach, y = n, fill = category)) +
+  geom_col(position = 'stack', width = 0.7, color = 'black', size = 0.2) +
+  facet_wrap(~ Trait) +
+  scale_fill_manual(values = removed_category_palette) +
+  labs(title = 'Removed CAAS by Gene Category and Approach',
+       subtitle = 'Counts of CAAS positions removed that belong to genes flagged as Extreme or Dubious',
+       x = 'Filtering Approach', y = 'Number of CAAS removed', fill = 'Gene Category',
+       caption = 'Approach i removes Extreme genes entirely; Approach ii keeps Extreme genes. Dubious genes with clusters are removed in both approaches.') +
+  theme_minimal(base_size = 12)
+
+print(p_removed)
+
+ggsave(filename = file.path(removed_dir, 'removed_caas_by_category.png'), plot = p_removed, width = 12, height = 6, dpi = 320)
+
+```
+
+## 7. Final Summary Tables
+
+This section presents the declustering results in tabular format for easy interpretation.
+
+```{r final_summary, message=FALSE, warning=FALSE}
+# Per-hypothesis summary table
+summary_comparison <- summary_stats_i %>%
+  select(Trait, Hypothesis_ID, n_CAAS_original, n_CAAS_declust, percent_diff, significant) %>%
+  rename(
+    `Original CAAS` = n_CAAS_original,
+    `Approach i` = n_CAAS_declust,
+    `% Removed (i)` = percent_diff,
+    `Significant (i)` = significant
+  ) %>%
+  left_join(
+    summary_stats_ii %>%
+      select(Trait, Hypothesis_ID, n_CAAS_declust, percent_diff, significant) %>%
+      rename(
+        `Approach ii` = n_CAAS_declust,
+        `% Removed (ii)` = percent_diff,
+        `Significant (ii)` = significant
+      ),
+    by = c("Trait", "Hypothesis_ID")
+  ) %>%
+  arrange(Trait, Hypothesis_ID)
+
+cat("\n### Per-Hypothesis Declustering Results\n\n")
+kable(summary_comparison, 
+      digits = 1,
+      caption = "CAAS counts before and after declustering for each hypothesis",
+      format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  print()
+
+# Overall summary by trait
+trait_summary <- bind_rows(
+  summary_stats_i %>%
+    group_by(Trait) %>%
+    summarise(
+      Approach = "i",
+      Total_Original = sum(n_CAAS_original),
+      Total_Retained = sum(n_CAAS_declust),
+      Total_Removed = sum(n_CAAS_original) - sum(n_CAAS_declust),
+      Percent_Removed = 100 * (sum(n_CAAS_original) - sum(n_CAAS_declust)) / sum(n_CAAS_original),
+      N_Hypotheses = n(),
+      N_Significant = sum(significant),
+      .groups = "drop"
+    ),
+  summary_stats_ii %>%
+    group_by(Trait) %>%
+    summarise(
+      Approach = "ii",
+      Total_Original = sum(n_CAAS_original),
+      Total_Retained = sum(n_CAAS_declust),
+      Total_Removed = sum(n_CAAS_original) - sum(n_CAAS_declust),
+      Percent_Removed = 100 * (sum(n_CAAS_original) - sum(n_CAAS_declust)) / sum(n_CAAS_original),
+      N_Hypotheses = n(),
+      N_Significant = sum(significant),
+      .groups = "drop"
+    )
+) %>%
+  arrange(Trait, Approach)
+
+cat("\n### Overall Summary by Trait\n\n")
+kable(trait_summary,
+      digits = 1,
+      col.names = c("Trait", "Approach", "Original", "Retained", "Removed", "% Removed", 
+                    "N Hypotheses", "Significant"),
+      caption = "Overall declustering impact aggregated by trait",
+      format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  print()
+
+# Grand total summary
+grand_summary <- tibble(
+  Approach = c("i (strict)", "ii (moderate)"),
+  `Total Original CAAS` = c(sum(summary_stats_i$n_CAAS_original), 
+                             sum(summary_stats_ii$n_CAAS_original)),
+  `Total Retained CAAS` = c(sum(summary_stats_i$n_CAAS_declust), 
+                             sum(summary_stats_ii$n_CAAS_declust)),
+  `Total Removed` = c(sum(summary_stats_i$n_CAAS_original) - sum(summary_stats_i$n_CAAS_declust),
+                       sum(summary_stats_ii$n_CAAS_original) - sum(summary_stats_ii$n_CAAS_declust)),
+  `% Removed` = c(100 * (sum(summary_stats_i$n_CAAS_original) - sum(summary_stats_i$n_CAAS_declust)) / 
+                    sum(summary_stats_i$n_CAAS_original),
+                   100 * (sum(summary_stats_ii$n_CAAS_original) - sum(summary_stats_ii$n_CAAS_declust)) / 
+                    sum(summary_stats_ii$n_CAAS_original)),
+  `Hypotheses with Significant Reduction` = c(
+    sprintf("%d/%d (%.1f%%)", sum(summary_stats_i$significant), nrow(summary_stats_i),
+            100 * sum(summary_stats_i$significant) / nrow(summary_stats_i)),
+    sprintf("%d/%d (%.1f%%)", sum(summary_stats_ii$significant), nrow(summary_stats_ii),
+            100 * sum(summary_stats_ii$significant) / nrow(summary_stats_ii))
+  )
+)
+
+cat("\n### Grand Total Summary\n\n")
+kable(grand_summary,
+      digits = 1,
+      caption = "Overall declustering impact across all hypotheses and traits",
+      format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE) %>%
+  column_spec(1, bold = TRUE) %>%
+  print()
+
+cat("\n### Interpretation Guide\n\n")
+cat("**Key Metrics Explained:**\n\n")
+cat("- **CAAS Density (`n_CAAS_per_length`)**: (n_CAAS / Gene Length) × 100 = CAAS per 100 amino acids\n")
+cat("  - Example: 15 CAAS in 500 AA gene = (15/500) × 100 = 3.0% density\n\n")
+cat("- **Median Density**: The 'typical' gene density on a chromosome (robust to outliers)\n")
+cat("  - Low (0.5-2%): Normal evolutionary rate\n")
+cat("  - High (3-5%): Potential alignment issues or genuine hotspot\n\n")
+cat("- **Mean Density**: Average density across genes (affected by extreme values)\n")
+cat("  - In chromosome summaries: Average across all genes on that chromosome\n")
+cat("  - In chromosomal impact: Average density of removed genes only\n")
+cat("  - Use to validate filtering: Removed genes should have much higher mean_density than chromosome median\n\n")
+cat("**Filtering Approaches:**\n\n")
+cat("- **Approach i (strict)**: Removes Extreme genes (top 1% CAAS density) entirely + Dubious genes with clusters\n")
+cat("- **Approach ii (moderate)**: Keeps Extreme genes, only removes Dubious genes with clusters\n")
+cat("- **Significant**: p < 0.05 from proportion test comparing original vs declustered CAAS counts\n")
+cat("- **Extreme genes**: Top 1% by CAAS per alignment length (most likely alignment artifacts)\n")
+cat("- **Dubious genes**: 3×IQR outliers (genes with unusually high CAAS density)\n")
+cat("- **Clusters**: High-density CAAS regions (trains) detected by sliding window algorithm\n\n")
+cat("**Validation Example:**\n")
+cat("  Chromosome 7 overall: median_density = 1.8%\n")
+cat("  Chromosome 7 removed genes: mean_density = 8.2%\n")
+cat("  → Removed genes were 4.6× denser than typical genes (8.2 / 1.8)\n")
+cat("  → Confirms they were true outliers, not over-aggressive filtering\n\n")
+cat(sprintf("**Recommendation**: Use Approach %s for downstream analysis (retains %d CAAS, removes %.1f%%)\n",
+            ifelse(sum(summary_stats_i$n_CAAS_declust) < sum(summary_stats_ii$n_CAAS_declust), 
+                   "ii", "i"),
+            ifelse(sum(summary_stats_i$n_CAAS_declust) < sum(summary_stats_ii$n_CAAS_declust),
+                   sum(summary_stats_ii$n_CAAS_declust), sum(summary_stats_i$n_CAAS_declust)),
+            ifelse(sum(summary_stats_i$n_CAAS_declust) < sum(summary_stats_ii$n_CAAS_declust),
+                   100 * (sum(summary_stats_ii$n_CAAS_original) - sum(summary_stats_ii$n_CAAS_declust)) / 
+                     sum(summary_stats_ii$n_CAAS_original),
+                   100 * (sum(summary_stats_i$n_CAAS_original) - sum(summary_stats_i$n_CAAS_declust)) / 
+                     sum(summary_stats_i$n_CAAS_original))))
+```
+
+## 8. Genomic Distribution Visualization
+Now that all filtering has been applied and outliers identified, we can visualize the genomic distribution of CAAS density and assess which chromosomes were most affected by filtering.
+
+```{r manhattan_helpers, message=FALSE, warning=FALSE}
+compute_chr_layout <- function(df) {
+  layout_df <- df %>%
+    mutate(chr_num = str_replace(chr, "chr", "")) %>%
+    mutate(chr_rank = case_when(
+      chr_num %in% as.character(1:22) ~ as.numeric(chr_num),
+      chr_num == "X" ~ 23,
+      chr_num == "Y" ~ 24,
+      chr_num %in% c("M", "MT") ~ 25,
+      TRUE ~ 26
+    )) %>%
+    group_by(chr_num, chr_rank) %>%
+    summarise(chr_max = max(pos, na.rm = TRUE), .groups = "drop") %>%
+    arrange(chr_rank) %>%
+    mutate(
+      chr_start = lag(cumsum(chr_max), default = 0),
+      chr_center = chr_start + chr_max / 2
+    )
+  layout_df %>% mutate(chr_order = chr_rank)
+}
+
+apply_chr_layout <- function(df, layout_df) {
+  df %>%
+    mutate(chr_num = str_replace(chr, "chr", "")) %>%
+    left_join(layout_df %>% select(chr_num, chr_start), by = "chr_num") %>%
+    mutate(BPcum = pos + chr_start)
+}
+
+ordered_chr_levels <- function(df) {
+  base_levels <- c(as.character(1:22), "X", "Y", "M")
+  chr_clean <- df %>%
+    mutate(chr_num = str_replace(chr, "chr", "")) %>%
+    pull(chr_num) %>%
+    unique()
+  extras <- setdiff(chr_clean, base_levels)
+  c(base_levels, sort(extras))
+}
+```
+
+### 8.1. Manhattan Plot
+This section visualizes CAAS density across the genome, highlighting outlier genes (Extreme and Dubious) to assess if artifacts are clustered in specific genomic regions.
+
+```{r manhattan_plot, message=FALSE, warning=FALSE, fig.height=8, fig.width=16, dev='png', dpi=320}
+# Prepare data for Manhattan plot (genomic_info already loaded in Section 3)
+manhattan_data <- df_all_annotated %>%
+  left_join(genomic_info %>% select(gene, chr, start, end), 
+            by = c("Gene" = "gene")) %>%
+  filter(!is.na(chr)) %>%  # Remove genes without genomic coordinates
+  mutate(
+    # Clean chromosome names (remove 'chr' prefix for sorting)
+    chr_num = str_replace(chr, "chr", ""),
+    # Convert to numeric for autosomes, keep X/Y/M as is
+    chr_order = case_when(
+      chr_num %in% as.character(1:22) ~ as.numeric(chr_num),
+      chr_num == "X" ~ 23,
+      chr_num == "Y" ~ 24,
+      chr_num == "M" ~ 25,
+      TRUE ~ 26
+    ),
+    # Gene midpoint for plotting
+    pos = (start + end) / 2,
+    # Categorize genes
+    Category = case_when(
+      Extreme & Dubious ~ "Both",
+      Extreme ~ "Extreme",
+      Dubious ~ "Dubious",
+      TRUE ~ "Normal"
+    ),
+    Category = factor(Category, levels = category_levels)
+  ) %>%
+  arrange(chr_order, pos)
+
+# Per-chromosome baseline summary used by chromosomal-impact plots
+chr_summary <- manhattan_data %>%
+  mutate(chr_num = str_replace(chr, "chr", "")) %>%
+  group_by(Trait, chr_num) %>%
+  summarise(
+    median_density = median(n_CAAS_per_length, na.rm = TRUE),
+    mean_density = mean(n_CAAS_per_length, na.rm = TRUE),
+    n_genes = n(),
+    .groups = "drop"
+  )
+
+# Calculate cumulative chromosome positions for x-axis
+chr_lengths <- manhattan_data %>%
+  select(chr, pos) %>%
+  compute_chr_layout()
+
+# Add cumulative positions to data
+manhattan_data <- apply_chr_layout(manhattan_data, chr_lengths)
+
+# Axis data for chromosome labels
+axis_data <- chr_lengths %>%
+  select(chr_num, chr_center) %>%
+  rename(center = chr_center)
+
+# Create separate plots for each trait
+manhattan_plots <- lapply(c("malignant_prevalence", "neoplasia_prevalence"), function(trait) {
+  plot_data <- manhattan_data %>% filter(Trait == trait)
+  
+  p <- ggplot(plot_data, aes(x = BPcum, y = n_CAAS_per_length, color = Category)) +
+    # Add vertical separators between chromosomes
+    geom_vline(
+      data = chr_lengths %>% filter(chr_order > 1),  # Skip first chromosome
+      aes(xintercept = chr_start),
+      color = "gray20",
+      linetype = "dashed",
+      linewidth = 0.3,
+      alpha = 0.6
+    ) +
+    # Points
+    geom_point(
+      data = plot_data %>% filter(Category == "Normal"),
+      alpha = 0.35, size = 1.5
+    ) +
+    geom_point(
+      data = plot_data %>% filter(Category == "Dubious"),
+      alpha = 0.8, size = 2.5
+    ) +
+    geom_point(
+      data = plot_data %>% filter(Category == "Extreme"),
+      alpha = 0.8, size = 2.5
+    ) +
+    geom_point(
+      data = plot_data %>% filter(Category == "Both"),
+      alpha = 1, size = 3, shape = 17  # Triangle for both
+    ) +
+    # Color scheme
+    scale_color_manual(
+      values = category_palette,
+      breaks = category_levels,
+      drop = FALSE
+    ) +
+    # Scales and labels
+    scale_x_continuous(
+      label = axis_data$chr_num,
+      breaks = axis_data$center,
+      expand = expansion(mult = c(0.005, 0.005))  # Small equal expansion on both sides
+    ) +
+    scale_y_log10(
+      breaks = c(0.1, 0.5, 1, 2, 5, 10, 20, 50),
+      labels = c("0.1", "0.5", "1", "2", "5", "10", "20", "50")
+    ) +
+    labs(
+      title = paste0("Genomic Distribution of CAAS Density: ", 
+                     str_replace(trait, "_", " ") %>% str_to_title()),
+      subtitle = "Extreme genes (salmon) removed only in Approach i; Dubious genes (green) with clusters removed in both approaches",
+      x = "Chromosome",
+      y = "CAAS per Gene Length (%, log scale)",
+      color = "Gene Category",
+      caption = paste0(
+        "Points = genes colored by category. 'Extreme' = top 1% density; ",
+        "'Dubious' = 3×IQR outliers. Extreme genes are removed in Approach i only; ",
+        "Dubious genes with clusters are removed in both approaches. Use this plot to ",
+        "inspect genomic clustering of high-density genes."
+      )
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9),
+      panel.grid.major.x = element_blank(),
+      panel.grid.minor.x = element_blank(),
+      legend.position = "top",
+      legend.box = "horizontal",
+      # Add some padding to axes titles
+      axis.title.x = element_text(margin = margin(t = 10)),
+      axis.title.y = element_text(margin = margin(r = 10))
+    )
+  
+  return(p)
+})
+
+# Display plots
+manhattan_plots[[1]]
+manhattan_plots[[2]]
+
+# Save plots
+ggsave(
+  filename = file.path(outliers_dir, "manhattan_malignant_prevalence.png"),
+  plot = manhattan_plots[[1]],
+  width = 16, 
+  height = 8, 
+  dpi = 320, 
+  dev = "png"
+)
+
+ggsave(
+  filename = file.path(outliers_dir, "manhattan_neoplasia_prevalence.png"),
+  plot = manhattan_plots[[2]],
+  width = 16, 
+  height = 8, 
+  dpi = 320, 
+  dev = "png"
+)
+```
+
+# Generate per-criteria Manhattan plots
+This section creates Manhattan plots showing the CAAS density after removing positions based on each declustering parameter, allowing visualization of the impact of each filtering criterion.
+```{r manhattan_by_parameters_windows, message=FALSE, warning=FALSE, fig.height=15, fig.width=18, dev='png', dpi=320}
+param_cols <- names(param_names)
+traits <- c('malignant_prevalence','neoplasia_prevalence')
+build_after_param <- function(trait, pname) {
+  pattern <- param_names[[pname]]
+  orig <- bind_rows(setup_dfs[grepl(trait, names(setup_dfs))], .id = 'src') %>%
+    mutate(GenePos = paste(Gene, Position, sep = '@')) %>%
+    distinct(GenePos, Gene, Position)
+
+  matching <- cluster_dfs[grepl(pattern, names(cluster_dfs)) & grepl(trait, names(cluster_dfs))]
+  discarded_pos <- character(0)
+  if (length(matching) > 0) {
+    discarded_pos <- unique(unlist(lapply(matching, function(df) {
+      df %>%
+        filter(ClusteringFlag == 'Discarded') %>%
+        mutate(GenePos = paste(Gene, Position, sep='@')) %>%
+        pull(GenePos)
+    }), use.names = FALSE))
+  }
+
+  retained <- orig %>%
+    mutate(discarded = GenePos %in% discarded_pos) %>%
+    filter(!discarded) %>%
+    group_by(Gene) %>%
+    summarise(n_retained = n(), .groups = 'drop')
+
+  gene_meta <- df_all_annotated %>%
+    filter(Trait == trait) %>%
+    distinct(Gene, .keep_all = TRUE) %>%
+    select(Gene, Length, Extreme, Dubious, n_CAAS_per_length)
+
+  trait_genes <- orig %>%
+    distinct(Gene) %>%
+    left_join(gene_meta, by = 'Gene') %>%
+    mutate(
+      Extreme = replace_na(Extreme, FALSE),
+      Dubious = replace_na(Dubious, FALSE),
+      Length = as.numeric(Length),
+      n_CAAS_per_length = as.numeric(n_CAAS_per_length)
+    ) %>%
+    mutate(Category = case_when(
+      Extreme & Dubious ~ 'Both',
+      Extreme ~ 'Extreme',
+      Dubious ~ 'Dubious',
+      TRUE ~ 'Normal'
+    )) %>%
+    mutate(Category = factor(Category, levels = category_levels))
+
+  df <- trait_genes %>%
+    left_join(retained, by = 'Gene') %>%
+    mutate(n_retained = replace_na(n_retained, 0)) %>%
+    mutate(RemovalStatus = if_else(n_retained == 0, 'Removed by window', 'Retained')) %>%
+    left_join(genomic_info %>% select(gene, chr, start, end), by = c('Gene' = 'gene')) %>%
+    mutate(pos = ifelse(!is.na(start) & !is.na(end), (start + end)/2, NA_real_)) %>%
+    mutate(
+      density_filtered = ifelse(!is.na(Length) & Length > 0, 100 * n_retained / Length, NA_real_),
+      density_original = n_CAAS_per_length,
+      plot_density_original = case_when(
+        is.na(density_original) ~ NA_real_,
+        density_original <= 0 ~ min_density_display,
+        TRUE ~ density_original
+      ),
+      plot_density_filtered = case_when(
+        is.na(density_filtered) ~ NA_real_,
+        density_filtered <= 0 ~ min_density_display,
+        TRUE ~ density_filtered
+      ),
+      display_group = case_when(
+        RemovalStatus == 'Removed by window' ~ 'Removed by window',
+        RemovalStatus == 'Retained' ~ as.character(Category),
+        TRUE ~ RemovalStatus
+      ),
+      display_group = factor(display_group, levels = manhattan_color_levels)
+    ) %>%
+    mutate(Parameter = pname, Trait = trait) %>%
+    select(Trait, Parameter, Gene, chr, pos, n_retained, Length,
+           density_original, density_filtered,
+           plot_density_original, plot_density_filtered,
+           Category, display_group, RemovalStatus)
+
+  df
+}
+
+for (tr in traits) {
+  manh_params <- map_dfr(param_cols, function(pn) build_after_param(tr, pn)) %>%
+    filter(!is.na(chr) & !is.na(pos)) %>%
+    mutate(Parameter = factor(Parameter, levels = param_cols))
+
+  chr_layout <- manh_params %>%
+    select(chr, pos) %>%
+    compute_chr_layout()
+  manh_params <- apply_chr_layout(manh_params, chr_layout)
+  axis_data <- chr_layout %>% select(chr_num, chr_center)
+
+  p <- ggplot(manh_params, aes(x = BPcum, y = plot_density_original,
+                               color = display_group, shape = display_group)) +
+    geom_vline(
+      data = chr_layout %>% filter(chr_start > 0),
+      aes(xintercept = chr_start),
+      color = 'gray60', linetype = 'dashed', linewidth = 0.3, alpha = 0.7
+    ) +
+    geom_point(aes(alpha = display_group), size = 2, stroke = 0.8) +
+    scale_alpha_manual(
+      values = c(
+        "Normal" = 0.15,
+        "Dubious" = 0.85,
+        "Extreme" = 0.85,
+        "Both" = 0.85,
+        "Removed by window" = 1,
+        "Removed (Extreme)" = 1,
+        "Removed (Dubious cluster)" = 1
+      ),
+      guide = "none"
+    ) +
+    scale_size_manual(
+      values = c(
+        "Normal" = 1.4,
+        "Dubious" = 1.8,
+        "Extreme" = 1.8,
+        "Both" = 1.8,
+        "Removed by window" = 2.6,
+        "Removed (Extreme)" = 2.8,
+        "Removed (Dubious cluster)" = 2.8
+      ),
+      guide = 'none'
+    ) +
+    scale_color_manual(values = manhattan_color_map,
+                       breaks = manhattan_color_levels,
+                       drop = FALSE) +
+    scale_shape_manual(values = shape_map,
+                       breaks = shape_levels,
+                       drop = FALSE) +
+    scale_x_continuous(labels = axis_data$chr_num,
+                       breaks = axis_data$chr_center,
+                       expand = expansion(mult = c(0.005, 0.005))) +
+    scale_y_log10(
+      breaks = c(0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10),
+      labels = c('0.01', '0.05', '0.1', '0.5', '1', '2', '5', '10'),
+      expand = expansion(mult = c(0.02, 0.05))
+    ) +
+    facet_wrap(~ Parameter, nrow = 3, scales = 'fixed') +
+    labs(
+      title = sprintf('Manhattan: %s (per-parameter window filtering)', tr),
+      x = 'Chromosome',
+      y = 'CAAS per Gene Length (%)',
+      color = 'Category / removal',
+      shape = 'Category / removal',
+      caption = 'Crosses denote genes where the window filter removed every CAAS (displayed at ~0.008%).'
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position = 'top',
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 9),
+      axis.ticks.x = element_line(size = 0.2)
+    )
+
+  print(p)
+
+  out_file <- file.path(outliers_dir, sprintf('manhattan_parameters_%s.png', gsub('[^A-Za-z0-9]', '_', tolower(tr))))
+  ggsave(filename = out_file, plot = p, width = 18, height = 14, dpi = 320)
+  cat(sprintf('Saved per-parameter manhattan for %s -> %s\n', tr, out_file))
+}
+```
+
+```{r manhattan_parameters_by_approach, message=FALSE, warning=FALSE, fig.height=8, fig.width=18, dev='png', dpi=320}
+# For each approach (i, ii) and trait, plot per-parameter Manhattan after applying that approach's filtering
+approaches <- c('Approach i', 'Approach ii')
+param_cols <- names(param_names)
+traits <- c('malignant_prevalence','neoplasia_prevalence')
+
+apply_param_with_approach <- function(trait, pname, approach) {
+  pattern <- param_names[[pname]]
+  orig <- bind_rows(setup_dfs[grepl(trait, names(setup_dfs))], .id = 'src') %>%
+    mutate(GenePos = paste(Gene, Position, sep = '@')) %>%
+    distinct(GenePos, Gene, Position)
+
+  matching <- cluster_dfs[grepl(pattern, names(cluster_dfs)) & grepl(trait, names(cluster_dfs))]
+  discarded_pos <- character(0)
+  if (length(matching) > 0) {
+    discarded_pos <- unique(unlist(lapply(matching, function(df) {
+      df %>%
+        filter(ClusteringFlag == 'Discarded') %>%
+        mutate(GenePos = paste(Gene, Position, sep='@')) %>%
+        pull(GenePos)
+    }), use.names = FALSE))
+  }
+
+  gene_meta <- df_all_annotated %>%
+    filter(Trait == trait) %>%
+    distinct(Gene, .keep_all = TRUE) %>%
+    select(Gene, Length, Extreme, Dubious, n_CAAS_per_length)
+
+  gene_flags <- gene_meta %>% select(Gene, Extreme, Dubious)
+
+  dubious_with_clusters <- character(0)
+  if (length(discarded_pos) > 0) {
+    dubious_with_clusters <- orig %>%
+      filter(GenePos %in% discarded_pos) %>%
+      inner_join(gene_flags %>% filter(Dubious) %>% select(Gene), by = 'Gene') %>%
+      distinct(Gene) %>%
+      pull(Gene)
+  }
+
+  kept <- orig %>% mutate(discarded = GenePos %in% discarded_pos) %>% filter(!discarded)
+
+  extreme_genes <- gene_flags %>% filter(Extreme) %>% pull(Gene)
+  if (approach == 'Approach i') {
+    kept <- kept %>% filter(!(Gene %in% extreme_genes))
+  }
+  if (length(dubious_with_clusters) > 0) {
+    kept <- kept %>% filter(!(Gene %in% dubious_with_clusters))
+  }
+
+  retained <- kept %>% group_by(Gene) %>% summarise(n_retained = n(), .groups = 'drop')
+
+  trait_genes <- orig %>%
+    distinct(Gene) %>%
+    left_join(gene_meta, by = 'Gene') %>%
+    mutate(
+      Extreme = replace_na(Extreme, FALSE),
+      Dubious = replace_na(Dubious, FALSE),
+      Length = as.numeric(Length),
+      n_CAAS_per_length = as.numeric(n_CAAS_per_length)
+    ) %>%
+    mutate(Category = case_when(
+      Extreme & Dubious ~ 'Both',
+      Extreme ~ 'Extreme',
+      Dubious ~ 'Dubious',
+      TRUE ~ 'Normal'
+    )) %>%
+    mutate(Category = factor(Category, levels = category_levels))
+
+  df <- trait_genes %>%
+    left_join(retained, by = 'Gene') %>%
+    mutate(n_retained = replace_na(n_retained, 0)) %>%
+    mutate(RemovalStatus = case_when(
+      approach == 'Approach i' & Gene %in% extreme_genes ~ 'Removed (Extreme)',
+      Gene %in% dubious_with_clusters ~ 'Removed (Dubious cluster)',
+      n_retained == 0 ~ 'Removed by window',
+      TRUE ~ 'Retained'
+    )) %>%
+    left_join(genomic_info %>% select(gene, chr, start, end), by = c('Gene' = 'gene')) %>%
+    mutate(pos = ifelse(!is.na(start) & !is.na(end), (start + end)/2, NA_real_)) %>%
+    mutate(
+      density_filtered = ifelse(!is.na(Length) & Length > 0, 100 * n_retained / Length, NA_real_),
+      density_original = n_CAAS_per_length,
+      plot_density_original = case_when(
+        is.na(density_original) ~ NA_real_,
+        density_original <= 0 ~ min_density_display,
+        TRUE ~ density_original
+      ),
+      plot_density_filtered = case_when(
+        is.na(density_filtered) ~ NA_real_,
+        density_filtered <= 0 ~ min_density_display,
+        TRUE ~ density_filtered
+      ),
+      display_group = case_when(
+        RemovalStatus == 'Retained' ~ as.character(Category),
+        TRUE ~ RemovalStatus
+      ),
+      display_group = factor(display_group, levels = manhattan_color_levels)
+    ) %>%
+    mutate(Parameter = pname, Trait = trait, Approach = approach) %>%
+    select(Trait, Approach, Parameter, Gene, chr, pos, n_retained, Length,
+           density_original, density_filtered,
+           plot_density_original, plot_density_filtered,
+           Category, display_group, RemovalStatus)
+
+  df
+}
+
+for (approach in approaches) {
+  for (tr in traits) {
+    manh_df <- map_dfr(param_cols, function(pn) apply_param_with_approach(tr, pn, approach)) %>%
+      filter(!is.na(chr) & !is.na(pos)) %>%
+      mutate(Parameter = factor(Parameter, levels = param_cols))
+
+    chr_layout <- manh_df %>% select(chr, pos) %>% compute_chr_layout()
+    manh_df <- apply_chr_layout(manh_df, chr_layout)
+    axis_data <- chr_layout %>% select(chr_num, chr_center)
+
+    p <- ggplot(manh_df, aes(x = BPcum, y = plot_density_original,
+                             color = display_group, shape = display_group)) +
+      geom_vline(
+        data = chr_layout %>% filter(chr_start > 0),
+        aes(xintercept = chr_start),
+        color = 'gray60', linetype = 'dashed', linewidth = 0.3, alpha = 0.7
+      ) +
+    geom_point(aes(alpha = display_group, size = display_group), stroke = 0.65) +
+    scale_alpha_manual(
+      values = c(
+        "Normal" = 0.15,
+        "Dubious" = 0.85,
+        "Extreme" = 0.85,
+        "Both" = 0.85,
+        "Removed by window" = 1,
+        "Removed (Extreme)" = 1,
+        "Removed (Dubious cluster)" = 1
+      ),
+      guide = 'none'
+    ) +
+    scale_size_manual(
+      values = c(
+        "Normal" = 1.4,
+        "Dubious" = 1.8,
+        "Extreme" = 1.8,
+        "Both" = 1.8,
+        "Removed by window" = 2.6,
+        "Removed (Extreme)" = 2.8,
+        "Removed (Dubious cluster)" = 2.8
+      ),
+      guide = 'none'
+    ) +
+      scale_color_manual(values = manhattan_color_map,
+                         breaks = manhattan_color_levels,
+                         drop = FALSE) +
+      scale_shape_manual(values = shape_map,
+                         breaks = shape_levels,
+                         drop = FALSE) +
+      scale_x_continuous(labels = axis_data$chr_num,
+                         breaks = axis_data$chr_center,
+                         expand = expansion(mult = c(0.005, 0.005))) +
+      scale_y_log10(
+        breaks = c(0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10),
+        labels = c('0.01','0.05','0.1','0.5','1','2','5','10'),
+        expand = expansion(mult = c(0.02, 0.05))
+      ) +
+      facet_wrap(~ Parameter, nrow = 3, scales = 'fixed') +
+      labs(
+        title = sprintf('Manhattan: %s — %s', tr, approach),
+        x = 'Chromosome',
+        y = 'CAAS per Gene Length (%)',
+        color = 'Category / removal',
+        shape = 'Category / removal',
+        caption = "Crosses indicate genes removed by window (blue), Extreme (orange) or Dubious cluster (teal); placed at ~0.008%."
+      ) +
+      theme_minimal(base_size = 14) +
+      theme(legend.position = 'top', axis.text.x = element_text(angle = 45, hjust = 1, size = 9))
+
+    print(p)
+    out_file <- file.path(outliers_dir, sprintf('manhattan_%s_%s.png', tolower(gsub(' ', '_', approach)), gsub('[^A-Za-z0-9]', '_', tolower(tr))))
+    ggsave(filename = out_file, plot = p, width = 18, height = 14, dpi = 320)
+    cat(sprintf('Saved %s -> %s\n', paste(tr, approach, sep=' - '), out_file))
+  }
+}
+```
+
+### 8.2. Chromosomal Impact Analysis
+
+This section visualizes the impact of filtering on each chromosome by comparing the CAAS density of removed genes to the chromosome baseline.
+
+```{r chr_impact, message=FALSE, warning=FALSE, fig.height=6, fig.width=12, dev='png', dpi=320}
+cat("\n=== Combined Chromosomal Impact ===\n")
+cat("Chromosomes most affected by filtering (extreme + dubious genes):\n")
+cat("Note: mean_density here = average CAAS density of REMOVED genes only\n")
+cat("      Compare to chromosome median_density in chromosome_summary.tsv\n")
+cat("      to validate these were true outliers.\n\n")
+
+# Combine extreme and all dubious genes by chromosome (keep Trait column)
+all_removed_genes <- bind_rows(
+  extreme_genes %>% 
+    filter(chr != "unknown") %>%
+    select(chr, Gene, Trait, n_CAAS_per_length) %>%
+    mutate(Reason = "Extreme"),
+  bind_rows(
+    read_tsv(file.path(removed_dir, "malignant_prevalence_dubious_genes_with_clusters.tsv"), 
+             show_col_types = FALSE) %>% mutate(Trait = "malignant_prevalence"),
+    read_tsv(file.path(removed_dir, "neoplasia_prevalence_dubious_genes_with_clusters.tsv"), 
+             show_col_types = FALSE) %>% mutate(Trait = "neoplasia_prevalence")
+  ) %>%
+    filter(chr != "unknown") %>%
+    select(chr, Gene, Trait, n_CAAS_per_length) %>%
+    mutate(Reason = "Dubious")
+)
+
+# Group by BOTH chr and Trait
+chr_impact_by_trait <- all_removed_genes %>%
+  group_by(chr, Trait) %>%
+  summarise(
+    n_genes = n(),
+    n_extreme = sum(Reason == "Extreme"),
+    n_dubious = sum(Reason == "Dubious"),
+    mean_density = mean(n_CAAS_per_length, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Also create combined (across traits) for saving
+chr_impact_combined <- all_removed_genes %>%
+  group_by(chr) %>%
+  summarise(
+    n_genes = n(),
+    n_extreme = sum(Reason == "Extreme"),
+    n_dubious = sum(Reason == "Dubious"),
+    mean_density = mean(n_CAAS_per_length, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_genes))
+
+print(chr_impact_combined %>% head(10))
+
+# Save combined impact
+write_tsv(chr_impact_combined, file.path(removed_dir, "chromosomal_impact_summary.tsv"))
+write_tsv(all_removed_genes, file.path(removed_dir, "all_removed_genes.tsv"))
+
+cat("\nFiles saved:\n")
+cat("  - chromosomal_impact_summary.tsv (per-chromosome statistics)\n")
+cat("  - all_removed_genes.tsv (complete list with reasons)\n")
+
+# Function to create plot for one trait (chr_summary already loaded above)
+create_chr_impact_plot <- function(trait_name, trait_label) {
+  # Get top 15 chromosomes for this trait
+  trait_data <- chr_impact_by_trait %>%
+    filter(Trait == trait_name) %>%
+    arrange(desc(n_genes)) %>%
+    head(15) %>%
+    mutate(chr_num = gsub("^chr", "", chr))  # Strip "chr" prefix
+  
+  # Merge with baseline from chr_summary (already loaded above)
+  trait_baseline <- chr_summary %>%
+    filter(Trait == trait_name) %>%
+    select(chr_num, median_density) %>%
+    rename(population_median_density = median_density)
+  
+  plot_data <- trait_data %>%
+    left_join(trait_baseline, by = "chr_num") %>%
+    mutate(
+      fold_enrichment = mean_density / population_median_density,
+      absolute_diff = mean_density - population_median_density,
+      is_significant = !is.na(population_median_density) & fold_enrichment > 2 & absolute_diff > 1
+    )
+  
+  cat(sprintf("\n=== %s: Chr Impact Plot Data ===\n", trait_label))
+  print(plot_data %>% select(chr, n_genes, mean_density, population_median_density, fold_enrichment, is_significant))
+  
+  # Create plot
+  p <- ggplot(plot_data, aes(x = reorder(chr, -n_genes))) +
+    # Mean density of removed genes (main bars)
+    geom_col(aes(y = mean_density, fill = n_genes), 
+             color = "black", size = 0.3, alpha = 0.85, width = 0.7) +
+    # Chromosome median density as thick horizontal lines (baseline)
+    geom_segment(data = plot_data %>% filter(!is.na(population_median_density)),
+                 aes(x = as.numeric(factor(reorder(chr, -n_genes))) - 0.4,
+                     xend = as.numeric(factor(reorder(chr, -n_genes))) + 0.4,
+                     y = population_median_density,
+                     yend = population_median_density),
+                 color = "black", size = 2, lineend = "butt") +
+    # Gene count labels
+    geom_text(aes(y = mean_density, label = n_genes), 
+              vjust = -0.5, size = 3.5, fontface = "bold") +
+    scale_fill_gradient(low = "skyblue", high = "salmon4",
+                        name = "Genes\nRemoved") +
+    labs(
+      title = sprintf("Chromosomal Impact: %s", trait_label),
+      subtitle = "Colored bars = mean density of removed genes | Black lines = chromosome baseline\nTop 15 chromosomes by number of removed genes",
+      x = "Chromosome",
+      y = "CAAS Density (% per 100 AA)",
+      caption = paste0(
+        "Bars = mean CAAS density of genes REMOVED by filtering (Extreme and Dubious). ",
+        "Black lines = chromosome median density (baseline). A large gap between a bar \nand its line indicates that removed genes are much denser than typical genes on that chromosome. ",
+        "\nThis plot helps validate whether filtering disproportionately \naffects specific chromosomes or reflects true outliers."
+      )
+    ) +
+    theme_minimal(base_size = 11) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      plot.caption = element_text(size = 9, hjust = 0, face = "italic"),
+      legend.position = "right"
+    )
+  
+  # Add significance asterisks (no brackets)
+  if (any(plot_data$is_significant, na.rm = TRUE)) {
+    sig_data <- plot_data %>%
+      filter(is_significant) %>%
+      mutate(
+        x_pos = as.numeric(factor(reorder(chr, -n_genes))),
+        y_pos = mean_density * 1.05
+      )
+    
+    cat(sprintf("=== %s: Significant chromosomes (n=%d) ===\n", trait_label, nrow(sig_data)))
+    print(sig_data %>% select(chr, mean_density, population_median_density, fold_enrichment))
+    
+    p <- p + geom_text(data = sig_data,
+                       aes(x = x_pos, y = y_pos + 0.5, label = "*"),
+                       vjust = 0, size = 6, fontface = "bold", color = "black")
+  }
+  
+  return(p)
+}
+
+# Create plots for both traits
+p_chr_impact_malignant <- create_chr_impact_plot("malignant_prevalence", "Malignant Prevalence")
+p_chr_impact_neoplasia <- create_chr_impact_plot("neoplasia_prevalence", "Neoplasia Prevalence")
+
+print(p_chr_impact_malignant)
+print(p_chr_impact_neoplasia)
+
+# Save plots
+ggsave(
+  filename = file.path(removed_dir, "chromosomal_impact_malignant_prevalence.png"),
+  plot = p_chr_impact_malignant,
+  width = 12, height = 6, dpi = 320, dev = "png"
+)
+
+ggsave(
+  filename = file.path(removed_dir, "chromosomal_impact_neoplasia_prevalence.png"),
+  plot = p_chr_impact_neoplasia,
+  width = 12, height = 6, dpi = 320, dev = "png"
+)
+
+```
+
+## 9. BG cleanup
+
+Now that we have the declustered datasets, we can also create cleaned-up background datasets by removing the same genes/positions from the original background CAAS data.
+
+```{r bg_cleanup, message=FALSE, warning=FALSE, fig.height=6, fig.width=10, dev='png', dpi=320}
+# We will be using all_removed_genes from above in order to remove same genes from background CAAS data
+cat("\n=== Background CAAS Cleanup ===\n")
+# First load original background CAAS data
+bg_dir <- file.path(resultsDir, "2.CAAS/1.Discovery/2.CAAS_background")
+
+bg_caas_files <- list.files(
+  path = bg_dir,
+  pattern = "global_background",
+  full.names = TRUE,
+  recursive = TRUE
+)
+
+# Load background CAAS data
+bg_caas_dfs <- lapply(bg_caas_files, function(file) {
+  trait_name <- ifelse(grepl("malignant_prevalence", file), "malignant_prevalence", "neoplasia_prevalence")
+  df <- read_tsv(file, col_names = FALSE) %>%
+    dplyr::rename(Gene = X1) %>%
+    mutate(Trait = trait_name)
+  return(df)
+})
+
+# Name the list elements
+names(bg_caas_dfs) <- sapply(bg_caas_files, function(file) {
+  trait_name <- ifelse(grepl("malignant_prevalence", file), "malignant_prevalence", "neoplasia_prevalence")
+  return(paste0("bg_caas_", trait_name))
+})
+
+# Clean background CAAS data by removing same genes/positions as in all_removed_genes (by Trait)
+clean_bg_caas <- function(trait_name) {
+  bg_key <- paste0("bg_caas_", trait_name)
+  if (!bg_key %in% names(bg_caas_dfs)) {
+    stop("No background CAAS dataset found for trait: ", trait_name)
+  }
+  if (!is.data.frame(all_removed_genes)) {
+    stop("all_removed_genes is not a data.frame/tibble. Actual class: ",
+         paste(class(all_removed_genes), collapse = ", "))
+  }
+
+  # Required columns check (prevents silent fallback to env variables)
+  needed_cols <- c("Trait", "Gene")
+
+  bg_df <- bg_caas_dfs[[bg_key]]
+
+  removed_pairs <- all_removed_genes %>%
+    filter(.data$Trait == trait_name) %>%
+    distinct(.data$Gene)
+
+  cleaned_df <- bg_df %>%
+    anti_join(removed_pairs, by = "Gene")
+
+  cleaned_df
+}
+
+cleaned_bg_malignant <- clean_bg_caas("malignant_prevalence")
+cleaned_bg_neoplasia <- clean_bg_caas("neoplasia_prevalence")
+
+# Rewrite the gene lists to files
+write.table(
+  cleaned_bg_malignant$Gene,
+  file.path(bg_dir, "malignant_prevalence/cleaned_background_malignant_prevalence.txt"),
+  col.names = FALSE,
+  row.names = FALSE,
+  quote = FALSE,
+  sep = "\n"
+)
+
+write.table(
+  cleaned_bg_neoplasia$Gene,
+  file.path(bg_dir, "neoplasia_prevalence/cleaned_background_neoplasia_prevalence.txt"),
+  col.names = FALSE,
+  row.names = FALSE,
+  quote = FALSE,
+  sep = "\n"
+)
+
+```
+
+## Session Information
+
+```{r session_info}
+sessionInfo()
+```

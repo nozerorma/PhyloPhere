@@ -1,0 +1,10 @@
+File	DiscardedCount	Minlen	Maxcaas	CAAP_Groups
+discovery.filtered.minlen2.maxcaas60	24	2	60	GS0,GS1,GS2,GS3,GS4,US
+discovery.filtered.minlen2.maxcaas70	20	2	70	GS0,GS1,GS2,GS3,GS4,US
+discovery.filtered.minlen2.maxcaas80	20	2	80	GS0,GS1,GS2,GS3,GS4,US
+discovery.filtered.minlen3.maxcaas60	2	3	60	GS0
+discovery.filtered.minlen3.maxcaas70	0	3	70	none
+discovery.filtered.minlen3.maxcaas80	0	3	80	none
+discovery.filtered.minlen4.maxcaas60	0	4	60	none
+discovery.filtered.minlen4.maxcaas70	0	4	70	none
+discovery.filtered.minlen4.maxcaas80	0	4	80	none

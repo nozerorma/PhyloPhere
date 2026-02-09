@@ -60,6 +60,8 @@ include {CT} from './workflows/ct.nf'
 include {RER_MAIN} from './workflows/rerconverge.nf'
 include {REPORTING} from './workflows/reporting.nf'
 include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
+include {CAAS_POSTPROC} from './workflows/caas_postproc.nf'
+include {CAAS_SIGNIFICATION} from './workflows/caas_signification.nf'
 //include {ORA} from './workflows/ora.nf'
 
 /*
@@ -101,13 +103,32 @@ workflow {
             RER_MAIN()
             ran_any = true
         }
+        if (params.caas_postproc) {
+            // Pass empty channel for background files when running standalone
+            // If running after CT_DISCOVERY, wire the background files channel here
+            def postproc_results = CAAS_POSTPROC(Channel.empty())
+            ran_any = true
+            
+            // Optionally chain CAAS_SIGNIFICATION after CAAS_POSTPROC
+            if (params.caas_signification) {
+                CAAS_SIGNIFICATION(
+                    postproc_results.filtered_discovery,
+                    postproc_results.cleaned_background
+                )
+            }
+        }
+        if (params.caas_signification && !params.caas_postproc) {
+            log.error "ERROR: --caas_signification requires --caas_postproc to run first"
+            log.error "Please enable both workflows or run CAAS_POSTPROC separately to generate filtered inputs"
+            System.exit(1)
+        }
         /* if (params.ora) {
             ORA()
             ran_any = true
         } */
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --caas_postproc, or --caas_signification."
         }
     }
 }

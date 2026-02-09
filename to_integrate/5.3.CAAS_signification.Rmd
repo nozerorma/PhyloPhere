@@ -1,0 +1,997 @@
+---
+title: "CAAS Signification and Organization for Downstream Analysis"
+author: "Miguel Ramon"
+date: "`r Sys.Date()`"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+# CAAS Signification and Organization for Downstream Analysis
+
+This script organizes CAAS (Context-Aware Amino Acid Substitutions) discovery results for downstream analyses (enrichment, meta-analysis, etc.). It applies **filtering criteria**—not statistical tests—to create organized subsets suitable for different analytical approaches.
+
+**Purpose**: Prepare filtered CAAS datasets for downstream analysis
+
+- **Hypergeometric p-values** (Hyp_05): Filter by biological variability/pattern strength
+- **Permulation p-values** (Perm_05): Filter by strength of trait association
+- **Combined filters** (Perm_Hyp_05): Strictest criteria for high-confidence CAAS
+
+**Key Outputs:**
+
+- Filtered CAAS tables organized by contrast, pattern, and filtering criteria
+- Pattern-specific CAAS subsets (pattern1, pattern2, pattern3, and combinations)
+- Gene lists for downstream enrichment analysis (e.g., GO, pathway)
+- Summary statistics and visualizations
+- Cross-contrast commonality tables for meta-analysis
+
+**Note**: The actual downstream aggregation and statistical testing occurs in separate scripts. This script focuses on organizing and filtering discovery-stage CAAS calls.
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=FALSE, warning=FALSE}
+# Source commons.R for setup
+source("./functions/commons.R")
+setup_rmd()
+
+# Load additional libraries specific to this analysis
+library(reshape2)
+library(tibble)
+library(stringr)
+library(ggplot2)
+```
+
+## 1. Data Import and Quality Control Filtering
+
+This section loads CAAS discovery results from CAASTools and applies initial quality control filters.
+
+**Quality Filters Applied:**
+- **Gap filtering** (GFG=0, GBG=0): Safety check ensuring no-gap constraint from discovery phase
+- **P-value filtering** (p≤0.05): Retains CAAS meeting nominal variability threshold
+
+Note: These are filtering criteria for dataset organization, not statistical hypothesis tests.
+
+```{r data_import, message=FALSE, warning=FALSE}
+# Define input directory
+caas_folder <- file.path(resultsDir, "2.CAAS/3.CAAS_postproc/4.Declustered_i/")
+
+# Locate all CAAS files recursively
+caas_files <- list.files(
+  path = caas_folder, 
+  pattern = "\\.tsv$", 
+  full.names = TRUE, 
+  recursive = TRUE
+)
+
+if (length(caas_files) == 0) {
+  stop("No CAAS files found in ", caas_folder)
+}
+
+# Read all CAAS files into list
+caas_raw <- lapply(caas_files, read_tsv, show_col_types = FALSE)
+names(caas_raw) <- gsub("_sp.tab.caas_declustered.tsv", "", basename(caas_files))
+
+# Summary of loaded data
+cat("\n=== Data Import Summary ===\n")
+cat(sprintf("Total CAAS files found: %d\n", length(caas_files)))
+cat(sprintf("Total CAAS positions loaded: %s\n", format(sum(sapply(caas_raw, nrow)), big.mark = ",")))
+cat("\nCAAS by contrast:\n")
+print(data.frame(
+  Contrast = names(caas_raw),
+  Positions = sapply(caas_raw, nrow)
+) %>% head(10))
+if (length(caas_raw) > 10) {
+  cat(sprintf("... and %d more contrasts\n", length(caas_raw) - 10))
+}
+```
+
+```{r initial_filtering, message=FALSE, warning=FALSE}
+# Apply gap filtering as quality control
+# GFG (Gaps Foreground Group) and GBG (Gaps Background Group) from CAASTools
+# This is a safety check: if no-gap constraint was enforced during discovery,
+# this filter will be redundant (all values = 0)
+filter_gaps <- function(df) {
+  if (!all(c("GFG", "GBG") %in% colnames(df))) {
+    warning("GFG/GBG columns not found in CAASTools output; skipping gap filter")
+    return(df)
+  }
+  df %>% 
+    filter(GFG == 0 & GBG == 0) %>%
+    # Add GenePos identifier for merging later
+    mutate(GenePos = paste0(Gene, "@", Position))
+}
+
+caas_gapless <- lapply(caas_raw, filter_gaps)
+```
+
+## 2. Permulation Test Integration
+
+This section integrates permulation test results (bootstrap p-values) with CAAS calls. Permulation p-values assess **strength of association** between amino acid patterns and traits.
+
+**Key Distinction:**
+- **Hypergeometric p-values** (from CAASTools): Measure pattern variability/strength
+- **Permulation p-values** (from RERConverge style "permulations"): Measure trait association strength
+
+Both are used as **filtering criteria** (not statistical tests) to create different CAAS subsets for downstream analysis.
+
+```{r bootstrap_import, message=FALSE, warning=FALSE}
+boot_folder <- file.path(resultsDir, "2.CAAS/2.Results")
+
+# Locate bootstrap CAAS files
+boot_files <- list.files(
+  path = boot_folder, 
+  pattern = "\\.tab.caas$", 
+  full.names = TRUE, 
+  recursive = TRUE
+)
+
+boot_files <- boot_files[grepl("/bootstrap/", boot_files, ignore.case = TRUE)]
+
+if (length(boot_files) == 0) {
+  stop("No bootstrap files found in ", boot_folder)
+}
+
+# Read bootstrap data (no column names in original format)
+boot_raw <- lapply(boot_files, read_tsv, col_names = FALSE, show_col_types = FALSE)
+names(boot_raw) <- gsub("_sp.tab.caas", "", basename(boot_files))
+
+cat("\n=== Permutation Test Data Import ===\n")
+cat(sprintf("Bootstrap files loaded: %d\n", length(boot_files)))
+cat(sprintf("Total positions tested: %s\n", format(sum(sapply(boot_raw, nrow)), big.mark = ",")))
+```
+
+```{r sig_processing, message=FALSE, warning=FALSE}
+# Process permulation test p-values
+process_bootstrap <- function(df) {
+  df %>%
+    as.data.frame() %>%
+    # Correct zero p-values using pseudo-count: 1/(permulations+1)
+    mutate(X4 = ifelse(X2 == 0, 1 / (X3 + 1), X4)) %>%
+    rename(
+      GenePos = X1,
+      Counts = X2,
+      Perms = X3,
+      Pvalue.boot = X4
+    ) %>%
+    # Apply Benjamini-Hochberg correction
+    mutate(Pvalue.boot.BH = p.adjust(Pvalue.boot, method = "BH"))
+}
+
+boot_processed <- lapply(boot_raw, process_bootstrap)
+names(boot_processed) <- names(caas_gapless)
+
+# Define p-value threshold
+P_VALUE_THRESHOLD <- 0.05
+
+# Merge permutation p-values with CAAS data early
+# This ensures all downstream objects have Pvalue.boot available
+caas_filtered <- lapply(names(caas_gapless), function(name) {
+  caas_gapless[[name]] %>%
+    left_join(
+      boot_processed[[name]] %>% select(GenePos, Pvalue.boot),
+      by = "GenePos"
+    ) %>%
+    # Add isSignificant flag: TRUE if BOTH p-values ≤ 0.05
+    mutate(
+      isSignificant = !is.na(Pvalue.boot) & 
+                      as.numeric(Pvalue) <= P_VALUE_THRESHOLD & 
+                      Pvalue.boot <= P_VALUE_THRESHOLD
+    )
+})
+names(caas_filtered) <- names(boot_processed)
+
+# Apply hypergeometric p-value filter
+# This filters CAAS by pattern variability, NOT as a statistical test
+# Used as criterion for downstream analysis inclusion
+filter_pvalue <- function(df, threshold = P_VALUE_THRESHOLD) {
+  df %>% filter(as.numeric(Pvalue) <= threshold)
+}
+
+caas_pval05 <- lapply(caas_filtered, filter_pvalue)
+
+# Apply permutation p-value filter
+boot_pval05 <- lapply(caas_filtered, function(df) {
+  df %>% filter(!is.na(Pvalue.boot) & Pvalue.boot <= P_VALUE_THRESHOLD)
+})
+
+cat("\n=== Significance Processing Summary ===\n")
+cat(sprintf("P-value threshold: %.2f\n\n", P_VALUE_THRESHOLD))
+cat("Positions passing filtering criteria:\n")
+cat(sprintf("  - Variability check (hypergeometric p ≤ %.2f): %s\n",
+            P_VALUE_THRESHOLD,
+            format(sum(sapply(caas_pval05, nrow)), big.mark = ",")))
+cat(sprintf("  - Association check (permutation p ≤ %.2f): %s\n",
+            P_VALUE_THRESHOLD,
+            format(sum(sapply(boot_pval05, nrow)), big.mark = ",")))
+cat(sprintf("  - Both criteria (isSignificant=TRUE): %s\n",
+            format(sum(sapply(caas_filtered, function(df) sum(df$isSignificant, na.rm = TRUE))), big.mark = ",")))
+cat(sprintf("\nPercentages relative to gap-filtered positions:\n"))
+cat(sprintf("  - Variability: %.1f%%\n",
+            100 * sum(sapply(caas_pval05, nrow)) / sum(sapply(caas_filtered, nrow))))
+cat(sprintf("  - Association: %.1f%%\n",
+            100 * sum(sapply(boot_pval05, nrow)) / sum(sapply(caas_filtered, nrow))))
+cat(sprintf("  - Both: %.1f%%\n",
+            100 * sum(sapply(caas_filtered, function(df) sum(df$isSignificant, na.rm = TRUE))) / sum(sapply(caas_filtered, nrow))))
+
+
+# Apply hypergeometric p-value filter
+# This filters CAAS by pattern variability, NOT as a statistical test
+# Used as criterion for downstream analysis inclusion
+P_VALUE_THRESHOLD <- 0.05
+
+filter_pvalue <- function(df, threshold = P_VALUE_THRESHOLD) {
+  df %>% filter(as.numeric(Pvalue) <= threshold)
+}
+
+caas_pval05 <- lapply(caas_filtered, filter_pvalue)
+
+
+# Summary of filtering results
+cat("\n=== Variability Control Filtering Summary ===\n")
+cat(sprintf("P-value threshold: %.2f\n\n", P_VALUE_THRESHOLD))
+
+filtering_summary <- data.frame(
+  Stage = c("Raw CAAS", "After gap filter", "After hypergeometric filter", "After permutation filter", "Significant CAAS (both filters)"),
+  Total_Positions = c(
+    sum(sapply(caas_raw, nrow)),
+    sum(sapply(caas_filtered, nrow)),
+    sum(sapply(caas_pval05, nrow)),
+    sum(sapply(boot_pval05, nrow)),
+    sum(sapply(caas_filtered, function(df) sum(df$isSignificant, na.rm = TRUE)))
+  ),
+  Retained_Pct = c(
+    100,
+    round(100 * sum(sapply(caas_filtered, nrow)) / sum(sapply(caas_raw, nrow)), 1),
+    round(100 * sum(sapply(caas_pval05, nrow)) / sum(sapply(caas_filtered, nrow)), 1),
+    round(100 * sum(sapply(boot_pval05, nrow)) / sum(sapply(caas_filtered, nrow)), 1),
+    round(100 * sum(sapply(caas_filtered, function(df) sum(df$isSignificant, na.rm = TRUE))) / sum(sapply(caas_filtered, nrow)), 1)
+  )
+)
+
+print(filtering_summary)
+
+cat(sprintf("\nSignificant positions (both filters): %s (%.1f%% of gap-filtered)\n",
+            format(sum(sapply(caas_filtered, function(df) sum(df$isSignificant, na.rm = TRUE))), big.mark = ","),
+            100 * sum(sapply(caas_filtered, function(df) sum(df$isSignificant, na.rm = TRUE))) / sum(sapply(caas_filtered, nrow))))
+```
+
+```{r merge_bootstrap, message=FALSE, warning=FALSE}
+# Create four filtering strategy variants for downstream analysis:
+# 1. caas_filtered: All gap-filtered CAAS (already has Pvalue.boot and isSignificant)
+# 2. caas_pval05: Hypergeometric filter only
+# 3. caas_boot (boot_pval05): Permutation filter only  
+# 4. caas_pval05_boot: Combined filters (strictest - these have isSignificant=TRUE)
+
+# caas_boot is just an alias for boot_pval05 (already created above)
+caas_boot <- boot_pval05
+
+# Combined filter: positions that pass BOTH filters (isSignificant=TRUE)
+caas_pval05_boot <- lapply(caas_filtered, function(df) {
+  df %>% filter(isSignificant == TRUE)
+})
+
+# Summary table of filtering strategies
+cat("\n=== Filtering Strategy Comparison ===\n")
+cat("Creating four CAAS subsets based on different filtering criteria:\n\n")
+
+strategy_summary <- data.frame(
+  Strategy = c("All (gap-filtered)", "Hypergeometric only", "Permutation only", "Combined (strictest)"),
+  Description = c(
+    "Quality control only",
+    "Pattern variability filter",
+    "Association strength filter",
+    "Both filters applied"
+  ),
+  Positions = c(
+    sum(sapply(caas_filtered, nrow)),
+    sum(sapply(caas_pval05, nrow)),
+    sum(sapply(caas_boot, nrow)),
+    sum(sapply(caas_pval05_boot, nrow))
+  )
+)
+
+print(strategy_summary)
+
+cat(sprintf("\nStrictestfilter retains %.1f%% of hypergeometric-filtered positions\n",
+            100 * sum(sapply(caas_pval05_boot, nrow)) / sum(sapply(caas_pval05, nrow))))
+```
+
+## 3. Pattern-Based Filtering
+
+This section extracts CAAS by pattern type and creates combined pattern sets.
+Each pattern represent (as defined by CAASTools):
+- **pattern1**: Foreground and background groups have distinct amino acids, shared within groups
+- **pattern2**: Foreground group shares the same amino acid; background group has distinct amino acids
+- **pattern3**: Foreground group has distinct amino acids; background group shares the same amino acid
+(Easter egg: pattern 4 is not considered as it represents no convergence, foreground and background share no amin
+```{r pattern_filtering, message=FALSE, warning=FALSE}
+# Unified pattern extraction function
+extract_patterns <- function(df_list, patterns = c("pattern1", "pattern2", "pattern3")) {
+  result <- list()
+  
+  # Extract individual patterns
+  for (pattern in patterns) {
+    result[[pattern]] <- lapply(names(df_list), function(name) {
+      df_list[[name]] %>% filter(Pattern == pattern)
+    })
+    names(result[[pattern]]) <- names(df_list)
+  }
+  
+  # Create combined patterns
+  result[["pattern12"]] <- lapply(names(result[["pattern1"]]), function(name) {
+    bind_rows(result[["pattern1"]][[name]], result[["pattern2"]][[name]])
+  })
+  names(result[["pattern12"]]) <- names(df_list)
+  
+  result[["pattern13"]] <- lapply(names(result[["pattern1"]]), function(name) {
+    bind_rows(result[["pattern1"]][[name]], result[["pattern3"]][[name]])
+  })
+  names(result[["pattern13"]]) <- names(df_list)
+  
+  return(result)
+}
+
+# Extract patterns for all four CAAS variants
+patterns_raw <- extract_patterns(caas_filtered)
+patterns_pval05 <- extract_patterns(caas_pval05)
+patterns_boot <- extract_patterns(caas_boot)
+patterns_boot_pval05 <- extract_patterns(caas_pval05_boot)
+
+# Pattern distribution summary
+cat("\n=== Pattern Distribution Summary ===\n")
+cat("CAAS patterns represent different types of amino acid convergence:\n")
+cat("  - Pattern1: Distinct amino acids, shared within foreground/background\n")
+cat("  - Pattern2: Foreground fixed, background variable\n")
+cat("  - Pattern3: Foreground variable, background fixed\n")
+cat("  - Pattern12/13: Combined pattern sets\n\n")
+
+pattern_counts <- data.frame(
+  Pattern = c("Pattern1", "Pattern2", "Pattern3", "Pattern12", "Pattern13"),
+  All = c(
+    sum(sapply(patterns_raw$pattern1, nrow)),
+    sum(sapply(patterns_raw$pattern2, nrow)),
+    sum(sapply(patterns_raw$pattern3, nrow)),
+    sum(sapply(patterns_raw$pattern12, nrow)),
+    sum(sapply(patterns_raw$pattern13, nrow))
+  ),
+  Hyp_05 = c(
+    sum(sapply(patterns_pval05$pattern1, nrow)),
+    sum(sapply(patterns_pval05$pattern2, nrow)),
+    sum(sapply(patterns_pval05$pattern3, nrow)),
+    sum(sapply(patterns_pval05$pattern12, nrow)),
+    sum(sapply(patterns_pval05$pattern13, nrow))
+  ),
+  Combined = c(
+    sum(sapply(patterns_boot_pval05$pattern1, nrow)),
+    sum(sapply(patterns_boot_pval05$pattern2, nrow)),
+    sum(sapply(patterns_boot_pval05$pattern3, nrow)),
+    sum(sapply(patterns_boot_pval05$pattern12, nrow)),
+    sum(sapply(patterns_boot_pval05$pattern13, nrow))
+  )
+)
+
+print(pattern_counts)
+```
+
+## 4. Export Organized CAAS Tables
+
+This section saves filtered CAAS tables in organized directory structures for downstream analyses (enrichment, meta-analysis, etc.). Each filtering strategy produces separate output files to support different analytical approaches.
+
+```{r export_tables, message=FALSE, warning=FALSE}
+# Set output directory
+caas_list_dir <- file.path(resultsDir, "2.CAAS/3.5.CAAS_exploration")
+createDir(caas_list_dir)
+
+# Unified file export function
+export_caas_tables <- function(df, name, filter_type, base_dir = caas_list_dir, subdir = "") {
+  # Parse trait and scenario from name
+  trait_name <- paste(strsplit(name, "_")[[1]][1:2], collapse = "_")
+  file_name <- paste(strsplit(name, "_")[[1]][3:4], collapse = "_")
+  
+  # Create output path
+  path <- file.path(base_dir, "1.CAAS_tables_filtered", trait_name, file_name, subdir)
+  createDir(path)
+  
+  # Write file
+  output_file <- file.path(path, paste0(filter_type, "_", file_name, ".output"))
+  write.table(
+    df, 
+    output_file,
+    quote = FALSE,
+    row.names = FALSE,
+    col.names = TRUE,
+    sep = "\t"
+  )
+  
+  return(df)
+}
+
+# Save all pattern variants
+save_pattern_tables <- function(pattern_list, suffix, subdir = "") {
+  results <- list()
+  for (pattern_name in names(pattern_list)) {
+    pattern_data <- pattern_list[[pattern_name]]
+    file_prefix <- paste0(pattern_name, suffix)
+    
+    results[[pattern_name]] <- lapply(names(pattern_data), function(name) {
+      export_caas_tables(pattern_data[[name]], name, file_prefix, subdir = subdir)
+    })
+    names(results[[pattern_name]]) <- names(pattern_data)
+  }
+  return(results)
+}
+
+# Save raw (unfiltered by p-value) patterns
+saved_raw <- save_pattern_tables(patterns_raw, "")
+
+# Save p-value filtered patterns
+saved_pval05 <- save_pattern_tables(patterns_pval05, "_05")
+
+# Save bootstrap filtered patterns
+saved_boot <- save_pattern_tables(patterns_boot, "_boot", subdir = "boot")
+
+# Save bootstrap + p-value filtered patterns
+saved_boot_pval05 <- save_pattern_tables(patterns_boot_pval05, "_boot05", subdir = "boot")
+
+# Export summary
+cat("\n=== CAAS Table Export Summary ===\n")
+cat(sprintf("Output directory: %s\n", caas_list_dir))
+cat("\nFiles exported by filtering strategy:\n")
+
+export_summary <- data.frame(
+  Strategy = c("Raw patterns", "Hypergeometric filtered", "Permutation filtered", "Combined filtered"),
+  Files_per_pattern = c(
+    length(patterns_raw$pattern1),
+    length(patterns_pval05$pattern1),
+    length(patterns_boot$pattern1),
+    length(patterns_boot_pval05$pattern1)
+  ),
+  Total_patterns = c(5, 5, 5, 5),
+  Total_files = c(
+    length(patterns_raw$pattern1) * 5,
+    length(patterns_pval05$pattern1) * 5,
+    length(patterns_boot$pattern1) * 5,
+    length(patterns_boot_pval05$pattern1) * 5
+  )
+)
+
+print(export_summary)
+cat(sprintf("\nTotal files exported: %d\n", sum(export_summary$Total_files)))
+```
+
+## 5. Summary Statistics
+
+This section computes summary counts and creates visualization-ready tables.
+
+```{r summary_table, message=FALSE, warning=FALSE}
+# Create comprehensive summary table
+create_summary_table <- function(
+  raw_list, pval05_list, boot_list, boot_pval05_list,
+  pattern_raw, pattern_pval05, pattern_boot, pattern_boot_pval05
+) {
+  summary_df <- data.frame(
+    File = names(raw_list),
+    All = sapply(raw_list, nrow),
+    Perm_05 = sapply(boot_list, nrow),
+    Hyp_05 = sapply(pval05_list, nrow),
+    Perm_Hyp_05 = sapply(boot_pval05_list, nrow)
+  )
+  
+  # Add pattern counts
+  for (pattern in c("pattern1", "pattern2", "pattern3", "pattern12", "pattern13")) {
+    prefix <- gsub("pattern", "Pattern", pattern)
+    summary_df[[paste0(prefix, "_All")]] <- sapply(pattern_raw[[pattern]], nrow)
+    summary_df[[paste0(prefix, "_Perm_05")]] <- sapply(pattern_boot[[pattern]], nrow)
+    summary_df[[paste0(prefix, "_Hyp_05")]] <- sapply(pattern_pval05[[pattern]], nrow)
+    summary_df[[paste0(prefix, "_Perm_Hyp_05")]] <- sapply(pattern_boot_pval05[[pattern]], nrow)
+  }
+  
+  return(summary_df)
+}
+
+summary_table <- create_summary_table(
+  caas_filtered, caas_pval05, caas_boot, caas_pval05_boot,
+  patterns_raw, patterns_pval05, patterns_boot, patterns_boot_pval05
+)
+
+# Add totals row
+totals <- c("Total", colSums(summary_table[, -1]))
+summary_table <- rbind(summary_table, totals)
+
+# Add species pair information
+malignant_pairs_file <- file.path(
+  resultsDir, 
+  "2.CAAS/1.Discovery/1.Traitfiles/malignant_prevalence/malignant_prevalence_paired_species.tab"
+)
+neoplasia_pairs_file <- file.path(
+  resultsDir,
+  "2.CAAS/1.Discovery/1.Traitfiles/neoplasia_prevalence/neoplasia_prevalence_paired_species.tab"
+)
+
+# Function to read and format species pairs
+format_species_pairs <- function(file_path) {
+  read_tsv(file_path, show_col_types = FALSE) %>%
+    select(species, pair, contrast) %>%
+    unique() %>%
+    group_by(pair, contrast) %>%
+    summarize(sp_pair = paste(species, collapse = ","), .groups = "drop") %>%
+    group_by(contrast) %>%
+    summarize(sp_pair_display = paste(sp_pair, collapse = "\n"), .groups = "drop")
+}
+
+if (file.exists(malignant_pairs_file) && file.exists(neoplasia_pairs_file)) {
+  malignant_pairs <- format_species_pairs(malignant_pairs_file) %>%
+    mutate(source = "malignant_pairs")
+  
+  neoplasia_pairs <- format_species_pairs(neoplasia_pairs_file) %>%
+    mutate(source = "neoplasia_pairs")
+  
+  # Combine and merge with summary
+  lookup_table <- bind_rows(malignant_pairs, neoplasia_pairs) %>%
+    mutate(file_name = paste0(source, "_", contrast))
+  
+  summary_table_annotated <- summary_table %>%
+    rownames_to_column(var = "RowNum") %>%
+    mutate(
+      contrast_num = str_extract(File, "\\d+"),
+      source = case_when(
+        str_detect(File, "^malignant_prevalence_pair_") ~ "malignant_pairs",
+        str_detect(File, "^neoplasia_prevalence_pair_") ~ "neoplasia_pairs",
+        TRUE ~ NA_character_
+      ),
+      file_name = paste0(source, "_", contrast_num)
+    ) %>%
+    left_join(
+      select(lookup_table, file_name, sp_pair_display),
+      by = "file_name"
+    ) %>%
+    mutate(
+      File = case_when(
+        !is.na(source) ~ paste0(source, "_", contrast_num),
+        TRUE ~ File
+      )
+    ) %>%
+    select(sp_pair_display, everything(), -RowNum, -contrast_num, -file_name)
+} else {
+  summary_table_annotated <- summary_table
+}
+
+# Display summary (show first 10 rows if large)
+cat("\n=== CAAS Summary Statistics ===\n")
+if (nrow(summary_table_annotated) > 11) {
+  cat("Showing first 10 contrasts and totals:\n\n")
+  print(rbind(
+    head(summary_table_annotated, 10),
+    tail(summary_table_annotated, 1)
+  ))
+  cat(sprintf("\n... %d contrasts omitted ...\n", nrow(summary_table_annotated) - 11))
+} else {
+  print(summary_table_annotated)
+}
+
+write.table(
+  summary_table_annotated,
+  file.path(caas_list_dir, "summary_table.txt"),
+  row.names = FALSE,
+  col.names = TRUE,
+  quote = FALSE,
+  sep = "\t"
+)
+
+cat(sprintf("\nFull summary table saved to: %s\n", 
+            file.path(caas_list_dir, "summary_table.txt")))
+```
+
+## 6. Visualization
+
+This section creates bar plots summarizing CAAS counts across contrasts and patterns.
+
+```{r visualization, fig.width=16, fig.height=12, message=FALSE, warning=FALSE, dpi=320, dev="png"}
+# Prepare plot data (exclude Total row)
+plot_data <- summary_table_annotated %>%
+  drop_na(sp_pair_display) %>%
+  mutate(sp_pair_display = factor(sp_pair_display, levels = unique(sp_pair_display)))
+
+# Define color palette
+levels_palette <- c(
+  "All" = "skyblue3", 
+  "Hyp_05" = "salmon3", 
+  "Perm_05" = "darkseagreen3", 
+  "Perm_Hyp_05" = "tan1"
+)
+
+# Overall counts plot
+overall_data <- plot_data %>%
+  select(sp_pair_display, source, All, Hyp_05, Perm_05, Perm_Hyp_05) %>%
+  pivot_longer(
+    cols = c(All, Hyp_05, Perm_05, Perm_Hyp_05),
+    names_to = "Category",
+    values_to = "Count"
+  ) %>%
+  mutate(Count = as.numeric(Count))
+
+p_overall <- ggplot(overall_data, aes(x = sp_pair_display, y = Count, fill = Category)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(~ source, scales = "free_x") +
+  theme_minimal() +
+  labs(
+    title = "CAAS Counts by Filtering Strategy",
+    subtitle = "Hyp_05 = Hypergeometric (variability) | Perm_05 = Permulation (association) | Perm_Hyp_05 = Both",
+    x = "Species Pair",
+    y = "Count"
+  ) +
+  scale_fill_manual(values = levels_palette) +
+  scale_y_continuous(breaks = seq(0, 11000, by = 500)) +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1, size = 10),
+    panel.grid.major = element_line(color = "darkgray", size = 0.5),
+    panel.grid.minor = element_line(color = "lightgray", size = 0.5),
+    axis.title.x = element_text(margin = margin(t = 20)),
+    axis.title.y = element_text(margin = margin(r = 20))
+  )
+
+print(p_overall)
+
+# Pattern-specific stacked plot
+patterns <- c("1", "2", "3")
+categories <- c("All", "Hyp_05", "Perm_05", "Perm_Hyp_05")
+
+pattern_data_list <- list()
+
+for (cat in categories) {
+  suffix <- paste0("_", cat)
+  pattern_cols <- paste0("Pattern", patterns, suffix)
+  
+  temp_data <- plot_data %>%
+    select(sp_pair_display, source, all_of(pattern_cols))
+  
+  temp_long <- temp_data %>%
+    pivot_longer(
+      cols = all_of(pattern_cols),
+      names_to = "Pattern",
+      values_to = "Count"
+    ) %>%
+    mutate(
+      Pattern = gsub("^Pattern", "", Pattern),
+      Pattern = gsub(paste0(suffix, "$"), "", Pattern),
+      Category = cat,
+      Count = as.numeric(Count)
+    )
+  
+  pattern_data_list[[cat]] <- temp_long
+}
+
+all_pattern_data <- bind_rows(pattern_data_list) %>%
+  mutate(
+    Category = factor(Category, levels = c("All", "Hyp_05", "Perm_05", "Perm_Hyp_05")),
+    sp_pair_display = factor(sp_pair_display, levels = unique(plot_data$sp_pair_display))
+  )
+
+# Color palette for patterns
+pattern_palette <- c(
+  "1" = "skyblue3",
+  "2" = "salmon3",
+  "3" = "darkseagreen3"
+)
+
+p_stacked <- ggplot(all_pattern_data, aes(x = sp_pair_display, y = Count, fill = Pattern)) +
+  geom_bar(stat = "identity") +
+  facet_grid(Category ~ source, scales = "free") +
+  theme_minimal() +
+  labs(
+    title = "CAAS Counts by Pattern Type and Filtering Strategy",
+    x = "Hypothesis (Species Pair)",
+    y = "Count",
+    fill = "Pattern"
+  ) +
+  scale_fill_manual(values = pattern_palette) +
+  theme(
+    axis.text.x = element_text(angle = 60, hjust = 1, vjust = 1, size = 10),
+    panel.grid.major = element_line(color = "darkgray", size = 0.5),
+    panel.grid.minor = element_line(color = "lightgray", size = 0.5),
+    axis.title.x = element_text(margin = margin(t = 20)),
+    axis.title.y = element_text(margin = margin(r = 20))
+  )
+
+print(p_stacked)
+
+# Save plots
+ggsave(
+  file.path(caas_list_dir, "overall_counts.png"),
+  plot = p_overall,
+  width = 15,
+  height = 10,
+  dpi = 320
+)
+
+ggsave(
+  file.path(caas_list_dir, "stacked_counts.png"),
+  plot = p_stacked,
+  width = 10,
+  height = 8,
+  dpi = 320
+)
+
+cat("\n=== Visualization Export Summary ===\n")
+cat(sprintf("Overall counts plot: %s\n", file.path(caas_list_dir, "overall_counts.png")))
+cat(sprintf("Stacked patterns plot: %s\n", file.path(caas_list_dir, "stacked_counts.png")))
+cat("\nPlots show CAAS distributions across:\n")
+cat("  - Species pair contrasts\n")
+cat("  - Filtering strategies (All, Hyp_05, Perm_05, Combined)\n")
+cat("  - Pattern types (Pattern 1, 2, 3)\n")
+```
+
+## 7. Gene List Extraction for Enrichment Analysis
+
+This section extracts unique gene lists from filtered CAAS datasets. These lists are formatted for downstream enrichment analysis tools (GO, KEGG, Reactome, etc.).
+
+```{r gene_extraction, message=FALSE, warning=FALSE}
+gene_path <- file.path(caas_list_dir, "3.Gene-tables")
+createDir(gene_path)
+
+# Unified gene extraction function
+extract_gene_list <- function(df, name, criteria) {
+  # Parse trait and scenario names
+  trait_name <- paste(strsplit(name, "_")[[1]][1:2], collapse = "_")
+  scenario_name <- gsub("\\.tab\\.caas", "", paste(strsplit(name, "_")[[1]][3:4], collapse = "_"))
+  
+  # Create output directory
+  path <- file.path(gene_path, trait_name, scenario_name)
+  createDir(path)
+  
+  # Extract unique genes
+  genes <- unique(df$Gene)
+  
+  # Write to file
+  output_file <- file.path(path, paste0(criteria, "_", name, ".genes"))
+  write.table(
+    genes,
+    output_file,
+    quote = FALSE,
+    row.names = FALSE,
+    col.names = FALSE,
+    sep = "\n"
+  )
+  
+  return(genes)
+}
+
+# Extract genes for all variants and patterns
+extract_all_genes <- function(pattern_list, suffix) {
+  results <- list()
+  for (pattern_name in names(pattern_list)) {
+    pattern_data <- pattern_list[[pattern_name]]
+    criteria <- paste0(pattern_name, suffix)
+    
+    results[[pattern_name]] <- lapply(names(pattern_data), function(name) {
+      extract_gene_list(pattern_data[[name]], name, criteria)
+    })
+    names(results[[pattern_name]]) <- names(pattern_data)
+  }
+  return(results)
+}
+
+# Extract for all pattern sets
+genes_raw <- extract_all_genes(patterns_raw, "")
+genes_pval05 <- extract_all_genes(patterns_pval05, "_05")
+genes_boot <- extract_all_genes(patterns_boot, "_boot")
+genes_boot_pval05 <- extract_all_genes(patterns_boot_pval05, "_boot05")
+
+# Create aggregated gene lists per trait
+aggregate_trait_genes <- function(gene_list, trait_name) {
+  all_genes <- unique(unlist(gene_list))
+  
+  path <- file.path(gene_path, trait_name)
+  createDir(path)
+  
+  output_file <- file.path(path, paste0("all_genes_", trait_name, ".txt"))
+  write.table(
+    sort(all_genes),
+    output_file,
+    quote = FALSE,
+    row.names = FALSE,
+    col.names = FALSE,
+    sep = "\t"
+  )
+  
+  return(all_genes)
+}
+
+# Aggregate by trait (malignant vs neoplasia)
+for (trait in c("malignant_prevalence", "neoplasia_prevalence")) {
+  trait_genes <- genes_raw[["pattern1"]][grepl(trait, names(genes_raw[["pattern1"]]))]
+  aggregate_trait_genes(trait_genes, trait)
+}
+
+# Gene extraction summary
+cat("\n=== Gene List Extraction Summary ===\n")
+cat(sprintf("Output directory: %s\n", gene_path))
+cat("\nUnique genes extracted by filtering strategy:\n")
+
+gene_summary <- data.frame(
+  Strategy = c("Raw", "Hypergeometric", "Permutation", "Combined"),
+  Pattern1_genes = c(
+    length(unique(unlist(lapply(genes_raw$pattern1, unique)))),
+    length(unique(unlist(lapply(genes_pval05$pattern1, unique)))),
+    length(unique(unlist(lapply(genes_boot$pattern1, unique)))),
+    length(unique(unlist(lapply(genes_boot_pval05$pattern1, unique))))
+  ),
+  All_patterns_genes = c(
+    length(unique(unlist(genes_raw))),
+    length(unique(unlist(genes_pval05))),
+    length(unique(unlist(genes_boot))),
+    length(unique(unlist(genes_boot_pval05)))
+  )
+)
+
+print(gene_summary)
+
+cat("\nGene lists exported for:\n")
+cat("  - Each contrast and pattern combination\n")
+cat("  - Aggregated by trait (malignant_prevalence, neoplasia_prevalence)\n")
+cat("  - Ready for enrichment analysis (GO, KEGG, Reactome, etc.)\n")
+```
+
+## 8. Cross-Contrast Commonality Analysis
+
+This section identifies positions shared across multiple contrasts and creates aggregated datasets for meta-analysis.
+"Significant" positions are determined based on the combined hypergeometric and permulation filtering.
+
+```{r commonality_analysis, message=FALSE, warning=FALSE}
+assign_caas_tags <- function(df) {
+  set.seed(1998)
+  
+  n_rows <- nrow(df)
+  tags <- sapply(1:n_rows, function(i) {
+    paste0("CAAS_", 
+           paste0(sample(LETTERS, 5, TRUE), collapse = ""),
+           sprintf("%04d", sample(9999, 1)),
+           sample(LETTERS, 1))
+  })
+  
+  if ("Substitution" %in% colnames(df)) {
+    df <- df %>% mutate(AminoConv = Substitution)
+  }
+  
+  df %>%
+    mutate(
+      Trait = sub("^([^_]+_[^_]+)_.*", "\\1", source),
+      Tag = tags
+    ) %>%
+    rename(Contrast = source) %>%
+    # Extract only the final integer before the extension
+    mutate(Contrast = sub(".*_(\\d+)\\..*$", "\\1", Contrast)) %>%
+    select(-Trait)
+}
+
+# Aggregate by trait
+aggregate_by_trait <- function(df_list) {
+  malignant <- df_list[grepl("^malignant_", names(df_list))] %>%
+    bind_rows(.id = "source") %>%
+    assign_caas_tags()
+  
+  neoplasia <- df_list[grepl("^neoplasia_", names(df_list))] %>%
+    bind_rows(.id = "source") %>%
+    assign_caas_tags()
+  
+  return(list(
+    malignant_prevalence = malignant,
+    neoplasia_prevalence = neoplasia
+  ))
+}
+
+# Create aggregated datasets
+aggregated_raw <- aggregate_by_trait(caas_filtered)
+aggregated_sig <- aggregate_by_trait(caas_pval05_boot)
+
+# Extract position-level information
+extract_position_info <- function(df) {
+  df %>%
+    mutate(GenePos = paste(Gene, Position, sep = "_")) %>%
+    group_by(GenePos) %>%
+    summarize(
+      Contrast = paste(unique(Contrast), collapse = ","),
+      Unique = !grepl(",", Contrast[1]),
+      .groups = "drop"
+    )
+}
+
+# Create unique/shared position tables
+create_commonality_tables <- function(agg_df) {
+  pos_info <- extract_position_info(agg_df)
+  
+  unique_positions <- pos_info %>%
+    filter(Unique) %>%
+    select(GenePos, Contrast)
+  
+  shared_positions <- pos_info %>%
+    filter(!Unique) %>%
+    select(GenePos, Contrast)
+  
+  merged_positions <- agg_df %>%
+    mutate(GenePos = paste(Gene, Position, sep = "_")) %>%
+    select(GenePos, Contrast, Tag)
+  
+  meta_caas <- agg_df %>%
+    mutate(GenePos = paste(Gene, Position, sep = "_")) %>%
+    select(GenePos, Tag, Contrast, Pattern, AminoConv, Pvalue, Pvalue.boot, isSignificant)
+  
+  return(list(
+    unique_positions = unique_positions,
+    shared_positions = shared_positions,
+    merged_positions = merged_positions,
+    meta_caas = meta_caas
+  ))
+}
+
+# Process both raw and bootstrap aggregations
+commonality_raw <- lapply(aggregated_raw, create_commonality_tables)
+commonality_sig <- lapply(aggregated_sig, create_commonality_tables)
+
+# Save commonality tables
+save_commonality <- function(commonality_list, parent_name, subdir) {
+  for (table_name in names(commonality_list)) {
+    path <- file.path(caas_list_dir, "4.Commonalities", subdir, parent_name)
+    createDir(path)
+    
+    output_file <- file.path(path, paste0(table_name, ".output"))
+    write.table(
+      commonality_list[[table_name]],
+      output_file,
+      quote = FALSE,
+      row.names = FALSE,
+      col.names = TRUE,
+      sep = "\t"
+    )
+  }
+}
+
+# Save raw commonality tables
+for (trait in names(commonality_raw)) {
+  save_commonality(commonality_raw[[trait]], trait, "not-significant")
+}
+
+# Save significant commonality tables
+for (trait in names(commonality_sig)) {
+  save_commonality(commonality_sig[[trait]], trait, "significant")
+}
+
+# Commonality analysis summary
+cat("\n=== Cross-Contrast Commonality Analysis Summary ===\n")
+cat(sprintf("Output directory: %s\n", file.path(caas_list_dir, "4.Commonalities")))
+cat("\nAnalysis identifies CAAS positions shared across multiple contrasts.\n")
+cat("Useful for meta-analysis and identifying robust trait-associated positions.\n\n")
+
+# Summary for each trait
+for (trait in names(commonality_raw)) {
+  cat(sprintf("Trait: %s\n", trait))
+  cat(sprintf("  Total positions: %s\n", 
+              format(nrow(commonality_raw[[trait]]$merged_positions), big.mark = ",")))
+  cat(sprintf("  Unique to one contrast: %s\n", 
+              format(nrow(commonality_raw[[trait]]$unique_positions), big.mark = ",")))
+  cat(sprintf("  Shared across contrasts: %s\n", 
+              format(nrow(commonality_raw[[trait]]$shared_positions), big.mark = ",")))
+  
+  if (nrow(commonality_raw[[trait]]$shared_positions) > 0) {
+    cat(sprintf("  Sharing percentage: %.1f%%\n\n",
+                100 * nrow(commonality_raw[[trait]]$shared_positions) / 
+                  nrow(commonality_raw[[trait]]$merged_positions)))
+  } else {
+    cat("\n")
+  }
+}
+
+cat("Tables exported:\n")
+cat("  - unique_positions: Positions specific to single contrasts\n")
+cat("  - shared_positions: Positions found in multiple contrasts\n")
+cat("  - merged_positions: All positions with contrast assignments\n")
+cat("  - meta_caas: Full CAAS metadata for meta-analysis\n")
+```
+
+## Session Information
+
+```{r session_info}
+sessionInfo()
+```
