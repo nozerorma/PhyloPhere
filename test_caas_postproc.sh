@@ -46,10 +46,10 @@ TEST_TAG="postproc_test"
 TRAIT="neoplasia_prevalence_toy"
 
 # Input files (using existing toy dataset from PhyloPhere Out directory)
-DISCOVERY_FILE="Out/integrated_test/neoplasia_prevalence_toy/20260206_152126/caas_analysis/caastools/discovery.tab"
-BOOTSTRAP_FILE="Out/integrated_test/neoplasia_prevalence_toy/20260206_152126/caas_analysis/caastools/bootstrap.tab"
+DISCOVERY_FILE="Out/integrated_test/neoplasia_prevalence_toy/20260210_095707/caas_analysis/caastools/discovery.tab"
+BOOTSTRAP_FILE="Out/integrated_test/neoplasia_prevalence_toy/20260210_095707/caas_analysis/caastools/bootstrap.tab"
 GENE_ENSEMBL_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/ensembl_genes.output"
-BACKGROUND_FILE="Out/integrated_test/neoplasia_prevalence_toy/20260206_152126/caas_analysis/caastools/background_genes.output"
+BACKGROUND_FILE="Out/integrated_test/neoplasia_prevalence_toy/20260210_095707/caas_analysis/caastools/background_genes.output"
 
 # Validate input files exist
 if [ ! -f "$DISCOVERY_FILE" ]; then
@@ -104,8 +104,10 @@ echo "=========================================="
 echo "Testing parameter sweep (2,3,4 × 0.6,0.7,0.8)"
 echo ""
 
-OUT_EXPLORATORY="${RESULTS_BASE}/exploratory"
+OUT_EXPLORATORY="${RESULTS_BASE}/exploratory/postproc"
+OUT_SIGNIFICATION="${RESULTS_BASE}/exploratory/caas_signification"
 mkdir -p "$OUT_EXPLORATORY"
+mkdir -p "$OUT_SIGNIFICATION"
 
 nextflow run main.nf \
     -with-tower \
@@ -126,7 +128,7 @@ nextflow run main.nf \
     --generate_reports true \
     --generate_manhattan true \
     --postproc_outdir "$OUT_EXPLORATORY" \
-    --outdir "$OUT_EXPLORATORY"
+    --signification_outdir "$OUT_SIGNIFICATION"
 
 echo ""
 echo "✓ Exploratory mode completed"
@@ -142,8 +144,10 @@ echo "=========================================="
 echo "Testing single filter (minlen=3, maxcaas=0.7)"
 echo ""
 
-OUT_FILTER="${RESULTS_BASE}/filter"
+OUT_FILTER="${RESULTS_BASE}/filter/postproc"
 mkdir -p "$OUT_FILTER"
+OUT_SIGNIFICATION="${RESULTS_BASE}/filter/caas_signification"
+mkdir -p "$OUT_SIGNIFICATION"
 
 nextflow run main.nf \
     -with-tower \
@@ -164,7 +168,7 @@ nextflow run main.nf \
     --generate_reports true \
     --generate_manhattan true \
     --postproc_outdir "$OUT_FILTER" \
-    --outdir "$OUT_FILTER"
+    --signification_outdir "$OUT_SIGNIFICATION"
 
 echo ""
 echo "✓ Filter mode completed"
@@ -183,6 +187,8 @@ echo ""
 # # Test with only extreme filtering
 # OUT_EXTREME="${RESULTS_BASE}/gene_filter_extreme"
 # mkdir -p "$OUT_EXTREME"
+# OUT_SIGNIFICATION="${RESULTS_BASE}/gene_filter_extreme/caas_signification"
+# mkdir -p "$OUT_SIGNIFICATION"
 
 # echo "→ Testing gene_filter_mode=extreme"
 # nextflow run main.nf \
@@ -202,7 +208,7 @@ echo ""
 #     --extreme_threshold 0.95 \
 #     --generate_reports true \
 #     --postproc_outdir "$OUT_EXTREME" \
-#     --outdir "$OUT_EXTREME"
+#     --signification_outdir "$OUT_SIGNIFICATION"
 
 # echo "  ✓ Extreme-only filtering completed"
 # echo ""
@@ -210,6 +216,8 @@ echo ""
 # # Test with only dubious filtering
 # OUT_DUBIOUS="${RESULTS_BASE}/gene_filter_dubious"
 # mkdir -p "$OUT_DUBIOUS"
+# OUT_SIGNIFICATION="${RESULTS_BASE}/gene_filter_dubious/caas_signification"
+# mkdir -p "$OUT_SIGNIFICATION"
 
 # echo "→ Testing gene_filter_mode=dubious"
 # nextflow run main.nf \
@@ -229,7 +237,7 @@ echo ""
 #     --iqr_multiplier 4.0 \
 #     --generate_reports true \
 #     --postproc_outdir "$OUT_DUBIOUS" \
-#     --outdir "$OUT_DUBIOUS"
+#     --signification_outdir "$OUT_SIGNIFICATION"
 
 # echo "  ✓ Dubious-only filtering completed"
 # echo ""
@@ -237,6 +245,8 @@ echo ""
 # # Test with no gene filtering
 # OUT_NONE="${RESULTS_BASE}/gene_filter_none"
 # mkdir -p "$OUT_NONE"
+# OUT_SIGNIFICATION="${RESULTS_BASE}/gene_filter_none/caas_signification"
+# mkdir -p "$OUT_SIGNIFICATION"
 
 # echo "→ Testing gene_filter_mode=none"
 # nextflow run main.nf \
@@ -255,7 +265,7 @@ echo ""
 #     --gene_filter_mode none \
 #     --generate_reports true \
 #     --postproc_outdir "$OUT_NONE" \
-#     --outdir "$OUT_NONE"
+#     --signification_outdir "$OUT_SIGNIFICATION"
 
 # echo "  ✓ No gene filtering completed"
 # echo ""

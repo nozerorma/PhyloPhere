@@ -8,8 +8,8 @@ process CAAS_FILTER {
     tag "${mode}:${minlen}x${maxcaas_int}"
     publishDir(
         path: params.caas_postproc_mode == 'exploratory' ? 
-            "${params.postproc_outdir}/filter_${mode}/minlen${minlen}_maxcaas${maxcaas_int}" :
-            "${params.postproc_outdir}/filter_selected",
+            "${params.outdir}/postproc/filter_${mode}/minlen${minlen}_maxcaas${maxcaas_int}" :
+            "${params.outdir}/postproc/filter_selected",
         mode: 'copy',
         overwrite: true
     )
@@ -18,7 +18,7 @@ process CAAS_FILTER {
     tuple val(mode), val(minlen), val(maxcaas), path(discovery_file)
     
     output:
-    tuple val(minlen), val(maxcaas), path("*.filtered.*.tsv"), emit: filtered
+    path "*.filtered.*.tsv", emit: filtered_files
     
     script:
     maxcaas_int = (maxcaas * 100).toInteger()
@@ -33,13 +33,13 @@ process CAAS_FILTER {
 
 process CAAS_FILTER_SUMMARY {
     tag "filter_summary"
-    publishDir "${params.postproc_outdir}", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/postproc", mode: 'copy', overwrite: true
     
     input:
     path(filter_files)
     
     output:
-    path("discarded_summary.tsv"), emit: summary
+    path "discarded_summary.tsv", emit: summary
     
     script:
     """
@@ -81,7 +81,7 @@ process CAAS_FILTER_SUMMARY {
 process CAAS_FILTER_GENES {
     tag "gene_filter:${params.gene_filter_mode}"
     label 'process_low'
-    publishDir "${params.postproc_outdir}/gene_filtering", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/postproc/gene_filtering", mode: 'copy', overwrite: true
     
     when:
     params.gene_filter_mode != 'none'
@@ -92,8 +92,8 @@ process CAAS_FILTER_GENES {
     path(cluster_file)
     
     output:
-    path("filtered_discovery.tsv"), emit: filtered_discovery
-    path("removed_genes_summary.tsv"), emit: removed_genes
+    path "filtered_discovery.tsv", emit: filtered_discovery
+    path "removed_genes_summary.tsv", emit: removed_genes
     
     script:
     def cluster_arg = (params.gene_filter_mode in ['dubious', 'both']) ? "-c ${cluster_file}" : ""
@@ -113,7 +113,7 @@ process CAAS_FILTER_GENES {
 process CAAS_BACKGROUND_CLEANUP {
     tag "bg_cleanup"
     label 'process_low'
-    publishDir "${params.postproc_outdir}/cleaned_backgrounds", mode: 'copy', overwrite: true
+    publishDir "${params.outdir}/postproc/cleaned_backgrounds", mode: 'copy', overwrite: true
     
     input:
     path(background_files)

@@ -31,12 +31,34 @@ suppressPackageStartupMessages({
   library(knitr)
   library(scales)
   library(data.table)
+  library(paletteer)
 })
 
 # Directory management
 createDir <- function(path) {
   if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
 }
+
+# Define color palettes, including a colorblind-friendly palette for categories
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "brown", "gray"
+)
+
+# Consistent colorblind-friendly palette
+category_palette <- c(
+  "Normal" = tableau_10[["gray"]],
+  "Dubious" = tableau_10[["blue"]],
+  "Extreme" = tableau_10[["vermillion"]],
+  "Both" = tableau_10[["reddish_purple"]]
+)
+
+removal_palette <- c(
+  Discarded = tableau_10[["vermillion"]],
+  Good = tableau_10[["green"]]
+)
 ```
 
 ## 1. Data Import and Validation
@@ -307,10 +329,10 @@ if (has_caap_group) {
       y = "Count"
     ) +
     scale_fill_manual(values = c(
-      "Total" = "gray70",
-      "Hyp_05" = "salmon3",
-      "Perm_05" = "darkseagreen3",
-      "Both_05" = "tan1"
+      "Total" = tableau_10[["gray"]],
+      "Hyp_05" = tableau_10[["blue"]],
+      "Perm_05" = tableau_10[["green"]],
+      "Both_05" = tableau_10[["vermillion"]]
     )) +
     theme(
       axis.text.x = element_text(angle = 0, hjust = 0.5),
@@ -355,10 +377,10 @@ if (has_caap_group) {
       y = "Count"
     ) +
     scale_fill_manual(values = c(
-      "Total" = "gray70",
-      "Hyp_05" = "salmon3",
-      "Perm_05" = "darkseagreen3",
-      "Both_05" = "tan1"
+      "Total" = tableau_10[["gray"]],
+      "Hyp_05" = tableau_10[["blue"]],
+      "Perm_05" = tableau_10[["green"]],
+      "Both_05" = tableau_10[["vermillion"]]
     )) +
     theme(
       axis.text.x = element_text(angle = 0, hjust = 0.5),
@@ -379,7 +401,8 @@ Export gene lists for downstream enrichment analysis (GO, KEGG, Reactome).
 ```{r gene_export}
 cat("\n=== Exporting Gene Lists ===\n")
 
-gene_list_dir <- file.path(params$output_dir, "gene_lists")
+# Use local directory for Nextflow to capture
+gene_list_dir <- "gene_lists"
 createDir(gene_list_dir)
 
 # Export function
@@ -490,12 +513,13 @@ Extract comprehensive CAAS metadata for meta-analysis and cross-study comparison
 ```{r meta_caas_export}
 cat("\n=== Exporting Meta-CAAS Data ===\n")
 
-meta_dir <- file.path(params$output_dir, "meta_caas")
+# Use local directory for Nextflow to capture
+meta_dir <- "meta_caas"
 createDir(meta_dir)
 
 if (has_caap_group) {
   # Per-group meta-CAAS
-  for (grp in setdiff(unique(caas_for_export$CAAP_Group), "gs0")) {
+  for (grp in unique(caas_for_export$CAAP_Group)) {
     grp_meta <- caas_for_export %>%
       filter(CAAP_Group == grp) %>%
       mutate(

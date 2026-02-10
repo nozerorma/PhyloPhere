@@ -1,0 +1,9 @@
+Metric	Value
+Total CAAS Positions	742
+Unique Genes	63
+Extreme Genes (top 1% density)	6
+Dubious Genes (IQR outliers)	0
+Both Extreme and Dubious	0
+Normal Genes	266
+Extreme Threshold (density)	2.6856
+Dubious Threshold (count)	13

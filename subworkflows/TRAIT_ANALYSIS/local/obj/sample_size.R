@@ -14,8 +14,8 @@ if (!exists("debug_log", inherits = TRUE)) {
 ####### specify it here, as it will allow for a more in-depth analysis.                     #######
 ###################################################################################################
 
-n_trait <- get_arg(args, 8, "") # Trait with number of individuals sampled (population size)
-c_trait <- get_arg(args, 9, "") # Trait with number of observed cases (e.g., number of diseased individuals)
+n_trait <- if (exists("params")) params$n_trait else "" # Trait with number of individuals sampled (population size)
+c_trait <- if (exists("params")) params$c_trait else "" # Trait with number of observed cases (e.g., number of diseased individuals)
 debug_log("n_trait = %s", ifelse(nzchar(n_trait), n_trait, "<none>"))
 debug_log("c_trait = %s", ifelse(nzchar(c_trait), c_trait, "<none>"))
 

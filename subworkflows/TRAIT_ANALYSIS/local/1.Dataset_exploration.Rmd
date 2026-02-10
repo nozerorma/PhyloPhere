@@ -1,9 +1,28 @@
 ---
-title: "Data Visualization for trait analysis"
+title: "Dataset Exploration for Trait Analysis"
+author: "PhyloPhere Pipeline"
 date: "`r Sys.Date()`"
 output:
-  html_document: default
-  pdf_document: default
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  trait_file: NULL
+  tree_file: NULL
+  output_dir: !r getwd()
+  seed: ""
+  clade_name: "clade"
+  taxon_of_interest: "family"
+  traitname: "trait"
+  n_trait: ""
+  c_trait: ""
+  tax_id: ""
+  secondary_trait: ""
+  branch_trait: ""
 ---
 
 ```{r header}
@@ -36,6 +55,12 @@ This section configures the working environment, sets directories, and loads nec
 
 ```{r setup, message=FALSE, warning=FALSE}
 
+# Make params available in environment before sourcing commons.R
+if (!exists("params")) {
+  stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
+}
+assign("params", params, envir = .GlobalEnv)
+
 # Call the setup function from commons.R
 source("./obj/commons.R")
 setup_rmd()
@@ -45,6 +70,7 @@ library(dplyr)
 library(ggplot2)
 library(readr)
 library(reshape2)
+library(paletteer)
 
 # Objects
 color_palette <- paste0(clade_name, "_palette") # Color palette for the clade

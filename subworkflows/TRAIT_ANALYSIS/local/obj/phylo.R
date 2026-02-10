@@ -14,7 +14,7 @@ if (!exists("debug_log", inherits = TRUE)) {
 # Check if a TAX_ID column is present, or file mapping taxonomy IDs to species names is provided
 has.TAX_ID <- FALSE
 # Is there a tax_id file provided?
-tax_id_file <- get_arg(args, 10, "")
+tax_id_file <- if (exists("params")) params$tax_id else ""
 debug_log("tax_id_file = %s", ifelse(nzchar(tax_id_file), tax_id_file, "<none>"))
 # Check if the file is a csv or tsv
 if (endsWith(tax_id_file, ".csv")) {

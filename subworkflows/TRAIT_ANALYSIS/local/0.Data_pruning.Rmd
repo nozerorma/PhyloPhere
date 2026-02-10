@@ -1,9 +1,30 @@
 ---
-title: "Optional data pruning using a list of species"
+title: "Optional Data Pruning for Trait Analysis"
+author: "PhyloPhere Pipeline"
 date: "`r Sys.Date()`"
 output:
-  html_document: default
-  pdf_document: default
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  trait_file: NULL
+  tree_file: NULL
+  output_dir: !r getwd()
+  seed: ""
+  clade_name: "clade"
+  taxon_of_interest: "family"
+  traitname: "trait"
+  n_trait: ""
+  c_trait: ""
+  tax_id: ""
+  secondary_trait: ""
+  branch_trait: ""
+  prune_list: ""
+  prune_list_secondary: ""
 ---
 
 ```{r header}
@@ -36,6 +57,13 @@ Fast and easy.
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
 ```{r setup, message=TRUE, warning=TRUE}
+
+# Make params available in environment before sourcing commons.R
+if (!exists("params")) {
+  stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
+}
+# Assign to parent environment so commons.R can access it
+assign("params", params, envir = .GlobalEnv)
 
 # Call the setup function from commons.R
 source("./obj/commons.R")
@@ -72,16 +100,24 @@ library(phylolm)
 library(ggtreeExtra)
 library(geiger)
 library(rphylopic)
+library(paletteer)
 
 color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
 capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
 capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
 capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
 
+# Define color palettes, including a colorblind-friendly palette for categories
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "brown", "gray"
+)
+
 createDir(data_pruning_dir)
 
 # Create subdirectories for the new plots
-
 extreme_plots_dir <- file.path(data_pruning_dir, "1.Extreme_plots")
 asr_trees <- file.path(data_pruning_dir, "2.ASR_trees")
 phylo_distribution_dir <- file.path(data_pruning_dir, "3.Phylo_distribution")
@@ -95,8 +131,8 @@ createDir(phylo_distribution_dir)
 This section loads the prune list, prunes the trait data frame and phylogenetic tree, and saves the pruned data for downstream analyses.
 ```{r set_ourdirs, message=TRUE, warning=TRUE}
 
-prune_list <- get_arg(args, 13, "")
-prune_list_secondary <- get_arg(args, 14, "")
+prune_list <- params$prune_list
+prune_list_secondary <- params$prune_list_secondary
 
 print(paste("Prune list primary:", prune_list))
 print(paste("Prune list secondary:", prune_list_secondary))
@@ -227,11 +263,25 @@ This section generates contrast plots to visualize the trait across taxa, highli
 
 ## PLOT FUNCTION --------------------------------------------------------------
 ### 1. Contrast plot function
-contrast_plot.f <- function(df) {
+contrast_plot.f <- function(df, palette_values = NULL) {
   stopifnot(all(c("species", taxon_of_interest, trait) %in% names(df)))
-  palette_values <- get_palette_values()
+  if (is.null(palette_values)) {
+    palette_values <- get_palette_values()
+  }
   debug_log("contrast_plot.f rows = %d, trait = %s, taxon = %s", nrow(df), trait, taxon_of_interest)
   debug_log("contrast_plot.f columns: %s", paste(names(df), collapse = ", "))
+  debug_log("color_palette = %s", color_palette)
+  debug_log("palette_values is NULL: %s", is.null(palette_values))
+  debug_log("palette_values length: %d", ifelse(is.null(palette_values), 0, length(palette_values)))
+  if (!is.null(palette_values)) {
+    debug_log("palette_values: %s", paste(palette_values, collapse = ", "))
+  }
+  
+  # Use the palette if available, otherwise use discrete scales
+  if (is.null(palette_values) || length(palette_values) == 0) {
+    debug_log("Using discrete color scales (no palette available)")
+    palette_values <- NULL  # Ensure it's NULL for consistency
+  }
   fill_scale <- if (is.null(palette_values)) {
     ggplot2::scale_fill_discrete()
   } else {
@@ -245,7 +295,8 @@ contrast_plot.f <- function(df) {
 
   global_median <- df$g_median
   
-  ggplot(df, aes(x = value, y = taxa)) +
+  # Create the plot base
+  p <- ggplot(df, aes(x = value, y = taxa)) +
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
     ggplot2::geom_point(
       data = subset(df, global_label == "normal"),
@@ -255,17 +306,24 @@ contrast_plot.f <- function(df) {
       data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
       aes(shape = global_label, color = taxa, fill = taxa), size = 5
     ) +
-    ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17)) +
-    ggplot2::scale_fill_manual(values = palette_values, breaks = 0) +
-    ggplot2::scale_color_manual(values = palette_values, breaks = 0) +
-    ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = "salmon3") +
+    ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17))
+  
+  # Add color/fill scales with breaks = 0 to hide legends but keep colors
+  if (!is.null(palette_values) && length(palette_values) > 0) {
+    p <- p +
+      ggplot2::scale_fill_manual(values = palette_values, breaks = 0) +
+      ggplot2::scale_color_manual(values = palette_values, breaks = 0)
+  }
+  
+  p <- p +
+    ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = tableau_10["vermillion"]) +
     ggplot2::stat_summary(fun = median, geom = "errorbar",
                           aes(xmax = after_stat(x), xmin = after_stat(x), y = taxa),
-                          linewidth = 1.2, color = "skyblue4", alpha = 0.8) +
+                          linewidth = 1.2, color = tableau_10["bluish_green"], alpha = 0.8) +
     ggplot2::labs(x = capitalized_trait, 
                   y = paste(capitalized_taxon, "-", capitalized_clade), 
                   title = paste("Trait differential plot for trait:", capitalized_trait, "in", clade_name),
-                  caption = "Global median shown as a longdash red line. Per taxa median shown as skyblue error bars. 
+                  caption = "Global median shown as a longdash red line. Per taxa median shown as blue error bars. 
                   Extreme values were identified based on global thresholds (top and bottom quantiles).") +
     ggrepel::geom_text_repel(
       data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
@@ -284,6 +342,8 @@ contrast_plot.f <- function(df) {
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "bottom"
     )
+  
+  return(p)
 }
 
 # 3. CONTRAST PLOTS  ------------------------------------------------------
@@ -294,7 +354,21 @@ plot_ready <- plot_ready && all(required_cols %in% names(stats_df))
 if (!plot_ready) {
   message("Skipping contrast plot: missing or empty trait stats.")
 } else {
-  contrast_graph <- contrast_plot.f(stats_df)
+  # Get palette values before calling the function
+  # Direct lookup as a fallback if get_palette_values() returns NULL
+  palette_for_plot <- get_palette_values()
+  if (is.null(palette_for_plot) && exists("color_palette") && nzchar(color_palette)) {
+    # Try direct access from global environment
+    if (exists(color_palette, envir = .GlobalEnv)) {
+      palette_for_plot <- get(color_palette, envir = .GlobalEnv)
+      debug_log("Retrieved palette '%s' directly from GlobalEnv: length = %d", color_palette, length(palette_for_plot))
+    } else if (exists(color_palette, where = parent.frame(n = 1))) {
+      palette_for_plot <- get(color_palette, pos = parent.frame(n = 1))
+      debug_log("Retrieved palette '%s' from parent frame: length = %d", color_palette, length(palette_for_plot))
+    }
+  }
+  debug_log("Calling contrast_plot.f with palette length: %d", ifelse(is.null(palette_for_plot), 0, length(palette_for_plot)))
+  contrast_graph <- contrast_plot.f(stats_df, palette_for_plot)
   ggplot2::ggsave(
     file.path(extreme_plots_dir, paste0(trait, "_contrast_plot.png")),
     contrast_graph, device = "png", width = 15, height = 10, dpi = "retina"
@@ -369,7 +443,7 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17)) +
     color_scale_dark +
     ggplot2::geom_vline(
-      aes(xintercept = median_value), linewidth = 1, color = "salmon3", alpha = 0.5
+      aes(xintercept = median_value), linewidth = 1, color = tableau_10["vermillion"], alpha = 0.5
     ) +
     ggplot2::stat_summary(
       fun = median, geom = "errorbar",
@@ -614,7 +688,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   # --- Plot ---
   cont_obj <- phytools::contMap(rescaled_tree, trait_vec, plot=FALSE)
   debug_log("asr_tree.f contMap range = [%.4f, %.4f]", cont_obj$lims[1], cont_obj$lims[2])
-  cont_obj <- phytools::setMap(cont_obj, colors=colorRampPalette(c("white","salmon3"))(100))
+  cont_obj <- phytools::setMap(cont_obj, colors=colorRampPalette(c("white",tableau_10["vermillion"]))(100))
   h <- max(phytools::nodeHeights(cont_obj$tree))
 
   par(mar=c(5,5,10,7), oma=c(0,0,2,0))
@@ -687,7 +761,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     if(tip_df$immediate_parent[i]){
       # Tip symbol for derived tips
       pch_val <- ifelse(tip_df$direction[i]=="up", 24, 25)
-      bg_val <- ifelse(tip_df$direction[i]=="up", "salmon3", "skyblue3")
+      bg_val <- ifelse(tip_df$direction[i]=="up", tableau_10["vermillion"], tableau_10["bluish_green"])
       ape::tiplabels(pch=pch_val, bg=bg_val, tip=tip_pos, cex=2, offset=58)
       
       # Tip value (larger to match parent node emphasis)
@@ -701,7 +775,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     
     # Cumulative derived marker
     if(tip_df$cumulative_derived[i]){
-      ape::tiplabels(pch=22, bg="forestgreen", tip=tip_pos, cex=2, offset=62)
+      ape::tiplabels(pch=22, bg=tableau_10["green"], tip=tip_pos, cex=2, offset=62)
     }
   }
   
@@ -755,6 +829,13 @@ This section creates a fan-shaped phylogenetic tree.
 
 # 5. PHYLOGENETIC DISTRIBUTION PLOT  ------------------------------------------------------
 palette_values <- get_palette_values()
+# Fallback: try to get palette directly from GlobalEnv if NULL
+if (is.null(palette_values) && exists("color_palette") && nzchar(color_palette)) {
+  if (exists(color_palette, envir = .GlobalEnv)) {
+    palette_values <- get(color_palette, envir = .GlobalEnv)
+    debug_log("Retrieved palette '%s' directly from GlobalEnv for visual_distribution: length = %d", color_palette, length(palette_values))
+  }
+}
 fill_scale <- if (is.null(palette_values)) {
   ggplot2::scale_fill_discrete()
 } else {
@@ -904,11 +985,10 @@ if (isTRUE(has.branch)) {
                                   size=2) +
     scale_color_gradient(
       name = capitalized_branch_trait, 
-      low = "skyblue", high = "salmon3",     
+      low = "#F4EBD0", high = "#2B2D42",
                         guide = guide_colorbar(order = 3)) +  # BR last
     new_scale_color()
 } else {
-  # Add trait bars with gradient
   tree_plot_step1 <- ggtree(tree_data_object,
                                   layout="fan",
                                   open.angle=15, 
@@ -939,7 +1019,7 @@ if (isTRUE(has.branch)) {
   scale_fill_gradient2(
     name = capitalized_trait, 
     low = "white", 
-    high = "darkseagreen4",  # Different gradient color for distinction
+    high = tableau_10["blue"],  # Different gradient color for distinction
     guide = guide_colorbar(order = 1),
     aesthetics = "fill"
   ) +
@@ -973,7 +1053,7 @@ if (isTRUE(has.secondary)) {
     scale_fill_gradient2(
       name = capitalized_secondary_trait, 
       low = "white", 
-      high = "salmon3",  # Different gradient color for distinction
+      high = tableau_10["vermillion"],  # Different gradient color for distinction
       guide = guide_colorbar(order = 2),
       aesthetics = "fill"
     ) +
@@ -986,8 +1066,13 @@ tree_plot_step1
 tree_plot_step2 <- tree_plot_step1 +
   geom_fruit(geom = geom_col, 
              mapping = aes(y = species, x = 1, fill = taxa),
-             pwidth = 0.1, color = "black", linewidth = 0.5, offset = 0.2) +
-  scale_fill_manual(values = palette_values, breaks = 0) +
+             pwidth = 0.1, color = "black", linewidth = 0.5, offset = 0.2)
+
+if (!is.null(palette_values) && length(palette_values) > 0) {
+  tree_plot_step2 <- tree_plot_step2 + scale_fill_manual(values = palette_values, breaks = 0)
+}
+
+tree_plot_step2 <- tree_plot_step2 +
   new_scale_fill() +
   theme_tree() +
   theme(panel.background = element_rect(fill = "transparent", colour = NA),  
@@ -1011,7 +1096,7 @@ if(isTRUE(has.n)){
 tree_plot_step3 <- tree_plot_step3 +
   geom_text(aes(label = trait_asterisk),
             nudge_x = 6, nudge_y = 0.15,
-            color = "darkseagreen4",
+            color = tableau_10["blue"],
             fontface = "bold",
             size = 7,
             vjust = 0.5)
@@ -1020,7 +1105,7 @@ if (isTRUE(has.secondary)) {
   tree_plot_step3 <- tree_plot_step3 +
     geom_text(aes(label = secondary_asterisk),
               nudge_x = 6, nudge_y = -0.15,
-              color = "salmon3",
+              color = tableau_10["vermillion"],
               fontface = "bold",
               size = 7,
               vjust = 0.5)
@@ -1055,8 +1140,13 @@ final_tree_plot <- tree_plot_step3 +
                 barsize = NA,
                 offset = 13,
                 imagesize = 0.05,
-                alpha = 0.75) +
-  scale_color_manual(values = palette_values, breaks = 0) +
+                alpha = 0.75)
+
+if (!is.null(palette_values) && length(palette_values) > 0) {
+  final_tree_plot <- final_tree_plot + scale_color_manual(values = palette_values, breaks = 0)
+}
+
+final_tree_plot <- final_tree_plot +
   geom_cladelab(data = tip_df,
                 mapping = aes(
                   node = mrca_node,

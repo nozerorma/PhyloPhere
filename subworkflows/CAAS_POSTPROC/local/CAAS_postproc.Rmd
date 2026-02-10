@@ -5,12 +5,23 @@ date: "`r Sys.Date()`"
 output:
   html_document:
     toc: true
-    toc_depth: 3
     toc_float: true
-    number_sections: true
-    theme: bootstrap
-    highlight: tango
-  pdf_document: default
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  discovery_file: NULL
+  filter_summary_file: NULL
+  filter_dir: NULL
+  gene_ensembl_file: NULL
+  processing_mode: "exploratory"
+  output_dir: "caas_postproc"
+  extreme_threshold: 0.99
+  iqr_multiplier: 3.0
+  gene_filter_mode: "both"
+  generate_manhattan: TRUE
+  manhattan_min_density: 0.008
 ---
 
 ```{r header}
@@ -38,33 +49,18 @@ This script processes CAAS (Context-Aware Amino Acid Substitutions) discovery re
 
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
-```{r setup, include = FALSE}
-# ----------------------------------------
-# R Markdown Setup
-# ----------------------------------------
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  dev = 'png',
+  dpi = 320
+)
 
-seed_val <- 12345  # For reproducibility
-
-# Create a directory if it doesn't exist
-createDir <- function(directory) {
-  if (!file.exists(directory)) {
-    dir.create(directory, recursive = TRUE)
-    print(sprintf("createDir: created %s", directory))
-  } else {
-    print(sprintf("createDir: exists %s", directory))
-  }
-}
-
-setup_rmd <- function() {
-  knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, dev='png', dpi=320)
-  knitr::opts_knit$set(root.dir =getwd()) # Set working directory to project root
-  set.seed(as.integer(seed_val)) 
-}
-# Define working and results directories
-workingDir <- getwd()
-setup_rmd()
-
-# Load additional libraries
+# Load required libraries
 suppressPackageStartupMessages({
   library(stringr)
   library(purrr)
@@ -80,58 +76,57 @@ suppressPackageStartupMessages({
   library(tidyverse)
 })
 
-# Parse command line arguments
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) >= 10) {
-  discovery_file <- args[1]
-  filter_summary_file <- args[2]
-  gene_ensembl_file <- args[3]
-  processing_mode <- args[4]  # "exploratory" or "filter"
-  resultsDir <- args[5]
-  extreme_threshold <- as.numeric(args[6])
-  iqr_multiplier <- as.numeric(args[7])
-  gene_filter_mode <- args[8]  # "none", "extreme", "dubious", "both"
-  generate_manhattan <- as.logical(args[9])
-  manhattan_min_density <- as.numeric(args[10])
-} else if (length(args) >= 3) {
-  # Backward compatibility - minimal args
-  discovery_file <- args[1]
-  filter_summary_file <- args[2]
-  gene_ensembl_file <- args[3]
-  processing_mode <- "exploratory"
-  resultsDir <- file.path(getwd(), "caas_postproc")
-  extreme_threshold <- 0.99
-  iqr_multiplier <- 3.0
-  gene_filter_mode <- "both"
-  generate_manhattan <- TRUE
-  manhattan_min_density <- 0.008
-} else {
-  stop("Usage: Rscript CAAS_postproc.Rmd <discovery> <filter_summary> <gene_ensembl> [mode] [outdir] [extreme_thresh] [iqr_mult] [gene_filter] [gen_manhattan] [manhattan_min_dens]")
+# Directory management
+createDir <- function(directory) {
+  if (!dir.exists(directory)) {
+    dir.create(directory, recursive = TRUE, showWarnings = FALSE)
+  }
 }
 
+seed_val <- 12345  # For reproducibility
+set.seed(seed_val)
+
+# Access parameters from YAML header
+discovery_file <- params$discovery_file
+filter_summary_file <- params$filter_summary_file
+filtered_files <- params$filter_files
+gene_ensembl_file <- params$gene_ensembl_file
+processing_mode <- params$processing_mode
+resultsDir <- params$output_dir
+extreme_threshold <- params$extreme_threshold
+iqr_multiplier <- params$iqr_multiplier
+gene_filter_mode <- params$gene_filter_mode
+generate_manhattan <- params$generate_manhattan
+manhattan_min_density <- params$manhattan_min_density
+
 # Validate input files
+if (is.null(discovery_file)) {
+  stop("Error: discovery_file parameter is required")
+}
+if (is.null(filter_summary_file)) {
+  stop("Error: filter_summary_file parameter is required")
+}
+if (is.null(gene_ensembl_file)) {
+  stop("Error: gene_ensembl_file parameter is required")
+}
+
 stopifnot(file.exists(discovery_file), 
           file.exists(filter_summary_file),
           file.exists(gene_ensembl_file))
 
-# Define output directories from passed parameter
-caas_postproc_dir <- resultsDir
-outliers_dir <- file.path(caas_postproc_dir, "outliers")
-cluster_dir <- file.path(caas_postproc_dir, "clusters")
-
-# Directory for filtered discovery files (in exploratory mode)
-# These are in subdirectories: filter_exploratory/minlenX_maxcaasY/
-discovery_filtered_base_dir <- file.path(caas_postproc_dir, 
-                                        ifelse(processing_mode == "exploratory", 
-                                               "filter_exploratory", 
-                                               "filter_selected"))
+# Define output directories
+# Use local directories in work dir for Nextflow to capture
+caas_postproc_dir <- "."
+outliers_dir <- "outliers"
+cluster_dir <- "clusters"
+summary_stats_dir <- "summary_statistics"
 
 # Define color palettes, including a colorblind-friendly palette for categories
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
   "blue", "orange", "vermillion", "bluish_green",
   "green", "yellow", "reddish_purple", "pink",
-  "mauve", "gray"
+  "brown", "gray"
 )
 
 # Consistent colorblind-friendly palette
@@ -168,6 +163,7 @@ if (generate_manhattan) {
 createDir(caas_postproc_dir)
 createDir(outliers_dir)
 createDir(cluster_dir)
+createDir(summary_stats_dir)
 
 cat("\nInput files:\n")
 cat("  Discovery:", discovery_file, "\n")
@@ -602,32 +598,31 @@ kable(filter_table,
 # Plot parameter sweep results (if multiple combinations)
 if (nrow(filter_summary) > 1) {
   if (has_caap_groups_in_summary) {
-    # CAAP mode: use the correctly prepared long format data
-    # This has the actual per-group counts, not the total duplicated across groups
-    plot_data <- filter_summary_long
+    # CAAP mode: use grouped bar plot to show differences between parameters
+    plot_data <- filter_summary_long %>%
+      mutate(
+        param_label = sprintf("%d/%d", Minlen, as.integer(Maxcaas)),
+        param_label = factor(param_label, levels = unique(param_label))
+      )
 
     print(head(plot_data))
     
     p_param_sweep <- ggplot(plot_data, 
-                            aes(x = factor(Minlen), 
+                            aes(x = param_label, 
                                 y = DiscardedCount, 
-                                color = CAAP_Groups,
-                                linetype = factor(Maxcaas))) +
-      geom_bar(stat = "identity", position = "dodge", width = 0.7) +
-      geom_line(linewidth = 1.2) +
-      scale_color_paletteer_d("ggthemes::Tableau_10") +
-      scale_linetype_manual(values = c("solid", "dashed", "dotted"),
-                           labels = function(x) sprintf("%.0f%%", as.numeric(x))) +
+                                fill = CAAP_Groups)) +
+      geom_col(position = "dodge", color = "black", linewidth = 0.3) +
+      scale_fill_paletteer_d("ggthemes::Tableau_10") +
       labs(title = "Discarded CAAS Positions by Parameter Combination",
-           subtitle = "Effect of minimum cluster length and maximum density threshold (group-aware filtering)",
-           x = "Minimum Cluster Length (minlen)", 
+           subtitle = "Grouped by CAAP group - minlen/maxcaas combinations",
+           x = "Parameter Combination (minlen/maxcaas)", 
            y = "Positions Discarded", 
-           color = "Group",
-           linetype = "Max Density") +
+           fill = "CAAP Group") +
       theme_minimal() +
       theme(legend.position = "right",
             plot.title = element_text(face = "bold", size = 14),
-            axis.title = element_text(size = 12))
+            axis.title = element_text(size = 12),
+            axis.text.x = element_text(angle = 45, hjust = 1))
   } else {
     # Standard mode: single series with color for density
     p_param_sweep <- ggplot(filter_summary, 
@@ -702,7 +697,30 @@ if (processing_mode == 'exploratory' && nrow(filter_summary) > 1) {
     filter_subdir <- sprintf("minlen%d_maxcaas%d", param_row$Minlen, as.integer(param_row$Maxcaas))
     pattern_str <- sprintf("discovery.filtered.minlen%d.maxcaas%d.tsv", 
                           param_row$Minlen, as.integer(param_row$Maxcaas))
+    
+    # Look for the filtered file in the working directory (where Nextflow copies them)
+    discovery_filtered_base_dir <- file.path(getwd(), "filter_exploratory")
     matching_file <- file.path(discovery_filtered_base_dir, filter_subdir, pattern_str)
+    
+    # Debug output
+    cat(sprintf("\nDebug - Looking for filtered file:\n"))
+    cat(sprintf("  Working dir: %s\n", getwd()))
+    cat(sprintf("  Base dir: %s\n", discovery_filtered_base_dir))
+    cat(sprintf("  Subdir: %s\n", filter_subdir))
+    cat(sprintf("  Pattern: %s\n", pattern_str))
+    cat(sprintf("  Full path: %s\n", matching_file))
+    cat(sprintf("  Exists: %s\n", file.exists(matching_file)))
+    
+    # List actual files in base directory
+    if (dir.exists(discovery_filtered_base_dir)) {
+      subdirs <- list.dirs(discovery_filtered_base_dir, full.names = FALSE, recursive = FALSE)
+      cat(sprintf("  Available subdirs: %s\n", paste(subdirs, collapse = ", ")))
+      
+      if (dir.exists(file.path(discovery_filtered_base_dir, filter_subdir))) {
+        files_in_subdir <- list.files(file.path(discovery_filtered_base_dir, filter_subdir))
+        cat(sprintf("  Files in %s: %s\n\n", filter_subdir, paste(files_in_subdir, collapse = ", ")))
+      }
+    }
     
     if (!is.na(matching_file) && file.exists(matching_file)) {
       # Load filtered data
@@ -1083,7 +1101,7 @@ kable(summary_table,
 # Export summary
 write_tsv(
   summary_table,
-  file.path(caas_postproc_dir, "summary_statistics.tsv")
+  file.path(summary_stats_dir, "summary_statistics.tsv")
 )
 
 cat("\n✓ Summary statistics exported\n")

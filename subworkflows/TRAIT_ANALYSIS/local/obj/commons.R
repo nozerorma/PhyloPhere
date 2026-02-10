@@ -16,23 +16,37 @@ debug_log <- function(...) {
   }
 }
 
-## Set up variable to control command line arguments
-args <- commandArgs(trailingOnly = TRUE)
-if (length(args) > 0 && args[1] == "--args") {
-  args <- args[-1]
-}
-debug_log("args = %s", ifelse(length(args) > 0, paste(args, collapse = " | "), "<none>"))
-
+# ----------------------------------------
+# Parameter Access via YAML params
+# ----------------------------------------
+# NOTE: get_arg() function is DEPRECATED - use params$ directly in Rmd files
+# This function is kept only for backward compatibility but should NOT be used in new code
+#
+# Modern approach (use this):
+#   trait_path <- params$trait_file
+#   seed_val <- params$seed
+#
+# Old approach (deprecated):
+#   trait_path <- get_arg(args, 1, "")
+#
 get_arg <- function(args, idx, default = NULL) {
+  warning("get_arg() is deprecated. Use params$ from YAML header instead.")
   if (length(args) >= idx && nzchar(args[idx])) {
     return(args[idx])
   }
   default
 }
 
+# Access parameters from YAML header (passed via rmarkdown::render params list)
+# These variables are set from params in the calling Rmd file's setup chunk
+trait_path <- if (exists("params") && !is.null(params$trait_file)) params$trait_file else stop("trait_file parameter required")
+tree_path <- if (exists("params") && !is.null(params$tree_file)) params$tree_file else stop("tree_file parameter required")
+resultsDir <- if (exists("params")) params$output_dir else getwd()
+seed_val <- if (exists("params")) params$seed else ""
 
-# Set seed for reproducibility
-seed_val <- get_arg(args, 4, "")
+debug_log("trait_path = %s", trait_path)
+debug_log("tree_path = %s", tree_path)
+debug_log("resultsDir = %s", resultsDir)
 debug_log("seed_val = %s", ifelse(nzchar(seed_val), seed_val, "<empty>"))
 
 # ----------------------------------------
@@ -42,15 +56,16 @@ debug_log("seed_val = %s", ifelse(nzchar(seed_val), seed_val, "<empty>"))
 setup_rmd <- function() {
   knitr::opts_chunk$set(warning = FALSE, message = FALSE)
   knitr::opts_knit$set(root.dir =getwd()) # Set working directory to project root
-  set.seed(as.integer(seed_val)) 
+  if (nzchar(seed_val)) {
+    set.seed(as.integer(seed_val))
+  }
 }
+
 # Define working and results directories
 workingDir <- getwd()
 objDir <- file.path(workingDir, "obj")
-resultsDir <- get_arg(args, 3, getwd())
 debug_log("workingDir = %s", workingDir)
 debug_log("objDir = %s", objDir)
-debug_log("resultsDir = %s", resultsDir)
 
 # Load palettes, statistical functions, I/O utilities, and general utilities
 source(file.path(objDir, "io_utils.R"))
@@ -60,16 +75,11 @@ source(file.path(objDir, "stats.R"))
 source(file.path(objDir, "plotting_fun.R"))
 
 # ----------------------------------------
-
 # Trait objects
+# ----------------------------------------
 ## Trait data needs to have standardized colnames (species, family) and be comma-separated (csv format).
-trait_path <- get_arg(args, 1, "")
-if (!nzchar(trait_path)) {
-  stop("Trait file path not provided.")
-}
 
 print(paste0("Loading trait data from: ", trait_path))
-debug_log("trait_path = %s", trait_path)
 
 # Check if the trait file is a csv or tsv
 if (endsWith(trait_path, ".csv")) {
@@ -92,25 +102,35 @@ if (!"species" %in% names(trait_df)) {
 }
 debug_log("trait_df species unique = %d", length(unique(trait_df$species)))
 
+# ----------------------------------------
 # Phylo objects
-tree_path <- get_arg(args, 2, "")
-if (!nzchar(tree_path)) {
-  stop("Tree file path not provided.")
-}
-debug_log("tree_path = %s", tree_path)
+# ----------------------------------------
+
 tree <- phytools::read.newick(tree_path) %>% ape::as.phylo() # Tree object
 tree_species <- tree$tip.label # Tree species
 debug_log("tree tips = %d, nodes = %d", length(tree$tip.label), tree$Nnode)
 
-### OPTS
-# Optional parameters for analysis
-# Analysis metadata (trait-naive)
-clade_name <- get_arg(args, 5, "clade") # Clade of interest (used for titles, file names, etc)
-taxon_of_interest <- get_arg(args, 6, "family") # Taxonomic level of interest (column name in the trait file)
-trait <- get_arg(args, 7, "trait") # Trait of interest (column name in the trait file)
+# ----------------------------------------
+# Optional parameters (from YAML params)
+# ----------------------------------------
+
+clade_name <- if (exists("params")) params$clade_name else "clade"
+taxon_of_interest <- if (exists("params")) params$taxon_of_interest else "family"
+trait <- if (exists("params")) params$traitname else "trait"
+
 debug_log("clade_name = %s", clade_name)
 debug_log("taxon_of_interest = %s", taxon_of_interest)
 debug_log("trait = %s", trait)
+
+# Validate that required columns exist in trait_df
+if (!taxon_of_interest %in% names(trait_df)) {
+  stop(sprintf("Column '%s' (taxon_of_interest) not found in trait file. Available columns: %s", 
+               taxon_of_interest, paste(names(trait_df), collapse=", ")))
+}
+if (!trait %in% names(trait_df)) {
+  stop(sprintf("Column '%s' (trait) not found in trait file. Available columns: %s", 
+               trait, paste(names(trait_df), collapse=", ")))
+}
 
 # Check if sample size (N) column is provided
 source(file.path(objDir, "sample_size.R"))
@@ -118,8 +138,11 @@ source(file.path(objDir, "sample_size.R"))
 # Load phylo.R to handle phylogenetic tree processing and tax_id mapping if needed
 source(file.path(objDir, "phylo.R"))
 
-# Is there a second trait of interest? (Optional, for fan tree visualization. Related to co-visualization)
-secondary_trait <- get_arg(args, 11, "")
+# ----------------------------------------
+# Secondary traits (optional)
+# ----------------------------------------
+
+secondary_trait <- if (exists("params")) params$secondary_trait else ""
 debug_log("secondary_trait = %s", ifelse(nzchar(secondary_trait), secondary_trait, "<none>"))
 has.secondary <- FALSE
 if (nzchar(secondary_trait) && secondary_trait %in% names(trait_df)) {
@@ -130,8 +153,7 @@ if (nzchar(secondary_trait) && secondary_trait %in% names(trait_df)) {
   debug_log("has.secondary = FALSE")
 }
 
-# Is there any other trait you'd like to include in the fan tree visualization? (Optional, for branch coloring)
-branch_trait <- get_arg(args, 12, "")
+branch_trait <- if (exists("params")) params$branch_trait else ""
 debug_log("branch_trait = %s", ifelse(nzchar(branch_trait), branch_trait, "<none>"))
 has.branch <- FALSE
 if (nzchar(branch_trait) && branch_trait %in% names(trait_df)) {

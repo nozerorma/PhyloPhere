@@ -99,22 +99,106 @@ echo "Results: $RESULTS_BASE"
 echo "Timestamp: $timestamp"
 echo ""
 
-#########################################
-# STEP 1: CAAS Discovery Pipeline
-#########################################
-echo "=========================================="
-echo "STEP 1: CAAS DISCOVERY PIPELINE"
-echo "=========================================="
-echo "Running: Discovery + Resample + Bootstrap"
-echo ""
+# #########################################
+# # STEP 1: CAAS Discovery Pipeline
+# #########################################
+# echo "=========================================="
+# echo "STEP 1: CAAS DISCOVERY PIPELINE"
+# echo "=========================================="
+# echo "Running: Discovery + Resample + Bootstrap"
+# echo ""
 
-OUT_DISCOVERY="${RESULTS_BASE}/caas_analysis"
-mkdir -p "$OUT_DISCOVERY"
+# OUT_DISCOVERY="${RESULTS_BASE}/caas_analysis"
+# mkdir -p "$OUT_DISCOVERY"
+
+# nextflow run main.nf \
+#     -with-tower \
+#     -profile local \
+#     -w "$WORK_DIR/discovery" \
+#     --prune_data \
+#     --contrast_selection \
+#     --ct_tool "discovery,resample,bootstrap" \
+#     --alignment "$ALI_DIR" \
+#     --caas_config "$TRAIT_FILE" \
+#     --tree "$TREE_FILE" \
+#     --traitvalues "$TRAIT_VALUES" \
+#     --cycles "$CYCLES" \
+#     --outdir "$OUT_DISCOVERY"
+
+# echo ""
+# echo "✓ CAAS discovery completed"
+# echo ""
+
+# # Locate output files from discovery
+# DISCOVERY_FILE=$(find "$OUT_DISCOVERY" -name "discovery.tab" | head -1)
+# BACKGROUND_FILE=$(find "$OUT_DISCOVERY" -name "background_genes.output" | head -1)
+
+# if [ ! -f "$DISCOVERY_FILE" ]; then
+#     echo "Error: Discovery file not found in $OUT_DISCOVERY"
+#     echo "Expected: discovery.tab"
+#     exit 1
+# fi
+
+# if [ ! -f "$BACKGROUND_FILE" ]; then
+#     echo "Error: Background genes file not found in $OUT_DISCOVERY"
+#     echo "Expected: background_genes.output"
+#     exit 1
+# fi
+
+# echo "Discovery outputs located:"
+# echo "  Discovery: $DISCOVERY_FILE"
+# echo "  Background: $BACKGROUND_FILE"
+# echo "  Gene ensembl: $GENE_ENSEMBL_FILE"
+# echo ""
+
+# #########################################
+# # STEP 2: CAAS Post-Processing (Exploratory)
+# #########################################
+# echo "=========================================="
+# echo "STEP 2: CAAS POST-PROCESSING (EXPLORATORY)"
+# echo "=========================================="
+# echo "Running parameter sweep: minlen=2,3,4 × maxcaas=0.6,0.7,0.8"
+# echo ""
+
+# OUT_POSTPROC_EXPLORATORY="${RESULTS_BASE}/postprocessing/exploratory"
+# mkdir -p "$OUT_POSTPROC_EXPLORATORY"
+
+# nextflow run main.nf \
+#     -with-tower \
+#     -profile local \
+#     -w "$WORK_DIR/postproc_exploratory" \
+#     --caas_postproc \
+#     --discovery_input "$DISCOVERY_FILE" \
+#     --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
+#     --background_input "$BACKGROUND_FILE" \
+#     --caas_postproc_mode exploratory \
+#     --minlen_values "2,3,4" \
+#     --maxcaas_values "0.6,0.7,0.8" \
+#     --gene_filter_mode both \
+#     --extreme_threshold 0.99 \
+#     --iqr_multiplier 3.0 \
+#     --generate_reports true \
+#     --generate_manhattan true \
+#     --postproc_outdir "$OUT_POSTPROC_EXPLORATORY" \
+#     --outdir "$OUT_POSTPROC_EXPLORATORY"
+
+# echo ""
+# echo "✓ Exploratory post-processing completed"
+# echo ""
+
+#########################################
+# STEP 3: CAAS Post-Processing (Filter)
+#########################################
+echo "=========================================="
+echo "STEP 3: TEST THE WHOLE PIPELINE IN ONE WORKFLOW"
+echo "=========================================="
+echo "Running complete pipeline: Discovery → Post-processing (filter mode)"
+echo ""
 
 nextflow run main.nf \
     -with-tower \
     -profile local \
-    -w "$WORK_DIR/discovery" \
+    -w "$WORK_DIR/complete" \
     --prune_data \
     --contrast_selection \
     --ct_tool "discovery,resample,bootstrap" \
@@ -123,89 +207,10 @@ nextflow run main.nf \
     --tree "$TREE_FILE" \
     --traitvalues "$TRAIT_VALUES" \
     --cycles "$CYCLES" \
-    --outdir "$OUT_DISCOVERY"
-
-echo ""
-echo "✓ CAAS discovery completed"
-echo ""
-
-# Locate output files from discovery
-DISCOVERY_FILE=$(find "$OUT_DISCOVERY" -name "discovery.tab" | head -1)
-BACKGROUND_FILE=$(find "$OUT_DISCOVERY" -name "background_genes.output" | head -1)
-
-if [ ! -f "$DISCOVERY_FILE" ]; then
-    echo "Error: Discovery file not found in $OUT_DISCOVERY"
-    echo "Expected: discovery.tab"
-    exit 1
-fi
-
-if [ ! -f "$BACKGROUND_FILE" ]; then
-    echo "Error: Background genes file not found in $OUT_DISCOVERY"
-    echo "Expected: background_genes.output"
-    exit 1
-fi
-
-echo "Discovery outputs located:"
-echo "  Discovery: $DISCOVERY_FILE"
-echo "  Background: $BACKGROUND_FILE"
-echo "  Gene ensembl: $GENE_ENSEMBL_FILE"
-echo ""
-
-#########################################
-# STEP 2: CAAS Post-Processing (Exploratory)
-#########################################
-echo "=========================================="
-echo "STEP 2: CAAS POST-PROCESSING (EXPLORATORY)"
-echo "=========================================="
-echo "Running parameter sweep: minlen=2,3,4 × maxcaas=0.6,0.7,0.8"
-echo ""
-
-OUT_POSTPROC_EXPLORATORY="${RESULTS_BASE}/postprocessing/exploratory"
-mkdir -p "$OUT_POSTPROC_EXPLORATORY"
-
-nextflow run main.nf \
-    -with-tower \
-    -profile local \
-    -w "$WORK_DIR/postproc_exploratory" \
+    --outdir "$RESULTS_BASE" \
     --caas_postproc \
-    --discovery_input "$DISCOVERY_FILE" \
+    --caas_signification \
     --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
-    --background_input "$BACKGROUND_FILE" \
-    --caas_postproc_mode exploratory \
-    --minlen_values "2,3,4" \
-    --maxcaas_values "0.6,0.7,0.8" \
-    --gene_filter_mode both \
-    --extreme_threshold 0.99 \
-    --iqr_multiplier 3.0 \
-    --generate_reports true \
-    --generate_manhattan true \
-    --postproc_outdir "$OUT_POSTPROC_EXPLORATORY" \
-    --outdir "$OUT_POSTPROC_EXPLORATORY"
-
-echo ""
-echo "✓ Exploratory post-processing completed"
-echo ""
-
-#########################################
-# STEP 3: CAAS Post-Processing (Filter)
-#########################################
-echo "=========================================="
-echo "STEP 3: CAAS POST-PROCESSING (FILTER)"
-echo "=========================================="
-echo "Applying best-performing filter: minlen=2, maxcaas=0.6"
-echo ""
-
-OUT_POSTPROC_FILTER="${RESULTS_BASE}/postprocessing/filter"
-mkdir -p "$OUT_POSTPROC_FILTER"
-
-nextflow run main.nf \
-    -with-tower \
-    -profile local \
-    -w "$WORK_DIR/postproc_filter" \
-    --caas_postproc \
-    --discovery_input "$DISCOVERY_FILE" \
-    --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
-    --background_input "$BACKGROUND_FILE" \
     --caas_postproc_mode filter \
     --filter_minlen 2 \
     --filter_maxcaas 0.6 \
@@ -213,52 +218,50 @@ nextflow run main.nf \
     --extreme_threshold 0.99 \
     --iqr_multiplier 3.0 \
     --generate_reports true \
-    --generate_manhattan true \
-    --manhattan_min_density 0.008 \
-    --postproc_outdir "$OUT_POSTPROC_FILTER" \
-    --outdir "$OUT_POSTPROC_FILTER"
+    --generate_manhattan true
 
-echo ""
-echo "✓ Filter mode post-processing completed"
-echo ""
 
-#########################################
-# STEP 4: Test Different Gene Filter Modes
-#########################################
-echo "=========================================="
-echo "STEP 4: GENE FILTER MODE COMPARISON"
-echo "=========================================="
-echo "Testing: extreme, dubious, both, none"
-echo ""
+# echo ""
+# echo "✓ Filter mode post-processing completed"
+# echo ""
 
-for filter_mode in extreme dubious both none; do
-    echo "→ Testing gene_filter_mode=${filter_mode}"
+# #########################################
+# # STEP 4: Test Different Gene Filter Modes
+# #########################################
+# echo "=========================================="
+# echo "STEP 4: GENE FILTER MODE COMPARISON"
+# echo "=========================================="
+# echo "Testing: extreme, dubious, both, none"
+# echo ""
+
+# for filter_mode in extreme dubious both none; do
+#     echo "→ Testing gene_filter_mode=${filter_mode}"
     
-    OUT_FILTER_MODE="${RESULTS_BASE}/postprocessing/gene_filter_${filter_mode}"
-    mkdir -p "$OUT_FILTER_MODE"
+#     OUT_FILTER_MODE="${RESULTS_BASE}/postprocessing/gene_filter_${filter_mode}"
+#     mkdir -p "$OUT_FILTER_MODE"
     
-    nextflow run main.nf \
-        -with-tower \
-        -profile local \
-        -w "$WORK_DIR/gene_filter_${filter_mode}" \
-        --caas_postproc \
-        --discovery_input "$DISCOVERY_FILE" \
-        --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
-        --background_input "$BACKGROUND_FILE" \
-        --caas_postproc_mode filter \
-        --filter_minlen 2 \
-        --filter_maxcaas 0.6 \
-        --gene_filter_mode "$filter_mode" \
-        --extreme_threshold 0.99 \
-        --iqr_multiplier 3.0 \
-        --generate_reports true \
-        --generate_manhattan true \
-        --postproc_outdir "$OUT_FILTER_MODE" \
-        --outdir "$OUT_FILTER_MODE"
+#     nextflow run main.nf \
+#         -with-tower \
+#         -profile local \
+#         -w "$WORK_DIR/gene_filter_${filter_mode}" \
+#         --caas_postproc \
+#         --discovery_input "$DISCOVERY_FILE" \
+#         --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
+#         --background_input "$BACKGROUND_FILE" \
+#         --caas_postproc_mode filter \
+#         --filter_minlen 2 \
+#         --filter_maxcaas 0.6 \
+#         --gene_filter_mode "$filter_mode" \
+#         --extreme_threshold 0.99 \
+#         --iqr_multiplier 3.0 \
+#         --generate_reports true \
+#         --generate_manhattan true \
+#         --postproc_outdir "$OUT_FILTER_MODE" \
+#         --outdir "$OUT_FILTER_MODE"
     
-    echo "  ✓ ${filter_mode} completed"
-    echo ""
-done
+#     echo "  ✓ ${filter_mode} completed"
+#     echo ""
+# done
 
 #########################################
 # Summary

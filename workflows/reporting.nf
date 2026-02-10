@@ -44,12 +44,14 @@ workflow REPORTING {
         prune_out = DATASET_PRUNE(trait_file, tree_file)
         trait_file = prune_out.pruned_trait_file
         tree_file = prune_out.pruned_tree_file
-        dataset_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
+        dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
+        dataset_out = dataset_exploration_out.results_dir
     } else {
         log.info "No data pruning selected; skipping data pruning module."
         prune_out = file('NO_FILE')
-        dataset_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out)
-        phenotype_out = PHENOTYPE_EXPLORATION(trait_file, tree_file, dataset_out)
+        dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out)
+        phenotype_out = PHENOTYPE_EXPLORATION(trait_file, tree_file, dataset_exploration_out.results_dir)
+        dataset_out = phenotype_out.results_dir
     }
 
     emit:

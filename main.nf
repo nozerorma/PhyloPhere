@@ -83,15 +83,16 @@ workflow {
             REPORTING()
             ran_any = true
         }
+        def ct_results
         if (params.ct_tool) {
             if (params.contrast_selection) {
                 def contrast_out = CONTRAST_SELECTION()
-                CT(contrast_out.trait_file_out, contrast_out.bootstrap_trait_file_out, contrast_out.tree_file_out)
+                ct_results = CT(contrast_out.trait_file_out, contrast_out.bootstrap_trait_file_out, contrast_out.tree_file_out)
             } else {
                 def trait_file_in = null
                 def bootstrap_trait_file_in = null
                 def tree_file_in = null
-                CT (trait_file_in, bootstrap_trait_file_in, tree_file_in)
+                ct_results = CT (trait_file_in, bootstrap_trait_file_in, tree_file_in)
             }
             ran_any = true
         }
@@ -104,16 +105,23 @@ workflow {
             ran_any = true
         }
         if (params.caas_postproc) {
-            // Pass empty channel for background files when running standalone
-            // If running after CT_DISCOVERY, wire the background files channel here
-            def postproc_results = CAAS_POSTPROC(Channel.empty())
+            // Use CT outputs if available, otherwise use empty channels (will fall back to parameters)
+            def discovery_ch = ct_results ? ct_results.discovery_file : Channel.empty()
+            def background_ch = ct_results ? ct_results.background_file : Channel.empty()
+            def background_genes_ch = ct_results ? ct_results.background_genes : Channel.empty()
+            def bootstrap_ch = ct_results ? ct_results.bootstrap_file : Channel.empty()
+            
+            def postproc_results = CAAS_POSTPROC(discovery_ch, background_ch, background_genes_ch)
             ran_any = true
             
             // Optionally chain CAAS_SIGNIFICATION after CAAS_POSTPROC
             if (params.caas_signification) {
+                // For signification, we need bootstrap data from CT if available
+                // Otherwise it will use params.bootstrap_input
                 CAAS_SIGNIFICATION(
                     postproc_results.filtered_discovery,
-                    postproc_results.cleaned_background
+                    postproc_results.cleaned_background,
+                    bootstrap_ch
                 )
             }
         }

@@ -1,0 +1,2 @@
+task_id	hash	native_id	name	status	exit	submit	duration	realtime	%cpu	peak_rss	peak_vmem	rchar	wchar
+1	42/1421b3	846610	CONTRAST_SELECTION:DATASET_PRUNE (dataset_prune)	ABORTED	-	2026-02-10 16:52:38.756	-	-	-	-	-	-	-

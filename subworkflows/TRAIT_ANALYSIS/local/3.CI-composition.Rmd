@@ -1,9 +1,28 @@
 ---
-title: "CI Composition and Statistical Overview"
+title: "Confidence Interval Composition Analysis"
+author: "PhyloPhere Pipeline"
 date: "`r Sys.Date()`"
 output:
-  html_document: default
-  pdf_document: default
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  trait_file: NULL
+  tree_file: NULL
+  output_dir: !r getwd()
+  seed: ""
+  clade_name: "clade"
+  taxon_of_interest: "family"
+  traitname: "trait"
+  n_trait: ""
+  c_trait: ""
+  tax_id: ""
+  secondary_trait: ""
+  branch_trait: ""
 ---
 
 ```{r header}
@@ -37,6 +56,12 @@ This script computes 95% credibility intervals (CIs) for the trait of interest:
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
 ```{r setup, message=TRUE, warning=TRUE}
+# Make params available in environment before sourcing commons.R
+if (!exists("params")) {
+  stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
+}
+assign("params", params, envir = .GlobalEnv)
+
 # Call the setup function from commons.R
 source("./obj/commons.R")
 setup_rmd()
@@ -63,11 +88,20 @@ library(tibble)
 library(ggplot2)
 library(patchwork)
 library(ggtext)
+library(paletteer)
 
 color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
 capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
 capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
 capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
+
+# Define color palettes, including a colorblind-friendly palette for categories
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "mauve", "gray"
+)
 
 createDir(ci_dir)
 
@@ -193,8 +227,8 @@ create_colored_labels <- function(trait_data) {
   label_df <- trait_data %>%
     mutate(
       color = case_when(
-        trait >= q75 ~ "#D73027",  # Red for top quartile
-        trait <= q25 ~ "#1A9850",  # Green for bottom quartile
+        trait >= q75 ~ as.character(tableau_10["vermillion"]),  # Red for top quartile
+        trait <= q25 ~ as.character(tableau_10["bluish_green"]),  # Green for bottom quartile
         TRUE ~ "#000000"           # Black for middle
       )
     ) %>%
@@ -213,7 +247,7 @@ create_colored_labels <- function(trait_data) {
 create_legend_plot <- function() {
   legend_df <- tibble(
     category = c("Top", "Bottom"),
-    color = c("#D73027", "#1A9850")
+    color = c(tableau_10["vermillion"], tableau_10["bluish_green"])
   )
   
   ggplot(legend_df, aes(x = 1, y = category, color = category)) +
@@ -247,7 +281,7 @@ create_heatmap <- function(pairwise_data, colored_labels,
   p <- ggplot(pairwise_data, aes(x = species2, y = species1, fill = abs(diff_value))) +
     geom_tile(color = "black", size = 0.25) +
     geom_text(aes(label = sprintf("%.2f", abs(diff_value))), size = 3) +
-    scale_fill_gradient(low = "white", high = "salmon3", name = "Difference") +
+    scale_fill_gradient(low = "white", high = tableau_10["vermillion"], name = "Difference") +
     scale_x_discrete(labels = function(x) colored_labels[x]) +
     scale_y_discrete(labels = function(y) colored_labels[y]) +
     theme_minimal() +

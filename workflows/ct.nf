@@ -42,6 +42,12 @@ workflow CT {
         bootstrap_trait_file_in
         tree_file_in
     main:
+        // Output channels for emit block - must be defined at workflow level
+        def discovery_concat_out = Channel.empty()
+        def background_concat_out = Channel.empty()
+        def background_genes_out = Channel.empty()
+        def bootstrap_concat_out = Channel.empty()
+        
     if (params.ct_tool) {
 
         def toolsToRun = params.ct_tool.split(',')
@@ -96,6 +102,7 @@ workflow CT {
                 .ifEmpty([])
                 .set { discovery_files_to_concat }
             CONCAT_DISCOVERY(discovery_files_to_concat)
+            discovery_concat_out = CONCAT_DISCOVERY.out.discovery_concat
             
             // Concatenate background outputs - collect actual files for staging
             discovery_out.background_out
@@ -103,6 +110,8 @@ workflow CT {
                 .ifEmpty([])
                 .set { background_files_to_concat }
             CONCAT_BACKGROUND(background_files_to_concat)
+            background_concat_out = CONCAT_BACKGROUND.out.background_concat
+            background_genes_out = CONCAT_BACKGROUND.out.background_genes
         }
         if (toolsToRun.contains('resample')) {
             // Define the tree file channel
@@ -165,7 +174,13 @@ workflow CT {
                 .collect()
                 .ifEmpty([])
                 .set { bootstrap_files }
-            CONCAT_BOOTSTRAP(bootstrap_files)
+            bootstrap_concat_out = CONCAT_BOOTSTRAP(bootstrap_files)
         }
     }
+    
+    emit:
+        discovery_file = discovery_concat_out
+        background_file = background_concat_out
+        background_genes = background_genes_out
+        bootstrap_file = bootstrap_concat_out
 }
