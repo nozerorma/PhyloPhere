@@ -17,23 +17,22 @@ import sys
 import threading
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Set, Any
-from collections import defaultdict
 
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "single_gene_pipeline"))
 sys.path.insert(0, str(project_root / "src"))
 
-from src.single_pipe.biochem_single import analyze_gene_biochemistry
-from src.single_pipe.asr_single import (
+from src.convergence.disambiguate_single import analyze_gene_disambiguation
+from src.asr.asr_single import (
     load_alignment_and_mappings,
     load_and_match_tree,
     run_asr_pipeline,
-    load_precomputed_asr
+    load_precomputed_asr,
 )
 
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
 from src.utils.concurrency import plan_concurrency, init_worker, codeml_slot
-from src.data.loaders import list_gene_caas_positions, parse_trait_pairs
+from src.data.loaders import list_gene_caas_positions
 from src.utils.io_utils import find_gene_alignment
 
 from src.utils.disambiguation_db import (
@@ -46,25 +45,23 @@ from src.utils.disambiguation_db import (
 logger = logging.getLogger(__name__)
 
 
-def convert_biochem_result_to_dict(
+def convert_convergence_result_to_dict(
     result,
     multi_hypothesis: Optional[str],
     alignment=None,
     seq_by_id: Optional[Dict] = None,
     seq_by_species: Optional[Dict] = None,
-    trait_pairs: Optional[List[Tuple[str, str]]] = None,
+    trait_pairs: Optional[Dict[int, List[Tuple[str, str]]]] = None,
     taxid_to_species: Optional[Dict] = None,
 ) -> Dict:
     """
-    Convert a BiochemResults-like object to a JSON-serializable dict.
+    Convert a ConvergenceResult-like object to a JSON-serializable dict.
     This version is strictly attribute-safe: it never assumes dict APIs
     once conversion begins.
 
-    Requires either alignment OR seq_by_id/seq_by_species to build multi_caas,
-    and requires trait_pairs to define pair ordering for multiset logic.
+    Stability is assessed from the metadata-provided amino-encoded pattern
+    (`amino_encoded`), not from reconstructed multi-caas multisets.
     """
-    from src.convergence.convergence import build_consolidated_multiset
-    from src.convergence.patterns import assess_convergence_stability
     from types import SimpleNamespace
 
     # Normalize dict -> namespace for consistent attribute access
@@ -121,25 +118,11 @@ def convert_biochem_result_to_dict(
             # If normalization fails, keep original; downstream getattr will be defensive
             pass
 
-    # Validation: allow either alignment OR seq maps
-    if alignment is None and not seq_by_id and not seq_by_species:
-        raise ValueError(
-            f"Alignment or seq_by_id/seq_by_species required for "
-            f"{getattr(result, 'gene', None)}_{getattr(result, 'position', None)} "
-            f"to build multi_caas."
-        )
-    if not trait_pairs:
-        raise ValueError(
-            f"Trait pairs required for "
-            f"{getattr(result, 'gene', None)}_{getattr(result, 'position', None)} "
-            f"to build multi_caas."
-        )
-
     # Core identity
     result_dict: Dict[str, Any] = {
         "gene": getattr(result, "gene", None),
-        "msa_pos": getattr(result, "position_zero_based", None),   # 0-based
-        "position": getattr(result, "position", None),             # usually 1-based
+        "msa_pos": getattr(result, "position_zero_based", None),  # 0-based
+        "position": getattr(result, "position", None),  # usually 1-based
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
         "is_significant": bool(getattr(result, "is_significant", False)),
@@ -195,15 +178,11 @@ def convert_biochem_result_to_dict(
             result_dict[f"mrca_{idx}_state"] = state
             result_dict[f"mrca_{idx}_posterior"] = prob
 
-        fallback_depths = nsd.get("fallback_depths", {}) or {}
-        if isinstance(fallback_depths, dict) and fallback_depths:
-            for idx in range(1, len(focal_states) + 1):
-                depth = fallback_depths.get(f"focal_{idx}", 0)
-                result_dict[f"mrca_{idx}_fallback_depth"] = depth
-
     # Pattern classification
     result_dict["pattern_type"] = getattr(result, "pattern_type", None)
-    result_dict["convergence_description"] = getattr(result, "convergence_description", None)
+    result_dict["convergence_description"] = getattr(
+        result, "convergence_description", None
+    )
     result_dict["convergence_mode"] = getattr(result, "convergence_mode", None)
 
     # Change tracking
@@ -232,36 +211,7 @@ def convert_biochem_result_to_dict(
     if getattr(result, "node_state_details", None):
         result_dict["node_state_details"] = getattr(result, "node_state_details")
 
-    # Build consolidated multiset (multi_caas)
-    all_pairs: List[Tuple[str, str]] = []
-    seen = set()
-    for pair in trait_pairs or []:
-        t = tuple(pair)
-        if t not in seen:
-            all_pairs.append(pair)
-            seen.add(t)
-
-    if all_pairs:
-        msa_pos = getattr(result, "position_zero_based", None)
-        msa_pos_int = int(msa_pos) if msa_pos is not None else -1
-
-        multi = build_consolidated_multiset(
-            alignment=alignment,
-            msa_pos=msa_pos_int,
-            trait_pairs=all_pairs,
-            hypothesis_caas=str(getattr(result, "caas", "") or ""),
-            seq_by_id=seq_by_id,
-            seq_by_species=seq_by_species,
-            taxid_to_species=taxid_to_species,
-        )
-        result_dict["multi_caas"] = multi
-
-        stability = assess_convergence_stability(multi)
-        result_dict["is_stable"] = stability.get("is_stable")
-        result_dict["stability_pattern"] = stability.get("stability_pattern")
-        result_dict["top_conserved"] = stability.get("top_conserved")
-        result_dict["bottom_conserved"] = stability.get("bottom_conserved")
-        result_dict["ambiguous"] = not bool(stability.get("is_stable", True))
+    result_dict["ambiguous"] = bool(getattr(result, "ambiguous", False))
 
     return result_dict
 
@@ -269,25 +219,29 @@ def convert_biochem_result_to_dict(
 def merge_multi_hypothesis_results(
     results_group: List,
     alignment=None,
-    trait_pairs: Optional[List[Tuple[str, str]]] = None,
-    taxid_to_species: Optional[Dict] = None
+    seq_by_id: Optional[Dict] = None,
+    seq_by_species: Optional[Dict] = None,
+    trait_pairs: Optional[Dict[int, List[Tuple[str, str]]]] = None,
+    taxid_to_species: Optional[Dict] = None,
 ) -> Dict:
     """
-    Merge multiple BiochemResults for same (gene, msa_pos) into one dict.
+    Merge multiple ConvergenceResult rows for same (gene, msa_pos) into one dict.
 
     This function is intentionally side-effect free: it does not mutate
     the input results.
     """
     base = results_group[0]
-    tags = [str(getattr(r, "tag", "")) for r in results_group if getattr(r, "tag", None)]
+    tags = [
+        str(getattr(r, "tag", "")) for r in results_group if getattr(r, "tag", None)
+    ]
     multi_hypothesis = ",".join(sorted(set(tags))) if tags else None
 
-    merged = convert_biochem_result_to_dict(
+    merged = convert_convergence_result_to_dict(
         base,
         multi_hypothesis=multi_hypothesis,
         alignment=alignment,
-        seq_by_id=None,
-        seq_by_species=None,
+        seq_by_id=seq_by_id,
+        seq_by_species=seq_by_species,
         trait_pairs=trait_pairs,
         taxid_to_species=taxid_to_species,
     )
@@ -305,23 +259,29 @@ def merge_multi_hypothesis_results(
     else:
         merged["pattern_type"] = "ambiguous"
 
-    descs = [getattr(r, "convergence_description", None) for r in results_group if getattr(r, "convergence_description", None)]
+    descs = [
+        getattr(r, "convergence_description", None)
+        for r in results_group
+        if getattr(r, "convergence_description", None)
+    ]
     merged["convergence_description"] = "; ".join(filter(None, descs[:3]))
 
     # Merge low confidence nodes
     all_lcn = []
     for r in results_group:
-        l = getattr(r, "low_confidence_nodes", None)
-        if l:
-            if isinstance(l, (list, tuple, set)):
-                all_lcn.extend(list(l))
+        low_conf_nodes = getattr(r, "low_confidence_nodes", None)
+        if low_conf_nodes:
+            if isinstance(low_conf_nodes, (list, tuple, set)):
+                all_lcn.extend(list(low_conf_nodes))
             else:
-                all_lcn.append(l)
+                all_lcn.append(low_conf_nodes)
     if all_lcn:
         merged["low_confidence_nodes"] = ",".join(sorted(set(str(x) for x in all_lcn)))
 
     # Merge CAAS labels
-    caass = [getattr(r, "caas", None) for r in results_group if getattr(r, "caas", None)]
+    caass = [
+        getattr(r, "caas", None) for r in results_group if getattr(r, "caas", None)
+    ]
     if caass:
         merged["caas_merged"] = "; ".join(sorted(set(str(x) for x in caass)))
 
@@ -329,13 +289,23 @@ def merge_multi_hypothesis_results(
     merged["asr_is_conserved"] = any(
         bool(getattr(r, "asr_is_conserved", False)) for r in results_group
     )
-    merged["is_conserved_meta"] = any(bool(getattr(r, "is_conserved_meta", False)) for r in results_group)
+    merged["is_conserved_meta"] = any(
+        bool(getattr(r, "is_conserved_meta", False)) for r in results_group
+    )
 
-    groups = [str(getattr(r, "caap_group", "")).strip() for r in results_group if getattr(r, "caap_group", None)]
+    groups = [
+        str(getattr(r, "caap_group", "")).strip()
+        for r in results_group
+        if getattr(r, "caap_group", None)
+    ]
     if groups:
         merged["caap_group"] = ",".join(sorted(set(g for g in groups if g)))
 
-    encoded = [str(getattr(r, "amino_encoded", "")).strip() for r in results_group if getattr(r, "amino_encoded", None)]
+    encoded = [
+        str(getattr(r, "amino_encoded", "")).strip()
+        for r in results_group
+        if getattr(r, "amino_encoded", None)
+    ]
     if encoded:
         merged["amino_encoded"] = ",".join(sorted(set(e for e in encoded if e)))
 
@@ -378,13 +348,13 @@ def process_single_gene(
         alignment_data = load_alignment_and_mappings(
             alignment_path,
             Path(taxid_mapping_path) if taxid_mapping_path else None,
-            gene_name=gene
+            gene_name=gene,
         )
 
         tree_data = load_and_match_tree(
             Path(tree_file),
             alignment_data,
-            Path(taxid_mapping_path) if taxid_mapping_path else None
+            Path(taxid_mapping_path) if taxid_mapping_path else None,
         )
 
         node_posteriors = None
@@ -392,13 +362,14 @@ def process_single_gene(
         paml_tree_file = None
 
         if asr_mode == "precomputed" and asr_cache_dir:
-            from single_pipe.asr_single import SingleGeneASRConfig
+            from src.asr.asr_single import SingleGeneASRConfig
+
             asr_config = SingleGeneASRConfig(
                 alignment_path=alignment_path,
                 tree_path=Path(tree_file),
                 model=asr_model,
                 posterior_threshold=posterior_threshold,
-                output_dir=Path(asr_cache_dir)
+                output_dir=Path(asr_cache_dir),
             )
             try:
                 node_posteriors = load_precomputed_asr(gene, asr_config, alignment_data)
@@ -412,14 +383,15 @@ def process_single_gene(
             gene_output_dir = output_dir / "asr"
             gene_output_dir.mkdir(parents=True, exist_ok=True)
 
-            from single_pipe.asr_single import SingleGeneASRConfig
+            from src.asr.asr_single import SingleGeneASRConfig
+
             asr_config = SingleGeneASRConfig(
                 alignment_path=alignment_path,
                 tree_path=Path(tree_file),
                 model=asr_model,
                 posterior_threshold=posterior_threshold,
                 output_dir=gene_output_dir,
-                threads=threads_per_gene
+                threads=threads_per_gene,
             )
 
             with codeml_slot():
@@ -428,7 +400,7 @@ def process_single_gene(
                     asr_config,
                     skip_if_exists=True,
                     alignment_data=alignment_data,
-                    tree_data=tree_data
+                    tree_data=tree_data,
                 )
             if node_posteriors:
                 rst_file = getattr(node_posteriors, "rst_file", None)
@@ -438,8 +410,7 @@ def process_single_gene(
         if rst_file and paml_tree_file and Path(paml_tree_file).exists():
             try:
                 ordered_nodes, id_mapping = build_tree_node_mapping(
-                    tree_file=Path(paml_tree_file),
-                    rst_file=Path(rst_file)
+                    tree_file=Path(paml_tree_file), rst_file=Path(rst_file)
                 )
                 tree_data.nodes = ordered_nodes
                 tree_data.root = ordered_nodes[-1]
@@ -448,29 +419,48 @@ def process_single_gene(
                 def _tip_taxid(label: str) -> str:
                     return label.split("_")[-1] if "_" in label else label
 
-                tree_data.tip_set = {_tip_taxid(lbl) for lbl in extract_tip_labels(tree_data.root)}
-                logger.info("Updated tree_data from PAML tree for node/posterior alignment")
+                tree_data.tip_set = {
+                    _tip_taxid(lbl) for lbl in extract_tip_labels(tree_data.root)
+                }
+                logger.info(
+                    "Updated tree_data from PAML tree for node/posterior alignment"
+                )
             except Exception as e:
                 logger.warning(f"Could not rebuild tree_data from PAML tree: {e}")
 
         diag_root = output_dir / "diagnostics" if run_diagnostics else None
         posterior_dump_jsonl = None
 
-        if run_diagnostics and node_posteriors and getattr(node_posteriors, "posteriors_node", None):
+        if (
+            run_diagnostics
+            and node_posteriors
+            and getattr(node_posteriors, "posteriors_node", None)
+        ):
             try:
                 from src.asr.posterior import export_posteriors_to_jsonl
-                effective_diag_root = diag_root if diag_root is not None else (output_dir / "diagnostics")
+
+                effective_diag_root = (
+                    diag_root if diag_root is not None else (output_dir / "diagnostics")
+                )
                 posterior_dump_dir = effective_diag_root / "node_dumps"
                 posterior_dump_dir.mkdir(parents=True, exist_ok=True)
-                posterior_dump_jsonl = posterior_dump_dir / f"{gene.lower()}_posteriors.jsonl"
+                posterior_dump_jsonl = (
+                    posterior_dump_dir / f"{gene.lower()}_posteriors.jsonl"
+                )
 
                 if not posterior_dump_jsonl.exists():
-                    posteriors_node = getattr(node_posteriors, "posteriors_node", {}) or {}
+                    posteriors_node = (
+                        getattr(node_posteriors, "posteriors_node", {}) or {}
+                    )
                     posteriors_mapping = {int(k): v for k, v in posteriors_node.items()}
                     export_posteriors_to_jsonl(
                         posteriors_mapping,
                         posterior_dump_jsonl,
-                        node_posteriors.node_id_map if hasattr(node_posteriors, "node_id_map") else None
+                        (
+                            node_posteriors.node_id_map
+                            if hasattr(node_posteriors, "node_id_map")
+                            else None
+                        ),
                     )
                     logger.info(f"Wrote posterior JSONL to {posterior_dump_jsonl}")
             except Exception as e:
@@ -482,28 +472,39 @@ def process_single_gene(
             positions_1_based = {int(p) + 1 for p in caas_positions}
             try:
                 from src.asr.posterior import parse_paml_rst_node_level
-                if getattr(node_posteriors, "rst_file", None) and getattr(node_posteriors, "tree_file", None):
+
+                if getattr(node_posteriors, "rst_file", None) and getattr(
+                    node_posteriors, "tree_file", None
+                ):
                     parsed = parse_paml_rst_node_level(
                         Path(str(node_posteriors.rst_file)),
                         Path(str(node_posteriors.tree_file)),
                         threshold=posterior_threshold,
-                        positions=positions_1_based
+                        positions=positions_1_based,
                     )
-                    filtered_posteriors = parsed[0] if isinstance(parsed, tuple) else parsed
+                    filtered_posteriors = (
+                        parsed[0] if isinstance(parsed, tuple) else parsed
+                    )
             except Exception:
                 filtered_posteriors = None
 
             if filtered_posteriors is None:
                 try:
-                    posteriors_node = getattr(node_posteriors, "posteriors_node", {}) or {}
+                    posteriors_node = (
+                        getattr(node_posteriors, "posteriors_node", {}) or {}
+                    )
                     filtered_posteriors = {
-                        int(node_id): {int(pos): probs for pos, probs in site_map.items() if int(pos) in positions_1_based}
+                        int(node_id): {
+                            int(pos): probs
+                            for pos, probs in site_map.items()
+                            if int(pos) in positions_1_based
+                        }
                         for node_id, site_map in posteriors_node.items()
                     }
                 except Exception:
                     filtered_posteriors = None
 
-        biochem_results, diagnostics = analyze_gene_biochemistry(
+        biochem_results, diagnostics = analyze_gene_disambiguation(
             gene=gene,
             alignment_data=alignment_data,
             tree_data=tree_data,
@@ -511,16 +512,22 @@ def process_single_gene(
             caas_metadata_path=Path(caas_metadata_path),
             trait_file_path=Path(trait_file_path),
             taxid_mapping=alignment_data.species_to_taxid,
-            posterior_data=filtered_posteriors if filtered_posteriors else (node_posteriors.posteriors_node if node_posteriors else None),
+            posterior_data=(
+                filtered_posteriors
+                if filtered_posteriors
+                else (node_posteriors.posteriors_node if node_posteriors else None)
+            ),
             posterior_threshold=posterior_threshold,
             diagnostics_dir=diag_root,
             convergence_mode=convergence_mode,
             asr_mode=asr_mode,
-            include_non_significant=include_non_significant
+            include_non_significant=include_non_significant,
         )
 
         if not include_non_significant:
-            biochem_results = [r for r in biochem_results if getattr(r, "is_significant", False)]
+            biochem_results = [
+                r for r in biochem_results if getattr(r, "is_significant", False)
+            ]
 
         if not biochem_results:
             return (gene, None)
@@ -540,7 +547,9 @@ def process_single_gene(
                 return None
 
         seq_by_id_serial = {k: _to_seq_str(v) for k, v in seq_by_id_raw.items()}
-        seq_by_species_serial = {k: _to_seq_str(v) for k, v in seq_by_species_raw.items()}
+        seq_by_species_serial = {
+            k: _to_seq_str(v) for k, v in seq_by_species_raw.items()
+        }
 
         alignment_record = {
             "alignment_path": str(alignment_path) if alignment_path else None,
@@ -550,50 +559,46 @@ def process_single_gene(
             "species_to_taxid": getattr(alignment_data, "species_to_taxid", None),
             "alignment_extras": {
                 "paml_tree_file": paml_tree_file,
-                "posterior_dump_jsonl": str(posterior_dump_jsonl) if posterior_dump_jsonl else None,
-                "node_id_map": node_posteriors.node_id_map if node_posteriors and hasattr(node_posteriors, "node_id_map") else None,
+                "posterior_dump_jsonl": (
+                    str(posterior_dump_jsonl) if posterior_dump_jsonl else None
+                ),
+                "node_id_map": (
+                    node_posteriors.node_id_map
+                    if node_posteriors and hasattr(node_posteriors, "node_id_map")
+                    else None
+                ),
             },
         }
 
         if db_queue is not None:
             try:
-                db_queue.put({"type": "gene", "gene": gene, "alignment": alignment_record})
+                db_queue.put(
+                    {"type": "gene", "gene": gene, "alignment": alignment_record}
+                )
 
-                trait_pairs_local = parse_trait_pairs(Path(trait_file_path))
-
-                groups = defaultdict(list)
                 for r in biochem_results:
-                    groups[getattr(r, "position_zero_based", None)].append(r)
+                    msa_pos = getattr(r, "position_zero_based", None)
+                    caas_dict = convert_convergence_result_to_dict(
+                        r,
+                        multi_hypothesis=None,
+                        alignment=None,
+                        seq_by_id=seq_by_id_serial,
+                        seq_by_species=seq_by_species_serial,
+                        trait_pairs=None,
+                        taxid_to_species=getattr(
+                            alignment_data, "taxid_to_species", None
+                        ),
+                    )
 
-                for msa_pos, results_group in groups.items():
-                    if len(results_group) == 1:
-                        r = results_group[0]
-                        caas_dict = convert_biochem_result_to_dict(
-                            r,
-                            multi_hypothesis=None,
-                            alignment=None,
-                            seq_by_id=seq_by_id_serial,
-                            seq_by_species=seq_by_species_serial,
-                            trait_pairs=trait_pairs_local,
-                            taxid_to_species=getattr(alignment_data, "taxid_to_species", None),
-                        )
-                    else:
-                        caas_dict = merge_multi_hypothesis_results(
-                            results_group,
-                            alignment=None,
-                            trait_pairs=trait_pairs_local,
-                            taxid_to_species=getattr(alignment_data, "taxid_to_species", None),
-                        )
-
-                    # Conserved-pair flags are set upstream in BiochemResults
-
-                    db_queue.put({
-                        "type": "result",
-                        "gene": gene,
-                        "msa_pos": msa_pos,
-                        "position": caas_dict.get("position", None),
-                        "result": caas_dict,
-                    })
+                    db_queue.put(
+                        {
+                            "type": "result",
+                            "gene": gene,
+                            "msa_pos": msa_pos,
+                            "position": caas_dict.get("position", None),
+                            "result": caas_dict,
+                        }
+                    )
 
             except Exception as e:
                 logger.warning(f"Failed to enqueue results for {gene}: {e}")
@@ -603,9 +608,16 @@ def process_single_gene(
         # keep worker RAM low
         try:
             import gc
+
             for name in (
-                "alignment_data", "tree_data", "biochem_results", "node_posteriors",
-                "seq_by_id_raw", "seq_by_species_raw", "seq_by_id_serial", "seq_by_species_serial"
+                "alignment_data",
+                "tree_data",
+                "biochem_results",
+                "node_posteriors",
+                "seq_by_id_raw",
+                "seq_by_species_raw",
+                "seq_by_id_serial",
+                "seq_by_species_serial",
             ):
                 if name in locals():
                     try:
@@ -648,8 +660,12 @@ def process_all_genes(
     max_codeml: Optional[int] = None,
 ) -> Tuple[List[Dict], Optional[Dict]]:
 
-    effective_workers, threads_per_gene = plan_concurrency(workers, threads_per_gene, logger)
-    logger.info(f"Processing {len(genes)} genes with {effective_workers} workers and {threads_per_gene} threads/gene")
+    effective_workers, threads_per_gene = plan_concurrency(
+        workers, threads_per_gene, logger
+    )
+    logger.info(
+        f"Processing {len(genes)} genes with {effective_workers} workers and {threads_per_gene} threads/gene"
+    )
 
     db_queue = None
     writer_thread = None
@@ -657,6 +673,7 @@ def process_all_genes(
 
     # Load Ensembl genes file if provided (no gate)
     from src.data.loaders import load_ensembl_genes
+
     ensembl_genes: Optional[Set[str]] = None
     try:
         if ensembl_genes_file:
@@ -689,7 +706,9 @@ def process_all_genes(
                     if item.get("type") == "gene":
                         gene_name = item.get("gene")
                         if gene_name and gene_name not in genes_seen:
-                            insert_gene_alignment(conn, gene_name, item.get("alignment") or {})
+                            insert_gene_alignment(
+                                conn, gene_name, item.get("alignment") or {}
+                            )
                             genes_seen.add(gene_name)
 
                     elif item.get("type") == "result":
@@ -698,7 +717,7 @@ def process_all_genes(
                             item.get("gene"),
                             item.get("msa_pos"),
                             item.get("position"),
-                            item.get("result") or {}
+                            item.get("result") or {},
                         )
                         insert_count += 1
                         if insert_count % 100 == 0:
@@ -711,7 +730,9 @@ def process_all_genes(
             conn.commit()
             conn.close()
 
-    writer_thread = threading.Thread(target=_db_writer, args=(db_path, db_queue), daemon=True)
+    writer_thread = threading.Thread(
+        target=_db_writer, args=(db_path, db_queue), daemon=True
+    )
     writer_thread.start()
 
     if max_tasks_per_child is not None:
@@ -733,13 +754,23 @@ def process_all_genes(
                 pool.apply_async(
                     process_single_gene,
                     (
-                        gene, alignment_dir, tree_file, caas_metadata_path,
-                        trait_file_path, taxid_mapping_path,
-                        asr_mode, asr_model, asr_cache_dir,
-                        posterior_threshold, convergence_mode,
-                        threads_per_gene, include_non_significant,
-                        run_diagnostics, output_dir,
-                        db_queue, ensembl_genes,
+                        gene,
+                        alignment_dir,
+                        tree_file,
+                        caas_metadata_path,
+                        trait_file_path,
+                        taxid_mapping_path,
+                        asr_mode,
+                        asr_model,
+                        asr_cache_dir,
+                        posterior_threshold,
+                        convergence_mode,
+                        threads_per_gene,
+                        include_non_significant,
+                        run_diagnostics,
+                        output_dir,
+                        db_queue,
+                        ensembl_genes,
                     ),
                 )
             )
@@ -773,18 +804,20 @@ def process_all_genes(
     if skipped_genes:
         skipped_file = output_dir / "skipped_genes.txt"
         with open(skipped_file, "w") as f:
-            f.write(f"# Skipped {len(skipped_genes)} genes (missing alignment or no CAAS positions)\n")
+            f.write(
+                f"# Skipped {len(skipped_genes)} genes (missing alignment or no CAAS positions)\n"
+            )
             for g in sorted(skipped_genes):
                 f.write(f"{g}\n")
         logger.info(f"Skipped {len(skipped_genes)} genes (see {skipped_file})")
 
-    logger.info(f"Results written to DB at {db_path}; processed {len(processed_genes)} genes")
-
-    trait_pairs = parse_trait_pairs(Path(trait_file_path))
-    logger.info(f"Loaded {len(trait_pairs)} pairs for export")
+    logger.info(
+        f"Results written to DB at {db_path}; processed {len(processed_genes)} genes"
+    )
 
     from src.reporting.disambiguation_writers import export_from_db
-    caas_files, summary_json = export_from_db(db_path, output_dir, trait_pairs)
+
+    caas_files, summary_json = export_from_db(db_path, output_dir)
 
     export_info = {
         "db_path": str(db_path),
@@ -793,3 +826,7 @@ def process_all_genes(
     }
 
     return [], export_info
+
+
+# Backward-compatible alias
+convert_biochem_result_to_dict = convert_convergence_result_to_dict

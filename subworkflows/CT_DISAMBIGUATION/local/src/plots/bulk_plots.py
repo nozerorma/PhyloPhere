@@ -14,7 +14,7 @@ results. All plotting functions accept pre-loaded DataFrames
 **Generated plots:**
 
 1. **Pattern-based plots:**
-   - convergence_patterns.png: 3-row structure (raw, stability, significant/stable + ASR-conserved)
+   - convergence_patterns.png: 3-row structure (raw, significance, significant + ASR-conserved)
    - convergence_patterns_faceted_*.png: Faceted by change_side (top/bottom/both)
    - convergence_patterns_trait_*.png: Filtered by trait_value (high/low)
 
@@ -37,12 +37,20 @@ from typing import Optional
 
 import pandas as pd
 import matplotlib.pyplot as plt
-import numpy as np
 
 from src.plots.gene_trees_bulk import plot_random_gene_trees
 from src.plots.manhattan_bulk import plot_manhattan
-from src.plots.pattern_plots import plot_convergence_patterns, plot_faceted_patterns, plot_trait_high_low_patterns
-from src.plots.plot_utils import load_df, safe_save, get_pattern_abbreviation, find_tree_file
+from src.plots.pattern_plots import (
+    plot_convergence_patterns,
+    plot_faceted_patterns,
+    plot_trait_high_low_patterns,
+)
+from src.plots.plot_utils import (
+    load_df,
+    safe_save,
+    get_pattern_abbreviation,
+    find_tree_file,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +64,6 @@ logging.getLogger("matplotlib.backends").setLevel(logging.WARNING)
 
 # Optional: suppress matplotlib-related warnings
 warnings.filterwarnings("ignore", module="matplotlib")
-
 
 
 def _generate_plot_suite(
@@ -175,18 +182,24 @@ def generate_bulk_plots(
     # Prepare significant subset (do not overwrite df_full so we can optionally
     # still generate 'all' outputs when requested).
     if "is_significant" in df_full.columns:
-        df_significant = df_full[df_full["is_significant"].fillna(False).astype(bool)].copy()
-        logger.info("Significant filter: %s/%s results", len(df_significant), len(df_full))
+        df_significant = df_full[
+            df_full["is_significant"].fillna(False).astype(bool)
+        ].copy()
+        logger.info(
+            "Significant filter: %s/%s results", len(df_significant), len(df_full)
+        )
     else:
         df_significant = df_full.copy()
-        logger.warning("No 'is_significant' column found; treating all results as significant")
+        logger.warning(
+            "No 'is_significant' column found; treating all results as significant"
+        )
 
     # Generate plots for significant results in 'significant' subdirectory
     significant_dir = output_dir / "significant"
     significant_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Generating plots for significant results in %s...", significant_dir)
     _generate_plot_suite(
-        df_significant, # type : ignore
+        df_significant,  # type : ignore
         ensembl_df,
         significant_dir,
         n_gene_trees,
@@ -199,7 +212,10 @@ def generate_bulk_plots(
     if include_non_significant:
         all_dir = output_dir / "all"
         all_dir.mkdir(parents=True, exist_ok=True)
-        logger.info("Generating plots for all results (including non-significant) in %s...", all_dir)
+        logger.info(
+            "Generating plots for all results (including non-significant) in %s...",
+            all_dir,
+        )
         _generate_plot_suite(
             df_full,
             ensembl_df,
@@ -221,10 +237,6 @@ def plot_trait_analysis(df: pd.DataFrame, out: Path, focus: str):
 
     subset = subset.copy()
 
-    if "is_stable" not in subset.columns:
-        subset["is_stable"] = False
-    subset["is_stable"] = subset["is_stable"].fillna(False).astype(bool)
-
     counts = subset["pattern_type"].value_counts().sort_values(ascending=False)
 
     # -----------------------------
@@ -245,17 +257,19 @@ def plot_trait_analysis(df: pd.DataFrame, out: Path, focus: str):
     axes[0].set_title(f"Trait-{focus.upper()} Pattern Distribution (All)")
     axes[0].set_xlabel("Pattern Type")
 
-    # Right: stable subset by pattern
-    stable_counts = (
-        subset[subset["is_stable"]]
-        .groupby("pattern_type")
-        .size()
-        .reindex(patterns, fill_value=0)
+    # Right: significant subset by pattern
+    sig_mask = (
+        subset.get("is_significant", pd.Series(False, index=subset.index))
+        .fillna(False)
+        .astype(bool)
     )
-    axes[1].bar(x, stable_counts.values, color="#16a085")
+    sig_counts = (
+        subset[sig_mask].groupby("pattern_type").size().reindex(patterns, fill_value=0)
+    )
+    axes[1].bar(x, sig_counts.values, color="#16a085")
     axes[1].set_xticks(list(x))
     axes[1].set_xticklabels(pattern_labels, rotation=0, ha="center", fontweight="bold")
-    axes[1].set_title(f"Trait-{focus.upper()} Stable Subset")
+    axes[1].set_title(f"Trait-{focus.upper()} Significant Subset")
     axes[1].set_ylabel("Count")
     axes[1].set_xlabel("Pattern Type")
 
@@ -263,12 +277,22 @@ def plot_trait_analysis(df: pd.DataFrame, out: Path, focus: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate bulk plots from CAAS aggregation")
+    parser = argparse.ArgumentParser(
+        description="Generate bulk plots from CAAS aggregation"
+    )
     parser.add_argument("caas_csv", type=Path, help="CAAS convergence CSV")
     parser.add_argument("--ensembl-csv", type=Path, help="Ensembl annotations CSV")
-    parser.add_argument("--output-dir", type=Path, default=Path("plots_bulk"), help="Output directory")
-    parser.add_argument("--include-non-significant", action="store_true", help="Include non-significant results")
-    parser.add_argument("--n-gene-trees", type=int, default=5, help="Number of gene trees to plot")
+    parser.add_argument(
+        "--output-dir", type=Path, default=Path("plots_bulk"), help="Output directory"
+    )
+    parser.add_argument(
+        "--include-non-significant",
+        action="store_true",
+        help="Include non-significant results",
+    )
+    parser.add_argument(
+        "--n-gene-trees", type=int, default=5, help="Number of gene trees to plot"
+    )
 
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 

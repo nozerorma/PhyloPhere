@@ -30,20 +30,14 @@ sys.path.insert(0, str(project_root / "src"))
 # Core imports
 from src.utils.io_utils import read_alignment
 from src.asr.reconstruct import ASRReconstructor, ASRConfig
-from src.asr.posterior import (
-    parse_paml_rst,
-    parse_paml_rst_node_level
-)
+from src.asr.posterior import parse_paml_rst, parse_paml_rst_node_level
 from src.asr.tree_parser import (
     get_tip_labels,
     parse_newick,
     assign_postorder_ids,
-    get_node_order
+    get_node_order,
 )
-from src.phylo.species_mapping import (
-    match_tree_alignment_by_taxid,
-    read_taxid_mapping
-)
+from src.phylo.species_mapping import match_tree_alignment_by_taxid, read_taxid_mapping
 from src.phylo.tree_utils import load_tree
 
 logger = logging.getLogger(__name__)
@@ -52,6 +46,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class SingleGeneASRConfig:
     """Configuration for single gene ASR pipeline execution."""
+
     alignment_path: Path
     tree_path: Path
     taxid_path: Optional[Path] = None
@@ -65,6 +60,7 @@ class SingleGeneASRConfig:
 @dataclass
 class AlignmentData:
     """Container for alignment and mapping data."""
+
     alignment: MultipleSeqAlignment  # BioPython alignment object
     # Mapping orientations kept consistent:
     #   species_to_taxid: species name -> taxid (for trait/metadata files)
@@ -79,6 +75,7 @@ class AlignmentData:
 @dataclass
 class TreeData:
     """Container for tree and phylogenetic data."""
+
     tree: Phylo.BaseTree.Tree  # BioPython tree object
     tip_set: set
     nodes: list
@@ -90,6 +87,7 @@ class TreeData:
 @dataclass
 class ASRResults:
     """Container for ASR execution results."""
+
     gene: str
     posteriors_site: Dict[int, Dict[str, float]]
     posteriors_node: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None
@@ -99,22 +97,22 @@ class ASRResults:
     node_id_map: Optional[Dict[int, int]] = None
 
 
-def _write_node_id_map(node_id_map: Optional[Dict[int, int]], tree_file: Optional[Path]) -> None:
+def _write_node_id_map(
+    node_id_map: Optional[Dict[int, int]], tree_file: Optional[Path]
+) -> None:
     """Write node-id remapping JSON next to the provided tree."""
     if not node_id_map or tree_file is None:
         return
     map_path = tree_file.with_suffix(tree_file.suffix + ".node_map.json")
     try:
-        with map_path.open('w', encoding='utf-8') as handle:
+        with map_path.open("w", encoding="utf-8") as handle:
             json.dump(node_id_map, handle, indent=2)
     except Exception as exc:
         logger.warning(f"Could not write node-id map to {map_path}: {exc}")
 
 
 def load_alignment_and_mappings(
-    alignment_path: Path,
-    taxid_path: Optional[Path] = None,
-    gene_name: str = "unknown"
+    alignment_path: Path, taxid_path: Optional[Path] = None, gene_name: str = "unknown"
 ) -> AlignmentData:
     """
     Load alignment and create lookup mappings.
@@ -133,8 +131,12 @@ def load_alignment_and_mappings(
         raise FileNotFoundError(f"Alignment file not found: {alignment_path}")
 
     # Load alignment
-    alignment: MultipleSeqAlignment = read_alignment(alignment_path, format='phylip-relaxed')
-    logger.info(f"✓ Alignment loaded: {len(alignment)} sequences, {alignment.get_alignment_length()} positions")
+    alignment: MultipleSeqAlignment = read_alignment(
+        alignment_path, format="phylip-relaxed"
+    )
+    logger.info(
+        f"✓ Alignment loaded: {len(alignment)} sequences, {alignment.get_alignment_length()} positions"
+    )
 
     # Build sequence lookups
     seq_by_id = {}
@@ -150,7 +152,9 @@ def load_alignment_and_mappings(
     if taxid_path and taxid_path.exists():
         logger.info("Loading TaxID to species mappings")
         species_to_taxid = read_taxid_mapping(taxid_path)  # species -> taxid
-        taxid_to_species = {taxid: species for species, taxid in species_to_taxid.items()}
+        taxid_to_species = {
+            taxid: species for species, taxid in species_to_taxid.items()
+        }
 
         # Update species lookups using mapping
         for species, taxid in species_to_taxid.items():
@@ -167,14 +171,12 @@ def load_alignment_and_mappings(
         taxid_to_species=taxid_to_species,
         seq_by_id=seq_by_id,
         seq_by_species=seq_by_species,
-        gene_name=gene_name
+        gene_name=gene_name,
     )
 
 
 def load_and_match_tree(
-    tree_path: Path,
-    alignment_data: AlignmentData,
-    taxid_path: Optional[Path] = None
+    tree_path: Path, alignment_data: AlignmentData, taxid_path: Optional[Path] = None
 ) -> TreeData:
     """
     Load phylogenetic tree and match to alignment species.
@@ -202,19 +204,22 @@ def load_and_match_tree(
         logger.info("Attempting tree-alignment matching via TaxID...")
 
         # Match tree to alignment
-        matched_tree, matched_alignment, tree_taxid_to_sp, aln_taxid_to_sp, synthetic_taxids = \
-            match_tree_alignment_by_taxid(
-                tree,
-                alignment_data.alignment,
-                taxid_mapping
-            )
+        (
+            matched_tree,
+            matched_alignment,
+            tree_taxid_to_sp,
+            aln_taxid_to_sp,
+            synthetic_taxids,
+        ) = match_tree_alignment_by_taxid(tree, alignment_data.alignment, taxid_mapping)
 
         tree = matched_tree
 
         # Update alignment and mappings after relabeling to taxids
         alignment_data.alignment = matched_alignment
         alignment_data.taxid_to_species = aln_taxid_to_sp  # taxid -> species
-        alignment_data.species_to_taxid = {species: taxid for taxid, species in aln_taxid_to_sp.items()}
+        alignment_data.species_to_taxid = {
+            species: taxid for taxid, species in aln_taxid_to_sp.items()
+        }
 
         # Rebuild sequence lookups with new IDs (taxids)
         seq_by_id = {}
@@ -232,8 +237,10 @@ def load_and_match_tree(
 
         taxid_mapping = aln_taxid_to_sp
 
-        logger.info(f"✓ After matching: {len(tree.get_terminals())} tips, "
-                   f"{len(synthetic_taxids)} synthetic taxids created")
+        logger.info(
+            f"✓ After matching: {len(tree.get_terminals())} tips, "
+            f"{len(synthetic_taxids)} synthetic taxids created"
+        )
 
     # Build tree structure data (use matched tree tips as valid taxids)
     taxid_mapping_dict = taxid_mapping
@@ -245,7 +252,7 @@ def load_and_match_tree(
     # Ensure tree is unrooted to avoid PAML/rooting issues
     try:
         logger.debug(f"Tree rooted flag before ASR: {getattr(tree, 'rooted', None)}")
-        if getattr(tree, 'rooted', False):
+        if getattr(tree, "rooted", False):
             logger.info("Input tree is rooted; unrooting before ASR")
             tree.rooted = False
             if hasattr(tree, "root"):
@@ -268,7 +275,7 @@ def load_and_match_tree(
         nodes=ordered_nodes,
         root=parsed_root,
         taxid_mapping=taxid_mapping_dict,
-        node_mapping=id_mapping
+        node_mapping=id_mapping,
     )
 
 
@@ -277,7 +284,7 @@ def run_asr_pipeline(
     config: SingleGeneASRConfig,
     skip_if_exists: bool = True,
     alignment_data=None,
-    tree_data=None
+    tree_data=None,
 ) -> ASRResults:
     """
     Execute complete ASR pipeline for a gene.
@@ -307,16 +314,12 @@ def run_asr_pipeline(
         # Load alignment and tree unless provided
         if alignment_data is None:
             alignment_data = load_alignment_and_mappings(
-                config.alignment_path,
-                config.taxid_path,
-                gene
+                config.alignment_path, config.taxid_path, gene
             )
 
         if tree_data is None:
             tree_data = load_and_match_tree(
-                config.tree_path,
-                alignment_data,
-                config.taxid_path
+                config.tree_path, alignment_data, config.taxid_path
             )
 
         # Configure and run PAML (exact same params as working test)
@@ -325,7 +328,7 @@ def run_asr_pipeline(
             compute_asr=True,
             output_dir=config.output_dir,
             fix_blength=2,
-            threads=config.threads
+            threads=config.threads,
         )
 
         reconstructor = ASRReconstructor(asr_config)
@@ -334,7 +337,7 @@ def run_asr_pipeline(
             gene=gene,
             alignment=alignment_data.alignment,
             tree=tree_data.tree,
-            output_dir=config.output_dir
+            output_dir=config.output_dir,
         )
 
         if not rst_file.exists():
@@ -354,7 +357,9 @@ def run_asr_pipeline(
             tree_paml_file = legacy_tree
             logger.debug(f"Using legacy gene-prefixed PAML tree: {tree_paml_file}")
         else:
-            logger.debug("No tree_paml.nwk found; posterior parsing may lack node remap")
+            logger.debug(
+                "No tree_paml.nwk found; posterior parsing may lack node remap"
+            )
 
     node_id_map = None
     if tree_paml_file.exists():
@@ -362,7 +367,7 @@ def run_asr_pipeline(
             rst_file,
             tree_paml_file,
             threshold=config.posterior_threshold,
-            return_mapping=True
+            return_mapping=True,
         )
         if isinstance(parsed, tuple):
             posteriors_node, node_id_map = parsed
@@ -376,9 +381,11 @@ def run_asr_pipeline(
     # Always parse site-level for backward compatibility
     posteriors_site = parse_paml_rst(rst_file)
 
-    logger.info("✓ Posteriors parsed "
-               f"(node-level: {len(posteriors_node) if isinstance(posteriors_node, dict) else 0} nodes, "
-               f"site-level: {len(posteriors_site)} sites)")
+    logger.info(
+        "✓ Posteriors parsed "
+        f"(node-level: {len(posteriors_node) if isinstance(posteriors_node, dict) else 0} nodes, "
+        f"site-level: {len(posteriors_site)} sites)"
+    )
 
     return ASRResults(
         gene=gene,
@@ -387,14 +394,12 @@ def run_asr_pipeline(
         rst_file=rst_file,
         tree_file=tree_paml_file if tree_paml_file.exists() else None,
         taxid_to_species=None,  # Will be set by caller if needed
-        node_id_map=node_id_map if isinstance(node_id_map, dict) else None
+        node_id_map=node_id_map if isinstance(node_id_map, dict) else None,
     )
 
 
 def load_precomputed_asr(
-    gene: str,
-    config: SingleGeneASRConfig,
-    alignment_data: AlignmentData
+    gene: str, config: SingleGeneASRConfig, alignment_data: AlignmentData
 ) -> ASRResults:
     """
     Load pre-computed ASR results without running PAML.
@@ -412,14 +417,14 @@ def load_precomputed_asr(
     # Try canonical location first: config.output_dir / asr_{GENE} / rst
     rst_file = config.output_dir / f"asr_{gene}" / "rst"
     tree_file = config.output_dir / f"asr_{gene}" / "tree_paml.nwk"
-    
+
     # Fall back to legacy location: config.output_dir / {GENE} / asr_{GENE} / rst
     if not rst_file.exists():
         legacy_rst_file = config.output_dir / gene / f"asr_{gene}" / "rst"
         if legacy_rst_file.exists():
             rst_file = legacy_rst_file
             tree_file = config.output_dir / gene / f"asr_{gene}" / "tree_paml.nwk"
-    
+
     if not rst_file.exists():
         raise FileNotFoundError(
             f"Pre-computed RST file not found at:\n"
@@ -439,7 +444,7 @@ def load_precomputed_asr(
             rst_file,
             tree_file,
             threshold=config.posterior_threshold,
-            return_mapping=True
+            return_mapping=True,
         )
         if isinstance(parsed, tuple):
             posteriors_node, node_id_map = parsed
@@ -448,8 +453,10 @@ def load_precomputed_asr(
 
     logger.info("✓ Pre-computed ASR results loaded")
 
-    _write_node_id_map(node_id_map if isinstance(node_id_map, dict) else None, 
-                       tree_file if tree_file and tree_file.exists() else None)
+    _write_node_id_map(
+        node_id_map if isinstance(node_id_map, dict) else None,
+        tree_file if tree_file and tree_file.exists() else None,
+    )
 
     return ASRResults(
         gene=gene,
@@ -458,7 +465,7 @@ def load_precomputed_asr(
         rst_file=rst_file,
         tree_file=tree_file if tree_file.exists() else None,
         taxid_to_species=alignment_data.taxid_to_species,
-        node_id_map=node_id_map if isinstance(node_id_map, dict) else None
+        node_id_map=node_id_map if isinstance(node_id_map, dict) else None,
     )
 
 
@@ -489,6 +496,8 @@ def validate_asr_inputs(config: SingleGeneASRConfig) -> bool:
             raise FileNotFoundError(f"Required {name} not found: {path}")
 
     if config.posterior_threshold < 0 or config.posterior_threshold > 1:
-        raise ValueError(f"Invalid posterior threshold: {config.posterior_threshold} (must be 0-1)")
-    
+        raise ValueError(
+            f"Invalid posterior threshold: {config.posterior_threshold} (must be 0-1)"
+        )
+
     return True

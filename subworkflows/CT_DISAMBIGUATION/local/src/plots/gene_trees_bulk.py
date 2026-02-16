@@ -8,6 +8,7 @@ from collections import defaultdict
 import json
 
 import matplotlib
+
 matplotlib.use("Agg")  # Use non-interactive backend
 import matplotlib.pyplot as plt
 
@@ -26,7 +27,7 @@ def plot_random_gene_trees(
     asr_root: Path,
     node_dumps_root: Path,
     tip_details_root: Path,
-    n: int = 5
+    n: int = 5,
 ):
     """Render gene tree plots for N random positions using existing ASR outputs."""
     if df.empty:
@@ -45,7 +46,7 @@ def plot_random_gene_trees(
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Cache per-gene result entries assembled from CSV rows
     gene_results_cache: Dict[str, list] = {}
     gene_posteriors_cache: Dict[str, Optional[Dict]] = {}
@@ -71,9 +72,10 @@ def plot_random_gene_trees(
             return None
 
         import json
+
         per_node: Dict = {}
         try:
-            with open(dump_path, 'r', encoding='utf-8') as handle:
+            with open(dump_path, "r", encoding="utf-8") as handle:
                 for line in handle:
                     if not line.strip():
                         continue
@@ -82,10 +84,10 @@ def plot_random_gene_trees(
                     except Exception:
                         continue
                     # skip optional metadata
-                    if obj.get('__metadata__'):
+                    if obj.get("__metadata__"):
                         continue
-                    nid = obj.get('node_id')
-                    positions = obj.get('positions') or {}
+                    nid = obj.get("node_id")
+                    positions = obj.get("positions") or {}
                     try:
                         nid = int(nid)
                     except Exception:
@@ -114,7 +116,9 @@ def plot_random_gene_trees(
                             per_node[nid] = (best_aa, best_prob)
                             per_node[str(nid)] = (best_aa, best_prob)
             if per_node:
-                logger.info(f"Loaded poster node JSONL for {gene}: {len(per_node)} nodes (including string keys)")
+                logger.info(
+                    f"Loaded poster node JSONL for {gene}: {len(per_node)} nodes (including string keys)"
+                )
                 return {"per_node": per_node}
             return None
         except Exception as err:
@@ -161,25 +165,31 @@ def plot_random_gene_trees(
         # NOTE: JSONL contains 1-based PAML positions, so convert from CAAS 0-based
         if gene not in gene_posteriors_cache:
             # Try default node_dumps_root first
-            post = _load_node_posteriors(gene, focus_pos=pos + 1 if pos is not None else None)
+            post = _load_node_posteriors(
+                gene, focus_pos=pos + 1 if pos is not None else None
+            )
             # If missing, try to find explicit path in results (e.g., prior DB export added posterior_dump_path)
             if not post:
                 dump_path = None
                 for r in results:
-                    if isinstance(r, dict) and r.get('posterior_dump_jsonl'):
-                        posterior_dump = r.get('posterior_dump_jsonl')
+                    if isinstance(r, dict) and r.get("posterior_dump_jsonl"):
+                        posterior_dump = r.get("posterior_dump_jsonl")
                         if posterior_dump is not None:
                             dump_path = Path(posterior_dump)
                         break
                 if dump_path:
-                    post = _load_node_posteriors(gene, focus_pos=pos + 1 if pos is not None else None, explicit_path=dump_path)
+                    post = _load_node_posteriors(
+                        gene,
+                        focus_pos=pos + 1 if pos is not None else None,
+                        explicit_path=dump_path,
+                    )
             gene_posteriors_cache[gene] = post
 
         node_posteriors = gene_posteriors_cache[gene]
         if node_posteriors:
             for result in results:
                 result["node_posteriors"] = node_posteriors
-                
+
         # Load tip details from JSON and attach to results
         # NOTE: JSONL contains 0-based CAAS positions
         tip_jsonl_path = tip_details_root / f"{gene.lower()}_tip_details.jsonl"
@@ -194,7 +204,7 @@ def plot_random_gene_trees(
                             obj = json.loads(line)
                             tip_details.append(obj)
                         except Exception:
-                                continue
+                            continue
 
                 # Optional light pre-flattening to help downstream code
                 flattened_pairs: List[Dict[str, Any]] = []
@@ -474,9 +484,7 @@ def create_gene_tree_state_plot(
                 taxid = rec.get("taxid")
                 label = rec.get("label")
                 for key in filter(None, [taxid, species, label]):
-                    _store_tip(
-                        key, residue, group_label, species=species, taxid=taxid
-                    )
+                    _store_tip(key, residue, group_label, species=species, taxid=taxid)
 
     # Prepare per-node state summaries (supports dynamic focal_N lists)
     state_by_node: Dict[int, Tuple[str, Optional[float]]] = {}
@@ -634,7 +642,7 @@ def create_gene_tree_state_plot(
                 label.lower().replace("_", " ") if label else None,
                 label.lower().replace(" ", "_") if label else None,
             ]
-            
+
             matched_key = None
             for key in lookup_keys:
                 if key:
@@ -707,9 +715,7 @@ def create_gene_tree_state_plot(
         position_label = focus_label
     suffix = f"_pos{focus_label}" if focus_label is not None else ""
     plot_path = output_dir / f"{gene_name.lower()}_gene_tree_states{suffix}.png"
-    title = (
-        f"{gene_name} tree – position {position_label if position_label is not None else '?'} (0-based)"
-    )
+    title = f"{gene_name} tree – position {position_label if position_label is not None else '?'} (0-based)"
     if focus_label is not None:
         title = f"{title} (focus {focus_label})"
     ax.set_title(title, fontsize=13, fontweight="bold")

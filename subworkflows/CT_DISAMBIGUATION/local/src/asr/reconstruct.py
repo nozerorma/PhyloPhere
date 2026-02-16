@@ -15,7 +15,6 @@ from dataclasses import dataclass
 
 from Bio.Align import MultipleSeqAlignment
 from Bio.Phylo.BaseTree import Tree
-from Bio.Phylo._io import read
 from Bio.Phylo._io import write as phylo_write
 
 logger = logging.getLogger(__name__)
@@ -49,16 +48,16 @@ class ASRConfig:
 class ASRReconstructor:
     """
     Main class for ancestral state reconstruction.
-    
+
     Supports:
     - PAML (internal computation)
     - External ASR results (read pre-computed files)
     """
-    
+
     def __init__(self, config: ASRConfig):
         """
         Initialize ASR reconstructor.
-        
+
         Args:
             config: ASR configuration
         """
@@ -68,7 +67,7 @@ class ASRReconstructor:
         logger.info(f"PAML binary: {self.paml_binary}")
         logger.info(f"ASR model requested: {self.config.model}")
         self._validate_config()
-    
+
     def _validate_config(self) -> None:
         """Validate ASR configuration."""
         if self.config.compute_asr:
@@ -76,16 +75,18 @@ class ASRReconstructor:
             tool_path = shutil.which("codeml")
             if not tool_path:
                 raise FileNotFoundError(
-                    f"PAML codeml binary not found in PATH. "
-                    f"Please install or provide --paml-binary with full path to codeml."
+                    "PAML codeml binary not found in PATH. "
+                    "Please install or provide --paml-binary with full path to codeml."
                 )
             self.paml_binary = tool_path
             logger.info(f"Found PAML codeml at {tool_path}")
         else:
             if not self.config.asr_input_dir or not self.config.asr_input_dir.exists():
-                raise ValueError("--asr-input-dir must be provided when --compute-asr is False")
+                raise ValueError(
+                    "--asr-input-dir must be provided when --compute-asr is False"
+                )
             logger.info(f"Using pre-computed ASR from {self.config.asr_input_dir}")
-    
+
     def reconstruct_gene(
         self,
         gene: str,
@@ -95,57 +96,59 @@ class ASRReconstructor:
     ) -> Path:
         """
         Reconstruct ancestral states for a single gene.
-        
+
         Args:
             gene: Gene identifier
             alignment: Multiple sequence alignment
             tree: Phylogenetic tree (pruned to alignment species)
             output_dir: Directory for output files
-        
+
         Returns:
             Path to ASR results file (.rst for PAML)
-        
+
         Raises:
             RuntimeError: If ASR computation fails
         """
         if not self.config.compute_asr:
             # Return path to pre-computed results
             return self._find_precomputed_asr(gene)
-        
+
         # Compute ASR using PAML
         return self._run_paml_asr(gene, alignment, tree, output_dir)
-    
+
     def _find_precomputed_asr(self, gene: str) -> Path:
         """
         Find pre-computed ASR file for a gene.
-        
+
         Args:
             gene: Gene identifier
-        
+
         Returns:
             Path to ASR file
-        
+
         Raises:
             FileNotFoundError: If ASR file not found
         """
         if self.config.asr_input_dir is None:
-            raise ValueError("asr_input_dir is None, cannot search for pre-computed ASR files")
-        
+            raise ValueError(
+                "asr_input_dir is None, cannot search for pre-computed ASR files"
+            )
+
         # Try different file patterns
         candidates = [
-            self.config.asr_input_dir / f"asr_{gene}/rst",    # PAML
+            self.config.asr_input_dir / f"asr_{gene}/rst",  # PAML
         ]
-        
+
         for candidate in candidates:
             if candidate.exists():
                 logger.debug(f"Found pre-computed ASR for {gene}: {candidate}")
                 return candidate
-        
+
         raise FileNotFoundError(
             f"No pre-computed ASR found for {gene} in {self.config.asr_input_dir}. "
             f"Tried: {[c.name for c in candidates]}"
         )
-    
+
     def _run_paml_asr(
         self,
         gene: str,
@@ -155,42 +158,44 @@ class ASRReconstructor:
     ) -> Path:
         """
         Run PAML ancestral state reconstruction.
-        
+
         Args:
             gene: Gene identifier
             alignment: Multiple sequence alignment
             tree: Phylogenetic tree
             output_dir: Output directory
-        
+
         Returns:
             Path to rst file
-        
+
         Raises:
             RuntimeError: If PAML fails
-        """        
+        """
         # Create gene-specific output directory
         gene_dir = output_dir / f"asr_{gene}"
         gene_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Write alignment and tree to temporary files
         aln_file = gene_dir / "alignment_paml.phy"
         tree_file = gene_dir / "tree_paml.nwk"
-        
+
         # Write in sequential Phylip format (required by PAML)
         # BioPython's writers sometimes have issues, so we write it manually
         self._write_sequential_phylip(alignment, aln_file)
         # For tree, use the BioPython tree writing function
         phylo_write(tree, tree_file, "newick")
-        
+
         # PAML requires a blank line after the tree
-        with open(tree_file, 'a') as f:
-            f.write('\n')
-        
+        with open(tree_file, "a") as f:
+            f.write("\n")
+
         # Create control file
         ctl_file = self._create_control_file(gene_dir)
-        
-        logger.debug(f"PAML inputs for {gene}: alignment={aln_file}, tree={tree_file}, ctl={ctl_file}")
-        
+
+        logger.debug(
+            f"PAML inputs for {gene}: alignment={aln_file}, tree={tree_file}, ctl={ctl_file}"
+        )
+
         try:
             env = os.environ.copy()
             env["OMP_NUM_THREADS"] = str(max(1, self.config.threads))
@@ -210,7 +215,7 @@ class ASRReconstructor:
                 timeout=3600,  # 1 hour timeout
                 env=env,
             )
-            
+
             # Check for .rst file (PAML may return exit code 1 even if successful)
             rst_file = gene_dir / "rst"
             if rst_file.exists():
@@ -218,17 +223,21 @@ class ASRReconstructor:
                 rst_size = rst_file.stat().st_size
                 logger.info(f"  ✓ RST file generated: {rst_file} ({rst_size} bytes)")
                 return rst_file
-            
+
             # If rst doesn't exist, check for actual errors
             if result.returncode != 0:
-                logger.error(f"PAML failed for {gene} with exit code {result.returncode}")
+                logger.error(
+                    f"PAML failed for {gene} with exit code {result.returncode}"
+                )
                 logger.error(f"STDOUT: {result.stdout}")
                 logger.error(f"STDERR: {result.stderr}")
-                raise RuntimeError(f"PAML failed for {gene}: exit code {result.returncode}")
-            
+                raise RuntimeError(
+                    f"PAML failed for {gene}: exit code {result.returncode}"
+                )
+
             # No rst file and no error = unexpected
             raise RuntimeError(f"PAML did not produce rst file for {gene}")
-            
+
         except subprocess.CalledProcessError as e:
             logger.error(f"PAML failed for {gene} with exit code {e.returncode}")
             logger.error(f"STDOUT: {e.stdout}")
@@ -239,28 +248,25 @@ class ASRReconstructor:
                 if paml_out.exists():
                     with open(paml_out) as f:
                         logger.error(f"PAML output file: {f.read()}")
-            except:
+            except Exception:
                 pass
             raise RuntimeError(f"PAML failed for {gene}: exit code {e.returncode}")
         except subprocess.TimeoutExpired:
             logger.error(f"PAML timeout for {gene} (>1 hour)")
             raise RuntimeError(f"PAML timeout for {gene}")
-    
-    def _create_control_file(
-        self,
-        output_dir: Path
-    ) -> Path:
+
+    def _create_control_file(self, output_dir: Path) -> Path:
         """
         Create PAML control file.
-        
+
         Args:
             alignment_path: Path to alignment (phylip format)
             tree_path: Path to tree (newick format)
             output_dir: Output directory
-            
+
         Returns:
             Path to created control file
-            
+
         Mostly based on PAML documentation for codeml using their example for mouse lemurs.
         https://github.com/abacus-gene/paml/blob/master/examples/MouseLemurs/codeml.ctl
         """
@@ -272,7 +278,9 @@ class ASRReconstructor:
         if model_cfg.get("aa_rate_file"):
             rate_file_path = self._resolve_rate_file(model_cfg["aa_rate_file"])
             logger.info(f"Using amino acid rate file: {rate_file_path}")
-        logger.info(f"Using substitution model '{model_key}' (PAML model={model_cfg['paml_model']})")
+        logger.info(
+            f"Using substitution model '{model_key}' (PAML model={model_cfg['paml_model']})"
+        )
 
         # Create control file content
         # Note: files will be written as alignment_paml.phy and tree_paml.nwk
@@ -326,46 +334,59 @@ cleandata = 0 * remove sites with ambiguity data (1:yes, 0:no)?
 fix_blength = {self.config.fix_blength} * 0: ignore, -1: random, 1: initial, 2: fixed, 3: proportional
 method = 0 * Optimization method 0: simultaneous; 1: one branch a time
 """
-        
+
         # Write control file
-        with open(ctl_path, 'w') as f:
+        with open(ctl_path, "w") as f:
             f.write(content)
-            
+
         if self.config.fix_blength == 2:
-            logger.info("Preserving supplied tree topology and branch lengths during ASR (fix_blength=2)")
+            logger.info(
+                "Preserving supplied tree topology and branch lengths during ASR (fix_blength=2)"
+            )
         logger.debug(f"Created PAML control file: {ctl_path}")
         return ctl_path
-    
-    def _write_sequential_phylip(self, alignment: MultipleSeqAlignment, output_path: Path) -> None:
+
+    def _write_sequential_phylip(
+        self, alignment: MultipleSeqAlignment, output_path: Path
+    ) -> None:
         """
         Write alignment in sequential Phylip format (required by PAML).
-        
+
         Args:
             alignment: Multiple sequence alignment
             output_path: Path to write Phylip file
         """
         nseq = len(alignment)
         seq_length = alignment.get_alignment_length()
-        
-        with open(output_path, 'w') as f:
+
+        with open(output_path, "w") as f:
             # Header line
             f.write(f"{nseq:>6} {seq_length:>6}\n")
-            
+
             # Write sequences one per line in sequential format
             for record in alignment:
                 # Name: up to 10 characters, padded
                 name = record.id[:10].ljust(10)
                 # Sequence on same line - keep gaps as '-', PAML handles them
                 # Replace non-standard amino acids with X
-                seq_str = str(record.seq).replace('O', 'X').replace('U', 'X').replace('B', 'X').replace('Z', 'X').replace('J', 'X')
+                seq_str = (
+                    str(record.seq)
+                    .replace("O", "X")
+                    .replace("U", "X")
+                    .replace("B", "X")
+                    .replace("Z", "X")
+                    .replace("J", "X")
+                )
                 f.write(f"{name} {seq_str}\n")
-    
+
     def _normalize_model_key(self, model_name: Optional[str]) -> str:
         if not model_name:
             return DEFAULT_MODEL
-        token = str(model_name).lower().split('+')[0].strip()
+        token = str(model_name).lower().split("+")[0].strip()
         if token not in MODEL_SPECS:
-            logger.warning(f"Unrecognized substitution model '{model_name}', falling back to '{DEFAULT_MODEL}'")
+            logger.warning(
+                f"Unrecognized substitution model '{model_name}', falling back to '{DEFAULT_MODEL}'"
+            )
             return DEFAULT_MODEL
         return token
 
@@ -376,10 +397,12 @@ method = 0 * Optimization method 0: simultaneous; 1: one branch a time
         conda_prefix = os.environ.get("CONDA_PREFIX")
         if conda_prefix:
             conda_path = Path(conda_prefix)
-            search_paths.extend([
-                conda_path / "dat" / filename,
-                conda_path / "share" / "paml" / "dat" / filename,
-            ])
+            search_paths.extend(
+                [
+                    conda_path / "dat" / filename,
+                    conda_path / "share" / "paml" / "dat" / filename,
+                ]
+            )
         for path in search_paths:
             if path.exists():
                 return path
@@ -395,4 +418,6 @@ method = 0 * Optimization method 0: simultaneous; 1: one branch a time
         codeml_path = shutil.which("codeml")
         if codeml_path:
             return Path(codeml_path)
-        raise FileNotFoundError("PAML codeml binary not found. Please specify the path.")
+        raise FileNotFoundError(
+            "PAML codeml binary not found. Please specify the path."
+        )

@@ -28,7 +28,7 @@ Each TSV has columns: ``gene``, ``position``, ``pattern``
 
 Significance Rule
 -----------------
-``is_significant`` AND ``is_stable``
+``is_significant``
 
 Author
 ------
@@ -45,7 +45,19 @@ from __future__ import annotations
 import csv
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional, Sequence, Set, Tuple, Union
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 
 __all__ = [
     "export_gene_lists",
@@ -111,7 +123,9 @@ def _safe_pattern_name(pattern: str) -> str:
 
 
 def _normalize_results(
-    results: Union[Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]]
+    results: Union[
+        Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]
+    ],
 ) -> List[MutableMapping[str, Any]]:
     """
     Flatten results into a list while ensuring each entry has a ``gene`` field.
@@ -154,7 +168,9 @@ def _normalize_results(
     return normalized
 
 
-def _build_pattern_order(entries: Iterable[Mapping[str, Any]], patterns: Optional[Sequence[str]]) -> List[str]:
+def _build_pattern_order(
+    entries: Iterable[Mapping[str, Any]], patterns: Optional[Sequence[str]]
+) -> List[str]:
     """
     Build deterministic pattern order combining defaults, user-specified, and observed.
 
@@ -178,7 +194,7 @@ def _significance_passes(entry: Mapping[str, Any]) -> bool:
     """
     Evaluate the significance rule for exporting genes.
 
-    Rule: is_significant AND is_stable
+    Rule: is_significant.
     Missing fields default to False to enforce conservative filtering.
 
     Args:
@@ -189,12 +205,13 @@ def _significance_passes(entry: Mapping[str, Any]) -> bool:
     """
 
     is_significant = _coerce_bool(entry.get("is_significant"))
-    is_stable = _coerce_bool(entry.get("is_stable"))
-    return bool(is_significant and is_stable)
+    return bool(is_significant)
 
 
 def extract_gene_sets(
-    results: Union[Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]],
+    results: Union[
+        Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]
+    ],
     patterns: Optional[Sequence[str]] = None,
 ) -> Tuple[Dict[str, Set[str]], Dict[str, Set[str]]]:
     """
@@ -240,7 +257,9 @@ def extract_gene_sets(
 
 
 def extract_change_records(
-    results: Union[Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]],
+    results: Union[
+        Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]
+    ],
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Extract gene/position/pattern records grouped by change side (top, bottom, both).
@@ -283,7 +302,9 @@ def extract_change_records(
     return all_records, sig_records
 
 
-def _write_change_tsv(target_dir: Path, records: List[Dict[str, Any]], change_side: str) -> Path:
+def _write_change_tsv(
+    target_dir: Path, records: List[Dict[str, Any]], change_side: str
+) -> Path:
     """
     Write a TSV file for a specific change side with gene/position/pattern columns.
 
@@ -306,14 +327,18 @@ def _write_change_tsv(target_dir: Path, records: List[Dict[str, Any]], change_si
     sorted_records = sorted(filtered, key=lambda r: (r["gene"], r["position"]))
 
     with open(output_path, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["gene", "position", "pattern"], delimiter="\t")
+        writer = csv.DictWriter(
+            f, fieldnames=["gene", "position", "pattern"], delimiter="\t"
+        )
         writer.writeheader()
         for record in sorted_records:
-            writer.writerow({
-                "gene": record["gene"],
-                "position": record["position"],
-                "pattern": record["pattern"],
-            })
+            writer.writerow(
+                {
+                    "gene": record["gene"],
+                    "position": record["position"],
+                    "pattern": record["pattern"],
+                }
+            )
 
     return output_path
 
@@ -333,12 +358,16 @@ def _write_gene_list(target_dir: Path, genes: Set[str]) -> Path:
     target_dir.mkdir(parents=True, exist_ok=True)
     output_path = target_dir / "gene_list.txt"
     sorted_genes = sorted(genes)
-    output_path.write_text("\n".join(sorted_genes) + ("\n" if sorted_genes else ""), encoding="utf-8")
+    output_path.write_text(
+        "\n".join(sorted_genes) + ("\n" if sorted_genes else ""), encoding="utf-8"
+    )
     return output_path
 
 
 def export_gene_lists(
-    results: Union[Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]],
+    results: Union[
+        Sequence[Mapping[str, Any]], Mapping[str, Sequence[Mapping[str, Any]]]
+    ],
     output_root: Path,
     patterns: Optional[Sequence[str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
@@ -381,7 +410,9 @@ def export_gene_lists(
             path = _write_gene_list(target_dir, genes)
             output_paths[subset_label]["by_pattern"][pattern] = path
         logger.info(
-            "✓ Exported by_pattern gene lists for '%s' subset to %s", subset_label, subset_dir
+            "✓ Exported by_pattern gene lists for '%s' subset to %s",
+            subset_label,
+            subset_dir,
         )
 
     # Export by_change TSV tables
@@ -391,7 +422,9 @@ def export_gene_lists(
             path = _write_change_tsv(subset_dir, records, change_side)
             output_paths[subset_label]["by_change"][change_side] = path
         logger.info(
-            "✓ Exported by_change TSV tables for '%s' subset to %s", subset_label, subset_dir
+            "✓ Exported by_change TSV tables for '%s' subset to %s",
+            subset_label,
+            subset_dir,
         )
 
     return output_paths

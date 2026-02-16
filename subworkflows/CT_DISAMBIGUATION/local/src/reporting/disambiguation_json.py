@@ -8,7 +8,7 @@ per-position dictionaries produced by the CAAS/ASR pipeline.
 Design goals:
 - Keep JSON structure stable for downstream plotting/UI.
 - Avoid recomputing heavy biology here; assume upstream results already
-  contain core fields (pattern_type, multi_caas, pair_details, etc.).
+  contain core fields (pattern_type, amino_encoded, pair_details, etc.).
 - Be defensive with missing optional keys.
 
 Author: ASR Integration
@@ -32,24 +32,14 @@ def extract_pair_info(
     """
     Extract pair-level MRCA and tip information.
 
-    Priority of sources for tip residues:
+    Source for tip residues:
         1) pair_details (if present)
-        2) multi_caas string pattern (fallback)
 
     Returns a list with length == num_pairs.
     """
     pairs: List[Dict[str, Any]] = []
 
     pair_details = result_dict.get("pair_details") or []
-    multi_caas = result_dict.get("multi_caas") or ""
-
-    # Fallback parsing of multi_caas, expected "TOP/BOTTOM"
-    top_residues: List[str] = []
-    bottom_residues: List[str] = []
-    if isinstance(multi_caas, str) and "/" in multi_caas:
-        top_str, bottom_str = multi_caas.split("/", 1)
-        top_residues = list(top_str) if top_str else []
-        bottom_residues = list(bottom_str) if bottom_str else []
 
     for idx in range(1, num_pairs + 1):
         mrca_state = result_dict.get(f"mrca_{idx}_state")
@@ -70,32 +60,44 @@ def extract_pair_info(
             pair = pair_details[idx - 1] or {}
             if isinstance(pair, dict):
                 top_tip = pair.get("top_tip_residue") or pair.get("top_tip_mode")
-                bottom_tip = pair.get("bottom_tip_residue") or pair.get("bottom_tip_mode")
+                bottom_tip = pair.get("bottom_tip_residue") or pair.get(
+                    "bottom_tip_mode"
+                )
 
                 top_tip_residues = pair.get("top_tip_residues")
                 bottom_tip_residues = pair.get("bottom_tip_residues")
 
                 if top_tip_residues:
-                    trs = top_tip_residues if isinstance(top_tip_residues, list) else [top_tip_residues]
+                    trs = (
+                        top_tip_residues
+                        if isinstance(top_tip_residues, list)
+                        else [top_tip_residues]
+                    )
                     pair_info["top_tip_residues"] = [
-                        {"species": r.get("species"), "taxid": r.get("taxid"), "residue": r.get("residue")}
+                        {
+                            "species": r.get("species"),
+                            "taxid": r.get("taxid"),
+                            "residue": r.get("residue"),
+                        }
                         for r in trs
                         if isinstance(r, dict) and r.get("residue")
                     ]
 
                 if bottom_tip_residues:
-                    brs = bottom_tip_residues if isinstance(bottom_tip_residues, list) else [bottom_tip_residues]
+                    brs = (
+                        bottom_tip_residues
+                        if isinstance(bottom_tip_residues, list)
+                        else [bottom_tip_residues]
+                    )
                     pair_info["bottom_tip_residues"] = [
-                        {"species": r.get("species"), "taxid": r.get("taxid"), "residue": r.get("residue")}
+                        {
+                            "species": r.get("species"),
+                            "taxid": r.get("taxid"),
+                            "residue": r.get("residue"),
+                        }
                         for r in brs
                         if isinstance(r, dict) and r.get("residue")
                     ]
-
-        # Fallback: extract from multi_caas pattern
-        if top_tip is None and idx - 1 < len(top_residues):
-            top_tip = top_residues[idx - 1]
-        if bottom_tip is None and idx - 1 < len(bottom_residues):
-            bottom_tip = bottom_residues[idx - 1]
 
         if top_tip or bottom_tip:
             pair_info["tip_states"] = {"top": top_tip, "bottom": bottom_tip}
@@ -115,10 +117,14 @@ def extract_pair_info(
                 }
 
             top_changed = bool(mrca_state and top_tip and (mrca_state != top_tip))
-            bottom_changed = bool(mrca_state and bottom_tip and (mrca_state != bottom_tip))
+            bottom_changed = bool(
+                mrca_state and bottom_tip and (mrca_state != bottom_tip)
+            )
             pair_info["pair_change"] = top_changed or bottom_changed
 
-            pair_info["conserved"] = bool(top_tip and bottom_tip and (top_tip == bottom_tip))
+            pair_info["conserved"] = bool(
+                top_tip and bottom_tip and (top_tip == bottom_tip)
+            )
 
         pairs.append(pair_info)
 
@@ -148,10 +154,7 @@ def extract_convergence_summary(
         "tag": result_dict.get("tag"),
         "pattern_type": result_dict.get("pattern_type"),
         "convergence_description": result_dict.get("convergence_description"),
-        "is_stable": result_dict.get("is_stable"),
-        "stability_pattern": result_dict.get("stability_pattern"),
         "caas": result_dict.get("caas", ""),
-        "multi_caas": result_dict.get("multi_caas"),
         "caap_group": result_dict.get("caap_group", "US"),
         "amino_encoded": result_dict.get("amino_encoded", ""),
         "is_conserved_meta": bool(result_dict.get("is_conserved_meta", False)),
@@ -210,9 +213,7 @@ def export_aggregated_convergence_json(
         )
 
     for gene in by_gene:
-        by_gene[gene].sort(
-            key=lambda x: (x.get("position") is None, x.get("position"))
-        )
+        by_gene[gene].sort(key=lambda x: (x.get("position") is None, x.get("position")))
 
     output = {
         "metadata": {

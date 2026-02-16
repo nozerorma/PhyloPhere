@@ -1,4 +1,4 @@
-"""Convergence exports for ASR-driven pattern classification."""
+"""Public exports for convergence classification and disambiguation."""
 
 from .convergence import (
     NodeStates,
@@ -21,24 +21,26 @@ from .patterns import (
 from .node_mapping import (
     build_convergence_node_mapping,
 )
+from .disambiguate_single import (
+    analyze_caas_position_disambiguation,
+    analyze_gene_disambiguation,
+)
 
 __all__ = [
-    # Pattern classification
-    "classify_tip_level_pattern",
-    "transition_status",
-    "summarize_pair_transitions",
-    "classify_focus_transitions",
-    # Node mapping
-    "build_convergence_node_mapping",
-    # Convergence
-    "NodeStates",
     "ConvergenceClassification",
-    "extract_node_states_from_node_level",
-    # Tip-level analysis
+    "NodeStates",
+    "analyze_caas_position_disambiguation",
+    "analyze_gene_disambiguation",
     "build_alignment_lookup",
+    "build_convergence_node_mapping",
+    "classify_focus_transitions",
+    "classify_tip_level_pattern",
     "collect_tip_residues",
-    "normalize_amino_list",
-    "format_amino_display",
     "compute_derived_state_similarity",
     "describe_transition",
+    "extract_node_states_from_node_level",
+    "format_amino_display",
+    "normalize_amino_list",
+    "summarize_pair_transitions",
+    "transition_status",
 ]

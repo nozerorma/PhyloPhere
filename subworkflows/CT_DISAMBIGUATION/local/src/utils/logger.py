@@ -91,7 +91,9 @@ def configure_logging(
             "root": {"level": level, "handlers": root_handlers},
             "loggers": {
                 "matplotlib": {"level": "WARNING" if quiet_matplotlib else level},
-                "matplotlib.font_manager": {"level": "WARNING" if quiet_matplotlib else level},
+                "matplotlib.font_manager": {
+                    "level": "WARNING" if quiet_matplotlib else level
+                },
             },
         }
     )

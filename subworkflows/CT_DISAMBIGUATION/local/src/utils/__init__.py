@@ -1,34 +1,4 @@
-"""
-Utils Module
-============
-
-Utilities for the CAAS aggregation pipeline including I/O, logging, and
-database helpers.
-
-Components:
-    - logging_conf: Centralized logging configuration
-    - io_utils: File readers/writers for alignments, trees, metadata
-    - validation: Input validation and error handling
-
-Usage Example
--------------
-::
-
-    from src.utils import find_gene_alignment, read_alignment
-
-    path = find_gene_alignment(Path("alignments/"), "BRCA2")
-    alignment = read_alignment(path)
-
-Author
-------
-Miguel Ramon Alonso
-Evolutionary Genomics Lab - IBE-UPF
-
-Date
-----
-2025-12-09
-"""
-
+"""Public utility exports for I/O, logging, DB helpers, and wrappers."""
 
 from .io_utils import (
     find_gene_alignment,
@@ -53,12 +23,40 @@ from .disambiguation_db import (
     iter_results_for_group,
 )
 
-from .gene_wrapper import (
-    convert_biochem_result_to_dict,
-    merge_multi_hypothesis_results,
-    process_single_gene,
-    process_all_genes,
-)
+
+def convert_convergence_result_to_dict(*args, **kwargs):
+    """Proxy to :func:`src.utils.gene_wrapper.convert_convergence_result_to_dict`."""
+    from .gene_wrapper import convert_convergence_result_to_dict as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def convert_biochem_result_to_dict(*args, **kwargs):
+    """Proxy to :func:`src.utils.gene_wrapper.convert_biochem_result_to_dict`."""
+    from .gene_wrapper import convert_biochem_result_to_dict as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def merge_multi_hypothesis_results(*args, **kwargs):
+    """Proxy to :func:`src.utils.gene_wrapper.merge_multi_hypothesis_results`."""
+    from .gene_wrapper import merge_multi_hypothesis_results as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def process_single_gene(*args, **kwargs):
+    """Proxy to :func:`src.utils.gene_wrapper.process_single_gene`."""
+    from .gene_wrapper import process_single_gene as _impl
+
+    return _impl(*args, **kwargs)
+
+
+def process_all_genes(*args, **kwargs):
+    """Proxy to :func:`src.utils.gene_wrapper.process_all_genes`."""
+    from .gene_wrapper import process_all_genes as _impl
+
+    return _impl(*args, **kwargs)
 
 
 __all__ = [
@@ -76,6 +74,7 @@ __all__ = [
     "fetch_alignment_for_gene",
     "iter_group_keys",
     "iter_results_for_group",
+    "convert_convergence_result_to_dict",
     "convert_biochem_result_to_dict",
     "merge_multi_hypothesis_results",
     "process_single_gene",

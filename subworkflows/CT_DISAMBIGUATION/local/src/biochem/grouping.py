@@ -6,7 +6,6 @@ active pipeline: group definitions (GS1-GS4) and amino-acid to group lookup.
 
 from typing import Dict, Optional
 
-
 # GS1: CV // AGPS // NDQE // RHK // ILMFWY // T
 GS1: Dict[str, str] = {
     "C": "CV",

@@ -70,7 +70,9 @@ def _sanitize_for_json(obj: Any) -> Any:
         return None
 
 
-def _load_posteriors_from_jsonl(jsonl_path: Path) -> Dict[int, Dict[int, Dict[str, float]]]:
+def _load_posteriors_from_jsonl(
+    jsonl_path: Path,
+) -> Dict[int, Dict[int, Dict[str, float]]]:
     """Load posteriors from a JSON Lines (JSONL) file exported by export_posteriors_to_jsonl.
 
     Each line is expected to be a JSON object like::
@@ -140,8 +142,7 @@ def init_db(db_path: Path) -> None:
         cur.execute("PRAGMA journal_mode=WAL;")
         cur.execute("PRAGMA synchronous=NORMAL;")
 
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS gene_alignment (
                 gene TEXT PRIMARY KEY,
                 seq_by_id_json TEXT,
@@ -153,11 +154,9 @@ def init_db(db_path: Path) -> None:
                 num_sequences INTEGER,
                 alignment_len INTEGER
             )
-            """
-        )
+            """)
 
-        cur.execute(
-            """
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 gene TEXT,
@@ -166,8 +165,7 @@ def init_db(db_path: Path) -> None:
                 pair_count INTEGER,
                 result_json TEXT
             )
-            """
-        )
+            """)
 
         cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_results_gene_msa ON results(gene, msa_pos);"
@@ -191,7 +189,9 @@ def get_connection(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def insert_gene_alignment(conn: sqlite3.Connection, gene: str, alignment_obj: Dict[str, Any]) -> None:
+def insert_gene_alignment(
+    conn: sqlite3.Connection, gene: str, alignment_obj: Dict[str, Any]
+) -> None:
     """Insert or replace per-gene alignment metadata in the `gene_alignment` table.
 
     :param conn: Open SQLite connection where the record will be stored.
@@ -214,11 +214,29 @@ def insert_gene_alignment(conn: sqlite3.Connection, gene: str, alignment_obj: Di
     alignment_extras = alignment_obj.get("alignment_extras")
     alignment_path = alignment_obj.get("alignment_path")
 
-    seq_by_id_json = json.dumps(_sanitize_for_json(seq_by_id)) if seq_by_id is not None else None
-    seq_by_species_json = json.dumps(_sanitize_for_json(seq_by_species)) if seq_by_species is not None else None
-    taxid_to_species_json = json.dumps(_sanitize_for_json(taxid_to_species)) if taxid_to_species is not None else None
-    species_to_taxid_json = json.dumps(_sanitize_for_json(species_to_taxid)) if species_to_taxid is not None else None
-    alignment_extras_json = json.dumps(_sanitize_for_json(alignment_extras)) if alignment_extras is not None else None
+    seq_by_id_json = (
+        json.dumps(_sanitize_for_json(seq_by_id)) if seq_by_id is not None else None
+    )
+    seq_by_species_json = (
+        json.dumps(_sanitize_for_json(seq_by_species))
+        if seq_by_species is not None
+        else None
+    )
+    taxid_to_species_json = (
+        json.dumps(_sanitize_for_json(taxid_to_species))
+        if taxid_to_species is not None
+        else None
+    )
+    species_to_taxid_json = (
+        json.dumps(_sanitize_for_json(species_to_taxid))
+        if species_to_taxid is not None
+        else None
+    )
+    alignment_extras_json = (
+        json.dumps(_sanitize_for_json(alignment_extras))
+        if alignment_extras is not None
+        else None
+    )
 
     num_sequences: Optional[int] = None
     alignment_len: Optional[int] = None
@@ -332,7 +350,13 @@ def insert_result(
 
     cur.execute(
         "INSERT INTO results (gene, msa_pos, position, pair_count, result_json) VALUES (?, ?, ?, ?, ?)",
-        (gene, int(msa_pos), int(position) if position is not None else -1, int(pair_count), result_json),
+        (
+            gene,
+            int(msa_pos),
+            int(position) if position is not None else -1,
+            int(pair_count),
+            result_json,
+        ),
     )
 
 
@@ -368,15 +392,26 @@ def fetch_alignment_for_gene(
         return None
 
     (
-        seq_by_id_json, seq_by_species_json, taxid_to_species_json,
-        species_to_taxid_json, alignment_extras_json,
-        alignment_path, num_sequences, alignment_len
+        seq_by_id_json,
+        seq_by_species_json,
+        taxid_to_species_json,
+        species_to_taxid_json,
+        alignment_extras_json,
+        alignment_path,
+        num_sequences,
+        alignment_len,
     ) = row
 
-    alignment_extras = json.loads(alignment_extras_json) if alignment_extras_json else None
+    alignment_extras = (
+        json.loads(alignment_extras_json) if alignment_extras_json else None
+    )
 
     # Optionally load posteriors from JSONL if caller asks for it
-    if load_posteriors and alignment_extras and not alignment_extras.get("posterior_data"):
+    if (
+        load_posteriors
+        and alignment_extras
+        and not alignment_extras.get("posterior_data")
+    ):
         dump_path = alignment_extras.get("posterior_dump_jsonl")
         if dump_path:
             try:
@@ -388,9 +423,15 @@ def fetch_alignment_for_gene(
 
     return {
         "seq_by_id": json.loads(seq_by_id_json) if seq_by_id_json else None,
-        "seq_by_species": json.loads(seq_by_species_json) if seq_by_species_json else None,
-        "taxid_to_species": json.loads(taxid_to_species_json) if taxid_to_species_json else None,
-        "species_to_taxid": json.loads(species_to_taxid_json) if species_to_taxid_json else None,
+        "seq_by_species": (
+            json.loads(seq_by_species_json) if seq_by_species_json else None
+        ),
+        "taxid_to_species": (
+            json.loads(taxid_to_species_json) if taxid_to_species_json else None
+        ),
+        "species_to_taxid": (
+            json.loads(species_to_taxid_json) if species_to_taxid_json else None
+        ),
         "alignment_extras": alignment_extras,
         "alignment_path": alignment_path,
         "num_sequences": num_sequences,

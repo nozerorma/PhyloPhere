@@ -21,8 +21,8 @@ import sqlite3
 from typing import Tuple
 import json as _json
 
-from src.utils.disambiguation_db import iter_group_keys, iter_results_for_group, fetch_alignment_for_gene
-from src.utils.gene_wrapper import convert_biochem_result_to_dict, merge_multi_hypothesis_results
+from src.utils.disambiguation_db import fetch_alignment_for_gene
+from src.utils.gene_wrapper import convert_convergence_result_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +50,7 @@ def write_caas_convergence_csvs(
     for result in results:
         result["comments"] = _build_comments(result)
 
-    _write_csv(
-        results, master_filename, max_pairs=max_pairs
-    )
+    _write_csv(results, master_filename, max_pairs=max_pairs)
 
     # Export no_change cases for debugging
     no_change_results = [r for r in results if r.get("pattern_type") == "no_change"]
@@ -100,7 +98,6 @@ def _build_comments(result: Dict) -> str:
                 comments.append(f"pair{pair_id}_fallback:{state}")
 
     # Check for low ASR posteriors (< 0.5)
-    max_pairs = 0
     idx = 1
     while f"mrca_{idx}_posterior" in result:
         posterior = result.get(f"mrca_{idx}_posterior")
@@ -165,7 +162,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "msa_pos",
         "tag",
         "caas",
-        "multi_caas",
         "is_significant",
         "pvalue",
         "pvalue_boot",
@@ -173,11 +169,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "pattern_type",
         "convergence_description",
         "convergence_mode",
-        # Stability analysis
-        "is_stable",
-        "stability_pattern",
-        "top_conserved",
-        "bottom_conserved",
         # Metadata-driven convergence context
         "caap_group",
         "amino_encoded",
@@ -257,11 +248,13 @@ def _write_csv(
     logger.debug(f"Wrote {len(results)} rows with {len(fields)} fields to {filename}")
 
 
-def export_from_db(db_path: Path, output_dir: Path, trait_pairs: List[Tuple[str, str]], max_pairs: Optional[int] = None) -> Tuple[List[Path], Path]:
+def export_from_db(
+    db_path: Path, output_dir: Path, max_pairs: Optional[int] = None
+) -> Tuple[List[Path], Path]:
     """
     Export CAAS convergence master CSV, no_change debug CSV, and per-gene JSONs directly from the aggregation SQLite DB.
 
-    Streams groups from DB to avoid loading all results into memory.
+    Streams rows from DB to avoid loading all results into memory.
 
     Returns:
         (list_of_caas_files, summary_json)
@@ -299,14 +292,19 @@ def export_from_db(db_path: Path, output_dir: Path, trait_pairs: List[Tuple[str,
             return str(val)
 
         master_f = open(master_filename, "w", newline="")
-        master_writer = csv.DictWriter(master_f, fieldnames=master_fields, extrasaction="ignore")
+        master_writer = csv.DictWriter(
+            master_f, fieldnames=master_fields, extrasaction="ignore"
+        )
         master_writer.writeheader()
 
         no_change_f = open(no_change_filename, "w", newline="")
-        no_change_writer = csv.DictWriter(no_change_f, fieldnames=master_fields, extrasaction="ignore")
+        no_change_writer = csv.DictWriter(
+            no_change_f, fieldnames=master_fields, extrasaction="ignore"
+        )
         no_change_writer.writeheader()
 
-        # Iterate groups ordered by gene, msa_pos and write rows
+        # Iterate rows ordered by gene, msa_pos, id and write rows one-by-one.
+        # This preserves Tag-level hypotheses even when they share the same msa_pos.
         cur = conn.cursor()
 
         current_gene = None
@@ -314,81 +312,75 @@ def export_from_db(db_path: Path, output_dir: Path, trait_pairs: List[Tuple[str,
         per_gene_counts = {}
         total_positions = 0
 
-        for gene, msa_pos in iter_group_keys(conn):
-            results_group = list(iter_results_for_group(conn, gene, msa_pos))
+        cur.execute(
+            "SELECT id, gene, msa_pos, result_json FROM results ORDER BY gene, msa_pos, id"
+        )
+        for _, gene, msa_pos, result_json in cur.fetchall():
+            if not result_json:
+                continue
+            try:
+                result = _json.loads(result_json)
+            except Exception:
+                continue
+
             align_data = fetch_alignment_for_gene(conn, gene) or {}
-            alignment = align_data.get('alignment')
-            taxid_to_species = align_data.get('taxid_to_species')
-            seq_by_id = align_data.get('seq_by_id')
-            seq_by_species = align_data.get('seq_by_species')
-            alignment_extras = align_data.get('alignment_extras')
+            alignment = align_data.get("alignment")
+            taxid_to_species = align_data.get("taxid_to_species")
+            seq_by_id = align_data.get("seq_by_id")
+            seq_by_species = align_data.get("seq_by_species")
+            alignment_extras = align_data.get("alignment_extras")
             posterior_dump_jsonl = None
             if alignment_extras:
-                posterior_dump_jsonl = alignment_extras.get('posterior_dump_jsonl')
+                posterior_dump_jsonl = alignment_extras.get("posterior_dump_jsonl")
 
-            if len(results_group) == 1:
-                result = results_group[0]
-                caas_dict = convert_biochem_result_to_dict(
-                    result,
-                    multi_hypothesis=None,
-                    alignment=alignment,
-                    seq_by_id=seq_by_id,
-                    seq_by_species=seq_by_species,
-                    trait_pairs=trait_pairs,
-                    taxid_to_species=taxid_to_species,
+            caas_dict = convert_convergence_result_to_dict(
+                result,
+                multi_hypothesis=None,
+                alignment=alignment,
+                seq_by_id=seq_by_id,
+                seq_by_species=seq_by_species,
+                trait_pairs=None,
+                taxid_to_species=taxid_to_species,
+            )
+            try:
+                caas_dict["comments"] = _build_comments(caas_dict)
+            except Exception:
+                caas_dict["comments"] = ""
+
+            master_writer.writerow(
+                {k: serialize_value(caas_dict.get(k)) for k in master_fields}
+            )
+            total_positions += 1
+            per_gene_counts[gene] = per_gene_counts.get(gene, 0) + 1
+
+            if caas_dict.get("pattern_type") == "no_change":
+                no_change_writer.writerow(
+                    {k: serialize_value(caas_dict.get(k)) for k in master_fields}
                 )
-                # Build comments for CSV (mirror _build_comments used by write_caas_convergence_csvs)
-                try:
-                    caas_dict['comments'] = _build_comments(caas_dict)
-                except Exception:
-                    caas_dict['comments'] = ''
 
-                # write to master (with updated flags)
-                master_writer.writerow({k: serialize_value(caas_dict.get(k)) for k in master_fields})
-                total_positions += 1
-                per_gene_counts[gene] = per_gene_counts.get(gene, 0) + 1
-
-                # no_change debug
-                if caas_dict.get('pattern_type') == 'no_change':
-                    no_change_writer.writerow({k: serialize_value(caas_dict.get(k)) for k in master_fields})
-
-                # per-gene JSONL: append a small position-level summary to file
-                if current_gene != gene:
-                    if gene_file is not None:
-                        gene_file.close()
-                    gene_file = open(json_dir / f"{gene.lower()}_convergence_positions.jsonl", 'a', encoding='utf-8')
-                    current_gene = gene
-                try:
-                    from src.reporting.disambiguation_json import extract_convergence_summary
-                    summary = extract_convergence_summary(caas_dict, max_pairs)
-                except Exception:
-                    summary = {'gene': gene, 'msa_pos': caas_dict.get('msa_pos')}
-                # Include posterior dump path (diagnostic JSONL) in per-gene JSON summary if available
-                if posterior_dump_jsonl:
-                    summary['posterior_dump_jsonl'] = posterior_dump_jsonl
+            if current_gene != gene:
                 if gene_file is not None:
-                    gene_file.write(_json.dumps(summary, ensure_ascii=False) + "\n")
-                else:
-                    logger.error(f"gene_file is None for gene: {gene}")
-
-            else:
-                # multiple hypotheses - merge
-                merged = merge_multi_hypothesis_results(
-                    results_group,
-                    alignment=alignment,
-                    trait_pairs=trait_pairs,
-                    taxid_to_species=taxid_to_species,
+                    gene_file.close()
+                gene_file = open(
+                    json_dir / f"{gene.lower()}_convergence_positions.jsonl",
+                    "a",
+                    encoding="utf-8",
+                )
+                current_gene = gene
+            try:
+                from src.reporting.disambiguation_json import (
+                    extract_convergence_summary,
                 )
 
-                # Fill comments for merged record as well
-                try:
-                    merged['comments'] = _build_comments(merged)
-                except Exception:
-                    merged['comments'] = ''
-
-                master_writer.writerow({k: serialize_value(merged.get(k)) for k in master_fields})
-                total_positions += 1
-                per_gene_counts[gene] = per_gene_counts.get(gene, 0) + 1
+                summary = extract_convergence_summary(caas_dict, max_pairs)
+            except Exception:
+                summary = {"gene": gene, "msa_pos": msa_pos}
+            if posterior_dump_jsonl:
+                summary["posterior_dump_jsonl"] = posterior_dump_jsonl
+            if gene_file is not None:
+                gene_file.write(_json.dumps(summary, ensure_ascii=False) + "\n")
+            else:
+                logger.error(f"gene_file is None for gene: {gene}")
 
         # flush final gene file
         if gene_file is not None:
@@ -398,17 +390,17 @@ def export_from_db(db_path: Path, output_dir: Path, trait_pairs: List[Tuple[str,
         master_f.close()
         no_change_f.close()
         # Write aggregated summary JSON (compact)
-        summary_path = output_dir / 'caas_convergence_summary.json'
+        summary_path = output_dir / "caas_convergence_summary.json"
         summary_obj = {
-            'metadata': {
-                'num_genes': len(per_gene_counts),
-                'total_positions': total_positions,
-                'num_pairs': max_pairs,
-                'schema_version': '2025-12-08_db_export',
+            "metadata": {
+                "num_genes": len(per_gene_counts),
+                "total_positions": total_positions,
+                "num_pairs": max_pairs,
+                "schema_version": "2025-12-08_db_export",
             },
-            'by_gene_counts': per_gene_counts,
+            "by_gene_counts": per_gene_counts,
         }
-        with open(summary_path, 'w', encoding='utf-8') as f:
+        with open(summary_path, "w", encoding="utf-8") as f:
             _json.dump(summary_obj, f, indent=2, ensure_ascii=False)
 
     finally:
@@ -418,5 +410,7 @@ def export_from_db(db_path: Path, output_dir: Path, trait_pairs: List[Tuple[str,
     if Path(no_change_filename).exists():
         caas_files.append(no_change_filename)
 
-    logger.info(f"Exported CAAS master CSV: {master_filename}; JSON summary: {summary_path}")
+    logger.info(
+        f"Exported CAAS master CSV: {master_filename}; JSON summary: {summary_path}"
+    )
     return caas_files, summary_path

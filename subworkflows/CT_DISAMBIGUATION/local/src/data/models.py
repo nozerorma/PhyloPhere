@@ -3,8 +3,8 @@
 Provided classes
 ----------------
 - CAASPosition: tip/position metadata and significance flags.
-- BiochemResults: consolidated ASR/convergence results and diagnostics.
-- ContrastDefinition: species pair definitions and tip residue holders.
+- ConvergenceResult: consolidated ASR/convergence results and diagnostics.
+- ContrastDefinition: species/contrast definitions and tip residue holders.
 
 Author
 ------
@@ -17,9 +17,10 @@ Date
 """
 
 __all__ = [
-        "CAASPosition",
-        "BiochemResults",
-        "ContrastDefinition",
+    "CAASPosition",
+    "ConvergenceResult",
+    "BiochemResults",
+    "ContrastDefinition",
 ]
 
 from dataclasses import dataclass, field
@@ -55,7 +56,7 @@ class CAASPosition:
 
 
 @dataclass
-class BiochemResults:
+class ConvergenceResult:
     """
     Container for ASR-driven convergence analysis results.
     """
@@ -130,7 +131,7 @@ class BiochemResults:
 
 @dataclass
 class ContrastDefinition:
-    """Container for species pair definitions."""
+    """Container for species contrast definitions."""
 
     pair_id: str
     top_taxa: List[str]
@@ -148,3 +149,7 @@ class ContrastDefinition:
     focal_state: Optional[str] = None
     mrca_contrast: Optional[str] = None
     mrca_modal_aa: Optional[str] = None
+
+
+# Backward-compatible alias
+BiochemResults = ConvergenceResult

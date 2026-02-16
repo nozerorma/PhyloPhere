@@ -1,12 +1,4 @@
-"""
-Phylo Module
-============
-
-Phylogenetic tree manipulation and utilities.
-
-Components:
-    - tree_utils: Tree parsing, pruning, node labeling, path traversal
-"""
+"""Public exports for phylogenetic tree and taxid-mapping utilities."""
 
 from .tree_utils import (
     load_tree,

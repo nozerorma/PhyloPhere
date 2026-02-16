@@ -13,7 +13,7 @@ import logging
 import json
 import sys
 
-from src.single_pipe.asr_single import (
+from src.asr.asr_single import (
     run_asr_pipeline,
     SingleGeneASRConfig,
     validate_asr_inputs,
@@ -24,7 +24,6 @@ from src.utils.io_utils import find_gene_alignment
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root / "src"))
 from src.utils.logger import configure_logging
-
 
 logger = logging.getLogger(__name__)
 
@@ -56,42 +55,98 @@ def _run_gene_asr(
         model=asr_model,
         threads=threads,
         posterior_threshold=posterior_threshold,
-        run_diagnostics=run_diagnostics
+        run_diagnostics=run_diagnostics,
     )
 
     validate_asr_inputs(config)
 
     logger.info(f"Running ASR for {gene} -> {gene_out}")
     from src.utils.concurrency import codeml_slot
+
     with codeml_slot():
-        result = run_asr_pipeline(gene=gene, config=config, skip_if_exists=skip_if_exists)
+        result = run_asr_pipeline(
+            gene=gene, config=config, skip_if_exists=skip_if_exists
+        )
     return {
-        'gene': gene,
-        'success': bool(result),
-        'rst_file': str(result.rst_file) if result and result.rst_file else None,
-        'tree_file': str(result.tree_file) if result and result.tree_file else None,
-        'node_id_map': str(result.node_id_map) if result and result.node_id_map else None,
-        'output_dir': str(gene_out)
+        "gene": gene,
+        "success": bool(result),
+        "rst_file": str(result.rst_file) if result and result.rst_file else None,
+        "tree_file": str(result.tree_file) if result and result.tree_file else None,
+        "node_id_map": (
+            str(result.node_id_map) if result and result.node_id_map else None
+        ),
+        "output_dir": str(gene_out),
     }
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run ASR only for one or more genes")
-    parser.add_argument("--genes", "-g", nargs='+', required=True, help="Gene names to process")
-    parser.add_argument("--alignment_dir", "-a", type=Path, required=True, help="Directory with alignments")
-    parser.add_argument("--ensembl-genes-file", type=Path, help="TSV/CSV with gene column to enforce exact alignment matching")
-    parser.add_argument("--tree", "-t", type=Path, required=True, help="Tree file (.nex/.nwk)")
-    parser.add_argument("--output_dir", "-o", type=Path, default=Path("./asr_only_output"), help="Output directory")
+    parser.add_argument(
+        "--genes", "-g", nargs="+", required=True, help="Gene names to process"
+    )
+    parser.add_argument(
+        "--alignment_dir",
+        "-a",
+        type=Path,
+        required=True,
+        help="Directory with alignments",
+    )
+    parser.add_argument(
+        "--ensembl-genes-file",
+        type=Path,
+        help="TSV/CSV with gene column to enforce exact alignment matching",
+    )
+    parser.add_argument(
+        "--tree", "-t", type=Path, required=True, help="Tree file (.nex/.nwk)"
+    )
+    parser.add_argument(
+        "--output_dir",
+        "-o",
+        type=Path,
+        default=Path("./asr_only_output"),
+        help="Output directory",
+    )
     parser.add_argument("--taxid_mapping", type=Path, help="TaxID mapping file")
     parser.add_argument("--asr_model", default="lg", help="ASR model (default: lg)")
-    parser.add_argument("--threads", type=int, default=1, help="Threads for ASR (default: 1)")
-    parser.add_argument("--workers", "-w", type=int, default=None, help="Parallel ASR workers across genes (default: auto)")
-    parser.add_argument("--codeml-concurrency", type=int, default=None, help="Max concurrent codeml runs (default: auto)")
-    parser.add_argument("--posterior-threshold", type=float, default=0.7, help="Posterior threshold (default: 0.7)")
-    parser.add_argument("--skip-if-exists", action='store_true', help="Skip ASR if outputs already present")
-    parser.add_argument("--run-diagnostics", action='store_true', help="Enable diagnostics: node-level posteriors and per-position tip details in diagnostics/")
-    parser.add_argument("--verbose", "-v", action='store_true', help="Verbose logging")
-    parser.add_argument("--log-file", type=Path, default=None, help="Optional path to write ASR logs (overwrites if exists)")
+    parser.add_argument(
+        "--threads", type=int, default=1, help="Threads for ASR (default: 1)"
+    )
+    parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=None,
+        help="Parallel ASR workers across genes (default: auto)",
+    )
+    parser.add_argument(
+        "--codeml-concurrency",
+        type=int,
+        default=None,
+        help="Max concurrent codeml runs (default: auto)",
+    )
+    parser.add_argument(
+        "--posterior-threshold",
+        type=float,
+        default=0.7,
+        help="Posterior threshold (default: 0.7)",
+    )
+    parser.add_argument(
+        "--skip-if-exists",
+        action="store_true",
+        help="Skip ASR if outputs already present",
+    )
+    parser.add_argument(
+        "--run-diagnostics",
+        action="store_true",
+        help="Enable diagnostics: node-level posteriors and per-position tip details in diagnostics/",
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose logging")
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="Optional path to write ASR logs (overwrites if exists)",
+    )
     return parser.parse_args()
 
 
@@ -118,8 +173,11 @@ def main():
     if args.ensembl_genes_file:
         try:
             from src.data.loaders import load_ensembl_genes
+
             ensembl_genes = load_ensembl_genes(args.ensembl_genes_file)
-            logger.info(f"Loaded {len(ensembl_genes)} genes from {args.ensembl_genes_file}")
+            logger.info(
+                f"Loaded {len(ensembl_genes)} genes from {args.ensembl_genes_file}"
+            )
         except Exception as exc:
             logger.error(f"Failed to load Ensembl genes file: {exc}")
             sys.exit(1)
@@ -132,7 +190,11 @@ def main():
 
     if effective_workers > 1:
         manager = mp.Manager()
-        codeml_sem = manager.Semaphore(max(1, args.codeml_concurrency)) if args.codeml_concurrency else None
+        codeml_sem = (
+            manager.Semaphore(max(1, args.codeml_concurrency))
+            if args.codeml_concurrency
+            else None
+        )
         with ProcessPoolExecutor(
             max_workers=effective_workers,
             initializer=init_worker,

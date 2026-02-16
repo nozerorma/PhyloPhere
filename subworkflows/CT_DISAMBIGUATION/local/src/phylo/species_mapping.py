@@ -47,54 +47,52 @@ def read_taxid_mapping(taxid_file: Path) -> Dict[str, str]:
 
     if not taxid_file.exists():
         raise FileNotFoundError(f"Taxid mapping file not found: {taxid_file}")
-    
+
     logger.info(f"Reading taxid mapping from {taxid_file}")
-    
+
     try:
-        df = pd.read_csv(taxid_file, sep='\t', dtype=str)
+        df = pd.read_csv(taxid_file, sep="\t", dtype=str)
     except Exception as e:
         raise ValueError(f"Error reading taxid file: {e}")
-    
+
     # Validate required columns
-    required_cols = ['tax_id', 'species']
+    required_cols = ["tax_id", "species"]
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
         raise ValueError(
             f"Taxid file missing required columns: {missing_cols}. "
             f"Available columns: {list(df.columns)}"
         )
-    
+
     # Create mapping dictionary
     mapping = {}
     for _, row in df.iterrows():
-        species_name = str(row['species']).strip()
-        taxon_id = str(row['tax_id']).strip()
-        
+        species_name = str(row["species"]).strip()
+        taxon_id = str(row["tax_id"]).strip()
+
         if species_name and taxon_id:
             mapping[species_name] = taxon_id
-    
+
     logger.info(f"Loaded {len(mapping)} species → taxon ID mappings")
     logger.debug(f"Sample mappings: {dict(list(mapping.items())[:5])}")
-    
+
     return mapping
 
 
 def validate_taxids_in_tree(
-    taxids: List[str],
-    tree_tips: List[str],
-    group_name: str = "species"
+    taxids: List[str], tree_tips: List[str], group_name: str = "species"
 ) -> Tuple[List[str], List[str]]:
     """
     Validate that taxon IDs exist in the phylogenetic tree.
-    
+
     Args:
         taxids: List of taxon IDs to validate
         tree_tips: List of tip labels from the tree
         group_name: Name of the group for logging (e.g., "TOP", "BOTTOM")
-        
+
     Returns:
         Tuple of (found_taxids, missing_taxids)
-        
+
     Example:
         >>> tree_tips = ['9606', '9598', '9544']
         >>> taxids = ['9606', '9598', '9999']
@@ -103,20 +101,18 @@ def validate_taxids_in_tree(
         Found: ['9606', '9598'], Missing: ['9999']
     """
     tree_tips_set = set(tree_tips)
-    
+
     found = [tid for tid in taxids if tid in tree_tips_set]
     missing = [tid for tid in taxids if tid not in tree_tips_set]
-    
+
     logger.info(
         f"Validated {group_name} taxon IDs: "
         f"{len(found)}/{len(taxids)} found in tree"
     )
-    
+
     if missing:
-        logger.warning(
-            f"Missing {group_name} taxon IDs not in tree: {missing}"
-        )
-    
+        logger.warning(f"Missing {group_name} taxon IDs not in tree: {missing}")
+
     return found, missing
 
 
@@ -124,7 +120,13 @@ def match_tree_alignment_by_taxid(
     tree: Tree,
     alignment: MultipleSeqAlignment,
     tax_mapping: Dict[str, str],
-) -> Tuple[Tree, MultipleSeqAlignment, Dict[str, str], Dict[str, str], Dict[str, Dict[str, str]]]:
+) -> Tuple[
+    Tree,
+    MultipleSeqAlignment,
+    Dict[str, str],
+    Dict[str, str],
+    Dict[str, Dict[str, str]],
+]:
     """Match tree and alignment species using tax_id mapping.
 
     Handles:
@@ -192,7 +194,9 @@ def match_tree_alignment_by_taxid(
             logger.warning(f"Alignment species not in tax_id mapping: {sp}")
 
     synthetic_taxids: Dict[str, Dict[str, str]] = {}
-    all_existing_taxids: Set[str] = set(tree_sp_to_taxid.values()) | set(aln_sp_to_taxid.values())
+    all_existing_taxids: Set[str] = set(tree_sp_to_taxid.values()) | set(
+        aln_sp_to_taxid.values()
+    )
 
     for taxid, species_list in aln_taxid_duplicates.items():
         if len(species_list) <= 1:
@@ -242,7 +246,9 @@ def match_tree_alignment_by_taxid(
                 tree_sp_to_taxid[dup_sp] = synthetic_taxid
 
                 other_species = [
-                    sp for sp, tid in tree_sp_to_taxid.items() if tid == old_tree_taxid and sp != dup_sp
+                    sp
+                    for sp, tid in tree_sp_to_taxid.items()
+                    if tid == old_tree_taxid and sp != dup_sp
                 ]
 
                 if not other_species:
@@ -300,7 +306,9 @@ def match_tree_alignment_by_taxid(
             "Consider checking tax_id mapping file."
         )
 
-    logger.info("Found %d common tax_ids between tree and alignment", len(common_taxids))
+    logger.info(
+        "Found %d common tax_ids between tree and alignment", len(common_taxids)
+    )
 
     tree_only_taxids = tree_taxids - aln_taxids
     aln_only_taxids = aln_taxids - tree_taxids
@@ -320,9 +328,7 @@ def match_tree_alignment_by_taxid(
                 logger.debug("  %s (%s)", taxid, sp)
 
     species_to_keep_in_tree = [
-        tree_taxid_to_sp[taxid]
-        for taxid in common_taxids
-        if taxid in tree_taxid_to_sp
+        tree_taxid_to_sp[taxid] for taxid in common_taxids if taxid in tree_taxid_to_sp
     ]
 
     pruned_tree = prune_tree(tree, species_to_keep_in_tree)
@@ -333,7 +339,9 @@ def match_tree_alignment_by_taxid(
         if original_name in tree_sp_to_taxid:
             tip.name = tree_sp_to_taxid[original_name]
         else:
-            logger.error("Tree tip %s not found in mapping (should not happen)", original_name)
+            logger.error(
+                "Tree tip %s not found in mapping (should not happen)", original_name
+            )
 
     filtered_records = []
     seen_taxids: Set[str] = set()
@@ -380,4 +388,10 @@ def match_tree_alignment_by_taxid(
 
     logger.info("✓ Tree and alignment matched successfully via tax_ids")
 
-    return pruned_tree, filtered_alignment, tree_taxid_to_sp, aln_taxid_to_sp, synthetic_taxids
+    return (
+        pruned_tree,
+        filtered_alignment,
+        tree_taxid_to_sp,
+        aln_taxid_to_sp,
+        synthetic_taxids,
+    )

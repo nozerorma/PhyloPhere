@@ -192,11 +192,13 @@ def find_tree_file(gene: str, asr_root: Optional[Path]) -> Optional[Path]:
         candidates.append(asr_root / gene_caps / f"asr_{gene_caps}" / "tree_paml.nwk")
         candidates.append(asr_root / gene_caps / "tree_paml.nwk")
 
-    # Also check lower/upper variations and direct children named with gene prefix
-    # (e.g., asr_root / 'asr_BRCA2')
+        # Also check lower/upper variations and direct children named with gene prefix
+        # (e.g., asr_root / 'asr_BRCA2')
         candidates.append(asr_root / f"asr_{gene_caps}" / "tree_paml.nwk")
         if asr_root is not None:
-            candidates.append(asr_root / gene_caps.lower() / f"asr_{gene_caps}" / "tree_paml.nwk")
+            candidates.append(
+                asr_root / gene_caps.lower() / f"asr_{gene_caps}" / "tree_paml.nwk"
+            )
 
     for candidate in candidates:
         try:
@@ -227,11 +229,13 @@ def find_tree_file(gene: str, asr_root: Optional[Path]) -> Optional[Path]:
             pass
 
     # Broader autodetection: check common results locations relative to cwd
-    common_roots.extend([
-        Path.cwd() / "results" / "asr",
-        Path.cwd() / "results_toy" / "asr",
-        Path.cwd() / "results",
-    ])
+    common_roots.extend(
+        [
+            Path.cwd() / "results" / "asr",
+            Path.cwd() / "results_toy" / "asr",
+            Path.cwd() / "results",
+        ]
+    )
     for root in common_roots:
         try:
             if not root.exists():
@@ -311,7 +315,6 @@ def compute_mean_evidence_score(
     return float(np.mean(evidences))
 
 
-
 def get_pattern_abbreviation(pattern: str) -> str:
     """Map pattern type to abbreviated label."""
     abbrev_map = {
@@ -331,7 +334,6 @@ def get_pattern_abbreviation(pattern: str) -> str:
         "ambiguous": "AMB",
     }
     return abbrev_map.get(pattern.lower(), pattern.upper()[:3])
-
 
 
 def get_pattern_colors(pattern_type: str) -> str:

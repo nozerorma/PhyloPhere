@@ -63,6 +63,7 @@ from dataclasses import dataclass, field
 import logging
 
 from ..biochem.grouping import get_grouping_scheme
+from ..utils.amino import normalize_amino_list as _normalize_amino_list
 
 logger = logging.getLogger(__name__)
 
@@ -85,12 +86,6 @@ class NodeStates:
     """
     Container for amino acid states at key phylogenetic nodes.
 
-    **REDESIGNED FOR DYNAMIC PAIRS (2025-12-05)**:
-    focal_states and focal_probs are now lists supporting variable pairs (1-N).
-
-    **FALLBACK TRACKING (2025-12-07)**:
-    fallback_depths tracks how many ancestor levels were traversed for each focal node.
-
     Attributes:
         root (Optional[str]): State at root
         pre_split (Optional[str]): State at internal node before first split
@@ -99,7 +94,6 @@ class NodeStates:
         gene (str): Gene identifier
         focal_states (List[str]): States at focal lineage MRCAs [focal_1..focal_N]
         focal_probs (List[float]): Posterior probabilities for focal states
-        fallback_depths (Dict[str, int]): Depth of ancestor fallback for each node (focal_1, focal_2, root, etc.)
     """
 
     root: Optional[str]
@@ -113,7 +107,6 @@ class NodeStates:
     pre_split_prob: Optional[float] = None
     mrca_contrast_prob: Optional[float] = None
     low_confidence_nodes: Optional[List[str]] = None
-    fallback_depths: Optional[Dict[str, int]] = None
 
 
 @dataclass
@@ -248,7 +241,9 @@ def _fetch_residue_from_lookup(
         # Try species name lookup (handles trait files with species names instead of taxids)
         seq = seq_by_species.get(key)
         if seq is not None:
-            logger.debug(f"Resolved '{key}' via species name lookup (not found in taxid lookup)")
+            logger.debug(
+                f"Resolved '{key}' via species name lookup (not found in taxid lookup)"
+            )
 
     if seq and 0 <= msa_pos < len(seq):
         return seq[msa_pos]
@@ -303,17 +298,27 @@ def collect_tip_residues(
 
         # Retry with species name if taxid lookup failed (handles trait files with species names)
         if residue is None and species_name:
-            residue = _fetch_residue_from_lookup(species_name, msa_pos, seq_by_id, seq_by_species)
+            residue = _fetch_residue_from_lookup(
+                species_name, msa_pos, seq_by_id, seq_by_species
+            )
             if residue is not None:
-                logger.debug(f"Resolved taxid '{taxid}' via species name '{species_name}'")
+                logger.debug(
+                    f"Resolved taxid '{taxid}' via species name '{species_name}'"
+                )
 
-        tip_records.append({"taxid": str(taxid), "species": species_name, "residue": residue})
+        tip_records.append(
+            {"taxid": str(taxid), "species": species_name, "residue": residue}
+        )
 
     # If only species names provided (no taxids)
     if not (taxa_list or []) and species_list:
         for species_name in species_list:
-            residue = _fetch_residue_from_lookup(species_name, msa_pos, seq_by_id, seq_by_species)
-            tip_records.append({"taxid": None, "species": species_name, "residue": residue})
+            residue = _fetch_residue_from_lookup(
+                species_name, msa_pos, seq_by_id, seq_by_species
+            )
+            tip_records.append(
+                {"taxid": None, "species": species_name, "residue": residue}
+            )
 
     return tip_records
 
@@ -338,7 +343,11 @@ def extract_tip_residue(tip_records: List[Dict[str, Any]]) -> Optional[str]:
         'A'
     """
     # Filter out missing/gap/unknown residues
-    residues = [tip["residue"] for tip in tip_records if tip.get("residue") not in {None, "-", "X"}]
+    residues = [
+        tip["residue"]
+        for tip in tip_records
+        if tip.get("residue") not in {None, "-", "X"}
+    ]
 
     if not residues:
         return None
@@ -361,23 +370,9 @@ def normalize_amino_list(values: List[Optional[str]]) -> List[str]:
         >>> normalize_amino_list(['A', 'a', 'T', None, '-', 'X', 'A'])
         ['A', 'T']
     """
-    cleaned = []
-    seen = set()
-
-    for value in values or []:
-        if value is None:
-            continue
-
-        aa = str(value).strip().upper()
-
-        # Skip empty, gaps, unknowns, and duplicates
-        if aa in {"", "-", "X", "?"} or aa in seen:
-            continue
-
-        seen.add(aa)
-        cleaned.append(aa)
-
-    return cleaned
+    # Keep public API here for backward compatibility, but delegate implementation
+    # to the neutral helper module to avoid cross-package circular imports.
+    return _normalize_amino_list(values)
 
 
 def format_amino_display(amino_list: List[str]) -> str:
@@ -401,7 +396,9 @@ def format_amino_display(amino_list: List[str]) -> str:
     return "+".join(amino_list)
 
 
-def compute_derived_state_similarity(derived_states: List[str], grouping_getter) -> Dict[str, Any]:
+def compute_derived_state_similarity(
+    derived_states: List[str], grouping_getter
+) -> Dict[str, Any]:
     """
     Check if derived states belong to the same biochemical group.
 
@@ -480,9 +477,7 @@ def extract_node_states_from_node_level(
         position: Alignment position (1-based)
         gene: Gene identifier
         posterior_threshold: Minimum posterior probability to accept state
-        tree_node_lookup: Optional mapping of node_id -> TreeNode (with parent links) to
-            enable fallback to ancestral nodes when focal nodes are missing or have
-            sub-threshold posteriors.
+        tree_node_lookup: Unused. Kept for API compatibility.
 
     Returns:
         NodeStates object or None if extraction fails or confidence too low
@@ -510,7 +505,9 @@ def extract_node_states_from_node_level(
             return None
 
         if position not in asr_posteriors[node_id]:
-            logger.debug(f"Position {position} not found in posteriors for node {node_id}")
+            logger.debug(
+                f"Position {position} not found in posteriors for node {node_id}"
+            )
             return None
 
         posteriors = asr_posteriors[node_id][position]
@@ -520,76 +517,7 @@ def extract_node_states_from_node_level(
         modal_aa = max(posteriors.items(), key=lambda x: x[1])
         return modal_aa[0], modal_aa[1]
 
-    def resolve_with_parent_fallback(
-        start_id: Optional[int], idx: int
-    ) -> Tuple[Optional[Tuple[str, float]], bool, int]:
-        """Return modal state for node, falling back up the tree if needed (max 3 levels).
-
-        Returns:
-            (state, fallback_used, fallback_depth) where fallback_depth is number of ancestors traversed
-        """
-        if start_id is None:
-            return None, False, 0
-
-        current_id = start_id
-        visited: Set[int] = set()
-        fallback_used = False
-        fallback_depth = 0
-        max_fallback_depth = 5
-        fallback_trace: List[str] = []  # Track all attempts for logging
-
-        while (
-            current_id is not None
-            and current_id not in visited
-            and fallback_depth <= max_fallback_depth
-        ):
-            visited.add(current_id)
-            modal = get_modal_state(current_id)
-
-            # Record this level for trace logging
-            if modal:
-                fallback_trace.append(
-                    f"node={current_id}:residue={modal[0]}:posterior={modal[1]:.4f}"
-                )
-            else:
-                fallback_trace.append(f"node={current_id}:residue=None:posterior=0.0000")
-
-            if modal and modal[1] >= posterior_threshold:
-                if fallback_used and start_id != current_id:
-                    logger.info(
-                        "Focal node %d missing/low confidence; fell back to ancestor %d (depth=%d). "
-                        "Trace: %s",
-                        idx + 1,
-                        current_id,
-                        fallback_depth,
-                        " -> ".join(fallback_trace),
-                    )
-                return modal, fallback_used, fallback_depth
-
-            # Move to parent if available (but respect max fallback depth)
-            if not tree_node_lookup or fallback_depth >= max_fallback_depth:
-                break
-            node_obj = tree_node_lookup.get(current_id)
-            parent_id = node_obj.parent.node_id if node_obj and node_obj.parent else None
-            if parent_id is None:
-                break
-            fallback_used = True
-            fallback_depth += 1
-            current_id = parent_id
-
-        # Log final unresolved trace
-        if fallback_trace:
-            logger.warning(
-                "Focal node %d unresolved after fallback (depth=%d). Trace: %s",
-                idx + 1,
-                fallback_depth,
-                " -> ".join(fallback_trace),
-            )
-
-        return None, fallback_used, fallback_depth
-
     low_conf_nodes: List[str] = []
-    fallback_depths: Dict[str, int] = {}  # Track fallback depth for each node
 
     try:
         root_data = get_modal_state(node_mapping["root"])
@@ -599,20 +527,17 @@ def extract_node_states_from_node_level(
         focal_node_ids = node_mapping.get("focal_nodes", [])
         focal_states_data = []
         for idx, focal_id in enumerate(focal_node_ids):
-            focal_data, used_fallback, fallback_depth = resolve_with_parent_fallback(focal_id, idx)
-            fallback_depths[f"focal_{idx+1}"] = fallback_depth
+            focal_data = get_modal_state(focal_id) if focal_id is not None else None
             if focal_data is None:
                 if focal_id is None:
                     logger.warning(f"Focal node {idx+1} is None for {gene}:{position}")
                 else:
                     logger.warning(
-                        "Focal node %d unresolved for %s:%s after ancestor fallback",
+                        "Focal node %d unresolved for %s:%s at direct MRCA node",
                         idx + 1,
                         gene,
                         position,
                     )
-            elif used_fallback:
-                low_conf_nodes.append(f"focal_{idx+1}")
             focal_states_data.append(focal_data)
 
         if not root_data or not mrca_data or not any(focal_states_data):
@@ -651,7 +576,6 @@ def extract_node_states_from_node_level(
             pre_split_prob=pre_split_data[1] if pre_split_data else None,
             mrca_contrast_prob=mrca_data[1] if mrca_data else None,
             low_confidence_nodes=low_conf_nodes or None,
-            fallback_depths=fallback_depths if fallback_depths else None,
         )
 
     except Exception as e:
@@ -709,7 +633,9 @@ def classify_tip_level_pattern(
         'convergent'
     """
 
-    def _validate_pair_details(entries: Sequence[PairDetail]) -> Optional[List[PairDetail]]:
+    def _validate_pair_details(
+        entries: Sequence[PairDetail],
+    ) -> Optional[List[PairDetail]]:
         """Validate and order pair details; return None when insufficient."""
         if not entries:
             return None
@@ -728,7 +654,9 @@ def classify_tip_level_pattern(
 
         # Deterministic ordering: sort by pair_id (case-insensitive) with stable index fallback
         indexed = list(enumerate(usable))
-        indexed.sort(key=lambda item: (str(item[1].get("pair_id", "")).lower(), item[0]))
+        indexed.sort(
+            key=lambda item: (str(item[1].get("pair_id", "")).lower(), item[0])
+        )
         return [item[1] for item in indexed]
 
     validated_pairs = _validate_pair_details(pair_details)
@@ -779,7 +707,9 @@ def classify_tip_level_pattern(
         if convergence_mode == "mrca":
             # Use mrca_contrast as the common ancestor for both focal groups
             ancestor = mrca_contrast
-            logger.info(f"Pair {pair_id}: MODE='mrca' -> USING ancestor={ancestor} (mrca_contrast)")
+            logger.info(
+                f"Pair {pair_id}: MODE='mrca' -> USING ancestor={ancestor} (mrca_contrast)"
+            )
         else:  # focal_clade mode (default)
             # Use focal-specific ancestors (focal_i aligned to pair order) for top/bottom
             ancestor = focal_state
@@ -919,33 +849,29 @@ def classify_tip_level_pattern(
         if top_convergent and bottom_insufficient:
             top_state = top_descendants[0] if top_descendants else "?"
             pattern = "convergent"
-            description = f"Convergent (TOP only): → {top_state}, BOTTOM insufficient changes"
+            description = (
+                f"Convergent (TOP only): → {top_state}, BOTTOM insufficient changes"
+            )
         elif bottom_convergent and top_insufficient:
             bottom_state = bottom_descendants[0] if bottom_descendants else "?"
             pattern = "convergent"
-            description = f"Convergent (BOTTOM only): → {bottom_state}, TOP insufficient changes"
+            description = (
+                f"Convergent (BOTTOM only): → {bottom_state}, TOP insufficient changes"
+            )
         elif top_divergent and bottom_insufficient:
             all_descendants = sorted(top_descendants)
             pattern = "divergent"
-            description = (
-                f"Divergent (TOP only): {'/'.join(all_descendants)}, BOTTOM insufficient changes"
-            )
+            description = f"Divergent (TOP only): {'/'.join(all_descendants)}, BOTTOM insufficient changes"
         elif bottom_divergent and top_insufficient:
             all_descendants = sorted(bottom_descendants)
             pattern = "divergent"
-            description = (
-                f"Divergent (BOTTOM only): {'/'.join(all_descendants)}, TOP insufficient changes"
-            )
+            description = f"Divergent (BOTTOM only): {'/'.join(all_descendants)}, TOP insufficient changes"
         elif top_codivergent and bottom_insufficient:
             pattern = "codivergent_top"
-            description = (
-                f"Codivergent TOP: {'/'.join(top_descendants)}, BOTTOM insufficient changes"
-            )
+            description = f"Codivergent TOP: {'/'.join(top_descendants)}, BOTTOM insufficient changes"
         elif bottom_codivergent and top_insufficient:
             pattern = "codivergent_bottom"
-            description = (
-                f"Codivergent BOTTOM: {'/'.join(bottom_descendants)}, TOP insufficient changes"
-            )
+            description = f"Codivergent BOTTOM: {'/'.join(bottom_descendants)}, TOP insufficient changes"
 
     elif (top_convergent or top_divergent or top_codivergent) and bottom_unchanged:
         # TOP changed, BOTTOM unchanged
@@ -956,12 +882,18 @@ def classify_tip_level_pattern(
         elif top_divergent:
             all_descendants = sorted(top_descendants)
             pattern = "divergent"
-            description = f"Divergent (TOP only): {'/'.join(all_descendants)}, BOTTOM unchanged"
+            description = (
+                f"Divergent (TOP only): {'/'.join(all_descendants)}, BOTTOM unchanged"
+            )
         elif top_codivergent:
             pattern = "codivergent_top"
-            description = f"Codivergent TOP: {'/'.join(top_descendants)}, BOTTOM unchanged"
+            description = (
+                f"Codivergent TOP: {'/'.join(top_descendants)}, BOTTOM unchanged"
+            )
 
-    elif (bottom_convergent or bottom_divergent or bottom_codivergent) and top_unchanged:
+    elif (
+        bottom_convergent or bottom_divergent or bottom_codivergent
+    ) and top_unchanged:
         # BOTTOM changed, TOP unchanged
         if bottom_convergent:
             bottom_state = bottom_descendants[0] if bottom_descendants else "?"
@@ -970,19 +902,21 @@ def classify_tip_level_pattern(
         elif bottom_divergent:
             all_descendants = sorted(bottom_descendants)
             pattern = "divergent"
-            description = f"Divergent (BOTTOM only): {'/'.join(all_descendants)}, TOP unchanged"
+            description = (
+                f"Divergent (BOTTOM only): {'/'.join(all_descendants)}, TOP unchanged"
+            )
         elif bottom_codivergent:
             pattern = "codivergent_bottom"
-            description = f"Codivergent BOTTOM: {'/'.join(bottom_descendants)}, TOP unchanged"
+            description = (
+                f"Codivergent BOTTOM: {'/'.join(bottom_descendants)}, TOP unchanged"
+            )
 
     elif top_sufficient_changes and bottom_sufficient_changes:
         # Both sides have sufficient changes - determine parallel subtype
         if top_convergent and bottom_convergent:
             if set(top_descendants) == set(bottom_descendants):
                 pattern = "no_convergence"
-                description = (
-                    f"Both groups converge to the same state: TOP/BOTTOM → {top_descendants[0]}"
-                )
+                description = f"Both groups converge to the same state: TOP/BOTTOM → {top_descendants[0]}"
             else:
                 pattern = "parallel_convergence"
                 description = (
@@ -993,21 +927,35 @@ def classify_tip_level_pattern(
             pattern = "parallel_divergence"
             top_states = "/".join(top_descendants)
             bottom_states = "/".join(bottom_descendants)
-            description = f"Parallel divergence: TOP → {top_states}, BOTTOM → {bottom_states}"
+            description = (
+                f"Parallel divergence: TOP → {top_states}, BOTTOM → {bottom_states}"
+            )
         elif top_codivergent and bottom_codivergent:
             pattern = "parallel_codivergent"
-            description = f"Parallel codivergence: both sides show convergence+divergence"
-        elif (top_convergent or top_codivergent) and (bottom_divergent or bottom_codivergent):
+            description = (
+                "Parallel codivergence: both sides show convergence+divergence"
+            )
+        elif (top_convergent or top_codivergent) and (
+            bottom_divergent or bottom_codivergent
+        ):
             # One side converges/codiverges, other diverges/codiverges = mixed
             pattern = "parallel_mixed"
-            description = f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
-        elif (bottom_convergent or bottom_codivergent) and (top_divergent or top_codivergent):
+            description = (
+                f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
+            )
+        elif (bottom_convergent or bottom_codivergent) and (
+            top_divergent or top_codivergent
+        ):
             pattern = "parallel_mixed"
-            description = f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
+            description = (
+                f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
+            )
         else:
             # Fallback for unexpected combinations
             pattern = "parallel_mixed"
-            description = f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
+            description = (
+                f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
+            )
 
     result = {
         "pattern": pattern,
@@ -1102,7 +1050,7 @@ def build_consolidated_multiset(
         ... )
         'AAA/VVI'  # Left side: A,A,A; Right side: V,V,I
     """
-    logger.info(f"=== build_consolidated_multiset START ===")
+    logger.info("=== build_consolidated_multiset START ===")
     logger.info(f"Gene: {getattr(alignment, 'gene_name', 'unknown')}")
     logger.info(f"MSA position (0-based): {msa_pos}")
     logger.info(f"Number of trait pairs: {len(trait_pairs)}")
@@ -1147,7 +1095,9 @@ def build_consolidated_multiset(
         if res1 is None:
             # Try with underscore replacement (common species name format)
             species1_alt = species1.replace(" ", "_")
-            res1 = _fetch_residue_from_lookup(species1_alt, msa_pos, seq_by_id, seq_by_species)
+            res1 = _fetch_residue_from_lookup(
+                species1_alt, msa_pos, seq_by_id, seq_by_species
+            )
             logger.debug(f"    LEFT retry with '{species1_alt}' -> residue: {res1}")
 
         if res1 is None:
@@ -1172,7 +1122,9 @@ def build_consolidated_multiset(
 
         if res2 is None:
             species2_alt = species2.replace(" ", "_")
-            res2 = _fetch_residue_from_lookup(species2_alt, msa_pos, seq_by_id, seq_by_species)
+            res2 = _fetch_residue_from_lookup(
+                species2_alt, msa_pos, seq_by_id, seq_by_species
+            )
             logger.debug(f"    RIGHT retry with '{species2_alt}' -> residue: {res2}")
 
         if res2 is None:
@@ -1191,7 +1143,9 @@ def build_consolidated_multiset(
             skipped_pairs.append((species1, species2, "RIGHT species has gap"))
             continue
 
-        logger.info(f"    Pair {pair_idx} ({species1} vs {species2}): LEFT={res1}, RIGHT={res2}")
+        logger.info(
+            f"    Pair {pair_idx} ({species1} vs {species2}): LEFT={res1}, RIGHT={res2}"
+        )
         left_residues.append(res1)
         right_residues.append(res2)
 
@@ -1215,6 +1169,6 @@ def build_consolidated_multiset(
     logger.info(f"  LEFT multiset (sorted): {left_multiset} (from {left_residues})")
     logger.info(f"  RIGHT multiset (sorted): {right_multiset} (from {right_residues})")
     logger.info(f"  Hypothesis pattern: {hypothesis_caas}")
-    logger.info(f"=== build_consolidated_multiset END ===")
+    logger.info("=== build_consolidated_multiset END ===")
 
     return new_convAA

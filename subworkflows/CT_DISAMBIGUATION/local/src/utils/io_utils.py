@@ -15,13 +15,14 @@ Date
 """
 
 from pathlib import Path
-from typing import Dict, Tuple, Optional, Set
+from typing import Optional, Set
 import logging
 
 from Bio import AlignIO
 from Bio.Align import MultipleSeqAlignment
 
 logger = logging.getLogger(__name__)
+
 
 def find_gene_alignment(
     alignment_dir: Optional[Path],
@@ -55,6 +56,7 @@ def find_gene_alignment(
 
     raise FileNotFoundError(f"No alignment file found for gene {gene}")
 
+
 def read_alignment(
     alignment_file: Path,
     format: str = "phylip-relaxed",
@@ -76,10 +78,12 @@ def read_alignment(
 
     if not alignment_file.exists():
         raise FileNotFoundError(f"Alignment file not found: {alignment_file}")
-    
+
     try:
         alignment = AlignIO.read(alignment_file, format)
-        logger.debug(f"Read alignment from {alignment_file}: {len(alignment)} sequences, {alignment.get_alignment_length()} positions")
+        logger.debug(
+            f"Read alignment from {alignment_file}: {len(alignment)} sequences, {alignment.get_alignment_length()} positions"
+        )
         return alignment
     except Exception as e:
         raise ValueError(f"Failed to read alignment {alignment_file}: {e}")

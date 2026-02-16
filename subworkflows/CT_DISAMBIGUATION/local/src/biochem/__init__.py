@@ -1,4 +1,4 @@
-"""Biochem module: amino-acid grouping + change-side inference only."""
+"""Public exports for biochemical grouping and side-change inference."""
 
 from .grouping import GS1, GS2, GS3, GS4, get_grouping_scheme
 
@@ -7,12 +7,10 @@ from .state_inference import (
 )
 
 __all__ = [
-    # Grouping schemes
     "GS1",
     "GS2",
     "GS3",
     "GS4",
     "get_grouping_scheme",
-    # State inference
     "compute_change_side",
 ]

@@ -96,7 +96,9 @@ def build_convergence_node_mapping(
         mrca_state = get_modal_state(mrca_node.node_id)
         node_map[mrca_node.node_id] = mrca_state or f"MRCA_{contrast.pair_id}"
     else:
-        logger.debug("No MRCA node found for contrast %s", getattr(contrast, "pair_id", "?"))
+        logger.debug(
+            "No MRCA node found for contrast %s", getattr(contrast, "pair_id", "?")
+        )
 
     # Map all taxa tips
     for taxid in contrast.all_taxa:
@@ -123,7 +125,9 @@ def build_convergence_node_mapping(
                 path_to_root.append(current.node_id)
             if current == mrca_node:
                 break
-            current = tree.get_path(current)[-2] if len(tree.get_path(current)) > 1 else None
+            current = (
+                tree.get_path(current)[-2] if len(tree.get_path(current)) > 1 else None
+            )
 
         return list(reversed(path_to_root))
 
