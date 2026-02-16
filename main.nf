@@ -62,6 +62,7 @@ include {REPORTING} from './workflows/reporting.nf'
 include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
 include {CAAS_POSTPROC} from './workflows/caas_postproc.nf'
 include {CAAS_SIGNIFICATION} from './workflows/caas_signification.nf'
+include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
 //include {ORA} from './workflows/ora.nf'
 
 /*
@@ -104,6 +105,8 @@ workflow {
             RER_MAIN()
             ran_any = true
         }
+        def signification_results = null
+
         if (params.caas_postproc) {
             // Use CT outputs if available, otherwise use empty channels (will fall back to parameters)
             def discovery_ch = ct_results ? ct_results.discovery_file : Channel.empty()
@@ -118,7 +121,7 @@ workflow {
             if (params.caas_signification) {
                 // For signification, we need bootstrap data from CT if available
                 // Otherwise it will use params.bootstrap_input
-                CAAS_SIGNIFICATION(
+                signification_results = CAAS_SIGNIFICATION(
                     postproc_results.filtered_discovery,
                     postproc_results.cleaned_background,
                     bootstrap_ch
@@ -130,13 +133,18 @@ workflow {
             log.error "Please enable both workflows or run CAAS_POSTPROC separately to generate filtered inputs"
             System.exit(1)
         }
+        if (params.ct_disambiguation) {
+            def meta_for_disambiguation = signification_results ? signification_results.meta_caas : Channel.empty()
+            CT_DISAMBIGUATION(meta_for_disambiguation)
+            ran_any = true
+        }
         /* if (params.ora) {
             ORA()
             ran_any = true
         } */
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --caas_postproc, or --caas_signification."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --caas_postproc, --caas_signification, or --ct_disambiguation."
         }
     }
 }

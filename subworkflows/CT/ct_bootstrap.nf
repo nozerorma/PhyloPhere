@@ -42,7 +42,7 @@ process BOOTSTRAP {
 
     script:
     def args = task.ext.args ?: ''
-    def discovery_arg = ""
+    def discovery_arg = discoveryFile.name != 'NO_FILE' ? "--discovery ${discoveryFile}" : ""
     def progress_log_arg = params.progress_log != "none" ? "--progress_log ${alignmentID}.progress.log" : ""
     def export_groups_arg = params.export_groups != "none" ? "--export_groups ${alignmentID}.bootstrap.groups.output" : ""
     def export_perm_discovery_arg = params.export_perm_discovery != "none" ? "--export_perm_discovery ${alignmentID}.bootstrap.discovery.output" : ""

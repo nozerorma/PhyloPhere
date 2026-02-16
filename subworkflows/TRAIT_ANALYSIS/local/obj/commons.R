@@ -71,7 +71,6 @@ debug_log("objDir = %s", objDir)
 source(file.path(objDir, "io_utils.R"))
 source(file.path(objDir, "directories.R"))
 source(file.path(objDir, "palettes.R"))
-source(file.path(objDir, "stats.R"))
 source(file.path(objDir, "plotting_fun.R"))
 
 # ----------------------------------------
@@ -163,3 +162,6 @@ if (nzchar(branch_trait) && branch_trait %in% names(trait_df)) {
   message("No valid branch trait provided; proceeding without it.")
   debug_log("has.branch = FALSE")
 }
+
+# Lets try sourcing stats.R after all the parameters and data are loaded, since it relies on some of these variables being defined
+source(file.path(objDir, "stats.R"))

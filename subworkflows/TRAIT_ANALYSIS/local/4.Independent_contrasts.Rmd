@@ -159,7 +159,6 @@ selected_pairs <- selected_pairs.f(trait)
 
 # Display selected pairs
 print(selected_pairs)
-
 ```
 
 

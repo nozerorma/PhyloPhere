@@ -64,6 +64,16 @@ from os.path import exists
 from typing import Dict, List, Tuple, Optional
 
 
+def _pair_sort_key(multiconfig, sp):
+    pair_id = multiconfig.get_pair(sp)
+    if pair_id:
+        try:
+            return (int(pair_id), sp)
+        except (ValueError, TypeError):
+            return (float('inf'), sp)
+    return (float('inf'), sp)
+
+
 #: US: Ungrouped scheme (identity mapping; each amino acid is its own group)
 US: Dict[str, str] = {
     "A": "A", "C": "C", "D": "D", "E": "E", "F": "F",
@@ -325,19 +335,14 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
             self.conserved_pairs = "0:"
 
     z = caap_result()
+    if fg_species_list is None:
+        fg_species_list = []
+    if bg_species_list is None:
+        bg_species_list = []
     z.substitution = f"{fg_aas}/{bg_aas}"
 
-    # Filter non-standard amino acids (only allow 20 standard AAs)
-    # NOTE: give a thought to this
-    STANDARD_AAS = set('ACDEFGHIKLMNPQRSTVWY-')
-    
-    # Filter non-standard amino acids and treat them as gaps
-    fg_aas_filtered = ''.join([aa if aa in STANDARD_AAS else '-' for aa in fg_aas])
-    bg_aas_filtered = ''.join([aa if aa in STANDARD_AAS else '-' for aa in bg_aas])
-    
-    # If either side has no valid amino acids after filtering, not a CAAP
-    if len(fg_aas_filtered) == 0 or len(bg_aas_filtered) == 0:
-        return (z.caap, z.pattern, z.substitution, z.conserved_pairs)
+    fg_aas_filtered = fg_aas
+    bg_aas_filtered = bg_aas
 
     # Encode amino acids to groups
     # Use get() with None as default and filter out None values for non-standard AAs
@@ -388,8 +393,8 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
         else:
             z.caap = False
 
-        # Track conserved pairs only when paired mode is enabled
-        if z.caap and multiconfig and multiconfig.paired_mode:
+        # Track conserved pairs
+        if z.caap and multiconfig:
             conserved_pair_indices = []
             min_len = min(len(fg_groups), len(bg_groups))
 
@@ -410,7 +415,7 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
 def fetch_caap(genename: str, position_obj, trait_list: List[str],
                max_fg_gaps: int, max_bg_gaps: int, max_overall_gaps: int,
                max_fg_miss: int, max_bg_miss: int, max_overall_miss: int,
-               output_file: str, paired_mode: bool = False,
+               output_file: Optional[str],
                miss_pair: bool = False, max_conserved: int = 0,
                species_in_alignment: Optional[List[str]] = None,
                allowed_patterns: Optional[List[str]] = None,
@@ -433,7 +438,6 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
         max_bg_miss: Maximum missing species in background
         max_overall_miss: Maximum missing overall
         output_file: Path to output file (or None if return_results=True)
-        paired_mode: Whether to use pair-aware mode
         miss_pair: Whether to allow missing pairs
         max_conserved: Maximum number of amino acids allowed to overlap with other side's groups
         species_in_alignment: List of species in alignment (for p-value calculation)
@@ -475,8 +479,8 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
         if position_obj.trait2miss_all.get(trait, 0) > max_overall_miss:
             continue
 
-        # Pair-aware filtering (only in paired mode with miss_pair enabled)
-        if paired_mode and miss_pair:
+        # Pair-aware filtering
+        if miss_pair:
             # Check if missing thresholds are equal
             miss_thresholds_equal = False
             if max_fg_miss < 999999 and max_bg_miss < 999999 and max_fg_miss == max_bg_miss:
@@ -516,23 +520,9 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
         if not fg_species or not bg_species:
             continue
 
-        # Sort species by pair ID if in paired mode, otherwise alphabetically
-        # This ensures position indices correspond to correct pairs for conserved tracking
-        if paired_mode and multiconfig:
-            def pair_sort_key(sp):
-                pair_id = multiconfig.get_pair(sp)
-                if pair_id:
-                    try:
-                        return (int(pair_id), sp)
-                    except (ValueError, TypeError):
-                        return (float('inf'), sp)  # Non-numeric pairs go to end
-                return (float('inf'), sp)  # No pair goes to end
-
-            fg_species.sort(key=pair_sort_key)
-            bg_species.sort(key=pair_sort_key)
-        else:
-            fg_species.sort()
-            bg_species.sort()
+        # Always sort species by pair ID (mandatory paired mode)
+        fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+        bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
 
         # Extract amino acid for each species to create pattern string
         # Same as classical CAAS: get AA from position_obj.d[species]
@@ -579,14 +569,14 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
             pvalue = calcpval_random(line_dict, genename, fg_size, bg_size)
 
             # Prepare output row
-            # Get species lists
-            fg_species = position_obj.trait2ungapped_fg.get(trait, [])
-            bg_species = position_obj.trait2ungapped_bg.get(trait, [])
+            # Preserve the same sorted pair order used for substitution/encoded strings
+            fg_species_ordered = fg_species[:]
+            bg_species_ordered = bg_species[:]
             miss_species = position_obj.trait2missings.get(trait, [])
 
             # Format species lists
-            fg_species_str = ",".join(fg_species) if fg_species else "NA"
-            bg_species_str = ",".join(bg_species) if bg_species else "NA"
+            fg_species_str = ",".join(fg_species_ordered) if fg_species_ordered else "NA"
+            bg_species_str = ",".join(bg_species_ordered) if bg_species_ordered else "NA"
             miss_species_str = ",".join(miss_species) if miss_species else "NA"
 
             # Build output line
@@ -600,8 +590,8 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
                 encoded,
                 str(pvalue),
                 pattern,
-                str(len(fg_species)),  # FFGN - Final foreground number
-                str(len(bg_species)),  # FBGN - Final background number
+                str(len(fg_species_ordered)),  # FFGN - Final foreground number
+                str(len(bg_species_ordered)),  # FBGN - Final background number
                 str(position_obj.trait2gaps_fg.get(trait, 0)),  # GFG
                 str(position_obj.trait2gaps_bg.get(trait, 0)),  # GBG
                 str(position_obj.trait2miss_fg.get(trait, 0)),  # MFG
@@ -611,8 +601,8 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
                 miss_species_str,  # MS
             ]
 
-            # Add pair-aware columns if in paired mode
-            if paired_mode and max_conserved > 0:
+            # Add conserved-pair columns when overlap tolerance is enabled
+            if max_conserved > 0:
                 # Parse conserved_pairs to get overlap count and pair list
                 parts = conserved_pairs.split(":")
                 overlap_count = int(parts[0]) if parts[0] else 0

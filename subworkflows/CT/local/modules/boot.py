@@ -39,6 +39,16 @@ import time
 from datetime import datetime
 
 
+def _pair_sort_key(multiconfig, sp):
+    pair_id = multiconfig.get_pair(sp)
+    if pair_id:
+        try:
+            return (int(pair_id), sp)
+        except (ValueError, TypeError):
+            return (float('inf'), sp)
+    return (float('inf'), sp)
+
+
 # UTILITY FUNCTIONS for progress tracking
 
 def format_time(seconds):
@@ -120,8 +130,9 @@ def parse_discovery_positions(discovery_file, genename):
     Parse discovery output file and extract positions with their CAAP grouping schemes.
     Handles both classical CAAS and CAAP formats.
     
-    Classical CAAS format: Gene\tMode\tTrait\tPosition\t...
-    CAAP format:          Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
+    Classical CAAS legacy format:   Gene\tMode\tTrait\tPosition\t...
+    Normalized CAAS format:         Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
+    CAAP format:                    Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
     
     Args:
         discovery_file: Path to discovery output file
@@ -170,14 +181,20 @@ def parse_discovery_positions(discovery_file, genename):
                                 position_schemes[position] = set()
                             position_schemes[position].add(scheme)
                     elif mode == "CAAS":
-                        # Classical CAAS format: Gene\tMode\tTrait\tPosition\t...
-                        # Position is at index 3, no grouping scheme (test all)
-                        if len(fields) >= 4:
+                        # CAAS can be legacy (no CAAP_Group) or normalized (CAAP_Group=US).
+                        # Legacy:    Gene Mode Trait Position ...
+                        # Normalized:Gene Mode CAAP_Group Trait Position ...
+                        if len(fields) >= 5 and fields[2] in {"US", "GS0", "GS1", "GS2", "GS3", "GS4"}:
+                            position = fields[4]
+                        elif len(fields) >= 4:
                             position = fields[3]
-                            # For classical CAAS, mark with special 'CAAS' marker to test all schemes
-                            if position not in position_schemes:
-                                position_schemes[position] = set()
-                            position_schemes[position].add("CAAS")
+                        else:
+                            continue
+
+                        # For classical CAAS, mark with special 'CAAS' marker to test all schemes
+                        if position not in position_schemes:
+                            position_schemes[position] = set()
+                        position_schemes[position].add("CAAS")
                 except:
                     continue
         
@@ -258,7 +275,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                 outlines.append(outline)
             return "\n".join(outlines)
         else:
-            outline = "\t".join([position_name, "0", str(cycles), "0.0"])
+            outline = "\t".join([position_name, "US", "0", str(cycles), "0.0"])
             return outline
     
     # Process traits in chunks to avoid memory issues with large files
@@ -324,27 +341,14 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             for trait in filtered_traits:
                 fg_species = processed_position.trait2ungapped_fg[trait][:]
                 bg_species = processed_position.trait2ungapped_bg[trait][:]
-                
-                # Sort species by pair number if in paired mode, otherwise alphabetically
-                if multiconfig.paired_mode:
-                    def pair_sort_key(sp):
-                        pair_id = multiconfig.get_pair(sp)
-                        if pair_id:
-                            try:
-                                return (int(pair_id), sp)
-                            except (ValueError, TypeError):
-                                return (float('inf'), sp)
-                        return (float('inf'), sp)
-                    
-                    fg_species.sort(key=pair_sort_key)
-                    bg_species.sort(key=pair_sort_key)
-                else:
-                    fg_species.sort()
-                    bg_species.sort()
-                
+
+                # Always sort by pair number (mandatory paired mode)
+                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+
                 # Extract amino acids per species
-                fg_aas = [processed_position.d[sp].split("@")[0] for sp in fg_species]
-                bg_aas = [processed_position.d[sp].split("@")[0] for sp in bg_species]
+                fg_aas = "".join([(processed_position.d[sp].split("@")[0] or "") for sp in fg_species])
+                bg_aas = "".join([(processed_position.d[sp].split("@")[0] or "") for sp in bg_species])
 
                 # Test only the schemes found in discovery (or all if no discovery)
                 any_match = False
@@ -366,9 +370,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                             bg_species_str = ",".join(bg_species) if bg_species else "NA"
                             miss_species = processed_position.trait2missings.get(trait, [])
                             miss_species_str = ",".join(miss_species) if miss_species else "NA"
-                            fg_aas_str = "".join(fg_aas)
-                            bg_aas_str = "".join(bg_aas)
-                            encoded = encode_to_groups(fg_aas_str, scheme_dict) + "/" + encode_to_groups(bg_aas_str, scheme_dict)
+                            encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
                             output_fields = [
                                 trait,
                                 genename,
@@ -390,7 +392,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                                 bg_species_str,
                                 miss_species_str,
                             ]
-                            if multiconfig.paired_mode and max_conserved > 0:
+                            if max_conserved > 0:
                                 overlap_count = conserved_pairs.split(":")[0] if conserved_pairs else "0"
                                 pair_list = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
                                 output_fields.extend([
@@ -450,23 +452,10 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             for trait in filtered_traits:
                 fg_species = processed_position.trait2ungapped_fg[trait][:]
                 bg_species = processed_position.trait2ungapped_bg[trait][:]
-                
-                # Sort species by pair number if in paired mode, otherwise alphabetically
-                if multiconfig.paired_mode:
-                    def pair_sort_key(sp):
-                        pair_id = multiconfig.get_pair(sp)
-                        if pair_id:
-                            try:
-                                return (int(pair_id), sp)
-                            except (ValueError, TypeError):
-                                return (float('inf'), sp)
-                        return (float('inf'), sp)
-                    
-                    fg_species.sort(key=pair_sort_key)
-                    bg_species.sort(key=pair_sort_key)
-                else:
-                    fg_species.sort()
-                    bg_species.sort()
+
+                # Always sort by pair number (mandatory paired mode)
+                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
                 
                 aa_tag_fg = "".join([processed_position.d[sp].split("@")[0] for sp in fg_species])
                 aa_tag_bg = "".join([processed_position.d[sp].split("@")[0] for sp in bg_species])
@@ -482,20 +471,8 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                         bg_species_number = str(len(processed_position.trait2ungapped_bg[trait]))
                         fg_ungapped = processed_position.trait2ungapped_fg[trait][:]
                         bg_ungapped = processed_position.trait2ungapped_bg[trait][:]
-                        if multiconfig.paired_mode:
-                            def pair_sort_key(sp):
-                                pair_id = multiconfig.get_pair(sp)
-                                if pair_id:
-                                    try:
-                                        return (int(pair_id), sp)
-                                    except (ValueError, TypeError):
-                                        return (float('inf'), sp)
-                                return (float('inf'), sp)
-                            fg_ungapped.sort(key=pair_sort_key)
-                            bg_ungapped.sort(key=pair_sort_key)
-                        else:
-                            fg_ungapped.sort()
-                            bg_ungapped.sort()
+                        fg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+                        bg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
                         missings = "-"
                         if len(processed_position.trait2missings.get(trait, [])) > 0:
                             missings = ",".join(processed_position.trait2missings[trait])
@@ -503,6 +480,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                             trait,
                             genename,
                             "CAAS",
+                            "US",
                             trait,
                             str(processed_position.position),
                             tag,
@@ -518,7 +496,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                             ",".join(bg_ungapped),
                             missings
                         ]
-                        if multiconfig.paired_mode and max_conserved > 0:
+                        if max_conserved > 0:
                             conserved_info = getattr(check, "conserved_pairs", "0:")
                             conserved_count = conserved_info.split(":")[0] if conserved_info else "0"
                             conserved_pairs_list = conserved_info.split(":")[1] if ":" in conserved_info else ""
@@ -534,7 +512,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             position_name = genename + "@" + str(processed_position.position)
             count = str(len(total_output_traits))
             empval = str(int(count)/cycles)
-            outline = "\t".join([position_name, count, str(cycles), empval])
+            outline = "\t".join([position_name, "US", count, str(cycles), empval])
             
             return outline
 
@@ -592,6 +570,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 "Cycle",
                 "Gene",
                 "Mode",
+                "CAAP_Group",
                 "Trait",
                 "Position",
                 "Substitution",
@@ -607,7 +586,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 "FBG",
                 "MS"
             ]
-        if miss_pair and max_conserved > 0:
+        if max_conserved > 0:
             header_fields.extend(["ConservedPair", "ConservedPairs"])
         perm_discovery_handle.write("\t".join(header_fields) + "\n")
 
@@ -719,7 +698,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                         # Single line per position
                         parts = line_output.split("\t")
                         position_name = parts[0]
-                        count = int(parts[1])
+                        count = int(parts[2])
                         
                         if position_name not in position_counts:
                             position_counts[position_name] = 0
@@ -747,7 +726,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                     for position_name in sorted(position_counts.keys()):
                         count = position_counts[position_name]
                         empval = count / total_cycles
-                        outline = "\t".join([position_name, str(count), str(total_cycles), str(empval)])
+                        outline = "\t".join([position_name, "US", str(count), str(total_cycles), str(empval)])
                         print(outline, file=ooout)
             
             total_elapsed = time.time() - start_time
@@ -756,7 +735,8 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
         
         else:
             # Single file mode (backward compatibility)
-            print("caastools found", resampled_traits.cycles, "resamplings")
+            resampled_traits_obj = resampled_traits
+            print("caastools found", resampled_traits_obj.cycles, "resamplings")
             
             # OPTIMIZATION: Filter to only test positions found in discovery
             positions_list = list(sliced_object.d)
@@ -790,7 +770,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                         scheme_speedup = max_scheme_tests / max(1, total_scheme_tests)
                         print(f"✓ Scheme optimization: Testing {total_scheme_tests} schemes (vs {max_scheme_tests} if testing all)")
                         print(f"✓ Scheme speedup: {scheme_speedup:.1f}× fewer scheme tests per position")
-                    print(f"✓ Tests reduced: {total_positions * resampled_traits.cycles:,} → {len(positions_with_schemes) * resampled_traits.cycles:,}\n")
+                    print(f"✓ Tests reduced: {total_positions * resampled_traits_obj.cycles:,} → {len(positions_with_schemes) * resampled_traits_obj.cycles:,}\n")
                 else:
                     print("No positions found in discovery file. Processing all positions with all schemes.\n")
                     positions_with_schemes = [(pos, None) for pos in positions_list]
@@ -802,12 +782,12 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
             output_lines = []
             for pos_dict, schemes in positions_with_schemes:
                 # Process position
-                processed_pos = process_position(pos_dict, multiconfig=resampled_traits, species_in_alignment=sliced_object.species)
+                processed_pos = process_position(pos_dict, multiconfig=resampled_traits_obj, species_in_alignment=sliced_object.species)
                 
                 # Run bootstrap with position-specific schemes
                 line_output = caasboot(
                     processed_pos,
-                    list_of_traits=resampled_traits.alltraits,
+                    list_of_traits=resampled_traits_obj.alltraits,
                     genename=the_genename,
                     maxgaps_fg=max_fg_gaps,
                     maxgaps_bg=max_bg_gaps,
@@ -815,11 +795,11 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                     maxmiss_fg=max_fg_miss,
                     maxmiss_bg=max_bg_miss,
                     maxmiss_all=max_overall_miss,
-                    multiconfig=resampled_traits,
+                    multiconfig=resampled_traits_obj,
                     miss_pair=miss_pair,
                     max_conserved=max_conserved,
                     admitted_patterns=the_admitted_patterns,
-                    cycles=resampled_traits.cycles,
+                    cycles=resampled_traits_obj.cycles,
                 caap_mode=caap_mode,
                 discovery_schemes=schemes,
                 debug_rejects=False,

@@ -36,7 +36,7 @@ from os.path import exists
 ### FUNCTION discovery()
 ### Scans one single alignment to identify the CAAS or CAAP
 
-def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, admitted_patterns, output_file, paired_mode=False, miss_pair=False, max_conserved=0, caap_mode=False, background_output_file=None):
+def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, admitted_patterns, output_file, miss_pair=False, max_conserved=0, caap_mode=False, background_output_file=None):
 
     def _valid_traits_for_position(processed_position, trait_list, multiconfig,
                                    max_fg_gaps, max_bg_gaps, max_overall_gaps,
@@ -66,8 +66,8 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
             if max_overall_miss != "NO" and processed_position.trait2miss_fg.get(trait, 0) + processed_position.trait2miss_bg.get(trait, 0) > int(max_overall_miss):
                 continue
 
-            # Pair-aware filtering (only in paired mode with miss_pair enabled)
-            if multiconfig.paired_mode and miss_pair:
+            # Pair-aware filtering
+            if miss_pair:
                 miss_thresholds_equal = False
                 if max_fg_miss != "NO" and max_bg_miss != "NO" and max_fg_miss == max_bg_miss:
                     miss_thresholds_equal = True
@@ -97,7 +97,7 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
         return valid_traits
 
     # Step 1: import the trait into a trait object (load_cfg from pindex.py)
-    trait_object = load_cfg(input_cfg, paired_mode=paired_mode)
+    trait_object = load_cfg(input_cfg)
 
     # Step 2: import the alignment int a processed position object (slice from alimport.py)
     p = sliced_object
@@ -143,7 +143,6 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
                         max_overall_miss = int(max_overall_miss) if max_overall_miss != "NO" else 999999,
                         
                         output_file = None,  # Don't write yet
-                        paired_mode = paired_mode,
                         miss_pair = miss_pair,
                         max_conserved = max_conserved,
                         species_in_alignment = p.species,
@@ -234,6 +233,7 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
             header_fields = [
                 "Gene",
                 "Mode",
+                "CAAP_Group",
                 "Trait",
                 "Position",
                 "Substitution",
@@ -250,8 +250,8 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
                 "MS"
             ]
         
-        # Add conserved pair columns in paired mode
-        if paired_mode and max_conserved > 0:
+        # Add conserved-pair columns when overlap tolerance is enabled
+        if max_conserved > 0:
             header_fields.extend(["ConservedPair", "ConservedPairs"])
         
         header = "\t".join(header_fields)
@@ -260,6 +260,18 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
         with open(output_file, "w") as outf:
             outf.write(header + "\n")
             for result_line in results_to_write:
+                if not caap_mode:
+                    # Normalize CAAS rows to include CAAP_Group=US for schema parity
+                    # Legacy CAAS rows come as:
+                    # Gene Mode Trait Position ...
+                    # New normalized row becomes:
+                    # Gene Mode CAAP_Group Trait Position ...
+                    fields = result_line.split("\t")
+                    if len(fields) >= 3 and fields[1] == "CAAS":
+                        # Avoid duplicating if already normalized
+                        if len(fields) < 4 or fields[2] not in ["US", "GS0", "GS1", "GS2", "GS3", "GS4"]:
+                            fields.insert(2, "US")
+                            result_line = "\t".join(fields)
                 outf.write(result_line + "\n")
         
         print(f"Discovery complete: {len(results_to_write)} CAAS/CAAP found in {p.genename}")

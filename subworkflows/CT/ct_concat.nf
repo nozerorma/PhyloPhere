@@ -204,7 +204,7 @@ process CONCAT_BOOTSTRAP {
     # Check if we have any files
     if [ \${#bootstrap_files[@]} -eq 0 ]; then
         echo "WARNING: No bootstrap files found - creating header-only file"
-        echo "Gene@Position\tCount\tTotal\tProportion" > bootstrap.tab
+        echo "Gene@Position\tCAAP_Group\tCount\tTotal\tProportion" > bootstrap.tab
         exit 0
     fi
     

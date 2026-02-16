@@ -216,13 +216,16 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
   distance_df <- distance_df %>%
     left_join(overlap_df, by = c("species1", "species2")) %>%
     mutate(distance = round(distance, 4),
-           diff = round(abs(trait_diff), 4)) %>%
+          diff = round(trait_diff, 4),
+          abs_diff = round(abs(trait_diff), 4)) %>%
+    # Filter out pairs with under 0 difff
+    dplyr::filter(!is.na(diff) & diff > 0) %>%  
     {
-      if (has.n) arrange(., distance, desc(diff), desc(pair_n)) else arrange(., distance, desc(diff))
+      if (has.n) arrange(., distance, desc(abs_diff), desc(pair_n)) else arrange(., distance, desc(abs_diff))
     } %>%
-    filter(!is.na(diff)) %>%
+    filter(!is.na(abs_diff)) %>%
     {
-      if (has.n) select(., species1, species2, distance, diff, pair_n) else select(., species1, species2, distance, diff)
+      if (has.n) select(., species1, species2, distance, abs_diff, pair_n) else select(., species1, species2, distance, abs_diff)
     }
   debug_log("pair_sel.f candidate pairs = %d", nrow(distance_df))
 
@@ -231,7 +234,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
 
   top_pair <- distance_df %>%
     {
-      if (has.n) arrange(., distance, desc(diff), desc(pair_n)) else arrange(., distance, desc(diff))
+      if (has.n) arrange(., distance, desc(abs_diff), desc(pair_n)) else arrange(., distance, desc(abs_diff))
     } %>%
     slice_head(n = 1) %>%
     mutate(cluster = 1)
@@ -241,7 +244,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
   selected_species <- data.frame(
     top = top_pair$species1, 
     bottom = top_pair$species2, 
-    diff = top_pair$diff, 
+    abs_diff = top_pair$abs_diff, 
     cluster = top_pair$cluster
   )
   mat <- as.matrix(distance_matrix)
@@ -251,7 +254,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     species1 = character(), 
     species2 = character(), 
     Dunn_index = numeric(), 
-    diff = numeric(), 
+    abs_diff = numeric(), 
     cluster = numeric(),
     stringsAsFactors = FALSE
   )
@@ -273,7 +276,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     dunn_candidates <- apply(distance_df, 1, function(row) {
       query_species1 <- row["species1"]
       query_species2 <- row["species2"]
-      query_diff <- row["diff"]
+      query_abs_diff <- row["abs_diff"]
       query_pair_n <- if (has.n) row["pair_n"] else NA_real_
 
       # Temporarily add candidate pair as new cluster
@@ -282,7 +285,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
         data.frame(
           top = query_species1, 
           bottom = query_species2, 
-          diff = query_diff, 
+          abs_diff = query_abs_diff, 
           cluster = querry_cluster
         )
       )
@@ -312,7 +315,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
         species1 = query_species1, 
         species2 = query_species2, 
         Dunn_index = dunn_value, 
-        diff = query_diff, 
+        abs_diff = query_abs_diff, 
         cluster = querry_cluster,
         stringsAsFactors = FALSE
       )
@@ -325,13 +328,13 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     dunn_candidates <- do.call(rbind, dunn_candidates)
     dunn_result_cummulative <- rbind(dunn_result_cummulative, dunn_candidates) %>%
       {
-        if (has.n) arrange(., desc(cluster), desc(Dunn_index), desc(diff), desc(pair_n)) else arrange(., desc(cluster), desc(Dunn_index), desc(diff))
+        if (has.n) arrange(., desc(cluster), desc(Dunn_index), desc(abs_diff), desc(pair_n)) else arrange(., desc(cluster), desc(Dunn_index), desc(abs_diff))
       }
 
     # Select best candidate: highest Dunn index, then largest trait difference
     dunn_best <- dunn_candidates %>%
       {
-        if (has.n) arrange(., desc(Dunn_index), desc(diff), desc(pair_n)) else arrange(., desc(Dunn_index), desc(diff))
+        if (has.n) arrange(., desc(Dunn_index), desc(abs_diff), desc(pair_n)) else arrange(., desc(Dunn_index), desc(abs_diff))
       } %>%
       slice_head(n = 1)
 
@@ -353,7 +356,7 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
       data.frame(
         top = dunn_best$species1, 
         bottom = dunn_best$species2, 
-        diff = dunn_best$diff, 
+        abs_diff = dunn_best$abs_diff, 
         cluster = dunn_best$cluster
       )
     )

@@ -174,22 +174,17 @@ if tool.lower() == "discovery":
                     help="Filter by number of miss in foreground and background.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     1.4.6 Paired mode (enables pair-aware features)
-    parser.add_option("--paired_mode", dest="paired_mode", action="store_true",
-                    help="Enable paired_mode for 3-column config files (species, trait, pair). \
-                        Required for pair-aware filtering and conserved-pair tolerance. Default = disabled.", default = False)
-
-    ###     1.4.7 Pair-aware missing/gap filtering
+    ###     1.4.6 Pair-aware missing/gap filtering
     parser.add_option("--miss_pair", dest="miss_pair", action="store_true",
-                    help="Enable pair-aware missing/gap filtering (only works with --paired_mode). \
+                    help="Enable pair-aware missing/gap filtering (paired mode is mandatory). \
                         When enabled and max thresholds are equal, validates that missing/gapped species come from matching pairs. Default = disabled.", default = False)
 
-    ###     1.4.8 Conserved pair tolerance
+    ###     1.4.7 Conserved pair tolerance
     parser.add_option("--max_conserved", dest="max_conserved",
-                    help="Maximum number of pairs allowed to share the same amino acid between FG and BG (only works with --paired_mode). \
+                    help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
-    ###     1.4.9 CAAP mode (detect property-based convergence)
+    ###     1.4.8 CAAP mode (detect property-based convergence)
     parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
                     help="Enable CAAP (Convergent Amino Acid Properties) mode. \
                         Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
@@ -258,7 +253,6 @@ if tool.lower() == "discovery":
                 max_bg_miss = options.max_bg_miss_string,
                 max_overall_miss = options.max_miss_string,
 
-                paired_mode = options.paired_mode,
                 miss_pair = options.miss_pair,
                 max_conserved = int(options.max_conserved),
 
@@ -566,27 +560,22 @@ if tool.lower() == "bootstrap":
                     help="Filter by number of miss in foreground and background.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     3.4.6 Paired mode (enables pair-aware features)
-    parser.add_option("--paired_mode", dest="paired_mode", action="store_true",
-                    help="Enable paired_mode for 3-column config files (species, trait, pair). \
-                        Required for pair-aware filtering and conserved-pair tolerance. Default = disabled.", default = False)
-
-    ###     3.4.7 Pair-aware missing/gap filtering
+    ###     3.4.6 Pair-aware missing/gap filtering
     parser.add_option("--miss_pair", dest="miss_pair", action="store_true",
-                    help="Enable pair-aware missing/gap filtering (only works with --paired_mode). \
+                    help="Enable pair-aware missing/gap filtering (paired mode is mandatory). \
                         When enabled and max thresholds are equal, validates that missing/gapped species come from matching pairs. Default = disabled.", default = False)
 
-    ###     3.4.8 Conserved pair tolerance
+    ###     3.4.7 Conserved pair tolerance
     parser.add_option("--max_conserved", dest="max_conserved",
-                    help="Maximum number of pairs allowed to share the same amino acid between FG and BG (only works with --paired_mode). \
+                    help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
-    ###     3.4.9 Discovery file for position filtering (optimization)
+    ###     3.4.8 Discovery file for position filtering (optimization)
     parser.add_option("--discovery", dest="discovery_file",
                     help="Path to discovery output file. When provided, bootstrap will only test positions that had CAAS in discovery, \
                         resulting in massive speedup (typically 100-1000x). Highly recommended for large alignments. Default = test all positions.", default = "none")
 
-    ###     3.4.10 Progress logging
+    ###     3.4.9 Progress logging
     parser.add_option("--progress_log", dest="progress_log",
                     help="Path to file for logging progress with timestamps and ETA. Especially useful for directory-based bootstrap. Default = stdout only.", default = "none")
 

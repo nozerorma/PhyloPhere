@@ -32,9 +32,6 @@ def runslice(options_object):
     the_alignment = options_object.single_alignment
     alignment_format = options_object.ali_format
     
-    # Get paired_mode flag (default to False for backward compatibility)
-    paired_mode = getattr(options_object, 'paired_mode', False)
-
     # Alignment slice: 1- Calculate column treshold
 
     with open(options_object.config_file) as cfg_handle:
@@ -43,16 +40,13 @@ def runslice(options_object):
     values = []
 
     for x in cfg_list:
-        try:
-            c = x.split("\t")
-            if paired_mode and len(c) >= 3:
-                # In paired mode, use the trait column (index 1)
-                values.append(c[1])
-            elif not paired_mode and len(c) >= 2:
-                # In legacy mode, use the second column (index 1)
-                values.append(c[1])
-        except:
-            pass
+        c = x.split("\t")
+        if len(c) < 3:
+            raise ValueError(
+                f"ERROR: Paired mode is mandatory but config file has only {len(c)} columns. "
+                f"Trait config must be: species, trait, pair"
+            )
+        values.append(c[1])
     
     fg_species = values.count("1")
     bg_species = values.count("0")

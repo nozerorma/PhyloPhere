@@ -114,7 +114,7 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
             self.alltraits = []
             self.trait2fg = {}
             self.trait2bg = {}
-            self.paired_mode = False  # Bootstrap doesn't use paired mode
+            self.paired_mode = True
             
             # Pair-aware attributes (for compatibility with caas_id.py)
             self.species2pair = {}
@@ -367,7 +367,7 @@ def simtrait_revive(traitfile):
             self.trait2fg = {}
             self.trait2bg = {}
             self.cycles = 0
-            self.paired_mode = False  # Bootstrap doesn't use paired mode
+            self.paired_mode = True
             
             # Pair-aware attributes (for compatibility with caas_id.py)
             self.species2pair = {}

@@ -11,17 +11,17 @@ if (!exists("debug_log", inherits = TRUE)) {
 
 # Function to extract several statistical insights from the data
 stats.f <- function(df) {
-  p_trait_name <- if (exists("p_trait", inherits = TRUE)) p_trait else ""
+  c_trait_name <- if (exists("c_trait", inherits = TRUE)) c_trait else ""
   n_trait_name <- if (exists("n_trait", inherits = TRUE)) n_trait else ""
   tax_id <- if (exists("tax_id", inherits = TRUE)) tax_id else ""
   secondary_trait <- if (exists("secondary_trait", inherits = TRUE)) secondary_trait else ""
   branch_trait <- if (exists("branch_trait", inherits = TRUE)) branch_trait else ""
   taxa_col <- taxon_of_interest
   trait_col <- trait
-  debug_log("stats.f rows = %d, trait = %s, taxon = %s, n_trait = %s, p_trait = %s, tax_id = %s", 
+  debug_log("stats.f rows = %d, trait = %s, taxon = %s, n_trait = %s, c_trait = %s, tax_id = %s", 
             nrow(df), trait_col, taxa_col, 
             ifelse(nzchar(n_trait_name), n_trait_name, "<none>"), 
-            ifelse(nzchar(p_trait_name), p_trait_name, "<none>"),
+            ifelse(nzchar(c_trait_name), c_trait_name, "<none>"),
             ifelse(nzchar(tax_id), tax_id, "<none>"),
             ifelse(nzchar(secondary_trait), secondary_trait, "<none>"),
             ifelse(nzchar(branch_trait), branch_trait, "<none>"))
@@ -30,8 +30,8 @@ stats.f <- function(df) {
   if (nzchar(n_trait_name) && n_trait_name %in% names(df)) {
     base_cols <- c(base_cols, n_trait_name)
   }
-  if (nzchar(p_trait_name) && p_trait_name %in% names(df)) {
-    base_cols <- c(base_cols, p_trait_name)
+  if (nzchar(c_trait_name) && c_trait_name %in% names(df)) {
+    base_cols <- c(base_cols, c_trait_name)
   }
   if (nzchar(tax_id) && tax_id %in% names(df)) {
     base_cols <- c(base_cols, tax_id)

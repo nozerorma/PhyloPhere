@@ -49,7 +49,6 @@ workflow CT {
         def bootstrap_concat_out = Channel.empty()
         
     if (params.ct_tool) {
-
         def toolsToRun = params.ct_tool.split(',')
 
         // Define the alignment channel (used by discovery and bootstrap)
@@ -63,6 +62,7 @@ workflow CT {
         def bootstrap_trait_file_out
 
         def discovery_out = Channel.empty()
+        def discovery_done = Channel.value(true)
         // resample_out may be a directory (new default) or a legacy single file when running bootstrap only
         def resample_out = Channel.empty()
         if (params.resample_out) {
@@ -94,6 +94,11 @@ workflow CT {
 
         if (toolsToRun.contains('discovery')) {
             discovery_out = DISCOVERY(align_tuple, trait_file_out)
+
+            // Hard barrier: downstream steps should start only after discovery is fully complete
+            discovery_done = discovery_out.discovery_out
+                .collect()
+                .ifEmpty([])
             
             // Concatenate discovery outputs - collect actual files for staging
             discovery_out.discovery_out
@@ -114,17 +119,21 @@ workflow CT {
             background_genes_out = CONCAT_BACKGROUND.out.background_genes
         }
         if (toolsToRun.contains('resample')) {
-            // Define the tree file channel
-            def resample_trigger = toolsToRun.contains('discovery')
-                ? discovery_out.discovery_out.ifEmpty { Channel.value(null) }.collect()
-                : Channel.value(true)
+            // Discovery barrier trigger (if discovery was requested, wait until it fully completes)
+            def resample_trigger = discovery_done
 
             // Handle channels differently based on whether they come from contrast_selection
             if (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) {
                 // tree_file_out, trait_file_out, and trait_val are already channels from CONTRAST_SELECTION
                 nw_tree = tree_file_out
+                    .combine(resample_trigger)
+                    .map { row -> row[0] }
                 caas_config = trait_file_out
+                    .combine(resample_trigger)
+                    .map { row -> row[0] }
                 trait_values = trait_val
+                    .combine(resample_trigger)
+                    .map { row -> row[0] }
             } else {
                 // tree_file_out, trait_file_out, and trait_val are file objects that need to be channelized
                 nw_tree = resample_trigger.map { tree_file_out }
@@ -138,10 +147,17 @@ workflow CT {
         }
         if (toolsToRun.contains('bootstrap')) {
             if (toolsToRun.contains('discovery')) {
+                // Use discovery results from the pipeline
                 align_with_discovery = align_tuple
                         .join(discovery_out.discovery_out)
                         .map { row -> tuple(row[0], row[1], row[2]) }
+
+                // Hard barrier: bootstrap starts only after full discovery completion
+                align_with_discovery = align_with_discovery
+                        .combine(discovery_done)
+                        .map { row -> tuple(row[0], row[1], row[2]) }
             } else if (params.discovery_out && params.discovery_out != "none") {
+                // Use external discovery file(s)
                 def discovery_path = file(params.discovery_out)
                 if (discovery_path.isDirectory()) {
                     def discovery_files = Channel
@@ -159,12 +175,16 @@ workflow CT {
                             .map { row -> tuple(row[0], row[1], row[2]) }
                 }
             } else {
-                align_with_discovery = align_tuple.map { id, alignmentFile -> tuple(id, alignmentFile, []) }
+                // No discovery file - create placeholder for bootstrap process
+                // Use a marker file to indicate no discovery optimization
+                align_with_discovery = align_tuple.map { id, alignmentFile -> 
+                    tuple(id, alignmentFile, file('NO_FILE')) 
+                }
             }
 
             bootstrap_in = align_with_discovery
                     .combine(resample_out)
-                    .map { row -> tuple(row[0], row[1], row[2] ?: [], row[3]) }
+                    .map { row -> tuple(row[0], row[1], row[2], row[3]) }
 
             bootstrap_out = BOOTSTRAP(bootstrap_in, trait_file_out)
             

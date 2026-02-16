@@ -144,7 +144,7 @@ workflow CAAS_POSTPROC {
         filter_results = CAAS_FILTER(param_combinations)
         
         // Collect all results and generate consolidated summary
-        filter_summary = CAAS_FILTER_SUMMARY(
+        filter_summary_results = CAAS_FILTER_SUMMARY(
             filter_results.filtered_files.collect()
         )
         
@@ -204,7 +204,7 @@ workflow CAAS_POSTPROC {
             
             characterization_results = CAAS_POSTPROC_REPORT(
                 discovery_file_ch,
-                filter_summary.summary,
+                filter_summary_results.summary,
                 filter_output_dir,
                 gene_ensembl_file
             )
@@ -213,7 +213,8 @@ workflow CAAS_POSTPROC {
         }
     
     emit:
-        filter_summary = filter_summary.summary
+        filter_summary = filter_summary_results.summary  // filter_summary.tsv (rows=params, cols=groups)
+        discarded_summary = filter_summary_results.discarded_summary  // discarded_summary.tsv (old format for compatibility)
         filter_dir = "${params.outdir}/postproc"
         filtered_discovery = gene_filter_results ? gene_filter_results.filtered_discovery : Channel.empty()
         cleaned_background = cleaned_backgrounds

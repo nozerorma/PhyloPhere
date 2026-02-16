@@ -546,6 +546,39 @@ filter_summary <- read_tsv(filter_summary_file, show_col_types = FALSE)
 
 cat("  Parameter combinations tested:", nrow(filter_summary), "\n")
 
+# Normalize filter summary schema for robust downstream plotting/reporting
+# (supports both standard and CAAP-wide formats)
+if (!"Minlen" %in% names(filter_summary) || !"Maxcaas" %in% names(filter_summary)) {
+  if ("Parameter" %in% names(filter_summary)) {
+    parsed_params <- stringr::str_split_fixed(as.character(filter_summary$Parameter), "/", 2)
+    if (!"Minlen" %in% names(filter_summary)) {
+      filter_summary$Minlen <- suppressWarnings(as.integer(parsed_params[, 1]))
+    }
+    if (!"Maxcaas" %in% names(filter_summary)) {
+      filter_summary$Maxcaas <- suppressWarnings(as.numeric(parsed_params[, 2]))
+    }
+    cat("  Parsed missing Minlen/Maxcaas from Parameter column\n")
+  }
+}
+
+if (!"DiscardedCount" %in% names(filter_summary)) {
+  protected_cols <- c("Parameter", "Minlen", "Maxcaas", "CAAP_Groups", "Groups_List", "N_Groups")
+  candidate_cols <- setdiff(names(filter_summary), protected_cols)
+  numeric_candidate_cols <- candidate_cols[sapply(filter_summary[candidate_cols], is.numeric)]
+
+  if (length(numeric_candidate_cols) > 0) {
+    filter_summary <- filter_summary %>%
+      mutate(DiscardedCount = rowSums(across(all_of(numeric_candidate_cols)), na.rm = TRUE))
+    cat("  Built DiscardedCount from columns:", paste(numeric_candidate_cols, collapse = ", "), "\n")
+  } else {
+    filter_summary$DiscardedCount <- 0L
+    cat("  Warning: Could not infer DiscardedCount from summary columns; defaulting to 0\n")
+  }
+} else {
+  filter_summary$DiscardedCount <- suppressWarnings(as.numeric(filter_summary$DiscardedCount))
+  filter_summary$DiscardedCount[is.na(filter_summary$DiscardedCount)] <- 0
+}
+
 # Check if CAAP mode
 has_caap_groups_in_summary <- 'CAAP_Groups' %in% names(filter_summary) && 
                                any(filter_summary$CAAP_Groups != 'N/A' & filter_summary$CAAP_Groups != '')
@@ -561,33 +594,32 @@ if (has_caap_groups_in_summary) {
 }
 
 # Create pivot table: rows = parameters, columns = groups (if CAAP)
+# Note: filter_summary.tsv is now generated with this format directly
 if (has_caap_groups_in_summary) {
-  # CAAP mode: create wide table with groups as columns
-  filter_summary_wide <- filter_summary %>%
-    mutate(param_label = sprintf("%d/%.0f", Minlen, Maxcaas)) %>%
-    select(param_label, Minlen, Maxcaas, CAAP_Groups, DiscardedCount)
+  # CAAP mode: already in wide format (rows=params, cols=groups)
+  # Get group columns (all except Parameter, Minlen, Maxcaas)
+  group_cols <- setdiff(names(filter_summary), c('Parameter', 'Minlen', 'Maxcaas'))
   
-  # Parse groups and create one row per parameter-group combination
-  filter_summary_long <- filter_summary_wide %>%
-    separate_rows(CAAP_Groups, sep = ",") %>%
-    mutate(CAAP_Groups = trimws(CAAP_Groups)) %>%
-    filter(CAAP_Groups != "N/A" & CAAP_Groups != "")
-  
-  # Get unique groups for column ordering
-  all_groups <- sort(unique(filter_summary_long$CAAP_Groups))
-  
-  # Pivot to wide format
-  filter_table <- filter_summary_long %>%
-    pivot_wider(names_from = CAAP_Groups, values_from = DiscardedCount, values_fill = 0) %>%
-    select(param_label, all_of(all_groups))
-  
-  names(filter_table)[1] <- "Parameter"
+  if (length(group_cols) > 0) {
+    filter_table <- filter_summary %>%
+      select(Parameter, all_of(sort(group_cols)))
+  } else {
+    # Fallback if no group columns found
+    filter_table <- filter_summary %>%
+      mutate(Parameter = sprintf("%d/%.0f", Minlen, Maxcaas)) %>%
+      select(Parameter, everything())
+  }
 } else {
   # Standard mode: simple table
-  filter_table <- filter_summary %>%
-    mutate(Parameter = sprintf("%d/%.0f", Minlen, Maxcaas)) %>%
-    select(Parameter, DiscardedCount)
-  names(filter_table)[2] <- "Discarded"
+  if ("DiscardedCount" %in% names(filter_summary)) {
+    filter_table <- filter_summary %>%
+      select(Parameter, DiscardedCount)
+    names(filter_table)[2] <- "Discarded"
+  } else {
+    filter_table <- filter_summary %>%
+      mutate(Parameter = sprintf("%d/%.0f", Minlen, Maxcaas)) %>%
+      select(Parameter, everything())
+  }
 }
 
 kable(filter_table, 
@@ -598,19 +630,24 @@ kable(filter_table,
 # Plot parameter sweep results (if multiple combinations)
 if (nrow(filter_summary) > 1) {
   if (has_caap_groups_in_summary) {
-    # CAAP mode: use grouped bar plot to show differences between parameters
-    plot_data <- filter_summary_long %>%
+    # CAAP mode: convert wide format to long for plotting
+    # Get group columns (exclude Parameter, Minlen, Maxcaas)
+    group_cols <- setdiff(names(filter_summary), c('Parameter', 'Minlen', 'Maxcaas'))
+    
+    # Convert to long format for plotting
+    plot_data <- filter_summary %>%
+      pivot_longer(cols = all_of(group_cols), 
+                   names_to = "CAAP_Group", 
+                   values_to = "DiscardedCount") %>%
       mutate(
         param_label = sprintf("%d/%d", Minlen, as.integer(Maxcaas)),
         param_label = factor(param_label, levels = unique(param_label))
       )
-
-    print(head(plot_data))
     
     p_param_sweep <- ggplot(plot_data, 
                             aes(x = param_label, 
                                 y = DiscardedCount, 
-                                fill = CAAP_Groups)) +
+                                fill = CAAP_Group)) +
       geom_col(position = "dodge", color = "black", linewidth = 0.3) +
       scale_fill_paletteer_d("ggthemes::Tableau_10") +
       labs(title = "Discarded CAAS Positions by Parameter Combination",
@@ -982,15 +1019,18 @@ if (!"chr" %in% names(gene_ensembl)) {
         labels = c("0.01", "0.05", "0.1", "0.5", "1", "2", "5", "10", "20", "50")
       ) +
       labs(
-        title = paste0("Genomic Distribution of CAAS Density (", processing_mode, " mode)"),
+        title = paste0("Genomic Distribution of CAAS Density",
+                      if (has_caap_group) " - Overall View (All Groups Combined)" else "",
+                      " (", processing_mode, " mode)"),
         subtitle = paste0("Gene filtering: ", gene_filter_mode, 
                          " | Extreme threshold: top ", 100*(1-extreme_threshold), "%",
-                         " | IQR multiplier: ", iqr_multiplier, "×"),
+                         " | IQR multiplier: ", iqr_multiplier, "×",
+                         if (has_caap_group) " | Per-group plots generated separately" else ""),
         x = "Chromosome",
         y = "CAAS per Gene Length (%, log scale)",
         color = "Gene Category",
         caption = paste0(
-          "Extreme genes (top percentile density) and Dubious genes (IQR outliers) ",
+          "Extreme genes (top percentile density) and Dubious genes (IQR outliers with clusters) ",
           "are flagged for potential removal. Genes in 'Both' category are flagged by both criteria."
         )
       ) +
@@ -1016,7 +1056,100 @@ if (!"chr" %in% names(gene_ensembl)) {
       dev = "png"
     )
     
-    cat("✓ Manhattan plot generated\n\n")
+    if (has_caap_group) {
+      cat("\u2713 Manhattan plot generated (overall view across all groups)\n\n")
+    } else {
+      cat("\u2713 Manhattan plot generated\n\n")
+    }
+    
+    # Generate per-group Manhattan plots if CAAP mode
+    if (has_caap_group && 'CAAP_Group' %in% names(manhattan_data)) {
+      cat("Generating per-group Manhattan plots...\n")
+      
+      # Get unique groups (excluding gs0 if present)
+      groups_to_plot <- manhattan_data %>%
+        filter(CAAP_Group != 'gs0') %>%
+        pull(CAAP_Group) %>%
+        unique() %>%
+        sort()
+      
+      for (group in groups_to_plot) {
+        group_data <- manhattan_data %>% filter(CAAP_Group == group)
+        
+        if (nrow(group_data) == 0) next
+        
+        p_manhattan_group <- ggplot(group_data, aes(x = BPcum, y = plot_density, color = Category)) +
+          geom_vline(
+            data = chr_lengths %>% filter(chr_order > 1),
+            aes(xintercept = chr_start),
+            color = "gray20",
+            linetype = "dashed",
+            linewidth = 0.3,
+            alpha = 0.6
+          ) +
+          geom_point(
+            data = group_data %>% filter(Category == "Normal"),
+            alpha = 0.35, size = 1.5
+          ) +
+          geom_point(
+            data = group_data %>% filter(Category == "Dubious"),
+            alpha = 0.8, size = 2.5
+          ) +
+          geom_point(
+            data = group_data %>% filter(Category == "Extreme"),
+            alpha = 0.8, size = 2.5
+          ) +
+          geom_point(
+            data = group_data %>% filter(Category == "Both"),
+            alpha = 1, size = 3, shape = 17
+          ) +
+          scale_color_manual(
+            values = category_palette,
+            drop = FALSE
+          ) +
+          scale_x_continuous(
+            label = axis_data$chr_num,
+            breaks = axis_data$center,
+            expand = expansion(mult = c(0.005, 0.005))
+          ) +
+          scale_y_log10(
+            breaks = c(0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 20, 50),
+            labels = c("0.01", "0.05", "0.1", "0.5", "1", "2", "5", "10", "20", "50")
+          ) +
+          labs(
+            title = paste0("Genomic Distribution of CAAS Density - Group: ", toupper(group)),
+            subtitle = paste0("Gene filtering: ", gene_filter_mode, 
+                             " | Extreme threshold: top ", 100*(1-extreme_threshold), "%",
+                             " | IQR multiplier: ", iqr_multiplier, "\u00d7"),
+            x = "Chromosome",
+            y = "CAAS per Gene Length (%, log scale)",
+            color = "Gene Category"
+          ) +
+          theme_minimal(base_size = 11) +
+          theme(
+            axis.text.x = element_text(angle = 0, hjust = 0.5, size = 9),
+            panel.grid.major.x = element_blank(),
+            panel.grid.minor.x = element_blank(),
+            legend.position = "top",
+            legend.box = "horizontal",
+            axis.title.x = element_text(margin = margin(t = 10)),
+            axis.title.y = element_text(margin = margin(r = 10))
+          )
+        
+        ggsave(
+          filename = file.path(outliers_dir, sprintf("manhattan_plot_%s.png", group)),
+          plot = p_manhattan_group,
+          width = 16, 
+          height = 8, 
+          dpi = 320, 
+          dev = "png"
+        )
+        
+        cat(sprintf("  \u2713 Manhattan plot for group %s generated\n", toupper(group)))
+      }
+      
+      cat("\n")
+    }
   }
 }
 ```
@@ -1070,6 +1203,47 @@ if (nrow(filter_summary) > 0) {
 }
 
 # Create summary table for export
+# Check if removed_genes_summary.tsv exists (from gene filtering step)
+# Try multiple possible locations
+possible_paths <- c(
+  file.path(dirname(dirname(summary_stats_dir)), "gene_filtering", "removed_genes_summary.tsv"),
+  file.path(params$output_dir, "gene_filtering", "removed_genes_summary.tsv"),
+  file.path(dirname(params$output_dir), "gene_filtering", "removed_genes_summary.tsv")
+)
+
+removed_genes_file <- NULL
+for (path in possible_paths) {
+  if (file.exists(path)) {
+    removed_genes_file <- path
+    break
+  }
+}
+
+genes_removed_info <- c("N/A", "N/A", "N/A")  # Default if file doesn't exist
+
+if (!is.null(removed_genes_file)) {
+  cat(sprintf("Found removed genes file: %s\n", removed_genes_file))
+  removed_genes_df <- read_tsv(removed_genes_file, show_col_types = FALSE)
+  
+  # Count genes by category
+  # Note: "Dubious" genes are IQR outliers that also have clusters
+  total_removed <- nrow(removed_genes_df)
+  extreme_removed <- sum(removed_genes_df$Category == "Extreme", na.rm = TRUE)
+  dubious_removed <- sum(removed_genes_df$Category == "Dubious", na.rm = TRUE)
+  both_removed <- sum(removed_genes_df$Category == "Both", na.rm = TRUE)
+  
+  genes_removed_info <- c(
+    as.character(total_removed),
+    as.character(extreme_removed + both_removed),  # Total extreme (including both)
+    as.character(dubious_removed + both_removed)   # Total dubious (including both)
+  )
+  
+  cat(sprintf("Genes removed: Total=%s, Extreme=%s, Dubious=%s\n", 
+              genes_removed_info[1], genes_removed_info[2], genes_removed_info[3]))
+} else {
+  cat("Note: removed_genes_summary.tsv not found - gene filtering may not have been run\n")
+}
+
 summary_table <- tibble(
   Metric = c(
     "Total CAAS Positions",
@@ -1079,7 +1253,10 @@ summary_table <- tibble(
     "Both Extreme and Dubious",
     "Normal Genes",
     "Extreme Threshold (density)",
-    "Dubious Threshold (count)"
+    "Dubious Threshold (count)",
+    "Total Genes Removed",
+    "Extreme Genes Removed",
+    "Dubious Genes Removed"
   ),
   Value = c(
     nrow(discovery_df),
@@ -1089,7 +1266,10 @@ summary_table <- tibble(
     sum(gene_summary_annotated$Extreme & gene_summary_annotated$Dubious),
     sum(gene_summary_annotated$Category == "Normal"),
     sprintf("%.4f", threshold_extreme),
-    as.character(threshold_dubious)
+    as.character(threshold_dubious),
+    genes_removed_info[1],
+    genes_removed_info[2],
+    genes_removed_info[3]
   )
 )
 

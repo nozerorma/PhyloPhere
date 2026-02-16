@@ -47,7 +47,7 @@ def update_dictionary(dictionary, key, value):
 # FUNCTION load multi cfg dictionary
 # Loads the multi cfg dictionary
 
-def load_cfg(input_path, mode = "mono", paired_mode = False):
+def load_cfg(input_path, mode = "mono"):
 
     class multicfg():
 
@@ -56,7 +56,7 @@ def load_cfg(input_path, mode = "mono", paired_mode = False):
             self.alltraits = []
             self.trait2fg = {}
             self.trait2bg = {}
-            self.paired_mode = paired_mode
+            self.paired_mode = True
             
             # Pair-aware attributes
             self.species2pair = {}
@@ -85,8 +85,8 @@ def load_cfg(input_path, mode = "mono", paired_mode = False):
                 except:
                     self.trait2bg[traitname] = [species]
             
-            # Handle pair information in paired mode
-            if self.paired_mode and pair is not None:
+            # Handle pair information (mandatory paired mode)
+            if pair is not None:
                 self.species2pair[species] = pair
                 
                 if pair not in self.allpairs:
@@ -125,17 +125,15 @@ def load_cfg(input_path, mode = "mono", paired_mode = False):
             for line in singlecfg:
                 try:
                     c = line.split()
-                    if paired_mode:
-                        if len(c) < 3:
-                            raise ValueError(
-                                f"ERROR: Paired mode enabled but config file has only {len(c)} columns.\n"
-                                f"This implementation of caastools is designed for paired contrasts.\n"
-                                f"For sparse species analyses, please use the original caastools framework:\n"
-                                f"Barteri et al. (https://academic.oup.com/bioinformatics/article/39/10/btad623/7319365)"
-                            )
-                        z.update_dictionary(traitname, c[0], c[1], pair=c[2])
-                    else:
-                        z.update_dictionary(traitname, c[0], c[1])
+                    if len(c) < 3:
+                        raise ValueError(
+                            f"ERROR: Paired mode is mandatory but config file has only {len(c)} columns.\n"
+                            f"This implementation of caastools is designed for paired contrasts.\n"
+                            f"Trait config files must contain exactly: species, trait, pair.\n"
+                            f"For sparse species analyses, please use the original caastools framework:\n"
+                            f"Barteri et al. (https://academic.oup.com/bioinformatics/article/39/10/btad623/7319365)"
+                        )
+                    z.update_dictionary(traitname, c[0], c[1], pair=c[2])
                 except ValueError as e:
                     raise e
                 except:
@@ -152,31 +150,28 @@ def load_cfg(input_path, mode = "mono", paired_mode = False):
         for line in singlecfg:
             try:
                 c = line.split()
-                if paired_mode:
-                    if len(c) < 3:
-                        raise ValueError(
-                            f"ERROR: Paired mode enabled but config file has only {len(c)} columns.\n"
-                            f"This implementation of caastools is designed for paired contrasts.\n"
-                            f"For sparse species analyses, please use the original caastools framework:\n"
-                            f"Barteri et al. (https://academic.oup.com/bioinformatics/article/39/10/btad623/7319365)"
-                        )
-                    z.update_dictionary(traitname, c[0], c[1], pair=c[2])
-                else:
-                    z.update_dictionary(traitname, c[0], c[1])
+                if len(c) < 3:
+                    raise ValueError(
+                        f"ERROR: Paired mode is mandatory but config file has only {len(c)} columns.\n"
+                        f"This implementation of caastools is designed for paired contrasts.\n"
+                        f"Trait config files must contain exactly: species, trait, pair.\n"
+                        f"For sparse species analyses, please use the original caastools framework:\n"
+                        f"Barteri et al. (https://academic.oup.com/bioinformatics/article/39/10/btad623/7319365)"
+                    )
+                z.update_dictionary(traitname, c[0], c[1], pair=c[2])
             except ValueError as e:
                 raise e
             except:
                 pass
     
-    # Validate all species have pairs in paired mode
-    if paired_mode:
-        species_without_pairs = [s for s in z.s2t.keys() if s not in z.species2pair]
-        if species_without_pairs:
-            raise ValueError(
-                f"ERROR: The following species lack pair assignments: {', '.join(species_without_pairs)}\n"
-                f"This implementation of caastools is designed for paired contrasts.\n"
-                f"For sparse species analyses, please use the original caastools framework:\n"
-                f"Barteri et al. (https://academic.oup.com/bioinformatics/article/39/10/btad623/7319365)"
-            )
+    # Validate all species have pairs
+    species_without_pairs = [s for s in z.s2t.keys() if s not in z.species2pair]
+    if species_without_pairs:
+        raise ValueError(
+            f"ERROR: The following species lack pair assignments: {', '.join(species_without_pairs)}\n"
+            f"This implementation of caastools is designed for paired contrasts.\n"
+            f"For sparse species analyses, please use the original caastools framework:\n"
+            f"Barteri et al. (https://academic.oup.com/bioinformatics/article/39/10/btad623/7319365)"
+        )
 
     return z

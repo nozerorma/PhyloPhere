@@ -39,42 +39,114 @@ process CAAS_FILTER_SUMMARY {
     path(filter_files)
     
     output:
-    path "discarded_summary.tsv", emit: summary
+    path "filter_summary.tsv", emit: summary
+    path "discarded_summary.tsv", emit: discarded_summary
     
     script:
     """
-    echo -e "File\tDiscardedCount\tMinlen\tMaxcaas\tCAAP_Groups" > discarded_summary.tsv
+    #!/usr/bin/env python3
+    import pandas as pd
+    import sys
+    from pathlib import Path
+    import re
     
-    for file in *.filtered.*.tsv; do
-        # Extract minlen and maxcaas from filename
-        # Format: discovery.filtered.minlenX.maxcaasYY.tsv
-        base=\$(basename \$file .tsv)
-        params=\$(echo \$base | grep -oP 'minlen\\K[0-9]+\\.maxcaas[0-9]+')
-        minlen=\$(echo \$params | cut -d'.' -f1)
-        maxcaas=\$(echo \$params | cut -d'.' -f2 | sed 's/maxcaas//')
+    # Find all filtered files
+    filter_files = list(Path('.').glob('*.filtered.*.tsv'))
+    
+    if not filter_files:
+        print("No filtered files found", file=sys.stderr)
+        sys.exit(1)
+    
+    # Check if CAAP mode by examining first file
+    first_file = filter_files[0]
+    df_sample = pd.read_csv(first_file, sep='\\t', nrows=5)
+    has_caap = 'CAAP_Group' in df_sample.columns
+    
+    print(f"Found {len(filter_files)} filtered files")
+    print(f"CAAP mode: {has_caap}")
+    
+    # Collect per-group counts for each parameter combination
+    summary_data = []
+    discarded_data = []
+    
+    for file_path in filter_files:
+        # Extract parameters from filename
+        fname = file_path.stem
+        match = re.search(r'minlen(\\d+)\\.maxcaas(\\d+)', fname)
+        if not match:
+            continue
         
-        # Check if file has CAAP_Group column
-        has_caap_col=\$(head -1 \$file | grep -c "CAAP_Group" || true)
+        minlen = int(match.group(1))
+        maxcaas = int(match.group(2))
+        param_label = f"{minlen}/{maxcaas}"
         
-        if [ "\$has_caap_col" -gt 0 ]; then
-            # CAAP mode: ClusteringFlag is column 4
-            # Count discarded entries overall
-            count=\$(awk -F'\t' 'NR>1 && \$4=="Discarded" {count++} END {print count+0}' \$file)
+        # Read file
+        df = pd.read_csv(file_path, sep='\\t')
+        
+        if has_caap and 'CAAP_Group' in df.columns:
+            # CAAP mode: count discarded per group
+            discarded = df[df['ClusteringFlag'] == 'Discarded']
             
-            # Get unique groups with discarded positions
-            groups=\$(awk -F'\t' 'NR>1 && \$4=="Discarded" {print \$3}' \$file | sort -u | tr '\n' ',' | sed 's/,\$//')
-            if [ -z "\$groups" ]; then
-                groups="none"
-            fi
-        else
-            # CAAS mode: ClusteringFlag is column 3
-            count=\$(awk -F'\t' 'NR>1 && \$3=="Discarded" {count++} END {print count+0}' \$file)
-            groups="N/A"
-        fi
-        
-        # Append to summary
-        echo -e "\${base}\t\${count}\t\${minlen}\t\${maxcaas}\t\${groups}" >> discarded_summary.tsv
-    done
+            # Get per-group counts
+            group_counts = discarded.groupby('CAAP_Group').size().to_dict()
+            
+            # Add to summary (one row per parameter with group columns)
+            row = {'Parameter': param_label, 'Minlen': minlen, 'Maxcaas': maxcaas}
+            row.update(group_counts)
+            summary_data.append(row)
+            
+            # Discarded summary (old format for compatibility)
+            groups_str = ','.join(sorted(group_counts.keys()))
+            total_count = sum(group_counts.values())
+            discarded_data.append({
+                'File': fname,
+                'DiscardedCount': total_count,
+                'Minlen': minlen,
+                'Maxcaas': maxcaas,
+                'CAAP_Groups': groups_str if groups_str else 'none'
+            })
+        else:
+            # Standard mode: simple count
+            count = (df['ClusteringFlag'] == 'Discarded').sum()
+            summary_data.append({
+                'Parameter': param_label,
+                'Minlen': minlen,
+                'Maxcaas': maxcaas,
+                'DiscardedCount': count
+            })
+            discarded_data.append({
+                'File': fname,
+                'DiscardedCount': count,
+                'Minlen': minlen,
+                'Maxcaas': maxcaas,
+                'CAAP_Groups': 'N/A'
+            })
+    
+    # Create DataFrames and save
+    if has_caap:
+        # For CAAP mode: rows=params, cols=groups
+        summary_df = pd.DataFrame(summary_data).fillna(0)
+        # Sort by parameters
+        summary_df = summary_df.sort_values(['Minlen', 'Maxcaas'])
+        # Reorder columns: Parameter, Minlen, Maxcaas, then groups alphabetically
+        group_cols = [col for col in summary_df.columns if col not in ['Parameter', 'Minlen', 'Maxcaas']]
+        group_cols.sort()
+        col_order = ['Parameter', 'Minlen', 'Maxcaas'] + group_cols
+        summary_df = summary_df[col_order]
+        # Convert group columns to integers
+        for col in group_cols:
+            summary_df[col] = summary_df[col].astype(int)
+    else:
+        summary_df = pd.DataFrame(summary_data).sort_values(['Minlen', 'Maxcaas'])
+    
+    discarded_df = pd.DataFrame(discarded_data).sort_values(['Minlen', 'Maxcaas'])
+    
+    # Save files
+    summary_df.to_csv('filter_summary.tsv', sep='\\t', index=False)
+    discarded_df.to_csv('discarded_summary.tsv', sep='\\t', index=False)
+    
+    print(f"✓ filter_summary.tsv: {len(summary_df)} parameter combinations")
+    print(f"✓ discarded_summary.tsv: {len(discarded_df)} entries")
     """
 }
 

@@ -46,28 +46,41 @@ fi
 timestamp=$(date +%Y%m%d_%H%M%S)
 
 # Configuration
+# Set to true to run a quick test with a small subset of data (for debugging purposes)
 IS_TOY=true
+
+# Base data directory
+DATADIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data"
+
+# Trait and branch definitions
 TRAIT="neoplasia_prevalence"
+SECONDARY_TRAIT="malignant_prevalence"
+N_TRAIT="adult_necropsy_count"
+C_TRAIT="neoplasia_necropsy"
+BRANCH_TRAIT="LQ"
+
+# Pruning lists
+PRUNE_LIST="${DATADIR}/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP/neoplasia_exclude.txt"
+PRUNE_SECONDARY_LIST="${DATADIR}/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP/malignant_exclude.txt"
+
+# Trait file
+TRAIT_FILE="${DATADIR}/1.Cancer_data/Neoplasia_species360/cancer_traits_processed-LQ.csv"
+
 
 # Input configuration
 if [ "$IS_TOY" = true ]; then
     TAG="_toy"
-    ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Ali_toy"
+    ALI_DIR="${DATADIR}/2.Alignments/Ali_toy"
     CYCLES="100"
 else
     TAG=""
-    ALI_DIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/Primate_alignments"
+    ALI_DIR="${DATADIR}/2.Alignments/Primate_alignments"
     CYCLES="1000000"
 fi
 
-# Trait files
-TRAIT_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.Traitfiles/${TRAIT}/traitfile.tab"
-TREE_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/5.Phylogeny/science.abn7829_data_s4.nex.tree"
-TRAIT_VALUES="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Malignancy_Primates/Out/2.CAAS/1.5.Bootstrap_traitfiles/${TRAIT}/boot_traitfile.tab"
-GENE_ENSEMBL_FILE="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/ensembl_genes.output"
 
 # Validate required files
-for file in "$TRAIT_FILE" "$TREE_FILE" "$TRAIT_VALUES" "$GENE_ENSEMBL_FILE"; do
+for file in "$TRAIT_FILE"; do
     if [ ! -f "$file" ]; then
         echo "Error: Required file not found: $file"
         exit 1
@@ -80,7 +93,7 @@ if [ ! -d "$ALI_DIR" ]; then
 fi
 
 # Output configuration
-RESULTS_BASE="Out/integrated_test/${TRAIT}${TAG}/${timestamp}"
+RESULTS_BASE="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/${TRAIT}${TAG}/${timestamp}"
 mkdir -p "$RESULTS_BASE"
 
 WORK_DIR="${RESULTS_BASE}/work"
@@ -99,173 +112,77 @@ echo "Results: $RESULTS_BASE"
 echo "Timestamp: $timestamp"
 echo ""
 
-# #########################################
-# # STEP 1: CAAS Discovery Pipeline
-# #########################################
-# echo "=========================================="
-# echo "STEP 1: CAAS DISCOVERY PIPELINE"
-# echo "=========================================="
-# echo "Running: Discovery + Resample + Bootstrap"
-# echo ""
-
-# OUT_DISCOVERY="${RESULTS_BASE}/caas_analysis"
-# mkdir -p "$OUT_DISCOVERY"
-
-# nextflow run main.nf \
-#     -with-tower \
-#     -profile local \
-#     -w "$WORK_DIR/discovery" \
-#     --prune_data \
-#     --contrast_selection \
-#     --ct_tool "discovery,resample,bootstrap" \
-#     --alignment "$ALI_DIR" \
-#     --caas_config "$TRAIT_FILE" \
-#     --tree "$TREE_FILE" \
-#     --traitvalues "$TRAIT_VALUES" \
-#     --cycles "$CYCLES" \
-#     --outdir "$OUT_DISCOVERY"
-
-# echo ""
-# echo "✓ CAAS discovery completed"
-# echo ""
-
-# # Locate output files from discovery
-# DISCOVERY_FILE=$(find "$OUT_DISCOVERY" -name "discovery.tab" | head -1)
-# BACKGROUND_FILE=$(find "$OUT_DISCOVERY" -name "background_genes.output" | head -1)
-
-# if [ ! -f "$DISCOVERY_FILE" ]; then
-#     echo "Error: Discovery file not found in $OUT_DISCOVERY"
-#     echo "Expected: discovery.tab"
-#     exit 1
-# fi
-
-# if [ ! -f "$BACKGROUND_FILE" ]; then
-#     echo "Error: Background genes file not found in $OUT_DISCOVERY"
-#     echo "Expected: background_genes.output"
-#     exit 1
-# fi
-
-# echo "Discovery outputs located:"
-# echo "  Discovery: $DISCOVERY_FILE"
-# echo "  Background: $BACKGROUND_FILE"
-# echo "  Gene ensembl: $GENE_ENSEMBL_FILE"
-# echo ""
-
-# #########################################
-# # STEP 2: CAAS Post-Processing (Exploratory)
-# #########################################
-# echo "=========================================="
-# echo "STEP 2: CAAS POST-PROCESSING (EXPLORATORY)"
-# echo "=========================================="
-# echo "Running parameter sweep: minlen=2,3,4 × maxcaas=0.6,0.7,0.8"
-# echo ""
-
-# OUT_POSTPROC_EXPLORATORY="${RESULTS_BASE}/postprocessing/exploratory"
-# mkdir -p "$OUT_POSTPROC_EXPLORATORY"
-
-# nextflow run main.nf \
-#     -with-tower \
-#     -profile local \
-#     -w "$WORK_DIR/postproc_exploratory" \
-#     --caas_postproc \
-#     --discovery_input "$DISCOVERY_FILE" \
-#     --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
-#     --background_input "$BACKGROUND_FILE" \
-#     --caas_postproc_mode exploratory \
-#     --minlen_values "2,3,4" \
-#     --maxcaas_values "0.6,0.7,0.8" \
-#     --gene_filter_mode both \
-#     --extreme_threshold 0.99 \
-#     --iqr_multiplier 3.0 \
-#     --generate_reports true \
-#     --generate_manhattan true \
-#     --postproc_outdir "$OUT_POSTPROC_EXPLORATORY" \
-#     --outdir "$OUT_POSTPROC_EXPLORATORY"
-
-# echo ""
-# echo "✓ Exploratory post-processing completed"
-# echo ""
-
 #########################################
-# STEP 3: CAAS Post-Processing (Filter)
+# STEP 1: CAAS Post-Processing (Filter)
 #########################################
 echo "=========================================="
-echo "STEP 3: TEST THE WHOLE PIPELINE IN ONE WORKFLOW"
+echo "TEST THE WHOLE PIPELINE IN ONE WORKFLOW"
 echo "=========================================="
 echo "Running complete pipeline: Discovery → Post-processing (filter mode)"
 echo ""
 
+RESULTS_BASE_FILTER="${RESULTS_BASE}/filter"
+mkdir -p "$RESULTS_BASE_FILTER"
+
 nextflow run main.nf \
     -with-tower \
     -profile local \
-    -w "$WORK_DIR/complete" \
+    -w "$WORK_DIR/filter" \
     --prune_data \
-    --contrast_selection \
+    --prune_list "$PRUNE_LIST" \
+    --prune_list_secondary "$PRUNE_SECONDARY_LIST" \
     --ct_tool "discovery,resample,bootstrap" \
     --alignment "$ALI_DIR" \
-    --caas_config "$TRAIT_FILE" \
-    --tree "$TREE_FILE" \
-    --traitvalues "$TRAIT_VALUES" \
+    --my_traits "$TRAIT_FILE" \
+    --traitname "$TRAIT" \
+    --secondary_trait "$SECONDARY_TRAIT" \
+    --branch_trait "$BRANCH_TRAIT" \
+    --n_trait "$N_TRAIT" \
+    --c_trait "$C_TRAIT" \
     --cycles "$CYCLES" \
-    --outdir "$RESULTS_BASE" \
-    --caas_postproc \
-    --caas_signification \
-    --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
-    --caas_postproc_mode filter \
-    --filter_minlen 2 \
-    --filter_maxcaas 0.6 \
-    --gene_filter_mode both \
-    --extreme_threshold 0.99 \
-    --iqr_multiplier 3.0 \
-    --generate_reports true \
-    --generate_manhattan true
+    --outdir "$RESULTS_BASE_FILTER" \
+    --caas_postproc_mode filter
 
 
 # echo ""
 # echo "✓ Filter mode post-processing completed"
 # echo ""
 
-# #########################################
-# # STEP 4: Test Different Gene Filter Modes
-# #########################################
-# echo "=========================================="
-# echo "STEP 4: GENE FILTER MODE COMPARISON"
-# echo "=========================================="
-# echo "Testing: extreme, dubious, both, none"
-# echo ""
+#########################################
+# STEP 2: CAAS Post-Processing (Exploratory)
+#########################################
+echo "=========================================="
+echo "TEST THE WHOLE PIPELINE IN ONE WORKFLOW"
+echo "=========================================="
+echo "Running complete pipeline: Discovery → Post-processing (exploratory mode)"
+echo ""
 
-# for filter_mode in extreme dubious both none; do
-#     echo "→ Testing gene_filter_mode=${filter_mode}"
-    
-#     OUT_FILTER_MODE="${RESULTS_BASE}/postprocessing/gene_filter_${filter_mode}"
-#     mkdir -p "$OUT_FILTER_MODE"
-    
-#     nextflow run main.nf \
-#         -with-tower \
-#         -profile local \
-#         -w "$WORK_DIR/gene_filter_${filter_mode}" \
-#         --caas_postproc \
-#         --discovery_input "$DISCOVERY_FILE" \
-#         --gene_ensembl_file "$GENE_ENSEMBL_FILE" \
-#         --background_input "$BACKGROUND_FILE" \
-#         --caas_postproc_mode filter \
-#         --filter_minlen 2 \
-#         --filter_maxcaas 0.6 \
-#         --gene_filter_mode "$filter_mode" \
-#         --extreme_threshold 0.99 \
-#         --iqr_multiplier 3.0 \
-#         --generate_reports true \
-#         --generate_manhattan true \
-#         --postproc_outdir "$OUT_FILTER_MODE" \
-#         --outdir "$OUT_FILTER_MODE"
-    
-#     echo "  ✓ ${filter_mode} completed"
-#     echo ""
-# done
+RESULTS_BASE_EXPLORATORY="${RESULTS_BASE}/exploratory"
+mkdir -p "$RESULTS_BASE_EXPLORATORY"
+
+nextflow run main.nf \
+    -with-tower \
+    -profile local \
+    -w "$WORK_DIR/exploratory" \
+    --prune_data \
+    --prune_list "$PRUNE_LIST" \
+    --prune_list_secondary "$PRUNE_SECONDARY_LIST" \
+    --ct_tool "discovery,resample,bootstrap" \
+    --alignment "$ALI_DIR" \
+    --my_traits "$TRAIT_FILE" \
+    --traitname "$TRAIT" \
+    --secondary_trait "$SECONDARY_TRAIT" \
+    --branch_trait "$BRANCH_TRAIT" \
+    --n_trait "$N_TRAIT" \
+    --c_trait "$C_TRAIT" \
+    --cycles "$CYCLES" \
+    --outdir "$RESULTS_BASE_EXPLORATORY" \
+    --caas_postproc_mode exploratory
 
 #########################################
 # Summary
 #########################################
+echo ""
 echo "=========================================="
 echo "INTEGRATED PIPELINE TEST COMPLETED"
 echo "=========================================="
@@ -273,31 +190,29 @@ echo ""
 echo "Results directory: $RESULTS_BASE"
 echo ""
 echo "Pipeline outputs:"
-echo "  1. CAAS Analysis:           $OUT_DISCOVERY"
-echo "     - Discovery file:        $(basename "$DISCOVERY_FILE")"
-echo "     - Background file:       $(basename "$BACKGROUND_FILE")"
+echo "  1. Complete Pipeline (Filter mode):"
+echo "     - CAAS Discovery outputs"
+echo "     - Resample results"
+echo "     - Bootstrap analysis"
+echo "     - Post-processing with filter mode"
 echo ""
-echo "  2. Post-processing (Exploratory):"
-echo "     - Directory:             $OUT_POSTPROC_EXPLORATORY"
-echo "     - Parameter sweep:       9 combinations tested"
-echo "     - Reports:               */reports/*.html"
+echo "  2. Complete Pipeline (Exploratory mode):"
+echo "     - CAAS Discovery outputs"
+echo "     - Resample results"
+echo "     - Bootstrap analysis"
+echo "     - Post-processing with exploratory mode"
+echo "     - Parameter sweep results"
 echo ""
-echo "  3. Post-processing (Filter):"
-echo "     - Directory:             $OUT_POSTPROC_FILTER"
-echo "     - Best filter:           minlen=2, maxcaas=0.6"
-echo "     - Filtered output:       filter_*/discovery.filtered.*.tsv"
+echo "Key directories to examine:"
+echo "  - CAAS results:            ${RESULTS_BASE}/caas/"
+echo "  - Resample results:        ${RESULTS_BASE}/resample/"
+echo "  - Bootstrap results:       ${RESULTS_BASE}/bootstrap/"
+echo "  - Post-processing:         ${RESULTS_BASE}/postprocessing/"
 echo ""
-echo "  4. Gene Filter Comparison:"
-echo "     - Extreme only:          ${RESULTS_BASE}/postprocessing/gene_filter_extreme"
-echo "     - Dubious only:          ${RESULTS_BASE}/postprocessing/gene_filter_dubious"
-echo "     - Both filters:          ${RESULTS_BASE}/postprocessing/gene_filter_both"
-echo "     - No filtering:          ${RESULTS_BASE}/postprocessing/gene_filter_none"
-echo ""
-echo "Key files to examine:"
-echo "  - Filter summaries:        */discarded_summary.tsv"
-echo "  - Gene filtering:          */gene_filtering/removed_genes_summary.tsv"
-echo "  - Manhattan plots:         */reports/manhattan_plot.png"
-echo "  - Characterization:        */reports/CAAS_postproc.html"
+echo "Reports and visualizations:"
+echo "  - Manhattan plots:         ${RESULTS_BASE}/postprocessing/*/reports/manhattan_plot.png"
+echo "  - Characterization:        ${RESULTS_BASE}/postprocessing/*/reports/CAAS_postproc.html"
+echo "  - Filter summaries:        ${RESULTS_BASE}/postprocessing/*/discarded_summary.tsv"
 echo ""
 echo "=========================================="
 echo "End-to-end workflow validation complete!"
