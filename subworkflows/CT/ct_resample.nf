@@ -36,40 +36,50 @@ process RESAMPLE {
 
 
     input:
-    path nw_tree
-    path trait_val
+    path nw_tree,     stageAs: 'nw_tree.nwk'
+    path caas_config, stageAs: 'caas_config.tab'
+    path trait_val,   stageAs: 'traitvalues.tab'
 
     output:
     path("${nw_tree.baseName}.resampled.output/")
 
     script:
     def args = task.ext.args ?: ''
-    def strategyCommand = ""
-
-    // Determine the strategy command based on the provided strategy
-    if (params.strategy == "FGBG") {
-        strategyCommand = "-f ${params.fgsize} -b ${params.bgsize} -m random"
-    } else if (params.strategy == "TEMPLATE") {
-        strategyCommand = "--bytemp ${params.template} -m random"
-    } else if (params.strategy == "PHYLORESTRICTED") {
-        strategyCommand = "--bytemp ${params.template} --limit_by_group ${params.bygroup} -m random"
-    } else if (params.strategy == "BM") {
-        strategyCommand = "--bytemp ${params.template} --traitvalues ${params.traitvalues} --mode bm --perm_strategy ${params.perm_strategy}"
-    } else {
-        exit 1, "Invalid strategy: ${params.strategy}"
-    }
 
     if (params.use_singularity | params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
+
+        if [ ! -f "${nw_tree}" ]; then
+            echo "[ERROR] Missing tree input: ${nw_tree}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${caas_config}" ]; then
+            echo "[ERROR] Missing caas config input: ${caas_config}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${trait_val}" ]; then
+            echo "[ERROR] Missing trait values input: ${trait_val}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+
         mkdir -p ${nw_tree.baseName}.resampled.output
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
-        ${nw_tree} \\
-        ${params.traitfile} \\
+        "${nw_tree}" \\
+        "${caas_config}" \\
         ${params.cycles} \\
         ${params.perm_strategy} \\
-        ${trait_val} \\
+        "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0}
@@ -77,36 +87,40 @@ process RESAMPLE {
     } else {
         """
         echo "Running locally"
+
+        if [ ! -f "${nw_tree}" ]; then
+            echo "[ERROR] Missing tree input: ${nw_tree}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${caas_config}" ]; then
+            echo "[ERROR] Missing caas config input: ${caas_config}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${trait_val}" ]; then
+            echo "[ERROR] Missing trait values input: ${trait_val}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+
         mkdir -p ${nw_tree.baseName}.resampled.output
         Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
-        ${nw_tree} \\
-        ${params.traitfile} \\
+        "${nw_tree}" \\
+        "${caas_config}" \\
         ${params.cycles} \\
         ${params.perm_strategy} \\
-        ${trait_val} \\
+        "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0}
         """
     }
-
-
-    // Could probably be changed to so I can use the ct logic:
-    // if (params.use_singularity = true) {
-    // """
-    //  /usr/local/bin/_entrypoint.sh ct resample \\
-    //  -p ${nw_tree} \\
-    //  -o ${nw_tree}.resampled.output \\
-    //  ${strategyCommand} \\
-    //  $args
-    // """
-    // } else
-    // """
-    // ct resample \\
-    //  -p ${nw_tree} \\
-    //  -o ${nw_tree}.resampled.output \\
-    //  ${strategyCommand} \\
-    //  $args
-    // """
 }

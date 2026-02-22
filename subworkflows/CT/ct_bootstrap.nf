@@ -33,15 +33,16 @@ process BOOTSTRAP {
     
     input:
     tuple val(alignmentID), path(alignmentFile), path(discoveryFile), path(resampledPath) // resampledPath can be either directory or file
+    file caas_config
     
     output:
-    tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), emit: bootstrap_out, optional: true
+    tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), emit: bootstrap_out
     tuple val(alignmentID), file("${alignmentID}.bootstrap.groups.output"), emit: bootstrap_groups, optional: true
     tuple val(alignmentID), file("${alignmentID}.bootstrap.discovery.output"), emit: bootstrap_perm_discovery, optional: true
 
     script:
     def args = task.ext.args ?: ''
-    def discovery_arg = discoveryFile ? "--discovery ${discoveryFile}" : ""
+    def discovery_arg = discoveryFile.name != 'NO_FILE' ? "--discovery ${discoveryFile}" : ""
     def progress_log_arg = params.progress_log != "none" ? "--progress_log ${alignmentID}.progress.log" : ""
     def export_groups_arg = params.export_groups != "none" ? "--export_groups ${alignmentID}.bootstrap.groups.output" : ""
     def export_perm_discovery_arg = params.export_perm_discovery != "none" ? "--export_perm_discovery ${alignmentID}.bootstrap.discovery.output" : ""
@@ -51,7 +52,7 @@ process BOOTSTRAP {
         echo "Using Singularity/Apptainer"
         /usr/local/bin/_entrypoint.sh ct bootstrap \\
             -a ${alignmentFile} \\
-            -t ${params.traitfile} \\
+            -t ${caas_config} \\
             -s ${resampledPath} \\
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\
@@ -64,9 +65,9 @@ process BOOTSTRAP {
     } else {
         """    
         echo "Running locally"
-        $baseDir/ct bootstrap \\
+        $baseDir/subworkflows/CT/local/ct bootstrap \\
             -a ${alignmentFile} \\
-            -t ${params.traitfile} \\
+            -t ${caas_config} \\
             -s ${resampledPath} \\
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\

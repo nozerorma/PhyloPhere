@@ -1,0 +1,279 @@
+#                      _              _     
+#                     | |            | |    
+#   ___ __ _  __ _ ___| |_ ___   ___ | |___ 
+#  / __/ _` |/ _` / __| __/ _ \ / _ \| / __|
+# | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
+#  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
+
+__version__ = "2.0.0-paired"
+
+'''
+A Convergent Amino Acid Substitution identification 
+and analysis toolbox
+
+Author:         Fabio Barteri (fabio.barteri@upf.edu)
+
+Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
+                Xavier Farré (xfarrer@igtp.cat),
+                David de Juan (david.juan@upf.edu).
+
+Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
+
+MODULE NAME: disco.py
+DESCRIPTION: runs the caas discovery on one single alignment. Returns non-validated caas candidate positions.
+DEPENDENCIES: alimport.py, caas_id.py, pindex.py
+CALLED BY: CT.
+
+'''
+
+
+from modules.caas_id import *
+from modules.alimport import *
+from modules.pindex import *
+import os
+from os.path import exists
+
+### FUNCTION discovery()
+### Scans one single alignment to identify the CAAS or CAAP
+
+def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, admitted_patterns, output_file, miss_pair=False, max_conserved=0, caap_mode=False, background_output_file=None):
+
+    def _valid_traits_for_position(processed_position, trait_list, multiconfig,
+                                   max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                                   max_fg_miss, max_bg_miss, max_overall_miss,
+                                   miss_pair):
+        valid_traits = []
+
+        for trait in trait_list:
+            if trait not in processed_position.trait2aas_fg:
+                continue
+            if trait not in processed_position.trait2aas_bg:
+                continue
+
+            # Gap filtering
+            if max_fg_gaps != "NO" and processed_position.trait2gaps_fg.get(trait, 0) > int(max_fg_gaps):
+                continue
+            if max_bg_gaps != "NO" and processed_position.trait2gaps_bg.get(trait, 0) > int(max_bg_gaps):
+                continue
+            if max_overall_gaps != "NO" and processed_position.trait2gaps_fg.get(trait, 0) + processed_position.trait2gaps_bg.get(trait, 0) > int(max_overall_gaps):
+                continue
+
+            # Missing filtering
+            if max_fg_miss != "NO" and processed_position.trait2miss_fg.get(trait, 0) > int(max_fg_miss):
+                continue
+            if max_bg_miss != "NO" and processed_position.trait2miss_bg.get(trait, 0) > int(max_bg_miss):
+                continue
+            if max_overall_miss != "NO" and processed_position.trait2miss_fg.get(trait, 0) + processed_position.trait2miss_bg.get(trait, 0) > int(max_overall_miss):
+                continue
+
+            # Pair-aware filtering
+            if miss_pair:
+                miss_thresholds_equal = False
+                if max_fg_miss != "NO" and max_bg_miss != "NO" and max_fg_miss == max_bg_miss:
+                    miss_thresholds_equal = True
+                elif max_fg_miss == "NO" and max_bg_miss == "NO" and max_overall_miss != "NO":
+                    miss_thresholds_equal = True
+
+                if miss_thresholds_equal:
+                    miss_pairs_fg = set(processed_position.trait2miss_pairs_fg.get(trait, []))
+                    miss_pairs_bg = set(processed_position.trait2miss_pairs_bg.get(trait, []))
+                    if miss_pairs_fg and miss_pairs_bg and miss_pairs_fg != miss_pairs_bg:
+                        continue
+
+                gap_thresholds_equal = False
+                if max_fg_gaps != "NO" and max_bg_gaps != "NO" and max_fg_gaps == max_bg_gaps:
+                    gap_thresholds_equal = True
+                elif max_fg_gaps == "NO" and max_bg_gaps == "NO" and max_overall_gaps != "NO":
+                    gap_thresholds_equal = True
+
+                if gap_thresholds_equal:
+                    gap_pairs_fg = set(processed_position.trait2gap_pairs_fg.get(trait, []))
+                    gap_pairs_bg = set(processed_position.trait2gap_pairs_bg.get(trait, []))
+                    if gap_pairs_fg and gap_pairs_bg and gap_pairs_fg != gap_pairs_bg:
+                        continue
+
+            valid_traits.append(trait)
+
+        return valid_traits
+
+    # Step 1: import the trait into a trait object (load_cfg from pindex.py)
+    trait_object = load_cfg(input_cfg)
+
+    # Step 2: import the alignment int a processed position object (slice from alimport.py)
+    p = sliced_object
+
+    # Step 3: processes the positions from imported alignment (process_position() from caas_id.py)
+    processed_positions = map(functools.partial(process_position, multiconfig = trait_object, species_in_alignment = p.species), p.d)
+
+    # Step 4: Collect results before writing to file
+    results_to_write = []
+    tested_positions = set()
+
+    # Step 5: extract the raw caas or caap
+    if caap_mode:
+        # Import caap_id module for CAAP mode
+        from modules.caap_id import fetch_caap
+        
+        # CAAP mode: detect property-based convergence
+        for position in processed_positions:
+            valid_traits = _valid_traits_for_position(
+                position,
+                trait_object.alltraits,
+                trait_object,
+                max_fg_gaps,
+                max_bg_gaps,
+                max_overall_gaps,
+                max_fg_miss,
+                max_bg_miss,
+                max_overall_miss,
+                miss_pair
+            )
+            if valid_traits:
+                tested_positions.add(position.position)
+            caap_results = fetch_caap( genename = p.genename,
+                        position_obj = position,
+                        trait_list = trait_object.alltraits,
+                        
+                        max_fg_gaps = int(max_fg_gaps) if max_fg_gaps != "NO" else 999999,
+                        max_bg_gaps = int(max_bg_gaps) if max_bg_gaps != "NO" else 999999,
+                        max_overall_gaps = int(max_overall_gaps) if max_overall_gaps != "NO" else 999999,
+                        
+                        max_fg_miss = int(max_fg_miss) if max_fg_miss != "NO" else 999999,
+                        max_bg_miss = int(max_bg_miss) if max_bg_miss != "NO" else 999999,
+                        max_overall_miss = int(max_overall_miss) if max_overall_miss != "NO" else 999999,
+                        
+                        output_file = None,  # Don't write yet
+                        miss_pair = miss_pair,
+                        max_conserved = max_conserved,
+                        species_in_alignment = p.species,
+                        allowed_patterns = admitted_patterns,
+                        multiconfig = trait_object,
+                        return_results = True  # Get results instead of writing
+                        )
+            if caap_results:
+                results_to_write.extend(caap_results)
+    else:
+        # CAAS mode: classical detection
+        for position in processed_positions:
+            valid_traits = _valid_traits_for_position(
+                position,
+                trait_object.alltraits,
+                trait_object,
+                max_fg_gaps,
+                max_bg_gaps,
+                max_overall_gaps,
+                max_fg_miss,
+                max_bg_miss,
+                max_overall_miss,
+                miss_pair
+            )
+            if valid_traits:
+                tested_positions.add(position.position)
+            caas_results = fetch_caas( p.genename,
+                        position,
+                        trait_object.alltraits,
+
+                        maxgaps_bg= max_bg_gaps,
+                        maxgaps_fg= max_fg_gaps,
+                        maxgaps_all= max_overall_gaps,
+
+                        maxmiss_bg= max_bg_miss,
+                        maxmiss_fg= max_fg_miss,
+                        maxmiss_all= max_overall_miss,
+                        
+                        multiconfig= trait_object,
+                        miss_pair= miss_pair,
+                        max_conserved= max_conserved,
+
+                        admitted_patterns=admitted_patterns,
+                        output_file = None,  # Don't write yet
+                        return_results = True  # Get results instead of writing
+                        )
+            if caas_results:
+                results_to_write.extend(caas_results)
+    
+    # Step 6: Write background coverage file (positions tested)
+    if background_output_file:
+        if tested_positions:
+            positions_sorted = ",".join(map(str, sorted(tested_positions, key=lambda x: int(x))))
+        else:
+            positions_sorted = "NULL"
+        with open(background_output_file, "w") as bkg_out:
+            bkg_out.write(f"{p.genename}\t{positions_sorted}\n")
+
+    # Step 7: Only write output file if CAAS/CAAP were found
+    if len(results_to_write) > 0:
+        # Delete existing file if present
+        if exists(output_file):
+            os.system("rm -r " + output_file)
+        
+        # Determine header based on mode
+        if caap_mode:
+            header_fields = [
+                "Gene",
+                "Mode",
+                "CAAP_Group",
+                "Trait",
+                "Position",
+                "Substitution",
+                "Encoded",
+                "Pvalue",
+                "Pattern",
+                "FFGN",
+                "FBGN",
+                "GFG",
+                "GBG",
+                "MFG",
+                "MBG",
+                "FFG",
+                "FBG",
+                "MS"
+            ]
+        else:
+            header_fields = [
+                "Gene",
+                "Mode",
+                "CAAP_Group",
+                "Trait",
+                "Position",
+                "Substitution",
+                "Pvalue",
+                "Pattern",
+                "FFGN",
+                "FBGN",
+                "GFG",
+                "GBG",
+                "MFG",
+                "MBG",
+                "FFG",
+                "FBG",
+                "MS"
+            ]
+        
+        # Add conserved-pair columns when overlap tolerance is enabled
+        if max_conserved > 0:
+            header_fields.extend(["ConservedPair", "ConservedPairs"])
+        
+        header = "\t".join(header_fields)
+        
+        # Write header and results
+        with open(output_file, "w") as outf:
+            outf.write(header + "\n")
+            for result_line in results_to_write:
+                if not caap_mode:
+                    # Normalize CAAS rows to include CAAP_Group=US for schema parity
+                    # Legacy CAAS rows come as:
+                    # Gene Mode Trait Position ...
+                    # New normalized row becomes:
+                    # Gene Mode CAAP_Group Trait Position ...
+                    fields = result_line.split("\t")
+                    if len(fields) >= 3 and fields[1] == "CAAS":
+                        # Avoid duplicating if already normalized
+                        if len(fields) < 4 or fields[2] not in ["US", "GS0", "GS1", "GS2", "GS3", "GS4"]:
+                            fields.insert(2, "US")
+                            result_line = "\t".join(fields)
+                outf.write(result_line + "\n")
+        
+        print(f"Discovery complete: {len(results_to_write)} CAAS/CAAP found in {p.genename}")
+    else:
+        print(f"Discovery complete: No CAAS/CAAP found in {p.genename} - output file not created")

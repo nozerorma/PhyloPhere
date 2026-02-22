@@ -1,0 +1,681 @@
+---
+title: "CT Signification Analysis"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  filtered_discovery: NULL
+  filtered_background: NULL
+  bootstrap_file: NULL
+  output_dir: "."
+  caap_mode: FALSE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7
+)
+
+# Load required libraries
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(scales)
+  library(data.table)
+  library(paletteer)
+})
+
+# Directory management
+createDir <- function(path) {
+  if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
+}
+
+# Define color palettes, including a colorblind-friendly palette for categories
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "brown", "gray"
+)
+
+# Consistent colorblind-friendly palette
+category_palette <- c(
+  "Normal" = tableau_10[["gray"]],
+  "Dubious" = tableau_10[["blue"]],
+  "Extreme" = tableau_10[["vermillion"]],
+  "Both" = tableau_10[["reddish_purple"]]
+)
+
+removal_palette <- c(
+  Discarded = tableau_10[["vermillion"]],
+  Good = tableau_10[["green"]]
+)
+```
+
+## 1. Data Import and Validation
+
+This section loads the filtered CAAS data and validates input files.
+
+```{r data_import, message=FALSE}
+cat("=== Loading Filtered CAAS Data ===\n")
+
+# Load filtered discovery file
+filtered_discovery_path <- params$filtered_discovery
+if (is.null(filtered_discovery_path)) {
+  stop("Filtered discovery file parameter is NULL")
+}
+
+cat(sprintf("Attempting to load: %s\n", filtered_discovery_path))
+cat(sprintf("  File exists: %s\n", file.exists(filtered_discovery_path)))
+cat(sprintf("  Working directory: %s\n", getwd()))
+
+if (!file.exists(filtered_discovery_path)) {
+  # List files in current directory for debugging
+  cat("Files in current directory:\n")
+  print(list.files(".", full.names = TRUE))
+  stop("Filtered discovery file not found: ", filtered_discovery_path)
+}
+
+discovery_df <- read_tsv(filtered_discovery_path, show_col_types = FALSE)
+
+# Normalize discovery schema (legacy CAAS files may not include CAAP_Group)
+if (!"CAAP_Group" %in% names(discovery_df)) {
+  discovery_df <- discovery_df %>% mutate(CAAP_Group = "US")
+}
+cat(sprintf("Loaded discovery file: %s\n", basename(filtered_discovery_path)))
+cat(sprintf("  Total CAAS positions: %s\n", format(nrow(discovery_df), big.mark = ",")))
+
+# Detect CAAP mode (after normalization)
+has_caap_group <- 'CAAP_Group' %in% names(discovery_df)
+cat(sprintf("  CAAP mode detected: %s\n", has_caap_group))
+
+if (has_caap_group) {
+  groups <- unique(discovery_df$CAAP_Group)
+  cat(sprintf("  Groups present: %s\n", paste(groups, collapse = ", ")))
+}
+
+# Load filtered background
+filtered_background_path <- params$filtered_background
+if (is.null(filtered_background_path) || !file.exists(filtered_background_path)) {
+  stop("Filtered background file not found: ", filtered_background_path)
+}
+
+background_df <- read_tsv(filtered_background_path, show_col_types = FALSE)
+cat(sprintf("\nLoaded background file: %s\n", basename(filtered_background_path)))
+cat(sprintf("  Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
+
+# Validate required columns
+required_cols <- c("Gene", "Position", "Pattern", "Pvalue")
+missing_cols <- setdiff(required_cols, names(discovery_df))
+if (length(missing_cols) > 0) {
+  stop("Missing required columns in discovery: ", paste(missing_cols, collapse = ", "))
+}
+
+cat("\n=== Data Validation Complete ===\n")
+```
+
+## 2. Bootstrap Permutation Integration
+
+Load bootstrap permutation file to calculate empirical p-values.
+
+```{r bootstrap_integration, message=FALSE}
+cat("\n=== Loading Bootstrap File ===\n")
+
+# Load bootstrap file
+if (is.null(params$bootstrap_file)) {
+  stop("Bootstrap file parameter is NULL")
+}
+
+bootstrap_file_path <- params$bootstrap_file
+if (!file.exists(bootstrap_file_path)) {
+  stop("Bootstrap file not found: ", bootstrap_file_path)
+}
+
+cat(sprintf("Loading bootstrap file: %s\n", basename(bootstrap_file_path)))
+
+# Load bootstrap data (headerless expected, but tolerate legacy variants)
+# Supported formats:
+#   5 cols: GenePos CAAP_Group Occurrences Total Pvalue.boot
+#   4 cols: GenePos Occurrences Total Pvalue.boot   (legacy CAAS)
+bootstrap_raw <- tryCatch({
+  read_tsv(
+    bootstrap_file_path,
+    col_names = FALSE,
+    show_col_types = FALSE
+  )
+}, error = function(e) {
+  stop("Failed to load bootstrap file: ", e$message)
+})
+
+if (ncol(bootstrap_raw) < 4) {
+  stop(sprintf("Bootstrap file has %d columns; expected at least 4", ncol(bootstrap_raw)))
+}
+
+if (ncol(bootstrap_raw) >= 5) {
+  names(bootstrap_raw)[1:5] <- c("GenePos", "CAAP_Group", "Occurrences", "Total", "Pvalue.boot")
+} else {
+  names(bootstrap_raw)[1:4] <- c("GenePos", "Occurrences", "Total", "Pvalue.boot")
+  bootstrap_raw <- bootstrap_raw %>% mutate(CAAP_Group = "US")
+}
+
+# Drop accidental textual header rows if present
+bootstrap_raw <- bootstrap_raw %>%
+  filter(!is.na(GenePos), GenePos != "Gene@Position")
+
+# Normalize types
+bootstrap_raw <- bootstrap_raw %>%
+  mutate(
+    CAAP_Group = if_else(is.na(CAAP_Group) | CAAP_Group == "", "US", CAAP_Group),
+    Occurrences = suppressWarnings(as.integer(Occurrences)),
+    Total = suppressWarnings(as.integer(Total)),
+    Pvalue.boot = suppressWarnings(as.numeric(Pvalue.boot))
+  )
+
+# Split GenePos into Gene and Position
+bootstrap_df <- bootstrap_raw %>%
+  separate(GenePos, into = c("Gene", "Position"), sep = "@", remove = FALSE) %>%
+  mutate(Position = as.integer(Position))
+
+# Final safeguard for expected columns
+if (!"Pvalue.boot" %in% names(bootstrap_df)) {
+  stop("Bootstrap integration requires Pvalue.boot column after normalization")
+}
+
+cat(sprintf("Loaded bootstrap data: %s permutations\n", 
+            format(nrow(bootstrap_df), big.mark = ",")))
+
+# Check if bootstrap has CAAP groups
+bootstrap_has_groups <- 'CAAP_Group' %in% names(bootstrap_df) && 
+                        any(!is.na(bootstrap_df$CAAP_Group))
+
+if (has_caap_group && !bootstrap_has_groups) {
+  warning("Bootstrap file missing CAAP_Group data, but discovery has CAAP mode enabled")
+  warning("Bootstrap results may not be group-aware")
+}
+
+if (bootstrap_has_groups) {
+  boot_groups <- unique(bootstrap_df$CAAP_Group)
+  cat(sprintf("  Bootstrap groups: %s\n", paste(boot_groups, collapse = ", ")))
+}
+
+# Calculate empirical p-values
+cat("\nIntegrating bootstrap p-values...\n")
+
+# Bootstrap file already contains Pvalue.boot, just need to join
+if (has_caap_group && bootstrap_has_groups) {
+  # Group-aware permutation p-values
+  discovery_with_perm <- discovery_df %>%
+    left_join(
+      bootstrap_df %>%
+        select(Gene, Position, CAAP_Group, Pvalue.boot, Occurrences, Total),
+      by = c("Gene", "Position", "CAAP_Group")
+    )
+} else if (has_caap_group && !bootstrap_has_groups) {
+  # Discovery has groups but bootstrap doesn't - join without CAAP_Group
+  warning("Joining bootstrap data without CAAP_Group matching")
+  discovery_with_perm <- discovery_df %>%
+    left_join(
+      bootstrap_df %>%
+        select(Gene, Position, Pvalue.boot, Occurrences, Total) %>%
+        distinct(Gene, Position, .keep_all = TRUE),
+      by = c("Gene", "Position")
+    )
+} else {
+  # Standard permutation p-values (no CAAP groups)
+  discovery_with_perm <- discovery_df %>%
+    left_join(
+      bootstrap_df %>%
+        select(Gene, Position, Pvalue.boot, Occurrences, Total),
+      by = c("Gene", "Position")
+    )
+}
+
+# Handle missing permutation p-values
+discovery_with_perm <- discovery_with_perm %>%
+  mutate(
+    Pvalue.boot = if_else(is.na(Pvalue.boot), Pvalue, Pvalue.boot),
+    Occurrences = if_else(is.na(Occurrences), 0L, as.integer(Occurrences)),
+    Total = if_else(is.na(Total), 0L, as.integer(Total))
+  )
+
+# Normalize optional conserved columns for downstream meta export
+if (!"ConservedPair" %in% names(discovery_with_perm)) {
+  discovery_with_perm <- discovery_with_perm %>% mutate(ConservedPair = NA_character_)
+}
+if (!"ConservedPairs" %in% names(discovery_with_perm)) {
+  discovery_with_perm <- discovery_with_perm %>% mutate(ConservedPairs = NA_character_)
+}
+
+cat(sprintf("Integrated bootstrap p-values for %d positions\n", 
+            sum(!is.na(discovery_with_perm$Pvalue.boot))))
+
+cat("\n=== Bootstrap Integration Complete ===\n")
+```
+
+## 3. Significance Filtering
+
+Apply hypergeometric and permutation significance thresholds.
+
+```{r significance_filtering}
+cat("\n=== Applying Significance Thresholds ===\n")
+
+alpha <- 0.05
+
+# Apply filters
+caas_filtered <- discovery_with_perm %>%
+  mutate(
+    isSignificant = Pvalue <= alpha | Pvalue.boot <= alpha,
+    sig_hyp = Pvalue <= alpha,
+    sig_perm = Pvalue.boot <= alpha,
+    sig_both = sig_hyp & sig_perm
+  )
+
+# Summary statistics
+if (has_caap_group) {
+  # Group-aware summary
+  summary_stats <- caas_filtered %>%
+    group_by(CAAP_Group) %>%
+    summarize(
+      Total = n(),
+      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
+      Perm_05 = sum(sig_perm, na.rm = TRUE),
+      Both_05 = sum(sig_both, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  cat("\nSignificance Summary by Group:\n")
+  print(kable(summary_stats, format.args = list(big.mark = ",")))
+
+  caas_for_export <- caas_filtered
+
+} else {
+  # Standard summary
+  summary_stats <- caas_filtered %>%
+    summarize(
+      Total = n(),
+      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
+      Perm_05 = sum(sig_perm, na.rm = TRUE),
+      Both_05 = sum(sig_both, na.rm = TRUE)
+    )
+  
+  cat("\nSignificance Summary:\n")
+  print(kable(summary_stats, format.args = list(big.mark = ",")))
+  
+  caas_for_export <- caas_filtered
+}
+
+cat("\n=== Significance Filtering Complete ===\n")
+```
+
+## 4. Pattern-Based Analysis
+
+Analyze CAAS patterns and their significance profiles.
+
+```{r pattern_analysis}
+cat("\n=== Pattern-Based Analysis ===\n")
+
+# Detect available patterns
+patterns_present <- unique(caas_filtered$Pattern)
+cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", ")))
+
+# Pattern distribution
+if (has_caap_group) {
+  pattern_summary <- caas_filtered %>%
+    group_by(CAAP_Group, Pattern) %>%
+    summarize(
+      Total = n(),
+      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
+      Perm_05 = sum(sig_perm, na.rm = TRUE),
+      Both_05 = sum(sig_both, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    arrange(CAAP_Group, Pattern)
+  
+  cat("\nPattern Distribution by Group:\n")
+  print(kable(pattern_summary, format.args = list(big.mark = ",")))
+  
+  # Visualization: faceted by group
+  plot_data <- pattern_summary %>%
+    pivot_longer(
+      cols = c(Total, Hyp_05, Perm_05, Both_05),
+      names_to = "Filter",
+      values_to = "Count"
+    ) %>%
+    mutate(
+      Filter = factor(Filter, levels = c("Total", "Hyp_05", "Perm_05", "Both_05")),
+      Pattern = factor(Pattern)
+    )
+  
+  p_pattern <- ggplot(plot_data, aes(x = Pattern, y = Count, fill = Filter)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    facet_wrap(~ CAAP_Group, scales = "free_y") +
+    theme_minimal() +
+    labs(
+      title = "CAAS Pattern Distribution by Significance Filter",
+      subtitle = "Hyp_05 = Hypergeometric | Perm_05 = Permutation | Both_05 = Combined",
+      x = "Pattern",
+      y = "Count"
+    ) +
+    scale_fill_manual(values = c(
+      "Total" = tableau_10[["gray"]],
+      "Hyp_05" = tableau_10[["blue"]],
+      "Perm_05" = tableau_10[["green"]],
+      "Both_05" = tableau_10[["vermillion"]]
+    )) +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      panel.grid.major = element_line(color = "darkgray", size = 0.5),
+      legend.position = "bottom"
+    )
+  
+  print(p_pattern)
+} else {
+  pattern_summary <- caas_filtered %>%
+    group_by(Pattern) %>%
+    summarize(
+      Total = n(),
+      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
+      Perm_05 = sum(sig_perm, na.rm = TRUE),
+      Both_05 = sum(sig_both, na.rm = TRUE),
+      .groups = "drop"
+    )
+  
+  cat("\nPattern Distribution:\n")
+  print(kable(pattern_summary, format.args = list(big.mark = ",")))
+  
+  # Visualization
+  plot_data <- pattern_summary %>%
+    pivot_longer(
+      cols = c(Total, Hyp_05, Perm_05, Both_05),
+      names_to = "Filter",
+      values_to = "Count"
+    ) %>%
+    mutate(
+      Filter = factor(Filter, levels = c("Total", "Hyp_05", "Perm_05", "Both_05")),
+      Pattern = factor(Pattern)
+    )
+  
+  p_pattern <- ggplot(plot_data, aes(x = Pattern, y = Count, fill = Filter)) +
+    geom_bar(stat = "identity", position = "dodge") +
+    theme_minimal() +
+    labs(
+      title = "CAAS Pattern Distribution by Significance Filter",
+      subtitle = "Hyp_05 = Hypergeometric | Perm_05 = Permutation | Both_05 = Combined",
+      x = "Pattern",
+      y = "Count"
+    ) +
+    scale_fill_manual(values = c(
+      "Total" = tableau_10[["gray"]],
+      "Hyp_05" = tableau_10[["blue"]],
+      "Perm_05" = tableau_10[["green"]],
+      "Both_05" = tableau_10[["vermillion"]]
+    )) +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      panel.grid.major = element_line(color = "darkgray", size = 0.5),
+      legend.position = "bottom"
+    )
+  
+  print(p_pattern)
+}
+
+cat("\n=== Pattern Analysis Complete ===\n")
+```
+
+## 5. Gene List Export for Enrichment
+
+Export gene lists for downstream enrichment analysis (GO, KEGG, Reactome).
+
+```{r gene_export}
+cat("\n=== Exporting Gene Lists ===\n")
+
+# Use local directory for Nextflow to capture
+gene_list_dir <- "gene_lists"
+createDir(gene_list_dir)
+
+# Export function
+export_gene_list <- function(df, name, dir) {
+  genes <- unique(df$Gene)
+  output_file <- file.path(dir, paste0(name, ".genes"))
+  write.table(
+    genes,
+    output_file,
+    quote = FALSE,
+    row.names = FALSE,
+    col.names = FALSE
+  )
+  return(length(genes))
+}
+
+# Export by significance criteria
+if (has_caap_group) {
+  # Per-group exports (excluding gs0)
+  for (grp in unique(caas_for_export$CAAP_Group)) {
+    grp_dir <- file.path(gene_list_dir, grp)
+    createDir(grp_dir)
+    
+    grp_data <- caas_for_export %>% filter(CAAP_Group == grp)
+    
+    # All genes
+    n_all <- export_gene_list(grp_data, "all", grp_dir)
+    
+    # Hypergeometric significant
+    n_hyp <- export_gene_list(
+      grp_data %>% filter(sig_hyp),
+      "hypergeometric_p05",
+      grp_dir
+    )
+    
+    # Permutation significant
+    n_perm <- export_gene_list(
+      grp_data %>% filter(sig_perm),
+      "permutation_p05",
+      grp_dir
+    )
+    
+    # Both significant
+    n_both <- export_gene_list(
+      grp_data %>% filter(sig_both),
+      "combined_p05",
+      grp_dir
+    )
+    
+    cat(sprintf("  %s: All=%d | Hyp=%d | Perm=%d | Both=%d\n",
+                grp, n_all, n_hyp, n_perm, n_both))
+  }
+  
+  # Global exports (all groups except gs0)
+  global_dir <- file.path(gene_list_dir, "global")
+  createDir(global_dir)
+  
+  n_all <- export_gene_list(caas_for_export, "all", global_dir)
+  n_hyp <- export_gene_list(
+    caas_for_export %>% filter(sig_hyp),
+    "hypergeometric_p05",
+    global_dir
+  )
+  n_perm <- export_gene_list(
+    caas_for_export %>% filter(sig_perm),
+    "permutation_p05",
+    global_dir
+  )
+  n_both <- export_gene_list(
+    caas_for_export %>% filter(sig_both),
+    "combined_p05",
+    global_dir
+  )
+  
+  cat(sprintf("  Global (excluding gs0): All=%d | Hyp=%d | Perm=%d | Both=%d\n",
+              n_all, n_hyp, n_perm, n_both))
+} else {
+  # Standard exports
+  n_all <- export_gene_list(caas_for_export, "all", gene_list_dir)
+  n_hyp <- export_gene_list(
+    caas_for_export %>% filter(sig_hyp),
+    "hypergeometric_p05",
+    gene_list_dir
+  )
+  n_perm <- export_gene_list(
+    caas_for_export %>% filter(sig_perm),
+    "permutation_p05",
+    gene_list_dir
+  )
+  n_both <- export_gene_list(
+    caas_for_export %>% filter(sig_both),
+    "combined_p05",
+    gene_list_dir
+  )
+  
+  cat(sprintf("  All=%d | Hyp=%d | Perm=%d | Both=%d\n",
+              n_all, n_hyp, n_perm, n_both))
+}
+
+cat(sprintf("\nGene lists exported to: %s\n", gene_list_dir))
+cat("\n=== Gene List Export Complete ===\n")
+```
+
+## 6. Meta-CAAS Extraction
+
+Extract comprehensive CAAS metadata for meta-analysis and cross-study comparison.
+
+```{r meta_caas_export}
+cat("\n=== Exporting Meta-CAAS Data ===\n")
+
+# Function to assign random CAAS tags
+assign_caas_tags <- function(n_rows) {
+  set.seed(1234)  # For reproducibility
+  
+  tags <- sapply(1:n_rows, function(i) {
+    paste0("CAAS_", 
+           paste0(sample(LETTERS, 5, TRUE), collapse = ""),
+           sprintf("%04d", sample(9999, 1)),
+           sample(LETTERS, 1))
+  })
+  
+  return(tags)
+}
+
+# Use local directory for Nextflow to capture
+meta_dir <- "meta_caas"
+createDir(meta_dir)
+
+if (has_caap_group) {
+  # Per-group meta-CAAS
+  for (grp in unique(caas_for_export$CAAP_Group)) {
+    grp_data <- caas_for_export %>% filter(CAAP_Group == grp)
+    
+    grp_meta <- grp_data %>%
+      mutate(
+        GenePos = paste(Gene, Position, sep = "_"),
+        SignificanceLevel = case_when(
+          sig_both ~ "Both",
+          sig_hyp ~ "Hypergeometric",
+          sig_perm ~ "Permutation",
+          TRUE ~ "Not Significant"
+        ),
+        Tag = assign_caas_tags(n()),
+        IsConserved = if_else(!is.na(ConservedPair) & ConservedPair != "", TRUE, FALSE),
+        ConservedPair = if_else(
+          !is.na(ConservedPairs) & ConservedPairs != "",
+          sub("^\\d+:", "", ConservedPairs),
+          NA_character_
+        ),
+        AminoConv = if ("Substitution" %in% names(.)) Substitution else NA_character_,
+        AminoEncoded = if ("Encoded" %in% names(.)) Encoded else NA_character_
+      ) %>%
+      select(
+        Tag, GenePos, Gene, Position, Pattern, CAAP_Group,
+        Pvalue, Pvalue.boot, Occurrences, Total,
+        sig_hyp, sig_perm, sig_both, SignificanceLevel,
+        IsConserved, ConservedPair, AminoConv, AminoEncoded
+      )
+    
+    output_file <- file.path(meta_dir, paste0(grp, "_meta_caas.tsv"))
+    write_tsv(grp_meta, output_file)
+    
+    cat(sprintf("  %s: %d positions\n", grp, nrow(grp_meta)))
+  }
+  
+  # Global meta-CAAS
+  global_meta <- caas_for_export %>%
+    mutate(
+      GenePos = paste(Gene, Position, sep = "_"),
+      SignificanceLevel = case_when(
+        sig_both ~ "Both",
+        sig_hyp ~ "Hypergeometric",
+        sig_perm ~ "Permutation",
+        TRUE ~ "Not Significant"
+      ),
+      Tag = assign_caas_tags(n()),
+      IsConserved = if_else(!is.na(ConservedPair) & ConservedPair != "", TRUE, FALSE),
+      ConservedPair = if_else(
+        !is.na(ConservedPairs) & ConservedPairs != "",
+        sub("^\\d+:", "", ConservedPairs),
+        NA_character_
+      ),
+      AminoConv = if ("Substitution" %in% names(.)) Substitution else NA_character_,
+      AminoEncoded = if ("Encoded" %in% names(.)) Encoded else NA_character_
+    ) %>%
+    select(
+      Tag, GenePos, Gene, Position, Pattern, CAAP_Group,
+      Pvalue, Pvalue.boot, Occurrences, Total,
+      sig_hyp, sig_perm, sig_both, SignificanceLevel,
+      IsConserved, ConservedPair, AminoConv, AminoEncoded
+    )
+  
+  output_file <- file.path(meta_dir, "global_meta_caas.tsv")
+  write_tsv(global_meta, output_file)
+  
+  cat(sprintf("  Global: %d positions\n", nrow(global_meta)))
+} else {
+  # Standard meta-CAAS
+  meta_caas <- caas_for_export %>%
+    mutate(
+      GenePos = paste(Gene, Position, sep = "_"),
+      SignificanceLevel = case_when(
+        sig_both ~ "Both",
+        sig_hyp ~ "Hypergeometric",
+        sig_perm ~ "Permutation",
+        TRUE ~ "Not Significant"
+      ),
+      Tag = assign_caas_tags(n()),
+      IsConserved = if_else(!is.na(ConservedPair) & ConservedPair != "", TRUE, FALSE),
+      ConservedPair = if_else(
+        !is.na(ConservedPairs) & ConservedPairs != "",
+        sub("^\\d+:", "", ConservedPairs),
+        NA_character_
+      ),
+      AminoConv = if ("Substitution" %in% names(.)) Substitution else NA_character_,
+      AminoEncoded = if ("Encoded" %in% names(.)) Encoded else NA_character_
+    ) %>%
+    select(
+      Tag, GenePos, Gene, Position, Pattern,
+      Pvalue, Pvalue.boot, Occurrences, Total,
+      sig_hyp, sig_perm, sig_both, SignificanceLevel,
+      IsConserved, ConservedPair, AminoConv, AminoEncoded
+    )
+  
+  output_file <- file.path(meta_dir, "meta_caas.tsv")
+  write_tsv(meta_caas, output_file)
+  
+  cat(sprintf("  Total: %d positions\n", nrow(meta_caas)))
+}
+
+cat(sprintf("\nMeta-CAAS data exported to: %s\n", meta_dir))
+cat("\n=== Meta-CAAS Export Complete ===\n")
+```
+
+## Session Information
+
+```{r session_info}
+sessionInfo()
+```

@@ -40,7 +40,7 @@ process RER_TRAIT {
     tuple val(alignmentID), file(alignmentFile)
 
     output:
-    tuple val(alignmentID), file("${alignmentID}.output"), optional: true
+    tuple val(alignmentID), file("${alignmentID}.output")
 
     script:
     // Define extra discovery arguments from params.file

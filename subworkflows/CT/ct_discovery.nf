@@ -34,9 +34,11 @@ process DISCOVERY {
 
     input:
     tuple val(alignmentID), file(alignmentFile)
+    file caas_config
 
     output:
-    tuple val(alignmentID), file("${alignmentID}.output"), optional: true
+    tuple val(alignmentID), path("${alignmentID}.output"), emit: discovery_out, optional: true
+    path("${alignmentID}.background.tsv"), emit: background_out, optional: true
 
     script:
     // Define extra discovery arguments from params.file
@@ -47,18 +49,20 @@ process DISCOVERY {
         echo "Using Singularity/Apptainer"
         /usr/local/bin/_entrypoint.sh ct discovery \\
         -a ${alignmentFile} \\
-        -t ${params.traitfile} \\
+        -t ${caas_config} \\
         -o ${alignmentID}.output \\
+        --background_output ${alignmentID}.background.tsv \\
         --fmt ${params.ali_format} \\
         ${args.replaceAll('\n', ' ')}
         """
     } else {
         """
         echo "Running locally"
-        $baseDir/ct discovery \\
+        $baseDir/subworkflows/CT/local/ct discovery \\
         -a ${alignmentFile} \\
-        -t ${params.traitfile} \\
+        -t ${caas_config} \\
         -o ${alignmentID}.output \\
+        --background_output ${alignmentID}.background.tsv \\
         --fmt ${params.ali_format} \\
         ${args.replaceAll('\n', ' ')}
         """

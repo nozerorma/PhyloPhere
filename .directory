@@ -1,12 +1,2 @@
 [Desktop Entry]
 Icon=folder-orange-github
-
-[Dolphin]
-HeaderColumnWidths=590,149,112,121
-Timestamp=2024,4,26,15,24,32.232
-Version=4
-ViewMode=1
-VisibleRoles=Details_text,Details_size,Details_modificationtime,Details_creationtime,CustomizedDetails
-
-[Settings]
-HiddenFilesShown=true

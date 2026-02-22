@@ -21,7 +21,7 @@
 # File: help.nf
 #
 
-#Detects Convergent Amino Acid Substitutions (CAAS) from a single Multiple Sequence Alignment (MSA).
+#Detects Candidate Amino Acid Substitutions (CAAS) from a single Multiple Sequence Alignment (MSA).
 
 Parameters:
 --alignment               Path to the alignment file. Default: "$baseDir/examples/MSA"
@@ -42,7 +42,7 @@ Help for single tool:   > nextflow run main.nf --ct_tool <tool> --help
 
 Tools           Description
 --------        -------------------------------------------------
-discovery       Detects Convergent Amino Acid Substitutions (CAAS) from
+discovery       Detects Candidate Amino Acid Substitutions (CAAS) from
                 a single Multiple Sequence Alignment (MSA).
 
 resample        Resamples virtual phenotypes for CAAS bootstrap analysis.
@@ -55,7 +55,7 @@ bootstrap       Runs CAAS bootstrap analysis on a on a single MSA.
 def discovery_help = '''
 Discovery Tool Help
 =============================================
-Detects Convergent Amino Acid Substitutions (CAAS) from a single Multiple Sequence Alignment (MSA).
+Detects Candidate Amino Acid Substitutions (CAAS) from a single Multiple Sequence Alignment (MSA).
 
 Usage:
 --alignment             <"input_dir">                           null
@@ -78,11 +78,9 @@ Resamples virtual phenotypes for CAAS bootstrap analysis.
 
 Usage:
 --tree                  <"nwtree_file">                         ${params.tree}
---strategy              <"FGBG|TEMPLATE|PHYLORESTRICTED|BM">    ${params.strategy}
+--strategy              <"FGBG|BM">                             ${params.strategy}
 --fgsize                <"INTEGER">                             ${params.fgsize}
 --bgsize                <"INTEGER">                             null
---template              <"template_file">                       null
---bygroup               <"grouping_file">                       null
 --traitvalues           <"traitvalues_file">                    null
 --cycles                <"INTEGER">                             "1000"
 --chunk_size            <"INTEGER">                             "500"
@@ -92,8 +90,6 @@ Output: Directory containing resample_*.tab files (one per chunk_size cycles)
 
 Strategy requirements:
 FGBG                    --fgsize --bgsize
-TEMPLATE                --template
-PHYLORESTRICTED         --bytemp --limit_by_group
 BM                      --bytemp --traitvalues
 '''
 

@@ -327,17 +327,8 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
     z = caap_result()
     z.substitution = f"{fg_aas}/{bg_aas}"
 
-    # Filter non-standard amino acids (only allow 20 standard AAs)
-    # NOTE: give a thought to this
-    STANDARD_AAS = set('ACDEFGHIKLMNPQRSTVWY-')
-    
-    # Filter non-standard amino acids and treat them as gaps
-    fg_aas_filtered = ''.join([aa if aa in STANDARD_AAS else '-' for aa in fg_aas])
-    bg_aas_filtered = ''.join([aa if aa in STANDARD_AAS else '-' for aa in bg_aas])
-    
-    # If either side has no valid amino acids after filtering, not a CAAP
-    if len(fg_aas_filtered) == 0 or len(bg_aas_filtered) == 0:
-        return (z.caap, z.pattern, z.substitution, z.conserved_pairs)
+    fg_aas_filtered = fg_aas
+    bg_aas_filtered = bg_aas
 
     # Encode amino acids to groups
     # Use get() with None as default and filter out None values for non-standard AAs

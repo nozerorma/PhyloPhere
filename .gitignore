@@ -5,3 +5,10 @@ run_scripts
 apptainer
 .Rproj.user
 .history
+work
+token.tk
+to_integrate
+Docker
+Out
+__pycache__
+

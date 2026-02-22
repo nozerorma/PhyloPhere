@@ -1,0 +1,527 @@
+---
+title: "Trait Composition Analysis"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  trait_file: NULL
+  tree_file: NULL
+  output_dir: !r getwd()
+  seed: ""
+  clade_name: "clade"
+  taxon_of_interest: "family"
+  traitname: "trait"
+  n_trait: ""
+  c_trait: ""
+  tax_id: ""
+  secondary_trait: ""
+  branch_trait: ""
+  discrete_method: "decile"
+  top_quantile: "0.90"
+  bottom_quantile: "0.10"
+---
+
+```{r header}
+
+#  ██████╗ ██╗  ██╗██╗   ██╗██╗      ██████╗ ██████╗ ██╗  ██╗███████╗██████╗ ███████╗
+#  ██╔══██╗██║  ██║╚██╗ ██╔╝██║     ██╔═══██╗██╔══██╗██║  ██║██╔════╝██╔══██╗██╔════╝
+#  ██████╔╝███████║ ╚████╔╝ ██║     ██║   ██║██████╔╝███████║█████╗  ██████╔╝█████╗
+#  ██╔═══╝ ██╔══██║  ╚██╔╝  ██║     ██║   ██║██╔═══╝ ██╔══██║██╔══╝  ██╔══██╗██╔══╝
+#  ██║     ██║  ██║   ██║   ███████╗╚██████╔╝██║     ██║  ██║███████╗██║  ██║███████╗
+#  ╚═╝     ╚═╝  ╚═╝   ╚═╝   ╚══════╝ ╚═════╝ ╚═╝     ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚══════╝
+
+## PHYLOPHERE: A Nextflow pipeline including a complete set
+## of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+### Github: https://github.com/nozerorma/caastools/nf-phylophere
+### Author: Miguel Ramon (miguel.ramon@upf.edu)
+
+#### File: CI-composition.Rmd
+
+```
+
+# Trait Composition Analysis
+This script computes contrasting species pairs for the trait of interest using one of two methods:
+
+- **Jeffreys CI method** (when `n_trait` and `c_trait` count columns exist): computes 95% credibility intervals using a Beta(0.5,0.5) prior and identifies species pairs whose CIs do not overlap.
+- **Discrete categorization** (fallback when count columns are absent): assigns each species to *top*, *bottom*, or *intermediate* groups using one of several threshold strategies (`quartile`, `quintile`, `decile`, `median_sd`, `parameterized`), and treats top–bottom pairs as non-overlapping.
+
+---
+
+## Setup and Directory Configuration
+
+This section configures the working environment, sets directories, and loads necessary functions and libraries.
+
+```{r setup, message=TRUE, warning=TRUE}
+# Make params available in environment before sourcing commons.R
+if (!exists("params")) {
+  stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
+}
+assign("params", params, envir = .GlobalEnv)
+
+# Call the setup function from commons.R
+source("./obj/commons.R")
+setup_rmd()
+
+# discrete_method, top_quantile, bottom_quantile are set by commons.R from params
+debug_log("discrete_method = %s, top_quantile = %s, bottom_quantile = %s",
+          discrete_method, top_quantile, bottom_quantile)
+
+# Debug helper (prints into HTML output)
+if (is.null(getOption("phylo_debug"))) {
+  options(phylo_debug = TRUE)
+}
+if (!exists("phylo_debug_log", envir = .GlobalEnv)) {
+  phylo_debug_log <- character()
+}
+if (!exists("debug_log", inherits = TRUE)) {
+  debug_log <- function(...) {
+    msg <- sprintf(...)
+    phylo_debug_log <<- c(phylo_debug_log, msg)
+    cat("[DEBUG] ", msg, "\n", sep = "")
+  }
+}
+
+# Load additional libraries
+library(dplyr)
+library(tidyr)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+library(ggtext)
+library(paletteer)
+
+color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
+capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name
+capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and deconvoluted trait name
+capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
+
+# Define color palettes, including a colorblind-friendly palette for categories
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "mauve", "gray"
+)
+
+createDir(ci_dir)
+
+```
+
+## 1. Composition Analysis
+
+When population count columns (`n_trait` / `c_trait`) are present, 95% Jeffreys credibility intervals are computed. Otherwise, species are categorised into *top*, *bottom*, and *intermediate* groups using the selected `discrete_method`.
+
+```{r compute_CI, message=TRUE, warning=TRUE}
+# Determine which analysis path to follow
+use_count_data <- has.n && has.c
+debug_log("use_count_data = %s", use_count_data)
+
+if (use_count_data) {
+  # ---- Jeffreys CI path ----
+  debug_log("compute_CI: Jeffreys CI method (n_trait = %s, c_trait = %s)", n_trait, c_trait)
+  library(binom)
+
+  trait_ci <- trait_df %>%
+    group_by(species) %>%
+    dplyr::rename(n_population = .data[[n_trait]],
+                  n_cases      = .data[[c_trait]],
+                  trait        = .data[[trait]]) %>%
+    dplyr::mutate(
+      # Jeffreys beta method CIs
+      trait_ci_lb = binom::binom.confint(n_cases, n_population,
+                                         method = "bayes", priors = c(0.5, 0.5),
+                                         conf.level = 0.95)[, 5],
+      trait_ci_ub = binom::binom.confint(n_cases, n_population,
+                                         method = "bayes", priors = c(0.5, 0.5),
+                                         conf.level = 0.95)[, 6],
+      trait_ci = paste0("[", round(trait_ci_lb, 2), "-", round(trait_ci_ub, 2), "]"),
+      # Category assigned from quartiles of the trait for colouring
+      category = dplyr::case_when(
+        trait >= quantile(trait, 0.75, na.rm = TRUE) ~ "top",
+        trait <= quantile(trait, 0.25, na.rm = TRUE) ~ "bottom",
+        TRUE ~ "intermediate"
+      )
+    ) %>%
+    ungroup()
+
+} else {
+  # ---- Discrete categorization path ----
+  debug_log("compute_CI: discrete method = %s", discrete_method)
+
+  trait_vals <- trait_df[[trait]]
+
+  thresholds <- switch(
+    discrete_method,
+    "quartile" = list(
+      lower = quantile(trait_vals, 0.25, na.rm = TRUE),
+      upper = quantile(trait_vals, 0.75, na.rm = TRUE)
+    ),
+    "quintile" = list(
+      lower = quantile(trait_vals, 0.20, na.rm = TRUE),
+      upper = quantile(trait_vals, 0.80, na.rm = TRUE)
+    ),
+    "median_sd" = list(
+      lower = median(trait_vals, na.rm = TRUE) - sd(trait_vals, na.rm = TRUE),
+      upper = median(trait_vals, na.rm = TRUE) + sd(trait_vals, na.rm = TRUE)
+    ),
+    "decile" = list(
+      lower = quantile(trait_vals, 0.10, na.rm = TRUE),
+      upper = quantile(trait_vals, 0.90, na.rm = TRUE)
+    ),
+    "parameterized" = list(
+      lower = quantile(trait_vals, as.numeric(bottom_quantile), na.rm = TRUE),
+      upper = quantile(trait_vals, as.numeric(top_quantile),    na.rm = TRUE)
+    ),
+    stop(sprintf(
+      "Unknown discrete_method: '%s'. Choose one of: quartile, quintile, decile, median_sd, parameterized",
+      discrete_method
+    ))
+  )
+
+  lower_thresh <- as.numeric(thresholds$lower)
+  upper_thresh <- as.numeric(thresholds$upper)
+  debug_log("compute_CI: lower_thresh = %.4f, upper_thresh = %.4f", lower_thresh, upper_thresh)
+
+  trait_ci <- trait_df %>%
+    dplyr::rename(trait = .data[[trait]]) %>%
+    dplyr::mutate(
+      category     = dplyr::case_when(
+        trait >= upper_thresh ~ "top",
+        trait <= lower_thresh ~ "bottom",
+        TRUE                  ~ "intermediate"
+      ),
+      n_population = NA_real_,
+      n_cases      = NA_real_,
+      # Pseudo-bounds: the thresholds themselves, so downstream columns are consistent
+      trait_ci_lb  = lower_thresh,
+      trait_ci_ub  = upper_thresh,
+      trait_ci     = category
+    )
+
+  cat("Discrete categorization summary:\n")
+  print(table(trait_ci$category))
+  cat(sprintf("Method: %s | lower threshold = %.4f | upper threshold = %.4f\n",
+              discrete_method, lower_thresh, upper_thresh))
+}
+
+# Save results
+write.csv(trait_ci, file.path(ci_dir, "trait_CI.csv"),
+          quote = FALSE, row.names = FALSE)
+
+# Display preview
+head(trait_ci)
+```
+
+## 3. Pairwise Comparison Preparation
+
+This section prepares data for comparing trait values between all pairs of species.
+For the **Jeffreys CI** path, two species are considered non-overlapping when their credibility intervals do not overlap.
+For the **discrete** path, a pair is considered non-overlapping only when one species is in the *top* group and the other in the *bottom* group.
+
+```{r prep_CI, paged.print=TRUE, message=TRUE, warning=TRUE}
+# Helper function to create pairwise comparisons
+create_pairwise_data <- function(ci_data) {
+  ci_subset <- ci_data %>%
+    dplyr::select(species, n_population, n_cases, trait,
+                  trait_ci_lb, trait_ci_ub, category)
+
+  # Generate all pairwise species combinations
+  pairwise <- expand.grid(species1 = ci_subset$species,
+                          species2 = ci_subset$species,
+                          stringsAsFactors = FALSE)
+
+  # Merge species data for each pair
+  pairwise <- pairwise %>%
+    left_join(ci_subset %>% rename_with(~paste0(.x, "1"), .cols = -species),
+              by = c("species1" = "species")) %>%
+    left_join(ci_subset %>% rename_with(~paste0(.x, "2"), .cols = -species),
+              by = c("species2" = "species"))
+
+  pairwise <- pairwise %>%
+    mutate(
+      trait_diff = trait1 - trait2,
+      trait_overlap = if (use_count_data) {
+        # CI-based: overlapping when intervals share any range
+        ci_overlap(trait_ci_lb1, trait_ci_ub1, trait_ci_lb2, trait_ci_ub2)
+      } else {
+        # Discrete: non-overlapping only for top vs bottom contrasts
+        !(category1 %in% c("top", "bottom") &
+          category2 %in% c("top", "bottom") &
+          category1 != category2)
+      },
+      diff_value  = trait_diff,
+      overlap_use = trait_overlap
+    )
+
+  return(pairwise)
+}
+
+# Create pairwise data
+pairwise_data <- create_pairwise_data(trait_ci)
+
+# Keep full pairwise_data for downstream contrast selection files,
+# but generate a visualization-only copy that removes rows involving NA trait values.
+pairwise_data_viz <- pairwise_data %>%
+  dplyr::filter(!is.na(trait1), !is.na(trait2), !is.na(diff_value), !is.na(overlap_use))
+
+if (nrow(pairwise_data_viz) == 0) {
+  warning("No valid non-NA rows available for pairwise visualization")
+}
+
+# Save results
+write.csv(pairwise_data, file.path(ci_dir, "pairwise_data.csv"), 
+          quote = FALSE, row.names = FALSE)
+
+# Display preview
+head(pairwise_data)
+```
+
+## 4. Difference Matrix Creation
+
+This section transforms pairwise data into matrix format for visualization.
+
+```{r diff_matrix, paged.print=TRUE, message=TRUE, warning=TRUE}
+# Helper function to build difference matrix
+build_diff_matrix <- function(pairwise_data_input) {
+  pairwise_data_input %>%
+    select(species1, species2, diff_value) %>%
+    pivot_wider(names_from = species2, values_from = diff_value) %>%
+    column_to_rownames("species1") %>%
+    as.matrix()
+}
+
+# Create matrices
+matrix <- build_diff_matrix(pairwise_data_viz)
+
+# Save matrices
+write.csv(matrix, file.path(ci_dir, "diff_matrix-CI.csv"), 
+          quote = FALSE, row.names = TRUE)
+
+# Display preview
+head(matrix)
+```
+
+## 5. Heatmap Visualization
+
+This section creates heatmaps to visualize pairwise differences in prevalence. Species labels are colored based on prevalence quantiles.
+
+```{r plot_CI, fig.height=12, fig.width=15, message=TRUE, warning=TRUE, dev="png", dpi=320}
+# Simplified function to create colored labels based on trait quantiles
+create_colored_labels <- function(trait_data) {
+  # Calculate quantile thresholds
+  q75 <- quantile(trait_data$trait, 0.75, na.rm = TRUE)
+  q25 <- quantile(trait_data$trait, 0.25, na.rm = TRUE)
+  
+  # Create a lookup table with species and their colors
+  label_df <- trait_data %>%
+    mutate(
+      color = case_when(
+        trait >= q75 ~ as.character(tableau_10["vermillion"]),  # Red for top quartile
+        trait <= q25 ~ as.character(tableau_10["bluish_green"]),  # Green for bottom quartile
+        TRUE ~ "#000000"           # Black for middle
+      )
+    ) %>%
+    select(species, color)
+  
+  # Create named vector of colored HTML labels
+  colored_labels <- setNames(
+    paste0("<span style='color:", label_df$color, ";'>", label_df$species, "</span>"),
+    label_df$species
+  )
+  
+  return(colored_labels)
+}
+
+# Helper function to create legend plot
+create_legend_plot <- function() {
+  legend_df <- tibble(
+    category = c("Top", "Bottom"),
+    color = c(tableau_10["vermillion"], tableau_10["bluish_green"])
+  )
+  
+  ggplot(legend_df, aes(x = 1, y = category, color = category)) +
+    geom_point(size = 0) +
+    scale_color_manual(
+      values = setNames(legend_df$color, legend_df$category),
+      guide = guide_legend(override.aes = list(size = 5))
+    ) +
+    labs(color = "Trait Categories") +
+    theme_void() +
+    theme(
+      legend.position = "right",
+      legend.title = element_text(size = 12),
+      legend.text = element_text(size = 10)
+    )
+}
+
+# Helper function to create heatmap
+create_heatmap <- function(pairwise_data, colored_labels, 
+                          highlight_nonoverlap = TRUE) {
+  # Ensure label mapping is stable across axes
+  if (is.null(names(colored_labels))) {
+    stop("colored_labels must be a named vector with species names.")
+  }
+  pairwise_data <- pairwise_data %>%
+    mutate(
+      species1 = factor(species1, levels = names(colored_labels)),
+      species2 = factor(species2, levels = names(colored_labels))
+    )
+
+  p <- ggplot(pairwise_data, aes(x = species2, y = species1, fill = abs(diff_value))) +
+    geom_tile(color = "black", size = 0.25) +
+    geom_text(aes(label = sprintf("%.2f", abs(diff_value))), size = 3) +
+    scale_fill_gradient(low = "white", high = tableau_10["vermillion"], name = "Difference") +
+    scale_x_discrete(labels = function(x) colored_labels[x]) +
+    scale_y_discrete(labels = function(y) colored_labels[y]) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_markdown(angle = 45, hjust = 1),
+      axis.text.y = element_markdown(angle = 0),
+      panel.grid = element_blank(),
+      legend.position = "none"
+    )
+  
+  # Add bold border for non-overlapping CIs if requested
+  if (highlight_nonoverlap) {
+    p <- p + 
+      geom_tile(data = filter(pairwise_data, !overlap_use), 
+                fill = NA, color = "black", size = 1.5) +
+      labs(
+        x = "Species", y = "Species",
+        title = paste("Pairwise Differences in trait: ", capitalized_trait, " with Non-overlapping CIs", sep = ""),
+        caption = "Bold border: non-overlapping CIs."
+      )
+  } else {
+    p <- p +
+      labs(
+        x = "Species", y = "Species",
+        title = paste("Pairwise Differences in trait: ", capitalized_trait, sep = ""),
+        caption = "Bold border: non-overlapping CIs."
+      )
+  }
+  
+  return(p)
+}
+
+# Create colored labels directly from trait data
+my_labels_colored <- create_colored_labels(trait_ci)
+
+# Save colored labels
+write.csv(my_labels_colored, file.path(ci_dir, "my_labels_colored.csv"), 
+          quote = FALSE, row.names = TRUE)
+
+# Create legend
+legend_plot <- create_legend_plot()
+
+# Create heatmaps with non-overlapping CI highlights
+p_overlap <- create_heatmap(pairwise_data_viz, my_labels_colored, highlight_nonoverlap = TRUE) + 
+  legend_plot + plot_layout(ncol = 2, widths = c(1000, 1))
+
+p_flat <- create_heatmap(pairwise_data_viz, my_labels_colored, highlight_nonoverlap = FALSE) + 
+  legend_plot + plot_layout(ncol = 2, widths = c(1000, 1))
+
+# Save heatmaps
+ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap, 
+       width = 15, height = 12, dpi = "retina")
+ggsave(file.path(ci_dir, "visual_matrix_flat.png"), p_flat, 
+       width = 15, height = 12, dpi = "retina")
+
+# Display plots
+p_overlap
+p_flat
+```
+
+## 6. Polished Tables Preparation
+
+This section creates readable summary tables for the trait and pairwise comparisons.
+
+```{r polished_tables, message=FALSE, warning=FALSE}
+# Conditionally include count columns (only present in Jeffreys CI path)
+count_cols_select  <- if (use_count_data) c("n_population", "n_cases") else character(0)
+
+# Polished table for trait values
+trait_ci_polished <- trait_ci %>%
+  mutate(
+    trait = round(trait, 3),
+  ) %>%
+  dplyr::select(species, all_of(count_cols_select), category,
+                trait, trait_ci_lb, trait_ci_ub, trait_ci) %>%
+  dplyr::rename(
+    "Category"           = category,
+    "Trait"              = trait,
+    "Trait CI Lower Bound" = trait_ci_lb,
+    "Trait CI Upper Bound" = trait_ci_ub,
+    "Trait CI / Group"   = trait_ci
+  )
+
+write.csv(trait_ci_polished, 
+          file.path(ci_dir, "trait_CI_polished.csv"), 
+          quote = FALSE, row.names = FALSE)
+
+# Polished pairwise table - recreate from original data with available CI columns
+trait_diff <- trait_ci %>%
+  dplyr::select(species, all_of(count_cols_select), category, trait,
+                trait_ci_lb, trait_ci_ub, trait_ci)
+
+# Generate all pairwise species combinations
+pairwise_data_full <- expand.grid(species1 = trait_diff$species,
+                                   species2 = trait_diff$species,
+                                   stringsAsFactors = FALSE) %>%
+  left_join(trait_diff %>% rename_with(~paste0(.x, "1"), .cols = -species),
+            by = c("species1" = "species")) %>%
+  left_join(trait_diff %>% rename_with(~paste0(.x, "2"), .cols = -species),
+            by = c("species2" = "species"))
+
+# Create polished pairwise table
+pairwise_data_end_polished <- pairwise_data_full %>%
+  dplyr::mutate(
+    trait_diff = abs(trait1 - trait2),
+    trait_diff = round(trait_diff, 3),
+    # Format CIs for both Wilson and Jeffreys methods
+    trait_CI1 = sprintf("[%.2f-%.2f]", 
+                                 as.numeric(trait_ci_lb1), 
+                                 as.numeric(trait_ci_ub1)),
+    trait_CI2 = sprintf("[%.2f-%.2f]", 
+                                 as.numeric(trait_ci_lb2), 
+                                 as.numeric(trait_ci_ub2)),
+    diff_value = trait_diff
+  ) %>%
+  dplyr::select(species1, species2, 
+         trait_diff, trait_CI1, trait_CI2) %>%
+  dplyr::rename(
+    "Trait Difference" = trait_diff,
+    "Trait CI1" = trait_CI1,        
+    "Trait CI2" = trait_CI2
+  )
+
+write.csv(pairwise_data_end_polished, 
+          file.path(ci_dir, "pairwise_data_end_polished.csv"), 
+          quote = FALSE, row.names = FALSE)
+
+# Display preview
+head(trait_ci_polished)
+
+```
+
+## Session Information
+
+```{r debug_dump, results='asis'}
+
+if (length(phylo_debug_log) > 0) {
+  cat("### Debug log\n")
+  cat(paste0("[DEBUG] ", phylo_debug_log, "\n"))
+}
+
+```
+
+```{r session_info}
+sessionInfo()
+```

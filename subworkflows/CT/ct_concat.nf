@@ -1,5 +1,5 @@
 /*
- * Concatenation processes for CAAS tools outputs
+ * Concatenation processes for CT tools outputs
  * Combines multiple output files, keeping only the first header
  */
 
@@ -8,7 +8,7 @@ process CONCAT_DISCOVERY {
     publishDir "${params.outdir}/caastools", mode: 'copy'
 
     input:
-    val(discovery_dir)
+    path(discovery_files, stageAs: "discovery_*")
 
     output:
     path("discovery.tab"), emit: discovery_concat
@@ -18,22 +18,24 @@ process CONCAT_DISCOVERY {
     #!/usr/bin/env bash
     set -euo pipefail
     
-    echo "=== CONCAT_DISCOVERY DEBUG ==="
+    echo "=== CONCAT_DISCOVERY ==="
     echo "Working directory: \$(pwd)"
-    echo "Discovery directory: ${discovery_dir}"
+    echo "Staged files:"
+    ls -la
     echo ""
     
-    # Find all .output files in the published directory and sort them
-    mapfile -t discovery_files < <(find "${discovery_dir}" -type f -name "*.output" | sort)
+    # Find all discovery_* files in the staged directory (files or symlinks)
+    mapfile -t discovery_files < <(find . -maxdepth 1 -name "discovery_*" ! -name ".*" | sort)
     
     echo "Found \${#discovery_files[@]} discovery files:"
     printf '%s\n' "\${discovery_files[@]}"
     echo ""
-    
+
     # Check if we have any files
     if [ \${#discovery_files[@]} -eq 0 ]; then
-        echo "WARNING: No discovery files found - creating header-only file"
-        echo "Gene\tPosition\tAncestral\tDerived\tType\tForeground\tBackground" > discovery.tab
+        echo "WARNING: No discovery files found - creating empty discovery table with expected schema"
+        # Keep schema aligned with CT_SIGNIFICATION expectations (Pattern + Pvalue required)
+        echo "Gene\tMode\tCAAP_Group\tTrait\tPosition\tSubstitution\tEncoded\tPvalue\tPattern\tFFGN\tFBGN\tGFG\tGBG\tMFG\tMBG\tFFG\tFBG\tMS\tConservedPair\tConservedPairs" > discovery.tab
         exit 0
     fi
     
@@ -58,12 +60,69 @@ process CONCAT_DISCOVERY {
     """
 }
 
+process CONCAT_BACKGROUND {
+    tag "Concatenating background outputs"
+    publishDir "${params.outdir}/caastools", mode: 'copy'
+
+    input:
+    path(background_files, stageAs: "background_*")
+
+    output:
+    path("background.output"), emit: background_concat
+    path("background_genes.output"), emit: background_genes
+
+    script:
+    """
+    #!/usr/bin/env bash
+    set -euo pipefail
+    
+    echo "=== CONCAT_BACKGROUND ==="
+    echo "Working directory: \$(pwd)"
+    echo "Staged files:"
+    ls -la
+    echo ""
+    
+    # Find all background_* files in the staged directory (files or symlinks)
+    mapfile -t background_files < <(find . -maxdepth 1 -name "background_*" ! -name ".*" | sort)
+    
+    echo "Found \${#background_files[@]} background files:"
+    printf '%s\n' "\${background_files[@]}"
+    echo ""
+
+    # Check if we have any files
+    if [ \${#background_files[@]} -eq 0 ]; then
+        echo "WARNING: No background files found - creating header-only file"
+        echo "Gene\tPosition" > background.output
+        touch background_genes.output
+        exit 0
+    fi
+
+    echo "First file preview (\${background_files[0]}):"
+    head -5 "\${background_files[0]}" || echo "ERROR: Cannot read first file"
+    echo "Line count: \$(wc -l < "\${background_files[0]}")"
+    echo ""
+
+    # Concatenate all background files (no headers to strip)
+    cat "\${background_files[@]}" > background.output
+
+    echo "Final background file line count: \$(wc -l < background.output)"
+    echo "Final file preview:"
+    head -10 background.output
+    
+    # Generate background_genes.output: unique gene list where Position is not empty
+    echo ""
+    echo "Generating background_genes.output..."
+    awk -F'\t' 'NF >= 2 && \$2 != "" && \$2 != "Position" {print \$1}' background.output | sort -u > background_genes.output
+    echo "Unique genes with positions: \$(wc -l < background_genes.output)"
+    """
+}
+
 process CONCAT_RESAMPLE {
     tag "Concatenating resample outputs"
     publishDir "${params.outdir}/caastools", mode: 'copy'
 
     input:
-    val(resample_dir)
+    path(resample_dir)
 
     output:
     path("resample.tab"), emit: resample_concat
@@ -73,13 +132,15 @@ process CONCAT_RESAMPLE {
     #!/usr/bin/env bash
     set -euo pipefail
     
-    echo "=== CONCAT_RESAMPLE DEBUG ==="
+    echo "=== CONCAT_RESAMPLE ==="
     echo "Working directory: \$(pwd)"
-    echo "Resample directory: ${resample_dir}"
+    echo "Staged directory: ${resample_dir}"
+    echo "Contents of staged directory:"
+    ls -la ${resample_dir}/
     echo ""
     
-    # Find all resample_*.tab files in the published directory and sort them numerically
-    mapfile -t resample_files < <(find "${resample_dir}" -type f -name "resample_*.tab" | sort -V)
+    # Find all resample_*.tab files in the staged directory and sort them numerically
+    mapfile -t resample_files < <(find ${resample_dir}/ -type f -name "resample_*.tab" | sort -V)
     
     echo "Found \${#resample_files[@]} resample files:"
     printf '%s\n' "\${resample_files[@]}"
@@ -118,7 +179,7 @@ process CONCAT_BOOTSTRAP {
     publishDir "${params.outdir}/caastools", mode: 'copy'
 
     input:
-    val(bootstrap_dir)
+    path(bootstrap_files, stageAs: "bootstrap_*")
 
     output:
     path("bootstrap.tab"), emit: bootstrap_concat
@@ -128,13 +189,14 @@ process CONCAT_BOOTSTRAP {
     #!/usr/bin/env bash
     set -euo pipefail
     
-    echo "=== CONCAT_BOOTSTRAP DEBUG ==="
+    echo "=== CONCAT_BOOTSTRAP ==="
     echo "Working directory: \$(pwd)"
-    echo "Bootstrap directory: ${bootstrap_dir}"
+    echo "Staged files:"
+    ls -la
     echo ""
     
-    # Find all .output files in the published directory and sort them
-    mapfile -t bootstrap_files < <(find "${bootstrap_dir}" -type f -name "*.bootstraped.output" | sort)
+    # Find all bootstrap_* files in the staged directory (files or symlinks)
+    mapfile -t bootstrap_files < <(find . -maxdepth 1 -name "bootstrap_*" ! -name ".*" | sort)
     
     echo "Found \${#bootstrap_files[@]} bootstrap files:"
     printf '%s\n' "\${bootstrap_files[@]}"
@@ -143,7 +205,7 @@ process CONCAT_BOOTSTRAP {
     # Check if we have any files
     if [ \${#bootstrap_files[@]} -eq 0 ]; then
         echo "WARNING: No bootstrap files found - creating header-only file"
-        echo "Gene\tPosition\tCount\tProportion" > bootstrap.tab
+        echo "Gene@Position\tCAAP_Group\tCount\tTotal\tProportion" > bootstrap.tab
         exit 0
     fi
     

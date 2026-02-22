@@ -1,0 +1,134 @@
+<!--
+  ~ Copyright 2013-2024, Seqera Labs
+  ~
+  ~ Licensed under the Apache License, Version 2.0 (the "License");
+  ~ you may not use this file except in compliance with the License.
+  ~ You may obtain a copy of the License at
+  ~
+  ~     http://www.apache.org/licenses/LICENSE-2.0
+  ~
+  ~ Unless required by applicable law or agreed to in writing, software
+  ~ distributed under the License is distributed on an "AS IS" BASIS,
+  ~ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  ~ See the License for the specific language governing permissions and
+  ~ limitations under the License.
+  -->
+<html>
+<head>
+<meta name="viewport" content="width=device-width, user-scalable=no, initial-scale=1, maximum-scale=1">
+</head>
+<body>
+<pre class="mermaid" style="text-align: center;">
+%%{
+  init: {
+    'theme': 'base',
+    'themeVariables': {
+      'primaryColor': '#B6ECE2',
+      'primaryTextColor': '#160F26',
+      'primaryBorderColor': '#065647',
+      'lineColor': '#545555',
+      'clusterBkg': '#BABCBD22',
+      'clusterBorder': '#DDDEDE',
+      'fontFamily': 'arial'
+    }
+  }
+}%%
+flowchart TB
+    subgraph " "
+    v0["trait_file"]
+    v1["tree_file"]
+    v18["Channel.fromPath"]
+    end
+    subgraph "CONTRAST_SELECTION [CONTRAST_SELECTION]"
+    v2(["DATASET_PRUNE"])
+    v5(["DATASET_EXPLORATION"])
+    v9(["CI_COMPOSITION_REPORT"])
+    v13(["CONTRAST_ALGORITHM"])
+    end
+    subgraph " "
+    v3[" "]
+    v4[" "]
+    v6[" "]
+    v7[" "]
+    v8[" "]
+    v10[" "]
+    v11[" "]
+    v12[" "]
+    v14[" "]
+    v15[" "]
+    v16[" "]
+    v17["contrast_results_dir"]
+    v30[" "]
+    v34[" "]
+    v35[" "]
+    v38[" "]
+    v41[" "]
+    v47[" "]
+    v48[" "]
+    v53[" "]
+    end
+    subgraph "CT [CT]"
+    v25(["DISCOVERY"])
+    v29(["CONCAT_DISCOVERY"])
+    v33(["CONCAT_BACKGROUND"])
+    v39(["RESAMPLE"])
+    v40(["CONCAT_RESAMPLE"])
+    v46(["BOOTSTRAP"])
+    v52(["CONCAT_BOOTSTRAP"])
+    v19(( ))
+    v26(( ))
+    v31(( ))
+    v36(( ))
+    v49(( ))
+    end
+    v0 --> v2
+    v1 --> v2
+    v2 --> v5
+    v2 --> v4
+    v2 --> v3
+    v2 --> v9
+    v2 --> v13
+    v5 --> v9
+    v5 --> v8
+    v5 --> v7
+    v5 --> v6
+    v9 --> v13
+    v9 --> v12
+    v9 --> v11
+    v9 --> v10
+    v13 --> v17
+    v13 --> v16
+    v13 --> v25
+    v13 --> v39
+    v13 --> v15
+    v13 --> v14
+    v13 --> v46
+    v18 --> v19
+    v19 --> v25
+    v25 --> v19
+    v25 --> v26
+    v25 --> v31
+    v25 --> v36
+    v26 --> v29
+    v29 --> v30
+    v31 --> v33
+    v33 --> v35
+    v33 --> v34
+    v36 --> v38
+    v39 --> v40
+    v39 --> v19
+    v40 --> v41
+    v19 --> v46
+    v46 --> v48
+    v46 --> v47
+    v46 --> v49
+    v49 --> v52
+    v52 --> v53
+
+</pre>
+<script type="module">
+  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+  mermaid.initialize({ startOnLoad: true, maxTextSize: Number.MAX_SAFE_INTEGER, maxEdges: Number.MAX_SAFE_INTEGER });
+</script>
+</body>
+</html>

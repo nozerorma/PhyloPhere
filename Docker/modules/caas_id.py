@@ -90,16 +90,9 @@ def process_position(position, multiconfig, species_in_alignment):
     z.missing = list(set(multiconfig.s2t.keys()) -  confirmed_species)
 
     # Load aas2species
-    # Define standard amino acids (20 standard AAs + gap)
-    STANDARD_AAS = set('ACDEFGHIKLMNPQRSTVWY-')
-    
     for x in position.keys():
         z.position = position[x].split("@")[1]
         aa = position[x].split("@")[0].upper()
-
-        # Treat non-standard amino acids as gaps
-        if aa not in STANDARD_AAS:
-            aa = "-"
         
         try:
             z.aas2species[aa].append(x)
@@ -234,17 +227,8 @@ def iscaas(input_string, multiconfig=None, position_dict=None, max_conserved=0, 
     fg_string = twosides[0]
     bg_string = twosides[1]
     
-    # Filter out non-standard amino acids before processing
-    # Only allow 20 standard amino acids (no gaps in this context)
-    # NOTE: this is weird. why do i have two logics for filtering gaps? check original author's intent
-    STANDARD_AAS = set('ACDEFGHIKLMNPQRSTVWY')
-    fg_string_filtered = ''.join([aa for aa in fg_string if aa in STANDARD_AAS])
-    bg_string_filtered = ''.join([aa for aa in bg_string if aa in STANDARD_AAS])
-    
-    # If either side has no valid amino acids after filtering, not a CAAS
-    if len(fg_string_filtered) == 0 or len(bg_string_filtered) == 0:
-        z.caas = False
-        return z
+    fg_string_filtered = fg_string
+    bg_string_filtered = bg_string
     
     # Convert to unique amino acids for pattern determination
     fg_unique = list(set(fg_string_filtered))
