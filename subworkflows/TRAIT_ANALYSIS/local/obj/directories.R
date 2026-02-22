@@ -31,7 +31,7 @@ phylo_distribution_dir <- file.path(data_exploration_dir, "4.Phylogenetic_distri
 ci_dir <- file.path(data_exploration_dir, "5.CI_overlaps")
 
 # CAAS directories
-caas_dir <- file.path(resultsDir, "2.CAAS")
+caas_dir <- file.path(resultsDir, "2.CT")
 traitfile_dir <- file.path(caas_dir, "1.Traitfiles")
 bootstrap_traitfile_dir <- file.path(caas_dir, "2.Bootstrap_traitfiles")
 

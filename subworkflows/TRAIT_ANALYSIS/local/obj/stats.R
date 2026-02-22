@@ -66,6 +66,37 @@ stats.f <- function(df) {
   g_q75 <- quantile(df_num[[trait]], 0.75, na.rm = TRUE)
   g_iqr <- IQR(df_num[[trait]], na.rm = TRUE)
 
+  # Dynamic extreme thresholds from discrete_method (set by commons.R / params)
+  # Options: quartile, quintile, decile, median_sd, parameterized
+  disc_method <- if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile"
+  tq <- if (exists("top_quantile",    inherits = TRUE)) as.numeric(top_quantile)    else 0.90
+  bq <- if (exists("bottom_quantile", inherits = TRUE)) as.numeric(bottom_quantile) else 0.10
+
+  # Pre-compute all threshold pairs unconditionally (used for contrast plot visualization)
+  g_q10 <- unname(quantile(df_num[[trait]], 0.10, na.rm = TRUE))
+  g_q20 <- unname(quantile(df_num[[trait]], 0.20, na.rm = TRUE))
+  g_q80 <- unname(quantile(df_num[[trait]], 0.80, na.rm = TRUE))
+  g_q90 <- unname(quantile(df_num[[trait]], 0.90, na.rm = TRUE))
+
+  lower_thresh <- switch(disc_method,
+    "quartile"      = g_q25,
+    "quintile"      = g_q20,
+    "decile"        = g_q10,
+    "median_sd"     = g_median - g_sd,
+    "parameterized" = unname(quantile(df_num[[trait]], bq, na.rm = TRUE)),
+    g_q10  # fallback to decile
+  )
+  upper_thresh <- switch(disc_method,
+    "quartile"      = g_q75,
+    "quintile"      = g_q80,
+    "decile"        = g_q90,
+    "median_sd"     = g_median + g_sd,
+    "parameterized" = unname(quantile(df_num[[trait]], tq, na.rm = TRUE)),
+    g_q90  # fallback to decile
+  )
+  debug_log("stats.f: disc_method = %s, lower_thresh = %.4f, upper_thresh = %.4f",
+            disc_method, lower_thresh, upper_thresh)
+
   # Taxon stats separately, then join
   taxon_stats <- df_num %>%
     dplyr::group_by(.data[[taxa_col]]) %>%
@@ -85,8 +116,14 @@ stats.f <- function(df) {
       g_mean = g_mean,
       g_median = g_median,
       g_sd = g_sd,
+      g_q10 = g_q10,
+      g_q20 = g_q20,
       g_q25 = g_q25,
       g_q75 = g_q75,
+      g_q80 = g_q80,
+      g_q90 = g_q90,
+      lower_thresh = lower_thresh,
+      upper_thresh = upper_thresh,
       outlier = dplyr::case_when(
         .data[[trait_col]] < (g_q25 - 1.5 * g_iqr) ~ "low_outlier",
         .data[[trait_col]] > (g_q75 + 1.5 * g_iqr) ~ "high_outlier",
@@ -98,8 +135,8 @@ stats.f <- function(df) {
         TRUE ~ "normal"
       ),
       global_label = dplyr::case_when(
-        (.data[[trait_col]] < g_q25) & (.data[[trait_col]] < g_median) ~ "low_extreme",
-        (.data[[trait_col]] > g_q75) & (.data[[trait_col]] > g_median) ~ "high_extreme",
+        (.data[[trait_col]] <= lower_thresh) & (.data[[trait_col]] < g_median) ~ "low_extreme",
+        (.data[[trait_col]] >= upper_thresh) & (.data[[trait_col]] > g_median) ~ "high_extreme",
         TRUE ~ "normal"
       )
     ) %>%

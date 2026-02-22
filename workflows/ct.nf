@@ -45,8 +45,11 @@ workflow CT {
         // Output channels for emit block - must be defined at workflow level
         def discovery_concat_out = Channel.empty()
         def background_concat_out = Channel.empty()
+        def background_raw_out = Channel.empty()
         def background_genes_out = Channel.empty()
         def bootstrap_concat_out = Channel.empty()
+        def trait_file_emit = Channel.empty()
+        def tree_file_emit = Channel.empty()
         
     if (params.ct_tool) {
         def toolsToRun = params.ct_tool.split(',')
@@ -84,13 +87,17 @@ workflow CT {
             log.info "No contrast selection output provided for CT analyses."
             assert params.caas_config : "CT workflow requires --caas_config."
             trait_file_out = file(params.caas_config)
+            tree_file_out = file(params.tree)
             if (toolsToRun.contains('resample') || toolsToRun.contains('bootstrap')) {
                 if (params.traitvalues) {
                     trait_val = file(params.traitvalues)
-                    tree_file_out = file(params.tree)
                 }
             }
         }
+
+        // Normalize trait/tree output channels for downstream modules
+        trait_file_emit = (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) ? trait_file_out : Channel.value(trait_file_out)
+        tree_file_emit  = (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) ? tree_file_out  : Channel.value(tree_file_out)
 
         if (toolsToRun.contains('discovery')) {
             discovery_out = DISCOVERY(align_tuple, trait_file_out)
@@ -110,6 +117,7 @@ workflow CT {
             discovery_concat_out = CONCAT_DISCOVERY.out.discovery_concat
             
             // Concatenate background outputs - collect actual files for staging
+            background_raw_out = discovery_out.background_out
             discovery_out.background_out
                 .collect()
                 .ifEmpty([])
@@ -124,26 +132,36 @@ workflow CT {
 
             // Handle channels differently based on whether they come from contrast_selection
             if (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) {
-                // tree_file_out, trait_file_out, and trait_val are already channels from CONTRAST_SELECTION
+                // tree_file_out, trait_file_out, and trait_val are already channels from CONTRAST_SELECTION.
+                // Combine with resample_trigger to enforce discovery → resample ordering.
+                // File-staging collisions are prevented by stageAs aliases in the RESAMPLE process.
                 nw_tree = tree_file_out
                     .combine(resample_trigger)
-                    .map { row -> row[0] }
+                    .map { row ->
+                        (row instanceof List || row instanceof Object[]) ? row[0] : row
+                    }
                 caas_config = trait_file_out
                     .combine(resample_trigger)
-                    .map { row -> row[0] }
+                    .map { row ->
+                        (row instanceof List || row instanceof Object[]) ? row[0] : row
+                    }
                 trait_values = trait_val
                     .combine(resample_trigger)
-                    .map { row -> row[0] }
+                    .map { row ->
+                        (row instanceof List || row instanceof Object[]) ? row[0] : row
+                    }
             } else {
                 // tree_file_out, trait_file_out, and trait_val are file objects that need to be channelized
-                nw_tree = resample_trigger.map { tree_file_out }
-                caas_config = resample_trigger.map { trait_file_out }
-                trait_values = resample_trigger.map { trait_val }
+                nw_tree = resample_trigger.map { file(tree_file_out) }
+                caas_config = resample_trigger.map { file(trait_file_out) }
+                trait_values = resample_trigger.map { file(trait_val) }
             }
             resample_out = RESAMPLE(nw_tree, caas_config, trait_values)
             
             // Concatenate all resample outputs - pass directory for staging
             CONCAT_RESAMPLE(resample_out)
+            // Update resample_out to the concatenated file so bootstrap has a live channel
+            resample_out = CONCAT_RESAMPLE.out.resample_concat
         }
         if (toolsToRun.contains('bootstrap')) {
             if (toolsToRun.contains('discovery')) {
@@ -200,7 +218,10 @@ workflow CT {
     
     emit:
         discovery_file = discovery_concat_out
+        background_file_raw = background_raw_out
         background_file = background_concat_out
         background_genes = background_genes_out
         bootstrap_file = bootstrap_concat_out
+        trait_file = trait_file_emit
+        tree_file = tree_file_emit
 }

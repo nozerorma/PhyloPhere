@@ -330,6 +330,7 @@ def process_single_gene(
     output_dir: Path,
     db_queue: Optional[Any] = None,
     ensembl_genes: Optional[Set[str]] = None,
+    use_all_mrca_filter: bool = False,
 ) -> Tuple[str, Optional[Path]]:
 
     try:
@@ -380,7 +381,7 @@ def process_single_gene(
                 logger.debug(f"Precomputed ASR not found for {gene}: {e}")
 
         elif asr_mode == "compute":
-            gene_output_dir = output_dir / "asr"
+            gene_output_dir = Path(asr_cache_dir) if asr_cache_dir else output_dir / "asr"
             gene_output_dir.mkdir(parents=True, exist_ok=True)
 
             from src.asr.asr_single import SingleGeneASRConfig
@@ -522,6 +523,7 @@ def process_single_gene(
             convergence_mode=convergence_mode,
             asr_mode=asr_mode,
             include_non_significant=include_non_significant,
+            use_all_mrca_filter=use_all_mrca_filter,
         )
 
         if not include_non_significant:
@@ -658,6 +660,7 @@ def process_all_genes(
     ensembl_genes_file: Optional[str] = None,
     max_tasks_per_child: Optional[int] = None,
     max_codeml: Optional[int] = None,
+    use_all_mrca_filter: bool = False,
 ) -> Tuple[List[Dict], Optional[Dict]]:
 
     effective_workers, threads_per_gene = plan_concurrency(
@@ -772,6 +775,7 @@ def process_all_genes(
                         db_queue,
                         ensembl_genes,
                     ),
+                    kwds={'use_all_mrca_filter': use_all_mrca_filter},
                 )
             )
 

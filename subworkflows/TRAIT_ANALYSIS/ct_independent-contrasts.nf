@@ -18,9 +18,9 @@ process CONTRAST_ALGORITHM {
     output:
     path "data_exploration", emit: contrast_results_dir
     path "*.html", emit: reports, optional: true
-    path "data_exploration/2.CAAS/1.Traitfiles/traitfile.tab", emit: trait_file_out
-    path "data_exploration/2.CAAS/3.Tree/pruned_tree_file.nwk", emit: tree_file_out
-    path "data_exploration/2.CAAS/2.Bootstrap_traitfiles/boot_traitfile.tab", emit: bootstrap_trait_file_out
+    path "data_exploration/2.CT/1.Traitfiles/traitfile.tab", emit: trait_file_out
+    path "data_exploration/2.CT/3.Tree/pruned_tree_file.nwk", emit: tree_file_out
+    path "data_exploration/2.CT/2.Bootstrap_traitfiles/boot_traitfile.tab", emit: bootstrap_trait_file_out
     path "data_exploration/**/*.csv", emit: data_tables, optional: true
     path "data_exploration/**/*.png", emit: plots, optional: true
 
@@ -62,8 +62,8 @@ process CONTRAST_ALGORITHM {
         "
         
         # Copy the tree file to the expected output location
-        mkdir -p ${results_dir}/2.CAAS/3.Tree
-        cp ${tree_file} ${results_dir}/2.CAAS/3.Tree/pruned_tree_file.nwk
+        mkdir -p ${results_dir}/2.CT/3.Tree
+        cp ${tree_file} ${results_dir}/2.CT/3.Tree/pruned_tree_file.nwk
         """
     } else {
         """
@@ -91,8 +91,8 @@ process CONTRAST_ALGORITHM {
         "
         
         # Copy the tree file to the expected output location
-        mkdir -p ${results_dir}/2.CAAS/3.Tree
-        cp ${tree_file} ${results_dir}/2.CAAS/3.Tree/pruned_tree_file.nwk
+        mkdir -p ${results_dir}/2.CT/3.Tree
+        cp ${tree_file} ${results_dir}/2.CT/3.Tree/pruned_tree_file.nwk
         """
     }
 }

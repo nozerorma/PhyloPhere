@@ -1,0 +1,806 @@
+---
+title: "WebGestalt ORA Analysis"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  background_file: NULL
+  background_basename: NULL
+  gene_list_files: NULL
+  output_dir: "ora"
+  project_name: "ORA_WebGestalt"
+  organism: "hsapiens"
+  ora_databases: "geneontology_Biological_Process_noRedundant,geneontology_Cellular_Component_noRedundant,geneontology_Molecular_Function_noRedundant,pathway_KEGG,pathway_Reactome,pathway_WikiPathways"
+  min_num: 5
+  max_num: 500
+  fdr_thr: 0.1
+  report_num: 20
+  top_thr: 15
+  n_threads: 8
+  enable_spider_plot: true
+  enable_overlap_heatmap: true
+  enable_enrichment_map: true
+  overlap_top_terms: 50
+  compare_metric: "jaccard"
+  enable_enrichment_heatmap: true
+  enable_upset_plot: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  dev = 'png',
+  dpi = 320
+)
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(kableExtra)
+  library(clusterProfiler)
+  library(org.Hs.eg.db)
+  library(WebGestaltR)
+  library(paletteer)
+})
+
+# ── Shared colour palette (mirrors CT_postproc.Rmd for consistency) ──────────
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "brown", "gray"
+)
+
+has_pkg <- function(pkg) requireNamespace(pkg, quietly = TRUE)
+
+`%||%` <- function(a, b) {
+  if (!is.null(a) && length(a) > 0 && !all(is.na(a))) a else b
+}
+
+createDir <- function(directory) {
+  if (!dir.exists(directory)) dir.create(directory, recursive = TRUE, showWarnings = FALSE)
+}
+
+read_gene_vector <- function(path) {
+  x <- readr::read_lines(path)
+  x <- trimws(x)
+  x <- x[x != ""]
+  unique(x)
+}
+
+safe_symbol_to_entrez <- function(genes) {
+  if (length(genes) == 0) return(character(0))
+  mapped <- suppressWarnings(
+    bitr(
+      genes,
+      fromType = "SYMBOL",
+      toType = "ENTREZID",
+      OrgDb = org.Hs.eg.db,
+      drop = TRUE
+    )
+  )
+  if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
+  unique(as.character(mapped$ENTREZID))
+}
+
+bg_file <- params$background_file
+if (!file.exists(bg_file) && !is.null(params$background_basename)) {
+  if (file.exists(params$background_basename)) bg_file <- params$background_basename
+}
+
+if (is.null(bg_file) || !file.exists(bg_file)) {
+  stop("Error: background_file not found")
+}
+# Resolve background to absolute path so it survives any working-directory changes
+bg_file <- normalizePath(bg_file, mustWork = TRUE)
+bg_basename <- basename(bg_file)
+
+# Auto-detect gene list files from the current working directory, excluding the
+# background file.  Using normalizePath() ensures that subsequent reads succeed
+# even when WebGestaltR changes the working directory during ORA execution.
+gene_list_files <- params$gene_list_files
+if (is.null(gene_list_files) || length(gene_list_files) == 0) {
+  gene_list_files <- list.files(pattern = "\\.txt$", full.names = TRUE)
+  gene_list_files <- gene_list_files[basename(gene_list_files) != bg_basename]
+}
+gene_list_files <- gene_list_files[file.exists(gene_list_files)]
+# Always normalise to absolute paths
+gene_list_files <- normalizePath(gene_list_files, mustWork = FALSE)
+gene_list_files <- gene_list_files[file.exists(gene_list_files)]
+if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
+
+dbs <- strsplit(as.character(params$ora_databases), ",")[[1]]
+dbs <- trimws(dbs)
+dbs <- dbs[dbs != ""]
+if (length(dbs) == 0) stop("Error: ora_databases is empty")
+
+ora_root <- "."
+ora_results_dir <- "ora_results"
+ora_summary_dir <- "ora_summary"
+ora_plots_dir <- "ora_plots"
+ora_files_dir <- "ORA_files"
+cache_dir <- file.path(ora_files_dir, ".cache")
+
+createDir(ora_root)
+createDir(ora_results_dir)
+createDir(ora_summary_dir)
+createDir(ora_plots_dir)
+createDir(ora_files_dir)
+createDir(cache_dir)
+```
+
+# ORA configuration
+
+```{r config_overview}
+cat("=== ORA configuration ===\n")
+cat("Background file:", bg_file, "\n")
+cat("Gene list files:", length(gene_list_files), "\n")
+cat("Organism:", params$organism, "\n")
+cat("Databases:", paste(dbs, collapse = ", "), "\n")
+cat("Thresholds: min_num=", params$min_num, ", max_num=", params$max_num, ", fdr_thr=", params$fdr_thr, "\n", sep = "")
+cat("Spider plot:", params$enable_spider_plot, "\n")
+cat("Overlap heatmap:", params$enable_overlap_heatmap, "\n")
+cat("Enrichment map:", params$enable_enrichment_map, "\n")
+cat("Overlap top terms:", params$overlap_top_terms, "\n")
+cat("Overlap metric:", params$compare_metric, "\n")
+```
+
+# Parse background and convert to ENTREZ
+
+```{r parse_background}
+bg_symbols <- read_gene_vector(bg_file)
+bg_entrez <- safe_symbol_to_entrez(bg_symbols)
+
+cat("Background symbols:", length(bg_symbols), "\n")
+cat("Background ENTREZ mapped:", length(bg_entrez), "\n")
+
+if (length(bg_entrez) < params$min_num) {
+  stop("Error: background ENTREZ set is too small for ORA")
+}
+```
+
+# Run ORA per gene list
+
+```{r run_ora}
+run_single_ora <- function(gene_file, bg_entrez, dbs) {
+  genes_sym <- read_gene_vector(gene_file)
+  genes_entrez <- safe_symbol_to_entrez(genes_sym)
+
+  list_name <- tools::file_path_sans_ext(basename(gene_file))
+  out_dir <- file.path(ora_results_dir, list_name)
+  createDir(out_dir)
+
+  if (length(genes_entrez) < params$min_num) {
+    return(list(
+      list_name = list_name,
+      input_n = length(genes_sym),
+      mapped_n = length(genes_entrez),
+      status = "skipped_too_few_mapped_genes",
+      n_rows = 0,
+      results = tibble()
+    ))
+  }
+
+  res <- tryCatch({
+    WebGestaltR(
+      enrichMethod = "ORA",
+      organism = params$organism,
+      enrichDatabase = dbs,
+      interestGene = genes_entrez,
+      interestGeneType = "entrezgene",
+      referenceGene = bg_entrez,
+      referenceGeneType = "entrezgene",
+      minNum = params$min_num,
+      maxNum = params$max_num,
+      sigMethod = "fdr",
+      fdrMethod = "BH",
+      fdrThr = params$fdr_thr,
+      topThr = params$top_thr,
+      reportNum = params$report_num,
+      outputDirectory = out_dir,
+      projectName = list_name,
+      dagColor = "continuous",
+      setCoverNum = 10,
+      nThreads = params$n_threads,
+      cache = cache_dir,
+      isParallel = TRUE
+    )
+  }, error = function(e) {
+    message(sprintf("ORA failed for %s: %s", list_name, e$message))
+    NULL
+  })
+
+  if (is.null(res) || nrow(res) == 0) {
+    return(list(
+      list_name = list_name,
+      input_n = length(genes_sym),
+      mapped_n = length(genes_entrez),
+      status = "no_results",
+      n_rows = 0,
+      results = tibble()
+    ))
+  }
+
+  res2 <- res %>% mutate(gene_list = list_name)
+  readr::write_tsv(res2, file.path(ora_summary_dir, paste0(list_name, "_results.tsv")))
+
+  list(
+    list_name = list_name,
+    input_n = length(genes_sym),
+    mapped_n = length(genes_entrez),
+    status = "ok",
+    n_rows = nrow(res2),
+    results = res2
+  )
+}
+
+ora_runs <- lapply(gene_list_files, run_single_ora, bg_entrez = bg_entrez, dbs = dbs)
+```
+
+# Summary and plots
+
+```{r summary_and_plots}
+run_summary <- purrr::map_dfr(ora_runs, ~tibble(
+  gene_list = .x$list_name,
+  input_genes = .x$input_n,
+  mapped_entrez = .x$mapped_n,
+  status = .x$status,
+  n_results = .x$n_rows
+))
+
+all_results <- purrr::map_dfr(ora_runs, "results")
+
+readr::write_tsv(run_summary, file.path(ora_summary_dir, "ora_run_summary.tsv"))
+readr::write_tsv(all_results, file.path(ora_summary_dir, "ora_all_results.tsv"))
+
+kable(run_summary, caption = "ORA run summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+if (nrow(all_results) > 0) {
+  fdr_col <- c("FDR", "fdr", "adjP", "fdrBH", "fdr_bh")
+  fdr_col <- fdr_col[fdr_col %in% names(all_results)][1] %||% "FDR"
+  db_col <- c("database", "enrichmentCategory", "category")
+  db_col <- db_col[db_col %in% names(all_results)][1] %||% "database"
+  desc_col <- c("description", "geneSet", "term", "name")
+  desc_col <- desc_col[desc_col %in% names(all_results)][1] %||% "description"
+
+  std_results <- all_results %>%
+    mutate(
+      FDR_std = suppressWarnings(as.numeric(.data[[fdr_col]])),
+      FDR_std = pmax(FDR_std, .Machine$double.xmin, na.rm = TRUE),
+      database_std = as.character(.data[[db_col]]),
+      term_std = as.character(.data[[desc_col]]),
+      neglog10FDR = -log10(FDR_std)
+    ) %>%
+    filter(!is.na(FDR_std), !is.na(term_std), term_std != "")
+
+  top_hits <- std_results %>%
+    arrange(FDR_std) %>%
+    group_by(gene_list) %>%
+    slice_head(n = 10) %>%
+    ungroup()
+
+  p_hits <- ggplot(top_hits, aes(x = reorder(term_std, neglog10FDR), y = neglog10FDR, fill = gene_list)) +
+    geom_col(position = "dodge") +
+    coord_flip() +
+    scale_fill_paletteer_d("ggthemes::Tableau_10") +
+    theme_minimal() +
+    labs(title = "Top ORA hits per gene list", x = "Gene set", y = "-log10(FDR)")
+
+  print(p_hits)
+  ggsave(file.path(ora_plots_dir, "top_ora_hits_per_list.png"), p_hits, width = 14, height = 9, dpi = 320)
+
+  db_counts <- std_results %>%
+    count(gene_list, database_std, sort = TRUE)
+
+  p_db <- ggplot(db_counts, aes(x = gene_list, y = n, fill = database_std)) +
+    geom_col(position = "stack") +
+    scale_fill_paletteer_d("ggthemes::Tableau_10") +
+    theme_minimal() +
+    labs(title = "Number of enriched terms by database", x = "Gene list", y = "N terms") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+  print(p_db)
+  ggsave(file.path(ora_plots_dir, "enriched_terms_by_database.png"), p_db, width = 12, height = 7, dpi = 320)
+
+  # Spider/radar-like profile plot by database
+  if (isTRUE(params$enable_spider_plot)) {
+    db_profile <- std_results %>%
+      group_by(gene_list, database_std) %>%
+      summarise(
+        min_fdr = min(FDR_std, na.rm = TRUE),
+        n_terms = n_distinct(term_std),
+        signal = -log10(pmax(min_fdr, .Machine$double.xmin)),
+        .groups = "drop"
+      ) %>%
+      group_by(database_std) %>%
+      mutate(signal_scaled = ifelse(max(signal, na.rm = TRUE) > 0, signal / max(signal, na.rm = TRUE), 0)) %>%
+      ungroup()
+
+    if (nrow(db_profile) > 0) {
+      p_spider <- ggplot(db_profile, aes(x = database_std, y = signal_scaled, group = gene_list, color = gene_list)) +
+        geom_polygon(aes(fill = gene_list), alpha = 0.08, linewidth = 0.4) +
+        geom_line(linewidth = 0.8) +
+        geom_point(size = 2) +
+        coord_polar() +
+        scale_color_paletteer_d("ggthemes::Tableau_10") +
+        scale_fill_paletteer_d("ggthemes::Tableau_10") +
+        theme_minimal() +
+        labs(
+          title = "ORA functional profile (radar-like) by gene list",
+          subtitle = "Scaled -log10(min FDR) across databases",
+          x = NULL,
+          y = "Scaled signal"
+        ) +
+        theme(axis.text.x = element_text(size = 9))
+
+      print(p_spider)
+      ggsave(file.path(ora_plots_dir, "ora_spider_profile.png"), p_spider, width = 10, height = 9, dpi = 320)
+    }
+  }
+
+  # Overall characterization: recurrence of enriched terms across lists
+  term_recurrence <- std_results %>%
+    distinct(gene_list, term_std, database_std, FDR_std) %>%
+    group_by(term_std, database_std) %>%
+    summarise(
+      n_lists = n_distinct(gene_list),
+      best_fdr = min(FDR_std, na.rm = TRUE),
+      mean_fdr = mean(FDR_std, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(n_lists), best_fdr)
+
+  readr::write_tsv(term_recurrence, file.path(ora_summary_dir, "ora_term_recurrence.tsv"))
+
+  top_recurrent <- term_recurrence %>%
+    # slice_head() already returns all available rows when n > nrow(data)
+    # (using n() here errors in recent dplyr because n() is only valid
+    # inside data-masking verbs such as mutate/summarise/filter).
+    slice_head(n = 30L) %>%
+    mutate(term_short = stringr::str_trunc(term_std, 70))
+
+  if (nrow(top_recurrent) > 0) {
+    p_recurrent <- ggplot(top_recurrent, aes(x = reorder(term_short, n_lists), y = n_lists, fill = database_std)) +
+      geom_col() +
+      coord_flip() +
+      scale_fill_paletteer_d("ggthemes::Tableau_10") +
+      theme_minimal() +
+      labs(
+        title = "Most recurrent enriched functions across gene lists",
+        x = "Term",
+        y = "# gene lists where term is enriched"
+      )
+
+    print(p_recurrent)
+    ggsave(file.path(ora_plots_dir, "ora_recurrent_terms.png"), p_recurrent, width = 13, height = 10, dpi = 320)
+  }
+
+  # Pairwise overlap characterization (Jaccard / overlap coefficient)
+  if (isTRUE(params$enable_overlap_heatmap)) {
+    top_n <- as.integer(params$overlap_top_terms)
+    top_n <- ifelse(is.na(top_n) || top_n <= 0, 50, top_n)
+
+    term_sets <- std_results %>%
+      arrange(FDR_std) %>%
+      group_by(gene_list) %>%
+      slice_head(n = top_n) %>%
+      summarise(term_set = list(unique(term_std)), .groups = "drop")
+
+    glists <- term_sets$gene_list
+    overlap_mat <- matrix(0, nrow = length(glists), ncol = length(glists), dimnames = list(glists, glists))
+
+    for (i in seq_along(glists)) {
+      for (j in seq_along(glists)) {
+        a <- term_sets$term_set[[i]]
+        b <- term_sets$term_set[[j]]
+        inter <- length(intersect(a, b))
+        union_n <- length(unique(c(a, b)))
+        min_n <- min(length(a), length(b))
+
+        metric <- tolower(as.character(params$compare_metric %||% "jaccard"))
+        overlap_val <- if (metric == "overlap") {
+          ifelse(min_n > 0, inter / min_n, 0)
+        } else {
+          ifelse(union_n > 0, inter / union_n, 0)
+        }
+
+        overlap_mat[i, j] <- overlap_val
+      }
+    }
+
+    overlap_df <- as.data.frame(as.table(overlap_mat)) %>%
+      rename(gene_list_x = Var1, gene_list_y = Var2, overlap = Freq)
+
+    readr::write_tsv(overlap_df, file.path(ora_summary_dir, "ora_overlap_matrix.tsv"))
+
+    p_overlap <- ggplot(overlap_df, aes(x = gene_list_x, y = gene_list_y, fill = overlap)) +
+      geom_tile(color = "white") +
+      geom_text(aes(label = sprintf("%.2f", overlap)), size = 3) +
+      scale_fill_viridis_c(option = "C") +
+      theme_minimal() +
+      labs(
+        title = sprintf("Pairwise enrichment overlap (%s)", params$compare_metric),
+        subtitle = sprintf("Computed from top %d enriched terms per list", top_n),
+        x = NULL,
+        y = NULL
+      ) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    print(p_overlap)
+    ggsave(file.path(ora_plots_dir, "ora_overlap_heatmap.png"), p_overlap, width = 10, height = 8, dpi = 320)
+  }
+
+  # clusterProfiler-style pooled comparison (dotplot-like)
+  pooled_dot <- std_results %>%
+    arrange(FDR_std) %>%
+    group_by(gene_list) %>%
+    slice_head(n = 15) %>%
+    ungroup() %>%
+    mutate(term_short = stringr::str_trunc(term_std, 60))
+
+  if (nrow(pooled_dot) > 0) {
+    p_dot <- ggplot(pooled_dot, aes(x = gene_list, y = term_short, size = neglog10FDR, color = database_std)) +
+      geom_point(alpha = 0.85) +
+      scale_color_paletteer_d("ggthemes::Tableau_10") +
+      theme_minimal() +
+      labs(
+        title = "Pooled ORA characterization across lists",
+        subtitle = "Top enriched terms per list (dot size = -log10(FDR))",
+        x = "Gene list",
+        y = "Enriched term"
+      ) +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+    print(p_dot)
+    ggsave(file.path(ora_plots_dir, "ora_pooled_dotplot.png"), p_dot, width = 14, height = 11, dpi = 320)
+  }
+
+  # Optional enrichment map/network visualization if dependencies are available
+  if (isTRUE(params$enable_enrichment_map) && has_pkg("igraph")) {
+    term_links <- std_results %>%
+      distinct(gene_list, term_std) %>%
+      group_by(term_std) %>%
+      summarise(gene_lists = list(sort(unique(gene_list))), n_lists = n(), .groups = "drop") %>%
+      filter(n_lists > 1)
+
+    if (nrow(term_links) > 0) {
+      edges <- term_links %>%
+        mutate(pairs = purrr::map(gene_lists, ~{
+          x <- .x
+          if (length(x) < 2) return(tibble(from = character(0), to = character(0)))
+          as_tibble(t(combn(x, 2)), .name_repair = "minimal") %>%
+            setNames(c("from", "to"))
+        })) %>%
+        select(term_std, pairs) %>%
+        tidyr::unnest(pairs) %>%
+        count(from, to, name = "shared_terms")
+
+      if (nrow(edges) > 0) {
+        p_network <- ggplot(edges, aes(x = from, y = to, fill = shared_terms)) +
+          geom_tile(color = "white") +
+          scale_fill_viridis_c(option = "B") +
+          theme_minimal() +
+          labs(
+            title = "Shared enriched functions between gene lists",
+            subtitle = "Cell value = number of overlapping enriched terms",
+            x = NULL,
+            y = NULL
+          ) +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+        print(p_network)
+        ggsave(file.path(ora_plots_dir, "ora_shared_term_network_matrix.png"), p_network, width = 10, height = 8, dpi = 320)
+      }
+    }
+  }
+}
+```
+
+# Enrichment signal heatmap
+
+Rows are the union of the top-N enriched terms per gene list; columns are the
+gene list scenarios. Cell colour encodes **-log10(FDR)**; zero (white) means the
+term was not enriched in that scenario. Hierarchical clustering (when ≥ 3
+scenarios) reveals groups of scenarios with similar functional landscapes.
+A separate per-database heatmap is produced for each functional category so
+terms from different ontologies are compared on the same scale.
+
+```{r enrichment_heatmap}
+if (exists("std_results") && nrow(std_results) > 0 && isTRUE(params$enable_enrichment_heatmap)) {
+
+  hm_top_n <- as.integer(params$overlap_top_terms %||% 30)
+  hm_top_n <- if (is.na(hm_top_n) || hm_top_n <= 0) 30L else min(hm_top_n, 50L)
+
+  # Union of top enriched terms across all lists
+  hm_terms <- std_results %>%
+    arrange(FDR_std) %>%
+    group_by(gene_list) %>%
+    slice_head(n = hm_top_n) %>%
+    ungroup() %>%
+    distinct(term_std) %>%
+    pull(term_std)
+
+  if (length(hm_terms) > 0) {
+
+    # Build term × list signal matrix (-log10 FDR; 0 = not enriched)
+    hm_wide <- std_results %>%
+      filter(term_std %in% hm_terms) %>%
+      group_by(gene_list, term_std) %>%
+      summarise(signal = max(neglog10FDR, na.rm = TRUE), .groups = "drop") %>%
+      tidyr::pivot_wider(names_from = gene_list, values_from = signal, values_fill = 0) %>%
+      tibble::column_to_rownames("term_std")
+
+    rownames(hm_wide) <- stringr::str_trunc(rownames(hm_wide), 65)
+    hm_mat <- as.matrix(hm_wide)
+    hm_mat <- hm_mat[order(rowSums(hm_mat), decreasing = TRUE), , drop = FALSE]
+
+    cat(sprintf("Enrichment heatmap: %d terms × %d gene lists\n", nrow(hm_mat), ncol(hm_mat)))
+
+    # ── render function (pheatmap or ggplot fallback) ──────────────────────
+    draw_signal_heatmap <- function(mat, title, palette_high, out_png) {
+      if (has_pkg("pheatmap")) {
+        library(pheatmap)
+        p_out <- pheatmap(
+          mat,
+          color        = colorRampPalette(c("white", palette_high))(100),
+          cluster_rows = nrow(mat) > 2,
+          cluster_cols = ncol(mat) > 2,
+          fontsize_row = max(5, min(10, 200 / nrow(mat))),
+          fontsize_col = 9,
+          main         = title,
+          angle_col    = 45,
+          border_color = NA,
+          silent       = TRUE
+        )
+        png(out_png,
+            width  = max(1200, ncol(mat) * 130 + 800),
+            height = max(800,  nrow(mat) * 24  + 250), res = 160)
+        grid::grid.newpage()
+        grid::grid.draw(p_out$gtable)
+        dev.off()
+        grid::grid.newpage()
+        grid::grid.draw(p_out$gtable)
+      } else {
+        long_df <- as.data.frame(mat) %>%
+          tibble::rownames_to_column("term") %>%
+          tidyr::pivot_longer(-term, names_to = "gene_list", values_to = "signal") %>%
+          mutate(term = factor(term, levels = rev(rownames(mat))))
+        p_gg <- ggplot(long_df, aes(x = gene_list, y = term, fill = signal)) +
+          geom_tile(color = "grey90", linewidth = 0.15) +
+          scale_fill_gradient(low = "white", high = palette_high, name = "-log10(FDR)") +
+          theme_minimal(base_size = 9) +
+          labs(title = title,
+               subtitle = "-log10(FDR) | rows = enriched terms, cols = scenarios",
+               x = NULL, y = NULL) +
+          theme(
+            axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+            axis.text.y = element_text(size = max(5, min(8, 180 / nrow(mat))))
+          )
+        print(p_gg)
+        ggsave(out_png, p_gg,
+               width  = max(8, ncol(mat) * 1.5 + 3),
+               height = max(6, nrow(mat) * 0.28 + 2), dpi = 300)
+      }
+    }
+
+    # Global heatmap (all databases pooled)
+    draw_signal_heatmap(
+      hm_mat,
+      title       = "Enrichment signal: -log10(FDR) per term × scenario (all databases)",
+      palette_high = as.character(tableau_10[["blue"]]),
+      out_png     = file.path(ora_plots_dir, "ora_enrichment_heatmap.png")
+    )
+
+    # Per-database heatmaps
+    for (db_i in unique(std_results$database_std)) {
+      db_res <- std_results %>% filter(database_std == db_i)
+      db_terms <- db_res %>%
+        arrange(FDR_std) %>%
+        group_by(gene_list) %>%
+        slice_head(n = 20) %>%
+        ungroup() %>%
+        distinct(term_std) %>%
+        pull(term_std)
+      if (length(db_terms) < 2) next
+
+      db_wide <- db_res %>%
+        filter(term_std %in% db_terms) %>%
+        group_by(gene_list, term_std) %>%
+        summarise(signal = max(neglog10FDR, na.rm = TRUE), .groups = "drop") %>%
+        tidyr::pivot_wider(names_from = gene_list, values_from = signal, values_fill = 0) %>%
+        tibble::column_to_rownames("term_std")
+
+      rownames(db_wide) <- stringr::str_trunc(rownames(db_wide), 60)
+      db_mat <- as.matrix(db_wide)
+      db_mat <- db_mat[order(rowSums(db_mat), decreasing = TRUE), , drop = FALSE]
+      db_slug <- gsub("[^A-Za-z0-9_]", "_", db_i)
+
+      draw_signal_heatmap(
+        db_mat,
+        title        = paste0("-log10(FDR) | ", db_i),
+        palette_high  = as.character(tableau_10[["vermillion"]]),
+        out_png      = file.path(ora_plots_dir, paste0("ora_heatmap_", db_slug, ".png"))
+      )
+    }
+
+  } else {
+    cat("No enriched terms found — enrichment heatmap skipped.\n")
+  }
+} else {
+  cat("Enrichment heatmap disabled or no results available.\n")
+}
+```
+
+# UpSet plot: term intersections across scenarios
+
+Each gene list / scenario is treated as a **set of enriched terms**. The UpSet
+plot decomposes those sets into their exact intersections — revealing terms
+significantly enriched in every scenario, terms unique to a single scenario, and
+all gradations in between. This is more informative than a pairwise Jaccard score
+because it shows the precise multi-way structure of the overlap.
+
+Requires the **UpSetR** (preferred) or **ComplexUpset** package.
+Install with `install.packages("UpSetR")`.
+
+```{r upset_plot, fig.width=14, fig.height=8}
+if (exists("std_results") && nrow(std_results) > 0 && isTRUE(params$enable_upset_plot)) {
+
+  upset_top_n <- as.integer(params$overlap_top_terms %||% 50)
+  upset_top_n <- if (is.na(upset_top_n) || upset_top_n <= 0) 50L else min(upset_top_n, 75L)
+
+  upset_terms <- std_results %>%
+    arrange(FDR_std) %>%
+    group_by(gene_list) %>%
+    slice_head(n = upset_top_n) %>%
+    ungroup() %>%
+    distinct(gene_list, term_std)
+
+  all_terms_u <- unique(upset_terms$term_std)
+  glists_u    <- unique(upset_terms$gene_list)
+
+  if (length(glists_u) >= 2 && length(all_terms_u) > 0) {
+
+    # Binary membership matrix: rows = terms, cols = gene lists
+    upset_mat <- as.data.frame(
+      setNames(
+        lapply(glists_u, function(gl) {
+          as.integer(all_terms_u %in% upset_terms$term_std[upset_terms$gene_list == gl])
+        }),
+        glists_u
+      )
+    )
+    rownames(upset_mat) <- all_terms_u
+    upset_mat <- upset_mat[rowSums(upset_mat) >= 1, , drop = FALSE]
+
+    cat(sprintf("UpSet input: %d terms × %d gene lists\n", nrow(upset_mat), ncol(upset_mat)))
+
+    if (has_pkg("UpSetR")) {
+      library(UpSetR)
+      upset_args <- list(
+        data            = upset_mat,
+        sets            = rev(glists_u),
+        order.by        = "freq",
+        decreasing      = TRUE,
+        mb.ratio        = c(0.60, 0.40),
+        text.scale      = c(1.5, 1.2, 1.1, 1.0, 1.2, 1.0),
+        mainbar.y.label = "# shared enriched terms",
+        sets.x.label    = "Total enriched terms per scenario",
+        main.bar.color  = "#4393c3",
+        sets.bar.color  = "#2166ac",
+        matrix.color    = "#08306b",
+        point.size      = 3.0,
+        line.size       = 0.8,
+        nintersects     = min(40L, 2L ^ length(glists_u))
+      )
+      # Save to file
+      png(
+        file.path(ora_plots_dir, "ora_upset_terms.png"),
+        width  = max(1600, length(glists_u) * 200 + 600),
+        height = max(900,  length(glists_u) * 80  + 400),
+        res    = 150
+      )
+      do.call(upset, upset_args)
+      dev.off()
+      # Render inline
+      do.call(upset, upset_args)
+
+    } else if (has_pkg("ComplexUpset")) {
+      library(ComplexUpset)
+      upset_tbl <- upset_mat %>%
+        tibble::rownames_to_column("term") %>%
+        dplyr::mutate(dplyr::across(all_of(glists_u), as.logical))
+      p_upset_cx <- upset(
+        upset_tbl, glists_u,
+        name        = "Gene list",
+        width_ratio = 0.25,
+        min_size    = 1,
+        sort_sets   = FALSE,
+        base_annotations = list(
+          "Shared terms" = intersection_size(
+            counts = TRUE,
+            mapping = aes(fill = "bar")
+          ) + scale_fill_manual(values = c("bar" = "#4393c3"), guide = "none")
+        )
+      ) +
+        labs(
+          title    = "UpSet: intersection of enriched terms across gene lists",
+          subtitle = sprintf("Top %d enriched terms per scenario", upset_top_n)
+        )
+      print(p_upset_cx)
+      ggsave(
+        file.path(ora_plots_dir, "ora_upset_terms.png"), p_upset_cx,
+        width  = max(12, length(glists_u) * 2 + 6),
+        height = max(8,  length(glists_u) * 1.2 + 4), dpi = 200
+      )
+
+    } else {
+      # Fallback: manual intersection decomposition rendered as a bar chart
+      message("UpSetR not found — falling back to intersection bar chart. Install with: install.packages('UpSetR')")
+      n_lists <- length(glists_u)
+      if (n_lists <= 6) {
+        all_combos <- do.call(c, lapply(seq_len(n_lists), function(k) combn(glists_u, k, simplify = FALSE)))
+        combo_df <- purrr::map_dfr(all_combos, function(combo) {
+          in_all   <- rowSums(upset_mat[, combo, drop = FALSE]) == length(combo)
+          out_rest <- if (length(combo) < n_lists) {
+            rowSums(upset_mat[, setdiff(glists_u, combo), drop = FALSE]) == 0
+          } else {
+            rep(TRUE, nrow(upset_mat))
+          }
+          tibble::tibble(
+            intersection = paste(sort(combo), collapse = " ∩ "),
+            n_terms      = sum(in_all & out_rest),
+            n_sets       = length(combo)
+          )
+        }) %>%
+          filter(n_terms > 0) %>%
+          arrange(desc(n_terms))
+
+        p_fallback <- ggplot(
+          combo_df %>% slice_head(n = 30),
+          aes(x = reorder(intersection, n_terms), y = n_terms, fill = factor(n_sets))
+        ) +
+          geom_col() +
+          coord_flip() +
+          scale_fill_paletteer_d("ggthemes::Tableau_10", name = "# lists") +
+          theme_minimal() +
+          labs(
+            title    = "Enriched term intersections across gene lists",
+            subtitle = "(UpSetR not installed — simplified view)",
+            x        = NULL,
+            y        = "# shared terms"
+          )
+        print(p_fallback)
+        ggsave(
+          file.path(ora_plots_dir, "ora_upset_fallback.png"), p_fallback,
+          width = 12, height = 8, dpi = 300
+        )
+      } else {
+        cat("Too many gene lists for the fallback intersection chart (> 6). Please install UpSetR.\n")
+      }
+    }
+
+  } else {
+    cat("UpSet plot requires ≥ 2 gene lists with enrichment results — skipping.\n")
+  }
+} else {
+  cat("UpSet plot disabled or no results available.\n")
+}
+```
+
+## Session Info
+
+```{r session_info}
+sessionInfo()
+```

@@ -468,9 +468,6 @@ def extract_node_states_from_node_level(
     """
     Extract amino acid states at key phylogenetic nodes from node-level ASR posteriors.
 
-    **UPDATED FOR DYNAMIC PAIRS (2025-12-05)**:
-    Now extracts variable numbers of focal states from node_mapping['focal_nodes'] list.
-
     Args:
         asr_posteriors: Dict mapping node_id (int) -> position -> amino_acid -> probability
         node_mapping: Dict with 'root', 'mrca_contrast', 'focal_nodes' (list of node IDs)

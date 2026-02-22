@@ -34,6 +34,10 @@ process DATASET_PRUNE {
     def secondary_trait = params.secondary_trait ?: ''
     def prune_list = params.prune_list ?: ''
     def prune_list_secondary = params.prune_list_secondary ?: ''
+    def discrete_method = params.discrete_method ?: 'quartile'
+    def top_quantile = params.top_quantile ?: '0.75'
+    def bottom_quantile = params.bottom_quantile ?: '0.25'
+    def contrast_max_iter = params.contrast_max_iter ?: '4'
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -55,7 +59,11 @@ process DATASET_PRUNE {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     prune_list = '${prune_list}',
-                    prune_list_secondary = '${prune_list_secondary}'
+                    prune_list_secondary = '${prune_list_secondary}',
+                    discrete_method = '${discrete_method}',
+                    top_quantile = '${top_quantile}',
+                    bottom_quantile = '${bottom_quantile}',
+                    contrast_max_iter = '${contrast_max_iter}'
                 ),
                 output_file = '0.Data_pruning.html',
                 envir = new.env()
@@ -82,7 +90,11 @@ process DATASET_PRUNE {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     prune_list = '${prune_list}',
-                    prune_list_secondary = '${prune_list_secondary}'
+                    prune_list_secondary = '${prune_list_secondary}',
+                    discrete_method = '${discrete_method}',
+                    top_quantile = '${top_quantile}',
+                    bottom_quantile = '${bottom_quantile}',
+                    contrast_max_iter = '${contrast_max_iter}'
                 ),
                 output_file = '0.Data_pruning.html',
                 envir = new.env()

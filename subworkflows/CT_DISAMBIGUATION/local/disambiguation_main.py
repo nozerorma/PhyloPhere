@@ -134,6 +134,17 @@ def parse_arguments():
         action="store_true",
         help="Continue with warnings on low ASR confidence",
     )
+    parser.add_argument(
+        "--use-all-mrca-filter",
+        action="store_true",
+        default=False,
+        help=(
+            "Require all_mrca_state == focal_state AND all_mrca_posterior >= "
+            "posterior_threshold for asr_is_conserved. Also applies the same "
+            "posterior filter to all_mrca when deciding which positions are "
+            "removed for low confidence."
+        ),
+    )
 
     # Diagnostics output
     parser.add_argument(
@@ -263,6 +274,7 @@ def main():
             output_dir=output_dir,
             ensembl_genes_file=args.ensembl_genes_file,
             max_codeml=args.codeml_concurrency,
+            use_all_mrca_filter=args.use_all_mrca_filter,
         )
         # process_all_genes now returns (caas_results, export_info)
         if isinstance(proc_res, tuple) and len(proc_res) == 2:

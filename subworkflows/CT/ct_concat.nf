@@ -1,5 +1,5 @@
 /*
- * Concatenation processes for CAAS tools outputs
+ * Concatenation processes for CT tools outputs
  * Combines multiple output files, keeping only the first header
  */
 
@@ -30,11 +30,12 @@ process CONCAT_DISCOVERY {
     echo "Found \${#discovery_files[@]} discovery files:"
     printf '%s\n' "\${discovery_files[@]}"
     echo ""
-    
+
     # Check if we have any files
     if [ \${#discovery_files[@]} -eq 0 ]; then
-        echo "WARNING: No discovery files found - creating header-only file"
-        echo "Gene\tPosition\tAncestral\tDerived\tType\tForeground\tBackground" > discovery.tab
+        echo "WARNING: No discovery files found - creating empty discovery table with expected schema"
+        # Keep schema aligned with CT_SIGNIFICATION expectations (Pattern + Pvalue required)
+        echo "Gene\tMode\tCAAP_Group\tTrait\tPosition\tSubstitution\tEncoded\tPvalue\tPattern\tFFGN\tFBGN\tGFG\tGBG\tMFG\tMBG\tFFG\tFBG\tMS\tConservedPair\tConservedPairs" > discovery.tab
         exit 0
     fi
     

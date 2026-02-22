@@ -163,5 +163,21 @@ if (nzchar(branch_trait) && branch_trait %in% names(trait_df)) {
   debug_log("has.branch = FALSE")
 }
 
+# ----------------------------------------
+# Categorization / discretization method
+# ----------------------------------------
+# Used by stats.f() for global_label and by the CI-composition Rmd.
+# Options: quartile, quintile, decile, median_sd, parameterized
+
+discrete_method <- if (exists("params") && !is.null(params$discrete_method) && nzchar(params$discrete_method)) params$discrete_method else "decile"
+top_quantile    <- if (exists("params") && !is.null(params$top_quantile)    && nzchar(params$top_quantile))    as.numeric(params$top_quantile)    else 0.90
+bottom_quantile <- if (exists("params") && !is.null(params$bottom_quantile) && nzchar(params$bottom_quantile)) as.numeric(params$bottom_quantile) else 0.10
+debug_log("discrete_method = %s, top_quantile = %.2f, bottom_quantile = %.2f",
+          discrete_method, top_quantile, bottom_quantile)
+
+# Maximum iterations for the contrast selection algorithm
+contrast_max_iter <- if (exists("params") && !is.null(params$contrast_max_iter) && nzchar(params$contrast_max_iter)) as.integer(params$contrast_max_iter) else 4L
+debug_log("contrast_max_iter = %d", contrast_max_iter)
+
 # Lets try sourcing stats.R after all the parameters and data are loaded, since it relies on some of these variables being defined
 source(file.path(objDir, "stats.R"))

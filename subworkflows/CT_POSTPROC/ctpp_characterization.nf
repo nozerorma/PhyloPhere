@@ -1,0 +1,91 @@
+#!/usr/bin/env nextflow
+
+/*
+#  CT Post-Processing: Characterization and reporting (Rmarkdown)
+*/
+
+process CT_POSTPROC_REPORT {
+    tag "caas_postproc_report"
+    label 'process_reporting'
+    publishDir path: "${params.outdir}/postproc", mode: 'copy', overwrite: true, pattern: '{CT_postproc_files/**,outliers/**,clusters/**,summary_statistics/**,disambiguation_characterization/**}'
+    publishDir path: "${params.outdir}/HTML_reports", mode: 'copy', overwrite: true, pattern: '*.html'
+    
+    input:
+    path discovery_file
+    path filter_summary
+    val filter_dir
+    path gene_ensembl_file
+    
+    output:
+    path "*.html", emit: report
+    path "CT_postproc_files/**", emit: assets, optional: true
+    path "outliers/**", emit: outliers, optional: true
+    path "clusters/**", emit: clusters, optional: true
+    path "summary_statistics/**", emit: summary_stats, optional: true
+    path "disambiguation_characterization/**", emit: disambiguation_characterization, optional: true
+    
+    script:
+    def local_dir = "${baseDir}/subworkflows/CT_POSTPROC/local"
+    def discovery = discovery_file.toString()
+    def filter_sum = filter_summary.toString()
+    def filter_dir_path = filter_dir
+    def gene_len = gene_ensembl_file.toString()
+    def mode = params.caas_postproc_mode
+    def outdir = "${params.outdir}/postproc"
+    def extreme_thresh = params.extreme_threshold
+    def iqr_mult = params.iqr_multiplier
+    def gene_filter = params.gene_filter_mode
+    def gen_manhattan = params.generate_manhattan ? 'TRUE' : 'FALSE'
+    def manhattan_min_dens = params.manhattan_min_density
+
+
+    if (params.use_singularity | params.use_apptainer) {
+        """
+        cp -R ${local_dir}/* .
+        
+        /usr/local/bin/_entrypoint.sh Rscript -e "
+            rmarkdown::render(
+                'CT_postproc.Rmd',
+                params = list(
+                    discovery_file = '${discovery}',
+                    filter_summary_file = '${filter_sum}',
+                    filter_dir = '${filter_dir_path}',
+                    gene_ensembl_file = '${gene_len}',
+                    processing_mode = '${mode}',
+                    output_dir = '${outdir}',
+                    extreme_threshold = ${extreme_thresh},
+                    iqr_multiplier = ${iqr_mult},
+                    gene_filter_mode = '${gene_filter}',
+                    generate_manhattan = ${gen_manhattan},
+                    manhattan_min_density = ${manhattan_min_dens}
+                ),
+                output_file = 'CT_postproc.html'
+            )
+        "
+        """
+    } else {
+        """
+        cp -R ${local_dir}/* .
+        
+        Rscript -e "
+            rmarkdown::render(
+                'CT_postproc.Rmd',
+                params = list(
+                    discovery_file = '${discovery}',
+                    filter_summary_file = '${filter_sum}',
+                    filter_dir = '${filter_dir_path}',
+                    gene_ensembl_file = '${gene_len}',
+                    processing_mode = '${mode}',
+                    output_dir = '${outdir}',
+                    extreme_threshold = ${extreme_thresh},
+                    iqr_multiplier = ${iqr_mult},
+                    gene_filter_mode = '${gene_filter}',
+                    generate_manhattan = ${gen_manhattan},
+                    manhattan_min_density = ${manhattan_min_dens}
+                ),
+                output_file = 'CT_postproc.html'
+            )
+        "
+        """
+    }
+}

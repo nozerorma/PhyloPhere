@@ -48,6 +48,7 @@ def analyze_caas_position_disambiguation(
     tip_diagnostics: Optional[Dict[str, Any]] = None,
     posterior_threshold: float = 0.7,
     convergence_mode: str = "focal_clade",
+    use_all_mrca_filter: bool = False,
 ) -> ConvergenceResult:
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
@@ -332,17 +333,40 @@ def analyze_caas_position_disambiguation(
     asr_cons = False
     if is_cons_meta and conserved_pair:
         try:
-            pair_idx = int(conserved_pair)
+            # conserved_pair may arrive as a float string (e.g. "1.0"), so
+            # convert via float first to avoid ValueError from int("1.0").
+            pair_idx = int(float(conserved_pair))
         except Exception:
             pair_idx = None
         if pair_idx and 1 <= pair_idx <= len(pair_details_list):
             pair = pair_details_list[pair_idx - 1] or {}
-            mrca = pair.get("focal_state") or pair.get("mrca_modal_aa")
             top_tip = pair.get("top_tip_mode") or pair.get("top_tip_residue")
             bottom_tip = pair.get("bottom_tip_mode") or pair.get("bottom_tip_residue")
-            asr_cons = bool(
-                mrca and top_tip and bottom_tip and mrca == top_tip == bottom_tip
+            # Focal-pair state from ASR: state at the pair-level MRCA node
+            focal_state = (
+                node_state_info.focal_states[pair_idx - 1]
+                if node_state_info and pair_idx - 1 < len(node_state_info.focal_states)
+                else None
             )
+            # Core requirement: tips agree AND the focal ASR node confirms the same AA
+            tips_agree = bool(
+                top_tip and bottom_tip and focal_state
+                and top_tip == bottom_tip == focal_state
+            )
+            if tips_agree and use_all_mrca_filter:
+                # Additional filter: the universal MRCA (all-species MRCA) must
+                # also carry the same conserved AA with sufficient posterior.
+                all_mrca_state = node_state_info.mrca_contrast if node_state_info else None
+                all_mrca_prob  = node_state_info.mrca_contrast_prob if node_state_info else None
+                mrca_ok = bool(
+                    all_mrca_state
+                    and all_mrca_state == focal_state
+                    and all_mrca_prob is not None
+                    and all_mrca_prob >= posterior_threshold
+                )
+                asr_cons = mrca_ok
+            else:
+                asr_cons = tips_agree
 
     return ConvergenceResult(
         gene=gene,
@@ -415,6 +439,7 @@ def analyze_gene_disambiguation(
     convergence_mode: str = "focal_clade",
     asr_mode: str = "precomputed",
     include_non_significant: bool = False,
+    use_all_mrca_filter: bool = False,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
@@ -668,6 +693,7 @@ def analyze_gene_disambiguation(
                 tip_diagnostics,
                 posterior_threshold=posterior_threshold,
                 convergence_mode=convergence_mode,
+                use_all_mrca_filter=use_all_mrca_filter,
             )
 
             results.append(result)

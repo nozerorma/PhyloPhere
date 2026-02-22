@@ -1,2 +1,0 @@
-Tag	GenePos	Gene	Position	Pattern	CAAP_Group	Pvalue	Pvalue.boot	Occurrences	Total	sig_hyp	sig_perm	sig_both	SignificanceLevel	IsConserved	ConservedPair	AminoConv	AminoEncoded
-CAAS_PZVEL0623I	GENE1_10	GENE1	10	pattern1	US	0.2	0.03	3	100	FALSE	TRUE	FALSE	Permutation	FALSE	NA	A/V	NA

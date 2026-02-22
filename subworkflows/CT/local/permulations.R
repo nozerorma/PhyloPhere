@@ -90,16 +90,6 @@ if (!dir.exists(outdir)) {
   write(paste("[INFO]", Sys.time(), "Created output directory:", outdir), stdout())
 }
 
-# tree <- "Data/5.Phylogeny/science.abn7829_data_s4.nex.pruned.tree"
-# config.file <-"Out/2.CAAS/20240703-def/4.Traitfiles/df4_sp.tab"
-# number.of.cycles <- "10"
-# selection.strategy <- "phylogeny"
-# phenotypes <- "Data/9.CAAS_bootstrap/traitfile.tab"
-# outfile <- "Data/9.CAAS_bootstrap/permulated_traits.tab"
-
-# Read the tree object.
-#imported.tree <- read_file(tree)
-
 tree.o <- read.tree(tree)
 trait <- tree.o$tip.label
 l <- length(trait)

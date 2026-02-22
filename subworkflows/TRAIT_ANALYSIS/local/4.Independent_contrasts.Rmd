@@ -232,7 +232,10 @@ This section extracts species  for use in bootstrap/permutation testing.
 
 # Extract malignant prevalence traitfile with ZIMS-ACE validation
 bootstrap_traitfile <- trait_df %>%
-  dplyr::select(species, trait) 
+  dplyr::select(species, trait) %>%
+  dplyr::filter(!is.na(trait))
+
+cat("Removed", nrow(trait_df) - nrow(bootstrap_traitfile), "species with NA trait values from bootstrap traitfile\n")
 
 # Save malignant traitfile
 boot_path <- file.path(bootstrap_traitfile_dir)

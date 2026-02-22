@@ -262,7 +262,8 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
   dunn_result_cummulative <- data.frame()
 
   current_dunn_index <- Inf
-  iteration_limit <- 10
+  # Allow override via contrast_max_iter global (set from params in commons.R)
+  iteration_limit <- if (exists("contrast_max_iter", inherits = TRUE)) as.integer(contrast_max_iter) else 4L
   iteration_count <- 0
 
   # Iteratively add pairs while maintaining phylogenetic independence (Dunn ≥ 1)

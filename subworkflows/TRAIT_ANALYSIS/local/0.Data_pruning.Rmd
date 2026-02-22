@@ -25,6 +25,10 @@ params:
   branch_trait: ""
   prune_list: ""
   prune_list_secondary: ""
+  discrete_method: "decile"
+  top_quantile: "0.90"
+  bottom_quantile: "0.10"
+  contrast_max_iter: "4"
 ---
 
 ```{r header}
@@ -293,8 +297,25 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     ggplot2::scale_color_manual(values = palette_values)
   }
 
-  global_median <- df$g_median
-  
+  global_median <- df$g_median[1]
+
+  # --- Threshold boundary vlines: all four methods, active visually prominent ---
+  .active_method <- if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile"
+  .q10  <- if ("g_q10"    %in% names(df)) df$g_q10[1]    else unname(quantile(df$value, 0.10, na.rm = TRUE))
+  .q20  <- if ("g_q20"    %in% names(df)) df$g_q20[1]    else unname(quantile(df$value, 0.20, na.rm = TRUE))
+  .q25  <- if ("g_q25"    %in% names(df)) df$g_q25[1]    else unname(quantile(df$value, 0.25, na.rm = TRUE))
+  .q75  <- if ("g_q75"    %in% names(df)) df$g_q75[1]    else unname(quantile(df$value, 0.75, na.rm = TRUE))
+  .q80  <- if ("g_q80"    %in% names(df)) df$g_q80[1]    else unname(quantile(df$value, 0.80, na.rm = TRUE))
+  .q90  <- if ("g_q90"    %in% names(df)) df$g_q90[1]    else unname(quantile(df$value, 0.90, na.rm = TRUE))
+  .sd.v <- if ("g_sd"     %in% names(df)) df$g_sd[1]     else sd(df$value, na.rm = TRUE)
+  .med  <- if ("g_median" %in% names(df)) df$g_median[1] else median(df$value, na.rm = TRUE)
+  .thresh_methods <- list(
+    quartile  = list(lo = .q25,          hi = .q75,          style = "solid"),
+    quintile  = list(lo = .q20,          hi = .q80,          style = "dotdash"),
+    decile    = list(lo = .q10,          hi = .q90,          style = "dashed"),
+    median_sd = list(lo = .med - .sd.v,  hi = .med + .sd.v,  style = "dotted")
+  )
+
   # Create the plot base
   p <- ggplot(df, aes(x = value, y = taxa)) +
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
@@ -314,7 +335,23 @@ contrast_plot.f <- function(df, palette_values = NULL) {
       ggplot2::scale_fill_manual(values = palette_values, breaks = 0) +
       ggplot2::scale_color_manual(values = palette_values, breaks = 0)
   }
-  
+
+  # Add threshold boundary lines for all four methods (active = visually prominent)
+  for (.nm in names(.thresh_methods)) {
+    .t      <- .thresh_methods[[.nm]]
+    .is_act <- .nm == .active_method
+    .lw     <- if (.is_act) 1.3 else 0.55
+    .alpha  <- if (.is_act) 0.90 else 0.25
+    .col    <- if (.is_act) "#2B2D42" else "grey40"
+    p <- p +
+      ggplot2::geom_vline(xintercept = .t$lo, linetype = .t$style,
+                          linewidth = .lw, color = .col, alpha = .alpha,
+                          show.legend = FALSE) +
+      ggplot2::geom_vline(xintercept = .t$hi, linetype = .t$style,
+                          linewidth = .lw, color = .col, alpha = .alpha,
+                          show.legend = FALSE)
+  }
+
   p <- p +
     ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = tableau_10["vermillion"]) +
     ggplot2::stat_summary(fun = median, geom = "errorbar",
@@ -323,8 +360,9 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     ggplot2::labs(x = capitalized_trait, 
                   y = paste(capitalized_taxon, "-", capitalized_clade), 
                   title = paste("Trait differential plot for trait:", capitalized_trait, "in", clade_name),
-                  caption = "Global median shown as a longdash red line. Per taxa median shown as blue error bars. 
-                  Extreme values were identified based on global thresholds (top and bottom quantiles).") +
+                  subtitle = paste0("Active extreme threshold: ", .active_method,
+                                    "  |  styles \u2014 solid: quartile  dot-dash: quintile  dashed: decile  dotted: median\u00b1SD"),
+                  caption = "Global median: longdash red line. Per-taxa median: green error bars. Labelled: extreme-classified species.") +
     ggrepel::geom_text_repel(
       data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
       aes(label = species), size = 5, hjust = 0, vjust = 0, family = "Inter",
@@ -335,10 +373,11 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     ggplot2::theme_minimal() +
     ggplot2::theme(
       plot.title = ggplot2::element_text(size = 20, hjust = 0.5, margin = ggplot2::margin(t = 20), face = "bold"),
+      plot.subtitle = ggplot2::element_text(size = 12, hjust = 0.5, color = "grey40"),
       axis.text.y = ggplot2::element_text(size = 15),
       axis.title.x = ggplot2::element_text(size = 15, hjust = 0.5, margin = ggplot2::margin(t = 20, b = 20)),
       axis.title.y = ggplot2::element_text(size = 15, angle = 90, hjust = 0.5, margin = ggplot2::margin(l = 20, r = 20)),
-      caption = ggplot2::element_text(size = 12, hjust = 0.5, margin = ggplot2::margin(t = 20)),
+      plot.caption = ggplot2::element_text(size = 12, hjust = 0.5, margin = ggplot2::margin(t = 20)),
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "bottom"
     )
@@ -539,7 +578,9 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     rescaled_tree <- phytools::rescale(tree,"lambda",lambda=lambda_hat)
   } else {
     sigma2_used <- fit_bm$sigma2
-    rescaled_tree <- phytools::rescale(tree,"BM")
+    # BM requires no rescaling; phytools::rescale(tree, "BM") returns a closure
+    # (factory pattern) on some phytools versions, not a tree object — use as-is.
+    rescaled_tree <- tree
   }
   debug_log("asr_tree.f sigma2_used = %.6f", sigma2_used)
   
@@ -1113,8 +1154,13 @@ if (isTRUE(has.secondary)) {
 
 tree_plot_step3
 
+# Compute dynamic dimensions for final tree plot (keeps ring height invariant across clade sizes)
+n_tips <- length(pruned_tree$tip.label)
+dyn_height <- max(15, round(3 + n_tips * 0.12, 1))
+dyn_width  <- dyn_height + 2
+
 ```
-```{r visual_distribution_final, fig.height=15, fig.width=17, dev="png", dpi=320, message=TRUE, warning=TRUE}
+```{r visual_distribution_final, fig.height=dyn_height, fig.width=dyn_width, dev="png", dpi=320, message=TRUE, warning=TRUE}
 
 # Finalize tree with taxon labels and phylopic images
 # Build taxon to tip mapping
@@ -1184,7 +1230,7 @@ ggsave(file.path(phylo_distribution_dir, "tree_with_taxa_bars.png"), tree_plot_s
 if(isTRUE(has.n)){
   ggsave(file.path(phylo_distribution_dir, "tree_with_n_labels.png"), tree_plot_step3, device = "png", width = 15, height = 15, dpi = "retina")
 }
-ggsave(file.path(phylo_distribution_dir, "final_tree_plot.png"), final_tree_plot, device = "png", width = 17, height = 15, dpi = "retina")
+ggsave(file.path(phylo_distribution_dir, "final_tree_plot.png"), final_tree_plot, device = "png", width = dyn_width, height = dyn_height, dpi = "retina")
 
 ```
 

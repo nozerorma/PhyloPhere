@@ -36,9 +36,9 @@ process RESAMPLE {
 
 
     input:
-    path nw_tree
-    file caas_config
-    file trait_val
+    path nw_tree,     stageAs: 'nw_tree.nwk'
+    path caas_config, stageAs: 'caas_config.tab'
+    path trait_val,   stageAs: 'traitvalues.tab'
 
     output:
     path("${nw_tree.baseName}.resampled.output/")
@@ -49,14 +49,37 @@ process RESAMPLE {
     if (params.use_singularity | params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
+
+        if [ ! -f "${nw_tree}" ]; then
+            echo "[ERROR] Missing tree input: ${nw_tree}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${caas_config}" ]; then
+            echo "[ERROR] Missing caas config input: ${caas_config}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${trait_val}" ]; then
+            echo "[ERROR] Missing trait values input: ${trait_val}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+
         mkdir -p ${nw_tree.baseName}.resampled.output
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
-        ${nw_tree} \\
-        ${caas_config} \\
+        "${nw_tree}" \\
+        "${caas_config}" \\
         ${params.cycles} \\
         ${params.perm_strategy} \\
-        ${trait_val} \\
+        "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0}
@@ -64,14 +87,37 @@ process RESAMPLE {
     } else {
         """
         echo "Running locally"
+
+        if [ ! -f "${nw_tree}" ]; then
+            echo "[ERROR] Missing tree input: ${nw_tree}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${caas_config}" ]; then
+            echo "[ERROR] Missing caas config input: ${caas_config}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+        if [ ! -f "${trait_val}" ]; then
+            echo "[ERROR] Missing trait values input: ${trait_val}" >&2
+            echo "[DEBUG] workdir:" >&2
+            pwd >&2
+            ls -la >&2
+            exit 1
+        fi
+
         mkdir -p ${nw_tree.baseName}.resampled.output
         Rscript \\
         '$baseDir/subworkflows/CT/local/permulations.R' \\
-        ${nw_tree} \\
-        ${caas_config} \\
+        "${nw_tree}" \\
+        "${caas_config}" \\
         ${params.cycles} \\
         ${params.perm_strategy} \\
-        ${trait_val} \\
+        "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0}

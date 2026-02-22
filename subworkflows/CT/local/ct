@@ -61,11 +61,7 @@ bootstrap       Runs CAAS bootstrap analysis on a on a single MSA.
 
 import sys                                          # for tool selection and more
 from optparse import OptionParser                   # for single option parser
-from modules.deps import check_dependencies         #
 from os.path import exists
-
-
-
 
 #### PROGRAM CHECK ####################################################################################################
 ########################################################################################################################
@@ -98,45 +94,42 @@ if tool.lower() not in ("discovery", "resample", "bootstrap"):          # Check:
 
 if tool.lower() == "discovery":
 
-    ### 1.1 Check the dependencies
-    check_dependencies("discovery", ["biopython", "scipy", "numpy"])
-
-    ### 1.2 Init the input parser
+    ### 1.1 Init the input parser
     parser = OptionParser()
 
 
-    ### 1.3 The mandatory inputs
+    ### 1.2 The mandatory inputs
 
-    ###     1.3.1 Input alignment
+    ###     1.2.1 Input alignment
     parser.add_option("-a", "--alignment", dest="single_alignment",
                     help="Multiple Sequence Alignment (MSA) file.", default = "none")
-    ###     1.3.2 Alignment format
+    ###     1.2.2 Alignment format
     parser.add_option("--fmt", dest="ali_format",
                     help="File format of the MSA file. Default: clustal. Accepted: clustal, emboss, fasta, \
                     fasta-m10, ig, maf, mauve, msf, nexus, phylip, phylip-sequential, phylip-relaxed, stockholm.", default = "clustal")
-    ###     1.3.3 Config file
+    ###     1.2.3 Config file
     parser.add_option("-t", "--traitfile", dest="config_file",
                     help="The trait config file (read documentation for file formatting)", default = "none")
 
-    ###     1.3.4 Output file (the table)
+    ###     1.2.4 Output file (the table)
     parser.add_option("-o", "--output", dest="output_file",
                     help="The output file, where the CAAS discovery table will be printed", default = "none")
-    ###     1.3.5 Background coverage output
+    ###     1.2.5 Background coverage output
     parser.add_option("--background_output", dest="background_output",
                     help="Output file with tested positions per gene (background coverage)", default = "background.output")
 
 
 
-    ### 1.4 Optional and filtering inputs
+    ### 1.3 Optional and filtering inputs
 
-    ###     1.4.1 limit output to pattern (default: all patterns)
+    ###     1.3.1 limit output to pattern (default: all patterns)
 
     # Which patterns to be included
     parser.add_option("--patterns", dest="patterns_string",
                     help="Limit the result to some CAAS patterns. Patterns are indicated with numbers from 1 to 3 and must \
                         be provided as comma separated (e.g.: -s 1,2,3). See documentation for more details on the patterns", default = "1,2,3")
 
-    ###     1.4.2 filter per gaps
+    ###     1.3.2 filter per gaps
 
     # Max background gaps
     parser.add_option("--max_bg_gaps", dest="max_bg_gaps_string",
@@ -157,49 +150,49 @@ if tool.lower() == "discovery":
     parser.add_option("--max_gaps_per_position", dest="max_gaps_pos_string",
                     help="Max gap ratio admitted in a single alignment position.", default = "0.5")
 
-    ###     1.4.3 filter for missing species
+    ###     1.3.3 filter for missing species
 
     # Max background missing species
     parser.add_option("--max_bg_miss", dest="max_bg_miss_string",
                     help="Filter by number of miss in the background\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in bg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     1.4.4 Max foreground missing species
+    ###     1.3.4 Max foreground missing species
     parser.add_option("--max_fg_miss", dest="max_fg_miss_string",
                     help="Filter by number of miss in the foreground.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     1.4.5 Max overall missing species (fg + bg)
+    ###     1.3.5 Max overall missing species (fg + bg)
     parser.add_option("--max_miss", dest="max_miss_string",
                     help="Filter by number of miss in foreground and background.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     1.4.6 Pair-aware missing/gap filtering
+    ###     1.3.6 Pair-aware missing/gap filtering
     parser.add_option("--miss_pair", dest="miss_pair", action="store_true",
                     help="Enable pair-aware missing/gap filtering (paired mode is mandatory). \
                         When enabled and max thresholds are equal, validates that missing/gapped species come from matching pairs. Default = disabled.", default = False)
 
-    ###     1.4.7 Conserved pair tolerance
+    ###     1.3.7 Conserved pair tolerance
     parser.add_option("--max_conserved", dest="max_conserved",
                     help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
-    ###     1.4.8 CAAP mode (detect property-based convergence)
+    ###     1.3.8 CAAP mode (detect property-based convergence)
     parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
                     help="Enable CAAP (Convergent Amino Acid Properties) mode. \
                         Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
                         Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
 
 
-    ### 1.5 Usage
+    ### 1.4 Usage
 
     parser.usage = "ct discoevery -a $alignment_file -t $trait_file -o $output_file --fmt $alignment_format (default:clustal)"
 
-    ### 1.6 Parse the options
+    ### 1.5 Parse the options
 
     (options, args) = parser.parse_args()
 
-    ### 1.7 Check the options
+    ### 1.6 Check the options
 
     missing_option_messages = []
 
@@ -224,16 +217,16 @@ if tool.lower() == "discovery":
         exit()
 
 
-    ### 1.8 Import the modules
+    ### 1.7 Import the modules
 
     from modules.disco import *
     from modules.runslice import runslice
 
-    ### 1.9 PROCEDURE Step 1- Slice the alignment
+    ### 1.8 PROCEDURE Step 1- Slice the alignment
 
     sliced_alignment = runslice(options)
 
-    ### 1.10 PROCEDURE Step 2- Run the discovery
+    ### 1.9 PROCEDURE Step 2- Run the discovery
 
     print(application_info)
     print("")
@@ -275,67 +268,64 @@ if tool.lower() == "discovery":
 
 if tool.lower() == "resample":
 
-    ### 2.1 Check the dependencies
-    check_dependencies("resample", ["dendropy"])
-
-    ### 2.2 Init the input parser
+    ### 2.1 Init the input parser
     parser = OptionParser()
 
-    ### 2.3 Inputs and outputs
+    ### 2.2 Inputs and outputs
 
-    #       2.3.1 Phylogeny (phylogenetic tree for permulations)
+    #       2.2.1 Phylogeny (phylogenetic tree for permulations)
     parser.add_option("-p", "--phylogeny", dest="phylogeny_file",
                     help="The tree of species in newick format. Needed for permulations", default = "none")
 
-    ###     2.3.2 Output file (the table)
+    ###     2.2.2 Output file (the table)
     parser.add_option("-o", "--output", dest="output_file",
                     help="The output file with resampled traits", default = "none")
 
-    ### 2.4 FG and BG size settings
+    ### 2.3 FG and BG size settings
 
-    #       2.4.1 Template config file (ct discovery -t)
+    #       2.3.1 Template config file (ct discovery -t)
     parser.add_option("--bytemp", dest="config_file",
                     help="Fetch the size of FG and BG groups from a ct discovery trait config file.", default = "none")
 
-    #       2.4.2 Size of the foreground group
+    #       2.3.2 Size of the foreground group
     parser.add_option("-f", "--fg_size", dest="fgsize",
                     help="Number of species in the foreground group. Must be > 0.", default = "notset")
 
-    #       2.4.3 Size of the background group
+    #       2.3.3 Size of the background group
     parser.add_option("-b", "--bg_size", dest="bgsize",
                     help="Number of species in the background group. Must be > 0.", default = "notset")
 
-    ### 2.5 Simulation settings
+    ### 2.4 Simulation settings
 
-    ###     2.5.1 Simulation strategy
+    ###     2.4.1 Simulation strategy
     parser.add_option("-m", "--mode", dest="bootstrap_mode",
                     help="Virtualization strategy. 'random' for random species selection, or 'bm' for brownian motion based selection.", default = "random")
 
-    ###     2.5.2 Simulation strategy options for phylogeny restriction
+    ###     2.4.2 Simulation strategy options for phylogeny restriction
     parser.add_option("--limit_by_group", dest="groupfile",
                     help="Limits random species selections in specific groups. Works with --mode random only and requires a group specification file.", default = "none")
 
     parser.add_option("--limit_by_patristic_distance", dest="pd_option",
                     help="Limits random species selections in specific patristic distance intervals. Works with --mode random only. Overridden by --limit_by_group.", default = "NO")
 
-    ###     2.5.3 Simulation strategy options for brownian motion
+    ###     2.4.3 Simulation strategy options for brownian motion
 
     parser.add_option("--traitvalues", dest="trait_values",
                     help="Trait values for brownian motion reshuffling. Mandatory for --mode bm.", default = "none")
 
-    ###     2.5.4 How many bootstrap cycles?
+    ###     2.4.4 How many bootstrap cycles?
     parser.add_option("--cycles", dest="cycles",
                     help="number of cycles", default = "1000")
 
-    ###     2.5.5 Chunk size for file writing
+    ###     2.4.5 Chunk size for file writing
     parser.add_option("--chunk_size", dest="chunk_size",
                     help="Number of cycles per output file. Default: 500. Output will be a directory with multiple resample_*.tab files.", default = "500")
 
-    ### 2.6 Usage
+    ### 2.5 Usage
 
     parser.usage = "ct resample -p $phylogenetic_tree (newick format) -f $foreground_size -b $background_size / --bytemp $trait_file -o $output_directory --cycles $N --chunk_size $M\n\nNOTE: to use --mode bm or phylogeny restriction you MUST provide a template (--bytemp)\nNOTE: Output will be a directory containing resample_*.tab files (one file per chunk_size cycles)"
 
-    ### 2.7 Parse the options
+    ### 2.6 Parse the options
 
     (options, args) = parser.parse_args()
 
@@ -482,47 +472,43 @@ if tool.lower() == "resample":
 ########################################################################################################################
 
 if tool.lower() == "bootstrap":
-
-    ### 3.1 Check the dependencies
-    check_dependencies("discovery", ["biopython", "scipy", "numpy"])
-
-    ### 3.2 Init the input parser
+    ### 3.1 Init the input parser
     parser = OptionParser()
 
-    ### 3.3 Inputs and outputs
+    ### 3.2 Inputs and outputs
 
-    ###     3.3.1 Config file (phylogenetic tree for permulations)
+    ###     3.2.1 Config file (phylogenetic tree for permulations)
     parser.add_option("-t", "--traitfile", dest="config_file",
                     help="The trait config file (read documentation for file formatting)", default = "none")
 
-    ###     3.3.2 Resampled traits File or Directory
+    ###     3.2.2 Resampled traits File or Directory
     parser.add_option("-s", "--simtraits", dest="simtraits",
                     help="The resampled traits file (legacy) or directory containing resample_*.tab files (recommended for large analyses)", default = "none")
 
-    ###     3.3.3 Input alignment
+    ###     3.2.3 Input alignment
     parser.add_option("-a", "--alignment", dest="single_alignment",
                     help="Multiple Sequence Alignment (MSA) file.", default = "none")
 
-    ###     3.3.4 Alignment format
+    ###     3.2.4 Alignment format
     parser.add_option("--fmt", dest="ali_format",
                     help="File format of the MSA file. Default: clustal. Accepted: clustal, emboss, fasta, \
                     fasta-m10, ig, maf, mauve, msf, nexus, phylip, phylip-sequential, phylip-relaxed, stockholm.", default = "clustal")
-    ###     3.3.5 Output file (the table)
+    ###     3.2.5 Output file (the table)
     parser.add_option("-o", "--output", dest="output_file",
                     help="The output file, where the bootstrap table will be printed", default = "none")
 
 
 
-    ### 3.4 Optional and filtering inputs
+    ### 3.3 Optional and filtering inputs
 
-    ###     3.4.1 limit output to pattern (default: all patterns)
+    ###     3.3.1 limit output to pattern (default: all patterns)
 
     # Which patterns to be included
     parser.add_option("--patterns", dest="patterns_string",
                     help="Limit the result to some patterns. Patterns are indicated with numbers from 1 to 4 and must \
                         be provided as comma separated (e.g.: -s 1,2,3). See documentation for more details on the patterns", default = "1,2,3")
 
-    ###     3.4.2 filter per gaps
+    ###     3.3.2 filter per gaps
 
     # Max background gaps
     parser.add_option("--max_bg_gaps", dest="max_bg_gaps_string",
@@ -543,39 +529,39 @@ if tool.lower() == "bootstrap":
     parser.add_option("--max_gaps_per_position", dest="max_gaps_pos_string",
                     help="Max gap ratio admitted in a single alignment position.", default = "0.5")
 
-    ###     3.4.3 filter for missing species
+    ###     3.3.3 filter for missing species
 
     # Max background missing species
     parser.add_option("--max_bg_miss", dest="max_bg_miss_string",
                     help="Filter by number of miss in the background\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in bg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     3.4.4 Max foreground missing species
+    ###     3.3.4 Max foreground missing species
     parser.add_option("--max_fg_miss", dest="max_fg_miss_string",
                     help="Filter by number of miss in the foreground.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     3.4.5 Max overall missing species (fg + bg)
+    ###     3.3.5 Max overall missing species (fg + bg)
     parser.add_option("--max_miss", dest="max_miss_string",
                     help="Filter by number of miss in foreground and background.\
                         e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
 
-    ###     3.4.6 Pair-aware missing/gap filtering
+    ###     3.3.6 Pair-aware missing/gap filtering
     parser.add_option("--miss_pair", dest="miss_pair", action="store_true",
                     help="Enable pair-aware missing/gap filtering (paired mode is mandatory). \
                         When enabled and max thresholds are equal, validates that missing/gapped species come from matching pairs. Default = disabled.", default = False)
 
-    ###     3.4.7 Conserved pair tolerance
+    ###     3.3.7 Conserved pair tolerance
     parser.add_option("--max_conserved", dest="max_conserved",
                     help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
-    ###     3.4.8 Discovery file for position filtering (optimization)
+    ###     3.3.8 Discovery file for position filtering (optimization)
     parser.add_option("--discovery", dest="discovery_file",
                     help="Path to discovery output file. When provided, bootstrap will only test positions that had CAAS in discovery, \
                         resulting in massive speedup (typically 100-1000x). Highly recommended for large alignments. Default = test all positions.", default = "none")
 
-    ###     3.4.9 Progress logging
+    ###     3.3.9 Progress logging
     parser.add_option("--progress_log", dest="progress_log",
                     help="Path to file for logging progress with timestamps and ETA. Especially useful for directory-based bootstrap. Default = stdout only.", default = "none")
 
@@ -584,15 +570,15 @@ if tool.lower() == "bootstrap":
                         Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
                         Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
 
-    ### 3.5 Usage
+    ### 3.4 Usage
 
     parser.usage = "ct bootstrap -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA"
 
-    ### 3.6 Parse the options
+    ### 3.5 Parse the options
 
     (options, args) = parser.parse_args()
 
-    ### 3.7 FILTERINGS AND ERRORS
+    ### 3.6 FILTERINGS AND ERRORS
 
     missing_option_messages = []
 
@@ -619,25 +605,25 @@ if tool.lower() == "bootstrap":
         print("")
         exit()
 
-    ### 3.8 Import the modules
+    ### 3.7 Import the modules
 
     from modules.boot import *
     from modules.init_bootstrap import simtrait_revive, get_resample_info
     from modules.runslice import runslice
     import os
 
-    ### 3.9 PROCEDURE
+    ### 3.8 PROCEDURE
 
     print(application_info)
     print("")
 
     print("[BOOTSTRAP TOOL] - Scanning", options.single_alignment, "with phenotype information from", options.config_file + "\n\n")
 
-    ###     3.9.1 - Slice the alignment
+    ###     3.8.1 - Slice the alignment
 
     sliced_alignment = runslice(options)
 
-    ###     3.9.2 - Detect if input is directory or file, load accordingly
+    ###     3.8.2 - Detect if input is directory or file, load accordingly
 
     if os.path.isdir(options.simtraits):
         # Directory mode: pass directory path directly, boot_on_single_alignment will handle loading
@@ -648,7 +634,7 @@ if tool.lower() == "bootstrap":
         print(f"Detected single-file resampled traits: {options.simtraits}")
         bootstrap_input = simtrait_revive(options.simtraits)
 
-    ###     3.9.3 - Boot on the alignment file
+    ###     3.8.3 - Boot on the alignment file
 
     # Prepare discovery file parameter (None if not provided)
     discovery_input = None if options.discovery_file == "none" else options.discovery_file
@@ -679,7 +665,7 @@ if tool.lower() == "bootstrap":
                     caap_mode = options.caap_mode
                     )
 
-    ###     3.9.4 Final output
+    ###     3.8.4 Final output
     print("\n\nBootstrap information available in", options.output_file)
 
 
