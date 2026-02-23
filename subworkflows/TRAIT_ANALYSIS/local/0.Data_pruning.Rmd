@@ -899,8 +899,30 @@ ggsave(file.path(phylo_distribution_dir, "big_tree.png"), base_fan_tree, device 
 ordered_species <- rev(pruned_tree$tip.label)
 row.names(stats_df) <- stats_df$species
 
+# Prune tree and trait vector for circular/fan plotting:
+# keep only species with finite primary trait values.
+tree_plot_trait_df <- stats_df %>%
+  dplyr::filter(species %in% pruned_tree$tip.label)
+
+valid_primary_species <- tree_plot_trait_df %>%
+  dplyr::filter(!is.na(value) & is.finite(value)) %>%
+  dplyr::pull(species) %>%
+  unique()
+
+if (length(valid_primary_species) >= 3) {
+  circular_tree <- ape::drop.tip(pruned_tree, setdiff(pruned_tree$tip.label, valid_primary_species))
+  tree_plot_trait_df <- tree_plot_trait_df %>%
+    dplyr::filter(species %in% circular_tree$tip.label)
+  debug_log("visual_distribution: circular_tree tips after trait pruning = %d", length(circular_tree$tip.label))
+} else {
+  circular_tree <- pruned_tree
+  tree_plot_trait_df <- tree_plot_trait_df %>%
+    dplyr::filter(species %in% circular_tree$tip.label)
+  debug_log("visual_distribution: insufficient non-missing trait species (%d); using pruned_tree", length(valid_primary_species))
+}
+
 # Prepare trait data for tree visualization
-tree_trait_data <- stats_df %>%
+tree_trait_data <- tree_plot_trait_df %>%
   group_by(species, taxa)
 
 # Is there a branch color trait specified?
@@ -913,11 +935,11 @@ if (isTRUE(has.branch)) {
   # Perform ancestral state reconstruction for LQ trait
   br_trait_vec <- tree_trait_data$br_trait
   names(br_trait_vec) <- tree_trait_data$species
-  br_asr_fit <- phytools::fastAnc(pruned_tree, br_trait_vec, vars = TRUE, CI = TRUE)
+  br_asr_fit <- phytools::fastAnc(circular_tree, br_trait_vec, vars = TRUE, CI = TRUE)
 
   # Create data frames for tip and node values
   tip_br_data <- data.frame(
-    node = nodeid(pruned_tree, names(br_trait_vec)),
+    node = nodeid(circular_tree, names(br_trait_vec)),
     BR = br_trait_vec
   )
   node_br_data <- data.frame(
@@ -984,7 +1006,7 @@ if (isTRUE(has.secondary)) {
 }
 
 # Convert tree to tibble and join with trait data
-tree_tibble <- tidytree::as_tibble(pruned_tree) %>%
+tree_tibble <- tidytree::as_tibble(circular_tree) %>%
   dplyr::rename(species = label)
 
 tree_with_traits <- full_join(tree_tibble, tree_trait_data, by = 'species')
@@ -1155,7 +1177,7 @@ if (isTRUE(has.secondary)) {
 tree_plot_step3
 
 # Compute dynamic dimensions for final tree plot (keeps ring height invariant across clade sizes)
-n_tips <- length(pruned_tree$tip.label)
+n_tips <- length(circular_tree$tip.label)
 dyn_height <- max(15, round(3 + n_tips * 0.12, 1))
 dyn_width  <- dyn_height + 2
 
@@ -1164,7 +1186,7 @@ dyn_width  <- dyn_height + 2
 
 # Finalize tree with taxon labels and phylopic images
 # Build taxon to tip mapping
-tip_df <- find_taxon_mrca(pruned_tree, tree_with_traits)
+tip_df <- find_taxon_mrca(circular_tree, tree_with_traits)
 
 # Get phylopic data
 tip_df <- tip_df %>%

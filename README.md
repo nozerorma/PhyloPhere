@@ -37,6 +37,7 @@ This project builds on and extends major prior tools and contributions:
 
 - **CAAStools** (linudz): https://github.com/linudz/caastools
 - **CAAP/isCAAP extensions in this codebase** (property-based convergence and group-aware logic, including `iscaap` handling in accumulation/randomization paths).
+- **CAAP grouping follows the same logic described in:** Chen, S., & Zou, Z. (2025). *Detecting Convergence of Amino Acid Physicochemical Properties Underlying the Organismal Adaptive Convergent Evolution*. *Molecular Ecology Resources*, 25(1), e70052. https://doi.org/10.1111/1755-0998.70052
 - **RERConverge** (partial integration in PhyloPhere).
 - **María Sánchez Bermúdez** (diet/ethanol phenotype project definitions and test-use scenarios integrated in runner workflows).
 

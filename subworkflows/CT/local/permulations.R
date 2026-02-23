@@ -109,7 +109,39 @@ background.species <- background.df$V1
 
 # Read the phenotype file
 
-phenotype.df <- read.table(phenotypes, sep = "\t")
+phenotype.df <- read.table(
+  phenotypes,
+  sep = "\t",
+  na.strings = c("", "NA", "NaN", "nan", "NULL", "null")
+)
+
+# Keep only species with non-missing phenotype values to avoid pic()/simpermvec
+# failures in phytools/ape when trait vectors contain NA.
+if (!all(c("V1", "V2") %in% colnames(phenotype.df))) {
+  stop("Phenotype table must contain at least two tab-separated columns: species (V1) and value (V2)")
+}
+
+# Coerce trait values to numeric (required by pic/simperm routines)
+phenotype.df$V2 <- suppressWarnings(as.numeric(phenotype.df$V2))
+
+phenotype.df <- subset(phenotype.df, !is.na(V1) & !is.na(V2) & is.finite(V2))
+
+if (nrow(phenotype.df) == 0) {
+  stop("No valid (non-missing) phenotype rows remain after filtering NA values")
+}
+
+# Restrict FG/BG species to those with available phenotype values.
+available.species <- phenotype.df$V1
+foreground.species <- intersect(foreground.species, available.species)
+background.species <- intersect(background.species, available.species)
+
+foreground.size <- length(foreground.species)
+background.size <- length(background.species)
+
+if (foreground.size == 0 || background.size == 0) {
+  stop("Foreground/background groups become empty after removing species with missing trait values")
+}
+
 foreground.values <- subset(phenotype.df, phenotype.df$V1 %in% foreground.species)$V2
 background.values <- subset(phenotype.df, phenotype.df$V1 %in% background.species)$V2
 
@@ -119,7 +151,29 @@ all.species <- phenotype.df$V1
 
 pruned.tree.o <- drop.tip(tree.o, setdiff(tree.o$tip.label, all.species))
 
+if (length(pruned.tree.o$tip.label) < 2) {
+  stop("Pruned tree has fewer than 2 tips after NA filtering; cannot run resampling")
+}
+
+if (length(setdiff(all.species, pruned.tree.o$tip.label)) > 0) {
+  write(
+    paste(
+      "[WARN]",
+      length(setdiff(all.species, pruned.tree.o$tip.label)),
+      "phenotype species are absent from tree and will be ignored"
+    ),
+    stdout()
+  )
+}
+
 names(starting.values) <- all.species
+
+# Keep only species present in the pruned tree for simulation input.
+starting.values <- starting.values[names(starting.values) %in% pruned.tree.o$tip.label]
+
+if (any(is.na(starting.values))) {
+  stop("Internal error: NA values remain in starting.values after filtering")
+}
 
 ### SIMULATE
 counter = 0
