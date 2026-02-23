@@ -166,7 +166,7 @@ RUN_SIMPLE=true            # user-defined list of unpruned, secondary-free pheno
 # TOY / FULL MODE
 # Toy mode: small alignment subset, fewer cycles and randomizations.
 # ============================================================
-IS_TOY=true
+IS_TOY=false
 
 DATADIR="/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data"
 
@@ -182,7 +182,8 @@ else
     N_RANDOMIZATIONS="10000"
 fi
 
-CAAS_OUTBASE="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0"
+CAAS_OUTBASE="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Results"
+ASR_CACHE_DIR="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/asr"
 
 # ============================================================
 # SHARED INPUTS (used by both phenotype classes)
@@ -314,7 +315,7 @@ COMMON_NF_FLAGS=(
     --cycles      "$CYCLES"
     --accumulation_n_randomizations "$N_RANDOMIZATIONS"
     --ct_disambig_asr_mode      "precomputed"
-    --ct_disambig_asr_cache_dir "${REPO_DIR}/Data/asr"
+    --ct_disambig_asr_cache_dir "${ASR_CACHE_DIR}"
 )
 
 # ============================================================
