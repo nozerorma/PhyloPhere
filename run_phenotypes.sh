@@ -54,7 +54,9 @@
 #
 #   Full downstream chain: contrast_selection → CT (discovery + resample +
 #   bootstrap) → signification → disambiguation (precomputed ASR) →
-#   postproc / filter → ORA → STRING → CT accumulation.
+#   postproc / filter → ORA → STRING → CT accumulation →
+#   FADE (directional AA selection) / MoleRate (rel. evo. rate) in gene_set
+#   mode; RERConverge in gene_set mode (pre-filtered gene trees).
 #
 #
 #   CLASS 2 · SIMPLE  (RUN_SIMPLE)
@@ -115,7 +117,9 @@
 #
 #   Full downstream chain: contrast_selection (no CI) → CT (discovery +
 #   resample + bootstrap) → signification → disambiguation (precomputed ASR)
-#   → postproc / filter → ORA → STRING → CT accumulation.
+#   → postproc / filter → ORA → STRING → CT accumulation →
+#   FADE / MoleRate (gene_set mode); RERConverge (gene_set mode, pre-filtered
+#   gene trees).
 #
 #
 # In both classes: --caas_postproc_mode filter; --ct_disambig_asr_mode
@@ -152,6 +156,28 @@ fi
 export NXF_APPTAINER_HOME_MOUNT=true
 export NXF_SINGULARITY_HOME_MOUNT=true
 
+# Redirect Apptainer's tmp and cache directories to the external drive.
+# /home is ~95% full (13 GB free) and /tmp is a 7.5 GB tmpfs — both too small
+# to unpack the full conda environment from the Docker image layers (~5-8 GB
+# uncompressed).  The external drive has ~65 GB free and is adequate for builds.
+_EXT_DRIVE="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92"
+export APPTAINER_TMPDIR="${_EXT_DRIVE}/apptainer_tmp"
+export APPTAINER_CACHEDIR="${_EXT_DRIVE}/apptainer_cache"
+export SINGULARITY_TMPDIR="${APPTAINER_TMPDIR}"
+export SINGULARITY_CACHEDIR="${APPTAINER_CACHEDIR}"
+mkdir -p "${APPTAINER_TMPDIR}" "${APPTAINER_CACHEDIR}"
+
+# Pre-pull the Apptainer SIF if absent (same guard as run_neoplasia script).
+_REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_APPTAINER_SIF="${_REPO_DIR}/apptainer/miralnso-phylophere-latest.img"
+if [ ! -f "${_APPTAINER_SIF}" ]; then
+    echo "[INFO] Pre-pulling Apptainer image to ${_APPTAINER_SIF} ..."
+    mkdir -p "${_REPO_DIR}/apptainer"
+    apptainer pull "${_APPTAINER_SIF}" docker://miralnso/phylophere:latest
+    echo "[INFO] Apptainer image ready."
+fi
+unset _EXT_DRIVE _REPO_DIR _APPTAINER_SIF
+
 timestamp=$(date +%Y%m%d_%H%M%S)
 
 # ============================================================
@@ -161,6 +187,19 @@ timestamp=$(date +%Y%m%d_%H%M%S)
 # Which phenotype class(es) to run
 RUN_PRUNED_SECONDARY=true   # neoplasia/malignant pair (pruning + secondary trait + CI)
 RUN_SIMPLE=true            # user-defined list of unpruned, secondary-free phenotypes
+
+# ── Selection analysis toggles ───────────────────────────────────────────────
+# Both default to false; enable independently of each other.
+# Mode 'all'       : runs on the full alignment directory (no upstream dependency).
+# Mode 'gene_set'  : runs only on genes from a prior accumulation / postproc run;
+#                    you must set the *_accumulation_* / *_postproc_* path params
+#                    (see FADE_NF_FLAGS / MOLERATE_NF_FLAGS below for details).
+# NOTE: when run inline (same Nextflow invocation as CT_ACCUMULATION), use
+#       mode 'all' or point the gene-set paths at outputs of a *previous* run.
+RUN_FADE=false              # HyPhy FADE (directional amino-acid selection)
+RUN_MOLERATE=false          # HyPhy MoleRate (relative evolutionary rate)
+FADE_MODE="gene_set"             # 'all' or 'gene_set'
+MOLERATE_MODE="gene_set"         # 'all' or 'gene_set'
 
 # ============================================================
 # TOY / FULL MODE
@@ -179,7 +218,7 @@ else
     TAG=""
     ALI_DIR="${DATADIR}/2.Alignments/Primate_alignments"
     CYCLES="1000000"
-    N_RANDOMIZATIONS="10000"
+    N_RANDOMIZATIONS="1000000"
 fi
 
 CAAS_OUTBASE="/media/miguel/adfbf391-5867-414b-8af7-bceb102e6e92/CAAS_2.0/Results"
@@ -304,6 +343,40 @@ if [ ! -d "$ALI_DIR" ]; then
 fi
 
 # ============================================================
+# FADE / MOLERATE NEXTFLOW FLAGS
+# Extend or override per trait by editing below.
+# In gene_set mode set the *_accumulation_* / *_postproc_* paths to the
+# output files from a completed CT_ACCUMULATION run, e.g.:
+#   --fade_accumulation_top  "${CAAS_OUTBASE}/${TRAIT}${TAG}/<timestamp>/filter/accumulation/\
+#     accumulation_convergent_caap_top_aggregated_results.csv"
+# ============================================================
+FADE_NF_FLAGS=()
+if [ "$RUN_FADE" = true ]; then
+    FADE_NF_FLAGS=(
+        --fade
+        --fade_mode "$FADE_MODE"
+        # Uncomment and fill for gene_set mode:
+        # --fade_accumulation_top    "/path/to/accumulation_convergent_caap_top_aggregated_results.csv"
+        # --fade_accumulation_bottom "/path/to/accumulation_convergent_caap_bottom_aggregated_results.csv"
+        # --fade_postproc_top        "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
+        # --fade_postproc_bottom     "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
+    )
+fi
+
+MOLERATE_NF_FLAGS=()
+if [ "$RUN_MOLERATE" = true ]; then
+    MOLERATE_NF_FLAGS=(
+        --molerate
+        --molerate_mode "$MOLERATE_MODE"
+        # Uncomment and fill for gene_set mode:
+        # --molerate_accumulation_top    "/path/to/accumulation_convergent_caap_top_aggregated_results.csv"
+        # --molerate_accumulation_bottom "/path/to/accumulation_convergent_caap_bottom_aggregated_results.csv"
+        # --molerate_postproc_top        "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
+        # --molerate_postproc_bottom     "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
+    )
+fi
+
+# ============================================================
 # COMMON NEXTFLOW INFRASTRUCTURE FLAGS (shared across all runs)
 # ============================================================
 COMMON_NF_FLAGS=(
@@ -418,6 +491,8 @@ if [ "$RUN_PRUNED_SECONDARY" = true ]; then
             --ora
             --string
             --ct_accumulation
+            "${FADE_NF_FLAGS[@]:-}"
+            "${MOLERATE_NF_FLAGS[@]:-}"
         )
 
         run_pipeline \
@@ -501,6 +576,8 @@ if [ "$RUN_SIMPLE" = true ]; then
             --ora
             --string
             --ct_accumulation
+            "${FADE_NF_FLAGS[@]:-}"
+            "${MOLERATE_NF_FLAGS[@]:-}"
         )
 
         run_pipeline \

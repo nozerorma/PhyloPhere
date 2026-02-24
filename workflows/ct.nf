@@ -66,14 +66,19 @@ workflow CT {
 
         def discovery_out = Channel.empty()
         def discovery_done = Channel.value(true)
-        // resample_out may be a directory (new default) or a legacy single file when running bootstrap only
+        // resample_dir_out  → partitioned directory passed to ct bootstrap -s
+        // resample_out      → concatenated resample.tab used for reporting / emit
         def resample_out = Channel.empty()
+        def resample_dir_out = Channel.empty()   // directory channel for BOOTSTRAP
         if (params.resample_out) {
             def resample_path = file(params.resample_out)
             if (resample_path.isDirectory()) {
-                resample_out = Channel.value(file(params.resample_out, type: 'dir'))
+                resample_dir_out = Channel.value(file(params.resample_out, type: 'dir'))
+                resample_out     = resample_dir_out
             } else {
-                resample_out = Channel.value(resample_path)
+                // legacy single-file fallback (pre-partitioned runs)
+                resample_out     = Channel.value(resample_path)
+                resample_dir_out = resample_out
             }
         }
         def bootstrap_out
@@ -156,12 +161,13 @@ workflow CT {
                 caas_config = resample_trigger.map { file(trait_file_out) }
                 trait_values = resample_trigger.map { file(trait_val) }
             }
-            resample_out = RESAMPLE(nw_tree, caas_config, trait_values)
-            
-            // Concatenate all resample outputs - pass directory for staging
-            CONCAT_RESAMPLE(resample_out)
-            // Update resample_out to the concatenated file so bootstrap has a live channel
+            resample_dir_out = RESAMPLE(nw_tree, caas_config, trait_values)
+
+            // Concatenate the partitioned directory into a single resample.tab for reporting
+            CONCAT_RESAMPLE(resample_dir_out)
             resample_out = CONCAT_RESAMPLE.out.resample_concat
+            // NOTE: resample_dir_out retains the raw directory so bootstrap receives
+            // the partitioned resample_NNN.tab files, not the merged flat file.
         }
         if (toolsToRun.contains('bootstrap')) {
             if (toolsToRun.contains('discovery')) {
@@ -187,10 +193,20 @@ workflow CT {
                             .join(discovery_files)
                             .map { row -> tuple(row[0], row[1], row[2]) }
                 } else {
-                    def discovery_file_ch = Channel.value(discovery_path)
+                    // Single concatenated discovery.tab:
+                    // Read gene names at plan-time, filter align_tuple to only those
+                    // genes, then pass the full discovery file to bootstrap --discovery.
+                    // Alignment IDs have the form GENE.Homo_sapiens.filter2, so we
+                    // extract the gene name as the token before the first dot.
+                    def caas_genes = discovery_path
+                        .readLines()
+                        .drop(1)                          // skip header
+                        .collect { it.split('\t')[0] }   // Gene column
+                        .toSet()
+
                     align_with_discovery = align_tuple
-                            .combine(discovery_file_ch)
-                            .map { row -> tuple(row[0], row[1], row[2]) }
+                        .filter { id, f -> caas_genes.contains(id.split('\\.')[0]) }
+                        .map    { id, f -> tuple(id, f, discovery_path) }
                 }
             } else {
                 // No discovery file - create placeholder for bootstrap process
@@ -200,8 +216,11 @@ workflow CT {
                 }
             }
 
+            // Pass the partitioned resample directory (resample_dir_out), NOT the
+            // concatenated resample.tab, so ct bootstrap -s receives individual
+            // resample_NNN.tab files as expected.
             bootstrap_in = align_with_discovery
-                    .combine(resample_out)
+                    .combine(resample_dir_out)
                     .map { row -> tuple(row[0], row[1], row[2], row[3]) }
 
             bootstrap_out = BOOTSTRAP(bootstrap_in, trait_file_out)

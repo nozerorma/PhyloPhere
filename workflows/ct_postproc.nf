@@ -166,9 +166,7 @@ workflow CT_POSTPROC {
                 cluster_file
             )
             
-            // Run background cleanup (always when gene filtering is enabled)
-            log.info "🧹 Cleaning background gene lists..."
-            
+            // Run background cleanup (always when gene filtering is enabled)            
             cleaned_backgrounds = CAAS_BACKGROUND_CLEANUP(
                 global_background_genes,
                 gene_filter_results.removed_genes

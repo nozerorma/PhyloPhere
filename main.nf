@@ -66,6 +66,8 @@ include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
 include {ORA} from './workflows/ora.nf'
 include {ORA_ACCUMULATION} from './workflows/ora_accumulation.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
+include {FADE}           from './workflows/fade.nf'
+include {MOLERATE}       from './workflows/molerate.nf'
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -110,19 +112,38 @@ workflow {
             CONTRAST_SELECTION()
             ran_any = true
         }
-        if (params.rer_tool) {
-            RER_MAIN()
-            ran_any = true
-        }
         def signification_results = null
         def disambiguation_results = null
         def postproc_results = null
 
+        // Channels populated by CT_ACCUMULATION/CT_POSTPROC when they run.
+        // Used by FADE/MOLERATE/RER gene-set piping without manual path specification.
+        def sel_acc_top_ch    = Channel.empty()
+        def sel_acc_bottom_ch = Channel.empty()
+        def sel_pp_top_ch     = Channel.empty()
+        def sel_pp_bottom_ch  = Channel.empty()
+
+        // Track which sub-tools actually ran so we can pass null (not Channel.empty())
+        // to downstream workflows when a tool didn't produce output.
+        // Channel.empty() is truthy in Groovy, so if() guards inside sub-workflows
+        // would take the "use CT output" branch but the channel would never emit,
+        // causing all downstream .ifEmpty{} fallbacks to fire incorrectly.
+        def ct_tools_ran      = params.ct_tool ? params.ct_tool.split(',').collect { it.trim() } : []
+        def ran_discovery     = ct_tools_ran.contains('discovery')
+        def ran_bootstrap     = ct_tools_ran.contains('bootstrap')
+
+        // Stable channel references for CT_POSTPROC outputs used by multiple consumers.
+        // Populated inside the ct_postproc block when --ct_postproc is enabled.
+        def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
+        def pp_gene_lists_val = null   // .collect()-ed list of ORA gene list files (value channel)
+
         if (params.ct_signification) {
-            // Use CT outputs if available, otherwise workflow falls back to params inputs.
-            def discovery_ch       = ct_results ? ct_results.discovery_file  : null
-            def background_genes_ch = ct_results ? ct_results.background_genes : null
-            def bootstrap_ch       = ct_results ? ct_results.bootstrap_file   : null
+            // Only pass CT channels when the corresponding tool actually ran.
+            // Pass null (not Channel.empty()) when absent so the if(channel) guard
+            // inside CT_SIGNIFICATION correctly detects absence and falls back to params.
+            def discovery_ch        = (ct_results && ran_discovery) ? ct_results.discovery_file   : null
+            def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes  : null
+            def bootstrap_ch        = (ct_results && ran_bootstrap) ? ct_results.bootstrap_file    : null
 
             signification_results = CT_SIGNIFICATION(discovery_ch, background_genes_ch, bootstrap_ch)
             ran_any = true
@@ -166,19 +187,27 @@ workflow {
             // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
             // to --discovery_input / --background_input params (same pattern as CT_SIGNIFICATION).
             def discovery_ch = disambiguation_results ? disambiguation_results.master_csv : null
-            def background_ch = ct_results ? ct_results.background_file_raw : Channel.empty()
-            def background_genes_ch = ct_results ? ct_results.background_genes : null
+            // Only wire raw background channels when discovery actually ran; otherwise pass
+            // null/Channel.empty() so CT_POSTPROC falls back to --background_input param.
+            def background_ch       = (ct_results && ran_discovery) ? ct_results.background_file_raw : Channel.empty()
+            def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
             def bootstrap_ch = Channel.empty() // retained for CT_POSTPROC signature compatibility
 
             postproc_results = CT_POSTPROC(discovery_ch, background_ch, background_genes_ch, bootstrap_ch)
             ran_any = true
 
-            if (params.ora) {
-                // ORA consumes CT_POSTPROC channels in integrated runs
-                def ora_background_ch = postproc_results.cleaned_background
-                def ora_gene_lists_ch = postproc_results.ora_gene_lists_files
+            // Capture postproc outputs as reusable references.
+            // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
+            // Collect ora_gene_lists_files into a value channel so FADE/MOLERATE/RER can each
+            // independently filter/flatMap the full list without racing on queue items.
+            pp_cleaned_bg     = postproc_results.cleaned_background
+            pp_gene_lists_val = postproc_results.ora_gene_lists_files.collect()
 
-                ORA(ora_background_ch, ora_gene_lists_ch)
+            if (params.ora) {
+                // ORA uses if(channel) guard internally, so passing a channel that has
+                // not yet emitted is safe — it will wait for the upstream process.
+                // Pass the direct queue channel for gene lists (ORA collects internally).
+                ORA(pp_cleaned_bg, postproc_results.ora_gene_lists_files)
                 ran_any = true
             }
         }
@@ -192,23 +221,73 @@ workflow {
             }
 
             // Use filtered_discovery.tsv from postproc (gene_filtering stage)
-            def acc_caas_ch       = postproc_results      ? postproc_results.filtered_discovery             : Channel.empty()
-            def acc_background_ch = postproc_results      ? postproc_results.cleaned_background             : Channel.empty()
-            def acc_trait_file_ch = ct_results            ? ct_results.trait_file                          : Channel.empty()
+            def acc_caas_ch       = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
+            def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()
+            def acc_trait_file_ch = ct_results       ? ct_results.trait_file               : Channel.empty()
 
             def accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch)
             ran_any = true
 
+            // Split accumulation CSVs by direction for FADE/MOLERATE/RER gene-set piping.
+            sel_acc_top_ch    = accum_results.results
+                .filter { f -> f.name.contains('_top_') }
+            sel_acc_bottom_ch = accum_results.results
+                .filter { f -> f.name.contains('_bottom_') }
+
             if (params.ora) {
                 // Pipe accumulation gene lists into the ORA / STRING enrichment pipeline.
                 // Background falls back to --ora_background_input when no postproc channel is present.
-                def ora_acc_background_ch  = postproc_results ? postproc_results.cleaned_background : Channel.empty()
+                def ora_acc_background_ch  = pp_cleaned_bg ?: Channel.empty()
                 ORA_ACCUMULATION(ora_acc_background_ch, accum_results.gene_lists)
             }
         }
 
+        // Populate postproc gene-list channels for FADE/MOLERATE/RER gene-set piping.
+        // pp_gene_lists_val is a value channel holding the collected List<File>.
+        // Each .flatMap { files -> files.findAll{...} } is an independent subscription
+        // that filters the same list — no queue items are shared between consumers.
+        if (pp_gene_lists_val) {
+            sel_pp_top_ch    = pp_gene_lists_val
+                .flatMap { files -> files.findAll { f -> f.name.contains('_top_') && f.name.endsWith('significant.txt') } }
+            sel_pp_bottom_ch = pp_gene_lists_val
+                .flatMap { files -> files.findAll { f -> f.name.contains('_bottom_') && f.name.endsWith('significant.txt') } }
+        }
+
+        if (params.fade) {
+            def fade_traitfile_ch = ct_results ? ct_results.trait_file : Channel.empty()
+            def fade_tree_ch      = ct_results ? ct_results.tree_file  : Channel.empty()
+            FADE(fade_traitfile_ch, fade_tree_ch,
+                 sel_acc_top_ch, sel_acc_bottom_ch,
+                 sel_pp_top_ch,  sel_pp_bottom_ch)
+            ran_any = true
+        }
+
+        if (params.molerate) {
+            def mr_traitfile_ch = ct_results ? ct_results.trait_file : Channel.empty()
+            def mr_tree_ch      = ct_results ? ct_results.tree_file  : Channel.empty()
+            MOLERATE(mr_traitfile_ch, mr_tree_ch,
+                     sel_acc_top_ch, sel_acc_bottom_ch,
+                     sel_pp_top_ch,  sel_pp_bottom_ch)
+            ran_any = true
+        }
+
+        if (params.rer_tool) {
+            // RER_MAIN is called last so that sel_acc_*/sel_pp_* channels are
+            // fully populated by CT_ACCUMULATION / CT_POSTPROC when running together.
+            // NOTE: RER_TRAIT requires the original phenotype file (with proper column
+            // headers), NOT the caastools traitfile (headerless 3-col format).
+            // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.
+            def rer_traitfile_ch = Channel.empty()
+            RER_MAIN(
+                rer_traitfile_ch,
+                sel_acc_top_ch, sel_acc_bottom_ch,
+                sel_pp_top_ch,  sel_pp_bottom_ch
+            )
+            ran_any = true
+        }
+
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, or --ct_accumulation."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --molerate, or --rer_tool."
         }
     }
 }

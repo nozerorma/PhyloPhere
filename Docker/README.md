@@ -1,786 +1,456 @@
-# CAAStools 1.0 - Software documentation.
-# 1. Introduction to CAAStools
-
-Amino acid substitutions that are consistent with phenotypic variation indicate that the gene product is potentially involved in the genetic determination of the trait. We define these cases as _Convergent Amino Acid Substitutions_ (CAAS).
-
-It is possible to retrieve CAAS by scanning Multiple Sequence Alignments (MSA) of orthologous proteins or translated nucleotides. We will isolate those positions in which we can verify that species with diverging trait values converge to different amino acids. A very simple way to do this is to define two groups of species, isolate those positions in which they won’t share any amino acids, and test the statistical significance of this association.
-
-Although the implementation of this strategy can be easily achieved through simple scripting, its scaling to proteome-size requires some additional effort in terms of code optimization. Also, CAAS analysis is usually validated through bootstrap-based approaches. All these operations together are computationally expensive, especially when brought to proteome-wide scale.
-
-In recent years, our group worked on optimizing our in-house scripts for CAAS discovery and validation. CAAStools is the result of these efforts. A small suite of bioinformatics tools that allow the user to identify and validate CAAS analysis on MSA of orthologous proteins.
-
-
-## 1.1 Suite overview 
-
-CAAStools is a collection of 3 bioinformatics tools written in Python 3.9.4. **Figure 1** resumes the functioning of each tool. Globally, CAAStools relies on three main pieces of information that are required in different formats (see the input specification section of those paragraphs discussing each single tool). The **_discovery_** tool detects CAAS from a single amino acid MSA (protein or translated nucleotide). The **_resample_** tools elaborates virtual phenotype groups through different strategies (brownian motion simulation, random sorting of species or phylogeny-restricted resampling). The result of this tool can be submitted to the **_bootstrap_** tool that runs a bootstrap CAAS analysis on a single MSA.
-
-[Link to **Figure 1**](https://figshare.com/articles/figure/CAAStools_Figure/21324306)
-
-The output of the discovery tool consists in a table reporting a list of CAAS associations. A corresponding p-value is calculated as the probability of randomly finding a CAAS association in that position (see our preprint for a full explanation about the statistical testing of CAAS).
-
-
-# 2 Download, installation and updates.
-
-
-## 2.1 Availability.
-
-CAAStools is available as a GitHub repository
-
-[https://github.com/linudz/caastools](https://github.com/linudz/caastools).  
-
-The repository can be cloned through command line
-
-`git clone github.com/linudz/caastools`
-
-Also, you can clone it through the GitHub GUI client or download the code as a zipped file through your browser.
-
-
-## 2.2 Installation.
-
-
-The file _ct_ in the CAAStools Git folder is an executable python script that will launch the different tools of the suite. To run it system-wide, you can decide to either download the code to the usr/local/bin folder or to add the caastools folder to the $PATH variable.
-
-
-### Updates.
-
-Please, follow the github.com/linudz/caastools repository for code updates.
-
-
-## 2.3 Dependencies and software requirements.
-
-CAAStools is written in **Pyhton 3.9.4** and is compatible with any Python 3+ environment. Each tool has its own set of dependencies.
-
-
-### Discovery and Bootstrap tools.
-
-Biopython 1.79
-
-Scipy (Biopython dependency)
-
-Numpy (Biopython dependency)
-
-
-### Resample tool
-
-Dendropy 4+
-
-Also, the _Brownian Motion_ _mode_ (`--mode bm`) for trait simulation relies on the simpermvec() function from R library RERconverge ([https://github.com/nclark-lab/RERconverge](https://github.com/nclark-lab/RERconverge)). This library will be requested only by the _resample_ tool when run in _Brownian Motion mode_ (`--mode bm`).
-
-**Warning.** Apple M1 and M2 users might experience issues during RERconverge installation ([https://github.com/nclark-lab/RERconverge/issues/60](https://github.com/nclark-lab/RERconverge/issues/60)).
-
-
-# 3. Discovery tool
-
-
-## 3.1 Algorithm overview
-
-CAAStools discovery identifies CAAS from an amino acid Multiple Sequence Alignment file (MSA). It is possible to view the inputs and the options through the `-h --help` command
-
-`ct discovery -h/--help`
-
-CAAStools discovery returns those positions in which amino acids differ between two groups of species. We call these groups **discovery groups**, distinguishing them into foreground (**FG**) and background (**BG**). The program will detect a CAAS in those MSA positions that will meet two conditions. First, the foreground and the background won’t share any amino acids. Second, all the species in at least one group need to share (or _converge_ to) the same amino acid. The two conditions define a set of 4 possible mutation **patterns**. _Table 3.1_ reports a set of possible mutation patterns, indicating which ones are accepted as CAAS, that are enumerated from 1 to 4.
-
-
-<table>
-  <tr>
-   <td><strong>FG</strong>
-   </td>
-   <td><strong>BG</strong>
-   </td>
-   <td><strong>Difference between groups</strong>
-   </td>
-   <td><strong>Convergence within…</strong>
-   </td>
-   <td><strong>Pattern</strong>
-   </td>
-   <td><strong>Is it CAAS?</strong>
-   </td>
-  </tr>
-  <tr>
-   <td>K
-   </td>
-   <td>W
-   </td>
-   <td>YES
-   </td>
-   <td>Both groups
-   </td>
-   <td>Pattern 1
-   </td>
-   <td>YES
-   </td>
-  </tr>
-  <tr>
-   <td>K
-   </td>
-   <td>WE
-   </td>
-   <td>YES
-   </td>
-   <td>FG
-   </td>
-   <td>Pattern 2
-   </td>
-   <td>YES
-   </td>
-  </tr>
-  <tr>
-   <td>KE
-   </td>
-   <td>W
-   </td>
-   <td>YES
-   </td>
-   <td>BG
-   </td>
-   <td>Pattern 3
-   </td>
-   <td>YES
-   </td>
-  </tr>
-  <tr>
-   <td>KE
-   </td>
-   <td>WF
-   </td>
-   <td>YES
-   </td>
-   <td>None
-   </td>
-   <td>-
-   </td>
-   <td>NO
-   </td>
-  </tr>
-  <tr>
-   <td>K
-   </td>
-   <td>KE
-   </td>
-   <td>NO
-   </td>
-   <td>FG
-   </td>
-   <td>-
-   </td>
-   <td>NO
-   </td>
-  </tr>
-  <tr>
-   <td>KE
-   </td>
-   <td>K
-   </td>
-   <td>NO
-   </td>
-   <td>BG
-   </td>
-   <td>-
-   </td>
-   <td>NO
-   </td>
-  </tr>
-</table>
-
-
-**Table 3.1** - Mutation patterns.
-
-Note that the **pattern 4** can be included as CAAS by user specification. Through the `--patterns` option, the user will be able to select the number of patterns to include in the output. By default, ct discovery returns the patterns 1,2 and 3.
-
-The user can filter the result based on the maximum number of indels (or gaps, “-”) accepted per position or the maximum species missing in the alignment.
-
-For each CAAS prediction, the program will calculate an empiric p-value that corresponds to the probability of finding the same set of mutational patterns with random species. This probability is calculated through the hypergeometric distribution.
-
-For further details on the CAAStools discovery algorithm, please refer to our preprint on BioRXIV.
-
-
-## 3.2 Formatting the inputs
-
-
-### 3.2.1 The configuration file
-
-`-t /--traitfile $config_file`
-
-The **configuration file **or **config** is the file that we’ll use to tell the program which species we are comparing and how they are arranged into the FG and BG. It consists of a simple tab file containing the name of the species and a label indicating the corresponding group (**FG** = 1, **BG **= 0).
-
-A config file is present in the examples/ folder (examples/conifig.tab)
-
-Aotus_griseimembra	0
-
-Avahi_peyrierasi	0
-
-Callibella_humilis	0
-
-Gorilla_beringei	1
-
-Gorilla_gorilla	1
-
-Macaca_thibetana	1
-
-Mandrillus_leucophaeus	1
-
-This config file will instruct the program to create two groups.
-
-
-<table>
-  <tr>
-   <td>FG
-   </td>
-   <td>Gorilla_beringei, Gorilla_gorilla, Macaca_thibetana, Mandrillus_leucophaeus
-   </td>
-  </tr>
-  <tr>
-   <td>BG
-   </td>
-   <td>Aotus_griseimembra, Avahi_peyrierasi, Callibella_humilis
-   </td>
-  </tr>
-</table>
-
-
-Note that:
-
-
-
-* The values are tab-separated and no further space is admitted
-* The order of the species is irrelevant.
-
-
-### 3.2.2 The amino acid MSA
-
-The second fundamental input is the amino acid MSA file. CAAStools relies on Biopython 1.7 to import sequence files. Hence, the accepted formats are the ones specified in Biopython docs ( [https://biopython.org/wiki/AlignIO](https://biopython.org/wiki/AlignIO) ):
-
-**clustal, emboss, fasta, fasta-m10, ig, maf, mauve, msf, nexus, phylip, phylip-sequential, phylip-relaxed, stockholm**
-
-By default, ct discovery will read the MSA as a clustal file. To specify a different format, we’ll need to specify it through the `--fmt` option (e.g. `--fmt phylip-relaxed`). In the examples folder, the examples/MSA directory contains an MSA in different formats.
-
-
-### 3.2.3 A note on name consistency
-
-CAAStools will associate the sequence in the MSA to the species by name identity. The program will save the name of each species in FG and BG groups in string variables, and will select those sequences in the MSA whose ID field will coincide with one of the species in the config file. **Please, format your config file and MSA in order to match the sequence IDs with the name of the species in the config file**.
-
-
-## 3.3 Gaps and missing species filtering 
-
-CAAS results can be filtered for a maximum of gaps or missing species. In this, we define as a “gap” the presence of an indel which is indicated with the “-” character. A missing species will be a species that is mentioned in the config file but it is not found in the MSA. This situation can occur when we iterate the analysis over different MSAs with variable coverage.
-
-By default, CAAStools discovery accepts a maximum of n-1 gaps or missing species per group, where n is the size of the group. This means that the program will need the presence of at least one species per group to verify the conditions for CAAS assignment. The user can decide to limit the number of gaps and missing species per group, or to skip those positions in which gaps represent more than a maximum percentage of total symbols (default=50%). The following tables report the different options for gaps and missing species.
-
-
-### 3.3.1 Filtering for gaps
-
-
-<table>
-  <tr>
-   <td>Max background gaps
-   </td>
-   <td>--max_bg_gaps
-   </td>
-   <td>Filter by number of gaps in the background.
-   </td>
-   <td>Default: No filter
-   </td>
-  </tr>
-  <tr>
-   <td>Max foreground gaps
-   </td>
-   <td>--max_fg_gaps
-   </td>
-   <td>Filter by number of gaps in the foreground.
-   </td>
-   <td>Default: No filter
-   </td>
-  </tr>
-  <tr>
-   <td>Max overall gaps
-   </td>
-   <td>--max_gaps
-   </td>
-   <td>Filter by total number of gaps
-   </td>
-   <td>Default: No filter
-   </td>
-  </tr>
-  <tr>
-   <td>Max gaps per position
-   </td>
-   <td>--max_gaps_per_position
-   </td>
-   <td>Filter by number of gaps per position.
-   </td>
-   <td>Default: 0.5 (50%)
-   </td>
-  </tr>
-</table>
-
-
-
-### 3.3.2 Filtering for missing species
-
-
-<table>
-  <tr>
-   <td>Max background missing species
-   </td>
-   <td>--max_bg_miss
-   </td>
-   <td>Filter by number of missing species in the background.
-   </td>
-   <td>Default: No filter
-   </td>
-  </tr>
-  <tr>
-   <td>Max foreground missing species
-   </td>
-   <td>--max_fg_miss
-   </td>
-   <td>Filter by number of missing species in the foreground.
-   </td>
-   <td>Default: No filter
-   </td>
-  </tr>
-  <tr>
-   <td>Max overall missing species
-   </td>
-   <td>--max_miss
-   </td>
-   <td>Filter by total number of missing species
-   </td>
-   <td>Default: No filter
-   </td>
-  </tr>
-</table>
-
-## 3.4 The output
-
-CAAStools discovery will output a tab file with all the CAAS found in one single MSA.
-
-
-<table>
-  <tr>
-   <td><strong>Column</strong>
-   </td>
-   <td><strong>Header</strong>
-   </td>
-   <td><strong>Description</strong>
-   </td>
-  </tr>
-  <tr>
-   <td>1
-   </td>
-   <td>Gene
-   </td>
-   <td>The name of the gene (from MSA filename)
-   </td>
-  </tr>
-  <tr>
-   <td>2
-   </td>
-   <td>Trait
-   </td>
-   <td>The name of the trait (from binary config file)
-   </td>
-  </tr>
-  <tr>
-   <td>3
-   </td>
-   <td>Position
-   </td>
-   <td>The position in the MSA (0-based)
-   </td>
-  </tr>
-  <tr>
-   <td>4
-   </td>
-   <td>Substitution
-   </td>
-   <td>The substitution FG/BG
-   </td>
-  </tr>
-  <tr>
-   <td>5
-   </td>
-   <td>Pvalue
-   </td>
-   <td>The p-value from hypergeometric distribution
-   </td>
-  </tr>
-  <tr>
-   <td>6
-   </td>
-   <td>Scenario
-   </td>
-   <td>The mutational pattern (see “patterns” table in<em> 3.1 - Algorithm overview</em>)
-   </td>
-  </tr>
-  <tr>
-   <td>7
-   </td>
-   <td>FFGN
-   </td>
-   <td>Species <strong>F</strong>ound in <strong>FG</strong>: <strong>N</strong>umber. Number of species found in the FG group (it excludes those ones having an indel). 
-   </td>
-  </tr>
-  <tr>
-   <td>8
-   </td>
-   <td>FBGN
-   </td>
-   <td>Species <strong>F</strong>ound in <strong>BG</strong>: <strong>N</strong>umber. Number of species found in the BG group (it excludes those ones having an indel). 
-   </td>
-  </tr>
-  <tr>
-   <td>9
-   </td>
-   <td>GFG
-   </td>
-   <td>Number of <strong>G</strong>aps in the <strong>FG</strong>.
-   </td>
-  </tr>
-  <tr>
-   <td>10
-   </td>
-   <td>GBG
-   </td>
-   <td>Number of <strong>G</strong>aps in the <strong>BG</strong>.
-   </td>
-  </tr>
-  <tr>
-   <td>11
-   </td>
-   <td>MFG
-   </td>
-   <td>Number of <strong>M</strong>issing species in the <strong>FG</strong>.
-   </td>
-  </tr>
-  <tr>
-   <td>12
-   </td>
-   <td>MBG
-   </td>
-   <td>Number of <strong>M</strong>issing species in the <strong>BG</strong>.
-   </td>
-  </tr>
-  <tr>
-   <td>13
-   </td>
-   <td>FFG
-   </td>
-   <td>List of species <strong>F</strong>ound in the <strong>FG</strong>. Comma-separated.
-   </td>
-  </tr>
-  <tr>
-   <td>14
-   </td>
-   <td>FBG
-   </td>
-   <td>List of species <strong>F</strong>ound in the <strong>FG</strong>. Comma-separated.
-   </td>
-  </tr>
-  <tr>
-   <td>15
-   </td>
-   <td>MS
-   </td>
-   <td>List of missing species. Comma-separated.
-   </td>
-  </tr>
-</table>
-
-
-
-## 
-
-
-## 3.5 Examples
-
-Run ct discovery with example alignment (`phylip-relaxed` format, that has to be specified).
-
-`ct discovery -a examples/MSA/primates.msa.pr -t examples/config.tab -o examples/discovery.output.usr.example --fmt phylip-relaxed`
-
-
-# 4 Resample tool
-
-
-## 4.1 Algorithm Overview
-
-CAAStools resample (ct resample) elaborates a set of resampled discovery groups for bootstrap analysis. The global options for the tool can be fetched through the help command:
-
-`ct resample -h/--help`
-
-The simulation of discovery groups is propaedeutic to bootstrap analysis
-
-can consist in a simple randomization, a randomization that is restricted to some parts of the phylogeny, or be based on brownian-motion trait evolution simulation. The user will indicate one of these three strategies, the size of the resampled FG and BG groups and the number of simulation cycles. The program outputs a tab file in 
-
-
-### 4.1.1 Random simulation strategy
-
-`ct resample --mode random`
-
-In this case, the simulation will consist in the bare random sorting of species into a pair of FG/BG discovery groups. 
-
-
-### 4.1.2 Phylogeny-restricted random simulation strategy.
-
-`ct resample --mode random --limit_by_group $groupfile`
-
-In this case, the simulation is based on the random choice of species, but is limited to the families that are present in a config file provided as a template. A further file, the species file, specifies the composition of the families. The random scooping takes into account the number of groups (or families) present in the template groups and will replicate that composition. For instance, if our template FG group consists of 3 species from group A and 2 species from groupB, the randomisation will follow this pattern. In each cycle, the program scoops 3 random species from group A and 2 random species from group B.
-
-
-### 4.1.3 Brownian motion based simulation strategy.
-
-`ct resample --mode bm`
-
-This strategy resamples neutral evolution by brownian motion simulation. The FG/BG group size is defined by a template config file. The R function
-
-`simpermvec()`
-
-from R library RERconverge ([https://github.com/nclark-lab/RERconverge](https://github.com/nclark-lab/RERconverge)) will perform a brownian motion simulation of neutral evolution. FG and BG will be defined as the n-th species with higher values and the m-th species with lower values, where n and m are the size of FG and BG respectively.
-
-
-## 4.2 Inputs per simulation strategy
-
-Each simulation strategy will require a specific set of input files. The following table reports all the inputs that are needed for each strategy.
-
-
-<table>
-  <tr>
-   <td><strong>Input File</strong>
-   </td>
-   <td><strong>Random</strong>
-   </td>
-   <td><strong>Random (Phylogeny restricted)</strong>
-   </td>
-   <td><strong>Brownian Motion</strong>
-   </td>
-  </tr>
-  <tr>
-   <td>Phylogenetic tree in newick format.
-<p>
--p/--phylogeny
-   </td>
-   <td>Mandatory
-   </td>
-   <td>Mandatory
-   </td>
-   <td>Mandatory
-   </td>
-  </tr>
-  <tr>
-   <td>
-   </td>
-   <td>
-   </td>
-   <td>
-   </td>
-   <td>
-   </td>
-  </tr>
-  <tr>
-   <td>Config File as a template
-<p>
---bytemp
-   </td>
-   <td>Can be replaced by -f/--fg_size and -b/--bg_size for FG/BG size definition
-   </td>
-   <td>Mandatory
-   </td>
-   <td>Mandatory
-   </td>
-  </tr>
-  <tr>
-   <td>Trait values
-<p>
---traitvalues
-   </td>
-   <td>NO
-   </td>
-   <td>NO
-   </td>
-   <td>Mandatory. It is used by the program to shuffle the
-   </td>
-  </tr>
-</table>
-
-The user will need to provide a phylogenetic tree in Newick format ([https://evolution.genetics.washington.edu/phylip/newicktree.html](https://evolution.genetics.washington.edu/phylip/newicktree.html)) to tell the program on which species base its simulation. The binary configuration file is required for the phylogeny restricted and Brownian motion strategies. The phylogeny restricted strategy limits trait randomisation to some specific families.
-
-The resample tool outputs 1000 resampled traits by default. The user can decide the number of cycles through the --cycles option:
-
-`--cycles 10`
-
-`--cycles 100`
-
-`--cycles 1000`
-
-
-## 4.3 The output
-
-The output consists in a tab file with three columns.
-
-**Column 1**: The name of the cycle, indicated in the b_numberofcycle format
-
-**Column 2**: The FG species (comma-separated)
-
-**Column 3**: The BG species (comma-separated)
-
-Here’s an example of the first ten lines of a resampled traits output file.
-
-  b_1	Cercopithecus_mitis,Alouatta_palliata,Pan_troglodytes,Colobus_polykomos	Saimiri_sciureus,Alouatta_puruensis,Trachypithecus_crepusculus,Cercocebus_torquatus
-
-  b_2	Macaca_fuscata,Papio_cynocephalus,Cercopithecus_petaurista,Cheracebus_lucifer	Trachypithecus_phayrei,Tarsius_wallacei,Lophocebus_aterrimus,Macaca_silenus
-
-  b_3	Saimiri_oerstedii,Nomascus_concolor,Lemur_catta,Saguinus_oedipus	Pongo_abelii,Indri_indri,Eulemur_albifrons,Eulemur_fulvus
-
-  b_4	Saimiri_ustus,Eulemur_rubriventer,Leontocebus_nigricollis,Macaca_mulatta	Semnopithecus_hypoleucos,Mus_musculus,Otolemur_garnettii,Eulemur_macaco
-
-  b_5	Cacajao_hosomi,Alouatta_puruensis,Saimiri_macrodon,Pithecia_mittermeieri	Ateles_belzebuth,Macaca_maura,Prolemur_simus,Trachypithecus_laotum
-
-  b_6	Eulemur_coronatus,Trachypithecus_geei,Hapalemur_griseus,Prolemur_simus	Eulemur_flavifrons,Macaca_fuscata,Trachypithecus_pileatus,Cercopithecus_mona
-
-  b_7	Cheracebus_lugens,Cercocebus_lunulatus,Hapalemur_occidentalis,Ateles_chamek	Tarsius_lariang,Cercopithecus_neglectus,Cercopithecus_diana,Macaca_thibetana
-
-  b_8	Perodicticus_potto,Pan_paniscus,Cacajao_hosomi,Lepilemur_ankaranensis	Cercocebus_chrysogaster,Papio_anubis,Callimico_goeldii,Plecturocebus_miltoni
-
-  b_9	Macaca_leonina,Cercopithecus_diana,Propithecus_diadema,Macaca_siberu	Galagoides_demidovii,Alouatta_seniculus,Propithecus_coquereli,Plecturocebus_dubius
-
-  b_10	Leontopithecus_rosalia,Papio_cynocephalus,Hylobates_agilis,Mus_musculus	Cheracebus_regulus,Cercopithecus_mitis,Lophocebus_aterrimus,Ateles_marginatus
-
-
-## 4.4 Examples {#4-4-examples}
-
-
-### Ex.1 Resampling based on random selection of species {#ex-1-resampling-based-on-random-selection-of-species}
-
-**With input fg/bg size (-f and -b options)**
-
- `ct resample -p examples/phylogeny.nw -f 5 -b 4 -m random --cycles 500 -o test/resample/random.resampling.tab`
-
-**By template (binary config)**
-
-`ct resample -p examples/phylogeny.nw --bytemp examples/config.tab -m random --cycles 500 -o test/resample/random.resampling.bytemplate.tab`
-
-**Phylogeny restricted (must go by template)**
-
-`ct resample -p examples/phylogeny.nw --bytemp examples/config.tab -m random --limit_by_group test/sp2fam.210727.tab --cycles 500 -o test/resample/random.resampling.bytemplate.tab`
-
-
-### Ex.2 resampling based on BM 
-
-**Template and trait values mandatory**
-
-`ct resample -p examples/phylogeny.nw --bytemp examples/config.tab -m random --cycles 500  --traitvalues examples/traitvalues.tab -o test/resample/BM.resampling.tab`
-
-
-
-
-# 5 Bootstrap Tool
-
-
-## 5.1 Algorithm overview 
-
-The bootstrap tool is designed to repeat the CAAS discovery on a large number of discovery groups. In this case, the discovery groups are defined through the output file of the resample tool, in which each line represents a single cycle (see previous paragraph). The program will scan an MSA and will count the number of cycles that return a CAAS in that position.
-
-
-## 5.2 The inputs
-
-`-s $resampled_trait (output of ct resample)`
-
-`-a $MSA`
-
-
-## 5.3 Output
-
-The output consists in a tabbed file with three columns
-
-Column 1: Position
-
-Column 2: Number of resamples returning a CAAS in the position
-
-Column 3: Number of cycles
-
-Column 4: Bootstrap value
-
-Column 5: Cycles with positive CAAS
-
-
-## 5.4 Examples
-
-
-### Bootstrap from random resampled traits.
-
-`ct bootstrap -s test/resample/random.resampling.tab -t examples/config.tab -a examples/MSA/primates.msa.pr -o examples/random.bootstrap.tab --fmt phylip-relaxed`
-
-# 6. Docker
-
-Docker images can be constructed utilizing the provided Dockerfile. Additionally, these images are accessible under the tag [miralnso/caastools-micromamba:latest](https://hub.docker.com/r/miralnso/caastools-micromamba).
-
-A detailed examination of the Dockerfile reveals that a minimal installation approach was adopted, utilizing version 1.5.1 from the [Micromamba](https://hub.docker.com/r/mambaorg/micromamba) Docker repository. This is built upon a streamlined base of Debian Bookworm. The selection of Micromamba was strategic, aiming to ensure workspace reproducibility within an immutable environment, all while leveraging a compact base image, as opposed to alternatives like Conda or Mamba.
-
-Owing to packaging constraints of RERconverge in Bioconda, it became necessary to devise a workaround for the manual integration of the library into the R environment.
-
-The image also comes with pre-installed basic Debian tools and essentials for a fully functional Nextflow workflow (refer to Section 7: Nextflow).
-
-For user convenience, CAAStools python prerequisites have been directly integrated into the Micromamba environment, which includes **numpy, scipy, biopython==1.79,** and **dendropy**. Additionally, Radian has been incorporated to provide a contemporary R console interface.
-
-The **workDir** has been designated as CAAStools, ensuring that the container is primed for operations as soon as a volume mount is executed.
-
-## Constructing the CAAStools Docker Image
-
-```bash
-$ docker build -t caastools-micromamba .
-
-```
-## Executing CAAStools with a Mounted Volume
-
-```bash
-$ docker run -it --volume <hostdir>:<containerdir> caastools-micromamba:latest bash
-
-```
-## Launching CAAStools from an External Image
-
-```bash
-$ docker run -it --volume .:/home docker.io/miralnso/caastools-micromamba:latest bash
+# PHYLOPHERE
+
+![PhyloPhere logo](res/ChatGPT%20Image%20Sep%204,%202025,%2003_24_13%20PM.png)
+
+```text
+ PPP   H   H  Y   Y  L     L   Y   Y
+ P  P  H   H   Y Y   L     L    Y Y
+ PPP   HHHHH    Y    L     L     Y
+ P     H   H    Y    L     L     Y
+ P     H   H    Y    LLLL  LLLL  Y
 ```
 
-# 7. Nextflow
+A **Nextflow DSL2 pipeline** to run phylogenetic comparative workflows for genome–phenome analyses, centered on CAAStools-based CAAS/CAAP discovery and extended with downstream significance, disambiguation, post-processing, enrichment, and accumulation analyses.
 
-Introducing the Nextflow workflow for CAAStools. The primary objective is to alleviate user preliminary tasks by offering a reproducible and ready-to-use environment. This environment is designed to adapt to the computational instance it operates on, while also facilitating a more straightforward and reproducible allocation of computational resources and workload. The pipeline is fully parameterized, accepting parameters either from *nextflow.config* or *modules.config*. These parameters can be either hardcoded or passed as command-line arguments.
+---
 
-The distinct tool-sets (**Discovery, Resample,** and **Bootstrap**) are designed for collective use within the pipeline. However, users can modify this default behavior by commenting out specific workflow executions within the primary CAAStools execution framework (*ct.nf*). Future updates will introduce bypass mechanisms for tool execution by supplying arguments to the pipeline (e.g., nextflow run main.nf --tools discovery,resample,bootstrap --ext.args args).
+## Why PhyloPhere
 
-It's imperative to initiate the pipeline from *main.nf*, which establishes the standard environment for tool execution.
+PhyloPhere provides:
 
-It's noteworthy that the current pipeline is in its nascent stages and will undergo continuous enhancements. As it stands, it's more of a work-in-progress than a fully functional tool. For any substantial tasks, it's recommended to utilize CAAStools.
+- Reproducible orchestration of CAAStools modules (`discovery`, `resample`, `bootstrap`) in Nextflow.
+- Integration with trait preprocessing and contrast selection.
+- Extended downstream modules not present in vanilla CAAStools runs:
+  - `ct_signification`
+  - `ct_disambiguation`
+  - `ct_postproc`
+  - `ora` / `string`
+  - `ct_accumulation`
+- Optional RERConverge workflow support (`build_trait`, `build_tree`, `build_matrix`, `continuous`).
+- Both **end-to-end integrated** execution and **standalone module-by-module** execution.
 
-The Nextflow pipeline has been crafted adhering to the best practices of DSL2.
+---
 
-## Executing CAAStools via Nextflow
-1) Make necessary modifications to *nextflow.config*, *modules.config*, and other relevant scripts.
-2) Execute the pipeline:
+## Attribution
+
+This project builds on and extends major prior tools and contributions:
+
+- **CAAStools** (linudz): https://github.com/linudz/caastools
+- **CAAP/isCAAP extensions in this codebase** (property-based convergence and group-aware logic, including `iscaap` handling in accumulation/randomization paths).
+- **CAAP grouping follows the same logic described in:** Chen, S., & Zou, Z. (2025). *Detecting Convergence of Amino Acid Physicochemical Properties Underlying the Organismal Adaptive Convergent Evolution*. *Molecular Ecology Resources*, 25(1), e70052. https://doi.org/10.1111/1755-0998.70052
+- **RERConverge** (partial integration in PhyloPhere).
+- **María Sánchez Bermúdez** (diet/ethanol phenotype project definitions and test-use scenarios integrated in runner workflows).
+
+Please cite resources listed in [`docs/CITATIONS.md`](docs/CITATIONS.md).
+
+---
+
+## What changed vs original `linudz/caastools`
+
+Compared with standalone CAAStools usage, PhyloPhere adds:
+
+1. **Workflow orchestration in Nextflow DSL2** with profile/config-driven execution.
+2. **Integrated trait preprocessing** (`reporting`, `contrast_selection`, optional pruning, CI-aware grouping).
+3. **CAAP-aware pipeline plumbing** across discovery/signification/postproc/accumulation (including CAAP groups and `iscaap`-aware downstream logic).
+4. **Disambiguation stage** (`ct_disambiguation`) with ASR modes:
+   - `precomputed` (cache-backed)
+   - `compute`
+5. **Post-processing modes**:
+   - `filter` (single selected parameters)
+   - `exploratory` (parameter sweep)
+6. **Functional enrichment modules**:
+   - ORA (WebGestalt)
+   - STRING enrichment
+7. **Accumulation module** (`ct_accumulation`) and optional ORA/STRING over accumulation gene lists.
+8. **Integrated + standalone dual model** with robust fallback logic from channels to explicit file inputs.
+
+### Core CT upgrades in PhyloPhere (vs classic CT usage)
+
+These are the biggest behavior-level changes you asked to highlight:
+
+- **Pair-aware mode (`miss_pair`)**
+  Missing-data filtering can enforce pair consistency between FG/BG when thresholds are aligned, reducing artifacts from asymmetrically missing taxa.
+- **Conservation-aware mode (`max_conserved`)**
+  Instead of requiring strict zero overlap, CT can tolerate limited overlap between FG/BG amino-acid states (or CAAP groups), while still requiring informative side-specific change. This is useful for biologically conservative substitutions where complete disjointness is too strict.
+- **CAAP mode (`caap_mode`)**
+  Discovery/Bootstrap can run on amino-acid property groupings (GS0–GS4 + US handling), not only exact residue identity. This extends classic CAAS into **property-level convergence** and is propagated downstream (signification, postproc, accumulation, `iscaap`-aware logic).
+- **Optimized permulations / bootstrap execution**PhyloPhere CT implements multiple practical optimizations for large runs:
+
+  - chunked resample generation / ingestion (`chunk_size`)
+  - directory-based `resample_out` support (not only legacy single-file input)
+  - discovery-guided bootstrap filtering (`discovery_out`) so bootstrap tests only discovered positions/schemes
+  - substantial reduction in total tests (documented in code/help as speedup-oriented optimization)
+
+---
+
+## End-to-end workflow (sequential integrated run)
+
+Typical integrated chain:
+
+1. `reporting` (optional phenotype exploration)
+2. `contrast_selection`
+3. `ct_tool=discovery,resample,bootstrap`
+4. `ct_signification`
+5. `ct_disambiguation`
+6. `ct_postproc`
+7. `ora` and optionally `string`
+8. `ct_accumulation`
+9. `ora_accumulation` and optionally `string_accumulation`
+
+### Example integrated run
 
 ```bash
-# If configurations are set in the files, execute as follows:
-
-$ nextflow run main-nf -with-docker
-
-# To override specific parameters:
-## Note: The default output subdirectory structure is $workDir/results/<timestamp>/<tool>/output.out
-
-$ nextflow run main-nf -with-docker --tool discovery,resample --alignment <alignmentsheet.csv/alignment.dir> --output <main.output.dir> --tree <nw_tree> --mode <mode> [...]
-
+nextflow run main.nf -profile local \
+  --my_traits <traits.csv> \
+  --traitname <trait_column> \
+  --tree <tree.nwk> \
+  --alignment <alignment_dir> \
+  --ct_tool "discovery,resample,bootstrap" \
+  --reporting \
+  --contrast_selection \
+  --ct_signification \
+  --ct_disambiguation \
+  --ct_postproc \
+  --ora --string \
+  --ct_accumulation \
+  --outdir <results_dir>
 ```
 
-# 8. License
+---
 
-This software is licensed under GNU General Public License. The kind of license is to be decided with UPF.
+## Pipeline overview (Mermaid)
 
+```mermaid
+flowchart TD
+  A[Traits input] --> B{Reporting enabled}
+  A --> P{Prune enabled}
+  T[Tree input] --> C
+  ALI[Alignment input] --> D
 
-# 9. How to cite
+  B -->|yes| B1[REPORTING<br/>Explore phenotypes and QC]
+  B -->|no| B0[Skip reporting]
 
-The application note for CAAStools is [available as a preprint in bioRxiv](https://doi.org/10.1101/2022.12.14.520422).
+  P -->|yes| P1[PRUNE<br/>Remove excluded species]
+  P -->|no| P0[Skip prune]
 
+  B1 --> C
+  B0 --> C
+  P1 --> C
+  P0 --> C
 
-# 10. How to contact the development team
+  C{Contrast selection enabled} -->|yes| C1[CONTRAST_SELECTION<br/>Select contrasts by CI thresholds or discrete groups]
+  C -->|no| D
 
-For any inquire, please contact Fabio Barteri at Pompeu Fabra University / BBRC [fabio.barteri@upf.edu](mailto:fabio.barteri@upf.edu)
+  C1 --> C2[CHECK_MIN_CONTRASTS<br/>Stop if too few foreground pairs]
+  C2 -->|pass| D
+  C2 -->|fail| X1[Graceful stop low contrasts]
 
+  D[CT workflow] --> D1[DISCOVERY<br/>Find candidate convergent sites]
+  D1 --> D2[RESAMPLE<br/>Generate null trait permutations]
+  D2 --> D3[BOOTSTRAP<br/>Estimate empirical support]
+
+  C1 -->|trait and tree channels| D
+  D1 --> D1A[Discovery and background outputs]
+  D3 --> D3A[Bootstrap output]
+
+  D1A --> E{Signification enabled}
+  D3A --> E
+  E -->|yes| E1[CT_SIGNIFICATION<br/>Combine p values and summary metadata]
+  E -->|no| F
+
+  E1 --> E1A[Global meta CAAS and gene lists]
+  E1 --> E2{Discovery has CAAS rows}
+  E2 -->|no| X2[Graceful stop no discoveries]
+  E2 -->|yes| F
+
+  F{Disambiguation enabled} -->|yes| F1[CT_DISAMBIGUATION<br/>ASR aware convergence filtering]
+  F -->|no| G
+  E1A --> F1
+  C1 -->|trait and tree fallback| F1
+  F1 --> F1A[Convergence master CSV]
+
+  G{Post processing enabled} -->|yes| G1[CT_POSTPROC<br/>Filter characterize and clean outputs]
+  G -->|no| H
+  F1A --> G1
+  D1A --> G1B[Background genes]
+  G1 --> G1C[Filtered discovery]
+  G1 --> G1D[Cleaned background]
+  G1 --> G1E[ORA gene lists]
+
+  H{ORA enabled} -->|yes| H1[ORA<br/>Functional over representation analysis]
+  H -->|no| I
+  G1D --> H1
+  G1E --> H1
+  H1 --> H2{STRING enabled}
+  H2 -->|yes| H3[STRING<br/>PPI context and enrichment]
+  H2 -->|no| I
+
+  I{CT accumulation enabled} -->|yes| I1[CT_ACCUMULATION<br/>Randomization test for gene burden]
+  I -->|no| K[Final outputs]
+  G1C --> I1
+  G1D --> I1
+  C1 -->|trait context| I1
+  ALI --> I1
+  I1 --> I2[Randomization gene lists]
+
+  I2 --> J{ORA accumulation enabled}
+  J -->|yes| J1[ORA_ACCUMULATION<br/>Functional analysis of accumulation lists]
+  J -->|no| K
+  J1 --> J2{STRING enabled}
+  J2 -->|yes| J3[STRING_ACCUMULATION<br/>Network enrichment for accumulation lists]
+  J2 -->|no| K
+
+  R{RER tool enabled} -->|yes| R1[RER_MAIN<br/>Trait tree matrix and continuous association]
+  R -->|no| K
+```
+
+This diagram reflects the actual **integrated channel flow** plus the same module boundaries you can invoke in **standalone file-input mode**.
+
+---
+
+## Run by modules (standalone / selective execution)
+
+You can run specific modules without full chaining.
+
+### CT only
+
+```bash
+nextflow run main.nf -profile local \
+  --ct_tool "discovery,resample,bootstrap" \
+  --alignment <alignment_dir> \
+  --caas_config <traitfile.tab> \
+  --tree <tree.nwk> \
+  --traitvalues <boot_traitfile.tab> \
+  --outdir <results_dir>
+```
+
+### Signification standalone
+
+```bash
+nextflow run main.nf -profile local \
+  --ct_signification \
+  --discovery_input <discovery.tab> \
+  --bootstrap_input <bootstrap.tab|bootstrap_dir> \
+  --background_input <background_genes.txt|dir> \
+  --outdir <results_dir>
+```
+
+### Disambiguation standalone
+
+```bash
+nextflow run main.nf -profile local \
+  --ct_disambiguation \
+  --ct_disambig_caas_metadata <global_meta_caas.tsv> \
+  --caas_config <traitfile.tab> \
+  --tree <tree.nwk> \
+  --ct_disambig_asr_mode precomputed \
+  --ct_disambig_asr_cache_dir <asr_cache_dir> \
+  --outdir <results_dir>
+```
+
+### Post-processing standalone
+
+```bash
+nextflow run main.nf -profile local \
+  --ct_postproc \
+  --discovery_input <caas_convergence_master.csv> \
+  --background_input <background_genes.txt|dir> \
+  --caas_postproc_mode filter \
+  --outdir <results_dir>
+```
+
+### ORA/STRING standalone
+
+```bash
+nextflow run main.nf -profile local \
+  --ora --string \
+  --ora_gene_lists_input <gene_lists_dir> \
+  --ora_background_input <cleaned_background_main.txt|dir> \
+  --outdir <results_dir>
+```
+
+### CT accumulation standalone
+
+```bash
+nextflow run main.nf -profile local \
+  --ct_accumulation \
+  --accumulation_caas_input <filtered_discovery.tsv> \
+  --accumulation_background_input <cleaned_background_main.txt|dir> \
+  --alignment <alignment_dir> \
+  --caas_config <traitfile.tab> \
+  --outdir <results_dir>
+```
+
+---
+
+## Main modules in one sentence each
+
+- **REPORTING**: Builds exploratory phenotype reports (distribution, phylogenetic context, and QC plots).
+- **CONTRAST_SELECTION**: Defines high/low phenotype contrast groups, optionally using pruning and CI-aware logic.
+- **CT (discovery/resample/bootstrap)**: Detects candidate convergent substitutions and tests them against permutation-based null distributions.
+- **CT_SIGNIFICATION**: Combines discovery and bootstrap evidence into significance summaries and meta tables (e.g., `global_meta_caas.tsv`).
+- **CT_DISAMBIGUATION**: Uses ASR-informed logic to separate true convergent events from ambiguous patterns and exports convergence master tables.
+- **CT_POSTPROC**: Filters and characterizes CAAS/CAAP outputs (filter or exploratory mode), producing cleaned sets for downstream analyses.
+- **ORA**: Runs over-representation analysis (WebGestalt) on selected gene lists with the chosen background universe.
+- **STRING**: Runs STRING enrichment/network-context analysis on the same selected gene sets.
+- **CT_ACCUMULATION**: Tests whether CAAS burden accumulates in genes more than expected by chance via randomization.
+- **ORA_ACCUMULATION / STRING_ACCUMULATION**: Functional enrichment over accumulation-derived gene lists.
+- **RER_MAIN**: Runs integrated RERConverge steps (trait/tree/matrix construction and continuous association mode).
+
+## Key options by module
+
+### Global/common
+
+- `--outdir`
+- `--my_traits`, `--traitname`, `--tree`
+- `--reporting`, `--contrast_selection`
+- `--secondary_trait`, `--branch_trait`, `--n_trait`, `--c_trait`
+
+### CT (`--ct_tool`)
+
+- `discovery|resample|bootstrap` (comma-separated)
+- `--alignment`, `--caas_config`, `--traitvalues`, `--cycles`, `--chunk_size`
+- Thresholds: `--maxbggaps`, `--maxfggaps`, `--maxgaps`, `--maxbgmiss`, `--maxfgmiss`, `--maxmiss`, `--max_conserved`
+- CAAP mode: `--caap_mode`
+
+### Signification
+
+- `--discovery_input`, `--bootstrap_input`, `--background_input`
+- significance threshold options from config (`alpha_threshold`, export flags)
+
+### Disambiguation
+
+- `--ct_disambig_caas_metadata`
+- `--ct_disambig_asr_mode (precomputed|compute)`
+- `--ct_disambig_asr_cache_dir`
+- `--ct_disambig_posterior_threshold`
+
+### Post-processing
+
+- `--caas_postproc_mode (filter|exploratory)`
+- `--filter_minlen`, `--filter_maxcaas`
+- exploratory sweep: `--minlen_values`, `--maxcaas_values`
+- gene filtering controls (`gene_filter_mode`, thresholds)
+
+### ORA / STRING
+
+- `--ora`, `--string`
+- `--ora_gene_lists_input`, `--ora_background_input`
+- ORA and STRING FDR/top thresholds and DB parameters in `conf/ora.config`
+
+### CT accumulation
+
+- `--ct_accumulation`
+- `--accumulation_caas_input`
+- `--accumulation_background_input`
+- `--accumulation_n_randomizations`
+- `--accumulation_randomization_type (naive|matched)`
+
+### RERConverge
+
+- `--rer_tool "build_trait,build_tree,build_matrix,continuous"`
+- inputs in `conf/rerconverge.config`
+
+For detailed help:
+
+```bash
+nextflow run main.nf --help
+nextflow run main.nf --ct_tool discovery --help
+nextflow run main.nf --ct_tool resample --help
+nextflow run main.nf --ct_tool bootstrap --help
+```
+
+---
+
+## Runners included in this repository
+
+### `run_phenotypes.sh`
+
+Main multi-phenotype runner with two explicit scenario classes:
+
+1. **Pruned-secondary (cancer project)**
+
+   - paired primary/secondary phenotype runs
+   - pruning lists
+   - CI-aware contrast selection (`n_trait`/`c_trait`)
+2. **Simple (diet/ethanol project, María Sánchez Bermúdez)**
+
+   - no pruning
+   - no `n_trait`/`c_trait`
+   - serial trait runs
+
+Also includes **toy vs full** toggles (`IS_TOY`) controlling cycles/randomizations.
+
+### `run_scripts/test_stress.sh`
+
+Comprehensive stress matrix:
+
+- integrated runs
+- standalone runs per module
+- ASR mode variants (compute/precomputed)
+- optional cleanup/input staging
+
+### `run_scripts/test_integrated_pipeline.sh`
+
+Integrated end-to-end validation in both:
+
+- `filter` mode
+- `exploratory` mode
+
+---
+
+## Test cases and scenario evidence already in repo
+
+- `Data/test/inputs/*`: staged standalone inputs for CT, signification, disambiguation, postproc, ORA.
+- `pipeline_info/*`: historical execution reports, timelines, traces, DAGs.
+- `run_scripts/test_stress.sh`: explicit integrated vs standalone validation matrix.
+- `run_phenotypes.sh`: biological scenario differences (cancer CI+pruning+secondary vs diet no CI/no pruning).
+
+---
+
+## Monitoring with Nextflow Tower (important)
+
+If you enable Tower, **you must provide your own API token**.
+
+In `conf/common.config`:
+
+```groovy
+tower {
+    accessToken = "INSERTCOIN"  // replace with your own token
+    enabled = false
+}
+```
+
+To use Tower safely:
+
+1. Replace `INSERTCOIN` with your token.
+2. Set `enabled = true` or run with `-with-tower` as desired.
+
+Do not commit private production tokens.
+
+---
+
+## Installation / execution notes
+
+- Recommended: run with Nextflow + container profile (`local`, `singularity`, `apptainer`, `slurm` as configured).
+- Main config files:
+  - `nextflow.config`
+  - `conf/common.config`
+  - `conf/ct.config`
+  - `conf/ct_postproc.config`
+  - `conf/ct_disambiguation.config`
+  - `conf/ora.config`
+  - `conf/ct_accumulation.config`
+  - `conf/rerconverge.config`
+
+---
+
+## License
+
+See [LICENSE](LICENSE).
+
+## Additional docs
+
+- [Citations](docs/CITATIONS.md)
+- [CAAP mode notes](docs/CAAP_MODE.md)
+- [Multi-phenotype methods](docs/METHODS_multi_phenotype.md)

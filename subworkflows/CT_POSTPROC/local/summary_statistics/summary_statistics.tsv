@@ -1,9 +1,0 @@
-Metric	Value
-Total CT Positions	4
-Unique Genes	3
-Extreme Genes (top 1% density)	3
-Dubious Genes (IQR outliers)	4
-Both Extreme and Dubious	3
-Normal Genes	0
-Extreme Threshold (density)	0.1000
-Dubious Threshold (count)	1

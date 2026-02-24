@@ -43,8 +43,7 @@ process RER_TRAIT {
     file("${params.traitname}.polished.output")
 
     script:
-    // Define extra discovery arguments from params.file
-    // def args = task.ext.args ?: ''
+    def args = task.ext.args ?: ''
     def outputName = "${params.traitname}.polished.output"
     
     if (params.use_singularity) {
