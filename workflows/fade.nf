@@ -162,19 +162,26 @@ workflow FADE {
         fasta_ch = PHYLIP_TO_FASTA(all_ali_ch).fasta
 
         // ── Annotate tree with {Foreground} labels ───────────────────────────
+        // fasta_ch is included so that annotate_tree_fg.py can prune the tree
+        // to only the taxa present in the per-gene alignment before running FADE
+        // (prevents tip-count / sequence-count mismatches in HyPhy FADE).
         def annotate_input_ch = fasta_ch
-            .map    { gene_id, direction, fasta -> tuple(gene_id, direction) }
             .combine(traitfile_ch)
             .combine(tree_ch)
-            // → (gene_id, direction, traitfile, tree)
+            // → (gene_id, direction, fasta, traitfile, tree)
 
-        annotated_ch = ANNOTATE_TREE_FG(annotate_input_ch).annotated_tree
+        def annotate_result    = ANNOTATE_TREE_FG(annotate_input_ch)
+        annotated_ch           = annotate_result.annotated_tree
+        def filtered_fasta_ch  = annotate_result.filtered_fasta
 
-        // ── Join FASTA + annotated tree, then run FADE ───────────────────────
-        //  fasta_ch     : (gene_id, direction, fasta)
-        //  annotated_ch : (gene_id, direction, annotated_tree)
-        //  join by [0,1] → (gene_id, direction, fasta, annotated_tree)
-        def fade_input_ch = fasta_ch.join(annotated_ch, by: [0, 1])
+        // ── Join filtered FASTA + annotated tree, then run FADE ─────────────
+        //  filtered_fasta_ch : (gene_id, direction, filtered_fasta)
+        //    — FASTA pruned to only sequences present in the (pruned) tree;
+        //      prevents HyPhy tip-count / sequence-count mismatch in both
+        //      directions (tree > fasta AND fasta > tree).
+        //  annotated_ch      : (gene_id, direction, annotated_tree)
+        //  join by [0,1]     → (gene_id, direction, filtered_fasta, annotated_tree)
+        def fade_input_ch = filtered_fasta_ch.join(annotated_ch, by: [0, 1])
 
         fade_results_ch = FADE_RUN(fade_input_ch, lg_dat_ch).fade_json
 

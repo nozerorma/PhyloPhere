@@ -52,10 +52,10 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Adjust before submitting on a new cluster.
 # ============================================================
 
-DATADIR="/gpfs42/robbyfs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data"
-CAAS_OUTBASE="/gpfs42/robbyfs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS"
-WORK_BASE="/gpfs42/robbyfs/scratch/lab_anavarro/mramon/PhyloPhere-work"
-ASR_CACHE_DIR="/gpfs42/robbyfs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/asr"
+DATADIR="/data/samanthafs/scratch/lab_anavarro/mramon//2.Primates/1.Primates_data"
+CAAS_OUTBASE="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS"
+WORK_BASE="/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs"
+ASR_CACHE_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/asr"
 
 TRAIT_FILE="${DATADIR}/1.Cancer_data/Neoplasia_species360/cancer_traits_processed-LQ.csv"
 TREE_FILE="${DATADIR}/5.Phylogeny/science.abn7829_data_s4.nex.tree"
@@ -85,6 +85,12 @@ RUN_FADE="${RUN_FADE:-false}"
 RUN_MOLERATE="${RUN_MOLERATE:-false}"
 FADE_MODE="${FADE_MODE:-gene_set}"
 MOLERATE_MODE="${MOLERATE_MODE:-gene_set}"
+
+# ── RERConverge toggles ──────────────────────────────────────────────────────
+RUN_RER="${RUN_RER:-false}"
+RER_TOOL="${RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
+RER_GENE_SET_MODE="${RER_GENE_SET_MODE:-gene_set}"
+GENE_TREES="${GENE_TREES:-${DATADIR}/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
 
 # ============================================================
 # ENVIRONMENT SETUP
@@ -144,6 +150,16 @@ if [ "$RUN_MOLERATE" = true ]; then
         # --molerate_accumulation_bottom "/path/to/..."
         # --molerate_postproc_top        "/path/to/..."
         # --molerate_postproc_bottom     "/path/to/..."
+    )
+fi
+
+# ── RERConverge flags ────────────────────────────────────────────────────────
+RER_NF_FLAGS=()
+if [ "$RUN_RER" = true ]; then
+    RER_NF_FLAGS=(
+        --rer_tool         "$RER_TOOL"
+        --rer_gene_set_mode "$RER_GENE_SET_MODE"
+        --gene_trees       "$GENE_TREES"
     )
 fi
 
@@ -244,6 +260,7 @@ if [ "$CLASS" = "1" ]; then
         --ct_accumulation
         "${FADE_NF_FLAGS[@]:-}"
         "${MOLERATE_NF_FLAGS[@]:-}"
+        "${RER_NF_FLAGS[@]:-}"
     )
 
     run_pipeline \
@@ -283,6 +300,7 @@ elif [ "$CLASS" = "2" ]; then
         --ct_accumulation
         "${FADE_NF_FLAGS[@]:-}"
         "${MOLERATE_NF_FLAGS[@]:-}"
+        "${RER_NF_FLAGS[@]:-}"
     )
 
     run_pipeline \

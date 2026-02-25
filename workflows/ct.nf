@@ -52,7 +52,12 @@ workflow CT {
         def tree_file_emit = Channel.empty()
         
     if (params.ct_tool) {
-        def toolsToRun = params.ct_tool.split(',')
+        // Guard: params.ct_tool may be a Boolean (true) when --ct_tool is
+        // passed without a value by some shells/Nextflow CLI versions.
+        // Coerce to String first so .split() does not trigger a DSL2 error.
+        def toolsToRun = params.ct_tool instanceof String
+            ? params.ct_tool.split(',').collect { it.trim() }.findAll { it }
+            : []
 
         // Define the alignment channel (used by discovery and bootstrap)
         align_tuple = Channel

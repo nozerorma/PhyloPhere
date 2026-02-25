@@ -61,11 +61,13 @@ install.packages("remotes")
 
 # Install CRAN package without pulling/compiling deps
 install.packages("rphylopic", dependencies = FALSE)
+install.packages('DT', repos='https://cloud.r-project.org')
 
 # Install dependencies for RERconverge
 install.packages("BiocManager")
 BiocManager::install("ggtree")
 BiocManager::install("impute")
+BiocManager::install("data.table")
 
 # Install GitHub package only if missing
 remotes::install_github("nclark-lab/RERconverge@v0.3.0", dependencies = TRUE, upgrade="never")

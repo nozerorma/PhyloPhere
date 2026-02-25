@@ -65,8 +65,10 @@ json_files <- list.files(
 )
 
 if (length(json_files) == 0) {
-  stop("No *.FADE.json files found in '", params$json_dir,
-       "'. Was FADE_RUN completed for this direction?")
+  message("No *.FADE.json files found in '", params$json_dir,
+          "'. No FADE results for the ", params$direction, " direction "
+          "(genes may all have failed or no genes were significant).")
+  knitr::knit_exit()
 }
 
 cat(sprintf("Found %d FADE result files.\n", length(json_files)))
@@ -135,7 +137,9 @@ all_results <- lapply(json_files, parse_fade_json)
 all_results <- Filter(Negate(is.null), all_results)
 
 if (length(all_results) == 0) {
-  stop("All FADE JSON files failed to parse. Check file integrity.")
+  message("All FADE JSON files failed to parse (empty or corrupt). "
+          "No valid results for the ", params$direction, " direction.")
+  knitr::knit_exit()
 }
 
 fade_df <- do.call(rbind, all_results)

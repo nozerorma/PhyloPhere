@@ -70,12 +70,21 @@ process MOLERATE_RUN {
             --output "${gene_id}.molerate.json" \\
             \$BRANCHES_ARGS \\
         || echo "MoleRate failed for ${gene_id} (${direction}), skipping"
+        # Remove 0-byte JSON so optional:true does not emit it to the report
+        [ -s "${gene_id}.molerate.json" ] || rm -f "${gene_id}.molerate.json"
         """
     } else {
         """
         BRANCHES_ARGS=\$(awk '{printf " --branches %s", \$1}' "${fg_list}")
 
-        hyphy "${hyphy_analyses}/molerate/molerate.bf" \\
+        # Resolve molerate.bf: prefer configured path; fall back to HyPhy's own
+        # TemplateBatchFiles when running locally without a container.
+        MOLERATE_BF="${hyphy_analyses}/molerate/molerate.bf"
+        if [ ! -f "\$MOLERATE_BF" ]; then
+            MOLERATE_BF="\$(dirname \$(which hyphy))/../share/hyphy/TemplateBatchFiles/molerate.bf"
+        fi
+
+        hyphy "\$MOLERATE_BF" \\
             --alignment "${fasta}" \\
             --tree      "${tree}" \\
             --model     ${model} \\
@@ -88,6 +97,8 @@ process MOLERATE_RUN {
             --output "${gene_id}.molerate.json" \\
             \$BRANCHES_ARGS \\
         || echo "MoleRate failed for ${gene_id} (${direction}), skipping"
+        # Remove 0-byte JSON so optional:true does not emit it to the report
+        [ -s "${gene_id}.molerate.json" ] || rm -f "${gene_id}.molerate.json"
         """
     }
 }

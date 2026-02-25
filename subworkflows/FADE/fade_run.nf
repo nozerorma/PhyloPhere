@@ -64,6 +64,8 @@ process FADE_RUN {
             ${mcmc_args} \\
             --output    "${gene_id}.FADE.json" \\
         || echo "FADE failed for ${gene_id} (${direction}), skipping"
+        # Remove 0-byte JSON so optional:true does not emit it to the report
+        [ -s "${gene_id}.FADE.json" ] || rm -f "${gene_id}.FADE.json"
         """
     } else {
         """
@@ -79,6 +81,8 @@ process FADE_RUN {
             ${mcmc_args} \\
             --output    "${gene_id}.FADE.json" \\
         || echo "FADE failed for ${gene_id} (${direction}), skipping"
+        # Remove 0-byte JSON so optional:true does not emit it to the report
+        [ -s "${gene_id}.FADE.json" ] || rm -f "${gene_id}.FADE.json"
         """
     }
 }
