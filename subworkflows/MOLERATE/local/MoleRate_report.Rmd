@@ -82,8 +82,10 @@ json_files <- list.files(
 )
 
 if (length(json_files) == 0) {
-  stop("No *.molerate.json files found in '", params$json_dir,
-       "'. Was MOLERATE_RUN completed for this direction?")
+  message("No *.molerate.json files found in '", params$json_dir,
+          "'. No MoleRate results for the ", params$direction, " direction ",
+          "(genes may all have failed or no genes were significant).")
+  knitr::knit_exit()
 }
 cat(sprintf("Found %d MoleRate result files.\n", length(json_files)))
 ```
@@ -187,7 +189,9 @@ all_results <- lapply(json_files, parse_molerate_json)
 all_results <- Filter(Negate(is.null), all_results)
 
 if (length(all_results) == 0) {
-  stop("All MoleRate JSON files failed to parse.")
+  message("All MoleRate JSON files failed to parse (empty or corrupt). ",
+          "No valid results for the ", params$direction, " direction.")
+  knitr::knit_exit()
 }
 
 mr_df <- do.call(rbind, all_results) %>%

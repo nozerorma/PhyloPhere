@@ -42,15 +42,23 @@ process PHYLIP_TO_FASTA {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ANNOTATE_TREE_FG  (FADE: {Foreground} labels in Newick string)
+// The FASTA alignment is required so that the tree can be pruned to only the
+// taxa present in the alignment, preventing FADE from failing when the species
+// tree has more tips than the per-gene alignment.
+// --fasta_out produces a filtered FASTA containing only sequences present in
+// the (possibly pruned) tree, which prevents the reverse mismatch — when the
+// alignment has MORE sequences than tree tips (e.g. a taxon present in the
+// alignment but absent from the species tree).
 // ─────────────────────────────────────────────────────────────────────────────
 process ANNOTATE_TREE_FG {
     tag "${gene_id}_${direction}"
 
     input:
-    tuple val(gene_id), val(direction), path(traitfile), path(tree)
+    tuple val(gene_id), val(direction), path(fasta), path(traitfile), path(tree)
 
     output:
     tuple val(gene_id), val(direction), path("${gene_id}_${direction}_fg.nwk"), emit: annotated_tree
+    tuple val(gene_id), val(direction), path("${gene_id}_${direction}.fa"),     emit: filtered_fasta
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local"
@@ -60,6 +68,8 @@ process ANNOTATE_TREE_FG {
         /usr/local/bin/_entrypoint.sh python ${local_dir}/annotate_tree_fg.py \
             --traitfile "${traitfile}" \
             --tree      "${tree}" \
+            --fasta     "${fasta}" \
+            --fasta_out "${gene_id}_${direction}.fa" \
             --output    "${gene_id}_${direction}_fg.nwk" \
             ${flip_flag}
         """
@@ -68,6 +78,8 @@ process ANNOTATE_TREE_FG {
         python ${local_dir}/annotate_tree_fg.py \
             --traitfile "${traitfile}" \
             --tree      "${tree}" \
+            --fasta     "${fasta}" \
+            --fasta_out "${gene_id}_${direction}.fa" \
             --output    "${gene_id}_${direction}_fg.nwk" \
             ${flip_flag}
         """

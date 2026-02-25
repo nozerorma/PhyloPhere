@@ -128,7 +128,10 @@ workflow {
         // Channel.empty() is truthy in Groovy, so if() guards inside sub-workflows
         // would take the "use CT output" branch but the channel would never emit,
         // causing all downstream .ifEmpty{} fallbacks to fire incorrectly.
-        def ct_tools_ran      = params.ct_tool ? params.ct_tool.split(',').collect { it.trim() } : []
+        // Guard: params.ct_tool may be Boolean true if --ct_tool "" was passed
+        // on some shells; use instanceof check before calling .split().
+        def ct_tools_ran      = (params.ct_tool instanceof String && params.ct_tool)
+                                    ? params.ct_tool.split(',').collect { it.trim() } : []
         def ran_discovery     = ct_tools_ran.contains('discovery')
         def ran_bootstrap     = ct_tools_ran.contains('bootstrap')
 

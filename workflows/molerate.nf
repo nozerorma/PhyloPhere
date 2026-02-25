@@ -118,7 +118,7 @@ workflow MOLERATE {
             .combine(traitfile_ch)
         // -> (direction, traitfile)
 
-        fg_branches_ch = EXTRACT_FG_BRANCHES(fg_inputs_ch).fg_branches
+        fg_branches_ch = EXTRACT_FG_BRANCHES(fg_inputs_ch).fg_list
         // -> (direction, fg_list_file)
 
         // 3. Build per-direction alignment channels -----------------------
@@ -175,22 +175,23 @@ workflow MOLERATE {
         //  fg_branches_ch: (direction, fg_list)
         //  For each (gene_id, direction) we need: fasta, fg_list, tree.
         //
-        //  Strategy: cross-join fasta_ch with fg_branches_ch on direction, then
+        //  Strategy: combine (broadcast) fasta_ch with fg_branches_ch on direction, then
         //  combine with tree_ch (single value).
         //
         //  fasta_ch.map -> (direction, gene_id, fasta)          [keyed by direction]
-        //  join fg_branches_ch -> (direction, gene_id, fasta, fg_list)
+        //  combine fg_branches_ch -> (direction, gene_id, fasta, fg_list)
+        //                           [broadcasts the 2 fg_list files across all genes]
         //  combine tree_ch -> (direction, gene_id, fasta, fg_list, tree)
 
         def fasta_keyed_ch = fasta_ch.map { gid, dir, fa -> tuple(dir, gid, fa) }
 
         molerate_input_ch = fasta_keyed_ch
-            .join(fg_branches_ch, by: 0)
+            .combine(fg_branches_ch, by: 0)
             // -> (direction, gene_id, fasta, fg_list)
             .combine(tree_ch)
             // -> (direction, gene_id, fasta, fg_list, tree)
-            .map { dir, gid, fa, fg_list, tree -> tuple(gid, dir, fa, fg_list, tree) }
-            // -> (gene_id, direction, fasta, fg_list, tree)
+            .map { dir, gid, fa, fg_list, tree -> tuple(gid, dir, fa, tree, fg_list) }
+            // -> (gene_id, direction, fasta, tree, fg_list)  [matches MOLERATE_RUN input order]
 
         molerate_results_ch = MOLERATE_RUN(molerate_input_ch, lg_dat_ch).molerate_json
 
