@@ -176,7 +176,7 @@ debug_log("discrete_method = %s, top_quantile = %.2f, bottom_quantile = %.2f",
           discrete_method, top_quantile, bottom_quantile)
 
 # Maximum iterations for the contrast selection algorithm
-contrast_max_iter <- if (exists("params") && !is.null(params$contrast_max_iter) && nzchar(params$contrast_max_iter)) as.integer(params$contrast_max_iter) else 4L
+contrast_max_iter <- if (exists("params") && !is.null(params$contrast_max_iter) && nzchar(params$contrast_max_iter)) as.integer(params$contrast_max_iter) else 3L
 debug_log("contrast_max_iter = %d", contrast_max_iter)
 
 # Lets try sourcing stats.R after all the parameters and data are loaded, since it relies on some of these variables being defined

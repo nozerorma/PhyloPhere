@@ -21,10 +21,10 @@ params:
   fdr_thr: 0.1
   top_thr: 15
   report_num: 20
-  enable_spider_plot: true
+  enable_spider_plot: false
   enable_overlap_heatmap: true
   enable_enrichment_map: true
-  enable_ppi_enrichment: true
+  enable_ppi_enrichment: false
   overlap_top_terms: 50
   compare_metric: "jaccard"
 ---
@@ -45,7 +45,14 @@ suppressPackageStartupMessages({
   library(knitr)
   library(kableExtra)
   library(STRINGdb)
+  library(paletteer)
 })
+
+# ── Palette helpers (overflow-safe Tableau_10) ────────────────────────────────
+.pal10_base <- as.character(paletteer_d("ggthemes::Tableau_10"))
+.safe_pal   <- function(n) if (n <= 10L) .pal10_base[seq_len(n)] else colorRampPalette(.pal10_base)(n)
+safe_fill   <- function(n) scale_fill_manual(values  = .safe_pal(n))
+safe_color  <- function(n) scale_color_manual(values = .safe_pal(n))
 
 has_pkg <- function(pkg) requireNamespace(pkg, quietly = TRUE)
 
@@ -323,13 +330,20 @@ run_single_string <- function(gene_file, use_custom_background) {
   # ── PPI density enrichment ─────────────────────────────────────────────────
   ppi_res <- NULL
   if (isTRUE(params$enable_ppi_enrichment)) {
-    ppi_res <- tryCatch(
-      string_db$get_ppi_enrichment(gene_string_ids),
-      error = function(e) {
-        message(sprintf("PPI enrichment failed for %s: %s", list_name, e$message))
-        NULL
-      }
-    )
+    if (length(gene_string_ids) > 500L) {
+      message(sprintf(
+        "PPI enrichment skipped for %s: gene set too large (%d > 500 STRING IDs).",
+        list_name, length(gene_string_ids)
+      ))
+    } else {
+      ppi_res <- tryCatch(
+        string_db$get_ppi_enrichment(gene_string_ids),
+        error = function(e) {
+          message(sprintf("PPI enrichment failed for %s: %s", list_name, e$message))
+          NULL
+        }
+      )
+    }
 
     if (!is.null(ppi_res)) {
       # Replace any NULL fields with NA before coercing to tibble; STRINGdb
@@ -451,6 +465,7 @@ if (nrow(all_results) > 0) {
   ) +
     geom_col(position = "dodge") +
     coord_flip() +
+    safe_fill(n_distinct(top_hits$gene_list)) +
     theme_minimal() +
     labs(
       title   = sprintf("Top STRING enrichment hits per gene list (FDR \u2264 %s)", params$fdr_thr),
@@ -467,6 +482,7 @@ if (nrow(all_results) > 0) {
 
   p_cat <- ggplot(cat_counts, aes(x = gene_list, y = n, fill = category)) +
     geom_col(position = "stack") +
+    safe_fill(n_distinct(cat_counts$category)) +
     theme_minimal() +
     labs(
       title = "Number of enriched terms by STRING category",
@@ -477,54 +493,6 @@ if (nrow(all_results) > 0) {
   print(p_cat)
   ggsave(file.path(string_plots_dir, "string_enriched_terms_by_category.png"),
          p_cat, width = 12, height = 7, dpi = 320)
-
-  # ── Spider / radar-like profile ─────────────────────────────────────────
-  if (isTRUE(params$enable_spider_plot)) {
-    db_profile <- std_results %>%
-      group_by(gene_list, category) %>%
-      summarise(
-        min_fdr    = min(FDR_std, na.rm = TRUE),
-        n_terms    = n_distinct(term_std),
-        signal     = -log10(pmax(min_fdr, .Machine$double.xmin)),
-        .groups    = "drop"
-      ) %>%
-      group_by(category) %>%
-      mutate(
-        signal_scaled = ifelse(max(signal, na.rm = TRUE) > 0,
-                                signal / max(signal, na.rm = TRUE), 0)
-      ) %>%
-      ungroup()
-
-    # geom_line + coord_polar crashes when any group has only 1 point
-    # (dist_polar returns a 0-row data frame that cannot receive a 1-element
-    # assignment).  Keep only gene_lists that span >= 2 categories.
-    db_profile_spider <- db_profile %>%
-      group_by(gene_list) %>%
-      filter(n() >= 2) %>%
-      ungroup()
-
-    if (nrow(db_profile_spider) > 0) {
-      p_spider <- ggplot(
-        db_profile_spider,
-        aes(x = category, y = signal_scaled, group = gene_list, color = gene_list)
-      ) +
-        geom_polygon(aes(fill = gene_list), alpha = 0.08, linewidth = 0.4) +
-        geom_line(linewidth = 0.8) +
-        geom_point(size = 2) +
-        coord_polar() +
-        theme_minimal() +
-        labs(
-          title    = "STRING functional profile (radar-like) by gene list",
-          subtitle = "Scaled -log10(min FDR) across STRING categories",
-          x        = NULL,
-          y        = "Scaled signal"
-        ) +
-        theme(axis.text.x = element_text(size = 9))
-      print(p_spider)
-      ggsave(file.path(string_plots_dir, "string_spider_profile.png"),
-             p_spider, width = 10, height = 9, dpi = 320)
-    }
-  }
 
   # ── Term recurrence across lists ───────────────────────────────────────────
   term_recurrence <- std_results %>%
@@ -555,6 +523,7 @@ if (nrow(all_results) > 0) {
     ) +
       geom_col() +
       coord_flip() +
+      safe_fill(n_distinct(top_recurrent$category)) +
       theme_minimal() +
       labs(
         title = "Most recurrent STRING terms across gene lists",
@@ -636,6 +605,7 @@ if (nrow(all_results) > 0) {
       aes(x = gene_list, y = term_short, size = neglog10FDR, color = category)
     ) +
       geom_point(alpha = 0.85) +
+      safe_color(n_distinct(pooled_dot$category)) +
       theme_minimal() +
       labs(
         title    = "Pooled STRING characterisation across gene lists",

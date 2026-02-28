@@ -35,6 +35,10 @@ process CONTRAST_ALGORITHM {
     def tax_id = params.tax_id ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
+    def discrete_method = params.discrete_method ?: 'decile'
+    def top_quantile = params.top_quantile ?: '0.90'
+    def bottom_quantile = params.bottom_quantile ?: '0.10'
+    def contrast_max_iter = params.contrast_max_iter ?: '3'
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -54,7 +58,11 @@ process CONTRAST_ALGORITHM {
                     c_trait = '${c_trait}',
                     tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
-                    branch_trait = '${branch_trait}'
+                    branch_trait = '${branch_trait}',
+                    discrete_method = '${discrete_method}',
+                    top_quantile = '${top_quantile}',
+                    bottom_quantile = '${bottom_quantile}',
+                    contrast_max_iter = '${contrast_max_iter}'
                 ),
                 output_file = '4.Independent_contrasts.html',
                 envir = new.env()
@@ -83,7 +91,11 @@ process CONTRAST_ALGORITHM {
                     c_trait = '${c_trait}',
                     tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
-                    branch_trait = '${branch_trait}'
+                    branch_trait = '${branch_trait}',
+                    discrete_method = '${discrete_method}',
+                    top_quantile = '${top_quantile}',
+                    bottom_quantile = '${bottom_quantile}',
+                    contrast_max_iter = '${contrast_max_iter}'
                 ),
                 output_file = '4.Independent_contrasts.html',
                 envir = new.env()

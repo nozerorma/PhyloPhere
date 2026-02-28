@@ -35,7 +35,7 @@ process PHENOTYPE_EXPLORATION {
     def discrete_method = params.discrete_method ?: 'quartile'
     def top_quantile = params.top_quantile ?: '0.75'
     def bottom_quantile = params.bottom_quantile ?: '0.25'
-    def contrast_max_iter = params.contrast_max_iter ?: '4'
+    def contrast_max_iter = params.contrast_max_iter ?: '3'
 
     if (params.use_singularity | params.use_apptainer) {
         """

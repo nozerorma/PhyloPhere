@@ -24,7 +24,7 @@ params:
   report_num: 20
   top_thr: 15
   n_threads: 8
-  enable_spider_plot: true
+  enable_spider_plot: false
   enable_overlap_heatmap: true
   enable_enrichment_map: true
   overlap_top_terms: 50
@@ -53,6 +53,18 @@ suppressPackageStartupMessages({
   library(WebGestaltR)
   library(paletteer)
 })
+
+# ── Explicit namespace guards ─────────────────────────────────────────────────
+# BioConductor packages (clusterProfiler, org.Hs.eg.db, S4Vectors, AnnotationDbi)
+# mask several tidyverse functions.  Re-pin the ones we use to their dplyr/tidyr
+# originals so pipe chains behave as expected regardless of load order.
+filter   <- dplyr::filter
+select   <- dplyr::select
+rename   <- dplyr::rename
+mutate   <- dplyr::mutate
+arrange  <- dplyr::arrange
+group_by <- dplyr::group_by
+count    <- dplyr::count
 
 # ── Shared colour palette (mirrors CT_postproc.Rmd for consistency) ──────────
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
@@ -138,6 +150,18 @@ createDir(ora_summary_dir)
 createDir(ora_plots_dir)
 createDir(ora_files_dir)
 createDir(cache_dir)
+
+# Normalise all directory paths to ABSOLUTE paths immediately after creation.
+# WebGestaltR calls setwd() internally during HTML-report generation even with
+# isParallel=FALSE, so relative paths can resolve to wrong locations once the
+# working directory drifts.  Capture the absolute working dir first, then build
+# absolute paths so every subsequent file.path() call is wd-independent.
+ora_work_dir    <- normalizePath(".", mustWork = TRUE)
+ora_results_dir <- file.path(ora_work_dir, ora_results_dir)
+ora_summary_dir <- file.path(ora_work_dir, ora_summary_dir)
+ora_plots_dir   <- file.path(ora_work_dir, ora_plots_dir)
+ora_files_dir   <- file.path(ora_work_dir, ora_files_dir)
+cache_dir       <- file.path(ora_work_dir, "ORA_files", ".cache")
 ```
 
 # ORA configuration
@@ -212,14 +236,53 @@ run_single_ora <- function(gene_file, bg_entrez, dbs) {
       projectName = list_name,
       dagColor = "continuous",
       setCoverNum = 10,
-      nThreads = params$n_threads,
+      # isParallel = TRUE is disabled: WebGestaltR worker threads each call
+      # setwd() internally, which is a global R operation.  With parallel workers
+      # the threads race on the working directory, causing relative-path resolution
+      # to break and results to be silently lost.  Sequential execution is safe.
+      nThreads = 1L,
       cache = cache_dir,
-      isParallel = TRUE
+      isParallel = FALSE
     )
   }, error = function(e) {
     message(sprintf("ORA failed for %s: %s", list_name, e$message))
     NULL
   })
+
+  # WebGestaltR with multiple databases may return a *list* of data frames
+  # (one per database) rather than a single data frame.  Coerce to one frame.
+  if (!is.null(res) && is.list(res) && !is.data.frame(res)) {
+    res <- tryCatch(dplyr::bind_rows(res), error = function(e) NULL)
+  }
+
+  # WebGestaltR writes enrichment_results_*.txt to disk *before* returning.
+  # If the R call errored out (e.g. during HTML-report generation) or returned
+  # an empty frame, recover results by reading the file that was already written.
+  if (is.null(res) || (is.data.frame(res) && nrow(res) == 0)) {
+    enr_file <- file.path(out_dir,
+                          paste0("Project_", list_name),
+                          paste0("enrichment_results_", list_name, ".txt"))
+    if (file.exists(enr_file)) {
+      res_disk <- tryCatch(
+        readr::read_tsv(enr_file,
+                        col_types = readr::cols(.default = "c"),
+                        show_col_types = FALSE),
+        error = function(e) NULL
+      )
+      if (!is.null(res_disk) && nrow(res_disk) > 0) {
+        message(sprintf("[ORA] Recovered %d result(s) from disk for %s",
+                        nrow(res_disk), list_name))
+        res <- res_disk %>%
+          dplyr::mutate(
+            pValue          = suppressWarnings(as.numeric(pValue)),
+            FDR             = suppressWarnings(as.numeric(FDR)),
+            enrichmentRatio = suppressWarnings(as.numeric(enrichmentRatio)),
+            size            = suppressWarnings(as.integer(size)),
+            overlap         = suppressWarnings(as.integer(overlap))
+          )
+      }
+    }
+  }
 
   if (is.null(res) || nrow(res) == 0) {
     return(list(
@@ -251,6 +314,12 @@ ora_runs <- lapply(gene_list_files, run_single_ora, bg_entrez = bg_entrez, dbs =
 # Summary and plots
 
 ```{r summary_and_plots}
+# Helper: build a fill/color scale that expands Tableau_10 when n > 10
+.pal10_base <- as.character(paletteer::paletteer_d("ggthemes::Tableau_10"))
+.safe_pal   <- function(n) if (n <= 10L) .pal10_base[seq_len(n)] else colorRampPalette(.pal10_base)(n)
+safe_fill   <- function(n) scale_fill_manual(values  = .safe_pal(n))
+safe_color  <- function(n) scale_color_manual(values = .safe_pal(n))
+
 run_summary <- purrr::map_dfr(ora_runs, ~tibble(
   gene_list = .x$list_name,
   input_genes = .x$input_n,
@@ -294,7 +363,7 @@ if (nrow(all_results) > 0) {
   p_hits <- ggplot(top_hits, aes(x = reorder(term_std, neglog10FDR), y = neglog10FDR, fill = gene_list)) +
     geom_col(position = "dodge") +
     coord_flip() +
-    scale_fill_paletteer_d("ggthemes::Tableau_10") +
+    safe_fill(n_distinct(top_hits$gene_list)) +
     theme_minimal() +
     labs(title = "Top ORA hits per gene list", x = "Gene set", y = "-log10(FDR)")
 
@@ -306,49 +375,13 @@ if (nrow(all_results) > 0) {
 
   p_db <- ggplot(db_counts, aes(x = gene_list, y = n, fill = database_std)) +
     geom_col(position = "stack") +
-    scale_fill_paletteer_d("ggthemes::Tableau_10") +
+    safe_fill(n_distinct(db_counts$database_std)) +
     theme_minimal() +
     labs(title = "Number of enriched terms by database", x = "Gene list", y = "N terms") +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
   print(p_db)
   ggsave(file.path(ora_plots_dir, "enriched_terms_by_database.png"), p_db, width = 12, height = 7, dpi = 320)
-
-  # Spider/radar-like profile plot by database
-  if (isTRUE(params$enable_spider_plot)) {
-    db_profile <- std_results %>%
-      group_by(gene_list, database_std) %>%
-      summarise(
-        min_fdr = min(FDR_std, na.rm = TRUE),
-        n_terms = n_distinct(term_std),
-        signal = -log10(pmax(min_fdr, .Machine$double.xmin)),
-        .groups = "drop"
-      ) %>%
-      group_by(database_std) %>%
-      mutate(signal_scaled = ifelse(max(signal, na.rm = TRUE) > 0, signal / max(signal, na.rm = TRUE), 0)) %>%
-      ungroup()
-
-    if (nrow(db_profile) > 0) {
-      p_spider <- ggplot(db_profile, aes(x = database_std, y = signal_scaled, group = gene_list, color = gene_list)) +
-        geom_polygon(aes(fill = gene_list), alpha = 0.08, linewidth = 0.4) +
-        geom_line(linewidth = 0.8) +
-        geom_point(size = 2) +
-        coord_polar() +
-        scale_color_paletteer_d("ggthemes::Tableau_10") +
-        scale_fill_paletteer_d("ggthemes::Tableau_10") +
-        theme_minimal() +
-        labs(
-          title = "ORA functional profile (radar-like) by gene list",
-          subtitle = "Scaled -log10(min FDR) across databases",
-          x = NULL,
-          y = "Scaled signal"
-        ) +
-        theme(axis.text.x = element_text(size = 9))
-
-      print(p_spider)
-      ggsave(file.path(ora_plots_dir, "ora_spider_profile.png"), p_spider, width = 10, height = 9, dpi = 320)
-    }
-  }
 
   # Overall characterization: recurrence of enriched terms across lists
   term_recurrence <- std_results %>%
@@ -375,7 +408,7 @@ if (nrow(all_results) > 0) {
     p_recurrent <- ggplot(top_recurrent, aes(x = reorder(term_short, n_lists), y = n_lists, fill = database_std)) +
       geom_col() +
       coord_flip() +
-      scale_fill_paletteer_d("ggthemes::Tableau_10") +
+      safe_fill(n_distinct(top_recurrent$database_std)) +
       theme_minimal() +
       labs(
         title = "Most recurrent enriched functions across gene lists",
@@ -453,7 +486,7 @@ if (nrow(all_results) > 0) {
   if (nrow(pooled_dot) > 0) {
     p_dot <- ggplot(pooled_dot, aes(x = gene_list, y = term_short, size = neglog10FDR, color = database_std)) +
       geom_point(alpha = 0.85) +
-      scale_color_paletteer_d("ggthemes::Tableau_10") +
+      safe_color(n_distinct(pooled_dot$database_std)) +
       theme_minimal() +
       labs(
         title = "Pooled ORA characterization across lists",

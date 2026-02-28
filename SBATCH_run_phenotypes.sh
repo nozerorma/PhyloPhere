@@ -48,7 +48,7 @@ submit_array_job() {
 #SBATCH -p haswell
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=8
+#SBATCH --cpus-per-task=20
 #SBATCH --mem-per-cpu=2G
 #SBATCH -t 48:00:00
 #SBATCH -e Slurm/slurm-%A_%a.err
@@ -61,14 +61,28 @@ module load Nextflow
 module load Miniconda3
 conda activate phylophere
 
-# ── Analysis toggles (passed to run_phenotype_single.sh via env) ──────────────
-export RUN_FADE=false
-export RUN_MOLERATE=false
-export RUN_RER=false
-# RERConverge extra params (only used when RUN_RER=true):
-# export RER_TOOL="build_trait,build_tree,build_matrix,continuous"
-# export RER_GENE_SET_MODE="gene_set"
-# export GENE_TREES="/path/to/ALL_FEB23_geneTrees.txt"
+# ── Toy mode ─────────────────────────────────────────────────────────────────
+# export IS_TOY=true    # small alignments + 100 cycles; unset or false for full run
+
+# ── Source run sub-directory ──────────────────────────────────────────────────
+# Pre-computed CT outputs (discovery, resample, bootstrap, gene sets) are read
+# from:  CAAS_RESULTS/<TRAIT>/<SOURCE_RUN_SUBDIR>/filter/
+# Set to the timestamped dir name of a completed run, or leave as "runtime" if
+# you maintain a stable symlink/alias there.
+export SOURCE_RUN_SUBDIR="runtime"
+
+# ── Selection analysis toggles ────────────────────────────────────────────────
+# Gene-set paths are auto-derived from SOURCE_RUN_SUBDIR; enable the tools here.
+export RUN_FADE=true
+export RUN_MOLERATE=true
+export FADE_MODE="gene_set"       # "gene_set" | "all"
+export MOLERATE_MODE="gene_set"   # "gene_set" | "all"
+
+# ── RERConverge ───────────────────────────────────────────────────────────────
+export RUN_RER=false # Note that we need to fix the gene_trees. They have species which dont match the species in the trait file, and RERConverge fails when that happens. We can either fix the gene trees or modify the RERConverge code to ignore those species. For now, we will set this to false to avoid errors.
+export RER_TOOL="build_trait,build_tree,build_matrix,continuous"
+export RER_GENE_SET_MODE="gene_set"   # "gene_set" | "all"
+export GENE_TREES="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
 
 REPO_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere"
 SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single.sh"
@@ -99,35 +113,35 @@ bash "$SINGLE_RUNNER" "$CLASS" "$TRAIT" "$SECONDARY" "$CTRAIT" "$PRUNE" "$PRUNE_
 EOF
 }
 
-# Function to submit the cleanup job
-submit_cleanup_job() {
-    local array_job_id=$1
-    sbatch --dependency=afterok:$array_job_id <<EOF
-#!/bin/bash
-#SBATCH --job-name=phylophere-cleanup
-#SBATCH --ntasks=1
-#SBATCH --cpus-per-task=1
-#SBATCH -p haswell
-#SBATCH --mem=2G
-#SBATCH -t 01:00:00
-#SBATCH -e Slurm/cleanup-%j.err
-#SBATCH -o Slurm/cleanup-%j.out
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=miguel.ramon@upf.edu
+# # Function to submit the cleanup job
+# submit_cleanup_job() {
+#     local array_job_id=$1
+#     sbatch --dependency=afterok:$array_job_id <<EOF
+# #!/bin/bash
+# #SBATCH --job-name=phylophere-cleanup
+# #SBATCH --ntasks=1
+# #SBATCH --cpus-per-task=1
+# #SBATCH -p haswell
+# #SBATCH --mem=2G
+# #SBATCH -t 01:00:00
+# #SBATCH -e Slurm/cleanup-%j.err
+# #SBATCH -o Slurm/cleanup-%j.out
+# #SBATCH --mail-type=END,FAIL
+# #SBATCH --mail-user=miguel.ramon@upf.edu
 
-echo "Cleaning up Nextflow work directories under: ${WORK_BASE}"
-rm -rf "${WORK_BASE:?}/"*
-echo "Cleanup done."
-EOF
-}
+# echo "Cleaning up Nextflow work directories under: ${WORK_BASE}"
+# rm -rf "${WORK_BASE:?}/"*
+# echo "Cleanup done."
+# EOF
+# }
 
-# Main script logic
-array_job_id=$(submit_array_job)
-echo "Submitted array job  : ${array_job_id}  (10 tasks)"
+# # Main script logic
+# array_job_id=$(submit_array_job)
+# echo "Submitted array job  : ${array_job_id}  (10 tasks)"
 
-cleanup_job_id=$(submit_cleanup_job "$array_job_id")
-echo "Submitted cleanup job: ${cleanup_job_id}  (depends on afterok:${array_job_id})"
+# cleanup_job_id=$(submit_cleanup_job "$array_job_id")
+# echo "Submitted cleanup job: ${cleanup_job_id}  (depends on afterok:${array_job_id})"
 
-echo ""
-echo "Monitor with: squeue -u \$USER"
-echo "Logs in     : Slurm/"
+# echo ""
+# echo "Monitor with: squeue -u \$USER"
+# echo "Logs in     : Slurm/"

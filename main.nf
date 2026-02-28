@@ -69,6 +69,22 @@ include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {MOLERATE}       from './workflows/molerate.nf'
 
+// Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
+
+// Post-completion: write workflow_map.html again after all publishDir copies are done.
+workflow.onComplete {
+    try {
+        def ctx = WorkflowMap.buildCtx(params, workflow)
+        def outdirFile = new File(ctx.outdir as String)
+        if (!outdirFile.exists()) outdirFile.mkdirs()
+        def target = new File(outdirFile, 'workflow_map.html')
+        target.text = WorkflowMap.buildWorkflowMapHtml(ctx)
+        log.info "Workflow map generated: ${target.absolutePath}"
+    } catch (Exception e) {
+        log.warn "Could not generate final workflow map HTML: ${e.message}"
+    }
+}
+
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  RUN PHYLOPHERE ANALYSIS: This section initiates the main Phylophere workflow.
@@ -255,6 +271,20 @@ workflow {
             sel_pp_bottom_ch = pp_gene_lists_val
                 .flatMap { files -> files.findAll { f -> f.name.contains('_bottom_') && f.name.endsWith('significant.txt') } }
         }
+
+        // Merge per-phenotype files into single files before passing to selection
+        // workflows. When multiple phenotypes are run together each sel_* channel
+        // emits N items (one per phenotype). COLLECT_GENE_SETS inside FADE/MOLERATE/RER
+        // is invoked once per synchronised 4-tuple of inputs, so without this merge it
+        // runs N times and every gene appears N times in the resulting ali channel —
+        // causing file-name staging collisions in the report process. collectFile()
+        // collapses N items into one merged file so COLLECT_GENE_SETS runs exactly once.
+        // When sel_* channels are empty (standalone runs) collectFile() emits nothing
+        // and the .ifEmpty {} fallback paths inside each workflow remain intact.
+        sel_acc_top_ch    = sel_acc_top_ch   .collectFile(keepHeader: true, skip: 1, name: 'merged_acc_top.csv')
+        sel_acc_bottom_ch = sel_acc_bottom_ch.collectFile(keepHeader: true, skip: 1, name: 'merged_acc_bottom.csv')
+        sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
+        sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
 
         if (params.fade) {
             def fade_traitfile_ch = ct_results ? ct_results.trait_file : Channel.empty()

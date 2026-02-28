@@ -42,6 +42,36 @@ from modules.alimport import *
 from modules.hyper import *
 
 
+def _prepare_reduced_line_dict_for_pvalue(position_dict, fg_species, bg_species):
+    """
+    Build a reduced line dictionary for hypergeometric p-value calculation by
+    removing pairwise conserved residues (same AA at matched FG/BG index).
+
+    Returns:
+        (line_dict, effective_fg_size, effective_bg_size)
+    """
+    reduced_line_dict = dict(position_dict)
+    remove_fg = set()
+    remove_bg = set()
+
+    for i in range(min(len(fg_species), len(bg_species))):
+        fg_sp = fg_species[i]
+        bg_sp = bg_species[i]
+        fg_aa = position_dict.get(fg_sp, "-").split("@")[0]
+        bg_aa = position_dict.get(bg_sp, "-").split("@")[0]
+        if fg_aa == bg_aa and fg_aa != "-":
+            remove_fg.add(fg_sp)
+            remove_bg.add(bg_sp)
+
+    for sp in remove_fg.union(remove_bg):
+        reduced_line_dict.pop(sp, None)
+
+    effective_fg_size = len(fg_species) - len(remove_fg)
+    effective_bg_size = len(bg_species) - len(remove_bg)
+
+    return reduced_line_dict, effective_fg_size, effective_bg_size
+
+
 def _pair_sort_key(multiconfig, sp):
     pair_id = multiconfig.get_pair(sp)
     if pair_id:
@@ -451,7 +481,23 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
                 # Starting the pvalue determination
 
 
-                pv = calcpval_random(processed_position.d, genename, int(fg_species_number), int(bg_species_number))
+                fg_size_for_p = int(fg_species_number)
+                bg_size_for_p = int(bg_species_number)
+                line_dict_for_p = processed_position.d
+
+                # When overlap tolerance is enabled, exclude conserved paired
+                # residues from p-value computation only (keep reported pattern unchanged).
+                if max_conserved > 0:
+                    line_dict_for_p, fg_size_for_p, bg_size_for_p = _prepare_reduced_line_dict_for_pvalue(
+                        processed_position.d,
+                        fg_ungapped,
+                        bg_ungapped,
+                    )
+
+                if fg_size_for_p <= 0 or bg_size_for_p <= 0:
+                    pv = 1.0
+                else:
+                    pv = calcpval_random(line_dict_for_p, genename, fg_size_for_p, bg_size_for_p)
                 pvalue_string = str(pv)
 
 
