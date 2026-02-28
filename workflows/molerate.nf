@@ -145,10 +145,10 @@ workflow MOLERATE {
                 .ifEmpty { file(params.molerate_postproc_bottom     ?: 'NO_FILE') }
 
             def sets = COLLECT_GENE_SETS(
-                resolved_acc_top.first(),
-                resolved_acc_bottom.first(),
-                resolved_pp_top.first(),
-                resolved_pp_bottom.first()
+                resolved_acc_top,
+                resolved_acc_bottom,
+                resolved_pp_top,
+                resolved_pp_bottom
             )
 
             def top_ali_ch = sets.gene_set_top.flatMap { gsf ->
@@ -199,12 +199,12 @@ workflow MOLERATE {
         def top_jsons = molerate_results_ch
             .filter { gid, dir, json -> dir == 'top' }
             .map    { gid, dir, json -> json }
-            .collect()
+            .collect().ifEmpty([])
 
         def bottom_jsons = molerate_results_ch
             .filter { gid, dir, json -> dir == 'bottom' }
             .map    { gid, dir, json -> json }
-            .collect()
+            .collect().ifEmpty([])
 
         def rpt_top    = MOLERATE_REPORT_TOP(Channel.value('top'),    top_jsons   )
         def rpt_bottom = MOLERATE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons)

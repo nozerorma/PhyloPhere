@@ -38,8 +38,12 @@ suppressPackageStartupMessages({
   library(tidyr)
   library(ggplot2)
   library(ggrepel)
+  library(paletteer)
   library(DT)
 })
+
+# Tableau_10 colour swatch (10 named colours for pipeline-wide consistency)
+.tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
 ```
 
 ---
@@ -312,9 +316,9 @@ ggplot(mr_df, aes(x = log2_ratio, y = -log10(qval_pp_vs_prop + 1e-300))) +
   ) +
   scale_colour_manual(
     values = c(
-      "Accelerated"     = "#d7191c",
-      "Decelerated"     = "#2c7bb6",
-      "Significant"     = "#fdae61",
+      "Accelerated"     = .tableau10[3],
+      "Decelerated"     = .tableau10[1],
+      "Significant"     = .tableau10[2],
       "Non-significant" = "grey60"
     ),
     name = NULL
@@ -337,7 +341,7 @@ ggplot(mr_df %>% filter(!is.na(log2_ratio) & is.finite(log2_ratio)),
   geom_histogram(aes(fill = after_stat(x) > 0), bins = 60,
                  colour = "white", alpha = 0.85) +
   scale_fill_manual(
-    values = c("TRUE" = "#d7191c", "FALSE" = "#2c7bb6"),
+    values = c("TRUE" = .tableau10[3], "FALSE" = .tableau10[1]),
     labels = c("TRUE" = "Faster (FG)", "FALSE" = "Slower (FG)"),
     name   = NULL
   ) +
@@ -373,7 +377,7 @@ ggplot(mr_df, aes(x = r_bg, y = r_test)) +
     max.overlaps = 20
   ) +
   scale_colour_manual(
-    values = c("Accelerated" = "#d7191c", "Decelerated" = "#2c7bb6", "Other" = "grey60"),
+    values = c("Accelerated" = .tableau10[3], "Decelerated" = .tableau10[1], "Other" = "grey60"),
     name   = NULL
   ) +
   scale_x_log10() +

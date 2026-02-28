@@ -39,10 +39,11 @@ GS3   Polarity and volume (6 groups; per Zhang 2000)
 GS4   Fine-grained biochemical (12 groups; textbook-style functional bins)
 
 Functions:
-encode_to_groups()          Encode amino acid string to group string for a given scheme
-build_group_line_dictionary() Transform position data to group-level format for p-value calc
-check_caap_pattern()        Check if a pattern is CAAP for a given scheme
-fetch_caap()                Main function: identifies CAAP for all traits at a position
+encode_to_groups()                          Encode amino acid string to group string for a given scheme
+build_group_line_dictionary()               Transform position data to group-level format for p-value calc
+_prepare_reduced_group_line_dict_for_pvalue() Exclude conserved FG/BG pairs from group-level p-value dict
+check_caap_pattern()                        Check if a pattern is CAAP for a given scheme
+fetch_caap()                                Main function: identifies CAAP for all traits at a position
 
 ----------
 
@@ -296,6 +297,40 @@ def build_group_line_dictionary(position_obj, trait: str, scheme_dict: Dict[str,
             line_dict[species] = f"{group}@{position_num}"
 
     return line_dict
+
+
+def _prepare_reduced_group_line_dict_for_pvalue(line_dict, fg_species, bg_species):
+    """
+    Build a reduced group line dictionary for hypergeometric p-value calculation by
+    removing pairwise conserved residues (same group code at matched FG/BG index).
+
+    Mirrors _prepare_reduced_line_dict_for_pvalue() in caas_id.py but operates on
+    already-encoded group line_dict entries ("GROUP@POSITION" format) rather than
+    raw amino acid position dicts.
+
+    Returns:
+        (reduced_line_dict, effective_fg_size, effective_bg_size)
+    """
+    reduced_line_dict = dict(line_dict)
+    remove_fg = set()
+    remove_bg = set()
+
+    for i in range(min(len(fg_species), len(bg_species))):
+        fg_sp = fg_species[i]
+        bg_sp = bg_species[i]
+        fg_group = line_dict.get(fg_sp, "-").split("@")[0]
+        bg_group = line_dict.get(bg_sp, "-").split("@")[0]
+        if fg_group == bg_group and fg_group != "-":
+            remove_fg.add(fg_sp)
+            remove_bg.add(bg_sp)
+
+    for sp in remove_fg.union(remove_bg):
+        reduced_line_dict.pop(sp, None)
+
+    effective_fg_size = len(fg_species) - len(remove_fg)
+    effective_bg_size = len(bg_species) - len(remove_bg)
+
+    return reduced_line_dict, effective_fg_size, effective_bg_size
 
 
 def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
@@ -563,10 +598,21 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
             )
 
             # Calculate group-based p-value
-            fg_size = len(fg_species)
-            bg_size = len(bg_species)
+            fg_size_for_p = len(fg_species)
+            bg_size_for_p = len(bg_species)
+            line_dict_for_p = line_dict
 
-            pvalue = calcpval_random(line_dict, genename, fg_size, bg_size)
+            # When overlap tolerance is enabled, exclude conserved paired residues
+            # from p-value computation only (keep reported pattern unchanged).
+            if max_conserved > 0:
+                line_dict_for_p, fg_size_for_p, bg_size_for_p = _prepare_reduced_group_line_dict_for_pvalue(
+                    line_dict, fg_species, bg_species
+                )
+
+            if fg_size_for_p <= 0 or bg_size_for_p <= 0:
+                pvalue = 1.0
+            else:
+                pvalue = calcpval_random(line_dict_for_p, genename, fg_size_for_p, bg_size_for_p)
 
             # Prepare output row
             # Preserve the same sorted pair order used for substitution/encoded strings

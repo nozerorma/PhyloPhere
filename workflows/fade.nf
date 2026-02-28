@@ -134,10 +134,10 @@ workflow FADE {
                 .ifEmpty { file(params.fade_postproc_bottom     ?: 'NO_FILE') }
 
             def gene_sets = COLLECT_GENE_SETS(
-                resolved_acc_top.first(),
-                resolved_acc_bottom.first(),
-                resolved_pp_top.first(),
-                resolved_pp_bottom.first()
+                resolved_acc_top,
+                resolved_acc_bottom,
+                resolved_pp_top,
+                resolved_pp_bottom
             )
 
             // flatMap runs the closure synchronously at evaluation time, where
@@ -187,9 +187,9 @@ workflow FADE {
 
         // ── Reports per direction ────────────────────────────────────────────
         def top_jsons    = fade_results_ch
-            .filter { gid, dir, json -> dir == 'top'    }.map { it[2] }.collect()
+            .filter { gid, dir, json -> dir == 'top'    }.map { it[2] }.collect().ifEmpty([])
         def bottom_jsons = fade_results_ch
-            .filter { gid, dir, json -> dir == 'bottom' }.map { it[2] }.collect()
+            .filter { gid, dir, json -> dir == 'bottom' }.map { it[2] }.collect().ifEmpty([])
 
         fade_report_top    = FADE_REPORT_TOP(Channel.value('top'),    top_jsons   )
         fade_report_bottom = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons)

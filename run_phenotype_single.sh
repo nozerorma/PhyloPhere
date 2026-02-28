@@ -57,6 +57,13 @@ CAAS_OUTBASE="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates
 WORK_BASE="/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs"
 ASR_CACHE_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/asr"
 
+# ── Source run sub-directory ──────────────────────────────────────────────────
+# Under CAAS_OUTBASE/<TRAIT>/  there must be a sub-directory containing a
+# completed prior run's filter/ outputs (caastools/, postproc/, accumulation/).
+# Set SOURCE_RUN_SUBDIR to "runtime" (default) or the timestamped dir name.
+# The full resolved path becomes: CAAS_OUTBASE/<TRAIT>/<SOURCE_RUN_SUBDIR>/filter
+SOURCE_RUN_SUBDIR="${SOURCE_RUN_SUBDIR:-runtime}"
+
 TRAIT_FILE="${DATADIR}/1.Cancer_data/Neoplasia_species360/cancer_traits_processed-LQ.csv"
 TREE_FILE="${DATADIR}/5.Phylogeny/science.abn7829_data_s4.nex.tree"
 PRUNE_DIR="${DATADIR}/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP"
@@ -99,6 +106,26 @@ module load Nextflow
 
 timestamp=$(date +%Y%m%d_%H%M%S)
 
+# ── Source-run derived paths (resolved here so TRAIT / TAG are known) ─────────
+# All CT outputs (discovery, resample, bootstrap, background) and gene-set
+# inputs (postproc top/bottom, accumulation CSV) are auto-derived from the
+# prior completed run that lives under SOURCE_RUN_SUBDIR/filter/.
+# SOURCE_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}/${SOURCE_RUN_SUBDIR}/filter"
+
+# # CT raw outputs
+# SOURCE_RESAMPLE_DIR="${SOURCE_BASE}/resample/nw_tree.resampled.output"
+# SOURCE_BOOTSTRAP="${SOURCE_BASE}/caastools/bootstrap.tab"
+# SOURCE_BACKGROUND="${SOURCE_BASE}/caastools/background_genes.output"
+
+# # Gene-set inputs for FADE / MoleRate / RER (used in gene_set mode)
+# SOURCE_POSTPROC_TOP="${SOURCE_BASE}/postproc/disambiguation_characterization/us_gs_relations/exports/txt/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
+# SOURCE_POSTPROC_BOTTOM="${SOURCE_BASE}/postproc/disambiguation_characterization/us_gs_relations/exports/txt/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
+# SOURCE_ACCUMULATION_CSV="${SOURCE_BASE}/accumulation/aggregation/accumulation_global.csv"
+
+# Short random hex ID used to name the Nextflow run (8 chars)
+NXF_RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | cut -c1-8 \
+              || printf '%08x' $RANDOM)"
+
 # ============================================================
 # INPUT VALIDATION
 # ============================================================
@@ -125,18 +152,15 @@ if [ ! -d "$ALI_DIR" ]; then
 fi
 
 # ============================================================
-# FADE / MOLERATE FLAGS
+# FADE / MOLERATE / RER FLAGS
+# Gene-set paths are auto-derived from the source run.
+# Override SOURCE_POSTPROC_* / SOURCE_ACCUMULATION_CSV above if needed.
 # ============================================================
 FADE_NF_FLAGS=()
 if [ "$RUN_FADE" = true ]; then
     FADE_NF_FLAGS=(
         --fade
         --fade_mode "$FADE_MODE"
-        # Uncomment and fill for gene_set mode:
-        # --fade_accumulation_top    "/path/to/accumulation_convergent_caap_top_aggregated_results.csv"
-        # --fade_accumulation_bottom "/path/to/accumulation_convergent_caap_bottom_aggregated_results.csv"
-        # --fade_postproc_top        "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
-        # --fade_postproc_bottom     "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
     )
 fi
 
@@ -145,11 +169,6 @@ if [ "$RUN_MOLERATE" = true ]; then
     MOLERATE_NF_FLAGS=(
         --molerate
         --molerate_mode "$MOLERATE_MODE"
-        # Uncomment and fill for gene_set mode:
-        # --molerate_accumulation_top    "/path/to/..."
-        # --molerate_accumulation_bottom "/path/to/..."
-        # --molerate_postproc_top        "/path/to/..."
-        # --molerate_postproc_bottom     "/path/to/..."
     )
 fi
 
@@ -157,9 +176,9 @@ fi
 RER_NF_FLAGS=()
 if [ "$RUN_RER" = true ]; then
     RER_NF_FLAGS=(
-        --rer_tool         "$RER_TOOL"
+        --rer_tool          "$RER_TOOL"
         --rer_gene_set_mode "$RER_GENE_SET_MODE"
-        --gene_trees       "$GENE_TREES"
+        --gene_trees        "$GENE_TREES"
     )
 fi
 
@@ -168,8 +187,9 @@ fi
 # ============================================================
 COMMON_NF_FLAGS=(
     -with-tower
+    -name "${TRAIT}_${NXF_RUN_ID}"
     -profile singularity,haswell
-    --ct_tool "discovery,resample,bootstrap"
+    --ct_tool "discovery,resample,bootstrap" #resample,bootstrap results are passed as inputs, so we only run the discovery step
     --alignment  "$ALI_DIR"
     --tree        "$TREE_FILE"
     --cycles      "$CYCLES"
@@ -202,12 +222,17 @@ run_pipeline() {
 # ============================================================
 echo "=========================================="
 echo " PHYLOPHERE SINGLE-PHENOTYPE RUNNER"
-echo " CLASS     : $CLASS"
-echo " TRAIT     : $TRAIT"
-echo " Timestamp : $timestamp"
-echo " IS_TOY    : $IS_TOY  (tag: '${TAG}')"
-echo " Cycles    : $CYCLES"
-echo " N_Rand    : $N_RANDOMIZATIONS"
+echo " CLASS      : $CLASS"
+echo " TRAIT      : $TRAIT"
+echo " Timestamp  : $timestamp"
+echo " NF run name: ${TRAIT}_${NXF_RUN_ID}"
+echo " IS_TOY     : $IS_TOY  (tag: '${TAG}')"
+echo " Cycles     : $CYCLES"
+echo " N_Rand     : $N_RANDOMIZATIONS"
+echo " Source run : $SOURCE_BASE"
+echo " RUN_FADE   : $RUN_FADE  (mode=${FADE_MODE})"
+echo " RUN_MOLERATE: $RUN_MOLERATE  (mode=${MOLERATE_MODE})"
+echo " RUN_RER    : $RUN_RER  (tool=${RER_TOOL})"
 echo "=========================================="
 
 RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}/${timestamp}"

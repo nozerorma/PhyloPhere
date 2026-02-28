@@ -583,7 +583,7 @@ if (has_caap_group) {
           TRUE ~ "Not Significant"
         ),
         Tag = assign_caas_tags(n()),
-        IsConserved = if_else(!is.na(ConservedPair) & ConservedPair != "", TRUE, FALSE),
+        IsConserved = if_else(!is.na(ConservedPair) & toupper(trimws(as.character(ConservedPair))) == "TRUE", TRUE, FALSE),
         ConservedPair = if_else(
           !is.na(ConservedPairs) & ConservedPairs != "",
           sub("^\\d+:", "", ConservedPairs),
@@ -616,7 +616,7 @@ if (has_caap_group) {
         TRUE ~ "Not Significant"
       ),
       Tag = assign_caas_tags(n()),
-      IsConserved = if_else(!is.na(ConservedPair) & ConservedPair != "", TRUE, FALSE),
+      IsConserved = if_else(!is.na(ConservedPair) & toupper(trimws(as.character(ConservedPair))) == "TRUE", TRUE, FALSE),
       ConservedPair = if_else(
         !is.na(ConservedPairs) & ConservedPairs != "",
         sub("^\\d+:", "", ConservedPairs),
@@ -648,7 +648,7 @@ if (has_caap_group) {
         TRUE ~ "Not Significant"
       ),
       Tag = assign_caas_tags(n()),
-      IsConserved = if_else(!is.na(ConservedPair) & ConservedPair != "", TRUE, FALSE),
+      IsConserved = if_else(!is.na(ConservedPair) & toupper(trimws(as.character(ConservedPair))) == "TRUE", TRUE, FALSE),
       ConservedPair = if_else(
         !is.na(ConservedPairs) & ConservedPairs != "",
         sub("^\\d+:", "", ConservedPairs),

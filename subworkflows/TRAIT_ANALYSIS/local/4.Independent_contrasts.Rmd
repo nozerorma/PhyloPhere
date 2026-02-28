@@ -23,6 +23,10 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
+  discrete_method: "decile"
+  top_quantile: "0.90"
+  bottom_quantile: "0.10"
+  contrast_max_iter: "3"
 ---
 
 ```{r header}
