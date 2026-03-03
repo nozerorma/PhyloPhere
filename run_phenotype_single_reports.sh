@@ -121,6 +121,8 @@ SOURCE_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}/${SOURCE_RUN_SUBDIR}/filter"
 SOURCE_RESAMPLE_DIR="${SOURCE_BASE}/resample/nw_tree.resampled.output"
 SOURCE_BOOTSTRAP="${SOURCE_BASE}/caastools/bootstrap.tab"
 SOURCE_BACKGROUND="${SOURCE_BASE}/caastools/background_genes.output"
+SOURCE_DISCOVERY="${SOURCE_BASE}/caastools/discovery.tab"
+SOURCE_DISAMBIGUATION="${SOURCE_BASE}/ct_disambiguation/ct_disambiguation/caas_convergence_master.csv"
 
 # # Gene-set inputs for FADE / MoleRate / RER (used in gene_set mode)
 # SOURCE_POSTPROC_TOP="${SOURCE_BASE}/postproc/disambiguation_characterization/us_gs_relations/exports/txt/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
@@ -194,15 +196,17 @@ COMMON_NF_FLAGS=(
     -with-tower
     -name "${TRAIT}_${NXF_RUN_ID}"
     -profile local
-    --ct_tool "discovery" #resample,bootstrap results are passed as inputs, so we only run the discovery step
+    --ct_tool "" #discovery,resample,bootstrap results are passed as inputs, so we only run the discovery step
     --alignment  "$ALI_DIR"
     --tree        "$TREE_FILE"
     --cycles      "$CYCLES"
     --accumulation_n_randomizations "$N_RANDOMIZATIONS"
     --ct_disambig_asr_mode      "precomputed"
     --ct_disambig_asr_cache_dir "${ASR_CACHE_DIR}"
+    --discovery_out "${SOURCE_DISCOVERY}"
     --resample_out "${SOURCE_RESAMPLE_DIR}"
     --bootstrap_input "${SOURCE_BOOTSTRAP}"
+    --disambiguation_input "${SOURCE_DISAMBIGUATION}"
 )
 
 # ============================================================
@@ -282,10 +286,8 @@ if [ "$CLASS" = "1" ]; then
         --prune_list           "$PRUNE_LIST"
         --prune_list_secondary "$PRUNE_SECONDARY_LIST"
         --reporting
-        --contrast_selection
         --ct_postproc
         --ct_signification
-        --ct_disambiguation
         --ora
         --string
         --ct_accumulation
@@ -322,10 +324,8 @@ elif [ "$CLASS" = "2" ]; then
         --c_trait         ""
         --secondary_trait ""
         --reporting
-        --contrast_selection
         --ct_postproc
         --ct_signification
-        --ct_disambiguation
         --ora
         --string
         --ct_accumulation

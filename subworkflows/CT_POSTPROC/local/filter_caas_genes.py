@@ -288,6 +288,99 @@ def apply_gene_filter(discovery_df, removed_genes_df, mode='both'):
     return filtered_df
 
 
+def build_full_gene_stats(discovery_df, gene_length_df, removed_genes_df, extreme_percentile=0.99, iqr_multiplier=3.0, trait_col="Trait"):
+    """
+    Build complete gene statistics for all genes with thresholds and categories.
+    
+    Args:
+        discovery_df: Original CAAS discovery DataFrame
+        gene_length_df: DataFrame with columns [Gene, Length]
+        removed_genes_df: DataFrame of flagged genes with Category column
+        extreme_percentile: Threshold percentile for extreme genes
+        iqr_multiplier: IQR multiplier for dubious gene threshold
+        trait_col: Name of trait column
+    
+    Returns:
+        DataFrame with all genes, their stats, thresholds, and categories
+    """
+    # Check if CAAP mode (CAAP_Group column present)
+    has_caap_group = 'CAAP_Group' in discovery_df.columns
+    groupby_cols = [trait_col, 'CAAP_Group'] if has_caap_group else [trait_col]
+    
+    # Merge gene lengths
+    discovery_with_len = discovery_df.merge(
+        gene_length_df[['Gene', 'Length']], 
+        on='Gene', 
+        how='left'
+    )
+    
+    # Drop rows without gene length annotation
+    discovery_with_len = discovery_with_len.dropna(subset=['Length'])
+    
+    # Count unique CAAS positions per gene per trait (and group if CAAP mode)
+    groupby_summary = groupby_cols + ['Gene', 'Position']
+    gene_summary = (
+        discovery_with_len
+        .groupby(groupby_summary)
+        .first()  # Keep only one occurrence of each position
+        .reset_index()
+        .groupby(groupby_cols + ['Gene', 'Length'])
+        .size()
+        .reset_index(name='n_CAAS')
+    )
+    
+    # Calculate CAAS density (percentage)
+    gene_summary['n_CAAS_per_length'] = (gene_summary['n_CAAS'] / gene_summary['Length']) * 100
+    
+    # Calculate extreme threshold per trait (and per group if CAAP mode)
+    extreme_thresholds = (
+        gene_summary
+        .groupby(groupby_cols)['n_CAAS_per_length']
+        .quantile(extreme_percentile)
+        .reset_index(name='threshold_extreme')
+    )
+    
+    # Calculate IQR thresholds per trait (and per group if CAAP mode)
+    def calc_iqr_threshold(series, multiplier):
+        q1 = series.quantile(0.25)
+        q3 = series.quantile(0.75)
+        iqr = q3 - q1
+        return q3 + multiplier * iqr
+    
+    iqr_thresholds = (
+        gene_summary
+        .groupby(groupby_cols)['n_CAAS']
+        .apply(lambda x: calc_iqr_threshold(x, iqr_multiplier))
+        .reset_index(name='threshold_dubious')
+    )
+    
+    # Join thresholds to gene summary
+    gene_summary = gene_summary.merge(extreme_thresholds, on=groupby_cols)
+    gene_summary = gene_summary.merge(iqr_thresholds, on=groupby_cols)
+    
+    # Initialize all genes as Normal
+    gene_summary['Category'] = 'Normal'
+    
+    # Apply categories from removed_genes_df if available
+    if not removed_genes_df.empty:
+        # Determine merge columns
+        merge_cols = [trait_col, 'CAAP_Group', 'Gene'] if has_caap_group else [trait_col, 'Gene']
+        # Only merge if removed_genes_df has the required columns
+        if all(col in removed_genes_df.columns for col in merge_cols):
+            category_mapping = removed_genes_df[merge_cols + ['Category']].drop_duplicates()
+            gene_summary = gene_summary.merge(
+                category_mapping, 
+                on=merge_cols, 
+                how='left', 
+                suffixes=('', '_removed')
+            )
+            # Update categories for flagged genes
+            gene_summary['Category'] = gene_summary['Category_removed'].fillna(gene_summary['Category'])
+            gene_summary = gene_summary.drop(columns=['Category_removed'])
+    
+    return gene_summary
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Filter CAAS discovery results by gene-level criteria",
@@ -307,8 +400,8 @@ Examples:
     )
     
     # Input files
-    parser.add_argument('-i', '--discovery-input', required=True,
-                        help='CAAS discovery file (TSV with Trait, Gene, Position columns)')
+    parser.add_argument('-i', '--disambiguation-input', required=True,
+                        help='CAAS disambiguation file (TSV with Trait, Gene, Position columns)')
     parser.add_argument('-l', '--gene-ensembl-file', required=True,
                         help='Gene annotation file (TSV with Gene, Chr, Start, End, Strand, Length columns)')
     parser.add_argument('-c', '--cluster-file', default=None,
@@ -331,12 +424,14 @@ Examples:
                         help='Filtered discovery output file')
     parser.add_argument('-s', '--summary', default=None,
                         help='Removed genes summary file (optional)')
+    parser.add_argument('-g', '--gene-stats-output', default=None,
+                        help='Full gene statistics output file (optional)')
     
     args = parser.parse_args()
     
     # Validate inputs
-    if not Path(args.discovery_input).exists():
-        print(f"Error: Discovery file not found: {args.discovery_input}", file=sys.stderr)
+    if not Path(args.disambiguation_input).exists():
+        print(f"Error: Disambiguation file not found: {args.disambiguation_input}", file=sys.stderr)
         sys.exit(1)
     
     if not Path(args.gene_ensembl_file).exists():
@@ -348,8 +443,8 @@ Examples:
         sys.exit(1)
     
     # Load data
-    print(f"Loading discovery data: {args.discovery_input}", file=sys.stderr)
-    discovery_df = pd.read_csv(args.discovery_input, sep='\t')
+    print(f"Loading disambiguation data: {args.disambiguation_input}", file=sys.stderr)
+    discovery_df = pd.read_csv(args.disambiguation_input, sep='\t')
     
     print(f"Loading gene lengths: {args.gene_ensembl_file}", file=sys.stderr)
     gene_length_df = pd.read_csv(args.gene_ensembl_file, sep='\t')
@@ -436,6 +531,20 @@ Examples:
     if args.summary:
         print(f"Writing removed genes summary: {args.summary}", file=sys.stderr)
         removed_genes_df.to_csv(args.summary, sep='\t', index=False)
+    
+    # Generate and export full gene statistics if requested
+    if args.gene_stats_output:
+        print(f"Building full gene statistics...", file=sys.stderr)
+        gene_stats_df = build_full_gene_stats(
+            discovery_df,
+            gene_length_df,
+            removed_genes_df,
+            extreme_percentile=args.extreme_percentile,
+            iqr_multiplier=args.iqr_multiplier,
+            trait_col=args.trait_col
+        )
+        print(f"Writing gene statistics: {args.gene_stats_output}", file=sys.stderr)
+        gene_stats_df.to_csv(args.gene_stats_output, sep='\t', index=False)
     
     # Summary statistics
     print("\n=== Gene Filtering Summary ===", file=sys.stderr)

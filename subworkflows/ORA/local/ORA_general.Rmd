@@ -613,7 +613,7 @@ if (exists("std_results") && nrow(std_results) > 0 && isTRUE(params$enable_enric
         p_gg <- ggplot(long_df, aes(x = gene_list, y = term, fill = signal)) +
           geom_tile(color = "grey90", linewidth = 0.15) +
           scale_fill_gradient(low = "white", high = palette_high, name = "-log10(FDR)") +
-          theme_minimal(base_size = 9) +
+          theme_minimal(base_size = 16) +
           labs(title = title,
                subtitle = "-log10(FDR) | rows = enriched terms, cols = scenarios",
                x = NULL, y = NULL) +

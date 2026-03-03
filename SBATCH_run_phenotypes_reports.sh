@@ -75,8 +75,8 @@ export SOURCE_RUN_SUBDIR="20260226_204433"
 
 # ── Selection analysis toggles ────────────────────────────────────────────────
 # Gene-set paths are auto-derived from SOURCE_RUN_SUBDIR; enable the tools here.
-export RUN_FADE=true
-export RUN_MOLERATE=true
+export RUN_FADE=false
+export RUN_MOLERATE=false
 export FADE_MODE="gene_set"       # "gene_set" | "all"
 export MOLERATE_MODE="gene_set"   # "gene_set" | "all"
 
@@ -94,7 +94,7 @@ SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single.sh"
 #   CLASS  TRAIT  SECONDARY  CTRAIT  PRUNE  PRUNE_SEC  DISCRETE_METHOD
 case $SLURM_ARRAY_TASK_ID in
     1)  CLASS=1; TRAIT="neoplasia_prevalence"; SECONDARY="malignant_prevalence"; CTRAIT="neoplasia_necropsy"; PRUNE="neoplasia_exclude.txt"; PRUNE_SEC="malignant_exclude.txt"; DISCRETE="decile"   ;;
-#     2)  CLASS=1; TRAIT="malignant_prevalence"; SECONDARY="neoplasia_prevalence"; CTRAIT="malignant_count";    PRUNE="malignant_exclude.txt"; PRUNE_SEC="neoplasia_exclude.txt"; DISCRETE="decile"   ;;
+    2)  CLASS=1; TRAIT="malignant_prevalence"; SECONDARY="neoplasia_prevalence"; CTRAIT="malignant_count";    PRUNE="malignant_exclude.txt"; PRUNE_SEC="neoplasia_exclude.txt"; DISCRETE="decile"   ;;
 #     3)  CLASS=2; TRAIT="frug_idx";     SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
 #     4)  CLASS=2; TRAIT="fol_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
 #     5)  CLASS=2; TRAIT="ins_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;

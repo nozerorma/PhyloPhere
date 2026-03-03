@@ -74,7 +74,8 @@ include {MOLERATE}       from './workflows/molerate.nf'
 // Post-completion: write workflow_map.html again after all publishDir copies are done.
 workflow.onComplete {
     try {
-        def ctx = WorkflowMap.buildCtx(params, workflow)
+        def outdir = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/Out"
+        def ctx = WorkflowMap.buildCtx(outdir, params, workflow)
         def outdirFile = new File(ctx.outdir as String)
         if (!outdirFile.exists()) outdirFile.mkdirs()
         def target = new File(outdirFile, 'workflow_map.html')
@@ -197,22 +198,22 @@ workflow {
         }
 
         if (params.ct_postproc) {
-            if (!params.ct_disambiguation && !params.discovery_input) {
-                error "CT post-processing now runs downstream of disambiguation. Enable --ct_disambiguation or provide --discovery_input (caas_convergence_master.csv)."
+            if (!params.ct_disambiguation && !params.disambiguation_input) {
+                error "CT post-processing now runs downstream of disambiguation. Enable --ct_disambiguation or provide --disambiguation_input (caas_convergence_master.csv)."
             }
 
             // Post-processing is downstream from disambiguation; consume disambiguation master CSV when available
             // Pass null (not Channel.empty()) when there is no upstream result so that the
             // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
-            // to --discovery_input / --background_input params (same pattern as CT_SIGNIFICATION).
-            def discovery_ch = disambiguation_results ? disambiguation_results.master_csv : null
+            // to --disambiguation_input / --background_input params (same pattern as CT_SIGNIFICATION).
+            def disambiguation_ch = disambiguation_results ? disambiguation_results.master_csv : null
             // Only wire raw background channels when discovery actually ran; otherwise pass
             // null/Channel.empty() so CT_POSTPROC falls back to --background_input param.
             def background_ch       = (ct_results && ran_discovery) ? ct_results.background_file_raw : Channel.empty()
             def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
             def bootstrap_ch = Channel.empty() // retained for CT_POSTPROC signature compatibility
 
-            postproc_results = CT_POSTPROC(discovery_ch, background_ch, background_genes_ch, bootstrap_ch)
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, bootstrap_ch)
             ran_any = true
 
             // Capture postproc outputs as reusable references.

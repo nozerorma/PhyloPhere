@@ -186,10 +186,15 @@ workflow FADE {
         fade_results_ch = FADE_RUN(fade_input_ch, lg_dat_ch).fade_json
 
         // ── Reports per direction ────────────────────────────────────────────
-        def top_jsons    = fade_results_ch
-            .filter { gid, dir, json -> dir == 'top'    }.map { it[2] }.collect().ifEmpty([])
-        def bottom_jsons = fade_results_ch
-            .filter { gid, dir, json -> dir == 'bottom' }.map { it[2] }.collect().ifEmpty([])
+        //    Use .branch() to split once and guarantee exclusive routing,
+        //    avoiding any ambiguity from applying two independent .filter()
+        //    subscriptions on the same queue channel.
+        def branched = fade_results_ch.branch {
+            top:    it[1] == 'top'
+            bottom: it[1] == 'bottom'
+        }
+        def top_jsons    = branched.top.map    { it[2] }.collect().ifEmpty([])
+        def bottom_jsons = branched.bottom.map { it[2] }.collect().ifEmpty([])
 
         fade_report_top    = FADE_REPORT_TOP(Channel.value('top'),    top_jsons   )
         fade_report_bottom = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons)

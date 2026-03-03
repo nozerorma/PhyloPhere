@@ -34,7 +34,7 @@ process FADE_RUN {
     path lg_dat
 
     output:
-    tuple val(gene_id), val(direction), path("${gene_id}.FADE.json"), emit: fade_json, optional: true
+    tuple val(gene_id), val(direction), path("${gene_id}.${direction}.FADE.json"), emit: fade_json, optional: true
 
     script:
     def model   = params.fade_model   ?: 'LG'
@@ -62,10 +62,10 @@ process FADE_RUN {
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\
             ${mcmc_args} \\
-            --output    "${gene_id}.FADE.json" \\
+            --output    "${gene_id}.${direction}.FADE.json" \\
         || echo "FADE failed for ${gene_id} (${direction}), skipping"
         # Remove 0-byte JSON so optional:true does not emit it to the report
-        [ -s "${gene_id}.FADE.json" ] || rm -f "${gene_id}.FADE.json"
+        [ -s "${gene_id}.${direction}.FADE.json" ] || rm -f "${gene_id}.${direction}.FADE.json"
         """
     } else {
         """
@@ -79,10 +79,10 @@ process FADE_RUN {
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\
             ${mcmc_args} \\
-            --output    "${gene_id}.FADE.json" \\
+            --output    "${gene_id}.${direction}.FADE.json" \\
         || echo "FADE failed for ${gene_id} (${direction}), skipping"
         # Remove 0-byte JSON so optional:true does not emit it to the report
-        [ -s "${gene_id}.FADE.json" ] || rm -f "${gene_id}.FADE.json"
+        [ -s "${gene_id}.${direction}.FADE.json" ] || rm -f "${gene_id}.${direction}.FADE.json"
         """
     }
 }

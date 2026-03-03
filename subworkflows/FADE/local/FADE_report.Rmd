@@ -90,7 +90,7 @@ cat(sprintf("Found %d FADE result files.\n", length(json_files)))
 AA_LETTERS <- strsplit("ACDEFGHIKLMNPQRSTVWY", "")[[1]]
 
 parse_fade_json <- function(path) {
-  gene_id <- sub("\\.FADE\\.json$", "", basename(path))
+  gene_id <- sub("\\.(top|bottom)\\.FADE\\.json$", "", basename(path))
 
   tryCatch({
     js <- fromJSON(path, simplifyVector = FALSE)
@@ -293,7 +293,7 @@ if (nrow(sig_genes) == 0) {
       x = "Target amino acid",
       y = "Number of significant site × AA combinations"
     ) +
-    theme_bw(base_size = 13)
+    theme_bw(base_size = 16)
 }
 ```
 
@@ -343,7 +343,7 @@ if (n_sig < params$min_genes_hmap) {
       x = "Target amino acid",
       y = NULL
     ) +
-    theme_bw(base_size = 12) +
+    theme_bw(base_size = 16) +
     theme(
       axis.text.y = element_text(size = 8),
       legend.position = "right"

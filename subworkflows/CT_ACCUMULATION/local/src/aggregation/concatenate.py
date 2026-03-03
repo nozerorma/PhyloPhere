@@ -189,9 +189,11 @@ def read_metadata_caas(metadata_file):
             pattern_idx   = _idx(['Pattern', 'pattern'])
             amino_idx     = _idx(['AminoConv', 'amino_conv'], required=False)
             pvalue_idx    = _idx(['Pvalue', 'pvalue'])
-            sig_idx       = _idx(['sig_both', 'isSignificant', 'is_significant'])
-            pboot_idx     = _idx(['Pvalue.boot', 'pvalue_boot'], required=False)
-            group_idx     = _idx(['CAAP_Group', 'caap_group', 'Group', 'group'], required=False)
+            sig_idx          = _idx(['sig_both', 'isSignificant', 'is_significant'])
+            pboot_idx        = _idx(['Pvalue.boot', 'pvalue_boot'], required=False)
+            group_idx        = _idx(['CAAP_Group', 'caap_group', 'Group', 'group'], required=False)
+            conserved_idx    = _idx(['IsConserved', 'is_conserved_meta'], required=False)
+            asr_conserved_idx = _idx(['ASR_ConsAntiCAAS', 'asr_is_conserved'], required=False)
 
             for line in f:
                 line = line.strip()
@@ -221,6 +223,17 @@ def read_metadata_caas(metadata_file):
                 except (IndexError, ValueError) as e:
                     logging.warning(f"Skipping malformed meta_caas line: {line[:120]} — {e}")
                     continue
+
+                # Exclude GS0 entries.
+                if group.upper() == 'GS0':
+                    continue
+
+                # Exclude dubious-conserved positions: is_conserved_meta=TRUE but asr_is_conserved=FALSE.
+                if conserved_idx is not None and asr_conserved_idx is not None:
+                    _is_cons = _as_bool(parts[conserved_idx]) if conserved_idx < len(parts) else False
+                    _is_asr  = _as_bool(parts[asr_conserved_idx]) if asr_conserved_idx < len(parts) else True
+                    if _is_cons and not _is_asr:
+                        continue
 
                 metadata[group][gene][msa_pos] = {
                     'tag': tag,

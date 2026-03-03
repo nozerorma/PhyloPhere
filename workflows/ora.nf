@@ -73,7 +73,7 @@ workflow ORA {
         // IMPORTANT: Channel.empty().collect() never emits in Nextflow DSL2 (it silently
         // completes without producing an item), so .map{} fallbacks after .collect() are
         // unreliable for empty channels. Use an upfront if(channel) guard instead,
-        // matching the same pattern used by CT_POSTPROC for its discovery_input.
+        // matching the same pattern used by CT_POSTPROC for its disambiguation_input.
         def gene_list_files_ch
         if (gene_lists_input_channel) {
             gene_list_files_ch = gene_lists_input_channel

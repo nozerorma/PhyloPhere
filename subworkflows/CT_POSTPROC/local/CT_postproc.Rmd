@@ -15,6 +15,7 @@ params:
   filter_summary_file: NULL
   filter_dir: NULL
   gene_ensembl_file: NULL
+  gene_stats_file: NULL
   processing_mode: "exploratory"
   output_dir: "ct_postproc"
   extreme_threshold: 0.99
@@ -43,7 +44,6 @@ suppressPackageStartupMessages({
   library(scales)
   library(ggplot2)
   library(forcats)
-  library(ggvenn)
   library(knitr)
   library(kableExtra)
   library(paletteer)
@@ -118,6 +118,7 @@ set.seed(seed_val)
 discovery_file <- params$discovery_file
 filter_summary_file <- params$filter_summary_file
 gene_ensembl_file <- params$gene_ensembl_file
+gene_stats_file <- params$gene_stats_file
 processing_mode <- params$processing_mode
 extreme_threshold <- params$extreme_threshold
 iqr_multiplier <- params$iqr_multiplier
@@ -136,12 +137,14 @@ outliers_dir <- "outliers"
 cluster_dir <- "clusters"
 summary_stats_dir <- "summary_statistics"
 disambig_dir <- "disambiguation_characterization"
+overlap_out_dir <- file.path(disambig_dir, "overlap_figures")
 
 createDir(ct_postproc_dir)
 createDir(outliers_dir)
 createDir(cluster_dir)
 createDir(summary_stats_dir)
 createDir(disambig_dir)
+createDir(overlap_out_dir)
 
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
@@ -174,12 +177,12 @@ cat("Gene filtering:", gene_filter_mode, "\n")
 cat("Extreme threshold:", extreme_threshold, paste0("(top ", 100*(1-extreme_threshold), "%)"), "\n")
 cat("IQR multiplier:", iqr_multiplier, "\n")
 cat("Generate Manhattan plots:", generate_manhattan, "\n")
-if (generate_manhattan) cat("Manhattan min density:", manhattan_min_density, "\n")
 
 cat("\nInput files:\n")
 cat("  Discovery:", discovery_file, "\n")
 cat("  Filter summary:", filter_summary_file, "\n")
-cat("  Gene ensembl:", gene_ensembl_file, "\n\n")
+cat("  Gene ensembl:", gene_ensembl_file, "\n")
+cat("  Gene stats:", ifelse(is.null(gene_stats_file) || is.na(gene_stats_file), "Not provided (will recompute)", gene_stats_file), "\n\n")
 
 raw_discovery <- read_delim(discovery_file, delim = "\t", show_col_types = FALSE)
 discovery_std <- normalize_disambig_schema(raw_discovery)
@@ -241,7 +244,7 @@ p_conserved_meta_comp <- ggplot(conserved_meta_comp, aes(x = is_conserved_meta, 
     x = "is_conserved_meta",
     y = "Proportion of CAAS"
   ) +
-  theme_minimal(base_size = 12) +
+  theme_minimal(base_size = 16) +
   theme(legend.position = "none")
 
 print(p_conserved_meta_comp)
@@ -251,51 +254,80 @@ ggsave(file.path(disambig_dir, "is_conserved_meta_proportion_after_pruning.png")
 ## Outlier Gene Detection
 
 ```{r outlier_detection, fig.height=10, fig.width=14}
-has_caap_group <- TRUE
-cat("Unified grouping mode enabled (CAAP_Group always present)\n")
-cat("Groups found:", paste(sort(unique(discovery_df$CAAP_Group)), collapse=", "), "\n")
+# Load gene statistics from precomputed file or compute fallback
+gene_summary_annotated <- NULL
 
-gene_summary <- discovery_df %>%
-  group_by(CAAP_Group, Gene) %>%
-  summarise(
-    n_CAAS = n(),
-    Length = first(Length),
-    n_CAAS_per_length = n() / first(Length) * 100,
-    .groups = 'drop'
-  )
-
-iqr_thresholds <- gene_summary %>%
-  group_by(CAAP_Group) %>%
-  summarise(
-    Q1 = quantile(n_CAAS, 0.25, na.rm = TRUE),
-    Q3 = quantile(n_CAAS, 0.75, na.rm = TRUE),
-    IQR_val = Q3 - Q1,
-    threshold_dubious = Q3 + iqr_multiplier * IQR_val,
-    .groups = 'drop'
-  )
-
-extreme_thresholds <- gene_summary %>%
-  group_by(CAAP_Group) %>%
-  summarise(
-    threshold_extreme = quantile(n_CAAS_per_length, extreme_threshold, na.rm = TRUE),
-    .groups = 'drop'
-  )
-
-gene_summary_annotated <- gene_summary %>%
-  left_join(extreme_thresholds, by = 'CAAP_Group') %>%
-  left_join(iqr_thresholds, by = 'CAAP_Group') %>%
-  mutate(
-    Extreme = n_CAAS_per_length >= threshold_extreme,
-    Dubious = n_CAAS >= threshold_dubious,
-    Category = case_when(
-      Extreme & Dubious ~ "Both",
-      Extreme ~ "Extreme",
-      Dubious ~ "Dubious",
-      TRUE ~ "Normal"
+if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_stats_file)) {
+  cat("Loading precomputed gene statistics from:", gene_stats_file, "\n")
+  gene_summary_annotated <- read_tsv(gene_stats_file, show_col_types = FALSE)
+  
+  # Ensure required columns exist and rename for compatibility
+  if ("CAAP_Group" %in% names(gene_summary_annotated)) {
+    colnames(gene_summary_annotated)[colnames(gene_summary_annotated) == "CAAP_Group"] <- "CAAP_Group"
+  } else if ("Trait" %in% names(gene_summary_annotated)) {
+    gene_summary_annotated$CAAP_Group <- "US"  # default for non-CAAP mode
+  }
+  
+  cat("Loaded gene statistics for", nrow(gene_summary_annotated), "genes\n")
+  
+} else {
+  cat("Warning: Gene stats file not provided or not found. Computing fallback statistics...\n")
+  
+  # Fallback: recompute (but this may have the original bugs)
+  has_caap_group <- TRUE
+  cat("Unified grouping mode enabled (CAAP_Group always present)\n")
+  cat("Groups found:", paste(sort(unique(discovery_df$CAAP_Group)), collapse=", "), "\n")
+  
+  gene_summary <- discovery_df %>%
+    group_by(CAAP_Group, Gene) %>%
+    summarise(
+      n_CAAS = n(),
+      Length = first(Length),
+      n_CAAS_per_length = n() / first(Length) * 100,
+      .groups = 'drop'
     )
-  ) %>%
-  arrange(desc(n_CAAS))
+  
+  iqr_thresholds <- gene_summary %>%
+    group_by(CAAP_Group) %>%
+    summarise(
+      Q1 = quantile(n_CAAS, 0.25, na.rm = TRUE),
+      Q3 = quantile(n_CAAS, 0.75, na.rm = TRUE),
+      IQR_val = Q3 - Q1,
+      threshold_dubious = Q3 + iqr_multiplier * IQR_val,
+      .groups = 'drop'
+    )
+  
+  extreme_thresholds <- gene_summary %>%
+    group_by(CAAP_Group) %>%
+    summarise(
+      threshold_extreme = quantile(n_CAAS_per_length, extreme_threshold, na.rm = TRUE),
+      .groups = 'drop'
+    )
+  
+  gene_summary_annotated <- gene_summary %>%
+    left_join(extreme_thresholds, by = 'CAAP_Group') %>%
+    left_join(iqr_thresholds, by = 'CAAP_Group') %>%
+    mutate(
+      Extreme = n_CAAS_per_length >= threshold_extreme,
+      Dubious = n_CAAS >= threshold_dubious,
+      Category = case_when(
+        Extreme & Dubious ~ "Both",
+        Extreme ~ "Extreme",
+        Dubious ~ "Dubious",
+        TRUE ~ "Normal"
+      )
+    ) %>%
+    arrange(desc(n_CAAS))
+}
 
+# Ensure CAAP_Group column exists for plotting
+if (!"CAAP_Group" %in% names(gene_summary_annotated)) {
+  gene_summary_annotated$CAAP_Group <- "US"
+}
+
+cat("Groups found:", paste(sort(unique(gene_summary_annotated$CAAP_Group)), collapse=", "), "\n")
+
+# Generate histograms with increased font sizes for slides
 p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = Category)) +
   geom_histogram(binwidth = 0.05, color = "black", alpha = 0.8) +
   geom_vline(
@@ -309,10 +341,17 @@ p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = Category))
   labs(title = "CAAP Count Distribution by Group",
        subtitle = "Dubious threshold (Q3 + 3×IQR) shown as dashed line",
        x = "Number of CAAP Positions", y = "Gene Count") +
-  theme_minimal() +
-  theme(legend.position = "bottom", plot.title = element_text(face = "bold", size = 14), axis.title = element_text(size = 12))
+  theme_minimal(base_size = 16) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 14),
+    axis.title = element_text(size = 15),
+    strip.text = element_text(face = "bold", size = 15)
+  )
 
-p_zoom_gross <- p_gross_dist + coord_cartesian(ylim = c(0, 100)) + labs(title = "Zoomed View (y ≤ 100)")
+p_zoom_gross <- p_gross_dist + coord_cartesian(ylim = c(0, 100)) + 
+  labs(title = "Zoomed View (y ≤ 100)")
 
 p_density_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS_per_length, fill = Category)) +
   geom_histogram(binwidth = 0.05, color = "black", alpha = 0.8) +
@@ -327,10 +366,17 @@ p_density_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS_per_length, fill
   labs(title = "CAAP Density Distribution by Group",
        subtitle = paste0("Top ", 100*(1-extreme_threshold), "% density threshold shown as dashed line"),
        x = "CAAP Density (positions / gene length)", y = "Gene Count") +
-  theme_minimal() +
-  theme(legend.position = "bottom", plot.title = element_text(face = "bold", size = 14), axis.title = element_text(size = 12))
+  theme_minimal(base_size = 16) +
+  theme(
+    legend.position = "bottom",
+    plot.title = element_text(face = "bold", size = 18),
+    plot.subtitle = element_text(size = 14),
+    axis.title = element_text(size = 15),
+    strip.text = element_text(face = "bold", size = 15)
+  )
 
-p_zoom_density <- p_density_dist + coord_cartesian(ylim = c(0, 50)) + labs(title = "Zoomed View (y ≤ 50)")
+p_zoom_density <- p_density_dist + coord_cartesian(ylim = c(0, 50)) + 
+  labs(title = "Zoomed View (y ≤ 50)")
 
 combined_outlier_plot <- p_gross_dist / p_density_dist
 combined_zoomed_plot <- p_zoom_gross / p_zoom_density
@@ -366,13 +412,13 @@ if (nrow(removed_cat_summary) > 0) {
       x = "Removal Category",
       y = "Gene Count"
     ) +
-    theme_minimal() +
+    theme_minimal(base_size = 16) +
     theme(
       legend.position  = "none",
-      plot.title       = element_text(face = "bold", size = 14),
-      plot.subtitle    = element_text(size = 10),
-      axis.title       = element_text(size = 12),
-      strip.text       = element_text(face = "bold")
+      plot.title       = element_text(face = "bold", size = 18),
+      plot.subtitle    = element_text(size = 14),
+      axis.title       = element_text(size = 15),
+      strip.text       = element_text(face = "bold", size = 15)
     )
 
   print(p_removed_cats)
@@ -461,8 +507,8 @@ if (nrow(filter_summary) > 1) {
       labs(title = "Discarded CAAS Positions by Parameter Combination",
            subtitle = "Grouped by CAAP group - minlen/maxcaas combinations",
            x = "Parameter Combination (minlen/maxcaas)", y = "Positions Discarded", fill = "CAAP Group") +
-      theme_minimal() +
-      theme(legend.position = "right", plot.title = element_text(face = "bold", size = 14), axis.title = element_text(size = 12), axis.text.x = element_text(angle = 45, hjust = 1))
+      theme_minimal(base_size = 16) +
+      theme(legend.position = "right", plot.title = element_text(face = "bold", size = 18), axis.title = element_text(size = 15), axis.text.x = element_text(angle = 45, hjust = 1))
   } else {
     p_param_sweep <- ggplot(filter_summary, aes(x = factor(Minlen), y = DiscardedCount, color = factor(Maxcaas), group = factor(Maxcaas))) +
       geom_point(size = 4) +
@@ -471,8 +517,8 @@ if (nrow(filter_summary) > 1) {
       labs(title = "Discarded CAAS Positions by Parameter Combination",
            subtitle = "Effect of minimum cluster length and maximum density threshold",
            x = "Minimum Cluster Length (minlen)", y = "Positions Discarded", color = "Max Density") +
-      theme_minimal() +
-      theme(legend.position = "right", plot.title = element_text(face = "bold", size = 14), axis.title = element_text(size = 12))
+      theme_minimal(base_size = 16) +
+      theme(legend.position = "right", plot.title = element_text(face = "bold", size = 18), axis.title = element_text(size = 15))
   }
 
   print(p_param_sweep)
@@ -543,7 +589,7 @@ if (processing_mode == 'exploratory' && nrow(filter_summary) > 1) {
             scale_fill_paletteer_d("ggthemes::Tableau_10") +
             scale_y_continuous(labels = scales::percent) +
             labs(title = sprintf("Spatial Clustering: %s", param_label), x = "Group", y = "Percentage", fill = "Cluster Type") +
-            theme_minimal(base_size = 12) +
+            theme_minimal(base_size = 16) +
             theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
 
           print(p_spatial)
@@ -614,11 +660,102 @@ if (!is.na(removed_genes_file)) {
 
 removal_events <- bind_rows(precluster_events, cluster_events, gene_events)
 write_tsv(removal_events, file.path(disambig_dir, "removal_events.tsv"))
+
+# ── GS0 exclusion for all downstream section B characterization ──────────────
+# GS0 is a random-baseline control kept in section A for reference.
+# From section B onward it is excluded; only US, GS1–GS4 are analysed.
+# Additionally, positions where is_conserved_meta=TRUE but asr_is_conserved=FALSE
+# are removed: these are "dubious-conserved" positions where the meta annotation
+# indicates conservation but ASR does not support it.
+discovery_b_std <- discovery_std %>%
+  filter(toupper(caap_group) != "GS0") %>%
+  filter(!(is_conserved_meta & !asr_is_conserved))
+
+n_gs0_removed       <- sum(toupper(discovery_std$caap_group) == "GS0")
+n_dubious_removed   <- discovery_std %>%
+  filter(toupper(caap_group) != "GS0") %>%
+  filter(is_conserved_meta & !asr_is_conserved) %>% nrow()
+cat("Section B filters:\n")
+cat("  GS0 rows removed:", n_gs0_removed, "\n")
+cat("  Dubious-conserved rows removed (is_conserved_meta=T & asr_is_conserved=F):", n_dubious_removed, "\n")
+cat("Section B analysis uses", nrow(discovery_b_std), "positions from groups:",
+    paste(sort(unique(toupper(discovery_b_std$caap_group))), collapse = ", "), "\n\n")
+```
+
+## B.1b Three focal relationship sets
+
+```{r three_focal_sets}
+# Three biologically relevant US / GS nondivergence sets
+# (all computed from n_dubious_removed — GS0 excluded)
+
+# For each site we need to know which groups it is present in and whether it is nondivergent.
+# We collapse to one row per (site_id, gene, position) with group-level presence/nondiv flags.
+site_flags_b <- discovery_b_std %>%
+  mutate(
+    caap_group_up = toupper(caap_group),
+    is_nondiv     = pattern_type != "divergent"
+  ) %>%
+  group_by(site_id, gene, position) %>%
+  summarise(
+    us_present    = any(caap_group_up == "US",  na.rm = TRUE),
+    us_nondiv     = any(caap_group_up == "US"  & is_nondiv, na.rm = TRUE),
+    gs_nondiv     = any(caap_group_up != "US"  & is_nondiv, na.rm = TRUE),
+    us_divergent  = any(caap_group_up == "US"  & !is_nondiv, na.rm = TRUE),
+    sig_both_any  = any(sig_both, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    set_us_nondiv_gs_nondiv   = us_nondiv  & gs_nondiv,
+    set_us_div_gs_nondiv      = us_divergent & gs_nondiv,
+    set_no_us_gs_nondiv       = !us_present  & gs_nondiv
+  )
+
+focal_sets_summary <- tibble(
+  Set = c(
+    "US nondiv + GS nondiv",
+    "US div + GS nondiv",
+    "No US + GS nondiv"
+  ),
+  Description = c(
+    "Position nondivergent in US AND at least one GS group (GS1-4)",
+    "Position divergent in US but nondivergent in at least one GS group (GS1-4)",
+    "No US row; position nondivergent in at least one GS group (GS1-4)"
+  ),
+  Positions_total = c(
+    sum(site_flags_b$set_us_nondiv_gs_nondiv),
+    sum(site_flags_b$set_us_div_gs_nondiv),
+    sum(site_flags_b$set_no_us_gs_nondiv)
+  ),
+  Genes_total = c(
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_nondiv_gs_nondiv]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_div_gs_nondiv]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_no_us_gs_nondiv])
+  ),
+  Positions_sig_both = c(
+    sum(site_flags_b$set_us_nondiv_gs_nondiv  & site_flags_b$sig_both_any),
+    sum(site_flags_b$set_us_div_gs_nondiv     & site_flags_b$sig_both_any),
+    sum(site_flags_b$set_no_us_gs_nondiv      & site_flags_b$sig_both_any)
+  ),
+  Genes_sig_both = c(
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_nondiv_gs_nondiv  & site_flags_b$sig_both_any]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_div_gs_nondiv     & site_flags_b$sig_both_any]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_no_us_gs_nondiv      & site_flags_b$sig_both_any])
+  )
+)
+
+kable(focal_sets_summary,
+      caption = "Three focal US/GS nondivergence sets (GS0 excluded)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+write_tsv(focal_sets_summary, file.path(disambig_dir, "focal_sets_summary.tsv"))
+cat("✓ Focal sets summary exported\n")
 ```
 
 ## B.2 Removed positions by `pattern_type` and significance
 
 ```{r removed_pattern_sig}
+# removal_events itself is GS0-inclusive (diagnostic), but subsequent
+# characterisation uses discovery_b_std (GS0 excluded).
 if (nrow(removal_events) > 0) {
   by_pattern <- removal_events %>% count(RemovalStage, pattern_type, sort = TRUE)
   by_sig <- removal_events %>%
@@ -631,11 +768,33 @@ if (nrow(removal_events) > 0) {
   p_rm <- ggplot(by_pattern, aes(pattern_type, n, fill = RemovalStage)) +
     geom_col(position = "dodge") +
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
-    theme_minimal() +
-    labs(title = "Removed positions: pattern_type composition", x = "pattern_type") +
+    theme_minimal(base_size = 16) +
+    labs(title = "Removed positions: pattern_type composition (all)", x = "pattern_type") +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
   print(p_rm)
-  ggsave(file.path(disambig_dir, "removed_pattern_type.png"), p_rm, width = 10, height = 5)
+  ggsave(file.path(disambig_dir, "removed_pattern_type_all.png"), p_rm, width = 10, height = 5)
+  
+  # Focus on significant-both positions only
+  removal_sig_both <- removal_events %>% filter(sig_both)
+  
+  if (nrow(removal_sig_both) > 0) {
+    by_pattern_sig_both <- removal_sig_both %>% count(RemovalStage, pattern_type, sort = TRUE)
+    
+    kable(by_pattern_sig_both, caption = "Removed positions by stage and pattern_type (SIGNIFICANT-BOTH only)") %>% kable_styling()
+    
+    p_rm_sig_both <- ggplot(by_pattern_sig_both, aes(pattern_type, n, fill = RemovalStage)) +
+      geom_col(position = "dodge") +
+      scale_fill_paletteer_d("ggthemes::Tableau_10") +
+      theme_minimal(base_size = 16) +
+      labs(title = "Removed positions: pattern_type composition (SIGNIFICANT-BOTH only)", 
+           subtitle = paste0("n = ", sum(by_pattern_sig_both$n), " significant-both removed positions"),
+           x = "pattern_type") +
+      theme(axis.text.x = element_text(angle = 45, hjust = 1))
+    print(p_rm_sig_both)
+    ggsave(file.path(disambig_dir, "removed_pattern_type_sig_both.png"), p_rm_sig_both, width = 10, height = 5)
+  } else {
+    cat("No significant-both positions in removal events.\n")
+  }
 }
 ```
 
@@ -643,13 +802,12 @@ if (nrow(removal_events) > 0) {
 
 ```{r pvalue_removed_vs_retained, fig.width=12, fig.height=9}
 # Build a status-annotated dataset:
-# every position from discovery_std gets "removed" if it appears in removal_events,
-# "retained" otherwise.  We keep the most severe removal stage per site to avoid
-# duplicates when a position was caught by more than one filter.
-if (nrow(discovery_std) > 0) {
+# every position from discovery_b_std (GS0 excluded) gets "removed" if it
+# appears in removal_events, "retained" otherwise.
+if (nrow(discovery_b_std) > 0) {
   removed_site_ids <- if (nrow(removal_events) > 0) unique(removal_events$site_id) else character(0)
 
-  pval_df <- discovery_std %>%
+  pval_df <- discovery_b_std %>%
     mutate(
       filter_status = if_else(site_id %in% removed_site_ids, "removed", "retained"),
       filter_status = factor(filter_status, levels = c("retained", "removed"))
@@ -693,7 +851,7 @@ if (nrow(discovery_std) > 0) {
       ),
       x = "p-value", y = "Density"
     ) +
-    theme_minimal(base_size = 12) +
+    theme_minimal(base_size = 16) +
     theme(
       legend.position  = "bottom",
       strip.text       = element_text(face = "bold"),
@@ -757,51 +915,209 @@ if (nrow(discovery_std) > 0) {
 ## B.3 Global change-pattern and significance characterization
 
 ```{r global_pattern_sig}
-pattern_sig <- discovery_std %>%
+# Uses discovery_b_std: GS0 excluded
+pattern_sig <- discovery_b_std %>%
   group_by(pattern_type) %>%
   summarise(n = n(), sig_hyp = sum(sig_hyp, na.rm = TRUE), sig_perm = sum(sig_perm, na.rm = TRUE), sig_both = sum(sig_both, na.rm = TRUE), .groups = "drop") %>%
   arrange(desc(n))
 
-pattern_by_group <- discovery_std %>% count(caap_group, pattern_type, sort = TRUE)
+pattern_by_group <- discovery_b_std %>% count(caap_group, pattern_type, sort = TRUE)
 
-kable(pattern_sig, caption = "pattern_type counts and significance (all three criteria)") %>% kable_styling()
-kable(pattern_by_group, caption = "pattern_type by CAAP group") %>% kable_styling()
+kable(pattern_sig, caption = "pattern_type counts and significance (all three criteria — GS0 excluded)") %>% kable_styling()
+kable(pattern_by_group, caption = "pattern_type by CAAP group (GS0 excluded)") %>% kable_styling()
 
 pg <- ggplot(pattern_by_group, aes(pattern_type, n, fill = caap_group)) +
   geom_col(position = "dodge") +
   scale_fill_paletteer_d("ggthemes::Tableau_10") +
   theme_minimal() +
-  labs(title = "pattern_type across CAAP groups", x = "pattern_type", y = "n") +
+  labs(title = "pattern_type across CAAP groups (all)", x = "pattern_type", y = "n") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 print(pg)
+ggsave(file.path(disambig_dir, "pattern_by_caap_group_all.png"), pg, width = 10, height = 6)
 ```
 
-## B.4 Convergent overlap across groups and genes
+## B.3b Enhanced pattern_type analysis: Significant-both focus
 
-```{r convergent_overlap}
-conv_sites <- discovery_std %>% filter(pattern_type == "convergent") %>% distinct(site_id, gene, caap_group)
+```{r pattern_sig_both_focus}
+# Focus exclusively on significant-both cases (GS0 excluded via discovery_b_std)
+pattern_sig_both <- discovery_b_std %>%
+  filter(sig_both) %>%
+  group_by(pattern_type) %>%
+  summarise(n_sig_both = n(), .groups = "drop") %>%
+  arrange(desc(n_sig_both))
 
-if (nrow(conv_sites) > 0) {
-  overlap_site_pairs <- expand_grid(g1 = sort(unique(conv_sites$caap_group)), g2 = sort(unique(conv_sites$caap_group))) %>%
-    rowwise() %>%
-    mutate(jaccard = {
-      s1 <- conv_sites %>% filter(caap_group == g1) %>% pull(site_id) %>% unique()
-      s2 <- conv_sites %>% filter(caap_group == g2) %>% pull(site_id) %>% unique()
-      if (length(union(s1, s2)) == 0) 0 else length(intersect(s1, s2)) / length(union(s1, s2))
-    }) %>% ungroup()
+pattern_by_group_sig_both <- discovery_b_std %>%
+  filter(sig_both) %>%
+  count(caap_group, pattern_type, sort = TRUE)
 
-  overlap_gene_pairs <- expand_grid(g1 = sort(unique(conv_sites$caap_group)), g2 = sort(unique(conv_sites$caap_group))) %>%
-    rowwise() %>%
-    mutate(jaccard = {
-      s1 <- conv_sites %>% filter(caap_group == g1) %>% pull(gene) %>% unique()
-      s2 <- conv_sites %>% filter(caap_group == g2) %>% pull(gene) %>% unique()
-      if (length(union(s1, s2)) == 0) 0 else length(intersect(s1, s2)) / length(union(s1, s2))
-    }) %>% ungroup()
+kable(pattern_sig_both, caption = "pattern_type counts for SIGNIFICANT-BOTH only") %>% kable_styling()
+kable(pattern_by_group_sig_both, caption = "pattern_type by CAAP group (SIGNIFICANT-BOTH only)") %>% kable_styling()
 
-  p_site_hm <- ggplot(overlap_site_pairs, aes(g1, g2, fill = jaccard)) + geom_tile() + scale_fill_viridis_c(limits = c(0,1)) + theme_minimal() + labs(title = "Convergent-site overlap (Jaccard)")
-  p_gene_hm <- ggplot(overlap_gene_pairs, aes(g1, g2, fill = jaccard)) + geom_tile() + scale_fill_viridis_c(limits = c(0,1)) + theme_minimal() + labs(title = "Convergent-gene overlap (Jaccard)")
-  print(p_site_hm + p_gene_hm)
+if (nrow(pattern_by_group_sig_both) > 0) {
+  pg_sig_both <- ggplot(pattern_by_group_sig_both, aes(pattern_type, n, fill = caap_group)) +
+    geom_col(position = "dodge") +
+    scale_fill_paletteer_d("ggthemes::Tableau_10") +
+    theme_minimal() +
+    labs(title = "pattern_type across CAAP groups (SIGNIFICANT-BOTH only)", 
+         subtitle = paste0("n = ", sum(pattern_by_group_sig_both$n), " significant-both positions"),
+         x = "pattern_type", y = "n") +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  print(pg_sig_both)
+  ggsave(file.path(disambig_dir, "pattern_by_caap_group_sig_both.png"), pg_sig_both, width = 10, height = 6)
+} else {
+  cat("No significant-both positions found for pattern_type analysis.\n")
 }
+```
+
+## B.4 Overlap across CAAP groupings (gene & position level)
+
+For each of four significance subsets (**all**, **sig_hyp** p≤0.05, **sig_perm** p≤0.05, **sig_both**)
+two composite figures are produced: one at the **position** level (site_id = gene@position) and one at
+the **gene** level. Each figure shows a Venn diagram of group membership across US and GS1–GS4.
+
+All figures are also saved to `disambiguation_characterization/overlap_figures/`.
+
+```{r overlap_helper_functions, include=FALSE}
+# Load additional packages for Venn diagrams
+library(VennDiagram)
+library(ggVennDiagram)
+
+# ---- Helper: create group sets for Venn diagrams ------------------------------------
+create_group_sets <- function(df, id_col) {
+  groups <- sort(unique(df$caap_group))
+  setNames(lapply(groups, function(g) unique(df[[id_col]][df$caap_group == g])), groups)
+}
+
+# ---- Helper: build + save Venn diagram ------------------------------------------
+make_overlap_plot <- function(df, id_col, level_label, subset_label, out_dir) {
+  if (nrow(df) == 0) {
+    message("  [skip] No rows for subset='", subset_label, "' level='", level_label, "'")
+    return(invisible(NULL))
+  }
+  groups <- sort(unique(df$caap_group))
+  if (length(groups) < 2) {
+    message("  [skip] Only one group for subset='", subset_label, "' level='", level_label, "'")
+    return(invisible(NULL))
+  }
+  if (length(groups) > 5) {
+    message("  [skip Venn] ", length(groups), " groups — ggVennDiagram requires 2-5.")
+    return(invisible(NULL))
+  }
+
+  group_sets <- create_group_sets(df, id_col)
+
+  venn_plot <- tryCatch({
+    ggVennDiagram(group_sets, label_alpha = 0.8, set_size = 5) +
+      scale_fill_gradient(low = "lightblue", high = "darkblue", name = "Count") +
+      labs(
+        title    = paste0(level_label, "-level overlap  [", subset_label, "]"),
+        subtitle = paste0("n = ", n_distinct(df[[id_col]]), " unique ", tolower(level_label), "s")
+      ) +
+      theme(
+        plot.title    = element_text(face = "bold", size = 20),
+        plot.subtitle = element_text(size = 15)
+      )
+  }, error = function(e) {
+    message("Venn diagram generation failed: ", e$message)
+    NULL
+  })
+
+  if (is.null(venn_plot)) return(invisible(NULL))
+
+  png_name <- paste0("overlap_", tolower(level_label), "_", subset_label, ".png")
+  ggsave(file.path(out_dir, png_name), venn_plot, width = 14, height = 10, dpi = 320)
+  invisible(venn_plot)
+}
+```
+
+```{r group_overlap_analysis_setup}
+# Four significance subsets — GS0 excluded (discovery_b_std)
+overlap_subsets <- list(
+  all      = discovery_b_std,
+  sig_hyp  = discovery_b_std %>% filter(sig_hyp),
+  sig_perm = discovery_b_std %>% filter(sig_perm),
+  sig_both = discovery_b_std %>% filter(sig_both)
+)
+```
+
+### Subset: all
+
+```{r overlap_all, fig.width=14, fig.height=10}
+subset_name <- "all"
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
+
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
+
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
+if (!is.null(p_pos)) print(p_pos)
+```
+
+```{r overlap_all_gene, fig.width=14, fig.height=10}
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
+if (!is.null(p_gene)) print(p_gene)
+```
+
+### Subset: sig_hyp
+
+```{r overlap_sig_hyp, fig.width=14, fig.height=10}
+subset_name <- "sig_hyp"
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
+
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
+
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
+if (!is.null(p_pos)) print(p_pos)
+```
+
+```{r overlap_sig_hyp_gene, fig.width=14, fig.height=10}
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
+if (!is.null(p_gene)) print(p_gene)
+```
+
+### Subset: sig_perm
+
+```{r overlap_sig_perm, fig.width=14, fig.height=10}
+subset_name <- "sig_perm"
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
+
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
+
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
+if (!is.null(p_pos)) print(p_pos)
+```
+
+```{r overlap_sig_perm_gene, fig.width=14, fig.height=10}
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
+if (!is.null(p_gene)) print(p_gene)
+```
+
+### Subset: sig_both
+
+```{r overlap_sig_both, fig.width=14, fig.height=10}
+subset_name <- "sig_both"
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
+
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
+
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
+if (!is.null(p_pos)) print(p_pos)
+```
+
+```{r overlap_sig_both_gene, fig.width=14, fig.height=10}
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
+if (!is.null(p_gene)) print(p_gene)
 ```
 
 ## B.5 US/GS non-divergence/divergence relations (upset-like + structured exports)
@@ -833,9 +1149,15 @@ plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file) {
 
   p_bar <- ggplot(plot_df, aes(x = combo_id, y = n)) +
     geom_col(fill = tableau_10[["blue"]], color = "black", linewidth = 0.2) +
+    geom_text(aes(label = n), vjust = -0.4, size = 4.5) +
     labs(title = title_txt, x = NULL, y = "Intersection size") +
-    theme_minimal(base_size = 10) +
-    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank())
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x  = element_blank(),
+      axis.ticks.x = element_blank(),
+      plot.title   = element_text(face = "bold", size = 15),
+      axis.title   = element_text(size = 13)
+    )
 
   mat_long <- plot_df %>%
     select(combo_id, all_of(set_cols)) %>%
@@ -858,12 +1180,18 @@ plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file) {
     geom_tile(color = "white", linewidth = 0.3) +
     scale_fill_manual(values = c(`TRUE` = tableau_10[["vermillion"]], `FALSE` = "#eeeeee")) +
     labs(x = "Intersections", y = "Set") +
-    theme_minimal(base_size = 10) +
-    theme(legend.position = "none", axis.text.x = element_blank(), axis.ticks.x = element_blank())
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position  = "none",
+      axis.text.x      = element_blank(),
+      axis.ticks.x     = element_blank(),
+      axis.text.y      = element_text(size = 12),
+      axis.title       = element_text(size = 13)
+    )
 
   p <- p_bar / p_mat + plot_layout(heights = c(2.2, 1.3))
   print(p)
-  ggsave(out_file, p, width = 13, height = 7, dpi = 320)
+  ggsave(out_file, p, width = 16, height = 9, dpi = 320)
 }
 
 write_export_pair <- function(df, key, txt_dir, tsv_dir) {
@@ -892,7 +1220,9 @@ createDir(us_gs_tsv_dir)
 gs_all <- c("GS0", "GS1", "GS2", "GS3", "GS4")
 gs_core <- c("GS1", "GS2", "GS3", "GS4")
 
-site_group <- discovery_std %>%
+# B.5 uses discovery_b_std (GS0 excluded) as input for all site_group logic.
+# GS0 columns (nondiv_GS0, present_GS0, etc.) will be FALSE / absent by default.
+site_group <- discovery_b_std %>%
   mutate(
     caap_group = toupper(caap_group),
     is_nondiv = pattern_type != "divergent"
@@ -967,10 +1297,34 @@ site_matrix <- site_matrix %>%
     gs_any_nondiv = rowSums(across(all_of(paste0("nondiv_", gs_all)), as.integer), na.rm = TRUE) > 0,
     gs_any_nondiv_core = rowSums(across(all_of(paste0("nondiv_", gs_core)), as.integer), na.rm = TRUE) > 0,
     gs0_poisoned = present_GS0,
+    
+    # Enhanced exclusion criteria - positions to EXCLUDE from us_gs union:
+    # 1. div_us + any_div_gs1-4 + nondiv_gs0
+    exclude_case1 = us_divergent & gs_div_grp & gs0_nondiv,
+    # 2. no_us + gs0_only (no other GS activity)
+    exclude_case2 = !us_present & present_GS0 & !rowSums(across(all_of(paste0("present_", gs_core)), as.integer), na.rm = TRUE) > 0,
+    # 3. no_us + any_div_gs1-4 + nondiv_gs0
+    exclude_case3 = !us_present & gs_div_grp & gs0_nondiv,
+    
+    # General exclusion flag
+    exclude_from_us_gs_union = exclude_case1 | exclude_case2 | exclude_case3,
+    
+    # Original case definitions (maintained for compatibility)
     case_us_nondiv_total = us_nondiv,
-    case_us_nondiv_and_gs_nondiv = us_nondiv & gs_any_nondiv,
-    case_us_div_and_gs_nondiv = us_divergent & gs_any_nondiv,
-    case_gs_nondiv_no_us_excl_gs0 = !us_present & gs_any_nondiv_core & !gs0_poisoned
+    case_us_nondiv_and_gs_nondiv = us_nondiv & gs_any_nondiv_core,
+    case_us_div_and_gs_nondiv = us_divergent & gs_any_nondiv_core,
+    case_gs_nondiv_no_us_excl_gs0 = !us_present & gs_any_nondiv_core & !gs0_poisoned,
+    
+    # Enhanced us_gs union: include valid cases and exclude problematic patterns
+    case_us_gs_union = (case_us_nondiv_total | case_us_nondiv_and_gs_nondiv | case_us_div_and_gs_nondiv) & !exclude_from_us_gs_union,
+    
+    # Individual GS group cases for separate unions
+    case_nondiv_us = us_nondiv,
+    case_nondiv_gs0 = nondiv_GS0 & present_GS0,
+    case_nondiv_gs1 = nondiv_GS1 & present_GS1,
+    case_nondiv_gs2 = nondiv_GS2 & present_GS2,
+    case_nondiv_gs3 = nondiv_GS3 & present_GS3,
+    case_nondiv_gs4 = nondiv_GS4 & present_GS4
   )
 
 # New plot: number of is_conserved_meta=TRUE CAAS per case
@@ -1055,7 +1409,7 @@ for (cs in c("top", "bottom", "both")) {
   }
 }
 
-detail_rows <- discovery_std %>%
+detail_rows <- discovery_b_std %>%
   transmute(
     site_id,
     gene,
@@ -1072,64 +1426,83 @@ site_flags <- site_matrix %>%
     sig_both_ref,
     change_side_ref,
     case_us_nondiv_total,
-    case_us_nondiv_and_gs_nondiv,
     case_us_div_and_gs_nondiv,
-    case_gs_nondiv_no_us_excl_gs0
+    case_gs_nondiv_no_us_excl_gs0,
+    case_nondiv_us,
+    case_nondiv_gs1,
+    case_nondiv_gs2,
+    case_nondiv_gs3,
+    case_nondiv_gs4
   )
 
 detail_with_flags <- detail_rows %>%
   left_join(site_flags, by = "site_id") %>%
   mutate(
-    sig_both_ref = replace_na(sig_both_ref, FALSE),
-    change_side_ref = replace_na(change_side_ref, "none"),
-    case_us_nondiv_total = replace_na(case_us_nondiv_total, FALSE),
-    case_us_nondiv_and_gs_nondiv = replace_na(case_us_nondiv_and_gs_nondiv, FALSE),
-    case_us_div_and_gs_nondiv = replace_na(case_us_div_and_gs_nondiv, FALSE),
-    case_gs_nondiv_no_us_excl_gs0 = replace_na(case_gs_nondiv_no_us_excl_gs0, FALSE)
+    sig_both_ref               = replace_na(sig_both_ref, FALSE),
+    change_side_ref            = replace_na(change_side_ref, "none"),
+    case_us_nondiv_total       = replace_na(case_us_nondiv_total, FALSE),
+    case_us_div_and_gs_nondiv  = replace_na(case_us_div_and_gs_nondiv, FALSE),
+    case_gs_nondiv_no_us_excl_gs0 = replace_na(case_gs_nondiv_no_us_excl_gs0, FALSE),
+    case_nondiv_us             = replace_na(case_nondiv_us, FALSE),
+    case_nondiv_gs1            = replace_na(case_nondiv_gs1, FALSE),
+    case_nondiv_gs2            = replace_na(case_nondiv_gs2, FALSE),
+    case_nondiv_gs3            = replace_na(case_nondiv_gs3, FALSE),
+    case_nondiv_gs4            = replace_na(case_nondiv_gs4, FALSE)
   )
 
-write_export_pair(detail_with_flags, "global", us_gs_txt_dir, us_gs_tsv_dir)
-write_export_pair(detail_with_flags %>% filter(sig_both_ref), "global_significant", us_gs_txt_dir, us_gs_tsv_dir)
+# ── Three-criteria global exports ────────────────────────────────────────────
+# Criteria:
+#   1. US nondiv only       (case_us_nondiv_total)
+#   2. US div + GS nondiv   (case_us_div_and_gs_nondiv)
+#   3. No US + GS nondiv    (case_gs_nondiv_no_us_excl_gs0)
+main_criteria <- detail_with_flags %>%
+  filter(case_us_nondiv_total | case_us_div_and_gs_nondiv | case_gs_nondiv_no_us_excl_gs0)
 
-for (cs in c("top", "bottom", "both")) {
+write_export_pair(main_criteria, "global", us_gs_txt_dir, us_gs_tsv_dir)
+write_export_pair(
+  main_criteria %>% filter(sig_both_ref),
+  "global_significant", us_gs_txt_dir, us_gs_tsv_dir
+)
+write_export_pair(
+  main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("top", "both")),
+  "top_significant", us_gs_txt_dir, us_gs_tsv_dir
+)
+write_export_pair(
+  main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("bottom", "both")),
+  "bottom_significant", us_gs_txt_dir, us_gs_tsv_dir
+)
+
+cat("\n✓ Global exports:\n")
+cat("  global:", nrow(main_criteria), "\n")
+cat("  global_significant:", nrow(main_criteria %>% filter(sig_both_ref)), "\n")
+cat("  top_significant:", nrow(main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("top","both"))), "\n")
+cat("  bottom_significant:", nrow(main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("bottom","both"))), "\n\n")
+
+# ── Individual group exports (US, GS1–GS4) — significant-only ─────────────────
+individual_cases <- list(
+  "us"  = detail_with_flags %>% filter(case_nondiv_us),
+  "gs1" = detail_with_flags %>% filter(case_nondiv_gs1),
+  "gs2" = detail_with_flags %>% filter(case_nondiv_gs2),
+  "gs3" = detail_with_flags %>% filter(case_nondiv_gs3),
+  "gs4" = detail_with_flags %>% filter(case_nondiv_gs4)
+)
+
+for (case_name in names(individual_cases)) {
+  case_df <- individual_cases[[case_name]]
+  sig_df  <- case_df %>% filter(sig_both_ref)
+  write_export_pair(sig_df,
+    paste0(case_name, "_significant"), us_gs_txt_dir, us_gs_tsv_dir)
   write_export_pair(
-    detail_with_flags %>% filter(change_side_ref == cs),
-    paste0("change_side_", cs),
-    us_gs_txt_dir,
-    us_gs_tsv_dir
-  )
+    sig_df %>% filter(change_side_ref %in% c("top", "both")),
+    paste0(case_name, "_top_significant"), us_gs_txt_dir, us_gs_tsv_dir)
   write_export_pair(
-    detail_with_flags %>% filter(change_side_ref == cs, sig_both_ref),
-    paste0("change_side_", cs, "_significant"),
-    us_gs_txt_dir,
-    us_gs_tsv_dir
-  )
-}
-
-special1 <- detail_with_flags %>%
-  filter(case_us_nondiv_total | case_us_nondiv_and_gs_nondiv | case_us_div_and_gs_nondiv)
-
-write_export_pair(special1, "special_union_us_nondiv_and_us_gs_cases", us_gs_txt_dir, us_gs_tsv_dir)
-write_export_pair(special1 %>% filter(sig_both_ref), "special_union_us_nondiv_and_us_gs_cases_significant", us_gs_txt_dir, us_gs_tsv_dir)
-write_export_pair(special1 %>% filter(!sig_both_ref), "special_union_us_nondiv_and_us_gs_cases_nonsignificant", us_gs_txt_dir, us_gs_tsv_dir)
-
-for (cs in c("top", "bottom", "both")) {
-  s1_cs <- special1 %>% filter(change_side_ref == cs)
-  write_export_pair(s1_cs, paste0("special_union_us_nondiv_and_us_gs_cases_change_side_", cs), us_gs_txt_dir, us_gs_tsv_dir)
-  write_export_pair(s1_cs %>% filter(sig_both_ref), paste0("special_union_us_nondiv_and_us_gs_cases_change_side_", cs, "_significant"), us_gs_txt_dir, us_gs_tsv_dir)
-}
-
-special2 <- detail_with_flags %>%
-  filter(case_gs_nondiv_no_us_excl_gs0)
-
-write_export_pair(special2, "special_gs_nondiv_no_us_excluding_gs0", us_gs_txt_dir, us_gs_tsv_dir)
-write_export_pair(special2 %>% filter(sig_both_ref), "special_gs_nondiv_no_us_excluding_gs0_significant", us_gs_txt_dir, us_gs_tsv_dir)
-write_export_pair(special2 %>% filter(!sig_both_ref), "special_gs_nondiv_no_us_excluding_gs0_nonsignificant", us_gs_txt_dir, us_gs_tsv_dir)
-
-for (cs in c("top", "bottom", "both")) {
-  s2_cs <- special2 %>% filter(change_side_ref == cs)
-  write_export_pair(s2_cs, paste0("special_gs_nondiv_no_us_excluding_gs0_change_side_", cs), us_gs_txt_dir, us_gs_tsv_dir)
-  write_export_pair(s2_cs %>% filter(sig_both_ref), paste0("special_gs_nondiv_no_us_excluding_gs0_change_side_", cs, "_significant"), us_gs_txt_dir, us_gs_tsv_dir)
+    sig_df %>% filter(change_side_ref %in% c("bottom", "both")),
+    paste0(case_name, "_bottom_significant"), us_gs_txt_dir, us_gs_tsv_dir)
+  cat("✓", case_name,
+    "| total:", nrow(case_df),
+    "| sig:", nrow(sig_df),
+    "| top-sig:", nrow(sig_df %>% filter(change_side_ref %in% c("top","both"))),
+    "| bottom-sig:", nrow(sig_df %>% filter(change_side_ref %in% c("bottom","both"))), "\n")
 }
 
 cat("
@@ -1144,30 +1517,35 @@ cat("  TSV:", us_gs_tsv_dir, "
 ")
 ```
 
-## B.6 Manhattan: genomic distribution of removed genes (−log10 permutation p-value)
+## B.6 Manhattan: genomic distribution of genes (CAAS density per gene length)
 
 ```{r manhattan_disambiguation, fig.height=8, fig.width=16, eval=generate_manhattan}
 if (!"chr" %in% names(gene_ensembl)) {
   cat("⚠ Chromosome information not available in gene ensembl file, skipping Manhattan plot\n")
 } else {
-  # Aggregate per-gene best (minimum) bootstrap p-value from position-level data
-  gene_boot_pval <- discovery_std %>%
+  # Calculate CAAS density per gene (significant-both positions / gene length).
+  # Uses all discovery data (GS0 included here: genomic position is gene-level).
+  gene_caas_density <- discovery_std %>%
+    filter(sig_both) %>%  # Focus on significant-both positions only
     group_by(gene) %>%
     summarise(
-      min_boot_pval = min(pvalue_boot, na.rm = TRUE),
+      n_caas_positions = n_distinct(site_id),
       .groups = "drop"
     ) %>%
+    left_join(gene_ensembl %>% 
+              select(gene, chr, start, end) %>%
+              mutate(gene_length = end - start + 1), 
+              by = "gene") %>%
+    filter(!is.na(chr), gene_length > 0) %>%
     mutate(
-      min_boot_pval = pmax(min_boot_pval, .Machine$double.xmin, na.rm = TRUE),
-      neglog10_boot = -log10(min_boot_pval)
+      caas_density = n_caas_positions / gene_length,
+      log_caas_density = log10(pmax(caas_density, 1e-10))  # Avoid log10(0)
     )
 
-  # Only visualise removed genes (Extreme, Dubious, Both); Normal genes are not plotted
-  manhattan_data <- gene_summary_annotated %>%
-    filter(Category != "Normal") %>%
-    left_join(gene_ensembl %>% select(gene, chr, start, end), by = c("Gene" = "gene")) %>%
-    left_join(gene_boot_pval, by = c("Gene" = "gene")) %>%
-    filter(!is.na(chr), !is.na(neglog10_boot)) %>%
+  # Visualise all genes with at least one significant-both CAAS position.
+  # manhattan_min_density is used only as a reference line, not a hard filter.
+  manhattan_data <- gene_caas_density %>%
+    filter(caas_density > 0) %>%
     mutate(
       chr_num   = str_replace(chr, "chr", ""),
       chr_order = case_when(
@@ -1176,8 +1554,7 @@ if (!"chr" %in% names(gene_ensembl)) {
         chr_num == "Y"                  ~ 24,
         TRUE                            ~ 25
       ),
-      pos = (start + end) / 2,
-      Category = factor(Category, levels = c("Extreme", "Dubious", "Both"))
+      pos = (start + end) / 2
     ) %>%
     arrange(chr_order, pos)
 
@@ -1197,15 +1574,13 @@ if (!"chr" %in% names(gene_ensembl)) {
       left_join(chr_lengths %>% select(chr_num, chr_start, chr_end), by = "chr_num") %>%
       mutate(BPcum = pos + chr_start)
 
-    # Bonferroni threshold across all genes with a genomic position
-    n_genes_tested  <- n_distinct(manhattan_data$Gene)
-    bonferroni_thr  <- -log10(0.05 / max(n_genes_tested, 1L))
+    # No Bonferroni threshold for CAAS density plot
+    n_genes_plotted <- n_distinct(manhattan_data$gene)
 
-    removed_palette <- category_palette[intersect(c("Extreme", "Dubious", "Both"), levels(manhattan_data$Category))]
-    removed_shapes  <- c(Extreme = 17L, Dubious = 16L, Both = 15L)
+    ref_density <- max(manhattan_data$caas_density, na.rm = TRUE) * 1.5
 
     p_manhattan <- ggplot(manhattan_data,
-        aes(x = BPcum, y = neglog10_boot, color = Category, shape = Category)) +
+        aes(x = BPcum, y = caas_density)) +
       # Discontinuous chromosome boundary lines
       geom_vline(
         data        = chr_lengths,
@@ -1213,34 +1588,34 @@ if (!"chr" %in% names(gene_ensembl)) {
         linetype    = "dotted", color = "grey60", alpha = 0.7, linewidth = 0.4,
         inherit.aes = FALSE
       ) +
-      geom_point(alpha = 0.80, size = 2.5) +
-      # Bonferroni threshold
-      geom_hline(yintercept = bonferroni_thr, linetype = "dashed",
-                 color = "black", linewidth = 0.6) +
+      geom_point(alpha = 0.80, size = 2.5, color = "#2E86AB") +
+      geom_hline(
+        yintercept = ref_density,
+        linetype   = "dashed", colour = "#E74C3C", linewidth = 0.6
+      ) +
       annotate(
         "text",
-        x     = min(manhattan_data$BPcum, na.rm = TRUE),
-        y     = bonferroni_thr + max(manhattan_data$neglog10_boot, na.rm = TRUE) * 0.03,
-        label = sprintf("Bonferroni (α = 0.05, n = %d)", n_genes_tested),
-        hjust = 0, size = 3, color = "black"
+        x     = Inf, y = ref_density,
+        label = sprintf("ref: %.3g", ref_density),
+        hjust = 1.05, vjust = -0.4, size = 3.5, colour = "#E74C3C"
       ) +
-      scale_color_manual(values = removed_palette, drop = FALSE) +
-      scale_shape_manual(values = removed_shapes,  drop = FALSE) +
       scale_x_continuous(
         labels = chr_lengths$chr_num,
         breaks = chr_lengths$chr_center,
         expand = expansion(mult = c(0.005, 0.005))
       ) +
+      scale_y_continuous(
+        labels = scales::label_number(scale_cut = cut_short_scale()),
+        expand = expansion(mult = c(0.02, 0.08))
+      ) +
       labs(
-        title    = "Genomic distribution of removed genes after disambiguation",
+        title    = "Genomic distribution of CAAS density (significant-both positions only)",
         subtitle = sprintf(
-          "Removed genes only (n = %d) | y = −log10(min permutation p-value per gene) | dashed line = Bonferroni threshold",
-          n_genes_tested
+          "n = %d genes with \u2265 1 sig-both CAAS position | y = sig-both positions / gene length (bp) | dashed line = reference density %.3g",
+          n_genes_plotted, ref_density
         ),
         x     = "Chromosome",
-        y     = "−log10(min permutation p-value)",
-        color = "Removal category",
-        shape = "Removal category"
+        y     = "CAAS density (sig-both positions / gene length)"
       ) +
       theme_minimal(base_size = 11) +
       theme(
@@ -1250,11 +1625,11 @@ if (!"chr" %in% names(gene_ensembl)) {
 
     print(p_manhattan)
     ggsave(
-      filename = file.path(disambig_dir, "manhattan_disambiguation_removed.png"),
+      filename = file.path(disambig_dir, "manhattan_caas_density.png"),
       plot     = p_manhattan, width = 16, height = 8, dpi = 320, dev = "png"
     )
   } else {
-    cat("No removed genes with genomic coordinates available — Manhattan plot skipped.\n")
+    cat("No genes with sig-both CAAS positions found — Manhattan plot skipped.\n")
   }
 }
 ```
@@ -1264,36 +1639,23 @@ if (!"chr" %in% names(gene_ensembl)) {
 ```{r impact_summary}
 cat("\n=== CT Post-Processing Impact Summary ===\n\n")
 
-threshold_extreme <- gene_summary_annotated$threshold_extreme[1]
-threshold_dubious <- gene_summary_annotated$threshold_dubious[1]
-
 cat("Gene-level statistics:\n")
-cat("  Total genes analyzed:", n_distinct(discovery_df$Gene), "\n")
-cat("  Extreme genes (top 1% density):", sum(gene_summary_annotated$Extreme), "\n")
-cat("  Dubious genes (IQR outliers):", sum(gene_summary_annotated$Dubious), "\n")
-cat("  Both categories:", sum(gene_summary_annotated$Extreme & gene_summary_annotated$Dubious), "\n")
-cat("  Normal genes:", sum(gene_summary_annotated$Category == "Normal"), "\n\n")
+cat("  Total genes analyzed:", n_distinct(discovery_df$Gene), "\n\n")
 
 cat("Position-level statistics:\n")
 cat("  Total CT positions:", nrow(discovery_df), "\n")
 if (nrow(filter_summary) > 0) {
-  cat("  Positions flagged by filtering:\n")
+  cat("  Positions flagged by cluster filtering:\n")
   for (i in 1:nrow(filter_summary)) {
     cat(sprintf("    minlen=%d, maxcaas=%.2f: %d positions\n", filter_summary$Minlen[i], filter_summary$Maxcaas[i], filter_summary$DiscardedCount[i]))
   }
 }
 
 summary_table <- tibble(
-  Metric = c("Total CT Positions", "Unique Genes", "Extreme Genes (top 1% density)", "Dubious Genes (IQR outliers)", "Both Extreme and Dubious", "Normal Genes", "Extreme Threshold (density)", "Dubious Threshold (count)"),
-  Value = c(
-    nrow(discovery_df),
-    n_distinct(discovery_df$Gene),
-    sum(gene_summary_annotated$Extreme),
-    sum(gene_summary_annotated$Dubious),
-    sum(gene_summary_annotated$Extreme & gene_summary_annotated$Dubious),
-    sum(gene_summary_annotated$Category == "Normal"),
-    sprintf("%.4f", threshold_extreme),
-    as.character(threshold_dubious)
+  Metric = c("Total CT Positions", "Unique Genes"),
+  Value  = c(
+    as.character(nrow(discovery_df)),
+    as.character(n_distinct(discovery_df$Gene))
   )
 )
 
