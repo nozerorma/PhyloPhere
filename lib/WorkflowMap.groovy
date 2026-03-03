@@ -8,6 +8,8 @@
  * Author: Miguel Ramon (miguel.ramon@upf.edu)
  */
 
+import java.util.UUID
+
 class WorkflowMap {
 
     // ── HTML utilities ─────────────────────────────────────────────────────────
@@ -271,39 +273,235 @@ class WorkflowMap {
     <div>Executed from: <code>${htmlEscape(ctx.launchDir)}</code></div>
   </div>
 
-  <div class="footer">Generated automatically as final run artifact: <code>${htmlEscape(outdir)}/workflow_map.html</code></div>
+  <div class="footer">
+    Generated automatically as final run artifact: <code>${htmlEscape(outdir)}/workflow_map.html</code>
+    <br/>
+    <button onclick="refreshStatus()" style="margin-top:8px; padding:4px 12px; border:1px solid #D1D5DB; border-radius:6px; background:#F9FAFB; cursor:pointer;">Refresh Status</button>
+    <span id="refresh-status" style="margin-left:8px; font-style:italic; color:#6B7280;"></span>
+  </div>
+
+  <script>
+    function refreshStatus() {
+      document.getElementById('refresh-status').textContent = 'Refreshing...';
+      
+      // Get the current HTML file's directory (baseDir)
+      const currentPath = window.location.pathname;
+      const baseDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
+      
+      // Define canonical directories for each stage
+      const canonicalDirs = {
+        'prune': ['data_exploration/0.Data-pruning'],
+        'dataset_rep': ['data_exploration'],
+        'pheno_rep': ['data_exploration'],
+        'contrast': ['data_exploration/2.CT', 'data_exploration/2.CT/1.Traitfiles'],
+        'ct': ['caastools', 'discovery'],
+        'ct_signif': ['signification', 'signification/gene_lists'],
+        'ct_disambig': ['ct_disambiguation'],
+        'ct_postproc': ['postproc', 'postproc/preprocessed'],
+        'ora': ['ora'],
+        'string': ['string'],
+        'ct_acc': ['accumulation', 'accumulation/aggregation'],
+        'rer': ['rerconverge'],
+        'fade': ['selection/fade'],
+        'molerate': ['selection/molerate']
+      };
+      
+      // Map stage IDs to display stages
+      const stageMapping = {
+        'prune': 'prune',
+        'dataset_rep': 'dataset_rep',
+        'pheno_rep': 'pheno_rep', 
+        'contrast': 'contrast',
+        'ct': 'ct',
+        'ct_signif': 'ct_signif',
+        'ct_disambig': 'ct_disambig',
+        'ct_postproc': 'ct_postproc',
+        'ora': 'ora',
+        'string': 'string',
+        'ct_acc': 'ct_acc',
+        'rer': 'rer',
+        'fade': 'fade',
+        'molerate': 'molerate'
+      };
+      
+      let checkedStages = 0;
+      const totalStages = Object.keys(canonicalDirs).length;
+      
+      // Check each stage's directories
+      Object.entries(canonicalDirs).forEach(([stageId, dirPaths]) => {
+        let stageCompleted = false;
+        let checkedPaths = 0;
+        
+        dirPaths.forEach(dirPath => {
+          const fullPath = baseDir + '/' + dirPath;
+          
+          // Try to detect directory existence (limited by browser security)
+          fetch(fullPath + '/')
+            .then(response => {
+              if (response.ok || response.status === 403) {
+                stageCompleted = true;
+              }
+            })
+            .catch(() => {
+              // Directory doesn't exist or can't access
+            })
+            .finally(() => {
+              checkedPaths++;
+              if (checkedPaths === dirPaths.length) {
+                updateStageDisplay(stageId, stageCompleted);
+                checkedStages++;
+                if (checkedStages === totalStages) {
+                  document.getElementById('refresh-status').textContent = 'Refreshed at ' + new Date().toLocaleTimeString();
+                }
+              }
+            });
+        });
+      });
+    }
+    
+    function updateStageDisplay(stageId, completed) {
+      const stages = document.querySelectorAll('.stage');
+      stages.forEach(stage => {
+        const stageHead = stage.querySelector('.stage-head');
+        if (stageHead && stageHead.textContent.includes(getStageNameFromId(stageId))) {
+          const pill = stage.querySelector('.pill');
+          const stageElement = stage;
+          
+          if (completed) {
+            pill.className = 'pill pill-ran';
+            pill.textContent = 'ran';
+            stageElement.style.borderColor = '#1F2937';
+            stageHead.style.background = getStageColor(stageId);
+          } else {
+            pill.className = 'pill pill-skip';
+            pill.textContent = 'not run';
+            stageElement.style.borderColor = '#9CA3AF';
+            stageHead.style.background = '#B8B8B8';
+          }
+        }
+      });
+    }
+    
+    function getStageNameFromId(stageId) {
+      const names = {
+        'prune': 'Data pruning',
+        'dataset_rep': 'Dataset reporting',
+        'pheno_rep': 'Phenotype reporting',
+        'contrast': 'Contrast selection',
+        'ct': 'CT (convergence)',
+        'ct_signif': 'CT signification (convergence)',
+        'ct_disambig': 'CT disambiguation (convergence)',
+        'ct_postproc': 'CT post-processing',
+        'ora': 'ORA',
+        'string': 'STRING',
+        'ct_acc': 'CT accumulation (convergence)',
+        'rer': 'RERconverge (RER)',
+        'fade': 'FADE (selection)',
+        'molerate': 'Molerate (RER)'
+      };
+      return names[stageId] || stageId;
+    }
+    
+    function getStageColor(stageId) {
+      const typeColors = {
+        'prune': '#0EA5E9',
+        'dataset_rep': '#7C3AED',
+        'pheno_rep': '#7C3AED',
+        'contrast': '#0EA5E9',
+        'ct': '#F97316',
+        'ct_signif': '#7C3AED',
+        'ct_disambig': '#F97316',
+        'ct_postproc': '#0EA5E9',
+        'ora': '#7C3AED',
+        'string': '#7C3AED',
+        'ct_acc': '#F97316',
+        'rer': '#F97316',
+        'fade': '#F97316',
+        'molerate': '#F97316'
+      };
+      return typeColors[stageId] || '#B8B8B8';
+    }
+  </script>
 </body>
 </html>
 """.stripIndent()
     }
 
-    // ── Convenience: build ctx map from params + workflow implicit objects ─────
-    // Called from workflow.onComplete or from a process exec: block.
+    // ── Dynamic directory scanning ─────────────────────────────────────────────
 
-    static Map buildCtx(params, workflow) {
-        def outdir = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/Out"
+    static Map getCanonicalDirectories() {
+        return [
+            prune        : ['data_exploration/0.Data-pruning'],
+            dataset_rep  : ['data_exploration'],
+            pheno_rep    : ['data_exploration'],
+            contrast     : ['data_exploration/2.CT', 'data_exploration/2.CT/1.Traitfiles'],
+            ct           : ['caastools', 'discovery'],
+            ct_signif    : ['signification', 'signification/gene_lists'],
+            ct_disambig  : ['ct_disambiguation'],
+            ct_postproc  : ['postproc', 'postproc/preprocessed'],
+            ora          : ['ora'],
+            string       : ['string'],
+            ct_acc       : ['accumulation', 'accumulation/aggregation'],
+            rer          : ['rerconverge'],
+            fade         : ['selection/fade'],
+            molerate     : ['selection/molerate']
+        ]
+    }
+
+    static boolean checkStageCompletion(String baseDir, String stageId) {
+        def canonicalDirs = getCanonicalDirectories()
+        def requiredDirs = canonicalDirs[stageId]
+        if (!requiredDirs) return false
+        
+        return requiredDirs.any { dirPath ->
+            new File(baseDir, dirPath).exists()
+        }
+    }
+
+    static Map scanWorkflowDirectory(String baseDir) {
+        def canonicalDirs = getCanonicalDirectories()
+        def results = [:]
+        
+        canonicalDirs.each { stageId, dirPaths ->
+            results[stageId] = checkStageCompletion(baseDir, stageId)
+        }
+        
+        return results
+    }
+
+    // ── Convenience: build ctx map from dynamic scanning or workflow context ───
+    // Can be called with just a directory path for standalone operation,
+    // or with params + workflow for backward compatibility.
+
+    static Map buildCtx(baseDir, params = null, workflow = null) {
+        def outdir = baseDir?.toString() ?: 
+                    (params?.outdir ? params.outdir.toString() : "${workflow?.projectDir}/Out")
+        
+        // Dynamic scanning of workflow completion status
+        def scanResults = scanWorkflowDirectory(outdir)
+        
         [
             outdir        : outdir,
-            launchDir     : workflow.launchDir?.toString(),
-            projectDir    : workflow.projectDir?.toString(),
-            profile       : workflow.profile ?: 'default',
-            runName       : workflow.runName,
-            sessionId     : workflow.sessionId?.toString(),
-            commandLine   : workflow.commandLine,
-            prune         : params.prune_data as boolean,
-            datasetReport : (params.reporting as boolean) || (params.contrast_selection as boolean),
-            phenotypeRep  : (params.reporting as boolean) && !(params.prune_data as boolean),
-            contrastSel   : params.contrast_selection as boolean,
-            ct            : ((params.ct_tool instanceof String && params.ct_tool?.trim()) || params.ct_tool == true) as boolean,
-            ctSignif      : params.ct_signification as boolean,
-            ctDisambig    : params.ct_disambiguation as boolean,
-            ctPostproc    : params.ct_postproc as boolean,
-            ora           : params.ora as boolean,
-            string        : params.string as boolean,
-            ctAccum       : params.ct_accumulation as boolean,
-            rer           : ((params.rer_tool instanceof String && params.rer_tool?.trim()) || params.rer_tool == true) as boolean,
-            fade          : params.fade as boolean,
-            molerate      : params.molerate as boolean
+            launchDir     : workflow?.launchDir?.toString() ?: outdir,
+            projectDir    : workflow?.projectDir?.toString() ?: outdir,
+            profile       : workflow?.profile ?: 'standalone',
+            runName       : workflow?.runName ?: 'dynamic-scan',
+            sessionId     : workflow?.sessionId?.toString() ?: UUID.randomUUID().toString(),
+            commandLine   : workflow?.commandLine ?: 'dynamic generation',
+            prune         : scanResults.prune ?: false,
+            datasetReport : scanResults.dataset_rep ?: false,
+            phenotypeRep  : scanResults.pheno_rep ?: false,
+            contrastSel   : scanResults.contrast ?: false,
+            ct            : scanResults.ct ?: false,
+            ctSignif      : scanResults.ct_signif ?: false,
+            ctDisambig    : scanResults.ct_disambig ?: false,
+            ctPostproc    : scanResults.ct_postproc ?: false,
+            ora           : scanResults.ora ?: false,
+            string        : scanResults.string ?: false,
+            ctAccum       : scanResults.ct_acc ?: false,
+            rer           : scanResults.rer ?: false,
+            fade          : scanResults.fade ?: false,
+            molerate      : scanResults.molerate ?: false
         ]
     }
 }

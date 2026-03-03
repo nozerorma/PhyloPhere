@@ -39,7 +39,7 @@ process MOLERATE_RUN {
     path lg_dat
 
     output:
-    tuple val(gene_id), val(direction), path("${gene_id}.molerate.json"), emit: molerate_json, optional: true
+    tuple val(gene_id), val(direction), path("${gene_id}.${direction}.molerate.json"), emit: molerate_json, optional: true
 
     script:
     def hyphy_analyses = params.hyphy_analyses_path ?: '/hyphy-analyses'
@@ -67,11 +67,11 @@ process MOLERATE_RUN {
             --labeling-strategy ${labeling} \\
             --branch-level-analysis ${branch_tests} \\
             --full-model ${full_model} \\
-            --output "${gene_id}.molerate.json" \\
+            --output "${gene_id}.${direction}.molerate.json" \\
             \$BRANCHES_ARGS \\
         || echo "MoleRate failed for ${gene_id} (${direction}), skipping"
         # Remove 0-byte JSON so optional:true does not emit it to the report
-        [ -s "${gene_id}.molerate.json" ] || rm -f "${gene_id}.molerate.json"
+        [ -s "${gene_id}.${direction}.molerate.json" ] || rm -f "${gene_id}.${direction}.molerate.json"
         """
     } else {
         """
@@ -94,11 +94,11 @@ process MOLERATE_RUN {
             --labeling-strategy ${labeling} \\
             --branch-level-analysis ${branch_tests} \\
             --full-model ${full_model} \\
-            --output "${gene_id}.molerate.json" \\
+            --output "${gene_id}.${direction}.molerate.json" \\
             \$BRANCHES_ARGS \\
         || echo "MoleRate failed for ${gene_id} (${direction}), skipping"
         # Remove 0-byte JSON so optional:true does not emit it to the report
-        [ -s "${gene_id}.molerate.json" ] || rm -f "${gene_id}.molerate.json"
+        [ -s "${gene_id}.${direction}.molerate.json" ] || rm -f "${gene_id}.${direction}.molerate.json"
         """
     }
 }

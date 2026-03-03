@@ -9,10 +9,10 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     publishDir "${params.outdir}/postproc/preprocessed", mode: 'copy', overwrite: true
 
     input:
-    path(discovery_input)
+    path(disambiguation_input)
 
     output:
-    path "postproc_discovery_input.tsv", emit: prepared_discovery
+    path "postproc_disambiguation_input.tsv", emit: prepared_discovery
     path "removed_patterns_precluster.tsv", emit: removed_patterns
 
     script:
@@ -22,7 +22,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     import re
     import pandas as pd
 
-    src = "${discovery_input}"
+    src = "${disambiguation_input}"
     mrca_threshold = float("${mrca_threshold}")
 
     def to_bool_series(series: pd.Series) -> pd.Series:
@@ -128,7 +128,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
         if helper_col in removed.columns:
             removed = removed.drop(columns=[helper_col])
 
-    cleaned.to_csv('postproc_discovery_input.tsv', sep='\\t', index=False)
+    cleaned.to_csv('postproc_disambiguation_input.tsv', sep='\\t', index=False)
     removed.to_csv('removed_patterns_precluster.tsv', sep='\\t', index=False)
 
     print(f"Input rows: {len(df)}")
@@ -306,6 +306,7 @@ process CAAS_FILTER_GENES {
     output:
     path "filtered_discovery.tsv", emit: filtered_discovery
     path "removed_genes_summary.tsv", emit: removed_genes
+    path "gene_stats.tsv", emit: gene_stats, optional: true
     
     script:
     def cluster_arg = (params.gene_filter_mode in ['dubious', 'both']) ? "-c ${cluster_file}" : ""
@@ -318,7 +319,8 @@ process CAAS_FILTER_GENES {
         --extreme-percentile ${params.extreme_threshold} \
         --iqr-multiplier ${params.iqr_multiplier} \
         -o filtered_discovery.tsv \
-        -s removed_genes_summary.tsv
+        -s removed_genes_summary.tsv \
+        -g gene_stats.tsv
     """
 }
 

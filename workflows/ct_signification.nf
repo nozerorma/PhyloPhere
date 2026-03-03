@@ -9,21 +9,21 @@ include { CAAS_SIGNIFICATION_REPORT } from "${baseDir}/subworkflows/CT_SIGNIFICA
 
 workflow CT_SIGNIFICATION {
     take:
-        discovery_input_channel
+        disambiguation_input_channel
         background_genes_channel
         bootstrap_input_channel
 
     main:
         // Discovery source
         def discovery_file_ch
-        if (discovery_input_channel) {
+        if (disambiguation_input_channel) {
             log.info "📥 Using discovery file from CT module for signification"
-            discovery_file_ch = discovery_input_channel
+            discovery_file_ch = disambiguation_input_channel
         } else {
-            assert params.discovery_input : "CT signification requires CT discovery output or --discovery_input"
-            def discovery_file_obj = file(params.discovery_input)
-            assert discovery_file_obj.exists() : "Error: discovery_input file not found: ${params.discovery_input}"
-            assert discovery_file_obj.isFile() : "Error: discovery_input must be a file"
+            assert params.disambiguation_input : "CT signification requires CT discovery output or --disambiguation_input"
+            def discovery_file_obj = file(params.disambiguation_input)
+            assert discovery_file_obj.exists() : "Error: disambiguation_input file not found: ${params.disambiguation_input}"
+            assert discovery_file_obj.isFile() : "Error: disambiguation_input must be a file"
             discovery_file_ch = Channel.value(discovery_file_obj)
         }
 

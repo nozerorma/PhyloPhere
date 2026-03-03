@@ -35,7 +35,7 @@ include { CT_POSTPROC_REPORT } from "${baseDir}/subworkflows/CT_POSTPROC/ctpp_ch
 
 workflow CT_POSTPROC {
     take:
-        discovery_input_channel      // Post-disambiguation master CSV (optional, can use --discovery_input instead)
+        disambiguation_input_channel      // Post-disambiguation master CSV (optional, can use --disambiguation_input instead)
         background_files_channel     // Raw background files from CT module (optional)
         background_genes_channel     // Global background genes file from CT module (preferred)
         bootstrap_input_channel      // kept for API compatibility (unused)
@@ -48,15 +48,15 @@ workflow CT_POSTPROC {
         def discovery_file_obj
         
         // Check if using upstream outputs (integrated mode) or standalone mode
-        if (discovery_input_channel) {
+        if (disambiguation_input_channel) {
             log.info "📥 Using discovery file from upstream disambiguation output"
-            discovery_file_ch = discovery_input_channel
+            discovery_file_ch = disambiguation_input_channel
             discovery_file_obj = null
         } else {
-            assert params.discovery_input : "CT Post-Processing requires disambiguation master CSV from upstream workflow or --discovery_input parameter"
-            discovery_file_obj = file(params.discovery_input)
-            assert discovery_file_obj.exists() : "Error: discovery_input file not found: ${params.discovery_input}"
-            assert discovery_file_obj.isFile() : "Error: discovery_input must be a file"
+            assert params.disambiguation_input : "CT Post-Processing requires disambiguation master CSV from upstream workflow or --disambiguation_input parameter"
+            discovery_file_obj = file(params.disambiguation_input)
+            assert discovery_file_obj.exists() : "Error: disambiguation_input file not found: ${params.disambiguation_input}"
+            assert discovery_file_obj.isFile() : "Error: disambiguation_input must be a file"
             discovery_file_ch = Channel.value(discovery_file_obj)
         }
         
@@ -201,7 +201,8 @@ workflow CT_POSTPROC {
                 prepared_discovery_ch,
                 filter_summary_results.summary,
                 filter_output_dir,
-                gene_ensembl_file
+                gene_ensembl_file,
+                gene_filter_results ? gene_filter_results.gene_stats : Channel.empty()
             )
 
             // Only pipe the specific txt exports needed by ORA (us_gs_relations/exports/txt/*.txt)

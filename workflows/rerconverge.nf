@@ -110,7 +110,10 @@ workflow RER_MAIN {
             }
 
             if (toolsToRun.contains('build_tree')) {
-                trees_out = RER_TREES(my_traitfile_ch, effective_gene_trees_ch)
+                def tax_id_ch = params.tax_id
+                    ? Channel.value(file(params.tax_id))
+                    : Channel.value(file('NO_FILE'))
+                trees_out = RER_TREES(my_traitfile_ch, effective_gene_trees_ch, tax_id_ch)
                 masterTrees_out = trees_out[0]
             }
 

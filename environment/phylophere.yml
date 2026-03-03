@@ -373,6 +373,7 @@ dependencies:
 - r-ggtangle=0.1.1=r44hc72bb7e_0
 - r-ggtext=0.1.2=r44hc72bb7e_4
 - r-ggvenn=0.1.19=r44hc72bb7e_0
+- r-ggvenndiagram=1.5.7=r44hc72bb7e_0
 - r-gh=1.5.0=r44hc72bb7e_1
 - r-gitcreds=0.1.2=r44hc72bb7e_4
 - r-glmnet=4.1_10=r44ha36cffa_1
@@ -556,6 +557,7 @@ dependencies:
 - r-utf8=1.2.6=r44h54b55ab_1
 - r-uuid=1.2_2=r44h54b55ab_0
 - r-vctrs=0.7.1=r44h3697838_0
+- r-venndiagram=1.8.2=r45hc72bb7e_0
 - r-viridis=0.6.5=r44hc72bb7e_2
 - r-viridislite=0.4.3=r44hc72bb7e_0
 - r-vroom=1.6.7=r44h3697838_0

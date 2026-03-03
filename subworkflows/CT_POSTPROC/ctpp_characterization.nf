@@ -15,6 +15,7 @@ process CT_POSTPROC_REPORT {
     path filter_summary
     val filter_dir
     path gene_ensembl_file
+    path gene_stats_file
     
     output:
     path "*.html", emit: report
@@ -30,6 +31,7 @@ process CT_POSTPROC_REPORT {
     def filter_sum = filter_summary.toString()
     def filter_dir_path = filter_dir
     def gene_len = gene_ensembl_file.toString()
+    def gene_stats = gene_stats_file.toString()
     def mode = params.caas_postproc_mode
     def outdir = "${params.outdir}/postproc"
     def extreme_thresh = params.extreme_threshold
@@ -51,6 +53,7 @@ process CT_POSTPROC_REPORT {
                     filter_summary_file = '${filter_sum}',
                     filter_dir = '${filter_dir_path}',
                     gene_ensembl_file = '${gene_len}',
+                    gene_stats_file = '${gene_stats}',
                     processing_mode = '${mode}',
                     output_dir = '${outdir}',
                     extreme_threshold = ${extreme_thresh},
@@ -75,6 +78,7 @@ process CT_POSTPROC_REPORT {
                     filter_summary_file = '${filter_sum}',
                     filter_dir = '${filter_dir_path}',
                     gene_ensembl_file = '${gene_len}',
+                    gene_stats_file = '${gene_stats}',
                     processing_mode = '${mode}',
                     output_dir = '${outdir}',
                     extreme_threshold = ${extreme_thresh},

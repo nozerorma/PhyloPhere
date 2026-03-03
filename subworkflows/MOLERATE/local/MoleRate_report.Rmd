@@ -111,7 +111,7 @@ as_num <- function(x, default = NA_real_) {
 
 # ── JSON parser ──────────────────────────────────────────────────────────────
 parse_molerate_json <- function(path) {
-  gene_id <- sub("\\.molerate\\.json$", "", basename(path))
+  gene_id <- sub("\\.(top|bottom)\\.molerate\\.json$", "", basename(path))
 
   tryCatch({
     js <- fromJSON(path, simplifyVector = FALSE)

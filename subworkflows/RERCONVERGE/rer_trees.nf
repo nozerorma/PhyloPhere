@@ -39,6 +39,7 @@ process RER_TREES {
     input:
     path my_traitfile
     path gene_trees_file
+    path tax_id_file
 
     output:
     file("${gene_trees_file}.masterTree.output")
@@ -49,6 +50,8 @@ process RER_TREES {
     def pruned_trees_out = "${gene_trees_file}.pruned.txt"
     def masterTrees_out = "${gene_trees_file}.masterTree.output"
     
+    def tax_id_arg = (tax_id_file.name != 'NO_FILE') ? "${tax_id_file}" : ''
+
     if (params.use_singularity) {
         """
         echo "Using Singularity"
@@ -59,6 +62,7 @@ process RER_TREES {
         ${ params.sp_colname } \\
         ${ pruned_trees_out } \\
         ${ masterTrees_out } \\
+        ${ tax_id_arg } \\
         $args
         """
     } else {
@@ -71,6 +75,7 @@ process RER_TREES {
         ${ params.sp_colname } \\
         ${ pruned_trees_out } \\
         ${ masterTrees_out } \\
+        ${ tax_id_arg } \\
         $args
         """
     }

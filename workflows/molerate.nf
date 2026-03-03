@@ -196,15 +196,15 @@ workflow MOLERATE {
         molerate_results_ch = MOLERATE_RUN(molerate_input_ch, lg_dat_ch).molerate_json
 
         // 6. Reports per direction -----------------------------------------
-        def top_jsons = molerate_results_ch
-            .filter { gid, dir, json -> dir == 'top' }
-            .map    { gid, dir, json -> json }
-            .collect().ifEmpty([])
-
-        def bottom_jsons = molerate_results_ch
-            .filter { gid, dir, json -> dir == 'bottom' }
-            .map    { gid, dir, json -> json }
-            .collect().ifEmpty([])
+        //    Use .branch() to split once and guarantee exclusive routing,
+        //    avoiding any ambiguity from applying two independent .filter()
+        //    subscriptions on the same queue channel.
+        def branched = molerate_results_ch.branch {
+            top:    it[1] == 'top'
+            bottom: it[1] == 'bottom'
+        }
+        def top_jsons    = branched.top.map    { it[2] }.collect().ifEmpty([])
+        def bottom_jsons = branched.bottom.map { it[2] }.collect().ifEmpty([])
 
         def rpt_top    = MOLERATE_REPORT_TOP(Channel.value('top'),    top_jsons   )
         def rpt_bottom = MOLERATE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons)

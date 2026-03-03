@@ -637,7 +637,7 @@ if tool.lower() == "bootstrap":
     ###     3.8.3 - Boot on the alignment file
 
     # Prepare discovery file parameter (None if not provided)
-    discovery_input = None if options.discovery_file == "none" else options.discovery_file
+    disambiguation_input = None if options.discovery_file == "none" else options.discovery_file
 
     # Prepare progress log parameter
     progress_log_input = None if options.progress_log == "none" else options.progress_log
@@ -660,7 +660,7 @@ if tool.lower() == "bootstrap":
 
                     the_admitted_patterns = options.patterns_string,
                     output_file = options.output_file,
-                    discovery_file = discovery_input,
+                    discovery_file = disambiguation_input,
                     progress_log = progress_log_input,
                     caap_mode = options.caap_mode
                     )
