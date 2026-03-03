@@ -39,16 +39,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from src.plots.gene_trees_bulk import plot_random_gene_trees
-from src.plots.manhattan_bulk import plot_manhattan
-from src.plots.pattern_plots import (
-    plot_convergence_patterns,
-    plot_faceted_patterns,
-    plot_trait_high_low_patterns,
-)
+
 from src.plots.plot_utils import (
     load_df,
-    safe_save,
-    get_pattern_abbreviation,
     find_tree_file,
 )
 
@@ -68,7 +61,6 @@ warnings.filterwarnings("ignore", module="matplotlib")
 
 def _generate_plot_suite(
     df: pd.DataFrame,
-    ensembl_df: pd.DataFrame,
     output_dir: Path,
     n_gene_trees: int,
     asr_root: Path,
@@ -76,31 +68,6 @@ def _generate_plot_suite(
     tip_details_root: Path,
 ):
     """Generate the full suite of bulk plots."""
-    # Manhattan plot
-    manhattan_out = output_dir / "manhattan_mean_pvalue.png"
-    plot_manhattan(df, ensembl_df, manhattan_out)
-
-    # Convergence patterns
-    patterns_out = output_dir / "convergence_patterns.png"
-    plot_convergence_patterns(df, patterns_out)
-
-    # Faceted patterns
-    plot_faceted_patterns(df, output_dir / "convergence_patterns_faceted")
-
-    # Trait patterns
-    if "trait_value" in df.columns:
-        for trait in ["high", "low"]:
-            trait_df = df[df["trait_value"] == trait]
-            if not trait_df.empty:
-                trait_out = output_dir / f"convergence_patterns_trait_{trait}.png"
-                plot_trait_high_low_patterns(trait_df, trait_out, trait)
-
-    # Trait analysis
-    if "change_side" in df.columns:
-        for focus in ["top", "bottom"]:
-            trait_analysis_out = output_dir / f"trait_{focus}_analysis.png"
-            plot_trait_analysis(df, trait_analysis_out, focus)
-
     # Gene trees
     gene_trees_dir = output_dir / "gene_tree_samples"
     # Provide additional per-gene debug logging so users can see why gene trees
@@ -200,7 +167,6 @@ def generate_bulk_plots(
     logger.info("Generating plots for significant results in %s...", significant_dir)
     _generate_plot_suite(
         df_significant,  # type : ignore
-        ensembl_df,
         significant_dir,
         n_gene_trees,
         asr_root,
@@ -218,63 +184,13 @@ def generate_bulk_plots(
         )
         _generate_plot_suite(
             df_full,
-            ensembl_df,
             all_dir,
             n_gene_trees,
             asr_root,
             node_dumps_root,
             tip_details_root,
         )
-
-
-def plot_trait_analysis(df: pd.DataFrame, out: Path, focus: str):
-    """Plot trait-specific pattern distributions for a focus side."""
-
-    subset = df[df["change_side"].isin([focus, "both"])]
-    if subset.empty:
-        logger.warning("No data for trait_%s_analysis", focus)
-        return
-
-    subset = subset.copy()
-
-    counts = subset["pattern_type"].value_counts().sort_values(ascending=False)
-
-    # -----------------------------
-    # Plot
-    # -----------------------------
-    fig, axes = plt.subplots(1, 2, figsize=(15, 10))  # 3:2 aspect ratio
-
-    # Left: raw pattern distribution
-    patterns = list(counts.index)
-    x = range(len(patterns))
-
-    axes[0].bar(x, counts.values, color="teal", label="All")
-
-    axes[0].set_xticks(list(x))
-    pattern_labels = [get_pattern_abbreviation(p) for p in patterns]
-    axes[0].set_xticklabels(pattern_labels, rotation=0, ha="center", fontweight="bold")
-    axes[0].set_ylabel("Count")
-    axes[0].set_title(f"Trait-{focus.upper()} Pattern Distribution (All)")
-    axes[0].set_xlabel("Pattern Type")
-
-    # Right: significant subset by pattern
-    sig_mask = (
-        subset.get("is_significant", pd.Series(False, index=subset.index))
-        .fillna(False)
-        .astype(bool)
-    )
-    sig_counts = (
-        subset[sig_mask].groupby("pattern_type").size().reindex(patterns, fill_value=0)
-    )
-    axes[1].bar(x, sig_counts.values, color="#16a085")
-    axes[1].set_xticks(list(x))
-    axes[1].set_xticklabels(pattern_labels, rotation=0, ha="center", fontweight="bold")
-    axes[1].set_title(f"Trait-{focus.upper()} Significant Subset")
-    axes[1].set_ylabel("Count")
-    axes[1].set_xlabel("Pattern Type")
-
-    safe_save(fig, out)
-
+        
 
 def main():
     parser = argparse.ArgumentParser(

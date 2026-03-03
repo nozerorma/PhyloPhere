@@ -12,7 +12,7 @@ import matplotlib
 matplotlib.use("Agg")  # Use non-interactive backend
 import matplotlib.pyplot as plt
 
-from .plot_utils import build_result_from_row, find_tree_file
+from src.plots.plot_utils import build_result_from_row, find_tree_file
 from src.asr.tree_parser import build_node_mapping
 
 logger = logging.getLogger(__name__)
@@ -66,9 +66,8 @@ def plot_random_gene_trees(
         if not dump_path.exists():
             return None
         # tip_details may be JSON or JSONL; try JSON first then JSONL
-        tip_json_path = Path(tip_details_root) / f"{gene.lower()}_tip_details.json"
         tip_jsonl_path = Path(tip_details_root) / f"{gene.lower()}_tip_details.jsonl"
-        if not tip_json_path.exists() and not tip_jsonl_path.exists():
+        if not tip_jsonl_path.exists():
             return None
 
         import json
@@ -202,7 +201,8 @@ def plot_random_gene_trees(
                             continue
                         try:
                             obj = json.loads(line)
-                            tip_details.append(obj)
+                            if obj.get("position") == pos:
+                                tip_details.append(obj)
                         except Exception:
                             continue
 
@@ -276,34 +276,6 @@ def create_gene_tree_state_plot(
                 # Prefer results with tip_details (from JSON)
                 candidate = r
                 break
-
-        # Fallback: any result matching position with node data
-        if candidate is None:
-            logger.debug(
-                f"No result with tip_details for focus_position={focus_position}, trying any with node data"
-            )
-            for r in results:
-                pos0 = r.get("position")
-                pos1 = r.get("position_one_based")
-                if (
-                    (
-                        (pos0 is not None and pos0 == focus_position)
-                        or (pos1 is not None and pos1 == focus_position)
-                        or (
-                            pos1 is not None
-                            and pos0 is not None
-                            and pos1 == focus_position + 1
-                        )
-                    )
-                    and r.get("node_mapping")
-                    and r.get("node_state_details")
-                ):
-                    candidate = r
-                    logger.debug(
-                        f"Found candidate result with tip_details for focus_position={focus_position}"
-                    )
-                    logger.debug(f"Candidate result details: {r}")
-                    break
 
         if candidate is None:
             logger.info(
