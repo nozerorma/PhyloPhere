@@ -22,6 +22,7 @@ params:
   iqr_multiplier: 3.0
   gene_filter_mode: "both"
   generate_manhattan: TRUE
+  manhattan_min_density: 0.008
 ---
 
 ```{r setup, include=FALSE}
@@ -70,23 +71,6 @@ find_recursive_file <- function(root_dir, pattern) {
 
 as_bool <- function(x) {
   tolower(as.character(x)) %in% c("true", "t", "1", "yes", "y")
-}
-
-collapse_change_side <- function(x) {
-  x <- tolower(as.character(x))
-  x <- x[x %in% c("top", "bottom", "both")]
-  if (length(x) == 0) return("none")
-  if ("both" %in% x) return("both")
-  ux <- unique(x)
-  if (all(c("top", "bottom") %in% ux)) return("both")
-  ux[[1]]
-}
-
-combo_from_flags <- function(df, cols) {
-  apply(df[, cols, drop = FALSE], 1, function(v) {
-    labs <- cols[as.logical(v)]
-    if (length(labs) == 0) "none" else paste(labs, collapse = "+")
-  })
 }
 
 normalize_disambig_schema <- function(df) {
@@ -140,7 +124,7 @@ extreme_threshold <- params$extreme_threshold
 iqr_multiplier <- params$iqr_multiplier
 gene_filter_mode <- params$gene_filter_mode
 generate_manhattan <- params$generate_manhattan
-manhattan_min_density <- (params$extreme_threshold + (params$extreme_threshold) / 2)
+manhattan_min_density <- params$manhattan_min_density
 
 if (is.null(discovery_file)) stop("Error: discovery_file parameter is required")
 if (is.null(filter_summary_file)) stop("Error: filter_summary_file parameter is required")
@@ -240,18 +224,6 @@ cat("  Genes with length annotation:", n_distinct(discovery_df$Gene), "\n\n")
 ## Conserved metadata composition after precluster pruning
 
 ```{r conserved_meta_composition}
-
-# Relation of genes that do seem to present conserved positions but they aren't supported by ASR (i.e. they are not conserved in the ASR node but they are in the meta-analysis) 
-#These could be interesting to explore as potential false positives or cases where ASR is missing signal. Removed downstream.
-non_asr_conserved <- discovery_df %>% dplyr::filter(is_conserved_meta == TRUE, asr_is_conserved == FALSE)
-count_non_asr_conserved <- nrow(non_asr_conserved)
-
-cat("  CAAS with conserved meta but not ASR support:", count_non_asr_conserved, "\n")
-
-discovery_df <- discovery_df %>%
-  # Remove non-ASR-supported conserved sites to focus on the more robustly supported ones
-  dplyr::filter(!(is_conserved_meta == TRUE & asr_is_conserved == FALSE))
-
 conserved_meta_comp <- discovery_df %>%
   mutate(is_conserved_meta = if_else(is_conserved_meta, "TRUE", "FALSE")) %>%
   count(is_conserved_meta, name = "n") %>%
@@ -261,6 +233,22 @@ kable(
   conserved_meta_comp,
   caption = "is_conserved_meta composition after precluster pruning"
 ) %>% kable_styling()
+
+p_conserved_meta_comp <- ggplot(conserved_meta_comp, aes(x = is_conserved_meta, y = prop, fill = is_conserved_meta)) +
+  geom_col(color = "black", linewidth = 0.25) +
+  geom_text(aes(label = scales::percent(prop, accuracy = 0.1)), vjust = -0.3, size = 4) +
+  scale_fill_paletteer_d("ggthemes::Tableau_10") +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  labs(
+    title = "Proportion of is_conserved_meta after pruning",
+    x = "is_conserved_meta",
+    y = "Proportion of CAAS"
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(legend.position = "none")
+
+print(p_conserved_meta_comp)
+ggsave(file.path(disambig_dir, "is_conserved_meta_proportion_after_pruning.png"), p_conserved_meta_comp, width = 8, height = 5, dpi = 320)
 ```
 
 ## Outlier Gene Detection
@@ -673,148 +661,101 @@ if (!is.na(removed_genes_file)) {
 removal_events <- bind_rows(precluster_events, cluster_events, gene_events)
 write_tsv(removal_events, file.path(disambig_dir, "removal_events.tsv"))
 
-# Diagnostic counts for reporting
-n_gs0 <- sum(toupper(discovery_std$caap_group) == "GS0")
+# ── GS0 exclusion for all downstream section B characterization ──────────────
+# GS0 is a random-baseline control kept in section A for reference.
+# From section B onward it is excluded; only US, GS1–GS4 are analysed.
+# Additionally, positions where is_conserved_meta=TRUE but asr_is_conserved=FALSE
+# are removed: these are "dubious-conserved" positions where the meta annotation
+# indicates conservation but ASR does not support it.
+discovery_b_std <- discovery_std %>%
+  filter(toupper(caap_group) != "GS0") %>%
+  filter(!(is_conserved_meta & !asr_is_conserved))
 
-cat("  GS0 rows:", n_gs0, "\n")
+n_gs0_removed       <- sum(toupper(discovery_std$caap_group) == "GS0")
+n_dubious_removed   <- discovery_std %>%
+  filter(toupper(caap_group) != "GS0") %>%
+  filter(is_conserved_meta & !asr_is_conserved) %>% nrow()
+cat("Section B filters:\n")
+cat("  GS0 rows removed:", n_gs0_removed, "\n")
+cat("  Dubious-conserved rows removed (is_conserved_meta=T & asr_is_conserved=F):", n_dubious_removed, "\n")
+cat("Section B analysis uses", nrow(discovery_b_std), "positions from groups:",
+    paste(sort(unique(toupper(discovery_b_std$caap_group))), collapse = ", "), "\n\n")
 ```
 
-## B.1b Focal relationships
+## B.1b Three focal relationship sets
 
-```{r focal_sets}
+```{r three_focal_sets}
+# Three biologically relevant US / GS nondivergence sets
+# (all computed from n_dubious_removed — GS0 excluded)
 
-# Helper: summarise one row per (site_id, gene, position) with per-group sig flags.
-# Flags: global (any presence), global_sig (sig_both in any group),
-#        per group: <g> = sig_both, <g>_nondiv = sig_both & nondivergent, <g>_div = sig_both & divergent.
-# Also derives change_side per site and top/bottom indicators.
-compute_site_flags <- function(df) {
-  df %>%
-    mutate(
-      caap_group_up = toupper(caap_group),
-      is_nondiv     = pattern_type != "divergent",
-      is_div        = pattern_type == "divergent"
-    ) %>%
-    group_by(site_id, gene, position) %>%
-    summarise(
-      global        = any(!is.na(caap_group_up), na.rm = TRUE),
-      global_sig    = any(sig_both, na.rm = TRUE),
-      us            = any(caap_group_up == "US"  & sig_both, na.rm = TRUE),
-      us_nondiv     = any(caap_group_up == "US"  & is_nondiv & sig_both, na.rm = TRUE),
-      us_div        = any(caap_group_up == "US"  & is_div    & sig_both, na.rm = TRUE),
-      gs            = any(caap_group_up != "US"  & sig_both, na.rm = TRUE),
-      gs_nondiv     = any(caap_group_up != "US"  & is_nondiv & sig_both, na.rm = TRUE),
-      gs_div        = any(caap_group_up != "US"  & is_div    & sig_both, na.rm = TRUE),
-      gs0           = any(caap_group_up == "GS0" & sig_both, na.rm = TRUE),
-      gs0_nondiv    = any(caap_group_up == "GS0" & is_nondiv & sig_both, na.rm = TRUE),
-      gs0_div       = any(caap_group_up == "GS0" & is_div    & sig_both, na.rm = TRUE),
-      gs1           = any(caap_group_up == "GS1" & sig_both, na.rm = TRUE),
-      gs1_nondiv    = any(caap_group_up == "GS1" & is_nondiv & sig_both, na.rm = TRUE),
-      gs1_div       = any(caap_group_up == "GS1" & is_div    & sig_both, na.rm = TRUE),
-      gs2           = any(caap_group_up == "GS2" & sig_both, na.rm = TRUE),
-      gs2_nondiv    = any(caap_group_up == "GS2" & is_nondiv & sig_both, na.rm = TRUE),
-      gs2_div       = any(caap_group_up == "GS2" & is_div    & sig_both, na.rm = TRUE),
-      gs3           = any(caap_group_up == "GS3" & sig_both, na.rm = TRUE),
-      gs3_nondiv    = any(caap_group_up == "GS3" & is_nondiv & sig_both, na.rm = TRUE),
-      gs3_div       = any(caap_group_up == "GS3" & is_div    & sig_both, na.rm = TRUE),
-      gs4           = any(caap_group_up == "GS4" & sig_both, na.rm = TRUE),
-      gs4_nondiv    = any(caap_group_up == "GS4" & is_nondiv & sig_both, na.rm = TRUE),
-      gs4_div       = any(caap_group_up == "GS4" & is_div    & sig_both, na.rm = TRUE),
-      change_side   = collapse_change_side(change_side),
-      .groups = "drop"
-    ) %>%
-    mutate(
-      convergent_pool = us_nondiv | gs_nondiv,
-      divergent_pool  = us_div    | gs_div,
-      is_top    = change_side %in% c("top",    "both"),
-      is_bottom = change_side %in% c("bottom", "both")
-    )
-}
-
-# Build site flags with GS0 included and without
-site_flags       <- compute_site_flags(discovery_std)
-site_flags_no_gs0 <- compute_site_flags(discovery_std %>% filter(toupper(caap_group) != "GS0"))
-
-# Helper: build a tidy summary table from a site_flags data frame.
-# include_gs0 controls whether GS0 rows are included.
-# filter_expr is a logical vector or NULL (NULL = all rows).
-build_focal_table <- function(sf, include_gs0 = TRUE, filter_mask = NULL) {
-  if (!is.null(filter_mask)) sf <- sf[filter_mask, ]
-
-  grp_rows <- function(g, label) {
-    gl <- g; nd <- paste0(g, "_nondiv"); dv <- paste0(g, "_div")
-    tibble(
-      Set             = c(paste0(label, " — global significant"),
-                          paste0(label, " — convergent (nondivergent)"),
-                          paste0(label, " — divergent")),
-      Description     = c(paste0("Significant (sig_both) positions in ", label),
-                          paste0("Significant nondivergent positions in ",  label),
-                          paste0("Significant divergent positions in ",     label)),
-      Positions_total = c(sum(sf[[gl]]),              sum(sf[[nd]]),              sum(sf[[dv]])),
-      Genes_total     = c(n_distinct(sf$gene[sf[[gl]]]), n_distinct(sf$gene[sf[[nd]]]), n_distinct(sf$gene[sf[[dv]]]))
-    )
-  }
-
-  pool_rows <- tibble(
-    Set             = c("Global pool", "Global significant pool",
-                        "Convergent pool (nondivergent)", "Divergent pool"),
-    Description     = c("All positions in any group",
-                        "Positions significant (sig_both) in any group",
-                        "Positions with sig nondivergent change in US or GS",
-                        "Positions with sig divergent change in US or GS"),
-    Positions_total = c(sum(sf$global), sum(sf$global_sig),
-                        sum(sf$convergent_pool), sum(sf$divergent_pool)),
-    Genes_total     = c(n_distinct(sf$gene[sf$global]),         n_distinct(sf$gene[sf$global_sig]),
-                        n_distinct(sf$gene[sf$convergent_pool]), n_distinct(sf$gene[sf$divergent_pool]))
+# For each site we need to know which groups it is present in and whether it is nondivergent.
+# We collapse to one row per (site_id, gene, position) with group-level presence/nondiv flags.
+site_flags_b <- discovery_b_std %>%
+  mutate(
+    caap_group_up = toupper(caap_group),
+    is_nondiv     = pattern_type != "divergent"
+  ) %>%
+  group_by(site_id, gene, position) %>%
+  summarise(
+    us_present    = any(caap_group_up == "US",  na.rm = TRUE),
+    us_nondiv     = any(caap_group_up == "US"  & is_nondiv, na.rm = TRUE),
+    gs_nondiv     = any(caap_group_up != "US"  & is_nondiv, na.rm = TRUE),
+    us_divergent  = any(caap_group_up == "US"  & !is_nondiv, na.rm = TRUE),
+    sig_both_any  = any(sig_both, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    set_us_nondiv_gs_nondiv   = us_nondiv  & gs_nondiv,
+    set_us_div_gs_nondiv      = us_divergent & gs_nondiv,
+    set_no_us_gs_nondiv       = !us_present  & gs_nondiv
   )
 
-  gs_groups <- if (include_gs0) c("gs0","gs1","gs2","gs3","gs4") else c("gs1","gs2","gs3","gs4")
-  gs_labels <- if (include_gs0) c("GS0","GS1","GS2","GS3","GS4") else c("GS1","GS2","GS3","GS4")
+focal_sets_summary <- tibble(
+  Set = c(
+    "US nondiv + GS nondiv",
+    "US div + GS nondiv",
+    "No US + GS nondiv"
+  ),
+  Description = c(
+    "Position nondivergent in US AND at least one GS group (GS1-4)",
+    "Position divergent in US but nondivergent in at least one GS group (GS1-4)",
+    "No US row; position nondivergent in at least one GS group (GS1-4)"
+  ),
+  Positions_total = c(
+    sum(site_flags_b$set_us_nondiv_gs_nondiv),
+    sum(site_flags_b$set_us_div_gs_nondiv),
+    sum(site_flags_b$set_no_us_gs_nondiv)
+  ),
+  Genes_total = c(
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_nondiv_gs_nondiv]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_div_gs_nondiv]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_no_us_gs_nondiv])
+  ),
+  Positions_sig_both = c(
+    sum(site_flags_b$set_us_nondiv_gs_nondiv  & site_flags_b$sig_both_any),
+    sum(site_flags_b$set_us_div_gs_nondiv     & site_flags_b$sig_both_any),
+    sum(site_flags_b$set_no_us_gs_nondiv      & site_flags_b$sig_both_any)
+  ),
+  Genes_sig_both = c(
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_nondiv_gs_nondiv  & site_flags_b$sig_both_any]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_us_div_gs_nondiv     & site_flags_b$sig_both_any]),
+    n_distinct(site_flags_b$gene[site_flags_b$set_no_us_gs_nondiv      & site_flags_b$sig_both_any])
+  )
+)
 
-  bind_rows(pool_rows, grp_rows("us", "US"), map2_dfr(gs_groups, gs_labels, grp_rows))
-}
+kable(focal_sets_summary,
+      caption = "Three focal US/GS nondivergence sets (GS0 excluded)") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
 
-# ── Six summary tables: {global | top | bottom} × {GS0 included | excluded} ───────
-
-make_and_print_focal_tables <- function(sf, label_suffix, include_gs0) {
-  # global (all significant positions)
-  tbl_g <- build_focal_table(sf, include_gs0 = include_gs0)
-  cat(sprintf("\n### %s — Global (all sig_both positions)\n\n", label_suffix))
-  print(kable(tbl_g, caption = paste("Focal sets — global —", label_suffix)) %>%
-    kable_styling(bootstrap_options = c("striped","hover","condensed")))
-  fname <- tolower(paste0("focal_sets_global_", gsub(" ", "_", label_suffix), ".tsv"))
-  write_tsv(tbl_g, file.path(disambig_dir, fname))
-
-  # top (change_side == top or both)
-  tbl_t <- build_focal_table(sf, include_gs0 = include_gs0, filter_mask = sf$is_top)
-  cat(sprintf("\n### %s — Top (change_side = top/both)\n\n", label_suffix))
-  print(kable(tbl_t, caption = paste("Focal sets — top —", label_suffix)) %>%
-    kable_styling(bootstrap_options = c("striped","hover","condensed")))
-  fname <- tolower(paste0("focal_sets_top_", gsub(" ", "_", label_suffix), ".tsv"))
-  write_tsv(tbl_t, file.path(disambig_dir, fname))
-
-  # bottom (change_side == bottom or both)
-  tbl_b <- build_focal_table(sf, include_gs0 = include_gs0, filter_mask = sf$is_bottom)
-  cat(sprintf("\n### %s — Bottom (change_side = bottom/both)\n\n", label_suffix))
-  print(kable(tbl_b, caption = paste("Focal sets — bottom —", label_suffix)) %>%
-    kable_styling(bootstrap_options = c("striped","hover","condensed")))
-  fname <- tolower(paste0("focal_sets_bottom_", gsub(" ", "_", label_suffix), ".tsv"))
-  write_tsv(tbl_b, file.path(disambig_dir, fname))
-
-  invisible(list(global = tbl_g, top = tbl_t, bottom = tbl_b))
-}
-
-# With GS0
-make_and_print_focal_tables(site_flags,        "GS0 included", include_gs0 = TRUE)
-# Without GS0
-make_and_print_focal_tables(site_flags_no_gs0, "GS0 excluded", include_gs0 = FALSE)
-
-cat("✓ Focal sets tables exported\n")
-
+write_tsv(focal_sets_summary, file.path(disambig_dir, "focal_sets_summary.tsv"))
+cat("✓ Focal sets summary exported\n")
 ```
 
 ## B.2 Removed positions by `pattern_type` and significance
 
 ```{r removed_pattern_sig}
+# removal_events itself is GS0-inclusive (diagnostic), but subsequent
+# characterisation uses discovery_b_std (GS0 excluded).
 if (nrow(removal_events) > 0) {
   by_pattern <- removal_events %>% count(RemovalStage, pattern_type, sort = TRUE)
   by_sig <- removal_events %>%
@@ -860,10 +801,13 @@ if (nrow(removal_events) > 0) {
 ## B.2b P-value distributions: removed vs retained positions
 
 ```{r pvalue_removed_vs_retained, fig.width=12, fig.height=9}
-if (nrow(discovery_std) > 0) {
+# Build a status-annotated dataset:
+# every position from discovery_b_std (GS0 excluded) gets "removed" if it
+# appears in removal_events, "retained" otherwise.
+if (nrow(discovery_b_std) > 0) {
   removed_site_ids <- if (nrow(removal_events) > 0) unique(removal_events$site_id) else character(0)
 
-  pval_df <- discovery_std %>%
+  pval_df <- discovery_b_std %>%
     mutate(
       filter_status = if_else(site_id %in% removed_site_ids, "removed", "retained"),
       filter_status = factor(filter_status, levels = c("retained", "removed"))
@@ -971,15 +915,22 @@ if (nrow(discovery_std) > 0) {
 ## B.3 Global change-pattern and significance characterization
 
 ```{r global_pattern_sig}
-# Focus on pattern_type distribution across CAAP groups, first globally then with significant-both focus
-pattern_by_group <- discovery_std %>% count(caap_group, pattern_type, sort = TRUE)
-kable(pattern_by_group, caption = "Convergence pattern by CAAP group") %>% kable_styling()
+# Uses discovery_b_std: GS0 excluded
+pattern_sig <- discovery_b_std %>%
+  group_by(pattern_type) %>%
+  summarise(n = n(), sig_hyp = sum(sig_hyp, na.rm = TRUE), sig_perm = sum(sig_perm, na.rm = TRUE), sig_both = sum(sig_both, na.rm = TRUE), .groups = "drop") %>%
+  arrange(desc(n))
+
+pattern_by_group <- discovery_b_std %>% count(caap_group, pattern_type, sort = TRUE)
+
+kable(pattern_sig, caption = "pattern_type counts and significance (all three criteria — GS0 excluded)") %>% kable_styling()
+kable(pattern_by_group, caption = "pattern_type by CAAP group (GS0 excluded)") %>% kable_styling()
 
 pg <- ggplot(pattern_by_group, aes(pattern_type, n, fill = caap_group)) +
   geom_col(position = "dodge") +
   scale_fill_paletteer_d("ggthemes::Tableau_10") +
   theme_minimal() +
-  labs(title = "Convergence pattern across CAAP groups (all)", x = "pattern_type", y = "n") +
+  labs(title = "pattern_type across CAAP groups (all)", x = "pattern_type", y = "n") +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 print(pg)
 ggsave(file.path(disambig_dir, "pattern_by_caap_group_all.png"), pg, width = 10, height = 6)
@@ -988,19 +939,26 @@ ggsave(file.path(disambig_dir, "pattern_by_caap_group_all.png"), pg, width = 10,
 ## B.3b Enhanced pattern_type analysis: Significant-both focus
 
 ```{r pattern_sig_both_focus}
-# Focus exclusively on significant-both cases
-pattern_by_group_sig_both <- discovery_std %>%
+# Focus exclusively on significant-both cases (GS0 excluded via discovery_b_std)
+pattern_sig_both <- discovery_b_std %>%
+  filter(sig_both) %>%
+  group_by(pattern_type) %>%
+  summarise(n_sig_both = n(), .groups = "drop") %>%
+  arrange(desc(n_sig_both))
+
+pattern_by_group_sig_both <- discovery_b_std %>%
   filter(sig_both) %>%
   count(caap_group, pattern_type, sort = TRUE)
 
-kable(pattern_by_group_sig_both, caption = "Convergence pattern by CAAP group (SIGNIFICANT-BOTH only)") %>% kable_styling()
+kable(pattern_sig_both, caption = "pattern_type counts for SIGNIFICANT-BOTH only") %>% kable_styling()
+kable(pattern_by_group_sig_both, caption = "pattern_type by CAAP group (SIGNIFICANT-BOTH only)") %>% kable_styling()
 
 if (nrow(pattern_by_group_sig_both) > 0) {
   pg_sig_both <- ggplot(pattern_by_group_sig_both, aes(pattern_type, n, fill = caap_group)) +
     geom_col(position = "dodge") +
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     theme_minimal() +
-    labs(title = "Convergence pattern across CAAP groups (SIGNIFICANT-BOTH only)", 
+    labs(title = "pattern_type across CAAP groups (SIGNIFICANT-BOTH only)", 
          subtitle = paste0("n = ", sum(pattern_by_group_sig_both$n), " significant-both positions"),
          x = "pattern_type", y = "n") +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
@@ -1013,9 +971,9 @@ if (nrow(pattern_by_group_sig_both) > 0) {
 
 ## B.4 Overlap across CAAP groupings (gene & position level)
 
-For each of two significance subsets (**all**, **sig_both**)
+For each of four significance subsets (**all**, **sig_hyp** p≤0.05, **sig_perm** p≤0.05, **sig_both**)
 two composite figures are produced: one at the **position** level (site_id = gene@position) and one at
-the **gene** level. Each figure shows a Venn diagram of group membership across US and GS0–GS4.
+the **gene** level. Each figure shows a Venn diagram of group membership across US and GS1–GS4.
 
 All figures are also saved to `disambiguation_characterization/overlap_figures/`.
 
@@ -1073,10 +1031,12 @@ make_overlap_plot <- function(df, id_col, level_label, subset_label, out_dir) {
 ```
 
 ```{r group_overlap_analysis_setup}
-# Four significance subsets — GS0 excluded (discovery_std)
+# Four significance subsets — GS0 excluded (discovery_b_std)
 overlap_subsets <- list(
-  all      = discovery_std,
-  sig_both = discovery_std %>% filter(sig_both)
+  all      = discovery_b_std,
+  sig_hyp  = discovery_b_std %>% filter(sig_hyp),
+  sig_perm = discovery_b_std %>% filter(sig_perm),
+  sig_both = discovery_b_std %>% filter(sig_both)
 )
 ```
 
@@ -1084,44 +1044,59 @@ overlap_subsets <- list(
 
 ```{r overlap_all, fig.width=14, fig.height=10}
 subset_name <- "all"
-sub_df_wo0 <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) != "GS0")
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
 
-sub_df_gs <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) != "US")
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
 
-sub_df_us0 <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) == "GS0" & toupper(caap_group) == "US")
-
-cat("Scenario 1 - US and GS groups (no GS0). Positions:", n_distinct(sub_df_wo0$site_id), " | Genes:", n_distinct(sub_df_wo0$gene),
-    " | Groups:", paste(sort(unique(sub_df_wo0$caap_group)), collapse = ", "), "\n\n")
-cat("Scenario 2 - GS groups only (US excluded). Positions:", n_distinct(sub_df_gs$site_id), " | Genes:", n_distinct(sub_df_gs$gene),
-    " | Groups:", paste(sort(unique(sub_df_gs$caap_group)), collapse = ", "), "\n\n")
-cat("Scenario 3 - US and GS0 only. Positions:", n_distinct(sub_df_us0$site_id), " | Genes:", n_distinct(sub_df_us0$gene),
-    " | Groups:", paste(sort(unique(sub_df_us0$caap_group)), collapse = ", "), "\n\n")
-
-cat("**Position-level overlap in Scenario 1 (US and GS groups, no GS0)**\n\n")
-p_pos <- make_overlap_plot(sub_df_wo0, "site_id", "Position", subset_name, overlap_out_dir)
-if (!is.null(p_pos)) print(p_pos)
-
-cat("**Position-level overlap in Scenario 2 (GS groups only, US excluded)**\n\n")
-p_pos <- make_overlap_plot(sub_df_gs, "site_id", "Position", subset_name, overlap_out_dir)
-if (!is.null(p_pos)) print(p_pos)
-
-cat("**Position-level overlap in Scenario 3 (US and GS0 only)**\n\n")
-p_pos <- make_overlap_plot(sub_df_us0, "site_id", "Position", subset_name, overlap_out_dir)
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
 if (!is.null(p_pos)) print(p_pos)
 ```
 
 ```{r overlap_all_gene, fig.width=14, fig.height=10}
-cat("**Gene-level overlap in Scenario 1 (US and GS groups, no GS0)**\n\n")
-p_gene <- make_overlap_plot(sub_df_wo0, "gene", "Gene", subset_name, overlap_out_dir)
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
 if (!is.null(p_gene)) print(p_gene)
-cat("**Gene-level overlap in Scenario 2 (GS groups only, US excluded)**\n\n")
-p_gene <- make_overlap_plot(sub_df_gs, "gene", "Gene", subset_name, overlap_out_dir)
+```
+
+### Subset: sig_hyp
+
+```{r overlap_sig_hyp, fig.width=14, fig.height=10}
+subset_name <- "sig_hyp"
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
+
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
+
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
+if (!is.null(p_pos)) print(p_pos)
+```
+
+```{r overlap_sig_hyp_gene, fig.width=14, fig.height=10}
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
 if (!is.null(p_gene)) print(p_gene)
-cat("**Gene-level overlap in Scenario 3 (US and GS0 only)**\n\n")
-p_gene <- make_overlap_plot(sub_df_us0, "gene", "Gene", subset_name, overlap_out_dir)
+```
+
+### Subset: sig_perm
+
+```{r overlap_sig_perm, fig.width=14, fig.height=10}
+subset_name <- "sig_perm"
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
+
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
+
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
+if (!is.null(p_pos)) print(p_pos)
+```
+
+```{r overlap_sig_perm_gene, fig.width=14, fig.height=10}
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
 if (!is.null(p_gene)) print(p_gene)
 ```
 
@@ -1129,65 +1104,44 @@ if (!is.null(p_gene)) print(p_gene)
 
 ```{r overlap_sig_both, fig.width=14, fig.height=10}
 subset_name <- "sig_both"
-sub_df_wo0 <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) != "GS0")
+sub_df <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group)
 
-sub_df_gs <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) != "US")
+cat("Positions:", n_distinct(sub_df$site_id), " | Genes:", n_distinct(sub_df$gene),
+    " | Groups:", paste(sort(unique(sub_df$caap_group)), collapse = ", "), "\n\n")
 
-sub_df_us0 <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) == "GS0" & toupper(caap_group) == "US")
-
-
-
-cat("Scenario 1 - US and GS groups (no GS0). Positions:", n_distinct(sub_df_wo0$site_id), " | Genes:", n_distinct(sub_df_wo0$gene),
-    " | Groups:", paste(sort(unique(sub_df_wo0$caap_group)), collapse = ", "), "\n\n")
-cat("Scenario 2 - GS groups only (US excluded). Positions:", n_distinct(sub_df_gs$site_id), " | Genes:", n_distinct(sub_df_gs$gene),
-    " | Groups:", paste(sort(unique(sub_df_gs$caap_group)), collapse = ", "), "\n\n")
-cat("Scenario 3 - US and GS0 only. Positions:", n_distinct(sub_df_us0$site_id), " | Genes:", n_distinct(sub_df_us0$gene),
-    " | Groups:", paste(sort(unique(sub_df_us0$caap_group)), collapse = ", "), "\n\n")
-
-cat("**Position-level overlap in Scenario 1 (US and GS groups, no GS0)**\n\n")
-p_pos <- make_overlap_plot(sub_df_wo0, "site_id", "Position", subset_name, overlap_out_dir)
-if (!is.null(p_pos)) print(p_pos)
-
-cat("**Position-level overlap in Scenario 2 (GS groups only, US excluded)**\n\n")
-p_pos <- make_overlap_plot(sub_df_gs, "site_id", "Position", subset_name, overlap_out_dir)
-if (!is.null(p_pos)) print(p_pos)
-
-cat("**Position-level overlap in Scenario 3 (US and GS0 only)**\n\n")
-p_pos <- make_overlap_plot(sub_df_us0, "site_id", "Position", subset_name, overlap_out_dir)
+cat("**Position-level overlap**\n\n")
+p_pos <- make_overlap_plot(sub_df, "site_id", "Position", subset_name, overlap_out_dir)
 if (!is.null(p_pos)) print(p_pos)
 ```
 
 ```{r overlap_sig_both_gene, fig.width=14, fig.height=10}
-cat("**Gene-level overlap in Scenario 1 (US and GS groups, no GS0)**\n\n")
-p_gene <- make_overlap_plot(sub_df_wo0, "gene", "Gene", subset_name, overlap_out_dir)
-if (!is.null(p_gene)) print(p_gene)
-cat("**Gene-level overlap in Scenario 2 (GS groups only, US excluded)**\n\n")
-p_gene <- make_overlap_plot(sub_df_gs, "gene", "Gene", subset_name, overlap_out_dir)
-if (!is.null(p_gene)) print(p_gene)
-cat("**Gene-level overlap in Scenario 3 (US and GS0 only)**\n\n")
-p_gene <- make_overlap_plot(sub_df_us0, "gene", "Gene", subset_name, overlap_out_dir)
+cat("**Gene-level overlap**\n\n")
+p_gene <- make_overlap_plot(sub_df, "gene", "Gene", subset_name, overlap_out_dir)
 if (!is.null(p_gene)) print(p_gene)
 ```
 
-## B.5 US/GS group intersections (upset plots + structured exports)
+## B.5 US/GS non-divergence/divergence relations (upset-like + structured exports)
 
-```{r us_gs_relation_analysis, fig.height=27, fig.width=16}
-# collapse_change_side and combo_from_flags are defined in setup.
+```{r us_gs_relation_analysis, fig.height=9, fig.width=14}
+collapse_change_side <- function(x) {
+  x <- tolower(as.character(x))
+  x <- x[x %in% c("top", "bottom", "both")]
+  if (length(x) == 0) return("none")
+  if ("both" %in% x) return("both")
+  ux <- unique(x)
+  if (all(c("top", "bottom") %in% ux)) return("both")
+  ux[[1]]
+}
 
-# ── Upset helper: build bar + membership-matrix composite and return it ────────
-plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file = NULL) {
-  if (is.null(intersections_df) || nrow(intersections_df) == 0) return(invisible(NULL))
+combo_from_flags <- function(df, cols) {
+  apply(df[, cols, drop = FALSE], 1, function(v) {
+    labs <- cols[as.logical(v)]
+    if (length(labs) == 0) "none" else paste(labs, collapse = "+")
+  })
+}
 
-  label_map <- c(
-    us = "US", gs0 = "GS0", gs1 = "GS1", gs2 = "GS2", gs3 = "GS3", gs4 = "GS4",
-    us_nondiv = "US nondiv",   gs0_nondiv = "GS0 nondiv", gs1_nondiv = "GS1 nondiv",
-    gs2_nondiv = "GS2 nondiv", gs3_nondiv = "GS3 nondiv", gs4_nondiv = "GS4 nondiv",
-    us_div = "US div",   gs0_div = "GS0 div", gs1_div = "GS1 div",
-    gs2_div = "GS2 div", gs3_div = "GS3 div", gs4_div = "GS4 div"
-  )
+plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file) {
+  if (nrow(intersections_df) == 0) return(invisible(NULL))
 
   plot_df <- intersections_df %>%
     arrange(desc(n), combo_label) %>%
@@ -1195,150 +1149,372 @@ plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file = NU
 
   p_bar <- ggplot(plot_df, aes(x = combo_id, y = n)) +
     geom_col(fill = tableau_10[["blue"]], color = "black", linewidth = 0.2) +
-    geom_text(aes(label = n), vjust = -0.4, size = 3.5, angle = 90) +
+    geom_text(aes(label = n), vjust = -0.4, size = 4.5) +
     labs(title = title_txt, x = NULL, y = "Intersection size") +
-    theme_minimal(base_size = 13) +
-    theme(axis.text.x = element_blank(), axis.ticks.x = element_blank(),
-          plot.title = element_text(face = "bold", size = 13), axis.title = element_text(size = 12))
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x  = element_blank(),
+      axis.ticks.x = element_blank(),
+      plot.title   = element_text(face = "bold", size = 15),
+      axis.title   = element_text(size = 13)
+    )
 
   mat_long <- plot_df %>%
     select(combo_id, all_of(set_cols)) %>%
     pivot_longer(cols = all_of(set_cols), names_to = "set_name", values_to = "present") %>%
-    mutate(set_label = recode(set_name, !!!label_map, .default = set_name),
-           set_label = factor(set_label, levels = rev(unname(label_map[set_cols]))))
+    mutate(
+      set_name = case_when(
+        set_name == "us_nondiv" ~ "US_nondiv",
+        set_name == "us_divergent" ~ "US_div",
+        set_name == "gs_div_grp" ~ "GS(1-4)_div",
+        set_name == "gs_nondiv_grp" ~ "GS(1-4)_nondiv",
+        set_name == "gs0_div" ~ "GS0_div",
+        set_name == "gs0_nondiv" ~ "GS0_nondiv",
+        str_detect(set_name, "^nondiv_GS") ~ str_replace(set_name, "^nondiv_", "") %>% paste0("_nondiv"),
+        str_detect(set_name, "^div_GS") ~ str_replace(set_name, "^div_", "") %>% paste0("_div"),
+        TRUE ~ set_name
+      )
+    )
 
-  p_mat <- ggplot(mat_long, aes(x = combo_id, y = set_label, fill = present)) +
+  p_mat <- ggplot(mat_long, aes(x = combo_id, y = set_name, fill = present)) +
     geom_tile(color = "white", linewidth = 0.3) +
     scale_fill_manual(values = c(`TRUE` = tableau_10[["vermillion"]], `FALSE` = "#eeeeee")) +
-    labs(x = "Intersections", y = NULL) +
-    theme_minimal(base_size = 13) +
-    theme(legend.position = "none", axis.text.x = element_blank(), axis.ticks.x = element_blank(),
-          axis.text.y = element_text(size = 11), axis.title = element_text(size = 12))
+    labs(x = "Intersections", y = "Set") +
+    theme_minimal(base_size = 14) +
+    theme(
+      legend.position  = "none",
+      axis.text.x      = element_blank(),
+      axis.ticks.x     = element_blank(),
+      axis.text.y      = element_text(size = 12),
+      axis.title       = element_text(size = 13)
+    )
 
   p <- p_bar / p_mat + plot_layout(heights = c(2.2, 1.3))
-  if (!is.null(out_file)) ggsave(out_file, p, width = 16, height = 9, dpi = 320)
-  invisible(p)
+  print(p)
+  ggsave(out_file, p, width = 16, height = 9, dpi = 320)
 }
 
-# ── Export helper ──────────────────────────────────────────────────────────────
-write_export_pair <- function(df, key, txt_d, tsv_d) {
-  createDir(txt_d); createDir(tsv_d)
-  base_cols <- intersect(c("gene", "position", "caap_group", "pattern_type", "change_side"), names(df))
-  out_df <- df %>% select(all_of(base_cols)) %>% distinct() %>% arrange(gene, position)
-  readr::write_lines(sort(unique(out_df$gene)), file.path(txt_d, paste0(key, ".txt")))
-  write_tsv(out_df, file.path(tsv_d, paste0(key, ".tsv")))
+write_export_pair <- function(df, key, txt_dir, tsv_dir) {
+  createDir(txt_dir)
+  createDir(tsv_dir)
+  base_cols <- c("gene", "position", "CAAP_group", "change_pattern", "change_side")
+
+  out_df <- df %>% select(all_of(base_cols)) %>% distinct() %>% arrange(gene, position, CAAP_group)
+  genes <- out_df %>% distinct(gene) %>% arrange(gene)
+
+  readr::write_lines(genes$gene, file.path(txt_dir, paste0(key, ".txt")))
+  write_tsv(out_df, file.path(tsv_dir, paste0(key, ".tsv")))
 }
 
-# ── Output directories ─────────────────────────────────────────────────────────
-gene_rel_dir  <- file.path(disambig_dir, "gene_relation_analysis")
-gr_plot_dir   <- file.path(gene_rel_dir,  "plots")
-gr_txt_dir    <- file.path(gene_rel_dir,  "txt")
-gr_tsv_dir    <- file.path(gene_rel_dir,  "tsv")
-createDir(gr_plot_dir); createDir(gr_txt_dir); createDir(gr_tsv_dir)
+us_gs_dir <- file.path(disambig_dir, "us_gs_relations")
+us_gs_plot_dir <- file.path(us_gs_dir, "plots")
+us_gs_export_dir <- file.path(us_gs_dir, "exports")
+us_gs_txt_dir <- file.path(us_gs_export_dir, "txt")
+us_gs_tsv_dir <- file.path(us_gs_export_dir, "tsv")
+createDir(us_gs_dir)
+createDir(us_gs_plot_dir)
+createDir(us_gs_export_dir)
+createDir(us_gs_txt_dir)
+createDir(us_gs_tsv_dir)
 
-# ── Set definitions ────────────────────────────────────────────────────────────
-grp_sets_global <- c("us", "gs0", "gs1", "gs2", "gs3", "gs4")
-grp_sets_nondiv <- c("us_nondiv", "gs0_nondiv", "gs1_nondiv", "gs2_nondiv", "gs3_nondiv", "gs4_nondiv")
-grp_sets_div    <- c("us_div",    "gs0_div",    "gs1_div",    "gs2_div",    "gs3_div",    "gs4_div")
+gs_all <- c("GS0", "GS1", "GS2", "GS3", "GS4")
+gs_core <- c("GS1", "GS2", "GS3", "GS4")
 
-make_intersections <- function(sf, set_cols) {
-  sf %>%
-    count(across(all_of(set_cols)), name = "n") %>%
-    mutate(combo_label = combo_from_flags(cur_data(), set_cols)) %>%
-    filter(n > 0)
+# B.5 uses discovery_b_std (GS0 excluded) as input for all site_group logic.
+# GS0 columns (nondiv_GS0, present_GS0, etc.) will be FALSE / absent by default.
+site_group <- discovery_b_std %>%
+  mutate(
+    caap_group = toupper(caap_group),
+    is_nondiv = pattern_type != "divergent"
+  ) %>%
+  group_by(site_id, gene, position, caap_group) %>%
+  summarise(
+    nondiv = any(is_nondiv, na.rm = TRUE),
+    sig_both = any(sig_both, na.rm = TRUE),
+    is_conserved_meta = any(is_conserved_meta, na.rm = TRUE),
+    change_side = collapse_change_side(change_side),
+    .groups = "drop"
+  )
+
+site_nondiv_wide <- site_group %>%
+  filter(caap_group %in% c("US", gs_all)) %>%
+  select(site_id, gene, position, caap_group, nondiv) %>%
+  distinct() %>%
+  pivot_wider(names_from = caap_group, values_from = nondiv, values_fill = FALSE, names_prefix = "nondiv_")
+
+site_present_wide <- site_group %>%
+  filter(caap_group %in% c("US", gs_all)) %>%
+  mutate(present = TRUE) %>%
+  select(site_id, gene, position, caap_group, present) %>%
+  distinct() %>%
+  pivot_wider(names_from = caap_group, values_from = present, values_fill = FALSE, names_prefix = "present_")
+
+site_meta <- site_group %>%
+  filter(caap_group %in% c("US", gs_all)) %>%
+  group_by(site_id, gene, position) %>%
+  summarise(
+    us_present = any(caap_group == "US"),
+    us_sig_both = any(sig_both[caap_group == "US"], na.rm = TRUE),
+    us_change_side = collapse_change_side(change_side[caap_group == "US"]),
+    gs_sig_both = any(sig_both[caap_group %in% gs_all], na.rm = TRUE),
+    gs_change_side = collapse_change_side(change_side[caap_group %in% gs_all]),
+    is_conserved_meta = any(is_conserved_meta, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    sig_both_ref = if_else(us_present, us_sig_both, gs_sig_both),
+    change_side_ref = case_when(
+      us_present & us_change_side %in% c("top", "bottom", "both") ~ us_change_side,
+      !us_present & gs_change_side %in% c("top", "bottom", "both") ~ gs_change_side,
+      TRUE ~ "none"
+    )
+  )
+
+site_matrix <- site_nondiv_wide %>%
+  left_join(site_present_wide, by = c("site_id", "gene", "position")) %>%
+  left_join(site_meta, by = c("site_id", "gene", "position"))
+
+for (g in c("US", gs_all)) {
+  nd <- paste0("nondiv_", g)
+  pr <- paste0("present_", g)
+  if (!nd %in% names(site_matrix)) site_matrix[[nd]] <- FALSE
+  if (!pr %in% names(site_matrix)) site_matrix[[pr]] <- FALSE
 }
 
-# ── Three upset figures: global / top / bottom ─────────────────────────────────
-upset_orientations <- list(
-  global = site_flags,
-  top    = site_flags[site_flags$is_top, ],
-  bottom = site_flags[site_flags$is_bottom, ]
+site_matrix <- site_matrix %>%
+  mutate(
+    us_nondiv = nondiv_US,
+    us_divergent = us_present & !nondiv_US,
+    div_GS0 = present_GS0 & !nondiv_GS0,
+    div_GS1 = present_GS1 & !nondiv_GS1,
+    div_GS2 = present_GS2 & !nondiv_GS2,
+    div_GS3 = present_GS3 & !nondiv_GS3,
+    div_GS4 = present_GS4 & !nondiv_GS4,
+    gs_div_grp = rowSums(across(all_of(paste0("div_GS", 1:4)), as.integer), na.rm = TRUE) > 0,
+    gs_nondiv_grp = rowSums(across(all_of(paste0("nondiv_GS", 1:4)), as.integer), na.rm = TRUE) > 0,
+    gs0_div = div_GS0,
+    gs0_nondiv = nondiv_GS0,
+    gs_any_nondiv = rowSums(across(all_of(paste0("nondiv_", gs_all)), as.integer), na.rm = TRUE) > 0,
+    gs_any_nondiv_core = rowSums(across(all_of(paste0("nondiv_", gs_core)), as.integer), na.rm = TRUE) > 0,
+    gs0_poisoned = present_GS0,
+    
+    # Enhanced exclusion criteria - positions to EXCLUDE from us_gs union:
+    # 1. div_us + any_div_gs1-4 + nondiv_gs0
+    exclude_case1 = us_divergent & gs_div_grp & gs0_nondiv,
+    # 2. no_us + gs0_only (no other GS activity)
+    exclude_case2 = !us_present & present_GS0 & !rowSums(across(all_of(paste0("present_", gs_core)), as.integer), na.rm = TRUE) > 0,
+    # 3. no_us + any_div_gs1-4 + nondiv_gs0
+    exclude_case3 = !us_present & gs_div_grp & gs0_nondiv,
+    
+    # General exclusion flag
+    exclude_from_us_gs_union = exclude_case1 | exclude_case2 | exclude_case3,
+    
+    # Original case definitions (maintained for compatibility)
+    case_us_nondiv_total = us_nondiv,
+    case_us_nondiv_and_gs_nondiv = us_nondiv & gs_any_nondiv_core,
+    case_us_div_and_gs_nondiv = us_divergent & gs_any_nondiv_core,
+    case_gs_nondiv_no_us_excl_gs0 = !us_present & gs_any_nondiv_core & !gs0_poisoned,
+    
+    # Enhanced us_gs union: include valid cases and exclude problematic patterns
+    case_us_gs_union = (case_us_nondiv_total | case_us_nondiv_and_gs_nondiv | case_us_div_and_gs_nondiv) & !exclude_from_us_gs_union,
+    
+    # Individual GS group cases for separate unions
+    case_nondiv_us = us_nondiv,
+    case_nondiv_gs0 = nondiv_GS0 & present_GS0,
+    case_nondiv_gs1 = nondiv_GS1 & present_GS1,
+    case_nondiv_gs2 = nondiv_GS2 & present_GS2,
+    case_nondiv_gs3 = nondiv_GS3 & present_GS3,
+    case_nondiv_gs4 = nondiv_GS4 & present_GS4
+  )
+
+# New plot: number of is_conserved_meta=TRUE CAAS per case
+conserved_case_counts <- site_matrix %>%
+  filter(is_conserved_meta) %>%
+  summarise(
+    case_us_nondiv_total = sum(case_us_nondiv_total, na.rm = TRUE),
+    case_us_nondiv_and_gs_nondiv = sum(case_us_nondiv_and_gs_nondiv, na.rm = TRUE),
+    case_us_div_and_gs_nondiv = sum(case_us_div_and_gs_nondiv, na.rm = TRUE),
+    case_gs_nondiv_no_us_excl_gs0 = sum(case_gs_nondiv_no_us_excl_gs0, na.rm = TRUE)
+  ) %>%
+  pivot_longer(everything(), names_to = "case", values_to = "n_conserved_meta") %>%
+  mutate(
+    case = recode(
+      case,
+      case_us_nondiv_total = "US nondiv total",
+      case_us_nondiv_and_gs_nondiv = "US nondiv + GS nondiv",
+      case_us_div_and_gs_nondiv = "US div + GS nondiv",
+      case_gs_nondiv_no_us_excl_gs0 = "GS nondiv no US (excl GS0)"
+    ),
+    case = forcats::fct_reorder(case, n_conserved_meta, .desc = TRUE)
+  )
+
+p_conserved_case_counts <- ggplot(conserved_case_counts, aes(x = case, y = n_conserved_meta, fill = case)) +
+  geom_col(color = "black", linewidth = 0.25) +
+  geom_text(aes(label = n_conserved_meta), vjust = -0.3, size = 3.5) +
+  scale_fill_paletteer_d("ggthemes::Tableau_10") +
+  labs(
+    title = "Number of is_conserved_meta = TRUE CAAS per US/GS case",
+    x = "Case",
+    y = "Count"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "none", axis.text.x = element_text(angle = 20, hjust = 1))
+
+print(p_conserved_case_counts)
+ggsave(file.path(us_gs_plot_dir, "conserved_meta_true_counts_by_case.png"), p_conserved_case_counts, width = 10, height = 6, dpi = 320)
+
+# Upset 1: GS1..GS4 divergent grouped, GS0 divergent separate
+upset_sets <- c("us_nondiv", "us_divergent", paste0("nondiv_", gs_all), "gs_div_grp", "gs0_div")
+
+upset_intersections <- site_matrix %>%
+  count(across(all_of(upset_sets)), name = "n") %>%
+  mutate(combo_label = combo_from_flags(cur_data(), upset_sets)) %>%
+  filter(n > 0)
+
+plot_upset_like(
+  intersections_df = upset_intersections,
+  set_cols = upset_sets,
+  title_txt = "US/GS upset-like intersections (GS1..GS4 div grouped; GS0 div separate)",
+  out_file = file.path(us_gs_plot_dir, "us_gs_upset_like_global.png")
 )
 
-for (ori_name in names(upset_orientations)) {
-  sf_ori <- upset_orientations[[ori_name]]
-  ori_label <- tools::toTitleCase(ori_name)
+# Upset 2: grouped GS1..GS4 non-div and div, plus GS0 non-div/div
+upset_sets_grouped <- c("us_divergent", "us_nondiv", "gs_div_grp", "gs_nondiv_grp", "gs0_div", "gs0_nondiv")
+upset_intersections_grouped <- site_matrix %>%
+  count(across(all_of(upset_sets_grouped)), name = "n") %>%
+  mutate(combo_label = combo_from_flags(cur_data(), upset_sets_grouped)) %>%
+  filter(n > 0)
 
-  p_all   <- plot_upset_like(make_intersections(sf_ori, grp_sets_global),
-                             grp_sets_global, paste0("Global significant (", ori_label, ")"),
-                             out_file = file.path(gr_plot_dir, paste0("upset_global_", ori_name, ".png")))
-  p_nondiv <- plot_upset_like(make_intersections(sf_ori, grp_sets_nondiv),
-                              grp_sets_nondiv, paste0("Nondivergent / convergent (", ori_label, ")"),
-                              out_file = file.path(gr_plot_dir, paste0("upset_nondiv_", ori_name, ".png")))
-  p_div   <- plot_upset_like(make_intersections(sf_ori, grp_sets_div),
-                             grp_sets_div, paste0("Divergent (", ori_label, ")"),
-                             out_file = file.path(gr_plot_dir, paste0("upset_div_", ori_name, ".png")))
+plot_upset_like(
+  intersections_df = upset_intersections_grouped,
+  set_cols = upset_sets_grouped,
+  title_txt = "US/GS upset-like intersections (US_div, US_nondiv, GS_div, GS_nondiv, GS0_div, GS0_nondiv)",
+  out_file = file.path(us_gs_plot_dir, "us_gs_upset_like_grouped_gs14.png")
+)
 
-  plots_valid <- Filter(Negate(is.null), list(p_all, p_nondiv, p_div))
-  if (length(plots_valid) > 0) {
-    combined <- wrap_plots(plots_valid, ncol = 1) +
-      plot_annotation(
-        title = paste0("US/GS group intersections — ", ori_label),
-        theme = theme(plot.title = element_text(face = "bold", size = 16))
-      )
-    print(combined)
-    ggsave(file.path(gr_plot_dir, paste0("us_gs_upset_", ori_name, ".png")),
-           combined, width = 16, height = 9 * length(plots_valid), dpi = 320)
+for (cs in c("top", "bottom", "both")) {
+  cs_intersections <- site_matrix %>%
+    filter(change_side_ref == cs) %>%
+    count(across(all_of(upset_sets)), name = "n") %>%
+    mutate(combo_label = combo_from_flags(cur_data(), upset_sets)) %>%
+    filter(n > 0)
+
+  if (nrow(cs_intersections) > 0) {
+    plot_upset_like(
+      intersections_df = cs_intersections,
+      set_cols = upset_sets,
+      title_txt = paste0("US/GS upset-like intersections (change_side=", cs, ")"),
+      out_file = file.path(us_gs_plot_dir, paste0("us_gs_upset_like_change_side_", cs, ".png"))
+    )
   }
-
-  cat("✓ Upset figure:", ori_name, "| n =", nrow(sf_ori), "sites\n")
 }
 
-# ── Structured exports: per group × global / top / bottom × sig_both ──────────
-# detail_rows: one row per position × CAAP group (for export files)
-detail_rows <- discovery_std %>%
+detail_rows <- discovery_b_std %>%
   transmute(
     site_id,
     gene,
     position,
-    caap_group = toupper(caap_group),
-    pattern_type,
-    change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none"),
-    sig_both
+    CAAP_group = toupper(caap_group),
+    change_pattern = pattern_type,
+    change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none")
   ) %>%
   distinct()
 
-# Join site-level flags back to detail rows for filtering
-detail_with_flags <- detail_rows %>%
-  left_join(
-    site_flags %>% select(site_id, is_top, is_bottom,
-                          us, gs0, gs1, gs2, gs3, gs4,
-                          us_nondiv, gs0_nondiv, gs1_nondiv, gs2_nondiv, gs3_nondiv, gs4_nondiv,
-                          us_div,    gs0_div,    gs1_div,    gs2_div,    gs3_div,    gs4_div),
-    by = "site_id"
-  ) %>%
-  mutate(across(where(is.logical), ~ replace_na(.x, FALSE)))
+site_flags <- site_matrix %>%
+  transmute(
+    site_id,
+    sig_both_ref,
+    change_side_ref,
+    case_us_nondiv_total,
+    case_us_div_and_gs_nondiv,
+    case_gs_nondiv_no_us_excl_gs0,
+    case_nondiv_us,
+    case_nondiv_gs1,
+    case_nondiv_gs2,
+    case_nondiv_gs3,
+    case_nondiv_gs4
+  )
 
-# Export per group (US, GS0–GS4) across orientations
-export_groups <- list(
-  us  = "us",  gs0 = "gs0",
-  gs1 = "gs1", gs2 = "gs2", gs3 = "gs3", gs4 = "gs4"
+detail_with_flags <- detail_rows %>%
+  left_join(site_flags, by = "site_id") %>%
+  mutate(
+    sig_both_ref               = replace_na(sig_both_ref, FALSE),
+    change_side_ref            = replace_na(change_side_ref, "none"),
+    case_us_nondiv_total       = replace_na(case_us_nondiv_total, FALSE),
+    case_us_div_and_gs_nondiv  = replace_na(case_us_div_and_gs_nondiv, FALSE),
+    case_gs_nondiv_no_us_excl_gs0 = replace_na(case_gs_nondiv_no_us_excl_gs0, FALSE),
+    case_nondiv_us             = replace_na(case_nondiv_us, FALSE),
+    case_nondiv_gs1            = replace_na(case_nondiv_gs1, FALSE),
+    case_nondiv_gs2            = replace_na(case_nondiv_gs2, FALSE),
+    case_nondiv_gs3            = replace_na(case_nondiv_gs3, FALSE),
+    case_nondiv_gs4            = replace_na(case_nondiv_gs4, FALSE)
+  )
+
+# ── Three-criteria global exports ────────────────────────────────────────────
+# Criteria:
+#   1. US nondiv only       (case_us_nondiv_total)
+#   2. US div + GS nondiv   (case_us_div_and_gs_nondiv)
+#   3. No US + GS nondiv    (case_gs_nondiv_no_us_excl_gs0)
+main_criteria <- detail_with_flags %>%
+  filter(case_us_nondiv_total | case_us_div_and_gs_nondiv | case_gs_nondiv_no_us_excl_gs0)
+
+write_export_pair(main_criteria, "global", us_gs_txt_dir, us_gs_tsv_dir)
+write_export_pair(
+  main_criteria %>% filter(sig_both_ref),
+  "global_significant", us_gs_txt_dir, us_gs_tsv_dir
+)
+write_export_pair(
+  main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("top", "both")),
+  "top_significant", us_gs_txt_dir, us_gs_tsv_dir
+)
+write_export_pair(
+  main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("bottom", "both")),
+  "bottom_significant", us_gs_txt_dir, us_gs_tsv_dir
 )
 
-for (grp_name in names(export_groups)) {
-  gc  <- export_groups[[grp_name]]
-  gc_nd <- paste0(gc, "_nondiv")
-  gc_dv <- paste0(gc, "_div")
+cat("\n✓ Global exports:\n")
+cat("  global:", nrow(main_criteria), "\n")
+cat("  global_significant:", nrow(main_criteria %>% filter(sig_both_ref)), "\n")
+cat("  top_significant:", nrow(main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("top","both"))), "\n")
+cat("  bottom_significant:", nrow(main_criteria %>% filter(sig_both_ref, change_side_ref %in% c("bottom","both"))), "\n\n")
 
-  for (ori_name in c("global", "top", "bottom")) {
-    ori_mask <- switch(ori_name,
-      global = rep(TRUE, nrow(detail_with_flags)),
-      top    = detail_with_flags$is_top,
-      bottom = detail_with_flags$is_bottom
-    )
-    base_df  <- detail_with_flags[ori_mask & detail_with_flags$sig_both, ]
+# ── Individual group exports (US, GS1–GS4) — significant-only ─────────────────
+individual_cases <- list(
+  "us"  = detail_with_flags %>% filter(case_nondiv_us),
+  "gs1" = detail_with_flags %>% filter(case_nondiv_gs1),
+  "gs2" = detail_with_flags %>% filter(case_nondiv_gs2),
+  "gs3" = detail_with_flags %>% filter(case_nondiv_gs3),
+  "gs4" = detail_with_flags %>% filter(case_nondiv_gs4)
+)
 
-    write_export_pair(base_df[base_df[[gc]],    ], paste0(grp_name, "_sig_",  ori_name), gr_txt_dir, gr_tsv_dir)
-    write_export_pair(base_df[base_df[[gc_nd]], ], paste0(grp_name, "_nondiv_", ori_name), gr_txt_dir, gr_tsv_dir)
-    write_export_pair(base_df[base_df[[gc_dv]], ], paste0(grp_name, "_div_",  ori_name), gr_txt_dir, gr_tsv_dir)
-  }
-  cat("✓ Exports:", grp_name, "\n")
+for (case_name in names(individual_cases)) {
+  case_df <- individual_cases[[case_name]]
+  sig_df  <- case_df %>% filter(sig_both_ref)
+  write_export_pair(sig_df,
+    paste0(case_name, "_significant"), us_gs_txt_dir, us_gs_tsv_dir)
+  write_export_pair(
+    sig_df %>% filter(change_side_ref %in% c("top", "both")),
+    paste0(case_name, "_top_significant"), us_gs_txt_dir, us_gs_tsv_dir)
+  write_export_pair(
+    sig_df %>% filter(change_side_ref %in% c("bottom", "both")),
+    paste0(case_name, "_bottom_significant"), us_gs_txt_dir, us_gs_tsv_dir)
+  cat("✓", case_name,
+    "| total:", nrow(case_df),
+    "| sig:", nrow(sig_df),
+    "| top-sig:", nrow(sig_df %>% filter(change_side_ref %in% c("top","both"))),
+    "| bottom-sig:", nrow(sig_df %>% filter(change_side_ref %in% c("bottom","both"))), "\n")
 }
 
-cat("\n✓ All B.5 upset plots and exports generated\n")
-cat("  Plots:", gr_plot_dir, "\n")
-cat("  TXT:  ", gr_txt_dir,  "\n")
-cat("  TSV:  ", gr_tsv_dir,  "\n\n")
+cat("
+✓ US/GS upset-like plots and exports generated:
+")
+cat("  Plots:", us_gs_plot_dir, "
+")
+cat("  TXT:", us_gs_txt_dir, "
+")
+cat("  TSV:", us_gs_tsv_dir, "
+
+")
 ```
 
 ## B.6 Manhattan: genomic distribution of genes (CAAS density per gene length)

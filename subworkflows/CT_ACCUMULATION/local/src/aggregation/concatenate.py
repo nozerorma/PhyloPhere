@@ -5,10 +5,14 @@ Aggregator — adapted for CT_ACCUMULATION in PhyloPhere.
 Changes vs. original to_integrate version:
   - read_species_list(): reads 3-col headerless traitfile (species, trait, pair);
     assigns contrast = 1 for every entry (single group accumulation mode).
-  - read_metadata_caas(): auto-detects global_meta_caas.tsv layout produced by
-    CT_SIGNIFICATION (columns: Gene, Position, sig_both/isSignificant, CAAP_Group,
-    IsConserved, AminoConv, Pvalue, Pvalue.boot, Tag, Pattern).
-    Falls back to the original 4-col layout for standalone usage.
+  - read_metadata_caas(): reads filtered_discovery.tsv produced by CT_POSTPROC.
+    Columns are the unique source of truth:
+      Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
+      convergence_description, convergence_mode, CAAP_Group, amino_encoded,
+      is_conserved_meta, conserved_pair, sig_hyp, sig_perm, sig_both,
+      top_change_type, bottom_change_type, change_side, low_confidence_nodes,
+      asr_is_conserved, comments, ..., Trait
+    No fallback to legacy formats.
 """
 
 import argparse
@@ -132,31 +136,18 @@ def read_bg_info(bg_file):
     return genes
 
 
-def _detect_meta_caas_format(headers):
-    """Return 'signification' if this looks like a global_meta_caas.tsv, else 'original'."""
-    h = set(h.strip() for h in headers)
-    # global_meta_caas.tsv has Gene, Position, and either sig_both or isSignificant
-    if ('Gene' in h or 'gene' in h) and ('Position' in h or 'position' in h):
-        if 'sig_both' in h or 'isSignificant' in h or 'is_significant' in h:
-            return 'signification'
-    return 'original'
-
-
 def read_metadata_caas(metadata_file):
-    """Read CAAS metadata.
+    """Read CAAS metadata from a filtered_discovery.tsv file.
 
-    Supports two formats:
+    Source-of-truth columns (tab-separated):
+      Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
+      convergence_description, convergence_mode, CAAP_Group, amino_encoded,
+      is_conserved_meta, conserved_pair, sig_hyp, sig_perm, sig_both,
+      top_change_type, bottom_change_type, change_side, low_confidence_nodes,
+      asr_is_conserved, comments, ..., Trait
 
-    **original** — original format with GenePos (gene_pos), Tag, Pattern, AminoConv,
-      Pvalue, isSignificant, optional Pvalue.boot, optional contrast/group column.
-
-    **signification** — global_meta_caas.tsv from CT_SIGNIFICATION with columns:
-      Tag, GenePos, Gene, Position, Pattern, [CAAP_Group,] Pvalue, Pvalue.boot,
-      sig_hyp, sig_perm, sig_both, IsConserved, AminoConv, etc.
-      isSignificant is mapped from sig_both (or isSignificant if present).
-      group is mapped from CAAP_Group (defaults to '1').
-
-    Returns: dict[group][gene][msa_pos] = {tag, Pattern, AminoConv, Pvalue, Pvalue.boot, isSignificant}
+    Returns: dict[group][gene][msa_pos] = {tag, Pattern, amino_encoded, Pvalue,
+                                           pvalue_boot, isSignificant}
     """
     logging.info(f"Reading metadata CAAS from {metadata_file if metadata_file else 'None'}")
     metadata = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
@@ -166,118 +157,32 @@ def read_metadata_caas(metadata_file):
 
     with open(metadata_file) as f:
         raw_header = f.readline().strip()
-        # Support comma or tab delimited
         sep = '\t' if '\t' in raw_header else ','
-        headers = raw_header.split(sep)
-        fmt = _detect_meta_caas_format(headers)
-        logging.info(f"  Meta-CAAS format detected: {fmt}")
+        h = raw_header.split(sep)
 
-        if fmt == 'signification':
-            # ---- signification format (global_meta_caas.tsv) ----
-            h = headers
-            def _idx(names, required=True):
-                for n in names:
-                    if n in h:
-                        return h.index(n)
-                if required:
-                    raise KeyError(f"None of {names} found in header: {h}")
-                return None
+        gene_idx          = h.index('Gene')
+        pos_idx           = h.index('Position')
+        tag_idx           = h.index('tag')
+        pattern_idx       = h.index('Pattern')
+        amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
+        pvalue_idx        = h.index('Pvalue')
+        sig_idx           = h.index('sig_both')
+        pboot_idx         = h.index('pvalue_boot') if 'pvalue_boot' in h else None
+        group_idx         = h.index('CAAP_Group')
+        conserved_idx     = h.index('is_conserved_meta') if 'is_conserved_meta' in h else None
+        asr_conserved_idx = h.index('asr_is_conserved') if 'asr_is_conserved' in h else None
 
-            gene_idx      = _idx(['Gene', 'gene'])
-            pos_idx       = _idx(['Position', 'position'])
-            tag_idx       = _idx(['Tag', 'tag'])
-            pattern_idx   = _idx(['Pattern', 'pattern'])
-            amino_idx     = _idx(['AminoConv', 'amino_conv'], required=False)
-            pvalue_idx    = _idx(['Pvalue', 'pvalue'])
-            sig_idx          = _idx(['sig_both', 'isSignificant', 'is_significant'])
-            pboot_idx        = _idx(['Pvalue.boot', 'pvalue_boot'], required=False)
-            group_idx        = _idx(['CAAP_Group', 'caap_group', 'Group', 'group'], required=False)
-            conserved_idx    = _idx(['IsConserved', 'is_conserved_meta'], required=False)
-            asr_conserved_idx = _idx(['ASR_ConsAntiCAAS', 'asr_is_conserved'], required=False)
-
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                parts = line.split(sep)
-                try:
-                    gene      = parts[gene_idx].strip()
-                    msa_pos   = int(float(parts[pos_idx].strip()))
-                    tag       = parts[tag_idx].strip() if tag_idx is not None else ''
-                    pattern   = parts[pattern_idx].strip() if pattern_idx is not None else ''
-                    amino_conv = parts[amino_idx].strip() if amino_idx is not None else ''
-                    try:
-                        caas_pval = float(parts[pvalue_idx])
-                    except Exception:
-                        caas_pval = float('inf')
-                    is_sig    = _as_bool(parts[sig_idx]) if sig_idx is not None else False
-                    pboot     = None
-                    if pboot_idx is not None:
-                        try:
-                            pboot = float(parts[pboot_idx])
-                        except Exception:
-                            pass
-                    group = parts[group_idx].strip() if group_idx is not None else '1'
-                    if not group or group in ('NA', 'na', 'N/A'):
-                        group = '1'
-                except (IndexError, ValueError) as e:
-                    logging.warning(f"Skipping malformed meta_caas line: {line[:120]} — {e}")
-                    continue
-
-                # Exclude GS0 entries.
-                if group.upper() == 'GS0':
-                    continue
-
-                # Exclude dubious-conserved positions: is_conserved_meta=TRUE but asr_is_conserved=FALSE.
-                if conserved_idx is not None and asr_conserved_idx is not None:
-                    _is_cons = _as_bool(parts[conserved_idx]) if conserved_idx < len(parts) else False
-                    _is_asr  = _as_bool(parts[asr_conserved_idx]) if asr_conserved_idx < len(parts) else True
-                    if _is_cons and not _is_asr:
-                        continue
-
-                metadata[group][gene][msa_pos] = {
-                    'tag': tag,
-                    'Pattern': pattern,
-                    'AminoConv': amino_conv,
-                    'Pvalue': caas_pval,
-                    'Pvalue.boot': pboot,
-                    'isSignificant': is_sig,
-                }
-
-        else:
-            # ---- original format ----
-            h = headers
-            gene_idx      = h.index('GenePos')
-            tag_idx       = h.index('Tag')
-            pattern_idx   = h.index('Pattern')
-            amino_idx     = h.index('AminoConv')
-            pvalue_idx    = h.index('Pvalue')
-            sig_idx       = h.index('isSignificant')
-            pboot_idx     = h.index('Pvalue.boot') if 'Pvalue.boot' in h else None
-            contrast_idx  = None
-            for cn in ['contrast', 'Contrast', 'group', 'Group']:
-                if cn in h:
-                    contrast_idx = h.index(cn)
-                    break
-
-            for line in f:
-                parts = line.strip().replace(',', sep).split(sep)
-                gene_pos = parts[gene_idx]
-                try:
-                    gene, pos_str = gene_pos.rsplit('_', 1)
-                    msa_pos = int(pos_str)
-                except ValueError:
-                    continue
-
-                if contrast_idx is not None:
-                    group = str(parts[contrast_idx])
-                else:
-                    tag = parts[tag_idx]
-                    group = tag.split('_')[0][1:] if tag.startswith('C') else '1'
-
-                tag        = parts[tag_idx]
-                pattern    = parts[pattern_idx]
-                amino_conv = parts[amino_idx]
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = line.split(sep)
+            try:
+                gene      = parts[gene_idx].strip()
+                msa_pos   = int(float(parts[pos_idx].strip()))
+                tag       = parts[tag_idx].strip()
+                pattern   = parts[pattern_idx].strip()
+                amino_conv = parts[amino_idx].strip() if amino_idx is not None else ''
                 try:
                     caas_pval = float(parts[pvalue_idx])
                 except Exception:
@@ -289,15 +194,32 @@ def read_metadata_caas(metadata_file):
                         pboot = float(parts[pboot_idx])
                     except Exception:
                         pass
+                group = parts[group_idx].strip()
+                if not group or group in ('NA', 'na', 'N/A'):
+                    group = '1'
+            except (IndexError, ValueError) as e:
+                logging.warning(f"Skipping malformed meta_caas line: {line[:120]} — {e}")
+                continue
 
-                metadata[group][gene][msa_pos] = {
-                    'tag': tag,
-                    'Pattern': pattern,
-                    'AminoConv': amino_conv,
-                    'Pvalue': caas_pval,
-                    'Pvalue.boot': pboot,
-                    'isSignificant': is_sig,
-                }
+            # Exclude GS0 entries.
+            if group.upper() == 'GS0':
+                continue
+
+            # Exclude dubious-conserved positions: is_conserved_meta=TRUE but asr_is_conserved=FALSE.
+            if conserved_idx is not None and asr_conserved_idx is not None:
+                _is_cons = _as_bool(parts[conserved_idx]) if conserved_idx < len(parts) else False
+                _is_asr  = _as_bool(parts[asr_conserved_idx]) if asr_conserved_idx < len(parts) else True
+                if _is_cons and not _is_asr:
+                    continue
+
+            metadata[group][gene][msa_pos] = {
+                'tag': tag,
+                'Pattern': pattern,
+                'AminoConv': amino_conv,
+                'Pvalue': caas_pval,
+                'Pvalue.boot': pboot,
+                'isSignificant': is_sig,
+            }
 
     logging.debug(f"Meta-CAAS loaded. Groups: {list(metadata.keys())}")
     return metadata

@@ -38,7 +38,6 @@ process CT_POSTPROC_REPORT {
     def iqr_mult = params.iqr_multiplier
     def gene_filter = params.gene_filter_mode
     def gen_manhattan = params.generate_manhattan ? 'TRUE' : 'FALSE'
-    def manhattan_min_dens = params.manhattan_min_density
 
 
     if (params.use_singularity | params.use_apptainer) {
@@ -60,7 +59,6 @@ process CT_POSTPROC_REPORT {
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
                     generate_manhattan = ${gen_manhattan},
-                    manhattan_min_density = ${manhattan_min_dens}
                 ),
                 output_file = 'CT_postproc.html'
             )
@@ -85,7 +83,6 @@ process CT_POSTPROC_REPORT {
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
                     generate_manhattan = ${gen_manhattan},
-                    manhattan_min_density = ${manhattan_min_dens}
                 ),
                 output_file = 'CT_postproc.html'
             )

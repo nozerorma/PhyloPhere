@@ -3,18 +3,29 @@
 Randomization / permutation significance test — adapted for CT_ACCUMULATION in PhyloPhere.
 
 Changes vs. original to_integrate version:
-  - _remap_caas_df(): normalises global_meta_caas.tsv column names to the internal schema
+  - _remap_caas_df(): remaps filtered_discovery.tsv column names to the internal schema
     (Gene→gene, Position→msa_pos, sig_both→is_significant,
-     Pattern→pattern_type, Tag→tag, CAAP_Group→iscaap derivation).
-    Falls back transparently when the original column schema is present.
-    is_stable is fully removed — is_conserved_meta and asr_is_conserved are the only
-    conserved-state columns; the dubious-conserved filter (is_conserved_meta=T &
-    asr_is_conserved=F → drop) is applied directly in main().
+     Pattern→pattern_type, CAAP_Group→caap_group/iscaap).
+    No fallback — filtered_discovery.tsv is the unique source of truth.
+    is_conserved_meta and asr_is_conserved are coerced to bool here; the
+    dubious-conserved filter (is_conserved_meta=T & asr_is_conserved=F → drop)
+    is applied directly in main(). isAntiCAAS/ASR_ConsAntiCAAS removed entirely.
   - Z-score p-values removed: PValueZ_* columns and scipy.stats.norm dependency removed.
     Only empirical p-values (and their BH-FDR corrections) are retained.
-  - Gene list categories mirror CT_postproc.Rmd: global, global_significant,
-    top_significant, bottom_significant, us_significant (+top/bottom),
-    gs1–gs4_significant (+top/bottom). No all/both/convergent/grp_us_div* categories.
+  - Gene list categories mirror CT_postproc.Rmd focal_sets chunk (both GS0-included and
+    GS0-excluded variants):
+      global, global_significant, top_significant, bottom_significant
+      convergent_pool (+top/bottom)    — mirrors site_flags (GS0 included in gs_nondiv)
+      divergent_pool  (+top/bottom)
+      convergent_pool_no_gs0 (+top/bottom) — mirrors site_flags_no_gs0
+      divergent_pool_no_gs0  (+top/bottom)
+      us_significant (+top/bottom), us_nondiv (+top/bottom), us_div (+top/bottom)
+      gs0_significant (+top/bottom), gs0_nondiv (+top/bottom), gs0_div (+top/bottom)
+      gs{1-4}_significant (+top/bottom), gs{1-4}_nondiv (+top/bottom), gs{1-4}_div (+top/bottom)
+  - GS0 is hard-excluded from valid_row (dubious-conserved + GS0 exclusions) but a
+    separate valid_row_any mask (dubious-conserved only) gates GS0 and pool categories.
+  - actual_counts dict replaces individual actual_* arrays; WorkerClass and init_worker
+    take a single actual_counts dict; process_chunk uses dict-driven accumulators.
   - --fdr-threshold arg added (default 0.05).
 """
 
@@ -37,95 +48,42 @@ from statsmodels.stats.multitest import multipletests
 # ---------------------------
 
 def _remap_caas_df(df):
-    """Normalise a CAAS DataFrame to the internal column schema.
+    """Normalise a filtered_discovery.tsv DataFrame to the internal column schema.
 
-    Handles two source formats:
-      1. filtered_discovery.tsv / global_meta_caas.tsv produced by CT_POSTPROC / CT_SIGNIFICATION
-         Columns include: Gene, Position, tag, is_significant, sig_both, Pattern,
-         CAAP_Group, change_side, asr_is_conserved, is_conserved_meta, ...
-      2. Original caas_csv used by the standalone tool:
-         gene, msa_pos, is_significant, change_side, isAntiCAAS,
-         ASR_ConsAntiCAAS, tag, pattern_type, iscaap, caap_group,
-         is_conserved_meta, asr_is_conserved
+    Source-of-truth columns (tab-separated):
+      Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
+      convergence_description, convergence_mode, CAAP_Group, amino_encoded,
+      is_conserved_meta, conserved_pair, sig_hyp, sig_perm, sig_both,
+      top_change_type, bottom_change_type, change_side, low_confidence_nodes,
+      asr_is_conserved, comments, ..., Trait
 
+    Produces internal schema columns:
+      gene, msa_pos, is_significant (from sig_both), tag, pattern_type (from Pattern),
+      caap_group (from CAAP_Group, uppercased), iscaap,
+      change_side, is_conserved_meta, asr_is_conserved
     """
-    cols = set(df.columns)
-
-    # Detect signification format: has Gene/Position but not yet msa_pos
-    is_signification_fmt = (
-        ('Gene' in cols or 'gene' in cols) and
-        ('Position' in cols or 'position' in cols) and
-        'msa_pos' not in cols
-    )
-
-    if not is_signification_fmt:
-        logging.info("CAAS CSV: using original column schema")
-        return df
-
-    logging.info("CAAS CSV: detected filtered_discovery.tsv / signification format — remapping columns")
-
     # Rename Gene→gene, Position→msa_pos
-    rename_map = {}
-    if 'Gene' in cols:     rename_map['Gene'] = 'gene'
-    if 'Position' in cols: rename_map['Position'] = 'msa_pos'
-    df = df.rename(columns=rename_map)
-    cols = set(df.columns)  # refresh after rename
+    df = df.rename(columns={'Gene': 'gene', 'Position': 'msa_pos'})
 
-    # is_significant: prefer sig_both (passes both hyp + perm tests) over raw is_significant.
-    # Always coerce to Python bool regardless of source dtype.
     _bool = lambda x: str(x).strip().lower() in {'true', 't', '1', 'yes', 'y'}
-    for cand in ['sig_both', 'is_significant', 'isSignificant']:
-        if cand in cols:
-            df['is_significant'] = df[cand].map(_bool)
-            break
-    else:
-        df['is_significant'] = False
 
-    # Conserved-state columns: is_conserved_meta and asr_is_conserved.
-    # The composite dubious-conserved filter (is_conserved_meta=T & asr_is_conserved=F → drop)
-    # is applied in main(); here we just ensure both columns are present.
-    if 'is_conserved_meta' not in cols:
-        if 'IsConserved' in cols:
-            df['is_conserved_meta'] = df['IsConserved'].map(_bool)
-        else:
-            df['is_conserved_meta'] = False
-    if 'asr_is_conserved' not in cols:
-        df['asr_is_conserved'] = True  # safe default: assume ASR is conserved when absent
+    # is_significant: use sig_both (passes both hyp + perm tests)
+    df['is_significant'] = df['sig_both'].map(_bool)
 
-    # tag — already lowercase in filtered_discovery.tsv; fall back to Tag
-    if 'tag' not in cols:
-        df['tag'] = df['Tag'] if 'Tag' in cols else ''
+    # Coerce conserved-state columns to bool
+    df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
+    df['asr_is_conserved']  = df['asr_is_conserved'].map(_bool)
 
     # pattern_type: from Pattern column
-    if 'pattern_type' not in cols:
-        df['pattern_type'] = df['Pattern'] if 'Pattern' in cols else ''
+    df['pattern_type'] = df['Pattern']
 
-    # caap_group: preserve the raw CAAP_Group label (GS0–GS4, US) — needed for
-    # the GS0-exclusion logic in the convergent filter downstream.
-    if 'caap_group' not in cols:
-        if 'CAAP_Group' in cols:
-            df['caap_group'] = df['CAAP_Group'].astype(str).str.strip().str.upper()
-        else:
-            df['caap_group'] = ''
+    # caap_group: preserve the raw CAAP_Group label (GS0–GS4, US)
+    df['caap_group'] = df['CAAP_Group'].astype(str).str.strip().str.upper()
 
     # iscaap: any labelled group other than 'US' (includes GS0–GS4)
-    if 'iscaap' not in cols:
-        df['iscaap'] = df['caap_group'].apply(lambda x: str(x).strip().upper() != 'US')
+    df['iscaap'] = df['caap_group'].apply(lambda x: x != 'US')
 
-    # change_side: present in filtered_discovery.tsv; warn only if truly absent
-    if 'change_side' not in cols:
-        logging.warning(
-            "change_side not found in CAAS CSV. Defaulting to 'top' for all entries. "
-            "Top/bottom/both category lists will reflect this simplification."
-        )
-        df['change_side'] = 'top'
-
-    # AntiCAAS flags — not propagated via signification pipeline; safe defaults
-    if 'isAntiCAAS' not in cols:
-        df['isAntiCAAS'] = False
-    if 'ASR_ConsAntiCAAS' not in cols:
-        df['ASR_ConsAntiCAAS'] = True
-
+    logging.info("CAAS CSV: remapped filtered_discovery.tsv columns to internal schema")
     return df
 
 
@@ -150,25 +108,7 @@ class RandomizationWorker:
         extra_key_sizes,
         caas_data,
         position_to_tag,
-        actual_global,
-        actual_global_significant,
-        actual_top_significant,
-        actual_bottom_significant,
-        actual_us_significant,
-        actual_us_top_significant,
-        actual_us_bottom_significant,
-        actual_gs1_significant,
-        actual_gs1_top_significant,
-        actual_gs1_bottom_significant,
-        actual_gs2_significant,
-        actual_gs2_top_significant,
-        actual_gs2_bottom_significant,
-        actual_gs3_significant,
-        actual_gs3_top_significant,
-        actual_gs3_bottom_significant,
-        actual_gs4_significant,
-        actual_gs4_top_significant,
-        actual_gs4_bottom_significant,
+        actual_counts,          # dict: category_name -> np.ndarray(n_genes, int64)
     ):
         self.randomization_type = randomization_type
         self.decile_bins = np.array(decile_bins) if decile_bins is not None else None
@@ -180,39 +120,14 @@ class RandomizationWorker:
         self.n_genes = n_genes
         self.caas_data = caas_data
         self.position_to_tag = position_to_tag or {}
-        self.actual_global                 = actual_global.astype(np.int64, copy=False)
-        self.actual_global_significant     = actual_global_significant.astype(np.int64, copy=False)
-        self.actual_top_significant        = actual_top_significant.astype(np.int64, copy=False)
-        self.actual_bottom_significant     = actual_bottom_significant.astype(np.int64, copy=False)
-        self.actual_us_significant         = actual_us_significant.astype(np.int64, copy=False)
-        self.actual_us_top_significant     = actual_us_top_significant.astype(np.int64, copy=False)
-        self.actual_us_bottom_significant  = actual_us_bottom_significant.astype(np.int64, copy=False)
-        self.actual_gs1_significant        = actual_gs1_significant.astype(np.int64, copy=False)
-        self.actual_gs1_top_significant    = actual_gs1_top_significant.astype(np.int64, copy=False)
-        self.actual_gs1_bottom_significant = actual_gs1_bottom_significant.astype(np.int64, copy=False)
-        self.actual_gs2_significant        = actual_gs2_significant.astype(np.int64, copy=False)
-        self.actual_gs2_top_significant    = actual_gs2_top_significant.astype(np.int64, copy=False)
-        self.actual_gs2_bottom_significant = actual_gs2_bottom_significant.astype(np.int64, copy=False)
-        self.actual_gs3_significant        = actual_gs3_significant.astype(np.int64, copy=False)
-        self.actual_gs3_top_significant    = actual_gs3_top_significant.astype(np.int64, copy=False)
-        self.actual_gs3_bottom_significant = actual_gs3_bottom_significant.astype(np.int64, copy=False)
-        self.actual_gs4_significant        = actual_gs4_significant.astype(np.int64, copy=False)
-        self.actual_gs4_top_significant    = actual_gs4_top_significant.astype(np.int64, copy=False)
-        self.actual_gs4_bottom_significant = actual_gs4_bottom_significant.astype(np.int64, copy=False)
+        self.actual_counts = {k: v.astype(np.int64, copy=False) for k, v in actual_counts.items()}
 
         if self.global_seed is not None:
             np.random.seed(self.global_seed)
             random.seed(self.global_seed)
 
-        self.caas_by_key_counts = defaultdict(lambda: {
-            'n_global': 0,
-            'n_global_significant': 0, 'n_top_significant': 0, 'n_bottom_significant': 0,
-            'n_us_significant': 0, 'n_us_top_significant': 0, 'n_us_bottom_significant': 0,
-            'n_gs1_significant': 0, 'n_gs1_top_significant': 0, 'n_gs1_bottom_significant': 0,
-            'n_gs2_significant': 0, 'n_gs2_top_significant': 0, 'n_gs2_bottom_significant': 0,
-            'n_gs3_significant': 0, 'n_gs3_top_significant': 0, 'n_gs3_bottom_significant': 0,
-            'n_gs4_significant': 0, 'n_gs4_top_significant': 0, 'n_gs4_bottom_significant': 0,
-        })
+        _zero_counts = {f'n_{cat}': 0 for cat in actual_counts}
+        self.caas_by_key_counts = defaultdict(lambda: dict(_zero_counts))
         for k, payload in extra_key_sizes.items():
             if k not in self.caas_by_key_counts:
                 self.caas_by_key_counts[k]
@@ -262,21 +177,15 @@ class RandomizationWorker:
         if self.global_seed is not None:
             np.random.seed(((self.global_seed or 0) + 9973 * chunk_idx) & 0x7FFFFFFF)
 
-        # Vectorized accumulators per category.
-        # Must be a list (not a tuple) so that S[0] += c in-place assignment works.
+        # Vectorized accumulators per category (dict-driven).
+        # Each entry is a list [sum, sum_sq, count_above] — mutable so in-place += works.
         def _zeros():
             return [
                 np.zeros(self.n_genes, dtype=np.int64),
                 np.zeros(self.n_genes, dtype=np.float64),
                 np.zeros(self.n_genes, dtype=np.int64),
             ]
-        S_global   = _zeros()
-        S_gsig     = _zeros(); S_top_sig  = _zeros(); S_bot_sig  = _zeros()
-        S_us_sig   = _zeros(); S_us_top   = _zeros(); S_us_bot   = _zeros()
-        S_gs1_sig  = _zeros(); S_gs1_top  = _zeros(); S_gs1_bot  = _zeros()
-        S_gs2_sig  = _zeros(); S_gs2_top  = _zeros(); S_gs2_bot  = _zeros()
-        S_gs3_sig  = _zeros(); S_gs3_top  = _zeros(); S_gs3_bot  = _zeros()
-        S_gs4_sig  = _zeros(); S_gs4_top  = _zeros(); S_gs4_bot  = _zeros()
+        S = {cat: _zeros() for cat in self.actual_counts}
 
         schema = None
         writer = None
@@ -297,30 +206,15 @@ class RandomizationWorker:
 
         for r in range(chunk_size):
             z = lambda: np.zeros(self.n_genes, dtype=np.int64)
-            c_global  = z()
-            c_gsig    = z(); c_top_sig = z(); c_bot_sig = z()
-            c_us_sig  = z(); c_us_top  = z(); c_us_bot  = z()
-            c_gs1_sig = z(); c_gs1_top = z(); c_gs1_bot = z()
-            c_gs2_sig = z(); c_gs2_top = z(); c_gs2_bot = z()
-            c_gs3_sig = z(); c_gs3_top = z(); c_gs3_bot = z()
-            c_gs4_sig = z(); c_gs4_top = z(); c_gs4_bot = z()
+            c = {cat: z() for cat in self.actual_counts}
             uid = f"{os.getpid()}_{chunk_idx}_{r}" if self.export_individual else None
 
             for key, cinfo in self.caas_by_key_counts.items():
                 elig = self.eligible_by_key.get(key)
                 if elig is None or elig.size == 0:
                     continue
-                cat_map = [
-                    ('n_global',           c_global),
-                    ('n_global_significant', c_gsig),   ('n_top_significant',    c_top_sig), ('n_bottom_significant',    c_bot_sig),
-                    ('n_us_significant',   c_us_sig),   ('n_us_top_significant', c_us_top),  ('n_us_bottom_significant', c_us_bot),
-                    ('n_gs1_significant',  c_gs1_sig),  ('n_gs1_top_significant', c_gs1_top), ('n_gs1_bottom_significant', c_gs1_bot),
-                    ('n_gs2_significant',  c_gs2_sig),  ('n_gs2_top_significant', c_gs2_top), ('n_gs2_bottom_significant', c_gs2_bot),
-                    ('n_gs3_significant',  c_gs3_sig),  ('n_gs3_top_significant', c_gs3_top), ('n_gs3_bottom_significant', c_gs3_bot),
-                    ('n_gs4_significant',  c_gs4_sig),  ('n_gs4_top_significant', c_gs4_top), ('n_gs4_bottom_significant', c_gs4_bot),
-                ]
-                for cname, carr in cat_map:
-                    n = cinfo.get(cname, 0)
+                for cat, carr in c.items():
+                    n = cinfo.get(f'n_{cat}', 0)
                     if n > 0:
                         idx = np.random.choice(elig, size=n, replace=True)
                         carr += bincount(self.genes[idx], minlength=self.n_genes)
@@ -345,58 +239,23 @@ class RandomizationWorker:
                         writer.write_table(pa.Table.from_pandas(dfb, schema=schema))
                         batch_rows = []
 
-            def _upd(S, c, act):
-                S[0] += c
-                S[1] += c.astype(np.float64) ** 2
-                S[2] += (c >= act).astype(np.int64)
-            _upd(S_global,   c_global,  self.actual_global)
-            _upd(S_gsig,     c_gsig,    self.actual_global_significant)
-            _upd(S_top_sig,  c_top_sig, self.actual_top_significant)
-            _upd(S_bot_sig,  c_bot_sig, self.actual_bottom_significant)
-            _upd(S_us_sig,   c_us_sig,  self.actual_us_significant)
-            _upd(S_us_top,   c_us_top,  self.actual_us_top_significant)
-            _upd(S_us_bot,   c_us_bot,  self.actual_us_bottom_significant)
-            _upd(S_gs1_sig,  c_gs1_sig, self.actual_gs1_significant)
-            _upd(S_gs1_top,  c_gs1_top, self.actual_gs1_top_significant)
-            _upd(S_gs1_bot,  c_gs1_bot, self.actual_gs1_bottom_significant)
-            _upd(S_gs2_sig,  c_gs2_sig, self.actual_gs2_significant)
-            _upd(S_gs2_top,  c_gs2_top, self.actual_gs2_top_significant)
-            _upd(S_gs2_bot,  c_gs2_bot, self.actual_gs2_bottom_significant)
-            _upd(S_gs3_sig,  c_gs3_sig, self.actual_gs3_significant)
-            _upd(S_gs3_top,  c_gs3_top, self.actual_gs3_top_significant)
-            _upd(S_gs3_bot,  c_gs3_bot, self.actual_gs3_bottom_significant)
-            _upd(S_gs4_sig,  c_gs4_sig, self.actual_gs4_significant)
-            _upd(S_gs4_top,  c_gs4_top, self.actual_gs4_top_significant)
-            _upd(S_gs4_bot,  c_gs4_bot, self.actual_gs4_bottom_significant)
+            def _upd(Sv, cv, act):
+                Sv[0] += cv
+                Sv[1] += cv.astype(np.float64) ** 2
+                Sv[2] += (cv >= act).astype(np.int64)
+            for cat in S:
+                _upd(S[cat], c[cat], self.actual_counts[cat])
 
         if self.export_individual and batch_rows and writer is not None:
             writer.write_table(pa.Table.from_pandas(pd.DataFrame(batch_rows), schema=schema))
         if writer is not None:
             writer.close()
 
-        def _pack(S):
-            return {'sum': S[0], 'sum_sq': S[1], 'count_above': S[2]}
+        def _pack(Sv):
+            return {'sum': Sv[0], 'sum_sq': Sv[1], 'count_above': Sv[2]}
         return {
             'chunk_idx': chunk_idx, 'n_rands': chunk_size,
-            'global':              _pack(S_global),
-            'global_significant':  _pack(S_gsig),
-            'top_significant':     _pack(S_top_sig),
-            'bottom_significant':  _pack(S_bot_sig),
-            'us_significant':      _pack(S_us_sig),
-            'us_top_significant':  _pack(S_us_top),
-            'us_bottom_significant': _pack(S_us_bot),
-            'gs1_significant':     _pack(S_gs1_sig),
-            'gs1_top_significant': _pack(S_gs1_top),
-            'gs1_bottom_significant': _pack(S_gs1_bot),
-            'gs2_significant':     _pack(S_gs2_sig),
-            'gs2_top_significant': _pack(S_gs2_top),
-            'gs2_bottom_significant': _pack(S_gs2_bot),
-            'gs3_significant':     _pack(S_gs3_sig),
-            'gs3_top_significant': _pack(S_gs3_top),
-            'gs3_bottom_significant': _pack(S_gs3_bot),
-            'gs4_significant':     _pack(S_gs4_sig),
-            'gs4_top_significant': _pack(S_gs4_top),
-            'gs4_bottom_significant': _pack(S_gs4_bot),
+            **{cat: _pack(S[cat]) for cat in S},
         }
 
 
@@ -408,26 +267,14 @@ def init_worker(
     randomization_type, decile_bins, export_individual, output_dir, global_seed,
     precompute_masks, n_rows, n_genes, shm_names, shapes, dtypes, extra_key_sizes,
     caas_data, position_to_tag,
-    actual_global,
-    actual_global_significant, actual_top_significant, actual_bottom_significant,
-    actual_us_significant, actual_us_top_significant, actual_us_bottom_significant,
-    actual_gs1_significant, actual_gs1_top_significant, actual_gs1_bottom_significant,
-    actual_gs2_significant, actual_gs2_top_significant, actual_gs2_bottom_significant,
-    actual_gs3_significant, actual_gs3_top_significant, actual_gs3_bottom_significant,
-    actual_gs4_significant, actual_gs4_top_significant, actual_gs4_bottom_significant,
+    actual_counts,              # dict: category_name -> np.ndarray
 ):
     global worker
     worker = RandomizationWorker(
         randomization_type, decile_bins, export_individual, output_dir, global_seed,
         precompute_masks, n_rows, n_genes, shm_names, shapes, dtypes, extra_key_sizes,
         caas_data, position_to_tag,
-        actual_global,
-        actual_global_significant, actual_top_significant, actual_bottom_significant,
-        actual_us_significant, actual_us_top_significant, actual_us_bottom_significant,
-        actual_gs1_significant, actual_gs1_top_significant, actual_gs1_bottom_significant,
-        actual_gs2_significant, actual_gs2_top_significant, actual_gs2_bottom_significant,
-        actual_gs3_significant, actual_gs3_top_significant, actual_gs3_bottom_significant,
-        actual_gs4_significant, actual_gs4_top_significant, actual_gs4_bottom_significant,
+        actual_counts,
     )
 
 def process_wrapper(ch):
@@ -475,15 +322,25 @@ def _write_gene_lists(df_cat, cat, gene_lists_dir, fdr_threshold):
 
 def _write_empty_outputs_and_exit(args):
     """Write empty-but-valid outputs when no rows are available for randomization."""
-    categories = [
-        'global',
-        'global_significant', 'top_significant',    'bottom_significant',
-        'us_significant',     'us_top_significant',  'us_bottom_significant',
-        'gs1_significant',    'gs1_top_significant', 'gs1_bottom_significant',
-        'gs2_significant',    'gs2_top_significant', 'gs2_bottom_significant',
-        'gs3_significant',    'gs3_top_significant', 'gs3_bottom_significant',
-        'gs4_significant',    'gs4_top_significant', 'gs4_bottom_significant',
+    # Full category list mirrors CT_postproc focal_sets (both GS0-included and GS0-excluded).
+    _grp_cats = lambda g: [
+        f'{g}_significant', f'{g}_significant_top', f'{g}_significant_bottom',
+        f'{g}_nondiv',      f'{g}_nondiv_top',      f'{g}_nondiv_bottom',
+        f'{g}_div',         f'{g}_div_top',          f'{g}_div_bottom',
     ]
+    categories = (
+        ['global', 'global_significant', 'top_significant', 'bottom_significant']
+        + ['convergent_pool', 'convergent_pool_top', 'convergent_pool_bottom']
+        + ['divergent_pool',  'divergent_pool_top',  'divergent_pool_bottom']
+        + ['convergent_pool_no_gs0', 'convergent_pool_no_gs0_top', 'convergent_pool_no_gs0_bottom']
+        + ['divergent_pool_no_gs0',  'divergent_pool_no_gs0_top',  'divergent_pool_no_gs0_bottom']
+        + _grp_cats('us')
+        + _grp_cats('gs0')
+        + _grp_cats('gs1')
+        + _grp_cats('gs2')
+        + _grp_cats('gs3')
+        + _grp_cats('gs4')
+    )
 
     base_dir = os.path.dirname(args.output_prefix) or '.'
     os.makedirs(base_dir, exist_ok=True)
@@ -541,8 +398,7 @@ def main(args):
 
     # Keep only needed columns to save memory
     required_cols = ['gene', 'msa_pos', 'is_significant',
-                     'change_side', 'isAntiCAAS', 'ASR_ConsAntiCAAS',
-                     'tag', 'pattern_type', 'iscaap', 'caap_group',
+                     'change_side', 'tag', 'pattern_type', 'iscaap', 'caap_group',
                      'is_conserved_meta', 'asr_is_conserved']
     available = [c for c in required_cols if c in caas_df.columns]
     caas_df = caas_df[available]
@@ -613,11 +469,7 @@ def main(args):
     # Actual counts
     caas_filter = (
         (merged_df['iscaas'] == True) &
-        (merged_df['change_side'] != 'none') &
-        (
-            (merged_df['isAntiCAAS'] == False) |
-            ((merged_df['isAntiCAAS'] == True) & (merged_df['ASR_ConsAntiCAAS'] == True))
-        )
+        (merged_df['change_side'] != 'none')
     )
 
     decile_bins = None
@@ -629,9 +481,6 @@ def main(args):
         )
 
     sig_mask    = caas_filter & (merged_df['is_significant'] == True)
-    top_mask    = sig_mask & (merged_df['change_side'].isin(['top', 'both']))
-    bottom_mask = sig_mask & (merged_df['change_side'].isin(['bottom', 'both']))
-    both_mask   = sig_mask & (merged_df['change_side'] == 'both')
 
     # --- Row-level exclusions: GS0 and dubious-conserved (is_conserved_meta=T & asr_is_conserved=F) ---
     _boolify = lambda s: str(s).strip().lower() in {'true', 't', '1', 'yes', 'y'}
@@ -644,114 +493,172 @@ def main(args):
     else:
         _arc = pd.Series(True, index=merged_df.index)
     dubious_conserved = _icm & ~_arc
-    is_gs0 = merged_df['caap_group'].fillna('').str.strip().str.upper().eq('GS0')
-    valid_row = ~dubious_conserved & ~is_gs0
+    is_gs0    = merged_df['caap_group'].fillna('').str.strip().str.upper().eq('GS0')
+    valid_row     = ~dubious_conserved & ~is_gs0   # gate for US + GS1-4
+    valid_row_any = ~dubious_conserved             # gate for GS0 and pool categories
     logging.info(
         f"Row exclusions: {dubious_conserved.sum()} dubious-conserved "
         f"(is_conserved_meta=T & asr_is_conserved=F), {is_gs0.sum()} GS0 — "
-        f"{valid_row.sum()} rows remain"
+        f"{valid_row.sum()} rows remain (valid_row), {valid_row_any.sum()} (valid_row_any)"
     )
 
-    # Propagate row exclusions to base filter and all derived masks.
-    caas_filter = caas_filter & valid_row
-    sig_mask    = caas_filter & (merged_df['is_significant'] == True)
-    top_mask    = sig_mask & merged_df['change_side'].isin(['top', 'both'])
-    bottom_mask = sig_mask & merged_df['change_side'].isin(['bottom', 'both'])
-    both_mask   = sig_mask & (merged_df['change_side'] == 'both')
+    # Propagate non-GS0 exclusions to base caas_filter and sig_mask.
+    caas_filter   = caas_filter & valid_row
+    sig_mask      = caas_filter & (merged_df['is_significant'] == True)
 
-    # --- Position-level group flags (from valid rows only) ---
-    _gu    = merged_df['caap_group'].fillna('').str.strip().str.upper()
-    _nd    = merged_df['pattern_type'].fillna('').ne('divergent')
-    _valid = valid_row.values
-    _gu_v  = _gu[valid_row]
-    _nd_v  = _nd[valid_row]
-    _gene_v = merged_df.loc[valid_row, 'gene']
-    _pos_v  = merged_df.loc[valid_row, 'msa_pos']
+    # GS0-inclusive caas/sig masks (dubious-conserved still excluded).
+    caas_filter_any = (
+        (merged_df['iscaas'] == True) &
+        (merged_df['change_side'] != 'none')
+    ) & valid_row_any
+    sig_mask_any = caas_filter_any & (merged_df['is_significant'] == True)
 
-    _us_mask     = _gu_v == 'US'
-    _gs1_mask    = _gu_v == 'GS1'
-    _gs2_mask    = _gu_v == 'GS2'
-    _gs3_mask    = _gu_v == 'GS3'
-    _gs4_mask    = _gu_v == 'GS4'
-    _gs14_mask   = _gu_v.isin(['GS1', 'GS2', 'GS3', 'GS4'])
-    _us_nd_keys  = set(zip(_gene_v[_us_mask & _nd_v],   _pos_v[_us_mask & _nd_v]))
-    _us_div_keys = set(zip(_gene_v[_us_mask & ~_nd_v],  _pos_v[_us_mask & ~_nd_v]))
-    _has_us_keys = set(zip(_gene_v[_us_mask],            _pos_v[_us_mask]))
-    _gsnd_keys   = set(zip(_gene_v[_gs14_mask & _nd_v], _pos_v[_gs14_mask & _nd_v]))
-    _gs1_nd_keys = set(zip(_gene_v[_gs1_mask & _nd_v],  _pos_v[_gs1_mask & _nd_v]))
-    _gs2_nd_keys = set(zip(_gene_v[_gs2_mask & _nd_v],  _pos_v[_gs2_mask & _nd_v]))
-    _gs3_nd_keys = set(zip(_gene_v[_gs3_mask & _nd_v],  _pos_v[_gs3_mask & _nd_v]))
-    _gs4_nd_keys = set(zip(_gene_v[_gs4_mask & _nd_v],  _pos_v[_gs4_mask & _nd_v]))
+    # --- Per-row group and pattern helpers ---
+    _gu      = merged_df['caap_group'].fillna('').str.strip().str.upper()
+    is_nondiv = merged_df['pattern_type'].fillna('').ne('divergent')
+    is_div    = merged_df['pattern_type'].fillna('').eq('divergent')
+    _cs       = merged_df['change_side']
 
-    _all_keys = list(zip(merged_df['gene'], merged_df['msa_pos']))
-    # US nondiv: position is nondivergent in US
-    grp_us_nondiv        = pd.Series([k in _us_nd_keys                          for k in _all_keys], index=merged_df.index)
-    # US div + GS nondiv: position is divergent in US but nondivergent in >=1 GS1-4
-    grp_us_div_gs_nondiv = pd.Series([k in _us_div_keys and k in _gsnd_keys     for k in _all_keys], index=merged_df.index)
-    # No US + GS nondiv: no US row for this position, nondivergent in >=1 GS1-4
-    grp_no_us_gs_nondiv  = pd.Series([k not in _has_us_keys and k in _gsnd_keys for k in _all_keys], index=merged_df.index)
-    # Per-GS nondiv: position is nondivergent in that specific GS group
-    grp_gs1_nondiv = pd.Series([k in _gs1_nd_keys for k in _all_keys], index=merged_df.index)
-    grp_gs2_nondiv = pd.Series([k in _gs2_nd_keys for k in _all_keys], index=merged_df.index)
-    grp_gs3_nondiv = pd.Series([k in _gs3_nd_keys for k in _all_keys], index=merged_df.index)
-    grp_gs4_nondiv = pd.Series([k in _gs4_nd_keys for k in _all_keys], index=merged_df.index)
+    def _top(m):    return m & _cs.isin(['top', 'both'])
+    def _bottom(m): return m & _cs.isin(['bottom', 'both'])
+
+    # --- Global: sig_both in any valid non-GS0 group ---
+    global_mask     = caas_filter
+    global_sig_mask = sig_mask
+    top_sig_mask    = _top(global_sig_mask)
+    bottom_sig_mask = _bottom(global_sig_mask)
+
+    # --- US masks ---
+    us_sig_mask        = sig_mask & (_gu == 'US')
+    us_nondiv_mask     = us_sig_mask & is_nondiv
+    us_div_mask        = us_sig_mask & is_div
+
+    # --- GS0 masks (valid_row_any: dubious-conserved excluded, GS0 allowed) ---
+    gs0_sig_mask       = sig_mask_any & (_gu == 'GS0')
+    gs0_nondiv_mask    = gs0_sig_mask & is_nondiv
+    gs0_div_mask       = gs0_sig_mask & is_div
+
+    # --- GS1-4 masks ---
+    gs1_sig_mask       = sig_mask & (_gu == 'GS1')
+    gs1_nondiv_mask    = gs1_sig_mask & is_nondiv
+    gs1_div_mask       = gs1_sig_mask & is_div
+
+    gs2_sig_mask       = sig_mask & (_gu == 'GS2')
+    gs2_nondiv_mask    = gs2_sig_mask & is_nondiv
+    gs2_div_mask       = gs2_sig_mask & is_div
+
+    gs3_sig_mask       = sig_mask & (_gu == 'GS3')
+    gs3_nondiv_mask    = gs3_sig_mask & is_nondiv
+    gs3_div_mask       = gs3_sig_mask & is_div
+
+    gs4_sig_mask       = sig_mask & (_gu == 'GS4')
+    gs4_nondiv_mask    = gs4_sig_mask & is_nondiv
+    gs4_div_mask       = gs4_sig_mask & is_div
+
+    # --- Pool masks: mirrors compute_site_flags() in CT_postproc ---
+    # convergent_pool (GS0 included): us_nondiv | gs_nondiv  (gs = any non-US incl. GS0)
+    convergent_pool_mask        = us_nondiv_mask | gs0_nondiv_mask | gs1_nondiv_mask | gs2_nondiv_mask | gs3_nondiv_mask | gs4_nondiv_mask
+    divergent_pool_mask         = us_div_mask    | gs0_div_mask    | gs1_div_mask    | gs2_div_mask    | gs3_div_mask    | gs4_div_mask
+    # convergent_pool_no_gs0: mirrors site_flags_no_gs0
+    convergent_pool_no_gs0_mask = us_nondiv_mask | gs1_nondiv_mask | gs2_nondiv_mask | gs3_nondiv_mask | gs4_nondiv_mask
+    divergent_pool_no_gs0_mask  = us_div_mask    | gs1_div_mask    | gs2_div_mask    | gs3_div_mask    | gs4_div_mask
+
     logging.info(
-        f"Position-level groups: us_nondiv={grp_us_nondiv.sum()}, "
-        f"us_div_gs_nondiv={grp_us_div_gs_nondiv.sum()}, "
-        f"no_us_gs_nondiv={grp_no_us_gs_nondiv.sum()}, "
-        f"gs1_nondiv={grp_gs1_nondiv.sum()}, gs2_nondiv={grp_gs2_nondiv.sum()}, "
-        f"gs3_nondiv={grp_gs3_nondiv.sum()}, gs4_nondiv={grp_gs4_nondiv.sum()}"
+        f"Category sizes: global_sig={global_sig_mask.sum()}, "
+        f"convergent_pool={convergent_pool_mask.sum()}, convergent_pool_no_gs0={convergent_pool_no_gs0_mask.sum()}, "
+        f"us_sig={us_sig_mask.sum()}, us_nondiv={us_nondiv_mask.sum()}, us_div={us_div_mask.sum()}, "
+        f"gs0_sig={gs0_sig_mask.sum()}, gs1_sig={gs1_sig_mask.sum()}, gs2_sig={gs2_sig_mask.sum()}, "
+        f"gs3_sig={gs3_sig_mask.sum()}, gs4_sig={gs4_sig_mask.sum()}"
     )
-
-    # --- Global three-criteria union (mirrors CT_postproc.Rmd B.5) ---
-    # global: all caas_filter positions belonging to any of the three US/GS criteria
-    global_union     = grp_us_nondiv | grp_us_div_gs_nondiv | grp_no_us_gs_nondiv
-    global_mask      = caas_filter & valid_row & global_union
-    global_sig_mask  = sig_mask    & valid_row & global_union
-    top_sig_mask     = global_sig_mask & merged_df['change_side'].isin(['top', 'both'])
-    bottom_sig_mask  = global_sig_mask & merged_df['change_side'].isin(['bottom', 'both'])
-
-    # --- US significant masks ---
-    us_sig_mask    = sig_mask & valid_row & grp_us_nondiv
-    us_top_mask    = us_sig_mask & merged_df['change_side'].isin(['top', 'both'])
-    us_bottom_mask = us_sig_mask & merged_df['change_side'].isin(['bottom', 'both'])
-
-    # --- Per-GS significant masks ---
-    gs1_sig_mask    = sig_mask & valid_row & grp_gs1_nondiv
-    gs1_top_mask    = gs1_sig_mask & merged_df['change_side'].isin(['top', 'both'])
-    gs1_bottom_mask = gs1_sig_mask & merged_df['change_side'].isin(['bottom', 'both'])
-    gs2_sig_mask    = sig_mask & valid_row & grp_gs2_nondiv
-    gs2_top_mask    = gs2_sig_mask & merged_df['change_side'].isin(['top', 'both'])
-    gs2_bottom_mask = gs2_sig_mask & merged_df['change_side'].isin(['bottom', 'both'])
-    gs3_sig_mask    = sig_mask & valid_row & grp_gs3_nondiv
-    gs3_top_mask    = gs3_sig_mask & merged_df['change_side'].isin(['top', 'both'])
-    gs3_bottom_mask = gs3_sig_mask & merged_df['change_side'].isin(['bottom', 'both'])
-    gs4_sig_mask    = sig_mask & valid_row & grp_gs4_nondiv
-    gs4_top_mask    = gs4_sig_mask & merged_df['change_side'].isin(['top', 'both'])
-    gs4_bottom_mask = gs4_sig_mask & merged_df['change_side'].isin(['bottom', 'both'])
 
     def _bc(mask):
         return np.bincount(np.asarray(genes_int[np.asarray(mask, dtype=bool)], dtype=np.int32), minlength=n_genes)
 
-    actual_global                = _bc(global_mask)
-    actual_global_significant    = _bc(global_sig_mask)
-    actual_top_significant       = _bc(top_sig_mask)
-    actual_bottom_significant    = _bc(bottom_sig_mask)
-    actual_us_significant        = _bc(us_sig_mask)
-    actual_us_top_significant    = _bc(us_top_mask)
-    actual_us_bottom_significant = _bc(us_bottom_mask)
-    actual_gs1_significant       = _bc(gs1_sig_mask)
-    actual_gs1_top_significant   = _bc(gs1_top_mask)
-    actual_gs1_bottom_significant = _bc(gs1_bottom_mask)
-    actual_gs2_significant       = _bc(gs2_sig_mask)
-    actual_gs2_top_significant   = _bc(gs2_top_mask)
-    actual_gs2_bottom_significant = _bc(gs2_bottom_mask)
-    actual_gs3_significant       = _bc(gs3_sig_mask)
-    actual_gs3_top_significant   = _bc(gs3_top_mask)
-    actual_gs3_bottom_significant = _bc(gs3_bottom_mask)
-    actual_gs4_significant       = _bc(gs4_sig_mask)
-    actual_gs4_top_significant   = _bc(gs4_top_mask)
-    actual_gs4_bottom_significant = _bc(gs4_bottom_mask)
+    # Ordered dict: category_name → actual count array.  Mirrors CT_postproc focal_sets tables.
+    # Ordered dict (insertion order guaranteed in Python 3.7+): category_name → mask.
+    # Mirrors CT_postproc focal_sets (both GS0-included and GS0-excluded variants).
+    actual_counts_masks = dict([
+        # ── Global pools ────────────────────────────────────────────────────────────
+        ('global',                          global_mask),
+        ('global_significant',              global_sig_mask),
+        ('top_significant',                 top_sig_mask),
+        ('bottom_significant',              bottom_sig_mask),
+        # ── Convergent / divergent pools (GS0 included) ─────────────────────────────
+        ('convergent_pool',                 convergent_pool_mask),
+        ('convergent_pool_top',             _top(convergent_pool_mask)),
+        ('convergent_pool_bottom',          _bottom(convergent_pool_mask)),
+        ('divergent_pool',                  divergent_pool_mask),
+        ('divergent_pool_top',              _top(divergent_pool_mask)),
+        ('divergent_pool_bottom',           _bottom(divergent_pool_mask)),
+        # ── Convergent / divergent pools (GS0 excluded) ─────────────────────────────
+        ('convergent_pool_no_gs0',          convergent_pool_no_gs0_mask),
+        ('convergent_pool_no_gs0_top',      _top(convergent_pool_no_gs0_mask)),
+        ('convergent_pool_no_gs0_bottom',   _bottom(convergent_pool_no_gs0_mask)),
+        ('divergent_pool_no_gs0',           divergent_pool_no_gs0_mask),
+        ('divergent_pool_no_gs0_top',       _top(divergent_pool_no_gs0_mask)),
+        ('divergent_pool_no_gs0_bottom',    _bottom(divergent_pool_no_gs0_mask)),
+        # ── US ──────────────────────────────────────────────────────────────────────
+        ('us_significant',                  us_sig_mask),
+        ('us_significant_top',              _top(us_sig_mask)),
+        ('us_significant_bottom',           _bottom(us_sig_mask)),
+        ('us_nondiv',                       us_nondiv_mask),
+        ('us_nondiv_top',                   _top(us_nondiv_mask)),
+        ('us_nondiv_bottom',                _bottom(us_nondiv_mask)),
+        ('us_div',                          us_div_mask),
+        ('us_div_top',                      _top(us_div_mask)),
+        ('us_div_bottom',                   _bottom(us_div_mask)),
+        # ── GS0 ─────────────────────────────────────────────────────────────────────
+        ('gs0_significant',                 gs0_sig_mask),
+        ('gs0_significant_top',             _top(gs0_sig_mask)),
+        ('gs0_significant_bottom',          _bottom(gs0_sig_mask)),
+        ('gs0_nondiv',                      gs0_nondiv_mask),
+        ('gs0_nondiv_top',                  _top(gs0_nondiv_mask)),
+        ('gs0_nondiv_bottom',               _bottom(gs0_nondiv_mask)),
+        ('gs0_div',                         gs0_div_mask),
+        ('gs0_div_top',                     _top(gs0_div_mask)),
+        ('gs0_div_bottom',                  _bottom(gs0_div_mask)),
+        # ── GS1 ─────────────────────────────────────────────────────────────────────
+        ('gs1_significant',                 gs1_sig_mask),
+        ('gs1_significant_top',             _top(gs1_sig_mask)),
+        ('gs1_significant_bottom',          _bottom(gs1_sig_mask)),
+        ('gs1_nondiv',                      gs1_nondiv_mask),
+        ('gs1_nondiv_top',                  _top(gs1_nondiv_mask)),
+        ('gs1_nondiv_bottom',               _bottom(gs1_nondiv_mask)),
+        ('gs1_div',                         gs1_div_mask),
+        ('gs1_div_top',                     _top(gs1_div_mask)),
+        ('gs1_div_bottom',                  _bottom(gs1_div_mask)),
+        # ── GS2 ─────────────────────────────────────────────────────────────────────
+        ('gs2_significant',                 gs2_sig_mask),
+        ('gs2_significant_top',             _top(gs2_sig_mask)),
+        ('gs2_significant_bottom',          _bottom(gs2_sig_mask)),
+        ('gs2_nondiv',                      gs2_nondiv_mask),
+        ('gs2_nondiv_top',                  _top(gs2_nondiv_mask)),
+        ('gs2_nondiv_bottom',               _bottom(gs2_nondiv_mask)),
+        ('gs2_div',                         gs2_div_mask),
+        ('gs2_div_top',                     _top(gs2_div_mask)),
+        ('gs2_div_bottom',                  _bottom(gs2_div_mask)),
+        # ── GS3 ─────────────────────────────────────────────────────────────────────
+        ('gs3_significant',                 gs3_sig_mask),
+        ('gs3_significant_top',             _top(gs3_sig_mask)),
+        ('gs3_significant_bottom',          _bottom(gs3_sig_mask)),
+        ('gs3_nondiv',                      gs3_nondiv_mask),
+        ('gs3_nondiv_top',                  _top(gs3_nondiv_mask)),
+        ('gs3_nondiv_bottom',               _bottom(gs3_nondiv_mask)),
+        ('gs3_div',                         gs3_div_mask),
+        ('gs3_div_top',                     _top(gs3_div_mask)),
+        ('gs3_div_bottom',                  _bottom(gs3_div_mask)),
+        # ── GS4 ─────────────────────────────────────────────────────────────────────
+        ('gs4_significant',                 gs4_sig_mask),
+        ('gs4_significant_top',             _top(gs4_sig_mask)),
+        ('gs4_significant_bottom',          _bottom(gs4_sig_mask)),
+        ('gs4_nondiv',                      gs4_nondiv_mask),
+        ('gs4_nondiv_top',                  _top(gs4_nondiv_mask)),
+        ('gs4_nondiv_bottom',               _bottom(gs4_nondiv_mask)),
+        ('gs4_div',                         gs4_div_mask),
+        ('gs4_div_top',                     _top(gs4_div_mask)),
+        ('gs4_div_bottom',                  _bottom(gs4_div_mask)),
+    ])
+    actual_counts = {cat: _bc(mask) for cat, mask in actual_counts_masks.items()}
 
     _, caas_data = _build_caas_payload(merged_df, args.randomization_type, decile_bins)
 
@@ -761,27 +668,8 @@ def main(args):
         return int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
 
     extra_key_sizes = {}
-    for name, m in [
-        ('n_global',              global_mask),
-        ('n_global_significant',  global_sig_mask),
-        ('n_top_significant',     top_sig_mask),
-        ('n_bottom_significant',  bottom_sig_mask),
-        ('n_us_significant',      us_sig_mask),
-        ('n_us_top_significant',  us_top_mask),
-        ('n_us_bottom_significant', us_bottom_mask),
-        ('n_gs1_significant',     gs1_sig_mask),
-        ('n_gs1_top_significant', gs1_top_mask),
-        ('n_gs1_bottom_significant', gs1_bottom_mask),
-        ('n_gs2_significant',     gs2_sig_mask),
-        ('n_gs2_top_significant', gs2_top_mask),
-        ('n_gs2_bottom_significant', gs2_bottom_mask),
-        ('n_gs3_significant',     gs3_sig_mask),
-        ('n_gs3_top_significant', gs3_top_mask),
-        ('n_gs3_bottom_significant', gs3_bottom_mask),
-        ('n_gs4_significant',     gs4_sig_mask),
-        ('n_gs4_top_significant', gs4_top_mask),
-        ('n_gs4_bottom_significant', gs4_bottom_mask),
-    ]:
+    for cat, m in actual_counts_masks.items():
+        name = f'n_{cat}'
         sub = merged_df.loc[m]
         for _, row in sub.iterrows():
             try:
@@ -816,13 +704,7 @@ def main(args):
                 output_dir, args.global_seed, args.precompute_masks,
                 n_rows, n_genes, shm_names, shapes, dtypes, extra_key_sizes,
                 caas_data, position_to_tag if args.export_individual_rand else None,
-                actual_global,
-                actual_global_significant, actual_top_significant, actual_bottom_significant,
-                actual_us_significant, actual_us_top_significant, actual_us_bottom_significant,
-                actual_gs1_significant, actual_gs1_top_significant, actual_gs1_bottom_significant,
-                actual_gs2_significant, actual_gs2_top_significant, actual_gs2_bottom_significant,
-                actual_gs3_significant, actual_gs3_top_significant, actual_gs3_bottom_significant,
-                actual_gs4_significant, actual_gs4_top_significant, actual_gs4_bottom_significant,
+                actual_counts,
             ),
         ) as executor:
             futures = [executor.submit(process_wrapper, ch) for ch in chunks]
@@ -841,27 +723,7 @@ def main(args):
     fdr_thr = getattr(args, 'fdr_threshold', 0.05)
     gene_lists_dir = os.path.join(os.path.dirname(args.output_prefix) or '.', 'gene_lists')
 
-    for cat, act in [
-        ('global',                  actual_global),
-        ('global_significant',      actual_global_significant),
-        ('top_significant',         actual_top_significant),
-        ('bottom_significant',      actual_bottom_significant),
-        ('us_significant',          actual_us_significant),
-        ('us_top_significant',      actual_us_top_significant),
-        ('us_bottom_significant',   actual_us_bottom_significant),
-        ('gs1_significant',         actual_gs1_significant),
-        ('gs1_top_significant',     actual_gs1_top_significant),
-        ('gs1_bottom_significant',  actual_gs1_bottom_significant),
-        ('gs2_significant',         actual_gs2_significant),
-        ('gs2_top_significant',     actual_gs2_top_significant),
-        ('gs2_bottom_significant',  actual_gs2_bottom_significant),
-        ('gs3_significant',         actual_gs3_significant),
-        ('gs3_top_significant',     actual_gs3_top_significant),
-        ('gs3_bottom_significant',  actual_gs3_bottom_significant),
-        ('gs4_significant',         actual_gs4_significant),
-        ('gs4_top_significant',     actual_gs4_top_significant),
-        ('gs4_bottom_significant',  actual_gs4_bottom_significant),
-    ]:
+    for cat, act in actual_counts.items():
         sum_cat    = np.sum([r[cat]['sum']         for r in results], axis=0)
         sumsq_cat  = np.sum([r[cat]['sum_sq']      for r in results], axis=0)
         cnt_ge_cat = np.sum([r[cat]['count_above'] for r in results], axis=0)
