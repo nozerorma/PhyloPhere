@@ -31,6 +31,8 @@ process CT_ACCUMULATION_AGGREGATE {
     if (params.use_singularity || params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+        find . -name '*.pyc' -delete 2>/dev/null || true
 
         /usr/local/bin/_entrypoint.sh python main.py \\
             --tool aggregate \\
@@ -46,6 +48,8 @@ process CT_ACCUMULATION_AGGREGATE {
     } else {
         """
         cp -R ${local_dir}/* .
+        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+        find . -name '*.pyc' -delete 2>/dev/null || true
 
         python main.py \\
             --tool aggregate \\
@@ -89,6 +93,8 @@ process CT_ACCUMULATION_RANDOMIZE {
     if (params.use_singularity || params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+        find . -name '*.pyc' -delete 2>/dev/null || true
 
         /usr/local/bin/_entrypoint.sh python main.py \\
             --tool randomize \\
@@ -104,6 +110,8 @@ process CT_ACCUMULATION_RANDOMIZE {
     } else {
         """
         cp -R ${local_dir}/* .
+        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+        find . -name '*.pyc' -delete 2>/dev/null || true
 
         python main.py \\
             --tool randomize \\
