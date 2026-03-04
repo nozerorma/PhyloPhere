@@ -43,6 +43,8 @@ process CT_POSTPROC_REPORT {
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+        find . -name '*.pyc' -delete 2>/dev/null || true
         
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
@@ -58,7 +60,7 @@ process CT_POSTPROC_REPORT {
                     extreme_threshold = ${extreme_thresh},
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
-                    generate_manhattan = ${gen_manhattan},
+                    generate_manhattan = ${gen_manhattan}
                 ),
                 output_file = 'CT_postproc.html'
             )
@@ -67,6 +69,8 @@ process CT_POSTPROC_REPORT {
     } else {
         """
         cp -R ${local_dir}/* .
+        find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+        find . -name '*.pyc' -delete 2>/dev/null || true
         
         Rscript -e "
             rmarkdown::render(
@@ -82,7 +86,7 @@ process CT_POSTPROC_REPORT {
                     extreme_threshold = ${extreme_thresh},
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
-                    generate_manhattan = ${gen_manhattan},
+                    generate_manhattan = ${gen_manhattan}
                 ),
                 output_file = 'CT_postproc.html'
             )

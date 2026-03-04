@@ -34,6 +34,9 @@ process CT_DISAMBIGUATION_RUN {
     """
     mkdir -p ct_disambiguation
     cp -R ${local_dir}/* .
+    # Remove stale .pyc / __pycache__ dirs so Python always compiles from source
+    find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+    find . -name '*.pyc' -delete 2>/dev/null || true
 
     echo "[ct_disambiguation] Inputs:"
     echo "  meta_caas=${meta_caas}"
