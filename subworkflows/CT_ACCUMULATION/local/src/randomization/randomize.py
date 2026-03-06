@@ -6,12 +6,6 @@ Changes vs. original to_integrate version:
   - _remap_caas_df(): remaps filtered_discovery.tsv column names to the internal schema
     (Gene→gene, Position→msa_pos, sig_both→is_significant,
      Pattern→pattern_type, CAAP_Group→caap_group/iscaap).
-    No fallback — filtered_discovery.tsv is the unique source of truth.
-    is_conserved_meta and asr_is_conserved are coerced to bool here; the
-    dubious-conserved filter (is_conserved_meta=T & asr_is_conserved=F → drop)
-    is applied directly in main(). isAntiCAAS/ASR_ConsAntiCAAS removed entirely.
-  - Z-score p-values removed: PValueZ_* columns and scipy.stats.norm dependency removed.
-    Only empirical p-values (and their BH-FDR corrections) are retained.
   - Gene list categories mirror CT_postproc.Rmd focal_sets chunk (both GS0-included and
     GS0-excluded variants):
       global, global_significant, top_significant, bottom_significant
@@ -304,20 +298,28 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins):
     unique_keys = list({item['key'] for item in caas_data})
     return unique_keys, caas_data
 
+def _normalize_cat_for_filename(cat):
+    """Normalize category token for export filenames.
+
+    Convention:
+      - *_significant* -> *_sig*
+      - keep direction suffixes as-is (top/bottom) and use explicit nodir categories
+    """
+    return str(cat).replace('_significant', '_sig')
+
+
 def _write_gene_lists(df_cat, cat, gene_lists_dir, fdr_threshold):
-    """Write two gene-list .txt files for a category: one FDR-corrected, one raw empirical."""
+    """Write a single FDR-corrected gene-list .txt file for one category."""
     os.makedirs(gene_lists_dir, exist_ok=True)
-    for suffix, col in [
-        ('fdr', f'PValueEmpirical_{cat}_FDR'),
-        ('raw', f'PValueEmpirical_{cat}'),
-    ]:
-        sig = df_cat[
-            (df_cat[f'ActualCount_{cat}'] > 0) &
-            (df_cat[col] < fdr_threshold)
-        ]['Gene']
-        out_path = os.path.join(gene_lists_dir, f"{cat}_significant_{suffix}.txt")
-        sig.to_csv(out_path, index=False, header=False)
-        logging.info(f"Gene list ({cat}, {suffix}): {len(sig)} genes → {out_path}")
+    col = f'PValueEmpirical_{cat}_FDR'
+    sig = df_cat[
+        (df_cat[f'ActualCount_{cat}'] > 0) &
+        (df_cat[col] < fdr_threshold)
+    ]['Gene']
+    file_cat = _normalize_cat_for_filename(cat)
+    out_path = os.path.join(gene_lists_dir, f"{file_cat}_fdr.txt")
+    sig.to_csv(out_path, index=False, header=False)
+    logging.info(f"Gene list ({cat}, fdr): {len(sig)} genes → {out_path}")
 
 
 def _write_empty_outputs_and_exit(args):
@@ -366,11 +368,11 @@ def _write_empty_outputs_and_exit(args):
         df_cat.to_csv(out_cat, index=False, compression='gzip' if args.compress else None)
         logging.info(f"Results ({cat}): {out_cat} [empty]")
 
-        # Keep output contract: create empty gene list files for every category.
-        for suffix in ['fdr', 'raw']:
-            out_path = os.path.join(gene_lists_dir, f"{cat}_significant_{suffix}.txt")
-            with open(out_path, 'w'):
-                pass
+        # Keep output contract: create empty FDR gene list files for every category.
+        file_cat = _normalize_cat_for_filename(cat)
+        out_path = os.path.join(gene_lists_dir, f"{file_cat}_fdr.txt")
+        with open(out_path, 'w'):
+            pass
 
     if args.randomization_type == 'cons_decile':
         pd.DataFrame(columns=['decile', 'NumPositions']).to_parquet(
@@ -747,7 +749,8 @@ def main(args):
         })
         # Keep only genes that have at least one actual CAAS event; rows with
         # ActualCount == 0 carry no information and inflate FDR denominator.
-        df_cat = df_cat[df_cat[f'ActualCount_{cat}'] > 0].reset_index(drop=True)
+        # I'm removing this criteria for now but it is worth considering.
+        # df_cat = df_cat[df_cat[f'ActualCount_{cat}'] > 0].reset_index(drop=True)
 
         # Apply BH-FDR on the remaining (all non-zero) empirical p-values.
         fdr_vals = np.ones(len(df_cat))

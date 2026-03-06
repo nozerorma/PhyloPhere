@@ -44,18 +44,20 @@ WORK_BASE="/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs"
 submit_array_job() {
     sbatch --parsable <<'EOF'
 #!/bin/bash
-#SBATCH --job-name=phylophere-pheno
+#SBATCH --job-name=phylophere-cons
+#SBATCH --partition=haswell
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=2G
-#SBATCH -t 48:00:00
+#SBATCH -t 72:00:00
 #SBATCH -e Slurm/slurm-%A_%a.err
 #SBATCH -o Slurm/slurm-%A_%a.out
 #SBATCH --mail-type=START,END,FAIL
 #SBATCH --mail-user=miguel.ramon@upf.edu
-#SBATCH --array=1-1%1
+#SBATCH --array=1-10%10
 
+module purge; module load modulepath/haswell
 module load Nextflow
 module load Miniconda3
 
@@ -94,15 +96,15 @@ SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single.sh"
 #   CLASS  TRAIT  SECONDARY  CTRAIT  PRUNE  PRUNE_SEC  DISCRETE_METHOD
 case $SLURM_ARRAY_TASK_ID in
     1)  CLASS=1; TRAIT="neoplasia_prevalence"; SECONDARY="malignant_prevalence"; CTRAIT="neoplasia_necropsy"; PRUNE="neoplasia_exclude.txt"; PRUNE_SEC="malignant_exclude.txt"; DISCRETE="decile"   ;;
-#     2)  CLASS=1; TRAIT="malignant_prevalence"; SECONDARY="neoplasia_prevalence"; CTRAIT="malignant_count";    PRUNE="malignant_exclude.txt"; PRUNE_SEC="neoplasia_exclude.txt"; DISCRETE="decile"   ;;
+    2)  CLASS=1; TRAIT="malignant_prevalence"; SECONDARY="neoplasia_prevalence"; CTRAIT="malignant_count";    PRUNE="malignant_exclude.txt"; PRUNE_SEC="neoplasia_exclude.txt"; DISCRETE="decile"   ;;
 #     3)  CLASS=2; TRAIT="frug_idx";     SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-#     4)  CLASS=2; TRAIT="fol_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+    4)  CLASS=2; TRAIT="fol_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
 #     5)  CLASS=2; TRAIT="ins_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-#     6)  CLASS=2; TRAIT="omn_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-#     7)  CLASS=2; TRAIT="omn_spec_idx"; SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+    6)  CLASS=2; TRAIT="omn_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+    7)  CLASS=2; TRAIT="omn_spec_idx"; SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
 #     8)  CLASS=2; TRAIT="herb_idx";     SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
 #     9)  CLASS=2; TRAIT="folfrug_idx";  SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-#    10)  CLASS=2; TRAIT="Ethanol";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="quintile" ;;
+   10)  CLASS=2; TRAIT="Ethanol";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="quintile" ;;
 esac
 
 echo "======================================================"

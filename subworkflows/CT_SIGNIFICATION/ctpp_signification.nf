@@ -7,8 +7,8 @@ process CAAS_SIGNIFICATION_REPORT {
     publishDir path: "${params.outdir}/HTML_reports", mode: 'copy', overwrite: true, pattern: '*.html'
     
     input:
-    path filtered_discovery
-    path filtered_background
+    path discovery_input
+    path background_input
     path bootstrap_files
     
     output:
@@ -22,7 +22,7 @@ process CAAS_SIGNIFICATION_REPORT {
     def caap_mode_r = params.caap_mode ? 'TRUE' : 'FALSE'
     def local_dir = "${baseDir}/subworkflows/CT_SIGNIFICATION/local"
     // Bootstrap files are collected into a single list, get the first file (or all files)
-    def bootstrap_file_name = bootstrap_files.getName()
+    def bootstrap_input = bootstrap_files.getName()
     def outdir = "${params.outdir}/signification"
 
 
@@ -35,9 +35,9 @@ process CAAS_SIGNIFICATION_REPORT {
             rmarkdown::render(
                 'CT_signification.Rmd',
                 params = list(
-                    filtered_discovery = '${filtered_discovery}',
-                    filtered_background = '${filtered_background}',
-                    bootstrap_file = '${bootstrap_file_name}',
+                    discovery_input = '${discovery_input}',
+                    background_input = '${background_input}',
+                    bootstrap_file = '${bootstrap_input}',
                     output_dir = '${outdir}',
                     caap_mode = ${caap_mode_r}
                 ),
@@ -54,9 +54,9 @@ process CAAS_SIGNIFICATION_REPORT {
             rmarkdown::render(
                 'CT_signification.Rmd',
                 params = list(
-                    filtered_discovery = '${filtered_discovery}',
-                    filtered_background = '${filtered_background}',
-                    bootstrap_file = '${bootstrap_file_name}',
+                    discovery_input = '${discovery_input}',
+                    background_input = '${background_input}',
+                    bootstrap_file = '${bootstrap_input}',
                     output_dir = '${outdir}',
                     caap_mode = ${caap_mode_r}
                 ),

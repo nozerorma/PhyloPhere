@@ -681,7 +681,7 @@ cat("  GS0 rows:", n_gs0, "\n")
 
 ## B.1b Focal relationships
 
-```{r focal_sets}
+```{r focal_sets, results='asis'}
 
 # Helper: summarise one row per (site_id, gene, position) with per-group sig flags.
 # Flags: global (any presence), global_sig (sig_both in any group),
@@ -1091,7 +1091,7 @@ sub_df_gs <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_gro
     filter(toupper(caap_group) != "US")
 
 sub_df_us0 <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) == "GS0" & toupper(caap_group) == "US")
+    filter(toupper(caap_group) %in% c("GS0", "US"))
 
 cat("Scenario 1 - US and GS groups (no GS0). Positions:", n_distinct(sub_df_wo0$site_id), " | Genes:", n_distinct(sub_df_wo0$gene),
     " | Groups:", paste(sort(unique(sub_df_wo0$caap_group)), collapse = ", "), "\n\n")
@@ -1136,7 +1136,7 @@ sub_df_gs <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_gro
     filter(toupper(caap_group) != "US")
 
 sub_df_us0 <- overlap_subsets[[subset_name]] %>% distinct(site_id, gene, caap_group) %>%
-    filter(toupper(caap_group) == "GS0" & toupper(caap_group) == "US")
+    filter(toupper(caap_group) %in% c("GS0", "US"))
 
 
 
@@ -1243,6 +1243,7 @@ grp_sets_div    <- c("us_div",    "gs0_div",    "gs1_div",    "gs2_div",    "gs3
 
 make_intersections <- function(sf, set_cols) {
   sf %>%
+    filter(if_any(all_of(set_cols))) %>%
     count(across(all_of(set_cols)), name = "n") %>%
     mutate(combo_label = combo_from_flags(cur_data(), set_cols)) %>%
     filter(n > 0)
@@ -1302,12 +1303,44 @@ detail_rows <- discovery_std %>%
 detail_with_flags <- detail_rows %>%
   left_join(
     site_flags %>% select(site_id, is_top, is_bottom,
+                          global_sig, convergent_pool, divergent_pool,
                           us, gs0, gs1, gs2, gs3, gs4,
                           us_nondiv, gs0_nondiv, gs1_nondiv, gs2_nondiv, gs3_nondiv, gs4_nondiv,
                           us_div,    gs0_div,    gs1_div,    gs2_div,    gs3_div,    gs4_div),
     by = "site_id"
   ) %>%
   mutate(across(where(is.logical), ~ replace_na(.x, FALSE)))
+
+# Export orientations with unified direction labels
+orientations <- list(
+  nodir  = rep(TRUE, nrow(detail_with_flags)),
+  top    = detail_with_flags$is_top,
+  bottom = detail_with_flags$is_bottom
+)
+
+# Export global scenario pools (general/convergent/divergent) across orientations
+scenario_exports <- list(
+  global_sig      = "global_sig",
+  convergent_pool = "convergent_pool",
+  divergent_pool  = "divergent_pool"
+)
+
+for (sc_name in names(scenario_exports)) {
+  sc_col <- scenario_exports[[sc_name]]
+
+  for (ori_name in names(orientations)) {
+    ori_mask <- orientations[[ori_name]]
+    base_df  <- detail_with_flags[ori_mask & detail_with_flags$sig_both, ]
+
+    write_export_pair(
+      base_df[base_df[[sc_col]], ],
+      paste0(sc_name, "_", ori_name),
+      gr_txt_dir,
+      gr_tsv_dir
+    )
+  }
+  cat("✓ Scenario exports:", sc_name, "\n")
+}
 
 # Export per group (US, GS0–GS4) across orientations
 export_groups <- list(
@@ -1320,12 +1353,8 @@ for (grp_name in names(export_groups)) {
   gc_nd <- paste0(gc, "_nondiv")
   gc_dv <- paste0(gc, "_div")
 
-  for (ori_name in c("global", "top", "bottom")) {
-    ori_mask <- switch(ori_name,
-      global = rep(TRUE, nrow(detail_with_flags)),
-      top    = detail_with_flags$is_top,
-      bottom = detail_with_flags$is_bottom
-    )
+  for (ori_name in names(orientations)) {
+    ori_mask <- orientations[[ori_name]]
     base_df  <- detail_with_flags[ori_mask & detail_with_flags$sig_both, ]
 
     write_export_pair(base_df[base_df[[gc]],    ], paste0(grp_name, "_sig_",  ori_name), gr_txt_dir, gr_tsv_dir)

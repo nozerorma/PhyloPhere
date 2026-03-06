@@ -74,15 +74,38 @@ include {MOLERATE}       from './workflows/molerate.nf'
 // Post-completion: write workflow_map.html again after all publishDir copies are done.
 workflow.onComplete {
     try {
-        def outdir = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/Out"
-        def ctx = WorkflowMap.buildCtx(outdir, params, workflow)
-        def outdirFile = new File(ctx.outdir as String)
+        // Resolve to an absolute canonical path so the file is always written
+        // to the correct location regardless of JVM working directory at hook time.
+        def outdirRaw = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/Out"
+        def outdirAbs = new File(outdirRaw).canonicalPath
+        def ctx = WorkflowMap.buildCtx(outdirAbs, params, workflow)
+        def outdirFile = new File(outdirAbs)
         if (!outdirFile.exists()) outdirFile.mkdirs()
-        def target = new File(outdirFile, 'workflow_map.html')
-        target.text = WorkflowMap.buildWorkflowMapHtml(ctx)
-        log.info "Workflow map generated: ${target.absolutePath}"
-    } catch (Exception e) {
-        log.warn "Could not generate final workflow map HTML: ${e.message}"
+        def html = WorkflowMap.buildWorkflowMapHtml(ctx)
+
+        // Primary artifact name
+        def mapTarget = new File(outdirFile, 'workflow_map.html')
+        log.info "[FINAL_HTML] Workflow map target: ${mapTarget.absolutePath}"
+        mapTarget.text = html
+
+        // Compatibility alias for downstream consumers expecting workflow.html
+        def legacyTarget = new File(outdirFile, 'workflow.html')
+        legacyTarget.text = html
+
+        // Explicit completion marker so users can quickly verify final HTML generation.
+        def markerTarget = new File(outdirFile, 'workflow_html.done')
+        markerTarget.text = """status=ok
+workflow_map=${mapTarget.absolutePath}
+workflow_html=${legacyTarget.absolutePath}
+generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
+"""
+
+        log.info "[FINAL_HTML] Workflow map generated: ${mapTarget.absolutePath}"
+        log.info "[FINAL_HTML] Workflow HTML alias generated: ${legacyTarget.absolutePath}"
+        log.info "[FINAL_HTML] Completion marker generated: ${markerTarget.absolutePath}"
+    } catch (Throwable t) {
+        log.warn "Could not generate final workflow map HTML: [${t.class.simpleName}] ${t.message ?: '(null message)'}"
+        t.printStackTrace()
     }
 }
 
@@ -212,8 +235,10 @@ workflow {
             def background_ch       = (ct_results && ran_discovery) ? ct_results.background_file_raw : Channel.empty()
             def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
             def bootstrap_ch = Channel.empty() // retained for CT_POSTPROC signature compatibility
+            // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
+            def disambiguation_dir_ch = disambiguation_results ? disambiguation_results.results_dir : null
 
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, bootstrap_ch)
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, bootstrap_ch, disambiguation_dir_ch)
             ran_any = true
 
             // Capture postproc outputs as reusable references.
@@ -264,13 +289,18 @@ workflow {
 
         // Populate postproc gene-list channels for FADE/MOLERATE/RER gene-set piping.
         // pp_gene_lists_val is a value channel holding the collected List<File>.
-        // Each .flatMap { files -> files.findAll{...} } is an independent subscription
-        // that filters the same list — no queue items are shared between consumers.
+        // Restrict to global scenario directional lists only:
+        //   global_sig_top*.txt and global_sig_bottom*.txt
+        // (postproc-only selection policy requested for FADE/MOLERATE).
         if (pp_gene_lists_val) {
             sel_pp_top_ch    = pp_gene_lists_val
-                .flatMap { files -> files.findAll { f -> f.name.contains('_top_') && f.name.endsWith('significant.txt') } }
+                .flatMap { files -> files.findAll { f ->
+                    f.name.startsWith('global_sig_top') && f.name.endsWith('.txt')
+                } }
             sel_pp_bottom_ch = pp_gene_lists_val
-                .flatMap { files -> files.findAll { f -> f.name.contains('_bottom_') && f.name.endsWith('significant.txt') } }
+                .flatMap { files -> files.findAll { f ->
+                    f.name.startsWith('global_sig_bottom') && f.name.endsWith('.txt')
+                } }
         }
 
         // Merge per-phenotype files into single files before passing to selection

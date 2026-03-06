@@ -472,22 +472,33 @@ class WorkflowMap {
     // ── Convenience: build ctx map from dynamic scanning or workflow context ───
     // Can be called with just a directory path for standalone operation,
     // or with params + workflow for backward compatibility.
+    // Explicit overloads are used instead of default parameters to avoid
+    // MissingMethodException when Groovy's generated overloads are incomplete
+    // due to classloader / compile-cache issues in Nextflow.
 
-    static Map buildCtx(baseDir, params = null, workflow = null) {
-        def outdir = baseDir?.toString() ?: 
-                    (params?.outdir ? params.outdir.toString() : "${workflow?.projectDir}/Out")
+    static Map buildCtx(baseDir) {
+        return buildCtx(baseDir, null, null)
+    }
+
+    static Map buildCtx(baseDir, paramsMap) {
+        return buildCtx(baseDir, paramsMap, null)
+    }
+
+    static Map buildCtx(baseDir, paramsMap, workflowMeta) {
+        def outdir = baseDir?.toString() ?:
+                    (paramsMap?.outdir ? paramsMap.outdir.toString() : "${workflowMeta?.projectDir}/Out")
         
         // Dynamic scanning of workflow completion status
         def scanResults = scanWorkflowDirectory(outdir)
         
         [
             outdir        : outdir,
-            launchDir     : workflow?.launchDir?.toString() ?: outdir,
-            projectDir    : workflow?.projectDir?.toString() ?: outdir,
-            profile       : workflow?.profile ?: 'standalone',
-            runName       : workflow?.runName ?: 'dynamic-scan',
-            sessionId     : workflow?.sessionId?.toString() ?: UUID.randomUUID().toString(),
-            commandLine   : workflow?.commandLine ?: 'dynamic generation',
+            launchDir     : workflowMeta?.launchDir?.toString() ?: outdir,
+            projectDir    : workflowMeta?.projectDir?.toString() ?: outdir,
+            profile       : workflowMeta?.profile ?: 'standalone',
+            runName       : workflowMeta?.runName ?: 'dynamic-scan',
+            sessionId     : workflowMeta?.sessionId?.toString() ?: UUID.randomUUID().toString(),
+            commandLine   : workflowMeta?.commandLine ?: 'dynamic generation',
             prune         : scanResults.prune ?: false,
             datasetReport : scanResults.dataset_rep ?: false,
             phenotypeRep  : scanResults.pheno_rep ?: false,

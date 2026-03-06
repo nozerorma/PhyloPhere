@@ -1,0 +1,855 @@
+---
+title: "ASR Robustness Characterisation"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 4
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+params:
+  disambig_dir:        NULL   # path to ct_disambiguation/ output directory
+  posterior_threshold: 0.95   # params.ct_disambig_posterior_threshold
+  output_dir:          "."    # working directory (TSVs → ./tsv/, plots → ./plots/)
+---
+
+<!--
+  ASR Robustness Characterisation — PhyloPhere Pipeline
+  ======================================================
+  Core filtering rule:
+    ASR uncertainty is described globally and per gene, but filtering for
+    convergence inference is based only on the focal MRCA nodes that define
+    change polarity. A site is retained only if the minimum MAP posterior
+    across all focal nodes is >= params.ct_disambig_posterior_threshold.
+    Additional threshold values are evaluated ONLY in the sensitivity analysis
+    section; they do not affect pipeline filtering decisions.
+
+  Author: Miguel Ramon (miguel.ramon@upf.edu)
+-->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width  = 11,
+  fig.height = 6,
+  dpi        = 180,
+  dev        = "png"
+)
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(ggplot2)
+  library(patchwork)
+  library(scales)
+  library(knitr)
+  library(kableExtra)
+  library(jsonlite)
+})
+
+# ── Parameter validation ──────────────────────────────────────────────────────
+disambig_dir        <- params$disambig_dir
+posterior_threshold <- as.numeric(params$posterior_threshold)
+output_dir          <- params$output_dir
+
+stopifnot(
+  !is.null(disambig_dir),
+  !is.null(posterior_threshold),
+  posterior_threshold > 0, posterior_threshold <= 1
+)
+
+# ── Output directories ────────────────────────────────────────────────────────
+tsv_dir   <- file.path(output_dir, "tsv")
+plots_dir <- file.path(output_dir, "plots")
+dir.create(tsv_dir,   recursive = TRUE, showWarnings = FALSE)
+dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
+
+write_tsv_safe <- function(df, fname) {
+  path <- file.path(tsv_dir, fname)
+  readr::write_tsv(df, path)
+  invisible(path)
+}
+
+save_plot <- function(p, fname, width = 11, height = 6) {
+  path <- file.path(plots_dir, fname)
+  ggsave(path, plot = p, width = width, height = height, dpi = 180)
+  invisible(path)
+}
+
+# Sensitivity tau grid — used ONLY in §7; never drives pipeline filtering
+TAU_GRID <- c(0.90, 0.95, 0.99)
+
+# ── Helper: entropy (nats) ────────────────────────────────────────────────────
+shannon_entropy <- function(probs) {
+  p <- probs[probs > 0]
+  -sum(p * log(p))
+}
+
+# ── Helper: styled kable ──────────────────────────────────────────────────────
+kbl_pp <- function(df, caption = NULL) {
+  df |>
+    kable(caption = caption, digits = 4) |>
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                  full_width = FALSE, font_size = 12)
+}
+```
+
+---
+
+```{r paths, include=FALSE}
+node_dumps_dir <- file.path(disambig_dir, "diagnostics", "node_dumps")
+master_csv     <- file.path(disambig_dir, "caas_convergence_master.csv")
+
+jsonl_files_exist <- dir.exists(node_dumps_dir) &&
+  length(list.files(node_dumps_dir, pattern = "_posteriors\\.jsonl$")) > 0
+master_csv_exists <- file.exists(master_csv)
+
+if (!master_csv_exists) {
+  stop(sprintf(
+    "[asr_robustness] caas_convergence_master.csv not found in: %s", disambig_dir
+  ))
+}
+```
+
+> **Pipeline threshold** (`params.ct_disambig_posterior_threshold`): **`r posterior_threshold`**
+
+> **Disambiguation directory**: `r disambig_dir`
+
+---
+
+## §1 – Per-(gene, node, site) ASR confidence metrics
+
+```{r parse_jsonl, cache=FALSE}
+# ── Parse per-gene posterior JSONL files ──────────────────────────────────────
+# Format (one JSON object per line):
+#   {"node_id": <int>, "positions": {"<site>": {"A": p, "C": p, ...}}}
+# Optional first line: {"__metadata__": {...}}  — skipped.
+#
+# Returns a data.frame with columns:
+#   gene | node | site | MAP | AA_MAP | AA_second | P_second | margin | entropy
+
+parse_single_jsonl <- function(path, gene_name) {
+  lines <- readLines(path, warn = FALSE)
+  lines <- lines[nzchar(trimws(lines))]
+
+  rows <- vector("list", length(lines) * 50L)  # pre-allocate generously
+  row_i <- 0L
+
+  for (ln in lines) {
+    obj <- tryCatch(jsonlite::fromJSON(ln, simplifyVector = TRUE), error = function(e) NULL)
+    if (is.null(obj)) next
+    if (!is.null(obj[["__metadata__"]])) next  # skip metadata header
+
+    node_id   <- as.integer(obj[["node_id"]])
+    positions <- obj[["positions"]]
+    if (is.null(positions) || !is.list(positions)) next
+
+    for (site_s in names(positions)) {
+      aa_map <- positions[[site_s]]
+      if (!is.numeric(aa_map) || length(aa_map) == 0) next
+
+      site <- as.integer(site_s)
+      probs <- sort(aa_map, decreasing = TRUE)
+
+      MAP      <- probs[[1]]
+      AA_MAP   <- names(probs)[[1]]
+      AA_sec   <- if (length(probs) >= 2) names(probs)[[2]] else NA_character_
+      P_sec    <- if (length(probs) >= 2) probs[[2]]        else 0
+      margin   <- MAP - P_sec
+      Hent     <- shannon_entropy(aa_map)
+
+      row_i <- row_i + 1L
+      rows[[row_i]] <- list(
+        gene      = gene_name,
+        node      = node_id,
+        site      = site,
+        MAP       = MAP,
+        AA_MAP    = AA_MAP,
+        AA_second = AA_sec,
+        P_second  = P_sec,
+        margin    = margin,
+        entropy   = Hent
+      )
+    }
+  }
+
+  if (row_i == 0L) return(NULL)
+  dplyr::bind_rows(rows[seq_len(row_i)])
+}
+
+node_site_metrics <- NULL
+
+if (jsonl_files_exist) {
+  jfiles <- list.files(node_dumps_dir, pattern = "_posteriors\\.jsonl$", full.names = TRUE)
+
+  parsed <- lapply(jfiles, function(f) {
+    gene <- sub("_posteriors\\.jsonl$", "", basename(f))
+    parse_single_jsonl(f, gene)
+  })
+
+  node_site_metrics <- dplyr::bind_rows(parsed)
+  message(sprintf("[§1] Parsed %d JSONL files → %d (gene, node, site) rows",
+                  length(jfiles), nrow(node_site_metrics)))
+  write_tsv_safe(node_site_metrics, "asr_node_site_metrics.tsv")
+} else {
+  message("[§1] No posterior JSONL files found under ", node_dumps_dir,
+          " — sections 1-3 will be skipped. Enable ct_disambig_run_diagnostics=true.")
+}
+```
+
+`r if (!jsonl_files_exist) "> ⚠️ Posterior JSONL files were not found (ct_disambig_run_diagnostics may have been disabled). Sections 1–3 are skipped." `
+
+```{r show_metrics_head, eval=jsonl_files_exist}
+node_site_metrics |> head(10) |> kbl_pp(caption = "First 10 rows of asr_node_site_metrics.tsv")
+```
+
+---
+
+## §2 – Global MAP distribution
+
+```{r global_stats, eval=jsonl_files_exist}
+# ── §2a Full distribution ─────────────────────────────────────────────────────
+compute_map_stats <- function(map_vec) {
+  pcts <- c(0.01, 0.05, 0.10, 0.20, 0.25, 0.40, 0.50, 0.60, 0.75, 0.80, 0.90, 0.95, 0.99)
+  cuts <- c(1.00, 0.99, 0.95, 0.90, 0.80, 0.60)
+
+  q <- quantile(map_vec, probs = pcts, na.rm = TRUE)
+  frac_below <- vapply(cuts, function(t) mean(map_vec < t, na.rm = TRUE), numeric(1))
+
+  c(
+    N_total = length(map_vec),
+    mean    = mean(map_vec, na.rm = TRUE),
+    sd      = sd(map_vec, na.rm = TRUE),
+    min     = min(map_vec, na.rm = TRUE),
+    max     = max(map_vec, na.rm = TRUE),
+    setNames(as.numeric(q),     paste0("pct_", pcts * 100)),
+    setNames(frac_below,        paste0("frac_MAP_lt_", sub("\\.", "", as.character(cuts))))
+  )
+}
+
+map_vec_full <- node_site_metrics$MAP
+stats_full   <- compute_map_stats(map_vec_full)
+
+global_stats_df <- tibble(statistic = names(stats_full), value = as.numeric(stats_full))
+write_tsv_safe(global_stats_df, "asr_global_statistics.tsv")
+
+# ── §2b Uncertainty tail (MAP < 1.0) ─────────────────────────────────────────
+map_vec_tail  <- map_vec_full[map_vec_full < 1.0]
+stats_tail    <- compute_map_stats(map_vec_tail)
+tail_stats_df <- tibble(statistic = names(stats_tail), value = as.numeric(stats_tail))
+write_tsv_safe(tail_stats_df, "asr_uncertain_tail.tsv")
+
+kbl_pp(global_stats_df, caption = "§2a Global MAP statistics (asr_global_statistics.tsv)")
+```
+
+```{r global_tail_summary, eval=jsonl_files_exist}
+kbl_pp(tail_stats_df, caption = "§2b Global MAP statistics — uncertainty tail MAP < 1.0 (asr_uncertain_tail.tsv)")
+```
+
+---
+
+## §3 – Per-gene MAP statistics
+
+```{r gene_stats, eval=jsonl_files_exist}
+compute_gene_stats <- function(df_gene) {
+  m <- df_gene$MAP
+  tibble(
+    N_total            = length(m),
+    fraction_MAP_1     = mean(m == 1,    na.rm = TRUE),
+    frac_MAP_lt_100    = mean(m < 1.00,  na.rm = TRUE),
+    frac_MAP_lt_099    = mean(m < 0.99,  na.rm = TRUE),
+    frac_MAP_lt_095    = mean(m < 0.95,  na.rm = TRUE),
+    frac_MAP_lt_090    = mean(m < 0.90,  na.rm = TRUE),
+    frac_MAP_lt_080    = mean(m < 0.80,  na.rm = TRUE),
+    frac_MAP_lt_060    = mean(m < 0.60,  na.rm = TRUE),
+    min_MAP            = min(m,  na.rm = TRUE),
+    mean_MAP           = mean(m, na.rm = TRUE),
+    sd_MAP             = sd(m,   na.rm = TRUE)
+  )
+}
+
+gene_stats_df <- node_site_metrics |>
+  group_by(gene) |>
+  group_modify(~ compute_gene_stats(.x)) |>
+  ungroup()
+
+write_tsv_safe(gene_stats_df, "asr_gene_statistics.tsv")
+
+# Tail version (MAP < 1.0 per gene)
+gene_tail_df <- node_site_metrics |>
+  filter(MAP < 1.0) |>
+  group_by(gene) |>
+  group_modify(~ compute_gene_stats(.x)) |>
+  ungroup()
+
+write_tsv_safe(gene_tail_df, "asr_gene_uncertain_tail.tsv")
+
+kbl_pp(gene_stats_df, caption = "§3 Per-gene MAP statistics (asr_gene_statistics.tsv)")
+```
+
+```{r gene_tail_tbl, eval=jsonl_files_exist}
+kbl_pp(gene_tail_df, caption = "§3 Per-gene MAP statistics — uncertainty tail MAP < 1.0 (asr_gene_uncertain_tail.tsv)")
+```
+
+---
+
+## §4 – Focal MRCA node extraction
+
+```{r load_master_csv}
+# ── Load caas_convergence_master.csv ─────────────────────────────────────────
+# Focal MRCA nodes are auto-derived from mrca_*_node and mrca_*_posterior
+# columns.  No user-supplied node list is required.
+master_df <- readr::read_csv(master_csv, show_col_types = FALSE, guess_max = 5000)
+
+# Normalise column names
+if ("msa_pos" %in% names(master_df))  master_df <- dplyr::rename(master_df, site = msa_pos)
+if (!("gene" %in% names(master_df)) && "Gene" %in% names(master_df))
+  master_df <- dplyr::rename(master_df, gene = Gene)
+if (!("site" %in% names(master_df)) && "Position" %in% names(master_df))
+  master_df <- dplyr::rename(master_df, site = Position)
+
+# Detect focal-node pair columns dynamically
+node_col_regex     <- "^mrca_(\\d+)_node$"
+post_col_regex     <- "^mrca_(\\d+)_posterior$"
+margin_col_regex   <- "^mrca_(\\d+)_margin$"
+
+node_cols   <- grep(node_col_regex,   names(master_df), value = TRUE)
+post_cols   <- grep(post_col_regex,   names(master_df), value = TRUE)
+n_pairs     <- length(post_cols)
+
+if (n_pairs == 0) stop("[asr_robustness §4] No mrca_*_posterior columns found in master CSV")
+
+pair_ids <- as.integer(sub("^mrca_(\\d+)_posterior$", "\\1", post_cols))
+message(sprintf("[§4] Detected %d focal MRCA pairs: %s", n_pairs, paste(pair_ids, collapse = ", ")))
+```
+
+```{r focal_extraction}
+# ── Build per-(gene, site) focal-node rows ────────────────────────────────────
+# Each row in master_df corresponds to one (gene, site) convergent position.
+# p_i = mrca_i_posterior (MAP at focal node i for this site).
+
+focal_df <- master_df |>
+  dplyr::select(gene, site,
+                all_of(c(node_cols, post_cols))) |>
+  dplyr::rename_with(~ paste0("node", pair_ids), all_of(node_cols)) |>
+  dplyr::rename_with(~ paste0("p",    pair_ids), all_of(post_cols))
+
+# Compute margin and entropy per focal node if available in node_site_metrics
+# If JSONL data are present, join margin/entropy per (gene, node_id, site)
+if (!is.null(node_site_metrics)) {
+  # Pivot JSONL metrics for each pair's node
+  # We need to match (gene, site, node_id) → margin_i, entropy_i
+  jm_sel <- node_site_metrics |>
+    dplyr::select(gene, node, site, margin, entropy) |>
+    dplyr::rename(jm_node_id = node, jm_margin = margin, jm_entropy = entropy)
+
+  for (i in seq_along(pair_ids)) {
+    pid <- pair_ids[[i]]
+    nc  <- paste0("node", pid)
+    # node column may be numeric or character; cast to character for join
+    focal_df <- focal_df |>
+      dplyr::mutate(!!nc := as.character(.data[[nc]])) |>
+      dplyr::left_join(
+        jm_sel |>
+          dplyr::mutate(jm_node_id = as.character(jm_node_id)),
+        by = c("gene" = "gene", "site" = "site", !!nc := "jm_node_id")
+      ) |>
+      dplyr::rename(
+        !!paste0("margin",  pid) := jm_margin,
+        !!paste0("entropy", pid) := jm_entropy
+      )
+  }
+}
+
+# Compute aggregate focal-node stats
+p_cols  <- paste0("p",      pair_ids)
+m_cols  <- paste0("margin",  pair_ids)
+e_cols  <- paste0("entropy", pair_ids)
+
+focal_df <- focal_df |>
+  dplyr::rowwise() |>
+  dplyr::mutate(
+    p_min    = min(dplyr::c_across(all_of(p_cols)),  na.rm = TRUE),
+    p_prod   = prod(dplyr::c_across(all_of(p_cols)), na.rm = TRUE)
+  )
+
+if (all(m_cols %in% names(focal_df))) {
+  focal_df <- focal_df |>
+    dplyr::mutate(
+      margin_min  = min(dplyr::c_across(all_of(m_cols)),  na.rm = TRUE),
+      entropy_max = max(dplyr::c_across(all_of(e_cols)),  na.rm = TRUE)
+    )
+}
+
+focal_df <- dplyr::ungroup(focal_df)
+write_tsv_safe(focal_df, "asr_focal_node_sites.tsv")
+
+focal_df |> head(10) |> kbl_pp(caption = "§4 Focal-node site posteriors (asr_focal_node_sites.tsv)")
+```
+
+---
+
+## §5 – Site filtering
+
+The filtering rule is:
+
+$$\text{PASS} \iff p_{\min} \geq \tau \quad\text{where}\quad \tau = \texttt{params.ct\_disambig\_posterior\_threshold} = `r posterior_threshold`$$
+
+```{r site_filter}
+tau <- posterior_threshold
+
+filter_df <- focal_df |>
+  dplyr::select(gene, site, all_of(p_cols), p_min, p_prod) |>
+  dplyr::mutate(
+    PASS            = p_min >= tau,
+    threshold_used  = tau
+  )
+
+write_tsv_safe(filter_df, "asr_site_filtering.tsv")
+
+n_pass <- sum(filter_df$PASS,  na.rm = TRUE)
+n_fail <- sum(!filter_df$PASS, na.rm = TRUE)
+
+cat(sprintf(
+  "τ = %.4f | Sites PASS: %d  |  Sites FAIL: %d  |  Retention: %.1f%%\n",
+  tau, n_pass, n_fail, 100 * n_pass / nrow(filter_df)
+))
+
+filter_df |> head(10) |> kbl_pp(caption = "§5 Site-level filtering (asr_site_filtering.tsv)")
+```
+
+---
+
+## §6 – Retention statistics
+
+```{r retention_stats}
+# ── Global ────────────────────────────────────────────────────────────────────
+retention_global <- tibble(
+  N_sites_total      = nrow(filter_df),
+  N_sites_retained   = n_pass,
+  N_sites_excluded   = n_fail,
+  retention_fraction = n_pass / nrow(filter_df),
+  exclusion_fraction = n_fail / nrow(filter_df),
+  threshold_used     = tau
+)
+write_tsv_safe(retention_global, "asr_retention_summary.tsv")
+
+# ── Per gene ──────────────────────────────────────────────────────────────────
+retention_gene <- filter_df |>
+  dplyr::group_by(gene) |>
+  dplyr::summarise(
+    sites_total        = dplyr::n(),
+    sites_retained     = sum(PASS, na.rm = TRUE),
+    sites_excluded     = sum(!PASS, na.rm = TRUE),
+    retention_fraction = sites_retained / sites_total,
+    exclusion_fraction = sites_excluded / sites_total,
+    threshold_used     = tau,
+    .groups = "drop"
+  )
+write_tsv_safe(retention_gene, "asr_gene_retention.tsv")
+
+kbl_pp(retention_global, caption = "§6 Global retention summary (asr_retention_summary.tsv)")
+```
+
+```{r retention_gene_tbl}
+kbl_pp(retention_gene, caption = "§6 Per-gene retention (asr_gene_retention.tsv)")
+```
+
+---
+
+## §7 – Sensitivity analysis
+
+*The pipeline always filters using `params.ct_disambig_posterior_threshold`. The tau grid below is a diagnostic summary only and does not affect any pipeline decision.*
+
+```{r sensitivity}
+tau_grid <- TAU_GRID  # c(0.90, 0.95, 0.99) — diagnostic only
+
+apply_tau <- function(fd, t) {
+  kept <- fd |> dplyr::filter(p_min >= t)
+  tibble(
+    tau                = t,
+    N_sites_total      = nrow(fd),
+    N_sites_retained   = nrow(kept),
+    retention_fraction = nrow(kept) / nrow(fd),
+    N_convergent_sites = dplyr::n_distinct(paste(kept$gene, kept$site)),
+    N_convergent_genes = dplyr::n_distinct(kept$gene)
+  )
+}
+
+sensitivity_df <- dplyr::bind_rows(lapply(tau_grid, function(t) apply_tau(filter_df, t)))
+write_tsv_safe(sensitivity_df, "convergence_sensitivity.tsv")
+
+# ── Callset overlap (Jaccard) ─────────────────────────────────────────────────
+callset <- function(t) {
+  filter_df |>
+    dplyr::filter(p_min >= t) |>
+    dplyr::mutate(key = paste(gene, site, sep = ":")) |>
+    dplyr::pull(key)
+}
+
+pairs <- list(
+  c("0.90", "0.95"),
+  c("0.95", "0.99"),
+  c("0.90", "0.99")
+)
+
+overlap_rows <- lapply(pairs, function(pr) {
+  t1 <- as.numeric(pr[[1]]);  t2 <- as.numeric(pr[[2]])
+  s1 <- callset(t1);           s2 <- callset(t2)
+  inter <- length(intersect(s1, s2))
+  union <- length(union(s1, s2))
+  tibble(
+    tau_A        = t1,
+    tau_B        = t2,
+    n_A          = length(s1),
+    n_B          = length(s2),
+    n_intersect  = inter,
+    n_union      = union,
+    jaccard      = if (union > 0) inter / union else NA_real_
+  )
+})
+
+overlap_df <- dplyr::bind_rows(overlap_rows)
+write_tsv_safe(overlap_df, "convergence_overlap.tsv")
+
+kbl_pp(sensitivity_df, caption = "§7 Sensitivity analysis (convergence_sensitivity.tsv)")
+```
+
+```{r overlap_tbl}
+kbl_pp(overlap_df, caption = "§7 Callset overlap between tau thresholds (convergence_overlap.tsv)")
+```
+
+---
+
+## §8 – Confidence diagnostics (focal nodes)
+
+```{r diagnostics}
+# Descriptive summaries of margin, entropy, p_prod at focal nodes
+diag_rows <- list()
+
+if ("margin_min" %in% names(focal_df) && "entropy_max" %in% names(focal_df)) {
+  diag_rows[["margin_min"]] <- summary(focal_df$margin_min)
+  diag_rows[["entropy_max"]] <- summary(focal_df$entropy_max)
+}
+diag_rows[["p_prod"]]  <- summary(focal_df$p_prod)
+diag_rows[["p_min"]]   <- summary(focal_df$p_min)
+
+diag_df <- dplyr::bind_rows(
+  lapply(names(diag_rows), function(nm) {
+    s <- diag_rows[[nm]]
+    tibble(
+      metric  = nm,
+      Min     = s[["Min."]],
+      Q1      = s[["1st Qu."]],
+      Median  = s[["Median"]],
+      Mean    = s[["Mean"]],
+      Q3      = s[["3rd Qu."]],
+      Max     = s[["Max."]]
+    )
+  })
+)
+
+# Proportion of sites below margin thresholds and above entropy quantiles
+extra_rows <- list()
+
+if ("margin_min" %in% names(focal_df)) {
+  extra_rows[["fraction_sites_margin_lt_0.05"]] <- mean(focal_df$margin_min < 0.05, na.rm = TRUE)
+  extra_rows[["fraction_sites_margin_lt_0.10"]] <- mean(focal_df$margin_min < 0.10, na.rm = TRUE)
+}
+
+if ("entropy_max" %in% names(focal_df)) {
+  ent_q <- quantile(focal_df$entropy_max, probs = c(0.75, 0.90, 0.95), na.rm = TRUE)
+  extra_rows[["fraction_sites_entropy_gt_q75"]] <- mean(focal_df$entropy_max > ent_q[["75%"]], na.rm = TRUE)
+  extra_rows[["fraction_sites_entropy_gt_q90"]] <- mean(focal_df$entropy_max > ent_q[["90%"]], na.rm = TRUE)
+  extra_rows[["fraction_sites_entropy_gt_q95"]] <- mean(focal_df$entropy_max > ent_q[["95%"]], na.rm = TRUE)
+  # Record the actual quantile values for reference
+  extra_rows[["entropy_q75_value"]] <- as.numeric(ent_q[["75%"]])
+  extra_rows[["entropy_q90_value"]] <- as.numeric(ent_q[["90%"]])
+  extra_rows[["entropy_q95_value"]] <- as.numeric(ent_q[["95%"]])
+}
+
+if (length(extra_rows) > 0) {
+  extra_df <- tibble(
+    metric = names(extra_rows),
+    Min    = as.numeric(extra_rows),
+    Q1     = NA_real_, Median = NA_real_, Mean = NA_real_, Q3 = NA_real_, Max = NA_real_
+  )
+  diag_full_df <- dplyr::bind_rows(diag_df, extra_df)
+} else {
+  diag_full_df <- diag_df
+}
+
+write_tsv_safe(diag_full_df, "asr_confidence_diagnostics.tsv")
+kbl_pp(diag_full_df, caption = "§8 Confidence diagnostics at focal nodes (asr_confidence_diagnostics.tsv)")
+```
+
+---
+
+## §9 – Diagnostic plots
+
+### Plot 1 — Global MAP distribution
+
+```{r plot1_global_map, eval=jsonl_files_exist, fig.height=5}
+p_full <- ggplot(node_site_metrics, aes(x = MAP)) +
+  geom_histogram(binwidth = 0.01, fill = "#4C8FC0", colour = NA, alpha = 0.8) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  labs(
+    title    = "Global MAP posterior distribution (all nodes × sites)",
+    subtitle = sprintf("%s genes | %s total observations",
+                       scales::comma(dplyr::n_distinct(node_site_metrics$gene)),
+                       scales::comma(nrow(node_site_metrics))),
+    x = "MAP posterior",
+    y = "Count"
+  ) +
+  theme_bw(base_size = 12)
+
+# Inset: uncertainty tail (MAP < 1.0)
+p_inset <- ggplot(node_site_metrics |> dplyr::filter(MAP < 1.0), aes(x = MAP)) +
+  geom_histogram(binwidth = 0.01, fill = "#E07B39", colour = NA, alpha = 0.85) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  labs(title = "MAP < 1.0 (uncertainty tail)", x = NULL, y = NULL) +
+  theme_bw(base_size = 9) +
+  theme(plot.title = element_text(size = 8))
+
+p1 <- p_full +
+  inset_element(p_inset, left = 0.02, bottom = 0.45, right = 0.48, top = 0.98)
+
+save_plot(p1, "plot_asr_global_map_distribution.png", width = 11, height = 5)
+p1
+```
+
+### Plot 2 — Uncertainty-tail distribution by gene
+
+```{r plot2_tail_by_gene, eval=jsonl_files_exist, fig.height=6}
+tail_gene_df <- node_site_metrics |> dplyr::filter(MAP < 1.0)
+
+p2 <- ggplot(tail_gene_df, aes(x = reorder(gene, MAP, median), y = MAP)) +
+  geom_violin(fill = "#4C8FC0", colour = NA, alpha = 0.7, scale = "width") +
+  geom_boxplot(width = 0.15, outlier.size = 0.4, colour = "grey30", fill = "white") +
+  coord_flip() +
+  labs(
+    title    = "MAP distribution (uncertainty tail: MAP < 1.0) by gene",
+    subtitle = "Violin + boxplot; genes sorted by median MAP",
+    x = NULL,
+    y = "MAP posterior"
+  ) +
+  theme_bw(base_size = 12)
+
+save_plot(p2, "plot_asr_uncertain_tail_by_gene.png", width = 11, height = max(6, 0.4 * dplyr::n_distinct(tail_gene_df$gene)))
+p2
+```
+
+### Plot 3 — Fraction of uncertain sites by gene
+
+```{r plot3_uncertainty_fractions, eval=jsonl_files_exist, fig.height=5}
+unc_fracs <- gene_stats_df |>
+  dplyr::select(gene, frac_MAP_lt_100, frac_MAP_lt_095, frac_MAP_lt_090, frac_MAP_lt_080) |>
+  dplyr::rename(
+    `< 1.00` = frac_MAP_lt_100,
+    `< 0.95` = frac_MAP_lt_095,
+    `< 0.90` = frac_MAP_lt_090,
+    `< 0.80` = frac_MAP_lt_080
+  ) |>
+  tidyr::pivot_longer(-gene, names_to = "Threshold", values_to = "Fraction") |>
+  dplyr::mutate(Threshold = factor(Threshold, levels = c("< 1.00", "< 0.95", "< 0.90", "< 0.80")))
+
+p3 <- ggplot(unc_fracs, aes(x = reorder(gene, Fraction), y = Fraction, fill = Threshold)) +
+  geom_col(position = "dodge", alpha = 0.85) +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format()) +
+  scale_fill_brewer(palette = "Blues", direction = -1) +
+  labs(
+    title = "Fraction of uncertain sites per gene",
+    x     = NULL,
+    y     = "Fraction of sites",
+    fill  = "MAP threshold"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "right")
+
+save_plot(p3, "plot_asr_uncertainty_fractions_by_gene.png", width = 11, height = 5)
+p3
+```
+
+### Plot 4 — Focal-node p_min distribution
+
+```{r plot4_pmin, fig.height=5}
+p4 <- ggplot(focal_df, aes(x = p_min)) +
+  geom_histogram(binwidth = 0.01, fill = "#4C8FC0", colour = NA, alpha = 0.85) +
+  geom_vline(xintercept = posterior_threshold,
+             colour = "#D62728", linewidth = 0.9, linetype = "dashed") +
+  annotate("text",
+           x     = posterior_threshold - 0.01,
+           y     = Inf,
+           label = sprintf("τ = %.2f", posterior_threshold),
+           colour = "#D62728", hjust = 1, vjust = 1.5, size = 3.5) +
+  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
+  labs(
+    title    = "Distribution of p_min across focal MRCA nodes",
+    subtitle = "Dashed line = params.ct_disambig_posterior_threshold",
+    x        = "p_min (minimum MAP across focal nodes for each site)",
+    y        = "Count"
+  ) +
+  theme_bw(base_size = 12)
+
+save_plot(p4, "plot_asr_focal_pmin_distribution.png", width = 11, height = 5)
+p4
+```
+
+### Plot 5 — Site retention by gene
+
+```{r plot5_retention, fig.height=5}
+p5 <- ggplot(
+  retention_gene,
+  aes(x = reorder(gene, retention_fraction), y = retention_fraction)
+) +
+  geom_col(fill = "#4C8FC0", alpha = 0.85) +
+  geom_hline(yintercept = retention_global$retention_fraction,
+             colour = "#D62728", linewidth = 0.8, linetype = "dashed") +
+  coord_flip() +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 1)) +
+  labs(
+    title    = sprintf("Site retention fraction per gene (τ = %.2f)", tau),
+    subtitle = "Dashed line = global retention fraction",
+    x        = NULL,
+    y        = "Retention fraction"
+  ) +
+  theme_bw(base_size = 12)
+
+save_plot(p5, "plot_asr_gene_retention.png", width = 11, height = max(5, 0.4 * nrow(retention_gene)))
+p5
+```
+
+### Plot 6 — Sensitivity: retained sites vs threshold
+
+```{r plot6_retention_sensitivity, fig.height=5}
+p6 <- ggplot(sensitivity_df, aes(x = tau, y = retention_fraction)) +
+  geom_line(colour = "#4C8FC0", linewidth = 1.1) +
+  geom_point(colour = "#4C8FC0", size = 3) +
+  geom_vline(xintercept = posterior_threshold,
+             colour = "#D62728", linewidth = 0.8, linetype = "dashed") +
+  annotate("text",
+           x = posterior_threshold + 0.002, y = 0.95,
+           label = sprintf("pipeline τ = %.2f", posterior_threshold),
+           colour = "#D62728", hjust = 0, size = 3.5) +
+  scale_x_continuous(breaks = TAU_GRID) +
+  scale_y_continuous(labels = percent_format(), limits = c(0, 1.05)) +
+  labs(
+    title    = "Sensitivity of site retention to posterior threshold",
+    subtitle = "Global retention fraction across tau grid (diagnostic only)",
+    x        = "Posterior threshold (τ)",
+    y        = "Retention fraction"
+  ) +
+  theme_bw(base_size = 12)
+
+# Add per-gene lines if not too many genes
+per_gene_sens <- dplyr::bind_rows(lapply(tau_grid, function(t) {
+  filter_df |>
+    dplyr::group_by(gene) |>
+    dplyr::summarise(
+      tau                = t,
+      retention_fraction = mean(p_min >= t, na.rm = TRUE),
+      .groups = "drop"
+    )
+}))
+
+if (dplyr::n_distinct(per_gene_sens$gene) <= 20) {
+  p6 <- p6 +
+    geom_line(data = per_gene_sens,
+              aes(x = tau, y = retention_fraction, group = gene),
+              colour = "grey70", linewidth = 0.5, alpha = 0.6)
+}
+
+save_plot(p6, "plot_asr_retention_sensitivity.png", width = 11, height = 5)
+p6
+```
+
+### Plot 7 — Sensitivity of convergence calls to threshold
+
+```{r plot7_convergence_sensitivity, fig.height=5}
+p7a <- ggplot(sensitivity_df, aes(x = tau, y = N_convergent_sites)) +
+  geom_line(colour = "#4C8FC0", linewidth = 1.1) +
+  geom_point(colour = "#4C8FC0", size = 3) +
+  geom_vline(xintercept = posterior_threshold,
+             colour = "#D62728", linewidth = 0.8, linetype = "dashed") +
+  scale_x_continuous(breaks = TAU_GRID) +
+  labs(title = "Convergent sites", x = "Threshold (τ)", y = "N convergent sites") +
+  theme_bw(base_size = 11)
+
+p7b <- ggplot(sensitivity_df, aes(x = tau, y = N_convergent_genes)) +
+  geom_line(colour = "#E07B39", linewidth = 1.1) +
+  geom_point(colour = "#E07B39", size = 3) +
+  geom_vline(xintercept = posterior_threshold,
+             colour = "#D62728", linewidth = 0.8, linetype = "dashed") +
+  scale_x_continuous(breaks = TAU_GRID) +
+  labs(title = "Convergent genes", x = "Threshold (τ)", y = "N convergent genes") +
+  theme_bw(base_size = 11)
+
+p7 <- p7a + p7b +
+  plot_annotation(
+    title    = "Sensitivity of convergence calls to posterior threshold",
+    subtitle = "Diagnostic only — pipeline always uses params.ct_disambig_posterior_threshold",
+    theme    = theme(plot.title = element_text(size = 13))
+  )
+
+save_plot(p7, "plot_convergence_sensitivity.png", width = 13, height = 5)
+p7
+```
+
+### Plots 8–9 — Margin and entropy by gene (focal nodes)
+
+```{r plot8_margin, eval="margin_min" %in% names(focal_df), fig.height=5}
+p8 <- ggplot(focal_df, aes(x = reorder(gene, margin_min, median), y = margin_min)) +
+  geom_violin(fill = "#7BAD6E", colour = NA, alpha = 0.7, scale = "width") +
+  geom_boxplot(width = 0.15, outlier.size = 0.4, colour = "grey30", fill = "white") +
+  coord_flip() +
+  labs(
+    title = "MAP margin (MAP − P_second) at focal nodes, per gene",
+    x     = NULL,
+    y     = "Minimum margin across focal nodes"
+  ) +
+  theme_bw(base_size = 12)
+
+save_plot(p8, "plot_asr_margin_by_gene.png", width = 11, height = max(5, 0.4 * dplyr::n_distinct(focal_df$gene)))
+p8
+```
+
+```{r plot9_entropy, eval="entropy_max" %in% names(focal_df), fig.height=5}
+p9 <- ggplot(focal_df, aes(x = reorder(gene, entropy_max, median), y = entropy_max)) +
+  geom_violin(fill = "#C97DB0", colour = NA, alpha = 0.7, scale = "width") +
+  geom_boxplot(width = 0.15, outlier.size = 0.4, colour = "grey30", fill = "white") +
+  coord_flip() +
+  labs(
+    title = "Shannon entropy at focal nodes (nats), per gene",
+    x     = NULL,
+    y     = "Maximum entropy across focal nodes"
+  ) +
+  theme_bw(base_size = 12)
+
+save_plot(p9, "plot_asr_entropy_by_gene.png", width = 11, height = max(5, 0.4 * dplyr::n_distinct(focal_df$gene)))
+p9
+```
+
+---
+
+## Output file summary
+
+```{r output_summary, echo=FALSE}
+tsv_files   <- list.files(tsv_dir,   pattern = "\\.tsv$", full.names = FALSE)
+plot_files  <- list.files(plots_dir, pattern = "\\.png$", full.names = FALSE)
+
+tibble(
+  type = c(rep("TSV", length(tsv_files)), rep("Plot", length(plot_files))),
+  file = c(tsv_files, plot_files)
+) |>
+  kbl_pp(caption = "All output files generated")
+```
+
+---
+
+*Generated by PhyloPhere — ASR Robustness Module*  
+*`params.ct_disambig_posterior_threshold` = **`r posterior_threshold`***
