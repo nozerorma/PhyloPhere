@@ -16,7 +16,9 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     path "removed_patterns_precluster.tsv", emit: removed_patterns
 
     script:
-    def mrca_threshold = params.mrca_posterior_threshold
+    // Use the canonical disambiguation threshold — same value applied during ASR reconstruction.
+    // This replaces the former mrca_posterior_threshold (0.7) which was a separate, weaker param.
+    def mrca_threshold = params.ct_disambig_posterior_threshold
     """
     python3 - <<'PY'
     import re

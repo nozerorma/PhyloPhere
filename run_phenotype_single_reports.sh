@@ -88,8 +88,8 @@ else
 fi
 
 # ── Selection analysis toggles ───────────────────────────────────────────────
-RUN_FADE="${RUN_FADE:-true}"
-RUN_MOLERATE="${RUN_MOLERATE:-true}"
+RUN_FADE="${RUN_FADE:-false}"
+RUN_MOLERATE="${RUN_MOLERATE:-false}"
 FADE_MODE="${FADE_MODE:-gene_set}"
 MOLERATE_MODE="${MOLERATE_MODE:-gene_set}"
 
@@ -98,6 +98,12 @@ RUN_RER="${RUN_RER:-false}"
 RER_TOOL="${RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
 RER_GENE_SET_MODE="${RER_GENE_SET_MODE:-gene_set}"
 GENE_TREES="${GENE_TREES:-${DATADIR}/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
+
+# ── PostProc exploratory toggle ───────────────────────────────────────────────
+# When true, runs an additional standalone postproc in exploratory mode after
+# the main filter run, using the same source CT outputs.  The output goes to
+# <RESULTS_BASE>/postproc_exploratory.  All other pipeline steps are disabled.
+RUN_POSTPROC_EXPLORATORY="${RUN_POSTPROC_EXPLORATORY:-false}"
 
 # ============================================================
 # ENVIRONMENT SETUP
@@ -123,6 +129,7 @@ SOURCE_BOOTSTRAP="${SOURCE_BASE}/caastools/bootstrap.tab"
 SOURCE_BACKGROUND="${SOURCE_BASE}/caastools/background_genes.output"
 SOURCE_DISCOVERY="${SOURCE_BASE}/caastools/discovery.tab"
 SOURCE_DISAMBIGUATION="${SOURCE_BASE}/ct_disambiguation/ct_disambiguation/caas_convergence_master.csv"
+SOURCE_TRAITFILE="${SOURCE_BASE}/data_exploration/2.CT/1.Traitfiles/traitfile.tab"
 
 # # Gene-set inputs for FADE / MoleRate / RER (used in gene_set mode)
 # SOURCE_POSTPROC_TOP="${SOURCE_BASE}/postproc/disambiguation_characterization/us_gs_relations/exports/txt/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
@@ -197,6 +204,7 @@ COMMON_NF_FLAGS=(
     -name "${TRAIT}_${NXF_RUN_ID}"
     -profile local
     --ct_tool "" #discovery,resample,bootstrap results are passed as inputs, so we only run the discovery step
+    --caas_config "${SOURCE_TRAITFILE}"
     --alignment  "$ALI_DIR"
     --tree        "$TREE_FILE"
     --cycles      "$CYCLES"
@@ -206,11 +214,12 @@ COMMON_NF_FLAGS=(
     --discovery_out "${SOURCE_DISCOVERY}"
     --resample_out "${SOURCE_RESAMPLE_DIR}"
     --bootstrap_input "${SOURCE_BOOTSTRAP}"
+    --background_input "${SOURCE_BACKGROUND}"
     --disambiguation_input "${SOURCE_DISAMBIGUATION}"
 )
 
 # ============================================================
-# HELPER: run pipeline
+# HELPER: run pipeline (filter mode)
 # ============================================================
 run_pipeline() {
     local outdir="$1"
@@ -223,6 +232,52 @@ run_pipeline() {
     nextflow run "${REPO_DIR}/main.nf" \
         "${COMMON_NF_FLAGS[@]}" \
         --caas_postproc_mode "filter" \
+        -w "$workdir" \
+        --outdir "$outdir" \
+        "${extra[@]}"
+}
+
+# ============================================================
+# HELPER: run postproc standalone (exploratory mode)
+# ─────────────────────────────────────────────────────────────
+# All CT / signification / disambiguation / ORA / string /
+# accumulation / reporting steps are disabled.  Only ct_postproc
+# is enabled, reading SOURCE_DISCOVERY + SOURCE_BACKGROUND from
+# the prior run.  Trait-specific flags are passed as extra args.
+# ============================================================
+run_postproc_exploratory() {
+    local outdir="$1"
+    local workdir="$2"
+    shift 2
+    local extra=("$@")
+
+    mkdir -p "$outdir" "$workdir"
+
+    echo ""
+    echo "------------------------------------------"
+    echo " Running PostProc (exploratory / standalone)"
+    echo "   discovery  : $SOURCE_DISCOVERY"
+    echo "   background : $SOURCE_BACKGROUND"
+    echo "   Output     : $outdir"
+    echo "------------------------------------------"
+
+    nextflow run "${REPO_DIR}/main.nf" \
+        -with-tower \
+        -name "${TRAIT}_${NXF_RUN_ID}_expl" \
+        -profile local \
+        --ct_tool            "" \
+        --caas_config        "${SOURCE_TRAITFILE}" \
+        --tree               "$TREE_FILE" \
+        --ct_signification   false \
+        --ct_disambiguation  false \
+        --ct_postproc \
+        --caas_postproc_mode "exploratory" \
+        --discovery_input    "$SOURCE_DISCOVERY" \
+        --background_input   "$SOURCE_BACKGROUND" \
+        --ora                false \
+        --string             false \
+        --ct_accumulation    false \
+        --reporting          false \
         -w "$workdir" \
         --outdir "$outdir" \
         "${extra[@]}"
@@ -243,6 +298,7 @@ echo " N_Rand     : $N_RANDOMIZATIONS"
 echo " RUN_FADE   : $RUN_FADE  (mode=${FADE_MODE})"
 echo " RUN_MOLERATE: $RUN_MOLERATE  (mode=${MOLERATE_MODE})"
 echo " RUN_RER    : $RUN_RER  (tool=${RER_TOOL})"
+echo " RUN_POSTPROC_EXPLORATORY: $RUN_POSTPROC_EXPLORATORY"
 echo "=========================================="
 
 RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}/${timestamp}"
@@ -287,7 +343,6 @@ if [ "$CLASS" = "1" ]; then
         --prune_list_secondary "$PRUNE_SECONDARY_LIST"
         --reporting
         --ct_postproc
-        --ct_signification
         --ora
         --string
         --ct_accumulation
@@ -300,6 +355,21 @@ if [ "$CLASS" = "1" ]; then
         "${RESULTS_BASE}/filter" \
         "${WORK_DIR}/filter" \
         "${TRAIT_FLAGS[@]}"
+
+    if [ "$RUN_POSTPROC_EXPLORATORY" = true ]; then
+        run_postproc_exploratory \
+            "${RESULTS_BASE}/postproc_exploratory" \
+            "${WORK_DIR}/postproc_exploratory" \
+            --my_traits            "$TRAIT_FILE" \
+            --traitname            "$TRAIT" \
+            --secondary_trait      "$SECONDARY_TRAIT" \
+            --n_trait              "$N_TRAIT_PRUNED" \
+            --c_trait              "$C_TRAIT" \
+            --branch_trait         "$BRANCH_TRAIT" \
+            --prune_data \
+            --prune_list           "$PRUNE_LIST" \
+            --prune_list_secondary "$PRUNE_SECONDARY_LIST"
+    fi
 
 # ============================================================
 # CLASS 2 — Diet / Simple (María Sánchez Bermúdez)
@@ -338,6 +408,19 @@ elif [ "$CLASS" = "2" ]; then
         "${RESULTS_BASE}/filter" \
         "${WORK_DIR}/filter" \
         "${TRAIT_FLAGS[@]}"
+
+    if [ "$RUN_POSTPROC_EXPLORATORY" = true ]; then
+        run_postproc_exploratory \
+            "${RESULTS_BASE}/postproc_exploratory" \
+            "${WORK_DIR}/postproc_exploratory" \
+            --my_traits       "$SIMPLE_TRAIT_FILE" \
+            --traitname       "$TRAIT" \
+            --branch_trait    "$BRANCH_TRAIT" \
+            --discrete_method "$DISCRETE_METHOD" \
+            --n_trait         "" \
+            --c_trait         "" \
+            --secondary_trait ""
+    fi
 
 else
     echo "Error: CLASS must be 1 or 2, got: $CLASS"

@@ -21,12 +21,11 @@ params:
   fdr_thr: 0.1
   top_thr: 15
   report_num: 20
-  enable_spider_plot: false
   enable_overlap_heatmap: true
   enable_enrichment_map: true
   enable_ppi_enrichment: false
   overlap_top_terms: 50
-  compare_metric: "jaccard"
+  compare_metric: "overlap"
 ---
 
 ```{r setup, include=FALSE}
@@ -191,7 +190,6 @@ cat("Required interaction score:", params$required_score, "\n")
 cat("FDR threshold:", params$fdr_thr, "\n")
 cat("Top terms per list:", params$top_thr, "\n")
 cat("PPI enrichment test:", params$enable_ppi_enrichment, "\n")
-cat("Spider plot:", params$enable_spider_plot, "\n")
 cat("Overlap heatmap:", params$enable_overlap_heatmap, "\n")
 cat("Enrichment map:", params$enable_enrichment_map, "\n")
 cat("Overlap top terms:", params$overlap_top_terms, "\n")
@@ -421,7 +419,7 @@ if (length(ppi_rows) > 0) {
 
 # Visualisations
 
-```{r plots, fig.width=12, fig.height=8}
+```{r plots, fig.width=12, fig.height=8, results='asis'}
 if (nrow(all_results) > 0) {
 
   # Detect key columns (STRING may return 'description' or 'term').
@@ -450,6 +448,20 @@ if (nrow(all_results) > 0) {
     ) %>%
     filter(!is.na(FDR_std), !is.na(term_std), term_std != "")
 
+  std_results <- std_results %>%
+    mutate(scenario = {
+      # Match _top_ or _bottom_ as a delimited token anywhere in the filename stem.
+      # Files without either token (i.e. global lists) fall back to "global".
+      s <- stringr::str_match(gene_list, "_(top|bottom)(?:_|$)")[, 2]
+      dplyr::if_else(is.na(s), "global", s)
+    })
+  std_results_all    <- std_results
+  present_scenarios  <- intersect(c("global", "top", "bottom"), unique(std_results$scenario))
+
+  for (.scen in present_scenarios) {
+    std_results <- std_results_all %>% dplyr::filter(scenario == .scen)
+    cat(sprintf("\n\n## STRING plots — %s\n\n", .scen))
+
   # ── Top hits per list ──────────────────────────────────────────────────────
   top_hits <- std_results %>%
     arrange(FDR_std) %>%
@@ -473,7 +485,7 @@ if (nrow(all_results) > 0) {
       y       = "-log10(FDR)"
     )
   print(p_hits)
-  ggsave(file.path(string_plots_dir, "top_string_hits_per_list.png"),
+  ggsave(file.path(string_plots_dir, paste0("top_string_hits_per_list_", .scen, ".png")),
          p_hits, width = 14, height = 9, dpi = 320)
 
   # ── Enriched terms by STRING category ─────────────────────────────────────
@@ -491,7 +503,7 @@ if (nrow(all_results) > 0) {
     ) +
     theme(axis.text.x = element_text(angle = 45, hjust = 1))
   print(p_cat)
-  ggsave(file.path(string_plots_dir, "string_enriched_terms_by_category.png"),
+  ggsave(file.path(string_plots_dir, paste0("string_enriched_terms_by_category_", .scen, ".png")),
          p_cat, width = 12, height = 7, dpi = 320)
 
   # ── Term recurrence across lists ───────────────────────────────────────────
@@ -507,7 +519,7 @@ if (nrow(all_results) > 0) {
     arrange(desc(n_lists), best_fdr)
 
   readr::write_tsv(term_recurrence,
-                   file.path(string_summary_dir, "string_term_recurrence.tsv"))
+                   file.path(string_summary_dir, paste0("string_term_recurrence_", .scen, ".tsv")))
 
   top_recurrent <- term_recurrence %>%
     # slice_head() already returns all available rows when n > nrow(data)
@@ -531,7 +543,7 @@ if (nrow(all_results) > 0) {
         y     = "# gene lists where term is enriched"
       )
     print(p_recurrent)
-    ggsave(file.path(string_plots_dir, "string_recurrent_terms.png"),
+    ggsave(file.path(string_plots_dir, paste0("string_recurrent_terms_", .scen, ".png")),
            p_recurrent, width = 13, height = 10, dpi = 320)
   }
 
@@ -539,7 +551,7 @@ if (nrow(all_results) > 0) {
   if (isTRUE(params$enable_overlap_heatmap)) {
     top_n     <- as.integer(params$overlap_top_terms)
     top_n     <- ifelse(is.na(top_n) || top_n <= 0L, 50L, top_n)
-    metric    <- tolower(as.character(params$compare_metric %||% "jaccard"))
+    metric    <- tolower(as.character(params$compare_metric %||% "overlap"))
 
     term_sets <- std_results %>%
       arrange(FDR_std) %>%
@@ -572,7 +584,7 @@ if (nrow(all_results) > 0) {
     overlap_df <- as.data.frame(as.table(overlap_mat)) %>%
       rename(gene_list_x = Var1, gene_list_y = Var2, overlap = Freq)
     readr::write_tsv(overlap_df,
-                     file.path(string_summary_dir, "string_overlap_matrix.tsv"))
+                     file.path(string_summary_dir, paste0("string_overlap_matrix_", .scen, ".tsv")))
 
     p_overlap <- ggplot(overlap_df,
                         aes(x = gene_list_x, y = gene_list_y, fill = overlap)) +
@@ -587,7 +599,7 @@ if (nrow(all_results) > 0) {
       ) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
     print(p_overlap)
-    ggsave(file.path(string_plots_dir, "string_overlap_heatmap.png"),
+    ggsave(file.path(string_plots_dir, paste0("string_overlap_heatmap_", .scen, ".png")),
            p_overlap, width = 10, height = 8, dpi = 320)
   }
 
@@ -614,7 +626,7 @@ if (nrow(all_results) > 0) {
       ) +
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
     print(p_dot)
-    ggsave(file.path(string_plots_dir, "string_pooled_dotplot.png"),
+    ggsave(file.path(string_plots_dir, paste0("string_pooled_dotplot_", .scen, ".png")),
            p_dot, width = 14, height = 11, dpi = 320)
   }
 
@@ -654,11 +666,13 @@ if (nrow(all_results) > 0) {
           ) +
           theme(axis.text.x = element_text(angle = 45, hjust = 1))
         print(p_network)
-        ggsave(file.path(string_plots_dir, "string_shared_term_network_matrix.png"),
+        ggsave(file.path(string_plots_dir, paste0("string_shared_term_network_matrix_", .scen, ".png")),
                p_network, width = 10, height = 8, dpi = 320)
       }
     }
   }
+  } # end for (.scen in present_scenarios)
+  if (exists("std_results_all")) std_results <- std_results_all
 }
 ```
 

@@ -33,11 +33,10 @@ process STRING_ACCUMULATION_REPORT {
     def top_thr                = params.string_top_thr           ?: 15
     def report_num             = params.string_report_num        ?: 20
     def enable_ppi             = params.string_enable_ppi              ? 'TRUE' : 'FALSE'
-    def enable_spider          = params.string_enable_spider_plot      ? 'TRUE' : 'FALSE'
     def enable_overlap         = params.string_enable_overlap_heatmap  ? 'TRUE' : 'FALSE'
     def enable_enrichment_map  = params.string_enable_enrichment_map   ? 'TRUE' : 'FALSE'
     def overlap_top_terms      = params.string_overlap_top_terms ?: 50
-    def compare_metric         = params.string_compare_metric    ?: 'jaccard'
+    def compare_metric         = params.string_compare_metric    ?: 'overlap'
     def bg_name                = background_file.getName().replace("'", "\\'")
     def gene_files_r           = gene_list_files
         .collect { it.getName().replace("'", "\\'") }
@@ -63,7 +62,6 @@ process STRING_ACCUMULATION_REPORT {
                     top_thr               = ${top_thr},
                     report_num            = ${report_num},
                     enable_ppi_enrichment = ${enable_ppi},
-                    enable_spider_plot    = ${enable_spider},
                     enable_overlap_heatmap   = ${enable_overlap},
                     enable_enrichment_map    = ${enable_enrichment_map},
                     overlap_top_terms     = ${overlap_top_terms},
@@ -92,7 +90,6 @@ process STRING_ACCUMULATION_REPORT {
                     top_thr               = ${top_thr},
                     report_num            = ${report_num},
                     enable_ppi_enrichment = ${enable_ppi},
-                    enable_spider_plot    = ${enable_spider},
                     enable_overlap_heatmap   = ${enable_overlap},
                     enable_enrichment_map    = ${enable_enrichment_map},
                     overlap_top_terms     = ${overlap_top_terms},

@@ -41,6 +41,7 @@ process GENERATE_WORKFLOW_MAP {
 
     output:
     path 'workflow_map.html'
+    path 'workflow.html'
 
     exec:
     // Build context map using dynamic directory scanning instead of workflow parameters.
@@ -52,6 +53,7 @@ process GENERATE_WORKFLOW_MAP {
     // Nextflow can stage and publish the output file correctly.
     def html = WorkflowMap.buildWorkflowMapHtml(ctx)
     new File(task.workDir.toString(), 'workflow_map.html').text = html
+    new File(task.workDir.toString(), 'workflow.html').text = html
 }
 
 // ── Workflow ──────────────────────────────────────────────────────────────────

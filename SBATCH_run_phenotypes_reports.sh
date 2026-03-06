@@ -54,7 +54,7 @@ submit_array_job() {
 #SBATCH -o Slurm/slurm-%A_%a.out
 #SBATCH --mail-type=START,END,FAIL
 #SBATCH --mail-user=miguel.ramon@upf.edu
-#SBATCH --array=1-1%1
+#SBATCH --array=1-2%2
 
 module load Nextflow
 module load Miniconda3
@@ -71,7 +71,7 @@ conda activate phylophere
 # from:  CAAS_RESULTS/<TRAIT>/<SOURCE_RUN_SUBDIR>/filter/
 # Set to the timestamped dir name of a completed run, or leave as "runtime" if
 # you maintain a stable symlink/alias there.
-export SOURCE_RUN_SUBDIR="20260226_204433"
+export SOURCE_RUN_SUBDIR="runtime"
 
 # ── Selection analysis toggles ────────────────────────────────────────────────
 # Gene-set paths are auto-derived from SOURCE_RUN_SUBDIR; enable the tools here.
@@ -87,7 +87,7 @@ export RER_GENE_SET_MODE="gene_set"   # "gene_set" | "all"
 export GENE_TREES="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
 
 REPO_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere"
-SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single.sh"
+SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single_reports.sh"
 
 # ── Phenotype catalogue ───────────────────────────────────────────────────────
 # Args passed to run_phenotype_single.sh:

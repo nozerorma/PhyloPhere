@@ -112,7 +112,7 @@ process CONCAT_BACKGROUND {
     # Generate background_genes.output: unique gene list where Position is not empty
     echo ""
     echo "Generating background_genes.output..."
-    awk -F'\t' 'NF >= 2 && \$2 != "" && \$2 != "Position" {print \$1}' background.output | sort -u > background_genes.output
+    awk -F'\t' 'NF >= 2 && \$2 != "" && \$2 != "Position" && \$2 != "NULL" {print \$1}' background.output | sort -u > background_genes.output
     echo "Unique genes with positions: \$(wc -l < background_genes.output)"
     """
 }

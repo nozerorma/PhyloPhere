@@ -32,6 +32,7 @@
 // Import local processes from subworkflows
 include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP } from "${baseDir}/subworkflows/CT_POSTPROC/ctpp_clustfilter"
 include { CT_POSTPROC_REPORT } from "${baseDir}/subworkflows/CT_POSTPROC/ctpp_characterization"
+include { ASR_ROBUSTNESS } from "${baseDir}/workflows/asr_robustness"
 
 workflow CT_POSTPROC {
     take:
@@ -39,6 +40,7 @@ workflow CT_POSTPROC {
         background_files_channel     // Raw background files from CT module (optional)
         background_genes_channel     // Global background genes file from CT module (preferred)
         bootstrap_input_channel      // kept for API compatibility (unused)
+        disambiguation_dir_channel   // Full ct_disambiguation/ directory for ASR robustness diagnostics (optional)
     
     main:
         def filter_dir_ch = Channel.value("${params.outdir}/postproc")
@@ -60,6 +62,26 @@ workflow CT_POSTPROC {
             discovery_file_ch = Channel.value(discovery_file_obj)
         }
         
+        // ── ASR Robustness diagnostics (parallel, does NOT affect clustering path) ────────────
+        // Resolve the ct_disambiguation/ directory: prefer the upstream channel, then
+        // derive from disambiguation_input CSV path when running in standalone mode.
+        if (params.asr_robustness) {
+            def asr_dir_ch
+            if (disambiguation_dir_channel) {
+                asr_dir_ch = disambiguation_dir_channel
+            } else if (params.disambiguation_input) {
+                def csv_parent = file(params.disambiguation_input).parent
+                asr_dir_ch = Channel.value(csv_parent)
+            } else {
+                asr_dir_ch = null
+            }
+            if (asr_dir_ch) {
+                ASR_ROBUSTNESS(asr_dir_ch)
+            } else {
+                log.warn "[asr_robustness] No disambiguation directory available — ASR robustness skipped."
+            }
+        }
+
         // Normalize discovery/disambiguation schema and remove ambiguous/no_change before clustering
         prepared_inputs = CAAS_PREPARE_POSTPROC_INPUT(discovery_file_ch)
         def prepared_discovery_ch = prepared_inputs.prepared_discovery
@@ -205,7 +227,7 @@ workflow CT_POSTPROC {
                 gene_filter_results ? gene_filter_results.gene_stats : Channel.empty()
             )
 
-            // Only pipe the specific txt exports needed by ORA (us_gs_relations/exports/txt/*.txt)
+            // Only pipe the specific txt exports needed by ORA (gene_relation_analysis/txt/*.txt)
             // NOTE: disambiguation_characterization can emit a collection of files; normalize to
             // single-file items first to avoid calling String methods on ArrayList values.
             ora_gene_lists_files_ch = characterization_results.disambiguation_characterization
@@ -214,7 +236,7 @@ workflow CT_POSTPROC {
                 }
                 .filter { f ->
                     def p = f.toString()
-                    p.endsWith('.txt') && p.contains('us_gs_relations/exports/txt')
+                    p.endsWith('.txt') && p.contains('gene_relation_analysis/txt')
                 }
             
             log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"

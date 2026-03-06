@@ -170,6 +170,17 @@ def process_position(position, multiconfig, species_in_alignment):
     except:
         pass
 
+    # Treat IUPAC ambiguity codes as gaps (no resolved amino acid).
+    # X = any, B = Asp/Asn, Z = Glu/Gln, J = Ile/Leu, U = selenocysteine.
+    # Including these in z.gapped ensures they are excluded from ungapped_fg/bg
+    # and counted towards the gap quota, preventing spurious convergence calls
+    # where X would be silently dropped from group encoding while the species
+    # remained in the foreground/background counts and species lists.
+    _AMBIGUOUS_AAS = {'X', 'B', 'Z', 'J', 'U'}
+    for _ambig in _AMBIGUOUS_AAS:
+        if _ambig in z.aas2species:
+            z.gapped = list(set(z.gapped) | set(z.aas2species[_ambig]))
+
     # Determine Ungapped Species
 
     for trait in z.trait2aas_bg.keys():
