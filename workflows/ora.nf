@@ -38,31 +38,36 @@ workflow ORA {
         gene_lists_input_channel
 
     main:
-        // Resolve background source: upstream channel OR standalone parameter
-        // ifEmpty returns a direct file value (not a Channel wrapper) so the process input receives a concrete path
-        def background_file_ch = (background_input_channel ?: Channel.empty())
-            .ifEmpty {
-                assert params.ora_background_input : "ORA requires CT_POSTPROC cleaned background output or --ora_background_input"
+        // Resolve background source: upstream channel OR standalone parameter.
+        // Use an upfront if(channel) guard (Groovy-time) instead of .ifEmpty{}
+        // (reactive-time) so the fallback is not triggered prematurely when
+        // background_input_channel is a value channel that has not yet emitted
+        // at DAG-construction time (same pattern used by CT_POSTPROC, FADE, etc.).
+        def background_file_ch
+        if (background_input_channel) {
+            background_file_ch = background_input_channel
+        } else {
+            assert params.ora_background_input : "ORA requires CT_POSTPROC cleaned background output or --ora_background_input"
 
-                def bg_path = file(params.ora_background_input)
-                assert bg_path.exists() : "Error: ora_background_input not found: ${params.ora_background_input}"
+            def bg_path = file(params.ora_background_input)
+            assert bg_path.exists() : "Error: ora_background_input not found: ${params.ora_background_input}"
 
-                if (bg_path.isDirectory()) {
-                    def preferred = file("${params.ora_background_input}/cleaned_background_main.txt")
-                    if (preferred.exists()) {
-                        log.info "📂 Using preferred cleaned background file: ${preferred}"
-                        preferred
-                    } else {
-                        def txts = bg_path.listFiles()?.findAll { it.isFile() && it.name.endsWith('.txt') } ?: []
-                        assert txts.size() > 0 : "Error: No .txt background files found in ${params.ora_background_input}"
-                        log.info "📂 Using first background .txt file from directory: ${txts[0]}"
-                        txts[0]
-                    }
+            if (bg_path.isDirectory()) {
+                def preferred = file("${params.ora_background_input}/cleaned_background_main.txt")
+                if (preferred.exists()) {
+                    log.info "📂 Using preferred cleaned background file: ${preferred}"
+                    background_file_ch = Channel.value(preferred)
                 } else {
-                    log.info "📄 Using ORA background file: ${bg_path}"
-                    bg_path
+                    def txts = bg_path.listFiles()?.findAll { it.isFile() && it.name.endsWith('.txt') } ?: []
+                    assert txts.size() > 0 : "Error: No .txt background files found in ${params.ora_background_input}"
+                    log.info "📂 Using first background .txt file from directory: ${txts[0]}"
+                    background_file_ch = Channel.value(txts[0])
                 }
+            } else {
+                log.info "📄 Using ORA background file: ${bg_path}"
+                background_file_ch = Channel.value(bg_path)
             }
+        }
 
         // Resolve gene-list source: upstream channel OR standalone parameter.
         // IMPORTANT: Channel.empty().collect() never emits in Nextflow DSL2 (it silently

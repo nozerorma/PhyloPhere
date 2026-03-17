@@ -30,7 +30,10 @@ library(RERconverge)
 
 # Load traitfile
 ## File must have a multi-column structure with at least a "species" and "trait" column
-ori_traits <- read.csv(args[1])
+## Auto-detect separator (tab or comma) by inspecting the first line
+.first_line <- readLines(args[1], n = 1)
+.sep <- if (grepl("\t", .first_line)) "\t" else ","
+ori_traits <- read.table(args[1], header = TRUE, sep = .sep, check.names = FALSE, quote = "\"")
 
 ## Remove whitespaces
 ori_traits[] <- lapply(ori_traits, function(col) trimws(col))
