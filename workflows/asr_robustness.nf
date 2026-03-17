@@ -61,10 +61,10 @@ workflow ASR_ROBUSTNESS {
             log.info "📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION"
             disambig_dir_ch = disambiguation_dir_channel
         } else {
-            assert params.disambiguation_input : \
-                "[asr_robustness] Requires --ct_disambiguation upstream or --disambiguation_input (path to ct_disambiguation/ directory)"
-            def d = file(params.disambiguation_input)
-            assert d.exists() : "[asr_robustness] disambiguation_input not found: ${params.disambiguation_input}"
+            assert params.disambiguation_dir : \
+                "[asr_robustness] Requires --ct_disambiguation upstream or --disambiguation_dir (path to ct_disambiguation/ directory)"
+            def d = file(params.disambiguation_dir)
+            assert d.exists() : "[asr_robustness] disambiguation_dir not found: ${params.disambiguation_dir}"
             disambig_dir_ch = Channel.value(d)
         }
 

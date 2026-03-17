@@ -141,7 +141,7 @@ all_results <- lapply(json_files, parse_fade_json)
 all_results <- Filter(Negate(is.null), all_results)
 
 if (length(all_results) == 0) {
-  message("All FADE JSON files failed to parse (empty or corrupt). "
+  message("All FADE JSON files failed to parse (empty or corrupt). ",
           "No valid results for the ", params$direction, " direction.")
   knitr::knit_exit()
 }

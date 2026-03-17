@@ -24,6 +24,9 @@ process FADE_REPORT {
     publishDir path: "${params.outdir}/selection/fade/${direction}",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
+    publishDir path: "${params.outdir}/HTML_reports",
+               mode: 'copy', overwrite: true,
+               pattern: '*.html'
     publishDir path: "${params.outdir}/selection/fade/${direction}",
                mode: 'copy', overwrite: true,
                pattern: 'fade_summary_*.tsv'
@@ -47,6 +50,14 @@ process FADE_REPORT {
         """
         cp -R ${local_dir}/* .
 
+        n_json=\$(ls *.FADE.json 2>/dev/null | wc -l)
+        echo "[FADE_REPORT] direction=${direction} | JSON files found: \${n_json}"
+        if [ "\${n_json}" -eq 0 ]; then
+            echo "[FADE_REPORT] WARNING: No *.FADE.json files found for direction '${direction}'. "\
+                 "The report will contain no results. "\
+                 "Possible causes: all FADE jobs failed, or no genes were selected for this direction."
+        fi
+
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 'FADE_report.Rmd',
@@ -61,10 +72,24 @@ process FADE_REPORT {
                 output_file = 'FADE_report_${direction}.html'
             )
         "
+
+        if [ -f 'FADE_report_${direction}.html' ]; then
+            echo "[FADE_REPORT] Report generated: FADE_report_${direction}.html"
+        else
+            echo "[FADE_REPORT] WARNING: Report file was not created for direction '${direction}'."
+        fi
         """
     } else {
         """
         cp -R ${local_dir}/* .
+
+        n_json=\$(ls *.FADE.json 2>/dev/null | wc -l)
+        echo "[FADE_REPORT] direction=${direction} | JSON files found: \${n_json}"
+        if [ "\${n_json}" -eq 0 ]; then
+            echo "[FADE_REPORT] WARNING: No *.FADE.json files found for direction '${direction}'. "\
+                 "The report will contain no results. "\
+                 "Possible causes: all FADE jobs failed, or no genes were selected for this direction."
+        fi
 
         Rscript -e "
             rmarkdown::render(
@@ -80,6 +105,12 @@ process FADE_REPORT {
                 output_file = 'FADE_report_${direction}.html'
             )
         "
+
+        if [ -f 'FADE_report_${direction}.html' ]; then
+            echo "[FADE_REPORT] Report generated: FADE_report_${direction}.html"
+        else
+            echo "[FADE_REPORT] WARNING: Report file was not created for direction '${direction}'."
+        fi
         """
     }
 }
