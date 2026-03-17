@@ -157,8 +157,15 @@ def read_metadata_caas(metadata_file):
 
     with open(metadata_file) as f:
         raw_header = f.readline().strip()
+        if not raw_header:
+            logging.warning(f"Metadata CAAS file is empty: {metadata_file} — skipping")
+            return metadata
         sep = '\t' if '\t' in raw_header else ','
         h = raw_header.split(sep)
+
+        if 'Gene' not in h:
+            logging.warning(f"Metadata CAAS file has no 'Gene' column (header: {raw_header[:120]}) — skipping")
+            return metadata
 
         gene_idx          = h.index('Gene')
         pos_idx           = h.index('Position')

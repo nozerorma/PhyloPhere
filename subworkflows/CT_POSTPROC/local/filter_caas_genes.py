@@ -523,7 +523,11 @@ Examples:
     
     # Apply filtering
     filtered_df = apply_gene_filter(discovery_df, removed_genes_df, mode=args.filter_mode)
-    
+
+    # If filtered_df lost all columns somehow (edge case: empty input), restore columns from discovery_df
+    if filtered_df.empty and len(filtered_df.columns) == 0 and not discovery_df.empty:
+        filtered_df = pd.DataFrame(columns=discovery_df.columns)
+
     # Write outputs
     print(f"Writing filtered discovery: {args.output}", file=sys.stderr)
     filtered_df.to_csv(args.output, sep='\t', index=False)

@@ -64,6 +64,7 @@ include {CT_SIGNIFICATION} from './workflows/ct_signification.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
 include {ORA} from './workflows/ora.nf'
+include {ORA_EXCLUDED} from './workflows/ora_excluded.nf'
 include {ORA_ACCUMULATION} from './workflows/ora_accumulation.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
@@ -253,6 +254,9 @@ workflow {
                 // not yet emitted is safe — it will wait for the upstream process.
                 // Pass the direct queue channel for gene lists (ORA collects internally).
                 ORA(pp_cleaned_bg, postproc_results.ora_gene_lists_files)
+                // Run a second ORA on the excluded gene lists using the original
+                // (pre-cleanup) background from discovery, publishing to ora_excluded/.
+                ORA_EXCLUDED(postproc_results.background_ori, postproc_results.excluded_gene_lists_files)
                 ran_any = true
             }
         }
@@ -317,19 +321,24 @@ workflow {
         sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
         sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
 
+        // Split trait/tree channels so multiple tools (FADE, MOLERATE) can each
+        // receive the single emission without competing on the same queue channel.
+        def split_traitfile = ct_results
+            ? ct_results.trait_file.multiMap { f -> fade: f; molerate: f }
+            : Channel.empty().multiMap { f -> fade: f; molerate: f }
+        def split_tree = ct_results
+            ? ct_results.tree_file.multiMap { f -> fade: f; molerate: f }
+            : Channel.empty().multiMap { f -> fade: f; molerate: f }
+
         if (params.fade) {
-            def fade_traitfile_ch = ct_results ? ct_results.trait_file : Channel.empty()
-            def fade_tree_ch      = ct_results ? ct_results.tree_file  : Channel.empty()
-            FADE(fade_traitfile_ch, fade_tree_ch,
+            FADE(split_traitfile.fade, split_tree.fade,
                  sel_acc_top_ch, sel_acc_bottom_ch,
                  sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.molerate) {
-            def mr_traitfile_ch = ct_results ? ct_results.trait_file : Channel.empty()
-            def mr_tree_ch      = ct_results ? ct_results.tree_file  : Channel.empty()
-            MOLERATE(mr_traitfile_ch, mr_tree_ch,
+            MOLERATE(split_traitfile.molerate, split_tree.molerate,
                      sel_acc_top_ch, sel_acc_bottom_ch,
                      sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true

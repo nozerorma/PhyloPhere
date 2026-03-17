@@ -47,6 +47,7 @@ suppressPackageStartupMessages({
   library(kableExtra)
   library(paletteer)
   library(tidyverse)
+  if (requireNamespace("UpSetR", quietly = TRUE)) library(UpSetR)
 })
 
 createDir <- function(directory) {
@@ -281,6 +282,23 @@ if (!is.null(gene_stats_file) && !is.na(gene_stats_file) && file.exists(gene_sta
   }
   
   cat("Loaded gene statistics for", nrow(gene_summary_annotated), "genes\n")
+
+  # Ensure all downstream-required columns exist (file may lack some)
+  if (!"CAAP_Group" %in% names(gene_summary_annotated)) {
+    gene_summary_annotated$CAAP_Group <- "US"
+  }
+  if (!"n_CAAS_per_length" %in% names(gene_summary_annotated)) {
+    if ("n_CAAS" %in% names(gene_summary_annotated) && "Length" %in% names(gene_summary_annotated)) {
+      gene_summary_annotated$n_CAAS_per_length <- gene_summary_annotated$n_CAAS / gene_summary_annotated$Length * 100
+    } else {
+      gene_summary_annotated$n_CAAS_per_length <- NA_real_
+    }
+  }
+  if (!"Extreme" %in% names(gene_summary_annotated))          gene_summary_annotated$Extreme          <- FALSE
+  if (!"Dubious" %in% names(gene_summary_annotated))          gene_summary_annotated$Dubious          <- FALSE
+  if (!"Category" %in% names(gene_summary_annotated))         gene_summary_annotated$Category         <- "Normal"
+  if (!"threshold_extreme" %in% names(gene_summary_annotated)) gene_summary_annotated$threshold_extreme <- NA_real_
+  if (!"threshold_dubious" %in% names(gene_summary_annotated)) gene_summary_annotated$threshold_dubious <- NA_real_
   
 } else {
   cat("Warning: Gene stats file not provided or not found. Computing fallback statistics...\n")
@@ -339,14 +357,17 @@ if (!"CAAP_Group" %in% names(gene_summary_annotated)) {
 
 cat("Groups found:", paste(sort(unique(gene_summary_annotated$CAAP_Group)), collapse=", "), "\n")
 
+if (nrow(gene_summary_annotated) == 0) {
+  cat("WARNING: gene_summary_annotated is empty — skipping outlier distribution plots.\n")
+} else {
+
+# Pre-compute vline data — guard against empty frames that break facet_wrap
+vline_dubious_data  <- gene_summary_annotated %>% filter(!is.na(threshold_dubious))  %>% distinct(CAAP_Group, threshold_dubious)
+vline_extreme_data  <- gene_summary_annotated %>% filter(!is.na(threshold_extreme)) %>% distinct(CAAP_Group, threshold_extreme)
+
 # Generate histograms with increased font sizes for slides
 p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = Category)) +
   geom_histogram(binwidth = 0.05, color = "black", alpha = 0.8) +
-  geom_vline(
-    data = gene_summary_annotated %>% filter(!is.na(threshold_dubious)) %>% distinct(CAAP_Group, threshold_dubious),
-    aes(xintercept = threshold_dubious),
-    color = tableau_10[["blue"]], linetype = "dashed", linewidth = 1
-  ) +
   scale_fill_manual(values = category_palette, breaks = c("Extreme", "Dubious", "Both", "Normal")) +
   scale_x_log10(breaks = c(1, 2, 5, 10, 20, 50, 100, 200)) +
   facet_wrap(~CAAP_Group, scales = "free_y") +
@@ -361,17 +382,17 @@ p_gross_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS, fill = Category))
     axis.title = element_text(size = 15),
     strip.text = element_text(face = "bold", size = 15)
   )
+if (nrow(vline_dubious_data) > 0) {
+  p_gross_dist <- p_gross_dist +
+    geom_vline(data = vline_dubious_data, aes(xintercept = threshold_dubious),
+               color = tableau_10[["blue"]], linetype = "dashed", linewidth = 1)
+}
 
 p_zoom_gross <- p_gross_dist + coord_cartesian(ylim = c(0, 100)) + 
   labs(title = "Zoomed View (y ≤ 100)")
 
 p_density_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS_per_length, fill = Category)) +
   geom_histogram(binwidth = 0.05, color = "black", alpha = 0.8) +
-  geom_vline(
-    data = gene_summary_annotated %>% filter(!is.na(threshold_extreme)) %>% distinct(CAAP_Group, threshold_extreme),
-    aes(xintercept = threshold_extreme),
-    color = tableau_10[["vermillion"]], linetype = "dashed", linewidth = 1
-  ) +
   scale_fill_manual(values = category_palette, breaks = c("Extreme", "Dubious", "Both", "Normal")) +
   scale_x_log10(breaks = c(0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100)) +
   facet_wrap(~ CAAP_Group, scales = "free_y") +
@@ -386,6 +407,11 @@ p_density_dist <- ggplot(gene_summary_annotated, aes(x = n_CAAS_per_length, fill
     axis.title = element_text(size = 15),
     strip.text = element_text(face = "bold", size = 15)
   )
+if (nrow(vline_extreme_data) > 0) {
+  p_density_dist <- p_density_dist +
+    geom_vline(data = vline_extreme_data, aes(xintercept = threshold_extreme),
+               color = tableau_10[["vermillion"]], linetype = "dashed", linewidth = 1)
+}
 
 p_zoom_density <- p_density_dist + coord_cartesian(ylim = c(0, 50)) + 
   labs(title = "Zoomed View (y ≤ 50)")
@@ -455,6 +481,8 @@ print(outlier_counts)
 
 write_tsv(gene_summary_annotated, file.path(outliers_dir, "gene_summary_annotated.tsv"))
 cat("\n✓ Gene summary exported\n\n")
+
+} # end if (nrow(gene_summary_annotated) > 0)
 ```
 
 ## Cluster Filtering Analysis
@@ -812,6 +840,330 @@ cat("✓ Focal sets tables exported\n")
 
 ```
 
+## B.1c Gene-Level Filter Overlap Diagnostics
+
+```{r filter_overlap_gene_table}
+# ─────────────────────────────────────────────────────────────────────────────
+# Build a gene-level membership table that records for each gene whether it
+# was flagged by each of the three independent filters:
+#   • Extreme   – top 1% CAAS density (gene_summary_annotated$Extreme)
+#   • Dubious   – IQR-outlier CAAS count (gene_summary_annotated$Dubious)
+#   • Cluster   – at least one position removed by the cluster filter
+# ─────────────────────────────────────────────────────────────────────────────
+
+# --- 1. Gene-level filter flags -------------------------------------------
+
+# Extreme / Dubious come straight from the already-computed gene_summary_annotated
+gene_filter_flags <- gene_summary_annotated %>%
+  transmute(
+    Gene        = Gene,
+    CAAP_Group  = CAAP_Group,
+    n_CAAS      = n_CAAS,
+    Length      = Length,
+    n_CAAS_per_length = n_CAAS_per_length,
+    Extreme     = as.logical(Extreme),
+    Dubious     = as.logical(Dubious)
+  )
+
+# Cluster_removed: any gene that contributed at least one site to cluster_events
+cluster_removed_genes <- if (nrow(cluster_events) > 0) {
+  cluster_events %>%
+    transmute(Gene = gene, CAAP_Group = caap_group) %>%
+    distinct() %>%
+    mutate(Cluster_removed = TRUE)
+} else {
+  tibble(Gene = character(), CAAP_Group = character(), Cluster_removed = logical())
+}
+
+gene_filter_flags <- gene_filter_flags %>%
+  left_join(cluster_removed_genes, by = c("Gene", "CAAP_Group")) %>%
+  mutate(
+    Cluster_removed = coalesce(Cluster_removed, FALSE),
+    # Composite label
+    filter_combo = case_when(
+      Extreme & Dubious & Cluster_removed ~ "Extreme+Dubious+Cluster",
+      Extreme & Dubious                  ~ "Extreme+Dubious",
+      Extreme & Cluster_removed          ~ "Extreme+Cluster",
+      Dubious & Cluster_removed          ~ "Dubious+Cluster",
+      Extreme                            ~ "Extreme",
+      Dubious                            ~ "Dubious",
+      Cluster_removed                    ~ "Cluster",
+      TRUE                               ~ "None"
+    ),
+    filter_combo = factor(filter_combo, levels = c(
+      "None", "Extreme", "Dubious", "Cluster",
+      "Extreme+Dubious", "Extreme+Cluster", "Dubious+Cluster",
+      "Extreme+Dubious+Cluster"
+    ))
+  )
+
+# --- 2. Per-gene significance descriptors from full discovery data ----------
+
+gene_sig_stats <- discovery_std %>%
+  group_by(gene, caap_group) %>%
+  summarise(
+    frac_sig_both    = mean(sig_both, na.rm = TRUE),
+    median_pval_hyp  = median(pvalue,      na.rm = TRUE),
+    min_pval_hyp     = min(pvalue,         na.rm = TRUE),
+    median_pval_boot = median(pvalue_boot, na.rm = TRUE),
+    min_pval_boot    = min(pvalue_boot,    na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rename(Gene = gene, CAAP_Group = caap_group)
+
+gene_filter_flags <- gene_filter_flags %>%
+  left_join(gene_sig_stats, by = c("Gene", "CAAP_Group"))
+
+# --- 3. Quick membership summary printed to console ------------------------
+
+cat("\n=== Gene-Level Filter Overlap Summary ===\n")
+membership_counts <- gene_filter_flags %>%
+  count(CAAP_Group, filter_combo, .drop = FALSE) %>%
+  arrange(CAAP_Group, filter_combo)
+print(membership_counts)
+
+cat("\nFilter-specific totals:\n")
+cat(sprintf("  Extreme only or combined : %d genes\n",
+    sum(gene_filter_flags$Extreme, na.rm = TRUE)))
+cat(sprintf("  Dubious only or combined : %d genes\n",
+    sum(gene_filter_flags$Dubious, na.rm = TRUE)))
+cat(sprintf("  Cluster only or combined : %d genes\n",
+    sum(gene_filter_flags$Cluster_removed, na.rm = TRUE)))
+cat(sprintf("  Any filter               : %d / %d genes (%.1f%%)\n",
+    sum(gene_filter_flags$filter_combo != "None"),
+    nrow(gene_filter_flags),
+    100 * mean(gene_filter_flags$filter_combo != "None")))
+
+# Fraction of sig-both sites removed by each filter pathway
+if (nrow(removal_events) > 0) {
+  total_sig_both  <- sum(discovery_std$sig_both, na.rm = TRUE)
+  removed_extreme <- discovery_std %>%
+    filter(sig_both, gene %in% filter(gene_filter_flags, Extreme)$Gene,
+           caap_group %in% filter(gene_filter_flags, Extreme)$CAAP_Group)
+  removed_dubious <- discovery_std %>%
+    filter(sig_both, gene %in% filter(gene_filter_flags, Dubious)$Gene,
+           caap_group %in% filter(gene_filter_flags, Dubious)$CAAP_Group)
+  removed_cluster <- discovery_std %>%
+    filter(sig_both, site_id %in% cluster_events$site_id)
+  cat(sprintf("\n  Sig-both sites in total  : %d\n", total_sig_both))
+  cat(sprintf("  Sig-both in Extreme genes: %d (%.1f%%)\n",
+      nrow(removed_extreme), 100 * nrow(removed_extreme) / max(total_sig_both, 1)))
+  cat(sprintf("  Sig-both in Dubious genes: %d (%.1f%%)\n",
+      nrow(removed_dubious), 100 * nrow(removed_dubious) / max(total_sig_both, 1)))
+  cat(sprintf("  Sig-both in Cluster sites: %d (%.1f%%)\n",
+      nrow(removed_cluster), 100 * nrow(removed_cluster) / max(total_sig_both, 1)))
+}
+
+cat("\n")
+```
+
+## B.1c-i UpSet plot of filter intersections
+
+```{r filter_overlap_upset, fig.width=10, fig.height=6}
+# Build a binary incidence data frame suitable for UpSetR
+upset_df <- gene_filter_flags %>%
+  transmute(
+    Extreme  = as.integer(Extreme),
+    Dubious  = as.integer(Dubious),
+    Cluster  = as.integer(Cluster_removed)
+  ) %>%
+  as.data.frame()
+
+# Guard: only proceed if at least two filters have any hits
+n_active_filters <- sum(c(
+  any(upset_df$Extreme == 1),
+  any(upset_df$Dubious == 1),
+  any(upset_df$Cluster == 1)
+))
+
+if (n_active_filters < 1) {
+  cat("No genes flagged by any filter — UpSet plot skipped.\n")
+} else if (!requireNamespace("UpSetR", quietly = TRUE)) {
+  cat("Package 'UpSetR' not available — falling back to membership table.\n")
+  kable(membership_counts, caption = "Gene counts per filter combination") %>% kable_styling()
+} else {
+  # One UpSet per CAAP group (or single global plot when only one group)
+  groups_present <- sort(unique(gene_filter_flags$CAAP_Group))
+
+  for (grp in groups_present) {
+    grp_df <- gene_filter_flags %>%
+      filter(CAAP_Group == grp) %>%
+      transmute(
+        Extreme = as.integer(Extreme),
+        Dubious = as.integer(Dubious),
+        Cluster = as.integer(Cluster_removed)
+      ) %>%
+      as.data.frame()
+
+    # Drop columns with zero variance (no genes hit by that filter in this group)
+    active_cols <- names(grp_df)[colSums(grp_df, na.rm = TRUE) > 0]
+    if (length(active_cols) < 1) {
+      cat(sprintf("  Group %s: no filter hits — skipping.\n", grp))
+      next
+    }
+    grp_df <- grp_df[, active_cols, drop = FALSE]
+
+    plot_title <- sprintf("Filter overlap — %s (n = %d genes)",
+                          grp, nrow(grp_df))
+    cat(sprintf("\n**%s**\n\n", plot_title))
+
+    # UpSetR::upset returns a grid object; use grid::grid.draw inside a device call
+    png_path <- file.path(outliers_dir,
+                          sprintf("filter_overlap_upset_%s.png", tolower(grp)))
+
+    # Render to file
+    png(png_path, width = 2800, height = 1600, res = 320)
+    tryCatch(
+      print(UpSetR::upset(
+        grp_df,
+        sets            = rev(active_cols),
+        order.by        = "freq",
+        decreasing      = TRUE,
+        text.scale      = c(1.4, 1.2, 1.2, 1.0, 1.2, 1.0),
+        mainbar.y.label = "Gene Intersections",
+        sets.x.label    = "Genes per filter",
+        mb.ratio        = c(0.60, 0.40),
+        main.bar.color  = "#4472C4",
+        sets.bar.color  = "#ED7D31"
+      )),
+      error = function(e) cat("UpSet render error:", conditionMessage(e), "\n")
+    )
+    dev.off()
+
+    # Also render inline
+    tryCatch(
+      print(UpSetR::upset(
+        grp_df,
+        sets            = rev(active_cols),
+        order.by        = "freq",
+        decreasing      = TRUE,
+        text.scale      = c(1.4, 1.2, 1.2, 1.0, 1.2, 1.0),
+        mainbar.y.label = "Gene Intersections",
+        sets.x.label    = "Genes per filter",
+        mb.ratio        = c(0.60, 0.40),
+        main.bar.color  = "#4472C4",
+        sets.bar.color  = "#ED7D31"
+      )),
+      error = function(e) cat("UpSet inline error:", conditionMessage(e), "\n")
+    )
+  }
+}
+```
+
+## B.1c-ii Descriptor distributions by filter membership
+
+```{r filter_overlap_stats, fig.width=14, fig.height=16}
+# Ordered factor for x-axis: None → single → double → triple
+combo_levels <- c(
+  "None", "Extreme", "Dubious", "Cluster",
+  "Extreme+Dubious", "Extreme+Cluster", "Dubious+Cluster",
+  "Extreme+Dubious+Cluster"
+)
+
+gene_filter_plot <- gene_filter_flags %>%
+  mutate(filter_combo = factor(as.character(filter_combo), levels = combo_levels))
+
+# Colour palette for combos
+combo_palette <- setNames(
+  c(
+    tableau_10[["gray"]],
+    tableau_10[["vermillion"]], tableau_10[["blue"]], tableau_10[["green"]],
+    tableau_10[["reddish_purple"]], tableau_10[["orange"]], tableau_10[["bluish_green"]],
+    tableau_10[["pink"]]
+  ),
+  combo_levels
+)
+
+make_descriptor_plot <- function(data, y_var, y_label, log_scale = FALSE) {
+  plot_data <- data %>% filter(!is.na(.data[[y_var]]), !is.na(CAAP_Group))
+  if (nrow(plot_data) == 0 || length(unique(plot_data$CAAP_Group)) == 0) {
+    return(
+      ggplot() +
+        annotate("text", x = 0.5, y = 0.5, label = paste("No data for:", y_label),
+                 size = 5, hjust = 0.5) +
+        theme_void()
+    )
+  }
+  p <- ggplot(plot_data,
+              aes(x = filter_combo, y = .data[[y_var]],
+                  fill = filter_combo, colour = filter_combo)) +
+    geom_boxplot(alpha = 0.5, outlier.shape = NA, linewidth = 0.6) +
+    geom_jitter(width = 0.18, alpha = 0.35, size = 0.9, shape = 16) +
+    facet_wrap(~ CAAP_Group, scales = "free_y") +
+    scale_fill_manual(values   = combo_palette, drop = TRUE) +
+    scale_colour_manual(values = combo_palette, drop = TRUE) +
+    labs(x = NULL, y = y_label) +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position  = "none",
+      axis.text.x      = element_text(angle = 40, hjust = 1, size = 9),
+      strip.text       = element_text(face = "bold"),
+      panel.grid.minor = element_blank()
+    )
+  if (log_scale) p <- p + scale_y_log10()
+  p
+}
+
+p_length     <- make_descriptor_plot(gene_filter_plot, "Length",           "Gene length (aa)",              log_scale = TRUE)
+p_ncaas      <- make_descriptor_plot(gene_filter_plot, "n_CAAS",           "Total CAAS count",              log_scale = TRUE)
+p_density    <- make_descriptor_plot(gene_filter_plot, "n_CAAS_per_length","CAAS density (per 100 aa)",     log_scale = TRUE)
+p_fracsig    <- make_descriptor_plot(gene_filter_plot, "frac_sig_both",    "Fraction sig-both sites",       log_scale = FALSE)
+p_medpval    <- make_descriptor_plot(gene_filter_plot, "median_pval_hyp",  "Median hyperg. p-value",        log_scale = FALSE)
+p_minpval    <- make_descriptor_plot(gene_filter_plot, "min_pval_hyp",     "Min hyperg. p-value",           log_scale = FALSE)
+
+desc_grid <- (
+  p_length  | p_ncaas  | p_density
+) / (
+  p_fracsig | p_medpval | p_minpval
+) +
+  plot_annotation(
+    title    = "Gene descriptor distributions by filter membership",
+    subtitle = sprintf(
+      "Extreme = top %.0f%% density  |  Dubious = Q3 + %.1f×IQR count  |  Cluster = cluster-filtered",
+      100 * (1 - extreme_threshold), iqr_multiplier
+    ),
+    theme = theme(plot.title = element_text(face = "bold", size = 16),
+                  plot.subtitle = element_text(size = 12))
+  )
+
+print(desc_grid)
+ggsave(file.path(outliers_dir, "filter_overlap_descriptors.png"),
+       desc_grid, width = 14, height = 10, dpi = 280)
+```
+
+## B.1c-iii Filter overlap summary table
+
+```{r filter_overlap_summary_table}
+# Per-combo × per-group mean ± SD for all five descriptors
+overlap_summary <- gene_filter_flags %>%
+  group_by(CAAP_Group, filter_combo) %>%
+  summarise(
+    n_genes            = n(),
+    mean_Length        = round(mean(Length,            na.rm = TRUE), 1),
+    sd_Length          = round(sd(Length,              na.rm = TRUE), 1),
+    mean_n_CAAS        = round(mean(n_CAAS,            na.rm = TRUE), 2),
+    sd_n_CAAS          = round(sd(n_CAAS,              na.rm = TRUE), 2),
+    mean_density       = round(mean(n_CAAS_per_length, na.rm = TRUE), 4),
+    sd_density         = round(sd(n_CAAS_per_length,   na.rm = TRUE), 4),
+    mean_frac_sig_both = round(mean(frac_sig_both,     na.rm = TRUE), 4),
+    sd_frac_sig_both   = round(sd(frac_sig_both,       na.rm = TRUE), 4),
+    mean_median_pval   = round(mean(median_pval_hyp,   na.rm = TRUE), 4),
+    sd_median_pval     = round(sd(median_pval_hyp,     na.rm = TRUE), 4),
+    .groups = "drop"
+  ) %>%
+  arrange(CAAP_Group, filter_combo)
+
+kable(
+  overlap_summary,
+  caption = "Gene-level filter overlap: descriptive statistics per membership group"
+) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), font_size = 11)
+
+write_tsv(gene_filter_flags,  file.path(outliers_dir, "filter_overlap_gene_table.tsv"))
+write_tsv(overlap_summary,    file.path(outliers_dir, "filter_overlap_summary.tsv"))
+cat("✓ Filter overlap tables exported\n")
+```
+
 ## B.2 Removed positions by `pattern_type` and significance
 
 ```{r removed_pattern_sig}
@@ -1021,8 +1373,8 @@ All figures are also saved to `disambiguation_characterization/overlap_figures/`
 
 ```{r overlap_helper_functions, include=FALSE}
 # Load additional packages for Venn diagrams
-library(VennDiagram)
-library(ggVennDiagram)
+has_ggvenn <- requireNamespace("ggVennDiagram", quietly = TRUE)
+if (has_ggvenn) library(ggVennDiagram)
 
 # ---- Helper: create group sets for Venn diagrams ------------------------------------
 create_group_sets <- function(df, id_col) {
@@ -1032,6 +1384,11 @@ create_group_sets <- function(df, id_col) {
 
 # ---- Helper: build + save Venn diagram ------------------------------------------
 make_overlap_plot <- function(df, id_col, level_label, subset_label, out_dir) {
+  if (!has_ggvenn) {
+    message("  [skip] ggVennDiagram not installed — skipping Venn diagram for subset='",
+            subset_label, "' level='", level_label, "'")
+    return(invisible(NULL))
+  }
   if (nrow(df) == 0) {
     message("  [skip] No rows for subset='", subset_label, "' level='", level_label, "'")
     return(invisible(NULL))
@@ -1368,6 +1725,71 @@ cat("\n✓ All B.5 upset plots and exports generated\n")
 cat("  Plots:", gr_plot_dir, "\n")
 cat("  TXT:  ", gr_txt_dir,  "\n")
 cat("  TSV:  ", gr_tsv_dir,  "\n\n")
+```
+
+## B.5b Excluded gene list exports
+
+```{r excluded_gene_lists}
+# ── Build per-category excluded gene lists ────────────────────────────────────────────
+# Six lists are exported to
+#   disambiguation_characterization/gene_relation_analysis/txt/excluded/
+# for a separate ORA run against the original (pre-cleanup) background from discovery.
+#
+# Categories (mutually exclusive by design for excluded_nonsig):
+#   excluded_preproc             – genes with ≥1 position removed during pre-processing
+#                                  (pattern-type filter / MRCA-posterior threshold)
+#   excluded_postproc_clusters   – genes with ≥1 position discarded by cluster filter
+#   excluded_postproc_genefilter – genes flagged Extreme and/or Dubious (gene-level filter)
+#   excluded_postproc            – union of the two postproc exclusion categories
+#   excluded_nonsig              – genes that survived ALL filters but never achieved
+#                                  sig_both == TRUE; does NOT overlap with preproc/postproc
+#   excluded_overall             – union of all four categories
+
+# 1. Pre-processing exclusions (from precluster_events, loaded in B.1)
+excluded_preproc <- sort(unique(precluster_events$gene))
+
+# 2. Post-processing: cluster-filter genes
+excluded_postproc_clusters <- sort(unique(
+  filter(gene_filter_flags, Cluster_removed)$Gene
+))
+
+# 3. Post-processing: gene-level filter (Extreme / Dubious / Both)
+excluded_postproc_genefilter <- sort(unique(
+  filter(gene_filter_flags, Extreme | Dubious)$Gene
+))
+
+# 4. All post-processing exclusions (union of 2 and 3)
+excluded_postproc <- sort(unique(c(excluded_postproc_clusters, excluded_postproc_genefilter)))
+
+# 5. Non-significant genes: survived all filters, but zero sig_both positions;
+#    explicitly does NOT overlap with preproc / postproc categories
+any_filtered_genes <- sort(unique(filter(gene_filter_flags, filter_combo != "None")$Gene))
+genes_ever_sig     <- sort(unique(filter(discovery_std, sig_both)$gene))
+survived_genes     <- sort(setdiff(unique(gene_filter_flags$Gene), any_filtered_genes))
+excluded_nonsig    <- sort(setdiff(survived_genes, c(genes_ever_sig, excluded_preproc)))
+
+# 6. Overall: union of all exclusion categories
+excluded_overall <- sort(unique(c(excluded_preproc, excluded_postproc, excluded_nonsig)))
+
+# ── Write to gene_relation_analysis/txt/excluded/ ────────────────────────────────────
+gr_excl_dir <- file.path(gr_txt_dir, "excluded")
+createDir(gr_excl_dir)
+
+readr::write_lines(excluded_preproc,             file.path(gr_excl_dir, "excluded_preproc.txt"))
+readr::write_lines(excluded_postproc_clusters,   file.path(gr_excl_dir, "excluded_postproc_clusters.txt"))
+readr::write_lines(excluded_postproc_genefilter, file.path(gr_excl_dir, "excluded_postproc_genefilter.txt"))
+readr::write_lines(excluded_postproc,            file.path(gr_excl_dir, "excluded_postproc.txt"))
+readr::write_lines(excluded_nonsig,              file.path(gr_excl_dir, "excluded_nonsig.txt"))
+readr::write_lines(excluded_overall,             file.path(gr_excl_dir, "excluded_overall.txt"))
+
+cat("\n=== Excluded Gene Lists ===\n")
+cat(sprintf("  excluded_preproc             : %d genes\n", length(excluded_preproc)))
+cat(sprintf("  excluded_postproc_clusters   : %d genes\n", length(excluded_postproc_clusters)))
+cat(sprintf("  excluded_postproc_genefilter : %d genes\n", length(excluded_postproc_genefilter)))
+cat(sprintf("  excluded_postproc (union)    : %d genes\n", length(excluded_postproc)))
+cat(sprintf("  excluded_nonsig              : %d genes\n", length(excluded_nonsig)))
+cat(sprintf("  excluded_overall             : %d genes\n", length(excluded_overall)))
+cat(sprintf("  Written to: %s\n\n", gr_excl_dir))
 ```
 
 ## B.6 Manhattan: genomic distribution of genes (CAAS density per gene length)

@@ -294,7 +294,7 @@ process CT_FILTER_SUMMARY {
 
 process CAAS_FILTER_GENES {
     tag "gene_filter:${params.gene_filter_mode}"
-    label 'process_low'
+    label 'CT_FILTER'
     publishDir "${params.outdir}/postproc/gene_filtering", mode: 'copy', overwrite: true
     
     when:
@@ -328,7 +328,7 @@ process CAAS_FILTER_GENES {
 
 process CAAS_BACKGROUND_CLEANUP {
     tag "bg_cleanup"
-    label 'process_low'
+    label 'CT_FILTER'
     publishDir "${params.outdir}/postproc/cleaned_backgrounds", mode: 'copy', overwrite: true
     
     input:

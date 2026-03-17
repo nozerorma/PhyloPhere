@@ -7,7 +7,7 @@
 process CT_DISAMBIGUATION_RUN {
     tag "ct_disambiguation"
     label 'process_resample'
-    publishDir path: "${params.outdir}/ct_disambiguation", mode: 'copy', overwrite: true
+    publishDir path: "${params.outdir}", mode: 'copy', overwrite: true
 
     input:
     path meta_caas

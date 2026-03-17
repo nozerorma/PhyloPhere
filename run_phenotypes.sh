@@ -198,8 +198,10 @@ RUN_SIMPLE=true            # user-defined list of unpruned, secondary-free pheno
 #       mode 'all' or point the gene-set paths at outputs of a *previous* run.
 RUN_FADE=false              # HyPhy FADE (directional amino-acid selection)
 RUN_MOLERATE=false          # HyPhy MoleRate (relative evolutionary rate)
+RUN_RER=false               # RERconverge (trait-gene evolutionary-rate association)
 FADE_MODE="gene_set"             # 'all' or 'gene_set'
 MOLERATE_MODE="gene_set"         # 'all' or 'gene_set'
+RER_MODE="gene_set"              # 'all' or 'gene_set'
 
 # ============================================================
 # TOY / FULL MODE
@@ -376,6 +378,17 @@ if [ "$RUN_MOLERATE" = true ]; then
     )
 fi
 
+RER_NF_FLAGS=()
+if [ "$RUN_RER" = true ]; then
+    RER_NF_FLAGS=(
+        --rer_tool
+        --rer_mode "$RER_MODE"
+        # Uncomment and fill for gene_set mode:
+        # --rer_postproc_top    "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
+        # --rer_postproc_bottom "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
+    )
+fi
+
 # ============================================================
 # COMMON NEXTFLOW INFRASTRUCTURE FLAGS (shared across all runs)
 # ============================================================
@@ -427,6 +440,11 @@ echo "------------------------------------------"
 echo " Classes to run:"
 echo "   Pruned-secondary : $RUN_PRUNED_SECONDARY"
 echo "   Simple           : $RUN_SIMPLE"
+echo "------------------------------------------"
+echo " Selection analyses:"
+echo "   FADE       : $RUN_FADE     (mode: $FADE_MODE)"
+echo "   MoleRate   : $RUN_MOLERATE  (mode: $MOLERATE_MODE)"
+echo "   RERconverge: $RUN_RER      (mode: $RER_MODE)"
 echo "=========================================="
 echo ""
 
@@ -493,6 +511,7 @@ if [ "$RUN_PRUNED_SECONDARY" = true ]; then
             --ct_accumulation
             "${FADE_NF_FLAGS[@]:-}"
             "${MOLERATE_NF_FLAGS[@]:-}"
+            "${RER_NF_FLAGS[@]:-}"
         )
 
         run_pipeline \
@@ -578,6 +597,7 @@ if [ "$RUN_SIMPLE" = true ]; then
             --ct_accumulation
             "${FADE_NF_FLAGS[@]:-}"
             "${MOLERATE_NF_FLAGS[@]:-}"
+            "${RER_NF_FLAGS[@]:-}"
         )
 
         run_pipeline \

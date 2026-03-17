@@ -9,8 +9,8 @@ output:
     code_folding: hide
     df_print: paged
 params:
-  filtered_discovery: NULL
-  filtered_background: NULL
+  discovery_input: NULL
+  background_input: NULL
   bootstrap_file: NULL
   output_dir: "."
   caap_mode: FALSE
@@ -69,7 +69,7 @@ This section loads the filtered CAAS data and validates input files.
 cat("=== Loading Filtered CAAS Data ===\n")
 
 # Load filtered discovery file
-filtered_discovery_path <- params$filtered_discovery
+filtered_discovery_path <- params$discovery_input
 if (is.null(filtered_discovery_path)) {
   stop("Filtered discovery file parameter is NULL")
 }
@@ -104,7 +104,7 @@ if (has_caap_group) {
 }
 
 # Load filtered background
-filtered_background_path <- params$filtered_background
+filtered_background_path <- params$background_input
 if (is.null(filtered_background_path) || !file.exists(filtered_background_path)) {
   stop("Filtered background file not found: ", filtered_background_path)
 }

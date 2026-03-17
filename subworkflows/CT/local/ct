@@ -570,9 +570,17 @@ if tool.lower() == "bootstrap":
                         Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
                         Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
 
+    ###     3.3.10 Debug: export permuted groups
+    parser.add_option("--export_groups", dest="export_groups",
+                    help="Path to output file for exporting the permuted trait groups used in each bootstrap cycle (DEBUG). Default = disabled.", default = None)
+
+    ###     3.3.11 Debug: export permuted discovery
+    parser.add_option("--export_perm_discovery", dest="export_perm_discovery",
+                    help="Path to output file for exporting the per-cycle permuted discovery results (DEBUG). Default = disabled.", default = None)
+
     ### 3.4 Usage
 
-    parser.usage = "ct bootstrap -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA"
+    parser.usage = "ct bootstrap -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA\nNOTE: Use --export_groups $file to export permuted groups (DEBUG)\nNOTE: Use --export_perm_discovery $file to export permuted discovery results (DEBUG)"
 
     ### 3.5 Parse the options
 
@@ -662,7 +670,9 @@ if tool.lower() == "bootstrap":
                     output_file = options.output_file,
                     discovery_file = disambiguation_input,
                     progress_log = progress_log_input,
-                    caap_mode = options.caap_mode
+                    caap_mode = options.caap_mode,
+                    export_groups = options.export_groups,
+                    export_perm_discovery = options.export_perm_discovery
                     )
 
     ###     3.8.4 Final output
