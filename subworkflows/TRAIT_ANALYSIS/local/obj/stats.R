@@ -9,6 +9,70 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
+compute_trait_thresholds <- function(trait_values,
+                                     discrete_method = if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile",
+                                     top_quantile = if (exists("top_quantile", inherits = TRUE)) as.numeric(top_quantile) else 0.90,
+                                     bottom_quantile = if (exists("bottom_quantile", inherits = TRUE)) as.numeric(bottom_quantile) else 0.10) {
+  trait_values <- as.numeric(trait_values)
+  trait_values <- trait_values[!is.na(trait_values)]
+
+  if (length(trait_values) == 0) {
+    stop("compute_trait_thresholds() received no non-missing trait values.")
+  }
+
+  g_mean <- mean(trait_values, na.rm = TRUE)
+  g_median <- median(trait_values, na.rm = TRUE)
+  g_sd <- sd(trait_values, na.rm = TRUE)
+  g_q10 <- unname(quantile(trait_values, 0.10, na.rm = TRUE))
+  g_q20 <- unname(quantile(trait_values, 0.20, na.rm = TRUE))
+  g_q25 <- unname(quantile(trait_values, 0.25, na.rm = TRUE))
+  g_q75 <- unname(quantile(trait_values, 0.75, na.rm = TRUE))
+  g_q80 <- unname(quantile(trait_values, 0.80, na.rm = TRUE))
+  g_q90 <- unname(quantile(trait_values, 0.90, na.rm = TRUE))
+  g_iqr <- IQR(trait_values, na.rm = TRUE)
+
+  lower_thresh <- switch(discrete_method,
+    "quartile"      = g_q25,
+    "quintile"      = g_q20,
+    "decile"        = g_q10,
+    "median_sd"     = g_median - g_sd,
+    "parameterized" = unname(quantile(trait_values, bottom_quantile, na.rm = TRUE)),
+    stop(sprintf(
+      "Unknown discrete_method: '%s'. Choose one of: quartile, quintile, decile, median_sd, parameterized",
+      discrete_method
+    ))
+  )
+  upper_thresh <- switch(discrete_method,
+    "quartile"      = g_q75,
+    "quintile"      = g_q80,
+    "decile"        = g_q90,
+    "median_sd"     = g_median + g_sd,
+    "parameterized" = unname(quantile(trait_values, top_quantile, na.rm = TRUE)),
+    stop(sprintf(
+      "Unknown discrete_method: '%s'. Choose one of: quartile, quintile, decile, median_sd, parameterized",
+      discrete_method
+    ))
+  )
+
+  list(
+    discrete_method = discrete_method,
+    top_quantile = top_quantile,
+    bottom_quantile = bottom_quantile,
+    g_mean = g_mean,
+    g_median = g_median,
+    g_sd = g_sd,
+    g_q10 = g_q10,
+    g_q20 = g_q20,
+    g_q25 = g_q25,
+    g_q75 = g_q75,
+    g_q80 = g_q80,
+    g_q90 = g_q90,
+    g_iqr = g_iqr,
+    lower_thresh = unname(lower_thresh),
+    upper_thresh = unname(upper_thresh)
+  )
+}
+
 # Function to extract several statistical insights from the data
 stats.f <- function(df) {
   c_trait_name <- if (exists("c_trait", inherits = TRUE)) c_trait else ""
@@ -59,41 +123,27 @@ stats.f <- function(df) {
   df_num <- df %>% dplyr::mutate("{trait_col}" := as.numeric(.data[[trait_col]]))
 
   # Global stats
-  g_mean <- mean(df_num[[trait]], na.rm = TRUE)
-  g_median <- median(df_num[[trait]], na.rm = TRUE)
-  g_sd <- sd(df_num[[trait]], na.rm = TRUE)
-  g_q25 <- quantile(df_num[[trait]], 0.25, na.rm = TRUE)
-  g_q75 <- quantile(df_num[[trait]], 0.75, na.rm = TRUE)
-  g_iqr <- IQR(df_num[[trait]], na.rm = TRUE)
-
-  # Dynamic extreme thresholds from discrete_method (set by commons.R / params)
-  # Options: quartile, quintile, decile, median_sd, parameterized
   disc_method <- if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile"
   tq <- if (exists("top_quantile",    inherits = TRUE)) as.numeric(top_quantile)    else 0.90
   bq <- if (exists("bottom_quantile", inherits = TRUE)) as.numeric(bottom_quantile) else 0.10
-
-  # Pre-compute all threshold pairs unconditionally (used for contrast plot visualization)
-  g_q10 <- unname(quantile(df_num[[trait]], 0.10, na.rm = TRUE))
-  g_q20 <- unname(quantile(df_num[[trait]], 0.20, na.rm = TRUE))
-  g_q80 <- unname(quantile(df_num[[trait]], 0.80, na.rm = TRUE))
-  g_q90 <- unname(quantile(df_num[[trait]], 0.90, na.rm = TRUE))
-
-  lower_thresh <- switch(disc_method,
-    "quartile"      = g_q25,
-    "quintile"      = g_q20,
-    "decile"        = g_q10,
-    "median_sd"     = g_median - g_sd,
-    "parameterized" = unname(quantile(df_num[[trait]], bq, na.rm = TRUE)),
-    g_q10  # fallback to decile
+  threshold_info <- compute_trait_thresholds(
+    trait_values = df_num[[trait]],
+    discrete_method = disc_method,
+    top_quantile = tq,
+    bottom_quantile = bq
   )
-  upper_thresh <- switch(disc_method,
-    "quartile"      = g_q75,
-    "quintile"      = g_q80,
-    "decile"        = g_q90,
-    "median_sd"     = g_median + g_sd,
-    "parameterized" = unname(quantile(df_num[[trait]], tq, na.rm = TRUE)),
-    g_q90  # fallback to decile
-  )
+  g_mean <- threshold_info$g_mean
+  g_median <- threshold_info$g_median
+  g_sd <- threshold_info$g_sd
+  g_q10 <- threshold_info$g_q10
+  g_q20 <- threshold_info$g_q20
+  g_q25 <- threshold_info$g_q25
+  g_q75 <- threshold_info$g_q75
+  g_q80 <- threshold_info$g_q80
+  g_q90 <- threshold_info$g_q90
+  g_iqr <- threshold_info$g_iqr
+  lower_thresh <- threshold_info$lower_thresh
+  upper_thresh <- threshold_info$upper_thresh
   debug_log("stats.f: disc_method = %s, lower_thresh = %.4f, upper_thresh = %.4f",
             disc_method, lower_thresh, upper_thresh)
 

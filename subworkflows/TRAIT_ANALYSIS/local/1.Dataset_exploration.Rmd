@@ -23,6 +23,9 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
+  discrete_method: "decile"
+  top_quantile: "0.90"
+  bottom_quantile: "0.10"
 ---
 
 ```{r header}
@@ -120,15 +123,28 @@ ordered_taxa <- ordered_species %>%
 print(ordered_taxa)
 
 ## PLOT FUNCTION --------------------------------------------------------------
-taxa_plot.f <- function(df, ordered_taxa_levels){
+taxa_plot.f <- function(df, ordered_taxa_levels, caption_text = NULL){
   max_count <- max(df$count, na.rm = TRUE)
-  palette_values <- get_palette_values()
-  debug_log("taxa_plot.f rows = %d, palette_values = %s", nrow(df), ifelse(is.null(palette_values), "<none>", "ok"))
-  fill_scale <- if (is.null(palette_values)) {
+  plot_profile <- species_plot_profile(
+    n_species = sum(df$count, na.rm = TRUE),
+    n_taxa = length(ordered_taxa_levels)
+  )$contrast
+  palette_values <- resolve_taxa_palette(ordered_taxa_levels, palette_name = color_palette)
+  count_label_size <- clamp_value(5.0 - 0.06 * length(ordered_taxa_levels), 3.2, 5.0)
+  right_margin <- clamp_value(45 + 3 * nchar(as.character(max_count)), 50, 90)
+  count_limit <- max(1, max_count * 1.12 + 0.8)
+  debug_log("taxa_plot.f rows = %d, mapped_taxa = %d", nrow(df), ifelse(is.null(palette_values), 0, length(palette_values)))
+  fill_scale <- if (is.null(palette_values) || length(palette_values) == 0) {
     ggplot2::scale_fill_discrete()
   } else {
-    ggplot2::scale_fill_manual(values = palette_values, breaks = NULL)
+    ggplot2::scale_fill_manual(
+      values = palette_values,
+      breaks = rev(ordered_taxa_levels),
+      limits = ordered_taxa_levels,
+      drop = FALSE
+    )
   }
+<<<<<<< HEAD
   ggplot2::ggplot(df, 
                 aes(x = taxa, y = count, fill = taxa)) +
   scale_x_discrete(limits = rev(ordered_taxa_levels)) +
@@ -150,8 +166,55 @@ taxa_plot.f <- function(df, ordered_taxa_levels){
     axis.title.x = element_text(size = 18, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
     axis.title.y = element_blank(),
     legend.position = "none"
+=======
+  plot <- ggplot2::ggplot(
+    df,
+    aes(x = taxa, y = count, fill = taxa)
+>>>>>>> asr
   ) +
-  coord_flip()
+    scale_x_discrete(limits = rev(ordered_taxa_levels), drop = FALSE) +
+    geom_col(width = 0.75) +
+    geom_text(
+      aes(label = count),
+      hjust = -0.15,
+      color = "black",
+      fontface = "bold",
+      size = count_label_size
+    ) +
+    labs(
+      x = paste(capitalized_taxon, "-", clade_name),
+      y = "Number of species",
+      title = paste(capitalized_taxon, "distribution in", clade_name),
+      caption = caption_text
+    ) +
+    fill_scale +
+    scale_y_continuous(
+      limits = c(0, count_limit),
+      expand = expansion(mult = c(0, 0.02))
+    ) +
+    theme_minimal(base_size = 16) +
+    theme(
+      axis.text.y = element_text(
+        hjust = 1,
+        size = clamp_value(18 - 0.4 * length(ordered_taxa_levels), 10, 18),
+        face = "bold",
+        color = "black"
+      ),
+      axis.text.x = element_blank(),
+      plot.title = element_text(size = plot_profile$title_size, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
+      axis.title.x = element_text(size = plot_profile$axis_title, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
+      axis.title.y = element_blank(),
+      plot.caption = element_text(size = plot_profile$caption_size, hjust = 0, face = "italic", color = "grey30", margin = margin(t = 14)),
+      plot.margin = margin(20, right_margin, 35, 20),
+      legend.position = "none"
+    ) +
+    coord_flip(clip = "off")
+
+  attr(plot, "plot_dims") <- list(
+    width = clamp_value(plot_profile$width - 1.0, 8.0, 10.0),
+    height = clamp_value(4.8 + 0.38 * length(ordered_taxa_levels), 6.0, 13.5)
+  )
+  plot
 }
 
 
@@ -163,11 +226,17 @@ taxa_distribution_all <- taxa_distribution %>%
   dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa_all)) %>%
   dplyr::arrange(taxa, .by_group = TRUE)
 
-p1 <- taxa_plot.f(taxa_distribution_all, ordered_taxa_all)
+p1 <- taxa_plot.f(
+  taxa_distribution_all,
+  ordered_taxa_all,
+  caption_text = "Ordering note: this non-pruned plot is shown in alphabetical order\nbecause some taxa may be absent from the provided phylogeny."
+)
+plot_dims_all <- attr(p1, "plot_dims")
+knitr::opts_current$set(fig.width = plot_dims_all$width, fig.height = plot_dims_all$height)
 
 # Save the plot to the results directory
 ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution_original.png")), p1, 
-                device = "png", width = 10, height = 10, dpi = "retina")
+                device = "png", width = plot_dims_all$width, height = plot_dims_all$height, dpi = "retina")
 
 # Display the plot
 p1
@@ -183,11 +252,17 @@ pruned_taxa_distribution <- pruned_taxa_distribution %>%
   dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa)) %>%
   dplyr::arrange(taxa, .by_group = TRUE)
 
-p2 <- taxa_plot.f(pruned_taxa_distribution, ordered_taxa)
+p2 <- taxa_plot.f(
+  pruned_taxa_distribution,
+  ordered_taxa,
+  caption_text = "Ordering note: this pruned plot follows the phylogenetic order\nof taxa represented in the provided tree."
+)
+plot_dims_pruned <- attr(p2, "plot_dims")
+knitr::opts_current$set(fig.width = plot_dims_pruned$width, fig.height = plot_dims_pruned$height)
 
 # Save the plot to the results directory
 ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxon_of_interest, "_distribution_pruned.png")), p2, 
-                device = "png", width = 10, height = 10, dpi = "retina")
+                device = "png", width = plot_dims_pruned$width, height = plot_dims_pruned$height, dpi = "retina")
 
 # Display the plot
 p2

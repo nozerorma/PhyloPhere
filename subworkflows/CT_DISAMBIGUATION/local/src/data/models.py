@@ -127,6 +127,7 @@ class ConvergenceResult:
     # Ambiguity and conserved-pair flags (dynamic multi-pair)
     ambiguous: bool = False
     asr_is_conserved: bool = False
+    asr_root_conserved: bool = False
 
 
 @dataclass

@@ -27,6 +27,7 @@ process CT_ACCUMULATION_AGGREGATE {
     def ali_fmt      = params.ali_format ?: 'phylip-relaxed'
     def out_pfx      = 'accumulation'
     def log_level    = params.accumulation_log_level ?: 'INFO'
+    def root_filter  = params.use_all_mrca_filter ? '--use-all-mrca-filter' : ''
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -42,6 +43,7 @@ process CT_ACCUMULATION_AGGREGATE {
             --species-list '${species_list}' \\
             --metadata-caas '${metadata_caas}' \\
             --bg-caas '${bg_caas}' \\
+            ${root_filter} \\
             --output-prefix '${out_pfx}' \\
             --log-level '${log_level}'
         """
@@ -59,6 +61,7 @@ process CT_ACCUMULATION_AGGREGATE {
             --species-list '${species_list}' \\
             --metadata-caas '${metadata_caas}' \\
             --bg-caas '${bg_caas}' \\
+            ${root_filter} \\
             --output-prefix '${out_pfx}' \\
             --log-level '${log_level}'
         """
@@ -89,6 +92,7 @@ process CT_ACCUMULATION_RANDOMIZE {
     def log_level    = params.accumulation_log_level          ?: 'INFO'
     def workers_flag = params.accumulation_workers ? "--workers ${params.accumulation_workers}" : ''
     def seed_flag    = params.accumulation_seed    ? "--global-seed ${params.accumulation_seed}"   : ''
+    def root_filter  = params.use_all_mrca_filter ? '--use-all-mrca-filter' : ''
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -104,6 +108,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
             --fdr-threshold ${fdr_thr} \\
+            ${root_filter} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """
@@ -121,6 +126,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
             --fdr-threshold ${fdr_thr} \\
+            ${root_filter} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """

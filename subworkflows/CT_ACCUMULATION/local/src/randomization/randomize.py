@@ -67,6 +67,13 @@ def _remap_caas_df(df):
     # Coerce conserved-state columns to bool
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
     df['asr_is_conserved']  = df['asr_is_conserved'].map(_bool)
+<<<<<<< HEAD
+=======
+    if 'asr_root_conserved' in df.columns:
+        df['asr_root_conserved'] = df['asr_root_conserved'].map(_bool)
+    else:
+        df['asr_root_conserved'] = False
+>>>>>>> asr
 
     # pattern_type: from Pattern column
     df['pattern_type'] = df['Pattern']
@@ -401,7 +408,11 @@ def main(args):
     # Keep only needed columns to save memory
     required_cols = ['gene', 'msa_pos', 'is_significant',
                      'change_side', 'tag', 'pattern_type', 'iscaap', 'caap_group',
+<<<<<<< HEAD
                      'is_conserved_meta', 'asr_is_conserved']
+=======
+                     'is_conserved_meta', 'asr_is_conserved', 'asr_root_conserved']
+>>>>>>> asr
     available = [c for c in required_cols if c in caas_df.columns]
     caas_df = caas_df[available]
     logging.info(f"CAAS df: {len(caas_df)} rows, columns: {available}")
@@ -494,6 +505,7 @@ def main(args):
         _arc = merged_df['asr_is_conserved'].map(_boolify).fillna(True)
     else:
         _arc = pd.Series(True, index=merged_df.index)
+<<<<<<< HEAD
     dubious_conserved = _icm & ~_arc
     is_gs0    = merged_df['caap_group'].fillna('').str.strip().str.upper().eq('GS0')
     valid_row     = ~dubious_conserved & ~is_gs0   # gate for US + GS1-4
@@ -501,6 +513,24 @@ def main(args):
     logging.info(
         f"Row exclusions: {dubious_conserved.sum()} dubious-conserved "
         f"(is_conserved_meta=T & asr_is_conserved=F), {is_gs0.sum()} GS0 — "
+=======
+    if getattr(args, 'use_all_mrca_filter', False) and 'asr_root_conserved' in merged_df.columns:
+        _arrc = merged_df['asr_root_conserved'].map(_boolify).fillna(True)
+    elif getattr(args, 'use_all_mrca_filter', False):
+        _arrc = pd.Series(True, index=merged_df.index)
+    else:
+        _arrc = pd.Series(True, index=merged_df.index)
+    dubious_conserved = _icm & ~_arc
+    root_filtered = _icm & ~_arrc
+    is_gs0    = merged_df['caap_group'].fillna('').str.strip().str.upper().eq('GS0')
+    valid_row     = ~dubious_conserved & ~root_filtered & ~is_gs0   # gate for US + GS1-4
+    valid_row_any = ~dubious_conserved & ~root_filtered             # gate for GS0 and pool categories
+    logging.info(
+        f"Row exclusions: {dubious_conserved.sum()} dubious-conserved "
+        f"(is_conserved_meta=T & asr_is_conserved=F), "
+        f"{root_filtered.sum()} root-filtered "
+        f"(is_conserved_meta=T & asr_root_conserved=F), {is_gs0.sum()} GS0 — "
+>>>>>>> asr
         f"{valid_row.sum()} rows remain (valid_row), {valid_row_any.sum()} (valid_row_any)"
     )
 
@@ -801,6 +831,8 @@ if __name__ == "__main__":
     parser.add_argument('--global-seed',  type=int, default=None)
     parser.add_argument('--fdr-threshold', type=float, default=0.05,
                         help='FDR threshold for gene list export (default: 0.05)')
+    parser.add_argument('--use-all-mrca-filter', action='store_true',
+                        help='Exclude conserved-meta rows failing asr_root_conserved')
     parser.add_argument('--precompute-masks', dest='precompute_masks', action='store_true')
     parser.add_argument('--no-precompute-masks', dest='precompute_masks', action='store_false')
     parser.set_defaults(precompute_masks=True)

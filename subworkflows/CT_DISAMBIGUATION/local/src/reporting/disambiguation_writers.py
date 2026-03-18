@@ -184,6 +184,7 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "low_confidence_nodes",
         # Conserved-pair validation flag
         "asr_is_conserved",
+        "asr_root_conserved",
         # Debug and comments
         "comments",
         # ASR fields (AT END - only present when ASR available)

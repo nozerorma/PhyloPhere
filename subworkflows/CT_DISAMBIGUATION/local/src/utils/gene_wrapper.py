@@ -200,8 +200,11 @@ def convert_convergence_result_to_dict(
         else:
             result_dict["low_confidence_nodes"] = str(lcn)
 
-    # Conserved-pair validation flag (set upstream)
+    # Conserved-pair validation flags (set upstream)
     result_dict["asr_is_conserved"] = bool(getattr(result, "asr_is_conserved", False))
+    result_dict["asr_root_conserved"] = bool(
+        getattr(result, "asr_root_conserved", False)
+    )
 
     # Keep rich payloads for downstream viz/reporting
     if getattr(result, "pair_details", None):
@@ -289,6 +292,9 @@ def merge_multi_hypothesis_results(
     merged["asr_is_conserved"] = any(
         bool(getattr(r, "asr_is_conserved", False)) for r in results_group
     )
+    merged["asr_root_conserved"] = any(
+        bool(getattr(r, "asr_root_conserved", False)) for r in results_group
+    )
     merged["is_conserved_meta"] = any(
         bool(getattr(r, "is_conserved_meta", False)) for r in results_group
     )
@@ -330,7 +336,6 @@ def process_single_gene(
     output_dir: Path,
     db_queue: Optional[Any] = None,
     ensembl_genes: Optional[Set[str]] = None,
-    use_all_mrca_filter: bool = False,
 ) -> Tuple[str, Optional[Path]]:
 
     try:
@@ -523,7 +528,6 @@ def process_single_gene(
             convergence_mode=convergence_mode,
             asr_mode=asr_mode,
             include_non_significant=include_non_significant,
-            use_all_mrca_filter=use_all_mrca_filter,
         )
 
         if not include_non_significant:
@@ -660,7 +664,6 @@ def process_all_genes(
     ensembl_genes_file: Optional[str] = None,
     max_tasks_per_child: Optional[int] = None,
     max_codeml: Optional[int] = None,
-    use_all_mrca_filter: bool = False,
 ) -> Tuple[List[Dict], Optional[Dict]]:
 
     effective_workers, threads_per_gene = plan_concurrency(
@@ -775,7 +778,6 @@ def process_all_genes(
                         db_queue,
                         ensembl_genes,
                     ),
-                    kwds={'use_all_mrca_filter': use_all_mrca_filter},
                 )
             )
 

@@ -63,6 +63,8 @@ def main():
     parser.add_argument("--global-seed",                type=int, default=None)
     parser.add_argument("--fdr-threshold",              type=float, default=0.05,
                         help="FDR threshold for gene list export (default: 0.05)")
+    parser.add_argument("--use-all-mrca-filter",        action="store_true",
+                        help="Exclude conserved-meta rows failing asr_root_conserved in aggregation/randomization")
     parser.add_argument("--precompute-masks",           dest="precompute_masks", action="store_true")
     parser.add_argument("--no-precompute-masks",        dest="precompute_masks", action="store_false")
     parser.set_defaults(precompute_masks=True)
@@ -100,6 +102,7 @@ def main():
                 bg_caas=args.bg_caas,
                 output_prefix=args.output_prefix,
                 log_level=args.log_level,
+                use_all_mrca_filter=args.use_all_mrca_filter,
             )
             timed_execution(aggregate_fn, agg_args, "Aggregation Phase")
 
@@ -118,6 +121,7 @@ def main():
                 fdr_threshold=args.fdr_threshold,
                 precompute_masks=args.precompute_masks,
                 log_level=args.log_level,
+                use_all_mrca_filter=args.use_all_mrca_filter,
             )
             timed_execution(randomize_fn, rand_args, "Randomization Phase")
 

@@ -124,6 +124,13 @@ save_plot <- function(p, fname, width = 11, height = 6) {
   invisible(path)
 }
 
+<<<<<<< HEAD
+=======
+as_bool <- function(x) {
+  tolower(trimws(as.character(x))) %in% c("true", "t", "1", "yes", "y")
+}
+
+>>>>>>> asr
 # Sensitivity tau grid — used ONLY in 7; never drives pipeline filtering
 TAU_GRID <- c(0.80, 0.90, 0.95, 0.99)
 
@@ -170,6 +177,19 @@ if (!("gene" %in% names(master_df)) && "Gene" %in% names(master_df))
   master_df <- dplyr::rename(master_df, gene = Gene)
 if (!("site" %in% names(master_df)) && "Position" %in% names(master_df))
   master_df <- dplyr::rename(master_df, site = Position)
+<<<<<<< HEAD
+=======
+if (!("is_conserved_meta" %in% names(master_df))) master_df$is_conserved_meta <- FALSE
+if (!("asr_is_conserved" %in% names(master_df))) master_df$asr_is_conserved <- FALSE
+if (!("asr_root_conserved" %in% names(master_df))) master_df$asr_root_conserved <- FALSE
+
+master_df <- master_df |>
+  dplyr::mutate(
+    is_conserved_meta = as_bool(is_conserved_meta),
+    asr_is_conserved = as_bool(asr_is_conserved),
+    asr_root_conserved = as_bool(asr_root_conserved)
+  )
+>>>>>>> asr
 
 # Build focal-node lookup: named list(gene_name → integer vector of focal node IDs)
 node_cols_early <- grep("^mrca_\\d+_node$", names(master_df), value = TRUE)
@@ -192,6 +212,56 @@ if (length(node_cols_early) > 0) {
 
 ---
 
+<<<<<<< HEAD
+=======
+## 0 – Conserved-status burden scenarios
+
+```{r conserved_status_burden}
+scenario_counts <- tibble(
+  scenario = c("include_both", "exclude_root_only", "exclude_both"),
+  description = c(
+    "No conserved-status exclusion",
+    "Exclude conserved-meta rows with asr_root_conserved = FALSE",
+    "Exclude conserved-meta rows with asr_is_conserved = FALSE or asr_root_conserved = FALSE"
+  )
+) |>
+  dplyr::rowwise() |>
+  dplyr::mutate(
+    rows_total = nrow(master_df),
+    rows_retained = dplyr::case_when(
+      scenario == "include_both" ~ nrow(master_df),
+      scenario == "exclude_root_only" ~ sum(!(master_df$is_conserved_meta & !master_df$asr_root_conserved)),
+      TRUE ~ sum(!(master_df$is_conserved_meta & (!master_df$asr_is_conserved | !master_df$asr_root_conserved)))
+    ),
+    rows_removed = rows_total - rows_retained,
+    retained_fraction = rows_retained / rows_total,
+    removed_fraction = rows_removed / rows_total
+  ) |>
+  dplyr::ungroup()
+
+scenario_comparison <- scenario_counts |>
+  dplyr::transmute(
+    scenario,
+    description,
+    rows_removed,
+    removed_fraction,
+    incremental_vs_include_both = rows_removed - rows_removed[scenario == "include_both"],
+    incremental_vs_root_only = rows_removed - rows_removed[scenario == "exclude_root_only"]
+  )
+
+write_tsv_safe(scenario_counts, "asr_conserved_status_burden.tsv")
+write_tsv_safe(scenario_comparison, "asr_conserved_status_comparison.tsv")
+
+kbl_pp(scenario_counts, caption = "0 Conserved-status burden across master-table scenarios (asr_conserved_status_burden.tsv)")
+```
+
+```{r conserved_status_comparison}
+kbl_pp(scenario_comparison, caption = "0 Conserved-status scenario comparison (asr_conserved_status_comparison.tsv)")
+```
+
+---
+
+>>>>>>> asr
 ## 1 – Per-(gene, node, site) ASR confidence metrics
 
 ```{r parse_jsonl, cache=FALSE}

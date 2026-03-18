@@ -29,9 +29,9 @@
  */
 
 // Import local modules/subworkflows
-include { DISCOVERY } from "${baseDir}/subworkflows/CT/ct_discovery"
+include { DISCOVERY; DISCOVERY_BATCHED } from "${baseDir}/subworkflows/CT/ct_discovery"
 include { RESAMPLE } from "${baseDir}/subworkflows/CT/ct_resample"
-include { BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_bootstrap"
+include { BOOTSTRAP; BOOTSTRAP_BATCHED } from "${baseDir}/subworkflows/CT/ct_bootstrap"
 include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE; CONCAT_BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_concat"
 
 // Main workflow
@@ -42,6 +42,12 @@ workflow CT {
         bootstrap_trait_file_in
         tree_file_in
     main:
+        def createBatchManifestText = { List<String> rows ->
+            rows
+                .collect { row -> row.replaceFirst(/^\s+/, '') }
+                .join(System.lineSeparator()) + System.lineSeparator()
+        }
+
         // Output channels for emit block - must be defined at workflow level
         def discovery_concat_out = Channel.empty()
         def background_concat_out = Channel.empty()
@@ -68,6 +74,8 @@ workflow CT {
         // Initialize variables
         def trait_file_out
         def bootstrap_trait_file_out
+        def discovery_results = Channel.empty()
+        def background_results = Channel.empty()
 
         def discovery_out = Channel.empty()
         def discovery_done = Channel.value(true)
@@ -110,15 +118,38 @@ workflow CT {
         tree_file_emit  = (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) ? tree_file_out  : Channel.value(tree_file_out)
 
         if (toolsToRun.contains('discovery')) {
-            discovery_out = DISCOVERY(align_tuple, trait_file_out)
+            def discoveryBatchSize = (params.ct_discovery_batch_size ?: 1) as int
+            if (discoveryBatchSize > 1) {
+                def discoveryBatchCounter = 0
+                def discovery_batches = align_tuple
+                    .collate(discoveryBatchSize)
+                    .map { batch ->
+                        def batchID = sprintf('discovery_batch_%05d', ++discoveryBatchCounter)
+                        def manifestText = createBatchManifestText(
+                            batch.collect { row -> "${row[0]}\t${row[1].name}" }
+                        )
+                        tuple(batchID, batch.size(), manifestText, batch.collect { row -> row[1] })
+                    }
+
+                discovery_out = DISCOVERY_BATCHED(discovery_batches, trait_file_out)
+                discovery_results = discovery_out.discovery_out
+                    .flatten()
+                    .map { file -> tuple(file.baseName, file) }
+                background_results = discovery_out.background_out
+                    .flatten()
+            } else {
+                discovery_out = DISCOVERY(align_tuple, trait_file_out)
+                discovery_results = discovery_out.discovery_out
+                background_results = discovery_out.background_out
+            }
 
             // Hard barrier: downstream steps should start only after discovery is fully complete
-            discovery_done = discovery_out.discovery_out
+            discovery_done = discovery_results
                 .collect()
                 .ifEmpty([])
             
             // Concatenate discovery outputs - collect actual files for staging
-            discovery_out.discovery_out
+            discovery_results
                 .map { id, file -> file }
                 .collect()
                 .ifEmpty([])
@@ -127,8 +158,8 @@ workflow CT {
             discovery_concat_out = CONCAT_DISCOVERY.out.discovery_concat
             
             // Concatenate background outputs - collect actual files for staging
-            background_raw_out = discovery_out.background_out
-            discovery_out.background_out
+            background_raw_out = background_results
+            background_results
                 .collect()
                 .ifEmpty([])
                 .set { background_files_to_concat }
@@ -178,7 +209,7 @@ workflow CT {
             if (toolsToRun.contains('discovery')) {
                 // Use discovery results from the pipeline
                 align_with_discovery = align_tuple
-                        .join(discovery_out.discovery_out)
+                        .join(discovery_results)
                         .map { row -> tuple(row[0], row[1], row[2]) }
 
                 // Hard barrier: bootstrap starts only after full discovery completion
@@ -228,10 +259,47 @@ workflow CT {
                     .combine(resample_dir_out)
                     .map { row -> tuple(row[0], row[1], row[2], row[3]) }
 
-            bootstrap_out = BOOTSTRAP(bootstrap_in, trait_file_out)
+            def ctBootstrapOut
+            def bootstrapBatchSize = (params.ct_bootstrap_batch_size ?: 1) as int
+            if (bootstrapBatchSize > 1) {
+                def bootstrapBatchCounter = 0
+                def bootstrap_batches = bootstrap_in
+                    .collate(bootstrapBatchSize)
+                    .map { batch ->
+                        def batchID = sprintf('bootstrap_batch_%05d', ++bootstrapBatchCounter)
+                        def manifestText = createBatchManifestText(
+                            batch.collect { row -> "${row[0]}\t${row[1].name}\t${row[2].name}" }
+                        )
+                        def alignmentFiles = batch.collect { row -> row[1] }
+                        def discoveryFiles = batch
+                            .collect { row -> row[2] }
+                            .findAll { file -> file.name != 'NO_FILE' }
+                            .unique { file -> file.name }
+                        if (!discoveryFiles) {
+                            // Stage a harmless existing file so the batched process
+                            // still receives a non-empty path input when discovery is disabled.
+                            discoveryFiles = [batch[0][1]]
+                        }
+                        def resampled = batch[0][3]
+
+                        tuple(batchID, batch.size(), manifestText, alignmentFiles, discoveryFiles, resampled)
+                    }
+
+                bootstrap_out = BOOTSTRAP_BATCHED(bootstrap_batches, trait_file_out)
+                ctBootstrapOut = bootstrap_out.bootstrap_out
+                    .flatten()
+                    .map { file ->
+                        def suffix = '.bootstraped.output'
+                        def id = file.name.endsWith(suffix) ? file.name[0..-(suffix.size() + 1)] : file.baseName
+                        tuple(id, file)
+                    }
+            } else {
+                bootstrap_out = BOOTSTRAP(bootstrap_in, trait_file_out)
+                ctBootstrapOut = bootstrap_out.bootstrap_out
+            }
             
             // Concatenate all bootstrap outputs - collect actual files for staging
-            bootstrap_out.bootstrap_out
+            ctBootstrapOut
                 .map { id, file -> file }
                 .collect()
                 .ifEmpty([])
