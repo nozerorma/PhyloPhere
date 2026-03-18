@@ -101,26 +101,25 @@ process BOOTSTRAP_BATCHED {
         : "$baseDir/subworkflows/CT/local/ct"
 
     """
-    cat > ${batchID}.manifest.tsv <<'EOF'
-    ${batchManifestText}
-    EOF
+cat > ${batchID}.manifest.tsv <<'EOF'
+""" + batchManifestText + """EOF
 
-    cat > .ct_bootstrap_batch_args <<'EOF'
-    ${args.replaceAll('\n', ' ')}
-    EOF
+cat > .ct_bootstrap_batch_args <<'EOF'
+${args.replaceAll('\n', ' ')}
+EOF
 
-    bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
-        --batch-id ${batchID} \\
-        --manifest ${batchID}.manifest.tsv \\
-        --caas-config ${caas_config} \\
-        --resampled-path ${resampledPath} \\
-        --workers ${params.ct_bootstrap_batch_workers} \\
-        --ali-format ${params.ali_format} \\
-        --runner-mode ${runnerMode} \\
-        --ct-bin ${ctBinary} \\
-        --progress-log ${params.progress_log != "none" ? '1' : '0'} \\
-        --export-groups ${params.export_groups != null && params.export_groups != "none" ? '1' : '0'} \\
-        --export-perm-discovery ${params.export_perm_discovery != null && params.export_perm_discovery != "none" ? '1' : '0'} \\
-        --extra-args-file .ct_bootstrap_batch_args
-    """.stripIndent()
+bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
+    --batch-id ${batchID} \\
+    --manifest ${batchID}.manifest.tsv \\
+    --caas-config ${caas_config} \\
+    --resampled-path ${resampledPath} \\
+    --workers ${params.ct_bootstrap_batch_workers} \\
+    --ali-format ${params.ali_format} \\
+    --runner-mode ${runnerMode} \\
+    --ct-bin ${ctBinary} \\
+    --progress-log ${params.progress_log != "none" ? '1' : '0'} \\
+    --export-groups ${params.export_groups != null && params.export_groups != "none" ? '1' : '0'} \\
+    --export-perm-discovery ${params.export_perm_discovery != null && params.export_perm_discovery != "none" ? '1' : '0'} \\
+    --extra-args-file .ct_bootstrap_batch_args
+"""
 }

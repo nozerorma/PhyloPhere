@@ -89,22 +89,21 @@ process DISCOVERY_BATCHED {
         : "$baseDir/subworkflows/CT/local/ct"
 
     """
-    cat > ${batchID}.manifest.tsv <<'EOF'
-    ${batchManifestText}
-    EOF
+cat > ${batchID}.manifest.tsv <<'EOF'
+""" + batchManifestText + """EOF
 
-    cat > .ct_discovery_batch_args <<'EOF'
-    ${args.replaceAll('\n', ' ')}
-    EOF
+cat > .ct_discovery_batch_args <<'EOF'
+${args.replaceAll('\n', ' ')}
+EOF
 
-    bash $baseDir/subworkflows/CT/local/scripts/run_ct_discovery_batch.sh \\
-        --batch-id ${batchID} \\
-        --manifest ${batchID}.manifest.tsv \\
-        --caas-config ${caas_config} \\
-        --workers ${params.ct_discovery_batch_workers} \\
-        --ali-format ${params.ali_format} \\
-        --runner-mode ${runnerMode} \\
-        --ct-bin ${ctBinary} \\
-        --extra-args-file .ct_discovery_batch_args
-    """.stripIndent()
+bash $baseDir/subworkflows/CT/local/scripts/run_ct_discovery_batch.sh \\
+    --batch-id ${batchID} \\
+    --manifest ${batchID}.manifest.tsv \\
+    --caas-config ${caas_config} \\
+    --workers ${params.ct_discovery_batch_workers} \\
+    --ali-format ${params.ali_format} \\
+    --runner-mode ${runnerMode} \\
+    --ct-bin ${ctBinary} \\
+    --extra-args-file .ct_discovery_batch_args
+"""
 }

@@ -43,7 +43,9 @@ workflow CT {
         tree_file_in
     main:
         def createBatchManifestText = { List<String> rows ->
-            rows.join(System.lineSeparator()) + System.lineSeparator()
+            rows
+                .collect { row -> row.replaceFirst(/^\s+/, '') }
+                .join(System.lineSeparator()) + System.lineSeparator()
         }
 
         // Output channels for emit block - must be defined at workflow level
