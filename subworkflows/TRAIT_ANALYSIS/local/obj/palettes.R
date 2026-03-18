@@ -29,7 +29,7 @@ darken_color <- function(hex, factor = 0.6) {
 ## Removed Callitrichidae as NCBI has collapsed it into Cebidae, but can be added back if needed with a distinct color
 primates_palette <- c(
   "Aotidae"           = "#4E79A7",  # Blue (Tableau)
-  # "Callitrichidae"    = "#BAB0AC",  # Gray (Tableau)
+  "Callitrichidae"    = "#E15759",  # Vermillion (Tableau), legacy color for compatibility, but not used in NCBI taxonomy
   "Cebidae"           = "#E15759",  # Vermillion (Tableau)
   "Atelidae"          = "#76B7B2",  # Bluish_green (Tableau)
   "Cercopithecidae"   = "#EDC948",  # Yellow (Tableau)
@@ -42,13 +42,15 @@ primates_palette <- c(
   "Galagidae"         = "#C9A961",  # Tan
   "Pitheciidae"       = "#A0796A",  # Earth tone
   "Daubentoniidae"    = "#D37295",  # Mauve
-  "Tarsiidae"         = "#8E8DBE"   # Lavender
+  "Tarsiidae"         = "#8E8DBE",  # Lavender
+  "Lepilemuridae"     = "#7C7C7C",  # Medium gray
+  "Palaeopropithecidae" = "#499894" # Teal
 )
 
 ## Darkened primate color palette (60% darker for contrast)
 dark_primates_palette <- c(
   "Aotidae"         = darken_color("#4E79A7", 0.6),
-  # "Callitrichidae"  = darken_color("#BAB0AC", 0.6),
+  "Callitrichidae"  = darken_color("#E15759", 0.6), # Legacy color for compatibility, but not used in NCBI taxonomy
   "Cebidae"         = darken_color("#E15759", 0.6),
   "Atelidae"        = darken_color("#76B7B2", 0.6),
   "Cercopithecidae" = darken_color("#EDC948", 0.6),
@@ -61,7 +63,9 @@ dark_primates_palette <- c(
   "Galagidae"       = darken_color("#C9A961", 0.6),
   "Pitheciidae"     = darken_color("#A0796A", 0.6),
   "Daubentoniidae"  = darken_color("#D37295", 0.6),
-  "Tarsiidae"       = darken_color("#8E8DBE", 0.6)
+  "Tarsiidae"       = darken_color("#8E8DBE", 0.6),
+  "Lepilemuridae"   = darken_color("#7C7C7C", 0.6),
+  "Palaeopropithecidae" = darken_color("#499894", 0.6)
 )
 
 # Colorblind-friendly mammalian order color palette

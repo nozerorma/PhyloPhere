@@ -124,6 +124,29 @@ When population count columns (`n_trait` / `c_trait`) are present, 95% Jeffreys 
 use_count_data <- has.n && has.c
 debug_log("use_count_data = %s", use_count_data)
 
+threshold_info <- compute_trait_thresholds(
+  trait_values = trait_df[[trait]],
+  discrete_method = discrete_method,
+  top_quantile = top_quantile,
+  bottom_quantile = bottom_quantile
+)
+lower_thresh <- threshold_info$lower_thresh
+upper_thresh <- threshold_info$upper_thresh
+
+threshold_label <- switch(
+  threshold_info$discrete_method,
+  "quartile" = "quartile (25/75)",
+  "quintile" = "quintile (20/80)",
+  "decile" = "decile (10/90)",
+  "median_sd" = "median +/- SD",
+  "parameterized" = sprintf("parameterized (%.2f/%.2f)", threshold_info$bottom_quantile, threshold_info$top_quantile),
+  threshold_info$discrete_method
+)
+debug_log(
+  "compute_CI thresholds: method = %s, lower_thresh = %.4f, upper_thresh = %.4f",
+  threshold_info$discrete_method, lower_thresh, upper_thresh
+)
+
 if (use_count_data) {
   # ---- Jeffreys CI path ----
   debug_log("compute_CI: Jeffreys CI method (n_trait = %s, c_trait = %s)", n_trait, c_trait)
@@ -143,52 +166,23 @@ if (use_count_data) {
                                          method = "bayes", priors = c(0.5, 0.5),
                                          conf.level = 0.95)[, 6],
       trait_ci = paste0("[", round(trait_ci_lb, 2), "-", round(trait_ci_ub, 2), "]"),
-      # Category assigned from quartiles of the trait for colouring
+      # Category follows the active global discretization policy for colouring/annotation
       category = dplyr::case_when(
-        trait >= quantile(trait, 0.75, na.rm = TRUE) ~ "top",
-        trait <= quantile(trait, 0.25, na.rm = TRUE) ~ "bottom",
+        trait >= upper_thresh ~ "top",
+        trait <= lower_thresh ~ "bottom",
         TRUE ~ "intermediate"
       )
     ) %>%
     ungroup()
 
+  cat(sprintf(
+    "Jeffreys CI categorization thresholds: %s | lower threshold = %.4f | upper threshold = %.4f\n",
+    threshold_label, lower_thresh, upper_thresh
+  ))
+
 } else {
   # ---- Discrete categorization path ----
   debug_log("compute_CI: discrete method = %s", discrete_method)
-
-  trait_vals <- trait_df[[trait]]
-
-  thresholds <- switch(
-    discrete_method,
-    "quartile" = list(
-      lower = quantile(trait_vals, 0.25, na.rm = TRUE),
-      upper = quantile(trait_vals, 0.75, na.rm = TRUE)
-    ),
-    "quintile" = list(
-      lower = quantile(trait_vals, 0.20, na.rm = TRUE),
-      upper = quantile(trait_vals, 0.80, na.rm = TRUE)
-    ),
-    "median_sd" = list(
-      lower = median(trait_vals, na.rm = TRUE) - sd(trait_vals, na.rm = TRUE),
-      upper = median(trait_vals, na.rm = TRUE) + sd(trait_vals, na.rm = TRUE)
-    ),
-    "decile" = list(
-      lower = quantile(trait_vals, 0.10, na.rm = TRUE),
-      upper = quantile(trait_vals, 0.90, na.rm = TRUE)
-    ),
-    "parameterized" = list(
-      lower = quantile(trait_vals, as.numeric(bottom_quantile), na.rm = TRUE),
-      upper = quantile(trait_vals, as.numeric(top_quantile),    na.rm = TRUE)
-    ),
-    stop(sprintf(
-      "Unknown discrete_method: '%s'. Choose one of: quartile, quintile, decile, median_sd, parameterized",
-      discrete_method
-    ))
-  )
-
-  lower_thresh <- as.numeric(thresholds$lower)
-  upper_thresh <- as.numeric(thresholds$upper)
-  debug_log("compute_CI: lower_thresh = %.4f, upper_thresh = %.4f", lower_thresh, upper_thresh)
 
   trait_ci <- trait_df %>%
     dplyr::rename(trait = .data[[trait]]) %>%
@@ -209,7 +203,7 @@ if (use_count_data) {
   cat("Discrete categorization summary:\n")
   print(table(trait_ci$category))
   cat(sprintf("Method: %s | lower threshold = %.4f | upper threshold = %.4f\n",
-              discrete_method, lower_thresh, upper_thresh))
+              threshold_label, lower_thresh, upper_thresh))
 }
 
 # Save results
@@ -272,8 +266,25 @@ pairwise_data <- create_pairwise_data(trait_ci)
 pairwise_data_viz <- pairwise_data %>%
   dplyr::filter(!is.na(trait1), !is.na(trait2), !is.na(diff_value), !is.na(overlap_use))
 
+trait_ci_extreme <- trait_ci %>%
+  dplyr::filter(category %in% c("top", "bottom"))
+
+extreme_categories_present <- sort(unique(trait_ci_extreme$category))
+has_heatmap_extremes <- nrow(trait_ci_extreme) >= 2 &&
+  all(c("top", "bottom") %in% extreme_categories_present)
+
+pairwise_data_viz_extreme <- pairwise_data_viz %>%
+  dplyr::filter(
+    category1 %in% c("top", "bottom"),
+    category2 %in% c("top", "bottom")
+  )
+
 if (nrow(pairwise_data_viz) == 0) {
   warning("No valid non-NA rows available for pairwise visualization")
+}
+
+if (!has_heatmap_extremes) {
+  warning("Skipping CI heatmap visualization: fewer than two extreme species or only one extreme class remains.")
 }
 
 # Save results
@@ -300,10 +311,15 @@ build_diff_matrix <- function(pairwise_data_input) {
 
 # Create matrices
 matrix <- build_diff_matrix(pairwise_data_viz)
+matrix_extreme <- if (has_heatmap_extremes) build_diff_matrix(pairwise_data_viz_extreme) else NULL
 
 # Save matrices
 write.csv(matrix, file.path(ci_dir, "diff_matrix-CI.csv"), 
           quote = FALSE, row.names = TRUE)
+if (!is.null(matrix_extreme)) {
+  write.csv(matrix_extreme, file.path(ci_dir, "diff_matrix-CI-extreme_only.csv"),
+            quote = FALSE, row.names = TRUE)
+}
 
 # Display preview
 head(matrix)
@@ -314,37 +330,46 @@ head(matrix)
 This section creates heatmaps to visualize pairwise differences in prevalence. Species labels are colored based on prevalence quantiles.
 
 ```{r plot_CI, fig.height=12, fig.width=15, message=TRUE, warning=TRUE, dev="png", dpi=320}
-# Simplified function to create colored labels based on trait quantiles
-create_colored_labels <- function(trait_data) {
-  # Calculate quantile thresholds
-  q75 <- quantile(trait_data$trait, 0.75, na.rm = TRUE)
-  q25 <- quantile(trait_data$trait, 0.25, na.rm = TRUE)
-  
-  # Create a lookup table with species and their colors
-  label_df <- trait_data %>%
+# Simplified function to create colored labels from the active discretization thresholds
+create_colored_labels <- function(trait_data, lower_thresh, upper_thresh) {
+  trait_data %>%
+    distinct(species, trait) %>%
     mutate(
       color = case_when(
-        trait >= q75 ~ as.character(tableau_10["vermillion"]),  # Red for top quartile
-        trait <= q25 ~ as.character(tableau_10["bluish_green"]),  # Green for bottom quartile
-        TRUE ~ "#000000"           # Black for middle
-      )
+        trait >= upper_thresh ~ as.character(tableau_10["vermillion"]),
+        trait <= lower_thresh ~ as.character(tableau_10["bluish_green"]),
+        TRUE ~ "#000000"
+      ),
+      label_html = paste0("<span style='color:", color, ";'>", species, "</span>")
     ) %>%
-    select(species, color)
-  
-  # Create named vector of colored HTML labels
-  colored_labels <- setNames(
-    paste0("<span style='color:", label_df$color, ";'>", label_df$species, "</span>"),
-    label_df$species
+    arrange(species)
+}
+
+heatmap_layout_profile <- function(n_species) {
+  base_profile <- species_plot_profile(n_species = n_species, n_taxa = n_species)$contrast
+  list(
+    width = clamp_value(base_profile$width + 0.18 * n_species, 12, 28),
+    height = clamp_value(base_profile$height + 0.14 * n_species, 10, 26),
+    axis_label_size = clamp_value(5.2 - 0.045 * n_species, 2.1, 5.2),
+    cell_label_size = clamp_value(4.0 - 0.050 * n_species, 1.8, 4.0),
+    tile_border = clamp_value(0.30 - 0.002 * n_species, 0.08, 0.30),
+    highlight_border = clamp_value(1.5 - 0.010 * n_species, 0.45, 1.5),
+    show_cell_labels = n_species <= 28,
+    rotate_angle = if (n_species > 18) 45 else 30,
+    legend_width = if (n_species > 35) 2 else 1,
+    bottom_label_y = -0.75,
+    bottom_margin = 135,
+    top_limit = n_species + 0.75,
+    left_label_x = 0.15,
+    right_limit = n_species + 1.1
   )
-  
-  return(colored_labels)
 }
 
 # Helper function to create legend plot
 create_legend_plot <- function() {
   legend_df <- tibble(
     category = c("Top", "Bottom"),
-    color = c(tableau_10["vermillion"], tableau_10["bluish_green"])
+    color = c(as.character(tableau_10["vermillion"]), as.character(tableau_10["bluish_green"]))
   )
   
   ggplot(legend_df, aes(x = 1, y = category, color = category)) +
@@ -365,78 +390,137 @@ create_legend_plot <- function() {
 # Helper function to create heatmap
 create_heatmap <- function(pairwise_data, colored_labels, 
                           highlight_nonoverlap = TRUE) {
-  # Ensure label mapping is stable across axes
-  if (is.null(names(colored_labels))) {
-    stop("colored_labels must be a named vector with species names.")
+  if (!all(c("species", "label_html") %in% names(colored_labels))) {
+    stop("colored_labels must contain species and label_html columns.")
   }
-  pairwise_data <- pairwise_data %>%
+  species_levels <- colored_labels$species
+  n_species <- length(species_levels)
+  heatmap_dims <- heatmap_layout_profile(n_species)
+
+  pairwise_plot <- pairwise_data %>%
     mutate(
-      species1 = factor(species1, levels = names(colored_labels)),
-      species2 = factor(species2, levels = names(colored_labels))
+      species1 = factor(species1, levels = species_levels),
+      species2 = factor(species2, levels = species_levels),
+      x_idx = as.integer(species2),
+      y_idx = n_species - as.integer(species1) + 1L
     )
 
-  p <- ggplot(pairwise_data, aes(x = species2, y = species1, fill = abs(diff_value))) +
-    geom_tile(color = "black", size = 0.25) +
-    geom_text(aes(label = sprintf("%.2f", abs(diff_value))), size = 3) +
-    scale_fill_gradient(low = "white", high = tableau_10["vermillion"], name = "Difference") +
-    scale_x_discrete(labels = function(x) colored_labels[x]) +
-    scale_y_discrete(labels = function(y) colored_labels[y]) +
+  bottom_labels <- colored_labels %>%
+    mutate(
+      x_idx = seq_len(n_species),
+      y_idx = heatmap_dims$bottom_label_y
+    )
+
+  left_labels <- colored_labels %>%
+    mutate(
+      x_idx = heatmap_dims$left_label_x,
+      y_idx = n_species - seq_len(n_species) + 1L
+    )
+
+  p <- ggplot(pairwise_plot, aes(x = x_idx, y = y_idx, fill = abs(diff_value))) +
+    geom_tile(color = "black", linewidth = heatmap_dims$tile_border) +
+    scale_fill_gradient(low = "white", high = as.character(tableau_10["vermillion"]), name = "Difference") +
+    scale_x_continuous(limits = c(0.1, heatmap_dims$right_limit), breaks = NULL, expand = c(0, 0)) +
+    scale_y_continuous(limits = c(heatmap_dims$bottom_label_y - 0.35, heatmap_dims$top_limit), breaks = NULL, expand = c(0, 0)) +
     theme_minimal(base_size = 16) +
     theme(
-      axis.text.x = element_markdown(angle = 45, hjust = 1),
-      axis.text.y = element_markdown(angle = 0),
+      axis.text.x = element_blank(),
+      axis.text.y = element_blank(),
+      axis.title = element_blank(),
       panel.grid = element_blank(),
-      legend.position = "none"
+      legend.position = "none",
+      plot.margin = margin(30, 20, heatmap_dims$bottom_margin, 120)
+    ) +
+    coord_cartesian(clip = "off") +
+    ggtext::geom_richtext(
+      data = bottom_labels,
+      aes(x = x_idx, y = y_idx, label = label_html),
+      inherit.aes = FALSE,
+      angle = heatmap_dims$rotate_angle,
+      hjust = 1,
+      vjust = 1,
+      size = heatmap_dims$axis_label_size,
+      label.color = NA,
+      fill = NA
+    ) +
+    ggtext::geom_richtext(
+      data = left_labels,
+      aes(x = x_idx, y = y_idx, label = label_html),
+      inherit.aes = FALSE,
+      hjust = 1,
+      vjust = 0.5,
+      size = heatmap_dims$axis_label_size,
+      label.color = NA,
+      fill = NA
     )
+
+  if (isTRUE(heatmap_dims$show_cell_labels)) {
+    p <- p + geom_text(aes(label = sprintf("%.2f", abs(diff_value))), size = heatmap_dims$cell_label_size)
+  }
   
   # Add bold border for non-overlapping CIs if requested
   if (highlight_nonoverlap) {
     p <- p + 
-      geom_tile(data = filter(pairwise_data, !overlap_use), 
-                fill = NA, color = "black", size = 1.5) +
+      geom_tile(data = filter(pairwise_plot, !overlap_use), 
+                fill = NA, color = "black", linewidth = heatmap_dims$highlight_border) +
       labs(
-        x = "Species", y = "Species",
+        x = NULL, y = NULL,
         title = paste("Pairwise Differences in trait: ", capitalized_trait, " with Non-overlapping CIs", sep = ""),
         caption = "Bold border: non-overlapping CIs."
       )
   } else {
     p <- p +
       labs(
-        x = "Species", y = "Species",
+        x = NULL, y = NULL,
         title = paste("Pairwise Differences in trait: ", capitalized_trait, sep = ""),
         caption = "Bold border: non-overlapping CIs."
       )
   }
-  
+
+  attr(p, "heatmap_dims") <- heatmap_dims[c("width", "height", "legend_width")]
   return(p)
 }
 
-# Create colored labels directly from trait data
-my_labels_colored <- create_colored_labels(trait_ci)
+if (has_heatmap_extremes) {
+  # Create colored labels directly from extreme trait data
+  my_labels_colored <- create_colored_labels(
+    trait_ci_extreme,
+    lower_thresh = lower_thresh,
+    upper_thresh = upper_thresh
+  )
 
-# Save colored labels
-write.csv(my_labels_colored, file.path(ci_dir, "my_labels_colored.csv"), 
-          quote = FALSE, row.names = TRUE)
+  # Save colored labels
+  write.csv(my_labels_colored, file.path(ci_dir, "my_labels_colored.csv"), 
+            quote = FALSE, row.names = FALSE)
 
-# Create legend
-legend_plot <- create_legend_plot()
+  # Create legend
+  legend_plot <- create_legend_plot()
 
-# Create heatmaps with non-overlapping CI highlights
-p_overlap <- create_heatmap(pairwise_data_viz, my_labels_colored, highlight_nonoverlap = TRUE) + 
-  legend_plot + plot_layout(ncol = 2, widths = c(1000, 1))
+  # Create heatmaps with non-overlapping CI highlights
+  overlap_heatmap <- create_heatmap(pairwise_data_viz_extreme, my_labels_colored, highlight_nonoverlap = TRUE)
+  flat_heatmap <- create_heatmap(pairwise_data_viz_extreme, my_labels_colored, highlight_nonoverlap = FALSE)
+  heatmap_dims <- attr(overlap_heatmap, "heatmap_dims")
 
-p_flat <- create_heatmap(pairwise_data_viz, my_labels_colored, highlight_nonoverlap = FALSE) + 
-  legend_plot + plot_layout(ncol = 2, widths = c(1000, 1))
+  p_overlap <- overlap_heatmap + 
+    legend_plot + plot_layout(ncol = 2, widths = c(1000, heatmap_dims$legend_width))
 
-# Save heatmaps
-ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap, 
-       width = 15, height = 12, dpi = "retina")
-ggsave(file.path(ci_dir, "visual_matrix_flat.png"), p_flat, 
-       width = 15, height = 12, dpi = "retina")
+  p_flat <- flat_heatmap + 
+    legend_plot + plot_layout(ncol = 2, widths = c(1000, heatmap_dims$legend_width))
 
-# Display plots
-p_overlap
-p_flat
+  knitr::opts_current$set(fig.width = heatmap_dims$width, fig.height = heatmap_dims$height)
+
+  # Save heatmaps
+  ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap, 
+         width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina")
+  ggsave(file.path(ci_dir, "visual_matrix_flat.png"), p_flat, 
+         width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina")
+
+  # Display plots
+  p_overlap
+  p_flat
+} else {
+  cat("CI heatmap skipped: fewer than two extreme species remain, or only one extreme class is present.\n")
+}
 ```
 
 ## 6. Polished Tables Preparation

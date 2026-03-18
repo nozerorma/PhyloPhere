@@ -204,6 +204,11 @@ This section generates contrast plots to visualize the trait across taxa, highli
 ### 1. Contrast plot function
 contrast_plot.f <- function(df, palette_values = NULL) {
   stopifnot(all(c("species", taxon_of_interest, trait) %in% names(df)))
+  plot_profile <- species_plot_profile(
+    n_species = dplyr::n_distinct(df$species),
+    n_taxa = dplyr::n_distinct(df$taxa)
+  )
+  contrast_dims <- plot_profile$contrast
   if (is.null(palette_values)) {
     palette_values <- get_palette_values()
   }
@@ -256,11 +261,11 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
     ggplot2::geom_point(
       data = subset(df, global_label == "normal"),
-      aes(shape = global_label, color = taxa), size = 5
+      aes(shape = global_label, color = taxa), size = contrast_dims$point_size
     ) +
     ggplot2::geom_point(
       data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
-      aes(shape = global_label, color = taxa, fill = taxa), size = 5
+      aes(shape = global_label, color = taxa, fill = taxa), size = contrast_dims$point_size
     ) +
     ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17))
   
@@ -300,22 +305,26 @@ contrast_plot.f <- function(df, palette_values = NULL) {
                   caption = "Global median: longdash red line. Per-taxa median: blue error bars. Labelled: extreme-classified species.") +
     ggrepel::geom_text_repel(
       data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
-      aes(label = species), size = 5, hjust = 0, vjust = 0, family = "Inter",
-      segment.size = 0.3, nudge_x = 0.010, nudge_y = 0.5, max.overlaps = Inf,
-      force = 1, direction = "y", max.iter = 10000, label.padding = 20,
-      min.segment.length = 0.06, seed = seed_val, show.legend = FALSE
+      aes(label = species), size = contrast_dims$label_size, hjust = 0, vjust = 0, family = "Inter",
+      segment.size = contrast_dims$segment_size, nudge_x = contrast_dims$nudge_x,
+      nudge_y = contrast_dims$nudge_y, max.overlaps = contrast_dims$max_overlaps,
+      force = contrast_dims$force, direction = "y", max.iter = 10000,
+      label.padding = contrast_dims$label_padding,
+      min.segment.length = contrast_dims$min_segment_length, seed = seed_val, show.legend = FALSE
     ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
-      plot.title = ggplot2::element_text(size = 20, hjust = 0.5, margin = ggplot2::margin(t = 20), face = "bold"),
-      plot.subtitle = ggplot2::element_text(size = 12, hjust = 0.5, color = "grey40"),
-      axis.text.y = ggplot2::element_text(size = 15),
-      axis.title.x = ggplot2::element_text(size = 15, hjust = 0.5, margin = ggplot2::margin(t = 20, b = 20)),
-      axis.title.y = ggplot2::element_text(size = 15, angle = 90, hjust = 0.5, margin = ggplot2::margin(l = 20, r = 20)),
-      plot.caption = ggplot2::element_text(size = 12, hjust = 0.5, margin = ggplot2::margin(t = 20)),
+      plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0.5, margin = ggplot2::margin(t = 20), face = "bold"),
+      plot.subtitle = ggplot2::element_text(size = contrast_dims$subtitle_size, hjust = 0.5, color = "grey40"),
+      axis.text.y = ggplot2::element_text(size = contrast_dims$axis_text_y),
+      axis.title.x = ggplot2::element_text(size = contrast_dims$axis_title, hjust = 0.5, margin = ggplot2::margin(t = 20, b = 20)),
+      axis.title.y = ggplot2::element_text(size = contrast_dims$axis_title, angle = 90, hjust = 0.5, margin = ggplot2::margin(l = 20, r = 20)),
+      plot.caption = ggplot2::element_text(size = contrast_dims$caption_size, hjust = 0.5, margin = ggplot2::margin(t = 20)),
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "bottom"
     )
+  attr(p, "plot_dims") <- contrast_dims[c("width", "height")]
+  p
 }
 
 # 3. CONTRAST PLOTS  ------------------------------------------------------
@@ -336,9 +345,11 @@ if (!plot_ready) {
   }
   debug_log("Calling contrast_plot.f with palette length: %d", ifelse(is.null(palette_for_plot), 0, length(palette_for_plot)))
   contrast_graph <- contrast_plot.f(stats_df, palette_for_plot)
+  contrast_dims <- attr(contrast_graph, "plot_dims")
+  knitr::opts_current$set(fig.width = contrast_dims$width, fig.height = contrast_dims$height)
   ggplot2::ggsave(
     file.path(extreme_plots_dir, paste0(trait, "_contrast_plot.png")),
-    contrast_graph, device = "png", width = 15, height = 10, dpi = "retina"
+    contrast_graph, device = "png", width = contrast_dims$width, height = contrast_dims$height, dpi = "retina"
   )
   contrast_graph
 }
@@ -353,6 +364,11 @@ This section generates violin plots to show trait distributions across taxa.
 ### PLOT FUNCTION --------------------------------------------------------------
 violin_extremes.f <- function(df, trait, taxon_of_interest) {
   stopifnot(all(c("species", taxon_of_interest, trait) %in% names(df)))
+  plot_profile <- species_plot_profile(
+    n_species = dplyr::n_distinct(df$species),
+    n_taxa = dplyr::n_distinct(df$taxa)
+  )
+  violin_dims <- plot_profile$violin
   palette_values <- get_palette_values()
   debug_log("violin_extremes.f rows = %d, trait = %s, taxon = %s", nrow(df), trait, taxon_of_interest)
   fill_scale <- if (is.null(palette_values)) {
@@ -400,12 +416,13 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     ggplot2::geom_point(
       data = subset(df, outlier == "normal"),
       aes(shape = global_label, color = taxa),
-      size = 3, position = ggplot2::position_jitter(height = 0.25)
+      size = violin_dims$point_size, position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
     ggplot2::geom_point(
       data = subset(df, outlier != "normal"),
       aes(color = taxa, fill = taxa),
-      shape = 21, size = 3, stroke = 0.8, position = ggplot2::position_jitter(height = 0.25)
+      shape = 21, size = violin_dims$point_size, stroke = violin_dims$stroke,
+      position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
     ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17)) +
     color_scale_dark +
@@ -420,14 +437,15 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     ggplot2::labs(x = capitalized_trait) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
-      axis.text.y = ggplot2::element_text(size = 17, hjust = 0.5, face = "bold"),
-      axis.title.x = ggplot2::element_text(size = 17, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 20, b = 20)),
+      axis.text.y = ggplot2::element_text(size = violin_dims$axis_text_y, hjust = 0.5, face = "bold"),
+      axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 20, b = 20)),
       axis.title.y = ggplot2::element_blank(),
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "none"
     )
-  
-  return(plot)
+
+  attr(plot, "plot_dims") <- violin_dims[c("width", "height")]
+  plot
 }
 
 if (!plot_ready) {
@@ -435,9 +453,11 @@ if (!plot_ready) {
 } else {
   violin_plot_path <- file.path(extreme_plots_dir, paste0(trait, "_violin_plot.png"))
   violin_graph <- violin_extremes.f(stats_df, trait, taxon_of_interest)
+  violin_dims <- attr(violin_graph, "plot_dims")
+  knitr::opts_current$set(fig.width = violin_dims$width, fig.height = violin_dims$height)
   ggplot2::ggsave(
     violin_plot_path,
-    violin_graph, device = "png", width = 8, height = 10, dpi = "retina"
+    violin_graph, device = "png", width = violin_dims$width, height = violin_dims$height, dpi = "retina"
   )
   violin_graph
 }
@@ -463,6 +483,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   tree <- ape::reorder.phylo(tree, "cladewise")
   Ntip <- length(tree$tip.label)
   Nnode <- tree$Nnode
+  asr_dims <- species_plot_profile(n_species = Ntip, n_taxa = dplyr::n_distinct(df[[taxon_of_interest]]))$asr
   debug_log("asr_tree.f tree tips after prune = %d, nodes = %d", Ntip, Nnode)
   node_indices <- (Ntip+1):(Ntip+Nnode)
 
@@ -662,11 +683,11 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
 
   par(mar=c(5,5,10,7), oma=c(0,0,2,0))
 
-  plot(cont_obj, fsize=1.8, lwd=6, res=320, legend=FALSE,
-      xlim=c(-0.2*h, 2*h),
-      cex.main=2.5)
+  plot(cont_obj, fsize=asr_dims$fsize, lwd=asr_dims$line_width, res=320, legend=FALSE,
+      xlim=c(-asr_dims$legend_left*h, asr_dims$xlim_right*h),
+      cex.main=asr_dims$main_cex)
 
-  lwd_bar <- 10
+  lwd_bar <- asr_dims$colorbar_lwd
   root_node_idx <- node_indices[1]
   root_est_str <- sprintf("%.2f (%.2f-%.2f)", 
                           node_df$estimate[1], 
@@ -681,24 +702,24 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     lims=NULL,
     lwd=lwd_bar, 
     direction="upwards",
-    x=-0.2*h, 
+    x=-asr_dims$legend_left*h, 
     y=1,
     prompt=FALSE, 
-    fsize=1.5
+    fsize=asr_dims$colorbar_fsize
   )
   
   # Add ticks and labels to color bar
-  tick_x <- -0.2*h + lwd_bar / 20
+  tick_x <- -asr_dims$legend_left*h + lwd_bar / 20
   lines(x = rep(tick_x, 2), y = c(1, Ntip_rescaled))
   nticks <- 10
   
   Y <- seq(1, Ntip_rescaled, length.out = nticks)
   X <- cbind(rep(tick_x, nticks), rep(tick_x + 0.02*h, nticks))
   ticks <- seq(cont_obj$lims[1], cont_obj$lims[2], length.out = nticks)
-  text(x = X[, 2], y = Y, labels = round(ticks, 3), pos = 4, cex = 1.5)
+  text(x = X[, 2], y = Y, labels = round(ticks, 3), pos = 4, cex = asr_dims$tick_cex)
   
   # Add root annotation
-  text(x = 0.02*h, y = Ntip_rescaled/1.45, labels = root_est_str, pos = 4, cex = 1.5, col = "black")
+  text(x = 0.02*h, y = Ntip_rescaled/1.45, labels = root_est_str, pos = 4, cex = asr_dims$root_cex, col = "black")
   
   # Collect parent nodes that have derived tips
   parent_nodes_with_derived_tips <- unique(tip_df$parent_node_id[tip_df$immediate_parent & !is.na(tip_df$parent_node_id)])
@@ -718,7 +739,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
 
         # Display at the parent node
         ape::nodelabels(text = parent_label, node = parent_node,
-                        frame = "none", cex = 1.5, col = "black", adj = c(-0.25, 0.4))
+                        frame = "none", cex = asr_dims$node_label_cex, col = "black", adj = c(-0.25, 0.4))
       }
     }
   }
@@ -731,26 +752,26 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
       # Tip symbol for derived tips
       pch_val <- ifelse(tip_df$direction[i]=="up", 24, 25)
       bg_val <- ifelse(tip_df$direction[i]=="up", as.character(tableau_10["vermillion"]), as.character(tableau_10["bluish_green"]))
-      ape::tiplabels(pch=pch_val, bg=bg_val, tip=tip_pos, cex=2, offset=58)
+      ape::tiplabels(pch=pch_val, bg=bg_val, tip=tip_pos, cex=asr_dims$tip_symbol_cex, offset=asr_dims$tip_symbol_offset)
       
       # Tip value (larger to match parent node emphasis)
       ape::tiplabels(text=sprintf("%.2f", tip_df$estimate[i]), 
-                    tip=tip_pos, frame="none", cex=1.5, offset=40)
+                    tip=tip_pos, frame="none", cex=asr_dims$tip_value_cex, offset=asr_dims$tip_value_offset)
       
       # Connection line from tip to tip value
-      segments(x0 = h, y0 = tip_pos-0.4, x1 = h + 70, y1 = tip_pos-0.4, 
+      segments(x0 = h, y0 = tip_pos - asr_dims$segment_y, x1 = h + asr_dims$segment_length, y1 = tip_pos - asr_dims$segment_y, 
               col = "gray50", lty = 2)
     }
     
     # Cumulative derived marker
     if(tip_df$cumulative_derived[i]){
-      ape::tiplabels(pch=22, bg="forestgreen", tip=tip_pos, cex=2, offset=62)
+      ape::tiplabels(pch=22, bg="forestgreen", tip=tip_pos, cex=asr_dims$tip_symbol_cex, offset=asr_dims$cumulative_offset)
     }
   }
   
   mtext(paste0("Symbols: ▲ Tip Up, ▼ Tip Down, ■ Cumulatively derived; ",
               "Parent node values shown for derived tips."),
-        side=3, line=-2, cex=1.2, adj=0.35)
+        side=3, line=-2, cex=asr_dims$note_cex, adj=0.35)
   
   
   # --- Return ---
@@ -760,7 +781,8 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     tip_table=tip_df,
     sigma2_used=sigma2_used,
     ace=ace_res,
-    rescaled_tree=rescaled_tree
+    rescaled_tree=rescaled_tree,
+    plot_dims=asr_dims[c("width", "height")]
   )
 }
 
@@ -768,11 +790,16 @@ if (!plot_ready) {
   message("Skipping ASR plot: missing or empty trait stats.")
 } else {
   asr_plot_path <- file.path(asr_trees, paste0(trait, "_asr_tree.png"))
+  asr_dims <- species_plot_profile(
+    n_species = sum(!is.na(stats_df[[trait]]) & is.finite(stats_df[[trait]])),
+    n_taxa = dplyr::n_distinct(stats_df[[taxon_of_interest]])
+  )$asr
+  knitr::opts_current$set(fig.width = asr_dims$width, fig.height = asr_dims$height)
   tryCatch(
     {
       grDevices::png(
         filename = asr_plot_path,
-        width = 17, height = 20, res = 320, bg = "white", units = "in"
+        width = asr_dims$width, height = asr_dims$height, res = 320, bg = "white", units = "in"
       )
       asr_result <- asr_tree.f(stats_df, pruned_tree, trait, taxon_of_interest)
       grDevices::dev.off()
@@ -817,12 +844,18 @@ color_scale <- if (is.null(palette_values)) {
 }
 
 # Create base phylogenetic tree in fan layout
+tree_profile_base <- species_plot_profile(
+  n_species = length(pruned_tree$tip.label),
+  n_taxa = dplyr::n_distinct(stats_df[[taxon_of_interest]]),
+  n_rings = 0
+)$tree
+knitr::opts_current$set(fig.width = tree_profile_base$diagnostic_size, fig.height = tree_profile_base$diagnostic_size)
 base_fan_tree <- ggtree(pruned_tree,
                         layout="fan",
                         open.angle=15, 
-                        size=2)
+                        size=tree_profile_base$tree_line_width)
 
-ggsave(file.path(phylo_distribution_dir, "big_tree.png"), base_fan_tree, device = "png", width = 15, height = 15, dpi = "retina")
+ggsave(file.path(phylo_distribution_dir, "big_tree.png"), base_fan_tree, device = "png", width = tree_profile_base$diagnostic_size, height = tree_profile_base$diagnostic_size, dpi = "retina")
 
 ordered_species <- rev(pruned_tree$tip.label)
 row.names(stats_df) <- stats_df$species
@@ -848,6 +881,15 @@ if (length(valid_primary_species) >= 3) {
     dplyr::filter(species %in% circular_tree$tip.label)
   debug_log("visual_distribution: insufficient non-missing trait species (%d); using pruned_tree", length(valid_primary_species))
 }
+
+n_tips <- length(circular_tree$tip.label)
+n_taxa_tree <- dplyr::n_distinct(tree_plot_trait_df$taxa)
+n_fruit_rings <- 1L + isTRUE(has.secondary) + 1L
+tree_profile <- species_plot_profile(n_species = n_tips, n_taxa = n_taxa_tree, n_rings = n_fruit_rings)$tree
+trait_axis_nbreak <- as.integer(max(1, round(tree_profile$axis_nbreak)))
+trait_axis_text_size <- as.numeric(tree_profile$axis_text_size)
+secondary_axis_text_size <- as.numeric(tree_profile$axis_text_size * 0.8)
+knitr::opts_current$set(fig.width = tree_profile$width, fig.height = tree_profile$height)
 
 # Prepare trait data for tree visualization
 tree_trait_data <- tree_plot_trait_df %>%
@@ -911,6 +953,9 @@ if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secon
     ungroup()
 }
 
+primary_ring_limits <- compute_ring_axis_limits(tree_trait_data$trait_sum, min_limit = 1)
+secondary_ring_limits <- if (isTRUE(has.secondary)) compute_ring_axis_limits(tree_trait_data$secondary_sum, min_limit = 1) else c(0, 1)
+
 # Convert tree to tibble and join with trait data
 tree_tibble <- tidytree::as_tibble(circular_tree) %>%
   dplyr::rename(species = label)
@@ -934,15 +979,15 @@ tree_data_object <- tidytree::as.treedata(tree_with_traits)
 diagnostic_tree <- ggtree(tree_data_object,
                           layout = "fan",
                           open.angle = 15,
-                          size = 2) +
-  geom_text2(aes(label = node), hjust = -0.5, vjust = -0.5, size = 6) +
+                          size = tree_profile$tree_line_width) +
+  geom_text2(aes(label = node), hjust = -0.5, vjust = -0.5, size = tree_profile$node_text_size) +
   aes(color = taxa) +
   color_scale
 
 diagnostic_tree
 
 # Save diagnostic tree
-ggsave(file.path(phylo_distribution_dir, "diagnostic_tree.png"), diagnostic_tree, device = "png", width = 15, height = 15, dpi = "retina")
+ggsave(file.path(phylo_distribution_dir, "diagnostic_tree.png"), diagnostic_tree, device = "png", width = tree_profile$diagnostic_size, height = tree_profile$diagnostic_size, dpi = "retina")
 
 # If branch color trait is present, add it to the tree plot
 
@@ -953,7 +998,7 @@ if (isTRUE(has.branch)) {
   tree_plot_step1 <- ggtree(tree_data_object, aes(color = BR),
                                   layout="fan",
                                   open.angle=15, 
-                                  size=2) +
+                                  size=tree_profile$tree_line_width) +
     scale_color_gradient(
       name = capitalized_branch_trait, 
       low = "#F4EBD0", high = "#2B2D42",
@@ -963,7 +1008,7 @@ if (isTRUE(has.branch)) {
   tree_plot_step1 <- ggtree(tree_data_object,
                                   layout="fan",
                                   open.angle=15, 
-                                  size=2)
+                                  size=tree_profile$tree_line_width)
 }
 
 tree_plot_step1 <- tree_plot_step1 +
@@ -973,17 +1018,17 @@ tree_plot_step1 <- tree_plot_step1 +
     mapping = aes(y = species, x = trait_sum, fill = trait_sum, width = 0.5),
     alpha = 0.5,  # Set transparency for lighter appearance
     show.legend = TRUE,
-    pwidth = 0.75,
+    pwidth = tree_profile$fruit_pwidth,
     color = "black",  # Add black contour
     size = 0.7,
     axis.params = list(
       axis = 'x',
-      text.size = 8,
-      nbreak = 2,
+      text.size = trait_axis_text_size,
+      nbreak = trait_axis_nbreak,
       text.angle = 270,
       vjust = 0.5,
       hjust = 0,
-      limits = c(0, 40)
+      limits = primary_ring_limits
     ),
     grid.params = list()
   ) +
@@ -1003,21 +1048,21 @@ if (isTRUE(has.secondary)) {
   tree_plot_step1 <- tree_plot_step1 +
     geom_fruit(
       geom = geom_col,
-      offset = -0.75,
+      offset = tree_profile$secondary_offset,
       mapping = aes(y = species, x = secondary_sum, fill = secondary_sum, width = 0.5),
       alpha = 0.5,  # Set transparency for lighter appearance
       show.legend = TRUE,
-      pwidth = 0.75,
+      pwidth = tree_profile$fruit_pwidth,
       color = "black",  # Add black contour
       size = 0.7,
       axis.params = list(
         axis = 'x',
-        text.size = 0,
-        nbreak = 1,
+        text.size = secondary_axis_text_size,
+        nbreak = 1L,
         text.angle = 270,
         vjust = 0.5,
         hjust = 0,
-        limits = c(0, 20)
+        limits = secondary_ring_limits
       ),
       grid.params = list()
     ) +
@@ -1037,7 +1082,7 @@ tree_plot_step1
 tree_plot_step2 <- tree_plot_step1 +
   geom_fruit(geom = geom_col, 
              mapping = aes(y = species, x = 1, fill = taxa),
-             pwidth = 0.1, color = "black", linewidth = 0.5, offset = 0.2)
+             pwidth = tree_profile$taxa_bar_pwidth, color = "black", linewidth = 0.5, offset = tree_profile$taxa_bar_offset)
 
 if (!is.null(palette_values) && length(palette_values) > 0) {
   tree_plot_step2 <- tree_plot_step2 + scale_fill_manual(values = palette_values, breaks = 0)
@@ -1058,23 +1103,17 @@ tree_plot_step2
 # Add n labels (if applicable)
 if(isTRUE(has.n)){
   tree_plot_step3 <- tree_plot_step2 +
-    geom_text(aes(label = n_sum), nudge_x = 7.5, fontface = "bold", size = 6, vjust = 0.5)
+    geom_text(aes(label = n_sum), nudge_x = tree_profile$n_label_nudge, fontface = "bold", size = tree_profile$n_label_size, vjust = 0.5)
 } else {
   tree_plot_step3 <- tree_plot_step2
 }
 
 tree_plot_step3
 
-# Compute dynamic dimensions for final tree plot (keeps ring height invariant across clade sizes)
-n_tips <- length(circular_tree$tip.label)
-dyn_height <- max(15, round(3 + n_tips * 0.12, 1))
-# Count geom_fruit rings added upstream: primary + optional secondary + taxa bar
-n_fruit_rings <- 1L + isTRUE(has.secondary) + 1L
-# Width: extra room for rings, clade labels and legend
-dyn_width <- max(dyn_height + 5, round(dyn_height + 3 + n_fruit_rings * 2 + n_tips * 0.06, 1))
-# Clade label offsets must clear all geom_fruit rings; scale with n_tips and ring count
-cladelab_offset_phylopic <- round(max(14, n_tips * 0.12 + n_fruit_rings * 2.5), 1)
-cladelab_offset_text     <- round(cladelab_offset_phylopic - 3, 1)
+dyn_height <- tree_profile$height
+dyn_width <- tree_profile$width
+cladelab_offset_phylopic <- tree_profile$cladelab_offset_phylopic
+cladelab_offset_text <- tree_profile$cladelab_offset_text
 
 ```
 ```{r visual_distribution_final, fig.height=dyn_height, fig.width=dyn_width, dev="png", dpi=320, message=TRUE, warning=TRUE}
@@ -1102,7 +1141,7 @@ final_tree_plot <- tree_plot_step3 +
                 geom="phylopic",
                 barsize = NA,
                 offset = cladelab_offset_phylopic,
-                imagesize = 0.05,
+                imagesize = tree_profile$image_size,
                 alpha = 0.75)
 
 if (!is.null(palette_values) && length(palette_values) > 0) {
@@ -1120,7 +1159,7 @@ final_tree_plot <- final_tree_plot +
                 horizontal = TRUE,
                 offset = cladelab_offset_text,
                 barsize = NA,
-                fontsize = 8.5,
+                fontsize = tree_profile$branch_label_size,
                 fontface = "bold") +
   theme_tree() +
   theme(panel.background = element_rect(fill = "transparent", colour = NA),  
@@ -1128,10 +1167,10 @@ final_tree_plot <- final_tree_plot +
         legend.position = "right",
         legend.spacing.y = unit(1.5, 'cm'),
         legend.title = element_text(
-          size = 15, face = "bold", 
+          size = tree_profile$legend_title_size, face = "bold", 
           margin = margin(b = 15)),
         legend.key.size = unit(1, 'cm'),
-        legend.text = element_text(size = 13),
+        legend.text = element_text(size = tree_profile$legend_text_size),
         plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
         plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))
   )
@@ -1139,10 +1178,10 @@ final_tree_plot <- final_tree_plot +
 final_tree_plot
 
 # Save progressive tree plots
-ggsave(file.path(phylo_distribution_dir, "tree_with_trait_bars.png"), tree_plot_step1, device = "png", width = 15, height = 15, dpi = "retina")
-ggsave(file.path(phylo_distribution_dir, "tree_with_taxa_bars.png"), tree_plot_step2, device = "png", width = 15, height = 15, dpi = "retina")
+ggsave(file.path(phylo_distribution_dir, "tree_with_trait_bars.png"), tree_plot_step1, device = "png", width = dyn_width, height = dyn_height, dpi = "retina")
+ggsave(file.path(phylo_distribution_dir, "tree_with_taxa_bars.png"), tree_plot_step2, device = "png", width = dyn_width, height = dyn_height, dpi = "retina")
 if(isTRUE(has.n)){
-  ggsave(file.path(phylo_distribution_dir, "tree_with_n_labels.png"), tree_plot_step3, device = "png", width = 15, height = 15, dpi = "retina")
+  ggsave(file.path(phylo_distribution_dir, "tree_with_n_labels.png"), tree_plot_step3, device = "png", width = dyn_width, height = dyn_height, dpi = "retina")
 }
 ggsave(file.path(phylo_distribution_dir, "final_tree_plot.png"), final_tree_plot, device = "png", width = dyn_width, height = dyn_height, dpi = "retina")
 
