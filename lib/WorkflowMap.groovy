@@ -9,6 +9,7 @@
  */
 
 import java.util.UUID
+import java.util.Base64
 
 class WorkflowMap {
 
@@ -37,6 +38,26 @@ class WorkflowMap {
         return p.toString().replace('\\', '/')
     }
 
+    static String readTextIfExists(String path) {
+        if (!path) return null
+        def f = new File(path)
+        return f.exists() ? f.getText('UTF-8') : null
+    }
+
+    static String imageDataUriIfExists(String path) {
+        if (!path) return null
+        def f = new File(path)
+        if (!f.exists()) return null
+
+        def lower = f.name.toLowerCase()
+        def mime = lower.endsWith('.png') ? 'image/png'
+                 : (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) ? 'image/jpeg'
+                 : 'application/octet-stream'
+
+        def encoded = Base64.getEncoder().encodeToString(f.bytes)
+        return "data:${mime};base64,${encoded}"
+    }
+
     static String relativeFromOutdir(String outdir, String targetPath) {
         if (!outdir || !targetPath) return targetPath
         def outNorm = normalizePath(new File(outdir).absolutePath)
@@ -63,11 +84,14 @@ class WorkflowMap {
         def filesDirs = (st.filesDirs ?: []) as List
         if (!filesDirs && st.filesDir) filesDirs = [st.filesDir]
 
-        def htmlTarget = resolveFirstExisting(st.htmlCandidates ?: [])
-        def htmlExists = htmlTarget ? new File(htmlTarget).exists() : false
-        def htmlLabel  = htmlExists ? 'available' : 'MISSING'
-        def htmlHref   = htmlTarget ? relativeFromOutdir(outdir, htmlTarget) : '#'
-        def htmlText   = htmlTarget ? relativeFromOutdir(outdir, htmlTarget) : '(none)'
+        def htmlCandidates = (st.htmlCandidates ?: []) as List
+        def htmlRows = htmlCandidates ? htmlCandidates.collect { ht ->
+            def exists = new File(ht.toString()).exists()
+            def label  = exists ? 'available' : 'MISSING'
+            def href   = relativeFromOutdir(outdir, ht.toString())
+            def text   = relativeFromOutdir(outdir, ht.toString())
+            return "<div class=\"link-row\">\u2192 html: <a href=\"${href}\">${htmlEscape(text)}</a> <span class=\"status ${exists ? 'ok' : 'missing'}\">${label}</span></div>"
+        }.join('\n') : ''
 
         def filesRows = filesDirs ? filesDirs.collect { fd ->
             def exists = new File(fd.toString()).exists()
@@ -83,7 +107,7 @@ class WorkflowMap {
       <div class=\"stage-body\">
         <div><span class=\"pill ${ran ? 'pill-ran' : 'pill-skip'}\">${ran ? 'ran' : 'not run'}</span></div>
         ${filesRows}
-        <div class=\"link-row\">\u2192 html: <a href=\"${htmlHref}\">${htmlEscape(htmlText)}</a> <span class=\"status ${htmlExists ? 'ok' : 'missing'}\">${htmlLabel}</span></div>
+        ${htmlRows}
       </div>
     </div>
     """.stripIndent()
@@ -94,6 +118,7 @@ class WorkflowMap {
     static String buildWorkflowMapHtml(Map ctx) {
         def outdir     = ctx.outdir
         def projectDir = ctx.projectDir ?: outdir
+        def logoDataUri = imageDataUriIfExists("${projectDir}/res/logo.png")
 
         def colors = [
             reporting : '#7C3AED',   // reports / ORA / STRING
@@ -119,13 +144,13 @@ class WorkflowMap {
                           "${outdir}/data_exploration/2.CT/1.Traitfiles",
                           "${outdir}/data_exploration/2.CT/2.Bootstrap_traitfiles",
                           "${outdir}/data_exploration/2.CT/3.Tree"],
-              htmlCandidates: ["${outdir}/HTML_reports/4.Independent_contrasts.html",
-                               "${outdir}/HTML_reports/3.CI-composition.html"] ],
+              htmlCandidates: ["${outdir}/HTML_reports/3.CI-composition.html",
+                                "${outdir}/HTML_reports/4.Independent_contrasts.html"] ],
 
             [ id: 'ct',          name: 'CT (convergence)',                type: 'processes', ran: ctx.ct,
               filesDirs: ["${outdir}/caastools", "${outdir}/discovery",
                           "${outdir}/resample",  "${outdir}/bootstrap"],
-              htmlCandidates: ["${outdir}/HTML_reports/ct_overview.html"] ],
+              htmlCandidates: [] ],
 
             [ id: 'ct_signif',   name: 'CT signification (convergence)',  type: 'reporting', ran: ctx.ctSignif,
               filesDirs: ["${outdir}/signification",
@@ -213,6 +238,9 @@ class WorkflowMap {
     body { font-family: Inter, Arial, sans-serif; margin: 18px; color: #111827; background: #FAFAFA; }
     h1 { margin: 0 0 6px 0; }
     .subtitle { color:#4B5563; margin-bottom: 14px; }
+    .hero { margin-bottom: 16px; max-width: 980px; }
+    .logo-wrap { margin: 0 0 18px 0; }
+    .hero-logo { display:block; max-width: 240px; width: 100%; height: auto; object-fit: contain; }
     .meta { font-size: 13px; color:#374151; background:#F3F4F6; border:1px solid #E5E7EB; padding:10px; border-radius:8px; }
     .grid { margin-top: 14px; display:flex; flex-direction:column; gap:8px; max-width: 980px; }
     .arrow { text-align:center; color:#6B7280; font-size: 18px; }
@@ -233,11 +261,19 @@ class WorkflowMap {
     .footer { margin-top:14px; font-size:12px; color:#6B7280; }
     code { background:#F3F4F6; padding:1px 5px; border-radius:4px; }
     ul { margin: 8px 0 0 20px; }
+    @media (max-width: 780px) {
+      .hero-logo { max-width: 180px; }
+    }
   </style>
 </head>
 <body>
-  <h1>PhyloPhere workflow map</h1>
-  <div class="subtitle">Complete chain from prune/reporting to selection (always shown). Gray = not run, colored = run.</div>
+  <div class="hero">
+    <div class="logo-wrap">
+      ${logoDataUri ? "<img class=\"hero-logo\" src=\"${logoDataUri}\" alt=\"PhyloPhere logo\" />" : ""}
+    </div>
+    <h1>PhyloPhere workflow map</h1>
+    <div class="subtitle">Complete chain from prune/reporting to selection (always shown). Gray = not run, colored = run.</div>
+  </div>
 
   <div class="meta">
     <div><b>Run directory:</b> <code>${htmlEscape(ctx.launchDir)}</code></div>

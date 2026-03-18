@@ -161,6 +161,8 @@ stats_df <- stats.f(trait_df)
 # Cleanup data frame and tree
 `%ni%` <- Negate(`%in%`)
 
+visualization_tree <- pruned_tree
+
 pruned_trait_df <- trait_df[trait_df$species %ni% prune_species_primary, ]
 clean_tree <- ape::drop.tip(pruned_tree, prune_species_primary)
 pruned_stats <- stats_df[stats_df$species %ni% prune_species_primary, ]
@@ -193,7 +195,7 @@ if (length(prune_species_secondary) > 0 && nzchar(secondary_trait) && secondary_
   cat("Nulled secondary trait for", sum(nulled_trait_df$species %in% prune_species_secondary), "species\n")
 }
 
-# Rename the variables for downstream use (plots use nulled data, tree stays pruned)
+# Rename the variables for downstream use (plots use nulled data, emitted files stay pruned)
 trait_df <- nulled_trait_df
 stats_df <- nulled_stats_df
 
@@ -915,47 +917,38 @@ color_scale <- if (is.null(palette_values)) {
 
 # Create base phylogenetic tree in fan layout
 tree_profile_base <- species_plot_profile(
-  n_species = length(pruned_tree$tip.label),
+  n_species = length(visualization_tree$tip.label),
   n_taxa = dplyr::n_distinct(stats_df[[taxon_of_interest]]),
   n_rings = 0
 )$tree
 knitr::opts_current$set(fig.width = tree_profile_base$diagnostic_size, fig.height = tree_profile_base$diagnostic_size)
-base_fan_tree <- ggtree(pruned_tree,
+base_fan_tree <- ggtree(visualization_tree,
                         layout="fan",
                         open.angle=15, 
                         size=tree_profile_base$tree_line_width)
 
 ggsave(file.path(phylo_distribution_dir, "big_tree.png"), base_fan_tree, device = "png", width = tree_profile_base$diagnostic_size, height = tree_profile_base$diagnostic_size, dpi = "retina")
 
-ordered_species <- rev(pruned_tree$tip.label)
+ordered_species <- rev(visualization_tree$tip.label)
 row.names(stats_df) <- stats_df$species
 
-# Prune tree and trait vector for circular/fan plotting:
-# keep only species with finite primary trait values.
+# Use the non-user-pruned tree copy for visualization so nulled species remain as tips.
 tree_plot_trait_df <- stats_df %>%
-  dplyr::filter(species %in% pruned_tree$tip.label)
+  dplyr::filter(species %in% visualization_tree$tip.label)
 
-valid_primary_species <- tree_plot_trait_df %>%
-  dplyr::filter(!is.na(value) & is.finite(value)) %>%
-  dplyr::pull(species) %>%
-  unique()
-
-if (length(valid_primary_species) >= 3) {
-  circular_tree <- ape::drop.tip(pruned_tree, setdiff(pruned_tree$tip.label, valid_primary_species))
-  tree_plot_trait_df <- tree_plot_trait_df %>%
-    dplyr::filter(species %in% circular_tree$tip.label)
-  debug_log("visual_distribution: circular_tree tips after trait pruning = %d", length(circular_tree$tip.label))
-} else {
-  circular_tree <- pruned_tree
-  tree_plot_trait_df <- tree_plot_trait_df %>%
-    dplyr::filter(species %in% circular_tree$tip.label)
-  debug_log("visual_distribution: insufficient non-missing trait species (%d); using pruned_tree", length(valid_primary_species))
-}
+circular_tree <- visualization_tree
+debug_log("visual_distribution: circular_tree tips retained for visualization = %d", length(circular_tree$tip.label))
 
 n_tips <- length(circular_tree$tip.label)
 n_taxa_tree <- dplyr::n_distinct(tree_plot_trait_df$taxa)
-n_fruit_rings <- 1L + isTRUE(has.secondary) + 1L
+n_fruit_rings <- 2L
 tree_profile <- species_plot_profile(n_species = n_tips, n_taxa = n_taxa_tree, n_rings = n_fruit_rings)$tree
+tree_profile$taxa_bar_offset <- tree_profile$taxa_bar_offset + 0.10
+tree_profile$n_label_nudge <- tree_profile$n_label_nudge + 0.45
+tree_profile$asterisk_nudge <- tree_profile$asterisk_nudge + 0.10
+tree_profile$asterisk_y <- tree_profile$asterisk_y + 0.04
+tree_profile$cladelab_offset_phylopic <- tree_profile$cladelab_offset_phylopic + 1.40
+tree_profile$cladelab_offset_text <- tree_profile$cladelab_offset_text + 1.20
 trait_axis_nbreak <- as.integer(max(1, round(tree_profile$axis_nbreak)))
 trait_axis_text_size <- as.numeric(tree_profile$axis_text_size)
 secondary_axis_text_size <- as.numeric(tree_profile$axis_text_size * 0.8)
@@ -1138,7 +1131,7 @@ if (isTRUE(has.secondary)) {
   tree_plot_step1 <- tree_plot_step1 +
     geom_fruit(
       geom = geom_col,
-      offset = tree_profile$secondary_offset,
+      offset = -tree_profile$fruit_pwidth,
       mapping = aes(y = species, x = secondary_sum_plot, fill = secondary_fill, width = 0.5),
       alpha = 0.5,  # Set transparency for lighter appearance
       show.legend = TRUE,
@@ -1147,8 +1140,8 @@ if (isTRUE(has.secondary)) {
       size = 0.7,
       axis.params = list(
         axis = 'x',
-        text.size = secondary_axis_text_size,
-        nbreak = 1L,
+        text.size = 0,
+        nbreak = 0,
         text.angle = 270,
         vjust = 0.5,
         hjust = 0,

@@ -32,6 +32,9 @@ process DATASET_EXPLORATION {
     def tax_id = params.tax_id ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
+    def discrete_method = params.discrete_method ?: 'quartile'
+    def top_quantile = params.top_quantile ?: '0.75'
+    def bottom_quantile = params.bottom_quantile ?: '0.25'
     def prune_dir = prune_results_dir ?: ''
 
     if (params.use_singularity | params.use_apptainer) {
@@ -55,7 +58,10 @@ process DATASET_EXPLORATION {
                     c_trait = '${c_trait}',
                     tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
-                    branch_trait = '${branch_trait}'
+                    branch_trait = '${branch_trait}',
+                    discrete_method = '${discrete_method}',
+                    top_quantile = '${top_quantile}',
+                    bottom_quantile = '${bottom_quantile}'
                 ),
                 output_file = '1.Dataset_exploration.html',
                 envir = new.env()
@@ -83,7 +89,10 @@ process DATASET_EXPLORATION {
                     c_trait = '${c_trait}',
                     tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
-                    branch_trait = '${branch_trait}'
+                    branch_trait = '${branch_trait}',
+                    discrete_method = '${discrete_method}',
+                    top_quantile = '${top_quantile}',
+                    bottom_quantile = '${bottom_quantile}'
                 ),
                 output_file = '1.Dataset_exploration.html',
                 envir = new.env()

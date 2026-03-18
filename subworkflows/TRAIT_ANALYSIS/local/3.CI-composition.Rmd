@@ -95,7 +95,6 @@ library(tidyr)
 library(tibble)
 library(ggplot2)
 library(patchwork)
-library(ggtext)
 library(paletteer)
 
 color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
@@ -284,7 +283,11 @@ if (nrow(pairwise_data_viz) == 0) {
 }
 
 if (!has_heatmap_extremes) {
-  warning("Skipping CI heatmap visualization: fewer than two extreme species or only one extreme class remains.")
+  if (use_count_data) {
+    warning("Skipping CI heatmap visualization: fewer than two extreme species or only one extreme class remains.")
+  } else {
+    warning("Skipping phenotype heatmap visualization: fewer than two extreme species or only one extreme class remains.")
+  }
 }
 
 # Save results
@@ -329,129 +332,125 @@ head(matrix)
 
 This section creates heatmaps to visualize pairwise differences in prevalence. Species labels are colored based on prevalence quantiles.
 
-```{r plot_CI, fig.height=12, fig.width=15, message=TRUE, warning=TRUE, dev="png", dpi=320}
-# Simplified function to create colored labels from the active discretization thresholds
-create_colored_labels <- function(trait_data, lower_thresh, upper_thresh) {
+```{r plot_CI, fig.height=12, fig.width=15, message=TRUE, warning=TRUE, dev="ragg_png", dpi=320}
+# Build plain-text species labels and explicit categories for a version-stable heatmap.
+create_species_labels <- function(trait_data, lower_thresh, upper_thresh) {
   trait_data %>%
     distinct(species, trait) %>%
     mutate(
-      color = case_when(
-        trait >= upper_thresh ~ as.character(tableau_10["vermillion"]),
-        trait <= lower_thresh ~ as.character(tableau_10["bluish_green"]),
-        TRUE ~ "#000000"
+      category = case_when(
+        trait >= upper_thresh ~ "Top",
+        trait <= lower_thresh ~ "Bottom",
+        TRUE ~ "Intermediate"
       ),
-      label_html = paste0("<span style='color:", color, ";'>", species, "</span>")
+      label_text = gsub("_", " ", species)
     ) %>%
     arrange(species)
 }
 
 heatmap_layout_profile <- function(n_species) {
-  base_profile <- species_plot_profile(n_species = n_species, n_taxa = n_species)$contrast
+  if (n_species <= 10) {
+    width <- clamp_value(9.5 + 0.55 * n_species, 12, 16)
+    height <- clamp_value(9.0 + 0.60 * n_species, 12, 16)
+    axis_label_size <- clamp_value(16.0 - 0.15 * n_species, 13.5, 16.0)
+    cell_label_size <- clamp_value(6.8 - 0.08 * n_species, 5.4, 6.8)
+    rotate_angle <- 35
+    bottom_margin <- 90
+    left_margin <- 85
+    caption_size <- 16
+  } else if (n_species <= 18) {
+    width <- clamp_value(11.0 + 0.45 * n_species, 15, 22)
+    height <- clamp_value(10.5 + 0.50 * n_species, 15, 22)
+    axis_label_size <- clamp_value(14.0 - 0.12 * n_species, 10.5, 13.5)
+    cell_label_size <- clamp_value(5.8 - 0.06 * n_species, 4.2, 5.8)
+    rotate_angle <- 40
+    bottom_margin <- 105
+    left_margin <- 100
+    caption_size <- 15
+  } else {
+    base_profile <- species_plot_profile(n_species = n_species, n_taxa = n_species)$contrast
+    width  <- clamp_value(base_profile$width  + 0.26 * n_species, 18, 30)
+    height <- clamp_value(base_profile$height + 0.24 * n_species, 18, 30)
+    axis_label_size <- clamp_value(12.0 - 0.12 * n_species, 7.0, 10.5)
+    cell_label_size <- clamp_value(5.2 - 0.04 * n_species, 3.2, 5.2)
+    rotate_angle <- 45
+    bottom_margin <- clamp_value(105 + 1.6 * n_species, 120, 165)
+    left_margin <- clamp_value(95 + 1.3 * n_species, 115, 155)
+    caption_size <- 14
+  }
+
   list(
-    width = clamp_value(base_profile$width + 0.18 * n_species, 12, 28),
-    height = clamp_value(base_profile$height + 0.14 * n_species, 10, 26),
-    axis_label_size = clamp_value(5.2 - 0.045 * n_species, 2.1, 5.2),
-    cell_label_size = clamp_value(4.0 - 0.050 * n_species, 1.8, 4.0),
+    width = width,
+    height = height,
+    axis_label_size = axis_label_size,
+    cell_label_size = cell_label_size,
     tile_border = clamp_value(0.30 - 0.002 * n_species, 0.08, 0.30),
     highlight_border = clamp_value(1.5 - 0.010 * n_species, 0.45, 1.5),
     show_cell_labels = n_species <= 28,
-    rotate_angle = if (n_species > 18) 45 else 30,
-    legend_width = if (n_species > 35) 2 else 1,
-    bottom_label_y = -0.75,
-    bottom_margin = 135,
-    top_limit = n_species + 0.75,
-    left_label_x = 0.15,
-    right_limit = n_species + 1.1
+    rotate_angle = rotate_angle,
+    bottom_margin = bottom_margin,
+    left_margin = left_margin,
+    caption_margin = 22,
+    caption_size = caption_size
   )
-}
-
-# Helper function to create legend plot
-create_legend_plot <- function() {
-  legend_df <- tibble(
-    category = c("Top", "Bottom"),
-    color = c(as.character(tableau_10["vermillion"]), as.character(tableau_10["bluish_green"]))
-  )
-  
-  ggplot(legend_df, aes(x = 1, y = category, color = category)) +
-    geom_point(size = 0) +
-    scale_color_manual(
-      values = setNames(legend_df$color, legend_df$category),
-      guide = guide_legend(override.aes = list(size = 5))
-    ) +
-    labs(color = "Trait Categories") +
-    theme_void() +
-    theme(
-      legend.position = "right",
-      legend.title = element_text(size = 12),
-      legend.text = element_text(size = 10)
-    )
 }
 
 # Helper function to create heatmap
-create_heatmap <- function(pairwise_data, colored_labels, 
+create_heatmap <- function(pairwise_data, species_labels, 
                           highlight_nonoverlap = TRUE) {
-  if (!all(c("species", "label_html") %in% names(colored_labels))) {
-    stop("colored_labels must contain species and label_html columns.")
+  if (!all(c("species", "label_text") %in% names(species_labels))) {
+    stop("species_labels must contain species and label_text columns.")
   }
-  species_levels <- colored_labels$species
+  species_levels <- species_labels$species
   n_species <- length(species_levels)
   heatmap_dims <- heatmap_layout_profile(n_species)
+  label_lookup <- setNames(as.character(species_labels$label_text), as.character(species_labels$species))
 
   pairwise_plot <- pairwise_data %>%
     mutate(
-      species1 = factor(species1, levels = species_levels),
-      species2 = factor(species2, levels = species_levels),
-      x_idx = as.integer(species2),
-      y_idx = n_species - as.integer(species1) + 1L
+      species1 = factor(species1, levels = rev(species_levels)),
+      species2 = factor(species2, levels = species_levels)
     )
 
-  bottom_labels <- colored_labels %>%
-    mutate(
-      x_idx = seq_len(n_species),
-      y_idx = heatmap_dims$bottom_label_y
-    )
+  overlap_label <- if (use_count_data) "Non-overlapping CIs" else "Non-overlapping phenotypes"
+  overlap_caption <- if (use_count_data) {
+    "Bold border: non-overlapping CIs."
+  } else {
+    "Bold border: non-overlapping phenotypes."
+  }
 
-  left_labels <- colored_labels %>%
-    mutate(
-      x_idx = heatmap_dims$left_label_x,
-      y_idx = n_species - seq_len(n_species) + 1L
-    )
-
-  p <- ggplot(pairwise_plot, aes(x = x_idx, y = y_idx, fill = abs(diff_value))) +
+  p <- ggplot(pairwise_plot, aes(x = species2, y = species1, fill = abs(diff_value))) +
     geom_tile(color = "black", linewidth = heatmap_dims$tile_border) +
     scale_fill_gradient(low = "white", high = as.character(tableau_10["vermillion"]), name = "Difference") +
-    scale_x_continuous(limits = c(0.1, heatmap_dims$right_limit), breaks = NULL, expand = c(0, 0)) +
-    scale_y_continuous(limits = c(heatmap_dims$bottom_label_y - 0.35, heatmap_dims$top_limit), breaks = NULL, expand = c(0, 0)) +
+    scale_x_discrete(
+      labels = function(x) unname(label_lookup[as.character(x)]),
+      expand = c(0, 0)
+    ) +
+    scale_y_discrete(
+      labels = function(y) unname(label_lookup[as.character(y)]),
+      expand = c(0, 0)
+    ) +
     theme_minimal(base_size = 16) +
     theme(
-      axis.text.x = element_blank(),
-      axis.text.y = element_blank(),
+      axis.text.x = element_text(
+        size = heatmap_dims$axis_label_size,
+        angle = heatmap_dims$rotate_angle,
+        hjust = 1,
+        vjust = 1,
+        colour = "#222222"
+      ),
+      axis.text.y = element_text(
+        size = heatmap_dims$axis_label_size,
+        hjust = 1,
+        vjust = 0.5,
+        colour = "#222222"
+      ),
       axis.title = element_blank(),
+      axis.ticks = element_blank(),
       panel.grid = element_blank(),
       legend.position = "none",
-      plot.margin = margin(30, 20, heatmap_dims$bottom_margin, 120)
-    ) +
-    coord_cartesian(clip = "off") +
-    ggtext::geom_richtext(
-      data = bottom_labels,
-      aes(x = x_idx, y = y_idx, label = label_html),
-      inherit.aes = FALSE,
-      angle = heatmap_dims$rotate_angle,
-      hjust = 1,
-      vjust = 1,
-      size = heatmap_dims$axis_label_size,
-      label.color = NA,
-      fill = NA
-    ) +
-    ggtext::geom_richtext(
-      data = left_labels,
-      aes(x = x_idx, y = y_idx, label = label_html),
-      inherit.aes = FALSE,
-      hjust = 1,
-      vjust = 0.5,
-      size = heatmap_dims$axis_label_size,
-      label.color = NA,
-      fill = NA
+      plot.margin = margin(30, 25, heatmap_dims$bottom_margin, heatmap_dims$left_margin),
+      plot.caption = element_text(size = heatmap_dims$caption_size, hjust = 0, margin = margin(t = heatmap_dims$caption_margin))
     )
 
   if (isTRUE(heatmap_dims$show_cell_labels)) {
@@ -465,61 +464,61 @@ create_heatmap <- function(pairwise_data, colored_labels,
                 fill = NA, color = "black", linewidth = heatmap_dims$highlight_border) +
       labs(
         x = NULL, y = NULL,
-        title = paste("Pairwise Differences in trait: ", capitalized_trait, " with Non-overlapping CIs", sep = ""),
-        caption = "Bold border: non-overlapping CIs."
+        title = paste("Pairwise Differences in trait: ", capitalized_trait, " with ", overlap_label, sep = ""),
+        caption = overlap_caption
       )
   } else {
     p <- p +
       labs(
         x = NULL, y = NULL,
         title = paste("Pairwise Differences in trait: ", capitalized_trait, sep = ""),
-        caption = "Bold border: non-overlapping CIs."
+        caption = overlap_caption
       )
   }
 
-  attr(p, "heatmap_dims") <- heatmap_dims[c("width", "height", "legend_width")]
+  attr(p, "heatmap_dims") <- heatmap_dims[c("width", "height")]
   return(p)
 }
 
 if (has_heatmap_extremes) {
-  # Create colored labels directly from extreme trait data
-  my_labels_colored <- create_colored_labels(
+  # Create plain-text species labels directly from extreme trait data.
+  species_labels <- create_species_labels(
     trait_ci_extreme,
     lower_thresh = lower_thresh,
     upper_thresh = upper_thresh
   )
 
-  # Save colored labels
-  write.csv(my_labels_colored, file.path(ci_dir, "my_labels_colored.csv"), 
+  # Save label metadata for debugging and downstream inspection.
+  write.csv(species_labels, file.path(ci_dir, "my_labels_colored.csv"), 
             quote = FALSE, row.names = FALSE)
 
-  # Create legend
-  legend_plot <- create_legend_plot()
-
   # Create heatmaps with non-overlapping CI highlights
-  overlap_heatmap <- create_heatmap(pairwise_data_viz_extreme, my_labels_colored, highlight_nonoverlap = TRUE)
-  flat_heatmap <- create_heatmap(pairwise_data_viz_extreme, my_labels_colored, highlight_nonoverlap = FALSE)
+  overlap_heatmap <- create_heatmap(pairwise_data_viz_extreme, species_labels, highlight_nonoverlap = TRUE)
+  flat_heatmap <- create_heatmap(pairwise_data_viz_extreme, species_labels, highlight_nonoverlap = FALSE)
   heatmap_dims <- attr(overlap_heatmap, "heatmap_dims")
 
-  p_overlap <- overlap_heatmap + 
-    legend_plot + plot_layout(ncol = 2, widths = c(1000, heatmap_dims$legend_width))
-
-  p_flat <- flat_heatmap + 
-    legend_plot + plot_layout(ncol = 2, widths = c(1000, heatmap_dims$legend_width))
+  p_overlap <- overlap_heatmap
+  p_flat <- flat_heatmap
 
   knitr::opts_current$set(fig.width = heatmap_dims$width, fig.height = heatmap_dims$height)
 
   # Save heatmaps
   ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap, 
-         width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina")
+         width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina",
+         device = ragg::agg_png)
   ggsave(file.path(ci_dir, "visual_matrix_flat.png"), p_flat, 
-         width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina")
+         width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina",
+         device = ragg::agg_png)
 
   # Display plots
-  p_overlap
-  p_flat
+  print(p_overlap)
+  print(p_flat)
 } else {
-  cat("CI heatmap skipped: fewer than two extreme species remain, or only one extreme class is present.\n")
+  if (use_count_data) {
+    cat("CI heatmap skipped: fewer than two extreme species remain, or only one extreme class is present.\n")
+  } else {
+    cat("Phenotype heatmap skipped: fewer than two extreme species remain, or only one extreme class is present.\n")
+  }
 }
 ```
 

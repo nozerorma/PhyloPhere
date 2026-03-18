@@ -89,20 +89,14 @@ workflow.onComplete {
         log.info "[FINAL_HTML] Workflow map target: ${mapTarget.absolutePath}"
         mapTarget.text = html
 
-        // Compatibility alias for downstream consumers expecting workflow.html
-        def legacyTarget = new File(outdirFile, 'workflow.html')
-        legacyTarget.text = html
-
         // Explicit completion marker so users can quickly verify final HTML generation.
         def markerTarget = new File(outdirFile, 'workflow_html.done')
         markerTarget.text = """status=ok
 workflow_map=${mapTarget.absolutePath}
-workflow_html=${legacyTarget.absolutePath}
 generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 """
 
         log.info "[FINAL_HTML] Workflow map generated: ${mapTarget.absolutePath}"
-        log.info "[FINAL_HTML] Workflow HTML alias generated: ${legacyTarget.absolutePath}"
         log.info "[FINAL_HTML] Completion marker generated: ${markerTarget.absolutePath}"
     } catch (Throwable t) {
         log.warn "Could not generate final workflow map HTML: [${t.class.simpleName}] ${t.message ?: '(null message)'}"

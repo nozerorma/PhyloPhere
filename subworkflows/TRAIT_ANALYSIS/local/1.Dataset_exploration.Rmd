@@ -23,6 +23,9 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
+  discrete_method: "decile"
+  top_quantile: "0.90"
+  bottom_quantile: "0.10"
 ---
 
 ```{r header}
@@ -120,7 +123,7 @@ ordered_taxa <- ordered_species %>%
 print(ordered_taxa)
 
 ## PLOT FUNCTION --------------------------------------------------------------
-taxa_plot.f <- function(df, ordered_taxa_levels){
+taxa_plot.f <- function(df, ordered_taxa_levels, caption_text = NULL){
   max_count <- max(df$count, na.rm = TRUE)
   plot_profile <- species_plot_profile(
     n_species = sum(df$count, na.rm = TRUE),
@@ -157,7 +160,8 @@ taxa_plot.f <- function(df, ordered_taxa_levels){
     labs(
       x = paste(capitalized_taxon, "-", clade_name),
       y = "Number of species",
-      title = paste(capitalized_taxon, "distribution in", clade_name)
+      title = paste(capitalized_taxon, "distribution in", clade_name),
+      caption = caption_text
     ) +
     fill_scale +
     scale_y_continuous(
@@ -176,7 +180,8 @@ taxa_plot.f <- function(df, ordered_taxa_levels){
       plot.title = element_text(size = plot_profile$title_size, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
       axis.title.x = element_text(size = plot_profile$axis_title, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
       axis.title.y = element_blank(),
-      plot.margin = margin(20, right_margin, 20, 20),
+      plot.caption = element_text(size = plot_profile$caption_size, hjust = 0, face = "italic", color = "grey30", margin = margin(t = 14)),
+      plot.margin = margin(20, right_margin, 35, 20),
       legend.position = "none"
     ) +
     coord_flip(clip = "off")
@@ -197,7 +202,11 @@ taxa_distribution_all <- taxa_distribution %>%
   dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa_all)) %>%
   dplyr::arrange(taxa, .by_group = TRUE)
 
-p1 <- taxa_plot.f(taxa_distribution_all, ordered_taxa_all)
+p1 <- taxa_plot.f(
+  taxa_distribution_all,
+  ordered_taxa_all,
+  caption_text = "Ordering note: this non-pruned plot is shown in alphabetical order\nbecause some taxa may be absent from the provided phylogeny."
+)
 plot_dims_all <- attr(p1, "plot_dims")
 knitr::opts_current$set(fig.width = plot_dims_all$width, fig.height = plot_dims_all$height)
 
@@ -219,7 +228,11 @@ pruned_taxa_distribution <- pruned_taxa_distribution %>%
   dplyr::mutate(taxa = factor(taxa, levels = ordered_taxa)) %>%
   dplyr::arrange(taxa, .by_group = TRUE)
 
-p2 <- taxa_plot.f(pruned_taxa_distribution, ordered_taxa)
+p2 <- taxa_plot.f(
+  pruned_taxa_distribution,
+  ordered_taxa,
+  caption_text = "Ordering note: this pruned plot follows the phylogenetic order\nof taxa represented in the provided tree."
+)
 plot_dims_pruned <- attr(p2, "plot_dims")
 knitr::opts_current$set(fig.width = plot_dims_pruned$width, fig.height = plot_dims_pruned$height)
 
