@@ -19,6 +19,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     // Use the canonical disambiguation threshold — same value applied during ASR reconstruction.
     // This replaces the former mrca_posterior_threshold (0.7) which was a separate, weaker param.
     def mrca_threshold = params.ct_disambig_posterior_threshold
+    def use_all_mrca_filter = params.use_all_mrca_filter ? "true" : "false"
     """
     python3 - <<'PY'
     import re
@@ -26,6 +27,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
 
     src = "${disambiguation_input}"
     mrca_threshold = float("${mrca_threshold}")
+    use_all_mrca_filter = "${use_all_mrca_filter}".strip().lower() == "true"
 
     def to_bool_series(series: pd.Series) -> pd.Series:
         true_vals = {'true', 't', '1', 'yes', 'y'}
@@ -70,9 +72,12 @@ process CAAS_PREPARE_POSTPROC_INPUT {
         df['is_conserved_meta'] = False
     if 'asr_is_conserved' not in df.columns:
         df['asr_is_conserved'] = False
+    if 'asr_root_conserved' not in df.columns:
+        df['asr_root_conserved'] = False
 
     df['_is_conserved_meta_bool'] = to_bool_series(df['is_conserved_meta'])
     df['_asr_is_conserved_bool'] = to_bool_series(df['asr_is_conserved'])
+    df['_asr_root_conserved_bool'] = to_bool_series(df['asr_root_conserved'])
 
     removed_frames = []
 
@@ -96,6 +101,15 @@ process CAAS_PREPARE_POSTPROC_INPUT {
         removed_asr['RemovalReason'] = 'conserved_meta_asr_mismatch'
         removed_frames.append(removed_asr)
     cleaned = cleaned.loc[~mask_asr_mismatch].copy()
+
+    removed_root = cleaned.iloc[0:0].copy()
+    if use_all_mrca_filter:
+        mask_root_mismatch = cleaned['_is_conserved_meta_bool'] & (~cleaned['_asr_root_conserved_bool'])
+        removed_root = cleaned.loc[mask_root_mismatch].copy()
+        if len(removed_root) > 0:
+            removed_root['RemovalReason'] = 'conserved_meta_root_mismatch'
+            removed_frames.append(removed_root)
+        cleaned = cleaned.loc[~mask_root_mismatch].copy()
 
     # Remove rows with any low-confidence MRCA posterior.
     mrca_cols = [c for c in cleaned.columns if re.fullmatch(r'mrca_\\d+_posterior', str(c))]
@@ -124,7 +138,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     else:
         removed = pd.DataFrame(columns=[*df.columns, 'RemovalReason'])
 
-    for helper_col in ['_is_conserved_meta_bool', '_asr_is_conserved_bool']:
+    for helper_col in ['_is_conserved_meta_bool', '_asr_is_conserved_bool', '_asr_root_conserved_bool']:
         if helper_col in cleaned.columns:
             cleaned = cleaned.drop(columns=[helper_col])
         if helper_col in removed.columns:
@@ -136,6 +150,8 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     print(f"Input rows: {len(df)}")
     print(f"Removed precluster patterns: {len(removed_pattern)}")
     print(f"Removed conserved-meta ASR mismatch: {len(removed_asr)}")
+    if use_all_mrca_filter:
+        print(f"Removed conserved-meta root mismatch: {len(removed_root)}")
     if mrca_cols:
         print(f"Removed low MRCA posterior (< {mrca_threshold}): {len(removed_low_mrca)}")
         print(f"MRCA posterior columns used: {', '.join(mrca_cols)}")

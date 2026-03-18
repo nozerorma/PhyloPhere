@@ -92,7 +92,6 @@ process CT_DISAMBIGUATION_RUN {
       ${params.ct_disambig_run_diagnostics ? '--run-diagnostics' : ''} \
       ${params.ct_disambig_skip_gene_lists ? '--skip-gene-lists' : ''} \
       ${params.ct_disambig_verbose ? '--verbose' : ''} \
-      ${params.ct_disambig_use_all_mrca_filter ? '--use-all-mrca-filter' : ''} \
       ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
       ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \
       ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}

@@ -23,7 +23,10 @@ params:
   gene_filter_mode: "both"
   generate_manhattan: TRUE
   manhattan_min_density: 0.008
+  use_all_mrca_filter: FALSE
 ---
+
+> NOTE: This file is not rendered by the pipeline. The active post-processing report source is `subworkflows/CT_POSTPROC/local/CT_postproc.Rmd`.
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -87,6 +90,7 @@ normalize_disambig_schema <- function(df) {
   if (!'change_side' %in% names(df)) df$change_side <- 'none'
   if (!'is_conserved_meta' %in% names(df)) df$is_conserved_meta <- FALSE
   if (!'asr_is_conserved' %in% names(df)) df$asr_is_conserved <- FALSE
+  if (!'asr_root_conserved' %in% names(df)) df$asr_root_conserved <- FALSE
 
   df %>%
     mutate(
@@ -97,6 +101,7 @@ normalize_disambig_schema <- function(df) {
       change_side = tolower(as.character(change_side)),
       is_conserved_meta = as_bool(is_conserved_meta),
       asr_is_conserved = as_bool(asr_is_conserved),
+      asr_root_conserved = as_bool(asr_root_conserved),
       pvalue = suppressWarnings(as.numeric(pvalue)),
       pvalue_boot = suppressWarnings(as.numeric(pvalue_boot)),
       sig_hyp = !is.na(pvalue) & pvalue <= 0.05,
@@ -125,6 +130,7 @@ iqr_multiplier <- params$iqr_multiplier
 gene_filter_mode <- params$gene_filter_mode
 generate_manhattan <- params$generate_manhattan
 manhattan_min_density <- params$manhattan_min_density
+use_all_mrca_filter <- isTRUE(params$use_all_mrca_filter)
 
 if (is.null(discovery_file)) stop("Error: discovery_file parameter is required")
 if (is.null(filter_summary_file)) stop("Error: filter_summary_file parameter is required")
@@ -195,6 +201,7 @@ discovery_df <- discovery_std %>%
     Pattern = pattern_type,
     is_conserved_meta,
     asr_is_conserved,
+    asr_root_conserved,
     Pvalue = pvalue,
     `Pvalue.boot` = pvalue_boot,
     sig_hyp,
@@ -224,6 +231,13 @@ cat("  Genes with length annotation:", n_distinct(discovery_df$Gene), "\n\n")
 ## Conserved metadata composition after precluster pruning
 
 ```{r conserved_meta_composition}
+non_asr_conserved <- discovery_df %>% dplyr::filter(is_conserved_meta == TRUE, asr_is_conserved == FALSE)
+non_root_conserved <- discovery_df %>% dplyr::filter(is_conserved_meta == TRUE, asr_root_conserved == FALSE)
+
+cat("  CAAS with conserved meta but not ASR support:", nrow(non_asr_conserved), "\n")
+cat("  CAAS with conserved meta but not root-MRCA support:", nrow(non_root_conserved), "\n")
+cat("  Root-MRCA filter enabled in preprocessing:", use_all_mrca_filter, "\n")
+
 conserved_meta_comp <- discovery_df %>%
   mutate(is_conserved_meta = if_else(is_conserved_meta, "TRUE", "FALSE")) %>%
   count(is_conserved_meta, name = "n") %>%
@@ -629,7 +643,15 @@ if (length(cluster_files) == 0) {
 precluster_events <- tibble()
 if (!is.na(removed_precluster_file)) {
   precluster_df <- normalize_disambig_schema(read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE))
-  precluster_events <- precluster_df %>% transmute(site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot, sig_hyp, sig_perm, sig_both, significance_class, RemovalStage = "precluster_pattern")
+  precluster_events <- precluster_df %>% transmute(
+    site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
+    sig_hyp, sig_perm, sig_both, significance_class,
+    RemovalStage = case_when(
+      RemovalReason == "conserved_meta_asr_mismatch" ~ "precluster_asr_mismatch",
+      RemovalReason == "conserved_meta_root_mismatch" ~ "precluster_root_mismatch",
+      TRUE ~ "precluster_pattern"
+    )
+  )
 }
 
 cluster_events <- tibble()
@@ -664,20 +686,16 @@ write_tsv(removal_events, file.path(disambig_dir, "removal_events.tsv"))
 # ── GS0 exclusion for all downstream section B characterization ──────────────
 # GS0 is a random-baseline control kept in section A for reference.
 # From section B onward it is excluded; only US, GS1–GS4 are analysed.
-# Additionally, positions where is_conserved_meta=TRUE but asr_is_conserved=FALSE
-# are removed: these are "dubious-conserved" positions where the meta annotation
-# indicates conservation but ASR does not support it.
 discovery_b_std <- discovery_std %>%
-  filter(toupper(caap_group) != "GS0") %>%
-  filter(!(is_conserved_meta & !asr_is_conserved))
+  filter(toupper(caap_group) != "GS0")
 
 n_gs0_removed       <- sum(toupper(discovery_std$caap_group) == "GS0")
-n_dubious_removed   <- discovery_std %>%
-  filter(toupper(caap_group) != "GS0") %>%
-  filter(is_conserved_meta & !asr_is_conserved) %>% nrow()
 cat("Section B filters:\n")
 cat("  GS0 rows removed:", n_gs0_removed, "\n")
-cat("  Dubious-conserved rows removed (is_conserved_meta=T & asr_is_conserved=F):", n_dubious_removed, "\n")
+cat("  Conserved-meta/ASR mismatch rows already handled in precluster preprocessing.\n")
+if (use_all_mrca_filter) {
+  cat("  Conserved-meta/root-MRCA mismatch rows already handled in precluster preprocessing.\n")
+}
 cat("Section B analysis uses", nrow(discovery_b_std), "positions from groups:",
     paste(sort(unique(toupper(discovery_b_std$caap_group))), collapse = ", "), "\n\n")
 ```

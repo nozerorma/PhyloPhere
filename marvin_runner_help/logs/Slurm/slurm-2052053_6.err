@@ -1,0 +1,6 @@
+
+The following have been reloaded with a version change:
+  1) modulepath/noarch => modulepath/haswell
+
+[33mNextflow 25.10.4 is available - Please consider updating your version to it(B[m
+slurmstepd: error: *** JOB 2052057 ON mr-00-07 CANCELLED AT 2026-03-17T20:03:59 ***

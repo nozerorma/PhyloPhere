@@ -167,6 +167,7 @@ def extract_convergence_summary(
         "is_significant": result_dict.get("is_significant"),
         "ambiguous": result_dict.get("ambiguous"),
         "asr_is_conserved": result_dict.get("asr_is_conserved"),
+        "asr_root_conserved": result_dict.get("asr_root_conserved"),
     }
 
     summary["pairs"] = extract_pair_info(result_dict, num_pairs)

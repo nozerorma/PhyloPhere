@@ -136,7 +136,7 @@ def read_bg_info(bg_file):
     return genes
 
 
-def read_metadata_caas(metadata_file):
+def read_metadata_caas(metadata_file, use_all_mrca_filter=False):
     """Read CAAS metadata from a filtered_discovery.tsv file.
 
     Source-of-truth columns (tab-separated):
@@ -178,6 +178,7 @@ def read_metadata_caas(metadata_file):
         group_idx         = h.index('CAAP_Group')
         conserved_idx     = h.index('is_conserved_meta') if 'is_conserved_meta' in h else None
         asr_conserved_idx = h.index('asr_is_conserved') if 'asr_is_conserved' in h else None
+        asr_root_conserved_idx = h.index('asr_root_conserved') if 'asr_root_conserved' in h else None
 
         for line in f:
             line = line.strip()
@@ -218,6 +219,10 @@ def read_metadata_caas(metadata_file):
                 _is_asr  = _as_bool(parts[asr_conserved_idx]) if asr_conserved_idx < len(parts) else True
                 if _is_cons and not _is_asr:
                     continue
+                if use_all_mrca_filter and asr_root_conserved_idx is not None:
+                    _is_root = _as_bool(parts[asr_root_conserved_idx]) if asr_root_conserved_idx < len(parts) else True
+                    if _is_cons and not _is_root:
+                        continue
 
             metadata[group][gene][msa_pos] = {
                 'tag': tag,
@@ -289,7 +294,10 @@ def aggregate(args):
     species_data   = read_species_list(args.species_list)
     gene_info_list = read_genomic_info(args.genomic_info)
     bg_list        = read_bg_info(args.bg_caas)
-    metadata_dict  = read_metadata_caas(args.metadata_caas) if args.metadata_caas else {}
+    metadata_dict  = read_metadata_caas(
+        args.metadata_caas,
+        use_all_mrca_filter=getattr(args, 'use_all_mrca_filter', False),
+    ) if args.metadata_caas else {}
 
     # Filter gene_info_list to background genes only
     if bg_list:
@@ -416,6 +424,8 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--metadata-caas',   help='Meta-CAAS file (original or global_meta_caas.tsv format)')
     parser.add_argument('-b', '--bg-caas',         help='Cleaned background gene list (one gene per line, no header)')
     parser.add_argument('-o', '--output-prefix',   required=True, help='Prefix for output files')
+    parser.add_argument('--use-all-mrca-filter', action='store_true',
+                        help='Exclude conserved-meta rows failing asr_root_conserved')
     parser.add_argument('--log-level', default='INFO')
 
     args = parser.parse_args()

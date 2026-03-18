@@ -1,0 +1,804 @@
+======================================================
+ SLURM TASK ID : 6
+ TRAIT         : omn_idx  [CLASS 2]
+ NODE          : mr-00-10
+======================================================
+==========================================
+ PHYLOPHERE SINGLE-PHENOTYPE RUNNER
+ CLASS      : 2
+ TRAIT      : omn_idx
+ Timestamp  : 20260317_193131
+ NF run name: omn_idx_85068a88
+ IS_TOY     : false  (tag: '')
+ Cycles     : 1000000
+ N_Rand     : 1000000
+ RUN_FADE   : false  (mode=gene_set)
+ RUN_MOLERATE: false  (mode=gene_set)
+ RUN_RER    : false  (tool=build_trait,build_tree,build_matrix,continuous)
+==========================================
+
+------------------------------------------
+ Running CLASS 2: omn_idx
+   Trait file    : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/maria_caas/Datos_fenotipos/diet_traitfile_comma.csv
+   Discrete meth : decile
+   (no pruning, no secondary/n/c traits)
+   Output        : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter
+------------------------------------------
+
+ N E X T F L O W   ~  version 25.04.6
+
+Launching `/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/main.nf` [omn_idx_85068a88] DSL2 - revision: 172d73259e
+
+
+
+PHYLOPHERE - NF PIPELINE  ~  version 1.0.0
+=============================================
+
+PHYLOPHERE: A Nextflow pipeline including a complete set
+of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+Author:         Miguel Ramon (miguel.ramon@upf.edu)
+
+
+
+stats_df generated during reporting
+No data pruning selected; skipping data pruning module.
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 4 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+[-        ] CON…ORTING:DATASET_EXPLORATION | 0 of 1
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+executor >  slurm (1)
+[a7/acd71e] CON…TION (dataset_exploration) | 0 of 1
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+executor >  slurm (1)
+[a7/acd71e] CON…TION (dataset_exploration) | 0 of 1
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+executor >  slurm (1)
+[a7/acd71e] CON…TION (dataset_exploration) | 1 of 1 ✔
+[-        ] CON…TING:PHENOTYPE_EXPLORATION | 0 of 1
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+executor >  slurm (2)
+[a7/acd71e] CON…TION (dataset_exploration) | 1 of 1 ✔
+[38/8f724a] CON…ON (phenotype_exploration) | 0 of 1
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+executor >  slurm (2)
+[a7/acd71e] CON…TION (dataset_exploration) | 1 of 1 ✔
+[38/8f724a] CON…ON (phenotype_exploration) | 0 of 1
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+executor >  slurm (2)
+[a7/acd71e] CON…TION (dataset_exploration) | 1 of 1 ✔
+[38/8f724a] CON…ON (phenotype_exploration) | 0 of 1
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ERROR ~ Error executing process > 'CONTRAST_SELECTION:REPORTING:PHENOTYPE_EXPLORATION (phenotype_exploration)'
+
+Caused by:
+  Process `CONTRAST_SELECTION:REPORTING:PHENOTYPE_EXPLORATION (phenotype_exploration)` terminated with an error exit status (137)
+
+
+Command executed:
+
+  cp -R /data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/subworkflows/TRAIT_ANALYSIS/local/* .
+  Rscript -e "
+      rmarkdown::render(
+          '2.Phenotype_exploration.Rmd',
+          params = list(
+              trait_file = 'diet_traitfile_comma.csv',
+              tree_file = 'science.abn7829_data_s4.nex.tree',
+              output_dir = 'data_exploration',
+              seed = '1998',
+              clade_name = 'primates',
+              taxon_of_interest = 'family',
+              traitname = 'omn_idx',
+              n_trait = 'true',
+              c_trait = 'true',
+              tax_id = '/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family.tsv',
+              secondary_trait = 'true',
+              branch_trait = 'LQ',
+              discrete_method = 'decile',
+              top_quantile = '0.90',
+              bottom_quantile = '0.10',
+              contrast_max_iter = '3'
+          ),
+          output_file = '2.Phenotype_exploration.html',
+          envir = new.env()
+      )
+  "
+
+Command exit status:
+  137
+
+Command output:
+  1/21                            
+  2/21 [header]                   
+  3/21                            
+  4/21 [setup]                    
+  5/21                            
+  6/21 [trait_import]             
+  7/21                            
+  8/21 [stat_visualization]       
+  9/21                            
+  10/21 [phenoplot]                
+  11/21                            
+  12/21 [violin_plot]              
+  13/21                            
+  14/21 [asr_plot]                 
+  15/21                            
+  16/21 [visual_distribution]      
+  17/21 [visual_distribution_final]
+
+Command error:
+  
+  
+  processing file: 2.Phenotype_exploration.Rmd
+  Read 1 item
+  .command.sh: line 27: 1614815 Killed                  Rscript -e "
+      rmarkdown::render(
+          '2.Phenotype_exploration.Rmd',
+          params = list(
+              trait_file = 'diet_traitfile_comma.csv',
+              tree_file = 'science.abn7829_data_s4.nex.tree',
+              output_dir = 'data_exploration',
+              seed = '1998',
+              clade_name = 'primates',
+              taxon_of_interest = 'family',
+              traitname = 'omn_idx',
+              n_trait = 'true',
+              c_trait = 'true',
+              tax_id = '/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family.tsv',
+              secondary_trait = 'true',
+              branch_trait = 'LQ',
+              discrete_method = 'decile',
+              top_quantile = '0.90',
+              bottom_quantile = '0.10',
+              contrast_max_iter = '3'
+          ),
+          output_file = '2.Phenotype_exploration.html',
+          envir = new.env()
+      )
+  "
+
+Work dir:
+  /data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs/diet/omn_idx/20260317_193131/filter/38/8f724a53818812cf4d622907749804
+
+Tip: you can try to figure out what's wrong by changing to the process work dir and showing the script file named `.command.sh`
+
+ -- Check '.nextflow.log' file for details
+[FINAL_HTML] Workflow map target: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/workflow_map.html
+[FINAL_HTML] Workflow map generated: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/workflow_map.html
+[FINAL_HTML] Workflow HTML alias generated: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/workflow.html
+[FINAL_HTML] Completion marker generated: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/omn_idx/20260317_193131/filter/workflow_html.done
+CT disambiguation requires a trait file from CT/contrast_selection or --caas_config
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/1LHo00mlXXIuWQ
+executor >  slurm (2)
+[a7/acd71e] CON…TION (dataset_exploration) | 1 of 1 ✔
+[38/8f724a] CON…ON (phenotype_exploration) | 0 of 1 ✘
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            | 0 of 1
+[-        ] CT:CONCAT_BACKGROUND           | 0 of 1
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            | 0 of 1
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+ERROR ~ Error executing process > 'CONTRAST_SELECTION:REPORTING:PHENOTYPE_EXPLORATION (phenotype_exploration)'
+
+Caused by:
+  Process `CONTRAST_SELECTION:REPORTING:PHENOTYPE_EXPLORATION (phenotype_exploration)` terminated with an error exit status (137)
+
+
+Command executed:
+
+  cp -R /data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/subworkflows/TRAIT_ANALYSIS/local/* .
+  Rscript -e "
+      rmarkdown::render(
+          '2.Phenotype_exploration.Rmd',
+          params = list(
+              trait_file = 'diet_traitfile_comma.csv',
+              tree_file = 'science.abn7829_data_s4.nex.tree',
+              output_dir = 'data_exploration',
+              seed = '1998',
+              clade_name = 'primates',
+              taxon_of_interest = 'family',
+              traitname = 'omn_idx',
+              n_trait = 'true',
+              c_trait = 'true',
+              tax_id = '/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family.tsv',
+              secondary_trait = 'true',
+              branch_trait = 'LQ',
+              discrete_method = 'decile',
+              top_quantile = '0.90',
+              bottom_quantile = '0.10',
+              contrast_max_iter = '3'
+          ),
+          output_file = '2.Phenotype_exploration.html',
+          envir = new.env()
+      )
+  "
+
+Command exit status:
+  137
+
+Command output:
+  1/21                            
+  2/21 [header]                   
+  3/21                            
+  4/21 [setup]                    
+  5/21                            
+  6/21 [trait_import]             
+  7/21                            
+  8/21 [stat_visualization]       
+  9/21                            
+  10/21 [phenoplot]                
+  11/21                            
+  12/21 [violin_plot]              
+  13/21                            
+  14/21 [asr_plot]                 
+  15/21                            
+  16/21 [visual_distribution]      
+  17/21 [visual_distribution_final]
+
+Command error:
+  
+  
+  processing file: 2.Phenotype_exploration.Rmd
+  Read 1 item
+  .command.sh: line 27: 1614815 Killed                  Rscript -e "
+      rmarkdown::render(
+          '2.Phenotype_exploration.Rmd',
+          params = list(
+              trait_file = 'diet_traitfile_comma.csv',
+              tree_file = 'science.abn7829_data_s4.nex.tree',
+              output_dir = 'data_exploration',
+              seed = '1998',
+              clade_name = 'primates',
+              taxon_of_interest = 'family',
+              traitname = 'omn_idx',
+              n_trait = 'true',
+              c_trait = 'true',
+              tax_id = '/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family.tsv',
+              secondary_trait = 'true',
+              branch_trait = 'LQ',
+              discrete_method = 'decile',
+              top_quantile = '0.90',
+              bottom_quantile = '0.10',
+              contrast_max_iter = '3'
+          ),
+          output_file = '2.Phenotype_exploration.html',
+          envir = new.env()
+      )
+  "
+
+Work dir:
+  /data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs/diet/omn_idx/20260317_193131/filter/38/8f724a53818812cf4d622907749804
+
+Tip: you can try to figure out what's wrong by changing to the process work dir and showing the script file named `.command.sh`
+
+ -- Check '.nextflow.log' file for details
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+WARN: Seqera Platform request field `workflow.errorMessage` exceeds expected size | offending value: `
+
+processing file: 2.Phenotype_exploration.Rmd
+Read 1 item
+/data/samanthafs/scratch/lab_anavarro/mra(truncated)`, size: 1148 (max: 255)
+

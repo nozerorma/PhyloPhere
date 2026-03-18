@@ -20,8 +20,10 @@ params:
   output_dir: "ct_postproc"
   extreme_threshold: 0.99
   iqr_multiplier: 3.0
+  alpha_threshold: 0.1
   gene_filter_mode: "both"
   generate_manhattan: TRUE
+  use_all_mrca_filter: FALSE
 ---
 
 ```{r setup, include=FALSE}
@@ -73,6 +75,19 @@ as_bool <- function(x) {
   tolower(as.character(x)) %in% c("true", "t", "1", "yes", "y")
 }
 
+format_threshold <- function(x) {
+  formatC(as.numeric(x), format = "f", digits = 2)
+}
+
+make_significance_class <- function(sig_hyp, sig_perm) {
+  case_when(
+    sig_hyp & sig_perm ~ "both",
+    sig_hyp ~ "hyper_only",
+    sig_perm ~ "perm_only",
+    TRUE ~ "none"
+  )
+}
+
 collapse_change_side <- function(x) {
   x <- tolower(as.character(x))
   x <- x[x %in% c("top", "bottom", "both")]
@@ -90,6 +105,105 @@ combo_from_flags <- function(df, cols) {
   })
 }
 
+build_threshold_line_df <- function(alpha_threshold) {
+  tibble(
+    line_key = c("configured", "comparison_010", "comparison_005"),
+    threshold = c(alpha_threshold, 0.10, 0.05),
+    line_label = c(
+      paste0("Configured alpha = ", format_threshold(alpha_threshold)),
+      "Comparison threshold = 0.10",
+      "Comparison threshold = 0.05"
+    )
+  ) %>%
+    group_by(threshold) %>%
+    summarise(
+      line_key = if ("configured" %in% line_key) "configured" else first(line_key),
+      line_label = paste(unique(line_label), collapse = " = "),
+      .groups = "drop"
+    ) %>%
+    arrange(desc(line_key == "configured"), desc(threshold))
+}
+
+resolve_filtered_cluster_file <- function(minlen, maxcaas_int, filter_root = NULL, postproc_root = NULL) {
+  search_roots <- unique(c(filter_root, postproc_root, getwd()))
+  search_roots <- search_roots[!is.na(search_roots) & nzchar(search_roots) & dir.exists(search_roots)]
+  filter_root_norm <- if (!is.null(filter_root) && length(filter_root) == 1 && !is.na(filter_root) && nzchar(filter_root)) {
+    normalizePath(filter_root, winslash = "/", mustWork = FALSE)
+  } else {
+    NA_character_
+  }
+  postproc_root_norm <- if (!is.null(postproc_root) && length(postproc_root) == 1 && !is.na(postproc_root) && nzchar(postproc_root)) {
+    normalizePath(postproc_root, winslash = "/", mustWork = FALSE)
+  } else {
+    NA_character_
+  }
+
+  candidate_files <- map(search_roots, ~ list.files(
+    path = .x,
+    pattern = "\\.filtered\\.minlen[0-9]+\\.maxcaas[0-9]+\\.tsv$",
+    recursive = TRUE,
+    full.names = TRUE
+  )) %>%
+    unlist() %>%
+    unique()
+
+  if (length(candidate_files) == 0) {
+    return(list(
+      path = NA_character_,
+      status = "missing",
+      message = "No filtered cluster TSV files were found in the report workspace or filter output directories."
+    ))
+  }
+
+  file_index <- tibble(file_path = candidate_files) %>%
+    mutate(
+      normalized_path = normalizePath(file_path, winslash = "/", mustWork = FALSE),
+      file_name = basename(file_path),
+      minlen_match = str_match(file_name, "minlen([0-9]+)\\.maxcaas([0-9]+)"),
+      minlen_file = suppressWarnings(as.integer(minlen_match[, 2])),
+      maxcaas_file = suppressWarnings(as.integer(minlen_match[, 3])),
+      priority = case_when(
+        !is.na(filter_root_norm) & str_starts(normalized_path, fixed(filter_root_norm)) ~ 1L,
+        !is.na(postproc_root_norm) & str_starts(normalized_path, fixed(postproc_root_norm)) ~ 2L,
+        TRUE ~ 3L
+      )
+    ) %>%
+    filter(!is.na(minlen_file), !is.na(maxcaas_file)) %>%
+    distinct(normalized_path, .keep_all = TRUE)
+
+  matches <- file_index %>%
+    filter(minlen_file == as.integer(minlen), maxcaas_file == as.integer(maxcaas_int)) %>%
+    arrange(priority, file_name)
+
+  if (nrow(matches) == 0) {
+    return(list(
+      path = NA_character_,
+      status = "missing",
+      message = sprintf(
+        "No filtered file matched minlen=%d and maxcaas=%d. Expected any '*.filtered.minlen%d.maxcaas%d.tsv'.",
+        as.integer(minlen), as.integer(maxcaas_int), as.integer(minlen), as.integer(maxcaas_int)
+      )
+    ))
+  }
+
+  if (nrow(matches) > 1) {
+    return(list(
+      path = matches$normalized_path[[1]],
+      status = "multiple",
+      message = sprintf(
+        "Multiple matches found for minlen=%d and maxcaas=%d; using preferred file `%s`.",
+        as.integer(minlen), as.integer(maxcaas_int), basename(matches$normalized_path[[1]])
+      )
+    ))
+  }
+
+  list(
+    path = matches$normalized_path[[1]],
+    status = "ok",
+    message = sprintf("Using filtered file `%s`.", basename(matches$normalized_path[[1]]))
+  )
+}
+
 normalize_disambig_schema <- function(df) {
   if ('Pattern' %in% names(df) && !'pattern_type' %in% names(df)) df <- df %>% rename(pattern_type = Pattern)
   if ('Pvalue' %in% names(df) && !'pvalue' %in% names(df)) df <- df %>% rename(pvalue = Pvalue)
@@ -104,6 +218,7 @@ normalize_disambig_schema <- function(df) {
   if (!'change_side' %in% names(df)) df$change_side <- 'none'
   if (!'is_conserved_meta' %in% names(df)) df$is_conserved_meta <- FALSE
   if (!'asr_is_conserved' %in% names(df)) df$asr_is_conserved <- FALSE
+  if (!'asr_root_conserved' %in% names(df)) df$asr_root_conserved <- FALSE
 
   df %>%
     mutate(
@@ -114,17 +229,21 @@ normalize_disambig_schema <- function(df) {
       change_side = tolower(as.character(change_side)),
       is_conserved_meta = as_bool(is_conserved_meta),
       asr_is_conserved = as_bool(asr_is_conserved),
+      asr_root_conserved = as_bool(asr_root_conserved),
       pvalue = suppressWarnings(as.numeric(pvalue)),
       pvalue_boot = suppressWarnings(as.numeric(pvalue_boot)),
-      sig_hyp = !is.na(pvalue) & pvalue <= 0.05,
-      sig_perm = !is.na(pvalue_boot) & pvalue_boot <= 0.05,
+      sig_hyp = !is.na(pvalue) & pvalue <= alpha_threshold,
+      sig_perm = !is.na(pvalue_boot) & pvalue_boot <= alpha_threshold,
       sig_both = sig_hyp & sig_perm,
-      significance_class = case_when(
-        sig_both ~ 'both',
-        sig_hyp ~ 'hyper_only',
-        sig_perm ~ 'perm_only',
-        TRUE ~ 'none'
-      ),
+      sig_hyp_010 = !is.na(pvalue) & pvalue <= 0.10,
+      sig_perm_010 = !is.na(pvalue_boot) & pvalue_boot <= 0.10,
+      sig_both_010 = sig_hyp_010 & sig_perm_010,
+      sig_hyp_005 = !is.na(pvalue) & pvalue <= 0.05,
+      sig_perm_005 = !is.na(pvalue_boot) & pvalue_boot <= 0.05,
+      sig_both_005 = sig_hyp_005 & sig_perm_005,
+      significance_class = make_significance_class(sig_hyp, sig_perm),
+      significance_class_010 = make_significance_class(sig_hyp_010, sig_perm_010),
+      significance_class_005 = make_significance_class(sig_hyp_005, sig_perm_005),
       site_id = paste(gene, position, sep = '@')
     )
 }
@@ -139,8 +258,13 @@ gene_stats_file <- params$gene_stats_file
 processing_mode <- params$processing_mode
 extreme_threshold <- params$extreme_threshold
 iqr_multiplier <- params$iqr_multiplier
+alpha_threshold <- suppressWarnings(as.numeric(params$alpha_threshold))
+if (is.na(alpha_threshold) || alpha_threshold <= 0 || alpha_threshold > 1) alpha_threshold <- 0.10
+alpha_threshold_label <- format_threshold(alpha_threshold)
+threshold_line_df <- build_threshold_line_df(alpha_threshold)
 gene_filter_mode <- params$gene_filter_mode
 generate_manhattan <- params$generate_manhattan
+use_all_mrca_filter <- isTRUE(params$use_all_mrca_filter)
 manhattan_min_density <- (params$extreme_threshold + (params$extreme_threshold) / 2)
 
 if (is.null(discovery_file)) stop("Error: discovery_file parameter is required")
@@ -170,6 +294,17 @@ names(tableau_10) <- c(
   "brown", "gray"
 )
 
+threshold_line_colours <- c(
+  configured = tableau_10[["orange"]],
+  comparison_010 = tableau_10[["blue"]],
+  comparison_005 = tableau_10[["gray"]]
+)
+threshold_line_types <- c(
+  configured = "solid",
+  comparison_010 = "dashed",
+  comparison_005 = "dotdash"
+)
+
 category_palette <- c(
   "Normal" = tableau_10[["gray"]],
   "Dubious" = tableau_10[["blue"]],
@@ -191,6 +326,7 @@ removal_palette <- c(
 cat("=== CT Post-Processing Configuration ===\n")
 cat("Processing mode:", processing_mode, "\n")
 cat("Gene filtering:", gene_filter_mode, "\n")
+cat("Selected alpha threshold:", alpha_threshold_label, "\n")
 cat("Extreme threshold:", extreme_threshold, paste0("(top ", 100*(1-extreme_threshold), "%)"), "\n")
 cat("IQR multiplier:", iqr_multiplier, "\n")
 cat("Generate Manhattan plots:", generate_manhattan, "\n")
@@ -212,6 +348,7 @@ discovery_df <- discovery_std %>%
     Pattern = pattern_type,
     is_conserved_meta,
     asr_is_conserved,
+    asr_root_conserved,
     Pvalue = pvalue,
     `Pvalue.boot` = pvalue_boot,
     sig_hyp,
@@ -242,16 +379,16 @@ cat("  Genes with length annotation:", n_distinct(discovery_df$Gene), "\n\n")
 
 ```{r conserved_meta_composition}
 
-# Relation of genes that do seem to present conserved positions but they aren't supported by ASR (i.e. they are not conserved in the ASR node but they are in the meta-analysis) 
-#These could be interesting to explore as potential false positives or cases where ASR is missing signal. Removed downstream.
+# Relation of genes that do seem to present conserved positions but they aren't supported by
+# focal ASR or root-MRCA support after precluster pruning.
 non_asr_conserved <- discovery_df %>% dplyr::filter(is_conserved_meta == TRUE, asr_is_conserved == FALSE)
 count_non_asr_conserved <- nrow(non_asr_conserved)
+non_root_conserved <- discovery_df %>% dplyr::filter(is_conserved_meta == TRUE, asr_root_conserved == FALSE)
+count_non_root_conserved <- nrow(non_root_conserved)
 
 cat("  CAAS with conserved meta but not ASR support:", count_non_asr_conserved, "\n")
-
-discovery_df <- discovery_df %>%
-  # Remove non-ASR-supported conserved sites to focus on the more robustly supported ones
-  dplyr::filter(!(is_conserved_meta == TRUE & asr_is_conserved == FALSE))
+cat("  CAAS with conserved meta but not root-MRCA support:", count_non_root_conserved, "\n")
+cat("  Root-MRCA filter enabled in preprocessing:", use_all_mrca_filter, "\n")
 
 conserved_meta_comp <- discovery_df %>%
   mutate(is_conserved_meta = if_else(is_conserved_meta, "TRUE", "FALSE")) %>%
@@ -572,70 +709,94 @@ cat("✓ Filter summary exported\n\n")
 ```{r cluster_detailed_analysis, results='asis', fig.height=8, fig.width=12, eval=(processing_mode == 'exploratory' && nrow(filter_summary) > 1)}
 if (processing_mode == 'exploratory' && nrow(filter_summary) > 1) {
   cat("\n## Detailed Parameter Analysis\n\n")
-
-  available_filtered_files <- list.files(
-    path = getwd(),
-    pattern = "^discovery\\.filtered\\.minlen[0-9]+\\.maxcaas[0-9]+\\.tsv$",
-    recursive = TRUE,
-    full.names = TRUE
-  )
+  detail_filter_root <- params$filter_dir
+  detail_postproc_root <- if (!is.null(detail_filter_root) && !is.na(detail_filter_root)) dirname(detail_filter_root) else NA_character_
 
   for (i in 1:nrow(filter_summary)) {
     param_row <- filter_summary[i, ]
-    param_label <- sprintf("minlen=%d, maxcaas=%.2f", param_row$Minlen, param_row$Maxcaas)
+    minlen_i <- suppressWarnings(as.integer(param_row$Minlen))
+    maxcaas_i <- suppressWarnings(as.integer(param_row$Maxcaas))
+    param_label <- sprintf("minlen=%d, maxcaas=%d", minlen_i, maxcaas_i)
     cat(sprintf("\n### Parameter Set %d: %s {.tabset}\n\n", i, param_label))
 
-    pattern_str <- sprintf("discovery.filtered.minlen%d.maxcaas%d.tsv", param_row$Minlen, as.integer(param_row$Maxcaas))
-    matching_file <- available_filtered_files[basename(available_filtered_files) == pattern_str]
+    resolved_file <- resolve_filtered_cluster_file(
+      minlen_i,
+      maxcaas_i,
+      filter_root = detail_filter_root,
+      postproc_root = detail_postproc_root
+    )
+    cat(sprintf("Resolved filtered file status: %s\n\n", resolved_file$message))
 
-    if (length(matching_file) > 0 && file.exists(matching_file[1])) {
-      filtered_data <- read_tsv(matching_file[1], show_col_types = FALSE)
-      if ("ClusteringFlag" %in% names(filtered_data)) {
-        discarded <- filtered_data %>% filter(ClusteringFlag == "Discarded")
-        if (nrow(discarded) > 0 && "CAAP_Group" %in% names(discarded)) {
-          detect_runs <- function(positions) {
-            positions <- sort(unique(positions))
-            if (length(positions) == 0) return(integer(0))
-            breaks <- c(0, which(diff(positions) > 1), length(positions))
-            diff(breaks)
-          }
-
-          spatial_analysis <- discarded %>%
-            group_by(CAAP_Group, Gene) %>%
-            summarise(positions = list(Position), .groups = "drop") %>%
-            mutate(run_lengths = map(positions, detect_runs)) %>%
-            unnest(run_lengths, keep_empty = TRUE) %>%
-            mutate(
-              cluster_type = case_when(
-                run_lengths == 1 ~ "Singlet (1)",
-                run_lengths == 2 ~ "Doublet (2)",
-                run_lengths == 3 ~ "Triplet (3)",
-                run_lengths == 4 ~ "Quad (4)",
-                run_lengths == 5 ~ "Quint (5)",
-                run_lengths >= 6 ~ "6+ Long",
-                TRUE ~ "Other"
-              )
-            )
-
-          spatial_summary <- spatial_analysis %>%
-            count(CAAP_Group, cluster_type) %>%
-            complete(CAAP_Group, cluster_type, fill = list(n = 0)) %>%
-            group_by(CAAP_Group) %>%
-            mutate(percentage = round(100 * n / sum(n), 1)) %>%
-            ungroup()
-
-          p_spatial <- ggplot(spatial_summary, aes(x = CAAP_Group, y = percentage/100, fill = cluster_type)) +
-            geom_col(position = "fill", color = "black", size = 0.2) +
-            scale_fill_paletteer_d("ggthemes::Tableau_10") +
-            scale_y_continuous(labels = scales::percent) +
-            labs(title = sprintf("Spatial Clustering: %s", param_label), x = "Group", y = "Percentage", fill = "Cluster Type") +
-            theme_minimal(base_size = 16) +
-            theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
-
-          print(p_spatial)
-        }
-      }
+    if (is.na(resolved_file$path) || !file.exists(resolved_file$path)) {
+      cat("No per-parameter file was available for this combination, so no spatial summary could be rendered.\n")
+      cat("\n---\n\n")
+      next
     }
+
+    filtered_data <- read_tsv(resolved_file$path, show_col_types = FALSE)
+    if (!"ClusteringFlag" %in% names(filtered_data)) {
+      cat("Matched file does not contain `ClusteringFlag`; skipping this parameter set.\n")
+      cat("\n---\n\n")
+      next
+    }
+
+    discarded <- filtered_data %>% filter(ClusteringFlag == "Discarded")
+    if (nrow(discarded) == 0) {
+      cat("No discarded clusters were found for this parameter set.\n")
+      cat("\n---\n\n")
+      next
+    }
+
+    if (!"CAAP_Group" %in% names(discarded)) {
+      discarded <- discarded %>% mutate(CAAP_Group = "US")
+    }
+
+    detect_runs <- function(positions) {
+      positions <- sort(unique(positions))
+      if (length(positions) == 0) return(integer(0))
+      breaks <- c(0, which(diff(positions) > 1), length(positions))
+      diff(breaks)
+    }
+
+    spatial_analysis <- discarded %>%
+      group_by(CAAP_Group, Gene) %>%
+      summarise(positions = list(Position), .groups = "drop") %>%
+      mutate(run_lengths = map(positions, detect_runs)) %>%
+      unnest(run_lengths, keep_empty = TRUE) %>%
+      mutate(
+        cluster_type = case_when(
+          run_lengths == 1 ~ "Singlet (1)",
+          run_lengths == 2 ~ "Doublet (2)",
+          run_lengths == 3 ~ "Triplet (3)",
+          run_lengths == 4 ~ "Quad (4)",
+          run_lengths == 5 ~ "Quint (5)",
+          run_lengths >= 6 ~ "6+ Long",
+          TRUE ~ "Other"
+        )
+      )
+
+    spatial_summary <- spatial_analysis %>%
+      count(CAAP_Group, cluster_type) %>%
+      complete(CAAP_Group, cluster_type, fill = list(n = 0)) %>%
+      group_by(CAAP_Group) %>%
+      mutate(percentage = round(100 * n / sum(n), 1)) %>%
+      ungroup()
+
+    p_spatial <- ggplot(spatial_summary, aes(x = CAAP_Group, y = percentage / 100, fill = cluster_type)) +
+      geom_col(position = "fill", color = "black", size = 0.2) +
+      scale_fill_paletteer_d("ggthemes::Tableau_10") +
+      scale_y_continuous(labels = scales::percent) +
+      labs(
+        title = sprintf("Spatial Clustering: %s", param_label),
+        subtitle = sprintf("Discarded positions only | %s", resolved_file$message),
+        x = "Group",
+        y = "Percentage",
+        fill = "Cluster Type"
+      ) +
+      theme_minimal(base_size = 16) +
+      theme(legend.position = "bottom", axis.text.x = element_text(angle = 45, hjust = 1))
+
+    print(p_spatial)
     cat("\n---\n\n")
   }
 }
@@ -669,7 +830,15 @@ if (length(cluster_files) == 0) {
 precluster_events <- tibble()
 if (!is.na(removed_precluster_file)) {
   precluster_df <- normalize_disambig_schema(read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE))
-  precluster_events <- precluster_df %>% transmute(site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot, sig_hyp, sig_perm, sig_both, significance_class, RemovalStage = "precluster_pattern")
+  precluster_events <- precluster_df %>% transmute(
+    site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
+    sig_hyp, sig_perm, sig_both, significance_class,
+    RemovalStage = case_when(
+      RemovalReason == "conserved_meta_asr_mismatch" ~ "precluster_asr_mismatch",
+      RemovalReason == "conserved_meta_root_mismatch" ~ "precluster_root_mismatch",
+      TRUE ~ "precluster_pattern"
+    )
+  )
 }
 
 cluster_events <- tibble()
@@ -1170,11 +1339,18 @@ cat("✓ Filter overlap tables exported\n")
 if (nrow(removal_events) > 0) {
   by_pattern <- removal_events %>% count(RemovalStage, pattern_type, sort = TRUE)
   by_sig <- removal_events %>%
-    mutate(sig_label = case_when(sig_both ~ "both<=0.05", sig_hyp ~ "hyp<=0.05", sig_perm ~ "perm<=0.05", TRUE ~ "not_sig")) %>%
+    mutate(
+      sig_label = case_when(
+        sig_both ~ paste0("both<=", alpha_threshold_label),
+        sig_hyp ~ paste0("hyp<=", alpha_threshold_label),
+        sig_perm ~ paste0("perm<=", alpha_threshold_label),
+        TRUE ~ "not_sig"
+      )
+    ) %>%
     count(RemovalStage, sig_label, sort = TRUE)
 
   kable(by_pattern, caption = "Removed positions by stage and pattern_type") %>% kable_styling()
-  kable(by_sig, caption = "Removed positions by stage and significance") %>% kable_styling()
+  kable(by_sig, caption = paste0("Removed positions by stage and significance (alpha = ", alpha_threshold_label, ")")) %>% kable_styling()
 
   p_rm <- ggplot(by_pattern, aes(pattern_type, n, fill = RemovalStage)) +
     geom_col(position = "dodge") +
@@ -1198,7 +1374,7 @@ if (nrow(removal_events) > 0) {
       scale_fill_paletteer_d("ggthemes::Tableau_10") +
       theme_minimal(base_size = 16) +
       labs(title = "Removed positions: pattern_type composition (SIGNIFICANT-BOTH only)", 
-           subtitle = paste0("n = ", sum(by_pattern_sig_both$n), " significant-both removed positions"),
+           subtitle = paste0("n = ", sum(by_pattern_sig_both$n), " significant-both removed positions at alpha = ", alpha_threshold_label),
            x = "pattern_type") +
       theme(axis.text.x = element_text(angle = 45, hjust = 1))
     print(p_rm_sig_both)
@@ -1234,7 +1410,63 @@ if (nrow(discovery_std) > 0) {
       )
     )
 
-  status_colours <- c(retained = "#2196F3", removed = "#F44336")
+  status_colours <- c(
+    retained = tableau_10[["blue"]],
+    removed = tableau_10[["vermillion"]]
+  )
+  threshold_scope_levels <- c("all", "<= 0.10", "<= 0.05")
+
+  pvalue_burden_summary <- pval_df %>%
+    group_by(pval_type, filter_status) %>%
+    summarise(
+      total = n(),
+      `all` = n(),
+      `<= 0.10` = sum(p <= 0.10, na.rm = TRUE),
+      `<= 0.05` = sum(p <= 0.05, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    pivot_longer(cols = c("all", "<= 0.10", "<= 0.05"), names_to = "threshold_scope", values_to = "count") %>%
+    mutate(
+      threshold_scope = factor(threshold_scope, levels = threshold_scope_levels),
+      proportion = count / total
+    ) %>%
+    arrange(pval_type, filter_status, threshold_scope)
+
+  kable(
+    pvalue_burden_summary %>% mutate(proportion = percent(proportion, accuracy = 0.1)),
+    caption = paste0("Removed vs retained burden by p-value threshold (configured alpha = ", alpha_threshold_label, ")")
+  ) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+  write_tsv(
+    pvalue_burden_summary %>% mutate(threshold_scope = as.character(threshold_scope)),
+    file.path(disambig_dir, "pvalue_burden_summary.tsv")
+  )
+
+  p_burden <- ggplot(
+    pvalue_burden_summary,
+    aes(x = threshold_scope, y = proportion, fill = filter_status)
+  ) +
+    geom_col(position = position_dodge(width = 0.7), width = 0.65, colour = "black", linewidth = 0.2) +
+    geom_text(
+      aes(label = sprintf("%d", count)),
+      position = position_dodge(width = 0.7),
+      vjust = -0.25,
+      size = 3
+    ) +
+    facet_wrap(~pval_type, ncol = 2) +
+    scale_fill_manual(values = status_colours, name = "Status") +
+    scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1.05)) +
+    labs(
+      title = "P-value burden comparison: all vs <= 0.10 vs <= 0.05",
+      subtitle = paste0("Configured alpha = ", alpha_threshold_label, " | labels show counts"),
+      x = "Threshold scope",
+      y = "Proportion of positions"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(legend.position = "bottom", panel.grid.minor = element_blank())
+  print(p_burden)
+  ggsave(file.path(disambig_dir, "pvalue_burden_summary.png"),
+         p_burden, width = 12, height = 5.5, dpi = 160)
 
   # ── Plot 1: global double-layered histogram ─────────────────────────────────
   p_glob <- ggplot(pval_df, aes(x = p, fill = filter_status, colour = filter_status)) +
@@ -1245,17 +1477,33 @@ if (nrow(discovery_std) > 0) {
       position  = "identity",
       linewidth = 0.25
     ) +
-    geom_vline(xintercept = 0.05, linetype = "dashed", colour = "grey30", linewidth = 0.4) +
+    geom_vline(
+      data = threshold_line_df,
+      aes(xintercept = threshold, colour = line_label, linetype = line_label),
+      linewidth = 0.6,
+      show.legend = TRUE,
+      inherit.aes = FALSE
+    ) +
     facet_wrap(~pval_type, scales = "free_y", ncol = 2) +
     scale_fill_manual(values = status_colours, name = "Status") +
-    scale_colour_manual(values = status_colours, name = "Status") +
-    scale_x_continuous(breaks = c(0, 0.05, 0.25, 0.5, 0.75, 1), limits = c(0, 1)) +
+    scale_colour_manual(
+      values = c(status_colours, setNames(threshold_line_colours[threshold_line_df$line_key], threshold_line_df$line_label)),
+      breaks = c(names(status_colours), threshold_line_df$line_label),
+      labels = c("retained", "removed", threshold_line_df$line_label),
+      name = NULL
+    ) +
+    scale_linetype_manual(
+      values = setNames(threshold_line_types[threshold_line_df$line_key], threshold_line_df$line_label),
+      name = "Threshold lines"
+    ) +
+    scale_x_continuous(breaks = c(0, 0.05, 0.10, 0.25, 0.5, 0.75, 1), limits = c(0, 1)) +
     labs(
-      title    = "P-value distribution: removed vs retained positions (all)",
+      title    = "P-value distribution: removed vs retained positions",
       subtitle = sprintf(
-        "%d retained · %d removed | dashed line = 0.05",
+        "%d retained · %d removed | configured alpha = %s | comparison lines = 0.10 and 0.05",
         sum(pval_df$pval_type == "Hypothesis p-value" & pval_df$filter_status == "retained"),
-        sum(pval_df$pval_type == "Hypothesis p-value" & pval_df$filter_status == "removed")
+        sum(pval_df$pval_type == "Hypothesis p-value" & pval_df$filter_status == "removed"),
+        alpha_threshold_label
       ),
       x = "p-value", y = "Density"
     ) +
@@ -1293,13 +1541,29 @@ if (nrow(discovery_std) > 0) {
         position  = "identity",
         linewidth = 0.25
       ) +
-      geom_vline(xintercept = 0.05, linetype = "dashed", colour = "grey30", linewidth = 0.4) +
+      geom_vline(
+        data = threshold_line_df,
+        aes(xintercept = threshold, colour = line_label, linetype = line_label),
+        linewidth = 0.55,
+        show.legend = TRUE,
+        inherit.aes = FALSE
+      ) +
       facet_grid(pattern_type ~ pval_type, scales = "free_y") +
       scale_fill_manual(values = status_colours, name = "Status") +
-      scale_colour_manual(values = status_colours, name = "Status") +
-      scale_x_continuous(breaks = c(0, 0.05, 0.5, 1), limits = c(0, 1)) +
+      scale_colour_manual(
+        values = c(status_colours, setNames(threshold_line_colours[threshold_line_df$line_key], threshold_line_df$line_label)),
+        breaks = c(names(status_colours), threshold_line_df$line_label),
+        labels = c("retained", "removed", threshold_line_df$line_label),
+        name = NULL
+      ) +
+      scale_linetype_manual(
+        values = setNames(threshold_line_types[threshold_line_df$line_key], threshold_line_df$line_label),
+        name = "Threshold lines"
+      ) +
+      scale_x_continuous(breaks = c(0, 0.05, 0.10, 0.5, 1), limits = c(0, 1)) +
       labs(
         title = "P-value distribution by pattern_type: removed vs retained",
+        subtitle = paste0("Configured alpha = ", alpha_threshold_label, " | comparison lines = 0.10 and 0.05"),
         x = "p-value", y = "Density"
       ) +
       theme_minimal(base_size = 11) +

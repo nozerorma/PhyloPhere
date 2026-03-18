@@ -333,8 +333,13 @@ nextflow run main.nf -profile local \
 
 - `discovery|resample|bootstrap` (comma-separated)
 - `--alignment`, `--caas_config`, `--traitvalues`, `--cycles`, `--chunk_size`
+- batching: `--ct_discovery_batch_size`, `--ct_bootstrap_batch_size`
 - Thresholds: `--maxbggaps`, `--maxfggaps`, `--maxgaps`, `--maxbgmiss`, `--maxfgmiss`, `--maxmiss`, `--max_conserved`
 - CAAP mode: `--caap_mode`
+
+For cluster runs, PhyloPhere can batch multiple genes into a single Nextflow task for `discovery` and `bootstrap` to reduce scheduler overhead. `1` preserves the original one-task-per-gene behavior; values `>1` process fixed-size gene batches per task. The `slurm` profile enables non-1 defaults for these two parameters, while local runs keep them at `1`.
+
+Batch execution now uses staged TSV manifests plus reusable runner scripts instead of expanding one shell command per gene directly into the Nextflow task body. That keeps Seqera `tasks.script` payloads bounded even for large batches, because the task script only launches the batch runner and the per-gene work is read from staged metadata inside the task working directory.
 
 ### Signification
 

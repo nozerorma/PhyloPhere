@@ -1,0 +1,3032 @@
+======================================================
+ SLURM TASK ID : 10
+ TRAIT         : Ethanol  [CLASS 2]
+ NODE          : mr-00-13
+======================================================
+==========================================
+ PHYLOPHERE SINGLE-PHENOTYPE RUNNER
+ CLASS      : 2
+ TRAIT      : Ethanol
+ Timestamp  : 20260317_193201
+ NF run name: Ethanol_8a7df753
+ IS_TOY     : false  (tag: '')
+ Cycles     : 1000000
+ N_Rand     : 1000000
+ RUN_FADE   : false  (mode=gene_set)
+ RUN_MOLERATE: false  (mode=gene_set)
+ RUN_RER    : false  (tool=build_trait,build_tree,build_matrix,continuous)
+==========================================
+
+------------------------------------------
+ Running CLASS 2: Ethanol
+   Trait file    : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/maria_caas/Datos_fenotipos/diet_traitfile_comma.csv
+   Discrete meth : quintile
+   (no pruning, no secondary/n/c traits)
+   Output        : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter
+------------------------------------------
+
+ N E X T F L O W   ~  version 25.04.6
+
+Launching `/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/main.nf` [Ethanol_8a7df753] DSL2 - revision: 172d73259e
+
+
+
+PHYLOPHERE - NF PIPELINE  ~  version 1.0.0
+=============================================
+
+PHYLOPHERE: A Nextflow pipeline including a complete set
+of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+Author:         Miguel Ramon (miguel.ramon@upf.edu)
+
+
+
+stats_df generated during reporting
+No data pruning selected; skipping data pruning module.
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 1 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+[-        ] CON…ORTING:DATASET_EXPLORATION -
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+[-        ] CON…ORTING:DATASET_EXPLORATION | 0 of 1
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (1)
+[be/1cee69] CON…TION (dataset_exploration) | 0 of 1
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (1)
+[be/1cee69] CON…TION (dataset_exploration) | 0 of 1
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (1)
+[be/1cee69] CON…TION (dataset_exploration) | 0 of 1 ✔
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (1)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[-        ] CON…TING:PHENOTYPE_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (1)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[-        ] CON…TING:PHENOTYPE_EXPLORATION | 0 of 1
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (2)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 0 of 1
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+Running composition analysis (CI or discrete). n_trait=true, c_trait=true
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.95
+📊 [asr_robustness] Outputs → /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect CAAP_Group boundaries)
+🧬 Running gene-level filtering (mode: both)...
+   (Gene-level statistics will be calculated per CAAP_Group)
+Cleaned background files: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/Primate_alignments
+   Genomic info   : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : naive
+   Randomizations : 1000000
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (2)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 0 of 1
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (2)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (3)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 0 of 1
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (3)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 0 of 1
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (3)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (3)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[-        ] CON…LECTION:CONTRAST_ALGORITHM | 0 of 1
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (4)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 0 of 1
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (4)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 0 of 1
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (4)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (5)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 0 of 1
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (5)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 0 of 1 ✔
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (5)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (6)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[83/eb6488] CT:…y_batch_00002 (400 genes)) | 0 of 2
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (6)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[83/eb6488] CT:…y_batch_00002 (400 genes)) | 0 of 4
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (6)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[83/eb6488] CT:…y_batch_00002 (400 genes)) | 0 of 8
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (6)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[83/eb6488] CT:…y_batch_00002 (400 genes)) | 0 of 10
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (6)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[83/eb6488] CT:…y_batch_00002 (400 genes)) | 0 of 12
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 14
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 18
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 20
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 23
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 27
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 31
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 35
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (7)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 0 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (8)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[67/d835bd] CT:…y_batch_00003 (400 genes)) | 0 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (8)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[83/eb6488] CT:…y_batch_00002 (400 genes)) | 1 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (9)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[07/ad6220] CT:…y_batch_00004 (400 genes)) | 1 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (10)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[67/dbe087] CT:…y_batch_00005 (400 genes)) | 1 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (11)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[fa/f0efa3] CT:…y_batch_00006 (400 genes)) | 1 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (11)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bb/9b2a62] CT:…y_batch_00001 (400 genes)) | 2 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (11)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[67/d835bd] CT:…y_batch_00003 (400 genes)) | 4 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (12)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[ae/c41703] CT:…y_batch_00007 (400 genes)) | 4 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (13)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[05/182ba8] CT:…y_batch_00008 (400 genes)) | 4 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (13)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[05/182ba8] CT:…y_batch_00008 (400 genes)) | 4 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (13)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[ae/c41703] CT:…y_batch_00007 (400 genes)) | 7 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (14)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[65/e3ae1d] CT:…y_batch_00010 (400 genes)) | 7 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (15)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[40/65bc19] CT:…y_batch_00009 (400 genes)) | 7 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (16)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[ed/dbda0d] CT:…y_batch_00011 (400 genes)) | 7 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (16)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[ed/dbda0d] CT:…y_batch_00011 (400 genes)) | 7 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (16)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[05/182ba8] CT:…y_batch_00008 (400 genes)) | 8 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (16)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[65/e3ae1d] CT:…y_batch_00010 (400 genes)) | 9 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (17)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[f4/c0312c] CT:…y_batch_00012 (400 genes)) | 9 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (18)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[9c/52316f] CT:…y_batch_00013 (400 genes)) | 9 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (18)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[9c/52316f] CT:…y_batch_00013 (400 genes)) | 9 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (18)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[9c/52316f] CT:…y_batch_00013 (400 genes)) | 9 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (18)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[40/65bc19] CT:…y_batch_00009 (400 genes)) | 10 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (19)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[f4/c0312c] CT:…y_batch_00012 (400 genes)) | 12 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (20)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[1b/07b86b] CT:…y_batch_00015 (400 genes)) | 12 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (21)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[80/c01582] CT:…y_batch_00016 (400 genes)) | 12 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (21)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[21/e5a267] CT:…y_batch_00014 (400 genes)) | 13 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (21)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[1b/07b86b] CT:…y_batch_00015 (400 genes)) | 14 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (21)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[9c/52316f] CT:…y_batch_00013 (400 genes)) | 15 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (22)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[b0/888c5d] CT:…y_batch_00017 (400 genes)) | 15 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (23)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[68/1bf75f] CT:…y_batch_00018 (400 genes)) | 15 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (23)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[68/1bf75f] CT:…y_batch_00018 (400 genes)) | 15 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (23)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[80/c01582] CT:…y_batch_00016 (400 genes)) | 16 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (24)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[b5/ce7a75] CT:…y_batch_00019 (400 genes)) | 16 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (24)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[68/1bf75f] CT:…y_batch_00018 (400 genes)) | 17 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (25)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[ac/a512ce] CT:…y_batch_00020 (400 genes)) | 17 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (26)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[aa/50e513] CT:…y_batch_00022 (400 genes)) | 17 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (26)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[b5/ce7a75] CT:…y_batch_00019 (400 genes)) | 18 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (26)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[b0/888c5d] CT:…y_batch_00017 (400 genes)) | 19 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (27)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[24/fcbd8e] CT:…y_batch_00021 (400 genes)) | 19 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (28)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[79/d2e95b] CT:…y_batch_00023 (400 genes)) | 19 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (28)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[79/d2e95b] CT:…y_batch_00023 (400 genes)) | 19 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (28)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[24/fcbd8e] CT:…y_batch_00021 (400 genes)) | 22 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (29)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[97/905636] CT:…y_batch_00024 (400 genes)) | 22 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (30)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[aa/957e0b] CT:…y_batch_00025 (400 genes)) | 22 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (31)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[63/412d88] CT:…y_batch_00026 (400 genes)) | 22 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (31)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[63/412d88] CT:…y_batch_00026 (400 genes)) | 22 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (31)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[79/d2e95b] CT:…y_batch_00023 (400 genes)) | 24 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (32)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[90/253767] CT:…y_batch_00027 (400 genes)) | 24 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (33)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[cf/3350f6] CT:…y_batch_00028 (400 genes)) | 24 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (33)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[cf/3350f6] CT:…y_batch_00028 (400 genes)) | 24 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (33)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[90/253767] CT:…y_batch_00027 (400 genes)) | 27 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (34)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[fd/188a3e] CT:…y_batch_00029 (400 genes)) | 27 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (35)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[5b/f67f4b] CT:…y_batch_00030 (400 genes)) | 27 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (36)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[67/33b25c] CT:…y_batch_00031 (400 genes)) | 27 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (36)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[67/33b25c] CT:…y_batch_00031 (400 genes)) | 27 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (36)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[fd/188a3e] CT:…y_batch_00029 (400 genes)) | 29 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (36)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[5b/f67f4b] CT:…y_batch_00030 (400 genes)) | 30 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (37)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[ca/6a385f] CT:…y_batch_00032 (400 genes)) | 30 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (38)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bc/5299ed] CT:…y_batch_00033 (400 genes)) | 30 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (38)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[67/33b25c] CT:…y_batch_00031 (400 genes)) | 31 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (39)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[83/4988c5] CT:…y_batch_00034 (400 genes)) | 31 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (40)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[5a/9cdd4c] CT:…y_batch_00035 (400 genes)) | 31 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (41)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[b2/8209de] CT:…y_batch_00036 (400 genes)) | 31 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (41)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[bc/5299ed] CT:…y_batch_00033 (400 genes)) | 34 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (42)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[04/aca677] CT:…y_batch_00037 (400 genes)) | 34 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (43)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[8b/98e1fc] CT:…y_batch_00039 (400 genes)) | 34 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (43)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[8b/98e1fc] CT:…y_batch_00039 (400 genes)) | 34 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (43)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[5a/9cdd4c] CT:…y_batch_00035 (400 genes)) | 37 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (44)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[3b/cce718] CT:…y_batch_00040 (400 genes)) | 37 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (45)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[54/f2e4d0] CT:…y_batch_00038 (400 genes)) | 37 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (46)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[f7/1a90f6] CT:…y_batch_00041 (133 genes)) | 37 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (46)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[3b/cce718] CT:…y_batch_00040 (400 genes)) | 39 of 41
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (46)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[f7/1a90f6] CT:…y_batch_00041 (133 genes)) | 41 of 41 ✔
+[-        ] CT:CONCAT_DISCOVERY            | 0 of 1
+[-        ] CT:CONCAT_BACKGROUND           | 0 of 1
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (47)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[f7/1a90f6] CT:…y_batch_00041 (133 genes)) | 41 of 41 ✔
+[-        ] CT:CONCAT_DISCOVERY            | 0 of 1
+[6b/e5b18e] CT:…nating background outputs) | 0 of 1
+[-        ] CT:RESAMPLE                    | 0 of 1
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (48)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[f7/1a90f6] CT:…y_batch_00041 (133 genes)) | 41 of 41 ✔
+[7f/bba4ef] CT:…enating discovery outputs) | 0 of 1
+[6b/e5b18e] CT:…nating background outputs) | 0 of 1
+[-        ] CT:RESAMPLE                    | 0 of 1
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+Monitor the execution with Seqera Platform using this URL: https://cloud.seqera.io/user/miralnso/watch/7mW8XRBQjqK3M
+executor >  slurm (49)
+[be/1cee69] CON…TION (dataset_exploration) | 1 of 1 ✔
+[0f/3fb7a6] CON…ON (phenotype_exploration) | 1 of 1 ✔
+[3d/d8f6de] CON…RT (CI_COMPOSITION_REPORT) | 1 of 1 ✔
+[ff/d84987] CON…RITHM (CONTRAST_ALGORITHM) | 1 of 1 ✔
+[4a/0316d0] CON…ASTS (CHECK_MIN_CONTRASTS) | 1 of 1 ✔
+[f7/1a90f6] CT:…y_batch_00041 (133 genes)) | 41 of 41 ✔
+[7f/bba4ef] CT:…enating discovery outputs) | 0 of 1
+[6b/e5b18e] CT:…nating background outputs) | 0 of 1
+[c1/0fac5b] CT:RESAMPLE (nw_tree.nwk)      | 0 of 1
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+[-        ] CT_POSTPROC:CT_FILTER          -
+[-        ] CT_POSTPROC:CT_FILTER_SUMMARY  -
+[-        ] CT_POSTPROC:CAAS_FILTER_GENES  -
+[-        ] CT_…OC:CAAS_BACKGROUND_CLEANUP -
+Plus 8 more processes waiting for tasks…
+
+
+ ✓ Completed: Ethanol  [CLASS 2]
+ Results    : /data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/Ethanol/20260317_193201/filter
+==========================================
