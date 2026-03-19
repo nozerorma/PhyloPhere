@@ -137,23 +137,12 @@ def extract_convergence_summary(
     """
     Extract a simplified convergence summary for one CAAS position.
     """
-    change_side = result_dict.get("change_side", "")
-    if change_side == "top":
-        direction = "bottom2top"
-    elif change_side == "bottom":
-        direction = "top2bottom"
-    elif change_side == "both":
-        direction = "derived"
-    else:
-        direction = "ambiguous"
-
     summary: Dict[str, Any] = {
         "gene": result_dict.get("gene"),
         "position": result_dict.get("position"),
         "position_zero_based": result_dict.get("msa_pos"),
         "tag": result_dict.get("tag"),
         "pattern_type": result_dict.get("pattern_type"),
-        "convergence_description": result_dict.get("convergence_description"),
         "caas": result_dict.get("caas", ""),
         "caap_group": result_dict.get("caap_group", "US"),
         "amino_encoded": result_dict.get("amino_encoded", ""),
@@ -162,8 +151,12 @@ def extract_convergence_summary(
         "sig_hyp": result_dict.get("sig_hyp"),
         "sig_perm": result_dict.get("sig_perm"),
         "sig_both": result_dict.get("sig_both"),
-        "change_side": change_side,
-        "direction": direction,
+        "change_top": result_dict.get("change_top", "no_change"),
+        "change_bottom": result_dict.get("change_bottom", "no_change"),
+        "change_side": result_dict.get("change_side", "none"),
+        "parallel_top": result_dict.get("parallel_top"),
+        "parallel_bottom": result_dict.get("parallel_bottom"),
+        "parallel_type": result_dict.get("parallel_type", "none"),
         "is_significant": result_dict.get("is_significant"),
         "ambiguous": result_dict.get("ambiguous"),
         "asr_is_conserved": result_dict.get("asr_is_conserved"),

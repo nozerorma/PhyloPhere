@@ -11,13 +11,13 @@
 #
 # PHYLOPHERE: MoleRate Workflow
 #
-# Tests foreground branches (defined by the caastools traitfile) for
+# Tests foreground branches (defined by trait_stats.csv extremes) for
 # differential evolutionary rate using HyPhy MoleRate
 # (hyphy-analyses/MoleRate/MoleRate.bf).
 #
 # Two directions always run in parallel:
-#   top    -> contrast_group == 1 species as foreground
-#   bottom -> contrast_group == 0 species as foreground
+#   top    -> global_label == high_extreme species as foreground
+#   bottom -> global_label == low_extreme species as foreground
 #
 # Run modes (params.molerate_mode):
 #   gene_set  -> only genes from CT accumulation / postproc significant lists
@@ -27,9 +27,10 @@
 # File: workflows/molerate.nf
 */
 
-include { COLLECT_GENE_SETS     } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { PHYLIP_TO_FASTA       } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { EXTRACT_FG_BRANCHES   } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { COLLECT_GENE_SETS       } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { PHYLIP_TO_FASTA         } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { EXTRACT_FG_BRANCHES     } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { MOLERATE_RUN              } from "${baseDir}/subworkflows/MOLERATE/molerate_run.nf"
 include { MOLERATE_REPORT as MOLERATE_REPORT_TOP    } from "${baseDir}/subworkflows/MOLERATE/molerate_report.nf"
 include { MOLERATE_REPORT as MOLERATE_REPORT_BOTTOM } from "${baseDir}/subworkflows/MOLERATE/molerate_report.nf"
@@ -75,24 +76,23 @@ def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
 workflow MOLERATE {
 
     take:
-        traitfile_input   // Channel<path> or null -> falls back to params.caas_config
+        stats_file_input  // Channel<path> or null -> falls back to canonical trait_stats.csv under outdir
         tree_input        // Channel<path> or null -> falls back to params.tree
         // Optional upstream channels for inline gene-set piping.
         // Pass Channel.empty() when running standalone (params-based).
         acc_top_ch        // accumulation CSV for TOP  (*_top_aggregated_results.csv)
         acc_bottom_ch     // accumulation CSV for BOTTOM
-        pp_top_ch         // postproc TXT for TOP  (*_change_side_top_significant.txt)
-        pp_bottom_ch      // postproc TXT for BOTTOM
+        pp_top_ch         // postproc TXT for TOP  (all_top.txt)
+        pp_bottom_ch      // postproc TXT for BOTTOM (all_bottom.txt)
 
     main:
 
         // 1. Resolve shared inputs ----------------------------------------
-        def traitfile_ch = (traitfile_input ?: Channel.empty())
+        def stats_file_ch = (stats_file_input ?: Channel.empty())
             .ifEmpty {
-                assert params.caas_config : \
-                    "MoleRate requires a CONTRAST_SELECTION traitfile or --caas_config"
-                def f = file(params.caas_config)
-                assert f.exists() : "MoleRate: traitfile not found: ${params.caas_config}"
+                def fallback = "${params.outdir}/data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv"
+                def f = file(fallback)
+                assert f.exists() : "MoleRate: trait_stats.csv not found at ${fallback}"
                 f
             }
 
@@ -111,12 +111,13 @@ workflow MOLERATE {
 
         // LG model dat file
         def lg_dat_ch = Channel.value(file(params.lg_dat_path))
+        def species_lists = EXTRACT_EXTREME_SPECIES(stats_file_ch)
+        def fg_inputs_ch = species_lists.top_species
+            .map { f -> tuple('top', f) }
+            .mix(species_lists.bottom_species.map { f -> tuple('bottom', f) })
 
         // 2. Extract FG branch lists per direction (one process call each) ---
-        //    EXTRACT_FG_BRANCHES input: (direction, traitfile)
-        def fg_inputs_ch = Channel.from(['top', 'bottom'])
-            .combine(traitfile_ch)
-        // -> (direction, traitfile)
+        //    EXTRACT_FG_BRANCHES input: (direction, fg_species_file)
 
         fg_branches_ch = EXTRACT_FG_BRANCHES(fg_inputs_ch).fg_list
         // -> (direction, fg_list_file)

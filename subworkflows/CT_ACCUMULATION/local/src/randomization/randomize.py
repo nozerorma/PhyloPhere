@@ -1,26 +1,18 @@
 #!/usr/bin/env python3
 """
-Randomization / permutation significance test — adapted for CT_ACCUMULATION in PhyloPhere.
+Randomization / permutation analysis for CT_ACCUMULATION in PhyloPhere.
 
-Changes vs. original to_integrate version:
-  - _remap_caas_df(): remaps filtered_discovery.tsv column names to the internal schema
-    (Gene→gene, Position→msa_pos, sig_both→is_significant,
-     Pattern→pattern_type, CAAP_Group→caap_group/iscaap).
-  - Gene list categories mirror CT_postproc.Rmd focal_sets chunk (both GS0-included and
-    GS0-excluded variants):
-      global, global_significant, top_significant, bottom_significant
-      convergent_pool (+top/bottom)    — mirrors site_flags (GS0 included in gs_nondiv)
-      divergent_pool  (+top/bottom)
-      convergent_pool_no_gs0 (+top/bottom) — mirrors site_flags_no_gs0
-      divergent_pool_no_gs0  (+top/bottom)
-      us_significant (+top/bottom), us_nondiv (+top/bottom), us_div (+top/bottom)
-      gs0_significant (+top/bottom), gs0_nondiv (+top/bottom), gs0_div (+top/bottom)
-      gs{1-4}_significant (+top/bottom), gs{1-4}_nondiv (+top/bottom), gs{1-4}_div (+top/bottom)
-  - GS0 is hard-excluded from valid_row (dubious-conserved + GS0 exclusions) but a
-    separate valid_row_any mask (dubious-conserved only) gates GS0 and pool categories.
-  - actual_counts dict replaces individual actual_* arrays; WorkerClass and init_worker
-    take a single actual_counts dict; process_chunk uses dict-driven accumulators.
-  - --fdr-threshold arg added (default 0.05).
+This simplified version only exports aggregated randomization outputs for:
+  - full_pool (US + GS0 + GS1 + GS2 + GS3 + GS4)
+  - us
+  - gs0
+  - gs1
+  - gs2
+  - gs3
+  - gs4
+
+No significance/convergence/divergence category families are exported.
+No FDR or gene-list outputs are generated.
 """
 
 import argparse
@@ -34,7 +26,6 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
 import random
 import multiprocessing.shared_memory as shm
-from statsmodels.stats.multitest import multipletests
 
 
 # ---------------------------
@@ -68,6 +59,7 @@ def _remap_caas_df(df):
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
     df['asr_is_conserved']  = df['asr_is_conserved'].map(_bool)
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
     if 'asr_root_conserved' in df.columns:
         df['asr_root_conserved'] = df['asr_root_conserved'].map(_bool)
@@ -75,6 +67,8 @@ def _remap_caas_df(df):
         df['asr_root_conserved'] = False
 >>>>>>> asr
 
+=======
+>>>>>>> convergence
     # pattern_type: from Pattern column
     df['pattern_type'] = df['Pattern']
 
@@ -290,11 +284,9 @@ def process_wrapper(ch):
 def _compute_bins_from_series(series):
     return np.percentile(series.dropna(), np.arange(0, 101, 10))
 
-def _build_caas_payload(merged_df, randomization_type, decile_bins):
+def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
     caas_data = []
-    for _, row in merged_df.iterrows():
-        if pd.isna(row['iscaas']) or not row['iscaas']:
-            continue
+    for _, row in merged_df.loc[pool_mask].iterrows():
         if randomization_type == 'naive':
             key = 'global'
         elif randomization_type == 'cons_decile':
@@ -305,57 +297,13 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins):
     unique_keys = list({item['key'] for item in caas_data})
     return unique_keys, caas_data
 
-def _normalize_cat_for_filename(cat):
-    """Normalize category token for export filenames.
-
-    Convention:
-      - *_significant* -> *_sig*
-      - keep direction suffixes as-is (top/bottom) and use explicit nodir categories
-    """
-    return str(cat).replace('_significant', '_sig')
-
-
-def _write_gene_lists(df_cat, cat, gene_lists_dir, fdr_threshold):
-    """Write a single FDR-corrected gene-list .txt file for one category."""
-    os.makedirs(gene_lists_dir, exist_ok=True)
-    col = f'PValueEmpirical_{cat}_FDR'
-    sig = df_cat[
-        (df_cat[f'ActualCount_{cat}'] > 0) &
-        (df_cat[col] < fdr_threshold)
-    ]['Gene']
-    file_cat = _normalize_cat_for_filename(cat)
-    out_path = os.path.join(gene_lists_dir, f"{file_cat}_fdr.txt")
-    sig.to_csv(out_path, index=False, header=False)
-    logging.info(f"Gene list ({cat}, fdr): {len(sig)} genes → {out_path}")
-
 
 def _write_empty_outputs_and_exit(args):
     """Write empty-but-valid outputs when no rows are available for randomization."""
-    # Full category list mirrors CT_postproc focal_sets (both GS0-included and GS0-excluded).
-    _grp_cats = lambda g: [
-        f'{g}_significant', f'{g}_significant_top', f'{g}_significant_bottom',
-        f'{g}_nondiv',      f'{g}_nondiv_top',      f'{g}_nondiv_bottom',
-        f'{g}_div',         f'{g}_div_top',          f'{g}_div_bottom',
-    ]
-    categories = (
-        ['global', 'global_significant', 'top_significant', 'bottom_significant']
-        + ['convergent_pool', 'convergent_pool_top', 'convergent_pool_bottom']
-        + ['divergent_pool',  'divergent_pool_top',  'divergent_pool_bottom']
-        + ['convergent_pool_no_gs0', 'convergent_pool_no_gs0_top', 'convergent_pool_no_gs0_bottom']
-        + ['divergent_pool_no_gs0',  'divergent_pool_no_gs0_top',  'divergent_pool_no_gs0_bottom']
-        + _grp_cats('us')
-        + _grp_cats('gs0')
-        + _grp_cats('gs1')
-        + _grp_cats('gs2')
-        + _grp_cats('gs3')
-        + _grp_cats('gs4')
-    )
+    categories = ['full_pool', 'us', 'gs0', 'gs1', 'gs2', 'gs3', 'gs4']
 
     base_dir = os.path.dirname(args.output_prefix) or '.'
     os.makedirs(base_dir, exist_ok=True)
-
-    gene_lists_dir = os.path.join(base_dir, 'gene_lists')
-    os.makedirs(gene_lists_dir, exist_ok=True)
 
     for cat in categories:
         df_cat = pd.DataFrame(columns=[
@@ -368,18 +316,11 @@ def _write_empty_outputs_and_exit(args):
             f'MeanSim_{cat}',
             f'SD_{cat}',
             f'NumRands_{cat}',
-            f'PValueEmpirical_{cat}_FDR',
         ])
 
         out_cat = f"{args.output_prefix}_{cat}_aggregated_results.csv"
         df_cat.to_csv(out_cat, index=False, compression='gzip' if args.compress else None)
         logging.info(f"Results ({cat}): {out_cat} [empty]")
-
-        # Keep output contract: create empty FDR gene list files for every category.
-        file_cat = _normalize_cat_for_filename(cat)
-        out_path = os.path.join(gene_lists_dir, f"{file_cat}_fdr.txt")
-        with open(out_path, 'w'):
-            pass
 
     if args.randomization_type == 'cons_decile':
         pd.DataFrame(columns=['decile', 'NumPositions']).to_parquet(
@@ -409,10 +350,14 @@ def main(args):
     required_cols = ['gene', 'msa_pos', 'is_significant',
                      'change_side', 'tag', 'pattern_type', 'iscaap', 'caap_group',
 <<<<<<< HEAD
+<<<<<<< HEAD
                      'is_conserved_meta', 'asr_is_conserved']
 =======
                      'is_conserved_meta', 'asr_is_conserved', 'asr_root_conserved']
 >>>>>>> asr
+=======
+                     'is_conserved_meta', 'asr_is_conserved']
+>>>>>>> convergence
     available = [c for c in required_cols if c in caas_df.columns]
     caas_df = caas_df[available]
     logging.info(f"CAAS df: {len(caas_df)} rows, columns: {available}")
@@ -479,11 +424,11 @@ def main(args):
         'cons_idx':  np.float32, 'genes': np.int32, 'iscaas': bool,
     }
 
-    # Actual counts
-    caas_filter = (
-        (merged_df['iscaas'] == True) &
-        (merged_df['change_side'] != 'none')
-    )
+    # Base pool candidates by group + event side
+    _gu = merged_df['caap_group'].fillna('').astype(str).str.strip().str.upper()
+    pool_groups = {'US', 'GS0', 'GS1', 'GS2', 'GS3', 'GS4'}
+    pool_group_mask = _gu.isin(pool_groups)
+    caas_filter = pool_group_mask & merged_df['change_side'].fillna('').ne('none')
 
     decile_bins = None
     if args.randomization_type == 'cons_decile':
@@ -493,9 +438,7 @@ def main(args):
             else np.array([float(x) for x in args.decile_bins.split(',')])
         )
 
-    sig_mask    = caas_filter & (merged_df['is_significant'] == True)
-
-    # --- Row-level exclusions: GS0 and dubious-conserved (is_conserved_meta=T & asr_is_conserved=F) ---
+    # --- Row-level exclusions: dubious-conserved ---
     _boolify = lambda s: str(s).strip().lower() in {'true', 't', '1', 'yes', 'y'}
     if 'is_conserved_meta' in merged_df.columns:
         _icm = merged_df['is_conserved_meta'].map(_boolify).fillna(False)
@@ -505,6 +448,7 @@ def main(args):
         _arc = merged_df['asr_is_conserved'].map(_boolify).fillna(True)
     else:
         _arc = pd.Series(True, index=merged_df.index)
+<<<<<<< HEAD
 <<<<<<< HEAD
     dubious_conserved = _icm & ~_arc
     is_gs0    = merged_df['caap_group'].fillna('').str.strip().str.upper().eq('GS0')
@@ -520,183 +464,62 @@ def main(args):
         _arrc = pd.Series(True, index=merged_df.index)
     else:
         _arrc = pd.Series(True, index=merged_df.index)
+=======
+>>>>>>> convergence
     dubious_conserved = _icm & ~_arc
-    root_filtered = _icm & ~_arrc
-    is_gs0    = merged_df['caap_group'].fillna('').str.strip().str.upper().eq('GS0')
-    valid_row     = ~dubious_conserved & ~root_filtered & ~is_gs0   # gate for US + GS1-4
-    valid_row_any = ~dubious_conserved & ~root_filtered             # gate for GS0 and pool categories
+    valid_row_any = ~dubious_conserved
     logging.info(
         f"Row exclusions: {dubious_conserved.sum()} dubious-conserved "
         f"(is_conserved_meta=T & asr_is_conserved=F), "
+<<<<<<< HEAD
         f"{root_filtered.sum()} root-filtered "
         f"(is_conserved_meta=T & asr_root_conserved=F), {is_gs0.sum()} GS0 — "
 >>>>>>> asr
         f"{valid_row.sum()} rows remain (valid_row), {valid_row_any.sum()} (valid_row_any)"
+=======
+        f"{valid_row_any.sum()} rows remain"
+>>>>>>> convergence
     )
 
-    # Propagate non-GS0 exclusions to base caas_filter and sig_mask.
-    caas_filter   = caas_filter & valid_row
-    sig_mask      = caas_filter & (merged_df['is_significant'] == True)
+    # Apply row validity and keep only requested output pools.
+    pool_mask = caas_filter & valid_row_any
 
-    # GS0-inclusive caas/sig masks (dubious-conserved still excluded).
-    caas_filter_any = (
-        (merged_df['iscaas'] == True) &
-        (merged_df['change_side'] != 'none')
-    ) & valid_row_any
-    sig_mask_any = caas_filter_any & (merged_df['is_significant'] == True)
-
-    # --- Per-row group and pattern helpers ---
-    _gu      = merged_df['caap_group'].fillna('').str.strip().str.upper()
-    is_nondiv = merged_df['pattern_type'].fillna('').ne('divergent')
-    is_div    = merged_df['pattern_type'].fillna('').eq('divergent')
-    _cs       = merged_df['change_side']
-
-    def _top(m):    return m & _cs.isin(['top', 'both'])
-    def _bottom(m): return m & _cs.isin(['bottom', 'both'])
-
-    # --- Global: sig_both in any valid non-GS0 group ---
-    global_mask     = caas_filter
-    global_sig_mask = sig_mask
-    top_sig_mask    = _top(global_sig_mask)
-    bottom_sig_mask = _bottom(global_sig_mask)
-
-    # --- US masks ---
-    us_sig_mask        = sig_mask & (_gu == 'US')
-    us_nondiv_mask     = us_sig_mask & is_nondiv
-    us_div_mask        = us_sig_mask & is_div
-
-    # --- GS0 masks (valid_row_any: dubious-conserved excluded, GS0 allowed) ---
-    gs0_sig_mask       = sig_mask_any & (_gu == 'GS0')
-    gs0_nondiv_mask    = gs0_sig_mask & is_nondiv
-    gs0_div_mask       = gs0_sig_mask & is_div
-
-    # --- GS1-4 masks ---
-    gs1_sig_mask       = sig_mask & (_gu == 'GS1')
-    gs1_nondiv_mask    = gs1_sig_mask & is_nondiv
-    gs1_div_mask       = gs1_sig_mask & is_div
-
-    gs2_sig_mask       = sig_mask & (_gu == 'GS2')
-    gs2_nondiv_mask    = gs2_sig_mask & is_nondiv
-    gs2_div_mask       = gs2_sig_mask & is_div
-
-    gs3_sig_mask       = sig_mask & (_gu == 'GS3')
-    gs3_nondiv_mask    = gs3_sig_mask & is_nondiv
-    gs3_div_mask       = gs3_sig_mask & is_div
-
-    gs4_sig_mask       = sig_mask & (_gu == 'GS4')
-    gs4_nondiv_mask    = gs4_sig_mask & is_nondiv
-    gs4_div_mask       = gs4_sig_mask & is_div
-
-    # --- Pool masks: mirrors compute_site_flags() in CT_postproc ---
-    # convergent_pool (GS0 included): us_nondiv | gs_nondiv  (gs = any non-US incl. GS0)
-    convergent_pool_mask        = us_nondiv_mask | gs0_nondiv_mask | gs1_nondiv_mask | gs2_nondiv_mask | gs3_nondiv_mask | gs4_nondiv_mask
-    divergent_pool_mask         = us_div_mask    | gs0_div_mask    | gs1_div_mask    | gs2_div_mask    | gs3_div_mask    | gs4_div_mask
-    # convergent_pool_no_gs0: mirrors site_flags_no_gs0
-    convergent_pool_no_gs0_mask = us_nondiv_mask | gs1_nondiv_mask | gs2_nondiv_mask | gs3_nondiv_mask | gs4_nondiv_mask
-    divergent_pool_no_gs0_mask  = us_div_mask    | gs1_div_mask    | gs2_div_mask    | gs3_div_mask    | gs4_div_mask
+    full_pool_mask = pool_mask
+    us_mask = pool_mask & _gu.eq('US')
+    gs0_mask = pool_mask & _gu.eq('GS0')
+    gs1_mask = pool_mask & _gu.eq('GS1')
+    gs2_mask = pool_mask & _gu.eq('GS2')
+    gs3_mask = pool_mask & _gu.eq('GS3')
+    gs4_mask = pool_mask & _gu.eq('GS4')
 
     logging.info(
-        f"Category sizes: global_sig={global_sig_mask.sum()}, "
-        f"convergent_pool={convergent_pool_mask.sum()}, convergent_pool_no_gs0={convergent_pool_no_gs0_mask.sum()}, "
-        f"us_sig={us_sig_mask.sum()}, us_nondiv={us_nondiv_mask.sum()}, us_div={us_div_mask.sum()}, "
-        f"gs0_sig={gs0_sig_mask.sum()}, gs1_sig={gs1_sig_mask.sum()}, gs2_sig={gs2_sig_mask.sum()}, "
-        f"gs3_sig={gs3_sig_mask.sum()}, gs4_sig={gs4_sig_mask.sum()}"
+        f"Category sizes: full_pool={full_pool_mask.sum()}, us={us_mask.sum()}, "
+        f"gs0={gs0_mask.sum()}, gs1={gs1_mask.sum()}, gs2={gs2_mask.sum()}, "
+        f"gs3={gs3_mask.sum()}, gs4={gs4_mask.sum()}"
     )
 
     def _bc(mask):
         return np.bincount(np.asarray(genes_int[np.asarray(mask, dtype=bool)], dtype=np.int32), minlength=n_genes)
 
-    # Ordered dict: category_name → actual count array.  Mirrors CT_postproc focal_sets tables.
     # Ordered dict (insertion order guaranteed in Python 3.7+): category_name → mask.
-    # Mirrors CT_postproc focal_sets (both GS0-included and GS0-excluded variants).
     actual_counts_masks = dict([
-        # ── Global pools ────────────────────────────────────────────────────────────
-        ('global',                          global_mask),
-        ('global_significant',              global_sig_mask),
-        ('top_significant',                 top_sig_mask),
-        ('bottom_significant',              bottom_sig_mask),
-        # ── Convergent / divergent pools (GS0 included) ─────────────────────────────
-        ('convergent_pool',                 convergent_pool_mask),
-        ('convergent_pool_top',             _top(convergent_pool_mask)),
-        ('convergent_pool_bottom',          _bottom(convergent_pool_mask)),
-        ('divergent_pool',                  divergent_pool_mask),
-        ('divergent_pool_top',              _top(divergent_pool_mask)),
-        ('divergent_pool_bottom',           _bottom(divergent_pool_mask)),
-        # ── Convergent / divergent pools (GS0 excluded) ─────────────────────────────
-        ('convergent_pool_no_gs0',          convergent_pool_no_gs0_mask),
-        ('convergent_pool_no_gs0_top',      _top(convergent_pool_no_gs0_mask)),
-        ('convergent_pool_no_gs0_bottom',   _bottom(convergent_pool_no_gs0_mask)),
-        ('divergent_pool_no_gs0',           divergent_pool_no_gs0_mask),
-        ('divergent_pool_no_gs0_top',       _top(divergent_pool_no_gs0_mask)),
-        ('divergent_pool_no_gs0_bottom',    _bottom(divergent_pool_no_gs0_mask)),
-        # ── US ──────────────────────────────────────────────────────────────────────
-        ('us_significant',                  us_sig_mask),
-        ('us_significant_top',              _top(us_sig_mask)),
-        ('us_significant_bottom',           _bottom(us_sig_mask)),
-        ('us_nondiv',                       us_nondiv_mask),
-        ('us_nondiv_top',                   _top(us_nondiv_mask)),
-        ('us_nondiv_bottom',                _bottom(us_nondiv_mask)),
-        ('us_div',                          us_div_mask),
-        ('us_div_top',                      _top(us_div_mask)),
-        ('us_div_bottom',                   _bottom(us_div_mask)),
-        # ── GS0 ─────────────────────────────────────────────────────────────────────
-        ('gs0_significant',                 gs0_sig_mask),
-        ('gs0_significant_top',             _top(gs0_sig_mask)),
-        ('gs0_significant_bottom',          _bottom(gs0_sig_mask)),
-        ('gs0_nondiv',                      gs0_nondiv_mask),
-        ('gs0_nondiv_top',                  _top(gs0_nondiv_mask)),
-        ('gs0_nondiv_bottom',               _bottom(gs0_nondiv_mask)),
-        ('gs0_div',                         gs0_div_mask),
-        ('gs0_div_top',                     _top(gs0_div_mask)),
-        ('gs0_div_bottom',                  _bottom(gs0_div_mask)),
-        # ── GS1 ─────────────────────────────────────────────────────────────────────
-        ('gs1_significant',                 gs1_sig_mask),
-        ('gs1_significant_top',             _top(gs1_sig_mask)),
-        ('gs1_significant_bottom',          _bottom(gs1_sig_mask)),
-        ('gs1_nondiv',                      gs1_nondiv_mask),
-        ('gs1_nondiv_top',                  _top(gs1_nondiv_mask)),
-        ('gs1_nondiv_bottom',               _bottom(gs1_nondiv_mask)),
-        ('gs1_div',                         gs1_div_mask),
-        ('gs1_div_top',                     _top(gs1_div_mask)),
-        ('gs1_div_bottom',                  _bottom(gs1_div_mask)),
-        # ── GS2 ─────────────────────────────────────────────────────────────────────
-        ('gs2_significant',                 gs2_sig_mask),
-        ('gs2_significant_top',             _top(gs2_sig_mask)),
-        ('gs2_significant_bottom',          _bottom(gs2_sig_mask)),
-        ('gs2_nondiv',                      gs2_nondiv_mask),
-        ('gs2_nondiv_top',                  _top(gs2_nondiv_mask)),
-        ('gs2_nondiv_bottom',               _bottom(gs2_nondiv_mask)),
-        ('gs2_div',                         gs2_div_mask),
-        ('gs2_div_top',                     _top(gs2_div_mask)),
-        ('gs2_div_bottom',                  _bottom(gs2_div_mask)),
-        # ── GS3 ─────────────────────────────────────────────────────────────────────
-        ('gs3_significant',                 gs3_sig_mask),
-        ('gs3_significant_top',             _top(gs3_sig_mask)),
-        ('gs3_significant_bottom',          _bottom(gs3_sig_mask)),
-        ('gs3_nondiv',                      gs3_nondiv_mask),
-        ('gs3_nondiv_top',                  _top(gs3_nondiv_mask)),
-        ('gs3_nondiv_bottom',               _bottom(gs3_nondiv_mask)),
-        ('gs3_div',                         gs3_div_mask),
-        ('gs3_div_top',                     _top(gs3_div_mask)),
-        ('gs3_div_bottom',                  _bottom(gs3_div_mask)),
-        # ── GS4 ─────────────────────────────────────────────────────────────────────
-        ('gs4_significant',                 gs4_sig_mask),
-        ('gs4_significant_top',             _top(gs4_sig_mask)),
-        ('gs4_significant_bottom',          _bottom(gs4_sig_mask)),
-        ('gs4_nondiv',                      gs4_nondiv_mask),
-        ('gs4_nondiv_top',                  _top(gs4_nondiv_mask)),
-        ('gs4_nondiv_bottom',               _bottom(gs4_nondiv_mask)),
-        ('gs4_div',                         gs4_div_mask),
-        ('gs4_div_top',                     _top(gs4_div_mask)),
-        ('gs4_div_bottom',                  _bottom(gs4_div_mask)),
+        ('full_pool', full_pool_mask),
+        ('us', us_mask),
+        ('gs0', gs0_mask),
+        ('gs1', gs1_mask),
+        ('gs2', gs2_mask),
+        ('gs3', gs3_mask),
+        ('gs4', gs4_mask),
     ])
     actual_counts = {cat: _bc(mask) for cat, mask in actual_counts_masks.items()}
 
-    _, caas_data = _build_caas_payload(merged_df, args.randomization_type, decile_bins)
+    _, caas_data = _build_caas_payload(merged_df, args.randomization_type, decile_bins, pool_mask)
 
     def _key_of(row):
         if args.randomization_type == 'naive':
             return 'global'
+        if decile_bins is None:
+            raise ValueError("decile_bins is required for cons_decile randomization")
         return int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
 
     extra_key_sizes = {}
@@ -752,8 +575,6 @@ def main(args):
                 pass
 
     total_n_rands = sum(r['n_rands'] for r in results)
-    fdr_thr = getattr(args, 'fdr_threshold', 0.05)
-    gene_lists_dir = os.path.join(os.path.dirname(args.output_prefix) or '.', 'gene_lists')
 
     for cat, act in actual_counts.items():
         sum_cat    = np.sum([r[cat]['sum']         for r in results], axis=0)
@@ -777,19 +598,6 @@ def main(args):
             f'SD_{cat}':              sd_cat,
             f'NumRands_{cat}':        total_n_rands,
         })
-        # Keep only genes that have at least one actual CAAS event; rows with
-        # ActualCount == 0 carry no information and inflate FDR denominator.
-        # I'm removing this criteria for now but it is worth considering.
-        # df_cat = df_cat[df_cat[f'ActualCount_{cat}'] > 0].reset_index(drop=True)
-
-        # Apply BH-FDR on the remaining (all non-zero) empirical p-values.
-        fdr_vals = np.ones(len(df_cat))
-        if len(df_cat) > 0:
-            fdr_vals = multipletests(
-                df_cat[f'PValueEmpirical_{cat}'].values, method='fdr_bh'
-            )[1]
-        df_cat[f'PValueEmpirical_{cat}_FDR'] = fdr_vals
-
         base_dir = os.path.dirname(args.output_prefix) or '.'
         os.makedirs(base_dir, exist_ok=True)
         out_cat = f"{args.output_prefix}_{cat}_aggregated_results.csv"
@@ -797,13 +605,11 @@ def main(args):
                       compression='gzip' if args.compress else None)
         logging.info(f"Results ({cat}): {out_cat}")
 
-        _write_gene_lists(df_cat, cat, gene_lists_dir, fdr_thr)
-
     # Decile window info
     if args.randomization_type == 'cons_decile':
         df_elig = merged_df[merged_df['masked'] == False].copy()
         bins = decile_bins if decile_bins is not None else _compute_bins_from_series(
-            merged_df.loc[caas_filter, 'cons_idx']
+            merged_df.loc[pool_mask, 'cons_idx']
         )
         df_elig['decile'] = np.digitize(df_elig['cons_idx'], bins=bins[:-1], right=False)
         global_decile     = df_elig.groupby('decile').size().reset_index(name='NumPositions')
@@ -818,7 +624,7 @@ def main(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='CT_ACCUMULATION: permutation significance test')
+    parser = argparse.ArgumentParser(description='CT_ACCUMULATION: permutation randomization (full pool + per-group)')
     parser.add_argument('--global_csv',   required=True)
     parser.add_argument('--caas_csv',     required=True)
     parser.add_argument('--output-prefix', required=True)
@@ -829,10 +635,6 @@ if __name__ == "__main__":
     parser.add_argument('--export-individual-rand', action='store_true')
     parser.add_argument('--decile-bins',  type=str, default=None)
     parser.add_argument('--global-seed',  type=int, default=None)
-    parser.add_argument('--fdr-threshold', type=float, default=0.05,
-                        help='FDR threshold for gene list export (default: 0.05)')
-    parser.add_argument('--use-all-mrca-filter', action='store_true',
-                        help='Exclude conserved-meta rows failing asr_root_conserved')
     parser.add_argument('--precompute-masks', dest='precompute_masks', action='store_true')
     parser.add_argument('--no-precompute-masks', dest='precompute_masks', action='store_false')
     parser.set_defaults(precompute_masks=True)

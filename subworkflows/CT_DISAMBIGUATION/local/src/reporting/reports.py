@@ -20,8 +20,6 @@ from src.reporting.disambiguation_json import (
     export_aggregated_convergence_json,
     export_gene_summaries_json,
 )
-from src.reporting.gene_lists import export_gene_lists
-
 # Optional: if you want plots as part of the report run
 from src.plots.bulk_plots import generate_bulk_plots
 
@@ -164,15 +162,7 @@ def orchestrate(
         )
 
     # ---------------------------
-    # 4) Gene list exports
-    # ---------------------------
-    gene_lists_out = export_gene_lists(
-        results=cast(List[Dict[str, Any]], results),
-        output_root=results_dir,
-    )
-
-    # ---------------------------
-    # 5) Optional plots
+    # 4) Optional plots
     # ---------------------------
     plots_out = None
     if run_plots:
@@ -191,7 +181,6 @@ def orchestrate(
         "caas_csv": str(caas_csv),
         "aggregated_json": str(aggregated_json),
         "per_gene_json_count": len(per_gene_jsons),
-        "gene_lists": gene_lists_out,
         "plots_dir": str(plots_out) if plots_out else None,
     }
 

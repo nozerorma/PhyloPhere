@@ -18,6 +18,7 @@ process DATASET_EXPLORATION {
     output:
     path "data_exploration", emit: results_dir
     path "*.html", emit: reports, optional: true
+    path "data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv", emit: stats_file, optional: true
     path "data_exploration/**/*.csv", emit: data_tables, optional: true
     path "data_exploration/**/*.png", emit: plots, optional: true
 

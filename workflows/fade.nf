@@ -11,12 +11,12 @@
 #
 # PHYLOPHERE: FADE Workflow
 #
-# Tests foreground branches (defined by the caastools traitfile) for
+# Tests foreground branches (defined by trait_stats.csv extremes) for
 # directional amino-acid selection using HyPhy FADE.
 #
 # Two directions are always run in parallel:
-#   top    → contrast_group == 1 species as foreground (high-trait extreme)
-#   bottom → contrast_group == 0 species as foreground (low-trait extreme)
+#   top    → global_label == high_extreme species as foreground
+#   bottom → global_label == low_extreme species as foreground
 #
 # Run modes (params.fade_mode):
 #   gene_set  → only genes from CT accumulation / postproc significant lists
@@ -26,9 +26,10 @@
 # File: workflows/fade.nf
 */
 
-include { COLLECT_GENE_SETS } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { PHYLIP_TO_FASTA   } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { ANNOTATE_TREE_FG  } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { COLLECT_GENE_SETS       } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { PHYLIP_TO_FASTA         } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { ANNOTATE_TREE_FG        } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { FADE_RUN              } from "${baseDir}/subworkflows/FADE/fade_run.nf"
 include { FADE_REPORT as FADE_REPORT_TOP    } from "${baseDir}/subworkflows/FADE/fade_report.nf"
 include { FADE_REPORT as FADE_REPORT_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_report.nf"
@@ -74,24 +75,24 @@ def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
 workflow FADE {
 
     take:
-        traitfile_input   // Channel<path> or null → falls back to params.caas_config
+        stats_file_input  // Channel<path> or null → falls back to canonical trait_stats.csv under outdir
         tree_input        // Channel<path> or null → falls back to params.tree
         // Optional upstream channels for inline gene-set piping.
         // When non-empty these take priority over the params.fade_* path params.
         // Pass Channel.empty() when running standalone (params-based).
         acc_top_ch        // accumulation CSV for TOP  (*_top_aggregated_results.csv)
         acc_bottom_ch     // accumulation CSV for BOTTOM
-        pp_top_ch         // postproc TXT for TOP  (*_change_side_top_significant.txt)
-        pp_bottom_ch      // postproc TXT for BOTTOM
+        pp_top_ch         // postproc TXT for TOP  (all_top.txt)
+        pp_bottom_ch      // postproc TXT for BOTTOM (all_bottom.txt)
 
     main:
 
         // ── Resolve shared inputs ────────────────────────────────────────────
-        def traitfile_ch = (traitfile_input ?: Channel.empty())
+        def stats_file_ch = (stats_file_input ?: Channel.empty())
             .ifEmpty {
-                assert params.caas_config : "FADE requires a CONTRAST_SELECTION traitfile or --caas_config"
-                def f = file(params.caas_config)
-                assert f.exists() : "FADE: traitfile not found: ${params.caas_config}"
+                def fallback = "${params.outdir}/data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv"
+                def f = file(fallback)
+                assert f.exists() : "FADE: trait_stats.csv not found at ${fallback}"
                 f
             }
 
@@ -108,6 +109,9 @@ workflow FADE {
 
         // ── LG model dat file ────────────────────────────────────────────────
         def lg_dat_ch = Channel.value(file(params.lg_dat_path))
+        def species_lists = EXTRACT_EXTREME_SPECIES(stats_file_ch)
+        def top_species_ch = species_lists.top_species
+        def bottom_species_ch = species_lists.bottom_species
 
         // ── Build per-direction alignment channels ───────────────────────────
         def all_ali_ch
@@ -165,10 +169,18 @@ workflow FADE {
         // fasta_ch is included so that annotate_tree_fg.py can prune the tree
         // to only the taxa present in the per-gene alignment before running FADE
         // (prevents tip-count / sequence-count mismatches in HyPhy FADE).
-        def annotate_input_ch = fasta_ch
-            .combine(traitfile_ch)
+        def top_annotate_input_ch = fasta_ch
+            .filter { gid, dir, fa -> dir == 'top' }
+            .combine(top_species_ch)
             .combine(tree_ch)
-            // → (gene_id, direction, fasta, traitfile, tree)
+
+        def bottom_annotate_input_ch = fasta_ch
+            .filter { gid, dir, fa -> dir == 'bottom' }
+            .combine(bottom_species_ch)
+            .combine(tree_ch)
+
+        def annotate_input_ch = top_annotate_input_ch.mix(bottom_annotate_input_ch)
+            // → (gene_id, direction, fasta, fg_species_file, tree)
 
         def annotate_result    = ANNOTATE_TREE_FG(annotate_input_ch)
         annotated_ch           = annotate_result.annotated_tree

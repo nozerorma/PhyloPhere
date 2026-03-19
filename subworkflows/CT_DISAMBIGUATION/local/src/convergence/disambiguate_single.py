@@ -28,10 +28,8 @@ from src.convergence.convergence import (
     collect_tip_residues,
     extract_tip_residue,
     format_amino_display,
-    classify_tip_level_pattern,
+    classify_change_and_parallelism,
 )
-
-from src.biochem.state_inference import compute_change_side
 from src.asr.tree_parser import get_mrca
 from src.data.models import CAASPosition, ConvergenceResult
 from src.data.loaders import list_gene_caas_entries, parse_trait_pairs
@@ -71,41 +69,28 @@ def analyze_caas_position_disambiguation(
     # Initialize analysis variables
     ancestral = "?"
     derived = "?"
-    pattern_type = "unknown"
-    convergence_desc = "No analysis available"
     tip_diagnostics = tip_diagnostics or {}
     state_source = "unknown"
     tip_pattern_comment = caas_pos.caas or ""
-    # Determine pattern type from tip-level analysis
+
+    # Extract change/parallelism classification from pre-computed result
+    cp_result = {}
     if tip_level_pattern and isinstance(tip_level_pattern, dict):
-        pattern_type = tip_level_pattern.get("pattern", "unknown")
-        convergence_desc = tip_level_pattern.get("description", "Unknown pattern")
+        cp_result = tip_level_pattern
     elif tip_diagnostics.get("pair_details"):
-        inferred_pattern = classify_tip_level_pattern(
+        cp_result = classify_change_and_parallelism(
             tip_diagnostics["pair_details"],
             convergence_mode=convergence_mode,
             grouping_scheme=getattr(caas_pos, "caap_group", None),
         )
-        pattern_type = inferred_pattern.get("pattern", "unknown")
-        convergence_desc = inferred_pattern.get("description", "Unknown pattern")
 
-    # Track which trait groups changed (top/bottom) and how
-    top_change_type = "none"
-    bottom_change_type = "none"
-    if tip_level_pattern:
-        if tip_level_pattern.get("top_convergent"):
-            top_change_type = "convergent"
-        elif tip_level_pattern.get("top_divergent"):
-            top_change_type = "divergent"
-        elif tip_level_pattern.get("top_insufficient"):
-            top_change_type = "insufficient"
-
-        if tip_level_pattern.get("bottom_convergent"):
-            bottom_change_type = "convergent"
-        elif tip_level_pattern.get("bottom_divergent"):
-            bottom_change_type = "divergent"
-        elif tip_level_pattern.get("bottom_insufficient"):
-            bottom_change_type = "insufficient"
+    change_top = cp_result.get("change_top", "no_change")
+    change_bottom = cp_result.get("change_bottom", "no_change")
+    change_side = cp_result.get("change_side", "none")
+    pattern_type = cp_result.get("pattern_type", "no_change")
+    parallel_top = cp_result.get("parallel_top")
+    parallel_bottom = cp_result.get("parallel_bottom")
+    parallel_type = cp_result.get("parallel_type", "none")
 
     # Build per-pair transition status map for annotations
     pair_status_map: Dict[str, Dict[str, str]] = {}
@@ -306,9 +291,6 @@ def analyze_caas_position_disambiguation(
 
     pair_details_list: List[Dict[str, Any]] = tip_diagnostics.get("pair_details") or []
 
-    # Compute change side using extracted function (now pattern-aware)
-    change_side = compute_change_side(top_change_type, bottom_change_type, pattern_type)
-
     if trait1_list or trait0_list:
         top_desc = format_amino_display(trait1_list)
         bottom_desc = format_amino_display(trait0_list)
@@ -375,8 +357,6 @@ def analyze_caas_position_disambiguation(
         ancestral=ancestral,
         derived=derived,
         pattern_type=pattern_type,
-        convergence_description=convergence_desc,
-        convergence_mode=convergence_mode,
         trait1_aa=trait1_list,
         trait0_aa=trait0_list,
         tip_pattern_comment=tip_pattern_comment,
@@ -403,9 +383,12 @@ def analyze_caas_position_disambiguation(
         ),
         state_source=state_source,
         derived_similarity=None,
-        top_change_type=top_change_type,
-        bottom_change_type=bottom_change_type,
+        change_top=change_top,
+        change_bottom=change_bottom,
         change_side=change_side,
+        parallel_top=parallel_top,
+        parallel_bottom=parallel_bottom,
+        parallel_type=parallel_type,
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
@@ -635,7 +618,7 @@ def analyze_gene_disambiguation(
                         "focal_nodes": [p.get("node_id") for p in pair_details],
                     }
 
-                    tip_level_pattern = classify_tip_level_pattern(
+                    tip_level_pattern = classify_change_and_parallelism(
                         pair_details,
                         convergence_mode=convergence_mode,
                         grouping_scheme=getattr(caas_pos, "caap_group", None),

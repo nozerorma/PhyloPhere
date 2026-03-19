@@ -9,7 +9,7 @@ from .convergence import (
     normalize_amino_list,
     format_amino_display,
     compute_derived_state_similarity,
-    classify_tip_level_pattern,
+    classify_change_and_parallelism,
     describe_transition,
 )
 
@@ -34,7 +34,7 @@ __all__ = [
     "build_alignment_lookup",
     "build_convergence_node_mapping",
     "classify_focus_transitions",
-    "classify_tip_level_pattern",
+    "classify_change_and_parallelism",
     "collect_tip_residues",
     "compute_derived_state_similarity",
     "describe_transition",
