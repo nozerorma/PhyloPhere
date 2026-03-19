@@ -222,8 +222,6 @@ if [ "$RUN_FADE" = true ]; then
     FADE_NF_FLAGS=(
         --fade
         --fade_mode "$FADE_MODE"
-        --fade_accumulation_top    "$SEL_ACC_TOP"
-        --fade_accumulation_bottom "$SEL_ACC_BOTTOM"
         --fade_postproc_top        "$SEL_PP_TOP"
         --fade_postproc_bottom     "$SEL_PP_BOTTOM"
     )
@@ -234,8 +232,6 @@ if [ "$RUN_MOLERATE" = true ]; then
     MOLERATE_NF_FLAGS=(
         --molerate
         --molerate_mode "$MOLERATE_MODE"
-        --molerate_accumulation_top    "$SEL_ACC_TOP"
-        --molerate_accumulation_bottom "$SEL_ACC_BOTTOM"
         --molerate_postproc_top        "$SEL_PP_TOP"
         --molerate_postproc_bottom     "$SEL_PP_BOTTOM"
     )
@@ -243,7 +239,7 @@ fi
 
 # ── RERconverge flags ─────────────────────────────────────────────────────────
 # RER_MAIN automatically reads --my_traits (passed via COMMON or per-class) and
-# uses sel_pp_*/sel_acc_* channels wired from CT_ACCUMULATION / CT_POSTPROC.
+# uses sel_pp_* channels wired from CT_POSTPROC.
 # In standalone gene_set mode the postproc paths are forwarded explicitly.
 RER_NF_FLAGS=()
 if [ "$RUN_RER" = true ]; then

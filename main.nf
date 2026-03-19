@@ -152,10 +152,8 @@ workflow {
         def disambiguation_results = null
         def postproc_results = null
 
-        // Channels populated by CT_ACCUMULATION/CT_POSTPROC when they run.
+        // Channels populated by CT_POSTPROC when it runs.
         // Used by FADE/MOLERATE/RER gene-set piping without manual path specification.
-        def sel_acc_top_ch    = Channel.empty()
-        def sel_acc_bottom_ch = Channel.empty()
         def sel_pp_top_ch     = Channel.empty()
         def sel_pp_bottom_ch  = Channel.empty()
 
@@ -272,11 +270,6 @@ workflow {
             def accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch)
             ran_any = true
 
-            // Split accumulation CSVs by direction for FADE/MOLERATE/RER gene-set piping.
-            sel_acc_top_ch    = accum_results.results
-                .filter { f -> f.name.contains('_top_') }
-            sel_acc_bottom_ch = accum_results.results
-                .filter { f -> f.name.contains('_bottom_') }
         }
 
         // Populate postproc gene-list channels for FADE/MOLERATE/RER gene-set piping.
@@ -298,14 +291,12 @@ workflow {
         // Merge per-phenotype files into single files before passing to selection
         // workflows. When multiple phenotypes are run together each sel_* channel
         // emits N items (one per phenotype). COLLECT_GENE_SETS inside FADE/MOLERATE/RER
-        // is invoked once per synchronised 4-tuple of inputs, so without this merge it
+        // is invoked once per synchronised 2-tuple of inputs, so without this merge it
         // runs N times and every gene appears N times in the resulting ali channel —
         // causing file-name staging collisions in the report process. collectFile()
         // collapses N items into one merged file so COLLECT_GENE_SETS runs exactly once.
         // When sel_* channels are empty (standalone runs) collectFile() emits nothing
         // and the .ifEmpty {} fallback paths inside each workflow remain intact.
-        sel_acc_top_ch    = sel_acc_top_ch   .collectFile(keepHeader: true, skip: 1, name: 'merged_acc_top.csv')
-        sel_acc_bottom_ch = sel_acc_bottom_ch.collectFile(keepHeader: true, skip: 1, name: 'merged_acc_bottom.csv')
         sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
         sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
 
@@ -323,28 +314,25 @@ workflow {
 
         if (params.fade) {
             FADE(split_stats_file.fade, split_tree.fade,
-                 sel_acc_top_ch, sel_acc_bottom_ch,
                  sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.molerate) {
             MOLERATE(split_stats_file.molerate, split_tree.molerate,
-                     sel_acc_top_ch, sel_acc_bottom_ch,
                      sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.rer_tool) {
-            // RER_MAIN is called last so that sel_acc_*/sel_pp_* channels are
-            // fully populated by CT_ACCUMULATION / CT_POSTPROC when running together.
+            // RER_MAIN is called last so that sel_pp_* channels are fully
+            // populated by CT_POSTPROC when running together.
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
             // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.
             def rer_traitfile_ch = Channel.empty()
             RER_MAIN(
                 rer_traitfile_ch,
-                sel_acc_top_ch, sel_acc_bottom_ch,
                 sel_pp_top_ch,  sel_pp_bottom_ch
             )
             ran_any = true

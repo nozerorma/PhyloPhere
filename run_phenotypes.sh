@@ -347,10 +347,8 @@ fi
 # ============================================================
 # FADE / MOLERATE NEXTFLOW FLAGS
 # Extend or override per trait by editing below.
-# In gene_set mode set the *_accumulation_* / *_postproc_* paths to the
-# output files from a completed CT_ACCUMULATION run, e.g.:
-#   --fade_accumulation_top  "${CAAS_OUTBASE}/${TRAIT}${TAG}/<timestamp>/filter/accumulation/\
-#     accumulation_convergent_caap_top_aggregated_results.csv"
+# In gene_set mode set the *_postproc_* paths to the output files from a
+# completed CT_POSTPROC run.
 # ============================================================
 FADE_NF_FLAGS=()
 if [ "$RUN_FADE" = true ]; then
@@ -358,8 +356,6 @@ if [ "$RUN_FADE" = true ]; then
         --fade
         --fade_mode "$FADE_MODE"
         # Uncomment and fill for gene_set mode:
-        # --fade_accumulation_top    "/path/to/accumulation_convergent_caap_top_aggregated_results.csv"
-        # --fade_accumulation_bottom "/path/to/accumulation_convergent_caap_bottom_aggregated_results.csv"
         # --fade_postproc_top        "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
         # --fade_postproc_bottom     "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
     )
@@ -371,8 +367,6 @@ if [ "$RUN_MOLERATE" = true ]; then
         --molerate
         --molerate_mode "$MOLERATE_MODE"
         # Uncomment and fill for gene_set mode:
-        # --molerate_accumulation_top    "/path/to/accumulation_convergent_caap_top_aggregated_results.csv"
-        # --molerate_accumulation_bottom "/path/to/accumulation_convergent_caap_bottom_aggregated_results.csv"
         # --molerate_postproc_top        "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
         # --molerate_postproc_bottom     "/path/to/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
     )

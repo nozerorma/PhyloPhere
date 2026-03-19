@@ -104,7 +104,8 @@ for (tree_name in names(gene_trees)) {
         tip <- old_labels[i]
         if (tip %in% names(tip_to_taxid)) {
           txid <- tip_to_taxid[[tip]]
-          canonical <- taxid_to_canonical[[as.character(txid)]]
+          txid_key <- as.character(txid)
+          canonical <- if (txid_key %in% names(taxid_to_canonical)) taxid_to_canonical[[txid_key]] else NULL
           if (!is.null(canonical) && !is.na(canonical)) {
             new_labels[i] <- canonical
           }

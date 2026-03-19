@@ -39,6 +39,7 @@ include { RER_MATRIX }         from "${baseDir}/subworkflows/RERCONVERGE/rer_mat
 include { RER_CONT }           from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
 include { COLLECT_GENE_SETS }  from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { FILTER_GENE_TREES }  from "${baseDir}/subworkflows/RERCONVERGE/rer_filter_trees.nf"
+include { RER_REPORT }         from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
 
 // Main workflow
 workflow RER_MAIN {
@@ -47,8 +48,6 @@ workflow RER_MAIN {
         traitfile_input   // Channel<path> or null → falls back to params.my_traits
         // Optional upstream channels for inline gene-set piping.
         // Pass Channel.empty() when running standalone (params-based).
-        acc_top_ch        // accumulation CSV for TOP
-        acc_bottom_ch     // accumulation CSV for BOTTOM
         pp_top_ch         // postproc TXT for TOP
         pp_bottom_ch      // postproc TXT for BOTTOM
 
@@ -66,12 +65,6 @@ workflow RER_MAIN {
 
         if (params.rer_gene_set_mode == 'gene_set') {
             // Prefer upstream piped channels; fall back to --rer_* path params.
-            def resolved_acc_top = (acc_top_ch ?: Channel.empty())
-                .ifEmpty { file(params.rer_accumulation_top    ?: 'NO_FILE') }
-
-            def resolved_acc_bottom = (acc_bottom_ch ?: Channel.empty())
-                .ifEmpty { file(params.rer_accumulation_bottom ?: 'NO_FILE') }
-
             def resolved_pp_top = (pp_top_ch ?: Channel.empty())
                 .ifEmpty { file(params.rer_postproc_top        ?: 'NO_FILE') }
 
@@ -79,8 +72,6 @@ workflow RER_MAIN {
                 .ifEmpty { file(params.rer_postproc_bottom     ?: 'NO_FILE') }
 
             def gene_sets = COLLECT_GENE_SETS(
-                resolved_acc_top,
-                resolved_acc_bottom,
                 resolved_pp_top,
                 resolved_pp_bottom
             )
@@ -122,7 +113,11 @@ workflow RER_MAIN {
             }
 
             if (toolsToRun.contains('continuous')) {
-                RER_CONT(trait_out, masterTrees_out, matrix_out_ch)
+                def rer_cont_result = RER_CONT(trait_out, masterTrees_out, matrix_out_ch)
+                def gmt_ch = params.rer_gmt_file
+                    ? Channel.value(file(params.rer_gmt_file))
+                    : Channel.value(file('NO_FILE'))
+                RER_REPORT(rer_cont_result.continuous_output, gmt_ch)
             }
         }
 }
