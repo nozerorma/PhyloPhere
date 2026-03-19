@@ -14,7 +14,6 @@ import argparse
 import sys
 from pathlib import Path
 import pandas as pd
-import numpy as np
 
 
 def detect_extreme_genes(discovery_df, gene_length_df, percentile=0.99, trait_col="Trait"):

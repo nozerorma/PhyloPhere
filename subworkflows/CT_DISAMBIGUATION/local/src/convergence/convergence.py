@@ -36,7 +36,7 @@ Usage Example
 -------------
 ::
 
-    from src.convergence.convergence import classify_tip_level_pattern
+    from src.convergence.convergence import classify_change_and_parallelism
 
     pair_details = [
         {'pair_id': 'pair_1', 'focal_state': 'A',
@@ -44,9 +44,9 @@ Usage Example
         {'pair_id': 'pair_2', 'focal_state': 'A',
          'top_tip_mode': 'V', 'bottom_tip_mode': 'V'}
     ]
-    result = classify_tip_level_pattern(pair_details, convergence_mode='focal_clade')
-    print(result['pattern'])  # 'convergent'
-    print(result['description'])  # 'Convergent (TOP only): → V, BOTTOM unchanged'
+    result = classify_change_and_parallelism(pair_details, convergence_mode='focal_clade')
+    print(result['pattern_type'])  # 'convergent_top'
+    print(result['change_top'])    # 'convergent'
 
 Author
 ------
@@ -580,105 +580,166 @@ def extract_node_states_from_node_level(
         return None
 
 
-def classify_tip_level_pattern(
+def _validate_pair_details(
+    entries: Sequence[PairDetail],
+) -> Optional[List[PairDetail]]:
+    """Validate and order pair details; return None when insufficient."""
+    if not entries:
+        return None
+
+    usable: List[PairDetail] = []
+    for entry in entries:
+        top_tip = entry.get("top_tip_mode") or entry.get("top_tip_residue")
+        bottom_tip = entry.get("bottom_tip_mode") or entry.get("bottom_tip_residue")
+        if top_tip is None and bottom_tip is None:
+            logger.debug(f"Skipping pair with no tip residues: {entry}")
+            continue
+        usable.append(entry)
+
+    if len(usable) < 2:
+        return None
+
+    indexed = list(enumerate(usable))
+    indexed.sort(
+        key=lambda item: (str(item[1].get("pair_id", "")).lower(), item[0])
+    )
+    return [item[1] for item in indexed]
+
+
+def _classify_side(changed_derived: List[str]) -> str:
+    """
+    Classify the change pattern for one side (top or bottom).
+
+    Returns one of: ``no_change``, ``ambiguous``, ``convergent``,
+    ``divergent``, ``codivergent``.
+    """
+    n_changes = len(changed_derived)
+    if n_changes == 0:
+        return "no_change"
+    if n_changes == 1:
+        return "ambiguous"
+
+    unique = set(changed_derived)
+    if len(unique) == 1:
+        return "convergent"
+
+    from collections import Counter
+    counts = Counter(changed_derived)
+    if any(c > 1 for c in counts.values()):
+        return "codivergent"
+    return "divergent"
+
+
+def _assess_parallelism(ancestors: List[str]) -> Any:
+    """
+    Assess parallelism by comparing ancestral states (MRCAs) of relevant pairs.
+
+    Returns ``True`` (all identical), ``False`` (all pairwise distinct),
+    ``"MIXED"`` (some equal, some different), or ``None`` if fewer than 2.
+    """
+    if len(ancestors) < 2:
+        return None
+
+    unique = set(ancestors)
+    if len(unique) == 1:
+        return True
+    if len(unique) == len(ancestors):
+        return False
+    return "MIXED"
+
+
+_SUBSTANTIVE = {"convergent", "divergent", "codivergent"}
+
+
+def _derive_change_side(change_top: str, change_bottom: str) -> str:
+    """Derive ``change_side`` from per-side change labels."""
+    top_sub = change_top in _SUBSTANTIVE
+    bot_sub = change_bottom in _SUBSTANTIVE
+    if top_sub and bot_sub:
+        return "both"
+    if top_sub:
+        return "top"
+    if bot_sub:
+        return "bottom"
+    return "none"
+
+
+def _derive_pattern_type(change_top: str, change_bottom: str) -> str:
+    """Derive conflated ``pattern_type`` from per-side change labels."""
+    top_sub = change_top in _SUBSTANTIVE
+    bot_sub = change_bottom in _SUBSTANTIVE
+    if top_sub and bot_sub:
+        if change_top == change_bottom:
+            return f"{change_top}_both"
+        return f"{change_top}_{change_bottom}"
+    if top_sub:
+        return f"{change_top}_top"
+    if bot_sub:
+        return f"{change_bottom}_bottom"
+    return "no_change"
+
+
+def _derive_parallel_type(parallel_top: Any, parallel_bottom: Any) -> str:
+    """Derive conflated ``parallel_type`` from per-side parallelism values."""
+    _map = {True: "parallel", False: "nonparallel", "MIXED": "mixed"}
+    top_label = _map.get(parallel_top)
+    bot_label = _map.get(parallel_bottom)
+
+    if top_label is not None and bot_label is not None:
+        if top_label == bot_label:
+            return f"{top_label}_both"
+        return f"{top_label}_{bot_label}"
+    if top_label is not None:
+        return f"{top_label}_top"
+    if bot_label is not None:
+        return f"{bot_label}_bottom"
+    return "none"
+
+
+def classify_change_and_parallelism(
     pair_details: Sequence[PairDetail],
     convergence_mode: str = "focal_clade",
     grouping_scheme: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Classify evolutionary pattern using tip-level transitions and ancestral states.
+    Two-stage classification of evolutionary change patterns.
 
-    :param pair_details: Iterable of tip-level pair detail dicts containing
-        ``pair_id``, ``focal_state`` or ``mrca_contrast``, and tip residues
-        (``top_tip_mode``/``top_tip_residue`` and ``bottom_tip_mode``/``bottom_tip_residue``).
-    :param convergence_mode: ``'mrca'`` to use MRCA contrast as ancestor for both sides,
-        ``'focal_clade'`` (default) to use focal-specific ancestors.
-    :returns: Classification dictionary with pattern label, description, change flags,
-        derived state lists, and per-transition diagnostics.
+    **Stage 1** classifies each side (top/bottom) independently by collecting
+    derived states across pairs where a substitution occurred:
 
-    The function validates input shape, sorts pairs deterministically by ``pair_id``,
-    and requires at least two usable pairs.
+    - ``no_change``: 0 changes
+    - ``ambiguous``: exactly 1 change
+    - ``convergent``: >=2 changes, all to the same derived state
+    - ``divergent``: >=2 changes, all derived states distinct
+    - ``codivergent``: >=2 changes, >=2 distinct derived states with at least one repeated
 
-    Patterns:
-        - convergent: One group converges, other unchanged
-        - parallel: Both groups converge to different states
-        - codivergent_top_converges: TOP converges, BOTTOM diverges
-        - codivergent_bottom_converges: BOTTOM converges, TOP diverges
-        - divergent: One group diverges, other unchanged
-        - ambiguous: Complex pattern requiring manual inspection
-        - no_change: No substitutions detected
+    **Stage 2** assesses parallelism for each substantive side by comparing
+    the ancestral states (MRCAs) of pairs that changed on that side:
 
-    Args:
-        pair_details: List of pair dicts with keys:
-            - focal_k: Ancestral state at focal node k (dynamic list)
-            - mrca_contrast: Ancestral state at contrast MRCA
-            - top_tip_mode: Residue in top group
-            - bottom_tip_mode: Residue in bottom group
-        convergence_mode: 'mrca' to use mrca_contrast as ancestral state,
-                         'focal_clade' to use per-focal-node ancestry (dynamic, default)
+    - ``True``: all ancestors identical
+    - ``False``: all ancestors pairwise distinct
+    - ``"MIXED"``: some equal, some different
+    - ``None``: side is no_change or ambiguous
 
-    Returns:
-        Dictionary with classification results
-
-    Example:
-        >>> pair_details = [
-        ...     {'focal_1': 'A', 'top_tip_mode': 'A', 'bottom_tip_mode': 'T'},
-        ...     {'focal_2': 'A', 'top_tip_mode': 'A', 'bottom_tip_mode': 'T'}
-        ... ]
-        >>> result = classify_tip_level_pattern(pair_details)
-        >>> print(result['pattern'])
-        'convergent'
+    Returns dict with keys: ``change_top``, ``change_bottom``, ``change_side``,
+    ``pattern_type``, ``parallel_top``, ``parallel_bottom``, ``parallel_type``.
     """
-
-    def _validate_pair_details(
-        entries: Sequence[PairDetail],
-    ) -> Optional[List[PairDetail]]:
-        """Validate and order pair details; return None when insufficient."""
-        if not entries:
-            return None
-
-        usable: List[PairDetail] = []
-        for entry in entries:
-            top_tip = entry.get("top_tip_mode") or entry.get("top_tip_residue")
-            bottom_tip = entry.get("bottom_tip_mode") or entry.get("bottom_tip_residue")
-            if top_tip is None and bottom_tip is None:
-                logger.debug(f"Skipping pair with no tip residues: {entry}")
-                continue
-            usable.append(entry)
-
-        if len(usable) < 2:
-            return None
-
-        # Deterministic ordering: sort by pair_id (case-insensitive) with stable index fallback
-        indexed = list(enumerate(usable))
-        indexed.sort(
-            key=lambda item: (str(item[1].get("pair_id", "")).lower(), item[0])
-        )
-        return [item[1] for item in indexed]
-
     validated_pairs = _validate_pair_details(pair_details)
     if validated_pairs is None:
         return {
-            "pattern": "insufficient_data",
-            "description": "Need at least 2 pairs with tip residues for classification",
-            "top_convergent": False,
-            "bottom_convergent": False,
+            "change_top": "no_change",
+            "change_bottom": "no_change",
+            "change_side": "none",
+            "pattern_type": "no_change",
+            "parallel_top": None,
+            "parallel_bottom": None,
+            "parallel_type": "none",
         }
 
     invalid_states = {None, "-", "X", "?"}
 
     def is_valid(state):
         return state not in invalid_states
-
-    top_transitions: List[Dict[str, Any]] = []
-    bottom_transitions: List[Dict[str, Any]] = []
-    ancestor_states: Set[str] = set()
-
-    # Log which convergence mode is being used
-    logger.info(
-        f"=== classify_tip_level_pattern CALLED with convergence_mode='{convergence_mode}' ==="
-    )
-    logger.debug(f"Number of pairs: {len(validated_pairs)}")
 
     def _map_state(state: Optional[str]) -> Optional[str]:
         if state is None:
@@ -691,300 +752,63 @@ def classify_tip_level_pattern(
         mapped = get_grouping_scheme(aa, grouping_scheme)
         return mapped if mapped else aa
 
+    top_changed_derived: List[str] = []
+    top_changed_ancestors: List[str] = []
+    bottom_changed_derived: List[str] = []
+    bottom_changed_ancestors: List[str] = []
+
     for pair in validated_pairs:
-        # Choose ancestral state based on convergence_mode
-        pair_id = pair.get("pair_id", "unknown")
         focal_state = pair.get("focal_state")
         mrca_contrast = pair.get("mrca_contrast")
-
-        logger.debug(
-            f"Pair {pair_id} available states: focal_state={focal_state}, mrca_contrast={mrca_contrast}"
-        )
-
-        if convergence_mode == "mrca":
-            # Use mrca_contrast as the common ancestor for both focal groups
-            ancestor = mrca_contrast
-            logger.info(
-                f"Pair {pair_id}: MODE='mrca' -> USING ancestor={ancestor} (mrca_contrast)"
-            )
-        else:  # focal_clade mode (default)
-            # Use focal-specific ancestors (focal_i aligned to pair order) for top/bottom
-            ancestor = focal_state
-            logger.info(
-                f"Pair {pair_id}: MODE='focal_clade' -> USING ancestor={ancestor} (focal_state)"
-            )
+        ancestor = mrca_contrast if convergence_mode == "mrca" else focal_state
 
         top_tip = pair.get("top_tip_mode") or pair.get("top_tip_residue")
         bottom_tip = pair.get("bottom_tip_mode") or pair.get("bottom_tip_residue")
 
         mapped_ancestor = _map_state(ancestor)
-        mapped_top_tip = _map_state(top_tip)
-        mapped_bottom_tip = _map_state(bottom_tip)
+        mapped_top = _map_state(top_tip)
+        mapped_bottom = _map_state(bottom_tip)
 
-        if is_valid(mapped_ancestor):
-            if ancestor is not None:
-                ancestor_states.add(str(mapped_ancestor))
+        if is_valid(mapped_ancestor) and is_valid(mapped_top):
+            if mapped_ancestor != mapped_top:
+                top_changed_derived.append(mapped_top)
+                top_changed_ancestors.append(mapped_ancestor)
 
-        top_changed_flag = False
-        bottom_changed_flag = False
+        if is_valid(mapped_ancestor) and is_valid(mapped_bottom):
+            if mapped_ancestor != mapped_bottom:
+                bottom_changed_derived.append(mapped_bottom)
+                bottom_changed_ancestors.append(mapped_ancestor)
 
-        if is_valid(mapped_ancestor) and is_valid(mapped_top_tip):
-            top_changed_flag = mapped_ancestor != mapped_top_tip
-            top_transitions.append(
-                {
-                    "pair_id": pair.get("pair_id"),
-                    "ancestor": mapped_ancestor,
-                    "descendant": mapped_top_tip,
-                    "changed": top_changed_flag,
-                }
-            )
+    # Stage 1: classify each side independently
+    change_top = _classify_side(top_changed_derived)
+    change_bottom = _classify_side(bottom_changed_derived)
 
-        if is_valid(mapped_ancestor) and is_valid(mapped_bottom_tip):
-            bottom_changed_flag = mapped_ancestor != mapped_bottom_tip
-            bottom_transitions.append(
-                {
-                    "pair_id": pair.get("pair_id"),
-                    "ancestor": mapped_ancestor,
-                    "descendant": mapped_bottom_tip,
-                    "changed": bottom_changed_flag,
-                }
-            )
-
-    logger.debug(f"Top transitions: {top_transitions}")
-    logger.debug(f"Bottom transitions: {bottom_transitions}")
-    logger.debug(f"Ancestor states: {ancestor_states}")
-
-    top_changed = [t["descendant"] for t in top_transitions if t["changed"]]
-    bottom_changed = [t["descendant"] for t in bottom_transitions if t["changed"]]
-
-    # Count actual amino acid changes (number of substitution events, not unique states)
-    top_change_count = len(top_changed)
-    bottom_change_count = len(bottom_changed)
-
-    # Require ≥2 changes to classify as convergent/divergent
-    # With <2 changes, we cannot reliably assess the pattern
-    top_sufficient_changes = top_change_count >= 2
-    bottom_sufficient_changes = bottom_change_count >= 2
-
-    # Determine change types based on unique derived states and change count
-    top_unique_states = set(top_changed) if top_changed else set()
-    bottom_unique_states = set(bottom_changed) if bottom_changed else set()
-
-    # Classify change types (convergent, divergent, codivergent, or no_change)
-    top_convergent = len(top_unique_states) == 1 and top_sufficient_changes
-    bottom_convergent = len(bottom_unique_states) == 1 and bottom_sufficient_changes
-
-    top_divergent = len(top_unique_states) > 1 and top_sufficient_changes
-    bottom_divergent = len(bottom_unique_states) > 1 and bottom_sufficient_changes
-
-    # Codivergent: both convergence and divergence in same group
-    # This happens when some pairs converge to one state while others converge to another
-    top_codivergent = (
-        len(top_unique_states) > 1
-        and top_sufficient_changes
-        and any(top_changed.count(state) > 1 for state in top_unique_states)
+    # Stage 2: assess parallelism for substantive sides
+    parallel_top = (
+        _assess_parallelism(top_changed_ancestors)
+        if change_top in _SUBSTANTIVE
+        else None
     )
-    bottom_codivergent = (
-        len(bottom_unique_states) > 1
-        and bottom_sufficient_changes
-        and any(bottom_changed.count(state) > 1 for state in bottom_unique_states)
+    parallel_bottom = (
+        _assess_parallelism(bottom_changed_ancestors)
+        if change_bottom in _SUBSTANTIVE
+        else None
     )
 
-    top_unchanged = top_change_count == 0
-    bottom_unchanged = bottom_change_count == 0
+    # Derived columns
+    change_side = _derive_change_side(change_top, change_bottom)
+    pattern_type = _derive_pattern_type(change_top, change_bottom)
+    parallel_type = _derive_parallel_type(parallel_top, parallel_bottom)
 
-    # Insufficient changes: cannot assess pattern
-    top_insufficient = top_change_count > 0 and not top_sufficient_changes
-    bottom_insufficient = bottom_change_count > 0 and not bottom_sufficient_changes
-
-    top_descendants = sorted(top_unique_states) if top_unique_states else []
-    bottom_descendants = sorted(bottom_unique_states) if bottom_unique_states else []
-
-    # Determine top_change_type and bottom_change_type for later use
-    if top_codivergent:
-        top_change_type = "codivergent"
-    elif top_convergent:
-        top_change_type = "convergent"
-    elif top_divergent:
-        top_change_type = "divergent"
-    elif top_insufficient:
-        top_change_type = "no_change"  # Insufficient evidence
-    else:
-        top_change_type = "none"
-
-    if bottom_codivergent:
-        bottom_change_type = "codivergent"
-    elif bottom_convergent:
-        bottom_change_type = "convergent"
-    elif bottom_divergent:
-        bottom_change_type = "divergent"
-    elif bottom_insufficient:
-        bottom_change_type = "no_change"  # Insufficient evidence
-    else:
-        bottom_change_type = "none"
-
-    pattern = "ambiguous"
-    description = "Complex pattern requiring manual inspection"
-
-    # Pattern classification with new hierarchy
-    if not top_changed and not bottom_changed:
-        pattern = "no_change"
-        description = "No substitutions detected in any group"
-
-    elif top_insufficient and bottom_insufficient:
-        pattern = "no_change"
-        description = "Insufficient changes (<2 per group) to assess pattern"
-
-    elif top_insufficient and bottom_insufficient:
-        pattern = "no_change"
-        description = "Insufficient changes (<2 per group) to assess pattern"
-
-    elif (top_sufficient_changes and bottom_insufficient) or (
-        top_insufficient and bottom_sufficient_changes
-    ):
-        # Only one side has sufficient changes
-        if top_convergent and bottom_insufficient:
-            top_state = top_descendants[0] if top_descendants else "?"
-            pattern = "convergent"
-            description = (
-                f"Convergent (TOP only): → {top_state}, BOTTOM insufficient changes"
-            )
-        elif bottom_convergent and top_insufficient:
-            bottom_state = bottom_descendants[0] if bottom_descendants else "?"
-            pattern = "convergent"
-            description = (
-                f"Convergent (BOTTOM only): → {bottom_state}, TOP insufficient changes"
-            )
-        elif top_divergent and bottom_insufficient:
-            all_descendants = sorted(top_descendants)
-            pattern = "divergent"
-            description = f"Divergent (TOP only): {'/'.join(all_descendants)}, BOTTOM insufficient changes"
-        elif bottom_divergent and top_insufficient:
-            all_descendants = sorted(bottom_descendants)
-            pattern = "divergent"
-            description = f"Divergent (BOTTOM only): {'/'.join(all_descendants)}, TOP insufficient changes"
-        elif top_codivergent and bottom_insufficient:
-            pattern = "codivergent_top"
-            description = f"Codivergent TOP: {'/'.join(top_descendants)}, BOTTOM insufficient changes"
-        elif bottom_codivergent and top_insufficient:
-            pattern = "codivergent_bottom"
-            description = f"Codivergent BOTTOM: {'/'.join(bottom_descendants)}, TOP insufficient changes"
-
-    elif (top_convergent or top_divergent or top_codivergent) and bottom_unchanged:
-        # TOP changed, BOTTOM unchanged
-        if top_convergent:
-            top_state = top_descendants[0] if top_descendants else "?"
-            pattern = "convergent"
-            description = f"Convergent (TOP only): → {top_state}, BOTTOM unchanged"
-        elif top_divergent:
-            all_descendants = sorted(top_descendants)
-            pattern = "divergent"
-            description = (
-                f"Divergent (TOP only): {'/'.join(all_descendants)}, BOTTOM unchanged"
-            )
-        elif top_codivergent:
-            pattern = "codivergent_top"
-            description = (
-                f"Codivergent TOP: {'/'.join(top_descendants)}, BOTTOM unchanged"
-            )
-
-    elif (
-        bottom_convergent or bottom_divergent or bottom_codivergent
-    ) and top_unchanged:
-        # BOTTOM changed, TOP unchanged
-        if bottom_convergent:
-            bottom_state = bottom_descendants[0] if bottom_descendants else "?"
-            pattern = "convergent"
-            description = f"Convergent (BOTTOM only): → {bottom_state}, TOP unchanged"
-        elif bottom_divergent:
-            all_descendants = sorted(bottom_descendants)
-            pattern = "divergent"
-            description = (
-                f"Divergent (BOTTOM only): {'/'.join(all_descendants)}, TOP unchanged"
-            )
-        elif bottom_codivergent:
-            pattern = "codivergent_bottom"
-            description = (
-                f"Codivergent BOTTOM: {'/'.join(bottom_descendants)}, TOP unchanged"
-            )
-
-    elif top_sufficient_changes and bottom_sufficient_changes:
-        # Both sides have sufficient changes - determine parallel subtype
-        if top_convergent and bottom_convergent:
-            if set(top_descendants) == set(bottom_descendants):
-                pattern = "no_convergence"
-                description = f"Both groups converge to the same state: TOP/BOTTOM → {top_descendants[0]}"
-            else:
-                pattern = "parallel_convergence"
-                description = (
-                    f"Parallel convergence: TOP → {top_descendants[0]}, "
-                    f"BOTTOM → {bottom_descendants[0]}"
-                )
-        elif top_divergent and bottom_divergent:
-            pattern = "parallel_divergence"
-            top_states = "/".join(top_descendants)
-            bottom_states = "/".join(bottom_descendants)
-            description = (
-                f"Parallel divergence: TOP → {top_states}, BOTTOM → {bottom_states}"
-            )
-        elif top_codivergent and bottom_codivergent:
-            pattern = "parallel_codivergent"
-            description = (
-                "Parallel codivergence: both sides show convergence+divergence"
-            )
-        elif (top_convergent or top_codivergent) and (
-            bottom_divergent or bottom_codivergent
-        ):
-            # One side converges/codiverges, other diverges/codiverges = mixed
-            pattern = "parallel_mixed"
-            description = (
-                f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
-            )
-        elif (bottom_convergent or bottom_codivergent) and (
-            top_divergent or top_codivergent
-        ):
-            pattern = "parallel_mixed"
-            description = (
-                f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
-            )
-        else:
-            # Fallback for unexpected combinations
-            pattern = "parallel_mixed"
-            description = (
-                f"Parallel mixed: TOP {top_change_type}, BOTTOM {bottom_change_type}"
-            )
-
-    result = {
-        "pattern": pattern,
-        "description": description,
-        "top_convergent": top_convergent,
-        "bottom_convergent": bottom_convergent,
-        "top_divergent": top_divergent,
-        "bottom_divergent": bottom_divergent,
-        "top_codivergent": top_codivergent,
-        "bottom_codivergent": bottom_codivergent,
-        "top_descendants": top_descendants,
-        "bottom_descendants": bottom_descendants,
-        "top_changed": top_descendants,
-        "bottom_changed": bottom_descendants,
-        "ancestors": sorted(ancestor_states),
-        "descendants": sorted(set(top_descendants + bottom_descendants)),
-        "top_change_type": top_change_type,
-        "bottom_change_type": bottom_change_type,
-        "top_change_count": top_change_count,
-        "bottom_change_count": bottom_change_count,
-        # Add diagnostic info
-        "diagnostic": {
-            "top_transitions": top_transitions,
-            "bottom_transitions": bottom_transitions,
-            "top_unchanged": top_unchanged,
-            "bottom_unchanged": bottom_unchanged,
-            "top_sufficient_changes": top_sufficient_changes,
-            "bottom_sufficient_changes": bottom_sufficient_changes,
-        },
+    return {
+        "change_top": change_top,
+        "change_bottom": change_bottom,
+        "change_side": change_side,
+        "pattern_type": pattern_type,
+        "parallel_top": parallel_top,
+        "parallel_bottom": parallel_bottom,
+        "parallel_type": parallel_type,
     }
-
-    return result
 
 
 def describe_transition(trans: Dict[str, Any]) -> str:

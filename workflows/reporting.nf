@@ -38,6 +38,7 @@ workflow REPORTING {
 
     def trait_file = file(params.my_traits)
     def tree_file = file(params.tree)
+    def reporting_stats_file
 
     if (params.prune_data) {
         log.info "Pruning selected; running data pruning module before reporting."
@@ -46,14 +47,17 @@ workflow REPORTING {
         tree_file = prune_out.pruned_tree_file
         dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
         dataset_out = dataset_exploration_out.results_dir
+        reporting_stats_file = dataset_exploration_out.stats_file
     } else {
         log.info "No data pruning selected; skipping data pruning module."
         prune_out = file('NO_FILE')
         dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out)
         phenotype_out = PHENOTYPE_EXPLORATION(trait_file, tree_file, dataset_exploration_out.results_dir)
         dataset_out = phenotype_out.results_dir
+        reporting_stats_file = dataset_exploration_out.stats_file
     }
 
     emit:
         dataset_out
+        stats_file = reporting_stats_file
 }

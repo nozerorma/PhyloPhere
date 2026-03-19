@@ -74,10 +74,6 @@ class ConvergenceResult:
 
     # Pattern classification
     pattern_type: str
-    convergence_description: str
-
-    # Fields with defaults (must come after non-default fields)
-    convergence_mode: str = "focal_clade"  # 'mrca' or 'focal_clade'
 
     # Tip-level pattern analysis
     trait1_aa: List[str] = field(default_factory=list)
@@ -120,9 +116,12 @@ class ConvergenceResult:
 
     # Change tracking
     is_focus: bool = False
-    top_change_type: str = "none"
-    bottom_change_type: str = "none"
+    change_top: str = "no_change"
+    change_bottom: str = "no_change"
     change_side: str = "none"
+    parallel_top: Optional[Any] = None
+    parallel_bottom: Optional[Any] = None
+    parallel_type: str = "none"
 
     # Ambiguity and conserved-pair flags (dynamic multi-pair)
     ambiguous: bool = False

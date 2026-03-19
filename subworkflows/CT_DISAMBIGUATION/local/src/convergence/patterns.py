@@ -46,13 +46,10 @@ Date
 
 from typing import Any, Dict, List, Optional, Tuple, TypedDict
 
-from .convergence import classify_tip_level_pattern
-
 __all__ = [
     "transition_status",
     "summarize_pair_transitions",
     "classify_focus_transitions",
-    "classify_tip_level_pattern",
 ]
 
 

@@ -44,6 +44,7 @@ workflow CONTRAST_SELECTION {
 
     def dataset_out
     def reporting_out = null
+    def contrast_stats_file
 
     if (params.reporting && params.prune_data) {
         log.info "Reporting + pruning enabled; running a single prune/exploration pass for contrast selection."
@@ -52,10 +53,12 @@ workflow CONTRAST_SELECTION {
         tree_file = prune_out.pruned_tree_file
         dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
         dataset_out = dataset_exploration_out.results_dir
+        contrast_stats_file = dataset_exploration_out.stats_file
     } else if (params.reporting){
         log.info "stats_df generated during reporting"
         reporting_out = REPORTING()
         dataset_out = reporting_out.dataset_out
+        contrast_stats_file = reporting_out.stats_file
     } else if (params.prune_data) {
         log.info "Pruning selected; running data pruning module before contrast selection."
         prune_out = DATASET_PRUNE(trait_file, tree_file)
@@ -63,10 +66,12 @@ workflow CONTRAST_SELECTION {
         tree_file = prune_out.pruned_tree_file
         dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
         dataset_out = dataset_exploration_out.results_dir
+        contrast_stats_file = dataset_exploration_out.stats_file
     } else {
         log.info "No stats_df provided. Rerunning dataset exploration for stats generation."
         dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, file('NO_FILE'))
         dataset_out = dataset_exploration_out.results_dir
+        contrast_stats_file = dataset_exploration_out.stats_file
     }
 
     // Always run composition step — the Rmd branches internally:
@@ -90,6 +95,7 @@ workflow CONTRAST_SELECTION {
         trait_file_out           = check_out.traitfile_out
         bootstrap_trait_file_out = check_out.boot_traitfile_out
         tree_file_out            = contrast_out.tree_file_out
+        stats_file_out           = contrast_stats_file
         contrast_results_dir     = contrast_out.contrast_results_dir
         low_contrasts_skip       = check_out.skip_flag
 }

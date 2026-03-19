@@ -180,17 +180,14 @@ def convert_convergence_result_to_dict(
 
     # Pattern classification
     result_dict["pattern_type"] = getattr(result, "pattern_type", None)
-    result_dict["convergence_description"] = getattr(
-        result, "convergence_description", None
-    )
-    result_dict["convergence_mode"] = getattr(result, "convergence_mode", None)
 
     # Change tracking
-    result_dict["top_change_type"] = getattr(result, "top_change_type", None)
-    result_dict["bottom_change_type"] = getattr(result, "bottom_change_type", None)
-    result_dict["change_side"] = getattr(result, "change_side", None)
-    result_dict["top_change_count"] = getattr(result, "top_change_count", 0)
-    result_dict["bottom_change_count"] = getattr(result, "bottom_change_count", 0)
+    result_dict["change_top"] = getattr(result, "change_top", "no_change")
+    result_dict["change_bottom"] = getattr(result, "change_bottom", "no_change")
+    result_dict["change_side"] = getattr(result, "change_side", "none")
+    result_dict["parallel_top"] = getattr(result, "parallel_top", None)
+    result_dict["parallel_bottom"] = getattr(result, "parallel_bottom", None)
+    result_dict["parallel_type"] = getattr(result, "parallel_type", "none")
 
     # Low confidence nodes
     lcn = getattr(result, "low_confidence_nodes", None)
@@ -248,26 +245,6 @@ def merge_multi_hypothesis_results(
         trait_pairs=trait_pairs,
         taxid_to_species=taxid_to_species,
     )
-
-    # Pattern priority
-    pattern_types = [getattr(r, "pattern_type", None) for r in results_group]
-    if "divergent" in pattern_types:
-        merged["pattern_type"] = "divergent"
-    elif "parallel" in pattern_types:
-        merged["pattern_type"] = "parallel"
-    elif "codivergent" in pattern_types:
-        merged["pattern_type"] = "codivergent"
-    elif "convergent" in pattern_types:
-        merged["pattern_type"] = "convergent"
-    else:
-        merged["pattern_type"] = "ambiguous"
-
-    descs = [
-        getattr(r, "convergence_description", None)
-        for r in results_group
-        if getattr(r, "convergence_description", None)
-    ]
-    merged["convergence_description"] = "; ".join(filter(None, descs[:3]))
 
     # Merge low confidence nodes
     all_lcn = []

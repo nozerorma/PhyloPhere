@@ -82,13 +82,14 @@ workflow CT_POSTPROC {
             }
         }
 
-        // Normalize discovery/disambiguation schema and remove ambiguous/no_change before clustering
+        // Normalize discovery/disambiguation schema and apply the current
+        // precluster hard filters used by CT post-processing.
         prepared_inputs = CAAS_PREPARE_POSTPROC_INPUT(discovery_file_ch)
         def prepared_discovery_ch = prepared_inputs.prepared_discovery
         def precluster_removed_ch = prepared_inputs.removed_patterns
 
         log.info "📂 Post-processing input normalized from disambiguation master CSV"
-        log.info "⛔ Rows with Pattern in {ambiguous, no_change} are removed before clustering and tracked"
+        log.info "⛔ Precluster hard filter retained: low MRCA posterior"
         
         // Handle global background genes source for cleanup
         def global_background_genes

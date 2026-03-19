@@ -7,8 +7,8 @@ Orchestrates two phases:
   2. randomize  — permutation test for per-gene CAAS accumulation
 
 Changes vs. original:
-  - Added --fdr-threshold argument (threaded to randomize phase).
-  - Z-score p-values removed from randomize output (see randomize.py).
+  - Randomize phase now exports only full_pool + per-group aggregated outputs.
+  - No FDR/gene-list outputs in randomize phase.
 """
 
 import argparse
@@ -32,7 +32,7 @@ def timed_execution(func, args, description):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="CT_ACCUMULATION: CAAS gene accumulation significance pipeline",
+        description="CT_ACCUMULATION: CAAS gene accumulation randomization pipeline",
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -61,10 +61,6 @@ def main():
     parser.add_argument("--export-individual-rand",     action="store_true")
     parser.add_argument("--decile-bins",                type=str, default=None)
     parser.add_argument("--global-seed",                type=int, default=None)
-    parser.add_argument("--fdr-threshold",              type=float, default=0.05,
-                        help="FDR threshold for gene list export (default: 0.05)")
-    parser.add_argument("--use-all-mrca-filter",        action="store_true",
-                        help="Exclude conserved-meta rows failing asr_root_conserved in aggregation/randomization")
     parser.add_argument("--precompute-masks",           dest="precompute_masks", action="store_true")
     parser.add_argument("--no-precompute-masks",        dest="precompute_masks", action="store_false")
     parser.set_defaults(precompute_masks=True)
@@ -102,7 +98,6 @@ def main():
                 bg_caas=args.bg_caas,
                 output_prefix=args.output_prefix,
                 log_level=args.log_level,
-                use_all_mrca_filter=args.use_all_mrca_filter,
             )
             timed_execution(aggregate_fn, agg_args, "Aggregation Phase")
 
@@ -118,10 +113,8 @@ def main():
                 export_individual_rand=args.export_individual_rand,
                 decile_bins=args.decile_bins,
                 global_seed=args.global_seed,
-                fdr_threshold=args.fdr_threshold,
                 precompute_masks=args.precompute_masks,
                 log_level=args.log_level,
-                use_all_mrca_filter=args.use_all_mrca_filter,
             )
             timed_execution(randomize_fn, rand_args, "Randomization Phase")
 

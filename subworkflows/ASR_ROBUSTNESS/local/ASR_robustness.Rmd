@@ -131,12 +131,6 @@ as_bool <- function(x) {
 # Sensitivity tau grid — used ONLY in 7; never drives pipeline filtering
 TAU_GRID <- c(0.80, 0.90, 0.95, 0.99)
 
-# ── Helper: entropy (nats) ────────────────────────────────────────────────────
-shannon_entropy <- function(probs) {
-  p <- probs[probs > 0]
-  -sum(p * log(p))
-}
-
 # ── Helper: styled kable ──────────────────────────────────────────────────────
 kbl_pp <- function(df, caption = NULL) {
   df |>
@@ -210,20 +204,23 @@ if (length(node_cols_early) > 0) {
 
 ```{r conserved_status_burden}
 scenario_counts <- tibble(
-  scenario = c("include_both", "exclude_root_only", "exclude_both"),
+  scenario = c("all_positions", "asr_is_conserved_only", "asr_both_conserved", "meta_not_conserved_only"),
   description = c(
-    "No conserved-status exclusion",
-    "Exclude conserved-meta rows with asr_root_conserved = FALSE",
-    "Exclude conserved-meta rows with asr_is_conserved = FALSE or asr_root_conserved = FALSE"
+    "All positions",
+    "Positions where asr_is_conserved = TRUE",
+    "Positions where asr_is_conserved = TRUE and asr_root_conserved = TRUE",
+    "Positions where no conservation is considered (is_conserved_meta = FALSE)"
   )
 ) |>
   dplyr::rowwise() |>
   dplyr::mutate(
     rows_total = nrow(master_df),
     rows_retained = dplyr::case_when(
-      scenario == "include_both" ~ nrow(master_df),
-      scenario == "exclude_root_only" ~ sum(!(master_df$is_conserved_meta & !master_df$asr_root_conserved)),
-      TRUE ~ sum(!(master_df$is_conserved_meta & (!master_df$asr_is_conserved | !master_df$asr_root_conserved)))
+      scenario == "all_positions" ~ nrow(master_df),
+      scenario == "asr_is_conserved_only" ~ sum(master_df$asr_is_conserved, na.rm = TRUE),
+      scenario == "asr_both_conserved" ~ sum(master_df$asr_is_conserved & master_df$asr_root_conserved, na.rm = TRUE),
+      scenario == "meta_not_conserved_only" ~ sum(!master_df$is_conserved_meta, na.rm = TRUE),
+      TRUE ~ NA_integer_
     ),
     rows_removed = rows_total - rows_retained,
     retained_fraction = rows_retained / rows_total,
@@ -237,8 +234,8 @@ scenario_comparison <- scenario_counts |>
     description,
     rows_removed,
     removed_fraction,
-    incremental_vs_include_both = rows_removed - rows_removed[scenario == "include_both"],
-    incremental_vs_root_only = rows_removed - rows_removed[scenario == "exclude_root_only"]
+    incremental_vs_all = rows_removed - rows_removed[scenario == "all_positions"],
+    incremental_vs_previous = c(0, diff(rows_removed))
   )
 
 write_tsv_safe(scenario_counts, "asr_conserved_status_burden.tsv")

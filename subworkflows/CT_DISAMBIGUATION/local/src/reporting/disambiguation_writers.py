@@ -53,7 +53,10 @@ def write_caas_convergence_csvs(
     _write_csv(results, master_filename, max_pairs=max_pairs)
 
     # Export no_change cases for debugging
-    no_change_results = [r for r in results if r.get("pattern_type") == "no_change"]
+    no_change_results = [
+        r for r in results
+        if r.get("change_top") == "no_change" and r.get("change_bottom") == "no_change"
+    ]
     if no_change_results:
         _write_csv(
             no_change_results,
@@ -107,7 +110,7 @@ def _build_comments(result: Dict) -> str:
         idx += 1
 
     # Check for insufficient changes
-    if result.get("pattern_type") == "no_change":
+    if result.get("change_top") == "no_change" and result.get("change_bottom") == "no_change":
         top_count = result.get("top_change_count", 0)
         bottom_count = result.get("bottom_change_count", 0)
         if top_count > 0 or bottom_count > 0:
@@ -167,8 +170,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "pvalue_boot",
         # Pattern classification
         "pattern_type",
-        "convergence_description",
-        "convergence_mode",
         # Metadata-driven convergence context
         "caap_group",
         "amino_encoded",
@@ -178,9 +179,12 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "sig_perm",
         "sig_both",
         # Change tracking
-        "top_change_type",
-        "bottom_change_type",
+        "change_top",
+        "change_bottom",
         "change_side",
+        "parallel_top",
+        "parallel_bottom",
+        "parallel_type",
         "low_confidence_nodes",
         # Conserved-pair validation flag
         "asr_is_conserved",
@@ -354,7 +358,7 @@ def export_from_db(
             total_positions += 1
             per_gene_counts[gene] = per_gene_counts.get(gene, 0) + 1
 
-            if caas_dict.get("pattern_type") == "no_change":
+            if caas_dict.get("change_top") == "no_change" and caas_dict.get("change_bottom") == "no_change":
                 no_change_writer.writerow(
                     {k: serialize_value(caas_dict.get(k)) for k in master_fields}
                 )

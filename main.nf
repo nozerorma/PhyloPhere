@@ -65,7 +65,6 @@ include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
 include {ORA} from './workflows/ora.nf'
 include {ORA_EXCLUDED} from './workflows/ora_excluded.nf'
-include {ORA_ACCUMULATION} from './workflows/ora_accumulation.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {MOLERATE}       from './workflows/molerate.nf'
@@ -118,15 +117,17 @@ workflow {
     } else {
         // Run any combination of tools requested
         def ran_any = false
+        def reporting_results = null
+        def contrast_out = null
 
         if (params.reporting && !params.contrast_selection) {
-            REPORTING()
+            reporting_results = REPORTING()
             ran_any = true
         }
         def ct_results
         if (params.ct_tool) {
             if (params.contrast_selection) {
-                def contrast_out = CONTRAST_SELECTION()
+                contrast_out = CONTRAST_SELECTION()
 
                 // Hard stop: if CHECK_MIN_CONTRASTS emits low_contrasts.skip,
                 // terminate the current trait run gracefully (exit 0).
@@ -144,7 +145,7 @@ workflow {
             ran_any = true
         }
         if (params.contrast_selection && !params.ct_tool) {
-            CONTRAST_SELECTION()
+            contrast_out = CONTRAST_SELECTION()
             ran_any = true
         }
         def signification_results = null
@@ -276,28 +277,21 @@ workflow {
                 .filter { f -> f.name.contains('_top_') }
             sel_acc_bottom_ch = accum_results.results
                 .filter { f -> f.name.contains('_bottom_') }
-
-            if (params.ora) {
-                // Pipe accumulation gene lists into the ORA / STRING enrichment pipeline.
-                // Background falls back to --ora_background_input when no postproc channel is present.
-                def ora_acc_background_ch  = pp_cleaned_bg ?: Channel.empty()
-                ORA_ACCUMULATION(ora_acc_background_ch, accum_results.gene_lists)
-            }
         }
 
         // Populate postproc gene-list channels for FADE/MOLERATE/RER gene-set piping.
         // pp_gene_lists_val is a value channel holding the collected List<File>.
         // Restrict to global scenario directional lists only:
-        //   global_sig_top*.txt and global_sig_bottom*.txt
+        //   all_top.txt and all_bottom.txt
         // (postproc-only selection policy requested for FADE/MOLERATE).
         if (pp_gene_lists_val) {
             sel_pp_top_ch    = pp_gene_lists_val
                 .flatMap { files -> files.findAll { f ->
-                    f.name.startsWith('global_sig_top') && f.name.endsWith('.txt')
+                    f.name == 'all_top.txt'
                 } }
             sel_pp_bottom_ch = pp_gene_lists_val
                 .flatMap { files -> files.findAll { f ->
-                    f.name.startsWith('global_sig_bottom') && f.name.endsWith('.txt')
+                    f.name == 'all_bottom.txt'
                 } }
         }
 
@@ -315,24 +309,27 @@ workflow {
         sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
         sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
 
-        // Split trait/tree channels so multiple tools (FADE, MOLERATE) can each
+        // Split stats/tree channels so multiple tools (FADE, MOLERATE) can each
         // receive the single emission without competing on the same queue channel.
-        def split_traitfile = ct_results
-            ? ct_results.trait_file.multiMap { f -> fade: f; molerate: f }
+        def stats_source_ch = contrast_out
+            ? contrast_out.stats_file_out
+            : (reporting_results ? reporting_results.stats_file : Channel.empty())
+        def split_stats_file = stats_source_ch
+            ? stats_source_ch.multiMap { f -> fade: f; molerate: f }
             : Channel.empty().multiMap { f -> fade: f; molerate: f }
         def split_tree = ct_results
             ? ct_results.tree_file.multiMap { f -> fade: f; molerate: f }
             : Channel.empty().multiMap { f -> fade: f; molerate: f }
 
         if (params.fade) {
-            FADE(split_traitfile.fade, split_tree.fade,
+            FADE(split_stats_file.fade, split_tree.fade,
                  sel_acc_top_ch, sel_acc_bottom_ch,
                  sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.molerate) {
-            MOLERATE(split_traitfile.molerate, split_tree.molerate,
+            MOLERATE(split_stats_file.molerate, split_tree.molerate,
                      sel_acc_top_ch, sel_acc_bottom_ch,
                      sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true

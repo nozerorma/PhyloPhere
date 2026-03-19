@@ -1,10 +1,6 @@
-"""Public exports for biochemical grouping and side-change inference."""
+"""Public exports for biochemical grouping."""
 
 from .grouping import US, GS0, GS1, GS2, GS3, GS4, get_grouping_scheme
-
-from .state_inference import (
-    compute_change_side,
-)
 
 __all__ = [
     "US",
@@ -14,5 +10,4 @@ __all__ = [
     "GS3",
     "GS4",
     "get_grouping_scheme",
-    "compute_change_side",
 ]

@@ -4,10 +4,44 @@
  * SELECTION / shared utility processes
  *
  * PHYLIP_TO_FASTA       – convert a relaxed-PHYLIP protein alignment to FASTA
- * ANNOTATE_TREE_FG      – label foreground leaf branches in a Newick tree for FADE
- * EXTRACT_FG_BRANCHES   – write a list of FG species names for MoleRate --branches args
+ * EXTRACT_EXTREME_SPECIES – derive top/bottom species lists from trait_stats.csv
+ * ANNOTATE_TREE_FG        – label foreground leaf branches in a Newick tree for FADE
+ * EXTRACT_FG_BRANCHES     – write a list of FG species names for MoleRate --branches args
  * COLLECT_GENE_SETS     – build TOP / BOTTOM gene lists from accumulation + postproc outputs
  */
+
+
+process EXTRACT_EXTREME_SPECIES {
+    tag "extract_extreme_species"
+
+    publishDir path: "${params.outdir}/selection/species_sets",
+               mode: 'copy', overwrite: true
+
+    input:
+    path stats_file
+
+    output:
+    path "top_species.txt", emit: top_species
+    path "bottom_species.txt", emit: bottom_species
+
+    script:
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
+    if (params.use_singularity || params.use_apptainer) {
+        """
+        /usr/local/bin/_entrypoint.sh python ${local_dir}/extract_extreme_species.py \
+            --stats-file "${stats_file}" \
+            --out-top "top_species.txt" \
+            --out-bottom "bottom_species.txt"
+        """
+    } else {
+        """
+        python ${local_dir}/extract_extreme_species.py \
+            --stats-file "${stats_file}" \
+            --out-top "top_species.txt" \
+            --out-bottom "bottom_species.txt"
+        """
+    }
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -54,7 +88,7 @@ process ANNOTATE_TREE_FG {
     tag "${gene_id}_${direction}"
 
     input:
-    tuple val(gene_id), val(direction), path(fasta), path(traitfile), path(tree)
+    tuple val(gene_id), val(direction), path(fasta), path(fg_species_file), path(tree)
 
     output:
     tuple val(gene_id), val(direction), path("${gene_id}_${direction}_fg.nwk"), emit: annotated_tree
@@ -62,26 +96,23 @@ process ANNOTATE_TREE_FG {
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local"
-    def flip_flag = (direction == "bottom") ? "--flip" : ""
     if (params.use_singularity || params.use_apptainer) {
         """
         /usr/local/bin/_entrypoint.sh python ${local_dir}/annotate_tree_fg.py \
-            --traitfile "${traitfile}" \
+            --species-file "${fg_species_file}" \
             --tree      "${tree}" \
             --fasta     "${fasta}" \
             --fasta_out "${gene_id}_${direction}.fa" \
-            --output    "${gene_id}_${direction}_fg.nwk" \
-            ${flip_flag}
+            --output    "${gene_id}_${direction}_fg.nwk"
         """
     } else {
         """
         python ${local_dir}/annotate_tree_fg.py \
-            --traitfile "${traitfile}" \
+            --species-file "${fg_species_file}" \
             --tree      "${tree}" \
             --fasta     "${fasta}" \
             --fasta_out "${gene_id}_${direction}.fa" \
-            --output    "${gene_id}_${direction}_fg.nwk" \
-            ${flip_flag}
+            --output    "${gene_id}_${direction}_fg.nwk"
         """
     }
 }
@@ -94,27 +125,24 @@ process EXTRACT_FG_BRANCHES {
     tag "${direction}"
 
     input:
-    tuple val(direction), path(traitfile)
+    tuple val(direction), path(fg_species_file)
 
     output:
     tuple val(direction), path("fg_branches_${direction}.txt"), emit: fg_list
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local"
-    def flip_flag = (direction == "bottom") ? "--flip" : ""
     if (params.use_singularity || params.use_apptainer) {
         """
         /usr/local/bin/_entrypoint.sh python ${local_dir}/extract_fg_branches.py \
-            --traitfile "${traitfile}" \
-            --output    "fg_branches_${direction}.txt" \
-            ${flip_flag}
+            --species-file "${fg_species_file}" \
+            --output    "fg_branches_${direction}.txt"
         """
     } else {
         """
         python ${local_dir}/extract_fg_branches.py \
-            --traitfile "${traitfile}" \
-            --output    "fg_branches_${direction}.txt" \
-            ${flip_flag}
+            --species-file "${fg_species_file}" \
+            --output    "fg_branches_${direction}.txt"
         """
     }
 }

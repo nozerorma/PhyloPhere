@@ -19,7 +19,6 @@ from src.reporting.disambiguation_json import (
     export_aggregated_convergence_json,
     export_gene_summaries_json,
 )
-from src.reporting.gene_lists import export_gene_lists
 from src.plots.bulk_plots import generate_bulk_plots
 from src.utils.logger import configure_logging
 
@@ -123,11 +122,6 @@ def parse_arguments():
         "--include-non-significant",
         action="store_true",
         help="Include non-significant CAAS in outputs",
-    )
-    parser.add_argument(
-        "--skip-gene-lists",
-        action="store_true",
-        help="Skip per-pattern gene list export",
     )
     parser.add_argument(
         "--allow-low-confidence",
@@ -319,89 +313,6 @@ def main():
                     )
             except Exception as e:
                 logger.warning(f"JSON export skipped: {e}")
-
-        # Export gene lists per pattern (all and significant subsets)
-        if not args.skip_gene_lists:
-            try:
-                # If process returned in-memory CAAS results, use them. Otherwise
-                # attempt to load the master CSV produced by the DB exporter so
-                # gene lists are generated even in DB-backed mode.
-                if caas_results:
-                    source_results = caas_results
-                else:
-                    source_results = []
-                    try:
-                        import csv as _csv
-
-                        master_csv = (
-                            caas_files[0]
-                            if caas_files
-                            else (output_dir / "caas_convergence_master.csv")
-                        )
-                        if Path(master_csv).exists():
-                            with open(master_csv, "r", encoding="utf-8") as _f:
-                                reader = _csv.DictReader(_f)
-                                for row in reader:
-                                    # Normalize common boolean-like fields
-                                    for bool_field in (
-                                        "is_significant",
-                                        "is_stable",
-                                        "isAntiCAAS",
-                                        "ASR_ConsAntiCAAS",
-                                    ):
-                                        if bool_field in row:
-                                            val = row[bool_field]
-                                            if isinstance(val, str):
-                                                v = val.strip().lower()
-                                                row[bool_field] = v in (
-                                                    "true",
-                                                    "1",
-                                                    "yes",
-                                                    "y",
-                                                )
-                                            else:
-                                                row[bool_field] = bool(val)
-                                    # Normalize position fields: CSV uses `msa_pos`; gene lists expect `position_zero_based` or `position`.
-                                    msa_pos = row.get("msa_pos") or row.get("position")
-                                    if msa_pos is not None and msa_pos != "":
-                                        # keep as string/int as-is; downstream code stringifies
-                                        row["position_zero_based"] = msa_pos
-                                    else:
-                                        # Ensure key exists to avoid missing field issues
-                                        row.setdefault("position_zero_based", "")
-
-                                    # Ensure pattern_type exists (some CSV exports may call it 'pattern')
-                                    if "pattern_type" not in row and "pattern" in row:
-                                        row["pattern_type"] = row.get("pattern")
-
-                                    source_results.append(row)
-                    except Exception as e:
-                        logger.warning(
-                            f"Failed to read master CSV for gene list export: {e}"
-                        )
-
-                if source_results:
-                    gene_list_paths = export_gene_lists(
-                        results=source_results, output_root=output_dir
-                    )
-                    all_pattern_count = len(
-                        gene_list_paths.get("all", {}).get("by_pattern", {})
-                    )
-                    sig_pattern_count = len(
-                        gene_list_paths.get("significant", {}).get("by_pattern", {})
-                    )
-                    all_change_count = len(
-                        gene_list_paths.get("all", {}).get("by_change", {})
-                    )
-                    sig_change_count = len(
-                        gene_list_paths.get("significant", {}).get("by_change", {})
-                    )
-                    logger.info(
-                        f"  Gene lists: by_pattern (all={all_pattern_count}, sig={sig_pattern_count}), "
-                        f"by_change (all={all_change_count}, sig={sig_change_count})"
-                    )
-            except Exception as e:
-                logger.warning(f"Gene list export skipped: {e}")
 
         asr_root = (
             Path(args.asr_cache_dir) if args.asr_cache_dir else output_dir / "asr"

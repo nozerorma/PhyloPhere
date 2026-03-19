@@ -3,7 +3,7 @@
 /*
 #
 #  CT_ACCUMULATION Workflow: Tests for gene-level accumulation of CAAS using
-#  permutation-based significance testing.
+#  permutation-based randomization.
 #
 #  Inputs (dual-mode: integrated pipeline OR standalone params):
 #    - meta_caas_channel   : global_meta_caas.tsv from CT_SIGNIFICATION
@@ -127,5 +127,4 @@ workflow CT_ACCUMULATION {
 
     emit:
         results    = randomize_out.results
-        gene_lists = randomize_out.gene_lists
 }
