@@ -93,6 +93,10 @@ workflow RER_MAIN {
         def masterTrees_out = params.trees_out    ? Channel.value(file(params.trees_out))     : Channel.empty()
         def matrix_out_ch  = params.matrix_out    ? Channel.value(file(params.matrix_out))    : Channel.empty()
 
+        // Track RER_REPORT output for downstream consumers (e.g. SCORING).
+        // Populated when 'continuous' tool is run; empty otherwise.
+        def rer_report_out = null
+
         if (params.rer_tool) {
             def toolsToRun = params.rer_tool.split(',')
 
@@ -117,7 +121,10 @@ workflow RER_MAIN {
                 def gmt_ch = params.rer_gmt_file
                     ? Channel.value(file(params.rer_gmt_file))
                     : Channel.value(file('NO_FILE'))
-                RER_REPORT(rer_cont_result.continuous_output, gmt_ch)
+                rer_report_out = RER_REPORT(rer_cont_result.continuous_output, gmt_ch)
             }
         }
+
+    emit:
+        summary_tsv = rer_report_out ? rer_report_out.summary_tsv : Channel.empty()
 }

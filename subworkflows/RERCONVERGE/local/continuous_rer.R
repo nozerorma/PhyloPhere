@@ -63,6 +63,11 @@ if (sw$p.value < 0.05) {
 # ── Load gene trees ───────────────────────────────────────────────────────────
 geneTrees <- readRDS(args[2])
 
+# Resolve polytomies in the master tree: ratematrix (used by getPermsContinuous
+# internally for BM simulation) requires a rooted, fully dichotomous tree.
+geneTrees_di             <- geneTrees
+geneTrees_di$masterTree  <- ape::multi2di(geneTrees$masterTree)
+
 # ── Convert trait vector to phylogenetic paths ────────────────────────────────
 charpaths <- char2Paths(trait_vector, geneTrees)
 saveRDS(charpaths, args[3])
@@ -87,33 +92,54 @@ message(sprintf("[RER] Correlation done: %d genes tested.", nrow(res)))
 # Empirical p-value (p.perm) = proportion of null correlations >= observed |Rho|.
 num_batches      <- as.integer(args[9])
 perms_per_batch  <- as.integer(args[10])
-perm_mode        <- args[11]
 
 if (num_batches > 0 && perms_per_batch > 0) {
   message(sprintf(
-    "[RER] Permutation testing: %d batches x %d permutations (mode='%s') ...",
-    num_batches, perms_per_batch, perm_mode
+    "[RER] Permutation testing: %d batches x %d permutations (BM null) ...",
+    num_batches, perms_per_batch
   ))
 
-  all_perms <- vector("list", num_batches)
-  for (i in seq_len(num_batches)) {
-    message(sprintf("  [RER] Permutation batch %d / %d", i, num_batches))
-    all_perms[[i]] <- getPermsContinuous(
-      numperms   = perms_per_batch,
-      traitname  = "trait",
-      mastertree = geneTrees$masterTree,
-      permmode   = perm_mode
-    )
+  message(sprintf("  [RER] Permutation batch 1 / %d", num_batches))
+  perms_combined <- getPermsContinuous(
+    numperms        = perms_per_batch,
+    traitvec        = trait_vector,
+    RERmat          = traitRERw,
+    annotlist       = NULL,
+    trees           = geneTrees_di,
+    mastertree      = geneTrees_di$masterTree,
+    calculateenrich = FALSE,
+    winR            = as.numeric(args[7]),
+    winT            = as.numeric(args[8])
+  )
+
+  if (num_batches > 1) {
+    for (i in 2:num_batches) {
+      message(sprintf("  [RER] Permutation batch %d / %d", i, num_batches))
+      batch_i <- getPermsContinuous(
+        numperms        = perms_per_batch,
+        traitvec        = trait_vector,
+        RERmat          = traitRERw,
+        annotlist       = NULL,
+        trees           = geneTrees,
+        mastertree      = geneTrees$masterTree,
+        calculateenrich = FALSE,
+        winR            = as.numeric(args[7]),
+        winT            = as.numeric(args[8])
+      )
+      perms_combined <- combinePermData(perms_combined, batch_i, enrich = FALSE)
+    }
   }
 
-  perms_combined <- combinePermData(all_perms)
-  permpvals      <- permpvalcor(res, perms_combined)
+  permpvals <- permpvalcor(res, perms_combined)
 
   # Align by gene name (row names of res)
   res$p.perm <- permpvals[rownames(res)]
+  # Store total permutation count as attribute so the report can display
+  # "< 1/N" for p.perm = 0 rather than a literal zero.
+  attr(res, "n_perms") <- num_batches * perms_per_batch
   message(sprintf(
-    "[RER] Permutation p-values computed for %d / %d genes.",
-    sum(!is.na(res$p.perm)), nrow(res)
+    "[RER] Permutation p-values computed for %d / %d genes (N=%d perms total).",
+    sum(!is.na(res$p.perm)), nrow(res), num_batches * perms_per_batch
   ))
 } else {
   message("[RER] Permutation testing skipped (rer_perm_batches = 0).")

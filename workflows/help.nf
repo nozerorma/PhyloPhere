@@ -49,6 +49,13 @@ resample        Resamples virtual phenotypes for CAAS bootstrap analysis.
 
 bootstrap       Runs CAAS bootstrap analysis on a on a single MSA.
 
+pgls            Runs site-level phylogenetic GLS on CT post-processed CAAS
+                sites and renders an HTML report.
+
+scoring         Computes composite CAAS scores at position-level and
+                gene-level, integrating CT, PGLS, FADE, RER, and
+                accumulation signals.
+
 '''
 
 // Define tool-specific help messages
@@ -121,9 +128,68 @@ NOTE: progress_log creates timestamped progress tracking with ETA
 --maxfgmiss             <"NO|INTEGER">                          "NO"
 --maxmiss               <"NO|INTEGER">                          "NO" 
 '''
+
+def pgls_help = """
+Site-PGLS Help
+=============================================
+Runs site-level phylogenetic GLS association tests on CT post-processed CAAS sites.
+
+Usage:
+--pgls                  <true|false>                            true
+--pgls_caas_input       <"filtered_discovery.tsv">              null
+--my_traits             <"traits.csv">                          ${params.my_traits}
+--traitname             <"trait_column">                        ${params.traitname}
+--tree                  <"tree_file">                           ${params.tree}
+--alignment             <"alignment_dir">                       ${params.alignment}
+--ali_format            <"alignment_format">                    ${params.ali_format}
+--tax_id                <"tax_map.tsv">                         ${params.tax_id}
+--sp_colname            <"species_column">                      ${params.sp_colname}
+--discrete_method       <"quartile|quintile|decile|median_sd|parameterized"> ${params.discrete_method}
+--top_quantile          <"FLOAT">                               ${params.top_quantile}
+--bottom_quantile       <"FLOAT">                               ${params.bottom_quantile}
+--use_median_sep        <"true|false">                          ${params.use_median_sep}
+--pgls_threads          <"INTEGER">                             ${params.pgls_threads}
+--pgls_site_fdr_alpha   <"FLOAT">                               ${params.pgls_site_fdr_alpha}
+--pgls_min_per_class    <"INTEGER">                             ${params.pgls_min_per_class}
+--pgls_phylo_model      <"bm|lambda|ou|eb|delta|kappa">         ${params.pgls_phylo_model}
+"""
+def scoring_help = """
+CAAS Scoring Help
+=============================================
+Computes composite CAAS scores at position-level and gene-level.
+
+Usage:
+--scoring                   <true|false>            false
+--scoring_ora               <true|false>            true
+--scoring_position_top_pct  <FLOAT>                 0.10
+--scoring_position_top1_pct <FLOAT>                 0.01
+--scoring_gene_top_pct      <FLOAT>                 0.10
+--scoring_gene_top1_pct     <FLOAT>                 0.01
+
+Standalone mode (provide inputs directly):
+--scoring_postproc_input    <"filtered_discovery.tsv">   ""
+--scoring_pgls_input        <"site_pgls.tsv">            ""
+--scoring_fade_summary_top  <"fade_summary_top.tsv">     ""
+--scoring_fade_summary_bottom <"fade_summary_bottom.tsv"> ""
+--scoring_rer_input         <"rerconverge_summary.tsv">  ""
+--scoring_accum_dir         <"accumulation_dir/">         ""
+--scoring_background_input  <"background.txt">           ""
+
+Position-level components: biochem, ASR, convergence, parallel, [PGLS], [FADE]
+Gene-level scores: gene_caas, [gene_rand], [gene_rer], gene_composite
+"""
+
 workflow HELP {
     // Check if --help is provided
     if (params.help) {
+        if (params.scoring) {
+            log.info scoring_help
+            exit 1
+        }
+        if (params.pgls) {
+            log.info pgls_help
+            exit 1
+        }
         // Check if a specific tool is mentioned with --ct_tool
         if (params.ct_tool) {
             switch (params.ct_tool) {

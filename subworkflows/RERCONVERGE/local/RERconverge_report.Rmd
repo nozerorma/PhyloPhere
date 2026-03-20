@@ -92,6 +92,10 @@ if (is.null(res) || nrow(res) == 0) {
   knitr::knit_exit()
 }
 
+# Total permutation count stored as attribute by continuous_rer.R.
+# Falls back to NA if running the report against an older RDS.
+n_perms_total <- attr(res, "n_perms")
+
 cat(sprintf("Loaded RERconverge results: %d genes.\n", nrow(res)))
 ```
 
@@ -145,10 +149,20 @@ display_df <- rer_df %>%
     )
   )
 
+# Format p.perm: replace 0 with "< 1/N" when total permutation count is known
+fmt_pperm <- function(x) {
+  if (!is.null(n_perms_total) && !is.na(n_perms_total) && n_perms_total > 0) {
+    ifelse(is.na(x), NA_character_,
+           ifelse(x == 0, paste0("< ", sprintf("%.4f", 1 / n_perms_total)), as.character(signif(x, 3))))
+  } else {
+    as.character(signif(x, 3))
+  }
+}
+
 # Include p.perm column only when permutations were run
 if (has_perm) {
   display_df <- display_df %>%
-    mutate(p.perm = signif(p.perm, 3)) %>%
+    mutate(p.perm = fmt_pperm(p.perm)) %>%
     select(gene, Rho, N, P, p.adj, p.perm, Call) %>%
     rename(Gene = gene, `Raw P` = P, `BH p.adj` = p.adj, `p.perm` = p.perm)
 } else {
@@ -376,7 +390,7 @@ top_pos <- rer_df %>%
 
 if (has_perm) {
   top_pos <- top_pos %>%
-    mutate(p.perm = signif(p.perm, 3)) %>%
+    mutate(p.perm = fmt_pperm(p.perm)) %>%
     select(gene, Rho, N, p.adj, p.perm)
   col_names <- c("Gene", "Rho", "N", "BH p.adj", "p.perm")
 } else {
@@ -406,7 +420,7 @@ top_neg <- rer_df %>%
 
 if (has_perm) {
   top_neg <- top_neg %>%
-    mutate(p.perm = signif(p.perm, 3)) %>%
+    mutate(p.perm = fmt_pperm(p.perm)) %>%
     select(gene, Rho, N, p.adj, p.perm)
 } else {
   top_neg <- top_neg %>% select(gene, Rho, N, p.adj)
@@ -440,7 +454,7 @@ if (has_gmt) {
   # Convert correlation results to signed ranking statistic:
   # stat = sign(Rho) * -log10(P)  — genes are ranked from most
   # negatively to most positively correlated with the trait.
-  stats_vec <- getStatl(res)
+  stats_vec <- getStat(res)
 
   gmt_name  <- tools::file_path_sans_ext(basename(params$gmt_file))
   annots    <- read.gmt(params$gmt_file)
@@ -499,14 +513,7 @@ DT::datatable(
     sprintf("Top %d enriched pathways (Wilcoxon rank-sum) | Trait: %s",
             params$enrich_top_n, params$traitname)
   )
-) %>%
-  DT::formatStyle(
-    "cor",
-    backgroundColor = DT::styleEqual(
-      c("positive", "negative"),
-      c("#ffe0e0",   "#dff0ff")
-    )
-  )
+)
 ```
 
 ```{r enrich-plot, fig.height=7, fig.width=10, eval=!is.null(enrich_df)}
@@ -577,9 +584,9 @@ and reported as `p.adj`. A gene is called **positively correlated** if
 p.adj < `r params$pval_threshold` and Rho > `r params$rho_threshold`, and
 **negatively correlated** if Rho < `r -params$rho_threshold`.
 
-**Permutation statistics:** `r if (has_perm) paste0("Empirical p-values (p.perm) were computed by generating null phenotypes under a Brownian Motion model of evolution using getPermsContinuous() (Complete Case method). The empirical p-value is the proportion of ", nrow(rer_df), " null correlations with |Rho| ≥ the observed value. Batches were combined with combinePermData().") else "Not run (rer_perm_batches = 0). Re-run with rer_perm_batches > 0 to enable (recommended: 10 batches × 100 permutations = 1,000 total, following Valenzuela et al., 2024)."`
+**Permutation statistics:** `r if (has_perm) { n_str <- if (!is.null(n_perms_total) && !is.na(n_perms_total)) paste0(n_perms_total, " total permutations (minimum detectable p.perm = 1/", n_perms_total, " = ", round(1/n_perms_total, 4), ")") else "N permutations (count not stored in this RDS)"; paste0("Empirical p-values (p.perm) were computed by generating null phenotypes under a Brownian Motion model of evolution using getPermsContinuous(). The empirical p-value is the proportion of null correlations with |Rho| ≥ the observed value. ", n_str, ". p.perm = 0 (displayed as '< 1/N') means the observed correlation exceeded all null draws — increase permutation count for finer resolution. Batches combined with combinePermData().") } else "Not run (rer_perm_batches = 0). Re-run with rer_perm_batches > 0 to enable (recommended: 10 batches × 100 permutations = 1,000 total, following Valenzuela et al., 2024)."`
 
-**Pathway enrichment:** `r if (has_gmt) paste0("Gene-set enrichment was performed with fastwilcoxGMTall() using a Wilcoxon rank-sum test on genes ranked by sign(Rho) × -log10(P) (via getStatl()). GMT file: ", basename(params$gmt_file), ". Minimum pathway size: ", params$enrich_min_genes, " genes. P-values are BH-corrected across pathways.") else paste0("Not run — no GMT file provided. Supply --rer_gmt_file to enable.")`
+**Pathway enrichment:** `r if (has_gmt) paste0("Gene-set enrichment was performed with fastwilcoxGMTall() using a Wilcoxon rank-sum test on genes ranked by sign(Rho) × -log10(P) (via getStat()). GMT file: ", basename(params$gmt_file), ". Minimum pathway size: ", params$enrich_min_genes, " genes. P-values are BH-corrected across pathways.") else paste0("Not run — no GMT file provided. Supply --rer_gmt_file to enable.")`
 
 ---
 

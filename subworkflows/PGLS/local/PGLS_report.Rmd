@@ -1,0 +1,171 @@
+---
+title: "Site-PGLS Report"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+params:
+  pgls_tsv: NULL
+  site_diag_tsv: NULL
+  intval_tsv: NULL
+  extremes_tsv: NULL
+  traitname: "unknown_trait"
+  output_dir: "."
+  top_hits_n: 20
+  top_genes_n: 20
+---
+
+```{r setup, include=FALSE}
+suppressPackageStartupMessages({
+  library(readr)
+  library(dplyr)
+  library(ggplot2)
+  library(scales)
+  library(knitr)
+})
+
+theme_set(theme_minimal(base_size = 13))
+
+read_tsv_safe <- function(path, columns = NULL) {
+  if (is.null(path) || !nzchar(path) || !file.exists(path)) {
+    if (is.null(columns)) {
+      return(tibble())
+    }
+    return(as_tibble(setNames(replicate(length(columns), logical(0), simplify = FALSE), columns)))
+  }
+  readr::read_tsv(path, show_col_types = FALSE, progress = FALSE)
+}
+
+pgls_df <- read_tsv_safe(params$pgls_tsv)
+diag_df <- read_tsv_safe(params$site_diag_tsv)
+intval_df <- read_tsv_safe(params$intval_tsv)
+extremes_df <- read_tsv_safe(params$extremes_tsv)
+
+if (!"sig_p_pgls" %in% names(pgls_df)) pgls_df$sig_p_pgls <- logical(nrow(pgls_df))
+if (!"q_p_pgls" %in% names(pgls_df)) pgls_df$q_p_pgls <- NA_real_
+if (!"p_pgls" %in% names(pgls_df)) pgls_df$p_pgls <- NA_real_
+
+gene_summary <- if (nrow(pgls_df) == 0) {
+  tibble(
+    Gene = character(),
+    tested_sites = integer(),
+    significant_sites = integer(),
+    best_q_p_pgls = numeric(),
+    best_p_pgls = numeric(),
+    mean_beta_top = numeric()
+  )
+} else {
+  pgls_df %>%
+    group_by(Gene) %>%
+    summarise(
+      tested_sites = sum(is.finite(p_pgls)),
+      significant_sites = sum(sig_p_pgls %in% TRUE, na.rm = TRUE),
+      best_q_p_pgls = suppressWarnings(min(q_p_pgls, na.rm = TRUE)),
+      best_p_pgls = suppressWarnings(min(p_pgls, na.rm = TRUE)),
+      mean_beta_top = mean(beta_top, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      best_q_p_pgls = ifelse(is.infinite(best_q_p_pgls), NA_real_, best_q_p_pgls),
+      best_p_pgls = ifelse(is.infinite(best_p_pgls), NA_real_, best_p_pgls)
+    ) %>%
+    arrange(desc(significant_sites), best_q_p_pgls, best_p_pgls, Gene)
+}
+
+readr::write_tsv(gene_summary, "pgls_gene_summary.tsv")
+
+tested_sites_n <- if (nrow(pgls_df) == 0) 0 else sum(is.finite(pgls_df$p_pgls))
+significant_sites_n <- if (nrow(pgls_df) == 0) 0 else sum(pgls_df$sig_p_pgls %in% TRUE, na.rm = TRUE)
+genes_n <- dplyr::n_distinct(pgls_df$Gene)
+sig_genes_n <- if (nrow(gene_summary) == 0) 0 else sum(gene_summary$significant_sites > 0, na.rm = TRUE)
+trait_model_df <- diag_df %>% filter(diag_type == "trait_model")
+```
+
+This report summarises **site-level phylogenetic GLS** results for `r params$traitname` using CT post-processed CAAS sites.
+
+## Summary
+
+```{r summary-table, echo=FALSE}
+summary_tbl <- tibble(
+  metric = c("Genes evaluated", "Sites tested", "Significant sites (q <= alpha)", "Genes with >=1 significant site"),
+  value = c(genes_n, tested_sites_n, significant_sites_n, sig_genes_n)
+)
+kable(summary_tbl, col.names = c("Metric", "Value"))
+```
+
+## Top Site Hits
+
+```{r top-site-hits, echo=FALSE}
+top_hits <- if (nrow(pgls_df) == 0) {
+  tibble()
+} else {
+  pgls_df %>%
+    mutate(
+      neg_log10_q = ifelse(is.finite(q_p_pgls) & q_p_pgls > 0, -log10(q_p_pgls), NA_real_)
+    ) %>%
+    arrange(q_p_pgls, p_pgls, desc(abs(beta_top))) %>%
+    slice_head(n = params$top_hits_n) %>%
+    select(Gene, Position, n_used, n_top_aa, n_bottom_aa, beta_top, p_pgls, q_p_pgls, sig_p_pgls)
+}
+
+if (nrow(top_hits) == 0) {
+  cat("No tested sites were available.\n")
+} else {
+  kable(top_hits)
+}
+```
+
+```{r qvalue-plot, echo=FALSE, fig.width=8, fig.height=5}
+plot_df <- pgls_df %>%
+  filter(is.finite(q_p_pgls), q_p_pgls > 0, is.finite(beta_top)) %>%
+  mutate(significant = ifelse(sig_p_pgls, "significant", "not_significant"))
+
+if (nrow(plot_df) == 0) {
+  plot.new()
+  text(0.5, 0.5, "No finite q-values available for plotting")
+} else {
+  ggplot(plot_df, aes(x = beta_top, y = -log10(q_p_pgls), color = significant)) +
+    geom_point(alpha = 0.8, size = 2) +
+    scale_color_manual(values = c(significant = "#b22222", not_significant = "#4c78a8")) +
+    labs(
+      title = "Site-level PGLS hits",
+      x = "beta_top",
+      y = expression(-log[10](q[pgls])),
+      color = NULL
+    )
+}
+```
+
+## Gene Summary
+
+```{r gene-summary, echo=FALSE}
+if (nrow(gene_summary) == 0) {
+  cat("No gene summaries available.\n")
+} else {
+  kable(gene_summary %>% slice_head(n = params$top_genes_n))
+}
+```
+
+## Trait Model Diagnostics
+
+```{r trait-models, echo=FALSE}
+if (nrow(trait_model_df) == 0) {
+  cat("No trait-model diagnostics were emitted.\n")
+} else {
+  kable(
+    trait_model_df %>%
+      select(trait, model, theta, ll, aicc, lrt_df, lrt_stat, lrt_p, is_best_aicc) %>%
+      arrange(trait, aicc)
+  )
+}
+```
+
+## Validation Coverage
+
+```{r validation-summary, echo=FALSE}
+validation_tbl <- tibble(
+  dataset = c("Internal validation rows", "Extreme-membership rows"),
+  rows = c(nrow(intval_df), nrow(extremes_df))
+)
+kable(validation_tbl)
+```

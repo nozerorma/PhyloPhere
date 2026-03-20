@@ -56,7 +56,7 @@ process RER_REPORT {
         cp -R ${local_dir}/* .
 
         echo "[RER_REPORT] Input RDS: ${continuous_output}"
-        echo "[RER_REPORT] GMT file: ${gmt_arg:-none}"
+        echo "[RER_REPORT] GMT file: ${gmt_arg ?: 'none'}"
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
@@ -87,7 +87,7 @@ process RER_REPORT {
         cp -R ${local_dir}/* .
 
         echo "[RER_REPORT] Input RDS: ${continuous_output}"
-        echo "[RER_REPORT] GMT file: ${gmt_arg:-none}"
+        echo "[RER_REPORT] GMT file: ${gmt_arg ?: 'none'}"
 
         Rscript -e "
             rmarkdown::render(
