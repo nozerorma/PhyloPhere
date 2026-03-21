@@ -34,8 +34,9 @@ treePath <- args[2]
 geneTrees <- readRDS(treePath)
 
 # Get residuals from our traitfile
-traitRERw <- getAllResiduals(geneTrees,useSpecies=names(trait_vector), 
-    transform = "sqrt", weighted = T, scale = T)
+min_sp <- if (length(args) >= 4) as.integer(args[4]) else 10L
+traitRERw <- getAllResiduals(geneTrees, useSpecies=names(trait_vector),
+    transform = "sqrt", weighted = T, scale = T, min.sp = min_sp)
 
 # Now we save our RERs
 

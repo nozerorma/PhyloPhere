@@ -65,7 +65,7 @@ output_dir          <- params$output_dir
 stopifnot(
   !is.null(disambig_dir),
   !is.null(posterior_threshold),
-  posterior_threshold > 0, posterior_threshold <= 1
+  posterior_threshold >= 0, posterior_threshold <= 1
 )
 
 # ── Output directories ────────────────────────────────────────────────────────
