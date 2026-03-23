@@ -26,9 +26,12 @@ RESULT_COLUMNS = [
     "lambda_full",
     "lambda_null",
     "lrt_stat",
-    "p_pgls",
-    "q_p_pgls",
-    "sig_p_pgls",
+    "p_pgls_top",       # one-tailed: H1 = beta_top > 0  (amino acid enriched in high-trait species)
+    "p_pgls_bottom",    # one-tailed: H1 = beta_top < 0  (amino acid enriched in low-trait species)
+    "q_p_pgls_top",
+    "sig_p_pgls_top",
+    "q_p_pgls_bottom",
+    "sig_p_pgls_bottom",
 ]
 
 DIAG_COLUMNS = [
@@ -123,10 +126,20 @@ def _lrt(y, A, X_full, X_null):
     return stat, df, p, fit_full
 
 
-def _one_tailed_same_direction(two_sided_p: float, beta_top: float) -> float:
+def _one_tailed_top(two_sided_p: float, beta_top: float) -> float:
+    """One-tailed p-value for H1: beta_top > 0 (amino acid enriched in high-trait / top species)."""
     if not np.isfinite(two_sided_p) or not np.isfinite(beta_top):
         return np.nan
     if beta_top <= 0:
+        return 1.0
+    return min(1.0, max(0.0, two_sided_p / 2.0))
+
+
+def _one_tailed_bottom(two_sided_p: float, beta_top: float) -> float:
+    """One-tailed p-value for H1: beta_top < 0 (amino acid enriched in low-trait / bottom species)."""
+    if not np.isfinite(two_sided_p) or not np.isfinite(beta_top):
+        return np.nan
+    if beta_top >= 0:
         return 1.0
     return min(1.0, max(0.0, two_sided_p / 2.0))
 
@@ -329,7 +342,8 @@ def _site_lrt(y: np.ndarray,
         "lrt_stat": float(stat),
         "lrt_df": int(df),
         "p_two_sided": float(p_two),
-        "p_one_tailed": float(_one_tailed_same_direction(p_two, beta_top)),
+        "p_one_tailed_top":    float(_one_tailed_top(p_two, beta_top)),
+        "p_one_tailed_bottom": float(_one_tailed_bottom(p_two, beta_top)),
         "beta_top": beta_top,
         "lambda_full": full.get("theta", np.nan),
         "lambda_null": null.get("theta", np.nan),
@@ -521,7 +535,8 @@ def run_caas_pgls(valid_df: pd.DataFrame,
                 "lambda_full": np.nan,
                 "lambda_null": np.nan,
                 "lrt_stat": np.nan,
-                "p_pgls": np.nan,
+                "p_pgls_top": np.nan,
+                "p_pgls_bottom": np.nan,
             }
             return row, diag_row
 
@@ -547,14 +562,16 @@ def run_caas_pgls(valid_df: pd.DataFrame,
             row["lambda_full"] = site_fit["lambda_full"]
             row["lambda_null"] = site_fit["lambda_null"]
             row["lrt_stat"] = site_fit["lrt_stat"]
-            row["p_pgls"] = site_fit["p_one_tailed"]
+            row["p_pgls_top"]    = site_fit["p_one_tailed_top"]
+            row["p_pgls_bottom"] = site_fit["p_one_tailed_bottom"]
         except Exception as e:
             logging.error(f"[PGLS] LRT failed for {gene}:{pos} trait={trait} model={best}: {e}")
             row["beta_top"] = np.nan
             row["lambda_full"] = np.nan
             row["lambda_null"] = np.nan
             row["lrt_stat"] = np.nan
-            row["p_pgls"] = np.nan
+            row["p_pgls_top"]    = np.nan
+            row["p_pgls_bottom"] = np.nan
 
         return row, diag_row
 
@@ -572,8 +589,9 @@ def run_caas_pgls(valid_df: pd.DataFrame,
 
     diags.extend(trait_diag_rows)
 
-    res_df = pd.DataFrame(results, columns=RESULT_COLUMNS[:-2])
+    res_df = pd.DataFrame(results, columns=RESULT_COLUMNS[:-4])
     diag_df = pd.DataFrame(diags, columns=DIAG_COLUMNS)
-    res_df = bh_fdr_per_group(res_df, "p_pgls", group_col="trait", alpha=float(fdr_alpha))
+    res_df = bh_fdr_per_group(res_df, "p_pgls_top",    group_col="trait", alpha=float(fdr_alpha))
+    res_df = bh_fdr_per_group(res_df, "p_pgls_bottom", group_col="trait", alpha=float(fdr_alpha))
     res_df = res_df.reindex(columns=RESULT_COLUMNS)
     return res_df, diag_df

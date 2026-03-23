@@ -54,7 +54,8 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # Detect which optional components are available
-has_pgls <- any(!is.na(pos_df$pgls_score))
+has_pgls <- "p_pgls_top" %in% names(pos_df) &&
+            (any(!is.na(pos_df$p_pgls_top)) || any(!is.na(pos_df$p_pgls_bottom)))
 has_rand <- any(!is.na(gene_df$gene_rand_score))
 has_rer  <- any(!is.na(gene_df$gene_rer_score))
 has_fade <- "gene_fade_score" %in% names(gene_df) && any(!is.na(gene_df$gene_fade_score))
@@ -82,7 +83,6 @@ substitutions (CAAS).  The scoring operates at two levels:
    - **Convergence score** — type and directionality of the convergent change.
    - **Parallel score** — parallelism pattern weighted by MRCA posterior
      confidence.
-   `r if (has_pgls) "- **PGLS score** — significance of phylogenetic least squares association."`
 
 2. **Gene-level scores** — each gene receives up to four independent scores:
    - **gene_caas_score** — 90th percentile of position-level CAAS scores.
@@ -244,23 +244,14 @@ $$\text{parallel\_score} = \frac{\text{mean\_parallel} + \text{bidirectional}}{2
 
 ---
 
-#### 7 · PGLS score  *(optional)*
-
-Decile rank of the site-level phylogenetic GLS p-value (`p_pgls`), inverted:
-
-$$\text{pgls\_score} = 1 - \frac{\text{ntile}(p_{\text{pgls}}, 10) - 1}{9}$$
-
-Positions from genes not tested by PGLS receive `NA` and are excluded from
-`CAAS_score` when PGLS is not run globally.
-
----
-
 #### Composite CAAS score
 
-Unweighted mean of the four core components plus PGLS when available.
-FADE is **not** included here — it is a gene-level signal (see below).
+Unweighted mean of the four core components. PGLS and FADE are **not**
+included — PGLS is an independent validation signal evaluated in the
+[Position Characterisation](#position-characterisation) section; FADE is a
+gene-level signal (see below).
 
-$$\text{CAAS\_score} = \frac{\text{biochem} + \text{asr} + \text{convergence} + \text{parallel} + [\text{pgls}]}{N_{\text{components}}}$$
+$$\text{CAAS\_score} = \frac{\text{biochem} + \text{asr} + \text{convergence} + \text{parallel}}{4}$$
 
 ---
 
@@ -407,25 +398,11 @@ ggplot(pos_df, aes(x = parallel_score)) +
   theme(plot.title = element_text(face = "bold"))
 ```
 
-`r if (has_pgls) "### PGLS Score"`
-
-```{r pgls-dist, eval=has_pgls, fig.height=4.5}
-ggplot(pos_df %>% filter(!is.na(pgls_score)), aes(x = pgls_score)) +
-  geom_histogram(aes(y = after_stat(density)), bins = 30,
-                 fill = .tableau10[9], alpha = 0.7) +
-  geom_density(linewidth = 0.8, colour = .tableau10[10]) +
-  labs(title = "PGLS Score Distribution",
-       subtitle = "Deciles of phylogenetic GLS p-values",
-       x = "pgls_score", y = "Density") +
-  theme(plot.title = element_text(face = "bold"))
-```
-
 ### Component Overview
 
 ```{r component-overview, fig.height=6}
 # Faceted density comparison of all position-level components
 component_cols <- c("biochem_score", "asr_score", "convergence_score", "parallel_score")
-if (has_pgls) component_cols <- c(component_cols, "pgls_score")
 
 long_df <- pos_df %>%
   select(all_of(component_cols)) %>%
@@ -451,7 +428,6 @@ ggplot(long_df, aes(x = Score, fill = Component)) +
 # can read off which signal drives positions into the top-N% × direction bucket.
 
 component_cols_tp <- c("biochem_score", "asr_score", "convergence_score", "parallel_score")
-if (has_pgls) component_cols_tp <- c(component_cols_tp, "pgls_score")
 
 thr_10_tp <- quantile(pos_df$CAAS_score, 1 - top_pct,  na.rm = TRUE)
 thr_1_tp  <- quantile(pos_df$CAAS_score, 1 - top1_pct, na.rm = TRUE)
@@ -528,9 +504,9 @@ gridExtra::grid.arrange(
 
 ```{r top-positions-table}
 display_cols <- c("Gene", "Position", "CAAS_score", "biochem_score",
-                  "asr_score", "convergence_score", "parallel_score")
-if (has_pgls) display_cols <- c(display_cols, "pgls_score")
-display_cols <- c(display_cols, "change_side")
+                  "asr_score", "convergence_score", "parallel_score", "change_side")
+if (has_pgls) display_cols <- c(display_cols, "p_pgls_top", "sig_p_pgls_top",
+                                              "p_pgls_bottom", "sig_p_pgls_bottom")
 
 DT::datatable(
   pos_df %>%
@@ -545,6 +521,217 @@ DT::datatable(
     sprintf("Position-level CAAS scores | Trait: %s", params$traitname)
   )
 )
+```
+
+---
+
+## Position Characterisation {.tabset #position-characterisation}
+
+This section examines how ranked positions behave in relation to external
+signals that do **not** contribute to the `CAAS_score`. PGLS is treated as
+an independent validator: we test whether PGLS-significant positions are
+over-represented among the highest-scoring positions.
+
+> **Important — PGLS directionality:** `p_pgls` is a **one-tailed** test for
+> `beta_top > 0` (amino acid enriched in high-trait / *top* species). Positions
+> where `beta_top ≤ 0` receive `p_pgls = 1` by construction, so `sig_p_pgls`
+> can only ever be `TRUE` for changes going in the **top** direction. Enrichment
+> tests are therefore stratified by `change_side` and a *directionally
+> consistent* flag is computed for each position.
+
+`r if (!has_pgls) "> **Note:** PGLS results are not available for this run — characterisation skipped."`
+
+```{r pgls-char-setup, eval=has_pgls}
+# Annotate each position that has a PGLS result.
+# "directionally consistent" = the direction-appropriate sig flag is TRUE:
+#   change_side == "top"    → sig_p_pgls_top    (H1: beta_top > 0)
+#   change_side == "bottom" → sig_p_pgls_bottom (H1: beta_top < 0)
+#   change_side == "both"   → either sig flag is TRUE
+
+as_logical <- function(x) isTRUE(x) | (!is.na(x) & as.character(x) == "TRUE")
+
+pgls_char <- pos_df %>%
+  filter(!is.na(p_pgls_top) | !is.na(p_pgls_bottom)) %>%
+  mutate(
+    sig_top    = as_logical(sig_p_pgls_top),
+    sig_bottom = as_logical(sig_p_pgls_bottom),
+    pgls_consistent = case_when(
+      change_side == "top"    ~ sig_top,
+      change_side == "bottom" ~ sig_bottom,
+      change_side == "both"   ~ sig_top | sig_bottom,
+      TRUE                    ~ FALSE
+    ),
+    caas_decile   = dplyr::ntile(CAAS_score, 10),
+    in_top_decile = CAAS_score >= thr_10,
+    in_top_pct    = CAAS_score >= thr_1
+  )
+```
+
+### PGLS Enrichment
+
+```{r pgls-char-fisher, eval=has_pgls}
+# Fisher's exact test: enrichment of directionally-consistent PGLS positions
+# in the top decile / top percentile, stratified by change_side direction.
+
+run_fisher <- function(df, flag_col, label) {
+  if (nrow(df) == 0 || sum(df$pgls_consistent, na.rm = TRUE) == 0) {
+    return(tibble(
+      Threshold = label, Direction = unique(df$change_side)[1],
+      N_top = NA_integer_, N_top_consistent = NA_integer_, Pct_top = "—",
+      N_rest = NA_integer_, N_rest_consistent = NA_integer_, Pct_rest = "—",
+      Odds_ratio = "—", CI_95 = "—", P_value = "—"
+    ))
+  }
+  mat <- table(
+    In_top      = df[[flag_col]],
+    PGLS_consist = df$pgls_consistent
+  )
+  # Ensure the table is 2×2 even when one cell is 0
+  mat <- matrix(
+    c(sum(!df[[flag_col]] & !df$pgls_consistent, na.rm = TRUE),
+      sum( df[[flag_col]] & !df$pgls_consistent, na.rm = TRUE),
+      sum(!df[[flag_col]] &  df$pgls_consistent, na.rm = TRUE),
+      sum( df[[flag_col]] &  df$pgls_consistent, na.rm = TRUE)),
+    nrow = 2, dimnames = list(
+      In_top        = c("FALSE", "TRUE"),
+      PGLS_consist  = c("FALSE", "TRUE")
+    )
+  )
+  ft         <- fisher.test(mat)
+  n_top      <- sum( df[[flag_col]], na.rm = TRUE)
+  n_top_c    <- sum( df[[flag_col]] & df$pgls_consistent, na.rm = TRUE)
+  n_rest     <- sum(!df[[flag_col]], na.rm = TRUE)
+  n_rest_c   <- sum(!df[[flag_col]] & df$pgls_consistent, na.rm = TRUE)
+  tibble(
+    Threshold        = label,
+    Direction        = unique(df$change_side)[1],
+    N_top            = n_top,
+    N_top_consistent = n_top_c,
+    Pct_top          = sprintf("%.1f%%", 100 * n_top_c  / max(n_top,  1)),
+    N_rest           = n_rest,
+    N_rest_consistent = n_rest_c,
+    Pct_rest         = sprintf("%.1f%%", 100 * n_rest_c / max(n_rest, 1)),
+    Odds_ratio       = sprintf("%.2f", ft$estimate),
+    CI_95            = sprintf("[%.2f, %.2f]", ft$conf.int[1], ft$conf.int[2]),
+    P_value          = formatC(ft$p.value, format = "e", digits = 2)
+  )
+}
+
+fisher_results <- bind_rows(lapply(
+  c("top", "bottom", "both"),
+  function(dir) {
+    df_dir <- if (dir == "both") pgls_char else pgls_char %>% filter(change_side == dir)
+    df_dir <- df_dir %>% mutate(change_side = dir)
+    bind_rows(
+      run_fisher(df_dir, "in_top_decile",
+                 sprintf("Top %g%% (decile)", top_pct  * 100)),
+      run_fisher(df_dir, "in_top_pct",
+                 sprintf("Top %g%% (percentile)", top1_pct * 100))
+    )
+  }
+))
+
+knitr::kable(
+  fisher_results,
+  caption = paste(
+    "Fisher's exact test — enrichment of directionally-consistent PGLS",
+    "positions in top-ranking groups, stratified by change direction.",
+    "Note: sig_p_pgls only captures beta_top > 0 (top direction);",
+    "bottom-direction consistency uses beta_top < 0."
+  ),
+  align = c("l", "l", rep("r", ncol(fisher_results) - 2))
+)
+```
+
+### PGLS Fraction by Decile
+
+```{r pgls-char-decile-plot, eval=has_pgls, fig.height=6}
+# Fraction of directionally-consistent PGLS positions per CAAS decile,
+# faceted by change_side direction.
+
+decile_summary <- pgls_char %>%
+  group_by(change_side, caas_decile) %>%
+  summarise(
+    n_total  = n(),
+    n_consist = sum(pgls_consistent, na.rm = TRUE),
+    frac      = n_consist / n_total,
+    .groups   = "drop"
+  )
+
+overall_rates <- pgls_char %>%
+  group_by(change_side) %>%
+  summarise(
+    rate = sum(pgls_consistent, na.rm = TRUE) / n(),
+    .groups = "drop"
+  )
+
+ggplot(decile_summary, aes(x = caas_decile, y = frac)) +
+  geom_col(fill = .tableau10[1], alpha = 0.8, width = 0.7) +
+  geom_hline(data = overall_rates, aes(yintercept = rate),
+             linetype = "dashed", colour = .tableau10[3], linewidth = 0.8) +
+  geom_text(data = overall_rates,
+            aes(x = 10.3, y = rate,
+                label = sprintf("Overall\n%.1f%%", rate * 100)),
+            hjust = 0, vjust = 0.5, size = 2.8, colour = .tableau10[3]) +
+  scale_x_continuous(breaks = 1:10,
+                     labels = c("1\n(low)", as.character(2:9), "10\n(high)")) +
+  scale_y_continuous(
+    labels = function(x) paste0(round(x * 100), "%"),
+    expand = expansion(mult = c(0, 0.20))
+  ) +
+  facet_wrap(~change_side, ncol = 1) +
+  labs(
+    title    = "Directionally-Consistent PGLS Positions by CAAS Decile",
+    subtitle = "Stratified by change direction (top / bottom / both)",
+    x = "CAAS Score Decile",
+    y = "Fraction directionally-consistent PGLS"
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        strip.text = element_text(face = "bold"))
+```
+
+### PGLS p-value Distribution
+
+```{r pgls-char-pval-dist, eval=has_pgls, fig.height=6}
+# For each position show the directionally-relevant p-value:
+#   change_side == "top"    → p_pgls_top
+#   change_side == "bottom" → p_pgls_bottom
+#   change_side == "both"   → min(p_pgls_top, p_pgls_bottom)
+# Faceted by change_side × CAAS rank group.
+
+pgls_pval_plot <- pgls_char %>%
+  mutate(
+    p_relevant = case_when(
+      change_side == "top"    ~ p_pgls_top,
+      change_side == "bottom" ~ p_pgls_bottom,
+      change_side == "both"   ~ pmin(p_pgls_top, p_pgls_bottom, na.rm = TRUE),
+      TRUE                    ~ NA_real_
+    ),
+    rank_group = case_when(
+      in_top_pct    ~ sprintf("Top %g%%", top1_pct * 100),
+      in_top_decile ~ sprintf("Top %g%%", top_pct  * 100),
+      TRUE          ~ "Rest"
+    ),
+    rank_group = factor(rank_group,
+                        levels = c(sprintf("Top %g%%", top1_pct * 100),
+                                   sprintf("Top %g%%", top_pct  * 100),
+                                   "Rest"))
+  ) %>%
+  filter(!is.na(p_relevant))
+
+ggplot(pgls_pval_plot, aes(x = p_relevant, fill = rank_group)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 40, alpha = 0.7,
+                 position = "identity") +
+  scale_fill_manual(values = .tableau10[c(4, 3, 1)]) +
+  facet_grid(change_side ~ rank_group, scales = "free_y") +
+  labs(
+    title    = "Directional PGLS p-value Distribution by Direction × CAAS Score Group",
+    subtitle = "p-value shown is direction-relevant (top: p_pgls_top; bottom: p_pgls_bottom; both: min of both)",
+    x = "Directional p-value", y = "Density", fill = NULL
+  ) +
+  theme(plot.title      = element_text(face = "bold"),
+        legend.position = "none",
+        strip.text      = element_text(face = "bold", size = 8))
 ```
 
 ---
@@ -816,8 +1003,7 @@ DT::datatable(
 ## Summary
 
 ```{r summary-stats}
-n_components <- 4L  # biochem, asr, convergence, parallel
-if (has_pgls) n_components <- n_components + 1L
+n_components <- 4L  # biochem, asr, convergence, parallel (PGLS is characterisation only)
 
 n_gene_components <- 1L  # gene_caas always present
 if (has_rand) n_gene_components <- n_gene_components + 1L

@@ -300,22 +300,35 @@ pos_scores <- pos_scores %>%
     )
   )
 
-# ── 2f. PGLS score (optional) ───────────────────────────────────────────────
+# ── 2f. PGLS (optional) — forwarded for position characterisation only ───────
+# PGLS does NOT contribute to CAAS_score. The raw p-values and significance
+# flags are passed through to position_scores.tsv for post-hoc enrichment
+# analysis in the report (see "Position Characterisation" section).
 has_pgls <- file_exists(pgls_file)
 if (has_pgls) {
   cat("Loading PGLS:", pgls_file, "\n")
   pgls <- read_tsv(pgls_file, show_col_types = FALSE) %>%
-    filter(!is.na(p_pgls)) %>%
-    mutate(pgls_score = decile_score(p_pgls)) %>%
-    select(Gene, Position, pgls_score)
+    filter(!is.na(p_pgls_top) | !is.na(p_pgls_bottom)) %>%
+    select(Gene, Position,
+           any_of(c("p_pgls_top", "q_p_pgls_top", "sig_p_pgls_top",
+                    "p_pgls_bottom", "q_p_pgls_bottom", "sig_p_pgls_bottom",
+                    "beta_top")))
 
   pos_scores <- pos_scores %>%
     left_join(pgls, by = c("Gene", "Position"))
 
-  cat(sprintf("  Merged %d PGLS scores\n", sum(!is.na(pos_scores$pgls_score))))
+  cat(sprintf("  Merged %d PGLS entries (top: %d sig, bottom: %d sig)\n",
+              sum(!is.na(pos_scores$p_pgls_top) | !is.na(pos_scores$p_pgls_bottom)),
+              sum(isTRUE(pos_scores$sig_p_pgls_top)    | pos_scores$sig_p_pgls_top    == "TRUE", na.rm = TRUE),
+              sum(isTRUE(pos_scores$sig_p_pgls_bottom) | pos_scores$sig_p_pgls_bottom == "TRUE", na.rm = TRUE)))
 } else {
   cat("PGLS: not available, skipping\n")
-  pos_scores$pgls_score <- NA_real_
+  pos_scores <- pos_scores %>%
+    mutate(
+      p_pgls_top        = NA_real_, q_p_pgls_top    = NA_real_, sig_p_pgls_top    = NA,
+      p_pgls_bottom     = NA_real_, q_p_pgls_bottom = NA_real_, sig_p_pgls_bottom = NA,
+      beta_top          = NA_real_
+    )
 }
 
 # ── 2g. FADE (moved to gene-level — see section 3c) ─────────────────────────
@@ -345,20 +358,18 @@ if (has_fade) {
 }
 
 # ── 2h. CAAS Score (composite) ──────────────────────────────────────────────
-# Unweighted mean of: biochem_score, asr_score, convergence_score,
-# parallel_score, [pgls_score]
+# Unweighted mean of the four core components: biochem_score, asr_score,
+# convergence_score, parallel_score.
+# PGLS is forwarded for characterisation only and does NOT enter CAAS_score.
 # FADE is gene-level and does NOT contribute to position-level CAAS_score.
 
 pos_scores <- pos_scores %>%
-  rowwise() %>%
   mutate(
-    CAAS_score = {
-      components <- c(biochem_score, asr_score, convergence_score, parallel_score)
-      if (!is.na(pgls_score)) components <- c(components, pgls_score)
-      mean(components, na.rm = TRUE)
-    }
-  ) %>%
-  ungroup()
+    CAAS_score = rowMeans(
+      cbind(biochem_score, asr_score, convergence_score, parallel_score),
+      na.rm = TRUE
+    )
+  )
 
 cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             min(pos_scores$CAAS_score, na.rm = TRUE),
@@ -577,8 +588,11 @@ cat("\n─── Writing outputs ───────────────�
 # Position scores
 pos_out <- pos_scores %>%
   select(Gene, Position, variability_score, pattern_score, biochem_score,
-         asr_score, convergence_score, parallel_score, pgls_score,
-         CAAS_score, change_side) %>%
+         asr_score, convergence_score, parallel_score,
+         CAAS_score, change_side,
+         any_of(c("p_pgls_top", "q_p_pgls_top", "sig_p_pgls_top",
+                  "p_pgls_bottom", "q_p_pgls_bottom", "sig_p_pgls_bottom",
+                  "beta_top"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")
