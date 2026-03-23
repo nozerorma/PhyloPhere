@@ -110,6 +110,11 @@ df <- df %>%
 df <- df %>%
   mutate(scheme_contribution = scheme_weight * variability_score * pattern_score)
 
+# Detect pair-indexed MRCA posterior columns dynamically (mrca_1_posterior, mrca_2_posterior, ...)
+mrca_posterior_cols <- grep("^mrca_\\d+_posterior$", names(df), value = TRUE)
+n_pairs <- length(mrca_posterior_cols)
+cat(sprintf("  Detected %d pairs (%s)\n", n_pairs, paste(mrca_posterior_cols, collapse = ", ")))
+
 # Aggregate to Gene×Position level: sum scheme contributions (cumulative),
 # and take the first value for fields that are constant within Gene×Position.
 pos_scores <- df %>%
@@ -124,9 +129,7 @@ pos_scores <- df %>%
     asr_root_conserved    = first(asr_root_conserved),
     conserved_pair        = first(conserved_pair),
     all_mrca_posterior    = first(all_mrca_posterior),
-    mrca_1_posterior      = first(mrca_1_posterior),
-    mrca_2_posterior      = first(mrca_2_posterior),
-    mrca_3_posterior      = first(mrca_3_posterior),
+    across(all_of(mrca_posterior_cols), \(x) first(x)),
     change_top            = first(change_top),
     change_bottom         = first(change_bottom),
     change_side           = first(change_side),
@@ -138,52 +141,67 @@ pos_scores <- df %>%
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
 
 # ── 2c. ASR score ────────────────────────────────────────────────────────────
-# Three cases:
-#   is_conserved_meta = FALSE                         → 1.0 (novel change, earned)
-#   is_conserved_meta = TRUE & asr_is_conserved = TRUE → 0.35 × mrca_pair_posterior
-#                                                         + (if root: 0.35 × all_mrca_posterior)
-#                                                         max = 0.70
-#   is_conserved_meta = TRUE & asr_is_conserved = FALSE → 0.0
-compute_asr_score <- function(is_conserved_meta, asr_is_conserved,
-                              asr_root_conserved, conserved_pair,
-                              mrca_1_posterior, mrca_2_posterior,
-                              mrca_3_posterior, all_mrca_posterior) {
+# Pair-weighted formula (w = 1 / n_pairs):
+#
+#   is_conserved_meta = FALSE                          → 1.0  (novel change)
+#   is_conserved_meta = TRUE & asr_is_conserved = FALSE → 0.0  (unconfirmed conservation)
+#   is_conserved_meta = TRUE & asr_is_conserved = TRUE  →
+#     Σ_{divergent pairs}  w
+#   + Σ_{conserved pairs}  min((w × P_MRCA(i) + w × P_root × I(root_cons)) / 2,  0.9 × w)
+#
+# The 0.9w cap ensures conserved positions never reach the 1.0 ceiling of novel changes.
+# conserved_pair may be a single id ("2") or comma-separated ("2,4") for future multi-pair support.
+compute_asr_score <- function(is_conserved_meta_vec, asr_is_conserved_vec,
+                              asr_root_conserved_vec, conserved_pair_vec,
+                              all_mrca_posterior_vec, n_pairs, pos_data) {
+
+  w <- 1.0 / n_pairs
 
   parse_bool <- function(x) {
     if (is.logical(x)) return(x)
     tolower(as.character(x)) %in% c("true", "1", "yes")
   }
 
-  is_cons   <- parse_bool(is_conserved_meta)
-  asr_cons  <- parse_bool(asr_is_conserved)
-  root_cons <- parse_bool(asr_root_conserved)
+  sapply(seq_along(is_conserved_meta_vec), function(i) {
+    is_cons   <- parse_bool(is_conserved_meta_vec[i])
+    asr_cons  <- parse_bool(asr_is_conserved_vec[i])
+    root_cons <- parse_bool(asr_root_conserved_vec[i])
 
-  # Look up the MRCA posterior for the conserved pair
-  pair_idx  <- suppressWarnings(as.integer(conserved_pair))
-  mrca_post <- case_when(
-    pair_idx == 1 ~ as.numeric(mrca_1_posterior),
-    pair_idx == 2 ~ as.numeric(mrca_2_posterior),
-    pair_idx == 3 ~ as.numeric(mrca_3_posterior),
-    TRUE          ~ as.numeric(mrca_1_posterior)  # fallback
-  )
+    if (!is_cons)  return(1.0)
+    if (!asr_cons) return(0.0)
 
-  case_when(
-    !is_cons             ~ 1.0,
-    is_cons & asr_cons   ~ pmin(
-      0.35 * mrca_post +
-        ifelse(root_cons, 0.35 * as.numeric(all_mrca_posterior), 0),
-      0.70
-    ),
-    TRUE                 ~ 0.0
-  )
+    # Parse conserved pair IDs: "2" → [2],  "2,4" → [2, 4]
+    conserved_ids <- suppressWarnings(
+      as.integer(trimws(strsplit(as.character(conserved_pair_vec[i]), ",")[[1]]))
+    )
+    conserved_ids <- conserved_ids[!is.na(conserved_ids) & conserved_ids >= 1]
+    if (length(conserved_ids) == 0) return(1.0)
+
+    n_divergent <- n_pairs - length(conserved_ids)
+    score       <- n_divergent * w
+
+    all_mrca_p <- suppressWarnings(as.numeric(all_mrca_posterior_vec[i]))
+    root_p     <- if (root_cons && !is.na(all_mrca_p)) all_mrca_p else 0.0
+
+    for (pid in conserved_ids) {
+      mcol    <- paste0("mrca_", pid, "_posterior")
+      mrca_p  <- if (mcol %in% names(pos_data)) suppressWarnings(as.numeric(pos_data[[mcol]][i])) else 0.0
+      if (is.na(mrca_p)) mrca_p <- 0.0
+      score   <- score + min((w * mrca_p + w * root_p) / 2, 0.9 * w)
+    }
+
+    return(min(score, 1.0))
+  })
 }
+
+pos_scores_ref <- pos_scores  # capture before pipe for mrca column lookup inside sapply
 
 pos_scores <- pos_scores %>%
   mutate(
     asr_score = compute_asr_score(
       is_conserved_meta, asr_is_conserved, asr_root_conserved,
-      conserved_pair, mrca_1_posterior, mrca_2_posterior,
-      mrca_3_posterior, all_mrca_posterior
+      conserved_pair, all_mrca_posterior,
+      n_pairs, pos_scores_ref
     )
   )
 

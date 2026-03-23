@@ -113,6 +113,27 @@ def _parse_gene_pos_token(gene_pos: str) -> Tuple[Optional[str], Optional[int]]:
     return gene, pos_val
 
 
+def _parse_conserved_pair(raw: str) -> str:
+    """Normalise the ConservedPair field from the CT output.
+
+    caas_id.py writes the field as ``"{count}:{pair_id1},{pair_id2},..."``,
+    e.g. ``"1:3"`` or ``"2:1,4"``.  Legacy data (max_conserved=0 runs or old
+    tooling) may already contain just a plain pair id like ``"1"``.
+
+    Returns a comma-separated string of pair ids, or ``""`` when no conserved
+    pairs are present (``"0:"`` or empty input).
+    """
+    raw = raw.strip()
+    if not raw:
+        return ""
+    if ":" in raw:
+        # "{count}:{pairs}" — drop the count prefix
+        pairs_part = raw.split(":", 1)[1]
+        # "0:" → "" (no conserved pairs)
+        return pairs_part.strip()
+    return raw  # already a plain id or comma-separated ids (legacy)
+
+
 # -- Functions for CAAS Metadata Loading and Parsing --#
 
 
@@ -279,7 +300,7 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             caap_group=str(row.get("CAAP_Group", "US") or "US"),
             amino_encoded=str(row.get("AminoEncoded", "") or ""),
             is_conserved_meta=_b(row.get("IsConserved")),
-            conserved_pair=str(row.get("ConservedPair", "") or ""),
+            conserved_pair=_parse_conserved_pair(str(row.get("ConservedPair", "") or "")),
             sig_hyp=_b(row.get("sig_hyp")) if pd.notna(row.get("sig_hyp")) else None,
             sig_perm=_b(row.get("sig_perm")) if pd.notna(row.get("sig_perm")) else None,
             sig_both=_b(row.get("sig_both")) if pd.notna(row.get("sig_both")) else None,

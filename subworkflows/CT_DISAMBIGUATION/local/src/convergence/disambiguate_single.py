@@ -314,13 +314,23 @@ def analyze_caas_position_disambiguation(
     asr_cons = False
     asr_root_cons = False
     if is_cons_meta and conserved_pair:
-        try:
-            # conserved_pair may arrive as a float string (e.g. "1.0"), so
-            # convert via float first to avoid ValueError from int("1.0").
-            pair_idx = int(float(conserved_pair))
-        except Exception:
-            pair_idx = None
-        if pair_idx and 1 <= pair_idx <= len(pair_details_list):
+        # conserved_pair is already normalised to comma-separated pair ids by the
+        # loader (e.g. "3" or "1,4").  Parse each id and validate independently.
+        pair_ids = []
+        for token in conserved_pair.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                pair_ids.append(int(float(token)))
+            except (ValueError, TypeError):
+                pass
+        pair_ids = [p for p in pair_ids if 1 <= p <= len(pair_details_list)]
+
+        pair_confirmed = []  # per-pair ASR confirmation flags
+        confirmed_focal_states = []  # focal states of confirmed pairs (for root check)
+
+        for pair_idx in pair_ids:
             pair = pair_details_list[pair_idx - 1] or {}
             top_tip = pair.get("top_tip_mode") or pair.get("top_tip_residue")
             bottom_tip = pair.get("bottom_tip_mode") or pair.get("bottom_tip_residue")
@@ -335,16 +345,23 @@ def analyze_caas_position_disambiguation(
                 top_tip and bottom_tip and focal_state
                 and top_tip == bottom_tip == focal_state
             )
-            all_mrca_state = node_state_info.mrca_contrast if node_state_info else None
-            all_mrca_prob = node_state_info.mrca_contrast_prob if node_state_info else None
-            asr_cons = tips_agree
-            asr_root_cons = bool(
-                tips_agree
-                and all_mrca_state
-                and all_mrca_state == focal_state
-                and all_mrca_prob is not None
-                and all_mrca_prob >= posterior_threshold
-            )
+            pair_confirmed.append(tips_agree)
+            if tips_agree and focal_state:
+                confirmed_focal_states.append(focal_state)
+
+        # All conserved pairs must be ASR-confirmed (strict: partial confirmation = 0)
+        asr_cons = bool(pair_confirmed) and all(pair_confirmed)
+
+        # Root conservation: root state matches any confirmed pair's focal state
+        all_mrca_state = node_state_info.mrca_contrast if node_state_info else None
+        all_mrca_prob = node_state_info.mrca_contrast_prob if node_state_info else None
+        asr_root_cons = bool(
+            asr_cons
+            and all_mrca_state
+            and all_mrca_state in confirmed_focal_states
+            and all_mrca_prob is not None
+            and all_mrca_prob >= posterior_threshold
+        )
 
     return ConvergenceResult(
         gene=gene,
