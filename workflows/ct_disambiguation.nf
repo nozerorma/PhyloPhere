@@ -14,16 +14,29 @@ workflow CT_DISAMBIGUATION {
         tree_file_in
 
     main:
-        // Disambiguation must consume signification output from meta_caas/global_meta_caas.tsv
+        // Disambiguation prefers signification's global metadata table, but older
+        // or non-grouped signification runs may only emit meta_caas.tsv.
         def meta_from_upstream = (meta_caas_in ?: Channel.empty())
             .flatten()
             .filter { f ->
                 def p = f.toString().toLowerCase()
-                p.endsWith('global_meta_caas.tsv') || p.contains('meta_caas/global_meta_caas.tsv')
+                p.endsWith('global_meta_caas.tsv') ||
+                p.contains('meta_caas/global_meta_caas.tsv') ||
+                p.endsWith('meta_caas.tsv') ||
+                p.contains('meta_caas/meta_caas.tsv')
             }
             .collect()
             .map { files ->
-                files ? files[0] : null
+                if (!files) {
+                    return null
+                }
+
+                def preferred = files.find { f ->
+                    def p = f.toString().toLowerCase()
+                    p.endsWith('global_meta_caas.tsv') || p.contains('meta_caas/global_meta_caas.tsv')
+                }
+
+                preferred ?: files[0]
             }
             .filter { it != null }
 

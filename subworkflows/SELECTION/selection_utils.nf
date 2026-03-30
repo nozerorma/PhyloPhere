@@ -3,11 +3,11 @@
 /*
  * SELECTION / shared utility processes
  *
- * PHYLIP_TO_FASTA       – convert a relaxed-PHYLIP protein alignment to FASTA
+ * PHYLIP_TO_FASTA       – normalize a supported alignment file to FASTA
  * EXTRACT_EXTREME_SPECIES – derive top/bottom species lists from trait_stats.csv
  * ANNOTATE_TREE_FG        – label foreground leaf branches in a Newick tree for FADE
  * EXTRACT_FG_BRANCHES     – write a list of FG species names for MoleRate --branches args
- * COLLECT_GENE_SETS     – build TOP / BOTTOM gene lists from accumulation + postproc outputs
+ * COLLECT_GENE_SETS     – build TOP / BOTTOM gene lists from postproc outputs
  */
 
 
@@ -49,27 +49,37 @@ process EXTRACT_EXTREME_SPECIES {
 // direction is carried through as a passthrough value so that downstream
 // processes (ANNOTATE_TREE_FG, FADE_RUN, MOLERATE_RUN) receive a consistent
 // (gene_id, direction, fasta) tuple without needing a separate join step.
+// Existing FASTA inputs are copied through directly; PHYLIP-like inputs are
+// converted to FASTA.
 // ─────────────────────────────────────────────────────────────────────────────
 process PHYLIP_TO_FASTA {
     tag "${gene_id}|${direction}"
 
     input:
-    tuple val(gene_id), val(direction), path(phylip_file)
+    tuple val(gene_id), val(direction), path(alignment_file)
 
     output:
     tuple val(gene_id), val(direction), path("${gene_id}.fa"), emit: fasta
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local"
-    if (params.use_singularity || params.use_apptainer) {
+    def is_fasta_input = alignment_file.name.toLowerCase().endsWith('.fa') ||
+                         alignment_file.name.toLowerCase().endsWith('.fasta')
+    if (is_fasta_input) {
         """
-        /usr/local/bin/_entrypoint.sh python ${local_dir}/phylip_to_fasta.py \
-            "${phylip_file}" "${gene_id}.fa"
+        cp "${alignment_file}" "${gene_id}.fa"
         """
     } else {
-        """
-        python ${local_dir}/phylip_to_fasta.py "${phylip_file}" "${gene_id}.fa"
-        """
+        if (params.use_singularity || params.use_apptainer) {
+            """
+            /usr/local/bin/_entrypoint.sh python ${local_dir}/phylip_to_fasta.py \
+                "${alignment_file}" "${gene_id}.fa"
+            """
+        } else {
+            """
+            python ${local_dir}/phylip_to_fasta.py "${alignment_file}" "${gene_id}.fa"
+            """
+        }
     }
 }
 
@@ -150,7 +160,7 @@ process EXTRACT_FG_BRANCHES {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COLLECT_GENE_SETS
-// Combines accumulation CSVs + postproc TXT files into two gene lists.
+// Combines postproc TXT files into two gene lists.
 // ─────────────────────────────────────────────────────────────────────────────
 process COLLECT_GENE_SETS {
     tag "collect_gene_sets"
@@ -159,8 +169,6 @@ process COLLECT_GENE_SETS {
                mode: 'copy', overwrite: true
 
     input:
-    path acc_top,    stageAs: 'acc_top.csv'
-    path acc_bottom, stageAs: 'acc_bottom.csv'
     path pp_top,     stageAs: 'pp_top.txt'
     path pp_bottom,  stageAs: 'pp_bottom.txt'
 
@@ -170,33 +178,23 @@ process COLLECT_GENE_SETS {
 
     script:
     def local_dir  = "${baseDir}/subworkflows/SELECTION/local"
-    def fdr        = params.fade_fdr_threshold ?: params.molerate_fdr_threshold ?: 0.05
-
     // Build optional source arguments (only pass a file if it was actually staged)
-    def acc_top_arg    = acc_top.name    != 'NO_FILE' ? "--accumulation_top    acc_top.csv"    : ""
-    def acc_bottom_arg = acc_bottom.name != 'NO_FILE' ? "--accumulation_bottom acc_bottom.csv" : ""
     def pp_top_arg     = pp_top.name     != 'NO_FILE' ? "--postproc_top        pp_top.txt"     : ""
     def pp_bottom_arg  = pp_bottom.name  != 'NO_FILE' ? "--postproc_bottom     pp_bottom.txt"  : ""
 
     if (params.use_singularity || params.use_apptainer) {
         """
         /usr/local/bin/_entrypoint.sh python ${local_dir}/collect_gene_sets.py \
-            ${acc_top_arg} \
-            ${acc_bottom_arg} \
             ${pp_top_arg} \
             ${pp_bottom_arg} \
-            --fdr        ${fdr} \
             --out_top    gene_set_top.txt \
             --out_bottom gene_set_bottom.txt
         """
     } else {
         """
         python ${local_dir}/collect_gene_sets.py \
-            ${acc_top_arg} \
-            ${acc_bottom_arg} \
             ${pp_top_arg} \
             ${pp_bottom_arg} \
-            --fdr        ${fdr} \
             --out_top    gene_set_top.txt \
             --out_bottom gene_set_bottom.txt
         """

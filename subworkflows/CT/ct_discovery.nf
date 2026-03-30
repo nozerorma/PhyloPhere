@@ -44,27 +44,55 @@ process DISCOVERY {
     // Define extra discovery arguments from params.file
     def args = task.ext.args ?: ''
 
+    def pairArgs = """
+n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+_max_conserved=\$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}')
+_max_bg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_fg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_bg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_fg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg_gaps=\$_max_bg_gaps fg_gaps=\$_max_fg_gaps gaps=\$_max_gaps bg_miss=\$_max_bg_miss fg_miss=\$_max_fg_miss miss=\$_max_miss"
+"""
+
     if (params.use_singularity | params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
+        ${pairArgs}
         /usr/local/bin/_entrypoint.sh ct discovery \\
         -a ${alignmentFile} \\
         -t ${caas_config} \\
         -o ${alignmentID}.output \\
         --background_output ${alignmentID}.background.tsv \\
         --fmt ${params.ali_format} \\
-        ${args.replaceAll('\n', ' ')}
+        ${args.replaceAll('\n', ' ')} \\
+        --max_conserved \$_max_conserved \\
+        --max_bg_gaps \$_max_bg_gaps \\
+        --max_fg_gaps \$_max_fg_gaps \\
+        --max_gaps \$_max_gaps \\
+        --max_bg_miss \$_max_bg_miss \\
+        --max_fg_miss \$_max_fg_miss \\
+        --max_miss \$_max_miss
         """
     } else {
         """
         echo "Running locally"
+        ${pairArgs}
         $baseDir/subworkflows/CT/local/ct discovery \\
         -a ${alignmentFile} \\
         -t ${caas_config} \\
         -o ${alignmentID}.output \\
         --background_output ${alignmentID}.background.tsv \\
         --fmt ${params.ali_format} \\
-        ${args.replaceAll('\n', ' ')}
+        ${args.replaceAll('\n', ' ')} \\
+        --max_conserved \$_max_conserved \\
+        --max_bg_gaps \$_max_bg_gaps \\
+        --max_fg_gaps \$_max_fg_gaps \\
+        --max_gaps \$_max_gaps \\
+        --max_bg_miss \$_max_bg_miss \\
+        --max_fg_miss \$_max_fg_miss \\
+        --max_miss \$_max_miss
         """
     }
 }
@@ -95,6 +123,17 @@ cat > ${batchID}.manifest.tsv <<'EOF'
 cat > .ct_discovery_batch_args <<'EOF'
 ${args.replaceAll('\n', ' ')}
 EOF
+
+n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+_max_conserved=\$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}')
+_max_bg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_fg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_bg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_fg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+_max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+echo " --max_conserved \$_max_conserved --max_bg_gaps \$_max_bg_gaps --max_fg_gaps \$_max_fg_gaps --max_gaps \$_max_gaps --max_bg_miss \$_max_bg_miss --max_fg_miss \$_max_fg_miss --max_miss \$_max_miss" >> .ct_discovery_batch_args
+echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg_gaps=\$_max_bg_gaps fg_gaps=\$_max_fg_gaps gaps=\$_max_gaps bg_miss=\$_max_bg_miss fg_miss=\$_max_fg_miss miss=\$_max_miss"
 
 bash $baseDir/subworkflows/CT/local/scripts/run_ct_discovery_batch.sh \\
     --batch-id ${batchID} \\

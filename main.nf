@@ -68,6 +68,9 @@ include {ORA_EXCLUDED} from './workflows/ora_excluded.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {MOLERATE}       from './workflows/molerate.nf'
+include {PGLS}           from './workflows/pgls.nf'
+include {VEP}            from './workflows/vep.nf'
+include {SCORING}        from './workflows/scoring.nf'
 
 // Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
 
@@ -119,15 +122,21 @@ workflow {
         def ran_any = false
         def reporting_results = null
         def contrast_out = null
+        def pgls_trait_ch = null
+        def pgls_tree_ch = null
 
         if (params.reporting && !params.contrast_selection) {
             reporting_results = REPORTING()
+            pgls_trait_ch = reporting_results.pruned_trait_file
+            pgls_tree_ch  = reporting_results.pruned_tree_file
             ran_any = true
         }
         def ct_results
         if (params.ct_tool) {
             if (params.contrast_selection) {
                 contrast_out = CONTRAST_SELECTION()
+                pgls_trait_ch = contrast_out.pruned_trait_file
+                pgls_tree_ch  = contrast_out.pruned_tree_file
 
                 // Hard stop: if CHECK_MIN_CONTRASTS emits low_contrasts.skip,
                 // terminate the current trait run gracefully (exit 0).
@@ -146,16 +155,16 @@ workflow {
         }
         if (params.contrast_selection && !params.ct_tool) {
             contrast_out = CONTRAST_SELECTION()
+            pgls_trait_ch = contrast_out.pruned_trait_file
+            pgls_tree_ch  = contrast_out.pruned_tree_file
             ran_any = true
         }
         def signification_results = null
         def disambiguation_results = null
         def postproc_results = null
 
-        // Channels populated by CT_ACCUMULATION/CT_POSTPROC when they run.
+        // Channels populated by CT_POSTPROC when it runs.
         // Used by FADE/MOLERATE/RER gene-set piping without manual path specification.
-        def sel_acc_top_ch    = Channel.empty()
-        def sel_acc_bottom_ch = Channel.empty()
         def sel_pp_top_ch     = Channel.empty()
         def sel_pp_bottom_ch  = Channel.empty()
 
@@ -193,9 +202,12 @@ workflow {
                 error "CT disambiguation requires signification outputs (--ct_signification) or a standalone metadata file (--ct_disambig_caas_metadata)."
             }
 
-            // Pass null so that the if(channel) guard inside CT_DISAMBIGUATION detects absence
-            // and falls back to --ct_disambig_caas_metadata.
-            def meta_for_disambiguation = signification_results ? signification_results.signification_global_meta : null
+            // Forward both possible signification metadata artifacts; CT_DISAMBIGUATION
+            // will prefer global_meta_caas.tsv when present and otherwise accept
+            // the per-run meta_caas.tsv fallback.
+            def meta_for_disambiguation = signification_results
+                ? signification_results.signification_global_meta.mix(signification_results.signification_meta_caas)
+                : null
             def trait_for_disambiguation = ct_results ? ct_results.trait_file : Channel.empty()
             def tree_for_disambiguation = ct_results ? ct_results.tree_file : Channel.empty()
 
@@ -245,16 +257,16 @@ workflow {
             pp_gene_lists_val = postproc_results.ora_gene_lists_files.collect()
 
             if (params.ora) {
-                // ORA uses if(channel) guard internally, so passing a channel that has
-                // not yet emitted is safe — it will wait for the upstream process.
-                // Pass the direct queue channel for gene lists (ORA collects internally).
-                ORA(pp_cleaned_bg, postproc_results.ora_gene_lists_files)
-                // Run a second ORA on the excluded gene lists using the original
-                // (pre-cleanup) background from discovery, publishing to ora_excluded/.
+                // ORA on excluded gene lists only: characterises genes removed during
+                // post-processing using the original (pre-cleanup) background.
+                // Post-proc gene-list ORA is intentionally omitted here; enrichment
+                // on significant positions is handled downstream by SCORING (scoring_ora).
                 ORA_EXCLUDED(postproc_results.background_ori, postproc_results.excluded_gene_lists_files)
                 ran_any = true
             }
         }
+
+        def accum_results = null
 
         if (params.ct_accumulation) {
             if (!params.ct_postproc && !params.accumulation_background_input) {
@@ -269,14 +281,21 @@ workflow {
             def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()
             def acc_trait_file_ch = ct_results       ? ct_results.trait_file               : Channel.empty()
 
-            def accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch)
+            accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch)
             ran_any = true
 
-            // Split accumulation CSVs by direction for FADE/MOLERATE/RER gene-set piping.
-            sel_acc_top_ch    = accum_results.results
-                .filter { f -> f.name.contains('_top_') }
-            sel_acc_bottom_ch = accum_results.results
-                .filter { f -> f.name.contains('_bottom_') }
+        }
+
+        if (params.pgls) {
+            def pgls_caas_ch = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
+            PGLS(pgls_caas_ch, pgls_trait_ch, pgls_tree_ch)
+            ran_any = true
+        }
+
+        if (params.vep) {
+            def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
+            VEP(vep_caas_ch)
+            ran_any = true
         }
 
         // Populate postproc gene-list channels for FADE/MOLERATE/RER gene-set piping.
@@ -298,60 +317,90 @@ workflow {
         // Merge per-phenotype files into single files before passing to selection
         // workflows. When multiple phenotypes are run together each sel_* channel
         // emits N items (one per phenotype). COLLECT_GENE_SETS inside FADE/MOLERATE/RER
-        // is invoked once per synchronised 4-tuple of inputs, so without this merge it
+        // is invoked once per synchronised 2-tuple of inputs, so without this merge it
         // runs N times and every gene appears N times in the resulting ali channel —
         // causing file-name staging collisions in the report process. collectFile()
         // collapses N items into one merged file so COLLECT_GENE_SETS runs exactly once.
         // When sel_* channels are empty (standalone runs) collectFile() emits nothing
         // and the .ifEmpty {} fallback paths inside each workflow remain intact.
-        sel_acc_top_ch    = sel_acc_top_ch   .collectFile(keepHeader: true, skip: 1, name: 'merged_acc_top.csv')
-        sel_acc_bottom_ch = sel_acc_bottom_ch.collectFile(keepHeader: true, skip: 1, name: 'merged_acc_bottom.csv')
         sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
         sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
 
-        // Split stats/tree channels so multiple tools (FADE, MOLERATE) can each
-        // receive the single emission without competing on the same queue channel.
+        // Split stats channel so FADE and MOLERATE can each receive the single
+        // emission without competing on the same queue channel.
         def stats_source_ch = contrast_out
             ? contrast_out.stats_file_out
             : (reporting_results ? reporting_results.stats_file : Channel.empty())
         def split_stats_file = stats_source_ch
             ? stats_source_ch.multiMap { f -> fade: f; molerate: f }
             : Channel.empty().multiMap { f -> fade: f; molerate: f }
-        def split_tree = ct_results
-            ? ct_results.tree_file.multiMap { f -> fade: f; molerate: f }
-            : Channel.empty().multiMap { f -> fade: f; molerate: f }
+        // Tree: FADE and MOLERATE always use params.tree (the complete species tree)
+        // via their .ifEmpty {} fallback.  The CT-pruned tree is pruned to
+        // valid-contrast-pair species only, which is a strict subset of the
+        // extreme-labeled species in stats_file — passing it would cause
+        // ANNOTATE_TREE_FG / MOLERATE_RUN to silently drop FG branches.
 
         if (params.fade) {
-            FADE(split_stats_file.fade, split_tree.fade,
-                 sel_acc_top_ch, sel_acc_bottom_ch,
+            FADE(split_stats_file.fade, Channel.empty(),
                  sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.molerate) {
-            MOLERATE(split_stats_file.molerate, split_tree.molerate,
-                     sel_acc_top_ch, sel_acc_bottom_ch,
+            MOLERATE(split_stats_file.molerate, Channel.empty(),
                      sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.rer_tool) {
-            // RER_MAIN is called last so that sel_acc_*/sel_pp_* channels are
-            // fully populated by CT_ACCUMULATION / CT_POSTPROC when running together.
+            // RER_MAIN is called last so that sel_pp_* channels are fully
+            // populated by CT_POSTPROC when running together.
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
             // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.
             def rer_traitfile_ch = Channel.empty()
             RER_MAIN(
                 rer_traitfile_ch,
-                sel_acc_top_ch, sel_acc_bottom_ch,
                 sel_pp_top_ch,  sel_pp_bottom_ch
             )
             ran_any = true
         }
 
+        if (params.scoring) {
+            if (!params.ct_postproc && !params.scoring_postproc_input) {
+                error "SCORING requires CT post-processing output (--ct_postproc) or --scoring_postproc_input."
+            }
+
+            // Wire upstream outputs into SCORING. Pass null (not Channel.empty())
+            // when a module didn't run so if(channel) guards detect absence correctly.
+            def scoring_postproc_ch  = postproc_results ? postproc_results.filtered_discovery : null
+            def scoring_pgls_ch      = params.pgls      ? PGLS.out.pgls_tsv                  : null
+            def scoring_fade_top_ch  = params.fade       ? FADE.out.summary_top               : null
+            def scoring_fade_bot_ch  = params.fade       ? FADE.out.summary_bottom            : null
+            def scoring_rer_ch       = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
+            def scoring_accum_ch     = accum_results     ? accum_results.results               : null
+            def scoring_bg_ch        = pp_cleaned_bg     ?: null
+            def scoring_vep_tv_ch    = params.vep        ? VEP.out.transvar_tsv               : null
+            def scoring_vep_pai_ch   = params.vep        ? VEP.out.primateai_tsv              : null
+            // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
+
+            SCORING(
+                scoring_postproc_ch,
+                scoring_pgls_ch,
+                scoring_fade_top_ch,
+                scoring_fade_bot_ch,
+                scoring_rer_ch,
+                scoring_accum_ch,
+                scoring_bg_ch,
+                scoring_vep_tv_ch,
+                scoring_vep_pai_ch,
+                null  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
+            )
+            ran_any = true
+        }
+
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --molerate, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --molerate, --pgls, --scoring, or --rer_tool."
         }
     }
 }

@@ -326,7 +326,7 @@ def process_single_gene(
             logger.debug(f"No CAAS positions for {gene}")
             return (gene, None)
 
-        logger.info(f"Processing gene: {gene} ({len(caas_positions)} CAAS positions)")
+        logger.debug(f"Processing gene: {gene} ({len(caas_positions)} CAAS positions)")
 
         alignment_data = load_alignment_and_mappings(
             alignment_path,
@@ -405,7 +405,7 @@ def process_single_gene(
                 tree_data.tip_set = {
                     _tip_taxid(lbl) for lbl in extract_tip_labels(tree_data.root)
                 }
-                logger.info(
+                logger.debug(
                     "Updated tree_data from PAML tree for node/posterior alignment"
                 )
             except Exception as e:
@@ -445,7 +445,7 @@ def process_single_gene(
                             else None
                         ),
                     )
-                    logger.info(f"Wrote posterior JSONL to {posterior_dump_jsonl}")
+                    logger.debug(f"Wrote posterior JSONL to {posterior_dump_jsonl}")
             except Exception as e:
                 logger.warning(f"Failed to export posterior JSONL for {gene}: {e}")
 
@@ -586,7 +586,7 @@ def process_single_gene(
             except Exception as e:
                 logger.warning(f"Failed to enqueue results for {gene}: {e}")
 
-        logger.info(f"  {gene}: {len(biochem_results)} CAAS processed (streamed to DB)")
+        logger.debug(f"  {gene}: {len(biochem_results)} CAAS processed (streamed to DB)")
 
         # keep worker RAM low
         try:

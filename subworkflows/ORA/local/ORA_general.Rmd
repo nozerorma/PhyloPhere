@@ -92,14 +92,17 @@ read_gene_vector <- function(path) {
 
 safe_symbol_to_entrez <- function(genes) {
   if (length(genes) == 0) return(character(0))
-  mapped <- suppressWarnings(
-    bitr(
-      genes,
-      fromType = "SYMBOL",
-      toType = "ENTREZID",
-      OrgDb = org.Hs.eg.db,
-      drop = TRUE
-    )
+  mapped <- tryCatch(
+    suppressWarnings(
+      bitr(
+        genes,
+        fromType = "SYMBOL",
+        toType = "ENTREZID",
+        OrgDb = org.Hs.eg.db,
+        drop = TRUE
+      )
+    ),
+    error = function(e) NULL
   )
   if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
   unique(as.character(mapped$ENTREZID))
@@ -129,7 +132,7 @@ gene_list_files <- gene_list_files[file.exists(gene_list_files)]
 # Always normalise to absolute paths
 gene_list_files <- normalizePath(gene_list_files, mustWork = FALSE)
 gene_list_files <- gene_list_files[file.exists(gene_list_files)]
-if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
+no_gene_lists <- length(gene_list_files) == 0
 
 dbs <- strsplit(as.character(params$ora_databases), ",")[[1]]
 dbs <- trimws(dbs)
@@ -178,9 +181,11 @@ cat("Overlap top terms:", params$overlap_top_terms, "\n")
 cat("Overlap metric:", params$compare_metric, "\n")
 ```
 
+`r if (no_gene_lists) "> **Note:** No gene list files were passed to this ORA run (gene lists may be empty due to insufficient data). Skipping enrichment analysis."`
+
 # Parse background and convert to ENTREZ
 
-```{r parse_background}
+```{r parse_background, eval=!no_gene_lists}
 bg_symbols <- read_gene_vector(bg_file)
 bg_entrez <- safe_symbol_to_entrez(bg_symbols)
 
@@ -194,7 +199,7 @@ if (length(bg_entrez) < params$min_num) {
 
 # Run ORA per gene list
 
-```{r run_ora}
+```{r run_ora, eval=!no_gene_lists}
 run_single_ora <- function(gene_file, bg_entrez, dbs) {
   genes_sym <- read_gene_vector(gene_file)
   genes_entrez <- safe_symbol_to_entrez(genes_sym)
@@ -311,7 +316,7 @@ ora_runs <- lapply(gene_list_files, run_single_ora, bg_entrez = bg_entrez, dbs =
 
 # Summary and plots
 
-```{r summary_and_plots, results='asis'}
+```{r summary_and_plots, results='asis', eval=!no_gene_lists}
 # Helper: build a fill/color scale that expands Tableau_10 when n > 10
 .pal10_base <- as.character(paletteer::paletteer_d("ggthemes::Tableau_10"))
 .safe_pal   <- function(n) if (n <= 10L) .pal10_base[seq_len(n)] else colorRampPalette(.pal10_base)(n)
@@ -567,7 +572,7 @@ scenarios) reveals groups of scenarios with similar functional landscapes.
 A separate per-database heatmap is produced for each functional category so
 terms from different ontologies are compared on the same scale.
 
-```{r enrichment_heatmap, results='asis'}
+```{r enrichment_heatmap, results='asis', eval=!no_gene_lists}
 for (.scen in (if (exists("present_scenarios")) present_scenarios else "global")) {
   if (exists("std_results_all")) std_results <- std_results_all %>% dplyr::filter(scenario == .scen)
   cat(sprintf("\n### Enrichment heatmap — %s\n\n", tools::toTitleCase(.scen)))
@@ -710,7 +715,7 @@ because it shows the precise multi-way structure of the overlap.
 Requires the **UpSetR** (preferred) or **ComplexUpset** package.
 Install with `install.packages("UpSetR")`.
 
-```{r upset_plot, fig.width=14, fig.height=8, results='asis'}
+```{r upset_plot, fig.width=14, fig.height=8, results='asis', eval=!no_gene_lists}
 if (exists("std_results") && nrow(std_results) > 0 && isTRUE(params$enable_upset_plot)) {
 
 for (.scen in present_scenarios) {

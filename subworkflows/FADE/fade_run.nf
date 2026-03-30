@@ -19,6 +19,58 @@
  *   fade_json : FADE results JSON (HyPhy standard output)
  */
 
+process FADE_BATCHED {
+    tag "$batchID (${batchSize} genes, ${direction})"
+    label 'process_long_compute'
+
+    publishDir path: "${params.outdir}/selection/fade/${direction}/json",
+               mode: 'copy', overwrite: true,
+               pattern: '*.FADE.json'
+
+    // Batch-level success is independent of individual gene failures —
+    // the batch script logs failures and continues.
+
+    input:
+    tuple val(batchID), val(direction), val(batchSize), val(batchManifestText),
+          path(fastas, stageAs: 'fastas/*'), path(trees, stageAs: 'trees/*')
+    path lg_dat
+
+    output:
+    tuple val(direction), path("*.FADE.json"), emit: fade_json, optional: true
+
+    script:
+    def model        = params.fade_model        ?: 'LG'
+    def model_file_arg = model == 'LG' ? "--model-file lg.dat" : ""
+    def method       = params.fade_method       ?: 'Variational-Bayes'
+    def grid         = params.fade_grid         ?: 20
+    def conc         = params.fade_concentration ?: 0.5
+    def runnerMode   = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
+
+    def mcmc_args = (method == 'Variational-Bayes') ? "" :
+        """--mcmc-chains ${params.fade_chains ?: 5} \\
+           --mcmc-chain-length ${params.fade_chain_length ?: 2000000} \\
+           --mcmc-burn-in ${params.fade_burn_in ?: 1000000} \\
+           --mcmc-samples ${params.fade_samples ?: 1000}"""
+
+    """
+cat > ${batchID}.manifest.tsv <<'EOF'
+""" + batchManifestText + """EOF
+
+bash ${baseDir}/subworkflows/FADE/local/scripts/run_hyphy_fade_batch.sh \\
+    --batch-id       ${batchID} \\
+    --manifest       ${batchID}.manifest.tsv \\
+    --direction      ${direction} \\
+    --workers        ${params.fade_batch_workers} \\
+    --runner-mode    ${runnerMode} \\
+    --model          ${model} \\
+    --model-file-arg "${model_file_arg}" \\
+    --method         "${method}" \\
+    --grid           ${grid} \\
+    --concentration  ${conc} \\
+    ${mcmc_args}
+"""
+}
+
 process FADE_RUN {
     tag "${gene_id}|${direction}"
     label 'process_long_compute'

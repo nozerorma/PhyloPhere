@@ -1,0 +1,613 @@
+---
+title: "RERconverge — Relative Evolutionary Rate Convergence Analysis"
+subtitle: "`r paste0('Trait: ', params$traitname)`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 11
+    fig_height: 6
+params:
+  continuous_rds:    "."
+  traitname:         "unknown_trait"
+  pval_threshold:    0.05
+  rho_threshold:     0.3
+  top_n_labels:      15
+  output_dir:        "."
+  gmt_file:          ""    # path to GMT gene-set annotation file (e.g. MSigDB c2.all.symbols.gmt)
+  enrich_min_genes:  10    # minimum genes per pathway for enrichment
+  enrich_top_n:      20    # top pathways to display in enrichment table/plot
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  out.width = "100%"
+)
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(ggrepel)
+  library(paletteer)
+  library(DT)
+  library(gridExtra)
+  library(stringr)
+})
+
+# Tableau_10 colour swatch (10 named colours for pipeline-wide consistency)
+.tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
+```
+
+---
+
+## Overview
+
+This report summarises the results of **RERconverge** (relative evolutionary rate convergence;
+Clark _et al._, 2012–2019) applied to the continuous phenotype **`r params$traitname`**.
+
+RERconverge tests whether genes show correlated **relative evolutionary rates (RERs)** across
+species with differences in a continuous trait. A positive correlation (Rho > 0) means that
+lineages with higher trait values tend to show **faster** evolution in that gene; a negative
+correlation (Rho < 0) means **slower** evolution.
+
+The analysis uses the following key statistics:
+
+| Statistic | Meaning |
+|-----------|---------|
+| **Rho**     | Pearson correlation between trait path values and gene RER path values |
+| **N**       | Number of branches (species) with data for the gene |
+| **P**       | Raw p-value from the correlation test |
+| **p.adj**   | Benjamini–Hochberg FDR-adjusted p-value (computed internally by `correlateWithContinuousPhenotype()`) |
+| **p.perm**  | Empirical p-value from Brownian Motion permutations (if run): proportion of 1,000 null correlations ≥ \|Rho\| |
+
+> **Note:** `p.adj` is already BH-corrected by RERconverge. No additional FDR correction is
+> applied in this report. `p.perm` is present only when permutation testing was enabled
+> (`rer_perm_batches > 0`). Trait normality was assessed with Shapiro-Wilk; non-normal traits
+> were log10-transformed before correlation (following Valenzuela _et al._, 2024).
+
+---
+
+```{r load-rds}
+if (!file.exists(params$continuous_rds)) {
+  message("RDS file not found: '", params$continuous_rds,
+          "'. Cannot generate report.")
+  knitr::knit_exit()
+}
+
+res <- readRDS(params$continuous_rds)
+
+if (is.null(res) || nrow(res) == 0) {
+  message("RDS file loaded but contains no results. Cannot generate report.")
+  knitr::knit_exit()
+}
+
+# Total permutation count stored as attribute by continuous_rer.R.
+# Falls back to NA if running the report against an older RDS.
+n_perms_total <- attr(res, "n_perms")
+
+cat(sprintf("Loaded RERconverge results: %d genes.\n", nrow(res)))
+```
+
+```{r process-results, results='hide'}
+has_perm <- "p.perm" %in% colnames(res) && any(!is.na(res$p.perm))
+
+rer_df <- res %>%
+  as.data.frame() %>%
+  # Ensure p.perm column exists (as NA if not present) to avoid downstream errors
+  {if (!("p.perm" %in% colnames(.))) mutate(., p.perm = NA_real_) else .} %>%
+  mutate(gene = rownames(res)) %>%   # row names ARE gene IDs
+  relocate(gene)
+
+# Compute significance flags based on whether permutation p-values exist
+if (has_perm) {
+  rer_df <- rer_df %>%
+    mutate(
+      signif      = !is.na(p.adj)  & p.adj  < params$pval_threshold,
+      signif_perm = !is.na(p.perm) & p.perm < params$pval_threshold,
+      # Primary call: use p.perm if available, else p.adj
+      signif_any  = signif_perm,
+      pos_corr    = signif_any &  Rho >  params$rho_threshold,
+      neg_corr    = signif_any &  Rho < -params$rho_threshold
+    ) %>%
+    arrange(p.perm)
+} else {
+  rer_df <- rer_df %>%
+    mutate(
+      signif      = !is.na(p.adj)  & p.adj  < params$pval_threshold,
+      signif_perm = FALSE,
+      # Primary call: use p.adj if no permutations
+      signif_any  = signif,
+      pos_corr    = signif_any &  Rho >  params$rho_threshold,
+      neg_corr    = signif_any &  Rho < -params$rho_threshold
+    ) %>%
+    arrange(p.adj)
+}
+
+cat(sprintf(
+  "Significant after BH-FDR (p.adj < %g): %d positively correlated, %d negatively correlated.\n",
+  params$pval_threshold,
+  sum(rer_df$pos_corr, na.rm = TRUE),
+  sum(rer_df$neg_corr, na.rm = TRUE)
+))
+if (has_perm) {
+  cat(sprintf(
+    "Significant by permutation (p.perm < %g): %d genes.\n",
+    params$pval_threshold,
+    sum(rer_df$signif_perm, na.rm = TRUE)
+  ))
+}
+```
+
+---
+
+## Gene-level Summary
+
+```{r gene-table}
+display_df <- rer_df %>%
+  mutate(
+    Rho   = round(Rho, 4),
+    P     = signif(P,    3),
+    p.adj = signif(p.adj, 3),
+    Call  = case_when(
+      pos_corr ~ "Positively correlated",
+      neg_corr ~ "Negatively correlated",
+      signif   ~ "Significant",
+      TRUE     ~ ""
+    )
+  )
+
+# Format p.perm: replace 0 with "< 1/N" when total permutation count is known
+fmt_pperm <- function(x) {
+  if (!is.null(n_perms_total) && !is.na(n_perms_total) && n_perms_total > 0) {
+    ifelse(is.na(x), NA_character_,
+           ifelse(x == 0, paste0("< ", sprintf("%.4f", 1 / n_perms_total)), as.character(signif(x, 3))))
+  } else {
+    as.character(signif(x, 3))
+  }
+}
+
+# Include p.perm column only when permutations were run
+if (has_perm) {
+  display_df <- display_df %>%
+    mutate(p.perm = fmt_pperm(p.perm)) %>%
+    select(gene, Rho, N, P, p.adj, p.perm, Call) %>%
+    rename(Gene = gene, `Raw P` = P, `BH p.adj` = p.adj, `p.perm` = p.perm)
+} else {
+  display_df <- display_df %>%
+    select(gene, Rho, N, P, p.adj, Call) %>%
+    rename(Gene = gene, `Raw P` = P, `BH p.adj` = p.adj)
+}
+
+DT::datatable(
+  display_df,
+  filter   = "top",
+  rownames = FALSE,
+  options  = list(pageLength = 30, scrollX = TRUE),
+  caption  = htmltools::tags$caption(
+    style = "caption-side: top; text-align: left; font-weight: bold;",
+    sprintf(
+      "RERconverge gene-level results | BH p.adj < %g | |Rho| ≥ %g | Trait: %s",
+      params$pval_threshold, params$rho_threshold, params$traitname
+    )
+  )
+) %>%
+  DT::formatStyle(
+    "Call",
+    backgroundColor = DT::styleEqual(
+      c("Positively correlated", "Negatively correlated", "Significant", ""),
+      c("#ffe0e0",               "#dff0ff",               "#fff0d0",      "white")
+    )
+  )
+```
+
+```{r write-tsv}
+out_tsv <- file.path(params$output_dir,
+                     paste0("rerconverge_summary_", params$traitname, ".tsv"))
+write.table(
+  rer_df %>% select(-signif, -pos_corr, -neg_corr),
+  out_tsv, sep = "\t", row.names = FALSE, quote = FALSE
+)
+invisible(NULL)
+```
+
+---
+
+## Visualisations
+
+### Correlation plot
+
+```{r corr-plot, fig.height=7, fig.width=9}
+label_df <- rer_df %>%
+  filter(signif) %>%
+  arrange(p.adj) %>%
+  slice_head(n = params$top_n_labels)
+
+ggplot(rer_df, aes(x = Rho, y = -log10(p.adj + 1e-300))) +
+  geom_point(
+    aes(colour = case_when(
+      pos_corr ~ "Positively correlated",
+      neg_corr ~ "Negatively correlated",
+      signif   ~ "Significant",
+      TRUE     ~ "Non-significant"
+    )),
+    alpha = 0.7,
+    size  = 2
+  ) +
+  geom_vline(xintercept = c(-params$rho_threshold, params$rho_threshold),
+             linetype = "dashed", colour = "grey40", linewidth = 0.5) +
+  geom_hline(yintercept = -log10(params$pval_threshold),
+             linetype = "dashed", colour = "grey40", linewidth = 0.5) +
+  geom_text_repel(
+    data    = label_df,
+    aes(label = gene),
+    size    = 3,
+    max.overlaps = 30
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Positively correlated" = .tableau10[3],
+      "Negatively correlated" = .tableau10[1],
+      "Significant"           = .tableau10[2],
+      "Non-significant"       = "grey60"
+    ),
+    name = NULL
+  ) +
+  labs(
+    title    = paste("RERconverge correlation plot — Trait:", params$traitname),
+    subtitle = paste0("n = ", nrow(rer_df), " genes"),
+    x        = expression(rho ~ "(Pearson correlation with trait)"),
+    y        = expression(-log[10](p.adj))
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "top")
+```
+
+### Rho distribution
+
+```{r rho-dist, fig.height=5}
+ggplot(rer_df %>% filter(!is.na(Rho) & is.finite(Rho)),
+       aes(x = Rho)) +
+  geom_histogram(aes(fill = after_stat(x) > 0), bins = 60,
+                 colour = "white", alpha = 0.85) +
+  scale_fill_manual(
+    values = c("TRUE" = .tableau10[3], "FALSE" = .tableau10[1]),
+    labels = c("TRUE" = "Positive correlation", "FALSE" = "Negative correlation"),
+    name   = NULL
+  ) +
+  geom_vline(xintercept = 0, linewidth = 0.7, colour = "black") +
+  labs(
+    title    = "Distribution of Rho across genes",
+    subtitle = paste0("Trait: ", params$traitname),
+    x        = expression(rho ~ "(Pearson correlation)"),
+    y        = "Number of genes"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+### Sample size vs correlation strength
+
+```{r n-vs-rho, fig.height=6, fig.width=7}
+ggplot(rer_df, aes(x = N, y = Rho)) +
+  geom_point(
+    aes(colour = case_when(
+      pos_corr ~ "Positively correlated",
+      neg_corr ~ "Negatively correlated",
+      TRUE     ~ "Other"
+    )),
+    alpha = 0.65, size = 2
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed",
+             colour = "grey40", linewidth = 0.6) +
+  geom_text_repel(
+    data    = label_df,
+    aes(label = gene),
+    size    = 2.6,
+    max.overlaps = 20
+  ) +
+  scale_colour_manual(
+    values = c(
+      "Positively correlated" = .tableau10[3],
+      "Negatively correlated" = .tableau10[1],
+      "Other"                 = "grey60"
+    ),
+    name = NULL
+  ) +
+  labs(
+    title    = "Number of species (N) vs correlation strength (Rho)",
+    subtitle = paste0("Trait: ", params$traitname,
+                     " | Dashed line = zero correlation"),
+    x = "N (branches with data)",
+    y = expression(rho ~ "(Pearson correlation)")
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "top")
+```
+
+### Permutation p-values
+
+```{r perm-plot, fig.height=6, fig.width=10, eval=has_perm}
+# p.adj vs p.perm scatter — genes on the diagonal have consistent parametric
+# and empirical evidence; off-diagonal genes may be driven by phylogenetic structure.
+perm_label_df <- rer_df %>%
+  filter(signif_perm | signif) %>%
+  arrange(p.perm) %>%
+  slice_head(n = params$top_n_labels)
+
+p1 <- ggplot(rer_df, aes(x = -log10(p.adj + 1e-300), y = -log10(p.perm + 1e-300))) +
+  geom_point(aes(colour = case_when(
+    pos_corr    ~ "Positively correlated",
+    neg_corr    ~ "Negatively correlated",
+    signif_perm ~ "Perm significant",
+    signif      ~ "BH significant",
+    TRUE        ~ "Non-significant"
+  )), alpha = 0.7, size = 2) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed",
+              colour = "grey40", linewidth = 0.5) +
+  geom_text_repel(data = perm_label_df, aes(label = gene),
+                  size = 2.8, max.overlaps = 25) +
+  scale_colour_manual(
+    values = c(
+      "Positively correlated" = .tableau10[3],
+      "Negatively correlated" = .tableau10[1],
+      "Perm significant"      = .tableau10[4],
+      "BH significant"        = .tableau10[2],
+      "Non-significant"       = "grey60"
+    ), name = NULL
+  ) +
+  labs(
+    title    = "Parametric (BH p.adj) vs empirical (p.perm) significance",
+    subtitle = paste0("Trait: ", params$traitname,
+                     " | Dashed diagonal = equal evidence"),
+    x = expression(-log[10](p.adj)),
+    y = expression(-log[10](p.perm))
+  ) +
+  theme_bw(base_size = 13) +
+  theme(legend.position = "top")
+
+p2 <- ggplot(rer_df %>% filter(!is.na(p.perm)), aes(x = p.perm)) +
+  geom_histogram(bins = 50, fill = .tableau10[5], colour = "white", alpha = 0.85) +
+  geom_vline(xintercept = params$pval_threshold,
+             linetype = "dashed", colour = "grey40", linewidth = 0.7) +
+  labs(
+    title = "Distribution of permutation p-values",
+    x = "p.perm",
+    y = "Number of genes"
+  ) +
+  theme_bw(base_size = 13)
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+```{r perm-missing, eval=!has_perm, results='asis'}
+cat("> **Permutation p-values not available.** Re-run with `rer_perm_batches > 0` to enable.\n")
+```
+
+---
+
+## Positively Correlated Genes (top `r params$top_n_labels`)
+
+```{r top-positive}
+sort_col <- if (has_perm) "p.perm" else "p.adj"
+
+top_pos <- rer_df %>%
+  filter(pos_corr) %>%
+  arrange(.data[[sort_col]], desc(Rho)) %>%
+  slice_head(n = params$top_n_labels) %>%
+  mutate(Rho = round(Rho, 4), p.adj = signif(p.adj, 3))
+
+if (has_perm) {
+  top_pos <- top_pos %>%
+    mutate(p.perm = fmt_pperm(p.perm)) %>%
+    select(gene, Rho, N, p.adj, p.perm)
+  col_names <- c("Gene", "Rho", "N", "BH p.adj", "p.perm")
+} else {
+  top_pos <- top_pos %>% select(gene, Rho, N, p.adj)
+  col_names <- c("Gene", "Rho", "N", "BH p.adj")
+}
+
+if (nrow(top_pos) == 0) {
+  cat("No positively correlated genes at the given thresholds.\n")
+} else {
+  knitr::kable(
+    top_pos,
+    col.names = col_names,
+    caption   = "Top positively correlated genes (faster evolution with higher trait value)"
+  )
+}
+```
+
+## Negatively Correlated Genes (top `r params$top_n_labels`)
+
+```{r top-negative}
+top_neg <- rer_df %>%
+  filter(neg_corr) %>%
+  arrange(.data[[sort_col]], Rho) %>%
+  slice_head(n = params$top_n_labels) %>%
+  mutate(Rho = round(Rho, 4), p.adj = signif(p.adj, 3))
+
+if (has_perm) {
+  top_neg <- top_neg %>%
+    mutate(p.perm = fmt_pperm(p.perm)) %>%
+    select(gene, Rho, N, p.adj, p.perm)
+} else {
+  top_neg <- top_neg %>% select(gene, Rho, N, p.adj)
+}
+
+if (nrow(top_neg) == 0) {
+  cat("No negatively correlated genes at the given thresholds.\n")
+} else {
+  knitr::kable(
+    top_neg,
+    col.names = col_names,
+    caption   = "Top negatively correlated genes (slower evolution with higher trait value)"
+  )
+}
+```
+
+---
+
+## Pathway Enrichment Analysis
+
+```{r enrich-run, results='hide'}
+has_gmt <- nzchar(params$gmt_file) &&
+           params$gmt_file != "NO_FILE" &&
+           file.exists(params$gmt_file)
+
+enrich_df <- NULL
+
+if (has_gmt) {
+  suppressPackageStartupMessages(library(RERconverge))
+
+  # Convert correlation results to signed ranking statistic:
+  # stat = sign(Rho) * -log10(P)  — genes are ranked from most
+  # negatively to most positively correlated with the trait.
+  stats_vec <- getStat(res)
+
+  gmt_name  <- tools::file_path_sans_ext(basename(params$gmt_file))
+  annots    <- read.gmt(params$gmt_file)
+  annotlist <- list(annots)
+  names(annotlist) <- gmt_name
+
+  cat(sprintf("Running enrichment against '%s' (%d gene sets, min %d genes)...\n",
+              gmt_name, length(annots), params$enrich_min_genes))
+
+  enrich_raw <- fastwilcoxGMTall(
+    stats_vec,
+    annotlist,
+    outputGeneVals = TRUE,
+    num.g          = params$enrich_min_genes
+  )
+
+  # fastwilcoxGMTall returns a named list — one element per annotation set
+  enrich_df <- enrich_raw[[1]] %>%
+    as.data.frame() %>%
+    mutate(pathway = rownames(.)) %>%
+    relocate(pathway)
+
+  # Standardise column names defensively (column names vary across RERconverge versions)
+  if (!"p.adj" %in% colnames(enrich_df) && "pval" %in% colnames(enrich_df)) {
+    enrich_df$p.adj <- p.adjust(enrich_df$pval, method = "BH")
+  }
+
+  cat(sprintf("Enrichment done: %d pathways tested, %d with p.adj < 0.05.\n",
+              nrow(enrich_df),
+              sum(enrich_df$p.adj < 0.05, na.rm = TRUE)))
+} else {
+  cat("GMT file not provided — enrichment analysis skipped.\n")
+}
+```
+
+```{r enrich-table, eval=!is.null(enrich_df)}
+enrich_display <- enrich_df %>%
+  arrange(p.adj) %>%
+  slice_head(n = params$enrich_top_n) %>%
+  mutate(
+    pval  = signif(pval,  3),
+    p.adj = signif(p.adj, 3)
+  )
+
+# Select columns that exist (version-safe)
+show_cols <- intersect(c("pathway", "pval", "p.adj", "cor", "n"), colnames(enrich_display))
+enrich_display <- enrich_display %>% select(all_of(show_cols))
+
+DT::datatable(
+  enrich_display,
+  filter   = "top",
+  rownames = FALSE,
+  options  = list(pageLength = 20, scrollX = TRUE),
+  caption  = htmltools::tags$caption(
+    style = "caption-side: top; text-align: left; font-weight: bold;",
+    sprintf("Top %d enriched pathways (Wilcoxon rank-sum) | Trait: %s",
+            params$enrich_top_n, params$traitname)
+  )
+)
+```
+
+```{r enrich-plot, fig.height=7, fig.width=10, eval=!is.null(enrich_df)}
+plot_df <- enrich_df %>%
+  filter(!is.na(pval)) %>%
+  arrange(p.adj) %>%
+  slice_head(n = params$enrich_top_n) %>%
+  mutate(
+    pathway_short = stringr::str_trunc(pathway, 55),
+    log10p        = -log10(pval + 1e-300),
+    direction     = if ("cor" %in% colnames(.)) .data$cor else "unknown"
+  ) %>%
+  arrange(log10p)   # arrange for coord_flip readability
+
+ggplot(plot_df, aes(x = reorder(pathway_short, log10p),
+                    y = log10p, fill = direction)) +
+  geom_col(alpha = 0.85) +
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed",
+             colour = "grey40", linewidth = 0.5) +
+  scale_fill_manual(
+    values = c("positive" = .tableau10[3], "negative" = .tableau10[1],
+               "unknown"  = "grey60"),
+    name   = "Correlation direction"
+  ) +
+  coord_flip() +
+  labs(
+    title    = paste("Top enriched pathways —", params$traitname),
+    subtitle = sprintf("Wilcoxon rank-sum | GMT: %s | dashed line = p=0.05",
+                       tools::file_path_sans_ext(basename(params$gmt_file))),
+    x = NULL,
+    y = expression(-log[10](p-value))
+  ) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "top")
+```
+
+```{r enrich-missing, eval=is.null(enrich_df), results='asis'}
+cat("> **Pathway enrichment not available.** Provide a GMT file via `--rer_gmt_file` to enable\n",
+    "> (e.g., MSigDB `c2.all.vX.Y.symbols.gmt`, downloadable from https://www.gsea-msigdb.org).\n")
+```
+
+---
+
+## Methods
+
+**Tool:** RERconverge (Clark _et al._, 2012–2019;
+https://github.com/nclark-lab/RERconverge) via the `correlateWithContinuousPhenotype()`
+function.
+
+**Trait:** `r params$traitname`
+
+**RER computation:** Relative evolutionary rates were calculated with `getAllResiduals()` using
+a square-root branch-length transform, weighted calculation, and scaling (`transform="sqrt"`,
+`weighted=TRUE`, `scale=TRUE`). Genes with insufficient species were excluded (`min.sp` parameter).
+
+**Winsorization:** RER and trait values were optionally winsorized to reduce the influence of extreme values
+(via `winsorizeRER` and `winsorizetrait` parameters).
+
+**Trait normalisation:** Prior to correlation, trait values were tested for normality with
+Shapiro-Wilk. If the null hypothesis of normality was rejected (p < 0.05), a log10 transform
+was applied (log10(x + ε), ε = min non-zero value / 10), following Valenzuela _et al._ (2024).
+
+**Statistical inference:** Pearson correlation between trait paths and RER paths per gene.
+P-values are Benjamini–Hochberg FDR-corrected within `correlateWithContinuousPhenotype()`
+and reported as `p.adj`. A gene is called **positively correlated** if
+p.adj < `r params$pval_threshold` and Rho > `r params$rho_threshold`, and
+**negatively correlated** if Rho < `r -params$rho_threshold`.
+
+**Permutation statistics:** `r if (has_perm) { n_str <- if (!is.null(n_perms_total) && !is.na(n_perms_total)) paste0(n_perms_total, " total permutations (minimum detectable p.perm = 1/", n_perms_total, " = ", round(1/n_perms_total, 4), ")") else "N permutations (count not stored in this RDS)"; paste0("Empirical p-values (p.perm) were computed by generating null phenotypes under a Brownian Motion model of evolution using getPermsContinuous(). The empirical p-value is the proportion of null correlations with |Rho| ≥ the observed value. ", n_str, ". p.perm = 0 (displayed as '< 1/N') means the observed correlation exceeded all null draws — increase permutation count for finer resolution. Batches combined with combinePermData().") } else "Not run (rer_perm_batches = 0). Re-run with rer_perm_batches > 0 to enable (recommended: 10 batches × 100 permutations = 1,000 total, following Valenzuela et al., 2024)."`
+
+**Pathway enrichment:** `r if (has_gmt) paste0("Gene-set enrichment was performed with fastwilcoxGMTall() using a Wilcoxon rank-sum test on genes ranked by sign(Rho) × -log10(P) (via getStat()). GMT file: ", basename(params$gmt_file), ". Minimum pathway size: ", params$enrich_min_genes, " genes. P-values are BH-corrected across pathways.") else paste0("Not run — no GMT file provided. Supply --rer_gmt_file to enable.")`
+
+---
+
+## Session Information
+
+```{r session-info}
+sessionInfo()
+```

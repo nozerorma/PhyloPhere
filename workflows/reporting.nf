@@ -39,12 +39,16 @@ workflow REPORTING {
     def trait_file = file(params.my_traits)
     def tree_file = file(params.tree)
     def reporting_stats_file
+    def pruned_trait_emit = Channel.empty()
+    def pruned_tree_emit = Channel.empty()
 
     if (params.prune_data) {
         log.info "Pruning selected; running data pruning module before reporting."
         prune_out = DATASET_PRUNE(trait_file, tree_file)
         trait_file = prune_out.pruned_trait_file
         tree_file = prune_out.pruned_tree_file
+        pruned_trait_emit = prune_out.pruned_trait_file
+        pruned_tree_emit = prune_out.pruned_tree_file
         dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
         dataset_out = dataset_exploration_out.results_dir
         reporting_stats_file = dataset_exploration_out.stats_file
@@ -60,4 +64,6 @@ workflow REPORTING {
     emit:
         dataset_out
         stats_file = reporting_stats_file
+        pruned_trait_file = pruned_trait_emit
+        pruned_tree_file = pruned_tree_emit
 }

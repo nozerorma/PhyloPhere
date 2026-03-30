@@ -8,6 +8,11 @@ process STRING_GENERAL_REPORT {
     tag "string_general"
     label 'process_reporting'
 
+    // STRING depends on network access; retry up to 3 times then ignore gracefully
+    // so that a transient connection failure never breaks the overall pipeline.
+    errorStrategy { task.attempt <= 3 ? 'retry' : 'ignore' }
+    maxRetries    3
+
     publishDir path: "${params.outdir}/string", mode: 'copy', overwrite: true, pattern: '{string_results/**,string_summary/**,string_plots/**}'
     publishDir path: "${params.outdir}/HTML_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
@@ -67,7 +72,10 @@ process STRING_GENERAL_REPORT {
                 ),
                 output_file = 'STRING_general.html'
             )
-        "
+        " || {
+            echo "[STRING] Rscript failed (attempt ${task.attempt}) — writing placeholder report" >&2
+            echo '<html><body><h2>STRING Enrichment Skipped</h2><p>STRING enrichment could not be completed (connection unavailable or rendering error). Re-run with network access to obtain results.</p></body></html>' > STRING_general.html
+        }
         """
     } else {
         """
@@ -95,7 +103,10 @@ process STRING_GENERAL_REPORT {
                 ),
                 output_file = 'STRING_general.html'
             )
-        "
+        " || {
+            echo "[STRING] Rscript failed (attempt ${task.attempt}) — writing placeholder report" >&2
+            echo '<html><body><h2>STRING Enrichment Skipped</h2><p>STRING enrichment could not be completed (connection unavailable or rendering error). Re-run with network access to obtain results.</p></body></html>' > STRING_general.html
+        }
         """
     }
 }

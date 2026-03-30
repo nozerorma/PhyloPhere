@@ -41,45 +41,52 @@ process RER_CONT {
 
 
     output:
-    file("${ params.traitname }.char2path.output")
-    file("${ params.traitname }.continuous.output")
+    path "${params.traitname}.char2path.output",  emit: char2path
+    path "${params.traitname}.continuous.output", emit: continuous_output
     // file("${ params.traitname }.pval.output")
     // file("${ params.traitname }.lfc.output")
 
 
 
     script:
-    // Define extra discovery arguments from params.file
-    def args = task.ext.args ?: ''
+    def perm_batches    = params.rer_perm_batches      ?: 0
+    def perms_per_batch = params.rer_perms_per_batch   ?: 100
+    def perm_mode       = params.rer_perm_mode         ?: 'cc'
 
-    if (params.use_singularity) {
+    if (params.use_singularity || params.use_apptainer) {
 
         """
-        echo "Using Singularity"
+        echo "Using Singularity/Apptainer"
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
-        ${ trait_file } \\
-        ${ rer_master_tree } \\
-        ${ params.traitname }.char2path.output \\
-        ${ rer_matrix } \\
-        ${ params.traitname }.continuous.output \\
+        ${trait_file} \\
+        ${rer_master_tree} \\
+        ${params.traitname}.char2path.output \\
+        ${rer_matrix} \\
+        ${params.traitname}.continuous.output \\
         ${params.rer_minsp} \\
         ${params.winsorizeRER} \\
-        ${params.winsorizeTrait}
+        ${params.winsorizeTrait} \\
+        ${perm_batches} \\
+        ${perms_per_batch} \\
+        ${perm_mode}
         """
     } else {
         """
         echo "Running locally"
         Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/continuous_rer.R' \\
-        ${ trait_file } \\
-        ${ rer_master_tree } \\
-        ${ params.traitname }.char2path.output \\
-        ${ rer_matrix } \\
-        ${ params.traitname }.continuous.output \\
+        ${trait_file} \\
+        ${rer_master_tree} \\
+        ${params.traitname}.char2path.output \\
+        ${rer_matrix} \\
+        ${params.traitname}.continuous.output \\
         ${params.rer_minsp} \\
         ${params.winsorizeRER} \\
-        ${params.winsorizeTrait}
+        ${params.winsorizeTrait} \\
+        ${perm_batches} \\
+        ${perms_per_batch} \\
+        ${perm_mode}
         """
     }
 

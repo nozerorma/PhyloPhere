@@ -75,4 +75,8 @@ remotes::install_github("nclark-lab/RERconverge@v0.3.0", dependencies = TRUE, up
 cat("OK: R deps installed\n")
 '
 
+echo "Installing pip dependencies not in Anaconda into: $ENV_NAME"
+echo "Installing TransVar..."
+\pip install TransVar
+
 echo "Done."

@@ -1,3 +1,6 @@
+.codex
+.claude
+debug
 .nextflow*
 Data
 run_scripts
@@ -11,4 +14,5 @@ to_integrate
 Docker
 Out
 __pycache__
-
+.vscode
+marvin_debug

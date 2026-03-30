@@ -19,8 +19,8 @@
 #   bottom → global_label == low_extreme species as foreground
 #
 # Run modes (params.fade_mode):
-#   gene_set  → only genes from CT accumulation / postproc significant lists
-#   all       → every PHYLIP alignment file in the alignment directory
+#   gene_set  → only genes from CT postproc significant lists
+#   all       → every supported alignment file in the alignment directory
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 # File: workflows/fade.nf
@@ -30,7 +30,7 @@ include { COLLECT_GENE_SETS       } from "${baseDir}/subworkflows/SELECTION/sele
 include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { PHYLIP_TO_FASTA         } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { ANNOTATE_TREE_FG        } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { FADE_RUN              } from "${baseDir}/subworkflows/FADE/fade_run.nf"
+include { FADE_RUN; FADE_BATCHED } from "${baseDir}/subworkflows/FADE/fade_run.nf"
 include { FADE_REPORT as FADE_REPORT_TOP    } from "${baseDir}/subworkflows/FADE/fade_report.nf"
 include { FADE_REPORT as FADE_REPORT_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_report.nf"
 
@@ -38,7 +38,17 @@ include { FADE_REPORT as FADE_REPORT_BOTTOM } from "${baseDir}/subworkflows/FADE
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
- * Build a List of [gene_id, direction, phylip_File] tuples synchronously.
+ * Render a list of TSV row strings into a heredoc-safe manifest block.
+ * Strips leading whitespace (Groovy multiline strings indent with the closure).
+ */
+def createBatchManifestText = { List<String> rows ->
+    rows
+        .collect { row -> row.replaceFirst(/^\s+/, '') }
+        .join(System.lineSeparator()) + System.lineSeparator()
+}
+
+/**
+ * Build a List of [gene_id, direction, alignment_File] tuples synchronously.
  * Returns a plain Groovy List (not a Channel) so it is safe to call inside
  * a channel operator's closure (e.g. flatMap).
  *
@@ -51,9 +61,12 @@ def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
         return []
     }
     def all_files = ali_path.listFiles()?.findAll { f ->
-        f.isFile() && (f.name.endsWith('.phy') ||
-                       f.name.endsWith('.phylip') ||
-                       f.name.endsWith('.aln') ||
+        def name = f.name.toLowerCase()
+        f.isFile() && (name.endsWith('.phy') ||
+                       name.endsWith('.phylip') ||
+                       name.endsWith('.aln') ||
+                       name.endsWith('.fa') ||
+                       name.endsWith('.fasta') ||
                        !f.name.contains('.'))
     } ?: []
 
@@ -80,8 +93,6 @@ workflow FADE {
         // Optional upstream channels for inline gene-set piping.
         // When non-empty these take priority over the params.fade_* path params.
         // Pass Channel.empty() when running standalone (params-based).
-        acc_top_ch        // accumulation CSV for TOP  (*_top_aggregated_results.csv)
-        acc_bottom_ch     // accumulation CSV for BOTTOM
         pp_top_ch         // postproc TXT for TOP  (all_top.txt)
         pp_bottom_ch      // postproc TXT for BOTTOM (all_bottom.txt)
 
@@ -125,12 +136,6 @@ workflow FADE {
         } else {
             // gene_set mode ───────────────────────────────────────────────────
             // Prefer upstream piped channels; fall back to --fade_* path params.
-            def resolved_acc_top = (acc_top_ch ?: Channel.empty())
-                .ifEmpty { file(params.fade_accumulation_top    ?: 'NO_FILE') }
-
-            def resolved_acc_bottom = (acc_bottom_ch ?: Channel.empty())
-                .ifEmpty { file(params.fade_accumulation_bottom ?: 'NO_FILE') }
-
             def resolved_pp_top = (pp_top_ch ?: Channel.empty())
                 .ifEmpty { file(params.fade_postproc_top        ?: 'NO_FILE') }
 
@@ -138,8 +143,6 @@ workflow FADE {
                 .ifEmpty { file(params.fade_postproc_bottom     ?: 'NO_FILE') }
 
             def gene_sets = COLLECT_GENE_SETS(
-                resolved_acc_top,
-                resolved_acc_bottom,
                 resolved_pp_top,
                 resolved_pp_bottom
             )
@@ -162,8 +165,19 @@ workflow FADE {
             all_ali_ch = top_ali_ch.mix(bottom_ali_ch)
         }
 
-        // ── PHYLIP → FASTA conversion ────────────────────────────────────────
-        fasta_ch = PHYLIP_TO_FASTA(all_ali_ch).fasta
+        // ── Normalize all supported alignment inputs to FASTA ────────────────
+        // FASTA files (.fa / .fasta) bypass the conversion process entirely;
+        // only PHYLIP-like inputs are submitted to PHYLIP_TO_FASTA.
+        def ali_branched = all_ali_ch.branch {
+            is_fasta: { gid, dir, f ->
+                def n = f.name.toLowerCase()
+                n.endsWith('.fa') || n.endsWith('.fasta')
+            }
+            needs_convert: true
+        }
+        def direct_fasta_ch  = ali_branched.is_fasta
+        def converted_ch     = PHYLIP_TO_FASTA(ali_branched.needs_convert).fasta
+        fasta_ch = direct_fasta_ch.mix(converted_ch)
 
         // ── Annotate tree with {Foreground} labels ───────────────────────────
         // fasta_ch is included so that annotate_tree_fg.py can prune the tree
@@ -195,7 +209,47 @@ workflow FADE {
         //  join by [0,1]     → (gene_id, direction, filtered_fasta, annotated_tree)
         def fade_input_ch = filtered_fasta_ch.join(annotated_ch, by: [0, 1])
 
-        fade_results_ch = FADE_RUN(fade_input_ch, lg_dat_ch).fade_json
+        def fadeBatchSize = (params.fade_batch_size ?: 1) as int
+        if (fadeBatchSize > 1) {
+            // ── Batched mode ──────────────────────────────────────────────
+            // Split by direction first so every batch is mono-directional,
+            // then collate each direction's genes into chunks of fadeBatchSize.
+            def fade_branched = fade_input_ch.branch {
+                top:    it[1] == 'top'
+                bottom: it[1] == 'bottom'
+            }
+            def fadeBatchCounterTop    = 0
+            def fadeBatchCounterBottom = 0
+
+            def make_fade_batches = { branch_ch, dir, counter ->
+                branch_ch
+                    .collate(fadeBatchSize)
+                    .map { batch ->
+                        def batchID = sprintf("fade_batch_${dir}_%05d", ++counter)
+                        def manifestText = createBatchManifestText(
+                            batch.collect { row -> "${row[0]}\t${row[2].name}\t${row[3].name}" }
+                        )
+                        tuple(batchID, dir, batch.size(), manifestText,
+                              batch.collect { row -> row[2] },   // filtered fastas
+                              batch.collect { row -> row[3] })   // annotated trees
+                    }
+            }
+
+            def batches_ch = make_fade_batches(fade_branched.top,    'top',    fadeBatchCounterTop)
+                .mix(make_fade_batches(fade_branched.bottom, 'bottom', fadeBatchCounterBottom))
+
+            def batched_out = FADE_BATCHED(batches_ch, lg_dat_ch).fade_json
+            // fade_json emits (direction, path) per JSON; flatten to (gene_id, direction, path)
+            fade_results_ch = batched_out
+                .transpose()
+                .map { dir, f ->
+                    def gene_id = f.name.replace(".${dir}.FADE.json", "")
+                    tuple(gene_id, dir, f)
+                }
+        } else {
+            // ── Single-gene mode (default) ────────────────────────────────
+            fade_results_ch = FADE_RUN(fade_input_ch, lg_dat_ch).fade_json
+        }
 
         // ── Reports per direction ────────────────────────────────────────────
         //    Use .branch() to split once and guarantee exclusive routing,

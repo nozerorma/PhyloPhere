@@ -57,6 +57,7 @@ process RER_MATRIX {
         ${ trait_file } \\
         ${ gene_trees_file } \\
         ${ matrix_out } \\
+        ${params.rer_minsp} \\
         $args
         """
     } else {
@@ -67,6 +68,7 @@ process RER_MATRIX {
         ${ trait_file } \\
         ${ gene_trees_file } \\
         ${ matrix_out } \\
+        ${params.rer_minsp} \\
         $args
         """
     }

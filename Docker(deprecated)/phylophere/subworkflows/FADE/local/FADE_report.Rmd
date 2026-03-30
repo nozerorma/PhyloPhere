@@ -1,0 +1,380 @@
+---
+title: "FADE — Directional Selection Analysis"
+subtitle: "`r paste0(params$traitname, ' | ', toupper(params$direction), ' direction')`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+params:
+  json_dir:       "."
+  direction:      "top"
+  traitname:      "unknown_trait"
+  bf_threshold:   100
+  min_genes_hmap: 3
+  output_dir:     "."
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  out.width = "100%"
+)
+
+suppressPackageStartupMessages({
+  library(jsonlite)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(ggrepel)
+  library(DT)
+})
+```
+
+---
+
+## Overview
+
+This report summarises the results of **FADE** (FUBAR Approach to Directional
+Evolution; Kosakovsky Pond _et al._ 2021) applied to **`r params$direction`**
+foreground branches associated with the phenotype **`r params$traitname`**.
+
+FADE quantifies, for each site in each protein alignment, whether the
+**foreground branches** show a statistically elevated substitution bias towards
+a particular amino acid, relative to the background rate modelled on the full
+tree.  Evidence is measured by the **Bayes Factor (BF)** for each site × target
+amino-acid combination.  A BF ≥ `r params$bf_threshold` is considered strong
+evidence of directional selection at that site.
+
+```{r load-jsons}
+# ── Locate all FADE JSON files in the working directory ──────────────────────
+json_files <- list.files(
+  path    = params$json_dir,
+  pattern = "\\.FADE\\.json$",
+  full.names = TRUE
+)
+
+if (length(json_files) == 0) {
+  stop("No *.FADE.json files found in '", params$json_dir,
+       "'. Was FADE_RUN completed for this direction?")
+}
+
+cat(sprintf("Found %d FADE result files.\n", length(json_files)))
+```
+
+```{r parse-fade, results='hide'}
+# ── Parse each JSON: extract per-site × amino-acid Bayes Factors ─────────────
+#
+# Expected FADE JSON structure:
+#   $MLE$headers  : list of [col_name, description] pairs (same for all sites)
+#   $MLE$content  : named list, each element = one site (0-indexed)
+#                   each site element = named list by amino acid (20 letters)
+#                   each AA element   = numeric vector matching headers
+
+AA_LETTERS <- strsplit("ACDEFGHIKLMNPQRSTVWY", "")[[1]]
+
+parse_fade_json <- function(path) {
+  gene_id <- sub("\\.FADE\\.json$", "", basename(path))
+
+  tryCatch({
+    js <- fromJSON(path, simplifyVector = FALSE)
+
+    if (is.null(js[["MLE"]]) || is.null(js[["MLE"]][["content"]])) {
+      warning("Skipping ", gene_id, ": no MLE content in JSON")
+      return(NULL)
+    }
+
+    # Identify the column index of Bayes Factor
+    hdrs <- js[["MLE"]][["headers"]]
+    bf_idx <- which(sapply(hdrs, function(h) {
+      grepl("Bayes Factor", h[[1]], ignore.case = TRUE)
+    }))
+    if (length(bf_idx) == 0) bf_idx <- 3L  # fallback: 3rd column
+
+    sites <- js[["MLE"]][["content"]]
+
+    rows <- lapply(seq_along(sites), function(i) {
+      site_data <- sites[[i]]
+      site_num  <- as.integer(names(sites)[i]) + 1L  # 1-indexed
+
+      aa_rows <- lapply(AA_LETTERS, function(aa) {
+        vals <- site_data[[aa]]
+        if (is.null(vals)) return(NULL)
+        bf_val <- tryCatch(as.numeric(vals[[bf_idx]]), error = function(e) NA_real_)
+        data.frame(
+          gene      = gene_id,
+          site      = site_num,
+          target_aa = aa,
+          bayes_factor = bf_val,
+          stringsAsFactors = FALSE
+        )
+      })
+      do.call(rbind, Filter(Negate(is.null), aa_rows))
+    })
+
+    do.call(rbind, Filter(Negate(is.null), rows))
+
+  }, error = function(e) {
+    warning("Failed to parse ", gene_id, ": ", conditionMessage(e))
+    NULL
+  })
+}
+
+# Parse all files (may take a moment for large gene sets)
+all_results <- lapply(json_files, parse_fade_json)
+all_results <- Filter(Negate(is.null), all_results)
+
+if (length(all_results) == 0) {
+  stop("All FADE JSON files failed to parse. Check file integrity.")
+}
+
+fade_df <- do.call(rbind, all_results)
+cat(sprintf(
+  "Parsed %d genes × %d site×AA combinations.\n",
+  n_distinct(fade_df$gene),
+  nrow(fade_df)
+))
+```
+
+---
+
+## Gene-level Summary
+
+```{r gene-summary}
+# ── For each gene: how many sites exceed the BF threshold? ───────────────────
+bf_thr <- params$bf_threshold
+
+gene_summary <- fade_df %>%
+  filter(!is.na(bayes_factor)) %>%
+  group_by(gene) %>%
+  summarise(
+    n_sites_tested   = n_distinct(site),
+    n_sig_site_aa    = sum(bayes_factor >= bf_thr, na.rm = TRUE),
+    max_bf           = max(bayes_factor, na.rm = TRUE),
+    top_target_aa    = {
+      sig <- filter(cur_data(), bayes_factor >= bf_thr)
+      if (nrow(sig) == 0) NA_character_
+      else sig$target_aa[which.max(sig$bayes_factor)]
+    },
+    top_site         = {
+      sig <- filter(cur_data(), bayes_factor >= bf_thr)
+      if (nrow(sig) == 0) NA_integer_
+      else sig$site[which.max(sig$bayes_factor)]
+    },
+    .groups = "drop"
+  ) %>%
+  arrange(desc(n_sig_site_aa), desc(max_bf))
+
+sig_genes <- gene_summary %>% filter(n_sig_site_aa > 0)
+
+cat(sprintf(
+  "%d / %d genes have ≥1 site with BF ≥ %g.\n",
+  nrow(sig_genes), nrow(gene_summary), bf_thr
+))
+```
+
+```{r gene-table}
+DT::datatable(
+  gene_summary %>%
+    mutate(max_bf = round(max_bf, 2)) %>%
+    rename(
+      Gene              = gene,
+      `Sites tested`    = n_sites_tested,
+      `Sig. site×AA`   = n_sig_site_aa,
+      `Max BF`          = max_bf,
+      `Top target AA`   = top_target_aa,
+      `Top site pos.`   = top_site
+    ),
+  filter    = "top",
+  rownames  = FALSE,
+  options   = list(pageLength = 25, scrollX = TRUE),
+  caption   = htmltools::tags$caption(
+    style = "caption-side: top; text-align: left; font-weight: bold;",
+    sprintf("Gene-level FADE summary | BF threshold = %g | Direction: %s",
+            bf_thr, toupper(params$direction))
+  )
+)
+```
+
+```{r write-summary-tsv}
+out_tsv <- file.path(params$output_dir,
+                     paste0("fade_summary_", params$direction, ".tsv"))
+write.table(gene_summary, out_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
+invisible(NULL)
+```
+
+---
+
+## Site × Amino-acid Detail
+
+### Top significant site × AA combinations
+
+```{r top-sites-table}
+top_sites <- fade_df %>%
+  filter(bayes_factor >= bf_thr) %>%
+  arrange(desc(bayes_factor)) %>%
+  mutate(bayes_factor = round(bayes_factor, 2)) %>%
+  rename(
+    Gene      = gene,
+    Site      = site,
+    `Target AA` = target_aa,
+    `Bayes Factor` = bayes_factor
+  )
+
+if (nrow(top_sites) == 0) {
+  cat("No site × AA combinations exceed BF ≥", bf_thr, "\n")
+} else {
+  DT::datatable(
+    top_sites,
+    filter   = "top",
+    rownames = FALSE,
+    options  = list(pageLength = 30, scrollX = TRUE)
+  )
+}
+```
+
+---
+
+## Visualisations
+
+### Distribution of maximum Bayes Factors across genes
+
+```{r bf-distribution, fig.height=5}
+ggplot(gene_summary, aes(x = max_bf)) +
+  geom_histogram(bins = 50, fill = "#2c7bb6", colour = "white", alpha = 0.85) +
+  geom_vline(xintercept = bf_thr, colour = "#d7191c", linetype = "dashed", linewidth = 0.8) +
+  annotate("text", x = bf_thr * 1.05, y = Inf, vjust = 1.5,
+           label = paste("BF =", bf_thr), colour = "#d7191c", size = 3.5) +
+  scale_x_log10(labels = scales::comma) +
+  labs(
+    title    = paste("Max Bayes Factor per gene —", toupper(params$direction), "direction"),
+    subtitle = params$traitname,
+    x        = "Max Bayes Factor (log10 scale)",
+    y        = "Number of genes"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+### Target amino-acid frequency among significant site × AA hits
+
+```{r aa-frequency, fig.height=5}
+if (nrow(sig_genes) == 0) {
+  cat("No significant genes to plot.\n")
+} else {
+  aa_freq <- fade_df %>%
+    filter(bayes_factor >= bf_thr) %>%
+    count(target_aa) %>%
+    arrange(desc(n))
+
+  ggplot(aa_freq, aes(x = reorder(target_aa, n), y = n)) +
+    geom_col(fill = "#1a9641", alpha = 0.85) +
+    coord_flip() +
+    labs(
+      title = paste("Target amino-acid frequency in significant hits —",
+                    toupper(params$direction)),
+      x = "Target amino acid",
+      y = "Number of significant site × AA combinations"
+    ) +
+    theme_bw(base_size = 13)
+}
+```
+
+### Heatmap: significant sites per gene × target amino acid
+
+```{r heatmap, fig.height=8, fig.width=11}
+n_sig <- nrow(sig_genes)
+
+if (n_sig < params$min_genes_hmap) {
+  cat(sprintf(
+    "Only %d significant gene(s) found (threshold for heatmap = %d). Skipping heatmap.\n",
+    n_sig, params$min_genes_hmap
+  ))
+} else {
+
+  # Count how many sites each gene × AA pair has above threshold
+  hm_data <- fade_df %>%
+    filter(gene %in% sig_genes$gene, bayes_factor >= bf_thr) %>%
+    group_by(gene, target_aa) %>%
+    summarise(n_sig_sites = n(), max_bf = max(bayes_factor), .groups = "drop")
+
+  # Pivot to wide and back to long for complete grid
+  hm_wide <- hm_data %>%
+    select(gene, target_aa, n_sig_sites) %>%
+    pivot_wider(names_from = target_aa, values_from = n_sig_sites, values_fill = 0) %>%
+    pivot_longer(-gene, names_to = "target_aa", values_to = "n_sig_sites")
+
+  # Order genes by total significant sites
+  gene_order <- hm_data %>%
+    group_by(gene) %>% summarise(tot = sum(n_sig_sites)) %>%
+    arrange(desc(tot)) %>% pull(gene)
+
+  hm_wide <- hm_wide %>%
+    mutate(
+      gene      = factor(gene,      levels = rev(gene_order)),
+      target_aa = factor(target_aa, levels = AA_LETTERS)
+    )
+
+  p <- ggplot(hm_wide, aes(x = target_aa, y = gene, fill = n_sig_sites)) +
+    geom_tile(colour = "white", linewidth = 0.3) +
+    scale_fill_gradient(low = "white", high = "#d7191c",
+                        name = "# significant\nsites") +
+    labs(
+      title    = paste("Significant FADE sites per gene × target AA —",
+                       toupper(params$direction)),
+      subtitle = paste0("BF ≥ ", bf_thr, " | Trait: ", params$traitname),
+      x = "Target amino acid",
+      y = NULL
+    ) +
+    theme_bw(base_size = 12) +
+    theme(
+      axis.text.y = element_text(size = 8),
+      legend.position = "right"
+    )
+
+  # Cap height at 80 genes to keep the plot readable
+  if (n_sig > 80) {
+    keep_genes <- gene_order[seq_len(80)]
+    p <- p %+% filter(hm_wide, gene %in% keep_genes) +
+      labs(caption = paste("Showing top 80 of", n_sig, "significant genes"))
+  }
+
+  print(p)
+}
+```
+
+---
+
+## Methods
+
+**Tool:** FADE (FUBAR Approach to Directional Evolution) via HyPhy ≥ 2.5.
+
+**Branch labelling:** Foreground branches correspond to species in the
+**`r params$direction`** contrast group of the caastools traitfile for trait
+`r params$traitname`. Background branches are the remaining species.
+For a `r params$direction` analysis, contrast_group
+`r ifelse(params$direction == "top", "= 1 (high-trait extreme)", "= 0 (low-trait extreme after FG/BG flip)")` species were labelled as foreground.
+
+**Statistical cutoff:** Bayes Factor ≥ `r params$bf_threshold` was used as the
+evidence threshold for directional selection at a site, following the convention
+of Kosakovsky Pond _et al._ 2021 (_HyPhy 2.5_, MBE).
+
+**Substitution model used for background rate:** `r params$traitname` (see
+pipeline parameters for `fade_model`).
+
+---
+
+## Session Information
+
+```{r session-info}
+sessionInfo()
+```
