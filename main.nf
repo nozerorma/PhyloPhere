@@ -69,6 +69,7 @@ include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {MOLERATE}       from './workflows/molerate.nf'
 include {PGLS}           from './workflows/pgls.nf'
+include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 
 // Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
@@ -201,9 +202,12 @@ workflow {
                 error "CT disambiguation requires signification outputs (--ct_signification) or a standalone metadata file (--ct_disambig_caas_metadata)."
             }
 
-            // Pass null so that the if(channel) guard inside CT_DISAMBIGUATION detects absence
-            // and falls back to --ct_disambig_caas_metadata.
-            def meta_for_disambiguation = signification_results ? signification_results.signification_global_meta : null
+            // Forward both possible signification metadata artifacts; CT_DISAMBIGUATION
+            // will prefer global_meta_caas.tsv when present and otherwise accept
+            // the per-run meta_caas.tsv fallback.
+            def meta_for_disambiguation = signification_results
+                ? signification_results.signification_global_meta.mix(signification_results.signification_meta_caas)
+                : null
             def trait_for_disambiguation = ct_results ? ct_results.trait_file : Channel.empty()
             def tree_for_disambiguation = ct_results ? ct_results.tree_file : Channel.empty()
 
@@ -253,12 +257,10 @@ workflow {
             pp_gene_lists_val = postproc_results.ora_gene_lists_files.collect()
 
             if (params.ora) {
-                // ORA uses if(channel) guard internally, so passing a channel that has
-                // not yet emitted is safe — it will wait for the upstream process.
-                // Pass the direct queue channel for gene lists (ORA collects internally).
-                ORA(pp_cleaned_bg, postproc_results.ora_gene_lists_files)
-                // Run a second ORA on the excluded gene lists using the original
-                // (pre-cleanup) background from discovery, publishing to ora_excluded/.
+                // ORA on excluded gene lists only: characterises genes removed during
+                // post-processing using the original (pre-cleanup) background.
+                // Post-proc gene-list ORA is intentionally omitted here; enrichment
+                // on significant positions is handled downstream by SCORING (scoring_ora).
                 ORA_EXCLUDED(postproc_results.background_ori, postproc_results.excluded_gene_lists_files)
                 ran_any = true
             }
@@ -290,6 +292,12 @@ workflow {
             ran_any = true
         }
 
+        if (params.vep) {
+            def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
+            VEP(vep_caas_ch)
+            ran_any = true
+        }
+
         // Populate postproc gene-list channels for FADE/MOLERATE/RER gene-set piping.
         // pp_gene_lists_val is a value channel holding the collected List<File>.
         // Restrict to global scenario directional lists only:
@@ -318,26 +326,28 @@ workflow {
         sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
         sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
 
-        // Split stats/tree channels so multiple tools (FADE, MOLERATE) can each
-        // receive the single emission without competing on the same queue channel.
+        // Split stats channel so FADE and MOLERATE can each receive the single
+        // emission without competing on the same queue channel.
         def stats_source_ch = contrast_out
             ? contrast_out.stats_file_out
             : (reporting_results ? reporting_results.stats_file : Channel.empty())
         def split_stats_file = stats_source_ch
             ? stats_source_ch.multiMap { f -> fade: f; molerate: f }
             : Channel.empty().multiMap { f -> fade: f; molerate: f }
-        def split_tree = ct_results
-            ? ct_results.tree_file.multiMap { f -> fade: f; molerate: f }
-            : Channel.empty().multiMap { f -> fade: f; molerate: f }
+        // Tree: FADE and MOLERATE always use params.tree (the complete species tree)
+        // via their .ifEmpty {} fallback.  The CT-pruned tree is pruned to
+        // valid-contrast-pair species only, which is a strict subset of the
+        // extreme-labeled species in stats_file — passing it would cause
+        // ANNOTATE_TREE_FG / MOLERATE_RUN to silently drop FG branches.
 
         if (params.fade) {
-            FADE(split_stats_file.fade, split_tree.fade,
+            FADE(split_stats_file.fade, Channel.empty(),
                  sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.molerate) {
-            MOLERATE(split_stats_file.molerate, split_tree.molerate,
+            MOLERATE(split_stats_file.molerate, Channel.empty(),
                      sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
@@ -370,6 +380,9 @@ workflow {
             def scoring_rer_ch       = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
             def scoring_accum_ch     = accum_results     ? accum_results.results               : null
             def scoring_bg_ch        = pp_cleaned_bg     ?: null
+            def scoring_vep_tv_ch    = params.vep        ? VEP.out.transvar_tsv               : null
+            def scoring_vep_pai_ch   = params.vep        ? VEP.out.primateai_tsv              : null
+            // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
 
             SCORING(
                 scoring_postproc_ch,
@@ -378,7 +391,10 @@ workflow {
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
                 scoring_accum_ch,
-                scoring_bg_ch
+                scoring_bg_ch,
+                scoring_vep_tv_ch,
+                scoring_vep_pai_ch,
+                null  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
             )
             ran_any = true
         }

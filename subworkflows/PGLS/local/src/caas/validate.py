@@ -37,6 +37,17 @@ def top_bottom_letters(new_convAA: str) -> Tuple[Set[str], Set[str]]:
     return top, bottom
 
 
+def infer_alignment_format(path: str, requested_format: str) -> str:
+    if requested_format and requested_format != "auto":
+        return requested_format
+
+    suffix = os.path.splitext(path)[1].lower()
+    if suffix in {".fa", ".fasta"}:
+        return "fasta"
+
+    return "phylip-relaxed"
+
+
 def open_alignment_for_gene(align_dir: str, gene: str, align_fmt: str, DEBUG: bool = False):
     candidates = sorted(glob.glob(os.path.join(align_dir, f"{gene}.*")))
     if not candidates:
@@ -44,7 +55,7 @@ def open_alignment_for_gene(align_dir: str, gene: str, align_fmt: str, DEBUG: bo
     last_err = None
     for fp in candidates:
         try:
-            aln = AlignIO.read(fp, align_fmt)
+            aln = AlignIO.read(fp, infer_alignment_format(fp, align_fmt))
             return aln, fp
         except Exception as e:
             last_err = e

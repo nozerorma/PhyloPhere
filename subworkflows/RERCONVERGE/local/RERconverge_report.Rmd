@@ -104,17 +104,35 @@ has_perm <- "p.perm" %in% colnames(res) && any(!is.na(res$p.perm))
 
 rer_df <- res %>%
   as.data.frame() %>%
-  mutate(gene = rownames(.)) %>%   # row names ARE gene IDs
-  relocate(gene) %>%
-  mutate(
-    signif      = !is.na(p.adj)  & p.adj  < params$pval_threshold,
-    signif_perm = has_perm & !is.na(p.perm) & p.perm < params$pval_threshold,
-    # Primary call: use p.perm if available, else p.adj
-    signif_any  = if (has_perm) signif_perm else signif,
-    pos_corr    = signif_any &  Rho >  params$rho_threshold,
-    neg_corr    = signif_any &  Rho < -params$rho_threshold
-  ) %>%
-  arrange(if (has_perm) p.perm else p.adj)
+  # Ensure p.perm column exists (as NA if not present) to avoid downstream errors
+  {if (!("p.perm" %in% colnames(.))) mutate(., p.perm = NA_real_) else .} %>%
+  mutate(gene = rownames(res)) %>%   # row names ARE gene IDs
+  relocate(gene)
+
+# Compute significance flags based on whether permutation p-values exist
+if (has_perm) {
+  rer_df <- rer_df %>%
+    mutate(
+      signif      = !is.na(p.adj)  & p.adj  < params$pval_threshold,
+      signif_perm = !is.na(p.perm) & p.perm < params$pval_threshold,
+      # Primary call: use p.perm if available, else p.adj
+      signif_any  = signif_perm,
+      pos_corr    = signif_any &  Rho >  params$rho_threshold,
+      neg_corr    = signif_any &  Rho < -params$rho_threshold
+    ) %>%
+    arrange(p.perm)
+} else {
+  rer_df <- rer_df %>%
+    mutate(
+      signif      = !is.na(p.adj)  & p.adj  < params$pval_threshold,
+      signif_perm = FALSE,
+      # Primary call: use p.adj if no permutations
+      signif_any  = signif,
+      pos_corr    = signif_any &  Rho >  params$rho_threshold,
+      neg_corr    = signif_any &  Rho < -params$rho_threshold
+    ) %>%
+    arrange(p.adj)
+}
 
 cat(sprintf(
   "Significant after BH-FDR (p.adj < %g): %d positively correlated, %d negatively correlated.\n",
@@ -524,7 +542,7 @@ plot_df <- enrich_df %>%
   mutate(
     pathway_short = stringr::str_trunc(pathway, 55),
     log10p        = -log10(pval + 1e-300),
-    direction     = if ("cor" %in% colnames(.)) cor else "unknown"
+    direction     = if ("cor" %in% colnames(.)) .data$cor else "unknown"
   ) %>%
   arrange(log10p)   # arrange for coord_flip readability
 
@@ -567,12 +585,10 @@ function.
 
 **RER computation:** Relative evolutionary rates were calculated with `getAllResiduals()` using
 a square-root branch-length transform, weighted calculation, and scaling (`transform="sqrt"`,
-`weighted=TRUE`, `scale=TRUE`). Only genes with at least `r if (!is.null(params$rer_minsp)) params$rer_minsp else "—"` species
-were included (`min.sp` parameter).
+`weighted=TRUE`, `scale=TRUE`). Genes with insufficient species were excluded (`min.sp` parameter).
 
-**Winsorization:** RER values winsorized at
-`r if (!is.null(params$rer_winsorizeRER)) params$rer_winsorizeRER else "—"` SD; trait values winsorized at
-`r if (!is.null(params$rer_winsorizeTrait)) params$rer_winsorizeTrait else "—"` SD (via `winsorizeRER` and `winsorizetrait` parameters).
+**Winsorization:** RER and trait values were optionally winsorized to reduce the influence of extreme values
+(via `winsorizeRER` and `winsorizetrait` parameters).
 
 **Trait normalisation:** Prior to correlation, trait values were tested for normality with
 Shapiro-Wilk. If the null hypothesis of normality was rejected (p < 0.05), a log10 transform

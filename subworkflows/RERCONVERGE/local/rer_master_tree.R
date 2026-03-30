@@ -106,8 +106,21 @@ for (tree_name in names(gene_trees)) {
           txid <- tip_to_taxid[[tip]]
           txid_key <- as.character(txid)
           canonical <- if (txid_key %in% names(taxid_to_canonical)) taxid_to_canonical[[txid_key]] else NULL
-          if (!is.null(canonical) && !is.na(canonical)) {
-            new_labels[i] <- canonical
+          if (!is.null(canonical) && !is.na(canonical) && canonical != tip) {
+            # Guard against duplicate labels: if the canonical target is already
+            # present in new_labels (either as an original scientific-name tip or
+            # because a previous synonym was already renamed to it), skip the
+            # rename.  The unmodified synonym keeps its original name and will be
+            # dropped by drop.tip() since it won't match any traitfile species.
+            # This mirrors the synthetic-taxid logic used in CT_DISAMBIGUATION.
+            if (canonical %in% new_labels) {
+              message(sprintf(
+                "[RER_TREES] Skipping rename '%s' -> '%s' (taxid %s): target already present; synonym will be pruned.",
+                tip, canonical, txid_key
+              ))
+            } else {
+              new_labels[i] <- canonical
+            }
           }
         }
       }

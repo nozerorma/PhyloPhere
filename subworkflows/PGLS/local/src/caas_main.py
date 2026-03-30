@@ -41,7 +41,7 @@ def main() -> None:
     ap.add_argument("--trait-name", required=True, help="Single trait column to analyze.")
     ap.add_argument("--caas-file", required=True)
     ap.add_argument("--alignments-dir", required=True)
-    ap.add_argument("--alignments-format", default="phylip-relaxed")
+    ap.add_argument("--alignments-format", default="auto")
 
     ap.add_argument("--q-lower", type=float, default=0.25)
     ap.add_argument("--q-upper", type=float, default=0.75)

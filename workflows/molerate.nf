@@ -21,7 +21,7 @@
 #
 # Run modes (params.molerate_mode):
 #   gene_set  -> only genes from CT postproc significant lists
-#   all       -> every PHYLIP alignment file in the alignment directory
+#   all       -> every supported alignment file in the alignment directory
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 # File: workflows/molerate.nf
@@ -45,7 +45,7 @@ def createBatchManifestText = { List<String> rows ->
 }
 
 // ---------------------------------------------------------------------------
-// Private helper: build a List of [gene_id, direction, phylip_File] tuples.
+// Private helper: build a List of [gene_id, direction, alignment_File] tuples.
 // Runs at channel-operator evaluation time (inside flatMap).
 // ---------------------------------------------------------------------------
 def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
@@ -55,10 +55,13 @@ def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
         return []
     }
     def all_files = ali_path.listFiles()?.findAll { f ->
+        def name = f.name.toLowerCase()
         f.isFile() && (
-            f.name.endsWith('.phy')    ||
-            f.name.endsWith('.phylip') ||
-            f.name.endsWith('.aln')    ||
+            name.endsWith('.phy')    ||
+            name.endsWith('.phylip') ||
+            name.endsWith('.aln')    ||
+            name.endsWith('.fa')     ||
+            name.endsWith('.fasta')  ||
             !f.name.contains('.')
         )
     } ?: []
@@ -165,8 +168,19 @@ workflow MOLERATE {
             all_ali_ch = top_ali_ch.mix(bottom_ali_ch)
         }
 
-        // 4. PHYLIP -> FASTA conversion ------------------------------------
-        fasta_ch = PHYLIP_TO_FASTA(all_ali_ch).fasta
+        // 4. Normalize all supported alignment inputs to FASTA --------------
+        // FASTA files (.fa / .fasta) bypass the conversion process entirely;
+        // only PHYLIP-like inputs are submitted to PHYLIP_TO_FASTA.
+        def ali_branched = all_ali_ch.branch {
+            is_fasta: { gid, dir, f ->
+                def n = f.name.toLowerCase()
+                n.endsWith('.fa') || n.endsWith('.fasta')
+            }
+            needs_convert: true
+        }
+        def direct_fasta_ch  = ali_branched.is_fasta
+        def converted_ch     = PHYLIP_TO_FASTA(ali_branched.needs_convert).fasta
+        fasta_ch = direct_fasta_ch.mix(converted_ch)
         // -> (gene_id, direction, fasta)
 
         // 5. Join fasta + fg_branches_ch by direction, broadcast tree -----

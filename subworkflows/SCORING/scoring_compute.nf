@@ -57,8 +57,10 @@ process SCORING_COMPUTE {
     script:
     def local_dir  = "${baseDir}/subworkflows/SCORING/local"
     def top_pct    = params.scoring_position_top_pct  ?: 0.10
+    def top5_pct   = params.scoring_position_top5_pct ?: 0.05
     def top1_pct   = params.scoring_position_top1_pct ?: 0.01
     def g_top_pct  = params.scoring_gene_top_pct      ?: 0.10
+    def g_top5_pct = params.scoring_gene_top5_pct     ?: 0.05
     def g_top1_pct = params.scoring_gene_top1_pct     ?: 0.01
     // Determine accum_dir: if accum_files is a real directory, pass it;
     // otherwise check if multiple CSVs were staged (Nextflow stages them flat).
@@ -79,8 +81,10 @@ process SCORING_COMPUTE {
             --rer        '${rer_summary}' \
             --accum_dir  '${accum_arg}' \
             --top_pct    ${top_pct} \
+            --top5_pct   ${top5_pct} \
             --top1_pct   ${top1_pct} \
             --gene_top_pct  ${g_top_pct} \
+            --gene_top5_pct ${g_top5_pct} \
             --gene_top1_pct ${g_top1_pct}
         """
     } else {
@@ -95,8 +99,10 @@ process SCORING_COMPUTE {
             --rer        '${rer_summary}' \
             --accum_dir  '${accum_arg}' \
             --top_pct    ${top_pct} \
+            --top5_pct   ${top5_pct} \
             --top1_pct   ${top1_pct} \
             --gene_top_pct  ${g_top_pct} \
+            --gene_top5_pct ${g_top5_pct} \
             --gene_top1_pct ${g_top1_pct}
         """
     }

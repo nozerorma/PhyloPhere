@@ -37,9 +37,10 @@ include { RER_TRAIT }          from "${baseDir}/subworkflows/RERCONVERGE/rer_tra
 include { RER_TREES }          from "${baseDir}/subworkflows/RERCONVERGE/rer_trees"
 include { RER_MATRIX }         from "${baseDir}/subworkflows/RERCONVERGE/rer_matrix"
 include { RER_CONT }           from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
+include { RER_BIN }            from "${baseDir}/subworkflows/RERCONVERGE/rer_bin"
 include { COLLECT_GENE_SETS }  from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { FILTER_GENE_TREES }  from "${baseDir}/subworkflows/RERCONVERGE/rer_filter_trees.nf"
-include { RER_REPORT }         from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
+include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
 
 // Main workflow
 workflow RER_MAIN {
@@ -89,42 +90,84 @@ workflow RER_MAIN {
         }
 
         // ── Conditionally run RER steps ──────────────────────────────────────
-        def trait_out      = params.trait_out     ? Channel.value(file(params.trait_out))     : Channel.empty()
-        def masterTrees_out = params.trees_out    ? Channel.value(file(params.trees_out))     : Channel.empty()
-        def matrix_out_ch  = params.matrix_out    ? Channel.value(file(params.matrix_out))    : Channel.empty()
+        def trait_out_ch    = params.trait_out  ? Channel.value(file(params.trait_out))  : Channel.empty()
+        def masterTrees_out = params.trees_out  ? Channel.value(file(params.trees_out))  : Channel.empty()
+        def matrix_out_ch   = params.matrix_out ? Channel.value(file(params.matrix_out)) : Channel.empty()
+
+        // trait_type_ch: string channel ("binary" or "continuous") resolved after
+        // build_trait, or defaulting to params.rer_trait_mode when skipping build_trait.
+        def trait_type_ch = Channel.empty()
 
         // Track RER_REPORT output for downstream consumers (e.g. SCORING).
-        // Populated when 'continuous' tool is run; empty otherwise.
+        // Populated when 'continuous' or 'binary' tool is run; empty otherwise.
         def rer_report_out = null
 
         if (params.rer_tool) {
             def toolsToRun = params.rer_tool.split(',')
 
             if (toolsToRun.contains('build_trait')) {
-                trait_out = RER_TRAIT(my_traitfile_ch)
+                def trait_result = RER_TRAIT(my_traitfile_ch)
+                trait_out_ch   = trait_result.polished
+                trait_type_ch  = trait_result.trait_type.map { f -> f.text.trim() }
+                trait_type_ch.view { t -> "[RER] Auto-detected trait type: ${t}" }
             }
 
             if (toolsToRun.contains('build_tree')) {
                 def tax_id_ch = params.tax_id
                     ? Channel.value(file(params.tax_id))
                     : Channel.value(file('NO_FILE'))
-                trees_out = RER_TREES(my_traitfile_ch, effective_gene_trees_ch, tax_id_ch)
+                def trees_out = RER_TREES(my_traitfile_ch, effective_gene_trees_ch, tax_id_ch)
                 masterTrees_out = trees_out[0]
             }
 
             if (toolsToRun.contains('build_matrix')) {
-                matrix_out_ch = RER_MATRIX(trait_out, masterTrees_out)
+                matrix_out_ch = RER_MATRIX(trait_out_ch, masterTrees_out)
             }
 
-            if (toolsToRun.contains('continuous')) {
-                def rer_cont_result = RER_CONT(trait_out, masterTrees_out, matrix_out_ch)
+            // ── Auto-route: continuous vs binary ─────────────────────────────
+            // When rer_tool contains 'continuous' or 'binary', the resolved trait
+            // type (from build_trait auto-detection or params.rer_trait_mode)
+            // determines which correlation process runs.
+            // Override auto-detection by setting params.rer_trait_mode = 'continuous'
+            // or 'binary' explicitly.
+            if (toolsToRun.contains('continuous') || toolsToRun.contains('binary')) {
+
+                // Resolve effective type: explicit param overrides auto-detection.
+                // If build_trait was skipped (trait_type_ch is empty) and no explicit
+                // mode is set, default to 'continuous' for backwards compatibility.
+                def effective_type_ch = (params.rer_trait_mode && params.rer_trait_mode != 'auto')
+                    ? Channel.value(params.rer_trait_mode)
+                    : trait_type_ch.ifEmpty { 'continuous' }
+
+                // Combine trait file with its type string for branching
+                def routed_trait = trait_out_ch
+                    .combine(effective_type_ch)
+
+                routed_trait.branch {
+                    continuous: it[1] == 'continuous'
+                    binary:     it[1] == 'binary'
+                }.set { trait_branched }
+
+                def cont_trait_ch = trait_branched.continuous.map { polished, _type -> polished }
+                def bin_trait_ch  = trait_branched.binary.map     { polished, _type -> polished }
+
                 def gmt_ch = params.rer_gmt_file
                     ? Channel.value(file(params.rer_gmt_file))
                     : Channel.value(file('NO_FILE'))
-                rer_report_out = RER_REPORT(rer_cont_result.continuous_output, gmt_ch)
+
+                // Both processes are declared; only the branch that received data
+                // will produce output — the other stays idle (empty input channel).
+                def rer_cont_result = RER_CONT(cont_trait_ch, masterTrees_out, matrix_out_ch)
+                def rer_bin_result  = RER_BIN(bin_trait_ch,  masterTrees_out, matrix_out_ch)
+
+                def cont_report = RER_REPORT_CONT(rer_cont_result.continuous_output, gmt_ch)
+                def bin_report  = RER_REPORT_BIN(rer_bin_result.binary_output,      gmt_ch)
+
+                // Merge summary TSV outputs (only the active branch will emit)
+                rer_report_out = cont_report.summary_tsv.mix(bin_report.summary_tsv)
             }
         }
 
     emit:
-        summary_tsv = rer_report_out ? rer_report_out.summary_tsv : Channel.empty()
+        summary_tsv = rer_report_out ?: Channel.empty()
 }

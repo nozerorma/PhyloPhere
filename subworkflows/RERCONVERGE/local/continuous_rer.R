@@ -120,8 +120,8 @@ if (num_batches > 0 && perms_per_batch > 0) {
         traitvec        = trait_vector,
         RERmat          = traitRERw,
         annotlist       = NULL,
-        trees           = geneTrees,
-        mastertree      = geneTrees$masterTree,
+        trees           = geneTrees_di,
+        mastertree      = geneTrees_di$masterTree,
         calculateenrich = FALSE,
         winR            = as.numeric(args[7]),
         winT            = as.numeric(args[8])

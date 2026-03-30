@@ -19,6 +19,10 @@ from src.phylo.tree_utils import prune_tree
 
 logger = logging.getLogger(__name__)
 
+# Per-process deduplication: log each taxid conflict only once per worker to
+# avoid flooding stderr when processing thousands of genes with the same conflict.
+_WARNED_CONFLICT_TAXIDS: Set[str] = set()
+
 
 def read_taxid_mapping(taxid_file: Path) -> Dict[str, str]:
     """
@@ -203,17 +207,26 @@ def match_tree_alignment_by_taxid(
             continue
 
         species_list = sorted(species_list)
-        logger.warning(
-            "Multiple alignment sequences map to tax_id %s: %s",
-            taxid,
-            ", ".join(species_list),
-        )
-        logger.warning(
-            "⚠️  TAXONOMY CONFLICT: These species are distinct in the phylogeny but share the same NCBI tax_id!"
-        )
-        logger.warning(
-            "⚠️  This likely indicates a taxonomic reclassification or mislabeling issue."
-        )
+        # Only emit the full warning block once per taxid conflict per worker process.
+        # In a multi-gene run this conflict recurs for every gene sharing these species;
+        # repeated logging floods stderr and can cause SLURM to kill the job.
+        first_occurrence = taxid not in _WARNED_CONFLICT_TAXIDS
+        _WARNED_CONFLICT_TAXIDS.add(taxid)
+
+        if first_occurrence:
+            logger.warning(
+                "TAXONOMY CONFLICT — tax_id %s shared by: %s. "
+                "Assigning synthetic tax_ids to duplicates. "
+                "This message is shown once per worker; further occurrences suppressed.",
+                taxid,
+                ", ".join(species_list),
+            )
+        else:
+            logger.debug(
+                "Repeated taxonomy conflict for tax_id %s (%s) — synthetic tax_id reassignment applied silently.",
+                taxid,
+                ", ".join(species_list),
+            )
 
         kept = species_list[0]
         duplicates = species_list[1:]
@@ -257,36 +270,31 @@ def match_tree_alignment_by_taxid(
                     tree_taxid_to_sp[old_tree_taxid] = other_species[0]
 
                 tree_taxid_to_sp[synthetic_taxid] = dup_sp
-                logger.warning(
-                    "⚠️  Also updated TREE mapping for '%s': %s → %s",
+                logger.debug(
+                    "Updated TREE mapping for '%s': %s -> %s",
                     dup_sp,
                     old_tree_taxid,
                     synthetic_taxid,
                 )
 
-            logger.warning(
-                "⚠️  Assigning SYNTHETIC tax_id %s to '%s' (original: %s, kept: %s)",
+            logger.debug(
+                "Synthetic tax_id %s assigned to '%s' (original: %s, kept: %s)",
                 synthetic_taxid,
                 dup_sp,
                 taxid,
                 kept,
             )
 
-        logger.warning("   Kept '%s' with original tax_id %s", kept, taxid)
+        logger.debug("Kept '%s' with original tax_id %s", kept, taxid)
 
     if synthetic_taxids:
-        logger.error(
-            "🚨 CRITICAL: %d species assigned SYNTHETIC tax_ids due to conflicts!",
+        logger.debug(
+            "SUMMARY: %d species assigned synthetic tax_ids due to conflicts: %s",
             len(synthetic_taxids),
+            ", ".join(
+                f"{sp}={info['synthetic_taxid']}" for sp, info in synthetic_taxids.items()
+            ),
         )
-        for sp, info in synthetic_taxids.items():
-            logger.error(
-                "🚨   %s: synthetic_taxid=%s (original=%s, %s)",
-                sp,
-                info["synthetic_taxid"],
-                info["original_taxid"],
-                info["reason"],
-            )
 
     logger.info(
         "Alignment: %d species mapped to tax_ids, %d unmatched",

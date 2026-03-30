@@ -37,6 +37,7 @@ process SITE_PGLS {
     def local_dir = "${baseDir}/subworkflows/PGLS/local"
     def speciesCol = params.sp_colname ?: 'species'
     def alignmentDir = params.alignment
+    def alignmentFormat = params.pgls_alignment_format ?: 'auto'
     assert alignmentDir : "PGLS requires --alignment"
 
     def taxMapPath = params.tax_id ?: ''
@@ -74,7 +75,7 @@ process SITE_PGLS {
         --trait-name "${params.traitname}" \\
         --caas-file "${caas_file}" \\
         --alignments-dir "${alignmentDir}" \\
-        --alignments-format "${params.ali_format ?: 'phylip-relaxed'}" \\
+        --alignments-format "${alignmentFormat}" \\
         --q-lower ${qLower} \\
         --q-upper ${qUpper} \\
         --extremes-method "${pglsMethod}" \\

@@ -33,8 +33,10 @@ process RER_TREES {
     tag "$gene_trees_file"
 
     label 'process_reporting'
-    label 'error_retry'
-
+    // RER_TREES loads all gene trees at once into R memory; override the
+    // generic process_reporting label with higher resources.
+    // maxRetries 3 gives memory steps of 32, 64, 96 GB before giving up.
+    maxRetries 3
 
     input:
     path my_traitfile
@@ -42,8 +44,8 @@ process RER_TREES {
     path tax_id_file
 
     output:
-    file("${gene_trees_file}.masterTree.output")
-    file("${gene_trees_file}.pruned.txt")
+    path("${gene_trees_file}.masterTree.output"), emit: master_tree
+    path("${gene_trees_file}.pruned.txt"),        emit: pruned_trees
 
     script:
     def args = task.ext.args ?: ''

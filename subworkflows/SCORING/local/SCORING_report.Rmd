@@ -24,6 +24,9 @@ params:
   top1_pct: 0.01
   gene_top_pct: 0.10
   gene_top1_pct: 0.01
+  vep_transvar_file: NULL
+  vep_primateai_file: NULL
+  genomic_info_file: NULL
 ---
 
 ```{r setup, include=FALSE}
@@ -41,6 +44,8 @@ suppressPackageStartupMessages({
   library(ggplot2)
   library(paletteer)
   library(DT)
+  library(scales)
+  library(ggrepel)
 })
 
 # Tableau_10 colour swatch for pipeline-wide consistency
@@ -59,6 +64,43 @@ has_pgls <- "p_pgls_top" %in% names(pos_df) &&
 has_rand <- any(!is.na(gene_df$gene_rand_score))
 has_rer  <- any(!is.na(gene_df$gene_rer_score))
 has_fade <- "gene_fade_score" %in% names(gene_df) && any(!is.na(gene_df$gene_fade_score))
+
+# ── VEP optional inputs ───────────────────────────────────────────────────────
+.file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
+
+has_vep_transvar  <- .file_ok(params$vep_transvar_file)
+has_vep_primateai <- .file_ok(params$vep_primateai_file)
+has_genomic       <- .file_ok(params$genomic_info_file)
+
+if (has_vep_transvar) {
+  vep_tv_df <- read_tsv(params$vep_transvar_file, show_col_types = FALSE)
+} else {
+  vep_tv_df <- NULL
+}
+
+if (has_vep_primateai) {
+  vep_pai_df <- read_tsv(params$vep_primateai_file, show_col_types = FALSE)
+} else {
+  vep_pai_df <- NULL
+}
+
+if (has_genomic) {
+  # Format: gene, chr, start, end, length  (no header assumed; detect if header present)
+  genomic_raw <- read_tsv(params$genomic_info_file,
+                          col_names = c("Gene", "chr", "gene_start", "gene_end", "gene_length"),
+                          show_col_types = FALSE)
+  # Drop header row if first cell is literally "gene" or "Gene"
+  if (tolower(genomic_raw$Gene[1]) == "gene") genomic_raw <- genomic_raw[-1, ]
+  genomic_raw <- genomic_raw %>%
+    mutate(
+      gene_start  = as.integer(gene_start),
+      gene_end    = as.integer(gene_end),
+      gene_length = as.integer(gene_length),
+      gene_mid    = as.integer((gene_start + gene_end) / 2L)
+    )
+} else {
+  genomic_raw <- NULL
+}
 
 # Thresholds
 top_pct  <- params$top_pct
@@ -316,6 +358,145 @@ independently (`gene_caas_score`, `gene_rand_score`, `gene_rer_score`,
 highest-scoring position.
 
 </details>
+
+---
+
+## Input P-value Distributions {.tabset}
+
+The `variability_score` and `pattern_score` components entering `biochem_score` are
+decile ranks of the **hypergeometric p-value** (`Pvalue`) and the
+**permutation bootstrap p-value** (`pvalue_boot`) respectively.  Because the
+decile transformation collapses the continuous p-value into 10 bins, the plots
+below show the underlying raw distribution together with the decile boundaries,
+so you can assess how sharply peaked the signal is and how well separated the
+scoring bins are.
+
+### Hypergeometric P-value
+
+```{r hyper-pval-dist, fig.height=8}
+# Compute decile boundaries from the raw p-values (same logic as scoring_compute.R)
+pv_breaks <- quantile(pos_df$Pvalue, probs = seq(0, 1, by = 0.1), na.rm = TRUE)
+decile_df_h <- pos_df %>%
+  filter(!is.na(Pvalue)) %>%
+  mutate(
+    neg_log10_p = -log10(pmax(Pvalue, 1e-300)),
+    decile      = dplyr::ntile(Pvalue, 10),
+    score_val   = 1 - (decile - 1) / 9
+  )
+
+# Panel 1: density on -log10 scale with decile boundaries
+p_hyp_density <- ggplot(decile_df_h, aes(x = neg_log10_p)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 60,
+                 fill = .tableau10[1], alpha = 0.6) +
+  geom_density(linewidth = 0.8, colour = .tableau10[2]) +
+  geom_vline(
+    xintercept = -log10(pmax(pv_breaks[2:10], 1e-300)),
+    linetype = "dotted", colour = "grey50", linewidth = 0.4
+  ) +
+  labs(
+    title    = "Hypergeometric P-value Distribution (-log10 scale)",
+    subtitle = "Dotted lines: decile boundaries (D1 = largest p-values → score 1.0; D10 = smallest → score 1.0 inverted)",
+    x        = "-log10(Pvalue)",
+    y        = "Density"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+# Panel 2: count per decile, coloured by variability_score
+decile_counts_h <- decile_df_h %>%
+  group_by(decile, score_val) %>%
+  summarise(n = n(), .groups = "drop")
+
+p_hyp_decile <- ggplot(decile_counts_h,
+                        aes(x = factor(decile), y = n, fill = score_val)) +
+  geom_col(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient(low = .tableau10[3], high = .tableau10[1],
+                      name = "variability_score") +
+  labs(
+    title    = "Positions per Hypergeometric Decile",
+    subtitle = "Decile 1 = highest p-values; Decile 10 = smallest p-values (variability_score = 1.0)",
+    x        = "Decile",
+    y        = "Number of rows"
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right")
+
+gridExtra::grid.arrange(p_hyp_density, p_hyp_decile, ncol = 1)
+```
+
+### Permutation P-value
+
+```{r perm-pval-dist, fig.height=8}
+pv_breaks_b <- quantile(pos_df$pvalue_boot, probs = seq(0, 1, by = 0.1), na.rm = TRUE)
+decile_df_b <- pos_df %>%
+  filter(!is.na(pvalue_boot)) %>%
+  mutate(
+    neg_log10_p = -log10(pmax(pvalue_boot, 1e-300)),
+    decile      = dplyr::ntile(pvalue_boot, 10),
+    score_val   = 1 - (decile - 1) / 9
+  )
+
+p_boot_density <- ggplot(decile_df_b, aes(x = neg_log10_p)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 60,
+                 fill = .tableau10[5], alpha = 0.6) +
+  geom_density(linewidth = 0.8, colour = .tableau10[6]) +
+  geom_vline(
+    xintercept = -log10(pmax(pv_breaks_b[2:10], 1e-300)),
+    linetype = "dotted", colour = "grey50", linewidth = 0.4
+  ) +
+  labs(
+    title    = "Permutation Bootstrap P-value Distribution (-log10 scale)",
+    subtitle = "Dotted lines: decile boundaries (D1 = least significant; D10 = most significant → pattern_score = 1.0)",
+    x        = "-log10(pvalue_boot)",
+    y        = "Density"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+decile_counts_b <- decile_df_b %>%
+  group_by(decile, score_val) %>%
+  summarise(n = n(), .groups = "drop")
+
+p_boot_decile <- ggplot(decile_counts_b,
+                         aes(x = factor(decile), y = n, fill = score_val)) +
+  geom_col(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient(low = .tableau10[7], high = .tableau10[5],
+                      name = "pattern_score") +
+  labs(
+    title    = "Positions per Permutation Decile",
+    subtitle = "Decile 10 = most significant permutation p-values (pattern_score = 1.0)",
+    x        = "Decile",
+    y        = "Number of rows"
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right")
+
+gridExtra::grid.arrange(p_boot_density, p_boot_decile, ncol = 1)
+```
+
+### Joint Decile Summary
+
+```{r joint-decile-summary, fig.height=5}
+# Scatter of variability_score vs pattern_score coloured by CAAS_score
+joint_df <- pos_df %>%
+  filter(!is.na(variability_score), !is.na(pattern_score)) %>%
+  mutate(
+    hyp_decile  = dplyr::ntile(Pvalue,      10),
+    boot_decile = dplyr::ntile(pvalue_boot, 10)
+  )
+
+ggplot(joint_df, aes(x = hyp_decile, y = boot_decile, colour = CAAS_score)) +
+  geom_jitter(alpha = 0.25, size = 0.6, width = 0.35, height = 0.35) +
+  scale_colour_gradient(low = .tableau10[3], high = .tableau10[1],
+                        name = "CAAS\nscore") +
+  scale_x_continuous(breaks = 1:10) +
+  scale_y_continuous(breaks = 1:10) +
+  labs(
+    title    = "Hypergeometric vs Permutation Decile Assignment per Position",
+    subtitle = "High CAAS scores (warm colours) cluster toward decile 10 × 10",
+    x        = "Hypergeometric decile (variability)",
+    y        = "Permutation decile (pattern)"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
 
 ---
 
@@ -734,6 +915,244 @@ ggplot(pgls_pval_plot, aes(x = p_relevant, fill = rank_group)) +
         strip.text      = element_text(face = "bold", size = 8))
 ```
 
+### VEP: PrimateAI by CAAS Decile
+
+`r if (!has_vep_primateai) "> **Note:** PrimateAI-3D scores are not available for this run."`
+
+```{r vep-pai-setup, eval=has_vep_primateai}
+# Detect PrimateAI score column (varies by database version)
+.pai_score_col <- intersect(
+  c("score", "primateai_score", "pathogenicity_score", "PrimateAI_score"),
+  names(vep_pai_df)
+)[1]
+if (is.na(.pai_score_col)) {
+  warning("PrimateAI: no recognised score column found — skipping.")
+  has_vep_primateai <- FALSE
+}
+```
+
+```{r vep-pai-join, eval=has_vep_primateai}
+pos_vep_pai <- vep_pai_df %>%
+  mutate(
+    Gene     = sub(":p\\..*", "", transvar_query),
+    Position = as.integer(sub(".*:p\\.", "", transvar_query)),
+    pai_score = .data[[.pai_score_col]]
+  ) %>%
+  select(Gene, Position, pai_score) %>%
+  # When multiple alt-AA rows exist for the same position, take the max score
+  group_by(Gene, Position) %>%
+  summarise(pai_score = max(pai_score, na.rm = TRUE), .groups = "drop") %>%
+  inner_join(
+    pos_df %>%
+      select(Gene, Position, CAAS_score) %>%
+      mutate(
+        caas_decile  = dplyr::ntile(CAAS_score, 10),
+        in_top_10pct = CAAS_score >= thr_10,
+        in_top_1pct  = CAAS_score >= thr_1
+      ),
+    by = c("Gene", "Position")
+  )
+```
+
+```{r vep-pai-violin, eval=has_vep_primateai, fig.height=5}
+# PrimateAI score violin + boxplot per CAAS decile.
+# Dashed line at 0.803 = PAI3D canonical damaging threshold.
+ggplot(pos_vep_pai, aes(x = factor(caas_decile), y = pai_score)) +
+  geom_violin(fill = .tableau10[1], alpha = 0.65, trim = TRUE, scale = "width") +
+  geom_boxplot(width = 0.14, outlier.size = 0.4, alpha = 0.9,
+               fill = "white", colour = "grey30") +
+  geom_hline(yintercept = 0.803, linetype = "dashed",
+             colour = .tableau10[3], linewidth = 0.8) +
+  annotate("text", x = 0.5, y = 0.82, hjust = 0,
+           label = "PAI3D damaging (0.803)", colour = .tableau10[3], size = 3.2) +
+  scale_x_discrete(labels = c("1\n(low)", as.character(2:9), "10\n(high)")) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(
+    title    = "PrimateAI-3D Score by CAAS Decile",
+    subtitle = sprintf("%d positions with PAI3D coverage (of %d total)",
+                       nrow(pos_vep_pai), nrow(pos_df)),
+    x = "CAAS Score Decile", y = "PrimateAI-3D Score"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r vep-pai-scatter, eval=has_vep_primateai, fig.height=5}
+# Scatter: CAAS_score vs PrimateAI score, coloured by decile.
+ggplot(pos_vep_pai, aes(x = CAAS_score, y = pai_score, colour = caas_decile)) +
+  geom_point(alpha = 0.45, size = 0.9) +
+  geom_hline(yintercept = 0.803, linetype = "dashed",
+             colour = "grey40", linewidth = 0.6) +
+  geom_vline(xintercept = thr_10, linetype = "dashed",
+             colour = .tableau10[3], linewidth = 0.6) +
+  geom_vline(xintercept = thr_1, linetype = "dotted",
+             colour = .tableau10[4], linewidth = 0.6) +
+  scale_colour_viridis_c(name = "CAAS\nDecile", option = "plasma") +
+  labs(
+    title    = "CAAS Score vs PrimateAI-3D Score",
+    subtitle = "Dashed: CAAS top-10% and PAI3D damaging thresholds",
+    x = "CAAS Score", y = "PrimateAI-3D Score"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r vep-pai-fisher, eval=has_vep_primateai}
+# Fisher's exact: enrichment of PAI3D-damaging positions in top 1% and top 10%.
+.pai_thresh <- 0.803
+
+run_pai_fisher <- function(df, flag_col, label) {
+  df <- df %>% mutate(damaging = pai_score >= .pai_thresh)
+  n_top  <- sum(df[[flag_col]], na.rm = TRUE)
+  n_dam_top  <- sum(df[[flag_col]] & df$damaging, na.rm = TRUE)
+  n_rest <- sum(!df[[flag_col]], na.rm = TRUE)
+  n_dam_rest <- sum(!df[[flag_col]] & df$damaging, na.rm = TRUE)
+  mat <- matrix(c(n_top - n_dam_top, n_rest - n_dam_rest, n_dam_top, n_dam_rest),
+                nrow = 2,
+                dimnames = list(In_top = c("FALSE","TRUE"), Damaging = c("FALSE","TRUE")))
+  ft <- fisher.test(mat)
+  tibble(
+    Threshold        = label,
+    N_top            = n_top,
+    N_damaging_top   = n_dam_top,
+    Pct_damaging_top = sprintf("%.1f%%", 100 * n_dam_top  / max(n_top,  1)),
+    N_rest           = n_rest,
+    N_damaging_rest  = n_dam_rest,
+    Pct_damaging_rest = sprintf("%.1f%%", 100 * n_dam_rest / max(n_rest, 1)),
+    Odds_ratio       = sprintf("%.2f", ft$estimate),
+    CI_95            = sprintf("[%.2f, %.2f]", ft$conf.int[1], ft$conf.int[2]),
+    P_value          = formatC(ft$p.value, format = "e", digits = 2)
+  )
+}
+
+pai_fisher <- bind_rows(
+  run_pai_fisher(pos_vep_pai, "in_top_10pct",
+                 sprintf("Top %g%% CAAS (decile)", top_pct  * 100)),
+  run_pai_fisher(pos_vep_pai, "in_top_1pct",
+                 sprintf("Top %g%% CAAS (percentile)", top1_pct * 100))
+)
+
+knitr::kable(
+  pai_fisher,
+  caption = paste(
+    "Fisher's exact test — enrichment of PAI3D-damaging positions (score ≥ 0.803)",
+    "in top-ranking CAAS positions."
+  ),
+  align = c("l", rep("r", ncol(pai_fisher) - 1))
+)
+```
+
+### VEP: TransVar Annotations
+
+`r if (!has_vep_transvar) "> **Note:** TransVar annotations are not available for this run."`
+
+```{r vep-tv-setup, eval=has_vep_transvar}
+# TransVar output has no header (--noheader flag).  Read with explicit column names.
+# The stub generates a header row for testing; drop it if the first cell is "input".
+vep_tv_raw <- read_tsv(
+  params$vep_transvar_file,
+  col_names = c("tv_input","tv_transcript","tv_gene","tv_strand",
+                "tv_coordinates","tv_region","tv_info"),
+  show_col_types = FALSE
+)
+if (nrow(vep_tv_raw) > 0 && identical(vep_tv_raw$tv_input[1], "input")) {
+  vep_tv_raw <- vep_tv_raw[-1, ]
+}
+
+# Parse region into broad functional categories
+vep_tv_parsed <- vep_tv_raw %>%
+  filter(!is.na(tv_input), tv_input != ".") %>%
+  mutate(
+    # Normalise region labels from TransVar to tidy categories
+    region_cat = case_when(
+      grepl("CDS|exon",            tv_region, ignore.case = TRUE) ~ "CDS",
+      grepl("5'UTR|5UTR|C5'",      tv_region, ignore.case = TRUE) ~ "5'UTR",
+      grepl("3'UTR|3UTR|C3'",      tv_region, ignore.case = TRUE) ~ "3'UTR",
+      grepl("intron|intronic",      tv_region, ignore.case = TRUE) ~ "Intronic",
+      grepl("splice",               tv_region, ignore.case = TRUE) ~ "Splice site",
+      grepl("intergenic",           tv_region, ignore.case = TRUE) ~ "Intergenic",
+      is.na(tv_region) | tv_region == "." ~ "Unmapped",
+      TRUE ~ tv_region
+    ),
+    # Extract mutation type from info field if present (TransVar panno)
+    mutation_type = case_when(
+      grepl("synonymous",  tv_info, ignore.case = TRUE) ~ "Synonymous",
+      grepl("nonsense|stop_gained|\\*",
+                           tv_info, ignore.case = TRUE) ~ "Nonsense",
+      grepl("missense|nonsynonymous",
+                           tv_info, ignore.case = TRUE) ~ "Missense",
+      grepl("splice",      tv_info, ignore.case = TRUE) ~ "Splice",
+      TRUE ~ NA_character_
+    )
+  )
+
+# Join to pos_df on Gene × Position
+pos_vep_tv <- pos_df %>%
+  select(Gene, Position, CAAS_score) %>%
+  mutate(
+    tv_query    = paste0(Gene, ":p.", Position),
+    caas_decile = dplyr::ntile(CAAS_score, 10)
+  ) %>%
+  inner_join(
+    vep_tv_parsed %>% select(tv_input, region_cat, mutation_type),
+    by = c("tv_query" = "tv_input")
+  ) %>%
+  # One TransVar row per query; keep first if duplicates exist
+  distinct(Gene, Position, .keep_all = TRUE)
+```
+
+```{r vep-tv-region-bar, eval=has_vep_transvar, fig.height=5}
+# Stacked bar: proportion of region categories per CAAS decile
+tv_decile_region <- pos_vep_tv %>%
+  count(caas_decile, region_cat) %>%
+  group_by(caas_decile) %>%
+  mutate(pct = n / sum(n)) %>%
+  ungroup()
+
+region_levels <- tv_decile_region %>%
+  count(region_cat, wt = n, sort = TRUE) %>%
+  pull(region_cat)
+
+tv_decile_region <- tv_decile_region %>%
+  mutate(region_cat = factor(region_cat, levels = region_levels))
+
+ggplot(tv_decile_region, aes(x = factor(caas_decile), y = pct, fill = region_cat)) +
+  geom_col(width = 0.75) +
+  scale_x_discrete(labels = c("1\n(low)", as.character(2:9), "10\n(high)")) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_manual(values = .tableau10, name = "Genomic Region") +
+  labs(
+    title    = "TransVar Region Annotation by CAAS Decile",
+    subtitle = sprintf("%d positions with TransVar coverage", nrow(pos_vep_tv)),
+    x = "CAAS Score Decile", y = "Proportion"
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right")
+```
+
+```{r vep-tv-muttype-bar, eval=has_vep_transvar && any(!is.na(pos_vep_tv$mutation_type)), fig.height=5}
+# Stacked bar: mutation type distribution per CAAS decile (when available from info field)
+tv_decile_mut <- pos_vep_tv %>%
+  filter(!is.na(mutation_type)) %>%
+  count(caas_decile, mutation_type) %>%
+  group_by(caas_decile) %>%
+  mutate(pct = n / sum(n)) %>%
+  ungroup()
+
+if (nrow(tv_decile_mut) > 0) {
+  ggplot(tv_decile_mut, aes(x = factor(caas_decile), y = pct, fill = mutation_type)) +
+    geom_col(width = 0.75) +
+    scale_x_discrete(labels = c("1\n(low)", as.character(2:9), "10\n(high)")) +
+    scale_y_continuous(labels = scales::percent_format()) +
+    scale_fill_manual(values = .tableau10[c(1,3,4,6,8)], name = "Mutation Type") +
+    labs(
+      title    = "Functional Mutation Type by CAAS Decile",
+      subtitle = "Derived from TransVar info field annotation",
+      x = "CAAS Score Decile", y = "Proportion"
+    ) +
+    theme(plot.title = element_text(face = "bold"),
+          legend.position = "right")
+}
+```
+
 ---
 
 ## Gene-Level Scores {.tabset}
@@ -1000,6 +1419,400 @@ DT::datatable(
 
 ---
 
+## Gene-Level Characterisation {.tabset}
+
+This section accumulates position-level PGLS and VEP signals at the gene level,
+testing whether genes with high composite scores tend to concentrate
+directionally-consistent PGLS hits or pathogenic VEP annotations.
+
+### Gene PGLS Accumulation
+
+`r if (!has_pgls) "> **Note:** PGLS results are not available — gene-level PGLS accumulation skipped."`
+
+```{r gene-pgls-accum, eval=has_pgls, fig.height=5}
+# Per-gene: count of directionally-consistent PGLS positions and fraction.
+gene_pgls <- pos_df %>%
+  filter(!is.na(p_pgls_top) | !is.na(p_pgls_bottom)) %>%
+  mutate(
+    sig_top    = isTRUE(sig_p_pgls_top)    | (!is.na(sig_p_pgls_top)    & as.character(sig_p_pgls_top)    == "TRUE"),
+    sig_bottom = isTRUE(sig_p_pgls_bottom) | (!is.na(sig_p_pgls_bottom) & as.character(sig_p_pgls_bottom) == "TRUE"),
+    pgls_consistent = case_when(
+      change_side == "top"    ~ sig_top,
+      change_side == "bottom" ~ sig_bottom,
+      change_side == "both"   ~ sig_top | sig_bottom,
+      TRUE                    ~ FALSE
+    )
+  ) %>%
+  group_by(Gene) %>%
+  summarise(
+    n_pgls_positions  = n(),
+    n_pgls_consistent = sum(pgls_consistent, na.rm = TRUE),
+    frac_pgls_consist = n_pgls_consistent / n_pgls_positions,
+    .groups = "drop"
+  ) %>%
+  inner_join(gene_df %>% select(Gene, gene_caas_score, gene_composite_score,
+                                n_positions),
+             by = "Gene")
+
+# Scatter: gene_caas_score vs fraction PGLS consistent, bubble size = n_positions
+ggplot(gene_pgls, aes(x = gene_caas_score, y = frac_pgls_consist,
+                      size = n_positions, colour = gene_composite_score)) +
+  geom_point(alpha = 0.65) +
+  ggrepel::geom_text_repel(
+    data = gene_pgls %>% slice_max(frac_pgls_consist, n = 15, with_ties = FALSE),
+    aes(label = Gene), size = 2.8, max.overlaps = 20,
+    show.legend = FALSE
+  ) +
+  geom_vline(xintercept = g_thr_10, linetype = "dashed",
+             colour = .tableau10[3], linewidth = 0.7) +
+  scale_colour_viridis_c(name = "Gene\nComposite", option = "plasma") +
+  scale_size_continuous(name = "N positions", range = c(1, 8)) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  labs(
+    title    = "Gene CAAS Score vs Fraction of Directionally-Consistent PGLS Positions",
+    subtitle = "Labels: top-15 genes by PGLS consistency; dashed = CAAS top 10% threshold",
+    x = "Gene CAAS Score", y = "Fraction PGLS-consistent positions"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r gene-pgls-top-bar, eval=has_pgls, fig.height=6}
+# Top 30 genes by PGLS consistency, coloured by gene_caas_score
+top_pgls_genes <- gene_pgls %>%
+  filter(n_pgls_consistent > 0) %>%
+  slice_max(frac_pgls_consist, n = 30, with_ties = FALSE) %>%
+  arrange(frac_pgls_consist) %>%
+  mutate(Gene = factor(Gene, levels = Gene))
+
+ggplot(top_pgls_genes, aes(x = frac_pgls_consist, y = Gene,
+                            fill = gene_caas_score)) +
+  geom_col() +
+  scale_fill_viridis_c(name = "Gene CAAS\nScore", option = "plasma") +
+  scale_x_continuous(labels = scales::percent_format(),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(
+    title = "Top 30 Genes by Fraction of PGLS-Consistent Positions",
+    x = "Fraction PGLS-consistent", y = NULL
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.text.y = element_text(size = 8))
+```
+
+### Gene VEP Accumulation
+
+`r if (!has_vep_primateai && !has_vep_transvar) "> **Note:** VEP data (PrimateAI and/or TransVar) are not available — gene-level VEP accumulation skipped."`
+
+```{r gene-vep-pai-accum, eval=has_vep_primateai, fig.height=5}
+# Per-gene mean PrimateAI score and fraction of PAI3D-damaging positions
+gene_vep_pai <- pos_vep_pai %>%
+  group_by(Gene) %>%
+  summarise(
+    n_pai_positions  = n(),
+    mean_pai_score   = mean(pai_score, na.rm = TRUE),
+    frac_pai_damaging = sum(pai_score >= 0.803, na.rm = TRUE) / n(),
+    .groups = "drop"
+  ) %>%
+  inner_join(gene_df %>% select(Gene, gene_caas_score, gene_composite_score,
+                                n_positions),
+             by = "Gene")
+
+ggplot(gene_vep_pai, aes(x = gene_caas_score, y = mean_pai_score,
+                          size = n_pai_positions, colour = frac_pai_damaging)) +
+  geom_point(alpha = 0.65) +
+  ggrepel::geom_text_repel(
+    data = gene_vep_pai %>% slice_max(mean_pai_score, n = 15, with_ties = FALSE),
+    aes(label = Gene), size = 2.8, max.overlaps = 20,
+    show.legend = FALSE
+  ) +
+  geom_vline(xintercept = g_thr_10, linetype = "dashed",
+             colour = .tableau10[3], linewidth = 0.7) +
+  scale_colour_viridis_c(name = "Fraction\nPAI3D-damaging",
+                          option = "inferno", labels = scales::percent_format()) +
+  scale_size_continuous(name = "N positions", range = c(1, 8)) +
+  labs(
+    title    = "Gene CAAS Score vs Mean PrimateAI-3D Score",
+    subtitle = "Labels: top-15 genes by mean PAI3D score; dashed = CAAS top 10% threshold",
+    x = "Gene CAAS Score", y = "Mean PrimateAI-3D Score"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r gene-vep-pai-top-bar, eval=has_vep_primateai, fig.height=6}
+# Top 30 genes by fraction PAI3D-damaging, coloured by gene_caas_score
+top_pai_genes <- gene_vep_pai %>%
+  filter(n_pai_positions >= 2) %>%
+  slice_max(frac_pai_damaging, n = 30, with_ties = FALSE) %>%
+  arrange(frac_pai_damaging) %>%
+  mutate(Gene = factor(Gene, levels = Gene))
+
+ggplot(top_pai_genes, aes(x = frac_pai_damaging, y = Gene,
+                           fill = gene_caas_score)) +
+  geom_col() +
+  scale_fill_viridis_c(name = "Gene CAAS\nScore", option = "plasma") +
+  scale_x_continuous(labels = scales::percent_format(),
+                     expand = expansion(mult = c(0, 0.05))) +
+  labs(
+    title = "Top 30 Genes by Fraction of PAI3D-Damaging CAAS Positions",
+    subtitle = "Genes with ≥ 2 positions with PAI3D coverage",
+    x = "Fraction PAI3D-damaging (score ≥ 0.803)", y = NULL
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.text.y = element_text(size = 8))
+```
+
+```{r gene-vep-tv-accum, eval=has_vep_transvar, fig.height=5}
+# Per-gene region annotation summary from TransVar
+gene_vep_tv <- pos_vep_tv %>%
+  group_by(Gene) %>%
+  summarise(
+    n_tv_positions = n(),
+    n_cds          = sum(region_cat == "CDS", na.rm = TRUE),
+    frac_cds       = n_cds / n_tv_positions,
+    .groups        = "drop"
+  ) %>%
+  inner_join(gene_df %>% select(Gene, gene_caas_score, n_positions),
+             by = "Gene")
+
+ggplot(gene_vep_tv, aes(x = gene_caas_score, y = frac_cds,
+                         size = n_tv_positions)) +
+  geom_point(alpha = 0.6, colour = .tableau10[2]) +
+  ggrepel::geom_text_repel(
+    data = gene_vep_tv %>%
+      filter(frac_cds < 0.8) %>%
+      slice_max(n_tv_positions, n = 15, with_ties = FALSE),
+    aes(label = Gene), size = 2.8, max.overlaps = 15,
+    show.legend = FALSE
+  ) +
+  geom_hline(yintercept = 1.0, linetype = "dashed",
+             colour = "grey50", linewidth = 0.5) +
+  scale_size_continuous(name = "N positions", range = c(1, 8)) +
+  scale_y_continuous(labels = scales::percent_format(),
+                     limits = c(0, NA)) +
+  labs(
+    title    = "TransVar CDS Mapping Rate by Gene CAAS Score",
+    subtitle = "Labels: genes with < 80% CDS coverage and ≥ 15 scored positions",
+    x = "Gene CAAS Score", y = "Fraction of positions mapping to CDS"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+---
+
+## Genomic Accumulation {.tabset}
+
+`r if (!has_genomic) "> **Note:** Genomic coordinates (gene_ensembl_file) are not available for this run — genomic accumulation skipped."`
+
+```{r genomic-setup, eval=has_genomic}
+# Join gene_df with genomic coordinates, then annotate with PGLS and VEP
+gene_genomic <- gene_df %>%
+  select(Gene, gene_caas_score, gene_composite_score, n_positions) %>%
+  inner_join(genomic_raw, by = "Gene") %>%
+  # Standardise chromosome labels (remove "chr" prefix if present)
+  mutate(
+    chr_label = sub("^chr", "", chr),
+    # Order chromosomes numerically then X, Y, MT
+    chr_num   = suppressWarnings(as.integer(chr_label)),
+    chr_order = dplyr::case_when(
+      !is.na(chr_num)       ~ chr_num,
+      chr_label == "X"      ~ 23L,
+      chr_label == "Y"      ~ 24L,
+      chr_label %in% c("MT","M") ~ 25L,
+      TRUE                  ~ 26L
+    )
+  ) %>%
+  arrange(chr_order, gene_mid)
+
+# Optionally add PGLS fraction
+if (has_pgls && exists("gene_pgls")) {
+  gene_genomic <- gene_genomic %>%
+    left_join(gene_pgls %>% select(Gene, frac_pgls_consist, n_pgls_consistent),
+              by = "Gene")
+} else {
+  gene_genomic$frac_pgls_consist  <- NA_real_
+  gene_genomic$n_pgls_consistent  <- NA_integer_
+}
+
+# Optionally add mean PAI score
+if (has_vep_primateai && exists("gene_vep_pai")) {
+  gene_genomic <- gene_genomic %>%
+    left_join(gene_vep_pai %>% select(Gene, mean_pai_score, frac_pai_damaging),
+              by = "Gene")
+} else {
+  gene_genomic$mean_pai_score   <- NA_real_
+  gene_genomic$frac_pai_damaging <- NA_real_
+}
+
+# Build a cumulative x-axis offset per chromosome for a stitched Manhattan view
+chr_offsets <- gene_genomic %>%
+  group_by(chr_order, chr_label) %>%
+  summarise(chr_max = max(gene_end, na.rm = TRUE), .groups = "drop") %>%
+  arrange(chr_order) %>%
+  mutate(offset = cumsum(lag(chr_max, default = 0L)) + (chr_order - 1L) * 5e6L)
+
+gene_genomic <- gene_genomic %>%
+  left_join(chr_offsets %>% select(chr_order, offset, chr_label), by = c("chr_order", "chr_label")) %>%
+  mutate(manhattan_x = gene_mid + offset)
+
+chr_label_positions <- chr_offsets %>%
+  left_join(gene_genomic %>% group_by(chr_order) %>%
+              summarise(mid_x = mean(manhattan_x, na.rm = TRUE), .groups = "drop"),
+            by = "chr_order")
+```
+
+### CAAS Score Manhattan
+
+```{r genomic-manhattan-caas, eval=has_genomic, fig.height=5, fig.width=14}
+# Manhattan-style plot: x = genomic position (stitched), y = gene_caas_score
+# Alternating chromosome colours for readability.
+gene_genomic <- gene_genomic %>%
+  mutate(chr_even = chr_order %% 2 == 0)
+
+ggplot(gene_genomic,
+       aes(x = manhattan_x, y = gene_caas_score,
+           colour = chr_even, size = n_positions)) +
+  geom_point(alpha = 0.65) +
+  geom_hline(yintercept = g_thr_10, linetype = "dashed",
+             colour = "grey40", linewidth = 0.6) +
+  ggrepel::geom_text_repel(
+    data = gene_genomic %>% slice_max(gene_caas_score, n = 20, with_ties = FALSE),
+    aes(label = Gene), size = 2.2, max.overlaps = 15,
+    show.legend = FALSE, colour = "black"
+  ) +
+  scale_colour_manual(values = c(.tableau10[1], .tableau10[2]), guide = "none") +
+  scale_size_continuous(name = "N positions", range = c(0.5, 5)) +
+  scale_x_continuous(
+    breaks = chr_label_positions$mid_x,
+    labels = chr_label_positions$chr_label,
+    expand = expansion(mult = 0.01)
+  ) +
+  labs(
+    title    = "Gene CAAS Score — Manhattan View",
+    subtitle = sprintf("%d genes with genomic coordinates | dashed = top %g%% threshold",
+                       nrow(gene_genomic), params$gene_top_pct * 100),
+    x = "Chromosome", y = "Gene CAAS Score"
+  ) +
+  theme(
+    plot.title      = element_text(face = "bold"),
+    axis.text.x     = element_text(size = 7, angle = 0),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+### Composite Score Manhattan
+
+```{r genomic-manhattan-composite, eval=has_genomic, fig.height=5, fig.width=14}
+ggplot(gene_genomic,
+       aes(x = manhattan_x, y = gene_composite_score,
+           colour = chr_even, size = n_positions)) +
+  geom_point(alpha = 0.65) +
+  geom_hline(yintercept = gc_thr_10, linetype = "dashed",
+             colour = "grey40", linewidth = 0.6) +
+  ggrepel::geom_text_repel(
+    data = gene_genomic %>% slice_max(gene_composite_score, n = 20, with_ties = FALSE),
+    aes(label = Gene), size = 2.2, max.overlaps = 15,
+    show.legend = FALSE, colour = "black"
+  ) +
+  scale_colour_manual(values = c(.tableau10[1], .tableau10[2]), guide = "none") +
+  scale_size_continuous(name = "N positions", range = c(0.5, 5)) +
+  scale_x_continuous(
+    breaks = chr_label_positions$mid_x,
+    labels = chr_label_positions$chr_label,
+    expand = expansion(mult = 0.01)
+  ) +
+  labs(
+    title    = "Gene Composite Score — Manhattan View",
+    subtitle = sprintf("dashed = top %g%% threshold", params$gene_top_pct * 100),
+    x = "Chromosome", y = "Gene Composite Score"
+  ) +
+  theme(
+    plot.title      = element_text(face = "bold"),
+    axis.text.x     = element_text(size = 7, angle = 0),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+### PGLS Signal Manhattan
+
+`r if (!has_pgls) "> **Note:** PGLS results not available — PGLS Manhattan skipped."`
+
+```{r genomic-manhattan-pgls, eval=has_genomic && has_pgls && any(!is.na(gene_genomic$frac_pgls_consist)), fig.height=5, fig.width=14}
+ggplot(gene_genomic %>% filter(!is.na(frac_pgls_consist)),
+       aes(x = manhattan_x, y = gene_caas_score,
+           size  = frac_pgls_consist,
+           colour = frac_pgls_consist)) +
+  geom_point(alpha = 0.70) +
+  geom_hline(yintercept = g_thr_10, linetype = "dashed",
+             colour = "grey60", linewidth = 0.5) +
+  ggrepel::geom_text_repel(
+    data = gene_genomic %>%
+      filter(!is.na(frac_pgls_consist), frac_pgls_consist > 0) %>%
+      slice_max(frac_pgls_consist, n = 20, with_ties = FALSE),
+    aes(label = Gene), size = 2.2, max.overlaps = 12,
+    show.legend = FALSE, colour = "black"
+  ) +
+  scale_colour_viridis_c(name = "PGLS\nfraction", option = "plasma",
+                          labels = scales::percent_format()) +
+  scale_size_continuous(name = "PGLS\nfraction",
+                         labels = scales::percent_format(), range = c(0.5, 6)) +
+  scale_x_continuous(
+    breaks = chr_label_positions$mid_x,
+    labels = chr_label_positions$chr_label,
+    expand = expansion(mult = 0.01)
+  ) +
+  guides(colour = guide_legend(), size = guide_legend()) +
+  labs(
+    title    = "Gene CAAS Score + PGLS Consistency — Manhattan View",
+    subtitle = "Bubble size and colour: fraction of directionally-consistent PGLS positions",
+    x = "Chromosome", y = "Gene CAAS Score"
+  ) +
+  theme(
+    plot.title      = element_text(face = "bold"),
+    axis.text.x     = element_text(size = 7),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+### PAI3D Signal Manhattan
+
+`r if (!has_vep_primateai) "> **Note:** PrimateAI-3D scores not available — PAI3D Manhattan skipped."`
+
+```{r genomic-manhattan-pai, eval=has_genomic && has_vep_primateai && any(!is.na(gene_genomic$mean_pai_score)), fig.height=5, fig.width=14}
+ggplot(gene_genomic %>% filter(!is.na(mean_pai_score)),
+       aes(x = manhattan_x, y = gene_caas_score,
+           size   = mean_pai_score,
+           colour = mean_pai_score)) +
+  geom_point(alpha = 0.70) +
+  geom_hline(yintercept = g_thr_10, linetype = "dashed",
+             colour = "grey60", linewidth = 0.5) +
+  ggrepel::geom_text_repel(
+    data = gene_genomic %>%
+      filter(!is.na(mean_pai_score)) %>%
+      slice_max(mean_pai_score, n = 20, with_ties = FALSE),
+    aes(label = Gene), size = 2.2, max.overlaps = 12,
+    show.legend = FALSE, colour = "black"
+  ) +
+  scale_colour_viridis_c(name = "Mean\nPAI3D", option = "inferno") +
+  scale_size_continuous(name = "Mean\nPAI3D", range = c(0.5, 6)) +
+  scale_x_continuous(
+    breaks = chr_label_positions$mid_x,
+    labels = chr_label_positions$chr_label,
+    expand = expansion(mult = 0.01)
+  ) +
+  guides(colour = guide_legend(), size = guide_legend()) +
+  labs(
+    title    = "Gene CAAS Score + Mean PrimateAI-3D — Manhattan View",
+    subtitle = "Bubble size and colour: mean PrimateAI-3D score across CAAS positions",
+    x = "Chromosome", y = "Gene CAAS Score"
+  ) +
+  theme(
+    plot.title      = element_text(face = "bold"),
+    axis.text.x     = element_text(size = 7),
+    panel.grid.major.x = element_blank()
+  )
+```
+
+---
+
 ## Summary
 
 ```{r summary-stats}
@@ -1017,7 +1830,9 @@ summary_tbl <- tibble(
     "CAAS Score (median)", "CAAS Score (top 10% threshold)",
     "Gene Composite (median)", "Gene Composite (top 10% threshold)",
     "PGLS available", "FADE available",
-    "Randomization available", "RERConverge available"
+    "Randomization available", "RERConverge available",
+    "VEP TransVar available", "VEP PrimateAI-3D available",
+    "Genomic coordinates available"
   ),
   Value = c(
     format(nrow(pos_df), big.mark = ","),
@@ -1031,7 +1846,10 @@ summary_tbl <- tibble(
     ifelse(has_pgls, "Yes", "No"),
     ifelse(has_fade, "Yes", "No"),
     ifelse(has_rand, "Yes", "No"),
-    ifelse(has_rer,  "Yes", "No")
+    ifelse(has_rer,  "Yes", "No"),
+    ifelse(has_vep_transvar,  "Yes", "No"),
+    ifelse(has_vep_primateai, "Yes", "No"),
+    ifelse(has_genomic,       "Yes", "No")
   )
 )
 

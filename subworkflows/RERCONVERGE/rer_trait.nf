@@ -40,22 +40,23 @@ process RER_TRAIT {
     path my_traitfile
 
     output:
-    file("${params.traitname}.polished.output")
+    path "${params.traitname}.polished.output", emit: polished
+    path "${params.traitname}.trait_type.output", emit: trait_type
 
     script:
-    def args = task.ext.args ?: ''
-    def outputName = "${params.traitname}.polished.output"
-    
-    if (params.use_singularity) {
+    def outputName   = "${params.traitname}.polished.output"
+    def typeOutName  = "${params.traitname}.trait_type.output"
+
+    if (params.use_singularity || params.use_apptainer) {
         """
-        echo "Using Singularity"
+        echo "Using Singularity/Apptainer"
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/RERCONVERGE/local/build_rer_trait.R' \\
         ${ my_traitfile } \\
         ${ params.sp_colname } \\
         ${ params.traitname } \\
         ${ outputName } \\
-        $args
+        ${ typeOutName }
         """
     } else {
         """
@@ -66,7 +67,7 @@ process RER_TRAIT {
         ${ params.sp_colname } \\
         ${ params.traitname } \\
         ${ outputName } \\
-        $args
+        ${ typeOutName }
         """
     }
 

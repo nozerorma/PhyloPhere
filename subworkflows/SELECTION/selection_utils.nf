@@ -3,7 +3,7 @@
 /*
  * SELECTION / shared utility processes
  *
- * PHYLIP_TO_FASTA       – convert a relaxed-PHYLIP protein alignment to FASTA
+ * PHYLIP_TO_FASTA       – normalize a supported alignment file to FASTA
  * EXTRACT_EXTREME_SPECIES – derive top/bottom species lists from trait_stats.csv
  * ANNOTATE_TREE_FG        – label foreground leaf branches in a Newick tree for FADE
  * EXTRACT_FG_BRANCHES     – write a list of FG species names for MoleRate --branches args
@@ -49,27 +49,37 @@ process EXTRACT_EXTREME_SPECIES {
 // direction is carried through as a passthrough value so that downstream
 // processes (ANNOTATE_TREE_FG, FADE_RUN, MOLERATE_RUN) receive a consistent
 // (gene_id, direction, fasta) tuple without needing a separate join step.
+// Existing FASTA inputs are copied through directly; PHYLIP-like inputs are
+// converted to FASTA.
 // ─────────────────────────────────────────────────────────────────────────────
 process PHYLIP_TO_FASTA {
     tag "${gene_id}|${direction}"
 
     input:
-    tuple val(gene_id), val(direction), path(phylip_file)
+    tuple val(gene_id), val(direction), path(alignment_file)
 
     output:
     tuple val(gene_id), val(direction), path("${gene_id}.fa"), emit: fasta
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local"
-    if (params.use_singularity || params.use_apptainer) {
+    def is_fasta_input = alignment_file.name.toLowerCase().endsWith('.fa') ||
+                         alignment_file.name.toLowerCase().endsWith('.fasta')
+    if (is_fasta_input) {
         """
-        /usr/local/bin/_entrypoint.sh python ${local_dir}/phylip_to_fasta.py \
-            "${phylip_file}" "${gene_id}.fa"
+        cp "${alignment_file}" "${gene_id}.fa"
         """
     } else {
-        """
-        python ${local_dir}/phylip_to_fasta.py "${phylip_file}" "${gene_id}.fa"
-        """
+        if (params.use_singularity || params.use_apptainer) {
+            """
+            /usr/local/bin/_entrypoint.sh python ${local_dir}/phylip_to_fasta.py \
+                "${alignment_file}" "${gene_id}.fa"
+            """
+        } else {
+            """
+            python ${local_dir}/phylip_to_fasta.py "${alignment_file}" "${gene_id}.fa"
+            """
+        }
     }
 }
 

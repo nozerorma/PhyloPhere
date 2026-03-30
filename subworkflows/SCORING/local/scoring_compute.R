@@ -15,8 +15,10 @@
 #     --rer        <rerconverge_summary.tsv> \
 #     --accum_dir  <directory_with_accumulation_CSVs> \
 #     --top_pct    0.10 \
+#     --top5_pct   0.05 \
 #     --top1_pct   0.01 \
 #     --gene_top_pct  0.10 \
+#     --gene_top5_pct 0.05 \
 #     --gene_top1_pct 0.01
 #
 # Outputs (in working directory):
@@ -49,8 +51,10 @@ fade_bottom_file  <- parse_arg("--fade_bottom")
 rer_file          <- parse_arg("--rer")
 accum_dir         <- parse_arg("--accum_dir")
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
+top5_pct          <- as.numeric(parse_arg("--top5_pct", "0.05"))
 top1_pct          <- as.numeric(parse_arg("--top1_pct", "0.01"))
 gene_top_pct      <- as.numeric(parse_arg("--gene_top_pct",  "0.10"))
+gene_top5_pct     <- as.numeric(parse_arg("--gene_top5_pct", "0.05"))
 gene_top1_pct     <- as.numeric(parse_arg("--gene_top1_pct", "0.01"))
 
 file_exists <- function(f) {

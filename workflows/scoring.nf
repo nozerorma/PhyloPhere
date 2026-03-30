@@ -28,6 +28,9 @@ workflow SCORING {
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
         accum_ch                 // Channel<path> or null — collected accumulation CSVs
         background_ch            // Channel<path> or null — cleaned_background_main.txt
+        vep_transvar_ch          // Channel<path> or null — transvar_annotations.tsv (optional)
+        vep_primateai_ch         // Channel<path> or null — primateai_scores.tsv     (optional)
+        genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -73,6 +76,20 @@ workflow SCORING {
                 file('NO_ACCUM')
             }
 
+        // VEP optional inputs — sentinels prevent staging collisions
+        def resolved_vep_transvar = (vep_transvar_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_vep_transvar ?: 'NO_VEP_TRANSVAR') }
+
+        def resolved_vep_primateai = (vep_primateai_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_vep_primateai ?: 'NO_VEP_PRIMATEAI') }
+
+        // Genomic info (gene coordinates) — reuses params.gene_ensembl_file if available
+        def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
+            .ifEmpty {
+                def gi = params.gene_ensembl_file ?: ''
+                if (gi && file(gi).exists()) file(gi) else file('NO_GENOMIC_INFO')
+            }
+
         // Background for ORA
         def resolved_background = (background_ch ?: Channel.empty())
             .ifEmpty {
@@ -98,7 +115,10 @@ workflow SCORING {
         def report_out = SCORING_REPORT(
             compute_out.position_scores,
             compute_out.gene_scores,
-            compute_out.gene_correlations
+            compute_out.gene_correlations,
+            resolved_vep_transvar,
+            resolved_vep_primateai,
+            resolved_genomic_info
         )
 
         // ── ORA on scoring gene lists (optional) ───────────────────────────
