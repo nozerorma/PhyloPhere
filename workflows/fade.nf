@@ -99,6 +99,8 @@ workflow FADE {
         // Pass Channel.empty() when running standalone (params-based).
         pp_top_ch         // postproc TXT for TOP  (all_top.txt)
         pp_bottom_ch      // postproc TXT for BOTTOM (all_bottom.txt)
+        // Optional CT discovery table used to reuse the single upstream toy sample.
+        ct_discovery_input
 
     main:
 
@@ -132,18 +134,37 @@ workflow FADE {
         def all_ali_ch
 
         if (params.fade_mode == 'all') {
-
-            def toy_genes = null
             if (params.toy_mode) {
-                def n = (params.toy_n ?: 50) as int
-                def all_top = ali_tuples_from_dir(ali_dir, 'top', null)
-                Collections.shuffle(all_top)
-                toy_genes = all_top.take(n).collect { it[0] }.toSet()
-                log.info "[toy_mode] FADE: using ${toy_genes.size()} randomly sampled genes"
+                def resolved_ct_discovery = (ct_discovery_input ?: Channel.empty())
+                    .ifEmpty { file('NO_FILE') }
+
+                all_ali_ch = resolved_ct_discovery.flatMap { discovery_file ->
+                    def toy_genes = null
+                    if (discovery_file.name != 'NO_FILE' && discovery_file.exists()) {
+                        toy_genes = discovery_file
+                            .readLines()
+                            .drop(1)
+                            .collect { it.split('\t')[0].trim() }
+                            .findAll { it }
+                            .toSet()
+                        log.info "[toy_mode] FADE: reusing ${toy_genes.size()} genes from CT discovery"
+                    } else {
+                        def n = (params.toy_n ?: 50) as int
+                        def all_top = ali_tuples_from_dir(ali_dir, 'top', null)
+                        Collections.shuffle(all_top)
+                        toy_genes = all_top.take(n).collect { it[0] }.toSet()
+                        log.info "[toy_mode] FADE: using ${toy_genes.size()} randomly sampled genes"
+                    }
+
+                    def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    toy_genes)
+                    def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', toy_genes)
+                    top_tuples + bottom_tuples
+                }
+            } else {
+                def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    null)
+                def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', null)
+                all_ali_ch = Channel.fromList(top_tuples + bottom_tuples)
             }
-            def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    toy_genes)
-            def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', toy_genes)
-            all_ali_ch = Channel.fromList(top_tuples + bottom_tuples)
 
         } else {
             // gene_set mode ───────────────────────────────────────────────────

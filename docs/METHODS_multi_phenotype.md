@@ -33,7 +33,6 @@ Both are frequency/proportion phenotypes derived from individual clinical record
 A continuous **branch-colouring trait** (`branch_trait = LQ`, Longevity Quotient) was also carried through for downstream visualisation of evolutionary shifts. LQ serves two complementary roles in the cancer analyses:
 
 1. **Phenotypic co-visualisation.** In the phenotype exploration report (`2.Phenotype_exploration.Rmd`), LQ is reconstructed onto the phylogenetic tree via ancestral state reconstruction and rendered as a continuous branch-colour overlay. This provides a qualitative readout of how longevity co-varies with cancer prevalence across the clade, allowing identification of lineages where both traits shift concordantly.
-
 2. **Direct quantitative correlation.** The same exploration report generates scatter plots and Pearson/Spearman correlation statistics between LQ and each cancer phenotype (neoplasia prevalence or malignancy prevalence). Where the sample is sufficient, phylogenetically generalised least squares (PGLS) regression is additionally computed to account for shared ancestry. These correlations serve as a biological validation layer — long-lived species are expected to display elevated cancer suppression mechanisms — and provide interpretive context for the CAAS results.
 
 LQ is deliberately excluded from `secondary_trait` to avoid conflating the CAAS contrast-group definition (which already uses the cross-cancer phenotype as secondary). Its quantitative relationship with cancer phenotypes is fully captured at the reporting and exploration stage.
@@ -79,45 +78,50 @@ María Sánchez Bermúdez compiled and curated dietary composition data from pub
 
 **Raw dietary fractions** (percentage of diet derived from each food source, drawn from EltonTraits and primary-literature sources):
 
-| Variable | Description |
-|---|---|
-| `Diet.Inv` | Invertebrate (insect) consumption |
-| `Diet.Vert` | Vertebrate (meat) consumption |
-| `Diet.Fruit` | Fruit consumption |
-| `Diet.Nect` | Nectar consumption |
-| `Diet.Seed` | Seed consumption |
-| `Diet.PlantO` | Other plant material consumption |
+
+| Variable      | Description                       |
+| --------------- | ----------------------------------- |
+| `Diet.Inv`    | Invertebrate (insect) consumption |
+| `Diet.Vert`   | Vertebrate (meat) consumption     |
+| `Diet.Fruit`  | Fruit consumption                 |
+| `Diet.Nect`   | Nectar consumption                |
+| `Diet.Seed`   | Seed consumption                  |
+| `Diet.PlantO` | Other plant material consumption  |
 
 **Trophic binary flags**:
 
-| Variable | Description |
-|---|---|
-| `Herb` | Herbivore flag (binary: 0/1) |
-| `Carn` | Carnivore flag (binary: 0/1) |
+
+| Variable | Description                  |
+| ---------- | ------------------------------ |
+| `Herb`   | Herbivore flag (binary: 0/1) |
+| `Carn`   | Carnivore flag (binary: 0/1) |
 
 **Trophic specialisation indices** (derived by María Sánchez Bermúdez; quantify the degree of specialism towards a given dietary guild relative to phylogenetic expectation):
 
-| Index | Description |
-|---|---|
-| `frug_idx` | Frugivory index |
-| `fol_idx` | Folivory index |
-| `ins_idx` | Insectivory index |
-| `herb_idx` | Herbivory index |
-| `omn_idx` | Omnivory index |
-| `omn_spec_idx` | Omnivory specialisation index |
-| `folfrug_idx` | Folivore–frugivore composite index |
+
+| Index          | Description                         |
+| ---------------- | ------------------------------------- |
+| `frug_idx`     | Frugivory index                     |
+| `fol_idx`      | Folivory index                      |
+| `ins_idx`      | Insectivory index                   |
+| `herb_idx`     | Herbivory index                     |
+| `omn_idx`      | Omnivory index                      |
+| `omn_spec_idx` | Omnivory specialisation index       |
+| `folfrug_idx`  | Folivore–frugivore composite index |
 
 **Dietary diversity metrics** (entropy-based):
 
-| Variable | Description |
-|---|---|
+
+| Variable       | Description                                       |
+| ---------------- | --------------------------------------------------- |
 | `Shannon_norm` | Shannon diversity of diet composition, normalised |
-| `Shannon_spec` | Shannon diversity at species level |
+| `Shannon_spec` | Shannon diversity at species level                |
 
 **Ethanol exposure**:
 
-| Variable | Description |
-|---|---|
+
+| Variable  | Description                                                                                     |
+| ----------- | ------------------------------------------------------------------------------------------------- |
 | `Ethanol` | Level of ethanol consumption/exposure (0–3 ordinal scale, from field and captive observations) |
 
 ### No population-size metrics

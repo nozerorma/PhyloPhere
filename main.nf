@@ -321,6 +321,15 @@ workflow {
         def split_stats_file = stats_source_ch
             ? stats_source_ch.multiMap { f -> fade: f; molerate: f }
             : Channel.empty().multiMap { f -> fade: f; molerate: f }
+
+        // Split CT discovery output so FADE and MOLERATE can reuse the same
+        // toy-mode gene universe selected upstream by CT.
+        def ct_discovery_source_ch = (ct_results && ran_discovery)
+            ? ct_results.discovery_file
+            : Channel.empty()
+        def split_ct_discovery = ct_discovery_source_ch
+            ? ct_discovery_source_ch.multiMap { f -> fade: f; molerate: f }
+            : Channel.empty().multiMap { f -> fade: f; molerate: f }
         
         // Tree: FADE and MOLERATE use the pruned tree from reporting (if available)
         // which contains only species with phenotypic data.
@@ -335,13 +344,15 @@ workflow {
 
         if (params.fade) {
             FADE(split_stats_file.fade, split_tree.fade,
-                 sel_pp_top_ch,  sel_pp_bottom_ch)
+                 sel_pp_top_ch,  sel_pp_bottom_ch,
+                 split_ct_discovery.fade)
             ran_any = true
         }
 
         if (params.molerate) {
             MOLERATE(split_stats_file.molerate, split_tree.molerate,
-                     sel_pp_top_ch,  sel_pp_bottom_ch)
+                     sel_pp_top_ch,  sel_pp_bottom_ch,
+                     split_ct_discovery.molerate)
             ran_any = true
         }
 
