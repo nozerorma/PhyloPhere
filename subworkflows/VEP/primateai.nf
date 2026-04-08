@@ -46,6 +46,8 @@ process PRIMATEAI_MAP {
     """
     cp ${local_dir}/map_to_primateai.py .
 
+    [[ -f "${primateai_db}" ]] || { echo "Missing PrimateAI database: ${primateai_db}" >&2; exit 1; }
+
     python3 map_to_primateai.py \\
         "${transvar_tsv}" \\
         "${aa2prot_csv}" \\

@@ -39,8 +39,7 @@ process FADE_BATCHED {
     tuple val(direction), path("*.FADE.json"), emit: fade_json, optional: true
 
     script:
-    def model        = params.fade_model        ?: 'LG'
-    def model_file_arg = model == 'LG' ? "--model-file lg.dat" : ""
+    def model        = params.fade_model        ?: 'GTR'
     def method       = params.fade_method       ?: 'Variational-Bayes'
     def grid         = params.fade_grid         ?: 20
     def conc         = params.fade_concentration ?: 0.5
@@ -50,7 +49,7 @@ process FADE_BATCHED {
         """--mcmc-chains ${params.fade_chains ?: 5} \\
            --mcmc-chain-length ${params.fade_chain_length ?: 2000000} \\
            --mcmc-burn-in ${params.fade_burn_in ?: 1000000} \\
-           --mcmc-samples ${params.fade_samples ?: 1000}"""
+           --mcmc-samples ${params.fade_samples ?: 100}"""
 
     """
 cat > ${batchID}.manifest.tsv <<'EOF'
@@ -63,7 +62,6 @@ bash ${baseDir}/subworkflows/FADE/local/scripts/run_hyphy_fade_batch.sh \\
     --workers        ${params.fade_batch_workers} \\
     --runner-mode    ${runnerMode} \\
     --model          ${model} \\
-    --model-file-arg "${model_file_arg}" \\
     --method         "${method}" \\
     --grid           ${grid} \\
     --concentration  ${conc} \\
@@ -89,8 +87,7 @@ process FADE_RUN {
     tuple val(gene_id), val(direction), path("${gene_id}.${direction}.FADE.json"), emit: fade_json, optional: true
 
     script:
-    def model   = params.fade_model   ?: 'LG'
-    def model_file_arg = model == 'LG' ? "--model-file lg.dat" : ""
+    def model   = params.fade_model   ?: 'GTR'
     def method  = params.fade_method  ?: 'Variational-Bayes'
     def grid    = params.fade_grid    ?: 20
     def conc    = params.fade_concentration ?: 0.5
@@ -100,7 +97,7 @@ process FADE_RUN {
         """--chains ${params.fade_chains ?: 5} \\
            --chain-length ${params.fade_chain_length ?: 2000000} \\
            --burn-in ${params.fade_burn_in ?: 1000000} \\
-           --samples ${params.fade_samples ?: 1000}"""
+           --samples ${params.fade_samples ?: 100}"""
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -109,7 +106,6 @@ process FADE_RUN {
             --tree      "${annotated_tree}" \\
             --branches  Foreground \\
             --model     ${model} \\
-            ${model_file_arg} \\
             --method    "${method}" \\
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\
@@ -126,7 +122,6 @@ process FADE_RUN {
             --tree      "${annotated_tree}" \\
             --branches  Foreground \\
             --model     ${model} \\
-            ${model_file_arg} \\
             --method    "${method}" \\
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\

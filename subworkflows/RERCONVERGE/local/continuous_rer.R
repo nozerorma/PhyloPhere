@@ -39,25 +39,47 @@ library(RERconverge)
 traitPath <- args[1]
 load(traitPath)   # loads object: trait_vector
 
-# ── Shapiro-Wilk normality test → log10 transform if non-normal ───────────────
-# As in Valenzuela et al. (2024): log10-transform traits that reject normality
-# (Shapiro-Wilk p < 0.05); use raw values otherwise.
-sw <- shapiro.test(trait_vector)
-message(sprintf(
-  "[RER] Shapiro-Wilk normality test: W = %.4f, p = %.4e",
-  sw$statistic, sw$p.value
-))
+# ── Trait transformation ───────────────────────────────────────────────────────
+# Priority order (mirrors PGLS caas_main.py logic):
+#   1. Prevalence (all values in [0,1], not purely binary 0/1):
+#      → logit(clamp(x, 1e-4, 1-1e-4))
+#   2. Non-prevalence, Shapiro-Wilk p < 0.05 (non-normal):
+#      → log10(x + shift), shift = min_nonzero / 10  [Valenzuela et al. 2024]
+#   3. Otherwise: raw values.
+vals        <- trait_vector[!is.na(trait_vector)]
+lo          <- min(vals)
+hi          <- max(vals)
+unique_vals <- unique(vals)
+is_prev     <- (lo >= 0 & hi <= 1 & !all(unique_vals %in% c(0, 1)))
 
-if (sw$p.value < 0.05) {
-  min_nonzero <- min(trait_vector[trait_vector > 0], na.rm = TRUE)
-  shift       <- min_nonzero / 10
-  trait_vector <- log10(trait_vector + shift)
-  message(sprintf(
-    "[RER] Non-normal distribution — log10(x + %.2e) transform applied",
-    shift
-  ))
+if (is_prev) {
+  eps          <- 1e-4
+  n_clipped    <- sum(vals <= 0 | vals >= 1)
+  if (n_clipped > 0)
+    warning(sprintf(
+      "[RER] %d value(s) outside (0,1) clipped to [%.0e, %.4f] before logit",
+      n_clipped, eps, 1 - eps
+    ))
+  trait_vector <- log(pmax(pmin(trait_vector, 1 - eps), eps) /
+                      (1 - pmax(pmin(trait_vector, 1 - eps), eps)))
+  message("[RER] Prevalence trait detected — logit transform applied")
 } else {
-  message("[RER] Normal distribution — no transform applied, using raw values")
+  sw <- shapiro.test(vals)
+  message(sprintf(
+    "[RER] Shapiro-Wilk normality test: W = %.4f, p = %.4e",
+    sw$statistic, sw$p.value
+  ))
+  if (sw$p.value < 0.05) {
+    min_nonzero  <- min(vals[vals > 0])
+    shift        <- min_nonzero / 10
+    trait_vector <- log10(trait_vector + shift)
+    message(sprintf(
+      "[RER] Non-normal distribution — log10(x + %.2e) transform applied",
+      shift
+    ))
+  } else {
+    message("[RER] Normal distribution — no transform applied, using raw values")
+  }
 }
 
 # ── Load gene trees ───────────────────────────────────────────────────────────

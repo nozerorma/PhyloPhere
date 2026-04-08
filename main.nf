@@ -33,7 +33,7 @@
 
 nextflow.enable.dsl = 2
 
-version = "1.0.0"
+version = "2.0.0"
 
 // Display input parameters
 log.info """
@@ -287,13 +287,18 @@ workflow {
         }
 
         if (params.pgls) {
+            if (!params.ct_postproc && !params.pgls_caas_input) {
+                error "PGLS requires CT post-processing output (--ct_postproc) or --pgls_caas_input."
+            }
             def pgls_caas_ch = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
             PGLS(pgls_caas_ch, pgls_trait_ch, pgls_tree_ch)
             ran_any = true
         }
 
         if (params.vep) {
-            def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
+            // Pass null (not Channel.empty()) when there is no upstream postproc
+            // output so VEP can correctly fall back to --vep_caas_input.
+            def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : null
             VEP(vep_caas_ch)
             ran_any = true
         }
@@ -334,20 +339,26 @@ workflow {
         def split_stats_file = stats_source_ch
             ? stats_source_ch.multiMap { f -> fade: f; molerate: f }
             : Channel.empty().multiMap { f -> fade: f; molerate: f }
-        // Tree: FADE and MOLERATE always use params.tree (the complete species tree)
-        // via their .ifEmpty {} fallback.  The CT-pruned tree is pruned to
-        // valid-contrast-pair species only, which is a strict subset of the
-        // extreme-labeled species in stats_file — passing it would cause
-        // ANNOTATE_TREE_FG / MOLERATE_RUN to silently drop FG branches.
+        
+        // Tree: FADE and MOLERATE use the pruned tree from reporting (if available)
+        // which contains only species with phenotypic data.
+        // If reporting didn't run but contrast_selection did, fall back to CT-pruned tree.
+        // Otherwise use params.tree (the complete species tree) via .ifEmpty {} in workflows.
+        def tree_source_ch = reporting_results
+            ? reporting_results.pruned_tree_file
+            : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
+        def split_tree = tree_source_ch
+            ? tree_source_ch.multiMap { f -> fade: f; molerate: f }
+            : Channel.empty().multiMap { f -> fade: f; molerate: f }
 
         if (params.fade) {
-            FADE(split_stats_file.fade, Channel.empty(),
+            FADE(split_stats_file.fade, split_tree.fade,
                  sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
 
         if (params.molerate) {
-            MOLERATE(split_stats_file.molerate, Channel.empty(),
+            MOLERATE(split_stats_file.molerate, split_tree.molerate,
                      sel_pp_top_ch,  sel_pp_bottom_ch)
             ran_any = true
         }
@@ -373,27 +384,35 @@ workflow {
 
             // Wire upstream outputs into SCORING. Pass null (not Channel.empty())
             // when a module didn't run so if(channel) guards detect absence correctly.
-            def scoring_postproc_ch  = postproc_results ? postproc_results.filtered_discovery : null
-            def scoring_pgls_ch      = params.pgls      ? PGLS.out.pgls_tsv                  : null
-            def scoring_fade_top_ch  = params.fade       ? FADE.out.summary_top               : null
-            def scoring_fade_bot_ch  = params.fade       ? FADE.out.summary_bottom            : null
-            def scoring_rer_ch       = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
-            def scoring_accum_ch     = accum_results     ? accum_results.results               : null
-            def scoring_bg_ch        = pp_cleaned_bg     ?: null
-            def scoring_vep_tv_ch    = params.vep        ? VEP.out.transvar_tsv               : null
-            def scoring_vep_pai_ch   = params.vep        ? VEP.out.primateai_tsv              : null
+            def scoring_postproc_ch      = postproc_results ? postproc_results.filtered_discovery : null
+            def scoring_pgls_ch          = params.pgls      ? PGLS.out.pgls_tsv                  : null
+            def scoring_pgls_excess_ch   = params.pgls      ? PGLS.out.excess_tsv                : null
+            def scoring_fade_top_ch      = params.fade       ? FADE.out.summary_top               : null
+            def scoring_fade_bot_ch      = params.fade       ? FADE.out.summary_bottom            : null
+            def scoring_rer_ch           = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
+            def scoring_accum_ch         = accum_results     ? accum_results.results               : null
+            def scoring_molerate_top_ch  = params.molerate   ? MOLERATE.out.summary_top           : null
+            def scoring_molerate_bot_ch  = params.molerate   ? MOLERATE.out.summary_bottom        : null
+            def scoring_bg_ch            = pp_cleaned_bg     ?: null
+            def scoring_vep_tv_ch        = params.vep        ? VEP.out.transvar_tsv               : null
+            def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
+            def scoring_vep_aa2prot_ch   = params.vep        ? VEP.out.aa2prot_csv               : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
 
             SCORING(
                 scoring_postproc_ch,
                 scoring_pgls_ch,
+                scoring_pgls_excess_ch,
                 scoring_fade_top_ch,
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
                 scoring_accum_ch,
+                scoring_molerate_top_ch,
+                scoring_molerate_bot_ch,
                 scoring_bg_ch,
                 scoring_vep_tv_ch,
                 scoring_vep_pai_ch,
+                scoring_vep_aa2prot_ch,
                 null  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
             )
             ran_any = true

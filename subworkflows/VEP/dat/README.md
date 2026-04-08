@@ -40,6 +40,6 @@ codon-filtering step.  Supply them via:
 
 The `transvar/` directory must contain the index files built by TransVar for
 hg38.  Run `transvar config --download_anno --refversion hg38` to populate it,
-or copy the files from `fa_transvar_ref/`.  The workflow passes `--dbdir` to
-`transvar panno`, so the directory name does not matter as long as the index
-files are present inside it.
+or copy the files from `fa_transvar_ref/`. The workflow writes a temporary
+`transvar.cfg` and points `TRANSVAR_CFG` at it so TransVar resolves the staged
+CCDS `.transvardb` files through its supported configuration mechanism.

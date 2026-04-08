@@ -9,6 +9,7 @@ params:
   site_diag_tsv: NULL
   intval_tsv: NULL
   extremes_tsv: NULL
+  excess_tsv: NULL
   traitname: "unknown_trait"
   output_dir: "."
   top_hits_n: 20
@@ -40,6 +41,24 @@ pgls_df <- read_tsv_safe(params$pgls_tsv)
 diag_df <- read_tsv_safe(params$site_diag_tsv)
 intval_df <- read_tsv_safe(params$intval_tsv)
 extremes_df <- read_tsv_safe(params$extremes_tsv)
+excess_df <- read_tsv_safe(params$excess_tsv)
+
+# Handle primary p-value columns: prefer two-sided metrics when available.
+if ("p_pgls_two_sided" %in% names(pgls_df)) {
+  pgls_df <- pgls_df %>% 
+    mutate(
+      p_pgls = p_pgls_two_sided,
+      q_p_pgls = q_p_pgls_two_sided,
+      sig_p_pgls = sig_p_pgls_two_sided
+    )
+} else if ("p_pgls_pos" %in% names(pgls_df)) {
+  pgls_df <- pgls_df %>%
+    mutate(
+      p_pgls = p_pgls_pos,
+      q_p_pgls = q_p_pgls_pos,
+      sig_p_pgls = sig_p_pgls_pos
+    )
+}
 
 if (!"sig_p_pgls" %in% names(pgls_df)) pgls_df$sig_p_pgls <- logical(nrow(pgls_df))
 if (!"q_p_pgls" %in% names(pgls_df)) pgls_df$q_p_pgls <- NA_real_
@@ -168,4 +187,74 @@ validation_tbl <- tibble(
   rows = c(nrow(intval_df), nrow(extremes_df))
 )
 kable(validation_tbl)
+```
+
+## Directional Consistency
+
+```{r directional-consistency, echo=FALSE}
+if (!all(c("change_side", "sig_p_pgls_directional", "q_p_pgls_directional", "p_pgls_directional") %in% names(pgls_df))) {
+  cat("Directional summary columns are not available in this run.\n")
+} else {
+  dir_df <- pgls_df %>%
+    filter(change_side %in% c("top", "bottom", "both"))
+
+  if (nrow(dir_df) == 0) {
+    cat("No direction-eligible rows (top/bottom/both) were available.\n")
+  } else {
+    dir_summary <- dir_df %>%
+      group_by(change_side) %>%
+      summarise(
+        tested_sites = sum(is.finite(p_pgls_directional)),
+        significant_sites = sum(sig_p_pgls_directional %in% TRUE, na.rm = TRUE),
+        best_q_directional = suppressWarnings(min(q_p_pgls_directional, na.rm = TRUE)),
+        .groups = "drop"
+      ) %>%
+      mutate(best_q_directional = ifelse(is.infinite(best_q_directional), NA_real_, best_q_directional))
+    kable(dir_summary)
+  }
+}
+```
+
+## Excess Enrichment
+
+```{r excess-summary, echo=FALSE}
+if (nrow(excess_df) == 0) {
+  cat("No excess enrichment table was emitted.\n")
+} else {
+  shown <- excess_df %>%
+    arrange(q_hyper_excess, desc(excess_ratio), Gene) %>%
+    mutate(log2_excess = ifelse(is.finite(excess_ratio) & excess_ratio > 0, log2(excess_ratio), NA_real_)) %>%
+    select(trait, Gene, CAAP_Group, N_testable, K_sig_testable, n_testable_caas, k_sig_caas,
+           excess_ratio, p_hyper_excess, q_hyper_excess, sig_hyper_excess)
+  kable(shown %>% slice_head(n = 30))
+}
+```
+
+```{r excess-plot, echo=FALSE, fig.width=8, fig.height=5}
+if (nrow(excess_df) == 0) {
+  plot.new()
+  text(0.5, 0.5, "No excess enrichment rows available")
+} else {
+  plot_excess <- excess_df %>%
+    filter(
+      is.finite(excess_ratio), excess_ratio > 0,
+      is.finite(q_hyper_excess), q_hyper_excess > 0
+    ) %>%
+    mutate(is_sig = ifelse(sig_hyper_excess, "significant", "not_significant"))
+
+  if (nrow(plot_excess) == 0) {
+    plot.new()
+    text(0.5, 0.5, "No finite excess values available for plotting")
+  } else {
+    ggplot(plot_excess, aes(x = log2(excess_ratio), y = -log10(q_hyper_excess), color = is_sig)) +
+      geom_point(alpha = 0.8, size = 2) +
+      scale_color_manual(values = c(significant = "#b22222", not_significant = "#4c78a8")) +
+      labs(
+        title = "Gene-level excess enrichment",
+        x = "log2(excess_ratio)",
+        y = expression(-log[10](q[hyper])),
+        color = NULL
+      )
+  }
+}
 ```

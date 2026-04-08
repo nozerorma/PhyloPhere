@@ -63,8 +63,8 @@ fi
 
 declare -a extra_args=()
 if [[ -n "$extra_args_file" && -s "$extra_args_file" ]]; then
-    # The generated args file contains plain whitespace-delimited CLI flags.
-    read -r -a extra_args <<<"$(<"$extra_args_file")"
+    # The args file may span multiple lines; tr collapses newlines before word-splitting.
+    read -r -a extra_args < <(tr '\n' ' ' < "$extra_args_file"; echo)
 fi
 
 declare -a base_cmd

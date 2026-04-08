@@ -6,7 +6,7 @@ author: "PhyloPhere pipeline"
 output:
   html_document:
     theme: flatly
-    highlight: tango
+    syntax_highlighting: tango
     toc: true
     toc_float:
       collapsed: false
@@ -167,14 +167,19 @@ display_df <- rer_df %>%
     )
   )
 
-# Format p.perm: replace 0 with "< 1/N" when total permutation count is known
+# Format p.perm: always show the actual numeric value so tables are readable.
+# Floor values (p.perm == 0, meaning no null permutation exceeded |Rho|) are
+# marked with a dagger so readers know the true bound is < 1/N_perms.
 fmt_pperm <- function(x) {
-  if (!is.null(n_perms_total) && !is.na(n_perms_total) && n_perms_total > 0) {
-    ifelse(is.na(x), NA_character_,
-           ifelse(x == 0, paste0("< ", sprintf("%.4f", 1 / n_perms_total)), as.character(signif(x, 3))))
-  } else {
-    as.character(signif(x, 3))
-  }
+  ifelse(is.na(x), NA_character_,
+         ifelse(x == 0, "0\u2020", as.character(signif(x, 3))))
+}
+
+perm_floor_note <- if (!is.null(n_perms_total) && !is.na(n_perms_total) && n_perms_total > 0) {
+  sprintf("\u2020 p.perm = 0: no permutation null exceeded |Rho|; true bound is < %.4f (1/%d permutations).",
+          1 / n_perms_total, as.integer(n_perms_total))
+} else {
+  "\u2020 p.perm = 0: no permutation null exceeded |Rho| (permutation count unknown)."
 }
 
 # Include p.perm column only when permutations were run
@@ -211,13 +216,22 @@ DT::datatable(
   )
 ```
 
+```{r perm-floor-note, results='asis', eval=has_perm && any(!is.na(rer_df$p.perm) & rer_df$p.perm == 0)}
+cat("\n\n*", perm_floor_note, "*\n\n")
+```
+
 ```{r write-tsv}
-out_tsv <- file.path(params$output_dir,
-                     paste0("rerconverge_summary_", params$traitname, ".tsv"))
+# Write to the Nextflow work directory (current dir) so the optional emit: can
+# capture it.  A copy is also placed in params$output_dir for human inspection.
+local_tsv <- paste0("rerconverge_summary_", params$traitname, ".tsv")
 write.table(
   rer_df %>% select(-signif, -pos_corr, -neg_corr),
-  out_tsv, sep = "\t", row.names = FALSE, quote = FALSE
+  local_tsv, sep = "\t", row.names = FALSE, quote = FALSE
 )
+if (!is.null(params$output_dir) && nzchar(params$output_dir)) {
+  out_tsv <- file.path(params$output_dir, local_tsv)
+  file.copy(local_tsv, out_tsv, overwrite = TRUE)
+}
 invisible(NULL)
 ```
 
@@ -344,6 +358,12 @@ perm_label_df <- rer_df %>%
   arrange(p.perm) %>%
   slice_head(n = params$top_n_labels)
 
+# Permutation floor: p.perm == 0 means no null permutation exceeded |Rho|.
+# The actual floor value is 1/n_perms; represent it as a dashed line in the plot.
+perm_floor_log10 <- if (!is.null(n_perms_total) && !is.na(n_perms_total) && n_perms_total > 0)
+  -log10(1 / n_perms_total) else NA_real_
+n_floor_genes <- sum(!is.na(rer_df$p.perm) & rer_df$p.perm == 0)
+
 p1 <- ggplot(rer_df, aes(x = -log10(p.adj + 1e-300), y = -log10(p.perm + 1e-300))) +
   geom_point(aes(colour = case_when(
     pos_corr    ~ "Positively correlated",
@@ -354,6 +374,19 @@ p1 <- ggplot(rer_df, aes(x = -log10(p.adj + 1e-300), y = -log10(p.perm + 1e-300)
   )), alpha = 0.7, size = 2) +
   geom_abline(slope = 1, intercept = 0, linetype = "dashed",
               colour = "grey40", linewidth = 0.5) +
+  # Permutation significance threshold line
+  geom_hline(yintercept = -log10(params$pval_threshold),
+             linetype = "dotted", colour = "grey50", linewidth = 0.5) +
+  # Floor line: p.perm == 0 genes are jittered above this line
+  {if (!is.na(perm_floor_log10))
+     geom_hline(yintercept = perm_floor_log10,
+                linetype = "solid", colour = "#d62728", linewidth = 0.5, alpha = 0.6)
+   else list()} +
+  {if (!is.na(perm_floor_log10) && n_floor_genes > 0)
+     annotate("text", x = Inf, y = perm_floor_log10,
+              label = sprintf(" floor: p < %.4f  (%d genes)", 1/n_perms_total, n_floor_genes),
+              hjust = 1.05, vjust = -0.4, size = 3, colour = "#d62728")
+   else list()} +
   geom_text_repel(data = perm_label_df, aes(label = gene),
                   size = 2.8, max.overlaps = 25) +
   scale_colour_manual(
@@ -375,16 +408,29 @@ p1 <- ggplot(rer_df, aes(x = -log10(p.adj + 1e-300), y = -log10(p.perm + 1e-300)
   theme_bw(base_size = 13) +
   theme(legend.position = "top")
 
-p2 <- ggplot(rer_df %>% filter(!is.na(p.perm)), aes(x = p.perm)) +
-  geom_histogram(bins = 50, fill = .tableau10[5], colour = "white", alpha = 0.85) +
+# Histogram: separate the floor bin (p.perm == 0) in a distinct colour so that
+# genes at the permutation resolution limit are clearly visible.
+perm_df_hist <- rer_df %>%
+  filter(!is.na(p.perm)) %>%
+  mutate(at_floor = p.perm == 0)
+
+p2 <- ggplot(perm_df_hist, aes(x = p.perm, fill = at_floor)) +
+  geom_histogram(bins = 50, colour = "white", alpha = 0.85) +
   geom_vline(xintercept = params$pval_threshold,
              linetype = "dashed", colour = "grey40", linewidth = 0.7) +
+  scale_fill_manual(
+    values = c(`FALSE` = .tableau10[5], `TRUE` = "#d62728"),
+    labels = c(`FALSE` = "Observed p.perm", `TRUE` = sprintf("Floor (p < %.4f)", if (!is.null(n_perms_total) && !is.na(n_perms_total)) 1/n_perms_total else 0)),
+    name   = NULL
+  ) +
   labs(
-    title = "Distribution of permutation p-values",
+    title    = "Distribution of permutation p-values",
+    subtitle = if (n_floor_genes > 0) sprintf("%d genes at permutation floor (p.perm = 0)", n_floor_genes) else NULL,
     x = "p.perm",
     y = "Number of genes"
   ) +
-  theme_bw(base_size = 13)
+  theme_bw(base_size = 13) +
+  theme(legend.position = "top")
 
 gridExtra::grid.arrange(p1, p2, ncol = 2)
 ```
@@ -453,6 +499,10 @@ if (nrow(top_neg) == 0) {
     caption   = "Top negatively correlated genes (slower evolution with higher trait value)"
   )
 }
+```
+
+```{r perm-floor-note-tables, results='asis', eval=has_perm && any(!is.na(rer_df$p.perm) & rer_df$p.perm == 0)}
+cat("\n\n*", perm_floor_note, "*\n\n")
 ```
 
 ---

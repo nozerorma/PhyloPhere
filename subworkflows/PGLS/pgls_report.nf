@@ -10,13 +10,13 @@ process PGLS_REPORT {
     tag "pgls_report|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 
-    publishDir path: "${params.outdir}/selection/pgls",
+    publishDir path: "${params.outdir}/characterization/pgls",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
     publishDir path: "${params.outdir}/HTML_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/selection/pgls",
+    publishDir path: "${params.outdir}/characterization/pgls",
                mode: 'copy', overwrite: true,
                pattern: 'pgls_gene_summary.tsv'
 
@@ -25,6 +25,7 @@ process PGLS_REPORT {
     path site_diag_tsv
     path intval_tsv
     path extremes_tsv
+    path excess_tsv
 
     output:
     path "PGLS_report.html", emit: report
@@ -38,7 +39,7 @@ process PGLS_REPORT {
 
     script:
     def local_dir = "${baseDir}/subworkflows/PGLS/local"
-    def outdir = "${params.outdir}/selection/pgls"
+    def outdir = "${params.outdir}/characterization/pgls"
     def topHits = params.pgls_top_hits_n ?: 20
     def topGenes = params.pgls_gene_top_n ?: 20
     def traitname = params.traitname ?: 'unknown_trait'
@@ -55,6 +56,7 @@ process PGLS_REPORT {
                     site_diag_tsv = '${site_diag_tsv}',
                     intval_tsv = '${intval_tsv}',
                     extremes_tsv = '${extremes_tsv}',
+                    excess_tsv = '${excess_tsv}',
                     traitname = '${traitname}',
                     output_dir = '${outdir}',
                     top_hits_n = ${topHits},
@@ -76,6 +78,7 @@ process PGLS_REPORT {
                     site_diag_tsv = '${site_diag_tsv}',
                     intval_tsv = '${intval_tsv}',
                     extremes_tsv = '${extremes_tsv}',
+                    excess_tsv = '${excess_tsv}',
                     traitname = '${traitname}',
                     output_dir = '${outdir}',
                     top_hits_n = ${topHits},

@@ -19,13 +19,16 @@ workflow PGLS {
     main:
         assert params.traitname : "PGLS requires --traitname"
 
-        def caas_ch = (caas_input ?: Channel.empty())
-            .ifEmpty {
-                assert params.pgls_caas_input : "PGLS requires CT post-processing output or --pgls_caas_input"
-                def f = file(params.pgls_caas_input)
-                assert f.exists() : "PGLS: CAAS input not found: ${params.pgls_caas_input}"
-                f
-            }
+        def caas_ch
+        if (caas_input) {
+            caas_ch = caas_input
+        } else if (params.pgls_caas_input) {
+            def f = file(params.pgls_caas_input)
+            assert f.exists() : "PGLS: CAAS input not found: ${params.pgls_caas_input}"
+            caas_ch = Channel.value(f)
+        } else {
+            caas_ch = Channel.empty()
+        }
 
         def trait_ch = (trait_input ?: Channel.empty())
             .ifEmpty {
@@ -52,7 +55,8 @@ workflow PGLS {
             pgls_out.pgls_tsv,
             pgls_out.site_diag_tsv,
             pgls_out.intval_tsv,
-            pgls_out.extremes_tsv
+            pgls_out.extremes_tsv,
+            pgls_out.excess_tsv
         )
 
     emit:
@@ -60,4 +64,5 @@ workflow PGLS {
         site_diag_tsv = pgls_out.site_diag_tsv
         intval_tsv    = pgls_out.intval_tsv
         extremes_tsv  = pgls_out.extremes_tsv
+        excess_tsv    = pgls_out.excess_tsv
 }

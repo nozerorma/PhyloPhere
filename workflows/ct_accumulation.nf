@@ -118,13 +118,26 @@ workflow CT_ACCUMULATION {
             background_ch
         )
 
-        // ── Phase 2: Randomize ────────────────────────────────────────────────
-        // global_csv already contains masked + iscaas (single-group accumulation)
+        // ── Phase 2: Randomize — run once per phenotype direction ─────────────
+        // AGGREGATE is direction-agnostic (alignment/conservation data).
+        // RANDOMIZE filters the CAAS pool by change_side and names outputs
+        // accumulation_{direction}_{cat}_aggregated_results.csv so that
+        // scoring_compute.R can select the right files via --direction.
+        def rand_in = Channel.of("top", "bottom")
+            .combine(aggregate_out.global_csv)
+            .combine(meta_caas_val)
+            .multiMap { dir, global_csv, caas_csv ->
+                direction: dir
+                global:    global_csv
+                caas:      caas_csv
+            }
+
         randomize_out = CT_ACCUMULATION_RANDOMIZE(
-            aggregate_out.global_csv,
-            meta_caas_val
+            rand_in.direction,
+            rand_in.global,
+            rand_in.caas
         )
 
     emit:
-        results    = randomize_out.results
+        results = randomize_out.results
 }

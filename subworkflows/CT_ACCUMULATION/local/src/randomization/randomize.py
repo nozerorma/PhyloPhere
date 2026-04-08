@@ -330,10 +330,19 @@ def main(args):
     logging.info("Loading data")
     # global_csv now contains both positional data (cons_idx) and group data (masked, iscaas)
     global_df = pd.read_csv(args.global_csv)
-    caas_raw  = pd.read_csv(args.caas_csv, sep=None, engine='python')
+    import os as _os
+    if _os.path.getsize(args.caas_csv) == 0:
+        logging.warning("CAAS input file is empty — no positions passed the filter; proceeding with all-null CAAS join")
+        caas_raw = pd.DataFrame()
+    else:
+        caas_raw  = pd.read_csv(args.caas_csv, sep=None, engine='python')
 
     # Normalise CAAS columns (handles global_meta_caas.tsv or original schema)
-    caas_df = _remap_caas_df(caas_raw)
+    # If caas_raw is empty, produce a minimal skeleton so the left-join keys exist
+    if caas_raw.empty:
+        caas_df = pd.DataFrame(columns=['gene', 'msa_pos'])
+    else:
+        caas_df = _remap_caas_df(caas_raw)
 
     # Keep only needed columns to save memory
     required_cols = ['gene', 'msa_pos', 'is_significant',
@@ -409,7 +418,13 @@ def main(args):
     _gu = merged_df['caap_group'].fillna('').astype(str).str.strip().str.upper()
     pool_groups = {'US', 'GS0', 'GS1', 'GS2', 'GS3', 'GS4'}
     pool_group_mask = _gu.isin(pool_groups)
-    caas_filter = pool_group_mask & merged_df['change_side'].fillna('').ne('none')
+    if args.change_side in ('top', 'bottom'):
+        # Include positions with change_side == target direction OR "both"
+        caas_filter = pool_group_mask & merged_df['change_side'].isin([args.change_side, 'both'])
+        logging.info(f"Direction filter '{args.change_side}': {caas_filter.sum()} positions retained")
+    else:
+        # Default: all positions that have any directional signal
+        caas_filter = pool_group_mask & merged_df['change_side'].fillna('').ne('none')
 
     decile_bins = None
     if args.randomization_type == 'cons_decile':
@@ -594,6 +609,11 @@ if __name__ == "__main__":
     parser.add_argument('--precompute-masks', dest='precompute_masks', action='store_true')
     parser.add_argument('--no-precompute-masks', dest='precompute_masks', action='store_false')
     parser.set_defaults(precompute_masks=True)
+    parser.add_argument('--change-side', dest='change_side', default='both',
+                        choices=['top', 'bottom', 'both'],
+                        help='Restrict the CAAS position pool to this phenotype direction. '
+                             '"top" and "bottom" each include positions with change_side=="both". '
+                             '"both" (default) retains all non-none positions (original behaviour).')
     parser.add_argument('--log-level', default='INFO')
 
     args = parser.parse_args()

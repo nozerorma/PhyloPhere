@@ -24,7 +24,7 @@ process CT_ACCUMULATION_AGGREGATE {
 
     script:
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
-    def ali_fmt      = params.ali_format ?: 'phylip-relaxed'
+    def ali_fmt      = params.ali_format
     def out_pfx      = 'accumulation'
     def log_level    = params.accumulation_log_level ?: 'INFO'
 
@@ -36,7 +36,7 @@ process CT_ACCUMULATION_AGGREGATE {
 
         /usr/local/bin/_entrypoint.sh python main.py \\
             --tool aggregate \\
-            --alignment-dir '${alignment_dir}' \\
+            --alignment-dir "${alignment_dir}" \\
             --alignment-format '${ali_fmt}' \\
             --genomic-info '${genomic_info}' \\
             --species-list '${species_list}' \\
@@ -53,7 +53,7 @@ process CT_ACCUMULATION_AGGREGATE {
 
         python main.py \\
             --tool aggregate \\
-            --alignment-dir '${alignment_dir}' \\
+            --alignment-dir "${alignment_dir}" \\
             --alignment-format '${ali_fmt}' \\
             --genomic-info '${genomic_info}' \\
             --species-list '${species_list}' \\
@@ -66,22 +66,25 @@ process CT_ACCUMULATION_AGGREGATE {
 }
 
 process CT_ACCUMULATION_RANDOMIZE {
-    tag "ct_accumulation_randomize"
+    tag "ct_accumulation_randomize|${direction}"
     label 'process_long_compute'
 
-    publishDir path: "${params.outdir}/accumulation/randomization", mode: 'copy', overwrite: true,
+    publishDir path: { "${params.outdir}/accumulation/${direction}/randomization" },
+               mode: 'copy', overwrite: true,
                pattern: '*_aggregated_results.csv'
 
     input:
+    val  direction
     path global_csv
     path caas_csv
 
     output:
-    path "*_aggregated_results.csv", emit: results
+    val  direction,                           emit: direction
+    path "*_aggregated_results.csv",          emit: results
 
     script:
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
-    def out_pfx      = 'accumulation'
+    def out_pfx      = "accumulation_${direction}"
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
     def n_rands      = params.accumulation_n_randomizations   ?: 10000
     def log_level    = params.accumulation_log_level          ?: 'INFO'
@@ -101,6 +104,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --output-prefix '${out_pfx}' \\
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
+            --change-side '${direction}' \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """
@@ -117,6 +121,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --output-prefix '${out_pfx}' \\
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
+            --change-side '${direction}' \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """

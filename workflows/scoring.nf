@@ -23,13 +23,17 @@ workflow SCORING {
     take:
         postproc_ch              // Channel<path> or null — filtered_discovery.tsv
         pgls_ch                  // Channel<path> or null — site_pgls.tsv
+        pgls_excess_ch           // Channel<path> or null — pgls_excess_gene_trait.tsv (enrichment only)
         fade_summary_top_ch      // Channel<path> or null — fade_summary_top.tsv
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
         accum_ch                 // Channel<path> or null — collected accumulation CSVs
+        molerate_summary_top_ch  // Channel<path> or null — molerate_summary_top.tsv
+        molerate_summary_bot_ch  // Channel<path> or null — molerate_summary_bottom.tsv
         background_ch            // Channel<path> or null — cleaned_background_main.txt
         vep_transvar_ch          // Channel<path> or null — transvar_annotations.tsv (optional)
         vep_primateai_ch         // Channel<path> or null — primateai_scores.tsv     (optional)
+        vep_aa2prot_ch           // Channel<path> or null — aa2prot_global.csv (alignment→protein pos map)
         genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
 
     main:
@@ -37,19 +41,24 @@ workflow SCORING {
 
         // ── Resolve each input with .ifEmpty{} fallbacks ───────────────────
 
-        def resolved_postproc = (postproc_ch ?: Channel.empty())
-            .ifEmpty {
-                assert params.scoring_postproc_input : \
-                    "SCORING requires CT post-processing output or --scoring_postproc_input"
-                def f = file(params.scoring_postproc_input)
-                assert f.exists() : "SCORING: postproc input not found: ${params.scoring_postproc_input}"
-                f
-            }
+        def resolved_postproc
+        if (postproc_ch) {
+            resolved_postproc = postproc_ch
+        } else if (params.scoring_postproc_input) {
+            def f = file(params.scoring_postproc_input)
+            assert f.exists() : "SCORING: postproc input not found: ${params.scoring_postproc_input}"
+            resolved_postproc = Channel.value(f)
+        } else {
+            resolved_postproc = Channel.empty()
+        }
 
         // Use unique sentinel names per input to avoid Nextflow staging collisions
         // (all file('NO_FILE') would try to stage as the same symlink name).
         def resolved_pgls = (pgls_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_pgls_input ?: 'NO_PGLS') }
+
+        def resolved_pgls_excess = (pgls_excess_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_pgls_excess_input ?: 'NO_PGLS_EXCESS') }
 
         def resolved_fade_top = (fade_summary_top_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_fade_summary_top ?: 'NO_FADE_TOP') }
@@ -60,21 +69,34 @@ workflow SCORING {
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_rer_input ?: 'NO_RER') }
 
-        // Accumulation: if accum_ch is provided (value channel with collected files),
-        // use it; otherwise check params.scoring_accum_dir for a directory of CSVs.
-        def resolved_accum = (accum_ch ?: Channel.empty())
-            .ifEmpty {
-                def accum_dir = params.scoring_accum_dir ?: ''
+        // Accumulation: collect all CSVs (top + bottom) into a single value channel.
+        // IMPORTANT: do NOT use .combine(accum_ch) in the multiMap chain below —
+        // when a channel emits List<Path> (from a glob output), .combine() spreads the
+        // list as individual tuple elements, causing an arity mismatch in multiMap.
+        // Instead we flatten + collect here so the process input receives all files at once
+        // and the R script selects the right direction via --direction / --accum_dir '.'.
+        def accum_source = (accum_ch ?: Channel.empty())
+        if (params.scoring_accum_dir) {
+            def accum_dir = params.scoring_accum_dir ?: ''
+            accum_source = accum_source.ifEmpty {
                 if (accum_dir && file(accum_dir).isDirectory()) {
-                    // Collect all accumulation CSVs from the directory
                     def csvs = file(accum_dir).listFiles()
                         ?.findAll { it.name.endsWith('.csv') && it.name.startsWith('accumulation_') }
-                    if (csvs && csvs.size() > 0) {
-                        return csvs
-                    }
+                    if (csvs && csvs.size() > 0) return csvs
                 }
-                file('NO_ACCUM')
+                [file('NO_ACCUM')]
             }
+        }
+        def accum_all_ch = accum_source
+            .flatten()
+            .collect()
+            .ifEmpty { [file('NO_ACCUM')] }
+
+        def resolved_molerate_top = (molerate_summary_top_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_molerate_summary_top ?: 'NO_MOLERATE_TOP') }
+
+        def resolved_molerate_bot = (molerate_summary_bot_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_molerate_summary_bottom ?: 'NO_MOLERATE_BOTTOM') }
 
         // VEP optional inputs — sentinels prevent staging collisions
         def resolved_vep_transvar = (vep_transvar_ch ?: Channel.empty())
@@ -82,6 +104,9 @@ workflow SCORING {
 
         def resolved_vep_primateai = (vep_primateai_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_vep_primateai ?: 'NO_VEP_PRIMATEAI') }
+
+        def resolved_vep_aa2prot = (vep_aa2prot_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_vep_aa2prot ?: 'NO_VEP_AA2PROT') }
 
         // Genomic info (gene coordinates) — reuses params.gene_ensembl_file if available
         def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
@@ -101,42 +126,129 @@ workflow SCORING {
                 file('NO_BACKGROUND')
             }
 
-        // ── Run scoring computation ────────────────────────────────────────
+        // ── Run scoring computation for each phenotype direction ──────────
+        // Each resolved_* is a single-item queue channel (one file per run).
+        // combine() creates the Cartesian product: 2 directions × 1 file = 2 items.
+        // multiMap then splits the combined tuples back into named channels,
+        // giving SCORING_COMPUTE two properly-paired calls without consuming any
+        // channel more than once and without using the deprecated .first() operator.
+        def directions_ch = Channel.of("top", "bottom")
+
+        def cmp_in = directions_ch
+            .combine(resolved_postproc)
+            .combine(resolved_pgls)
+            .combine(resolved_pgls_excess)
+            .combine(resolved_fade_top)
+            .combine(resolved_fade_bottom)
+            .combine(resolved_rer)
+            .combine(resolved_molerate_top)
+            .combine(resolved_molerate_bot)
+            .multiMap { dir, postproc, pgls, pgls_exc, fade_t, fade_b, rer, mol_t, mol_b ->
+                direction:   dir
+                postproc:    postproc
+                pgls:        pgls
+                pgls_exc:    pgls_exc
+                fade_top:    fade_t
+                fade_bot:    fade_b
+                rer:         rer
+                mol_top:     mol_t
+                mol_bot:     mol_b
+            }
+
         def compute_out = SCORING_COMPUTE(
-            resolved_postproc,
-            resolved_pgls,
-            resolved_fade_top,
-            resolved_fade_bottom,
-            resolved_rer,
-            resolved_accum
+            cmp_in.direction,
+            cmp_in.postproc,
+            cmp_in.pgls,
+            cmp_in.pgls_exc,
+            cmp_in.fade_top,
+            cmp_in.fade_bot,
+            cmp_in.rer,
+            accum_all_ch,
+            cmp_in.mol_top,
+            cmp_in.mol_bot
         )
 
-        // ── Render report ──────────────────────────────────────────────────
+        // ── Render one report per direction ────────────────────────────────
+        // SCORING_COMPUTE emits (direction, file) tuples for all outputs.
+        // Join on the direction key so each report receives correctly-paired inputs.
+        // For optional outputs, join with remainder:true and map null → sentinel file.
+
+        def report_core = compute_out.position_scores   // (dir, pos)
+            .join(compute_out.gene_scores)              // (dir, pos, gene)
+            .join(compute_out.gene_correlations)        // (dir, pos, gene, corr)
+
+        // For each direction-keyed optional channel, emit a sentinel when absent.
+        // report_core.map extracts just the direction keys as the left side of join.
+        def _opt = { ch, sentinel ->
+            report_core.map { d, _p, _g, _c -> d }
+                .join(ch, remainder: true)
+                .map { dir, f -> [dir, f ?: file(sentinel)] }
+        }
+
+        // Build a fully direction-keyed channel with all report inputs
+        def report_all = report_core
+            .join(_opt(compute_out.pgls_excess_report,     'NO_PGLS_EXCESS'))
+            .join(_opt(compute_out.stress_summary,         'NO_SCORING_STRESS_SUMMARY'))
+            .join(_opt(compute_out.stress_correlations,    'NO_SCORING_STRESS_CORR'))
+            .join(_opt(compute_out.stress_rank_agreement,  'NO_SCORING_STRESS_RANK'))
+            .join(_opt(compute_out.stress_top_overlap,     'NO_SCORING_STRESS_OVERLAP'))
+            .join(_opt(compute_out.stress_variants,        'NO_SCORING_STRESS_VARIANTS'))
+            .join(_opt(compute_out.stress_latent_loadings, 'NO_SCORING_STRESS_LOADINGS'))
+        // report_all: (dir, pos, gene, corr, exc, ss, sc, sr, so, sv, sl) — 11 elements
+
+        // Combine with shared VEP/genomic inputs (single-item channels reused per direction)
+        def rpt_in = report_all
+            .combine(resolved_vep_transvar)
+            .combine(resolved_vep_primateai)
+            .combine(resolved_vep_aa2prot)
+            .combine(resolved_genomic_info)
+            .multiMap { dir, pos, gene, corr, exc, ss, sc, sr, so, sv, sl, tv, pai, a2p, gi ->
+                direction:   dir
+                pos_scores:  pos
+                gene_scores: gene
+                gene_corr:   corr
+                excess:      exc
+                stress_sum:  ss
+                stress_corr: sc
+                stress_rank: sr
+                stress_over: so
+                stress_var:  sv
+                stress_load: sl
+                transvar:    tv
+                primateai:   pai
+                aa2prot:     a2p
+                genomic:     gi
+            }
+
         def report_out = SCORING_REPORT(
-            compute_out.position_scores,
-            compute_out.gene_scores,
-            compute_out.gene_correlations,
-            resolved_vep_transvar,
-            resolved_vep_primateai,
-            resolved_genomic_info
+            rpt_in.direction,
+            rpt_in.pos_scores,
+            rpt_in.gene_scores,
+            rpt_in.gene_corr,
+            rpt_in.excess,
+            rpt_in.stress_sum,
+            rpt_in.stress_corr,
+            rpt_in.stress_rank,
+            rpt_in.stress_over,
+            rpt_in.stress_var,
+            rpt_in.stress_load,
+            rpt_in.transvar,
+            rpt_in.primateai,
+            rpt_in.aa2prot,
+            rpt_in.genomic
         )
 
         // ── ORA on scoring gene lists (optional) ───────────────────────────
         if (params.scoring_ora) {
-            // Gate ORA behind the report: combine background with report output so
-            // Nextflow only releases the background channel item after SCORING_REPORT
-            // has finished, preventing ORA and SCORING_REPORT from racing over I/O.
             def bg_after_report = resolved_background
-                .combine(report_out.report)
-                .map { bg, _report -> bg }
+                .combine(report_out.report.collect())
+                .map { it[0] }  // bg is always first; avoid destructuring (collect() spreads list elements)
 
-            // Position-level ORA: gene lists from top-scoring positions
             ORA_SCORING_POSITION(
                 bg_after_report,
                 compute_out.position_gene_lists.collect()
             )
 
-            // Gene-level ORA: gene lists from top-scoring genes
             ORA_SCORING_GENE(
                 bg_after_report,
                 compute_out.gene_gene_lists.collect()
@@ -144,7 +256,7 @@ workflow SCORING {
         }
 
     emit:
-        position_scores = compute_out.position_scores
-        gene_scores     = compute_out.gene_scores
+        position_scores = compute_out.position_scores.map { _dir, f -> f }
+        gene_scores     = compute_out.gene_scores.map     { _dir, f -> f }
         report          = report_out.report
 }

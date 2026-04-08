@@ -4,6 +4,7 @@
  * SELECTION / shared utility processes
  *
  * PHYLIP_TO_FASTA       – normalize a supported alignment file to FASTA
+ * FILTER_FASTA_TO_TREE  – drop FASTA sequences whose taxa are absent from a tree
  * EXTRACT_EXTREME_SPECIES – derive top/bottom species lists from trait_stats.csv
  * ANNOTATE_TREE_FG        – label foreground leaf branches in a Newick tree for FADE
  * EXTRACT_FG_BRANCHES     – write a list of FG species names for MoleRate --branches args
@@ -63,24 +64,51 @@ process PHYLIP_TO_FASTA {
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local"
-    def is_fasta_input = alignment_file.name.toLowerCase().endsWith('.fa') ||
-                         alignment_file.name.toLowerCase().endsWith('.fasta')
-    if (is_fasta_input) {
-        """
+    // Format detection and tar.gz extraction are handled at bash level so that
+    // .tar.gz archives (where alignment_file.name would be the archive name, not
+    // the member name) are handled correctly.
+    def pyBin = (params.use_singularity || params.use_apptainer)
+        ? '/usr/local/bin/_entrypoint.sh python'
+        : 'python'
+    """
+    # Convert to FASTA (or copy directly if already FASTA).
+    _lower=\$(echo "${alignment_file}" | tr '[:upper:]' '[:lower:]')
+    if [[ "\$_lower" == *.fa || "\$_lower" == *.fasta ]]; then
         cp "${alignment_file}" "${gene_id}.fa"
-        """
-    } else {
-        if (params.use_singularity || params.use_apptainer) {
-            """
-            /usr/local/bin/_entrypoint.sh python ${local_dir}/phylip_to_fasta.py \
-                "${alignment_file}" "${gene_id}.fa"
-            """
-        } else {
-            """
-            python ${local_dir}/phylip_to_fasta.py "${alignment_file}" "${gene_id}.fa"
-            """
-        }
-    }
+    else
+        ${pyBin} ${local_dir}/phylip_to_fasta.py "${alignment_file}" "${gene_id}.fa"
+    fi
+    """
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FILTER_FASTA_TO_TREE
+// Restrict each per-gene FASTA to the phenotype-pruned tree taxa before any
+// downstream HyPhy step sees the alignment. This prevents off-tree species
+// from entering FADE / MoleRate simply because they are present in the raw
+// alignment directory.
+// ─────────────────────────────────────────────────────────────────────────────
+process FILTER_FASTA_TO_TREE {
+    tag "${gene_id}|${direction}"
+
+    input:
+    tuple val(gene_id), val(direction), path(fasta), path(tree)
+
+    output:
+    tuple val(gene_id), val(direction), path("${gene_id}.${direction}.tree_filtered.fa"), emit: fasta
+
+    script:
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
+    def pyBin = (params.use_singularity || params.use_apptainer)
+        ? '/usr/local/bin/_entrypoint.sh python'
+        : 'python'
+    """
+    ${pyBin} ${local_dir}/filter_fasta_to_tree.py \\
+        --tree "${tree}" \\
+        --fasta "${fasta}" \\
+        --output "${gene_id}.${direction}.tree_filtered.fa"
+    """
 }
 
 
@@ -101,8 +129,8 @@ process ANNOTATE_TREE_FG {
     tuple val(gene_id), val(direction), path(fasta), path(fg_species_file), path(tree)
 
     output:
-    tuple val(gene_id), val(direction), path("${gene_id}_${direction}_fg.nwk"), emit: annotated_tree
-    tuple val(gene_id), val(direction), path("${gene_id}_${direction}.fa"),     emit: filtered_fasta
+    tuple val(gene_id), val(direction), path("${gene_id}_${direction}_fg.nwk"), emit: annotated_tree, optional: true
+    tuple val(gene_id), val(direction), path("${gene_id}_${direction}.fa"),     emit: filtered_fasta, optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local"

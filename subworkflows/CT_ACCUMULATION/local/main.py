@@ -64,6 +64,9 @@ def main():
     parser.add_argument("--precompute-masks",           dest="precompute_masks", action="store_true")
     parser.add_argument("--no-precompute-masks",        dest="precompute_masks", action="store_false")
     parser.set_defaults(precompute_masks=True)
+    parser.add_argument("--change-side",                dest="change_side", default="both",
+                        choices=["top", "bottom", "both"],
+                        help="Restrict CAAS pool to this phenotype direction (default: both)")
 
     args = parser.parse_args()
 
@@ -114,6 +117,7 @@ def main():
                 decile_bins=args.decile_bins,
                 global_seed=args.global_seed,
                 precompute_masks=args.precompute_masks,
+                change_side=args.change_side,
                 log_level=args.log_level,
             )
             timed_execution(randomize_fn, rand_args, "Randomization Phase")

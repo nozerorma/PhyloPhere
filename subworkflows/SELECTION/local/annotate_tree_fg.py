@@ -152,14 +152,23 @@ def main():
 
     fg_in_tree = fg_species & tree_taxa
     if not fg_in_tree:
-        sys.exit("ERROR annotate_tree_fg: none of the foreground species are present in the tree.")
+        sys.stderr.write(
+            "WARNING annotate_tree_fg: none of the foreground species are present "
+            "after tree/alignment reconciliation; skipping this gene.\n"
+        )
+        return
 
     annotated, n_subs = annotate_newick(newick_str, fg_in_tree, args.label)
     if n_subs == 0:
-        sys.exit(
-            f"ERROR annotate_tree_fg: regex found 0 substitutions despite {len(fg_in_tree)} "
-            "foreground species in tree. Check that taxon names in the tree match the species list exactly."
+        sys.stderr.write(
+            f"WARNING annotate_tree_fg: regex found 0 substitutions despite {len(fg_in_tree)} "
+            "foreground species in tree; skipping this gene.\n"
         )
+        return
+
+    # Remove all single quotes around species names (dendropy may add them).
+    # This includes patterns like 'species'{Foreground} and 'species':branch_length
+    annotated = re.sub(r"'([^']+)'(\{|:)", r"\1\2", annotated)
 
     with open(args.output, "w") as fh:
         fh.write(annotated)

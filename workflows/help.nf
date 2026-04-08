@@ -151,6 +151,7 @@ Usage:
 --pgls_threads          <"INTEGER">                             ${params.pgls_threads}
 --pgls_site_fdr_alpha   <"FLOAT">                               ${params.pgls_site_fdr_alpha}
 --pgls_min_per_class    <"INTEGER">                             ${params.pgls_min_per_class}
+--pgls_enrichment       <"true|false">                          ${params.pgls_enrichment}
 --pgls_phylo_model      <"bm|lambda|ou|eb|delta|kappa">         ${params.pgls_phylo_model}
 """
 def scoring_help = """
@@ -161,22 +162,30 @@ Computes composite CAAS scores at position-level and gene-level.
 Usage:
 --scoring                   <true|false>            false
 --scoring_ora               <true|false>            true
+--scoring_stress            <true|false>            false
+--scoring_stress_top_n      <INTEGER>               25
+--scoring_stress_rank_metric <"spearman">           spearman
 --scoring_position_top_pct  <FLOAT>                 0.10
+--scoring_position_top5_pct <FLOAT>                 0.05
 --scoring_position_top1_pct <FLOAT>                 0.01
 --scoring_gene_top_pct      <FLOAT>                 0.10
+--scoring_gene_top5_pct     <FLOAT>                 0.05
 --scoring_gene_top1_pct     <FLOAT>                 0.01
 
 Standalone mode (provide inputs directly):
 --scoring_postproc_input    <"filtered_discovery.tsv">   ""
 --scoring_pgls_input        <"site_pgls.tsv">            ""
+--scoring_pgls_excess_input <"pgls_excess_gene_trait.tsv"> ""
 --scoring_fade_summary_top  <"fade_summary_top.tsv">     ""
 --scoring_fade_summary_bottom <"fade_summary_bottom.tsv"> ""
 --scoring_rer_input         <"rerconverge_summary.tsv">  ""
---scoring_accum_dir         <"accumulation_dir/">         ""
---scoring_background_input  <"background.txt">           ""
+--scoring_accum_dir                 <"accumulation_dir/">              ""
+--scoring_molerate_summary_top      <"molerate_summary_top.tsv">       ""
+--scoring_molerate_summary_bottom   <"molerate_summary_bottom.tsv">    ""
+--scoring_background_input          <"background.txt">                 ""
 
 Position-level components: biochem, ASR, convergence, parallel, [PGLS], [FADE]
-Gene-level scores: gene_caas, [gene_rand], [gene_rer], gene_composite
+Gene-level scores: gene_caas, [gene_rand], [gene_rer], [gene_fade], [gene_molerate], gene_composite
 """
 
 workflow HELP {

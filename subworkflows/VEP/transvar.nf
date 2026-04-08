@@ -10,7 +10,6 @@
  *   --ccds       use CCDS canonical transcripts only
  *   --longest    return one annotation per query (canonical/longest CDS)
  *   --noheader   skip the header line in the output
- *   --dbdir      path to the TransVar index directory (dat/transvar/)
  *
  * Output columns (tab-separated, no header):
  *   input | transcript | gene | strand | coordinates(gDNA/cDNA/protein) | region | info
@@ -41,18 +40,47 @@ process TRANSVAR_ANNO {
 
     script:
     def refver = params.vep_refversion ?: 'hg38'
+    def transvarBin = params.vep_transvar_bin ?: '/home/miguel/micromamba/envs/phylophere/bin/transvar'
     """
     # Extract unique GENE:p.N query strings from column 4 of the AA2prot table
     cut -f4 "${aa2prot_csv}" | sort -u > positions_input.txt
 
-    transvar panno \\
+    if [[ -x "${transvarBin}" ]]; then
+        tv_bin="${transvarBin}"
+    elif command -v transvar >/dev/null 2>&1; then
+        tv_bin="\$(command -v transvar)"
+    else
+        echo "TransVar executable not found. Checked: ${transvarBin} and PATH." >&2
+        exit 1
+    fi
+
+    # TransVar does not accept --dbdir on the panno subcommand. Resolve the
+    # active reference FASTA, then pass the staged CCDS .transvardb path
+    # explicitly on the command line so we do not inherit stale paths from any
+    # existing user/site TransVar configuration.
+    ref_path=\$("\${tv_bin}" config --refversion "${refver}" 2>/dev/null | awk -F': ' '/^Reference:/ {print \$2; exit}')
+    if [[ -z "\${ref_path}" ]]; then
+        echo "TransVar could not resolve a reference FASTA for refversion ${refver}." >&2
+        exit 1
+    fi
+
+    staged_db_dir="\$(cd "${transvar_db}" && pwd)"
+    ccds_db="\${staged_db_dir}/${refver}.ccds.txt.transvardb"
+    if [[ ! -f "\${ccds_db}" ]]; then
+        echo "TransVar CCDS database not found: \${ccds_db}" >&2
+        exit 1
+    fi
+
+    export TRANSVAR_DOWNLOAD_DIR="\${staged_db_dir}"
+
+    "\${tv_bin}" panno \\
         -l positions_input.txt \\
-        --ccds \\
+        --ccds "\${ccds_db}" \\
         --refversion "${refver}" \\
+        --reference "\${ref_path}" \\
         --noheader \\
         --longest \\
-        --dbdir "${transvar_db}" \\
-        > transvar.tsv 2>/dev/null || true
+        > transvar.tsv
 
     # Guarantee the output file exists even if TransVar produced nothing
     [[ -s transvar.tsv ]] || touch transvar.tsv

@@ -83,7 +83,8 @@ fi
 
 declare -a extra_args=()
 if [[ -n "$extra_args_file" && -s "$extra_args_file" ]]; then
-    read -r -a extra_args <<<"$(<"$extra_args_file")"
+    # The args file may span multiple lines; tr collapses newlines before word-splitting.
+    read -r -a extra_args < <(tr '\n' ' ' < "$extra_args_file"; echo)
 fi
 
 declare -a base_cmd
@@ -134,9 +135,11 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
     wait_for_slot
     echo "[BOOTSTRAP_BATCHED] Launching $alignment_id ($idx/$gene_count)"
 
+    alignment_path="alignments/$alignment_name"
+
     declare -a cmd=(
         "${base_cmd[@]}"
-        -a "alignments/$alignment_name"
+        -a "$alignment_path"
         -t "$caas_config"
         -s "$resampled_path"
         -o "${alignment_id}.bootstraped.output"

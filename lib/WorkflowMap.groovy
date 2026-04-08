@@ -121,8 +121,8 @@ class WorkflowMap {
         def logoDataUri = imageDataUriIfExists("${projectDir}/res/logo.png")
 
         def colors = [
-            reporting : '#7C3AED',   // reports / ORA / STRING
-            prepost   : '#0EA5E9',   // pre/post-processing
+            reporting : '#7C3AED',   // reports / ORA
+            prepost   : '#0EA5E9',   // pre/post-processing / characterization
             processes : '#F97316'    // CT / RER / disambiguation / accumulation / selection tools
         ]
 
@@ -174,16 +174,19 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/HTML_reports/ORA_general.html",
                                "${outdir}/HTML_reports/ORA_accumulation.html"] ],
 
-            [ id: 'string',      name: 'STRING',                          type: 'reporting', ran: ctx.string,
-              filesDirs: ["${outdir}/string", "${outdir}/accumulation/string"],
-              htmlCandidates: ["${outdir}/HTML_reports/STRING_general.html",
-                               "${outdir}/HTML_reports/STRING_accumulation.html"] ],
-
             [ id: 'ct_acc',      name: 'CT accumulation (convergence)',   type: 'processes', ran: ctx.ctAccum,
               filesDirs: ["${outdir}/accumulation",
                           "${outdir}/accumulation/aggregation",
                           "${outdir}/accumulation/randomization"],
               htmlCandidates: ["${outdir}/HTML_reports/CT_accumulation.html"] ],
+
+            [ id: 'pgls',        name: 'Site-PGLS (association)',         type: 'processes', ran: ctx.pgls,
+              filesDirs: ["${outdir}/selection/pgls"],
+              htmlCandidates: ["${outdir}/HTML_reports/PGLS_report.html"] ],
+
+            [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
+              filesDirs: ["${outdir}/characterization/vep"],
+              htmlCandidates: [] ],
 
             [ id: 'rer',         name: 'RERconverge (RER)',               type: 'processes', ran: ctx.rer,
               filesDirs: ["${outdir}/rerconverge", "${outdir}/rerconverge/gene_sets"],
@@ -201,12 +204,17 @@ class WorkflowMap {
                           "${outdir}/selection/molerate/top",
                           "${outdir}/selection/molerate/bottom"],
               htmlCandidates: ["${outdir}/selection/molerate/top/MOLERATE_top.html",
-                               "${outdir}/selection/molerate/bottom/MOLERATE_bottom.html"] ]
+                               "${outdir}/selection/molerate/bottom/MOLERATE_bottom.html"] ],
+
+            [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting', ran: ctx.scoring,
+              filesDirs: ["${outdir}/scoring",
+                          "${outdir}/scoring/gene_lists"],
+              htmlCandidates: ["${outdir}/HTML_reports/SCORING_report.html"] ]
 
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','ct_postproc','ora','string','ct_acc','rer','fade','molerate']
+                        'ct_disambig','ct_postproc','ora','ct_acc','pgls','vep','rer','fade','molerate','scoring']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -219,13 +227,17 @@ class WorkflowMap {
             "${projectDir}/conf/resources.config",
             "${projectDir}/conf/common.config",
             "${projectDir}/conf/ct.config",
-            "${projectDir}/conf/rerconverge.config",
-            "${projectDir}/conf/ora.config",
-            "${projectDir}/conf/ct_postproc.config",
+            "${projectDir}/conf/ct_signification.config",
             "${projectDir}/conf/ct_disambiguation.config",
+            "${projectDir}/conf/ct_postproc.config",
             "${projectDir}/conf/ct_accumulation.config",
+            "${projectDir}/conf/ora.config",
+            "${projectDir}/conf/pgls.config",
+            "${projectDir}/conf/vep.config",
+            "${projectDir}/conf/rerconverge.config",
             "${projectDir}/conf/fade.config",
-            "${projectDir}/conf/molerate.config"
+            "${projectDir}/conf/molerate.config",
+            "${projectDir}/conf/scoring.config"
         ]
 
         return """<!doctype html>
@@ -238,11 +250,11 @@ class WorkflowMap {
     body { font-family: Inter, Arial, sans-serif; margin: 18px; color: #111827; background: #FAFAFA; }
     h1 { margin: 0 0 6px 0; }
     .subtitle { color:#4B5563; margin-bottom: 14px; }
-    .hero { margin-bottom: 16px; max-width: 980px; }
+    .hero { margin-bottom: 16px; }
     .logo-wrap { margin: 0 0 18px 0; }
     .hero-logo { display:block; max-width: 240px; width: 100%; height: auto; object-fit: contain; }
     .meta { font-size: 13px; color:#374151; background:#F3F4F6; border:1px solid #E5E7EB; padding:10px; border-radius:8px; }
-    .grid { margin-top: 14px; display:flex; flex-direction:column; gap:8px; max-width: 980px; }
+    .grid { margin-top: 14px; display:flex; flex-direction:column; gap:8px; }
     .arrow { text-align:center; color:#6B7280; font-size: 18px; }
     .stage { border: 2px solid #D1D5DB; border-radius: 10px; background: #fff; overflow: hidden; }
     .stage-head { color: #fff; font-weight: 700; padding: 8px 10px; }
@@ -256,7 +268,7 @@ class WorkflowMap {
     .missing { color:#B91C1C; }
     a { color:#1D4ED8; text-decoration:none; }
     a:hover { text-decoration:underline; }
-    .legend { margin-top: 16px; padding: 10px; border:1px solid #E5E7EB; border-radius:8px; background:#fff; max-width:980px; }
+    .legend { margin-top: 16px; padding: 10px; border:1px solid #E5E7EB; border-radius:8px; background:#fff; }
     .sw { display:inline-block; width:14px; height:14px; border-radius:3px; margin-right:6px; vertical-align:middle; }
     .footer { margin-top:14px; font-size:12px; color:#6B7280; }
     code { background:#F3F4F6; padding:1px 5px; border-radius:4px; }
@@ -272,7 +284,7 @@ class WorkflowMap {
       ${logoDataUri ? "<img class=\"hero-logo\" src=\"${logoDataUri}\" alt=\"PhyloPhere logo\" />" : ""}
     </div>
     <h1>PhyloPhere workflow map</h1>
-    <div class="subtitle">Complete chain from prune/reporting to selection (always shown). Gray = not run, colored = run.</div>
+    <div class="subtitle">Complete chain from prune/reporting to scoring (always shown). Gray = not run, colored = run.</div>
   </div>
 
   <div class="meta">
@@ -291,11 +303,11 @@ class WorkflowMap {
 
   <div class="legend">
     <b>Color key (process type)</b><br/>
-    <span class="sw" style="background:${colors.reporting};"></span> Reporting-driven (reports, ORA, STRING)
+    <span class="sw" style="background:${colors.reporting};"></span> Reporting-driven (reports, ORA, Scoring)
     &nbsp;&nbsp;|&nbsp;&nbsp;
-    <span class="sw" style="background:${colors.prepost};"></span> Pre/postprocessing
+    <span class="sw" style="background:${colors.prepost};"></span> Pre/postprocessing &amp; characterization (VEP)
     &nbsp;&nbsp;|&nbsp;&nbsp;
-    <span class="sw" style="background:${colors.processes};"></span> Processes as such (CT, RER, selection tools, disambiguation, accumulation)
+    <span class="sw" style="background:${colors.processes};"></span> Analysis processes (CT, PGLS, RER, FADE, Molerate, disambiguation, accumulation)
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:#B8B8B8;"></span> Not run
   </div>
@@ -335,29 +347,33 @@ class WorkflowMap {
         'ct_disambig': ['ct_disambiguation'],
         'ct_postproc': ['postproc', 'postproc/preprocessed'],
         'ora': ['ora'],
-        'string': ['string'],
         'ct_acc': ['accumulation', 'accumulation/aggregation'],
+        'pgls': ['selection/pgls'],
+        'vep': ['characterization/vep'],
         'rer': ['rerconverge'],
         'fade': ['selection/fade'],
-        'molerate': ['selection/molerate']
+        'molerate': ['selection/molerate'],
+        'scoring': ['scoring']
       };
-      
+
       // Map stage IDs to display stages
       const stageMapping = {
         'prune': 'prune',
         'dataset_rep': 'dataset_rep',
-        'pheno_rep': 'pheno_rep', 
+        'pheno_rep': 'pheno_rep',
         'contrast': 'contrast',
         'ct': 'ct',
         'ct_signif': 'ct_signif',
         'ct_disambig': 'ct_disambig',
         'ct_postproc': 'ct_postproc',
         'ora': 'ora',
-        'string': 'string',
         'ct_acc': 'ct_acc',
+        'pgls': 'pgls',
+        'vep': 'vep',
         'rer': 'rer',
         'fade': 'fade',
-        'molerate': 'molerate'
+        'molerate': 'molerate',
+        'scoring': 'scoring'
       };
       
       let checkedStages = 0;
@@ -429,15 +445,17 @@ class WorkflowMap {
         'ct_disambig': 'CT disambiguation (convergence)',
         'ct_postproc': 'CT post-processing',
         'ora': 'ORA',
-        'string': 'STRING',
         'ct_acc': 'CT accumulation (convergence)',
+        'pgls': 'Site-PGLS (association)',
+        'vep': 'VEP characterization',
         'rer': 'RERconverge (RER)',
         'fade': 'FADE (selection)',
-        'molerate': 'Molerate (RER)'
+        'molerate': 'Molerate (RER)',
+        'scoring': 'CAAS Scoring'
       };
       return names[stageId] || stageId;
     }
-    
+
     function getStageColor(stageId) {
       const typeColors = {
         'prune': '#0EA5E9',
@@ -449,11 +467,13 @@ class WorkflowMap {
         'ct_disambig': '#F97316',
         'ct_postproc': '#0EA5E9',
         'ora': '#7C3AED',
-        'string': '#7C3AED',
         'ct_acc': '#F97316',
+        'pgls': '#F97316',
+        'vep': '#0EA5E9',
         'rer': '#F97316',
         'fade': '#F97316',
-        'molerate': '#F97316'
+        'molerate': '#F97316',
+        'scoring': '#7C3AED'
       };
       return typeColors[stageId] || '#B8B8B8';
     }
@@ -476,11 +496,13 @@ class WorkflowMap {
             ct_disambig  : ['ct_disambiguation'],
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
             ora          : ['ora'],
-            string       : ['string'],
             ct_acc       : ['accumulation', 'accumulation/aggregation'],
+            pgls         : ['selection/pgls'],
+            vep          : ['characterization/vep'],
             rer          : ['rerconverge'],
             fade         : ['selection/fade'],
-            molerate     : ['selection/molerate']
+            molerate     : ['selection/molerate'],
+            scoring      : ['scoring']
         ]
     }
 
@@ -544,11 +566,13 @@ class WorkflowMap {
             ctDisambig    : scanResults.ct_disambig ?: false,
             ctPostproc    : scanResults.ct_postproc ?: false,
             ora           : scanResults.ora ?: false,
-            string        : scanResults.string ?: false,
             ctAccum       : scanResults.ct_acc ?: false,
+            pgls          : scanResults.pgls ?: false,
+            vep           : scanResults.vep ?: false,
             rer           : scanResults.rer ?: false,
             fade          : scanResults.fade ?: false,
-            molerate      : scanResults.molerate ?: false
+            molerate      : scanResults.molerate ?: false,
+            scoring       : scanResults.scoring ?: false
         ]
     }
 }

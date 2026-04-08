@@ -33,7 +33,7 @@
 
 nextflow.enable.dsl = 2
 
-version = "1.0.0"
+version = "2.0.0"
 
 // Display input parameters
 log.info """

@@ -11,14 +11,17 @@ import numpy as np
 import pandas as pd
 from scipy.linalg import cho_factor, cho_solve
 from scipy.optimize import minimize_scalar
-from scipy.stats import chi2
+from scipy.stats import chi2, hypergeom
 
-from stats.stats_utils import bh_fdr_per_group
+from stats.stats_utils import bh_fdr, bh_fdr_per_group
 
 RESULT_COLUMNS = [
     "Gene",
     "Position",
     "trait",
+    "CAAP_Group",
+    "change_side",
+    "is_caas_position",
     "n_used",
     "n_top_aa",
     "n_bottom_aa",
@@ -26,12 +29,37 @@ RESULT_COLUMNS = [
     "lambda_full",
     "lambda_null",
     "lrt_stat",
-    "p_pgls_top",       # one-tailed: H1 = beta_top > 0  (amino acid enriched in high-trait species)
-    "p_pgls_bottom",    # one-tailed: H1 = beta_top < 0  (amino acid enriched in low-trait species)
-    "q_p_pgls_top",
-    "sig_p_pgls_top",
-    "q_p_pgls_bottom",
-    "sig_p_pgls_bottom",
+    "p_pgls_two_sided",
+    "p_pgls_pos",       # one-tailed: H1 = beta_top > 0  (β positive; top-group AA enriched in high-trait species)
+    "p_pgls_neg",       # one-tailed: H1 = beta_top < 0  (β negative; top-group AA enriched in low-trait species)
+    "q_p_pgls_two_sided",
+    "sig_p_pgls_two_sided",
+    "q_p_pgls_pos",
+    "sig_p_pgls_pos",
+    "q_p_pgls_neg",
+    "sig_p_pgls_neg",
+    "p_pgls_directional",
+    "q_p_pgls_directional",
+    "sig_p_pgls_directional",
+    "pgls_decile_score",
+    "pgls_weighted_decile",
+    "pgls_char_score",
+]
+
+EXCESS_COLUMNS = [
+    "trait",
+    "Gene",
+    "CAAP_Group",
+    "N_testable",
+    "K_sig_testable",
+    "n_testable_caas",
+    "k_sig_caas",
+    "rate_testable",
+    "rate_caas",
+    "excess_ratio",
+    "p_hyper_excess",
+    "q_hyper_excess",
+    "sig_hyper_excess",
 ]
 
 DIAG_COLUMNS = [
@@ -54,6 +82,32 @@ DIAG_COLUMNS = [
     "lrt_p",
     "is_best_aicc",
 ]
+
+SCHEME_WEIGHTS = {
+    "US": 0.5,
+    "GS4": 0.2,
+    "GS3": 0.1,
+    "GS2": 0.1,
+    "GS1": 0.1,
+    "GS0": 0.0,
+}
+
+
+def _decile_score_from_pvalues(values: pd.Series) -> pd.Series:
+    """Map p-values to the same 0..1 decile scale used in scoring."""
+    vals = pd.to_numeric(values, errors="coerce")
+    out = pd.Series(np.nan, index=vals.index, dtype=float)
+    ok = vals.notna()
+    n = int(ok.sum())
+    if n == 0:
+        return out
+    if n == 1:
+        out.loc[ok] = 1.0
+        return out
+    ranks = vals.loc[ok].rank(method="first", ascending=True)
+    ntile = np.ceil(ranks * 10.0 / n).astype(int).clip(lower=1, upper=10)
+    out.loc[ok] = 1.0 - (ntile - 1) / 9.0
+    return out
 
 
 def _symmetrize(V: np.ndarray) -> np.ndarray:
@@ -324,6 +378,11 @@ def _fit_site_model(y: np.ndarray,
     return fit
 
 
+def _aicc(ll: float, k: int, n: int) -> float:
+    denom = max(n - k - 1, 1)
+    return -2.0 * ll + 2.0 * k + (2.0 * k * (k + 1)) / denom
+
+
 def _site_lrt(y: np.ndarray,
               X_full: np.ndarray,
               X_null: np.ndarray,
@@ -332,32 +391,138 @@ def _site_lrt(y: np.ndarray,
               model: str,
               theta: float | None,
               bounds: str) -> dict:
+    n = len(y)
     full = _fit_site_model(y, X_full, tips, cache, model, theta, bounds)
     null = _fit_site_model(y, X_null, tips, cache, model, theta, bounds)
     df = X_full.shape[1] - X_null.shape[1]
     stat = max(0.0, 2.0 * (full["ll"] - null["ll"]))
-    p_two = chi2.sf(stat, df)
+    # chi2.sf can underflow to exact 0.0 for large statistics; floor at the
+    # smallest representable positive float so downstream log/BH-FDR stay valid.
+    p_two = max(float(chi2.sf(stat, df)), np.finfo(float).tiny)
     beta_top = float(full["beta"][1]) if len(full["beta"]) > 1 else np.nan
+    # k_full = regression params (X_full cols) + 1 for sigma^2, + 1 if theta fitted
+    k_full = X_full.shape[1] + 1 + (1 if (model != "bm" and theta is None) else 0)
     return {
         "lrt_stat": float(stat),
         "lrt_df": int(df),
-        "p_two_sided": float(p_two),
+        "p_two_sided": p_two,
         "p_one_tailed_top":    float(_one_tailed_top(p_two, beta_top)),
         "p_one_tailed_bottom": float(_one_tailed_bottom(p_two, beta_top)),
         "beta_top": beta_top,
         "lambda_full": full.get("theta", np.nan),
         "lambda_null": null.get("theta", np.nan),
+        # per-site diagnostics
+        "diag_model":  full.get("model", model),
+        "diag_theta":  full.get("theta", np.nan),
+        "diag_ll":     float(full["ll"]),
+        "diag_k":      k_full,
+        "diag_aicc":   _aicc(float(full["ll"]), k_full, n),
     }
 
 
-def _first_tip_match(species: str, tip_set: Set[str], sp2tax: Dict[str, str] | None) -> str | None:
+def _directional_summary(change_side: str,
+                         p_top: float,
+                         p_bottom: float,
+                         q_top: float,
+                         q_bottom: float,
+                         sig_top: bool,
+                         sig_bottom: bool) -> tuple[float, float, bool]:
+    side = str(change_side or "none").strip().lower()
+    if side == "top":
+        return p_top, q_top, bool(sig_top)
+    if side == "bottom":
+        # x = (observed_dir == "top"), so beta_top > 0 for a real bottom-CAAS signal.
+        # The correct one-sided test is p_top (H1: beta_top > 0), same as for top changes.
+        return p_top, q_top, bool(sig_top)
+    if side == "both":
+        p_vals = [v for v in [p_top, p_bottom] if np.isfinite(v)]
+        q_vals = [v for v in [q_top, q_bottom] if np.isfinite(v)]
+        return (
+            float(min(p_vals)) if p_vals else np.nan,
+            float(min(q_vals)) if q_vals else np.nan,
+            bool(sig_top) or bool(sig_bottom),
+        )
+    return np.nan, np.nan, False
+
+
+def _coalesce_change_side(series: pd.Series) -> str:
+    vals = {str(v).strip().lower() for v in series.dropna().astype(str)}
+    if "both" in vals or ({"top", "bottom"}.issubset(vals)):
+        return "both"
+    if "top" in vals:
+        return "top"
+    if "bottom" in vals:
+        return "bottom"
+    return "none"
+
+
+def compute_excess_by_gene_trait(res_df: pd.DataFrame, fdr_alpha: float = 0.05) -> pd.DataFrame:
+    if res_df.empty:
+        return pd.DataFrame(columns=EXCESS_COLUMNS)
+
+    tested = res_df[res_df["n_used"].fillna(0).astype(float) > 0].copy()
+    if tested.empty:
+        return pd.DataFrame(columns=EXCESS_COLUMNS)
+
+    group_cols = ["trait", "Gene", "CAAP_Group"]
+    rows = []
+    for key, grp in tested.groupby(group_cols, dropna=False):
+        trait, gene, caap_group = key
+        N = int(len(grp))
+        K = int((grp["sig_p_pgls_two_sided"] == True).sum())
+        n = int((grp["is_caas_position"] == True).sum())
+        k = int(((grp["is_caas_position"] == True) & (grp["sig_p_pgls_two_sided"] == True)).sum())
+
+        rate_testable = (K / N) if N > 0 else np.nan
+        rate_caas = (k / n) if n > 0 else np.nan
+        excess_ratio = (rate_caas / rate_testable) if np.isfinite(rate_caas) and np.isfinite(rate_testable) and rate_testable > 0 else np.nan
+        p_hyper = float(hypergeom.sf(k - 1, N, K, n)) if (N > 0 and n > 0) else np.nan
+
+        rows.append({
+            "trait": trait,
+            "Gene": gene,
+            "CAAP_Group": caap_group,
+            "N_testable": N,
+            "K_sig_testable": K,
+            "n_testable_caas": n,
+            "k_sig_caas": k,
+            "rate_testable": rate_testable,
+            "rate_caas": rate_caas,
+            "excess_ratio": excess_ratio,
+            "p_hyper_excess": p_hyper,
+        })
+
+    out = pd.DataFrame(rows)
+    out["q_hyper_excess"] = np.nan
+    out["sig_hyper_excess"] = False
+    for trait, grp in out.groupby("trait"):
+        idx = grp.index
+        qvals = bh_fdr(np.asarray(out.loc[idx, "p_hyper_excess"].values, float))
+        out.loc[idx, "q_hyper_excess"] = qvals
+        out.loc[idx, "sig_hyper_excess"] = qvals <= float(fdr_alpha)
+    return out.reindex(columns=EXCESS_COLUMNS)
+
+
+def _first_tip_match(
+    species: str,
+    tip_set: Set[str],
+    sp2tax: Dict[str, str] | None,
+    taxid2names: Dict[str, Set[str]] | None = None,
+) -> str | None:
     s = str(species).strip()
     if s in tip_set:
         return s
     if sp2tax is not None:
-        tid = str(sp2tax.get(s, s)).strip()
-        if tid in tip_set:
+        tid = str(sp2tax.get(s, "")).strip()
+        if tid and tid in tip_set:
             return tid
+        # Tree tips are binomial names, not taxon IDs.  Walk every known name
+        # for this taxon (scientific name + all synonyms) and return the first
+        # that matches a tree tip.
+        if tid and taxid2names:
+            for name in taxid2names.get(tid, set()):
+                if name in tip_set:
+                    return name
     return None
 
 
@@ -434,10 +599,12 @@ def run_caas_pgls(valid_df: pd.DataFrame,
                   tree,
                   tip_set: Set[str],
                   sp2tax: Dict[str, str] | None,
-                  min_per_class: int,
-                  select_cfg: dict,
+                  taxid2names: Dict[str, Set[str]] | None = None,
+                  n_map: Dict[str, float] | None = None,
+                  min_per_class: int = 4,
+                  select_cfg: dict = None,
                   threads: int = 1,
-                  fdr_alpha: float = 0.05) -> tuple[pd.DataFrame, pd.DataFrame]:
+                  fdr_alpha: float = 0.05) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     tips_all = [str(t.name) for t in tree.get_terminals()]
     traits = sorted(valid_df["trait"].unique())
 
@@ -449,7 +616,7 @@ def run_caas_pgls(valid_df: pd.DataFrame,
             .drop_duplicates("species")
             .dropna(subset=["trait_value"])
         )
-        sub["tip"] = sub["species"].map(lambda sp: _first_tip_match(sp, tip_set, sp2tax))
+        sub["tip"] = sub["species"].map(lambda sp: _first_tip_match(sp, tip_set, sp2tax, taxid2names))
         sub = sub.dropna(subset=["tip"])
         y_map = {row["tip"]: float(row["trait_value"]) for _, row in sub.iterrows()}
 
@@ -502,16 +669,27 @@ def run_caas_pgls(valid_df: pd.DataFrame,
                 })
 
     cache = _precompute_tree_caches(tree)
-    groups = list(valid_df.groupby(["Gene", "Position", "trait"]))
+    groups = list(valid_df.groupby(["Gene", "Position", "trait", "CAAP_Group"], dropna=False))
     total = len(groups)
     logging.info(f"[PGLS] evaluating {total} sites across {len(traits)} trait(s) with threads={threads}")
 
     def _eval_one(key, df_site):
-        gene, pos, trait = key
-        base = {"Gene": gene, "Position": int(pos), "trait": trait}
+        gene, pos, trait, caap_group = key
+        change_side = "none"
+        if "change_side" in df_site.columns:
+            change_side = _coalesce_change_side(df_site["change_side"])
+        is_caas_position = bool(df_site.get("is_caas_position", pd.Series([False])).astype(bool).any())
+        base = {
+            "Gene": gene,
+            "Position": int(pos),
+            "trait": trait,
+            "CAAP_Group": caap_group,
+            "change_side": change_side,
+            "is_caas_position": is_caas_position,
+        }
         diag_row = {"Gene": gene, "Position": int(pos), "trait": trait}
         sub = df_site[df_site["observed_dir"].isin(["top", "bottom"])].dropna(subset=["trait_value"]).copy()
-        sub["tip"] = sub["species"].map(lambda sp: _first_tip_match(sp, tip_set, sp2tax))
+        sub["tip"] = sub["species"].map(lambda sp: _first_tip_match(sp, tip_set, sp2tax, taxid2names))
         sub = sub.dropna(subset=["tip"]).drop_duplicates(subset=["tip"])
         n_top = int((sub["observed_dir"] == "top").sum())
         n_bottom = int((sub["observed_dir"] == "bottom").sum())
@@ -535,16 +713,31 @@ def run_caas_pgls(valid_df: pd.DataFrame,
                 "lambda_full": np.nan,
                 "lambda_null": np.nan,
                 "lrt_stat": np.nan,
-                "p_pgls_top": np.nan,
-                "p_pgls_bottom": np.nan,
+                "p_pgls_two_sided": np.nan,
+                "p_pgls_pos": np.nan,
+                "p_pgls_neg": np.nan,
             }
             return row, diag_row
 
         tips_sub = list(sub["tip"])
         y = sub["trait_value"].astype(float).to_numpy()
         x = (sub["observed_dir"] == "top").astype(int).to_numpy()
-        X_full = np.column_stack([np.ones_like(x, float), x])
-        X_null = np.ones((len(x), 1), float)
+
+        # Add log(n) as a nuisance covariate when a sample-count map is provided.
+        # Both full and null models include it so the AA test is net of sampling effort.
+        if n_map:
+            log_n = np.array([n_map.get(sp, np.nan) for sp in sub["species"]], float)
+            valid_n = np.isfinite(log_n)
+            if valid_n.any():
+                log_n = np.where(valid_n, log_n, np.nanmedian(log_n))
+                X_full = np.column_stack([np.ones_like(x, float), log_n, x])
+                X_null = np.column_stack([np.ones_like(x, float), log_n])
+            else:
+                X_full = np.column_stack([np.ones_like(x, float), x])
+                X_null = np.ones((len(x), 1), float)
+        else:
+            X_full = np.column_stack([np.ones_like(x, float), x])
+            X_null = np.ones((len(x), 1), float)
 
         row = {**base, "n_used": int(len(x)), "n_top_aa": n_top, "n_bottom_aa": n_bottom}
         try:
@@ -562,16 +755,30 @@ def run_caas_pgls(valid_df: pd.DataFrame,
             row["lambda_full"] = site_fit["lambda_full"]
             row["lambda_null"] = site_fit["lambda_null"]
             row["lrt_stat"] = site_fit["lrt_stat"]
-            row["p_pgls_top"]    = site_fit["p_one_tailed_top"]
-            row["p_pgls_bottom"] = site_fit["p_one_tailed_bottom"]
+            row["p_pgls_two_sided"] = site_fit["p_two_sided"]
+            row["p_pgls_pos"] = site_fit["p_one_tailed_top"]
+            row["p_pgls_neg"] = site_fit["p_one_tailed_bottom"]
+            diag_row.update({
+                "diag_type":   "site_lrt",
+                "model":       site_fit["diag_model"],
+                "k":           site_fit["diag_k"],
+                "theta":       site_fit["diag_theta"],
+                "ll":          site_fit["diag_ll"],
+                "aicc":        site_fit["diag_aicc"],
+                "lrt_df":      site_fit["lrt_df"],
+                "lrt_stat":    site_fit["lrt_stat"],
+                "lrt_p":       site_fit["p_two_sided"],
+                "is_best_aicc": True,
+            })
         except Exception as e:
             logging.error(f"[PGLS] LRT failed for {gene}:{pos} trait={trait} model={best}: {e}")
             row["beta_top"] = np.nan
             row["lambda_full"] = np.nan
             row["lambda_null"] = np.nan
             row["lrt_stat"] = np.nan
-            row["p_pgls_top"]    = np.nan
-            row["p_pgls_bottom"] = np.nan
+            row["p_pgls_two_sided"] = np.nan
+            row["p_pgls_pos"] = np.nan
+            row["p_pgls_neg"] = np.nan
 
         return row, diag_row
 
@@ -589,9 +796,56 @@ def run_caas_pgls(valid_df: pd.DataFrame,
 
     diags.extend(trait_diag_rows)
 
-    res_df = pd.DataFrame(results, columns=RESULT_COLUMNS[:-4])
+    res_df = pd.DataFrame(results, columns=[
+        "Gene", "Position", "trait", "CAAP_Group", "change_side", "is_caas_position",
+        "n_used", "n_top_aa", "n_bottom_aa", "beta_top", "lambda_full", "lambda_null", "lrt_stat",
+        "p_pgls_two_sided", "p_pgls_pos", "p_pgls_neg"
+    ])
     diag_df = pd.DataFrame(diags, columns=DIAG_COLUMNS)
-    res_df = bh_fdr_per_group(res_df, "p_pgls_top",    group_col="trait", alpha=float(fdr_alpha))
-    res_df = bh_fdr_per_group(res_df, "p_pgls_bottom", group_col="trait", alpha=float(fdr_alpha))
+    res_df = bh_fdr_per_group(res_df, "p_pgls_two_sided", group_col="trait", alpha=float(fdr_alpha))
+    res_df = bh_fdr_per_group(res_df, "p_pgls_pos", group_col="trait", alpha=float(fdr_alpha))
+    res_df = bh_fdr_per_group(res_df, "p_pgls_neg", group_col="trait", alpha=float(fdr_alpha))
+    dir_vals = res_df.apply(
+        lambda r: _directional_summary(
+            r.get("change_side", "none"),
+            r.get("p_pgls_pos", np.nan),
+            r.get("p_pgls_neg", np.nan),
+            r.get("q_p_pgls_pos", np.nan),
+            r.get("q_p_pgls_neg", np.nan),
+            bool(r.get("sig_p_pgls_pos", False)),
+            bool(r.get("sig_p_pgls_neg", False)),
+        ),
+        axis=1,
+        result_type="expand",
+    )
+    dir_vals.columns = ["p_pgls_directional", "q_p_pgls_directional", "sig_p_pgls_directional"]
+    res_df = pd.concat([res_df, dir_vals], axis=1)
+
+    # Scoring-ready proxy: deciles of directional p-values, weighted by CAAP group,
+    # then summed per Gene×Position×trait exactly like the biochemical score.
+    res_df["pgls_decile_score"] = np.nan
+    tested_mask = pd.to_numeric(res_df["n_used"], errors="coerce").fillna(0) > 0
+    if tested_mask.any():
+        for trait, grp in res_df.loc[tested_mask].groupby("trait"):
+            idx = grp.index
+            res_df.loc[idx, "pgls_decile_score"] = _decile_score_from_pvalues(grp["p_pgls_directional"])
+
+    res_df["pgls_weighted_decile"] = (
+        res_df["CAAP_Group"].map(SCHEME_WEIGHTS).fillna(0.0) *
+        pd.to_numeric(res_df["pgls_decile_score"], errors="coerce")
+    )
+    char_df = (
+        res_df.loc[tested_mask]
+        .groupby(["Gene", "Position", "trait"], dropna=False)["pgls_weighted_decile"]
+        .sum(min_count=1)
+        .reset_index()
+        .rename(columns={"pgls_weighted_decile": "pgls_char_score"})
+    )
+    if not char_df.empty:
+        res_df = res_df.merge(char_df, on=["Gene", "Position", "trait"], how="left")
+    else:
+        res_df["pgls_char_score"] = np.nan
+
+    excess_df = compute_excess_by_gene_trait(res_df, fdr_alpha=float(fdr_alpha))
     res_df = res_df.reindex(columns=RESULT_COLUMNS)
-    return res_df, diag_df
+    return res_df, diag_df, excess_df

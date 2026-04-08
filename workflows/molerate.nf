@@ -30,6 +30,7 @@
 include { COLLECT_GENE_SETS       } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { PHYLIP_TO_FASTA         } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { FILTER_FASTA_TO_TREE    } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { EXTRACT_FG_BRANCHES     } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { MOLERATE_RUN; MOLERATE_BATCHED } from "${baseDir}/subworkflows/MOLERATE/molerate_run.nf"
 include { MOLERATE_REPORT as MOLERATE_REPORT_TOP    } from "${baseDir}/subworkflows/MOLERATE/molerate_report.nf"
@@ -49,6 +50,9 @@ def createBatchManifestText = { List<String> rows ->
 // Runs at channel-operator evaluation time (inside flatMap).
 // ---------------------------------------------------------------------------
 def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
+    def extensions = ['.phy', '.phylip', '.aln', '.fa', '.fasta']
+
+    // ── plain directory ─────────────────────────────────────────────────────
     def ali_path = file(ali_dir)
     if (!ali_path.isDirectory()){
         log.warn "MoleRate: alignment directory not found: ${ali_dir} -- skipping ${direction}"
@@ -135,8 +139,16 @@ workflow MOLERATE {
         def all_ali_ch
 
         if (params.molerate_mode == 'all') {
-            def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    null)
-            def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', null)
+            def toy_genes = null
+            if (params.toy_mode) {
+                def n = (params.toy_n ?: 50) as int
+                def all_top = ali_tuples_from_dir(ali_dir, 'top', null)
+                Collections.shuffle(all_top)
+                toy_genes = all_top.take(n).collect { it[0] }.toSet()
+                log.info "[toy_mode] MoleRate: using ${toy_genes.size()} randomly sampled genes"
+            }
+            def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    toy_genes)
+            def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', toy_genes)
             all_ali_ch = Channel.fromList(top_tuples + bottom_tuples)
 
         } else {
@@ -183,20 +195,28 @@ workflow MOLERATE {
         fasta_ch = direct_fasta_ch.mix(converted_ch)
         // -> (gene_id, direction, fasta)
 
+        // Restrict every gene alignment to the phenotype-pruned tree taxa
+        // before MoleRate receives the alignment.
+        def fasta_in_tree_ch = fasta_ch
+            .combine(tree_ch)
+            .map { gid, dir, fa, tree -> tuple(gid, dir, fa, tree) }
+        def tree_filtered_fasta_ch = FILTER_FASTA_TO_TREE(fasta_in_tree_ch).fasta
+        // -> (gene_id, direction, filtered_fasta)
+
         // 5. Join fasta + fg_branches_ch by direction, broadcast tree -----
-        //  fasta_ch      : (gene_id, direction, fasta)
+        //  tree_filtered_fasta_ch : (gene_id, direction, fasta)
         //  fg_branches_ch: (direction, fg_list)
         //  For each (gene_id, direction) we need: fasta, fg_list, tree.
         //
         //  Strategy: combine (broadcast) fasta_ch with fg_branches_ch on direction, then
         //  combine with tree_ch (single value).
         //
-        //  fasta_ch.map -> (direction, gene_id, fasta)          [keyed by direction]
+        //  tree_filtered_fasta_ch.map -> (direction, gene_id, fasta) [keyed by direction]
         //  combine fg_branches_ch -> (direction, gene_id, fasta, fg_list)
         //                           [broadcasts the 2 fg_list files across all genes]
         //  combine tree_ch -> (direction, gene_id, fasta, fg_list, tree)
 
-        def fasta_keyed_ch = fasta_ch.map { gid, dir, fa -> tuple(dir, gid, fa) }
+        def fasta_keyed_ch = tree_filtered_fasta_ch.map { gid, dir, fa -> tuple(dir, gid, fa) }
 
         molerate_input_ch = fasta_keyed_ch
             .combine(fg_branches_ch, by: 0)

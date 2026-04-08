@@ -16,6 +16,7 @@
  * prot2coord output (aa2nuc_global.csv) is a standalone characterization artifact.
  */
 
+include { EXTRACT_VEP_ARCHIVES } from "${baseDir}/subworkflows/VEP/vep_archives.nf"
 include { PROT2COORD    } from "${baseDir}/subworkflows/VEP/prot2coord.nf"
 include { PROT2AA       } from "${baseDir}/subworkflows/VEP/prot2aa.nf"
 include { TRANSVAR_ANNO } from "${baseDir}/subworkflows/VEP/transvar.nf"
@@ -36,9 +37,8 @@ workflow VEP {
         def primateai_out = Channel.empty()
 
         // Resolve CAAS input: integrated runs pass a channel; standalone runs use
-        // --vep_caas_input. Do not assert on empty upstream channels here; if a
-        // previous workflow aborts or produces no CAAS table, VEP should stay idle
-        // instead of throwing a second, misleading error.
+        // --vep_caas_input. main.nf passes null (not Channel.empty()) when there is
+        // no upstream CAAS source so this fallback remains reachable.
         def caas_source = null
         if (caas_input) {
             caas_source = caas_input
@@ -67,10 +67,13 @@ workflow VEP {
             def tv_db_ch   = Channel.value(file(params.vep_transvar_db))
             def pai_db_ch  = Channel.value(file(params.vep_primateai_db))
 
+            // ── Stage 0: extract per-gene files from archives (once, shared) ─
+            def vep_dirs  = EXTRACT_VEP_ARCHIVES(caas_ch, cds_dir_ch, track_dir_ch)
+
             // ── Stage 1+2 (parallel) ──────────────────────────────────────────
-            def coord_out = PROT2COORD(caas_ch, cds_dir_ch, track_dir_ch,
+            def coord_out = PROT2COORD(caas_ch, vep_dirs.cds_dir, vep_dirs.track_dir,
                                        hs_cds_ch, gff_ch, equiv_ch)
-            def prot_out  = PROT2AA   (caas_ch, cds_dir_ch, track_dir_ch,
+            def prot_out  = PROT2AA   (caas_ch, vep_dirs.cds_dir, vep_dirs.track_dir,
                                        hs_cds_ch, gff_ch, equiv_ch)
 
             // ── Stage 3: TransVar annotation ──────────────────────────────────

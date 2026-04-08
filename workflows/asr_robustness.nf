@@ -49,6 +49,14 @@
 
 include { ASR_ROBUSTNESS_REPORT } from "${baseDir}/subworkflows/ASR_ROBUSTNESS/asr_robustness"
 
+// Utility: extract a .tar.gz archive to a work-dir subdirectory.
+// Used only when --disambiguation_dir points to a .tar.gz file.
+process EXTRACT_DISAMBIG_DIR {
+    input:  path tarball
+    output: path "extracted", emit: dir
+    script: "mkdir -p extracted && tar -xzf '${tarball}' --strip-components=1 -C extracted/"
+}
+
 workflow ASR_ROBUSTNESS {
     take:
         disambiguation_dir_channel    // results_dir from CT_DISAMBIGUATION_RUN (full ct_disambiguation/ dir)
@@ -65,7 +73,12 @@ workflow ASR_ROBUSTNESS {
                 "[asr_robustness] Requires --ct_disambiguation upstream or --disambiguation_dir (path to ct_disambiguation/ directory)"
             def d = file(params.disambiguation_dir)
             assert d.exists() : "[asr_robustness] disambiguation_dir not found: ${params.disambiguation_dir}"
-            disambig_dir_ch = Channel.value(d)
+            def dStr = params.disambiguation_dir as String
+            if (dStr.endsWith('.tar.gz') || dStr.endsWith('.tgz')) {
+                disambig_dir_ch = EXTRACT_DISAMBIG_DIR(Channel.value(d)).dir.first()
+            } else {
+                disambig_dir_ch = Channel.value(d)
+            }
         }
 
         // Require diagnostics JSONL files to be present (ct_disambig_run_diagnostics must be true)

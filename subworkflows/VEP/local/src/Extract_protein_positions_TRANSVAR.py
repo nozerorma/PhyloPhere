@@ -6,7 +6,7 @@
 
 import pandas as pd
 import numpy as np
-import requests, sys
+import sys
 from itertools import combinations
 #import seaborn as sns
 #from scipy import stats

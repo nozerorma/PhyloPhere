@@ -65,11 +65,20 @@ workflow CT {
             ? params.ct_tool.split(',').collect { it.trim() }.findAll { it }
             : []
 
-        // Define the alignment channel (used by discovery and bootstrap)
+        // Define the alignment channel (used by discovery and bootstrap).
+        // Accepts either a plain directory or a .tar.gz archive.
+        // For archives, members are listed at startup and extracted on-demand inside each process.
+        // When toy_mode=true, a random subset of toy_n alignments is used.
+        def alignParam = params.alignment as String
+        def allFiles = file(alignParam).listFiles()?.findAll { it.isFile() } ?: []
+        if (params.toy_mode) {
+            def n = (params.toy_n ?: 50) as int
+            Collections.shuffle(allFiles)
+            allFiles = allFiles.take(n)
+            log.info "[toy_mode] CT: using ${allFiles.size()} randomly sampled alignments from directory"
+        }
         align_tuple = Channel
-                .fromPath("${params.alignment}/*") // Recursively search all subdirectories
-                .filter { it.isFile() } // Filter out directories
-                .map { file -> tuple(file.baseName, file) }
+            .fromList(allFiles.collect { f -> tuple(f.baseName, f) })
 
         // Initialize variables
         def trait_file_out
@@ -128,7 +137,7 @@ workflow CT {
                         def manifestText = createBatchManifestText(
                             batch.collect { row -> "${row[0]}\t${row[1].name}" }
                         )
-                        tuple(batchID, batch.size(), manifestText, batch.collect { row -> row[1] })
+                        tuple(batchID, batch.size(), manifestText, batch.collect { row -> row[1] }.unique())
                     }
 
                 discovery_out = DISCOVERY_BATCHED(discovery_batches, trait_file_out)
@@ -271,6 +280,7 @@ workflow CT {
                             batch.collect { row -> "${row[0]}\t${row[1].name}\t${row[2].name}" }
                         )
                         def alignmentFiles = batch.collect { row -> row[1] }
+                            .unique { file -> file.name }
                         def discoveryFiles = batch
                             .collect { row -> row[2] }
                             .findAll { file -> file.name != 'NO_FILE' }

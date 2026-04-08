@@ -6,7 +6,7 @@ author: "PhyloPhere pipeline"
 output:
   html_document:
     theme: flatly
-    highlight: tango
+    syntax_highlighting: tango
     toc: true
     toc_float:
       collapsed: false
@@ -119,12 +119,15 @@ parse_molerate_json <- function(path) {
     # ── Proportional Partitioned fit → R_test, R_bg ──────────────────────────
     pp_fit  <- safe_get(js, "fits", "Proportional Partitioned")
 
+    # Try branch length scalers (newer MoleRate versions) first, then omega values (older versions)
     r_test <- as_num(
+      safe_get(pp_fit, "Rate Distributions", "branch length scaler for test") %||%
       safe_get(pp_fit, "Rate Distributions", "Test",       0, "omega") %||%
       safe_get(pp_fit, "Rate Distributions", "test",       0, "omega") %||%
       safe_get(pp_fit, "Rate Distributions", "Foreground", 0, "omega")
     )
     r_bg <- as_num(
+      safe_get(pp_fit, "Rate Distributions", "branch length scaler for background") %||%
       safe_get(pp_fit, "Rate Distributions", "Background", 0, "omega") %||%
       safe_get(pp_fit, "Rate Distributions", "background", 0, "omega")
     )
@@ -136,16 +139,19 @@ parse_molerate_json <- function(path) {
                          safe_get(prop_fit, "log likelihood"))
 
     # ── LRT p-value (Proportional Partitioned vs Proportional) ───────────────
-    # MoleRate stores corrected p-values in "test results" as a nested structure
+    # MoleRate stores corrected and uncorrected p-values in "test results" as a nested structure
     # Try multiple possible key names used across HyPhy versions.
     pval_pp_vs_prop <- as_num(
-      safe_get(js, "test results", "Proportional Partitioned", "p-value") %||%
+      safe_get(js, "test results", "Proportional:Proportional Partitioned", "Uncorrected P-value") %||%
       safe_get(js, "test results", "Proportional:Proportional Partitioned", "p-value") %||%
+      safe_get(js, "test results", "Proportional Partitioned", "p-value") %||%
       safe_get(js, "LRT", "Proportional Partitioned", "p-value")
     )
 
     # Unconstrained Test vs Proportional Partitioned p-value
     pval_uc_vs_pp <- as_num(
+      safe_get(js, "test results", "Proportional Partitioned:Unconstrained Test", "Uncorrected P-value") %||%
+      safe_get(js, "test results", "Proportional Partitioned:Unconstrained Test", "p-value") %||%
       safe_get(js, "test results", "Unconstrained Test",  "p-value") %||%
       safe_get(js, "test results", "Proportional Partitioned:Unconstrained Test", "p-value")
     )
@@ -271,11 +277,12 @@ DT::datatable(
 ```
 
 ```{r write-tsv}
-out_tsv <- file.path(params$output_dir,
-                     paste0("molerate_summary_", params$direction, ".tsv"))
+# Write to the working directory so Nextflow can capture the output via emit.
+# publishDir then copies it to the final output path.
+local_tsv <- paste0("molerate_summary_", params$direction, ".tsv")
 write.table(
   mr_df %>% select(-signif, -accelerated, -decelerated),
-  out_tsv, sep = "\t", row.names = FALSE, quote = FALSE
+  local_tsv, sep = "\t", row.names = FALSE, quote = FALSE
 )
 invisible(NULL)
 ```

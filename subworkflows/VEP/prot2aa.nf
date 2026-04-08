@@ -45,6 +45,7 @@ process PROT2AA {
     cp ${local_dir}/Extract_protein_positions_TRANSVAR.py .
 
     mkdir -p out
+    failed=0
 
     genes=\$(awk -F'\\t' '
         NR==1 {
@@ -58,22 +59,24 @@ process PROT2AA {
 
     while IFS= read -r gene; do
         [[ -z "\$gene" ]] && continue
-        track=\$(find -L "${track_dir}" \\
-            \\( -name "\${gene}.html" -o -name "\${gene}.*.html" \\) \\
-            -print -quit 2>/dev/null || true)
-        cds=\$(find -L "${cds_dir}" \\
-            \\( -name "\${gene}.Homo*.fasta" -o -name "\${gene}.*.fasta" \\) \\
-            -print -quit 2>/dev/null || true)
+        track=\$(find -L "${track_dir}" \\( -name "\${gene}.html" -o -name "\${gene}.*.html" \\) -print -quit 2>/dev/null || true)
+        cds=\$(find -L "${cds_dir}" \\( \
+            -name "\${gene}.Homo*.fasta" -o -name "\${gene}.*.fasta" -o \
+            -name "\${gene}.Homo*.fa"    -o -name "\${gene}.*.fa"    -o \
+            -name "\${gene}.Homo*.fna"   -o -name "\${gene}.*.fna" \
+        \\) -print -quit 2>/dev/null || true)
         if [[ -n "\$track" && -n "\$cds" ]]; then
             python3 Extract_protein_positions_TRANSVAR.py \\
                 "\$cds" "${hs_cds_gz}" "\$track" "${gff_file}" \\
                 "${caas_file}" "out/\${gene}_out.csv" "${gene_equiv}" "\$gene" \\
-                || echo "WARN prot2aa: script failed for \${gene}" >&2
+                || { echo "ERROR prot2aa: script failed for \${gene}" >&2; failed=1; }
         else
             [[ -z "\$track" ]] && echo "SKIP prot2aa \${gene}: tracking file not found" >&2
             [[ -z "\$cds" ]]   && echo "SKIP prot2aa \${gene}: CDS fasta not found" >&2
         fi
     done <<< "\$genes"
+
+    (( failed == 0 )) || exit 1
 
     shopt -s nullglob
     out_files=(out/*.csv)

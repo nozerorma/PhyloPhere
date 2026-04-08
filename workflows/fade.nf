@@ -29,6 +29,7 @@
 include { COLLECT_GENE_SETS       } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { PHYLIP_TO_FASTA         } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { FILTER_FASTA_TO_TREE    } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { ANNOTATE_TREE_FG        } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 include { FADE_RUN; FADE_BATCHED } from "${baseDir}/subworkflows/FADE/fade_run.nf"
 include { FADE_REPORT as FADE_REPORT_TOP    } from "${baseDir}/subworkflows/FADE/fade_report.nf"
@@ -55,6 +56,9 @@ def createBatchManifestText = { List<String> rows ->
  *   wanted  — Set<String> of gene IDs to keep, or null / empty to keep all.
  */
 def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
+    def extensions = ['.phy', '.phylip', '.aln', '.fa', '.fasta']
+
+    // ── plain directory ─────────────────────────────────────────────────────
     def ali_path = file(ali_dir)
     if (!ali_path.isDirectory()) {
         log.warn "FADE: alignment directory not found: ${ali_dir} -- skipping '${direction}'"
@@ -129,8 +133,16 @@ workflow FADE {
 
         if (params.fade_mode == 'all') {
 
-            def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    null)
-            def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', null)
+            def toy_genes = null
+            if (params.toy_mode) {
+                def n = (params.toy_n ?: 50) as int
+                def all_top = ali_tuples_from_dir(ali_dir, 'top', null)
+                Collections.shuffle(all_top)
+                toy_genes = all_top.take(n).collect { it[0] }.toSet()
+                log.info "[toy_mode] FADE: using ${toy_genes.size()} randomly sampled genes"
+            }
+            def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    toy_genes)
+            def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', toy_genes)
             all_ali_ch = Channel.fromList(top_tuples + bottom_tuples)
 
         } else {
@@ -179,16 +191,23 @@ workflow FADE {
         def converted_ch     = PHYLIP_TO_FASTA(ali_branched.needs_convert).fasta
         fasta_ch = direct_fasta_ch.mix(converted_ch)
 
+        // Restrict every gene alignment to the phenotype-pruned tree taxa
+        // before FADE-specific foreground labeling happens.
+        def fasta_in_tree_ch = fasta_ch
+            .combine(tree_ch)
+            .map { gid, dir, fa, tree -> tuple(gid, dir, fa, tree) }
+        def tree_filtered_fasta_ch = FILTER_FASTA_TO_TREE(fasta_in_tree_ch).fasta
+
         // ── Annotate tree with {Foreground} labels ───────────────────────────
         // fasta_ch is included so that annotate_tree_fg.py can prune the tree
         // to only the taxa present in the per-gene alignment before running FADE
         // (prevents tip-count / sequence-count mismatches in HyPhy FADE).
-        def top_annotate_input_ch = fasta_ch
+        def top_annotate_input_ch = tree_filtered_fasta_ch
             .filter { gid, dir, fa -> dir == 'top' }
             .combine(top_species_ch)
             .combine(tree_ch)
 
-        def bottom_annotate_input_ch = fasta_ch
+        def bottom_annotate_input_ch = tree_filtered_fasta_ch
             .filter { gid, dir, fa -> dir == 'bottom' }
             .combine(bottom_species_ch)
             .combine(tree_ch)
