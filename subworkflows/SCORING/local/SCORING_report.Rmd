@@ -26,7 +26,6 @@ params:
   gene_top_pct: 0.10
   gene_top5_pct: 0.05
   gene_top1_pct: 0.01
-  pgls_excess_file: NULL
   stress_summary_file: NULL
   stress_corr_file: NULL
   stress_rank_file: NULL
@@ -95,8 +94,6 @@ hyper_measure_is_raw <- identical(hyper_measure_col, "Pvalue")
 boot_measure_is_raw  <- identical(boot_measure_col,  "pvalue_boot")
 
 # Detect which optional components are available
-has_pgls <- "p_pgls_pos" %in% names(pos_df) &&
-            (any(!is.na(pos_df$p_pgls_pos)) || any(!is.na(pos_df$p_pgls_neg)))
 has_rand     <- any(!is.na(gene_df$gene_rand_score))
 has_rer      <- any(!is.na(gene_df$gene_rer_score))
 has_fade     <- "gene_fade_score"     %in% names(gene_df) && any(!is.na(gene_df$gene_fade_score))
@@ -105,7 +102,6 @@ has_molerate <- "gene_molerate_score" %in% names(gene_df) && any(!is.na(gene_df$
 # ── VEP optional inputs ───────────────────────────────────────────────────────
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
-has_pgls_enrichment <- .file_ok(params$pgls_excess_file)
 has_scoring_stress <- .file_ok(params$stress_summary_file) &&
   .file_ok(params$stress_corr_file) &&
   .file_ok(params$stress_rank_file) &&
@@ -212,9 +208,6 @@ substitutions (CAAS).  The scoring operates at two levels:
 All component scores are mapped to a 0--1 scale using decile ranking, making
 them directly comparable and suitable for downstream enrichment analysis.
 
-`r if (has_pgls_enrichment) "> **PGLS enrichment mode:** enabled for this run. The scoring report includes the gene-level PGLS excess table passed from pgls_excess_gene_trait.tsv; this table is descriptive and does not currently enter the composite score."`
-`r if (!has_pgls_enrichment) "> **PGLS enrichment mode:** not enabled for this run. No pgls_excess_gene_trait.tsv was provided to scoring, so enrichment-specific summaries are omitted by design."`
-
 ---
 
 ## Scoring Methodology
@@ -231,8 +224,8 @@ reproduced independently of the pipeline code.
 ### Position-Level Components
 
 All position-level component scores are mapped to the **[0, 1]** interval.
-The four core components are always computed; PGLS and FADE are included only
-when the corresponding upstream module has been run.
+The four core components are always computed; FADE is included only
+when the upstream module has been run.
 
 #### 1 · Variability score
 
@@ -373,10 +366,8 @@ $$\text{parallel\_score} = \text{mean\_parallel} \times \text{completeness penal
 
 #### Composite CAAS score
 
-Unweighted mean of the four core components. PGLS and FADE are **not**
-included — PGLS is an independent validation signal evaluated in the
-[Position Characterisation](#position-characterisation) section; FADE is a
-gene-level signal (see below).
+Unweighted mean of the four core components. FADE is **not**
+included — it is a gene-level signal (see below).
 
 $$\text{CAAS\_score} = \frac{\text{biochem} + \text{asr} + \text{convergence} + \text{parallel}}{4}$$
 
@@ -816,10 +807,6 @@ pos_score_cols <- c(
   "convergence_score",
   "parallel_score"
 )
-if ("pgls_char_score" %in% names(pos_df) && any(!is.na(pos_df$pgls_char_score))) {
-  pos_score_cols <- c(pos_score_cols, "pgls_char_score")
-}
-
 pos_corr_df <- if (length(pos_score_cols) >= 2) {
   expand.grid(
     score_a = pos_score_cols, score_b = pos_score_cols,
@@ -1060,8 +1047,6 @@ if (!is.null(stress_loadings_df) && nrow(stress_loadings_df) > 0) {
 ```{r top-positions-table}
 display_cols <- c("Gene", "Position", "CAAS_score", "biochem_score",
                   "asr_score", "convergence_score", "parallel_score", "change_side")
-if (has_pgls) display_cols <- c(display_cols, "p_pgls_pos", "sig_p_pgls_pos",
-                                              "p_pgls_neg", "sig_p_pgls_neg")
 
 DT::datatable(
   pos_df %>%
@@ -1083,153 +1068,17 @@ DT::datatable(
 ## Position Characterisation {.tabset #position-characterisation}
 
 This section examines how ranked positions behave in relation to external
-signals that do **not** contribute to the `CAAS_score`. Both PGLS and
-PrimateAI-3D are treated as independent characterisation layers: their signals
-are scheme-weighted exactly like the biochemical score
-(US = 0.5 → GS4 = 0.2 → GS3/2/1 = 0.1 each → GS0 = 0), producing continuous
-0–1 characterisation scores that can be compared directly.
+signals that do **not** contribute to the `CAAS_score`. PrimateAI-3D is treated
+as an independent characterisation layer: its signal is scheme-weighted exactly
+like the biochemical score (US = 0.5 → GS4 = 0.2 → GS3/2/1 = 0.1 each → GS0 = 0),
+producing a continuous 0–1 characterisation score.
 
-- **`pgls_char_score`** = Σ scheme\_weight × (1 − q\_pgls\_directional) per
-  Gene × Position — captures how consistently each position's amino-acid change
-  associates with the phenotype across grouping schemes.
 - **`pai_char_score`** = Σ scheme\_weight × max(PAI3D\_score per CAAP group)
   per Gene × Position — captures the scheme-weighted pathogenicity of the
   CAAS-specific substitution.
 
-Both scores range from 0 (no support in any scheme) to ≤ 1.0 (strong support
-across all schemes). They are **not** included in `CAAS_score`.
-
-`r if (!has_pgls) "> **Note:** PGLS results are not available for this run — characterisation skipped."`
-
-```{r pgls-char-setup, eval=has_pgls}
-# pgls_char_score is pre-computed in scoring_compute.R as:
-#   Σ scheme_weight × (1 − q_pgls_directional) per Gene × Position
-# It is already present in pos_df when PGLS ran.
-pgls_char <- pos_df %>%
-  filter(!is.na(pgls_char_score)) %>%
-  mutate(
-    caas_decile   = dplyr::ntile(CAAS_score, 10),
-    in_top_decile = CAAS_score >= thr_10,
-    in_top_5pct   = CAAS_score >= thr_5,
-    in_top_pct    = CAAS_score >= thr_1,
-    # "high_pgls" = any directional PGLS signal across schemes (score > 0)
-    high_pgls     = !is.na(pgls_char_score) & pgls_char_score > 0
-  )
-```
-
-### PGLS Enrichment
-
-```{r pgls-char-fisher, eval=has_pgls}
-# Fisher's exact test: are positions with pgls_char_score > 0 enriched among
-# the top CAAS positions?
-# pgls_char_score > 0 means at least one scheme showed directional PGLS support
-# (q_pgls_directional < 1 in that scheme).
-
-run_pgls_fisher <- function(df, flag_col, label) {
-  flag_vec  <- df[[flag_col]]
-  high_pgls <- df$high_pgls
-  n_top_h  <- sum( flag_vec &  high_pgls, na.rm = TRUE)
-  n_top_l  <- sum( flag_vec & !high_pgls, na.rm = TRUE)
-  n_rest_h <- sum(!flag_vec &  high_pgls, na.rm = TRUE)
-  n_rest_l <- sum(!flag_vec & !high_pgls, na.rm = TRUE)
-  if ((n_top_h + n_top_l + n_rest_h + n_rest_l) == 0 || (n_top_h + n_rest_h) == 0) {
-    return(tibble(Threshold = label, N_top = NA_integer_, N_top_high_pgls = NA_integer_,
-                  Pct_top = "—", N_rest = NA_integer_, N_rest_high_pgls = NA_integer_,
-                  Pct_rest = "—", Odds_ratio = "—", CI_95 = "—", P_value = "—"))
-  }
-  mat <- matrix(c(n_top_l, n_rest_l, n_top_h, n_rest_h), nrow = 2,
-                dimnames = list(In_top = c("FALSE","TRUE"),
-                                High_PGLS = c("FALSE","TRUE")))
-  ft <- fisher.test(mat)
-  tibble(
-    Threshold           = label,
-    N_top               = n_top_h + n_top_l,
-    N_top_high_pgls     = n_top_h,
-    Pct_top             = sprintf("%.1f%%", 100 * n_top_h  / max(n_top_h  + n_top_l,  1)),
-    N_rest              = n_rest_h + n_rest_l,
-    N_rest_high_pgls    = n_rest_h,
-    Pct_rest            = sprintf("%.1f%%", 100 * n_rest_h / max(n_rest_h + n_rest_l, 1)),
-    Odds_ratio          = sprintf("%.2f", ft$estimate),
-    CI_95               = sprintf("[%.2f, %.2f]", ft$conf.int[1], ft$conf.int[2]),
-    P_value             = formatC(ft$p.value, format = "e", digits = 2)
-  )
-}
-
-pgls_fisher <- bind_rows(
-  run_pgls_fisher(pgls_char, "in_top_decile",
-                  sprintf("Top %g%% (decile)",     top_pct  * 100)),
-  run_pgls_fisher(pgls_char, "in_top_5pct",
-                  sprintf("Top %g%%",              top5_pct * 100)),
-  run_pgls_fisher(pgls_char, "in_top_pct",
-                  sprintf("Top %g%% (percentile)", top1_pct * 100))
-)
-
-knitr::kable(
-  pgls_fisher,
-  caption = paste(
-    "Fisher's exact test — enrichment of positions with pgls_char_score > 0",
-    "(any scheme-weighted directional PGLS signal) among top-ranking CAAS positions."
-  ),
-  align = c("l", rep("r", ncol(pgls_fisher) - 1))
-)
-```
-
-### PGLS Score by Decile
-
-```{r pgls-char-decile-plot, eval=has_pgls, fig.height=5}
-# pgls_char_score violin + boxplot per CAAS decile.
-# Shows the distribution of the scheme-weighted directional PGLS signal.
-# Higher deciles should trend toward higher pgls_char_score if PGLS and CAAS agree.
-
-ggplot(pgls_char, aes(x = factor(caas_decile), y = pgls_char_score)) +
-  geom_violin(fill = .tableau10[2], alpha = 0.6, trim = TRUE, scale = "width") +
-  geom_boxplot(width = 0.14, outlier.size = 0.4, alpha = 0.9,
-               fill = "white", colour = "grey30") +
-  geom_hline(yintercept = median(pgls_char$pgls_char_score, na.rm = TRUE),
-             linetype = "dashed", colour = .tableau10[3], linewidth = 0.7) +
-  annotate("text", x = 0.4,
-           y = median(pgls_char$pgls_char_score, na.rm = TRUE) + 0.01,
-           hjust = 0, vjust = 0, label = "Overall median",
-           colour = .tableau10[3], size = 3) +
-  scale_x_discrete(labels = c("1\n(low)", as.character(2:9), "10\n(high)")) +
-  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.05))) +
-  labs(
-    title    = "PGLS Scheme-Weighted Score (pgls_char_score) by CAAS Decile",
-    subtitle = sprintf(
-      "%d positions with PGLS coverage (of %d total) | score = \u03a3 scheme_weight \u00d7 (1 \u2212 q_pgls_directional)",
-      nrow(pgls_char), nrow(pos_df)
-    ),
-    x = "CAAS Score Decile", y = "pgls_char_score"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-### PGLS Score vs CAAS Score
-
-```{r pgls-char-scatter, eval=has_pgls, fig.height=5}
-# Scatter: CAAS_score vs pgls_char_score, coloured by CAAS decile.
-# If PGLS and CAAS agree, points should trend upward toward the top-right.
-ggplot(pgls_char, aes(x = CAAS_score, y = pgls_char_score, colour = caas_decile)) +
-  geom_point(alpha = 0.4, size = 0.9) +
-  geom_smooth(method = "lm", se = TRUE, colour = .tableau10[2],
-              linewidth = 0.8, fill = .tableau10[2], alpha = 0.15) +
-  geom_vline(xintercept = thr_10, linetype = "dashed",
-             colour = .tableau10[3], linewidth = 0.6) +
-  geom_vline(xintercept = thr_5,  linetype = "longdash",
-             colour = .tableau10[5], linewidth = 0.6) +
-  geom_vline(xintercept = thr_1,  linetype = "dotted",
-             colour = .tableau10[4], linewidth = 0.6) +
-  geom_hline(yintercept = median(pgls_char$pgls_char_score, na.rm = TRUE),
-             linetype = "dashed", colour = "grey50", linewidth = 0.5) +
-  scale_colour_viridis_c(name = "CAAS\nDecile", option = "plasma") +
-  labs(
-    title    = "CAAS Score vs PGLS Scheme-Weighted Score",
-    subtitle = paste0("Dashed verticals: CAAS top-10%, top-5%, top-1% thresholds\n",
-                      "Dashed horizontal: overall median pgls_char_score"),
-    x = "CAAS Score", y = "pgls_char_score"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-```
+This score ranges from 0 (no support in any scheme) to ≤ 1.0 (strong support
+across all schemes). It is **not** included in `CAAS_score`.
 
 ### VEP: PrimateAI by CAAS Decile
 
@@ -1748,72 +1597,9 @@ DT::datatable(
 
 ## Gene-Level Characterisation {.tabset}
 
-This section accumulates position-level PGLS and PrimateAI-3D signals at the
-gene level, testing whether genes with high composite scores tend to concentrate
-directionally-consistent PGLS hits or pathogenic PrimateAI-3D annotations.
-
-### Gene PGLS Accumulation
-
-`r if (!has_pgls) "> **Note:** PGLS results are not available — gene-level PGLS accumulation skipped."`
-
-```{r gene-pgls-accum, eval=has_pgls, fig.height=5}
-# Per-gene: mean pgls_char_score (scheme-weighted directional PGLS signal).
-# pgls_char_score is already in pos_df — no need to recompute from raw p-values.
-gene_pgls <- pos_df %>%
-  filter(!is.na(pgls_char_score)) %>%
-  group_by(Gene) %>%
-  summarise(
-    n_pgls_positions   = n(),
-    mean_pgls_char     = mean(pgls_char_score, na.rm = TRUE),
-    sum_pgls_char      = sum(pgls_char_score,  na.rm = TRUE),
-    n_pgls_any_support = sum(pgls_char_score > 0, na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  inner_join(gene_df %>% select(Gene, gene_caas_score, gene_composite_score,
-                                n_positions),
-             by = "Gene")
-
-ggplot(gene_pgls, aes(x = gene_caas_score, y = mean_pgls_char,
-                      size = n_positions, colour = gene_composite_score)) +
-  geom_point(alpha = 0.65) +
-  ggrepel::geom_text_repel(
-    data = gene_pgls %>% slice_max(mean_pgls_char, n = 15, with_ties = FALSE),
-    aes(label = Gene), size = 2.8, max.overlaps = 20,
-    show.legend = FALSE
-  ) +
-  geom_vline(xintercept = g_thr_10, linetype = "dashed",
-             colour = .tableau10[3], linewidth = 0.7) +
-  scale_colour_viridis_c(name = "Gene\nComposite", option = "plasma") +
-  scale_size_continuous(name = "N positions", range = c(1, 8)) +
-  labs(
-    title    = "Gene CAAS Score vs Mean PGLS Scheme-Weighted Score",
-    subtitle = "Labels: top-15 genes by mean pgls_char_score; dashed = CAAS top 10% threshold",
-    x = "Gene CAAS Score", y = "Mean pgls_char_score per gene"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-```{r gene-pgls-top-bar, eval=has_pgls, fig.height=6}
-# Top 30 genes by mean pgls_char_score, coloured by gene_caas_score
-top_pgls_genes <- gene_pgls %>%
-  filter(mean_pgls_char > 0) %>%
-  slice_max(mean_pgls_char, n = 30, with_ties = FALSE) %>%
-  arrange(mean_pgls_char) %>%
-  mutate(Gene = factor(Gene, levels = Gene))
-
-ggplot(top_pgls_genes, aes(x = mean_pgls_char, y = Gene,
-                            fill = gene_caas_score)) +
-  geom_col() +
-  scale_fill_viridis_c(name = "Gene CAAS\nScore", option = "plasma") +
-  scale_x_continuous(expand = expansion(mult = c(0, 0.05))) +
-  labs(
-    title = "Top 30 Genes by Mean PGLS Scheme-Weighted Score",
-    subtitle = "pgls_char_score = \u03a3 scheme_weight \u00d7 (1 \u2212 q_pgls_directional) per position",
-    x = "Mean pgls_char_score", y = NULL
-  ) +
-  theme(plot.title = element_text(face = "bold"),
-        axis.text.y = element_text(size = 8))
-```
+This section accumulates PrimateAI-3D signals at the gene level, testing
+whether genes with high composite scores tend to concentrate pathogenic
+PrimateAI-3D annotations.
 
 ### Gene VEP Accumulation
 
@@ -1885,7 +1671,7 @@ ggplot(top_pai_genes, aes(x = mean_pai_char, y = Gene,
 `r if (!has_genomic) "> **Note:** Genomic coordinates (gene_ensembl_file) are not available for this run — genomic accumulation skipped."`
 
 ```{r genomic-setup, eval=has_genomic}
-# Join gene_df with genomic coordinates, then annotate with PGLS and VEP
+# Join gene_df with genomic coordinates, then annotate with VEP
 gene_genomic <- gene_df %>%
   select(Gene, gene_caas_score, gene_composite_score, n_positions) %>%
   inner_join(genomic_raw, by = "Gene") %>%
@@ -1903,16 +1689,6 @@ gene_genomic <- gene_df %>%
     )
   ) %>%
   arrange(chr_order, gene_mid)
-
-# Optionally add PGLS characterisation score
-if (has_pgls && exists("gene_pgls")) {
-  gene_genomic <- gene_genomic %>%
-    left_join(gene_pgls %>% select(Gene, mean_pgls_char, n_pgls_any_support),
-              by = "Gene")
-} else {
-  gene_genomic$mean_pgls_char    <- NA_real_
-  gene_genomic$n_pgls_any_support <- NA_integer_
-}
 
 # Optionally add mean PAI characterisation score
 if (has_vep_primateai && exists("gene_vep_pai")) {
@@ -2012,45 +1788,6 @@ ggplot(gene_genomic,
   )
 ```
 
-### PGLS Signal Manhattan
-
-`r if (!has_pgls) "> **Note:** PGLS results not available — PGLS Manhattan skipped."`
-
-```{r genomic-manhattan-pgls, eval=has_genomic && has_pgls && any(!is.na(gene_genomic$mean_pgls_char)), fig.height=5, fig.width=14}
-ggplot(gene_genomic %>% filter(!is.na(mean_pgls_char)),
-       aes(x = manhattan_x, y = gene_caas_score,
-           size  = mean_pgls_char,
-           colour = mean_pgls_char)) +
-  geom_point(alpha = 0.70) +
-  geom_hline(yintercept = g_thr_10, linetype = "dashed",
-             colour = "grey60", linewidth = 0.5) +
-  ggrepel::geom_text_repel(
-    data = gene_genomic %>%
-      filter(!is.na(mean_pgls_char), mean_pgls_char > 0) %>%
-      slice_max(mean_pgls_char, n = 20, with_ties = FALSE),
-    aes(label = Gene), size = 2.2, max.overlaps = 12,
-    show.legend = FALSE, colour = "black"
-  ) +
-  scale_colour_viridis_c(name = "Mean PGLS\nchar score", option = "plasma") +
-  scale_size_continuous(name = "Mean PGLS\nchar score", range = c(0.5, 6)) +
-  scale_x_continuous(
-    breaks = chr_label_positions$mid_x,
-    labels = chr_label_positions$chr_label,
-    expand = expansion(mult = 0.01)
-  ) +
-  guides(colour = guide_legend(), size = guide_legend()) +
-  labs(
-    title    = "Gene CAAS Score + PGLS Characterisation — Manhattan View",
-    subtitle = "Bubble size and colour: mean scheme-weighted PGLS characterisation score across positions",
-    x = "Chromosome", y = "Gene CAAS Score"
-  ) +
-  theme(
-    plot.title      = element_text(face = "bold"),
-    axis.text.x     = element_text(size = 7),
-    panel.grid.major.x = element_blank()
-  )
-```
-
 ### PAI3D Signal Manhattan
 
 `r if (!has_vep_primateai) "> **Note:** PrimateAI-3D scores not available — PAI3D Manhattan skipped."`
@@ -2095,7 +1832,7 @@ ggplot(gene_genomic %>% filter(!is.na(mean_pai_char)),
 ## Summary
 
 ```{r summary-stats}
-n_components <- 4L  # biochem, asr, convergence, parallel (PGLS is characterisation only)
+n_components <- 4L  # biochem, asr, convergence, parallel
 
 n_gene_components <- 1L  # gene_caas always present
 if (has_rand)     n_gene_components <- n_gene_components + 1L
@@ -2109,7 +1846,7 @@ summary_tbl <- tibble(
     "Position-level components", "Gene-level components",
     "CAAS Score (median)", "CAAS Score (top 10% threshold)",
     "Gene Composite (median)", "Gene Composite (top 10% threshold)",
-    "PGLS available", "FADE available",
+    "FADE available",
     "Randomization available", "RERConverge available",
     "MoleRate available", "VEP PrimateAI-3D available",
     "Genomic coordinates available"
@@ -2123,7 +1860,6 @@ summary_tbl <- tibble(
     sprintf("%.4f", thr_10),
     sprintf("%.4f", median(gene_df$gene_composite_score, na.rm = TRUE)),
     sprintf("%.4f", gc_thr_10),
-    ifelse(has_pgls,         "Yes", "No"),
     ifelse(has_fade,         "Yes", "No"),
     ifelse(has_rand,         "Yes", "No"),
     ifelse(has_rer,          "Yes", "No"),

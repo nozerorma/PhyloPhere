@@ -40,7 +40,7 @@ traitPath <- args[1]
 load(traitPath)   # loads object: trait_vector
 
 # ── Trait transformation ───────────────────────────────────────────────────────
-# Priority order (mirrors PGLS caas_main.py logic):
+# Priority order:
 #   1. Prevalence (all values in [0,1], not purely binary 0/1):
 #      → logit(clamp(x, 1e-4, 1-1e-4))
 #   2. Non-prevalence, Shapiro-Wilk p < 0.05 (non-normal):

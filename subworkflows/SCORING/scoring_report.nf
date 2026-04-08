@@ -33,7 +33,6 @@ process SCORING_REPORT {
     path position_scores
     path gene_scores
     path gene_correlations
-    path pgls_excess_report  // optional: pgls_excess_for_report.tsv (NO_PGLS_EXCESS sentinel when absent)
     path stress_summary
     path stress_correlations
     path stress_rank_agreement
@@ -59,7 +58,6 @@ process SCORING_REPORT {
     def g_top5_pct     = params.scoring_gene_top5_pct     ?: 0.05
     def g_top1_pct     = params.scoring_gene_top1_pct     ?: 0.01
     // Resolve optional sentinel files: pass 'NULL' (R NULL) when no real file is staged
-    def exc_arg = (pgls_excess_report.name =~ /^NO_PGLS_EXCESS/) ? 'NULL' : "'${pgls_excess_report}'"
     def stress_summary_arg = (stress_summary.name =~ /^NO_SCORING_STRESS_SUMMARY/) ? 'NULL' : "'${stress_summary}'"
     def stress_corr_arg = (stress_correlations.name =~ /^NO_SCORING_STRESS_CORR/) ? 'NULL' : "'${stress_correlations}'"
     def stress_rank_arg = (stress_rank_agreement.name =~ /^NO_SCORING_STRESS_RANK/) ? 'NULL' : "'${stress_rank_agreement}'"
@@ -90,7 +88,6 @@ process SCORING_REPORT {
                     gene_top_pct         = ${g_top_pct},
                     gene_top5_pct        = ${g_top5_pct},
                     gene_top1_pct        = ${g_top1_pct},
-                    pgls_excess_file     = ${exc_arg},
                     stress_summary_file  = ${stress_summary_arg},
                     stress_corr_file     = ${stress_corr_arg},
                     stress_rank_file     = ${stress_rank_arg},
@@ -126,7 +123,6 @@ process SCORING_REPORT {
                     gene_top_pct         = ${g_top_pct},
                     gene_top5_pct        = ${g_top5_pct},
                     gene_top1_pct        = ${g_top1_pct},
-                    pgls_excess_file     = ${exc_arg},
                     stress_summary_file  = ${stress_summary_arg},
                     stress_corr_file     = ${stress_corr_arg},
                     stress_rank_file     = ${stress_rank_arg},

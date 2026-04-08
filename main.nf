@@ -68,7 +68,6 @@ include {ORA_EXCLUDED} from './workflows/ora_excluded.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {MOLERATE}       from './workflows/molerate.nf'
-include {PGLS}           from './workflows/pgls.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 
@@ -122,21 +121,15 @@ workflow {
         def ran_any = false
         def reporting_results = null
         def contrast_out = null
-        def pgls_trait_ch = null
-        def pgls_tree_ch = null
 
         if (params.reporting && !params.contrast_selection) {
             reporting_results = REPORTING()
-            pgls_trait_ch = reporting_results.pruned_trait_file
-            pgls_tree_ch  = reporting_results.pruned_tree_file
             ran_any = true
         }
         def ct_results
         if (params.ct_tool) {
             if (params.contrast_selection) {
                 contrast_out = CONTRAST_SELECTION()
-                pgls_trait_ch = contrast_out.pruned_trait_file
-                pgls_tree_ch  = contrast_out.pruned_tree_file
 
                 // Hard stop: if CHECK_MIN_CONTRASTS emits low_contrasts.skip,
                 // terminate the current trait run gracefully (exit 0).
@@ -155,8 +148,6 @@ workflow {
         }
         if (params.contrast_selection && !params.ct_tool) {
             contrast_out = CONTRAST_SELECTION()
-            pgls_trait_ch = contrast_out.pruned_trait_file
-            pgls_tree_ch  = contrast_out.pruned_tree_file
             ran_any = true
         }
         def signification_results = null
@@ -286,15 +277,6 @@ workflow {
 
         }
 
-        if (params.pgls) {
-            if (!params.ct_postproc && !params.pgls_caas_input) {
-                error "PGLS requires CT post-processing output (--ct_postproc) or --pgls_caas_input."
-            }
-            def pgls_caas_ch = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
-            PGLS(pgls_caas_ch, pgls_trait_ch, pgls_tree_ch)
-            ran_any = true
-        }
-
         if (params.vep) {
             // Pass null (not Channel.empty()) when there is no upstream postproc
             // output so VEP can correctly fall back to --vep_caas_input.
@@ -385,8 +367,6 @@ workflow {
             // Wire upstream outputs into SCORING. Pass null (not Channel.empty())
             // when a module didn't run so if(channel) guards detect absence correctly.
             def scoring_postproc_ch      = postproc_results ? postproc_results.filtered_discovery : null
-            def scoring_pgls_ch          = params.pgls      ? PGLS.out.pgls_tsv                  : null
-            def scoring_pgls_excess_ch   = params.pgls      ? PGLS.out.excess_tsv                : null
             def scoring_fade_top_ch      = params.fade       ? FADE.out.summary_top               : null
             def scoring_fade_bot_ch      = params.fade       ? FADE.out.summary_bottom            : null
             def scoring_rer_ch           = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
@@ -401,8 +381,6 @@ workflow {
 
             SCORING(
                 scoring_postproc_ch,
-                scoring_pgls_ch,
-                scoring_pgls_excess_ch,
                 scoring_fade_top_ch,
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
@@ -419,7 +397,7 @@ workflow {
         }
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --molerate, --pgls, --scoring, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --molerate, --scoring, or --rer_tool."
         }
     }
 }

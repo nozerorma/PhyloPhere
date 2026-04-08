@@ -72,7 +72,7 @@ def pair_aware_caas_letters_gs(caas_pattern, amino_encoded, change_side, caap_gr
     When amino_encoded is available (non-US grouped string from CT_DISAMBIGUATION),
     uses it positionally to detect positions that are conserved *at the group level*,
     then collects raw letters from caas at non-conserved positions — matching the
-    PGLS pair-aware logic while keeping raw AAs for PrimateAI lookup.
+    group-aware logic while keeping raw AAs for PrimateAI lookup.
 
     When amino_encoded is absent or the scheme is US, falls back to raw character
     comparison (pair-aware at the amino-acid level).

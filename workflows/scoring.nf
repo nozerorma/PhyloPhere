@@ -4,7 +4,7 @@
  * PHYLOPHERE: CAAS Scoring Workflow
  *
  * Computes composite position-level and gene-level CAAS scores by
- * integrating outputs from CT_POSTPROC, PGLS, FADE, RERConverge,
+ * integrating outputs from CT_POSTPROC, FADE, RERConverge,
  * and CT_ACCUMULATION.  Optionally runs ORA enrichment on top-scoring
  * gene lists.
  *
@@ -22,8 +22,6 @@ workflow SCORING {
 
     take:
         postproc_ch              // Channel<path> or null — filtered_discovery.tsv
-        pgls_ch                  // Channel<path> or null — site_pgls.tsv
-        pgls_excess_ch           // Channel<path> or null — pgls_excess_gene_trait.tsv (enrichment only)
         fade_summary_top_ch      // Channel<path> or null — fade_summary_top.tsv
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
@@ -51,14 +49,6 @@ workflow SCORING {
         } else {
             resolved_postproc = Channel.empty()
         }
-
-        // Use unique sentinel names per input to avoid Nextflow staging collisions
-        // (all file('NO_FILE') would try to stage as the same symlink name).
-        def resolved_pgls = (pgls_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_pgls_input ?: 'NO_PGLS') }
-
-        def resolved_pgls_excess = (pgls_excess_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_pgls_excess_input ?: 'NO_PGLS_EXCESS') }
 
         def resolved_fade_top = (fade_summary_top_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_fade_summary_top ?: 'NO_FADE_TOP') }
@@ -136,18 +126,14 @@ workflow SCORING {
 
         def cmp_in = directions_ch
             .combine(resolved_postproc)
-            .combine(resolved_pgls)
-            .combine(resolved_pgls_excess)
             .combine(resolved_fade_top)
             .combine(resolved_fade_bottom)
             .combine(resolved_rer)
             .combine(resolved_molerate_top)
             .combine(resolved_molerate_bot)
-            .multiMap { dir, postproc, pgls, pgls_exc, fade_t, fade_b, rer, mol_t, mol_b ->
+            .multiMap { dir, postproc, fade_t, fade_b, rer, mol_t, mol_b ->
                 direction:   dir
                 postproc:    postproc
-                pgls:        pgls
-                pgls_exc:    pgls_exc
                 fade_top:    fade_t
                 fade_bot:    fade_b
                 rer:         rer
@@ -158,8 +144,6 @@ workflow SCORING {
         def compute_out = SCORING_COMPUTE(
             cmp_in.direction,
             cmp_in.postproc,
-            cmp_in.pgls,
-            cmp_in.pgls_exc,
             cmp_in.fade_top,
             cmp_in.fade_bot,
             cmp_in.rer,
@@ -187,14 +171,13 @@ workflow SCORING {
 
         // Build a fully direction-keyed channel with all report inputs
         def report_all = report_core
-            .join(_opt(compute_out.pgls_excess_report,     'NO_PGLS_EXCESS'))
             .join(_opt(compute_out.stress_summary,         'NO_SCORING_STRESS_SUMMARY'))
             .join(_opt(compute_out.stress_correlations,    'NO_SCORING_STRESS_CORR'))
             .join(_opt(compute_out.stress_rank_agreement,  'NO_SCORING_STRESS_RANK'))
             .join(_opt(compute_out.stress_top_overlap,     'NO_SCORING_STRESS_OVERLAP'))
             .join(_opt(compute_out.stress_variants,        'NO_SCORING_STRESS_VARIANTS'))
             .join(_opt(compute_out.stress_latent_loadings, 'NO_SCORING_STRESS_LOADINGS'))
-        // report_all: (dir, pos, gene, corr, exc, ss, sc, sr, so, sv, sl) — 11 elements
+        // report_all: (dir, pos, gene, corr, ss, sc, sr, so, sv, sl) — 10 elements
 
         // Combine with shared VEP/genomic inputs (single-item channels reused per direction)
         def rpt_in = report_all
@@ -202,12 +185,11 @@ workflow SCORING {
             .combine(resolved_vep_primateai)
             .combine(resolved_vep_aa2prot)
             .combine(resolved_genomic_info)
-            .multiMap { dir, pos, gene, corr, exc, ss, sc, sr, so, sv, sl, tv, pai, a2p, gi ->
+            .multiMap { dir, pos, gene, corr, ss, sc, sr, so, sv, sl, tv, pai, a2p, gi ->
                 direction:   dir
                 pos_scores:  pos
                 gene_scores: gene
                 gene_corr:   corr
-                excess:      exc
                 stress_sum:  ss
                 stress_corr: sc
                 stress_rank: sr
@@ -225,7 +207,6 @@ workflow SCORING {
             rpt_in.pos_scores,
             rpt_in.gene_scores,
             rpt_in.gene_corr,
-            rpt_in.excess,
             rpt_in.stress_sum,
             rpt_in.stress_corr,
             rpt_in.stress_rank,

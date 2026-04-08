@@ -87,9 +87,6 @@ export RER_TOOL="build_trait,build_tree,build_matrix,continuous"
 export RER_GENE_SET_MODE="all"   # "gene_set" | "all"
 export GENE_TREES="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
 
-# ── PGLS ──────────────────────────────────────────────────────────────────────
-export RUN_PGLS=true
-
 # ── VEP ───────────────────────────────────────────────────────────────────────
 export RUN_VEP=true
 export CDS_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/CDS"

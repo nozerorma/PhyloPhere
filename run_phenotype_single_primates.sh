@@ -101,9 +101,6 @@ RER_TOOL="${RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
 RER_GENE_SET_MODE="${RER_GENE_SET_MODE:-gene_set}"
 GENE_TREES="${GENE_TREES:-${DATADIR}/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
 
-# ── PGLS toggles ─────────────────────────────────────────────────────────────
-RUN_PGLS="${RUN_PGLS:-true}"
-
 # ── VEP toggles ──────────────────────────────────────────────────────────────
 RUN_VEP="${RUN_VEP:-true}"
 CDS_DIR="${CDS_DIR:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/CDS}"
@@ -213,14 +210,6 @@ if [ "$RUN_RER" = true ]; then
     )
 fi
 
-# ── PGLS flags ───────────────────────────────────────────────────────────────
-PGLS_NF_FLAGS=()
-if [ "$RUN_PGLS" = true ]; then
-    PGLS_NF_FLAGS=(
-        --pgls
-    )
-fi
-
 # ── VEP flags ────────────────────────────────────────────────────────────────
 VEP_NF_FLAGS=()
 if [ "$RUN_VEP" = true ]; then
@@ -294,7 +283,6 @@ echo " N_Rand     : $N_RANDOMIZATIONS"
 echo " RUN_FADE   : $RUN_FADE  (mode=${FADE_MODE})"
 echo " RUN_MOLERATE: $RUN_MOLERATE  (mode=${MOLERATE_MODE})"
 echo " RUN_RER    : $RUN_RER  (tool=${RER_TOOL})"
-echo " RUN_PGLS   : $RUN_PGLS"
 echo " RUN_VEP    : $RUN_VEP"
 echo " RUN_SCORING: $RUN_SCORING"
 echo "=========================================="
@@ -351,7 +339,6 @@ if [ "$CLASS" = "1" ]; then
         "${FADE_NF_FLAGS[@]:-}"
         "${MOLERATE_NF_FLAGS[@]:-}"
         "${RER_NF_FLAGS[@]:-}"
-        "${PGLS_NF_FLAGS[@]:-}"
         "${VEP_NF_FLAGS[@]:-}"
         "${SCORING_NF_FLAGS[@]:-}"
     )
@@ -394,7 +381,6 @@ elif [ "$CLASS" = "2" ]; then
         "${FADE_NF_FLAGS[@]:-}"
         "${MOLERATE_NF_FLAGS[@]:-}"
         "${RER_NF_FLAGS[@]:-}"
-        "${PGLS_NF_FLAGS[@]:-}"
         "${VEP_NF_FLAGS[@]:-}"
         "${SCORING_NF_FLAGS[@]:-}"
     )

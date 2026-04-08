@@ -4,13 +4,12 @@
  * SCORING_COMPUTE
  * ───────────────
  * Compute composite CAAS scores at position-level and gene-level.
- * Integrates outputs from CT_POSTPROC, PGLS, FADE, RERConverge,
+ * Integrates outputs from CT_POSTPROC, FADE, RERConverge,
  * CT_ACCUMULATION, and MoleRate.
  *
  * Inputs
  * ──────
  *   postproc_file         : path — filtered_discovery.tsv (mandatory)
- *   pgls_file             : path — site_pgls.tsv (or NO_FILE sentinel)
  *   fade_summary_top      : path — fade_summary_top.tsv (or NO_FILE)
  *   fade_summary_bottom   : path — fade_summary_bottom.tsv (or NO_FILE)
  *   rer_summary           : path — rerconverge_summary_{trait}.tsv (or NO_FILE)
@@ -44,8 +43,6 @@ process SCORING_COMPUTE {
     input:
     val  direction
     path postproc_file
-    path pgls_file
-    path pgls_excess_file
     path fade_summary_top
     path fade_summary_bottom
     path rer_summary
@@ -58,7 +55,6 @@ process SCORING_COMPUTE {
     tuple val(direction), path("position_scores.tsv"),         emit: position_scores
     tuple val(direction), path("gene_scores.tsv"),             emit: gene_scores
     tuple val(direction), path("gene_correlations.tsv"),       emit: gene_correlations
-    tuple val(direction), path("pgls_excess_for_report.tsv"),  emit: pgls_excess_report,     optional: true
     tuple val(direction), path("position_score_stress_summary.tsv"),         emit: stress_summary,       optional: true
     tuple val(direction), path("position_score_stress_correlations.tsv"),    emit: stress_correlations,  optional: true
     tuple val(direction), path("position_score_stress_rank_agreement.tsv"),  emit: stress_rank_agreement, optional: true
@@ -89,8 +85,6 @@ process SCORING_COMPUTE {
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc   '${postproc_file}' \
-            --pgls       '${pgls_file}' \
-            --pgls_excess '${pgls_excess_file}' \
             --fade_top   '${fade_summary_top}' \
             --fade_bottom '${fade_summary_bottom}' \
             --rer        '${rer_summary}' \
@@ -117,8 +111,6 @@ process SCORING_COMPUTE {
 
         Rscript scoring_compute.R \
             --postproc   '${postproc_file}' \
-            --pgls       '${pgls_file}' \
-            --pgls_excess '${pgls_excess_file}' \
             --fade_top   '${fade_summary_top}' \
             --fade_bottom '${fade_summary_bottom}' \
             --rer        '${rer_summary}' \

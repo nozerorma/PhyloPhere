@@ -180,10 +180,6 @@ class WorkflowMap {
                           "${outdir}/accumulation/randomization"],
               htmlCandidates: ["${outdir}/HTML_reports/CT_accumulation.html"] ],
 
-            [ id: 'pgls',        name: 'Site-PGLS (association)',         type: 'processes', ran: ctx.pgls,
-              filesDirs: ["${outdir}/selection/pgls"],
-              htmlCandidates: ["${outdir}/HTML_reports/PGLS_report.html"] ],
-
             [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
               filesDirs: ["${outdir}/characterization/vep"],
               htmlCandidates: [] ],
@@ -214,7 +210,7 @@ class WorkflowMap {
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','ct_postproc','ora','ct_acc','pgls','vep','rer','fade','molerate','scoring']
+                        'ct_disambig','ct_postproc','ora','ct_acc','vep','rer','fade','molerate','scoring']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -232,7 +228,6 @@ class WorkflowMap {
             "${projectDir}/conf/ct_postproc.config",
             "${projectDir}/conf/ct_accumulation.config",
             "${projectDir}/conf/ora.config",
-            "${projectDir}/conf/pgls.config",
             "${projectDir}/conf/vep.config",
             "${projectDir}/conf/rerconverge.config",
             "${projectDir}/conf/fade.config",
@@ -307,7 +302,7 @@ class WorkflowMap {
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:${colors.prepost};"></span> Pre/postprocessing &amp; characterization (VEP)
     &nbsp;&nbsp;|&nbsp;&nbsp;
-    <span class="sw" style="background:${colors.processes};"></span> Analysis processes (CT, PGLS, RER, FADE, Molerate, disambiguation, accumulation)
+    <span class="sw" style="background:${colors.processes};"></span> Analysis processes (CT, RER, FADE, Molerate, disambiguation, accumulation)
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:#B8B8B8;"></span> Not run
   </div>
@@ -348,7 +343,6 @@ class WorkflowMap {
         'ct_postproc': ['postproc', 'postproc/preprocessed'],
         'ora': ['ora'],
         'ct_acc': ['accumulation', 'accumulation/aggregation'],
-        'pgls': ['selection/pgls'],
         'vep': ['characterization/vep'],
         'rer': ['rerconverge'],
         'fade': ['selection/fade'],
@@ -368,7 +362,6 @@ class WorkflowMap {
         'ct_postproc': 'ct_postproc',
         'ora': 'ora',
         'ct_acc': 'ct_acc',
-        'pgls': 'pgls',
         'vep': 'vep',
         'rer': 'rer',
         'fade': 'fade',
@@ -446,7 +439,6 @@ class WorkflowMap {
         'ct_postproc': 'CT post-processing',
         'ora': 'ORA',
         'ct_acc': 'CT accumulation (convergence)',
-        'pgls': 'Site-PGLS (association)',
         'vep': 'VEP characterization',
         'rer': 'RERconverge (RER)',
         'fade': 'FADE (selection)',
@@ -468,7 +460,6 @@ class WorkflowMap {
         'ct_postproc': '#0EA5E9',
         'ora': '#7C3AED',
         'ct_acc': '#F97316',
-        'pgls': '#F97316',
         'vep': '#0EA5E9',
         'rer': '#F97316',
         'fade': '#F97316',
@@ -497,7 +488,6 @@ class WorkflowMap {
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
             ora          : ['ora'],
             ct_acc       : ['accumulation', 'accumulation/aggregation'],
-            pgls         : ['selection/pgls'],
             vep          : ['characterization/vep'],
             rer          : ['rerconverge'],
             fade         : ['selection/fade'],
@@ -567,7 +557,6 @@ class WorkflowMap {
             ctPostproc    : scanResults.ct_postproc ?: false,
             ora           : scanResults.ora ?: false,
             ctAccum       : scanResults.ct_acc ?: false,
-            pgls          : scanResults.pgls ?: false,
             vep           : scanResults.vep ?: false,
             rer           : scanResults.rer ?: false,
             fade          : scanResults.fade ?: false,
