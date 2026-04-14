@@ -14,7 +14,7 @@ Notes
 -----
 * Uses BioPython's AlignIO which handles both strict and relaxed PHYLIP.
 * Accepts both interleaved and sequential PHYLIP files.
-* Gap-only sequences are silently dropped to avoid FADE/MoleRate failures.
+* Gap-only sequences are silently dropped to avoid FADE failures.
 """
 
 import sys

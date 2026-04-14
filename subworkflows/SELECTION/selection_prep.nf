@@ -4,7 +4,7 @@
  * SELECTION / shared alignment preprocessing
  *
  * SELECTION_PREP runs the alignment preparation pipeline ONCE and shares the
- * results between FADE and MOLERATE, eliminating duplicate work:
+ * results with FADE:
  *
  *   1. EXTRACT_EXTREME_SPECIES  – top/bottom species lists from trait_stats.csv
  *   2. [Alignment channel]      – build gene list (all / toy_mode)
@@ -195,19 +195,19 @@ workflow SELECTION_PREP {
             .filter { files -> files && files.size() > 0 }
             .map { files -> files[0] }
 
-        def ali_dir = (params.fade_alignment ?: params.molerate_alignment ?: params.alignment) ?:
-            error("SELECTION_PREP: no alignment directory specified (--alignment, --fade_alignment, or --molerate_alignment)")
+        def ali_dir = (params.fade_alignment ?: params.alignment) ?:
+            error("SELECTION_PREP: no alignment directory specified (--alignment or --fade_alignment)")
 
         log.info "[SELECTION_PREP] selection mode: all genes"
 
-        // ── Extract foreground species (once, shared by FADE and MOLERATE) ───
+        // ── Extract foreground species (once, shared with FADE) ───
         def species_lists      = EXTRACT_EXTREME_SPECIES(stats_file_ch)
         top_species_val        = species_lists.top_species.collect().map { it[0] }
         bottom_species_val     = species_lists.bottom_species.collect().map { it[0] }
 
         // ── Build alignment channel (gene_id, alignment_file) ────────────────
         // No direction at this stage — conversion and tree-filtering are
-        // direction-agnostic; direction is introduced later inside FADE/MOLERATE.
+        // direction-agnostic; direction is introduced later inside FADE.
 
         def ali_ch
 

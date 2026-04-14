@@ -77,7 +77,6 @@ export SOURCE_RUN_SUBDIR="20260318_201152"
 # ── Selection analysis toggles ────────────────────────────────────────────────
 # Gene-set paths are auto-derived from SOURCE_RUN_SUBDIR; enable the tools here.
 export RUN_FADE=true
-export RUN_MOLERATE=true
 
 # ── RERConverge ───────────────────────────────────────────────────────────────
 export RUN_RER=true # Note that we need to fix the gene_trees. They have species which dont match the species in the trait file, and RERConverge fails when that happens. We can either fix the gene trees or modify the RERConverge code to ignore those species. For now, we will set this to false to avoid errors.

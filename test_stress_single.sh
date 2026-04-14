@@ -106,7 +106,6 @@ INT_STRING="${INT_STRING:-true}"
 INT_CT_ACCUMULATION="${INT_CT_ACCUMULATION:-true}"
 INT_VEP="${INT_VEP:-true}"
 INT_FADE="${INT_FADE:-false}"
-INT_MOLERATE="${INT_MOLERATE:-false}"
 INT_RER="${INT_RER:-true}"
 INT_SCORING="${INT_SCORING:-true}"
 INT_SCORING_STRESS="${INT_SCORING_STRESS:-true}"
@@ -138,7 +137,6 @@ RUN_SA_SCORING="${RUN_SA_SCORING:-false}"
 SA_SCORING_STRESS="${SA_SCORING_STRESS:-true}"
 SA_SCORING_STRESS_TOP_N="${SA_SCORING_STRESS_TOP_N:-25}"
 RUN_SA_FADE="${RUN_SA_FADE:-false}"
-RUN_SA_MOLERATE="${RUN_SA_MOLERATE:-false}"
 RUN_SA_RER="${RUN_SA_RER:-false}"
 
 SA_SELECTION_MODE_ALL="${SA_SELECTION_MODE_ALL:-true}"
@@ -219,8 +217,6 @@ SCORING_FADE_SUMMARY_TOP="${INT_RUNTIME}/selection/fade/top/fade_summary_top.tsv
 SCORING_FADE_SUMMARY_BOTTOM="${INT_RUNTIME}/selection/fade/bottom/fade_summary_bottom.tsv"
 SCORING_FADE_SITE_TOP="${INT_RUNTIME}/selection/fade/top/fade_site_bf_top.tsv"
 SCORING_FADE_SITE_BOTTOM="${INT_RUNTIME}/selection/fade/bottom/fade_site_bf_bottom.tsv"
-SCORING_MOLERATE_SUMMARY_TOP="${INT_RUNTIME}/selection/molerate/top/molerate_summary_top.tsv"
-SCORING_MOLERATE_SUMMARY_BOTTOM="${INT_RUNTIME}/selection/molerate/bottom/molerate_summary_bottom.tsv"
 SCORING_RER_INPUT="${INT_RUNTIME}/RERConverge/RER_Results/rerconverge_summary_${TRAIT}.tsv"
 SCORING_ACCUM_DIR="${INT_RUNTIME}/accumulation/aggregation"
 SCORING_ACCUM_TOP_DIR="${INT_RUNTIME}/accumulation/top/randomization"
@@ -389,7 +385,6 @@ build_integrated_flags() {
     fi
 
     [ "$INT_FADE"     = true ] && OPTIONAL_BOOL_FLAGS+=(--fade --fade_mode "all")         || OPTIONAL_BOOL_FLAGS+=(--fade false)
-    [ "$INT_MOLERATE" = true ] && OPTIONAL_BOOL_FLAGS+=(--molerate --molerate_mode "all") || OPTIONAL_BOOL_FLAGS+=(--molerate false)
 
     if [ "$INT_RER" = true ]; then
         if [ "$SA_RER_CONTINUOUS_ONLY" = true ]; then
@@ -880,8 +875,6 @@ run_standalone_scoring() {
         --scoring \
         --scoring_postproc_input            "$SCORING_POSTPROC_INPUT" \
         --scoring_background_input          "$SCORING_BACKGROUND_INPUT" \
-        --scoring_molerate_summary_top      "$SCORING_MOLERATE_SUMMARY_TOP" \
-        --scoring_molerate_summary_bottom   "$SCORING_MOLERATE_SUMMARY_BOTTOM" \
         --scoring_rer_input                 "$SCORING_RER_INPUT" \
         --scoring_accum_dir                 "$accum_stage_dir" \
         "${optional_scoring_flags[@]}" \
@@ -899,7 +892,7 @@ run_standalone_scoring() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STANDALONE SELECTION HELPERS (FADE / MoleRate / RERConverge)
+# STANDALONE SELECTION HELPERS (FADE / RERConverge)
 # ─────────────────────────────────────────────────────────────────────────────
 _selection_mode_label() {
     case "$1" in all) echo "all" ;; gene_set_pp) echo "geneset_pp" ;; *) fail "Unknown selection mode: $1" ;; esac
@@ -964,46 +957,6 @@ _run_standalone_fade_mode() {
 run_standalone_fade() {
     [ "$SA_SELECTION_MODE_ALL"      = true ] && _run_standalone_fade_mode all
     [ "$SA_SELECTION_MODE_GENESET_PP" = true ] && _run_standalone_fade_mode gene_set_pp
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
-# STANDALONE MOLERATE
-# ─────────────────────────────────────────────────────────────────────────────
-_run_standalone_molerate_mode() {
-    local mode="$1"
-    local mode_label; mode_label="$(_selection_mode_label "$mode")"
-    local mode_value; mode_value="$(_selection_mode_value "$mode")"
-    _require_selection_mode_inputs "$mode"
-    _selection_source_flags "molerate" "$mode"
-
-    local outdir="${TEST_DIR}/standalone_molerate_${mode_label}/${timestamp}"
-    local workdir="${outdir}/work"
-    mkdir -p "$outdir" "$workdir"
-
-    echo "Running standalone MoleRate (mode: ${mode_label})"
-    echo "  Output: ${outdir}"
-
-    nextflow run main.nf \
-        -with-tower \
-        -profile slurm \
-        --molerate --molerate_mode "$mode_value" \
-        "${SELECTION_SOURCE_FLAGS[@]+"${SELECTION_SOURCE_FLAGS[@]}"}" \
-        --alignment "$ALI_DIR" --ali_format "fasta" \
-        --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
-        --tree "$INPUT_TREE" --reporting \
-        --ct_signification false --ct_postproc false --ct_disambiguation false \
-        --ora false --string false --ct_accumulation false --contrast_selection false \
-        -w "$workdir" --outdir "$outdir" \
-        -with-report "${outdir}/pipeline_info/execution_report.html" \
-        -with-trace  "${outdir}/pipeline_info/execution_trace.txt"
-
-    ok "Standalone MoleRate (${mode_label}) completed → ${outdir}"
-    maybe_clean_work "$workdir"
-}
-
-run_standalone_molerate() {
-    [ "$SA_SELECTION_MODE_ALL"        = true ] && _run_standalone_molerate_mode all
-    [ "$SA_SELECTION_MODE_GENESET_PP" = true ] && _run_standalone_molerate_mode gene_set_pp
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1093,7 +1046,6 @@ print_config() {
     echo "  sub: INT_CT_ACCUMULATION      : $INT_CT_ACCUMULATION"
     echo "  sub: INT_VEP                  : $INT_VEP"
     echo "  sub: INT_FADE                 : $INT_FADE"
-    echo "  sub: INT_MOLERATE             : $INT_MOLERATE"
     echo "  sub: INT_RER                  : $INT_RER"
     echo "  sub: INT_SCORING              : $INT_SCORING"
     echo "    (+ INT_SCORING_STRESS       : $INT_SCORING_STRESS)"
@@ -1117,7 +1069,6 @@ print_config() {
     echo "    (+ SA_SCORING_STRESS        : $SA_SCORING_STRESS)"
     echo "    (+ SA_SCORING_STRESS_TOP_N  : $SA_SCORING_STRESS_TOP_N)"
     echo "  RUN_SA_FADE                   : $RUN_SA_FADE"
-    echo "  RUN_SA_MOLERATE               : $RUN_SA_MOLERATE"
     echo "  RUN_SA_RER                    : $RUN_SA_RER"
     echo "    (+ SA_RER_CONTINUOUS_ONLY       : $SA_RER_CONTINUOUS_ONLY)"
     echo "    (+ SA_RER_TOOL                  : $SA_RER_TOOL)"
@@ -1168,7 +1119,6 @@ main() {
     [ "$RUN_SA_VEP"                 = true ] && { section "STANDALONE: VEP";                              run_standalone_vep; }
     [ "$RUN_SA_SCORING"             = true ] && { section "STANDALONE: Composite CAAS Scoring";           run_standalone_scoring; }
     [ "$RUN_SA_FADE"                = true ] && { section "STANDALONE: FADE";                             run_standalone_fade; }
-    [ "$RUN_SA_MOLERATE"            = true ] && { section "STANDALONE: MoleRate";                         run_standalone_molerate; }
     [ "$RUN_SA_RER"                 = true ] && { section "STANDALONE: RERConverge";                      run_standalone_rer; }
 
     print_summary

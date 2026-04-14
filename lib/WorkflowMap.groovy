@@ -195,13 +195,6 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/selection/fade/top/FADE_top.html",
                                "${outdir}/selection/fade/bottom/FADE_bottom.html"] ],
 
-            [ id: 'molerate',    name: 'Molerate (RER)',                  type: 'processes', ran: ctx.molerate,
-              filesDirs: ["${outdir}/selection/molerate",
-                          "${outdir}/selection/molerate/top",
-                          "${outdir}/selection/molerate/bottom"],
-              htmlCandidates: ["${outdir}/selection/molerate/top/MOLERATE_top.html",
-                               "${outdir}/selection/molerate/bottom/MOLERATE_bottom.html"] ],
-
             [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting', ran: ctx.scoring,
               filesDirs: ["${outdir}/scoring",
                           "${outdir}/scoring/gene_lists"],
@@ -210,7 +203,7 @@ class WorkflowMap {
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','ct_postproc','ora','ct_acc','vep','rer','fade','molerate','scoring']
+                        'ct_disambig','ct_postproc','ora','ct_acc','vep','rer','fade','scoring']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -231,7 +224,6 @@ class WorkflowMap {
             "${projectDir}/conf/vep.config",
             "${projectDir}/conf/rerconverge.config",
             "${projectDir}/conf/fade.config",
-            "${projectDir}/conf/molerate.config",
             "${projectDir}/conf/scoring.config"
         ]
 
@@ -302,7 +294,7 @@ class WorkflowMap {
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:${colors.prepost};"></span> Pre/postprocessing &amp; characterization (VEP)
     &nbsp;&nbsp;|&nbsp;&nbsp;
-    <span class="sw" style="background:${colors.processes};"></span> Analysis processes (CT, RER, FADE, Molerate, disambiguation, accumulation)
+    <span class="sw" style="background:${colors.processes};"></span> Analysis processes (CT, RER, FADE, disambiguation, accumulation)
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:#B8B8B8;"></span> Not run
   </div>
@@ -346,7 +338,6 @@ class WorkflowMap {
         'vep': ['characterization/vep'],
         'rer': ['rerconverge'],
         'fade': ['selection/fade'],
-        'molerate': ['selection/molerate'],
         'scoring': ['scoring']
       };
 
@@ -365,7 +356,6 @@ class WorkflowMap {
         'vep': 'vep',
         'rer': 'rer',
         'fade': 'fade',
-        'molerate': 'molerate',
         'scoring': 'scoring'
       };
       
@@ -442,7 +432,6 @@ class WorkflowMap {
         'vep': 'VEP characterization',
         'rer': 'RERconverge (RER)',
         'fade': 'FADE (selection)',
-        'molerate': 'Molerate (RER)',
         'scoring': 'CAAS Scoring'
       };
       return names[stageId] || stageId;
@@ -463,7 +452,6 @@ class WorkflowMap {
         'vep': '#0EA5E9',
         'rer': '#F97316',
         'fade': '#F97316',
-        'molerate': '#F97316',
         'scoring': '#7C3AED'
       };
       return typeColors[stageId] || '#B8B8B8';
@@ -491,7 +479,6 @@ class WorkflowMap {
             vep          : ['characterization/vep'],
             rer          : ['rerconverge'],
             fade         : ['selection/fade'],
-            molerate     : ['selection/molerate'],
             scoring      : ['scoring']
         ]
     }
@@ -560,7 +547,6 @@ class WorkflowMap {
             vep           : scanResults.vep ?: false,
             rer           : scanResults.rer ?: false,
             fade          : scanResults.fade ?: false,
-            molerate      : scanResults.molerate ?: false,
             scoring       : scanResults.scoring ?: false
         ]
     }

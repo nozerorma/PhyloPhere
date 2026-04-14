@@ -150,12 +150,10 @@ Standalone mode (provide inputs directly):
 --scoring_fade_summary_bottom <"fade_summary_bottom.tsv"> ""
 --scoring_rer_input         <"rerconverge_summary.tsv">  ""
 --scoring_accum_dir                 <"accumulation_dir/">              ""
---scoring_molerate_summary_top      <"molerate_summary_top.tsv">       ""
---scoring_molerate_summary_bottom   <"molerate_summary_bottom.tsv">    ""
 --scoring_background_input          <"background.txt">                 ""
 
 Position-level components: biochem, ASR, convergence, parallel, [FADE]
-Gene-level scores: gene_caas, [gene_rand], [gene_rer], [gene_fade], [gene_molerate], gene_composite
+Gene-level scores: gene_caas, [gene_rand], [gene_rer], [gene_fade], gene_composite
 """
 
 workflow HELP {

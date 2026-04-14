@@ -67,7 +67,6 @@ include {ORA} from './workflows/ora.nf'
 include {ORA_EXCLUDED} from './workflows/ora_excluded.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
-include {MOLERATE}       from './workflows/molerate.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
@@ -277,10 +276,10 @@ workflow {
             ran_any = true
         }
 
-        if (params.fade || params.molerate) {
+        if (params.fade) {
             // Resolve upstream channel sources for SELECTION_PREP.
             // These channels are now consumed by a single SELECTION_PREP call
-            // (instead of being split separately for FADE and MOLERATE).
+            // (instead of being split separately for FADE).
 
             def stats_source_ch = contrast_out
                 ? contrast_out.stats_file_out
@@ -298,7 +297,7 @@ workflow {
                 ? ct_results.discovery_file
                 : Channel.empty()
 
-            // Run alignment prep ONCE — shared by both FADE and MOLERATE.
+            // Run alignment prep ONCE for FADE.
             // SELECTION_PREP outputs value channels for species/tree files
             // (can be safely consumed by multiple downstream operators) and
             // queue channels for the per-gene filtered FASTAs.
@@ -311,27 +310,16 @@ workflow {
             )
 
             // Fork each per-gene fasta channel into independent copies for
-            // FADE and MOLERATE so they don't compete on the same queue channel.
+            // FADE  so they don't compete on the same queue channel.
             def prep_top_fanout    = SELECTION_PREP.out.filtered_fasta_top_ch
-                .multiMap { it -> fade: it; molerate: it }
+                .multiMap { it -> fade: it}
             def prep_bottom_fanout = SELECTION_PREP.out.filtered_fasta_bottom_ch
-                .multiMap { it -> fade: it; molerate: it }
+                .multiMap { it -> fade: it}
 
             if (params.fade) {
                 FADE(
                     prep_top_fanout.fade,
                     prep_bottom_fanout.fade,
-                    SELECTION_PREP.out.tree_ch,
-                    SELECTION_PREP.out.top_species,
-                    SELECTION_PREP.out.bottom_species
-                )
-                ran_any = true
-            }
-
-            if (params.molerate) {
-                MOLERATE(
-                    prep_top_fanout.molerate,
-                    prep_bottom_fanout.molerate,
                     SELECTION_PREP.out.tree_ch,
                     SELECTION_PREP.out.top_species,
                     SELECTION_PREP.out.bottom_species
@@ -367,8 +355,6 @@ workflow {
             def scoring_fade_site_bot_ch = params.fade       ? FADE.out.site_tsv_bottom           : null
             def scoring_rer_ch           = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
-            def scoring_molerate_top_ch  = params.molerate   ? MOLERATE.out.summary_top           : null
-            def scoring_molerate_bot_ch  = params.molerate   ? MOLERATE.out.summary_bottom        : null
             def scoring_bg_ch            = pp_cleaned_bg     ?: null
             def scoring_vep_tv_ch        = params.vep        ? VEP.out.transvar_tsv               : null
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
@@ -381,8 +367,6 @@ workflow {
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
                 scoring_accum_ch,
-                scoring_molerate_top_ch,
-                scoring_molerate_bot_ch,
                 scoring_bg_ch,
                 scoring_vep_tv_ch,
                 scoring_vep_pai_ch,
@@ -395,7 +379,7 @@ workflow {
         }
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --molerate, --scoring, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --scoring, or --rer_tool."
         }
     }
 }

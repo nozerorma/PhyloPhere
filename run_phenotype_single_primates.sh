@@ -91,7 +91,6 @@ ALI_FORMAT="fasta"
 
 # ── Selection analysis toggles ───────────────────────────────────────────────
 RUN_FADE="${RUN_FADE:-false}"
-RUN_MOLERATE="${RUN_MOLERATE:-false}"
 
 # ── RERConverge toggles ──────────────────────────────────────────────────────
 RUN_RER="${RUN_RER:-true}"
@@ -186,7 +185,7 @@ if [ "$RUN_VEP" = true ]; then
 fi
 
 # ============================================================
-# FADE / MOLERATE / RER FLAGS
+# FADE / RER FLAGS
 # Gene-set paths are auto-derived from the source run.
 # Override SOURCE_POSTPROC_* / SOURCE_ACCUMULATION_CSV above if needed.
 # ============================================================
@@ -194,13 +193,6 @@ FADE_NF_FLAGS=()
 if [ "$RUN_FADE" = true ]; then
     FADE_NF_FLAGS=(
         --fade
-    )
-fi
-
-MOLERATE_NF_FLAGS=()
-if [ "$RUN_MOLERATE" = true ]; then
-    MOLERATE_NF_FLAGS=(
-        --molerate
     )
 fi
 
@@ -301,7 +293,6 @@ echo " IS_TOY     : $IS_TOY  (tag: '${TAG}')"
 echo " Cycles     : $CYCLES"
 echo " N_Rand     : $N_RANDOMIZATIONS"
 echo " RUN_FADE   : $RUN_FADE"
-echo " RUN_MOLERATE: $RUN_MOLERATE"
 echo " RUN_RER    : $RUN_RER  (tool=${RER_TOOL})"
 echo " RUN_VEP    : $RUN_VEP"
 echo " RUN_SCORING: $RUN_SCORING"
@@ -360,7 +351,6 @@ if [ "$CLASS" = "1" ]; then
         --string
         --ct_accumulation
         "${FADE_NF_FLAGS[@]:-}"
-        "${MOLERATE_NF_FLAGS[@]:-}"
         "${RER_NF_FLAGS[@]:-}"
         "${VEP_NF_FLAGS[@]:-}"
         "${SCORING_NF_FLAGS[@]:-}"
@@ -402,7 +392,6 @@ elif [ "$CLASS" = "2" ]; then
         --string
         --ct_accumulation
         "${FADE_NF_FLAGS[@]:-}"
-        "${MOLERATE_NF_FLAGS[@]:-}"
         "${RER_NF_FLAGS[@]:-}"
         "${VEP_NF_FLAGS[@]:-}"
         "${SCORING_NF_FLAGS[@]:-}"

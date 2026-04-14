@@ -19,8 +19,7 @@
 #   bottom → global_label == low_extreme species as foreground
 #
 # Alignment preparation (PHYLIP→FASTA conversion, tree-filtering, and species
-# extraction) is handled upstream by SELECTION_PREP (called once in main.nf),
-# which shares the results with MOLERATE to avoid redundant processing.
+# extraction) is handled upstream by SELECTION_PREP (called once in main.nf)
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 # File: workflows/fade.nf

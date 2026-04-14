@@ -4,8 +4,7 @@
  * SCORING_COMPUTE
  * ───────────────
  * Compute composite CAAS scores at position-level and gene-level.
- * Integrates outputs from CT_POSTPROC, FADE, RERConverge,
- * CT_ACCUMULATION, and MoleRate.
+ * Integrates outputs from CT_POSTPROC, FADE, RERConverge and CT_ACCUMULATION.
  *
  * Inputs
  * ──────
@@ -14,8 +13,6 @@
  *   fade_summary_bottom   : path — fade_summary_bottom.tsv (or NO_FILE)
  *   rer_summary           : path — rerconverge_summary_{trait}.tsv (or NO_FILE)
  *   accum_files           : path — directory or collected CSVs (or NO_FILE)
- *   molerate_summary_top  : path — molerate_summary_top.tsv (or NO_FILE)
- *   molerate_summary_bottom: path — molerate_summary_bottom.tsv (or NO_FILE)
  *
  * Outputs
  * ───────
@@ -47,8 +44,6 @@ process SCORING_COMPUTE {
     path fade_summary_bottom
     path rer_summary
     path accum_files
-    path molerate_summary_top
-    path molerate_summary_bottom
 
     output:
     val  direction,                                             emit: direction
@@ -89,8 +84,6 @@ process SCORING_COMPUTE {
             --fade_bottom '${fade_summary_bottom}' \
             --rer        '${rer_summary}' \
             --accum_dir  '${accum_arg}' \
-            --molerate_top    '${molerate_summary_top}' \
-            --molerate_bottom '${molerate_summary_bottom}' \
             --stress     '${params.scoring_stress ?: false}' \
             --stress_top_n ${params.scoring_stress_top_n ?: 25} \
             --top_pct    ${top_pct} \
@@ -115,8 +108,6 @@ process SCORING_COMPUTE {
             --fade_bottom '${fade_summary_bottom}' \
             --rer        '${rer_summary}' \
             --accum_dir  '${accum_arg}' \
-            --molerate_top    '${molerate_summary_top}' \
-            --molerate_bottom '${molerate_summary_bottom}' \
             --stress     '${params.scoring_stress ?: false}' \
             --stress_top_n ${params.scoring_stress_top_n ?: 25} \
             --top_pct    ${top_pct} \

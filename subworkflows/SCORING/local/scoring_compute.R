@@ -19,8 +19,7 @@
 #     --gene_top_pct  0.10 \
 #     --gene_top5_pct 0.05 \
 #     --gene_top1_pct 0.01 \
-#     --molerate_top    <molerate_summary_top.tsv> \
-#     --molerate_bottom <molerate_summary_bottom.tsv>
+
 #
 # Outputs (in working directory):
 #   position_scores.tsv      — per Gene×Position scores
@@ -50,8 +49,6 @@ fade_top_file        <- parse_arg("--fade_top")
 fade_bottom_file     <- parse_arg("--fade_bottom")
 rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
-molerate_top_file    <- parse_arg("--molerate_top")
-molerate_bottom_file <- parse_arg("--molerate_bottom")
 stress_enabled_raw   <- parse_arg("--stress", "false")
 stress_top_n         <- as.integer(parse_arg("--stress_top_n", "25"))
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -456,60 +453,6 @@ if (has_fade_bottom) {
 } else {
   cat("FADE bottom: not available, skipping\n")
   fade_bottom_df <- tibble(Gene = character(), fade_max_bf_bottom = numeric())
-}
-
-# ── 2h. MOLERATE (moved to gene-level — see section 3e) ─────────────────────
-# MoleRate is gene-level. We take min(pval_pp_vs_prop) across top and bottom
-# directions per gene (most significant direction, analogous to FADE max_bf).
-has_molerate <- file_exists(molerate_top_file) || file_exists(molerate_bottom_file)
-if (has_molerate) {
-  cat(sprintf("Loading MoleRate summaries (direction='%s')\n", direction))
-  mol_file_for_dir <- if (direction == "top")    molerate_top_file
-                      else if (direction == "bottom") molerate_bottom_file
-                      else NULL  # 'both' → pool below
-
-  if (!is.null(mol_file_for_dir) && file_exists(mol_file_for_dir)) {
-    # Single-direction: pval and log2_ratio from the target file only
-    mol_dir_col <- paste0("mol_log2ratio_", direction)
-    mol_raw <- read_tsv(mol_file_for_dir, show_col_types = FALSE) %>%
-      select(Gene = gene, pval_pp_vs_prop, log2_ratio) %>%
-      filter(!is.na(pval_pp_vs_prop))
-    mol_combined <- mol_raw %>%
-      group_by(Gene) %>%
-      summarise(mol_min_pval = min(pval_pp_vs_prop, na.rm = TRUE),
-                !!mol_dir_col := first(log2_ratio),
-                .groups = "drop")
-  } else {
-    # Pool: min pval across both directions; keep both log2_ratio columns
-    mol_dfs <- list()
-    if (file_exists(molerate_top_file))
-      mol_dfs[["top"]]    <- read_tsv(molerate_top_file,    show_col_types = FALSE) %>%
-        select(Gene = gene, pval_pp_vs_prop, mol_log2ratio_top    = log2_ratio) %>%
-        filter(!is.na(pval_pp_vs_prop))
-    if (file_exists(molerate_bottom_file))
-      mol_dfs[["bottom"]] <- read_tsv(molerate_bottom_file, show_col_types = FALSE) %>%
-        select(Gene = gene, pval_pp_vs_prop, mol_log2ratio_bottom = log2_ratio) %>%
-        filter(!is.na(pval_pp_vs_prop))
-    mol_pvals <- bind_rows(
-      if (!is.null(mol_dfs[["top"]]))    select(mol_dfs[["top"]],    Gene, pval_pp_vs_prop),
-      if (!is.null(mol_dfs[["bottom"]])) select(mol_dfs[["bottom"]], Gene, pval_pp_vs_prop)
-    ) %>%
-      group_by(Gene) %>%
-      summarise(mol_min_pval = min(pval_pp_vs_prop, na.rm = TRUE), .groups = "drop")
-    mol_log2ratio <- tibble(Gene = character(), mol_log2ratio_top = numeric(),
-                            mol_log2ratio_bottom = numeric())
-    if (!is.null(mol_dfs[["top"]]))
-      mol_log2ratio <- mol_log2ratio %>%
-        full_join(select(mol_dfs[["top"]], Gene, mol_log2ratio_top), by = "Gene")
-    if (!is.null(mol_dfs[["bottom"]]))
-      mol_log2ratio <- mol_log2ratio %>%
-        full_join(select(mol_dfs[["bottom"]], Gene, mol_log2ratio_bottom), by = "Gene")
-    mol_combined <- mol_pvals %>% left_join(mol_log2ratio, by = "Gene")
-  }
-  cat(sprintf("  MoleRate: %d genes loaded\n", nrow(mol_combined)))
-} else {
-  cat("MoleRate: not available, skipping\n")
-  mol_combined <- tibble(Gene = character(), mol_min_pval = numeric())
 }
 
 # ── 2i. CAAS Score (composite) ──────────────────────────────────────────────
@@ -930,19 +873,6 @@ if (nrow(fade_bottom_df) > 0) {
   gene_fade$fade_significant_bottom <- NA
 }
 
-# ── 3e. MoleRate significance — differential evolutionary rate
-# MoleRate tests whether foreground branches evolve at a different rate than background.
-# Significance: p-value; direction: log2_ratio (> 0 = faster, < 0 = slower).
-if (has_molerate && nrow(mol_combined) > 0) {
-  gene_molerate <- mol_combined %>%
-    select(Gene, mol_min_pval,
-           any_of(c("mol_log2ratio_top", "mol_log2ratio_bottom")))
-  cat(sprintf("  MoleRate: %d genes\n", nrow(gene_molerate)))
-} else {
-  gene_molerate <- tibble(Gene = character(), mol_min_pval = numeric(),
-                          mol_log2ratio_top = numeric(), mol_log2ratio_bottom = numeric())
-}
-
 # ── 3f. Assemble gene scores ────────────────────────────────────────────────
 gene_scores <- gene_caas
 
@@ -967,12 +897,6 @@ if (nrow(gene_fade) > 0) {
   gene_scores$fade_significant <- NA
 }
 
-if (nrow(gene_molerate) > 0) {
-  gene_scores <- gene_scores %>% left_join(gene_molerate, by = "Gene")
-} else {
-  gene_scores$mol_min_pval <- NA_real_
-}
-
 # =============================================================================
 # 4. CORRELATION ANALYSIS (gene-level)
 # =============================================================================
@@ -980,7 +904,7 @@ if (nrow(gene_molerate) > 0) {
 cat("\n─── Correlation analysis ──────────────────────────────────────\n")
 
 # Correlations use gene_caas_score as primary axis; gene_rand_score (accumulation)
-# is included as a secondary numeric score. RER, FADE, and MoleRate use their
+# is included as a secondary numeric score. RER and FADE use their
 # native significance criteria and are not included as numeric score axes here.
 score_cols <- c("gene_caas_score")
 if (has_accum && any(!is.na(gene_scores$gene_rand_score)))
@@ -1100,7 +1024,7 @@ for (pct_label in c("top10pct", "top5pct", "top1pct")) {
 # Generate lists per score type and threshold — no internal direction loop needed.
 # ORA gene lists are generated from score-based rankings only.
 # gene_caas_score is the primary axis; gene_rand_score (accumulation) is included
-# as it is a custom score. RER, FADE, and MoleRate use significance thresholds,
+# as it is a custom score. RER and FADE use significance thresholds,
 # not scores, for characterization — their gene lists are not generated here.
 gene_score_cols <- c("gene_caas_score")
 if (has_accum && any(!is.na(gene_out$gene_rand_score)))

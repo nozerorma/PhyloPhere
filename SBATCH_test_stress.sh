@@ -96,7 +96,6 @@ export INT_STRING=true
 export INT_CT_ACCUMULATION=false
 export INT_VEP=false
 export INT_FADE=false
-export INT_MOLERATE=true
 export INT_RER=true
 export INT_SCORING=true
 export INT_SCORING_STRESS=true
@@ -128,7 +127,6 @@ export RUN_SA_SCORING=false
 export SA_SCORING_STRESS=false
 export SA_SCORING_STRESS_TOP_N=25
 export RUN_SA_FADE=true
-export RUN_SA_MOLERATE=false
 export RUN_SA_RER=false
 
 export SA_SELECTION_MODE_ALL=true

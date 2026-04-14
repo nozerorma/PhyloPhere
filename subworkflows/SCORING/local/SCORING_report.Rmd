@@ -143,7 +143,6 @@ boot_measure_is_raw  <- identical(boot_measure_col,  "pvalue_boot")
 has_rand     <- "gene_rand_score"     %in% names(gene_df) && any(!is.na(gene_df$gene_rand_score))
 has_rer      <- "gene_rer_score"      %in% names(gene_df) && any(!is.na(gene_df$gene_rer_score))
 has_fade     <- "gene_fade_score"     %in% names(gene_df) && any(!is.na(gene_df$gene_fade_score))
-has_molerate <- "gene_molerate_score" %in% names(gene_df) && any(!is.na(gene_df$gene_molerate_score))
 
 # ── VEP optional inputs ───────────────────────────────────────────────────────
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
@@ -259,7 +258,6 @@ substitutions (CAAS).  The scoring operates at two levels:
    `r if (has_rand) "- **gene_rand_score** — randomization enrichment across grouping schemes."`
    `r if (has_rer) "- **gene_rer_score** — RERConverge evolutionary rate correlation."`
    `r if (has_fade) "- **gene_fade_score** — directional selection signal (FADE max Bayes Factor, gene-level)."`
-   `r if (has_molerate) "- **gene_molerate_score** — differential evolutionary rate (MoleRate, min p-value across top/bottom directions)."`
    - **gene_composite_score** — unweighted mean of available gene scores.
 
 All component scores are mapped to a 0--1 scale using decile ranking, making
@@ -466,7 +464,7 @@ $$\text{gene\_fade\_score} = \frac{\text{ntile}(\max_{d \in \{\text{top,bottom}\
 
 Unweighted mean of all available gene-level sub-scores:
 
-$$\text{gene\_composite\_score} = \frac{\text{gene\_caas} + [\text{gene\_rand}] + [\text{gene\_rer}] + [\text{gene\_fade}] + [\text{gene\_molerate}]}{N_{\text{available}}}$$
+$$\text{gene\_composite\_score} = \frac{\text{gene\_caas} + [\text{gene\_rand}] + [\text{gene\_rer}] + [\text{gene\_fade}]}{N_{\text{available}}}$$
 
 ---
 
@@ -1895,180 +1893,6 @@ ggplot(gene_df %>% filter(!is.na(gene_rer_score), !is.na(gene_caas_score)),
   theme(plot.title = element_text(face = "bold"))
 ```
 
-### MoleRate
-
-`r if (!has_molerate) "> **Note:** MoleRate results not available for this run."`
-
-```{r gene-molerate-dist, eval=has_molerate, fig.height=4.5}
-ggplot(gene_df %>% filter(!is.na(gene_molerate_score)), aes(x = gene_molerate_score)) +
-  geom_histogram(aes(y = after_stat(density)), bins = 40,
-                 fill = .tableau10[3], alpha = 0.7) +
-  geom_density(linewidth = 0.8, colour = .tableau10[4]) +
-  labs(title = "Gene MoleRate Score Distribution",
-       subtitle = "Deciles of min(pval_pp_vs_prop) across top/bottom directions per gene",
-       x = "gene_molerate_score", y = "Density") +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-```{r gene-molerate-decile-table, eval=has_molerate && "mol_min_pval" %in% names(gene_df)}
-mol_boundary_tbl <- decile_boundary_tbl(
-  gene_df$mol_min_pval,
-  score_name = "gene_molerate_score",
-  lower_better = TRUE,
-  value_label = "P-value",
-  digits = 2
-)
-if (!is.null(mol_boundary_tbl)) {
-  knitr::kable(mol_boundary_tbl,
-               caption = "MoleRate p-value range per decile (decile 10 = smallest p-values, gene_molerate_score = 1.0)")
-}
-```
-
-```{r gene-molerate-log2ratio, eval=has_molerate, fig.height=5}
-# Visualise log2_ratio (acceleration vs deceleration) per direction.
-# mol_log2ratio_top    > 0  → foreground accelerated in top-phenotype lineages
-# mol_log2ratio_bottom > 0  → foreground accelerated in bottom-phenotype lineages
-has_mol_log2_top    <- "mol_log2ratio_top"    %in% names(gene_df) && any(!is.na(gene_df$mol_log2ratio_top))
-has_mol_log2_bottom <- "mol_log2ratio_bottom" %in% names(gene_df) && any(!is.na(gene_df$mol_log2ratio_bottom))
-
-if (has_mol_log2_top || has_mol_log2_bottom) {
-  mol_long <- gene_df %>%
-    select(Gene,
-           any_of(c("mol_log2ratio_top", "mol_log2ratio_bottom"))) %>%
-    pivot_longer(-Gene, names_to = "Direction", values_to = "log2_ratio") %>%
-    filter(!is.na(log2_ratio)) %>%
-    mutate(
-      Direction   = recode(Direction,
-                           mol_log2ratio_top    = "top",
-                           mol_log2ratio_bottom = "bottom"),
-      Rate_change = ifelse(log2_ratio > 0, "Accelerated", "Decelerated")
-    )
-
-  ggplot(mol_long, aes(x = log2_ratio, fill = Rate_change, colour = Rate_change)) +
-    geom_histogram(aes(y = after_stat(density)), bins = 40, alpha = 0.5,
-                   position = "identity") +
-    geom_density(linewidth = 0.8, alpha = 0) +
-    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey30", linewidth = 0.7) +
-    scale_fill_manual(values   = c(Accelerated = .tableau10[3], Decelerated = .tableau10[1])) +
-    scale_colour_manual(values = c(Accelerated = .tableau10[3], Decelerated = .tableau10[1])) +
-    facet_wrap(~Direction, ncol = 2) +
-    labs(
-      title    = "MoleRate log2-ratio: Acceleration vs. Deceleration",
-      subtitle = "log2(fg rate / bg rate) — positive = acceleration in foreground lineages",
-      x = "log2_ratio", y = "Density", fill = NULL, colour = NULL
-    ) +
-    theme(plot.title      = element_text(face = "bold"),
-          legend.position = "right",
-          strip.text      = element_text(face = "bold"))
-}
-```
-
-```{r gene-molerate-accel-top, eval=has_molerate && (has_mol_log2_top || has_mol_log2_bottom), fig.height=6}
-# Top accelerated and decelerated genes per direction (with gene_molerate_score)
-if (exists("mol_long")) {
-  mol_extremes <- mol_long %>%
-    group_by(Direction) %>%
-    mutate(abs_log2 = abs(log2_ratio)) %>%
-    slice_max(abs_log2, n = 20, with_ties = FALSE) %>%
-    arrange(Direction, log2_ratio) %>%
-    mutate(Gene_dir = paste0(Gene, " (", Direction, ")"),
-           Gene_dir = factor(Gene_dir, levels = Gene_dir))
-
-  ggplot(mol_extremes, aes(x = log2_ratio, y = Gene_dir, fill = Rate_change)) +
-    geom_col() +
-    geom_vline(xintercept = 0, colour = "grey30", linewidth = 0.5) +
-    scale_fill_manual(values = c(Accelerated = .tableau10[3], Decelerated = .tableau10[1])) +
-    facet_wrap(~Direction, scales = "free_y", ncol = 2) +
-    labs(title = "Top 20 Genes by Absolute log2-ratio per Direction",
-         subtitle = "Red = accelerated foreground; Blue = decelerated foreground",
-         x = "log2(R_test / R_bg)", y = NULL, fill = NULL) +
-    theme(plot.title = element_text(face = "bold"),
-          axis.text.y = element_text(size = 7),
-          legend.position = "none")
-}
-```
-
-```{r gene-molerate-caas-scatter, eval=has_molerate, fig.height=5}
-ggplot(gene_df %>% filter(!is.na(gene_molerate_score), !is.na(gene_caas_score)),
-       aes(x = gene_caas_score, y = gene_molerate_score)) +
-  geom_point(alpha = 0.4, size = 0.9, colour = .tableau10[3]) +
-  geom_smooth(method = "lm", se = TRUE, colour = .tableau10[4], linewidth = 0.7) +
-  ggrepel::geom_text_repel(
-    data = gene_df %>%
-      filter(!is.na(gene_molerate_score), !is.na(gene_caas_score)) %>%
-      filter(gene_molerate_score > quantile(gene_molerate_score, 0.90, na.rm=TRUE) |
-             gene_caas_score     > quantile(gene_caas_score,     0.90, na.rm=TRUE)),
-    aes(label = Gene), size = 2.5, max.overlaps = 15
-  ) +
-  labs(title = "Gene CAAS Score vs MoleRate Score",
-       subtitle = sprintf("r = %.3f | Genes in top 10%% of either score labelled",
-                          safe_cor(gene_df$gene_caas_score, gene_df$gene_molerate_score)),
-       x = "gene_caas_score", y = "gene_molerate_score") +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-### RER vs MoleRate
-
-`r if (!has_rer || !has_molerate) "> **Note:** Both RERConverge and MoleRate results are required for this tab."`
-
-```{r rer-vs-molerate, eval=has_rer && has_molerate, fig.height=6}
-# Compare the two rate-based gene scores: RERConverge (genome-wide rate correlation)
-# vs MoleRate (within-gene rate ratio test).
-# Genes in the top quadrant of both are the strongest candidates for rate change.
-rer_mol_df <- gene_df %>% filter(!is.na(gene_rer_score), !is.na(gene_molerate_score))
-
-r_rer_mol <- safe_cor(rer_mol_df$gene_rer_score, rer_mol_df$gene_molerate_score)
-
-rer_mol_thr_rer <- quantile(rer_mol_df$gene_rer_score,     0.80, na.rm = TRUE)
-rer_mol_thr_mol <- quantile(rer_mol_df$gene_molerate_score, 0.80, na.rm = TRUE)
-
-ggplot(rer_mol_df, aes(x = gene_rer_score, y = gene_molerate_score,
-                        colour = gene_caas_score)) +
-  geom_point(alpha = 0.5, size = 1.2) +
-  geom_smooth(method = "lm", se = TRUE, colour = "grey40", linewidth = 0.6) +
-  geom_hline(yintercept = rer_mol_thr_mol, linetype = "dotted", colour = "grey50") +
-  geom_vline(xintercept = rer_mol_thr_rer, linetype = "dotted", colour = "grey50") +
-  ggrepel::geom_text_repel(
-    data = rer_mol_df %>%
-      filter(gene_rer_score > rer_mol_thr_rer & gene_molerate_score > rer_mol_thr_mol),
-    aes(label = Gene), size = 2.5, max.overlaps = 20, colour = "black"
-  ) +
-  scale_colour_viridis_c(name = "CAAS\nScore", option = "plasma") +
-  labs(
-    title    = "RERConverge Score vs MoleRate Score",
-    subtitle = sprintf("r = %.3f | Dotted lines: top 20%% thresholds | RERConverge: genome-wide rate correlation; MoleRate: within-gene rate ratio",
-                       r_rer_mol),
-    x = "gene_rer_score", y = "gene_molerate_score"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-```{r rer-vs-molerate-pval, eval=has_rer && has_molerate && "rer_min_pval" %in% names(gene_df) && "mol_min_pval" %in% names(gene_df), fig.height=6}
-# Raw p-value comparison (log scale) — less affected by rank discretization
-rer_mol_pval_df <- gene_df %>%
-  filter(!is.na(rer_min_pval), !is.na(mol_min_pval))
-
-ggplot(rer_mol_pval_df, aes(x = -log10(rer_min_pval), y = -log10(mol_min_pval),
-                              colour = gene_caas_score)) +
-  geom_point(alpha = 0.5, size = 1.2) +
-  geom_smooth(method = "lm", se = TRUE, colour = "grey40", linewidth = 0.6) +
-  ggrepel::geom_text_repel(
-    data = rer_mol_pval_df %>%
-      filter(-log10(rer_min_pval) > quantile(-log10(rer_min_pval), 0.90, na.rm=TRUE) |
-             -log10(mol_min_pval) > quantile(-log10(mol_min_pval), 0.90, na.rm=TRUE)),
-    aes(label = Gene), size = 2.5, max.overlaps = 15, colour = "black"
-  ) +
-  scale_colour_viridis_c(name = "CAAS\nScore", option = "plasma") +
-  labs(
-    title    = "RERConverge vs MoleRate: raw p-values (-log10 scale)",
-    subtitle = sprintf("r = %.3f | Genes in top 10%% of either score labelled",
-                       safe_cor(-log10(rer_mol_pval_df$rer_min_pval),
-                                -log10(rer_mol_pval_df$mol_min_pval))),
-    x = "-log10(RERConverge p-value)", y = "-log10(MoleRate p-value)"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-```
-
 ### Gene Composite Score
 
 ```{r gene-composite-dist, fig.height=5}
@@ -2112,7 +1936,6 @@ gene_score_cols_tp <- "gene_caas_score"
 if (has_rand)     gene_score_cols_tp <- c(gene_score_cols_tp, "gene_rand_score")
 if (has_rer)      gene_score_cols_tp <- c(gene_score_cols_tp, "gene_rer_score")
 if (has_fade)     gene_score_cols_tp <- c(gene_score_cols_tp, "gene_fade_score")
-if (has_molerate) gene_score_cols_tp <- c(gene_score_cols_tp, "gene_molerate_score")
 
 # Direction per gene is inherited from its top-scoring position
 gene_direction_tp <- pos_df %>%
@@ -2209,7 +2032,6 @@ score_cols <- "gene_caas_score"
 if (has_rand)     score_cols <- c(score_cols, "gene_rand_score")
 if (has_rer)      score_cols <- c(score_cols, "gene_rer_score")
 if (has_fade)     score_cols <- c(score_cols, "gene_fade_score")
-if (has_molerate) score_cols <- c(score_cols, "gene_molerate_score")
 
 if (length(score_cols) >= 2) {
   pairs_df <- gene_df %>%
@@ -2273,7 +2095,6 @@ gene_display_cols <- c("Gene", "n_positions", "gene_caas_score")
 if (has_rand)     gene_display_cols <- c(gene_display_cols, "gene_rand_score")
 if (has_rer)      gene_display_cols <- c(gene_display_cols, "gene_rer_score")
 if (has_fade)     gene_display_cols <- c(gene_display_cols, "gene_fade_score")
-if (has_molerate) gene_display_cols <- c(gene_display_cols, "gene_molerate_score")
 gene_display_cols <- c(gene_display_cols, "gene_composite_score")
 
 DT::datatable(
@@ -2788,7 +2609,6 @@ n_gene_components <- 1L  # gene_caas always present
 if (has_rand)     n_gene_components <- n_gene_components + 1L
 if (has_rer)      n_gene_components <- n_gene_components + 1L
 if (has_fade)     n_gene_components <- n_gene_components + 1L
-if (has_molerate) n_gene_components <- n_gene_components + 1L
 
 summary_tbl <- tibble(
   Metric = c(
@@ -2798,7 +2618,7 @@ summary_tbl <- tibble(
     "Gene Composite (median)", "Gene Composite (top 10% threshold)",
     "FADE available",
     "Randomization available", "RERConverge available",
-    "MoleRate available", "VEP PrimateAI-3D available",
+    "VEP PrimateAI-3D available",
     "Genomic coordinates available"
   ),
   Value = c(
@@ -2813,7 +2633,6 @@ summary_tbl <- tibble(
     ifelse(has_fade,         "Yes", "No"),
     ifelse(has_rand,         "Yes", "No"),
     ifelse(has_rer,          "Yes", "No"),
-    ifelse(has_molerate,     "Yes", "No"),
     ifelse(has_vep_primateai,"Yes", "No"),
     ifelse(has_genomic,      "Yes", "No")
   )

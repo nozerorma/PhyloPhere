@@ -7,7 +7,6 @@
  * FILTER_FASTA_TO_TREE  – drop FASTA sequences whose taxa are absent from a tree
  * EXTRACT_EXTREME_SPECIES – derive top/bottom species lists from trait_stats.csv
  * ANNOTATE_TREE_FG        – label foreground leaf branches in a Newick tree for FADE
- * EXTRACT_FG_BRANCHES     – write a list of FG species names for MoleRate --branches args
  * COLLECT_GENE_SETS     – build TOP / BOTTOM gene lists from postproc outputs
  */
 
@@ -48,7 +47,7 @@ process EXTRACT_EXTREME_SPECIES {
 // ─────────────────────────────────────────────────────────────────────────────
 // PHYLIP_TO_FASTA
 // direction is carried through as a passthrough value so that downstream
-// processes (ANNOTATE_TREE_FG, FADE_RUN, MOLERATE_RUN) receive a consistent
+// processes (ANNOTATE_TREE_FG and FADE_RUN) receive a consistent
 // (gene_id, direction, fasta) tuple without needing a separate join step.
 // Existing FASTA inputs are copied through directly; PHYLIP-like inputs are
 // converted to FASTA.
@@ -86,7 +85,7 @@ process PHYLIP_TO_FASTA {
 // FILTER_FASTA_TO_TREE
 // Restrict each per-gene FASTA to the phenotype-pruned tree taxa before any
 // downstream HyPhy step sees the alignment. This prevents off-tree species
-// from entering FADE / MoleRate simply because they are present in the raw
+// from entering FADE simply because they are present in the raw
 // alignment directory.
 // ─────────────────────────────────────────────────────────────────────────────
 process FILTER_FASTA_TO_TREE {
@@ -202,42 +201,11 @@ ${manifestText}MANIFEST_EOF
     """
 }
 
-
-// ─────────────────────────────────────────────────────────────────────────────
-// EXTRACT_FG_BRANCHES  (MoleRate: plain list of FG taxon names)
-// ─────────────────────────────────────────────────────────────────────────────
-process EXTRACT_FG_BRANCHES {
-    tag "${direction}"
-
-    input:
-    tuple val(direction), path(fg_species_file)
-
-    output:
-    tuple val(direction), path("fg_branches_${direction}.txt"), emit: fg_list
-
-    script:
-    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
-    if (params.use_singularity || params.use_apptainer) {
-        """
-        /usr/local/bin/_entrypoint.sh python ${local_dir}/extract_fg_branches.py \
-            --species-file "${fg_species_file}" \
-            --output    "fg_branches_${direction}.txt"
-        """
-    } else {
-        """
-        python ${local_dir}/extract_fg_branches.py \
-            --species-file "${fg_species_file}" \
-            --output    "fg_branches_${direction}.txt"
-        """
-    }
-}
-
-
 // ─────────────────────────────────────────────────────────────────────────────
 // COLLECT_GENE_SETS
 // ─────────────────────────────────────────────────────────────────────────────
 // Generic gene-set consolidation process used by:
-//   - SELECTION_PREP (when FADE or MOLERATE uses gene_set mode)
+//   - SELECTION_PREP (when FADE uses gene_set mode)
 //   - RER_MAIN (when RERconverge uses gene_set mode)
 //
 // Transforms postprocessing output files into unified TOP/BOTTOM gene lists.

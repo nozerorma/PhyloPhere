@@ -27,8 +27,6 @@ workflow SCORING {
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
         accum_ch                 // Channel<path> or null — collected accumulation CSVs
-        molerate_summary_top_ch  // Channel<path> or null — molerate_summary_top.tsv
-        molerate_summary_bot_ch  // Channel<path> or null — molerate_summary_bottom.tsv
         background_ch            // Channel<path> or null — cleaned_background_main.txt
         vep_transvar_ch          // Channel<path> or null — transvar_annotations.tsv (optional)
         vep_primateai_ch         // Channel<path> or null — primateai_scores.tsv     (optional)
@@ -85,12 +83,6 @@ workflow SCORING {
             .collect()
             .ifEmpty { [file('NO_ACCUM')] }
 
-        def resolved_molerate_top = (molerate_summary_top_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_molerate_summary_top ?: 'NO_MOLERATE_TOP') }
-
-        def resolved_molerate_bot = (molerate_summary_bot_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_molerate_summary_bottom ?: 'NO_MOLERATE_BOTTOM') }
-
         // VEP optional inputs — sentinels prevent staging collisions
         def resolved_vep_transvar = (vep_transvar_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_vep_transvar ?: 'NO_VEP_TRANSVAR') }
@@ -143,8 +135,6 @@ workflow SCORING {
             .combine(resolved_fade_top)
             .combine(resolved_fade_bottom)
             .combine(resolved_rer)
-            .combine(resolved_molerate_top)
-            .combine(resolved_molerate_bot)
             .multiMap { dir, postproc, fade_t, fade_b, rer, mol_t, mol_b ->
                 direction:   dir
                 postproc:    postproc
