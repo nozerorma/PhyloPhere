@@ -41,6 +41,7 @@
 process RER_BIN {
     tag "$rer_matrix"
     label 'process_medium'
+    errorStrategy 'ignore'
 
     input:
     path trait_file

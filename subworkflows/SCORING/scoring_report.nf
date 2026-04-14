@@ -39,6 +39,7 @@ process SCORING_REPORT {
     path stress_top_overlap
     path stress_variants
     path stress_latent_loadings
+    path fade_site_file      // optional: per-site FADE BF TSV (NO_FADE_SITE sentinel when absent)
     path vep_transvar        // optional: TransVar annotation TSV (NO_VEP_TRANSVAR sentinel when absent)
     path vep_primateai       // optional: PrimateAI-3D score TSV  (NO_VEP_PRIMATEAI sentinel when absent)
     path vep_aa2prot         // optional: aa2prot_global.csv — alignment→protein position map (NO_VEP_AA2PROT sentinel)
@@ -64,10 +65,12 @@ process SCORING_REPORT {
     def stress_overlap_arg = (stress_top_overlap.name =~ /^NO_SCORING_STRESS_OVERLAP/) ? 'NULL' : "'${stress_top_overlap}'"
     def stress_variants_arg = (stress_variants.name =~ /^NO_SCORING_STRESS_VARIANTS/) ? 'NULL' : "'${stress_variants}'"
     def stress_loadings_arg = (stress_latent_loadings.name =~ /^NO_SCORING_STRESS_LOADINGS/) ? 'NULL' : "'${stress_latent_loadings}'"
+    def fs_arg  = (fade_site_file.name =~ /^NO_FADE_SITE/)    ? 'NULL' : "'${fade_site_file}'"
     def tv_arg  = (vep_transvar.name  =~ /^NO_VEP_TRANSVAR/)  ? 'NULL' : "'${vep_transvar}'"
     def pai_arg = (vep_primateai.name =~ /^NO_VEP_PRIMATEAI/) ? 'NULL' : "'${vep_primateai}'"
     def a2p_arg = (vep_aa2prot.name   =~ /^NO_VEP_AA2PROT/)   ? 'NULL' : "'${vep_aa2prot}'"
     def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
+    def win_size = params.scoring_window_size_bp ?: 1000000
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -94,10 +97,12 @@ process SCORING_REPORT {
                     stress_overlap_file  = ${stress_overlap_arg},
                     stress_variants_file = ${stress_variants_arg},
                     stress_loadings_file = ${stress_loadings_arg},
+                    fade_site_file       = ${fs_arg},
                     vep_transvar_file    = ${tv_arg},
                     vep_primateai_file   = ${pai_arg},
                     vep_aa2prot_file     = ${a2p_arg},
                     genomic_info_file    = ${gi_arg},
+                    window_size_bp       = ${win_size},
                     direction            = '${direction}'
                 ),
                 output_file = 'SCORING_report_${direction}.html'
@@ -129,10 +134,12 @@ process SCORING_REPORT {
                     stress_overlap_file  = ${stress_overlap_arg},
                     stress_variants_file = ${stress_variants_arg},
                     stress_loadings_file = ${stress_loadings_arg},
+                    fade_site_file       = ${fs_arg},
                     vep_transvar_file    = ${tv_arg},
                     vep_primateai_file   = ${pai_arg},
                     vep_aa2prot_file     = ${a2p_arg},
                     genomic_info_file    = ${gi_arg},
+                    window_size_bp       = ${win_size},
                     direction            = '${direction}'
                 ),
                 output_file = 'SCORING_report_${direction}.html'

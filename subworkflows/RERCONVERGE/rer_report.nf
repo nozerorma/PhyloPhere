@@ -20,6 +20,7 @@
 process RER_REPORT {
     tag "rer_report|${params.traitname}"
     label 'process_reporting'
+    errorStrategy 'ignore'
 
     publishDir path: "${params.outdir}/RERConverge/RER_Results",
                mode: 'copy', overwrite: true,

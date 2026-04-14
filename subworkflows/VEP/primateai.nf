@@ -22,6 +22,7 @@
 process PRIMATEAI_MAP {
     tag "primateai"
     label 'process_long_compute'
+    errorStrategy 'ignore'
 
     publishDir path: "${params.outdir}/characterization/vep",
                mode: 'copy', overwrite: true,
@@ -46,7 +47,11 @@ process PRIMATEAI_MAP {
     """
     cp ${local_dir}/map_to_primateai.py .
 
-    [[ -f "${primateai_db}" ]] || { echo "Missing PrimateAI database: ${primateai_db}" >&2; exit 1; }
+    if [[ ! -f "${primateai_db}" ]]; then
+        echo "WARN Missing PrimateAI database: ${primateai_db}. Skipping PrimateAI mapping." >&2
+        touch primateai_mapped.tsv
+        exit 0
+    fi
 
     python3 map_to_primateai.py \\
         "${transvar_tsv}" \\

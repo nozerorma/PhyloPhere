@@ -144,10 +144,10 @@ workflow MOLERATE {
                 .ifEmpty { file(params.molerate_postproc_bottom     ?: 'NO_FILE') }
 
             def sets = COLLECT_GENE_SETS(
-                resolved_acc_top.first(),
-                resolved_acc_bottom.first(),
-                resolved_pp_top.first(),
-                resolved_pp_bottom.first()
+                resolved_acc_top,
+                resolved_acc_bottom,
+                resolved_pp_top,
+                resolved_pp_bottom
             )
 
             def top_ali_ch = sets.gene_set_top.flatMap { gsf ->

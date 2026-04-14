@@ -75,7 +75,7 @@ workflow ASR_ROBUSTNESS {
             assert d.exists() : "[asr_robustness] disambiguation_dir not found: ${params.disambiguation_dir}"
             def dStr = params.disambiguation_dir as String
             if (dStr.endsWith('.tar.gz') || dStr.endsWith('.tgz')) {
-                disambig_dir_ch = EXTRACT_DISAMBIG_DIR(Channel.value(d)).dir.first()
+                disambig_dir_ch = EXTRACT_DISAMBIG_DIR(Channel.value(d)).dir.collect().map { it[0] }
             } else {
                 disambig_dir_ch = Channel.value(d)
             }

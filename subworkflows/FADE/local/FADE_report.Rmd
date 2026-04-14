@@ -21,6 +21,7 @@ params:
   bf_threshold:   100
   min_genes_hmap: 3
   output_dir:     "."
+  fg_list_file:   NULL
 ---
 
 ```{r setup, include=FALSE}
@@ -60,6 +61,32 @@ tree.  Evidence is measured by the **Bayes Factor (BF)** for each site × target
 amino-acid combination.  A BF ≥ `r params$bf_threshold` is considered strong
 evidence of directional selection at that site.
 
+---
+
+## Analysis Setup
+
+```{r analysis-setup-fade, echo=FALSE}
+has_fg <- !is.null(params$fg_list_file) &&
+          nchar(params$fg_list_file %||% "") > 0 &&
+          file.exists(params$fg_list_file)
+
+if (has_fg) {
+  fg_sp <- readLines(params$fg_list_file)
+  fg_sp <- fg_sp[nzchar(trimws(fg_sp)) & !grepl("^#", fg_sp)]
+  cat(sprintf("**Foreground species (%s direction): %d species**\n\n",
+              params$direction, length(fg_sp)))
+  knitr::kable(
+    data.frame(Foreground_species = fg_sp),
+    caption = "Species labeled as foreground branches in FADE"
+  )
+} else {
+  cat("> Foreground species list not provided to this report.\n\n")
+  cat("> Species are specified via `--branches` flags in the HyPhy command.\n")
+}
+```
+
+---
+
 ```{r load-jsons}
 # ── Locate all FADE JSON files in the working directory ──────────────────────
 # Check if json files are in a "json" subdirectory
@@ -82,6 +109,38 @@ if (length(json_files) == 0) {
 }
 
 cat(sprintf("Found %d FADE result files.\n", length(json_files)))
+```
+
+```{r fade-json-branch-detect, echo=FALSE, results='asis'}
+# Attempt to detect foreground branches from the first FADE JSON
+# (supplements fg_list_file if not provided)
+if (!has_fg && length(json_files) > 0) {
+  js_sample <- tryCatch(
+    fromJSON(json_files[1], simplifyVector = FALSE),
+    error = function(e) NULL
+  )
+  if (!is.null(js_sample)) {
+    message("FADE JSON top-level keys: ", paste(names(js_sample), collapse = ", "))
+    fg_from_json <- tryCatch({
+      branches <- js_sample[["tested"]] %||%
+                  js_sample[["branch annotations"]] %||%
+                  js_sample[["Branch Attributes"]]
+      if (!is.null(branches) && is.list(branches)) {
+        names(branches)[sapply(branches, function(b) {
+          identical(b, "test") || identical(b, 1) || identical(b, "Foreground")
+        })]
+      } else character(0)
+    }, error = function(e) character(0))
+    if (length(fg_from_json) > 0) {
+      cat(sprintf("\n**Foreground species detected from JSON (%s direction, first gene): %d species**\n\n",
+                  params$direction, length(fg_from_json)))
+      print(knitr::kable(
+        data.frame(Species_from_JSON = fg_from_json),
+        caption = "Foreground species detected in FADE JSON (first gene)"
+      ))
+    }
+  }
+}
 ```
 
 ```{r parse-fade, results='asis', message=TRUE}
@@ -269,6 +328,25 @@ if (nrow(gene_summary) == 0) {
   }
 }
 
+invisible(NULL)
+```
+
+```{r write-site-tsv}
+# Write per-site BF summary for downstream SCORING characterisation.
+# Columns: gene, site, max_site_bf, top_target_aa, fade_biased
+if (exists("fade_df") && nrow(fade_df) > 0) {
+  site_summary <- fade_df %>%
+    filter(!is.na(bayes_factor)) %>%
+    group_by(gene, site) %>%
+    summarise(
+      max_site_bf   = max(bayes_factor, na.rm = TRUE),
+      top_target_aa = target_aa[which.max(bayes_factor)],
+      fade_biased   = max(bayes_factor, na.rm = TRUE) >= bf_thr,
+      .groups       = "drop"
+    )
+  out_site_tsv <- paste0("fade_site_bf_", params$direction, ".tsv")
+  write.table(site_summary, out_site_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
+}
 invisible(NULL)
 ```
 

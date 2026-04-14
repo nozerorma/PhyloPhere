@@ -22,6 +22,7 @@ params:
   log2fc_threshold: 0.5
   top_n_labels:     15
   output_dir:       "."
+  fg_list_file:     NULL
 ---
 
 ```{r setup, include=FALSE}
@@ -75,6 +76,30 @@ relative rate differs between foreground and background branches.
 P-values are Holm–Bonferroni corrected per gene (within‐gene, for branch-level
 tests) and are additionally FDR-corrected across genes (between-gene, for the
 gene-level tests) in this report.
+
+---
+
+## Analysis Setup
+
+```{r analysis-setup-molerate, echo=FALSE}
+has_fg <- !is.null(params$fg_list_file) &&
+          nchar(params$fg_list_file %||% "") > 0 &&
+          file.exists(params$fg_list_file)
+
+if (has_fg) {
+  fg_sp <- readLines(params$fg_list_file)
+  fg_sp <- fg_sp[nzchar(trimws(fg_sp)) & !grepl("^#", fg_sp)]
+  cat(sprintf("**Foreground species (%s direction): %d species**\n\n",
+              params$direction, length(fg_sp)))
+  knitr::kable(
+    data.frame(Foreground_species = fg_sp),
+    caption = "Species labeled as foreground branches in MoleRate"
+  )
+} else {
+  cat("> Foreground species list not provided to this report.\n\n")
+  cat("> Species are specified via `--branches` flags in the HyPhy command.\n")
+}
+```
 
 ---
 
@@ -161,7 +186,13 @@ parse_molerate_json <- function(path) {
     aicc_prop <- as_num(safe_get(prop_fit, "AIC-c"))
 
     # ── Branch-level results (optional) ──────────────────────────────────────
-    bl_results <- safe_get(js, "branch level results")
+    # HyPhy versions vary in key naming — try all known variants
+    message(sprintf("  [%s] top-level JSON keys: %s", gene_id, paste(names(js), collapse = ", ")))
+    bl_results <- safe_get(js, "branch level results") %||%
+                  safe_get(js, "branch-level results") %||%
+                  safe_get(js, "Branch-level results") %||%
+                  safe_get(js, "Branch Level Results") %||%
+                  safe_get(js, "tested")
     n_sig_branches <- if (!is.null(bl_results)) {
       sigs <- sapply(bl_results, function(br) {
         pv <- as_num(safe_get(br, "single branch", "p-value") %||%

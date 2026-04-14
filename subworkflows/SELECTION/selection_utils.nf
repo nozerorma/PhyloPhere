@@ -157,6 +157,53 @@ process ANNOTATE_TREE_FG {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// ANNOTATE_TREE_FG_BATCHED — batched annotation with foreground labels.
+// Processes multiple genes in a single Nextflow task, reducing SLURM scheduling
+// overhead. Up to params.fade_batch_workers genes run concurrently within each
+// task using bash job control.
+//
+// Manifest format (tab-separated, one gene per line):
+//   gene_id <TAB> direction <TAB> fasta_filename <TAB> tree_filename <TAB> species_file_filename
+//
+// Files are staged under:
+//   fastas/<fasta_filename>
+//   trees/<tree_filename>
+//   species_files/<species_file_filename>
+// Output files: <gene_id>_<direction>_fg.nwk and <gene_id>_<direction>.fa
+// ─────────────────────────────────────────────────────────────────────────────
+process ANNOTATE_TREE_FG_BATCHED {
+    tag "${batchID} (${batchSize} genes)"
+
+    input:
+    tuple val(batchID), val(batchSize), val(manifestText),
+          path(fastas, stageAs: 'fastas/*'),
+          path(trees, stageAs: 'trees/*'),
+          path(species_files, stageAs: 'species_files/*')
+
+    output:
+    path "*_fg.nwk",            emit: annotated_trees, optional: true
+    path "*.fa",                emit: filtered_fastas, optional: true
+
+    script:
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
+    def script_dir = "${baseDir}/subworkflows/SELECTION/local/scripts"
+    def workers = params.fade_batch_workers ?: 4
+    def runnerMode = (params.use_singularity || params.use_apptainer) ? "container" : "local"
+    """
+    cat <<'MANIFEST_EOF' > ${batchID}.manifest.tsv
+${manifestText}MANIFEST_EOF
+
+    bash ${script_dir}/run_annotate_tree_fg_batch.sh \\
+        --batch-id    "${batchID}" \\
+        --manifest    "${batchID}.manifest.tsv" \\
+        --workers     "${workers}" \\
+        --runner-mode "${runnerMode}" \\
+        --local-dir   "${local_dir}"
+    """
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // EXTRACT_FG_BRANCHES  (MoleRate: plain list of FG taxon names)
 // ─────────────────────────────────────────────────────────────────────────────
 process EXTRACT_FG_BRANCHES {
@@ -188,7 +235,14 @@ process EXTRACT_FG_BRANCHES {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COLLECT_GENE_SETS
-// Combines postproc TXT files into two gene lists.
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic gene-set consolidation process used by:
+//   - SELECTION_PREP (when FADE or MOLERATE uses gene_set mode)
+//   - RER_MAIN (when RERconverge uses gene_set mode)
+//
+// Transforms postprocessing output files into unified TOP/BOTTOM gene lists.
+// Each workflow supplies its own --postproc_top/bottom via params (e.g.,
+// --fade_postproc_top, --molerate_postproc_top, --rer_postproc_top).
 // ─────────────────────────────────────────────────────────────────────────────
 process COLLECT_GENE_SETS {
     tag "collect_gene_sets"

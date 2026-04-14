@@ -18,6 +18,7 @@
 process PROT2AA {
     tag "prot2aa"
     label 'process_long_compute'
+    errorStrategy 'ignore'
 
     publishDir path: "${params.outdir}/characterization/vep",
                mode: 'copy', overwrite: true,
@@ -69,14 +70,12 @@ process PROT2AA {
             python3 Extract_protein_positions_TRANSVAR.py \\
                 "\$cds" "${hs_cds_gz}" "\$track" "${gff_file}" \\
                 "${caas_file}" "out/\${gene}_out.csv" "${gene_equiv}" "\$gene" \\
-                || { echo "ERROR prot2aa: script failed for \${gene}" >&2; failed=1; }
+                || echo "WARN prot2aa: script failed for \${gene}, skipping" >&2
         else
             [[ -z "\$track" ]] && echo "SKIP prot2aa \${gene}: tracking file not found" >&2
             [[ -z "\$cds" ]]   && echo "SKIP prot2aa \${gene}: CDS fasta not found" >&2
         fi
     done <<< "\$genes"
-
-    (( failed == 0 )) || exit 1
 
     shopt -s nullglob
     out_files=(out/*.csv)

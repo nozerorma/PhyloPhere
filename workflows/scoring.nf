@@ -12,8 +12,9 @@
  * File: workflows/scoring.nf
  */
 
-include { SCORING_COMPUTE } from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
-include { SCORING_REPORT }  from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
+include { SCORING_COMPUTE }         from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
+include { SCORING_REPORT }          from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
+include { SCORING_OVERLAP_REPORT }  from "${baseDir}/subworkflows/SCORING/scoring_overlap_report.nf"
 include { ORA_GENERAL_REPORT as ORA_SCORING_POSITION } from "${baseDir}/subworkflows/ORA/ora_general.nf"
 include { ORA_GENERAL_REPORT as ORA_SCORING_GENE     } from "${baseDir}/subworkflows/ORA/ora_general.nf"
 
@@ -33,6 +34,8 @@ workflow SCORING {
         vep_primateai_ch         // Channel<path> or null — primateai_scores.tsv     (optional)
         vep_aa2prot_ch           // Channel<path> or null — aa2prot_global.csv (alignment→protein pos map)
         genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
+        fade_site_top_ch         // Channel<path> or null — fade_site_bf_top.tsv     (optional)
+        fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -105,6 +108,17 @@ workflow SCORING {
                 if (gi && file(gi).exists()) file(gi) else file('NO_GENOMIC_INFO')
             }
 
+        // FADE per-site BF TSVs — direction-keyed (top/bottom paired via _opt join)
+        def resolved_fade_site_top = (fade_site_top_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_fade_site_top ?: 'NO_FADE_SITE_TOP') }
+            .map { f -> tuple('top', f) }
+
+        def resolved_fade_site_bot = (fade_site_bot_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_fade_site_bottom ?: 'NO_FADE_SITE_BOTTOM') }
+            .map { f -> tuple('bottom', f) }
+
+        def resolved_fade_site_ch = resolved_fade_site_top.mix(resolved_fade_site_bot)
+
         // Background for ORA
         def resolved_background = (background_ch ?: Channel.empty())
             .ifEmpty {
@@ -166,7 +180,12 @@ workflow SCORING {
         def _opt = { ch, sentinel ->
             report_core.map { d, _p, _g, _c -> d }
                 .join(ch, remainder: true)
-                .map { dir, f -> [dir, f ?: file(sentinel)] }
+                .map { row ->
+                    def dir = row[0]
+                    // join(remainder:true) may emit 2 or 3 columns depending on key/value shapes.
+                    def picked = row.findAll { it != null && it != dir }?.last()
+                    tuple(dir, picked ?: file(sentinel))
+                }
         }
 
         // Build a fully direction-keyed channel with all report inputs
@@ -177,7 +196,8 @@ workflow SCORING {
             .join(_opt(compute_out.stress_top_overlap,     'NO_SCORING_STRESS_OVERLAP'))
             .join(_opt(compute_out.stress_variants,        'NO_SCORING_STRESS_VARIANTS'))
             .join(_opt(compute_out.stress_latent_loadings, 'NO_SCORING_STRESS_LOADINGS'))
-        // report_all: (dir, pos, gene, corr, ss, sc, sr, so, sv, sl) — 10 elements
+            .join(_opt(resolved_fade_site_ch,              'NO_FADE_SITE'))
+        // report_all: (dir, pos, gene, corr, ss, sc, sr, so, sv, sl, fade_site) — 11 elements
 
         // Combine with shared VEP/genomic inputs (single-item channels reused per direction)
         def rpt_in = report_all
@@ -185,7 +205,7 @@ workflow SCORING {
             .combine(resolved_vep_primateai)
             .combine(resolved_vep_aa2prot)
             .combine(resolved_genomic_info)
-            .multiMap { dir, pos, gene, corr, ss, sc, sr, so, sv, sl, tv, pai, a2p, gi ->
+            .multiMap { dir, pos, gene, corr, ss, sc, sr, so, sv, sl, fs, tv, pai, a2p, gi ->
                 direction:   dir
                 pos_scores:  pos
                 gene_scores: gene
@@ -196,6 +216,7 @@ workflow SCORING {
                 stress_over: so
                 stress_var:  sv
                 stress_load: sl
+                fade_site:   fs
                 transvar:    tv
                 primateai:   pai
                 aa2prot:     a2p
@@ -213,10 +234,31 @@ workflow SCORING {
             rpt_in.stress_over,
             rpt_in.stress_var,
             rpt_in.stress_load,
+            rpt_in.fade_site,
             rpt_in.transvar,
             rpt_in.primateai,
             rpt_in.aa2prot,
             rpt_in.genomic
+        )
+
+        // ── Top/Bottom Overlap Report ──────────────────────────────────────
+        // Collect the two per-direction position and gene score files, then
+        // render a single overlap report that compares them.
+        def pos_top_file  = compute_out.position_scores
+            .filter { it[0] == 'top'    }.map { _dir, f -> f }
+        def pos_bot_file  = compute_out.position_scores
+            .filter { it[0] == 'bottom' }.map { _dir, f -> f }
+        def gene_top_file = compute_out.gene_scores
+            .filter { it[0] == 'top'    }.map { _dir, f -> f }
+        def gene_bot_file = compute_out.gene_scores
+            .filter { it[0] == 'bottom' }.map { _dir, f -> f }
+
+        def overlap_out = SCORING_OVERLAP_REPORT(
+            pos_top_file,
+            pos_bot_file,
+            gene_top_file,
+            gene_bot_file,
+            resolved_genomic_info
         )
 
         // ── ORA on scoring gene lists (optional) ───────────────────────────
@@ -240,4 +282,5 @@ workflow SCORING {
         position_scores = compute_out.position_scores.map { _dir, f -> f }
         gene_scores     = compute_out.gene_scores.map     { _dir, f -> f }
         report          = report_out.report
+        overlap_report  = overlap_out.report
 }

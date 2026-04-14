@@ -68,6 +68,7 @@ include {ORA_EXCLUDED} from './workflows/ora_excluded.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {MOLERATE}       from './workflows/molerate.nf'
+include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 
@@ -303,57 +304,77 @@ workflow {
 
         // Merge per-phenotype files into single files before passing to selection
         // workflows. When multiple phenotypes are run together each sel_* channel
-        // emits N items (one per phenotype). COLLECT_GENE_SETS inside FADE/MOLERATE/RER
+        // emits N items (one per phenotype). COLLECT_GENE_SETS inside SELECTION_PREP
         // is invoked once per synchronised 2-tuple of inputs, so without this merge it
         // runs N times and every gene appears N times in the resulting ali channel —
         // causing file-name staging collisions in the report process. collectFile()
         // collapses N items into one merged file so COLLECT_GENE_SETS runs exactly once.
         // When sel_* channels are empty (standalone runs) collectFile() emits nothing
-        // and the .ifEmpty {} fallback paths inside each workflow remain intact.
+        // and the .ifEmpty {} fallback paths inside SELECTION_PREP remain intact.
         sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
         sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
 
-        // Split stats channel so FADE and MOLERATE can each receive the single
-        // emission without competing on the same queue channel.
-        def stats_source_ch = contrast_out
-            ? contrast_out.stats_file_out
-            : (reporting_results ? reporting_results.stats_file : Channel.empty())
-        def split_stats_file = stats_source_ch
-            ? stats_source_ch.multiMap { f -> fade: f; molerate: f }
-            : Channel.empty().multiMap { f -> fade: f; molerate: f }
+        if (params.fade || params.molerate) {
+            // Resolve upstream channel sources for SELECTION_PREP.
+            // These channels are now consumed by a single SELECTION_PREP call
+            // (instead of being split separately for FADE and MOLERATE).
 
-        // Split CT discovery output so FADE and MOLERATE can reuse the same
-        // toy-mode gene universe selected upstream by CT.
-        def ct_discovery_source_ch = (ct_results && ran_discovery)
-            ? ct_results.discovery_file
-            : Channel.empty()
-        def split_ct_discovery = ct_discovery_source_ch
-            ? ct_discovery_source_ch.multiMap { f -> fade: f; molerate: f }
-            : Channel.empty().multiMap { f -> fade: f; molerate: f }
-        
-        // Tree: FADE and MOLERATE use the pruned tree from reporting (if available)
-        // which contains only species with phenotypic data.
-        // If reporting didn't run but contrast_selection did, fall back to CT-pruned tree.
-        // Otherwise use params.tree (the complete species tree) via .ifEmpty {} in workflows.
-        def tree_source_ch = reporting_results
-            ? reporting_results.pruned_tree_file
-            : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
-        def split_tree = tree_source_ch
-            ? tree_source_ch.multiMap { f -> fade: f; molerate: f }
-            : Channel.empty().multiMap { f -> fade: f; molerate: f }
+            def stats_source_ch = contrast_out
+                ? contrast_out.stats_file_out
+                : (reporting_results ? reporting_results.stats_file : Channel.empty())
 
-        if (params.fade) {
-            FADE(split_stats_file.fade, split_tree.fade,
-                 sel_pp_top_ch,  sel_pp_bottom_ch,
-                 split_ct_discovery.fade)
-            ran_any = true
-        }
+            // Tree: prefer phenotype-pruned tree from reporting; fall back to
+            // CT-pruned tree from contrast_selection; otherwise SELECTION_PREP
+            // falls back to params.tree via its .ifEmpty {} guard.
+            def tree_source_ch = reporting_results
+                ? reporting_results.pruned_tree_file
+                : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
 
-        if (params.molerate) {
-            MOLERATE(split_stats_file.molerate, split_tree.molerate,
-                     sel_pp_top_ch,  sel_pp_bottom_ch,
-                     split_ct_discovery.molerate)
-            ran_any = true
+            // CT discovery output for toy_mode gene reuse (null when CT didn't run)
+            def ct_discovery_source_ch = (ct_results && ran_discovery)
+                ? ct_results.discovery_file
+                : Channel.empty()
+
+            // Run alignment prep ONCE — shared by both FADE and MOLERATE.
+            // SELECTION_PREP outputs value channels for species/tree files
+            // (can be safely consumed by multiple downstream operators) and
+            // queue channels for the per-gene filtered FASTAs.
+            SELECTION_PREP(
+                stats_source_ch,
+                tree_source_ch,
+                sel_pp_top_ch,
+                sel_pp_bottom_ch,
+                ct_discovery_source_ch
+            )
+
+            // Fork each per-gene fasta channel into independent copies for
+            // FADE and MOLERATE so they don't compete on the same queue channel.
+            def prep_top_fanout    = SELECTION_PREP.out.filtered_fasta_top_ch
+                .multiMap { it -> fade: it; molerate: it }
+            def prep_bottom_fanout = SELECTION_PREP.out.filtered_fasta_bottom_ch
+                .multiMap { it -> fade: it; molerate: it }
+
+            if (params.fade) {
+                FADE(
+                    prep_top_fanout.fade,
+                    prep_bottom_fanout.fade,
+                    SELECTION_PREP.out.tree_ch,
+                    SELECTION_PREP.out.top_species,
+                    SELECTION_PREP.out.bottom_species
+                )
+                ran_any = true
+            }
+
+            if (params.molerate) {
+                MOLERATE(
+                    prep_top_fanout.molerate,
+                    prep_bottom_fanout.molerate,
+                    SELECTION_PREP.out.tree_ch,
+                    SELECTION_PREP.out.top_species,
+                    SELECTION_PREP.out.bottom_species
+                )
+                ran_any = true
+            }
         }
 
         if (params.rer_tool) {
@@ -380,6 +401,8 @@ workflow {
             def scoring_postproc_ch      = postproc_results ? postproc_results.filtered_discovery : null
             def scoring_fade_top_ch      = params.fade       ? FADE.out.summary_top               : null
             def scoring_fade_bot_ch      = params.fade       ? FADE.out.summary_bottom            : null
+            def scoring_fade_site_top_ch = params.fade       ? FADE.out.site_tsv_top              : null
+            def scoring_fade_site_bot_ch = params.fade       ? FADE.out.site_tsv_bottom           : null
             def scoring_rer_ch           = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
             def scoring_molerate_top_ch  = params.molerate   ? MOLERATE.out.summary_top           : null
@@ -402,7 +425,9 @@ workflow {
                 scoring_vep_tv_ch,
                 scoring_vep_pai_ch,
                 scoring_vep_aa2prot_ch,
-                null  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
+                null,  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
+                scoring_fade_site_top_ch,
+                scoring_fade_site_bot_ch
             )
             ran_any = true
         }

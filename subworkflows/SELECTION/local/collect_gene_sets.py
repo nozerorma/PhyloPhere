@@ -2,28 +2,30 @@
 """
 collect_gene_sets.py
 ────────────────────
-Collect significant gene sets from CT postprocessing outputs and write
-consolidated gene lists for TOP and BOTTOM directions.
+Consolidate gene sets from CT postprocessing outputs into directional lists.
 
-Sources integrated
-──────────────────
-TOP genes:
-  Postproc TXT: special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt
-  → gene names listed directly (no filtering needed, already significant)
+This script is used by FADE, MoleRate, and RERconverge workflows to transform
+postprocessing result files (typically line-separated gene lists) into unified
+TOP and BOTTOM gene sets for downstream analysis.
 
-BOTTOM genes:
-  Postproc TXT: special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt
+Input Format
+────────────
+Postproc files should contain gene names, one per line (comments starting with '#' 
+are skipped). Each file can be either:
+  - A plain text file with gene names
+  - A results file that lists significant genes (exact format depends on upstream tool)
 
 Usage
 -----
     python collect_gene_sets.py \\
-        [--postproc_top      postproc_top.txt] \\
-        [--postproc_bottom   postproc_bottom.txt] \\
+        [--postproc_top      top_genes.txt] \\
+        [--postproc_bottom   bottom_genes.txt] \\
         --out_top    gene_set_top.txt \\
         --out_bottom gene_set_bottom.txt
 
-Postproc source arguments are optional; missing directions produce empty
-output files with a warning.
+Arguments are optional; missing input files produce empty output files with a warning.
+Workflow drivers (FADE/MoleRate/RERconverge) supply their own --postproc_top/bottom
+paths via params (e.g. --fade_postproc_top, --molerate_postproc_top, --rer_postproc_top).
 """
 
 import argparse
@@ -64,9 +66,9 @@ def main():
         description="Collect TOP / BOTTOM significant gene sets for selection analyses"
     )
     parser.add_argument("--postproc_top",        default="",
-                        help="special_union_..._top_significant.txt")
+                        help="Top postproc results (gene names, one per line)")
     parser.add_argument("--postproc_bottom",     default="",
-                        help="special_union_..._bottom_significant.txt")
+                        help="Bottom postproc results (gene names, one per line)")
     parser.add_argument("--out_top",    required=True, help="Output: gene_set_top.txt")
     parser.add_argument("--out_bottom", required=True, help="Output: gene_set_bottom.txt")
     args = parser.parse_args()

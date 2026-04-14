@@ -19,226 +19,78 @@
 #   top    -> global_label == high_extreme species as foreground
 #   bottom -> global_label == low_extreme species as foreground
 #
-# Run modes (params.molerate_mode):
-#   gene_set  -> only genes from CT postproc significant lists
-#   all       -> every supported alignment file in the alignment directory
+# Alignment preparation (PHYLIP→FASTA conversion, tree-filtering, and species
+# extraction) is handled upstream by SELECTION_PREP (called once in main.nf),
+# which shares the results with FADE to avoid redundant processing.
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 # File: workflows/molerate.nf
 */
 
-include { COLLECT_GENE_SETS       } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { PHYLIP_TO_FASTA         } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { FILTER_FASTA_TO_TREE    } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { EXTRACT_FG_BRANCHES     } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { MOLERATE_RUN; MOLERATE_BATCHED } from "${baseDir}/subworkflows/MOLERATE/molerate_run.nf"
+include { EXTRACT_FG_BRANCHES             } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { MOLERATE_RUN; MOLERATE_BATCHED  } from "${baseDir}/subworkflows/MOLERATE/molerate_run.nf"
 include { MOLERATE_REPORT as MOLERATE_REPORT_TOP    } from "${baseDir}/subworkflows/MOLERATE/molerate_report.nf"
 include { MOLERATE_REPORT as MOLERATE_REPORT_BOTTOM } from "${baseDir}/subworkflows/MOLERATE/molerate_report.nf"
 
 
-// ---------------------------------------------------------------------------
-// Render a list of TSV row strings into a heredoc-safe manifest block.
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Render a list of TSV row strings into a heredoc-safe manifest block.
+ */
 def createBatchManifestText = { List<String> rows ->
     rows
         .collect { row -> row.replaceFirst(/^\s+/, '') }
         .join(System.lineSeparator()) + System.lineSeparator()
 }
 
-// ---------------------------------------------------------------------------
-// Private helper: build a List of [gene_id, direction, alignment_File] tuples.
-// Runs at channel-operator evaluation time (inside flatMap).
-// ---------------------------------------------------------------------------
-def ali_tuples_from_dir(String ali_dir, String direction, Set wanted) {
-    def extensions = ['.phy', '.phylip', '.aln', '.fa', '.fasta']
 
-    // ── plain directory ─────────────────────────────────────────────────────
-    def ali_path = file(ali_dir)
-    if (!ali_path.isDirectory()){
-        log.warn "MoleRate: alignment directory not found: ${ali_dir} -- skipping ${direction}"
-        return []
-    }
-    def all_files = ali_path.listFiles()?.findAll { f ->
-        def name = f.name.toLowerCase()
-        f.isFile() && (
-            name.endsWith('.phy')    ||
-            name.endsWith('.phylip') ||
-            name.endsWith('.aln')    ||
-            name.endsWith('.fa')     ||
-            name.endsWith('.fasta')  ||
-            !f.name.contains('.')
-        )
-    } ?: []
-
-    def tuples = all_files.collect { f ->
-        def gid = f.name.tokenize('.')[0]
-        (wanted == null || wanted.contains(gid)) ? [gid, direction, f] : null
-    }.findAll { it != null }
-
-    if (tuples.isEmpty()) {
-        log.warn "MoleRate: no alignment files matched for direction '${direction}' in ${ali_dir}"
-    } else {
-        log.info "MoleRate: ${tuples.size()} genes queued for '${direction}' direction"
-    }
-    return tuples
-}
-
-
-// ---------------------------------------------------------------------------
-// Workflow
-// ---------------------------------------------------------------------------
+// ─── Workflow ─────────────────────────────────────────────────────────────────
 
 workflow MOLERATE {
 
     take:
-        stats_file_input  // Channel<path> or null -> falls back to canonical trait_stats.csv under outdir
-        tree_input        // Channel<path> or null -> falls back to params.tree
-        // Optional upstream channels for inline gene-set piping.
-        // Pass Channel.empty() when running standalone (params-based).
-        pp_top_ch         // postproc TXT for TOP  (all_top.txt)
-        pp_bottom_ch      // postproc TXT for BOTTOM (all_bottom.txt)
-        // Optional CT discovery table used to reuse the single upstream toy sample.
-        ct_discovery_input
+        // Pre-processed alignment channels from SELECTION_PREP (called once in main.nf).
+        // Each channel emits (gene_id, filtered_fasta) tuples — no direction label yet;
+        // direction is introduced inside this workflow when building the MoleRate inputs.
+        fasta_top_ch      // (gene_id, fasta) for top-direction genes
+        fasta_bottom_ch   // (gene_id, fasta) for bottom-direction genes
+        // Shared reference files (value channels — can be broadcast to every gene)
+        tree_ch           // path to phenotype-pruned species tree
+        top_species_ch    // path to top_species.txt
+        bottom_species_ch // path to bottom_species.txt
 
     main:
 
-        // 1. Resolve shared inputs ----------------------------------------
-        def stats_file_ch = (stats_file_input ?: Channel.empty())
-            .ifEmpty {
-                def fallback = "${params.outdir}/data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv"
-                def f = file(fallback)
-                assert f.exists() : "MoleRate: trait_stats.csv not found at ${fallback}"
-                f
-            }
-
-        def tree_ch = (tree_input ?: Channel.empty())
-            .ifEmpty {
-                assert params.tree : "MoleRate requires --tree"
-                def f = file(params.tree)
-                assert f.exists() : "MoleRate: tree not found: ${params.tree}"
-                f
-            }
-
-        def ali_dir = (params.molerate_alignment && params.molerate_alignment != '') \
-            ? params.molerate_alignment : params.alignment
-        assert ali_dir : \
-            "MoleRate: no alignment directory specified (--molerate_alignment or --alignment)"
-
-        // LG model dat file
+        // ── LG model dat file ────────────────────────────────────────────────
         def lg_dat_ch = Channel.value(file(params.lg_dat_path))
-        def species_lists = EXTRACT_EXTREME_SPECIES(stats_file_ch)
-        def fg_inputs_ch = species_lists.top_species
-            .map { f -> tuple('top', f) }
-            .mix(species_lists.bottom_species.map { f -> tuple('bottom', f) })
 
-        // 2. Extract FG branch lists per direction (one process call each) ---
-        //    EXTRACT_FG_BRANCHES input: (direction, fg_species_file)
+        // ── Extract FG branch lists per direction ────────────────────────────
+        // EXTRACT_FG_BRANCHES converts a species-file into a plain taxon-name
+        // list consumed by MoleRate's --branches argument.
+        def fg_inputs_ch = top_species_ch
+            .map { f -> tuple('top', f) }
+            .mix(bottom_species_ch.map { f -> tuple('bottom', f) })
 
         fg_branches_ch = EXTRACT_FG_BRANCHES(fg_inputs_ch).fg_list
         // -> (direction, fg_list_file)
 
-        // 3. Build per-direction alignment channels -----------------------
-        def all_ali_ch
-
-        if (params.molerate_mode == 'all') {
-            if (params.toy_mode) {
-                def resolved_ct_discovery = (ct_discovery_input ?: Channel.empty())
-                    .ifEmpty { file('NO_FILE') }
-
-                all_ali_ch = resolved_ct_discovery.flatMap { discovery_file ->
-                    def toy_genes = null
-                    if (discovery_file.name != 'NO_FILE' && discovery_file.exists()) {
-                        toy_genes = discovery_file
-                            .readLines()
-                            .drop(1)
-                            .collect { it.split('\t')[0].trim() }
-                            .findAll { it }
-                            .toSet()
-                        log.info "[toy_mode] MoleRate: reusing ${toy_genes.size()} genes from CT discovery"
-                    } else {
-                        def n = (params.toy_n ?: 50) as int
-                        def all_top = ali_tuples_from_dir(ali_dir, 'top', null)
-                        Collections.shuffle(all_top)
-                        toy_genes = all_top.take(n).collect { it[0] }.toSet()
-                        log.info "[toy_mode] MoleRate: using ${toy_genes.size()} randomly sampled genes"
-                    }
-
-                    def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    toy_genes)
-                    def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', toy_genes)
-                    top_tuples + bottom_tuples
-                }
-            } else {
-                def top_tuples    = ali_tuples_from_dir(ali_dir, 'top',    null)
-                def bottom_tuples = ali_tuples_from_dir(ali_dir, 'bottom', null)
-                all_ali_ch = Channel.fromList(top_tuples + bottom_tuples)
-            }
-
-        } else {
-            // gene_set mode -----------------------------------------------
-            // Prefer upstream piped channels; fall back to --molerate_* path params.
-            def resolved_pp_top = (pp_top_ch ?: Channel.empty())
-                .ifEmpty { file(params.molerate_postproc_top        ?: 'NO_FILE') }
-
-            def resolved_pp_bottom = (pp_bottom_ch ?: Channel.empty())
-                .ifEmpty { file(params.molerate_postproc_bottom     ?: 'NO_FILE') }
-
-            def sets = COLLECT_GENE_SETS(
-                resolved_pp_top,
-                resolved_pp_bottom
-            )
-
-            def top_ali_ch = sets.gene_set_top.flatMap { gsf ->
-                def wanted = gsf.readLines()
-                    .collect { it.trim() }.findAll { it && !it.startsWith('#')}.toSet()
-                ali_tuples_from_dir(ali_dir, 'top', wanted)
-            }
-
-            def bottom_ali_ch = sets.gene_set_bottom.flatMap { gsf ->
-                def wanted = gsf.readLines()
-                    .collect { it.trim() }.findAll { it && !it.startsWith('#')}.toSet()
-                ali_tuples_from_dir(ali_dir, 'bottom', wanted)
-            }
-
-            all_ali_ch = top_ali_ch.mix(bottom_ali_ch)
-        }
-
-        // 4. Normalize all supported alignment inputs to FASTA --------------
-        // FASTA files (.fa / .fasta) bypass the conversion process entirely;
-        // only PHYLIP-like inputs are submitted to PHYLIP_TO_FASTA.
-        def ali_branched = all_ali_ch.branch {
-            is_fasta: { gid, dir, f ->
-                def n = f.name.toLowerCase()
-                n.endsWith('.fa') || n.endsWith('.fasta')
-            }
-            needs_convert: true
-        }
-        def direct_fasta_ch  = ali_branched.is_fasta
-        def converted_ch     = PHYLIP_TO_FASTA(ali_branched.needs_convert).fasta
-        fasta_ch = direct_fasta_ch.mix(converted_ch)
-        // -> (gene_id, direction, fasta)
-
-        // Restrict every gene alignment to the phenotype-pruned tree taxa
-        // before MoleRate receives the alignment.
-        def fasta_in_tree_ch = fasta_ch
-            .combine(tree_ch)
-            .map { gid, dir, fa, tree -> tuple(gid, dir, fa, tree) }
-        def tree_filtered_fasta_ch = FILTER_FASTA_TO_TREE(fasta_in_tree_ch).fasta
-        // -> (gene_id, direction, filtered_fasta)
-
-        // 5. Join fasta + fg_branches_ch by direction, broadcast tree -----
-        //  tree_filtered_fasta_ch : (gene_id, direction, fasta)
-        //  fg_branches_ch: (direction, fg_list)
-        //  For each (gene_id, direction) we need: fasta, fg_list, tree.
+        // ── Build per-direction MoleRate input channel ───────────────────────
+        // Introduce direction labels and join with fg_branches and tree.
         //
-        //  Strategy: combine (broadcast) fasta_ch with fg_branches_ch on direction, then
-        //  combine with tree_ch (single value).
+        // fasta_top_ch    : (gene_id, fasta)
+        // fasta_bottom_ch : (gene_id, fasta)
+        // fg_branches_ch  : (direction, fg_list_file)
+        // tree_ch         : path (value — broadcasts to every gene)
         //
-        //  tree_filtered_fasta_ch.map -> (direction, gene_id, fasta) [keyed by direction]
-        //  combine fg_branches_ch -> (direction, gene_id, fasta, fg_list)
-        //                           [broadcasts the 2 fg_list files across all genes]
-        //  combine tree_ch -> (direction, gene_id, fasta, fg_list, tree)
+        // Strategy: tag each fasta with its direction, then combine with
+        // fg_branches_ch on direction (broadcast 2 fg_list files across all genes),
+        // then combine with tree_ch (broadcast single tree).
 
-        def fasta_keyed_ch = tree_filtered_fasta_ch.map { gid, dir, fa -> tuple(dir, gid, fa) }
+        def top_keyed_ch    = fasta_top_ch.map    { gid, fa -> tuple('top',    gid, fa) }
+        def bottom_keyed_ch = fasta_bottom_ch.map { gid, fa -> tuple('bottom', gid, fa) }
+        def fasta_keyed_ch  = top_keyed_ch.mix(bottom_keyed_ch)
+        // -> (direction, gene_id, fasta)
 
         molerate_input_ch = fasta_keyed_ch
             .combine(fg_branches_ch, by: 0)
@@ -251,51 +103,49 @@ workflow MOLERATE {
         def molerateBatchSize = (params.molerate_batch_size ?: 1) as int
         if (molerateBatchSize > 1) {
             // ── Batched mode ──────────────────────────────────────────────
-            // molerate_input_ch: (gene_id, direction, fasta, tree, fg_list)
             // tree and fg_list are shared per direction — take from batch[0].
             def molerate_branched = molerate_input_ch.branch {
                 top:    it[1] == 'top'
                 bottom: it[1] == 'bottom'
             }
-            def molerateBatchCounterTop    = 0
-            def molerateBatchCounterBottom = 0
 
-            def make_molerate_batches = { branch_ch, dir, counter ->
+            def make_molerate_batches = { branch_ch, dir ->
                 branch_ch
                     .collate(molerateBatchSize)
                     .map { batch ->
-                        def batchID = sprintf("molerate_batch_${dir}_%05d", ++counter)
+                        def batchID = "molerate_batch_${dir}_${java.util.UUID.randomUUID().toString().replace('-', '').take(12)}"
+                        def validRows = batch.findAll { row ->
+                            row[2]?.name != 'NO_FILE' && row[3]?.name != 'NO_FILE' && row[4]?.name != 'NO_FILE'
+                        }
+                        if (!validRows) return null
                         def manifestText = createBatchManifestText(
-                            batch.collect { row -> "${row[0]}\t${row[2].name}" }
+                            validRows.collect { row -> "${row[0]}\t${row[2].name}" }
                         )
-                        def sharedTree   = batch[0][3]
-                        def sharedFgList = batch[0][4]
-                        tuple(batchID, dir, batch.size(), manifestText,
-                              batch.collect { row -> row[2] },   // fastas
+                        def sharedTree   = validRows[0][3]
+                        def sharedFgList = validRows[0][4]
+                        tuple(batchID, dir, validRows.size(), manifestText,
+                              validRows.collect { row -> row[2] },   // fastas
                               sharedTree, sharedFgList)
                     }
+                    .filter { it != null }
             }
 
-            def batches_ch = make_molerate_batches(molerate_branched.top,    'top',    molerateBatchCounterTop)
-                .mix(make_molerate_batches(molerate_branched.bottom, 'bottom', molerateBatchCounterBottom))
+            def batches_ch = make_molerate_batches(molerate_branched.top,    'top')
+                .mix(make_molerate_batches(molerate_branched.bottom, 'bottom'))
 
             def batched_out = MOLERATE_BATCHED(batches_ch, lg_dat_ch).molerate_json
-            // molerate_json emits (direction, path) per JSON; flatten to (gene_id, direction, path)
             molerate_results_ch = batched_out
                 .transpose()
                 .map { dir, f ->
-                    def gene_id = f.name.replace(".${dir}.molerate.json", "")
-                    tuple(gene_id, dir, f)
+                    def m = (f.name =~ /^(.+)\.(top|bottom)\.molerate\.json$/)
+                    tuple(m[0][1], m[0][2], f)
                 }
         } else {
             // ── Single-gene mode (default) ────────────────────────────────
             molerate_results_ch = MOLERATE_RUN(molerate_input_ch, lg_dat_ch).molerate_json
         }
 
-        // 6. Reports per direction -----------------------------------------
-        //    Use .branch() to split once and guarantee exclusive routing,
-        //    avoiding any ambiguity from applying two independent .filter()
-        //    subscriptions on the same queue channel.
+        // ── Reports per direction ────────────────────────────────────────────
         def branched = molerate_results_ch.branch {
             top:    it[1] == 'top'
             bottom: it[1] == 'bottom'
@@ -303,8 +153,13 @@ workflow MOLERATE {
         def top_jsons    = branched.top.map    { it[2] }.collect().ifEmpty([])
         def bottom_jsons = branched.bottom.map { it[2] }.collect().ifEmpty([])
 
-        def rpt_top    = MOLERATE_REPORT_TOP(Channel.value('top'),    top_jsons   )
-        def rpt_bottom = MOLERATE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons)
+        def fg_top_ch    = fg_branches_ch.filter { it[0] == 'top'    }.map { it[1] }
+            .ifEmpty { file('NO_FG_LIST') }
+        def fg_bottom_ch = fg_branches_ch.filter { it[0] == 'bottom' }.map { it[1] }
+            .ifEmpty { file('NO_FG_LIST') }
+
+        def rpt_top    = MOLERATE_REPORT_TOP(Channel.value('top'),       top_jsons,    fg_top_ch   )
+        def rpt_bottom = MOLERATE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons, fg_bottom_ch)
 
     emit:
         report_top     = rpt_top.report

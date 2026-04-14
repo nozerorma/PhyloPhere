@@ -92,22 +92,36 @@ ALI_FORMAT="fasta"
 # ── Selection analysis toggles ───────────────────────────────────────────────
 RUN_FADE="${RUN_FADE:-false}"
 RUN_MOLERATE="${RUN_MOLERATE:-false}"
-FADE_MODE="${FADE_MODE:-gene_set}"
-MOLERATE_MODE="${MOLERATE_MODE:-gene_set}"
+FADE_MODE="${FADE_MODE:-all}"
+MOLERATE_MODE="${MOLERATE_MODE:-all}"
 
 # ── RERConverge toggles ──────────────────────────────────────────────────────
 RUN_RER="${RUN_RER:-true}"
 RER_TOOL="${RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
-RER_GENE_SET_MODE="${RER_GENE_SET_MODE:-gene_set}"
+RER_GENE_SET_MODE="${RER_GENE_SET_MODE:-all}"
 GENE_TREES="${GENE_TREES:-${DATADIR}/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
+RER_PERM_BATCHES="${RER_PERM_BATCHES:-100}"
+RER_PERMS_PER_BATCH="${RER_PERMS_PER_BATCH:-100}"
+RER_GMT_FILE="${RER_GMT_FILE:-}"
 
 # ── VEP toggles ──────────────────────────────────────────────────────────────
 RUN_VEP="${RUN_VEP:-true}"
 CDS_DIR="${CDS_DIR:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/CDS}"
 TRACK_DIR="${TRACK_DIR:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/TRACK}"
+VEP_REFVERSION="${VEP_REFVERSION:-hg38}"
 
 # ── Scoring toggles ──────────────────────────────────────────────────────────
 RUN_SCORING="${RUN_SCORING:-true}"
+RUN_SCORING_ORA="${RUN_SCORING_ORA:-true}"
+RUN_SCORING_STRESS="${RUN_SCORING_STRESS:-true}"
+SCORING_WINDOW_SIZE_BP="${SCORING_WINDOW_SIZE_BP:-1000000}"
+
+# ── CT accumulation knobs ─────────────────────────────────────────────────────
+ACCUM_RANDOMIZATION_TYPE="${ACCUM_RANDOMIZATION_TYPE:-naive}"
+ACCUM_WORKERS="${ACCUM_WORKERS:-}"
+ACCUM_SEED="${ACCUM_SEED:-1998}"
+ACCUM_FDR="${ACCUM_FDR:-0.1}"
+ACCUM_LOG_LEVEL="${ACCUM_LOG_LEVEL:-INFO}"
 
 # ============================================================
 # ENVIRONMENT SETUP
@@ -135,11 +149,6 @@ SOURCE_RESAMPLE_DIR="${SOURCE_BASE}/resample/nw_tree.resampled.output"
 SOURCE_BOOTSTRAP="${SOURCE_BASE}/caastools/bootstrap.tab"
 SOURCE_BACKGROUND="${SOURCE_BASE}/caastools/background_genes.output"
 SOURCE_CONFIG="${SOURCE_BASE}/data_exploration/2.CT/1.Traitfiles/traitfile.tab"
-
-# # Gene-set inputs for FADE / MoleRate / RER (used in gene_set mode)
-# SOURCE_POSTPROC_TOP="${SOURCE_BASE}/postproc/disambiguation_characterization/us_gs_relations/exports/txt/special_union_us_nondiv_and_us_gs_cases_change_side_top_significant.txt"
-# SOURCE_POSTPROC_BOTTOM="${SOURCE_BASE}/postproc/disambiguation_characterization/us_gs_relations/exports/txt/special_union_us_nondiv_and_us_gs_cases_change_side_bottom_significant.txt"
-# SOURCE_ACCUMULATION_CSV="${SOURCE_BASE}/accumulation/aggregation/accumulation_global.csv"
 
 # Short random hex ID used to name the Nextflow run (8 chars)
 NXF_RUN_ID="$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | cut -c1-8 \
@@ -207,7 +216,10 @@ if [ "$RUN_RER" = true ]; then
         --rer_tool          "$RER_TOOL"
         --rer_gene_set_mode "$RER_GENE_SET_MODE"
         --gene_trees        "$GENE_TREES"
+        --rer_perm_batches   "$RER_PERM_BATCHES"
+        --rer_perms_per_batch "$RER_PERMS_PER_BATCH"
     )
+    [ -n "$RER_GMT_FILE" ] && RER_NF_FLAGS+=(--rer_gmt_file "$RER_GMT_FILE")
 fi
 
 # ── VEP flags ────────────────────────────────────────────────────────────────
@@ -217,6 +229,7 @@ if [ "$RUN_VEP" = true ]; then
         --vep
         --vep_cds_dir "$CDS_DIR"
         --vep_track_dir "$TRACK_DIR"
+        --vep_refversion "$VEP_REFVERSION"
     )
 fi
 
@@ -225,7 +238,12 @@ SCORING_NF_FLAGS=()
 if [ "$RUN_SCORING" = true ]; then
     SCORING_NF_FLAGS=(
         --scoring
+        --scoring_ora "$RUN_SCORING_ORA"
+        --scoring_window_size_bp "$SCORING_WINDOW_SIZE_BP"
     )
+    if [ "$RUN_SCORING_STRESS" = true ]; then
+        SCORING_NF_FLAGS+=(--scoring_stress)
+    fi
 fi
 
 # ============================================================
@@ -241,6 +259,10 @@ COMMON_NF_FLAGS=(
     --tree        "$TREE_FILE"
     --cycles      "$CYCLES"
     --accumulation_n_randomizations "$N_RANDOMIZATIONS"
+    --accumulation_randomization_type "$ACCUM_RANDOMIZATION_TYPE"
+    --accumulation_fdr "$ACCUM_FDR"
+    --accumulation_log_level "$ACCUM_LOG_LEVEL"
+    --accumulation_seed "$ACCUM_SEED"
     --ct_disambig_asr_mode      "precomputed"
     --ct_disambig_asr_cache_dir "${ASR_CACHE_DIR}"
     --discovery_out "${SOURCE_DISCOVERY}"
@@ -248,6 +270,10 @@ COMMON_NF_FLAGS=(
     --bootstrap_input "${SOURCE_BOOTSTRAP}"
     --background_input "${SOURCE_BACKGROUND}"
 )
+
+if [ -n "$ACCUM_WORKERS" ]; then
+    COMMON_NF_FLAGS+=(--accumulation_workers "$ACCUM_WORKERS")
+fi
 
 # ============================================================
 # HELPER: run pipeline
@@ -285,6 +311,9 @@ echo " RUN_MOLERATE: $RUN_MOLERATE  (mode=${MOLERATE_MODE})"
 echo " RUN_RER    : $RUN_RER  (tool=${RER_TOOL})"
 echo " RUN_VEP    : $RUN_VEP"
 echo " RUN_SCORING: $RUN_SCORING"
+echo " RUN_SCORING_STRESS: $RUN_SCORING_STRESS"
+echo " RUN_SCORING_ORA: $RUN_SCORING_ORA"
+echo " ACCUM: type=${ACCUM_RANDOMIZATION_TYPE} fdr=${ACCUM_FDR} seed=${ACCUM_SEED} workers=${ACCUM_WORKERS:-auto}"
 echo "=========================================="
 
 RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}/${timestamp}"

@@ -54,7 +54,7 @@ submit_array_job() {
 #SBATCH -o Slurm/slurm-%A_%a.out
 #SBATCH --mail-type=START,END,FAIL
 #SBATCH --mail-user=miguel.ramon@upf.edu
-#SBATCH --array=1-10%10
+#SBATCH --array=1-2%2
 
 module load modulepath/haswell
 module load Nextflow
@@ -86,14 +86,26 @@ export RUN_RER=true # Note that we need to fix the gene_trees. They have species
 export RER_TOOL="build_trait,build_tree,build_matrix,continuous"
 export RER_GENE_SET_MODE="all"   # "gene_set" | "all"
 export GENE_TREES="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
+export RER_PERM_BATCHES=100
+export RER_PERMS_PER_BATCH=100
+export RER_GMT_FILE="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/subworkflows/RERCONVERGE/dat/c2.cp.pid.v2026.1.Hs.symbols.gmt"
 
 # ── VEP ───────────────────────────────────────────────────────────────────────
 export RUN_VEP=true
-export CDS_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/CDS"
+export CDS_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/TRIM"
 export TRACK_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/TRACK"
+export VEP_REFVERSION="hg38"
+
+# ── CT accumulation knobs ────────────────────────────────────────────────────
+export ACCUM_RANDOMIZATION_TYPE="cons_decile"
+export ACCUM_FDR=0.1
+export ACCUM_LOG_LEVEL="INFO"
 
 # ── Scoring ───────────────────────────────────────────────────────────────────
 export RUN_SCORING=true
+export RUN_SCORING_ORA=true
+export RUN_SCORING_STRESS=true
+export SCORING_WINDOW_SIZE_BP=1000000
 
 REPO_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere"
 SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single_primates.sh"
@@ -104,14 +116,14 @@ SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single_primates.sh"
 case $SLURM_ARRAY_TASK_ID in
      1)  CLASS=1; TRAIT="neoplasia_prevalence"; SECONDARY="malignant_prevalence"; CTRAIT="neoplasia_necropsy"; PRUNE="neoplasia_exclude.txt"; PRUNE_SEC="malignant_exclude.txt"; DISCRETE="quintile"   ;;
      2)  CLASS=1; TRAIT="malignant_prevalence"; SECONDARY="neoplasia_prevalence"; CTRAIT="malignant_count";    PRUNE="malignant_exclude.txt"; PRUNE_SEC="neoplasia_exclude.txt"; DISCRETE="quintile"   ;;
-     3)  CLASS=2; TRAIT="frug_idx";     SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-     4)  CLASS=2; TRAIT="fol_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-     5)  CLASS=2; TRAIT="ins_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-     6)  CLASS=2; TRAIT="omn_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-     7)  CLASS=2; TRAIT="omn_spec_idx"; SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-     8)  CLASS=2; TRAIT="herb_idx";     SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-     9)  CLASS=2; TRAIT="folfrug_idx";  SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
-    10)  CLASS=2; TRAIT="Ethanol";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="quintile" ;;
+#      3)  CLASS=2; TRAIT="frug_idx";     SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+#      4)  CLASS=2; TRAIT="fol_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+#      5)  CLASS=2; TRAIT="ins_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+#      6)  CLASS=2; TRAIT="omn_idx";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+#      7)  CLASS=2; TRAIT="omn_spec_idx"; SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+#      8)  CLASS=2; TRAIT="herb_idx";     SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+#      9)  CLASS=2; TRAIT="folfrug_idx";  SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="decile"   ;;
+#     10)  CLASS=2; TRAIT="Ethanol";      SECONDARY=""; CTRAIT=""; PRUNE=""; PRUNE_SEC=""; DISCRETE="quintile" ;;
 esac
 
 echo "======================================================"

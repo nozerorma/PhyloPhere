@@ -20,6 +20,7 @@
 process MOLERATE_REPORT {
     tag "molerate_report|${direction}"
     label 'process_reporting'
+    errorStrategy 'ignore'
 
     publishDir path: "${params.outdir}/selection/molerate/${direction}",
                mode: 'copy', overwrite: true,
@@ -34,6 +35,7 @@ process MOLERATE_REPORT {
     input:
     val  direction
     path json_files
+    path fg_list_file  // optional: foreground species list (NO_FG_LIST sentinel when absent)
 
     output:
     path "MoleRate_report_${direction}.html", emit: report
@@ -46,6 +48,7 @@ process MOLERATE_REPORT {
     def log2fc_thr      = params.molerate_log2fc_threshold ?: 0.5
     def top_n           = params.molerate_top_n_labels    ?: 15
     def traitname       = params.traitname ?: 'unknown_trait'
+    def fg_arg          = (fg_list_file.name =~ /^NO_FG_LIST/) ? 'NULL' : "'${fg_list_file}'"
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -69,7 +72,8 @@ process MOLERATE_REPORT {
                     pval_threshold  = ${pval_thr},
                     log2fc_threshold = ${log2fc_thr},
                     top_n_labels  = ${top_n},
-                    output_dir    = '${outdir}'
+                    output_dir    = '${outdir}',
+                    fg_list_file  = ${fg_arg}
                 ),
                 output_file = 'MoleRate_report_${direction}.html'
             )
@@ -103,7 +107,8 @@ process MOLERATE_REPORT {
                     pval_threshold  = ${pval_thr},
                     log2fc_threshold = ${log2fc_thr},
                     top_n_labels  = ${top_n},
-                    output_dir    = '${outdir}'
+                    output_dir    = '${outdir}',
+                    fg_list_file  = ${fg_arg}
                 ),
                 output_file = 'MoleRate_report_${direction}.html'
             )

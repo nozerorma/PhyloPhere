@@ -1,0 +1,855 @@
+---
+title: "CAAS Scoring — Top/Bottom Overlap Report"
+subtitle: "`r paste0(params$traitname, ' — top vs bottom phenotype directions')`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    syntax_highlighting: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+params:
+  pos_scores_top_file: NULL
+  pos_scores_bottom_file: NULL
+  gene_scores_top_file: NULL
+  gene_scores_bottom_file: NULL
+  traitname: "unknown_trait"
+  top_pct: 0.10
+  top5_pct: 0.05
+  top1_pct: 0.01
+  gene_top_pct: 0.10
+  gene_top5_pct: 0.05
+  gene_top1_pct: 0.01
+  genomic_info_file: NULL
+  window_size_bp: 1000000
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo    = FALSE,
+  warning = FALSE,
+  message = FALSE,
+  out.width = "100%"
+)
+
+suppressPackageStartupMessages({
+  library(readr)
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(DT)
+  library(scales)
+  library(ggrepel)
+})
+
+# Tableau_10 colour palette for pipeline-wide consistency
+if (requireNamespace("paletteer", quietly = TRUE)) {
+  .tableau10 <- as.character(paletteer::paletteer_d("ggthemes::Tableau_10"))
+} else {
+  .tableau10 <- c(
+    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
+    "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"
+  )
+}
+theme_set(theme_minimal(base_size = 13))
+
+.file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
+```
+
+```{r load-data}
+pos_top  <- read_tsv(params$pos_scores_top_file,    show_col_types = FALSE)
+pos_bot  <- read_tsv(params$pos_scores_bottom_file, show_col_types = FALSE)
+gene_top <- read_tsv(params$gene_scores_top_file,   show_col_types = FALSE)
+gene_bot <- read_tsv(params$gene_scores_bottom_file, show_col_types = FALSE)
+
+has_genomic <- .file_ok(params$genomic_info_file)
+
+if (has_genomic) {
+  genomic_raw <- read_tsv(params$genomic_info_file,
+                          col_names = c("Gene", "chr", "gene_start", "gene_end", "gene_length"),
+                          show_col_types = FALSE)
+  if (tolower(genomic_raw$Gene[1]) == "gene") genomic_raw <- genomic_raw[-1, ]
+  genomic_raw <- genomic_raw %>%
+    mutate(
+      gene_start  = as.integer(gene_start),
+      gene_end    = as.integer(gene_end),
+      gene_length = as.integer(gene_length),
+      gene_mid    = as.integer((gene_start + gene_end) / 2L)
+    )
+} else {
+  genomic_raw <- NULL
+}
+
+# ── Position-level thresholds (computed on each direction's full score vector) ──
+pos_thr_top  <- list(
+  t10 = quantile(pos_top$CAAS_score, 1 - params$top_pct,  na.rm = TRUE),
+  t5  = quantile(pos_top$CAAS_score, 1 - params$top5_pct, na.rm = TRUE),
+  t1  = quantile(pos_top$CAAS_score, 1 - params$top1_pct, na.rm = TRUE)
+)
+pos_thr_bot  <- list(
+  t10 = quantile(pos_bot$CAAS_score, 1 - params$top_pct,  na.rm = TRUE),
+  t5  = quantile(pos_bot$CAAS_score, 1 - params$top5_pct, na.rm = TRUE),
+  t1  = quantile(pos_bot$CAAS_score, 1 - params$top1_pct, na.rm = TRUE)
+)
+
+# ── Gene-level thresholds ──────────────────────────────────────────────────────
+gene_thr_top <- list(
+  t10 = quantile(gene_top$gene_composite_score, 1 - params$gene_top_pct,  na.rm = TRUE),
+  t5  = quantile(gene_top$gene_composite_score, 1 - params$gene_top5_pct, na.rm = TRUE),
+  t1  = quantile(gene_top$gene_composite_score, 1 - params$gene_top1_pct, na.rm = TRUE)
+)
+gene_thr_bot <- list(
+  t10 = quantile(gene_bot$gene_composite_score, 1 - params$gene_top_pct,  na.rm = TRUE),
+  t5  = quantile(gene_bot$gene_composite_score, 1 - params$gene_top5_pct, na.rm = TRUE),
+  t1  = quantile(gene_bot$gene_composite_score, 1 - params$gene_top1_pct, na.rm = TRUE)
+)
+
+# ── Available gene score types ─────────────────────────────────────────────────
+gene_score_cols <- c("gene_caas_score", "gene_composite_score")
+for (col in c("gene_rand_score", "gene_rer_score", "gene_fade_score", "gene_molerate_score")) {
+  if (col %in% names(gene_top) && col %in% names(gene_bot) &&
+      any(!is.na(gene_top[[col]])) && any(!is.na(gene_bot[[col]]))) {
+    gene_score_cols <- c(gene_score_cols, col)
+  }
+}
+```
+
+---
+
+## Introduction
+
+This report examines the **overlap between the top-phenotype and bottom-phenotype
+CAAS scoring results** for trait **`r params$traitname`**.
+
+The two per-direction reports score positions and genes independently — each run
+filters positions for one phenotypic extreme before computing gene-level
+aggregates.  Positions or genes that score highly in *both* directions are
+particularly interesting: they represent loci where convergent amino acid changes
+associate with *both* ends of the trait distribution, suggesting a potential
+pleiotropic or bidirectional signal.
+
+The analysis covers three resolution levels:
+
+1. **Position-level** — Gene × Alignment-position pairs, scored by `CAAS_score`.
+2. **Gene-level** — Per-gene scores, examined individually for each available
+   score type (`r paste(gene_score_cols, collapse = ", ")`).
+3. **Genomic window** `r if (has_genomic) paste0("(", params$window_size_bp / 1e6, " Mb windows)")` —
+   `r if (!has_genomic) "Not available (no genomic coordinates supplied)." else "Genomic regions enriched in high-scoring genes in both directions."`
+
+---
+
+## Position-Level Overlap {.tabset}
+
+Positions are identified by their `Gene:Position` key.  For each threshold
+(top 10%, 5%, 1% by `CAAS_score`), we extract the high-scoring positions from
+each direction and compute the intersection.
+
+```{r pos-overlap-setup}
+# Create unique position keys
+pos_top  <- pos_top  %>% mutate(.pos_key = paste0(Gene, ":", Position))
+pos_bot  <- pos_bot  %>% mutate(.pos_key = paste0(Gene, ":", Position))
+
+compute_pos_overlap <- function(thr_top, thr_bot, pct_label) {
+  set_t <- pos_top %>% filter(CAAS_score >= thr_top) %>% pull(.pos_key)
+  set_b <- pos_bot %>% filter(CAAS_score >= thr_bot) %>% pull(.pos_key)
+  ov    <- intersect(set_t, set_b)
+  jaccard <- if ((length(set_t) + length(set_b) - length(ov)) > 0) {
+    length(ov) / (length(set_t) + length(set_b) - length(ov))
+  } else NA_real_
+  list(
+    label   = pct_label,
+    n_top   = length(set_t),
+    n_bot   = length(set_b),
+    n_ovlp  = length(ov),
+    jaccard = jaccard,
+    keys    = ov
+  )
+}
+
+pos_ovlp_10 <- compute_pos_overlap(pos_thr_top$t10, pos_thr_bot$t10, "Top 10%")
+pos_ovlp_5  <- compute_pos_overlap(pos_thr_top$t5,  pos_thr_bot$t5,  "Top 5%")
+pos_ovlp_1  <- compute_pos_overlap(pos_thr_top$t1,  pos_thr_bot$t1,  "Top 1%")
+
+pos_summary_tbl <- tibble(
+  Threshold      = c("Top 10%", "Top 5%", "Top 1%"),
+  `N top`        = c(pos_ovlp_10$n_top,  pos_ovlp_5$n_top,  pos_ovlp_1$n_top),
+  `N bottom`     = c(pos_ovlp_10$n_bot,  pos_ovlp_5$n_bot,  pos_ovlp_1$n_bot),
+  `N overlap`    = c(pos_ovlp_10$n_ovlp, pos_ovlp_5$n_ovlp, pos_ovlp_1$n_ovlp),
+  `Jaccard index`= round(c(pos_ovlp_10$jaccard, pos_ovlp_5$jaccard, pos_ovlp_1$jaccard), 4)
+)
+```
+
+### Summary
+
+```{r pos-overlap-summary-plot, fig.height=4}
+pos_bar_df <- pos_summary_tbl %>%
+  mutate(
+    top_only    = `N top`     - `N overlap`,
+    bottom_only = `N bottom`  - `N overlap`,
+    overlap     = `N overlap`
+  ) %>%
+  select(Threshold, top_only, bottom_only, overlap) %>%
+  pivot_longer(c(top_only, bottom_only, overlap),
+               names_to = "Category", values_to = "Count") %>%
+  mutate(Category = factor(Category,
+                           levels = c("top_only", "overlap", "bottom_only"),
+                           labels = c("Top only", "Overlap", "Bottom only")))
+
+ggplot(pos_bar_df, aes(x = Threshold, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.55) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5),
+            size = 3.2, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values = c("Top only"    = .tableau10[1],
+               "Overlap"     = .tableau10[3],
+               "Bottom only" = .tableau10[2]),
+    name = NULL
+  ) +
+  labs(
+    title    = "Position-Level Top/Bottom Overlap",
+    subtitle = "Stacked bar: unique top-only, shared (overlap), unique bottom-only positions per threshold",
+    x = NULL, y = "Number of positions"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r pos-overlap-summary-table}
+knitr::kable(pos_summary_tbl, align = c("l", "r", "r", "r", "r"),
+             caption = "Position-level overlap statistics (Jaccard = |A ∩ B| / |A ∪ B|)")
+```
+
+### Overlap at Top 10%
+
+```{r pos-overlap-10pct}
+if (length(pos_ovlp_10$keys) > 0) {
+  ovlp_df <- tibble(.pos_key = pos_ovlp_10$keys) %>%
+    left_join(pos_top %>% select(.pos_key, Gene, Position,
+                                  CAAS_score_top    = CAAS_score,
+                                  biochem_top       = biochem_score,
+                                  asr_top           = asr_score,
+                                  convergence_top   = convergence_score,
+                                  parallel_top      = parallel_score),
+              by = ".pos_key") %>%
+    left_join(pos_bot %>% select(.pos_key,
+                                  CAAS_score_bottom  = CAAS_score,
+                                  biochem_bottom     = biochem_score,
+                                  asr_bottom         = asr_score,
+                                  convergence_bottom = convergence_score,
+                                  parallel_bottom    = parallel_score),
+              by = ".pos_key") %>%
+    select(-.pos_key) %>%
+    mutate(mean_CAAS = rowMeans(cbind(CAAS_score_top, CAAS_score_bottom), na.rm = TRUE)) %>%
+    arrange(desc(mean_CAAS)) %>%
+    mutate(across(where(is.numeric), ~round(., 4)))
+
+  DT::datatable(
+    ovlp_df,
+    rownames = FALSE,
+    filter   = "top",
+    options  = list(pageLength = 25, scrollX = TRUE),
+    caption  = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      sprintf("Positions in top 10%% of BOTH directions (%d positions)", nrow(ovlp_df))
+    )
+  )
+} else {
+  cat("> No positions overlap at the top 10% threshold in both directions.")
+}
+```
+
+### Overlap at Top 5%
+
+```{r pos-overlap-5pct}
+if (length(pos_ovlp_5$keys) > 0) {
+  ovlp_df <- tibble(.pos_key = pos_ovlp_5$keys) %>%
+    left_join(pos_top %>% select(.pos_key, Gene, Position,
+                                  CAAS_score_top  = CAAS_score,
+                                  biochem_top     = biochem_score,
+                                  asr_top         = asr_score),
+              by = ".pos_key") %>%
+    left_join(pos_bot %>% select(.pos_key,
+                                  CAAS_score_bottom = CAAS_score,
+                                  biochem_bottom    = biochem_score,
+                                  asr_bottom        = asr_score),
+              by = ".pos_key") %>%
+    select(-.pos_key) %>%
+    mutate(mean_CAAS = rowMeans(cbind(CAAS_score_top, CAAS_score_bottom), na.rm = TRUE)) %>%
+    arrange(desc(mean_CAAS)) %>%
+    mutate(across(where(is.numeric), ~round(., 4)))
+
+  DT::datatable(
+    ovlp_df,
+    rownames = FALSE,
+    filter   = "top",
+    options  = list(pageLength = 25, scrollX = TRUE),
+    caption  = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      sprintf("Positions in top 5%% of BOTH directions (%d positions)", nrow(ovlp_df))
+    )
+  )
+} else {
+  cat("> No positions overlap at the top 5% threshold in both directions.")
+}
+```
+
+### Overlap at Top 1%
+
+```{r pos-overlap-1pct}
+if (length(pos_ovlp_1$keys) > 0) {
+  ovlp_df <- tibble(.pos_key = pos_ovlp_1$keys) %>%
+    left_join(pos_top %>% select(.pos_key, Gene, Position,
+                                  CAAS_score_top  = CAAS_score,
+                                  biochem_top     = biochem_score),
+              by = ".pos_key") %>%
+    left_join(pos_bot %>% select(.pos_key,
+                                  CAAS_score_bottom = CAAS_score,
+                                  biochem_bottom    = biochem_score),
+              by = ".pos_key") %>%
+    select(-.pos_key) %>%
+    mutate(mean_CAAS = rowMeans(cbind(CAAS_score_top, CAAS_score_bottom), na.rm = TRUE)) %>%
+    arrange(desc(mean_CAAS)) %>%
+    mutate(across(where(is.numeric), ~round(., 4)))
+
+  DT::datatable(
+    ovlp_df,
+    rownames = FALSE,
+    options  = list(pageLength = 25, scrollX = TRUE),
+    caption  = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      sprintf("Positions in top 1%% of BOTH directions (%d positions)", nrow(ovlp_df))
+    )
+  )
+} else {
+  cat("> No positions overlap at the top 1% threshold in both directions.")
+}
+```
+
+---
+
+## Gene-Level Overlap {.tabset}
+
+For each available gene score type, we extract the high-scoring genes from each
+direction and compute the intersection.  Only score types present and non-missing
+in both direction runs are included.
+
+```{r gene-overlap-setup}
+# Generic function: given a score column name and thresholds, compute
+# top/bottom gene sets and their overlap at three cutoff levels.
+compute_gene_overlap <- function(score_col, pct_label, thr_top, thr_bot) {
+  vals_top <- gene_top[[score_col]]
+  vals_bot <- gene_bot[[score_col]]
+
+  thr_t <- quantile(vals_top, 1 - thr_top, na.rm = TRUE)
+  thr_b <- quantile(vals_bot, 1 - thr_bot, na.rm = TRUE)
+
+  set_t <- gene_top %>% filter(.data[[score_col]] >= thr_t) %>% pull(Gene)
+  set_b <- gene_bot %>% filter(.data[[score_col]] >= thr_b) %>% pull(Gene)
+  ov    <- intersect(set_t, set_b)
+
+  jaccard <- if ((length(set_t) + length(set_b) - length(ov)) > 0) {
+    length(ov) / (length(set_t) + length(set_b) - length(ov))
+  } else NA_real_
+
+  list(
+    pct_label = pct_label,
+    n_top     = length(set_t),
+    n_bot     = length(set_b),
+    n_ovlp    = length(ov),
+    jaccard   = jaccard,
+    genes     = ov
+  )
+}
+
+# Helper to make an overlap bar plot for a single score type
+make_gene_ovlp_bar <- function(score_col) {
+  thresholds <- list(
+    list(pct = params$gene_top_pct,  label = "Top 10%"),
+    list(pct = params$gene_top5_pct, label = "Top 5%"),
+    list(pct = params$gene_top1_pct, label = "Top 1%")
+  )
+  rows <- lapply(thresholds, function(t) {
+    r <- compute_gene_overlap(score_col, t$label, t$pct, t$pct)
+    tibble(
+      Threshold   = t$label,
+      top_only    = r$n_top  - r$n_ovlp,
+      bottom_only = r$n_bot  - r$n_ovlp,
+      overlap     = r$n_ovlp,
+      jaccard     = r$jaccard
+    )
+  })
+  bar_df <- bind_rows(rows) %>%
+    pivot_longer(c(top_only, bottom_only, overlap),
+                 names_to = "Category", values_to = "Count") %>%
+    mutate(Category = factor(Category,
+                             levels = c("top_only", "overlap", "bottom_only"),
+                             labels = c("Top only", "Overlap", "Bottom only")))
+  list(bar_df = bar_df, summary = bind_rows(lapply(thresholds, function(t) {
+    r <- compute_gene_overlap(score_col, t$label, t$pct, t$pct)
+    tibble(Threshold = t$label, `N top` = r$n_top, `N bottom` = r$n_bot,
+           `N overlap` = r$n_ovlp, `Jaccard` = round(r$jaccard, 4))
+  })))
+}
+
+# Helper to render overlap detail table for one threshold
+make_gene_ovlp_table <- function(score_col, pct_top, pct_bot, caption_text) {
+  r <- compute_gene_overlap(score_col, "", pct_top, pct_bot)
+  if (length(r$genes) == 0) {
+    cat(sprintf("> No genes overlap at this threshold for %s.", score_col))
+    return(invisible(NULL))
+  }
+  tbl <- tibble(Gene = r$genes) %>%
+    left_join(gene_top %>% select(Gene, score_top   = !!score_col), by = "Gene") %>%
+    left_join(gene_bot %>% select(Gene, score_bottom = !!score_col), by = "Gene") %>%
+    mutate(mean_score = rowMeans(cbind(score_top, score_bottom), na.rm = TRUE)) %>%
+    arrange(desc(mean_score)) %>%
+    mutate(across(where(is.numeric), ~round(., 4)))
+
+  DT::datatable(
+    tbl, rownames = FALSE, filter = "top",
+    options = list(pageLength = 25, scrollX = TRUE),
+    caption = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      caption_text
+    )
+  )
+}
+```
+
+### CAAS
+
+```{r gene-overlap-caas-score, fig.height=4}
+sc <- "gene_caas_score"
+ovlp_data <- make_gene_ovlp_bar(sc)
+ggplot(ovlp_data$bar_df, aes(x = Threshold, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.55) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5),
+            size = 3.2, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values = c("Top only"    = .tableau10[1],
+               "Overlap"     = .tableau10[3],
+               "Bottom only" = .tableau10[2]),
+    name = NULL
+  ) +
+  labs(title = "Gene CAAS Score — Top/Bottom Overlap",
+       x = NULL, y = "Number of genes") +
+  theme(plot.title = element_text(face = "bold"))
+knitr::kable(ovlp_data$summary, caption = "Gene CAAS score overlap statistics")
+```
+
+```{r gene-overlap-caas-table-10}
+make_gene_ovlp_table("gene_caas_score", params$gene_top_pct, params$gene_top_pct,
+                     sprintf("Genes in top %g%% by gene_caas_score in BOTH directions",
+                             params$gene_top_pct * 100))
+```
+
+### Composite
+
+```{r gene-overlap-composite-score, fig.height=4}
+sc <- "gene_composite_score"
+ovlp_data <- make_gene_ovlp_bar(sc)
+ggplot(ovlp_data$bar_df, aes(x = Threshold, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.55) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5),
+            size = 3.2, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values = c("Top only"    = .tableau10[1],
+               "Overlap"     = .tableau10[3],
+               "Bottom only" = .tableau10[2]),
+    name = NULL
+  ) +
+  labs(title = "Gene Composite Score — Top/Bottom Overlap",
+       x = NULL, y = "Number of genes") +
+  theme(plot.title = element_text(face = "bold"))
+knitr::kable(ovlp_data$summary, caption = "Gene composite score overlap statistics")
+```
+
+```{r gene-overlap-composite-table-10}
+make_gene_ovlp_table("gene_composite_score", params$gene_top_pct, params$gene_top_pct,
+                     sprintf("Genes in top %g%% by gene_composite_score in BOTH directions",
+                             params$gene_top_pct * 100))
+```
+
+### Accumulation
+
+`r if (!("gene_rand_score" %in% gene_score_cols)) "> **Note:** Accumulation score overlap is not available for both directions in this run."`
+
+```{r gene-overlap-rand-score, eval="gene_rand_score" %in% gene_score_cols, fig.height=4}
+sc <- "gene_rand_score"
+ovlp_data <- make_gene_ovlp_bar(sc)
+ggplot(ovlp_data$bar_df, aes(x = Threshold, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.55) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5),
+            size = 3.2, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values = c("Top only"    = .tableau10[1],
+               "Overlap"     = .tableau10[3],
+               "Bottom only" = .tableau10[2]),
+    name = NULL
+  ) +
+  labs(title = "Gene Randomization Score — Top/Bottom Overlap",
+       x = NULL, y = "Number of genes") +
+  theme(plot.title = element_text(face = "bold"))
+knitr::kable(ovlp_data$summary, caption = "Gene randomization score overlap statistics")
+```
+
+```{r gene-overlap-rand-table, eval="gene_rand_score" %in% gene_score_cols}
+make_gene_ovlp_table("gene_rand_score", params$gene_top_pct, params$gene_top_pct,
+                     sprintf("Genes in top %g%% by gene_rand_score in BOTH directions",
+                             params$gene_top_pct * 100))
+```
+
+### RERConverge
+
+`r if (!("gene_rer_score" %in% gene_score_cols)) "> **Note:** RERConverge overlap is not available for both directions in this run."`
+
+```{r gene-overlap-rer-score, eval="gene_rer_score" %in% gene_score_cols, fig.height=4}
+sc <- "gene_rer_score"
+ovlp_data <- make_gene_ovlp_bar(sc)
+ggplot(ovlp_data$bar_df, aes(x = Threshold, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.55) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5),
+            size = 3.2, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values = c("Top only"    = .tableau10[1],
+               "Overlap"     = .tableau10[3],
+               "Bottom only" = .tableau10[2]),
+    name = NULL
+  ) +
+  labs(title = "Gene RERConverge Score — Top/Bottom Overlap",
+       x = NULL, y = "Number of genes") +
+  theme(plot.title = element_text(face = "bold"))
+knitr::kable(ovlp_data$summary, caption = "Gene RER score overlap statistics")
+```
+
+```{r gene-overlap-rer-table, eval="gene_rer_score" %in% gene_score_cols}
+make_gene_ovlp_table("gene_rer_score", params$gene_top_pct, params$gene_top_pct,
+                     sprintf("Genes in top %g%% by gene_rer_score in BOTH directions",
+                             params$gene_top_pct * 100))
+```
+
+### FADE
+
+`r if (!("gene_fade_score" %in% gene_score_cols)) "> **Note:** FADE overlap is not available for both directions in this run."`
+
+```{r gene-overlap-fade-score, eval="gene_fade_score" %in% gene_score_cols, fig.height=4}
+sc <- "gene_fade_score"
+ovlp_data <- make_gene_ovlp_bar(sc)
+ggplot(ovlp_data$bar_df, aes(x = Threshold, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.55) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5),
+            size = 3.2, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values = c("Top only"    = .tableau10[1],
+               "Overlap"     = .tableau10[3],
+               "Bottom only" = .tableau10[2]),
+    name = NULL
+  ) +
+  labs(title = "Gene FADE Score — Top/Bottom Overlap",
+       x = NULL, y = "Number of genes") +
+  theme(plot.title = element_text(face = "bold"))
+knitr::kable(ovlp_data$summary, caption = "Gene FADE score overlap statistics")
+```
+
+```{r gene-overlap-fade-table, eval="gene_fade_score" %in% gene_score_cols}
+make_gene_ovlp_table("gene_fade_score", params$gene_top_pct, params$gene_top_pct,
+                     sprintf("Genes in top %g%% by gene_fade_score in BOTH directions",
+                             params$gene_top_pct * 100))
+```
+
+### MoleRate
+
+`r if (!("gene_molerate_score" %in% gene_score_cols)) "> **Note:** MoleRate overlap is not available for both directions in this run."`
+
+```{r gene-overlap-molerate-score, eval="gene_molerate_score" %in% gene_score_cols, fig.height=4}
+sc <- "gene_molerate_score"
+ovlp_data <- make_gene_ovlp_bar(sc)
+ggplot(ovlp_data$bar_df, aes(x = Threshold, y = Count, fill = Category)) +
+  geom_col(position = "stack", width = 0.55) +
+  geom_text(aes(label = Count), position = position_stack(vjust = 0.5),
+            size = 3.2, colour = "white", fontface = "bold") +
+  scale_fill_manual(
+    values = c("Top only"    = .tableau10[1],
+               "Overlap"     = .tableau10[3],
+               "Bottom only" = .tableau10[2]),
+    name = NULL
+  ) +
+  labs(title = "Gene MoleRate Score — Top/Bottom Overlap",
+       x = NULL, y = "Number of genes") +
+  theme(plot.title = element_text(face = "bold"))
+knitr::kable(ovlp_data$summary, caption = "Gene MoleRate score overlap statistics")
+```
+
+```{r gene-overlap-molerate-table, eval="gene_molerate_score" %in% gene_score_cols}
+make_gene_ovlp_table("gene_molerate_score", params$gene_top_pct, params$gene_top_pct,
+                     sprintf("Genes in top %g%% by gene_molerate_score in BOTH directions",
+                             params$gene_top_pct * 100))
+```
+
+---
+
+## Genomic Window Overlap {.tabset}
+
+`r if (!has_genomic) "> **Note:** Genomic coordinates not available — genomic window overlap skipped."`
+
+For each genomic window (size: `r params$window_size_bp / 1e6` Mb), we identify
+windows that appear in the top gene lists for **both** directions.  The
+Manhattan-style plot colours windows by their overlap status:
+- **Top only** — enriched in the top-phenotype direction
+- **Bottom only** — enriched in the bottom-phenotype direction
+- **Overlap** — enriched in both directions (highest interest)
+- **Neither** — not enriched in either direction
+
+```{r window-overlap-setup, eval=has_genomic}
+win_size <- params$window_size_bp
+
+# Build per-direction gene sets at top-10% composite threshold
+compute_window_membership <- function(gene_df_dir, score_col, thr_pct, gi_raw) {
+  thr <- quantile(gene_df_dir[[score_col]], 1 - thr_pct, na.rm = TRUE)
+  top_genes <- gene_df_dir %>% filter(.data[[score_col]] >= thr) %>% pull(Gene)
+
+  gi_raw %>%
+    filter(Gene %in% top_genes) %>%
+    mutate(
+      chr_label = sub("^chr", "", chr),
+      chr_num   = suppressWarnings(as.integer(chr_label)),
+      chr_order = dplyr::case_when(
+        !is.na(chr_num)              ~ chr_num,
+        chr_label == "X"             ~ 23L,
+        chr_label == "Y"             ~ 24L,
+        chr_label %in% c("MT","M")   ~ 25L,
+        TRUE                         ~ 26L
+      ),
+      win_id = floor(gene_mid / win_size)
+    ) %>%
+    distinct(chr_order, chr_label, win_id)
+}
+
+# Windows in top-10% composite for each direction
+win_top <- compute_window_membership(gene_top, "gene_composite_score",
+                                     params$gene_top_pct, genomic_raw)
+win_bot <- compute_window_membership(gene_bot, "gene_composite_score",
+                                     params$gene_top_pct, genomic_raw)
+
+# All windows that contain at least one gene (from either direction)
+all_gene_wins <- bind_rows(
+    gene_top %>% select(Gene) %>% mutate(dir = "top"),
+    gene_bot %>% select(Gene) %>% mutate(dir = "bottom")
+  ) %>%
+  inner_join(genomic_raw %>%
+               mutate(
+                 chr_label = sub("^chr", "", chr),
+                 chr_num   = suppressWarnings(as.integer(chr_label)),
+                 chr_order = dplyr::case_when(
+                   !is.na(chr_num)              ~ chr_num,
+                   chr_label == "X"             ~ 23L,
+                   chr_label == "Y"             ~ 24L,
+                   chr_label %in% c("MT","M")   ~ 25L,
+                   TRUE                         ~ 26L
+                 ),
+                 win_id    = floor(gene_mid / win_size),
+                 win_start = win_id * win_size,
+                 win_end   = win_start + win_size - 1L,
+                 win_mid   = win_start + win_size / 2L
+               ),
+             by = "Gene") %>%
+  distinct(chr_order, chr_label, win_id, win_start, win_end, win_mid)
+
+# Tag each window by overlap status
+all_gene_wins <- all_gene_wins %>%
+  mutate(
+    in_top = paste(chr_order, win_id) %in% paste(win_top$chr_order, win_top$win_id),
+    in_bot = paste(chr_order, win_id) %in% paste(win_bot$chr_order, win_bot$win_id),
+    status = dplyr::case_when(
+      in_top  & in_bot  ~ "Overlap",
+      in_top  & !in_bot ~ "Top only",
+      !in_top & in_bot  ~ "Bottom only",
+      TRUE              ~ "Neither"
+    ),
+    status = factor(status, levels = c("Overlap", "Top only", "Bottom only", "Neither"))
+  )
+
+# Build stitched x-axis
+chr_offsets_w <- all_gene_wins %>%
+  group_by(chr_order, chr_label) %>%
+  summarise(chr_max = max(win_end, na.rm = TRUE), .groups = "drop") %>%
+  arrange(chr_order) %>%
+  mutate(offset = cumsum(lag(chr_max, default = 0L)) + (chr_order - 1L) * 5e6L)
+
+all_gene_wins <- all_gene_wins %>%
+  left_join(chr_offsets_w %>% select(chr_order, offset), by = "chr_order") %>%
+  mutate(win_x = win_mid + offset)
+
+chr_label_positions_w <- chr_offsets_w %>%
+  left_join(
+    all_gene_wins %>% group_by(chr_order) %>%
+      summarise(mid_x = mean(win_x, na.rm = TRUE), .groups = "drop"),
+    by = "chr_order"
+  )
+
+n_ovlp_wins <- sum(all_gene_wins$status == "Overlap")
+```
+
+### Composite Score Windows
+
+```{r window-overlap-manhattan, eval=has_genomic, fig.height=5, fig.width=14}
+status_colours <- c(
+  "Overlap"     = .tableau10[3],
+  "Top only"    = .tableau10[1],
+  "Bottom only" = .tableau10[2],
+  "Neither"     = "grey80"
+)
+
+# Label the overlap windows with top-5 by win_id (just use position label)
+ovlp_wins_label <- all_gene_wins %>%
+  filter(status == "Overlap") %>%
+  arrange(chr_order, win_id)
+
+ggplot(all_gene_wins, aes(x = win_x, y = 0.5, colour = status, size = status)) +
+  geom_point(alpha = 0.80) +
+  ggrepel::geom_text_repel(
+    data = ovlp_wins_label,
+    aes(label = sprintf("chr%s:%s-%sMb",
+                        chr_label,
+                        round(win_start / 1e6, 1),
+                        round(win_end   / 1e6, 1))),
+    size = 2.4, max.overlaps = 20, colour = .tableau10[3],
+    show.legend = FALSE, nudge_y = 0.15
+  ) +
+  scale_colour_manual(values = status_colours, name = "Window status") +
+  scale_size_manual(
+    values = c("Overlap" = 3.5, "Top only" = 2, "Bottom only" = 2, "Neither" = 1),
+    guide  = "none"
+  ) +
+  scale_x_continuous(
+    breaks = chr_label_positions_w$mid_x,
+    labels = chr_label_positions_w$chr_label,
+    expand = expansion(mult = 0.01)
+  ) +
+  scale_y_continuous(limits = c(0, 1), breaks = NULL) +
+  labs(
+    title    = sprintf("Genomic Window Overlap — %s Mb windows (Gene Composite Score, top %g%%)",
+                       params$window_size_bp / 1e6, params$gene_top_pct * 100),
+    subtitle = sprintf("%d overlap windows (present in both top and bottom top-%g%%) | %d top-only | %d bottom-only",
+                       n_ovlp_wins,
+                       params$gene_top_pct * 100,
+                       sum(all_gene_wins$status == "Top only"),
+                       sum(all_gene_wins$status == "Bottom only")),
+    x = "Chromosome", y = NULL
+  ) +
+  theme(
+    plot.title         = element_text(face = "bold"),
+    axis.text.x        = element_text(size = 7),
+    panel.grid.major.x = element_blank(),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+### Overlap Region Table
+
+```{r window-overlap-table, eval=has_genomic}
+if (n_ovlp_wins > 0) {
+  ovlp_win_regions <- all_gene_wins %>%
+    filter(status == "Overlap") %>%
+    select(chr_label, win_start, win_end, chr_order, win_id) %>%
+    inner_join(
+      genomic_raw %>%
+        mutate(
+          chr_label = sub("^chr", "", chr),
+          chr_num   = suppressWarnings(as.integer(chr_label)),
+          chr_order = dplyr::case_when(
+            !is.na(chr_num)              ~ chr_num,
+            chr_label == "X"             ~ 23L,
+            chr_label == "Y"             ~ 24L,
+            chr_label %in% c("MT","M")   ~ 25L,
+            TRUE                         ~ 26L
+          ),
+          win_id = floor(gene_mid / win_size)
+        ) %>%
+        select(Gene, chr_order, win_id),
+      by = c("chr_order", "win_id")
+    ) %>%
+    left_join(gene_top %>% select(Gene, composite_top    = gene_composite_score,
+                                       caas_top          = gene_caas_score),
+              by = "Gene") %>%
+    left_join(gene_bot %>% select(Gene, composite_bottom = gene_composite_score,
+                                       caas_bottom       = gene_caas_score),
+              by = "Gene") %>%
+    group_by(chr_order, chr_label, win_start, win_end) %>%
+    summarise(
+      n_genes = n_distinct(Gene),
+      mean_composite_top = mean(composite_top, na.rm = TRUE),
+      mean_composite_bottom = mean(composite_bottom, na.rm = TRUE),
+      max_caas_top = max(caas_top, na.rm = TRUE),
+      max_caas_bottom = max(caas_bottom, na.rm = TRUE),
+      genes = paste(sort(unique(Gene)), collapse = ", "),
+      .groups = "drop"
+    ) %>%
+    arrange(chr_order, win_start, desc(mean_composite_top)) %>%
+    mutate(
+      window = sprintf("chr%s:%s-%s Mb", chr_label,
+                       round(win_start / 1e6, 1), round(win_end / 1e6, 1)),
+      across(where(is.numeric), ~round(., 4))
+    ) %>%
+    select(window, n_genes, mean_composite_top, mean_composite_bottom,
+           max_caas_top, max_caas_bottom, genes)
+
+  DT::datatable(
+    ovlp_win_regions,
+    rownames = FALSE,
+    filter   = "top",
+    options  = list(pageLength = 30, scrollX = TRUE),
+    caption  = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      sprintf("Overlap regions enriched in top %g%% composite score for BOTH directions",
+              params$gene_top_pct * 100)
+    )
+  )
+} else {
+  cat("> No genomic windows are enriched in both top and bottom directions at this threshold.")
+}
+```
+
+---
+
+## Summary
+
+```{r overlap-summary}
+# Cross-score summary table
+summary_rows <- lapply(gene_score_cols, function(sc) {
+  r10 <- compute_gene_overlap(sc, "Top 10%", params$gene_top_pct,  params$gene_top_pct)
+  r5  <- compute_gene_overlap(sc, "Top 5%",  params$gene_top5_pct, params$gene_top5_pct)
+  r1  <- compute_gene_overlap(sc, "Top 1%",  params$gene_top1_pct, params$gene_top1_pct)
+  tibble(
+    `Score type`    = sc,
+    `N top (10%)`   = r10$n_top,
+    `N bot (10%)`   = r10$n_bot,
+    `Overlap (10%)` = r10$n_ovlp,
+    `Jaccard (10%)` = round(r10$jaccard, 4),
+    `Overlap (5%)`  = r5$n_ovlp,
+    `Jaccard (5%)`  = round(r5$jaccard, 4),
+    `Overlap (1%)`  = r1$n_ovlp,
+    `Jaccard (1%)`  = round(r1$jaccard, 4)
+  )
+})
+
+knitr::kable(
+  bind_rows(summary_rows),
+  align = c("l", rep("r", 8)),
+  caption = "Gene-level overlap summary across all available score types"
+)
+```
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>

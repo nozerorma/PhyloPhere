@@ -20,6 +20,7 @@
 process FADE_REPORT {
     tag "fade_report|${direction}"
     label 'process_reporting'
+    errorStrategy 'ignore'
 
     publishDir path: "${params.outdir}/selection/fade/${direction}",
                mode: 'copy', overwrite: true,
@@ -30,14 +31,19 @@ process FADE_REPORT {
     publishDir path: "${params.outdir}/selection/fade/${direction}",
                mode: 'copy', overwrite: true,
                pattern: 'fade_summary_*.tsv'
+    publishDir path: "${params.outdir}/selection/fade/${direction}",
+               mode: 'copy', overwrite: true,
+               pattern: 'fade_site_bf_*.tsv'
 
     input:
     val  direction
     path json_files
+    path fg_list_file  // optional: foreground species list (NO_FG_LIST sentinel when absent)
 
     output:
-    path "FADE_report_${direction}.html", emit: report
-    path "fade_summary_${direction}.tsv", emit: summary_tsv, optional: true
+    path "FADE_report_${direction}.html",   emit: report
+    path "fade_summary_${direction}.tsv",   emit: summary_tsv, optional: true
+    path "fade_site_bf_${direction}.tsv",   emit: site_tsv,    optional: true
 
     script:
     def local_dir   = "${baseDir}/subworkflows/FADE/local"
@@ -45,6 +51,7 @@ process FADE_REPORT {
     def bf_thr      = params.fade_bf_threshold          ?: 100
     def min_genes   = params.fade_min_genes_for_heatmap ?: 3
     def traitname   = params.traitname ?: 'unknown_trait'
+    def fg_arg      = (fg_list_file.name =~ /^NO_FG_LIST/) ? 'NULL' : "'${fg_list_file}'"
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -67,7 +74,8 @@ process FADE_REPORT {
                     traitname       = '${traitname}',
                     bf_threshold    = ${bf_thr},
                     min_genes_hmap  = ${min_genes},
-                    output_dir      = '${outdir}'
+                    output_dir      = '${outdir}',
+                    fg_list_file    = ${fg_arg}
                 ),
                 output_file = 'FADE_report_${direction}.html'
             )
@@ -100,7 +108,8 @@ process FADE_REPORT {
                     traitname       = '${traitname}',
                     bf_threshold    = ${bf_thr},
                     min_genes_hmap  = ${min_genes},
-                    output_dir      = '${outdir}'
+                    output_dir      = '${outdir}',
+                    fg_list_file    = ${fg_arg}
                 ),
                 output_file = 'FADE_report_${direction}.html'
             )

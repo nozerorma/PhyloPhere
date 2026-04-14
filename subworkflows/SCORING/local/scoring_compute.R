@@ -250,7 +250,7 @@ pos_scores <- df %>%
   group_by(Gene, Position) %>%
   summarise(
     biochem_score         = sum(scheme_contribution, na.rm = TRUE),
-    caap_score            = sum(scheme_weight, na.rm = TRUE),
+    scheme_coverage       = sum(scheme_weight, na.rm = TRUE),
     biochem_mul_current   = sum(scheme_contribution, na.rm = TRUE),
     biochem_mean          = sum(scheme_contribution_mean, na.rm = TRUE),
     biochem_geo           = sum(scheme_contribution_geo, na.rm = TRUE),
@@ -261,6 +261,8 @@ pos_scores <- df %>%
       if (length(contribs) == 0) 0 else sum(contribs / (2 ^ (seq_along(contribs) - 1)))
     },
     # Take representative values from the row set (constant within Gene×Position)
+    Pvalue                = first(Pvalue),
+    pvalue_boot           = first(pvalue_boot),
     variability_score     = first(variability_score),
     pattern_score         = first(pattern_score),
     is_conserved_meta     = first(is_conserved_meta),
@@ -374,17 +376,24 @@ pos_scores <- pos_scores %>%
   )
 
 # ── 2e. Parallel score ──────────────────────────────────────────────────────
-compute_parallel_score <- function(parallel_top, parallel_bottom, change_top,
-                                   change_bottom, mrca_1_posterior,
-                                   mrca_2_posterior, mrca_3_posterior) {
-  # Parallelism coefficient
+# Parallelism coefficients (categorical, no MRCA-posterior weighting):
+#   Non-parallel = 1.0 (highest): independent changes are the most informative
+#     signal of convergence — identical substitutions in independent lineages
+#     are less surprising and may reflect shared selective constraints.
+#   Mixed = 0.75, Parallel = 0.5.
+# Completeness penalty: 1.0 when both sides are assessable, 0.75 when only one.
+# MRCA reconstruction confidence is already captured by asr_score; applying it
+# here again would double-deflate positions with uncertain reconstructions and
+# collapse the effective range to ~0–0.375 instead of 0–1.
+# FADE and PrimateAI-3D provide complementary position-level characterization.
+compute_parallel_score <- function(parallel_top, parallel_bottom,
+                                   change_top,   change_bottom) {
   parallel_coeff <- function(p) {
     case_when(
       is.na(p) | p == "" | tolower(p) == "na" ~ NA_real_,
       tolower(p) == "non-parallel" | p == "False" | p == "FALSE" ~ 1.0,
       tolower(p) == "mixed"        ~ 0.75,
       tolower(p) == "parallel"     | p == "True" | p == "TRUE"  ~ 0.5,
-      # Handle parallel_{direction} pattern from data
       grepl("^parallel", tolower(p)) ~ 0.5,
       TRUE                          ~ NA_real_
     )
@@ -401,20 +410,9 @@ compute_parallel_score <- function(parallel_top, parallel_bottom, change_top,
   top_coeff    <- parallel_coeff(parallel_top)
   bottom_coeff <- parallel_coeff(parallel_bottom)
 
-  # For each side, compute confidence-weighted score using MRCA posteriors.
-  # Average across pairs that changed on that side.
-  # Simplified: use mean of available MRCA posteriors for each side.
-  mrca_mean <- rowMeans(
-    cbind(
-      as.numeric(mrca_1_posterior),
-      as.numeric(mrca_2_posterior),
-      as.numeric(mrca_3_posterior)
-    ),
-    na.rm = TRUE
-  )
-
-  top_side_score    <- ifelse(top_assessable,    top_coeff * mrca_mean, NA_real_)
-  bottom_side_score <- ifelse(bottom_assessable, bottom_coeff * mrca_mean, NA_real_)
+  # Use coefficients directly — no MRCA multiplier (see comment above)
+  top_side_score    <- ifelse(top_assessable,    top_coeff, NA_real_)
+  bottom_side_score <- ifelse(bottom_assessable, bottom_coeff, NA_real_)
 
   mean_parallel <- ifelse(
     is.na(top_side_score) & is.na(bottom_side_score), 0,
@@ -429,8 +427,7 @@ compute_parallel_score <- function(parallel_top, parallel_bottom, change_top,
 pos_scores <- pos_scores %>%
   mutate(
     parallel_score = compute_parallel_score(
-      parallel_top, parallel_bottom, change_top, change_bottom,
-      mrca_1_posterior, mrca_2_posterior, mrca_3_posterior
+      parallel_top, parallel_bottom, change_top, change_bottom
     )
   )
 
@@ -560,7 +557,7 @@ if (stress_enabled) {
       Gene, Position,
       variability_score,
       pattern_score,
-      caap_score,
+      scheme_coverage,
       biochem_score,
       biochem_mul_current,
       biochem_mean,
@@ -580,7 +577,7 @@ if (stress_enabled) {
       CAAS_no_asr = rowMeans(cbind(biochem_score, convergence_score, parallel_score), na.rm = TRUE),
       CAAS_no_convergence = rowMeans(cbind(biochem_score, asr_score, parallel_score), na.rm = TRUE),
       CAAS_no_parallel = rowMeans(cbind(biochem_score, asr_score, convergence_score), na.rm = TRUE),
-      CAAS_biochem_split = rowMeans(cbind(variability_score, pattern_score, caap_score,
+      CAAS_biochem_split = rowMeans(cbind(variability_score, pattern_score, scheme_coverage,
                                           asr_score, convergence_score, parallel_score), na.rm = TRUE),
       CAAS_biochem_alt_mean = rowMeans(cbind(biochem_mean, asr_score, convergence_score, parallel_score), na.rm = TRUE),
       CAAS_biochem_alt_geo = rowMeans(cbind(biochem_geo, asr_score, convergence_score, parallel_score), na.rm = TRUE),
@@ -619,7 +616,7 @@ if (stress_enabled) {
     cat("  PCA_all_components: skipped (fewer than 2 variable columns after filtering)\n")
   }
 
-  pca_no_biochem_cols <- c("variability_score", "pattern_score", "caap_score", "asr_score", "convergence_score", "parallel_score")
+  pca_no_biochem_cols <- c("variability_score", "pattern_score", "scheme_coverage", "asr_score", "convergence_score", "parallel_score")
   pca_no_biochem_df <- stress_df %>% select(all_of(pca_no_biochem_cols), CAAS_current) %>% drop_na()
   pca_no_biochem_cols_var <- variable_numeric_cols(pca_no_biochem_df, pca_no_biochem_cols)
   if (length(pca_no_biochem_cols_var) < length(pca_no_biochem_cols)) {
@@ -690,7 +687,7 @@ if (stress_enabled) {
   }
 
   analysis_cols <- c(
-    "variability_score", "pattern_score", "caap_score", "biochem_score",
+    "variability_score", "pattern_score", "scheme_coverage", "biochem_score",
     "asr_score", "convergence_score", "parallel_score"
   )
 
@@ -800,6 +797,7 @@ if (has_accum) {
   names(scheme_w) <- scheme_names
 
   accum_scores <- NULL
+  accum_meta   <- NULL
 
   # File prefix includes direction when running a directional report so that
   # accumulation_top_us_*.csv and accumulation_bottom_us_*.csv don't cross-contaminate.
@@ -831,11 +829,31 @@ if (has_accum) {
       ) %>%
       select(Gene, weighted)
 
+    scheme_meta_df <- d %>%
+      select(Gene, pval = all_of(pval_col)) %>%
+      filter(!is.na(pval)) %>%
+      mutate(
+        decile_val = decile_score(pval),
+        weighted   = decile_val * scheme_w[scheme]
+      ) %>%
+      select(
+        Gene,
+        !!paste0("accum_pval_", scheme) := pval,
+        !!paste0("accum_score_", scheme) := decile_val,
+        !!paste0("accum_weighted_", scheme) := weighted
+      )
+
     if (is.null(accum_scores)) {
       accum_scores <- scheme_df %>% rename(!!scheme := weighted)
     } else {
       accum_scores <- accum_scores %>%
         full_join(scheme_df %>% rename(!!scheme := weighted), by = "Gene")
+    }
+
+    if (is.null(accum_meta)) {
+      accum_meta <- scheme_meta_df
+    } else {
+      accum_meta <- accum_meta %>% full_join(scheme_meta_df, by = "Gene")
     }
   }
 
@@ -845,6 +863,9 @@ if (has_accum) {
       mutate(gene_rand_score = sum(c_across(-Gene), na.rm = TRUE)) %>%
       ungroup() %>%
       select(Gene, gene_rand_score)
+    if (!is.null(accum_meta)) {
+      gene_rand <- gene_rand %>% left_join(accum_meta, by = "Gene")
+    }
     cat(sprintf("  gene_rand_score: %d genes\n", nrow(gene_rand)))
   } else {
     gene_rand <- tibble(Gene = character(), gene_rand_score = numeric())
@@ -871,8 +892,9 @@ if (has_rer) {
 
   gene_rer <- rer %>%
     filter(!is.na(.data[[pval_col]])) %>%
-    mutate(gene_rer_score = decile_score(.data[[pval_col]])) %>%
-    select(Gene = gene, gene_rer_score)
+    mutate(gene_rer_score = decile_score(.data[[pval_col]]),
+           rer_min_pval   = .data[[pval_col]]) %>%
+    select(Gene = gene, gene_rer_score, rer_min_pval)
 
   cat(sprintf("  gene_rer_score: %d genes\n", nrow(gene_rer)))
 } else {
@@ -885,19 +907,19 @@ if (has_rer) {
 if (has_fade && nrow(fade_combined) > 0) {
   gene_fade <- fade_combined %>%
     mutate(gene_fade_score = decile_score_higher_better(fade_max_bf)) %>%
-    select(Gene, gene_fade_score)
+    select(Gene, gene_fade_score, fade_max_bf)
   cat(sprintf("  gene_fade_score: %d genes\n", nrow(gene_fade)))
 } else {
   gene_fade <- tibble(Gene = character(), gene_fade_score = numeric())
 }
 
-# ── 3e. Gene MoleRate Score (optional) ─────────────────────────────────────
-# MoleRate is inherently gene-level (min p-value across top/bottom per gene).
-# Decile rank, lower p-value → higher score.
+# ── 3e. gene_molerate_score — differential evolutionary rate (MoleRate, min p-value across top/bottom directions)
+# MoleRate tests whether foreground branches evolve at a different rate than background.
+# Decile rank of min(pval_pp_vs_prop) across directions, lower p-value → higher score.
 if (has_molerate && nrow(mol_combined) > 0) {
   gene_molerate <- mol_combined %>%
     mutate(gene_molerate_score = decile_score(mol_min_pval)) %>%
-    select(Gene, gene_molerate_score,
+    select(Gene, gene_molerate_score, mol_min_pval,
            any_of(c("mol_log2ratio_top", "mol_log2ratio_bottom")))
   cat(sprintf("  gene_molerate_score: %d genes\n", nrow(gene_molerate)))
 } else {
@@ -1018,7 +1040,8 @@ cat("\n─── Writing outputs ───────────────�
 
 # Position scores
 pos_out <- pos_scores %>%
-  select(Gene, Position, variability_score, pattern_score, biochem_score,
+  select(Gene, Position, any_of(c("Pvalue", "pvalue_boot")), variability_score, pattern_score,
+         scheme_coverage, biochem_score,
          asr_score, convergence_score, parallel_score,
          CAAS_score, change_side) %>%
   arrange(desc(CAAS_score))
@@ -1031,7 +1054,13 @@ gene_out <- gene_scores %>%
   select(Gene, n_positions, gene_caas_score, gene_rand_score,
          gene_rer_score, gene_fade_score,
          gene_molerate_score,
-         any_of(c("mol_log2ratio_top", "mol_log2ratio_bottom")),
+         any_of(c("accum_pval_us", "accum_score_us", "accum_weighted_us",
+                  "accum_pval_gs4", "accum_score_gs4", "accum_weighted_gs4",
+                  "accum_pval_gs3", "accum_score_gs3", "accum_weighted_gs3",
+                  "accum_pval_gs2", "accum_score_gs2", "accum_weighted_gs2",
+                  "accum_pval_gs1", "accum_score_gs1", "accum_weighted_gs1")),
+         any_of(c("rer_min_pval", "mol_min_pval", "fade_max_bf",
+                  "mol_log2ratio_top", "mol_log2ratio_bottom")),
          gene_composite_score) %>%
   arrange(desc(gene_composite_score))
 
