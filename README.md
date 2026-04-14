@@ -202,28 +202,16 @@ flowchart TD
 
   I1 --> S{FADE enabled}
   S -->|no| K
-  S -->|yes| S1{fade_mode}
-  S1 -->|all| S2[FADE<br/>Directional AA selection<br/>all genes]
-  S1 -->|gene_set| S3[FADE<br/>Directional AA selection<br/>significant genes only]
-  I1 -.->|gene lists| S3
+  S -->|yes| S2[FADE<br/>Directional AA selection<br/>all genes]
   S2 --> K
-  S3 --> K
 
   I1 --> M{MoleRate enabled}
   M -->|no| K
-  M -->|yes| M1{molerate_mode}
-  M1 -->|all| M2[MOLERATE<br/>Relative evolutionary rate<br/>all genes]
-  M1 -->|gene_set| M3[MOLERATE<br/>Relative evolutionary rate<br/>significant genes only]
-  I1 -.->|gene lists| M3
+  M -->|yes| M2[MOLERATE<br/>Relative evolutionary rate<br/>all genes]
   M2 --> K
-  M3 --> K
 
   R{RER tool enabled} -->|no| K
-  R -->|yes| R0{rer_gene_set_mode}
-  R0 -->|all| R1[RER_MAIN<br/>Trait tree matrix and continuous association<br/>all genes]
-  R0 -->|gene_set| R0a[FILTER_GENE_TREES<br/>Subset gene trees to significant genes]
-  I1 -.->|gene lists| R0a
-  R0a --> R1
+  R -->|yes| R1[RER_MAIN<br/>Trait tree matrix and continuous association<br/>all genes]
   R1 --> K
 ```
 

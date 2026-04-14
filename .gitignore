@@ -16,3 +16,6 @@ Out
 __pycache__
 .vscode
 marvin_debug
+subworkflows/VEP/dat/transvar/hg38.fa
+subworkflows/VEP/dat/transvar/hg38.fa.fai
+subworkflows/VEP/dat/transvar/hg38.fa.gz

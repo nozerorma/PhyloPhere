@@ -395,7 +395,6 @@ build_integrated_flags() {
         if [ "$SA_RER_CONTINUOUS_ONLY" = true ]; then
             OPTIONAL_BOOL_FLAGS+=(
                 --rer_tool "continuous"
-                --rer_gene_set_mode "all"
                 --rer_perm_batches "$SA_RER_PERM_BATCHES"
                 --rer_perms_per_batch "$SA_RER_PERMS_PER_BATCH"
                 --rer_perm_mode "$SA_RER_PERM_MODE"
@@ -406,7 +405,6 @@ build_integrated_flags() {
         else
             OPTIONAL_BOOL_FLAGS+=(
                 --rer_tool "$SA_RER_TOOL"
-                --rer_gene_set_mode "all"
                 --rer_perm_batches "$SA_RER_PERM_BATCHES"
                 --rer_perms_per_batch "$SA_RER_PERMS_PER_BATCH"
                 --rer_perm_mode "$SA_RER_PERM_MODE"
@@ -1011,15 +1009,8 @@ run_standalone_molerate() {
 # ─────────────────────────────────────────────────────────────────────────────
 # STANDALONE RERConverge
 # ─────────────────────────────────────────────────────────────────────────────
-_run_standalone_rer_mode() {
-    local mode="$1"
-    local mode_label; mode_label="$(_selection_mode_label "$mode")"
-    local mode_value; mode_value="$(_selection_mode_value "$mode")"
-    _require_selection_mode_inputs "$mode"
-    _selection_source_flags "rer" "$mode"
-
+run_standalone_rer() {
     local rer_tool_flags=(
-        --rer_gene_set_mode "$mode_value"
         --rer_perm_batches "$SA_RER_PERM_BATCHES"
         --rer_perms_per_batch "$SA_RER_PERMS_PER_BATCH"
         --rer_perm_mode "$SA_RER_PERM_MODE"
@@ -1040,18 +1031,17 @@ _run_standalone_rer_mode() {
         )
     fi
 
-    local outdir="${TEST_DIR}/standalone_rer_${mode_label}/${timestamp}"
+    local outdir="${TEST_DIR}/standalone_rer/${timestamp}"
     local workdir="${outdir}/work"
     mkdir -p "$outdir" "$workdir"
 
-    echo "Running standalone RERConverge (mode: ${mode_label})"
+    echo "Running standalone RERConverge (always all genes)"
     echo "  Output: ${outdir}"
 
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
         "${rer_tool_flags[@]}" \
-        "${SELECTION_SOURCE_FLAGS[@]+"${SELECTION_SOURCE_FLAGS[@]}"}" \
         --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
         ${SECONDARY_TRAIT:+--secondary_trait "$SECONDARY_TRAIT"} \
         ${BRANCH_TRAIT:+--branch_trait "$BRANCH_TRAIT"} \
@@ -1065,13 +1055,8 @@ _run_standalone_rer_mode() {
         -with-report "${outdir}/pipeline_info/execution_report.html" \
         -with-trace  "${outdir}/pipeline_info/execution_trace.txt"
 
-    ok "Standalone RERConverge (${mode_label}) completed → ${outdir}"
+    ok "Standalone RERConverge completed → ${outdir}"
     maybe_clean_work "$workdir"
-}
-
-run_standalone_rer() {
-    [ "$SA_SELECTION_MODE_ALL"        = true ] && _run_standalone_rer_mode all
-    [ "$SA_SELECTION_MODE_GENESET_PP" = true ] && _run_standalone_rer_mode gene_set_pp
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1134,8 +1119,6 @@ print_config() {
     echo "  RUN_SA_FADE                   : $RUN_SA_FADE"
     echo "  RUN_SA_MOLERATE               : $RUN_SA_MOLERATE"
     echo "  RUN_SA_RER                    : $RUN_SA_RER"
-    echo "    (+ SA_SELECTION_MODE_ALL        : $SA_SELECTION_MODE_ALL)"
-    echo "    (+ SA_SELECTION_MODE_GENESET_PP : $SA_SELECTION_MODE_GENESET_PP)"
     echo "    (+ SA_RER_CONTINUOUS_ONLY       : $SA_RER_CONTINUOUS_ONLY)"
     echo "    (+ SA_RER_TOOL                  : $SA_RER_TOOL)"
     echo "    (+ SA_RER_PERM_BATCHES          : $SA_RER_PERM_BATCHES)"

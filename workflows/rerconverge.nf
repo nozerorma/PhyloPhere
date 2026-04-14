@@ -38,8 +38,6 @@ include { RER_TREES }          from "${baseDir}/subworkflows/RERCONVERGE/rer_tre
 include { RER_MATRIX }         from "${baseDir}/subworkflows/RERCONVERGE/rer_matrix"
 include { RER_CONT }           from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
 include { RER_BIN }            from "${baseDir}/subworkflows/RERCONVERGE/rer_bin"
-include { COLLECT_GENE_SETS }  from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { FILTER_GENE_TREES }  from "${baseDir}/subworkflows/RERCONVERGE/rer_filter_trees.nf"
 include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
 
 // Main workflow
@@ -47,10 +45,9 @@ workflow RER_MAIN {
 
     take:
         traitfile_input   // Channel<path> or null → falls back to params.my_traits
-        // Optional upstream channels for inline gene-set piping.
-        // Pass Channel.empty() when running standalone (params-based).
-        pp_top_ch         // postproc TXT for TOP
-        pp_bottom_ch      // postproc TXT for BOTTOM
+        // Kept for backwards-compatible signature; currently unused.
+        pp_top_ch
+        pp_bottom_ch
 
     main:
 
@@ -61,33 +58,8 @@ workflow RER_MAIN {
                 file(params.my_traits)
             }
 
-        // ── Resolve gene trees (optionally pre-filtered to gene set) ─────────
-        def effective_gene_trees_ch
-
-        if (params.rer_gene_set_mode == 'gene_set') {
-            // Prefer upstream piped channels; fall back to --rer_* path params.
-            def resolved_pp_top = (pp_top_ch ?: Channel.empty())
-                .ifEmpty { file(params.rer_postproc_top        ?: 'NO_FILE') }
-
-            def resolved_pp_bottom = (pp_bottom_ch ?: Channel.empty())
-                .ifEmpty { file(params.rer_postproc_bottom     ?: 'NO_FILE') }
-
-            def gene_sets = COLLECT_GENE_SETS(
-                resolved_pp_top,
-                resolved_pp_bottom
-            )
-
-            def filtered = FILTER_GENE_TREES(
-                Channel.value(file(params.gene_trees)),
-                gene_sets.gene_set_top,
-                gene_sets.gene_set_bottom
-            )
-            effective_gene_trees_ch = filtered.filtered_trees
-
-        } else {
-            // all mode: use the full gene trees file unchanged
-            effective_gene_trees_ch = Channel.value(file(params.gene_trees))
-        }
+        // ── Resolve gene trees (always full set) ─────────────────────────────
+        def effective_gene_trees_ch = Channel.value(file(params.gene_trees))
 
         // ── Conditionally run RER steps ──────────────────────────────────────
         def trait_out_ch    = params.trait_out  ? Channel.value(file(params.trait_out))  : Channel.empty()

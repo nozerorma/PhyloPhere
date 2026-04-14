@@ -241,8 +241,7 @@ process EXTRACT_FG_BRANCHES {
 //   - RER_MAIN (when RERconverge uses gene_set mode)
 //
 // Transforms postprocessing output files into unified TOP/BOTTOM gene lists.
-// Each workflow supplies its own --postproc_top/bottom via params (e.g.,
-// --fade_postproc_top, --molerate_postproc_top, --rer_postproc_top).
+// Inputs are provided directly as files/channels.
 // ─────────────────────────────────────────────────────────────────────────────
 process COLLECT_GENE_SETS {
     tag "collect_gene_sets"

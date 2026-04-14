@@ -4,9 +4,8 @@ collect_gene_sets.py
 ────────────────────
 Consolidate gene sets from CT postprocessing outputs into directional lists.
 
-This script is used by FADE, MoleRate, and RERconverge workflows to transform
-postprocessing result files (typically line-separated gene lists) into unified
-TOP and BOTTOM gene sets for downstream analysis.
+This script consolidates postprocessing result files (typically line-separated
+gene lists) into unified TOP and BOTTOM gene sets for downstream analysis.
 
 Input Format
 ────────────
@@ -24,8 +23,7 @@ Usage
         --out_bottom gene_set_bottom.txt
 
 Arguments are optional; missing input files produce empty output files with a warning.
-Workflow drivers (FADE/MoleRate/RERconverge) supply their own --postproc_top/bottom
-paths via params (e.g. --fade_postproc_top, --molerate_postproc_top, --rer_postproc_top).
+Workflow drivers pass --postproc_top/--postproc_bottom directly as needed.
 """
 
 import argparse

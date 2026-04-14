@@ -155,11 +155,6 @@ workflow {
         def disambiguation_results = null
         def postproc_results = null
 
-        // Channels populated by CT_POSTPROC when it runs.
-        // Used by FADE/MOLERATE/RER gene-set piping without manual path specification.
-        def sel_pp_top_ch     = Channel.empty()
-        def sel_pp_bottom_ch  = Channel.empty()
-
         // Track which sub-tools actually ran so we can pass null (not Channel.empty())
         // to downstream workflows when a tool didn't produce output.
         // Channel.empty() is truthy in Groovy, so if() guards inside sub-workflows
@@ -175,7 +170,6 @@ workflow {
         // Stable channel references for CT_POSTPROC outputs used by multiple consumers.
         // Populated inside the ct_postproc block when --ct_postproc is enabled.
         def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
-        def pp_gene_lists_val = null   // .collect()-ed list of ORA gene list files (value channel)
 
         if (params.ct_signification) {
             // Only pass CT channels when the corresponding tool actually ran.
@@ -243,10 +237,7 @@ workflow {
 
             // Capture postproc outputs as reusable references.
             // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
-            // Collect ora_gene_lists_files into a value channel so FADE/MOLERATE/RER can each
-            // independently filter/flatMap the full list without racing on queue items.
-            pp_cleaned_bg     = postproc_results.cleaned_background
-            pp_gene_lists_val = postproc_results.ora_gene_lists_files.collect()
+            pp_cleaned_bg = postproc_results.cleaned_background
 
             if (params.ora) {
                 // ORA on excluded gene lists only: characterises genes removed during
@@ -286,34 +277,6 @@ workflow {
             ran_any = true
         }
 
-        // Populate postproc gene-list channels for FADE/MOLERATE/RER gene-set piping.
-        // pp_gene_lists_val is a value channel holding the collected List<File>.
-        // Restrict to global scenario directional lists only:
-        //   all_top.txt and all_bottom.txt
-        // (postproc-only selection policy requested for FADE/MOLERATE).
-        if (pp_gene_lists_val) {
-            sel_pp_top_ch    = pp_gene_lists_val
-                .flatMap { files -> files.findAll { f ->
-                    f.name == 'all_top.txt'
-                } }
-            sel_pp_bottom_ch = pp_gene_lists_val
-                .flatMap { files -> files.findAll { f ->
-                    f.name == 'all_bottom.txt'
-                } }
-        }
-
-        // Merge per-phenotype files into single files before passing to selection
-        // workflows. When multiple phenotypes are run together each sel_* channel
-        // emits N items (one per phenotype). COLLECT_GENE_SETS inside SELECTION_PREP
-        // is invoked once per synchronised 2-tuple of inputs, so without this merge it
-        // runs N times and every gene appears N times in the resulting ali channel —
-        // causing file-name staging collisions in the report process. collectFile()
-        // collapses N items into one merged file so COLLECT_GENE_SETS runs exactly once.
-        // When sel_* channels are empty (standalone runs) collectFile() emits nothing
-        // and the .ifEmpty {} fallback paths inside SELECTION_PREP remain intact.
-        sel_pp_top_ch     = sel_pp_top_ch    .collectFile(name: 'merged_pp_top.txt')
-        sel_pp_bottom_ch  = sel_pp_bottom_ch .collectFile(name: 'merged_pp_bottom.txt')
-
         if (params.fade || params.molerate) {
             // Resolve upstream channel sources for SELECTION_PREP.
             // These channels are now consumed by a single SELECTION_PREP call
@@ -342,8 +305,8 @@ workflow {
             SELECTION_PREP(
                 stats_source_ch,
                 tree_source_ch,
-                sel_pp_top_ch,
-                sel_pp_bottom_ch,
+                Channel.empty(),
+                Channel.empty(),
                 ct_discovery_source_ch
             )
 
@@ -378,15 +341,14 @@ workflow {
         }
 
         if (params.rer_tool) {
-            // RER_MAIN is called last so that sel_pp_* channels are fully
-            // populated by CT_POSTPROC when running together.
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
             // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.
             def rer_traitfile_ch = Channel.empty()
             RER_MAIN(
                 rer_traitfile_ch,
-                sel_pp_top_ch,  sel_pp_bottom_ch
+                Channel.empty(),
+                Channel.empty()
             )
             ran_any = true
         }

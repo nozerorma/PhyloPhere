@@ -118,12 +118,13 @@ workflow CT_ACCUMULATION {
             background_ch
         )
 
-        // ── Phase 2: Randomize — run once per phenotype direction ─────────────
+        // ── Phase 2: Randomize — run once per phenotype direction + once for all ──
         // AGGREGATE is direction-agnostic (alignment/conservation data).
         // RANDOMIZE filters the CAAS pool by change_side and names outputs
-        // accumulation_{direction}_{cat}_aggregated_results.csv so that
-        // scoring_compute.R can select the right files via --direction.
-        def rand_in = Channel.of("top", "bottom")
+        // accumulation_{direction}_{cat}_aggregated_results.csv.
+        // "all" uses --change-side both (retains all non-none positions) for the
+        // global accumulation score used in gene-level significance characterisation.
+        def rand_in = Channel.of("top", "bottom", "all")
             .combine(aggregate_out.global_csv)
             .combine(meta_caas_val)
             .multiMap { dir, global_csv, caas_csv ->

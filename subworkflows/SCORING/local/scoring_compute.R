@@ -62,8 +62,8 @@ gene_top5_pct     <- as.numeric(parse_arg("--gene_top5_pct", "0.05"))
 gene_top1_pct     <- as.numeric(parse_arg("--gene_top1_pct", "0.01"))
 stress_enabled    <- tolower(as.character(stress_enabled_raw)) %in% c("true", "1", "yes")
 if (!is.finite(stress_top_n) || is.na(stress_top_n) || stress_top_n < 1) stress_top_n <- 25
-direction         <- parse_arg("--direction", "both")
-stopifnot(direction %in% c("top", "bottom", "both"))
+# direction removed: scoring always runs on the full postproc pool.
+# Directional characterisation happens post-scoring via change_side column.
 
 file_exists <- function(f) {
   !is.null(f) && f != "" && !grepl("^NO_", basename(f)) && file.exists(f)
@@ -385,7 +385,7 @@ pos_scores <- pos_scores %>%
 # MRCA reconstruction confidence is already captured by asr_score; applying it
 # here again would double-deflate positions with uncertain reconstructions and
 # collapse the effective range to ~0–0.375 instead of 0–1.
-# FADE and PrimateAI-3D provide complementary position-level characterization.
+# FADE provides gene-level significance (BF >= 100); PrimateAI-3D provides complementary position-level characterization.
 compute_parallel_score <- function(parallel_top, parallel_bottom,
                                    change_top,   change_bottom) {
   parallel_coeff <- function(p) {
@@ -431,36 +431,31 @@ pos_scores <- pos_scores %>%
     )
   )
 
-# ── 2g. FADE (moved to gene-level — see section 3c) ─────────────────────────
+# ── 2g. FADE (gene-level — see section 3c) ──────────────────────────────────
 # FADE operates at gene level (max Bayes Factor per gene across sites).
-# It is loaded here so the data is available, but NOT broadcast to positions.
-has_fade <- file_exists(fade_top_file) || file_exists(fade_bottom_file)
-if (has_fade) {
-  cat(sprintf("Loading FADE summaries (direction='%s')\n", direction))
-  # For a directional run use only the relevant file; for 'both' take max across directions.
-  fade_file_for_dir <- if (direction == "top")    fade_top_file
-                       else if (direction == "bottom") fade_bottom_file
-                       else NULL  # 'both' → pool below
-  if (!is.null(fade_file_for_dir) && file_exists(fade_file_for_dir)) {
-    fade_combined <- read_tsv(fade_file_for_dir, show_col_types = FALSE) %>%
-      select(Gene = gene, fade_max_bf = max_bf)
-  } else {
-    # Pool both directions: keep the gene's highest Bayes Factor across directions
-    fade_dfs <- list()
-    if (file_exists(fade_top_file))
-      fade_dfs[["top"]]    <- read_tsv(fade_top_file,    show_col_types = FALSE) %>%
-        select(Gene = gene, max_bf)
-    if (file_exists(fade_bottom_file))
-      fade_dfs[["bottom"]] <- read_tsv(fade_bottom_file, show_col_types = FALSE) %>%
-        select(Gene = gene, max_bf)
-    fade_combined <- bind_rows(fade_dfs) %>%
-      group_by(Gene) %>%
-      summarise(fade_max_bf = max(max_bf, na.rm = TRUE), .groups = "drop")
-  }
-  cat(sprintf("  FADE: %d genes loaded\n", nrow(fade_combined)))
+# Significance threshold: BF >= 100 (FADE's standard criterion).
+# Top and bottom are loaded separately: fade_top tests acceleration in top
+# phenotype direction; fade_bottom tests the bottom direction.
+has_fade_top    <- file_exists(fade_top_file)
+has_fade_bottom <- file_exists(fade_bottom_file)
+has_fade        <- has_fade_top || has_fade_bottom
+
+if (has_fade_top) {
+  fade_top_df <- read_tsv(fade_top_file, show_col_types = FALSE) %>%
+    select(Gene = gene, fade_max_bf_top = max_bf)
+  cat(sprintf("  FADE top: %d genes loaded\n", nrow(fade_top_df)))
 } else {
-  cat("FADE: not available, skipping\n")
-  fade_combined <- tibble(Gene = character(), fade_max_bf = numeric())
+  cat("FADE top: not available, skipping\n")
+  fade_top_df <- tibble(Gene = character(), fade_max_bf_top = numeric())
+}
+
+if (has_fade_bottom) {
+  fade_bottom_df <- read_tsv(fade_bottom_file, show_col_types = FALSE) %>%
+    select(Gene = gene, fade_max_bf_bottom = max_bf)
+  cat(sprintf("  FADE bottom: %d genes loaded\n", nrow(fade_bottom_df)))
+} else {
+  cat("FADE bottom: not available, skipping\n")
+  fade_bottom_df <- tibble(Gene = character(), fade_max_bf_bottom = numeric())
 }
 
 # ── 2h. MOLERATE (moved to gene-level — see section 3e) ─────────────────────
@@ -535,16 +530,8 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             median(pos_scores$CAAS_score, na.rm = TRUE),
             max(pos_scores$CAAS_score, na.rm = TRUE)))
 
-# ── Direction filter ──────────────────────────────────────────────────────────
-# Applied after all position-level scores are computed so that genome-wide
-# decile ranks (variability_score, pattern_score) remain calibrated against the
-# full position pool.  Gene-level scoring and ORA then operate on the filtered set.
-if (direction %in% c("top", "bottom")) {
-  n_before <- nrow(pos_scores)
-  pos_scores <- pos_scores %>% filter(change_side %in% c(direction, "both"))
-  cat(sprintf("  Direction filter '%s': %d → %d positions retained\n",
-              direction, n_before, nrow(pos_scores)))
-}
+# Direction filter removed: all positions are retained for scoring.
+# Directional splits (top/bottom) are applied per-analysis after scoring.
 
 # =============================================================================
 # 2j. POSITION-LEVEL STRESS TESTS (optional)
@@ -776,35 +763,51 @@ if (stress_enabled) {
 
 cat("\n─── Gene-level scoring ────────────────────────────────────────\n")
 
-# ── 3a. Gene CAAS Score: 90th percentile of CAAS_score per gene ─────────────
+# ── 3a. Gene CAAS Scores: 90th percentile of CAAS_score per gene ────────────
+# Three scores computed from different position subsets:
+#   gene_caas_score        — all positions (full pool)
+#   gene_caas_score_top    — positions with change_side ∈ {top, both}
+#   gene_caas_score_bottom — positions with change_side ∈ {bottom, both}
 gene_caas <- pos_scores %>%
   group_by(Gene) %>%
   summarise(
-    gene_caas_score = quantile(CAAS_score, 0.90, na.rm = TRUE),
-    n_positions     = n(),
+    gene_caas_score        = quantile(CAAS_score, 0.90, na.rm = TRUE),
+    gene_caas_score_top    = {
+      vals <- CAAS_score[change_side %in% c("top", "both")]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_score_bottom = {
+      vals <- CAAS_score[change_side %in% c("bottom", "both")]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    n_positions        = n(),
+    n_positions_top    = sum(change_side %in% c("top",    "both"), na.rm = TRUE),
+    n_positions_bottom = sum(change_side %in% c("bottom", "both"), na.rm = TRUE),
     .groups = "drop"
   )
 
-cat(sprintf("  gene_caas_score: %d genes\n", nrow(gene_caas)))
+cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)\n",
+            nrow(gene_caas),
+            sum(!is.na(gene_caas$gene_caas_score_top)),
+            sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
-# ── 3b. Gene Randomization Score (optional) ─────────────────────────────────
+# ── 3b. Gene Accumulation Score (optional) ──────────────────────────────────
+# Uses accumulation_all_* files: all non-none positions (change_side != 'none').
+# Score: accumulation_score = 1 - mean(w_i * p_i) / n_available_schemes
+#   where w_i are scheme weights and p_i are PValueEmpirical per scheme.
+# Significance: top 5% of accumulation_score (genome-wide empirical threshold).
 has_accum <- file_exists(accum_dir) && dir.exists(accum_dir)
 if (has_accum) {
-  cat("Loading accumulation from:", accum_dir, "\n")
+  cat("Loading accumulation (all positions) from:", accum_dir, "\n")
 
   scheme_names <- c("us", "gs4", "gs3", "gs2", "gs1")
   scheme_w     <- c(0.5,  0.2,   0.1,   0.1,   0.1)
   names(scheme_w) <- scheme_names
 
-  accum_scores <- NULL
-  accum_meta   <- NULL
-
-  # File prefix includes direction when running a directional report so that
-  # accumulation_top_us_*.csv and accumulation_bottom_us_*.csv don't cross-contaminate.
-  accum_pfx <- if (direction %in% c("top", "bottom")) paste0("accumulation_", direction) else "accumulation"
+  accum_pval_df <- NULL  # will hold Gene + one pval col per scheme
 
   for (scheme in scheme_names) {
-    pattern <- paste0(accum_pfx, "_", scheme, "_aggregated_results.csv")
+    pattern <- paste0("accumulation_all_", scheme, "_aggregated_results.csv")
     f <- list.files(accum_dir, pattern = pattern, full.names = TRUE)
     if (length(f) == 0) {
       cat(sprintf("    %s: file not found, skipping\n", scheme))
@@ -813,67 +816,58 @@ if (has_accum) {
     cat(sprintf("    %s: %s\n", scheme, basename(f[1])))
     d <- read_csv(f[1], show_col_types = FALSE)
 
-    # Find the PValueEmpirical column (pattern varies by scheme)
     pval_col <- grep("PValueEmpirical", names(d), value = TRUE)[1]
     if (is.na(pval_col)) {
       cat(sprintf("    %s: no PValueEmpirical column found, skipping\n", scheme))
       next
     }
 
-    scheme_df <- d %>%
-      select(Gene, pval = all_of(pval_col)) %>%
-      filter(!is.na(pval)) %>%
-      mutate(
-        decile_val = decile_score(pval),
-        weighted   = decile_val * scheme_w[scheme]
-      ) %>%
-      select(Gene, weighted)
+    scheme_pvals <- d %>%
+      select(Gene, !!paste0("accum_pval_", scheme) := all_of(pval_col))
 
-    scheme_meta_df <- d %>%
-      select(Gene, pval = all_of(pval_col)) %>%
-      filter(!is.na(pval)) %>%
-      mutate(
-        decile_val = decile_score(pval),
-        weighted   = decile_val * scheme_w[scheme]
-      ) %>%
-      select(
-        Gene,
-        !!paste0("accum_pval_", scheme) := pval,
-        !!paste0("accum_score_", scheme) := decile_val,
-        !!paste0("accum_weighted_", scheme) := weighted
-      )
-
-    if (is.null(accum_scores)) {
-      accum_scores <- scheme_df %>% rename(!!scheme := weighted)
+    if (is.null(accum_pval_df)) {
+      accum_pval_df <- scheme_pvals
     } else {
-      accum_scores <- accum_scores %>%
-        full_join(scheme_df %>% rename(!!scheme := weighted), by = "Gene")
-    }
-
-    if (is.null(accum_meta)) {
-      accum_meta <- scheme_meta_df
-    } else {
-      accum_meta <- accum_meta %>% full_join(scheme_meta_df, by = "Gene")
+      accum_pval_df <- accum_pval_df %>% full_join(scheme_pvals, by = "Gene")
     }
   }
 
-  if (!is.null(accum_scores)) {
-    gene_rand <- accum_scores %>%
+  if (!is.null(accum_pval_df)) {
+    available_schemes <- intersect(scheme_names,
+                                   sub("^accum_pval_", "", grep("^accum_pval_", names(accum_pval_df), value = TRUE)))
+    gene_rand <- accum_pval_df %>%
       rowwise() %>%
-      mutate(gene_rand_score = sum(c_across(-Gene), na.rm = TRUE)) %>%
+      mutate(
+        accum_score_raw = {
+          pvals   <- c_across(starts_with("accum_pval_"))
+          weights <- scheme_w[available_schemes]
+          valid   <- !is.na(pvals)
+          if (sum(valid) == 0) NA_real_
+          else sum(weights[valid] * pvals[valid], na.rm = TRUE) / sum(valid)
+        },
+        gene_rand_score = if (is.na(accum_score_raw)) NA_real_ else 1 - accum_score_raw
+      ) %>%
       ungroup() %>%
-      select(Gene, gene_rand_score)
-    if (!is.null(accum_meta)) {
-      gene_rand <- gene_rand %>% left_join(accum_meta, by = "Gene")
-    }
-    cat(sprintf("  gene_rand_score: %d genes\n", nrow(gene_rand)))
+      select(Gene, gene_rand_score, starts_with("accum_pval_"))
+
+    # Top 5% threshold (higher score = more accumulation above chance)
+    thr_accum <- quantile(gene_rand$gene_rand_score, 0.95, na.rm = TRUE)
+    gene_rand <- gene_rand %>%
+      mutate(accum_significant = gene_rand_score >= thr_accum)
+
+    cat(sprintf("  Accumulation: %d genes, %d significant (top 5%%, score >= %.3f)\n",
+                nrow(gene_rand),
+                sum(gene_rand$accum_significant, na.rm = TRUE),
+                thr_accum))
   } else {
-    gene_rand <- tibble(Gene = character(), gene_rand_score = numeric())
+    gene_rand <- tibble(Gene = character(), gene_rand_score = numeric(),
+                        accum_significant = logical())
     has_accum <- FALSE
   }
 } else {
   cat("Accumulation: not available, skipping\n")
-  gene_rand <- tibble(Gene = character(), gene_rand_score = numeric())
+  gene_rand <- tibble(Gene = character(), gene_rand_score = numeric(),
+                      accum_significant = logical())
 }
 
 # ── 3c. Gene RERConverge Score (optional) ───────────────────────────────────
@@ -888,42 +882,64 @@ if (has_rer) {
   } else {
     "p.adj"
   }
-  cat(sprintf("  Using %s for gene_rer_score\n", pval_col))
+  cat(sprintf("  Using %s for rer_min_pval\n", pval_col))
 
   gene_rer <- rer %>%
     filter(!is.na(.data[[pval_col]])) %>%
-    mutate(gene_rer_score = decile_score(.data[[pval_col]]),
-           rer_min_pval   = .data[[pval_col]]) %>%
-    select(Gene = gene, gene_rer_score, rer_min_pval)
+    mutate(rer_min_pval       = .data[[pval_col]],
+           rer_rho            = Rho,
+           rer_acceleration   = case_when(
+             is.na(Rho)  ~ NA_character_,
+             Rho > 0     ~ "accelerated",
+             Rho < 0     ~ "decelerated",
+             TRUE        ~ "neutral"
+           )) %>%
+    select(Gene = gene, rer_min_pval, rer_rho, rer_acceleration)
 
-  cat(sprintf("  gene_rer_score: %d genes\n", nrow(gene_rer)))
+  cat(sprintf("  RERConverge: %d genes\n", nrow(gene_rer)))
 } else {
   cat("RERConverge: not available, skipping\n")
-  gene_rer <- tibble(Gene = character(), gene_rer_score = numeric())
+  gene_rer <- tibble(Gene = character(), rer_min_pval = numeric(),
+                     rer_rho = numeric(), rer_acceleration = character())
 }
 
-# ── 3c. Gene FADE Score (optional) ──────────────────────────────────────────
-# FADE is inherently gene-level (max BF per gene). Decile rank, higher = better.
-if (has_fade && nrow(fade_combined) > 0) {
-  gene_fade <- fade_combined %>%
-    mutate(gene_fade_score = decile_score_higher_better(fade_max_bf)) %>%
-    select(Gene, gene_fade_score, fade_max_bf)
-  cat(sprintf("  gene_fade_score: %d genes\n", nrow(gene_fade)))
+# ── 3c. Gene FADE Significance (optional) ───────────────────────────────────
+# BF >= 100 per direction. fade_significant_top / _bottom used separately
+# to characterise top-CAAS and bottom-CAAS gene sets respectively.
+gene_fade <- tibble(Gene = character())
+
+if (nrow(fade_top_df) > 0) {
+  gene_fade <- gene_fade %>%
+    full_join(fade_top_df %>% mutate(fade_significant_top = fade_max_bf_top >= 100),
+              by = "Gene")
+  cat(sprintf("  FADE top: %d significant (BF >= 100)\n",
+              sum(gene_fade$fade_significant_top, na.rm = TRUE)))
 } else {
-  gene_fade <- tibble(Gene = character(), gene_fade_score = numeric())
+  gene_fade$fade_max_bf_top      <- NA_real_
+  gene_fade$fade_significant_top <- NA
 }
 
-# ── 3e. gene_molerate_score — differential evolutionary rate (MoleRate, min p-value across top/bottom directions)
+if (nrow(fade_bottom_df) > 0) {
+  gene_fade <- gene_fade %>%
+    full_join(fade_bottom_df %>% mutate(fade_significant_bottom = fade_max_bf_bottom >= 100),
+              by = "Gene")
+  cat(sprintf("  FADE bottom: %d significant (BF >= 100)\n",
+              sum(gene_fade$fade_significant_bottom, na.rm = TRUE)))
+} else {
+  gene_fade$fade_max_bf_bottom      <- NA_real_
+  gene_fade$fade_significant_bottom <- NA
+}
+
+# ── 3e. MoleRate significance — differential evolutionary rate
 # MoleRate tests whether foreground branches evolve at a different rate than background.
-# Decile rank of min(pval_pp_vs_prop) across directions, lower p-value → higher score.
+# Significance: p-value; direction: log2_ratio (> 0 = faster, < 0 = slower).
 if (has_molerate && nrow(mol_combined) > 0) {
   gene_molerate <- mol_combined %>%
-    mutate(gene_molerate_score = decile_score(mol_min_pval)) %>%
-    select(Gene, gene_molerate_score, mol_min_pval,
+    select(Gene, mol_min_pval,
            any_of(c("mol_log2ratio_top", "mol_log2ratio_bottom")))
-  cat(sprintf("  gene_molerate_score: %d genes\n", nrow(gene_molerate)))
+  cat(sprintf("  MoleRate: %d genes\n", nrow(gene_molerate)))
 } else {
-  gene_molerate <- tibble(Gene = character(), gene_molerate_score = numeric(),
+  gene_molerate <- tibble(Gene = character(), mol_min_pval = numeric(),
                           mol_log2ratio_top = numeric(), mol_log2ratio_bottom = numeric())
 }
 
@@ -939,40 +955,23 @@ if (nrow(gene_rand) > 0) {
 if (nrow(gene_rer) > 0) {
   gene_scores <- gene_scores %>% left_join(gene_rer, by = "Gene")
 } else {
-  gene_scores$gene_rer_score <- NA_real_
+  gene_scores$rer_min_pval     <- NA_real_
+  gene_scores$rer_rho          <- NA_real_
+  gene_scores$rer_acceleration <- NA_character_
 }
 
 if (nrow(gene_fade) > 0) {
   gene_scores <- gene_scores %>% left_join(gene_fade, by = "Gene")
 } else {
-  gene_scores$gene_fade_score <- NA_real_
+  gene_scores$fade_max_bf      <- NA_real_
+  gene_scores$fade_significant <- NA
 }
 
 if (nrow(gene_molerate) > 0) {
   gene_scores <- gene_scores %>% left_join(gene_molerate, by = "Gene")
 } else {
-  gene_scores$gene_molerate_score <- NA_real_
+  gene_scores$mol_min_pval <- NA_real_
 }
-
-# Gene composite score: unweighted mean of available sub-scores
-gene_scores <- gene_scores %>%
-  rowwise() %>%
-  mutate(
-    gene_composite_score = {
-      components <- c(gene_caas_score)
-      if (!is.na(gene_rand_score))     components <- c(components, gene_rand_score)
-      if (!is.na(gene_rer_score))      components <- c(components, gene_rer_score)
-      if (!is.na(gene_fade_score))     components <- c(components, gene_fade_score)
-      if (!is.na(gene_molerate_score)) components <- c(components, gene_molerate_score)
-      mean(components, na.rm = TRUE)
-    }
-  ) %>%
-  ungroup()
-
-cat(sprintf("\nGene composite: min=%.3f, median=%.3f, max=%.3f\n",
-            min(gene_scores$gene_composite_score, na.rm = TRUE),
-            median(gene_scores$gene_composite_score, na.rm = TRUE),
-            max(gene_scores$gene_composite_score, na.rm = TRUE)))
 
 # =============================================================================
 # 4. CORRELATION ANALYSIS (gene-level)
@@ -980,15 +979,12 @@ cat(sprintf("\nGene composite: min=%.3f, median=%.3f, max=%.3f\n",
 
 cat("\n─── Correlation analysis ──────────────────────────────────────\n")
 
+# Correlations use gene_caas_score as primary axis; gene_rand_score (accumulation)
+# is included as a secondary numeric score. RER, FADE, and MoleRate use their
+# native significance criteria and are not included as numeric score axes here.
 score_cols <- c("gene_caas_score")
-if (has_accum    && any(!is.na(gene_scores$gene_rand_score)))
+if (has_accum && any(!is.na(gene_scores$gene_rand_score)))
   score_cols <- c(score_cols, "gene_rand_score")
-if (has_rer      && any(!is.na(gene_scores$gene_rer_score)))
-  score_cols <- c(score_cols, "gene_rer_score")
-if (has_fade     && any(!is.na(gene_scores$gene_fade_score)))
-  score_cols <- c(score_cols, "gene_fade_score")
-if (has_molerate && any(!is.na(gene_scores$gene_molerate_score)))
-  score_cols <- c(score_cols, "gene_molerate_score")
 
 if (length(score_cols) >= 2) {
   corr_mat <- gene_scores %>%
@@ -1052,17 +1048,15 @@ cat(sprintf("  position_scores.tsv: %d rows\n", nrow(pos_out)))
 # Gene scores
 gene_out <- gene_scores %>%
   select(Gene, n_positions, gene_caas_score, gene_rand_score,
-         gene_rer_score, gene_fade_score,
-         gene_molerate_score,
          any_of(c("accum_pval_us", "accum_score_us", "accum_weighted_us",
                   "accum_pval_gs4", "accum_score_gs4", "accum_weighted_gs4",
                   "accum_pval_gs3", "accum_score_gs3", "accum_weighted_gs3",
                   "accum_pval_gs2", "accum_score_gs2", "accum_weighted_gs2",
                   "accum_pval_gs1", "accum_score_gs1", "accum_weighted_gs1")),
-         any_of(c("rer_min_pval", "mol_min_pval", "fade_max_bf",
-                  "mol_log2ratio_top", "mol_log2ratio_bottom")),
-         gene_composite_score) %>%
-  arrange(desc(gene_composite_score))
+         any_of(c("rer_min_pval", "rer_rho", "rer_acceleration",
+                  "fade_max_bf", "fade_significant",
+                  "mol_min_pval", "mol_log2ratio_top", "mol_log2ratio_bottom"))) %>%
+  arrange(desc(gene_caas_score))
 
 write_tsv(gene_out, "gene_scores.tsv")
 cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
@@ -1104,9 +1098,13 @@ for (pct_label in c("top10pct", "top5pct", "top1pct")) {
 # ── Gene-level ORA gene lists ───────────────────────────────────────────────
 # gene_out already reflects the direction-filtered position pool.
 # Generate lists per score type and threshold — no internal direction loop needed.
-gene_score_cols <- c("gene_caas_score", "gene_rand_score",
-                     "gene_rer_score", "gene_fade_score", "gene_molerate_score",
-                     "gene_composite_score")
+# ORA gene lists are generated from score-based rankings only.
+# gene_caas_score is the primary axis; gene_rand_score (accumulation) is included
+# as it is a custom score. RER, FADE, and MoleRate use significance thresholds,
+# not scores, for characterization — their gene lists are not generated here.
+gene_score_cols <- c("gene_caas_score")
+if (has_accum && any(!is.na(gene_out$gene_rand_score)))
+  gene_score_cols <- c(gene_score_cols, "gene_rand_score")
 
 for (score_col in gene_score_cols) {
   score_name <- sub("^gene_", "", sub("_score$", "", score_col))

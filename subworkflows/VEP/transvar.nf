@@ -42,13 +42,38 @@ process TRANSVAR_ANNO {
     script:
     def refver = params.vep_refversion ?: 'hg38'
     def transvarBin = params.vep_transvar_bin ?: ''
-    def transvarCfg = params.vep_transvar_cfg ?: '${projectDir}/subworkflows/VEP/dat/transvar/transvar.cfg'
+    def transvarCfg = params.vep_transvar_cfg ?: ''
+    def transvarReference = params.vep_transvar_reference ?: ''
     """
     # Extract unique GENE:p.N query strings from column 4 of the AA2prot table
     cut -f4 "${aa2prot_csv}" | sort -u > positions_input.txt
 
+    staged_db_dir="\$(cd "${transvar_db}" && pwd)"
+
+    # Resolve TransVar config with explicit precedence:
+    #  1) user-provided --vep_transvar_cfg (if it exists)
+    #  2) staged DB transvar.config
+    #  3) staged DB transvar.cfg
+    # If found, stage as a task-local temporary config and export TRANSVAR_CFG.
+    cfg_src=""
     if [[ -n "${transvarCfg}" ]]; then
-        export TRANSVAR_CFG="${transvarCfg}"
+        if [[ -f "${transvarCfg}" ]]; then
+            cfg_src="${transvarCfg}"
+        else
+            echo "WARN Requested TransVar config not found: ${transvarCfg}. Trying staged defaults." >&2
+        fi
+    fi
+
+    if [[ -z "\${cfg_src}" && -f "\${staged_db_dir}/transvar.config" ]]; then
+        cfg_src="\${staged_db_dir}/transvar.config"
+    fi
+    if [[ -z "\${cfg_src}" && -f "\${staged_db_dir}/transvar.cfg" ]]; then
+        cfg_src="\${staged_db_dir}/transvar.cfg"
+    fi
+
+    if [[ -n "\${cfg_src}" ]]; then
+        cp "\${cfg_src}" transvar.cfg
+        export TRANSVAR_CFG="\$(pwd)/transvar.cfg"
     fi
 
     if [[ -x "${transvarBin}" ]]; then
@@ -61,18 +86,29 @@ process TRANSVAR_ANNO {
         exit 0
     fi
 
-    # TransVar does not accept --dbdir on the panno subcommand. Resolve the
-    # active reference FASTA, then pass the staged CCDS .transvardb path
-    # explicitly on the command line so we do not inherit stale paths from any
-    # existing user/site TransVar configuration.
-    ref_path=\$("\${tv_bin}" config --refversion "${refver}" 2>/dev/null | awk -F': ' '/^Reference:/ {print \$2; exit}')
-    if [[ -z "\${ref_path}" ]]; then
-        echo "WARN TransVar could not resolve a reference FASTA for refversion ${refver}. Skipping TransVar annotation." >&2
-        touch transvar.tsv
-        exit 0
+    # TransVar does not accept --dbdir on the panno subcommand. Prefer an
+    # explicit reference FASTA when provided, then attempt to resolve it from
+    # 'transvar config --refversion'. If unresolved, still attempt panno and
+    # let TransVar use TRANSVAR_CFG/default behavior.
+    ref_path="${transvarReference}"
+    if [[ -n "\${ref_path}" && ! -f "\${ref_path}" ]]; then
+        echo "WARN vep_transvar_reference points to a missing file: \${ref_path}. Ignoring it." >&2
+        ref_path=""
     fi
 
-    staged_db_dir="\$(cd "${transvar_db}" && pwd)"
+    if [[ -z "\${ref_path}" ]]; then
+        ref_path=\$("\${tv_bin}" config --refversion "${refver}" 2>/dev/null | awk -F': ' '
+            tolower(\$1) ~ /reference/ { print \$2; exit }
+        ')
+    fi
+
+    ref_args=()
+    if [[ -n "\${ref_path}" ]]; then
+        ref_args=(--reference "\${ref_path}")
+    else
+        echo "WARN TransVar could not resolve a reference FASTA for refversion ${refver}. Continuing without --reference and relying on TRANSVAR_CFG/default config." >&2
+    fi
+
     ccds_db="\${staged_db_dir}/${refver}.ccds.txt.transvardb"
     if [[ ! -f "\${ccds_db}" ]]; then
         echo "WARN TransVar CCDS database not found: \${ccds_db}. Skipping TransVar annotation." >&2
@@ -82,14 +118,18 @@ process TRANSVAR_ANNO {
 
     export TRANSVAR_DOWNLOAD_DIR="\${staged_db_dir}"
 
-    "\${tv_bin}" panno \\
+    if ! "\${tv_bin}" panno \\
         -l positions_input.txt \\
         --ccds "\${ccds_db}" \\
         --refversion "${refver}" \\
-        --reference "\${ref_path}" \\
+        "\${ref_args[@]}" \\
         --noheader \\
         --longest \\
-        > transvar.tsv
+        > transvar.tsv; then
+        echo "WARN TransVar panno failed for refversion ${refver}. Skipping TransVar annotation." >&2
+        touch transvar.tsv
+        exit 0
+    fi
 
     # Guarantee the output file exists even if TransVar produced nothing
     [[ -s transvar.tsv ]] || touch transvar.tsv

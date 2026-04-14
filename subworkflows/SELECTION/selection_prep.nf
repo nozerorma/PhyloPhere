@@ -7,7 +7,7 @@
  * results between FADE and MOLERATE, eliminating duplicate work:
  *
  *   1. EXTRACT_EXTREME_SPECIES  – top/bottom species lists from trait_stats.csv
- *   2. [Alignment channel]      – build gene list (all / gene_set / toy_mode)
+ *   2. [Alignment channel]      – build gene list (all / toy_mode)
  *   3. PREP_ALIGNMENTS_BATCHED  – convert PHYLIP→FASTA + filter to tree taxa
  *                                  (or PREP_ALIGNMENTS for batch_size=1)
  *
@@ -23,7 +23,6 @@
  */
 
 include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { COLLECT_GENE_SETS       } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -165,8 +164,8 @@ workflow SELECTION_PREP {
     take:
         stats_file_input   // Channel<path> or null → falls back to canonical outdir path
         tree_input         // Channel<path> or null → falls back to params.tree
-        pp_top_ch          // postproc TXT for TOP  (all_top.txt)  — gene_set mode
-        pp_bottom_ch       // postproc TXT for BOTTOM (all_bottom.txt) — gene_set mode
+        pp_top_ch          // Legacy input, unused (kept for backwards-compatible signature)
+        pp_bottom_ch       // Legacy input, unused (kept for backwards-compatible signature)
         ct_discovery_input // Optional CT discovery table for toy_mode gene reuse
 
     main:
@@ -199,8 +198,7 @@ workflow SELECTION_PREP {
         def ali_dir = (params.fade_alignment ?: params.molerate_alignment ?: params.alignment) ?:
             error("SELECTION_PREP: no alignment directory specified (--alignment, --fade_alignment, or --molerate_alignment)")
 
-        // Prefer the FADE mode if set; fall back to MOLERATE mode, then 'gene_set'.
-        def mode = (params.fade_mode ?: params.molerate_mode ?: 'gene_set')
+        log.info "[SELECTION_PREP] selection mode: all genes"
 
         // ── Extract foreground species (once, shared by FADE and MOLERATE) ───
         def species_lists      = EXTRACT_EXTREME_SPECIES(stats_file_ch)
@@ -212,63 +210,32 @@ workflow SELECTION_PREP {
         // direction-agnostic; direction is introduced later inside FADE/MOLERATE.
 
         def ali_ch
-        // Gene-set files are only needed in gene_set mode; initialise as empty.
-        def gs_top_val    = Channel.value(file('NO_FILE'))
-        def gs_bottom_val = Channel.value(file('NO_FILE'))
 
-        if (mode == 'all') {
-            if (params.toy_mode) {
-                def resolved_ct = (ct_discovery_input ?: Channel.empty())
-                    .ifEmpty { file('NO_FILE') }
+        if (params.toy_mode) {
+            def resolved_ct = (ct_discovery_input ?: Channel.empty())
+                .ifEmpty { file('NO_FILE') }
 
-                ali_ch = resolved_ct.flatMap { discovery_file ->
-                    def toy_genes = null
-                    if (discovery_file.name != 'NO_FILE' && discovery_file.exists()) {
-                        toy_genes = discovery_file
-                            .readLines()
-                            .drop(1)
-                            .collect { it.split('\t')[0].trim() }
-                            .findAll { it }
-                            .toSet()
-                        log.info "[toy_mode] SELECTION_PREP: reusing ${toy_genes.size()} genes from CT discovery"
-                    } else {
-                        def n = (params.toy_n ?: 50) as int
-                        def all_tuples = ali_tuples_from_dir(ali_dir, null)
-                        Collections.shuffle(all_tuples)
-                        toy_genes = all_tuples.take(n).collect { it[0] }.toSet()
-                        log.info "[toy_mode] SELECTION_PREP: using ${toy_genes.size()} randomly sampled genes"
-                    }
-                    ali_tuples_from_dir(ali_dir, toy_genes)
+            ali_ch = resolved_ct.flatMap { discovery_file ->
+                def toy_genes = null
+                if (discovery_file.name != 'NO_FILE' && discovery_file.exists()) {
+                    toy_genes = discovery_file
+                        .readLines()
+                        .drop(1)
+                        .collect { it.split('\t')[0].trim() }
+                        .findAll { it }
+                        .toSet()
+                    log.info "[toy_mode] SELECTION_PREP: reusing ${toy_genes.size()} genes from CT discovery"
+                } else {
+                    def n = (params.toy_n ?: 50) as int
+                    def all_tuples = ali_tuples_from_dir(ali_dir, null)
+                    Collections.shuffle(all_tuples)
+                    toy_genes = all_tuples.take(n).collect { it[0] }.toSet()
+                    log.info "[toy_mode] SELECTION_PREP: using ${toy_genes.size()} randomly sampled genes"
                 }
-            } else {
-                ali_ch = Channel.fromList(ali_tuples_from_dir(ali_dir, null))
+                ali_tuples_from_dir(ali_dir, toy_genes)
             }
-
         } else {
-            // gene_set mode ───────────────────────────────────────────────────
-            // Prefer upstream piped channels; fall back to --fade_* / --molerate_* params.
-            def resolved_pp_top = (pp_top_ch ?: Channel.empty())
-                .ifEmpty { file(params.fade_postproc_top ?: params.molerate_postproc_top ?: 'NO_FILE') }
-
-            def resolved_pp_bottom = (pp_bottom_ch ?: Channel.empty())
-                .ifEmpty { file(params.fade_postproc_bottom ?: params.molerate_postproc_bottom ?: 'NO_FILE') }
-
-            def gene_sets = COLLECT_GENE_SETS(resolved_pp_top, resolved_pp_bottom)
-
-            // Keep references for direction-routing below.
-            gs_top_val    = gene_sets.gene_set_top.collect().map { it[0] }
-            gs_bottom_val = gene_sets.gene_set_bottom.collect().map { it[0] }
-
-            // Preprocess the UNION of top+bottom gene sets so each gene is
-            // converted and tree-filtered exactly once.
-            ali_ch = gene_sets.gene_set_top.combine(gene_sets.gene_set_bottom).flatMap { gsf_top, gsf_bottom ->
-                def top_genes = gsf_top.readLines()
-                    .collect { it.trim() }.findAll { it && !it.startsWith('#') }.toSet()
-                def bottom_genes = gsf_bottom.readLines()
-                    .collect { it.trim() }.findAll { it && !it.startsWith('#') }.toSet()
-                def union_genes = top_genes + bottom_genes
-                ali_tuples_from_dir(ali_dir, union_genes)
-            }
+            ali_ch = Channel.fromList(ali_tuples_from_dir(ali_dir, null))
         }
 
         // ── Convert + filter: batch or single-gene ───────────────────────────
@@ -307,33 +274,9 @@ workflow SELECTION_PREP {
             bottom: tuple(gid, fa)
         }
 
-        prep_filtered_top_ch = Channel.empty()
-        prep_filtered_bottom_ch = Channel.empty()
-
-        if (mode == 'gene_set') {
-            // Keep only genes that appear in the respective directional gene set.
-            prep_filtered_top_ch = fanout.top
-                .combine(gs_top_val)
-                .filter { gid, fa, gsf ->
-                    gsf.readLines()
-                        .collect { it.trim() }.findAll { it && !it.startsWith('#') }
-                        .contains(gid)
-                }
-                .map { gid, fa, gsf -> tuple(gid, fa) }
-
-            prep_filtered_bottom_ch = fanout.bottom
-                .combine(gs_bottom_val)
-                .filter { gid, fa, gsf ->
-                    gsf.readLines()
-                        .collect { it.trim() }.findAll { it && !it.startsWith('#') }
-                        .contains(gid)
-                }
-                .map { gid, fa, gsf -> tuple(gid, fa) }
-        } else {
-            // 'all' mode: every gene goes to both directions.
-            prep_filtered_top_ch    = fanout.top
-            prep_filtered_bottom_ch = fanout.bottom
-        }
+        // Every gene is routed to both directions.
+        prep_filtered_top_ch    = fanout.top
+        prep_filtered_bottom_ch = fanout.bottom
 
     emit:
         filtered_fasta_top_ch    = prep_filtered_top_ch

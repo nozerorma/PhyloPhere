@@ -92,13 +92,10 @@ ALI_FORMAT="fasta"
 # ── Selection analysis toggles ───────────────────────────────────────────────
 RUN_FADE="${RUN_FADE:-false}"
 RUN_MOLERATE="${RUN_MOLERATE:-false}"
-FADE_MODE="${FADE_MODE:-all}"
-MOLERATE_MODE="${MOLERATE_MODE:-all}"
 
 # ── RERConverge toggles ──────────────────────────────────────────────────────
 RUN_RER="${RUN_RER:-true}"
 RER_TOOL="${RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
-RER_GENE_SET_MODE="${RER_GENE_SET_MODE:-all}"
 GENE_TREES="${GENE_TREES:-${DATADIR}/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
 RER_PERM_BATCHES="${RER_PERM_BATCHES:-100}"
 RER_PERMS_PER_BATCH="${RER_PERMS_PER_BATCH:-100}"
@@ -197,7 +194,6 @@ FADE_NF_FLAGS=()
 if [ "$RUN_FADE" = true ]; then
     FADE_NF_FLAGS=(
         --fade
-        --fade_mode "$FADE_MODE"
     )
 fi
 
@@ -205,7 +201,6 @@ MOLERATE_NF_FLAGS=()
 if [ "$RUN_MOLERATE" = true ]; then
     MOLERATE_NF_FLAGS=(
         --molerate
-        --molerate_mode "$MOLERATE_MODE"
     )
 fi
 
@@ -214,7 +209,6 @@ RER_NF_FLAGS=()
 if [ "$RUN_RER" = true ]; then
     RER_NF_FLAGS=(
         --rer_tool          "$RER_TOOL"
-        --rer_gene_set_mode "$RER_GENE_SET_MODE"
         --gene_trees        "$GENE_TREES"
         --rer_perm_batches   "$RER_PERM_BATCHES"
         --rer_perms_per_batch "$RER_PERMS_PER_BATCH"
@@ -306,8 +300,8 @@ echo " NF run name: ${TRAIT}_${NXF_RUN_ID}"
 echo " IS_TOY     : $IS_TOY  (tag: '${TAG}')"
 echo " Cycles     : $CYCLES"
 echo " N_Rand     : $N_RANDOMIZATIONS"
-echo " RUN_FADE   : $RUN_FADE  (mode=${FADE_MODE})"
-echo " RUN_MOLERATE: $RUN_MOLERATE  (mode=${MOLERATE_MODE})"
+echo " RUN_FADE   : $RUN_FADE"
+echo " RUN_MOLERATE: $RUN_MOLERATE"
 echo " RUN_RER    : $RUN_RER  (tool=${RER_TOOL})"
 echo " RUN_VEP    : $RUN_VEP"
 echo " RUN_SCORING: $RUN_SCORING"

@@ -84,7 +84,9 @@ process CT_ACCUMULATION_RANDOMIZE {
 
     script:
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
-    def out_pfx      = "accumulation_${direction}"
+    def out_pfx        = "accumulation_${direction}"
+    // 'all' direction uses --change-side both: retains all non-none positions
+    def change_side_arg = (direction == 'all') ? 'both' : direction
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
     def n_rands      = params.accumulation_n_randomizations   ?: 10000
     def log_level    = params.accumulation_log_level          ?: 'INFO'
@@ -104,7 +106,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --output-prefix '${out_pfx}' \\
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
-            --change-side '${direction}' \\
+            --change-side '${change_side_arg}' \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """
@@ -121,7 +123,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --output-prefix '${out_pfx}' \\
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
-            --change-side '${direction}' \\
+            --change-side '${change_side_arg}' \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """

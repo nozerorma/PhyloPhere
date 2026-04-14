@@ -78,13 +78,10 @@ export SOURCE_RUN_SUBDIR="20260318_201152"
 # Gene-set paths are auto-derived from SOURCE_RUN_SUBDIR; enable the tools here.
 export RUN_FADE=true
 export RUN_MOLERATE=true
-export FADE_MODE="all"       # "gene_set" | "all"
-export MOLERATE_MODE="all"   # "gene_set" | "all"
 
 # ── RERConverge ───────────────────────────────────────────────────────────────
 export RUN_RER=true # Note that we need to fix the gene_trees. They have species which dont match the species in the trait file, and RERConverge fails when that happens. We can either fix the gene trees or modify the RERConverge code to ignore those species. For now, we will set this to false to avoid errors.
 export RER_TOOL="build_trait,build_tree,build_matrix,continuous"
-export RER_GENE_SET_MODE="all"   # "gene_set" | "all"
 export GENE_TREES="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
 export RER_PERM_BATCHES=100
 export RER_PERMS_PER_BATCH=100
