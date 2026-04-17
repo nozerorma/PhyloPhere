@@ -14,6 +14,7 @@ output:
     df_print: paged
     fig_width: 10
     fig_height: 6
+    self_contained: false
 params:
   position_scores_file: NULL
   gene_scores_file: NULL
@@ -32,7 +33,8 @@ params:
   stress_overlap_file: NULL
   stress_variants_file: NULL
   stress_loadings_file: NULL
-  fade_site_file: NULL
+  fade_site_top_file: NULL
+  fade_site_bot_file: NULL
   vep_transvar_file: NULL
   vep_primateai_file: NULL
   vep_aa2prot_file: NULL
@@ -155,7 +157,8 @@ has_scoring_stress <- .file_ok(params$stress_summary_file) &&
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
 has_aa2prot       <- .file_ok(params$vep_aa2prot_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
-has_fade_pos      <- .file_ok(params$fade_site_file)
+# FADE site data: use top direction if available, otherwise try bottom
+has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
 # TransVar is no longer used in the scoring report (removed — it added no actionable signal)
 has_vep_transvar  <- FALSE
 
@@ -1549,26 +1552,39 @@ ggplot(pos_region_wins, aes(x = win_x, y = frac_top_positions)) +
 > FADE-biased positions and top-CAAS positions indicates that convergent positions are also
 > under directional selection in the foreground lineages.
 
-`r if (!has_fade_pos) "> **Note:** FADE per-site data are not available for this run (fade_site_file not provided)."`
+`r if (!has_fade_pos) "> **Note:** FADE per-site data are not available for this run (fade_site_top_file and fade_site_bot_file not provided)."`
 
 ```{r fade-pos-setup, eval=has_fade_pos}
-fade_site_df <- read_tsv(params$fade_site_file, show_col_types = FALSE) %>%
-  rename(Gene = gene, Position = site)
+# Use top direction if available, otherwise bottom
+fade_site_file <- if (.file_ok(params$fade_site_top_file)) {
+  params$fade_site_top_file
+} else if (.file_ok(params$fade_site_bot_file)) {
+  params$fade_site_bot_file
+} else {
+  NULL
+}
 
-# Join FADE site data to position scores; compute caas_decile and fade_char_score
-pos_fade <- pos_df %>%
-  left_join(
-    fade_site_df %>% select(Gene, Position, max_site_bf, top_target_aa, fade_biased),
-    by = c("Gene", "Position")
-  ) %>%
-  mutate(
-    fade_biased     = replace_na(fade_biased, FALSE),
-    caas_decile     = dplyr::ntile(CAAS_score, 10),
-    # fade_char_score: scheme_coverage-weighted FADE signal
-    # scheme_coverage = sum of active GS-scheme weights at this position
-    fade_char_score = ifelse(fade_biased & !is.na(scheme_coverage), scheme_coverage, 0)
-  )
-has_fade_pos <- nrow(pos_fade) > 0 && any(pos_fade$fade_biased, na.rm = TRUE)
+if (!is.null(fade_site_file)) {
+  fade_site_df <- read_tsv(fade_site_file, show_col_types = FALSE) %>%
+    rename(Gene = gene, Position = site)
+
+  # Join FADE site data to position scores; compute caas_decile and fade_char_score
+  pos_fade <- pos_df %>%
+    left_join(
+      fade_site_df %>% select(Gene, Position, max_site_bf, top_target_aa, fade_biased),
+      by = c("Gene", "Position")
+    ) %>%
+    mutate(
+      fade_biased     = replace_na(fade_biased, FALSE),
+      caas_decile     = dplyr::ntile(CAAS_score, 10),
+      # fade_char_score: scheme_coverage-weighted FADE signal
+      # scheme_coverage = sum of active GS-scheme weights at this position
+      fade_char_score = ifelse(fade_biased & !is.na(scheme_coverage), scheme_coverage, 0)
+    )
+  has_fade_pos <- nrow(pos_fade) > 0 && any(pos_fade$fade_biased, na.rm = TRUE)
+} else {
+  has_fade_pos <- FALSE
+}
 ```
 
 `r if (exists("pos_fade") && nrow(pos_fade) > 0 && !any(pos_fade$fade_biased, na.rm = TRUE)) "> **Note:** FADE site data were loaded, but no positions passed the FADE biased-site threshold for this direction."`

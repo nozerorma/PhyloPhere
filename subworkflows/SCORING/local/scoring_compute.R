@@ -741,6 +741,15 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
 # Significance: top 5% of accumulation_score (genome-wide empirical threshold).
 has_accum <- file_exists(accum_dir) && dir.exists(accum_dir)
 if (has_accum) {
+  # Check if any accumulation_all_* files exist; skip accumulation if not
+  all_accum_files <- list.files(accum_dir, pattern = "^accumulation_all_", full.names = TRUE)
+  if (length(all_accum_files) == 0) {
+    cat("Accumulation: no accumulation_all_* files found (full pool), skipping\n")
+    has_accum <- FALSE
+  }
+}
+
+if (has_accum) {
   cat("Loading accumulation (all positions) from:", accum_dir, "\n")
 
   scheme_names <- c("us", "gs4", "gs3", "gs2", "gs1")
@@ -829,21 +838,24 @@ if (has_rer) {
 
   gene_rer <- rer %>%
     filter(!is.na(.data[[pval_col]])) %>%
-    mutate(rer_min_pval       = .data[[pval_col]],
-           rer_rho            = Rho,
-           rer_acceleration   = case_when(
-             is.na(Rho)  ~ NA_character_,
-             Rho > 0     ~ "accelerated",
-             Rho < 0     ~ "decelerated",
-             TRUE        ~ "neutral"
+    mutate(rer_min_pval     = .data[[pval_col]],
+           rer_significant  = .data[[pval_col]] <= 0.05,
+           rer_rho          = Rho,
+           rer_acceleration = case_when(
+             is.na(Rho) ~ NA_character_,
+             Rho > 0    ~ "accelerated",
+             Rho < 0    ~ "decelerated",
+             TRUE       ~ "neutral"
            )) %>%
-    select(Gene = gene, rer_min_pval, rer_rho, rer_acceleration)
+    select(Gene = gene, rer_min_pval, rer_significant, rer_rho, rer_acceleration)
 
-  cat(sprintf("  RERConverge: %d genes\n", nrow(gene_rer)))
+  cat(sprintf("  RERConverge: %d genes, %d significant (p <= 0.05)\n",
+              nrow(gene_rer), sum(gene_rer$rer_significant, na.rm = TRUE)))
 } else {
   cat("RERConverge: not available, skipping\n")
   gene_rer <- tibble(Gene = character(), rer_min_pval = numeric(),
-                     rer_rho = numeric(), rer_acceleration = character())
+                     rer_significant = logical(), rer_rho = numeric(),
+                     rer_acceleration = character())
 }
 
 # ── 3c. Gene FADE Significance (optional) ───────────────────────────────────
@@ -879,22 +891,26 @@ gene_scores <- gene_caas
 if (nrow(gene_rand) > 0) {
   gene_scores <- gene_scores %>% left_join(gene_rand, by = "Gene")
 } else {
-  gene_scores$gene_rand_score <- NA_real_
+  gene_scores$gene_rand_score   <- NA_real_
+  gene_scores$accum_significant <- NA
 }
 
 if (nrow(gene_rer) > 0) {
   gene_scores <- gene_scores %>% left_join(gene_rer, by = "Gene")
 } else {
-  gene_scores$rer_min_pval     <- NA_real_
-  gene_scores$rer_rho          <- NA_real_
-  gene_scores$rer_acceleration <- NA_character_
+  gene_scores$rer_min_pval      <- NA_real_
+  gene_scores$rer_significant   <- NA
+  gene_scores$rer_rho           <- NA_real_
+  gene_scores$rer_acceleration  <- NA_character_
 }
 
 if (nrow(gene_fade) > 0) {
   gene_scores <- gene_scores %>% left_join(gene_fade, by = "Gene")
 } else {
-  gene_scores$fade_max_bf      <- NA_real_
-  gene_scores$fade_significant <- NA
+  gene_scores$fade_max_bf_top         <- NA_real_
+  gene_scores$fade_significant_top    <- NA
+  gene_scores$fade_max_bf_bottom      <- NA_real_
+  gene_scores$fade_significant_bottom <- NA
 }
 
 # =============================================================================
@@ -971,15 +987,17 @@ cat(sprintf("  position_scores.tsv: %d rows\n", nrow(pos_out)))
 
 # Gene scores
 gene_out <- gene_scores %>%
-  select(Gene, n_positions, gene_caas_score, gene_rand_score,
-         any_of(c("accum_pval_us", "accum_score_us", "accum_weighted_us",
-                  "accum_pval_gs4", "accum_score_gs4", "accum_weighted_gs4",
-                  "accum_pval_gs3", "accum_score_gs3", "accum_weighted_gs3",
-                  "accum_pval_gs2", "accum_score_gs2", "accum_weighted_gs2",
-                  "accum_pval_gs1", "accum_score_gs1", "accum_weighted_gs1")),
-         any_of(c("rer_min_pval", "rer_rho", "rer_acceleration",
-                  "fade_max_bf", "fade_significant",
-                  "mol_min_pval", "mol_log2ratio_top", "mol_log2ratio_bottom"))) %>%
+  select(
+    Gene,
+    n_positions, n_positions_top, n_positions_bottom,
+    gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
+    any_of(c("gene_rand_score", "accum_significant",
+             "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
+             "accum_pval_gs2", "accum_pval_gs1")),
+    any_of(c("rer_min_pval", "rer_significant", "rer_rho", "rer_acceleration")),
+    any_of(c("fade_max_bf_top", "fade_significant_top",
+             "fade_max_bf_bottom", "fade_significant_bottom"))
+  ) %>%
   arrange(desc(gene_caas_score))
 
 write_tsv(gene_out, "gene_scores.tsv")
@@ -1003,52 +1021,106 @@ write_gene_list <- function(genes, dir, filename) {
 }
 
 # ── Position-level ORA gene lists ────────────────────────────────────────────
-# pos_scores is already filtered to the target direction; generate flat lists.
-pos_for_ora <- pos_out %>%
-  mutate(
-    in_top10 = CAAS_score >= quantile(CAAS_score, 1 - top_pct,  na.rm = TRUE),
-    in_top5  = CAAS_score >= quantile(CAAS_score, 1 - top5_pct, na.rm = TRUE),
-    in_top1  = CAAS_score >= quantile(CAAS_score, 1 - top1_pct, na.rm = TRUE)
+# Three slices per threshold: all positions, top-direction only, bottom-direction only.
+pos_thresholds <- list(
+  top10pct = 1 - top_pct,
+  top5pct  = 1 - top5_pct,
+  top1pct  = 1 - top1_pct
+)
+
+for (pct_label in names(pos_thresholds)) {
+  thr <- quantile(pos_out$CAAS_score, pos_thresholds[[pct_label]], na.rm = TRUE)
+  above <- pos_out %>% filter(CAAS_score >= thr)
+
+  slices <- list(
+    all    = above,
+    top    = above %>% filter(change_side %in% c("top",    "both")),
+    bottom = above %>% filter(change_side %in% c("bottom", "both"))
   )
 
-for (pct_label in c("top10pct", "top5pct", "top1pct")) {
-  col  <- paste0("in_", sub("pct$", "", pct_label))
-  genes <- pos_for_ora %>% filter(.data[[col]]) %>% pull(Gene) %>% unique()
-  fname <- sprintf("pos_caas_%s.txt", pct_label)
-  n <- write_gene_list(genes, "pos_gene_lists", fname)
-  cat(sprintf("  %s: %d genes\n", fname, n))
+  for (slice_name in names(slices)) {
+    genes <- slices[[slice_name]] %>% pull(Gene) %>% unique()
+    fname <- sprintf("pos_caas_%s_%s.txt", pct_label, slice_name)
+    n <- write_gene_list(genes, "pos_gene_lists", fname)
+    cat(sprintf("  %s: %d genes\n", fname, n))
+  }
 }
 
 # ── Gene-level ORA gene lists ───────────────────────────────────────────────
-# gene_out already reflects the direction-filtered position pool.
-# Generate lists per score type and threshold — no internal direction loop needed.
-# ORA gene lists are generated from score-based rankings only.
-# gene_caas_score is the primary axis; gene_rand_score (accumulation) is included
-# as it is a custom score. RER and FADE use significance thresholds,
-# not scores, for characterization — their gene lists are not generated here.
-gene_score_cols <- c("gene_caas_score")
-if (has_accum && any(!is.na(gene_out$gene_rand_score)))
-  gene_score_cols <- c(gene_score_cols, "gene_rand_score")
+# Two types:
+#   A) Per-tool significance sets (standalone — for direct ORA)
+#   B) CAAS threshold × tool significance intersections (for overlap ORA)
+#      Applied per direction (top/bottom) × threshold (10/5/1%).
 
-for (score_col in gene_score_cols) {
-  score_name <- sub("^gene_", "", sub("_score$", "", score_col))
+# A) Standalone significance sets
+sig_sets <- list()
+if (has_rer && any(gene_out$rer_significant %in% TRUE)) {
+  sig_sets[["rer_significant"]] <- gene_out %>%
+    filter(rer_significant == TRUE) %>% pull(Gene)
+}
+if (has_fade_top && any(gene_out$fade_significant_top %in% TRUE)) {
+  sig_sets[["fade_top_significant"]] <- gene_out %>%
+    filter(fade_significant_top == TRUE) %>% pull(Gene)
+}
+if (has_fade_bottom && any(gene_out$fade_significant_bottom %in% TRUE)) {
+  sig_sets[["fade_bottom_significant"]] <- gene_out %>%
+    filter(fade_significant_bottom == TRUE) %>% pull(Gene)
+}
+if (has_accum && any(gene_out$accum_significant %in% TRUE)) {
+  sig_sets[["accum_significant"]] <- gene_out %>%
+    filter(accum_significant == TRUE) %>% pull(Gene)
+}
+
+for (set_name in names(sig_sets)) {
+  fname <- sprintf("gene_%s.txt", set_name)
+  n <- write_gene_list(sig_sets[[set_name]], "gene_gene_lists", fname)
+  cat(sprintf("  %s: %d genes\n", fname, n))
+}
+
+# B) CAAS threshold × tool significance intersections
+gene_caas_thresholds <- list(
+  top10 = 1 - gene_top_pct,
+  top5  = 1 - gene_top5_pct,
+  top1  = 1 - gene_top1_pct
+)
+
+for (dir in c("top", "bottom")) {
+  score_col <- paste0("gene_caas_score_", dir)
+  fade_sig  <- paste0("fade_significant_", dir)
+
   vals  <- gene_out[[score_col]]
   valid <- !is.na(vals)
-
   if (sum(valid) < 2) next
 
-  thr_10 <- quantile(vals[valid], 1 - gene_top_pct,  na.rm = TRUE)
-  thr_5  <- quantile(vals[valid], 1 - gene_top5_pct, na.rm = TRUE)
-  thr_1  <- quantile(vals[valid], 1 - gene_top1_pct, na.rm = TRUE)
-
-  for (pct_label in c("top10", "top5", "top1")) {
-    thr   <- switch(pct_label, top10 = thr_10, top5 = thr_5, top1 = thr_1)
-    genes <- gene_out %>%
+  for (pct_label in names(gene_caas_thresholds)) {
+    thr      <- quantile(vals[valid], gene_caas_thresholds[[pct_label]], na.rm = TRUE)
+    caas_set <- gene_out %>%
       filter(!is.na(.data[[score_col]]) & .data[[score_col]] >= thr) %>%
-      pull(Gene) %>% unique()
-    fname <- sprintf("gene_%s_%spct.txt", score_name, pct_label)
-    n <- write_gene_list(genes, "gene_gene_lists", fname)
-    cat(sprintf("  %s: %d genes\n", fname, n))
+      pull(Gene)
+
+    # CAAS set alone (for reference)
+    fname <- sprintf("gene_caas_%s_%s.txt", dir, pct_label)
+    write_gene_list(caas_set, "gene_gene_lists", fname)
+    cat(sprintf("  %s: %d genes\n", fname, length(unique(caas_set))))
+
+    # Intersections with each tool's significant set
+    tool_sigs <- list()
+    if (fade_sig %in% names(gene_out) && any(gene_out[[fade_sig]] %in% TRUE))
+      tool_sigs[[paste0("fade_", dir)]] <- gene_out %>%
+        filter(.data[[fade_sig]] == TRUE) %>% pull(Gene)
+    if (has_rer && any(gene_out$rer_significant %in% TRUE))
+      tool_sigs[["rer"]] <- gene_out %>%
+        filter(rer_significant == TRUE) %>% pull(Gene)
+    if (has_accum && any(gene_out$accum_significant %in% TRUE))
+      tool_sigs[["accum"]] <- gene_out %>%
+        filter(accum_significant == TRUE) %>% pull(Gene)
+
+    for (tool_name in names(tool_sigs)) {
+      overlap <- intersect(caas_set, tool_sigs[[tool_name]])
+      fname   <- sprintf("gene_caas_%s_%s_x_%s.txt", dir, pct_label, tool_name)
+      n <- write_gene_list(overlap, "gene_gene_lists", fname)
+      cat(sprintf("  %s: %d genes\n", fname, n))
+    }
   }
 }
 
