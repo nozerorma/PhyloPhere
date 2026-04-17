@@ -234,6 +234,64 @@ if (has_scoring_stress) {
 top_pct  <- params$top_pct
 top5_pct <- params$top5_pct
 top1_pct <- params$top1_pct
+
+# ── Create derived gene scores from raw values ──────────────────────────────
+# Convert raw RER p-values to decile scores (lower p-value = higher score)
+if ("rer_min_pval" %in% names(gene_df) && any(!is.na(gene_df$rer_min_pval))) {
+  gene_df <- gene_df %>%
+    mutate(
+      gene_rer_score = {
+        vals <- gene_df$rer_min_pval
+        ranks <- dplyr::ntile(vals, 10)
+        # Invert: lower p-values get higher scores
+        1 - (ranks - 1) / 9
+      }
+    )
+  has_rer <- any(!is.na(gene_df$gene_rer_score))
+} else {
+  has_rer <- FALSE
+}
+
+# Convert FADE max Bayes Factor to decile scores (higher BF = higher score)
+has_fade_raw <- ("fade_max_bf_top" %in% names(gene_df) && any(!is.na(gene_df$fade_max_bf_top))) ||
+                ("fade_max_bf_bottom" %in% names(gene_df) && any(!is.na(gene_df$fade_max_bf_bottom)))
+if (has_fade_raw) {
+  gene_df <- gene_df %>%
+    mutate(
+      fade_bf_for_scoring = case_when(
+        !is.na(fade_max_bf_top)    ~ fade_max_bf_top,
+        !is.na(fade_max_bf_bottom) ~ fade_max_bf_bottom,
+        TRUE                       ~ NA_real_
+      ),
+      gene_fade_score = {
+        vals <- gene_df$fade_bf_for_scoring
+        ranks <- dplyr::ntile(vals, 10)
+        # Direct mapping: higher BF gets higher score
+        (ranks - 1) / 9
+      }
+    ) %>%
+    select(-fade_bf_for_scoring)
+  has_fade <- any(!is.na(gene_df$gene_fade_score))
+} else {
+  has_fade <- FALSE
+}
+
+# Create composite gene score: unweighted mean of available gene-level scores
+score_cols <- c("gene_caas_score")
+if ("gene_rand_score" %in% names(gene_df)) score_cols <- c(score_cols, "gene_rand_score")
+if (has_rer && "gene_rer_score" %in% names(gene_df)) score_cols <- c(score_cols, "gene_rer_score")
+if (has_fade && "gene_fade_score" %in% names(gene_df)) score_cols <- c(score_cols, "gene_fade_score")
+
+if (length(score_cols) > 1) {
+  gene_df <- gene_df %>%
+    mutate(
+      gene_composite_score = rowMeans(select(cur_data(), all_of(score_cols)), na.rm = TRUE)
+    )
+} else {
+  # Only CAAS available
+  gene_df <- gene_df %>%
+    mutate(gene_composite_score = gene_caas_score)
+}
 ```
 
 ---
