@@ -241,8 +241,7 @@ if ("rer_min_pval" %in% names(gene_df) && any(!is.na(gene_df$rer_min_pval))) {
   gene_df <- gene_df %>%
     mutate(
       gene_rer_score = {
-        vals <- gene_df$rer_min_pval
-        ranks <- dplyr::ntile(vals, 10)
+        ranks <- dplyr::ntile(rer_min_pval, 10)
         # Invert: lower p-values get higher scores
         1 - (ranks - 1) / 9
       }
@@ -258,19 +257,18 @@ has_fade_raw <- ("fade_max_bf_top" %in% names(gene_df) && any(!is.na(gene_df$fad
 if (has_fade_raw) {
   gene_df <- gene_df %>%
     mutate(
-      fade_bf_for_scoring = case_when(
-        !is.na(fade_max_bf_top)    ~ fade_max_bf_top,
-        !is.na(fade_max_bf_bottom) ~ fade_max_bf_bottom,
-        TRUE                       ~ NA_real_
-      ),
       gene_fade_score = {
-        vals <- gene_df$fade_bf_for_scoring
-        ranks <- dplyr::ntile(vals, 10)
+        # Prioritize top direction, fall back to bottom
+        bf_vals <- case_when(
+          !is.na(fade_max_bf_top)    ~ fade_max_bf_top,
+          !is.na(fade_max_bf_bottom) ~ fade_max_bf_bottom,
+          TRUE                       ~ NA_real_
+        )
+        ranks <- dplyr::ntile(bf_vals, 10)
         # Direct mapping: higher BF gets higher score
         (ranks - 1) / 9
       }
-    ) %>%
-    select(-fade_bf_for_scoring)
+    )
   has_fade <- any(!is.na(gene_df$gene_fade_score))
 } else {
   has_fade <- FALSE
