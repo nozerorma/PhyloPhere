@@ -46,7 +46,7 @@ process CT_POSTPROC_REPORT {
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find . -name '*.pyc' -delete 2>/dev/null || true
         
-        /usr/local/bin/_entrypoint.sh Rscript -e "
+        REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 'CT_postproc.Rmd',
                 params = list(
@@ -72,7 +72,7 @@ process CT_POSTPROC_REPORT {
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find . -name '*.pyc' -delete 2>/dev/null || true
         
-        Rscript -e "
+        REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
                 'CT_postproc.Rmd',
                 params = list(

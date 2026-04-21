@@ -65,7 +65,7 @@ submit_array_job() {
 #SBATCH --mail-user=miguel.ramon@upf.edu
 #SBATCH --array=1-2%2
 
-module load modulepath/haswell
+module purge; module load modulepath/haswell
 module load Nextflow
 module load Miniconda3
 
@@ -89,6 +89,7 @@ export INT_RESUME=false
 export INT_PRUNE_DATA=false
 export INT_REPORTING=false
 export INT_CONTRAST_SELECTION=false
+export INT_CT_POSTPROC=true
 export INT_CT_SIGNIFICATION=false
 export INT_CT_DISAMBIGUATION=false
 export INT_ORA=true
@@ -96,6 +97,7 @@ export INT_STRING=true
 export INT_CT_ACCUMULATION=false
 export INT_VEP=false
 export INT_FADE=false
+export FADE_MODE="gene_set"
 export INT_RER=true
 export INT_SCORING=true
 export INT_SCORING_STRESS=true
@@ -111,6 +113,8 @@ export INT_DISAMBIG_ASR_CACHE_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/
 
 # ── Standalone run toggles ────────────────────────────────────────────────────
 export RUN_SA_CT=false
+export RUN_SA_PRUNE=false
+export SA_PRUNE_ENABLE=false
 export RUN_SA_SIGNIFICATION=false
 export RUN_SA_DISAMBIGUATION=false
 export SA_DISAMBIG_COMPUTE=false
@@ -126,11 +130,9 @@ export RUN_SA_VEP=false
 export RUN_SA_SCORING=false
 export SA_SCORING_STRESS=false
 export SA_SCORING_STRESS_TOP_N=25
-export RUN_SA_FADE=true
-export RUN_SA_RER=false
-
-export SA_SELECTION_MODE_ALL=true
-export SA_SELECTION_MODE_GENESET_PP=false
+export RUN_SA_FADE=false
+export SA_FADE_MODE="gene_set"
+export RUN_SA_RER=true
 
 export SA_RER_TOOL="build_trait,build_tree,build_matrix,continuous"
 export SA_RER_CONTINUOUS_ONLY=false
@@ -154,6 +156,11 @@ export INPUT_ASR_CACHED="${DATADIR}/asr"
 export INPUT_VEP_CDS_DIR="${ALI_ARCHIVE_ROOT}/TRIM"
 export INPUT_VEP_TRACK_DIR="${ALI_ARCHIVE_ROOT}/TRACK"
 export INPUT_VEP_PRIMATEAI_DB="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/subworkflows/VEP/dat/PrimateAI-3D.hg38.txt.gz"
+export INPUT_VEP_TRANSVAR_REFERENCE="/homes/users/mramon/scratch/0.Phylophere/subworkflows/VEP/dat/transvar/hg38.fa"
+# Optional: precomputed VEP stage outputs to skip aa2nuc/aa2prot.
+# Leave empty to keep default behavior.
+export INPUT_VEP_AA2NUC_INPUT="${INPUT_VEP_AA2NUC_INPUT:-}"
+export INPUT_VEP_AA2PROT_INPUT="${INPUT_VEP_AA2PROT_INPUT:-}"
 
 export SOURCE_RUN_SUBDIR="runtime"
 export CYCLES="1000000"

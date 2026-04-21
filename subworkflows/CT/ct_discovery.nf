@@ -99,7 +99,7 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
 
 process DISCOVERY_BATCHED {
     tag "$batchID (${batchSize} genes)"
-    label 'process_discovery'
+    label 'process_discovery_batched'
 
     input:
     tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*')

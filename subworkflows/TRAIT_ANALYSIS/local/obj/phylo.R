@@ -76,20 +76,43 @@ if (has.TAX_ID && !"tax_id" %in% names(trait_df)) {
 
 # Map tree species to taxonomy IDs if needed
 if (has.TAX_ID) {
-  # Create a mapping of species to tax_id
-  tree_ids <- trait_df %>%
-    dplyr::filter(gsub(" ", "_", species) %in% tree_species) %>%
+  # Use tax_id_df to map tree tip labels to tax_ids.
+  # tax_id_df contains tree-side species names (which may differ from trait names
+  # due to taxonomic reclassification, e.g. Nycticebus_pygmaeus -> Xanthonycticebus_pygmaeus).
+  tree_tip_to_taxid <- tax_id_df %>%
+    dplyr::filter(species %in% tree_species) %>%
+    dplyr::rename(tree_name = species)
+  debug_log("tree_tip_to_taxid rows = %d, missing tax_id = %d",
+            nrow(tree_tip_to_taxid), sum(is.na(tree_tip_to_taxid$tax_id)))
+
+  # Find common tax_ids: present in both tree (via tax_id_df) and traits (via trait_df$tax_id)
+  common_tax_ids <- intersect(tree_tip_to_taxid$tax_id, trait_df$tax_id)
+  debug_log("common_tax_ids = %d", length(common_tax_ids))
+
+  # Prune tree: keep tips whose tax_id is in common_tax_ids
+  tips_to_keep <- tree_tip_to_taxid$tree_name[tree_tip_to_taxid$tax_id %in% common_tax_ids]
+  pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, tips_to_keep))
+  debug_log("pruned_tree tips (TAX_ID) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
+
+  # Rename tree tips from tree taxonomy names to trait species names where they differ,
+  # so that downstream joins on species name work correctly.
+  trait_taxid_to_name <- trait_df %>%
     dplyr::select(species, tax_id) %>%
     dplyr::distinct()
-  debug_log("tree_ids rows = %d, missing tax_id = %d", nrow(tree_ids), sum(is.na(tree_ids$tax_id)))
-
-# Find common taxonomic IDs between the tree and the traits
-  common_tax_ids <- intersect(tree_ids$tax_id, trait_df$tax_id)
-  debug_log("common_tax_ids = %d", length(common_tax_ids))
-  
-# Prune the tree to only include species with common taxonomic IDs
-  pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, tree_ids$species[tree_ids$tax_id %in% common_tax_ids]))
-  debug_log("pruned_tree tips (TAX_ID) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
+  rename_map <- merge(
+    tree_tip_to_taxid %>% dplyr::filter(tax_id %in% common_tax_ids),
+    trait_taxid_to_name %>% dplyr::filter(tax_id %in% common_tax_ids),
+    by = "tax_id"
+  )
+  mismatched <- rename_map[rename_map$tree_name != rename_map$species, ]
+  if (nrow(mismatched) > 0) {
+    debug_log("renaming %d tree tip(s) to match trait species names", nrow(mismatched))
+    for (i in seq_len(nrow(mismatched))) {
+      debug_log("  rename: %s -> %s (tax_id %s)",
+                mismatched$tree_name[i], mismatched$species[i], mismatched$tax_id[i])
+      pruned_tree$tip.label[pruned_tree$tip.label == mismatched$tree_name[i]] <- mismatched$species[i]
+    }
+  }
 } else {
   # Prune the tree to only include species present in the trait data
   pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, gsub(" ", "_", trait_df$species)))

@@ -3,8 +3,10 @@
 /*
  * SCORING_COMPUTE
  * ───────────────
- * Compute composite CAAS scores at position-level and gene-level.
+ * Compute CAAS scores at position-level and gene-level.
  * Integrates outputs from CT_POSTPROC, FADE, RERConverge and CT_ACCUMULATION.
+ * Runs once on the full postproc pool; directional characterisation is handled
+ * post-scoring via the change_side column.
  *
  * Inputs
  * ──────
@@ -17,28 +19,27 @@
  * Outputs
  * ───────
  *   position_scores    : TSV with per Gene×Position scores
- *   gene_scores        : TSV with per Gene scores
+ *   gene_scores        : TSV with per Gene scores + directional significance flags
  *   gene_correlations  : TSV with pairwise correlations
- *   position_gene_lists: TXT files for position-level ORA
- *   gene_gene_lists    : TXT files for gene-level ORA
+ *   position_gene_lists: TXT files for position-level ORA (all/top/bottom × 10/5/1%)
+ *   gene_gene_lists    : TXT files for gene-level ORA (significance sets + intersections)
  */
 
 process SCORING_COMPUTE {
-    tag "scoring_compute|${params.traitname ?: 'unknown_trait'}|${direction}"
+    tag "scoring_compute|${params.traitname ?: 'unknown_trait'}"
     label 'error_retry'
 
-    publishDir path: { "${params.outdir}/scoring/${direction}" },
+    publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
                pattern: '*.tsv'
-    publishDir path: { "${params.outdir}/scoring/${direction}/gene_lists/position" },
+    publishDir path: "${params.outdir}/scoring/gene_lists/position",
                mode: 'copy', overwrite: true,
                pattern: 'pos_gene_lists/*.txt'
-    publishDir path: { "${params.outdir}/scoring/${direction}/gene_lists/gene" },
+    publishDir path: "${params.outdir}/scoring/gene_lists/gene",
                mode: 'copy', overwrite: true,
                pattern: 'gene_gene_lists/*.txt'
 
     input:
-    val  direction
     path postproc_file
     path fade_summary_top
     path fade_summary_bottom
@@ -46,18 +47,17 @@ process SCORING_COMPUTE {
     path accum_files
 
     output:
-    val  direction,                                             emit: direction
-    tuple val(direction), path("position_scores.tsv"),         emit: position_scores
-    tuple val(direction), path("gene_scores.tsv"),             emit: gene_scores
-    tuple val(direction), path("gene_correlations.tsv"),       emit: gene_correlations
-    tuple val(direction), path("position_score_stress_summary.tsv"),         emit: stress_summary,       optional: true
-    tuple val(direction), path("position_score_stress_correlations.tsv"),    emit: stress_correlations,  optional: true
-    tuple val(direction), path("position_score_stress_rank_agreement.tsv"),  emit: stress_rank_agreement, optional: true
-    tuple val(direction), path("position_score_stress_top_overlap.tsv"),     emit: stress_top_overlap,   optional: true
-    tuple val(direction), path("position_score_stress_variants.tsv"),        emit: stress_variants,      optional: true
-    tuple val(direction), path("position_score_stress_latent_loadings.tsv"), emit: stress_latent_loadings, optional: true
-    path "pos_gene_lists/*.txt",                                emit: position_gene_lists, optional: true
-    path "gene_gene_lists/*.txt",                               emit: gene_gene_lists,     optional: true
+    path "position_scores.tsv",                              emit: position_scores
+    path "gene_scores.tsv",                                  emit: gene_scores
+    path "gene_correlations.tsv",                            emit: gene_correlations
+    path "position_score_stress_summary.tsv",         optional: true, emit: stress_summary
+    path "position_score_stress_correlations.tsv",    optional: true, emit: stress_correlations
+    path "position_score_stress_rank_agreement.tsv",  optional: true, emit: stress_rank_agreement
+    path "position_score_stress_top_overlap.tsv",     optional: true, emit: stress_top_overlap
+    path "position_score_stress_variants.tsv",        optional: true, emit: stress_variants
+    path "position_score_stress_latent_loadings.tsv", optional: true, emit: stress_latent_loadings
+    path "pos_gene_lists/*.txt",                      optional: true, emit: position_gene_lists
+    path "gene_gene_lists/*.txt",                     optional: true, emit: gene_gene_lists
 
     script:
     def local_dir  = "${baseDir}/subworkflows/SCORING/local"
@@ -67,9 +67,6 @@ process SCORING_COMPUTE {
     def g_top_pct  = params.scoring_gene_top_pct      ?: 0.10
     def g_top5_pct = params.scoring_gene_top5_pct     ?: 0.05
     def g_top1_pct = params.scoring_gene_top1_pct     ?: 0.01
-    // Determine accum_dir: if accum_files is a real directory, pass it;
-    // otherwise check if multiple CSVs were staged (Nextflow stages them flat).
-    // accum_files may be a single sentinel file or a list of CSVs
     def accum_arg  = (accum_files instanceof List
                         ? (accum_files.size() == 1 && accum_files[0].name.startsWith('NO_') ? 'NO_ACCUM' : '.')
                         : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
@@ -79,48 +76,38 @@ process SCORING_COMPUTE {
         cp ${local_dir}/scoring_compute.R .
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
-            --postproc   '${postproc_file}' \
-            --fade_top   '${fade_summary_top}' \
+            --postproc    '${postproc_file}' \
+            --fade_top    '${fade_summary_top}' \
             --fade_bottom '${fade_summary_bottom}' \
-            --rer        '${rer_summary}' \
-            --accum_dir  '${accum_arg}' \
-            --stress     '${params.scoring_stress ?: false}' \
+            --rer         '${rer_summary}' \
+            --accum_dir   '${accum_arg}' \
+            --stress      '${params.scoring_stress ?: false}' \
             --stress_top_n ${params.scoring_stress_top_n ?: 25} \
-            --top_pct    ${top_pct} \
-            --top5_pct   ${top5_pct} \
-            --top1_pct   ${top1_pct} \
+            --top_pct     ${top_pct} \
+            --top5_pct    ${top5_pct} \
+            --top1_pct    ${top1_pct} \
             --gene_top_pct  ${g_top_pct} \
             --gene_top5_pct ${g_top5_pct} \
-            --gene_top1_pct ${g_top1_pct} \
-            --direction     '${direction}'
-
-        for f in pos_gene_lists/*.txt gene_gene_lists/*.txt; do
-            [ -f "\$f" ] && mv "\$f" "\${f%.txt}_${direction}.txt"
-        done
+            --gene_top1_pct ${g_top1_pct}
         """
     } else {
         """
         cp ${local_dir}/scoring_compute.R .
 
         Rscript scoring_compute.R \
-            --postproc   '${postproc_file}' \
-            --fade_top   '${fade_summary_top}' \
+            --postproc    '${postproc_file}' \
+            --fade_top    '${fade_summary_top}' \
             --fade_bottom '${fade_summary_bottom}' \
-            --rer        '${rer_summary}' \
-            --accum_dir  '${accum_arg}' \
-            --stress     '${params.scoring_stress ?: false}' \
+            --rer         '${rer_summary}' \
+            --accum_dir   '${accum_arg}' \
+            --stress      '${params.scoring_stress ?: false}' \
             --stress_top_n ${params.scoring_stress_top_n ?: 25} \
-            --top_pct    ${top_pct} \
-            --top5_pct   ${top5_pct} \
-            --top1_pct   ${top1_pct} \
+            --top_pct     ${top_pct} \
+            --top5_pct    ${top5_pct} \
+            --top1_pct    ${top1_pct} \
             --gene_top_pct  ${g_top_pct} \
             --gene_top5_pct ${g_top5_pct} \
-            --gene_top1_pct ${g_top1_pct} \
-            --direction     '${direction}'
-
-        for f in pos_gene_lists/*.txt gene_gene_lists/*.txt; do
-            [ -f "\$f" ] && mv "\$f" "\${f%.txt}_${direction}.txt"
-        done
+            --gene_top1_pct ${g_top1_pct}
         """
     }
 }

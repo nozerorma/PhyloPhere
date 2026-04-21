@@ -91,6 +91,7 @@ ALI_FORMAT="fasta"
 
 # ── Selection analysis toggles ───────────────────────────────────────────────
 RUN_FADE="${RUN_FADE:-false}"
+FADE_MODE="${FADE_MODE:-gene_set}"
 
 # ── RERConverge toggles ──────────────────────────────────────────────────────
 RUN_RER="${RUN_RER:-true}"
@@ -193,6 +194,7 @@ FADE_NF_FLAGS=()
 if [ "$RUN_FADE" = true ]; then
     FADE_NF_FLAGS=(
         --fade
+        --fade_mode "$FADE_MODE"
     )
 fi
 

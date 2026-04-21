@@ -1,0 +1,23 @@
+[tool.black]
+line-length = 100
+target-version = ["py39", "py310", "py311", "py312"]
+# Consistent with the pipeline's existing 100-char lines and modern Python targets.
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["src"]
+# src/ is the package namespace used by CT_ACCUMULATION and CT_DISAMBIGUATION.
+skip_glob = ["*/work/*", "*/.git/*", "*/Docker*/*"]
+
+[tool.vulture]
+min_confidence = 80
+# Lower confidence surfaces too many false positives from argparse destinations
+# and dynamically-called functions in the HyPhy/RERconverge wrappers.
+ignore_names = [
+    "args",       # argparse Namespace attributes
+    "logger",     # module-level logger instances
+    "main",       # entry points
+    "setUp",      # unittest
+    "tearDown",
+]

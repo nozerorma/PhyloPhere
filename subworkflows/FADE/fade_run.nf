@@ -44,6 +44,11 @@ process FADE_BATCHED {
     def grid         = params.fade_grid         ?: 20
     def conc         = params.fade_concentration ?: 0.5
     def runnerMode   = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
+    def nWorkers     = (params.fade_batch_workers ?: 8) as int
+    // Each HyPhy call gets a fair share of the task's allocated CPUs.
+    // floor(task.cpus / workers), minimum 1 — prevents HyPhy from reading
+    // the full hardware CPU count of the node and oversubscribing it.
+    def cpuPerWorker = Math.max(1, (task.cpus as int).intdiv(nWorkers))
 
     def mcmc_args = (method == 'Variational-Bayes') ? "" :
         """--mcmc-chains ${params.fade_chains ?: 5} \\
@@ -59,7 +64,8 @@ bash ${baseDir}/subworkflows/FADE/local/scripts/run_hyphy_fade_batch.sh \\
     --batch-id       ${batchID} \\
     --manifest       ${batchID}.manifest.tsv \\
     --direction      ${direction} \\
-    --workers        ${params.fade_batch_workers} \\
+    --workers        ${nWorkers} \\
+    --cpu-per-worker ${cpuPerWorker} \\
     --runner-mode    ${runnerMode} \\
     --model          ${model} \\
     --method         "${method}" \\
@@ -101,6 +107,10 @@ process FADE_RUN {
 
     if (params.use_singularity || params.use_apptainer) {
         """
+        export OMP_NUM_THREADS=${task.cpus}
+        export MKL_NUM_THREADS=${task.cpus}
+        export OPENBLAS_NUM_THREADS=${task.cpus}
+        export BLAS_NUM_THREADS=${task.cpus}
         /usr/local/bin/_entrypoint.sh hyphy fade \\
             --alignment "${fasta}" \\
             --tree      "${annotated_tree}" \\
@@ -109,6 +119,7 @@ process FADE_RUN {
             --method    "${method}" \\
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\
+            --cpu       ${task.cpus} \\
             ${mcmc_args} \\
             --output    "${gene_id}.${direction}.FADE.json" \\
         || echo "FADE failed for ${gene_id} (${direction}), skipping"
@@ -117,6 +128,10 @@ process FADE_RUN {
         """
     } else {
         """
+        export OMP_NUM_THREADS=${task.cpus}
+        export MKL_NUM_THREADS=${task.cpus}
+        export OPENBLAS_NUM_THREADS=${task.cpus}
+        export BLAS_NUM_THREADS=${task.cpus}
         hyphy fade \\
             --alignment "${fasta}" \\
             --tree      "${annotated_tree}" \\
@@ -125,6 +140,7 @@ process FADE_RUN {
             --method    "${method}" \\
             --grid      ${grid} \\
             --concentration_parameter ${conc} \\
+            --cpu       ${task.cpus} \\
             ${mcmc_args} \\
             --output    "${gene_id}.${direction}.FADE.json" \\
         || echo "FADE failed for ${gene_id} (${direction}), skipping"

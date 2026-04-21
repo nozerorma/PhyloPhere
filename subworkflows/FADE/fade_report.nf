@@ -65,7 +65,7 @@ process FADE_REPORT {
                  "Possible causes: all FADE jobs failed, or no genes were selected for this direction."
         fi
 
-        /usr/local/bin/_entrypoint.sh Rscript -e "
+        FADE_REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 'FADE_report.Rmd',
                 params = list(
@@ -99,7 +99,7 @@ process FADE_REPORT {
                  "Possible causes: all FADE jobs failed, or no genes were selected for this direction."
         fi
 
-        Rscript -e "
+        FADE_REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
                 'FADE_report.Rmd',
                 params = list(

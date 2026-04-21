@@ -19,6 +19,7 @@ batch_id=""
 manifest=""
 direction=""
 workers="1"
+cpu_per_worker="1"
 runner_mode=""
 model="LG"
 model_file_arg=""
@@ -36,6 +37,7 @@ while [[ $# -gt 0 ]]; do
         --manifest)           manifest="$2";           shift 2 ;;
         --direction)          direction="$2";          shift 2 ;;
         --workers)            workers="$2";            shift 2 ;;
+        --cpu-per-worker)     cpu_per_worker="$2";     shift 2 ;;
         --runner-mode)        runner_mode="$2";        shift 2 ;;
         --model)              model="$2";              shift 2 ;;
         --model-file-arg)     model_file_arg="$2";     shift 2 ;;
@@ -82,7 +84,7 @@ fi
 gene_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
 echo "Running batched FADE task $batch_id (direction: $direction)"
 echo "Genes in batch: $gene_count"
-echo "Concurrent workers: $workers"
+echo "Concurrent workers: $workers (${cpu_per_worker} CPU(s) per HyPhy call)"
 
 # ── Job-control helpers ──────────────────────────────────────────────────────
 # Note: unlike the CT batch scripts, failures are non-fatal here.
@@ -123,6 +125,7 @@ while IFS=$'\t' read -r gene_id fasta_name tree_name; do
             "--method"                  "$method"
             "--grid"                    "$grid"
             "--concentration_parameter" "$concentration"
+            "--cpu"                     "$cpu_per_worker"
             "--output"                  "$output_json"
         )
         if [[ -n "$model_file_arg" ]]; then
@@ -131,6 +134,15 @@ while IFS=$'\t' read -r gene_id fasta_name tree_name; do
             cmd+=("${_mfa[@]}")
         fi
         cmd+=("${mcmc_args[@]}")
+
+        # Cap BLAS/OpenMP threads to the per-worker CPU allocation.
+        # HyPhy's --cpu flag only controls its own scheduler; library-level
+        # threads (OpenBLAS, OpenMP, MKL) still detect hardware CPU count via
+        # sysconf() and ignore --cpu entirely unless these vars are set.
+        export OMP_NUM_THREADS="${cpu_per_worker}"
+        export MKL_NUM_THREADS="${cpu_per_worker}"
+        export OPENBLAS_NUM_THREADS="${cpu_per_worker}"
+        export BLAS_NUM_THREADS="${cpu_per_worker}"
 
         "${cmd[@]}" \
             || echo "[FADE_BATCHED] FADE failed for ${gene_id} (${direction}), skipping"

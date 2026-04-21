@@ -1,0 +1,123 @@
+---
+title: "FADE — Directional Positive Selection Report"
+subtitle: "`r paste0(params$traitname, ' | ', toupper(params$direction), ' direction')`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
+params:
+  # ── required ────────────────────────────────────────────────────────────────
+  traitname:      "unknown_trait"
+  direction:      "top"          # top | bottom
+  json_dir:       "."            # directory of per-gene FADE JSON outputs
+  output_dir:     "."
+  # ── optional ────────────────────────────────────────────────────────────────
+  gene_list:      NULL           # path to gene list for overlap annotation
+  bf_threshold:   10             # Bayes Factor threshold for site-level calls
+---
+
+<!-- FADE_report.Rmd — Summarises FADE site-level positive selection results per direction. -->
+<!-- PhyloPhere | subworkflows/FADE/local/ -->
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+    echo       = TRUE,
+    message    = FALSE,
+    warning    = FALSE,
+    fig.align  = "center"
+)
+
+# ── Dependencies ───────────────────────────────────────────────────────────────
+suppressPackageStartupMessages({
+    library(dplyr)
+    library(ggplot2)
+    library(knitr)
+    library(DT)
+    library(jsonlite)
+})
+
+# ── Pipeline palette & theme (sourced from shared utility) ─────────────────────
+# source(file.path(params$output_dir, "obj", "palettes.R"))
+
+# Use inline fallback if obj/ is not available
+PALETTE_DIRECTION <- c(top = "#E63946", bottom = "#457B9D")
+```
+
+## Overview {.tabset}
+
+> **Trait:** `r params$traitname`  |  **Direction:** `r toupper(params$direction)`
+>
+> FADE (Fast Ancestral Sequence reconstruction with empirical bayes Dropout Elimination)
+> identifies sites evolving under positive selection in the foreground branches.
+> Sites with Bayes Factor ≥ `r params$bf_threshold` are considered significant.
+
+### Site-level results
+
+```{r load-fade}
+# Load all per-gene FADE JSON files from json_dir
+json_files <- list.files(params$json_dir, pattern = "\\.json$", full.names = TRUE)
+
+if (length(json_files) == 0) {
+    knitr::knit_exit("No FADE JSON files found in json_dir.")
+}
+
+fade_raw <- lapply(json_files, function(f) {
+    gene <- tools::file_path_sans_ext(basename(f))
+    tryCatch({
+        dat <- jsonlite::fromJSON(f, flatten = TRUE)
+        # Extract site-level BF from the standard FADE JSON schema
+        sites <- as.data.frame(dat[["MLE"]][["content"]])
+        sites$gene <- gene
+        sites
+    }, error = function(e) {
+        message("Skipping ", gene, ": ", conditionMessage(e))
+        NULL
+    })
+}) |> dplyr::bind_rows()
+```
+
+```{r site-table}
+# Sites above the BF threshold
+sig_sites <- fade_raw |>
+    dplyr::filter(`Bayes Factor` >= params$bf_threshold) |>
+    dplyr::arrange(dplyr::desc(`Bayes Factor`))
+
+DT::datatable(sig_sites,
+    caption = paste0("Sites with BF ≥ ", params$bf_threshold,
+                     " — ", params$direction, " direction"),
+    options = list(pageLength = 20, scrollX = TRUE)
+)
+```
+
+### Gene-level summary
+
+```{r gene-summary}
+gene_summary <- fade_raw |>
+    dplyr::group_by(gene) |>
+    dplyr::summarise(
+        n_sites_tested = dplyr::n(),
+        n_sites_sig    = sum(`Bayes Factor` >= params$bf_threshold, na.rm = TRUE),
+        max_bf         = max(`Bayes Factor`, na.rm = TRUE),
+        .groups = "drop"
+    ) |>
+    dplyr::arrange(dplyr::desc(max_bf))
+
+knitr::kable(gene_summary, digits = 2,
+    caption = "Gene-level FADE summary (sorted by max Bayes Factor)")
+```
+
+## Session info {.tabset}
+
+```{r session}
+sessionInfo()
+```

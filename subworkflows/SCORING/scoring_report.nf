@@ -6,11 +6,23 @@
  * Render an HTML summary report for position-level and gene-level
  * CAAS scores.  Calls SCORING_report.Rmd.
  *
- * Inputs
+ * Inputs (15)
  * ──────
- *   position_scores  : path — position_scores.tsv
- *   gene_scores      : path — gene_scores.tsv
- *   gene_correlations: path — gene_correlations.tsv
+ *   position_scores      : path — position_scores.tsv
+ *   gene_scores          : path — gene_scores.tsv
+ *   gene_correlations    : path — gene_correlations.tsv
+ *   stress_summary       : path — position_score_stress_summary.tsv (or NO_SCORING_STRESS_SUMMARY sentinel)
+ *   stress_correlations  : path — position_score_stress_correlations.tsv (or NO_SCORING_STRESS_CORR sentinel)
+ *   stress_rank_agreement: path — position_score_stress_rank_agreement.tsv (or NO_SCORING_STRESS_RANK sentinel)
+ *   stress_top_overlap   : path — position_score_stress_top_overlap.tsv (or NO_SCORING_STRESS_OVERLAP sentinel)
+ *   stress_variants      : path — position_score_stress_variants.tsv (or NO_SCORING_STRESS_VARIANTS sentinel)
+ *   stress_latent_loadings: path — position_score_stress_latent_loadings.tsv (or NO_SCORING_STRESS_LOADINGS sentinel)
+ *   fade_site_top_file   : path — per-site FADE BF TSV top direction (or NO_FADE_SITE_TOP sentinel)
+ *   fade_site_bot_file   : path — per-site FADE BF TSV bottom direction (or NO_FADE_SITE_BOT sentinel)
+ *   vep_transvar         : path — TransVar annotation TSV (or NO_VEP_TRANSVAR sentinel)
+ *   vep_primateai        : path — PrimateAI-3D score TSV (or NO_VEP_PRIMATEAI sentinel)
+ *   vep_aa2prot          : path — aa2prot_global.csv (or NO_VEP_AA2PROT sentinel)
+ *   genomic_info         : path — gene genomic coords TSV (or NO_GENOMIC_INFO sentinel)
  *
  * Outputs
  * ───────
@@ -18,10 +30,10 @@
  */
 
 process SCORING_REPORT {
-    tag "scoring_report|${params.traitname ?: 'unknown_trait'}|${direction}"
+    tag "scoring_report|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 
-    publishDir path: { "${params.outdir}/scoring/${direction}" },
+    publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
     publishDir path: "${params.outdir}/HTML_reports",
@@ -29,7 +41,6 @@ process SCORING_REPORT {
                pattern: '*.html'
 
     input:
-    val  direction
     path position_scores
     path gene_scores
     path gene_correlations
@@ -39,14 +50,15 @@ process SCORING_REPORT {
     path stress_top_overlap
     path stress_variants
     path stress_latent_loadings
-    path fade_site_file      // optional: per-site FADE BF TSV (NO_FADE_SITE sentinel when absent)
+    path fade_site_top_file  // optional: per-site FADE BF TSV top direction  (NO_FADE_SITE sentinel when absent)
+    path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
     path vep_transvar        // optional: TransVar annotation TSV (NO_VEP_TRANSVAR sentinel when absent)
     path vep_primateai       // optional: PrimateAI-3D score TSV  (NO_VEP_PRIMATEAI sentinel when absent)
     path vep_aa2prot         // optional: aa2prot_global.csv — alignment→protein position map (NO_VEP_AA2PROT sentinel)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
 
     output:
-    path "SCORING_report_${direction}.html", emit: report
+    path "SCORING_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
 
     script:
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
@@ -65,7 +77,9 @@ process SCORING_REPORT {
     def stress_overlap_arg = (stress_top_overlap.name =~ /^NO_SCORING_STRESS_OVERLAP/) ? 'NULL' : "'${stress_top_overlap}'"
     def stress_variants_arg = (stress_variants.name =~ /^NO_SCORING_STRESS_VARIANTS/) ? 'NULL' : "'${stress_variants}'"
     def stress_loadings_arg = (stress_latent_loadings.name =~ /^NO_SCORING_STRESS_LOADINGS/) ? 'NULL' : "'${stress_latent_loadings}'"
-    def fs_arg  = (fade_site_file.name =~ /^NO_FADE_SITE/)    ? 'NULL' : "'${fade_site_file}'"
+    def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
+    def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
+
     def tv_arg  = (vep_transvar.name  =~ /^NO_VEP_TRANSVAR/)  ? 'NULL' : "'${vep_transvar}'"
     def pai_arg = (vep_primateai.name =~ /^NO_VEP_PRIMATEAI/) ? 'NULL' : "'${vep_primateai}'"
     def a2p_arg = (vep_aa2prot.name   =~ /^NO_VEP_AA2PROT/)   ? 'NULL' : "'${vep_aa2prot}'"
@@ -76,7 +90,7 @@ process SCORING_REPORT {
         """
         cp -R ${local_dir}/* .
 
-        /usr/local/bin/_entrypoint.sh Rscript -e "
+        REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 'SCORING_report.Rmd',
                 params = list(
@@ -97,15 +111,16 @@ process SCORING_REPORT {
                     stress_overlap_file  = ${stress_overlap_arg},
                     stress_variants_file = ${stress_variants_arg},
                     stress_loadings_file = ${stress_loadings_arg},
-                    fade_site_file       = ${fs_arg},
+                    fade_site_top_file   = ${fs_top_arg},
+                    fade_site_bot_file   = ${fs_bot_arg},
                     vep_transvar_file    = ${tv_arg},
                     vep_primateai_file   = ${pai_arg},
                     vep_aa2prot_file     = ${a2p_arg},
                     genomic_info_file    = ${gi_arg},
                     window_size_bp       = ${win_size},
-                    direction            = '${direction}'
+                    direction            = 'combined'
                 ),
-                output_file = 'SCORING_report_${direction}.html'
+                output_file = 'SCORING_report_${traitname}.html'
             )
         "
         """
@@ -113,7 +128,7 @@ process SCORING_REPORT {
         """
         cp -R ${local_dir}/* .
 
-        Rscript -e "
+        REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
                 'SCORING_report.Rmd',
                 params = list(
@@ -134,15 +149,16 @@ process SCORING_REPORT {
                     stress_overlap_file  = ${stress_overlap_arg},
                     stress_variants_file = ${stress_variants_arg},
                     stress_loadings_file = ${stress_loadings_arg},
-                    fade_site_file       = ${fs_arg},
+                    fade_site_top_file   = ${fs_top_arg},
+                    fade_site_bot_file   = ${fs_bot_arg},
                     vep_transvar_file    = ${tv_arg},
                     vep_primateai_file   = ${pai_arg},
                     vep_aa2prot_file     = ${a2p_arg},
                     genomic_info_file    = ${gi_arg},
                     window_size_bp       = ${win_size},
-                    direction            = '${direction}'
+                    direction            = 'combined'
                 ),
-                output_file = 'SCORING_report_${direction}.html'
+                output_file = 'SCORING_report_${traitname}.html'
             )
         "
         """

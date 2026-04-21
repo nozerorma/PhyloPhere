@@ -14,6 +14,7 @@ output:
     df_print: paged
     fig_width: 10
     fig_height: 6
+    self_contained: true
 params:
   json_dir:       "."
   direction:      "top"
@@ -40,6 +41,7 @@ suppressPackageStartupMessages({
   library(ggrepel)
   library(paletteer)
   library(DT)
+  library(parallel)
 })
 
 # Tableau_10 colour swatch (10 named colours for pipeline-wide consistency)
@@ -166,62 +168,42 @@ parse_fade_json <- function(path) {
     }
 
     # Identify the column index of Bayes Factor in headers
-    # HyPhy FADE headers structure: [[name, description], [name, description], ...]
     hdrs <- js[["MLE"]][["headers"]]
     bf_idx <- which(sapply(hdrs, function(h) {
       grepl("BayesFactor", h[[1]], ignore.case = TRUE)
     }))
-    if (length(bf_idx) == 0) bf_idx <- 4L  # fallback: 4th column (1-indexed, so index 4)
-    
-    # HyPhy FADE JSON structure (correct):
-    # content[amino_acid_letter][site_index] = [[values_rep1], [values_rep2], ...]
-    # Each row contains: [rate, bias, prob, bf]
+    if (length(bf_idx) == 0) bf_idx <- 4L  # fallback: 4th column
+
     content <- js[["MLE"]][["content"]]
-    
-    rows <- list()
-    
-    # Iterate through amino acids (20 standard amino acids)
-    for (aa in AA_LETTERS) {
-      if (!is.null(content[[aa]])) {
-        aa_data <- content[[aa]]
-        
-        # aa_data is a list where each element is indexed by site number (usually just "0" containing all sites)
-        # Each site has multiple rows (replicates), where each row is [rate, bias, prob, bf]
-        for (site_key in names(aa_data)) {
-          all_site_rows <- aa_data[[site_key]]
-          
-          if (!is.null(all_site_rows) && length(all_site_rows) > 0) {
-            # all_site_rows is a list of replicates, each replicate is a row of [rate, bias, prob, bf]
-            # We need to iterate through site positions (rows) within this list
-            for (site_pos in seq_along(all_site_rows)) {
-              rep_data <- all_site_rows[[site_pos]]
-              
-              # Convert to numeric vector
-              rep_num <- as.numeric(unlist(rep_data))
-              
-              if (length(rep_num) >= bf_idx) {
-                bf_val <- rep_num[[bf_idx]]
-                
-                # site_pos is 1-indexed (from seq_along)
-                rows[[length(rows) + 1]] <- data.frame(
-                  gene           = gene_id,
-                  site           = site_pos,
-                  target_aa      = aa,
-                  bayes_factor   = bf_val,
-                  stringsAsFactors = FALSE
-                )
-              }
-            }
-          }
-        }
-      }
-    }
-    
-    if (length(rows) == 0) {
-      return(NULL)
-    }
-    
-    do.call(rbind, rows)
+
+    # Vectorized: one data.frame per AA (not one per site×AA), using vapply
+    # for BF extraction — avoids millions of single-row data.frame allocations.
+    aa_frames <- lapply(AA_LETTERS, function(aa) {
+      aa_data <- content[[aa]]
+      if (is.null(aa_data)) return(NULL)
+
+      site_frames <- lapply(names(aa_data), function(site_key) {
+        all_site_rows <- aa_data[[site_key]]
+        if (is.null(all_site_rows) || length(all_site_rows) == 0) return(NULL)
+
+        bf_vals <- vapply(all_site_rows, function(rep_data) {
+          rep_num <- as.numeric(unlist(rep_data))
+          if (length(rep_num) >= bf_idx) rep_num[[bf_idx]] else NA_real_
+        }, numeric(1))
+
+        data.frame(
+          gene         = gene_id,
+          site         = seq_along(all_site_rows),
+          target_aa    = aa,
+          bayes_factor = bf_vals,
+          stringsAsFactors = FALSE
+        )
+      })
+      bind_rows(site_frames)
+    })
+
+    result <- bind_rows(aa_frames)
+    if (nrow(result) == 0) NULL else result
 
   }, error = function(e) {
     warning("Failed to parse ", gene_id, ": ", conditionMessage(e))
@@ -229,8 +211,16 @@ parse_fade_json <- function(path) {
   })
 }
 
-# Parse all files (may take a moment for large gene sets)
-all_results <- lapply(json_files, parse_fade_json)
+# Parse all files in parallel across genes.
+# FADE_REPORT_CORES env var controls parallelism (set by the Nextflow process).
+n_report_cores <- max(1L, as.integer(Sys.getenv("FADE_REPORT_CORES", unset = detectCores())))
+message(sprintf("Parsing %d FADE JSON files using %d core(s)...", length(json_files), n_report_cores))
+
+all_results <- if (.Platform$OS.type == "unix" && n_report_cores > 1L) {
+  mclapply(json_files, parse_fade_json, mc.cores = n_report_cores)
+} else {
+  lapply(json_files, parse_fade_json)
+}
 all_results <- Filter(Negate(is.null), all_results)
 
 if (length(all_results) == 0) {
@@ -239,7 +229,7 @@ if (length(all_results) == 0) {
   knitr::knit_exit()
 }
 
-fade_df <- do.call(rbind, all_results)
+fade_df <- bind_rows(all_results)
 cat(sprintf(
   "✓ Parsed %d genes × %d site×AA combinations.\n",
   n_distinct(fade_df$gene),

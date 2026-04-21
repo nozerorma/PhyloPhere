@@ -14,6 +14,7 @@ output:
     df_print: paged
     fig_width: 11
     fig_height: 6
+    self_contained: true
 params:
   continuous_rds:    "."
   traitname:         "unknown_trait"

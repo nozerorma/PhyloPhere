@@ -110,7 +110,7 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
 
 process BOOTSTRAP_BATCHED {
     tag "$batchID (${batchSize} genes)"
-    label 'process_boot'
+    label 'process_boot_batched'
 
     input:
     tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(discoveryFiles, stageAs: 'discovery/*'), path(resampledPath)

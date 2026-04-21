@@ -99,6 +99,7 @@ INT_RESUME="${INT_RESUME:-false}"
 INT_PRUNE_DATA="${INT_PRUNE_DATA:-false}"
 INT_REPORTING="${INT_REPORTING:-false}"
 INT_CONTRAST_SELECTION="${INT_CONTRAST_SELECTION:-false}"
+INT_CT_POSTPROC="${INT_CT_POSTPROC:-true}"
 INT_CT_SIGNIFICATION="${INT_CT_SIGNIFICATION:-false}"
 INT_CT_DISAMBIGUATION="${INT_CT_DISAMBIGUATION:-false}"
 INT_ORA="${INT_ORA:-true}"
@@ -106,6 +107,7 @@ INT_STRING="${INT_STRING:-true}"
 INT_CT_ACCUMULATION="${INT_CT_ACCUMULATION:-true}"
 INT_VEP="${INT_VEP:-true}"
 INT_FADE="${INT_FADE:-false}"
+INT_FADE_MODE="${INT_FADE_MODE:-gene_set}"
 INT_RER="${INT_RER:-true}"
 INT_SCORING="${INT_SCORING:-true}"
 INT_SCORING_STRESS="${INT_SCORING_STRESS:-true}"
@@ -121,6 +123,8 @@ INT_DISAMBIG_ASR_CACHE_DIR="${INT_DISAMBIG_ASR_CACHE_DIR:-/data/samanthafs/scrat
 
 # ── Standalone run toggles ───────────────────────────────────────────────────
 RUN_SA_CT="${RUN_SA_CT:-false}"
+RUN_SA_PRUNE="${RUN_SA_PRUNE:-false}"
+SA_PRUNE_ENABLE="${SA_PRUNE_ENABLE:-false}"
 RUN_SA_SIGNIFICATION="${RUN_SA_SIGNIFICATION:-false}"
 RUN_SA_DISAMBIGUATION="${RUN_SA_DISAMBIGUATION:-false}"
 SA_DISAMBIG_COMPUTE="${SA_DISAMBIG_COMPUTE:-false}"
@@ -137,10 +141,8 @@ RUN_SA_SCORING="${RUN_SA_SCORING:-false}"
 SA_SCORING_STRESS="${SA_SCORING_STRESS:-true}"
 SA_SCORING_STRESS_TOP_N="${SA_SCORING_STRESS_TOP_N:-25}"
 RUN_SA_FADE="${RUN_SA_FADE:-false}"
+SA_FADE_MODE="${SA_FADE_MODE:-gene_set}"
 RUN_SA_RER="${RUN_SA_RER:-false}"
-
-SA_SELECTION_MODE_ALL="${SA_SELECTION_MODE_ALL:-true}"
-SA_SELECTION_MODE_GENESET_PP="${SA_SELECTION_MODE_GENESET_PP:-false}"
 
 SA_RER_TOOL="${SA_RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
 SA_RER_CONTINUOUS_ONLY="${SA_RER_CONTINUOUS_ONLY:-false}"
@@ -175,6 +177,9 @@ INPUT_ASR_CACHED="${INPUT_ASR_CACHED:-${DATADIR}/asr}"
 INPUT_VEP_CDS_DIR="${INPUT_VEP_CDS_DIR:-${ALI_ARCHIVE_ROOT}/TRIM}"
 INPUT_VEP_TRACK_DIR="${INPUT_VEP_TRACK_DIR:-${ALI_ARCHIVE_ROOT}/TRACK}"
 INPUT_VEP_PRIMATEAI_DB="${INPUT_VEP_PRIMATEAI_DB:-}"
+INPUT_VEP_TRANSVAR_REFERENCE="${INPUT_VEP_TRANSVAR_REFERENCE:-}"
+INPUT_VEP_AA2NUC_INPUT="${INPUT_VEP_AA2NUC_INPUT:-}"
+INPUT_VEP_AA2PROT_INPUT="${INPUT_VEP_AA2PROT_INPUT:-}"
 
 CYCLES="${CYCLES:-1000000}"
 
@@ -190,6 +195,10 @@ PRUNE_LIST_SECONDARY="${PRUNE_DIR}/${PRUNE_FILE_SECONDARY}"
 TEST_DIR="${CAAS_OUTBASE}/${TRAIT}/${SOURCE_RUN_SUBDIR}/standalone"
 INT_RUNTIME="${CAAS_OUTBASE}/${TRAIT}/${SOURCE_RUN_SUBDIR}/filter"
 
+# Apply fallback precomputed VEP outputs only after INT_RUNTIME is defined.
+[ -z "$INPUT_VEP_AA2NUC_INPUT"  ] && INPUT_VEP_AA2NUC_INPUT="${INT_RUNTIME}/characterization/vep/aa2nuc_global.csv"
+[ -z "$INPUT_VEP_AA2PROT_INPUT" ] && INPUT_VEP_AA2PROT_INPUT="${INT_RUNTIME}/characterization/vep/aa2prot_global.csv"
+
 INPUT_TRAITFILE="${INT_RUNTIME}/data_exploration/2.CT/1.Traitfiles/traitfile.tab"
 INPUT_BOOT_TRAITFILE="${INT_RUNTIME}/data_exploration/2.CT/2.Bootstrap_traitfiles/boot_traitfile.tab"
 INPUT_DISCOVERY="${INT_RUNTIME}/caastools/discovery.tab"
@@ -203,9 +212,6 @@ INPUT_FILTERED_DISCOVERY="${INT_RUNTIME}/postproc/gene_filtering/filtered_discov
 INPUT_CLEANED_BG="${INT_RUNTIME}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
 INPUT_ORA_GENE_LISTS_DIR="${INT_RUNTIME}/gene_lists/position"
 INPUT_ACCUMULATION_GENE_LISTS_DIR="${INT_RUNTIME}/accumulation/randomization/gene_lists"
-SELECTION_INPUTS_DIR="${INT_RUNTIME}/postproc/disambiguation_characterization/gene_relation_analysis/txt/"
-INPUT_SELECTION_PP_TOP="${SELECTION_INPUTS_DIR}/all_top.txt"
-INPUT_SELECTION_PP_BOTTOM="${SELECTION_INPUTS_DIR}/all_bottom.txt"
 RER_STAGED_DIR="${INT_RUNTIME}/RERConverge"
 INPUT_RER_TRAIT_OUT="${RER_STAGED_DIR}/RER_Traits/${TRAIT}.polished.output"
 INPUT_RER_TREES_OUT="${RER_STAGED_DIR}/RER_Objects/ALL_FEB23_geneTrees.txt.masterTree.output"
@@ -213,6 +219,9 @@ INPUT_RER_MATRIX_OUT="${RER_STAGED_DIR}/RER_Objects/${TRAIT}.RERmatrix.output"
 
 SCORING_POSTPROC_INPUT="${INPUT_FILTERED_DISCOVERY}"
 SCORING_BACKGROUND_INPUT="${INPUT_CLEANED_BG}"
+FADE_GENE_RELATION_DIR="${INT_RUNTIME}/postproc/disambiguation_characterization/gene_relation_analysis/txt"
+FADE_POSTPROC_TOP="${FADE_GENE_RELATION_DIR}/all_top.txt"
+FADE_POSTPROC_BOTTOM="${FADE_GENE_RELATION_DIR}/all_bottom.txt"
 SCORING_FADE_SUMMARY_TOP="${INT_RUNTIME}/selection/fade/top/fade_summary_top.tsv"
 SCORING_FADE_SUMMARY_BOTTOM="${INT_RUNTIME}/selection/fade/bottom/fade_summary_bottom.tsv"
 SCORING_FADE_SITE_TOP="${INT_RUNTIME}/selection/fade/top/fade_site_bf_top.tsv"
@@ -234,6 +243,13 @@ export NXF_SINGULARITY_HOME_MOUNT=true
 # Toy-mode flag array (empty when TOY_MODE=false)
 SA_TOY_FLAGS=()
 [ "$TOY_MODE" = true ] && SA_TOY_FLAGS=(--toy_mode --toy_n "$TOY_N")
+
+# Shared standalone prune behavior.
+SA_PRUNE_FLAGS=(--prune_data false)
+if [ "$SA_PRUNE_ENABLE" = true ]; then
+    SA_PRUNE_FLAGS=(--prune_data --prune_list "$PRUNE_LIST")
+    [ -n "$PRUNE_FILE_SECONDARY" ] && SA_PRUNE_FLAGS+=(--prune_list_secondary "$PRUNE_LIST_SECONDARY")
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # UTILITY FUNCTIONS
@@ -281,6 +297,15 @@ maybe_clean_work() {
     if [ "$CLEAN_WORK" = true ] && [ -d "$workdir" ]; then
         rm -rf "$workdir"
         ok "Cleaned work dir: $workdir"
+    fi
+}
+
+validate_sa_prune_inputs() {
+    [ "$SA_PRUNE_ENABLE" = true ] || [ "$RUN_SA_PRUNE" = true ] || return 0
+    [ -n "$PRUNE_FILE" ] || fail "SA prune requires PRUNE_FILE when SA_PRUNE_ENABLE=true or RUN_SA_PRUNE=true"
+    require_file "$PRUNE_LIST"
+    if [ -n "$PRUNE_FILE_SECONDARY" ]; then
+        require_file "$PRUNE_LIST_SECONDARY"
     fi
 }
 
@@ -362,7 +387,7 @@ build_integrated_flags() {
     [ "$INT_REPORTING" = true ]          && OPTIONAL_BOOL_FLAGS+=(--reporting)          || OPTIONAL_BOOL_FLAGS+=(--reporting false)
     [ "$INT_CONTRAST_SELECTION" = true ] && OPTIONAL_BOOL_FLAGS+=(--contrast_selection) || OPTIONAL_BOOL_FLAGS+=(--contrast_selection false)
 
-    OPTIONAL_BOOL_FLAGS+=(--ct_postproc)
+    [ "$INT_CT_POSTPROC" = true ] && OPTIONAL_BOOL_FLAGS+=(--ct_postproc) || OPTIONAL_BOOL_FLAGS+=(--ct_postproc false)
 
     [ "$INT_CT_SIGNIFICATION" = true ] && OPTIONAL_BOOL_FLAGS+=(--ct_signification) || OPTIONAL_BOOL_FLAGS+=(--ct_signification false)
 
@@ -384,7 +409,17 @@ build_integrated_flags() {
         OPTIONAL_BOOL_FLAGS+=(--ct_accumulation false)
     fi
 
-    [ "$INT_FADE"     = true ] && OPTIONAL_BOOL_FLAGS+=(--fade --fade_mode "all")         || OPTIONAL_BOOL_FLAGS+=(--fade false)
+    if [ "$INT_FADE" = true ]; then
+        OPTIONAL_BOOL_FLAGS+=(--fade --fade_mode "${INT_FADE_MODE:-${FADE_MODE:-gene_set}}")
+        if [ "${INT_FADE_MODE:-${FADE_MODE:-gene_set}}" = "gene_set" ]; then
+            OPTIONAL_BOOL_FLAGS+=(
+                --fade_postproc_top "$FADE_POSTPROC_TOP"
+                --fade_postproc_bottom "$FADE_POSTPROC_BOTTOM"
+            )
+        fi
+    else
+        OPTIONAL_BOOL_FLAGS+=(--fade false)
+    fi
 
     if [ "$INT_RER" = true ]; then
         if [ "$SA_RER_CONTINUOUS_ONLY" = true ]; then
@@ -421,6 +456,9 @@ build_integrated_flags() {
             --vep_track_dir "$INPUT_VEP_TRACK_DIR"
         )
         [ -n "$INPUT_VEP_PRIMATEAI_DB" ] && OPTIONAL_BOOL_FLAGS+=(--vep_primateai_db "$INPUT_VEP_PRIMATEAI_DB")
+        [ -n "$INPUT_VEP_TRANSVAR_REFERENCE" ] && [ -f "$INPUT_VEP_TRANSVAR_REFERENCE" ] && OPTIONAL_BOOL_FLAGS+=(--vep_transvar_reference "$INPUT_VEP_TRANSVAR_REFERENCE")
+        [ -n "$INPUT_VEP_AA2NUC_INPUT"  ] && [ -f "$INPUT_VEP_AA2NUC_INPUT"  ] && OPTIONAL_BOOL_FLAGS+=(--vep_aa2nuc_input  "$INPUT_VEP_AA2NUC_INPUT")
+        [ -n "$INPUT_VEP_AA2PROT_INPUT" ] && [ -f "$INPUT_VEP_AA2PROT_INPUT" ] && OPTIONAL_BOOL_FLAGS+=(--vep_aa2prot_input "$INPUT_VEP_AA2PROT_INPUT")
     else
         OPTIONAL_BOOL_FLAGS+=(--vep false)
     fi
@@ -493,6 +531,7 @@ run_standalone_ct() {
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         --ct_tool "discovery,resample,bootstrap" \
         --alignment "$ALI_DIR" --ali_format "fasta" \
         --my_traits "$INPUT_TRAITS" \
@@ -518,6 +557,46 @@ run_standalone_ct() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# STANDALONE PRUNING
+# ─────────────────────────────────────────────────────────────────────────────
+run_standalone_prune() {
+    local outdir="${TEST_DIR}/standalone_prune/${timestamp}"
+    local workdir="${outdir}/work"
+    mkdir -p "$outdir" "$workdir"
+    require_file "$INPUT_TRAITS"; require_file "$INPUT_TREE"
+    require_file "$PRUNE_LIST"
+    if [ -n "$PRUNE_FILE_SECONDARY" ]; then
+        require_file "$PRUNE_LIST_SECONDARY"
+    fi
+
+    local prune_flags=(--prune_data --prune_list "$PRUNE_LIST")
+    [ -n "$PRUNE_FILE_SECONDARY" ] && prune_flags+=(--prune_list_secondary "$PRUNE_LIST_SECONDARY")
+
+    echo "Running standalone pruning"
+    echo "  Output: ${outdir}"
+
+    nextflow run main.nf \
+        -with-tower \
+        -profile slurm \
+        "${prune_flags[@]}" \
+        --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
+        ${SECONDARY_TRAIT:+--secondary_trait "$SECONDARY_TRAIT"} \
+        ${BRANCH_TRAIT:+--branch_trait "$BRANCH_TRAIT"} \
+        ${N_TRAIT:+--n_trait "$N_TRAIT"} \
+        ${C_TRAIT:+--c_trait "$C_TRAIT"} \
+        --tree "$INPUT_TREE" \
+        --ct_signification false --ct_postproc false --ct_disambiguation false \
+        --ora false --string false --ct_accumulation false \
+        --reporting false --contrast_selection false \
+        -w "$workdir" --outdir "$outdir" \
+        -with-report "${outdir}/pipeline_info/execution_report.html" \
+        -with-trace  "${outdir}/pipeline_info/execution_trace.txt"
+
+    ok "Standalone pruning completed → ${outdir}"
+    maybe_clean_work "$workdir"
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # STANDALONE SIGNIFICATION
 # ─────────────────────────────────────────────────────────────────────────────
 run_standalone_signification() {
@@ -533,6 +612,7 @@ run_standalone_signification() {
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         --ct_signification \
         --discovery_out "$INPUT_DISCOVERY" \
         --bootstrap_input "$INPUT_BOOTSTRAP" \
@@ -566,6 +646,7 @@ run_standalone_disambiguation() {
         nextflow run main.nf \
             -with-tower \
             -profile slurm \
+            "${SA_PRUNE_FLAGS[@]}" \
             --ct_signification false --ct_disambiguation \
             --ct_disambig_caas_metadata "$INPUT_GLOBAL_META_CAAS" \
             --alignment "$ALI_DIR" --ali_format "fasta" \
@@ -593,6 +674,7 @@ run_standalone_disambiguation() {
         nextflow run main.nf \
             -with-tower \
             -profile slurm \
+            "${SA_PRUNE_FLAGS[@]}" \
             --ct_signification false --ct_disambiguation \
             --ct_disambig_caas_metadata "$INPUT_GLOBAL_META_CAAS" \
             --alignment "$ALI_DIR" --ali_format "fasta" \
@@ -628,6 +710,7 @@ _run_standalone_postproc() {
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         --ct_signification false --ct_disambiguation false --ct_postproc \
         --caas_postproc_mode "$mode" \
         --disambiguation_input "$INPUT_MASTER_CSV" \
@@ -666,6 +749,7 @@ run_standalone_ora() {
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         --ct_signification false --ct_disambiguation false --ct_postproc false \
         --ora $string_flag \
         --ora_gene_lists_input "$INPUT_ORA_GENE_LISTS_DIR" \
@@ -697,6 +781,7 @@ run_standalone_accumulation() {
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         --ct_signification false --ct_disambiguation false --ct_postproc false \
         --ora false --string false --ct_accumulation \
         --accumulation_n_randomizations "$CYCLES" \
@@ -731,6 +816,7 @@ run_standalone_reporting() {
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         --reporting \
         --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
         ${SECONDARY_TRAIT:+--secondary_trait "$SECONDARY_TRAIT"} \
@@ -763,6 +849,7 @@ run_standalone_contrast_selection() {
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         --contrast_selection \
         --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
         ${SECONDARY_TRAIT:+--secondary_trait "$SECONDARY_TRAIT"} \
@@ -789,10 +876,19 @@ run_standalone_vep() {
     local workdir="${outdir}/work"
     mkdir -p "$outdir" "$workdir"
     require_file "$INPUT_FILTERED_DISCOVERY"
-    require_file "$INPUT_VEP_CDS_DIR"
-    require_file "$INPUT_VEP_TRACK_DIR"
 
     local primateai_db="${INPUT_VEP_PRIMATEAI_DB:-}"
+    local transvar_reference="${INPUT_VEP_TRANSVAR_REFERENCE:-}"
+    local precomp_aa2nuc="${INPUT_VEP_AA2NUC_INPUT:-}"
+    local precomp_aa2prot="${INPUT_VEP_AA2PROT_INPUT:-}"
+    local need_alignment_inputs=true
+    [ -n "$precomp_aa2nuc" ] && [ -f "$precomp_aa2nuc" ] && \
+    [ -n "$precomp_aa2prot" ] && [ -f "$precomp_aa2prot" ] && need_alignment_inputs=false
+
+    if [ "$need_alignment_inputs" = true ]; then
+        require_file "$INPUT_VEP_CDS_DIR"
+        require_file "$INPUT_VEP_TRACK_DIR"
+    fi
 
     echo "Running standalone VEP"
     echo "  Output: ${outdir}"
@@ -800,16 +896,23 @@ run_standalone_vep() {
     local vep_flags=(
         --vep
         --vep_caas_input "$INPUT_FILTERED_DISCOVERY"
-        --vep_cds_dir    "$INPUT_VEP_CDS_DIR"
-        --vep_track_dir  "$INPUT_VEP_TRACK_DIR"
     )
+    if [ "$need_alignment_inputs" = true ]; then
+        vep_flags+=(
+            --vep_cds_dir   "$INPUT_VEP_CDS_DIR"
+            --vep_track_dir "$INPUT_VEP_TRACK_DIR"
+        )
+    fi
     [ -n "$primateai_db" ] && vep_flags+=(--vep_primateai_db "$primateai_db")
+    [ -n "$transvar_reference" ] && [ -f "$transvar_reference" ] && vep_flags+=(--vep_transvar_reference "$transvar_reference")
+    [ -n "$precomp_aa2nuc"  ] && [ -f "$precomp_aa2nuc"  ] && vep_flags+=(--vep_aa2nuc_input  "$precomp_aa2nuc")
+    [ -n "$precomp_aa2prot" ] && [ -f "$precomp_aa2prot" ] && vep_flags+=(--vep_aa2prot_input "$precomp_aa2prot")
 
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
         "${vep_flags[@]}" \
-        --prune_data false --reporting false \
+        "${SA_PRUNE_FLAGS[@]}" --reporting false \
         --ct_signification false --ct_postproc false --ct_disambiguation false \
         --ora false --string false --ct_accumulation false --contrast_selection false \
         -w "$workdir" --outdir "$outdir" \
@@ -880,7 +983,7 @@ run_standalone_scoring() {
         "${optional_scoring_flags[@]}" \
         --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
         --tree "$INPUT_TREE" \
-        --prune_data false --reporting false \
+        "${SA_PRUNE_FLAGS[@]}" --reporting false \
         --ct_signification false --ct_postproc false --ct_disambiguation false \
         --ora false --string false --ct_accumulation false --contrast_selection false \
         -w "$workdir" --outdir "$outdir" \
@@ -892,55 +995,35 @@ run_standalone_scoring() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STANDALONE SELECTION HELPERS (FADE / RERConverge)
-# ─────────────────────────────────────────────────────────────────────────────
-_selection_mode_label() {
-    case "$1" in all) echo "all" ;; gene_set_pp) echo "geneset_pp" ;; *) fail "Unknown selection mode: $1" ;; esac
-}
-_selection_mode_value() {
-    case "$1" in all) echo "all" ;; gene_set_pp) echo "gene_set" ;; *) fail "Unknown selection mode: $1" ;; esac
-}
-_require_selection_mode_inputs() {
-    case "$1" in
-        all) ;;
-        gene_set_pp)
-            require_file "$INPUT_SELECTION_PP_TOP"
-            require_file "$INPUT_SELECTION_PP_BOTTOM"
-            ;;
-        *) fail "Unknown selection mode: $1" ;;
-    esac
-}
-_selection_source_flags() {
-    local tool="$1" mode="$2"
-    SELECTION_SOURCE_FLAGS=()
-    [ "$mode" = "gene_set_pp" ] && SELECTION_SOURCE_FLAGS=(
-        "--postproc_top"    "$INPUT_SELECTION_PP_TOP"
-        "--postproc_bottom" "$INPUT_SELECTION_PP_BOTTOM"
-    )
-}
-
-# ─────────────────────────────────────────────────────────────────────────────
 # STANDALONE FADE
 # ─────────────────────────────────────────────────────────────────────────────
-_run_standalone_fade_mode() {
-    local mode="$1"
-    local mode_label; mode_label="$(_selection_mode_label "$mode")"
-    local mode_value; mode_value="$(_selection_mode_value "$mode")"
-    _require_selection_mode_inputs "$mode"
-    _selection_source_flags "fade" "$mode"
-
-    local outdir="${TEST_DIR}/standalone_fade_${mode_label}/${timestamp}"
+run_standalone_fade() {
+    local outdir="${TEST_DIR}/standalone_fade/${timestamp}"
     local workdir="${outdir}/work"
+    local fade_mode="${SA_FADE_MODE:-gene_set}"
+    local fade_gene_set_flags=()
     mkdir -p "$outdir" "$workdir"
 
-    echo "Running standalone FADE (mode: ${mode_label})"
+    if [ "$fade_mode" = "gene_set" ]; then
+        require_file "$FADE_POSTPROC_TOP"
+        require_file "$FADE_POSTPROC_BOTTOM"
+        fade_gene_set_flags=(
+            --fade_postproc_top "$FADE_POSTPROC_TOP"
+            --fade_postproc_bottom "$FADE_POSTPROC_BOTTOM"
+        )
+    fi
+
+    echo "Running standalone FADE"
     echo "  Output: ${outdir}"
+    echo "  Mode: ${fade_mode}"
 
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
-        --fade --fade_mode "$mode_value" \
-        "${SELECTION_SOURCE_FLAGS[@]+"${SELECTION_SOURCE_FLAGS[@]}"}" \
+        "${SA_PRUNE_FLAGS[@]}" \
+        --fade \
+        --fade_mode "$fade_mode" \
+        "${fade_gene_set_flags[@]}" \
         --alignment "$ALI_DIR" --ali_format "fasta" \
         --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
         --tree "$INPUT_TREE" --reporting \
@@ -950,13 +1033,8 @@ _run_standalone_fade_mode() {
         -with-report "${outdir}/pipeline_info/execution_report.html" \
         -with-trace  "${outdir}/pipeline_info/execution_trace.txt"
 
-    ok "Standalone FADE (${mode_label}) completed → ${outdir}"
+    ok "Standalone FADE completed → ${outdir}"
     maybe_clean_work "$workdir"
-}
-
-run_standalone_fade() {
-    [ "$SA_SELECTION_MODE_ALL"      = true ] && _run_standalone_fade_mode all
-    [ "$SA_SELECTION_MODE_GENESET_PP" = true ] && _run_standalone_fade_mode gene_set_pp
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -988,12 +1066,13 @@ run_standalone_rer() {
     local workdir="${outdir}/work"
     mkdir -p "$outdir" "$workdir"
 
-    echo "Running standalone RERConverge (always all genes)"
+    echo "Running standalone RERConverge"
     echo "  Output: ${outdir}"
 
     nextflow run main.nf \
         -with-tower \
         -profile slurm \
+        "${SA_PRUNE_FLAGS[@]}" \
         "${rer_tool_flags[@]}" \
         --my_traits "$INPUT_TRAITS" --traitname "$TRAIT" \
         ${SECONDARY_TRAIT:+--secondary_trait "$SECONDARY_TRAIT"} \
@@ -1041,6 +1120,7 @@ print_config() {
     echo "  sub: INT_CONTRAST_SELECTION   : $INT_CONTRAST_SELECTION"
     echo "  sub: INT_CT_SIGNIFICATION     : $INT_CT_SIGNIFICATION"
     echo "  sub: INT_CT_DISAMBIGUATION    : $INT_CT_DISAMBIGUATION"
+    echo "  sub: INT_CT_POSTPROC          : $INT_CT_POSTPROC"
     echo "  sub: INT_ORA                  : $INT_ORA"
     echo "  sub: INT_STRING               : $INT_STRING"
     echo "  sub: INT_CT_ACCUMULATION      : $INT_CT_ACCUMULATION"
@@ -1053,6 +1133,8 @@ print_config() {
     echo ""
     echo "── Standalone runs ─────────────────────────"
     echo "  RUN_SA_CT                     : $RUN_SA_CT"
+    echo "  RUN_SA_PRUNE                  : $RUN_SA_PRUNE"
+    echo "    (+ SA_PRUNE_ENABLE          : $SA_PRUNE_ENABLE)"
     echo "  RUN_SA_SIGNIFICATION          : $RUN_SA_SIGNIFICATION"
     echo "  RUN_SA_DISAMBIGUATION         : $RUN_SA_DISAMBIGUATION"
     echo "    (+ SA_DISAMBIG_COMPUTE      : $SA_DISAMBIG_COMPUTE)"
@@ -1098,6 +1180,8 @@ print_summary() {
 # MAIN
 # ─────────────────────────────────────────────────────────────────────────────
 main() {
+    validate_sa_prune_inputs
+
     print_config
 
     if [ "$RUN_INT_FILTER" = true ] || [ "$RUN_INT_EXPLORATORY" = true ]; then
@@ -1108,6 +1192,7 @@ main() {
     [ "$RUN_INT_EXPLORATORY" = true ] && { section "INTEGRATED PIPELINE — exploratory mode"; run_integrated exploratory; }
 
     [ "$RUN_SA_CT"                  = true ] && { section "STANDALONE: CT";                               run_standalone_ct; }
+    [ "$RUN_SA_PRUNE"               = true ] && { section "STANDALONE: Pruning";                          run_standalone_prune; }
     [ "$RUN_SA_SIGNIFICATION"       = true ] && { section "STANDALONE: Signification";                    run_standalone_signification; }
     [ "$RUN_SA_DISAMBIGUATION"      = true ] && { section "STANDALONE: Disambiguation";                   run_standalone_disambiguation; }
     [ "$RUN_SA_POSTPROC_FILTER"     = true ] && { section "STANDALONE: PostProc — filter mode";           run_standalone_postproc_filter; }

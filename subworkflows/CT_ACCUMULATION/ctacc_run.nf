@@ -90,7 +90,9 @@ process CT_ACCUMULATION_RANDOMIZE {
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
     def n_rands      = params.accumulation_n_randomizations   ?: 10000
     def log_level    = params.accumulation_log_level          ?: 'INFO'
-    def workers_flag = params.accumulation_workers ? "--workers ${params.accumulation_workers}" : ''
+    // Fall back to task.cpus so the process never defaults to os.cpu_count()
+    // (which reads the full hardware CPU count of the node, not the Slurm allocation).
+    def workers_flag = "--workers ${params.accumulation_workers ?: task.cpus}"
     def seed_flag    = params.accumulation_seed    ? "--global-seed ${params.accumulation_seed}"   : ''
 
     if (params.use_singularity || params.use_apptainer) {

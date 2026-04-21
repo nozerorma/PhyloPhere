@@ -3,10 +3,10 @@
 /*
  * PHYLOPHERE: CAAS Scoring Workflow
  *
- * Computes composite position-level and gene-level CAAS scores by
- * integrating outputs from CT_POSTPROC, FADE, RERConverge,
- * and CT_ACCUMULATION.  Optionally runs ORA enrichment on top-scoring
- * gene lists.
+ * Computes position-level and gene-level CAAS scores by integrating outputs
+ * from CT_POSTPROC, FADE, RERConverge, and CT_ACCUMULATION.
+ * Runs once on the full postproc pool; directional characterisation is
+ * performed post-scoring via the change_side column.
  *
  * Author: Miguel Ramon (miguel.ramon@upf.edu)
  * File: workflows/scoring.nf
@@ -14,7 +14,6 @@
 
 include { SCORING_COMPUTE }         from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
 include { SCORING_REPORT }          from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
-include { SCORING_OVERLAP_REPORT }  from "${baseDir}/subworkflows/SCORING/scoring_overlap_report.nf"
 include { ORA_GENERAL_REPORT as ORA_SCORING_POSITION } from "${baseDir}/subworkflows/ORA/ora_general.nf"
 include { ORA_GENERAL_REPORT as ORA_SCORING_GENE     } from "${baseDir}/subworkflows/ORA/ora_general.nf"
 
@@ -26,11 +25,11 @@ workflow SCORING {
         fade_summary_top_ch      // Channel<path> or null — fade_summary_top.tsv
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
-        accum_ch                 // Channel<path> or null — collected accumulation CSVs
+        accum_ch                 // Channel<path> or null — collected accumulation CSVs (all directions)
         background_ch            // Channel<path> or null — cleaned_background_main.txt
         vep_transvar_ch          // Channel<path> or null — transvar_annotations.tsv (optional)
         vep_primateai_ch         // Channel<path> or null — primateai_scores.tsv     (optional)
-        vep_aa2prot_ch           // Channel<path> or null — aa2prot_global.csv (alignment→protein pos map)
+        vep_aa2prot_ch           // Channel<path> or null — aa2prot_global.csv (optional)
         genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
         fade_site_top_ch         // Channel<path> or null — fade_site_bf_top.tsv     (optional)
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
@@ -60,12 +59,8 @@ workflow SCORING {
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_rer_input ?: 'NO_RER') }
 
-        // Accumulation: collect all CSVs (top + bottom) into a single value channel.
-        // IMPORTANT: do NOT use .combine(accum_ch) in the multiMap chain below —
-        // when a channel emits List<Path> (from a glob output), .combine() spreads the
-        // list as individual tuple elements, causing an arity mismatch in multiMap.
-        // Instead we flatten + collect here so the process input receives all files at once
-        // and the R script selects the right direction via --direction / --accum_dir '.'.
+        // Accumulation: collect all CSVs (top + bottom + all) into a single value channel.
+        // The R script selects accumulation_all_* files via pattern matching.
         def accum_source = (accum_ch ?: Channel.empty())
         if (params.scoring_accum_dir) {
             def accum_dir = params.scoring_accum_dir ?: ''
@@ -83,7 +78,7 @@ workflow SCORING {
             .collect()
             .ifEmpty { [file('NO_ACCUM')] }
 
-        // VEP optional inputs — sentinels prevent staging collisions
+        // VEP optional inputs
         def resolved_vep_transvar = (vep_transvar_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_vep_transvar ?: 'NO_VEP_TRANSVAR') }
 
@@ -93,25 +88,18 @@ workflow SCORING {
         def resolved_vep_aa2prot = (vep_aa2prot_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_vep_aa2prot ?: 'NO_VEP_AA2PROT') }
 
-        // Genomic info (gene coordinates) — reuses params.gene_ensembl_file if available
         def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
             .ifEmpty {
                 def gi = params.gene_ensembl_file ?: ''
                 if (gi && file(gi).exists()) file(gi) else file('NO_GENOMIC_INFO')
             }
 
-        // FADE per-site BF TSVs — direction-keyed (top/bottom paired via _opt join)
-        def resolved_fade_site_top = (fade_site_top_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_fade_site_top ?: 'NO_FADE_SITE_TOP') }
-            .map { f -> tuple('top', f) }
+        def resolved_fade_site_top_ch = (fade_site_top_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_fade_site_top ?: 'NO_FADE_SITE_TOP.txt') }
 
-        def resolved_fade_site_bot = (fade_site_bot_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_fade_site_bottom ?: 'NO_FADE_SITE_BOTTOM') }
-            .map { f -> tuple('bottom', f) }
+        def resolved_fade_site_bot_ch = (fade_site_bot_ch ?: Channel.empty())
+            .ifEmpty { file(params.scoring_fade_site_bottom ?: 'NO_FADE_SITE_BOT.txt') }
 
-        def resolved_fade_site_ch = resolved_fade_site_top.mix(resolved_fade_site_bot)
-
-        // Background for ORA
         def resolved_background = (background_ch ?: Channel.empty())
             .ifEmpty {
                 def bg = params.scoring_background_input ?: ''
@@ -122,132 +110,36 @@ workflow SCORING {
                 file('NO_BACKGROUND')
             }
 
-        // ── Run scoring computation for each phenotype direction ──────────
-        // Each resolved_* is a single-item queue channel (one file per run).
-        // combine() creates the Cartesian product: 2 directions × 1 file = 2 items.
-        // multiMap then splits the combined tuples back into named channels,
-        // giving SCORING_COMPUTE two properly-paired calls without consuming any
-        // channel more than once and without using the deprecated .first() operator.
-        def directions_ch = Channel.of("top", "bottom")
-
-        def cmp_in = directions_ch
-            .combine(resolved_postproc)
-            .combine(resolved_fade_top)
-            .combine(resolved_fade_bottom)
-            .combine(resolved_rer)
-            .multiMap { dir, postproc, fade_t, fade_b, rer, mol_t, mol_b ->
-                direction:   dir
-                postproc:    postproc
-                fade_top:    fade_t
-                fade_bot:    fade_b
-                rer:         rer
-                mol_top:     mol_t
-                mol_bot:     mol_b
-            }
-
+        // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
-            cmp_in.direction,
-            cmp_in.postproc,
-            cmp_in.fade_top,
-            cmp_in.fade_bot,
-            cmp_in.rer,
-            accum_all_ch,
-            cmp_in.mol_top,
-            cmp_in.mol_bot
+            resolved_postproc,
+            resolved_fade_top,
+            resolved_fade_bottom,
+            resolved_rer,
+            accum_all_ch
         )
 
-        // ── Render one report per direction ────────────────────────────────
-        // SCORING_COMPUTE emits (direction, file) tuples for all outputs.
-        // Join on the direction key so each report receives correctly-paired inputs.
-        // For optional outputs, join with remainder:true and map null → sentinel file.
-
-        def report_core = compute_out.position_scores   // (dir, pos)
-            .join(compute_out.gene_scores)              // (dir, pos, gene)
-            .join(compute_out.gene_correlations)        // (dir, pos, gene, corr)
-
-        // For each direction-keyed optional channel, emit a sentinel when absent.
-        // report_core.map extracts just the direction keys as the left side of join.
+        // ── Render report ──────────────────────────────────────────────────
+        // Helper: for optional compute outputs, emit a sentinel when absent.
         def _opt = { ch, sentinel ->
-            report_core.map { d, _p, _g, _c -> d }
-                .join(ch, remainder: true)
-                .map { row ->
-                    def dir = row[0]
-                    // join(remainder:true) may emit 2 or 3 columns depending on key/value shapes.
-                    def picked = row.findAll { it != null && it != dir }?.last()
-                    tuple(dir, picked ?: file(sentinel))
-                }
+            ch.ifEmpty { file(sentinel) }
         }
 
-        // Build a fully direction-keyed channel with all report inputs
-        def report_all = report_core
-            .join(_opt(compute_out.stress_summary,         'NO_SCORING_STRESS_SUMMARY'))
-            .join(_opt(compute_out.stress_correlations,    'NO_SCORING_STRESS_CORR'))
-            .join(_opt(compute_out.stress_rank_agreement,  'NO_SCORING_STRESS_RANK'))
-            .join(_opt(compute_out.stress_top_overlap,     'NO_SCORING_STRESS_OVERLAP'))
-            .join(_opt(compute_out.stress_variants,        'NO_SCORING_STRESS_VARIANTS'))
-            .join(_opt(compute_out.stress_latent_loadings, 'NO_SCORING_STRESS_LOADINGS'))
-            .join(_opt(resolved_fade_site_ch,              'NO_FADE_SITE'))
-        // report_all: (dir, pos, gene, corr, ss, sc, sr, so, sv, sl, fade_site) — 11 elements
-
-        // Combine with shared VEP/genomic inputs (single-item channels reused per direction)
-        def rpt_in = report_all
-            .combine(resolved_vep_transvar)
-            .combine(resolved_vep_primateai)
-            .combine(resolved_vep_aa2prot)
-            .combine(resolved_genomic_info)
-            .multiMap { dir, pos, gene, corr, ss, sc, sr, so, sv, sl, fs, tv, pai, a2p, gi ->
-                direction:   dir
-                pos_scores:  pos
-                gene_scores: gene
-                gene_corr:   corr
-                stress_sum:  ss
-                stress_corr: sc
-                stress_rank: sr
-                stress_over: so
-                stress_var:  sv
-                stress_load: sl
-                fade_site:   fs
-                transvar:    tv
-                primateai:   pai
-                aa2prot:     a2p
-                genomic:     gi
-            }
-
         def report_out = SCORING_REPORT(
-            rpt_in.direction,
-            rpt_in.pos_scores,
-            rpt_in.gene_scores,
-            rpt_in.gene_corr,
-            rpt_in.stress_sum,
-            rpt_in.stress_corr,
-            rpt_in.stress_rank,
-            rpt_in.stress_over,
-            rpt_in.stress_var,
-            rpt_in.stress_load,
-            rpt_in.fade_site,
-            rpt_in.transvar,
-            rpt_in.primateai,
-            rpt_in.aa2prot,
-            rpt_in.genomic
-        )
-
-        // ── Top/Bottom Overlap Report ──────────────────────────────────────
-        // Collect the two per-direction position and gene score files, then
-        // render a single overlap report that compares them.
-        def pos_top_file  = compute_out.position_scores
-            .filter { it[0] == 'top'    }.map { _dir, f -> f }
-        def pos_bot_file  = compute_out.position_scores
-            .filter { it[0] == 'bottom' }.map { _dir, f -> f }
-        def gene_top_file = compute_out.gene_scores
-            .filter { it[0] == 'top'    }.map { _dir, f -> f }
-        def gene_bot_file = compute_out.gene_scores
-            .filter { it[0] == 'bottom' }.map { _dir, f -> f }
-
-        def overlap_out = SCORING_OVERLAP_REPORT(
-            pos_top_file,
-            pos_bot_file,
-            gene_top_file,
-            gene_bot_file,
+            compute_out.position_scores,
+            compute_out.gene_scores,
+            compute_out.gene_correlations,
+            _opt(compute_out.stress_summary,         'NO_SCORING_STRESS_SUMMARY'),
+            _opt(compute_out.stress_correlations,    'NO_SCORING_STRESS_CORR'),
+            _opt(compute_out.stress_rank_agreement,  'NO_SCORING_STRESS_RANK'),
+            _opt(compute_out.stress_top_overlap,     'NO_SCORING_STRESS_OVERLAP'),
+            _opt(compute_out.stress_variants,        'NO_SCORING_STRESS_VARIANTS'),
+            _opt(compute_out.stress_latent_loadings, 'NO_SCORING_STRESS_LOADINGS'),
+            resolved_fade_site_top_ch,
+            resolved_fade_site_bot_ch,
+            resolved_vep_transvar,
+            resolved_vep_primateai,
+            resolved_vep_aa2prot,
             resolved_genomic_info
         )
 
@@ -255,7 +147,7 @@ workflow SCORING {
         if (params.scoring_ora) {
             def bg_after_report = resolved_background
                 .combine(report_out.report.collect())
-                .map { it[0] }  // bg is always first; avoid destructuring (collect() spreads list elements)
+                .map { it[0] }
 
             ORA_SCORING_POSITION(
                 bg_after_report,
@@ -269,8 +161,7 @@ workflow SCORING {
         }
 
     emit:
-        position_scores = compute_out.position_scores.map { _dir, f -> f }
-        gene_scores     = compute_out.gene_scores.map     { _dir, f -> f }
+        position_scores = compute_out.position_scores
+        gene_scores     = compute_out.gene_scores
         report          = report_out.report
-        overlap_report  = overlap_out.report
 }

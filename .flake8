@@ -1,0 +1,25 @@
+[flake8]
+max-line-length = 100
+extend-ignore =
+    # E203: whitespace before ':' — conflicts with black slice formatting
+    E203,
+    # W503: line break before binary operator — conflicts with black
+    W503,
+    # E501: line too long — black handles this; flake8 duplicate noise
+    E501
+
+exclude =
+    .git,
+    __pycache__,
+    .eggs,
+    *.egg,
+    build,
+    dist,
+    work,
+    Docker(deprecated)
+
+per-file-ignores =
+    # __init__.py re-exports are intentional — F401 (imported but unused) is noise here
+    __init__.py:F401
+    # Test/scratch scripts in Data/ may have loose style
+    Data/*:E302,E303

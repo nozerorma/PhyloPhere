@@ -10,6 +10,7 @@ output:
     theme: cosmo
     code_folding: hide
     df_print: paged
+    self_contained: true
 params:
   disambig_dir:        NULL   # path to ct_disambiguation/ output directory
   posterior_threshold: 0.95   # params.ct_disambig_posterior_threshold
@@ -55,6 +56,7 @@ suppressPackageStartupMessages({
   library(knitr)
   library(kableExtra)
   library(jsonlite)
+  library(parallel)
 })
 
 # ── Parameter validation ──────────────────────────────────────────────────────
@@ -333,20 +335,36 @@ if (jsonl_files_exist) {
   jfiles <- list.files(node_dumps_dir, pattern = "_posteriors\\.jsonl$", full.names = TRUE)
   n_genes_parsed <- length(jfiles)
 
-  focal_rows_list <- lapply(jfiles, function(f) {
-    gene_lower <- sub("_posteriors\\.jsonl$", "", basename(f))
-    # JSONL filenames are lowercase; master_df gene names may be uppercase —
-    # try exact match first, then case-insensitive fallback.
-    gene <- if (!is.null(focal_lookup_map[[gene_lower]])) {
-      gene_lower
-    } else {
-      gene_upper <- toupper(gene_lower)
-      if (!is.null(focal_lookup_map[[gene_upper]])) gene_upper else gene_lower
-    }
-    fids <- focal_lookup_map[[gene]]
-    if (is.null(fids)) return(NULL)
-    extract_focal_jsonl(f, gene, fids)
-  })
+  # Parallelized across gene files — REPORT_CORES is set by the Nextflow process.
+  n_asr_cores <- max(1L, as.integer(Sys.getenv("REPORT_CORES", unset = detectCores())))
+  message(sprintf("Parsing %d JSONL files using %d core(s)...", length(jfiles), n_asr_cores))
+  focal_rows_list <- if (.Platform$OS.type == "unix" && n_asr_cores > 1L) {
+    mclapply(jfiles, function(f) {
+      gene_lower <- sub("_posteriors\\.jsonl$", "", basename(f))
+      gene <- if (!is.null(focal_lookup_map[[gene_lower]])) {
+        gene_lower
+      } else {
+        gene_upper <- toupper(gene_lower)
+        if (!is.null(focal_lookup_map[[gene_upper]])) gene_upper else gene_lower
+      }
+      fids <- focal_lookup_map[[gene]]
+      if (is.null(fids)) return(NULL)
+      extract_focal_jsonl(f, gene, fids)
+    }, mc.cores = n_asr_cores)
+  } else {
+    lapply(jfiles, function(f) {
+      gene_lower <- sub("_posteriors\\.jsonl$", "", basename(f))
+      gene <- if (!is.null(focal_lookup_map[[gene_lower]])) {
+        gene_lower
+      } else {
+        gene_upper <- toupper(gene_lower)
+        if (!is.null(focal_lookup_map[[gene_upper]])) gene_upper else gene_lower
+      }
+      fids <- focal_lookup_map[[gene]]
+      if (is.null(fids)) return(NULL)
+      extract_focal_jsonl(f, gene, fids)
+    })
+  }
 
   not_null <- !vapply(focal_rows_list, is.null, logical(1L))
   if (any(not_null)) {

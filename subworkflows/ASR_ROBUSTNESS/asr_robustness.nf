@@ -35,7 +35,7 @@ process ASR_ROBUSTNESS_REPORT {
         """
         cp ${local_dir}/ASR_robustness.Rmd .
 
-        /usr/local/bin/_entrypoint.sh Rscript -e "
+        REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 'ASR_robustness.Rmd',
                 params = list(
@@ -51,7 +51,7 @@ process ASR_ROBUSTNESS_REPORT {
         """
         cp ${local_dir}/ASR_robustness.Rmd .
 
-        Rscript -e "
+        REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
                 'ASR_robustness.Rmd',
                 params = list(

@@ -10,6 +10,7 @@ output:
     theme: cosmo
     code_folding: hide
     df_print: paged
+    self_contained: true
 params:
   discovery_file: NULL
   filter_summary_file: NULL
