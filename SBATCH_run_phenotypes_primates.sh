@@ -89,6 +89,8 @@ export RER_GMT_FILE="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/s
 
 # ── VEP ───────────────────────────────────────────────────────────────────────
 export RUN_VEP=true
+export ALI_SP_NAMES="${ALI_SP_NAMES:-}"
+export INPUT_TAX_ID="${INPUT_TAX_ID:-/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family.tsv}"
 export CDS_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/TRIM"
 export TRACK_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE/TRACK"
 export VEP_REFVERSION="hg38"

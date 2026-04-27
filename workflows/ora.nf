@@ -99,7 +99,8 @@ workflow ORA {
 
         ora_run = ORA_GENERAL_REPORT(
             background_file_ch,
-            gene_list_files_ch
+            gene_list_files_ch,
+            'ORA_general'
         )
 
         // Run STRING enrichment in parallel when --string is enabled

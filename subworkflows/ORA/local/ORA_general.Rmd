@@ -200,7 +200,7 @@ if (length(bg_entrez) < params$min_num) {
 
 # Run ORA per gene list
 
-```{r run_ora, eval=!no_gene_lists}
+```{r run_ora, eval=!no_gene_lists, include=FALSE}
 run_single_ora <- function(gene_file, bg_entrez, dbs) {
   genes_sym <- read_gene_vector(gene_file)
   genes_entrez <- safe_symbol_to_entrez(genes_sym)
@@ -496,69 +496,6 @@ if (nrow(all_results) > 0) {
     ggsave(file.path(ora_plots_dir, paste0("ora_overlap_heatmap_", .scen, ".png")), p_overlap, width = 10, height = 8, dpi = 320)
   }
 
-  # clusterProfiler-style pooled comparison (dotplot-like)
-  pooled_dot <- std_results %>%
-    arrange(FDR_std) %>%
-    group_by(gene_list) %>%
-    slice_head(n = 15) %>%
-    ungroup() %>%
-    mutate(term_short = stringr::str_trunc(term_std, 60))
-
-  if (nrow(pooled_dot) > 0) {
-    p_dot <- ggplot(pooled_dot, aes(x = gene_list, y = term_short, size = neglog10FDR, color = database_std)) +
-      geom_point(alpha = 0.85) +
-      safe_color(n_distinct(pooled_dot$database_std)) +
-      theme_minimal() +
-      labs(
-        title = "Pooled ORA characterization across lists",
-        subtitle = "Top enriched terms per list (dot size = -log10(FDR))",
-        x = "Gene list",
-        y = "Enriched term"
-      ) +
-      theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-    print(p_dot)
-    ggsave(file.path(ora_plots_dir, paste0("ora_pooled_dotplot_", .scen, ".png")), p_dot, width = 14, height = 11, dpi = 320)
-  }
-
-  # Optional enrichment map/network visualization if dependencies are available
-  if (isTRUE(params$enable_enrichment_map) && has_pkg("igraph")) {
-    term_links <- std_results %>%
-      distinct(gene_list, term_std) %>%
-      group_by(term_std) %>%
-      summarise(gene_lists = list(sort(unique(gene_list))), n_lists = n(), .groups = "drop") %>%
-      filter(n_lists > 1)
-
-    if (nrow(term_links) > 0) {
-      edges <- term_links %>%
-        mutate(pairs = purrr::map(gene_lists, ~{
-          x <- .x
-          if (length(x) < 2) return(tibble(from = character(0), to = character(0)))
-          as_tibble(t(combn(x, 2)), .name_repair = "minimal") %>%
-            setNames(c("from", "to"))
-        })) %>%
-        select(term_std, pairs) %>%
-        tidyr::unnest(pairs) %>%
-        count(from, to, name = "shared_terms")
-
-      if (nrow(edges) > 0) {
-        p_network <- ggplot(edges, aes(x = from, y = to, fill = shared_terms)) +
-          geom_tile(color = "white") +
-          scale_fill_viridis_c(option = "B") +
-          theme_minimal() +
-          labs(
-            title = "Shared enriched functions between gene lists",
-            subtitle = "Cell value = number of overlapping enriched terms",
-            x = NULL,
-            y = NULL
-          ) +
-          theme(axis.text.x = element_text(angle = 45, hjust = 1))
-
-        print(p_network)
-        ggsave(file.path(ora_plots_dir, paste0("ora_shared_term_network_matrix_", .scen, ".png")), p_network, width = 10, height = 8, dpi = 320)
-      }
-    }
-  }
   } # end for (.scen in present_scenarios)
   std_results <- std_results_all   # restore for enrichment_heatmap / upset_plot chunks
 }

@@ -70,7 +70,7 @@ workflow CT {
         // For archives, members are listed at startup and extracted on-demand inside each process.
         // When toy_mode=true, a random subset of toy_n alignments is used.
         def alignParam = params.alignment as String
-        def allFiles = file(alignParam).listFiles()?.findAll { it.isFile() } ?: []
+        def allFiles = file(alignParam).listFiles()?.findAll { it.isFile() && !it.name.matches('.*\\.txt$|.*\\.tsv$|.*\\.csv$|.*\\.log$|.*\\.map$') } ?: []
         if (params.toy_mode) {
             def n = (params.toy_n ?: 50) as int
             Collections.shuffle(allFiles)

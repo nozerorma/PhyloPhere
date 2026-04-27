@@ -71,6 +71,7 @@ SIMPLE_TRAIT_FILE="${DATADIR}/maria_caas/Datos_fenotipos/diet_traitfile_comma.cs
 
 N_TRAIT_PRUNED="adult_necropsy_count"
 BRANCH_TRAIT="LQ"
+INPUT_TAX_ID="${INPUT_TAX_ID:-${DATADIR}/5.Phylogeny/taxid_species_family.tsv}"
 
 # ── Toy / Full mode ──────────────────────────────────────────────────────────
 IS_TOY="${IS_TOY:-false}"
@@ -88,6 +89,7 @@ else
 fi
 
 ALI_FORMAT="fasta"
+ALI_SP_NAMES="${ALI_SP_NAMES:-}"  # Flat file of alignment species names for NAME_CURATION (one per line).
 
 # ── Selection analysis toggles ───────────────────────────────────────────────
 RUN_FADE="${RUN_FADE:-false}"
@@ -226,13 +228,21 @@ SCORING_NF_FLAGS=()
 if [ "$RUN_SCORING" = true ]; then
     SCORING_NF_FLAGS=(
         --scoring
-        --scoring_ora "$RUN_SCORING_ORA"
-        --scoring_window_size_bp "$SCORING_WINDOW_SIZE_BP"
+        --scoring_ora                "$RUN_SCORING_ORA"
+        --scoring_window_size_bp     "$SCORING_WINDOW_SIZE_BP"
     )
     if [ "$RUN_SCORING_STRESS" = true ]; then
         SCORING_NF_FLAGS+=(--scoring_stress)
     fi
 fi
+
+# Optional NAME_CURATION species list flag (only emitted when ALI_SP_NAMES is set).
+ALI_SP_NAMES_FLAG=()
+[ -n "$ALI_SP_NAMES" ] && ALI_SP_NAMES_FLAG=(--ali_sp_names "$ALI_SP_NAMES")
+
+# Optional tax ID mapping file.
+TAX_ID_FLAG=()
+[ -n "$INPUT_TAX_ID" ] && TAX_ID_FLAG=(--tax_id "$INPUT_TAX_ID")
 
 # ============================================================
 # COMMON NEXTFLOW FLAGS
@@ -244,6 +254,8 @@ COMMON_NF_FLAGS=(
     --ct_tool "" #resample,bootstrap results are passed as inputs, so we only run the discovery step
     --alignment  "$ALI_DIR"
     --ali_format "$ALI_FORMAT"
+    "${ALI_SP_NAMES_FLAG[@]+"${ALI_SP_NAMES_FLAG[@]}"}"
+    "${TAX_ID_FLAG[@]+"${TAX_ID_FLAG[@]}"}"
     --tree        "$TREE_FILE"
     --cycles      "$CYCLES"
     --accumulation_n_randomizations "$N_RANDOMIZATIONS"

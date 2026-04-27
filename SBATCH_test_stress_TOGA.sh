@@ -35,8 +35,6 @@ mkdir -p Slurm
 # ============================================================
 # CONFIGURATION  (edit before submitting)
 # ============================================================
-REPO_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere"
-
 # ─── Phenotype catalogue (array 1-10) ─────────────────────────────────────────
 #   1.  neoplasia_prevalence  [CLASS 1]
 #   2.  malignant_prevalence  [CLASS 1]
@@ -63,7 +61,7 @@ submit_array_job() {
 #SBATCH -o Slurm/slurm-%A_%a.out
 #SBATCH --mail-type=START,END,FAIL
 #SBATCH --mail-user=miguel.ramon@upf.edu
-#SBATCH --array=1-2%2
+#SBATCH --array=1-1%1
 
 module purge; module load modulepath/haswell
 module load Nextflow
@@ -82,25 +80,25 @@ conda activate phylophere
 export CLEAN_WORK=false
 
 # ── Integrated run toggles ────────────────────────────────────────────────────
-export RUN_INT_FILTER=false
+export RUN_INT_FILTER=true
 export RUN_INT_EXPLORATORY=false
 export INT_RESUME=false
 
-export INT_PRUNE_DATA=false
-export INT_REPORTING=false
-export INT_CONTRAST_SELECTION=false
-export INT_CT_POSTPROC=true
-export INT_CT_SIGNIFICATION=false
+export INT_PRUNE_DATA=true
+export INT_REPORTING=true
+export INT_CONTRAST_SELECTION=true
+export INT_CT_SIGNIFICATION=true
 export INT_CT_DISAMBIGUATION=false
-export INT_ORA=true
-export INT_STRING=true
+export INT_CT_POSTPROC=false
+export INT_ORA=false
+export INT_STRING=false
 export INT_CT_ACCUMULATION=false
 export INT_VEP=false
 export INT_FADE=false
 export FADE_MODE="gene_set"
-export INT_RER=true
-export INT_SCORING=true
-export INT_SCORING_STRESS=true
+export INT_RER=false
+export INT_SCORING=false
+export INT_SCORING_STRESS=false
 export INT_SCORING_STRESS_TOP_N=25
 
 export INT_USE_SECONDARY_TRAIT=true
@@ -114,16 +112,16 @@ export INT_DISAMBIG_ASR_CACHE_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/
 # ── Standalone run toggles ────────────────────────────────────────────────────
 export RUN_SA_CT=false
 export RUN_SA_PRUNE=false
-export SA_PRUNE_ENABLE=true
+export SA_PRUNE_ENABLE=false
 export RUN_SA_SIGNIFICATION=false
 export RUN_SA_DISAMBIGUATION=false
 export SA_DISAMBIG_COMPUTE=false
-export SA_DISAMBIG_PRECOMPUTED=true
+export SA_DISAMBIG_PRECOMPUTED=false
 export RUN_SA_POSTPROC_FILTER=false
 export RUN_SA_POSTPROC_EXPLORATORY=false
 export RUN_SA_ORA=false
 export RUN_SA_STRING=false
-export RUN_SA_ACCUMULATION=true
+export RUN_SA_ACCUMULATION=false
 export RUN_SA_REPORTING=false
 export RUN_SA_CONTRAST_SELECTION=false
 export RUN_SA_VEP=false
@@ -136,20 +134,20 @@ export RUN_SA_RER=false
 
 export SA_RER_TOOL="build_trait,build_tree,build_matrix,continuous"
 export SA_RER_CONTINUOUS_ONLY=false
-export SA_RER_PERM_BATCHES=100
+export SA_RER_PERM_BATCHES=10
 export SA_RER_PERMS_PER_BATCH=100
 export SA_RER_PERM_MODE="cc"
 export SA_RER_GMT_FILE="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/subworkflows/RERCONVERGE/dat/c2.cp.pid.v2026.1.Hs.symbols.gmt"
 
 # ── Toy mode ──────────────────────────────────────────────────────────────────
-export TOY_MODE=false
-export TOY_N=1000
+export TOY_MODE=true
+export TOY_N=100
 
 # ── Cluster / environment paths (override defaults in test_stress_single.sh) ──
 export DATADIR="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data"
-export CAAS_OUTBASE="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/final"
-export WORK_BASE="/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs/final"
-export ALI_ARCHIVE_ROOT="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE"
+export CAAS_OUTBASE="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/TOGA_TEST"
+export WORK_BASE="/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs/TOGA_TEST"
+export ALI_ARCHIVE_ROOT="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Mammals_BMGE_20260409_234008_frozen"
 export ALI_DIR="${ALI_ARCHIVE_ROOT}/PROT"
 export ALI_SP_NAMES="${ALI_SP_NAMES:-}"
 export INPUT_TAX_ID="${INPUT_TAX_ID:-${DATADIR}/5.Phylogeny/taxid_species_family.tsv}"
@@ -165,10 +163,10 @@ export INPUT_VEP_AA2NUC_INPUT="${INPUT_VEP_AA2NUC_INPUT:-}"
 export INPUT_VEP_AA2PROT_INPUT="${INPUT_VEP_AA2PROT_INPUT:-}"
 
 export SOURCE_RUN_SUBDIR="runtime"
-export CYCLES="1000000"
+export CYCLES="100"
 
-REPO_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere"
-SINGLE_RUNNER="${REPO_DIR}/test_stress_single.sh"
+REPO_DIR="${SLURM_SUBMIT_DIR:-$(pwd)}"
+SINGLE_RUNNER="${REPO_DIR}/test_stress_single_TOGA.sh"
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #   TRAIT CATALOGUE
@@ -188,15 +186,15 @@ case $SLURM_ARRAY_TASK_ID in
          export PRUNE_FILE="neoplasia_exclude.txt"
          export PRUNE_FILE_SECONDARY="malignant_exclude.txt"
          ;;
-     2)  export TRAIT_CLASS=1
-         export TRAIT="malignant_prevalence"
-         export SECONDARY_TRAIT="neoplasia_prevalence"
-         export N_TRAIT="adult_necropsy_count"
-         export C_TRAIT="malignant_count"
-         export BRANCH_TRAIT="LQ"
-         export PRUNE_FILE="malignant_exclude.txt"
-         export PRUNE_FILE_SECONDARY="neoplasia_exclude.txt"
-         ;;
+#      2)  export TRAIT_CLASS=1
+#          export TRAIT="malignant_prevalence"
+#          export SECONDARY_TRAIT="neoplasia_prevalence"
+#          export N_TRAIT="adult_necropsy_count"
+#          export C_TRAIT="malignant_count"
+#          export BRANCH_TRAIT="LQ"
+#          export PRUNE_FILE="malignant_exclude.txt"
+#          export PRUNE_FILE_SECONDARY="neoplasia_exclude.txt"
+#          ;;
 #      3)  export TRAIT_CLASS=2; export TRAIT="frug_idx";     export SECONDARY_TRAIT=""; export N_TRAIT=""; export C_TRAIT=""; export BRANCH_TRAIT="LQ"; export PRUNE_FILE=""; export PRUNE_FILE_SECONDARY="" ;;
 #      4)  export TRAIT_CLASS=2; export TRAIT="fol_idx";      export SECONDARY_TRAIT=""; export N_TRAIT=""; export C_TRAIT=""; export BRANCH_TRAIT="LQ"; export PRUNE_FILE=""; export PRUNE_FILE_SECONDARY="" ;;
 #      5)  export TRAIT_CLASS=2; export TRAIT="ins_idx";      export SECONDARY_TRAIT=""; export N_TRAIT=""; export C_TRAIT=""; export BRANCH_TRAIT="LQ"; export PRUNE_FILE=""; export PRUNE_FILE_SECONDARY="" ;;
@@ -223,7 +221,3 @@ echo "Submitted array job  : ${array_job_id}  (10 tasks)"
 echo ""
 echo "Monitor with: squeue -u \$USER"
 echo "Logs in     : Slurm/"
-
-mkdir -p SBATCH_runner
-mv slurm-*.out SBATCH_runner
-mv slurm-*.err SBATCH_runner

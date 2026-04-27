@@ -14,6 +14,7 @@ process ORA_GENERAL_REPORT {
     input:
     path background_file
     path gene_list_files
+    val  report_label
 
     output:
     path "*.html", emit: report
@@ -75,7 +76,7 @@ process ORA_GENERAL_REPORT {
                     overlap_top_terms = ${overlap_top_terms},
                     compare_metric = '${compare_metric}'
                 ),
-                output_file = 'ORA_general.html'
+                output_file = '${report_label}.html'
             )
         "
         """
@@ -104,7 +105,7 @@ process ORA_GENERAL_REPORT {
                     overlap_top_terms = ${overlap_top_terms},
                     compare_metric = '${compare_metric}'
                 ),
-                output_file = 'ORA_general.html'
+                output_file = '${report_label}.html'
             )
         "
         """

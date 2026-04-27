@@ -113,6 +113,11 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
 workflow {
 
+    // Backward-compatible alias: allow --input_tax_id as an alternative to --tax_id.
+    if (params.input_tax_id && !params.tax_id) {
+        params.tax_id = params.input_tax_id
+    }
+
     // Check if --help is provided
     if (params.help) {
         HELP ()

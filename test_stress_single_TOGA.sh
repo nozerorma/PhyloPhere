@@ -57,6 +57,12 @@ conda activate phylophere
 # ─────────────────────────────────────────────────────────────────────────────
 timestamp=$(date +%Y%m%d_%H%M%S)
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_DIR"
+
+if [ ! -f "$REPO_DIR/main.nf" ]; then
+    echo "ERROR: expected Nextflow entrypoint not found at $REPO_DIR/main.nf" >&2
+    exit 1
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ══════════════════════════════════════════════════════════════════════════════
@@ -99,9 +105,9 @@ INT_RESUME="${INT_RESUME:-false}"
 INT_PRUNE_DATA="${INT_PRUNE_DATA:-false}"
 INT_REPORTING="${INT_REPORTING:-false}"
 INT_CONTRAST_SELECTION="${INT_CONTRAST_SELECTION:-false}"
-INT_CT_POSTPROC="${INT_CT_POSTPROC:-true}"
 INT_CT_SIGNIFICATION="${INT_CT_SIGNIFICATION:-false}"
 INT_CT_DISAMBIGUATION="${INT_CT_DISAMBIGUATION:-false}"
+INT_CT_POSTPROC="${INT_CT_POSTPROC:-true}"
 INT_ORA="${INT_ORA:-true}"
 INT_STRING="${INT_STRING:-true}"
 INT_CT_ACCUMULATION="${INT_CT_ACCUMULATION:-true}"
@@ -146,7 +152,7 @@ RUN_SA_RER="${RUN_SA_RER:-false}"
 
 SA_RER_TOOL="${SA_RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
 SA_RER_CONTINUOUS_ONLY="${SA_RER_CONTINUOUS_ONLY:-false}"
-SA_RER_PERM_BATCHES="${SA_RER_PERM_BATCHES:-10}"
+SA_RER_PERM_BATCHES="${SA_RER_PERM_BATCHES:-100}"
 SA_RER_PERMS_PER_BATCH="${SA_RER_PERMS_PER_BATCH:-100}"
 SA_RER_PERM_MODE="${SA_RER_PERM_MODE:-cc}"
 SA_RER_GMT_FILE="${SA_RER_GMT_FILE:-/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere/subworkflows/RERCONVERGE/dat/c2.cp.pid.v2026.1.Hs.symbols.gmt}"
@@ -161,16 +167,16 @@ TOY_N="${TOY_N:-1000}"
 # CLUSTER / ENVIRONMENT PATHS
 # ─────────────────────────────────────────────────────────────────────────────
 DATADIR="${DATADIR:-/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data}"
-CAAS_OUTBASE="${CAAS_OUTBASE:-/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/final}"
-WORK_BASE="${WORK_BASE:-/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs/final}"
-ALI_ARCHIVE_ROOT="${ALI_ARCHIVE_ROOT:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Primates_BMGE}"
+CAAS_OUTBASE="${CAAS_OUTBASE:-/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/TOGA_TEST}"
+WORK_BASE="${WORK_BASE:-/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs/TOGA_TEST}"
+ALI_ARCHIVE_ROOT="${ALI_ARCHIVE_ROOT:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/alignments/Mammals_BMGE_20260409_234008_frozen}"
 
 ALI_DIR="${ALI_DIR:-${ALI_ARCHIVE_ROOT}/PROT}"
 ALI_SP_NAMES="${ALI_SP_NAMES:-}"  # Flat file of alignment species names for NAME_CURATION (one per line).
                                    # Leave empty to derive at runtime from ALI_DIR (slow for large datasets).
 INPUT_TRAITS="${INPUT_TRAITS:-${DATADIR}/1.Cancer_data/Neoplasia_species360/cancer_traits_processed-LQ.csv}"
 SIMPLE_TRAIT_FILE="${SIMPLE_TRAIT_FILE:-${DATADIR}/maria_caas/Datos_fenotipos/diet_traitfile_comma.csv}"
-INPUT_TREE="${INPUT_TREE:-${DATADIR}/5.Phylogeny/science.abn7829_data_s4.nex.tree}"
+INPUT_TREE="${INPUT_TREE:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/external_phylogenies/phylacine/phylacine_pruned.rooted.nwk}"
 PRUNE_DIR="${PRUNE_DIR:-${DATADIR}/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP}"
 INPUT_GENE_TREES="${INPUT_GENE_TREES:-${DATADIR}/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
 INPUT_TAX_ID="${INPUT_TAX_ID:-${DATADIR}/5.Phylogeny/taxid_species_family.tsv}"
@@ -248,7 +254,9 @@ export NXF_SINGULARITY_HOME_MOUNT=true
 SA_TOY_FLAGS=()
 [ "$TOY_MODE" = true ] && SA_TOY_FLAGS=(--toy_mode --toy_n "$TOY_N")
 
-# Shared standalone prune behavior.
+# Shared standalone prune behavior:
+# - SA_PRUNE_ENABLE=true applies pruning to all standalone module runs.
+# - Otherwise, standalone modules run with --prune_data false.
 SA_PRUNE_FLAGS=(--prune_data false)
 if [ "$SA_PRUNE_ENABLE" = true ]; then
     SA_PRUNE_FLAGS=(--prune_data --prune_list "$PRUNE_LIST")
@@ -374,7 +382,7 @@ TAX_ID_FLAG=()
 build_integrated_flags() {
     COMMON_FLAGS=(
         -profile slurm
-        --ct_tool ""
+        --ct_tool "discovery,resample,bootstrap"
         --alignment "$ALI_DIR"
         --ali_format "fasta"
         --my_traits "$INPUT_TRAITS"

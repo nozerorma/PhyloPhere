@@ -49,16 +49,16 @@ fade_top_file        <- parse_arg("--fade_top")
 fade_bottom_file     <- parse_arg("--fade_bottom")
 rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
-stress_enabled_raw   <- parse_arg("--stress", "false")
-stress_top_n         <- as.integer(parse_arg("--stress_top_n", "25"))
+stress_enabled_raw        <- parse_arg("--stress", "false")
+stress_top_n              <- as.integer(parse_arg("--stress_top_n", "25"))
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
 top5_pct          <- as.numeric(parse_arg("--top5_pct", "0.05"))
 top1_pct          <- as.numeric(parse_arg("--top1_pct", "0.01"))
 gene_top_pct      <- as.numeric(parse_arg("--gene_top_pct",  "0.10"))
 gene_top5_pct     <- as.numeric(parse_arg("--gene_top5_pct", "0.05"))
 gene_top1_pct     <- as.numeric(parse_arg("--gene_top1_pct", "0.01"))
-stress_enabled    <- tolower(as.character(stress_enabled_raw)) %in% c("true", "1", "yes")
-if (!is.finite(stress_top_n) || is.na(stress_top_n) || stress_top_n < 1) stress_top_n <- 25
+stress_enabled        <- tolower(as.character(stress_enabled_raw)) %in% c("true", "1", "yes")
+if (!is.finite(stress_top_n)      || is.na(stress_top_n)      || stress_top_n < 1)  stress_top_n      <- 25
 # direction removed: scoring always runs on the full postproc pool.
 # Directional characterisation happens post-scoring via change_side column.
 
@@ -206,58 +206,43 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 # 2. POSITION-LEVEL SCORING
 # =============================================================================
 
-# ── 2a. Variability score (deciles of hypergeometric p-value) ────────────────
-# Computed across ALL rows, then collapsed per Gene×Position later.
+# ── 2a. Pre-scoring exclusions ───────────────────────────────────────────────
+# Applied before decile computation so boundaries reflect the scored pool only.
+
+# GS0: any substitution regardless of biochemistry — too permissive, excluded entirely.
+n_before <- nrow(df)
+df <- df %>% filter(CAAP_Group != "GS0")
+cat(sprintf("  GS0 exclusion: %d rows removed (%d → %d); %d unique Gene×Position remain\n",
+            n_before - nrow(df), n_before, nrow(df),
+            n_distinct(paste(df$Gene, df$Position))))
+
+# ── 2b. Variability and pattern scores ───────────────────────────────────────
+# Deciles computed over the non-GS0 pool; lower p-values → higher score.
 df <- df %>%
   mutate(
     variability_score = decile_score(Pvalue),
     pattern_score     = decile_score(pvalue_boot)
   )
 
-# ── 2b. Biochem score (cumulative scheme weights × variability × pattern) ────
-scheme_weights <- c(US = 0.5, GS4 = 0.2, GS3 = 0.1, GS2 = 0.1, GS1 = 0.1, GS0 = 0)
-scheme_weights_flat <- c(US = 0.35, GS4 = 0.2, GS3 = 0.15, GS2 = 0.15, GS1 = 0.15, GS0 = 0)
-scheme_weights_us_heavy <- c(US = 0.60, GS4 = 0.2, GS3 = 0.1, GS2 = 0.05, GS1 = 0.05, GS0 = 0)
+# ── 2c. Biochemical scheme weights ───────────────────────────────────────────
+# Integer specificity points per scheme (max achievable sum = 10).
+# Applied after aggregation as a multiplier on pre_score.
+scheme_weights_int <- c(US = 5L, GS4 = 2L, GS3 = 1L, GS2 = 1L, GS1 = 1L)
 
 df <- df %>%
-  mutate(
-    scheme_weight = scheme_weights[CAAP_Group],
-    scheme_weight_flat = scheme_weights_flat[CAAP_Group],
-    scheme_weight_us_heavy = scheme_weights_us_heavy[CAAP_Group]
-  )
-
-# Compute per-row scheme contribution
-df <- df %>%
-  mutate(
-    scheme_contribution = scheme_weight * variability_score * pattern_score,
-    scheme_contribution_mean = scheme_weight * ((variability_score + pattern_score) / 2),
-    scheme_contribution_geo = scheme_weight * sqrt(pmax(variability_score * pattern_score, 0)),
-    scheme_contribution_flat = scheme_weight_flat * variability_score * pattern_score,
-    scheme_contribution_us_heavy = scheme_weight_us_heavy * variability_score * pattern_score
-  )
+  mutate(scheme_weight = scheme_weights_int[CAAP_Group])
 
 # Detect pair-indexed MRCA posterior columns dynamically (mrca_1_posterior, mrca_2_posterior, ...)
 mrca_posterior_cols <- grep("^mrca_\\d+_posterior$", names(df), value = TRUE)
 n_pairs <- length(mrca_posterior_cols)
 cat(sprintf("  Detected %d pairs (%s)\n", n_pairs, paste(mrca_posterior_cols, collapse = ", ")))
 
-# Aggregate to Gene×Position level: sum scheme contributions (cumulative),
-# and take the first value for fields that are constant within Gene×Position.
+# Aggregate to Gene×Position level: sum integer scheme weights across satisfied
+# schemes, and take the first value for fields constant within Gene×Position.
 pos_scores <- df %>%
   group_by(Gene, Position) %>%
   summarise(
-    biochem_score         = sum(scheme_contribution, na.rm = TRUE),
-    scheme_coverage       = sum(scheme_weight, na.rm = TRUE),
-    biochem_mul_current   = sum(scheme_contribution, na.rm = TRUE),
-    biochem_mean          = sum(scheme_contribution_mean, na.rm = TRUE),
-    biochem_geo           = sum(scheme_contribution_geo, na.rm = TRUE),
-    biochem_flat_weights  = sum(scheme_contribution_flat, na.rm = TRUE),
-    biochem_us_heavy      = sum(scheme_contribution_us_heavy, na.rm = TRUE),
-    biochem_saturated     = {
-      contribs <- sort(scheme_contribution[is.finite(scheme_contribution)], decreasing = TRUE)
-      if (length(contribs) == 0) 0 else sum(contribs / (2 ^ (seq_along(contribs) - 1)))
-    },
-    # Take representative values from the row set (constant within Gene×Position)
+    biochem_weight_sum    = sum(scheme_weight, na.rm = TRUE),
     Pvalue                = first(Pvalue),
     pvalue_boot           = first(pvalue_boot),
     variability_score     = first(variability_score),
@@ -456,16 +441,20 @@ if (has_fade_bottom) {
 }
 
 # ── 2i. CAAS Score (composite) ──────────────────────────────────────────────
-# Unweighted mean of the four core components: biochem_score, asr_score,
-# convergence_score, parallel_score.
+# pre_score: unweighted mean of the 5 independent signal components
+#   (variability, pattern, asr, convergence, parallel).
+# CAAS_score: pre_score scaled by biochemical specificity:
+#   pre_score × biochem_weight_sum / 10
+# where 10 is the maximum achievable weight (US=5 + GS4=2 + GS3+GS2+GS1=3).
 # FADE is gene-level and does NOT contribute to position-level CAAS_score.
 
 pos_scores <- pos_scores %>%
   mutate(
-    CAAS_score = rowMeans(
-      cbind(biochem_score, asr_score, convergence_score, parallel_score),
+    pre_score  = rowMeans(
+      cbind(variability_score, pattern_score, asr_score, convergence_score, parallel_score),
       na.rm = TRUE
-    )
+    ),
+    CAAS_score = pre_score * biochem_weight_sum / 10
   )
 
 cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
@@ -487,39 +476,29 @@ if (stress_enabled) {
       Gene, Position,
       variability_score,
       pattern_score,
-      scheme_coverage,
-      biochem_score,
-      biochem_mul_current,
-      biochem_mean,
-      biochem_geo,
-      biochem_saturated,
-      biochem_flat_weights,
-      biochem_us_heavy,
       asr_score,
       convergence_score,
       parallel_score,
+      biochem_weight_sum,
+      pre_score,
       CAAS_current = CAAS_score
     )
 
+  # Leave-one-out variants: drop one pre-score component, recompute mean × biochem weight
   stress_df <- stress_df %>%
     mutate(
-      CAAS_no_biochem = rowMeans(cbind(asr_score, convergence_score, parallel_score), na.rm = TRUE),
-      CAAS_no_asr = rowMeans(cbind(biochem_score, convergence_score, parallel_score), na.rm = TRUE),
-      CAAS_no_convergence = rowMeans(cbind(biochem_score, asr_score, parallel_score), na.rm = TRUE),
-      CAAS_no_parallel = rowMeans(cbind(biochem_score, asr_score, convergence_score), na.rm = TRUE),
-      CAAS_biochem_split = rowMeans(cbind(variability_score, pattern_score, scheme_coverage,
-                                          asr_score, convergence_score, parallel_score), na.rm = TRUE),
-      CAAS_biochem_alt_mean = rowMeans(cbind(biochem_mean, asr_score, convergence_score, parallel_score), na.rm = TRUE),
-      CAAS_biochem_alt_geo = rowMeans(cbind(biochem_geo, asr_score, convergence_score, parallel_score), na.rm = TRUE),
-      CAAS_biochem_alt_saturated = rowMeans(cbind(biochem_saturated, asr_score, convergence_score, parallel_score), na.rm = TRUE),
-      CAAS_biochem_alt_flat = rowMeans(cbind(biochem_flat_weights, asr_score, convergence_score, parallel_score), na.rm = TRUE),
-      CAAS_biochem_alt_us_heavy = rowMeans(cbind(biochem_us_heavy, asr_score, convergence_score, parallel_score), na.rm = TRUE)
+      CAAS_unweighted     = pre_score,
+      CAAS_no_variability = rowMeans(cbind(pattern_score, asr_score, convergence_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
+      CAAS_no_pattern     = rowMeans(cbind(variability_score, asr_score, convergence_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
+      CAAS_no_asr         = rowMeans(cbind(variability_score, pattern_score, convergence_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
+      CAAS_no_convergence = rowMeans(cbind(variability_score, pattern_score, asr_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
+      CAAS_no_parallel    = rowMeans(cbind(variability_score, pattern_score, asr_score, convergence_score), na.rm = TRUE) * biochem_weight_sum / 10
     )
 
   latent_loadings <- tibble(model = character(), variable = character(), loading = numeric(),
                             variance_explained = numeric())
 
-  pca_all_cols <- c("biochem_score", "asr_score", "convergence_score", "parallel_score")
+  pca_all_cols <- c("variability_score", "pattern_score", "asr_score", "convergence_score", "parallel_score")
   pca_all_df <- stress_df %>% select(all_of(pca_all_cols), CAAS_current) %>% drop_na()
   pca_all_cols_var <- variable_numeric_cols(pca_all_df, pca_all_cols)
   if (length(pca_all_cols_var) < length(pca_all_cols)) {
@@ -544,33 +523,6 @@ if (stress_enabled) {
     )
   } else {
     cat("  PCA_all_components: skipped (fewer than 2 variable columns after filtering)\n")
-  }
-
-  pca_no_biochem_cols <- c("variability_score", "pattern_score", "scheme_coverage", "asr_score", "convergence_score", "parallel_score")
-  pca_no_biochem_df <- stress_df %>% select(all_of(pca_no_biochem_cols), CAAS_current) %>% drop_na()
-  pca_no_biochem_cols_var <- variable_numeric_cols(pca_no_biochem_df, pca_no_biochem_cols)
-  if (length(pca_no_biochem_cols_var) < length(pca_no_biochem_cols)) {
-    cat(sprintf("  PCA_no_biochem: dropped %d constant/degenerate columns\n",
-                length(pca_no_biochem_cols) - length(pca_no_biochem_cols_var)))
-  }
-  if (nrow(pca_no_biochem_df) >= 3 && length(pca_no_biochem_cols_var) >= 2) {
-    pca_nb <- prcomp(pca_no_biochem_df[, pca_no_biochem_cols_var, drop = FALSE], center = TRUE, scale. = TRUE)
-    scores <- pca_nb$x[, 1]
-    score_corr <- safe_cor(scores, pca_no_biochem_df$CAAS_current, method = "pearson")
-    if (!is.na(score_corr) && score_corr < 0) scores <- -scores
-    stress_df$PCA_no_biochem <- NA_real_
-    stress_df$PCA_no_biochem[complete.cases(stress_df[, pca_no_biochem_cols_var])] <- score_to_decile(scores)
-    latent_loadings <- bind_rows(
-      latent_loadings,
-      tibble(
-        model = "PCA_no_biochem",
-        variable = rownames(pca_nb$rotation),
-        loading = pca_nb$rotation[, 1],
-        variance_explained = summary(pca_nb)$importance[2, 1]
-      )
-    )
-  } else {
-    cat("  PCA_no_biochem: skipped (fewer than 2 variable columns after filtering)\n")
   }
 
   factanal_df <- stress_df %>% select(all_of(pca_all_cols), CAAS_current) %>% drop_na()
@@ -603,31 +555,17 @@ if (stress_enabled) {
     cat("  Factor1_all_components: skipped (insufficient rows or variable columns)\n")
   }
 
-  resid_predictors <- c("asr_score", "convergence_score", "parallel_score")
-  resid_df <- stress_df %>% select(biochem_score, all_of(resid_predictors)) %>% drop_na()
-  if (nrow(resid_df) >= 5) {
-    resid_fit <- lm(as.formula(paste("biochem_score ~", paste(resid_predictors, collapse = " + "))), data = resid_df)
-    resid_scores <- resid(resid_fit)
-    stress_df$residualized_biochem <- NA_real_
-    stress_df$residualized_biochem[complete.cases(stress_df[, c("biochem_score", resid_predictors)])] <- score_to_decile(resid_scores)
-    stress_df$CAAS_residualized_biochem <- rowMeans(
-      cbind(stress_df$residualized_biochem, stress_df$asr_score, stress_df$convergence_score, stress_df$parallel_score),
-      na.rm = TRUE
-    )
-  }
-
   analysis_cols <- c(
-    "variability_score", "pattern_score", "scheme_coverage", "biochem_score",
-    "asr_score", "convergence_score", "parallel_score"
+    "variability_score", "pattern_score", "asr_score", "convergence_score",
+    "parallel_score", "biochem_weight_sum", "pre_score"
   )
 
   composite_cols <- c(
-    "CAAS_current", "CAAS_no_biochem", "CAAS_no_asr", "CAAS_no_convergence",
-    "CAAS_no_parallel", "CAAS_biochem_split", "CAAS_biochem_alt_mean",
-    "CAAS_biochem_alt_geo", "CAAS_biochem_alt_saturated",
-    "CAAS_biochem_alt_flat", "CAAS_biochem_alt_us_heavy"
+    "CAAS_current", "CAAS_unweighted",
+    "CAAS_no_variability", "CAAS_no_pattern", "CAAS_no_asr",
+    "CAAS_no_convergence", "CAAS_no_parallel"
   )
-  latent_cols <- c("PCA_all_components", "PCA_no_biochem", "Factor1_all_components", "CAAS_residualized_biochem")
+  latent_cols <- c("PCA_all_components", "Factor1_all_components")
   latent_cols <- latent_cols[latent_cols %in% names(stress_df)]
   latent_cols <- latent_cols[vapply(latent_cols, function(col) any(!is.na(stress_df[[col]])), logical(1))]
   if (length(latent_cols) > 0) composite_cols <- c(composite_cols, latent_cols)
@@ -974,12 +912,31 @@ if (length(score_cols) >= 2) {
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
-# Position scores
+# Position scores — direction-specific top-N% flags (thresholds computed within each direction)
+.pos_top_sub <- pos_scores %>% filter(change_side %in% c("top",    "both"))
+.pos_bot_sub <- pos_scores %>% filter(change_side %in% c("bottom", "both"))
+.thr_top_10 <- quantile(.pos_top_sub$CAAS_score, 0.90, na.rm = TRUE)
+.thr_top_5  <- quantile(.pos_top_sub$CAAS_score, 0.95, na.rm = TRUE)
+.thr_top_1  <- quantile(.pos_top_sub$CAAS_score, 0.99, na.rm = TRUE)
+.thr_bot_10 <- quantile(.pos_bot_sub$CAAS_score, 0.90, na.rm = TRUE)
+.thr_bot_5  <- quantile(.pos_bot_sub$CAAS_score, 0.95, na.rm = TRUE)
+.thr_bot_1  <- quantile(.pos_bot_sub$CAAS_score, 0.99, na.rm = TRUE)
+
 pos_out <- pos_scores %>%
+  mutate(
+    is_top_10pct = change_side %in% c("top", "both")    & CAAS_score >= .thr_top_10,
+    is_top_5pct  = change_side %in% c("top", "both")    & CAAS_score >= .thr_top_5,
+    is_top_1pct  = change_side %in% c("top", "both")    & CAAS_score >= .thr_top_1,
+    is_bot_10pct = change_side %in% c("bottom", "both") & CAAS_score >= .thr_bot_10,
+    is_bot_5pct  = change_side %in% c("bottom", "both") & CAAS_score >= .thr_bot_5,
+    is_bot_1pct  = change_side %in% c("bottom", "both") & CAAS_score >= .thr_bot_1
+  ) %>%
   select(Gene, Position, any_of(c("Pvalue", "pvalue_boot")), variability_score, pattern_score,
-         scheme_coverage, biochem_score,
          asr_score, convergence_score, parallel_score,
-         CAAS_score, change_side) %>%
+         pre_score, biochem_weight_sum, CAAS_score, change_side,
+         any_of(c("caas", "change_top", "change_bottom")),
+         is_top_10pct, is_top_5pct, is_top_1pct,
+         is_bot_10pct, is_bot_5pct, is_bot_1pct) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")
@@ -1057,6 +1014,10 @@ sig_sets <- list()
 if (has_rer && any(gene_out$rer_significant %in% TRUE)) {
   sig_sets[["rer_significant"]] <- gene_out %>%
     filter(rer_significant == TRUE) %>% pull(Gene)
+  accel_genes <- gene_out %>% filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho > 0) %>% pull(Gene)
+  decel_genes <- gene_out %>% filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho < 0) %>% pull(Gene)
+  if (length(accel_genes) > 0) sig_sets[["rer_accelerating"]] <- accel_genes
+  if (length(decel_genes) > 0) sig_sets[["rer_decelerating"]] <- decel_genes
 }
 if (has_fade_top && any(gene_out$fade_significant_top %in% TRUE)) {
   sig_sets[["fade_top_significant"]] <- gene_out %>%
@@ -1103,14 +1064,21 @@ for (dir in c("top", "bottom")) {
     write_gene_list(caas_set, "gene_gene_lists", fname)
     cat(sprintf("  %s: %d genes\n", fname, length(unique(caas_set))))
 
-    # Intersections with each tool's significant set
+    # Intersections with each tool's significant set (direction-matched for RER)
     tool_sigs <- list()
     if (fade_sig %in% names(gene_out) && any(gene_out[[fade_sig]] %in% TRUE))
       tool_sigs[[paste0("fade_", dir)]] <- gene_out %>%
         filter(.data[[fade_sig]] == TRUE) %>% pull(Gene)
-    if (has_rer && any(gene_out$rer_significant %in% TRUE))
-      tool_sigs[["rer"]] <- gene_out %>%
-        filter(rer_significant == TRUE) %>% pull(Gene)
+    if (has_rer && any(gene_out$rer_significant %in% TRUE)) {
+      # Accelerating (rho > 0) matched to top direction; decelerating (rho < 0) to bottom
+      rer_dir_col  <- if (dir == "top") quote(rer_rho > 0) else quote(rer_rho < 0)
+      rer_dir_tag  <- if (dir == "top") "rer_accel" else "rer_decel"
+      rer_dir_genes <- gene_out %>%
+        filter(rer_significant == TRUE, !is.na(rer_rho), eval(rer_dir_col)) %>%
+        pull(Gene)
+      if (length(rer_dir_genes) > 0)
+        tool_sigs[[rer_dir_tag]] <- rer_dir_genes
+    }
     if (has_accum && any(gene_out$accum_significant %in% TRUE))
       tool_sigs[["accum"]] <- gene_out %>%
         filter(accum_significant == TRUE) %>% pull(Gene)

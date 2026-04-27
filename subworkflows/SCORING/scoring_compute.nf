@@ -60,16 +60,16 @@ process SCORING_COMPUTE {
     path "gene_gene_lists/*.txt",                     optional: true, emit: gene_gene_lists
 
     script:
-    def local_dir  = "${baseDir}/subworkflows/SCORING/local"
-    def top_pct    = params.scoring_position_top_pct  ?: 0.10
-    def top5_pct   = params.scoring_position_top5_pct ?: 0.05
-    def top1_pct   = params.scoring_position_top1_pct ?: 0.01
-    def g_top_pct  = params.scoring_gene_top_pct      ?: 0.10
-    def g_top5_pct = params.scoring_gene_top5_pct     ?: 0.05
-    def g_top1_pct = params.scoring_gene_top1_pct     ?: 0.01
-    def accum_arg  = (accum_files instanceof List
-                        ? (accum_files.size() == 1 && accum_files[0].name.startsWith('NO_') ? 'NO_ACCUM' : '.')
-                        : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
+    def local_dir       = "${baseDir}/subworkflows/SCORING/local"
+    def top_pct         = params.scoring_position_top_pct    ?: 0.10
+    def top5_pct        = params.scoring_position_top5_pct   ?: 0.05
+    def top1_pct        = params.scoring_position_top1_pct   ?: 0.01
+    def g_top_pct       = params.scoring_gene_top_pct        ?: 0.10
+    def g_top5_pct      = params.scoring_gene_top5_pct       ?: 0.05
+    def g_top1_pct      = params.scoring_gene_top1_pct       ?: 0.01
+    def accum_arg       = (accum_files instanceof List
+                            ? (accum_files.size() == 1 && accum_files[0].name.startsWith('NO_') ? 'NO_ACCUM' : '.')
+                            : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -81,14 +81,14 @@ process SCORING_COMPUTE {
             --fade_bottom '${fade_summary_bottom}' \
             --rer         '${rer_summary}' \
             --accum_dir   '${accum_arg}' \
-            --stress      '${params.scoring_stress ?: false}' \
-            --stress_top_n ${params.scoring_stress_top_n ?: 25} \
-            --top_pct     ${top_pct} \
-            --top5_pct    ${top5_pct} \
-            --top1_pct    ${top1_pct} \
-            --gene_top_pct  ${g_top_pct} \
-            --gene_top5_pct ${g_top5_pct} \
-            --gene_top1_pct ${g_top1_pct}
+            --stress               '${params.scoring_stress ?: false}' \
+            --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
+            --top_pct              ${top_pct} \
+            --top5_pct             ${top5_pct} \
+            --top1_pct             ${top1_pct} \
+            --gene_top_pct         ${g_top_pct} \
+            --gene_top5_pct        ${g_top5_pct} \
+            --gene_top1_pct        ${g_top1_pct}
         """
     } else {
         """
@@ -100,14 +100,14 @@ process SCORING_COMPUTE {
             --fade_bottom '${fade_summary_bottom}' \
             --rer         '${rer_summary}' \
             --accum_dir   '${accum_arg}' \
-            --stress      '${params.scoring_stress ?: false}' \
-            --stress_top_n ${params.scoring_stress_top_n ?: 25} \
-            --top_pct     ${top_pct} \
-            --top5_pct    ${top5_pct} \
-            --top1_pct    ${top1_pct} \
-            --gene_top_pct  ${g_top_pct} \
-            --gene_top5_pct ${g_top5_pct} \
-            --gene_top1_pct ${g_top1_pct}
+            --stress               '${params.scoring_stress ?: false}' \
+            --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
+            --top_pct              ${top_pct} \
+            --top5_pct             ${top5_pct} \
+            --top1_pct             ${top1_pct} \
+            --gene_top_pct         ${g_top_pct} \
+            --gene_top5_pct        ${g_top5_pct} \
+            --gene_top1_pct        ${g_top1_pct}
         """
     }
 }

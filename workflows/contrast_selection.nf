@@ -34,13 +34,30 @@ include { REPORTING } from "${baseDir}/workflows/reporting"
 include { CI_COMPOSITION_REPORT } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ct_ci"
 include { CONTRAST_ALGORITHM } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ct_independent-contrasts"
 include { CHECK_MIN_CONTRASTS } from "${baseDir}/subworkflows/CT/ct_check_min_contrasts"
+include { NAME_CURATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_name_curation"
 
 workflow CONTRAST_SELECTION {
     assert params.my_traits : "Contrast selection workflow requires --traitfile."
     assert params.tree : "Contrast selection workflow requires --tree."
 
     def trait_file = file(params.my_traits)
-    def tree_file = file(params.tree)
+    def tree_file_ch = Channel.value(file(params.tree))
+
+    // NAME_CURATION: normalise tree tip labels to alignment-canonical species names.
+    // Run it here whenever CONTRAST_SELECTION is driving the tree path itself.
+    // When params.reporting=true and params.prune_data=false, REPORTING() handles curation internally.
+    def run_name_curation_here = (!params.reporting || params.prune_data)
+    if (run_name_curation_here && (params.ali_sp_names || params.alignment)) {
+        def tax_id_param = params.input_tax_id ?: params.tax_id
+        def tax_id_ch = tax_id_param
+            ? Channel.value(file(tax_id_param))
+            : Channel.value(file('NO_FILE'))
+        name_curation_out = NAME_CURATION(tree_file_ch, tax_id_ch)
+        tree_file_ch = name_curation_out.curated_tree
+        log.info "[CONTRAST_SELECTION] NAME_CURATION enabled — using curated tree as canonical tree."
+    }
+
+    def tree_file = tree_file_ch
 
     def dataset_out
     def reporting_out = null

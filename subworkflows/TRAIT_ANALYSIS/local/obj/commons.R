@@ -12,8 +12,17 @@ debug_log <- function(...) {
     if (exists("phylo_debug_log", envir = .GlobalEnv)) {
       phylo_debug_log <<- c(phylo_debug_log, msg)
     }
-    cat("[DEBUG] ", msg, "\n", sep = "")
+    cat("[DEBUG] ", msg, "\n", sep = "", file = stderr())
+    flush.console()
   }
+}
+
+debug_stage <- function(label, expr) {
+  debug_log("[STAGE START] %s @ %s", label, format(Sys.time(), "%Y-%m-%d %H:%M:%S"))
+  t0 <- proc.time()[["elapsed"]]
+  value <- force(expr)
+  debug_log("[STAGE END] %s elapsed=%.3fs", label, proc.time()[["elapsed"]] - t0)
+  value
 }
 
 # ----------------------------------------
@@ -105,7 +114,17 @@ debug_log("trait_df species unique = %d", length(unique(trait_df$species)))
 # Phylo objects
 # ----------------------------------------
 
-tree <- phytools::read.newick(tree_path) %>% ape::as.phylo() # Tree object
+debug_log("tree_path exists = %s", file.exists(tree_path))
+tree_preview <- tryCatch(
+  readLines(tree_path, n = 2, warn = FALSE),
+  error = function(e) paste0("<readLines error: ", conditionMessage(e), ">")
+)
+debug_log("tree preview: %s", paste(tree_preview, collapse = " | "))
+
+tree <- debug_stage(
+  "read tree",
+  ape::read.tree(file = tree_path)
+)
 tree_species <- tree$tip.label # Tree species
 debug_log("tree tips = %d, nodes = %d", length(tree$tip.label), tree$Nnode)
 

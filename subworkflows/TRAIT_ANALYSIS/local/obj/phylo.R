@@ -93,38 +93,32 @@ if (has.TAX_ID) {
   tips_to_keep <- tree_tip_to_taxid$tree_name[tree_tip_to_taxid$tax_id %in% common_tax_ids]
   pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, tips_to_keep))
   debug_log("pruned_tree tips (TAX_ID) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
-
-  # Rename tree tips from tree taxonomy names to trait species names where they differ,
-  # so that downstream joins on species name work correctly.
-  trait_taxid_to_name <- trait_df %>%
-    dplyr::select(species, tax_id) %>%
-    dplyr::distinct()
-  rename_map <- merge(
-    tree_tip_to_taxid %>% dplyr::filter(tax_id %in% common_tax_ids),
-    trait_taxid_to_name %>% dplyr::filter(tax_id %in% common_tax_ids),
-    by = "tax_id"
-  )
-  mismatched <- rename_map[rename_map$tree_name != rename_map$species, ]
-  if (nrow(mismatched) > 0) {
-    debug_log("renaming %d tree tip(s) to match trait species names", nrow(mismatched))
-    for (i in seq_len(nrow(mismatched))) {
-      debug_log("  rename: %s -> %s (tax_id %s)",
-                mismatched$tree_name[i], mismatched$species[i], mismatched$tax_id[i])
-      pruned_tree$tip.label[pruned_tree$tip.label == mismatched$tree_name[i]] <- mismatched$species[i]
-    }
-  }
 } else {
   # Prune the tree to only include species present in the trait data
   pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, gsub(" ", "_", trait_df$species)))
   debug_log("pruned_tree tips (species match) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
 }
 
-# Update trait_df to only include species present in the pruned tree
+# Update trait_df to only include species present in the pruned tree.
 if (has.TAX_ID) {
   trait_df_ori <- trait_df # Save original for reference
-  trait_df <- trait_df %>%
-    dplyr::filter(tax_id %in% common_tax_ids)
-  debug_log("trait_df after TAX_ID tree filter rows = %d", nrow(trait_df))
+  tree_tax_map <- tax_id_df %>%
+    dplyr::filter(species %in% pruned_tree$tip.label) %>%
+    dplyr::transmute(tax_id, tree_species = species) %>%
+    dplyr::distinct(tax_id, .keep_all = TRUE)
+
+  if (nrow(tree_tax_map) > 0) {
+    trait_df <- trait_df %>%
+      dplyr::left_join(tree_tax_map, by = "tax_id") %>%
+      dplyr::mutate(species = dplyr::coalesce(tree_species, species)) %>%
+      dplyr::filter(species %in% pruned_tree$tip.label) %>%
+      dplyr::select(-tree_species)
+    debug_log("trait_df remapped to tree/alignment species using tax_id: rows = %d", nrow(trait_df))
+  } else {
+    trait_df <- trait_df %>%
+      dplyr::filter(tax_id %in% common_tax_ids)
+    debug_log("trait_df filtered by common_tax_ids only: rows = %d", nrow(trait_df))
+  }
 } else {
   trait_df_ori <- trait_df # Save original for reference
   trait_df <- trait_df %>%

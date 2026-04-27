@@ -14,8 +14,10 @@
 
 include { SCORING_COMPUTE }         from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
 include { SCORING_REPORT }          from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
-include { ORA_GENERAL_REPORT as ORA_SCORING_POSITION } from "${baseDir}/subworkflows/ORA/ora_general.nf"
-include { ORA_GENERAL_REPORT as ORA_SCORING_GENE     } from "${baseDir}/subworkflows/ORA/ora_general.nf"
+include { ORA_GENERAL_REPORT as ORA_SCORING_POSITION   } from "${baseDir}/subworkflows/ORA/ora_general.nf"
+include { ORA_GENERAL_REPORT as ORA_SCORING_GENE       } from "${baseDir}/subworkflows/ORA/ora_general.nf"
+include { STRING_GENERAL_REPORT as STRING_SCORING_POSITION } from "${baseDir}/subworkflows/ORA/string_general.nf"
+include { STRING_GENERAL_REPORT as STRING_SCORING_GENE     } from "${baseDir}/subworkflows/ORA/string_general.nf"
 
 
 workflow SCORING {
@@ -151,13 +153,26 @@ workflow SCORING {
 
             ORA_SCORING_POSITION(
                 bg_after_report,
-                compute_out.position_gene_lists.collect()
+                compute_out.position_gene_lists.collect(),
+                'ORA_scoring_position'
             )
 
             ORA_SCORING_GENE(
                 bg_after_report,
-                compute_out.gene_gene_lists.collect()
+                compute_out.gene_gene_lists.collect(),
+                'ORA_scoring_gene'
             )
+
+            if (params.string) {
+                STRING_SCORING_POSITION(
+                    bg_after_report,
+                    compute_out.position_gene_lists.collect()
+                )
+                STRING_SCORING_GENE(
+                    bg_after_report,
+                    compute_out.gene_gene_lists.collect()
+                )
+            }
         }
 
     emit:

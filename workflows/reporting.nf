@@ -31,13 +31,27 @@
 include { DATASET_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration"
 include { PHENOTYPE_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration"
 include { DATASET_PRUNE } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_data_prune"
+include { NAME_CURATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_name_curation"
 
 workflow REPORTING {
     assert params.my_traits : "Reporting workflow requires --traitfile."
     assert params.tree : "Reporting workflow requires --tree."
 
     def trait_file = file(params.my_traits)
-    def tree_file = file(params.tree)
+    def tree_file_ch = Channel.value(file(params.tree))
+
+    // NAME_CURATION: normalise tree tip labels to alignment-canonical species names.
+    // Runs when ali_sp_names or alignment is provided; replaces the raw tree downstream.
+    if (params.ali_sp_names || params.alignment) {
+        def tax_id_ch = params.tax_id
+            ? Channel.value(file(params.tax_id))
+            : Channel.value(file('NO_FILE'))
+        name_curation_out = NAME_CURATION(tree_file_ch, tax_id_ch)
+        tree_file_ch = name_curation_out.curated_tree
+        log.info "[REPORTING] NAME_CURATION enabled — using curated tree as canonical tree."
+    }
+
+    def tree_file = tree_file_ch
     def reporting_stats_file
     def pruned_trait_emit = Channel.empty()
     def pruned_tree_emit = Channel.empty()
