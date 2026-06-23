@@ -22,4 +22,5 @@ pyproject.toml
 .mypy_cache
 .pytest_cache
 run_scripts
+*.Rproj
 subworkflows/VEP/dat/PrimateAI-3D.hg38.txt.gz
