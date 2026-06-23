@@ -154,7 +154,7 @@ workflow RER_MAIN {
             def rer_bg_ch = rer_lists.gene_lists
                 .flatten()
                 .filter { it.name == 'background.txt' }
-                .first()
+                .collect()
             def rer_interest_ch = rer_lists.gene_lists
                 .flatten()
                 .filter { it.name != 'background.txt' }

@@ -330,7 +330,7 @@ workflow {
             }
         }
 
-        if (params.rer_tool || params.enrichment || params.string) {
+        if (params.rer_tool) {
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
             // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.

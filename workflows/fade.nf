@@ -208,7 +208,7 @@ workflow FADE {
             def run_fade_enrich = { direction, summary_tsv_ch, gene_lists_proc ->
                 def lists_out    = gene_lists_proc(Channel.value(direction), summary_tsv_ch)
                 def subpath      = "selection/fade/${direction}"
-                def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.first()
+                def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
                 def interest_ch  = lists_out.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
                 if (params.enrichment) {
                     FADE_FCS_REPORT(

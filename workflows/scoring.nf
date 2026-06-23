@@ -135,7 +135,7 @@ workflow SCORING {
         // BOTH the FCS and STRING processes (a queue channel would feed only one).
         def fcs_universe_ch = (cleaned_background_ch ?: Channel.empty())
             .ifEmpty { file('NO_BACKGROUND') }
-            .first()
+            .collect()
         def fcs_out = SCORING_FCS_REPORT(compute_out.fcs_stats, fcs_universe_ch)
 
         // ── STRING on the gated directional 9-slice gene lists ────────────
