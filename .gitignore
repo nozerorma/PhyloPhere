@@ -2,7 +2,8 @@
 .claude
 debug
 .nextflow*
-Data
+test/inputs/
+test/runs/
 run_scripts
 .directory
 apptainer
