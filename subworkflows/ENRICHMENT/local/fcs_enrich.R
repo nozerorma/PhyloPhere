@@ -162,7 +162,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
         for (db in unique(obs_rk$database)) {
           db_df <- obs_rk %>% dplyr::filter(database == db) %>% as.data.frame()
           rownames(db_df) <- db_df$pathway
-          realenrich[[db]] <- db_df[, c("p.val", "stat")]
+          realenrich[[db]] <- db_df[, c("pval", "stat")]
           colnames(realenrich[[db]]) <- c("pval", "stat")
         }
         
