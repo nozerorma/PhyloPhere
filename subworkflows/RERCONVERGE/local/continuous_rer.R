@@ -35,50 +35,100 @@ args <- commandArgs(TRUE)
 library(dplyr)
 library(RERconverge)
 
-# ── Load trait vector ─────────────────────────────────────────────────────────
+# ── Load trait vector and count vectors ───────────────────────────────────────
 traitPath <- args[1]
-load(traitPath)   # loads object: trait_vector
+load(traitPath)   # loads objects: trait_vector, n_vector, c_vector (if present)
 
 # ── Trait transformation ───────────────────────────────────────────────────────
-# Priority order:
-#   1. Prevalence (all values in [0,1], not purely binary 0/1):
-#      → logit(clamp(x, 1e-4, 1-1e-4))
-#   2. Non-prevalence, Shapiro-Wilk p < 0.05 (non-normal):
-#      → log10(x + shift), shift = min_nonzero / 10  [Valenzuela et al. 2024]
-#   3. Otherwise: raw values.
-vals        <- trait_vector[!is.na(trait_vector)]
-lo          <- min(vals)
-hi          <- max(vals)
-unique_vals <- unique(vals)
-is_prev     <- (lo >= 0 & hi <= 1 & !all(unique_vals %in% c(0, 1)))
+transform_type <- if (length(args) >= 12) args[12] else "auto"
+message(sprintf("[RER] Trait transformation parameter: '%s'", transform_type))
 
-if (is_prev) {
-  eps          <- 1e-4
-  n_clipped    <- sum(vals <= 0 | vals >= 1)
-  if (n_clipped > 0)
+# Check for NA values in trait_vector
+vals <- trait_vector[!is.na(trait_vector)]
+if (length(vals) == 0) {
+  stop("ERROR: trait_vector contains no non-NA values.")
+}
+
+if (transform_type == "ha_logit") {
+  if (is.null(n_vector) || is.null(c_vector)) {
+    stop("ERROR: ha_logit transformation requested, but n_trait and/or c_trait were not specified or not found in the raw trait file.")
+  }
+  # Align species and compute Haldane-Anscombe corrected logit
+  common_sp <- intersect(names(n_vector), names(c_vector))
+  common_sp <- intersect(common_sp, names(trait_vector))
+  if (length(common_sp) == 0) {
+    stop("ERROR: No overlap between species in n_vector, c_vector, and trait_vector.")
+  }
+  n_val <- n_vector[common_sp]
+  c_val <- c_vector[common_sp]
+  
+  trans_vals <- log((c_val + 0.5) / (n_val - c_val + 0.5))
+  
+  # Align trait_vector to these transformed values, keeping others NA
+  trait_vector <- setNames(rep(NA_real_, length(trait_vector)), names(trait_vector))
+  trait_vector[common_sp] <- trans_vals
+  message("[RER] Applied Haldane-Anscombe corrected logit transformation")
+} else if (transform_type == "logit") {
+  eps  <- 1e-4
+  n_clipped <- sum(vals <= 0 | vals >= 1)
+  if (n_clipped > 0) {
     warning(sprintf(
       "[RER] %d value(s) outside (0,1) clipped to [%.0e, %.4f] before logit",
       n_clipped, eps, 1 - eps
     ))
+  }
   trait_vector <- log(pmax(pmin(trait_vector, 1 - eps), eps) /
                       (1 - pmax(pmin(trait_vector, 1 - eps), eps)))
-  message("[RER] Prevalence trait detected — logit transform applied")
-} else {
-  sw <- shapiro.test(vals)
-  message(sprintf(
-    "[RER] Shapiro-Wilk normality test: W = %.4f, p = %.4e",
-    sw$statistic, sw$p.value
-  ))
-  if (sw$p.value < 0.05) {
-    min_nonzero  <- min(vals[vals > 0])
-    shift        <- min_nonzero / 10
-    trait_vector <- log10(trait_vector + shift)
-    message(sprintf(
-      "[RER] Non-normal distribution — log10(x + %.2e) transform applied",
-      shift
-    ))
+  message("[RER] Applied standard logit transformation")
+} else if (transform_type == "arcsin") {
+  # Arcsine square root: asin(sqrt(x))
+  if (any(vals < 0 | vals > 1)) {
+    warning("[RER] Trait values outside [0,1] detected; arcsine square root may produce NaNs.")
+  }
+  trait_vector <- asin(sqrt(trait_vector))
+  message("[RER] Applied arcsine square root transformation")
+} else if (transform_type == "log10") {
+  min_nonzero  <- min(vals[vals > 0])
+  shift        <- min_nonzero / 10
+  trait_vector <- log10(trait_vector + shift)
+  message(sprintf("[RER] Applied log10(x + %.2e) transformation", shift))
+} else if (transform_type == "none") {
+  message("[RER] No transformation applied (using raw values)")
+} else { # auto
+  lo          <- min(vals)
+  hi          <- max(vals)
+  unique_vals <- unique(vals)
+  is_prev     <- (lo >= 0 & hi <= 1 & !all(unique_vals %in% c(0, 1)))
+
+  if (is_prev) {
+    eps          <- 1e-4
+    n_clipped    <- sum(vals <= 0 | vals >= 1)
+    if (n_clipped > 0) {
+      warning(sprintf(
+        "[RER] %d value(s) outside (0,1) clipped to [%.0e, %.4f] before logit",
+        n_clipped, eps, 1 - eps
+      ))
+    }
+    trait_vector <- log(pmax(pmin(trait_vector, 1 - eps), eps) /
+                        (1 - pmax(pmin(trait_vector, 1 - eps), eps)))
+    message("[RER] Auto-detected prevalence trait — applied logit transform")
   } else {
-    message("[RER] Normal distribution — no transform applied, using raw values")
+    sw <- shapiro.test(vals)
+    message(sprintf(
+      "[RER] Shapiro-Wilk normality test: W = %.4f, p = %.4e",
+      sw$statistic, sw$p.value
+    ))
+    if (sw$p.value < 0.05) {
+      min_nonzero  <- min(vals[vals > 0])
+      shift        <- min_nonzero / 10
+      trait_vector <- log10(trait_vector + shift)
+      message(sprintf(
+        "[RER] Auto-detected non-normal distribution — applied log10(x + %.2e) transform",
+        shift
+      ))
+    } else {
+      message("[RER] Auto-detected normal distribution — using raw values")
+    }
   }
 }
 
@@ -154,15 +204,27 @@ if (num_batches > 0 && perms_per_batch > 0) {
 
   permpvals <- permpvalcor(res, perms_combined)
 
+  # Apply standard pseudo-count correction (num + 1) / (denom + 1)
+  # to prevent exact 0 p-values and properly represent finite empirical probability.
+  n_perms <- num_batches * perms_per_batch
+  permpvals <- (permpvals * n_perms + 1) / (n_perms + 1)
+
   # Align by gene name (row names of res)
   res$p.perm <- permpvals[rownames(res)]
+  # BH-correct the permulation p-values for multiple testing across genes.
+  res$p.perm.adj <- p.adjust(res$p.perm, method = "BH")
   # Store total permutation count as attribute so the report can display
-  # "< 1/N" for p.perm = 0 rather than a literal zero.
-  attr(res, "n_perms") <- num_batches * perms_per_batch
+  # the minimum detectable p.perm rather than a literal zero.
+  attr(res, "n_perms") <- n_perms
   message(sprintf(
     "[RER] Permutation p-values computed for %d / %d genes (N=%d perms total).",
-    sum(!is.na(res$p.perm)), nrow(res), num_batches * perms_per_batch
+    sum(!is.na(res$p.perm)), nrow(res), n_perms
   ))
+  
+  # Save the raw permutations object containing null statistics matrices for pathway-level permulations downstream
+  perms_path <- sub("\\.output$", ".perms.rds", args[5])
+  saveRDS(perms_combined, file = perms_path)
+  message("[RER] Saved raw null permutations RDS to: ", perms_path)
 } else {
   message("[RER] Permutation testing skipped (rer_perm_batches = 0).")
 }

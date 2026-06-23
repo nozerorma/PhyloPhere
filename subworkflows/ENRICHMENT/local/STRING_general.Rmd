@@ -1,0 +1,925 @@
+---
+title: "STRING Enrichment Analysis"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+params:
+  background_file: NULL
+  background_basename: NULL
+  gene_list_files: NULL
+  output_dir: "string"
+  project_name: "STRING_Analysis"
+  species: 9606
+  required_score: 400
+  network_score_thr: 400
+  mcl_inflation: 3
+  fdr_thr: 0.1
+  top_thr: 15
+  report_num: 20
+  enable_ppi_enrichment: false
+  gene_scores_file: NULL
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  dev = 'png',
+  dpi = 320
+)
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(kableExtra)
+  library(STRINGdb)
+  library(paletteer)
+})
+
+# ── Palette helpers (overflow-safe Tableau_10) ────────────────────────────────
+.pal10_base <- as.character(paletteer_d("ggthemes::Tableau_10"))
+.safe_pal   <- function(n) if (n <= 10L) .pal10_base[seq_len(n)] else colorRampPalette(.pal10_base)(n)
+safe_fill   <- function(n) scale_fill_manual(values  = .safe_pal(n))
+safe_color  <- function(n) scale_color_manual(values = .safe_pal(n))
+
+has_pkg <- function(pkg) requireNamespace(pkg, quietly = TRUE)
+
+`%||%` <- function(a, b) {
+  if (!is.null(a) && length(a) > 0 && !all(is.na(a))) a else b
+}
+
+createDir <- function(directory) {
+  if (!dir.exists(directory)) dir.create(directory, recursive = TRUE, showWarnings = FALSE)
+}
+
+download_with_retry <- function(url, destfile, tries = 4L, timeout_sec = 1800L) {
+  old_timeout <- getOption("timeout")
+  on.exit(options(timeout = old_timeout), add = TRUE)
+  options(timeout = max(as.integer(old_timeout), as.integer(timeout_sec), 600L))
+
+  for (i in seq_len(tries)) {
+    ok <- tryCatch({
+      utils::download.file(url, destfile = destfile, mode = "wb", quiet = FALSE, method = "libcurl")
+      TRUE
+    }, error = function(e) {
+      message(sprintf("Download failed (%d/%d): %s", i, tries, e$message))
+      FALSE
+    })
+
+    if (isTRUE(ok) && file.exists(destfile) && file.size(destfile) > 0) return(invisible(TRUE))
+    if (i < tries) Sys.sleep(min(30, i * 5))
+  }
+
+  stop(sprintf("Failed to download after %d attempts: %s", tries, url))
+}
+
+ensure_string_cache <- function(species, version = "12.0", input_directory = "string_cache") {
+  createDir(input_directory)
+
+  species <- as.integer(species)
+  base <- "https://stringdb-downloads.org/download"
+  files <- c(
+    sprintf("protein.aliases.v%s/%d.protein.aliases.v%s.txt.gz", version, species, version),
+    sprintf("protein.info.v%s/%d.protein.info.v%s.txt.gz", version, species, version),
+    sprintf("protein.links.v%s/%d.protein.links.v%s.txt.gz", version, species, version),
+    sprintf("protein.physical.links.v%s/%d.protein.physical.links.v%s.txt.gz", version, species, version)
+  )
+
+  for (rel in files) {
+    url <- sprintf("%s/%s", base, rel)
+    dest <- file.path(input_directory, basename(rel))
+    if (!file.exists(dest) || file.size(dest) == 0) {
+      message(sprintf("Caching STRING file: %s", basename(rel)))
+      download_with_retry(url, destfile = dest)
+    }
+  }
+
+  invisible(normalizePath(input_directory, winslash = "/", mustWork = FALSE))
+}
+
+read_gene_vector <- function(path) {
+  x <- readr::read_lines(path)
+  x <- trimws(x)
+  x <- x[x != ""]
+  unique(x)
+}
+
+string_root <- "."
+string_results_dir <- "string_results"
+string_summary_dir <- "string_summary"
+string_plots_dir   <- "string_plots"
+string_cache_dir   <- "string_cache"
+
+createDir(string_results_dir)
+createDir(string_summary_dir)
+createDir(string_plots_dir)
+createDir(string_cache_dir)
+
+# Pre-cache STRING DB files with retry/timeout guards to avoid transient
+# network failures during set_background()/enrichment calls.
+ensure_string_cache(
+  species = as.integer(params$species),
+  version = "12.0",
+  input_directory = string_cache_dir
+)
+
+# ── STRINGdb instances ────────────────────────────────────────────────────────
+# Enrichment instance: uses required_score (default 400); background/enrichment calls.
+string_db <- STRINGdb$new(
+  version         = "12.0",
+  species         = as.integer(params$species),
+  score_threshold = as.integer(params$required_score),
+  input_directory = string_cache_dir
+)
+
+# Network instance: uses network_score_thr (default 700 = 0.7) for PPI graphs.
+# Higher threshold → only high-confidence interactions → sparser, more meaningful networks.
+string_db_network <- STRINGdb$new(
+  version         = "12.0",
+  species         = as.integer(params$species),
+  score_threshold = as.integer(params$network_score_thr),
+  input_directory = string_cache_dir
+)
+
+# Physical subnetwork instance: uses only experimentally-determined physical interactions.
+string_db_physical <- tryCatch(
+  STRINGdb$new(
+    version         = "12.0",
+    species         = as.integer(params$species),
+    score_threshold = as.integer(params$network_score_thr),
+    network_type    = "physical",
+    input_directory = string_cache_dir
+  ),
+  error = function(e) {
+    message(sprintf("Physical STRINGdb instance failed: %s — physical networks skipped.", e$message))
+    NULL
+  }
+)
+
+string_networks_dir <- "string_networks"
+createDir(string_networks_dir)
+
+# ── STRING clustering (walktrap algorithm) ────────────────────────────────────
+# STRINGdb$get_clusters() wraps igraph community detection; available algorithms
+# are fastgreedy, walktrap, spinglass, and edge.betweenness.
+# Walktrap is closest to STRING's own MCL: both simulate random diffusion on the
+# weighted network — walks stay within dense communities, matching MCL's
+# expansion/inflation dynamic.
+run_string_clustering <- function(sdb, string_ids, algorithm = "walktrap") {
+  if (length(string_ids) < 3) return(NULL)
+  tryCatch({
+    cl_list <- sdb$get_clusters(string_ids, algorithm = algorithm)
+    if (length(cl_list) == 0) return(NULL)
+    purrr::imap_dfr(cl_list, ~data.frame(node = .x, cluster = .y, stringsAsFactors = FALSE))
+  }, error = function(e) {
+    message(sprintf("STRING get_clusters (%s): %s — no clustering available", algorithm, e$message))
+    NULL
+  })
+}
+
+# ── Cluster-aware FR layout ───────────────────────────────────────────────────
+# Seeds node positions by cluster centroid before Fruchterman-Reingold so that
+# same-cluster nodes start near each other and the final layout mirrors the
+# STRING web interface (clusters appear as visual blobs, not scattered).
+cluster_layout <- function(net, clusters_df, seed = 42) {
+  set.seed(seed)
+  n <- igraph::vcount(net)
+  if (is.null(clusters_df) || n < 2) return(igraph::layout_with_fr(net))
+
+  vnames  <- igraph::V(net)$name
+  cl_map  <- setNames(clusters_df$cluster, clusters_df$node)
+  clusters <- cl_map[vnames]
+  clusters[is.na(clusters)] <- max(clusters_df$cluster, na.rm = TRUE) + 1L
+
+  unique_cl <- sort(unique(clusters))
+  n_cl <- length(unique_cl)
+  if (n_cl <= 1) return(igraph::layout_with_fr(net))
+
+  theta  <- seq(0, 2 * pi * (1 - 1 / n_cl), length.out = n_cl)
+  spread <- max(5, sqrt(n) * 0.9)
+  cx     <- spread * cos(theta)
+  cy     <- spread * sin(theta)
+
+  init <- matrix(0, nrow = n, ncol = 2)
+  for (i in seq_along(unique_cl)) {
+    mask  <- clusters == unique_cl[i]
+    n_sub <- sum(mask)
+    sd_jit <- max(0.5, sqrt(n_sub) * 0.35)
+    init[mask, 1] <- cx[i] + rnorm(n_sub, 0, sd_jit)
+    init[mask, 2] <- cy[i] + rnorm(n_sub, 0, sd_jit)
+  }
+  igraph::layout_with_fr(net, coords = init, niter = 300)
+}
+
+# ── Cluster functional descriptions ──────────────────────────────────────────
+# Runs STRING enrichment on each cluster's nodes to derive a functional label
+# from the top significant GO / pathway term.
+describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3) {
+  if (is.null(clusters_df) || nrow(clusters_df) == 0) return(tibble())
+  purrr::map_dfr(sort(unique(clusters_df$cluster)), function(cl_id) {
+    cl_nodes <- clusters_df$node[clusters_df$cluster == cl_id]
+    genes    <- id2gene[cl_nodes]
+    gene_str <- paste(head(sort(genes[!is.na(genes)]), 8), collapse = ", ")
+    if (length(cl_nodes) < 3) {
+      return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
+                    genes = gene_str, description = "Too small"))
+    }
+    enrich <- tryCatch(sdb$get_enrichment(cl_nodes), error = function(e) NULL)
+    if (is.null(enrich) || nrow(enrich) == 0 || "error" %in% names(enrich)) {
+      return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
+                    genes = gene_str, description = "No enrichment"))
+    }
+    pvcol   <- intersect(c("fdr", "p_value", "pvalue", "p.adjust"), names(enrich))[1]
+    if (!is.na(pvcol)) enrich <- enrich[order(enrich[[pvcol]]), ]
+    dcol    <- intersect(c("description", "term", "name"), names(enrich))[1]
+    top     <- head(as.character(enrich[[dcol]]), top_terms)
+    tibble(cluster = cl_id, n_genes = length(cl_nodes),
+           genes = gene_str, description = paste(top, collapse = " / "))
+  })
+}
+
+# ── Network plot (cluster-aware layout, no isolated nodes) ───────────────────
+plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
+                                  cluster_labels = NULL) {
+  n_clust <- if (!is.null(clusters_df)) length(unique(clusters_df$cluster)) else 1L
+  pal     <- .safe_pal(max(n_clust, 2L))
+
+  if (!is.null(clusters_df) && nrow(clusters_df) > 0) {
+    cl_map  <- setNames(clusters_df$cluster, clusters_df$node)
+    v_cl    <- cl_map[igraph::V(net)$name]
+    v_cl[is.na(v_cl)] <- n_clust + 1L
+    cl_ids  <- sort(unique(clusters_df$cluster))
+    vertex_colors <- pal[match(v_cl, c(cl_ids, n_clust + 1L))]
+  } else {
+    cl_ids        <- integer(0)
+    vertex_colors <- rep(pal[1], igraph::vcount(net))
+  }
+
+  labels <- if (!is.null(id_to_gene)) id_to_gene[igraph::V(net)$name] else igraph::V(net)$name
+  labels[is.na(labels)] <- igraph::V(net)$name[is.na(labels)]
+
+  lo <- cluster_layout(net, clusters_df)
+
+  old_par <- par(mar = c(0, 0, 2, 5))
+  on.exit(par(old_par), add = TRUE)
+  igraph::plot.igraph(
+    net,
+    main               = title,
+    layout             = lo,
+    vertex.color       = vertex_colors,
+    vertex.size        = pmin(18, pmax(4, 55 / sqrt(igraph::vcount(net)))),
+    vertex.label       = labels,
+    vertex.label.cex   = max(0.55, min(1.1, 10 / sqrt(igraph::vcount(net)))),
+    vertex.label.color = "black",
+    vertex.label.font  = 2,
+    edge.arrow.size    = 0,
+    edge.width         = 0.7,
+    edge.color         = "#aaaaaa"
+  )
+  if (length(cl_ids) > 1) {
+    leg_labels <- if (!is.null(cluster_labels)) {
+      vapply(as.character(cl_ids), function(k) {
+        lbl <- cluster_labels[k]
+        if (is.na(lbl)) paste0("Cluster ", k) else paste0("C", k, ": ", stringr::str_trunc(lbl, 35))
+      }, character(1))
+    } else {
+      paste0("Cluster ", cl_ids)
+    }
+    legend("topright", legend = leg_labels,
+           fill = pal[seq_along(cl_ids)], cex = 0.55, bty = "n", title = "Cluster")
+  }
+}
+
+# Map a character vector of gene SYMBOLs to STRING identifiers.
+# Returns a character vector of STRING_id values.
+safe_string_map_ids <- function(genes) {
+  if (length(genes) == 0) return(character(0))
+  df_in <- data.frame(gene = genes, stringsAsFactors = FALSE)
+  mapped <- tryCatch(
+    string_db$map(df_in, "gene", removeUnmappedRows = TRUE, quiet = TRUE),
+    error = function(e) {
+      message(sprintf("STRING ID mapping failed: %s", e$message))
+      NULL
+    }
+  )
+  if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
+  unique(as.character(mapped$STRING_id))
+}
+
+# Resolve background file path and normalize to absolute path
+bg_file <- params$background_file
+if (!file.exists(bg_file) && !is.null(params$background_basename)) {
+  if (file.exists(params$background_basename)) bg_file <- params$background_basename
+}
+
+if (is.null(bg_file) || !file.exists(bg_file)) {
+  stop("Error: background_file not found")
+}
+bg_file <- normalizePath(bg_file, mustWork = TRUE)
+bg_basename <- basename(bg_file)
+
+# Auto-detect gene list files from the current working directory, excluding the
+# background file.  Using normalizePath() ensures that subsequent reads succeed
+# even if the working directory changes during report rendering.
+gene_list_files <- params$gene_list_files
+if (is.null(gene_list_files) || length(gene_list_files) == 0) {
+  gene_list_files <- list.files(pattern = "\\.txt$", full.names = TRUE)
+  gene_list_files <- gene_list_files[basename(gene_list_files) != bg_basename]
+}
+gene_list_files <- gene_list_files[file.exists(gene_list_files)]
+# Always normalize to absolute paths
+gene_list_files <- normalizePath(gene_list_files, mustWork = FALSE)
+gene_list_files <- gene_list_files[file.exists(gene_list_files)]
+if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
+
+
+```
+
+# STRING analysis configuration
+
+```{r config_overview}
+cat("=== STRING configuration ===\n")
+cat("Background file (cleaned_background):", bg_file, "\n")
+cat("Gene list files:", length(gene_list_files), "\n")
+cat("Species (NCBI taxon ID):", params$species, "\n")
+cat("Required interaction score:", params$required_score, "\n")
+cat("FDR threshold:", params$fdr_thr, "\n")
+cat("Top terms per list:", params$top_thr, "\n")
+cat("PPI enrichment test:", params$enable_ppi_enrichment, "\n")
+cat("Network score threshold:", params$network_score_thr, "\n")
+cat("Clustering algorithm: walktrap\n")
+```
+
+# Map background to STRING IDs
+
+> **Note:** A custom background (`cleaned_background`) constrains enrichment to the experimental proteome (all tested genes).
+> When background genes are provided, they are mapped to STRING identifiers and set
+> on the `STRINGdb` object via `set_background()`, which applies to all subsequent
+> `get_enrichment()` calls.
+
+```{r parse_background}
+bg_symbols  <- read_gene_vector(bg_file)
+bg_string_ids <- safe_string_map_ids(bg_symbols)
+
+cat("Background symbols supplied:", length(bg_symbols), "\n")
+cat("Background STRING IDs successfully mapped:", length(bg_string_ids), "\n")
+
+if (length(bg_string_ids) < 5) {
+  warning(
+    sprintf(
+      "Only %d background genes mapped to STRING IDs. ",
+      length(bg_string_ids)
+    ),
+    "Proceeding without a custom background (STRING will use the full proteome)."
+  )
+  use_custom_background <- FALSE
+} else {
+  # Set the background on the STRINGdb object so all subsequent enrichment
+  # calls are constrained to the experimental proteome.
+  use_custom_background <- tryCatch({
+    string_db$set_background(bg_string_ids)
+    TRUE
+  }, error = function(e) {
+    warning(
+      sprintf("Could not set custom STRING background: %s", e$message),
+      " Proceeding with STRING default background."
+    )
+    FALSE
+  })
+
+  if (isTRUE(use_custom_background)) {
+    cat("Custom background set on STRINGdb object (", length(bg_string_ids), " proteins).\n")
+  }
+}
+```
+
+# Load gene scores for overlap checking
+
+```{r load_gene_scores}
+gene_scores_df <- NULL
+if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
+  gene_scores_df <- readr::read_tsv(params$gene_scores_file, show_col_types = FALSE)
+  cat("Loaded gene_scores_file:", params$gene_scores_file, "with", nrow(gene_scores_df), "genes.\n")
+} else {
+  cat("No gene_scores_file provided or file not found. Overlap checks will be skipped.\n")
+}
+```
+
+# Run STRING enrichment per gene list
+
+```{r run_string_enrichment}
+MIN_MAPPED <- 5L
+
+run_single_string <- function(gene_file, use_custom_background) {
+  genes_sym   <- read_gene_vector(gene_file)
+  list_name   <- tools::file_path_sans_ext(basename(gene_file))
+
+  # Map gene list symbols to STRING IDs
+  gene_string_ids <- safe_string_map_ids(genes_sym)
+
+  if (length(gene_string_ids) < MIN_MAPPED) {
+    return(list(
+      list_name      = list_name,
+      input_n        = length(genes_sym),
+      mapped_n       = length(gene_string_ids),
+      status         = "skipped_too_few_mapped_genes",
+      n_rows         = 0L,
+      results        = tibble(),
+      ppi_result     = NULL
+    ))
+  }
+
+  # ── Functional enrichment ──────────────────────────────────────────────────
+  # get_enrichment() returns a flat data.frame with a 'category' column.
+  # The background is already set globally on string_db via set_background().
+  enrich_df <- tryCatch(
+    {
+      res <- string_db$get_enrichment(gene_string_ids)
+      if (!is.null(res) && nrow(res) > 0) {
+        # STRINGdb may return an error frame with columns 'error'/'message'
+        # (e.g. background_error when mapped genes fall outside the custom
+        # background set) instead of real enrichment rows.  Detect and skip.
+        if ("error" %in% names(res)) {
+          message(sprintf(
+            "STRING enrichment API error for %s: %s",
+            list_name,
+            paste(as.character(res[["message"]]), collapse = "; ")
+          ))
+          tibble()
+        } else {
+          res %>% mutate(gene_list = list_name)
+        }
+      } else {
+        tibble()
+      }
+    },
+    error = function(e) {
+      message(sprintf("STRING enrichment failed for %s: %s", list_name, e$message))
+      tibble()
+    }
+  )
+
+  if (nrow(enrich_df) == 0) {
+    return(list(
+      list_name  = list_name,
+      input_n    = length(genes_sym),
+      mapped_n   = length(gene_string_ids),
+      status     = "no_results",
+      n_rows     = 0L,
+      results    = tibble(),
+      ppi_result = NULL
+    ))
+  }
+
+  # Standardise FDR / p-value column (STRINGdb uses 'fdr' and 'p_value')
+  pval_col <- c("fdr", "p_value", "pvalue", "p.adjust", "FDR")
+  pval_col <- pval_col[pval_col %in% names(enrich_df)][1] %||% NA_character_
+
+  if (!is.na(pval_col)) {
+    enrich_df <- enrich_df %>%
+      filter(suppressWarnings(as.numeric(.data[[pval_col]])) <= params$fdr_thr)
+    # Rename to canonical 'fdr' so all downstream consumers (all_results,
+    # plots chunk, accumulation) see a consistent column name regardless of
+    # the STRINGdb version that produced it.
+    if (pval_col != "fdr") {
+      enrich_df <- enrich_df %>% dplyr::rename(fdr = dplyr::all_of(pval_col))
+    }
+  }
+
+  # ── Compute Top Overlap Metrics for STRING enriched terms ──
+  enrich_df$n_top_10 <- NA_integer_
+  enrich_df$n_top_5  <- NA_integer_
+  enrich_df$n_top_1  <- NA_integer_
+  enrich_df$n_fade   <- NA_integer_
+  enrich_df$n_rer    <- NA_integer_
+  enrich_df$n_accum  <- NA_integer_
+
+  if (!is.null(gene_scores_df) && nrow(enrich_df) > 0) {
+    dir_label <- if (grepl("top", list_name)) "top" else if (grepl("bottom", list_name)) "bottom" else "global"
+    score_col <- if (dir_label == "top") "gene_caas_score_top" else if (dir_label == "bottom") "gene_caas_score_bottom" else "gene_caas_score"
+
+    if (score_col %in% names(gene_scores_df)) {
+      ranked_df <- gene_scores_df %>%
+        filter(!is.na(.data[[score_col]])) %>%
+        select(Gene, score = all_of(score_col),
+               any_of(c("fade_significant_top", "fade_significant_bottom",
+                        "rer_significant", "accum_significant")))
+
+      ranked_df <- ranked_df[order(ranked_df$score, decreasing = TRUE), ]
+
+      n_total <- nrow(ranked_df)
+      if (n_total > 0) {
+        top_10_genes <- head(ranked_df$Gene, max(1, round(n_total * 0.10)))
+        top_5_genes  <- head(ranked_df$Gene, max(1, round(n_total * 0.05)))
+        top_1_genes  <- head(ranked_df$Gene, max(1, round(n_total * 0.01)))
+
+        fade_sig_col <- if (dir_label == "bottom") "fade_significant_bottom" else "fade_significant_top"
+        fade_pos  <- ranked_df$Gene[ranked_df[[fade_sig_col]] %in% TRUE]
+        rer_pos   <- ranked_df$Gene[ranked_df$rer_significant %in% TRUE]
+        accum_pos <- ranked_df$Gene[ranked_df$accum_significant %in% TRUE]
+
+        for (i in 1:nrow(enrich_df)) {
+          term_pref <- as.character(enrich_df$preferredNames[i])
+          if (!is.na(term_pref) && term_pref != "") {
+            term_genes <- strsplit(term_pref, ",")[[1]]
+            enrich_df$n_top_10[i] <- length(intersect(term_genes, top_10_genes))
+            enrich_df$n_top_5[i]  <- length(intersect(term_genes, top_5_genes))
+            enrich_df$n_top_1[i]  <- length(intersect(term_genes, top_1_genes))
+            enrich_df$n_fade[i]   <- length(intersect(term_genes, fade_pos))
+            enrich_df$n_rer[i]    <- length(intersect(term_genes, rer_pos))
+            enrich_df$n_accum[i]  <- length(intersect(term_genes, accum_pos))
+          }
+        }
+      }
+    }
+  }
+
+  readr::write_tsv(
+    enrich_df,
+    file.path(string_summary_dir, paste0(list_name, "_results.tsv"))
+  )
+
+  # ── PPI density enrichment ─────────────────────────────────────────────────
+  ppi_res <- NULL
+  if (isTRUE(params$enable_ppi_enrichment)) {
+    if (length(gene_string_ids) > 500L) {
+      message(sprintf(
+        "PPI enrichment skipped for %s: gene set too large (%d > 500 STRING IDs).",
+        list_name, length(gene_string_ids)
+      ))
+    } else {
+      ppi_res <- tryCatch(
+        string_db$get_ppi_enrichment(gene_string_ids),
+        error = function(e) {
+          message(sprintf("PPI enrichment failed for %s: %s", list_name, e$message))
+          NULL
+        }
+      )
+    }
+
+    if (!is.null(ppi_res)) {
+      # Replace any NULL fields with NA before coercing to tibble; STRINGdb
+      # returns NULL for 'enrichment' and 'lambda' when no interactions are
+      # found, which makes as_tibble() abort with "column is NULL".
+      ppi_lst <- lapply(as.list(ppi_res), function(x) if (is.null(x)) NA else x)
+      ppi_df  <- as_tibble(ppi_lst) %>% mutate(gene_list = list_name)
+      readr::write_tsv(
+        ppi_df,
+        file.path(string_summary_dir, paste0(list_name, "_ppi.tsv"))
+      )
+    }
+  }
+
+  list(
+    list_name  = list_name,
+    input_n    = length(genes_sym),
+    mapped_n   = length(gene_string_ids),
+    status     = "ok",
+    n_rows     = nrow(enrich_df),
+    results    = enrich_df,
+    ppi_result = ppi_res
+  )
+}
+
+string_runs <- lapply(
+  gene_list_files,
+  run_single_string,
+  use_custom_background = use_custom_background
+)
+```
+
+# Summary tables
+
+```{r summary_tables}
+run_summary <- purrr::map_dfr(string_runs, ~tibble(
+  gene_list     = .x$list_name,
+  input_genes   = .x$input_n,
+  mapped_string = .x$mapped_n,
+  status        = .x$status,
+  n_results     = .x$n_rows
+))
+
+all_results <- purrr::map_dfr(string_runs, "results")
+
+readr::write_tsv(run_summary, file.path(string_summary_dir, "string_run_summary.tsv"))
+readr::write_tsv(all_results, file.path(string_summary_dir, "string_all_results.tsv"))
+
+kable(run_summary, caption = "STRING enrichment run summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+
+# Render top enriched terms with overlaps
+if (nrow(all_results) > 0 && !is.null(gene_scores_df)) {
+  for (.gl in unique(all_results$gene_list)) {
+    .gl_dat <- all_results %>%
+      dplyr::filter(gene_list == .gl) %>%
+      dplyr::arrange(fdr) %>%
+      dplyr::slice_head(n = 10)
+
+    if (nrow(.gl_dat) > 0) {
+      display_df <- .gl_dat %>%
+        dplyr::select(
+          Category = category,
+          Term = description,
+          FDR = fdr,
+          `Top 10% (N)` = n_top_10,
+          `Top 5% (N)`  = n_top_5,
+          `Top 1% (N)`  = n_top_1,
+          `FADE (N)`    = n_fade,
+          `RER (N)`     = n_rer,
+          `Accum. (N)`  = n_accum
+        )
+
+      cat(sprintf("\n\n#### Top Enriched STRING Terms for %s\n\n", .gl))
+      print(
+        knitr::kable(display_df, digits = 4, caption = sprintf("Top Enriched STRING Terms and Gene Overlaps for %s", .gl)) %>%
+          kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+      )
+      cat("\n\n")
+    }
+  }
+}
+```
+
+```{r ppi_summary, eval=isTRUE(params$enable_ppi_enrichment)}
+ppi_rows <- purrr::keep(string_runs, ~!is.null(.x$ppi_result))
+if (length(ppi_rows) > 0) {
+  ppi_summary <- purrr::map_dfr(ppi_rows, function(x) {
+    pr <- as.list(x$ppi_result)
+    tibble(
+      gene_list                   = x$list_name,
+      number_of_nodes             = pr$number_of_nodes %||% NA_integer_,
+      number_of_edges             = pr$number_of_edges %||% NA_integer_,
+      average_node_degree         = pr$average_node_degree %||% NA_real_,
+      local_clustering_coefficient = pr$local_clustering_coefficient %||% NA_real_,
+      expected_number_of_edges    = pr$expected_number_of_edges %||% NA_integer_,
+      p_value                     = pr$p_value %||% NA_real_
+    )
+  })
+
+  readr::write_tsv(ppi_summary, file.path(string_summary_dir, "string_ppi_summary.tsv"))
+
+  kable(ppi_summary, caption = "STRING PPI enrichment (density test) summary") %>%
+    kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+}
+```
+
+# STRING Protein Networks {.tabset}
+
+Network score threshold: **`r params$network_score_thr`** (= `r params$network_score_thr / 1000` on the 0–1 STRING scale).
+Only nodes with at least one edge at this confidence level are shown.
+Clustering algorithm: **walktrap** (random-walk community detection; closest available method to STRING's own MCL).
+
+```{r string_networks, fig.width=10, fig.height=8, results='asis'}
+suppressPackageStartupMessages(library(igraph))
+
+# Map all gene symbols to STRING IDs up-front so we can reverse-annotate network nodes.
+build_id2gene <- function(genes_sym) {
+  if (length(genes_sym) == 0) return(character(0))
+  df_in  <- data.frame(gene = genes_sym, stringsAsFactors = FALSE)
+  mapped <- tryCatch(
+    string_db$map(df_in, "gene", removeUnmappedRows = TRUE, quiet = TRUE),
+    error = function(e) NULL
+  )
+  if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
+  setNames(mapped$gene, mapped$STRING_id)
+}
+
+network_summary_rows <- list()
+
+for (.gf in gene_list_files) {
+  .list_name   <- tools::file_path_sans_ext(basename(.gf))
+  .genes_sym   <- read_gene_vector(.gf)
+  .string_ids  <- safe_string_map_ids(.genes_sym)
+
+  if (length(.string_ids) < MIN_MAPPED) next
+
+  .id2gene <- build_id2gene(.genes_sym)
+  cat(sprintf("\n\n## %s {.tabset}\n\n", .list_name))
+
+  for (.net_type in c("full", "physical")) {
+    .sdb <- if (.net_type == "full") string_db_network else string_db_physical
+    if (is.null(.sdb)) {
+      cat(sprintf("> Physical STRINGdb unavailable — skipping physical network for %s.\n\n", .list_name))
+      next
+    }
+
+    .net <- tryCatch(
+      .sdb$get_subnetwork(.string_ids),
+      error = function(e) {
+        message(sprintf("[%s][%s] get_subnetwork failed: %s", .list_name, .net_type, e$message))
+        NULL
+      }
+    )
+    if (is.null(.net) || igraph::vcount(.net) == 0) {
+      cat(sprintf("> No %s network retrieved for %s.\n\n", .net_type, .list_name))
+      next
+    }
+
+    # Keep only connected nodes (nodes with ≥1 edge at the score threshold)
+    .connected <- igraph::V(.net)[igraph::degree(.net) > 0]
+    .net_conn  <- igraph::induced_subgraph(.net, .connected)
+    .n_nodes   <- igraph::vcount(.net_conn)
+    .n_edges   <- igraph::ecount(.net_conn)
+
+    cat(sprintf("### %s\n\n", tools::toTitleCase(.net_type)))
+    cat(sprintf("Connected nodes: **%d** | Edges: **%d** | Input genes mapped: **%d**\n\n",
+                .n_nodes, .n_edges, length(.string_ids)))
+
+    if (.n_nodes < 3) {
+      cat("> Too few connected nodes — network plot skipped.\n\n")
+      network_summary_rows[[length(network_summary_rows) + 1]] <- tibble(
+        gene_list = .list_name, net_type = .net_type,
+        n_input = length(.string_ids), n_connected = .n_nodes,
+        n_edges = .n_edges, n_clusters = NA_integer_
+      )
+      next
+    }
+
+    # Walktrap clustering via STRINGdb (closest to STRING's own MCL)
+    # Run on all mapped IDs so the algorithm sees the full graph topology,
+    # then restrict results to nodes that survive the connectivity filter.
+    .clusters_raw <- run_string_clustering(.sdb, .string_ids)
+    .net_vnames   <- igraph::V(.net_conn)$name
+    .clusters_df  <- if (!is.null(.clusters_raw)) {
+      .clusters_raw %>% dplyr::filter(node %in% .net_vnames)
+    } else NULL
+    .n_clust <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
+
+    # Annotate clusters with gene symbols and write TSV
+    if (!is.null(.clusters_df)) {
+      .clusters_df$gene <- .id2gene[.clusters_df$node]
+      .clusters_df$gene[is.na(.clusters_df$gene)] <- .clusters_df$node[is.na(.clusters_df$gene)]
+      .clust_file <- file.path(
+        string_networks_dir,
+        sprintf("%s_%s_clusters.tsv", .list_name, .net_type)
+      )
+      readr::write_tsv(.clusters_df %>% dplyr::arrange(cluster, gene), .clust_file)
+      cat(sprintf("Clusters found: **%d** (written to `%s`)\n\n", .n_clust, basename(.clust_file)))
+
+      # Cluster descriptions from top enriched term per cluster
+      .clust_desc <- describe_clusters(string_db, .clusters_df, .id2gene)
+      .clust_desc_display <- .clust_desc %>%
+        dplyr::filter(!description %in% c("Too small", "No enrichment"))
+      if (nrow(.clust_desc_display) > 0) {
+        print(knitr::kable(
+          .clust_desc_display,
+          caption = sprintf("Cluster functional descriptions — %s %s", .list_name, .net_type),
+          col.names = c("Cluster", "Genes", "Representative genes", "Top enriched terms")
+        ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed"), full_width = TRUE))
+      }
+
+      # Named vector for legend labels: cluster id → short description
+      # Exclude uninformative labels so they don't clutter the legend
+      .cl_labels <- setNames(.clust_desc$description, as.character(.clust_desc$cluster))
+      .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment")]
+    } else {
+      .cl_labels <- NULL
+    }
+
+    # Network plot saved to PNG and rendered inline
+    .png_path <- file.path(
+      string_networks_dir,
+      sprintf("%s_%s_network.png", .list_name, .net_type)
+    )
+    png(.png_path, width = 1800, height = 1500, res = 160)
+    plot_cluster_network(
+      .net_conn, .clusters_df,
+      title          = sprintf("%s — %s network (score ≥ %s)", .list_name, .net_type, params$network_score_thr),
+      id_to_gene     = .id2gene,
+      cluster_labels = .cl_labels
+    )
+    dev.off()
+    # Emit image via cat() so it lands in the text stream at the correct tab position.
+    # Calling plot_cluster_network() inline here causes knitr to flush the plot
+    # through the plot hook *after* the current text buffer, shifting it one tab forward.
+    cat(sprintf("![](%s)\n\n", .png_path))
+
+    network_summary_rows[[length(network_summary_rows) + 1]] <- tibble(
+      gene_list  = .list_name, net_type = .net_type,
+      n_input    = length(.string_ids), n_connected = .n_nodes,
+      n_edges    = .n_edges, n_clusters = .n_clust
+    )
+  }
+}
+
+if (length(network_summary_rows) > 0) {
+  .net_summary <- dplyr::bind_rows(network_summary_rows)
+  readr::write_tsv(.net_summary, file.path(string_networks_dir, "network_summary.tsv"))
+  cat("\n\n## Network summary\n\n")
+  print(knitr::kable(.net_summary, caption = "STRING network summary") %>%
+          kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+}
+```
+
+# Visualisations {.tabset}
+
+```{r plots, fig.width=12, fig.height=8, results='asis'}
+if (nrow(all_results) > 0) {
+
+  # Detect key columns (STRING may return 'description' or 'term').
+  # 'p.adjust' is included for STRINGdb versions that use that name; the
+  # run_string_enrichment chunk normalises it to 'fdr' at source, but we
+  # keep the full list here as a belt-and-suspenders safeguard.
+  pval_col <- c("fdr", "p_value", "pvalue", "p.adjust", "FDR")
+  pval_col <- pval_col[pval_col %in% names(all_results)][1]
+  if (is.na(pval_col) || length(pval_col) == 0) {
+    warning(sprintf(
+      "No recognised FDR/p-value column found in all_results. Available columns: %s. Plots may be empty.",
+      paste(names(all_results), collapse = ", ")
+    ))
+    pval_col <- names(all_results)[1]  # last-resort: use first column
+  }
+  desc_col <- c("description", "term", "name")
+  desc_col <- desc_col[desc_col %in% names(all_results)][1]
+  if (is.na(desc_col) || length(desc_col) == 0) desc_col <- "description"
+
+  std_results <- all_results %>%
+    mutate(
+      FDR_std       = suppressWarnings(as.numeric(.data[[pval_col]])),
+      FDR_std       = pmax(FDR_std, .Machine$double.xmin, na.rm = TRUE),
+      term_std      = as.character(.data[[desc_col]]),
+      neglog10FDR   = -log10(FDR_std)
+    ) %>%
+    filter(!is.na(FDR_std), !is.na(term_std), term_std != "")
+
+  std_results <- std_results %>%
+    mutate(scenario = {
+      # Match _top_ or _bottom_ as a delimited token anywhere in the filename stem.
+      # Files without either token (i.e. global lists) fall back to "global".
+      s <- stringr::str_match(gene_list, "_(top|bottom)(?:_|$)")[, 2]
+      dplyr::if_else(is.na(s), "global", s)
+    })
+  std_results_all    <- std_results
+  present_scenarios  <- intersect(c("global", "top", "bottom"), unique(std_results$scenario))
+
+  for (.scen in present_scenarios) {
+    std_results <- std_results_all %>% dplyr::filter(scenario == .scen)
+    if (length(present_scenarios) > 1) {
+      cat(sprintf("\n\n## %s {.tabset}\n\n", tools::toTitleCase(.scen)))
+      .gl_hdr <- "###"
+    } else {
+      .gl_hdr <- "##"
+    }
+
+  # ── Per-list enrichment barplots (typical STRINGdb style) ──────────────
+  # One plot per gene list; terms coloured by STRING functional category.
+  # Mirrors the canonical barplot shown in the STRINGdb Bioconductor vignette.
+  for (.gl in unique(std_results$gene_list)) {
+    .gl_dat <- std_results %>%
+      dplyr::filter(gene_list == .gl) %>%
+      dplyr::arrange(FDR_std) %>%
+      dplyr::slice_head(n = as.integer(params$top_thr)) %>%
+      dplyr::mutate(term_short = stringr::str_trunc(term_std, 65))
+
+    if (nrow(.gl_dat) == 0) next
+
+    cat(sprintf("\n\n%s %s\n\n", .gl_hdr, .gl))
+
+    .n_cats <- dplyr::n_distinct(.gl_dat$category)
+    .p_bar <- ggplot(
+      .gl_dat,
+      aes(x = reorder(term_short, neglog10FDR), y = neglog10FDR, fill = category)
+    ) +
+      geom_col() +
+      coord_flip() +
+      safe_fill(.n_cats) +
+      theme_minimal(base_size = 11) +
+      labs(
+        title    = .gl,
+        subtitle = sprintf("Top %d enriched STRING terms (FDR ≤ %s)", nrow(.gl_dat), params$fdr_thr),
+        x        = NULL,
+        y        = expression(-log[10](FDR)),
+        fill     = "Category"
+      ) +
+      theme(plot.title = element_text(face = "bold"), axis.text.y = element_text(size = 9))
+    print(.p_bar)
+    ggsave(
+      file.path(string_plots_dir, sprintf("string_enrichment_%s_%s.png", .gl, .scen)),
+      .p_bar,
+      width  = 13,
+      height = max(5, nrow(.gl_dat) * 0.35 + 2),
+      dpi    = 320
+    )
+  } # end for (.gl in unique(std_results$gene_list))
+
+  } # end for (.scen in present_scenarios)
+  if (exists("std_results_all")) std_results <- std_results_all
+}
+```
+
+## Session Info
+
+```{r session_info}
+sessionInfo()
+```

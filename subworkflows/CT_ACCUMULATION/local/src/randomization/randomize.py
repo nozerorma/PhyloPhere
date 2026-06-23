@@ -3,9 +3,8 @@
 Randomization / permutation analysis for CT_ACCUMULATION in PhyloPhere.
 
 This simplified version only exports aggregated randomization outputs for:
-  - full_pool (US + GS0 + GS1 + GS2 + GS3 + GS4)
+  - full_pool (US + GS1 + GS2 + GS3 + GS4)
   - us
-  - gs0
   - gs1
   - gs2
   - gs3
@@ -57,14 +56,13 @@ def _remap_caas_df(df):
 
     # Coerce conserved-state columns to bool
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
-    df['asr_is_conserved']  = df['asr_is_conserved'].map(_bool)
     # pattern_type: from Pattern column
     df['pattern_type'] = df['Pattern']
 
-    # caap_group: preserve the raw CAAP_Group label (GS0–GS4, US)
+    # caap_group: preserve the raw CAAP_Group label (GS1–GS4, US)
     df['caap_group'] = df['CAAP_Group'].astype(str).str.strip().str.upper()
 
-    # iscaap: any labelled group other than 'US' (includes GS0–GS4)
+    # iscaap: any labelled group other than 'US' (includes GS1–GS4)
     df['iscaap'] = df['caap_group'].apply(lambda x: x != 'US')
 
     logging.info("CAAS CSV: remapped filtered_discovery.tsv columns to internal schema")
@@ -149,17 +147,22 @@ class RandomizationWorker:
             return
         if self.randomization_type == 'cons_decile':
             assert self.decile_bins is not None
+            # np.digitize returns 1-based indices [1, 10] for percentiles.
+            # Clip and shift to 0-based indices [0, 9] mapping to deciles.
             dec = np.digitize(self.cons_idx, bins=self.decile_bins[:-1], right=False)
+            dec = np.clip(dec - 1, 0, len(self.decile_bins) - 2)
             for d in range(len(self.decile_bins) - 1):
-                mask = dec == d
+                mask = (dec == d) & ~self.masked
                 self.eligible_by_key[d] = self.row_indices[mask]
             return
         raise ValueError(f"Unknown randomization_type: {self.randomization_type}")
 
     def process_chunk(self, chunk_size, chunk_idx):
         logging.info(f"Starting chunk {chunk_idx} with {chunk_size} randomizations in PID {os.getpid()}")
+        seed = None
         if self.global_seed is not None:
-            np.random.seed(((self.global_seed or 0) + 9973 * chunk_idx) & 0x7FFFFFFF)
+            seed = ((self.global_seed or 0) + 9973 * chunk_idx) & 0x7FFFFFFF
+        rng = np.random.default_rng(seed)
 
         # Vectorized accumulators per category (dict-driven).
         # Each entry is a list [sum, sum_sq, count_above] — mutable so in-place += works.
@@ -188,25 +191,53 @@ class RandomizationWorker:
 
         bincount = np.bincount
 
+        # Pre-allocate slice buffers for fast indexing
+        cat_total_sizes = {cat: self.actual_counts[cat].sum() for cat in self.actual_counts}
+        idx_buffers = {cat: np.empty(cat_total_sizes[cat], dtype=np.int32) for cat in self.actual_counts}
+
+        offsets = {cat: 0 for cat in self.actual_counts}
+        decile_plans = []
+
+        for key, cinfo in self.caas_by_key_counts.items():
+            elig = self.eligible_by_key.get(key)
+            if elig is None or elig.size == 0:
+                continue
+            n_fp = cinfo.get('n_full_pool', 0)
+            if n_fp == 0:
+                continue
+
+            slices = {}
+            slices['full_pool'] = (offsets['full_pool'], offsets['full_pool'] + n_fp, 0, n_fp)
+            offsets['full_pool'] += n_fp
+
+            curr = 0
+            for cat in ['us', 'gs1', 'gs2', 'gs3', 'gs4']:
+                n_cat = cinfo.get(f'n_{cat}', 0)
+                if n_cat > 0:
+                    slices[cat] = (offsets[cat], offsets[cat] + n_cat, curr, curr + n_cat)
+                    curr += n_cat
+                    offsets[cat] += n_cat
+            decile_plans.append((elig, n_fp, slices, key))
+
         for r in range(chunk_size):
-            z = lambda: np.zeros(self.n_genes, dtype=np.int64)
-            c = {cat: z() for cat in self.actual_counts}
             uid = f"{os.getpid()}_{chunk_idx}_{r}" if self.export_individual else None
 
-            for key, cinfo in self.caas_by_key_counts.items():
-                elig = self.eligible_by_key.get(key)
-                if elig is None or elig.size == 0:
-                    continue
-                for cat, carr in c.items():
-                    n = cinfo.get(f'n_{cat}', 0)
-                    if n > 0:
-                        idx = np.random.choice(elig, size=n, replace=True)
-                        carr += bincount(self.genes[idx], minlength=self.n_genes)
+            for elig, n_fp, slices, key in decile_plans:
+                if len(elig) < n_fp:
+                    idx_fp = rng.choice(elig, size=n_fp, replace=True)
+                else:
+                    idx_fp = rng.choice(elig, size=n_fp, replace=False)
+
+                for cat, (dest_start, dest_end, src_start, src_end) in slices.items():
+                    idx_buffers[cat][dest_start:dest_end] = idx_fp[src_start:src_end]
 
                 if self.export_individual:
                     caas_list = self.caas_by_key_lists.get(key, [])
                     if caas_list:
-                        idx_ind = np.random.choice(elig, size=len(caas_list), replace=True)
+                        if len(elig) < len(caas_list):
+                            idx_ind = rng.choice(elig, size=len(caas_list), replace=True)
+                        else:
+                            idx_ind = rng.choice(elig, size=len(caas_list), replace=False)
                         pos_rand  = self.positions[idx_ind]
                         gene_rand = self.genes[idx_ind]
                         for rec, pr, gid in zip(caas_list, pos_rand, gene_rand):
@@ -218,17 +249,16 @@ class RandomizationWorker:
                                 'randomized_position': int(pr),
                                 'randomized_gene_id': int(gid),
                             })
-                    if len(batch_rows) >= 1000 and writer is not None:
-                        dfb = pd.DataFrame(batch_rows)
-                        writer.write_table(pa.Table.from_pandas(dfb, schema=schema))
-                        batch_rows = []
+                        if len(batch_rows) >= 1000 and writer is not None:
+                            dfb = pd.DataFrame(batch_rows)
+                            writer.write_table(pa.Table.from_pandas(dfb, schema=schema))
+                            batch_rows = []
 
-            def _upd(Sv, cv, act):
-                Sv[0] += cv
-                Sv[1] += cv.astype(np.float64) ** 2
-                Sv[2] += (cv >= act).astype(np.int64)
-            for cat in S:
-                _upd(S[cat], c[cat], self.actual_counts[cat])
+            for cat in self.actual_counts:
+                cv = bincount(self.genes[idx_buffers[cat]], minlength=self.n_genes)
+                S[cat][0] += cv
+                S[cat][1] += cv.astype(np.float64) ** 2
+                S[cat][2] += (cv >= self.actual_counts[cat]).astype(np.int64)
 
         if self.export_individual and batch_rows and writer is not None:
             writer.write_table(pa.Table.from_pandas(pd.DataFrame(batch_rows), schema=schema))
@@ -279,7 +309,8 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
         if randomization_type == 'naive':
             key = 'global'
         elif randomization_type == 'cons_decile':
-            key = int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
+            k = int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
+            key = np.clip(k - 1, 0, len(decile_bins) - 2)
         else:
             continue
         caas_data.append({'position': row['position'], 'key': key})
@@ -289,7 +320,7 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
 
 def _write_empty_outputs_and_exit(args):
     """Write empty-but-valid outputs when no rows are available for randomization."""
-    categories = ['full_pool', 'us', 'gs0', 'gs1', 'gs2', 'gs3', 'gs4']
+    categories = ['full_pool', 'us', 'gs1', 'gs2', 'gs3', 'gs4']
 
     base_dir = os.path.dirname(args.output_prefix) or '.'
     os.makedirs(base_dir, exist_ok=True)
@@ -337,17 +368,18 @@ def main(args):
     else:
         caas_raw  = pd.read_csv(args.caas_csv, sep=None, engine='python')
 
-    # Normalise CAAS columns (handles global_meta_caas.tsv or original schema)
-    # If caas_raw is empty, produce a minimal skeleton so the left-join keys exist
-    if caas_raw.empty:
-        caas_df = pd.DataFrame(columns=['gene', 'msa_pos'])
-    else:
-        caas_df = _remap_caas_df(caas_raw)
-
     # Keep only needed columns to save memory
     required_cols = ['gene', 'msa_pos', 'is_significant',
                      'change_side', 'tag', 'pattern_type', 'iscaap', 'caap_group',
-                     'is_conserved_meta', 'asr_is_conserved']
+                     'is_conserved_meta']
+
+    # Normalise CAAS columns (handles global_meta_caas.tsv or original schema)
+    # If caas_raw is empty, produce a minimal skeleton so the left-join keys exist
+    if caas_raw.empty:
+        caas_df = pd.DataFrame(columns=required_cols)
+    else:
+        caas_df = _remap_caas_df(caas_raw)
+
     available = [c for c in required_cols if c in caas_df.columns]
     caas_df = caas_df[available]
     logging.info(f"CAAS df: {len(caas_df)} rows, columns: {available}")
@@ -416,7 +448,7 @@ def main(args):
 
     # Base pool candidates by group + event side
     _gu = merged_df['caap_group'].fillna('').astype(str).str.strip().str.upper()
-    pool_groups = {'US', 'GS0', 'GS1', 'GS2', 'GS3', 'GS4'}
+    pool_groups = {'US', 'GS1', 'GS2', 'GS3', 'GS4'}
     pool_group_mask = _gu.isin(pool_groups)
     if args.change_side in ('top', 'bottom'):
         # Include positions with change_side == target direction OR "both"
@@ -434,30 +466,11 @@ def main(args):
             else np.array([float(x) for x in args.decile_bins.split(',')])
         )
 
-    # --- Row-level exclusions: dubious-conserved ---
-    _boolify = lambda s: str(s).strip().lower() in {'true', 't', '1', 'yes', 'y'}
-    if 'is_conserved_meta' in merged_df.columns:
-        _icm = merged_df['is_conserved_meta'].map(_boolify).fillna(False)
-    else:
-        _icm = pd.Series(False, index=merged_df.index)
-    if 'asr_is_conserved' in merged_df.columns:
-        _arc = merged_df['asr_is_conserved'].map(_boolify).fillna(True)
-    else:
-        _arc = pd.Series(True, index=merged_df.index)
-    dubious_conserved = _icm & ~_arc
-    valid_row_any = ~dubious_conserved
-    logging.info(
-        f"Row exclusions: {dubious_conserved.sum()} dubious-conserved "
-        f"(is_conserved_meta=T & asr_is_conserved=F), "
-        f"{valid_row_any.sum()} rows remain"
-    )
-
     # Apply row validity and keep only requested output pools.
-    pool_mask = caas_filter & valid_row_any
+    pool_mask = caas_filter
 
     full_pool_mask = pool_mask
     us_mask = pool_mask & _gu.eq('US')
-    gs0_mask = pool_mask & _gu.eq('GS0')
     gs1_mask = pool_mask & _gu.eq('GS1')
     gs2_mask = pool_mask & _gu.eq('GS2')
     gs3_mask = pool_mask & _gu.eq('GS3')
@@ -465,7 +478,7 @@ def main(args):
 
     logging.info(
         f"Category sizes: full_pool={full_pool_mask.sum()}, us={us_mask.sum()}, "
-        f"gs0={gs0_mask.sum()}, gs1={gs1_mask.sum()}, gs2={gs2_mask.sum()}, "
+        f"gs1={gs1_mask.sum()}, gs2={gs2_mask.sum()}, "
         f"gs3={gs3_mask.sum()}, gs4={gs4_mask.sum()}"
     )
 
@@ -476,7 +489,6 @@ def main(args):
     actual_counts_masks = dict([
         ('full_pool', full_pool_mask),
         ('us', us_mask),
-        ('gs0', gs0_mask),
         ('gs1', gs1_mask),
         ('gs2', gs2_mask),
         ('gs3', gs3_mask),
@@ -491,7 +503,8 @@ def main(args):
             return 'global'
         if decile_bins is None:
             raise ValueError("decile_bins is required for cons_decile randomization")
-        return int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
+        k = int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
+        return np.clip(k - 1, 0, len(decile_bins) - 2)
 
     extra_key_sizes = {}
     for cat, m in actual_counts_masks.items():
@@ -529,7 +542,8 @@ def main(args):
                 args.randomization_type, decile_bins, args.export_individual_rand,
                 output_dir, args.global_seed, args.precompute_masks,
                 n_rows, n_genes, shm_names, shapes, dtypes, extra_key_sizes,
-                caas_data, position_to_tag if args.export_individual_rand else None,
+                caas_data if args.export_individual_rand else None,
+                position_to_tag if args.export_individual_rand else None,
                 actual_counts,
             ),
         ) as executor:

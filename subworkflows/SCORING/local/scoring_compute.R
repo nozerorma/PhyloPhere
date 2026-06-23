@@ -9,24 +9,29 @@
 # Usage:
 #   Rscript scoring_compute.R \
 #     --postproc   <filtered_discovery.tsv> \
-#     --fade_top   <fade_summary_top.tsv> \
-#     --fade_bottom <fade_summary_bottom.tsv> \
-#     --rer        <rerconverge_summary.tsv> \
-#     --accum_dir  <directory_with_accumulation_CSVs> \
+#     --fade_top      <fade_summary_top.tsv> \
+#     --fade_bottom   <fade_summary_bottom.tsv> \
+#     --fade_site_top <fade_site_bf_top.tsv> \
+#     --fade_site_bot <fade_site_bf_bottom.tsv> \
+#     --rer           <rerconverge_summary.tsv> \
+#     --accum_dir     <directory_with_accumulation_CSVs> \
 #     --top_pct    0.10 \
 #     --top5_pct   0.05 \
 #     --top1_pct   0.01 \
 #     --gene_top_pct  0.10 \
 #     --gene_top5_pct 0.05 \
 #     --gene_top1_pct 0.01 \
-
+#     --stress        false \
+#     --stress_top_n  25 \
 #
 # Outputs (in working directory):
-#   position_scores.tsv      — per Gene×Position scores
-#   gene_scores.tsv          — per Gene scores
-#   gene_correlations.tsv    — pairwise correlations between gene scores
-#   pos_gene_lists/*.txt     — gene lists for position-level ORA
-#   gene_gene_lists/*.txt    — gene lists for gene-level ORA
+#   position_scores.tsv           — per Gene×Position scores
+#   gene_scores.tsv               — per Gene scores
+#   gene_correlations.tsv         — pairwise correlations between gene scores
+#   gene_threshold_enrichment.tsv — gene-level enrichment curve (OR + Fisher) across CAAS thresholds × tools
+#   pos_threshold_enrichment.tsv  — position-level FADE enrichment curve across CAAS thresholds
+#   gene_lists/slice_*.tsv        — 9 ranked gene lists (Global/Top/Bottom × All/Sig/FDR) for STRING
+#   position_score_stress_*.tsv   — leave-one-axis-out / PCA stress diagnostics (only when --stress true)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -47,6 +52,8 @@ parse_arg <- function(flag, default = "NO_FILE") {
 postproc_file        <- parse_arg("--postproc")
 fade_top_file        <- parse_arg("--fade_top")
 fade_bottom_file     <- parse_arg("--fade_bottom")
+fade_site_top_file   <- parse_arg("--fade_site_top")
+fade_site_bot_file   <- parse_arg("--fade_site_bot")
 rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
 stress_enabled_raw        <- parse_arg("--stress", "false")
@@ -65,9 +72,6 @@ if (!is.finite(stress_top_n)      || is.na(stress_top_n)      || stress_top_n < 
 file_exists <- function(f) {
   !is.null(f) && f != "" && !grepl("^NO_", basename(f)) && file.exists(f)
 }
-
-dir.create("pos_gene_lists",  showWarnings = FALSE)
-dir.create("gene_gene_lists", showWarnings = FALSE)
 
 # ─── Helper: decile score (0–1 scale) ────────────────────────────────────────
 # Lower p-values → higher decile → higher score.
@@ -206,214 +210,189 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 # 2. POSITION-LEVEL SCORING
 # =============================================================================
 
-# ── 2a. Pre-scoring exclusions ───────────────────────────────────────────────
-# Applied before decile computation so boundaries reflect the scored pool only.
+# ── 2a. Pre-scoring exclusions + scheme scope ────────────────────────────────
+# Equal weight per scoring scheme (1 each; max achievable sum = 5). Schemes NOT
+# in this map (e.g. GS0) are not scoring schemes and are dropped here, BEFORE
+# deciles, so the scored pool and every downstream weighted-mean display column
+# are consistent. (Previously such rows carried an NA weight, which silently
+# dropped them from CAAS_score while NA-poisoning all weighted-mean diagnostics.)
+scheme_weights_int <- c(US = 0.2, GS4 = 0.2, GS3 = 0.2, GS2 = 0.2, GS1 = 0.2)
 
-# GS0: any substitution regardless of biochemistry — too permissive, excluded entirely.
-n_before <- nrow(df)
-df <- df %>% filter(CAAP_Group != "GS0")
-cat(sprintf("  GS0 exclusion: %d rows removed (%d → %d); %d unique Gene×Position remain\n",
-            n_before - nrow(df), n_before, nrow(df),
-            n_distinct(paste(df$Gene, df$Position))))
+df <- df %>%
+  mutate(scheme_weight = scheme_weights_int[CAAP_Group]) %>%
+  filter(!is.na(scheme_weight))
+cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring schemes\n",
+            nrow(df), n_distinct(df$CAAP_Group)))
 
 # ── 2b. Variability and pattern scores ───────────────────────────────────────
-# Deciles computed over the non-GS0 pool; lower p-values → higher score.
+# Deciles computed over the scored pool; lower p-values → higher score.
 df <- df %>%
   mutate(
     variability_score = decile_score(Pvalue),
     pattern_score     = decile_score(pvalue_boot)
   )
 
-# ── 2c. Biochemical scheme weights ───────────────────────────────────────────
-# Integer specificity points per scheme (max achievable sum = 10).
-# Applied after aggregation as a multiplier on pre_score.
-scheme_weights_int <- c(US = 5L, GS4 = 2L, GS3 = 1L, GS2 = 1L, GS1 = 1L)
+# Ordinal numeric value for a convergence side label.
+# no_change / ambiguous → NA (excluded from weighted mean).
+side_value <- function(x) {
+  case_when(
+    x == "convergent"  ~ 1.00,
+    x == "codivergent" ~ 0.50,
+    x == "divergent"   ~ 0.25,
+    TRUE               ~ NA_real_
+  )
+}
 
-df <- df %>%
-  mutate(scheme_weight = scheme_weights_int[CAAP_Group])
+# Numeric coefficient for a parallel label (categorical → ordinal).
+parallel_value <- function(p) {
+  case_when(
+    is.na(p) | p == "" | tolower(p) == "na" ~ NA_real_,
+    tolower(p) == "non-parallel" | p == "False" | p == "FALSE" ~ 1.0,
+    tolower(p) == "mixed"        ~ 0.75,
+    tolower(p) == "parallel"     | p == "True" | p == "TRUE"  ~ 0.5,
+    grepl("^parallel", tolower(p)) ~ 0.5,
+    TRUE                          ~ NA_real_
+  )
+}
+
+# TRUE when a change label indicates an assessable directional event.
+assessable_change <- function(x) x %in% c("convergent", "codivergent", "divergent")
 
 # Detect pair-indexed MRCA posterior columns dynamically (mrca_1_posterior, mrca_2_posterior, ...)
 mrca_posterior_cols <- grep("^mrca_\\d+_posterior$", names(df), value = TRUE)
 n_pairs <- length(mrca_posterior_cols)
 cat(sprintf("  Detected %d pairs (%s)\n", n_pairs, paste(mrca_posterior_cols, collapse = ", ")))
 
-# Aggregate to Gene×Position level: sum integer scheme weights across satisfied
-# schemes, and take the first value for fields constant within Gene×Position.
+# ── 2c. ASR score (per-row) ──────────────────────────────────────────────────
+# asr_score sources the unified ASR path score computed upstream in
+# CT_DISAMBIGUATION (src/convergence/path_scores.py).
+stopifnot("asr_path_score" %in% names(df))
+cat("  Using upstream asr_path_score (unified ASR/convergence/parallel signal)\n")
+df <- df %>%
+  mutate(
+    asr_score = suppressWarnings(as.numeric(asr_path_score))
+  )
+
+# Ensure the diagnostic path-score columns exist (absent in legacy output).
+if (!"mrca_diversity" %in% names(df)) df$mrca_diversity <- NA_real_
+df$mrca_diversity <- suppressWarnings(as.numeric(df$mrca_diversity))
+if (!"derived_agreement" %in% names(df)) df$derived_agreement <- NA_real_
+df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
+if (!"conservation_gate" %in% names(df)) df$conservation_gate <- NA_real_
+df$conservation_gate <- suppressWarnings(as.numeric(df$conservation_gate))
+if (!"count_factor" %in% names(df)) df$count_factor <- NA_real_
+df$count_factor <- suppressWarnings(as.numeric(df$count_factor))
+if (!"n_changed_pairs" %in% names(df)) df$n_changed_pairs <- NA_real_
+df$n_changed_pairs <- suppressWarnings(as.numeric(df$n_changed_pairs))
+if (!"n_changed_sides" %in% names(df)) df$n_changed_sides <- NA_real_
+df$n_changed_sides <- suppressWarnings(as.numeric(df$n_changed_sides))
+
+# ── 2f. Per-row two-way CAAS score and weighted contribution ─────────────────
+# The CAAS score is now the product of TWO orthogonal evidence axes, each already
+# on a raw [0,1] scale (no deciles):
+#   1. phenotype evolution = permulation evidence (1 - pvalue_boot). Low
+#      permutation p-value → strong phenotype-partition signal → high evidence.
+#   2. position evolution  = asr_path_score (asr_score). The unified ASR signal,
+#      now count-aware (replication re-enters via its count_factor).
+# The hypergeometric Pvalue is deliberately absent from the score — it became the
+# significance gate (gate_all / gate_sig / gate_fdr, section 2h).
+# row_caas:  each scheme contributes at most scheme_weight/5 to the position score
+#   (US=GS4=GS3=GS2=GS1=0.2 each; maximum achievable sum = 1.0). The /5 reflects
+#   the sum of scheme weights, not the component/axis count, so it is unchanged.
+# CAAS_score at position level = sum(row_caas) across all detected schemes.
+df <- df %>%
+  mutate(
+    # ── Display-only diagnostics (deciles): NO LONGER feed CAAS_score ─────────
+    # Kept so the report's PCA / stress / correlation sections keep working.
+    asr_decile         = decile_score_higher_better(asr_score),
+    significance_score  = rowMeans(cbind(variability_score, pattern_score), na.rm = TRUE),
+    pre_score           = rowMeans(cbind(significance_score, asr_decile), na.rm = TRUE),
+
+    # ── Two-way CAAS score (per row): phenotype × position evolution ──────────
+    # phenotype evolution = permulation evidence (1 - pvalue_boot, the bootstrap
+    # permutation p-value); position evolution = asr_path_score (asr_score,
+    # already 0..1 and count-aware). Both raw [0,1], higher = better — NO deciles.
+    # Their product gives the rank. The hypergeometric Pvalue is NOT here: it is
+    # demoted to the significance gate (gate_sig / gate_fdr below).
+    phen_score = 1 - pmin(pmax(pvalue_boot, 0), 1),
+    caas_row   = phen_score * asr_score,
+    row_caas   = caas_row * scheme_weight
+  )
+
+# ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
+# Sort descending by scheme_weight so first() picks the most-specific scheme
+# for display-only columns (Pvalue, change_top, asr_is_conserved, etc.).
+# Score columns use sums or weighted means — no first() for any scored quantity.
+df <- df %>% arrange(desc(scheme_weight))
+
 pos_scores <- df %>%
   group_by(Gene, Position) %>%
   summarise(
-    biochem_weight_sum    = sum(scheme_weight, na.rm = TRUE),
-    Pvalue                = first(Pvalue),
-    pvalue_boot           = first(pvalue_boot),
-    variability_score     = first(variability_score),
-    pattern_score         = first(pattern_score),
-    is_conserved_meta     = first(is_conserved_meta),
-    asr_is_conserved      = first(asr_is_conserved),
-    asr_root_conserved    = first(asr_root_conserved),
-    conserved_pair        = first(conserved_pair),
-    all_mrca_posterior    = first(all_mrca_posterior),
+    CAAS_score         = sum(row_caas,         na.rm = TRUE),
+    biochem_weight_sum = sum(scheme_weight,     na.rm = TRUE),
+    pre_score          = weighted.mean(pre_score,         w = scheme_weight, na.rm = TRUE),
+    significance_score = weighted.mean(significance_score, w = scheme_weight, na.rm = TRUE),
+    asr_decile         = weighted.mean(asr_decile,        w = scheme_weight, na.rm = TRUE),
+    variability_score  = weighted.mean(variability_score, w = scheme_weight, na.rm = TRUE),
+    pattern_score      = weighted.mean(pattern_score,     w = scheme_weight, na.rm = TRUE),
+    asr_score          = weighted.mean(asr_score,         w = scheme_weight, na.rm = TRUE),
+    mrca_diversity     = weighted.mean(mrca_diversity,   w = scheme_weight, na.rm = TRUE),
+    derived_agreement  = weighted.mean(derived_agreement, w = scheme_weight, na.rm = TRUE),
+    conservation_gate  = weighted.mean(conservation_gate, w = scheme_weight, na.rm = TRUE),
+    count_factor       = weighted.mean(count_factor,     w = scheme_weight, na.rm = TRUE),
+    n_changed_pairs    = weighted.mean(n_changed_pairs,    w = scheme_weight, na.rm = TRUE),
+    n_changed_sides    = weighted.mean(n_changed_sides,    w = scheme_weight, na.rm = TRUE),
+    phen_score         = weighted.mean(phen_score,       w = scheme_weight, na.rm = TRUE),
+    # Display-only: most-specific scheme via first() after desc(scheme_weight) sort
+    Pvalue             = first(Pvalue),
+    pvalue_boot        = first(pvalue_boot),
+    is_conserved_meta  = first(is_conserved_meta),
+    conserved_pair     = first(conserved_pair),
+    all_mrca_posterior = first(all_mrca_posterior),
     across(all_of(mrca_posterior_cols), \(x) first(x)),
-    change_top            = first(change_top),
-    change_bottom         = first(change_bottom),
-    change_side           = first(change_side),
-    parallel_top          = first(parallel_top),
-    parallel_bottom       = first(parallel_bottom),
+    change_top         = first(change_top),
+    change_bottom      = first(change_bottom),
+    has_change_top     = any(assessable_change(change_top)),
+    has_change_bottom  = any(assessable_change(change_bottom)),
     .groups = "drop"
+  ) %>%
+  mutate(
+    change_side = case_when(
+      has_change_top & has_change_bottom ~ "both",
+      has_change_top                     ~ "top",
+      has_change_bottom                  ~ "bottom",
+      TRUE                               ~ "none"
+    )
+  ) %>%
+  select(-has_change_top, -has_change_bottom)
+
+# ── 2h. Three-way significance gate (hypergeometric Pvalue) ──────────────
+# The hypergeometric CAAS p-value no longer feeds CAAS_score (that is now the
+# permulation × asr_path product). Instead it gates the result into three tiers,
+# so callers can keep all positions for ranking but filter to a defensible set:
+#   gate_all : every scored position (the full ranked pool)
+#   gate_sig : nominally significant         (Pvalue < 0.05)
+#   gate_fdr : significant after BH-FDR       (BH-adjusted Pvalue < 0.05)
+# FDR is computed over the whole position pool (one hypergeometric test/position).
+pos_scores <- pos_scores %>%
+  mutate(
+    Pvalue_hyp_fdr = p.adjust(Pvalue, method = "BH"),
+    gate_all       = TRUE,
+    gate_sig       = !is.na(Pvalue) & Pvalue < 0.05,
+    gate_fdr       = !is.na(Pvalue_hyp_fdr) & Pvalue_hyp_fdr < 0.05
   )
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
+cat(sprintf("  Significance gate: %d significant (p<0.05), %d FDR-significant (BH<0.05)\n",
+            sum(pos_scores$gate_sig, na.rm = TRUE),
+            sum(pos_scores$gate_fdr, na.rm = TRUE)))
 
-# ── 2c. ASR score ────────────────────────────────────────────────────────────
-# Pair-weighted formula (w = 1 / n_pairs):
-#
-#   is_conserved_meta = FALSE                          → 1.0  (novel change)
-#   is_conserved_meta = TRUE & asr_is_conserved = FALSE → 0.0  (unconfirmed conservation)
-#   is_conserved_meta = TRUE & asr_is_conserved = TRUE  →
-#     Σ_{divergent pairs}  w
-#   + Σ_{conserved pairs}  min((w × P_MRCA(i) + w × P_root × I(root_cons)) / 2,  0.9 × w)
-#
-# The 0.9w cap ensures conserved positions never reach the 1.0 ceiling of novel changes.
-# conserved_pair may be a single id ("2") or comma-separated ("2,4") for future multi-pair support.
-compute_asr_score <- function(is_conserved_meta_vec, asr_is_conserved_vec,
-                              asr_root_conserved_vec, conserved_pair_vec,
-                              all_mrca_posterior_vec, n_pairs, pos_data) {
+cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
+            min(pos_scores$CAAS_score, na.rm = TRUE),
+            median(pos_scores$CAAS_score, na.rm = TRUE),
+            max(pos_scores$CAAS_score, na.rm = TRUE)))
 
-  w <- 1.0 / n_pairs
-
-  parse_bool <- function(x) {
-    if (is.logical(x)) return(x)
-    tolower(as.character(x)) %in% c("true", "1", "yes")
-  }
-
-  sapply(seq_along(is_conserved_meta_vec), function(i) {
-    is_cons   <- parse_bool(is_conserved_meta_vec[i])
-    asr_cons  <- parse_bool(asr_is_conserved_vec[i])
-    root_cons <- parse_bool(asr_root_conserved_vec[i])
-
-    if (!is_cons)  return(1.0)
-    if (!asr_cons) return(0.0)
-
-    # Parse conserved pair IDs: "2" → [2],  "2,4" → [2, 4]
-    conserved_ids <- suppressWarnings(
-      as.integer(trimws(strsplit(as.character(conserved_pair_vec[i]), ",")[[1]]))
-    )
-    conserved_ids <- conserved_ids[!is.na(conserved_ids) & conserved_ids >= 1]
-    if (length(conserved_ids) == 0) return(1.0)
-
-    n_divergent <- n_pairs - length(conserved_ids)
-    score       <- n_divergent * w
-
-    all_mrca_p <- suppressWarnings(as.numeric(all_mrca_posterior_vec[i]))
-    root_p     <- if (root_cons && !is.na(all_mrca_p)) all_mrca_p else 0.0
-
-    for (pid in conserved_ids) {
-      mcol    <- paste0("mrca_", pid, "_posterior")
-      mrca_p  <- if (mcol %in% names(pos_data)) suppressWarnings(as.numeric(pos_data[[mcol]][i])) else 0.0
-      if (is.na(mrca_p)) mrca_p <- 0.0
-      score   <- score + min((w * mrca_p + w * root_p) / 2, 0.9 * w)
-    }
-
-    return(min(score, 1.0))
-  })
-}
-
-pos_scores_ref <- pos_scores  # capture before pipe for mrca column lookup inside sapply
-
-pos_scores <- pos_scores %>%
-  mutate(
-    asr_score = compute_asr_score(
-      is_conserved_meta, asr_is_conserved, asr_root_conserved,
-      conserved_pair, all_mrca_posterior,
-      n_pairs, pos_scores_ref
-    )
-  )
-
-# ── 2d. Convergence score ───────────────────────────────────────────────────
-compute_convergence_score <- function(change_top, change_bottom) {
-  side_value <- function(side) {
-    case_when(
-      side == "convergent"  ~ 1.0,
-      side == "codivergent" ~ 0.5,
-      side == "divergent"   ~ 0.25,
-      TRUE                  ~ NA_real_  # ambiguous / no_change → excluded
-    )
-  }
-
-  top_val    <- side_value(change_top)
-  bottom_val <- side_value(change_bottom)
-
-  mean_change <- ifelse(
-    is.na(top_val) & is.na(bottom_val), 0,
-    rowMeans(cbind(top_val, bottom_val), na.rm = TRUE)
-  )
-
-  completeness_penalty <- ifelse(!is.na(top_val) & !is.na(bottom_val), 1.0, 0.75)
-
-  mean_change * completeness_penalty
-}
-
-pos_scores <- pos_scores %>%
-  mutate(
-    convergence_score = compute_convergence_score(change_top, change_bottom)
-  )
-
-# ── 2e. Parallel score ──────────────────────────────────────────────────────
-# Parallelism coefficients (categorical, no MRCA-posterior weighting):
-#   Non-parallel = 1.0 (highest): independent changes are the most informative
-#     signal of convergence — identical substitutions in independent lineages
-#     are less surprising and may reflect shared selective constraints.
-#   Mixed = 0.75, Parallel = 0.5.
-# Completeness penalty: 1.0 when both sides are assessable, 0.75 when only one.
-# MRCA reconstruction confidence is already captured by asr_score; applying it
-# here again would double-deflate positions with uncertain reconstructions and
-# collapse the effective range to ~0–0.375 instead of 0–1.
-# FADE provides gene-level significance (BF >= 100); PrimateAI-3D provides complementary position-level characterization.
-compute_parallel_score <- function(parallel_top, parallel_bottom,
-                                   change_top,   change_bottom) {
-  parallel_coeff <- function(p) {
-    case_when(
-      is.na(p) | p == "" | tolower(p) == "na" ~ NA_real_,
-      tolower(p) == "non-parallel" | p == "False" | p == "FALSE" ~ 1.0,
-      tolower(p) == "mixed"        ~ 0.75,
-      tolower(p) == "parallel"     | p == "True" | p == "TRUE"  ~ 0.5,
-      grepl("^parallel", tolower(p)) ~ 0.5,
-      TRUE                          ~ NA_real_
-    )
-  }
-
-  # Side is assessable only if change is convergent/codivergent/divergent
-  side_assessable <- function(change) {
-    change %in% c("convergent", "codivergent", "divergent")
-  }
-
-  top_assessable    <- side_assessable(change_top)
-  bottom_assessable <- side_assessable(change_bottom)
-
-  top_coeff    <- parallel_coeff(parallel_top)
-  bottom_coeff <- parallel_coeff(parallel_bottom)
-
-  # Use coefficients directly — no MRCA multiplier (see comment above)
-  top_side_score    <- ifelse(top_assessable,    top_coeff, NA_real_)
-  bottom_side_score <- ifelse(bottom_assessable, bottom_coeff, NA_real_)
-
-  mean_parallel <- ifelse(
-    is.na(top_side_score) & is.na(bottom_side_score), 0,
-    rowMeans(cbind(top_side_score, bottom_side_score), na.rm = TRUE)
-  )
-
-  completeness_penalty <- ifelse(!is.na(top_side_score) & !is.na(bottom_side_score), 1.0, 0.75)
-
-  mean_parallel * completeness_penalty
-}
-
-pos_scores <- pos_scores %>%
-  mutate(
-    parallel_score = compute_parallel_score(
-      parallel_top, parallel_bottom, change_top, change_bottom
-    )
-  )
-
-# ── 2g. FADE (gene-level — see section 3c) ──────────────────────────────────
+# ── 2i. FADE (gene-level — see section 4d) ──────────────────────────────────
 # FADE operates at gene level (max Bayes Factor per gene across sites).
 # Significance threshold: BF >= 100 (FADE's standard criterion).
 # Top and bottom are loaded separately: fade_top tests acceleration in top
@@ -440,33 +419,38 @@ if (has_fade_bottom) {
   fade_bottom_df <- tibble(Gene = character(), fade_max_bf_bottom = numeric())
 }
 
-# ── 2i. CAAS Score (composite) ──────────────────────────────────────────────
-# pre_score: unweighted mean of the 5 independent signal components
-#   (variability, pattern, asr, convergence, parallel).
-# CAAS_score: pre_score scaled by biochemical specificity:
-#   pre_score × biochem_weight_sum / 10
-# where 10 is the maximum achievable weight (US=5 + GS4=2 + GS3+GS2+GS1=3).
-# FADE is gene-level and does NOT contribute to position-level CAAS_score.
+# ── 2j. FADE site-level (position-level BF) ─────────────────────────────────
+# Per-site max BF from FADE_report. Coordinate: FADE emits 1-based site index;
+# CAAS uses 0-based positions — subtract 1 before any join.
+has_fade_site_top <- file_exists(fade_site_top_file)
+has_fade_site_bot <- file_exists(fade_site_bot_file)
 
-pos_scores <- pos_scores %>%
-  mutate(
-    pre_score  = rowMeans(
-      cbind(variability_score, pattern_score, asr_score, convergence_score, parallel_score),
-      na.rm = TRUE
-    ),
-    CAAS_score = pre_score * biochem_weight_sum / 10
-  )
+.load_fade_sites <- function(path) {
+  read_tsv(path, show_col_types = FALSE) %>%
+    rename(Gene = gene, Position = site) %>%
+    mutate(Position = Position - 1L) %>%
+    select(Gene, Position, max_site_bf, any_of(c("top_target_aa", "fade_biased")))
+}
 
-cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
-            min(pos_scores$CAAS_score, na.rm = TRUE),
-            median(pos_scores$CAAS_score, na.rm = TRUE),
-            max(pos_scores$CAAS_score, na.rm = TRUE)))
+if (has_fade_site_top) {
+  fade_site_top_df <- .load_fade_sites(fade_site_top_file)
+  cat(sprintf("  FADE site top: %d positions loaded\n", nrow(fade_site_top_df)))
+} else {
+  fade_site_top_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric())
+}
+
+if (has_fade_site_bot) {
+  fade_site_bot_df <- .load_fade_sites(fade_site_bot_file)
+  cat(sprintf("  FADE site bot: %d positions loaded\n", nrow(fade_site_bot_df)))
+} else {
+  fade_site_bot_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric())
+}
 
 # Direction filter removed: all positions are retained for scoring.
 # Directional splits (top/bottom) are applied per-analysis after scoring.
 
 # =============================================================================
-# 2j. POSITION-LEVEL STRESS TESTS (optional)
+# 3. POSITION-LEVEL STRESS TESTS (optional)
 # =============================================================================
 if (stress_enabled) {
   cat("\n─── Position-level scoring stress test ───────────────────────\n")
@@ -474,31 +458,31 @@ if (stress_enabled) {
   stress_df <- pos_scores %>%
     transmute(
       Gene, Position,
-      variability_score,
+      significance_score,            # axis 1: collapsed p-value channels
+      asr_decile,                    # axis 2: deciled ASR path score
+      variability_score,             # raw inputs kept for diagnostic correlations
       pattern_score,
       asr_score,
-      convergence_score,
-      parallel_score,
       biochem_weight_sum,
       pre_score,
       CAAS_current = CAAS_score
     )
 
-  # Leave-one-out variants: drop one pre-score component, recompute mean × biochem weight
+  # Leave-one-out variants: drop one of the TWO scoring axes (significance vs
+  # ASR) and rescale. Divisor /5 matches the main row_caas scaling.
   stress_df <- stress_df %>%
     mutate(
-      CAAS_unweighted     = pre_score,
-      CAAS_no_variability = rowMeans(cbind(pattern_score, asr_score, convergence_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
-      CAAS_no_pattern     = rowMeans(cbind(variability_score, asr_score, convergence_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
-      CAAS_no_asr         = rowMeans(cbind(variability_score, pattern_score, convergence_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
-      CAAS_no_convergence = rowMeans(cbind(variability_score, pattern_score, asr_score, parallel_score), na.rm = TRUE) * biochem_weight_sum / 10,
-      CAAS_no_parallel    = rowMeans(cbind(variability_score, pattern_score, asr_score, convergence_score), na.rm = TRUE) * biochem_weight_sum / 10
+      CAAS_unweighted      = pre_score,
+      CAAS_no_significance = asr_decile         * biochem_weight_sum / 5,
+      CAAS_no_asr          = significance_score * biochem_weight_sum / 5
     )
 
   latent_loadings <- tibble(model = character(), variable = character(), loading = numeric(),
                             variance_explained = numeric())
 
-  pca_all_cols <- c("variability_score", "pattern_score", "asr_score", "convergence_score", "parallel_score")
+  # PCA over the raw inputs (the two p-value deciles + deciled ASR) to show how
+  # they load — more informative than a 2-variable PCA on the collapsed axes.
+  pca_all_cols <- c("variability_score", "pattern_score", "asr_decile")
   pca_all_df <- stress_df %>% select(all_of(pca_all_cols), CAAS_current) %>% drop_na()
   pca_all_cols_var <- variable_numeric_cols(pca_all_df, pca_all_cols)
   if (length(pca_all_cols_var) < length(pca_all_cols)) {
@@ -556,14 +540,14 @@ if (stress_enabled) {
   }
 
   analysis_cols <- c(
-    "variability_score", "pattern_score", "asr_score", "convergence_score",
-    "parallel_score", "biochem_weight_sum", "pre_score"
+    "significance_score", "asr_decile",
+    "variability_score", "pattern_score", "asr_score",
+    "biochem_weight_sum", "pre_score"
   )
 
   composite_cols <- c(
     "CAAS_current", "CAAS_unweighted",
-    "CAAS_no_variability", "CAAS_no_pattern", "CAAS_no_asr",
-    "CAAS_no_convergence", "CAAS_no_parallel"
+    "CAAS_no_significance", "CAAS_no_asr"
   )
   latent_cols <- c("PCA_all_components", "Factor1_all_components")
   latent_cols <- latent_cols[latent_cols %in% names(stress_df)]
@@ -574,25 +558,26 @@ if (stress_enabled) {
   stress_rank_agreement <- make_rank_matrix(stress_df, composite_cols)
   stress_top_overlap <- make_top_overlap(stress_df, composite_cols, top_n = stress_top_n)
 
+  # Rank of the reference (current) score is constant across variants — compute
+  # once here rather than re-ranking it inside every rowwise cell below.
+  rank_current <- rank(-stress_df$CAAS_current, ties.method = "average", na.last = "keep")
+
   stress_summary <- tibble(variant = composite_cols) %>%
     rowwise() %>%
     mutate(
       pearson_to_current = safe_cor(stress_df[[variant]], stress_df$CAAS_current, method = "pearson"),
       spearman_to_current = safe_cor(stress_df[[variant]], stress_df$CAAS_current, method = "spearman"),
       mean_abs_rank_shift = {
-        r0 <- rank(-stress_df$CAAS_current, ties.method = "average", na.last = "keep")
         r1 <- rank(-stress_df[[variant]], ties.method = "average", na.last = "keep")
-        mean(abs(r0 - r1), na.rm = TRUE)
+        mean(abs(rank_current - r1), na.rm = TRUE)
       },
       median_abs_rank_shift = {
-        r0 <- rank(-stress_df$CAAS_current, ties.method = "average", na.last = "keep")
         r1 <- rank(-stress_df[[variant]], ties.method = "average", na.last = "keep")
-        median(abs(r0 - r1), na.rm = TRUE)
+        median(abs(rank_current - r1), na.rm = TRUE)
       },
       max_abs_rank_shift = {
-        r0 <- rank(-stress_df$CAAS_current, ties.method = "average", na.last = "keep")
         r1 <- rank(-stress_df[[variant]], ties.method = "average", na.last = "keep")
-        max(abs(r0 - r1), na.rm = TRUE)
+        max(abs(rank_current - r1), na.rm = TRUE)
       },
       top10_overlap = {
         a <- safe_top_set(stress_df, "CAAS_current", "pct", 0.10)
@@ -639,12 +624,12 @@ if (stress_enabled) {
 }
 
 # =============================================================================
-# 3. GENE-LEVEL SCORING
+# 4. GENE-LEVEL SCORING
 # =============================================================================
 
 cat("\n─── Gene-level scoring ────────────────────────────────────────\n")
 
-# ── 3a. Gene CAAS Scores: 90th percentile of CAAS_score per gene ────────────
+# ── 4a. Gene CAAS Scores: 90th percentile of CAAS_score per gene ────────────
 # Three scores computed from different position subsets:
 #   gene_caas_score        — all positions (full pool)
 #   gene_caas_score_top    — positions with change_side ∈ {top, both}
@@ -652,19 +637,48 @@ cat("\n─── Gene-level scoring ──────────────�
 gene_caas <- pos_scores %>%
   group_by(Gene) %>%
   summarise(
-    gene_caas_score        = quantile(CAAS_score, 0.90, na.rm = TRUE),
-    gene_caas_score_top    = {
+    gene_caas_score_global_all = quantile(CAAS_score, 0.90, na.rm = TRUE),
+    gene_caas_score_global_sig = {
+      vals <- CAAS_score[gate_sig %in% TRUE]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_score_global_fdr = {
+      vals <- CAAS_score[gate_fdr %in% TRUE]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_score_top_all    = {
       vals <- CAAS_score[change_side %in% c("top", "both")]
       if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
     },
-    gene_caas_score_bottom = {
+    gene_caas_score_top_sig    = {
+      vals <- CAAS_score[change_side %in% c("top", "both") & gate_sig %in% TRUE]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_score_top_fdr    = {
+      vals <- CAAS_score[change_side %in% c("top", "both") & gate_fdr %in% TRUE]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_score_bottom_all = {
       vals <- CAAS_score[change_side %in% c("bottom", "both")]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_score_bottom_sig = {
+      vals <- CAAS_score[change_side %in% c("bottom", "both") & gate_sig %in% TRUE]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_score_bottom_fdr = {
+      vals <- CAAS_score[change_side %in% c("bottom", "both") & gate_fdr %in% TRUE]
       if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
     },
     n_positions        = n(),
     n_positions_top    = sum(change_side %in% c("top",    "both"), na.rm = TRUE),
     n_positions_bottom = sum(change_side %in% c("bottom", "both"), na.rm = TRUE),
     .groups = "drop"
+  ) %>%
+  mutate(
+    gene_caas_score        = gene_caas_score_global_all,
+    gene_caas_score_top    = gene_caas_score_top_all,
+    gene_caas_score_bottom = gene_caas_score_bottom_all
   )
 
 cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)\n",
@@ -672,7 +686,7 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
             sum(!is.na(gene_caas$gene_caas_score_top)),
             sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
-# ── 3b. Gene Accumulation Score (optional) ──────────────────────────────────
+# ── 4b. Gene Accumulation Score (optional) ──────────────────────────────────
 # Uses accumulation_all_* files: all non-none positions (change_side != 'none').
 # Score: accumulation_score = 1 - mean(w_i * p_i) / n_available_schemes
 #   where w_i are scheme weights and p_i are PValueEmpirical per scheme.
@@ -691,7 +705,7 @@ if (has_accum) {
   cat("Loading accumulation (all positions) from:", accum_dir, "\n")
 
   scheme_names <- c("us", "gs4", "gs3", "gs2", "gs1")
-  scheme_w     <- c(0.5,  0.2,   0.1,   0.1,   0.1)
+  scheme_w     <- c(0.2,  0.2,   0.2,   0.2,   0.2)
   names(scheme_w) <- scheme_names
 
   accum_pval_df <- NULL  # will hold Gene + one pval col per scheme
@@ -760,7 +774,7 @@ if (has_accum) {
                       accum_significant = logical())
 }
 
-# ── 3c. Gene RERConverge Score (optional) ───────────────────────────────────
+# ── 4c. Gene RERConverge Score (optional) ───────────────────────────────────
 has_rer <- file_exists(rer_file)
 if (has_rer) {
   cat("Loading RER summary:", rer_file, "\n")
@@ -796,7 +810,7 @@ if (has_rer) {
                      rer_acceleration = character())
 }
 
-# ── 3c. Gene FADE Significance (optional) ───────────────────────────────────
+# ── 4d. Gene FADE Significance (optional) ───────────────────────────────────
 # BF >= 100 per direction. fade_significant_top / _bottom used separately
 # to characterise top-CAAS and bottom-CAAS gene sets respectively.
 gene_fade <- tibble(Gene = character())
@@ -823,7 +837,7 @@ if (nrow(fade_bottom_df) > 0) {
   gene_fade$fade_significant_bottom <- NA
 }
 
-# ── 3f. Assemble gene scores ────────────────────────────────────────────────
+# ── 4e. Assemble gene scores ────────────────────────────────────────────────
 gene_scores <- gene_caas
 
 if (nrow(gene_rand) > 0) {
@@ -852,7 +866,7 @@ if (nrow(gene_fade) > 0) {
 }
 
 # =============================================================================
-# 4. CORRELATION ANALYSIS (gene-level)
+# 5. CORRELATION ANALYSIS (gene-level)
 # =============================================================================
 
 cat("\n─── Correlation analysis ──────────────────────────────────────\n")
@@ -907,7 +921,7 @@ if (length(score_cols) >= 2) {
 }
 
 # =============================================================================
-# 5. WRITE OUTPUTS
+# 6. WRITE OUTPUTS
 # =============================================================================
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
@@ -923,20 +937,13 @@ cat("\n─── Writing outputs ───────────────�
 .thr_bot_1  <- quantile(.pos_bot_sub$CAAS_score, 0.99, na.rm = TRUE)
 
 pos_out <- pos_scores %>%
-  mutate(
-    is_top_10pct = change_side %in% c("top", "both")    & CAAS_score >= .thr_top_10,
-    is_top_5pct  = change_side %in% c("top", "both")    & CAAS_score >= .thr_top_5,
-    is_top_1pct  = change_side %in% c("top", "both")    & CAAS_score >= .thr_top_1,
-    is_bot_10pct = change_side %in% c("bottom", "both") & CAAS_score >= .thr_bot_10,
-    is_bot_5pct  = change_side %in% c("bottom", "both") & CAAS_score >= .thr_bot_5,
-    is_bot_1pct  = change_side %in% c("bottom", "both") & CAAS_score >= .thr_bot_1
-  ) %>%
-  select(Gene, Position, any_of(c("Pvalue", "pvalue_boot")), variability_score, pattern_score,
-         asr_score, convergence_score, parallel_score,
-         pre_score, biochem_weight_sum, CAAS_score, change_side,
-         any_of(c("caas", "change_top", "change_bottom")),
-         is_top_10pct, is_top_5pct, is_top_1pct,
-         is_bot_10pct, is_bot_5pct, is_bot_1pct) %>%
+  select(Gene, Position, any_of(c("Pvalue", "pvalue_boot", "Pvalue_hyp_fdr")),
+         significance_score, asr_decile,
+         variability_score, pattern_score,
+         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "count_factor", "n_changed_pairs", "n_changed_sides")),
+         any_of("phen_score"), pre_score, biochem_weight_sum, CAAS_score,
+         any_of(c("gate_all", "gate_sig", "gate_fdr")), change_side,
+         any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")
@@ -947,6 +954,9 @@ gene_out <- gene_scores %>%
   select(
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
+    gene_caas_score_global_all, gene_caas_score_global_sig, gene_caas_score_global_fdr,
+    gene_caas_score_top_all, gene_caas_score_top_sig, gene_caas_score_top_fdr,
+    gene_caas_score_bottom_all, gene_caas_score_bottom_sig, gene_caas_score_bottom_fdr,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
     any_of(c("gene_rand_score", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
@@ -960,136 +970,274 @@ gene_out <- gene_scores %>%
 write_tsv(gene_out, "gene_scores.tsv")
 cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 
+# ── FCS stats table (consumed by FCS_general.Rmd) ─────────────────────────────
+# Generic contract: gene + score_<ranking> (zero-floored downstream over the
+# cleaned_background universe) + flag_<name> per-gene highlight booleans.
+#   score_global/top/bottom = magnitude (the *_all columns); direction via the
+#   {top,both}/{bottom,both} membership already baked into the *_top/_bottom cols.
+#   flags ride along as leading-edge annotation (NEVER gate the FCS input).
+.has  <- function(d, c) c %in% names(d)
+.col  <- function(d, c, default = NA) if (.has(d, c)) d[[c]] else rep(default, nrow(d))
+.istrue <- function(x) !is.na(x) & x %in% c(TRUE, "TRUE", "True", "true", 1, "1")
+.rer_dir <- tolower(as.character(.col(gene_scores, "rer_acceleration")))
+
+fcs_stats <- tibble(
+  gene             = gene_scores$Gene,
+  score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_global_all"))),
+  score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top_all"))),
+  score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom_all"))),
+  flag_gate_sig    = !is.na(.col(gene_scores, "gene_caas_score_global_sig")),
+  flag_gate_fdr    = !is.na(.col(gene_scores, "gene_caas_score_global_fdr")),
+  flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
+  flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
+  flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),
+  flag_rer_decc    = .istrue(.col(gene_scores, "rer_significant")) & grepl("dec", .rer_dir),
+  flag_accum       = .istrue(.col(gene_scores, "accum_significant"))
+) %>%
+  mutate(flag_fade = flag_fade_top | flag_fade_bottom)
+write_tsv(fcs_stats, "fcs_stats.tsv")
+cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom, %d gate_sig)\n",
+            nrow(fcs_stats), sum(!is.na(fcs_stats$score_top)),
+            sum(!is.na(fcs_stats$score_bottom)), sum(fcs_stats$flag_gate_sig)))
+
 # Correlations
 write_tsv(corr_results, "gene_correlations.tsv")
 
 # =============================================================================
-# 6. GENE LIST EXTRACTION FOR ORA
+# 7. EXPORT RASED/SIGNIFICANCE-GATED GENE LISTS
 # =============================================================================
 
-cat("\n─── Generating ORA gene lists ─────────────────────────────────\n")
+dir.create("gene_lists", showWarnings = FALSE)
 
-# Helper: write gene list file, return count
-write_gene_list <- function(genes, dir, filename) {
-  genes <- unique(genes[!is.na(genes)])
-  if (length(genes) == 0) return(0)
-  writeLines(genes, file.path(dir, filename))
-  length(genes)
-}
+# Define the 9 slices
+slices_def <- list(
+  list(name = "global_all", col = "gene_caas_score_global_all", fade_sig = NA),
+  list(name = "global_sig", col = "gene_caas_score_global_sig", fade_sig = NA),
+  list(name = "global_fdr", col = "gene_caas_score_global_fdr", fade_sig = NA),
 
-# ── Position-level ORA gene lists ────────────────────────────────────────────
-# Three slices per threshold: all positions, top-direction only, bottom-direction only.
-pos_thresholds <- list(
-  top10pct = 1 - top_pct,
-  top5pct  = 1 - top5_pct,
-  top1pct  = 1 - top1_pct
+  list(name = "top_all",    col = "gene_caas_score_top_all",    fade_sig = "fade_significant_top"),
+  list(name = "top_sig",    col = "gene_caas_score_top_sig",    fade_sig = "fade_significant_top"),
+  list(name = "top_fdr",    col = "gene_caas_score_top_fdr",    fade_sig = "fade_significant_top"),
+
+  list(name = "bottom_all", col = "gene_caas_score_bottom_all", fade_sig = "fade_significant_bottom"),
+  list(name = "bottom_sig", col = "gene_caas_score_bottom_sig", fade_sig = "fade_significant_bottom"),
+  list(name = "bottom_fdr", col = "gene_caas_score_bottom_fdr", fade_sig = "fade_significant_bottom")
 )
 
-for (pct_label in names(pos_thresholds)) {
-  thr <- quantile(pos_out$CAAS_score, pos_thresholds[[pct_label]], na.rm = TRUE)
-  above <- pos_out %>% filter(CAAS_score >= thr)
+cat("\n─── Exporting 9 STRING ranked lists ────────────────────────\n")
+for (slice in slices_def) {
+  col_name <- slice$col
+  file_name <- sprintf("gene_lists/slice_%s.tsv", slice$name)
 
-  slices <- list(
-    all    = above,
-    top    = above %>% filter(change_side %in% c("top",    "both")),
-    bottom = above %>% filter(change_side %in% c("bottom", "both"))
-  )
+  # Select non-NA genes for this slice
+  slice_df <- gene_out %>%
+    filter(!is.na(.data[[col_name]])) %>%
+    select(Gene, score = all_of(col_name))
 
-  for (slice_name in names(slices)) {
-    genes <- slices[[slice_name]] %>% pull(Gene) %>% unique()
-    fname <- sprintf("pos_caas_%s_%s.txt", pct_label, slice_name)
-    n <- write_gene_list(genes, "pos_gene_lists", fname)
-    cat(sprintf("  %s: %d genes\n", fname, n))
+  if (nrow(slice_df) == 0) {
+    # Write empty file to prevent Nextflow missing output crashes
+    write_tsv(tibble(Gene = character(), score = numeric(), is_fade = logical(), is_rer = logical(), is_accum = logical()), file_name)
+    cat(sprintf("  %s: empty (0 genes) exported\n", file_name))
+    next
   }
+
+  # Add validation columns: is_fade, is_rer, is_accum
+  f_col <- slice$fade_sig
+  slice_df <- slice_df %>%
+    mutate(
+      is_fade = if (!is.na(f_col) && f_col %in% names(gene_out)) {
+        gene_out[[f_col]][match(Gene, gene_out$Gene)] %in% TRUE
+      } else FALSE,
+      is_rer = if ("rer_significant" %in% names(gene_out)) {
+        is_sig <- gene_out$rer_significant[match(Gene, gene_out$Gene)] %in% TRUE
+        rho_val <- gene_out$rer_rho[match(Gene, gene_out$Gene)]
+        if (slice$name %in% c("top_all", "top_sig", "top_fdr")) {
+          is_sig & !is.na(rho_val) & rho_val > 0
+        } else if (slice$name %in% c("bottom_all", "bottom_sig", "bottom_fdr")) {
+          is_sig & !is.na(rho_val) & rho_val < 0
+        } else {
+          is_sig
+        }
+      } else FALSE,
+      is_accum = if ("accum_significant" %in% names(gene_out)) {
+        gene_out$accum_significant[match(Gene, gene_out$Gene)] %in% TRUE
+      } else FALSE
+    ) %>%
+    arrange(desc(score))
+
+  write_tsv(slice_df, file_name)
+  cat(sprintf("  %s: %d genes exported\n", file_name, nrow(slice_df)))
 }
 
-# ── Gene-level ORA gene lists ───────────────────────────────────────────────
-# Two types:
-#   A) Per-tool significance sets (standalone — for direct ORA)
-#   B) CAAS threshold × tool significance intersections (for overlap ORA)
-#      Applied per direction (top/bottom) × threshold (10/5/1%).
+# =============================================================================
+# 8. THRESHOLD ENRICHMENT ANALYSIS
+# =============================================================================
+# For each progressively tighter CAAS threshold, test whether the retained
+# set is enriched in independent convergent signals (RER, FADE, accumulation).
+# Produces enrichment curves: odds ratio + Fisher p per (direction × threshold × tool).
 
-# A) Standalone significance sets
-sig_sets <- list()
-if (has_rer && any(gene_out$rer_significant %in% TRUE)) {
-  sig_sets[["rer_significant"]] <- gene_out %>%
-    filter(rer_significant == TRUE) %>% pull(Gene)
-  accel_genes <- gene_out %>% filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho > 0) %>% pull(Gene)
-  decel_genes <- gene_out %>% filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho < 0) %>% pull(Gene)
-  if (length(accel_genes) > 0) sig_sets[["rer_accelerating"]] <- accel_genes
-  if (length(decel_genes) > 0) sig_sets[["rer_decelerating"]] <- decel_genes
-}
-if (has_fade_top && any(gene_out$fade_significant_top %in% TRUE)) {
-  sig_sets[["fade_top_significant"]] <- gene_out %>%
-    filter(fade_significant_top == TRUE) %>% pull(Gene)
-}
-if (has_fade_bottom && any(gene_out$fade_significant_bottom %in% TRUE)) {
-  sig_sets[["fade_bottom_significant"]] <- gene_out %>%
-    filter(fade_significant_bottom == TRUE) %>% pull(Gene)
-}
-if (has_accum && any(gene_out$accum_significant %in% TRUE)) {
-  sig_sets[["accum_significant"]] <- gene_out %>%
-    filter(accum_significant == TRUE) %>% pull(Gene)
+.fisher_enrich <- function(n_both, n_caas, n_tool, n_total) {
+  a  <- n_both
+  b  <- n_caas  - n_both
+  c_ <- n_tool  - n_both
+  d  <- n_total - n_caas - n_tool + n_both
+  if (any(c(a, b, c_, d) < 0))
+    return(list(or = NA_real_, p = NA_real_, ci_lo = NA_real_, ci_hi = NA_real_))
+  ft <- tryCatch(
+    fisher.test(matrix(c(a, b, c_, d), nrow = 2)),
+    error = function(e) list(estimate = NA_real_, p.value = NA_real_,
+                              conf.int = c(NA_real_, NA_real_))
+  )
+  list(or = as.numeric(ft$estimate), p = ft$p.value,
+       ci_lo = ft$conf.int[1], ci_hi = ft$conf.int[2])
 }
 
-for (set_name in names(sig_sets)) {
-  fname <- sprintf("gene_%s.txt", set_name)
-  n <- write_gene_list(sig_sets[[set_name]], "gene_gene_lists", fname)
-  cat(sprintf("  %s: %d genes\n", fname, n))
-}
-
-# B) CAAS threshold × tool significance intersections
-gene_caas_thresholds <- list(
-  top10 = 1 - gene_top_pct,
-  top5  = 1 - gene_top5_pct,
-  top1  = 1 - gene_top1_pct
+enrich_thresholds <- tibble(
+  label = c("top100", "top50", "top25", "top10", "top5", "top1"),
+  q     = c(0.00,     0.50,   0.75,    0.90,    0.95,   0.99)
 )
 
-for (dir in c("top", "bottom")) {
-  score_col <- paste0("gene_caas_score_", dir)
-  fade_sig  <- paste0("fade_significant_", dir)
+# ── 8a. Gene-level enrichment ─────────────────────────────────────────────────
+cat("\n─── Gene-level threshold enrichment ──────────────────────────\n")
+n_total_genes    <- n_distinct(gene_out$Gene)
+gene_enrich_rows <- list()
+k_ge             <- 1
 
+for (dir in c("top", "bottom", "global")) {
+  score_col <- if (dir == "global") "gene_caas_score" else paste0("gene_caas_score_", dir)
   vals  <- gene_out[[score_col]]
   valid <- !is.na(vals)
   if (sum(valid) < 2) next
 
-  for (pct_label in names(gene_caas_thresholds)) {
-    thr      <- quantile(vals[valid], gene_caas_thresholds[[pct_label]], na.rm = TRUE)
-    caas_set <- gene_out %>%
+  tool_sigs <- list()
+  if (dir %in% c("top", "global") && has_fade_top &&
+      any(gene_out$fade_significant_top %in% TRUE))
+    tool_sigs[["fade_top"]] <- gene_out %>%
+      filter(fade_significant_top == TRUE) %>% pull(Gene)
+  if (dir %in% c("bottom", "global") && has_fade_bottom &&
+      any(gene_out$fade_significant_bottom %in% TRUE))
+    tool_sigs[["fade_bottom"]] <- gene_out %>%
+      filter(fade_significant_bottom == TRUE) %>% pull(Gene)
+  if (has_rer && any(gene_out$rer_significant %in% TRUE)) {
+    if (dir == "global")
+      tool_sigs[["rer_global"]] <- gene_out %>%
+        filter(rer_significant == TRUE) %>% pull(Gene)
+    if (dir == "top")
+      tool_sigs[["rer_accel"]] <- gene_out %>%
+        filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho > 0) %>% pull(Gene)
+    if (dir == "bottom")
+      tool_sigs[["rer_decel"]] <- gene_out %>%
+        filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho < 0) %>% pull(Gene)
+  }
+  if (dir == "global" && has_accum && any(gene_out$accum_significant %in% TRUE))
+    tool_sigs[["accum"]] <- gene_out %>%
+      filter(accum_significant == TRUE) %>% pull(Gene)
+
+  if (length(tool_sigs) == 0) next
+
+  for (i in seq_len(nrow(enrich_thresholds))) {
+    thr_label <- enrich_thresholds$label[i]
+    q         <- enrich_thresholds$q[i]
+    thr       <- quantile(vals[valid], q, na.rm = TRUE)
+    caas_set  <- gene_out %>%
       filter(!is.na(.data[[score_col]]) & .data[[score_col]] >= thr) %>%
-      pull(Gene)
-
-    # CAAS set alone (for reference)
-    fname <- sprintf("gene_caas_%s_%s.txt", dir, pct_label)
-    write_gene_list(caas_set, "gene_gene_lists", fname)
-    cat(sprintf("  %s: %d genes\n", fname, length(unique(caas_set))))
-
-    # Intersections with each tool's significant set (direction-matched for RER)
-    tool_sigs <- list()
-    if (fade_sig %in% names(gene_out) && any(gene_out[[fade_sig]] %in% TRUE))
-      tool_sigs[[paste0("fade_", dir)]] <- gene_out %>%
-        filter(.data[[fade_sig]] == TRUE) %>% pull(Gene)
-    if (has_rer && any(gene_out$rer_significant %in% TRUE)) {
-      # Accelerating (rho > 0) matched to top direction; decelerating (rho < 0) to bottom
-      rer_dir_col  <- if (dir == "top") quote(rer_rho > 0) else quote(rer_rho < 0)
-      rer_dir_tag  <- if (dir == "top") "rer_accel" else "rer_decel"
-      rer_dir_genes <- gene_out %>%
-        filter(rer_significant == TRUE, !is.na(rer_rho), eval(rer_dir_col)) %>%
-        pull(Gene)
-      if (length(rer_dir_genes) > 0)
-        tool_sigs[[rer_dir_tag]] <- rer_dir_genes
-    }
-    if (has_accum && any(gene_out$accum_significant %in% TRUE))
-      tool_sigs[["accum"]] <- gene_out %>%
-        filter(accum_significant == TRUE) %>% pull(Gene)
+      pull(Gene) %>% unique()
+    n_caas <- length(caas_set)
 
     for (tool_name in names(tool_sigs)) {
-      overlap <- intersect(caas_set, tool_sigs[[tool_name]])
-      fname   <- sprintf("gene_caas_%s_%s_x_%s.txt", dir, pct_label, tool_name)
-      n <- write_gene_list(overlap, "gene_gene_lists", fname)
-      cat(sprintf("  %s: %d genes\n", fname, n))
+      tool_set  <- tool_sigs[[tool_name]]
+      n_tool    <- length(unique(tool_set))
+      n_overlap <- length(intersect(caas_set, tool_set))
+      fe        <- .fisher_enrich(n_overlap, n_caas, n_tool, n_total_genes)
+      gene_enrich_rows[[k_ge]] <- tibble(
+        direction   = dir,
+        threshold   = thr_label,
+        score_col   = score_col,
+        tool        = tool_name,
+        n_total     = n_total_genes,
+        n_caas_set  = n_caas,
+        n_tool_sig  = n_tool,
+        n_overlap   = n_overlap,
+        enrich_frac = if (n_caas > 0) n_overlap / n_caas else NA_real_,
+        odds_ratio  = fe$or,
+        or_ci_lo    = fe$ci_lo,
+        or_ci_hi    = fe$ci_hi,
+        fisher_p    = fe$p
+      )
+      k_ge <- k_ge + 1
     }
   }
+}
+
+if (length(gene_enrich_rows) > 0) {
+  gene_threshold_enrichment <- bind_rows(gene_enrich_rows)
+  write_tsv(gene_threshold_enrichment, "gene_threshold_enrichment.tsv")
+  cat(sprintf("  gene_threshold_enrichment.tsv: %d rows\n", nrow(gene_threshold_enrichment)))
+} else {
+  cat("  Gene-level enrichment: skipped (no tool data available)\n")
+}
+
+# ── 8b. Position-level FADE enrichment ───────────────────────────────────────
+has_fade_site_data <- (has_fade_site_top && nrow(fade_site_top_df) > 0) ||
+                      (has_fade_site_bot && nrow(fade_site_bot_df) > 0)
+
+if (has_fade_site_data) {
+  cat("\n─── Position-level FADE threshold enrichment ─────────────────\n")
+  pos_enrich_rows <- list()
+  k_pe            <- 1
+
+  for (dir in c("top", "bottom")) {
+    pos_subset <- pos_scores %>% filter(change_side %in% c(dir, "both"))
+    fade_site  <- if (dir == "top") fade_site_top_df else fade_site_bot_df
+    if (nrow(pos_subset) == 0 || nrow(fade_site) == 0) next
+
+    pos_fade <- pos_subset %>%
+      left_join(fade_site %>% select(Gene, Position, max_site_bf),
+                by = c("Gene", "Position")) %>%
+      mutate(fade_sig = !is.na(max_site_bf) & max_site_bf >= 100)
+
+    n_total_pos <- nrow(pos_fade)
+    n_fade_sig  <- sum(pos_fade$fade_sig, na.rm = TRUE)
+    if (n_fade_sig == 0) {
+      cat(sprintf("  FADE site %s: no significant positions (BF >= 100), skipping\n", dir))
+      next
+    }
+
+    vals  <- pos_fade$CAAS_score
+    valid <- !is.na(vals)
+
+    for (i in seq_len(nrow(enrich_thresholds))) {
+      thr_label <- enrich_thresholds$label[i]
+      q         <- enrich_thresholds$q[i]
+      thr       <- quantile(vals[valid], q, na.rm = TRUE)
+      caas_pos  <- pos_fade %>% filter(!is.na(CAAS_score) & CAAS_score >= thr)
+      n_caas    <- nrow(caas_pos)
+      n_overlap <- sum(caas_pos$fade_sig, na.rm = TRUE)
+      fe        <- .fisher_enrich(n_overlap, n_caas, n_fade_sig, n_total_pos)
+      pos_enrich_rows[[k_pe]] <- tibble(
+        direction   = dir,
+        threshold   = thr_label,
+        n_total     = n_total_pos,
+        n_caas_set  = n_caas,
+        n_fade_sig  = n_fade_sig,
+        n_overlap   = n_overlap,
+        enrich_frac = if (n_caas > 0) n_overlap / n_caas else NA_real_,
+        odds_ratio  = fe$or,
+        or_ci_lo    = fe$ci_lo,
+        or_ci_hi    = fe$ci_hi,
+        fisher_p    = fe$p
+      )
+      k_pe <- k_pe + 1
+    }
+  }
+
+  if (length(pos_enrich_rows) > 0) {
+    pos_threshold_enrichment <- bind_rows(pos_enrich_rows)
+    write_tsv(pos_threshold_enrichment, "pos_threshold_enrichment.tsv")
+    cat(sprintf("  pos_threshold_enrichment.tsv: %d rows\n", nrow(pos_threshold_enrichment)))
+  }
+} else {
+  cat("  Position-level FADE enrichment: skipped (no site-level FADE files)\n")
 }
 
 cat("\n═══════════════════════════════════════════════════════════════\n")

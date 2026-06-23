@@ -1,0 +1,253 @@
+---
+title: "CT Accumulation Report"
+subtitle: "`r paste0('Trait: ', params$traitname)`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 11
+    fig_height: 6
+    self_contained: true
+params:
+  accum_dir:      "."       # path to accumulation/ root (contains top/, bottom/, all/, aggregation/)
+  traitname:      "unknown_trait"
+  pval_threshold: 0.05
+  output_dir:     "."
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, out.width = "100%")
+
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(ggrepel)
+  library(DT)
+  library(paletteer)
+  library(stringr)
+  library(purrr)
+  library(readr)
+})
+
+.tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
+dir_colours <- c(top = .tableau10[1], bottom = .tableau10[2], all = .tableau10[3])
+scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "full_pool")
+
+pval_thr  <- params$pval_threshold
+accum_dir <- params$accum_dir
+```
+
+```{r load-data}
+# ── Load all per-scheme CSVs across directions ────────────────────────────────
+directions <- c("top", "bottom", "all")
+schemes    <- scheme_order
+
+load_scheme_csv <- function(direction, scheme) {
+  path <- file.path(accum_dir, direction, "randomization",
+                    sprintf("accumulation_%s_%s_aggregated_results.csv", direction, scheme))
+  if (!file.exists(path)) return(NULL)
+  df <- read_csv(path, show_col_types = FALSE)
+  # Rename scheme-suffixed columns to generic names
+  df <- df %>%
+    rename_with(~ str_remove(.x, paste0("_", scheme, "$"))) %>%
+    mutate(direction = direction, scheme = scheme)
+  df
+}
+
+raw <- map_dfr(directions, function(d) map_dfr(schemes, ~ load_scheme_csv(d, .x)))
+
+has_data <- nrow(raw) > 0
+if (!has_data) stop("No accumulation CSVs found under: ", accum_dir)
+
+# Standardise column names (Gene / gene)
+if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene = Gene)
+
+# Significant flag
+accum <- raw %>%
+  mutate(
+    significant = !is.na(PValueEmpirical) & PValueEmpirical < pval_thr,
+    scheme      = factor(scheme, levels = scheme_order),
+    direction   = factor(direction, levels = directions)
+  )
+
+# Load aggregation-level files if present
+global_path  <- file.path(accum_dir, "aggregation", "accumulation_global.csv")
+deciles_path <- file.path(accum_dir, "aggregation", "accumulation_deciles.csv")
+has_global   <- file.exists(global_path)
+has_deciles  <- file.exists(deciles_path)
+if (has_global)  global_df  <- read_csv(global_path,  show_col_types = FALSE)
+if (has_deciles) deciles_df <- read_csv(deciles_path, show_col_types = FALSE)
+```
+
+---
+
+## Overview
+
+```{r overview-table}
+summary_tbl <- accum %>%
+  group_by(direction, scheme) %>%
+  summarise(
+    n_genes        = n_distinct(gene),
+    n_significant  = sum(significant, na.rm = TRUE),
+    pct_significant = round(100 * mean(significant, na.rm = TRUE), 2),
+    .groups = "drop"
+  ) %>%
+  arrange(direction, scheme)
+
+DT::datatable(
+  summary_tbl,
+  caption  = htmltools::tags$caption(
+    style = "caption-side: top; text-align: left; font-weight: bold;",
+    sprintf("Significant genes (p < %g) per direction × scheme | Trait: %s",
+            pval_thr, params$traitname)
+  ),
+  rownames = FALSE,
+  options  = list(pageLength = 21, dom = "t")
+) %>%
+  DT::formatStyle("n_significant",
+    background = DT::styleColorBar(range(summary_tbl$n_significant), "#cce5ff"),
+    backgroundSize = "98% 88%", backgroundRepeat = "no-repeat",
+    backgroundPosition = "center"
+  )
+```
+
+---
+
+## Actual vs Simulated count distributions {.tabset}
+
+```{r scatter-tabs, results='asis'}
+for (dir in directions) {
+  cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
+  sub <- accum %>% filter(direction == dir)
+  if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
+
+  p <- ggplot(sub, aes(x = MeanSim, y = ActualCount, colour = significant)) +
+    geom_point(alpha = 0.5, size = 1.2) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey50") +
+    geom_text_repel(
+      data = sub %>% filter(significant) %>% arrange(PValueEmpirical) %>% slice_head(n = 20),
+      aes(label = gene), size = 2.5, max.overlaps = 20, show.legend = FALSE
+    ) +
+    scale_colour_manual(values = c("FALSE" = "grey70", "TRUE" = dir_colours[[dir]])) +
+    facet_wrap(~ scheme, nrow = 2) +
+    labs(
+      x      = "Mean simulated count",
+      y      = "Actual count",
+      colour = sprintf("p < %g", pval_thr),
+      title  = sprintf("Direction: %s | Trait: %s", str_to_title(dir), params$traitname)
+    ) +
+    theme_bw(base_size = 11) +
+    theme(legend.position = "bottom")
+
+  print(p)
+  cat("\n\n")
+}
+```
+
+---
+
+## Empirical p-value distributions {.tabset}
+
+```{r pval-tabs, results='asis'}
+for (dir in directions) {
+  cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
+  sub <- accum %>% filter(direction == dir, !is.na(PValueEmpirical))
+  if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
+
+  p <- ggplot(sub, aes(x = PValueEmpirical, fill = scheme)) +
+    geom_histogram(bins = 40, alpha = 0.7, colour = "white") +
+    geom_vline(xintercept = pval_thr, linetype = "dashed", colour = "red") +
+    facet_wrap(~ scheme, nrow = 2, scales = "free_y") +
+    scale_fill_manual(values = setNames(.tableau10[seq_along(scheme_order)], scheme_order)) +
+    labs(x = "Empirical p-value", y = "Gene count",
+         title = sprintf("Direction: %s", str_to_title(dir))) +
+    theme_bw(base_size = 11) +
+    theme(legend.position = "none")
+
+  print(p)
+  cat("\n\n")
+}
+```
+
+---
+
+## Significant genes {.tabset}
+
+```{r sig-tables, results='asis'}
+for (dir in directions) {
+  cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
+  sig <- accum %>%
+    filter(direction == dir, significant) %>%
+    select(gene, scheme, ActualCount, MeanSim, SD, PValueEmpirical, RandsAbove, RandsBelow) %>%
+    arrange(PValueEmpirical, gene)
+
+  if (nrow(sig) == 0) { cat("*No significant genes.*\n\n"); next }
+
+  print(DT::datatable(
+    sig, rownames = FALSE,
+    options = list(pageLength = 15, scrollX = TRUE),
+    caption = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      sprintf("Significant genes | direction: %s | p < %g", str_to_title(dir), pval_thr)
+    )
+  ) %>% DT::formatRound(c("MeanSim", "SD", "PValueEmpirical"), digits = 4))
+  cat("\n\n")
+}
+```
+
+---
+
+## Gene overlap across schemes
+
+```{r overlap}
+sig_genes_by_scheme <- accum %>%
+  filter(significant) %>%
+  group_by(direction, scheme) %>%
+  summarise(genes = list(unique(gene)), .groups = "drop")
+
+overlap_tbl <- sig_genes_by_scheme %>%
+  group_by(direction) %>%
+  summarise(
+    schemes_with_hits = sum(map_int(genes, length) > 0),
+    union_genes       = n_distinct(unlist(genes)),
+    intersection_genes = {
+      gl <- genes[map_int(genes, length) > 0]
+      if (length(gl) == 0) 0L
+      else length(Reduce(intersect, gl))
+    },
+    .groups = "drop"
+  )
+
+DT::datatable(overlap_tbl, rownames = FALSE,
+  caption = htmltools::tags$caption(
+    style = "caption-side: top; text-align: left; font-weight: bold;",
+    "Gene overlap across schemes per direction"
+  ),
+  options = list(dom = "t")
+)
+```
+
+```{r write-summary}
+# Write summary TSV (union of significant genes across all schemes per direction)
+sig_summary <- accum %>%
+  filter(significant) %>%
+  group_by(gene, direction) %>%
+  summarise(
+    n_schemes_significant = n(),
+    min_pval              = min(PValueEmpirical, na.rm = TRUE),
+    schemes               = paste(sort(unique(as.character(scheme))), collapse = ","),
+    .groups               = "drop"
+  ) %>%
+  arrange(direction, min_pval)
+
+out_tsv <- file.path(params$output_dir, paste0("accumulation_summary_", params$traitname, ".tsv"))
+write_tsv(sig_summary, out_tsv)
+invisible(NULL)
+```

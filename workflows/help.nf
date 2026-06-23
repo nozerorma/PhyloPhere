@@ -133,7 +133,7 @@ Computes composite CAAS scores at position-level and gene-level.
 
 Usage:
 --scoring                   <true|false>            false
---scoring_ora               <true|false>            true
+--scoring_enrichment         <true|false>            true
 --scoring_stress            <true|false>            false
 --scoring_stress_top_n      <INTEGER>               25
 --scoring_stress_rank_metric <"spearman">           spearman

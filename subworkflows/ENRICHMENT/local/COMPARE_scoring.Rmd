@@ -1,0 +1,160 @@
+---
+title: "Top vs Bottom Comparative Enrichment — `r params$traitname`"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+    mathjax: null
+    md_extensions: "-tex_math_dollars"   # gene-set names may contain '$' (V$HNF4_01)
+params:
+  fcs_dir:    "cmp_fcs"       # dir containing fcs_all_results.tsv
+  string_dir: "cmp_string"    # dir of *_enrichment.tsv (optional)
+  fdr_thr:    0.10
+  top_n:      20
+  traitname:  "trait"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 9, fig.height = 7, dev = "png", dpi = 200)
+suppressPackageStartupMessages({ library(tidyverse); library(knitr); library(kableExtra) })
+filter <- dplyr::filter; select <- dplyr::select; rename <- dplyr::rename; mutate <- dplyr::mutate
+has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
+
+QUAD_COLS <- c("Shared" = "#2166ac", "Top only" = "#d73027",
+               "Bottom only" = "#4dac26", "Neither" = "gray80")
+kbl_html <- function(df, height = NULL) {
+  k <- kable(df, format = "html", escape = TRUE) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = FALSE)
+  if (!is.null(height)) k <- scroll_box(k, height = height)
+  k
+}
+```
+
+```{r load, include=FALSE}
+fcs_file <- file.path(params$fcs_dir, "fcs_all_results.tsv")
+fcs <- if (file.exists(fcs_file)) readr::read_tsv(fcs_file, show_col_types = FALSE) else tibble()
+has_fcs <- nrow(fcs) > 0 && all(c("ranking", "database", "pathway", "stat", "p.adj") %in% names(fcs))
+
+string_files <- list.files(params$string_dir, pattern = "_enrichment\\.tsv$", full.names = TRUE)
+string_all <- if (length(string_files) > 0)
+  purrr::map_dfr(string_files, ~readr::read_tsv(.x, show_col_types = FALSE)) else tibble()
+has_string <- nrow(string_all) > 0
+```
+
+# Overview
+
+```{r overview, echo=FALSE}
+tibble::tibble(
+  Source = c("FCS (Wilcoxon-AUC)", "STRING"),
+  Rows   = c(nrow(fcs), nrow(string_all)),
+  Available = c(has_fcs, has_string)
+) %>% kbl_html()
+```
+
+This report contrasts the **top** and **bottom** directional FCS rankings for `r params$traitname`: which enriched gene sets are shared, and which are
+direction-specific. A set is "significant" at BH < `r params$fdr_thr` with AUC > 0.5.
+
+# FCS: Top vs Bottom {.tabset .tabset-fade}
+
+`r if (!has_fcs) "> **No FCS results available — skipping.**"`
+
+```{r fcs_prep, eval=has_fcs}
+thr <- params$fdr_thr
+desc_lookup <- fcs %>% distinct(database, pathway, description = dplyr::coalesce(description, pathway))
+wide <- fcs %>%
+  filter(ranking %in% c("top", "bottom")) %>%
+  mutate(sig = !is.na(p.adj) & p.adj < thr & stat > 0) %>%
+  select(database, pathway, ranking, AUC = stat, p.adj, sig) %>%
+  mutate(AUC = AUC + 0.5) %>%
+  pivot_wider(names_from = ranking, values_from = c(AUC, p.adj, sig),
+              names_sep = "_") %>%
+  left_join(desc_lookup, by = c("database", "pathway")) %>%
+  mutate(
+    sig_top    = dplyr::coalesce(sig_top, FALSE),
+    sig_bottom = dplyr::coalesce(sig_bottom, FALSE),
+    class = dplyr::case_when(
+      sig_top & sig_bottom ~ "Shared",
+      sig_top              ~ "Top only",
+      sig_bottom           ~ "Bottom only",
+      TRUE                 ~ "Neither"
+    )
+  )
+dir.create("compare_results", showWarnings = FALSE)
+readr::write_tsv(wide, "compare_results/fcs_top_vs_bottom.tsv")
+```
+
+## Summary
+
+```{r fcs_summary, eval=has_fcs, results='asis'}
+tab <- wide %>% filter(class != "Neither") %>% count(class, name = "n_sets")
+if (nrow(tab) == 0) cat("_No sets reached BH significance in either direction._\n") else
+  print(kbl_html(tab))
+```
+
+## Scatter (AUC top vs bottom)
+
+```{r fcs_scatter, eval=has_fcs, fig.height=6}
+pl <- wide %>% filter(!is.na(AUC_top) | !is.na(AUC_bottom)) %>%
+  mutate(AUC_top = dplyr::coalesce(AUC_top, 0.5), AUC_bottom = dplyr::coalesce(AUC_bottom, 0.5))
+p <- ggplot(pl, aes(AUC_top, AUC_bottom, colour = class)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_point(alpha = 0.7, size = 2) +
+  scale_colour_manual(values = QUAD_COLS, name = NULL) +
+  labs(title = sprintf("FCS top vs bottom AUC — %s", params$traitname),
+       x = "AUC (top ranking)", y = "AUC (bottom ranking)") +
+  theme_minimal(base_size = 12)
+if (has_pkg("ggrepel")) {
+  lab <- pl %>% filter(class %in% c("Top only", "Bottom only", "Shared")) %>%
+    slice_max(abs(AUC_top - AUC_bottom), n = 12, with_ties = FALSE)
+  if (nrow(lab) > 0) p <- p + ggrepel::geom_text_repel(
+    data = lab, aes(label = stringr::str_trunc(description, 40)), size = 2.6, max.overlaps = 20, seed = 42)
+}
+print(p)
+```
+
+## Direction-specific sets
+
+```{r fcs_tables, eval=has_fcs, results='asis'}
+for (cl in c("Top only", "Bottom only", "Shared")) {
+  d <- wide %>% filter(class == cl) %>%
+    mutate(across(c(AUC_top, AUC_bottom), ~round(.x, 3)),
+           across(c(p.adj_top, p.adj_bottom), ~signif(.x, 3)),
+           Description = stringr::str_trunc(description, 55)) %>%
+    arrange(p.adj_top, p.adj_bottom) %>%
+    select(database, pathway, Description, AUC_top, p.adj_top, AUC_bottom, p.adj_bottom) %>%
+    head(params$top_n)
+  cat(sprintf("\n### %s (%d)\n\n", cl, nrow(d)))
+  if (nrow(d) == 0) cat("_None._\n\n") else print(kbl_html(d, height = if (nrow(d) > 15) "420px" else NULL))
+}
+```
+
+# STRING: Top vs Bottom {.tabset .tabset-fade}
+
+`r if (!has_string) "> **No STRING results available — skipping.**"`
+
+```{r string_compare, eval=has_string, results='asis'}
+dir_col <- intersect(c("direction", "gene_list", "list_name"), names(string_all))[1]
+if (is.na(dir_col)) {
+  cat("_STRING results lack a direction column; showing combined table._\n\n")
+  print(kbl_html(head(string_all, params$top_n), height = "420px"))
+} else {
+  sa <- string_all %>% mutate(direction = tolower(as.character(.data[[dir_col]])),
+                              direction = dplyr::case_when(grepl("top", direction) ~ "top",
+                                                           grepl("bottom|bot", direction) ~ "bottom",
+                                                           TRUE ~ "other"))
+  term_col <- intersect(c("term", "description", "Description", "category"), names(sa))[1]
+  for (d in c("top", "bottom")) {
+    sub <- sa %>% filter(direction == d) %>% head(params$top_n)
+    cat(sprintf("\n## %s\n\n", d))
+    if (nrow(sub) == 0) cat("_None._\n\n") else print(kbl_html(sub, height = "420px"))
+  }
+}
+```

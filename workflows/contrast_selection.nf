@@ -48,7 +48,7 @@ workflow CONTRAST_SELECTION {
     // When params.reporting=true and params.prune_data=false, REPORTING() handles curation internally.
     def run_name_curation_here = (!params.reporting || params.prune_data)
     if (run_name_curation_here && (params.ali_sp_names || params.alignment)) {
-        def tax_id_param = params.input_tax_id ?: params.tax_id
+        def tax_id_param = params.tax_id
         def tax_id_ch = tax_id_param
             ? Channel.value(file(tax_id_param))
             : Channel.value(file('NO_FILE'))

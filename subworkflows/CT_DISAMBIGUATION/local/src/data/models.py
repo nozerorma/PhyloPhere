@@ -112,7 +112,6 @@ class ConvergenceResult:
     position_one_based: Optional[int] = None
     caas_pvalue: Optional[float] = None
     pvalue_boot: Optional[float] = None
-    low_confidence_nodes: Optional[List[str]] = None
 
     # Change tracking
     is_focus: bool = False
@@ -125,8 +124,19 @@ class ConvergenceResult:
 
     # Ambiguity and conserved-pair flags (dynamic multi-pair)
     ambiguous: bool = False
-    asr_is_conserved: bool = False
-    asr_root_conserved: bool = False
+
+    # ASR path score (unified replacement for binary ASR gate + convergence +
+    # parallel; computed in src/convergence/path_scores.py)
+    asr_path_score: Optional[float] = None
+    independence: Optional[float] = None
+    mrca_diversity: Optional[float] = None
+    derived_agreement: Optional[float] = None
+    conservation_gate: Optional[float] = None
+    count_factor: Optional[float] = None
+    n_changed_pairs: Optional[int] = None
+    n_changed_sides: Optional[int] = None
+    pair_path_scores: Optional[Dict[int, float]] = None
+    pair_path_contaminated: Optional[Dict[int, bool]] = None
 
 
 @dataclass

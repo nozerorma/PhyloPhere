@@ -13,6 +13,8 @@
  *   postproc_file         : path — filtered_discovery.tsv (mandatory)
  *   fade_summary_top      : path — fade_summary_top.tsv (or NO_FILE)
  *   fade_summary_bottom   : path — fade_summary_bottom.tsv (or NO_FILE)
+ *   fade_site_top         : path — fade_site_bf_top.tsv (or NO_FADE_SITE_TOP sentinel)
+ *   fade_site_bot         : path — fade_site_bf_bottom.tsv (or NO_FADE_SITE_BOT sentinel)
  *   rer_summary           : path — rerconverge_summary_{trait}.tsv (or NO_FILE)
  *   accum_files           : path — directory or collected CSVs (or NO_FILE)
  *
@@ -21,8 +23,9 @@
  *   position_scores    : TSV with per Gene×Position scores
  *   gene_scores        : TSV with per Gene scores + directional significance flags
  *   gene_correlations  : TSV with pairwise correlations
- *   position_gene_lists: TXT files for position-level ORA (all/top/bottom × 10/5/1%)
- *   gene_gene_lists    : TXT files for gene-level ORA (significance sets + intersections)
+ *   gene_lists                : directory of 9 slice TSVs (Global/Top/Bottom × All/Sig/FDR) for STRING
+ *   gene_threshold_enrichment : TSV — gene-level enrichment curve across CAAS thresholds × tools
+ *   pos_threshold_enrichment  : TSV — position-level FADE enrichment curve across CAAS thresholds
  */
 
 process SCORING_COMPUTE {
@@ -32,23 +35,23 @@ process SCORING_COMPUTE {
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
                pattern: '*.tsv'
-    publishDir path: "${params.outdir}/scoring/gene_lists/position",
+    publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
-               pattern: 'pos_gene_lists/*.txt'
-    publishDir path: "${params.outdir}/scoring/gene_lists/gene",
-               mode: 'copy', overwrite: true,
-               pattern: 'gene_gene_lists/*.txt'
+               pattern: 'gene_lists'
 
     input:
     path postproc_file
     path fade_summary_top
     path fade_summary_bottom
+    path fade_site_top
+    path fade_site_bot
     path rer_summary
     path accum_files
 
     output:
     path "position_scores.tsv",                              emit: position_scores
     path "gene_scores.tsv",                                  emit: gene_scores
+    path "fcs_stats.tsv",                                    emit: fcs_stats
     path "gene_correlations.tsv",                            emit: gene_correlations
     path "position_score_stress_summary.tsv",         optional: true, emit: stress_summary
     path "position_score_stress_correlations.tsv",    optional: true, emit: stress_correlations
@@ -56,37 +59,46 @@ process SCORING_COMPUTE {
     path "position_score_stress_top_overlap.tsv",     optional: true, emit: stress_top_overlap
     path "position_score_stress_variants.tsv",        optional: true, emit: stress_variants
     path "position_score_stress_latent_loadings.tsv", optional: true, emit: stress_latent_loadings
-    path "pos_gene_lists/*.txt",                      optional: true, emit: position_gene_lists
-    path "gene_gene_lists/*.txt",                     optional: true, emit: gene_gene_lists
+    path "gene_lists",                                 optional: true, emit: gene_lists
+    path "gene_threshold_enrichment.tsv",             optional: true, emit: gene_threshold_enrichment
+    path "pos_threshold_enrichment.tsv",              optional: true, emit: pos_threshold_enrichment
 
     script:
     def local_dir       = "${baseDir}/subworkflows/SCORING/local"
     def top_pct         = params.scoring_position_top_pct    ?: 0.10
+    def top25_pct       = params.scoring_position_top25_pct  ?: 0.25
     def top5_pct        = params.scoring_position_top5_pct   ?: 0.05
     def top1_pct        = params.scoring_position_top1_pct   ?: 0.01
     def g_top_pct       = params.scoring_gene_top_pct        ?: 0.10
+    def g_top25_pct     = params.scoring_gene_top25_pct      ?: 0.25
     def g_top5_pct      = params.scoring_gene_top5_pct       ?: 0.05
     def g_top1_pct      = params.scoring_gene_top1_pct       ?: 0.01
-    def accum_arg       = (accum_files instanceof List
-                            ? (accum_files.size() == 1 && accum_files[0].name.startsWith('NO_') ? 'NO_ACCUM' : '.')
-                            : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
+    def accum_arg         = (accum_files instanceof List
+                              ? (accum_files.size() == 1 && accum_files[0].name.startsWith('NO_') ? 'NO_ACCUM' : '.')
+                              : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
+    def fs_top_arg        = fade_site_top.name =~ /^NO_FADE_SITE_TOP/ ? 'NO_FADE_SITE_TOP' : "${fade_site_top}"
+    def fs_bot_arg        = fade_site_bot.name =~ /^NO_FADE_SITE_BOT/ ? 'NO_FADE_SITE_BOT' : "${fade_site_bot}"
 
     if (params.use_singularity || params.use_apptainer) {
         """
         cp ${local_dir}/scoring_compute.R .
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
-            --postproc    '${postproc_file}' \
-            --fade_top    '${fade_summary_top}' \
-            --fade_bottom '${fade_summary_bottom}' \
-            --rer         '${rer_summary}' \
-            --accum_dir   '${accum_arg}' \
+            --postproc       '${postproc_file}' \
+            --fade_top       '${fade_summary_top}' \
+            --fade_bottom    '${fade_summary_bottom}' \
+            --fade_site_top  '${fs_top_arg}' \
+            --fade_site_bot  '${fs_bot_arg}' \
+            --rer            '${rer_summary}' \
+            --accum_dir      '${accum_arg}' \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
+            --top25_pct            ${top25_pct} \
             --top5_pct             ${top5_pct} \
             --top1_pct             ${top1_pct} \
             --gene_top_pct         ${g_top_pct} \
+            --gene_top25_pct       ${g_top25_pct} \
             --gene_top5_pct        ${g_top5_pct} \
             --gene_top1_pct        ${g_top1_pct}
         """
@@ -95,17 +107,21 @@ process SCORING_COMPUTE {
         cp ${local_dir}/scoring_compute.R .
 
         Rscript scoring_compute.R \
-            --postproc    '${postproc_file}' \
-            --fade_top    '${fade_summary_top}' \
-            --fade_bottom '${fade_summary_bottom}' \
-            --rer         '${rer_summary}' \
-            --accum_dir   '${accum_arg}' \
+            --postproc       '${postproc_file}' \
+            --fade_top       '${fade_summary_top}' \
+            --fade_bottom    '${fade_summary_bottom}' \
+            --fade_site_top  '${fs_top_arg}' \
+            --fade_site_bot  '${fs_bot_arg}' \
+            --rer            '${rer_summary}' \
+            --accum_dir      '${accum_arg}' \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
+            --top25_pct            ${top25_pct} \
             --top5_pct             ${top5_pct} \
             --top1_pct             ${top1_pct} \
             --gene_top_pct         ${g_top_pct} \
+            --gene_top25_pct       ${g_top25_pct} \
             --gene_top5_pct        ${g_top5_pct} \
             --gene_top1_pct        ${g_top1_pct}
         """

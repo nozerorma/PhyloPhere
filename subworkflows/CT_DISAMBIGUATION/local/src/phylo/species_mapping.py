@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 # Per-process deduplication: log each taxid conflict only once per worker to
 # avoid flooding stderr when processing thousands of genes with the same conflict.
 _WARNED_CONFLICT_TAXIDS: Set[str] = set()
+_WARNED_TREE_UNMATCHED_SPECIES: Set[str] = set()
+_WARNED_ALIGNMENT_UNMATCHED_SPECIES: Set[str] = set()
 
 
 def read_taxid_mapping(taxid_file: Path) -> Dict[str, str]:
@@ -174,7 +176,29 @@ def match_tree_alignment_by_taxid(
             tree_taxid_to_sp[taxid] = sp
         else:
             tree_unmatched.append(sp)
-            logger.warning(f"Tree species not in tax_id mapping: {sp}")
+
+    if tree_unmatched:
+        # Avoid printing the same missing species for every gene in long runs.
+        unseen_tree_unmatched = sorted(
+            [sp for sp in tree_unmatched if sp not in _WARNED_TREE_UNMATCHED_SPECIES]
+        )
+        _WARNED_TREE_UNMATCHED_SPECIES.update(tree_unmatched)
+
+        if unseen_tree_unmatched:
+            preview = ", ".join(unseen_tree_unmatched[:10])
+            suffix = "" if len(unseen_tree_unmatched) <= 10 else ", ..."
+            logger.warning(
+                "Pruning %d tree species missing in tax_id mapping (showing %d new): %s%s",
+                len(tree_unmatched),
+                len(unseen_tree_unmatched),
+                preview,
+                suffix,
+            )
+        else:
+            logger.debug(
+                "Pruning %d tree species missing in tax_id mapping (all previously reported)",
+                len(tree_unmatched),
+            )
 
     logger.info(
         "Tree: %d species mapped to tax_ids, %d unmatched",
@@ -195,7 +219,32 @@ def match_tree_alignment_by_taxid(
             aln_taxid_to_sp.setdefault(taxid, sp)
         else:
             aln_unmatched.append(sp)
-            logger.warning(f"Alignment species not in tax_id mapping: {sp}")
+
+    if aln_unmatched:
+        unseen_aln_unmatched = sorted(
+            [
+                sp
+                for sp in aln_unmatched
+                if sp not in _WARNED_ALIGNMENT_UNMATCHED_SPECIES
+            ]
+        )
+        _WARNED_ALIGNMENT_UNMATCHED_SPECIES.update(aln_unmatched)
+
+        if unseen_aln_unmatched:
+            preview = ", ".join(unseen_aln_unmatched[:10])
+            suffix = "" if len(unseen_aln_unmatched) <= 10 else ", ..."
+            logger.warning(
+                "Ignoring %d alignment species missing in tax_id mapping (showing %d new): %s%s",
+                len(aln_unmatched),
+                len(unseen_aln_unmatched),
+                preview,
+                suffix,
+            )
+        else:
+            logger.debug(
+                "Ignoring %d alignment species missing in tax_id mapping (all previously reported)",
+                len(aln_unmatched),
+            )
 
     synthetic_taxids: Dict[str, Dict[str, str]] = {}
     all_existing_taxids: Set[str] = set(tree_sp_to_taxid.values()) | set(
@@ -338,6 +387,11 @@ def match_tree_alignment_by_taxid(
     species_to_keep_in_tree = [
         tree_taxid_to_sp[taxid] for taxid in common_taxids if taxid in tree_taxid_to_sp
     ]
+
+    # Explicitly drop tree tips that have no tax_id mapping before the final common
+    # species prune so this behavior is guaranteed and visible in logs.
+    if tree_unmatched:
+        tree = prune_tree(tree, sorted(tree_sp_to_taxid.keys()))
 
     pruned_tree = prune_tree(tree, species_to_keep_in_tree)
     logger.info("Pruned tree to %d species", len(species_to_keep_in_tree))

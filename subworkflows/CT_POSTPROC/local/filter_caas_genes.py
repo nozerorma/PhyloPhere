@@ -212,14 +212,17 @@ def detect_dubious_genes(discovery_df, gene_length_df, cluster_file, iqr_multipl
         genes_with_clusters = cluster_df[cluster_df['ClusteringFlag'] == 'Discarded']['Gene'].unique()
         dubious_genes = iqr_outliers[iqr_outliers['Gene'].isin(genes_with_clusters)].copy()
     
-    # Only modify non-empty DataFrame
+    # Drop iqr_threshold column if it exists (present regardless of dubious count)
+    if 'iqr_threshold' in dubious_genes.columns:
+        dubious_genes = dubious_genes.drop(columns=['iqr_threshold'])
+
     if len(dubious_genes) > 0:
         dubious_genes['Category'] = 'Dubious'
-        # Drop iqr_threshold column if it exists
-        if 'iqr_threshold' in dubious_genes.columns:
-            dubious_genes = dubious_genes.drop(columns=['iqr_threshold'])
-        # Calculate CAAS density for output
         dubious_genes['n_CAAS_per_length'] = (dubious_genes['n_CAAS'] / dubious_genes['Length']) * 100
+    else:
+        # Ensure required columns are always present even when result is empty
+        dubious_genes['Category'] = pd.Series(dtype='object')
+        dubious_genes['n_CAAS_per_length'] = pd.Series(dtype='float64')
     
     if has_caap_group:
         group_counts = dubious_genes.groupby('CAAP_Group').size()

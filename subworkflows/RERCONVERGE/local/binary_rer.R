@@ -134,12 +134,25 @@ if (num_batches > 0 && perms_per_batch > 0) {
   }
 
   permpvals      <- permpvalcor(res, perms_combined)
+
+  # Apply standard pseudo-count correction (num + 1) / (denom + 1)
+  # to prevent exact 0 p-values and properly represent finite empirical probability.
+  n_perms <- num_batches * perms_per_batch
+  permpvals <- (permpvals * n_perms + 1) / (n_perms + 1)
+
   res$p.perm     <- permpvals[rownames(res)]
-  attr(res, "n_perms") <- num_batches * perms_per_batch
+  # BH-correct the permulation p-values for multiple testing across genes.
+  res$p.perm.adj <- p.adjust(res$p.perm, method = "BH")
+  attr(res, "n_perms") <- n_perms
   message(sprintf(
     "[RER_BIN] Permutation p-values computed for %d / %d genes (N=%d perms).",
-    sum(!is.na(res$p.perm)), nrow(res), num_batches * perms_per_batch
+    sum(!is.na(res$p.perm)), nrow(res), n_perms
   ))
+  
+  # Save the raw permutations object containing null statistics matrices for pathway-level permulations downstream
+  perms_path <- sub("\\.output$", ".perms.rds", args[5])
+  saveRDS(perms_combined, file = perms_path)
+  message("[RER_BIN] Saved raw null permutations RDS to: ", perms_path)
 } else {
   message("[RER_BIN] Permutation testing skipped (rer_perm_batches = 0).")
 }

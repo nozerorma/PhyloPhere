@@ -12,12 +12,10 @@
  * File: workflows/scoring.nf
  */
 
-include { SCORING_COMPUTE }         from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
-include { SCORING_REPORT }          from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
-include { ORA_GENERAL_REPORT as ORA_SCORING_POSITION   } from "${baseDir}/subworkflows/ORA/ora_general.nf"
-include { ORA_GENERAL_REPORT as ORA_SCORING_GENE       } from "${baseDir}/subworkflows/ORA/ora_general.nf"
-include { STRING_GENERAL_REPORT as STRING_SCORING_POSITION } from "${baseDir}/subworkflows/ORA/string_general.nf"
-include { STRING_GENERAL_REPORT as STRING_SCORING_GENE     } from "${baseDir}/subworkflows/ORA/string_general.nf"
+include { SCORING_COMPUTE }                                                           from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
+include { SCORING_REPORT }                                                            from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
+include { SCORING_STRING_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/scoring_enrichment.nf"
+include { SCORING_FCS_REPORT }                            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 
 
 workflow SCORING {
@@ -28,13 +26,11 @@ workflow SCORING {
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
         accum_ch                 // Channel<path> or null — collected accumulation CSVs (all directions)
-        background_ch            // Channel<path> or null — cleaned_background_main.txt
-        vep_transvar_ch          // Channel<path> or null — transvar_annotations.tsv (optional)
         vep_primateai_ch         // Channel<path> or null — primateai_scores.tsv     (optional)
-        vep_aa2prot_ch           // Channel<path> or null — aa2prot_global.csv (optional)
         genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
         fade_site_top_ch         // Channel<path> or null — fade_site_bf_top.tsv     (optional)
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
+        cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -81,14 +77,8 @@ workflow SCORING {
             .ifEmpty { [file('NO_ACCUM')] }
 
         // VEP optional inputs
-        def resolved_vep_transvar = (vep_transvar_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_vep_transvar ?: 'NO_VEP_TRANSVAR') }
-
         def resolved_vep_primateai = (vep_primateai_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_vep_primateai ?: 'NO_VEP_PRIMATEAI') }
-
-        def resolved_vep_aa2prot = (vep_aa2prot_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_vep_aa2prot ?: 'NO_VEP_AA2PROT') }
 
         def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
             .ifEmpty {
@@ -102,21 +92,13 @@ workflow SCORING {
         def resolved_fade_site_bot_ch = (fade_site_bot_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_fade_site_bottom ?: 'NO_FADE_SITE_BOT.txt') }
 
-        def resolved_background = (background_ch ?: Channel.empty())
-            .ifEmpty {
-                def bg = params.scoring_background_input ?: ''
-                if (bg) {
-                    def f = file(bg)
-                    if (f.exists()) return f
-                }
-                file('NO_BACKGROUND')
-            }
-
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
             resolved_postproc,
             resolved_fade_top,
             resolved_fade_bottom,
+            resolved_fade_site_top_ch,
+            resolved_fade_site_bot_ch,
             resolved_rer,
             accum_all_ch
         )
@@ -139,44 +121,52 @@ workflow SCORING {
             _opt(compute_out.stress_latent_loadings, 'NO_SCORING_STRESS_LOADINGS'),
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
-            resolved_vep_transvar,
             resolved_vep_primateai,
-            resolved_vep_aa2prot,
             resolved_genomic_info
         )
 
-        // ── ORA on scoring gene lists (optional) ───────────────────────────
-        if (params.scoring_ora) {
-            def bg_after_report = resolved_background
-                .combine(report_out.report.collect())
-                .map { it[0] }
+        def gene_lists_ch = compute_out.gene_lists
+            .ifEmpty { file('NO_GENE_LISTS') }
 
-            ORA_SCORING_POSITION(
-                bg_after_report,
-                compute_out.position_gene_lists.collect(),
-                'ORA_scoring_position'
-            )
+        // ── FCS enrichment (Wilcoxon-AUC) ───────────
+        // Universe = cleaned_background (all tested genes); FCS_general.Rmd
+        // floors no-signal genes to 0. Falls back to scored genes if absent.
+        // .first() → value channel so the single background file can fan out to
+        // BOTH the FCS and STRING processes (a queue channel would feed only one).
+        def fcs_universe_ch = (cleaned_background_ch ?: Channel.empty())
+            .ifEmpty { file('NO_BACKGROUND') }
+            .first()
+        def fcs_out = SCORING_FCS_REPORT(compute_out.fcs_stats, fcs_universe_ch)
 
-            ORA_SCORING_GENE(
-                bg_after_report,
-                compute_out.gene_gene_lists.collect(),
-                'ORA_scoring_gene'
-            )
+        // ── STRING on the gated directional 9-slice gene lists ────────────
+        def run_string = params.scoring_string ?: false
+        def string_out = null
+        if (run_string) {
+            string_out = SCORING_STRING_REPORT(gene_lists_ch, fcs_universe_ch, compute_out.gene_scores)
+        }
 
-            if (params.string) {
-                STRING_SCORING_POSITION(
-                    bg_after_report,
-                    compute_out.position_gene_lists.collect()
-                )
-                STRING_SCORING_GENE(
-                    bg_after_report,
-                    compute_out.gene_gene_lists.collect()
-                )
-            }
+        // ── Comparative report: Top vs Bottom across FCS + STRING ─────────
+        def fcs_all_ch = fcs_out.fcs_all_results
+            .ifEmpty { file('NO_FCS_ALL') }
+
+        def string_tsv_ch = run_string
+            ? string_out.string_enrichment_tsvs
+                .ifEmpty { file('NO_STRING_TSV') }
+                .collect()
+            : Channel.value([ file('NO_STRING_TSV') ])
+
+        def cmp_out = SCORING_COMPARE_REPORT(fcs_all_ch, string_tsv_ch)
+
+        // Collect all reports to force Nextflow to wait for completion
+        def final_reports = report_out.report
+            .mix(fcs_out.report)
+            .mix(cmp_out.report)
+        if (run_string) {
+            final_reports = final_reports.mix(string_out.report)
         }
 
     emit:
         position_scores = compute_out.position_scores
         gene_scores     = compute_out.gene_scores
-        report          = report_out.report
+        report          = final_reports
 }

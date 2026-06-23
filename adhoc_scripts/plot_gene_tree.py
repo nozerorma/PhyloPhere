@@ -57,6 +57,12 @@ Examples:
         help="Tree file (auto-detected if not provided)"
     )
     parser.add_argument(
+        "--asr-root",
+        type=Path,
+        default=None,
+        help="Root directory containing asr_GENE/rst files (e.g. scratch/2.Primates/1.Primates_data/asr)"
+    )
+    parser.add_argument(
         "--fig-width",
         type=float,
         default=20,
@@ -193,17 +199,29 @@ Examples:
     
     logger.info(f"Using tree: {tree_file}")
     
-    # Create temporary RST symlink so plotter can find it
-    rst_file = args.debug_root / "diagnostics" / "asr" / f"asr_{args.gene}" / "rst"
+    # Resolve RST file: --asr-root takes priority, then debug_root/diagnostics/asr
+    rst_file = None
+    if args.asr_root:
+        candidate = args.asr_root / f"asr_{args.gene}" / "rst"
+        if candidate.exists():
+            rst_file = candidate
+        else:
+            logger.warning(f"RST not found at expected path: {candidate}")
+    else:
+        fallback = args.debug_root / "diagnostics" / "asr" / f"asr_{args.gene}" / "rst"
+        if fallback.exists():
+            rst_file = fallback
+
     rst_dest = Path(tree_file).parent / "rst"
-    
     symlink_created = False
     try:
-        if rst_file.exists() and not rst_dest.exists():
-            logger.info(f"Creating RST symlink for plotter")
+        if rst_file and not rst_dest.exists():
+            logger.info(f"Creating RST symlink: {rst_file} → {rst_dest}")
             rst_dest.symlink_to(rst_file)
             symlink_created = True
-        
+        elif not rst_file:
+            logger.warning("No RST file found; tree will be plotted without PAML node IDs")
+
         # Call the actual disambiguation plotter
         plot_path = create_gene_tree_state_plot(
             results=results,
@@ -212,15 +230,15 @@ Examples:
             tree_file=Path(tree_file),
             focus_position=args.position,
         )
-        
+
         if not plot_path:
             logger.error("Failed to generate plot")
             return 1
-        
+
         logger.info(f"✓ Plot saved: {plot_path}")
         print(f"\n✓ Success! Plot saved to:\n  {plot_path}\n")
         return 0
-    
+
     finally:
         if symlink_created and rst_dest.is_symlink():
             rst_dest.unlink()

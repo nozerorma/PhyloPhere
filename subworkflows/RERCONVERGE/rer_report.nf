@@ -34,7 +34,6 @@ process RER_REPORT {
 
     input:
     path continuous_output
-    path gmt_file           // pass file('NO_FILE') when not provided
 
     output:
     path "RERconverge_report.html",   emit: report
@@ -44,20 +43,17 @@ process RER_REPORT {
     def local_dir        = "${baseDir}/subworkflows/RERCONVERGE/local"
     def outdir           = "${params.outdir}/RERConverge/RER_Results"
     def pval_thr         = params.rer_pval_threshold  ?: 0.05
-    def rho_thr          = params.rer_rho_threshold   ?: 0.3
     def top_n            = params.rer_top_n_labels    ?: 15
     def traitname        = params.traitname           ?: 'unknown_trait'
-    def enrich_min_genes = params.rer_enrich_min_genes ?: 10
-    def enrich_top_n     = params.rer_enrich_top_n     ?: 20
-    // gmt_file is staged by Nextflow — pass basename if real, empty string if sentinel
-    def gmt_arg          = (gmt_file.name == 'NO_FILE') ? '' : gmt_file.name
+    def top_pct          = params.rer_top_pct          ?: 0.10
+    def top5_pct         = params.rer_top5_pct         ?: 0.05
+    def top1_pct         = params.rer_top1_pct         ?: 0.01
 
     if (params.use_singularity || params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
 
         echo "[RER_REPORT] Input RDS: ${continuous_output}"
-        echo "[RER_REPORT] GMT file: ${gmt_arg ?: 'none'}"
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
@@ -66,12 +62,11 @@ process RER_REPORT {
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
                     pval_threshold    = ${pval_thr},
-                    rho_threshold     = ${rho_thr},
                     top_n_labels      = ${top_n},
-                    output_dir        = '${outdir}',
-                    gmt_file          = '${gmt_arg}',
-                    enrich_min_genes  = ${enrich_min_genes},
-                    enrich_top_n      = ${enrich_top_n}
+                    top_pct           = ${top_pct},
+                    top5_pct          = ${top5_pct},
+                    top1_pct          = ${top1_pct},
+                    output_dir        = '${outdir}'
                 ),
                 output_file = 'RERconverge_report.html'
             )
@@ -88,7 +83,6 @@ process RER_REPORT {
         cp -R ${local_dir}/* .
 
         echo "[RER_REPORT] Input RDS: ${continuous_output}"
-        echo "[RER_REPORT] GMT file: ${gmt_arg ?: 'none'}"
 
         Rscript -e "
             rmarkdown::render(
@@ -97,12 +91,11 @@ process RER_REPORT {
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
                     pval_threshold    = ${pval_thr},
-                    rho_threshold     = ${rho_thr},
                     top_n_labels      = ${top_n},
-                    output_dir        = '${outdir}',
-                    gmt_file          = '${gmt_arg}',
-                    enrich_min_genes  = ${enrich_min_genes},
-                    enrich_top_n      = ${enrich_top_n}
+                    top_pct           = ${top_pct},
+                    top5_pct          = ${top5_pct},
+                    top1_pct          = ${top1_pct},
+                    output_dir        = '${outdir}'
                 ),
                 output_file = 'RERconverge_report.html'
             )

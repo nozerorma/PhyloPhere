@@ -10,7 +10,7 @@ import subprocess
 import shutil
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional, TypedDict
 from dataclasses import dataclass
 
 from Bio.Align import MultipleSeqAlignment
@@ -22,7 +22,14 @@ logger = logging.getLogger(__name__)
 
 # Updated ASRConfig to include asr_input_dir
 # Mapping for substitution models
-MODEL_SPECS = {
+class ModelSpec(TypedDict):
+    """PAML substitution-model specification."""
+
+    paml_model: int
+    aa_rate_file: Optional[str]
+
+
+MODEL_SPECS: Dict[str, ModelSpec] = {
     "poisson": {"paml_model": 0, "aa_rate_file": None},
     "poison": {"paml_model": 0, "aa_rate_file": None},  # alias
     "proportional": {"paml_model": 1, "aa_rate_file": None},
@@ -78,7 +85,7 @@ class ASRReconstructor:
                     "PAML codeml binary not found in PATH. "
                     "Please install or provide --paml-binary with full path to codeml."
                 )
-            self.paml_binary = tool_path
+            self.paml_binary = Path(tool_path)
             logger.info(f"Found PAML codeml at {tool_path}")
         else:
             if not self.config.asr_input_dir or not self.config.asr_input_dir.exists():
@@ -275,8 +282,9 @@ class ASRReconstructor:
         model_key = self._normalize_model_key(self.config.model)
         model_cfg = MODEL_SPECS.get(model_key, MODEL_SPECS[DEFAULT_MODEL])
         rate_file_path = None
-        if model_cfg.get("aa_rate_file"):
-            rate_file_path = self._resolve_rate_file(model_cfg["aa_rate_file"])
+        aa_rate_file = model_cfg.get("aa_rate_file")
+        if aa_rate_file:
+            rate_file_path = self._resolve_rate_file(aa_rate_file)
             logger.info(f"Using amino acid rate file: {rate_file_path}")
         logger.info(
             f"Using substitution model '{model_key}' (PAML model={model_cfg['paml_model']})"

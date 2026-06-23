@@ -1,2 +1,0 @@
-Documentation is provided in read the docs: (URL)
-For further inquires: Fabio Barteri (fabio.barteri@upf.edu)

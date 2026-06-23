@@ -207,10 +207,6 @@ def read_metadata_caas(metadata_file):
                 logging.warning(f"Skipping malformed meta_caas line: {line[:120]} — {e}")
                 continue
 
-            # Exclude GS0 entries.
-            if group.upper() == 'GS0':
-                continue
-
             # Exclude dubious-conserved positions: is_conserved_meta=TRUE but asr_is_conserved=FALSE.
             if conserved_idx is not None and asr_conserved_idx is not None:
                 _is_cons = _as_bool(parts[conserved_idx]) if conserved_idx < len(parts) else False
@@ -254,18 +250,25 @@ def validate_species(alignment, required_species):
 
 def calculate_conservation(alignment, group_species=None):
     seq_len = alignment.get_alignment_length()
-    general_counts = [defaultdict(int) for _ in range(seq_len)]
-    for record in alignment:
-        for pos in range(seq_len):
-            aa = record.seq[pos]
-            if aa != '-':
-                general_counts[pos][aa] += 1
+    if len(alignment) == 0:
+        return {pos: {'cons_idx': 0.0} for pos in range(seq_len)}
+
+    # Load alignment sequences into a 2D uint8 NumPy array
+    seqs = np.array([list(str(rec.seq).encode('ascii')) for rec in alignment], dtype=np.uint8)
+
+    # Gap is ASCII 45
+    gap_char = 45
     results = {}
     for pos in range(seq_len):
-        g_counts = general_counts[pos]
-        g_total  = sum(g_counts.values()) or 1
-        max_val  = max(g_counts.values(), default=0)
-        cons_idx = (max_val / g_total) * 100
+        col = seqs[:, pos]
+        non_gap = col[col != gap_char]
+        g_total = len(non_gap)
+        if g_total == 0:
+            cons_idx = 0.0
+        else:
+            counts = np.bincount(non_gap)
+            max_val = counts.max() if len(counts) > 0 else 0
+            cons_idx = (max_val / g_total) * 100
         results[pos] = {'cons_idx': cons_idx}
     return results
 
@@ -273,13 +276,13 @@ def calculate_conservation(alignment, group_species=None):
 def calculate_masked_positions(alignment, target_species):
     target_set = set(target_species)
     seq_len = alignment.get_alignment_length()
-    masked = set()
-    for pos in range(seq_len):
-        for rec in alignment:
-            if rec.id in target_set and rec.seq[pos] == '-':
-                masked.add(pos)
-                break
-    return masked
+    target_recs = [rec for rec in alignment if rec.id in target_set]
+    if not target_recs:
+        return set()
+
+    seqs = np.array([list(str(rec.seq).encode('ascii')) for rec in target_recs], dtype=np.uint8)
+    masked_cols = np.any(seqs == 45, axis=0)
+    return set(np.where(masked_cols)[0])
 
 
 def aggregate(args):
@@ -289,6 +292,16 @@ def aggregate(args):
     gene_info_list = read_genomic_info(args.genomic_info)
     bg_list        = read_bg_info(args.bg_caas)
     metadata_dict  = read_metadata_caas(args.metadata_caas) if args.metadata_caas else {}
+
+    # Map gene names to entropy TSV file paths if entropy_dir is provided
+    entropy_files = {}
+    if getattr(args, 'entropy_dir', None) and os.path.isdir(args.entropy_dir):
+        logging.info(f"Scanning entropy directory: {args.entropy_dir}")
+        for f in os.listdir(args.entropy_dir):
+            if f.endswith('.entropy.tsv') and not f.endswith('.clade_entropy.tsv'):
+                gene = f.split('.')[0]
+                entropy_files[gene] = os.path.join(args.entropy_dir, f)
+        logging.info(f"Found {len(entropy_files)} matching entropy files")
 
     # Filter gene_info_list to background genes only
     if bg_list:
@@ -347,6 +360,25 @@ def aggregate(args):
                     f"MSA length mismatch for {gene_name}: observed {seq_len} "
                     f"vs metadata {gene_info['msa_length']}"
                 )
+
+            # Load entropy values if entropy file is available
+            entropy_vals = {}
+            entropy_loaded = False
+            if getattr(args, 'entropy_dir', None):
+                if gene_name in entropy_files:
+                    try:
+                        with open(entropy_files[gene_name], 'r') as ef:
+                            reader = csv.DictReader(ef, delimiter='\t')
+                            for row in reader:
+                                pos = int(row['position'])
+                                var = float(row['variability'])
+                                entropy_vals[pos - 1] = var
+                        entropy_loaded = True
+                    except Exception as e:
+                        logging.warning(f"Error reading entropy file for {gene_name}: {e}")
+                else:
+                    logging.warning(f"No entropy file found for gene {gene_name}")
+
             general_cons = calculate_conservation(alignment)
             masked_pos   = calculate_masked_positions(alignment, all_species)
 
@@ -356,6 +388,19 @@ def aggregate(args):
                     msa_pos in metadata_dict.get(g, {}).get(gene_name, {})
                     for g in metadata_dict
                 ) if metadata_dict else False
+
+                # Determine conservation value and masking
+                is_masked = (msa_pos in masked_pos)
+                if getattr(args, 'entropy_dir', None):
+                    # In entropy mode, if the position (or file) is missing, we nullify it
+                    if entropy_loaded and msa_pos in entropy_vals:
+                        cons_val = entropy_vals[msa_pos]
+                    else:
+                        cons_val = "" # Write empty/null value
+                        is_masked = True # Nullified positions must be masked out to exclude from permutations
+                else:
+                    cons_val = general_cons[msa_pos]['cons_idx']
+
                 aggregated_writer.writerow({
                     'gene':     gene_name,
                     'msa_pos':  msa_pos,
@@ -363,12 +408,12 @@ def aggregate(args):
                     'chr':      gene_info['chr'],
                     'start':    gene_info['start'],
                     'end':      gene_info['end'],
-                    'cons_idx': general_cons[msa_pos]['cons_idx'],
-                    'masked':   (msa_pos in masked_pos),
+                    'cons_idx': cons_val,
+                    'masked':   is_masked,
                     'iscaas':   is_caas,
                 })
-                if is_caas:
-                    overall_caas_cons.append(general_cons[msa_pos]['cons_idx'])
+                if is_caas and cons_val != "":
+                    overall_caas_cons.append(float(cons_val))
 
             genes_written += 1
             del alignment
@@ -415,6 +460,7 @@ if __name__ == "__main__":
     parser.add_argument('-m', '--metadata-caas',   help='Meta-CAAS file (original or global_meta_caas.tsv format)')
     parser.add_argument('-b', '--bg-caas',         help='Cleaned background gene list (one gene per line, no header)')
     parser.add_argument('-o', '--output-prefix',   required=True, help='Prefix for output files')
+    parser.add_argument('--entropy-dir',           help='Directory containing Valdar entropy (.entropy.tsv) files')
     parser.add_argument('--log-level', default='INFO')
 
     args = parser.parse_args()

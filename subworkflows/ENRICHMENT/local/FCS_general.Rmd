@@ -1,0 +1,278 @@
+---
+title: "FCS Enrichment (Wilcoxon-AUC) — `r params$project_name`"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+    mathjax: null                       # no math in this report
+    md_extensions: "-tex_math_dollars"  # gene-set names contain '$' (e.g. V$HNF4_01) — never parse as TeX math
+params:
+  stats_file:   NULL          # TSV: gene + one-or-more score_<ranking> cols + optional flag_<name> cols
+  universe_file: NULL         # cleaned_background (one gene symbol per line)
+  gmt_dir:      NULL          # directory of curated *.gmt files
+  project_name: "FCS"
+  num_g:        10            # min genes per set (fastwilcoxGMT num.g)
+  fdr_thr:      0.10          # BH cutoff for the "significant" highlight
+  top_n:        20            # rows shown per database x ranking
+  traitname:    "trait"
+  enrich:       FALSE         # RER-only permutation enrichment toggle
+  perms_file:   "NO_FILE"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 7, dev = "png", dpi = 200)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(kableExtra)
+})
+filter <- dplyr::filter; select <- dplyr::select; rename <- dplyr::rename
+mutate <- dplyr::mutate; arrange <- dplyr::arrange
+`%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && nzchar(as.character(a)[1])) a else b
+
+this_dir <- tryCatch(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)),
+                     error = function(e) ".")
+src_candidates <- c(file.path(this_dir, "fcs_enrich.R"), "fcs_enrich.R")
+src <- src_candidates[file.exists(src_candidates)][1]
+if (is.na(src)) stop("fcs_enrich.R not found next to FCS_general.Rmd")
+suppressMessages(invisible(capture.output(source(src))))
+
+kbl_html <- function(df, height = NULL) {
+  k <- kable(df, format = "html", escape = TRUE) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = FALSE)
+  if (!is.null(height)) k <- scroll_box(k, height = height)
+  k
+}
+```
+
+```{r load, include=FALSE}
+stopifnot(!is.null(params$stats_file), file.exists(params$stats_file))
+stopifnot(!is.null(params$universe_file), file.exists(params$universe_file))
+
+stats <- readr::read_tsv(params$stats_file, show_col_types = FALSE)
+if (!"gene" %in% names(stats)) {
+  gcol <- intersect(c("Gene", "GENE"), names(stats))[1]
+  if (!is.na(gcol)) stats <- dplyr::rename(stats, gene = !!gcol)
+}
+stopifnot("gene" %in% names(stats))
+
+# Universe = cleaned_background (all tested genes). Fall back to the scored genes
+# if no valid background was provided (e.g. a Nextflow sentinel placeholder).
+universe <- character(0)
+if (!is.null(params$universe_file) && file.exists(params$universe_file) &&
+    !grepl("^NO_", basename(params$universe_file))) {
+  universe <- unique(trimws(readLines(params$universe_file)))
+  universe <- universe[nzchar(universe)]
+}
+if (length(universe) < 2) {
+  message("No valid universe file — falling back to scored genes as the universe.")
+  universe <- unique(stats$gene)
+}
+
+score_cols <- grep("^score_", names(stats), value = TRUE)
+flag_cols  <- grep("^flag_",  names(stats), value = TRUE)
+if (length(score_cols) == 0) stop("stats_file has no score_<ranking> columns")
+ranking_names <- sub("^score_", "", score_cols)
+
+gmt_dir <- params$gmt_dir %||% file.path(this_dir, "..", "dat")
+invisible(capture.output(suppressMessages(gmts <- fcs_load_gmts(gmt_dir))))
+desc_map <- suppressMessages(fcs_load_descriptions(gmt_dir))
+```
+
+# Overview
+
+```{r overview, echo=FALSE}
+tibble::tibble(
+  Field = c("Project", "Trait", "Genes (stats)", "Universe genes", "Rankings",
+            "Flags", "GMT databases", "num.g (min set)", "BH threshold"),
+  Value = c(params$project_name, params$traitname, nrow(stats), length(universe),
+            paste(ranking_names, collapse = ", "),
+            if (length(flag_cols)) paste(sub("^flag_", "", flag_cols), collapse = ", ") else "(none)",
+            length(gmts), params$num_g, params$fdr_thr)
+) %>% kbl_html()
+```
+
+```{r run, include=FALSE}
+# One zero-floored ranking vector per score_<ranking> column.
+rankings <- list()
+for (sc in score_cols) {
+  rk <- sub("^score_", "", sc)
+  rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
+}
+enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g, perms_file = params$perms_file)) %>%
+  dplyr::left_join(desc_map, by = c("database", "pathway")) %>%
+  dplyr::mutate(description = dplyr::coalesce(description, pathway))
+
+# Per-gene attribute table: stats flags + derived directional percentile flags.
+pct_flags <- fcs_percentile_flags(stats)
+attr_df <- pct_flags
+if (length(flag_cols)) attr_df <- dplyr::left_join(pct_flags, stats[, c("gene", flag_cols)], by = "gene")
+attr_cols_all <- setdiff(names(attr_df), "gene")
+
+# Restrict the leading edge to the genes that actually DRIVE each enrichment —
+# i.e. pathway members with signal (score > 0) in that ranking. fastwilcoxGMT's
+# gene.vals lists every member in the universe (incl. zero-floored background
+# genes); summarising over those would dilute the composition with non-drivers
+# and leave their flags undefined. score_long lets us keep only the drivers.
+score_long <- stats %>%
+  dplyr::select(gene, dplyr::all_of(score_cols)) %>%
+  tidyr::pivot_longer(-gene, names_to = "ranking", values_to = "drv_score") %>%
+  dplyr::mutate(ranking = sub("^score_", "", ranking))
+leading <- fcs_annotate_leading_edge(enrich, attr_df) %>%
+  dplyr::left_join(score_long, by = c("gene", "ranking")) %>%
+  dplyr::filter(!is.na(drv_score) & drv_score > 0) %>%
+  dplyr::select(-drv_score)
+
+dir.create("fcs_results", showWarnings = FALSE)
+readr::write_tsv(enrich %>% select(-any_of("gene.vals")), "fcs_results/fcs_all_results.tsv")
+readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
+
+n_sig <- sum(enrich$stat > 0 & enrich$p.adj < params$fdr_thr, na.rm = TRUE)
+```
+
+`r sprintf("**%d** gene sets are positively enriched at BH < %.2g across %d databases.", n_sig, params$fdr_thr, dplyr::n_distinct(enrich$database))`
+
+# Enriched gene sets {.tabset .tabset-fade}
+
+Positive `stat` (AUC − 0.5 > 0) means the ranking's genes sit systematically
+**high** for that set. Top `r params$top_n` positively-enriched sets per database,
+ordered by BH p. Each ranking is a tab; databases are nested tabs.
+
+```{r tables, results='asis'}
+for (rk in ranking_names) {
+  cat(sprintf("\n## %s {.tabset}\n", rk))
+  sub <- enrich %>% filter(ranking == rk, stat > 0)
+  if (nrow(sub) == 0) { cat("\n_No positively-enriched sets._\n"); next }
+  
+  # Check if permutations exist for this ranking
+  has_perm <- "p.perm" %in% names(sub) && any(!is.na(sub$p.perm))
+  
+  # Arrange by p.perm if available, otherwise by p.adj
+  if (has_perm) {
+    sub <- sub %>% arrange(p.perm, p.adj, desc(stat))
+  } else {
+    sub <- sub %>% arrange(p.adj, desc(stat))
+  }
+  
+  for (db in unique(sub$database)) {
+    dbres <- sub %>% filter(database == db) %>% head(params$top_n) %>%
+      mutate(AUC = round(stat + 0.5, 3),
+             Description = stringr::str_trunc(description, 70),
+             pval = signif(pval, 3), 
+             p.adj = signif(p.adj, 3))
+    
+    if (has_perm) {
+      dbres <- dbres %>%
+        mutate(p.perm = signif(p.perm, 3)) %>%
+        select(pathway, Description, AUC, num.genes, pval, p.adj, p.perm)
+    } else {
+      dbres <- dbres %>%
+        select(pathway, Description, AUC, num.genes, pval, p.adj)
+    }
+    
+    cat(sprintf("\n### %s\n\n", db))
+    
+    if (has_perm) {
+      cat(sprintf("_%d sets, %d at p.perm < %g._\n\n", nrow(dbres),
+                  sum(dbres$p.perm < params$fdr_thr, na.rm = TRUE), params$fdr_thr))
+    } else {
+      cat(sprintf("_%d sets, %d at BH < %.2g._\n\n", nrow(dbres),
+                  sum(dbres$p.adj < params$fdr_thr, na.rm = TRUE), params$fdr_thr))
+    }
+    
+    print(kbl_html(dbres, height = if (nrow(dbres) > 15) "420px" else NULL))
+  }
+}
+```
+
+# Enrichment dotplots {.tabset .tabset-fade}
+
+Top enriched sets per database (gene-set **descriptions** on the y-axis, point
+colour = AUC, size = set genes, dashed line = BH threshold). Ranking → database tabs.
+
+```{r dotplots, results='asis', fig.height=5}
+for (rk in ranking_names) {
+  cat(sprintf("\n## %s {.tabset}\n", rk))
+  subrk <- enrich %>% filter(ranking == rk, stat > 0, !is.na(p.adj))
+  if (nrow(subrk) == 0) { cat("\n_No positively-enriched sets._\n"); next }
+  for (db in unique(subrk$database)) {
+    sub <- subrk %>% filter(database == db) %>% arrange(p.adj) %>% head(20) %>%
+      mutate(label = stringr::str_trunc(description, 55),
+             label = forcats::fct_reorder(label, -log10(p.adj)))
+    cat(sprintf("\n### %s\n\n", db))
+    p <- ggplot(sub, aes(x = -log10(p.adj), y = label, size = num.genes, colour = stat + 0.5)) +
+      geom_point() +
+      scale_colour_viridis_c(name = "AUC", option = "C", limits = c(0.5, 1)) +
+      scale_size_continuous(name = "set genes") +
+      geom_vline(xintercept = -log10(params$fdr_thr), linetype = "dashed", colour = "grey50") +
+      labs(title = sprintf("%s — %s", db, rk), x = expression(-log[10]~"BH p"), y = NULL) +
+      theme_minimal(base_size = 11)
+    print(p); cat("\n")
+  }
+}
+```
+
+# Leading-edge composition {.tabset .tabset-fade}
+
+For each positively-enriched set (BH < `r params$fdr_thr`), the **percentage of its
+leading-edge genes** carrying each attribute — significance gates, directional score
+percentiles, and cross-module support. One table per direction.
+
+```{r leadingedge, results='asis'}
+# Friendly display names per attribute column.
+disp_names <- c(
+  flag_gate_sig = "gate_sig", flag_gate_fdr = "gate_fdr",
+  pct_top10 = "top10%", pct_top5 = "top5%", pct_top1 = "top1%",
+  pct_bottom10 = "bot10%", pct_bottom5 = "bot5%", pct_bottom1 = "bot1%",
+  flag_fade = "fade", flag_fade_top = "fade_top", flag_fade_bottom = "fade_bottom",
+  flag_rer_acc = "rer_acc", flag_rer_decc = "rer_decc", flag_accum = "accum"
+)
+# Attribute columns shown per ranking (direction-aware).
+cols_by_rk <- list(
+  global = c("flag_gate_sig","flag_gate_fdr","pct_top10","pct_top5","pct_top1",
+             "pct_bottom10","pct_bottom5","pct_bottom1",
+             "flag_fade","flag_rer_acc","flag_rer_decc","flag_accum"),
+  top    = c("flag_gate_sig","flag_gate_fdr","pct_top10","pct_top5","pct_top1",
+             "flag_fade_top","flag_rer_acc","flag_rer_decc","flag_accum"),
+  bottom = c("flag_gate_sig","flag_gate_fdr","pct_bottom10","pct_bottom5","pct_bottom1",
+             "flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum")
+)
+
+for (rk in ranking_names) {
+  cat(sprintf("\n## %s\n\n", rk))
+  want <- cols_by_rk[[rk]] %||% attr_cols_all
+  le_rk <- leading %>% filter(ranking == rk) %>%
+    semi_join(enrich %>% filter(ranking == rk, stat > 0, p.adj < params$fdr_thr),
+              by = c("ranking", "database", "pathway"))
+  if (nrow(le_rk) == 0) { cat("_No sets passed BH for this direction._\n"); next }
+  summ <- fcs_leading_edge_summary(le_rk, want) %>%
+    left_join(desc_map, by = c("database", "pathway")) %>%
+    mutate(Description = stringr::str_trunc(coalesce(description, pathway), 50),
+           p.adj = signif(p.adj, 3), AUC = round(stat + 0.5, 3)) %>%
+    select(database, pathway, Description, n_le, AUC, p.adj,
+           any_of(intersect(want, names(.)))) %>%
+    head(60)
+  # rename attribute columns to friendly labels
+  present_attr <- intersect(want, names(summ))
+  names(summ)[match(present_attr, names(summ))] <- disp_names[present_attr]
+  print(kbl_html(summ, height = if (nrow(summ) > 15) "480px" else NULL))
+}
+```
+
+# Method
+
+```{r method, echo=FALSE}
+cat("Engine    : RERconverge::fastwilcoxGMTall (Wilcoxon rank-sum / Mann-Whitney AUC)\n")
+cat("Universe  : cleaned_background; no-signal genes floored to 0 (zero-floor)\n")
+cat("Direction : membership rankings (top = {top,both}, bottom = {bottom,both})\n")
+cat("MTC       : Benjamini-Hochberg, per GMT database\n")
+cat("Highlights: significance gates + directional percentile + cross-module flags\n")
+```

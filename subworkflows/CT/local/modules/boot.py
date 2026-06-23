@@ -30,7 +30,7 @@ CALLED BY: ct
 from modules.init_bootstrap import *
 from modules.disco import process_position
 from modules.caas_id import iscaas
-from modules.caap_id import check_caap_pattern, encode_to_groups, US, GS0, GS1, GS2, GS3, GS4
+from modules.caap_id import check_caap_pattern, encode_to_groups, US, GS1, GS2, GS3, GS4
 from modules.alimport import *
 
 from os.path import exists
@@ -139,7 +139,7 @@ def parse_discovery_positions(discovery_file, genename):
         genename: Gene name to match (e.g., "BRCA1")
     
     Returns:
-        dict mapping position -> set of grouping schemes found (e.g., {"142": {"GS0", "GS1"}})
+        dict mapping position -> set of grouping schemes found (e.g., {"142": {"GS1", "GS2"}})
         or None if no discovery file or all positions should be tested
     """
     if not exists(discovery_file):
@@ -174,7 +174,7 @@ def parse_discovery_positions(discovery_file, genename):
                         # CAAP format: Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
                         # CAAP_Group is at index 2, Position is at index 4
                         if len(fields) >= 5:
-                            scheme = fields[2]  # US, GS0, GS1, GS2, GS3, or GS4
+                            scheme = fields[2]  # US, GS1, GS2, GS3, or GS4
                             position = fields[4]
                             
                             if position not in position_schemes:
@@ -184,7 +184,7 @@ def parse_discovery_positions(discovery_file, genename):
                         # CAAS can be legacy (no CAAP_Group) or normalized (CAAP_Group=US).
                         # Legacy:    Gene Mode Trait Position ...
                         # Normalized:Gene Mode CAAP_Group Trait Position ...
-                        if len(fields) >= 5 and fields[2] in {"US", "GS0", "GS1", "GS2", "GS3", "GS4"}:
+                        if len(fields) >= 5 and fields[2] in {"US", "GS1", "GS2", "GS3", "GS4"}:
                             position = fields[4]
                         elif len(fields) >= 4:
                             position = fields[3]
@@ -253,7 +253,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
     
     Args:
         caap_mode: If True, test CAAP grouping schemes instead of classical CAAS
-        discovery_schemes: Set of grouping schemes found in discovery for this position (US, GS0-GS4, or CAAS)
+        discovery_schemes: Set of grouping schemes found in discovery for this position (US, GS1-GS4, or CAAS)
                           If None, test all schemes. If provided, only test those schemes.
     """
     
@@ -268,7 +268,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
         position_name = genename + "@" + str(processed_position.position)
         if caap_mode:
             # Return one line per scheme with zero counts
-            schemes = [("US", US), ("GS0", GS0), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
+            schemes = [("US", US), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
             outlines = []
             for scheme_name, _ in schemes:
                 outline = "\t".join([position_name, scheme_name, "0", str(cycles), "0.0"])
@@ -318,7 +318,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             # CAAP mode: test grouping schemes
             # If discovery_schemes provided, only test those schemes for this position
             # Otherwise test all schemes
-            scheme_counts = {"US": [], "GS0": [], "GS1": [], "GS2": [], "GS3": [], "GS4": []}
+            scheme_counts = {"US": [], "GS1": [], "GS2": [], "GS3": [], "GS4": []}
             
             # Determine which schemes to test
             if discovery_schemes:
@@ -327,17 +327,17 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                 
                 if "CAAS" in discovery_schemes:
                     # Classical CAAS mode - test all schemes
-                    schemes_to_test = [("US", US), ("GS0", GS0), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
+                    schemes_to_test = [("US", US), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
                 else:
                     # CAAP mode - only test discovered schemes
-                    scheme_map = {"US": US, "GS0": GS0, "GS1": GS1, "GS2": GS2, "GS3": GS3, "GS4": GS4}
+                    scheme_map = {"US": US, "GS1": GS1, "GS2": GS2, "GS3": GS3, "GS4": GS4}
                     for scheme_name in discovery_schemes:
                         if scheme_name in scheme_map:
                             schemes_to_test.append((scheme_name, scheme_map[scheme_name]))
             else:
                 # No discovery info - test all schemes
-                schemes_to_test = [("US", US), ("GS0", GS0), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
-            
+                schemes_to_test = [("US", US), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
+
             for trait in filtered_traits:
                 fg_species = processed_position.trait2ungapped_fg[trait][:]
                 bg_species = processed_position.trait2ungapped_bg[trait][:]
@@ -439,7 +439,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             position_name = genename + "@" + str(processed_position.position)
             outlines = []
             scheme_set = {name for name, _ in schemes_to_test}
-            ordered_schemes = [name for name in ["US", "GS0", "GS1", "GS2", "GS3", "GS4"] if name in scheme_set]
+            ordered_schemes = [name for name in ["US", "GS1", "GS2", "GS3", "GS4"] if name in scheme_set]
             for scheme_name in ordered_schemes:
                 count = str(len(scheme_counts[scheme_name]))
                 empval = str(len(scheme_counts[scheme_name])/cycles)
@@ -530,7 +530,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
     Args:
         resampled_traits: multicfg object OR directory path (str) containing resample_*.tab files
         progress_log: Optional file path for logging progress
-        caap_mode: If True, test all CAAP grouping schemes (US, GS0-GS4) instead of classical CAAS
+        caap_mode: If True, test all CAAP grouping schemes (US, GS1-GS4) instead of classical CAAS
         ... (other parameters as before)
     """
     the_genename = sliced_object.genename

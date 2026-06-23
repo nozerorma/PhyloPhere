@@ -101,7 +101,7 @@ def summarize_pair_transitions(
     summary: List[TransitionSummary] = []
     for pair in pair_details or []:
         ancestor = pair.get("focal_state") or pair.get("mrca_modal_aa")
-        transitions = {}
+        transitions: Dict[str, Transition] = {}
         for side in ("top", "bottom"):
             tip_state = pair.get(f"{side}_tip_mode") or pair.get(f"{side}_tip_residue")
             transitions[side] = {

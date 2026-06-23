@@ -1,5 +1,5 @@
 ---
-title: "ASR Robustness Characterisation"
+title: "ASR Path Robustness Characterisation"
 author: "PhyloPhere Pipeline"
 date: "`r Sys.Date()`"
 output:
@@ -18,21 +18,11 @@ params:
 ---
 
 <!--
-  ASR Robustness Characterisation — PhyloPhere Pipeline
+  ASR Path Robustness Characterisation — PhyloPhere Pipeline
   ======================================================
-  Core filtering rule:
-    ASR uncertainty is described globally and via a compact per-gene summary
-    (asr_gene_map_summary.tsv). Filtering for convergence inference is based
-    only on the focal MRCA nodes that define change polarity. A site is
-    retained only if the minimum MAP posterior across all focal nodes is >=
-    params.ct_disambig_posterior_threshold.
-    Additional threshold values are evaluated ONLY in the sensitivity analysis
-    section; they do not affect pipeline filtering decisions.
-
-  Performance note:
-    JSONL parsing is streaming — only MAP values are materialised globally;
-    full rows are kept only for focal nodes. This keeps memory tractable at
-    tens of thousands of genes.
+  Evaluates the continuous `asr_path_score` and its subcomponents:
+  (independence, mrca_diversity, derived_agreement, conservation_gate, count_factor)
+  assigned to sites during ASR evaluation.
 
   Author: Miguel Ramon (miguel.ramon@upf.edu)
 -->
@@ -55,8 +45,6 @@ suppressPackageStartupMessages({
   library(scales)
   library(knitr)
   library(kableExtra)
-  library(jsonlite)
-  library(parallel)
 })
 
 # ── Parameter validation ──────────────────────────────────────────────────────
@@ -65,9 +53,7 @@ posterior_threshold <- as.numeric(params$posterior_threshold)
 output_dir          <- params$output_dir
 
 stopifnot(
-  !is.null(disambig_dir),
-  !is.null(posterior_threshold),
-  posterior_threshold >= 0, posterior_threshold <= 1
+  !is.null(disambig_dir)
 )
 
 # ── Output directories ────────────────────────────────────────────────────────
@@ -77,44 +63,6 @@ dir.create(tsv_dir,   recursive = TRUE, showWarnings = FALSE)
 dir.create(plots_dir, recursive = TRUE, showWarnings = FALSE)
 
 write_tsv_safe <- function(df, fname) {
-  # readr::write_tsv requires atomic vector columns only.
-  # Guard against list/matrix/data.frame columns that can appear after
-  # pivot/join edge cases (especially with duplicated keys).
-  scalarize_cell <- function(x) {
-    if (is.null(x) || length(x) == 0) return(NA_real_)
-    x <- suppressWarnings(as.numeric(unlist(x)))
-    x <- x[!is.na(x)]
-    if (length(x) == 0) return(NA_real_)
-    if (length(x) == 1) return(x[[1]])
-    mean(x)
-  }
-
-  bad_cols <- vapply(df, function(col) {
-    is.list(col) ||
-      is.data.frame(col) ||
-      !is.null(dim(col)) ||
-      !is.atomic(col)
-  }, logical(1))
-
-  if (any(bad_cols)) {
-    bad_names <- names(df)[bad_cols]
-    for (nm in bad_names) {
-      col <- df[[nm]]
-      if (is.data.frame(col) || !is.null(dim(col))) {
-        mat <- as.matrix(col)
-        df[[nm]] <- vapply(seq_len(nrow(mat)), function(i) scalarize_cell(mat[i, ]), numeric(1))
-      } else if (is.list(col)) {
-        df[[nm]] <- vapply(col, scalarize_cell, numeric(1))
-      } else {
-        df[[nm]] <- vapply(as.list(col), scalarize_cell, numeric(1))
-      }
-    }
-    warning(sprintf(
-      "[write_tsv_safe] Sanitized non-atomic columns in %s: %s",
-      fname, paste(bad_names, collapse = ", ")
-    ))
-  }
-
   path <- file.path(tsv_dir, fname)
   readr::write_tsv(df, path)
   invisible(path)
@@ -126,736 +74,185 @@ save_plot <- function(p, fname, width = 11, height = 6) {
   invisible(path)
 }
 
-as_bool <- function(x) {
-  tolower(trimws(as.character(x))) %in% c("true", "t", "1", "yes", "y")
-}
-
-# Sensitivity tau grid — used ONLY in 7; never drives pipeline filtering
-TAU_GRID <- c(0.80, 0.90, 0.95, 0.99)
-
-# ── Helper: styled kable ──────────────────────────────────────────────────────
-kbl_pp <- function(df, caption = NULL) {
-  df |>
-    kable(format = "html", caption = caption, digits = 4) |>
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
-                  full_width = FALSE, font_size = 12)
-}
+# Color palette definition
+.tableau10 <- c(
+  "#1F77B4", "#AEC7E8", "#FF7F0E", "#FFBB78",
+  "#2CA02C", "#98DF8A", "#D62728", "#FF9896",
+  "#9467BD", "#C5B0D5"
+)
 ```
+
+## Introduction
+
+With the introduction of the continuous `asr_path_score`, the ASR evaluations have fundamentally shifted from binary cut-offs to a holistic score based on a path-to-root walk. This report details the distribution of the `asr_path_score` across evaluated sites and breaks down the final score into its constituent penalty and reward components:
+
+*   **Replication of Private Isolation (`core`)**: The combinatorial probability that at least two independent changes occurred at this position.
+*   **Independence at shared ancestors (`independence`)**: The probability that the derived state was absent at shared ancestors (LCA/LAC nodes).
+*   **Parallel vs. non-parallel origins (`mrca_diversity`)**: How distinct the ancestral starting states are across participating pairs.
+*   **Convergence agreement (`derived_agreement`)**: Cooperation/coherence of derived states on each phenotype side.
+*   **Conserved-pair confirmation (`conservation_gate`)**: Soft-gating penalty on deep conservation of ancestral residues in control clades.
+*   **Replication factor (`count_factor`)**: Bounded count scaling to reward multiple independent contrasts.
 
 ---
 
-```{r paths, include=FALSE}
-node_dumps_dir <- file.path(disambig_dir, "diagnostics", "node_dumps")
-master_csv     <- file.path(disambig_dir, "caas_convergence_master.csv")
-
-jsonl_files_exist <- dir.exists(node_dumps_dir) &&
-  length(list.files(node_dumps_dir, pattern = "jsonl$")) > 0
-master_csv_exists <- file.exists(master_csv)
-
-if (!master_csv_exists) {
-  stop(sprintf(
-    "[asr_robustness] caas_convergence_master.csv not found in: %s", disambig_dir
-  ))
+```{r load-data}
+master_csv <- file.path(disambig_dir, "caas_convergence_master.csv")
+if (!file.exists(master_csv)) {
+  stop(sprintf("[asr_robustness] caas_convergence_master.csv not found in: %s", disambig_dir))
 }
-```
 
-```{r load_master_early, include=FALSE}
-# ── Load master CSV early to build per-gene focal-node lookup ─────────────────
-# Required before parse_jsonl so the parser can skip non-focal nodes.
 master_df <- readr::read_csv(master_csv, show_col_types = FALSE, guess_max = 5000)
 
-# Normalise column names (same logic mirrored in 4 load_master_csv)
-if ("msa_pos" %in% names(master_df))  master_df <- dplyr::rename(master_df, site = msa_pos)
+# Normalize column names if necessary
+if ("msa_pos" %in% names(master_df)) master_df <- dplyr::rename(master_df, site = msa_pos)
 if (!("gene" %in% names(master_df)) && "Gene" %in% names(master_df))
   master_df <- dplyr::rename(master_df, gene = Gene)
 if (!("site" %in% names(master_df)) && "Position" %in% names(master_df))
   master_df <- dplyr::rename(master_df, site = Position)
-if (!("is_conserved_meta" %in% names(master_df))) master_df$is_conserved_meta <- FALSE
-if (!("asr_is_conserved" %in% names(master_df))) master_df$asr_is_conserved <- FALSE
-if (!("asr_root_conserved" %in% names(master_df))) master_df$asr_root_conserved <- FALSE
 
-master_df <- master_df |>
-  dplyr::mutate(
-    is_conserved_meta = as_bool(is_conserved_meta),
-    asr_is_conserved = as_bool(asr_is_conserved),
-    asr_root_conserved = as_bool(asr_root_conserved)
-  )
+# Isolate scored rows
+score_df <- master_df %>% filter(!is.na(asr_path_score))
 
-# Build focal-node lookup: named list(gene_name → integer vector of focal node IDs)
-node_cols_early <- grep("^mrca_\\d+_node$", names(master_df), value = TRUE)
-if (length(node_cols_early) > 0) {
-  focal_lookup_map <- master_df |>
-    dplyr::select(gene, all_of(node_cols_early)) |>
-    tidyr::pivot_longer(all_of(node_cols_early), values_to = "focal_node_id", names_to = NULL) |>
-    dplyr::filter(!is.na(focal_node_id)) |>
-    dplyr::group_by(gene) |>
-    dplyr::summarise(focal_ids = list(unique(as.integer(focal_node_id))), .groups = "drop") |>
-    (\(x) setNames(x$focal_ids, x$gene))()
-} else {
-  focal_lookup_map <- list()
+if (nrow(score_df) == 0) {
+  stop("No ASR path scores found in the provided CSV.")
 }
+
+comp_vars <- c("independence", "mrca_diversity", "derived_agreement", "conservation_gate", "count_factor")
+available_comps <- intersect(comp_vars, colnames(score_df))
 ```
 
 > **Pipeline threshold** (`params.ct_disambig_posterior_threshold`): **`r posterior_threshold`**
-
+>
 > **Disambiguation directory**: `r disambig_dir`
+>
+> **Total convergent sites loaded**: `r nrow(master_df)`
+>
+> **ASR path scored sites**: `r nrow(score_df)`
 
 ---
 
-## 0 – Conserved-status burden scenarios
+## 1. Overall ASR Path Score Distribution
 
-```{r conserved_status_burden}
-scenario_counts <- tibble(
-  scenario = c("all_positions", "asr_is_conserved_only", "asr_both_conserved", "meta_not_conserved_only"),
-  description = c(
-    "All positions",
-    "Positions where asr_is_conserved = TRUE",
-    "Positions where asr_is_conserved = TRUE and asr_root_conserved = TRUE",
-    "Positions where no conservation is considered (is_conserved_meta = FALSE)"
-  )
-) |>
-  dplyr::rowwise() |>
-  dplyr::mutate(
-    rows_total = nrow(master_df),
-    rows_retained = dplyr::case_when(
-      scenario == "all_positions" ~ nrow(master_df),
-      scenario == "asr_is_conserved_only" ~ sum(master_df$asr_is_conserved, na.rm = TRUE),
-      scenario == "asr_both_conserved" ~ sum(master_df$asr_is_conserved & master_df$asr_root_conserved, na.rm = TRUE),
-      scenario == "meta_not_conserved_only" ~ sum(!master_df$is_conserved_meta, na.rm = TRUE),
-      TRUE ~ NA_integer_
-    ),
-    rows_removed = rows_total - rows_retained,
-    retained_fraction = rows_retained / rows_total,
-    removed_fraction = rows_removed / rows_total
-  ) |>
-  dplyr::ungroup()
+The overall `asr_path_score` aggregates both the private walk and shared-node checks. High scores indicate independent, clean mutations that are well-supported by ancestral reconstructions.
 
-scenario_comparison <- scenario_counts |>
-  dplyr::transmute(
-    scenario,
-    description,
-    rows_removed,
-    removed_fraction,
-    incremental_vs_all = rows_removed - rows_removed[scenario == "all_positions"],
-    incremental_vs_previous = c(0, diff(rows_removed))
+```{r plot-score-dist, fig.cap="Distribution of the final ASR Path Score across positions."}
+p_score <- ggplot(score_df, aes(x = asr_path_score)) +
+  geom_histogram(binwidth = 0.02, fill = .tableau10[1], colour = "white", alpha = 0.8) +
+  geom_density(aes(y = after_stat(density) * 0.02 * nrow(score_df)), color = .tableau10[7], linewidth = 1) +
+  theme_bw(base_size = 12) +
+  labs(
+    title = "Overall ASR Path Score Distribution",
+    subtitle = sprintf("%s positions across %d genes",
+                       formatC(nrow(score_df), big.mark = ","),
+                       n_distinct(score_df$gene)),
+    x = "ASR Path Score",
+    y = "Count"
   )
 
-write_tsv_safe(scenario_counts, "asr_conserved_status_burden.tsv")
-write_tsv_safe(scenario_comparison, "asr_conserved_status_comparison.tsv")
-
-kbl_pp(scenario_counts, caption = "0 Conserved-status burden across master-table scenarios (asr_conserved_status_burden.tsv)")
-```
-
-```{r conserved_status_comparison}
-kbl_pp(scenario_comparison, caption = "0 Conserved-status scenario comparison (asr_conserved_status_comparison.tsv)")
+print(p_score)
+save_plot(p_score, "asr_path_score_distribution.png", width = 8, height = 5)
 ```
 
 ---
 
-## 1 – Per-(gene, node, site) ASR confidence metrics
+## 2. Component Distributions
 
-```{r parse_jsonl, cache=FALSE}
-# ── JSONL parser: focal nodes only ───────────────────────────────────────────
-# Non-focal node lines are rejected with a plain string match BEFORE any JSON
-# parse — avoiding millions of fromJSON() calls at 16k-gene scale.
-# Focal rows capture MAP, margin, and entropy (needed for 4 join and 8).
-# global_map_vec is derived from master_df posterior columns (already loaded),
-# which contain exactly the MAP posteriors at focal nodes for all convergent
-# sites — no JSONL traversal required for 2.
+The final path score is composed of several continuous subcomponents. We plot their density distributions below to understand which factors act as the main limiters or contributors to the final scores in this dataset.
 
-extract_focal_jsonl <- function(path, gene_name, focal_ids) {
-  if (length(focal_ids) == 0L) return(NULL)
+```{r plot-comp-dists, fig.height=8, fig.cap="Density distributions of the individual components that make up the ASR Path Score."}
+comp_df <- score_df %>%
+  select(gene, site, all_of(available_comps)) %>%
+  pivot_longer(cols = all_of(available_comps), names_to = "component", values_to = "value") %>%
+  filter(!is.na(value))
 
-  lines <- readLines(path, warn = FALSE)
-  lines <- lines[nzchar(trimws(lines))]
-
-  # Build a fast lookup string for each focal id (e.g. '"node_id": 42')
-  # so we can reject non-focal lines with grepl before any JSON parse.
-  focal_patterns <- paste0('"node_id"\\s*:\\s*', focal_ids, '\\b')
-  focal_regex    <- paste(focal_patterns, collapse = "|")
-
-  all_rows <- vector("list", length(focal_ids) * 1000L)
-  row_i    <- 0L
-
-  for (ln in lines) {
-    # Fast pre-filter: skip lines that cannot contain a focal node_id
-    if (!grepl(focal_regex, ln, perl = TRUE)) next
-
-    # Extract node_id with sub() — cheaper than full JSON parse
-    nid_raw <- sub('.*"node_id"\\s*:\\s*([0-9]+).*', '\\1', ln, perl = TRUE)
-    node_id <- suppressWarnings(as.integer(nid_raw))
-    if (is.na(node_id) || !node_id %in% focal_ids) next
-
-    # Full JSON parse only for confirmed focal nodes
-    obj <- tryCatch(jsonlite::fromJSON(ln, simplifyVector = TRUE), error = function(e) NULL)
-    if (is.null(obj) || !is.null(obj[["__metadata__"]])) next
-
-    positions <- obj[["positions"]]
-    if (is.null(positions) || !is.list(positions)) next
-
-    site_names <- names(positions)
-    aa_lists   <- lapply(positions, unlist)
-    valid      <- vapply(aa_lists, function(x) is.numeric(x) && length(x) > 0, logical(1))
-    aa_lists   <- aa_lists[valid]
-    site_names <- site_names[valid]
-    if (length(site_names) == 0L) next
-
-    # Vectorized extraction across sites for this focal node
-    sorted_list <- lapply(aa_lists, sort, decreasing = TRUE)
-    MAP_vec     <- vapply(sorted_list, `[[`, numeric(1L), 1L)
-    P_sec_vec   <- vapply(sorted_list,
-                          function(x) if (length(x) >= 2L) x[[2L]] else 0,
-                          numeric(1L))
-    ent_vec     <- vapply(aa_lists, function(x) {
-                            p <- x[x > 0]; -sum(p * log(p))
-                          }, numeric(1L))
-
-    n_new <- length(site_names)
-    row_i <- row_i + 1L
-    all_rows[[row_i]] <- data.frame(
-      gene    = rep(gene_name, n_new),
-      node    = rep(node_id,   n_new),
-      site    = as.integer(site_names),
-      MAP     = MAP_vec,
-      margin  = MAP_vec - P_sec_vec,
-      entropy = ent_vec,
-      stringsAsFactors = FALSE
-    )
-  }
-
-  if (row_i == 0L) return(NULL)
-  dplyr::bind_rows(all_rows[seq_len(row_i)])
-}
-
-# ── Run parser over all JSONL files ──────────────────────────────────────────
-focal_jm       <- NULL
-n_genes_parsed <- 0L
-
-if (jsonl_files_exist) {
-  jfiles <- list.files(node_dumps_dir, pattern = "_posteriors\\.jsonl$", full.names = TRUE)
-  n_genes_parsed <- length(jfiles)
-
-  # Parallelized across gene files — REPORT_CORES is set by the Nextflow process.
-  n_asr_cores <- max(1L, as.integer(Sys.getenv("REPORT_CORES", unset = detectCores())))
-  message(sprintf("Parsing %d JSONL files using %d core(s)...", length(jfiles), n_asr_cores))
-  focal_rows_list <- if (.Platform$OS.type == "unix" && n_asr_cores > 1L) {
-    mclapply(jfiles, function(f) {
-      gene_lower <- sub("_posteriors\\.jsonl$", "", basename(f))
-      gene <- if (!is.null(focal_lookup_map[[gene_lower]])) {
-        gene_lower
-      } else {
-        gene_upper <- toupper(gene_lower)
-        if (!is.null(focal_lookup_map[[gene_upper]])) gene_upper else gene_lower
-      }
-      fids <- focal_lookup_map[[gene]]
-      if (is.null(fids)) return(NULL)
-      extract_focal_jsonl(f, gene, fids)
-    }, mc.cores = n_asr_cores)
-  } else {
-    lapply(jfiles, function(f) {
-      gene_lower <- sub("_posteriors\\.jsonl$", "", basename(f))
-      gene <- if (!is.null(focal_lookup_map[[gene_lower]])) {
-        gene_lower
-      } else {
-        gene_upper <- toupper(gene_lower)
-        if (!is.null(focal_lookup_map[[gene_upper]])) gene_upper else gene_lower
-      }
-      fids <- focal_lookup_map[[gene]]
-      if (is.null(fids)) return(NULL)
-      extract_focal_jsonl(f, gene, fids)
-    })
-  }
-
-  not_null <- !vapply(focal_rows_list, is.null, logical(1L))
-  if (any(not_null)) {
-    focal_jm <- dplyr::bind_rows(focal_rows_list[not_null])
-    message(sprintf("[1] %d gene files | %d focal-node rows recovered",
-                    n_genes_parsed, nrow(focal_jm)))
-  } else {
-    message("[1] No focal-node rows recovered from JSONL files.")
-    jsonl_files_exist <- FALSE
-  }
-} else {
-  message("[1] No posterior JSONL files found under ", node_dumps_dir,
-          " — sections 1–3 skipped. Enable ct_disambig_run_diagnostics=true.")
-}
-
-# ── Global MAP vector from master_df posterior columns ───────────────────────
-# The mrca_*_posterior columns hold the MAP posteriors at focal nodes for all
-# convergent sites — the exact distribution relevant for the report.
-post_cols_early <- grep("^mrca_\\d+_posterior$", names(master_df), value = TRUE)
-global_map_vec <- if (length(post_cols_early) > 0) {
-  unlist(master_df[, post_cols_early], use.names = FALSE)
-} else {
-  NULL
-}
-global_map_vec <- global_map_vec[!is.na(global_map_vec)]
-jsonl_or_master_ok <- !is.null(global_map_vec) && length(global_map_vec) > 0L
-```
-
-`r if (!jsonl_or_master_ok) "> ⚠️ No focal-node MAP posteriors available. Sections 1–3 are skipped." `
-
-```{r show_metrics_head, eval=jsonl_or_master_ok}
-cat(sprintf(
-  "Global MAP vector: %s values (focal-node posteriors from %d convergent sites × %d pairs).\nJSONL parsed for margin/entropy: %d focal-node rows.",
-  formatC(length(global_map_vec), big.mark = ",", format = "d"),
-  nrow(master_df),
-  length(post_cols_early),
-  if (!is.null(focal_jm)) nrow(focal_jm) else 0L
-))
-```
-
----
-
-## 2 – Global MAP distribution
-
-```{r global_stats, eval=jsonl_or_master_ok}
-# ── 2a Full distribution ─────────────────────────────────────────────────────
-compute_map_stats <- function(map_vec) {
-  pcts <- c(0.01, 0.05, 0.10, 0.20, 0.25, 0.40, 0.50, 0.60, 0.75, 0.80, 0.90, 0.95, 0.99)
-  cuts <- c(1.00, 0.99, 0.95, 0.90, 0.80, 0.60)
-
-  q <- quantile(map_vec, probs = pcts, na.rm = TRUE)
-  frac_below <- vapply(cuts, function(t) mean(map_vec < t, na.rm = TRUE), numeric(1))
-
-  c(
-    N_total = length(map_vec),
-    mean    = mean(map_vec, na.rm = TRUE),
-    sd      = sd(map_vec, na.rm = TRUE),
-    min     = min(map_vec, na.rm = TRUE),
-    max     = max(map_vec, na.rm = TRUE),
-    setNames(as.numeric(q),     paste0("pct_", pcts * 100)),
-    setNames(frac_below,        paste0("frac_MAP_lt_", sub("\\.", "", as.character(cuts))))
-  )
-}
-
-map_vec_full <- global_map_vec
-stats_full   <- compute_map_stats(map_vec_full)
-
-global_stats_df <- tibble(statistic = names(stats_full), value = as.numeric(stats_full))
-write_tsv_safe(global_stats_df, "asr_global_statistics.tsv")
-
-# ── 2b Uncertainty tail (MAP < 1.0) ─────────────────────────────────────────
-map_vec_tail  <- map_vec_full[map_vec_full < 1.0]
-stats_tail    <- compute_map_stats(map_vec_tail)
-tail_stats_df <- tibble(statistic = names(stats_tail), value = as.numeric(stats_tail))
-write_tsv_safe(tail_stats_df, "asr_uncertain_tail.tsv")
-
-kbl_pp(global_stats_df, caption = "2a Global MAP statistics (asr_global_statistics.tsv)")
-```
-
-```{r global_tail_summary, eval=jsonl_or_master_ok}
-kbl_pp(tail_stats_df, caption = "2b Global MAP statistics — uncertainty tail MAP < 1.0 (asr_uncertain_tail.tsv)")
-```
-
----
-
-## 3 – Per-gene MAP summary
-
-`r if (jsonl_files_exist) sprintf("> **%d gene** JSONL files processed. Per-gene MAP summaries (N, mean, sd, min, fraction MAP=1) written to **asr_gene_map_summary.tsv**.", n_genes_parsed)`
-`r if (!jsonl_files_exist) "> ℹ️ JSONL files not found — per-gene margin/entropy summary not available. Global MAP stats are derived from master CSV."`
-
----
-
-## 4 – Focal MRCA node extraction
-
-```{r load_master_csv}
-# master_df was already loaded and column-normalised in load_master_early.
-# Detect focal-node pair columns dynamically.
-node_col_regex   <- "^mrca_(\\d+)_node$"
-post_col_regex   <- "^mrca_(\\d+)_posterior$"
-margin_col_regex <- "^mrca_(\\d+)_margin$"
-
-node_cols <- grep(node_col_regex, names(master_df), value = TRUE)
-post_cols <- grep(post_col_regex, names(master_df), value = TRUE)
-n_pairs   <- length(post_cols)
-
-if (n_pairs == 0) stop("[asr_robustness 4] No mrca_*_posterior columns found in master CSV")
-
-pair_ids <- as.integer(sub("^mrca_(\\d+)_posterior$", "\\1", post_cols))
-message(sprintf("[4] Detected %d focal MRCA pairs: %s", n_pairs, paste(pair_ids, collapse = ", ")))
-```
-
-```{r focal_extraction}
-# ── Build per-(gene, site) focal-node posteriors ──────────────────────────────
-# Each row in master_df is one (gene, site) convergent position.
-focal_df <- master_df |>
-  dplyr::select(gene, site,
-                all_of(c(node_cols, post_cols))) |>
-  dplyr::rename_with(~ paste0("node", pair_ids), all_of(node_cols)) |>
-  dplyr::rename_with(~ paste0("p",    pair_ids), all_of(post_cols))
-
-p_cols <- paste0("p",      pair_ids)
-m_cols <- paste0("margin", pair_ids)
-e_cols <- paste0("entropy", pair_ids)
-
-# ── Join margin & entropy from focal-only JSONL rows ─────────────────────────
-# focal_jm has columns: gene, node, site, margin, entropy.
-# Strategy: pivot focal_df node columns to long → single join → pivot back wide.
-# Avoids scanning focal_jm once per pair (old sequential for-loop approach).
-if (!is.null(focal_jm) && nrow(focal_jm) > 0) {
-  node_long <- focal_df |>
-    dplyr::select(gene, site, all_of(paste0("node", pair_ids))) |>
-    tidyr::pivot_longer(
-      cols      = all_of(paste0("node", pair_ids)),
-      names_to  = "pair_col",
-      values_to = "node_id"
-    ) |>
-    dplyr::mutate(
-      pair_num = as.integer(sub("^node", "", pair_col)),
-      node_id  = as.integer(node_id)
-    ) |>
-    dplyr::filter(!is.na(node_id)) |>
-    dplyr::left_join(
-      focal_jm |> dplyr::mutate(node = as.integer(node)),
-      by = c("gene" = "gene", "site" = "site", "node_id" = "node")
-    ) |>
-    dplyr::select(gene, site, pair_num, margin, entropy) |>
-    tidyr::pivot_wider(
-      id_cols     = c(gene, site),
-      names_from  = pair_num,
-      values_from = c(margin, entropy),
-      names_glue  = "{.value}{pair_num}",  # → margin1, entropy1, margin2, ...
-      values_fn   = list(
-        margin  = ~ if (all(is.na(.x))) NA_real_ else mean(.x, na.rm = TRUE),
-        entropy = ~ if (all(is.na(.x))) NA_real_ else mean(.x, na.rm = TRUE)
-      ),                                   # collapse duplicates (same gene/site/node in focal_jm)
-      values_fill = NA_real_               # avoid list columns when a cell has no observations
-    )
-  focal_df <- dplyr::left_join(focal_df, node_long, by = c("gene", "site"))
-}
-
-# ── Vectorized aggregate stats across focal nodes ────────────────────────────
-# pmin / pmax across columns — much faster than dplyr::rowwise() at scale.
-p_mat          <- as.matrix(focal_df[, p_cols, drop = FALSE])
-focal_df$p_min  <- do.call(pmin, c(asplit(p_mat, 2), list(na.rm = TRUE)))
-focal_df$p_prod <- Reduce(`*`, lapply(p_cols, function(col) focal_df[[col]]))
-
-has_margin_cols  <- all(m_cols %in% names(focal_df))
-has_entropy_cols <- all(e_cols %in% names(focal_df))
-
-if (has_margin_cols) {
-  m_mat <- as.matrix(focal_df[, m_cols, drop = FALSE])
-  focal_df$margin_min <- do.call(pmin, c(asplit(m_mat, 2), list(na.rm = TRUE)))
-  focal_df$margin_min <- ifelse(is.infinite(focal_df$margin_min), NA_real_, focal_df$margin_min)
-}
-
-if (has_entropy_cols) {
-  e_mat <- as.matrix(focal_df[, e_cols, drop = FALSE])
-  focal_df$entropy_max <- do.call(pmax, c(asplit(e_mat, 2), list(na.rm = TRUE)))
-  focal_df$entropy_max <- ifelse(is.infinite(focal_df$entropy_max), NA_real_, focal_df$entropy_max)
-}
-
-# Flatten any residual list columns that can arise from pivot_wider edge cases
-# (e.g. tidyr producing list-type cells when values_fn is applied to mixed input).
-list_col_idx <- which(vapply(focal_df, is.list, logical(1)))
-if (length(list_col_idx) > 0) {
-  focal_df <- dplyr::mutate(focal_df, dplyr::across(
-    where(is.list),
-    ~ vapply(., function(x) {
-        x <- unlist(x)
-        if (length(x) == 0 || all(is.na(x))) NA_real_ else mean(x, na.rm = TRUE)
-      }, numeric(1))
-  ))
-}
-
-# Defensive final normalization before writing TSV:
-# ensure no column keeps matrix/list-like structure under S3 wrappers.
-focal_df <- as.data.frame(focal_df, stringsAsFactors = FALSE)
-
-write_tsv_safe(focal_df, "asr_focal_node_sites.tsv")
-cat(sprintf("Focal-node table: %d sites across %d genes.\n",
-            nrow(focal_df), dplyr::n_distinct(focal_df$gene)))
-```
-
----
-
-## 5 – Site filtering
-
-The filtering rule is:
-
-$$\text{PASS} \iff p_{\min} \geq \tau \quad\text{where}\quad \tau = \texttt{params.ct\_disambig\_posterior\_threshold} = `r posterior_threshold`$$
-
-```{r site_filter}
-tau <- posterior_threshold
-
-filter_df <- focal_df |>
-  dplyr::select(gene, site, all_of(p_cols), p_min, p_prod) |>
-  dplyr::mutate(
-    PASS            = p_min >= tau,
-    threshold_used  = tau
+p_comps <- ggplot(comp_df, aes(x = value, fill = component)) +
+  geom_density(alpha = 0.6, colour = "grey30", linewidth = 0.3) +
+  facet_wrap(~ component, scales = "free_y", ncol = 2) +
+  scale_fill_manual(values = .tableau10[seq_along(available_comps)]) +
+  theme_bw(base_size = 12) +
+  theme(legend.position = "none",
+        strip.background = element_rect(fill = "grey95", colour = "grey80"),
+        strip.text = element_text(face = "bold")) +
+  labs(
+    title = "Distributions of ASR Path Score Components",
+    x = "Component Value",
+    y = "Density"
   )
 
-write_tsv_safe(filter_df, "asr_site_filtering.tsv")
-
-n_pass <- sum(filter_df$PASS,  na.rm = TRUE)
-n_fail <- sum(!filter_df$PASS, na.rm = TRUE)
-
-cat(sprintf(
-  "τ = %.4f | Sites PASS: %d  |  Sites FAIL: %d  |  Retention: %.1f%%\n",
-  tau, n_pass, n_fail, 100 * n_pass / nrow(filter_df)
-))
-
-filter_df |> head(10) |> kbl_pp(caption = "5 Site-level filtering (asr_site_filtering.tsv)")
+print(p_comps)
+save_plot(p_comps, "asr_path_components_density.png", width = 10, height = 8)
 ```
 
 ---
 
-## 6 – Retention statistics
+## 3. Subcomponent Influence on Final Score
 
-```{r retention_stats}
-# ── Global ────────────────────────────────────────────────────────────────────
-retention_global <- tibble(
-  N_sites_total      = nrow(filter_df),
-  N_sites_retained   = n_pass,
-  N_sites_excluded   = n_fail,
-  retention_fraction = n_pass / nrow(filter_df),
-  exclusion_fraction = n_fail / nrow(filter_df),
-  threshold_used     = tau
-)
-write_tsv_safe(retention_global, "asr_retention_summary.tsv")
+To visualize how each subcomponent influences the final `asr_path_score`, we plot their pairwise scatter plots. A linear model (red dashed line) is fitted to highlight global trends.
 
-# ── Per gene ──────────────────────────────────────────────────────────────────
-retention_gene <- filter_df |>
-  dplyr::group_by(gene) |>
-  dplyr::summarise(
-    sites_total        = dplyr::n(),
-    sites_retained     = sum(PASS, na.rm = TRUE),
-    sites_excluded     = sum(!PASS, na.rm = TRUE),
-    retention_fraction = sites_retained / sites_total,
-    exclusion_fraction = sites_excluded / sites_total,
-    threshold_used     = tau,
-    .groups = "drop"
-  )
-write_tsv_safe(retention_gene, "asr_gene_retention.tsv")
-
-kbl_pp(retention_global, caption = "6 Global retention summary (asr_retention_summary.tsv)")
-```
-
-
----
-
-## 7 – Sensitivity analysis
-
-*The pipeline always filters using `params.ct_disambig_posterior_threshold`. The tau grid below is a diagnostic summary only and does not affect any pipeline decision.*
-
-```{r sensitivity}
-tau_grid <- TAU_GRID  # c(0.80, 0.90, 0.95, 0.99) — diagnostic only
-
-apply_tau <- function(fd, t) {
-  kept <- fd |> dplyr::filter(p_min >= t)
-  tibble(
-    tau                = t,
-    N_sites_total      = nrow(fd),
-    N_sites_retained   = nrow(kept),
-    retention_fraction = nrow(kept) / nrow(fd),
-    N_convergent_sites = dplyr::n_distinct(paste(kept$gene, kept$site)),
-    N_convergent_genes = dplyr::n_distinct(kept$gene)
-  )
-}
-
-sensitivity_df <- dplyr::bind_rows(lapply(tau_grid, function(t) apply_tau(filter_df, t)))
-write_tsv_safe(sensitivity_df, "convergence_sensitivity.tsv")
-
-# ── Callset overlap (Jaccard) ─────────────────────────────────────────────────
-callset <- function(t) {
-  filter_df |>
-    dplyr::filter(p_min >= t) |>
-    dplyr::mutate(key = paste(gene, site, sep = ":")) |>
-    dplyr::pull(key)
-}
-
-pairs <- list(
-  c("0.90", "0.95"),
-  c("0.95", "0.99"),
-  c("0.90", "0.99")
-)
-
-overlap_rows <- lapply(pairs, function(pr) {
-  t1 <- as.numeric(pr[[1]]);  t2 <- as.numeric(pr[[2]])
-  s1 <- callset(t1);           s2 <- callset(t2)
-  inter <- length(intersect(s1, s2))
-  union <- length(union(s1, s2))
-  tibble(
-    tau_A        = t1,
-    tau_B        = t2,
-    n_A          = length(s1),
-    n_B          = length(s2),
-    n_intersect  = inter,
-    n_union      = union,
-    jaccard      = if (union > 0) inter / union else NA_real_
-  )
+```{r plot-comp-scatters, fig.height=9, fig.width=11, fig.cap="Scatter plots comparing individual component values against the final ASR Path Score."}
+scatter_list <- lapply(available_comps, function(comp) {
+  ggplot(score_df, aes(x = .data[[comp]], y = asr_path_score)) +
+    geom_jitter(alpha = 0.3, color = .tableau10[1], width = 0.01, height = 0) +
+    geom_smooth(method = "lm", color = .tableau10[7], se = FALSE, linetype = "dashed", formula = y ~ x) +
+    theme_bw(base_size = 11) +
+    labs(x = comp, y = "Final Path Score")
 })
 
-overlap_df <- dplyr::bind_rows(overlap_rows)
-write_tsv_safe(overlap_df, "convergence_overlap.tsv")
-
-kbl_pp(sensitivity_df, caption = "7 Sensitivity analysis (convergence_sensitivity.tsv)")
-```
-
-```{r overlap_tbl}
-kbl_pp(overlap_df, caption = "7 Callset overlap between tau thresholds (convergence_overlap.tsv)")
-```
-
----
-
-## 8 – Diagnostic plots
-
-### Plot 1 — Global MAP distribution
-
-```{r plot1_global_map, eval=jsonl_or_master_ok, fig.height=5}
-# Main panel: full distribution including MAP=1.0
-# Use coord_cartesian so the bin at exactly 1.0 is not clipped
-p_full <- ggplot(data.frame(MAP = global_map_vec), aes(x = MAP)) +
-  geom_histogram(binwidth = 0.01, fill = "#4C8FC0", colour = NA, alpha = 0.8,
-                 boundary = 0, closed = "right") +
-  coord_cartesian(xlim = c(0, 1.01)) +
-  scale_x_continuous(breaks = seq(0, 1, 0.1)) +
-  labs(
-    title    = "MAP posterior distribution at focal MRCA nodes (all convergent sites)",
-    subtitle = sprintf("%s sites × %d focal node pairs | %s MAP values",
-                       formatC(nrow(master_df), big.mark = ",", format = "d"),
-                       length(post_cols_early),
-                       formatC(length(global_map_vec), big.mark = ",", format = "d")),
-    x = "MAP posterior",
-    y = "Count"
-  ) +
-  theme_bw(base_size = 12)
-
-# Inset: uncertainty tail (MAP < 1.0)
-p_inset <- ggplot(data.frame(MAP = global_map_vec[global_map_vec < 1.0]), aes(x = MAP)) +
-  geom_histogram(binwidth = 0.01, fill = "#E07B39", colour = NA, alpha = 0.85,
-                 boundary = 0, closed = "right") +
-  coord_cartesian(xlim = c(0, 1)) +
-  scale_x_continuous(breaks = seq(0, 1, 0.2)) +
-  labs(title = "MAP < 1.0 (uncertainty tail)", x = NULL, y = NULL) +
-  theme_bw(base_size = 9) +
-  theme(plot.title = element_text(size = 8))
-
-p1 <- p_full +
-  inset_element(p_inset, left = 0.02, bottom = 0.45, right = 0.48, top = 0.98)
-
-save_plot(p1, "plot_asr_global_map_distribution.png", width = 11, height = 5)
-p1
-```
-
-### Plot 2 — Focal-node p_min distribution
-
-```{r plot2_pmin, fig.height=5}
-p4 <- ggplot(focal_df, aes(x = p_min)) +
-  geom_histogram(binwidth = 0.01, fill = "#4C8FC0", colour = NA, alpha = 0.85) +
-  geom_vline(xintercept = posterior_threshold,
-             colour = "#D62728", linewidth = 0.9, linetype = "dashed") +
-  annotate("text",
-           x     = posterior_threshold - 0.01,
-           y     = Inf,
-           label = sprintf("τ = %.2f", posterior_threshold),
-           colour = "#D62728", hjust = 1, vjust = 1.5, size = 3.5) +
-  scale_x_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.1)) +
-  labs(
-    title    = "Distribution of p_min across focal MRCA nodes",
-    subtitle = "Dashed line = params.ct_disambig_posterior_threshold",
-    x        = "p_min (minimum MAP across focal nodes for each site)",
-    y        = "Count"
-  ) +
-  theme_bw(base_size = 12)
-
-save_plot(p4, "plot_asr_focal_pmin_distribution.png", width = 11, height = 5)
-p4
-```
-
-### Plot 3 — Sensitivity: retained sites vs threshold
-
-```{r plot3_retention_sensitivity, fig.height=5}
-p6 <- ggplot(sensitivity_df, aes(x = tau, y = retention_fraction)) +
-  geom_line(colour = "#4C8FC0", linewidth = 1.1) +
-  geom_point(colour = "#4C8FC0", size = 3) +
-  geom_vline(xintercept = posterior_threshold,
-             colour = "#D62728", linewidth = 0.8, linetype = "dashed") +
-  annotate("text",
-           x = posterior_threshold + 0.002, y = 0.95,
-           label = sprintf("pipeline τ = %.2f", posterior_threshold),
-           colour = "#D62728", hjust = 0, size = 3.5) +
-  scale_x_continuous(breaks = TAU_GRID) +
-  scale_y_continuous(labels = percent_format(), limits = c(0, 1.05)) +
-  labs(
-    title    = "Sensitivity of site retention to posterior threshold",
-    subtitle = "Global retention fraction across tau grid (diagnostic only)",
-    x        = "Posterior threshold (τ)",
-    y        = "Retention fraction"
-  ) +
-  theme_bw(base_size = 12)
-
-# Add per-gene lines if not too many genes
-per_gene_sens <- dplyr::bind_rows(lapply(tau_grid, function(t) {
-  filter_df |>
-    dplyr::group_by(gene) |>
-    dplyr::summarise(
-      tau                = t,
-      retention_fraction = mean(p_min >= t, na.rm = TRUE),
-      .groups = "drop"
-    )
-}))
-
-if (dplyr::n_distinct(per_gene_sens$gene) <= 20) {
-  p6 <- p6 +
-    geom_line(data = per_gene_sens,
-              aes(x = tau, y = retention_fraction, group = gene),
-              colour = "grey70", linewidth = 0.5, alpha = 0.6)
-}
-
-save_plot(p6, "plot_asr_retention_sensitivity.png", width = 11, height = 5)
-p6
-```
-
-### Plot 4 — Sensitivity of convergence calls to threshold
-
-```{r plot4_convergence_sensitivity, fig.height=5}
-p7a <- ggplot(sensitivity_df, aes(x = tau, y = N_convergent_sites)) +
-  geom_line(colour = "#4C8FC0", linewidth = 1.1) +
-  geom_point(colour = "#4C8FC0", size = 3) +
-  geom_vline(xintercept = posterior_threshold,
-             colour = "#D62728", linewidth = 0.8, linetype = "dashed") +
-  scale_x_continuous(breaks = TAU_GRID) +
-  labs(title = "Convergent sites", x = "Threshold (τ)", y = "N convergent sites") +
-  theme_bw(base_size = 11)
-
-p7b <- ggplot(sensitivity_df, aes(x = tau, y = N_convergent_genes)) +
-  geom_line(colour = "#E07B39", linewidth = 1.1) +
-  geom_point(colour = "#E07B39", size = 3) +
-  geom_vline(xintercept = posterior_threshold,
-             colour = "#D62728", linewidth = 0.8, linetype = "dashed") +
-  scale_x_continuous(breaks = TAU_GRID) +
-  labs(title = "Convergent genes", x = "Threshold (τ)", y = "N convergent genes") +
-  theme_bw(base_size = 11)
-
-p7 <- p7a + p7b +
+p_scatter <- wrap_plots(scatter_list, ncol = 2) +
   plot_annotation(
-    title    = "Sensitivity of convergence calls to posterior threshold",
-    subtitle = "Diagnostic only — pipeline always uses params.ct_disambig_posterior_threshold",
-    theme    = theme(plot.title = element_text(size = 13))
+    title = "Influence of Components on Final ASR Path Score",
+    theme = theme(plot.title = element_text(size = 14, face = "bold"))
   )
 
-save_plot(p7, "plot_convergence_sensitivity.png", width = 13, height = 5)
-p7
+print(p_scatter)
+save_plot(p_scatter, "asr_path_components_scatter.png", width = 11, height = 9)
 ```
 
 ---
 
-## Output file summary
+## 4. Summary Statistics
+
+The table below lists the summary statistics for the final path score and each of its continuous subcomponents across all scored positions.
+
+```{r summary-table}
+summary_table <- score_df %>%
+  select(asr_path_score, all_of(available_comps)) %>%
+  summarise(across(everything(), list(
+    Mean   = ~mean(., na.rm = TRUE),
+    Median = ~median(., na.rm = TRUE),
+    Min    = ~min(., na.rm = TRUE),
+    Max    = ~max(., na.rm = TRUE),
+    SD     = ~sd(., na.rm = TRUE)
+  ))) %>%
+  pivot_longer(everything(), names_to = c("Variable", "Stat"), names_sep = "_(?=[A-Za-z]+$)") %>%
+  pivot_wider(names_from = Stat, values_from = value)
+
+write_tsv_safe(summary_table, "asr_path_summary_statistics.tsv")
+
+summary_table %>%
+  kable(format = "html", caption = "Summary Statistics for ASR Path Score & Components (asr_path_summary_statistics.tsv)", digits = 4) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+```
+
+---
+
+## Output Files Summary
+
+The following generated output tables and plots have been saved under the robustness results directory:
 
 ```{r output_summary, echo=FALSE}
 tsv_files   <- list.files(tsv_dir,   pattern = "\\.tsv$", full.names = FALSE)
 plot_files  <- list.files(plots_dir, pattern = "\\.png$", full.names = FALSE)
 
 tibble(
-  type = c(rep("TSV", length(tsv_files)), rep("Plot", length(plot_files))),
-  file = c(tsv_files, plot_files)
-) |>
-  kbl_pp(caption = "All output files generated")
+  Type = c(rep("TSV", length(tsv_files)), rep("Plot", length(plot_files))),
+  File = c(tsv_files, plot_files)
+) %>%
+  kable(format = "html", caption = "All output files generated") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 ```
 
 ---
 
-*Generated by PhyloPhere — ASR Robustness Module*  
-*`params.ct_disambig_posterior_threshold` = **`r posterior_threshold`***
+*Generated by PhyloPhere — ASR Path Robustness Module*
+*Date of generation: `r Sys.Date()`*

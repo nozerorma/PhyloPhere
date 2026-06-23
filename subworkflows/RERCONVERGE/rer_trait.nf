@@ -56,7 +56,10 @@ process RER_TRAIT {
         ${ params.sp_colname } \\
         ${ params.traitname } \\
         ${ outputName } \\
-        ${ typeOutName }
+        ${ typeOutName } \\
+        "${ params.n_trait ?: '' }" \\
+        "${ params.c_trait ?: '' }" \\
+        "${ params.rer_transform ?: 'auto' }"
         """
     } else {
         """
@@ -67,7 +70,10 @@ process RER_TRAIT {
         ${ params.sp_colname } \\
         ${ params.traitname } \\
         ${ outputName } \\
-        ${ typeOutName }
+        ${ typeOutName } \\
+        "${ params.n_trait ?: '' }" \\
+        "${ params.c_trait ?: '' }" \\
+        "${ params.rer_transform ?: 'auto' }"
         """
     }
 

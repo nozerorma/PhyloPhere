@@ -51,6 +51,7 @@ process RER_BIN {
     output:
     path "${params.traitname}.fg_paths.output",  emit: fg_paths
     path "${params.traitname}.binary.output",    emit: binary_output
+    path "${params.traitname}.binary.perms.rds",  emit: perms_output, optional: true
 
     script:
     def perm_batches    = params.rer_perm_batches    ?: 0

@@ -5,16 +5,15 @@
  * ─────────────
  * Maps CAAS variants to PrimateAI-3D pathogenicity scores.
  *
- * Strategy (see map_to_primateai.py for full documentation):
- *   1. Load CAAS file → tag → (caas_pattern, change_side)
- *   2. Load AA2prot output → query → union of changing-side amino acids
- *   3. Load TransVar output → query → (chrom, start, end, transcript, hg38_ref_aa)
- *   4. Build a genomic-position lookup table
- *   5. Stream PrimateAI-3D.hg38.txt.gz and emit rows where:
- *        ref_aa == hg38_ref_aa  AND  alt_aa ∈ changing_aas
+ * Strategy:
+ *   1. Load CAAS file → group targets by (Gene, Position)
+ *   2. Load MAP files for each Gene → map Position to codon coordinate and infer strand
+ *   3. Build a genomic-position lookup table (expand codon to 3 nucleotides)
+ *   4. Stream PrimateAI-3D.hg38.txt.gz and emit rows where:
+ *        alt_aa ∈ derived_aas  AND  ref_aa matches hg38 reference
  *
  * Output columns:
- *   transvar_query | transvar_transcript | hg38_ref_aa | caas_alt_aas |
+ *   Gene | Position | hg38_ref_aa | caas_alt_aas | caap_group | scheme_weight |
  *   [all PrimateAI-3D columns: chr, pos, ref_aa, alt_aa, score_PAI3D,
  *    percentile_PAI3D, refseq, prediction, ...]
  */
@@ -29,9 +28,8 @@ process PRIMATEAI_MAP {
                pattern: 'primateai_mapped.tsv'
 
     input:
-    path transvar_tsv
-    path aa2prot_csv
     path caas_file
+    path vep_map_dir
     path primateai_db
 
     output:
@@ -39,7 +37,7 @@ process PRIMATEAI_MAP {
 
     stub:
     """
-    printf 'transvar_query\ttransvar_transcript\thg38_ref_aa\tcaas_alt_aas\tchr\tpos\tref_aa\talt_aa\tscore_PAI3D\tpercentile_PAI3D\n' > primateai_mapped.tsv
+    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaap_group\tscheme_weight\tchr\tpos\tref_aa\talt_aa\tscore_PAI3D\tpercentile_PAI3D\n' > primateai_mapped.tsv
     """
 
     script:
@@ -53,11 +51,10 @@ process PRIMATEAI_MAP {
         exit 0
     fi
 
-    python3 map_to_primateai.py \\
-        "${transvar_tsv}" \\
-        "${aa2prot_csv}" \\
-        "${caas_file}" \\
-        "${primateai_db}" \\
+    python3 map_to_primateai.py \
+        "${caas_file}" \
+        "${vep_map_dir}" \
+        "${primateai_db}" \
         primateai_mapped.tsv
     """
 }

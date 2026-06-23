@@ -151,8 +151,11 @@ def collect_contrast_tip_residues(
         return None
 
     enriched_contrast.mrca_modal_aa = enriched_contrast.focal_state
+    enriched_contrast.mrca_contrast = enriched_contrast.focal_state
 
-    return enriched_contrast
+    # Convert dataclass to dict for compatibility with classify_change_and_parallelism
+    # which expects dict.get() operations, not dataclass attributes
+    return enriched_contrast.__dict__.copy() if hasattr(enriched_contrast, '__dict__') else enriched_contrast
 
 
 def analyze_tip_convergence_patterns(

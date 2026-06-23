@@ -858,7 +858,6 @@ base_fan_tree <- ggtree(pruned_tree,
 ggsave(file.path(phylo_distribution_dir, "big_tree.png"), base_fan_tree, device = "png", width = tree_profile_base$diagnostic_size, height = tree_profile_base$diagnostic_size, dpi = "retina")
 
 ordered_species <- rev(pruned_tree$tip.label)
-row.names(stats_df) <- stats_df$species
 
 # Prune tree and trait vector for circular/fan plotting:
 # keep only species with finite primary trait values.

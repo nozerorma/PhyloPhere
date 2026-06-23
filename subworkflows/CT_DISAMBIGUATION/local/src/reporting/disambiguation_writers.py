@@ -46,10 +46,6 @@ def write_caas_convergence_csvs(
     master_filename = output_dir / "caas_convergence_master.csv"
     no_change_filename = output_dir / "no_change_debug.csv"
 
-    # Build comments for debugging ASR/fallback issues
-    for result in results:
-        result["comments"] = _build_comments(result)
-
     _write_csv(results, master_filename, max_pairs=max_pairs)
 
     # Export no_change cases for debugging
@@ -73,52 +69,6 @@ def write_caas_convergence_csvs(
         if no_change_results
         else [master_filename]
     )
-
-
-def _build_comments(result: Dict) -> str:
-    """
-    Build debug comments string from result data.
-
-    Captures fallback-to-parent cases (ASR states with posterior=0)
-    and other edge cases for debugging.
-
-    Args:
-        result: Single CAAS result dictionary
-
-    Returns:
-        Comments string (empty if no issues detected)
-    """
-    comments = []
-
-    # Check for missing ASR states (posterior=0 indicates fallback)
-    if "pair_details" in result and result["pair_details"]:
-        for pair in result["pair_details"]:
-            pair_id = pair.get("pair_id", "?")
-            posterior = pair.get("focal_posterior", pair.get("mrca_posterior"))
-            state = pair.get("focal_state", pair.get("mrca_modal_aa"))
-
-            if posterior is not None and posterior == 0:
-                comments.append(f"pair{pair_id}_fallback:{state}")
-
-    # Check for low ASR posteriors (< 0.5)
-    idx = 1
-    while f"mrca_{idx}_posterior" in result:
-        posterior = result.get(f"mrca_{idx}_posterior")
-        state = result.get(f"mrca_{idx}_state")
-        if posterior is not None and posterior < 0.5:
-            comments.append(f"pair{idx}_low_posterior:{posterior:.3f}")
-        idx += 1
-
-    # Check for insufficient changes
-    if result.get("change_top") == "no_change" and result.get("change_bottom") == "no_change":
-        top_count = result.get("top_change_count", 0)
-        bottom_count = result.get("bottom_change_count", 0)
-        if top_count > 0 or bottom_count > 0:
-            comments.append(
-                f"insufficient_changes(top={top_count},bottom={bottom_count})"
-            )
-
-    return ";".join(comments) if comments else ""
 
 
 def _detect_max_pairs(results: List[Dict]) -> int:
@@ -185,12 +135,15 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "parallel_top",
         "parallel_bottom",
         "parallel_type",
-        "low_confidence_nodes",
-        # Conserved-pair validation flag
-        "asr_is_conserved",
-        "asr_root_conserved",
-        # Debug and comments
-        "comments",
+        # Unified ASR path score (replaces convergence/parallel at scoring time)
+        "asr_path_score",
+        "independence",
+        "mrca_diversity",
+        "derived_agreement",
+        "conservation_gate",
+        "count_factor",
+        "n_changed_pairs",
+        "n_changed_sides",
         # ASR fields (AT END - only present when ASR available)
         "all_mrca_state",
         "all_mrca_posterior",
@@ -204,6 +157,8 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
                 f"mrca_{idx}_node",
                 f"mrca_{idx}_state",
                 f"mrca_{idx}_posterior",
+                f"mrca_{idx}_path_score",
+                f"mrca_{idx}_contaminated",
             ]
         )
 
@@ -347,10 +302,6 @@ def export_from_db(
                 trait_pairs=None,
                 taxid_to_species=taxid_to_species,
             )
-            try:
-                caas_dict["comments"] = _build_comments(caas_dict)
-            except Exception:
-                caas_dict["comments"] = ""
 
             master_writer.writerow(
                 {k: serialize_value(caas_dict.get(k)) for k in master_fields}

@@ -105,14 +105,6 @@ def convert_convergence_result_to_dict(
             if not hasattr(ns, "pair_details") and "pairs" in result:
                 ns.pair_details = result.get("pairs")
 
-            # Low confidence nodes extraction
-            if not hasattr(ns, "low_confidence_nodes"):
-                nsd = result.get("node_state_details") or {}
-                if isinstance(nsd, dict) and "low_confidence_nodes" in nsd:
-                    ns.low_confidence_nodes = nsd.get("low_confidence_nodes")
-                else:
-                    ns.low_confidence_nodes = result.get("low_confidence_nodes")
-
             result = ns
         except Exception:
             # If normalization fails, keep original; downstream getattr will be defensive
@@ -136,7 +128,6 @@ def convert_convergence_result_to_dict(
         "sig_perm": getattr(result, "sig_perm", None),
         "sig_both": getattr(result, "sig_both", None),
         "multi_hypothesis": multi_hypothesis,
-        "comments": "",
     }
 
     # Node mapping
@@ -189,19 +180,33 @@ def convert_convergence_result_to_dict(
     result_dict["parallel_bottom"] = getattr(result, "parallel_bottom", None)
     result_dict["parallel_type"] = getattr(result, "parallel_type", "none")
 
-    # Low confidence nodes
-    lcn = getattr(result, "low_confidence_nodes", None)
-    if lcn:
-        if isinstance(lcn, (list, tuple, set)):
-            result_dict["low_confidence_nodes"] = ",".join(str(x) for x in lcn)
-        else:
-            result_dict["low_confidence_nodes"] = str(lcn)
-
-    # Conserved-pair validation flags (set upstream)
-    result_dict["asr_is_conserved"] = bool(getattr(result, "asr_is_conserved", False))
-    result_dict["asr_root_conserved"] = bool(
-        getattr(result, "asr_root_conserved", False)
-    )
+    # ASR path score (unified ASR/convergence/parallel signal) + per-pair detail
+    result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)
+    result_dict["independence"] = getattr(result, "independence", None)
+    result_dict["mrca_diversity"] = getattr(result, "mrca_diversity", None)
+    result_dict["derived_agreement"] = getattr(result, "derived_agreement", None)
+    result_dict["conservation_gate"] = getattr(result, "conservation_gate", None)
+    result_dict["count_factor"] = getattr(result, "count_factor", None)
+    result_dict["n_changed_pairs"] = getattr(result, "n_changed_pairs", None)
+    result_dict["n_changed_sides"] = getattr(result, "n_changed_sides", None)
+    pair_path_scores = getattr(result, "pair_path_scores", None) or {}
+    pair_path_contam = getattr(result, "pair_path_contaminated", None) or {}
+    if pair_path_scores or pair_path_contam:
+        # Fresh ConvergenceResult: per-pair dicts present → flatten to columns.
+        for pid, pscore in pair_path_scores.items():
+            result_dict[f"mrca_{pid}_path_score"] = pscore
+        for pid, contam in pair_path_contam.items():
+            result_dict[f"mrca_{pid}_contaminated"] = bool(contam)
+    else:
+        # Round-trip case (reloaded from aggregation DB): the per-pair scores
+        # were already flattened onto the input as mrca_N_path_score /
+        # mrca_N_contaminated attributes. Carry those flat keys through.
+        src = vars(result) if hasattr(result, "__dict__") else {}
+        for k, v in src.items():
+            if k.startswith("mrca_") and (
+                k.endswith("_path_score") or k.endswith("_contaminated")
+            ):
+                result_dict[k] = v
 
     # Keep rich payloads for downstream viz/reporting
     if getattr(result, "pair_details", None):
@@ -246,18 +251,6 @@ def merge_multi_hypothesis_results(
         taxid_to_species=taxid_to_species,
     )
 
-    # Merge low confidence nodes
-    all_lcn = []
-    for r in results_group:
-        low_conf_nodes = getattr(r, "low_confidence_nodes", None)
-        if low_conf_nodes:
-            if isinstance(low_conf_nodes, (list, tuple, set)):
-                all_lcn.extend(list(low_conf_nodes))
-            else:
-                all_lcn.append(low_conf_nodes)
-    if all_lcn:
-        merged["low_confidence_nodes"] = ",".join(sorted(set(str(x) for x in all_lcn)))
-
     # Merge CAAS labels
     caass = [
         getattr(r, "caas", None) for r in results_group if getattr(r, "caas", None)
@@ -266,15 +259,16 @@ def merge_multi_hypothesis_results(
         merged["caas_merged"] = "; ".join(sorted(set(str(x) for x in caass)))
 
     # Merge boolean/meta flags across hypothesis rows
-    merged["asr_is_conserved"] = any(
-        bool(getattr(r, "asr_is_conserved", False)) for r in results_group
-    )
-    merged["asr_root_conserved"] = any(
-        bool(getattr(r, "asr_root_conserved", False)) for r in results_group
-    )
     merged["is_conserved_meta"] = any(
         bool(getattr(r, "is_conserved_meta", False)) for r in results_group
     )
+    path_scores = [
+        getattr(r, "asr_path_score", None)
+        for r in results_group
+        if getattr(r, "asr_path_score", None) is not None
+    ]
+    if path_scores:
+        merged["asr_path_score"] = max(path_scores)
 
     groups = [
         str(getattr(r, "caap_group", "")).strip()

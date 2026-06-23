@@ -51,7 +51,7 @@ Author:         Miguel Ramon (miguel.ramon@upf.edu)
 
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- *  NAMED WORKFLOW FOR PIPELINE: This section includes the main CT, ORA and RERConverge workflows.
+ *  NAMED WORKFLOW FOR PIPELINE: This section includes the main workflows.
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
@@ -63,8 +63,7 @@ include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
 include {CT_SIGNIFICATION} from './workflows/ct_signification.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
-include {ORA} from './workflows/ora.nf'
-include {ORA_EXCLUDED} from './workflows/ora_excluded.nf'
+include {ENRICHMENT_EXCLUDED} from './workflows/enrichment_excluded.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
@@ -112,11 +111,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
  */
 
 workflow {
-
-    // Backward-compatible alias: allow --input_tax_id as an alternative to --tax_id.
-    if (params.input_tax_id && !params.tax_id) {
-        params.tax_id = params.input_tax_id
-    }
 
     // Check if --help is provided
     if (params.help) {
@@ -205,18 +199,6 @@ workflow {
             ran_any = true
         }
 
-        if (params.ora && !params.ct_postproc) {
-            // Standalone ORA: no upstream postproc channels — ORA will fall back to
-            // --ora_gene_lists_input + --ora_background_input via its .ifEmpty {} guards.
-            if (!params.ora_gene_lists_input || !params.ora_background_input) {
-                error "Standalone ORA requires --ora_gene_lists_input and --ora_background_input (or enable --ct_postproc for integrated mode)."
-            }
-            // Pass null for gene_lists so the if(channel) guard in ora.nf detects absence
-            // and loads directly from --ora_gene_lists_input (Channel.empty() would silently
-            // stall .collect() without ever emitting).
-            ORA(Channel.empty(), null)
-            ran_any = true
-        }
 
         if (params.ct_postproc) {
             if (!params.ct_disambiguation && !params.disambiguation_input) {
@@ -243,12 +225,10 @@ workflow {
             // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
             pp_cleaned_bg = postproc_results.cleaned_background
 
-            if (params.ora) {
-                // ORA on excluded gene lists only: characterises genes removed during
+            if (params.enrichment) {
+                // Enrichment on excluded gene lists only: characterises genes removed during
                 // post-processing using the original (pre-cleanup) background.
-                // Post-proc gene-list ORA is intentionally omitted here; enrichment
-                // on significant positions is handled downstream by SCORING (scoring_ora).
-                ORA_EXCLUDED(postproc_results.background_ori, postproc_results.excluded_gene_lists_files)
+                ENRICHMENT_EXCLUDED(postproc_results.background_ori, postproc_results.excluded_gene_lists_files)
                 ran_any = true
             }
         }
@@ -310,7 +290,7 @@ workflow {
             def sel_pp_top_ch    = Channel.empty()
             def sel_pp_bottom_ch = Channel.empty()
             if (postproc_results) {
-                def pp_gene_lists_val = postproc_results.ora_gene_lists_files.collect()
+                def pp_gene_lists_val = postproc_results.enrichment_gene_lists_files.collect()
                 sel_pp_top_ch    = pp_gene_lists_val
                     .flatMap { files -> files.findAll { f -> f.name == 'all_top.txt' } }
                     .collectFile(name: 'merged_pp_top.txt')
@@ -350,7 +330,7 @@ workflow {
             }
         }
 
-        if (params.rer_tool) {
+        if (params.rer_tool || params.enrichment || params.string) {
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
             // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.
@@ -363,6 +343,7 @@ workflow {
             ran_any = true
         }
 
+        println "DEBUG: params.traitname = '${params.traitname}'"
         if (params.scoring) {
             if (!params.ct_postproc && !params.scoring_postproc_input) {
                 error "SCORING requires CT post-processing output (--ct_postproc) or --scoring_postproc_input."
@@ -375,12 +356,9 @@ workflow {
             def scoring_fade_bot_ch      = params.fade       ? FADE.out.summary_bottom            : null
             def scoring_fade_site_top_ch = params.fade       ? FADE.out.site_tsv_top              : null
             def scoring_fade_site_bot_ch = params.fade       ? FADE.out.site_tsv_bottom           : null
-            def scoring_rer_ch           = params.rer_tool   ? RER_MAIN.out.summary_tsv           : null
+            def scoring_rer_ch           = (params.rer_tool || params.rer_report_file) ? RER_MAIN.out.summary_tsv : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
-            def scoring_bg_ch            = pp_cleaned_bg     ?: null
-            def scoring_vep_tv_ch        = params.vep        ? VEP.out.transvar_tsv               : null
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
-            def scoring_vep_aa2prot_ch   = params.vep        ? VEP.out.aa2prot_csv               : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
 
             SCORING(
@@ -389,19 +367,17 @@ workflow {
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
                 scoring_accum_ch,
-                scoring_bg_ch,
-                scoring_vep_tv_ch,
                 scoring_vep_pai_ch,
-                scoring_vep_aa2prot_ch,
                 null,  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
                 scoring_fade_site_top_ch,
-                scoring_fade_site_bot_ch
+                scoring_fade_site_bot_ch,
+                pp_cleaned_bg          // cleaned_background_main.txt — FCS universe
             )
             ran_any = true
         }
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --ora, --ct_accumulation, --fade, --scoring, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --enrichment, --ct_accumulation, --fade, --scoring, or --rer_tool."
         }
     }
 }

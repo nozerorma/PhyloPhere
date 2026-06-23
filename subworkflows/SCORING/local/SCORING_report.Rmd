@@ -22,9 +22,11 @@ params:
   traitname: "unknown_trait"
   output_dir: "."
   top_pct: 0.10
+  top25_pct: 0.25
   top5_pct: 0.05
   top1_pct: 0.01
   gene_top_pct: 0.10
+  gene_top25_pct: 0.25
   gene_top5_pct: 0.05
   gene_top1_pct: 0.01
   stress_summary_file: NULL
@@ -35,9 +37,7 @@ params:
   stress_loadings_file: NULL
   fade_site_top_file: NULL
   fade_site_bot_file: NULL
-  vep_transvar_file: NULL
   vep_primateai_file: NULL
-  vep_aa2prot_file: NULL
   genomic_info_file: NULL
   window_size_bp: 1000000
   direction: "combined"
@@ -142,6 +142,14 @@ boot_measure_col <- if ("pvalue_boot" %in% names(pos_df)) {
 hyper_measure_is_raw <- identical(hyper_measure_col, "Pvalue")
 boot_measure_is_raw  <- identical(boot_measure_col,  "pvalue_boot")
 
+# FDR-corrected hypergeometric p-value columns
+fdr_measure_col <- if ("Pvalue_hyp_fdr" %in% names(pos_df)) {
+  "Pvalue_hyp_fdr"
+} else {
+  NULL
+}
+has_fdr_measure <- !is.null(fdr_measure_col)
+
 # Provisional detection — overridden in the load-data block after directional scores are computed
 has_rand <- "gene_rand_score" %in% names(gene_df) && any(!is.na(gene_df$gene_rand_score))
 has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_pval)) &&
@@ -156,31 +164,20 @@ has_scoring_stress <- .file_ok(params$stress_summary_file) &&
   .file_ok(params$stress_overlap_file) &&
   .file_ok(params$stress_variants_file)
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
-has_aa2prot       <- .file_ok(params$vep_aa2prot_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
 # FADE site data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
-# TransVar is no longer used in the scoring report (removed — it added no actionable signal)
-has_vep_transvar  <- FALSE
+# Initialized FALSE here so later chunks with eval=has_fade_any don't crash when
+# the fade-pos-setup chunk is skipped (has_fade_pos == FALSE).
+has_fade_top <- FALSE
+has_fade_bot <- FALSE
+has_fade_any <- FALSE
+has_pos_char       <- has_vep_primateai || has_genomic
 
 if (has_vep_primateai) {
   vep_pai_df <- read_tsv(params$vep_primateai_file, show_col_types = FALSE)
 } else {
   vep_pai_df <- NULL
-}
-
-# aa2prot: tab-separated, no header — Gene | aln_pos (0-based) | caas_id | Gene:p.N
-# Used to bridge alignment positions in pos_df to 1-based protein positions used by
-# PrimateAI-3D lookup (map_to_primateai.py outputs transvar_query in this format).
-if (has_aa2prot) {
-  aa2prot_raw <- read_tsv(params$vep_aa2prot_file,
-                          col_names = c("Gene", "aln_pos", "caas_id", "prot_query"),
-                          show_col_types = FALSE)
-  pos_prot_map <- aa2prot_raw %>%
-    distinct(Gene, aln_pos, prot_query) %>%
-    rename(Position = aln_pos)
-} else {
-  pos_prot_map <- NULL
 }
 
 if (has_genomic) {
@@ -282,15 +279,33 @@ gene_direction_df <- pos_df %>%
 
 gene_df <- gene_df %>% left_join(gene_direction_df, by = "Gene")
 
-gene_top_list <- gene_df %>%
-  filter(!is.na(gene_caas_top)) %>%
-  slice_max(gene_caas_top, prop = params$gene_top_pct) %>%
-  pull(Gene)
+# ── Gate-based gene lists (global / p-val sig / FDR sig) ─────────────────────
+# Derived from position-level hypergeometric significance flags so gene membership
+# is tied to the test outcome rather than an arbitrary top-% rank cut.
+.gate_genes <- function(pos_sub, gate_col = NULL) {
+  if (!is.null(gate_col) && gate_col %in% names(pos_sub))
+    pos_sub %>% filter(.data[[gate_col]] %in% TRUE) %>% pull(Gene) %>% unique()
+  else
+    pos_sub %>% pull(Gene) %>% unique()
+}
 
-gene_bot_list <- gene_df %>%
-  filter(!is.na(gene_caas_bot)) %>%
-  slice_max(gene_caas_bot, prop = params$gene_top_pct) %>%
-  pull(Gene)
+gene_global_top <- .gate_genes(pos_top)
+gene_global_bot <- .gate_genes(pos_bottom)
+gene_sig_top    <- .gate_genes(pos_top,    "gate_sig")
+gene_sig_bot    <- .gate_genes(pos_bottom, "gate_sig")
+gene_fdr_top    <- .gate_genes(pos_top,    "gate_fdr")
+gene_fdr_bot    <- .gate_genes(pos_bottom, "gate_fdr")
+
+# Primary aliases used in tables — p-val sig gate is most informative default
+gene_top_list <- gene_sig_top
+gene_bot_list <- gene_sig_bot
+
+# Named list for looping over all three gates in overlap sections
+.caas_gates <- list(
+  list(lbl = "Global",        top = gene_global_top, bot = gene_global_bot),
+  list(lbl = "Sig (p<0.05)", top = gene_sig_top,    bot = gene_sig_bot),
+  list(lbl = "FDR sig",      top = gene_fdr_top,    bot = gene_fdr_bot)
+)
 
 # ── Normalisation helper ──────────────────────────────────────────────────────
 rank_norm <- function(x) {
@@ -335,23 +350,17 @@ substitutions (CAAS).  The scoring operates at two levels:
 
 1. **Position-level CAAS Score** — each alignment position receives a composite
    score that combines:
-   - **Biochemical score** — amino acid variability and pattern association,
-     weighted by grouping scheme specificity.
-   - **ASR score** — ancestral state reconstruction confidence: novel changes
-     score 1.0; contradicted conserved cases score 0; ASR-supported conserved
-     cases receive pair-weighted posterior support capped below novelty.
-   - **Convergence score** — ordinal change-type support with a mild
-     completeness penalty when only one side is assessable.
-   - **Parallel score** — ordinal parallelism support weighted by MRCA
-     posterior confidence and penalised mildly when only one side is assessable.
+   - **Phenotype evolution** — permulation partition evidence ($1 - \text{pvalue\_boot}$).
+   - **Position evolution** — continuous ASR path score ($\text{asr\_path\_score}$ / $\text{asr\_score}$), aggregating isolation, independence, diversity, agreement, and conservation elements.
 
 2. **Gene-level scores** — each gene receives directional CAAS scores and is
    compared against independent evolutionary signals:
    - **gene_caas_top / gene_caas_bot** — 90th percentile of position-level CAAS
      scores for TOP and BOTTOM direction positions respectively.
-   `r if (has_rand) "- **gene_accum_score** — weighted accumulation score (US=0.5, GS4=0.2, …)."`
+   `r if (has_rand) "- **gene_accum_score** — equally weighted accumulation score (0.2 each)."`
    `r if (has_rer) "- RERConverge p-values and direction (accelerating / decelerating)."`
    - FADE gene-level BF ≥ 100 significance, tested separately per direction.
+   `r if (has_vep_primateai) "- **PrimateAI-3D Validation** — PAI3D pathogenicity scores collapsed to position-level (maximum per CAAP group, averaged across schemes)."`
 
 All comparisons use rank-normalised variables for correlations.
 
@@ -368,159 +377,64 @@ reproduced independently of the pipeline code.
 
 ---
 
-### Position-Level Components
+### Position-Level Score (two-way)
 
-All position-level component scores are mapped to the **[0, 1]** interval.
-The four core components are always computed; FADE is included only
-when the upstream module has been run.
+The position-level **`CAAS_score`** is the product of **two orthogonal evidence
+axes**, each already on a raw **[0, 1]** scale (no decile transforms), computed
+**per scheme row** and then scheme-weight-aggregated. The hypergeometric p-value is
+*not* part of the score — it is a separate three-way significance **gate** (below).
 
-#### 1 · Variability score
+#### 1 · Phenotype evolution — `phen_score`
 
-Decile rank of the **hypergeometric p-value** (`Pvalue`) across all
-non-GS0 Gene × Position × Scheme rows, inverted so that smaller p-values receive
-higher scores.
+Permulation evidence: one minus the **permutation p-value** (`pvalue_boot`), which
+permutes the phenotype on the tree. Low permutation p-value → strong, phylogenetically
+honest phenotype-partition signal → high evidence.
 
-$$\text{variability\_score} = 1 - \frac{\text{ntile}(P_{\text{hyp}}, 10) - 1}{9}$$
+$$\text{phen\_score} = 1 - P_{\text{boot}}$$
 
-*Range: 0.0 (least significant decile) → 1.0 (most significant decile).*
+#### 2 · Position evolution — `asr_path_score` (`asr_score`)
 
-> One of five independent components entering `pre_score`.
+The unified ASR path score, built from the per-node ASR posteriors as the product of
+**six factors** (full definitions in
+[`docs/ASR_PATH_SCORE.md`](../../docs/ASR_PATH_SCORE.md)):
 
----
+| Factor | What it rewards |
+|--------|-----------------|
+| `core` | per-pair isolation: the change is made above the MRCA, not inherited |
+| `independence` | derived state **absent** at the pairs' shared ancestors (LAC nodes) |
+| `mrca_diversity` | non-parallel origins (distinct ancestral starting posteriors) |
+| `derived_agreement` | changed pairs landing on the **same** derived residue per side |
+| `conservation_gate` | conserved pairs holding the ancestral state deeply |
+| `count_factor` | number of pairs that **actually** changed (inherited states excluded) |
 
-#### 2 · Pattern score
+It folds in the old binary ASR gate, convergence, and parallel signals; those legacy
+columns survive only as display diagnostics.
 
-Decile rank of the **permulation p-value** (`pvalue_boot`), inverted in the
-same way.
+#### 3 · Biochemical weighting & aggregation
 
-$$\text{pattern\_score} = 1 - \frac{\text{ntile}(P_{\text{boot}}, 10) - 1}{9}$$
+Each scoring scheme (US, GS1–GS4) carries **equal weight of 0.2**. The per-row two-way
+score is multiplied by its scheme weight:
 
-> One of five independent components entering `pre_score`.
+$$\text{caas\_row} = \text{phen\_score} \times \text{asr\_path\_score}$$
 
----
+$$\text{row\_caas} = \text{caas\_row} \times w_s, \qquad w_s = 0.2$$
 
-#### 3 · Biochemical weight
+$$\text{CAAS\_score} = \sum_{s \in \text{detected schemes}} \text{row\_caas}$$
 
-GS0 positions (any substitution, biochemically uninformative) are **excluded
-entirely** before scoring. For each remaining position, the integer specificity
-points of all satisfied schemes are summed:
+Each scheme contributes at most **0.2**; the maximum achievable `CAAS_score` = **1.0**
+(all five schemes, both axes = 1.0). `biochem_weight_sum` is the sum of detected
+scheme weights (max 1.0), a diagnostic of how many schemes flagged the position.
 
-| Scheme | Points |
-|--------|-------:|
-| US     | 5      |
-| GS4    | 2      |
-| GS3    | 1      |
-| GS2    | 1      |
-| GS1    | 1      |
-| GS0    | *excluded* |
+#### 4 · Significance gate (hypergeometric `Pvalue`)
 
-$$\text{biochem\_weight\_sum} = \sum_{s \in \text{detected schemes}} w_s$$
+The hypergeometric CAAS p-value gates positions into three nested tiers, so callers
+rank by `CAAS_score` and then filter to a defensible significance level:
 
-Maximum = **10** (US + GS4 + GS3 + GS2 + GS1 = 5 + 2 + 1 + 1 + 1).
-
-> This is not a [0,1] score — it is a **multiplier** applied to `pre_score` at the final step. A position satisfying US only scores 5/10 = 0.5 of its signal potential; one satisfying all schemes scores 10/10 = 1.0.
-
----
-
-#### 4 · ASR score
-
-Measures ancestral-state-reconstruction confidence. Three mutually exclusive cases:
-
-| Condition | Score |
-|-----------|------:|
-| `is_conserved_meta = FALSE` (novel change) | **1.0** |
-| `is_conserved_meta = TRUE` **and** `asr_is_conserved = TRUE` | see formula below |
-| `is_conserved_meta = TRUE` **and** `asr_is_conserved = FALSE` | **0.0** |
-
-For ASR-confirmed conserved positions, the score is pair-weighted across the
-detected foreground-pair configuration. Let $w = 1 / n_{\text{pairs}}$. Then:
-
-$$
-\text{asr\_score} =
-\sum_{\text{divergent pairs}} w +
-\sum_{\text{conserved pairs}} \min\left(
-\frac{w \times P_{\text{MRCA}(i)} + w \times P_{\text{root}} \times I(\texttt{asr\_root\_conserved})}{2},
-0.9w
-\right)
-$$
-
-This keeps supported conserved explanations informative while ensuring they do
-not outrank genuinely novel changes, which always score **1.0**.
-
----
-
-#### 5 · Convergence score
-
-Scores the **type and directionality** of the amino acid change on each
-assessed side (top / bottom foreground lineages).
-
-Side values:
-
-| Change type | Value |
-|-------------|------:|
-| convergent  | 1.0   |
-| codivergent | 0.5   |
-| divergent   | 0.25  |
-| ambiguous / no change | excluded (NA) |
-
-$$\text{mean\_change} = \text{mean of non-NA side values}$$
-
-$$\text{completeness penalty} = \begin{cases} 1.0 & \text{both sides assessed} \\ 0.75 & \text{one side only} \end{cases}$$
-
-$$\text{convergence\_score} = \text{mean\_change} \times \text{completeness penalty}$$
-
-Range: 0.1875 (one side, divergent: 0.25 × 0.75) → 1.0 (both sides convergent).
-
----
-
-#### 6 · Parallel score
-
-Scores whether the amino acid change is **parallel** (same substitution in
-independent lineages) or **non-parallel**, weighted by MRCA posterior
-confidence.
-
-Parallelism coefficients (note: non-parallel receives the *highest* weight
-because independent parallel changes are less informative as a signal of
-convergence):
-
-| Parallel type | Coefficient |
-|---------------|------------:|
-| non-parallel  | 1.0         |
-| mixed         | 0.75        |
-| parallel      | 0.5         |
-
-For each assessable side (where `change_top`/`change_bottom` is
-convergent / codivergent / divergent):
-
-$$\text{side\_score} = \text{coeff} \times \overline{P_{\text{MRCA}}}$$
-
-where $\overline{P_{\text{MRCA}}}$ is the mean of `mrca_1_posterior`,
-`mrca_2_posterior`, `mrca_3_posterior` (NA excluded).
-
-$$\text{mean\_parallel} = \text{mean of non-NA side scores}$$
-
-$$\text{completeness penalty} = \begin{cases} 1.0 & \text{both sides assessed} \\ 0.75 & \text{one side only} \end{cases}$$
-
-$$\text{parallel\_score} = \text{mean\_parallel} \times \text{completeness penalty}$$
-
----
-
-#### Pre-score and Composite CAAS score
-
-**`pre_score`** is the unweighted mean of the five independent signal components.
-FADE is **not** included — it is used only as an independent gene-level
-characterisation layer.
-
-$$\text{pre\_score} = \frac{\text{variability} + \text{pattern} + \text{asr} + \text{convergence} + \text{parallel}}{5}$$
-
-**`CAAS_score`** scales `pre_score` by biochemical specificity:
-
-$$\text{CAAS\_score} = \text{pre\_score} \times \frac{\text{biochem\_weight\_sum}}{10}$$
-
-This factorisation keeps *how strong is the signal* (`pre_score`) orthogonal
-to *how biochemically specific is the convergence* (`biochem_weight_sum / 10`).
-A GS0-only position is excluded entirely; a position satisfying only GS1 carries
-10% of its signal potential regardless of how high its pre_score is.
+| Tier | Column | Condition |
+|------|--------|-----------|
+| All | `gate_all` | every scored position (the full ranked pool) |
+| Significant | `gate_sig` | `Pvalue < 0.05` |
+| FDR-significant | `gate_fdr` | BH-adjusted `Pvalue < 0.05` (`Pvalue_hyp_fdr`) |
 
 ---
 
@@ -536,13 +450,18 @@ $$\text{gene\_caas\_bot} = Q_{0.90}(\text{CAAS\_score} \mid \text{change\_side} 
 
 #### gene\_accum\_score  *(optional)*
 
-Scheme-weighted sum of accumulation randomization p-values (GS0 excluded).
-Weights are the normalized versions of the integer specificity points
-(US = 0.5, GS4 = 0.2, GS3/2/1 = 0.1 each — proportional to `biochem_weight_sum`):
+Equally weighted sum of accumulation randomization p-values.
+Weights are equal at 0.2 for each of the active schemes (US, GS1-GS4):
 
-$$\text{gene\_accum\_score} = 1 - \frac{\sum_{s \in \{US, GS4, GS3, GS2, GS1\}} w_s \times P_{\text{accum},s}}{n_{\text{available schemes}}}$$
+$$\text{gene\_accum\_score} = 1 - \frac{\sum_{s \in \{US, GS4, GS3, GS2, GS1\}} 0.2 \times P_{\text{accum},s}}{n_{\text{available schemes}}}$$
 
 Maximum = 1.0 (all schemes p-value = 0).
+
+#### PrimateAI-3D validation  *(optional)*
+
+The PrimateAI-3D characterization score (`pai_char_score`) is calculated per protein position as the average of the maximum PAI3D score per CAAP group across detected biochemically grouped schemes (US, GS1-GS4):
+1. **Stance collapse**: Take the maximum PAI3D score per (Gene × Position × CAAP group) to collapse multiple alternative amino acids per stance.
+2. **Stance average**: Average these maximums across the CAAP groups where the scheme weight is positive (`scheme_weight > 0`).
 
 #### RERConverge characterisation  *(optional)*
 
@@ -583,12 +502,9 @@ direction) and `gene_caas_bot` (BOTTOM direction) independently.
 
 ## Input Distributions {.tabset}
 
-The five independent pre-score components (variability, pattern, ASR, convergence, parallel)
-are derived from the hypergeometric, permulation, and structural signals.
-If the input table still contains raw p-values, those are shown directly; otherwise
-the report falls back to the exported decile scores, which preserve the same ranking.
+This section displays the distributions of the primary input significance measures (Hypergeometric P-values, FDR-adjusted hypergeometric P-values, and Permutation P-values) along with joint comparisons to show how they behave relative to each other and to the final CAAS score.
 
-### `r if (hyper_measure_is_raw) "Hypergeometric P-value" else "Variability Score"`
+### Hypergeometric P-value
 
 ```{r hyper-pval-dist, fig.height=8}
 # Compute decile boundaries from the selected hypergeometric measure.
@@ -600,8 +516,6 @@ decile_df_h <- pos_df %>%
     measure_value = .data[[hyper_measure_col]],
     plot_value    = if (hyper_measure_is_raw) -log10(pmax(measure_value, 1e-300)) else measure_value,
     decile_raw    = dplyr::ntile(measure_value, 10),
-    # Keep decile direction aligned with score semantics:
-    # decile 10 = strongest signal (smallest p-value or highest score).
     decile        = if (hyper_measure_is_raw) 11 - decile_raw else decile_raw,
     score_val     = (decile - 1) / 9
   )
@@ -618,7 +532,7 @@ p_hyp_density <- ggplot(decile_df_h, aes(x = plot_value)) +
   labs(
     title    = if (hyper_measure_is_raw) "Hypergeometric P-value Distribution (-log10 scale)" else "Variability Score Distribution",
     subtitle = if (hyper_measure_is_raw) {
-      "Dotted lines: decile boundaries (D10 = smallest p-values, highest variability_score; D1 = largest p-values)"
+      "Dotted lines: decile boundaries (D10 = smallest p-values, highest score; D1 = largest p-values)"
     } else {
       "Dotted lines: decile boundaries of the exported variability_score values"
     },
@@ -631,7 +545,7 @@ p_hyp_density <- ggplot(decile_df_h, aes(x = plot_value)) +
   ) +
   theme(plot.title = element_text(face = "bold"))
 
-# Panel 2: count per decile, coloured by variability_score
+# Panel 2: count per decile, coloured by score_val
 decile_counts_h <- decile_df_h %>%
   group_by(decile, score_val) %>%
   summarise(n = n(), .groups = "drop")
@@ -644,9 +558,9 @@ p_hyp_decile <- ggplot(decile_counts_h,
   labs(
     title    = "Positions per Hypergeometric Decile",
     subtitle = if (hyper_measure_is_raw) {
-      "Decile 10 = smallest p-values (variability_score = 1.0); Decile 1 = largest p-values"
+      "Decile 10 = smallest p-values (score = 1.0); Decile 1 = largest p-values"
     } else {
-      "Decile 1 = lowest variability_score; Decile 10 = highest variability_score"
+      "Decile 1 = lowest score; Decile 10 = highest score"
     },
     x        = "Decile (10 = most significant)",
     y        = "Number of rows"
@@ -668,12 +582,87 @@ if (hyper_measure_is_raw) {
   )
   knitr::kable(
     hyp_boundary_tbl,
-    caption = "Hypergeometric p-value range per decile (decile 10 = smallest p-values, variability_score = 1.0)"
+    caption = "Hypergeometric p-value range per decile (decile 10 = smallest p-values, score = 1.0)"
   )
 }
 ```
 
-### `r if (boot_measure_is_raw) "Permulation P-value" else "Pattern Score"`
+### FDR-adjusted P-value
+
+```{r fdr-pval-dist, fig.height=8, eval=has_fdr_measure}
+# Compute decile boundaries from the FDR hypergeometric measure.
+fdr_values <- pos_df[[fdr_measure_col]]
+pv_breaks_f <- quantile(fdr_values, probs = seq(0, 1, by = 0.1), na.rm = TRUE)
+decile_df_f <- pos_df %>%
+  filter(!is.na(.data[[fdr_measure_col]])) %>%
+  mutate(
+    measure_value = .data[[fdr_measure_col]],
+    plot_value    = -log10(pmax(measure_value, 1e-300)),
+    decile_raw    = dplyr::ntile(measure_value, 10),
+    decile        = 11 - decile_raw,
+    score_val     = (decile - 1) / 9
+  )
+
+# Panel 1: density on the FDR measure scale with decile boundaries
+p_fdr_density <- ggplot(decile_df_f, aes(x = plot_value)) +
+  geom_histogram(aes(y = after_stat(density)), bins = 60,
+                 fill = .tableau10[4], alpha = 0.6) +
+  geom_density(linewidth = 0.8, colour = .tableau10[3]) +
+  geom_vline(
+    xintercept = -log10(pmax(pv_breaks_f[2:10], 1e-300)),
+    linetype = "dotted", colour = "grey50", linewidth = 0.4
+  ) +
+  labs(
+    title    = "FDR-adjusted Hypergeometric P-value Distribution (-log10 scale)",
+    subtitle = "Dotted lines: decile boundaries (D10 = smallest p-values, D1 = largest p-values)",
+    x        = "-log10(Pvalue_hyp_fdr)",
+    y        = "Density"
+  ) +
+  scale_x_continuous(
+    breaks = scales::pretty_breaks(n = 14),
+    minor_breaks = scales::pretty_breaks(n = 28)
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+
+# Panel 2: count per decile, coloured by score_val
+decile_counts_f <- decile_df_f %>%
+  group_by(decile, score_val) %>%
+  summarise(n = n(), .groups = "drop")
+
+p_fdr_decile <- ggplot(decile_counts_f,
+                        aes(x = factor(decile), y = n, fill = score_val)) +
+  geom_col(colour = "white", linewidth = 0.3) +
+  scale_fill_gradient(low = .tableau10[4], high = .tableau10[3],
+                      name = "FDR score") +
+  labs(
+    title    = "Positions per FDR Decile",
+    subtitle = "Decile 10 = smallest FDR p-values; Decile 1 = largest p-values",
+    x        = "Decile (10 = most significant)",
+    y        = "Number of rows"
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "right")
+
+gridExtra::grid.arrange(p_fdr_density, p_fdr_decile, ncol = 1)
+
+# Decile boundary table
+.fdr_lower <- pv_breaks_f[1:10]
+.fdr_upper <- c(pv_breaks_f[2:10], max(fdr_values, na.rm = TRUE))
+fdr_boundary_tbl <- tibble(
+  Decile                = 10:1,
+  `P-value lower bound` = formatC(.fdr_lower, format = "e", digits = 2),
+  `P-value upper bound` = formatC(.fdr_upper, format = "e", digits = 2),
+  score                 = round((10:1 - 1) / 9, 3)
+)
+knitr::kable(
+  fdr_boundary_tbl,
+  caption = "FDR p-value range per decile (decile 10 = smallest p-values)"
+)
+```
+
+`r if (!has_fdr_measure) "_FDR hypergeometric p-values not available in this run._"`
+
+### Permulation P-value
 
 ```{r perm-pval-dist, fig.height=8}
 boot_values <- pos_df[[boot_measure_col]]
@@ -699,7 +688,7 @@ p_boot_density <- ggplot(decile_df_b, aes(x = plot_value)) +
   labs(
     title    = if (boot_measure_is_raw) "Permulation Bootstrap P-value Distribution (-log10 scale)" else "Pattern Score Distribution",
     subtitle = if (boot_measure_is_raw) {
-      "Dotted lines: decile boundaries (D10 = smallest p-values, highest pattern_score; D1 = largest p-values)"
+      "Dotted lines: decile boundaries (D10 = smallest p-values, highest score; D1 = largest p-values)"
     } else {
       "Dotted lines: decile boundaries of the exported pattern_score values"
     },
@@ -724,9 +713,9 @@ p_boot_decile <- ggplot(decile_counts_b,
   labs(
     title    = "Positions per Permulation Decile",
     subtitle = if (boot_measure_is_raw) {
-      "Decile 10 = smallest permulation p-values (pattern_score = 1.0); Decile 1 = largest p-values"
+      "Decile 10 = smallest permulation p-values (score = 1.0); Decile 1 = largest p-values"
     } else {
-      "Decile 1 = lowest pattern_score; Decile 10 = highest pattern_score"
+      "Decile 1 = lowest score; Decile 10 = highest score"
     },
     x        = "Decile (10 = most significant)",
     y        = "Number of rows"
@@ -748,17 +737,38 @@ if (boot_measure_is_raw) {
   )
   knitr::kable(
     boot_boundary_tbl,
-    caption = "Permulation p-value range per decile (decile 10 = smallest p-values, pattern_score = 1.0)"
+    caption = "Permulation p-value range per decile (decile 10 = smallest p-values, score = 1.0)"
   )
+}
+```
+
+### Significance Gate
+
+The hypergeometric p-value is not part of `CAAS_score`; it tiers positions into
+nested significance levels. Rank by `CAAS_score`, then keep whichever tier you need.
+
+```{r gate-summary}
+if (all(c("gate_all", "gate_sig", "gate_fdr") %in% names(pos_df))) {
+  gate_tbl <- tibble::tibble(
+    Tier = c("All (ranked pool)", "Significant (Pvalue < 0.05)",
+             "FDR-significant (BH < 0.05)"),
+    Positions = c(sum(pos_df$gate_all, na.rm = TRUE),
+                  sum(pos_df$gate_sig, na.rm = TRUE),
+                  sum(pos_df$gate_fdr, na.rm = TRUE))
+  ) %>% mutate(`% of pool` = round(100 * Positions / max(Positions, 1), 1))
+  knitr::kable(gate_tbl,
+               caption = "Hypergeometric significance gate — positions per tier")
+} else {
+  cat("_Significance gate columns (gate_all / gate_sig / gate_fdr) not present in this run._\n")
 }
 ```
 
 ### Joint Decile Summary
 
-```{r joint-decile-summary, fig.height=5}
-# Scatter of variability_score vs pattern_score coloured by CAAS_score
+```{r joint-decile-summary, fig.height=5, fig.width=10}
+# Scatter of hypergeometric decile vs pattern decile, and FDR decile vs pattern decile, colored by CAAS_score.
 joint_df <- pos_df %>%
-  filter(!is.na(variability_score), !is.na(pattern_score)) %>%
+  filter(!is.na(.data[[hyper_measure_col]]), !is.na(.data[[boot_measure_col]])) %>%
   mutate(
     hyp_decile_raw  = dplyr::ntile(.data[[hyper_measure_col]], 10),
     boot_decile_raw = dplyr::ntile(.data[[boot_measure_col]], 10),
@@ -770,7 +780,7 @@ joint_df <- pos_df %>%
 .r_boot_caas <- round(cor(joint_df$boot_decile, joint_df$CAAS_score, use = "complete.obs"), 2)
 .r_hyp_boot  <- round(cor(joint_df$hyp_decile,  joint_df$boot_decile, use = "complete.obs"), 2)
 
-ggplot(joint_df, aes(x = hyp_decile, y = boot_decile, colour = CAAS_score)) +
+p1 <- ggplot(joint_df, aes(x = hyp_decile, y = boot_decile, colour = CAAS_score)) +
   geom_jitter(alpha = 0.45, size = 1.8, width = 0.35, height = 0.35) +
   scale_colour_gradientn(
     colours = c("#4E79A7", "#76B7B2", "#EDC948", "#F28E2B", "#E15759"),
@@ -783,12 +793,51 @@ ggplot(joint_df, aes(x = hyp_decile, y = boot_decile, colour = CAAS_score)) +
                            .r_hyp_caas, .r_boot_caas, .r_hyp_boot),
            hjust = 0, vjust = 1, size = 3.2, colour = "grey30") +
   labs(
-    title    = "Hypergeometric vs Permulation Decile Assignment per Position",
-    subtitle = "High CAAS scores (warm colours) cluster toward decile 10 × 10. Pearson r computed on decile ranks.",
-    x        = "Hypergeometric decile (variability; 10 = most significant)",
-    y        = "Permulation decile (pattern; 10 = most significant)"
+    title    = "Hypergeometric vs Permulation Decile",
+    subtitle = "High CAAS scores cluster toward 10x10",
+    x        = "Hypergeometric decile (10 = most significant)",
+    y        = "Permulation decile (10 = most significant)"
   ) +
-  theme(plot.title = element_text(face = "bold"))
+  theme(plot.title = element_text(face = "bold"),
+        legend.position = "none")
+
+if (has_fdr_measure) {
+  joint_df_f <- joint_df %>%
+    filter(!is.na(.data[[fdr_measure_col]])) %>%
+    mutate(
+      fdr_decile_raw = dplyr::ntile(.data[[fdr_measure_col]], 10),
+      fdr_decile     = 11 - fdr_decile_raw
+    )
+
+  .r_fdr_caas  <- round(cor(joint_df_f$fdr_decile,  joint_df_f$CAAS_score, use = "complete.obs"), 2)
+  .r_fdr_boot  <- round(cor(joint_df_f$fdr_decile,  joint_df_f$boot_decile, use = "complete.obs"), 2)
+
+  p2 <- ggplot(joint_df_f, aes(x = fdr_decile, y = boot_decile, colour = CAAS_score)) +
+    geom_jitter(alpha = 0.45, size = 1.8, width = 0.35, height = 0.35) +
+    scale_colour_gradientn(
+      colours = c("#4E79A7", "#76B7B2", "#EDC948", "#F28E2B", "#E15759"),
+      name    = "CAAS\nscore"
+    ) +
+    scale_x_continuous(breaks = 1:10) +
+    scale_y_continuous(breaks = 1:10) +
+    annotate("text", x = 1, y = 10,
+             label = sprintf("r(fdr, CAAS) = %.2f\nr(perm, CAAS) = %.2f\nr(fdr, perm) = %.2f",
+                             .r_fdr_caas, .r_boot_caas, .r_fdr_boot),
+             hjust = 0, vjust = 1, size = 3.2, colour = "grey30") +
+    labs(
+      title    = "FDR vs Permulation Decile",
+      subtitle = "High CAAS scores cluster toward 10x10",
+      x        = "FDR decile (10 = most significant)",
+      y        = "Permulation decile (10 = most significant)"
+    ) +
+    theme(plot.title = element_text(face = "bold"),
+          legend.position = "right")
+
+  gridExtra::grid.arrange(p1, p2, ncol = 2)
+} else {
+  p1 <- p1 + theme(legend.position = "right")
+  print(p1)
+}
 ```
 
 ---
@@ -833,200 +882,64 @@ p_combined <- ggplot(pos_df, aes(x = CAAS_score)) +
        x = "CAAS Score", y = "Density") +
   theme(plot.title = element_text(face = "bold"))
 
-make_dir_dist <- function(df, dir_label, thr10, thr5, thr1, col) {
-  ggplot(df, aes(x = CAAS_score)) +
-    geom_histogram(aes(y = after_stat(density)), bins = 50,
-                   fill = col, alpha = 0.7) +
-    geom_density(linewidth = 0.8, colour = col) +
-    geom_vline(xintercept = thr10, linetype = "dashed",  colour = "grey30", linewidth = 0.7) +
-    geom_vline(xintercept = thr5,  linetype = "longdash", colour = "grey30", linewidth = 0.7) +
-    geom_vline(xintercept = thr1,  linetype = "dotted",  colour = "grey30", linewidth = 0.7) +
-    annotate("text", x = thr10, y = Inf,
-             label = sprintf("Top %g%%\n(%.4f)", top_pct * 100,  thr10),
-             vjust = 2,    hjust = -0.05, colour = "grey20", size = 3) +
-    annotate("text", x = thr5,  y = Inf,
-             label = sprintf("Top %g%%\n(%.4f)", top5_pct * 100, thr5),
-             vjust = 3.8,  hjust = -0.05, colour = "grey20", size = 3) +
-    annotate("text", x = thr1,  y = Inf,
-             label = sprintf("Top %g%%\n(%.4f)", top1_pct * 100, thr1),
-             vjust = 5.6,  hjust = -0.05, colour = "grey20", size = 3) +
-    labs(title = sprintf("CAAS Score Distribution — %s positions", dir_label),
-         subtitle = sprintf("n = %s | thresholds computed within direction",
-                            format(nrow(df), big.mark = ",")),
-         x = "CAAS Score", y = "Density") +
-    theme(plot.title = element_text(face = "bold"))
-}
-
-p_top <- make_dir_dist(pos_top,    "TOP",    .thr_top_10, .thr_top_5, .thr_top_1, .tableau10[1])
-p_bot <- make_dir_dist(pos_bottom, "BOTTOM", .thr_bot_10, .thr_bot_5, .thr_bot_1, .tableau10[3])
-
-gridExtra::grid.arrange(p_combined, p_top, p_bot, ncol = 1)
+print(p_combined)
 ```
 
-### Pre-Score
+### Score axis
 
-```{r pre-score-dist, fig.height=7}
-p_prescore <- ggplot(pos_df, aes(x = pre_score)) +
-  geom_histogram(aes(y = after_stat(density)), bins = 40,
-                 fill = .tableau10[1], alpha = 0.7) +
-  geom_density(linewidth = 0.8, colour = .tableau10[2]) +
-  labs(title = "Pre-Score Distribution",
-       subtitle = "Unweighted mean of variability, pattern, ASR, convergence and parallel scores",
-       x = "pre_score", y = "Density") +
-  theme(plot.title = element_text(face = "bold"))
+These are the two axes whose product is `CAAS_score`, the replication factor
+folded into the ASR path score, and the biochemical weight sum showing how many
+schemes flagged each position.
+
+```{r score-axes-dist, fig.height=9}
+.axis_plot <- function(col, title, subtitle, fill, line) {
+  if (!col %in% names(pos_df)) return(NULL)
+  ggplot(pos_df, aes(x = .data[[col]])) +
+    geom_histogram(aes(y = after_stat(density)), bins = 30, fill = fill, alpha = 0.7) +
+    geom_density(linewidth = 0.8, colour = line) +
+    labs(title = title, subtitle = subtitle, x = col, y = "Density") +
+    theme(plot.title = element_text(face = "bold"))
+}
+.axis_plots <- Filter(Negate(is.null), list(
+  .axis_plot("asr_score", "ASR Path Score (position evolution)",
+             "Unified six-factor ASR path score (core × independence × diversity × agreement × conservation × count)",
+             .tableau10[3], .tableau10[4]),
+  .axis_plot("phen_score", "Phenotype Evolution (1 - pvalue_boot)",
+             "Permulation evidence — the phenotype-partition axis of CAAS_score",
+             .tableau10[1], .tableau10[2]),
+  .axis_plot("count_factor", "Replication Factor (count_factor)",
+             "n_changed_pairs / (n_changed_pairs + k): saturating reward for independent changes",
+             .tableau10[5], .tableau10[6])
+))
+if (length(.axis_plots)) gridExtra::grid.arrange(grobs = .axis_plots, ncol = 1)
 
 p_bwsum <- ggplot(pos_df, aes(x = factor(biochem_weight_sum))) +
   geom_bar(fill = .tableau10[4], alpha = 0.8) +
   labs(title = "Biochemical Weight Sum Distribution",
-       subtitle = "Sum of integer scheme specificity points (max = 10 if US+GS4+GS3+GS2+GS1 all satisfied)",
+       subtitle = "Sum of scheme weights across detected schemes per position (max = 1.0). Reflects breadth of biochemical evidence.",
        x = "biochem_weight_sum", y = "Count") +
   theme(plot.title = element_text(face = "bold"))
 
-gridExtra::grid.arrange(p_prescore, p_bwsum, ncol = 1)
-```
-
-### ASR Score
-
-```{r asr-dist, fig.height=4.5}
-ggplot(pos_df, aes(x = asr_score)) +
-  geom_histogram(aes(y = after_stat(density)), bins = 30,
-                 fill = .tableau10[3], alpha = 0.7) +
-  geom_density(linewidth = 0.8, colour = .tableau10[4]) +
-  labs(title = "ASR Score Distribution",
-       subtitle = "Novel = 1.0 | contradicted conserved = 0 | supported conserved = pair-weighted posterior support below novelty",
-       x = "asr_score", y = "Density") +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-### Convergence Score
-
-```{r convergence-dist, fig.height=4.5}
-ggplot(pos_df, aes(x = convergence_score)) +
-  geom_histogram(aes(y = after_stat(density)), bins = 30,
-                 fill = .tableau10[5], alpha = 0.7) +
-  geom_density(linewidth = 0.8, colour = .tableau10[6]) +
-  labs(title = "Convergence Score Distribution",
-       subtitle = "Ordinal change type (1 / 0.5 / 0.25) with a 1.0 / 0.75 completeness penalty",
-       x = "convergence_score", y = "Density") +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-### Parallel Score
-
-```{r parallel-dist, fig.height=4.5}
-ggplot(pos_df, aes(x = parallel_score)) +
-  geom_histogram(aes(y = after_stat(density)), bins = 30,
-                 fill = .tableau10[7], alpha = 0.7) +
-  geom_density(linewidth = 0.8, colour = .tableau10[8]) +
-  labs(title = "Parallel Score Distribution",
-       subtitle = "Non-parallel / mixed / parallel = 1 / 0.75 / 0.5, weighted by MRCA confidence and completeness",
-       x = "parallel_score", y = "Density") +
-  theme(plot.title = element_text(face = "bold"))
-```
-
-### Component Overview
-
-```{r component-overview, fig.height=8}
-# Faceted density comparison of all five independent pre-score components
-component_cols <- c("variability_score", "pattern_score", "asr_score", "convergence_score", "parallel_score")
-
-long_df <- pos_df %>%
-  select(all_of(component_cols)) %>%
-  pivot_longer(everything(), names_to = "Component", values_to = "Score") %>%
-  filter(!is.na(Score)) %>%
-  mutate(Component = factor(Component, levels = component_cols))
-
-ggplot(long_df, aes(x = Score, fill = Component)) +
-  geom_density(alpha = 0.6, linewidth = 0.3) +
-  scale_fill_manual(values = .tableau10[seq_along(component_cols)]) +
-  facet_wrap(~Component, scales = "free_y", ncol = 2) +
-  labs(title = "Position-Level Component Score Distributions",
-       x = "Score (0-1)", y = "Density") +
-  theme(plot.title = element_text(face = "bold"),
-        legend.position = "none")
-```
-
-### Threshold Profiles
-
-```{r threshold-profiles, fig.height=14, fig.width=12}
-# Component score distributions for positions inside each ORA gene-list cutoff.
-# Each panel shows overlaid densities of all position-level components so you
-# can read off which signal drives positions into the top-N% × direction bucket.
-
-component_cols_tp <- c("variability_score", "pattern_score", "asr_score", "convergence_score", "parallel_score")
-
-thr_10_tp <- quantile(pos_df$CAAS_score, 1 - top_pct,  na.rm = TRUE)
-thr_5_tp  <- quantile(pos_df$CAAS_score, 1 - top5_pct, na.rm = TRUE)
-thr_1_tp  <- quantile(pos_df$CAAS_score, 1 - top1_pct, na.rm = TRUE)
-
-make_threshold_panel <- function(df, threshold, pct_label, direction) {
-  subset_df <- if (direction == "both") {
-    df %>% filter(CAAS_score >= threshold)
-  } else {
-    df %>% filter(CAAS_score >= threshold, change_side == direction)
-  }
-
-  if (nrow(subset_df) == 0) {
-    return(
-      ggplot() +
-        annotate("text", x = 0.5, y = 0.5, label = "No positions",
-                 size = 5, colour = "grey50") +
-        labs(title = sprintf("Top %s — %s", pct_label, direction),
-             x = "Score (0–1)", y = "Density") +
-        xlim(0, 1) + theme_minimal()
-    )
-  }
-
-  long_df <- subset_df %>%
-    select(all_of(component_cols_tp)) %>%
-    pivot_longer(everything(), names_to = "Component", values_to = "Score") %>%
-    filter(!is.na(Score)) %>%
-    mutate(Component = factor(Component, levels = component_cols_tp))
-
-  ggplot(long_df, aes(x = Score, fill = Component, colour = Component)) +
-    geom_density(alpha = 0.35, linewidth = 0.6) +
-    scale_fill_manual(values   = .tableau10[seq_along(component_cols_tp)]) +
-    scale_colour_manual(values = .tableau10[seq_along(component_cols_tp)]) +
-    scale_x_continuous(limits = c(0, 1), expand = c(0.01, 0)) +
-    labs(
-      title    = sprintf("Top %s — %s", pct_label, direction),
-      subtitle = sprintf("n = %d positions", nrow(subset_df)),
-      x = "Score (0–1)", y = "Density",
-      fill = NULL, colour = NULL
-    ) +
-    theme(
-      plot.title    = element_text(face = "bold", size = 11),
-      plot.subtitle = element_text(size = 9, colour = "grey40"),
-      legend.position = "bottom",
-      legend.text     = element_text(size = 8)
-    )
+# Scheme combination plot: which schemes co-occur most often?
+scheme_combo_cols <- grep("^scheme_weight_", names(pos_df), value = TRUE)
+if (length(scheme_combo_cols) > 0) {
+  scheme_combo_df <- pos_df %>%
+    select(all_of(scheme_combo_cols)) %>%
+    mutate(across(everything(), ~as.integer(.x > 0))) %>%
+    unite("combo", everything(), sep = "/", remove = FALSE) %>%
+    count(combo, sort = TRUE) %>%
+    slice_head(n = 15)
+  p_scheme_combo <- ggplot(scheme_combo_df, aes(x = reorder(combo, n), y = n)) +
+    geom_col(fill = .tableau10[6], alpha = 0.85) +
+    coord_flip() +
+    labs(title = "Most common scheme combinations",
+         subtitle = "Top 15 scheme flag patterns (1 = scheme detected, 0 = absent)",
+         x = "Scheme combination", y = "Count") +
+    theme(plot.title = element_text(face = "bold"))
+  gridExtra::grid.arrange(p_bwsum, p_scheme_combo, ncol = 2)
+} else {
+  print(p_bwsum)
 }
-
-panels <- list()
-for (direction in c("top", "bottom", "both")) {
-  panels[[paste0("10pct_", direction)]] <-
-    make_threshold_panel(pos_df, thr_10_tp, "10%", direction)
-  panels[[paste0("5pct_",  direction)]] <-
-    make_threshold_panel(pos_df, thr_5_tp,  "5%",  direction)
-  panels[[paste0("1pct_",  direction)]] <-
-    make_threshold_panel(pos_df, thr_1_tp,  "1%",  direction)
-}
-
-# Layout: rows = direction (top / bottom / both), cols = threshold (10% | 5% | 1%)
-gridExtra::grid.arrange(
-  panels[["10pct_top"]],    panels[["5pct_top"]],    panels[["1pct_top"]],
-  panels[["10pct_bottom"]], panels[["5pct_bottom"]], panels[["1pct_bottom"]],
-  panels[["10pct_both"]],   panels[["5pct_both"]],   panels[["1pct_both"]],
-  ncol = 3,
-  top  = grid::textGrob(
-    "Component score profiles for top-scoring position subsets",
-    gp = grid::gpar(fontface = "bold", fontsize = 13)
-  ),
-  left = grid::textGrob(
-    "Direction:  top                          bottom                          both",
-    rot = 90, gp = grid::gpar(fontsize = 9, col = "grey40")
-  )
-)
 ```
 
 ### Stress Test
@@ -1048,22 +961,21 @@ DT::datatable(
 ```
 
 ```{r stress-component-overview, eval=has_scoring_stress, fig.height=10}
-# Five independent pre-score components — none unified before biochem weighting
-stress_prescore_cols <- c("variability_score", "pattern_score", "asr_score",
-                          "convergence_score", "parallel_score")
+# Current score axes used in CAAS_score: phen_score and asr_score (asr_path_score)
+stress_score_cols <- c("CAAS_score", "phen_score", "asr_score")
 stress_components_long <- stress_variants_df %>%
-  select(any_of(stress_prescore_cols)) %>%
+  select(any_of(stress_score_cols)) %>%
   pivot_longer(everything(), names_to = "Component", values_to = "Score") %>%
   filter(!is.na(Score)) %>%
-  mutate(Component = factor(Component, levels = stress_prescore_cols))
+  mutate(Component = factor(Component, levels = stress_score_cols))
 
 p_components <- ggplot(stress_components_long, aes(x = Score, fill = Component)) +
   geom_density(alpha = 0.55, linewidth = 0.4) +
-  scale_fill_manual(values = .tableau10[seq_along(stress_prescore_cols)]) +
+  scale_fill_manual(values = .tableau10[seq_along(stress_score_cols)]) +
   facet_wrap(~Component, scales = "free_y", ncol = 2) +
   labs(
-    title    = "Pre-Score Component Distributions",
-    subtitle = "Five independent signals — none aggregated before the biochem multiplier is applied",
+    title    = "Current Score Axis Distributions (stress-test variants)",
+    subtitle = "CAAS_score = phen_score × asr_score; biochem scheme weight applied per row",
     x = "Score (0–1)", y = "Density"
   ) +
   theme(plot.title = element_text(face = "bold"), legend.position = "none")
@@ -1072,8 +984,8 @@ p_components <- ggplot(stress_components_long, aes(x = Score, fill = Component))
 p_bwsum_stress <- ggplot(stress_variants_df, aes(x = factor(biochem_weight_sum))) +
   geom_bar(fill = .tableau10[6], alpha = 0.8) +
   labs(
-    title    = "Biochemical Weight Sum (multiplier pool)",
-    subtitle = "Discrete: 1=GS1/2/3 only (×0.1) … 10=all schemes (×1.0). GS0-only positions excluded.",
+    title    = "Biochemical Weight Sum (scheme coverage)",
+    subtitle = "Sum of scheme_weight across detected schemes per position (max = 1.0). Reflects breadth of biochemical evidence.",
     x = "biochem_weight_sum", y = "Count"
   ) +
   theme(plot.title = element_text(face = "bold"))
@@ -1155,23 +1067,22 @@ DT::datatable(
 )
 ```
 
-Latent models ask: *if we let the data decide the weights, which of the five
-pre-score components drive the most shared variance?*  Two approaches are computed:
+Latent models ask: *if we let the data decide the weights, which of the current
+score axes drive the most shared variance?*  Two approaches are computed:
 
-- **PCA_all_components** — First principal component of the five pre-score
-  components (variability, pattern, ASR, convergence, parallel). The loadings
-  show how much each score contributes to PC1. A positive loading means the
-  component co-varies with the main source of variation across positions.
+- **PCA_all_components** — First principal component of the primary score axes
+  (`phen_score`, `asr_score`). The loadings show how much each axis contributes
+  to PC1. A positive loading means the axis co-varies with the main source of
+  variation across positions.
 - **Factor1_all_components** — Exploratory factor analysis with a single latent
   factor. Unlike PCA, factor analysis separates shared variance (the factor) from
-  unique variance per variable; loadings quantify each component's contribution to
+  unique variance per variable; loadings quantify each axis's contribution to
   the shared signal.
 
 All latent scores are converted to 0–1 decile scale for comparison. A high
 correlation with `CAAS_current` means the latent model and the hand-engineered
-composite agree on which positions are most interesting. Note that latent models
-operate on `pre_score` components only — the biochem multiplier is intentionally
-excluded because it reflects biochemical specificity rather than signal strength.
+composite agree on which positions are most interesting. The biochem multiplier is
+intentionally excluded because it reflects biochemical specificity rather than signal strength.
 
 ```{r stress-latent, eval=has_scoring_stress, fig.height=5}
 if (!is.null(stress_loadings_df) && nrow(stress_loadings_df) > 0) {
@@ -1192,15 +1103,38 @@ if (!is.null(stress_loadings_df) && nrow(stress_loadings_df) > 0) {
 }
 ```
 
-`r if (has_scoring_stress) '> **How to read the stress test:**\n> \n> | Output | What to look for | What it means |\n> |--------|-----------------|---------------|\n> | **Pre-score components** | All five distributions span 0–1 without severe collapse | Checks that each signal dimension has real variance; a collapsed component adds little to pre_score |\n> | **Biochem weight sum** | Distribution shape across discrete values 1–10 | Most positions should not sit at the extremes; a spike at 1 suggests the trait has few US/GS4 hits |\n> | **Correlation heatmap** | r / rho close to 1 between a variant and CAAS_current | Dropping that component barely changes position rankings |\n> | **Rank-agreement heatmap** | rho close to 1 | The two variants order positions the same way |\n> | **Top-overlap table** | High Jaccard at top-10% / top-5% thresholds | The same genes appear in gene lists regardless of which component is dropped |\n> | **Instability table** | High rank_spread | These positions are assumption-sensitive; examine their five component scores manually |\n> | **Latent models** | PC1 / Factor1 loadings; correlation with CAAS_current | Which pre-score components drive shared variance; if latent models agree with CAAS_current the equal-weight assumption is data-consistent |\n> \n> **Score variant naming:** <code>CAAS_unweighted</code> = pre_score without the biochem multiplier (isolates the effect of biochem scaling); <code>CAAS_no_*</code> — drops one pre-score component and recomputes pre_score × biochem_weight_sum/10; <code>PCA_all_components</code> / <code>Factor1_all_components</code> — data-driven weighting of the five pre-score components.\n> A robust run shows consistent rankings across all variants.'`
+```{r stress-howto, results='asis', echo=FALSE}
+if (has_scoring_stress) cat('
+> **How to read the stress test:**
+>
+> | Output | What to look for | What it means |
+> |--------|-----------------|---------------|
+> | **Score axes** | `phen_score` and `asr_score` distributions span 0–1 without severe collapse | Checks that each axis has real variance; a collapsed axis adds little to CAAS_score |
+> | **Biochem weight sum** | Distribution shape across discrete values 1–10 | Most positions should not sit at the extremes; a spike at 1 suggests the trait has few US/GS4 hits |
+> | **Correlation heatmap** | r / rho close to 1 between a variant and CAAS_current | Dropping that component barely changes position rankings |
+> | **Rank-agreement heatmap** | rho close to 1 | The two variants order positions the same way |
+> | **Top-overlap table** | High Jaccard at top-10% / top-5% thresholds | The same genes appear in gene lists regardless of which component is dropped |
+> | **Instability table** | High rank_spread | These positions are assumption-sensitive; examine their five component scores manually |
+> | **Latent models** | PC1 / Factor1 loadings; correlation with CAAS_current | Which score axes drive shared variance; if latent models agree with CAAS_current the phen×asr product is data-consistent |
+>
+> **Score variant naming:** <code>CAAS_unweighted</code> = phen_score × asr_score without biochem multiplier (isolates the effect of biochem scaling); <code>CAAS_no_*</code> — drops one score axis and recomputes the product; <code>PCA_all_components</code> / <code>Factor1_all_components</code> — data-driven weighting of the current score axes.
+> A robust run shows consistent rankings across all variants.
+')
+```
 
 ### Top Positions
 
 ```{r top-positions-table}
-display_cols <- c("Gene", "Position", "CAAS_score", "pre_score", "biochem_weight_sum",
+# Two-way score axes first (phen_score × asr_score), then the gate tiers, then
+# legacy diagnostics. any_of() keeps this robust to absent columns.
+display_cols <- c("Gene", "Position", "CAAS_score",
+                  "phen_score", "asr_score", "count_factor",
+                  "n_changed_pairs", "n_changed_sides",
+                  "gate_sig", "gate_fdr",
+                  "Pvalue", "pvalue_boot", "Pvalue_hyp_fdr",
+                  "biochem_weight_sum", "change_side",
+                  "pre_score",
                   "variability_score", "pattern_score",
-                  "asr_score", "convergence_score", "parallel_score", "change_side",
-                  "Pvalue", "pvalue_boot",
                   "is_top_10pct", "is_top_5pct", "is_top_1pct",
                   "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
 
@@ -1301,7 +1235,42 @@ ggplot(pos_genomic, aes(x = manhattan_x, y = caas_log, colour = chr_even)) +
 
 Each tab shows distribution plots for TOP-direction and BOTTOM-direction positions
 side by side, allowing direct comparison of how each scoring component behaves
-across the two phenotypic directions.
+across the two phenotypic directions. These tabs mirror the global Position-Level
+Scores section, faceted by direction.
+
+### CAAS Score
+
+```{r dir-caas-dist, fig.height=9}
+make_dir_dist <- function(df, dir_label, thr10, thr5, thr1, col) {
+  ggplot(df, aes(x = CAAS_score)) +
+    geom_histogram(aes(y = after_stat(density)), bins = 50,
+                   fill = col, alpha = 0.7) +
+    geom_density(linewidth = 0.8, colour = col) +
+    geom_vline(xintercept = thr10, linetype = "dashed",  colour = "grey30", linewidth = 0.7) +
+    geom_vline(xintercept = thr5,  linetype = "longdash", colour = "grey30", linewidth = 0.7) +
+    geom_vline(xintercept = thr1,  linetype = "dotted",  colour = "grey30", linewidth = 0.7) +
+    annotate("text", x = thr10, y = Inf,
+             label = sprintf("Top %g%%\n(%.4f)", top_pct * 100,  thr10),
+             vjust = 2,    hjust = -0.05, colour = "grey20", size = 3) +
+    annotate("text", x = thr5,  y = Inf,
+             label = sprintf("Top %g%%\n(%.4f)", top5_pct * 100, thr5),
+             vjust = 3.8,  hjust = -0.05, colour = "grey20", size = 3) +
+    annotate("text", x = thr1,  y = Inf,
+             label = sprintf("Top %g%%\n(%.4f)", top1_pct * 100, thr1),
+             vjust = 5.6,  hjust = -0.05, colour = "grey20", size = 3) +
+    labs(title = sprintf("CAAS Score Distribution — %s positions", dir_label),
+         subtitle = sprintf("n = %s | thresholds computed within direction",
+                            format(nrow(df), big.mark = ",")),
+         x = "CAAS Score", y = "Density") +
+    theme(plot.title = element_text(face = "bold"))
+}
+
+gridExtra::grid.arrange(
+  make_dir_dist(pos_top,    "TOP",    .thr_top_10, .thr_top_5, .thr_top_1, .tableau10[1]),
+  make_dir_dist(pos_bottom, "BOTTOM", .thr_bot_10, .thr_bot_5, .thr_bot_1, .tableau10[3]),
+  ncol = 1
+)
+```
 
 ### P-Value Distributions
 
@@ -1337,60 +1306,66 @@ gridExtra::grid.arrange(
   p_per_top, p_per_bot,
   ncol = 2,
   top  = grid::textGrob(
-    "Hypergeometric (rows 1) and Permulation (row 2) p-value distributions by direction",
+    "Hypergeometric (row 1) and Permulation (row 2) p-value distributions by direction",
     gp = grid::gpar(fontface = "bold", fontsize = 12)
   )
 )
 ```
 
-### Pre-Score
+### Significance Gate
 
-```{r dir-prescore-dist, fig.height=5}
-make_dir_component_plot <- function(df, col, dir_label, colour, title_suffix = "") {
+```{r dir-gate-summary}
+if (all(c("gate_all", "gate_sig", "gate_fdr") %in% names(pos_df))) {
+  gate_dir_tbl <- bind_rows(
+    pos_top    %>% summarise(Direction = "TOP",
+                              `All positions`        = sum(gate_all, na.rm = TRUE),
+                              `Significant (p<0.05)` = sum(gate_sig, na.rm = TRUE),
+                              `FDR-significant`      = sum(gate_fdr, na.rm = TRUE)),
+    pos_bottom %>% summarise(Direction = "BOTTOM",
+                              `All positions`        = sum(gate_all, na.rm = TRUE),
+                              `Significant (p<0.05)` = sum(gate_sig, na.rm = TRUE),
+                              `FDR-significant`      = sum(gate_fdr, na.rm = TRUE))
+  ) %>%
+    mutate(
+      `% sig`     = round(100 * `Significant (p<0.05)` / pmax(`All positions`, 1), 1),
+      `% FDR-sig` = round(100 * `FDR-significant`      / pmax(`All positions`, 1), 1)
+    )
+  knitr::kable(gate_dir_tbl,
+               caption = "Hypergeometric significance gate by direction — positions per tier")
+} else {
+  cat("_Significance gate columns not present in this run._\n")
+}
+```
+
+### Score axis
+
+```{r dir-score-axis-dist, fig.height=9}
+make_dir_component_plot <- function(df, col, dir_label, colour) {
+  if (!col %in% names(df)) return(NULL)
   ggplot(df, aes(x = .data[[col]])) +
     geom_histogram(aes(y = after_stat(density)), bins = 40, fill = colour, alpha = 0.65) +
     geom_density(linewidth = 0.8, colour = colour) +
-    labs(title    = sprintf("%s — %s%s", col, dir_label, title_suffix),
+    labs(title    = sprintf("%s — %s", col, dir_label),
          subtitle = sprintf("n = %s positions", format(nrow(df), big.mark = ",")),
          x = col, y = "Density") +
     theme(plot.title = element_text(face = "bold", size = 10))
 }
 
-gridExtra::grid.arrange(
-  make_dir_component_plot(pos_top,    "pre_score", "TOP",    .tableau10[1]),
-  make_dir_component_plot(pos_bottom, "pre_score", "BOTTOM", .tableau10[3]),
-  ncol = 2
-)
-```
-
-### ASR Score
-
-```{r dir-asr-dist, fig.height=5}
-gridExtra::grid.arrange(
-  make_dir_component_plot(pos_top,    "asr_score", "TOP",    .tableau10[1]),
-  make_dir_component_plot(pos_bottom, "asr_score", "BOTTOM", .tableau10[3]),
-  ncol = 2
-)
-```
-
-### Convergence Score
-
-```{r dir-convergence-dist, fig.height=5}
-gridExtra::grid.arrange(
-  make_dir_component_plot(pos_top,    "convergence_score", "TOP",    .tableau10[1]),
-  make_dir_component_plot(pos_bottom, "convergence_score", "BOTTOM", .tableau10[3]),
-  ncol = 2
-)
-```
-
-### Parallel Score
-
-```{r dir-parallel-dist, fig.height=5}
-gridExtra::grid.arrange(
-  make_dir_component_plot(pos_top,    "parallel_score", "TOP",    .tableau10[1]),
-  make_dir_component_plot(pos_bottom, "parallel_score", "BOTTOM", .tableau10[3]),
-  ncol = 2
-)
+dir_axis_plots <- Filter(Negate(is.null), list(
+  make_dir_component_plot(pos_top,    "phen_score", "TOP",    .tableau10[1]),
+  make_dir_component_plot(pos_bottom, "phen_score", "BOTTOM", .tableau10[3]),
+  make_dir_component_plot(pos_top,    "asr_score",  "TOP",    .tableau10[5]),
+  make_dir_component_plot(pos_bottom, "asr_score",  "BOTTOM", .tableau10[7])
+))
+if (length(dir_axis_plots)) {
+  gridExtra::grid.arrange(
+    grobs = dir_axis_plots, ncol = 2,
+    top = grid::textGrob(
+      "Score axis distributions by direction: phenotype evolution (row 1) and ASR path score (row 2)",
+      gp = grid::gpar(fontface = "bold", fontsize = 12)
+    )
+  )
+}
 ```
 
 ### Top Positions by Direction
@@ -1398,11 +1373,15 @@ gridExtra::grid.arrange(
 ```{r dir-top-positions-table}
 has_caas_col <- "caas" %in% names(pos_df)
 
-dir_display_cols <- c("Gene", "Position", "CAAS_score", "pre_score", "biochem_weight_sum",
+dir_display_cols <- c("Gene", "Position", "CAAS_score",
+                      "phen_score", "asr_score", "count_factor",
+                      "n_changed_pairs", "n_changed_sides",
+                      "gate_sig", "gate_fdr",
                       if (has_caas_col) "caas",
+                      "biochem_weight_sum",
                       "variability_score", "pattern_score",
-                      "asr_score", "convergence_score", "parallel_score",
-                      "Pvalue", "pvalue_boot",
+                      "pre_score",
+                      "Pvalue", "pvalue_boot", "Pvalue_hyp_fdr",
                       "change_side",
                       "is_top_10pct", "is_top_5pct", "is_top_1pct",
                       "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
@@ -1429,12 +1408,13 @@ DT::datatable(
 
 ---
 
-## Position Characterisation {.tabset #position-characterisation}
+```{r pos-char-header, results='asis'}
+if (has_pos_char) cat(r"(## Position Characterisation {.tabset #position-characterisation}
 
 This section examines how ranked positions behave in relation to external
 signals that do **not** contribute to the `CAAS_score`. PrimateAI-3D is treated
 as an independent characterisation layer: its signal is averaged across the
-detected biochemical stances (GS0 excluded), producing a continuous 0–1
+detected biochemical stances, producing a continuous 0–1
 characterisation score.
 
 - **`pai_char_score`** = mean(max(PAI3D\_score per CAAP group)) per Gene ×
@@ -1444,12 +1424,20 @@ characterisation score.
 This score ranges from 0 (no support in any stance) to ≤ 1.0 (strong support
 across stances). It is **not** included in `CAAS_score`.
 
+**Directional Pathogenicity Interpretation:**
+The PrimateAI-3D pathogenicity lookup is direction-aware and only includes positions where the human reference allele matches the ancestral state under each specific scheme:
+- **TOP Direction (Ancestral Human / Derived in Top)**: We assess the pathogenicity of mutating the ancestral human allele into the derived, "high-cancer" susceptibility allele. A high score indicates that acquiring this derived state carries a heavy functional constraint in humans.
+- **BOTTOM Direction (Ancestral Human / Derived in Bottom)**: We assess the tolerance or pathogenicity of mutating the ancestral human allele (associated with the "high-cancer" susceptibility side) into the derived, "low-cancer" resistance allele. A lower pathogenicity score suggests that the evolutionary transition to cancer resistance is tolerated and biochemically accessible.
+
 > **Note:** PrimateAI-3D scores require an access request to Illumina —
 > see illumina.com/science/genomics-research/articles/primateai-3d.html
 
-### VEP: PrimateAI by CAAS Decile
+)")
+```
 
-`r if (!has_vep_primateai) "> **Note:** PrimateAI-3D scores are not available for this run."`
+```{r vep-pai-subsec, results='asis'}
+if (has_vep_primateai) cat("### VEP: PrimateAI by CAAS Decile\n\n")
+```
 
 ```{r vep-pai-setup, eval=has_vep_primateai}
 # Detect PrimateAI score column (varies by database version)
@@ -1465,7 +1453,7 @@ if (is.na(.pai_score_col)) {
 
 ```{r vep-pai-join, eval=has_vep_primateai}
 pos_score_meta <- pos_df %>%
-  select(Gene, Position, CAAS_score, pre_score, biochem_weight_sum, change_side) %>%
+  select(Gene, Position, CAAS_score, biochem_weight_sum, change_side) %>%
   mutate(
     caas_decile  = dplyr::ntile(CAAS_score, 10),
     in_top_10pct = CAAS_score >= thr_10,
@@ -1474,12 +1462,12 @@ pos_score_meta <- pos_df %>%
   )
 
 # pai_char_score = mean(max(PAI3D per CAAP group)) per protein position.
-# Uses equal contribution from each detected biochemical stance (GS0 excluded).
+# Uses equal contribution from each detected biochemical stance.
 # map_to_primateai.py outputs caap_group and scheme_weight columns when available.
 has_pai_schemes <- all(c("caap_group", "scheme_weight") %in% names(vep_pai_df))
 
 if (has_pai_schemes) {
-  # Two-step: max per (query × CAAP group) to collapse multiple alt AAs per stance,
+  # Two-step: max per (Gene × Position × CAAP group) to collapse multiple alt AAs per stance,
   # then average across CAAP groups (scheme_weight > 0 only).
   pai_by_prot <- vep_pai_df %>%
     mutate(
@@ -1487,9 +1475,9 @@ if (has_pai_schemes) {
       scheme_weight = as.numeric(scheme_weight)
     ) %>%
     filter(is.finite(pai_score), is.finite(scheme_weight), scheme_weight > 0) %>%
-    group_by(transvar_query, caap_group) %>%
+    group_by(Gene, Position, caap_group) %>%
     summarise(max_pai = max(pai_score, na.rm = TRUE), .groups = "drop") %>%
-    group_by(transvar_query) %>%
+    group_by(Gene, Position) %>%
     summarise(
       pai_char_score = mean(max_pai, na.rm = TRUE),
       n_pai_schemes  = n(),
@@ -1500,7 +1488,7 @@ if (has_pai_schemes) {
   pai_by_prot <- vep_pai_df %>%
     mutate(pai_score = as.numeric(.data[[.pai_score_col]])) %>%
     filter(is.finite(pai_score)) %>%
-    group_by(transvar_query) %>%
+    group_by(Gene, Position) %>%
     summarise(
       pai_char_score = mean(pai_score, na.rm = TRUE),
       n_pai_schemes  = 1L,
@@ -1508,28 +1496,9 @@ if (has_pai_schemes) {
     )
 }
 
-if (!is.null(pos_prot_map)) {
-  pos_vep_pai <- pos_prot_map %>%
-    filter(!is.na(prot_query)) %>%
-    inner_join(pai_by_prot, by = c("prot_query" = "transvar_query")) %>%
-    inner_join(pos_score_meta, by = c("Gene", "Position")) %>%
-    distinct(Gene, Position, .keep_all = TRUE)
-} else {
-  # fallback: parse GENE:p.N from transvar_query — will mostly miss without aa2prot
-  pos_vep_pai <- pai_by_prot %>%
-    mutate(
-      Gene     = sub(":p\\..*", "", transvar_query),
-      Position = as.integer(sub(".*:p\\.", "", transvar_query))
-    ) %>%
-    select(Gene, Position, pai_char_score, n_pai_schemes) %>%
-    group_by(Gene, Position) %>%
-    summarise(
-      pai_char_score = mean(pai_char_score, na.rm = TRUE),
-      n_pai_schemes  = max(n_pai_schemes),
-      .groups = "drop"
-    ) %>%
-    inner_join(pos_score_meta, by = c("Gene", "Position"))
-}
+pos_vep_pai <- pai_by_prot %>%
+  inner_join(pos_score_meta, by = c("Gene", "Position")) %>%
+  distinct(Gene, Position, .keep_all = TRUE)
 
 has_vep_primateai <- nrow(pos_vep_pai) > 0
 
@@ -1636,27 +1605,27 @@ ggplot(pos_vep_pai_dir, aes(x = CAAS_score, y = pai_char_score,
   theme(plot.title = element_text(face = "bold"))
 ```
 
-```{r vep-pai-prescore-scatter, eval=has_vep_primateai, fig.height=5}
-.pai_prescore_r_top <- safe_cor(
-  rank(pos_vep_pai_top$pre_score,       na.last = "keep") / sum(!is.na(pos_vep_pai_top$pre_score)),
+```{r vep-pai-phenaxis-scatter, eval=has_vep_primateai && "phen_score" %in% names(pos_vep_pai_top), fig.height=5}
+.pai_phen_r_top <- safe_cor(
+  rank(pos_vep_pai_top$phen_score,      na.last = "keep") / sum(!is.na(pos_vep_pai_top$phen_score)),
   rank(pos_vep_pai_top$pai_char_score,  na.last = "keep") / sum(!is.na(pos_vep_pai_top$pai_char_score))
 )
-.pai_prescore_r_bot <- safe_cor(
-  rank(pos_vep_pai_bottom$pre_score,       na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$pre_score)),
+.pai_phen_r_bot <- safe_cor(
+  rank(pos_vep_pai_bottom$phen_score,      na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$phen_score)),
   rank(pos_vep_pai_bottom$pai_char_score,  na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$pai_char_score))
 )
 
-ggplot(pos_vep_pai_dir, aes(x = pre_score, y = pai_char_score,
+ggplot(pos_vep_pai_dir, aes(x = phen_score, y = pai_char_score,
                              colour = pai_direction)) +
   geom_point(alpha = 0.35, size = 0.8) +
   geom_smooth(method = "lm", se = TRUE, linewidth = 0.8, alpha = 0.15) +
   scale_colour_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3]),
                       name = "Direction") +
   labs(
-    title    = "Pre-Score vs PrimateAI-3D Score by Direction",
+    title    = "Phenotype Evolution Score vs PrimateAI-3D Score by Direction",
     subtitle = sprintf("Pearson r (rank-norm): TOP = %.3f | BOTTOM = %.3f",
-                       .pai_prescore_r_top, .pai_prescore_r_bot),
-    x = "pre_score", y = "pai_char_score"
+                       .pai_phen_r_top, .pai_phen_r_bot),
+    x = "phen_score (1 - pvalue_boot)", y = "pai_char_score"
   ) +
   theme(plot.title = element_text(face = "bold"))
 ```
@@ -1720,9 +1689,9 @@ knitr::kable(
 )
 ```
 
-### Regional Accumulation
-
-`r if (!has_genomic) "> **Note:** Genomic coordinates not available — regional position accumulation skipped."`
+```{r reg-accum-subsec, results='asis'}
+if (has_genomic) cat("### Regional Accumulation\n\n")
+```
 
 ```{r position-region-accum, eval=has_genomic, fig.height=10, fig.width=14}
 # Build directional window summaries — TOP and BOTTOM use direction-specific thresholds
@@ -1745,6 +1714,18 @@ knitr::kable(
       n_top1_positions   = sum(in_top1,  na.rm = TRUE),
       frac_top_positions = n_top10_positions / n_positions,
       mean_caas          = mean(CAAS_score, na.rm = TRUE),
+      gene_pos_top10 = {
+        idx <- !is.na(in_top10) & in_top10
+        if (any(idx)) paste(paste0(Gene[idx], ":", Position[idx]), collapse = "; ") else NA_character_
+      },
+      gene_pos_top5  = {
+        idx <- !is.na(in_top5)  & in_top5
+        if (any(idx)) paste(paste0(Gene[idx], ":", Position[idx]), collapse = "; ") else NA_character_
+      },
+      gene_pos_top1  = {
+        idx <- !is.na(in_top1)  & in_top1
+        if (any(idx)) paste(paste0(Gene[idx], ":", Position[idx]), collapse = "; ") else NA_character_
+      },
       .groups = "drop"
     ) %>%
     left_join(chr_offsets_df %>% select(chr_order, offset), by = "chr_order") %>%
@@ -1793,36 +1774,7 @@ pos_region_wins <- pos_genomic %>%
                            chr_label, win_start / 1e6, win_end / 1e6)
   )
 
-.make_accum_plot <- function(df, title_str, subtitle_str) {
-  ggplot(df, aes(x = win_x, y = frac_top_positions)) +
-    geom_col(aes(fill = mean_caas), width = params$window_size_bp * 0.9, alpha = 0.9) +
-    geom_point(aes(size = n_top10_positions), colour = "black", alpha = 0.8) +
-    scale_fill_viridis_c(name = "Mean\nCAAS", option = "magma") +
-    scale_size_continuous(name = "Top-10%\npositions", range = c(3, 14)) +
-    scale_x_continuous(
-      breaks = pos_chr_label_positions$mid_x,
-      labels = pos_chr_label_positions$chr_label,
-      expand = expansion(mult = 0.01)
-    ) +
-    scale_y_continuous(labels = percent_format(accuracy = 1)) +
-    labs(title = title_str, subtitle = subtitle_str,
-         x = "Chromosome", y = "Fraction in top 10%") +
-    theme(plot.title = element_text(face = "bold"),
-          axis.text.x = element_text(size = 7),
-          panel.grid.major.x = element_blank())
-}
-
-p_accum_all <- .make_accum_plot(pos_region_wins,
-  "Regional Accumulation — All positions (global thresholds)",
-  "Bars: fraction of top-10% CAAS | Dot size: count of top-10% positions")
-p_accum_top <- .make_accum_plot(pos_region_top,
-  "Regional Accumulation — TOP direction (direction-specific thresholds)",
-  sprintf("TOP positions only | top-10%% threshold = %.4f", .thr_top_10))
-p_accum_bot <- .make_accum_plot(pos_region_bot,
-  "Regional Accumulation — BOTTOM direction (direction-specific thresholds)",
-  sprintf("BOTTOM positions only | top-10%% threshold = %.4f", .thr_bot_10))
-
-gridExtra::grid.arrange(p_accum_all, p_accum_top, p_accum_bot, ncol = 1)
+# Dotplots removed — tables below provide the same information with GenePos detail.
 ```
 
 ```{r position-region-accum-table, eval=has_genomic}
@@ -1837,15 +1789,18 @@ gridExtra::grid.arrange(p_accum_all, p_accum_top, p_accum_bot, ncol = 1)
       frac_top1  = sprintf("%.1f%%", 100 * n_top1_positions  / n_positions)
     ) %>%
     select(
-      Region       = region_label,
-      `N positions` = n_positions,
-      `N top-10%`  = n_top10_positions,
-      `% top-10%`  = frac_top10,
-      `N top-5%`   = n_top5_positions,
-      `% top-5%`   = frac_top5,
-      `N top-1%`   = n_top1_positions,
-      `% top-1%`   = frac_top1,
-      `Mean CAAS`  = mean_caas
+      Region              = region_label,
+      `N positions`       = n_positions,
+      `N top-10%`         = n_top10_positions,
+      `% top-10%`         = frac_top10,
+      `GenePos top-10%`   = gene_pos_top10,
+      `N top-5%`          = n_top5_positions,
+      `% top-5%`          = frac_top5,
+      `GenePos top-5%`    = gene_pos_top5,
+      `N top-1%`          = n_top1_positions,
+      `% top-1%`          = frac_top1,
+      `GenePos top-1%`    = gene_pos_top1,
+      `Mean CAAS`         = mean_caas
     ) %>%
     mutate(`Mean CAAS` = round(`Mean CAAS`, 4))
 }
@@ -1864,7 +1819,8 @@ readr::write_tsv(region_export,
   file.path(params$output_dir, "regional_accumulation.tsv"))
 ```
 
-
+```{r fade-pos-char-header, results='asis'}
+if (has_fade_pos) cat(r"(
 ---
 
 ## FADE Position Characterisation {.tabset}
@@ -1875,7 +1831,8 @@ readr::write_tsv(region_export,
 > amino acid evolution; bottom-direction shows the opposite.
 > CAAS positions (BF ≥ 100) overlap reveals sites that are both convergent and under directional selection.
 
-`r if (!has_fade_pos) "> **Note:** FADE per-site data are not available for this run (fade_site_top_file and fade_site_bot_file not provided)."`
+)")
+```
 
 ```{r fade-pos-setup, eval=has_fade_pos}
 # Load FADE site tables for each direction separately.
@@ -1973,9 +1930,16 @@ vc_top <- .fade_venn_counts(pos_top,    fade_top_df)
 vc_bot <- .fade_venn_counts(pos_bottom, fade_bot_df)
 ```
 
-### Venn Diagrams
+```{r fade-venn-subsec, results='asis'}
+if (has_fade_pos) {
+  cat("### Venn Diagrams\n\n")
+  if (!has_fade_any)
+    cat("> **Note:** No CAAS positions found with FADE BF ≥ 100 in this run.",
+        "Venn diagrams shown with zero overlap — all CAAS positions fall below the BF threshold.\n\n")
+}
+```
 
-```{r fade-venn-plots, eval=has_fade_any, fig.height=5, fig.width=14}
+```{r fade-venn-plots, eval=has_fade_pos, fig.height=5, fig.width=14}
 venn_plots <- list()
 if (!is.null(vc_top)) {
   venn_plots[["top"]] <- .draw_venn2(
@@ -1998,9 +1962,9 @@ if (length(venn_plots) == 2) {
 }
 ```
 
-```{r fade-venn-overlap-table, eval=has_fade_any}
+```{r fade-venn-overlap-table, eval=has_fade_pos}
 # Table of positions in the intersection (CAAS + FADE BF>=100), by direction
-.venn_overlap_positions <- function(pos_dir, fade_df, dir_label) {
+.venn_overlap_positions <- function(pos_dir, fade_df, dir_label, thr10, thr5, thr1) {
   if (is.null(pos_dir) || is.null(fade_df)) return(NULL)
   caas_sel <- if ("caas" %in% names(pos_dir))
     c("Gene", "Position", "CAAS_score", "caas", "change_side") else
@@ -2011,13 +1975,18 @@ if (length(venn_plots) == 2) {
                  select(Gene, Position, max_site_bf, top_target_aa),
     by = c("Gene", "Position")
   ) %>%
-    mutate(Direction = dir_label) %>%
+    mutate(
+      Direction = dir_label,
+      IsTop10   = CAAS_score >= thr10,
+      IsTop5    = CAAS_score >= thr5,
+      IsTop1    = CAAS_score >= thr1
+    ) %>%
     arrange(desc(max_site_bf))
 }
 
 overlap_pos_tbl <- bind_rows(
-  .venn_overlap_positions(pos_top,    fade_top_df, "TOP"),
-  .venn_overlap_positions(pos_bottom, fade_bot_df, "BOTTOM")
+  .venn_overlap_positions(pos_top,    fade_top_df, "TOP",    .thr_top_10, .thr_top_5, .thr_top_1),
+  .venn_overlap_positions(pos_bottom, fade_bot_df, "BOTTOM", .thr_bot_10, .thr_bot_5, .thr_bot_1)
 )
 
 if (nrow(overlap_pos_tbl) > 0) {
@@ -2036,9 +2005,11 @@ if (nrow(overlap_pos_tbl) > 0) {
 }
 ```
 
-### Overlap Table
+```{r fade-overlap-subsec, results='asis'}
+if (has_fade_pos) cat("### Overlap Table\n\n")
+```
 
-```{r fade-overlap-table, eval=has_fade_any}
+```{r fade-overlap-table, eval=has_fade_pos}
 .fade_overlap_row <- function(pos_fade_dir, dir_label, pct_val, pct_label) {
   if (is.null(pos_fade_dir)) return(NULL)
   thr  <- quantile(pos_fade_dir$CAAS_score, 1 - pct_val, na.rm = TRUE)
@@ -2073,7 +2044,9 @@ knitr::kable(
 )
 ```
 
-### CAAS vs FADE Correlation
+```{r fade-corr-subsec, results='asis'}
+if (has_fade_pos) cat("### CAAS vs FADE Correlation\n\n")
+```
 
 ```{r fade-caas-corr, eval=has_fade_any, fig.height=5}
 # Combine top and bottom joined datasets; plot CAAS_score vs log10(BF)
@@ -2157,7 +2130,7 @@ ggplot(long_dir_scores, aes(x = score, fill = direction, colour = direction)) +
 
 `r if (!has_rer) "> **Note:** RERConverge results not available for this run."`
 
-```{r gene-rer-venn, eval=has_rer, fig.height=5, fig.width=12}
+```{r gene-rer-venn, eval=has_rer, fig.height=14, fig.width=12}
 rer_accel_sig <- gene_df %>%
   filter(!is.na(rer_min_pval), rer_min_pval <= 0.05,
          !is.na(rer_rho), rer_rho > 0) %>% pull(Gene)
@@ -2165,14 +2138,25 @@ rer_decel_sig <- gene_df %>%
   filter(!is.na(rer_min_pval), rer_min_pval <= 0.05,
          !is.na(rer_rho), rer_rho < 0) %>% pull(Gene)
 
-vc_rer_top <- .venn_counts(gene_top_list, rer_accel_sig, "CAAS TOP", "RER Accel.")
-vc_rer_bot <- .venn_counts(gene_bot_list, rer_decel_sig, "CAAS BOT", "RER Decel.")
+# 3 rows (gate) \u00d7 4 columns (TOP/BOT \u00d7 Accel/Decel)
+rer_venn_plots <- list()
+for (g in .caas_gates) {
+  rer_venn_plots <- c(rer_venn_plots, list(
+    .draw_venn(.venn_counts(g$top, rer_accel_sig, sprintf("CAAS TOP\n%s", g$lbl), "RER Accel."),
+               .tableau10[1], .tableau10[3], sprintf("%s | TOP vs Accel.", g$lbl)),
+    .draw_venn(.venn_counts(g$top, rer_decel_sig, sprintf("CAAS TOP\n%s", g$lbl), "RER Decel."),
+               .tableau10[1], .tableau10[4], sprintf("%s | TOP vs Decel.", g$lbl)),
+    .draw_venn(.venn_counts(g$bot, rer_accel_sig, sprintf("CAAS BOT\n%s", g$lbl), "RER Accel."),
+               .tableau10[2], .tableau10[3], sprintf("%s | BOT vs Accel.", g$lbl)),
+    .draw_venn(.venn_counts(g$bot, rer_decel_sig, sprintf("CAAS BOT\n%s", g$lbl), "RER Decel."),
+               .tableau10[2], .tableau10[4], sprintf("%s | BOT vs Decel.", g$lbl))
+  ))
+}
 gridExtra::grid.arrange(
-  .draw_venn(vc_rer_top, .tableau10[1], .tableau10[3], "TOP genes vs RER Accelerating"),
-  .draw_venn(vc_rer_bot, .tableau10[2], .tableau10[4], "BOTTOM genes vs RER Decelerating"),
-  ncol = 2,
-  top = grid::textGrob("RERConverge Gene Overlap (CAAS top 10% vs RER p \u2264 0.05)",
-                        gp = grid::gpar(fontface="bold", fontsize=13)))
+  grobs = rer_venn_plots, ncol = 4,
+  top = grid::textGrob(
+    "RERConverge Gene Overlap \u2014 CAAS gates (rows) \u00d7 direction\u00d7RER (cols) | RER p \u2264 0.05",
+    gp = grid::gpar(fontface = "bold", fontsize = 12)))
 ```
 
 ```{r gene-rer-table, eval=has_rer}
@@ -2182,13 +2166,16 @@ rer_tbl <- gene_df %>%
     rer_direction = case_when(rer_rho > 0 ~ "accelerating",
                                rer_rho < 0 ~ "decelerating",
                                TRUE        ~ "neutral"),
-    in_top_list = Gene %in% gene_top_list,
-    in_bot_list = Gene %in% gene_bot_list
+    in_top_global = Gene %in% gene_global_top, in_top_sig = Gene %in% gene_sig_top,
+    in_top_fdr    = Gene %in% gene_fdr_top,
+    in_bot_global = Gene %in% gene_global_bot, in_bot_sig = Gene %in% gene_sig_bot,
+    in_bot_fdr    = Gene %in% gene_fdr_bot
   ) %>%
   arrange(rer_min_pval) %>%
   select(Gene, rer_min_pval, rer_rho, rer_direction,
          gene_caas_score, gene_caas_top, gene_caas_bot,
-         in_top_list, in_bot_list) %>%
+         in_top_global, in_top_sig, in_top_fdr,
+         in_bot_global, in_bot_sig, in_bot_fdr) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
 
 DT::datatable(
@@ -2259,17 +2246,22 @@ gene_fade_df <- gene_df %>%
 has_gene_fade_any <- any(gene_fade_df$fade_top_sig) || any(gene_fade_df$fade_bot_sig)
 ```
 
-```{r gene-fade-venn, eval=has_fade_pos && exists("has_gene_fade_any") && has_gene_fade_any, fig.height=5, fig.width=12}
+```{r gene-fade-venn, eval=has_fade_pos && exists("has_gene_fade_any") && has_gene_fade_any, fig.height=11, fig.width=12}
 fade_top_genes <- gene_fade_df %>% filter(fade_top_sig) %>% pull(Gene)
 fade_bot_genes <- gene_fade_df %>% filter(fade_bot_sig) %>% pull(Gene)
-vc_fade_top <- .venn_counts(gene_top_list, fade_top_genes, "CAAS TOP", "FADE TOP sig")
-vc_fade_bot <- .venn_counts(gene_bot_list, fade_bot_genes, "CAAS BOT", "FADE BOT sig")
+fade_venn_plots <- list()
+for (g in .caas_gates) {
+  fade_venn_plots <- c(fade_venn_plots, list(
+    .draw_venn(.venn_counts(g$top, fade_top_genes, sprintf("CAAS TOP\n%s", g$lbl), "FADE TOP sig"),
+               .tableau10[1], .tableau10[5], sprintf("%s | TOP vs FADE TOP (BF\u2265100)", g$lbl)),
+    .draw_venn(.venn_counts(g$bot, fade_bot_genes, sprintf("CAAS BOT\n%s", g$lbl), "FADE BOT sig"),
+               .tableau10[2], .tableau10[6], sprintf("%s | BOT vs FADE BOT (BF\u2265100)", g$lbl))
+  ))
+}
 gridExtra::grid.arrange(
-  .draw_venn(vc_fade_top, .tableau10[1], .tableau10[5], "TOP genes vs FADE TOP (BF\u2265100)"),
-  .draw_venn(vc_fade_bot, .tableau10[2], .tableau10[6], "BOTTOM genes vs FADE BOT (BF\u2265100)"),
-  ncol = 2,
-  top = grid::textGrob("FADE Gene Overlap (CAAS top 10% vs FADE BF \u2265 100)",
-                        gp = grid::gpar(fontface="bold", fontsize=13)))
+  grobs = fade_venn_plots, ncol = 2,
+  top = grid::textGrob("FADE Gene Overlap \u2014 CAAS gates (rows) \u00d7 direction (cols) | BF \u2265 100",
+                        gp = grid::gpar(fontface = "bold", fontsize = 12)))
 ```
 
 ```{r gene-fade-correlation, eval=has_fade_pos && exists("has_gene_fade_any") && has_gene_fade_any, fig.height=5, fig.width=12}
@@ -2308,15 +2300,18 @@ gridExtra::grid.arrange(
 ```{r gene-fade-table, eval=has_fade_pos}
 fade_tbl <- gene_fade_df %>%
   mutate(
-    in_top_list = Gene %in% gene_top_list,
-    in_bot_list = Gene %in% gene_bot_list
+    in_top_global = Gene %in% gene_global_top, in_top_sig = Gene %in% gene_sig_top,
+    in_top_fdr    = Gene %in% gene_fdr_top,
+    in_bot_global = Gene %in% gene_global_bot, in_bot_sig = Gene %in% gene_sig_bot,
+    in_bot_fdr    = Gene %in% gene_fdr_bot
   ) %>%
   arrange(desc(pmax(replace_na(fade_top_max_bf, 0), replace_na(fade_bot_max_bf, 0)))) %>%
   select(Gene,
          fade_top_max_bf, fade_top_sig,
          fade_bot_max_bf, fade_bot_sig,
          gene_caas_score, gene_caas_top, gene_caas_bot,
-         in_top_list, in_bot_list) %>%
+         in_top_global, in_top_sig, in_top_fdr,
+         in_bot_global, in_bot_sig, in_bot_fdr) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
 
 DT::datatable(
@@ -2333,33 +2328,27 @@ DT::datatable(
 
 `r if (!has_accum_score) "> **Note:** Accumulation scores not available for this run."`
 
-```{r gene-accum-venn, eval=has_accum_score, fig.height=7, fig.width=12}
-pct_list_gene <- list(
-  list(val=params$gene_top_pct,  lbl=sprintf("Top %g%%", params$gene_top_pct  * 100)),
-  list(val=params$gene_top5_pct, lbl=sprintf("Top %g%%", params$gene_top5_pct * 100)),
-  list(val=params$gene_top1_pct, lbl=sprintf("Top %g%%", params$gene_top1_pct * 100))
-)
+```{r gene-accum-venn, eval=has_accum_score, fig.height=11, fig.width=12}
+accum_sig_genes <- gene_df %>%
+  filter(!is.na(gene_accum_score), accum_significant %in% TRUE) %>% pull(Gene)
+
 accum_venn_plots <- list()
-accum_overlap_exports <- list()  # collect overlap gene lists for ORA export
-for (dir_lbl in c("TOP", "BOTTOM")) {
-  caas_col <- if (dir_lbl == "TOP") "gene_caas_top" else "gene_caas_bot"
-  col_a    <- if (dir_lbl == "TOP") .tableau10[1]   else .tableau10[2]
-  dir_slug <- tolower(dir_lbl)
-  for (pct in pct_list_gene) {
-    caas_genes  <- gene_df %>% filter(!is.na(.data[[caas_col]])) %>%
-      slice_max(.data[[caas_col]], prop=pct$val) %>% pull(Gene)
-    accum_genes <- gene_df %>% filter(!is.na(gene_accum_score)) %>%
-      slice_max(gene_accum_score, prop=pct$val) %>% pull(Gene)
-    overlap_genes <- intersect(caas_genes, accum_genes)
-    pct_slug <- gsub("[^0-9]", "", pct$lbl)  # e.g. "10", "5", "1"
-    accum_overlap_exports[[sprintf("gene_caas_%s_top%spct_x_accum.txt", dir_slug, pct_slug)]] <- overlap_genes
-    vc <- .venn_counts(caas_genes, accum_genes, sprintf("CAAS %s", dir_lbl), "Accum.")
-    accum_venn_plots[[length(accum_venn_plots)+1]] <-
-      .draw_venn(vc, col_a, .tableau10[5], sprintf("%s — %s", dir_lbl, pct$lbl))
+accum_overlap_exports <- list()
+for (g in .caas_gates) {
+  for (dir_lbl in c("TOP", "BOTTOM")) {
+    caas_genes <- if (dir_lbl == "TOP") g$top else g$bot
+    col_a      <- if (dir_lbl == "TOP") .tableau10[1] else .tableau10[2]
+    dir_slug   <- tolower(dir_lbl)
+    gate_slug  <- gsub("[^a-z0-9]", "_", tolower(g$lbl))
+    overlap_genes <- intersect(caas_genes, accum_sig_genes)
+    accum_overlap_exports[[sprintf("gene_caas_%s_%s_x_accum.txt", dir_slug, gate_slug)]] <- overlap_genes
+    vc <- .venn_counts(caas_genes, accum_sig_genes,
+                       sprintf("CAAS %s\n%s", dir_lbl, g$lbl), "Accum. sig")
+    accum_venn_plots[[length(accum_venn_plots) + 1]] <-
+      .draw_venn(vc, col_a, .tableau10[5], sprintf("%s | %s vs Accum.", g$lbl, dir_lbl))
   }
 }
 
-# Export accumulation overlap gene lists as .txt files for downstream ORA
 for (fname in names(accum_overlap_exports)) {
   genes <- unique(accum_overlap_exports[[fname]])
   genes <- genes[!is.na(genes) & genes != ""]
@@ -2369,9 +2358,11 @@ for (fname in names(accum_overlap_exports)) {
   }
 }
 
-gridExtra::grid.arrange(grobs=accum_venn_plots, ncol=3,
-  top=grid::textGrob("Directional CAAS Gene List vs Top Accumulation Genes",
-                      gp=grid::gpar(fontface="bold", fontsize=13)))
+gridExtra::grid.arrange(
+  grobs = accum_venn_plots, ncol = 2,
+  top = grid::textGrob(
+    "Accumulation Gene Overlap — CAAS gates (rows) × direction (cols) | accum_significant",
+    gp = grid::gpar(fontface = "bold", fontsize = 12)))
 ```
 
 ```{r gene-accum-correlation, eval=has_accum_score, fig.height=5, fig.width=12}
@@ -2417,13 +2408,16 @@ accum_pval_cols <- grep("^accum_pval_", names(gene_df), value = TRUE)
 accum_tbl <- gene_df %>%
   filter(!is.na(gene_accum_score)) %>%
   mutate(
-    in_top_list = Gene %in% gene_top_list,
-    in_bot_list = Gene %in% gene_bot_list
+    in_top_global = Gene %in% gene_global_top, in_top_sig = Gene %in% gene_sig_top,
+    in_top_fdr    = Gene %in% gene_fdr_top,
+    in_bot_global = Gene %in% gene_global_bot, in_bot_sig = Gene %in% gene_sig_bot,
+    in_bot_fdr    = Gene %in% gene_fdr_bot
   ) %>%
   arrange(desc(gene_accum_score)) %>%
   select(Gene, gene_accum_score, any_of(accum_pval_cols),
          gene_caas_score, gene_caas_top, gene_caas_bot,
-         in_top_list, in_bot_list) %>%
+         in_top_global, in_top_sig, in_top_fdr,
+         in_bot_global, in_bot_sig, in_bot_fdr) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
 
 DT::datatable(
@@ -2511,13 +2505,16 @@ ggplot(top_pai_genes, aes(x=mean_pai_char, y=Gene, fill=gene_caas_score)) +
 ```{r gene-pai-table, eval=has_vep_primateai}
 pai_tbl <- gene_vep_pai %>%
   mutate(
-    in_top_list = Gene %in% gene_top_list,
-    in_bot_list = Gene %in% gene_bot_list
+    in_top_global = Gene %in% gene_global_top, in_top_sig = Gene %in% gene_sig_top,
+    in_top_fdr    = Gene %in% gene_fdr_top,
+    in_bot_global = Gene %in% gene_global_bot, in_bot_sig = Gene %in% gene_sig_bot,
+    in_bot_fdr    = Gene %in% gene_fdr_bot
   ) %>%
   arrange(desc(mean_pai_char)) %>%
   select(Gene, n_pai_positions, mean_pai_char, sum_pai_char,
          gene_caas_score, gene_caas_top, gene_caas_bot, gene_direction,
-         in_top_list, in_bot_list) %>%
+         in_top_global, in_top_sig, in_top_fdr,
+         in_bot_global, in_bot_sig, in_bot_fdr) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
 
 DT::datatable(
@@ -2728,7 +2725,9 @@ ggplot(gene_genomic,
                        nrow(gene_genomic), params$gene_top_pct * 100),
     x = "Chromosome", y = "-log10(1 - gene_caas_score)"
   ) +
-  theme(plot.title=element_text(face="bold"), axis.text.x=element_text(size=7),
+  theme(plot.title=element_text(face="bold"),
+        axis.text.x=element_text(size=14), axis.text.y=element_text(size=14),
+        axis.title=element_text(size=14), legend.text=element_text(size=12),
         panel.grid.major.x=element_blank())
 ```
 
@@ -2761,7 +2760,9 @@ ggplot(gene_genomic_pai %>% filter(!is.na(mean_pai_char)),
   labs(title    = "Gene CAAS Score + PrimateAI-3D — Manhattan View",
       subtitle = "Bubble size and colour: mean PAI3D characterisation score | y = -log10(1 - gene_caas_score)",
        x = "Chromosome", y = "-log10(1 - gene_caas_score)") +
-  theme(plot.title=element_text(face="bold"), axis.text.x=element_text(size=7),
+  theme(plot.title=element_text(face="bold"),
+        axis.text.x=element_text(size=14), axis.text.y=element_text(size=14),
+        axis.title=element_text(size=14), legend.text=element_text(size=12),
         panel.grid.major.x=element_blank())
 ```
 
@@ -2824,7 +2825,10 @@ ggplot(pos_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
   ) +
   theme(
     plot.title         = element_text(face = "bold"),
-    axis.text.x        = element_text(size = 7),
+    axis.text.x        = element_text(size = 14),
+    axis.text.y        = element_text(size = 14),
+    axis.title         = element_text(size = 14),
+    legend.text        = element_text(size = 12),
     panel.grid.major.x = element_blank()
   )
 ```
@@ -2897,7 +2901,10 @@ ggplot(gene_caas_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
   ) +
   theme(
     plot.title         = element_text(face = "bold"),
-    axis.text.x        = element_text(size = 7),
+    axis.text.x        = element_text(size = 14),
+    axis.text.y        = element_text(size = 14),
+    axis.title         = element_text(size = 14),
+    legend.text        = element_text(size = 12),
     panel.grid.major.x = element_blank()
   )
 ```
@@ -2957,7 +2964,9 @@ ggplot(gene_top_wins, aes(x = win_x, y = mean_log, fill = chr_even)) +
   labs(title    = sprintf("Gene CAAS Score TOP — %s Window Accumulation", win_size_label),
        subtitle = sprintf("Bars = mean | Points = max | %d windows", nrow(gene_top_wins)),
        x = "Chromosome", y = "-log10(1 - mean gene_caas_top)") +
-  theme(plot.title=element_text(face="bold"), axis.text.x=element_text(size=7),
+  theme(plot.title=element_text(face="bold"),
+        axis.text.x=element_text(size=14), axis.text.y=element_text(size=14),
+        axis.title=element_text(size=14), legend.text=element_text(size=12),
         panel.grid.major.x=element_blank())
 ```
 
@@ -3056,7 +3065,7 @@ cat(sprintf("Columns: %s\n", paste(names(supp_df), collapse = ", ")))
 ## Summary
 
 ```{r summary-stats}
-n_components <- 4L  # biochem, asr, convergence, parallel
+n_components <- 5L  # variability, pattern, asr, convergence, parallel
 
 n_gene_components <- 1L  # gene_caas always present
 if (has_accum_score) n_gene_components <- n_gene_components + 1L

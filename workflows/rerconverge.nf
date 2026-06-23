@@ -39,6 +39,9 @@ include { RER_MATRIX }         from "${baseDir}/subworkflows/RERCONVERGE/rer_mat
 include { RER_CONT }           from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
 include { RER_BIN }            from "${baseDir}/subworkflows/RERCONVERGE/rer_bin"
 include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
+include { RER_GENE_LISTS }    from "${baseDir}/subworkflows/RERCONVERGE/rer_gene_lists.nf"
+include { TOOL_STRING_REPORT as RER_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
+include { RER_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 
 // Main workflow
 workflow RER_MAIN {
@@ -73,9 +76,11 @@ workflow RER_MAIN {
         // Track RER_REPORT output for downstream consumers (e.g. SCORING).
         // Populated when 'continuous' or 'binary' tool is run; empty otherwise.
         def rer_report_out = null
+        def rer_perms_out  = null
 
-        if (params.rer_tool) {
-            def toolsToRun = params.rer_tool.split(',')
+        def rerToolStr = params.rer_tool ? params.rer_tool.toString().trim() : ""
+        if (rerToolStr && rerToolStr != 'false') {
+            def toolsToRun = rerToolStr.split(',')
 
             if (toolsToRun.contains('build_trait')) {
                 def trait_result = RER_TRAIT(my_traitfile_ch)
@@ -123,23 +128,57 @@ workflow RER_MAIN {
                 def cont_trait_ch = trait_branched.continuous.map { polished, _type -> polished }
                 def bin_trait_ch  = trait_branched.binary.map     { polished, _type -> polished }
 
-                def gmt_ch = params.rer_gmt_file
-                    ? Channel.value(file(params.rer_gmt_file))
-                    : Channel.value(file('NO_FILE'))
-
                 // Both processes are declared; only the branch that received data
                 // will produce output — the other stays idle (empty input channel).
                 def rer_cont_result = RER_CONT(cont_trait_ch, masterTrees_out, matrix_out_ch)
                 def rer_bin_result  = RER_BIN(bin_trait_ch,  masterTrees_out, matrix_out_ch)
 
-                def cont_report = RER_REPORT_CONT(rer_cont_result.continuous_output, gmt_ch)
-                def bin_report  = RER_REPORT_BIN(rer_bin_result.binary_output,      gmt_ch)
+                def cont_report = RER_REPORT_CONT(rer_cont_result.continuous_output)
+                def bin_report  = RER_REPORT_BIN(rer_bin_result.binary_output)
 
                 // Merge summary TSV outputs (only the active branch will emit)
                 rer_report_out = cont_report.summary_tsv.mix(bin_report.summary_tsv)
+                rer_perms_out  = rer_cont_result.perms_output.mix(rer_bin_result.perms_output)
+            }
+        }
+
+        // ── Gene list extraction + Enrichment/STRING (gated on --enrichment / --string) ──
+        if (params.enrichment || params.string) {
+            def effective_report = rer_report_out ?: (params.rer_report_file ? Channel.value(file(params.rer_report_file)) : Channel.empty())
+            def effective_perms  = rer_perms_out  ?: (params.rer_perms_file  ? Channel.value(file(params.rer_perms_file))  : Channel.empty())
+            def perms_file_ch    = effective_perms.ifEmpty(file('NO_FILE'))
+
+            def rer_lists = RER_GENE_LISTS(effective_report)
+
+            // Separate background from gene lists for the ORA processes
+            def rer_bg_ch = rer_lists.gene_lists
+                .flatten()
+                .filter { it.name == 'background.txt' }
+                .first()
+            def rer_interest_ch = rer_lists.gene_lists
+                .flatten()
+                .filter { it.name != 'background.txt' }
+                .collect()
+
+            if (params.enrichment) {
+                RER_FCS_REPORT(
+                    Channel.value('RERConverge'),
+                    rer_lists.fcs_stats,
+                    rer_bg_ch,
+                    Channel.value("FCS_rer_${params.traitname}"),
+                    perms_file_ch
+                )
+            }
+            if (params.string) {
+                RER_STRING_REPORT(
+                    Channel.value('RERConverge'),
+                    rer_bg_ch,
+                    rer_interest_ch,
+                    Channel.value("STRING_rer_${params.traitname}")
+                )
             }
         }
 
     emit:
-        summary_tsv = rer_report_out ?: Channel.empty()
+        summary_tsv = rer_report_out ?: (params.rer_report_file ? Channel.value(file(params.rer_report_file)) : Channel.empty())
 }

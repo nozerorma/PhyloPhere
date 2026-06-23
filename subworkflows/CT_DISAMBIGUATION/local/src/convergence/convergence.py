@@ -58,7 +58,7 @@ Date
 2025-12-07
 """
 
-from typing import Dict, List, Optional, Tuple, Set, Any, Sequence, TypedDict
+from typing import Dict, List, Optional, Tuple, Any, Sequence, TypedDict, TypeGuard
 from dataclasses import dataclass, field
 import logging
 
@@ -106,7 +106,6 @@ class NodeStates:
     root_prob: Optional[float] = None
     pre_split_prob: Optional[float] = None
     mrca_contrast_prob: Optional[float] = None
-    low_confidence_nodes: Optional[List[str]] = None
 
 
 @dataclass
@@ -417,7 +416,7 @@ def compute_derived_state_similarity(
             ...
         }
     """
-    summary = {}
+    summary: Dict[str, Any] = {}
 
     if grouping_getter is None or not derived_states:
         return summary
@@ -514,8 +513,6 @@ def extract_node_states_from_node_level(
         modal_aa = max(posteriors.items(), key=lambda x: x[1])
         return modal_aa[0], modal_aa[1]
 
-    low_conf_nodes: List[str] = []
-
     try:
         root_data = get_modal_state(node_mapping["root"])
         mrca_data = get_modal_state(node_mapping["mrca_contrast"])
@@ -541,15 +538,6 @@ def extract_node_states_from_node_level(
             logger.debug(f"Missing required node states for {gene}:{position}")
             return None
 
-        if root_data and root_data[1] < posterior_threshold:
-            low_conf_nodes.append("root")
-        if mrca_data and mrca_data[1] < posterior_threshold:
-            low_conf_nodes.append("mrca_contrast")
-
-        for idx, data in enumerate(focal_states_data, 1):
-            if data and data[1] < posterior_threshold:
-                low_conf_nodes.append(f"focal_{idx}")
-
         # Extract optional nodes
         pre_split_data = (
             get_modal_state(node_mapping.get("pre_split", -1))
@@ -572,7 +560,6 @@ def extract_node_states_from_node_level(
             root_prob=root_data[1] if root_data else None,
             pre_split_prob=pre_split_data[1] if pre_split_data else None,
             mrca_contrast_prob=mrca_data[1] if mrca_data else None,
-            low_confidence_nodes=low_conf_nodes or None,
         )
 
     except Exception as e:
@@ -738,7 +725,7 @@ def classify_change_and_parallelism(
 
     invalid_states = {None, "-", "X", "?"}
 
-    def is_valid(state):
+    def is_valid(state: Optional[str]) -> TypeGuard[str]:
         return state not in invalid_states
 
     def _map_state(state: Optional[str]) -> Optional[str]:

@@ -17,6 +17,7 @@ process CT_ACCUMULATION_AGGREGATE {
     path species_list
     path metadata_caas
     path bg_caas
+    val  entropy_dir
 
     output:
     path "*_global.csv",    emit: global_csv
@@ -43,6 +44,7 @@ process CT_ACCUMULATION_AGGREGATE {
             --metadata-caas '${metadata_caas}' \\
             --bg-caas '${bg_caas}' \\
             --output-prefix '${out_pfx}' \\
+            --entropy-dir '${entropy_dir}' \\
             --log-level '${log_level}'
         """
     } else {
@@ -60,6 +62,7 @@ process CT_ACCUMULATION_AGGREGATE {
             --metadata-caas '${metadata_caas}' \\
             --bg-caas '${bg_caas}' \\
             --output-prefix '${out_pfx}' \\
+            --entropy-dir '${entropy_dir}' \\
             --log-level '${log_level}'
         """
     }

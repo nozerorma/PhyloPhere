@@ -29,8 +29,6 @@ def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
         df["CAAP_Group"] = "US"
     if "is_conserved_meta" not in df.columns:
         df["is_conserved_meta"] = False
-    if "asr_is_conserved" not in df.columns:
-        df["asr_is_conserved"] = False
 
     return df
 

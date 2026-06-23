@@ -50,6 +50,7 @@ def main():
     parser.add_argument("--metadata-caas",    help="Meta-CAAS file (global_meta_caas.tsv or original format)")
     parser.add_argument("--bg-caas",          help="Cleaned background gene list (no header)")
     parser.add_argument("--alignment-format", default="phylip-relaxed")
+    parser.add_argument("--entropy-dir",      help="Directory containing Valdar entropy (.entropy.tsv) files")
 
     # Randomization args
     parser.add_argument("--global-csv",                 help="Path to _global.csv from aggregation (contains masked + iscaas)")
@@ -100,6 +101,7 @@ def main():
                 metadata_caas=args.metadata_caas,
                 bg_caas=args.bg_caas,
                 output_prefix=args.output_prefix,
+                entropy_dir=args.entropy_dir,
                 log_level=args.log_level,
             )
             timed_execution(aggregate_fn, agg_args, "Aggregation Phase")

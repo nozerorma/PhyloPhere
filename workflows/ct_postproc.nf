@@ -171,7 +171,7 @@ workflow CT_POSTPROC {
         def characterization_results = null
         def filtered_discovery_ch = Channel.empty()
         def cleaned_background_main_ch = Channel.empty()
-        def ora_gene_lists_files_ch = Channel.empty()
+        def enrichment_gene_lists_files_ch = Channel.empty()
         def excluded_gene_lists_files_ch = Channel.empty()
         
         if (params.gene_filter_mode != 'none') {
@@ -254,7 +254,7 @@ workflow CT_POSTPROC {
                     excluded:    f.toString().contains('gene_relation_analysis/txt/excluded')
                     significant: true
                 }
-            ora_gene_lists_files_ch      = _txt_branched.significant
+            enrichment_gene_lists_files_ch      = _txt_branched.significant
             excluded_gene_lists_files_ch = _txt_branched.excluded
             
             log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"
@@ -267,7 +267,7 @@ workflow CT_POSTPROC {
         precluster_removed_patterns = precluster_removed_ch
         filtered_discovery = filtered_discovery_ch
         cleaned_background = cleaned_background_main_ch
-        ora_gene_lists_files = ora_gene_lists_files_ch
+        enrichment_gene_lists_files = enrichment_gene_lists_files_ch
         background_ori = background_ori_ch                        // original (pre-cleanup) background for ORA on excluded genes
         excluded_gene_lists_files = excluded_gene_lists_files_ch  // txt/excluded/*.txt gene lists from postproc report
 }

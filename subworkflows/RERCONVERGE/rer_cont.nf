@@ -44,8 +44,7 @@ process RER_CONT {
     output:
     path "${params.traitname}.char2path.output",  emit: char2path
     path "${params.traitname}.continuous.output", emit: continuous_output
-    // file("${ params.traitname }.pval.output")
-    // file("${ params.traitname }.lfc.output")
+    path "${params.traitname}.continuous.perms.rds", emit: perms_output, optional: true
 
 
 
@@ -70,7 +69,8 @@ process RER_CONT {
         ${params.winsorizeTrait} \\
         ${perm_batches} \\
         ${perms_per_batch} \\
-        ${perm_mode}
+        ${perm_mode} \\
+        "${params.rer_transform ?: 'auto'}"
         """
     } else {
         """
@@ -87,7 +87,8 @@ process RER_CONT {
         ${params.winsorizeTrait} \\
         ${perm_batches} \\
         ${perms_per_batch} \\
-        ${perm_mode}
+        ${perm_mode} \\
+        "${params.rer_transform ?: 'auto'}"
         """
     }
 

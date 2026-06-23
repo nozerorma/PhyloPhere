@@ -278,6 +278,22 @@ def create_gene_tree_state_plot(
                 break
 
         if candidate is None:
+            # Fallback: accept a matching result without tip_details
+            for r in results:
+                pos0 = r.get("position")
+                pos1 = r.get("position_one_based")
+                if (
+                    (pos0 is not None and pos0 == focus_position)
+                    or (
+                        pos1 is not None
+                        and pos0 is not None
+                        and pos1 == focus_position + 1
+                    )
+                ) and r.get("node_mapping") and r.get("node_state_details"):
+                    candidate = r
+                    break
+
+        if candidate is None:
             logger.info(
                 f"No result entry matches focus_position={focus_position}; skipping gene tree plot"
             )

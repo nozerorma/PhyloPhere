@@ -269,7 +269,7 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
                     fields = result_line.split("\t")
                     if len(fields) >= 3 and fields[1] == "CAAS":
                         # Avoid duplicating if already normalized
-                        if len(fields) < 4 or fields[2] not in ["US", "GS0", "GS1", "GS2", "GS3", "GS4"]:
+                        if len(fields) < 4 or fields[2] not in ["US", "GS1", "GS2", "GS3", "GS4"]:
                             fields.insert(2, "US")
                             result_line = "\t".join(fields)
                 outf.write(result_line + "\n")

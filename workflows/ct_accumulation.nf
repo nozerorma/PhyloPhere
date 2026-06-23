@@ -17,6 +17,10 @@
 */
 
 include { CT_ACCUMULATION_AGGREGATE; CT_ACCUMULATION_RANDOMIZE } from "${baseDir}/subworkflows/CT_ACCUMULATION/ctacc_run"
+include { ACCUMULATION_REPORT } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_report"
+include { ACCUMULATION_GENE_LISTS } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_gene_lists.nf"
+include { TOOL_FCS_REPORT as ACCUMULATION_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+include { TOOL_STRING_REPORT as ACCUMULATION_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 
 workflow CT_ACCUMULATION {
     take:
@@ -115,7 +119,8 @@ workflow CT_ACCUMULATION {
             genomic_info_ch,
             species_list_val,
             meta_caas_val,
-            background_ch
+            background_ch,
+            params.accumulation_entropy_dir ?: ""
         )
 
         // ── Phase 2: Randomize — run once per phenotype direction + once for all ──
@@ -139,6 +144,47 @@ workflow CT_ACCUMULATION {
             rand_in.caas
         )
 
+        // ── Accumulation report (rendered after all directions complete) ──────
+        def all_rand_csvs = randomize_out.results.collect()
+        def agg_csvs      = aggregate_out.global_csv
+            .mix(aggregate_out.deciles.ifEmpty(Channel.empty()))
+            .collect()
+        ACCUMULATION_REPORT(all_rand_csvs, agg_csvs)
+
+        // ── Gene list extraction + FCS/STRING per direction ──────────────────
+        if (params.enrichment || params.string) {
+            def lists_out = ACCUMULATION_GENE_LISTS(randomize_out.direction, randomize_out.results)
+
+            if (params.enrichment) {
+                def fcs_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }
+                def fcs_stats_ch   = lists_out.fcs_stats
+                def fcs_bg_ch      = lists_out.gene_lists.map { files -> files.find { it.name == 'background.txt' } }
+                def fcs_label_ch   = lists_out.direction.map { dir -> "FCS_accumulation_${dir}_${params.traitname ?: 'trait'}" }
+
+                ACCUMULATION_FCS_REPORT(
+                    fcs_subpath_ch,
+                    fcs_stats_ch,
+                    fcs_bg_ch,
+                    fcs_label_ch
+                )
+            }
+
+            if (params.string) {
+                def str_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }
+                def str_bg_ch      = lists_out.gene_lists.map { files -> files.find { it.name == 'background.txt' } }
+                def str_interest_ch = lists_out.gene_lists.map { files -> files.findAll { it.name != 'background.txt' } }
+                def str_label_ch   = lists_out.direction.map { dir -> "STRING_accumulation_${dir}_${params.traitname ?: 'trait'}" }
+
+                ACCUMULATION_STRING_REPORT(
+                    str_subpath_ch,
+                    str_bg_ch,
+                    str_interest_ch,
+                    str_label_ch
+                )
+            }
+        }
+
     emit:
-        results = randomize_out.results
+        results      = randomize_out.results
+        accum_report = ACCUMULATION_REPORT.out.report
 }

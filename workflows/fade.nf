@@ -29,6 +29,9 @@ include { ANNOTATE_TREE_FG; ANNOTATE_TREE_FG_BATCHED } from "${baseDir}/subworkf
 include { FADE_RUN; FADE_BATCHED  } from "${baseDir}/subworkflows/FADE/fade_run.nf"
 include { FADE_REPORT as FADE_REPORT_TOP    } from "${baseDir}/subworkflows/FADE/fade_report.nf"
 include { FADE_REPORT as FADE_REPORT_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_report.nf"
+include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_gene_lists.nf"
+include { TOOL_FCS_REPORT as FADE_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+include { TOOL_STRING_REPORT as FADE_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -199,6 +202,33 @@ workflow FADE {
 
         fade_report_top    = FADE_REPORT_TOP(Channel.value('top'),       top_jsons,    fg_top_ch   )
         fade_report_bottom = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons, fg_bottom_ch)
+
+        // ── Gene list extraction + FCS/STRING per direction ──────────────────
+        if (params.enrichment || params.string) {
+            def run_fade_enrich = { direction, summary_tsv_ch, gene_lists_proc ->
+                def lists_out    = gene_lists_proc(Channel.value(direction), summary_tsv_ch)
+                def subpath      = "selection/fade/${direction}"
+                def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.first()
+                def interest_ch  = lists_out.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
+                if (params.enrichment) {
+                    FADE_FCS_REPORT(
+                        Channel.value(subpath),
+                        lists_out.fcs_stats,
+                        bg_ch,
+                        Channel.value("FCS_fade_${direction}_${params.traitname ?: 'trait'}")
+                    )
+                }
+                if (params.string) {
+                    FADE_STRING_REPORT(
+                        Channel.value(subpath), bg_ch, interest_ch,
+                        Channel.value("STRING_fade_${direction}_${params.traitname ?: 'trait'}")
+                    )
+                }
+            }
+
+            run_fade_enrich('top',    fade_report_top.summary_tsv,    { d, s -> FADE_GENE_LISTS_TOP(d, s) })
+            run_fade_enrich('bottom', fade_report_bottom.summary_tsv, { d, s -> FADE_GENE_LISTS_BOTTOM(d, s) })
+        }
 
     emit:
         report_top     = fade_report_top.report

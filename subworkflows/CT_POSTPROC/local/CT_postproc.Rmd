@@ -216,7 +216,6 @@ build_group_flag_table <- function(df) {
     group_by(orientation, site_id, gene, position) %>%
     summarise(
       us = any(caap_group == "US"),
-      gs0 = any(caap_group == "GS0"),
       gs1 = any(caap_group == "GS1"),
       gs2 = any(caap_group == "GS2"),
       gs3 = any(caap_group == "GS3"),
@@ -337,7 +336,6 @@ normalize_disambig_schema <- function(df) {
   if ('Gene' %in% names(df) && !'gene' %in% names(df)) df <- df %>% rename(gene = Gene)
   if ('Position' %in% names(df) && !'position' %in% names(df)) df <- df %>% rename(position = Position)
   if ('CAAP_Group' %in% names(df) && !'caap_group' %in% names(df)) df <- df %>% rename(caap_group = CAAP_Group)
-  if ('ASR_ConsAntiCAAS' %in% names(df) && !'asr_is_conserved' %in% names(df)) df <- df %>% rename(asr_is_conserved = ASR_ConsAntiCAAS)
   if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
   if (!'pattern_type' %in% names(df)) df$pattern_type <- 'unknown'
   if (!'change_side' %in% names(df)) df$change_side <- 'none'
@@ -347,8 +345,6 @@ normalize_disambig_schema <- function(df) {
   if (!'parallel_bottom' %in% names(df)) df$parallel_bottom <- 'none'
   if (!'parallel_type' %in% names(df)) df$parallel_type <- 'none'
   if (!'is_conserved_meta' %in% names(df)) df$is_conserved_meta <- FALSE
-  if (!'asr_is_conserved' %in% names(df)) df$asr_is_conserved <- FALSE
-  if (!'asr_root_conserved' %in% names(df)) df$asr_root_conserved <- FALSE
 
   df %>%
     mutate(
@@ -363,8 +359,6 @@ normalize_disambig_schema <- function(df) {
       parallel_bottom = normalize_parallel_type(parallel_bottom),
       parallel_type = normalize_parallel_type(parallel_type),
       is_conserved_meta = as_bool(is_conserved_meta),
-      asr_is_conserved = as_bool(asr_is_conserved),
-      asr_root_conserved = as_bool(asr_root_conserved),
       pvalue = suppressWarnings(as.numeric(pvalue)),
       pvalue_boot = suppressWarnings(as.numeric(pvalue_boot)),
       sig_hyp = !is.na(pvalue) & pvalue <= alpha_threshold,
@@ -502,8 +496,6 @@ discovery_df <- discovery_std %>%
     parallel_type,
     change_side,
     is_conserved_meta,
-    asr_is_conserved,
-    asr_root_conserved,
     Pvalue = pvalue,
     `Pvalue.boot` = pvalue_boot,
     sig_hyp,
@@ -1833,9 +1825,9 @@ make_overlap_plot <- function(df, id_col, level_label, subset_label, out_dir) {
 }
 render_overlap_scenario <- function(df, orientation_name, id_col, level_label) {
   scenario_defs <- list(
-    scenario1 = df %>% filter(toupper(caap_group) != "GS0"),
+    scenario1 = df,
     scenario2 = df %>% filter(toupper(caap_group) != "US"),
-    scenario3 = df %>% filter(toupper(caap_group) %in% c("GS0", "US"))
+    scenario3 = df %>% filter(toupper(caap_group) == "US")
   )
 
   for (scenario_name in names(scenario_defs)) {
@@ -1875,7 +1867,7 @@ for (orientation_name in c("global", "top", "bottom", "both")) {
 plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file = NULL) {
   if (is.null(intersections_df) || nrow(intersections_df) == 0) return(invisible(NULL))
 
-  label_map <- c(us = "US", gs0 = "GS0", gs1 = "GS1", gs2 = "GS2", gs3 = "GS3", gs4 = "GS4")
+  label_map <- c(us = "US", gs1 = "GS1", gs2 = "GS2", gs3 = "GS3", gs4 = "GS4")
 
   plot_df <- intersections_df %>%
     arrange(desc(n), combo_label) %>%
@@ -1938,7 +1930,7 @@ createDir(gr_plot_dir)
 createDir(gr_txt_dir)
 createDir(gr_tsv_dir)
 
-grp_sets_global <- c("us", "gs0", "gs1", "gs2", "gs3", "gs4")
+grp_sets_global <- c("us", "gs1", "gs2", "gs3", "gs4")
 
 make_intersections <- function(sf, set_cols) {
   sf %>%
@@ -1973,7 +1965,7 @@ for (ori_name in c("global", "top", "bottom", "both")) {
 
   base_df <- detail_rows %>% filter(orientation == ori_name)
   write_export_pair(base_df, paste0("all_", ori_name), gr_txt_dir, gr_tsv_dir)
-  for (grp_name in c("US", "GS0", "GS1", "GS2", "GS3", "GS4")) {
+  for (grp_name in c("US", "GS1", "GS2", "GS3", "GS4")) {
     write_export_pair(
       base_df %>% filter(caap_group == grp_name),
       paste0(tolower(grp_name), "_", ori_name),

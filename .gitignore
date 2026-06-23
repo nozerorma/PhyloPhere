@@ -16,6 +16,10 @@ Out
 __pycache__
 .vscode
 marvin_debug
-subworkflows/VEP/dat/transvar/hg38.fa
-subworkflows/VEP/dat/transvar/hg38.fa.fai
-subworkflows/VEP/dat/transvar/hg38.fa.gz
+adhoc_scripts
+.deprecated
+pyproject.toml
+.mypy_cache
+.pytest_cache
+run_scripts
+subworkflows/VEP/dat/PrimateAI-3D.hg38.txt.gz

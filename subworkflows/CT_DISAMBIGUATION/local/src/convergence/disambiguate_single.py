@@ -33,6 +33,8 @@ from src.convergence.convergence import (
 from src.asr.tree_parser import get_mrca
 from src.data.models import CAASPosition, ConvergenceResult
 from src.data.loaders import list_gene_caas_entries, parse_trait_pairs
+from src.biochem.grouping import get_grouping_scheme
+from src.convergence.path_scores import build_node_index, compute_asr_path_score
 
 logger = logging.getLogger(__name__)
 
@@ -200,18 +202,6 @@ def analyze_caas_position_disambiguation(
                         "aa": aa,
                         "prob": prob,
                     }
-            if node_state_info.low_confidence_nodes:
-                logger.warning(
-                    f"Low-confidence node posteriors for {gene}:{caas_pos.position_zero_based} "
-                    f"at nodes {node_state_info.low_confidence_nodes}"
-                )
-                node_state_details["low_confidence_nodes"] = (
-                    node_state_info.low_confidence_nodes
-                )
-                node_posteriors["low_confidence_nodes"] = (
-                    node_state_info.low_confidence_nodes
-                )
-
             # Capture per-node annotations for downstream debugging/plots
             per_node_states: Dict[int, Dict[str, Any]] = {}
             for node_id, node_sites in posterior_data.items():
@@ -311,56 +301,52 @@ def analyze_caas_position_disambiguation(
     # Conserved-pair logic driven by metadata row
     is_cons_meta = bool(getattr(caas_pos, "is_conserved_meta", False))
     conserved_pair = str(getattr(caas_pos, "conserved_pair", "") or "").strip()
-    asr_cons = False
-    asr_root_cons = False
-    if is_cons_meta and conserved_pair:
-        # conserved_pair is already normalised to comma-separated pair ids by the
-        # loader (e.g. "3" or "1,4").  Parse each id and validate independently.
-        pair_ids = []
-        for token in conserved_pair.split(","):
-            token = token.strip()
-            if not token:
-                continue
-            try:
-                pair_ids.append(int(float(token)))
-            except (ValueError, TypeError):
-                pass
-        pair_ids = [p for p in pair_ids if 1 <= p <= len(pair_details_list)]
 
-        pair_confirmed = []  # per-pair ASR confirmation flags
-        confirmed_focal_states = []  # focal states of confirmed pairs (for root check)
-
-        for pair_idx in pair_ids:
-            pair = pair_details_list[pair_idx - 1] or {}
-            top_tip = pair.get("top_tip_mode") or pair.get("top_tip_residue")
-            bottom_tip = pair.get("bottom_tip_mode") or pair.get("bottom_tip_residue")
-            # Focal-pair state from ASR: state at the pair-level MRCA node
-            focal_state = (
-                node_state_info.focal_states[pair_idx - 1]
-                if node_state_info and pair_idx - 1 < len(node_state_info.focal_states)
-                else None
-            )
-            # Core requirement: tips agree AND the focal ASR node confirms the same AA
-            tips_agree = bool(
-                top_tip and bottom_tip and focal_state
-                and top_tip == bottom_tip == focal_state
-            )
-            pair_confirmed.append(tips_agree)
-            if tips_agree and focal_state:
-                confirmed_focal_states.append(focal_state)
-
-        # All conserved pairs must be ASR-confirmed (strict: partial confirmation = 0)
-        asr_cons = bool(pair_confirmed) and all(pair_confirmed)
-
-        # Root conservation: root state matches any confirmed pair's focal state
-        all_mrca_state = node_state_info.mrca_contrast if node_state_info else None
-        all_mrca_prob = node_state_info.mrca_contrast_prob if node_state_info else None
-        asr_root_cons = bool(
-            asr_cons
-            and all_mrca_state
-            and all_mrca_state in confirmed_focal_states
-            and all_mrca_prob is not None
-            and all_mrca_prob >= posterior_threshold
+    # ── ASR path score ───────────────────────────────────────────────────────
+    # Unified replacement for the legacy binary ASR gate + convergence + parallel
+    # scores. Walks each pair's MRCA up to the root using the per-node posteriors
+    # captured above, scoring how isolated each tip change is from the deeper
+    # background (signed isolation) or how deep the conserved state extends
+    # (unsigned conservation). See src/convergence/path_scores.py.
+    asr_path_score = 0.0
+    independence = 1.0
+    mrca_diversity = 0.0
+    derived_agreement = 1.0
+    conservation_gate = 1.0
+    count_factor = 0.0
+    n_changed_pairs = 0
+    n_changed_sides = 0
+    pair_path_scores: Dict[int, float] = {}
+    pair_path_contaminated: Dict[int, bool] = {}
+    try:
+        per_node_payload = (node_posteriors or {}).get("per_node", {}) or {}
+        per_node_dist = {
+            int(nid): (info or {}).get("distribution", {})
+            for nid, info in per_node_payload.items()
+        }
+        tree_root = getattr(tree_data, "root", None)
+        node_index = build_node_index(tree_root)
+        path_result = compute_asr_path_score(
+            pair_details=pair_details_list,
+            per_node_dist=per_node_dist,
+            node_index=node_index,
+            scheme=getattr(caas_pos, "caap_group", "US") or "US",
+            is_conserved_meta=is_cons_meta,
+            conserved_pair=conserved_pair,
+        )
+        asr_path_score = path_result["asr_path_score"]
+        independence = path_result.get("independence", 1.0)
+        mrca_diversity = path_result["mrca_diversity"]
+        derived_agreement = path_result["derived_agreement"]
+        conservation_gate = path_result["conservation_gate"]
+        count_factor = path_result.get("count_factor", 0.0)
+        n_changed_pairs = path_result.get("n_changed_pairs", 0)
+        n_changed_sides = path_result.get("n_changed_sides", 0)
+        pair_path_scores = path_result["pair_scores"]
+        pair_path_contaminated = path_result["pair_contaminated"]
+    except Exception as e:  # never let path scoring break disambiguation
+        logger.warning(
+            f"ASR path scoring failed for {gene}:{caas_pos.position_zero_based}: {e}"
         )
 
     return ConvergenceResult(
@@ -395,9 +381,6 @@ def analyze_caas_position_disambiguation(
             else None
         ),
         node_state_summary=node_summary,
-        low_confidence_nodes=(
-            node_state_info.low_confidence_nodes if node_state_info else None
-        ),
         state_source=state_source,
         derived_similarity=None,
         change_top=change_top,
@@ -413,8 +396,16 @@ def analyze_caas_position_disambiguation(
         sig_hyp=getattr(caas_pos, "sig_hyp", None),
         sig_perm=getattr(caas_pos, "sig_perm", None),
         sig_both=getattr(caas_pos, "sig_both", None),
-        asr_is_conserved=asr_cons,
-        asr_root_conserved=asr_root_cons,
+        asr_path_score=asr_path_score,
+        independence=independence,
+        mrca_diversity=mrca_diversity,
+        derived_agreement=derived_agreement,
+        conservation_gate=conservation_gate,
+        count_factor=count_factor,
+        n_changed_pairs=n_changed_pairs,
+        n_changed_sides=n_changed_sides,
+        pair_path_scores=pair_path_scores or None,
+        pair_path_contaminated=pair_path_contaminated or None,
         score=None,
         caas_pvalue=caas_pos.pvalue,
         pvalue_boot=getattr(caas_pos, "pvalue_boot", None),
@@ -433,7 +424,7 @@ def analyze_gene_disambiguation(
     posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     posterior_threshold: float = 0.7,
     diagnostics_dir: Optional[Path] = None,
-    convergence_mode: str = "focal_clade",
+    convergence_mode: str = "focal_state",
     asr_mode: str = "precomputed",
     include_non_significant: bool = False,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
@@ -465,7 +456,6 @@ def analyze_gene_disambiguation(
     diagnostics: Dict[str, Any] = {
         "skipped_positions": 0,
         "skip_reasons": Counter(),
-        "low_confidence_positions": 0,
         "tip_dump_file": None,
     }
     # Prepare a streaming JSONL file for tip diagnostics if requested
@@ -625,6 +615,19 @@ def analyze_gene_disambiguation(
                         if tree_data and all_taxa
                         else None
                     )
+                    # Populate mrca_contrast in each pair using the global contrast MRCA
+                    # state (MRCA of all taxa). classify_change_and_parallelism uses this
+                    # field as the ancestor when convergence_mode="mrca".
+                    global_mrca_state, _ = _modal_state(
+                        mrca_node.node_id if mrca_node else None
+                    )
+                    if global_mrca_state is None:
+                        logger.warning(
+                            f"Global MRCA state unavailable for {gene} pos {pos}; "
+                            "mrca convergence_mode will fall back to focal_state per pair"
+                        )
+                    for p in pair_details:
+                        p["mrca_contrast"] = global_mrca_state if global_mrca_state is not None else p.get("focal_state")
                     node_mapping = {
                         "root": (
                             tree_data.root.node_id
@@ -692,8 +695,6 @@ def analyze_gene_disambiguation(
             )
 
             results.append(result)
-            if getattr(result, "low_confidence_nodes", None):
-                diagnostics["low_confidence_positions"] += 1
             logger.info(
                 f"✓ Analyzed position {pos}: {result.pattern_type} pattern, "
                 f"{result.ancestral}→{result.derived}"

@@ -121,7 +121,7 @@ class WorkflowMap {
         def logoDataUri = imageDataUriIfExists("${projectDir}/res/logo.png")
 
         def colors = [
-            reporting : '#7C3AED',   // reports / ORA
+            reporting : '#7C3AED',   // reports / Enrichment
             prepost   : '#0EA5E9',   // pre/post-processing / characterization
             processes : '#F97316'    // CT / RER / disambiguation / accumulation / selection tools
         ]
@@ -169,41 +169,53 @@ class WorkflowMap {
                           "${outdir}/postproc/cleaned_backgrounds"],
               htmlCandidates: ["${outdir}/HTML_reports/CT_postproc.html"] ],
 
-            [ id: 'ora',         name: 'ORA',                             type: 'reporting', ran: ctx.ora,
-              filesDirs: ["${outdir}/ora", "${outdir}/accumulation/ora"],
-              htmlCandidates: ["${outdir}/HTML_reports/ORA_general.html",
-                               "${outdir}/HTML_reports/ORA_accumulation.html"] ],
+            [ id: 'enrichment',  name: 'Enrichment / Enrichment-excluded', type: 'reporting', ran: ctx.enrichment,
+              filesDirs: ["${outdir}/enrichment", "${outdir}/enrichment_excluded"],
+              htmlCandidates: ["${outdir}/HTML_reports/Enrichment_general.html"] ],
 
             [ id: 'ct_acc',      name: 'CT accumulation (convergence)',   type: 'processes', ran: ctx.ctAccum,
               filesDirs: ["${outdir}/accumulation",
                           "${outdir}/accumulation/aggregation",
-                          "${outdir}/accumulation/randomization"],
-              htmlCandidates: ["${outdir}/HTML_reports/CT_accumulation.html"] ],
+                          "${outdir}/accumulation/top/randomization",
+                          "${outdir}/accumulation/bottom/randomization",
+                          "${outdir}/accumulation/all/randomization"],
+              htmlCandidates: ["${outdir}/HTML_reports/accumulation_report.html"] ],
 
             [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
               filesDirs: ["${outdir}/characterization/vep"],
               htmlCandidates: [] ],
 
             [ id: 'rer',         name: 'RERconverge (RER)',               type: 'processes', ran: ctx.rer,
-              filesDirs: ["${outdir}/rerconverge", "${outdir}/rerconverge/gene_sets"],
-              htmlCandidates: ["${outdir}/HTML_reports/RERconverge.html"] ],
+              filesDirs: ["${outdir}/RERConverge",
+                          "${outdir}/RERConverge/RER_Results",
+                          "${outdir}/RERConverge/gene_lists",
+                          "${outdir}/RERConverge/enrichment"],
+              htmlCandidates: ["${outdir}/HTML_reports/RERconverge_report.html"] ],
 
             [ id: 'fade',        name: 'FADE (selection)',                type: 'processes', ran: ctx.fade,
               filesDirs: ["${outdir}/selection/fade",
                           "${outdir}/selection/fade/top",
-                          "${outdir}/selection/fade/bottom"],
-              htmlCandidates: ["${outdir}/selection/fade/top/FADE_top.html",
-                               "${outdir}/selection/fade/bottom/FADE_bottom.html"] ],
+                          "${outdir}/selection/fade/bottom",
+                          "${outdir}/selection/fade/top/gene_lists",
+                          "${outdir}/selection/fade/bottom/gene_lists",
+                          "${outdir}/selection/fade/top/enrichment",
+                          "${outdir}/selection/fade/bottom/enrichment"],
+              htmlCandidates: ["${outdir}/HTML_reports/FADE_report_top.html",
+                               "${outdir}/HTML_reports/FADE_report_bottom.html"] ],
 
             [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting', ran: ctx.scoring,
               filesDirs: ["${outdir}/scoring",
-                          "${outdir}/scoring/gene_lists"],
-              htmlCandidates: ["${outdir}/HTML_reports/SCORING_report.html"] ]
+                          "${outdir}/scoring/gene_lists",
+                          "${outdir}/scoring/gene_lists/position",
+                          "${outdir}/scoring/gene_lists/gene",
+                          "${outdir}/scoring/overlap"],
+              htmlCandidates: ["${outdir}/HTML_reports/SCORING_report.html",
+                               "${outdir}/HTML_reports/SCORING_report_overlap.html"] ]
 
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','ct_postproc','ora','ct_acc','vep','rer','fade','scoring']
+                        'ct_disambig','ct_postproc','enrichment','ct_acc','vep','rer','fade','scoring']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -220,7 +232,7 @@ class WorkflowMap {
             "${projectDir}/conf/ct_disambiguation.config",
             "${projectDir}/conf/ct_postproc.config",
             "${projectDir}/conf/ct_accumulation.config",
-            "${projectDir}/conf/ora.config",
+            "${projectDir}/conf/enrichment.config",
             "${projectDir}/conf/vep.config",
             "${projectDir}/conf/rerconverge.config",
             "${projectDir}/conf/fade.config",
@@ -290,7 +302,7 @@ class WorkflowMap {
 
   <div class="legend">
     <b>Color key (process type)</b><br/>
-    <span class="sw" style="background:${colors.reporting};"></span> Reporting-driven (reports, ORA, Scoring)
+    <span class="sw" style="background:${colors.reporting};"></span> Reporting-driven (reports, Enrichment, Scoring)
     &nbsp;&nbsp;|&nbsp;&nbsp;
     <span class="sw" style="background:${colors.prepost};"></span> Pre/postprocessing &amp; characterization (VEP)
     &nbsp;&nbsp;|&nbsp;&nbsp;
@@ -333,11 +345,11 @@ class WorkflowMap {
         'ct_signif': ['signification', 'signification/gene_lists'],
         'ct_disambig': ['ct_disambiguation'],
         'ct_postproc': ['postproc', 'postproc/preprocessed'],
-        'ora': ['ora'],
+        'enrichment': ['enrichment', 'enrichment_excluded'],
         'ct_acc': ['accumulation', 'accumulation/aggregation'],
         'vep': ['characterization/vep'],
-        'rer': ['rerconverge'],
-        'fade': ['selection/fade'],
+        'rer': ['RERConverge', 'RERConverge/RER_Results'],
+        'fade': ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
         'scoring': ['scoring']
       };
 
@@ -351,7 +363,7 @@ class WorkflowMap {
         'ct_signif': 'ct_signif',
         'ct_disambig': 'ct_disambig',
         'ct_postproc': 'ct_postproc',
-        'ora': 'ora',
+        'enrichment': 'enrichment',
         'ct_acc': 'ct_acc',
         'vep': 'vep',
         'rer': 'rer',
@@ -427,7 +439,7 @@ class WorkflowMap {
         'ct_signif': 'CT signification (convergence)',
         'ct_disambig': 'CT disambiguation (convergence)',
         'ct_postproc': 'CT post-processing',
-        'ora': 'ORA',
+        'enrichment': 'Enrichment / Enrichment-excluded',
         'ct_acc': 'CT accumulation (convergence)',
         'vep': 'VEP characterization',
         'rer': 'RERconverge (RER)',
@@ -447,7 +459,7 @@ class WorkflowMap {
         'ct_signif': '#7C3AED',
         'ct_disambig': '#F97316',
         'ct_postproc': '#0EA5E9',
-        'ora': '#7C3AED',
+        'enrichment': '#7C3AED',
         'ct_acc': '#F97316',
         'vep': '#0EA5E9',
         'rer': '#F97316',
@@ -474,11 +486,11 @@ class WorkflowMap {
             ct_signif    : ['signification', 'signification/gene_lists'],
             ct_disambig  : ['ct_disambiguation'],
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
-            ora          : ['ora'],
+            enrichment   : ['enrichment', 'enrichment_excluded'],
             ct_acc       : ['accumulation', 'accumulation/aggregation'],
             vep          : ['characterization/vep'],
-            rer          : ['rerconverge'],
-            fade         : ['selection/fade'],
+            rer          : ['RERConverge', 'RERConverge/RER_Results'],
+            fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
             scoring      : ['scoring']
         ]
     }
@@ -542,7 +554,7 @@ class WorkflowMap {
             ctSignif      : scanResults.ct_signif ?: false,
             ctDisambig    : scanResults.ct_disambig ?: false,
             ctPostproc    : scanResults.ct_postproc ?: false,
-            ora           : scanResults.ora ?: false,
+            enrichment    : scanResults.enrichment ?: false,
             ctAccum       : scanResults.ct_acc ?: false,
             vep           : scanResults.vep ?: false,
             rer           : scanResults.rer ?: false,

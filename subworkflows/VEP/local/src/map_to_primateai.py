@@ -1,49 +1,39 @@
 #!/usr/bin/python3
-"""Map CAAS protein positions to PrimateAI-3D scores.
+"""Map CAAS protein positions to PrimateAI-3D scores using upstream MAP files.
 
 Strategy
 --------
-For each protein position query (GENE:p.N):
+For each CAAS position (Gene + Position):
 
-1. **hg38 reference amino acid** — read from the TransVar output.
-   TransVar encodes this in the protein coordinates field as "p.NX" where
-   X is the single-letter reference AA (e.g. "p.26E" → ref = E).
+1. **MAP file lookup** — read the gene's MAP file from the upstream directory.
+   Match the 0-based CAAS position to `prot_ali_col - 1`.
+   Extract the 1-based protein position (`hg38_aa_pos`) and genomic coordinate (`hg38_nt_coord`).
 
-2. **Derived (changing) amino acids** — determined from the CAAS pattern
-   and ``change_side``:
-   * change_side = top    → the top group is the changing one
-   * change_side = bottom → the bottom group is the changing one
-   * change_side = none / ambiguous → use all unique AAs from both groups
+2. **Strand inference** — compare adjacent valid codon coordinates in the MAP file.
+   - If coordinates increase: plus strand (+). Nucleotides are C, C+1, C+2.
+   - If coordinates decrease: minus strand (-). Nucleotides are C, C-1, C-2.
 
-   ``alt_aas = changing_group_aas − {ref_aa_hg38}``
+3. **PrimateAI Lookup**: stream through the PrimateAI gz database and keep variants at
+   any of the 3 nucleotide positions where the alternative amino acid matches the CAAS pattern.
 
-3. **PrimateAI lookup**: stream through the gz file and keep variants where
-   ``ref_aa == ref_aa_hg38  AND  alt_aa ∈ alt_aas``
-
-   * Convergent CAAS (one changing AA)  → single PrimateAI entry per codon pos.
-   * Divergent CAAS  (multiple alt AAs) → multiple entries (one per alt AA).
-   * Ambiguous CAAS  (change_side=none) → all missense variants at those positions.
+Directional Pathogenicity Interpretation & Filtering
+----------------------------------------------------
+The script enforces a directional constraint to align PrimateAI lookups with evolutionary medicine context:
+  `if anc_aas and ref_aa not in anc_aas: continue`
+- **TOP Direction (Ancestral Human / Derived in Top)**: We look at the pathogenicity of mutating the ancestral human allele into the derived, "high-cancer" susceptibility allele.
+- **BOTTOM Direction (Ancestral Human / Derived in Bottom)**: We look at the tolerance or pathogenicity of mutating the ancestral human allele (associated with the "high-cancer" susceptibility side) into the derived, "low-cancer" resistance allele.
+- **Filtering**: If the human reference allele is not in the ancestral set, the position is filtered out because the human reference background does not reflect the ancestral state under the scheme. Similarly, if the derived state matches the human reference, it is skipped as no missense variant can represent a mutation to it.
 
 Usage
 -----
-    map_to_primateai.py <transvar_tsv> <aa2prot_csv> <caas_file> <primateai_gz> <output_tsv>
-
-Arguments
----------
-transvar_tsv   Stage 3 output: transvar panno --ccds --longest --noheader
-               Columns: input | transcript | gene | strand |
-                         coordinates(gDNA/cDNA/protein) | region | info
-aa2prot_csv    Stage 2 output (AA2prot global.csv)
-               Columns: gene | caas_pos | tag | GENE:p.N
-caas_file      Original CAAS discovery TSV
-               Columns: Gene | Position | tag | caas | ... | change_side | ...
-primateai_gz   PrimateAI-3D.hg38.txt.gz
-output_tsv     Output path for the merged results table
+    map_to_primateai.py <caas_file> <vep_map_dir> <primateai_gz> <output_tsv>
 """
 
 import sys
+import os
 import gzip
 import re
+import glob
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -62,41 +52,20 @@ SCHEME_WEIGHTS = {
     "GS3": 0.1,
     "GS2": 0.1,
     "GS1": 0.1,
-    "GS0": 0.0,
 }
 
 
 def pair_aware_caas_letters_gs(caas_pattern, amino_encoded, change_side, caap_group):
     """Return (ancestral_aas, derived_aas) as raw AA sets, with GS-aware conserved-pair exclusion.
 
-    When amino_encoded is available (non-US grouped string from CT_DISAMBIGUATION),
-    uses it positionally to detect positions that are conserved *at the group level*,
-    then collects raw letters from caas at non-conserved positions — matching the
-    group-aware logic while keeping raw AAs for PrimateAI lookup.
-
-    When amino_encoded is absent or the scheme is US, falls back to raw character
-    comparison (pair-aware at the amino-acid level).
-
-    Parameters
-    ----------
-    caas_pattern  : str  e.g. 'LAP/PPP', 'TTT/TNI'
-    amino_encoded : str  e.g. 'aaa/ass' (group-label string from disambiguation), or ''
-    change_side   : str  'top', 'bottom', or 'none'/'ambiguous'/''
-    caap_group    : str  e.g. 'US', 'GS2'
-
-    Returns
-    -------
-    (ancestral_aas, derived_aas) : tuple of set of str  (raw 1-letter AA codes)
-        ancestral_aas – raw AAs on the non-changing side at non-conserved positions.
-                        Empty when change_side is ambiguous (filter will be bypassed).
-        derived_aas   – raw AAs on the changing side at non-conserved positions.
+    Uses group-aware logic while keeping raw AAs for PrimateAI lookup.
     """
     if '/' not in caas_pattern:
         return set(), _uc_letters(caas_pattern)
 
     raw_top, raw_bot = caas_pattern.split('/', 1)
-    top_nc: set = set()
-    bot_nc: set = set()
+    top_nc = set()
+    bot_nc = set()
 
     use_enc = (caap_group != 'US'
                and amino_encoded
@@ -131,212 +100,234 @@ def pair_aware_caas_letters_gs(caas_pattern, amino_encoded, change_side, caap_gr
         return set(), top_nc | bot_nc
 
 
-def parse_codon_range(coord_str):
-    """Parse TransVar coordinate string → (chrom, start, end).
+def load_map_file(gene, vep_map_dir):
+    """Parse Gene.*.map.tsv to retrieve codon position-to-coordinate mapping and strand."""
+    pattern = os.path.join(vep_map_dir, f"{gene}.*.map.tsv")
+    matching = glob.glob(pattern)
+    if not matching:
+        pattern = os.path.join(vep_map_dir, f"{gene}.map.tsv")
+        if os.path.exists(pattern):
+            matching = [pattern]
+    if not matching:
+        print(f"WARN: MAP file for gene {gene} not found in {vep_map_dir}", file=sys.stderr)
+        return None, None
 
-    Handles:
-      'chr17:g.7675087_7675089/c.523_525/p.175R'  → range
-      'chr17:g.7675087/c.523/p.175R'              → single position
-    Returns (None, None, None) if not parseable.
-    """
-    m = re.match(r'(chr[\w]+):g\.(\d+)_(\d+)(?:[/\s]|$)', coord_str)
-    if m:
-        return m.group(1), int(m.group(2)), int(m.group(3))
-    m = re.match(r'(chr[\w]+):g\.(\d+)(?:[/\s]|$)', coord_str)
-    if m:
-        pos = int(m.group(2))
-        return m.group(1), pos, pos
-    return None, None, None
+    map_file = matching[0]
+    coords = []
+    rows = []
+
+    with open(map_file, 'r') as fh:
+        header_line = fh.readline().rstrip('\n')
+        if not header_line:
+            return None, None
+        header = header_line.split('\t')
+        col = {name.strip(): idx for idx, name in enumerate(header)}
+
+        # Verify required columns exist
+        required = ['hg38_nt_coord', 'hg38_aa_pos', 'prot_ali_col']
+        if not all(c in col for c in required):
+            print(f"WARN: MAP file {map_file} is missing required columns", file=sys.stderr)
+            return None, None
+
+        for line in fh:
+            fields = line.rstrip('\n').split('\t')
+            if len(fields) < len(header):
+                continue
+
+            nt_coord_val = fields[col['hg38_nt_coord']]
+            aa_pos_val = fields[col['hg38_aa_pos']]
+            prot_ali_val = fields[col['prot_ali_col']]
+
+            if nt_coord_val != 'NA' and ':' in nt_coord_val:
+                try:
+                    pos = int(nt_coord_val.split(':')[1])
+                    coords.append(pos)
+                except ValueError:
+                    pass
+
+            rows.append({
+                'prot_ali_col': prot_ali_val,
+                'hg38_aa_pos': aa_pos_val,
+                'hg38_nt_coord': nt_coord_val
+            })
+
+    if not coords:
+        return None, None
+
+    # Determine strand by coordinate trend
+    is_minus = False
+    if len(coords) > 1:
+        diffs = [coords[i+1] - coords[i] for i in range(len(coords)-1)]
+        sign_sum = sum(1 if d > 0 else -1 for d in diffs if d != 0)
+        is_minus = (sign_sum < 0)
+    strand = '-' if is_minus else '+'
+
+    # Build mapping from 1-based prot_ali_col to (hg38_aa_pos, chrom, coord)
+    pos_map = {}
+    for r in rows:
+        prot_ali = r['prot_ali_col']
+        if prot_ali == 'NA' or not prot_ali:
+            continue
+        try:
+            prot_ali_idx = int(prot_ali)
+        except ValueError:
+            continue
+
+        nt_coord = r['hg38_nt_coord']
+        aa_pos_str = r['hg38_aa_pos']
+        if nt_coord == 'NA' or aa_pos_str == 'NA' or ':' not in nt_coord:
+            continue
+
+        chrom, pos_str = nt_coord.split(':')
+        try:
+            coord = int(pos_str)
+            aa_pos = int(aa_pos_str)
+            pos_map[prot_ali_idx] = (aa_pos, chrom, coord)
+        except ValueError:
+            continue
+
+    return pos_map, strand
 
 
-def parse_ref_aa_hg38(coord_str):
-    """Extract the hg38 reference amino acid from a TransVar protein field.
-
-    TransVar encodes it as '/p.NX' where N is the position and X is the
-    single-letter AA (e.g. '/p.26E' → 'E').  Returns '' if not found.
-    """
-    m = re.search(r'/p\.\d+([A-Z])', coord_str)
-    return m.group(1) if m else ''
-
-
-def write_empty_output(primateai_gz, output_tsv):
+def write_header_only(primateai_gz, output_tsv):
     """Emit a header-only output file and exit successfully."""
     with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
         pai_header = gz_in.readline().rstrip('\n')
         out.write(
-            "transvar_query\ttransvar_transcript\t"
+            "Gene\tPosition\t"
             "hg38_ref_aa\tcaas_alt_aas\t"
+            "caap_group\tscheme_weight\t"
             + pai_header + "\n"
         )
     print("No CAAS rows available for PrimateAI mapping; wrote header-only output.",
           file=sys.stderr)
     sys.exit(0)
 
-
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-if len(sys.argv) != 6:
+if len(sys.argv) != 5:
     sys.exit(
         "Usage: map_to_primateai.py "
-        "<transvar_tsv> <aa2prot_csv> <caas_file> <primateai_gz> <output_tsv>"
+        "<caas_file> <vep_map_dir> <primateai_gz> <output_tsv>"
     )
 
-transvar_tsv, aa2prot_csv, caas_file, primateai_gz, output_tsv = sys.argv[1:]
+caas_file, vep_map_dir, primateai_gz, output_tsv = sys.argv[1:]
 
 # ---------------------------------------------------------------------------
-# Step 1: Load CAAS file → tag → (caas_pattern, amino_encoded, change_side, caap_group)
+# Step 1: Load CAAS file → group targets by (Gene, Position)
 # ---------------------------------------------------------------------------
 print("Loading CAAS file ...", file=sys.stderr)
 
-tag_to_caas      = {}   # tag → raw AA pattern string
-tag_to_amino_enc = {}   # tag → group-label pattern string (from CT_DISAMBIGUATION)
-tag_to_cside     = {}   # tag → change_side string
-tag_to_caap      = {}   # tag → CAAP_Group string
+caas_targets = {}  # (Gene, Position) -> list of tag dicts
 
 with open(caas_file) as fh:
     header_line = fh.readline().rstrip('\n')
     if not header_line:
-        write_empty_output(primateai_gz, output_tsv)
+        write_header_only(primateai_gz, output_tsv)
 
     header = header_line.split('\t')
-    col    = {name.strip(): idx for idx, name in enumerate(header)}
+    col = {name.strip(): idx for idx, name in enumerate(header)}
     col_lc = {name.strip().lower(): idx for idx, name in enumerate(header)}
 
-    tag_col      = col_lc.get('tag')
-    caas_col     = col_lc.get('caas')
-    cside_col    = col.get('change_side')
-    amino_col    = col_lc.get('amino_encoded')
-    caap_col     = col.get('CAAP_Group') or col_lc.get('caap_group')
+    tag_col = col_lc.get('tag')
+    caas_col = col_lc.get('caas')
+    gene_col = col_lc.get('gene')
+    pos_col = col_lc.get('position')
+    cside_col = col.get('change_side')
+    amino_col = col_lc.get('amino_encoded')
+    caap_col = col.get('CAAP_Group') or col_lc.get('caap_group')
 
-    if tag_col is None or caas_col is None:
-        write_empty_output(primateai_gz, output_tsv)
+    if any(c is None for c in [tag_col, caas_col, gene_col, pos_col]):
+        print("Missing required columns in CAAS file header.", file=sys.stderr)
+        write_header_only(primateai_gz, output_tsv)
 
     for line in fh:
         fields = line.rstrip('\n').split('\t')
+        if len(fields) < len(header):
+            continue
+
+        gene = fields[gene_col]
+        try:
+            position = int(fields[pos_col])
+        except ValueError:
+            continue
+
         tag = fields[tag_col]
-        if tag in tag_to_caas:
-            continue
-        tag_to_caas[tag]      = fields[caas_col]
-        tag_to_cside[tag]     = fields[cside_col]     if cside_col  is not None else ''
-        tag_to_amino_enc[tag] = fields[amino_col]     if amino_col  is not None else ''
-        tag_to_caap[tag]      = fields[caap_col]      if caap_col   is not None else 'US'
-
-print(f"  {len(tag_to_caas)} unique tags loaded.", file=sys.stderr)
-
-# ---------------------------------------------------------------------------
-# Step 2: Load AA2prot output → query → per-tag entries (one per CAAP_Group scheme)
-#
-# A single GENE:p.N query maps to multiple tags (one per CAAP_Group scheme).
-# We keep them separate so each can carry its own GS-aware ancestral/derived
-# letter sets and scheme weight, rather than unioning across schemes.
-# ---------------------------------------------------------------------------
-print("Loading AA2prot output ...", file=sys.stderr)
-
-# query_tag_entries[GENE:p.N] = list of dicts:
-#   { caap_group, weight, anc_aas (raw), der_aas (raw) }
-query_tag_entries: dict[str, list] = {}
-
-with open(aa2prot_csv) as fh:
-    for line in fh:
-        fields = line.rstrip('\n').split('\t')
-        if len(fields) < 4:
-            continue
-        tag   = fields[2]
-        query = fields[3]   # GENE:p.N
-
-        caas_pat  = tag_to_caas.get(tag, '')
-        cside     = tag_to_cside.get(tag, '')
-        amino_enc = tag_to_amino_enc.get(tag, '')
-        caap_grp  = tag_to_caap.get(tag, 'US')
-        if not caas_pat:
-            continue
-
+        caas_pat = fields[caas_col]
+        cside = fields[cside_col] if cside_col is not None else ''
+        amino_enc = fields[amino_col] if amino_col is not None else ''
+        caap_grp = fields[caap_col] if caap_col is not None else 'US'
         weight = SCHEME_WEIGHTS.get(caap_grp, 0.0)
+
         anc_aas, der_aas = pair_aware_caas_letters_gs(
             caas_pat, amino_enc, cside, caap_grp
         )
 
-        if query not in query_tag_entries:
-            query_tag_entries[query] = []
-        query_tag_entries[query].append({
+        key = (gene, position)
+        if key not in caas_targets:
+            caas_targets[key] = []
+        caas_targets[key].append({
+            'tag': tag,
+            'anc_aas': anc_aas,
+            'der_aas': der_aas,
             'caap_group': caap_grp,
-            'weight':     weight,
-            'anc_aas':   anc_aas,
-            'der_aas':   der_aas,
+            'weight': weight,
         })
 
-print(f"  {len(query_tag_entries)} unique protein-position queries.", file=sys.stderr)
+print(f"  {len(caas_targets)} unique (Gene, Position) targets loaded.", file=sys.stderr)
+
+if not caas_targets:
+    write_header_only(primateai_gz, output_tsv)
 
 # ---------------------------------------------------------------------------
-# Step 3: Load TransVar output → query → (chrom, start, end, transcript, ref_aa_hg38)
+# Step 2: Load MAP files and build genomic position lookup
 # ---------------------------------------------------------------------------
-print("Loading TransVar output ...", file=sys.stderr)
+print("Loading MAP files and building genomic lookup ...", file=sys.stderr)
 
-query_coords: dict[str, tuple] = {}   # query → (chrom, start, end, transcript, ref_aa_hg38)
+pos_lookup = {}  # (chrom, pos) -> list of (gene, caas_pos, hg38_aa_pos, tag_entries)
+loaded_maps = {}  # gene -> pos_map
 
-with open(transvar_tsv) as fh:
-    for line in fh:
-        line = line.rstrip('\n')
-        if not line or line.startswith('input\t'):
-            continue
-        fields = line.split('\t')
-        if len(fields) < 5:
-            continue
-        query      = fields[0]
-        transcript = fields[1]
-        coord_str  = fields[4]
+for (gene, caas_pos) in caas_targets:
+    if gene not in loaded_maps:
+        pos_map, strand = load_map_file(gene, vep_map_dir)
+        loaded_maps[gene] = (pos_map, strand)
+    else:
+        pos_map, strand = loaded_maps[gene]
 
-        chrom, start, end = parse_codon_range(coord_str)
-        ref_aa_hg38       = parse_ref_aa_hg38(coord_str)
-
-        if chrom and query not in query_coords:
-            query_coords[query] = (chrom, start, end, transcript, ref_aa_hg38)
-
-print(f"  {len(query_coords)} queries with genomic coordinates.", file=sys.stderr)
-
-# ---------------------------------------------------------------------------
-# Step 4: Build position → query lookup for PrimateAI streaming
-#
-# Each query entry carries the list of per-tag dicts (one per CAAP_Group),
-# each with its own GS-aware ancestral/derived sets and scheme weight.
-# alt_aas = der_aas − {ref_aa_hg38} is computed here once per tag.
-# ---------------------------------------------------------------------------
-print("Building position lookup ...", file=sys.stderr)
-
-# pos_lookup[(chrom, pos)] = list of (query, ref_aa_hg38, transcript, tag_entries)
-# tag_entries = list of { caap_group, weight, anc_aas, alt_aas }
-pos_lookup: dict[tuple, list] = {}
-
-for query, (chrom, start, end, transcript, ref_aa_hg38) in query_coords.items():
-    raw_tag_entries = query_tag_entries.get(query, [])
-    if not raw_tag_entries:
+    if not pos_map:
         continue
 
-    # Pre-compute alt_aas (ref excluded) per tag entry
-    tag_entries = []
-    for entry in raw_tag_entries:
-        alt_aas = entry['der_aas'] - {ref_aa_hg38}
-        if not alt_aas:
-            alt_aas = entry['der_aas']   # safety: keep all if ref subtraction empties the set
-        tag_entries.append({
-            'caap_group': entry['caap_group'],
-            'weight':     entry['weight'],
-            'anc_aas':    entry['anc_aas'],
-            'alt_aas':    alt_aas,
-        })
+    # prot_ali_col in MAP file is 1-based alignment column.
+    # CAAS Position is 0-based.
+    prot_ali_idx = caas_pos + 1
+    if prot_ali_idx not in pos_map:
+        continue
 
-    for pos in range(start, end + 1):
-        key = (chrom, pos)
+    hg38_aa_pos, chrom, coord = pos_map[prot_ali_idx]
+
+    # Generate the 3 nucleotide coordinates for this codon
+    if strand == '+':
+        codon_positions = [coord, coord + 1, coord + 2]
+    else:
+        codon_positions = [coord, coord - 1, coord - 2]
+
+    tag_entries = caas_targets[(gene, caas_pos)]
+
+    for nt_pos in codon_positions:
+        key = (chrom, nt_pos)
         if key not in pos_lookup:
             pos_lookup[key] = []
-        pos_lookup[key].append((query, ref_aa_hg38, transcript, tag_entries))
+        pos_lookup[key].append((gene, caas_pos, hg38_aa_pos, tag_entries))
 
 print(f"  {len(pos_lookup)} genomic positions to scan.", file=sys.stderr)
 
+if not pos_lookup:
+    write_header_only(primateai_gz, output_tsv)
+
 # ---------------------------------------------------------------------------
-# Step 5: Stream PrimateAI-3D and emit matching rows
+# Step 3: Stream PrimateAI-3D and emit matching rows
 # ---------------------------------------------------------------------------
 print("Streaming PrimateAI-3D database ...", file=sys.stderr)
 
@@ -345,19 +336,19 @@ scanned = 0
 
 with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
     pai_header = gz_in.readline().rstrip('\n')
-    pai_cols   = pai_header.split('\t')
+    pai_cols = pai_header.split('\t')
 
     try:
         ref_aa_col = pai_cols.index('ref_aa')
         alt_aa_col = pai_cols.index('alt_aa')
-        chr_col    = pai_cols.index('chr')
-        pos_col    = pai_cols.index('pos')
+        chr_col = pai_cols.index('chr')
+        pos_col = pai_cols.index('pos')
     except ValueError as exc:
         sys.exit(f"Missing expected column in PrimateAI header: {exc}")
 
-    # Output header — two extra columns: caap_group, scheme_weight
+    # Output header
     out.write(
-        "transvar_query\ttransvar_transcript\t"
+        "Gene\tPosition\t"
         "hg38_ref_aa\tcaas_alt_aas\t"
         "caap_group\tscheme_weight\t"
         + pai_header + "\n"
@@ -389,26 +380,27 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
         ref_aa = fields[ref_aa_col]
         alt_aa = fields[alt_aa_col]
 
-        for query, ref_aa_hg38, transcript, tag_entries in pos_lookup[key]:
-            if ref_aa != ref_aa_hg38:
-                continue   # PrimateAI ref doesn't match hg38 reference at this position
-
+        for gene, caas_pos, hg38_aa_pos, tag_entries in pos_lookup[key]:
             for entry in tag_entries:
-                alt_aas  = entry['alt_aas']
-                anc_aas  = entry['anc_aas']
+                der_aas = entry['der_aas']
+                anc_aas = entry['anc_aas']
                 caap_grp = entry['caap_group']
-                weight   = entry['weight']
+                weight = entry['weight']
+
+                alt_aas = der_aas - {ref_aa}
+                if not alt_aas:
+                    alt_aas = der_aas   # safety: keep all if ref subtraction empties the set
 
                 if alt_aa not in alt_aas:
-                    continue   # not a CAAS-derived substitution for this scheme
-                # Accept only when human ref is ancestral (non-changing side).
-                # When ancestral is unknown (change_side=none), anc_aas is empty
-                # and the filter is bypassed to preserve existing behaviour.
-                if anc_aas and ref_aa_hg38 not in anc_aas:
-                    continue   # human ref is not ancestral under this scheme — skip
+                    continue
+
+                # Enforce ancestral constraints if ancestral state is known
+                if anc_aas and ref_aa not in anc_aas:
+                    continue
+
                 out.write(
-                    f"{query}\t{transcript}\t"
-                    f"{ref_aa_hg38}\t{''.join(sorted(alt_aas))}\t"
+                    f"{gene}\t{caas_pos}\t"
+                    f"{ref_aa}\t{''.join(sorted(alt_aas))}\t"
                     f"{caap_grp}\t{weight}\t"
                     f"{line}\n"
                 )

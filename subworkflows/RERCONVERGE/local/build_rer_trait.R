@@ -40,25 +40,42 @@ ori_traits[] <- lapply(ori_traits, function(col) trimws(col))
 
 # Specify column name for species
 sp_colname <- args[2]
+selected_column <- args[3]
 
 ## Binarize names if not performed already
 ori_traits$species <- gsub(" ", "_", ori_traits[[sp_colname]])
 
-# Reorder and filter species
-selected_column <- args[3]
+# ── Extract count vectors if present ──────────────────────────────────────────
+n_trait_col <- if (length(args) >= 6) args[6] else ""
+c_trait_col <- if (length(args) >= 7) args[7] else ""
 
+n_vector <- NULL
+c_vector <- NULL
+
+if (nzchar(n_trait_col) && n_trait_col %in% colnames(ori_traits)) {
+  temp_df <- ori_traits %>% dplyr::filter(!is.na(!!as.name(selected_column)))
+  n_vector <- setNames(as.numeric(temp_df[[n_trait_col]]), temp_df$species)
+  message(sprintf("[RER_TRAIT] Extracted n_vector from column '%s'", n_trait_col))
+}
+if (nzchar(c_trait_col) && c_trait_col %in% colnames(ori_traits)) {
+  temp_df <- ori_traits %>% dplyr::filter(!is.na(!!as.name(selected_column)))
+  c_vector <- setNames(as.numeric(temp_df[[c_trait_col]]), temp_df$species)
+  message(sprintf("[RER_TRAIT] Extracted c_vector from column '%s'", c_trait_col))
+}
+
+# Reorder and filter species
 ori_traits <- ori_traits %>%
   dplyr::select(species, !!as.name(selected_column)) %>%
   dplyr::filter(!is.na(!!as.name(selected_column)))
 
 # Select only those columns of interest and build named vector
-trait_vector <- setNames(as.numeric(ori_traits[[selected_column]]), ori_traits[[sp_colname]])
+trait_vector <- setNames(as.numeric(ori_traits[[selected_column]]), ori_traits$species)
 
-# Write the generated vector
+# Write the generated vectors
 ## Parameterize to traits_continuous
 traitPath <- args[4]
 print(traitPath)
-save(trait_vector, file = traitPath)
+save(trait_vector, n_vector, c_vector, file = traitPath)
 
 # ── Detect trait type (binary vs continuous) from value distribution ──────────
 # Binary: exactly 2 unique non-NA values (expected: 0/1 encoding).

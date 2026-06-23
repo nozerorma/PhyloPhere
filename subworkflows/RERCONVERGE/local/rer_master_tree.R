@@ -137,6 +137,13 @@ print("Prunned")
 
 pruned_out <- args[4]
 
+# Drop degenerate trees (fewer than 3 tips) before writing — readTrees() cannot
+# parse single-tip or empty Newick strings and will crash the whole batch.
+n_before <- length(gene_trees_pruned)
+gene_trees_pruned <- Filter(function(t) !is.null(t) && length(t$tip.label) >= 3, gene_trees_pruned)
+n_dropped <- n_before - length(gene_trees_pruned)
+if (n_dropped > 0) message(sprintf("[RER_TREES] Dropped %d gene tree(s) with < 3 tips after pruning", n_dropped))
+
 # Open a connection to the output file
 file_conn <- file(pruned_out, open = "wt")
 

@@ -32,7 +32,6 @@ TABLE OF CONTENTS
 
 Grouping Schemes
 US    Classical CAAS (ungrouped; identity mapping: each amino acid is its own group)
-GS0   Random aggregation control (6 groups; arbitrary bins; no biochemical meaning)
 GS1   Coarse biochemical recoding (6 groups; Dayhoff-like variant; custom partition)
 GS2   Side-chain dipole/volume-inspired (7 groups; per Yang 2010 via Shen 2007)
 GS3   Polarity and volume (6 groups; per Zhang 2000)
@@ -81,30 +80,6 @@ US: Dict[str, str] = {
     "G": "G", "H": "H", "I": "I", "K": "K", "L": "L",
     "M": "M", "N": "N", "P": "P", "Q": "Q", "R": "R",
     "S": "S", "T": "T", "V": "V", "W": "W", "Y": "Y",
-}
-
-
-#: GS0: Random aggregation control (6 groups)
-#: Partition: GWDC // PM // K // IQLS // EATVYF // NHR
-#: Notes: Randomly generated from a biochemical scheme; used as a negative control.
-GS0: Dict[str, str] = {
-    # a: arbitrary bin (random control; no biochemical interpretation)
-    "G": "a", "W": "a", "D": "a", "C": "a",
-
-    # b: arbitrary bin (random control; no biochemical interpretation)
-    "P": "b", "M": "b",
-
-    # c: arbitrary bin (random control; no biochemical interpretation)
-    "K": "c",
-
-    # d: arbitrary bin (random control; no biochemical interpretation)
-    "I": "d", "Q": "d", "L": "d", "S": "d",
-
-    # e: arbitrary bin (random control; no biochemical interpretation)
-    "E": "e", "A": "e", "T": "e", "V": "e", "Y": "e", "F": "e",
-
-    # f: arbitrary bin (random control; no biochemical interpretation)
-    "N": "f", "H": "f", "R": "f",
 }
 
 
@@ -228,7 +203,6 @@ GS4: Dict[str, str] = {
 #: Scheme registry mapping scheme names to their definitions
 SCHEMES: Dict[str, Dict[str, str]] = {
     "US": US,
-    "GS0": GS0,
     "GS1": GS1,
     "GS2": GS2,
     "GS3": GS3,
@@ -458,7 +432,7 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
     """
     Identify CAAP (Convergent Amino Acid Properties) for all traits at a position.
 
-    For each position, checks all 5 grouping schemes (GS0-GS4). When a scheme detects
+    For each position, checks all 4 grouping schemes (GS1-GS4). When a scheme detects
     convergence, writes one output row with scheme-specific p-value calculated from
     group-level diversity.
 

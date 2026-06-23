@@ -2,7 +2,7 @@
 
 Definitions are aligned with the paired CAAP implementation in
 ``subworkflows/CT/local/modules/caap_id.py`` and include:
-US, GS0, GS1, GS2, GS3, GS4.
+US, GS1, GS2, GS3, GS4.
 """
 
 from typing import Dict, Optional
@@ -29,31 +29,6 @@ US: Dict[str, str] = {
     "V": "V",
     "W": "W",
     "Y": "Y",
-}
-
-# GS0: random aggregation control
-# Partition: GWDC // PM // K // IQLS // EATVYF // NHR
-GS0: Dict[str, str] = {
-    "G": "a",
-    "W": "a",
-    "D": "a",
-    "C": "a",
-    "P": "b",
-    "M": "b",
-    "K": "c",
-    "I": "d",
-    "Q": "d",
-    "L": "d",
-    "S": "d",
-    "E": "e",
-    "A": "e",
-    "T": "e",
-    "V": "e",
-    "Y": "e",
-    "F": "e",
-    "N": "f",
-    "H": "f",
-    "R": "f",
 }
 
 # GS1: CV // AGPS // NDQE // RHK // ILMFWY // T
@@ -154,7 +129,6 @@ GS4: Dict[str, str] = {
 
 SCHEMES: Dict[str, Dict[str, str]] = {
     "US": US,
-    "GS0": GS0,
     "GS1": GS1,
     "GS2": GS2,
     "GS3": GS3,

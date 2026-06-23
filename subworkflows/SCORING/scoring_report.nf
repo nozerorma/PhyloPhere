@@ -19,9 +19,7 @@
  *   stress_latent_loadings: path — position_score_stress_latent_loadings.tsv (or NO_SCORING_STRESS_LOADINGS sentinel)
  *   fade_site_top_file   : path — per-site FADE BF TSV top direction (or NO_FADE_SITE_TOP sentinel)
  *   fade_site_bot_file   : path — per-site FADE BF TSV bottom direction (or NO_FADE_SITE_BOT sentinel)
- *   vep_transvar         : path — TransVar annotation TSV (or NO_VEP_TRANSVAR sentinel)
  *   vep_primateai        : path — PrimateAI-3D score TSV (or NO_VEP_PRIMATEAI sentinel)
- *   vep_aa2prot          : path — aa2prot_global.csv (or NO_VEP_AA2PROT sentinel)
  *   genomic_info         : path — gene genomic coords TSV (or NO_GENOMIC_INFO sentinel)
  *
  * Outputs
@@ -52,9 +50,7 @@ process SCORING_REPORT {
     path stress_latent_loadings
     path fade_site_top_file  // optional: per-site FADE BF TSV top direction  (NO_FADE_SITE sentinel when absent)
     path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
-    path vep_transvar        // optional: TransVar annotation TSV (NO_VEP_TRANSVAR sentinel when absent)
     path vep_primateai       // optional: PrimateAI-3D score TSV  (NO_VEP_PRIMATEAI sentinel when absent)
-    path vep_aa2prot         // optional: aa2prot_global.csv — alignment→protein position map (NO_VEP_AA2PROT sentinel)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
 
     output:
@@ -64,12 +60,14 @@ process SCORING_REPORT {
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
     def outdir         = "${params.outdir}/scoring"
     def traitname      = params.traitname ?: 'unknown_trait'
-    def top_pct        = params.scoring_position_top_pct  ?: 0.10
-    def top5_pct       = params.scoring_position_top5_pct ?: 0.05
-    def top1_pct       = params.scoring_position_top1_pct ?: 0.01
-    def g_top_pct      = params.scoring_gene_top_pct      ?: 0.10
-    def g_top5_pct     = params.scoring_gene_top5_pct     ?: 0.05
-    def g_top1_pct     = params.scoring_gene_top1_pct     ?: 0.01
+    def top_pct        = params.scoring_position_top_pct   ?: 0.10
+    def top25_pct      = params.scoring_position_top25_pct ?: 0.25
+    def top5_pct       = params.scoring_position_top5_pct  ?: 0.05
+    def top1_pct       = params.scoring_position_top1_pct  ?: 0.01
+    def g_top_pct      = params.scoring_gene_top_pct       ?: 0.10
+    def g_top25_pct    = params.scoring_gene_top25_pct     ?: 0.25
+    def g_top5_pct     = params.scoring_gene_top5_pct      ?: 0.05
+    def g_top1_pct     = params.scoring_gene_top1_pct      ?: 0.01
     // Resolve optional sentinel files: pass 'NULL' (R NULL) when no real file is staged
     def stress_summary_arg = (stress_summary.name =~ /^NO_SCORING_STRESS_SUMMARY/) ? 'NULL' : "'${stress_summary}'"
     def stress_corr_arg = (stress_correlations.name =~ /^NO_SCORING_STRESS_CORR/) ? 'NULL' : "'${stress_correlations}'"
@@ -80,9 +78,7 @@ process SCORING_REPORT {
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
 
-    def tv_arg  = (vep_transvar.name  =~ /^NO_VEP_TRANSVAR/)  ? 'NULL' : "'${vep_transvar}'"
     def pai_arg = (vep_primateai.name =~ /^NO_VEP_PRIMATEAI/) ? 'NULL' : "'${vep_primateai}'"
-    def a2p_arg = (vep_aa2prot.name   =~ /^NO_VEP_AA2PROT/)   ? 'NULL' : "'${vep_aa2prot}'"
     def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
 
@@ -100,9 +96,11 @@ process SCORING_REPORT {
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
                     top_pct              = ${top_pct},
+                    top25_pct            = ${top25_pct},
                     top5_pct             = ${top5_pct},
                     top1_pct             = ${top1_pct},
                     gene_top_pct         = ${g_top_pct},
+                    gene_top25_pct       = ${g_top25_pct},
                     gene_top5_pct        = ${g_top5_pct},
                     gene_top1_pct        = ${g_top1_pct},
                     stress_summary_file  = ${stress_summary_arg},
@@ -113,9 +111,7 @@ process SCORING_REPORT {
                     stress_loadings_file = ${stress_loadings_arg},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
-                    vep_transvar_file    = ${tv_arg},
                     vep_primateai_file   = ${pai_arg},
-                    vep_aa2prot_file     = ${a2p_arg},
                     genomic_info_file    = ${gi_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
@@ -138,9 +134,11 @@ process SCORING_REPORT {
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
                     top_pct              = ${top_pct},
+                    top25_pct            = ${top25_pct},
                     top5_pct             = ${top5_pct},
                     top1_pct             = ${top1_pct},
                     gene_top_pct         = ${g_top_pct},
+                    gene_top25_pct       = ${g_top25_pct},
                     gene_top5_pct        = ${g_top5_pct},
                     gene_top1_pct        = ${g_top1_pct},
                     stress_summary_file  = ${stress_summary_arg},
@@ -151,9 +149,7 @@ process SCORING_REPORT {
                     stress_loadings_file = ${stress_loadings_arg},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
-                    vep_transvar_file    = ${tv_arg},
                     vep_primateai_file   = ${pai_arg},
-                    vep_aa2prot_file     = ${a2p_arg},
                     genomic_info_file    = ${gi_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
