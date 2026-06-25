@@ -14,7 +14,7 @@ process ASR_ROBUSTNESS_REPORT {
     label 'process_reporting'
     label 'error_retry'
     publishDir path: "${params.outdir}/asr_robustness", mode: 'copy', overwrite: true, pattern: '{tsv/**,plots/**}'
-    publishDir path: "${params.outdir}/HTML_reports",   mode: 'copy', overwrite: true, pattern: '*.html'
+    publishDir path: "${params.outdir}/html_reports",   mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
     path disambiguation_dir   // full ct_disambiguation/ output directory

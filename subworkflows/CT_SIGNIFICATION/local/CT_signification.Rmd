@@ -285,13 +285,12 @@ caas_filtered <- caas_filtered %>%
   mutate(
     Pvalue_fdr      = p.adjust(Pvalue,      method = "BH"),
     Pvalue.boot_fdr = p.adjust(Pvalue.boot, method = "BH"),
-    isSignificant = Pvalue <= alpha | Pvalue.boot <= alpha,
+    is_significant = Pvalue <= alpha & Pvalue.boot <= alpha,
     sig_hyp = Pvalue <= alpha,
     sig_perm = Pvalue.boot <= alpha,
-    sig_both = sig_hyp & sig_perm,
     sig_hyp_fdr  = Pvalue_fdr      <= alpha,
     sig_perm_fdr = Pvalue.boot_fdr <= alpha,
-    sig_both_fdr = sig_hyp_fdr & sig_perm_fdr
+    is_significant_fdr = sig_hyp_fdr & sig_perm_fdr
   ) %>%
   ungroup()
 
@@ -304,10 +303,10 @@ if (has_caap_group) {
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
       Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(sig_both, na.rm = TRUE),
+      Both_05 = sum(is_significant, na.rm = TRUE),
       Hyp_FDR = sum(sig_hyp_fdr, na.rm = TRUE),
       Perm_FDR = sum(sig_perm_fdr, na.rm = TRUE),
-      Both_FDR = sum(sig_both_fdr, na.rm = TRUE),
+      Both_FDR = sum(is_significant_fdr, na.rm = TRUE),
       .groups = "drop"
     )
 
@@ -323,10 +322,10 @@ if (has_caap_group) {
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
       Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(sig_both, na.rm = TRUE),
+      Both_05 = sum(is_significant, na.rm = TRUE),
       Hyp_FDR = sum(sig_hyp_fdr, na.rm = TRUE),
       Perm_FDR = sum(sig_perm_fdr, na.rm = TRUE),
-      Both_FDR = sum(sig_both_fdr, na.rm = TRUE)
+      Both_FDR = sum(is_significant_fdr, na.rm = TRUE)
     )
 
   cat("\nSignificance Summary (raw alpha=0.05 vs BH-FDR q<=0.05):\n")
@@ -357,7 +356,7 @@ if (has_caap_group) {
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
       Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(sig_both, na.rm = TRUE),
+      Both_05 = sum(is_significant, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     arrange(CAAP_Group, Pattern)
@@ -407,7 +406,7 @@ if (has_caap_group) {
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
       Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(sig_both, na.rm = TRUE),
+      Both_05 = sum(is_significant, na.rm = TRUE),
       .groups = "drop"
     )
   
@@ -453,119 +452,7 @@ if (has_caap_group) {
 cat("\n=== Pattern Analysis Complete ===\n")
 ```
 
-## 5. Gene List Export for Enrichment
-
-Export gene lists for downstream enrichment analysis (GO, KEGG, Reactome).
-
-```{r gene_export}
-cat("\n=== Exporting Gene Lists ===\n")
-
-# Use local directory for Nextflow to capture
-gene_list_dir <- "gene_lists"
-createDir(gene_list_dir)
-
-# Export function
-export_gene_list <- function(df, name, dir) {
-  genes <- unique(df$Gene)
-  output_file <- file.path(dir, paste0(name, ".genes"))
-  write.table(
-    genes,
-    output_file,
-    quote = FALSE,
-    row.names = FALSE,
-    col.names = FALSE
-  )
-  return(length(genes))
-}
-
-# Export by significance criteria
-if (has_caap_group) {
-  # Per-group exports
-  for (grp in unique(caas_for_export$CAAP_Group)) {
-    grp_dir <- file.path(gene_list_dir, grp)
-    createDir(grp_dir)
-    
-    grp_data <- caas_for_export %>% filter(CAAP_Group == grp)
-    
-    # All genes
-    n_all <- export_gene_list(grp_data, "all", grp_dir)
-    
-    # Hypergeometric significant
-    n_hyp <- export_gene_list(
-      grp_data %>% filter(sig_hyp),
-      "hypergeometric_p05",
-      grp_dir
-    )
-    
-    # Permutation significant
-    n_perm <- export_gene_list(
-      grp_data %>% filter(sig_perm),
-      "permutation_p05",
-      grp_dir
-    )
-    
-    # Both significant
-    n_both <- export_gene_list(
-      grp_data %>% filter(sig_both),
-      "combined_p05",
-      grp_dir
-    )
-    
-    cat(sprintf("  %s: All=%d | Hyp=%d | Perm=%d | Both=%d\n",
-                grp, n_all, n_hyp, n_perm, n_both))
-  }
-  
-  # Global exports (all groups)
-  global_dir <- file.path(gene_list_dir, "global")
-  createDir(global_dir)
-  
-  n_all <- export_gene_list(caas_for_export, "all", global_dir)
-  n_hyp <- export_gene_list(
-    caas_for_export %>% filter(sig_hyp),
-    "hypergeometric_p05",
-    global_dir
-  )
-  n_perm <- export_gene_list(
-    caas_for_export %>% filter(sig_perm),
-    "permutation_p05",
-    global_dir
-  )
-  n_both <- export_gene_list(
-    caas_for_export %>% filter(sig_both),
-    "combined_p05",
-    global_dir
-  )
-  
-  cat(sprintf("  Global: All=%d | Hyp=%d | Perm=%d | Both=%d\n",
-              n_all, n_hyp, n_perm, n_both))
-} else {
-  # Standard exports
-  n_all <- export_gene_list(caas_for_export, "all", gene_list_dir)
-  n_hyp <- export_gene_list(
-    caas_for_export %>% filter(sig_hyp),
-    "hypergeometric_p05",
-    gene_list_dir
-  )
-  n_perm <- export_gene_list(
-    caas_for_export %>% filter(sig_perm),
-    "permutation_p05",
-    gene_list_dir
-  )
-  n_both <- export_gene_list(
-    caas_for_export %>% filter(sig_both),
-    "combined_p05",
-    gene_list_dir
-  )
-  
-  cat(sprintf("  All=%d | Hyp=%d | Perm=%d | Both=%d\n",
-              n_all, n_hyp, n_perm, n_both))
-}
-
-cat(sprintf("\nGene lists exported to: %s\n", gene_list_dir))
-cat("\n=== Gene List Export Complete ===\n")
-```
-
-## 6. Meta-CAAS Extraction
+## 5. Meta-CAAS Extraction
 
 Extract comprehensive CAAS metadata for meta-analysis and cross-study comparison.
 
@@ -599,7 +486,7 @@ if (has_caap_group) {
       mutate(
         GenePos = paste(Gene, Position, sep = "_"),
         SignificanceLevel = case_when(
-          sig_both ~ "Both",
+          is_significant ~ "Both",
           sig_hyp ~ "Hypergeometric",
           sig_perm ~ "Permutation",
           TRUE ~ "Not Significant"
@@ -617,8 +504,8 @@ if (has_caap_group) {
       select(
         Tag, GenePos, Gene, Position, Pattern, CAAP_Group,
         Pvalue, Pvalue.boot, Pvalue_fdr, Pvalue.boot_fdr, Occurrences, Total,
-        sig_hyp, sig_perm, sig_both,
-        sig_hyp_fdr, sig_perm_fdr, sig_both_fdr, SignificanceLevel,
+        sig_hyp, sig_perm, is_significant,
+        sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
         IsConserved, ConservedPair, AminoConv, AminoEncoded
       )
 
@@ -633,7 +520,7 @@ if (has_caap_group) {
     mutate(
       GenePos = paste(Gene, Position, sep = "_"),
       SignificanceLevel = case_when(
-        sig_both ~ "Both",
+        is_significant ~ "Both",
         sig_hyp ~ "Hypergeometric",
         sig_perm ~ "Permutation",
         TRUE ~ "Not Significant"
@@ -651,8 +538,8 @@ if (has_caap_group) {
     select(
       Tag, GenePos, Gene, Position, Pattern, CAAP_Group,
       Pvalue, Pvalue.boot, Pvalue_fdr, Pvalue.boot_fdr, Occurrences, Total,
-      sig_hyp, sig_perm, sig_both,
-      sig_hyp_fdr, sig_perm_fdr, sig_both_fdr, SignificanceLevel,
+      sig_hyp, sig_perm, is_significant,
+      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
       IsConserved, ConservedPair, AminoConv, AminoEncoded
     )
 
@@ -666,7 +553,7 @@ if (has_caap_group) {
     mutate(
       GenePos = paste(Gene, Position, sep = "_"),
       SignificanceLevel = case_when(
-        sig_both ~ "Both",
+        is_significant ~ "Both",
         sig_hyp ~ "Hypergeometric",
         sig_perm ~ "Permutation",
         TRUE ~ "Not Significant"
@@ -684,8 +571,8 @@ if (has_caap_group) {
     select(
       Tag, GenePos, Gene, Position, Pattern,
       Pvalue, Pvalue.boot, Pvalue_fdr, Pvalue.boot_fdr, Occurrences, Total,
-      sig_hyp, sig_perm, sig_both,
-      sig_hyp_fdr, sig_perm_fdr, sig_both_fdr, SignificanceLevel,
+      sig_hyp, sig_perm, is_significant,
+      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
       IsConserved, ConservedPair, AminoConv, AminoEncoded
     )
 

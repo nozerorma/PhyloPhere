@@ -34,7 +34,7 @@ process SCORING_REPORT {
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
 

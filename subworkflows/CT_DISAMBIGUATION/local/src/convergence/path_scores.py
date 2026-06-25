@@ -489,16 +489,6 @@ def compute_asr_path_score(
             "pair_contaminated": {},
         }
 
-    # Replication factor: how many independent changes does the position rest on?
-    # Counts changed *pairs* — independent phylogenetic contrasts that actually
-    # changed relative to their own MRCA (a tip that merely inherited the state,
-    # tip == MRCA, never entered `changed`, so a surface "convergence" built from
-    # inherited states does not inflate the count). A pair changing on both sides
-    # is still one contrast → counts once. Saturating, so it rewards replication
-    # with diminishing returns and never dominates the quality axes.
-    n_changed_pairs = len(changed)
-    count_factor = n_changed_pairs / (n_changed_pairs + count_k)
-
     # ── LAC merge points ─────────────────────────────────────────────────────
     # The LAC nodes are the merge points of the changed pairs' MRCAs (the
     # internal nodes of the minimal subtree connecting them). At most n-1 of
@@ -513,6 +503,13 @@ def compute_asr_path_score(
 
     # ── Phase 2: per-pair core isolation (each MRCA → root) ───────────────────
     pair_scores: Dict[int, float] = {}
+    # Per-side scores: needed for directional core (see below). A pair that
+    # changed only on top contributes to top_pair_scores; one that changed on
+    # both sides contributes to both. This prevents a pair changing top→S and a
+    # different pair changing bottom→T from being counted as "2 convergent
+    # changes" — they are changes in opposite directions.
+    top_pair_scores: Dict[int, float] = {}
+    bottom_pair_scores: Dict[int, float] = {}
     for c in changed:
         # Nearest LAC = deepest merge point on this pair's root-path. The private
         # segment (below it) is the pair's own, judged by the core walk; the
@@ -530,6 +527,10 @@ def compute_asr_path_score(
             )
             side_scores.append(score)
             pair_contam = pair_contam or contam
+            if side_key == "top_tip_mode":
+                top_pair_scores[c["pid"]] = score
+            else:
+                bottom_pair_scores[c["pid"]] = score
         pair_scores[c["pid"]] = sum(side_scores) / len(side_scores)
         pair_contaminated[c["pid"]] = pair_contam
 
@@ -582,18 +583,21 @@ def compute_asr_path_score(
         derived_agreement = 1.0  # no changed sides (handled above by empty `changed`)
 
     # ── Combinatorial Core Score: P(>= 2 independent changes) ──────────────────
-    # Replaces the heuristic average and count_factor with the exact probability.
-    p_list = list(pair_scores.values())
+    # Computed *per phenotype side* and then maximised. This is the critical
+    # directional check: a pair changing only on the top side and a different pair
+    # changing only on the bottom side are changes in opposite directions — not
+    # convergence. Without the per-side split they would both enter p_list and
+    # produce P(≥2) ≈ 1 even though neither direction has ≥2 independent events.
     n_changed_pairs = len(changed)
     n_changed_sides = sum(len(c["sides"]) for c in changed)
     count_factor = n_changed_sides / (n_changed_sides + count_k)
 
-    if n_changed_pairs >= 2:
-        # P(0 changes)
+    def _p_at_least_2(p_list: List[float]) -> float:
+        if len(p_list) < 2:
+            return 0.0
         p0 = 1.0
         for p in p_list:
             p0 *= (1.0 - p)
-        # P(1 change)
         p1 = 0.0
         for i in range(len(p_list)):
             term = p_list[i]
@@ -601,9 +605,11 @@ def compute_asr_path_score(
                 if j != i:
                     term *= (1.0 - p_list[j])
             p1 += term
-        core = max(0.0, min(1.0, 1.0 - p0 - p1))
-    else:
-        core = 0.0
+        return max(0.0, min(1.0, 1.0 - p0 - p1))
+
+    core_top = _p_at_least_2(list(top_pair_scores.values()))
+    core_bottom = _p_at_least_2(list(bottom_pair_scores.values()))
+    core = 1.0 - (1.0 - core_top) * (1.0 - core_bottom)
 
     asr_path_score = max(
         0.0,

@@ -44,7 +44,9 @@ def write_caas_convergence_csvs(
     logger.info(f"Writing CAAS convergence CSVs to {output_dir}")
 
     master_filename = output_dir / "caas_convergence_master.csv"
-    no_change_filename = output_dir / "no_change_debug.csv"
+    diag_dir = output_dir / "diagnostics"
+    diag_dir.mkdir(parents=True, exist_ok=True)
+    no_change_filename = diag_dir / "no_change_debug.csv"
 
     _write_csv(results, master_filename, max_pairs=max_pairs)
 
@@ -127,7 +129,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "conserved_pair",
         "sig_hyp",
         "sig_perm",
-        "sig_both",
         # Change tracking
         "change_top",
         "change_bottom",
@@ -223,7 +224,9 @@ def export_from_db(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     master_filename = output_dir / "caas_convergence_master.csv"
-    no_change_filename = output_dir / "no_change_debug.csv"
+    diag_dir = output_dir / "diagnostics"
+    diag_dir.mkdir(parents=True, exist_ok=True)
+    no_change_filename = diag_dir / "no_change_debug.csv"
     json_dir = output_dir / "json_summaries"
     json_dir.mkdir(parents=True, exist_ok=True)
 

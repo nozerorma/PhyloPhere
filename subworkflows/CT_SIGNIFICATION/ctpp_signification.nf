@@ -3,18 +3,17 @@
 
 process CAAS_SIGNIFICATION_REPORT {
     label 'process_reporting'
-    publishDir path: "${params.outdir}/signification", mode: 'copy', overwrite: true, pattern: '{CAAS_signification_files/**,gene_lists/**,meta_caas/**}'
-    publishDir path: "${params.outdir}/HTML_reports", mode: 'copy', overwrite: true, pattern: '*.html'
-    
+    publishDir path: "${params.outdir}/signification", mode: 'copy', overwrite: true, pattern: '{CAAS_signification_files/**,meta_caas/**}'
+    publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
+
     input:
     path discovery_input
     path background_input
     path bootstrap_files
-    
+
     output:
     path "*.html", emit: report
     path "CAAS_signification_files/**", emit: assets, optional: true
-    path "gene_lists/**", emit: gene_lists, optional: true
     path "meta_caas/**", emit: meta_caas, optional: true
     path "meta_caas/global_meta_caas.tsv", emit: global_meta_caas, optional: true
     

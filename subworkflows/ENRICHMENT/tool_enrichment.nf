@@ -21,10 +21,10 @@ process TOOL_STRING_REPORT {
     errorStrategy { task.attempt <= 3 ? 'retry' : 'ignore' }
     maxRetries 3
 
-    publishDir path: { "${params.outdir}/${output_subpath}/string" },
+    publishDir path: { "${params.outdir}/${output_subpath.toLowerCase()}/string" },
                mode: 'copy', overwrite: true,
                pattern: '{string_results/**,string_summary/**,string_plots/**,string_networks/**}'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
 

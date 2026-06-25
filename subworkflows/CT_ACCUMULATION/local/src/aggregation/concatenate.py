@@ -9,7 +9,7 @@ Changes vs. original to_integrate version:
     Columns are the unique source of truth:
       Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
       convergence_description, convergence_mode, CAAP_Group, amino_encoded,
-      is_conserved_meta, conserved_pair, sig_hyp, sig_perm, sig_both,
+      is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
     No fallback to legacy formats.
@@ -142,7 +142,7 @@ def read_metadata_caas(metadata_file):
     Source-of-truth columns (tab-separated):
       Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
       convergence_description, convergence_mode, CAAP_Group, amino_encoded,
-      is_conserved_meta, conserved_pair, sig_hyp, sig_perm, sig_both,
+      is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
 
@@ -173,7 +173,8 @@ def read_metadata_caas(metadata_file):
         pattern_idx       = h.index('Pattern')
         amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
         pvalue_idx        = h.index('Pvalue')
-        sig_idx           = h.index('sig_both')
+        
+        sig_idx           = h.index('is_significant')
         pboot_idx         = h.index('pvalue_boot') if 'pvalue_boot' in h else None
         group_idx         = h.index('CAAP_Group')
         conserved_idx     = h.index('is_conserved_meta') if 'is_conserved_meta' in h else None

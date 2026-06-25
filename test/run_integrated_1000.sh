@@ -89,6 +89,7 @@ NF_FLAGS=(
     --scoring_rer_input "${REPO_DIR}/test/inputs/rer/RERConverge/RER_Results/rerconverge_summary_neoplasia_prevalence.tsv"
     --vep
     --outdir "$OUTDIR"
+    -resume
 )
 
 nextflow run "${REPO_DIR}/main.nf" \

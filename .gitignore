@@ -25,3 +25,6 @@ pyproject.toml
 run_scripts
 *.Rproj
 subworkflows/VEP/dat/PrimateAI-3D.hg38.txt.gz
+
+# Kate editor swap files
+*.kate-swp

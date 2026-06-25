@@ -70,15 +70,6 @@ def convert_convergence_result_to_dict(
             ns = SimpleNamespace(**result)
 
             # Common key mappings
-            if not hasattr(ns, "position_zero_based"):
-                if "msa_pos" in result and result["msa_pos"] is not None:
-                    ns.position_zero_based = result["msa_pos"]
-                elif "position" in result and result["position"] is not None:
-                    try:
-                        ns.position_zero_based = int(result["position"]) - 1
-                    except Exception:
-                        ns.position_zero_based = result["position"]
-
             if not hasattr(ns, "position") and "position" in result:
                 ns.position = result.get("position")
 
@@ -113,8 +104,8 @@ def convert_convergence_result_to_dict(
     # Core identity
     result_dict: Dict[str, Any] = {
         "gene": getattr(result, "gene", None),
-        "msa_pos": getattr(result, "position_zero_based", None),  # 0-based
-        "position": getattr(result, "position", None),  # usually 1-based
+        "msa_pos": getattr(result, "msa_pos", None) or getattr(result, "position", None),  # 0-based
+        "position": getattr(result, "position", None),
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
         "is_significant": bool(getattr(result, "is_significant", False)),
@@ -126,7 +117,6 @@ def convert_convergence_result_to_dict(
         "conserved_pair": getattr(result, "conserved_pair", ""),
         "sig_hyp": getattr(result, "sig_hyp", None),
         "sig_perm": getattr(result, "sig_perm", None),
-        "sig_both": getattr(result, "sig_both", None),
         "multi_hypothesis": multi_hypothesis,
     }
 
@@ -302,7 +292,6 @@ def process_single_gene(
     posterior_threshold: float,
     convergence_mode: str,
     threads_per_gene: int,
-    include_non_significant: bool,
     run_diagnostics: bool,
     output_dir: Path,
     db_queue: Optional[Any] = None,
@@ -498,13 +487,7 @@ def process_single_gene(
             diagnostics_dir=diag_root,
             convergence_mode=convergence_mode,
             asr_mode=asr_mode,
-            include_non_significant=include_non_significant,
         )
-
-        if not include_non_significant:
-            biochem_results = [
-                r for r in biochem_results if getattr(r, "is_significant", False)
-            ]
 
         if not biochem_results:
             return (gene, None)
@@ -554,7 +537,7 @@ def process_single_gene(
                 )
 
                 for r in biochem_results:
-                    msa_pos = getattr(r, "position_zero_based", None)
+                    msa_pos = getattr(r, "position", None)
                     caas_dict = convert_convergence_result_to_dict(
                         r,
                         multi_hypothesis=None,
@@ -629,7 +612,6 @@ def process_all_genes(
     convergence_mode: str,
     threads_per_gene: int,
     workers: Optional[int],
-    include_non_significant: bool,
     run_diagnostics: bool,
     output_dir: Path,
     ensembl_genes_file: Optional[str] = None,
@@ -743,7 +725,6 @@ def process_all_genes(
                         posterior_threshold,
                         convergence_mode,
                         threads_per_gene,
-                        include_non_significant,
                         run_diagnostics,
                         output_dir,
                         db_queue,
@@ -779,7 +760,9 @@ def process_all_genes(
 
     skipped_genes = [g for g in genes if g not in processed_genes]
     if skipped_genes:
-        skipped_file = output_dir / "skipped_genes.txt"
+        diag_dir = output_dir / "diagnostics"
+        diag_dir.mkdir(parents=True, exist_ok=True)
+        skipped_file = diag_dir / "skipped_genes.txt"
         with open(skipped_file, "w") as f:
             f.write(
                 f"# Skipped {len(skipped_genes)} genes (missing alignment or no CAAS positions)\n"

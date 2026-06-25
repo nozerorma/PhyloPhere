@@ -7,7 +7,7 @@ Orchestrates two phases:
   2. randomize  — permutation test for per-gene CAAS accumulation
 
 Changes vs. original:
-  - Randomize phase now exports only full_pool + per-group aggregated outputs.
+  - Randomize phase exports five independent per-group outputs (us, gs1-gs4).
   - No FDR/gene-list outputs in randomize phase.
 """
 

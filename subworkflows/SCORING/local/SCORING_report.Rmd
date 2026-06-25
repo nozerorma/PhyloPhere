@@ -908,7 +908,7 @@ schemes flagged each position.
              "Permulation evidence — the phenotype-partition axis of CAAS_score",
              .tableau10[1], .tableau10[2]),
   .axis_plot("count_factor", "Replication Factor (count_factor)",
-             "n_changed_pairs / (n_changed_pairs + k): saturating reward for independent changes",
+             "Saturating reward based on number of changed sides (saturating count multiplier)",
              .tableau10[5], .tableau10[6])
 ))
 if (length(.axis_plots)) gridExtra::grid.arrange(grobs = .axis_plots, ncol = 1)
@@ -1129,7 +1129,6 @@ if (has_scoring_stress) cat('
 # legacy diagnostics. any_of() keeps this robust to absent columns.
 display_cols <- c("Gene", "Position", "CAAS_score",
                   "phen_score", "asr_score", "count_factor",
-                  "n_changed_pairs", "n_changed_sides",
                   "gate_sig", "gate_fdr",
                   "Pvalue", "pvalue_boot", "Pvalue_hyp_fdr",
                   "biochem_weight_sum", "change_side",
@@ -1375,7 +1374,6 @@ has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       "phen_score", "asr_score", "count_factor",
-                      "n_changed_pairs", "n_changed_sides",
                       "gate_sig", "gate_fdr",
                       if (has_caas_col) "caas",
                       "biochem_weight_sum",
@@ -2348,15 +2346,7 @@ for (g in .caas_gates) {
       .draw_venn(vc, col_a, .tableau10[5], sprintf("%s | %s vs Accum.", g$lbl, dir_lbl))
   }
 }
-
-for (fname in names(accum_overlap_exports)) {
-  genes <- unique(accum_overlap_exports[[fname]])
-  genes <- genes[!is.na(genes) & genes != ""]
-  if (length(genes) > 0) {
-    writeLines(genes, file.path(params$output_dir, fname))
-    cat(sprintf("  Exported %s: %d genes\n", fname, length(genes)))
-  }
-}
+# Note: Overlap text file exports (gene_caas_*_x_accum.txt) removed as requested.
 
 gridExtra::grid.arrange(
   grobs = accum_venn_plots, ncol = 2,

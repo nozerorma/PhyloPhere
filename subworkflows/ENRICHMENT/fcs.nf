@@ -25,11 +25,11 @@ process SCORING_FCS_REPORT {
     tag "scoring_fcs|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 
-    publishDir path: "${params.outdir}/FCS",
+    publishDir path: "${params.outdir}/fcs",
                mode: 'copy', overwrite: true, pattern: '*.html'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true, pattern: '*.html'
-    publishDir path: "${params.outdir}/FCS/fcs_results",
+    publishDir path: "${params.outdir}/fcs/fcs_results",
                mode: 'copy', overwrite: true, pattern: 'fcs_results/**'
 
     input:
@@ -85,11 +85,11 @@ process TOOL_FCS_REPORT {
     tag "tool_fcs|${report_label}"
     label 'process_reporting'
 
-    publishDir path: { "${params.outdir}/${subpath}" },
+    publishDir path: { "${params.outdir}/${subpath.toLowerCase()}" },
                mode: 'copy', overwrite: true, pattern: '*.html'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true, pattern: '*.html'
-    publishDir path: { "${params.outdir}/${subpath}/fcs_results" },
+    publishDir path: { "${params.outdir}/${subpath.toLowerCase()}/fcs_results" },
                mode: 'copy', overwrite: true, pattern: 'fcs_results/**'
 
     input:
@@ -147,11 +147,11 @@ process RER_FCS_REPORT {
     tag "rer_fcs|${report_label}"
     label 'process_reporting'
 
-    publishDir path: { "${params.outdir}/${subpath}" },
+    publishDir path: { "${params.outdir}/${subpath.toLowerCase()}" },
                mode: 'copy', overwrite: true, pattern: '*.html'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true, pattern: '*.html'
-    publishDir path: { "${params.outdir}/${subpath}/fcs_results" },
+    publishDir path: { "${params.outdir}/${subpath.toLowerCase()}/fcs_results" },
                mode: 'copy', overwrite: true, pattern: 'fcs_results/**'
 
     input:

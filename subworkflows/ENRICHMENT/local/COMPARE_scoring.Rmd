@@ -43,6 +43,10 @@ fcs_file <- file.path(params$fcs_dir, "fcs_all_results.tsv")
 fcs <- if (file.exists(fcs_file)) readr::read_tsv(fcs_file, show_col_types = FALSE) else tibble()
 has_fcs <- nrow(fcs) > 0 && all(c("ranking", "database", "pathway", "stat", "p.adj") %in% names(fcs))
 
+le_file <- file.path(params$fcs_dir, "fcs_leading_edge.tsv")
+le <- if (file.exists(le_file)) readr::read_tsv(le_file, show_col_types = FALSE) else tibble()
+has_le <- nrow(le) > 0
+
 string_files <- list.files(params$string_dir, pattern = "_enrichment\\.tsv$", full.names = TRUE)
 string_all <- if (length(string_files) > 0)
   purrr::map_dfr(string_files, ~readr::read_tsv(.x, show_col_types = FALSE)) else tibble()
@@ -87,8 +91,41 @@ wide <- fcs %>%
       TRUE                 ~ "Neither"
     )
   )
+
+# Calculate leading-edge percentages if available
+wide_with_pcts <- wide
+if (has_le) {
+  flag_cols <- intersect(
+    names(le),
+    c("flag_gate_sig", "flag_gate_fdr", "pct_top10", "pct_top5", "pct_top1",
+      "pct_bottom10", "pct_bottom5", "pct_bottom1", "flag_fade_top", "flag_fade_bottom",
+      "flag_fade", "flag_rer_acc", "flag_rer_decc", "flag_accum")
+  )
+  
+  le_pcts <- le %>%
+    group_by(ranking, database, pathway) %>%
+    summarise(
+      across(all_of(flag_cols), ~ round(100 * mean(.x, na.rm = TRUE), 1)),
+      .groups = "drop"
+    )
+    
+  top_pcts <- le_pcts %>%
+    filter(ranking == "top") %>%
+    select(-ranking) %>%
+    rename_with(~ paste0(.x, "_top"), -c(database, pathway))
+    
+  bot_pcts <- le_pcts %>%
+    filter(ranking == "bottom") %>%
+    select(-ranking) %>%
+    rename_with(~ paste0(.x, "_bottom"), -c(database, pathway))
+    
+  wide_with_pcts <- wide %>%
+    left_join(top_pcts, by = c("database", "pathway")) %>%
+    left_join(bot_pcts, by = c("database", "pathway"))
+}
+
 dir.create("compare_results", showWarnings = FALSE)
-readr::write_tsv(wide, "compare_results/fcs_top_vs_bottom.tsv")
+readr::write_tsv(wide_with_pcts, "compare_results/fcs_top_vs_bottom.tsv")
 ```
 
 ## Summary
@@ -124,13 +161,73 @@ print(p)
 
 ```{r fcs_tables, eval=has_fcs, results='asis'}
 for (cl in c("Top only", "Bottom only", "Shared")) {
-  d <- wide %>% filter(class == cl) %>%
-    mutate(across(c(AUC_top, AUC_bottom), ~round(.x, 3)),
-           across(c(p.adj_top, p.adj_bottom), ~signif(.x, 3)),
-           Description = stringr::str_trunc(description, 55)) %>%
-    arrange(p.adj_top, p.adj_bottom) %>%
-    select(database, pathway, Description, AUC_top, p.adj_top, AUC_bottom, p.adj_bottom) %>%
-    head(params$top_n)
+  if (has_le) {
+    if (cl == "Top only") {
+      d <- wide_with_pcts %>% filter(class == cl) %>%
+        mutate(across(c(AUC_top, p.adj_top), ~round(.x, 3)),
+               Description = stringr::str_trunc(description, 55)) %>%
+        arrange(p.adj_top) %>%
+        select(
+          database, pathway, Description, AUC_top, p.adj_top,
+          `gate_sig (%)` = flag_gate_sig_top,
+          `gate_fdr (%)` = flag_gate_fdr_top,
+          `top10% (%)` = pct_top10_top,
+          `top5% (%)` = pct_top5_top,
+          `top1% (%)` = pct_top1_top,
+          `fade_top (%)` = flag_fade_top_top,
+          `rer_acc (%)` = flag_rer_acc_top,
+          `rer_decc (%)` = flag_rer_decc_top,
+          `accum (%)` = flag_accum_top
+        ) %>%
+        head(params$top_n)
+    } else if (cl == "Bottom only") {
+      d <- wide_with_pcts %>% filter(class == cl) %>%
+        mutate(across(c(AUC_bottom, p.adj_bottom), ~round(.x, 3)),
+               Description = stringr::str_trunc(description, 55)) %>%
+        arrange(p.adj_bottom) %>%
+        select(
+          database, pathway, Description, AUC_bottom, p.adj_bottom,
+          `gate_sig (%)` = flag_gate_sig_bottom,
+          `gate_fdr (%)` = flag_gate_fdr_bottom,
+          `bot10% (%)` = pct_bottom10_bottom,
+          `bot5% (%)` = pct_bottom5_bottom,
+          `bot1% (%)` = pct_bottom1_bottom,
+          `fade_bottom (%)` = flag_fade_bottom_bottom,
+          `rer_acc (%)` = flag_rer_acc_bottom,
+          `rer_decc (%)` = flag_rer_decc_bottom,
+          `accum (%)` = flag_accum_bottom
+        ) %>%
+        head(params$top_n)
+    } else {
+      d <- wide_with_pcts %>% filter(class == cl) %>%
+        mutate(across(c(AUC_top, AUC_bottom), ~round(.x, 3)),
+               across(c(p.adj_top, p.adj_bottom), ~signif(.x, 3)),
+               Description = stringr::str_trunc(description, 55)) %>%
+        arrange(p.adj_top, p.adj_bottom) %>%
+        select(
+          database, pathway, Description,
+          AUC_top, p.adj_top, AUC_bottom, p.adj_bottom,
+          `gate_sig_top (%)` = flag_gate_sig_top,
+          `fade_top (%)` = flag_fade_top_top,
+          `rer_acc_top (%)` = flag_rer_acc_top,
+          `accum_top (%)` = flag_accum_top,
+          `gate_sig_bot (%)` = flag_gate_sig_bottom,
+          `fade_bot (%)` = flag_fade_bottom_bottom,
+          `rer_acc_bot (%)` = flag_rer_acc_bottom,
+          `accum_bot (%)` = flag_accum_bottom
+        ) %>%
+        head(params$top_n)
+    }
+  } else {
+    d <- wide %>% filter(class == cl) %>%
+      mutate(across(c(AUC_top, AUC_bottom), ~round(.x, 3)),
+             across(c(p.adj_top, p.adj_bottom), ~signif(.x, 3)),
+             Description = stringr::str_trunc(description, 55)) %>%
+      arrange(p.adj_top, p.adj_bottom) %>%
+      select(database, pathway, Description, AUC_top, p.adj_top, AUC_bottom, p.adj_bottom) %>%
+      head(params$top_n)
+  }
+  
   cat(sprintf("\n### %s (%d)\n\n", cl, nrow(d)))
   if (nrow(d) == 0) cat("_None._\n\n") else print(kbl_html(d, height = if (nrow(d) > 15) "420px" else NULL))
 }
@@ -150,11 +247,54 @@ if (is.na(dir_col)) {
                               direction = dplyr::case_when(grepl("top", direction) ~ "top",
                                                            grepl("bottom|bot", direction) ~ "bottom",
                                                            TRUE ~ "other"))
-  term_col <- intersect(c("term", "description", "Description", "category"), names(sa))[1]
   for (d in c("top", "bottom")) {
     sub <- sa %>% filter(direction == d) %>% head(params$top_n)
     cat(sprintf("\n## %s\n\n", d))
-    if (nrow(sub) == 0) cat("_None._\n\n") else print(kbl_html(sub, height = "420px"))
+    if (nrow(sub) == 0) {
+      cat("_None._\n\n")
+      next
+    }
+    
+    has_pct <- "pct_gate_sig" %in% names(sub)
+    if (has_pct) {
+      if (d == "top") {
+        display_df <- sub %>%
+          dplyr::select(
+            Category = category,
+            Term = description,
+            FDR = fdr,
+            `gate_sig (%)` = pct_gate_sig,
+            `gate_fdr (%)` = pct_gate_fdr,
+            `top10% (%)` = pct_top10,
+            `top5% (%)` = pct_top5,
+            `top1% (%)` = pct_top1,
+            `fade_top (%)` = pct_fade_top,
+            `rer_acc (%)` = pct_rer_acc,
+            `rer_decc (%)` = pct_rer_decc,
+            `accum (%)` = pct_accum
+          )
+      } else {
+        display_df <- sub %>%
+          dplyr::select(
+            Category = category,
+            Term = description,
+            FDR = fdr,
+            `gate_sig (%)` = pct_gate_sig,
+            `gate_fdr (%)` = pct_gate_fdr,
+            `bot10% (%)` = pct_bottom10,
+            `bot5% (%)` = pct_bottom5,
+            `bot1% (%)` = pct_bottom1,
+            `fade_bottom (%)` = pct_fade_bottom,
+            `rer_acc (%)` = pct_rer_acc,
+            `rer_decc (%)` = pct_rer_decc,
+            `accum (%)` = pct_accum
+          )
+      }
+    } else {
+      display_df <- sub
+    }
+    
+    print(kbl_html(display_df, height = "420px"))
   }
 }
 ```

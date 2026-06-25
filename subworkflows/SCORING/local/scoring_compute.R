@@ -282,10 +282,8 @@ if (!"conservation_gate" %in% names(df)) df$conservation_gate <- NA_real_
 df$conservation_gate <- suppressWarnings(as.numeric(df$conservation_gate))
 if (!"count_factor" %in% names(df)) df$count_factor <- NA_real_
 df$count_factor <- suppressWarnings(as.numeric(df$count_factor))
-if (!"n_changed_pairs" %in% names(df)) df$n_changed_pairs <- NA_real_
-df$n_changed_pairs <- suppressWarnings(as.numeric(df$n_changed_pairs))
-if (!"n_changed_sides" %in% names(df)) df$n_changed_sides <- NA_real_
-df$n_changed_sides <- suppressWarnings(as.numeric(df$n_changed_sides))
+# n_changed_pairs and n_changed_sides removed as they are redundant/misleading diagnostic counts.
+
 
 # ── 2f. Per-row two-way CAAS score and weighted contribution ─────────────────
 # The CAAS score is now the product of TWO orthogonal evidence axes, each already
@@ -340,8 +338,6 @@ pos_scores <- df %>%
     derived_agreement  = weighted.mean(derived_agreement, w = scheme_weight, na.rm = TRUE),
     conservation_gate  = weighted.mean(conservation_gate, w = scheme_weight, na.rm = TRUE),
     count_factor       = weighted.mean(count_factor,     w = scheme_weight, na.rm = TRUE),
-    n_changed_pairs    = weighted.mean(n_changed_pairs,    w = scheme_weight, na.rm = TRUE),
-    n_changed_sides    = weighted.mean(n_changed_sides,    w = scheme_weight, na.rm = TRUE),
     phen_score         = weighted.mean(phen_score,       w = scheme_weight, na.rm = TRUE),
     # Display-only: most-specific scheme via first() after desc(scheme_weight) sort
     Pvalue             = first(Pvalue),
@@ -739,30 +735,42 @@ if (has_accum) {
   if (!is.null(accum_pval_df)) {
     available_schemes <- intersect(scheme_names,
                                    sub("^accum_pval_", "", grep("^accum_pval_", names(accum_pval_df), value = TRUE)))
+
+    # Fisher's combined p-value across available per-group schemes.
+    # Each group draws independently, so the per-group p-values are uncorrelated
+    # and Fisher's χ²= -2Σln(p) ~ χ²(2k) is valid.
+    # Groups absent for a gene contribute p=1 → ln(1)=0, adding no spurious signal.
     gene_rand <- accum_pval_df %>%
       rowwise() %>%
       mutate(
-        accum_score_raw = {
-          pvals   <- c_across(starts_with("accum_pval_"))
-          weights <- scheme_w[available_schemes]
-          valid   <- !is.na(pvals)
+        accum_fisher_p = {
+          pvals <- c_across(starts_with("accum_pval_"))
+          valid <- !is.na(pvals)
           if (sum(valid) == 0) NA_real_
-          else sum(weights[valid] * pvals[valid], na.rm = TRUE) / sum(valid)
+          else {
+            ps   <- pmax(pvals[valid], 1e-300)
+            pchisq(-2 * sum(log(ps)), df = 2 * sum(valid), lower.tail = FALSE)
+          }
         },
-        gene_rand_score = if (is.na(accum_score_raw)) NA_real_ else 1 - accum_score_raw
+        gene_rand_score = if (is.na(accum_fisher_p)) NA_real_ else -log10(pmax(accum_fisher_p, 1e-300))
       ) %>%
       ungroup() %>%
-      select(Gene, gene_rand_score, starts_with("accum_pval_"))
+      select(Gene, gene_rand_score, accum_fisher_p, starts_with("accum_pval_"))
 
-    # Top 5% threshold (higher score = more accumulation above chance)
-    thr_accum <- quantile(gene_rand$gene_rand_score, 0.95, na.rm = TRUE)
+    # BH FDR on genes with at least one observed CAAS (p < 1 strictly).
+    # Genes with no CAAS in any group have accum_fisher_p = 1 by construction —
+    # they are background members only and must not enter the FDR denominator.
+    tested <- !is.na(gene_rand$accum_fisher_p) & gene_rand$accum_fisher_p < 1
+    fdr_q  <- rep(NA_real_, nrow(gene_rand))
+    if (any(tested))
+      fdr_q[tested] <- p.adjust(gene_rand$accum_fisher_p[tested], method = "BH")
+    gene_rand$accum_fdr <- fdr_q
     gene_rand <- gene_rand %>%
-      mutate(accum_significant = gene_rand_score >= thr_accum)
+      mutate(accum_significant = !is.na(accum_fdr) & accum_fdr < 0.05)
 
-    cat(sprintf("  Accumulation: %d genes, %d significant (top 5%%, score >= %.3f)\n",
+    cat(sprintf("  Accumulation: %d genes, %d significant (Fisher p, BH FDR < 0.05)\n",
                 nrow(gene_rand),
-                sum(gene_rand$accum_significant, na.rm = TRUE),
-                thr_accum))
+                sum(gene_rand$accum_significant, na.rm = TRUE)))
   } else {
     gene_rand <- tibble(Gene = character(), gene_rand_score = numeric(),
                         accum_significant = logical())
@@ -938,10 +946,8 @@ cat("\n─── Writing outputs ───────────────�
 
 pos_out <- pos_scores %>%
   select(Gene, Position, any_of(c("Pvalue", "pvalue_boot", "Pvalue_hyp_fdr")),
-         significance_score, asr_decile,
-         variability_score, pattern_score,
-         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "count_factor", "n_changed_pairs", "n_changed_sides")),
-         any_of("phen_score"), pre_score, biochem_weight_sum, CAAS_score,
+         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "count_factor")),
+         any_of("phen_score"), biochem_weight_sum, CAAS_score,
          any_of(c("gate_all", "gate_sig", "gate_fdr")), change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))

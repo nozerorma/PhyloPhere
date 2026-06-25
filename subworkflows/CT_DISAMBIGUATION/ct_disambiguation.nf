@@ -88,9 +88,7 @@ process CT_DISAMBIGUATION_RUN {
       --threads ${threads} \
       --workers ${workers} \
       --max-tasks-per-child ${params.ct_disambig_max_tasks_per_child} \
-      ${params.ct_disambig_include_non_significant ? '--include-non-significant' : ''} \
       ${params.ct_disambig_run_diagnostics ? '--run-diagnostics' : ''} \
-      ${params.ct_disambig_skip_gene_lists ? '--skip-gene-lists' : ''} \
       ${params.ct_disambig_verbose ? '--verbose' : ''} \
       ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
       ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \

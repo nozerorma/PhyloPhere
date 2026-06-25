@@ -24,22 +24,22 @@ process SCORING_STRING_REPORT {
     errorStrategy { task.attempt <= 3 ? 'retry' : 'ignore' }
     maxRetries    3
 
-    publishDir path: "${params.outdir}/STRING",
+    publishDir path: "${params.outdir}/string",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/STRING/string_results",
+    publishDir path: "${params.outdir}/string/string_results",
                mode: 'copy', overwrite: true,
                pattern: 'string_results/**'
-    publishDir path: "${params.outdir}/STRING/string_summary",
+    publishDir path: "${params.outdir}/string/string_summary",
                mode: 'copy', overwrite: true,
                pattern: 'string_summary/**'
-    publishDir path: "${params.outdir}/STRING/string_plots",
+    publishDir path: "${params.outdir}/string/string_plots",
                mode: 'copy', overwrite: true,
                pattern: 'string_plots/**'
-    publishDir path: "${params.outdir}/STRING/string_networks",
+    publishDir path: "${params.outdir}/string/string_networks",
                mode: 'copy', overwrite: true,
                pattern: 'string_networks/**'
 
@@ -144,13 +144,13 @@ process SCORING_COMPARE_REPORT {
     tag "scoring_compare|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 
-    publishDir path: "${params.outdir}/COMPARE",
+    publishDir path: "${params.outdir}/compare",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/COMPARE/compare_results",
+    publishDir path: "${params.outdir}/compare/compare_results",
                mode: 'copy', overwrite: true,
                pattern: 'compare_results/**'
 

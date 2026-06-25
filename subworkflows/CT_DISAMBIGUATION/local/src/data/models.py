@@ -31,8 +31,7 @@ from typing import Any, Dict, List, Optional
 class CAASPosition:
     """Container for CAAS position metadata."""
 
-    position: int
-    position_zero_based: int
+    position: int          # 0-based MSA column index
     position_one_based: int
     tag: str
     caas: str
@@ -52,7 +51,6 @@ class CAASPosition:
     conserved_pair: str = ""
     sig_hyp: Optional[bool] = None
     sig_perm: Optional[bool] = None
-    sig_both: Optional[bool] = None
 
 
 @dataclass
@@ -87,7 +85,6 @@ class ConvergenceResult:
     conserved_pair: str = ""
     sig_hyp: Optional[bool] = None
     sig_perm: Optional[bool] = None
-    sig_both: Optional[bool] = None
 
     # Node mapping and state tracking
     node_mapping: Optional[Dict[str, int]] = None
@@ -108,7 +105,6 @@ class ConvergenceResult:
 
     # Scoring and quality
     score: Optional[Any] = None
-    position_zero_based: Optional[int] = None
     position_one_based: Optional[int] = None
     caas_pvalue: Optional[float] = None
     pvalue_boot: Optional[float] = None

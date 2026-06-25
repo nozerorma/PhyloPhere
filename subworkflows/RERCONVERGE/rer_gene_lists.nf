@@ -23,7 +23,7 @@ process RER_GENE_LISTS {
     label 'process_low'
     errorStrategy 'ignore'
 
-    publishDir path: "${params.outdir}/RERConverge/gene_lists",
+    publishDir path: "${params.outdir}/rerconverge/gene_lists",
                mode: 'copy', overwrite: true,
                pattern: '*.txt'
 

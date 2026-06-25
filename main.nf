@@ -77,7 +77,7 @@ workflow.onComplete {
     try {
         // Resolve to an absolute canonical path so the file is always written
         // to the correct location regardless of JVM working directory at hook time.
-        def outdirRaw = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/Out"
+        def outdirRaw = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/out"
         def outdirAbs = new File(outdirRaw).canonicalPath
         def ctx = WorkflowMap.buildCtx(outdirAbs, params, workflow)
         def outdirFile = new File(outdirAbs)

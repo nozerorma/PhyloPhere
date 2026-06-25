@@ -55,11 +55,12 @@ process CT_FILTER {
 
 process CT_FILTER_SUMMARY {
     tag "filter_summary"
-    publishDir "${params.outdir}/postproc", mode: 'copy', overwrite: true
-    
+    publishDir "${params.outdir}/postproc/summary_statistics", mode: 'copy', overwrite: true, pattern: "filter_summary.tsv"
+    publishDir "${params.outdir}/postproc/gene_filtering", mode: 'copy', overwrite: true, pattern: "discarded_summary.tsv"
+
     input:
     path(filter_files)
-    
+
     output:
     path "filter_summary.tsv", emit: summary
     path "discarded_summary.tsv", emit: discarded_summary

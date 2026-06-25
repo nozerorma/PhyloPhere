@@ -30,6 +30,7 @@ suppressPackageStartupMessages({
   library(dplyr)
   library(tidyr)
   library(stringr)
+  library(parallel)
 })
 
 # ── GMT loading ──────────────────────────────────────────────────────────────
@@ -130,6 +131,107 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, enrich = FALSE) {
 }
 
 # Convenience: run several named rankings (e.g. global/top/bottom) and tag each.
+# Parallelized getEnrichPerms and vectorized permpvalenrich
+fcs_get_enrich_perms_parallel <- function(corperms, realenrich, annotlist, ncores = 1) {
+  numperms <- ncol(corperms$corP)
+  groups <- length(realenrich)
+  
+  c <- 1
+  while (c <= groups) {
+    current <- realenrich[[c]]
+    realenrich[[c]] <- current[order(rownames(current)), ]
+    c <- c + 1
+  }
+  
+  run_one_perm <- function(count) {
+    statvec <- setNames(corperms$corStat[, count], rownames(corperms$corP))
+    statvec <- na.omit(statvec)
+    enrich <- RERconverge::fastwilcoxGMTall(statvec, annotlist, outputGeneVals = FALSE)
+    
+    res_pvals <- vector("list", groups)
+    res_stats <- vector("list", groups)
+    names(res_pvals) <- names(realenrich)
+    names(res_stats) <- names(realenrich)
+    
+    for (db in names(realenrich)) {
+      current <- enrich[[db]]
+      if (!is.null(current) && nrow(current) > 0) {
+        current <- current[order(rownames(current)), ]
+        ref_names <- rownames(realenrich[[db]])
+        current <- current[match(ref_names, rownames(current)), ]
+        res_pvals[[db]] <- current$pval
+        res_stats[[db]] <- current$stat
+      } else {
+        res_pvals[[db]] <- rep(NA_real_, nrow(realenrich[[db]]))
+        res_stats[[db]] <- rep(NA_real_, nrow(realenrich[[db]]))
+      }
+    }
+    list(pvals = res_pvals, stats = res_stats)
+  }
+  
+  message(sprintf("[FCS] Running pathway permutations parallelized on %d cores...", ncores))
+  results <- parallel::mclapply(1:numperms, run_one_perm, mc.cores = ncores)
+  
+  permenrichP <- vector("list", groups)
+  permenrichStat <- vector("list", groups)
+  names(permenrichP) <- names(realenrich)
+  names(permenrichStat) <- names(realenrich)
+  c <- 1
+  while (c <= groups) {
+    newdf <- data.frame(matrix(ncol = numperms, nrow = nrow(realenrich[[c]])))
+    rownames(newdf) <- rownames(realenrich[[c]])
+    permenrichP[[c]] <- newdf
+    permenrichStat[[c]] <- newdf
+    c <- c + 1
+  }
+  
+  for (count in 1:numperms) {
+    perm_res <- results[[count]]
+    if (is.null(perm_res)) {
+      stop(paste("Permutation", count, "failed or returned NULL. Parallel execution might have encountered an error or OOM."))
+    }
+    for (c in 1:groups) {
+      db <- names(realenrich)[c]
+      permenrichP[[c]][, count] <- perm_res$pvals[[db]]
+      permenrichStat[[c]][, count] <- perm_res$stats[[db]]
+    }
+  }
+  
+  data <- vector("list", 5)
+  data[[1]] <- corperms$corP
+  data[[2]] <- corperms$corRho
+  data[[3]] <- corperms$corStat
+  data[[4]] <- permenrichP
+  data[[5]] <- permenrichStat
+  names(data) <- c("corP", "corRho", "corStat", "enrichP", "enrichStat")
+  data
+}
+
+fcs_permpvalenrich_vectorized <- function(realenrich, permvals) {
+  groups <- length(realenrich)
+  enrichpvals <- vector("list", groups)
+  names(enrichpvals) <- names(realenrich)
+  
+  for (count in 1:groups) {
+    currreal <- realenrich[[count]]
+    currenrich <- permvals$enrichStat[[count]]
+    
+    currreal <- currreal[match(rownames(currenrich), rownames(currreal)), , drop = FALSE]
+    mat_enrich <- as.matrix(currenrich)
+    obs_stat <- currreal$stat
+    
+    greater_mat <- abs(mat_enrich) > abs(obs_stat)
+    lessnum <- rowSums(greater_mat, na.rm = TRUE)
+    denom <- rowSums(!is.na(mat_enrich))
+    pvals <- lessnum / denom
+    pvals[is.na(obs_stat)] <- NA_real_
+    
+    names(pvals) <- rownames(currreal)
+    enrichpvals[[count]] <- pvals
+  }
+  enrichpvals
+}
+
 # rankings: named list of named-numeric vectors (already zero-floored).
 fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
   res <- list()
@@ -151,7 +253,14 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
     
     if (!is.null(corperms) && !is.null(corperms$corStat)) {
       n_perms <- ncol(corperms$corStat)
-      message("[FCS] Running pathway permulations (N = ", n_perms, ")...")
+      message("[FCS] Running pathway permutations (N = ", n_perms, ")...")
+      
+      ncores <- as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1"))
+      if (is.na(ncores) || ncores < 1) {
+        ncores <- parallel::detectCores()
+        if (is.na(ncores) || ncores < 1) ncores <- 1
+      }
+      ncores <- min(ncores, 16)
       
       for (rk in names(rankings)) {
         obs_rk <- enrich_df %>% dplyr::filter(ranking == rk)
@@ -179,17 +288,17 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
         }
         
         permvals <- tryCatch({
-          RERconverge::getEnrichPerms(corperms_rk, realenrich, gmts)
+          fcs_get_enrich_perms_parallel(corperms_rk, realenrich, gmts, ncores = ncores)
         }, error = function(e) {
-          message(sprintf("[FCS] getEnrichPerms failed for ranking %s: %s", rk, e$message))
+          message(sprintf("[FCS] fcs_get_enrich_perms_parallel failed for ranking %s: %s", rk, e$message))
           NULL
         })
         
         if (!is.null(permvals)) {
           enrichpvals <- tryCatch({
-            RERconverge::permpvalenrich(realenrich, permvals)
+            fcs_permpvalenrich_vectorized(realenrich, permvals)
           }, error = function(e) {
-            message(sprintf("[FCS] permpvalenrich failed for ranking %s: %s", rk, e$message))
+            message(sprintf("[FCS] fcs_permpvalenrich_vectorized failed for ranking %s: %s", rk, e$message))
             NULL
           })
           

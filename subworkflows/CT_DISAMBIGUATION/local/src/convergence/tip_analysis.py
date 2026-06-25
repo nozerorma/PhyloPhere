@@ -66,7 +66,7 @@ def collect_contrast_tip_residues(
 
     :param contrast: ContrastDefinition-like object (expects top_taxa, bottom_taxa,
                      top_species, bottom_species, all_taxa, pair_id fields)
-    :param position_info: Object with ``position_zero_based`` and ``position_one_based``
+    :param position_info: Object with ``position`` (0-based) and ``position_one_based``
     :param alignment_data: Alignment metadata (expects ``taxid_to_species`` map)
     :param seq_by_id: Alignment lookup keyed by taxid/record id
     :param seq_by_species: Alignment lookup keyed by species name
@@ -95,7 +95,7 @@ def collect_contrast_tip_residues(
 
     enriched_contrast = replace(contrast, node_id=mrca_node.node_id)
 
-    position_zero_based = position_info.position_zero_based
+    position_zero_based = position_info.position
 
     # Collect tip residues for this position
     top_tip_records = collect_tip_residues(

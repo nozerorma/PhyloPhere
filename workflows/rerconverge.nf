@@ -142,6 +142,17 @@ workflow RER_MAIN {
             }
         }
 
+        // Check if we have precomputed continuous RDS files but still want to run report/downstream
+        if (params.rer_continuous_file && !(rerToolStr && rerToolStr.split(',').contains('continuous'))) {
+            def cont_output_ch = Channel.value(file(params.rer_continuous_file))
+            def cont_report = RER_REPORT_CONT(cont_output_ch)
+            rer_report_out = cont_report.summary_tsv
+            
+            if (params.rer_perms_file) {
+                rer_perms_out = Channel.value(file(params.rer_perms_file))
+            }
+        }
+
         // ── Gene list extraction + Enrichment/STRING (gated on --enrichment / --string) ──
         if (params.enrichment || params.string) {
             def effective_report = rer_report_out ?: (params.rer_report_file ? Channel.value(file(params.rer_report_file)) : Channel.empty())
@@ -162,7 +173,7 @@ workflow RER_MAIN {
 
             if (params.enrichment) {
                 RER_FCS_REPORT(
-                    Channel.value('RERConverge'),
+                    Channel.value('rerconverge'),
                     rer_lists.fcs_stats,
                     rer_bg_ch,
                     Channel.value("FCS_rer_${params.traitname}"),
@@ -171,7 +182,7 @@ workflow RER_MAIN {
             }
             if (params.string) {
                 RER_STRING_REPORT(
-                    Channel.value('RERConverge'),
+                    Channel.value('rerconverge'),
                     rer_bg_ch,
                     rer_interest_ch,
                     Channel.value("STRING_rer_${params.traitname}")

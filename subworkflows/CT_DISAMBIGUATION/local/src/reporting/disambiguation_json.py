@@ -49,7 +49,6 @@ def extract_pair_info(
             "mrca_node": result_dict.get(f"mrca_{idx}_node"),
             "mrca_state": mrca_state,
             "mrca_posterior": result_dict.get(f"mrca_{idx}_posterior"),
-            "fallback_depth": result_dict.get(f"mrca_{idx}_fallback_depth", 0),
         }
 
         top_tip: Optional[str] = None
@@ -139,8 +138,7 @@ def extract_convergence_summary(
     """
     summary: Dict[str, Any] = {
         "gene": result_dict.get("gene"),
-        "position": result_dict.get("position"),
-        "position_zero_based": result_dict.get("msa_pos"),
+        "msa_pos": result_dict.get("msa_pos"),
         "tag": result_dict.get("tag"),
         "pattern_type": result_dict.get("pattern_type"),
         "caas": result_dict.get("caas", ""),
@@ -150,7 +148,6 @@ def extract_convergence_summary(
         "conserved_pair": result_dict.get("conserved_pair", ""),
         "sig_hyp": result_dict.get("sig_hyp"),
         "sig_perm": result_dict.get("sig_perm"),
-        "sig_both": result_dict.get("sig_both"),
         "change_top": result_dict.get("change_top", "no_change"),
         "change_bottom": result_dict.get("change_bottom", "no_change"),
         "change_side": result_dict.get("change_side", "none"),

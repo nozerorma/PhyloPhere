@@ -2,32 +2,8 @@
 """
 Bulk plotting utilities for CAAS aggregation outputs.
 
-This module generates comprehensive visualization sets from aggregated CAAS convergence
-results. All plotting functions accept pre-loaded DataFrames
-(pure, testable functions) and save results to disk.
-
-**Design principles:**
-- Pure functions accepting DataFrames as input (no hidden I/O)
-- Deterministic ordering and reproducible plots
-- Comprehensive logging for debugging and traceability
-
-**Generated plots:**
-
-1. **Pattern-based plots:**
-   - convergence_patterns.png: 3-row structure (raw, significance, significant + ASR-conserved)
-   - convergence_patterns_faceted_*.png: Faceted by change_side (top/bottom/both)
-   - convergence_patterns_trait_*.png: Filtered by trait_value (high/low)
-
-2. **Supporting plots:**
-   - trait_*_analysis.png: Original 2-panel trait analysis
-
-Author
-------
-Miguel Ramon Alonso
-Evolutionary Genomics Lab - IBE-UPF
-
-Date: 2025-12-07
-Updated: 2026-02-12 (Simplified plots for convergence-only pipeline)
+Generates visualizations from aggregated CAAS convergence results.
+All plotting functions accept pre-loaded DataFrames and save results to disk.
 """
 
 from pathlib import Path
@@ -38,7 +14,7 @@ from typing import Optional
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from src.plots.gene_trees_bulk import plot_random_gene_trees
+from src.plots.gene_trees import plot_random_gene_trees
 
 from src.plots.plot_utils import (
     load_df,
@@ -50,12 +26,10 @@ logger = logging.getLogger(__name__)
 import logging
 import warnings
 
-# Suppress matplotlib log spam
 logging.getLogger("matplotlib").setLevel(logging.WARNING)
 logging.getLogger("matplotlib.font_manager").setLevel(logging.ERROR)
 logging.getLogger("matplotlib.backends").setLevel(logging.WARNING)
 
-# Optional: suppress matplotlib-related warnings
 warnings.filterwarnings("ignore", module="matplotlib")
 
 
@@ -67,10 +41,8 @@ def _generate_plot_suite(
     node_dumps_root: Path,
     tip_details_root: Path,
 ):
-    """Generate the full suite of bulk plots."""
-    # Gene trees
-    gene_trees_dir = output_dir / "gene_tree_samples"
-    # Provide additional per-gene debug logging so users can see why gene trees
+    """Generate the full suite of plots."""
+    sample_tree_plots_dir = output_dir / "sample_tree_plots"
     try:
         unique_genes = []
         if "gene" in df.columns:
@@ -99,12 +71,12 @@ def _generate_plot_suite(
                     g,
                     "exists" if tip_path.exists() else "(none)",
                 )
-    except Exception as exc:  # defensive - don't stop plotting on logging failure
+    except Exception as exc:
         logger.debug("Could not emit per-gene debug info: %s", exc)
 
     plot_random_gene_trees(
         df,
-        gene_trees_dir,
+        sample_tree_plots_dir,
         asr_root=asr_root,
         node_dumps_root=node_dumps_root,
         tip_details_root=tip_details_root,
@@ -115,18 +87,16 @@ def _generate_plot_suite(
 def generate_bulk_plots(
     caas_csv: Path,
     ensembl_csv: Optional[Path] = None,
-    output_dir: Path = Path("plots_bulk"),
-    include_non_significant: bool = False,
+    output_dir: Path = Path("plots"),
     n_gene_trees: int = 5,
     asr_root: Optional[Path] = None,
     node_dumps_root: Optional[Path] = None,
     tip_details_root: Optional[Path] = None,
 ):
-    """Generate comprehensive bulk plots from CAAS aggregation outputs."""
+    """Generate bulk plots from CAAS aggregation outputs (all results)."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve defaults for ASR and node dump roots (keep legacy locations)
     if asr_root is None:
         asr_root = output_dir.parent / "asr"
     if node_dumps_root is None:
@@ -138,59 +108,21 @@ def generate_bulk_plots(
     logger.info("Resolved node dumps root: %s", node_dumps_root)
     logger.info("Resolved tip details root: %s", tip_details_root)
 
-    # Load data
-    df_full = load_df(caas_csv)
-    if df_full.empty:
+    df = load_df(caas_csv)
+    if df.empty:
         logger.warning("No CAAS data loaded")
         return
 
-    ensembl_df = load_df(ensembl_csv) if ensembl_csv else pd.DataFrame()
-
-    # Prepare significant subset (do not overwrite df_full so we can optionally
-    # still generate 'all' outputs when requested).
-    if "is_significant" in df_full.columns:
-        df_significant = df_full[
-            df_full["is_significant"].fillna(False).astype(bool)
-        ].copy()
-        logger.info(
-            "Significant filter: %s/%s results", len(df_significant), len(df_full)
-        )
-    else:
-        df_significant = df_full.copy()
-        logger.warning(
-            "No 'is_significant' column found; treating all results as significant"
-        )
-
-    # Generate plots for significant results in 'significant' subdirectory
-    significant_dir = output_dir / "significant"
-    significant_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("Generating plots for significant results in %s...", significant_dir)
+    logger.info("Plotting %s results", len(df))
     _generate_plot_suite(
-        df_significant,  # type : ignore
-        significant_dir,
+        df,
+        output_dir,
         n_gene_trees,
         asr_root,
         node_dumps_root,
         tip_details_root,
     )
 
-    # If requested, also generate plots for ALL results in 'all' subdirectory
-    if include_non_significant:
-        all_dir = output_dir / "all"
-        all_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(
-            "Generating plots for all results (including non-significant) in %s...",
-            all_dir,
-        )
-        _generate_plot_suite(
-            df_full,
-            all_dir,
-            n_gene_trees,
-            asr_root,
-            node_dumps_root,
-            tip_details_root,
-        )
-        
 
 def main():
     parser = argparse.ArgumentParser(
@@ -199,17 +131,11 @@ def main():
     parser.add_argument("caas_csv", type=Path, help="CAAS convergence CSV")
     parser.add_argument("--ensembl-csv", type=Path, help="Ensembl annotations CSV")
     parser.add_argument(
-        "--output-dir", type=Path, default=Path("plots_bulk"), help="Output directory"
-    )
-    parser.add_argument(
-        "--include-non-significant",
-        action="store_true",
-        help="Include non-significant results",
+        "--output-dir", type=Path, default=Path("plots"), help="Output directory"
     )
     parser.add_argument(
         "--n-gene-trees", type=int, default=5, help="Number of gene trees to plot"
     )
-
     parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
     args = parser.parse_args()
@@ -223,7 +149,6 @@ def main():
         args.caas_csv,
         args.ensembl_csv,
         args.output_dir,
-        args.include_non_significant,
         args.n_gene_trees,
     )
 

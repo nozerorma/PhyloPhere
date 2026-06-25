@@ -21,7 +21,7 @@ from src.reporting.disambiguation_json import (
     export_gene_summaries_json,
 )
 # Optional: if you want plots as part of the report run
-from src.plots.bulk_plots import generate_bulk_plots
+from src.plots.plotter import generate_bulk_plots
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,6 @@ class ReportConfig:
     include_plots: bool = True
     embed_images: bool = False
     show_detailed_stats: bool = True
-    include_non_significant: bool = False
 
 
 def load_master_csv(path: Path) -> pd.DataFrame:
@@ -64,7 +63,6 @@ def orchestrate(
     ensembl_csv: Optional[Path] = None,
     db_path: Optional[Path] = None,
     trait_pairs_json: Optional[Path] = None,
-    include_non_significant: bool = False,
     n_gene_trees: int = 5,
     run_plots: bool = True,
     run_json: bool = True,
@@ -167,12 +165,11 @@ def orchestrate(
     plots_out = None
     if run_plots:
         # Delegate plotting to your already-refactored bulk module
-        plots_out = results_dir / "plots_bulk"
+        plots_out = results_dir / "plots"
         generate_bulk_plots(
             caas_csv=caas_csv,
             ensembl_csv=ensembl_csv,
             output_dir=plots_out,
-            include_non_significant=include_non_significant,
             n_gene_trees=n_gene_trees,
         )
 
@@ -203,7 +200,6 @@ def main():
         "--ensembl-csv", type=Path, help="Ensembl annotations CSV for plots"
     )
 
-    parser.add_argument("--include-non-significant", action="store_true")
     parser.add_argument("--n-gene-trees", type=int, default=5)
     parser.add_argument("--no-plots", action="store_true")
     parser.add_argument(
@@ -222,7 +218,6 @@ def main():
         ensembl_csv=args.ensembl_csv,
         db_path=args.db,
         trait_pairs_json=args.trait_pairs_json,
-        include_non_significant=args.include_non_significant,
         n_gene_trees=args.n_gene_trees,
         run_plots=not args.no_plots,
         run_json=args.debug_json_fields,

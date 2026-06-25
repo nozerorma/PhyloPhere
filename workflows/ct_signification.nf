@@ -100,7 +100,6 @@ workflow CT_SIGNIFICATION {
 
     emit:
         signification_report = signification_results.report
-        signification_gene_lists = signification_results.gene_lists
         signification_meta_caas = signification_results.meta_caas
         signification_global_meta = signification_results.global_meta_caas
 }

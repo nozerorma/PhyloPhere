@@ -19,7 +19,7 @@ from src.reporting.disambiguation_json import (
     export_aggregated_convergence_json,
     export_gene_summaries_json,
 )
-from src.plots.bulk_plots import generate_bulk_plots
+from src.plots.plotter import generate_bulk_plots
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -119,11 +119,6 @@ def parse_arguments():
 
     # Filters and options
     parser.add_argument(
-        "--include-non-significant",
-        action="store_true",
-        help="Include non-significant CAAS in outputs",
-    )
-    parser.add_argument(
         "--allow-low-confidence",
         action="store_true",
         help="Continue with warnings on low ASR confidence",
@@ -212,10 +207,6 @@ def main():
         logger.info(f"Found {len(unique_genes)} unique genes in metadata")
         logger.info(f"Total CAAS positions: {len(metadata_df)}")
 
-        if not args.include_non_significant:
-            significant_count = metadata_df["isSignificant"].sum()
-            logger.info(f"Significant CAAS: {significant_count}")
-
     except Exception as e:
         logger.error(f"Failed to load metadata: {e}")
         raise
@@ -251,7 +242,6 @@ def main():
             threads_per_gene=args.threads,
             workers=args.workers,
             max_tasks_per_child=args.max_tasks_per_child,
-            include_non_significant=args.include_non_significant,
             run_diagnostics=args.run_diagnostics,
             output_dir=output_dir,
             ensembl_genes_file=args.ensembl_genes_file,
@@ -336,9 +326,8 @@ def main():
             if master_csv.exists():
                 generate_bulk_plots(
                     caas_csv=master_csv,
-                    output_dir=output_dir / "plots_bulk",
+                    output_dir=output_dir / "plots",
                     ensembl_csv=ensembl_path,
-                    include_non_significant=args.include_non_significant,
                     asr_root=asr_root,
                     node_dumps_root=node_dumps_root,
                 )

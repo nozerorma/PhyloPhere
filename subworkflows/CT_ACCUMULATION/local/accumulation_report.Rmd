@@ -34,11 +34,13 @@ suppressPackageStartupMessages({
   library(stringr)
   library(purrr)
   library(readr)
+  library(knitr)
+  library(kableExtra)
 })
 
 .tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
 dir_colours <- c(top = .tableau10[1], bottom = .tableau10[2], all = .tableau10[3])
-scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "full_pool")
+scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "fisher")
 
 pval_thr  <- params$pval_threshold
 accum_dir <- params$accum_dir
@@ -69,13 +71,55 @@ if (!has_data) stop("No accumulation CSVs found under: ", accum_dir)
 # Standardise column names (Gene / gene)
 if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene = Gene)
 
-# Significant flag
+# ── Fisher's combined p-value across the 5 group schemes ─────────────────────
+# Replaces full_pool: each group draws independently so their p-values are
+# uncorrelated, making Fisher's χ²= -2Σln(p) ~ χ²(2k) valid.
+# Groups with ActualCount=0 contribute p=1 → ln(1)=0, adding no spurious signal.
+.fisher_combine <- function(ps) {
+  ps <- pmax(ps, 1e-300)   # guard log(0)
+  pchisq(-2 * sum(log(ps)), df = 2 * length(ps), lower.tail = FALSE)
+}
+
+group_schemes <- c("us", "gs1", "gs2", "gs3", "gs4")
+
+fisher_df <- raw %>%
+  filter(scheme %in% group_schemes, !is.na(PValueEmpirical)) %>%
+  group_by(gene, direction) %>%
+  summarise(
+    PValueEmpirical = .fisher_combine(PValueEmpirical),
+    ActualCount     = sum(ActualCount, na.rm = TRUE),
+    MeanSim         = NA_real_,
+    SD              = NA_real_,
+    RandsAbove      = NA_integer_,
+    RandsBelow      = NA_integer_,
+    NumRands        = NA_integer_,
+    scheme          = "fisher",
+    .groups         = "drop"
+  )
+
+# Drop full_pool rows if present (legacy runs), append Fisher
+raw <- bind_rows(raw %>% filter(scheme != "full_pool"), fisher_df)
+
+# ── BH FDR — applied per direction × scheme, excluding ActualCount=0 genes ───
+# Genes with ActualCount=0 have p=1 by construction (not by test) and must not
+# enter the FDR denominator — they would inflate it and reduce power.
 accum <- raw %>%
   mutate(
-    significant = !is.na(PValueEmpirical) & PValueEmpirical < pval_thr,
-    scheme      = factor(scheme, levels = scheme_order),
-    direction   = factor(direction, levels = directions)
-  )
+    scheme    = factor(scheme, levels = scheme_order),
+    direction = factor(direction, levels = directions)
+  ) %>%
+  group_by(direction, scheme) %>%
+  mutate(
+    FDR = {
+      tested <- !is.na(ActualCount) & ActualCount > 0 & !is.na(PValueEmpirical)
+      q      <- rep(NA_real_, n())
+      if (any(tested))
+        q[tested] <- p.adjust(PValueEmpirical[tested], method = "BH")
+      q
+    }
+  ) %>%
+  ungroup() %>%
+  mutate(significant = !is.na(FDR) & FDR < pval_thr)
 
 # Load aggregation-level files if present
 global_path  <- file.path(accum_dir, "aggregation", "accumulation_global.csv")
@@ -125,7 +169,7 @@ DT::datatable(
 ```{r scatter-tabs, results='asis'}
 for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
-  sub <- accum %>% filter(direction == dir)
+  sub <- accum %>% filter(direction == dir, scheme != "fisher")
   if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
 
   p <- ggplot(sub, aes(x = MeanSim, y = ActualCount, colour = significant)) +
@@ -158,7 +202,7 @@ for (dir in directions) {
 ```{r pval-tabs, results='asis'}
 for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
-  sub <- accum %>% filter(direction == dir, !is.na(PValueEmpirical))
+  sub <- accum %>% filter(direction == dir, !is.na(PValueEmpirical), !is.na(ActualCount), ActualCount > 0)
   if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
 
   p <- ggplot(sub, aes(x = PValueEmpirical, fill = scheme)) +
@@ -185,26 +229,26 @@ for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
   sig <- accum %>%
     filter(direction == dir, significant) %>%
-    select(gene, scheme, ActualCount, MeanSim, SD, PValueEmpirical, RandsAbove, RandsBelow) %>%
-    arrange(PValueEmpirical, gene)
+    select(gene, scheme, ActualCount, MeanSim, SD, PValueEmpirical, FDR, RandsAbove, RandsBelow) %>%
+    arrange(FDR, gene)
 
   if (nrow(sig) == 0) { cat("*No significant genes.*\n\n"); next }
 
-  print(DT::datatable(
-    sig, rownames = FALSE,
-    options = list(pageLength = 15, scrollX = TRUE),
-    caption = htmltools::tags$caption(
-      style = "caption-side: top; text-align: left; font-weight: bold;",
-      sprintf("Significant genes | direction: %s | p < %g", str_to_title(dir), pval_thr)
-    )
-  ) %>% DT::formatRound(c("MeanSim", "SD", "PValueEmpirical"), digits = 4))
+  print(
+    knitr::kable(
+      sig, rownames = FALSE, digits = 4, format = "html", escape = TRUE,
+      caption = sprintf("Significant genes | direction: %s | p < %g", str_to_title(dir), pval_thr)
+    ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = TRUE)
+  )
   cat("\n\n")
 }
 ```
 
 ---
 
-## Gene overlap across schemes
+## Gene overlap across schemes {.tabset}
+
+### Overview
 
 ```{r overlap}
 sig_genes_by_scheme <- accum %>%
@@ -225,14 +269,45 @@ overlap_tbl <- sig_genes_by_scheme %>%
     .groups = "drop"
   )
 
-DT::datatable(overlap_tbl, rownames = FALSE,
-  caption = htmltools::tags$caption(
-    style = "caption-side: top; text-align: left; font-weight: bold;",
-    "Gene overlap across schemes per direction"
-  ),
-  options = list(dom = "t")
-)
+knitr::kable(overlap_tbl, rownames = FALSE, caption = "Summary gene overlap counts across schemes per direction") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
 ```
+
+```{r overlap-details, results='asis'}
+for (dir in directions) {
+  cat(sprintf("\n\n### %s Details\n\n", str_to_title(dir)))
+  
+  sub_sig <- accum %>%
+    filter(direction == dir, significant)
+  
+  if (nrow(sub_sig) == 0) {
+    cat("*No significant genes to show overlap for.*\n\n")
+    next
+  }
+  
+  overlap_detail <- sub_sig %>%
+    mutate(has_sig = "✔") %>%
+    pivot_wider(
+      id_cols = gene,
+      names_from = scheme,
+      values_from = has_sig,
+      values_fill = ""
+    )
+  
+  all_cols <- c("gene", scheme_order)
+  present_cols <- intersect(all_cols, names(overlap_detail))
+  overlap_detail <- overlap_detail %>% select(all_of(present_cols))
+  
+  print(
+    knitr::kable(
+      overlap_detail, rownames = FALSE, format = "html", escape = TRUE,
+      caption = sprintf("Detailed gene overlap matrix across schemes | direction: %s", str_to_title(dir))
+    ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = TRUE)
+  )
+  cat("\n\n")
+}
+```
+
 
 ```{r write-summary}
 # Write summary TSV (union of significant genes across all schemes per direction)
@@ -242,12 +317,23 @@ sig_summary <- accum %>%
   summarise(
     n_schemes_significant = n(),
     min_pval              = min(PValueEmpirical, na.rm = TRUE),
+    min_fdr               = min(FDR, na.rm = TRUE),
     schemes               = paste(sort(unique(as.character(scheme))), collapse = ","),
     .groups               = "drop"
   ) %>%
-  arrange(direction, min_pval)
+  arrange(direction, min_fdr)
 
 out_tsv <- file.path(params$output_dir, paste0("accumulation_summary_", params$traitname, ".tsv"))
 write_tsv(sig_summary, out_tsv)
+
+# Write independent Fisher file (all tested genes, sorted by FDR)
+fisher_export <- accum %>%
+  filter(scheme == "fisher") %>%
+  select(gene, direction, ActualCount, PValueEmpirical, FDR, significant) %>%
+  arrange(direction, FDR)
+
+out_fisher <- file.path(params$output_dir, paste0("accumulation_summary_fisher_", params$traitname, ".tsv"))
+write_tsv(fisher_export, out_fisher)
+
 invisible(NULL)
 ```

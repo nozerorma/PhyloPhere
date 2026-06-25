@@ -414,6 +414,112 @@ if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
 } else {
   cat("No gene_scores_file provided or file not found. Overlap checks will be skipped.\n")
 }
+
+prepare_gene_attributes <- function(df) {
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  
+  # Helper to compute percentile flags
+  pct_of <- function(v) {
+    ok <- !is.na(v) & v > 0
+    p <- rep(NA_real_, length(v))
+    if (any(ok)) p[ok] <- 1 - (rank(v[ok], ties.method = "max") - 1) / sum(ok)
+    p
+  }
+  
+  .col <- function(c, default = NA) if (c %in% names(df)) df[[c]] else rep(default, nrow(df))
+  .istrue <- function(x) !is.na(x) & x %in% c(TRUE, "TRUE", "True", "true", 1, "1")
+  
+  out <- tibble::tibble(gene = df$Gene)
+  
+  # CAAS score columns for percentiles
+  score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top_all")))
+  if (all(is.na(score_top))) score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top")))
+  
+  score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom_all")))
+  if (all(is.na(score_bot))) score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom")))
+  
+  # Percentiles
+  breaks <- c(0.10, 0.05, 0.01)
+  if (!all(is.na(score_top))) {
+    pt <- pct_of(score_top)
+    out$pct_top10 <- !is.na(pt) & pt <= breaks[1]
+    out$pct_top5  <- !is.na(pt) & pt <= breaks[2]
+    out$pct_top1  <- !is.na(pt) & pt <= breaks[3]
+  } else {
+    out$pct_top10 <- FALSE; out$pct_top5 <- FALSE; out$pct_top1 <- FALSE
+  }
+  
+  if (!all(is.na(score_bot))) {
+    pb <- pct_of(score_bot)
+    out$pct_bottom10 <- !is.na(pb) & pb <= breaks[1]
+    out$pct_bottom5  <- !is.na(pb) & pb <= breaks[2]
+    out$pct_bottom1  <- !is.na(pb) & pb <= breaks[3]
+  } else {
+    out$pct_bottom10 <- FALSE; out$pct_bottom5 <- FALSE; out$pct_bottom1 <- FALSE
+  }
+  
+  # Significance gates
+  out$flag_gate_sig <- !is.na(.col("gene_caas_score_global_sig"))
+  out$flag_gate_fdr <- !is.na(.col("gene_caas_score_global_fdr"))
+  
+  # FADE
+  out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
+  out$flag_fade_bottom <- .istrue(.col("fade_significant_bottom"))
+  out$flag_fade        <- out$flag_fade_top | out$flag_fade_bottom
+  
+  # RER
+  .rer_dir <- tolower(as.character(.col("rer_acceleration")))
+  out$flag_rer_acc     <- .istrue(.col("rer_significant")) & grepl("acc", .rer_dir)
+  out$flag_rer_decc    <- .istrue(.col("rer_significant")) & grepl("dec", .rer_dir)
+  
+  # Accumulation
+  out$flag_accum       <- .istrue(.col("accum_significant"))
+  
+  out
+}
+
+compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label) {
+  if (is.na(preferred_names) || preferred_names == "" || is.null(attr_df)) {
+    return(tibble::tibble(
+      gate_sig = NA_real_, gate_fdr = NA_real_,
+      top10 = NA_real_, top5 = NA_real_, top1 = NA_real_,
+      bot10 = NA_real_, bot5 = NA_real_, bot1 = NA_real_,
+      fade = NA_real_, fade_top = NA_real_, fade_bottom = NA_real_,
+      rer_acc = NA_real_, rer_decc = NA_real_, accum = NA_real_
+    ))
+  }
+  genes <- strsplit(preferred_names, ",")[[1]]
+  sub_attr <- attr_df %>% dplyr::filter(gene %in% genes)
+  if (nrow(sub_attr) == 0) {
+    return(tibble::tibble(
+      gate_sig = 0, gate_fdr = 0,
+      top10 = 0, top5 = 0, top1 = 0,
+      bot10 = 0, bot5 = 0, bot1 = 0,
+      fade = 0, fade_top = 0, fade_bottom = 0,
+      rer_acc = 0, rer_decc = 0, accum = 0
+    ))
+  }
+  
+  # Calculate percentages (mean * 100)
+  round_pct <- function(x) round(100 * mean(x, na.rm = TRUE), 1)
+  
+  tibble::tibble(
+    gate_sig = round_pct(sub_attr$flag_gate_sig),
+    gate_fdr = round_pct(sub_attr$flag_gate_fdr),
+    top10    = round_pct(sub_attr$pct_top10),
+    top5     = round_pct(sub_attr$pct_top5),
+    top1     = round_pct(sub_attr$pct_top1),
+    bot10    = round_pct(sub_attr$pct_bottom10),
+    bot5     = round_pct(sub_attr$pct_bottom5),
+    bot1     = round_pct(sub_attr$pct_bottom1),
+    fade     = round_pct(sub_attr$flag_fade),
+    fade_top = round_pct(sub_attr$flag_fade_top),
+    fade_bottom = round_pct(sub_attr$flag_fade_bottom),
+    rer_acc  = round_pct(sub_attr$flag_rer_acc),
+    rer_decc = round_pct(sub_attr$flag_rer_decc),
+    accum    = round_pct(sub_attr$flag_accum)
+  )
+}
 ```
 
 # Run STRING enrichment per gene list
@@ -505,9 +611,27 @@ run_single_string <- function(gene_file, use_custom_background) {
   enrich_df$n_rer    <- NA_integer_
   enrich_df$n_accum  <- NA_integer_
 
+  # Percentage columns
+  enrich_df$pct_gate_sig <- NA_real_
+  enrich_df$pct_gate_fdr <- NA_real_
+  enrich_df$pct_top10 <- NA_real_
+  enrich_df$pct_top5 <- NA_real_
+  enrich_df$pct_top1 <- NA_real_
+  enrich_df$pct_bottom10 <- NA_real_
+  enrich_df$pct_bottom5 <- NA_real_
+  enrich_df$pct_bottom1 <- NA_real_
+  enrich_df$pct_fade <- NA_real_
+  enrich_df$pct_fade_top <- NA_real_
+  enrich_df$pct_fade_bottom <- NA_real_
+  enrich_df$pct_rer_acc <- NA_real_
+  enrich_df$pct_rer_decc <- NA_real_
+  enrich_df$pct_accum <- NA_real_
+
   if (!is.null(gene_scores_df) && nrow(enrich_df) > 0) {
     dir_label <- if (grepl("top", list_name)) "top" else if (grepl("bottom", list_name)) "bottom" else "global"
     score_col <- if (dir_label == "top") "gene_caas_score_top" else if (dir_label == "bottom") "gene_caas_score_bottom" else "gene_caas_score"
+
+    attr_df <- prepare_gene_attributes(gene_scores_df)
 
     if (score_col %in% names(gene_scores_df)) {
       ranked_df <- gene_scores_df %>%
@@ -539,6 +663,24 @@ run_single_string <- function(gene_file, use_custom_background) {
             enrich_df$n_fade[i]   <- length(intersect(term_genes, fade_pos))
             enrich_df$n_rer[i]    <- length(intersect(term_genes, rer_pos))
             enrich_df$n_accum[i]  <- length(intersect(term_genes, accum_pos))
+
+            if (!is.null(attr_df)) {
+              pcts <- compute_term_overlap_percentages(term_pref, attr_df, dir_label)
+              enrich_df$pct_gate_sig[i] <- pcts$gate_sig
+              enrich_df$pct_gate_fdr[i] <- pcts$gate_fdr
+              enrich_df$pct_top10[i]    <- pcts$top10
+              enrich_df$pct_top5[i]     <- pcts$top5
+              enrich_df$pct_top1[i]     <- pcts$top1
+              enrich_df$pct_bottom10[i] <- pcts$bot10
+              enrich_df$pct_bottom5[i]  <- pcts$bot5
+              enrich_df$pct_bottom1[i]  <- pcts$bot1
+              enrich_df$pct_fade[i]     <- pcts$fade
+              enrich_df$pct_fade_top[i] <- pcts$fade_top
+              enrich_df$pct_fade_bottom[i] <- pcts$fade_bottom
+              enrich_df$pct_rer_acc[i]  <- pcts$rer_acc
+              enrich_df$pct_rer_decc[i] <- pcts$rer_decc
+              enrich_df$pct_accum[i]    <- pcts$accum
+            }
           }
         }
       }
@@ -627,18 +769,60 @@ if (nrow(all_results) > 0 && !is.null(gene_scores_df)) {
       dplyr::slice_head(n = 10)
 
     if (nrow(.gl_dat) > 0) {
-      display_df <- .gl_dat %>%
-        dplyr::select(
-          Category = category,
-          Term = description,
-          FDR = fdr,
-          `Top 10% (N)` = n_top_10,
-          `Top 5% (N)`  = n_top_5,
-          `Top 1% (N)`  = n_top_1,
-          `FADE (N)`    = n_fade,
-          `RER (N)`     = n_rer,
-          `Accum. (N)`  = n_accum
-        )
+      .dir_label <- if (grepl("top", .gl)) "top" else if (grepl("bottom", .gl)) "bottom" else "global"
+      
+      if (.dir_label == "top") {
+        display_df <- .gl_dat %>%
+          dplyr::select(
+            Category = category,
+            Term = description,
+            FDR = fdr,
+            `gate_sig (%)` = pct_gate_sig,
+            `gate_fdr (%)` = pct_gate_fdr,
+            `top10% (%)` = pct_top10,
+            `top5% (%)` = pct_top5,
+            `top1% (%)` = pct_top1,
+            `fade_top (%)` = pct_fade_top,
+            `rer_acc (%)` = pct_rer_acc,
+            `rer_decc (%)` = pct_rer_decc,
+            `accum (%)` = pct_accum
+          )
+      } else if (.dir_label == "bottom") {
+        display_df <- .gl_dat %>%
+          dplyr::select(
+            Category = category,
+            Term = description,
+            FDR = fdr,
+            `gate_sig (%)` = pct_gate_sig,
+            `gate_fdr (%)` = pct_gate_fdr,
+            `bot10% (%)` = pct_bottom10,
+            `bot5% (%)` = pct_bottom5,
+            `bot1% (%)` = pct_bottom1,
+            `fade_bottom (%)` = pct_fade_bottom,
+            `rer_acc (%)` = pct_rer_acc,
+            `rer_decc (%)` = pct_rer_decc,
+            `accum (%)` = pct_accum
+          )
+      } else {
+        display_df <- .gl_dat %>%
+          dplyr::select(
+            Category = category,
+            Term = description,
+            FDR = fdr,
+            `gate_sig (%)` = pct_gate_sig,
+            `gate_fdr (%)` = pct_gate_fdr,
+            `top10% (%)` = pct_top10,
+            `top5% (%)` = pct_top5,
+            `top1% (%)` = pct_top1,
+            `bot10% (%)` = pct_bottom10,
+            `bot5% (%)` = pct_bottom5,
+            `bot1% (%)` = pct_bottom1,
+            `fade (%)` = pct_fade,
+            `rer_acc (%)` = pct_rer_acc,
+            `rer_decc (%)` = pct_rer_decc,
+            `accum (%)` = pct_accum
+          )
+      }
 
       cat(sprintf("\n\n#### Top Enriched STRING Terms for %s\n\n", .gl))
       print(
@@ -754,28 +938,133 @@ for (.gf in gene_list_files) {
     .clusters_df  <- if (!is.null(.clusters_raw)) {
       .clusters_raw %>% dplyr::filter(node %in% .net_vnames)
     } else NULL
+
+    # Reorder clusters by size (number of genes) descending
+    if (!is.null(.clusters_df) && nrow(.clusters_df) > 0) {
+      .cl_counts <- .clusters_df %>%
+        dplyr::group_by(cluster) %>%
+        dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
+        dplyr::arrange(desc(n), cluster)
+      .cl_map <- setNames(seq_len(nrow(.cl_counts)), .cl_counts$cluster)
+      .clusters_df$cluster <- .cl_map[as.character(.clusters_df$cluster)]
+    }
+
     .n_clust <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
 
     # Annotate clusters with gene symbols and write TSV
     if (!is.null(.clusters_df)) {
       .clusters_df$gene <- .id2gene[.clusters_df$node]
       .clusters_df$gene[is.na(.clusters_df$gene)] <- .clusters_df$node[is.na(.clusters_df$gene)]
+      
+      # Append individual gene-level flags to the exported cluster TSVs
+      .clusters_out <- .clusters_df
+      if (!is.null(gene_scores_df)) {
+        attr_df <- prepare_gene_attributes(gene_scores_df)
+        if (!is.null(attr_df)) {
+          .clusters_out <- .clusters_out %>%
+            dplyr::left_join(attr_df, by = c("gene" = "gene"))
+        }
+      }
+      
       .clust_file <- file.path(
         string_networks_dir,
         sprintf("%s_%s_clusters.tsv", .list_name, .net_type)
       )
-      readr::write_tsv(.clusters_df %>% dplyr::arrange(cluster, gene), .clust_file)
+      readr::write_tsv(.clusters_out %>% dplyr::arrange(cluster, gene), .clust_file)
       cat(sprintf("Clusters found: **%d** (written to `%s`)\n\n", .n_clust, basename(.clust_file)))
 
       # Cluster descriptions from top enriched term per cluster
       .clust_desc <- describe_clusters(string_db, .clusters_df, .id2gene)
+      
+      # Calculate percentages for each cluster if gene_scores_df is available
+      if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
+        .dir_label <- if (grepl("top", .list_name)) "top" else if (grepl("bottom", .list_name)) "bottom" else "global"
+        
+        .cl_pcts <- purrr::map_dfr(sort(unique(.clusters_df$cluster)), function(cl_id) {
+          cl_genes <- .clusters_df$gene[.clusters_df$cluster == cl_id]
+          compute_term_overlap_percentages(paste(cl_genes, collapse = ","), attr_df, .dir_label) %>%
+            mutate(cluster = cl_id)
+        })
+        
+        .clust_desc <- .clust_desc %>% dplyr::left_join(.cl_pcts, by = "cluster")
+      }
+      
       .clust_desc_display <- .clust_desc %>%
-        dplyr::filter(!description %in% c("Too small", "No enrichment"))
+        dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
+        dplyr::arrange(desc(n_genes))
+        
       if (nrow(.clust_desc_display) > 0) {
+        if (!is.null(gene_scores_df)) {
+          .dir_label <- if (grepl("top", .list_name)) "top" else if (grepl("bottom", .list_name)) "bottom" else "global"
+          
+          if (.dir_label == "top") {
+            display_df <- .clust_desc_display %>%
+              dplyr::select(
+                Cluster = cluster,
+                Genes = n_genes,
+                `Representative genes` = genes,
+                `Top enriched terms` = description,
+                `gate_sig (%)` = gate_sig,
+                `gate_fdr (%)` = gate_fdr,
+                `top10% (%)` = top10,
+                `top5% (%)` = top5,
+                `top1% (%)` = top1,
+                `fade_top (%)` = fade_top,
+                `rer_acc (%)` = rer_acc,
+                `rer_decc (%)` = rer_decc,
+                `accum (%)` = accum
+              )
+          } else if (.dir_label == "bottom") {
+            display_df <- .clust_desc_display %>%
+              dplyr::select(
+                Cluster = cluster,
+                Genes = n_genes,
+                `Representative genes` = genes,
+                `Top enriched terms` = description,
+                `gate_sig (%)` = gate_sig,
+                `gate_fdr (%)` = gate_fdr,
+                `bot10% (%)` = bot10,
+                `bot5% (%)` = bot5,
+                `bot1% (%)` = bot1,
+                `fade_bottom (%)` = fade_bottom,
+                `rer_acc (%)` = rer_acc,
+                `rer_decc (%)` = rer_decc,
+                `accum (%)` = accum
+              )
+          } else {
+            display_df <- .clust_desc_display %>%
+              dplyr::select(
+                Cluster = cluster,
+                Genes = n_genes,
+                `Representative genes` = genes,
+                `Top enriched terms` = description,
+                `gate_sig (%)` = gate_sig,
+                `gate_fdr (%)` = gate_fdr,
+                `top10% (%)` = top10,
+                `top5% (%)` = top5,
+                `top1% (%)` = top1,
+                `bot10% (%)` = bot10,
+                `bot5% (%)` = bot5,
+                `bot1% (%)` = bot1,
+                `fade (%)` = fade,
+                `rer_acc (%)` = rer_acc,
+                `rer_decc (%)` = rer_decc,
+                `accum (%)` = accum
+              )
+          }
+        } else {
+          display_df <- .clust_desc_display %>%
+            dplyr::select(
+              Cluster = cluster,
+              Genes = n_genes,
+              `Representative genes` = genes,
+              `Top enriched terms` = description
+            )
+        }
+        
         print(knitr::kable(
-          .clust_desc_display,
-          caption = sprintf("Cluster functional descriptions — %s %s", .list_name, .net_type),
-          col.names = c("Cluster", "Genes", "Representative genes", "Top enriched terms")
+          display_df,
+          caption = sprintf("Cluster functional descriptions — %s %s", .list_name, .net_type)
         ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed"), full_width = TRUE))
       }
 

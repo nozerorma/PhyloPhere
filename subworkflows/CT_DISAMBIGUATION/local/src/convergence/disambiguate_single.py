@@ -111,7 +111,7 @@ def analyze_caas_position_disambiguation(
     # Perform node-level convergence analysis using ASR node mapping
     if posterior_data is None:
         raise ValueError(
-            f"ASR node states unavailable for {gene} position {caas_pos.position_zero_based}: missing posterior data."
+            f"ASR node states unavailable for {gene} position {caas_pos.position}: missing posterior data."
         )
 
     node_state_info = None
@@ -128,7 +128,7 @@ def analyze_caas_position_disambiguation(
         # We can't determine focal nodes without tip analysis, so skip ASR node states
         if not node_role_mapping or len(node_role_mapping) < 4:
             logger.debug(
-                f"Skipping ASR node states for {gene} position {caas_pos.position_zero_based}: "
+                f"Skipping ASR node states for {gene} position {caas_pos.position}: "
                 f"focal node mapping not available (need tip-level analysis)"
             )
             node_role_mapping = None
@@ -225,14 +225,14 @@ def analyze_caas_position_disambiguation(
 
     if state_source != "asr" or not node_state_info:
         raise ValueError(
-            f"ASR node states unavailable for {gene} position {caas_pos.position_zero_based}; "
+            f"ASR node states unavailable for {gene} position {caas_pos.position}; "
             "cannot analyze without posterior-supported nodes."
         )
 
     # Determine ancestral/derived states using ASR node states
     if not node_state_info or not node_state_info.mrca_contrast:
         raise ValueError(
-            f"ASR node states unavailable for {gene} position {caas_pos.position_zero_based}: "
+            f"ASR node states unavailable for {gene} position {caas_pos.position}: "
             "missing MRCA contrast state."
         )
 
@@ -245,7 +245,7 @@ def analyze_caas_position_disambiguation(
     ]
     if not asr_descendants:
         raise ValueError(
-            f"ASR node states unavailable for {gene} position {caas_pos.position_zero_based}: "
+            f"ASR node states unavailable for {gene} position {caas_pos.position}: "
             "missing focal lineage states."
         )
 
@@ -346,7 +346,7 @@ def analyze_caas_position_disambiguation(
         pair_path_contaminated = path_result["pair_contaminated"]
     except Exception as e:  # never let path scoring break disambiguation
         logger.warning(
-            f"ASR path scoring failed for {gene}:{caas_pos.position_zero_based}: {e}"
+            f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
         )
 
     return ConvergenceResult(
@@ -355,7 +355,6 @@ def analyze_caas_position_disambiguation(
         tag=caas_pos.tag,
         caas=caas_pos.caas,
         is_significant=caas_pos.is_significant,
-        position_zero_based=caas_pos.position_zero_based,
         position_one_based=caas_pos.position_one_based,
         ancestral=ancestral,
         derived=derived,
@@ -395,7 +394,6 @@ def analyze_caas_position_disambiguation(
         conserved_pair=conserved_pair,
         sig_hyp=getattr(caas_pos, "sig_hyp", None),
         sig_perm=getattr(caas_pos, "sig_perm", None),
-        sig_both=getattr(caas_pos, "sig_both", None),
         asr_path_score=asr_path_score,
         independence=independence,
         mrca_diversity=mrca_diversity,
@@ -426,7 +424,6 @@ def analyze_gene_disambiguation(
     diagnostics_dir: Optional[Path] = None,
     convergence_mode: str = "focal_state",
     asr_mode: str = "precomputed",
-    include_non_significant: bool = False,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
@@ -476,7 +473,6 @@ def analyze_gene_disambiguation(
             caas_entries = [
                 CAASPosition(
                     position=pos,
-                    position_zero_based=pos,
                     position_one_based=pos + 1,
                     tag=f"POS{pos}",
                     caas="",
@@ -500,18 +496,8 @@ def analyze_gene_disambiguation(
                     seen_pairs.add(pair_tuple)
 
     for idx, caas_pos in enumerate(caas_entries):
-        pos = caas_pos.position_zero_based
+        pos = caas_pos.position
         try:
-            # Skip non-significant positions unless explicitly included
-            if not include_non_significant and not getattr(
-                caas_pos, "is_significant", False
-            ):
-                diagnostics["skip_reasons"]["non_significant"] += 1
-                diagnostics["skipped_positions"] += 1
-                logger.debug(
-                    f"Skipping position {pos} (non-significant and include_non_significant=False)"
-                )
-                continue
             # Skip if no amino acid conversion data
             if not caas_pos.caas:
                 logger.debug(f"Skipping position {pos} - no amino acid conversion data")
@@ -573,7 +559,7 @@ def analyze_gene_disambiguation(
                         top_tip_records = collect_tip_residues(
                             [top_taxid],
                             [high_species],
-                            caas_pos.position_zero_based,
+                            caas_pos.position,
                             seq_by_id,
                             seq_by_species,
                             alignment_data.taxid_to_species,
@@ -581,7 +567,7 @@ def analyze_gene_disambiguation(
                         bottom_tip_records = collect_tip_residues(
                             [bottom_taxid],
                             [low_species],
-                            caas_pos.position_zero_based,
+                            caas_pos.position,
                             seq_by_id,
                             seq_by_species,
                             alignment_data.taxid_to_species,

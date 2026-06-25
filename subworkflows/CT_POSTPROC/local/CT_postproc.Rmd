@@ -363,13 +363,13 @@ normalize_disambig_schema <- function(df) {
       pvalue_boot = suppressWarnings(as.numeric(pvalue_boot)),
       sig_hyp = !is.na(pvalue) & pvalue <= alpha_threshold,
       sig_perm = !is.na(pvalue_boot) & pvalue_boot <= alpha_threshold,
-      sig_both = sig_hyp & sig_perm,
+      is_significant = sig_hyp & sig_perm,
       sig_hyp_010 = !is.na(pvalue) & pvalue <= 0.10,
       sig_perm_010 = !is.na(pvalue_boot) & pvalue_boot <= 0.10,
-      sig_both_010 = sig_hyp_010 & sig_perm_010,
+      is_significant_010 = sig_hyp_010 & sig_perm_010,
       sig_hyp_005 = !is.na(pvalue) & pvalue <= 0.05,
       sig_perm_005 = !is.na(pvalue_boot) & pvalue_boot <= 0.05,
-      sig_both_005 = sig_hyp_005 & sig_perm_005,
+      is_significant_005 = sig_hyp_005 & sig_perm_005,
       significance_class = make_significance_class(sig_hyp, sig_perm),
       significance_class_010 = make_significance_class(sig_hyp_010, sig_perm_010),
       significance_class_005 = make_significance_class(sig_hyp_005, sig_perm_005),
@@ -500,7 +500,7 @@ discovery_df <- discovery_std %>%
     `Pvalue.boot` = pvalue_boot,
     sig_hyp,
     sig_perm,
-    sig_both,
+    is_significant,
     significance_class,
     site_id
   )
@@ -971,7 +971,7 @@ if (!is.na(removed_precluster_file)) {
   precluster_events <- precluster_df %>% transmute(
     site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
     change_top, change_bottom, change_side, parallel_top, parallel_bottom, parallel_type,
-    sig_hyp, sig_perm, sig_both, significance_class,
+    sig_hyp, sig_perm, is_significant, significance_class,
     RemovalStage = case_when(
       str_detect(RemovalReason, "^mrca_posterior_below_") ~ "precluster_mrca_threshold",
       TRUE ~ "precluster_other"
@@ -988,7 +988,7 @@ if (length(cluster_files) > 0) {
     transmute(
       site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
       change_top, change_bottom, change_side, parallel_top, parallel_bottom, parallel_type,
-      sig_hyp, sig_perm, sig_both, significance_class,
+      sig_hyp, sig_perm, is_significant, significance_class,
       RemovalStage = "cluster"
     ) %>%
     distinct()
@@ -1012,7 +1012,7 @@ if (!is.na(removed_genes_file)) {
     transmute(
       site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
       change_top, change_bottom, change_side, parallel_top, parallel_bottom, parallel_type,
-      sig_hyp, sig_perm, sig_both, significance_class, RemovalStage
+      sig_hyp, sig_perm, is_significant, significance_class, RemovalStage
     ) %>%
     distinct()
 }
@@ -1158,7 +1158,7 @@ gene_filter_flags <- gene_filter_flags %>%
 gene_sig_stats <- discovery_std %>%
   group_by(gene, caap_group) %>%
   summarise(
-    frac_sig_both    = mean(sig_both, na.rm = TRUE),
+    frac_is_significant = mean(is_significant, na.rm = TRUE),
     median_pval_hyp  = median(pvalue,      na.rm = TRUE),
     min_pval_hyp     = min(pvalue,         na.rm = TRUE),
     median_pval_boot = median(pvalue_boot, na.rm = TRUE),
@@ -1190,24 +1190,24 @@ cat(sprintf("  Any filter               : %d / %d genes (%.1f%%)\n",
     nrow(gene_filter_flags),
     100 * mean(gene_filter_flags$filter_combo != "None")))
 
-# Fraction of sig-both sites removed by each filter pathway
+# Fraction of significant sites removed by each filter pathway
 if (nrow(removal_events) > 0) {
-  total_sig_both  <- sum(discovery_std$sig_both, na.rm = TRUE)
+  total_is_significant  <- sum(discovery_std$is_significant, na.rm = TRUE)
   removed_extreme <- discovery_std %>%
-    filter(sig_both, gene %in% filter(gene_filter_flags, Extreme)$Gene,
+    filter(is_significant, gene %in% filter(gene_filter_flags, Extreme)$Gene,
            caap_group %in% filter(gene_filter_flags, Extreme)$CAAP_Group)
   removed_dubious <- discovery_std %>%
-    filter(sig_both, gene %in% filter(gene_filter_flags, Dubious)$Gene,
+    filter(is_significant, gene %in% filter(gene_filter_flags, Dubious)$Gene,
            caap_group %in% filter(gene_filter_flags, Dubious)$CAAP_Group)
   removed_cluster <- discovery_std %>%
-    filter(sig_both, site_id %in% cluster_events$site_id)
-  cat(sprintf("\n  Sig-both sites in total  : %d\n", total_sig_both))
-  cat(sprintf("  Sig-both in Extreme genes: %d (%.1f%%)\n",
-      nrow(removed_extreme), 100 * nrow(removed_extreme) / max(total_sig_both, 1)))
-  cat(sprintf("  Sig-both in Dubious genes: %d (%.1f%%)\n",
-      nrow(removed_dubious), 100 * nrow(removed_dubious) / max(total_sig_both, 1)))
-  cat(sprintf("  Sig-both in Cluster sites: %d (%.1f%%)\n",
-      nrow(removed_cluster), 100 * nrow(removed_cluster) / max(total_sig_both, 1)))
+    filter(is_significant, site_id %in% cluster_events$site_id)
+  cat(sprintf("\n  Significant sites in total  : %d\n", total_is_significant))
+  cat(sprintf("  Significant in Extreme genes: %d (%.1f%%)\n",
+      nrow(removed_extreme), 100 * nrow(removed_extreme) / max(total_is_significant, 1)))
+  cat(sprintf("  Significant in Dubious genes: %d (%.1f%%)\n",
+      nrow(removed_dubious), 100 * nrow(removed_dubious) / max(total_is_significant, 1)))
+  cat(sprintf("  Significant in Cluster sites: %d (%.1f%%)\n",
+      nrow(removed_cluster), 100 * nrow(removed_cluster) / max(total_is_significant, 1)))
 }
 
 cat("\n")
@@ -1363,7 +1363,7 @@ make_descriptor_plot <- function(data, y_var, y_label, log_scale = FALSE) {
 p_length     <- make_descriptor_plot(gene_filter_plot, "Length",           "Gene length (aa)",              log_scale = TRUE)
 p_ncaas      <- make_descriptor_plot(gene_filter_plot, "n_CAAS",           "Total CAAS count",              log_scale = TRUE)
 p_density    <- make_descriptor_plot(gene_filter_plot, "n_CAAS_per_length","CAAS density (per 100 aa)",     log_scale = TRUE)
-p_fracsig    <- make_descriptor_plot(gene_filter_plot, "frac_sig_both",    "Fraction sig-both sites",       log_scale = FALSE)
+p_fracsig    <- make_descriptor_plot(gene_filter_plot, "frac_is_significant","Fraction significant sites",    log_scale = FALSE)
 p_medpval    <- make_descriptor_plot(gene_filter_plot, "median_pval_hyp",  "Median hyperg. p-value",        log_scale = FALSE)
 p_minpval    <- make_descriptor_plot(gene_filter_plot, "min_pval_hyp",     "Min hyperg. p-value",           log_scale = FALSE)
 
@@ -1394,17 +1394,17 @@ ggsave(file.path(outliers_dir, "filter_overlap_descriptors.png"),
 overlap_summary <- gene_filter_flags %>%
   group_by(CAAP_Group, filter_combo) %>%
   summarise(
-    n_genes            = n(),
-    mean_Length        = round(mean(Length,            na.rm = TRUE), 1),
-    sd_Length          = round(sd(Length,              na.rm = TRUE), 1),
-    mean_n_CAAS        = round(mean(n_CAAS,            na.rm = TRUE), 2),
-    sd_n_CAAS          = round(sd(n_CAAS,              na.rm = TRUE), 2),
-    mean_density       = round(mean(n_CAAS_per_length, na.rm = TRUE), 4),
-    sd_density         = round(sd(n_CAAS_per_length,   na.rm = TRUE), 4),
-    mean_frac_sig_both = round(mean(frac_sig_both,     na.rm = TRUE), 4),
-    sd_frac_sig_both   = round(sd(frac_sig_both,       na.rm = TRUE), 4),
-    mean_median_pval   = round(mean(median_pval_hyp,   na.rm = TRUE), 4),
-    sd_median_pval     = round(sd(median_pval_hyp,     na.rm = TRUE), 4),
+    n_genes                  = n(),
+    mean_Length              = round(mean(Length,            na.rm = TRUE), 1),
+    sd_Length                = round(sd(Length,              na.rm = TRUE), 1),
+    mean_n_CAAS              = round(mean(n_CAAS,            na.rm = TRUE), 2),
+    sd_n_CAAS                = round(sd(n_CAAS,              na.rm = TRUE), 2),
+    mean_density             = round(mean(n_CAAS_per_length, na.rm = TRUE), 4),
+    sd_density               = round(sd(n_CAAS_per_length,   na.rm = TRUE), 4),
+    mean_frac_is_significant = round(mean(frac_is_significant, na.rm = TRUE), 4),
+    sd_frac_is_significant   = round(sd(frac_is_significant,   na.rm = TRUE), 4),
+    mean_median_pval         = round(mean(median_pval_hyp,   na.rm = TRUE), 4),
+    sd_median_pval           = round(sd(median_pval_hyp,     na.rm = TRUE), 4),
     .groups = "drop"
   ) %>%
   arrange(CAAP_Group, filter_combo)
@@ -2019,7 +2019,7 @@ excluded_postproc <- sort(unique(c(excluded_postproc_clusters, excluded_postproc
 # 5. Non-significant genes: survived all filters, but zero sig_both positions;
 #    explicitly does NOT overlap with preproc / postproc categories
 any_filtered_genes <- sort(unique(filter(gene_filter_flags, filter_combo != "None")$Gene))
-genes_ever_sig     <- sort(unique(filter(discovery_std, sig_both)$gene))
+genes_ever_sig     <- sort(unique(filter(discovery_std, is_significant)$gene))
 survived_genes     <- sort(setdiff(unique(gene_filter_flags$Gene), any_filtered_genes))
 excluded_nonsig    <- sort(setdiff(survived_genes, c(genes_ever_sig, excluded_preproc)))
 
@@ -2058,7 +2058,7 @@ if (!"chr" %in% names(gene_ensembl)) {
     group_by(gene) %>%
     summarise(
       n_caas_positions = n_distinct(site_id),
-      frac_sig_both = mean(sig_both, na.rm = TRUE),
+      frac_is_significant = mean(is_significant, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     left_join(gene_ensembl %>% 

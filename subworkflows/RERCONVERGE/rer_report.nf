@@ -22,13 +22,13 @@ process RER_REPORT {
     label 'process_reporting'
     errorStrategy 'ignore'
 
-    publishDir path: "${params.outdir}/RERConverge/RER_Results",
+    publishDir path: "${params.outdir}/rerconverge/rer_results",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
-    publishDir path: "${params.outdir}/RERConverge/RER_Results",
+    publishDir path: "${params.outdir}/rerconverge/rer_results",
                mode: 'copy', overwrite: true,
                pattern: 'rerconverge_summary_*.tsv'
 
@@ -41,7 +41,7 @@ process RER_REPORT {
 
     script:
     def local_dir        = "${baseDir}/subworkflows/RERCONVERGE/local"
-    def outdir           = "${params.outdir}/RERConverge/RER_Results"
+    def outdir           = "${params.outdir}/rerconverge/rer_results"
     def pval_thr         = params.rer_pval_threshold  ?: 0.05
     def top_n            = params.rer_top_n_labels    ?: 15
     def traitname        = params.traitname           ?: 'unknown_trait'

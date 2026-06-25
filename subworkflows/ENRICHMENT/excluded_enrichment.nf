@@ -11,7 +11,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
     label 'process_reporting'
 
     publishDir path: "${params.outdir}/enrichment_excluded", mode: 'copy', overwrite: true, pattern: '{ORA_files/**,ora_results/**,ora_summary/**,ora_plots/**}'
-    publishDir path: "${params.outdir}/HTML_reports",  mode: 'copy', overwrite: true, pattern: '*.html'
+    publishDir path: "${params.outdir}/html_reports",  mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
     path background_file

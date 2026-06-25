@@ -21,7 +21,7 @@ Historical CAAS exports (e.g., `meta_caas.output`) record positions as **zero-ba
 indices** in the `GenePos` column (e.g., `NUTM2A_648` → column 648). ASR consumers and
 biology workflows expect **1-based** positions. All loaders return both forms:
 
-    - position_zero_based: MSA column index (0-indexed)
+    - position: MSA column index (0-indexed)
     - position_one_based: Biological position (1-indexed)
 
 This dual indexing prevents off-by-one errors in cross-consumer pipelines.
@@ -29,9 +29,8 @@ This dual indexing prevents off-by-one errors in cross-consumer pipelines.
 Data Contracts & Validation
 ------------------------------
 1. **CAAS Metadata** (read_caas_metadata_table, get_caas_position_info):
-     - Required columns: Tag, AminoConv, isSignificant
+     - Required columns: Tag, AminoConv, is_significant, GenePos
      - Optional columns: Pvalue, Pvalue.boot
-     - GenePos normalization: Accepts 'GenePos' or 'Gene_Pos'; returns 'GenePos'
      - FileNotFoundError raised if file missing; ValueError for missing columns
 
 2. **Trait Pairs** (parse_trait_pairs):
@@ -141,10 +140,9 @@ def read_caas_metadata_table(
     metadata_file: Path, gene_name: Optional[str] = None
 ) -> pd.DataFrame:
     """
-    Load CAAS metadata (Tag, Contrast, AminoConv, isSignificant, optional Pvalue.boot).
+    Load CAAS metadata (Tag, AminoConv, is_significant, optional Pvalue.boot).
 
     - Tries comma-separated first, falls back to tab-separated.
-    - Accepts `GenePos` or `Gene_Pos` and normalizes to `GenePos`.
     - Returns a filtered DataFrame if `gene_name` is provided.
     - Positions in `GenePos` remain zero-based; callers may derive +1.
     """
@@ -160,15 +158,8 @@ def read_caas_metadata_table(
     except Exception as e:
         raise ValueError(f"Error reading CAAS metadata file: {e}") from e
 
-    # Validate required columns (flexible with Gene_Pos vs GenePos)
-    required_cols = ["Tag", "AminoConv"]
-    gene_pos_col = "GenePos" if "GenePos" in df.columns else "Gene_Pos"
-
-    if gene_pos_col not in df.columns:
-        raise ValueError(
-            f"CAAS metadata file missing gene position column (GenePos or Gene_Pos). "
-            f"Available columns: {list(df.columns)}"
-        )
+    # Validate required columns
+    required_cols = ["Tag", "AminoConv", "is_significant", "GenePos"]
 
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
@@ -176,19 +167,6 @@ def read_caas_metadata_table(
             f"CAAS metadata file missing required columns: {missing_cols}. "
             f"Available columns: {list(df.columns)}"
         )
-
-    # Normalize column name for consistency
-    if gene_pos_col == "Gene_Pos":
-        df = df.rename(columns={"Gene_Pos": "GenePos"})
-
-    # Harmonize significance columns to a single canonical boolean
-    if "isSignificant" not in df.columns:
-        if "sig_both" in df.columns:
-            df["isSignificant"] = df["sig_both"]
-        elif "sig_hyp" in df.columns:
-            df["isSignificant"] = df["sig_hyp"]
-        else:
-            df["isSignificant"] = False
 
     # Ensure optional fields exist with stable names used downstream
     for col, default in {
@@ -198,7 +176,6 @@ def read_caas_metadata_table(
         "IsConserved": False,
         "sig_hyp": None,
         "sig_perm": None,
-        "sig_both": None,
     }.items():
         if col not in df.columns:
             df[col] = default
@@ -280,7 +257,6 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
 
         entry = CAASPosition(
             position=pos0,
-            position_zero_based=pos0,
             position_one_based=pos0 + 1,
             tag=str(row.get("Tag", f"POS{pos0}")),
             caas=caas,
@@ -296,14 +272,13 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
                 if "Pvalue.boot" in row.index and pd.notna(row["Pvalue.boot"])
                 else None
             ),
-            is_significant=_b(row.get("isSignificant")),
+            is_significant=_b(row.get("is_significant")),
             caap_group=str(row.get("CAAP_Group", "US") or "US"),
             amino_encoded=str(row.get("AminoEncoded", "") or ""),
             is_conserved_meta=_b(row.get("IsConserved")),
             conserved_pair=_parse_conserved_pair(str(row.get("ConservedPair", "") or "")),
             sig_hyp=_b(row.get("sig_hyp")) if pd.notna(row.get("sig_hyp")) else None,
             sig_perm=_b(row.get("sig_perm")) if pd.notna(row.get("sig_perm")) else None,
-            sig_both=_b(row.get("sig_both")) if pd.notna(row.get("sig_both")) else None,
         )
         entries.append(entry)
 
@@ -353,11 +328,11 @@ def get_caas_position_info(
         "gene_pos": str(row["GenePos"]),
         "tag": str(row["Tag"]),
         "caas": str(row["AminoConv"]),
-        "is_significant": str(row["isSignificant"]).upper() == "TRUE",
+        "is_significant": str(row["is_significant"]).upper() == "TRUE",
     }
 
     _, zero_based_pos = _parse_gene_pos_token(str(info["gene_pos"]))
-    info["position_zero_based"] = zero_based_pos
+    info["position"] = zero_based_pos
     info["position_one_based"] = (
         zero_based_pos + 1 if zero_based_pos is not None else None
     )
@@ -420,7 +395,6 @@ def build_caas_positions_map(
             if info:
                 caas_pos = CAASPosition(
                     position=pos,
-                    position_zero_based=info.get("position_zero_based", pos),
                     position_one_based=info.get("position_one_based", pos + 1),
                     tag=info.get("tag", f"POS{pos}"),
                     caas=info.get("caas", ""),

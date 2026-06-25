@@ -2,8 +2,8 @@
  * WorkflowMap.groovy
  *
  * Helper library for generating the final PhyloPhere workflow-map HTML artifact.
- * Placed in lib/ so it is automatically compiled and available to all .nf files
- * in the project (main.nf's workflow.onComplete and workflows/workflow_map.nf).
+ * Placed in lib/ so it is automatically compiled and available to the main.nf
+ * script's workflow.onComplete hook.
  *
  * Author: Miguel Ramon (miguel.ramon@upf.edu)
  */
@@ -129,23 +129,23 @@ class WorkflowMap {
         def stages = [
             [ id: 'prune',       name: 'Data pruning',                    type: 'prepost',   ran: ctx.prune,
               filesDirs: ["${outdir}/data_exploration/0.Data-pruning"],
-              htmlCandidates: ["${outdir}/HTML_reports/0.Data_pruning.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/0.Data_pruning.html"] ],
 
             [ id: 'dataset_rep', name: 'Dataset reporting',               type: 'reporting', ran: ctx.datasetReport,
               filesDirs: ["${outdir}/data_exploration"],
-              htmlCandidates: ["${outdir}/HTML_reports/1.Dataset_exploration.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/1.Dataset_exploration.html"] ],
 
             [ id: 'pheno_rep',   name: 'Phenotype reporting',             type: 'reporting', ran: ctx.phenotypeRep,
               filesDirs: ["${outdir}/data_exploration"],
-              htmlCandidates: ["${outdir}/HTML_reports/2.Phenotype_exploration.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration.html"] ],
 
             [ id: 'contrast',    name: 'Contrast selection',              type: 'prepost',   ran: ctx.contrastSel,
               filesDirs: ["${outdir}/data_exploration/2.CT",
                           "${outdir}/data_exploration/2.CT/1.Traitfiles",
                           "${outdir}/data_exploration/2.CT/2.Bootstrap_traitfiles",
                           "${outdir}/data_exploration/2.CT/3.Tree"],
-              htmlCandidates: ["${outdir}/HTML_reports/3.CI-composition.html",
-                                "${outdir}/HTML_reports/4.Independent_contrasts.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/3.CI-composition.html",
+                                "${outdir}/html_reports/4.Independent_contrasts.html"] ],
 
             [ id: 'ct',          name: 'CT (convergence)',                type: 'processes', ran: ctx.ct,
               filesDirs: ["${outdir}/caastools", "${outdir}/discovery",
@@ -156,22 +156,26 @@ class WorkflowMap {
               filesDirs: ["${outdir}/signification",
                           "${outdir}/signification/gene_lists",
                           "${outdir}/signification/meta_caas"],
-              htmlCandidates: ["${outdir}/HTML_reports/CT_signification.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/CT_signification.html"] ],
 
             [ id: 'ct_disambig', name: 'CT disambiguation (convergence)', type: 'processes', ran: ctx.ctDisambig,
               filesDirs: ["${outdir}/ct_disambiguation"],
-              htmlCandidates: ["${outdir}/HTML_reports/CT_disambiguation.html"] ],
+              htmlCandidates: [] ],
+
+            [ id: 'asr_robustness', name: 'ASR Robustness',              type: 'reporting', ran: ctx.asrRobustness,
+              filesDirs: ["${outdir}/asr_robustness"],
+              htmlCandidates: ["${outdir}/html_reports/ASR_robustness.html"] ],
 
             [ id: 'ct_postproc', name: 'CT post-processing',              type: 'prepost',   ran: ctx.ctPostproc,
               filesDirs: ["${outdir}/postproc",
                           "${outdir}/postproc/preprocessed",
                           "${outdir}/postproc/gene_filtering",
                           "${outdir}/postproc/cleaned_backgrounds"],
-              htmlCandidates: ["${outdir}/HTML_reports/CT_postproc.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/CT_postproc.html"] ],
 
             [ id: 'enrichment',  name: 'Enrichment / Enrichment-excluded', type: 'reporting', ran: ctx.enrichment,
-              filesDirs: ["${outdir}/enrichment", "${outdir}/enrichment_excluded"],
-              htmlCandidates: ["${outdir}/HTML_reports/Enrichment_general.html"] ],
+              filesDirs: ["${outdir}/enrichment_excluded"],
+              htmlCandidates: ["${outdir}/html_reports/Enrichment_excluded.html"] ],
 
             [ id: 'ct_acc',      name: 'CT accumulation (convergence)',   type: 'processes', ran: ctx.ctAccum,
               filesDirs: ["${outdir}/accumulation",
@@ -179,29 +183,26 @@ class WorkflowMap {
                           "${outdir}/accumulation/top/randomization",
                           "${outdir}/accumulation/bottom/randomization",
                           "${outdir}/accumulation/all/randomization"],
-              htmlCandidates: ["${outdir}/HTML_reports/accumulation_report.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/accumulation_report.html"] ],
 
             [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
               filesDirs: ["${outdir}/characterization/vep"],
               htmlCandidates: [] ],
 
             [ id: 'rer',         name: 'RERconverge (RER)',               type: 'processes', ran: ctx.rer,
-              filesDirs: ["${outdir}/RERConverge",
-                          "${outdir}/RERConverge/RER_Results",
-                          "${outdir}/RERConverge/gene_lists",
-                          "${outdir}/RERConverge/enrichment"],
-              htmlCandidates: ["${outdir}/HTML_reports/RERconverge_report.html"] ],
+              filesDirs: ["${outdir}/rerconverge",
+                          "${outdir}/rerconverge/rer_results",
+                          "${outdir}/rerconverge/gene_lists"],
+              htmlCandidates: ["${outdir}/html_reports/RERconverge_report.html"] ],
 
             [ id: 'fade',        name: 'FADE (selection)',                type: 'processes', ran: ctx.fade,
               filesDirs: ["${outdir}/selection/fade",
                           "${outdir}/selection/fade/top",
                           "${outdir}/selection/fade/bottom",
                           "${outdir}/selection/fade/top/gene_lists",
-                          "${outdir}/selection/fade/bottom/gene_lists",
-                          "${outdir}/selection/fade/top/enrichment",
-                          "${outdir}/selection/fade/bottom/enrichment"],
-              htmlCandidates: ["${outdir}/HTML_reports/FADE_report_top.html",
-                               "${outdir}/HTML_reports/FADE_report_bottom.html"] ],
+                          "${outdir}/selection/fade/bottom/gene_lists"],
+              htmlCandidates: ["${outdir}/html_reports/FADE_report_top.html",
+                               "${outdir}/html_reports/FADE_report_bottom.html"] ],
 
             [ id: 'scoring',     name: 'CAAS Scoring',                    type: 'reporting', ran: ctx.scoring,
               filesDirs: ["${outdir}/scoring",
@@ -209,13 +210,12 @@ class WorkflowMap {
                           "${outdir}/scoring/gene_lists/position",
                           "${outdir}/scoring/gene_lists/gene",
                           "${outdir}/scoring/overlap"],
-              htmlCandidates: ["${outdir}/HTML_reports/SCORING_report.html",
-                               "${outdir}/HTML_reports/SCORING_report_overlap.html"] ]
+              htmlCandidates: ["${outdir}/html_reports/SCORING_report.html"] ]
 
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','ct_postproc','enrichment','ct_acc','vep','rer','fade','scoring']
+                        'ct_disambig','asr_robustness','ct_postproc','enrichment','ct_acc','vep','rer','fade','scoring']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -344,11 +344,12 @@ class WorkflowMap {
         'ct': ['caastools', 'discovery'],
         'ct_signif': ['signification', 'signification/gene_lists'],
         'ct_disambig': ['ct_disambiguation'],
+        'asr_robustness': ['asr_robustness'],
         'ct_postproc': ['postproc', 'postproc/preprocessed'],
-        'enrichment': ['enrichment', 'enrichment_excluded'],
+        'enrichment': ['enrichment_excluded'],
         'ct_acc': ['accumulation', 'accumulation/aggregation'],
         'vep': ['characterization/vep'],
-        'rer': ['RERConverge', 'RERConverge/RER_Results'],
+        'rer': ['rerconverge', 'rerconverge/rer_results'],
         'fade': ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
         'scoring': ['scoring']
       };
@@ -362,6 +363,7 @@ class WorkflowMap {
         'ct': 'ct',
         'ct_signif': 'ct_signif',
         'ct_disambig': 'ct_disambig',
+        'asr_robustness': 'asr_robustness',
         'ct_postproc': 'ct_postproc',
         'enrichment': 'enrichment',
         'ct_acc': 'ct_acc',
@@ -438,6 +440,7 @@ class WorkflowMap {
         'ct': 'CT (convergence)',
         'ct_signif': 'CT signification (convergence)',
         'ct_disambig': 'CT disambiguation (convergence)',
+        'asr_robustness': 'ASR Robustness',
         'ct_postproc': 'CT post-processing',
         'enrichment': 'Enrichment / Enrichment-excluded',
         'ct_acc': 'CT accumulation (convergence)',
@@ -458,6 +461,7 @@ class WorkflowMap {
         'ct': '#F97316',
         'ct_signif': '#7C3AED',
         'ct_disambig': '#F97316',
+        'asr_robustness': '#7C3AED',
         'ct_postproc': '#0EA5E9',
         'enrichment': '#7C3AED',
         'ct_acc': '#F97316',
@@ -485,11 +489,12 @@ class WorkflowMap {
             ct           : ['caastools', 'discovery'],
             ct_signif    : ['signification', 'signification/gene_lists'],
             ct_disambig  : ['ct_disambiguation'],
+            asr_robustness : ['asr_robustness'],
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
-            enrichment   : ['enrichment', 'enrichment_excluded'],
+            enrichment   : ['enrichment_excluded'],
             ct_acc       : ['accumulation', 'accumulation/aggregation'],
             vep          : ['characterization/vep'],
-            rer          : ['RERConverge', 'RERConverge/RER_Results'],
+            rer          : ['rerconverge', 'rerconverge/rer_results'],
             fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
             scoring      : ['scoring']
         ]
@@ -533,7 +538,7 @@ class WorkflowMap {
 
     static Map buildCtx(baseDir, paramsMap, workflowMeta) {
         def outdir = baseDir?.toString() ?:
-                    (paramsMap?.outdir ? paramsMap.outdir.toString() : "${workflowMeta?.projectDir}/Out")
+                    (paramsMap?.outdir ? paramsMap.outdir.toString() : "${workflowMeta?.projectDir}/out")
         
         // Dynamic scanning of workflow completion status
         def scanResults = scanWorkflowDirectory(outdir)
@@ -553,6 +558,7 @@ class WorkflowMap {
             ct            : scanResults.ct ?: false,
             ctSignif      : scanResults.ct_signif ?: false,
             ctDisambig    : scanResults.ct_disambig ?: false,
+            asrRobustness : scanResults.asr_robustness ?: false,
             ctPostproc    : scanResults.ct_postproc ?: false,
             enrichment    : scanResults.enrichment ?: false,
             ctAccum       : scanResults.ct_acc ?: false,

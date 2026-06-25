@@ -527,7 +527,7 @@ def extract_node_states_from_node_level(
                     logger.warning(f"Focal node {idx+1} is None for {gene}:{position}")
                 else:
                     logger.warning(
-                        "Focal node %d unresolved for %s:%s at direct MRCA node",
+                        "Focal node %d unresolved for %s:%s",
                         idx + 1,
                         gene,
                         position,

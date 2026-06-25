@@ -2,16 +2,16 @@
 """
 Randomization / permutation analysis for CT_ACCUMULATION in PhyloPhere.
 
-This simplified version only exports aggregated randomization outputs for:
-  - full_pool (US + GS1 + GS2 + GS3 + GS4)
-  - us
-  - gs1
-  - gs2
-  - gs3
-  - gs4
+Exports aggregated randomization outputs for five independent per-group tests:
+  - us, gs1, gs2, gs3, gs4
+
+Each group receives an independent random draw so their p-values are uncorrelated.
+Fisher's combined probability test (χ²= -2Σln(p), df=2k) is then computed
+downstream (report, gene-lists, scoring) to combine evidence across groups without
+the position double-counting that a joint full_pool draw would introduce.
 
 No significance/convergence/divergence category families are exported.
-No FDR or gene-list outputs are generated.
+No FDR or gene-list outputs are generated here.
 """
 
 import argparse
@@ -37,12 +37,12 @@ def _remap_caas_df(df):
     Source-of-truth columns (tab-separated):
       Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
       convergence_description, convergence_mode, CAAP_Group, amino_encoded,
-      is_conserved_meta, conserved_pair, sig_hyp, sig_perm, sig_both,
+      is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
 
     Produces internal schema columns:
-      gene, msa_pos, is_significant (from sig_both), tag, pattern_type (from Pattern),
+      gene, msa_pos, is_significant, tag, pattern_type (from Pattern),
       caap_group (from CAAP_Group, uppercased), iscaap,
       change_side, is_conserved_meta, asr_is_conserved
     """
@@ -51,8 +51,8 @@ def _remap_caas_df(df):
 
     _bool = lambda x: str(x).strip().lower() in {'true', 't', '1', 'yes', 'y'}
 
-    # is_significant: use sig_both (passes both hyp + perm tests)
-    df['is_significant'] = df['sig_both'].map(_bool)
+    # is_significant: coerce to boolean
+    df['is_significant'] = df['is_significant'].map(_bool)
 
     # Coerce conserved-state columns to bool
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
@@ -202,34 +202,32 @@ class RandomizationWorker:
             elig = self.eligible_by_key.get(key)
             if elig is None or elig.size == 0:
                 continue
-            n_fp = cinfo.get('n_full_pool', 0)
-            if n_fp == 0:
-                continue
 
-            slices = {}
-            slices['full_pool'] = (offsets['full_pool'], offsets['full_pool'] + n_fp, 0, n_fp)
-            offsets['full_pool'] += n_fp
-
-            curr = 0
+            # Build per-category (dest_start, dest_end) slices; skip keys with no positions.
+            cat_slices = {}
             for cat in ['us', 'gs1', 'gs2', 'gs3', 'gs4']:
                 n_cat = cinfo.get(f'n_{cat}', 0)
                 if n_cat > 0:
-                    slices[cat] = (offsets[cat], offsets[cat] + n_cat, curr, curr + n_cat)
-                    curr += n_cat
+                    cat_slices[cat] = (offsets[cat], offsets[cat] + n_cat)
                     offsets[cat] += n_cat
-            decile_plans.append((elig, n_fp, slices, key))
+            if not cat_slices:
+                continue
+            decile_plans.append((elig, cat_slices, key))
 
         for r in range(chunk_size):
             uid = f"{os.getpid()}_{chunk_idx}_{r}" if self.export_individual else None
 
-            for elig, n_fp, slices, key in decile_plans:
-                if len(elig) < n_fp:
-                    idx_fp = rng.choice(elig, size=n_fp, replace=True)
-                else:
-                    idx_fp = rng.choice(elig, size=n_fp, replace=False)
-
-                for cat, (dest_start, dest_end, src_start, src_end) in slices.items():
-                    idx_buffers[cat][dest_start:dest_end] = idx_fp[src_start:src_end]
+            for elig, cat_slices, key in decile_plans:
+                # Independent draw per group — no shared pool slice.
+                # This ensures per-group p-values are uncorrelated and Fisher's
+                # combination is statistically valid.
+                for cat, (dest_start, dest_end) in cat_slices.items():
+                    n_cat = dest_end - dest_start
+                    if len(elig) < n_cat:
+                        idx_cat = rng.choice(elig, size=n_cat, replace=True)
+                    else:
+                        idx_cat = rng.choice(elig, size=n_cat, replace=False)
+                    idx_buffers[cat][dest_start:dest_end] = idx_cat
 
                 if self.export_individual:
                     caas_list = self.caas_by_key_lists.get(key, [])
@@ -320,7 +318,7 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
 
 def _write_empty_outputs_and_exit(args):
     """Write empty-but-valid outputs when no rows are available for randomization."""
-    categories = ['full_pool', 'us', 'gs1', 'gs2', 'gs3', 'gs4']
+    categories = ['us', 'gs1', 'gs2', 'gs3', 'gs4']
 
     base_dir = os.path.dirname(args.output_prefix) or '.'
     os.makedirs(base_dir, exist_ok=True)
@@ -466,29 +464,30 @@ def main(args):
             else np.array([float(x) for x in args.decile_bins.split(',')])
         )
 
-    # Apply row validity and keep only requested output pools.
+    # Apply row validity and keep only per-group output pools.
+    # full_pool is intentionally removed: the same physical position can appear in
+    # multiple groups, so summing across groups inflates counts. Fisher's combined
+    # test on the independent per-group p-values is computed downstream instead.
     pool_mask = caas_filter
 
-    full_pool_mask = pool_mask
-    us_mask = pool_mask & _gu.eq('US')
+    us_mask  = pool_mask & _gu.eq('US')
     gs1_mask = pool_mask & _gu.eq('GS1')
     gs2_mask = pool_mask & _gu.eq('GS2')
     gs3_mask = pool_mask & _gu.eq('GS3')
     gs4_mask = pool_mask & _gu.eq('GS4')
 
     logging.info(
-        f"Category sizes: full_pool={full_pool_mask.sum()}, us={us_mask.sum()}, "
-        f"gs1={gs1_mask.sum()}, gs2={gs2_mask.sum()}, "
-        f"gs3={gs3_mask.sum()}, gs4={gs4_mask.sum()}"
+        f"Category sizes: us={us_mask.sum()}, gs1={gs1_mask.sum()}, "
+        f"gs2={gs2_mask.sum()}, gs3={gs3_mask.sum()}, gs4={gs4_mask.sum()}"
     )
 
     def _bc(mask):
         return np.bincount(np.asarray(genes_int[np.asarray(mask, dtype=bool)], dtype=np.int32), minlength=n_genes)
 
-    # Ordered dict (insertion order guaranteed in Python 3.7+): category_name → mask.
+    # Each group gets an independent draw so per-group p-values are uncorrelated,
+    # making Fisher's combination statistically valid.
     actual_counts_masks = dict([
-        ('full_pool', full_pool_mask),
-        ('us', us_mask),
+        ('us',  us_mask),
         ('gs1', gs1_mask),
         ('gs2', gs2_mask),
         ('gs3', gs3_mask),

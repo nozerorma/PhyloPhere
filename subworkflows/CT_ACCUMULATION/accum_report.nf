@@ -30,7 +30,7 @@ process ACCUMULATION_REPORT {
     publishDir path: "${params.outdir}/accumulation/aggregation",
                mode: 'copy', overwrite: true,
                pattern: '*.tsv'
-    publishDir path: "${params.outdir}/HTML_reports",
+    publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
 
