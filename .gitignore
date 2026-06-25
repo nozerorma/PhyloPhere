@@ -28,3 +28,6 @@ subworkflows/VEP/dat/PrimateAI-3D.hg38.txt.gz
 
 # Kate editor swap files
 *.kate-swp
+
+# FCS runtime progress log (written to work dir)
+fcs_progress.log
