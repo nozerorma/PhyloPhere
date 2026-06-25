@@ -15,7 +15,8 @@
 
 // ── helper: shared param resolution ──────────────────────────────────────────
 def fcs_num_g()  { params.fcs_min_genes ?: 10 }
-def fcs_fdr()    { params.fcs_fdr        ?: 0.10 }
+def fcs_fdr()    { params.fcs_fdr        ?: 0.15 }   // BH (adjusted-p) cutoff
+def fcs_pperm()  { params.fcs_pperm_thr  ?: 0.025 }  // permulation-p cutoff (dual threshold)
 def fcs_top_n()  { params.fcs_top_n      ?: 20 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +48,7 @@ process SCORING_FCS_REPORT {
     def gmt_dir   = "${baseDir}/subworkflows/ENRICHMENT/dat"
     def num_g     = fcs_num_g()
     def fdr_thr   = fcs_fdr()
+    def pperm_thr = fcs_pperm()
     def top_n     = fcs_top_n()
     def render = """
         rmarkdown::render(
@@ -58,6 +60,7 @@ process SCORING_FCS_REPORT {
                 project_name  = 'Scoring_FCS_${traitname}',
                 num_g         = ${num_g},
                 fdr_thr       = ${fdr_thr},
+                pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${traitname}'
             ),
@@ -108,6 +111,7 @@ process TOOL_FCS_REPORT {
     def gmt_dir   = "${baseDir}/subworkflows/ENRICHMENT/dat"
     def num_g     = fcs_num_g()
     def fdr_thr   = fcs_fdr()
+    def pperm_thr = fcs_pperm()
     def top_n     = fcs_top_n()
     def enrich_flag = (params.rer_permulation_enrichment ?: false)
     def render = """
@@ -120,6 +124,7 @@ process TOOL_FCS_REPORT {
                 project_name  = '${report_label}',
                 num_g         = ${num_g},
                 fdr_thr       = ${fdr_thr},
+                pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
                 enrich        = ${enrich_flag ? 'TRUE' : 'FALSE'}
@@ -171,6 +176,7 @@ process RER_FCS_REPORT {
     def gmt_dir   = "${baseDir}/subworkflows/ENRICHMENT/dat"
     def num_g     = fcs_num_g()
     def fdr_thr   = fcs_fdr()
+    def pperm_thr = fcs_pperm()
     def top_n     = fcs_top_n()
     def enrich_flag = (params.rer_permulation_enrichment ?: false)
     def render = """
@@ -183,6 +189,7 @@ process RER_FCS_REPORT {
                 project_name  = '${report_label}',
                 num_g         = ${num_g},
                 fdr_thr       = ${fdr_thr},
+                pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
                 perms_file    = '${perms_file}',

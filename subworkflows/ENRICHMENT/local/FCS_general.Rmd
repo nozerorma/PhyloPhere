@@ -19,7 +19,8 @@ params:
   gmt_dir:      NULL          # directory of curated *.gmt files
   project_name: "FCS"
   num_g:        10            # min genes per set (fastwilcoxGMT num.g)
-  fdr_thr:      0.10          # BH cutoff for the "significant" highlight
+  fdr_thr:      0.15          # BH (adjusted-p) cutoff — RERconverge categorical default (msae210)
+  pperm_thr:    0.025         # permulation-p cutoff — applied in addition to fdr_thr when perms exist
   top_n:        20            # rows shown per database x ranking
   traitname:    "trait"
   enrich:       FALSE         # RER-only permutation enrichment toggle
@@ -135,10 +136,21 @@ dir.create("fcs_results", showWarnings = FALSE)
 readr::write_tsv(enrich %>% select(-any_of("gene.vals")), "fcs_results/fcs_all_results.tsv")
 readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
 
-n_sig <- sum(enrich$stat > 0 & enrich$p.adj < params$fdr_thr, na.rm = TRUE)
+# Dual-threshold significance (RERconverge categorical convention, msae210):
+#   adjusted p < fdr_thr AND — when permulations are available — permulation p <
+#   pperm_thr. The permulation p corrects for non-independence in gene ranks; a low
+#   value indicates the BH significance is driven by the phenotype, not other
+#   correlation in the data. Where no permulations exist (perms_file = NO_FILE), the
+#   permulation clause is vacuous and significance falls back to the BH cutoff alone.
+enrich <- enrich %>% dplyr::mutate(
+  sig = stat > 0 & !is.na(p.adj) & p.adj < params$fdr_thr &
+        (is.na(p.perm) | p.perm < params$pperm_thr)
+)
+has_perm_any <- any(!is.na(enrich$p.perm))
+n_sig <- sum(enrich$sig, na.rm = TRUE)
 ```
 
-`r sprintf("**%d** gene sets are positively enriched at BH < %.2g across %d databases.", n_sig, params$fdr_thr, dplyr::n_distinct(enrich$database))`
+`r if (has_perm_any) sprintf("**%d** gene sets are significantly enriched (BH < %.2g **and** permulation p < %.3g) across %d databases.", n_sig, params$fdr_thr, params$pperm_thr, dplyr::n_distinct(enrich$database)) else sprintf("**%d** gene sets are positively enriched at BH < %.2g across %d databases. _(No permulations: permulation-p threshold not applied.)_", n_sig, params$fdr_thr, dplyr::n_distinct(enrich$database))`
 
 # Enriched gene sets {.tabset .tabset-fade}
 
@@ -166,29 +178,26 @@ for (rk in ranking_names) {
     dbres <- sub %>% filter(database == db) %>% head(params$top_n) %>%
       mutate(AUC = round(stat + 0.5, 3),
              Description = stringr::str_trunc(description, 70),
-             pval = signif(pval, 3), 
+             pval = signif(pval, 3),
              p.adj = signif(p.adj, 3))
-    
+    n_pass <- sum(dbres$sig, na.rm = TRUE)   # dual-threshold significance among shown sets
+
     if (has_perm) {
-      dbres <- dbres %>%
-        mutate(p.perm = signif(p.perm, 3)) %>%
+      disp <- dbres %>% mutate(p.perm = signif(p.perm, 3)) %>%
         select(pathway, Description, AUC, num.genes, pval, p.adj, p.perm)
     } else {
-      dbres <- dbres %>%
-        select(pathway, Description, AUC, num.genes, pval, p.adj)
+      disp <- dbres %>% select(pathway, Description, AUC, num.genes, pval, p.adj)
     }
-    
+
     cat(sprintf("\n### %s\n\n", db))
-    
     if (has_perm) {
-      cat(sprintf("_%d sets, %d at p.perm < %g._\n\n", nrow(dbres),
-                  sum(dbres$p.perm < params$fdr_thr, na.rm = TRUE), params$fdr_thr))
+      cat(sprintf("_%d shown, %d significant (BH < %.2g ∩ permulation p < %.3g)._\n\n",
+                  nrow(disp), n_pass, params$fdr_thr, params$pperm_thr))
     } else {
-      cat(sprintf("_%d sets, %d at BH < %.2g._\n\n", nrow(dbres),
-                  sum(dbres$p.adj < params$fdr_thr, na.rm = TRUE), params$fdr_thr))
+      cat(sprintf("_%d shown, %d significant (BH < %.2g)._\n\n",
+                  nrow(disp), n_pass, params$fdr_thr))
     }
-    
-    print(kbl_html(dbres, height = if (nrow(dbres) > 15) "420px" else NULL))
+    print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
   }
 }
 ```
@@ -222,9 +231,9 @@ for (rk in ranking_names) {
 
 # Leading-edge composition {.tabset .tabset-fade}
 
-For each positively-enriched set (BH < `r params$fdr_thr`), the **percentage of its
-leading-edge genes** carrying each attribute — significance gates, directional score
-percentiles, and cross-module support. One table per direction.
+For each significantly-enriched set (BH < `r params$fdr_thr``r if (has_perm_any) sprintf(" ∩ permulation p < %.3g", params$pperm_thr) else ""`), the
+**percentage of its leading-edge genes** carrying each attribute — significance gates,
+directional score percentiles, and cross-module support. One table per direction.
 
 ```{r leadingedge, results='asis'}
 # Friendly display names per attribute column.
@@ -250,9 +259,9 @@ for (rk in ranking_names) {
   cat(sprintf("\n## %s\n\n", rk))
   want <- cols_by_rk[[rk]] %||% attr_cols_all
   le_rk <- leading %>% filter(ranking == rk) %>%
-    semi_join(enrich %>% filter(ranking == rk, stat > 0, p.adj < params$fdr_thr),
+    semi_join(enrich %>% filter(ranking == rk, sig),
               by = c("ranking", "database", "pathway"))
-  if (nrow(le_rk) == 0) { cat("_No sets passed BH for this direction._\n"); next }
+  if (nrow(le_rk) == 0) { cat("_No sets passed the significance thresholds for this direction._\n"); next }
   summ <- fcs_leading_edge_summary(le_rk, want) %>%
     left_join(desc_map, by = c("database", "pathway")) %>%
     mutate(Description = stringr::str_trunc(coalesce(description, pathway), 50),

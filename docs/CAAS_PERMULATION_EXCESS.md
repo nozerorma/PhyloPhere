@@ -82,6 +82,72 @@ Confirm the cluster-purger can run **headless** (gene table only, no report/JSON
 side effects). If it currently couples to reporting, that's the one real plumbing
 task before prototyping.
 
+## Alignment with RERconverge (validated against msae210, the categorical paper)
+
+The categorical RERconverge paper (MBE 2024, msae210; vignette + supplement in
+~/Downloads/msae210_supplementary_data/) confirms our FCS design IS their method:
+- Engine: `fastwilcoxGMTall(getStat(...), annotlist, outputGeneVals=T)` — same as ours.
+- **One-sided** `alternative="greater"` for magnitude/omnibus tests ("only more positive
+  statistics indicate strength"); two-sided for signed pairwise. ⇒ TODO: set
+  alternative="greater" in `fcs_run_ranking` for the non-negative rankings
+  (CAAS/FADE/accum, RER accel/decel zero-floored); keep two-sided for RER signed global.
+- Pathway-level permulations (permute phenotype → recompute RER → re-enrich → empirical
+  p) — exactly what fcs_enrich.R does by re-enriching the corStat perm matrix.
+- Significance = **adjusted p < 0.15 ∩ permulation p < 0.025** (relaxed BH because
+  underpowered + strict perm-p as the non-independence filter; their own example has NO
+  pathway < 0.05 adj-p). p.perm is NOT BH'd (matches fcs_enrich.R). ⇒ adopt 0.15/0.025
+  as the default reporting convention.
+The vectorization (below) must reproduce fastwilcoxGMT EXACTLY incl. the one-sided
+alternative and ties.method="average" — guarded by the equivalence test.
+
+## FCS permulation performance + progress — DONE (2026-06-25)
+
+Implemented in `fcs_enrich.R`: the permulation null is now a vectorized sparse
+`M %*% Rk` per GMT (`fcs_null_enrichstat_vectorized`), replacing 3×N
+`fastwilcoxGMTall` calls. Equivalence to `fastwilcoxGMT` proven at max|Δstat|=0
+by `fcs_enrich_equivtest.R` (clean/ties/NA/num.g/multi-col). Benchmark (16k genes,
+16 GMTs, 35,520 sets): null **~100 s for N=1000** vs ~5 h before; total fcs_run_all
+~95 s (the rest is the N-independent observed enrichment). One-sided `alternative`
+auto-detected per ranking (signed→two.sided, magnitude→greater) incl. recomputed
+one-sided observed analytic p. Progress → stderr + `fcs_progress.log`. The mclapply
+ncores path was removed entirely (no longer needed), so the ncores env bug is moot.
+
+Original analysis (kept for context):
+
+## FCS permulation performance + progress (PREREQUISITE — affects RER too)
+
+The current FCS permulation path (`subworkflows/ENRICHMENT/local/fcs_enrich.R`) is
+the bottleneck for the existing RER run (≈4 h on 16k genes) and will be reused by
+the CAAS excess null — so fix it before scaling either up.
+
+**Root causes**
+1. `fcs_get_enrich_perms_parallel` calls `RERconverge::fastwilcoxGMTall` 3 rankings ×
+   N permulations times (`fcs_enrich.R:149`), re-ranking 16k genes + re-looping all
+   ~30k sets every call. `fcs_permpvalenrich_vectorized` only vectorized the final
+   p-step, not null generation.
+2. ncores fallback bug (`fcs_enrich.R:258`): `Sys.getenv("SLURM_CPUS_PER_TASK","1")`
+   → off-SLURM defaults to "1"; the `detectCores()` fallback never fires because 1L
+   is not NA/<1. Local runs silently use ONE core. Fix:
+   `n <- Sys.getenv("SLURM_CPUS_PER_TASK"); ncores <- if (nzchar(n)) as.integer(n) else parallel::detectCores()`.
+
+**The fix — vectorize (stay in R; do NOT switch language)**
+The Wilcoxon-AUC for a set depends only on its members' rank-sum. Replace the
+per-permulation `fastwilcoxGMTall` calls with:
+- `Rk = matrixStats::colRanks(corStat, ties.method="average")` — rank each perm col once.
+- `M` = sparse set×gene membership matrix (`Matrix`), built once.
+- `M %*% Rk` → rank-sums for all sets × all perms in one BLAS call.
+- Analytic AUC: `U = ranksum - n_S(n_S+1)/2; stat = U/(n_S*n_other) - 0.5`; empirical p.
+- Compute the OBSERVED stat with the same formula for the comparison (keep
+  fastwilcoxGMTall's value for display only) so observed/null share a scale.
+Expect hours → seconds-minutes. Memory ~130 MB (ranks) + ~240 MB (rank-sums) at N=1000.
+
+**Progress tracking (R-side, Nextflow-log friendly)**
+Chunk the N perms; after each chunk emit a timestamped line to stderr AND append to a
+tailable `fcs_progress.log`:
+`[FCS][<ranking>] perms 400/1000 (40%) | 12.3/s | elapsed 0.5m | ETA 0.8m`.
+(`pbmcapply::pbmclapply` is a drop-in alternative but a bar renders poorly in
+non-TTY pipeline logs.) Once vectorized, a per-ranking message largely suffices.
+
 ## Effort estimate
 
 Weekend prototype IF the purger headless-mode is clean. Dominant work = null-mode

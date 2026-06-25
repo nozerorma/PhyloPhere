@@ -31,6 +31,7 @@ suppressPackageStartupMessages({
   library(tidyr)
   library(stringr)
   library(parallel)
+  library(Matrix)        # sparse membership matrix + %*% for the vectorized null
 })
 
 # ── GMT loading ──────────────────────────────────────────────────────────────
@@ -111,16 +112,34 @@ fcs_build_vals <- function(scores, universe, floor = 0) {
 # NOTE: fastwilcoxGMT is internal to RERconverge; fastwilcoxGMTall is the exported
 # wrapper (loops fastwilcoxGMT over a named annotation list and BH-adjusts per
 # GMT). We call it once over all GMTs and stitch the per-database results.
-fcs_run_ranking <- function(vals, gmts, num_g = 10, enrich = FALSE) {
+fcs_run_ranking <- function(vals, gmts, num_g = 10, alternative = "two.sided") {
   reslist <- tryCatch(
     RERconverge::fastwilcoxGMTall(vals, gmts, outputGeneVals = TRUE, num.g = num_g),
     error = function(e) { message(sprintf("  fastwilcoxGMTall failed: %s", e$message)); NULL }
   )
   if (is.null(reslist) || length(reslist) == 0) return(tibble::tibble())
+  vals <- vals[!is.na(vals)]
   out <- list()
   for (db in names(reslist)) {
     res <- reslist[[db]]
     if (is.null(res) || nrow(res) == 0) next
+    # fastwilcoxGMT's simple-mode p-value (simpleAUCgenesRanks) is ALWAYS two-sided.
+    # For one-sided ("greater") magnitude rankings — CAAS/FADE/accum scores and RER
+    # accel/decel (all non-negative, zero-floored) — recompute the analytic p one-
+    # sided from the AUC so a DEPLETED set (stat < 0) is not falsely flagged, then
+    # re-BH per GMT. Matches RERconverge's alternative="greater" omnibus convention.
+    # (Background = the GMT's own annotated genes, exactly as fastwilcoxGMT.)
+    if (alternative == "greater") {
+      gmt  <- gmts[[db]]
+      n_db <- length(intersect(unique(unlist(gmt$genesets)), names(vals)))
+      n1   <- res$num.genes
+      n2   <- n_db - n1
+      U    <- (res$stat + 0.5) * n1 * n2
+      mu   <- n1 * n2 / 2
+      sdv  <- sqrt(n1 * n2 * (n1 + n2 + 1) / 12)
+      res$pval  <- pnorm(U, mu, sdv, lower.tail = FALSE)
+      res$p.adj <- p.adjust(res$pval, method = "BH")
+    }
     out[[db]] <- tibble::as_tibble(res, rownames = "pathway") %>%
       dplyr::mutate(database = db)
   }
@@ -130,196 +149,190 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, enrich = FALSE) {
     dplyr::arrange(p.adj, dplyr::desc(abs(stat)))
 }
 
-# Convenience: run several named rankings (e.g. global/top/bottom) and tag each.
-# Parallelized getEnrichPerms and vectorized permpvalenrich
-fcs_get_enrich_perms_parallel <- function(corperms, realenrich, annotlist, ncores = 1) {
-  numperms <- ncol(corperms$corP)
-  groups <- length(realenrich)
-  
-  c <- 1
-  while (c <= groups) {
-    current <- realenrich[[c]]
-    realenrich[[c]] <- current[order(rownames(current)), ]
-    c <- c + 1
-  }
-  
-  run_one_perm <- function(count) {
-    statvec <- setNames(corperms$corStat[, count], rownames(corperms$corP))
-    statvec <- na.omit(statvec)
-    enrich <- RERconverge::fastwilcoxGMTall(statvec, annotlist, outputGeneVals = FALSE)
-    
-    res_pvals <- vector("list", groups)
-    res_stats <- vector("list", groups)
-    names(res_pvals) <- names(realenrich)
-    names(res_stats) <- names(realenrich)
-    
-    for (db in names(realenrich)) {
-      current <- enrich[[db]]
-      if (!is.null(current) && nrow(current) > 0) {
-        current <- current[order(rownames(current)), ]
-        ref_names <- rownames(realenrich[[db]])
-        current <- current[match(ref_names, rownames(current)), ]
-        res_pvals[[db]] <- current$pval
-        res_stats[[db]] <- current$stat
-      } else {
-        res_pvals[[db]] <- rep(NA_real_, nrow(realenrich[[db]]))
-        res_stats[[db]] <- rep(NA_real_, nrow(realenrich[[db]]))
-      }
-    }
-    list(pvals = res_pvals, stats = res_stats)
-  }
-  
-  message(sprintf("[FCS] Running pathway permutations parallelized on %d cores...", ncores))
-  results <- parallel::mclapply(1:numperms, run_one_perm, mc.cores = ncores)
-  
-  permenrichP <- vector("list", groups)
-  permenrichStat <- vector("list", groups)
-  names(permenrichP) <- names(realenrich)
-  names(permenrichStat) <- names(realenrich)
-  c <- 1
-  while (c <= groups) {
-    newdf <- data.frame(matrix(ncol = numperms, nrow = nrow(realenrich[[c]])))
-    rownames(newdf) <- rownames(realenrich[[c]])
-    permenrichP[[c]] <- newdf
-    permenrichStat[[c]] <- newdf
-    c <- c + 1
-  }
-  
-  for (count in 1:numperms) {
-    perm_res <- results[[count]]
-    if (is.null(perm_res)) {
-      stop(paste("Permutation", count, "failed or returned NULL. Parallel execution might have encountered an error or OOM."))
-    }
-    for (c in 1:groups) {
-      db <- names(realenrich)[c]
-      permenrichP[[c]][, count] <- perm_res$pvals[[db]]
-      permenrichStat[[c]][, count] <- perm_res$stats[[db]]
-    }
-  }
-  
-  data <- vector("list", 5)
-  data[[1]] <- corperms$corP
-  data[[2]] <- corperms$corRho
-  data[[3]] <- corperms$corStat
-  data[[4]] <- permenrichP
-  data[[5]] <- permenrichStat
-  names(data) <- c("corP", "corRho", "corStat", "enrichP", "enrichStat")
-  data
+# ── Per-ranking test sidedness ────────────────────────────────────────────────
+# A signed ranking (negatives present, e.g. RER global getStat = sign(Rho)*-log10P)
+# is two-sided; a non-negative magnitude ranking (CAAS/FADE/accum scores, RER
+# accel/decel zero-floored) is one-sided "greater". Detected from the values so no
+# per-module plumbing is needed.
+fcs_alternative <- function(vals) if (any(vals < 0, na.rm = TRUE)) "two.sided" else "greater"
+
+# ── Progress logging (flushed; survives knitr chunk buffering) ────────────────
+# Writes a timestamped line to stderr AND appends to fcs_progress.log in the work
+# dir, so a run can be followed with `tail -f` even while an Rmd chunk is mid-flight
+# (knitr buffers chunk stdout/stderr, so the file is the reliable channel).
+fcs_progress <- function(msg, file = "fcs_progress.log") {
+  line <- sprintf("[FCS %s] %s", format(Sys.time(), "%H:%M:%S"), msg)
+  message(line)
+  try(cat(line, "\n", sep = "", file = file, append = TRUE), silent = TRUE)
 }
 
-fcs_permpvalenrich_vectorized <- function(realenrich, permvals) {
-  groups <- length(realenrich)
-  enrichpvals <- vector("list", groups)
-  names(enrichpvals) <- names(realenrich)
-  
-  for (count in 1:groups) {
-    currreal <- realenrich[[count]]
-    currenrich <- permvals$enrichStat[[count]]
-    
-    currreal <- currreal[match(rownames(currenrich), rownames(currreal)), , drop = FALSE]
-    mat_enrich <- as.matrix(currenrich)
-    obs_stat <- currreal$stat
-    
-    greater_mat <- abs(mat_enrich) > abs(obs_stat)
-    lessnum <- rowSums(greater_mat, na.rm = TRUE)
-    denom <- rowSums(!is.na(mat_enrich))
-    pvals <- lessnum / denom
-    pvals[is.na(obs_stat)] <- NA_real_
-    
-    names(pvals) <- rownames(currreal)
-    enrichpvals[[count]] <- pvals
+# Per-column ranks (average ties); NA -> 0 so absent genes drop out of the rank-sum
+# (mirrors fastwilcoxGMT's `vals = vals[!is.na(vals)]` then `rank()`).
+fcs_colranks <- function(m) {
+  if (!anyNA(m)) {
+    r <- apply(m, 2, rank, ties.method = "average")
+  } else {
+    r <- apply(m, 2, function(v) { x <- numeric(length(v)); o <- !is.na(v)
+                                   x[o] <- rank(v[o], ties.method = "average"); x })
   }
-  enrichpvals
+  if (is.null(dim(r))) r <- matrix(r, nrow = nrow(m))
+  rownames(r) <- rownames(m)
+  r
+}
+
+# Sparse set x gene membership matrix over a fixed gene space.
+fcs_membership_matrix <- function(genesets_named, set_names, genes) {
+  gi <- setNames(seq_along(genes), genes)
+  ii <- integer(0); jj <- integer(0)
+  for (s in seq_along(set_names)) {
+    g <- genesets_named[[ set_names[s] ]]
+    idx <- gi[g]; idx <- idx[!is.na(idx)]
+    if (length(idx)) { ii <- c(ii, rep.int(s, length(idx))); jj <- c(jj, as.integer(idx)) }
+  }
+  Matrix::sparseMatrix(i = ii, j = jj, x = 1,
+                       dims = c(length(set_names), length(genes)),
+                       dimnames = list(set_names, genes))
+}
+
+# ── Vectorized permulation null statistics ────────────────────────────────────
+# Reproduces fastwilcoxGMTall(corStat[,j], gmts)$stat for EVERY permulation column
+# j in ONE sparse matrix multiply per GMT, replacing N x fastwilcoxGMTall calls.
+# Faithful to fastwilcoxGMT: background = the GMT's own annotated genes; ranks are
+# per-GMT, per-column, average-tie; sets failing num.g (or bkgenes<=2) in a column
+# become NA for that column. Output: named list db -> (sets x N) AUC-0.5 matrix,
+# rows aligned to rownames(realenrich[[db]]). Equivalence to fastwilcoxGMT is
+# proven numerically by fcs_enrich_equivtest.R.
+fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10) {
+  enrichStat <- list()
+  genes_all  <- rownames(corStat)
+  for (db in names(realenrich)) {
+    gmt <- gmts[[db]]
+    set_names <- rownames(realenrich[[db]])
+    if (is.null(gmt) || length(set_names) == 0) {
+      enrichStat[[db]] <- matrix(NA_real_, nrow = length(set_names), ncol = ncol(corStat),
+                                 dimnames = list(set_names, NULL))
+      next
+    }
+    gs <- gmt$genesets; names(gs) <- gmt$geneset.names
+    genes_db <- intersect(unique(unlist(gs)), genes_all)
+    if (length(genes_db) < 3) {
+      enrichStat[[db]] <- matrix(NA_real_, nrow = length(set_names), ncol = ncol(corStat),
+                                 dimnames = list(set_names, NULL))
+      next
+    }
+    M   <- fcs_membership_matrix(gs, set_names, genes_db)  # sets x genes_db
+    sub <- corStat[genes_db, , drop = FALSE]               # genes_db x N
+    Rk  <- fcs_colranks(sub)                               # NA -> 0
+    ranksum <- as.matrix(M %*% Rk)                         # sets x N
+    if (!anyNA(sub)) {
+      n1   <- as.numeric(Matrix::rowSums(M))               # per set, constant over cols
+      n2   <- length(genes_db) - n1
+      U    <- ranksum - (n1 * (n1 + 1) / 2)                # n1/U recycle down columns
+      stat <- (U / (n1 * n2)) - 0.5
+      stat[(n1 < num_g) | (n2 <= 2), ] <- NA_real_
+    } else {
+      notNA <- !is.na(sub)
+      n1    <- as.matrix(M %*% (notNA * 1.0))              # sets x N
+      ntot  <- matrix(colSums(notNA), nrow = nrow(M), ncol = ncol(sub), byrow = TRUE)
+      n2    <- ntot - n1
+      U     <- ranksum - (n1 * (n1 + 1) / 2)
+      stat  <- (U / (n1 * n2)) - 0.5
+      stat[(n1 < num_g) | (n2 <= 2)] <- NA_real_
+    }
+    rownames(stat) <- set_names
+    enrichStat[[db]] <- stat
+  }
+  enrichStat
+}
+
+# Empirical permulation p-value per set (pseudo-count built in), per-ranking sidedness:
+#   greater   -> (#{null >= obs} + 1) / (N_valid + 1)   [magnitude rankings]
+#   two.sided -> (#{|null| >= |obs|} + 1) / (N_valid + 1) [signed rankings]
+fcs_permpvalenrich_vectorized <- function(realenrich, enrichStat, alternative = "two.sided") {
+  out <- list()
+  for (db in names(realenrich)) {
+    null <- enrichStat[[db]]
+    if (is.null(null) || nrow(null) == 0) next
+    obs <- realenrich[[db]]$stat[match(rownames(null), rownames(realenrich[[db]]))]
+    count <- if (alternative == "greater") rowSums(null >= obs, na.rm = TRUE)
+             else                          rowSums(abs(null) >= abs(obs), na.rm = TRUE)
+    denom <- rowSums(!is.na(null))
+    p <- (count + 1) / (denom + 1)
+    p[is.na(obs)] <- NA_real_
+    names(p) <- rownames(null)
+    out[[db]] <- p
+  }
+  out
 }
 
 # rankings: named list of named-numeric vectors (already zero-floored).
 fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
-  res <- list()
+  res <- list(); alts <- list()
   for (rk in names(rankings)) {
-    r <- fcs_run_ranking(rankings[[rk]], gmts, num_g = num_g)
+    alts[[rk]] <- fcs_alternative(rankings[[rk]])
+    r <- fcs_run_ranking(rankings[[rk]], gmts, num_g = num_g, alternative = alts[[rk]])
     if (nrow(r) > 0) res[[rk]] <- dplyr::mutate(r, ranking = rk)
   }
   if (length(res) == 0) {
     return(tibble::tibble(ranking = character(), database = character(), pathway = character(),
-                          stat = numeric(), p.val = numeric(), p.adj = numeric(), p.perm = numeric(), gene.vals = character()))
+                          stat = numeric(), pval = numeric(), p.adj = numeric(), p.perm = numeric(),
+                          num.genes = numeric(), gene.vals = character()))
   }
   enrich_df <- dplyr::bind_rows(res)
   enrich_df$p.perm <- NA_real_
-  
-  # Check if perms_file is provided and exists
+
   if (!is.null(perms_file) && perms_file != "NO_FILE" && file.exists(perms_file)) {
-    message("[FCS] Loading null permutations from: ", perms_file)
+    fcs_progress(paste0("Loading null permulations from: ", perms_file))
     corperms <- tryCatch(readRDS(perms_file), error = function(e) NULL)
-    
+
     if (!is.null(corperms) && !is.null(corperms$corStat)) {
-      n_perms <- ncol(corperms$corStat)
-      message("[FCS] Running pathway permutations (N = ", n_perms, ")...")
-      
-      ncores <- as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "1"))
-      if (is.na(ncores) || ncores < 1) {
-        ncores <- parallel::detectCores()
-        if (is.na(ncores) || ncores < 1) ncores <- 1
-      }
-      ncores <- min(ncores, 16)
-      
+      n_perms      <- ncol(corperms$corStat)
+      base_corStat <- as.matrix(corperms$corStat)
+      base_corRho  <- if (!is.null(corperms$corRho)) as.matrix(corperms$corRho) else NULL
+      fcs_progress(sprintf("Vectorized pathway permulations: N=%d, %d GMTs, %d rankings",
+                           n_perms, length(gmts), length(rankings)))
+
       for (rk in names(rankings)) {
         obs_rk <- enrich_df %>% dplyr::filter(ranking == rk)
         if (nrow(obs_rk) == 0) next
-        
-        # Reconstruct realenrich list format for getEnrichPerms
+        t0  <- Sys.time()
+        alt <- alts[[rk]]
+
+        # Per-ranking transform of the null stat matrix, mirroring the observed
+        # ranking construction (global=signed; accel/decel=zero-floored magnitude).
+        corStat_rk <- base_corStat
+        if (rk == "accelerating" && !is.null(base_corRho)) {
+          corStat_rk <- ifelse(base_corRho > 0,  base_corStat, 0)
+        } else if (rk == "decelerating" && !is.null(base_corRho)) {
+          corStat_rk <- ifelse(base_corRho < 0, -base_corStat, 0)
+        }
+        rownames(corStat_rk) <- rownames(base_corStat)
+
+        # Observed stat per set, per db (rows = pathways).
         realenrich <- list()
         for (db in unique(obs_rk$database)) {
           db_df <- obs_rk %>% dplyr::filter(database == db) %>% as.data.frame()
           rownames(db_df) <- db_df$pathway
-          realenrich[[db]] <- db_df[, c("pval", "stat")]
-          colnames(realenrich[[db]]) <- c("pval", "stat")
+          realenrich[[db]] <- db_df[, c("pval", "stat"), drop = FALSE]
         }
-        
-        # Build null statistics matrix scaled/floored for the current ranking
-        corperms_rk <- corperms
-        if (rk == "global") {
-          corperms_rk$corStat <- as.matrix(corperms$corStat)
-        } else if (rk == "accelerating") {
-          corperms_rk$corStat <- ifelse(as.matrix(corperms$corRho) > 0, as.matrix(corperms$corStat), 0)
-        } else if (rk == "decelerating") {
-          corperms_rk$corStat <- ifelse(as.matrix(corperms$corRho) < 0, -as.matrix(corperms$corStat), 0)
-        } else {
-          corperms_rk$corStat <- as.matrix(corperms$corStat)
+
+        enrichStat <- tryCatch(
+          fcs_null_enrichstat_vectorized(corStat_rk, gmts, realenrich, num_g = num_g),
+          error = function(e) { fcs_progress(sprintf("null stats failed [%s]: %s", rk, e$message)); NULL })
+        if (is.null(enrichStat)) next
+
+        ppv <- fcs_permpvalenrich_vectorized(realenrich, enrichStat, alternative = alt)
+        for (db in names(ppv)) {
+          idx <- which(enrich_df$ranking == rk & enrich_df$database == db)
+          if (length(idx)) enrich_df$p.perm[idx] <- ppv[[db]][enrich_df$pathway[idx]]
         }
-        
-        permvals <- tryCatch({
-          fcs_get_enrich_perms_parallel(corperms_rk, realenrich, gmts, ncores = ncores)
-        }, error = function(e) {
-          message(sprintf("[FCS] fcs_get_enrich_perms_parallel failed for ranking %s: %s", rk, e$message))
-          NULL
-        })
-        
-        if (!is.null(permvals)) {
-          enrichpvals <- tryCatch({
-            fcs_permpvalenrich_vectorized(realenrich, permvals)
-          }, error = function(e) {
-            message(sprintf("[FCS] fcs_permpvalenrich_vectorized failed for ranking %s: %s", rk, e$message))
-            NULL
-          })
-          
-          if (!is.null(enrichpvals)) {
-            for (db in names(enrichpvals)) {
-              raw_pvals <- enrichpvals[[db]]
-              # Apply standard pseudo-count correction (num + 1) / (denom + 1) to pathway permulation p-values
-              corrected_pvals <- (raw_pvals * n_perms + 1) / (n_perms + 1)
-              
-              match_idx <- which(enrich_df$ranking == rk & enrich_df$database == db)
-              if (length(match_idx) > 0) {
-                p_paths <- enrich_df$pathway[match_idx]
-                enrich_df$p.perm[match_idx] <- corrected_pvals[p_paths]
-              }
-            }
-          }
-        }
+        fcs_progress(sprintf("ranking %-13s done (%s) | %d sets across %d GMTs | %.1fs",
+                             rk, alt, nrow(obs_rk), length(realenrich),
+                             as.numeric(difftime(Sys.time(), t0, units = "secs"))))
       }
     }
   }
-  
+
   enrich_df %>% dplyr::relocate(ranking, database, pathway)
 }
 
