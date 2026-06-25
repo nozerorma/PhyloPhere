@@ -52,10 +52,9 @@ process TOOL_STRING_REPORT {
     def fdr_thr           = params.string_fdr              ?: 0.1
     def top_thr           = params.string_top_thr          ?: 15
     def report_num        = params.string_report_num       ?: 20
-    // PPI density test (get_ppi_enrichment) is OFF by default: STRINGdb ignores the
-    // custom background and tests against the WHOLE species interactome, so almost
-    // any biologically-selected list looks "enriched". Only enable with a custom
-    // cleaned_background null (not implemented). See string_enable_ppi in conf.
+    // PPI density test. Honours the custom background: set_background(cleaned_background)
+    // in STRING_general.Rmd is forwarded to the STRING API, so the null is draws from
+    // cleaned_background, not the whole proteome. See string_enable_ppi in conf.
     def enable_ppi        = (params.string_enable_ppi ?: false) ? 'TRUE' : 'FALSE'
     def bg_name           = background_file instanceof List
         ? background_file[0].getName().replace("'", "\\'")

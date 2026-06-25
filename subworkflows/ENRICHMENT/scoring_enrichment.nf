@@ -64,9 +64,9 @@ process SCORING_STRING_REPORT {
     def net_score = params.string_network_score_thr ?: 700
     def fdr_thr   = params.string_fdr              ?: 0.1
     def top_thr   = params.string_top_thr          ?: 15
-    // PPI density test OFF by default — STRINGdb's get_ppi_enrichment ignores the
-    // custom background and tests against the whole species interactome (flags
-    // almost any list). See string_enable_ppi in conf/enrichment.config.
+    // PPI density test. Honours the custom background: set_background(cleaned_background)
+    // is forwarded to the STRING API, so the null is draws from cleaned_background, not
+    // the whole proteome. See string_enable_ppi in conf/enrichment.config.
     def enable_ppi = (params.string_enable_ppi ?: false) ? 'TRUE' : 'FALSE'
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
