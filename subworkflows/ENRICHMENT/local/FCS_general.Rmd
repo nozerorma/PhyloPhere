@@ -25,6 +25,9 @@ params:
   traitname:    "trait"
   enrich:       FALSE         # RER-only permutation enrichment toggle
   perms_file:   "NO_FILE"
+  annot_file:   "NO_FILE"     # optional cross-module annotation overlay (SCORING fcs_stats.tsv):
+                              # supplies flag_* + CAAS score_top/score_bottom for the leading edge.
+                              # When NO_FILE, annotation falls back to the stats file itself.
 ---
 
 ```{r setup, include=FALSE}
@@ -79,9 +82,25 @@ if (length(universe) < 2) {
 }
 
 score_cols <- grep("^score_", names(stats), value = TRUE)
-flag_cols  <- grep("^flag_",  names(stats), value = TRUE)
 if (length(score_cols) == 0) stop("stats_file has no score_<ranking> columns")
 ranking_names <- sub("^score_", "", score_cols)
+
+# Annotation overlay: cross-module leading-edge flags (+ CAAS directional scores for
+# the top/bottom percentiles) come from a separate file when provided — e.g. SCORING's
+# fcs_stats.tsv — so a per-module report (RER/FADE/accum) ranked by its OWN score can
+# still be annotated with CAAS gates / FADE / accumulation membership. RANKINGS always
+# come from `stats`; only annotation comes from `annot`. Falls back to `stats` itself
+# (the CAAS report carries its own flags), so the un-annotated path is unchanged.
+annot <- stats
+if (!is.null(params$annot_file) && file.exists(params$annot_file) &&
+    !grepl("^NO_", basename(params$annot_file))) {
+  annot <- readr::read_tsv(params$annot_file, show_col_types = FALSE)
+  if (!"gene" %in% names(annot)) {
+    gcol <- intersect(c("Gene", "GENE"), names(annot))[1]
+    if (!is.na(gcol)) annot <- dplyr::rename(annot, gene = !!gcol)
+  }
+}
+flag_cols <- grep("^flag_", names(annot), value = TRUE)
 
 gmt_dir <- params$gmt_dir %||% file.path(this_dir, "..", "dat")
 invisible(capture.output(suppressMessages(gmts <- fcs_load_gmts(gmt_dir))))
@@ -112,10 +131,12 @@ enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g, per
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%
   dplyr::mutate(description = dplyr::coalesce(description, pathway))
 
-# Per-gene attribute table: stats flags + derived directional percentile flags.
-pct_flags <- fcs_percentile_flags(stats)
+# Per-gene attribute table: annotation flags + derived directional percentile flags.
+# Sourced from `annot` (the overlay) so per-module reports inherit CAAS/FADE/accum
+# annotation; `annot` defaults to `stats` when no overlay is supplied.
+pct_flags <- fcs_percentile_flags(annot)
 attr_df <- pct_flags
-if (length(flag_cols)) attr_df <- dplyr::left_join(pct_flags, stats[, c("gene", flag_cols)], by = "gene")
+if (length(flag_cols)) attr_df <- dplyr::left_join(pct_flags, annot[, c("gene", flag_cols)], by = "gene")
 attr_cols_all <- setdiff(names(attr_df), "gene")
 
 # Restrict the leading edge to the genes that actually DRIVE each enrichment —

@@ -100,6 +100,7 @@ process TOOL_FCS_REPORT {
     path fcs_stats
     path universe
     val  report_label
+    path annot_file
 
     output:
     path "${report_label}.html",            emit: report
@@ -127,7 +128,8 @@ process TOOL_FCS_REPORT {
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
-                enrich        = ${enrich_flag ? 'TRUE' : 'FALSE'}
+                enrich        = ${enrich_flag ? 'TRUE' : 'FALSE'},
+                annot_file    = '${annot_file}'
             ),
             output_file = '${report_label}.html'
         )
@@ -165,6 +167,7 @@ process RER_FCS_REPORT {
     path universe
     val  report_label
     path perms_file
+    path annot_file
 
     output:
     path "${report_label}.html",            emit: report
@@ -193,7 +196,8 @@ process RER_FCS_REPORT {
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
                 perms_file    = '${perms_file}',
-                enrich        = ${enrich_flag ? 'TRUE' : 'FALSE'}
+                enrich        = ${enrich_flag ? 'TRUE' : 'FALSE'},
+                annot_file    = '${annot_file}'
             ),
             output_file = '${report_label}.html'
         )

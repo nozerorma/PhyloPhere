@@ -181,7 +181,8 @@ workflow RER_MAIN {
                     rer_lists.fcs_stats,
                     rer_bg_ch,
                     Channel.value("FCS_rer_${params.traitname}"),
-                    perms_file_ch
+                    perms_file_ch,
+                    Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
                 )
             }
             if (params.string) {

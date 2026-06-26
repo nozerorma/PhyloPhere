@@ -165,7 +165,8 @@ workflow CT_ACCUMULATION {
                     fcs_subpath_ch,
                     fcs_stats_ch,
                     fcs_bg_ch,
-                    fcs_label_ch
+                    fcs_label_ch,
+                    Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats
                 )
             }
 

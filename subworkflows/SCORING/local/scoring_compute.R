@@ -1006,6 +1006,43 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom, %d gate_sig)\n",
             nrow(fcs_stats), sum(!is.na(fcs_stats$score_top)),
             sum(!is.na(fcs_stats$score_bottom)), sum(fcs_stats$flag_gate_sig)))
 
+# ── Per-module FCS RANKING files (rankings only) ─────────────────────────────
+# Each carries only its module's score_<ranking> columns. The cross-module
+# leading-edge annotation (CAAS gates, top/bottom percentiles, FADE, accum) is
+# supplied separately to the FCS report via annot_file = fcs_stats.tsv (above).
+# This lets SCORING render an FCS report per module — ranked by that module's own
+# statistic, annotated with every module's evidence — downstream of the join.
+.nonempty <- function(col) .has(gene_scores, col) && any(!is.na(gene_scores[[col]]))
+
+if (.nonempty("rer_rho") && .nonempty("rer_min_pval")) {
+  .rp <- pmax(suppressWarnings(as.numeric(.col(gene_scores, "rer_min_pval"))), 1e-300)
+  .rr <- suppressWarnings(as.numeric(.col(gene_scores, "rer_rho")))
+  write_tsv(tibble(
+    gene               = gene_scores$Gene,
+    score_global       = sign(.rr) * -log10(.rp),
+    score_accelerating = ifelse(.rr > 0, -log10(.rp), 0),
+    score_decelerating = ifelse(.rr < 0, -log10(.rp), 0)
+  ), "fcs_stats_rer.tsv")
+  cat("  fcs_stats_rer.tsv written (RER rankings)\n")
+}
+
+if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
+  write_tsv(tibble(
+    gene         = gene_scores$Gene,
+    score_top    = suppressWarnings(as.numeric(.col(gene_scores, "fade_max_bf_top"))),
+    score_bottom = suppressWarnings(as.numeric(.col(gene_scores, "fade_max_bf_bottom")))
+  ), "fcs_stats_fade.tsv")
+  cat("  fcs_stats_fade.tsv written (FADE BF rankings)\n")
+}
+
+if (.nonempty("gene_rand_score")) {
+  write_tsv(tibble(
+    gene         = gene_scores$Gene,
+    score_global = suppressWarnings(as.numeric(.col(gene_scores, "gene_rand_score")))
+  ), "fcs_stats_accum.tsv")
+  cat("  fcs_stats_accum.tsv written (accumulation rankings)\n")
+}
+
 # Correlations
 write_tsv(corr_results, "gene_correlations.tsv")
 

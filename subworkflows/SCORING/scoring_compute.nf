@@ -52,6 +52,9 @@ process SCORING_COMPUTE {
     path "position_scores.tsv",                              emit: position_scores
     path "gene_scores.tsv",                                  emit: gene_scores
     path "fcs_stats.tsv",                                    emit: fcs_stats
+    path "fcs_stats_rer.tsv",                          optional: true, emit: fcs_stats_rer
+    path "fcs_stats_fade.tsv",                         optional: true, emit: fcs_stats_fade
+    path "fcs_stats_accum.tsv",                        optional: true, emit: fcs_stats_accum
     path "gene_correlations.tsv",                            emit: gene_correlations
     path "position_score_stress_summary.tsv",         optional: true, emit: stress_summary
     path "position_score_stress_correlations.tsv",    optional: true, emit: stress_correlations

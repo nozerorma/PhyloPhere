@@ -160,7 +160,13 @@ process SCORING_COMPARE_REPORT {
                pattern: 'compare_results/**'
 
     input:
-    path fcs_all_results   // fcs_results/fcs_all_results.tsv or NO_FCS_ALL placeholder
+    // One fcs_all_results.tsv per module — stageAs distinct names to avoid the
+    // same-filename collision; absent modules arrive as the NO_FCS_ALL sentinel and
+    // are filtered by the non-empty (-s) guard below + column validation in the Rmd.
+    path caas_fcs,  stageAs: 'caas_fcs_all.tsv'    // CAAS (composite) FCS results
+    path rer_fcs,   stageAs: 'rer_fcs_all.tsv'     // RER FCS results
+    path fade_fcs,  stageAs: 'fade_fcs_all.tsv'    // FADE FCS results
+    path accum_fcs, stageAs: 'accum_fcs_all.tsv'   // accumulation FCS results
     path string_tsvs       // string_results/*_enrichment.tsv files (may be placeholder)
 
     output:
@@ -170,7 +176,8 @@ process SCORING_COMPARE_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def traitname = params.traitname ?: 'unknown_trait'
-    def fdr_thr   = params.scoring_compare_fdr   ?: params.fcs_fdr ?: 0.1
+    def fdr_thr   = params.scoring_compare_fdr   ?: params.fcs_fdr ?: 0.15
+    def pperm_thr = params.fcs_pperm_thr         ?: 0.025
     def top_n     = params.scoring_compare_top_n  ?: 20
 
     def render_cmd = """
@@ -181,6 +188,7 @@ process SCORING_COMPARE_REPORT {
                     fcs_dir    = 'cmp_fcs',
                     string_dir = 'cmp_string',
                     fdr_thr    = ${fdr_thr},
+                    pperm_thr  = ${pperm_thr},
                     top_n      = ${top_n},
                     traitname  = '${traitname}'
                 ),
@@ -194,8 +202,11 @@ process SCORING_COMPARE_REPORT {
 
         mkdir -p cmp_fcs cmp_string
 
-        # FCS all-results table
-        [ -f "fcs_all_results.tsv" ] && cp "fcs_all_results.tsv" cmp_fcs/ || true
+        # Per-module FCS all-results tables (skip empty/sentinel files via -s).
+        # COMPARE_scoring.Rmd derives the module from the <module>_fcs_all.tsv name.
+        for m in caas rer fade accum; do
+            [ -s "\${m}_fcs_all.tsv" ] && cp "\${m}_fcs_all.tsv" "cmp_fcs/\${m}_fcs_all.tsv" || true
+        done
 
         # STRING enrichment TSVs
         for f in *_enrichment.tsv; do

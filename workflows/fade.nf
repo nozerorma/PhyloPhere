@@ -215,7 +215,8 @@ workflow FADE {
                         Channel.value(subpath),
                         lists_out.fcs_stats,
                         bg_ch,
-                        Channel.value("FCS_fade_${direction}_${params.traitname ?: 'trait'}")
+                        Channel.value("FCS_fade_${direction}_${params.traitname ?: 'trait'}"),
+                        Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats
                     )
                 }
                 if (params.string) {

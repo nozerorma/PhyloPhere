@@ -16,6 +16,11 @@ include { SCORING_COMPUTE }                                                     
 include { SCORING_REPORT }                                                            from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
 include { SCORING_STRING_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/scoring_enrichment.nf"
 include { SCORING_FCS_REPORT }                            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+// Per-module annotated FCS reports, rendered downstream of the scoring join so each
+// module's ranking carries the cross-module leading-edge annotation (annot_file).
+include { TOOL_FCS_REPORT as MODULE_FCS_RER;
+          TOOL_FCS_REPORT as MODULE_FCS_FADE;
+          TOOL_FCS_REPORT as MODULE_FCS_ACCUM } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 
 
 workflow SCORING {
@@ -138,6 +143,24 @@ workflow SCORING {
             .collect()
         def fcs_out = SCORING_FCS_REPORT(compute_out.fcs_stats, fcs_universe_ch)
 
+        // ── Per-module annotated FCS reports (downstream of the scoring join) ──
+        // Each module's FCS report is ranked by ITS OWN statistic (RER/FADE/accum)
+        // but annotated with the shared cross-module leading-edge flags via
+        // annot_file = the CAAS fcs_stats.tsv. The per-module ranking files are
+        // OPTIONAL emits from SCORING_COMPUTE — when a module did not run, its
+        // channel is empty and the corresponding report is simply not rendered.
+        def annot_ch = compute_out.fcs_stats.first()
+        def trait_lbl = params.traitname ?: 'trait'
+        def rer_fcs = MODULE_FCS_RER(
+            Channel.value('scoring/rer'),   compute_out.fcs_stats_rer,
+            fcs_universe_ch, Channel.value("FCS_rer_${trait_lbl}"),   annot_ch)
+        def fade_fcs = MODULE_FCS_FADE(
+            Channel.value('scoring/fade'),  compute_out.fcs_stats_fade,
+            fcs_universe_ch, Channel.value("FCS_fade_${trait_lbl}"),  annot_ch)
+        def accum_fcs = MODULE_FCS_ACCUM(
+            Channel.value('scoring/accum'), compute_out.fcs_stats_accum,
+            fcs_universe_ch, Channel.value("FCS_accum_${trait_lbl}"), annot_ch)
+
         // ── STRING on the gated directional 9-slice gene lists ────────────
         def run_string = params.scoring_string ?: false
         def string_out = null
@@ -145,9 +168,14 @@ workflow SCORING {
             string_out = SCORING_STRING_REPORT(gene_lists_ch, fcs_universe_ch, compute_out.gene_scores)
         }
 
-        // ── Comparative report: Top vs Bottom across FCS + STRING ─────────
-        def fcs_all_ch = fcs_out.fcs_all_results
-            .ifEmpty { file('NO_FCS_ALL') }
+        // ── Comparative report: cross-module overview of enriched terms ───
+        // Collects every module's fcs_all_results (CAAS/RER/FADE/accum) so COMPARE
+        // can show which pathways are enriched in which module and highlight
+        // multi-module convergence. Absent modules → NO_FCS_ALL sentinel.
+        def caas_all  = fcs_out.fcs_all_results.ifEmpty   { file('NO_FCS_ALL') }
+        def rer_all   = rer_fcs.fcs_all_results.ifEmpty   { file('NO_FCS_ALL') }
+        def fade_all  = fade_fcs.fcs_all_results.ifEmpty  { file('NO_FCS_ALL') }
+        def accum_all = accum_fcs.fcs_all_results.ifEmpty { file('NO_FCS_ALL') }
 
         def string_tsv_ch = run_string
             ? string_out.string_enrichment_tsvs
@@ -155,12 +183,15 @@ workflow SCORING {
                 .collect()
             : Channel.value([ file('NO_STRING_TSV') ])
 
-        def cmp_out = SCORING_COMPARE_REPORT(fcs_all_ch, string_tsv_ch)
+        def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, fade_all, accum_all, string_tsv_ch)
 
         // Collect all reports to force Nextflow to wait for completion
         def final_reports = report_out.report
             .mix(fcs_out.report)
             .mix(cmp_out.report)
+            .mix(rer_fcs.report)
+            .mix(fade_fcs.report)
+            .mix(accum_fcs.report)
         if (run_string) {
             final_reports = final_reports.mix(string_out.report)
         }

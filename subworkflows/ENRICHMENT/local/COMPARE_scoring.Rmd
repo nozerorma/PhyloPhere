@@ -1,5 +1,5 @@
 ---
-title: "Top vs Bottom Comparative Enrichment — `r params$traitname`"
+title: "Comparative Enrichment Across Modules — `r params$traitname`"
 author: "PhyloPhere Pipeline"
 date: "`r Sys.Date()`"
 output:
@@ -14,9 +14,10 @@ output:
     mathjax: null
     md_extensions: "-tex_math_dollars"   # gene-set names may contain '$' (V$HNF4_01)
 params:
-  fcs_dir:    "cmp_fcs"       # dir containing fcs_all_results.tsv
+  fcs_dir:    "cmp_fcs"       # dir of per-module <module>_fcs_all.tsv
   string_dir: "cmp_string"    # dir of *_enrichment.tsv (optional)
-  fdr_thr:    0.10
+  fdr_thr:    0.15
+  pperm_thr:  0.025
   top_n:      20
   traitname:  "trait"
 ---
@@ -39,13 +40,27 @@ kbl_html <- function(df, height = NULL) {
 ```
 
 ```{r load, include=FALSE}
-fcs_file <- file.path(params$fcs_dir, "fcs_all_results.tsv")
-fcs <- if (file.exists(fcs_file)) readr::read_tsv(fcs_file, show_col_types = FALSE) else tibble()
-has_fcs <- nrow(fcs) > 0 && all(c("ranking", "database", "pathway", "stat", "p.adj") %in% names(fcs))
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+REQ <- c("ranking", "database", "pathway", "stat", "p.adj")
 
-le_file <- file.path(params$fcs_dir, "fcs_leading_edge.tsv")
-le <- if (file.exists(le_file)) readr::read_tsv(le_file, show_col_types = FALSE) else tibble()
-has_le <- nrow(le) > 0
+# Per-module FCS results: cmp_fcs/<module>_fcs_all.tsv (caas/rer/fade/accum).
+mod_files <- list.files(params$fcs_dir, pattern = "_fcs_all\\.tsv$", full.names = TRUE)
+fcs_by_mod <- list()
+for (f in mod_files) {
+  mod <- sub("_fcs_all\\.tsv$", "", basename(f))
+  d <- tryCatch(readr::read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
+  if (!is.null(d) && nrow(d) > 0 && all(REQ %in% names(d))) {
+    fcs_by_mod[[mod]] <- dplyr::mutate(d, module = mod)
+  }
+}
+fcs_all_mod <- if (length(fcs_by_mod)) dplyr::bind_rows(fcs_by_mod) else tibble()
+modules_present <- names(fcs_by_mod)
+has_multi <- length(fcs_by_mod) >= 1
+
+# The CAAS module drives the legacy top-vs-bottom section (backward compatible).
+fcs <- fcs_by_mod[["caas"]] %||% tibble()
+has_fcs <- nrow(fcs) > 0 && all(REQ %in% names(fcs))
+has_le <- FALSE; le <- tibble()   # leading edge not collected cross-module
 
 string_files <- list.files(params$string_dir, pattern = "_enrichment\\.tsv$", full.names = TRUE)
 string_all <- if (length(string_files) > 0)
@@ -56,19 +71,99 @@ has_string <- nrow(string_all) > 0
 # Overview
 
 ```{r overview, echo=FALSE}
+mod_rows <- if (has_multi) sapply(fcs_by_mod, nrow) else integer(0)
 tibble::tibble(
-  Source = c("FCS (Wilcoxon-AUC)", "STRING"),
-  Rows   = c(nrow(fcs), nrow(string_all)),
-  Available = c(has_fcs, has_string)
+  Source = c(paste0("FCS module: ", names(mod_rows)), "STRING"),
+  Rows   = c(unname(mod_rows), nrow(string_all))
 ) %>% kbl_html()
 ```
 
-This report contrasts the **top** and **bottom** directional FCS rankings for `r params$traitname`: which enriched gene sets are shared, and which are
-direction-specific. A set is "significant" at BH < `r params$fdr_thr` with AUC > 0.5.
+This report compares enrichment **across the evidence modules** (CAAS, RER, FADE,
+accumulation) for `r params$traitname`. Because every module is scored by the same
+FCS engine and dual-threshold significance, a gene set enriched in **multiple**
+modules is convergent, independent evidence. A set is "significant" at BH < `r params$fdr_thr`
+(and permulation p < threshold where available) with AUC > 0.5.
 
-# FCS: Top vs Bottom {.tabset .tabset-fade}
+# Cross-module convergence {.tabset .tabset-fade}
 
-`r if (!has_fcs) "> **No FCS results available — skipping.**"`
+`r if (!has_multi) "> **No module FCS results available — skipping.**"`
+
+```{r xmod_prep, eval=has_multi}
+thr <- params$fdr_thr
+# Per (module, database, pathway): take the BEST positively-enriched ranking
+# (smallest p.adj with AUC > 0.5). p.perm tightens significance when present.
+best <- fcs_all_mod %>%
+  mutate(sig = !is.na(p.adj) & p.adj < thr & stat > 0 &
+               (!("p.perm" %in% names(.)) | is.na(p.perm) | p.perm < (params$pperm_thr %||% 1))) %>%
+  filter(stat > 0) %>%
+  group_by(module, database, pathway) %>%
+  summarise(AUC = max(stat, na.rm = TRUE) + 0.5,
+            p.adj = min(p.adj, na.rm = TRUE),
+            sig = any(sig, na.rm = TRUE),
+            description = dplyr::first(dplyr::coalesce(description, pathway)),
+            .groups = "drop")
+
+# Convergence matrix: which modules call each term significant.
+conv <- best %>%
+  filter(sig) %>%
+  group_by(database, pathway) %>%
+  summarise(n_modules = dplyr::n_distinct(module),
+            modules = paste(sort(unique(module)), collapse = ", "),
+            min_padj = min(p.adj, na.rm = TRUE),
+            description = dplyr::first(description),
+            .groups = "drop") %>%
+  arrange(desc(n_modules), min_padj)
+
+dir.create("compare_results", showWarnings = FALSE)
+readr::write_tsv(conv, "compare_results/cross_module_convergence.tsv")
+readr::write_tsv(best, "compare_results/cross_module_best_per_term.tsv")
+```
+
+## Convergent terms (≥2 modules)
+
+```{r xmod_convergent, eval=has_multi, results='asis'}
+cv <- conv %>% filter(n_modules >= 2)
+if (nrow(cv) == 0) {
+  cat(sprintf("_No gene set is significant in ≥2 modules at BH < %.2g._\n\n", thr))
+} else {
+  cat(sprintf("**%d** gene sets are significantly enriched in **≥2 modules** — the strongest, independent-evidence pathways.\n\n", nrow(cv)))
+  disp <- cv %>%
+    mutate(Description = stringr::str_trunc(description, 60), min_padj = signif(min_padj, 3)) %>%
+    select(database, pathway, Description, n_modules, modules, min_padj) %>%
+    head(params$top_n)
+  print(kbl_html(disp, height = if (nrow(disp) > 15) "460px" else NULL))
+}
+```
+
+## Term × module heatmap
+
+```{r xmod_heatmap, eval=has_multi, fig.height=7}
+top_terms <- conv %>% slice_head(n = 30) %>% select(database, pathway)
+hm <- best %>%
+  semi_join(top_terms, by = c("database", "pathway")) %>%
+  mutate(label = stringr::str_trunc(description, 45),
+         score = ifelse(sig, -log10(pmax(p.adj, 1e-300)), NA_real_))
+if (nrow(hm) > 0) {
+  p <- ggplot(hm, aes(x = module, y = forcats::fct_reorder(label, score, .fun = max, na.rm = TRUE), fill = score)) +
+    geom_tile(colour = "grey90") +
+    scale_fill_viridis_c(name = "-log10 BH", option = "C", na.value = "grey95") +
+    labs(title = sprintf("Top convergent terms across modules — %s", params$traitname),
+         x = NULL, y = NULL) +
+    theme_minimal(base_size = 10)
+  print(p)
+} else {
+  cat("_No significant terms to display._\n")
+}
+```
+
+---
+
+# FCS: Top vs Bottom (CAAS) {.tabset .tabset-fade}
+
+The section below contrasts the **top** and **bottom** directional CAAS rankings:
+which enriched gene sets are shared, and which are direction-specific.
+
+`r if (!has_fcs) "> **No CAAS FCS results available — skipping.**"`
 
 ```{r fcs_prep, eval=has_fcs}
 thr <- params$fdr_thr
