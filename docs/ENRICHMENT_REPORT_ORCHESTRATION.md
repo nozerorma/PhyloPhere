@@ -1,8 +1,30 @@
 # Enrichment report orchestration — Option A + COMPARE cross-FCS overview
 
-> Status: **planned** (not started). Captured 2026-06-26. Approved direction:
-> Option A (per-module FCS reports downstream of SCORING, auto-annotated) plus a
-> generalized COMPARE_REPORT giving a cross-FCS overview of enriched terms.
+> Status: **IMPLEMENTED 2026-06-26 (commit fe36c25), R-validated, NEEDS END-TO-END RUN.**
+> Per-module FCS reports now render downstream of SCORING with the annot_file overlay;
+> COMPARE generalized to the cross-module convergence overview. R logic validated
+> (annot overlay, convergence table, equivalence test 0-diff). What remains:
+>
+> **MUST verify in an end-to-end pipeline run before relying on it:**
+> 1. **stageAs + NO_FCS_ALL sentinel** in SCORING_COMPARE_REPORT: when a module is
+>    absent, its fcs_all_results channel is `.ifEmpty{file('NO_FCS_ALL')}`. Confirm
+>    Nextflow stages that sentinel under the stageAs name without a "path does not
+>    exist" error (the existing code uses the same sentinel pattern, but stageAs +
+>    the rer/fade/accum-absent path is newly exercised). If it errors, create real
+>    empty placeholder files instead of the bare `file('NO_FCS_ALL')`.
+> 2. **Optional-emit gating**: MODULE_FCS_* should simply not run when its
+>    fcs_stats_{rer,fade,accum} emit is absent (empty channel). Confirm.
+> 3. **Duplication**: in-branch RER/FADE/accum FCS reports still run (NOT gated on
+>    !params.scoring) — so a full run renders both the in-branch (module-only, RER
+>    keeps runtime p.perm) AND the scoring-centralized (annotated) reports. Decide
+>    whether to gate the in-branch ones off when scoring runs (left ON for safety:
+>    the in-branch RER report is the one with runtime permulation p.perm).
+> 4. The centralized RER render uses TOOL_FCS_REPORT (no perms) → BH-only. Runtime
+>    RER permulation stays in the in-branch RER_FCS_REPORT. If you want p.perm in the
+>    centralized/COMPARE RER too, pipe RER_MAIN.out perms into SCORING.
+>
+> Original plan below (for context).
+> ────────────────────────────────────────────────────────────────────────────
 
 ## Why
 
