@@ -159,7 +159,11 @@ workflow RER_MAIN {
             def effective_perms  = rer_perms_out  ?: (params.rer_perms_file  ? Channel.value(file(params.rer_perms_file))  : Channel.empty())
             def perms_file_ch    = effective_perms.ifEmpty(file('NO_FILE'))
 
-            def rer_lists = RER_GENE_LISTS(effective_report)
+            // Optional cross-module annotation source (CAAS gates, FADE, accum,
+            // CAAS directional scores) from a scoring gene-scores TSV. Mirrors the
+            // rer_perms_file pattern; NO_FILE when unset → only RER columns appear.
+            def gene_scores_ch = params.rer_gene_scores ? Channel.value(file(params.rer_gene_scores)) : Channel.value(file('NO_FILE'))
+            def rer_lists = RER_GENE_LISTS(effective_report, gene_scores_ch)
 
             // Separate background from gene lists for the ORA processes
             def rer_bg_ch = rer_lists.gene_lists
