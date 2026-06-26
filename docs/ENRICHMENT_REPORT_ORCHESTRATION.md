@@ -14,14 +14,14 @@
 >    empty placeholder files instead of the bare `file('NO_FCS_ALL')`.
 > 2. **Optional-emit gating**: MODULE_FCS_* should simply not run when its
 >    fcs_stats_{rer,fade,accum} emit is absent (empty channel). Confirm.
-> 3. **Duplication**: in-branch RER/FADE/accum FCS reports still run (NOT gated on
->    !params.scoring) — so a full run renders both the in-branch (module-only, RER
->    keeps runtime p.perm) AND the scoring-centralized (annotated) reports. Decide
->    whether to gate the in-branch ones off when scoring runs (left ON for safety:
->    the in-branch RER report is the one with runtime permulation p.perm).
-> 4. The centralized RER render uses TOOL_FCS_REPORT (no perms) → BH-only. Runtime
->    RER permulation stays in the in-branch RER_FCS_REPORT. If you want p.perm in the
->    centralized/COMPARE RER too, pipe RER_MAIN.out perms into SCORING.
+> 3. **Duplication — RESOLVED (commit 144fa26).** In-branch RER/FADE/accum FCS reports
+>    are now gated on `!params.scoring`; when SCORING runs it renders the single
+>    centralized annotated set. Gene-list extraction (for STRING) still runs in-branch.
+> 4. **RER p.perm — RESOLVED (commit 144fa26).** RER_MAIN emits `perms`; main.nf threads
+>    it into SCORING (11th arg); scoring.nf renders RER via RER_FCS_REPORT (perms +
+>    annot) so the centralized/COMPARE RER carries p.perm. FADE/accum BH-only (no
+>    permulation null); accumulation swaps to a perms-capable render once its excess
+>    null exists. Verify the perms channel actually arrives non-empty in the run.
 >
 > Original plan below (for context).
 > ────────────────────────────────────────────────────────────────────────────
