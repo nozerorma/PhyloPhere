@@ -175,7 +175,9 @@ workflow RER_MAIN {
                 .filter { it.name != 'background.txt' }
                 .collect()
 
-            if (params.enrichment) {
+            // Skip when SCORING runs: it renders the annotated, centralized RER FCS
+            // (with p.perm + cross-module flags). Avoids per-tool + centralized duplication.
+            if (params.enrichment && !params.scoring) {
                 RER_FCS_REPORT(
                     Channel.value('rerconverge'),
                     rer_lists.fcs_stats,
@@ -197,4 +199,6 @@ workflow RER_MAIN {
 
     emit:
         summary_tsv = rer_report_out ?: (params.rer_report_file ? Channel.value(file(params.rer_report_file)) : Channel.empty())
+        // Permulation null matrix (corStat RDS) for downstream FCS p.perm in SCORING.
+        perms = (rer_perms_out ?: (params.rer_perms_file ? Channel.value(file(params.rer_perms_file)) : Channel.empty()))
 }

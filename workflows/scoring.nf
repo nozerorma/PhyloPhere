@@ -18,8 +18,11 @@ include { SCORING_STRING_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subwo
 include { SCORING_FCS_REPORT }                            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 // Per-module annotated FCS reports, rendered downstream of the scoring join so each
 // module's ranking carries the cross-module leading-edge annotation (annot_file).
-include { TOOL_FCS_REPORT as MODULE_FCS_RER;
-          TOOL_FCS_REPORT as MODULE_FCS_FADE;
+// RER uses RER_FCS_REPORT so it can carry permulation p.perm; FADE/accum have no
+// permulation null, so TOOL_FCS_REPORT (BH-only) — p.perm stays NA and the dual
+// threshold degrades to BH for them.
+include { RER_FCS_REPORT  as MODULE_FCS_RER }   from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+include { TOOL_FCS_REPORT as MODULE_FCS_FADE;
           TOOL_FCS_REPORT as MODULE_FCS_ACCUM } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 
 
@@ -36,6 +39,7 @@ workflow SCORING {
         fade_site_top_ch         // Channel<path> or null — fade_site_bf_top.tsv     (optional)
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
+        rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -151,9 +155,15 @@ workflow SCORING {
         // channel is empty and the corresponding report is simply not rendered.
         def annot_ch = compute_out.fcs_stats.first()
         def trait_lbl = params.traitname ?: 'trait'
+        // RER permulation null (from RER_MAIN) → enables p.perm in the centralized RER
+        // report. NO_FILE when RER ran without permulations → BH-only.
+        def rer_perms_resolved = (rer_perms_ch ?: Channel.empty())
+            .ifEmpty { file(params.rer_perms_file ?: 'NO_FILE') }
+            .first()
         def rer_fcs = MODULE_FCS_RER(
             Channel.value('scoring/rer'),   compute_out.fcs_stats_rer,
-            fcs_universe_ch, Channel.value("FCS_rer_${trait_lbl}"),   annot_ch)
+            fcs_universe_ch, Channel.value("FCS_rer_${trait_lbl}"),
+            rer_perms_resolved, annot_ch)
         def fade_fcs = MODULE_FCS_FADE(
             Channel.value('scoring/fade'),  compute_out.fcs_stats_fade,
             fcs_universe_ch, Channel.value("FCS_fade_${trait_lbl}"),  annot_ch)

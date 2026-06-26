@@ -210,7 +210,8 @@ workflow FADE {
                 def subpath      = "selection/fade/${direction}"
                 def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
                 def interest_ch  = lists_out.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
-                if (params.enrichment) {
+                // Skip when SCORING runs: it renders the annotated, centralized FADE FCS.
+                if (params.enrichment && !params.scoring) {
                     FADE_FCS_REPORT(
                         Channel.value(subpath),
                         lists_out.fcs_stats,

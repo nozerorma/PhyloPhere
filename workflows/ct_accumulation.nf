@@ -155,7 +155,8 @@ workflow CT_ACCUMULATION {
         if (params.enrichment || params.string) {
             def lists_out = ACCUMULATION_GENE_LISTS(randomize_out.direction, randomize_out.results)
 
-            if (params.enrichment) {
+            // Skip when SCORING runs: it renders the annotated, centralized accum FCS.
+            if (params.enrichment && !params.scoring) {
                 def fcs_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }
                 def fcs_stats_ch   = lists_out.fcs_stats
                 def fcs_bg_ch      = lists_out.gene_lists.map { files -> files.find { it.name == 'background.txt' } }

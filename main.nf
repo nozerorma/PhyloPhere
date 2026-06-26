@@ -357,6 +357,7 @@ workflow {
             def scoring_fade_site_top_ch = params.fade       ? FADE.out.site_tsv_top              : null
             def scoring_fade_site_bot_ch = params.fade       ? FADE.out.site_tsv_bottom           : null
             def scoring_rer_ch           = (params.rer_tool || params.rer_report_file) ? RER_MAIN.out.summary_tsv : null
+            def scoring_rer_perms_ch     = (params.rer_tool || params.rer_report_file) ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
@@ -371,7 +372,8 @@ workflow {
                 null,  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
                 scoring_fade_site_top_ch,
                 scoring_fade_site_bot_ch,
-                pp_cleaned_bg          // cleaned_background_main.txt — FCS universe
+                pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
+                scoring_rer_perms_ch   // RER permulation RDS → p.perm in centralized RER FCS
             )
             ran_any = true
         }
