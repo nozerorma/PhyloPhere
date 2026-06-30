@@ -73,10 +73,13 @@ _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{prin
 """
     def ct_bin = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh ct' : "$baseDir/subworkflows/CT/local/ct"
     """
-    # Pin BLAS/OpenMP to 1 thread: the CAAS kernel is scalar scipy.stats (no gemm),
-    # so library auto-threading is pure overhead and oversubscribes under maxForks.
-    # (Not global — R/RER stages keep their multithreaded BLAS.) See docs/CAAS_PERMULATION_RUNTIME.md.
-    export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    # Full-pool perms bootstrap now runs the vectorized CAAS kernel
+    # (modules/boot_vec.py): the per-cycle CAAS test is a Level-3 BLAS matmul and
+    # the perm_discovery rows are materialized only for the sparse hits. Size
+    # OpenBLAS to the task allocation so those matmuls parallelize; pin MKL/NUMEXPR
+    # (unused) and OpenMP to 1. Per-stage only — RER/R stages keep multithreaded
+    # BLAS, so this must never go in nextflow.config env{}. See docs/CAAS_PERMULATION_RUNTIME.md.
+    export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     ${pairArgs}
     # No --discovery → full position pool; export_perm_discovery forced ON.
     ${ct_bin} bootstrap \\
@@ -96,6 +99,70 @@ _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{prin
         --max_bg_miss \$_max_bg_miss \\
         --max_fg_miss \$_max_fg_miss \\
         --max_miss \$_max_miss
+    """
+}
+
+// ── 2b. Batched full-pool bootstrap with perm-discovery export ───────────────
+process BOOTSTRAP_PERMS_BATCHED {
+    tag "$batchID (${batchSize} genes)"
+    label 'process_boot_batched'
+
+    input:
+    tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(resampledPath)
+    file caas_config
+
+    output:
+    path("*.bootstraped.output"), emit: bootstrap_out, optional: true
+    path("*.bootstrap.discovery.output"), emit: perm_discovery, optional: true
+
+    script:
+    def runnerMode = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
+    def ctBinary = (params.use_singularity || params.use_apptainer)
+        ? '/usr/local/bin/_entrypoint.sh'
+        : "$baseDir/subworkflows/CT/local/ct"
+    """
+    # Pin BLAS/OpenMP to 1 thread: the concurrency comes from the worker pool
+    # running multiple genes in parallel; multi-threading would oversubscribe.
+    export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    cat > ${batchID}.manifest.tsv <<'EOF'
+""" + batchManifestText + """EOF
+
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+    _max_conserved=\$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}')
+    _max_bg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+    _max_fg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+    _max_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+    _max_bg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+    _max_fg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+    _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
+
+    declare -a extra_opts=()
+    extra_opts+=(--patterns "${params.patterns}")
+    if [ "${params.miss_pair}" = "true" ]; then extra_opts+=(--miss_pair); fi
+    if [ "${params.caap_mode}" = "true" ]; then extra_opts+=(--caap_mode); fi
+    extra_opts+=(--max_conserved \$_max_conserved)
+    extra_opts+=(--max_bg_gaps \$_max_bg_gaps)
+    extra_opts+=(--max_fg_gaps \$_max_fg_gaps)
+    extra_opts+=(--max_gaps \$_max_gaps)
+    extra_opts+=(--max_bg_miss \$_max_bg_miss)
+    extra_opts+=(--max_fg_miss \$_max_fg_miss)
+    extra_opts+=(--max_miss \$_max_miss)
+
+    echo "\${extra_opts[@]}" > .ct_bootstrap_batch_args
+
+    bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
+        --batch-id ${batchID} \\
+        --manifest ${batchID}.manifest.tsv \\
+        --caas-config ${caas_config} \\
+        --resampled-path ${resampledPath} \\
+        --workers ${params.ct_bootstrap_batch_workers} \\
+        --ali-format ${params.ali_format} \\
+        --runner-mode ${runnerMode} \\
+        --ct-bin ${ctBinary} \\
+        --progress-log 0 \\
+        --export-groups 0 \\
+        --export-perm-discovery 1 \\
+        --extra-args-file .ct_bootstrap_batch_args
     """
 }
 
@@ -208,13 +275,31 @@ workflow CAAS_PERMS_PREP {
         resample_dir       // path (resample_*.tab directory)
 
     main:
+        def bootstrapBatchSize = (params.ct_bootstrap_batch_size ?: 1) as int
         def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms ?: 10)
         def boot_in = align_tuple
             .map { id, f -> tuple(id, f) }
             .combine(subset.subset)
             .map { id, f, sub -> tuple(id, f, sub) }
-        def boot = BOOTSTRAP_PERMS(boot_in, caas_config)
-        def discovery_files = boot.perm_discovery.map { id, f -> f }.collect()
+
+        def discovery_files
+        if (bootstrapBatchSize > 1) {
+            def bootstrapBatchCounter = 0
+            def bootstrap_batches = boot_in
+                .collate(bootstrapBatchSize)
+                .map { batch ->
+                    def batchID = sprintf('bootstrap_perms_batch_%05d', ++bootstrapBatchCounter)
+                    def manifestText = batch.collect { row -> "${row[0]}\t${row[1].name}\tNO_FILE" }.join('\n') + '\n'
+                    def alignmentFiles = batch.collect { row -> row[1] }.unique { file -> file.name }
+                    def resampled = batch[0][2]
+                    tuple(batchID, batch.size(), manifestText, alignmentFiles, resampled)
+                }
+            def boot = BOOTSTRAP_PERMS_BATCHED(bootstrap_batches, caas_config)
+            discovery_files = boot.perm_discovery.flatten().collect()
+        } else {
+            def boot = BOOTSTRAP_PERMS(boot_in, caas_config)
+            discovery_files = boot.perm_discovery.map { id, f -> f }.collect()
+        }
         def concat = CONCAT_PERM_DISCOVERY(discovery_files)
 
     emit:

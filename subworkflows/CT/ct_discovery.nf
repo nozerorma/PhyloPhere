@@ -59,6 +59,10 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
     if (params.use_singularity | params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
+        # Discovery uses the scalar CAAS kernel (single labeling, no Level-3 BLAS),
+        # so pin all math-library threads to 1 to avoid stray auto-threading bursts.
+        # Per-stage only (never global env{}) — RERConverge shares this OpenBLAS.
+        export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         ${pairArgs}
         /usr/local/bin/_entrypoint.sh ct discovery \\
         -a ${alignmentFile} \\
@@ -78,6 +82,7 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
     } else {
         """
         echo "Running locally"
+        export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         ${pairArgs}
         $baseDir/subworkflows/CT/local/ct discovery \\
         -a ${alignmentFile} \\
@@ -117,6 +122,9 @@ process DISCOVERY_BATCHED {
         : "$baseDir/subworkflows/CT/local/ct"
 
     """
+# Scalar discovery kernel across an internal worker pool: pin BLAS/OpenMP to 1
+# per worker (no Level-3 BLAS here; parallelism is the pool over genes).
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 cat > ${batchID}.manifest.tsv <<'EOF'
 """ + batchManifestText + """EOF
 

@@ -100,6 +100,11 @@ process CT_ACCUMULATION_RANDOMIZE {
 
     if (params.use_singularity || params.use_apptainer) {
         """
+        # Randomization fans draws across a ProcessPoolExecutor of numpy workers
+        # (np.random + bincount; no Level-3 BLAS). Pin math-library threads to 1
+        # per worker so no auto-threading bloom multiplies by the worker count.
+        # Per-stage only (never global env{}) — RERConverge needs multithread BLAS.
+        export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         cp -R ${local_dir}/* .
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find . -name '*.pyc' -delete 2>/dev/null || true
@@ -117,6 +122,7 @@ process CT_ACCUMULATION_RANDOMIZE {
         """
     } else {
         """
+        export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         cp -R ${local_dir}/* .
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find . -name '*.pyc' -delete 2>/dev/null || true

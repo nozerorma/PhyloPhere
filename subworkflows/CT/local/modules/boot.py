@@ -38,6 +38,123 @@ import functools
 import time
 from datetime import datetime
 
+# ---------------------------------------------------------------------------
+# Vectorized (Level-3 BLAS) counting kernel. Optional: if numpy / the module is
+# unavailable we fall back to the scalar caasboot loop transparently. The kernel
+# is proven bit-for-bit equivalent to caasboot by modules/boot_vec_equivtest.py
+# (counts) and modules/boot_vec_perm_equivtest.py (perm_discovery rows).
+# ---------------------------------------------------------------------------
+try:
+    from modules.boot_vec import VectorizedBootstrap
+except Exception as _boot_vec_err:  # pragma: no cover - defensive import guard
+    VectorizedBootstrap = None
+    print(f"[BOOTSTRAP] vectorized kernel unavailable ({_boot_vec_err}); using scalar path")
+
+_VECTORIZE_BOOTSTRAP = os.environ.get("CT_BOOTSTRAP_VECTORIZE", "1") not in ("0", "false", "False")
+
+# Ambiguity codes count as gaps (no resolved amino acid), exactly as
+# caas_id.process_position() does; "-" is the literal gap.
+_VEC_GAP_SYMBOLS = frozenset({"-", "X", "B", "Z", "J", "U"})
+_VEC_SCHEME_MAP = {"US": US, "GS1": GS1, "GS2": GS2, "GS3": GS3, "GS4": GS4}
+
+
+def _posnum_from_posdict(pos_dict):
+    for v in pos_dict.values():
+        parts = v.split("@")
+        if len(parts) > 1:
+            return parts[1]
+    return None
+
+
+def _vectorized_position_counts(cfg, sliced_object, genename, positions_with_schemes,
+                                max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                                max_fg_miss, max_bg_miss, max_overall_miss,
+                                max_conserved, admitted_patterns, caap_mode,
+                                collect_hits=False):
+    """Run the vectorized kernel for one resample multiconfig.
+
+    Returns the same per-(position[, scheme]) count mapping the scalar loop
+    accumulates into position_counts; when collect_hits is True also returns the
+    per-key list of hit labeling (trait) names for perm_discovery emission.
+    """
+    vb = VectorizedBootstrap(cfg, sliced_object.species)
+    return vb.count(
+        positions_with_schemes,
+        genename,
+        maxgaps_fg=max_fg_gaps, maxgaps_bg=max_bg_gaps, maxgaps_all=max_overall_gaps,
+        maxmiss_fg=max_fg_miss, maxmiss_bg=max_bg_miss, maxmiss_all=max_overall_miss,
+        max_conserved=max_conserved,
+        admitted_patterns=admitted_patterns,
+        caap_mode=caap_mode,
+        collect_hits=collect_hits,
+    )
+
+
+def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_schemes,
+                              hits, caap_mode, max_conserved):
+    """Materialize perm_discovery rows for the vectorized hits.
+
+    The kernel identifies WHICH (position, scheme, labeling) are CAAS; each rare
+    hit's row is then rebuilt by calling the SAME functions caasboot uses
+    (iscaas / check_caap_pattern / encode_to_groups) with the SAME inputs, so the
+    emitted fields are byte-identical to the scalar perm_discovery_out. The
+    resample multiconfig carries no pairs, so species sort is alphabetical
+    (matching caasboot's _pair_sort_key fallback) and the substitution / tag
+    strings reproduce exactly.
+    """
+    if not hits:
+        return
+    posname_to_posdict = {}
+    for pos_dict, _schemes in positions_with_schemes:
+        pn = genename + "@" + str(_posnum_from_posdict(pos_dict))
+        posname_to_posdict[pn] = pos_dict
+
+    def _ungapped_sorted(species_iter, pos_dict):
+        keep = [sp for sp in species_iter
+                if sp in pos_dict and pos_dict[sp].split("@")[0].upper() not in _VEC_GAP_SYMBOLS]
+        keep.sort()  # no pairs in resample cfg -> alphabetical, matches caasboot
+        return keep
+
+    for key, trait_names in hits.items():
+        if not trait_names:
+            continue
+        if caap_mode:
+            position_name, scheme_name = key
+            scheme_dict = _VEC_SCHEME_MAP[scheme_name]
+        else:
+            position_name, scheme_name, scheme_dict = key, None, None
+        pos_dict = posname_to_posdict[position_name]
+        posnum = position_name.split("@", 1)[1]
+
+        for trait in trait_names:
+            fg = _ungapped_sorted(cfg.trait2fg.get(trait, ()), pos_dict)
+            bg = _ungapped_sorted(cfg.trait2bg.get(trait, ()), pos_dict)
+            fg_aas = "".join(pos_dict[sp].split("@")[0] for sp in fg)
+            bg_aas = "".join(pos_dict[sp].split("@")[0] for sp in bg)
+
+            if caap_mode:
+                is_caap, pattern, substitution, conserved_pairs = check_caap_pattern(
+                    fg_aas, bg_aas, scheme_dict, max_conserved, cfg, fg, bg
+                )
+                encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
+                fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
+                          substitution, encoded, "NA", pattern]
+                if max_conserved > 0:
+                    oc = conserved_pairs.split(":")[0] if conserved_pairs else "0"
+                    pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
+                    fields.extend(["TRUE" if int(oc) > 0 else "FALSE", f"{oc}:{pl}"])
+            else:
+                tag = "/".join([fg_aas, bg_aas])
+                check = iscaas(tag, cfg, pos_dict, max_conserved, trait, fg, bg)
+                fields = [trait, genename, "CAAS", "US", trait, str(posnum),
+                          tag, "NA", f"pattern{check.pattern}"]
+                if max_conserved > 0:
+                    ci = getattr(check, "conserved_pairs", "0:")
+                    cc = ci.split(":")[0] if ci else "0"
+                    cl = ci.split(":")[1] if ":" in ci else ""
+                    fields.extend(["TRUE" if int(cc) > 0 else "FALSE", f"{cc}:{cl}"])
+            perm_discovery_out.write("\t".join(fields) + "\n")
+
 
 def _pair_sort_key(multiconfig, sp):
     pair_id = multiconfig.get_pair(sp)
@@ -554,6 +671,17 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
             header_fields.extend(["is_conserved_meta", "conserved_pair"])
         perm_discovery_handle.write("\t".join(header_fields) + "\n")
 
+    # Vectorized BLAS path. It produces the empirical-p COUNTS and (when
+    # perm_discovery is requested, e.g. BOOTSTRAP_PERMS) the per-hit perm_discovery
+    # ROWS. Only the rarer per-cycle groups debug export (--export_groups) still
+    # needs the scalar per-trait walk.
+    use_vectorized = (
+        VectorizedBootstrap is not None
+        and _VECTORIZE_BOOTSTRAP
+        and groups_handle is None
+    )
+    collect_hits = perm_discovery_handle is not None
+
     try:
         # Detect if resampled_traits is a directory path or a multicfg object
         if isinstance(resampled_traits, str) and os.path.isdir(resampled_traits):
@@ -615,12 +743,36 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                             log_file=progress_log, prefix=f"Processing file {os.path.basename(file_path)}")
                 
                 is_b0 = os.path.basename(file_path) == "resample_000.tab"
-                
-                # Process each position with its specific schemes
-                for pos_dict, schemes in positions_with_schemes:
+
+                if use_vectorized:
+                    # BLAS path: one set of batched matmuls for the whole file.
+                    if collect_hits:
+                        file_counts, file_hits = _vectorized_position_counts(
+                            file_config, sliced_object, the_genename, positions_with_schemes,
+                            max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                            max_fg_miss, max_bg_miss, max_overall_miss,
+                            max_conserved, the_admitted_patterns, caap_mode,
+                            collect_hits=True,
+                        )
+                        _emit_perm_discovery_rows(
+                            perm_discovery_handle, file_config, the_genename,
+                            positions_with_schemes, file_hits, caap_mode, max_conserved,
+                        )
+                    else:
+                        file_counts = _vectorized_position_counts(
+                            file_config, sliced_object, the_genename, positions_with_schemes,
+                            max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                            max_fg_miss, max_bg_miss, max_overall_miss,
+                            max_conserved, the_admitted_patterns, caap_mode,
+                        )
+                    for key, count in file_counts.items():
+                        position_counts[key] = position_counts.get(key, 0) + count
+                else:
+                  # Process each position with its specific schemes
+                  for pos_dict, schemes in positions_with_schemes:
                     # Process position
                     processed_pos = process_position(pos_dict, multiconfig=file_config, species_in_alignment=sliced_object.species)
-                    
+
                     # Run bootstrap with position-specific schemes
                     line_output = caasboot(
                         processed_pos,
@@ -643,7 +795,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                     groups_out=groups_handle,
                     perm_discovery_out=perm_discovery_handle
                 )
-                    
+
                     # Accumulate counts for this position
                     # In CAAP mode, each position returns multiple lines (one per scheme)
                     if caap_mode:
@@ -653,7 +805,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                             position_name = parts[0]
                             scheme_name = parts[1]
                             count = int(parts[2])
-                            
+
                             key = (position_name, scheme_name)
                             if key not in position_counts:
                                 position_counts[key] = 0
@@ -663,11 +815,11 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                         parts = line_output.split("\t")
                         position_name = parts[0]
                         count = int(parts[2])
-                        
+
                         if position_name not in position_counts:
                             position_counts[position_name] = 0
                         position_counts[position_name] += count
-                
+
                 file_elapsed = time.time() - file_start
                 print(f"  → File completed in {format_time(file_elapsed)}\n")
             
@@ -742,12 +894,48 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 # No discovery file - test all positions with all schemes
                 positions_with_schemes = [(pos, None) for pos in positions_list]
 
-            # Step 3 & 4: process positions with their specific schemes and run bootstrap
-            output_lines = []
-            for pos_dict, schemes in positions_with_schemes:
+            if use_vectorized:
+                # BLAS path: batched matmuls over the whole resample object, then
+                # emit the same per-(position[, scheme]) lines the scalar loop does,
+                # plus perm_discovery rows when requested.
+                if collect_hits:
+                    counts, hits = _vectorized_position_counts(
+                        resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,
+                        max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                        max_fg_miss, max_bg_miss, max_overall_miss,
+                        max_conserved, the_admitted_patterns, caap_mode,
+                        collect_hits=True,
+                    )
+                    _emit_perm_discovery_rows(
+                        perm_discovery_handle, resampled_traits_obj, the_genename,
+                        positions_with_schemes, hits, caap_mode, max_conserved,
+                    )
+                else:
+                    counts = _vectorized_position_counts(
+                        resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,
+                        max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                        max_fg_miss, max_bg_miss, max_overall_miss,
+                        max_conserved, the_admitted_patterns, caap_mode,
+                    )
+                cyc = resampled_traits_obj.cycles
+                ooout = open(output_file, "w")
+                if caap_mode:
+                    for (position_name, scheme_name), count in counts.items():
+                        empval = str(count / cyc)
+                        print("\t".join([position_name, scheme_name, str(count), str(cyc), empval]), file=ooout)
+                else:
+                    for position_name, count in counts.items():
+                        empval = str(count / cyc)
+                        print("\t".join([position_name, "US", str(count), str(cyc), empval]), file=ooout)
+                ooout.close()
+                print(f"Results written to {output_file}")
+            else:
+              # Step 3 & 4: process positions with their specific schemes and run bootstrap
+              output_lines = []
+              for pos_dict, schemes in positions_with_schemes:
                 # Process position
                 processed_pos = process_position(pos_dict, multiconfig=resampled_traits_obj, species_in_alignment=sliced_object.species)
-                
+
                 # Run bootstrap with position-specific schemes
                 line_output = caasboot(
                     processed_pos,
@@ -772,21 +960,21 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
             )
                 output_lines.append(line_output)
 
-            ooout = open(output_file, "w")
+              ooout = open(output_file, "w")
 
-            if caap_mode:
+              if caap_mode:
                 # Each line may contain multiple scheme results separated by newlines
                 for line_output in output_lines:
                     for line in line_output.split("\n"):
                         print(line, file=ooout)
-            else:
+              else:
                 # Classical CAAS mode
                 for line in output_lines:
                     print(line, file=ooout)
-            
-            ooout.close()
-            
-            print(f"Results written to {output_file}")
+
+              ooout.close()
+
+              print(f"Results written to {output_file}")
     finally:
         if groups_handle:
             groups_handle.close()

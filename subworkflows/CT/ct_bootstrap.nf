@@ -62,6 +62,11 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
     if (params.use_singularity | params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
+        # BLAS thread sizing: the vectorized CAAS kernel (modules/boot_vec.py) does
+        # Level-3 matmuls; size OpenBLAS to the task allocation (NOT a global pin —
+        # RERConverge shares this OpenBLAS and needs multithreaded BLAS). MKL/NUMEXPR
+        # are unused here and pinned to 1 to avoid stray oversubscription.
+        export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         ${pairArgs}
         /usr/local/bin/_entrypoint.sh ct bootstrap \\
             -a ${alignmentFile} \\
@@ -85,6 +90,7 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
     } else {
         """
         echo "Running locally"
+        export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         ${pairArgs}
         $baseDir/subworkflows/CT/local/ct bootstrap \\
             -a ${alignmentFile} \\
@@ -129,6 +135,11 @@ process BOOTSTRAP_BATCHED {
         : "$baseDir/subworkflows/CT/local/ct"
 
     """
+# Batched bootstrap fans out genes across an internal worker pool
+# (--workers). Each worker runs the vectorized kernel, so pin BLAS to 1 thread
+# per worker — parallelism comes from the pool, not from intra-matmul threading
+# (otherwise workers x BLAS-threads oversubscribes the allocation).
+export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
 cat > ${batchID}.manifest.tsv <<'EOF'
 """ + batchManifestText + """EOF
 

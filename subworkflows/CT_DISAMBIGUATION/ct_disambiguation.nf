@@ -32,6 +32,12 @@ process CT_DISAMBIGUATION_RUN {
     def workers = params.ct_disambig_workers ?: task_cpus
 
     """
+    # Disambiguation is an irregular pure-Python tree walk over dict posteriors
+    # (no Level-3 BLAS) and fans genes across an mp.Pool of ${workers} workers.
+    # Pin math-library threads to 1 so a per-worker BLAS/OpenMP bloom can't
+    # multiply by the worker count. Per-stage only (RERConverge needs multithread
+    # BLAS elsewhere and must not see a global pin).
+    export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     mkdir -p ct_disambiguation
     cp -R ${local_dir}/* .
     # Remove stale .pyc / __pycache__ dirs so Python always compiles from source

@@ -44,7 +44,7 @@ matter for extrapolation.
 Update this row with the measured value (`extract_merged.py` → `PERMS_DISAMBIGUATE`).
 
 ### Per-stage SERIAL task-seconds at test scale (one full run)
-DISCOVERY ≈ 4 460 · BOOTSTRAP(sig) ≈ 4 540 · PERMS_BOOTSTRAP ≈ 4 010 ·
+DISCOVERY ≈ 4 460 · BOOTSTRAP(sig) ≈ 4 540 · BOOTSTRAP_PERMS ≈ 4 010 ·
 CT_DISAMBIGUATION ≈ 276 · ACCUMULATION ≈ 250–2 000 · VEP ≈ 1 000 · FCS ≈ 250 ·
 STRING ≈ 4 100 (if enabled) · everything else < 100 each.
 **Total ≈ 20–25 k serial task-seconds** (~6 h serial; far less wall-time under
@@ -60,7 +60,7 @@ CT_DISAMBIGUATION      ∝ genes  (+ one-time ASR load per gene)
 ACCUMULATION           ∝ randomizations × genes
 SCORING / SIGNIF       ∝ genes / positions  (flat-ish)
 FCS                    ∝ full_perms (null, vectorized) — near-flat to N=1000
-PERMS_BOOTSTRAP        ∝ genes × full_perms      (full pool: every position, N labelings)
+BOOTSTRAP_PERMS        ∝ genes × full_perms      (full pool: every position, N labelings)
 PERMS_DISAMBIGUATE     ∝ genes × full_perms      (ASR loaded ONCE/gene, then N replays)
 ```
 
@@ -78,7 +78,7 @@ Scale factors vs test: genes **×8.25**, cycles **×1000**, full_perms **×100**
 | **BOOTSTRAP (significance)** | **×8250** (8.25·1000) | 4 540 × 8250 ≈ **3.7e7** | **≈ 10 400** |
 | CT_DISAMBIGUATION | ×8.25 | 276 × 8.25 ≈ 2.3e3 | 0.6 |
 | **CT_ACCUMULATION** | ×8.25 (1M fixed) | ~1e4–1.6e4 | 3–4 |
-| **PERMS_BOOTSTRAP (full-pool)** | **×825** (8.25·100) | 4 010 × 825 ≈ **3.3e6** | **≈ 920** |
+| **BOOTSTRAP_PERMS (full-pool)** | **×825** (8.25·100) | 4 010 × 825 ≈ **3.3e6** | **≈ 920** |
 | **PERMS_DISAMBIGUATE (replay)** | **×825** scoring (load ×8.25) | ≈ **2–6e5** (est.²) | **≈ 60–170** |
 | FCS | ×100 (vectorized) | ~1e2–1e3 | <1 |
 | SCORING / SIGNIF / POSTPROC | ×8.25 | <1e4 total | <3 |
@@ -93,7 +93,7 @@ as an upper-ish band until the measured number lands.
 - **Significance BOOTSTRAP (genes × cycles) dominates the entire pipeline** at 1M cycles:
   ~10 000 core-hours — two orders of magnitude above anything else. This is **pre-existing**,
   not introduced by the permulation feature.
-- **The permulation feature adds ~1000 core-hours**, almost all in **PERMS_BOOTSTRAP**
+- **The permulation feature adds ~1000 core-hours**, almost all in **BOOTSTRAP_PERMS**
   (genes × full_perms, full pool). The replay is comparatively cheap thanks to load-once ASR.
 - At realistic parallelism (e.g. a 64-core node or a SLURM array of hundreds of tasks),
   the perms feature adds **single-digit to low-tens of wall-clock hours**; the significance
@@ -107,13 +107,13 @@ as an upper-ish band until the measured number lands.
    (b) vectorize the inner per-cycle CAAS test (NumPy over the resample matrix) — this is
    the single biggest lever; (c) it is already batched, so scheduler overhead is not the issue.
 
-2. **PERMS_BOOTSTRAP is PER-GENE (1939 → 16k tasks).** Biggest perms-side win: **batch it**
+2. **BOOTSTRAP_PERMS is PER-GENE (1939 → 16k tasks).** Biggest perms-side win: **batch it**
    like `BOOTSTRAP_BATCHED` (N genes/task with an internal worker pool). At 16k one-gene
    tasks the Nextflow scheduler + container spin-up overhead (~0.2–1 s/task) becomes a large
    fraction of the 2 s/task compute. Batching 10–25 genes/task cuts that 5–25×. (File:
    `subworkflows/CT/caas_permulation.nf` → add a batched variant mirroring `ct_bootstrap.nf`.)
 
-3. **PERMS_BOOTSTRAP tests the FULL position pool every labeling.** Most positions never
+3. **BOOTSTRAP_PERMS tests the FULL position pool every labeling.** Most positions never
    become CAAS under any labeling. A cheap pre-pass (union of positions that are CAAS in
    *any* of the N labelings) would shrink the per-labeling work; or share the resample
    parsing across labelings (already the case). Reducing `full_perms` from 1000 is the
@@ -136,7 +136,7 @@ as an upper-ish band until the measured number lands.
 For a 16k-gene / 1M-cycle / 1000-full_perm run on a cluster: the significance bootstrap is
 the schedule-defining stage (batch across an array; budget ~10k core-hours). The
 permulation-excess null is a **~1000 core-hour add-on**, made tractable by (a) batching
-PERMS_BOOTSTRAP and (b) the load-once ASR replay. Start `full_perms` at 200–500 to confirm
+BOOTSTRAP_PERMS and (b) the load-once ASR replay. Start `full_perms` at 200–500 to confirm
 the p.perm block behaves, then scale to 1000 only if the analytic-vs-permulation gap warrants it.
 
 ---
@@ -153,13 +153,13 @@ Investigated live during a perms run. Findings:
 - Steady-state, a `ct bootstrap` process has **1 thread and no BLAS lib mapped**. A
   transient 12-thread burst was observed (a brief library/auto-thread spin), not a
   persistent 8×12 bloom. So the earlier "thread oversubscription" framing was overstated.
-- **The real driver of the "many forks" feeling is process COUNT**: PERMS_BOOTSTRAP is
+- **The real driver of the "many forks" feeling is process COUNT**: BOOTSTRAP_PERMS is
   **per-gene** (1939 → 16k one-gene tasks) at `maxForks=8`, each a fresh interpreter that
   imports scipy + loads an alignment for ~2 s of work. Thousands stream past → churn.
 
 ## Levers (two complementary, both safe; neither global)
 
-1. **Batch PERMS_BOOTSTRAP** (primary; addresses the churn). 1939 one-gene tasks →
+1. **Batch BOOTSTRAP_PERMS** (primary; addresses the churn). 1939 one-gene tasks →
    ~80–200 multi-gene tasks with an internal worker pool, mirroring `BOOTSTRAP_BATCHED`
    (`ct_bootstrap.nf` + `run_ct_bootstrap_batch.sh`). Amortizes interpreter/scipy/alignment
    startup across many genes per process.
@@ -265,8 +265,8 @@ numpy here links `libopenblasp` (pthreads build → `OPENBLAS_NUM_THREADS` is au
   this calibrated permutation null (distribution stays identical). Recommend doing it as its
   own change gated by a **statistical-equivalence** test (mean/var/p within MC tolerance),
   not bit-parity. If done, then size its BLAS to `${task.cpus}`.
-- **Task 4 (batch PERMS_BOOTSTRAP):** the perms workflow files (`caas_permulation.nf`,
+- **Task 4 (batch BOOTSTRAP_PERMS):** the perms workflow files (`caas_permulation.nf`,
   `BOOTSTRAP_PERMS`, the disambiguation replay) are **not committed in this branch/worktree**
   (this runtime doc is itself untracked in the main checkout). The 548× kernel already
-  collapses the per-gene compute, so PERMS_BOOTSTRAP batching is far less urgent; wire the
+  collapses the per-gene compute, so BOOTSTRAP_PERMS batching is far less urgent; wire the
   same `boot_vec` path + per-stage thread sizing into those processes when they land.
