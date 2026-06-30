@@ -139,7 +139,7 @@ workflow CT_POSTPROC {
                 }
             
             log.info "🔍 Exploratory mode: testing ${minlen_list.size()} × ${maxcaas_list.size()} = ${minlen_list.size() * maxcaas_list.size()} parameter combinations"
-            log.info "   (Cluster filtering will respect CAAP_Group boundaries)"
+            log.info "   (Cluster filtering will respect caap_group boundaries)"
             
         } else if (params.caas_postproc_mode == 'filter') {
             // Single filter run: use provided minlen and maxcaas
@@ -152,7 +152,7 @@ workflow CT_POSTPROC {
                 }
             
             log.info "🔧 Filter mode: running with minlen=${params.filter_minlen}, maxcaas=${params.filter_maxcaas}"
-            log.info "   (Cluster filtering will respect CAAP_Group boundaries)"
+            log.info "   (Cluster filtering will respect caap_group boundaries)"
             
         } else {
             error "Invalid caas_postproc_mode: ${params.caas_postproc_mode}. Must be 'exploratory' or 'filter'"
@@ -181,7 +181,7 @@ workflow CT_POSTPROC {
             assert gene_ensembl_file.exists() : "Error: gene_ensembl_file not found: ${params.gene_ensembl_file}"
             
             log.info "🧬 Running gene-level filtering (mode: ${params.gene_filter_mode})..."
-            log.info "   (Gene-level statistics will be calculated per CAAP_Group)"
+            log.info "   (Gene-level statistics will be calculated per caap_group)"
             
             // Select appropriate cluster file based on mode
             // Use first cluster file from results without `.first()` to avoid

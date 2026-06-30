@@ -31,12 +31,12 @@ CAAP implements 5 grouping schemes (GS0-GS4) that classify amino acids by differ
 #### Discovery Output
 When `--caap_mode` is enabled, discovery output includes:
 - **Mode column**: "CAAP" for property-based hits
-- **CAAP_Group column**: The grouping scheme (GS0-GS4) that detected the convergence
+- **caap_group column**: The grouping scheme (GS0-GS4) that detected the convergence
 - **One row per matching scheme**: A position may appear multiple times if detected by different schemes
 
 Example:
 ```
-Gene    Mode    CAAP_Group    Trait          Position    Substitution    ...
+Gene    Mode    caap_group    Trait          Position    Substitution    ...
 BRCA1   CAAP    GS0           config_np.tab  745         VEG/EEE        ...
 BRCA1   CAAP    GS1           config_np.tab  745         132/333        ...
 BRCA1   CAAP    GS2           config_np.tab  745         BBC/CCC        ...
@@ -45,7 +45,7 @@ BRCA1   CAAP    GS2           config_np.tab  745         BBC/CCC        ...
 #### Bootstrap Output
 Bootstrap tests ALL grouping schemes for each discovered position:
 ```
-Position        CAAP_Group    Count    Cycles    EmpiricalPval
+Position        caap_group    Count    Cycles    EmpiricalPval
 BRCA1@745       GS0          1232     100000    0.01232
 BRCA1@745       GS1          1232     100000    0.01232
 BRCA1@745       GS2          1228     100000    0.01228

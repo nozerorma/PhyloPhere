@@ -176,9 +176,7 @@ def convert_convergence_result_to_dict(
     result_dict["mrca_diversity"] = getattr(result, "mrca_diversity", None)
     result_dict["derived_agreement"] = getattr(result, "derived_agreement", None)
     result_dict["conservation_gate"] = getattr(result, "conservation_gate", None)
-    result_dict["count_factor"] = getattr(result, "count_factor", None)
-    result_dict["n_changed_pairs"] = getattr(result, "n_changed_pairs", None)
-    result_dict["n_changed_sides"] = getattr(result, "n_changed_sides", None)
+    result_dict["core"] = getattr(result, "core", None)
     pair_path_scores = getattr(result, "pair_path_scores", None) or {}
     pair_path_contam = getattr(result, "pair_path_contaminated", None) or {}
     if pair_path_scores or pair_path_contam:
@@ -786,6 +784,387 @@ def process_all_genes(
     }
 
     return [], export_info
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Null-mode (permulation-excess) processing
+# ═════════════════════════════════════════════════════════════════════════════
+# Give CAAS a genome-wide *excess* null for FCS pathway enrichment: replay N
+# permuted phenotype labelings through the FULL position pool and score each on
+# the SAME ASR posteriors as the real run. ASR posteriors are phenotype-invariant
+# (load_precomputed_asr is a pure function of alignment+tree), so we load them ONCE
+# per gene and replay N labelings over the cached object. The scoring itself goes
+# through analyze_gene_disambiguation (hence compute_asr_path_score) VERBATIM —
+# observed and null share the code path, so the null is calibrated by construction.
+# See docs/CAAS_PERMULATION_EXCESS.md.
+
+
+def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], List[str]]]:
+    """Index every resample cycle → (fg_species, bg_species) by its cycle tag.
+
+    resample_*.tab is 3-col, no header: cycle_tag, fg_csv, bg_csv (permulations.R).
+    A file may hold many cycles (chunk_size rows). Pairing is by index: fg[k] ↔ bg[k]
+    is pair k+1 — exactly how the original trait file encodes pairs.
+    """
+    import csv
+
+    labelings: Dict[str, Tuple[List[str], List[str]]] = {}
+    for tab in sorted(Path(resample_dir).glob("resample_*.tab")):
+        try:
+            with open(tab, "r") as f:
+                for row in csv.reader(f, delimiter="\t"):
+                    if len(row) < 3:
+                        continue
+                    tag = row[0].strip()
+                    fg = [s for s in row[1].split(",") if s.strip()]
+                    bg = [s for s in row[2].split(",") if s.strip()]
+                    if tag and fg and bg:
+                        labelings[tag] = (fg, bg)
+        except Exception as e:
+            logger.warning(f"[perms] failed to read {tab}: {e}")
+    return labelings
+
+
+def _write_cycle_trait_file(fg: List[str], bg: List[str], out_path: Path) -> None:
+    """Write a cycle's labeling as a 3-col trait file (species, trait, pair).
+
+    trait=1 (high/top) for FG, trait=0 (low/bottom) for BG; pair index = position in
+    the resample lists. Consumed verbatim by parse_trait_pairs in disambiguation.
+    """
+    with open(out_path, "w") as f:
+        for k, sp in enumerate(fg, start=1):
+            f.write(f"{sp}\t1\t{k}\n")
+        for k, sp in enumerate(bg, start=1):
+            f.write(f"{sp}\t0\t{k}\n")
+
+
+def build_cycle_inputs(
+    perm_discovery_file: str,
+    resample_dir: str,
+    work_dir: Path,
+    cycles: Optional[List[str]] = None,
+) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
+    """Materialize per-cycle trait + caas-metadata files from the full-pool export.
+
+    The export_perm_discovery file already uses disambiguation's canonical column
+    names (caas, caap_group, amino_encoded, is_conserved_meta, conserved_pair) —
+    so the metadata adapter only adds GenePos/tag/is_significant and strips the
+    "N:" prefix from conserved_pair, mirroring CT_signification.
+
+    Returns (cycle_tags, cycle_trait_files, cycle_meta_files).
+    """
+    import csv as _csv
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    trait_dir = work_dir / "cycle_traits"
+    meta_dir = work_dir / "cycle_meta"
+    trait_dir.mkdir(exist_ok=True)
+    meta_dir.mkdir(exist_ok=True)
+
+    labelings = _read_resample_labelings(resample_dir)
+
+    # Group export rows by cycle tag.
+    rows_by_cycle: Dict[str, List[Dict[str, str]]] = {}
+    with open(perm_discovery_file, "r") as f:
+        reader = _csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            # export_perm_discovery (boot.py) headers are fully lowercase.
+            cyc = (row.get("cycle") or "").strip()
+            if not cyc:
+                continue
+            rows_by_cycle.setdefault(cyc, []).append(row)
+
+    cycle_tags = cycles if cycles else sorted(rows_by_cycle.keys())
+
+    # Loader's canonical metadata schema (required + optional).
+    meta_cols = [
+        "tag", "GenePos", "Gene", "Position", "Pattern", "caap_group",
+        "pvalue", "is_significant", "caas", "amino_encoded",
+        "is_conserved_meta", "conserved_pair",
+    ]
+
+    cycle_trait_files: Dict[str, str] = {}
+    cycle_meta_files: Dict[str, str] = {}
+    for cyc in cycle_tags:
+        # Trait file (the permuted labeling drives which species pair top/bottom).
+        if cyc not in labelings:
+            logger.warning(f"[perms] cycle {cyc} has no resample labeling; skipping")
+            continue
+        fg, bg = labelings[cyc]
+        trait_path = trait_dir / f"trait_{cyc}.tab"
+        _write_cycle_trait_file(fg, bg, trait_path)
+        cycle_trait_files[cyc] = str(trait_path)
+
+        # Per-cycle caas metadata (positions discovered under this labeling).
+        meta_path = meta_dir / f"meta_{cyc}.tsv"
+        with open(meta_path, "w", newline="") as mf:
+            writer = _csv.DictWriter(mf, fieldnames=meta_cols, delimiter="\t",
+                                     extrasaction="ignore")
+            writer.writeheader()
+            for row in rows_by_cycle.get(cyc, []):
+                gene = (row.get("gene") or "").strip()
+                pos = (row.get("position") or "").strip()
+                if not gene or not pos:
+                    continue
+                cp = (row.get("conserved_pair") or "").strip()
+                # Strip the "N:" overlap-count prefix (mirrors CT_signification).
+                if cp and ":" in cp.split(",")[0]:
+                    cp = cp.split(":", 1)[1]
+                writer.writerow({
+                    "tag": "CAAS",
+                    "GenePos": f"{gene}_{pos}",
+                    "Gene": gene,
+                    "Position": pos,
+                    "Pattern": row.get("pattern", ""),
+                    "caap_group": row.get("caap_group", "US") or "US",
+                    "pvalue": row.get("pvalue", "NA"),
+                    "is_significant": "TRUE",
+                    "caas": row.get("caas", ""),
+                    "amino_encoded": row.get("amino_encoded", ""),
+                    "is_conserved_meta": row.get("is_conserved_meta", "FALSE"),
+                    "conserved_pair": cp,
+                })
+        cycle_meta_files[cyc] = str(meta_path)
+
+    valid = [c for c in cycle_tags if c in cycle_trait_files]
+    logger.info(f"[perms] built inputs for {len(valid)} cycles")
+    return valid, cycle_trait_files, cycle_meta_files
+
+
+def _load_gene_asr_context(
+    gene: str,
+    alignment_dir: str,
+    tree_file: str,
+    taxid_mapping_path: Optional[str],
+    asr_model: str,
+    asr_cache_dir: str,
+    posterior_threshold: float,
+    ensembl_genes: Optional[Set[str]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Load alignment + tree + precomputed ASR posteriors for one gene ONCE.
+
+    Mirrors the precomputed-ASR load path of process_single_gene (the
+    phenotype-invariant part), including the PAML tree rebuild for node alignment.
+    Returns a context dict, or None if alignment/ASR unavailable.
+    """
+    alignment_path = find_gene_alignment(Path(alignment_dir), gene, ensembl_genes)
+    if not alignment_path:
+        return None
+
+    alignment_data = load_alignment_and_mappings(
+        alignment_path,
+        Path(taxid_mapping_path) if taxid_mapping_path else None,
+        gene_name=gene,
+    )
+    tree_data = load_and_match_tree(
+        Path(tree_file), alignment_data,
+        Path(taxid_mapping_path) if taxid_mapping_path else None,
+    )
+
+    from src.asr.asr_single import SingleGeneASRConfig
+
+    asr_config = SingleGeneASRConfig(
+        alignment_path=alignment_path,
+        tree_path=Path(tree_file),
+        model=asr_model,
+        posterior_threshold=posterior_threshold,
+        output_dir=Path(asr_cache_dir),
+    )
+    try:
+        node_posteriors = load_precomputed_asr(gene, asr_config, alignment_data)
+    except FileNotFoundError:
+        return None
+    if not node_posteriors:
+        return None
+
+    rst_file = getattr(node_posteriors, "rst_file", None)
+    paml_tree_file = getattr(node_posteriors, "tree_file", None)
+    if rst_file and paml_tree_file and Path(paml_tree_file).exists():
+        try:
+            ordered_nodes, id_mapping = build_tree_node_mapping(
+                tree_file=Path(paml_tree_file), rst_file=Path(rst_file)
+            )
+            tree_data.nodes = ordered_nodes
+            tree_data.root = ordered_nodes[-1]
+            tree_data.node_mapping = id_mapping
+
+            def _tip_taxid(label: str) -> str:
+                return label.split("_")[-1] if "_" in label else label
+
+            tree_data.tip_set = {
+                _tip_taxid(lbl) for lbl in extract_tip_labels(tree_data.root)
+            }
+        except Exception as e:
+            logger.warning(f"[perms] {gene}: could not rebuild tree_data from PAML tree: {e}")
+
+    return {
+        "alignment_data": alignment_data,
+        "tree_data": tree_data,
+        "node_posteriors": node_posteriors,
+    }
+
+
+def _perms_worker(
+    gene: str,
+    alignment_dir: str,
+    tree_file: str,
+    taxid_mapping_path: Optional[str],
+    asr_model: str,
+    asr_cache_dir: str,
+    posterior_threshold: float,
+    convergence_mode: str,
+    cycle_tags: List[str],
+    cycle_trait_files: Dict[str, str],
+    cycle_meta_files: Dict[str, str],
+    ensembl_genes: Optional[Set[str]] = None,
+) -> Tuple[str, List[Dict[str, Any]]]:
+    """Replay N labelings over one gene's cached ASR. One gene = one worker task,
+    so the load-once/replay-N invariant holds inside the worker."""
+    try:
+        ctx = _load_gene_asr_context(
+            gene, alignment_dir, tree_file, taxid_mapping_path,
+            asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
+        )
+        if ctx is None:
+            return (gene, [])
+
+        alignment_data = ctx["alignment_data"]
+        tree_data = ctx["tree_data"]
+        node_posteriors = ctx["node_posteriors"]
+        full_posteriors = getattr(node_posteriors, "posteriors_node", None)
+
+        rows: List[Dict[str, Any]] = []
+        for cyc in cycle_tags:
+            meta_path = cycle_meta_files.get(cyc)
+            trait_path = cycle_trait_files.get(cyc)
+            if not meta_path or not trait_path:
+                continue
+            try:
+                caas_positions = list_gene_caas_positions(Path(meta_path), gene)
+            except Exception:
+                caas_positions = []
+            if not caas_positions:
+                continue
+            try:
+                biochem_results, _ = analyze_gene_disambiguation(
+                    gene=gene,
+                    alignment_data=alignment_data,
+                    tree_data=tree_data,
+                    caas_positions=caas_positions,
+                    caas_metadata_path=Path(meta_path),
+                    trait_file_path=Path(trait_path),
+                    taxid_mapping=alignment_data.species_to_taxid,
+                    posterior_data=full_posteriors,
+                    posterior_threshold=posterior_threshold,
+                    diagnostics_dir=None,
+                    convergence_mode=convergence_mode,
+                    asr_mode="precomputed",
+                )
+            except Exception as e:
+                logger.debug(f"[perms] {gene} cycle {cyc} failed: {e}")
+                continue
+            for r in (biochem_results or []):
+                rows.append({
+                    "Gene": gene,
+                    "cycle": cyc,
+                    "Position": getattr(r, "position", None),
+                    "caap_group": getattr(r, "caap_group", "US"),
+                    "asr_path_score": getattr(r, "asr_path_score", None),
+                    "change_top": getattr(r, "change_top", "no_change"),
+                    "change_bottom": getattr(r, "change_bottom", "no_change"),
+                })
+        return (gene, rows)
+    except Exception as e:
+        logger.error(f"[perms] worker failed for {gene}: {e}", exc_info=True)
+        return (gene, [])
+
+
+def process_all_genes_perms(
+    genes: List[str],
+    alignment_dir: str,
+    tree_file: str,
+    perm_discovery_file: str,
+    resample_dir: str,
+    taxid_mapping_path: Optional[str],
+    asr_model: str,
+    asr_cache_dir: str,
+    posterior_threshold: float,
+    convergence_mode: str,
+    workers: Optional[int],
+    output_dir: Path,
+    ensembl_genes_file: Optional[str] = None,
+    cycles: Optional[List[str]] = None,
+    max_tasks_per_child: Optional[int] = None,
+) -> Path:
+    """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
+    labelings, emit a long per-(gene,cycle,position,scheme) asr_path_score table.
+
+    Output: <output_dir>/caas_perm_scores.tsv (consumed by scoring_caas_perms.R).
+    """
+    import csv as _csv
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    effective_workers, _ = plan_concurrency(workers, 1, logger)
+
+    from src.data.loaders import load_ensembl_genes
+    ensembl_genes: Optional[Set[str]] = None
+    if ensembl_genes_file:
+        try:
+            ensembl_genes = load_ensembl_genes(Path(ensembl_genes_file)) or set()
+        except Exception as exc:
+            logger.warning(f"[perms] failed to load ensembl genes: {exc}")
+
+    cycle_tags, cycle_trait_files, cycle_meta_files = build_cycle_inputs(
+        perm_discovery_file, resample_dir, output_dir / "cycle_inputs", cycles
+    )
+    if not cycle_tags:
+        raise RuntimeError("[perms] no usable cycles (check export_perm_discovery + resample dir)")
+    logger.info(
+        f"[perms] replaying {len(cycle_tags)} cycles over {len(genes)} genes "
+        f"with {effective_workers} workers"
+    )
+
+    if max_tasks_per_child is not None:
+        maxtasks = int(max_tasks_per_child)
+    else:
+        maxtasks = int(os.environ.get("CAAS_MAX_TASKS_PER_CHILD", "50"))
+
+    out_path = output_dir / "caas_perm_scores.tsv"
+    fieldnames = ["Gene", "cycle", "Position", "caap_group",
+                  "asr_path_score", "change_top", "change_bottom"]
+
+    pool = mp.Pool(processes=effective_workers, maxtasksperchild=maxtasks)
+    n_rows = 0
+    try:
+        async_results = [
+            pool.apply_async(
+                _perms_worker,
+                (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
+                 asr_cache_dir, posterior_threshold, convergence_mode,
+                 cycle_tags, cycle_trait_files, cycle_meta_files, ensembl_genes),
+            )
+            for gene in genes
+        ]
+        with open(out_path, "w", newline="") as f:
+            writer = _csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
+            writer.writeheader()
+            for ar in async_results:
+                try:
+                    _gene, rows = ar.get()
+                except Exception as e:
+                    logger.error(f"[perms] gene task failed: {e}")
+                    continue
+                for row in rows:
+                    writer.writerow(row)
+                    n_rows += 1
+    finally:
+        pool.close()
+        pool.join()
+
+    logger.info(f"[perms] wrote {n_rows} rows for {len(cycle_tags)} cycles → {out_path}")
+    return out_path
 
 
 # Backward-compatible alias

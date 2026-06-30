@@ -518,7 +518,7 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
 
                 output_fields = [
                     genename,
-                    "CAAS",  # Mode column
+                    "CAAS",  # mode column
                     traitname,
                     processed_position.position,
                     change,

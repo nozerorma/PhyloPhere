@@ -20,7 +20,7 @@ Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
 Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
 MODULE NAME:    hyper.py
-DESCRIPTION:    Pvalue assignment to CAAS prediction based on hypergeometric probability function.
+DESCRIPTION:    pvalue assignment to CAAS prediction based on hypergeometric probability function.
 DEPENDENCIES:   TBD
 '''
 

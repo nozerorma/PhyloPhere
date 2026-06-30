@@ -9,24 +9,22 @@ import pandas as pd
 
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
+    # Structural-key normalization only (gene/msa_pos → Gene/Position, used pervasively
+    # downstream). Semantic concept columns (caap_group, pattern_type, pvalue, caas,
+    # amino_encoded, is_conserved_meta, conserved_pair, pvalue_boot, tag) are kept in
+    # disambiguation's canonical lowercase form end-to-end — no re-capitalization.
     rename_map = {}
     if "gene" in df.columns:
         rename_map["gene"] = "Gene"
     if "msa_pos" in df.columns:
         rename_map["msa_pos"] = "Position"
-    if "caap_group" in df.columns:
-        rename_map["caap_group"] = "CAAP_Group"
-    if "pattern_type" in df.columns:
-        rename_map["pattern_type"] = "Pattern"
-    if "pvalue" in df.columns:
-        rename_map["pvalue"] = "Pvalue"
     if rename_map:
         df = df.rename(columns=rename_map)
 
     if "Trait" not in df.columns:
         df["Trait"] = "post_disambiguation"
-    if "CAAP_Group" not in df.columns:
-        df["CAAP_Group"] = "US"
+    if "caap_group" not in df.columns:
+        df["caap_group"] = "US"
     if "is_conserved_meta" not in df.columns:
         df["is_conserved_meta"] = False
 
@@ -46,7 +44,7 @@ def _collect_removed_rows(cleaned: pd.DataFrame, mrca_threshold: float):
         mask_low_mrca = cleaned[mrca_cols].lt(mrca_threshold).any(axis=1, skipna=True)
         removed_low_mrca = cleaned.loc[mask_low_mrca].copy()
         if not removed_low_mrca.empty:
-            removed_low_mrca["RemovalReason"] = (
+            removed_low_mrca["removal_reason"] = (
                 f"mrca_posterior_below_{mrca_threshold:g}"
             )
             removed_frames.append(removed_low_mrca)
@@ -96,7 +94,7 @@ def main() -> int:
         if "Position" in removed.columns:
             removed["Position"] = pd.to_numeric(removed["Position"], errors="coerce")
     else:
-        removed = pd.DataFrame(columns=[*df.columns, "RemovalReason"])
+        removed = pd.DataFrame(columns=[*df.columns, "removal_reason"])
 
     cleaned.to_csv(args.output, sep="\t", index=False)
     removed.to_csv(args.removed_output, sep="\t", index=False)

@@ -237,7 +237,7 @@ with open(caas_file) as fh:
     pos_col = col_lc.get('position')
     cside_col = col.get('change_side')
     amino_col = col_lc.get('amino_encoded')
-    caap_col = col.get('CAAP_Group') or col_lc.get('caap_group')
+    caap_col = col.get('caap_group') or col_lc.get('caap_group')
 
     if any(c is None for c in [tag_col, caas_col, gene_col, pos_col]):
         print("Missing required columns in CAAS file header.", file=sys.stderr)

@@ -39,7 +39,7 @@ def main() -> int:
         return 1
 
     df_sample = pd.read_csv(filter_files[0], sep="\t", nrows=5)
-    has_caap = "CAAP_Group" in df_sample.columns
+    has_caap = "caap_group" in df_sample.columns
 
     print(f"Found {len(filter_files)} filtered files")
     print(f"CAAP mode: {has_caap}")
@@ -57,9 +57,9 @@ def main() -> int:
         param_label = f"{minlen}/{maxcaas}"
         df = pd.read_csv(file_path, sep="\t")
 
-        if has_caap and "CAAP_Group" in df.columns:
-            discarded = df[df["ClusteringFlag"] == "Discarded"]
-            group_counts = discarded.groupby("CAAP_Group").size().to_dict()
+        if has_caap and "caap_group" in df.columns:
+            discarded = df[df["clustering_flag"] == "Discarded"]
+            group_counts = discarded.groupby("caap_group").size().to_dict()
             row = {"Parameter": param_label, "Minlen": minlen, "Maxcaas": maxcaas}
             row.update({str(k): v for k, v in group_counts.items()})
             row["DiscardedCount"] = int(sum(group_counts.values()))
@@ -73,11 +73,11 @@ def main() -> int:
                     "DiscardedCount": row["DiscardedCount"],
                     "Minlen": minlen,
                     "Maxcaas": maxcaas,
-                    "CAAP_Groups": groups_str if groups_str else "none",
+                    "caap_groups": groups_str if groups_str else "none",
                 }
             )
         else:
-            count = int((df["ClusteringFlag"] == "Discarded").sum())
+            count = int((df["clustering_flag"] == "Discarded").sum())
             summary_data.append(
                 {
                     "Parameter": param_label,
@@ -92,7 +92,7 @@ def main() -> int:
                     "DiscardedCount": count,
                     "Minlen": minlen,
                     "Maxcaas": maxcaas,
-                    "CAAP_Groups": "N/A",
+                    "caap_groups": "N/A",
                 }
             )
 

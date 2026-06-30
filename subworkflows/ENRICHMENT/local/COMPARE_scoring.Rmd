@@ -84,6 +84,76 @@ FCS engine and dual-threshold significance, a gene set enriched in **multiple**
 modules is convergent, independent evidence. A set is "significant" at BH < `r params$fdr_thr`
 (and permulation p < threshold where available) with AUC > 0.5.
 
+The report reads bottom-up: **(1)** what is significant *within each module on its
+own*, then **(2)** which terms recur *across* modules (the convergence view), and
+finally **(3)** the legacy CAAS top-vs-bottom and STRING directional contrasts.
+
+# Per-module significance {.tabset .tabset-fade}
+
+What does each module call significant on its own? This is the per-module baseline
+that the cross-module convergence view (next section) builds on — a term recurring
+across modules only means something once you know each module's own hit list.
+
+`r if (!has_multi) "> **No module FCS results available — skipping.**"`
+
+```{r permod_prep, eval=has_multi}
+thr  <- params$fdr_thr
+pthr <- params$pperm_thr %||% 1
+# Per (module, database, pathway): best positively-enriched ranking (max AUC, min
+# p.adj). Significance = BH < thr AND AUC > 0.5 AND (p.perm < pthr where present).
+permod_best <- fcs_all_mod %>%
+  filter(stat > 0) %>%
+  mutate(sig = !is.na(p.adj) & p.adj < thr & stat > 0 &
+               (!("p.perm" %in% names(.)) | is.na(p.perm) | p.perm < pthr)) %>%
+  group_by(module, database, pathway) %>%
+  summarise(AUC = max(stat, na.rm = TRUE) + 0.5,
+            p.adj = min(p.adj, na.rm = TRUE),
+            sig = any(sig, na.rm = TRUE),
+            description = dplyr::first(dplyr::coalesce(description, pathway)),
+            .groups = "drop")
+
+permod_summary <- permod_best %>%
+  group_by(module) %>%
+  summarise(`Terms tested` = dplyr::n(),
+            `Significant`  = sum(sig, na.rm = TRUE),
+            `% significant` = round(100 * mean(sig, na.rm = TRUE), 1),
+            .groups = "drop") %>%
+  arrange(desc(Significant))
+
+dir.create("compare_results", showWarnings = FALSE)
+readr::write_tsv(permod_summary, "compare_results/per_module_significance_summary.tsv")
+readr::write_tsv(permod_best,    "compare_results/per_module_best_per_term.tsv")
+```
+
+## Summary
+
+```{r permod_summary_tab, eval=has_multi, results='asis'}
+if (nrow(permod_summary) == 0) {
+  cat("_No module produced enriched terms._\n")
+} else {
+  print(kbl_html(permod_summary))
+}
+```
+
+```{r permod_tabs, eval=has_multi, results='asis'}
+# One tab per module: its own top-N significant terms by AUC.
+for (m in modules_present) {
+  cat(sprintf("\n## %s\n\n", toupper(m)))
+  d <- permod_best %>%
+    filter(module == m, sig) %>%
+    mutate(Description = stringr::str_trunc(description, 60),
+           AUC = round(AUC, 3), p.adj = signif(p.adj, 3)) %>%
+    arrange(desc(AUC)) %>%
+    select(database, pathway, Description, AUC, p.adj) %>%
+    head(params$top_n)
+  if (nrow(d) == 0) {
+    cat(sprintf("_No gene set is significant in %s at BH < %.2g._\n\n", toupper(m), thr))
+  } else {
+    print(kbl_html(d, height = if (nrow(d) > 15) "420px" else NULL))
+  }
+}
+```
+
 # Cross-module convergence {.tabset .tabset-fade}
 
 `r if (!has_multi) "> **No module FCS results available — skipping.**"`

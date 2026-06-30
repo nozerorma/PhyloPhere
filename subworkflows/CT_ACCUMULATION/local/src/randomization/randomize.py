@@ -35,18 +35,18 @@ def _remap_caas_df(df):
     """Normalise a filtered_discovery.tsv DataFrame to the internal column schema.
 
     Source-of-truth columns (tab-separated):
-      Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
-      convergence_description, convergence_mode, CAAP_Group, amino_encoded,
+      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, pattern_type,
+      convergence_description, convergence_mode, caap_group, amino_encoded,
       is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
 
     Produces internal schema columns:
-      gene, msa_pos, is_significant, tag, pattern_type (from Pattern),
-      caap_group (from CAAP_Group, uppercased), iscaap,
-      change_side, is_conserved_meta, asr_is_conserved
+      gene, msa_pos, is_significant, tag, pattern_type, caap_group (uppercased),
+      iscaap, change_side, is_conserved_meta, asr_is_conserved
     """
-    # Rename Gene→gene, Position→msa_pos
+    # Rename Gene→gene, Position→msa_pos (structural keys; concept columns are
+    # already in disambiguation's canonical lowercase form).
     df = df.rename(columns={'Gene': 'gene', 'Position': 'msa_pos'})
 
     _bool = lambda x: str(x).strip().lower() in {'true', 't', '1', 'yes', 'y'}
@@ -56,11 +56,10 @@ def _remap_caas_df(df):
 
     # Coerce conserved-state columns to bool
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
-    # pattern_type: from Pattern column
-    df['pattern_type'] = df['Pattern']
+    # pattern_type is already canonical in filtered_discovery.tsv — no remap needed.
 
-    # caap_group: preserve the raw CAAP_Group label (GS1–GS4, US)
-    df['caap_group'] = df['CAAP_Group'].astype(str).str.strip().str.upper()
+    # caap_group: normalise casing of the raw label (GS1–GS4, US)
+    df['caap_group'] = df['caap_group'].astype(str).str.strip().str.upper()
 
     # iscaap: any labelled group other than 'US' (includes GS1–GS4)
     df['iscaap'] = df['caap_group'].apply(lambda x: x != 'US')

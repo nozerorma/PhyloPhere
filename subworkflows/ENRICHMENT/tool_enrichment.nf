@@ -48,7 +48,6 @@ process TOOL_STRING_REPORT {
     def species           = params.string_species           ?: 9606
     def required_score    = params.string_required_score    ?: 400
     def network_score_thr = params.string_network_score_thr ?: 700
-    def mcl_inflation     = params.string_mcl_inflation     ?: 2.5
     def fdr_thr           = params.string_fdr              ?: 0.1
     def top_thr           = params.string_top_thr          ?: 15
     def report_num        = params.string_report_num       ?: 20
@@ -75,7 +74,7 @@ process TOOL_STRING_REPORT {
                     species            = ${species},
                     required_score     = ${required_score},
                     network_score_thr  = ${network_score_thr},
-                    mcl_inflation      = ${mcl_inflation},
+
                     fdr_thr            = ${fdr_thr},
                     top_thr            = ${top_thr},
                     report_num         = ${report_num},
@@ -100,7 +99,7 @@ process TOOL_STRING_REPORT {
                     species            = ${species},
                     required_score     = ${required_score},
                     network_score_thr  = ${network_score_thr},
-                    mcl_inflation      = ${mcl_inflation},
+
                     fdr_thr            = ${fdr_thr},
                     top_thr            = ${top_thr},
                     report_num         = ${report_num},

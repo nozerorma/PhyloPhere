@@ -52,6 +52,10 @@ process SCORING_REPORT {
     path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
     path vep_primateai       // optional: PrimateAI-3D score TSV  (NO_VEP_PRIMATEAI sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
+    path caas_perms          // optional: CAAS permulation RDS (asr + caas null) (NO_FILE/NO_CAAS_PERMS sentinel when absent)
+    path caas_pos_pval       // optional: lean recovery p-value per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
+    path caas_pos_sample     // optional: lean capped per-scheme sample for distribution plots (NO_CAAS_POS_SAMPLE sentinel)
+    path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay
 
     output:
     path "SCORING_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -80,6 +84,10 @@ process SCORING_REPORT {
 
     def pai_arg = (vep_primateai.name =~ /^NO_VEP_PRIMATEAI/) ? 'NULL' : "'${vep_primateai}'"
     def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
+    def perms_arg = (caas_perms.name =~ /^NO_CAAS_PERMS|^NO_FILE/) ? 'NULL' : "'${caas_perms}'"
+    def pos_pval_arg = (caas_pos_pval.name =~ /^NO_CAAS_POS_PVAL|^NO_FILE/) ? 'NULL' : "'${caas_pos_pval}'"
+    def pos_sample_arg = (caas_pos_sample.name =~ /^NO_CAAS_POS_SAMPLE|^NO_FILE/) ? 'NULL' : "'${caas_pos_sample}'"
+    def filt_disc_arg = (filtered_discovery.name =~ /^NO_POSTPROC|^NO_FILE/) ? 'NULL' : "'${filtered_discovery}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
 
     if (params.use_singularity || params.use_apptainer) {
@@ -113,6 +121,10 @@ process SCORING_REPORT {
                     fade_site_bot_file   = ${fs_bot_arg},
                     vep_primateai_file   = ${pai_arg},
                     genomic_info_file    = ${gi_arg},
+                    caas_perms_file      = ${perms_arg},
+                    caas_pos_pval_file   = ${pos_pval_arg},
+                    caas_pos_sample_file = ${pos_sample_arg},
+                    filtered_discovery_file = ${filt_disc_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
                 ),
@@ -151,6 +163,10 @@ process SCORING_REPORT {
                     fade_site_bot_file   = ${fs_bot_arg},
                     vep_primateai_file   = ${pai_arg},
                     genomic_info_file    = ${gi_arg},
+                    caas_perms_file      = ${perms_arg},
+                    caas_pos_pval_file   = ${pos_pval_arg},
+                    caas_pos_sample_file = ${pos_sample_arg},
+                    filtered_discovery_file = ${filt_disc_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
                 ),

@@ -128,9 +128,7 @@ class ConvergenceResult:
     mrca_diversity: Optional[float] = None
     derived_agreement: Optional[float] = None
     conservation_gate: Optional[float] = None
-    count_factor: Optional[float] = None
-    n_changed_pairs: Optional[int] = None
-    n_changed_sides: Optional[int] = None
+    core: Optional[float] = None
     pair_path_scores: Optional[Dict[int, float]] = None
     pair_path_contaminated: Optional[Dict[int, bool]] = None
 

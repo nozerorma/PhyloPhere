@@ -95,5 +95,51 @@ cat(sprintf("  [%s] %-22s  cols=%d  max|Δstat|=%.2e\n",
             ifelse(ok, "PASS", "FAIL"), "multi-column", N, maxd_multi))
 if (!ok) fails <- fails + 1
 
+# 6. corStat_byrank per-ranking selection via fcs_run_all (the CAAS perms shape).
+#    Proves fcs_run_all routes each ranking to ITS OWN null matrix when the RDS
+#    carries corStat_byrank, and that the RER single-corStat path is unaffected.
+#    Strategy: same observed rankings, two RDS shapes —
+#      • byrank : list(global=Mg, top=Mt, bottom=Mb)  (distinct null matrices)
+#      • single : list(corStat=Mg)                    (RER-style, shared)
+#    Then: global p.perm must MATCH across shapes (both use Mg); top/bottom must
+#    DIFFER (byrank uses Mt/Mb, single reuses Mg) — i.e. selection actually happens.
+{
+  set.seed(7)
+  genes6 <- paste0("G", 1:400)
+  gmt6   <- make_gmt(genes6, n_sets = 16, min_sz = 4, max_sz = 50)
+  gmts6  <- list(testdb = gmt6)
+  Np     <- 200
+  # Non-negative (zero-floored) magnitude rankings → alternative auto = "greater".
+  mkrank <- function(shift) { v <- pmax(0, rnorm(length(genes6)) + shift); setNames(v, genes6) }
+  rankings6 <- list(global = mkrank(0), top = mkrank(0.3), bottom = mkrank(-0.3))
+  # Three CLEARLY distinct null matrices so a mis-selection is detectable.
+  mkmat <- function(scale, shift) {
+    m <- matrix(pmax(0, rnorm(length(genes6) * Np) * scale + shift),
+                nrow = length(genes6), dimnames = list(genes6, NULL)); m
+  }
+  Mg <- mkmat(1.0, 0.0); Mt <- mkmat(2.0, 0.5); Mb <- mkmat(0.5, -0.2)
+
+  f_by <- tempfile(fileext = ".rds"); saveRDS(list(corStat_byrank = list(global = Mg, top = Mt, bottom = Mb)), f_by)
+  f_sg <- tempfile(fileext = ".rds"); saveRDS(list(corStat = Mg), f_sg)
+
+  e_by <- suppressMessages(fcs_run_all(rankings6, gmts6, num_g = 10, perms_file = f_by))
+  e_sg <- suppressMessages(fcs_run_all(rankings6, gmts6, num_g = 10, perms_file = f_sg))
+
+  pp <- function(df, rk) { s <- df[df$ranking == rk, ]; setNames(s$p.perm, s$pathway) }
+  cmp <- function(rk) { a <- pp(e_by, rk); b <- pp(e_sg, rk); k <- intersect(names(a), names(b))
+                        list(n = length(k), maxd = if (length(k)) max(abs(a[k] - b[k]), na.rm = TRUE) else NA_real_) }
+
+  cg <- cmp("global")  # both shapes use Mg  → identical
+  ct <- cmp("top")     # byrank=Mt vs single=Mg → must differ somewhere
+  has_perm_by <- any(!is.na(pp(e_by, "global"))) && any(!is.na(pp(e_by, "top"))) && any(!is.na(pp(e_by, "bottom")))
+
+  ok_global <- is.finite(cg$maxd) && cg$maxd < TOL              # selection agrees when matrices match
+  ok_top    <- is.finite(ct$maxd) && ct$maxd > TOL              # distinct matrix → distinct p.perm
+  ok <- has_perm_by && ok_global && ok_top
+  cat(sprintf("  [%s] %-22s  global Δ=%.2e (==0)  top Δ=%.2e (>0)  allperm=%s\n",
+              ifelse(ok, "PASS", "FAIL"), "corStat_byrank", cg$maxd, ct$maxd, has_perm_by))
+  if (!ok) fails <- fails + 1
+}
+
 cat(sprintf("\n%s — %d failure(s)\n", ifelse(fails == 0, "ALL PASS", "FAILURES"), fails))
 quit(status = if (fails == 0) 0 else 1)

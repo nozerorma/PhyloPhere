@@ -131,8 +131,8 @@ def parse_discovery_positions(discovery_file, genename):
     Handles both classical CAAS and CAAP formats.
     
     Classical CAAS legacy format:   Gene\tMode\tTrait\tPosition\t...
-    Normalized CAAS format:         Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
-    CAAP format:                    Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
+    Normalized CAAS format:         Gene\tMode\tcaap_group\tTrait\tPosition\t...
+    CAAP format:                    Gene\tMode\tcaap_group\tTrait\tPosition\t...
     
     Args:
         discovery_file: Path to discovery output file
@@ -153,7 +153,7 @@ def parse_discovery_positions(discovery_file, genename):
         with open(discovery_file, 'r') as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith("Gene"):  # Skip header
+                if not line or line.startswith("gene"):  # Skip header
                     continue
                 
                 try:
@@ -171,8 +171,8 @@ def parse_discovery_positions(discovery_file, genename):
                     mode = fields[1] if len(fields) > 1 else ""
                     
                     if mode == "CAAP":
-                        # CAAP format: Gene\tMode\tCAAP_Group\tTrait\tPosition\t...
-                        # CAAP_Group is at index 2, Position is at index 4
+                        # CAAP format: Gene\tMode\tcaap_group\tTrait\tPosition\t...
+                        # caap_group is at index 2, Position is at index 4
                         if len(fields) >= 5:
                             scheme = fields[2]  # US, GS1, GS2, GS3, or GS4
                             position = fields[4]
@@ -181,9 +181,9 @@ def parse_discovery_positions(discovery_file, genename):
                                 position_schemes[position] = set()
                             position_schemes[position].add(scheme)
                     elif mode == "CAAS":
-                        # CAAS can be legacy (no CAAP_Group) or normalized (CAAP_Group=US).
-                        # Legacy:    Gene Mode Trait Position ...
-                        # Normalized:Gene Mode CAAP_Group Trait Position ...
+                        # CAAS can be legacy (no caap_group) or normalized (caap_group=US).
+                        # Legacy:    Gene mode Trait Position ...
+                        # Normalized:Gene mode caap_group Trait Position ...
                         if len(fields) >= 5 and fields[2] in {"US", "GS1", "GS2", "GS3", "GS4"}:
                             position = fields[4]
                         elif len(fields) >= 4:
@@ -382,15 +382,6 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                                 encoded,
                                 "NA",
                                 pattern,
-                                str(len(fg_species)),
-                                str(len(bg_species)),
-                                str(processed_position.trait2gaps_fg.get(trait, 0)),
-                                str(processed_position.trait2gaps_bg.get(trait, 0)),
-                                str(processed_position.trait2miss_fg.get(trait, 0)),
-                                str(processed_position.trait2miss_bg.get(trait, 0)),
-                                fg_species_str,
-                                bg_species_str,
-                                miss_species_str,
                             ]
                             if max_conserved > 0:
                                 overlap_count = conserved_pairs.split(":")[0] if conserved_pairs else "0"
@@ -486,15 +477,6 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                             tag,
                             "NA",
                             f"pattern{check.pattern}",
-                            fg_species_number,
-                            bg_species_number,
-                            str(processed_position.trait2gaps_fg.get(trait, 0)),
-                            str(processed_position.trait2gaps_bg.get(trait, 0)),
-                            str(processed_position.trait2miss_fg.get(trait, 0)),
-                            str(processed_position.trait2miss_bg.get(trait, 0)),
-                            ",".join(fg_ungapped),
-                            ",".join(bg_ungapped),
-                            missings
                         ]
                         if max_conserved > 0:
                             conserved_info = getattr(check, "conserved_pairs", "0:")
@@ -545,49 +527,31 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
         perm_discovery_handle = open(export_perm_discovery, "w")
         if caap_mode:
             header_fields = [
-                "Cycle",
-                "Gene",
-                "Mode",
-                "CAAP_Group",
-                "Trait",
-                "Position",
-                "Substitution",
-                "Encoded",
-                "Pvalue",
-                "Pattern",
-                "FFGN",
-                "FBGN",
-                "GFG",
-                "GBG",
-                "MFG",
-                "MBG",
-                "FFG",
-                "FBG",
-                "MS"
+                "cycle",
+                "gene",
+                "mode",
+                "caap_group",
+                "trait",
+                "position",
+                "caas",
+                "amino_encoded",
+                "pvalue",
+                "pattern"
             ]
         else:
             header_fields = [
-                "Cycle",
-                "Gene",
-                "Mode",
-                "CAAP_Group",
-                "Trait",
-                "Position",
-                "Substitution",
-                "Pvalue",
-                "Pattern",
-                "FFGN",
-                "FBGN",
-                "GFG",
-                "GBG",
-                "MFG",
-                "MBG",
-                "FFG",
-                "FBG",
-                "MS"
+                "cycle",
+                "gene",
+                "mode",
+                "caap_group",
+                "trait",
+                "position",
+                "caas",
+                "pvalue",
+                "pattern"
             ]
         if max_conserved > 0:
-            header_fields.extend(["ConservedPair", "ConservedPairs"])
+            header_fields.extend(["is_conserved_meta", "conserved_pair"])
         perm_discovery_handle.write("\t".join(header_fields) + "\n")
 
     try:

@@ -453,8 +453,8 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
         return_results: If True, return list of result lines instead of writing to file
 
     Output columns:
-        Gene, Mode, CAAP_Group, Trait, Position, Substitution, Encoded, Pvalue, Pattern,
-        FFGN, FBGN, GFG, GBG, MFG, MBG, FFG, FBG, MS [, ConservedPair, ConservedPairs]
+        gene, mode, caap_group, trait, position, caas, amino_encoded, pvalue, pattern,
+        ffgn, fbgn, gfg, gbg, mfg, mbg, ffg, fbg, ms [, is_conserved_meta, conserved_pair]
     """
 
     # Ensure species_in_alignment is provided
@@ -628,7 +628,7 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
                 overlap_count = int(parts[0]) if parts[0] else 0
                 pair_list = parts[1] if len(parts) > 1 else ""
 
-                # ConservedPair column: TRUE if overlap > 0, FALSE otherwise
+                # is_conserved_meta column: TRUE if overlap > 0, FALSE otherwise
                 has_conserved = "TRUE" if overlap_count > 0 else "FALSE"
                 output_line.append(has_conserved)
                 output_line.append(conserved_pairs)

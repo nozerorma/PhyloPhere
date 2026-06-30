@@ -34,8 +34,8 @@ process CONCAT_DISCOVERY {
     # Check if we have any files
     if [ \${#discovery_files[@]} -eq 0 ]; then
         echo "WARNING: No discovery files found - creating empty discovery table with expected schema"
-        # Keep schema aligned with CT_SIGNIFICATION expectations (Pattern + Pvalue required)
-        echo "Gene\tMode\tCAAP_Group\tTrait\tPosition\tSubstitution\tEncoded\tPvalue\tPattern\tFFGN\tFBGN\tGFG\tGBG\tMFG\tMBG\tFFG\tFBG\tMS\tConservedPair\tConservedPairs" > discovery.tab
+        # Keep schema aligned with CT_SIGNIFICATION expectations (Pattern + pvalue required)
+        echo "gene\tmode\tcaap_group\ttrait\tposition\tcaas\tamino_encoded\tpvalue\tpattern\tffgn\tfbgn\tgfg\tgbg\tmfg\tmbg\tffg\tfbg\tms\tis_conserved_meta\tconserved_pair" > discovery.tab
         exit 0
     fi
     
@@ -205,7 +205,7 @@ process CONCAT_BOOTSTRAP {
     # Check if we have any files
     if [ \${#bootstrap_files[@]} -eq 0 ]; then
         echo "WARNING: No bootstrap files found - creating header-only file"
-        echo "Gene@Position\tCAAP_Group\tCount\tTotal\tProportion" > bootstrap.tab
+        echo "gene@position\tcaap_group\tcount\ttotal\tproportion" > bootstrap.tab
         exit 0
     fi
     

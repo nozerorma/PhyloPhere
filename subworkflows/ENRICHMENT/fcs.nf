@@ -36,6 +36,7 @@ process SCORING_FCS_REPORT {
     input:
     path fcs_stats
     path universe
+    path perms_file
 
     output:
     path "FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -62,7 +63,8 @@ process SCORING_FCS_REPORT {
                 fdr_thr       = ${fdr_thr},
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
-                traitname     = '${traitname}'
+                traitname     = '${traitname}',
+                perms_file    = '${perms_file}'
             ),
             output_file = 'FCS_scoring_${traitname}.html'
         )

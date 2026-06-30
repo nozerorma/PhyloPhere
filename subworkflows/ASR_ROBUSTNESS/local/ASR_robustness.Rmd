@@ -21,7 +21,7 @@ params:
   ASR Path Robustness Characterisation — PhyloPhere Pipeline
   ======================================================
   Evaluates the continuous `asr_path_score` and its subcomponents:
-  (independence, mrca_diversity, derived_agreement, conservation_gate, count_factor)
+  (independence, mrca_diversity, derived_agreement, conservation_gate, core)
   assigned to sites during ASR evaluation.
 
   Author: Miguel Ramon (miguel.ramon@upf.edu)
@@ -86,12 +86,11 @@ save_plot <- function(p, fname, width = 11, height = 6) {
 
 With the introduction of the continuous `asr_path_score`, the ASR evaluations have fundamentally shifted from binary cut-offs to a holistic score based on a path-to-root walk. This report details the distribution of the `asr_path_score` across evaluated sites and breaks down the final score into its constituent penalty and reward components:
 
-*   **Replication of Private Isolation (`core`)**: The combinatorial probability that at least two independent changes occurred at this position.
-*   **Independence at shared ancestors (`independence`)**: The probability that the derived state was absent at shared ancestors (LCA/LAC nodes).
+*   **Replication (`core`)**: P(≥2 independent changes) — combinatorial probability that ≥2 pairs changed independently in at least one phenotype direction (top or bottom).
+*   **Independence at shared ancestors (`independence`)**: The probability that the derived state was absent at shared ancestors (LAC nodes).
 *   **Parallel vs. non-parallel origins (`mrca_diversity`)**: How distinct the ancestral starting states are across participating pairs.
-*   **Convergence agreement (`derived_agreement`)**: Cooperation/coherence of derived states on each phenotype side.
-*   **Conserved-pair confirmation (`conservation_gate`)**: Soft-gating penalty on deep conservation of ancestral residues in control clades.
-*   **Replication factor (`count_factor`)**: Bounded count scaling to reward multiple independent contrasts.
+*   **Convergence agreement (`derived_agreement`)**: Coherence of derived states per phenotype side — penalises divergent derived residues.
+*   **Conserved-pair confirmation (`conservation_gate`)**: Soft gate from conserved pairs: deep conservation confirms the contrast; drifted controls weaken it.
 
 ---
 
@@ -117,7 +116,7 @@ if (nrow(score_df) == 0) {
   stop("No ASR path scores found in the provided CSV.")
 }
 
-comp_vars <- c("independence", "mrca_diversity", "derived_agreement", "conservation_gate", "count_factor")
+comp_vars <- c("independence", "mrca_diversity", "derived_agreement", "conservation_gate", "core")
 available_comps <- intersect(comp_vars, colnames(score_df))
 ```
 

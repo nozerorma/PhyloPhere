@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+#
+# Integrated 1000-gene test WITH the CAAS permulation-excess framework.
+# Copy of run_integrated_1000.sh tuned for the perms feature (cycles=1000, full_perms=10).
+#
+# IMPORTANT — why this script does NOT use -resume by default:
+#   Nextflow caches tasks by the process *command* (e.g. `ct discovery`), NOT by the
+#   Python modules the `ct` binary loads at runtime (disco.py/boot.py/caas_id.py...).
+#   After a change to those modules (e.g. the header canonicalization), -resume happily
+#   serves STALE old-schema discovery → CT_SIGNIFICATION then fails
+#   "Missing required columns: pvalue". So a clean run is required the first time after
+#   any CAAStools-module edit. See docs/CAAS_PERMULATION_RUNTIME.md.
+#
+# Usage:
+#   bash test/run_integrated_1000_perms.sh                 # clean run (safe default)
+#   RESUME=1 bash test/run_integrated_1000_perms.sh        # -resume (only if modules unchanged)
+#   CYCLES=200 FULL_PERMS=20 bash test/run_integrated_1000_perms.sh   # override knobs
+#   ... any extra args are passed through to `nextflow run`.
 
 set -Eeuo pipefail
 
@@ -7,8 +24,13 @@ TEST_DIR="${REPO_DIR}/test"
 INPUTS_DIR="${TEST_DIR}/inputs"
 ALIGNMENT_DIR="${REPO_DIR}/test/inputs/alignments/Ali_1000"
 
+# Tunable knobs (env-overridable)
+CYCLES="${CYCLES:-1000}"
+FULL_PERMS="${FULL_PERMS:-10}"
+RESUME="${RESUME:-0}"
+
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-OUTDIR="${TEST_DIR}/runs/integrated_1000/${TIMESTAMP}"
+OUTDIR="${TEST_DIR}/runs/integrated_1000_perms/${TIMESTAMP}"
 WORKDIR="${OUTDIR}/work"
 
 TRAIT_FILE="${INPUTS_DIR}/traitfiles/traitfile.tab"
@@ -28,6 +50,8 @@ require_path() {
 # ENVIRONMENT ACTIVATION
 # ─────────────────────────────────────────────────────────────────────────────
 echo "Activating environment: phylophere"
+# Fallback so `micromamba shell hook` works under set -u even when .bashrc didn't set it.
+export MAMBA_ROOT_PREFIX="${MAMBA_ROOT_PREFIX:-$HOME/micromamba}"
 if [ -f "$HOME/.bashrc" ]; then
     source "$HOME/.bashrc"
 fi
@@ -49,14 +73,12 @@ require_path "$ASR_CACHE_DIR"
 mkdir -p "$OUTDIR" "$WORKDIR"
 
 echo "=========================================="
-echo "PHYLOPHERE INTEGRATED 1000 GENES TESTER"
+echo "PHYLOPHERE 1000-GENE TEST — CAAS PERMULATION FRAMEWORK"
 echo "=========================================="
-echo "Mode              : full integrated CT 1000 run"
+echo "cycles            : $CYCLES"
+echo "caas_full_perms   : $FULL_PERMS"
+echo "resume            : $([ "$RESUME" = 1 ] && echo yes || echo 'no (clean run)')"
 echo "Alignments        : $ALIGNMENT_DIR"
-echo "Trait file        : $TRAIT_FILE"
-echo "Boot trait file   : $BOOT_TRAIT_FILE"
-echo "Tree file         : $TREE_FILE"
-echo "ASR cache         : $ASR_CACHE_DIR"
 echo "Output dir        : $OUTDIR"
 echo "Work dir          : $WORKDIR"
 echo "=========================================="
@@ -72,9 +94,9 @@ NF_FLAGS=(
     --ct_accumulation
     --traitname "neoplasia_prevalence"
     --scoring
-    --cycles 1000
+    --cycles "$CYCLES"
     --caas_permulation_enrichment true
-    --caas_full_perms 10
+    --caas_full_perms "$FULL_PERMS"
     --gene_ensembl_file "${REPO_DIR}/test/inputs/alignments/ensembl_genes.output"
     --tax_id "${REPO_DIR}/test/inputs/phylogeny/taxid_species_family_primates.tsv"
     --vep_map_dir "${REPO_DIR}/test/inputs/map_1000/"
@@ -92,8 +114,11 @@ NF_FLAGS=(
     --scoring_rer_input "${REPO_DIR}/test/inputs/rer/RERConverge/RER_Results/rerconverge_summary_neoplasia_prevalence.tsv"
     --vep
     --outdir "$OUTDIR"
-    -resume
 )
+# Opt-in resume only (default clean — see header note on the module-cache trap).
+if [ "$RESUME" = 1 ]; then
+    NF_FLAGS+=( -resume )
+fi
 
 nextflow run "${REPO_DIR}/main.nf" \
     "${NF_FLAGS[@]}" \
@@ -101,5 +126,7 @@ nextflow run "${REPO_DIR}/main.nf" \
     "$@"
 
 echo ""
-echo "Integrated 1000 genes test finished."
-echo "Results: $OUTDIR"
+echo "Permulation framework test finished."
+echo "Results:        $OUTDIR"
+echo "Null matrix:    $OUTDIR/caas_permulation/caas_perms.rds"
+echo "CAAS FCS report: $OUTDIR/fcs/FCS_scoring_neoplasia_prevalence.html  (p.perm on the *_asr rankings)"

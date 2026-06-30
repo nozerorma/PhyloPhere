@@ -99,17 +99,17 @@ mean of pair scores multiplied by **five factors**:
   position — all lineages changed). The gate can only confirm/undermine, never
   boost — convergence support is the primary signal.
 
-* ``count_factor`` (replication axis): ``n_changed_pairs / (n_changed_pairs + k)``
-  — a saturating reward for the number of independent contrasts (pairs) that
-  actually changed relative to their own MRCA. A tip that merely inherited the
-  state (tip == MRCA) is not a change, so a surface "convergence" built from
-  inherited states does not inflate the count; a pair changing on both sides is
-  still one contrast. Replication used to be carried by the hypergeometric CAAS
-  p-value; with that p-value demoted to a significance gate, the count re-enters
-  here. Bounded and diminishing, so it never dominates the quality axes.
+* ``core`` (replication axis): ``P(≥2 independent changes)`` — the combinatorial
+  probability that at least two pairs changed independently in at least one
+  phenotype direction (top or bottom). Computed per side via inclusion-exclusion
+  on the per-pair path scores (each treated as P(change is genuine)), then
+  combined across directions: ``core = 1 − (1 − core_top)(1 − core_bottom)``.
+  A pair that changed on *both* sides contributes to both halves; opposite-only
+  changes (one pair top-only, another bottom-only) correctly yield ``core = 0``
+  because neither direction reaches ≥2.
 
-    asr_path_score = mean_pair * independence * diversity_mult
-                     * derived_agreement * conservation_gate * count_factor
+    asr_path_score = core * independence * diversity_mult
+                     * derived_agreement * conservation_gate
 
 Most-interesting case D->A & S->A maximizes the multipliers (diversity 1.0,
 agreement 1.0); parallel S->A & S->A scores diversity 0.75; a false "S->A & S->V"
@@ -386,7 +386,6 @@ def compute_asr_path_score(
     is_conserved_meta: bool,
     conserved_pair: Optional[str],
     diversity_floor: float = 0.75,
-    count_k: float = 1.0,
 ) -> Dict[str, Any]:
     """Compute the unified ASR path score for one CAAS position row.
 
@@ -404,17 +403,11 @@ def compute_asr_path_score(
         diversity_floor: lower bound of ``diversity_mult``. A pure-parallel
             position (identical MRCA posteriors) gets exactly this; a maximally
             independent one gets 1.0. Default 0.75.
-        count_k: saturation constant of the replication factor
-            ``n_changed_pairs / (n_changed_pairs + count_k)``. With the default 1
-            a single changed pair scores 0.5, two 0.67, three 0.75 … saturating
-            toward 1. Replication used to live in the hypergeometric CAAS p-value;
-            now that p-value is a gate, so the count re-enters here.
 
     Returns:
         Dict with ``asr_path_score`` (position level, 0-1), ``independence``,
         ``mrca_diversity``, ``derived_agreement``, ``conservation_gate``,
-        ``count_factor``, ``n_changed_pairs``, ``pair_scores`` ({pair_id: score})
-        and ``pair_contaminated``.
+        ``core``, ``pair_scores`` ({pair_id: score}) and ``pair_contaminated``.
     """
     pairs = pair_details or []
     n_pairs = len(pairs)
@@ -483,8 +476,7 @@ def compute_asr_path_score(
             "mrca_diversity": 0.0,
             "derived_agreement": 0.0,
             "conservation_gate": conservation_gate,
-            "count_factor": 0.0,
-            "n_changed_pairs": 0,
+            "core": 0.0,
             "pair_scores": {},
             "pair_contaminated": {},
         }
@@ -583,14 +575,12 @@ def compute_asr_path_score(
         derived_agreement = 1.0  # no changed sides (handled above by empty `changed`)
 
     # ── Combinatorial Core Score: P(>= 2 independent changes) ──────────────────
-    # Computed *per phenotype side* and then maximised. This is the critical
-    # directional check: a pair changing only on the top side and a different pair
-    # changing only on the bottom side are changes in opposite directions — not
-    # convergence. Without the per-side split they would both enter p_list and
-    # produce P(≥2) ≈ 1 even though neither direction has ≥2 independent events.
-    n_changed_pairs = len(changed)
-    n_changed_sides = sum(len(c["sides"]) for c in changed)
-    count_factor = n_changed_sides / (n_changed_sides + count_k)
+    # Computed *per phenotype side* and then combined via union. This is the
+    # critical directional check: a pair changing only on the top side and a
+    # different pair changing only on the bottom side are changes in opposite
+    # directions — not convergence. Without the per-side split they would both
+    # enter p_list and produce P(≥2) ≈ 1 even though neither direction has ≥2
+    # independent events.
 
     def _p_at_least_2(p_list: List[float]) -> float:
         if len(p_list) < 2:
@@ -629,9 +619,7 @@ def compute_asr_path_score(
         "mrca_diversity": diversity,
         "derived_agreement": derived_agreement,
         "conservation_gate": conservation_gate,
-        "count_factor": count_factor,
-        "n_changed_pairs": n_changed_pairs,
-        "n_changed_sides": n_changed_sides,
+        "core": core,
         "pair_scores": pair_scores,
         "pair_contaminated": pair_contaminated,
     }

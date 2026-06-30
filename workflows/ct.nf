@@ -33,6 +33,7 @@ include { DISCOVERY; DISCOVERY_BATCHED } from "${baseDir}/subworkflows/CT/ct_dis
 include { RESAMPLE } from "${baseDir}/subworkflows/CT/ct_resample"
 include { BOOTSTRAP; BOOTSTRAP_BATCHED } from "${baseDir}/subworkflows/CT/ct_bootstrap"
 include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE; CONCAT_BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_concat"
+include { CAAS_PERMS_PREP } from "${baseDir}/subworkflows/CT/caas_permulation"
 
 // Main workflow
 
@@ -55,6 +56,10 @@ workflow CT {
         def background_genes_out = Channel.empty()
         def bootstrap_concat_out = Channel.empty()
         def trait_file_emit = Channel.empty()
+        // CAAS permulation-excess null (full-pool perm-discovery export). Populated
+        // only when --caas_permulation_enrichment is set and bootstrap+resample run.
+        def caas_perm_discovery_out = Channel.empty()
+        def caas_resample_subset_out = Channel.empty()
         def tree_file_emit = Channel.empty()
         
     if (params.ct_tool) {
@@ -315,6 +320,15 @@ workflow CT {
                 .ifEmpty([])
                 .set { bootstrap_files }
             bootstrap_concat_out = CONCAT_BOOTSTRAP(bootstrap_files)
+
+            // CAAS permulation-excess null: a SEPARATE full-pool bootstrap pass over
+            // N permuted labelings (no --discovery, export_perm_discovery ON). Reuses
+            // the sliced per-gene alignments + the resample directory already in scope.
+            if (params.caas_permulation_enrichment) {
+                def perms_prep = CAAS_PERMS_PREP(align_tuple, trait_file_out, resample_dir_out)
+                caas_perm_discovery_out  = perms_prep.perm_discovery
+                caas_resample_subset_out = perms_prep.resample_subset
+            }
         }
     }
     
@@ -326,4 +340,8 @@ workflow CT {
         bootstrap_file = bootstrap_concat_out
         trait_file = trait_file_emit
         tree_file = tree_file_emit
+        // CAAS permulation-excess: full-pool perm-discovery + the N-cycle resample
+        // subset, consumed downstream by CAAS_PERMULATION (main.nf) → caas_perms.rds.
+        caas_perm_discovery = caas_perm_discovery_out
+        caas_resample_subset = caas_resample_subset_out
 }

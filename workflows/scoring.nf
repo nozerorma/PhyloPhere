@@ -40,6 +40,9 @@ workflow SCORING {
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
+        caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm + report
+        caas_pos_pval_ch         // Channel<path> or null — lean recovery p-value per (gene,position,scheme)
+        caas_pos_sample_ch       // Channel<path> or null — lean capped per-scheme sample for report distribution plots
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -48,7 +51,9 @@ workflow SCORING {
 
         def resolved_postproc
         if (postproc_ch) {
-            resolved_postproc = postproc_ch
+            // .first() → broadcastable value channel: filtered_discovery is consumed
+            // by BOTH SCORING_COMPUTE and the report's functional-group overlay tab.
+            resolved_postproc = postproc_ch.first()
         } else if (params.scoring_postproc_input) {
             def f = file(params.scoring_postproc_input)
             assert f.exists() : "SCORING: postproc input not found: ${params.scoring_postproc_input}"
@@ -118,6 +123,24 @@ workflow SCORING {
             ch.ifEmpty { file(sentinel) }
         }
 
+        // CAAS permulation null (corStat_byrank rds) — resolved once, shared by the
+        // scoring report (permulation-null overview) and the FCS report (p.perm).
+        // Value channel via collect()/map (NOT .first(), which warns on a value channel).
+        def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
+            .collect()
+            .map { it && it.size() > 0 ? it[0] : file(params.caas_perms_file ?: 'NO_FILE') }
+
+        // Lean per-scheme null files → report permulation section.
+        def caas_pos_pval_resolved = (caas_pos_pval_ch ?: Channel.empty())
+            .collect()
+            .map { it && it.size() > 0 ? it[0] : file('NO_CAAS_POS_PVAL') }
+        def caas_pos_sample_resolved = (caas_pos_sample_ch ?: Channel.empty())
+            .collect()
+            .map { it && it.size() > 0 ? it[0] : file('NO_CAAS_POS_SAMPLE') }
+
+        // filtered_discovery (resolved_postproc, a value channel) = the observed
+        // per-(gene,position,scheme) asr_path_score overlaid on the per-scheme null;
+        // when scoring runs it is always present (same condition as position_scores).
         def report_out = SCORING_REPORT(
             compute_out.position_scores,
             compute_out.gene_scores,
@@ -131,7 +154,11 @@ workflow SCORING {
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
             resolved_vep_primateai,
-            resolved_genomic_info
+            resolved_genomic_info,
+            caas_perms_resolved,
+            caas_pos_pval_resolved,
+            caas_pos_sample_resolved,
+            resolved_postproc
         )
 
         def gene_lists_ch = compute_out.gene_lists
@@ -145,7 +172,10 @@ workflow SCORING {
         def fcs_universe_ch = (cleaned_background_ch ?: Channel.empty())
             .ifEmpty { file('NO_BACKGROUND') }
             .collect()
-        def fcs_out = SCORING_FCS_REPORT(compute_out.fcs_stats, fcs_universe_ch)
+        // CAAS permulation null (corStat_byrank: global_asr/top_asr/bottom_asr) → p.perm
+        // on the score_*_asr rankings. Resolved above (shared with SCORING_REPORT);
+        // NO_FILE when the toggle is off → BH-only.
+        def fcs_out = SCORING_FCS_REPORT(compute_out.fcs_stats, fcs_universe_ch, caas_perms_resolved)
 
         // ── Per-module annotated FCS reports (downstream of the scoring join) ──
         // Each module's FCS report is ranked by ITS OWN statistic (RER/FADE/accum)
@@ -158,8 +188,8 @@ workflow SCORING {
         // RER permulation null (from RER_MAIN) → enables p.perm in the centralized RER
         // report. NO_FILE when RER ran without permulations → BH-only.
         def rer_perms_resolved = (rer_perms_ch ?: Channel.empty())
-            .ifEmpty { file(params.rer_perms_file ?: 'NO_FILE') }
-            .first()
+            .collect()
+            .map { it && it.size() > 0 ? it[0] : file(params.rer_perms_file ?: 'NO_FILE') }
         def rer_fcs = MODULE_FCS_RER(
             Channel.value('scoring/rer'),   compute_out.fcs_stats_rer,
             fcs_universe_ch, Channel.value("FCS_rer_${trait_lbl}"),

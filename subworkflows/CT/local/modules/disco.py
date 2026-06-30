@@ -210,49 +210,49 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
         # Determine header based on mode
         if caap_mode:
             header_fields = [
-                "Gene",
-                "Mode",
-                "CAAP_Group",
-                "Trait",
-                "Position",
-                "Substitution",
-                "Encoded",
-                "Pvalue",
-                "Pattern",
-                "FFGN",
-                "FBGN",
-                "GFG",
-                "GBG",
-                "MFG",
-                "MBG",
-                "FFG",
-                "FBG",
-                "MS"
+                "gene",
+                "mode",
+                "caap_group",
+                "trait",
+                "position",
+                "caas",
+                "amino_encoded",
+                "pvalue",
+                "pattern",
+                "ffgn",
+                "fbgn",
+                "gfg",
+                "gbg",
+                "mfg",
+                "mbg",
+                "ffg",
+                "fbg",
+                "ms"
             ]
         else:
             header_fields = [
-                "Gene",
-                "Mode",
-                "CAAP_Group",
-                "Trait",
-                "Position",
-                "Substitution",
-                "Pvalue",
-                "Pattern",
-                "FFGN",
-                "FBGN",
-                "GFG",
-                "GBG",
-                "MFG",
-                "MBG",
-                "FFG",
-                "FBG",
-                "MS"
+                "gene",
+                "mode",
+                "caap_group",
+                "trait",
+                "position",
+                "caas",
+                "pvalue",
+                "pattern",
+                "ffgn",
+                "fbgn",
+                "gfg",
+                "gbg",
+                "mfg",
+                "mbg",
+                "ffg",
+                "fbg",
+                "ms"
             ]
         
         # Add conserved-pair columns when overlap tolerance is enabled
         if max_conserved > 0:
-            header_fields.extend(["ConservedPair", "ConservedPairs"])
+            header_fields.extend(["is_conserved_meta", "conserved_pair"])
         
         header = "\t".join(header_fields)
         
@@ -261,11 +261,11 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
             outf.write(header + "\n")
             for result_line in results_to_write:
                 if not caap_mode:
-                    # Normalize CAAS rows to include CAAP_Group=US for schema parity
+                    # Normalize CAAS rows to include caap_group=US for schema parity
                     # Legacy CAAS rows come as:
-                    # Gene Mode Trait Position ...
+                    # Gene mode Trait Position ...
                     # New normalized row becomes:
-                    # Gene Mode CAAP_Group Trait Position ...
+                    # Gene mode caap_group Trait Position ...
                     fields = result_line.split("\t")
                     if len(fields) >= 3 and fields[1] == "CAAS":
                         # Avoid duplicating if already normalized

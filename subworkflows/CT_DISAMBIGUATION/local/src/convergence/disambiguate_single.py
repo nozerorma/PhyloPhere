@@ -313,9 +313,7 @@ def analyze_caas_position_disambiguation(
     mrca_diversity = 0.0
     derived_agreement = 1.0
     conservation_gate = 1.0
-    count_factor = 0.0
-    n_changed_pairs = 0
-    n_changed_sides = 0
+    core = 0.0
     pair_path_scores: Dict[int, float] = {}
     pair_path_contaminated: Dict[int, bool] = {}
     try:
@@ -339,9 +337,7 @@ def analyze_caas_position_disambiguation(
         mrca_diversity = path_result["mrca_diversity"]
         derived_agreement = path_result["derived_agreement"]
         conservation_gate = path_result["conservation_gate"]
-        count_factor = path_result.get("count_factor", 0.0)
-        n_changed_pairs = path_result.get("n_changed_pairs", 0)
-        n_changed_sides = path_result.get("n_changed_sides", 0)
+        core = path_result.get("core", 0.0)
         pair_path_scores = path_result["pair_scores"]
         pair_path_contaminated = path_result["pair_contaminated"]
     except Exception as e:  # never let path scoring break disambiguation
@@ -399,9 +395,7 @@ def analyze_caas_position_disambiguation(
         mrca_diversity=mrca_diversity,
         derived_agreement=derived_agreement,
         conservation_gate=conservation_gate,
-        count_factor=count_factor,
-        n_changed_pairs=n_changed_pairs,
-        n_changed_sides=n_changed_sides,
+        core=core,
         pair_path_scores=pair_path_scores or None,
         pair_path_contaminated=pair_path_contaminated or None,
         score=None,

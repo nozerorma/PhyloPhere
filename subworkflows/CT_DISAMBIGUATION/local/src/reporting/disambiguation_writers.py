@@ -142,9 +142,7 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "mrca_diversity",
         "derived_agreement",
         "conservation_gate",
-        "count_factor",
-        "n_changed_pairs",
-        "n_changed_sides",
+        "core",
         # ASR fields (AT END - only present when ASR available)
         "all_mrca_state",
         "all_mrca_posterior",

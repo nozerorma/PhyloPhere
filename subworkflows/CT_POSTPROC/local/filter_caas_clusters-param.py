@@ -26,7 +26,7 @@ Input Format:
 Output:
 -------
   - Filtered TSV file: input.filtered.minlenX.maxcaasY.tsv
-    Columns: Gene, Position, ClusteringFlag ("Good" or "Discarded")
+    Columns: Gene, Position, clustering_flag ("Good" or "Discarded")
   - Log file: input.minlenX.maxcaasY.log
 """
 
@@ -235,11 +235,11 @@ def filterCAAS(infile, maxcaas, minlen, logger):
     genes = df["Gene"].unique()
     total_genes = len(genes)
     
-    # Check if CAAP_Group column exists for group-aware processing
-    has_caap_group = "CAAP_Group" in df.columns
+    # Check if caap_group column exists for group-aware processing
+    has_caap_group = "caap_group" in df.columns
     
     if has_caap_group:
-        caap_groups = df["CAAP_Group"].unique()
+        caap_groups = df["caap_group"].unique()
         logger.info(
             f"CAAP mode detected: Processing {total_genes} genes across "
             f"{len(caap_groups)} CAAP groups ({', '.join(caap_groups)}) with "
@@ -254,7 +254,7 @@ def filterCAAS(infile, maxcaas, minlen, logger):
     # Cache column access for performance
     position_col = df["Position"]
     gene_col = df["Gene"]
-    caap_group_col = df["CAAP_Group"] if has_caap_group else None
+    caap_group_col = df["caap_group"] if has_caap_group else None
     
     # Process each gene independently
     for i, gene in enumerate(genes, 1):
@@ -262,11 +262,11 @@ def filterCAAS(infile, maxcaas, minlen, logger):
         
         if has_caap_group:
             # Process each CAAP group within the gene independently
-            groups_in_gene = gene_df["CAAP_Group"].unique()
+            groups_in_gene = gene_df["caap_group"].unique()
             logger.info(f"Gene [{i}/{total_genes}]: {gene} (Groups: {', '.join(groups_in_gene)})")
             
             for group in groups_in_gene:
-                group_df = gene_df[gene_df["CAAP_Group"] == group]
+                group_df = gene_df[gene_df["caap_group"] == group]
                 positions = sorted(group_df["Position"].unique())
                 
                 if len(positions) < minlen:
@@ -319,23 +319,23 @@ def filterCAAS(infile, maxcaas, minlen, logger):
     # Mark positions as Good/Discarded based on gene-group-position tuple
     if has_caap_group:
         # For CAAP mode, check gene + position + group
-        out["ClusteringFlag"] = out.apply(
-            lambda row: "Discarded" if (row["Gene"], row["Position"], row["CAAP_Group"]) in discarded else "Good",
+        out["clustering_flag"] = out.apply(
+            lambda row: "Discarded" if (row["Gene"], row["Position"], row["caap_group"]) in discarded else "Good",
             axis=1
         )
     else:
         # For CAAS mode, check gene + position only
         discarded_set = {(gene, pos) for gene, pos, _ in discarded}
-        out["ClusteringFlag"] = out.apply(
+        out["clustering_flag"] = out.apply(
             lambda row: "Discarded" if (row["Gene"], row["Position"]) in discarded_set else "Good",
             axis=1
         )
     
-    # Output essential columns (preserve CAAP_Group if present)
-    output_cols = ["Gene", "Position", "ClusteringFlag"]
-    if "CAAP_Group" in df.columns:
-        # Insert CAAP_Group after Position
-        output_cols = ["Gene", "Position", "CAAP_Group", "ClusteringFlag"]
+    # Output essential columns (preserve caap_group if present)
+    output_cols = ["Gene", "Position", "clustering_flag"]
+    if "caap_group" in df.columns:
+        # Insert caap_group after Position
+        output_cols = ["Gene", "Position", "caap_group", "clustering_flag"]
         out = out[output_cols]
     else:
         out = out[output_cols]
@@ -351,7 +351,7 @@ def filterCAAS(infile, maxcaas, minlen, logger):
     logger.info(f"Total genes processed: {total_genes}")
     logger.info(f"Total positions discarded: {len(discarded)}")
     logger.info(
-        f"Positions retained: {len(out[out['ClusteringFlag'] == 'Good'])}"
+        f"Positions retained: {len(out[out['clustering_flag'] == 'Good'])}"
     )
     
     return out_file

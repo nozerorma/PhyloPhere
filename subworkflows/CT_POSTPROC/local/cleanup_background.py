@@ -5,7 +5,7 @@ Implements CAAP-group-aware cleanup from a *single global background* source:
 
 1) Load global background genes (typically discovery::background_genes.output)
 2) Load removed_genes_summary.tsv from gene filtering
-3) Build one cleaned background per CAAP_Group
+3) Build one cleaned background per caap_group
 4) Build cleaned_background_main.txt by removing genes removed in ALL groups
 """
 
@@ -17,7 +17,7 @@ import pandas as pd
 
 
 def load_removed_genes(summary_file):
-    """Load removed genes summary and normalize CAAP_Group."""
+    """Load removed genes summary and normalize caap_group."""
     if not Path(summary_file).exists():
         print(f"Error: Removed genes summary file not found: {summary_file}", file=sys.stderr)
         sys.exit(1)
@@ -30,14 +30,14 @@ def load_removed_genes(summary_file):
         print(f"Error: Removed genes summary missing columns: {missing_cols}", file=sys.stderr)
         sys.exit(1)
 
-    if 'CAAP_Group' not in removed_df.columns:
-        removed_df['CAAP_Group'] = 'US'
+    if 'caap_group' not in removed_df.columns:
+        removed_df['caap_group'] = 'US'
     else:
-        removed_df['CAAP_Group'] = removed_df['CAAP_Group'].fillna('US').astype(str)
+        removed_df['caap_group'] = removed_df['caap_group'].fillna('US').astype(str)
 
     print(
         f"Loaded {len(removed_df)} removed gene entries across "
-        f"{removed_df['CAAP_Group'].nunique()} groups",
+        f"{removed_df['caap_group'].nunique()} groups",
         file=sys.stderr,
     )
 
@@ -93,7 +93,7 @@ def main():
     bg_genes = load_global_background_genes(args.global_background_file)
     bg_gene_set = set(bg_genes)
 
-    groups = sorted(set(removed_genes_df['CAAP_Group'].astype(str)))
+    groups = sorted(set(removed_genes_df['caap_group'].astype(str)))
     if not groups:
         groups = ['US']
 
@@ -102,7 +102,7 @@ def main():
 
     for g in groups:
         removed_g = set(
-            removed_genes_df.loc[removed_genes_df['CAAP_Group'] == g, 'Gene']
+            removed_genes_df.loc[removed_genes_df['caap_group'] == g, 'Gene']
             .dropna()
             .astype(str)
         )

@@ -29,8 +29,8 @@ This dual indexing prevents off-by-one errors in cross-consumer pipelines.
 Data Contracts & Validation
 ------------------------------
 1. **CAAS Metadata** (read_caas_metadata_table, get_caas_position_info):
-     - Required columns: Tag, AminoConv, is_significant, GenePos
-     - Optional columns: Pvalue, Pvalue.boot
+     - Required columns: tag, caas, is_significant, GenePos
+     - Optional columns: pvalue, pvalue_boot
      - FileNotFoundError raised if file missing; ValueError for missing columns
 
 2. **Trait Pairs** (parse_trait_pairs):
@@ -113,7 +113,7 @@ def _parse_gene_pos_token(gene_pos: str) -> Tuple[Optional[str], Optional[int]]:
 
 
 def _parse_conserved_pair(raw: str) -> str:
-    """Normalise the ConservedPair field from the CT output.
+    """Normalise the conserved_pair field from the CT output.
 
     caas_id.py writes the field as ``"{count}:{pair_id1},{pair_id2},..."``,
     e.g. ``"1:3"`` or ``"2:1,4"``.  Legacy data (max_conserved=0 runs or old
@@ -140,7 +140,7 @@ def read_caas_metadata_table(
     metadata_file: Path, gene_name: Optional[str] = None
 ) -> pd.DataFrame:
     """
-    Load CAAS metadata (Tag, AminoConv, is_significant, optional Pvalue.boot).
+    Load CAAS metadata (tag, caas, is_significant, optional pvalue_boot).
 
     - Tries comma-separated first, falls back to tab-separated.
     - Returns a filtered DataFrame if `gene_name` is provided.
@@ -150,16 +150,19 @@ def read_caas_metadata_table(
         raise FileNotFoundError(f"CAAS metadata file not found: {metadata_file}")
 
     try:
-        # Try comma-separated first (typical for .output files), then tab-separated
-        df = pd.read_csv(metadata_file, sep=",")
-        # Check if parsing worked - if we got a single column, try tab-separated
-        if len(df.columns) == 1:
-            df = pd.read_csv(metadata_file, sep="\t")
+        # Sniff the delimiter from the header line. meta_caas is TSV (write_tsv);
+        # legacy .output files are CSV. A comma-first guess is fragile because a TSV
+        # field may itself contain commas (e.g. conserved_pair="1,3"), which makes
+        # the C parser raise on inconsistent field counts. Matches concatenate.py.
+        with open(metadata_file, "r") as _fh:
+            _header = _fh.readline()
+        sep = "\t" if "\t" in _header else ","
+        df = pd.read_csv(metadata_file, sep=sep)
     except Exception as e:
         raise ValueError(f"Error reading CAAS metadata file: {e}") from e
 
     # Validate required columns
-    required_cols = ["Tag", "AminoConv", "is_significant", "GenePos"]
+    required_cols = ["tag", "caas", "is_significant", "GenePos"]
 
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
@@ -170,10 +173,10 @@ def read_caas_metadata_table(
 
     # Ensure optional fields exist with stable names used downstream
     for col, default in {
-        "CAAP_Group": "US",
-        "AminoEncoded": "",
-        "ConservedPair": "",
-        "IsConserved": False,
+        "caap_group": "US",
+        "amino_encoded": "",
+        "conserved_pair": "",
+        "is_conserved_meta": False,
         "sig_hyp": None,
         "sig_perm": None,
     }.items():
@@ -224,7 +227,7 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
     Load CAAS metadata rows for a gene as independent CAASPosition entries.
 
     Each metadata row is treated as an independent hypothesis row
-    (e.g., same GenePos with different CAAP_Group values).
+    (e.g., same GenePos with different caap_group values).
     """
     logger.info(f"Loading CAAS entries for {gene} from {caas_metadata_path}")
     df = read_caas_metadata_table(caas_metadata_path, gene)
@@ -243,7 +246,7 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
         if pos0 is None:
             continue
 
-        caas = str(row.get("AminoConv", "") or "")
+        caas = str(row.get("caas", "") or "")
         parts = caas.split("/") if caas else []
         trait1 = normalize_amino_list(list(parts[0])) if len(parts) == 2 else []
         trait0 = normalize_amino_list(list(parts[1])) if len(parts) == 2 else []
@@ -258,25 +261,25 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
         entry = CAASPosition(
             position=pos0,
             position_one_based=pos0 + 1,
-            tag=str(row.get("Tag", f"POS{pos0}")),
+            tag=str(row.get("tag", f"POS{pos0}")),
             caas=caas,
             trait1_aa=trait1,
             trait0_aa=trait0,
             pvalue=(
-                float(row["Pvalue"])
-                if "Pvalue" in row.index and pd.notna(row["Pvalue"])
+                float(row["pvalue"])
+                if "pvalue" in row.index and pd.notna(row["pvalue"])
                 else None
             ),
             pvalue_boot=(
-                float(row["Pvalue.boot"])
-                if "Pvalue.boot" in row.index and pd.notna(row["Pvalue.boot"])
+                float(row["pvalue_boot"])
+                if "pvalue_boot" in row.index and pd.notna(row["pvalue_boot"])
                 else None
             ),
             is_significant=_b(row.get("is_significant")),
-            caap_group=str(row.get("CAAP_Group", "US") or "US"),
-            amino_encoded=str(row.get("AminoEncoded", "") or ""),
-            is_conserved_meta=_b(row.get("IsConserved")),
-            conserved_pair=_parse_conserved_pair(str(row.get("ConservedPair", "") or "")),
+            caap_group=str(row.get("caap_group", "US") or "US"),
+            amino_encoded=str(row.get("amino_encoded", "") or ""),
+            is_conserved_meta=_b(row.get("is_conserved_meta")),
+            conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair", "") or "")),
             sig_hyp=_b(row.get("sig_hyp")) if pd.notna(row.get("sig_hyp")) else None,
             sig_perm=_b(row.get("sig_perm")) if pd.notna(row.get("sig_perm")) else None,
         )
@@ -326,8 +329,8 @@ def get_caas_position_info(
     # Extract core information (always present)
     info = {
         "gene_pos": str(row["GenePos"]),
-        "tag": str(row["Tag"]),
-        "caas": str(row["AminoConv"]),
+        "tag": str(row["tag"]),
+        "caas": str(row["caas"]),
         "is_significant": str(row["is_significant"]).upper() == "TRUE",
     }
 
@@ -337,25 +340,25 @@ def get_caas_position_info(
         zero_based_pos + 1 if zero_based_pos is not None else None
     )
 
-    # Add Pvalue (should always be present)
-    if "Pvalue" in row.index:
+    # Add pvalue (should always be present)
+    if "pvalue" in row.index:
         try:
-            info["pvalue"] = float(row["Pvalue"])
+            info["pvalue"] = float(row["pvalue"])
         except (ValueError, TypeError):
-            logger.warning("Could not parse Pvalue for %s: %s", gene_pos, row["Pvalue"])
+            logger.warning("Could not parse pvalue for %s: %s", gene_pos, row["pvalue"])
             info["pvalue"] = None
 
-    # Add Pvalue.boot if present (optional column)
-    if "Pvalue.boot" in row.index:
+    # Add pvalue_boot if present (optional column)
+    if "pvalue_boot" in row.index:
         try:
-            pvalue_boot = row["Pvalue.boot"]
+            pvalue_boot = row["pvalue_boot"]
             if pd.notna(pvalue_boot):
                 info["pvalue_boot"] = float(pvalue_boot)
             else:
                 info["pvalue_boot"] = None
         except (ValueError, TypeError):
             logger.warning(
-                "Could not parse Pvalue.boot for %s: %s", gene_pos, row["Pvalue.boot"]
+                "Could not parse pvalue_boot for %s: %s", gene_pos, row["pvalue_boot"]
             )
             info["pvalue_boot"] = None
 

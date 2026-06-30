@@ -285,10 +285,20 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
     fcs_progress(paste0("Loading null permulations from: ", perms_file))
     corperms <- tryCatch(readRDS(perms_file), error = function(e) NULL)
 
-    if (!is.null(corperms) && !is.null(corperms$corStat)) {
-      n_perms      <- ncol(corperms$corStat)
-      base_corStat <- as.matrix(corperms$corStat)
+    # Two perms-RDS shapes are supported:
+    #   • RER  : corperms$corStat (genes×N) [+ optional corRho] — ONE matrix shared
+    #            across rankings; accel/decel derived from corRho per ranking.
+    #   • CAAS : corperms$corStat_byrank, a named list keyed by ranking name
+    #            (global/top/bottom), each a genes×N null matrix. The matching
+    #            matrix is selected per ranking — directionality is precomputed
+    #            upstream (each labeling's change_side partitions the directions),
+    #            so no corRho transform is needed.
+    corStat_byrank <- corperms$corStat_byrank
+    if (!is.null(corperms) && (!is.null(corperms$corStat) || !is.null(corStat_byrank))) {
+      base_corStat <- if (!is.null(corperms$corStat)) as.matrix(corperms$corStat) else NULL
       base_corRho  <- if (!is.null(corperms$corRho)) as.matrix(corperms$corRho) else NULL
+      n_perms      <- if (!is.null(base_corStat)) ncol(base_corStat)
+                      else if (length(corStat_byrank)) ncol(corStat_byrank[[1]]) else 0L
       fcs_progress(sprintf("Vectorized pathway permulations: N=%d, %d GMTs, %d rankings",
                            n_perms, length(gmts), length(rankings)))
 
@@ -298,15 +308,21 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
         t0  <- Sys.time()
         alt <- alts[[rk]]
 
-        # Per-ranking transform of the null stat matrix, mirroring the observed
-        # ranking construction (global=signed; accel/decel=zero-floored magnitude).
-        corStat_rk <- base_corStat
-        if (rk == "accelerating" && !is.null(base_corRho)) {
-          corStat_rk <- ifelse(base_corRho > 0,  base_corStat, 0)
-        } else if (rk == "decelerating" && !is.null(base_corRho)) {
-          corStat_rk <- ifelse(base_corRho < 0, -base_corStat, 0)
+        # Per-ranking null matrix. CAAS supplies a precomputed per-direction matrix;
+        # RER shares one base matrix and derives the accel/decel transform from corRho.
+        corStat_rk <- NULL
+        if (!is.null(corStat_byrank) && !is.null(corStat_byrank[[rk]])) {
+          corStat_rk <- as.matrix(corStat_byrank[[rk]])
+        } else if (!is.null(base_corStat)) {
+          corStat_rk <- base_corStat
+          if (rk == "accelerating" && !is.null(base_corRho)) {
+            corStat_rk <- ifelse(base_corRho > 0,  base_corStat, 0)
+          } else if (rk == "decelerating" && !is.null(base_corRho)) {
+            corStat_rk <- ifelse(base_corRho < 0, -base_corStat, 0)
+          }
+          rownames(corStat_rk) <- rownames(base_corStat)
         }
-        rownames(corStat_rk) <- rownames(base_corStat)
+        if (is.null(corStat_rk)) next  # no null for this ranking → p.perm stays NA
 
         # Observed stat per set, per db (rows = pathways).
         realenrich <- list()

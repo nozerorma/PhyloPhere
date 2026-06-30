@@ -19,8 +19,7 @@ params:
   project_name: "STRING_Analysis"
   species: 9606
   required_score: 400
-  network_score_thr: 400
-  mcl_inflation: 3
+  network_score_thr: 700
   fdr_thr: 0.1
   top_thr: 15
   report_num: 20
@@ -224,28 +223,51 @@ cluster_layout <- function(net, clusters_df, seed = 42) {
 
 # ── Cluster functional descriptions ──────────────────────────────────────────
 # Runs STRING enrichment on each cluster's nodes to derive a functional label
-# from the top significant GO / pathway term.
-describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3) {
+# from the top significant GO / pathway term. When enable_ppi is TRUE, also runs
+# the per-cluster PPI density test (get_ppi_enrichment): walktrap finds communities
+# by random-walk edge density, and this test asks whether each community is
+# *statistically* denser than expected when the same number of genes is drawn from
+# the (custom) background. A low p confirms the cluster is a real interaction
+# module, not just a co-annotated GO bin. Returns ppi_edges / ppi_expected / ppi_pvalue.
+describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3, enable_ppi = FALSE) {
   if (is.null(clusters_df) || nrow(clusters_df) == 0) return(tibble())
   purrr::map_dfr(sort(unique(clusters_df$cluster)), function(cl_id) {
     cl_nodes <- clusters_df$node[clusters_df$cluster == cl_id]
     genes    <- id2gene[cl_nodes]
     gene_str <- paste(head(sort(genes[!is.na(genes)]), 8), collapse = ", ")
+
+    # Per-cluster PPI density test (independent of the enrichment label below).
+    ppi_edges <- NA_integer_; ppi_expected <- NA_real_; ppi_pvalue <- NA_real_
+    if (isTRUE(enable_ppi) && length(cl_nodes) >= 3 && length(cl_nodes) <= 500) {
+      ppi <- tryCatch(sdb$get_ppi_enrichment(cl_nodes), error = function(e) NULL)
+      if (!is.null(ppi)) {
+        # STRINGdb::get_ppi_enrichment returns a list with fields edges (observed),
+        # lambda (expected) and enrichment (the p-value) — NOT number_of_edges /
+        # expected_number_of_edges / p_value (those are STRING web-API names).
+        ppi_edges    <- ppi$edges      %||% NA_integer_
+        ppi_expected <- ppi$lambda     %||% NA_real_
+        ppi_pvalue   <- ppi$enrichment %||% NA_real_
+      }
+    }
+
     if (length(cl_nodes) < 3) {
       return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
-                    genes = gene_str, description = "Too small"))
+                    genes = gene_str, description = "Too small",
+                    ppi_edges = ppi_edges, ppi_expected = ppi_expected, ppi_pvalue = ppi_pvalue))
     }
     enrich <- tryCatch(sdb$get_enrichment(cl_nodes), error = function(e) NULL)
     if (is.null(enrich) || nrow(enrich) == 0 || "error" %in% names(enrich)) {
       return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
-                    genes = gene_str, description = "No enrichment"))
+                    genes = gene_str, description = "No enrichment",
+                    ppi_edges = ppi_edges, ppi_expected = ppi_expected, ppi_pvalue = ppi_pvalue))
     }
     pvcol   <- intersect(c("fdr", "p_value", "pvalue", "p.adjust"), names(enrich))[1]
     if (!is.na(pvcol)) enrich <- enrich[order(enrich[[pvcol]]), ]
     dcol    <- intersect(c("description", "term", "name"), names(enrich))[1]
     top     <- head(as.character(enrich[[dcol]]), top_terms)
     tibble(cluster = cl_id, n_genes = length(cl_nodes),
-           genes = gene_str, description = paste(top, collapse = " / "))
+           genes = gene_str, description = paste(top, collapse = " / "),
+           ppi_edges = ppi_edges, ppi_expected = ppi_expected, ppi_pvalue = ppi_pvalue)
   })
 }
 
@@ -840,14 +862,13 @@ ppi_rows <- purrr::keep(string_runs, ~!is.null(.x$ppi_result))
 if (length(ppi_rows) > 0) {
   ppi_summary <- purrr::map_dfr(ppi_rows, function(x) {
     pr <- as.list(x$ppi_result)
+    # get_ppi_enrichment returns only edges (observed), lambda (expected) and
+    # enrichment (p-value); the node/degree/clustering fields are not provided.
     tibble(
-      gene_list                   = x$list_name,
-      number_of_nodes             = pr$number_of_nodes %||% NA_integer_,
-      number_of_edges             = pr$number_of_edges %||% NA_integer_,
-      average_node_degree         = pr$average_node_degree %||% NA_real_,
-      local_clustering_coefficient = pr$local_clustering_coefficient %||% NA_real_,
-      expected_number_of_edges    = pr$expected_number_of_edges %||% NA_integer_,
-      p_value                     = pr$p_value %||% NA_real_
+      gene_list                = x$list_name,
+      number_of_edges          = pr$edges      %||% NA_integer_,
+      expected_number_of_edges = pr$lambda     %||% NA_real_,
+      p_value                  = pr$enrichment %||% NA_real_
     )
   })
 
@@ -973,8 +994,13 @@ for (.gf in gene_list_files) {
       readr::write_tsv(.clusters_out %>% dplyr::arrange(cluster, gene), .clust_file)
       cat(sprintf("Clusters found: **%d** (written to `%s`)\n\n", .n_clust, basename(.clust_file)))
 
-      # Cluster descriptions from top enriched term per cluster
-      .clust_desc <- describe_clusters(string_db, .clusters_df, .id2gene)
+      # Cluster descriptions from top enriched term per cluster (+ per-cluster PPI
+      # density test when enabled). Uses string_db (required_score) so the PPI null
+      # honours the custom background set via set_background().
+      .clust_desc <- describe_clusters(
+        string_db, .clusters_df, .id2gene,
+        enable_ppi = isTRUE(params$enable_ppi_enrichment)
+      )
       
       # Calculate percentages for each cluster if gene_scores_df is available
       if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
@@ -989,6 +1015,14 @@ for (.gf in gene_list_files) {
         .clust_desc <- .clust_desc %>% dplyr::left_join(.cl_pcts, by = "cluster")
       }
       
+      # Persist cluster-level descriptions (incl. per-cluster PPI density) so the
+      # table in the report has a durable artifact downstream consumers can read.
+      .clust_desc_file <- file.path(
+        string_networks_dir,
+        sprintf("%s_%s_cluster_descriptions.tsv", .list_name, .net_type)
+      )
+      readr::write_tsv(.clust_desc %>% dplyr::arrange(desc(n_genes)), .clust_desc_file)
+
       .clust_desc_display <- .clust_desc %>%
         dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
         dplyr::arrange(desc(n_genes))
@@ -1062,6 +1096,21 @@ for (.gf in gene_list_files) {
             )
         }
         
+        # Append per-cluster PPI density columns (row-aligned: display_df derives
+        # from .clust_desc_display via select(), preserving row order). Only when
+        # the PPI test ran and produced at least one non-NA p-value.
+        if (all(c("ppi_edges", "ppi_expected", "ppi_pvalue") %in% names(.clust_desc_display)) &&
+            any(!is.na(.clust_desc_display$ppi_pvalue))) {
+          display_df <- dplyr::bind_cols(
+            display_df,
+            .clust_desc_display %>% dplyr::transmute(
+              `PPI edges` = ppi_edges,
+              `PPI exp.`  = round(ppi_expected, 1),
+              `PPI p`     = signif(ppi_pvalue, 3)
+            )
+          )
+        }
+
         print(knitr::kable(
           display_df,
           caption = sprintf("Cluster functional descriptions — %s %s", .list_name, .net_type)

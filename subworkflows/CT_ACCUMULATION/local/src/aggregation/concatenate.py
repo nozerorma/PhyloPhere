@@ -7,8 +7,8 @@ Changes vs. original to_integrate version:
     assigns contrast = 1 for every entry (single group accumulation mode).
   - read_metadata_caas(): reads filtered_discovery.tsv produced by CT_POSTPROC.
     Columns are the unique source of truth:
-      Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
-      convergence_description, convergence_mode, CAAP_Group, amino_encoded,
+      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, pattern_type,
+      convergence_description, convergence_mode, caap_group, amino_encoded,
       is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
@@ -140,13 +140,13 @@ def read_metadata_caas(metadata_file):
     """Read CAAS metadata from a filtered_discovery.tsv file.
 
     Source-of-truth columns (tab-separated):
-      Gene, Position, tag, caas, is_significant, Pvalue, pvalue_boot, Pattern,
-      convergence_description, convergence_mode, CAAP_Group, amino_encoded,
+      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, pattern_type,
+      convergence_description, convergence_mode, caap_group, amino_encoded,
       is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
 
-    Returns: dict[group][gene][msa_pos] = {tag, Pattern, amino_encoded, Pvalue,
+    Returns: dict[group][gene][msa_pos] = {tag, pattern_type, amino_encoded, pvalue,
                                            pvalue_boot, isSignificant}
     """
     logging.info(f"Reading metadata CAAS from {metadata_file if metadata_file else 'None'}")
@@ -170,13 +170,13 @@ def read_metadata_caas(metadata_file):
         gene_idx          = h.index('Gene')
         pos_idx           = h.index('Position')
         tag_idx           = h.index('tag')
-        pattern_idx       = h.index('Pattern')
+        pattern_idx       = h.index('pattern_type')
         amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
-        pvalue_idx        = h.index('Pvalue')
-        
+        pvalue_idx        = h.index('pvalue')
+
         sig_idx           = h.index('is_significant')
         pboot_idx         = h.index('pvalue_boot') if 'pvalue_boot' in h else None
-        group_idx         = h.index('CAAP_Group')
+        group_idx         = h.index('caap_group')
         conserved_idx     = h.index('is_conserved_meta') if 'is_conserved_meta' in h else None
         asr_conserved_idx = h.index('asr_is_conserved') if 'asr_is_conserved' in h else None
         for line in f:
@@ -217,10 +217,10 @@ def read_metadata_caas(metadata_file):
 
             metadata[group][gene][msa_pos] = {
                 'tag': tag,
-                'Pattern': pattern,
-                'AminoConv': amino_conv,
-                'Pvalue': caas_pval,
-                'Pvalue.boot': pboot,
+                'pattern_type': pattern,
+                'caas': amino_conv,
+                'pvalue': caas_pval,
+                'pvalue_boot': pboot,
                 'isSignificant': is_sig,
             }
 

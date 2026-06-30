@@ -87,19 +87,32 @@ if (!file.exists(filtered_discovery_path)) {
 
 discovery_df <- read_tsv(filtered_discovery_path, show_col_types = FALSE)
 
-# Normalize discovery schema (legacy CAAS files may not include CAAP_Group)
-if (!"CAAP_Group" %in% names(discovery_df)) {
-  discovery_df <- discovery_df %>% mutate(CAAP_Group = "US")
+# discovery.tab is now fully lowercase (gene/mode/trait/position/pattern/ffgn/…).
+# Map the structural keys to the CamelCase names this report uses internally so the
+# rest of the logic (joins on Gene/Position, GenePos = paste(Gene, Position), the
+# Pattern column) is unchanged. Concept columns (caap_group, caas, amino_encoded,
+# pvalue, is_conserved_meta, conserved_pair) are already lowercase as used below.
+.disc_keymap <- c(Gene = "gene", Position = "position", Pattern = "pattern")
+for (.new in names(.disc_keymap)) {
+  .old <- .disc_keymap[[.new]]
+  if (.old %in% names(discovery_df) && !(.new %in% names(discovery_df))) {
+    names(discovery_df)[names(discovery_df) == .old] <- .new
+  }
+}
+
+# Normalize discovery schema (legacy CAAS files may not include caap_group)
+if (!"caap_group" %in% names(discovery_df)) {
+  discovery_df <- discovery_df %>% mutate(caap_group = "US")
 }
 cat(sprintf("Loaded discovery file: %s\n", basename(filtered_discovery_path)))
 cat(sprintf("  Total CAAS positions: %s\n", format(nrow(discovery_df), big.mark = ",")))
 
 # Detect CAAP mode (after normalization)
-has_caap_group <- 'CAAP_Group' %in% names(discovery_df)
+has_caap_group <- 'caap_group' %in% names(discovery_df)
 cat(sprintf("  CAAP mode detected: %s\n", has_caap_group))
 
 if (has_caap_group) {
-  groups <- unique(discovery_df$CAAP_Group)
+  groups <- unique(discovery_df$caap_group)
   cat(sprintf("  Groups present: %s\n", paste(groups, collapse = ", ")))
 }
 
@@ -114,7 +127,7 @@ cat(sprintf("\nLoaded background file: %s\n", basename(filtered_background_path)
 cat(sprintf("  Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
 
 # Validate required columns
-required_cols <- c("Gene", "Position", "Pattern", "Pvalue")
+required_cols <- c("Gene", "Position", "Pattern", "pvalue")
 missing_cols <- setdiff(required_cols, names(discovery_df))
 if (length(missing_cols) > 0) {
   stop("Missing required columns in discovery: ", paste(missing_cols, collapse = ", "))
@@ -144,8 +157,8 @@ cat(sprintf("Loading bootstrap file: %s\n", basename(bootstrap_file_path)))
 
 # Load bootstrap data (headerless expected, but tolerate legacy variants)
 # Supported formats:
-#   5 cols: GenePos CAAP_Group Occurrences Total Pvalue.boot
-#   4 cols: GenePos Occurrences Total Pvalue.boot   (legacy CAAS)
+#   5 cols: GenePos caap_group Occurrences Total pvalue_boot
+#   4 cols: GenePos Occurrences Total pvalue_boot   (legacy CAAS)
 bootstrap_raw <- tryCatch({
   read_tsv(
     bootstrap_file_path,
@@ -161,23 +174,23 @@ if (ncol(bootstrap_raw) < 4) {
 }
 
 if (ncol(bootstrap_raw) >= 5) {
-  names(bootstrap_raw)[1:5] <- c("GenePos", "CAAP_Group", "Occurrences", "Total", "Pvalue.boot")
+  names(bootstrap_raw)[1:5] <- c("GenePos", "caap_group", "Occurrences", "Total", "pvalue_boot")
 } else {
-  names(bootstrap_raw)[1:4] <- c("GenePos", "Occurrences", "Total", "Pvalue.boot")
-  bootstrap_raw <- bootstrap_raw %>% mutate(CAAP_Group = "US")
+  names(bootstrap_raw)[1:4] <- c("GenePos", "Occurrences", "Total", "pvalue_boot")
+  bootstrap_raw <- bootstrap_raw %>% mutate(caap_group = "US")
 }
 
 # Drop accidental textual header rows if present
 bootstrap_raw <- bootstrap_raw %>%
-  filter(!is.na(GenePos), GenePos != "Gene@Position")
+  filter(!is.na(GenePos), GenePos != "gene@position", GenePos != "Gene@Position")
 
 # Normalize types
 bootstrap_raw <- bootstrap_raw %>%
   mutate(
-    CAAP_Group = if_else(is.na(CAAP_Group) | CAAP_Group == "", "US", CAAP_Group),
+    caap_group = if_else(is.na(caap_group) | caap_group == "", "US", caap_group),
     Occurrences = suppressWarnings(as.integer(Occurrences)),
     Total = suppressWarnings(as.integer(Total)),
-    Pvalue.boot = suppressWarnings(as.numeric(Pvalue.boot))
+    pvalue_boot = suppressWarnings(as.numeric(pvalue_boot))
   )
 
 # Split GenePos into Gene and Position
@@ -186,46 +199,46 @@ bootstrap_df <- bootstrap_raw %>%
   mutate(Position = as.integer(Position))
 
 # Final safeguard for expected columns
-if (!"Pvalue.boot" %in% names(bootstrap_df)) {
-  stop("Bootstrap integration requires Pvalue.boot column after normalization")
+if (!"pvalue_boot" %in% names(bootstrap_df)) {
+  stop("Bootstrap integration requires pvalue_boot column after normalization")
 }
 
 cat(sprintf("Loaded bootstrap data: %s permutations\n", 
             format(nrow(bootstrap_df), big.mark = ",")))
 
 # Check if bootstrap has CAAP groups
-bootstrap_has_groups <- 'CAAP_Group' %in% names(bootstrap_df) && 
-                        any(!is.na(bootstrap_df$CAAP_Group))
+bootstrap_has_groups <- 'caap_group' %in% names(bootstrap_df) && 
+                        any(!is.na(bootstrap_df$caap_group))
 
 if (has_caap_group && !bootstrap_has_groups) {
-  warning("Bootstrap file missing CAAP_Group data, but discovery has CAAP mode enabled")
+  warning("Bootstrap file missing caap_group data, but discovery has CAAP mode enabled")
   warning("Bootstrap results may not be group-aware")
 }
 
 if (bootstrap_has_groups) {
-  boot_groups <- unique(bootstrap_df$CAAP_Group)
+  boot_groups <- unique(bootstrap_df$caap_group)
   cat(sprintf("  Bootstrap groups: %s\n", paste(boot_groups, collapse = ", ")))
 }
 
 # Calculate empirical p-values
 cat("\nIntegrating bootstrap p-values...\n")
 
-# Bootstrap file already contains Pvalue.boot, just need to join
+# Bootstrap file already contains pvalue_boot, just need to join
 if (has_caap_group && bootstrap_has_groups) {
   # Group-aware permutation p-values
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, CAAP_Group, Pvalue.boot, Occurrences, Total),
-      by = c("Gene", "Position", "CAAP_Group")
+        select(Gene, Position, caap_group, pvalue_boot, Occurrences, Total),
+      by = c("Gene", "Position", "caap_group")
     )
 } else if (has_caap_group && !bootstrap_has_groups) {
-  # Discovery has groups but bootstrap doesn't - join without CAAP_Group
-  warning("Joining bootstrap data without CAAP_Group matching")
+  # Discovery has groups but bootstrap doesn't - join without caap_group
+  warning("Joining bootstrap data without caap_group matching")
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, Pvalue.boot, Occurrences, Total) %>%
+        select(Gene, Position, pvalue_boot, Occurrences, Total) %>%
         distinct(Gene, Position, .keep_all = TRUE),
       by = c("Gene", "Position")
     )
@@ -234,7 +247,7 @@ if (has_caap_group && bootstrap_has_groups) {
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, Pvalue.boot, Occurrences, Total),
+        select(Gene, Position, pvalue_boot, Occurrences, Total),
       by = c("Gene", "Position")
     )
 }
@@ -242,21 +255,21 @@ if (has_caap_group && bootstrap_has_groups) {
 # Handle missing permutation p-values
 discovery_with_perm <- discovery_with_perm %>%
   mutate(
-    Pvalue.boot = if_else(is.na(Pvalue.boot), Pvalue, Pvalue.boot),
+    pvalue_boot = if_else(is.na(pvalue_boot), pvalue, pvalue_boot),
     Occurrences = if_else(is.na(Occurrences), 0L, as.integer(Occurrences)),
     Total = if_else(is.na(Total), 0L, as.integer(Total))
   )
 
 # Normalize optional conserved columns for downstream meta export
-if (!"ConservedPair" %in% names(discovery_with_perm)) {
-  discovery_with_perm <- discovery_with_perm %>% mutate(ConservedPair = NA_character_)
+if (!"is_conserved_meta" %in% names(discovery_with_perm)) {
+  discovery_with_perm <- discovery_with_perm %>% mutate(is_conserved_meta = NA)
 }
-if (!"ConservedPairs" %in% names(discovery_with_perm)) {
-  discovery_with_perm <- discovery_with_perm %>% mutate(ConservedPairs = NA_character_)
+if (!"conserved_pair" %in% names(discovery_with_perm)) {
+  discovery_with_perm <- discovery_with_perm %>% mutate(conserved_pair = NA_character_)
 }
 
 cat(sprintf("Integrated bootstrap p-values for %d positions\n", 
-            sum(!is.na(discovery_with_perm$Pvalue.boot))))
+            sum(!is.na(discovery_with_perm$pvalue_boot))))
 
 cat("\n=== Bootstrap Integration Complete ===\n")
 ```
@@ -273,23 +286,23 @@ alpha <- 0.05
 # Apply filters.
 # Raw thresholds (sig_hyp/sig_perm/sig_both) are kept as the primary calls.
 # Benjamini-Hochberg FDR is added alongside as a multiplicity-controlled
-# validation: q-values (Pvalue_fdr / Pvalue.boot_fdr) and BH-significant flags
-# (sig_*_fdr). BH is applied *within each biochemical scheme* (CAAP_Group) — each
+# validation: q-values (pvalue_fdr / pvalue_boot_fdr) and BH-significant flags
+# (sig_*_fdr). BH is applied *within each biochemical scheme* (caap_group) — each
 # scheme is its own family of position-level tests — so positions are not
 # multiply-counted across schemes. (The permutation "p-value" is not a calibrated
 # p-value under its null; it is BH-adjusted here for a comparable figure, with
 # that caveat.)
 caas_filtered <- discovery_with_perm
-if (has_caap_group) caas_filtered <- caas_filtered %>% group_by(CAAP_Group)
+if (has_caap_group) caas_filtered <- caas_filtered %>% group_by(caap_group)
 caas_filtered <- caas_filtered %>%
   mutate(
-    Pvalue_fdr      = p.adjust(Pvalue,      method = "BH"),
-    Pvalue.boot_fdr = p.adjust(Pvalue.boot, method = "BH"),
-    is_significant = Pvalue <= alpha & Pvalue.boot <= alpha,
-    sig_hyp = Pvalue <= alpha,
-    sig_perm = Pvalue.boot <= alpha,
-    sig_hyp_fdr  = Pvalue_fdr      <= alpha,
-    sig_perm_fdr = Pvalue.boot_fdr <= alpha,
+    pvalue_fdr      = p.adjust(pvalue,      method = "BH"),
+    pvalue_boot_fdr = p.adjust(pvalue_boot, method = "BH"),
+    is_significant = pvalue <= alpha & pvalue_boot <= alpha,
+    sig_hyp = pvalue <= alpha,
+    sig_perm = pvalue_boot <= alpha,
+    sig_hyp_fdr  = pvalue_fdr      <= alpha,
+    sig_perm_fdr = pvalue_boot_fdr <= alpha,
     is_significant_fdr = sig_hyp_fdr & sig_perm_fdr
   ) %>%
   ungroup()
@@ -298,7 +311,7 @@ caas_filtered <- caas_filtered %>%
 if (has_caap_group) {
   # Group-aware summary
   summary_stats <- caas_filtered %>%
-    group_by(CAAP_Group) %>%
+    group_by(caap_group) %>%
     summarize(
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
@@ -351,7 +364,7 @@ cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", "))
 # Pattern distribution
 if (has_caap_group) {
   pattern_summary <- caas_filtered %>%
-    group_by(CAAP_Group, Pattern) %>%
+    group_by(caap_group, Pattern) %>%
     summarize(
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
@@ -359,7 +372,7 @@ if (has_caap_group) {
       Both_05 = sum(is_significant, na.rm = TRUE),
       .groups = "drop"
     ) %>%
-    arrange(CAAP_Group, Pattern)
+    arrange(caap_group, Pattern)
   
   cat("\nPattern Distribution by Group:\n")
   print(kable(pattern_summary, format.args = list(big.mark = ",")))
@@ -378,7 +391,7 @@ if (has_caap_group) {
   
   p_pattern <- ggplot(plot_data, aes(x = Pattern, y = Count, fill = Filter)) +
     geom_bar(stat = "identity", position = "dodge") +
-    facet_wrap(~ CAAP_Group, scales = "free_y") +
+    facet_wrap(~ caap_group, scales = "free_y") +
     theme_minimal() +
     labs(
       title = "CAAS Pattern Distribution by Significance Filter",
@@ -479,8 +492,8 @@ createDir(meta_dir)
 
 if (has_caap_group) {
   # Per-group meta-CAAS
-  for (grp in unique(caas_for_export$CAAP_Group)) {
-    grp_data <- caas_for_export %>% filter(CAAP_Group == grp)
+  for (grp in unique(caas_for_export$caap_group)) {
+    grp_data <- caas_for_export %>% filter(caap_group == grp)
     
     grp_meta <- grp_data %>%
       mutate(
@@ -491,22 +504,22 @@ if (has_caap_group) {
           sig_perm ~ "Permutation",
           TRUE ~ "Not Significant"
         ),
-        Tag = assign_caas_tags(n()),
-        IsConserved = if_else(!is.na(ConservedPair) & toupper(trimws(as.character(ConservedPair))) == "TRUE", TRUE, FALSE),
-        ConservedPair = if_else(
-          !is.na(ConservedPairs) & ConservedPairs != "",
-          sub("^\\d+:", "", ConservedPairs),
+        tag = assign_caas_tags(n()),
+        is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+        conserved_pair = if_else(
+          !is.na(conserved_pair) & conserved_pair != "",
+          sub("^\\d+:", "", conserved_pair),
           NA_character_
         ),
-        AminoConv = if ("Substitution" %in% names(.)) Substitution else NA_character_,
-        AminoEncoded = if ("Encoded" %in% names(.)) Encoded else NA_character_
+        caas = if ("caas" %in% names(.)) caas else NA_character_,
+        amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
       ) %>%
       select(
-        Tag, GenePos, Gene, Position, Pattern, CAAP_Group,
-        Pvalue, Pvalue.boot, Pvalue_fdr, Pvalue.boot_fdr, Occurrences, Total,
+        tag, GenePos, Gene, Position, Pattern, caap_group,
+        pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, Occurrences, Total,
         sig_hyp, sig_perm, is_significant,
         sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
-        IsConserved, ConservedPair, AminoConv, AminoEncoded
+        is_conserved_meta, conserved_pair, caas, amino_encoded
       )
 
     output_file <- file.path(meta_dir, paste0(grp, "_meta_caas.tsv"))
@@ -525,22 +538,22 @@ if (has_caap_group) {
         sig_perm ~ "Permutation",
         TRUE ~ "Not Significant"
       ),
-      Tag = assign_caas_tags(n()),
-      IsConserved = if_else(!is.na(ConservedPair) & toupper(trimws(as.character(ConservedPair))) == "TRUE", TRUE, FALSE),
-      ConservedPair = if_else(
-        !is.na(ConservedPairs) & ConservedPairs != "",
-        sub("^\\d+:", "", ConservedPairs),
+      tag = assign_caas_tags(n()),
+      is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+      conserved_pair = if_else(
+        !is.na(conserved_pair) & conserved_pair != "",
+        sub("^\\d+:", "", conserved_pair),
         NA_character_
       ),
-      AminoConv = if ("Substitution" %in% names(.)) Substitution else NA_character_,
-      AminoEncoded = if ("Encoded" %in% names(.)) Encoded else NA_character_
+      caas = if ("caas" %in% names(.)) caas else NA_character_,
+      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
     ) %>%
     select(
-      Tag, GenePos, Gene, Position, Pattern, CAAP_Group,
-      Pvalue, Pvalue.boot, Pvalue_fdr, Pvalue.boot_fdr, Occurrences, Total,
+      tag, GenePos, Gene, Position, Pattern, caap_group,
+      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, Occurrences, Total,
       sig_hyp, sig_perm, is_significant,
       sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
-      IsConserved, ConservedPair, AminoConv, AminoEncoded
+      is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 
   output_file <- file.path(meta_dir, "global_meta_caas.tsv")
@@ -558,22 +571,22 @@ if (has_caap_group) {
         sig_perm ~ "Permutation",
         TRUE ~ "Not Significant"
       ),
-      Tag = assign_caas_tags(n()),
-      IsConserved = if_else(!is.na(ConservedPair) & toupper(trimws(as.character(ConservedPair))) == "TRUE", TRUE, FALSE),
-      ConservedPair = if_else(
-        !is.na(ConservedPairs) & ConservedPairs != "",
-        sub("^\\d+:", "", ConservedPairs),
+      tag = assign_caas_tags(n()),
+      is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
+      conserved_pair = if_else(
+        !is.na(conserved_pair) & conserved_pair != "",
+        sub("^\\d+:", "", conserved_pair),
         NA_character_
       ),
-      AminoConv = if ("Substitution" %in% names(.)) Substitution else NA_character_,
-      AminoEncoded = if ("Encoded" %in% names(.)) Encoded else NA_character_
+      caas = if ("caas" %in% names(.)) caas else NA_character_,
+      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
     ) %>%
     select(
-      Tag, GenePos, Gene, Position, Pattern,
-      Pvalue, Pvalue.boot, Pvalue_fdr, Pvalue.boot_fdr, Occurrences, Total,
+      tag, GenePos, Gene, Position, Pattern,
+      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, Occurrences, Total,
       sig_hyp, sig_perm, is_significant,
       sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
-      IsConserved, ConservedPair, AminoConv, AminoEncoded
+      is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 
   output_file <- file.path(meta_dir, "meta_caas.tsv")

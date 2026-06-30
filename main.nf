@@ -69,6 +69,7 @@ include {FADE}           from './workflows/fade.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
+include {CAAS_PERMULATION} from './subworkflows/CT/caas_permulation.nf'
 
 // Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
 
@@ -362,6 +363,25 @@ workflow {
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
 
+            // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) feeding
+            // the CAAS FCS p.perm path. Gated on --caas_permulation_enrichment; needs
+            // the full-pool perm-discovery + resample subset emitted by CT.
+            def scoring_caas_perms_ch = null
+            def scoring_caas_pos_pval_ch = null
+            def scoring_caas_pos_sample_ch = null
+            if (params.caas_permulation_enrichment && ct_results) {
+                def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
+                def caas_perm_out = CAAS_PERMULATION(
+                    ct_results.caas_perm_discovery,
+                    ct_results.caas_resample_subset,
+                    ct_results.tree_file,
+                    caas_universe_ch
+                )
+                scoring_caas_perms_ch = caas_perm_out.perms
+                scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // lean recovery p-value per (gene,position,scheme)
+                scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // lean capped sample for distribution plots
+            }
+
             SCORING(
                 scoring_postproc_ch,
                 scoring_fade_top_ch,
@@ -373,7 +393,10 @@ workflow {
                 scoring_fade_site_top_ch,
                 scoring_fade_site_bot_ch,
                 pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
-                scoring_rer_perms_ch   // RER permulation RDS → p.perm in centralized RER FCS
+                scoring_rer_perms_ch,  // RER permulation RDS → p.perm in centralized RER FCS
+                scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
+                scoring_caas_pos_pval_ch,    // lean recovery p-value per (gene,position,scheme)
+                scoring_caas_pos_sample_ch   // lean capped sample for report distribution plots
             )
             ran_any = true
         }

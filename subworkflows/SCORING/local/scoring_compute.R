@@ -203,6 +203,8 @@ cat("═════════════════════════
 stopifnot(file_exists(postproc_file))
 cat("Loading postproc:", postproc_file, "\n")
 df <- read_tsv(postproc_file, show_col_types = FALSE)
+# filtered_discovery.tsv uses disambiguation's canonical lowercase concept names
+# (caap_group, pvalue, …) — consumed as-is; position_scores.tsv keeps the same lowercase schema.
 cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
             nrow(df), n_distinct(paste(df$Gene, df$Position))))
 
@@ -219,16 +221,16 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 scheme_weights_int <- c(US = 0.2, GS4 = 0.2, GS3 = 0.2, GS2 = 0.2, GS1 = 0.2)
 
 df <- df %>%
-  mutate(scheme_weight = scheme_weights_int[CAAP_Group]) %>%
+  mutate(scheme_weight = scheme_weights_int[caap_group]) %>%
   filter(!is.na(scheme_weight))
 cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring schemes\n",
-            nrow(df), n_distinct(df$CAAP_Group)))
+            nrow(df), n_distinct(df$caap_group)))
 
 # ── 2b. Variability and pattern scores ───────────────────────────────────────
 # Deciles computed over the scored pool; lower p-values → higher score.
 df <- df %>%
   mutate(
-    variability_score = decile_score(Pvalue),
+    variability_score = decile_score(pvalue),
     pattern_score     = decile_score(pvalue_boot)
   )
 
@@ -280,9 +282,8 @@ if (!"derived_agreement" %in% names(df)) df$derived_agreement <- NA_real_
 df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
 if (!"conservation_gate" %in% names(df)) df$conservation_gate <- NA_real_
 df$conservation_gate <- suppressWarnings(as.numeric(df$conservation_gate))
-if (!"count_factor" %in% names(df)) df$count_factor <- NA_real_
-df$count_factor <- suppressWarnings(as.numeric(df$count_factor))
-# n_changed_pairs and n_changed_sides removed as they are redundant/misleading diagnostic counts.
+if (!"core" %in% names(df)) df$core <- NA_real_
+df$core <- suppressWarnings(as.numeric(df$core))
 
 
 # ── 2f. Per-row two-way CAAS score and weighted contribution ─────────────────
@@ -291,8 +292,8 @@ df$count_factor <- suppressWarnings(as.numeric(df$count_factor))
 #   1. phenotype evolution = permulation evidence (1 - pvalue_boot). Low
 #      permutation p-value → strong phenotype-partition signal → high evidence.
 #   2. position evolution  = asr_path_score (asr_score). The unified ASR signal,
-#      now count-aware (replication re-enters via its count_factor).
-# The hypergeometric Pvalue is deliberately absent from the score — it became the
+#      replication-weighted via core = P(≥2 independent changes).
+# The hypergeometric pvalue is deliberately absent from the score — it became the
 # significance gate (gate_all / gate_sig / gate_fdr, section 2h).
 # row_caas:  each scheme contributes at most scheme_weight/5 to the position score
 #   (US=GS4=GS3=GS2=GS1=0.2 each; maximum achievable sum = 1.0). The /5 reflects
@@ -310,7 +311,7 @@ df <- df %>%
     # phenotype evolution = permulation evidence (1 - pvalue_boot, the bootstrap
     # permutation p-value); position evolution = asr_path_score (asr_score,
     # already 0..1 and count-aware). Both raw [0,1], higher = better — NO deciles.
-    # Their product gives the rank. The hypergeometric Pvalue is NOT here: it is
+    # Their product gives the rank. The hypergeometric pvalue is NOT here: it is
     # demoted to the significance gate (gate_sig / gate_fdr below).
     phen_score = 1 - pmin(pmax(pvalue_boot, 0), 1),
     caas_row   = phen_score * asr_score,
@@ -319,7 +320,7 @@ df <- df %>%
 
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
 # Sort descending by scheme_weight so first() picks the most-specific scheme
-# for display-only columns (Pvalue, change_top, asr_is_conserved, etc.).
+# for display-only columns (pvalue, change_top, asr_is_conserved, etc.).
 # Score columns use sums or weighted means — no first() for any scored quantity.
 df <- df %>% arrange(desc(scheme_weight))
 
@@ -337,10 +338,10 @@ pos_scores <- df %>%
     mrca_diversity     = weighted.mean(mrca_diversity,   w = scheme_weight, na.rm = TRUE),
     derived_agreement  = weighted.mean(derived_agreement, w = scheme_weight, na.rm = TRUE),
     conservation_gate  = weighted.mean(conservation_gate, w = scheme_weight, na.rm = TRUE),
-    count_factor       = weighted.mean(count_factor,     w = scheme_weight, na.rm = TRUE),
+    core               = weighted.mean(core,             w = scheme_weight, na.rm = TRUE),
     phen_score         = weighted.mean(phen_score,       w = scheme_weight, na.rm = TRUE),
     # Display-only: most-specific scheme via first() after desc(scheme_weight) sort
-    Pvalue             = first(Pvalue),
+    pvalue             = first(pvalue),
     pvalue_boot        = first(pvalue_boot),
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
@@ -362,20 +363,20 @@ pos_scores <- df %>%
   ) %>%
   select(-has_change_top, -has_change_bottom)
 
-# ── 2h. Three-way significance gate (hypergeometric Pvalue) ──────────────
+# ── 2h. Three-way significance gate (hypergeometric pvalue) ──────────────
 # The hypergeometric CAAS p-value no longer feeds CAAS_score (that is now the
 # permulation × asr_path product). Instead it gates the result into three tiers,
 # so callers can keep all positions for ranking but filter to a defensible set:
 #   gate_all : every scored position (the full ranked pool)
-#   gate_sig : nominally significant         (Pvalue < 0.05)
-#   gate_fdr : significant after BH-FDR       (BH-adjusted Pvalue < 0.05)
+#   gate_sig : nominally significant         (pvalue < 0.05)
+#   gate_fdr : significant after BH-FDR       (BH-adjusted pvalue < 0.05)
 # FDR is computed over the whole position pool (one hypergeometric test/position).
 pos_scores <- pos_scores %>%
   mutate(
-    Pvalue_hyp_fdr = p.adjust(Pvalue, method = "BH"),
+    pvalue_hyp_fdr = p.adjust(pvalue, method = "BH"),
     gate_all       = TRUE,
-    gate_sig       = !is.na(Pvalue) & Pvalue < 0.05,
-    gate_fdr       = !is.na(Pvalue_hyp_fdr) & Pvalue_hyp_fdr < 0.05
+    gate_sig       = !is.na(pvalue) & pvalue < 0.05,
+    gate_fdr       = !is.na(pvalue_hyp_fdr) & pvalue_hyp_fdr < 0.05
   )
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
@@ -666,6 +667,23 @@ gene_caas <- pos_scores %>%
       vals <- CAAS_score[change_side %in% c("bottom", "both") & gate_fdr %in% TRUE]
       if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
     },
+    # ── ASR-axis rankings (permulation-bearing): 0.90-quantile of asr_path_score ──
+    # These mirror the gene_caas_score_*_all columns but aggregate asr_score (the
+    # scheme-weighted asr_path_score) instead of the two-axis CAAS_score. The CAAS
+    # permulation null (caas_perms.rds) can only be built on asr_path_score —
+    # pvalue_boot is a bootstrap aggregate over cycles with no per-labeling value —
+    # so observed and null must share THIS statistic for the empirical p.perm to be
+    # valid. fcs_stats exposes these as score_*_asr; the two-axis score_* rankings
+    # keep analytic p.adj only (p.perm stays NA for them).
+    gene_caas_asr_global_all = quantile(asr_score, 0.90, na.rm = TRUE),
+    gene_caas_asr_top_all    = {
+      vals <- asr_score[change_side %in% c("top", "both")]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
+    gene_caas_asr_bottom_all = {
+      vals <- asr_score[change_side %in% c("bottom", "both")]
+      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
+    },
     n_positions        = n(),
     n_positions_top    = sum(change_side %in% c("top",    "both"), na.rm = TRUE),
     n_positions_bottom = sum(change_side %in% c("bottom", "both"), na.rm = TRUE),
@@ -751,11 +769,10 @@ if (has_accum) {
             ps   <- pmax(pvals[valid], 1e-300)
             pchisq(-2 * sum(log(ps)), df = 2 * sum(valid), lower.tail = FALSE)
           }
-        },
-        gene_rand_score = if (is.na(accum_fisher_p)) NA_real_ else -log10(pmax(accum_fisher_p, 1e-300))
+        }
       ) %>%
       ungroup() %>%
-      select(Gene, gene_rand_score, accum_fisher_p, starts_with("accum_pval_"))
+      select(Gene, accum_fisher_p, starts_with("accum_pval_"))
 
     # BH FDR on genes with at least one observed CAAS (p < 1 strictly).
     # Genes with no CAAS in any group have accum_fisher_p = 1 by construction —
@@ -772,14 +789,14 @@ if (has_accum) {
                 nrow(gene_rand),
                 sum(gene_rand$accum_significant, na.rm = TRUE)))
   } else {
-    gene_rand <- tibble(Gene = character(), gene_rand_score = numeric(),
-                        accum_significant = logical())
+    gene_rand <- tibble(Gene = character(), accum_fisher_p = numeric(),
+                        accum_fdr = numeric(), accum_significant = logical())
     has_accum <- FALSE
   }
 } else {
   cat("Accumulation: not available, skipping\n")
-  gene_rand <- tibble(Gene = character(), gene_rand_score = numeric(),
-                      accum_significant = logical())
+  gene_rand <- tibble(Gene = character(), accum_fisher_p = numeric(),
+                      accum_fdr = numeric(), accum_significant = logical())
 }
 
 # ── 4c. Gene RERConverge Score (optional) ───────────────────────────────────
@@ -851,7 +868,8 @@ gene_scores <- gene_caas
 if (nrow(gene_rand) > 0) {
   gene_scores <- gene_scores %>% left_join(gene_rand, by = "Gene")
 } else {
-  gene_scores$gene_rand_score   <- NA_real_
+  gene_scores$accum_fisher_p    <- NA_real_
+  gene_scores$accum_fdr         <- NA_real_
   gene_scores$accum_significant <- NA
 }
 
@@ -879,12 +897,10 @@ if (nrow(gene_fade) > 0) {
 
 cat("\n─── Correlation analysis ──────────────────────────────────────\n")
 
-# Correlations use gene_caas_score as primary axis; gene_rand_score (accumulation)
-# is included as a secondary numeric score. RER and FADE use their
-# native significance criteria and are not included as numeric score axes here.
+# Correlations use gene_caas_score as the primary axis. Accumulation, RER and FADE
+# are represented by their native significance (accum_fisher_p / RER p / FADE BF),
+# not numeric score axes, so they are not included here.
 score_cols <- c("gene_caas_score")
-if (has_accum && any(!is.na(gene_scores$gene_rand_score)))
-  score_cols <- c(score_cols, "gene_rand_score")
 
 if (length(score_cols) >= 2) {
   corr_mat <- gene_scores %>%
@@ -945,8 +961,8 @@ cat("\n─── Writing outputs ───────────────�
 .thr_bot_1  <- quantile(.pos_bot_sub$CAAS_score, 0.99, na.rm = TRUE)
 
 pos_out <- pos_scores %>%
-  select(Gene, Position, any_of(c("Pvalue", "pvalue_boot", "Pvalue_hyp_fdr")),
-         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "count_factor")),
+  select(Gene, Position, any_of(c("pvalue", "pvalue_boot", "pvalue_hyp_fdr")),
+         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core")),
          any_of("phen_score"), biochem_weight_sum, CAAS_score,
          any_of(c("gate_all", "gate_sig", "gate_fdr")), change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
@@ -964,7 +980,7 @@ gene_out <- gene_scores %>%
     gene_caas_score_top_all, gene_caas_score_top_sig, gene_caas_score_top_fdr,
     gene_caas_score_bottom_all, gene_caas_score_bottom_sig, gene_caas_score_bottom_fdr,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
-    any_of(c("gene_rand_score", "accum_significant",
+    any_of(c("accum_fisher_p", "accum_fdr", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
              "accum_pval_gs2", "accum_pval_gs1")),
     any_of(c("rer_min_pval", "rer_significant", "rer_rho", "rer_acceleration")),
@@ -992,6 +1008,12 @@ fcs_stats <- tibble(
   score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_global_all"))),
   score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top_all"))),
   score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom_all"))),
+  # ASR-axis rankings — perm-bearing (matched by name to caas_perms.rds$corStat_byrank:
+  # global_asr / top_asr / bottom_asr). FCS derives the ranking name from the
+  # score_<name> suffix, so these become rankings "global_asr"/"top_asr"/"bottom_asr".
+  score_global_asr = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_asr_global_all"))),
+  score_top_asr    = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_asr_top_all"))),
+  score_bottom_asr = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_asr_bottom_all"))),
   flag_gate_sig    = !is.na(.col(gene_scores, "gene_caas_score_global_sig")),
   flag_gate_fdr    = !is.na(.col(gene_scores, "gene_caas_score_global_fdr")),
   flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
@@ -1035,12 +1057,16 @@ if (.nonempty("fade_max_bf_top") || .nonempty("fade_max_bf_bottom")) {
   cat("  fcs_stats_fade.tsv written (FADE BF rankings)\n")
 }
 
-if (.nonempty("gene_rand_score")) {
+if (.nonempty("accum_fisher_p")) {
+  # FCS ranks descending (higher = more significant); the Fisher p is lower = more
+  # significant, so rank on -log10(accum_fisher_p) (the value formerly named
+  # gene_rand_score, now derived inline — the score name is deprecated).
+  .afp <- suppressWarnings(as.numeric(.col(gene_scores, "accum_fisher_p")))
   write_tsv(tibble(
     gene         = gene_scores$Gene,
-    score_global = suppressWarnings(as.numeric(.col(gene_scores, "gene_rand_score")))
+    score_global = ifelse(is.na(.afp), NA_real_, -log10(pmax(.afp, 1e-300)))
   ), "fcs_stats_accum.tsv")
-  cat("  fcs_stats_accum.tsv written (accumulation rankings)\n")
+  cat("  fcs_stats_accum.tsv written (accumulation rankings, -log10 Fisher p)\n")
 }
 
 # Correlations

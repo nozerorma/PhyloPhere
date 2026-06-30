@@ -275,6 +275,12 @@ cols_by_rk <- list(
   bottom = c("flag_gate_sig","flag_gate_fdr","pct_bottom10","pct_bottom5","pct_bottom1",
              "flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum")
 )
+# ASR-axis CAAS rankings (permulation-bearing) share their base direction's
+# attribute columns. Defined explicitly so the leading-edge table stays
+# direction-aware rather than falling back to the full attr_cols_all set.
+cols_by_rk[["global_asr"]] <- cols_by_rk[["global"]]
+cols_by_rk[["top_asr"]]    <- cols_by_rk[["top"]]
+cols_by_rk[["bottom_asr"]] <- cols_by_rk[["bottom"]]
 
 for (rk in ranking_names) {
   cat(sprintf("\n## %s\n\n", rk))
