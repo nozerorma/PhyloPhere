@@ -18,7 +18,7 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     script:
     def mrca_threshold = params.ct_disambig_posterior_threshold
     """
-    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/prepare_postproc_input.py \
+    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/prepare_postproc_input.py \
         --input ${disambiguation_input} \
         --mrca-threshold ${mrca_threshold} \
         --output postproc_disambiguation_input.tsv \
@@ -45,7 +45,7 @@ process CT_FILTER {
     script:
     maxcaas_int = (maxcaas * 100).toInteger()
     """
-    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/filter_caas_clusters-param.py \
+    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/filter_caas_clusters-param.py \
         -i ${discovery_file} \
         -l ${minlen} \
         -c ${maxcaas} \
@@ -67,7 +67,7 @@ process CT_FILTER_SUMMARY {
 
     script:
     """
-    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/summarize_cluster_filters.py \
+    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/summarize_cluster_filters.py \
         --input-dir . \
         --summary-output filter_summary.tsv \
         --discarded-output discarded_summary.tsv
@@ -95,7 +95,7 @@ process CAAS_FILTER_GENES {
     script:
     def cluster_arg = (params.gene_filter_mode in ['dubious', 'both']) ? "-c ${cluster_file}" : ""
     """
-    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/filter_caas_genes.py \
+    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/filter_caas_genes.py \
         -i ${discovery_file} \
         -l ${gene_ensembl_file} \
         ${cluster_arg} \
@@ -123,7 +123,7 @@ process CAAS_BACKGROUND_CLEANUP {
     
     script:
     """
-    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/cleanup_background.py \
+    python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/cleanup_background.py \
         -s ${removed_genes_summary} \
         -g ${global_background_file} \
         -o .

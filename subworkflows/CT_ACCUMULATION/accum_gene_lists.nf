@@ -48,7 +48,7 @@ process ACCUMULATION_GENE_LISTS {
         group_schemes <- c('us', 'gs1', 'gs2', 'gs3', 'gs4')
         all_dfs <- list()
         for (scheme in group_schemes) {
-            pat   <- paste0('accumulation_${direction}_', scheme, '_aggregated_results\\\\.csv')
+            pat   <- paste0('accumulation_${direction}_', scheme, '_aggregated_results.csv')
             files <- list.files('.', pattern = pat, full.names = TRUE)
             if (length(files) == 0) next
             d     <- read.csv(files[1], stringsAsFactors = FALSE)
@@ -74,7 +74,7 @@ process ACCUMULATION_GENE_LISTS {
                 setNames(all_dfs[[s]], c('gene', paste0('pval_', s), paste0('actcount_', s))))
         )
 
-        gene_syms <- df_wide\\\\$gene
+        gene_syms <- df_wide[['gene']]
         act_total <- rowSums(df_wide[, grep('^actcount_', names(df_wide)), drop = FALSE], na.rm = TRUE)
         pval_cols <- grep('^pval_', names(df_wide), value = TRUE)
 

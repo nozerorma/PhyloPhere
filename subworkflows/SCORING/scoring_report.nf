@@ -51,6 +51,7 @@ process SCORING_REPORT {
     path fade_site_top_file  // optional: per-site FADE BF TSV top direction  (NO_FADE_SITE sentinel when absent)
     path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
     path vep_primateai       // optional: PrimateAI-3D score TSV  (NO_VEP_PRIMATEAI sentinel when absent)
+    path vep_cosmic          // optional: COSMIC score TSV  (NO_VEP_COSMIC sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
     path caas_perms          // optional: CAAS permulation RDS (asr + caas null) (NO_FILE/NO_CAAS_PERMS sentinel when absent)
     path caas_pos_pval       // optional: lean recovery p-value per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
@@ -65,13 +66,7 @@ process SCORING_REPORT {
     def outdir         = "${params.outdir}/scoring"
     def traitname      = params.traitname ?: 'unknown_trait'
     def top_pct        = params.scoring_position_top_pct   ?: 0.10
-    def top25_pct      = params.scoring_position_top25_pct ?: 0.25
-    def top5_pct       = params.scoring_position_top5_pct  ?: 0.05
-    def top1_pct       = params.scoring_position_top1_pct  ?: 0.01
     def g_top_pct      = params.scoring_gene_top_pct       ?: 0.10
-    def g_top25_pct    = params.scoring_gene_top25_pct     ?: 0.25
-    def g_top5_pct     = params.scoring_gene_top5_pct      ?: 0.05
-    def g_top1_pct     = params.scoring_gene_top1_pct      ?: 0.01
     // Resolve optional sentinel files: pass 'NULL' (R NULL) when no real file is staged
     def stress_summary_arg = (stress_summary.name =~ /^NO_SCORING_STRESS_SUMMARY/) ? 'NULL' : "'${stress_summary}'"
     def stress_corr_arg = (stress_correlations.name =~ /^NO_SCORING_STRESS_CORR/) ? 'NULL' : "'${stress_correlations}'"
@@ -83,6 +78,7 @@ process SCORING_REPORT {
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
 
     def pai_arg = (vep_primateai.name =~ /^NO_VEP_PRIMATEAI/) ? 'NULL' : "'${vep_primateai}'"
+    def cosmic_arg = (vep_cosmic.name =~ /^NO_VEP_COSMIC/) ? 'NULL' : "'${vep_cosmic}'"
     def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
     def perms_arg = (caas_perms.name =~ /^NO_CAAS_PERMS|^NO_FILE/) ? 'NULL' : "'${caas_perms}'"
     def pos_pval_arg = (caas_pos_pval.name =~ /^NO_CAAS_POS_PVAL|^NO_FILE/) ? 'NULL' : "'${caas_pos_pval}'"
@@ -104,13 +100,7 @@ process SCORING_REPORT {
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
                     top_pct              = ${top_pct},
-                    top25_pct            = ${top25_pct},
-                    top5_pct             = ${top5_pct},
-                    top1_pct             = ${top1_pct},
                     gene_top_pct         = ${g_top_pct},
-                    gene_top25_pct       = ${g_top25_pct},
-                    gene_top5_pct        = ${g_top5_pct},
-                    gene_top1_pct        = ${g_top1_pct},
                     stress_summary_file  = ${stress_summary_arg},
                     stress_corr_file     = ${stress_corr_arg},
                     stress_rank_file     = ${stress_rank_arg},
@@ -120,6 +110,7 @@ process SCORING_REPORT {
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     vep_primateai_file   = ${pai_arg},
+                    vep_cosmic_file      = ${cosmic_arg},
                     genomic_info_file    = ${gi_arg},
                     caas_perms_file      = ${perms_arg},
                     caas_pos_pval_file   = ${pos_pval_arg},
@@ -146,13 +137,7 @@ process SCORING_REPORT {
                     traitname            = '${traitname}',
                     output_dir           = '${outdir}',
                     top_pct              = ${top_pct},
-                    top25_pct            = ${top25_pct},
-                    top5_pct             = ${top5_pct},
-                    top1_pct             = ${top1_pct},
                     gene_top_pct         = ${g_top_pct},
-                    gene_top25_pct       = ${g_top25_pct},
-                    gene_top5_pct        = ${g_top5_pct},
-                    gene_top1_pct        = ${g_top1_pct},
                     stress_summary_file  = ${stress_summary_arg},
                     stress_corr_file     = ${stress_corr_arg},
                     stress_rank_file     = ${stress_rank_arg},
@@ -162,6 +147,7 @@ process SCORING_REPORT {
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     vep_primateai_file   = ${pai_arg},
+                    vep_cosmic_file      = ${cosmic_arg},
                     genomic_info_file    = ${gi_arg},
                     caas_perms_file      = ${perms_arg},
                     caas_pos_pval_file   = ${pos_pval_arg},

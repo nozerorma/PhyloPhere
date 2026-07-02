@@ -565,7 +565,6 @@ dependencies:
   - r-viridislite=0.4.3=r44hc72bb7e_0
   - r-vroom=1.6.7=r44h3697838_0
   - r-waldo=0.6.2=r44hc72bb7e_1
-  - r-webgestaltr=0.4.6=r44h3697838_3
   - r-webshot=0.5.5=r44hc72bb7e_2
   - r-weights=1.1.2=r44h54b55ab_1
   - r-whisker=0.4.1=r44hc72bb7e_3
@@ -581,7 +580,6 @@ dependencies:
   - rav1e=0.7.1=h8fae777_3
   - re2=2025.11.05=h5301d42_1
   - readline=8.3=h853b02a_0
-  - rerconverge=0.3.0=r44h7b50bb2_3
   - ruff=0.15.1=h40fa522_0
   - s2n=1.7.0=ha63dd3a_1
   - scipy=1.17.0=py314hf07bd8e_1

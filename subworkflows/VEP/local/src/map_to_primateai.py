@@ -47,11 +47,7 @@ def _uc_letters(text):
 AMBIGSYMS = {'-', 'X', 'B', 'Z', 'J', 'U', 'O'}
 
 SCHEME_WEIGHTS = {
-    "US":  0.5,
-    "GS4": 0.2,
-    "GS3": 0.1,
-    "GS2": 0.1,
-    "GS1": 0.1,
+    "US":  1.0,
 }
 
 
@@ -248,6 +244,10 @@ with open(caas_file) as fh:
         if len(fields) < len(header):
             continue
 
+        caap_grp = fields[caap_col] if caap_col is not None else 'US'
+        if caap_grp != 'US':
+            continue
+
         gene = fields[gene_col]
         try:
             position = int(fields[pos_col])
@@ -258,8 +258,8 @@ with open(caas_file) as fh:
         caas_pat = fields[caas_col]
         cside = fields[cside_col] if cside_col is not None else ''
         amino_enc = fields[amino_col] if amino_col is not None else ''
-        caap_grp = fields[caap_col] if caap_col is not None else 'US'
-        weight = SCHEME_WEIGHTS.get(caap_grp, 0.0)
+        caas_change = amino_enc
+        weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
 
         anc_aas, der_aas = pair_aware_caas_letters_gs(
             caas_pat, amino_enc, cside, caap_grp
@@ -274,6 +274,7 @@ with open(caas_file) as fh:
             'der_aas': der_aas,
             'caap_group': caap_grp,
             'weight': weight,
+            'caas_change': caas_change,
         })
 
 print(f"  {len(caas_targets)} unique (Gene, Position) targets loaded.", file=sys.stderr)
@@ -349,7 +350,7 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
     # Output header
     out.write(
         "Gene\tPosition\t"
-        "hg38_ref_aa\tcaas_alt_aas\t"
+        "hg38_ref_aa\tcaas_alt_aas\tcaas_change\t"
         "caap_group\tscheme_weight\t"
         + pai_header + "\n"
     )
@@ -386,6 +387,7 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
                 anc_aas = entry['anc_aas']
                 caap_grp = entry['caap_group']
                 weight = entry['weight']
+                caas_change = entry['caas_change']
 
                 alt_aas = der_aas - {ref_aa}
                 if not alt_aas:
@@ -400,7 +402,7 @@ with gzip.open(primateai_gz, 'rt') as gz_in, open(output_tsv, 'w') as out:
 
                 out.write(
                     f"{gene}\t{caas_pos}\t"
-                    f"{ref_aa}\t{''.join(sorted(alt_aas))}\t"
+                    f"{ref_aa}\t{''.join(sorted(alt_aas))}\t{caas_change}\t"
                     f"{caap_grp}\t{weight}\t"
                     f"{line}\n"
                 )

@@ -138,11 +138,7 @@ Usage:
 --scoring_stress_top_n      <INTEGER>               25
 --scoring_stress_rank_metric <"spearman">           spearman
 --scoring_position_top_pct  <FLOAT>                 0.10
---scoring_position_top5_pct <FLOAT>                 0.05
---scoring_position_top1_pct <FLOAT>                 0.01
 --scoring_gene_top_pct      <FLOAT>                 0.10
---scoring_gene_top5_pct     <FLOAT>                 0.05
---scoring_gene_top1_pct     <FLOAT>                 0.01
 
 Standalone mode (provide inputs directly):
 --scoring_postproc_input    <"filtered_discovery.tsv">   ""

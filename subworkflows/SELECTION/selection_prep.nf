@@ -90,7 +90,7 @@ process PREP_ALIGNMENTS {
     tuple val(gene_id), path("${gene_id}.filtered.fa"), emit: filtered_fasta, optional: true
 
     script:
-    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local/modules"
     def pyBin = (params.use_singularity || params.use_apptainer)
         ? '/usr/local/bin/_entrypoint.sh python'
         : 'python'
@@ -138,15 +138,14 @@ process PREP_ALIGNMENTS_BATCHED {
     tuple val(batchID), path("*.filtered.fa"), emit: filtered_fastas, optional: true
 
     script:
-    def local_dir  = "${baseDir}/subworkflows/SELECTION/local"
-    def script_dir = "${baseDir}/subworkflows/SELECTION/local/scripts"
+    def local_dir  = "${baseDir}/subworkflows/SELECTION/local/src"
     def workers    = params.selection_prep_batch_workers ?: 4
     def runnerMode = (params.use_singularity || params.use_apptainer) ? "container" : "local"
     """
     cat <<'MANIFEST_EOF' > ${batchID}.manifest.tsv
 ${manifestText}MANIFEST_EOF
 
-    bash ${script_dir}/run_prep_alignments_batch.sh \\
+    bash ${local_dir}/run_prep_alignments_batch.sh \\
         --batch-id    "${batchID}" \\
         --manifest    "${batchID}.manifest.tsv" \\
         --workers     "${workers}" \\

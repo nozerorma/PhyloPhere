@@ -48,6 +48,7 @@ def analyze_caas_position_disambiguation(
     tip_diagnostics: Optional[Dict[str, Any]] = None,
     posterior_threshold: float = 0.7,
     convergence_mode: str = "focal_clade",
+    node_index: Optional[Dict[int, Any]] = None,
 ) -> ConvergenceResult:
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
@@ -323,7 +324,8 @@ def analyze_caas_position_disambiguation(
             for nid, info in per_node_payload.items()
         }
         tree_root = getattr(tree_data, "root", None)
-        node_index = build_node_index(tree_root)
+        if node_index is None:  # per-gene invariant; hoisted by the caller when available
+            node_index = build_node_index(tree_root)
         path_result = compute_asr_path_score(
             pair_details=pair_details_list,
             per_node_dist=per_node_dist,
@@ -489,6 +491,29 @@ def analyze_gene_disambiguation(
                     flattened_pairs.append(pair)
                     seen_pairs.add(pair_tuple)
 
+    # ── Hoisted per-gene/tree invariants (computed ONCE, not per position) ──────
+    # The alignment lookup, the tree node index, and each species-pair's MRCA
+    # depend only on the alignment + tree, which are fixed for the gene. Rebuilding
+    # them inside the per-position loop (and, for the permulation replay, once per
+    # position × per cycle) is pure redundant work. Hoisting/memoising them here
+    # speeds up both the observed disambiguation and the perm replay with NO change
+    # to results.
+    hoisted_seq_by_id = hoisted_seq_by_species = None
+    if flattened_pairs and taxid_mapping:
+        hoisted_seq_by_id, hoisted_seq_by_species = build_alignment_lookup(
+            alignment_data.alignment, alignment_data.taxid_to_species
+        )
+    hoisted_node_index = build_node_index(getattr(tree_data, "root", None))
+    _mrca_cache: Dict[tuple, Any] = {}
+
+    def _get_mrca_cached(taxa: List[str]):
+        if not tree_data or not taxa:
+            return None
+        key = tuple(sorted(taxa))
+        if key not in _mrca_cache:
+            _mrca_cache[key] = get_mrca(tree_data.root, list(taxa))
+        return _mrca_cache[key]
+
     for idx, caas_pos in enumerate(caas_entries):
         pos = caas_pos.position
         try:
@@ -513,9 +538,7 @@ def analyze_gene_disambiguation(
             tip_diagnostics: Dict[str, Any] = {}
             try:
                 if flattened_pairs and taxid_mapping:
-                    seq_by_id, seq_by_species = build_alignment_lookup(
-                        alignment_data.alignment, alignment_data.taxid_to_species
-                    )
+                    seq_by_id, seq_by_species = hoisted_seq_by_id, hoisted_seq_by_species
 
                     pair_details = []
                     all_taxa: List[str] = []
@@ -541,11 +564,7 @@ def analyze_gene_disambiguation(
 
                         all_taxa.extend([top_taxid, bottom_taxid])
 
-                        mrca_node = (
-                            get_mrca(tree_data.root, [top_taxid, bottom_taxid])
-                            if tree_data
-                            else None
-                        )
+                        mrca_node = _get_mrca_cached([top_taxid, bottom_taxid])
                         mrca_state, mrca_prob = _modal_state(
                             mrca_node.node_id if mrca_node else None
                         )
@@ -590,11 +609,7 @@ def analyze_gene_disambiguation(
                             }
                         )
 
-                    mrca_node = (
-                        get_mrca(tree_data.root, all_taxa)
-                        if tree_data and all_taxa
-                        else None
-                    )
+                    mrca_node = _get_mrca_cached(all_taxa)
                     # Populate mrca_contrast in each pair using the global contrast MRCA
                     # state (MRCA of all taxa). classify_change_and_parallelism uses this
                     # field as the ancestor when convergence_mode="mrca".
@@ -672,6 +687,7 @@ def analyze_gene_disambiguation(
                 tip_diagnostics,
                 posterior_threshold=posterior_threshold,
                 convergence_mode=convergence_mode,
+                node_index=hoisted_node_index,
             )
 
             results.append(result)

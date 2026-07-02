@@ -70,6 +70,7 @@ include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_PERMULATION} from './subworkflows/CT/caas_permulation.nf'
+include {ENRICHMENT}      from './workflows/enrichment.nf'
 
 // Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
 
@@ -361,23 +362,27 @@ workflow {
             def scoring_rer_perms_ch     = (params.rer_tool || params.rer_report_file) ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
+            def scoring_vep_cosmic_ch    = params.vep        ? VEP.out.cosmic_tsv                 : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
 
             // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) feeding
             // the CAAS FCS p.perm path. Gated on --caas_permulation_enrichment; needs
             // the full-pool perm-discovery + resample subset emitted by CT.
             def scoring_caas_perms_ch = null
+            def scoring_caas_perm_scores_ch = null
             def scoring_caas_pos_pval_ch = null
             def scoring_caas_pos_sample_ch = null
+            def caas_perm_out = null
             if (params.caas_permulation_enrichment && ct_results) {
                 def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
-                def caas_perm_out = CAAS_PERMULATION(
+                caas_perm_out = CAAS_PERMULATION(
                     ct_results.caas_perm_discovery,
                     ct_results.caas_resample_subset,
                     ct_results.tree_file,
                     caas_universe_ch
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms
+                scoring_caas_perm_scores_ch = caas_perm_out.perm_scores
                 scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // lean recovery p-value per (gene,position,scheme)
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // lean capped sample for distribution plots
             }
@@ -389,6 +394,7 @@ workflow {
                 scoring_rer_ch,
                 scoring_accum_ch,
                 scoring_vep_pai_ch,
+                scoring_vep_cosmic_ch,
                 null,  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
                 scoring_fade_site_top_ch,
                 scoring_fade_site_bot_ch,
@@ -399,6 +405,36 @@ workflow {
                 scoring_caas_pos_sample_ch   // lean capped sample for report distribution plots
             )
             ran_any = true
+
+            if (params.enrichment) {
+                def fcs_stats_ch = params.scoring ? SCORING.out.fcs_stats : Channel.empty()
+                def fcs_stats_rer_ch = params.scoring ? SCORING.out.fcs_stats_rer : Channel.empty()
+                def fcs_stats_fade_ch = params.scoring ? SCORING.out.fcs_stats_fade : Channel.empty()
+                def fcs_stats_accum_ch = params.scoring ? SCORING.out.fcs_stats_accum : Channel.empty()
+                def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
+                def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
+                def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
+                // POSENRICH background = caastools background.output (tested positions);
+                // the engine restricts it to the cleaned_background genes.
+                def posenrich_background_ch = (ct_results && ran_discovery) ? ct_results.background_file : file('NO_FILE')
+
+                ENRICHMENT(
+                    fcs_stats_ch,
+                    fcs_stats_rer_ch,
+                    fcs_stats_fade_ch,
+                    fcs_stats_accum_ch,
+                    gene_lists_ch,
+                    gene_scores_ch,
+                    pp_cleaned_bg,
+                    scoring_rer_perms_ch,
+                    scoring_caas_perms_ch,
+                    scoring_caas_perm_scores_ch,
+                    scoring_caas_pos_pval_ch,
+                    scoring_caas_pos_sample_ch,
+                    position_scores_ch,
+                    posenrich_background_ch
+                )
+            }
         }
 
         if (!ran_any) {

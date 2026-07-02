@@ -23,7 +23,7 @@ process PRIMATEAI_MAP {
     label 'process_long_compute'
     errorStrategy 'ignore'
 
-    publishDir path: "${params.outdir}/characterization/vep",
+    publishDir path: "${params.outdir}/vep",
                mode: 'copy', overwrite: true,
                pattern: 'primateai_mapped.tsv'
 

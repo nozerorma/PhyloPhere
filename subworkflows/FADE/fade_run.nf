@@ -60,7 +60,7 @@ process FADE_BATCHED {
 cat > ${batchID}.manifest.tsv <<'EOF'
 """ + batchManifestText + """EOF
 
-bash ${baseDir}/subworkflows/FADE/local/scripts/run_hyphy_fade_batch.sh \\
+bash ${baseDir}/subworkflows/FADE/local/src/run_hyphy_fade_batch.sh \\
     --batch-id       ${batchID} \\
     --manifest       ${batchID}.manifest.tsv \\
     --direction      ${direction} \\

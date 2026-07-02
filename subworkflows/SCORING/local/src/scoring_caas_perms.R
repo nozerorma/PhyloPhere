@@ -16,6 +16,19 @@
 #   directional subsets      = change_side ∈ {top,both} / {bottom,both}
 # Ranking names match fcs_stats' score_*_asr columns: global_asr/top_asr/bottom_asr.
 #
+# NULL SEMANTICS CAVEAT — this is a NAIVE random-relabeling null. The permuted
+# labelings (from CAAStools resample) do NOT preserve the observed matched-sister-
+# pair design: permuted fg/bg species are paired at RANDOM across the tree, so pair
+# MRCAs are deep and the asr_path_score isolation/independence geometry differs from
+# the observed (which uses shallow matched pairs). We can't preserve matched pairs
+# under permutation — a random labeling almost never yields N independent matched
+# contrasts — so random pairing is a necessity, and the up-side is a homogeneous,
+# well-defined null. Consequence: p.perm tests "phenotype + matched-pair design"
+# jointly (mildly anti-conservative on the MRCA axes), not the phenotype alone. A
+# within-pair fg/bg swap would isolate the phenotype but spans only 2^n labelings
+# (too coarse unless n is large). POSENRICH therefore drops p.perm entirely and
+# relies on the exact XL-mHG p.adj; the gene FCS keeps p.perm with this caveat.
+#
 # Usage:
 #   Rscript scoring_caas_perms.R --perm-scores caas_perm_scores.tsv \
 #       [--universe cleaned_background.txt] --output caas_perms.rds

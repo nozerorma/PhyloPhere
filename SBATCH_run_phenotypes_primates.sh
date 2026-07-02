@@ -33,7 +33,7 @@ export RUN_FADE=false
 export FADE_MODE="all"
 export RUN_RER=false
 export RER_TOOL="build_trait,build_tree,build_matrix,continuous"
-export GENE_TREES="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
+export GENE_TREES="/homes/users/mramon/scratch/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt"
 export RER_PERM_BATCHES=10
 export RER_PERMS_PER_BATCH=100
 export RUN_VEP=true
@@ -41,23 +41,33 @@ export RUN_SCORING=true
 export RUN_SCORING_STRESS=true
 export RUN_CAAS_PERMULATION=true
 export CAAS_FULL_PERMS=1000
-export ALI_SP_NAMES="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/results_ppga/20260615_200027/ali_sp_names.txt"
-export INPUT_TAX_ID="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family_primates.tsv"
+export ALI_SP_NAMES="/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ali_sp_names.txt"
+export GENE_ENSEMBL_FILE="/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output"
+export INPUT_TAX_ID="/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family_primates.tsv"
+export MAP_DIR="/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP"
+export ASR_CACHE_DIR="/homes/users/mramon/scratch/2.Primates/1.Primates_data/7.ASR_primates"
+export RUN_ENRICHMENT=true
+export GMT_DIR="/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/GMTs"
+export RUN_POSENRICH=true
+export EGG_MEMBERS_FILE="/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv"
+export EGG_ANNOTATIONS_FILE="/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv"
+export COSMIC_DB="/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz"
+export VEP_PRIMATEAI_DB="/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz"
 
-REPO_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/0.Phylophere"
+REPO_DIR="/homes/users/mramon/scratch/0.Phylophere"
 SINGLE_RUNNER="${REPO_DIR}/run_phenotype_single_primates.sh"
 
 # --- PHENOTYPE CATALOGUE ---
 case $SLURM_ARRAY_TASK_ID in
      1)  CLASS=1; TRAIT="neoplasia_prevalence"; SECONDARY="malignant_prevalence"; CTRAIT="neoplasia_necropsy"; PRUNE="neoplasia_exclude.txt"; PRUNE_SEC="malignant_exclude.txt"; DISCRETE="quintile"
-         export SCORING_RER_INPUT="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/neoplasia_prevalence/runtime/filter/rerconverge/rer_results/rerconverge_summary_neoplasia_prevalence.tsv"
-         export SCORING_FADE_SUMMARY_TOP="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/neoplasia_prevalence/runtime/filter/selection/fade/top/fade_summary_top.tsv"
-         export SCORING_FADE_SUMMARY_BOTTOM="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/neoplasia_prevalence/runtime/filter/selection/fade/bottom/fade_summary_bottom.tsv"
+         export SCORING_RER_INPUT="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/neoplasia_prevalence/runtime/filter/rerconverge/rer_results/rerconverge_summary_neoplasia_prevalence.tsv"
+         export SCORING_FADE_SUMMARY_TOP="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/neoplasia_prevalence/runtime/filter/selection/fade/top/fade_summary_top.tsv"
+         export SCORING_FADE_SUMMARY_BOTTOM="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/neoplasia_prevalence/runtime/filter/selection/fade/bottom/fade_summary_bottom.tsv"
          ;;
      2)  CLASS=1; TRAIT="malignant_prevalence"; SECONDARY="neoplasia_prevalence"; CTRAIT="malignant_count";    PRUNE="malignant_exclude.txt"; PRUNE_SEC="neoplasia_exclude.txt"; DISCRETE="quintile"
-         export SCORING_RER_INPUT="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/malignant_prevalence/runtime/filter/rerconverge/rer_results/rerconverge_summary_malignant_prevalence.tsv"
-         export SCORING_FADE_SUMMARY_TOP="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/malignant_prevalence/runtime/filter/selection/fade/top/fade_summary_top.tsv"
-         export SCORING_FADE_SUMMARY_BOTTOM="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/diet/malignant_prevalence/runtime/filter/selection/fade/bottom/fade_summary_bottom.tsv"
+         export SCORING_RER_INPUT="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/malignant_prevalence/runtime/filter/rerconverge/rer_results/rerconverge_summary_malignant_prevalence.tsv"
+         export SCORING_FADE_SUMMARY_TOP="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/malignant_prevalence/runtime/filter/selection/fade/top/fade_summary_top.tsv"
+         export SCORING_FADE_SUMMARY_BOTTOM="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/malignant_prevalence/runtime/filter/selection/fade/bottom/fade_summary_bottom.tsv"
          ;;
 esac
 

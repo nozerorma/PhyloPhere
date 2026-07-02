@@ -72,7 +72,7 @@ setup_rmd <- function() {
 
 # Define working and results directories
 workingDir <- getwd()
-objDir <- file.path(workingDir, "obj")
+objDir <- file.path(workingDir, "src")
 debug_log("workingDir = %s", workingDir)
 debug_log("objDir = %s", objDir)
 

@@ -27,6 +27,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
     script:
     def local_dir    = "${baseDir}/subworkflows/ENRICHMENT/local"
     def outdir       = "${params.outdir}/enrichment_excluded"
+    def gmt_dir      = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
     def project_name = params.enrichment_project_name ?: 'Enrichment_Excluded_clusterProfiler'
     def organism     = params.enrichment_organism     ?: 'hsapiens'
     def min_num      = params.enrichment_min_num      ?: 5
@@ -59,6 +60,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
                     background_file = '${background_file}',
                     background_basename = '${bg_name}',
                     output_dir = '${outdir}',
+                    gmt_dir = '${gmt_dir}',
                     project_name = '${project_name}',
                     organism = '${organism}',
                     ora_databases = '${db_combined}',
@@ -88,6 +90,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
                     background_file = '${background_file}',
                     background_basename = '${bg_name}',
                     output_dir = '${outdir}',
+                    gmt_dir = '${gmt_dir}',
                     project_name = '${project_name}',
                     organism = '${organism}',
                     ora_databases = '${db_combined}',

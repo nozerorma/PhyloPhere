@@ -83,7 +83,7 @@ process TREE_CLEANUP {
 
     script:
     """
-    python3 ${baseDir}/subworkflows/TRAIT_ANALYSIS/local/scripts/tree_cleanup.py \\
+    python3 ${baseDir}/subworkflows/TRAIT_ANALYSIS/local/src/tree_cleanup.py \\
         --tree          "${tree_file}" \\
         --ali-sp-names  "${ali_sp_names_file}" \\
         --tax-id        "${tax_id_file}" \\

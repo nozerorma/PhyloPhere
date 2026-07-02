@@ -74,7 +74,7 @@ process RESAMPLE {
 
         mkdir -p ${nw_tree.baseName}.resampled.output
         /usr/local/bin/_entrypoint.sh Rscript \\
-        '$baseDir/subworkflows/CT/local/permulations.R' \\
+        '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "${caas_config}" \\
         ${params.cycles} \\
@@ -112,7 +112,7 @@ process RESAMPLE {
 
         mkdir -p ${nw_tree.baseName}.resampled.output
         Rscript \\
-        '$baseDir/subworkflows/CT/local/permulations.R' \\
+        '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "${caas_config}" \\
         ${params.cycles} \\

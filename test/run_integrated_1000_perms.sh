@@ -26,11 +26,11 @@ ALIGNMENT_DIR="${REPO_DIR}/test/inputs/alignments/Ali_1000"
 
 # Tunable knobs (env-overridable)
 CYCLES="${CYCLES:-1000}"
-FULL_PERMS="${FULL_PERMS:-10}"
+FULL_PERMS="${FULL_PERMS:-100}"
 RESUME="${RESUME:-0}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
-OUTDIR="${TEST_DIR}/runs/integrated_1000_perms/${TIMESTAMP}"
+OUTDIR="/media/miguel/phd/run/integrated_1000_perms/${TIMESTAMP}"
 WORKDIR="${OUTDIR}/work"
 
 TRAIT_FILE="${INPUTS_DIR}/traitfiles/traitfile.tab"
@@ -97,8 +97,9 @@ NF_FLAGS=(
     --cycles "$CYCLES"
     --caas_permulation_enrichment true
     --caas_full_perms "$FULL_PERMS"
-    --gene_ensembl_file "${REPO_DIR}/test/inputs/alignments/ensembl_genes.output"
-    --tax_id "${REPO_DIR}/test/inputs/phylogeny/taxid_species_family_primates.tsv"
+    --gene_ensembl_file "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/ensembl_genes.output"
+    --tax_id "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/5.Phylogeny/taxid_species_family_primates.tsv"
+    --ali_sp_names "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/ali_sp_names.txt"
     --vep_map_dir "${REPO_DIR}/test/inputs/map_1000/"
     --alignment "$ALIGNMENT_DIR"
     --caas_config "$TRAIT_FILE"
@@ -113,6 +114,16 @@ NF_FLAGS=(
     --asr_robustness true
     --scoring_rer_input "${REPO_DIR}/test/inputs/rer/RERConverge/RER_Results/rerconverge_summary_neoplasia_prevalence.tsv"
     --vep
+    --enrichment true
+    --gmt_dir "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/GMTs"
+    --posenrich true
+    --domain_variability_file "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/PFAM/domain_variability.tsv"
+    --ucr_positions_file "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/UCR/ucr_positions.tsv"
+    --fubar_sites_file "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/FUBAR/fubar_sites.tsv"
+    --vep_primateai_db "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz"
+    --egg_members_file "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/eggNOG/9443_members.tsv.gz"
+    --egg_annotations_file "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/eggNOG/9443_annotations.tsv.gz"
+    --cosmic_db "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz"
     --outdir "$OUTDIR"
 )
 # Opt-in resume only (default clean — see header note on the module-cache trap).
@@ -121,12 +132,17 @@ if [ "$RESUME" = 1 ]; then
 fi
 
 nextflow run "${REPO_DIR}/main.nf" \
+    -with-tower \
     "${NF_FLAGS[@]}" \
     -w "$WORKDIR" \
     "$@"
 
 echo ""
 echo "Permulation framework test finished."
-echo "Results:        $OUTDIR"
-echo "Null matrix:    $OUTDIR/caas_permulation/caas_perms.rds"
-echo "CAAS FCS report: $OUTDIR/fcs/FCS_scoring_neoplasia_prevalence.html  (p.perm on the *_asr rankings)"
+echo "Results:          $OUTDIR"
+echo "Null matrix:      $OUTDIR/caas_permulation/caas_perms.rds"
+echo "CAAS FCS report:  $OUTDIR/fcs/FCS_scoring_neoplasia_prevalence.html  (p.perm on the *_asr rankings)"
+# POSENRICH (position-wise XL-mHG): background = the in-run caastools background.output
+# (discovery) restricted to cleaned_background — no manual background input needed.
+echo "POSENRICH report: $OUTDIR/posenrich/POSENRICH_report_neoplasia_prevalence.html"
+echo "POSENRICH results:$OUTDIR/posenrich/posenrich_results.tsv"

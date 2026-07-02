@@ -335,13 +335,13 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
         
         script_path = os.path.realpath(sys.argv[0]).split("/")
         script_path.remove(script_path[-1])
-        rscript_path = "/".join(script_path) + "/permulations.r"
+        rscript_path = "/".join(script_path[:-1]) + "/scripts/permulations.R"
 
         os.system("ln -s " + rscript_path)
         
         r_line = " ".join([
             
-            "./permulations.r",                     # Rscript
+            "./permulations.R",                     # Rscript
             tree_file,                              # args[1]
             template,                               # args[2]
             str(cycles),                            # args[3]

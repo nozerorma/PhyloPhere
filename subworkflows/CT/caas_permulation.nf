@@ -29,6 +29,7 @@ process SUBSET_RESAMPLE_PERMS {
     input:
     path resample_dir
     val  n_perms
+    val  seed
 
     output:
     path "resample_perms.tab", emit: subset
@@ -36,14 +37,21 @@ process SUBSET_RESAMPLE_PERMS {
     script:
     """
     # Concatenate all resample cycles (-L: the resample dir is staged as a symlink,
-    # so follow it). Drop the original labeling (b_0) and keep the first N. awk does
-    # the limiting by reading a FILE and exit-ing early — avoids the SIGPIPE that
-    # `... | head` triggers under pipefail.
+    # so follow it). Drop the original labeling (b_0), then take a SEEDED RANDOM
+    # sample of N labelings (not the first N — those are not exchangeable with an
+    # arbitrary null draw). gawk's srand(seed) is deterministic, so the same seed
+    # reproduces the same subset. We tag each candidate with a seeded rand() key,
+    # sort by it, write to a file, then awk-limit by reading that FILE and exit-ing
+    # early — avoids the SIGPIPE that `sort | head` triggers under pipefail.
     cat \$(find -L ${resample_dir} -name 'resample_*.tab' | sort) > all_resamples.tab
-    awk -v n=${n_perms} -F'\\t' 'NF>=3 && \$1!="b_0"{print; if(++c>=n) exit}' \\
-        all_resamples.tab > resample_perms.tab
+    awk -F'\\t' 'NF>=3 && \$1!="b_0"' all_resamples.tab > candidates.tab
+    awk -v seed=${seed} 'BEGIN{srand(seed)} {print rand()"\\t"\$0}' candidates.tab \\
+        | sort -k1,1g > shuffled.tab
+    awk -v n=${n_perms} '{sub(/^[^\\t]*\\t/,""); print; if(++c>=n) exit}' \\
+        shuffled.tab > resample_perms.tab
     n=\$(wc -l < resample_perms.tab)
-    echo "[caas_perms] selected \$n permuted labelings (requested ${n_perms})"
+    avail=\$(wc -l < candidates.tab)
+    echo "[caas_perms] seed=${seed}: sampled \$n of \$avail permuted labelings (requested ${n_perms})"
     if [ "\$n" -eq 0 ]; then echo "ERROR: no permuted labelings selected" >&2; exit 1; fi
     """
 }
@@ -173,7 +181,7 @@ process CONCAT_PERM_DISCOVERY {
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_discovery.tab'
 
     input:
-    path discovery_files
+    path(discovery_files, stageAs: "perm_disc_*")
 
     output:
     path "perm_discovery.tab", emit: perm_discovery
@@ -181,7 +189,7 @@ process CONCAT_PERM_DISCOVERY {
     script:
     """
     set -euo pipefail
-    files=( ${discovery_files} )
+    mapfile -t files < <(find . -maxdepth 1 -name "perm_disc_*" ! -name ".*" | sort)
     first=\${files[0]}
     head -n 1 "\$first" > perm_discovery.tab
     for f in "\${files[@]}"; do
@@ -259,7 +267,7 @@ process CAAS_PERMS_AGGREGATE {
     def universe_arg = universe.name != 'NO_FILE' ? "--universe ${universe}" : ""
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     """
-    ${run} ${local_dir}/scoring_caas_perms.R \\
+    ${run} ${local_dir}/src/scoring_caas_perms.R \\
         --perm-scores ${perm_scores} \\
         ${universe_arg} \\
         --output caas_perms.rds
@@ -276,7 +284,7 @@ workflow CAAS_PERMS_PREP {
 
     main:
         def bootstrapBatchSize = (params.ct_bootstrap_batch_size ?: 1) as int
-        def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms ?: 10)
+        def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms ?: 10, params.seed ?: 1998)
         def boot_in = align_tuple
             .map { id, f -> tuple(id, f) }
             .combine(subset.subset)

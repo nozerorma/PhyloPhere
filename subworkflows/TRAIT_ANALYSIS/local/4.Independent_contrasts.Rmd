@@ -65,7 +65,7 @@ if (!exists("params")) {
 assign("params", params, envir = .GlobalEnv)
 
 # Call the setup function from commons.R
-source("./obj/commons.R")
+source("./src/commons.R")
 setup_rmd()
 
 # Debug helper (prints into HTML output)
@@ -88,7 +88,7 @@ library(purrr)
 library(tibble)
 
 # Load selection algorithm
-source("./obj/selection_algorithm.R")
+source("./src/selection_algorithm.R")
 
 color_palette <- paste0(clade_name, "_palette") # Color palette for the clade
 capitalized_taxon <- tools::toTitleCase(taxon_of_interest) # Capitalized taxon name

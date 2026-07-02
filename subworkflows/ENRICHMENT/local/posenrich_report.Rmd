@@ -1,0 +1,283 @@
+---
+title: "Position-level Enrichment (XL-mHG) — `r params$traitname`"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+params:
+  results_file: NULL
+  characterization_file: NULL
+  traitname: "trait"
+  padj_thr: 0.05
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 6, dev = "png", dpi = 150)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(kableExtra)
+  library(DT)
+  library(scales)
+})
+
+PADJ  <- params$padj_thr
+
+kbl_html <- function(df, caption = NULL) {
+  kable(df, format = "html", escape = TRUE, caption = caption) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed", "hover"),
+                  full_width = FALSE)
+}
+
+sig_stars <- function(p) {
+  ifelse(is.na(p), "",
+  ifelse(p < 0.001, "***",
+  ifelse(p < 0.01,  "**",
+  ifelse(p < 0.05,  "*", ""))))
+}
+```
+
+```{r load, include=FALSE}
+stopifnot(!is.null(params$results_file), file.exists(params$results_file))
+res <- readr::read_tsv(params$results_file, show_col_types = FALSE)
+
+# characterization is optional
+char <- NULL
+if (!is.null(params$characterization_file) &&
+    file.exists(params$characterization_file)) {
+  char <- tryCatch(readr::read_tsv(params$characterization_file, show_col_types = FALSE),
+                   error = function(e) NULL)
+  if (!is.null(char) && nrow(char) == 0) char <- NULL
+}
+
+has_res <- !is.null(res) && nrow(res) > 0
+```
+
+# Overview
+
+This report summarises **position-level enrichment** for `r params$traitname`. Unlike
+the gene-level FCS (a Wilcoxon-AUC rank-shift test), the position background is a
+sea of invariant columns that can never carry a CAAS change — a rank-shift test
+degenerates there. Instead we use the **XL-mHG (minimum-hypergeometric) test**: for
+each position set it finds the `CAAS_score` cutoff at which the set is most
+over-represented at the *top* of the ranking, so it is robust to the tied
+zero-mass and remains powerful. `p.adj` is the BH-adjusted **exact XL-mHG p-value**
+(per direction × database) — the exact XL-mHG p already corrects the
+cutoff-optimisation, so this is the only significance used here (no permulation;
+see Methods).
+
+```{r overview, echo=FALSE}
+if (has_res) {
+  ov <- res %>%
+    group_by(ranking, database) %>%
+    summarise(`Sets tested` = n(),
+              `Sig (p.adj)` = sum(p_adj < PADJ, na.rm = TRUE),
+              .groups = "drop") %>%
+    arrange(ranking, database)
+  kbl_html(ov, caption = sprintf(
+    "Sets tested and significant at p.adj < %.3g, by direction and database.", PADJ))
+} else {
+  cat("No enrichment results were produced.\n")
+}
+```
+
+# Global Characterization {.tabset .tabset-fade}
+
+Large functional layers (UCR cores/flanks, FUBAR positive/purifying sites) are too
+big to rank as ordinary sets, so they are characterised with a **hypergeometric /
+Fisher overlap**: are the top-scoring CAAS positions enriched (or depleted) inside
+each layer, relative to the whole position universe? Foreground = the top 10 / 5 /
+1 % of scored positions by global `CAAS_score`. `fold > 1` = enriched, `< 1` =
+depleted; stars mark Fisher significance (`* p<0.05, ** p<0.01, *** p<0.001`).
+
+```{r characterization, echo=FALSE, results='asis', fig.height=4}
+if (is.null(char)) {
+  cat("_No characterization layers were available._\n\n")
+} else {
+  char <- char %>%
+    mutate(group = ifelse(grepl("^UCR", layer), "UCR",
+                   ifelse(grepl("^FUBAR", layer), "Selection", "Other")),
+           log2fold = log2(pmax(fold_enrichment, 1e-6)),
+           star = sig_stars(p_adj))
+  for (grp in c("UCR", "Selection")) {
+    g_df <- char %>% filter(group == grp)
+    if (nrow(g_df) == 0) next
+    cat(sprintf("\n## %s {.tabset}\n\n", grp))
+    for (tf in sort(unique(g_df$top_frac))) {
+      cat(sprintf("\n### Top %s%% {.tabset}\n\n", format(100 * tf)))
+      tf_df <- g_df %>% filter(top_frac == tf) %>%
+        arrange(p_adj)
+      tab <- tf_df %>%
+        transmute(Layer = layer, Description = description,
+                  `Layer size` = layer_size, `Foreground` = foreground_size,
+                  Observed = observed, Expected = round(expected, 1),
+                  `Fold` = round(fold_enrichment, 3),
+                  Direction = direction,
+                  `p (Fisher)` = signif(p_value, 3),
+                  `p.adj` = signif(p_adj, 3), Sig = star)
+      print(kbl_html(tab))
+      cat("\n\n")
+      p <- ggplot(tf_df, aes(x = reorder(layer, log2fold), y = log2fold,
+                             fill = direction)) +
+        geom_col() +
+        geom_text(aes(label = star), vjust = ifelse(tf_df$log2fold >= 0, -0.2, 1.1)) +
+        geom_hline(yintercept = 0, linewidth = 0.3) +
+        scale_fill_manual(values = c(enriched = "#c0392b", depleted = "#2c7fb8")) +
+        coord_flip() +
+        labs(x = NULL, y = expression(log[2]~fold~enrichment),
+             title = sprintf("%s — top %s%% CAAS foreground", grp, format(100 * tf))) +
+        theme_minimal(base_size = 12)
+      print(p)
+      cat("\n\n")
+    }
+  }
+}
+```
+
+# Enriched position sets {.tabset .tabset-fade}
+
+XL-mHG enrichment per direction and database. `fold` and `leading edge` are taken
+at the mHG optimal cutoff; `n scored` is how many of the set's positions carry any
+CAAS signal, and `top 10/5/1%` how many sit in the top tiers of the score
+distribution.
+
+```{r enriched, echo=FALSE, results='asis'}
+if (!has_res) {
+  cat("_No results._\n\n")
+} else {
+  for (rk in unique(res$ranking)) {
+    cat(sprintf("\n## %s {.tabset}\n\n", toupper(rk)))
+    rk_df <- res %>% filter(ranking == rk)
+    for (db in unique(rk_df$database)) {
+      cat(sprintf("\n### %s\n\n", db))
+      db_df <- rk_df %>% filter(database == db) %>%
+        arrange(p_adj, pval) %>%
+        transmute(Pathway = pathway, Description = description,
+                  Fold = round(fold, 3), Cutoff = cutoff,
+                  `p (mHG)` = signif(pval, 3), `p.adj` = signif(p_adj, 3),
+                  N = set_size,
+                  `n scored` = n_scored_members, `LE` = leading_edge_size,
+                  `LE genes` = n_le_genes,
+                  `top10` = n_top10, `top5` = n_top5, `top1` = n_top1)
+      id <- paste("dt", rk, db, sep = "_")
+      cat(knitr::knit_child(text = c(
+        paste0("```{r ", id, ", echo=FALSE}"),
+        "DT::datatable(db_df, options = list(pageLength = 10, scrollX = TRUE), rownames = FALSE)",
+        "```"), envir = environment(), quiet = TRUE))
+      cat("\n\n")
+    }
+  }
+}
+```
+
+# Enrichment dotplots {.tabset .tabset-fade}
+
+Each point is a position set: x = log2 fold at the mHG peak, y = −log10 `p.adj`,
+size = leading-edge size. Red points are significant at `p.adj < `r PADJ``
+(the dashed line).
+
+```{r dotplots, echo=FALSE, results='asis', fig.height=5}
+if (!has_res) {
+  cat("_No results._\n\n")
+} else {
+  for (rk in unique(res$ranking)) {
+    cat(sprintf("\n## %s {.tabset}\n\n", toupper(rk)))
+    rk_df <- res %>% filter(ranking == rk)
+    for (db in unique(rk_df$database)) {
+      cat(sprintf("\n### %s\n\n", db))
+      d <- rk_df %>% filter(database == db, !is.na(fold), fold > 0) %>%
+        mutate(l2f = log2(fold), neglogp = -log10(pmax(p_adj, 1e-300)))
+      if (nrow(d) == 0) { cat("_No plottable sets._\n\n"); next }
+      d$sig <- d$p_adj < PADJ
+      col_name <- sprintf("p.adj < %.3g", PADJ)
+      lab <- d %>% arrange(p_adj) %>% head(8)
+      p <- ggplot(d, aes(l2f, neglogp)) +
+        geom_hline(yintercept = -log10(PADJ), linetype = "dashed", colour = "grey50") +
+        geom_vline(xintercept = 0, linewidth = 0.3, colour = "grey70") +
+        geom_point(aes(size = leading_edge_size, colour = sig), alpha = 0.75) +
+        ggrepel::geom_text_repel(data = lab, aes(label = pathway), size = 3, max.overlaps = 12) +
+        scale_colour_manual(values = c(`FALSE` = "grey55", `TRUE` = "#c0392b"),
+                            name = col_name) +
+        scale_size_continuous(name = "leading edge") +
+        labs(x = expression(log[2]~fold), y = expression(-log[10]~p.adj),
+             title = sprintf("%s — %s", toupper(rk), db)) +
+        theme_minimal(base_size = 12)
+      print(p)
+      cat("\n\n")
+    }
+  }
+}
+```
+
+# Leading-edge composition {.tabset .tabset-fade}
+
+For the significant sets (`p.adj < `r PADJ``), what fraction of their positions sit
+in the top **10 / 5 / 1 %** of the CAAS-score distribution (the scoring module's
+percentile convention). High top-1% fractions flag sets driven by a few very
+strong residues. **`LE genes`** is the number of *distinct genes* in the leading
+edge — a low value (1–2) means the enrichment is carried by within-gene clumping
+rather than a broad signal (the non-independence a permutation null would guard
+against; here it is surfaced directly instead — see Methods).
+
+```{r leadingedge, echo=FALSE, results='asis'}
+if (!has_res) {
+  cat("_No results._\n\n")
+} else {
+  for (rk in unique(res$ranking)) {
+    le <- res %>% filter(ranking == rk, p_adj < PADJ, set_size > 0)
+    cat(sprintf("\n## %s {.tabset}\n\n", toupper(rk)))
+    if (nrow(le) == 0) { cat("_No sets pass p.adj._\n\n"); next }
+    for (db in unique(le$database)) {
+      cat(sprintf("\n### %s\n\n", db))
+      db_le <- le %>% filter(database == db) %>%
+        arrange(p_adj) %>%
+        transmute(Pathway = pathway, N = set_size,
+                  `n scored` = n_scored_members,
+                  `LE` = leading_edge_size, `LE genes` = n_le_genes,
+                  `% top10` = round(100 * n_top10 / set_size, 1),
+                  `% top5`  = round(100 * n_top5  / set_size, 1),
+                  `% top1`  = round(100 * n_top1  / set_size, 1),
+                  `p.adj` = signif(p_adj, 3))
+      print(kbl_html(db_le))
+      cat("\n\n")
+    }
+  }
+}
+```
+
+# Methods
+
+- **Test**: XL-mHG (`xlmhglite`), positions ranked by `CAAS_score` (scoring
+  module `position_scores.tsv`), separately for the **global / top / bottom**
+  directions (`change_side`). `X = ` the `--posenrich_min_overlap` parameter
+  (minimum set members above the cutoff; ≥2 neutralises one-hit-wonders); `L =`
+  the scored region.
+- **Background**: the honest testable position universe — all non-gapped
+  ("selected") alignment columns of the cleaned-background genes.
+- **`p.adj`**: BH-adjusted exact XL-mHG p-value, per direction × database. This is
+  the **only** significance used here — the exact XL-mHG p already corrects the
+  cutoff-optimisation, so no permulation is applied.
+- **No permulation (`p.perm`) at position level.** The CAAS permulation null is a
+  *naive random relabeling*: when the phenotype is permuted, the fg/bg species are
+  paired at **random across the tree**, not as the observed **matched sister
+  pairs** — so pair MRCAs are deep and the ASR path-score's isolation/independence
+  geometry differs from the observed. That null therefore tests "phenotype + a
+  broken matched-pair design" jointly rather than isolating the phenotype, and it
+  is anti-conservative on the MRCA axes. (For a rank-based enrichment the offset
+  is roughly constant across positions and largely cancels — but rather than lean
+  on that, POSENRICH simply uses the exact analytic `p.adj`.) `LE genes` flags the
+  within-gene clumping a null would otherwise guard against. The **gene-level FCS**
+  still uses `p.perm`; see its report for the same pairing caveat.
+- **Characterization**: Fisher's exact overlap of the top 10/5/1% scored
+  positions against each global layer (UCR core/flank, FUBAR positive/purifying).
+
+*Report generated `r Sys.time()`.*
+```

@@ -65,7 +65,7 @@ if (!exists("params")) {
 assign("params", params, envir = .GlobalEnv)
 
 # Call the setup function from commons.R
-source("./obj/commons.R")
+source("./src/commons.R")
 setup_rmd()
 
 # Load necessary libraries

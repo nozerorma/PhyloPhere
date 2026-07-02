@@ -67,15 +67,9 @@ process SCORING_COMPUTE {
     path "pos_threshold_enrichment.tsv",              optional: true, emit: pos_threshold_enrichment
 
     script:
-    def local_dir       = "${baseDir}/subworkflows/SCORING/local"
+    def local_dir       = "${baseDir}/subworkflows/SCORING/local/src"
     def top_pct         = params.scoring_position_top_pct    ?: 0.10
-    def top25_pct       = params.scoring_position_top25_pct  ?: 0.25
-    def top5_pct        = params.scoring_position_top5_pct   ?: 0.05
-    def top1_pct        = params.scoring_position_top1_pct   ?: 0.01
     def g_top_pct       = params.scoring_gene_top_pct        ?: 0.10
-    def g_top25_pct     = params.scoring_gene_top25_pct      ?: 0.25
-    def g_top5_pct      = params.scoring_gene_top5_pct       ?: 0.05
-    def g_top1_pct      = params.scoring_gene_top1_pct       ?: 0.01
     def accum_arg         = (accum_files instanceof List
                               ? (accum_files.size() == 1 && accum_files[0].name.startsWith('NO_') ? 'NO_ACCUM' : '.')
                               : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
@@ -97,13 +91,13 @@ process SCORING_COMPUTE {
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
-            --top25_pct            ${top25_pct} \
-            --top5_pct             ${top5_pct} \
-            --top1_pct             ${top1_pct} \
+            --top25_pct            0.25 \
+            --top5_pct             0.05 \
+            --top1_pct             0.01 \
             --gene_top_pct         ${g_top_pct} \
-            --gene_top25_pct       ${g_top25_pct} \
-            --gene_top5_pct        ${g_top5_pct} \
-            --gene_top1_pct        ${g_top1_pct}
+            --gene_top25_pct       0.25 \
+            --gene_top5_pct        0.05 \
+            --gene_top1_pct        0.01
         """
     } else {
         """
@@ -120,13 +114,13 @@ process SCORING_COMPUTE {
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
-            --top25_pct            ${top25_pct} \
-            --top5_pct             ${top5_pct} \
-            --top1_pct             ${top1_pct} \
+            --top25_pct            0.25 \
+            --top5_pct             0.05 \
+            --top1_pct             0.01 \
             --gene_top_pct         ${g_top_pct} \
-            --gene_top25_pct       ${g_top25_pct} \
-            --gene_top5_pct        ${g_top5_pct} \
-            --gene_top1_pct        ${g_top1_pct}
+            --gene_top25_pct       0.25 \
+            --gene_top5_pct        0.05 \
+            --gene_top1_pct        0.01
         """
     }
 }

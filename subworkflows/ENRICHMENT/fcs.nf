@@ -46,7 +46,7 @@ process SCORING_FCS_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def traitname = params.traitname ?: 'unknown_trait'
-    def gmt_dir   = "${baseDir}/subworkflows/ENRICHMENT/dat"
+    def gmt_dir   = params.gmt_dir
     def num_g     = fcs_num_g()
     def fdr_thr   = fcs_fdr()
     def pperm_thr = fcs_pperm()
@@ -111,7 +111,7 @@ process TOOL_FCS_REPORT {
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
-    def gmt_dir   = "${baseDir}/subworkflows/ENRICHMENT/dat"
+    def gmt_dir   = params.gmt_dir
     def num_g     = fcs_num_g()
     def fdr_thr   = fcs_fdr()
     def pperm_thr = fcs_pperm()
@@ -178,7 +178,7 @@ process RER_FCS_REPORT {
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
-    def gmt_dir   = "${baseDir}/subworkflows/ENRICHMENT/dat"
+    def gmt_dir   = params.gmt_dir
     def num_g     = fcs_num_g()
     def fdr_thr   = fcs_fdr()
     def pperm_thr = fcs_pperm()

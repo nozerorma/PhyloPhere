@@ -25,7 +25,7 @@ process EXTRACT_EXTREME_SPECIES {
     path "bottom_species.txt", emit: bottom_species
 
     script:
-    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local/src"
     if (params.use_singularity || params.use_apptainer) {
         """
         /usr/local/bin/_entrypoint.sh python ${local_dir}/extract_extreme_species.py \
@@ -98,7 +98,7 @@ process FILTER_FASTA_TO_TREE {
     tuple val(gene_id), val(direction), path("${gene_id}.${direction}.tree_filtered.fa"), emit: fasta
 
     script:
-    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local/src"
     def pyBin = (params.use_singularity || params.use_apptainer)
         ? '/usr/local/bin/_entrypoint.sh python'
         : 'python'
@@ -132,7 +132,7 @@ process ANNOTATE_TREE_FG {
     tuple val(gene_id), val(direction), path("${gene_id}_${direction}.fa"),     emit: filtered_fasta, optional: true
 
     script:
-    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local/src"
     if (params.use_singularity || params.use_apptainer) {
         """
         /usr/local/bin/_entrypoint.sh python ${local_dir}/annotate_tree_fg.py \
@@ -184,15 +184,14 @@ process ANNOTATE_TREE_FG_BATCHED {
     path "*.fa",                emit: filtered_fastas, optional: true
 
     script:
-    def local_dir = "${baseDir}/subworkflows/SELECTION/local"
-    def script_dir = "${baseDir}/subworkflows/SELECTION/local/scripts"
+    def local_dir = "${baseDir}/subworkflows/SELECTION/local/src"
     def workers = params.fade_batch_workers ?: 4
     def runnerMode = (params.use_singularity || params.use_apptainer) ? "container" : "local"
     """
     cat <<'MANIFEST_EOF' > ${batchID}.manifest.tsv
 ${manifestText}MANIFEST_EOF
 
-    bash ${script_dir}/run_annotate_tree_fg_batch.sh \\
+    bash ${local_dir}/run_annotate_tree_fg_batch.sh \\
         --batch-id    "${batchID}" \\
         --manifest    "${batchID}.manifest.tsv" \\
         --workers     "${workers}" \\
@@ -226,7 +225,7 @@ process COLLECT_GENE_SETS {
     path "gene_set_bottom.txt", emit: gene_set_bottom
 
     script:
-    def local_dir  = "${baseDir}/subworkflows/SELECTION/local"
+    def local_dir  = "${baseDir}/subworkflows/SELECTION/local/src"
     // Build optional source arguments (only pass a file if it was actually staged)
     def pp_top_arg     = pp_top.name     != 'NO_FILE' ? "--postproc_top        pp_top.txt"     : ""
     def pp_bottom_arg  = pp_bottom.name  != 'NO_FILE' ? "--postproc_bottom     pp_bottom.txt"  : ""

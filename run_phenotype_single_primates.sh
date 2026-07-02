@@ -14,17 +14,18 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 timestamp=$(date +%Y%m%d_%H%M%S)
 
 # --- CLUSTER / ENVIRONMENT CONFIGURATION ---
-DATADIR="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data"
-CAAS_OUTBASE="/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/2.Primates_results/CAAS_RESULTS/final"
-WORK_BASE="/data/samanthafs/scratch/lab_anavarro/mramon/3.Work_dirs_new"
-ASR_CACHE_DIR="${DATADIR}/asr"
+DATADIR="/homes/users/mramon/scratch/2.Primates/1.Primates_data"
+CAAS_OUTBASE="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final"
+WORK_BASE="/homes/users/mramon/scratch/3.Work_dirs_new"
+ASR_CACHE_DIR="${ASR_CACHE_DIR:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/7.ASR_primates}"
 
 TRAIT_FILE="${DATADIR}/1.Cancer_data/Neoplasia_species360/cancer_traits_processed-LQ.csv"
 TREE_FILE="${DATADIR}/5.Phylogeny/science.abn7829_data_s4.nex.tree"
 PRUNE_DIR="${DATADIR}/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP"
 SIMPLE_TRAIT_FILE="${DATADIR}/maria_caas/Datos_fenotipos/diet_traitfile_comma.csv"
-ALI_SP_NAMES="${ALI_SP_NAMES:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/results_ppga/20260615_200027/ali_sp_names.txt}"
-INPUT_TAX_ID="${INPUT_TAX_ID:-/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family_primates.tsv}"
+ALI_SP_NAMES="${ALI_SP_NAMES:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ali_sp_names.txt}"
+INPUT_TAX_ID="${INPUT_TAX_ID:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family_primates.tsv}"
+
 
 # --- ENV ACTIVATION ---
 source ~/.bashrc
@@ -51,7 +52,7 @@ if [ "$IS_TOY" = true ]; then
     CAAS_FULL_PERMS="100"
 else
     TAG=""
-    ALI_DIR="/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge"
+    ALI_DIR="/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge"
     CYCLES="1000000"
     N_RANDOMIZATIONS="1000000"
     CAAS_FULL_PERMS="${CAAS_FULL_PERMS:-1000}"
@@ -114,7 +115,7 @@ NF_FLAGS=(
 if [ "${RUN_RER:-true}" = true ]; then
     NF_FLAGS+=(
         --rer_tool "${RER_TOOL:-build_trait,build_tree,build_matrix,continuous}"
-        --gene_trees "${GENE_TREES:-/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
+        --gene_trees "${GENE_TREES:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt}"
         --rer_perm_batches "${RER_PERM_BATCHES:-10}"
         --rer_perms_per_batch "${RER_PERMS_PER_BATCH:-100}"
     )
@@ -132,7 +133,25 @@ fi
 if [ "${RUN_VEP:-true}" = true ]; then
     NF_FLAGS+=(
         --vep
-        --vep_map_dir "${MAP_DIR:-/data/samanthafs/scratch/lab_anavarro/mramon/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP}"
+        --vep_map_dir "${MAP_DIR:-/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP}"
+    )
+fi
+
+# POSENRICH (position-wise enrichment) flags
+if [ "${RUN_POSENRICH:-true}" = true ]; then
+    NF_FLAGS+=(
+        --posenrich
+        --egg_members_file "${EGG_MEMBERS_FILE:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv}"
+        --egg_annotations_file "${EGG_ANNOTATIONS_FILE:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv}"
+        --cosmic_db "${COSMIC_DB:-${REPO_DIR}/to_integrate/Cosmic_MutantCensus_v104_GRCh38.tsv.gz}"
+    )
+fi
+
+# Enrichment Flags
+if [ "${RUN_ENRICHMENT:-true}" = true ]; then
+    NF_FLAGS+=(
+        --enrichment
+        --gmt_dir "${GMT_DIR:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/GMTs}"
     )
 fi
 
@@ -141,7 +160,7 @@ if [ "${RUN_SCORING:-true}" = true ]; then
     NF_FLAGS+=(
         --scoring
         --scoring_window_size_bp "${SCORING_WINDOW_SIZE_BP:-1000000}"
-        --gene_ensembl_file "${GENE_ENSEMBL_FILE:-/data/samanthafs/scratch/lab_anavarro/mramon/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output}"
+        --gene_ensembl_file "${GENE_ENSEMBL_FILE:-/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output}"
     )
     if [ "${RUN_SCORING_STRESS:-true}" = true ]; then
         NF_FLAGS+=(--scoring_stress)

@@ -86,11 +86,24 @@ class WorkflowMap {
 
         def htmlCandidates = (st.htmlCandidates ?: []) as List
         def htmlRows = htmlCandidates ? htmlCandidates.collect { ht ->
-            def exists = new File(ht.toString()).exists()
+            def file = new File(ht.toString())
+            def exists = file.exists()
+            def targetPath = ht.toString()
+            if (!exists) {
+                def parent = file.parentFile
+                if (parent && parent.exists()) {
+                    def base = file.name.replace(".html", "")
+                    def matching = parent.listFiles().find { it.name.startsWith(base) && it.name.endsWith(".html") }
+                    if (matching) {
+                        exists = true
+                        targetPath = matching.absolutePath
+                    }
+                }
+            }
             def label  = exists ? 'available' : 'MISSING'
-            def href   = relativeFromOutdir(outdir, ht.toString())
-            def text   = relativeFromOutdir(outdir, ht.toString())
-            return "<div class=\"link-row\">\u2192 html: <a href=\"${href}\">${htmlEscape(text)}</a> <span class=\"status ${exists ? 'ok' : 'missing'}\">${label}</span></div>"
+            def href   = relativeFromOutdir(outdir, targetPath)
+            def text   = relativeFromOutdir(outdir, targetPath)
+            return "<div class=\"link-row\">→ html: <a href=\"${href}\">${htmlEscape(text)}</a> <span class=\"status ${exists ? 'ok' : 'missing'}\">${label}</span></div>"
         }.join('\n') : ''
 
         def filesRows = filesDirs ? filesDirs.collect { fd ->
@@ -186,7 +199,7 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/html_reports/accumulation_report.html"] ],
 
             [ id: 'vep',         name: 'VEP characterization',            type: 'prepost',   ran: ctx.vep,
-              filesDirs: ["${outdir}/characterization/vep"],
+              filesDirs: ["${outdir}/vep"],
               htmlCandidates: [] ],
 
             [ id: 'rer',         name: 'RERconverge (RER)',               type: 'processes', ran: ctx.rer,
@@ -210,12 +223,17 @@ class WorkflowMap {
                           "${outdir}/scoring/gene_lists/position",
                           "${outdir}/scoring/gene_lists/gene",
                           "${outdir}/scoring/overlap"],
-              htmlCandidates: ["${outdir}/html_reports/SCORING_report.html"] ]
+              htmlCandidates: ["${outdir}/html_reports/SCORING_report.html"] ],
+
+            [ id: 'posenrich', name: 'Position Enrichment',              type: 'reporting', ran: ctx.posenrich,
+              filesDirs: ["${outdir}/posenrich",
+                          "${outdir}/posenrich/gmts"],
+              htmlCandidates: ["${outdir}/html_reports/POSENRICH_report.html"] ]
 
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','asr_robustness','ct_postproc','enrichment','ct_acc','vep','rer','fade','scoring']
+                        'ct_disambig','asr_robustness','ct_postproc','enrichment','ct_acc','vep','rer','fade','scoring','posenrich']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -348,7 +366,7 @@ class WorkflowMap {
         'ct_postproc': ['postproc', 'postproc/preprocessed'],
         'enrichment': ['enrichment_excluded'],
         'ct_acc': ['accumulation', 'accumulation/aggregation'],
-        'vep': ['characterization/vep'],
+        'vep': ['vep'],
         'rer': ['rerconverge', 'rerconverge/rer_results'],
         'fade': ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
         'scoring': ['scoring']
@@ -493,10 +511,11 @@ class WorkflowMap {
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
             enrichment   : ['enrichment_excluded'],
             ct_acc       : ['accumulation', 'accumulation/aggregation'],
-            vep          : ['characterization/vep'],
+            vep          : ['vep'],
             rer          : ['rerconverge', 'rerconverge/rer_results'],
             fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
-            scoring      : ['scoring']
+            scoring      : ['scoring'],
+            posenrich    : ['posenrich']
         ]
     }
 
@@ -565,7 +584,8 @@ class WorkflowMap {
             vep           : scanResults.vep ?: false,
             rer           : scanResults.rer ?: false,
             fade          : scanResults.fade ?: false,
-            scoring       : scanResults.scoring ?: false
+            scoring       : scanResults.scoring ?: false,
+            posenrich     : scanResults.posenrich ?: false
         ]
     }
 }

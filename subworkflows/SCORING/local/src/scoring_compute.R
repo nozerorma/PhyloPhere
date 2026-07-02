@@ -16,11 +16,7 @@
 #     --rer           <rerconverge_summary.tsv> \
 #     --accum_dir     <directory_with_accumulation_CSVs> \
 #     --top_pct    0.10 \
-#     --top5_pct   0.05 \
-#     --top1_pct   0.01 \
 #     --gene_top_pct  0.10 \
-#     --gene_top5_pct 0.05 \
-#     --gene_top1_pct 0.01 \
 #     --stress        false \
 #     --stress_top_n  25 \
 #
@@ -59,11 +55,13 @@ accum_dir            <- parse_arg("--accum_dir")
 stress_enabled_raw        <- parse_arg("--stress", "false")
 stress_top_n              <- as.integer(parse_arg("--stress_top_n", "25"))
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
-top5_pct          <- as.numeric(parse_arg("--top5_pct", "0.05"))
-top1_pct          <- as.numeric(parse_arg("--top1_pct", "0.01"))
+top25_pct         <- 0.25
+top5_pct          <- 0.05
+top1_pct          <- 0.01
 gene_top_pct      <- as.numeric(parse_arg("--gene_top_pct",  "0.10"))
-gene_top5_pct     <- as.numeric(parse_arg("--gene_top5_pct", "0.05"))
-gene_top1_pct     <- as.numeric(parse_arg("--gene_top1_pct", "0.01"))
+gene_top25_pct    <- 0.25
+gene_top5_pct     <- 0.05
+gene_top1_pct     <- 0.01
 stress_enabled        <- tolower(as.character(stress_enabled_raw)) %in% c("true", "1", "yes")
 if (!is.finite(stress_top_n)      || is.na(stress_top_n)      || stress_top_n < 1)  stress_top_n      <- 25
 # direction removed: scoring always runs on the full postproc pool.

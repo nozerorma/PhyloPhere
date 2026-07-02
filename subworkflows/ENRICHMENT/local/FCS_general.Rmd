@@ -44,9 +44,9 @@ mutate <- dplyr::mutate; arrange <- dplyr::arrange
 
 this_dir <- tryCatch(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)),
                      error = function(e) ".")
-src_candidates <- c(file.path(this_dir, "fcs_enrich.R"), "fcs_enrich.R")
+src_candidates <- c(file.path(this_dir, "src", "fcs_enrich.R"), "src/fcs_enrich.R", file.path(this_dir, "fcs_enrich.R"), "fcs_enrich.R")
 src <- src_candidates[file.exists(src_candidates)][1]
-if (is.na(src)) stop("fcs_enrich.R not found next to FCS_general.Rmd")
+if (is.na(src)) stop("fcs_enrich.R not found under src/ or next to FCS_general.Rmd")
 suppressMessages(invisible(capture.output(source(src))))
 
 kbl_html <- function(df, height = NULL) {
@@ -163,6 +163,19 @@ readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
 #   value indicates the BH significance is driven by the phenotype, not other
 #   correlation in the data. Where no permulations exist (perms_file = NO_FILE), the
 #   permulation clause is vacuous and significance falls back to the BH cutoff alone.
+#
+#   CAVEAT — read p.perm as "beyond a NAIVE random relabeling". The CAAS
+#   permulation null permutes the phenotype without preserving the observed
+#   matched-sister-pair design: the permuted fg/bg species are paired at RANDOM
+#   across the tree, so pair MRCAs are deep and the ASR path-score's
+#   isolation/independence geometry differs from the observed (which uses shallow
+#   matched pairs). We cannot preserve matched pairs under permutation — a random
+#   labeling almost never yields N independent matched contrasts — so this is by
+#   design; the up-side is a homogeneous, well-defined null. But it means p.perm
+#   tests "phenotype + matched-pair design" jointly (mildly anti-conservative on
+#   the MRCA axes), not the phenotype in isolation. A within-pair fg/bg swap would
+#   isolate the phenotype but only spans 2^n labelings (too coarse unless n is
+#   large). See docs / scoring_caas_perms.R.
 enrich <- enrich %>% dplyr::mutate(
   sig = stat > 0 & !is.na(p.adj) & p.adj < params$fdr_thr &
         (is.na(p.perm) | p.perm < params$pperm_thr)
