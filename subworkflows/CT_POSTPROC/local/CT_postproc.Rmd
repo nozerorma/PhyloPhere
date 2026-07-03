@@ -291,15 +291,15 @@ resolve_filtered_cluster_file <- function(minlen, maxcaas_int, filter_root = NUL
 }
 
 normalize_disambig_schema <- function(df) {
-  # Two distinct concepts that used to share the "pattern" name:
-  #  * the DISAMBIGUATION convergence label (convergent_top/divergent_bottom/…),
-  #    formerly the lowercase `pattern_type` column, now `convergence_type`;
-  #  * the CAAS-DISCOVERY contrast index (the capitalised metadata `Pattern`),
-  #    which stays its own concept, normalised to lowercase `pattern_type`.
-  # The case difference (lowercase pattern_type vs capital Pattern) disambiguates
-  # them cleanly, so a df can carry both without collision.
+  # This normalises the DISAMBIGUATION output, whose convergence label was renamed
+  # pattern_type -> convergence_type; accept the old lowercase `pattern_type` name.
+  # NOTE: the CAAS-discovery cardinal contrast index (`pattern` in disco.py, capital
+  # `Pattern` in meta_caas) is a DIFFERENT concept and is dropped before
+  # disambiguation, so it does not reach here — we deliberately do NOT fold `Pattern`
+  # into pattern_type/convergence_type (that was a prior conflation). If a cardinal
+  # column ever appears, keep it lowercased as its own `pattern` column.
   if ('pattern_type' %in% names(df) && !'convergence_type' %in% names(df)) df <- df %>% rename(convergence_type = pattern_type)
-  if ('Pattern' %in% names(df) && !'pattern_type' %in% names(df)) df <- df %>% rename(pattern_type = Pattern)
+  if ('Pattern' %in% names(df) && !'pattern' %in% names(df)) df <- df %>% rename(pattern = Pattern)
   if ('pvalue.boot' %in% names(df) && !'pvalue_boot' %in% names(df)) df <- df %>% rename(pvalue_boot = `pvalue.boot`)
   if ('ChangeSide' %in% names(df) && !'change_side' %in% names(df)) df <- df %>% rename(change_side = ChangeSide)
   if ('ChangeTop' %in% names(df) && !'change_top' %in% names(df)) df <- df %>% rename(change_top = ChangeTop)
