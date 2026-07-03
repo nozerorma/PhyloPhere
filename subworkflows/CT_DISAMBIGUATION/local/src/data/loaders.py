@@ -79,6 +79,7 @@ Date
 """
 
 import csv
+import io
 import logging
 from collections import defaultdict
 from pathlib import Path
@@ -136,6 +137,41 @@ def _parse_conserved_pair(raw: str) -> str:
 # -- Functions for CAAS Metadata Loading and Parsing --#
 
 
+def _stream_gene_filtered(
+    metadata_file: Path, sep: str, gene: str
+) -> Optional[str]:
+    """Return ``header + only the rows for ``gene`` as a text buffer, or None.
+
+    Streams the file line-by-line with a cheap substring prefilter, splitting and
+    exact-matching only candidate lines. Matches on the ``Gene`` column if present,
+    else on the ``GenePos`` ``"{gene}_"`` prefix — mirroring the post-read gene
+    filter in :func:`read_caas_metadata_table`. Returns None (caller falls back to a
+    full parse) if neither key column is in the header, so behaviour degrades safely.
+    """
+    with open(metadata_file, "r") as fh:
+        header = fh.readline()
+        if not header:
+            return None
+        cols = header.rstrip("\n").split(sep)
+        gene_idx = cols.index("Gene") if "Gene" in cols else None
+        gp_idx = cols.index("GenePos") if "GenePos" in cols else None
+        if gene_idx is None and gp_idx is None:
+            return None  # no key column → let the caller parse the whole file
+        prefix = f"{gene}_"
+        parts_out = [header]
+        for line in fh:
+            if gene not in line:  # C-level superset guard: no false negatives
+                continue
+            parts = line.rstrip("\n").split(sep)
+            if gene_idx is not None and gene_idx < len(parts):
+                if parts[gene_idx] == gene:
+                    parts_out.append(line)
+            elif gp_idx is not None and gp_idx < len(parts):
+                if parts[gp_idx].startswith(prefix):
+                    parts_out.append(line)
+    return "".join(parts_out)
+
+
 def read_caas_metadata_table(
     metadata_file: Path, gene_name: Optional[str] = None
 ) -> pd.DataFrame:
@@ -157,7 +193,20 @@ def read_caas_metadata_table(
         with open(metadata_file, "r") as _fh:
             _header = _fh.readline()
         sep = "\t" if "\t" in _header else ","
-        df = pd.read_csv(metadata_file, sep=sep)
+
+        # Gene-filtered fast path: the permulation cycle metadata is genome-wide
+        # (~150k rows, all genes), and every per-gene worker × cycle would otherwise
+        # pandas-parse the WHOLE file just to keep one gene's ~hundreds of rows. Stream
+        # the header + only the matching lines and hand that small buffer to pandas —
+        # same rows, same dtypes-on-the-kept-subset, ~7× faster. The substring
+        # prefilter is a pure superset guard (a row with Gene==gene necessarily
+        # contains the token, so no false negatives); the exact column check below
+        # drops false positives (e.g. "A2M" matching an "A2ML1" line).
+        buf = _stream_gene_filtered(metadata_file, sep, gene_name) if gene_name else None
+        if buf is not None:
+            df = pd.read_csv(io.StringIO(buf), sep=sep)
+        else:
+            df = pd.read_csv(metadata_file, sep=sep)
     except Exception as e:
         raise ValueError(f"Error reading CAAS metadata file: {e}") from e
 
@@ -232,8 +281,19 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
     logger.info(f"Loading CAAS entries for {gene} from {caas_metadata_path}")
     df = read_caas_metadata_table(caas_metadata_path, gene)
 
+    def _b(v: Any) -> bool:
+        if isinstance(v, bool):
+            return v
+        if v is None:
+            return False
+        return str(v).strip().lower() in {"true", "1", "yes", "y"}
+
     entries: List[CAASPosition] = []
-    for _, row in df.iterrows():
+    # ``to_dict("records")`` once is far cheaper than ``iterrows()`` + per-column
+    # ``Series.__getitem__``/``.get`` (each of which builds/searches a Series). The
+    # dict values are the same typed cell values, so ``pd.notna`` and membership
+    # checks behave identically — bit-for-bit same entries, less pandas overhead.
+    for row in df.to_dict("records"):
         gene_pos = str(row.get("GenePos", ""))
         _, pos0 = _parse_gene_pos_token(gene_pos)
         if pos0 is None:
@@ -251,13 +311,6 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
         trait1 = normalize_amino_list(list(parts[0])) if len(parts) == 2 else []
         trait0 = normalize_amino_list(list(parts[1])) if len(parts) == 2 else []
 
-        def _b(v: Any) -> bool:
-            if isinstance(v, bool):
-                return v
-            if v is None:
-                return False
-            return str(v).strip().lower() in {"true", "1", "yes", "y"}
-
         entry = CAASPosition(
             position=pos0,
             position_one_based=pos0 + 1,
@@ -267,12 +320,12 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             trait0_aa=trait0,
             pvalue=(
                 float(row["pvalue"])
-                if "pvalue" in row.index and pd.notna(row["pvalue"])
+                if "pvalue" in row and pd.notna(row["pvalue"])
                 else None
             ),
             pvalue_boot=(
                 float(row["pvalue_boot"])
-                if "pvalue_boot" in row.index and pd.notna(row["pvalue_boot"])
+                if "pvalue_boot" in row and pd.notna(row["pvalue_boot"])
                 else None
             ),
             is_significant=_b(row.get("is_significant")),

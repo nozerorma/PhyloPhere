@@ -32,7 +32,7 @@ from src.asr.asr_single import (
 
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
 from src.utils.concurrency import plan_concurrency, init_worker, codeml_slot
-from src.data.loaders import list_gene_caas_positions
+from src.data.loaders import list_gene_caas_positions, list_gene_caas_entries
 from src.utils.io_utils import find_gene_alignment
 
 from src.utils.disambiguation_db import (
@@ -1033,6 +1033,21 @@ def _perms_worker(
         node_posteriors = ctx["node_posteriors"]
         full_posteriors = getattr(node_posteriors, "posteriors_node", None)
 
+        # Reduced per-position kernel: compute ONLY the asr_path_score axes the perm
+        # null keeps, skipping the scorer body the null discards (redundant per-node
+        # map rebuild + 40-field ConvergenceResult assembly). Combined with the site
+        # cache below this is a ~5x compute speedup on the disambiguation itself.
+        # On by default; export CAAS_PERMS_AXES_ONLY=0 to fall back to the full path
+        # (mirrors the boot-vectorization export guard).
+        axes_only = os.environ.get("CAAS_PERMS_AXES_ONLY", "1") not in ("0", "false", "False")
+
+        # per_node_dist for a site depends only on (ASR posteriors, site) — invariant
+        # to the grouping scheme and the permuted phenotype — so it is built once per
+        # site and reused across all schemes and all N cycles of THIS gene. This is the
+        # load-once/replay-N win: with N cycles the dominant per-node-dist build drops
+        # from O(N * rows) toward O(distinct sites). Only meaningful for axes_only.
+        per_site_dist_cache: Dict[int, Any] = {} if axes_only else None
+
         rows: List[Dict[str, Any]] = []
         for cyc in cycle_tags:
             meta_path = cycle_meta_files.get(cyc)
@@ -1040,17 +1055,22 @@ def _perms_worker(
             if not meta_path or not trait_path:
                 continue
             try:
-                caas_positions = list_gene_caas_positions(Path(meta_path), gene)
+                # Read the cycle's metadata ONCE and hand the entries to the analyzer
+                # (which otherwise re-parses the same TSV via list_gene_caas_entries).
+                # With the per-position compute now cached, this per-cycle pandas parse
+                # is the dominant remaining cost, so the duplicate read is worth removing.
+                caas_entries = list_gene_caas_entries(Path(meta_path), gene)
             except Exception:
-                caas_positions = []
-            if not caas_positions:
+                caas_entries = []
+            if not caas_entries:
                 continue
             try:
                 biochem_results, _ = analyze_gene_disambiguation(
                     gene=gene,
                     alignment_data=alignment_data,
                     tree_data=tree_data,
-                    caas_positions=caas_positions,
+                    caas_positions=[],
+                    caas_entries=caas_entries,
                     caas_metadata_path=Path(meta_path),
                     trait_file_path=Path(trait_path),
                     taxid_mapping=alignment_data.species_to_taxid,
@@ -1059,6 +1079,8 @@ def _perms_worker(
                     diagnostics_dir=None,
                     convergence_mode=convergence_mode,
                     asr_mode="precomputed",
+                    axes_only=axes_only,
+                    per_site_dist_cache=per_site_dist_cache,
                 )
             except Exception as e:
                 logger.debug(f"[perms] {gene} cycle {cyc} failed: {e}")
