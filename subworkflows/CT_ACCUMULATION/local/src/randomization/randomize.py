@@ -56,7 +56,10 @@ def _remap_caas_df(df):
 
     # Coerce conserved-state columns to bool
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
-    # pattern_type is already canonical in filtered_discovery.tsv — no remap needed.
+    # Back-compat: disambiguation renamed the convergence label pattern_type →
+    # convergence_type. Accept either as input; keep pattern_type as the internal name.
+    if 'convergence_type' in df.columns and 'pattern_type' not in df.columns:
+        df = df.rename(columns={'convergence_type': 'pattern_type'})
 
     # caap_group: normalise casing of the raw label (GS1–GS4, US)
     df['caap_group'] = df['caap_group'].astype(str).str.strip().str.upper()

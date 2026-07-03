@@ -106,9 +106,9 @@ combo_from_flags <- function(df, cols) {
 
 # The parallel_* axis was retired upstream (superseded by the continuous
 # mrca_diversity axis of the ASR path score), so the convergence label is now the
-# pattern_type alone.
-make_pattern_parallel_label <- function(pattern_type) {
-  pattern_chr <- as.character(pattern_type)
+# convergence_type alone.
+make_pattern_parallel_label <- function(convergence_type) {
+  pattern_chr <- as.character(convergence_type)
   pattern_chr[is.na(pattern_chr) | pattern_chr == ""] <- "unknown"
   pattern_chr
 }
@@ -291,7 +291,11 @@ resolve_filtered_cluster_file <- function(minlen, maxcaas_int, filter_root = NUL
 }
 
 normalize_disambig_schema <- function(df) {
-  if ('Pattern' %in% names(df) && !'pattern_type' %in% names(df)) df <- df %>% rename(pattern_type = Pattern)
+  # Back-compat: the disambiguation convergence label was renamed
+  # pattern_type -> convergence_type. Accept the new name, an old `pattern_type`
+  # column, or the CAAS-metadata `Pattern` fallback (in that precedence).
+  if ('pattern_type' %in% names(df) && !'convergence_type' %in% names(df)) df <- df %>% rename(convergence_type = pattern_type)
+  if ('Pattern' %in% names(df) && !'convergence_type' %in% names(df)) df <- df %>% rename(convergence_type = Pattern)
   if ('pvalue.boot' %in% names(df) && !'pvalue_boot' %in% names(df)) df <- df %>% rename(pvalue_boot = `pvalue.boot`)
   if ('ChangeSide' %in% names(df) && !'change_side' %in% names(df)) df <- df %>% rename(change_side = ChangeSide)
   if ('ChangeTop' %in% names(df) && !'change_top' %in% names(df)) df <- df %>% rename(change_top = ChangeTop)
@@ -299,7 +303,7 @@ normalize_disambig_schema <- function(df) {
   if ('Gene' %in% names(df) && !'gene' %in% names(df)) df <- df %>% rename(gene = Gene)
   if ('Position' %in% names(df) && !'position' %in% names(df)) df <- df %>% rename(position = Position)
   if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
-  if (!'pattern_type' %in% names(df)) df$pattern_type <- 'unknown'
+  if (!'convergence_type' %in% names(df)) df$convergence_type <- 'unknown'
   if (!'change_side' %in% names(df)) df$change_side <- 'none'
   if (!'change_top' %in% names(df)) df$change_top <- 'no_change'
   if (!'change_bottom' %in% names(df)) df$change_bottom <- 'no_change'
@@ -312,7 +316,7 @@ normalize_disambig_schema <- function(df) {
       gene = as.character(gene),
       position = suppressWarnings(as.integer(position)),
       caap_group = as.character(caap_group),
-      pattern_type = as.character(pattern_type),
+      convergence_type = as.character(convergence_type),
       change_side = tolower(as.character(change_side)),
       change_top = tolower(as.character(change_top)),
       change_bottom = tolower(as.character(change_bottom)),
@@ -438,7 +442,7 @@ discovery_std <- normalize_disambig_schema(raw_discovery)
 convergence_plot_df <- discovery_std %>%
   mutate(
     change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none"),
-    pattern_parallel = make_pattern_parallel_label(pattern_type),
+    pattern_parallel = make_pattern_parallel_label(convergence_type),
     pattern_parallel = forcats::fct_infreq(pattern_parallel)
   )
 orientation_rows <- build_orientation_rows(convergence_plot_df) %>%
@@ -450,7 +454,7 @@ discovery_df <- discovery_std %>%
     caap_group = caap_group,
     Gene = gene,
     Position = position,
-    Pattern = pattern_type,
+    Pattern = convergence_type,
     change_side,
     is_conserved_meta,
     pvalue = pvalue,
@@ -919,7 +923,7 @@ precluster_events <- tibble()
 if (!is.na(removed_precluster_file)) {
   precluster_df <- normalize_disambig_schema(read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE))
   precluster_events <- precluster_df %>% transmute(
-    site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
+    site_id, gene, position, caap_group, convergence_type, pvalue, pvalue_boot,
     change_top, change_bottom, change_side,
     sig_hyp, sig_perm, is_significant, significance_class,
     removal_stage = case_when(
@@ -936,7 +940,7 @@ if (length(cluster_files) > 0) {
   cluster_events <- discovery_std %>%
     inner_join(cluster_hits, by = c("gene", "position", "caap_group")) %>%
     transmute(
-      site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
+      site_id, gene, position, caap_group, convergence_type, pvalue, pvalue_boot,
       change_top, change_bottom, change_side,
       sig_hyp, sig_perm, is_significant, significance_class,
       removal_stage = "cluster"
@@ -960,7 +964,7 @@ if (!is.na(removed_genes_file)) {
       TRUE ~ "gene_filter"
     )) %>%
     transmute(
-      site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
+      site_id, gene, position, caap_group, convergence_type, pvalue, pvalue_boot,
       change_top, change_bottom, change_side,
       sig_hyp, sig_perm, is_significant, significance_class, removal_stage
     ) %>%
@@ -1199,14 +1203,14 @@ cat(sprintf("✓ Filter overlap tables exported (%d membership rows) → filter_
             nrow(overlap_summary)))
 ```
 
-## B.2 Removed positions by `pattern_type` and significance
+## B.2 Removed positions by `convergence_type` and significance
 
 ```{r removed_pattern_sig}
 if (nrow(removal_events) > 0) {
   removal_events_plot <- removal_events %>%
     mutate(
       change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none"),
-      pattern_parallel = make_pattern_parallel_label(pattern_type)
+      pattern_parallel = make_pattern_parallel_label(convergence_type)
     )
 
   by_pattern <- removal_events_plot %>%
@@ -1226,7 +1230,7 @@ if (nrow(removal_events) > 0) {
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     scale_y_discrete(labels = format_pattern_parallel_axis) +
     theme_minimal(base_size = 16) +
-    labs(title = "Removed positions by convergence label", x = "n", y = "convergence label (pattern_type)") +
+    labs(title = "Removed positions by convergence label", x = "n", y = "convergence label (convergence_type)") +
     theme(
       axis.text.y = element_text(size = 10, lineheight = 0.95),
       strip.text = element_text(face = "bold")
@@ -1388,22 +1392,22 @@ if (nrow(discovery_std) > 0) {
   ggsave(file.path(disambig_dir, "pvalue_removed_vs_retained_global.png"),
          p_glob, width = 12, height = 5, dpi = 160)
 
-  # ── Plot 2: same, faceted by pattern_type ───────────────────────────────────
+  # ── Plot 2: same, faceted by convergence_type ───────────────────────────────────
   pt_counts <- pval_df %>%
     filter(pval_type == "Hypothesis p-value") %>%
-    count(pattern_type, filter_status) %>%
+    count(convergence_type, filter_status) %>%
     pivot_wider(names_from = filter_status, values_from = n, values_fill = 0)
 
   pval_df_pt <- pval_df %>%
-    filter(pattern_type %in% (
+    filter(convergence_type %in% (
       pval_df %>%
         filter(pval_type == "Hypothesis p-value") %>%
-        count(pattern_type) %>%
+        count(convergence_type) %>%
         filter(n >= 5) %>%
-        pull(pattern_type)
+        pull(convergence_type)
     ))
 
-  if (nrow(pval_df_pt) > 0 && n_distinct(pval_df_pt$pattern_type) >= 1) {
+  if (nrow(pval_df_pt) > 0 && n_distinct(pval_df_pt$convergence_type) >= 1) {
     p_pt <- ggplot(pval_df_pt, aes(x = p, fill = filter_status)) +
       geom_histogram(
         aes(y = after_stat(density)),
@@ -1420,7 +1424,7 @@ if (nrow(discovery_std) > 0) {
         show.legend = TRUE,
         inherit.aes = FALSE
       ) +
-      facet_grid(pattern_type ~ pval_type, scales = "free_y") +
+      facet_grid(convergence_type ~ pval_type, scales = "free_y") +
       scale_fill_manual(values = status_colours, name = "Status") +
       scale_colour_manual(
         values = setNames(threshold_line_colours[threshold_line_df$line_key], threshold_line_df$line_label),
@@ -1432,7 +1436,7 @@ if (nrow(discovery_std) > 0) {
       ) +
       scale_x_continuous(breaks = c(0, 0.05, 0.10, 0.5, 1), limits = c(0, 1)) +
       labs(
-        title = "P-value distribution by pattern_type: removed vs retained",
+        title = "P-value distribution by convergence_type: removed vs retained",
         subtitle = paste0("Configured alpha = ", alpha_threshold_label, " | comparison lines = 0.10 and 0.05"),
         x = "p-value", y = "Density"
       ) +
@@ -1445,9 +1449,9 @@ if (nrow(discovery_std) > 0) {
       )
     print(p_pt)
     ggsave(file.path(disambig_dir, "pvalue_removed_vs_retained_by_pattern.png"),
-           p_pt, width = 12, height = max(4, 2.5 * n_distinct(pval_df_pt$pattern_type)), dpi = 160)
+           p_pt, width = 12, height = max(4, 2.5 * n_distinct(pval_df_pt$convergence_type)), dpi = 160)
   } else {
-    cat("Skipping per-pattern_type p-value plot: no pattern_type with \u2265 5 observations.\n")
+    cat("Skipping per-convergence_type p-value plot: no convergence_type with \u2265 5 observations.\n")
   }
 } else {
   cat("No discovery data available — skipping p-value removal histograms.\n")
@@ -1473,7 +1477,7 @@ pg <- ggplot(
   scale_fill_paletteer_d("ggthemes::Tableau_10") +
   scale_y_discrete(labels = format_pattern_parallel_axis) +
   theme_minimal(base_size = 14) +
-  labs(title = "Convergence labels across CAAP groups", x = "n", y = "convergence label (pattern_type)") +
+  labs(title = "Convergence labels across CAAP groups", x = "n", y = "convergence label (convergence_type)") +
   theme(
     axis.text.y = element_text(size = 10, lineheight = 0.95),
     strip.text = element_text(face = "bold")
@@ -1509,7 +1513,7 @@ if (nrow(pattern_parallel_sig) > 0) {
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     scale_y_discrete(labels = format_pattern_parallel_axis) +
     theme_minimal(base_size = 14) +
-    labs(title = "Descriptive significance classes across convergence labels", x = "n", y = "convergence label (pattern_type)") +
+    labs(title = "Descriptive significance classes across convergence labels", x = "n", y = "convergence label (convergence_type)") +
     theme(
       axis.text.y = element_text(size = 10, lineheight = 0.95),
       strip.text = element_text(face = "bold")
@@ -1529,7 +1533,7 @@ if (nrow(pattern_parallel_sig) > 0) {
 
 ## B.3c Geometric labels vs probabilistic disambiguation
 
-The labels above (`pattern_type`) are **geometric** — they read tip
+The labels above (`convergence_type`) are **geometric** — they read tip
 states only. Disambiguation re-scores every position **probabilistically** from the
 MRCA→root ASR posteriors into `asr_path_score` and its five constituent axes
 (`core`, `independence`, `mrca_diversity`, `derived_agreement`, `conservation_gate`).
@@ -1595,24 +1599,24 @@ if (!has_asr) {
       base_width = 10, base_height = 7
     )
 
-    # ── (2) Integrating the five axes: mean per axis by geometric pattern_type ─
+    # ── (2) Integrating the five axes: mean per axis by geometric convergence_type ─
     # Shows WHICH axis drives (or sinks) each geometric class — e.g. parallel
     # labels should score low on mrca_diversity, divergent ones low on
     # derived_agreement. Confirms axis and label are mechanistically consistent.
     if (length(have_axes) > 0) {
       axis_long <- prob_df %>%
-        select(pattern_type, all_of(have_axes)) %>%
+        select(convergence_type, all_of(have_axes)) %>%
         pivot_longer(all_of(have_axes), names_to = "axis", values_to = "value") %>%
-        group_by(pattern_type, axis) %>%
+        group_by(convergence_type, axis) %>%
         summarise(mean_value = mean(value, na.rm = TRUE), .groups = "drop")
       write_tsv(axis_long, file.path(disambig_dir, "disambig_axes_by_pattern.tsv"))
-      p_axis <- ggplot(axis_long, aes(x = axis, y = pattern_type, fill = mean_value)) +
+      p_axis <- ggplot(axis_long, aes(x = axis, y = convergence_type, fill = mean_value)) +
         geom_tile(colour = "grey90") +
         geom_text(aes(label = sprintf("%.2f", mean_value)), size = 3) +
         scale_fill_viridis_c(option = "C", limits = c(0, 1), name = "mean") +
         theme_minimal(base_size = 12) +
         theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
-        labs(title = "ASR path-score axes by geometric pattern_type", x = NULL, y = NULL)
+        labs(title = "ASR path-score axes by geometric convergence_type", x = NULL, y = NULL)
       print(p_axis)
       ggsave(file.path(disambig_dir, "disambig_axes_by_pattern.png"), p_axis,
              width = 9, height = 5, dpi = 320)
@@ -1680,7 +1684,7 @@ plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file = NU
 write_export_pair <- function(df, key, txt_d, tsv_d) {
   createDir(txt_d)
   createDir(tsv_d)
-  base_cols <- intersect(c("gene", "position", "caap_group", "pattern_type", "change_side"), names(df))
+  base_cols <- intersect(c("gene", "position", "caap_group", "convergence_type", "change_side"), names(df))
   out_df <- df %>% select(all_of(base_cols)) %>% distinct() %>% arrange(gene, position)
   readr::write_lines(sort(unique(out_df$gene)), file.path(txt_d, paste0(key, ".txt")))
   write_tsv(out_df, file.path(tsv_d, paste0(key, ".tsv")))
@@ -1712,7 +1716,7 @@ detail_rows <- orientation_rows %>%
     gene,
     position,
     caap_group = toupper(caap_group),
-    pattern_type,
+    convergence_type,
     change_side
   ) %>%
   distinct()

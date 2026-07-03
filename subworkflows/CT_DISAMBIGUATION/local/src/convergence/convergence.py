@@ -44,7 +44,7 @@ Usage Example
          'top_tip_mode': 'V', 'bottom_tip_mode': 'V'}
     ]
     result = classify_change_and_parallelism(pair_details, convergence_mode='focal_clade')
-    print(result['pattern_type'])  # 'convergent_top'
+    print(result['convergence_type'])  # 'convergent_top'
     print(result['change_top'])    # 'convergent'
 
 Author
@@ -592,8 +592,8 @@ def _derive_change_side(change_top: str, change_bottom: str) -> str:
     return "none"
 
 
-def _derive_pattern_type(change_top: str, change_bottom: str) -> str:
-    """Derive conflated ``pattern_type`` from per-side change labels."""
+def _derive_convergence_type(change_top: str, change_bottom: str) -> str:
+    """Derive conflated ``convergence_type`` from per-side change labels."""
     top_sub = change_top in _SUBSTANTIVE
     bot_sub = change_bottom in _SUBSTANTIVE
     if top_sub and bot_sub:
@@ -625,7 +625,7 @@ def classify_change_and_parallelism(
     - ``codivergent``: >=2 changes, >=2 distinct derived states with at least one repeated
 
     Returns dict with keys: ``change_top``, ``change_bottom``, ``change_side``,
-    ``pattern_type``. (The former parallelism axis — ``parallel_top/bottom/type``
+    ``convergence_type``. (The former parallelism axis — ``parallel_top/bottom/type``
     — was retired: the continuous ``mrca_diversity`` axis of the ASR path score
     supersedes it.)
     """
@@ -635,7 +635,7 @@ def classify_change_and_parallelism(
             "change_top": "no_change",
             "change_bottom": "no_change",
             "change_side": "none",
-            "pattern_type": "no_change",
+            "convergence_type": "no_change",
         }
 
     invalid_states = {None, "-", "X", "?"}
@@ -683,13 +683,13 @@ def classify_change_and_parallelism(
 
     # Derived columns
     change_side = _derive_change_side(change_top, change_bottom)
-    pattern_type = _derive_pattern_type(change_top, change_bottom)
+    convergence_type = _derive_convergence_type(change_top, change_bottom)
 
     return {
         "change_top": change_top,
         "change_bottom": change_bottom,
         "change_side": change_side,
-        "pattern_type": pattern_type,
+        "convergence_type": convergence_type,
     }
 
 

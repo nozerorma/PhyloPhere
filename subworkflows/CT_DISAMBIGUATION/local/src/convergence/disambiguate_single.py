@@ -181,7 +181,7 @@ def analyze_caas_position_disambiguation(
     change_top = cp_result.get("change_top", "no_change")
     change_bottom = cp_result.get("change_bottom", "no_change")
     change_side = cp_result.get("change_side", "none")
-    pattern_type = cp_result.get("pattern_type", "no_change")
+    convergence_type = cp_result.get("convergence_type", "no_change")
 
     # Build per-pair transition status map for annotations
     pair_status_map: Dict[str, Dict[str, str]] = {}
@@ -440,7 +440,7 @@ def analyze_caas_position_disambiguation(
         position_one_based=caas_pos.position_one_based,
         ancestral=ancestral,
         derived=derived,
-        pattern_type=pattern_type,
+        convergence_type=convergence_type,
         trait1_aa=trait1_list,
         trait0_aa=trait0_list,
         tip_pattern_comment=tip_pattern_comment,
@@ -827,7 +827,7 @@ def analyze_gene_disambiguation(
 
             results.append(result)
             logger.info(
-                f"✓ Analyzed position {pos}: {result.pattern_type} pattern, "
+                f"✓ Analyzed position {pos}: {result.convergence_type} pattern, "
                 f"{result.ancestral}→{result.derived}"
             )
 

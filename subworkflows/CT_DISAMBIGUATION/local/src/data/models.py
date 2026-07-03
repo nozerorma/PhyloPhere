@@ -71,7 +71,7 @@ class ConvergenceResult:
     derived: str  # Used for display/legacy compatibility
 
     # Pattern classification
-    pattern_type: str
+    convergence_type: str
 
     # Tip-level pattern analysis
     trait1_aa: List[str] = field(default_factory=list)

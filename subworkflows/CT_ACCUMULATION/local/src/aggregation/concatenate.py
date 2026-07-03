@@ -170,7 +170,9 @@ def read_metadata_caas(metadata_file):
         gene_idx          = h.index('Gene')
         pos_idx           = h.index('Position')
         tag_idx           = h.index('tag')
-        pattern_idx       = h.index('pattern_type')
+        # Back-compat: disambiguation renamed the convergence label
+        # pattern_type → convergence_type; accept either header.
+        pattern_idx       = h.index('convergence_type') if 'convergence_type' in h else h.index('pattern_type')
         amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
         pvalue_idx        = h.index('pvalue')
 

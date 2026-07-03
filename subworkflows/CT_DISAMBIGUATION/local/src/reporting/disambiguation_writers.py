@@ -121,7 +121,7 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "pvalue",
         "pvalue_boot",
         # Pattern classification
-        "pattern_type",
+        "convergence_type",
         # Metadata-driven convergence context
         "caap_group",
         "amino_encoded",

@@ -160,7 +160,7 @@ def convert_convergence_result_to_dict(
             result_dict[f"mrca_{idx}_posterior"] = prob
 
     # Pattern classification
-    result_dict["pattern_type"] = getattr(result, "pattern_type", None)
+    result_dict["convergence_type"] = getattr(result, "convergence_type", None)
 
     # Change tracking
     result_dict["change_top"] = getattr(result, "change_top", "no_change")

@@ -180,7 +180,7 @@ def analyze_tip_convergence_patterns(
 
     # Cast to Sequence for type checking (dicts are compatible at runtime)
     tip_level_pattern = classify_change_and_parallelism(pair_details)  # type: ignore[arg-type]
-    logger.info(f"✓ Tip-level pattern: {tip_level_pattern.get('pattern_type', 'unknown')}")
+    logger.info(f"✓ Tip-level pattern: {tip_level_pattern.get('convergence_type', 'unknown')}")
 
     diagnostics["pair_details"] = pair_details
     diagnostics["pair_transition_summary"] = summarize_pair_transitions(pair_details)
