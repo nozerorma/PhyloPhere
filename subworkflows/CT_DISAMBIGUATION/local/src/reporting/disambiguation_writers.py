@@ -133,9 +133,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "change_top",
         "change_bottom",
         "change_side",
-        "parallel_top",
-        "parallel_bottom",
-        "parallel_type",
         # Unified ASR path score (replaces convergence/parallel at scoring time)
         "asr_path_score",
         "independence",

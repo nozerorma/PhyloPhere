@@ -114,9 +114,6 @@ class ConvergenceResult:
     change_top: str = "no_change"
     change_bottom: str = "no_change"
     change_side: str = "none"
-    parallel_top: Optional[Any] = None
-    parallel_bottom: Optional[Any] = None
-    parallel_type: str = "none"
 
     # Ambiguity and conserved-pair flags (dynamic multi-pair)
     ambiguous: bool = False

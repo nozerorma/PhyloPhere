@@ -104,17 +104,13 @@ combo_from_flags <- function(df, cols) {
   })
 }
 
-normalize_parallel_type <- function(x) {
-  x_chr <- tolower(trimws(as.character(x)))
-  x_chr[is.na(x_chr) | x_chr %in% c("", "na", "nan", "null")] <- "none"
-  x_chr
-}
-
-make_pattern_parallel_label <- function(pattern_type, parallel_type) {
+# The parallel_* axis was retired upstream (superseded by the continuous
+# mrca_diversity axis of the ASR path score), so the convergence label is now the
+# pattern_type alone.
+make_pattern_parallel_label <- function(pattern_type) {
   pattern_chr <- as.character(pattern_type)
   pattern_chr[is.na(pattern_chr) | pattern_chr == ""] <- "unknown"
-  parallel_chr <- normalize_parallel_type(parallel_type)
-  if_else(parallel_chr == "none", pattern_chr, paste(pattern_chr, parallel_chr, sep = " / "))
+  pattern_chr
 }
 
 format_pattern_parallel_axis <- function(x) {
@@ -300,9 +296,6 @@ normalize_disambig_schema <- function(df) {
   if ('ChangeSide' %in% names(df) && !'change_side' %in% names(df)) df <- df %>% rename(change_side = ChangeSide)
   if ('ChangeTop' %in% names(df) && !'change_top' %in% names(df)) df <- df %>% rename(change_top = ChangeTop)
   if ('ChangeBottom' %in% names(df) && !'change_bottom' %in% names(df)) df <- df %>% rename(change_bottom = ChangeBottom)
-  if ('ParallelTop' %in% names(df) && !'parallel_top' %in% names(df)) df <- df %>% rename(parallel_top = ParallelTop)
-  if ('ParallelBottom' %in% names(df) && !'parallel_bottom' %in% names(df)) df <- df %>% rename(parallel_bottom = ParallelBottom)
-  if ('ParallelType' %in% names(df) && !'parallel_type' %in% names(df)) df <- df %>% rename(parallel_type = ParallelType)
   if ('Gene' %in% names(df) && !'gene' %in% names(df)) df <- df %>% rename(gene = Gene)
   if ('Position' %in% names(df) && !'position' %in% names(df)) df <- df %>% rename(position = Position)
   if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
@@ -310,9 +303,6 @@ normalize_disambig_schema <- function(df) {
   if (!'change_side' %in% names(df)) df$change_side <- 'none'
   if (!'change_top' %in% names(df)) df$change_top <- 'no_change'
   if (!'change_bottom' %in% names(df)) df$change_bottom <- 'no_change'
-  if (!'parallel_top' %in% names(df)) df$parallel_top <- 'none'
-  if (!'parallel_bottom' %in% names(df)) df$parallel_bottom <- 'none'
-  if (!'parallel_type' %in% names(df)) df$parallel_type <- 'none'
   if (!'is_conserved_meta' %in% names(df)) df$is_conserved_meta <- FALSE
   if (!'pvalue' %in% names(df)) df$pvalue <- NA_real_
   if (!'pvalue_boot' %in% names(df)) df$pvalue_boot <- NA_real_
@@ -326,9 +316,6 @@ normalize_disambig_schema <- function(df) {
       change_side = tolower(as.character(change_side)),
       change_top = tolower(as.character(change_top)),
       change_bottom = tolower(as.character(change_bottom)),
-      parallel_top = normalize_parallel_type(parallel_top),
-      parallel_bottom = normalize_parallel_type(parallel_bottom),
-      parallel_type = normalize_parallel_type(parallel_type),
       is_conserved_meta = as_bool(is_conserved_meta),
       pvalue = suppressWarnings(as.numeric(pvalue)),
       pvalue_boot = suppressWarnings(as.numeric(pvalue_boot)),
@@ -451,7 +438,7 @@ discovery_std <- normalize_disambig_schema(raw_discovery)
 convergence_plot_df <- discovery_std %>%
   mutate(
     change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none"),
-    pattern_parallel = make_pattern_parallel_label(pattern_type, parallel_type),
+    pattern_parallel = make_pattern_parallel_label(pattern_type),
     pattern_parallel = forcats::fct_infreq(pattern_parallel)
   )
 orientation_rows <- build_orientation_rows(convergence_plot_df) %>%
@@ -464,7 +451,6 @@ discovery_df <- discovery_std %>%
     Gene = gene,
     Position = position,
     Pattern = pattern_type,
-    parallel_type,
     change_side,
     is_conserved_meta,
     pvalue = pvalue,
@@ -934,7 +920,7 @@ if (!is.na(removed_precluster_file)) {
   precluster_df <- normalize_disambig_schema(read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE))
   precluster_events <- precluster_df %>% transmute(
     site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
-    change_top, change_bottom, change_side, parallel_top, parallel_bottom, parallel_type,
+    change_top, change_bottom, change_side,
     sig_hyp, sig_perm, is_significant, significance_class,
     removal_stage = case_when(
       str_detect(removal_reason, "^mrca_posterior_below_") ~ "precluster_mrca_threshold",
@@ -951,7 +937,7 @@ if (length(cluster_files) > 0) {
     inner_join(cluster_hits, by = c("gene", "position", "caap_group")) %>%
     transmute(
       site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
-      change_top, change_bottom, change_side, parallel_top, parallel_bottom, parallel_type,
+      change_top, change_bottom, change_side,
       sig_hyp, sig_perm, is_significant, significance_class,
       removal_stage = "cluster"
     ) %>%
@@ -975,7 +961,7 @@ if (!is.na(removed_genes_file)) {
     )) %>%
     transmute(
       site_id, gene, position, caap_group, pattern_type, pvalue, pvalue_boot,
-      change_top, change_bottom, change_side, parallel_top, parallel_bottom, parallel_type,
+      change_top, change_bottom, change_side,
       sig_hyp, sig_perm, is_significant, significance_class, removal_stage
     ) %>%
     distinct()
@@ -1220,8 +1206,7 @@ if (nrow(removal_events) > 0) {
   removal_events_plot <- removal_events %>%
     mutate(
       change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none"),
-      parallel_type = normalize_parallel_type(parallel_type),
-      pattern_parallel = make_pattern_parallel_label(pattern_type, parallel_type)
+      pattern_parallel = make_pattern_parallel_label(pattern_type)
     )
 
   by_pattern <- removal_events_plot %>%
@@ -1241,7 +1226,7 @@ if (nrow(removal_events) > 0) {
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     scale_y_discrete(labels = format_pattern_parallel_axis) +
     theme_minimal(base_size = 16) +
-    labs(title = "Removed positions by convergence label", x = "n", y = "pattern_type / parallel_type") +
+    labs(title = "Removed positions by convergence label", x = "n", y = "convergence label (pattern_type)") +
     theme(
       axis.text.y = element_text(size = 10, lineheight = 0.95),
       strip.text = element_text(face = "bold")
@@ -1488,7 +1473,7 @@ pg <- ggplot(
   scale_fill_paletteer_d("ggthemes::Tableau_10") +
   scale_y_discrete(labels = format_pattern_parallel_axis) +
   theme_minimal(base_size = 14) +
-  labs(title = "Convergence labels across CAAP groups", x = "n", y = "pattern_type / parallel_type") +
+  labs(title = "Convergence labels across CAAP groups", x = "n", y = "convergence label (pattern_type)") +
   theme(
     axis.text.y = element_text(size = 10, lineheight = 0.95),
     strip.text = element_text(face = "bold")
@@ -1524,7 +1509,7 @@ if (nrow(pattern_parallel_sig) > 0) {
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     scale_y_discrete(labels = format_pattern_parallel_axis) +
     theme_minimal(base_size = 14) +
-    labs(title = "Descriptive significance classes across convergence labels", x = "n", y = "pattern_type / parallel_type") +
+    labs(title = "Descriptive significance classes across convergence labels", x = "n", y = "convergence label (pattern_type)") +
     theme(
       axis.text.y = element_text(size = 10, lineheight = 0.95),
       strip.text = element_text(face = "bold")
@@ -1544,7 +1529,7 @@ if (nrow(pattern_parallel_sig) > 0) {
 
 ## B.3c Geometric labels vs probabilistic disambiguation
 
-The labels above (`pattern_type` / `parallel_type`) are **geometric** — they read tip
+The labels above (`pattern_type`) are **geometric** — they read tip
 states only. Disambiguation re-scores every position **probabilistically** from the
 MRCA→root ASR posteriors into `asr_path_score` and its five constituent axes
 (`core`, `independence`, `mrca_diversity`, `derived_agreement`, `conservation_gate`).
@@ -1695,7 +1680,7 @@ plot_upset_like <- function(intersections_df, set_cols, title_txt, out_file = NU
 write_export_pair <- function(df, key, txt_d, tsv_d) {
   createDir(txt_d)
   createDir(tsv_d)
-  base_cols <- intersect(c("gene", "position", "caap_group", "pattern_type", "parallel_type", "change_side"), names(df))
+  base_cols <- intersect(c("gene", "position", "caap_group", "pattern_type", "change_side"), names(df))
   out_df <- df %>% select(all_of(base_cols)) %>% distinct() %>% arrange(gene, position)
   readr::write_lines(sort(unique(out_df$gene)), file.path(txt_d, paste0(key, ".txt")))
   write_tsv(out_df, file.path(tsv_d, paste0(key, ".tsv")))
@@ -1728,7 +1713,6 @@ detail_rows <- orientation_rows %>%
     position,
     caap_group = toupper(caap_group),
     pattern_type,
-    parallel_type,
     change_side
   ) %>%
   distinct()

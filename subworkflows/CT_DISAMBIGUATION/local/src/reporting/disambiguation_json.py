@@ -151,9 +151,6 @@ def extract_convergence_summary(
         "change_top": result_dict.get("change_top", "no_change"),
         "change_bottom": result_dict.get("change_bottom", "no_change"),
         "change_side": result_dict.get("change_side", "none"),
-        "parallel_top": result_dict.get("parallel_top"),
-        "parallel_bottom": result_dict.get("parallel_bottom"),
-        "parallel_type": result_dict.get("parallel_type", "none"),
         "is_significant": result_dict.get("is_significant"),
         "ambiguous": result_dict.get("ambiguous"),
     }

@@ -166,9 +166,6 @@ def convert_convergence_result_to_dict(
     result_dict["change_top"] = getattr(result, "change_top", "no_change")
     result_dict["change_bottom"] = getattr(result, "change_bottom", "no_change")
     result_dict["change_side"] = getattr(result, "change_side", "none")
-    result_dict["parallel_top"] = getattr(result, "parallel_top", None)
-    result_dict["parallel_bottom"] = getattr(result, "parallel_bottom", None)
-    result_dict["parallel_type"] = getattr(result, "parallel_type", "none")
 
     # ASR path score (unified ASR/convergence/parallel signal) + per-pair detail
     result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)

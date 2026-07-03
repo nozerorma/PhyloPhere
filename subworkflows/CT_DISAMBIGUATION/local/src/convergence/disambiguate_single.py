@@ -182,9 +182,6 @@ def analyze_caas_position_disambiguation(
     change_bottom = cp_result.get("change_bottom", "no_change")
     change_side = cp_result.get("change_side", "none")
     pattern_type = cp_result.get("pattern_type", "no_change")
-    parallel_top = cp_result.get("parallel_top")
-    parallel_bottom = cp_result.get("parallel_bottom")
-    parallel_type = cp_result.get("parallel_type", "none")
 
     # Build per-pair transition status map for annotations
     pair_status_map: Dict[str, Dict[str, str]] = {}
@@ -470,9 +467,6 @@ def analyze_caas_position_disambiguation(
         change_top=change_top,
         change_bottom=change_bottom,
         change_side=change_side,
-        parallel_top=parallel_top,
-        parallel_bottom=parallel_bottom,
-        parallel_type=parallel_type,
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
