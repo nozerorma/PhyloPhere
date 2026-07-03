@@ -873,7 +873,7 @@ def build_cycle_inputs(
 
     # Loader's canonical metadata schema (required + optional).
     meta_cols = [
-        "tag", "GenePos", "Gene", "Position", "Pattern", "caap_group",
+        "tag", "GenePos", "Gene", "Position", "pattern", "caap_group",
         "pvalue", "is_significant", "caas", "amino_encoded",
         "is_conserved_meta", "conserved_pair",
     ]
@@ -910,7 +910,7 @@ def build_cycle_inputs(
                     "GenePos": f"{gene}_{pos}",
                     "Gene": gene,
                     "Position": pos,
-                    "Pattern": row.get("pattern", ""),
+                    "pattern": row.get("pattern", ""),
                     "caap_group": row.get("caap_group", "US") or "US",
                     "pvalue": row.get("pvalue", "NA"),
                     "is_significant": "TRUE",
