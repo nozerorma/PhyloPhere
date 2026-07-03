@@ -328,8 +328,8 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
         bg_species_list: List of BG species (optional, for pair tracking)
 
     Returns:
-        Tuple of (is_caap: bool, pattern_type: str, substitution: str, conserved_pairs: str)
-        pattern_type is "1", "2", "3", "4", or "null"
+        Tuple of (is_caap: bool, pattern: str, substitution: str, conserved_pairs: str)
+        pattern is "1", "2", "3", "4", or "null"
         conserved_pairs is "overlap:pair1,pair2,..." or "0:"
 
     Example:

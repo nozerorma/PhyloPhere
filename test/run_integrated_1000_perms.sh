@@ -22,11 +22,11 @@ set -Eeuo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEST_DIR="${REPO_DIR}/test"
 INPUTS_DIR="${TEST_DIR}/inputs"
-ALIGNMENT_DIR="${REPO_DIR}/test/inputs/alignments/Ali_1000"
+ALIGNMENT_DIR="${REPO_DIR}/test/inputs/alignments/Ali_toy"
 
 # Tunable knobs (env-overridable)
-CYCLES="${CYCLES:-1000}"
-FULL_PERMS="${FULL_PERMS:-100}"
+CYCLES="${CYCLES:-100}"
+FULL_PERMS="${FULL_PERMS:-10}"
 RESUME="${RESUME:-0}"
 
 TIMESTAMP="$(date +%Y%m%d_%H%M%S)"

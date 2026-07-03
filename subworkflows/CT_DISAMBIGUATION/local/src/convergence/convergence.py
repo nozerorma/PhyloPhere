@@ -45,7 +45,7 @@ Usage Example
          'top_tip_mode': 'V', 'bottom_tip_mode': 'V'}
     ]
     result = classify_change_and_parallelism(pair_details, convergence_mode='focal_clade')
-    print(result['pattern_type'])  # 'convergent_top'
+    print(result['convergence_type'])  # 'convergent_top'
     print(result['change_top'])    # 'convergent'
 
 Author
