@@ -130,9 +130,19 @@ def analyze_caas_position_disambiguation(
     posterior_threshold: float = 0.7,
     convergence_mode: str = "focal_clade",
     node_index: Optional[Dict[int, Any]] = None,
+    build_node_posteriors: bool = False,
 ) -> ConvergenceResult:
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
+
+    ``build_node_posteriors`` (default False): populate the heavy
+    ``node_posteriors["per_node"]`` map — the modal AA + full 20-AA distribution
+    for *every* tree node at the focal site. This field is NOT in the master CSV,
+    the aggregation DB, or the per-gene JSON summary, and the tree plots reload
+    node posteriors from the separately-dumped ASR object (see
+    ``gene_wrapper.export_posteriors_to_jsonl``), overwriting whatever is here.
+    It is therefore redundant, so it is skipped by default; pass True only if an
+    in-memory consumer genuinely needs it.
 
     Args:
         gene: Gene name
@@ -284,23 +294,28 @@ def analyze_caas_position_disambiguation(
                         "aa": aa,
                         "prob": prob,
                     }
-            # Capture per-node annotations for downstream debugging/plots
-            per_node_states: Dict[int, Dict[str, Any]] = {}
-            for node_id, node_sites in posterior_data.items():
-                site_probs = node_sites.get(paml_site)
-                if not site_probs:
-                    continue
-                try:
-                    modal_aa, modal_prob = max(site_probs.items(), key=lambda x: x[1])
-                except ValueError:
-                    continue
-                per_node_states[int(node_id)] = {
-                    "aa": modal_aa,
-                    "prob": modal_prob,
-                    "distribution": dict(sorted(site_probs.items())),
-                }
-            if per_node_states:
-                node_posteriors["per_node"] = per_node_states
+            # Capture per-node annotations for downstream debugging/plots. Redundant
+            # in the normal path (not serialized anywhere; plots reload posteriors
+            # from the ASR dump), so only built when explicitly requested.
+            if build_node_posteriors:
+                per_node_states: Dict[int, Dict[str, Any]] = {}
+                for node_id, node_sites in posterior_data.items():
+                    site_probs = node_sites.get(paml_site)
+                    if not site_probs:
+                        continue
+                    try:
+                        modal_aa, modal_prob = max(
+                            site_probs.items(), key=lambda x: x[1]
+                        )
+                    except ValueError:
+                        continue
+                    per_node_states[int(node_id)] = {
+                        "aa": modal_aa,
+                        "prob": modal_prob,
+                        "distribution": dict(sorted(site_probs.items())),
+                    }
+                if per_node_states:
+                    node_posteriors["per_node"] = per_node_states
 
     except Exception as e:
         logger.warning(f"Node-level analysis failed: {e}")
@@ -494,6 +509,7 @@ def analyze_gene_disambiguation(
     asr_mode: str = "precomputed",
     axes_only: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
+    build_node_posteriors: bool = False,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
@@ -812,6 +828,7 @@ def analyze_gene_disambiguation(
                 posterior_threshold=posterior_threshold,
                 convergence_mode=convergence_mode,
                 node_index=hoisted_node_index,
+                build_node_posteriors=build_node_posteriors,
             )
 
             results.append(result)
