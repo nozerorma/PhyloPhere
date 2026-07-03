@@ -30,7 +30,6 @@ Data Contracts
 --------------
 - **PairDetail**: TypedDict for tip-level pair data (pair_id, focal_state, tip residues)
 - **NodeStates**: Dataclass container for key phylogenetic node states
-- **ConvergenceClassification**: Dataclass for classification results
 
 Usage Example
 -------------
@@ -106,46 +105,6 @@ class NodeStates:
     root_prob: Optional[float] = None
     pre_split_prob: Optional[float] = None
     mrca_contrast_prob: Optional[float] = None
-
-
-@dataclass
-class ConvergenceClassification:
-    """
-    Result of convergence pattern classification.
-
-    Attributes:
-        is_divergent (bool): True if pattern shows divergent evolution
-        is_convergent (bool): True if pattern shows convergent evolution
-        is_parallel (bool): True if pattern shows parallel evolution
-        is_codivergent (bool): True if one group converges, other diverges
-        is_caap (str): Comma-separated list of converging schemes (e.g., "GS3,GS4")
-        confidence (float): Classification confidence (0.0-1.0)
-        ancestral_state (str): Reconstructed ancestral amino acid
-        derived_states (List[str]): Derived amino acids in focal lineages
-        pattern_description (str): Human-readable pattern description
-        ambiguous (bool): True if pattern cannot be unambiguously classified
-        individual_transitions (Optional[Dict]): Per-transition metrics for divergent/parallel
-        top_convergent (bool): True if top group shows convergence (tip-level)
-        bottom_convergent (bool): True if bottom group shows convergence (tip-level)
-        top_changed (List[str]): Descendant states in top group (tip-level)
-        bottom_changed (List[str]): Descendant states in bottom group (tip-level)
-    """
-
-    is_divergent: bool
-    is_convergent: bool
-    is_parallel: bool
-    is_codivergent: bool
-    is_caap: str
-    confidence: float
-    ancestral_state: str
-    derived_states: List[str]
-    pattern_description: str
-    ambiguous: bool = False
-    individual_transitions: Optional[Dict[str, Any]] = None
-    top_convergent: bool = False
-    bottom_convergent: bool = False
-    top_changed: List[str] = field(default_factory=list)
-    bottom_changed: List[str] = field(default_factory=list)
 
 
 # =============================================================================

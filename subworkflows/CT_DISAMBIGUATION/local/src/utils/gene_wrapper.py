@@ -201,8 +201,6 @@ def convert_convergence_result_to_dict(
     if getattr(result, "node_state_details", None):
         result_dict["node_state_details"] = getattr(result, "node_state_details")
 
-    result_dict["ambiguous"] = bool(getattr(result, "ambiguous", False))
-
     return result_dict
 
 

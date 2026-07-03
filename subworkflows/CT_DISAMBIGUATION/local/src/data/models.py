@@ -115,9 +115,6 @@ class ConvergenceResult:
     change_bottom: str = "no_change"
     change_side: str = "none"
 
-    # Ambiguity and conserved-pair flags (dynamic multi-pair)
-    ambiguous: bool = False
-
     # ASR path score (unified replacement for binary ASR gate + convergence +
     # parallel; computed in src/convergence/path_scores.py)
     asr_path_score: Optional[float] = None

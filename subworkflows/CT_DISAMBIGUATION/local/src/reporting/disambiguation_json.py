@@ -152,7 +152,6 @@ def extract_convergence_summary(
         "change_bottom": result_dict.get("change_bottom", "no_change"),
         "change_side": result_dict.get("change_side", "none"),
         "is_significant": result_dict.get("is_significant"),
-        "ambiguous": result_dict.get("ambiguous"),
     }
 
     summary["pairs"] = extract_pair_info(result_dict, num_pairs)
