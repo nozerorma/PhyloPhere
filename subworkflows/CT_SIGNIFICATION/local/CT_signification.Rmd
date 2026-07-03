@@ -88,11 +88,11 @@ if (!file.exists(filtered_discovery_path)) {
 discovery_df <- read_tsv(filtered_discovery_path, show_col_types = FALSE)
 
 # discovery.tab is now fully lowercase (gene/mode/trait/position/pattern/ffgn/…).
-# Map the structural keys to the CamelCase names this report uses internally so the
-# rest of the logic (joins on Gene/Position, GenePos = paste(Gene, Position), the
-# Pattern column) is unchanged. Concept columns (caap_group, caas, amino_encoded,
-# pvalue, is_conserved_meta, conserved_pair) are already lowercase as used below.
-.disc_keymap <- c(Gene = "gene", Position = "position", Pattern = "pattern")
+# Map ONLY the structural keys to the CamelCase names this report uses internally
+# (joins on Gene/Position, GenePos = paste(Gene, Position)). Concept columns —
+# including the cardinal `pattern` contrast index — stay lowercase (canonical), so
+# they are no longer re-capitalised here.
+.disc_keymap <- c(Gene = "gene", Position = "position")
 for (.new in names(.disc_keymap)) {
   .old <- .disc_keymap[[.new]]
   if (.old %in% names(discovery_df) && !(.new %in% names(discovery_df))) {
@@ -127,7 +127,7 @@ cat(sprintf("\nLoaded background file: %s\n", basename(filtered_background_path)
 cat(sprintf("  Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
 
 # Validate required columns
-required_cols <- c("Gene", "Position", "Pattern", "pvalue")
+required_cols <- c("Gene", "Position", "pattern", "pvalue")
 missing_cols <- setdiff(required_cols, names(discovery_df))
 if (length(missing_cols) > 0) {
   stop("Missing required columns in discovery: ", paste(missing_cols, collapse = ", "))
@@ -157,8 +157,8 @@ cat(sprintf("Loading bootstrap file: %s\n", basename(bootstrap_file_path)))
 
 # Load bootstrap data (headerless expected, but tolerate legacy variants)
 # Supported formats:
-#   5 cols: GenePos caap_group Occurrences Total pvalue_boot
-#   4 cols: GenePos Occurrences Total pvalue_boot   (legacy CAAS)
+#   5 cols: GenePos caap_group occurrences total pvalue_boot
+#   4 cols: GenePos occurrences total pvalue_boot   (legacy CAAS)
 bootstrap_raw <- tryCatch({
   read_tsv(
     bootstrap_file_path,
@@ -174,9 +174,9 @@ if (ncol(bootstrap_raw) < 4) {
 }
 
 if (ncol(bootstrap_raw) >= 5) {
-  names(bootstrap_raw)[1:5] <- c("GenePos", "caap_group", "Occurrences", "Total", "pvalue_boot")
+  names(bootstrap_raw)[1:5] <- c("GenePos", "caap_group", "occurrences", "total", "pvalue_boot")
 } else {
-  names(bootstrap_raw)[1:4] <- c("GenePos", "Occurrences", "Total", "pvalue_boot")
+  names(bootstrap_raw)[1:4] <- c("GenePos", "occurrences", "total", "pvalue_boot")
   bootstrap_raw <- bootstrap_raw %>% mutate(caap_group = "US")
 }
 
@@ -188,8 +188,8 @@ bootstrap_raw <- bootstrap_raw %>%
 bootstrap_raw <- bootstrap_raw %>%
   mutate(
     caap_group = if_else(is.na(caap_group) | caap_group == "", "US", caap_group),
-    Occurrences = suppressWarnings(as.integer(Occurrences)),
-    Total = suppressWarnings(as.integer(Total)),
+    occurrences = suppressWarnings(as.integer(occurrences)),
+    total = suppressWarnings(as.integer(total)),
     pvalue_boot = suppressWarnings(as.numeric(pvalue_boot))
   )
 
@@ -229,7 +229,7 @@ if (has_caap_group && bootstrap_has_groups) {
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, caap_group, pvalue_boot, Occurrences, Total),
+        select(Gene, Position, caap_group, pvalue_boot, occurrences, total),
       by = c("Gene", "Position", "caap_group")
     )
 } else if (has_caap_group && !bootstrap_has_groups) {
@@ -238,7 +238,7 @@ if (has_caap_group && bootstrap_has_groups) {
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, pvalue_boot, Occurrences, Total) %>%
+        select(Gene, Position, pvalue_boot, occurrences, total) %>%
         distinct(Gene, Position, .keep_all = TRUE),
       by = c("Gene", "Position")
     )
@@ -247,7 +247,7 @@ if (has_caap_group && bootstrap_has_groups) {
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, pvalue_boot, Occurrences, Total),
+        select(Gene, Position, pvalue_boot, occurrences, total),
       by = c("Gene", "Position")
     )
 }
@@ -256,8 +256,8 @@ if (has_caap_group && bootstrap_has_groups) {
 discovery_with_perm <- discovery_with_perm %>%
   mutate(
     pvalue_boot = if_else(is.na(pvalue_boot), pvalue, pvalue_boot),
-    Occurrences = if_else(is.na(Occurrences), 0L, as.integer(Occurrences)),
-    Total = if_else(is.na(Total), 0L, as.integer(Total))
+    occurrences = if_else(is.na(occurrences), 0L, as.integer(occurrences)),
+    total = if_else(is.na(total), 0L, as.integer(total))
   )
 
 # Normalize optional conserved columns for downstream meta export
@@ -358,13 +358,13 @@ Analyze CAAS patterns and their significance profiles.
 cat("\n=== Pattern-Based Analysis ===\n")
 
 # Detect available patterns
-patterns_present <- unique(caas_filtered$Pattern)
+patterns_present <- unique(caas_filtered$pattern)
 cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", ")))
 
 # Pattern distribution
 if (has_caap_group) {
   pattern_summary <- caas_filtered %>%
-    group_by(caap_group, Pattern) %>%
+    group_by(caap_group, pattern) %>%
     summarize(
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
@@ -372,7 +372,7 @@ if (has_caap_group) {
       Both_05 = sum(is_significant, na.rm = TRUE),
       .groups = "drop"
     ) %>%
-    arrange(caap_group, Pattern)
+    arrange(caap_group, pattern)
   
   cat("\nPattern Distribution by Group:\n")
   print(kable(pattern_summary, format.args = list(big.mark = ",")))
@@ -386,10 +386,10 @@ if (has_caap_group) {
     ) %>%
     mutate(
       Filter = factor(Filter, levels = c("Total", "Hyp_05", "Perm_05", "Both_05")),
-      Pattern = factor(Pattern)
+      pattern = factor(pattern)
     )
   
-  p_pattern <- ggplot(plot_data, aes(x = Pattern, y = Count, fill = Filter)) +
+  p_pattern <- ggplot(plot_data, aes(x = pattern, y = Count, fill = Filter)) +
     geom_bar(stat = "identity", position = "dodge") +
     facet_wrap(~ caap_group, scales = "free_y") +
     theme_minimal() +
@@ -414,7 +414,7 @@ if (has_caap_group) {
   print(p_pattern)
 } else {
   pattern_summary <- caas_filtered %>%
-    group_by(Pattern) %>%
+    group_by(pattern) %>%
     summarize(
       Total = n(),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
@@ -435,10 +435,10 @@ if (has_caap_group) {
     ) %>%
     mutate(
       Filter = factor(Filter, levels = c("Total", "Hyp_05", "Perm_05", "Both_05")),
-      Pattern = factor(Pattern)
+      pattern = factor(pattern)
     )
   
-  p_pattern <- ggplot(plot_data, aes(x = Pattern, y = Count, fill = Filter)) +
+  p_pattern <- ggplot(plot_data, aes(x = pattern, y = Count, fill = Filter)) +
     geom_bar(stat = "identity", position = "dodge") +
     theme_minimal() +
     labs(
@@ -498,7 +498,7 @@ if (has_caap_group) {
     grp_meta <- grp_data %>%
       mutate(
         GenePos = paste(Gene, Position, sep = "_"),
-        SignificanceLevel = case_when(
+        significance_level = case_when(
           is_significant ~ "Both",
           sig_hyp ~ "Hypergeometric",
           sig_perm ~ "Permutation",
@@ -515,10 +515,10 @@ if (has_caap_group) {
         amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
       ) %>%
       select(
-        tag, GenePos, Gene, Position, Pattern, caap_group,
-        pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, Occurrences, Total,
+        tag, GenePos, Gene, Position, pattern, caap_group,
+        pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, occurrences, total,
         sig_hyp, sig_perm, is_significant,
-        sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
+        sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, significance_level,
         is_conserved_meta, conserved_pair, caas, amino_encoded
       )
 
@@ -532,7 +532,7 @@ if (has_caap_group) {
   global_meta <- caas_for_export %>%
     mutate(
       GenePos = paste(Gene, Position, sep = "_"),
-      SignificanceLevel = case_when(
+      significance_level = case_when(
         is_significant ~ "Both",
         sig_hyp ~ "Hypergeometric",
         sig_perm ~ "Permutation",
@@ -549,10 +549,10 @@ if (has_caap_group) {
       amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
     ) %>%
     select(
-      tag, GenePos, Gene, Position, Pattern, caap_group,
-      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, Occurrences, Total,
+      tag, GenePos, Gene, Position, pattern, caap_group,
+      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, occurrences, total,
       sig_hyp, sig_perm, is_significant,
-      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
+      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, significance_level,
       is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 
@@ -565,7 +565,7 @@ if (has_caap_group) {
   meta_caas <- caas_for_export %>%
     mutate(
       GenePos = paste(Gene, Position, sep = "_"),
-      SignificanceLevel = case_when(
+      significance_level = case_when(
         is_significant ~ "Both",
         sig_hyp ~ "Hypergeometric",
         sig_perm ~ "Permutation",
@@ -582,10 +582,10 @@ if (has_caap_group) {
       amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
     ) %>%
     select(
-      tag, GenePos, Gene, Position, Pattern,
-      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, Occurrences, Total,
+      tag, GenePos, Gene, Position, pattern,
+      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, occurrences, total,
       sig_hyp, sig_perm, is_significant,
-      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, SignificanceLevel,
+      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, significance_level,
       is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 

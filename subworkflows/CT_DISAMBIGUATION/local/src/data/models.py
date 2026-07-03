@@ -71,7 +71,7 @@ class ConvergenceResult:
     derived: str  # Used for display/legacy compatibility
 
     # Pattern classification
-    pattern_type: str
+    convergence_type: str
 
     # Tip-level pattern analysis
     trait1_aa: List[str] = field(default_factory=list)
@@ -114,12 +114,6 @@ class ConvergenceResult:
     change_top: str = "no_change"
     change_bottom: str = "no_change"
     change_side: str = "none"
-    parallel_top: Optional[Any] = None
-    parallel_bottom: Optional[Any] = None
-    parallel_type: str = "none"
-
-    # Ambiguity and conserved-pair flags (dynamic multi-pair)
-    ambiguous: bool = False
 
     # ASR path score (unified replacement for binary ASR gate + convergence +
     # parallel; computed in src/convergence/path_scores.py)

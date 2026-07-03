@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import logging
-from collections import Counter
+from collections import Counter, namedtuple
 
 # Add src to path
 project_root = Path(__file__).parent.parent
@@ -39,6 +39,87 @@ from src.convergence.path_scores import build_node_index, compute_asr_path_score
 logger = logging.getLogger(__name__)
 
 
+# Lightweight per-position record emitted by the axes-only (permulation) path.
+# The permulation null keeps ONLY these five fields (Gene/cycle are added by the
+# worker), so there is no reason to assemble the full 40-field ConvergenceResult.
+# It exposes the same attribute names the perm worker reads via getattr, so it is
+# a drop-in for a ConvergenceResult on that path.
+PositionAxes = namedtuple(
+    "PositionAxes",
+    ["position", "caap_group", "asr_path_score", "change_top", "change_bottom"],
+)
+
+
+def _build_per_node_dist(
+    posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]],
+    paml_site: Optional[int],
+) -> Dict[int, Dict[str, float]]:
+    """Collect ``node_id -> {aa: posterior}`` for one focal site.
+
+    Mirrors exactly what the full scorer stores in ``node_posteriors["per_node"]``
+    (same site key, same ``dict(sorted(...))`` ordering, same skip of empty nodes),
+    so both the observed path and the perm replay feed
+    :func:`compute_asr_path_score` the same input. The ``dict(sorted(...))`` order
+    is retained because :func:`modal_encoded` breaks argmax ties by iteration order.
+    """
+    per_node_dist: Dict[int, Dict[str, float]] = {}
+    if not posterior_data or paml_site is None:
+        return per_node_dist
+    for node_id, node_sites in posterior_data.items():
+        site_probs = node_sites.get(paml_site)
+        if not site_probs:  # missing/empty site → node contributes nothing
+            continue
+        per_node_dist[int(node_id)] = dict(sorted(site_probs.items()))
+    return per_node_dist
+
+
+def _position_axes(
+    caas_pos: CAASPosition,
+    tree_data,
+    posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]],
+    node_index: Optional[Dict[int, Any]],
+    pair_details_list: Optional[List[Dict[str, Any]]],
+    per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
+) -> Dict[str, Any]:
+    """Reduced ASR-path-score kernel shared by the full scorer and the perm replay.
+
+    Builds ``per_node_dist`` for the focal site directly from the posterior map and
+    runs :func:`compute_asr_path_score`. This is the ONLY numeric computation the
+    permulation null keeps (``asr_path_score`` + its five axes). Extracting it into
+    one helper guarantees the observed (full) path and the axes-only perm path score
+    each position through *identical* code — bit-for-bit — instead of two drifting
+    copies.
+
+    ``per_site_dist_cache`` (perm replay only): ``per_node_dist`` depends solely on
+    ``(posterior_data, site)`` — it is invariant to the grouping scheme (applied
+    later inside :func:`compute_asr_path_score`) and to the permuted phenotype. So a
+    site that recurs across schemes within a cycle, or across the N permulation
+    cycles for a gene, is built once and reused. When supplied the map is keyed by
+    ``position_one_based``; the observed path passes ``None`` (each site scored once).
+    """
+    paml_site = caas_pos.position_one_based
+
+    if per_site_dist_cache is not None:
+        per_node_dist = per_site_dist_cache.get(paml_site)
+        if per_node_dist is None:
+            per_node_dist = _build_per_node_dist(posterior_data, paml_site)
+            per_site_dist_cache[paml_site] = per_node_dist
+    else:
+        per_node_dist = _build_per_node_dist(posterior_data, paml_site)
+
+    if node_index is None:  # per-gene invariant; hoisted by the caller when available
+        node_index = build_node_index(getattr(tree_data, "root", None))
+
+    return compute_asr_path_score(
+        pair_details=pair_details_list,
+        per_node_dist=per_node_dist,
+        node_index=node_index,
+        scheme=getattr(caas_pos, "caap_group", "US") or "US",
+        is_conserved_meta=bool(getattr(caas_pos, "is_conserved_meta", False)),
+        conserved_pair=str(getattr(caas_pos, "conserved_pair", "") or "").strip(),
+    )
+
+
 def analyze_caas_position_disambiguation(
     gene: str,
     caas_pos: CAASPosition,
@@ -49,9 +130,19 @@ def analyze_caas_position_disambiguation(
     posterior_threshold: float = 0.7,
     convergence_mode: str = "focal_clade",
     node_index: Optional[Dict[int, Any]] = None,
+    build_node_posteriors: bool = False,
 ) -> ConvergenceResult:
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
+
+    ``build_node_posteriors`` (default False): populate the heavy
+    ``node_posteriors["per_node"]`` map — the modal AA + full 20-AA distribution
+    for *every* tree node at the focal site. This field is NOT in the master CSV,
+    the aggregation DB, or the per-gene JSON summary, and the tree plots reload
+    node posteriors from the separately-dumped ASR object (see
+    ``gene_wrapper.export_posteriors_to_jsonl``), overwriting whatever is here.
+    It is therefore redundant, so it is skipped by default; pass True only if an
+    in-memory consumer genuinely needs it.
 
     Args:
         gene: Gene name
@@ -90,10 +181,7 @@ def analyze_caas_position_disambiguation(
     change_top = cp_result.get("change_top", "no_change")
     change_bottom = cp_result.get("change_bottom", "no_change")
     change_side = cp_result.get("change_side", "none")
-    pattern_type = cp_result.get("pattern_type", "no_change")
-    parallel_top = cp_result.get("parallel_top")
-    parallel_bottom = cp_result.get("parallel_bottom")
-    parallel_type = cp_result.get("parallel_type", "none")
+    convergence_type = cp_result.get("convergence_type", "no_change")
 
     # Build per-pair transition status map for annotations
     pair_status_map: Dict[str, Dict[str, str]] = {}
@@ -203,23 +291,28 @@ def analyze_caas_position_disambiguation(
                         "aa": aa,
                         "prob": prob,
                     }
-            # Capture per-node annotations for downstream debugging/plots
-            per_node_states: Dict[int, Dict[str, Any]] = {}
-            for node_id, node_sites in posterior_data.items():
-                site_probs = node_sites.get(paml_site)
-                if not site_probs:
-                    continue
-                try:
-                    modal_aa, modal_prob = max(site_probs.items(), key=lambda x: x[1])
-                except ValueError:
-                    continue
-                per_node_states[int(node_id)] = {
-                    "aa": modal_aa,
-                    "prob": modal_prob,
-                    "distribution": dict(sorted(site_probs.items())),
-                }
-            if per_node_states:
-                node_posteriors["per_node"] = per_node_states
+            # Capture per-node annotations for downstream debugging/plots. Redundant
+            # in the normal path (not serialized anywhere; plots reload posteriors
+            # from the ASR dump), so only built when explicitly requested.
+            if build_node_posteriors:
+                per_node_states: Dict[int, Dict[str, Any]] = {}
+                for node_id, node_sites in posterior_data.items():
+                    site_probs = node_sites.get(paml_site)
+                    if not site_probs:
+                        continue
+                    try:
+                        modal_aa, modal_prob = max(
+                            site_probs.items(), key=lambda x: x[1]
+                        )
+                    except ValueError:
+                        continue
+                    per_node_states[int(node_id)] = {
+                        "aa": modal_aa,
+                        "prob": modal_prob,
+                        "distribution": dict(sorted(site_probs.items())),
+                    }
+                if per_node_states:
+                    node_posteriors["per_node"] = per_node_states
 
     except Exception as e:
         logger.warning(f"Node-level analysis failed: {e}")
@@ -318,21 +411,12 @@ def analyze_caas_position_disambiguation(
     pair_path_scores: Dict[int, float] = {}
     pair_path_contaminated: Dict[int, bool] = {}
     try:
-        per_node_payload = (node_posteriors or {}).get("per_node", {}) or {}
-        per_node_dist = {
-            int(nid): (info or {}).get("distribution", {})
-            for nid, info in per_node_payload.items()
-        }
-        tree_root = getattr(tree_data, "root", None)
-        if node_index is None:  # per-gene invariant; hoisted by the caller when available
-            node_index = build_node_index(tree_root)
-        path_result = compute_asr_path_score(
-            pair_details=pair_details_list,
-            per_node_dist=per_node_dist,
-            node_index=node_index,
-            scheme=getattr(caas_pos, "caap_group", "US") or "US",
-            is_conserved_meta=is_cons_meta,
-            conserved_pair=conserved_pair,
+        # Single code path with the axes-only perm replay: _position_axes rebuilds
+        # per_node_dist from posterior_data exactly as node_posteriors["per_node"]
+        # was built above, so the score here stays bit-identical while guaranteeing
+        # the perm null scores each position through the same helper.
+        path_result = _position_axes(
+            caas_pos, tree_data, posterior_data, node_index, pair_details_list
         )
         asr_path_score = path_result["asr_path_score"]
         independence = path_result.get("independence", 1.0)
@@ -356,7 +440,7 @@ def analyze_caas_position_disambiguation(
         position_one_based=caas_pos.position_one_based,
         ancestral=ancestral,
         derived=derived,
-        pattern_type=pattern_type,
+        convergence_type=convergence_type,
         trait1_aa=trait1_list,
         trait0_aa=trait0_list,
         tip_pattern_comment=tip_pattern_comment,
@@ -383,9 +467,6 @@ def analyze_caas_position_disambiguation(
         change_top=change_top,
         change_bottom=change_bottom,
         change_side=change_side,
-        parallel_top=parallel_top,
-        parallel_bottom=parallel_bottom,
-        parallel_type=parallel_type,
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
@@ -420,6 +501,9 @@ def analyze_gene_disambiguation(
     diagnostics_dir: Optional[Path] = None,
     convergence_mode: str = "focal_state",
     asr_mode: str = "precomputed",
+    axes_only: bool = False,
+    per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
+    build_node_posteriors: bool = False,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
@@ -434,9 +518,19 @@ def analyze_gene_disambiguation(
         taxid_mapping: Optional species to taxid mapping
         posterior_data: Optional ASR posterior data
         posterior_threshold: Posterior probability threshold for node state extraction
+        axes_only: Reduced-kernel mode for the permulation replay. When True, each
+            position still builds pair_details + the (cheap) change classification,
+            but SKIPS the full per-position scorer (its redundant per-node
+            posterior-map rebuild + the 40-field ConvergenceResult the perm null
+            discards). It emits a
+            lightweight :class:`PositionAxes` per position carrying only
+            asr_path_score + change_top/change_bottom. The asr_path_score is scored
+            by the same :func:`_position_axes` helper as the full path, so it is
+            bit-for-bit identical.
 
     Returns:
-        Tuple of (results list, diagnostics dict)
+        Tuple of (results list, diagnostics dict). In axes_only mode the list holds
+        :class:`PositionAxes` records instead of :class:`ConvergenceResult`.
     """
     logger.info(
         f"Starting convergence disambiguation for {gene} ({len(caas_positions)} positions)"
@@ -677,6 +771,46 @@ def analyze_gene_disambiguation(
                 )
                 continue
 
+            # ── Axes-only reduced kernel (permulation replay) ──────────────────
+            # The perm null keeps only asr_path_score + the change partition, so we
+            # skip the full per-position scorer — whose cost is the redundant per-node
+            # posterior-map rebuild (node_posteriors["per_node"]) plus the 40-field
+            # ConvergenceResult assembly the null discards — and call the shared
+            # _position_axes helper directly (which builds per_node_dist once, cached).
+            # change_top/change_bottom come straight from the (cheap) classification
+            # computed just above, so they are the EXACT categories the full path
+            # would have emitted — not a placeholder.
+            if axes_only:
+                cp = tip_level_pattern or {}
+                try:
+                    path_result = _position_axes(
+                        caas_pos,
+                        tree_data,
+                        posterior_data,
+                        hoisted_node_index,
+                        tip_diagnostics.get("pair_details"),
+                        per_site_dist_cache=per_site_dist_cache,
+                    )
+                    axes_score = path_result.get("asr_path_score", 0.0)
+                except Exception as e:  # never let path scoring break the replay
+                    logger.warning(
+                        f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
+                    )
+                    axes_score = 0.0
+                results.append(
+                    PositionAxes(
+                        position=caas_pos.position,
+                        caap_group=getattr(caas_pos, "caap_group", "US"),
+                        asr_path_score=axes_score,
+                        change_top=cp.get("change_top", "no_change"),
+                        change_bottom=cp.get("change_bottom", "no_change"),
+                    )
+                )
+                logger.debug(
+                    f"✓ Axes-only position {pos}: asr_path_score={axes_score}"
+                )
+                continue
+
             # Perform convergence/disambiguation analysis
             result = analyze_caas_position_disambiguation(
                 gene,
@@ -688,11 +822,12 @@ def analyze_gene_disambiguation(
                 posterior_threshold=posterior_threshold,
                 convergence_mode=convergence_mode,
                 node_index=hoisted_node_index,
+                build_node_posteriors=build_node_posteriors,
             )
 
             results.append(result)
             logger.info(
-                f"✓ Analyzed position {pos}: {result.pattern_type} pattern, "
+                f"✓ Analyzed position {pos}: {result.convergence_type} pattern, "
                 f"{result.ancestral}→{result.derived}"
             )
 

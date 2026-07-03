@@ -2,7 +2,6 @@
 
 from .convergence import (
     NodeStates,
-    ConvergenceClassification,
     extract_node_states_from_node_level,
     build_alignment_lookup,
     collect_tip_residues,
@@ -27,7 +26,6 @@ from .disambiguate_single import (
 )
 
 __all__ = [
-    "ConvergenceClassification",
     "NodeStates",
     "analyze_caas_position_disambiguation",
     "analyze_gene_disambiguation",

@@ -8,7 +8,7 @@ per-position dictionaries produced by the CAAS/ASR pipeline.
 Design goals:
 - Keep JSON structure stable for downstream plotting/UI.
 - Avoid recomputing heavy biology here; assume upstream results already
-  contain core fields (pattern_type, amino_encoded, pair_details, etc.).
+  contain core fields (convergence_type, amino_encoded, pair_details, etc.).
 - Be defensive with missing optional keys.
 
 Author: ASR Integration
@@ -140,7 +140,7 @@ def extract_convergence_summary(
         "gene": result_dict.get("gene"),
         "msa_pos": result_dict.get("msa_pos"),
         "tag": result_dict.get("tag"),
-        "pattern_type": result_dict.get("pattern_type"),
+        "convergence_type": result_dict.get("convergence_type"),
         "caas": result_dict.get("caas", ""),
         "caap_group": result_dict.get("caap_group", "US"),
         "amino_encoded": result_dict.get("amino_encoded", ""),
@@ -151,11 +151,7 @@ def extract_convergence_summary(
         "change_top": result_dict.get("change_top", "no_change"),
         "change_bottom": result_dict.get("change_bottom", "no_change"),
         "change_side": result_dict.get("change_side", "none"),
-        "parallel_top": result_dict.get("parallel_top"),
-        "parallel_bottom": result_dict.get("parallel_bottom"),
-        "parallel_type": result_dict.get("parallel_type", "none"),
         "is_significant": result_dict.get("is_significant"),
-        "ambiguous": result_dict.get("ambiguous"),
     }
 
     summary["pairs"] = extract_pair_info(result_dict, num_pairs)

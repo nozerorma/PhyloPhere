@@ -30,7 +30,6 @@ Data Contracts
 --------------
 - **PairDetail**: TypedDict for tip-level pair data (pair_id, focal_state, tip residues)
 - **NodeStates**: Dataclass container for key phylogenetic node states
-- **ConvergenceClassification**: Dataclass for classification results
 
 Usage Example
 -------------
@@ -106,46 +105,6 @@ class NodeStates:
     root_prob: Optional[float] = None
     pre_split_prob: Optional[float] = None
     mrca_contrast_prob: Optional[float] = None
-
-
-@dataclass
-class ConvergenceClassification:
-    """
-    Result of convergence pattern classification.
-
-    Attributes:
-        is_divergent (bool): True if pattern shows divergent evolution
-        is_convergent (bool): True if pattern shows convergent evolution
-        is_parallel (bool): True if pattern shows parallel evolution
-        is_codivergent (bool): True if one group converges, other diverges
-        is_caap (str): Comma-separated list of converging schemes (e.g., "GS3,GS4")
-        confidence (float): Classification confidence (0.0-1.0)
-        ancestral_state (str): Reconstructed ancestral amino acid
-        derived_states (List[str]): Derived amino acids in focal lineages
-        pattern_description (str): Human-readable pattern description
-        ambiguous (bool): True if pattern cannot be unambiguously classified
-        individual_transitions (Optional[Dict]): Per-transition metrics for divergent/parallel
-        top_convergent (bool): True if top group shows convergence (tip-level)
-        bottom_convergent (bool): True if bottom group shows convergence (tip-level)
-        top_changed (List[str]): Descendant states in top group (tip-level)
-        bottom_changed (List[str]): Descendant states in bottom group (tip-level)
-    """
-
-    is_divergent: bool
-    is_convergent: bool
-    is_parallel: bool
-    is_codivergent: bool
-    is_caap: str
-    confidence: float
-    ancestral_state: str
-    derived_states: List[str]
-    pattern_description: str
-    ambiguous: bool = False
-    individual_transitions: Optional[Dict[str, Any]] = None
-    top_convergent: bool = False
-    bottom_convergent: bool = False
-    top_changed: List[str] = field(default_factory=list)
-    bottom_changed: List[str] = field(default_factory=list)
 
 
 # =============================================================================
@@ -617,24 +576,6 @@ def _classify_side(changed_derived: List[str]) -> str:
     return "divergent"
 
 
-def _assess_parallelism(ancestors: List[str]) -> Any:
-    """
-    Assess parallelism by comparing ancestral states (MRCAs) of relevant pairs.
-
-    Returns ``True`` (all identical), ``False`` (all pairwise distinct),
-    ``"MIXED"`` (some equal, some different), or ``None`` if fewer than 2.
-    """
-    if len(ancestors) < 2:
-        return None
-
-    unique = set(ancestors)
-    if len(unique) == 1:
-        return True
-    if len(unique) == len(ancestors):
-        return False
-    return "MIXED"
-
-
 _SUBSTANTIVE = {"convergent", "divergent", "codivergent"}
 
 
@@ -651,8 +592,8 @@ def _derive_change_side(change_top: str, change_bottom: str) -> str:
     return "none"
 
 
-def _derive_pattern_type(change_top: str, change_bottom: str) -> str:
-    """Derive conflated ``pattern_type`` from per-side change labels."""
+def _derive_convergence_type(change_top: str, change_bottom: str) -> str:
+    """Derive conflated ``convergence_type`` from per-side change labels."""
     top_sub = change_top in _SUBSTANTIVE
     bot_sub = change_bottom in _SUBSTANTIVE
     if top_sub and bot_sub:
@@ -666,33 +607,16 @@ def _derive_pattern_type(change_top: str, change_bottom: str) -> str:
     return "no_change"
 
 
-def _derive_parallel_type(parallel_top: Any, parallel_bottom: Any) -> str:
-    """Derive conflated ``parallel_type`` from per-side parallelism values."""
-    _map = {True: "parallel", False: "nonparallel", "MIXED": "mixed"}
-    top_label = _map.get(parallel_top)
-    bot_label = _map.get(parallel_bottom)
-
-    if top_label is not None and bot_label is not None:
-        if top_label == bot_label:
-            return f"{top_label}_both"
-        return f"{top_label}_{bot_label}"
-    if top_label is not None:
-        return f"{top_label}_top"
-    if bot_label is not None:
-        return f"{bot_label}_bottom"
-    return "none"
-
-
 def classify_change_and_parallelism(
     pair_details: Sequence[PairDetail],
     convergence_mode: str = "focal_clade",
     grouping_scheme: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Two-stage classification of evolutionary change patterns.
+    Classify evolutionary change patterns per side (top/bottom).
 
-    **Stage 1** classifies each side (top/bottom) independently by collecting
-    derived states across pairs where a substitution occurred:
+    Classifies each side independently by collecting derived states across pairs
+    where a substitution occurred:
 
     - ``no_change``: 0 changes
     - ``ambiguous``: exactly 1 change
@@ -700,16 +624,10 @@ def classify_change_and_parallelism(
     - ``divergent``: >=2 changes, all derived states distinct
     - ``codivergent``: >=2 changes, >=2 distinct derived states with at least one repeated
 
-    **Stage 2** assesses parallelism for each substantive side by comparing
-    the ancestral states (MRCAs) of pairs that changed on that side:
-
-    - ``True``: all ancestors identical
-    - ``False``: all ancestors pairwise distinct
-    - ``"MIXED"``: some equal, some different
-    - ``None``: side is no_change or ambiguous
-
     Returns dict with keys: ``change_top``, ``change_bottom``, ``change_side``,
-    ``pattern_type``, ``parallel_top``, ``parallel_bottom``, ``parallel_type``.
+    ``convergence_type``. (The former parallelism axis — ``parallel_top/bottom/type``
+    — was retired: the continuous ``mrca_diversity`` axis of the ASR path score
+    supersedes it.)
     """
     validated_pairs = _validate_pair_details(pair_details)
     if validated_pairs is None:
@@ -717,10 +635,7 @@ def classify_change_and_parallelism(
             "change_top": "no_change",
             "change_bottom": "no_change",
             "change_side": "none",
-            "pattern_type": "no_change",
-            "parallel_top": None,
-            "parallel_bottom": None,
-            "parallel_type": "none",
+            "convergence_type": "no_change",
         }
 
     invalid_states = {None, "-", "X", "?"}
@@ -740,9 +655,7 @@ def classify_change_and_parallelism(
         return mapped if mapped else aa
 
     top_changed_derived: List[str] = []
-    top_changed_ancestors: List[str] = []
     bottom_changed_derived: List[str] = []
-    bottom_changed_ancestors: List[str] = []
 
     for pair in validated_pairs:
         focal_state = pair.get("focal_state")
@@ -759,42 +672,24 @@ def classify_change_and_parallelism(
         if is_valid(mapped_ancestor) and is_valid(mapped_top):
             if mapped_ancestor != mapped_top:
                 top_changed_derived.append(mapped_top)
-                top_changed_ancestors.append(mapped_ancestor)
 
         if is_valid(mapped_ancestor) and is_valid(mapped_bottom):
             if mapped_ancestor != mapped_bottom:
                 bottom_changed_derived.append(mapped_bottom)
-                bottom_changed_ancestors.append(mapped_ancestor)
 
-    # Stage 1: classify each side independently
+    # Classify each side independently
     change_top = _classify_side(top_changed_derived)
     change_bottom = _classify_side(bottom_changed_derived)
 
-    # Stage 2: assess parallelism for substantive sides
-    parallel_top = (
-        _assess_parallelism(top_changed_ancestors)
-        if change_top in _SUBSTANTIVE
-        else None
-    )
-    parallel_bottom = (
-        _assess_parallelism(bottom_changed_ancestors)
-        if change_bottom in _SUBSTANTIVE
-        else None
-    )
-
     # Derived columns
     change_side = _derive_change_side(change_top, change_bottom)
-    pattern_type = _derive_pattern_type(change_top, change_bottom)
-    parallel_type = _derive_parallel_type(parallel_top, parallel_bottom)
+    convergence_type = _derive_convergence_type(change_top, change_bottom)
 
     return {
         "change_top": change_top,
         "change_bottom": change_bottom,
         "change_side": change_side,
-        "pattern_type": pattern_type,
-        "parallel_top": parallel_top,
-        "parallel_bottom": parallel_bottom,
-        "parallel_type": parallel_type,
+        "convergence_type": convergence_type,
     }
 
 
