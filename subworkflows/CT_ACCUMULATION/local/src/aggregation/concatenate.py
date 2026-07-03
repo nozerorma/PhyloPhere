@@ -7,7 +7,7 @@ Changes vs. original to_integrate version:
     assigns contrast = 1 for every entry (single group accumulation mode).
   - read_metadata_caas(): reads filtered_discovery.tsv produced by CT_POSTPROC.
     Columns are the unique source of truth:
-      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, pattern_type,
+      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, convergence_type,
       convergence_description, convergence_mode, caap_group, amino_encoded,
       is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
@@ -140,13 +140,13 @@ def read_metadata_caas(metadata_file):
     """Read CAAS metadata from a filtered_discovery.tsv file.
 
     Source-of-truth columns (tab-separated):
-      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, pattern_type,
+      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, convergence_type,
       convergence_description, convergence_mode, caap_group, amino_encoded,
       is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
 
-    Returns: dict[group][gene][msa_pos] = {tag, pattern_type, amino_encoded, pvalue,
+    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, amino_encoded, pvalue,
                                            pvalue_boot, isSignificant}
     """
     logging.info(f"Reading metadata CAAS from {metadata_file if metadata_file else 'None'}")
@@ -170,9 +170,7 @@ def read_metadata_caas(metadata_file):
         gene_idx          = h.index('Gene')
         pos_idx           = h.index('Position')
         tag_idx           = h.index('tag')
-        # Back-compat: disambiguation renamed the convergence label
-        # pattern_type → convergence_type; accept either header.
-        pattern_idx       = h.index('convergence_type') if 'convergence_type' in h else h.index('pattern_type')
+        convergence_idx   = h.index('convergence_type')
         amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
         pvalue_idx        = h.index('pvalue')
 
@@ -190,7 +188,7 @@ def read_metadata_caas(metadata_file):
                 gene      = parts[gene_idx].strip()
                 msa_pos   = int(float(parts[pos_idx].strip()))
                 tag       = parts[tag_idx].strip()
-                pattern   = parts[pattern_idx].strip()
+                convergence   = parts[convergence_idx].strip()
                 amino_conv = parts[amino_idx].strip() if amino_idx is not None else ''
                 try:
                     caas_pval = float(parts[pvalue_idx])
@@ -219,7 +217,7 @@ def read_metadata_caas(metadata_file):
 
             metadata[group][gene][msa_pos] = {
                 'tag': tag,
-                'pattern_type': pattern,
+                'convergence_type': convergence,
                 'caas': amino_conv,
                 'pvalue': caas_pval,
                 'pvalue_boot': pboot,

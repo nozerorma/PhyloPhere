@@ -35,14 +35,14 @@ def _remap_caas_df(df):
     """Normalise a filtered_discovery.tsv DataFrame to the internal column schema.
 
     Source-of-truth columns (tab-separated):
-      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, pattern_type,
+      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, convergence_type,
       convergence_description, convergence_mode, caap_group, amino_encoded,
       is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
       asr_is_conserved, comments, ..., Trait
 
     Produces internal schema columns:
-      gene, msa_pos, is_significant, tag, pattern_type, caap_group (uppercased),
+      gene, msa_pos, is_significant, tag, convergence_type, caap_group (uppercased),
       iscaap, change_side, is_conserved_meta, asr_is_conserved
     """
     # Rename Gene→gene, Position→msa_pos (structural keys; concept columns are
@@ -56,10 +56,7 @@ def _remap_caas_df(df):
 
     # Coerce conserved-state columns to bool
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
-    # Back-compat: disambiguation renamed the convergence label pattern_type →
-    # convergence_type. Accept either as input; keep pattern_type as the internal name.
-    if 'convergence_type' in df.columns and 'pattern_type' not in df.columns:
-        df = df.rename(columns={'convergence_type': 'pattern_type'})
+    # convergence_type is already canonical in filtered_discovery.tsv — no remap needed.
 
     # caap_group: normalise casing of the raw label (GS1–GS4, US)
     df['caap_group'] = df['caap_group'].astype(str).str.strip().str.upper()
@@ -370,7 +367,7 @@ def main(args):
 
     # Keep only needed columns to save memory
     required_cols = ['gene', 'msa_pos', 'is_significant',
-                     'change_side', 'tag', 'pattern_type', 'iscaap', 'caap_group',
+                     'change_side', 'tag', 'convergence_type', 'iscaap', 'caap_group',
                      'is_conserved_meta']
 
     # Normalise CAAS columns (handles global_meta_caas.tsv or original schema)
