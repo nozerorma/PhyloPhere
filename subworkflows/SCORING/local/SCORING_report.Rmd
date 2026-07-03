@@ -180,12 +180,16 @@ has_pos_char       <- has_vep_primateai || has_vep_cosmic || has_genomic
 
 if (has_vep_primateai) {
   vep_pai_df <- read_tsv(params$vep_primateai_file, show_col_types = FALSE)
+  # read_tsv may infer Position as character (e.g. empty/NA cells); the scored
+  # positions it is joined to are numeric, so coerce to a common integer type.
+  if ("Position" %in% names(vep_pai_df)) vep_pai_df$Position <- suppressWarnings(as.integer(vep_pai_df$Position))
 } else {
   vep_pai_df <- NULL
 }
 
 if (has_vep_cosmic) {
   vep_cosmic_df <- read_tsv(params$vep_cosmic_file, show_col_types = FALSE)
+  if ("Position" %in% names(vep_cosmic_df)) vep_cosmic_df$Position <- suppressWarnings(as.integer(vep_cosmic_df$Position))
 } else {
   vep_cosmic_df <- NULL
 }
