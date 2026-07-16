@@ -36,6 +36,8 @@ process RER_TRAIT {
     label 'process_low'
 
 
+    publishDir path: "${params.outdir}/rerconverge/rer_traits/", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }
+
     input:
     path my_traitfile
 

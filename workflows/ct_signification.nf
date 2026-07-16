@@ -20,10 +20,10 @@ workflow CT_SIGNIFICATION {
             log.info "📥 Using discovery file from CT module for signification"
             discovery_file_ch = discovery_input_channel
         } else {
-            assert params.discovery_out : "CT signification requires CT discovery output or --discovery_out"
-            def discovery_file_obj = file(params.discovery_out)
-            assert discovery_file_obj.exists() : "Error: discovery_out file not found: ${params.discovery_out}"
-            assert discovery_file_obj.isFile() : "Error: discovery_out must be a file"
+            assert params.discovery_from : "CT signification requires CT discovery output or --discovery_from"
+            def discovery_file_obj = file(params.discovery_from)
+            assert discovery_file_obj.exists() : "Error: discovery_from file not found: ${params.discovery_from}"
+            assert discovery_file_obj.isFile() : "Error: discovery_from must be a file"
             discovery_file_ch = Channel.value(discovery_file_obj)
         }
 
@@ -53,24 +53,24 @@ workflow CT_SIGNIFICATION {
             log.info "📥 Using bootstrap file from CT module"
             bootstrap_files = bootstrap_input_channel.map { file -> file }.collect()
         } else {
-            assert params.bootstrap_input : "CT signification requires --bootstrap_input when not using CT pipeline"
+            assert params.bootstrap_from : "CT signification requires --bootstrap_from when not using CT pipeline"
 
-            def bootstrap_path = file(params.bootstrap_input)
-            assert bootstrap_path.exists() : "Error: bootstrap_input not found: ${params.bootstrap_input}"
+            def bootstrap_path = file(params.bootstrap_from)
+            assert bootstrap_path.exists() : "Error: bootstrap_from not found: ${params.bootstrap_from}"
 
             if (bootstrap_path.isDirectory()) {
-                def boot_files = Channel.fromPath("${params.bootstrap_input}/*.{boot,tab}")
+                def boot_files = Channel.fromPath("${params.bootstrap_from}/*.{boot,tab}")
                 bootstrap_files = boot_files.collect()
-                def bootstrap_count = file(params.bootstrap_input).list().findAll {
+                def bootstrap_count = file(params.bootstrap_from).list().findAll {
                     it.endsWith('.boot') || it.endsWith('.tab')
                 }.size()
-                assert bootstrap_count > 0 : "Error: No .boot or .tab files found in directory ${params.bootstrap_input}"
-                log.info "📂 Loading ${bootstrap_count} bootstrap files from directory: ${params.bootstrap_input}"
+                assert bootstrap_count > 0 : "Error: No .boot or .tab files found in directory ${params.bootstrap_from}"
+                log.info "📂 Loading ${bootstrap_count} bootstrap files from directory: ${params.bootstrap_from}"
             } else {
                 assert bootstrap_path.name.endsWith('.boot') || bootstrap_path.name.endsWith('.tab') :
-                    "Error: bootstrap_input file must have .boot or .tab extension"
-                bootstrap_files = Channel.fromPath(params.bootstrap_input).collect()
-                log.info "📄 Loading single bootstrap file: ${params.bootstrap_input}"
+                    "Error: bootstrap_from file must have .boot or .tab extension"
+                bootstrap_files = Channel.fromPath(params.bootstrap_from).collect()
+                log.info "📄 Loading single bootstrap file: ${params.bootstrap_from}"
             }
         }
 

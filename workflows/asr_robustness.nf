@@ -96,7 +96,7 @@ workflow ASR_ROBUSTNESS {
         robustness_output = ASR_ROBUSTNESS_REPORT(disambig_dir_ch, threshold_ch)
 
     emit:
-        report  = robustness_output.report   // ASR_robustness.html
+        report  = robustness_output.report   // 7.ASR_robustness.html
         tables  = robustness_output.tables   // tsv/**
         plots   = robustness_output.plots    // plots/**
 }

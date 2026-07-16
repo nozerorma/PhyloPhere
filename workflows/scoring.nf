@@ -60,7 +60,7 @@ workflow SCORING {
             .ifEmpty { file(params.scoring_fade_summary_bottom ?: 'NO_FADE_BOTTOM') }
 
         def resolved_rer = (rer_summary_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_rer_input ?: 'NO_RER') }
+            .ifEmpty { file(params.scoring_rer_input ?: (params.rer_continuous_file ?: 'NO_RER')) }
 
         // Accumulation: collect all CSVs (top + bottom + all) into a single value channel.
         // The R script selects accumulation_all_* files via pattern matching.
@@ -94,11 +94,21 @@ workflow SCORING {
                 if (gi && file(gi).exists()) file(gi) else file('NO_GENOMIC_INFO')
             }
 
+        // .collect() turns these into value channels so they can be safely consumed
+        // by both SCORING_COMPUTE and SCORING_REPORT below — without it, a regular
+        // (queue) channel is drained by its first consumer, leaving the report with
+        // nothing and silently dropping the FADE site data from the rendered report.
+        // .map { it[0] } unwraps the single-element list .collect() produces back to
+        // a scalar path, since both processes call `.name` directly on this input.
         def resolved_fade_site_top_ch = (fade_site_top_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_fade_site_top ?: 'NO_FADE_SITE_TOP.txt') }
+            .collect()
+            .map { it && it.size() > 0 ? it[0] : file('NO_FADE_SITE_TOP.txt') }
 
         def resolved_fade_site_bot_ch = (fade_site_bot_ch ?: Channel.empty())
             .ifEmpty { file(params.scoring_fade_site_bottom ?: 'NO_FADE_SITE_BOT.txt') }
+            .collect()
+            .map { it && it.size() > 0 ? it[0] : file('NO_FADE_SITE_BOT.txt') }
 
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(

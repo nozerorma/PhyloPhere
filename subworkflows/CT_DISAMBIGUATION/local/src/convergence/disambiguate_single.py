@@ -482,7 +482,7 @@ def analyze_caas_position_disambiguation(
         pair_path_scores=pair_path_scores or None,
         pair_path_contaminated=pair_path_contaminated or None,
         score=None,
-        caas_pvalue=caas_pos.pvalue,
+        pvalue=caas_pos.pvalue,
         pvalue_boot=getattr(caas_pos, "pvalue_boot", None),
     )
 

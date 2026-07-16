@@ -63,7 +63,7 @@ debug_log("seed_val = %s", ifelse(nzchar(seed_val), seed_val, "<empty>"))
 # ----------------------------------------
 
 setup_rmd <- function() {
-  knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+  knitr::opts_chunk$set(warning = FALSE, message = FALSE, echo = FALSE)
   knitr::opts_knit$set(root.dir =getwd()) # Set working directory to project root
   if (nzchar(seed_val)) {
     set.seed(as.integer(seed_val))

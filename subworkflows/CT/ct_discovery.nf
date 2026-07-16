@@ -32,6 +32,11 @@ process DISCOVERY {
     tag "$alignmentID"
     label 'process_discovery'
 
+    publishDir = [
+        [ path: { "${params.outdir}/discovery" },  pattern: "*.output",         mode: 'copy', enabled: params.publish_intermediates ],
+        [ path: { "${params.outdir}/background" }, pattern: "*.background.tsv", mode: 'copy', enabled: params.publish_intermediates ]
+    ]
+
     input:
     tuple val(alignmentID), file(alignmentFile)
     file caas_config
@@ -41,8 +46,8 @@ process DISCOVERY {
     path("${alignmentID}.background.tsv"), emit: background_out, optional: true
 
     script:
-    // Define extra discovery arguments from params.file
-    def args = task.ext.args ?: ''
+    // CT discovery flags (moved here from conf/ct.config process{} block)
+    def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
 
     def pairArgs = """
 n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
@@ -106,6 +111,11 @@ process DISCOVERY_BATCHED {
     tag "$batchID (${batchSize} genes)"
     label 'process_discovery_batched'
 
+    publishDir = [
+        [ path: { "${params.outdir}/discovery" },  pattern: "*.output",         mode: 'copy', enabled: params.publish_intermediates ],
+        [ path: { "${params.outdir}/background" }, pattern: "*.background.tsv", mode: 'copy', enabled: params.publish_intermediates ]
+    ]
+
     input:
     tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*')
     file caas_config
@@ -115,7 +125,7 @@ process DISCOVERY_BATCHED {
     path("*.background.tsv"), emit: background_out, optional: true
 
     script:
-    def args = task.ext.args ?: ''
+    def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
     def runnerMode = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
     def ctBinary = (params.use_singularity || params.use_apptainer)
         ? '/usr/local/bin/_entrypoint.sh'
@@ -147,7 +157,7 @@ bash $baseDir/subworkflows/CT/local/scripts/run_ct_discovery_batch.sh \\
     --batch-id ${batchID} \\
     --manifest ${batchID}.manifest.tsv \\
     --caas-config ${caas_config} \\
-    --workers ${params.ct_discovery_batch_workers} \\
+    --workers ${task.cpus} \\
     --ali-format ${params.ali_format} \\
     --runner-mode ${runnerMode} \\
     --ct-bin ${ctBinary} \\

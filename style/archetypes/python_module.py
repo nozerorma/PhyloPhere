@@ -37,7 +37,7 @@ def load_inputs(discovery_path: Path, lengths_path: Path) -> tuple[pd.DataFrame,
     disc = pd.read_csv(discovery_path, sep="\t")
     lens = pd.read_csv(lengths_path, sep="\t")
 
-    required_disc = {"Trait", "Gene", "Position"}
+    required_disc = {"trait", "Gene", "Position"}
     missing = required_disc - set(disc.columns)
     if missing:
         raise ValueError(f"Discovery TSV missing columns: {missing}")

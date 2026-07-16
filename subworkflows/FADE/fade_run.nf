@@ -44,7 +44,7 @@ process FADE_BATCHED {
     def grid         = params.fade_grid         ?: 20
     def conc         = params.fade_concentration ?: 0.5
     def runnerMode   = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
-    def nWorkers     = (params.fade_batch_workers ?: 8) as int
+    def nWorkers     = (task.cpus ?: 8) as int
     // Each HyPhy call gets a fair share of the task's allocated CPUs.
     // floor(task.cpus / workers), minimum 1 — prevents HyPhy from reading
     // the full hardware CPU count of the node and oversubscribing it.

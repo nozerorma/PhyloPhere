@@ -48,7 +48,7 @@ process CT_POSTPROC_REPORT {
         
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'CT_postproc.Rmd',
+                '9.Characterization_report.Rmd',
                 params = list(
                     discovery_file = '${discovery}',
                     filter_summary_file = '${filter_sum}',
@@ -62,7 +62,7 @@ process CT_POSTPROC_REPORT {
                     alpha_threshold = ${alpha_thresh},
                     gene_filter_mode = '${gene_filter}'
                 ),
-                output_file = 'CT_postproc.html'
+                output_file = '9.Characterization_report.html'
             )
         "
         """
@@ -74,7 +74,7 @@ process CT_POSTPROC_REPORT {
         
         REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
-                'CT_postproc.Rmd',
+                '9.Characterization_report.Rmd',
                 params = list(
                     discovery_file = '${discovery}',
                     filter_summary_file = '${filter_sum}',
@@ -88,7 +88,7 @@ process CT_POSTPROC_REPORT {
                     alpha_threshold = ${alpha_thresh},
                     gene_filter_mode = '${gene_filter}'
                 ),
-                output_file = 'CT_postproc.html'
+                output_file = '9.Characterization_report.html'
             )
         "
         """

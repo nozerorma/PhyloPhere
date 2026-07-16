@@ -10,7 +10,7 @@ import pandas as pd
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     # Structural-key normalization only (gene/msa_pos → Gene/Position, used pervasively
-    # downstream). Semantic concept columns (caap_group, pattern_type, pvalue, caas,
+    # downstream). Semantic concept columns (caap_group, convergence_type, pvalue, caas,
     # amino_encoded, is_conserved_meta, conserved_pair, pvalue_boot, tag) are kept in
     # disambiguation's canonical lowercase form end-to-end — no re-capitalization.
     rename_map = {}
@@ -21,8 +21,8 @@ def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     if rename_map:
         df = df.rename(columns=rename_map)
 
-    if "Trait" not in df.columns:
-        df["Trait"] = "post_disambiguation"
+    if "trait" not in df.columns:
+        df["trait"] = "post_disambiguation"
     if "caap_group" not in df.columns:
         df["caap_group"] = "US"
     if "is_conserved_meta" not in df.columns:

@@ -36,6 +36,8 @@ process RER_MATRIX {
     label 'process_medium' // have to tell it that only if using cluster!!!!!!!
 
 
+    publishDir path: "${params.outdir}/rerconverge/rer_objects", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }
+
     input:
     path trait_file
     path gene_trees_file

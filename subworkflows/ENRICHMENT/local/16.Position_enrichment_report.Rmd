@@ -1,0 +1,212 @@
+---
+title: "Position-level Enrichment (Fisher, fixed cutoffs) — `r params$traitname`"
+author: "PhyloPhere Pipeline"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    theme: cosmo
+    code_folding: hide
+    df_print: paged
+    self_contained: true
+params:
+  results_file: NULL
+  traitname: "trait"
+  padj_thr: 0.15
+  fold_thr: 1.5
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 10, fig.height = 6, dev = "png", dpi = 150)
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(kableExtra)
+  library(DT)
+  library(scales)
+})
+
+PADJ <- params$padj_thr
+FOLD <- params$fold_thr
+
+kbl_html <- function(df, caption = NULL) {
+  kable(df, format = "html", escape = TRUE, caption = caption) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed", "hover"),
+                  full_width = FALSE)
+}
+```
+
+```{r load, include=FALSE}
+stopifnot(!is.null(params$results_file), file.exists(params$results_file))
+res <- readr::read_tsv(params$results_file, show_col_types = FALSE)
+has_res <- !is.null(res) && nrow(res) > 0
+if (has_res && !"sig" %in% names(res)) {
+  res$sig <- res$p_adj < PADJ & !is.na(res$fold_enrichment) &
+    (res$fold_enrichment >= FOLD | res$fold_enrichment <= 1 / FOLD)
+}
+```
+
+# Overview
+
+This report summarises **position-level enrichment** for `r params$traitname`. Unlike
+the gene-level FCS (a Wilcoxon-AUC rank-shift test), the position background is a
+sea of invariant columns that can never carry a CAAS change — a rank-shift test
+degenerates there. Instead we use **Fisher's exact test** at three fixed
+foreground cutoffs (top 10 / 5 / 1% of scored positions, per direction), run
+against every pathway across 9 GMT-style databases plus the broad functional
+`characterization` layers (UCR core/flank, FUBAR positive/purifying) — all on
+the same mechanism.
+
+A set is flagged **significant** only when it clears **both** `p.adj < `r PADJ``
+(BH-adjusted per ranking × database) **and** a minimum fold-enrichment
+magnitude (`fold >= `r FOLD`` for enrichment, or `<= `r round(1/FOLD, 3)`` for
+depletion). The fold gate matters because Fisher/hypergeometric tests gain
+enormous power at this background size (~1.47M positions) — a barely-there
+deviation from the null ratio can otherwise reach a "significant" p-value on
+its own (see Methods).
+
+```{r overview, echo=FALSE}
+if (has_res) {
+  ov <- res %>%
+    group_by(ranking, database) %>%
+    summarise(`Sets tested` = n_distinct(pathway),
+              `Sig (p.adj & fold)` = n_distinct(pathway[sig]),
+              .groups = "drop") %>%
+    arrange(ranking, database)
+  kbl_html(ov, caption = sprintf(
+    "Sets tested and significant at p.adj < %.3g AND fold outside [%.3g, %.3g], by direction and database.",
+    PADJ, 1 / FOLD, FOLD))
+} else {
+  cat("No enrichment results were produced.\n")
+}
+```
+
+# Enrichment by direction and database {.tabset .tabset-fade}
+
+Foreground = the top 10 / 5 / 1% of scored positions by `CAAS_score` in that
+direction (`top`/`bottom` restrict to `change_side` first, matching the
+SCORING module's own percentile convention; `global` uses every scored
+position, unrestricted by `change_side`). Background = the full honest tested
+position pool for every test — never restricted to the scored subset, so
+tested-and-negative positions are never silently dropped from the null.
+`fold > 1` = enriched, `< 1` = depleted. UCR core and UCR flank (and their
+per-orthogroup counterparts) are tested as independent, potentially-overlapping
+layers, not a forced partition — nothing here requires them to be disjoint.
+When available, `%gate_sig`/`%gate_fdr`/`%fade_*`/`%rer_*`/`%accum` columns
+report the percentage of *distinct genes* contributing to the overlap (never
+raw positions — one gene must not dominate) that are independently flagged by
+SCORING's own significance/FADE/RER/accumulation criteria — a cross-module
+corroboration check for whether a hit is broadly supported or isolated.
+
+```{r enrichment, echo=FALSE, results='asis'}
+if (!has_res) {
+  cat("_No results._\n\n")
+} else {
+  for (rk in unique(res$ranking)) {
+    cat(sprintf("\n## %s {.tabset}\n\n", toupper(rk)))
+    rk_df <- res %>% filter(ranking == rk)
+    for (db in unique(rk_df$database)) {
+      cat(sprintf("\n### %s {.tabset}\n\n", db))
+      db_df <- rk_df %>% filter(database == db)
+
+      for (tf in sort(unique(db_df$top_frac), decreasing = TRUE)) {
+        cat(sprintf("\n#### Top %s%%\n\n", format(100 * tf)))
+        tf_src <- db_df %>% filter(top_frac == tf) %>% arrange(desc(sig), p_adj, p_value)
+        tf_df <- tf_src %>%
+          transmute(Pathway = pathway, Description = description,
+                    `Layer size` = layer_size, `Foreground` = foreground_size,
+                    Observed = observed, Expected = round(expected, 1),
+                    Fold = round(fold_enrichment, 3), Direction = direction,
+                    `p (Fisher)` = signif(p_value, 3),
+                    `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
+        # Cross-module corroboration: % of the DISTINCT genes in the overlap
+        # (never % of raw positions — one gene must not dominate) carrying
+        # each SCORING flag (gate_sig/gate_fdr/fade/rer/accum). Only present
+        # when POSENRICH was run with --annot-file.
+        flag_cols <- grep("^pct_", names(tf_src), value = TRUE)
+        if (length(flag_cols) > 0) {
+          flag_df <- tf_src %>% transmute(across(all_of(flag_cols), ~round(.x, 1)))
+          names(flag_df) <- paste0("%", sub("^pct_", "", flag_cols))
+          tf_df <- dplyr::bind_cols(tf_df, flag_df)
+        }
+        id <- paste("dt", rk, db, gsub("\\.", "_", as.character(tf)), sep = "_")
+        cat(knitr::knit_child(text = c(
+          paste0("```{r ", id, ", echo=FALSE}"),
+          "DT::datatable(tf_df, options = list(pageLength = 10, scrollX = TRUE), rownames = FALSE)",
+          "```"), envir = environment(), quiet = TRUE))
+        cat("\n\n")
+      }
+
+      # One dotplot per (ranking, database), faceted by top_frac.
+      d <- db_df %>% filter(!is.na(fold_enrichment), fold_enrichment > 0) %>%
+        mutate(l2f = log2(fold_enrichment), neglogp = -log10(pmax(p_adj, 1e-300)),
+               frac_lab = sprintf("Top %s%%", format(100 * top_frac)))
+      if (nrow(d) > 0) {
+        lab <- d %>% filter(sig) %>% arrange(p_adj) %>% group_by(top_frac) %>% slice_head(n = 8) %>% ungroup()
+        p <- ggplot(d, aes(l2f, neglogp)) +
+          geom_hline(yintercept = -log10(PADJ), linetype = "dashed", colour = "grey50") +
+          geom_vline(xintercept = c(-log2(FOLD), log2(FOLD)), linewidth = 0.3, colour = "grey70", linetype = "dotted") +
+          geom_point(aes(colour = sig), alpha = 0.75) +
+          { if (nrow(lab) > 0) ggrepel::geom_text_repel(data = lab, aes(label = pathway), size = 3, max.overlaps = 12) } +
+          facet_wrap(~frac_lab) +
+          scale_colour_manual(values = c(`FALSE` = "grey55", `TRUE` = "#c0392b"),
+                              name = sprintf("p.adj<%.2g & fold-gated", PADJ)) +
+          labs(x = expression(log[2]~fold), y = expression(-log[10]~p.adj),
+               title = sprintf("%s — %s", toupper(rk), db)) +
+          theme_minimal(base_size = 12)
+        print(p)
+        cat("\n\n")
+      }
+    }
+  }
+}
+```
+
+# Methods
+
+- **Test**: Fisher's exact test, one 2x2 table per (ranking, database, pathway,
+  top_frac): foreground = the top 10/5/1% of scored positions (by `CAAS_score`,
+  `scoring` module `position_scores.tsv`) in that direction; background = the
+  full honest tested position universe (all non-gapped "selected" alignment
+  columns of the cleaned-background genes) — never restricted to the scored
+  subset. Run separately for the **global / top / bottom** directions
+  (`change_side`); `top`/`bottom` filter to `change_side` first (matching the
+  `scoring` module's own percentile convention — see `11.Scoring_report.Rmd`),
+  `global` does not.
+- **Databases**: 9 GMT-style position-set databases (Pfam domains/clans, COSMIC
+  and general orthogroups, genomic locations, positive/purifying-selection
+  orthogroups, UCR core/flank orthogroups) plus the broad `characterization`
+  layers (UCR core/flank, FUBAR positive/purifying) — unified onto the same
+  Fisher mechanism. `min`/`max` set-size filtering applies only to the 9
+  GMT-style databases; the broad layers were never size-filtered.
+- **`p.adj`**: BH-adjusted per (ranking, database) — a handful of huge broad
+  layers and up to thousands of small GMT terms carry very different
+  multiple-testing burdens, so they are not pooled into one BH family.
+- **Cross-module corroboration (`%gate_sig`, `%gate_fdr`, `%fade_*`, `%rer_*`,
+  `%accum`)**: optional, present when POSENRICH is run with an `--annot-file`
+  (SCORING's `fcs_stats.tsv`). For each overlap, the distinct genes
+  contributing to it (never raw positions — a single gene contributing many
+  overlapping positions must not dominate the percentage) are looked up
+  against SCORING's own `flag_*` columns, and the percentage carrying each
+  flag is reported alongside the Fisher result — the same idea as the
+  gene-level FCS report's leading-edge composition, applied to positions.
+- **Significance is dual-gated**: `p.adj < `r PADJ`` **and** fold-enrichment
+  clearing `r FOLD`x (or `r round(1/FOLD, 3)`x for depletion). The fold gate
+  exists because, at this background size (~1.47M positions), even a
+  biologically negligible deviation from the expected ratio (e.g. fold ≈ 0.95)
+  can reach a "significant" p-value on p-value alone — a minimum-effect-size
+  floor is required alongside significance, mirroring the dual-threshold
+  design the gene-level FCS report already uses (`p.adj` AND `p.perm`).
+- **No permulation (`p.perm`) at position level.** The CAAS permulation null is a
+  *naive random relabeling*: when the phenotype is permuted, the fg/bg species are
+  paired at **random across the tree**, not as the observed **matched sister
+  pairs** — so pair MRCAs are deep and the ASR path-score's isolation/independence
+  geometry differs from the observed. That null therefore tests "phenotype + a
+  broken matched-pair design" jointly rather than isolating the phenotype, and it
+  is anti-conservative on the MRCA axes. The **gene-level FCS** still uses
+  `p.perm`; see its report for the same pairing caveat.
+
+*Report generated `r Sys.time()`.*

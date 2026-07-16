@@ -60,7 +60,7 @@ Fast and easy.
 
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
-```{r setup, message=TRUE, warning=TRUE}
+```{r setup, message=FALSE, warning=FALSE}
 
 # Make params available in environment before sourcing commons.R
 if (!exists("params")) {
@@ -133,13 +133,13 @@ createDir(phylo_distribution_dir)
 ```
 ## Data Pruning Process
 This section loads the prune list, prunes the trait data frame and phylogenetic tree, and saves the pruned data for downstream analyses.
-```{r set_ourdirs, message=TRUE, warning=TRUE}
+```{r set_ourdirs, message=FALSE, warning=FALSE}
 
 prune_list <- params$prune_list
 prune_list_secondary <- params$prune_list_secondary
 
-print(paste("Prune list primary:", prune_list))
-print(paste("Prune list secondary:", prune_list_secondary))
+# print(paste("Prune list primary:", prune_list))
+# print(paste("Prune list secondary:", prune_list_secondary))
 
 # Load the prune list
 if (prune_list != "") {
@@ -211,7 +211,7 @@ write.csv(trait_df, file = file.path(data_pruning_dir, "debug_pruned_trait_df.cs
 ## 1. Load Melted Trait Data
 This section loads pre-processed trait data in a long (melted) format and adds common names for species.
 
-```{r, stat_visualization, message=TRUE, warning=TRUE}
+```{r, stat_visualization, message=FALSE, warning=FALSE}
 
 # 1. LOAD STATS ------------------------------------------------------
 # Excerpt of the trait stats data
@@ -237,7 +237,7 @@ ordered_species <-  tidytree::as_tibble(pruned_tree) %>%
   dplyr::filter(!is.na(.data$label)) %>%
   dplyr::pull(.data$label)
 
-print(ordered_species)
+# print(ordered_species)
 
 stats_df$species <- factor(stats_df$species, levels = ordered_species)
 debug_log("contrast_plot.f ordered_species = %d", length(ordered_species))
@@ -253,7 +253,7 @@ ordered_taxa <- ordered_species %>%
   na.omit() %>%
   unique()
 
-print(ordered_taxa)
+# print(ordered_taxa)
 
 # Arrange stats_df by taxa
 stats_df <- stats_df %>%
@@ -265,7 +265,7 @@ stats_df <- stats_df %>%
 # 3. Contrast Plots
 This section generates contrast plots to visualize the trait across taxa, highlighting extreme values and outliers.
 
-```{r phenoplot, fig.height=10, fig.width=15, message=TRUE, warning=TRUE, dev='png', dpi=320}
+```{r phenoplot, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
 ## PLOT FUNCTION --------------------------------------------------------------
 ### 1. Contrast plot function
@@ -432,7 +432,7 @@ if (!plot_ready) {
 # 4. Violin Plots
 This section generates violin plots to show trait distributions across taxa.
 
-```{r violin_plot, fig.height=10, fig.width=8, message=TRUE, warning=TRUE, dev='png', dpi=320}
+```{r violin_plot, fig.height=10, fig.width=8, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
 ### PLOT FUNCTION --------------------------------------------------------------
 violin_extremes.f <- function(df, trait, taxon_of_interest) {
@@ -539,7 +539,7 @@ if (!plot_ready) {
 
 # 5. Ancestral State Reconstruction (ASR) Plots
 This section generates ASR plots to visualize the evolutionary history of the trait across the phylogenetic
-```{r asr_plot, fig.height=20, fig.width=17, message=TRUE, warning=TRUE, dev='png', dpi=320}
+```{r asr_plot, fig.height=20, fig.width=17, message=FALSE, warning=FALSE, dev='png', dpi=320}
 
 # 4. ASR PLOTS  ------------------------------------------------------
 asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
@@ -893,7 +893,7 @@ if (!plot_ready) {
 
 This section creates a fan-shaped phylogenetic tree.
 
-```{r visual_distribution, fig.height=15, fig.width=15, dev="png", dpi=320, message=TRUE, warning=TRUE}
+```{r visual_distribution, fig.height=15, fig.width=15, dev="png", dpi=320, message=FALSE, warning=FALSE}
 
 # 5. PHYLOGENETIC DISTRIBUTION PLOT  ------------------------------------------------------
 palette_values <- get_palette_values()
@@ -1052,7 +1052,7 @@ if (isTRUE(has.branch)) {
   tree_with_traits <- full_join(tree_with_traits, combined_br_data, by = 'node')
 }
 
-print(tree_with_traits)
+# print(tree_with_traits)
 
 # Export dataframe for debug
 write.csv(tree_with_traits, file.path(phylo_distribution_dir, "tree_with_traits.csv"), row.names = FALSE)
@@ -1216,7 +1216,7 @@ dyn_height <- tree_profile$height
 dyn_width <- tree_profile$width
 
 ```
-```{r visual_distribution_final, fig.height=dyn_height, fig.width=dyn_width, dev="png", dpi=320, message=TRUE, warning=TRUE}
+```{r visual_distribution_final, fig.height=dyn_height, fig.width=dyn_width, dev="png", dpi=320, message=FALSE, warning=FALSE}
 
 # Finalize tree with taxon labels and phylopic images
 # Build taxon to tip mapping
@@ -1292,7 +1292,7 @@ ggsave(file.path(phylo_distribution_dir, "final_tree_plot.png"), final_tree_plot
 
 ## Session Information
 
-```{r debug_dump, results='asis'}
+```{r debug_dump, results='asis', eval=FALSE}
 
 if (length(phylo_debug_log) > 0) {
   cat("### Debug log\n")
@@ -1301,6 +1301,6 @@ if (length(phylo_debug_log) > 0) {
 
 ```
 
-```{r session_info}
+```{r session_info, eval=FALSE}
 sessionInfo()
 ```

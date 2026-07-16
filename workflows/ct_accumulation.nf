@@ -160,7 +160,7 @@ workflow CT_ACCUMULATION {
                 def fcs_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }
                 def fcs_stats_ch   = lists_out.fcs_stats
                 def fcs_bg_ch      = lists_out.gene_lists.map { files -> files.find { it.name == 'background.txt' } }
-                def fcs_label_ch   = lists_out.direction.map { dir -> "FCS_accumulation_${dir}_${params.traitname ?: 'trait'}" }
+                def fcs_label_ch   = lists_out.direction.map { dir -> "13.FCS_accumulation_${dir}_${params.traitname ?: 'trait'}" }
 
                 ACCUMULATION_FCS_REPORT(
                     fcs_subpath_ch,
@@ -175,7 +175,7 @@ workflow CT_ACCUMULATION {
                 def str_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }
                 def str_bg_ch      = lists_out.gene_lists.map { files -> files.find { it.name == 'background.txt' } }
                 def str_interest_ch = lists_out.gene_lists.map { files -> files.findAll { it.name != 'background.txt' } }
-                def str_label_ch   = lists_out.direction.map { dir -> "STRING_accumulation_${dir}_${params.traitname ?: 'trait'}" }
+                def str_label_ch   = lists_out.direction.map { dir -> "15.STRING_accumulation_${dir}_${params.traitname ?: 'trait'}" }
 
                 ACCUMULATION_STRING_REPORT(
                     str_subpath_ch,

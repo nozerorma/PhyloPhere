@@ -268,10 +268,19 @@ def main():
         write_gmt(os.path.join(args.output_dir, "pfam_clans.gmt"), pfam_clan_terms)
 
     # 2. Load UCR Positions per gene, SPLIT by region_type.
-    #    region_type ∈ {core, flank_up, flank_down}. Cores (ultra-conserved) are
-    #    expected to be DEPLETED of trait-associated change; flanks ENRICHED — so
-    #    they must be kept as separate layers, not lumped (lumping made the UCR
-    #    layer ≈ every position and the core-vs-flank contrast impossible).
+    #    region_type ∈ {core, flank_up, flank_down}. ucr_positions.tsv aggregates
+    #    THREE independent UCR-detection methods (absolute / relative / sliding —
+    #    see detect_ucr.py upstream); reading all three indiscriminately made
+    #    "core" and "flank" massively overlapping (a position can be core under
+    #    one method's window and flank under another's), since each method
+    #    computes its own window boundaries over the same underlying
+    #    conservation track. Restricted to `sliding` only, which empirically has
+    #    the least residual self-overlap of the three (window-merging
+    #    consolidates each conserved stretch into fewer, more contiguous blocks
+    #    per gene than the other two methods). Core and flank are kept as
+    #    independent, potentially-overlapping annotation layers — not a forced
+    #    partition: each is Fisher-tested against the background on its own, so
+    #    there is no statistical requirement that they be disjoint.
     print("Loading UCR positions...")
     gene_ucr_core_cols = {}    # region_type == core
     gene_ucr_flank_cols = {}   # region_type in {flank_up, flank_down}
@@ -280,10 +289,11 @@ def main():
         # columns in chunks and iterate with itertuples (row-wise iterrows over
         # this file is pathologically slow).
         reader = pd.read_csv(args.ucr_positions_file, sep='\t',
-                             usecols=['gene', 'position', 'region_type'],
-                             dtype={'gene': str, 'region_type': str},
+                             usecols=['gene', 'position', 'region_type', 'method'],
+                             dtype={'gene': str, 'region_type': str, 'method': str},
                              chunksize=500_000)
         for chunk in reader:
+            chunk = chunk[chunk['method'] == 'sliding']
             for row in chunk.itertuples(index=False):
                 gene = str(row.gene).split('.')[0]
                 if gene not in active_genes:

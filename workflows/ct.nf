@@ -97,10 +97,10 @@ workflow CT {
         // resample_out      → concatenated resample.tab used for reporting / emit
         def resample_out = Channel.empty()
         def resample_dir_out = Channel.empty()   // directory channel for BOOTSTRAP
-        if (params.resample_out) {
-            def resample_path = file(params.resample_out)
+        if (params.resample_from) {
+            def resample_path = file(params.resample_from)
             if (resample_path.isDirectory()) {
-                resample_dir_out = Channel.value(file(params.resample_out, type: 'dir'))
+                resample_dir_out = Channel.value(file(params.resample_from, type: 'dir'))
                 resample_out     = resample_dir_out
             } else {
                 // legacy single-file fallback (pre-partitioned runs)
@@ -230,12 +230,12 @@ workflow CT {
                 align_with_discovery = align_with_discovery
                         .combine(discovery_done)
                         .map { row -> tuple(row[0], row[1], row[2]) }
-            } else if (params.discovery_out && params.discovery_out != "none") {
+            } else if (params.discovery_from && params.discovery_from != "none") {
                 // Use external discovery file(s)
-                def discovery_path = file(params.discovery_out)
+                def discovery_path = file(params.discovery_from)
                 if (discovery_path.isDirectory()) {
                     def discovery_files = Channel
-                            .fromPath("${params.discovery_out}/*")
+                            .fromPath("${params.discovery_from}/*")
                             .filter { it.isFile() }
                             .map { file -> tuple(file.baseName, file) }
 
@@ -278,6 +278,8 @@ workflow CT {
             if (bootstrapBatchSize > 1) {
                 def bootstrapBatchCounter = 0
                 def bootstrap_batches = bootstrap_in
+                    .toSortedList({ a, b -> a[0] <=> b[0] })
+                    .flatMap()
                     .collate(bootstrapBatchSize)
                     .map { batch ->
                         def batchID = sprintf('bootstrap_batch_%05d', ++bootstrapBatchCounter)

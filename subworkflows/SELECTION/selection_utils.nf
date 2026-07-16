@@ -158,7 +158,7 @@ process ANNOTATE_TREE_FG {
 // ─────────────────────────────────────────────────────────────────────────────
 // ANNOTATE_TREE_FG_BATCHED — batched annotation with foreground labels.
 // Processes multiple genes in a single Nextflow task, reducing SLURM scheduling
-// overhead. Up to params.fade_batch_workers genes run concurrently within each
+// overhead. Up to task.cpus genes run concurrently within each
 // task using bash job control.
 //
 // Manifest format (tab-separated, one gene per line):
@@ -185,7 +185,7 @@ process ANNOTATE_TREE_FG_BATCHED {
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local/src"
-    def workers = params.fade_batch_workers ?: 4
+    def workers = task.cpus ?: 4
     def runnerMode = (params.use_singularity || params.use_apptainer) ? "container" : "local"
     """
     cat <<'MANIFEST_EOF' > ${batchID}.manifest.tsv

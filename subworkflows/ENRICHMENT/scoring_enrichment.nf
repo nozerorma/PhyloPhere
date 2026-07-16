@@ -49,7 +49,7 @@ process SCORING_STRING_REPORT {
     path gene_scores
 
     output:
-    path "STRING_general_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "15.STRING_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "string_results/**",                  emit: string_results,          optional: true
     path "string_summary/**",                  emit: string_summary,          optional: true
     path "string_plots/**",                    emit: string_plots,            optional: true
@@ -67,7 +67,7 @@ process SCORING_STRING_REPORT {
     // PPI density test. Honours the custom background: set_background(cleaned_background)
     // is forwarded to the STRING API, so the null is draws from cleaned_background, not
     // the whole proteome. See string_enable_ppi in conf/enrichment.config.
-    def enable_ppi = (params.string_enable_ppi ?: false) ? 'TRUE' : 'FALSE'
+    def enable_ppi = 'TRUE'
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
 
@@ -80,7 +80,7 @@ process SCORING_STRING_REPORT {
                 basename=\$(basename "\$f" .tsv)
                 name=\${basename#slice_}
                 # Extract first column (Gene) except header (1st line)
-                tail -n +2 "\$f" | cut -f1 | grep -v "^[[:space:]]*\$" > "\${name}.txt"
+                tail -n +2 "\$f" | cut -f1 | { grep -v "^[[:space:]]*\$" || true; } > "\${name}.txt"
             fi
         done
     """
@@ -88,7 +88,7 @@ process SCORING_STRING_REPORT {
     def render_cmd = """
         Rscript -e "
             rmarkdown::render(
-                'STRING_general.Rmd',
+                '15.STRING_report.Rmd',
                 params = list(
                     background_file     = '${background}',
                     background_basename = '${bg_name}',
@@ -100,9 +100,10 @@ process SCORING_STRING_REPORT {
                     fdr_thr             = ${fdr_thr},
                     top_thr             = ${top_thr},
                     enable_ppi_enrichment = ${enable_ppi},
-                    gene_scores_file    = ${gs_arg}
+                    gene_scores_file    = ${gs_arg},
+                    string_db_dir       = '${params.string_db_dir}'
                 ),
-                output_file = 'STRING_general_${traitname}.html'
+                output_file = '15.STRING_report_${traitname}.html'
             )
         "
     """
@@ -143,7 +144,7 @@ process SCORING_STRING_REPORT {
 //   string_tsvs     : string_results/*_enrichment.tsv  (collection, optional)
 //
 // The script sorts staged files into cmp_fcs/ and cmp_string/ before
-// invoking COMPARE_scoring.Rmd.
+// invoking 12.Comparison_report.Rmd.
 // ─────────────────────────────────────────────────────────────────────────────
 process SCORING_COMPARE_REPORT {
     tag "scoring_compare|${params.traitname ?: 'unknown_trait'}"
@@ -170,7 +171,7 @@ process SCORING_COMPARE_REPORT {
     path string_tsvs       // string_results/*_enrichment.tsv files (may be placeholder)
 
     output:
-    path "COMPARE_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "12.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "compare_results/**", emit: compare_results, optional: true
 
     script:
@@ -183,7 +184,7 @@ process SCORING_COMPARE_REPORT {
     def render_cmd = """
         Rscript -e "
             rmarkdown::render(
-                'COMPARE_scoring.Rmd',
+                '12.Comparison_report.Rmd',
                 params = list(
                     fcs_dir    = 'cmp_fcs',
                     string_dir = 'cmp_string',
@@ -192,7 +193,7 @@ process SCORING_COMPARE_REPORT {
                     top_n      = ${top_n},
                     traitname  = '${traitname}'
                 ),
-                output_file = 'COMPARE_scoring_${traitname}.html'
+                output_file = '12.Comparison_report_${traitname}.html'
             )
         "
     """
@@ -203,7 +204,7 @@ process SCORING_COMPARE_REPORT {
         mkdir -p cmp_fcs cmp_string
 
         # Per-module FCS all-results tables (skip empty/sentinel files via -s).
-        # COMPARE_scoring.Rmd derives the module from the <module>_fcs_all.tsv name.
+        # 12.Comparison_report.Rmd derives the module from the <module>_fcs_all.tsv name.
         for m in caas rer fade accum; do
             [ -s "\${m}_fcs_all.tsv" ] && cp "\${m}_fcs_all.tsv" "cmp_fcs/\${m}_fcs_all.tsv" || true
         done

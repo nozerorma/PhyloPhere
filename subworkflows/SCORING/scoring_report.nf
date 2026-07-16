@@ -4,7 +4,7 @@
  * SCORING_REPORT
  * ──────────────
  * Render an HTML summary report for position-level and gene-level
- * CAAS scores.  Calls SCORING_report.Rmd.
+ * CAAS scores.  Calls 11.Scoring_report.Rmd.
  *
  * Inputs (15)
  * ──────
@@ -59,7 +59,7 @@ process SCORING_REPORT {
     path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay
 
     output:
-    path "SCORING_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
 
     script:
     def local_dir      = "${baseDir}/subworkflows/SCORING/local"
@@ -92,7 +92,7 @@ process SCORING_REPORT {
 
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'SCORING_report.Rmd',
+                '11.Scoring_report.Rmd',
                 params = list(
                     position_scores_file = '${position_scores}',
                     gene_scores_file     = '${gene_scores}',
@@ -119,7 +119,7 @@ process SCORING_REPORT {
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
                 ),
-                output_file = 'SCORING_report_${traitname}.html'
+                output_file = '11.Scoring_report_${traitname}.html'
             )
         "
         """
@@ -129,7 +129,7 @@ process SCORING_REPORT {
 
         REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
-                'SCORING_report.Rmd',
+                '11.Scoring_report.Rmd',
                 params = list(
                     position_scores_file = '${position_scores}',
                     gene_scores_file     = '${gene_scores}',
@@ -156,7 +156,7 @@ process SCORING_REPORT {
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
                 ),
-                output_file = 'SCORING_report_${traitname}.html'
+                output_file = '11.Scoring_report_${traitname}.html'
             )
         "
         """

@@ -16,7 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 
-def detect_extreme_genes(discovery_df, gene_length_df, percentile=0.99, trait_col="Trait"):
+def detect_extreme_genes(discovery_df, gene_length_df, percentile=0.99, trait_col="trait"):
     """
     Identify genes in the top percentile by CAAS density.
     
@@ -24,13 +24,13 @@ def detect_extreme_genes(discovery_df, gene_length_df, percentile=0.99, trait_co
     independently per group (genes are evaluated within their group context).
     
     Args:
-        discovery_df: DataFrame with columns [Trait, Gene, Position, ...] and optional caap_group
+        discovery_df: DataFrame with columns [trait, Gene, Position, ...] and optional caap_group
         gene_length_df: DataFrame with columns [Gene, length]
         percentile: Threshold percentile (default 0.99 for top 1%)
         trait_col: Name of trait column
     
     Returns:
-        DataFrame with columns [Trait, Gene, n_CAAS, length, n_CAAS_per_length, category] and optional caap_group
+        DataFrame with columns [trait, Gene, n_CAAS, length, n_CAAS_per_length, category] and optional caap_group
     """
     # Check if CAAP mode (caap_group column present)
     has_caap_group = 'caap_group' in discovery_df.columns
@@ -94,7 +94,7 @@ def detect_extreme_genes(discovery_df, gene_length_df, percentile=0.99, trait_co
     return extreme_genes
 
 
-def detect_dubious_genes(discovery_df, gene_length_df, cluster_file, iqr_multiplier=3.0, trait_col="Trait"):
+def detect_dubious_genes(discovery_df, gene_length_df, cluster_file, iqr_multiplier=3.0, trait_col="trait"):
     """
     Identify IQR outlier genes that contain clustered CAAS positions.
     
@@ -102,14 +102,14 @@ def detect_dubious_genes(discovery_df, gene_length_df, cluster_file, iqr_multipl
     independently per group (genes are evaluated within their group context).
     
     Args:
-        discovery_df: DataFrame with columns [Trait, Gene, Position, ...] and optional caap_group
+        discovery_df: DataFrame with columns [trait, Gene, Position, ...] and optional caap_group
         gene_length_df: DataFrame with columns [Gene, length]
         cluster_file: Path to cluster filtering output (*.filtered.*.tsv)
         iqr_multiplier: IQR multiplier for outlier threshold (default 3.0)
         trait_col: Name of trait column
     
     Returns:
-        DataFrame with columns [Trait, Gene, n_CAAS, length, n_CAAS_per_length, category] and optional caap_group
+        DataFrame with columns [trait, Gene, n_CAAS, length, n_CAAS_per_length, category] and optional caap_group
     """
     # Check if CAAP mode (caap_group column present)
     has_caap_group = 'caap_group' in discovery_df.columns
@@ -290,7 +290,7 @@ def apply_gene_filter(discovery_df, removed_genes_df, mode='both'):
     return filtered_df
 
 
-def build_full_gene_stats(discovery_df, gene_length_df, removed_genes_df, extreme_percentile=0.99, iqr_multiplier=3.0, trait_col="Trait"):
+def build_full_gene_stats(discovery_df, gene_length_df, removed_genes_df, extreme_percentile=0.99, iqr_multiplier=3.0, trait_col="trait"):
     """
     Build complete gene statistics for all genes with thresholds and categories.
     
@@ -403,7 +403,7 @@ Examples:
     
     # Input files
     parser.add_argument('-i', '--disambiguation-input', required=True,
-                        help='CAAS disambiguation file (TSV with Trait, Gene, Position columns)')
+                        help='CAAS disambiguation file (TSV with trait, Gene, Position columns)')
     parser.add_argument('-l', '--gene-ensembl-file', required=True,
                         help='Gene annotation file (TSV with Gene, Chr, Start, End, Strand, length columns)')
     parser.add_argument('-c', '--cluster-file', default=None,
@@ -418,8 +418,8 @@ Examples:
                         help='Density percentile for extreme genes (default: 0.99 = top 1%%)')
     parser.add_argument('--iqr-multiplier', type=float, default=3.0,
                         help='IQR multiplier for dubious gene threshold (default: 3.0)')
-    parser.add_argument('--trait-col', default='Trait',
-                        help='Name of trait column (default: Trait)')
+    parser.add_argument('--trait-col', default='trait',
+                        help='Name of trait column (default: trait)')
     
     # Output files
     parser.add_argument('-o', '--output', required=True,

@@ -97,10 +97,13 @@ workflow FADE {
             }
 
             def make_annotate_batches = { branch_ch, dir ->
+                def batchCounter = 0
                 branch_ch
+                    .toSortedList({ a, b -> a[0] <=> b[0] })
+                    .flatMap()
                     .collate(annotBatchSize)
                     .map { batch ->
-                        def batchID = "annotate_batch_${dir}_${java.util.UUID.randomUUID().toString().replace('-', '').take(12)}"
+                        def batchID = sprintf('annotate_batch_%s_%05d', dir, ++batchCounter)
                         def validRows = batch.findAll { row ->
                             row[2]?.name != 'NO_FILE' && row[3]?.name != 'NO_FILE' && row[4]?.name != 'NO_FILE'
                         }
@@ -161,10 +164,13 @@ workflow FADE {
             }
 
             def make_fade_batches = { branch_ch, dir ->
+                def batchCounter = 0
                 branch_ch
+                    .toSortedList({ a, b -> a[0] <=> b[0] })
+                    .flatMap()
                     .collate(fadeBatchSize)
                     .map { batch ->
-                        def batchID = "fade_batch_${dir}_${java.util.UUID.randomUUID().toString().replace('-', '').take(12)}"
+                        def batchID = sprintf('fade_batch_%s_%05d', dir, ++batchCounter)
                         def manifestText = createBatchManifestText(
                             batch.collect { row -> "${row[0]}\t${row[2].name}\t${row[3].name}" }
                         )
@@ -216,14 +222,14 @@ workflow FADE {
                         Channel.value(subpath),
                         lists_out.fcs_stats,
                         bg_ch,
-                        Channel.value("FCS_fade_${direction}_${params.traitname ?: 'trait'}"),
+                        Channel.value("13.FCS_fade_${direction}_${params.traitname ?: 'trait'}"),
                         Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats
                     )
                 }
                 if (params.string) {
                     FADE_STRING_REPORT(
                         Channel.value(subpath), bg_ch, interest_ch,
-                        Channel.value("STRING_fade_${direction}_${params.traitname ?: 'trait'}")
+                        Channel.value("15.STRING_fade_${direction}_${params.traitname ?: 'trait'}")
                     )
                 }
             }

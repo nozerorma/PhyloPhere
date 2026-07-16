@@ -44,6 +44,11 @@ process CONTRAST_ALGORITHM {
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        if [ -L "${results_dir}" ]; then
+            target=\$(readlink -f "${results_dir}")
+            rm -f "${results_dir}"
+            cp -r "\${target}" "${results_dir}"
+        fi
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 '4.Independent_contrasts.Rmd',
@@ -77,6 +82,11 @@ process CONTRAST_ALGORITHM {
     } else {
         """
         cp -R ${local_dir}/* .
+        if [ -L "${results_dir}" ]; then
+            target=\$(readlink -f "${results_dir}")
+            rm -f "${results_dir}"
+            cp -r "\${target}" "${results_dir}"
+        fi
         Rscript -e "
             rmarkdown::render(
                 '4.Independent_contrasts.Rmd',

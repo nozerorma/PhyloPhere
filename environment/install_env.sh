@@ -75,10 +75,4 @@ remotes::install_github("nclark-lab/RERconverge@2bd328f7530b4aca9b48c0b3997875c9
 cat("OK: R deps installed\n")
 '
 
-echo "Installing pip dependencies not in Anaconda into: $ENV_NAME"
-# Use the ENV's pip (via the solver's run wrapper), not whatever pip is on PATH,
-# so xlmhglite lands in phylophere. Quote the extra so the shell doesn't glob '[all]'.
-# Builds a Cython wheel using the env's gcc/cxx-compiler + numpy at install time.
-"${RUN[@]}" pip install "xlmhglite[all]"
-
 echo "Done."

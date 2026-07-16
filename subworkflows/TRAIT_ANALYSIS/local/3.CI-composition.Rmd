@@ -59,7 +59,7 @@ This script computes contrasting species pairs for the trait of interest using o
 
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
-```{r setup, message=TRUE, warning=TRUE}
+```{r setup, message=FALSE, warning=FALSE}
 # Make params available in environment before sourcing commons.R
 if (!exists("params")) {
   stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
@@ -118,7 +118,7 @@ createDir(ci_dir)
 
 When population count columns (`n_trait` / `c_trait`) are present, 95% Jeffreys credibility intervals are computed. Otherwise, species are categorised into *top*, *bottom*, and *intermediate* groups using the selected `discrete_method`.
 
-```{r compute_CI, message=TRUE, warning=TRUE}
+```{r compute_CI, message=FALSE, warning=FALSE}
 # Determine which analysis path to follow
 use_count_data <- has.n && has.c
 debug_log("use_count_data = %s", use_count_data)
@@ -200,7 +200,7 @@ if (use_count_data) {
     )
 
   cat("Discrete categorization summary:\n")
-  print(table(trait_ci$category))
+  # print(table(trait_ci$category))
   cat(sprintf("Method: %s | lower threshold = %.4f | upper threshold = %.4f\n",
               threshold_label, lower_thresh, upper_thresh))
 }
@@ -219,7 +219,7 @@ This section prepares data for comparing trait values between all pairs of speci
 For the **Jeffreys CI** path, two species are considered non-overlapping when their credibility intervals do not overlap.
 For the **discrete** path, a pair is considered non-overlapping only when one species is in the *top* group and the other in the *bottom* group.
 
-```{r prep_CI, paged.print=TRUE, message=TRUE, warning=TRUE}
+```{r prep_CI, paged.print=TRUE, message=FALSE, warning=FALSE}
 # Helper function to create pairwise comparisons
 create_pairwise_data <- function(ci_data) {
   ci_subset <- ci_data %>%
@@ -302,7 +302,7 @@ head(pairwise_data)
 
 This section transforms pairwise data into matrix format for visualization.
 
-```{r diff_matrix, paged.print=TRUE, message=TRUE, warning=TRUE}
+```{r diff_matrix, paged.print=TRUE, message=FALSE, warning=FALSE}
 # Helper function to build difference matrix
 build_diff_matrix <- function(pairwise_data_input) {
   pairwise_data_input %>%
@@ -332,7 +332,7 @@ head(matrix)
 
 This section creates heatmaps to visualize pairwise differences in prevalence. Species labels are colored based on prevalence quantiles.
 
-```{r plot_CI, fig.height=12, fig.width=15, message=TRUE, warning=TRUE, dev="ragg_png", dpi=320}
+```{r plot_CI, fig.height=12, fig.width=15, message=FALSE, warning=FALSE, dev="ragg_png", dpi=320}
 # Build plain-text species labels and explicit categories for a version-stable heatmap.
 create_species_labels <- function(trait_data, lower_thresh, upper_thresh) {
   trait_data %>%
@@ -492,27 +492,21 @@ if (has_heatmap_extremes) {
   write.csv(species_labels, file.path(ci_dir, "my_labels_colored.csv"), 
             quote = FALSE, row.names = FALSE)
 
-  # Create heatmaps with non-overlapping CI highlights
+  # Create heatmap with non-overlapping CI highlights
   overlap_heatmap <- create_heatmap(pairwise_data_viz_extreme, species_labels, highlight_nonoverlap = TRUE)
-  flat_heatmap <- create_heatmap(pairwise_data_viz_extreme, species_labels, highlight_nonoverlap = FALSE)
   heatmap_dims <- attr(overlap_heatmap, "heatmap_dims")
 
   p_overlap <- overlap_heatmap
-  p_flat <- flat_heatmap
 
   knitr::opts_current$set(fig.width = heatmap_dims$width, fig.height = heatmap_dims$height)
 
-  # Save heatmaps
-  ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap, 
-         width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina",
-         device = ragg::agg_png)
-  ggsave(file.path(ci_dir, "visual_matrix_flat.png"), p_flat, 
+  # Save heatmap
+  ggsave(file.path(ci_dir, "visual_matrix_no_overlap.png"), p_overlap,
          width = heatmap_dims$width, height = heatmap_dims$height, dpi = "retina",
          device = ragg::agg_png)
 
-  # Display plots
+  # Display plot
   print(p_overlap)
-  print(p_flat)
 } else {
   if (use_count_data) {
     cat("CI heatmap skipped: fewer than two extreme species remain, or only one extreme class is present.\n")
@@ -585,18 +579,27 @@ pairwise_data_end_polished <- pairwise_data_full %>%
     "Trait CI2" = trait_CI2
   )
 
-write.csv(pairwise_data_end_polished, 
-          file.path(ci_dir, "pairwise_data_end_polished.csv"), 
+write.csv(pairwise_data_end_polished,
+          file.path(ci_dir, "pairwise_data_end_polished.csv"),
           quote = FALSE, row.names = FALSE)
 
-# Display preview
-head(trait_ci_polished)
+# Display non-overlapping pairwise contrasts only, deduplicated (species1 < species2)
+# to avoid showing each pair twice (A-B and B-A).
+pairwise_nonoverlap <- pairwise_data_end_polished %>%
+  dplyr::left_join(
+    pairwise_data %>% dplyr::select(species1, species2, overlap_use),
+    by = c("species1", "species2")
+  ) %>%
+  dplyr::filter(!overlap_use, species1 < species2) %>%
+  dplyr::select(-overlap_use)
+
+pairwise_nonoverlap
 
 ```
 
 ## Session Information
 
-```{r debug_dump, results='asis'}
+```{r debug_dump, results='asis', eval=FALSE}
 
 if (length(phylo_debug_log) > 0) {
   cat("### Debug log\n")
@@ -605,6 +608,6 @@ if (length(phylo_debug_log) > 0) {
 
 ```
 
-```{r session_info}
+```{r session_info, eval=FALSE}
 sessionInfo()
 ```

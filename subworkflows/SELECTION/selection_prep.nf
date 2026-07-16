@@ -117,7 +117,7 @@ process PREP_ALIGNMENTS {
 /**
  * PREP_ALIGNMENTS_BATCHED — batched conversion + tree-filtering.
  * Processes multiple genes in a single Nextflow task, reducing SLURM scheduling
- * overhead. Up to params.selection_prep_batch_workers genes run concurrently
+ * overhead. Up to task.cpus genes run concurrently
  * within each task using bash job control.
  *
  * Manifest format (tab-separated, one gene per line):
@@ -139,7 +139,7 @@ process PREP_ALIGNMENTS_BATCHED {
 
     script:
     def local_dir  = "${baseDir}/subworkflows/SELECTION/local/src"
-    def workers    = params.selection_prep_batch_workers ?: 4
+    def workers    = task.cpus ?: 4
     def runnerMode = (params.use_singularity || params.use_apptainer) ? "container" : "local"
     """
     cat <<'MANIFEST_EOF' > ${batchID}.manifest.tsv
@@ -194,8 +194,8 @@ workflow SELECTION_PREP {
             .filter { files -> files && files.size() > 0 }
             .map { files -> files[0] }
 
-        def ali_dir = (params.fade_alignment ?: params.alignment) ?:
-            error("SELECTION_PREP: no alignment directory specified (--alignment or --fade_alignment)")
+        def ali_dir = params.alignment ?:
+            error("SELECTION_PREP: no alignment directory specified (--alignment)")
 
         def mode = (params.fade_mode ?: 'gene_set')
         log.info "[SELECTION_PREP] selection mode: ${mode}"
@@ -277,10 +277,13 @@ workflow SELECTION_PREP {
         def filtered_fasta_ch
 
         if (prepBatchSize > 1) {
+            def prepBatchCounter = 0
             def batches_ch = ali_ch
+                .toSortedList({ a, b -> a[0] <=> b[0] })
+                .flatMap()
                 .collate(prepBatchSize)
                 .map { batch ->
-                    def batchID = "prep_batch_${java.util.UUID.randomUUID().toString().replace('-', '').take(12)}"
+                    def batchID = sprintf('prep_batch_%05d', ++prepBatchCounter)
                     def manifestText = createBatchManifestText(
                         batch.collect { row -> "${row[0]}\t${row[1].name}" }
                     )

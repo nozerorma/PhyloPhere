@@ -4,7 +4,7 @@
  * RER_REPORT
  * ──────────
  * Generate an HTML summary report from the RERconverge continuous analysis
- * RDS result file. Calls RERconverge_report.Rmd.
+ * RDS result file. Calls 5.RERconverge_report.Rmd.
  *
  * Inputs
  * ──────
@@ -36,7 +36,7 @@ process RER_REPORT {
     path continuous_output
 
     output:
-    path "RERconverge_report.html",   emit: report
+    path "5.RERconverge_report.html",   emit: report
     path "rerconverge_summary_*.tsv", emit: summary_tsv, optional: true
 
     script:
@@ -57,7 +57,7 @@ process RER_REPORT {
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'RERconverge_report.Rmd',
+                '5.RERconverge_report.Rmd',
                 params = list(
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
@@ -68,12 +68,12 @@ process RER_REPORT {
                     top1_pct          = ${top1_pct},
                     output_dir        = '${outdir}'
                 ),
-                output_file = 'RERconverge_report.html'
+                output_file = '5.RERconverge_report.html'
             )
         "
 
-        if [ -f 'RERconverge_report.html' ]; then
-            echo "[RER_REPORT] Report generated: RERconverge_report.html"
+        if [ -f '5.RERconverge_report.html' ]; then
+            echo "[RER_REPORT] Report generated: 5.RERconverge_report.html"
         else
             echo "[RER_REPORT] WARNING: Report file was not created."
         fi
@@ -86,7 +86,7 @@ process RER_REPORT {
 
         Rscript -e "
             rmarkdown::render(
-                'RERconverge_report.Rmd',
+                '5.RERconverge_report.Rmd',
                 params = list(
                     continuous_rds    = '${continuous_output}',
                     traitname         = '${traitname}',
@@ -97,12 +97,12 @@ process RER_REPORT {
                     top1_pct          = ${top1_pct},
                     output_dir        = '${outdir}'
                 ),
-                output_file = 'RERconverge_report.html'
+                output_file = '5.RERconverge_report.html'
             )
         "
 
-        if [ -f 'RERconverge_report.html' ]; then
-            echo "[RER_REPORT] Report generated: RERconverge_report.html"
+        if [ -f '5.RERconverge_report.html' ]; then
+            echo "[RER_REPORT] Report generated: 5.RERconverge_report.html"
         else
             echo "[RER_REPORT] WARNING: Report file was not created."
         fi

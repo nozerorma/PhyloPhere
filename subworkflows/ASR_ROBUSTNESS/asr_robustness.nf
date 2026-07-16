@@ -33,33 +33,33 @@ process ASR_ROBUSTNESS_REPORT {
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        cp ${local_dir}/ASR_robustness.Rmd .
+        cp ${local_dir}/7.ASR_robustness.Rmd .
 
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'ASR_robustness.Rmd',
+                '7.ASR_robustness.Rmd',
                 params = list(
                     disambig_dir        = '${disambig_dir_str}',
                     posterior_threshold = ${threshold_str},
                     output_dir          = '.'
                 ),
-                output_file = 'ASR_robustness.html'
+                output_file = '7.ASR_robustness.html'
             )
         "
         """
     } else {
         """
-        cp ${local_dir}/ASR_robustness.Rmd .
+        cp ${local_dir}/7.ASR_robustness.Rmd .
 
         REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
-                'ASR_robustness.Rmd',
+                '7.ASR_robustness.Rmd',
                 params = list(
                     disambig_dir        = '${disambig_dir_str}',
                     posterior_threshold = ${threshold_str},
                     output_dir          = '.'
                 ),
-                output_file = 'ASR_robustness.html'
+                output_file = '7.ASR_robustness.html'
             )
         "
         """

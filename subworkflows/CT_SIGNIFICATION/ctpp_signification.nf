@@ -32,7 +32,7 @@ process CAAS_SIGNIFICATION_REPORT {
         # Render R Markdown report
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'CT_signification.Rmd',
+                '8.CT_signification.Rmd',
                 params = list(
                     discovery_input = '${discovery_input}',
                     background_input = '${background_input}',
@@ -40,7 +40,7 @@ process CAAS_SIGNIFICATION_REPORT {
                     output_dir = '${outdir}',
                     caap_mode = ${caap_mode_r}
                 ),
-                output_file = 'CT_signification.html'
+                output_file = '8.CT_signification.html'
             )
         "
         """
@@ -51,7 +51,7 @@ process CAAS_SIGNIFICATION_REPORT {
         # Render R Markdown report
         Rscript -e "
             rmarkdown::render(
-                'CT_signification.Rmd',
+                '8.CT_signification.Rmd',
                 params = list(
                     discovery_input = '${discovery_input}',
                     background_input = '${background_input}',
@@ -59,7 +59,7 @@ process CAAS_SIGNIFICATION_REPORT {
                     output_dir = '${outdir}',
                     caap_mode = ${caap_mode_r}
                 ),
-                output_file = 'CT_signification.html'
+                output_file = '8.CT_signification.html'
             )
         "
         """

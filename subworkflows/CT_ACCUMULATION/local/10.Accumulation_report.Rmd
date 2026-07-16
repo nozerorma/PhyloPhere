@@ -88,11 +88,14 @@ fisher_df <- raw %>%
   summarise(
     PValueEmpirical = .fisher_combine(PValueEmpirical),
     ActualCount     = sum(ActualCount, na.rm = TRUE),
-    MeanSim         = NA_real_,
-    SD              = NA_real_,
+    # Pooled under independence: sums combine, variances add, RandsAbove/RandsBelow
+    # (order statistics of a single group's null draws) don't carry a pooled meaning
+    # across independently-drawn groups and are therefore omitted (kept NA).
+    MeanSim         = sum(MeanSim, na.rm = TRUE),
+    SD              = sqrt(sum(SD^2, na.rm = TRUE)),
     RandsAbove      = NA_integer_,
     RandsBelow      = NA_integer_,
-    NumRands        = NA_integer_,
+    NumRands        = max(NumRands, na.rm = TRUE),
     scheme          = "fisher",
     .groups         = "drop"
   )
@@ -223,6 +226,13 @@ for (dir in directions) {
 ---
 
 ## Significant genes {.tabset}
+
+> **Note on the `fisher` scheme:** rows for the `fisher` scheme are pooled across the five
+> group schemes (`us`, `gs1`-`gs4`) under the assumption that each group's randomization draws
+> independently. `MeanSim` and `SD` are combined accordingly (sum of means; SD from summed
+> variances), and `PValueEmpirical` is Fisher's combined p-value. `RandsAbove`/`RandsBelow` are
+> per-group order statistics that have no valid pooled interpretation across independent groups
+> and are therefore omitted (shown as `NA`) for `fisher` rows.
 
 ```{r sig-tables, results='asis'}
 for (dir in directions) {

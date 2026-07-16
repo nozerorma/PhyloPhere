@@ -41,13 +41,13 @@ workflow CT_DISAMBIGUATION {
             .filter { it != null }
 
         def meta_caas = meta_from_upstream.ifEmpty {
-            if (params.ct_disambig_caas_metadata) {
-                def f = file(params.ct_disambig_caas_metadata)
-                assert f.exists() : "Error: ct_disambig_caas_metadata file not found: ${params.ct_disambig_caas_metadata}"
-                log.info "📄 Loading standalone disambiguation metadata: ${params.ct_disambig_caas_metadata}"
+            if (params.signification_from) {
+                def f = file(params.signification_from)
+                assert f.exists() : "Error: signification_from file not found: ${params.signification_from}"
+                log.info "📄 Loading standalone disambiguation metadata: ${params.signification_from}"
                 return f
             }
-            error "CT disambiguation requires signification meta file or --ct_disambig_caas_metadata"
+            error "CT disambiguation requires signification meta file or --signification_from"
         }
 
         // Prefer upstream CT-resolved trait/tree for integrated runs; fall back to params for standalone runs

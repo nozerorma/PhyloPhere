@@ -167,11 +167,16 @@ workflow {
         def ran_discovery     = ct_tools_ran.contains('discovery')
         def ran_bootstrap     = ct_tools_ran.contains('bootstrap')
 
+        // Signification always runs downstream of CAAStools when bootstrap produced
+        // permutation output (or a standalone --bootstrap_from directory is supplied).
+        // No separate --ct_signification toggle: it is implied by running bootstrap.
+        def run_signification = ran_bootstrap || params.bootstrap_from
+
         // Stable channel references for CT_POSTPROC outputs used by multiple consumers.
         // Populated inside the ct_postproc block when --ct_postproc is enabled.
         def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
 
-        if (params.ct_signification) {
+        if (run_signification) {
             // Only pass CT channels when the corresponding tool actually ran.
             // Pass null (not Channel.empty()) when absent so the if(channel) guard
             // inside CT_SIGNIFICATION correctly detects absence and falls back to params.
@@ -184,8 +189,8 @@ workflow {
         }
 
         if (params.ct_disambiguation) {
-            if (!params.ct_signification && !params.ct_disambig_caas_metadata) {
-                error "CT disambiguation requires signification outputs (--ct_signification) or a standalone metadata file (--ct_disambig_caas_metadata)."
+            if (!run_signification && !params.signification_from) {
+                error "CT disambiguation requires upstream signification (run CAAStools bootstrap via --ct_tool ...,bootstrap) or a standalone metadata file (--signification_from)."
             }
 
             // Forward both possible signification metadata artifacts; CT_DISAMBIGUATION
@@ -358,8 +363,8 @@ workflow {
             def scoring_fade_bot_ch      = params.fade       ? FADE.out.summary_bottom            : null
             def scoring_fade_site_top_ch = params.fade       ? FADE.out.site_tsv_top              : null
             def scoring_fade_site_bot_ch = params.fade       ? FADE.out.site_tsv_bottom           : null
-            def scoring_rer_ch           = (params.rer_tool || params.rer_report_file) ? RER_MAIN.out.summary_tsv : null
-            def scoring_rer_perms_ch     = (params.rer_tool || params.rer_report_file) ? RER_MAIN.out.perms      : null
+            def scoring_rer_ch           = params.rer_tool ? RER_MAIN.out.summary_tsv : null
+            def scoring_rer_perms_ch     = params.rer_tool ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
             def scoring_vep_cosmic_ch    = params.vep        ? VEP.out.cosmic_tsv                 : null
@@ -382,7 +387,7 @@ workflow {
                     caas_universe_ch
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms
-                scoring_caas_perm_scores_ch = caas_perm_out.perm_scores
+                scoring_caas_perm_scores_ch = Channel.empty()
                 scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // lean recovery p-value per (gene,position,scheme)
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // lean capped sample for distribution plots
             }
@@ -438,7 +443,7 @@ workflow {
         }
 
         if (!ran_any) {
-            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_signification, --ct_disambiguation, --ct_postproc, --enrichment, --ct_accumulation, --fade, --scoring, or --rer_tool."
+            log.info "No tool selected. Use --reporting, --contrast_selection, --ct_tool, --rer_tool, --ct_disambiguation, --ct_postproc, --enrichment, --ct_accumulation, --fade, --scoring, or --rer_tool."
         }
     }
 }

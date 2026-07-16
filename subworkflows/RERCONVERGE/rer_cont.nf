@@ -35,6 +35,8 @@ process RER_CONT {
     label 'process_medium' // have to tell it that only if using cluster!!!!!!!
 
 
+    publishDir path: "${params.outdir}/rerconverge/rer_results", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }
+
     input:
     path trait_file
     path rer_master_tree
@@ -51,7 +53,7 @@ process RER_CONT {
     script:
     def perm_batches    = params.rer_perm_batches      ?: 0
     def perms_per_batch = params.rer_perms_per_batch   ?: 100
-    def perm_mode       = params.rer_perm_mode         ?: 'cc'
+    def perm_mode       = 'cc'
 
     if (params.use_singularity || params.use_apptainer) {
 

@@ -5,19 +5,13 @@
  * ───────────────────────────────────────────────
  * Rank-based, threshold-free gene-set enrichment via the Wilcoxon-AUC test
  * (RERconverge::fastwilcoxGMTall) over the curated GMTs in subworkflows/ORA/dat.
- * Each process renders FCS_general.Rmd against a generic
+ * Each process renders 13.FCS_general_report.Rmd against a generic
  * stats TSV (gene + score_<ranking> + flag_<name> columns) and a universe file
  * (cleaned_background, no-signal genes floored to 0).
  *
  *   SCORING_FCS_REPORT : CAAS scoring (global/top/bottom + full cross-module flags)
  *   TOOL_FCS_REPORT    : generic, dynamic publishDir — aliased for FADE / RER
  */
-
-// ── helper: shared param resolution ──────────────────────────────────────────
-def fcs_num_g()  { params.fcs_min_genes ?: 10 }
-def fcs_fdr()    { params.fcs_fdr        ?: 0.15 }   // BH (adjusted-p) cutoff
-def fcs_pperm()  { params.fcs_pperm_thr  ?: 0.025 }  // permulation-p cutoff (dual threshold)
-def fcs_top_n()  { params.fcs_top_n      ?: 20 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCORING_FCS_REPORT
@@ -39,7 +33,7 @@ process SCORING_FCS_REPORT {
     path perms_file
 
     output:
-    path "FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "13.FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "fcs_results/**",                       emit: fcs_results,     optional: true
     path "fcs_results/fcs_all_results.tsv",      emit: fcs_all_results, optional: true
 
@@ -47,13 +41,13 @@ process SCORING_FCS_REPORT {
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def traitname = params.traitname ?: 'unknown_trait'
     def gmt_dir   = params.gmt_dir
-    def num_g     = fcs_num_g()
-    def fdr_thr   = fcs_fdr()
-    def pperm_thr = fcs_pperm()
-    def top_n     = fcs_top_n()
+    def num_g     = params.fcs_min_genes
+    def fdr_thr   = params.fcs_fdr
+    def pperm_thr = params.fcs_pperm_thr
+    def top_n     = params.fcs_top_n
     def render = """
         rmarkdown::render(
-            'FCS_general.Rmd',
+            '13.FCS_general_report.Rmd',
             params = list(
                 stats_file    = '${fcs_stats}',
                 universe_file = '${universe}',
@@ -66,7 +60,7 @@ process SCORING_FCS_REPORT {
                 traitname     = '${traitname}',
                 perms_file    = '${perms_file}'
             ),
-            output_file = 'FCS_scoring_${traitname}.html'
+            output_file = '13.FCS_scoring_${traitname}.html'
         )
     """
     if (params.use_singularity || params.use_apptainer) {
@@ -112,14 +106,14 @@ process TOOL_FCS_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def gmt_dir   = params.gmt_dir
-    def num_g     = fcs_num_g()
-    def fdr_thr   = fcs_fdr()
-    def pperm_thr = fcs_pperm()
-    def top_n     = fcs_top_n()
+    def num_g     = params.fcs_min_genes
+    def fdr_thr   = params.fcs_fdr
+    def pperm_thr = params.fcs_pperm_thr
+    def top_n     = params.fcs_top_n
     def enrich_flag = (params.rer_permulation_enrichment ?: false)
     def render = """
         rmarkdown::render(
-            'FCS_general.Rmd',
+            '13.FCS_general_report.Rmd',
             params = list(
                 stats_file    = '${fcs_stats}',
                 universe_file = '${universe}',
@@ -179,14 +173,14 @@ process RER_FCS_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def gmt_dir   = params.gmt_dir
-    def num_g     = fcs_num_g()
-    def fdr_thr   = fcs_fdr()
-    def pperm_thr = fcs_pperm()
-    def top_n     = fcs_top_n()
+    def num_g     = params.fcs_min_genes
+    def fdr_thr   = params.fcs_fdr
+    def pperm_thr = params.fcs_pperm_thr
+    def top_n     = params.fcs_top_n
     def enrich_flag = (params.rer_permulation_enrichment ?: false)
     def render = """
         rmarkdown::render(
-            'FCS_general.Rmd',
+            '13.FCS_general_report.Rmd',
             params = list(
                 stats_file    = '${fcs_stats}',
                 universe_file = '${universe}',

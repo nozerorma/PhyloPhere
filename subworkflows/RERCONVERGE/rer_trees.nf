@@ -38,6 +38,8 @@ process RER_TREES {
     // maxRetries 3 gives memory steps of 32, 64, 96 GB before giving up.
     maxRetries 3
 
+    publishDir path: "${params.outdir}/rerconverge/rer_objects", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }
+
     input:
     path my_traitfile
     path gene_trees_file

@@ -107,7 +107,7 @@ ordered_species <-  tidytree::as_tibble(pruned_tree) %>%
   dplyr::filter(!is.na(.data$label)) %>%
   dplyr::pull(.data$label)
 
-print(ordered_species)
+# print(ordered_species)
 
 # Define ordered taxa for plotting based on phylogeny order
 ordered_taxa <- ordered_species %>%
@@ -120,7 +120,7 @@ ordered_taxa <- ordered_species %>%
   na.omit() %>%
   unique()
 
-print(ordered_taxa)
+# print(ordered_taxa)
 
 ## PLOT FUNCTION --------------------------------------------------------------
 taxa_plot.f <- function(df, ordered_taxa_levels, caption_text = NULL){
@@ -260,15 +260,15 @@ if (!is.null(stats_df)) {
 }
 
 # Print an excerpt
-if (!is.null(stats_df)) {
-  print(head(stats_df))
-}
+# if (!is.null(stats_df)) {
+#   print(head(stats_df))
+# }
 
 ```
 
 ## Session Information
 
-```{r debug_dump, results='asis'}
+```{r debug_dump, results='asis', eval=FALSE}
 
 if (length(phylo_debug_log) > 0) {
   cat("### Debug log\n")
@@ -277,7 +277,7 @@ if (length(phylo_debug_log) > 0) {
 
 ```
 
-```{r session_info}
+```{r session_info, eval=FALSE}
 
 sessionInfo()
 

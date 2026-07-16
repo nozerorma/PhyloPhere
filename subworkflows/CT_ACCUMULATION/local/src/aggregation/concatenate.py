@@ -11,7 +11,7 @@ Changes vs. original to_integrate version:
       convergence_description, convergence_mode, caap_group, amino_encoded,
       is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
       top_change_type, bottom_change_type, change_side, low_confidence_nodes,
-      asr_is_conserved, comments, ..., Trait
+      asr_is_conserved, comments, ..., trait
     No fallback to legacy formats.
 """
 

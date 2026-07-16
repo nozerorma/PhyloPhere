@@ -44,7 +44,7 @@ process TOOL_STRING_REPORT {
     script:
     def local_dir         = "${baseDir}/subworkflows/ENRICHMENT/local"
     def outdir            = "${params.outdir}/${output_subpath}/string"
-    def project_name      = params.string_project_name     ?: 'STRING_Analysis'
+    def project_name      = "STRING_${params.traitname ?: 'unknown_trait'}"
     def species           = params.string_species           ?: 9606
     def required_score    = params.string_required_score    ?: 400
     def network_score_thr = params.string_network_score_thr ?: 700
@@ -52,9 +52,9 @@ process TOOL_STRING_REPORT {
     def top_thr           = params.string_top_thr          ?: 15
     def report_num        = params.string_report_num       ?: 20
     // PPI density test. Honours the custom background: set_background(cleaned_background)
-    // in STRING_general.Rmd is forwarded to the STRING API, so the null is draws from
+    // in 15.STRING_report.Rmd is forwarded to the STRING API, so the null is draws from
     // cleaned_background, not the whole proteome. See string_enable_ppi in conf.
-    def enable_ppi        = (params.string_enable_ppi ?: false) ? 'TRUE' : 'FALSE'
+    def enable_ppi        = 'TRUE'
     def bg_name           = background_file instanceof List
         ? background_file[0].getName().replace("'", "\\'")
         : background_file.getName().replace("'", "\\'")
@@ -65,7 +65,7 @@ process TOOL_STRING_REPORT {
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'STRING_general.Rmd',
+                '15.STRING_report.Rmd',
                 params = list(
                     background_file    = '${background_file}',
                     background_basename = '${bg_name}',
@@ -78,7 +78,8 @@ process TOOL_STRING_REPORT {
                     fdr_thr            = ${fdr_thr},
                     top_thr            = ${top_thr},
                     report_num         = ${report_num},
-                    enable_ppi_enrichment = ${enable_ppi}
+                    enable_ppi_enrichment = ${enable_ppi},
+                    string_db_dir      = '${params.string_db_dir}'
                 ),
                 output_file = '${report_label}.html'
             )
@@ -90,7 +91,7 @@ process TOOL_STRING_REPORT {
 
         Rscript -e "
             rmarkdown::render(
-                'STRING_general.Rmd',
+                '15.STRING_report.Rmd',
                 params = list(
                     background_file    = '${background_file}',
                     background_basename = '${bg_name}',
@@ -103,7 +104,8 @@ process TOOL_STRING_REPORT {
                     fdr_thr            = ${fdr_thr},
                     top_thr            = ${top_thr},
                     report_num         = ${report_num},
-                    enable_ppi_enrichment = ${enable_ppi}
+                    enable_ppi_enrichment = ${enable_ppi},
+                    string_db_dir      = '${params.string_db_dir}'
                 ),
                 output_file = '${report_label}.html'
             )

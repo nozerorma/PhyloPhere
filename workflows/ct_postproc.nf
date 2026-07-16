@@ -217,8 +217,8 @@ workflow CT_POSTPROC {
         }
         
         // Run characterization if reports are enabled
-        if (params.generate_reports) {
-            assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required when generate_reports is true"
+        if (true) {  // characterization reports always run
+            assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required for characterization reports"
             
             def gene_ensembl_file = file(params.gene_ensembl_file)
             assert gene_ensembl_file.exists() : "Error: gene_ensembl_file not found: ${params.gene_ensembl_file}"

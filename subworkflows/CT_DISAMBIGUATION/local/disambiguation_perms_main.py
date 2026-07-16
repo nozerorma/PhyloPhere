@@ -35,7 +35,7 @@ def parse_arguments():
     p.add_argument("--tree", required=True, help="Phylogenetic tree (Newick)")
     p.add_argument(
         "--perm-discovery", required=True,
-        help="Full-pool export_perm_discovery file (canonical headers, Cycle column)",
+        help="Full-pool export_perm_discovery file or directory of files (canonical headers, Cycle column)",
     )
     p.add_argument(
         "--resample-dir", required=True,
@@ -62,16 +62,41 @@ def parse_arguments():
     return p.parse_args()
 
 
-def _genes_from_export(perm_discovery_file: Path) -> list:
+def _genes_from_export(perm_discovery_path: Path) -> list:
     """Genes that produced ≥1 CAAS in any cycle (the only genes worth replaying)."""
     genes = set()
-    with open(perm_discovery_file, "r") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        for row in reader:
-            g = (row.get("gene") or "").strip()
-            if g:
-                genes.add(g)
+    if perm_discovery_path.is_file():
+        with open(perm_discovery_path, "r") as f:
+            header = f.readline()
+            if not header:
+                return []
+            cols = header.rstrip("\n").split("\t")
+            try:
+                gene_idx = cols.index("gene")
+            except ValueError:
+                return []
+            for line in f:
+                # gene is column 2 (index 1), splitting maxsplit=2 avoids splitting remaining columns
+                parts = line.split("\t", maxsplit=2)
+                if len(parts) > gene_idx:
+                    g = parts[gene_idx].strip()
+                    if g:
+                        genes.add(g)
+    else:
+        # Directory mode: filenames are "<alignmentID>.bootstrap.discovery.output",
+        # where alignmentID = Nextflow's f.baseName on the alignment file (e.g.
+        # "GENE.Homo_sapiens.fa" -> "GENE.Homo_sapiens"). Splitting on ".bootstrap"
+        # left the species suffix attached ("GENE.Homo_sapiens"), which then never
+        # matches the bare "GENE" symbols used everywhere else (ensembl_genes,
+        # find_gene_alignment's own prefix match, meta_caas "Gene" column) --
+        # silently zeroing every gene. Take the first dot-delimited segment instead,
+        # mirroring find_gene_alignment's own `path.name.split(".", 1)[0]` convention.
+        for p in perm_discovery_path.iterdir():
+            if p.is_file() and not p.name.startswith("."):
+                name = p.name.split(".", 1)[0]
+                genes.add(name)
     return sorted(genes)
+
 
 
 def main():

@@ -291,19 +291,7 @@ resolve_filtered_cluster_file <- function(minlen, maxcaas_int, filter_root = NUL
 }
 
 normalize_disambig_schema <- function(df) {
-  # This normalises the DISAMBIGUATION output, whose convergence label was renamed
-  # pattern_type -> convergence_type; accept the old lowercase `pattern_type` name.
-  # NOTE: the CAAS-discovery cardinal contrast index (`pattern` in disco.py, capital
-  # `Pattern` in meta_caas) is a DIFFERENT concept and is dropped before
-  # disambiguation, so it does not reach here — we deliberately do NOT fold `Pattern`
-  # into pattern_type/convergence_type (that was a prior conflation). If a cardinal
-  # column ever appears, keep it lowercased as its own `pattern` column.
-  if ('pattern_type' %in% names(df) && !'convergence_type' %in% names(df)) df <- df %>% rename(convergence_type = pattern_type)
-  if ('Pattern' %in% names(df) && !'pattern' %in% names(df)) df <- df %>% rename(pattern = Pattern)
-  if ('pvalue.boot' %in% names(df) && !'pvalue_boot' %in% names(df)) df <- df %>% rename(pvalue_boot = `pvalue.boot`)
-  if ('ChangeSide' %in% names(df) && !'change_side' %in% names(df)) df <- df %>% rename(change_side = ChangeSide)
-  if ('ChangeTop' %in% names(df) && !'change_top' %in% names(df)) df <- df %>% rename(change_top = ChangeTop)
-  if ('ChangeBottom' %in% names(df) && !'change_bottom' %in% names(df)) df <- df %>% rename(change_bottom = ChangeBottom)
+  # This normalises the DISAMBIGUATION output
   if ('Gene' %in% names(df) && !'gene' %in% names(df)) df <- df %>% rename(gene = Gene)
   if ('Position' %in% names(df) && !'position' %in% names(df)) df <- df %>% rename(position = Position)
   if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
@@ -428,19 +416,6 @@ removal_palette <- c(
 ## Data Loading and Gene length Annotation
 
 ```{r data_loading}
-cat("=== CT Post-Processing Configuration ===\n")
-cat("Processing mode:", processing_mode, "\n")
-cat("Gene filtering:", gene_filter_mode, "\n")
-cat("Selected alpha threshold:", alpha_threshold_label, "\n")
-cat("Extreme threshold:", extreme_threshold, paste0("(top ", 100*(1-extreme_threshold), "%)"), "\n")
-cat("IQR multiplier:", iqr_multiplier, "\n")
-
-cat("\nInput files:\n")
-cat("  Discovery:", discovery_file, "\n")
-cat("  Filter summary:", filter_summary_file, "\n")
-cat("  Gene ensembl:", gene_ensembl_file, "\n")
-cat("  Gene stats:", ifelse(is.null(gene_stats_file) || is.na(gene_stats_file), "Not provided (will recompute)", gene_stats_file), "\n\n")
-
 raw_discovery <- read_delim(discovery_file, delim = "\t", show_col_types = FALSE)
 discovery_std <- normalize_disambig_schema(raw_discovery)
 convergence_plot_df <- discovery_std %>%
@@ -462,7 +437,7 @@ discovery_df <- discovery_std %>%
     change_side,
     is_conserved_meta,
     pvalue = pvalue,
-    `pvalue.boot` = pvalue_boot,
+    pvalue_boot = pvalue_boot,
     sig_hyp,
     sig_perm,
     is_significant,
@@ -471,9 +446,6 @@ discovery_df <- discovery_std %>%
   )
 
 if (!"caap_group" %in% names(discovery_df)) discovery_df <- discovery_df %>% mutate(caap_group = "US")
-
-cat("  Loaded CT positions:", nrow(discovery_df), "\n")
-cat("  Unique genes:", n_distinct(discovery_df$Gene), "\n")
 
 gene_ensembl <- read_tsv(gene_ensembl_file, show_col_types = FALSE)
 names(gene_ensembl) <- tolower(names(gene_ensembl))
@@ -484,7 +456,21 @@ if (!"gene" %in% names(gene_ensembl) || !"length" %in% names(gene_ensembl)) {
 gene_length <- gene_ensembl %>% select(Gene = gene, length = length)
 discovery_df <- discovery_df %>% left_join(gene_length, by = "Gene") %>% filter(!is.na(length))
 
-cat("  Genes with length annotation:", n_distinct(discovery_df$Gene), "\n\n")
+cat(
+  "=== CT Post-Processing Configuration ===\n",
+  "Processing mode:", processing_mode, "\n",
+  "Gene filtering:", gene_filter_mode, "\n",
+  "Selected alpha threshold:", alpha_threshold_label, "\n",
+  "Extreme threshold:", extreme_threshold, paste0("(top ", 100*(1-extreme_threshold), "%)"), "\n",
+  "IQR multiplier:", iqr_multiplier, "\n",
+  "\nInput files:\n",
+  "  Discovery:", discovery_file, "\n",
+  "  Filter summary:", filter_summary_file, "\n",
+  "  Gene ensembl:", gene_ensembl_file, "\n",
+  "  Gene stats:", ifelse(is.null(gene_stats_file) || is.na(gene_stats_file), "Not provided (will recompute)", gene_stats_file), "\n",
+  "\n  Loaded CT positions:", nrow(discovery_df), "\n",
+  "  Unique genes with length annotation:", n_distinct(discovery_df$Gene), "\n"
+)
 ```
 
 ## Conserved metadata composition after precluster pruning
@@ -980,7 +966,7 @@ write_tsv(removal_events, file.path(disambig_dir, "removal_events.tsv"))
 
 ```
 
-## B.1c Gene-Level Filter Overlap Diagnostics
+### B.1c Gene-Level Filter Overlap Diagnostics
 
 ```{r filter_overlap_gene_table}
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1097,7 +1083,7 @@ if (nrow(removal_events) > 0) {
 cat("\n")
 ```
 
-## B.1c-ii Descriptor distributions by filter membership
+#### B.1c-ii Descriptor distributions by filter membership
 
 ```{r filter_overlap_stats, fig.width=14, fig.height=16}
 # Ordered factor for x-axis: None → single → double → triple
@@ -1178,7 +1164,7 @@ ggsave(file.path(outliers_dir, "filter_overlap_descriptors.png"),
        desc_grid, width = 14, height = 10, dpi = 280)
 ```
 
-## B.1c-iii Filter overlap summary table
+#### B.1c-iii Filter overlap summary table
 
 ```{r filter_overlap_summary_table}
 # Per-combo × per-group mean ± SD for all five descriptors
@@ -1200,11 +1186,13 @@ overlap_summary <- gene_filter_flags %>%
   ) %>%
   arrange(caap_group, filter_combo)
 
-# Long table dropped from the rendered report (exported to TSV instead).
 write_tsv(gene_filter_flags,  file.path(outliers_dir, "filter_overlap_gene_table.tsv"))
 write_tsv(overlap_summary,    file.path(outliers_dir, "filter_overlap_summary.tsv"))
-cat(sprintf("✓ Filter overlap tables exported (%d membership rows) → filter_overlap_summary.tsv\n",
-            nrow(overlap_summary)))
+
+kable(
+  overlap_summary,
+  caption = "Filter overlap summary: per-combo x per-group mean +/- SD across descriptors"
+) %>% kable_styling()
 ```
 
 ## B.2 Removed positions by `convergence_type` and significance

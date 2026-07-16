@@ -28,21 +28,21 @@ process EXCLUDED_ENRICHMENT_REPORT {
     def local_dir    = "${baseDir}/subworkflows/ENRICHMENT/local"
     def outdir       = "${params.outdir}/enrichment_excluded"
     def gmt_dir      = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
-    def project_name = params.enrichment_project_name ?: 'Enrichment_Excluded_clusterProfiler'
+    def project_name = "Enrichment_Excluded_${params.traitname ?: 'unknown_trait'}"
     def organism     = params.enrichment_organism     ?: 'hsapiens'
     def min_num      = params.enrichment_min_num      ?: 5
     def max_num      = params.enrichment_max_num      ?: 500
     def fdr_thr      = params.enrichment_fdr          ?: 0.1
     def report_num   = params.enrichment_report_num   ?: 20
     def top_thr      = params.enrichment_top_thr      ?: 15
-    def n_threads    = params.enrichment_threads      ?: 8
-    def enable_overlap        = params.enrichment_enable_overlap_heatmap ? 'TRUE' : 'FALSE'
-    def enable_enrichment_map = params.enrichment_enable_enrichment_map  ? 'TRUE' : 'FALSE'
+    def n_threads    = task.cpus ?: 8
+    def enable_overlap        = 'TRUE'
+    def enable_enrichment_map = 'TRUE'
     def overlap_top_terms     = params.enrichment_overlap_top_terms ?: 50
     def compare_metric        = params.enrichment_compare_metric    ?: 'overlap'
-    def db_default = params.enrichment_databases_default ?: 'geneontology_Biological_Process_noRedundant,geneontology_Cellular_Component_noRedundant,geneontology_Molecular_Function_noRedundant,pathway_KEGG,pathway_Reactome,pathway_Wikipathway'
-    def db_extra    = params.enrichment_databases_extra  ?: ''
-    def db_combined = [db_default, db_extra].findAll { it && it.toString().trim() }.join(',')
+    // ora_databases is vestigial: 14.ORA_report.Rmd loads gene sets from gmt_dir and only
+    // uses this list for a non-empty guard + a cosmetic printout. Kept as a fixed label.
+    def db_combined = 'gmt'
     def bg_name     = background_file.getName().replace("'", "\\'")
     def gene_files_r = gene_list_files
         .collect { it.getName().replace("'", "\\'") }
@@ -55,7 +55,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'ORA_general.Rmd',
+                '14.ORA_report.Rmd',
                 params = list(
                     background_file = '${background_file}',
                     background_basename = '${bg_name}',
@@ -75,7 +75,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
                     overlap_top_terms = ${overlap_top_terms},
                     compare_metric = '${compare_metric}'
                 ),
-                output_file = 'Enrichment_excluded.html'
+                output_file = '14.Enrichment_excluded.html'
             )
         "
         """
@@ -85,7 +85,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
 
         Rscript -e "
             rmarkdown::render(
-                'ORA_general.Rmd',
+                '14.ORA_report.Rmd',
                 params = list(
                     background_file = '${background_file}',
                     background_basename = '${bg_name}',
@@ -105,7 +105,7 @@ process EXCLUDED_ENRICHMENT_REPORT {
                     overlap_top_terms = ${overlap_top_terms},
                     compare_metric = '${compare_metric}'
                 ),
-                output_file = 'Enrichment_excluded.html'
+                output_file = '14.Enrichment_excluded.html'
             )
         "
         """

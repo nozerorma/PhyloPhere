@@ -261,11 +261,6 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
             outf.write(header + "\n")
             for result_line in results_to_write:
                 if not caap_mode:
-                    # Normalize CAAS rows to include caap_group=US for schema parity
-                    # Legacy CAAS rows come as:
-                    # Gene mode Trait Position ...
-                    # New normalized row becomes:
-                    # Gene mode caap_group Trait Position ...
                     fields = result_line.split("\t")
                     if len(fields) >= 3 and fields[1] == "CAAS":
                         # Avoid duplicating if already normalized

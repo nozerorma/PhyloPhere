@@ -4,7 +4,7 @@
  * FADE_REPORT
  * ───────────
  * Generate an HTML summary report from all FADE JSON results for a given
- * direction (top / bottom). Calls FADE_report.Rmd.
+ * direction (top / bottom). Calls 6.FADE_report.Rmd.
  *
  * Inputs
  * ──────
@@ -41,7 +41,7 @@ process FADE_REPORT {
     path fg_list_file  // optional: foreground species list (NO_FG_LIST sentinel when absent)
 
     output:
-    path "FADE_report_${direction}.html",   emit: report
+    path "6.FADE_report_${direction}.html",   emit: report
     path "fade_summary_${direction}.tsv",   emit: summary_tsv, optional: true
     path "fade_site_bf_${direction}.tsv",   emit: site_tsv,    optional: true
 
@@ -67,7 +67,7 @@ process FADE_REPORT {
 
         FADE_REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'FADE_report.Rmd',
+                '6.FADE_report.Rmd',
                 params = list(
                     json_dir        = '.',
                     direction       = '${direction}',
@@ -77,12 +77,12 @@ process FADE_REPORT {
                     output_dir      = '${outdir}',
                     fg_list_file    = ${fg_arg}
                 ),
-                output_file = 'FADE_report_${direction}.html'
+                output_file = '6.FADE_report_${direction}.html'
             )
         "
 
-        if [ -f 'FADE_report_${direction}.html' ]; then
-            echo "[FADE_REPORT] Report generated: FADE_report_${direction}.html"
+        if [ -f '6.FADE_report_${direction}.html' ]; then
+            echo "[FADE_REPORT] Report generated: 6.FADE_report_${direction}.html"
         else
             echo "[FADE_REPORT] WARNING: Report file was not created for direction '${direction}'."
         fi
@@ -101,7 +101,7 @@ process FADE_REPORT {
 
         FADE_REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
-                'FADE_report.Rmd',
+                '6.FADE_report.Rmd',
                 params = list(
                     json_dir        = '.',
                     direction       = '${direction}',
@@ -111,12 +111,12 @@ process FADE_REPORT {
                     output_dir      = '${outdir}',
                     fg_list_file    = ${fg_arg}
                 ),
-                output_file = 'FADE_report_${direction}.html'
+                output_file = '6.FADE_report_${direction}.html'
             )
         "
 
-        if [ -f 'FADE_report_${direction}.html' ]; then
-            echo "[FADE_REPORT] Report generated: FADE_report_${direction}.html"
+        if [ -f '6.FADE_report_${direction}.html' ]; then
+            echo "[FADE_REPORT] Report generated: 6.FADE_report_${direction}.html"
         else
             echo "[FADE_REPORT] WARNING: Report file was not created for direction '${direction}'."
         fi

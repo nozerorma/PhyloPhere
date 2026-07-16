@@ -66,13 +66,12 @@ NF_FLAGS=(
     --ali_format fasta
     --reporting false
     --ct_tool "discovery,resample,bootstrap"
-    --ct_signification
     --ct_disambiguation
     --ct_postproc
     --ct_accumulation
     --traitname "neoplasia_prevalence"
     --scoring
-    --cycles 1000
+    --perms_cycles 1000
     --caas_permulation_enrichment true
     --caas_full_perms 10
     --gene_ensembl_file "${REPO_DIR}/test/inputs/alignments/ensembl_genes.output"
@@ -87,7 +86,6 @@ NF_FLAGS=(
     --ct_disambig_posterior_threshold 0.1
     --caas_postproc_mode filter
     --gene_filter_mode both
-    --generate_reports true
     --asr_robustness true
     --scoring_rer_input "${REPO_DIR}/test/inputs/rer/RERConverge/RER_Results/rerconverge_summary_neoplasia_prevalence.tsv"
     --vep

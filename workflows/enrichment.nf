@@ -54,16 +54,16 @@ workflow ENRICHMENT {
 
         def rer_fcs = MODULE_FCS_RER(
             Channel.value('scoring/rer'),   fcs_stats_rer,
-            fcs_universe_ch, Channel.value("FCS_rer_${trait_lbl}"),
+            fcs_universe_ch, Channel.value("13.FCS_rer_${trait_lbl}"),
             rer_perms_resolved, annot_ch)
 
         def fade_fcs = MODULE_FCS_FADE(
             Channel.value('scoring/fade'),  fcs_stats_fade,
-            fcs_universe_ch, Channel.value("FCS_fade_${trait_lbl}"),  annot_ch)
+            fcs_universe_ch, Channel.value("13.FCS_fade_${trait_lbl}"),  annot_ch)
 
         def accum_fcs = MODULE_FCS_ACCUM(
             Channel.value('scoring/accum'), fcs_stats_accum,
-            fcs_universe_ch, Channel.value("FCS_accum_${trait_lbl}"), annot_ch)
+            fcs_universe_ch, Channel.value("13.FCS_accum_${trait_lbl}"), annot_ch)
 
         // STRING ppi network
         def run_string = params.scoring_string ?: false
@@ -128,9 +128,9 @@ workflow ENRICHMENT {
                 pos_cleaned_background_ch,
                 pos_caas_file_ch,
                 pos_background_ch,
+                annot_ch,
                 params.posenrich_min_size,
-                params.posenrich_max_size,
-                params.posenrich_min_overlap
+                params.posenrich_max_size
             )
             final_reports = final_reports.mix(POSENRICH.out.report)
         }

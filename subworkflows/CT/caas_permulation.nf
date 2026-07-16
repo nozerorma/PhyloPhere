@@ -163,7 +163,7 @@ process BOOTSTRAP_PERMS_BATCHED {
         --manifest ${batchID}.manifest.tsv \\
         --caas-config ${caas_config} \\
         --resampled-path ${resampledPath} \\
-        --workers ${params.ct_bootstrap_batch_workers} \\
+        --workers ${task.cpus} \\
         --ali-format ${params.ali_format} \\
         --runner-mode ${runnerMode} \\
         --ct-bin ${ctBinary} \\
@@ -174,44 +174,21 @@ process BOOTSTRAP_PERMS_BATCHED {
     """
 }
 
-// ── 3. Concatenate per-gene perm-discovery into one table (single header) ─────
-process CONCAT_PERM_DISCOVERY {
-    tag "caas_perms_concat"
-    label 'process_low'
-    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_discovery.tab'
-
-    input:
-    path(discovery_files, stageAs: "perm_disc_*")
-
-    output:
-    path "perm_discovery.tab", emit: perm_discovery
-
-    script:
-    """
-    set -euo pipefail
-    mapfile -t files < <(find . -maxdepth 1 -name "perm_disc_*" ! -name ".*" | sort)
-    first=\${files[0]}
-    head -n 1 "\$first" > perm_discovery.tab
-    for f in "\${files[@]}"; do
-        tail -n +2 "\$f" >> perm_discovery.tab
-    done
-    echo "[caas_perms] concatenated \$(( \$(wc -l < perm_discovery.tab) - 1 )) discovery rows"
-    """
-}
-
 // ── 4. Null-mode disambiguation: load ASR once, replay N labelings ───────────
 process CAAS_PERMS_DISAMBIGUATE {
     tag "caas_perms_disambiguate"
     label 'process_resample'
-    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'caas_perm_scores.tsv'
+    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'gene_cycle_scores.tsv'
 
     input:
-    path perm_discovery
+    path "perm_disc/*"
     path resample_subset
     path tree_file
 
     output:
-    path "caas_perm_scores.tsv", emit: perm_scores
+    path "gene_cycle_scores.tsv", emit: gene_cycle_scores
+    path "perm_pos_pval.tsv",     emit: pos_pval
+    path "perm_pos_sample.tsv",   emit: pos_sample
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
@@ -219,12 +196,10 @@ process CAAS_PERMS_DISAMBIGUATE {
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
     def taxid_mapping = params.tax_id ?: ''
     def ensembl_file = params.gene_ensembl_file ?: ''
-    def workers = params.ct_disambig_workers ?: (task.cpus ?: 1)
+    def workers = task.cpus ?: 1
+    def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     """
-    # Pin BLAS/OpenMP to 1 thread BEFORE the mp.Pool launches — each replay worker
-    # inherits this, so the pool's parallelism is the workers, not workers×nproc BLAS
-    # threads. The replay (path_scores) is pure-Python; nothing here benefits from BLAS.
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cp -R ${local_dir}/* .
     find . -name '*.pyc' -delete 2>/dev/null || true
@@ -232,17 +207,20 @@ process CAAS_PERMS_DISAMBIGUATE {
     ${run} ./disambiguation_perms_main.py \\
         --alignment-dir ${align_dir} \\
         --tree ${tree_file} \\
-        --perm-discovery ${perm_discovery} \\
+        --perm-discovery perm_disc \\
         --resample-dir . \\
         --output-dir caas_perms_out \\
         --asr-model ${params.ct_disambig_asr_model} \\
         --convergence-mode ${params.ct_disambig_convergence_mode} \\
         --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
         --workers ${workers} \\
+        --max-tasks-per-child ${max_tasks_per_child} \\
         --asr-cache-dir ${asr_cache_dir} \\
         ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
         ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
-    cp caas_perms_out/caas_perm_scores.tsv caas_perm_scores.tsv
+    cp caas_perms_out/gene_cycle_scores.tsv gene_cycle_scores.tsv
+    cp caas_perms_out/perm_pos_pval.tsv perm_pos_pval.tsv
+    cp caas_perms_out/perm_pos_sample.tsv perm_pos_sample.tsv
     """
 }
 
@@ -254,21 +232,26 @@ process CAAS_PERMS_AGGREGATE {
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_pos_*.tsv'
 
     input:
-    path perm_scores
+    path gene_cycle_scores
+    path perm_pos_pval, stageAs: 'input_perm_pos_pval.tsv'
+    path perm_pos_sample, stageAs: 'input_perm_pos_sample.tsv'
     path universe
 
     output:
     path "caas_perms.rds",      emit: perms
-    path "perm_pos_pval.tsv",   emit: pos_pval     // recovery p-value per (gene,position,scheme)
-    path "perm_pos_sample.tsv", emit: pos_sample   // capped per-scheme sample for distribution plots
+    path "perm_pos_pval.tsv",   emit: pos_pval
+    path "perm_pos_sample.tsv", emit: pos_sample
 
     script:
     def local_dir = "${baseDir}/subworkflows/SCORING/local"
     def universe_arg = universe.name != 'NO_FILE' ? "--universe ${universe}" : ""
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     """
+    cp ${perm_pos_pval} perm_pos_pval.tsv
+    cp ${perm_pos_sample} perm_pos_sample.tsv
+
     ${run} ${local_dir}/src/scoring_caas_perms.R \\
-        --perm-scores ${perm_scores} \\
+        --gene-cycle-scores ${gene_cycle_scores} \\
         ${universe_arg} \\
         --output caas_perms.rds
     """
@@ -294,6 +277,8 @@ workflow CAAS_PERMS_PREP {
         if (bootstrapBatchSize > 1) {
             def bootstrapBatchCounter = 0
             def bootstrap_batches = boot_in
+                .toSortedList({ a, b -> a[0] <=> b[0] })
+                .flatMap()
                 .collate(bootstrapBatchSize)
                 .map { batch ->
                     def batchID = sprintf('bootstrap_perms_batch_%05d', ++bootstrapBatchCounter)
@@ -308,10 +293,8 @@ workflow CAAS_PERMS_PREP {
             def boot = BOOTSTRAP_PERMS(boot_in, caas_config)
             discovery_files = boot.perm_discovery.map { id, f -> f }.collect()
         }
-        def concat = CONCAT_PERM_DISCOVERY(discovery_files)
-
     emit:
-        perm_discovery = concat.perm_discovery
+        perm_discovery = discovery_files
         resample_subset = subset.subset
 }
 
@@ -325,11 +308,10 @@ workflow CAAS_PERMULATION {
 
     main:
         def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, tree_file)
-        def agg = CAAS_PERMS_AGGREGATE(scores.perm_scores, universe)
+        def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_sample, universe)
 
     emit:
         perms       = agg.perms
-        perm_scores = scores.perm_scores   // per-(gene,cycle,position,scheme) null asr_path_score
         pos_pval    = agg.pos_pval          // lean recovery p-value per (gene,position,scheme)
         pos_sample  = agg.pos_sample        // lean capped sample for distribution plots
 }

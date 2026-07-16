@@ -6,7 +6,7 @@
  * Render an HTML report from CT_ACCUMULATION randomization outputs.
  * Receives all per-direction per-scheme CSVs (flat, from RANDOMIZE) plus the
  * aggregation CSVs (from AGGREGATE), reconstructs the expected directory
- * structure in the work directory, then calls accumulation_report.Rmd.
+ * structure in the work directory, then calls 10.Accumulation_report.Rmd.
  *
  * Inputs
  * ──────
@@ -15,7 +15,7 @@
  *
  * Outputs
  * ───────
- *   report      : path — accumulation_report.html
+ *   report      : path — 10.Accumulation_report.html
  *   summary_tsv : path — accumulation_summary_{trait}.tsv (optional)
  */
 
@@ -39,7 +39,7 @@ process ACCUMULATION_REPORT {
     path agg_csvs    // *_global.csv and *_deciles.csv staged flat
 
     output:
-    path "accumulation_report.html",      emit: report
+    path "10.Accumulation_report.html",      emit: report
     path "accumulation_summary_*.tsv",    emit: summary_tsv, optional: true
 
     script:
@@ -53,7 +53,7 @@ process ACCUMULATION_REPORT {
         cp -R ${local_dir}/* .
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
 
-        # Reconstruct directory structure expected by accumulation_report.Rmd
+        # Reconstruct directory structure expected by 10.Accumulation_report.Rmd
         mkdir -p accum_root/top/randomization \\
                  accum_root/bottom/randomization \\
                  accum_root/all/randomization \\
@@ -66,14 +66,14 @@ process ACCUMULATION_REPORT {
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                'accumulation_report.Rmd',
+                '10.Accumulation_report.Rmd',
                 params = list(
                     accum_dir      = 'accum_root',
                     traitname      = '${traitname}',
                     pval_threshold = ${pval_thr},
                     output_dir     = '${outdir}'
                 ),
-                output_file = 'accumulation_report.html'
+                output_file = '10.Accumulation_report.html'
             )
         "
         """
@@ -94,14 +94,14 @@ process ACCUMULATION_REPORT {
 
         Rscript -e "
             rmarkdown::render(
-                'accumulation_report.Rmd',
+                '10.Accumulation_report.Rmd',
                 params = list(
                     accum_dir      = 'accum_root',
                     traitname      = '${traitname}',
                     pval_threshold = ${pval_thr},
                     output_dir     = '${outdir}'
                 ),
-                output_file = 'accumulation_report.html'
+                output_file = '10.Accumulation_report.html'
             )
         "
         """

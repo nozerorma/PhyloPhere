@@ -20,7 +20,7 @@ process CT_DISAMBIGUATION_RUN {
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
-    def disambig_script = params.ct_disambig_script ?: "${local_dir}/disambiguation_main.py"
+    def disambig_script = "${local_dir}/disambiguation_main.py"
     def align_dir = params.alignment
     def taxid_mapping = params.tax_id ?: ''
     def ensembl_file = params.gene_ensembl_file ?: ''
@@ -28,8 +28,8 @@ process CT_DISAMBIGUATION_RUN {
     def asr_mode = params.ct_disambig_asr_mode
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
     def task_cpus = task.cpus ?: 1
-    def threads = params.ct_disambig_threads ?: task_cpus
-    def workers = params.ct_disambig_workers ?: task_cpus
+    def threads = task_cpus
+    def workers = task_cpus
 
     """
     # Disambiguation is an irregular pure-Python tree walk over dict posteriors
@@ -94,8 +94,8 @@ process CT_DISAMBIGUATION_RUN {
       --threads ${threads} \
       --workers ${workers} \
       --max-tasks-per-child ${params.ct_disambig_max_tasks_per_child} \
-      ${params.ct_disambig_run_diagnostics ? '--run-diagnostics' : ''} \
-      ${params.ct_disambig_verbose ? '--verbose' : ''} \
+      --run-diagnostics \
+      --verbose \
       ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
       ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \
       ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}

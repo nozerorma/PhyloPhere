@@ -43,6 +43,8 @@ process RER_BIN {
     label 'process_medium'
     errorStrategy 'ignore'
 
+    publishDir path: "${params.outdir}/rerconverge/rer_results", mode: 'copy', saveAs: { filename -> filename.equals('versions.yml') ? null : filename }
+
     input:
     path trait_file
     path rer_master_tree

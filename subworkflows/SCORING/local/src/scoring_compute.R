@@ -218,8 +218,18 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 # dropped them from CAAS_score while NA-poisoning all weighted-mean diagnostics.)
 scheme_weights_int <- c(US = 0.2, GS4 = 0.2, GS3 = 0.2, GS2 = 0.2, GS1 = 0.2)
 
+# Priority ONLY for picking a representative scheme's display/gating columns
+# (pvalue, pvalue_boot, change_side, caap_group, ...) at the Gene×Position
+# aggregation below (section 2g) — kept separate from scheme_weight, which is
+# intentionally uniform for the CAAS_score sum and would make that pick
+# arbitrary (file-order dependent) if reused for both purposes.
+scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
+
 df <- df %>%
-  mutate(scheme_weight = scheme_weights_int[caap_group]) %>%
+  mutate(
+    scheme_weight   = scheme_weights_int[caap_group],
+    scheme_priority = scheme_priority_int[caap_group]
+  ) %>%
   filter(!is.na(scheme_weight))
 cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring schemes\n",
             nrow(df), n_distinct(df$caap_group)))
@@ -317,10 +327,13 @@ df <- df %>%
   )
 
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
-# Sort descending by scheme_weight so first() picks the most-specific scheme
-# for display-only columns (pvalue, change_top, asr_is_conserved, etc.).
+# Sort descending by scheme_priority (US > GS4 > GS3 > GS2 > GS1) so first()
+# deterministically picks the US scheme (falling back to GS4..GS1) for
+# display/gating-only columns (pvalue, change_top, asr_is_conserved, etc.).
+# scheme_weight is uniform across schemes (see 2a) and would make this pick
+# arbitrary/file-order dependent if used here instead.
 # Score columns use sums or weighted means — no first() for any scored quantity.
-df <- df %>% arrange(desc(scheme_weight))
+df <- df %>% arrange(desc(scheme_priority))
 
 pos_scores <- df %>%
   group_by(Gene, Position) %>%
@@ -347,6 +360,7 @@ pos_scores <- df %>%
     across(all_of(mrca_posterior_cols), \(x) first(x)),
     change_top         = first(change_top),
     change_bottom      = first(change_bottom),
+    caap_group         = first(caap_group),
     has_change_top     = any(assessable_change(change_top)),
     has_change_bottom  = any(assessable_change(change_bottom)),
     .groups = "drop"
@@ -370,8 +384,10 @@ pos_scores <- df %>%
 #   gate_fdr : significant after BH-FDR       (BH-adjusted pvalue < 0.05)
 # FDR is computed over the whole position pool (one hypergeometric test/position).
 pos_scores <- pos_scores %>%
+  group_by(caap_group) %>%
+  mutate(pvalue_hyp_fdr = p.adjust(pvalue, method = "BH")) %>%
+  ungroup() %>%
   mutate(
-    pvalue_hyp_fdr = p.adjust(pvalue, method = "BH"),
     gate_all       = TRUE,
     gate_sig       = !is.na(pvalue) & pvalue < 0.05,
     gate_fdr       = !is.na(pvalue_hyp_fdr) & pvalue_hyp_fdr < 0.05
@@ -948,16 +964,6 @@ if (length(score_cols) >= 2) {
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
-# Position scores — direction-specific top-N% flags (thresholds computed within each direction)
-.pos_top_sub <- pos_scores %>% filter(change_side %in% c("top",    "both"))
-.pos_bot_sub <- pos_scores %>% filter(change_side %in% c("bottom", "both"))
-.thr_top_10 <- quantile(.pos_top_sub$CAAS_score, 0.90, na.rm = TRUE)
-.thr_top_5  <- quantile(.pos_top_sub$CAAS_score, 0.95, na.rm = TRUE)
-.thr_top_1  <- quantile(.pos_top_sub$CAAS_score, 0.99, na.rm = TRUE)
-.thr_bot_10 <- quantile(.pos_bot_sub$CAAS_score, 0.90, na.rm = TRUE)
-.thr_bot_5  <- quantile(.pos_bot_sub$CAAS_score, 0.95, na.rm = TRUE)
-.thr_bot_1  <- quantile(.pos_bot_sub$CAAS_score, 0.99, na.rm = TRUE)
-
 pos_out <- pos_scores %>%
   select(Gene, Position, any_of(c("pvalue", "pvalue_boot", "pvalue_hyp_fdr")),
          asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core")),
@@ -1006,12 +1012,6 @@ fcs_stats <- tibble(
   score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_global_all"))),
   score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top_all"))),
   score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom_all"))),
-  # ASR-axis rankings — perm-bearing (matched by name to caas_perms.rds$corStat_byrank:
-  # global_asr / top_asr / bottom_asr). FCS derives the ranking name from the
-  # score_<name> suffix, so these become rankings "global_asr"/"top_asr"/"bottom_asr".
-  score_global_asr = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_asr_global_all"))),
-  score_top_asr    = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_asr_top_all"))),
-  score_bottom_asr = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_asr_bottom_all"))),
   flag_gate_sig    = !is.na(.col(gene_scores, "gene_caas_score_global_sig")),
   flag_gate_fdr    = !is.na(.col(gene_scores, "gene_caas_score_global_fdr")),
   flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
@@ -1034,7 +1034,7 @@ cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom, %d gate_sig)\n",
 # statistic, annotated with every module's evidence — downstream of the join.
 .nonempty <- function(col) .has(gene_scores, col) && any(!is.na(gene_scores[[col]]))
 
-if (.nonempty("rer_rho") && .nonempty("rer_min_pval")) {
+if (has_rer) {
   .rp <- pmax(suppressWarnings(as.numeric(.col(gene_scores, "rer_min_pval"))), 1e-300)
   .rr <- suppressWarnings(as.numeric(.col(gene_scores, "rer_rho")))
   write_tsv(tibble(

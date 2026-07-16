@@ -30,20 +30,26 @@
 process BOOTSTRAP {
     tag "$alignmentID"
     label 'process_boot'
-    
+
+    publishDir = [
+        path: { "${params.outdir}/bootstrap" },
+        mode: 'copy',
+        saveAs: { filename -> filename.equals('versions.yml') ? null : filename },
+        enabled: params.publish_intermediates
+    ]
+
     input:
     tuple val(alignmentID), path(alignmentFile), path(discoveryFile), path(resampledPath) // resampledPath can be either directory or file
     file caas_config
-    
+
     output:
     tuple val(alignmentID), file("${alignmentID}.bootstraped.output"), emit: bootstrap_out
     tuple val(alignmentID), file("${alignmentID}.bootstrap.groups.output"), emit: bootstrap_groups, optional: true
     tuple val(alignmentID), file("${alignmentID}.bootstrap.discovery.output"), emit: bootstrap_perm_discovery, optional: true
 
     script:
-    def args = task.ext.args ?: ''
+    def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
     def discovery_arg = discoveryFile.name != 'NO_FILE' ? "--discovery ${discoveryFile}" : ""
-    def progress_log_arg = params.progress_log != "none" ? "--progress_log ${alignmentID}.progress.log" : ""
     def export_groups_arg = (params.export_groups != null && params.export_groups != "none") ? "--export_groups ${alignmentID}.bootstrap.groups.output" : ""
     def export_perm_discovery_arg = (params.export_perm_discovery != null && params.export_perm_discovery != "none") ? "--export_perm_discovery ${alignmentID}.bootstrap.discovery.output" : ""
 
@@ -75,7 +81,6 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\
             ${discovery_arg} \\
-            ${progress_log_arg} \\
             ${export_groups_arg} \\
             ${export_perm_discovery_arg} \\
             ${args.replaceAll('\n', ' ')} \\
@@ -99,7 +104,6 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
             -o ${alignmentID}.bootstraped.output \\
             --fmt ${params.ali_format} \\
             ${discovery_arg} \\
-            ${progress_log_arg} \\
             ${export_groups_arg} \\
             ${export_perm_discovery_arg} \\
             ${args.replaceAll('\n', ' ')} \\
@@ -118,6 +122,13 @@ process BOOTSTRAP_BATCHED {
     tag "$batchID (${batchSize} genes)"
     label 'process_boot_batched'
 
+    publishDir = [
+        path: { "${params.outdir}/bootstrap" },
+        mode: 'copy',
+        saveAs: { filename -> filename.equals('versions.yml') ? null : filename },
+        enabled: params.publish_intermediates
+    ]
+
     input:
     tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(discoveryFiles, stageAs: 'discovery/*'), path(resampledPath)
     file caas_config
@@ -128,7 +139,7 @@ process BOOTSTRAP_BATCHED {
     path("*.bootstrap.discovery.output"), emit: bootstrap_perm_discovery, optional: true
 
     script:
-    def args = task.ext.args ?: ''
+    def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
     def runnerMode = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
     def ctBinary = (params.use_singularity || params.use_apptainer)
         ? '/usr/local/bin/_entrypoint.sh'
@@ -163,11 +174,11 @@ bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
     --manifest ${batchID}.manifest.tsv \\
     --caas-config ${caas_config} \\
     --resampled-path ${resampledPath} \\
-    --workers ${params.ct_bootstrap_batch_workers} \\
+    --workers ${task.cpus} \\
     --ali-format ${params.ali_format} \\
     --runner-mode ${runnerMode} \\
     --ct-bin ${ctBinary} \\
-    --progress-log ${params.progress_log != "none" ? '1' : '0'} \\
+    --progress-log 0 \\
     --export-groups ${params.export_groups != null && params.export_groups != "none" ? '1' : '0'} \\
     --export-perm-discovery ${params.export_perm_discovery != null && params.export_perm_discovery != "none" ? '1' : '0'} \\
     --extra-args-file .ct_bootstrap_batch_args

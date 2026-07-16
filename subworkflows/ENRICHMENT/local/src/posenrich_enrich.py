@@ -1,30 +1,34 @@
 #!/usr/bin/env python3
 # =============================================================================
-# posenrich_enrich.py — Position-wise enrichment via the XL-mHG test
+# posenrich_enrich.py — Position-wise enrichment via fixed-cutoff Fisher tests
 # =============================================================================
 # This is NOT the gene-level FCS: FCS is a Wilcoxon rank-shift over gene scores;
-# this is a position-wise over-representation test that accounts for per-position
-# CAAS evidence via the minimum-hypergeometric statistic. Rationale: the honest
-# testable position background (all non-gapped "selected" columns of the
-# cleaned-background genes) is <1% non-zero in CAAS_score, which pins the
-# Mann-Whitney AUC at ~0.5. The XL-mHG (minimum-hypergeometric) test is a
-# top-concentration test: it finds the score cutoff where a position set is most
-# over-represented at the head of the ranking, so it is robust to the huge tied
-# zero-mass and remains powerful. See the gene-level FCS (fcs_enrich.R) which
-# keeps Wilcoxon — that background is ~40%+ non-zero, so it has resolution there.
+# this is a position-wise over-representation test. Rationale for testing at the
+# position level at all: the honest testable position background (all
+# non-gapped "selected" columns of the cleaned-background genes) is <1%
+# non-zero in CAAS_score, which pins a rank-shift test's AUC at ~0.5. See the
+# gene-level FCS (fcs_enrich.R) which keeps Wilcoxon — that background is ~40%+
+# non-zero, so it has resolution there.
 #
-# Observed statistic  : XL-mHG on positions ranked by CAAS_score (from the
-#                       scoring module's position_scores.tsv), per direction
-#                       (global / top / bottom via change_side).
-# Analytic p (p.adj)  : the exact XL-mHG p-value, BH-adjusted per (direction, db).
-#                       X>=2 neutralises one-hit-wonders; L confines the peak to
-#                       the top of the ranking. This is the ONLY significance here:
-#                       the exact XL-mHG p already corrects the cutoff-optimisation,
-#                       so no permulation (p.perm) is used. (The CAAS permulation
-#                       null is also a NAIVE random relabeling — its pairs are
-#                       random cross-tree, not the observed matched sister pairs —
-#                       so it would not isolate the phenotype at position level.
-#                       n_le_genes flags within-gene clumping instead.)
+# Observed statistic  : Fisher's exact test, one 2x2 table per
+#                       (ranking, database, pathway, top_frac): foreground =
+#                       the top 10/5/1% of scored positions in that ranking;
+#                       background = the full honest tested position pool
+#                       (never restricted to "scored", so negative evidence is
+#                       never silently discarded).
+# Significance         : dual-gated on p_adj (BH per ranking x database) AND
+#                       fold_enrichment clearing a minimum effect size. This
+#                       matters because Fisher/hypergeometric tests gain
+#                       enormous power at this N (~1.47M) -- a barely-there
+#                       deviation from the null ratio (e.g. fold=0.95) can
+#                       reach a "significant" p-value on its own. That is the
+#                       general fact that any correctly-calibrated test's
+#                       power grows with N, so p-value alone is not an
+#                       adequate decision criterion at this scale. Pairing it
+#                       with a fold-enrichment floor (posenrich_fold_thr,
+#                       ~DAVID/PANTHER "moderate enrichment" convention)
+#                       mirrors the dual-threshold design already used by the
+#                       gene-level FCS report (p.adj AND p.perm).
 # =============================================================================
 
 import os
@@ -34,17 +38,20 @@ import argparse
 import numpy as np
 import pandas as pd
 from scipy.stats import fisher_exact
-from xlmhglite import xlmhg_test
 
 
 # ── args ─────────────────────────────────────────────────────────────────────
 def parse_args():
-    p = argparse.ArgumentParser(description="Position-level XL-mHG enrichment.")
+    p = argparse.ArgumentParser(description="Position-level Fisher-exact enrichment.")
     p.add_argument("--obs-scores", required=True,
                    help="position_scores.tsv (Gene, Position, CAAS_score, change_side)")
     p.add_argument("--gmt-dir", required=True)
     p.add_argument("--characterization", default=None,
-                   help="characterization_layers.tsv (global overlap layers)")
+                   help="characterization_layers.tsv (broad functional layers)")
+    p.add_argument("--annot-file", default=None,
+                   help="SCORING's fcs_stats.tsv (gene + flag_* columns) — cross-module "
+                        "corroboration flags (gate_sig/gate_fdr/fade/rer/accum), reported "
+                        "as the %% of distinct genes in each overlap carrying each flag")
     p.add_argument("--universe", required=True,
                    help="cleaned_background_main.txt gene list (postproc-surviving)")
     p.add_argument("--background", required=True,
@@ -52,15 +59,16 @@ def parse_args():
                         "restricted to --universe genes = the position background")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--min-size", type=int, default=5,
-                   help="min positions per set (in background)")
+                   help="min positions per set in background (GMT sources only)")
     p.add_argument("--max-size", type=int, default=0,
-                   help="max positions per set (0 = no cap)")
-    p.add_argument("--min-overlap", type=int, default=2,
-                   help="XL-mHG X: min set positions above the cutoff (>=2 kills one-hit-wonders)")
-    p.add_argument("--l-frac", type=float, default=1.0,
-                   help="XL-mHG L as a fraction of the scored region (peak confined to top)")
+                   help="max positions per set in background (0 = no cap; GMT sources only)")
     p.add_argument("--char-fracs", default="0.10,0.05,0.01",
-                   help="characterization foreground top-fractions among scored positions")
+                   help="foreground top-fractions among scored positions, per ranking")
+    p.add_argument("--padj-thr", type=float, default=0.15,
+                   help="BH-adjusted p-value significance threshold")
+    p.add_argument("--fold-thr", type=float, default=1.5,
+                   help="minimum fold-enrichment magnitude for significance "
+                        "(fold >= thr for enrichment, or <= 1/thr for depletion)")
     return p.parse_args()
 
 
@@ -99,7 +107,7 @@ def build_background(background_file, universe_genes):
     return bg
 
 
-# ── GMT loading ──────────────────────────────────────────────────────────────
+# ── GMT / characterization-layer loading ─────────────────────────────────────
 def load_gmts(gmt_dir):
     gmts = {}
     for f in sorted(glob.glob(os.path.join(gmt_dir, "*.gmt"))):
@@ -133,71 +141,100 @@ def read_charset(path):
     return layers
 
 
-# ── XL-mHG on one ranking ────────────────────────────────────────────────────
-def rank_index(scores_by_pos, background):
-    """Order background positions by score desc (stable tie-break by pos id).
-    Returns (ordered_positions, index_of_pos, n_scored)."""
-    scores = np.array([scores_by_pos.get(p, 0.0) for p in background], dtype=float)
-    # stable, deterministic: sort by (-score, position string)
-    order = sorted(range(len(background)), key=lambda i: (-scores[i], background[i]))
-    ordered = [background[i] for i in order]
-    idx = {p: r for r, p in enumerate(ordered)}
-    n_scored = int(np.count_nonzero(scores > 0))
-    return ordered, idx, n_scored
+def load_annot(path):
+    """Cross-module corroboration flags, per gene (SCORING's fcs_stats.tsv).
+    Returns ({gene: {flag_name: bool}}, [flag_name, ...]); flag columns are
+    picked up dynamically (any column starting with 'flag_'), mirroring
+    fcs_enrich.R's grep('^flag_', names(stats)). Empty/missing file -> no flags,
+    so callers simply skip the pct_* columns."""
+    if not path or not os.path.exists(path):
+        return {}, []
+    df = pd.read_csv(path, sep="\t")
+    if "gene" not in df.columns:
+        return {}, []
+    flag_cols = [c for c in df.columns if c.startswith("flag_")]
+    if not flag_cols:
+        return {}, []
+    annot = {
+        row["gene"]: {c: bool(row[c]) for c in flag_cols}
+        for _, row in df.iterrows()
+    }
+    return annot, flag_cols
 
 
-def percentile_thresholds(scores_by_pos, fracs=(0.10, 0.05, 0.01)):
-    """Score cutoffs for the top-10/5/1% of the SCORED positions in a direction
-    (the scoring module's is_top_Xpct convention)."""
-    vals = sorted((s for s in scores_by_pos.values() if s > 0), reverse=True)
-    thr = {}
-    for f in fracs:
-        if vals:
-            k = max(1, int(round(f * len(vals))))
-            thr[f] = vals[k - 1]
-        else:
-            thr[f] = float("inf")
-    return thr
+# ── observed scores ──────────────────────────────────────────────────────────
+def direction_scores(df, direction):
+    """Return {pos_id: CAAS_score} for a direction (global/top/bottom).
+    global: every position, no change_side filter (kept as-is — no
+    SCORING-canonical "global" convention exists to migrate to). top/bottom:
+    change_side-filtered first (matching SCORING's 11.Scoring_report.Rmd
+    convention: pos_top/pos_bottom = filter(change_side %in% ...)), so
+    "none"-labeled positions are structurally excluded before any percentile
+    is ever computed."""
+    if direction == "global":
+        sub = df
+    elif direction == "top":
+        sub = df[df["change_side"].isin(["top", "both"])]
+    else:
+        sub = df[df["change_side"].isin(["bottom", "both"])]
+    return dict(zip(sub["pos_id"], sub["CAAS_score"]))
 
 
-def run_xlmhg_for_sets(terms, idx, N, n_scored, x, l_frac, num_g, num_g_max,
-                       scores_by_pos, ordered, tiers):
-    """Run XL-mHG for every term in one database against one ranking."""
-    L = max(x, min(N, int(round(l_frac * max(n_scored, 1)))))
-    v = np.zeros(N, dtype=np.uint8)
+# ── Fisher overlap test ───────────────────────────────────────────────────────
+def annotate_overlap(overlap, annot, flag_names):
+    """Cross-module corroboration: of the DISTINCT genes contributing to this
+    overlap (not the raw position count — a single gene contributing many
+    overlapping positions must not dominate the percentage), what fraction
+    carry each flag_* column from SCORING's fcs_stats.tsv? Returns
+    {pct_<flag w/o 'flag_' prefix>: value}, NaN when the overlap is empty."""
+    if not flag_names:
+        return {}
+    genes = {p.rsplit(":", 1)[0] for p in overlap}
+    if not genes:
+        return {f"pct_{f[len('flag_'):]}": np.nan for f in flag_names}
+    return {
+        f"pct_{f[len('flag_'):]}":
+            100.0 * sum(annot.get(g, {}).get(f, False) for g in genes) / len(genes)
+        for f in flag_names
+    }
+
+
+def run_fisher_for_terms(terms, descs, foreground_by_frac, bg_set, N, min_size, max_size,
+                         annot=None, flag_names=None):
+    """Fisher-exact overlap test for every term in one database against one
+    ranking, at each fixed top-fraction cutoff already precomputed for this
+    ranking (foreground_by_frac: frac -> (foreground_size, foreground_set)).
+    Background (N) is always the full honest tested position pool — never
+    restricted to the scored subset, so tested-negative positions are never
+    silently dropped from the null. min_size/max_size (set size within the
+    background) apply only to GMT-style term collections; pass 0/0 to skip
+    that filter for the broad characterization layers. annot/flag_names (from
+    load_annot) add pct_<flag> cross-module corroboration columns when given."""
     out = []
     for term, members in terms.items():
-        member_ranks = [idx[m] for m in members if m in idx]
-        K = len(member_ranks)
-        if K < num_g or (num_g_max > 0 and K > num_g_max):
+        M = set(members) & bg_set
+        mm = len(M)
+        if min_size and mm < min_size:
             continue
-        n_scored_members = sum(1 for m in members
-                               if scores_by_pos.get(m, 0.0) > 0 and m in idx)
-        # composition: set members in the top 10/5/1% of the score distribution
-        n_top10 = sum(1 for m in members if scores_by_pos.get(m, 0.0) >= tiers[0.10])
-        n_top5 = sum(1 for m in members if scores_by_pos.get(m, 0.0) >= tiers[0.05])
-        n_top1 = sum(1 for m in members if scores_by_pos.get(m, 0.0) >= tiers[0.01])
-        v[member_ranks] = 1
-        try:
-            stat, cutoff, pval = xlmhg_test(v, X=x, L=L)
-        except Exception:
-            stat, cutoff, pval = 1.0, 0, 1.0
-        finally:
-            v[member_ranks] = 0
-        # leading edge = members at or above the mHG cutoff
-        k_cut = sum(1 for r in member_ranks if r < cutoff)
-        fold = ((k_cut / cutoff) / (K / N)) if cutoff > 0 and K > 0 else np.nan
-        le = [ordered[r] for r in sorted(member_ranks) if r < cutoff]
-        # distinct genes in the leading edge — a cheap, analytic guard against
-        # within-gene clumping (an enrichment driven by 1-2 genes is the
-        # non-independence artifact the permulation null would have flagged).
-        n_le_genes = len({m.rsplit(":", 1)[0] for m in le})
-        out.append(dict(pathway=term, stat=float(stat), cutoff=int(cutoff),
-                        pval=float(pval), set_size=K,
-                        n_scored_members=n_scored_members,
-                        n_top10=n_top10, n_top5=n_top5, n_top1=n_top1,
-                        leading_edge_size=k_cut, n_le_genes=n_le_genes,
-                        fold=fold, leading_edge=",".join(le)))
+        if max_size and mm > max_size:
+            continue
+        desc = descs.get(term, term)
+        for frac, (nn, foreground) in foreground_by_frac.items():
+            overlap = foreground & M
+            k = len(overlap)
+            expected = nn * mm / N if N else np.nan
+            fold = (k / expected) if expected and expected > 0 else np.nan
+            table = [[k, nn - k], [mm - k, N - nn - (mm - k)]]
+            try:
+                _, p = fisher_exact(table, alternative="two-sided")
+            except Exception:
+                p = np.nan
+            row = dict(pathway=term, description=desc, top_frac=frac,
+                      layer_size=mm, foreground_size=nn, observed=k,
+                      expected=expected, fold_enrichment=fold, p_value=p,
+                      direction=("enriched" if fold and fold >= 1 else "depleted"))
+            row.update(annotate_overlap(overlap, annot or {}, flag_names or []))
+            out.append(row)
     return out
 
 
@@ -213,18 +250,6 @@ def bh_adjust(pvals):
     out = np.empty(n)
     out[order] = np.clip(adj, 0, 1)
     return out
-
-
-# ── observed scores ──────────────────────────────────────────────────────────
-def direction_scores(df, direction):
-    """Return {pos_id: CAAS_score} for a direction (global/top/bottom)."""
-    if direction == "global":
-        sub = df
-    elif direction == "top":
-        sub = df[df["change_side"].isin(["top", "both"])]
-    else:
-        sub = df[df["change_side"].isin(["bottom", "both"])]
-    return dict(zip(sub["pos_id"], sub["CAAS_score"]))
 
 
 def main():
@@ -247,84 +272,72 @@ def main():
     # testable, so never drop it) — a no-op when background.output is complete.
     n_bg_only = len(set(background))
     background = sorted(set(background) | set(obs["pos_id"]))
+    bg_set = set(background)
     N = len(background)
     print(f"[posenrich] background positions: {N} (background.output∩universe={n_bg_only}) "
           f"| scored: {(obs['CAAS_score']>0).sum()}", flush=True)
 
     gmts = load_gmts(args.gmt_dir)
-    print(f"[posenrich] GMT databases: {len(gmts)}", flush=True)
+    char_layers = read_charset(args.characterization)
+    annot, flag_names = load_annot(args.annot_file)
+    if flag_names:
+        print(f"[posenrich] cross-module flags: {', '.join(flag_names)} "
+              f"({len(annot)} genes annotated)", flush=True)
+    # Unify GMT-style term collections and the broad characterization layers
+    # into one sources dict: database -> (terms, descs, apply_size_filter).
+    # Both are structurally the same object (name -> position members), so one
+    # Fisher-loop handles both; only the min/max-size filter differs (GMT terms
+    # are size-bounded as before, the 4 broad layers never were).
+    sources = {db: (terms, descs, True) for db, (terms, descs) in gmts.items()}
+    if char_layers:
+        char_terms = {name: members for name, (desc, members) in char_layers.items()}
+        char_descs = {name: desc for name, (desc, members) in char_layers.items()}
+        sources["characterization"] = (char_terms, char_descs, False)
+    print(f"[posenrich] sources: {len(sources)} ({', '.join(sources)})", flush=True)
 
     directions = ["global", "top", "bottom"]
     rows = []
     for direction in directions:
         obs_scores = direction_scores(obs, direction)
-        ordered, idx, n_scored = rank_index(obs_scores, background)
+        n_scored = sum(1 for s in obs_scores.values() if s > 0)
         if n_scored == 0:
             continue
-        tiers = percentile_thresholds(obs_scores)
+        # Stable, deterministic ranking: sort scored positions by (-score, id).
+        scored_sorted = sorted((p for p in background if obs_scores.get(p, 0.0) > 0),
+                               key=lambda p: (-obs_scores[p], p))
+        foreground_by_frac = {}
+        for frac in char_fracs:
+            n = max(1, int(round(frac * len(scored_sorted))))
+            foreground_by_frac[frac] = (n, set(scored_sorted[:n]))
         print(f"[posenrich] {direction}: {n_scored} scored positions ranked", flush=True)
 
-        for db, (terms, descs) in gmts.items():
-            res = run_xlmhg_for_sets(terms, idx, N, n_scored, args.min_overlap,
-                                     args.l_frac, args.min_size, args.max_size,
-                                     obs_scores, ordered, tiers)
+        for db, (terms, descs, apply_size_filter) in sources.items():
+            res = run_fisher_for_terms(
+                terms, descs, foreground_by_frac, bg_set, N,
+                args.min_size if apply_size_filter else 0,
+                args.max_size if apply_size_filter else 0,
+                annot=annot, flag_names=flag_names)
             if not res:
                 continue
-            padj = bh_adjust([r["pval"] for r in res])
+            # BH per (ranking, database): a handful of huge broad layers and up
+            # to thousands of small GMT terms carry very different multiple-
+            # testing burdens, so one global family across everything would
+            # conflate them.
+            padj = bh_adjust([r["p_value"] for r in res])
             for i, r in enumerate(res):
-                rows.append(dict(ranking=direction, database=db,
-                                 pathway=r["pathway"],
-                                 description=descs.get(r["pathway"], r["pathway"]),
-                                 stat=r["stat"], cutoff=r["cutoff"],
-                                 pval=r["pval"], p_adj=padj[i],
-                                 set_size=r["set_size"],
-                                 n_scored_members=r["n_scored_members"],
-                                 n_top10=r["n_top10"], n_top5=r["n_top5"],
-                                 n_top1=r["n_top1"],
-                                 leading_edge_size=r["leading_edge_size"],
-                                 n_le_genes=r["n_le_genes"],
-                                 fold=r["fold"], leading_edge=r["leading_edge"]))
+                r["p_adj"] = padj[i]
+                fold = r["fold_enrichment"]
+                r["sig"] = bool(
+                    r["p_adj"] < args.padj_thr and not np.isnan(fold) and
+                    (fold >= args.fold_thr or fold <= 1.0 / args.fold_thr))
+                rows.append(dict(ranking=direction, database=db, **r))
 
     results = pd.DataFrame(rows)
     if not results.empty:
-        results = results.sort_values(["p_adj", "pval"], na_position="last")
-    out_path = os.path.join(args.output_dir, "posenrich_results.tsv")
+        results = results.sort_values(["p_adj", "p_value"], na_position="last")
+    out_path = os.path.join(args.output_dir, "posenrich_characterization.tsv")
     results.to_csv(out_path, sep="\t", index=False)
     print(f"[posenrich] wrote {out_path} ({len(results)} rows)", flush=True)
-
-    # ── Characterization (Fisher overlap at top 10/5/1% of scored) ────────────
-    layers = read_charset(args.characterization)
-    char_rows = []
-    if layers:
-        gscore = direction_scores(obs, "global")
-        scored_sorted = sorted([p for p in background if gscore.get(p, 0.0) > 0],
-                               key=lambda p: -gscore[p])
-        bg_set = set(background)
-        for frac in char_fracs:
-            n = max(1, int(round(frac * len(scored_sorted))))
-            foreground = set(scored_sorted[:n])
-            for name, (desc, members) in layers.items():
-                M = members & bg_set
-                k = len(foreground & M)
-                mm, nn, NN = len(M), n, N
-                expected = nn * mm / NN if NN else np.nan
-                fold = (k / expected) if expected and expected > 0 else np.nan
-                table = [[k, nn - k], [mm - k, NN - nn - (mm - k)]]
-                try:
-                    _, p = fisher_exact(table, alternative="two-sided")
-                except Exception:
-                    p = np.nan
-                char_rows.append(dict(top_frac=frac, layer=name, description=desc,
-                                      layer_size=mm, foreground_size=nn, observed=k,
-                                      expected=expected, fold_enrichment=fold,
-                                      p_value=p,
-                                      direction=("enriched" if fold and fold >= 1 else "depleted")))
-    char_df = pd.DataFrame(char_rows)
-    if not char_df.empty:
-        char_df["p_adj"] = bh_adjust(char_df["p_value"].fillna(1.0).values)
-    char_path = os.path.join(args.output_dir, "posenrich_characterization.tsv")
-    char_df.to_csv(char_path, sep="\t", index=False)
-    print(f"[posenrich] wrote {char_path} ({len(char_df)} rows)", flush=True)
 
 
 if __name__ == "__main__":

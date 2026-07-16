@@ -106,7 +106,7 @@ class ConvergenceResult:
     # Scoring and quality
     score: Optional[Any] = None
     position_one_based: Optional[int] = None
-    caas_pvalue: Optional[float] = None
+    pvalue: Optional[float] = None
     pvalue_boot: Optional[float] = None
 
     # Change tracking

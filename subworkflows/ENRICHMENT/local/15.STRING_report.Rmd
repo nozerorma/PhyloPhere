@@ -25,6 +25,8 @@ params:
   report_num: 20
   enable_ppi_enrichment: false
   gene_scores_file: NULL
+  string_db_dir: NULL
+  min_cluster_genes: 3
 ---
 
 ```{r setup, include=FALSE}
@@ -38,6 +40,18 @@ knitr::opts_chunk$set(
   dpi = 320
 )
 
+# Prevent hangs by setting connection timeouts for RCurl and httr
+options(timeout = 30)
+options(RCurlOptions = list(connecttimeout = 10, timeout = 30))
+if (requireNamespace("httr", quietly = TRUE)) {
+  httr::set_config(httr::config(connecttimeout = 10, timeout = 30))
+}
+
+# Minimum cluster size (genes) to keep in the cluster description table and
+# the network visualisation; smaller clusters are labelled "Too small" and
+# dropped from both.
+.min_cluster_genes <- if (!is.null(params$min_cluster_genes)) as.integer(params$min_cluster_genes) else 3L
+
 suppressPackageStartupMessages({
   library(tidyverse)
   library(knitr)
@@ -45,6 +59,134 @@ suppressPackageStartupMessages({
   library(STRINGdb)
   library(paletteer)
 })
+
+# ── Global ENSP -> Symbol Mapping Cache ──────────────────────────────────────
+global_id2gene <- new.env(parent = emptyenv())
+
+# ── Local offline enrichment implementation ───────────────────────────────────
+enrich_terms_db <- NULL
+
+find_enrichment_terms_file <- function(species, cache_dir) {
+  fname <- paste0(species, ".protein.enrichment.terms.v12.0.txt.gz")
+  
+  # Search paths in order of preference, starting with parameterized string_db_dir
+  paths <- c(
+    if (!is.null(params$string_db_dir) && nzchar(params$string_db_dir)) file.path(params$string_db_dir, fname) else NULL,
+    file.path(cache_dir, fname)
+  )
+  
+  for (p in paths) {
+    if (!is.null(p) && nzchar(p) && file.exists(p)) {
+      return(normalizePath(p))
+    }
+  }
+  NULL
+}
+
+load_local_enrichment_db <- function(species, cache_dir) {
+  terms_file <- find_enrichment_terms_file(species, cache_dir)
+  
+  if (is.null(terms_file)) {
+    # If not found locally, try downloading it (fallback if internet is available)
+    message(sprintf("[local_enrichment] Local file not found. Attempting to download for species %s...", species))
+    dest_file <- file.path(cache_dir, paste0(species, ".protein.enrichment.terms.v12.0.txt.gz"))
+    url <- sprintf("https://stringdb-downloads.org/download/protein.enrichment.terms.v12.0/%s.protein.enrichment.terms.v12.0.txt.gz", species)
+    
+    download_ok <- tryCatch({
+      download.file(url, dest_file, quiet = TRUE)
+      TRUE
+    }, error = function(e) {
+      message(sprintf("[local_enrichment] Download failed: %s", e$message))
+      FALSE
+    })
+    
+    if (download_ok && file.exists(dest_file)) {
+      terms_file <- dest_file
+    } else {
+      stop("Local enrichment terms file not found and download failed.")
+    }
+  }
+  
+  message(sprintf("[local_enrichment] Loading enrichment database from: %s", terms_file))
+  db <- readr::read_tsv(
+    terms_file,
+    col_types = "cccc",
+    comment = "#",
+    col_names = c("string_protein_id", "category", "term", "description")
+  )
+  db
+}
+
+get_enrichment_local <- function(fg_ids, bg_ids = NULL, fdr_threshold = 0.1) {
+  if (is.null(enrich_terms_db)) return(NULL)
+  if (length(fg_ids) == 0) return(tibble::tibble())
+  
+  # If bg_ids is too small/empty, default to all proteins present in the terms db
+  if (is.null(bg_ids) || length(bg_ids) < 5) {
+    bg_ids <- unique(enrich_terms_db$string_protein_id)
+  }
+  
+  # Ensure fg_ids is constrained by background
+  fg_ids <- intersect(fg_ids, bg_ids)
+  if (length(fg_ids) == 0) return(tibble::tibble())
+  
+  # Filter database to background proteins
+  bg_data <- enrich_terms_db %>% dplyr::filter(string_protein_id %in% bg_ids)
+  
+  # Count term sizes in background (STRING requires >= 2 genes in background for test)
+  term_bg_counts <- bg_data %>%
+    dplyr::group_by(category, term, description) %>%
+    dplyr::summarise(M = dplyr::n(), .groups = "drop") %>%
+    dplyr::filter(M >= 2)
+    
+  # Filter database to foreground and count
+  fg_data <- enrich_terms_db %>% dplyr::filter(string_protein_id %in% fg_ids)
+  fg_counts <- fg_data %>%
+    dplyr::group_by(category, term, description) %>%
+    dplyr::summarise(k = dplyr::n(), .groups = "drop")
+    
+  N <- length(bg_ids)
+  n <- length(fg_ids)
+  
+  # Run hypergeometric test: phyper(k-1, M, N-M, n, lower.tail = FALSE) -> P(X >= k)
+  res <- term_bg_counts %>%
+    dplyr::inner_join(fg_counts, by = c("category", "term", "description")) %>%
+    dplyr::mutate(
+      pvalue = phyper(k - 1, M, N - M, n, lower.tail = FALSE)
+    ) %>%
+    dplyr::group_by(category) %>%
+    dplyr::mutate(fdr = p.adjust(pvalue, method = "fdr")) %>%
+    dplyr::ungroup() %>%
+    dplyr::filter(fdr <= fdr_threshold) %>%
+    dplyr::arrange(category, fdr)
+    
+  if (nrow(res) == 0) return(tibble::tibble())
+  
+  # Map protein IDs in foreground to symbols using our global cache
+  fg_mapped <- fg_data %>%
+    dplyr::mutate(gene = sapply(string_protein_id, function(id) {
+      sym <- global_id2gene[[id]]
+      if (is.null(sym)) id else sym
+    }))
+    
+  # Append preferredNames (comma-separated list of symbols)
+  term_genes <- fg_mapped %>%
+    dplyr::group_by(category, term) %>%
+    dplyr::summarise(
+      preferredNames = paste(sort(unique(gene)), collapse = ","),
+      .groups = "drop"
+    )
+    
+  res <- res %>%
+    dplyr::left_join(term_genes, by = c("category", "term")) %>%
+    dplyr::rename(
+      number_of_genes = k,
+      number_of_genes_in_background = M,
+      p_value = pvalue
+    )
+    
+  res
+}
 
 # ── Palette helpers (overflow-safe Tableau_10) ────────────────────────────────
 .pal10_base <- as.character(paletteer_d("ggthemes::Tableau_10"))
@@ -97,10 +239,22 @@ ensure_string_cache <- function(species, version = "12.0", input_directory = "st
 
   for (rel in files) {
     url <- sprintf("%s/%s", base, rel)
-    dest <- file.path(input_directory, basename(rel))
+    fname <- basename(rel)
+    dest <- file.path(input_directory, fname)
     if (!file.exists(dest) || file.size(dest) == 0) {
-      message(sprintf("Caching STRING file: %s", basename(rel)))
-      download_with_retry(url, destfile = dest)
+      # Try finding in params$string_db_dir first
+      local_src <- if (!is.null(params$string_db_dir) && nzchar(params$string_db_dir)) file.path(params$string_db_dir, fname) else NULL
+      if (!is.null(local_src) && file.exists(local_src) && file.size(local_src) > 0) {
+        message(sprintf("[ensure_string_cache] Using local pre-cached file: %s", local_src))
+        file.copy(local_src, dest, overwrite = TRUE)
+      } else {
+        message(sprintf("Caching STRING file from online: %s", fname))
+        tryCatch({
+          download_with_retry(url, destfile = dest)
+        }, error = function(e) {
+          stop(sprintf("Failed to retrieve required STRING cache file %s: %s", fname, e$message))
+        })
+      }
     }
   }
 
@@ -124,6 +278,14 @@ createDir(string_results_dir)
 createDir(string_summary_dir)
 createDir(string_plots_dir)
 createDir(string_cache_dir)
+
+# Load local enrichment database
+enrich_terms_db <- tryCatch({
+  load_local_enrichment_db(as.integer(params$species), string_cache_dir)
+}, error = function(e) {
+  warning(sprintf("Could not load local enrichment database: %s. Will fallback to online queries.", e$message))
+  NULL
+})
 
 # Pre-cache STRING DB files with retry/timeout guards to avoid transient
 # network failures during set_background()/enrichment calls.
@@ -229,7 +391,8 @@ cluster_layout <- function(net, clusters_df, seed = 42) {
 # *statistically* denser than expected when the same number of genes is drawn from
 # the (custom) background. A low p confirms the cluster is a real interaction
 # module, not just a co-annotated GO bin. Returns ppi_edges / ppi_expected / ppi_pvalue.
-describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3, enable_ppi = FALSE) {
+describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3, enable_ppi = FALSE,
+                               min_cluster_genes = 3) {
   if (is.null(clusters_df) || nrow(clusters_df) == 0) return(tibble())
   purrr::map_dfr(sort(unique(clusters_df$cluster)), function(cl_id) {
     cl_nodes <- clusters_df$node[clusters_df$cluster == cl_id]
@@ -237,6 +400,8 @@ describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3, enable_p
     gene_str <- paste(head(sort(genes[!is.na(genes)]), 8), collapse = ", ")
 
     # Per-cluster PPI density test (independent of the enrichment label below).
+    # Requires >= 3 nodes as a hard statistical minimum for the test itself,
+    # separate from min_cluster_genes (which gates reporting/display).
     ppi_edges <- NA_integer_; ppi_expected <- NA_real_; ppi_pvalue <- NA_real_
     if (isTRUE(enable_ppi) && length(cl_nodes) >= 3 && length(cl_nodes) <= 500) {
       ppi <- tryCatch(sdb$get_ppi_enrichment(cl_nodes), error = function(e) NULL)
@@ -244,18 +409,32 @@ describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3, enable_p
         # STRINGdb::get_ppi_enrichment returns a list with fields edges (observed),
         # lambda (expected) and enrichment (the p-value) — NOT number_of_edges /
         # expected_number_of_edges / p_value (those are STRING web-API names).
-        ppi_edges    <- ppi$edges      %||% NA_integer_
-        ppi_expected <- ppi$lambda     %||% NA_real_
-        ppi_pvalue   <- ppi$enrichment %||% NA_real_
+        # Coerce values to numeric/integer to prevent type mismatches during bind_rows.
+        ppi_edges    <- if (!is.null(ppi$edges)) as.integer(ppi$edges) else NA_integer_
+        ppi_expected <- if (!is.null(ppi$lambda)) as.numeric(ppi$lambda) else NA_real_
+        ppi_pvalue   <- if (!is.null(ppi$enrichment)) as.numeric(ppi$enrichment) else NA_real_
       }
     }
 
-    if (length(cl_nodes) < 3) {
+    if (length(cl_nodes) < min_cluster_genes) {
       return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
                     genes = gene_str, description = "Too small",
                     ppi_edges = ppi_edges, ppi_expected = ppi_expected, ppi_pvalue = ppi_pvalue))
     }
-    enrich <- tryCatch(sdb$get_enrichment(cl_nodes), error = function(e) NULL)
+    message(sprintf("[describe_clusters] Querying STRING enrichment for cluster %d (%d genes)...", cl_id, length(cl_nodes)))
+    enrich <- if (!is.null(enrich_terms_db)) {
+      get_enrichment_local(cl_nodes, bg_string_ids)
+    } else {
+      # Fallback to online API
+      message(sprintf("[describe_clusters] Querying STRING online enrichment for cluster %d (%d genes)...", cl_id, length(cl_nodes)))
+      tryCatch(
+        sdb$get_enrichment(cl_nodes),
+        error = function(e) {
+          message(sprintf("[describe_clusters] Warning: STRING enrichment failed for cluster %d: %s", cl_id, e$message))
+          NULL
+        }
+      )
+    }
     if (is.null(enrich) || nrow(enrich) == 0 || "error" %in% names(enrich)) {
       return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
                     genes = gene_str, description = "No enrichment",
@@ -336,6 +515,12 @@ safe_string_map_ids <- function(genes) {
     }
   )
   if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
+  
+  # Populate the global ENSP -> symbol cache
+  for (i in 1:nrow(mapped)) {
+    global_id2gene[[mapped$STRING_id[i]]] <- mapped$gene[i]
+  }
+  
   unique(as.character(mapped$STRING_id))
 }
 
@@ -510,7 +695,7 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
       rer_acc = NA_real_, rer_decc = NA_real_, accum = NA_real_
     ))
   }
-  genes <- strsplit(preferred_names, ",")[[1]]
+  genes <- strsplit(preferred_names, "[,;]")[[1]]
   sub_attr <- attr_df %>% dplyr::filter(gene %in% genes)
   if (nrow(sub_attr) == 0) {
     return(tibble::tibble(
@@ -569,34 +754,43 @@ run_single_string <- function(gene_file, use_custom_background) {
   }
 
   # ── Functional enrichment ──────────────────────────────────────────────────
-  # get_enrichment() returns a flat data.frame with a 'category' column.
-  # The background is already set globally on string_db via set_background().
-  enrich_df <- tryCatch(
-    {
-      res <- string_db$get_enrichment(gene_string_ids)
-      if (!is.null(res) && nrow(res) > 0) {
-        # STRINGdb may return an error frame with columns 'error'/'message'
-        # (e.g. background_error when mapped genes fall outside the custom
-        # background set) instead of real enrichment rows.  Detect and skip.
-        if ("error" %in% names(res)) {
-          message(sprintf(
-            "STRING enrichment API error for %s: %s",
-            list_name,
-            paste(as.character(res[["message"]]), collapse = "; ")
-          ))
-          tibble()
-        } else {
-          res %>% mutate(gene_list = list_name)
-        }
-      } else {
-        tibble()
-      }
-    },
-    error = function(e) {
-      message(sprintf("STRING enrichment failed for %s: %s", list_name, e$message))
+  enrich_df <- if (!is.null(enrich_terms_db)) {
+    res <- get_enrichment_local(gene_string_ids, bg_string_ids)
+    if (!is.null(res) && nrow(res) > 0) {
+      res %>% mutate(gene_list = list_name)
+    } else {
       tibble()
     }
-  )
+  } else {
+    # Fallback to online API
+    message(sprintf("[run_string_enrichment] Querying STRING online enrichment for gene list '%s' (%d genes)...", list_name, length(gene_string_ids)))
+    tryCatch(
+      {
+        res <- string_db$get_enrichment(gene_string_ids)
+        if (!is.null(res) && nrow(res) > 0) {
+          # STRINGdb may return an error frame with columns 'error'/'message'
+          # (e.g. background_error when mapped genes fall outside the custom
+          # background set) instead of real enrichment rows.  Detect and skip.
+          if ("error" %in% names(res)) {
+            message(sprintf(
+              "STRING enrichment API error for %s: %s",
+              list_name,
+              paste(as.character(res[["message"]]), collapse = "; ")
+            ))
+            tibble()
+          } else {
+            res %>% mutate(gene_list = list_name)
+          }
+        } else {
+          tibble()
+        }
+      },
+      error = function(e) {
+        message(sprintf("STRING enrichment failed for %s: %s", list_name, e$message))
+        tibble()
+      }
+    )
+  }
 
   if (nrow(enrich_df) == 0) {
     return(list(
@@ -781,7 +975,9 @@ readr::write_tsv(all_results, file.path(string_summary_dir, "string_all_results.
 
 kable(run_summary, caption = "STRING enrichment run summary") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
+```
 
+```{r summary_tables_terms, results='asis'}
 # Render top enriched terms with overlaps
 if (nrow(all_results) > 0 && !is.null(gene_scores_df)) {
   for (.gl in unique(all_results$gene_list)) {
@@ -999,7 +1195,8 @@ for (.gf in gene_list_files) {
       # honours the custom background set via set_background().
       .clust_desc <- describe_clusters(
         string_db, .clusters_df, .id2gene,
-        enable_ppi = isTRUE(params$enable_ppi_enrichment)
+        enable_ppi = isTRUE(params$enable_ppi_enrichment),
+        min_cluster_genes = .min_cluster_genes
       )
       
       # Calculate percentages for each cluster if gene_scores_df is available
@@ -1121,8 +1318,14 @@ for (.gf in gene_list_files) {
       # Exclude uninformative labels so they don't clutter the legend
       .cl_labels <- setNames(.clust_desc$description, as.character(.clust_desc$cluster))
       .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment")]
+
+      # Drop clusters below min_cluster_genes from the network visualisation too
+      # (their nodes fall back to the "ungrouped" bucket in cluster_layout()).
+      .clusters_df_viz <- .clusters_df %>%
+        dplyr::filter(cluster %in% .clust_desc$cluster[.clust_desc$n_genes >= .min_cluster_genes])
     } else {
       .cl_labels <- NULL
+      .clusters_df_viz <- .clusters_df
     }
 
     # Network plot saved to PNG and rendered inline
@@ -1132,7 +1335,7 @@ for (.gf in gene_list_files) {
     )
     png(.png_path, width = 1800, height = 1500, res = 160)
     plot_cluster_network(
-      .net_conn, .clusters_df,
+      .net_conn, .clusters_df_viz,
       title          = sprintf("%s — %s network (score ≥ %s)", .list_name, .net_type, params$network_score_thr),
       id_to_gene     = .id2gene,
       cluster_labels = .cl_labels

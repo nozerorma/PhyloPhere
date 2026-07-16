@@ -293,10 +293,10 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
     #            matrix is selected per ranking — directionality is precomputed
     #            upstream (each labeling's change_side partitions the directions),
     #            so no corRho transform is needed.
-    corStat_byrank <- corperms$corStat_byrank
-    if (!is.null(corperms) && (!is.null(corperms$corStat) || !is.null(corStat_byrank))) {
-      base_corStat <- if (!is.null(corperms$corStat)) as.matrix(corperms$corStat) else NULL
-      base_corRho  <- if (!is.null(corperms$corRho)) as.matrix(corperms$corRho) else NULL
+    corStat_byrank <- c(corperms[["corStat_byrank"]], corperms[["caas_corStat_byrank"]])
+    if (!is.null(corperms) && (!is.null(corperms[["corStat"]]) || !is.null(corStat_byrank))) {
+      base_corStat <- if (!is.null(corperms[["corStat"]])) as.matrix(corperms[["corStat"]]) else NULL
+      base_corRho  <- if (!is.null(corperms[["corRho"]])) as.matrix(corperms[["corRho"]]) else NULL
       n_perms      <- if (!is.null(base_corStat)) ncol(base_corStat)
                       else if (length(corStat_byrank)) ncol(corStat_byrank[[1]]) else 0L
       fcs_progress(sprintf("Vectorized pathway permulations: N=%d, %d GMTs, %d rankings",

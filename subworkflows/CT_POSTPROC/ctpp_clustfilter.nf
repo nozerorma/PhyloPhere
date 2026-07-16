@@ -49,7 +49,7 @@ process CT_FILTER {
         -i ${discovery_file} \
         -l ${minlen} \
         -c ${maxcaas} \
-        ${params.verbose ? '--verbose' : ''}
+        --verbose
     """
 }
 

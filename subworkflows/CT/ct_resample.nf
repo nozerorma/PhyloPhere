@@ -34,6 +34,12 @@ process RESAMPLE {
     // Uncomment the following lines to assign workload priority.
     label 'process_resample'
 
+    publishDir = [
+        path: { "${params.outdir}/resample" },
+        mode: 'copy',
+        saveAs: { filename -> filename.equals('versions.yml') ? null : filename },
+        enabled: params.publish_intermediates
+    ]
 
     input:
     path nw_tree,     stageAs: 'nw_tree.nwk'
@@ -44,8 +50,6 @@ process RESAMPLE {
     path("${nw_tree.baseName}.resampled.output/")
 
     script:
-    def args = task.ext.args ?: ''
-
     if (params.use_singularity | params.use_apptainer) {
         """
         echo "Using Singularity/Apptainer"
@@ -77,7 +81,7 @@ process RESAMPLE {
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "${caas_config}" \\
-        ${params.cycles} \\
+        ${params.perms_cycles} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
@@ -115,7 +119,7 @@ process RESAMPLE {
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "${caas_config}" \\
-        ${params.cycles} \\
+        ${params.perms_cycles} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\

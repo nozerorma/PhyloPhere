@@ -298,9 +298,7 @@ def parse_discovery_positions(discovery_file, genename):
                                 position_schemes[position] = set()
                             position_schemes[position].add(scheme)
                     elif mode == "CAAS":
-                        # CAAS can be legacy (no caap_group) or normalized (caap_group=US).
-                        # Legacy:    Gene mode Trait Position ...
-                        # Normalized:Gene mode caap_group Trait Position ...
+                        # Gene mode caap_group Trait Position ...
                         if len(fields) >= 5 and fields[2] in {"US", "GS1", "GS2", "GS3", "GS4"}:
                             position = fields[4]
                         elif len(fields) >= 4:

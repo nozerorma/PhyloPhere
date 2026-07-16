@@ -32,8 +32,9 @@ from src.asr.asr_single import (
 
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
 from src.utils.concurrency import plan_concurrency, init_worker, codeml_slot
-from src.data.loaders import list_gene_caas_positions, list_gene_caas_entries
+from src.data.loaders import list_gene_caas_positions, list_gene_caas_entries, normalize_amino_list
 from src.utils.io_utils import find_gene_alignment
+from src.data.models import CAASPosition
 
 from src.utils.disambiguation_db import (
     init_db,
@@ -73,13 +74,11 @@ def convert_convergence_result_to_dict(
             if not hasattr(ns, "position") and "position" in result:
                 ns.position = result.get("position")
 
-            if not hasattr(ns, "caas_pvalue") and "pvalue" in result:
-                ns.caas_pvalue = result.get("pvalue")
+            if not hasattr(ns, "pvalue") and "pvalue" in result:
+                ns.pvalue = result.get("pvalue")
 
             if not hasattr(ns, "pvalue_boot") and "pvalue_boot" in result:
                 ns.pvalue_boot = result.get("pvalue_boot")
-            if not hasattr(ns, "pvalue_boot") and "pvalue.boot" in result:
-                ns.pvalue_boot = result.get("pvalue.boot")
 
             if not hasattr(ns, "is_significant") and "is_significant" in result:
                 ns.is_significant = result.get("is_significant")
@@ -109,7 +108,7 @@ def convert_convergence_result_to_dict(
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
         "is_significant": bool(getattr(result, "is_significant", False)),
-        "pvalue": getattr(result, "caas_pvalue", None),
+        "pvalue": getattr(result, "pvalue", None),
         "pvalue_boot": getattr(result, "pvalue_boot", None),
         "caap_group": getattr(result, "caap_group", "US"),
         "amino_encoded": getattr(result, "amino_encoded", ""),
@@ -834,96 +833,37 @@ def _write_cycle_trait_file(fg: List[str], bg: List[str], out_path: Path) -> Non
 
 
 def build_cycle_inputs(
-    perm_discovery_file: str,
+    perm_discovery_path: str,
     resample_dir: str,
     work_dir: Path,
     cycles: Optional[List[str]] = None,
 ) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
-    """Materialize per-cycle trait + caas-metadata files from the full-pool export.
-
-    The export_perm_discovery file already uses disambiguation's canonical column
-    names (caas, caap_group, amino_encoded, is_conserved_meta, conserved_pair) —
-    so the metadata adapter only adds GenePos/tag/is_significant and strips the
-    "N:" prefix from conserved_pair, mirroring CT_signification.
-
-    Returns (cycle_tags, cycle_trait_files, cycle_meta_files).
+    """Materialize per-cycle trait + caas-metadata files from the resample labelings.
+    Skips writing metadata split files to disk since workers read gene files directly.
     """
-    import csv as _csv
-
     work_dir.mkdir(parents=True, exist_ok=True)
     trait_dir = work_dir / "cycle_traits"
-    meta_dir = work_dir / "cycle_meta"
     trait_dir.mkdir(exist_ok=True)
-    meta_dir.mkdir(exist_ok=True)
 
     labelings = _read_resample_labelings(resample_dir)
-
-    # Group export rows by cycle tag.
-    rows_by_cycle: Dict[str, List[Dict[str, str]]] = {}
-    with open(perm_discovery_file, "r") as f:
-        reader = _csv.DictReader(f, delimiter="\t")
-        for row in reader:
-            # export_perm_discovery (boot.py) headers are fully lowercase.
-            cyc = (row.get("cycle") or "").strip()
-            if not cyc:
-                continue
-            rows_by_cycle.setdefault(cyc, []).append(row)
-
-    cycle_tags = cycles if cycles else sorted(rows_by_cycle.keys())
-
-    # Loader's canonical metadata schema (required + optional).
-    meta_cols = [
-        "tag", "GenePos", "Gene", "Position", "pattern", "caap_group",
-        "pvalue", "is_significant", "caas", "amino_encoded",
-        "is_conserved_meta", "conserved_pair",
-    ]
-
     cycle_trait_files: Dict[str, str] = {}
     cycle_meta_files: Dict[str, str] = {}
-    for cyc in cycle_tags:
-        # Trait file (the permuted labeling drives which species pair top/bottom).
-        if cyc not in labelings:
-            logger.warning(f"[perms] cycle {cyc} has no resample labeling; skipping")
-            continue
-        fg, bg = labelings[cyc]
-        trait_path = trait_dir / f"trait_{cyc}.tab"
-        _write_cycle_trait_file(fg, bg, trait_path)
-        cycle_trait_files[cyc] = str(trait_path)
 
-        # Per-cycle caas metadata (positions discovered under this labeling).
-        meta_path = meta_dir / f"meta_{cyc}.tsv"
-        with open(meta_path, "w", newline="") as mf:
-            writer = _csv.DictWriter(mf, fieldnames=meta_cols, delimiter="\t",
-                                     extrasaction="ignore")
-            writer.writeheader()
-            for row in rows_by_cycle.get(cyc, []):
-                gene = (row.get("gene") or "").strip()
-                pos = (row.get("position") or "").strip()
-                if not gene or not pos:
-                    continue
-                cp = (row.get("conserved_pair") or "").strip()
-                # Strip the "N:" overlap-count prefix (mirrors CT_signification).
-                if cp and ":" in cp.split(",")[0]:
-                    cp = cp.split(":", 1)[1]
-                writer.writerow({
-                    "tag": "CAAS",
-                    "GenePos": f"{gene}_{pos}",
-                    "Gene": gene,
-                    "Position": pos,
-                    "pattern": row.get("pattern", ""),
-                    "caap_group": row.get("caap_group", "US") or "US",
-                    "pvalue": row.get("pvalue", "NA"),
-                    "is_significant": "TRUE",
-                    "caas": row.get("caas", ""),
-                    "amino_encoded": row.get("amino_encoded", ""),
-                    "is_conserved_meta": row.get("is_conserved_meta", "FALSE"),
-                    "conserved_pair": cp,
-                })
-        cycle_meta_files[cyc] = str(meta_path)
+    target_cycles = cycles if cycles else sorted(labelings.keys())
 
-    valid = [c for c in cycle_tags if c in cycle_trait_files]
-    logger.info(f"[perms] built inputs for {len(valid)} cycles")
-    return valid, cycle_trait_files, cycle_meta_files
+    for c in target_cycles:
+        if c in labelings:
+            fg, bg = labelings[c]
+            trait_path = trait_dir / f"trait_{c}.tab"
+            if not trait_path.exists():
+                _write_cycle_trait_file(fg, bg, trait_path)
+            cycle_trait_files[c] = str(trait_path)
+            cycle_meta_files[c] = ""
+
+    logger.info(f"[perms] prepared trait inputs for {len(target_cycles)} cycles")
+    return target_cycles, cycle_trait_files, cycle_meta_files
+
+
 
 
 def _load_gene_asr_context(
@@ -1010,53 +950,159 @@ def _perms_worker(
     convergence_mode: str,
     cycle_tags: List[str],
     cycle_trait_files: Dict[str, str],
-    cycle_meta_files: Dict[str, str],
+    perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
-) -> Tuple[str, List[Dict[str, Any]]]:
-    """Replay N labelings over one gene's cached ASR. One gene = one worker task,
-    so the load-once/replay-N invariant holds inside the worker."""
+) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Replay N labelings over one gene's cached ASR. One gene = one worker task.
+    Performs on-the-fly aggregation inside the worker, avoiding outputting huge files.
+    """
     try:
         ctx = _load_gene_asr_context(
             gene, alignment_dir, tree_file, taxid_mapping_path,
             asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
         )
         if ctx is None:
-            return (gene, [])
+            return (gene, [], [], [])
 
         alignment_data = ctx["alignment_data"]
         tree_data = ctx["tree_data"]
         node_posteriors = ctx["node_posteriors"]
         full_posteriors = getattr(node_posteriors, "posteriors_node", None)
 
-        # Reduced per-position kernel: compute ONLY the asr_path_score axes the perm
-        # null keeps, skipping the scorer body the null discards (redundant per-node
-        # map rebuild + 40-field ConvergenceResult assembly). Combined with the site
-        # cache below this is a ~5x compute speedup on the disambiguation itself.
-        # On by default; export CAAS_PERMS_AXES_ONLY=0 to fall back to the full path
-        # (mirrors the boot-vectorization export guard).
         axes_only = os.environ.get("CAAS_PERMS_AXES_ONLY", "1") not in ("0", "false", "False")
-
-        # per_node_dist for a site depends only on (ASR posteriors, site) — invariant
-        # to the grouping scheme and the permuted phenotype — so it is built once per
-        # site and reused across all schemes and all N cycles of THIS gene. This is the
-        # load-once/replay-N win: with N cycles the dominant per-node-dist build drops
-        # from O(N * rows) toward O(distinct sites). Only meaningful for axes_only.
         per_site_dist_cache: Dict[int, Any] = {} if axes_only else None
 
-        rows: List[Dict[str, Any]] = []
+        # Load the gene's bootstrap discovery output in memory once
+        cycle_to_entries = {}
+        gene_file = None
+        disc_path = Path(perm_discovery_file)
+        if disc_path.is_file():
+            with open(disc_path, "r") as f:
+                header = f.readline()
+                if header:
+                    cols = header.rstrip("\n").split("\t")
+                    col_indices = {col: idx for idx, col in enumerate(cols)}
+                    if "cycle" in col_indices and "gene" in col_indices and "position" in col_indices:
+                        cyc_idx = col_indices["cycle"]
+                        gene_idx = col_indices["gene"]
+                        pos_idx = col_indices["position"]
+                        caas_idx = col_indices.get("caas")
+                        ae_idx = col_indices.get("amino_encoded")
+                        icm_idx = col_indices.get("is_conserved_meta")
+                        cp_idx = col_indices.get("conserved_pair")
+                        pval_idx = col_indices.get("pvalue")
+                        
+                        for line in f:
+                            parts = line.rstrip("\n").split("\t")
+                            if len(parts) <= max(cyc_idx, gene_idx, pos_idx):
+                                continue
+                            if parts[gene_idx].strip() != gene:
+                                continue
+                            cyc = parts[cyc_idx].strip()
+                            if not cyc or cyc not in cycle_tags:
+                                continue
+                            
+                            pos_raw = parts[pos_idx].strip()
+                            try:
+                                pos0 = int(pos_raw)
+                            except ValueError:
+                                continue
+                            
+                            caas = parts[caas_idx] if caas_idx is not None and caas_idx < len(parts) else ""
+                            parts_caas = caas.split("/") if caas else []
+                            trait1 = normalize_amino_list(list(parts_caas[0])) if len(parts_caas) == 2 else []
+                            trait0 = normalize_amino_list(list(parts_caas[1])) if len(parts_caas) == 2 else []
+                            
+                            cp = parts[cp_idx].strip() if cp_idx is not None and cp_idx < len(parts) else ""
+                            if cp and ":" in cp.split(",")[0]:
+                                cp = cp.split(":", 1)[1]
+                                
+                            entry = CAASPosition(
+                                position=pos0,
+                                position_one_based=pos0 + 1,
+                                tag=f"POS{pos0}",
+                                caas=caas,
+                                trait1_aa=trait1,
+                                trait0_aa=trait0,
+                                pvalue=float(parts[pval_idx]) if pval_idx is not None and pval_idx < len(parts) and parts[pval_idx] not in ("", "NA") else None,
+                                pvalue_boot=None,
+                                is_significant=False,
+                                caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
+                                amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
+                                is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
+                                conserved_pair=cp,
+                            )
+                            if cyc not in cycle_to_entries:
+                                cycle_to_entries[cyc] = []
+                            cycle_to_entries[cyc].append(entry)
+        else:
+            for p in disc_path.iterdir():
+                if p.is_file() and p.name.split(".", 1)[0] == gene:
+                    gene_file = p
+                    break
+            if gene_file and gene_file.exists():
+                with open(gene_file, "r") as f:
+                    header = f.readline()
+                    if header:
+                        cols = header.rstrip("\n").split("\t")
+                        col_indices = {col: idx for idx, col in enumerate(cols)}
+                        if "cycle" in col_indices and "position" in col_indices:
+                            cyc_idx = col_indices["cycle"]
+                            pos_idx = col_indices["position"]
+                            caas_idx = col_indices.get("caas")
+                            ae_idx = col_indices.get("amino_encoded")
+                            icm_idx = col_indices.get("is_conserved_meta")
+                            cp_idx = col_indices.get("conserved_pair")
+                            pval_idx = col_indices.get("pvalue")
+                            
+                            for line in f:
+                                parts = line.rstrip("\n").split("\t")
+                                if len(parts) <= max(cyc_idx, pos_idx):
+                                    continue
+                                cyc = parts[cyc_idx].strip()
+                                if not cyc or cyc not in cycle_tags:
+                                    continue
+                                
+                                pos_raw = parts[pos_idx].strip()
+                                try:
+                                    pos0 = int(pos_raw)
+                                except ValueError:
+                                    continue
+                                
+                                caas = parts[caas_idx] if caas_idx is not None and caas_idx < len(parts) else ""
+                                parts_caas = caas.split("/") if caas else []
+                                trait1 = normalize_amino_list(list(parts_caas[0])) if len(parts_caas) == 2 else []
+                                trait0 = normalize_amino_list(list(parts_caas[1])) if len(parts_caas) == 2 else []
+                                
+                                cp = parts[cp_idx].strip() if cp_idx is not None and cp_idx < len(parts) else ""
+                                if cp and ":" in cp.split(",")[0]:
+                                    cp = cp.split(":", 1)[1]
+                                    
+                                entry = CAASPosition(
+                                    position=pos0,
+                                    position_one_based=pos0 + 1,
+                                    tag=f"POS{pos0}",
+                                    caas=caas,
+                                    trait1_aa=trait1,
+                                    trait0_aa=trait0,
+                                    pvalue=float(parts[pval_idx]) if pval_idx is not None and pval_idx < len(parts) and parts[pval_idx] not in ("", "NA") else None,
+                                    pvalue_boot=None,
+                                    is_significant=False,
+                                    caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
+                                    amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
+                                    is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
+                                    conserved_pair=cp,
+                                )
+                                if cyc not in cycle_to_entries:
+                                    cycle_to_entries[cyc] = []
+                                cycle_to_entries[cyc].append(entry)
+
+        all_cycle_results = []
         for cyc in cycle_tags:
-            meta_path = cycle_meta_files.get(cyc)
             trait_path = cycle_trait_files.get(cyc)
-            if not meta_path or not trait_path:
+            if not trait_path:
                 continue
-            try:
-                # Read the cycle's metadata ONCE and hand the entries to the analyzer
-                # (which otherwise re-parses the same TSV via list_gene_caas_entries).
-                # With the per-position compute now cached, this per-cycle pandas parse
-                # is the dominant remaining cost, so the duplicate read is worth removing.
-                caas_entries = list_gene_caas_entries(Path(meta_path), gene)
-            except Exception:
-                caas_entries = []
+            caas_entries = cycle_to_entries.get(cyc, [])
             if not caas_entries:
                 continue
             try:
@@ -1066,7 +1112,7 @@ def _perms_worker(
                     tree_data=tree_data,
                     caas_positions=[],
                     caas_entries=caas_entries,
-                    caas_metadata_path=Path(meta_path),
+                    caas_metadata_path=Path("dummy_path"),
                     trait_file_path=Path(trait_path),
                     taxid_mapping=alignment_data.species_to_taxid,
                     posterior_data=full_posteriors,
@@ -1077,23 +1123,175 @@ def _perms_worker(
                     axes_only=axes_only,
                     per_site_dist_cache=per_site_dist_cache,
                 )
+                if biochem_results:
+                    all_cycle_results.append((cyc, biochem_results))
             except Exception as e:
                 logger.debug(f"[perms] {gene} cycle {cyc} failed: {e}")
                 continue
-            for r in (biochem_results or []):
-                rows.append({
+
+        if not all_cycle_results:
+            return (gene, [], [], [])
+
+        # ── 1. Calculate recovery p-values on the fly ──────────────────────────
+        scheme_weights_int = {"US": 0.2, "GS4": 0.2, "GS3": 0.2, "GS2": 0.2, "GS1": 0.2}
+        n_cycles_total = len(cycle_tags)
+        
+        n_detected = {}
+        for cyc, biochem_results in all_cycle_results:
+            for r in biochem_results:
+                pos = getattr(r, "position", None)
+                group = getattr(r, "caap_group", "US")
+                if pos is not None:
+                    key = (pos, group)
+                    if key not in n_detected:
+                        n_detected[key] = set()
+                    n_detected[key].add(cyc)
+
+        recovery_pval = {}
+        perm_pos_pval_rows = []
+        for key, cycles_set in n_detected.items():
+            k = len(cycles_set)
+            pval = (k + 1) / (n_cycles_total + 1)
+            recovery_pval[key] = pval
+            perm_pos_pval_rows.append({
+                "Gene": gene,
+                "Position": key[0],
+                "caap_group": key[1],
+                "n_detected": k,
+                "n_cycles": n_cycles_total,
+                "recovery_pval": pval
+            })
+
+        # ── 2. Group by (cycle, Position) and calculate asr+caas scores ────────
+        pos_groups = {}
+        for cyc, biochem_results in all_cycle_results:
+            for r in biochem_results:
+                pos = getattr(r, "position", None)
+                if pos is not None:
+                    key = (cyc, pos)
+                    if key not in pos_groups:
+                        pos_groups[key] = []
+                    pos_groups[key].append(r)
+
+        pos_scores_by_cycle = {}
+        for (cyc, pos), r_list in pos_groups.items():
+            asr_vals = []
+            row_caas_sum = 0.0
+            has_change_top = False
+            has_change_bottom = False
+            
+            for r in r_list:
+                group = getattr(r, "caap_group", "US")
+                asr_val = getattr(r, "asr_path_score", 0.0)
+                if asr_val is None:
+                    asr_val = 0.0
+                change_top = getattr(r, "change_top", "no_change")
+                change_bottom = getattr(r, "change_bottom", "no_change")
+                
+                pval = recovery_pval[(pos, group)]
+                weight = scheme_weights_int.get(group, 0.2)
+                
+                asr_vals.append(asr_val)
+                row_caas_sum += (1.0 - pval) * asr_val * weight
+                
+                if change_top in ("convergent", "codivergent", "divergent"):
+                    has_change_top = True
+                if change_bottom in ("convergent", "codivergent", "divergent"):
+                    has_change_bottom = True
+
+            asr_score = sum(asr_vals) / len(asr_vals) if asr_vals else 0.0
+            
+            if has_change_top and has_change_bottom:
+                change_side = "both"
+            elif has_change_top:
+                change_side = "top"
+            elif has_change_bottom:
+                change_side = "bottom"
+            else:
+                change_side = "none"
+
+            if cyc not in pos_scores_by_cycle:
+                pos_scores_by_cycle[cyc] = []
+            pos_scores_by_cycle[cyc].append((asr_score, row_caas_sum, change_side))
+
+        # ── 3. Calculate 90th percentile scores per cycle (gene_cycle_rows) ────
+        import numpy as np
+        gene_cycle_rows = []
+        for cyc in cycle_tags:
+            items = pos_scores_by_cycle.get(cyc, [])
+            if not items:
+                gene_cycle_rows.append({
                     "Gene": gene,
                     "cycle": cyc,
-                    "Position": getattr(r, "position", None),
-                    "caap_group": getattr(r, "caap_group", "US"),
-                    "asr_path_score": getattr(r, "asr_path_score", None),
-                    "change_top": getattr(r, "change_top", "no_change"),
-                    "change_bottom": getattr(r, "change_bottom", "no_change"),
+                    "global_asr": 0.0, "top_asr": 0.0, "bottom_asr": 0.0,
+                    "global_caas": 0.0, "top_caas": 0.0, "bottom_caas": 0.0
                 })
-        return (gene, rows)
+                continue
+                
+            asr_vals_global = [item[0] for item in items]
+            asr_vals_top = [item[0] for item in items if item[2] in ("top", "both")]
+            asr_vals_bottom = [item[0] for item in items if item[2] in ("bottom", "both")]
+            
+            caas_vals_global = [item[1] for item in items]
+            caas_vals_top = [item[1] for item in items if item[2] in ("top", "both")]
+            caas_vals_bottom = [item[1] for item in items if item[2] in ("bottom", "both")]
+            
+            def q90(vals):
+                return float(np.percentile(vals, 90)) if vals else 0.0
+
+            gene_cycle_rows.append({
+                "Gene": gene,
+                "cycle": cyc,
+                "global_asr": q90(asr_vals_global),
+                "top_asr": q90(asr_vals_top),
+                "bottom_asr": q90(asr_vals_bottom),
+                "global_caas": q90(caas_vals_global),
+                "top_caas": q90(caas_vals_top),
+                "bottom_caas": q90(caas_vals_bottom)
+            })
+
+        # ── 4. Sub-sample rows for distribution plotting ───────────────────────
+        import random
+        # Seed locally inside the worker for deterministic sub-sampling
+        random.seed(hash(gene) & 0xffffffff)
+        
+        perm_pos_sample_rows = []
+        by_group = {g: [] for g in ["US", "GS1", "GS2", "GS3", "GS4"]}
+        for cyc, biochem_results in all_cycle_results:
+            for r in biochem_results:
+                pos = getattr(r, "position", None)
+                if pos is not None:
+                    group = getattr(r, "caap_group", "US")
+                    asr_val = getattr(r, "asr_path_score", 0.0)
+                    if asr_val is None:
+                        asr_val = 0.0
+                    pval = recovery_pval[(pos, group)]
+                    weight = scheme_weights_int.get(group, 0.2)
+                    row_caas = (1.0 - pval) * asr_val * weight
+                    
+                    by_group[group].append({
+                        "Gene": gene,
+                        "Position": pos,
+                        "caap_group": group,
+                        "cycle": cyc,
+                        "asr_path_score": asr_val,
+                        "recovery_pval": pval,
+                        "row_caas": row_caas
+                    })
+        for g, rows in by_group.items():
+            if len(rows) > 5:
+                perm_pos_sample_rows.extend(random.sample(rows, 5))
+            else:
+                perm_pos_sample_rows.extend(rows)
+
+        return (gene, gene_cycle_rows, perm_pos_pval_rows, perm_pos_sample_rows)
     except Exception as e:
         logger.error(f"[perms] worker failed for {gene}: {e}", exc_info=True)
-        return (gene, [])
+        return (gene, [], [], [])
+
+
+def _perms_worker_wrapper(args):
+    return _perms_worker(*args)
 
 
 def process_all_genes_perms(
@@ -1114,9 +1312,12 @@ def process_all_genes_perms(
     max_tasks_per_child: Optional[int] = None,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
-    labelings, emit a long per-(gene,cycle,position,scheme) asr_path_score table.
+    labelings, and stream on-the-fly aggregated summaries to output TSV files.
 
-    Output: <output_dir>/caas_perm_scores.tsv (consumed by scoring_caas_perms.R).
+    Outputs:
+      - output_dir/gene_cycle_scores.tsv
+      - output_dir/perm_pos_pval.tsv
+      - output_dir/perm_pos_sample.tsv
     """
     import csv as _csv
 
@@ -1133,6 +1334,9 @@ def process_all_genes_perms(
         except Exception as exc:
             logger.warning(f"[perms] failed to load ensembl genes: {exc}")
 
+    if ensembl_genes is not None:
+        genes = [g for g in genes if g in ensembl_genes]
+
     cycle_tags, cycle_trait_files, cycle_meta_files = build_cycle_inputs(
         perm_discovery_file, resample_dir, output_dir / "cycle_inputs", cycles
     )
@@ -1148,40 +1352,51 @@ def process_all_genes_perms(
     else:
         maxtasks = int(os.environ.get("CAAS_MAX_TASKS_PER_CHILD", "50"))
 
-    out_path = output_dir / "caas_perm_scores.tsv"
-    fieldnames = ["Gene", "cycle", "Position", "caap_group",
-                  "asr_path_score", "change_top", "change_bottom"]
+    scores_path = output_dir / "gene_cycle_scores.tsv"
+    pval_path = output_dir / "perm_pos_pval.tsv"
+    sample_path = output_dir / "perm_pos_sample.tsv"
+
+    scores_fields = ["Gene", "cycle", "global_asr", "top_asr", "bottom_asr", "global_caas", "top_caas", "bottom_caas"]
+    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "recovery_pval"]
+    sample_fields = ["Gene", "Position", "caap_group", "cycle", "asr_path_score", "recovery_pval", "row_caas"]
+
+    # Generate arguments lazily
+    args_generator = (
+        (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
+         asr_cache_dir, posterior_threshold, convergence_mode,
+         cycle_tags, cycle_trait_files, perm_discovery_file, None)
+        for gene in genes
+    )
 
     pool = mp.Pool(processes=effective_workers, maxtasksperchild=maxtasks)
-    n_rows = 0
+    n_genes = 0
     try:
-        async_results = [
-            pool.apply_async(
-                _perms_worker,
-                (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
-                 asr_cache_dir, posterior_threshold, convergence_mode,
-                 cycle_tags, cycle_trait_files, cycle_meta_files, ensembl_genes),
-            )
-            for gene in genes
-        ]
-        with open(out_path, "w", newline="") as f:
-            writer = _csv.DictWriter(f, fieldnames=fieldnames, delimiter="\t")
-            writer.writeheader()
-            for ar in async_results:
-                try:
-                    _gene, rows = ar.get()
-                except Exception as e:
-                    logger.error(f"[perms] gene task failed: {e}")
-                    continue
-                for row in rows:
-                    writer.writerow(row)
-                    n_rows += 1
+        results_iterator = pool.imap_unordered(_perms_worker_wrapper, args_generator, chunksize=10)
+        
+        with open(scores_path, "w", newline="") as f_scores, \
+             open(pval_path, "w", newline="") as f_pval, \
+             open(sample_path, "w", newline="") as f_sample:
+             
+             writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t")
+             writer_pval = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
+             writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t")
+             
+             writer_scores.writeheader()
+             writer_pval.writeheader()
+             writer_sample.writeheader()
+             
+             for _gene, scores_rows, pval_rows, sample_rows in results_iterator:
+                 if scores_rows:
+                     writer_scores.writerows(scores_rows)
+                     writer_pval.writerows(pval_rows)
+                     writer_sample.writerows(sample_rows)
+                     n_genes += 1
     finally:
         pool.close()
         pool.join()
 
-    logger.info(f"[perms] wrote {n_rows} rows for {len(cycle_tags)} cycles → {out_path}")
-    return out_path
+    logger.info(f"[perms] successfully aggregated {n_genes} genes to summaries inside {output_dir}")
+    return output_dir
 
 
 # Backward-compatible alias

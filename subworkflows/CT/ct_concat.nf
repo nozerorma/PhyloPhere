@@ -34,7 +34,7 @@ process CONCAT_DISCOVERY {
     # Check if we have any files
     if [ \${#discovery_files[@]} -eq 0 ]; then
         echo "WARNING: No discovery files found - creating empty discovery table with expected schema"
-        # Keep schema aligned with CT_SIGNIFICATION expectations (Pattern + pvalue required)
+        # Keep schema aligned with CT_SIGNIFICATION expectations (pattern + pvalue required)
         echo "gene\tmode\tcaap_group\ttrait\tposition\tcaas\tamino_encoded\tpvalue\tpattern\tffgn\tfbgn\tgfg\tgbg\tmfg\tmbg\tffg\tfbg\tms\tis_conserved_meta\tconserved_pair" > discovery.tab
         exit 0
     fi

@@ -33,6 +33,7 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUTDIR="/media/miguel/phd/run/integrated_1000_perms/${TIMESTAMP}"
 WORKDIR="${OUTDIR}/work"
 
+TRAITS="${INPUTS_DIR}/traits/cancer_traits_processed-LQ.csv"
 TRAIT_FILE="${INPUTS_DIR}/traitfiles/traitfile.tab"
 BOOT_TRAIT_FILE="${INPUTS_DIR}/traitfiles/boot_traitfile.tab"
 TREE_FILE="${INPUTS_DIR}/tree/pruned_tree_file.nwk"
@@ -85,16 +86,17 @@ echo "=========================================="
 
 NF_FLAGS=(
     -profile local
+    --data_prune
+    --contrast_selection
     --ali_format fasta
     --reporting false
     --ct_tool "discovery,resample,bootstrap"
-    --ct_signification
     --ct_disambiguation
     --ct_postproc
     --ct_accumulation
     --traitname "neoplasia_prevalence"
     --scoring
-    --cycles "$CYCLES"
+    --perms_cycles "$CYCLES"
     --caas_permulation_enrichment true
     --caas_full_perms "$FULL_PERMS"
     --gene_ensembl_file "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/ensembl_genes.output"
@@ -102,15 +104,13 @@ NF_FLAGS=(
     --ali_sp_names "/home/miguel/IBE-UPF/PhD/NEOPLASY_PRIMATES/Data/2.Alignments/ali_sp_names.txt"
     --vep_map_dir "${REPO_DIR}/test/inputs/map_1000/"
     --alignment "$ALIGNMENT_DIR"
-    --caas_config "$TRAIT_FILE"
-    --traitvalues "$BOOT_TRAIT_FILE"
+    --my_traits "$TRAITS"
     --tree "$TREE_FILE"
     --ct_disambig_asr_mode precomputed
     --ct_disambig_asr_cache_dir "$ASR_CACHE_DIR"
     --ct_disambig_posterior_threshold 0.1
     --caas_postproc_mode filter
     --gene_filter_mode both
-    --generate_reports true
     --asr_robustness true
     --scoring_rer_input "${REPO_DIR}/test/inputs/rer/RERConverge/RER_Results/rerconverge_summary_neoplasia_prevalence.tsv"
     --vep
@@ -141,8 +141,9 @@ echo ""
 echo "Permulation framework test finished."
 echo "Results:          $OUTDIR"
 echo "Null matrix:      $OUTDIR/caas_permulation/caas_perms.rds"
-echo "CAAS FCS report:  $OUTDIR/fcs/FCS_scoring_neoplasia_prevalence.html  (p.perm on the *_asr rankings)"
-# POSENRICH (position-wise XL-mHG): background = the in-run caastools background.output
-# (discovery) restricted to cleaned_background — no manual background input needed.
-echo "POSENRICH report: $OUTDIR/posenrich/POSENRICH_report_neoplasia_prevalence.html"
-echo "POSENRICH results:$OUTDIR/posenrich/posenrich_results.tsv"
+echo "CAAS FCS report:  $OUTDIR/fcs/13.FCS_scoring_neoplasia_prevalence.html  (p.perm on the *_asr rankings)"
+# POSENRICH (position-wise Fisher-exact, fixed cutoffs): background = the in-run
+# caastools background.output (discovery) restricted to cleaned_background — no
+# manual background input needed.
+echo "POSENRICH report: $OUTDIR/posenrich/16.Position_enrichment_report_neoplasia_prevalence.html"
+echo "POSENRICH results:$OUTDIR/posenrich/posenrich_characterization.tsv"

@@ -65,7 +65,7 @@ arrange  <- dplyr::arrange
 group_by <- dplyr::group_by
 count    <- dplyr::count
 
-# ── Shared colour palette (mirrors CT_postproc.Rmd for consistency) ──────────
+# ── Shared colour palette (mirrors 9.Characterization_report.Rmd for consistency) ──────────
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
   "blue", "orange", "vermillion", "bluish_green",

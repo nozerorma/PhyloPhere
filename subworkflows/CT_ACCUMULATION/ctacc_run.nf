@@ -27,7 +27,7 @@ process CT_ACCUMULATION_AGGREGATE {
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
     def ali_fmt      = params.ali_format
     def out_pfx      = 'accumulation'
-    def log_level    = params.accumulation_log_level ?: 'INFO'
+    def log_level    = 'INFO'
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -92,10 +92,10 @@ process CT_ACCUMULATION_RANDOMIZE {
     def change_side_arg = (direction == 'all') ? 'both' : direction
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
     def n_rands      = params.accumulation_n_randomizations   ?: 10000
-    def log_level    = params.accumulation_log_level          ?: 'INFO'
+    def log_level    = 'INFO'
     // Fall back to task.cpus so the process never defaults to os.cpu_count()
     // (which reads the full hardware CPU count of the node, not the Slurm allocation).
-    def workers_flag = "--workers ${params.accumulation_workers ?: task.cpus}"
+    def workers_flag = "--workers ${task.cpus}"
     def seed_flag    = params.accumulation_seed    ? "--global-seed ${params.accumulation_seed}"   : ''
 
     if (params.use_singularity || params.use_apptainer) {

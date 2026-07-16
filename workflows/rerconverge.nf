@@ -155,7 +155,7 @@ workflow RER_MAIN {
 
         // ── Gene list extraction + Enrichment/STRING (gated on --enrichment / --string) ──
         if (params.enrichment || params.string) {
-            def effective_report = rer_report_out ?: (params.rer_report_file ? Channel.value(file(params.rer_report_file)) : Channel.empty())
+            def effective_report = rer_report_out ?: Channel.empty()
             def effective_perms  = rer_perms_out  ?: (params.rer_perms_file  ? Channel.value(file(params.rer_perms_file))  : Channel.empty())
             def perms_file_ch    = effective_perms.ifEmpty(file('NO_FILE'))
 
@@ -182,7 +182,7 @@ workflow RER_MAIN {
                     Channel.value('rerconverge'),
                     rer_lists.fcs_stats,
                     rer_bg_ch,
-                    Channel.value("FCS_rer_${params.traitname}"),
+                    Channel.value("13.FCS_rer_${params.traitname}"),
                     perms_file_ch,
                     Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
                 )
@@ -192,13 +192,13 @@ workflow RER_MAIN {
                     Channel.value('rerconverge'),
                     rer_bg_ch,
                     rer_interest_ch,
-                    Channel.value("STRING_rer_${params.traitname}")
+                    Channel.value("15.STRING_rer_${params.traitname}")
                 )
             }
         }
 
     emit:
-        summary_tsv = rer_report_out ?: (params.rer_report_file ? Channel.value(file(params.rer_report_file)) : Channel.empty())
+        summary_tsv = rer_report_out ?: Channel.empty()
         // Permulation null matrix (corStat RDS) for downstream FCS p.perm in SCORING.
         perms = (rer_perms_out ?: (params.rer_perms_file ? Channel.value(file(params.rer_perms_file)) : Channel.empty()))
 }
