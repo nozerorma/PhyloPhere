@@ -1,22 +1,72 @@
 ---
 title: "Position-level Enrichment (Fisher, fixed cutoffs) — `r params$traitname`"
-author: "PhyloPhere Pipeline"
-date: "`r Sys.Date()`"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
 output:
   html_document:
+    theme: flatly
+    syntax_highlighting: tango
     toc: true
-    toc_float: true
-    toc_depth: 3
-    theme: cosmo
+    toc_float:
+      collapsed: false
     code_folding: hide
     df_print: paged
+    fig_width: 10
+    fig_height: 6
     self_contained: true
+    mathjax: null                       # no math in this report
+    md_extensions: "-tex_math_dollars"  # pathway names contain '$' (e.g. V$HNF4_01) — never parse as TeX math
 params:
   results_file: NULL
+  leading_edge_file: NULL
   traitname: "trait"
   padj_thr: 0.15
   fold_thr: 1.5
+  table_top_n: 200
+  # Position Characterisation (moved here from 11.Scoring_report.Rmd): PrimateAI-3D
+  # + COSMIC validation and regional accumulation, all restricted to the US scheme.
+  # NULL/absent inputs degrade gracefully (has_pos_char is FALSE, section skipped).
+  position_scores_file: NULL   # position_scores.tsv (per-position CAAS scores)
+  gene_scores_file:     NULL   # gene_scores.tsv (background gene fallback)
+  vep_primateai_file:   NULL   # PrimateAI-3D score TSV
+  vep_cosmic_file:      NULL   # COSMIC Mutant Census score TSV
+  genomic_info_file:    NULL   # gene, chr, start, end, length (no header assumed)
+  top_pct:      0.10
+  window_size_bp: 1000000
+  output_dir:   "."            # regional_accumulation.tsv export target
 ---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
@@ -31,6 +81,7 @@ suppressPackageStartupMessages({
 
 PADJ <- params$padj_thr
 FOLD <- params$fold_thr
+TOP_N <- params$table_top_n
 
 kbl_html <- function(df, caption = NULL) {
   kable(df, format = "html", escape = TRUE, caption = caption) %>%
@@ -42,54 +93,115 @@ kbl_html <- function(df, caption = NULL) {
 ```{r load, include=FALSE}
 stopifnot(!is.null(params$results_file), file.exists(params$results_file))
 res <- readr::read_tsv(params$results_file, show_col_types = FALSE)
+# Drop 100%/50% cutoffs unconditionally -- retired from the analysis (100% is
+# a no-op foreground = full background, 50% is too coarse to be informative)
+# but older results_file/leading_edge_file runs may still carry them.
+if (!is.null(res) && "top_frac" %in% names(res)) {
+  res <- res %>% dplyr::filter(!top_frac %in% c(1.0, 0.5))
+}
 has_res <- !is.null(res) && nrow(res) > 0
 if (has_res && !"sig" %in% names(res)) {
-  res$sig <- res$p_adj < PADJ & !is.na(res$fold_enrichment) &
-    (res$fold_enrichment >= FOLD | res$fold_enrichment <= 1 / FOLD)
+  # No fold-enrichment gate by design — p.adj alone decides significance;
+  # fold_enrichment stays available as a displayed column to filter on
+  # downstream rather than being baked into what counts as "significant".
+  res$sig <- res$p_adj < PADJ
 }
+
+# Truncates a "gene1, gene2, ..." string to the first n_show entries, with
+# the remainder tucked behind an inline <details>/<summary> toggle -- a row
+# can otherwise carry hundreds of comma-separated gene:positions.
+truncate_gene_list <- function(x, n_show = 5) {
+  vapply(x, function(s) {
+    if (is.na(s) || !nzchar(s)) return("")
+    items <- strsplit(s, ", ", fixed = TRUE)[[1]]
+    if (length(items) <= n_show) return(s)
+    shown <- paste(items[seq_len(n_show)], collapse = ", ")
+    rest  <- paste(items[(n_show + 1):length(items)], collapse = ", ")
+    sprintf(
+      '%s <details style="display:inline"><summary style="display:inline; cursor:pointer; color:#2166ac;">&hellip; (%d more)</summary> %s</details>',
+      shown, length(items) - n_show, rest
+    )
+  }, character(1), USE.NAMES = FALSE)
+}
+
+# Observed gene:position members of the overlap, significant terms only
+# (posenrich_leading_edge.tsv — long format, one row per member). Optional.
+le_raw <- NULL
+if (!is.null(params$leading_edge_file) && file.exists(params$leading_edge_file)) {
+  le_raw <- tryCatch(readr::read_tsv(params$leading_edge_file, show_col_types = FALSE),
+                     error = function(e) NULL)
+  if (!is.null(le_raw) && "top_frac" %in% names(le_raw)) {
+    le_raw <- le_raw %>% dplyr::filter(!top_frac %in% c(1.0, 0.5))
+  }
+  if (!is.null(le_raw) && nrow(le_raw) == 0) le_raw <- NULL
+}
+le_summary <- if (!is.null(le_raw)) {
+  le_raw %>%
+    dplyr::group_by(ranking, database, pathway, top_frac) %>%
+    dplyr::summarise(`Genes/positions` = paste(sort(unique(gene_position)), collapse = ", "),
+                     `N genes` = dplyr::n_distinct(gene),
+                     .groups = "drop")
+} else NULL
+
+# Direction-aware corroboration columns (mirrors 13.FCS_general_report.Rmd's
+# cols_by_rk): fade_bottom only under `bottom`, fade_top only under `top` --
+# no combined "fade" column under `global` (redundant with _top/_bottom, which
+# already cover both directions). Only columns actually present (i.e. an
+# --annot-file was supplied to posenrich_enrich.py) are ever shown.
+flag_cols_by_rk <- list(
+  global = c("pct_gate_sig", "pct_gate_fdr", "pct_rer_acc", "pct_rer_decc", "pct_accum"),
+  top    = c("pct_gate_sig", "pct_gate_fdr", "pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum"),
+  bottom = c("pct_gate_sig", "pct_gate_fdr", "pct_fade_bottom", "pct_rer_acc", "pct_rer_decc", "pct_accum")
+)
 ```
 
-# Overview
+# Overview {.tabset .tabset-fade}
 
 This report summarises **position-level enrichment** for `r params$traitname`. Unlike
 the gene-level FCS (a Wilcoxon-AUC rank-shift test), the position background is a
 sea of invariant columns that can never carry a CAAS change — a rank-shift test
-degenerates there. Instead we use **Fisher's exact test** at three fixed
-foreground cutoffs (top 10 / 5 / 1% of scored positions, per direction), run
+degenerates there. Instead we use **Fisher's exact test** at four fixed
+foreground cutoffs (top 25 / 10 / 5 / 1% of scored positions, per direction), run
 against every pathway across 9 GMT-style databases plus the broad functional
 `characterization` layers (UCR core/flank, FUBAR positive/purifying) — all on
 the same mechanism.
 
-A set is flagged **significant** only when it clears **both** `p.adj < `r PADJ``
-(BH-adjusted per ranking × database) **and** a minimum fold-enrichment
-magnitude (`fold >= `r FOLD`` for enrichment, or `<= `r round(1/FOLD, 3)`` for
-depletion). The fold gate matters because Fisher/hypergeometric tests gain
-enormous power at this background size (~1.47M positions) — a barely-there
-deviation from the null ratio can otherwise reach a "significant" p-value on
-its own (see Methods).
+A set is flagged **significant** when `p.adj < `r PADJ`` (BH-adjusted per
+ranking × database). No fold-enrichment magnitude gate is applied here —
+`fold_enrichment` is still reported alongside every result so a magnitude
+cutoff can be applied downstream, but it does not affect which sets are
+marked significant in this report. Fisher/hypergeometric tests gain enormous
+power at this background size (~1.47M positions), so a barely-there deviation
+from the null ratio can still reach a "significant" p-value on its own — keep
+this in mind when filtering (see Methods).
 
-```{r overview, echo=FALSE}
-if (has_res) {
-  ov <- res %>%
-    group_by(ranking, database) %>%
-    summarise(`Sets tested` = n_distinct(pathway),
-              `Sig (p.adj & fold)` = n_distinct(pathway[sig]),
-              .groups = "drop") %>%
-    arrange(ranking, database)
-  kbl_html(ov, caption = sprintf(
-    "Sets tested and significant at p.adj < %.3g AND fold outside [%.3g, %.3g], by direction and database.",
-    PADJ, 1 / FOLD, FOLD))
-} else {
+```{r overview, echo=FALSE, results='asis'}
+if (!has_res) {
   cat("No enrichment results were produced.\n")
+} else {
+  for (rk in unique(res$ranking)) {
+    cat(sprintf("\n## %s\n\n", toupper(rk)))
+    ov <- res %>% filter(ranking == rk) %>%
+      group_by(database) %>%
+      summarise(`Sets tested` = n_distinct(pathway),
+                `Sig (p.adj)` = n_distinct(pathway[sig]),
+                .groups = "drop") %>%
+      arrange(database)
+    print(kbl_html(ov, caption = sprintf(
+      "%s — sets tested and significant at p.adj < %.3g.",
+      toupper(rk), PADJ)))
+    cat("\n\n")
+  }
 }
 ```
 
-# Enrichment by direction and database {.tabset .tabset-fade}
+# Enriched position sets {.tabset .tabset-fade}
 
-Foreground = the top 10 / 5 / 1% of scored positions by `CAAS_score` in that
-direction (`top`/`bottom` restrict to `change_side` first, matching the
-SCORING module's own percentile convention; `global` uses every scored
-position, unrestricted by `change_side`). Background = the full honest tested
+Foreground = the top 25 / 10 / 5 / 1% of scored positions by `CAAS_score` in
+that direction (`top`/`bottom` restrict to `change_side` first, matching the
+SCORING module's own percentile convention; no `global` ranking — dropped in
+favour of top/bottom only, consistent with every other report in this
+pipeline). Background = the full honest tested
 position pool for every test — never restricted to the scored subset, so
 tested-and-negative positions are never silently dropped from the null.
 `fold > 1` = enriched, `< 1` = depleted. UCR core and UCR flank (and their
@@ -101,7 +213,7 @@ raw positions — one gene must not dominate) that are independently flagged by
 SCORING's own significance/FADE/RER/accumulation criteria — a cross-module
 corroboration check for whether a hit is broadly supported or isolated.
 
-```{r enrichment, echo=FALSE, results='asis'}
+```{r enrichment-tables, echo=FALSE, results='asis'}
 if (!has_res) {
   cat("_No results._\n\n")
 } else {
@@ -113,8 +225,13 @@ if (!has_res) {
       db_df <- rk_df %>% filter(database == db)
 
       for (tf in sort(unique(db_df$top_frac), decreasing = TRUE)) {
-        cat(sprintf("\n#### Top %s%%\n\n", format(100 * tf)))
-        tf_src <- db_df %>% filter(top_frac == tf) %>% arrange(desc(sig), p_adj, p_value)
+        cat(sprintf("\n#### Top %s%%\n\n", format(100 * tf, trim = TRUE)))
+        tf_all <- db_df %>% filter(top_frac == tf) %>% arrange(desc(sig), p_adj, p_value)
+        n_total_tf <- nrow(tf_all)
+        tf_src <- tf_all %>% head(TOP_N)
+        if (n_total_tf > TOP_N) {
+          cat(sprintf("_Showing top %d of %d tested pathways (sorted by significance)._\n\n", TOP_N, n_total_tf))
+        }
         tf_df <- tf_src %>%
           transmute(Pathway = pathway, Description = description,
                     `Layer size` = layer_size, `Foreground` = foreground_size,
@@ -139,36 +256,863 @@ if (!has_res) {
           "```"), envir = environment(), quiet = TRUE))
         cat("\n\n")
       }
-
-      # One dotplot per (ranking, database), faceted by top_frac.
-      d <- db_df %>% filter(!is.na(fold_enrichment), fold_enrichment > 0) %>%
-        mutate(l2f = log2(fold_enrichment), neglogp = -log10(pmax(p_adj, 1e-300)),
-               frac_lab = sprintf("Top %s%%", format(100 * top_frac)))
-      if (nrow(d) > 0) {
-        lab <- d %>% filter(sig) %>% arrange(p_adj) %>% group_by(top_frac) %>% slice_head(n = 8) %>% ungroup()
-        p <- ggplot(d, aes(l2f, neglogp)) +
-          geom_hline(yintercept = -log10(PADJ), linetype = "dashed", colour = "grey50") +
-          geom_vline(xintercept = c(-log2(FOLD), log2(FOLD)), linewidth = 0.3, colour = "grey70", linetype = "dotted") +
-          geom_point(aes(colour = sig), alpha = 0.75) +
-          { if (nrow(lab) > 0) ggrepel::geom_text_repel(data = lab, aes(label = pathway), size = 3, max.overlaps = 12) } +
-          facet_wrap(~frac_lab) +
-          scale_colour_manual(values = c(`FALSE` = "grey55", `TRUE` = "#c0392b"),
-                              name = sprintf("p.adj<%.2g & fold-gated", PADJ)) +
-          labs(x = expression(log[2]~fold), y = expression(-log[10]~p.adj),
-               title = sprintf("%s — %s", toupper(rk), db)) +
-          theme_minimal(base_size = 12)
-        print(p)
-        cat("\n\n")
-      }
     }
   }
 }
 ```
 
+# Enrichment dotplots {.tabset .tabset-fade}
+
+Each point is a tested pathway: x = log2 fold enrichment, y = −log10 `p.adj`,
+faceted by top-fraction cutoff within each direction × database. Red points
+pass the `p.adj` significance threshold (dashed line); the dotted fold lines
+are shown for reference only and do not gate significance here.
+
+```{r enrichment-dotplots, echo=FALSE, results='asis', fig.height=5}
+if (!has_res) {
+  cat("_No results._\n\n")
+} else {
+  for (rk in unique(res$ranking)) {
+    cat(sprintf("\n## %s {.tabset}\n\n", toupper(rk)))
+    rk_df <- res %>% filter(ranking == rk)
+    for (db in unique(rk_df$database)) {
+      cat(sprintf("\n### %s\n\n", db))
+      db_df <- rk_df %>% filter(database == db)
+      d <- db_df %>% filter(!is.na(fold_enrichment), fold_enrichment > 0) %>%
+        mutate(l2f = log2(fold_enrichment), neglogp = -log10(pmax(p_adj, 1e-300)),
+               frac_lab = sprintf("Top %s%%", format(100 * top_frac, trim = TRUE)))
+      if (nrow(d) == 0) { cat("_No plottable points._\n\n"); next }
+      lab <- d %>% filter(sig) %>% arrange(p_adj) %>% group_by(top_frac) %>% slice_head(n = 8) %>% ungroup()
+      p <- ggplot(d, aes(l2f, neglogp)) +
+        geom_hline(yintercept = -log10(PADJ), linetype = "dashed", colour = "grey50") +
+        geom_vline(xintercept = c(-log2(FOLD), log2(FOLD)), linewidth = 0.3, colour = "grey70", linetype = "dotted") +
+        geom_point(aes(colour = sig), alpha = 0.75) +
+        { if (nrow(lab) > 0) ggrepel::geom_text_repel(data = lab, aes(label = pathway), size = 3, max.overlaps = 12, show.legend = FALSE) } +
+        facet_wrap(~frac_lab) +
+        scale_colour_manual(values = c(`FALSE` = "grey55", `TRUE` = "#c0392b"),
+                            name = sprintf("p.adj<%.2g", PADJ)) +
+        labs(x = expression(log[2]~fold), y = expression(-log[10]~p.adj),
+             title = sprintf("%s — %s", toupper(rk), db)) +
+        theme_minimal(base_size = 12)
+      print(p)
+      cat("\n\n")
+    }
+  }
+}
+```
+
+# Top vs Bottom (log2 fold enrichment)
+
+Mirrors the Comparison report's top-vs-bottom scatter: x = log2 fold enrichment
+under the **top** ranking, y = log2 fold enrichment under the **bottom**
+ranking, one point per (database, pathway, top-fraction cutoff) — restricted
+to the three tightest cutoffs (10/5/1%; 25% dropped here for readability),
+coloured by cutoff rather than by direction (direction is already the two
+axes). Points off the diagonal favour one direction over the other; points
+significant (`p.adj < 0.05`) in either direction are labelled
+`description_percentage`, as are terms that recur significantly at **more
+than one** of the three cutoffs (every term is tested at all three by
+construction, so raw presence isn't informative — recurring *significance*
+is; when a term qualifies, all of its cutoff points are labelled together so
+the recurring pattern reads as a group, not just its individually-significant
+points).
+
+```{r log2fold_top_vs_bottom, echo=FALSE, fig.height=7}
+if (!has_res) {
+  cat("_No results._\n\n")
+} else {
+  sc <- res %>%
+    filter(ranking %in% c("top", "bottom"), !is.na(fold_enrichment), fold_enrichment > 0,
+           top_frac %in% c(0.10, 0.05, 0.01)) %>%
+    mutate(l2f = log2(fold_enrichment),
+           frac_lab = sprintf("%s%%", format(100 * top_frac, trim = TRUE))) %>%
+    tidyr::pivot_wider(
+      id_cols = c(database, pathway, description, top_frac, frac_lab),
+      names_from = ranking, values_from = c(l2f, p_adj),
+      names_sep = "_"
+    )
+
+  req_cols <- c("l2f_top", "l2f_bottom", "p_adj_top", "p_adj_bottom")
+  for (rc in setdiff(req_cols, names(sc))) sc[[rc]] <- NA
+
+  sc <- sc %>%
+    mutate(
+      l2f_top    = dplyr::coalesce(l2f_top, 0),
+      l2f_bottom = dplyr::coalesce(l2f_bottom, 0),
+      is_sig     = dplyr::coalesce(p_adj_top < 0.05, FALSE) | dplyr::coalesce(p_adj_bottom < 0.05, FALSE),
+      highlight_tag = sprintf("%s_%s", description, frac_lab)
+    ) %>%
+    # Every term is tested at all three cutoffs by construction, so raw
+    # presence carries no information -- recurring *significance* does.
+    # A term crossing p.adj < 0.05 at >=2 of the three cutoffs gets ALL of
+    # its points labelled (not just the individually-significant ones), so
+    # the recurring pattern is visible as a connected group in the plot.
+    group_by(database, pathway) %>%
+    mutate(n_sig_fracs = sum(is_sig, na.rm = TRUE)) %>%
+    ungroup() %>%
+    mutate(highlight = is_sig | n_sig_fracs > 1)
+
+  if (nrow(sc) == 0) {
+    cat("_No plottable points._\n\n")
+  } else {
+    p <- ggplot(sc, aes(l2f_top, l2f_bottom, colour = frac_lab)) +
+      geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
+      geom_vline(xintercept = 0, linetype = "dashed", colour = "grey70") +
+      geom_abline(slope = 1, intercept = 0, linetype = "dashed", colour = "grey60") +
+      geom_point(alpha = 0.6, size = 1.8) +
+      scale_colour_manual(name = "Top fraction",
+                           # viridis' 3-stop scale with its yellow endpoint (1%)
+                           # swapped for orange -- yellow is near-invisible
+                           # against the white panel background here.
+                           values = c(`10%` = "#440154", `5%` = "#21908C", `1%` = "#E67E22"),
+                           limits = c("10%", "5%", "1%")) +
+      labs(title = sprintf("Position enrichment — top vs bottom, 10/5/1%% cutoffs — %s", params$traitname),
+           x = expression(log[2]~fold~enrichment~(top)),
+           y = expression(log[2]~fold~enrichment~(bottom))) +
+      theme_minimal(base_size = 12)
+
+    lab <- sc %>% filter(highlight)
+    if (nrow(lab) > 0) {
+      # Larger labels need more clearance to avoid (a) overlapping each other
+      # and (b) sitting on top of dense point clusters -- higher force/padding
+      # and more iterations give the algorithm room to push labels clear of
+      # both, not just of the point they're anchored to.
+      p <- p + ggrepel::geom_text_repel(
+        data = lab, aes(label = stringr::str_trunc(highlight_tag, 45)),
+        size = 3.6, fontface = "bold", max.overlaps = Inf, seed = 42,
+        box.padding = 0.6, point.padding = 0.4,
+        force = 4, force_pull = 0.5,
+        max.time = 3, max.iter = 100000,
+        min.segment.length = 0, segment.size = 0.3, segment.alpha = 0.6,
+        bg.color = "white", bg.r = 0.12, show.legend = FALSE)
+    }
+    print(p)
+  }
+}
+```
+
+# Leading edge {.tabset .tabset-fade}
+
+For every **significant** (`p.adj < `r PADJ``) pathway, the
+observed `gene:position` members of the overlap, plus the same cross-module
+corroboration columns as above (`%gate_sig`/`%gate_fdr`/`%fade_*`/`%rer_*`/
+`%accum`, direction-aware — `%fade_bottom` only appears under `BOTTOM`,
+`%fade_top` only under `TOP`, plain `%fade` under `GLOBAL`). The full member
+list is also written to `posenrich_leading_edge.tsv` alongside this report.
+
+```{r leading-edge, echo=FALSE, results='asis'}
+if (!has_res || !any(res$sig, na.rm = TRUE)) {
+  cat("_No significant sets._\n\n")
+} else {
+  sig_res <- res %>% filter(sig)
+  for (rk in unique(sig_res$ranking)) {
+    cat(sprintf("\n## %s\n\n", toupper(rk)))
+    rk_sig <- sig_res %>% filter(ranking == rk) %>% arrange(database, p_adj)
+    if (nrow(rk_sig) == 0) { cat("_No significant sets for this direction._\n\n"); next }
+
+    want <- flag_cols_by_rk[[rk]]
+    if (is.null(want)) want <- character(0)
+    present_flags <- intersect(want, names(rk_sig))
+
+    if (!is.null(le_summary)) {
+      rk_sig <- rk_sig %>%
+        dplyr::left_join(le_summary, by = c("ranking", "database", "pathway", "top_frac"))
+    }
+
+    le_df <- rk_sig %>%
+      transmute(Database = database, Pathway = pathway, Description = description,
+                `Top frac` = sprintf("%s%%", format(100 * top_frac, trim = TRUE)),
+                Fold = round(fold_enrichment, 3), Direction = direction,
+                `p.adj` = signif(p_adj, 3))
+    if (length(present_flags) > 0) {
+      flag_df <- rk_sig %>% transmute(across(all_of(present_flags), ~round(.x, 1)))
+      names(flag_df) <- paste0("%", sub("^pct_", "", present_flags))
+      le_df <- dplyr::bind_cols(le_df, flag_df)
+    }
+    esc_cols <- TRUE
+    if ("Genes/positions" %in% names(rk_sig)) {
+      le_df <- dplyr::bind_cols(le_df, rk_sig %>% dplyr::select(`N genes`, `Genes/positions`))
+      # Full member list is still in posenrich_leading_edge.tsv -- here, show
+      # only the first few inline with a <details> toggle for the rest, since
+      # a row can otherwise carry hundreds of comma-separated gene:positions.
+      le_df[["Genes/positions"]] <- truncate_gene_list(le_df[["Genes/positions"]])
+      # DT column indices for `escape` are 1-based over the data columns when
+      # rownames = FALSE (no offset needed) -- verified empirically, since
+      # DT's own docs are ambiguous on this point and getting it wrong throws
+      # "attempt to select less than one element in integerOneIndex" deep
+      # inside DT:::escapeData(), aborting the whole render.
+      esc_cols <- which(names(le_df) != "Genes/positions")
+    }
+
+    id <- paste("dt_le", rk, sep = "_")
+    assign(paste0(".esc_cols_", rk), esc_cols, envir = environment())
+    cat(knitr::knit_child(text = c(
+      paste0("```{r ", id, ", echo=FALSE}"),
+      sprintf("DT::datatable(le_df, options = list(pageLength = 10, scrollX = TRUE), rownames = FALSE, escape = .esc_cols_%s)", rk),
+      "```"), envir = environment(), quiet = TRUE))
+    cat("\n\n")
+  }
+}
+```
+
+---
+
+# Position Characterisation
+
+Moved here from the Scoring report (was a companion-report cross-reference;
+now lives directly alongside the position-level enrichment analysis it
+complements). Logic is unchanged from the original — same US-scheme
+restriction, same CAAS-score-threshold framing.
+
+```{r poschar-setup, include=FALSE}
+.file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
+
+# Tableau_10 colour swatch for pipeline-wide consistency (same palette used
+# throughout the Scoring/Characterization reports).
+if (requireNamespace("paletteer", quietly = TRUE)) {
+  .tableau10 <- as.character(paletteer::paletteer_d("ggthemes::Tableau_10"))
+} else {
+  .tableau10 <- c(
+    "#4E79A7", "#F28E2B", "#E15759", "#76B7B2", "#59A14F",
+    "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"
+  )
+}
+
+has_position_scores <- .file_ok(params$position_scores_file)
+has_gene_scores      <- .file_ok(params$gene_scores_file)
+pos_df  <- if (has_position_scores) readr::read_tsv(params$position_scores_file, show_col_types = FALSE) else NULL
+gene_df <- if (has_gene_scores)     readr::read_tsv(params$gene_scores_file,     show_col_types = FALSE) else NULL
+
+has_vep_primateai <- .file_ok(params$vep_primateai_file)
+has_vep_cosmic    <- .file_ok(params$vep_cosmic_file)
+has_genomic       <- .file_ok(params$genomic_info_file)
+# Position scores are required for every sub-tab below (PAI3D/COSMIC joins,
+# regional accumulation) -- gate the whole section on them, not just on which
+# external database happens to be supplied.
+has_pos_char <- has_position_scores && (has_vep_primateai || has_vep_cosmic || has_genomic)
+
+if (has_vep_primateai) {
+  vep_pai_df <- readr::read_tsv(params$vep_primateai_file, show_col_types = FALSE)
+  if ("Position" %in% names(vep_pai_df)) vep_pai_df$Position <- suppressWarnings(as.integer(vep_pai_df$Position))
+} else {
+  vep_pai_df <- NULL
+}
+
+if (has_vep_cosmic) {
+  vep_cosmic_df <- readr::read_tsv(params$vep_cosmic_file, show_col_types = FALSE)
+  if ("Position" %in% names(vep_cosmic_df)) vep_cosmic_df$Position <- suppressWarnings(as.integer(vep_cosmic_df$Position))
+} else {
+  vep_cosmic_df <- NULL
+}
+
+if (has_genomic) {
+  # Format: gene, chr, start, end, length (no header assumed; detect if present)
+  genomic_raw <- readr::read_tsv(params$genomic_info_file,
+                          col_names = c("Gene", "chr", "gene_start", "gene_end", "gene_length"),
+                          show_col_types = FALSE)
+  if (tolower(genomic_raw$Gene[1]) == "gene") genomic_raw <- genomic_raw[-1, ]
+  genomic_raw <- genomic_raw %>%
+    dplyr::mutate(
+      gene_start  = as.integer(gene_start),
+      gene_end    = as.integer(gene_end),
+      gene_length = as.integer(gene_length),
+      gene_mid    = as.integer((gene_start + gene_end) / 2L)
+    )
+} else {
+  genomic_raw <- NULL
+}
+
+if (has_pos_char) {
+  top_pct  <- params$top_pct %||% 0.10
+  top5_pct <- 0.05
+  top1_pct <- 0.01
+
+  pos_top    <- pos_df %>% dplyr::filter(change_side %in% c("top",    "both"))
+  pos_bottom <- pos_df %>% dplyr::filter(change_side %in% c("bottom", "both"))
+
+  # Global thresholds (used throughout this section for CAAS filters)
+  thr_10 <- quantile(pos_df$CAAS_score, 1 - top_pct,  na.rm = TRUE)
+  thr_5  <- quantile(pos_df$CAAS_score, 1 - top5_pct, na.rm = TRUE)
+  thr_1  <- quantile(pos_df$CAAS_score, 1 - top1_pct, na.rm = TRUE)
+
+  # Direction-specific thresholds (used for is_Xpct flags)
+  .thr_top_10 <- quantile(pos_top$CAAS_score, 1 - top_pct,  na.rm = TRUE)
+  .thr_top_5  <- quantile(pos_top$CAAS_score, 1 - top5_pct, na.rm = TRUE)
+  .thr_top_1  <- quantile(pos_top$CAAS_score, 1 - top1_pct, na.rm = TRUE)
+  .thr_bot_10 <- quantile(pos_bottom$CAAS_score, 1 - top_pct,  na.rm = TRUE)
+  .thr_bot_5  <- quantile(pos_bottom$CAAS_score, 1 - top5_pct, na.rm = TRUE)
+  .thr_bot_1  <- quantile(pos_bottom$CAAS_score, 1 - top1_pct, na.rm = TRUE)
+}
+```
+---
+
+```{r pos-char-header, results='asis'}
+if (has_pos_char) cat(r"(## Position Characterisation {.tabset #position-characterisation}
+
+This section examines how ranked positions behave in relation to external
+signals that do **not** contribute to the `CAAS_score`. Both PrimateAI-3D and
+COSMIC Mutant Census are treated as independent characterisation layers.
+
+Since both databases describe specific amino acid transitions, the biochemical
+Grantham Score (GS) groupings are out of scope (as they group transitions by
+biochemical radicalness rather than modeling the specific substitution directly).
+Therefore, we restrict the characterisation strictly to the **Unweighted Scheme (US)**,
+with all scores and mutation overlaps derived solely from US transitions.
+
+- **`pai_char_score`**: The pathogenicity score of mutating the ancestral human reference amino acid to the derived US alternative amino acid(s) in PrimateAI-3D.
+- **COSMIC Overlap**: The presence and recurrence of somatic mutations mapped to the specific codon under the US transition.
+
+)")
+```
+
+```{r vep-setup-common}
+pos_score_meta <- pos_df %>%
+  select(Gene, Position, CAAS_score, biochem_weight_sum, change_side, gate_sig, gate_fdr) %>%
+  mutate(
+    caas_decile  = dplyr::ntile(CAAS_score, 10),
+    in_top_10pct = CAAS_score >= thr_10,
+    in_top_5pct  = CAAS_score >= thr_5,
+    in_top_1pct  = CAAS_score >= thr_1
+  )
+
+has_background <- .file_ok(params$background_file)
+if (has_background) {
+  bg_lines <- readLines(params$background_file)
+  bg_genes <- bg_lines[nzchar(trimws(bg_lines)) & !grepl("^#", bg_lines)]
+} else {
+  bg_genes <- unique(gene_df$Gene)
+}
+```
+
+```{r vep-pai-subsec, results='asis'}
+if (has_vep_primateai) cat("### VEP: PrimateAI-3D\n\n")
+```
+
+```{r vep-pai-setup, eval=has_vep_primateai}
+# Detect PrimateAI score column (varies by database version)
+.pai_score_col <- intersect(
+  c("score_PAI3D", "score", "primateai_score", "pathogenicity_score", "PrimateAI_score"),
+  names(vep_pai_df)
+)[1]
+if (is.na(.pai_score_col)) {
+  warning("PrimateAI: no recognised score column found — skipping.")
+  has_vep_primateai <- FALSE
+}
+```
+
+```{r vep-pai-join, eval=has_vep_primateai}
+# Restrict to shared genes present in both our results (background clean) and database
+shared_genes_pai <- intersect(bg_genes, unique(vep_pai_df$Gene))
+pos_pai_shared <- pos_score_meta %>% filter(Gene %in% shared_genes_pai)
+
+# Under US-only design, pai_char_score is simply the pathogenicity score of the US change.
+# If multiple alternative AAs map, we keep the maximum score.
+# Pathogenic status is defined exclusively by the prediction column (containing
+# "pathogenic", case-insensitive) — never by a raw score cutoff.
+pai_by_prot <- vep_pai_df %>%
+  filter(caap_group == "US", Gene %in% shared_genes_pai) %>%
+  mutate(
+    pai_score = as.numeric(.data[[.pai_score_col]]),
+    is_pathogenic = grepl("pathogenic", prediction, ignore.case = TRUE)
+  ) %>%
+  filter(is.finite(pai_score)) %>%
+  group_by(Gene, Position) %>%
+  summarise(
+    pai_char_score = max(pai_score, na.rm = TRUE),
+    pai_pathogenic = any(is_pathogenic, na.rm = TRUE),
+    n_pai_schemes  = 1L,
+    .groups = "drop"
+  )
+
+pos_vep_pai <- pai_by_prot %>%
+  inner_join(pos_pai_shared, by = c("Gene", "Position")) %>%
+  distinct(Gene, Position, .keep_all = TRUE)
+
+# Join back caas_change and other details for display table
+pos_vep_pai_table_source <- vep_pai_df %>%
+  filter(caap_group == "US", Gene %in% shared_genes_pai) %>%
+  inner_join(pos_pai_shared, by = c("Gene", "Position")) %>%
+  distinct(Gene, Position, .keep_all = TRUE)
+
+has_vep_primateai <- nrow(pos_vep_pai) > 0
+
+# Directional PAI subsets: top+both and bottom+both
+pos_vep_pai_top    <- pos_vep_pai %>% filter(change_side %in% c("top",    "both"))
+pos_vep_pai_bottom <- pos_vep_pai %>% filter(change_side %in% c("bottom", "both"))
+```
+
+`r if (exists("pos_vep_pai") && nrow(pos_vep_pai) == 0) "> **Note:** PrimateAI-3D inputs were provided, but no scored positions could be matched to the VEP/PAI3D annotations for this direction."`
+
+```{r vep-pai-violin, eval=has_vep_primateai, fig.height=7}
+# pai_char_score violin per CAAS decile, split by direction (TOP and BOTTOM separately).
+pai_dir_df <- bind_rows(
+  pos_vep_pai_top    %>% mutate(pai_direction = "TOP (top + both)"),
+  pos_vep_pai_bottom %>% mutate(pai_direction = "BOTTOM (bottom + both)")
+) %>%
+  filter(!is.na(caas_decile), !is.na(pai_char_score))
+
+# Per-direction median for horizontal reference lines
+pai_medians <- pai_dir_df %>%
+  group_by(pai_direction) %>%
+  summarise(median_pai = median(pai_char_score, na.rm = TRUE), .groups = "drop")
+
+ggplot(pai_dir_df, aes(x = factor(caas_decile, levels = 1:10), y = pai_char_score)) +
+  geom_violin(aes(fill = pai_direction), alpha = 0.55, trim = TRUE, scale = "width",
+              show.legend = FALSE) +
+  geom_boxplot(width = 0.14, outlier.size = 0.4, alpha = 0.9,
+               fill = "white", colour = "grey30") +
+  geom_hline(data = pai_medians,
+             aes(yintercept = median_pai),
+             linetype = "dashed", colour = "grey20", linewidth = 0.7) +
+  geom_text(data = pai_medians,
+            aes(x = 10.6, y = median_pai,
+                label = sprintf("median = %.3f", median_pai)),
+            hjust = 0, vjust = -0.4, size = 3, colour = "grey20",
+            inherit.aes = FALSE) +
+  scale_fill_manual(values = c("TOP (top + both)" = .tableau10[1],
+                               "BOTTOM (bottom + both)" = .tableau10[3])) +
+  scale_x_discrete(
+    drop   = FALSE,
+    labels = setNames(c("1\n(low)", as.character(2:9), "10\n(high)"), as.character(1:10))
+  ) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.08))) +
+  facet_wrap(~pai_direction, ncol = 1) +
+  labs(
+    title    = "PAI_TOP and PAI_BOTTOM: PrimateAI-3D Score by CAAS Decile",
+    subtitle = sprintf(
+      "PAI_TOP: %d positions | PAI_BOTTOM: %d positions | dashed = per-direction median",
+      nrow(pos_vep_pai_top), nrow(pos_vep_pai_bottom)
+    ),
+    x = "CAAS Score Decile", y = "PrimateAI-3D Score"
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        strip.text = element_text(face = "bold", size = 11))
+```
+
+```{r vep-pai-scatter, eval=has_vep_primateai, fig.height=5}
+# CAAS_score vs pai_char_score, coloured by direction.
+# Normalise both axes for Pearson r (rank / n).
+pos_vep_pai_dir <- bind_rows(
+  pos_vep_pai_top    %>% mutate(pai_direction = "TOP"),
+  pos_vep_pai_bottom %>% mutate(pai_direction = "BOTTOM")
+) %>% distinct(Gene, Position, .keep_all = TRUE)
+
+.pai_caas_r_top  <- safe_cor(
+  rank(pos_vep_pai_top$CAAS_score,    na.last = "keep") / sum(!is.na(pos_vep_pai_top$CAAS_score)),
+  rank(pos_vep_pai_top$pai_char_score, na.last = "keep") / sum(!is.na(pos_vep_pai_top$pai_char_score))
+)
+.pai_caas_r_bot  <- safe_cor(
+  rank(pos_vep_pai_bottom$CAAS_score,    na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$CAAS_score)),
+  rank(pos_vep_pai_bottom$pai_char_score, na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$pai_char_score))
+)
+
+ggplot(pos_vep_pai_dir, aes(x = CAAS_score, y = pai_char_score,
+                             colour = pai_direction)) +
+  geom_point(alpha = 0.35, size = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 0.8, alpha = 0.15) +
+  geom_vline(xintercept = thr_10, linetype = "dashed",
+             colour = "grey40", linewidth = 0.5) +
+  scale_colour_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3]),
+                      name = "Direction") +
+  labs(
+    title    = "CAAS Score vs PrimateAI-3D Score by Direction",
+    subtitle = sprintf("Pearson r (rank-norm): TOP = %.3f | BOTTOM = %.3f | dashed = top-10%% CAAS",
+                       .pai_caas_r_top, .pai_caas_r_bot),
+    x = "CAAS Score", y = "PrimateAI-3D Score"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r vep-pai-pathogenic-bar, eval=has_vep_primateai, fig.height=5}
+# Count of pathogenic vs non-pathogenic positions, TOP and BOTTOM.
+pai_pathogenic_counts <- bind_rows(
+  pos_vep_pai_top    %>% mutate(pai_direction = "TOP"),
+  pos_vep_pai_bottom %>% mutate(pai_direction = "BOTTOM")
+) %>%
+  mutate(pathogenic = ifelse(pai_pathogenic, "pathogenic", "non-pathogenic")) %>%
+  count(pai_direction, pathogenic)
+
+ggplot(pai_pathogenic_counts, aes(x = pathogenic, y = n, fill = pai_direction)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = n), position = position_dodge(width = 0.8), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3])) +
+  labs(
+    title    = "Pathogenic vs Non-Pathogenic Positions (PrimateAI-3D)",
+    subtitle = "Pathogenic defined by prediction column",
+    x = NULL, y = "N positions", fill = "Direction"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r vep-pai-phenaxis-scatter, eval=has_vep_primateai && "phen_score" %in% names(pos_vep_pai_top), fig.height=5}
+.pai_phen_r_top <- safe_cor(
+  rank(pos_vep_pai_top$phen_score,      na.last = "keep") / sum(!is.na(pos_vep_pai_top$phen_score)),
+  rank(pos_vep_pai_top$pai_char_score,  na.last = "keep") / sum(!is.na(pos_vep_pai_top$pai_char_score))
+)
+.pai_phen_r_bot <- safe_cor(
+  rank(pos_vep_pai_bottom$phen_score,      na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$phen_score)),
+  rank(pos_vep_pai_bottom$pai_char_score,  na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$pai_char_score))
+)
+
+ggplot(pos_vep_pai_dir, aes(x = phen_score, y = pai_char_score,
+                             colour = pai_direction)) +
+  geom_point(alpha = 0.35, size = 0.8) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 0.8, alpha = 0.15) +
+  scale_colour_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3]),
+                      name = "Direction") +
+  labs(
+    title    = "Phenotype Evolution Score vs PrimateAI-3D Score by Direction",
+    subtitle = sprintf("Pearson r (rank-norm): TOP = %.3f | BOTTOM = %.3f",
+                       .pai_phen_r_top, .pai_phen_r_bot),
+    x = "phen_score (1 - pvalue_boot)", y = "PrimateAI-3D Score"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r vep-pai-table, eval=has_vep_primateai}
+pai_table <- pos_vep_pai_table_source %>%
+  arrange(desc(CAAS_score)) %>%
+  select(Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change, CAAS_score, change_side, score_PAI3D, percentile_PAI3D, prediction) %>%
+  rename(
+    `Ref AA` = hg38_ref_aa,
+    `Alt AA(s)` = caas_alt_aas,
+    `CAAS Change` = caas_change,
+    `CAAS Score` = CAAS_score,
+    `Change Side` = change_side,
+    `PAI3D Score` = score_PAI3D,
+    `PAI3D Percentile` = percentile_PAI3D,
+    `Prediction` = prediction
+  )
+
+DT::datatable(
+  pai_table,
+  caption = "CAAS positions overlapping with PrimateAI-3D pathogenicity predictions, ordered by CAAS score",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+```{r vep-pai-fisher, eval=has_vep_primateai}
+# Odds ratio & P-value interpretation:
+# - Odds Ratio: Measures the enrichment of pathogenic residues (by the prediction column) within the specified CAAS threshold compared to the rest of the positions. An odds ratio > 1 indicates enrichment.
+# - P-value: Reaches significance (via Fisher's exact test) when the proportion of pathogenic mutations is significantly higher inside the CAAS threshold.
+# `N positions` IS the Fisher test's actual population (PAI-scored, shared-gene
+# positions) — mirrors run_cosmic_fisher_dir below. Previously this column showed
+# a broader shared-gene pool count (via a separate coverage_df) that did not match
+# what the test was actually computed over; fixed to report the true population.
+run_pai_fisher_dir <- function(df, label) {
+  df   <- df %>% mutate(high_pai = !is.na(pai_pathogenic) & pai_pathogenic)
+  n_all <- nrow(df)
+
+  # Build named threshold list: CAAS-flag-based thresholds + percentage-based rows
+  # Percentage rows use in_top_Xpct flags when available; for 100% and 50% we
+  # derive a logical vector from the CAAS score quantile.
+  thr_50_val <- quantile(df$CAAS_score, 0.50, na.rm = TRUE)
+  pct_rows <- list(
+    list(col = NULL, lbl = "100% (all positions)",    flag = rep(TRUE, n_all)),
+    list(col = NULL, lbl = "50% (top 50% CAAS)",      flag = df$CAAS_score >= thr_50_val),
+    list(col = "in_top_10pct", lbl = sprintf("Top %g%%", top_pct  * 100), flag = NULL),
+    list(col = "in_top_5pct",  lbl = sprintf("Top %g%%", top5_pct * 100), flag = NULL),
+    list(col = "in_top_1pct",  lbl = sprintf("Top %g%%", top1_pct * 100), flag = NULL)
+  )
+
+  purrr::map_dfr(pct_rows, function(thr) {
+    in_top   <- if (!is.null(thr$flag)) thr$flag else df[[thr$col]]
+    in_top   <- replace_na(in_top, FALSE)
+
+    n_top    <- sum(in_top)
+    n_top_h  <- sum(in_top & df$high_pai, na.rm = TRUE)
+    n_rest   <- sum(!in_top)
+    n_rest_h <- sum(!in_top & df$high_pai, na.rm = TRUE)
+    mat <- matrix(c(n_top - n_top_h, n_rest - n_rest_h, n_top_h, n_rest_h), nrow = 2)
+    ft  <- tryCatch(fisher.test(mat),
+                    error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
+
+    pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
+    pct_fdr <- if ("gate_fdr" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_fdr[in_top], na.rm = TRUE)) else "0.0%"
+
+    tibble(
+      Direction            = label,
+      Threshold            = thr$lbl,
+      `N positions`        = n_top,
+      `N pathogenic`       = n_top_h,
+      `% pathogenic`       = sprintf("%.1f%%", 100 * n_top_h / max(n_top, 1)),
+      `Odds ratio`         = sprintf("%.2f", ft$estimate),
+      `P value`            = formatC(ft$p.value, format = "e", digits = 2)
+    )
+  })
+}
+
+pai_fisher <- bind_rows(
+  run_pai_fisher_dir(pos_vep_pai_top,    "TOP"),
+  run_pai_fisher_dir(pos_vep_pai_bottom, "BOTTOM")
+)
+
+knitr::kable(
+  pai_fisher,
+  caption = "PAI3D enrichment of pathogenic positions (defined by prediction column) by CAAS threshold and direction. N positions = the actual test population (shared-gene, PAI3D-scored positions) at that threshold. 100% row = all directional positions (baseline); 50% row = top half by CAAS score; Fisher OR and P value compare top-subset vs remainder, entirely within PAI-covered positions.",
+  align = c("l", "l", rep("r", ncol(pai_fisher) - 2))
+)
+```
+
+
+```{r vep-cosmic-subsec, results='asis'}
+if (has_vep_cosmic) cat("### VEP: COSMIC Mutant Census\n\n")
+```
+
+```{r vep-cosmic-setup, eval=has_vep_cosmic}
+# Restrict to shared genes present in both our results (background clean) and database
+shared_genes_cosmic <- intersect(bg_genes, unique(vep_cosmic_df$Gene))
+pos_cosmic_shared <- pos_score_meta %>% filter(Gene %in% shared_genes_cosmic)
+
+# Filter cosmic annotations for US only if caap_group is present
+if ("caap_group" %in% names(vep_cosmic_df)) {
+  vep_cosmic_df <- vep_cosmic_df %>% filter(caap_group == "US", Gene %in% shared_genes_cosmic)
+} else {
+  vep_cosmic_df <- vep_cosmic_df %>% filter(Gene %in% shared_genes_cosmic)
+}
+
+# Join cosmic annotations with pos_cosmic_shared (keeping all rows to count recurrence)
+cosmic_joined <- vep_cosmic_df %>%
+  inner_join(pos_cosmic_shared, by = c("Gene", "Position"))
+
+has_vep_cosmic <- nrow(cosmic_joined) > 0
+```
+
+`r if (exists("cosmic_joined") && nrow(cosmic_joined) == 0) "> **Note:** COSMIC Mutant Census mutations were mapped, but no scored positions could be matched to the COSMIC annotations for this direction."`
+
+```{r vep-cosmic-stats, eval=has_vep_cosmic}
+cosmic_table <- cosmic_joined %>%
+  group_by(Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change, CAAS_score, change_side) %>%
+  summarise(
+    Recurrence = n(),
+    `Mutation AA(s)` = paste(unique(MUTATION_AA), collapse = "; "),
+    `Description(s)` = paste(unique(MUTATION_DESCRIPTION), collapse = "; "),
+    `Somatic Status(es)` = paste(unique(MUTATION_SOMATIC_STATUS), collapse = "; "),
+    .groups = "drop"
+  ) %>%
+  arrange(desc(Recurrence)) %>%
+  rename(
+    `Ref AA` = hg38_ref_aa,
+    `Alt AA(s)` = caas_alt_aas,
+    `CAAS Change` = caas_change,
+    `CAAS Score` = CAAS_score,
+    `Change Side` = change_side,
+    `Mutation AA(s)` = `Mutation AA(s)`,
+    `Description` = `Description(s)`,
+    `Somatic Status` = `Somatic Status(es)`
+  )
+
+DT::datatable(
+  cosmic_table,
+  caption = "CAAS positions overlapping with COSMIC cancer-related mutations, ordered by mutation recurrence",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+```{r vep-cosmic-somatic-bar, eval=has_vep_cosmic, fig.height=5}
+# Count of COSMIC mutations by Somatic Status and direction.
+cosmic_counts <- bind_rows(
+  cosmic_joined %>% filter(change_side %in% c("top",    "both")) %>% mutate(cosmic_direction = "TOP"),
+  cosmic_joined %>% filter(change_side %in% c("bottom", "both")) %>% mutate(cosmic_direction = "BOTTOM")
+) %>%
+  filter(!is.na(MUTATION_SOMATIC_STATUS) & MUTATION_SOMATIC_STATUS != "") %>%
+  count(cosmic_direction, MUTATION_SOMATIC_STATUS)
+
+ggplot(cosmic_counts, aes(x = MUTATION_SOMATIC_STATUS, y = n, fill = cosmic_direction)) +
+  geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+  geom_text(aes(label = n), position = position_dodge(width = 0.8), vjust = -0.3, size = 3.5) +
+  scale_fill_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3])) +
+  labs(
+    title    = "COSMIC Mutation Somatic Status Distribution",
+    x = NULL, y = "N mutations", fill = "Direction"
+  ) +
+  theme(plot.title = element_text(face = "bold"),
+        axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r vep-cosmic-fisher, eval=has_vep_cosmic}
+# Odds ratio & P-value interpretation:
+# - Odds Ratio: Measures the enrichment of positions with somatic mutations reported in the COSMIC database within the specified CAAS threshold compared to the rest of the positions. An odds ratio > 1 indicates enrichment.
+# - P-value: Reaches significance (via Fisher's exact test) when the proportion of cancer somatic mutations is significantly higher inside the CAAS threshold.
+pos_cosmic <- pos_cosmic_shared %>%
+  mutate(has_cosmic = paste(Gene, Position, sep = "_") %in% paste(vep_cosmic_df$Gene, vep_cosmic_df$Position, sep = "_"))
+
+pos_cosmic_top    <- pos_cosmic %>% filter(change_side %in% c("top",    "both"))
+pos_cosmic_bottom <- pos_cosmic %>% filter(change_side %in% c("bottom", "both"))
+
+run_cosmic_fisher_dir <- function(df, label) {
+  n_all <- nrow(df)
+  thr_50_val <- quantile(df$CAAS_score, 0.50, na.rm = TRUE)
+  pct_rows <- list(
+    list(col = NULL, lbl = "100% (all positions)",    flag = rep(TRUE, n_all)),
+    list(col = NULL, lbl = "50% (top 50% CAAS)",      flag = df$CAAS_score >= thr_50_val),
+    list(col = "in_top_10pct", lbl = sprintf("Top %g%%", top_pct  * 100), flag = NULL),
+    list(col = "in_top_5pct",  lbl = sprintf("Top %g%%", top5_pct * 100), flag = NULL),
+    list(col = "in_top_1pct",  lbl = sprintf("Top %g%%", top1_pct * 100), flag = NULL)
+  )
+
+  purrr::map_dfr(pct_rows, function(thr) {
+    in_top   <- if (!is.null(thr$flag)) thr$flag else df[[thr$col]]
+    in_top   <- replace_na(in_top, FALSE)
+    n_top    <- sum(in_top)
+    n_top_c  <- sum(in_top & df$has_cosmic, na.rm = TRUE)
+    n_rest   <- sum(!in_top)
+    n_rest_c <- sum(!in_top & df$has_cosmic, na.rm = TRUE)
+    mat <- matrix(c(n_top - n_top_c, n_rest - n_rest_c, n_top_c, n_rest_c), nrow = 2)
+    ft  <- tryCatch(fisher.test(mat),
+                    error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
+    
+    pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
+    pct_fdr <- if ("gate_fdr" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_fdr[in_top], na.rm = TRUE)) else "0.0%"
+
+    tibble(
+      Direction            = label,
+      Threshold            = thr$lbl,
+      `N positions`        = n_top,
+      `N COSMIC`           = n_top_c,
+      `% COSMIC`           = sprintf("%.1f%%", 100 * n_top_c / max(n_top, 1)),
+      `% gate_sig`         = pct_sig,
+      `% gate_fdr`         = pct_fdr,
+      `Odds ratio`         = sprintf("%.2f", ft$estimate),
+      `P value`            = formatC(ft$p.value, format = "e", digits = 2)
+    )
+  })
+}
+
+cosmic_fisher <- bind_rows(
+  run_cosmic_fisher_dir(pos_cosmic_top,    "TOP"),
+  run_cosmic_fisher_dir(pos_cosmic_bottom, "BOTTOM")
+)
+
+knitr::kable(
+  cosmic_fisher,
+  caption = "Fisher exact test for COSMIC somatic mutations overlap enrichment within CAAS score thresholds",
+  align = c("l", "l", rep("r", ncol(cosmic_fisher) - 2))
+)
+```
+
+```{r reg-accum-subsec, results='asis'}
+if (has_genomic) cat("### Regional Accumulation\n\n")
+```
+
+```{r position-region-accum, eval=has_genomic, fig.height=10, fig.width=14}
+# Build directional window summaries — TOP and BOTTOM use direction-specific thresholds
+.build_region_wins <- function(pos_sub, thr10, thr5, thr1, chr_offsets_df, dir_label) {
+  pos_sub %>%
+    mutate(
+      win_id    = floor(gene_mid / params$window_size_bp),
+      win_start = win_id * params$window_size_bp,
+      win_end   = win_start + params$window_size_bp - 1L,
+      win_mid   = win_start + params$window_size_bp / 2L,
+      in_top10  = CAAS_score >= thr10,
+      in_top5   = CAAS_score >= thr5,
+      in_top1   = CAAS_score >= thr1
+    ) %>%
+    group_by(chr_order, chr_label, win_id, win_start, win_end, win_mid) %>%
+    summarise(
+      n_positions        = n(),
+      n_top10_positions  = sum(in_top10, na.rm = TRUE),
+      n_top5_positions   = sum(in_top5,  na.rm = TRUE),
+      n_top1_positions   = sum(in_top1,  na.rm = TRUE),
+      frac_top_positions = n_top10_positions / n_positions,
+      mean_caas          = mean(CAAS_score, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    left_join(chr_offsets_df %>% select(chr_order, offset), by = "chr_order") %>%
+    mutate(
+      direction    = dir_label,
+      win_x        = win_mid + offset,
+      region_label = sprintf("chr%s:%0.1f-%0.1f Mb",
+                             chr_label, win_start / 1e6, win_end / 1e6)
+    )
+}
+
+# pos_genomic already has chr_order and gene_mid; split by direction
+pos_genomic_top <- pos_genomic %>% filter(change_side %in% c("top",    "both"))
+pos_genomic_bot <- pos_genomic %>% filter(change_side %in% c("bottom", "both"))
+
+pos_region_top <- .build_region_wins(pos_genomic_top, .thr_top_10, .thr_top_5, .thr_top_1,
+                                      pos_chr_offsets, "TOP")
+pos_region_bot <- .build_region_wins(pos_genomic_bot, .thr_bot_10, .thr_bot_5, .thr_bot_1,
+                                      pos_chr_offsets, "BOTTOM")
+
+# Combined (global thresholds) for overview panel
+pos_region_wins <- pos_genomic %>%
+  mutate(
+    win_id    = floor(gene_mid / params$window_size_bp),
+    win_start = win_id * params$window_size_bp,
+    win_end   = win_start + params$window_size_bp - 1L,
+    win_mid   = win_start + params$window_size_bp / 2L,
+    in_top10  = CAAS_score >= thr_10,
+    in_top5   = CAAS_score >= thr_5,
+    in_top1   = CAAS_score >= thr_1
+  ) %>%
+  group_by(chr_order, chr_label, win_id, win_start, win_end, win_mid) %>%
+  summarise(
+    n_positions        = n(),
+    n_top10_positions  = sum(in_top10, na.rm = TRUE),
+    n_top5_positions   = sum(in_top5,  na.rm = TRUE),
+    n_top1_positions   = sum(in_top1,  na.rm = TRUE),
+    frac_top_positions = n_top10_positions / n_positions,
+    mean_caas          = mean(CAAS_score, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  left_join(pos_chr_offsets %>% select(chr_order, offset), by = "chr_order") %>%
+  mutate(
+    win_x        = win_mid + offset,
+    region_label = sprintf("chr%s:%0.1f-%0.1f Mb",
+                           chr_label, win_start / 1e6, win_end / 1e6)
+  )
+
+# Dotplots removed — tables below provide the same information with GenePos detail.
+```
+
+```{r position-region-accum-table, eval=has_genomic}
+.make_region_tbl <- function(wins_df) {
+  wins_df %>%
+    filter(n_top10_positions > 0) %>%
+    arrange(desc(n_positions), desc(frac_top_positions)) %>%
+    slice_head(n = 30) %>%
+    mutate(
+      frac_top10 = sprintf("%.1f%%", 100 * n_top10_positions / n_positions),
+      frac_top5  = sprintf("%.1f%%", 100 * n_top5_positions  / n_positions),
+      frac_top1  = sprintf("%.1f%%", 100 * n_top1_positions  / n_positions)
+    ) %>%
+    select(
+      Region              = region_label,
+      `N positions`       = n_positions,
+      `N top-10%`         = n_top10_positions,
+      `% top-10%`         = frac_top10,
+      `N top-5%`          = n_top5_positions,
+      `% top-5%`          = frac_top5,
+      `N top-1%`          = n_top1_positions,
+      `% top-1%`          = frac_top1,
+      `Mean CAAS`         = mean_caas
+    ) %>%
+    mutate(`Mean CAAS` = round(`Mean CAAS`, 4))
+}
+
+knitr::kable(.make_region_tbl(pos_region_top),
+  caption = "TOP-direction: genomic windows with high-CAAS positions, ordered by N positions (top 30; direction-specific thresholds)")
+knitr::kable(.make_region_tbl(pos_region_bot),
+  caption = "BOTTOM-direction: genomic windows with high-CAAS positions, ordered by N positions (top 30; direction-specific thresholds)")
+
+# Export directional regional accumulation tables as TSV
+region_export <- bind_rows(
+  .make_region_tbl(pos_region_top) %>% mutate(Direction = "TOP"),
+  .make_region_tbl(pos_region_bot) %>% mutate(Direction = "BOTTOM")
+) %>% select(Direction, everything())
+readr::write_tsv(region_export,
+  file.path(params$output_dir, "regional_accumulation.tsv"))
+```
+
+
 # Methods
 
 - **Test**: Fisher's exact test, one 2x2 table per (ranking, database, pathway,
-  top_frac): foreground = the top 10/5/1% of scored positions (by `CAAS_score`,
+  top_frac): foreground = the top 25/10/5/1% of scored positions (by `CAAS_score`,
   `scoring` module `position_scores.tsv`) in that direction; background = the
   full honest tested position universe (all non-gapped "selected" alignment
   columns of the cleaned-background genes) — never restricted to the scored
@@ -176,12 +1120,34 @@ if (!has_res) {
   (`change_side`); `top`/`bottom` filter to `change_side` first (matching the
   `scoring` module's own percentile convention — see `11.Scoring_report.Rmd`),
   `global` does not.
-- **Databases**: 9 GMT-style position-set databases (Pfam domains/clans, COSMIC
-  and general orthogroups, genomic locations, positive/purifying-selection
-  orthogroups, UCR core/flank orthogroups) plus the broad `characterization`
-  layers (UCR core/flank, FUBAR positive/purifying) — unified onto the same
-  Fisher mechanism. `min`/`max` set-size filtering applies only to the 9
-  GMT-style databases; the broad layers were never size-filtered.
+- **Two background conventions.** Every database above tests against the
+  **full honest background** *except* `cosmic_orthogroups` and
+  `pai3d_orthogroups`, which test against a **coverage-restricted background**
+  (foreground *and* background both intersected with the set of genes the
+  external database itself could ever annotate — see
+  `cosmic_coverage_genes.txt` / `pai3d_coverage_genes.txt`, emitted by
+  `build_position_gmt.py`). The distinction is *why* a position is absent from
+  a term: `orthogroups`/`pfam_domains`/`selection_*`/`ucr_*` are internal
+  deterministic computations with complete coverage by construction, so an
+  absent position is genuine negative evidence. COSMIC and PAI3D are external
+  observational/curated databases with incomplete real-world coverage — a gene
+  COSMIC never sequenced, or PAI3D never scored, is absent from the term for a
+  reason that has nothing to do with the trait being tested. Testing those two
+  GMTs against the full ~1.47M-position background would dilute the signal
+  with genes/positions the database could never have annotated regardless of
+  outcome; restricting both foreground and background to the coverage subset
+  keeps the 2x2 table's implicit universe honest to what was actually tested.
+- **Databases**: 10 GMT-style position-set databases (Pfam domains/clans,
+  COSMIC and PAI3D and general orthogroups, genomic locations,
+  positive/purifying-selection orthogroups, UCR core/flank orthogroups) plus
+  the broad `characterization` layers (UCR core/flank, FUBAR
+  positive/purifying) — unified onto the same Fisher mechanism. `min`/`max`
+  set-size filtering applies only to the GMT-style databases; the broad layers
+  were never size-filtered. PAI3D membership is restricted to variants the
+  `prediction` column calls pathogenic (substring match, no score-cutoff
+  fallback — the same convention as `11.Scoring_report.Rmd`'s
+  `is_pathogenic`); COSMIC has no such filter since every somatic mutation
+  counts as evidence.
 - **`p.adj`**: BH-adjusted per (ranking, database) — a handful of huge broad
   layers and up to thousands of small GMT terms carry very different
   multiple-testing burdens, so they are not pooled into one BH family.
@@ -193,13 +1159,12 @@ if (!has_res) {
   against SCORING's own `flag_*` columns, and the percentage carrying each
   flag is reported alongside the Fisher result — the same idea as the
   gene-level FCS report's leading-edge composition, applied to positions.
-- **Significance is dual-gated**: `p.adj < `r PADJ`` **and** fold-enrichment
-  clearing `r FOLD`x (or `r round(1/FOLD, 3)`x for depletion). The fold gate
-  exists because, at this background size (~1.47M positions), even a
-  biologically negligible deviation from the expected ratio (e.g. fold ≈ 0.95)
-  can reach a "significant" p-value on p-value alone — a minimum-effect-size
-  floor is required alongside significance, mirroring the dual-threshold
-  design the gene-level FCS report already uses (`p.adj` AND `p.perm`).
+- **Significance is `p.adj < `r PADJ`` alone** — no fold-enrichment magnitude
+  gate is applied. `fold_enrichment` is still computed and reported for every
+  result so a minimum-effect-size cutoff can be applied downstream; be aware
+  that at this background size (~1.47M positions) even a biologically
+  negligible deviation from the expected ratio (e.g. fold ≈ 0.95) can reach a
+  "significant" p-value on p-value alone.
 - **No permulation (`p.perm`) at position level.** The CAAS permulation null is a
   *naive random relabeling*: when the phenotype is permuted, the fg/bg species are
   paired at **random across the tree**, not as the observed **matched sister
@@ -210,3 +1175,21 @@ if (!has_res) {
   `p.perm`; see its report for the same pairing caveat.
 
 *Report generated `r Sys.time()`.*
+
+---
+
+## Summary
+
+This report summarizes the results of the **Enrichment** analysis.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>
+
+*Generated by PhyloPhere — Enrichment Module*
+*Date of generation: `r Sys.Date()`*

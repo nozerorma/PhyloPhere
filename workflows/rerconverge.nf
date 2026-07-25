@@ -40,7 +40,7 @@ include { RER_CONT }           from "${baseDir}/subworkflows/RERCONVERGE/rer_con
 include { RER_BIN }            from "${baseDir}/subworkflows/RERCONVERGE/rer_bin"
 include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
 include { RER_GENE_LISTS }    from "${baseDir}/subworkflows/RERCONVERGE/rer_gene_lists.nf"
-include { TOOL_STRING_REPORT as RER_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
+include { TOOL_STRING_MODULE_REPORT as RER_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 include { RER_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 
 // Main workflow

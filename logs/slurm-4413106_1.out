@@ -1,0 +1,279 @@
+======================================================
+ SLURM TASK ID : 1
+ TRAIT         : neoplasia_prevalence  [CLASS 1]
+======================================================
+==========================================
+ Running Nextflow Single Phenotype: neoplasia_prevalence
+ Profile  : local
+ Output   : /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503
+==========================================
+
+ N E X T F L O W   ~  version 25.04.6
+
+Launching `/homes/users/mramon/scratch/0.Phylophere/main.nf` [neoplasia_prevalence_55c3d823] DSL2 - revision: 2098e2180f
+
+
+
+PHYLOPHERE - NF PIPELINE  ~  version 2.0.0
+=============================================
+
+PHYLOPHERE: A Nextflow pipeline including a complete set
+of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+Author:         Miguel Ramon (miguel.ramon@upf.edu)
+
+
+
+[NAME_CURATION] Using pre-built species list: /homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ali_sp_names.txt
+[CONTRAST_SELECTION] NAME_CURATION enabled — using curated tree as canonical tree.
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+[-        ] CON…ST_SELECTION:DATASET_PRUNE -
+[-        ] CON…ECTION:DATASET_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+Running composition analysis (CI or discrete). n_trait=adult_necropsy_count, c_trait=neoplasia_necropsy
+
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+[-        ] CON…ST_SELECTION:DATASET_PRUNE -
+[-        ] CON…ECTION:DATASET_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+Running composition analysis (CI or discrete). n_trait=adult_necropsy_count, c_trait=neoplasia_necropsy
+Using contrast selection output for CT analyses.
+
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+[-        ] CON…ST_SELECTION:DATASET_PRUNE -
+[-        ] CON…ECTION:DATASET_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT:…PREP:SUBSET_RESAMPLE_PERMS -
+[-        ] CT:…EP:BOOTSTRAP_PERMS_BATCHED -
+[-        ] CT:…PREP:CONCAT_PERM_DISCOVERY -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+Running composition analysis (CI or discrete). n_trait=adult_necropsy_count, c_trait=neoplasia_necropsy
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.1
+📊 [asr_robustness] Outputs → /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/asr_robustness/
+
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+[-        ] CON…ST_SELECTION:DATASET_PRUNE -
+[-        ] CON…ECTION:DATASET_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT:…PREP:SUBSET_RESAMPLE_PERMS -
+[-        ] CT:…EP:BOOTSTRAP_PERMS_BATCHED -
+[-        ] CT:…PREP:CONCAT_PERM_DISCOVERY -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+Plus 8 more processes waiting for tasks…
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+Running composition analysis (CI or discrete). n_trait=adult_necropsy_count, c_trait=neoplasia_necropsy
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.1
+📊 [asr_robustness] Outputs → /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Precluster hard filter retained: low MRCA posterior
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect caap_group boundaries)
+🧬 Running gene-level filtering (mode: dubious)...
+   (Gene-level statistics will be calculated per caap_group)
+Cleaned background files: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge
+   Genomic info   : /homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : cons_decile
+   Randomizations : 1000000
+
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+[-        ] CON…ST_SELECTION:DATASET_PRUNE -
+[-        ] CON…ECTION:DATASET_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT:…PREP:SUBSET_RESAMPLE_PERMS -
+[-        ] CT:…EP:BOOTSTRAP_PERMS_BATCHED -
+[-        ] CT:…PREP:CONCAT_PERM_DISCOVERY -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+Plus 15 more processes waiting for tasks…
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+Running composition analysis (CI or discrete). n_trait=adult_necropsy_count, c_trait=neoplasia_necropsy
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.1
+📊 [asr_robustness] Outputs → /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Precluster hard filter retained: low MRCA posterior
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect caap_group boundaries)
+🧬 Running gene-level filtering (mode: dubious)...
+   (Gene-level statistics will be calculated per caap_group)
+Cleaned background files: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge
+   Genomic info   : /homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : cons_decile
+   Randomizations : 1000000
+DEBUG: params.traitname = 'neoplasia_prevalence'
+
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+[-        ] CON…ST_SELECTION:DATASET_PRUNE -
+[-        ] CON…ECTION:DATASET_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT:…PREP:SUBSET_RESAMPLE_PERMS -
+[-        ] CT:…EP:BOOTSTRAP_PERMS_BATCHED -
+[-        ] CT:…PREP:CONCAT_PERM_DISCOVERY -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+Plus 19 more processes waiting for tasks…
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+Running composition analysis (CI or discrete). n_trait=adult_necropsy_count, c_trait=neoplasia_necropsy
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.1
+📊 [asr_robustness] Outputs → /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Precluster hard filter retained: low MRCA posterior
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect caap_group boundaries)
+🧬 Running gene-level filtering (mode: dubious)...
+   (Gene-level statistics will be calculated per caap_group)
+Cleaned background files: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge
+   Genomic info   : /homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : cons_decile
+   Randomizations : 1000000
+DEBUG: params.traitname = 'neoplasia_prevalence'
+
+[-        ] CON…NAME_CURATION:TREE_CLEANUP -
+[-        ] CON…ST_SELECTION:DATASET_PRUNE -
+[-        ] CON…ECTION:DATASET_EXPLORATION -
+[-        ] CON…TION:CI_COMPOSITION_REPORT -
+[-        ] CON…LECTION:CONTRAST_ALGORITHM -
+[-        ] CON…ECTION:CHECK_MIN_CONTRASTS -
+[-        ] CT:DISCOVERY_BATCHED           -
+[-        ] CT:CONCAT_DISCOVERY            -
+[-        ] CT:CONCAT_BACKGROUND           -
+[-        ] CT:RESAMPLE                    -
+[-        ] CT:CONCAT_RESAMPLE             -
+[-        ] CT:BOOTSTRAP_BATCHED           -
+[-        ] CT:CONCAT_BOOTSTRAP            -
+[-        ] CT:…PREP:SUBSET_RESAMPLE_PERMS -
+[-        ] CT:…EP:BOOTSTRAP_PERMS_BATCHED -
+[-        ] CT:…PREP:CONCAT_PERM_DISCOVERY -
+[-        ] CT_…:CAAS_SIGNIFICATION_REPORT -
+[-        ] CT_…TION:CT_DISAMBIGUATION_RUN -
+[-        ] CT_…NESS:ASR_ROBUSTNESS_REPORT -
+[-        ] CT_…AAS_PREPARE_POSTPROC_INPUT -
+Plus 22 more processes waiting for tasks…
+Reporting + pruning enabled; running a single prune/exploration pass for contrast selection.
+Running composition analysis (CI or discrete). n_trait=adult_necropsy_count, c_trait=neoplasia_necropsy
+Using contrast selection output for CT analyses.
+📥 Using discovery file from CT module for signification
+📥 Using global background genes from CT module for signification
+📥 Using bootstrap file from CT module
+📥 Using discovery file from upstream disambiguation output
+📥 [asr_robustness] Using disambiguation output from upstream CT_DISAMBIGUATION
+🔬 [asr_robustness] Posterior threshold (params.ct_disambig_posterior_threshold): 0.1
+📊 [asr_robustness] Outputs → /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/asr_robustness/
+📂 Post-processing input normalized from disambiguation master CSV
+⛔ Precluster hard filter retained: low MRCA posterior
+📥 Using global background genes from CT_DISCOVERY module
+🔧 Filter mode: running with minlen=3, maxcaas=0.7
+   (Cluster filtering will respect caap_group boundaries)
+🧬 Running gene-level filtering (mode: dubious)...
+   (Gene-level statistics will be calculated per caap_group)
+Cleaned background files: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/cleaned_backgrounds
+📊 CT characterization reports...
+Post-processing reports generated in: /homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final/neoplasia_prevalence/20260703_171503/postproc/reports
+🔬 CT_ACCUMULATION
+   Alignment dir  : /homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge
+   Genomic info   : /homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output
+   Rand type      : cons_decile
+   Randomizations : 1000000
+DEBUG: params.traitname = 'neoplasia_prevalence'
+WARN: Access to undefined parameter `posenrich_background_file` -- Initialise it to a default value eg. `params.posenrich_background_file = some_value`
+WARN: Access to undefined parameter `posenrich_min_size` -- Initialise it to a default value eg. `params.posenrich_min_size = some_value`
+WARN: Access to undefined parameter `posenrich_max_size` -- Initialise it to a default value eg. `params.posenrich_max_size = some_value`
+WARN: Access to undefined parameter `posenrich_min_overlap` -- Initialise it to a default value eg. `params.posenrich_min_overlap = some_value`
+CT disambiguation requires signification meta file or --ct_disambig_caas_metadata
+WARN: Access to undefined parameter `scoring_vep_cosmic` -- Initialise it to a default value eg. `params.scoring_vep_cosmic = some_value`
+

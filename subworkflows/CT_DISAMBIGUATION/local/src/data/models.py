@@ -51,6 +51,12 @@ class CAASPosition:
     conserved_pair: str = ""
     sig_hyp: Optional[bool] = None
     sig_perm: Optional[bool] = None
+    pvalue_fdr: Optional[float] = None
+    pvalue_boot_fdr: Optional[float] = None
+    sig_hyp_fdr: Optional[bool] = None
+    sig_perm_fdr: Optional[bool] = None
+    is_significant_fdr: Optional[bool] = None
+    alpha_fdr: Optional[float] = None
 
 
 @dataclass
@@ -85,6 +91,12 @@ class ConvergenceResult:
     conserved_pair: str = ""
     sig_hyp: Optional[bool] = None
     sig_perm: Optional[bool] = None
+    pvalue_fdr: Optional[float] = None
+    pvalue_boot_fdr: Optional[float] = None
+    sig_hyp_fdr: Optional[bool] = None
+    sig_perm_fdr: Optional[bool] = None
+    is_significant_fdr: Optional[bool] = None
+    alpha_fdr: Optional[float] = None
 
     # Node mapping and state tracking
     node_mapping: Optional[Dict[str, int]] = None

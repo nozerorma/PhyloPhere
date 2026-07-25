@@ -166,8 +166,11 @@ fi
 
 # Precomputed FADE/RER summaries for scoring
 [ -n "${SCORING_RER_INPUT:-}" ] && NF_FLAGS+=(--scoring_rer_input "$SCORING_RER_INPUT")
+[ -n "${SCORING_RER_PERMS_INPUT:-}" ] && NF_FLAGS+=(--rer_perms_file "$SCORING_RER_PERMS_INPUT")
+[ -n "${RER_UNIVERSE_FILE:-}" ] && NF_FLAGS+=(--rer_universe_file "$RER_UNIVERSE_FILE")
 [ -n "${SCORING_FADE_SUMMARY_TOP:-}" ] && NF_FLAGS+=(--scoring_fade_summary_top "$SCORING_FADE_SUMMARY_TOP")
 [ -n "${SCORING_FADE_SUMMARY_BOTTOM:-}" ] && NF_FLAGS+=(--scoring_fade_summary_bottom "$SCORING_FADE_SUMMARY_BOTTOM")
+[ -n "${FADE_UNIVERSE_FILE:-}" ] && NF_FLAGS+=(--fade_universe_file "$FADE_UNIVERSE_FILE")
 
 # --- CLASS-SPECIFIC FLAGS ---
 if [ "$CLASS" = "1" ]; then

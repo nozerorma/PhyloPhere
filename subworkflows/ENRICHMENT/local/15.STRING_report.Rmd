@@ -1,16 +1,22 @@
 ---
 title: "STRING Enrichment Analysis"
-author: "PhyloPhere Pipeline"
-date: "`r Sys.Date()`"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
 output:
   html_document:
+    theme: flatly
+    syntax_highlighting: tango
     toc: true
-    toc_float: true
-    toc_depth: 3
-    theme: cosmo
+    toc_float:
+      collapsed: false
     code_folding: hide
     df_print: paged
+    fig_width: 10
+    fig_height: 6
     self_contained: true
+    mathjax: null                       # no math in this report
+    md_extensions: "-tex_math_dollars"  # gene-set names contain '$' (e.g. V$HNF4_01) — never parse as TeX math
 params:
   background_file: NULL
   background_basename: NULL
@@ -19,15 +25,47 @@ params:
   project_name: "STRING_Analysis"
   species: 9606
   required_score: 400
-  network_score_thr: 700
   fdr_thr: 0.1
   top_thr: 15
   report_num: 20
-  enable_ppi_enrichment: false
   gene_scores_file: NULL
   string_db_dir: NULL
   min_cluster_genes: 3
+  domino_network_sif: NULL
+  domino_modules_dir: NULL
+  domino_network_score_thr: 700
 ---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -295,8 +333,15 @@ ensure_string_cache(
   input_directory = string_cache_dir
 )
 
-# ── STRINGdb instances ────────────────────────────────────────────────────────
-# Enrichment instance: uses required_score (default 400); background/enrichment calls.
+# ── STRINGdb instance ─────────────────────────────────────────────────────────
+# STRING is used ONLY for ID mapping ($map()), background caching, and the
+# functional/term enrichment path (get_enrichment_local()/get_enrichment())
+# below. Module finding + per-module significance is DOMINO's job (see the
+# "DOMINO Active Modules" section) — STRINGdb's walktrap clustering and
+# get_ppi_enrichment() (both per-cluster and whole-list) have been removed
+# entirely: get_ppi_enrichment() cannot honour a custom background above 2000
+# proteins combined (confirmed empirically against the live API), while our
+# cleaned_background is ~10k genes.
 string_db <- STRINGdb$new(
   version         = "12.0",
   species         = as.integer(params$species),
@@ -304,49 +349,30 @@ string_db <- STRINGdb$new(
   input_directory = string_cache_dir
 )
 
-# Network instance: uses network_score_thr (default 700 = 0.7) for PPI graphs.
-# Higher threshold → only high-confidence interactions → sparser, more meaningful networks.
-string_db_network <- STRINGdb$new(
-  version         = "12.0",
-  species         = as.integer(params$species),
-  score_threshold = as.integer(params$network_score_thr),
-  input_directory = string_cache_dir
-)
-
-# Physical subnetwork instance: uses only experimentally-determined physical interactions.
-string_db_physical <- tryCatch(
-  STRINGdb$new(
-    version         = "12.0",
-    species         = as.integer(params$species),
-    score_threshold = as.integer(params$network_score_thr),
-    network_type    = "physical",
-    input_directory = string_cache_dir
-  ),
-  error = function(e) {
-    message(sprintf("Physical STRINGdb instance failed: %s — physical networks skipped.", e$message))
-    NULL
-  }
-)
-
 string_networks_dir <- "string_networks"
 createDir(string_networks_dir)
-
-# ── STRING clustering (walktrap algorithm) ────────────────────────────────────
-# STRINGdb$get_clusters() wraps igraph community detection; available algorithms
-# are fastgreedy, walktrap, spinglass, and edge.betweenness.
-# Walktrap is closest to STRING's own MCL: both simulate random diffusion on the
-# weighted network — walks stay within dense communities, matching MCL's
-# expansion/inflation dynamic.
-run_string_clustering <- function(sdb, string_ids, algorithm = "walktrap") {
-  if (length(string_ids) < 3) return(NULL)
-  tryCatch({
-    cl_list <- sdb$get_clusters(string_ids, algorithm = algorithm)
-    if (length(cl_list) == 0) return(NULL)
-    purrr::imap_dfr(cl_list, ~data.frame(node = .x, cluster = .y, stringsAsFactors = FALSE))
-  }, error = function(e) {
-    message(sprintf("STRING get_clusters (%s): %s — no clustering available", algorithm, e$message))
-    NULL
-  })
+# ── DOMINO module loading ─────────────────────────────────────────────────────
+# DOMINO (Shamir-Lab) replaces STRING's walktrap clustering here: it recovers
+# known complexes more fully than walktrap at our typical list sizes (10-40
+# genes), validated in a prior investigation session against AMINE/SIMBA on
+# real bottom-direction CAAS gene lists. Modules + their DOMINO-native
+# Bonferroni-corrected hypergeometric p-value were precomputed upstream
+# (subworkflows/ENRICHMENT/domino.nf's DOMINO_RUN_MODULES, via
+# src/run_domino_modules.py calling DOMINO's Python API directly so the
+# p-value survives — the `domino` CLI itself discards it). This just reads
+# those two TSVs back in; column names (node/cluster) are kept identical to
+# the old walktrap clusters_df shape so cluster_layout()/plot_cluster_network()
+# below are unchanged.
+load_domino_modules <- function(list_name, modules_dir) {
+  mod_file   <- file.path(modules_dir, sprintf("%s_domino_modules.tsv", list_name))
+  stats_file <- file.path(modules_dir, sprintf("%s_domino_module_stats.tsv", list_name))
+  if (!file.exists(mod_file) || !file.exists(stats_file)) {
+    return(list(clusters_df = NULL, module_stats = NULL))
+  }
+  list(
+    clusters_df  = readr::read_tsv(mod_file, col_types = "ci"),
+    module_stats = readr::read_tsv(stats_file, col_types = "iicdd")
+  )
 }
 
 # ── Cluster-aware FR layout ───────────────────────────────────────────────────
@@ -384,77 +410,81 @@ cluster_layout <- function(net, clusters_df, seed = 42) {
 }
 
 # ── Cluster functional descriptions ──────────────────────────────────────────
-# Runs STRING enrichment on each cluster's nodes to derive a functional label
-# from the top significant GO / pathway term. When enable_ppi is TRUE, also runs
-# the per-cluster PPI density test (get_ppi_enrichment): walktrap finds communities
-# by random-walk edge density, and this test asks whether each community is
-# *statistically* denser than expected when the same number of genes is drawn from
-# the (custom) background. A low p confirms the cluster is a real interaction
-# module, not just a co-annotated GO bin. Returns ppi_edges / ppi_expected / ppi_pvalue.
-describe_clusters <- function(sdb, clusters_df, id2gene, top_terms = 3, enable_ppi = FALSE,
+# Runs STRING enrichment (untouched functional-enrichment path) on each
+# DOMINO module's genes to derive a descriptive label from the top significant
+# GO/pathway term. Significance itself is no longer computed here — it comes
+# straight from DOMINO's own module_stats (p_value/p_adj, joined in below),
+# replacing the old per-cluster get_ppi_enrichment() density test.
+describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, top_terms = 3,
                                min_cluster_genes = 3) {
   if (is.null(clusters_df) || nrow(clusters_df) == 0) return(tibble())
-  purrr::map_dfr(sort(unique(clusters_df$cluster)), function(cl_id) {
+  desc <- purrr::map_dfr(sort(unique(clusters_df$cluster)), function(cl_id) {
     cl_nodes <- clusters_df$node[clusters_df$cluster == cl_id]
     genes    <- id2gene[cl_nodes]
     gene_str <- paste(head(sort(genes[!is.na(genes)]), 8), collapse = ", ")
 
-    # Per-cluster PPI density test (independent of the enrichment label below).
-    # Requires >= 3 nodes as a hard statistical minimum for the test itself,
-    # separate from min_cluster_genes (which gates reporting/display).
-    ppi_edges <- NA_integer_; ppi_expected <- NA_real_; ppi_pvalue <- NA_real_
-    if (isTRUE(enable_ppi) && length(cl_nodes) >= 3 && length(cl_nodes) <= 500) {
-      ppi <- tryCatch(sdb$get_ppi_enrichment(cl_nodes), error = function(e) NULL)
-      if (!is.null(ppi)) {
-        # STRINGdb::get_ppi_enrichment returns a list with fields edges (observed),
-        # lambda (expected) and enrichment (the p-value) — NOT number_of_edges /
-        # expected_number_of_edges / p_value (those are STRING web-API names).
-        # Coerce values to numeric/integer to prevent type mismatches during bind_rows.
-        ppi_edges    <- if (!is.null(ppi$edges)) as.integer(ppi$edges) else NA_integer_
-        ppi_expected <- if (!is.null(ppi$lambda)) as.numeric(ppi$lambda) else NA_real_
-        ppi_pvalue   <- if (!is.null(ppi$enrichment)) as.numeric(ppi$enrichment) else NA_real_
-      }
-    }
-
     if (length(cl_nodes) < min_cluster_genes) {
       return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
-                    genes = gene_str, description = "Too small",
-                    ppi_edges = ppi_edges, ppi_expected = ppi_expected, ppi_pvalue = ppi_pvalue))
+                    genes = gene_str, description = "Too small"))
     }
-    message(sprintf("[describe_clusters] Querying STRING enrichment for cluster %d (%d genes)...", cl_id, length(cl_nodes)))
+    message(sprintf("[describe_clusters] Querying STRING enrichment for module %d (%d genes)...", cl_id, length(cl_nodes)))
     enrich <- if (!is.null(enrich_terms_db)) {
       get_enrichment_local(cl_nodes, bg_string_ids)
     } else {
       # Fallback to online API
-      message(sprintf("[describe_clusters] Querying STRING online enrichment for cluster %d (%d genes)...", cl_id, length(cl_nodes)))
+      message(sprintf("[describe_clusters] Querying STRING online enrichment for module %d (%d genes)...", cl_id, length(cl_nodes)))
       tryCatch(
         sdb$get_enrichment(cl_nodes),
         error = function(e) {
-          message(sprintf("[describe_clusters] Warning: STRING enrichment failed for cluster %d: %s", cl_id, e$message))
+          message(sprintf("[describe_clusters] Warning: STRING enrichment failed for module %d: %s", cl_id, e$message))
           NULL
         }
       )
     }
     if (is.null(enrich) || nrow(enrich) == 0 || "error" %in% names(enrich)) {
       return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
-                    genes = gene_str, description = "No enrichment",
-                    ppi_edges = ppi_edges, ppi_expected = ppi_expected, ppi_pvalue = ppi_pvalue))
+                    genes = gene_str, description = "No enrichment"))
     }
     pvcol   <- intersect(c("fdr", "p_value", "pvalue", "p.adjust"), names(enrich))[1]
     if (!is.na(pvcol)) enrich <- enrich[order(enrich[[pvcol]]), ]
     dcol    <- intersect(c("description", "term", "name"), names(enrich))[1]
     top     <- head(as.character(enrich[[dcol]]), top_terms)
     tibble(cluster = cl_id, n_genes = length(cl_nodes),
-           genes = gene_str, description = paste(top, collapse = " / "),
-           ppi_edges = ppi_edges, ppi_expected = ppi_expected, ppi_pvalue = ppi_pvalue)
+           genes = gene_str, description = paste(top, collapse = " / "))
   })
+
+  if (!is.null(module_stats) && nrow(module_stats) > 0) {
+    desc <- desc %>%
+      dplyr::left_join(
+        module_stats %>% dplyr::select(cluster, domino_p_value = p_value, domino_p_adj = p_adj),
+        by = "cluster"
+      )
+  }
+  desc
 }
 
 # ── Network plot (cluster-aware layout, no isolated nodes) ───────────────────
+# Edge width/opacity encode STRING's combined_score (already an edge attribute
+# on every graph loaded via STRINGdb$load() -- graph.data.frame() preserves it
+# automatically, it was just never read here), mirroring STRING's own network
+# images where thicker/more solid lines mean higher-confidence interactions.
 plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
                                   cluster_labels = NULL) {
   n_clust <- if (!is.null(clusters_df)) length(unique(clusters_df$cluster)) else 1L
   pal     <- .safe_pal(max(n_clust, 2L))
+
+  # Scale edge width/opacity by combined_score when present and varying;
+  # fall back to the previous fixed width/color otherwise (e.g. a subgraph
+  # with only one edge, or one built without that attribute).
+  .escore <- igraph::E(net)$combined_score
+  if (!is.null(.escore) && length(unique(stats::na.omit(.escore))) > 1) {
+    edge_widths <- scales::rescale(.escore, to = c(0.4, 3))
+    edge_alphas <- scales::rescale(.escore, to = c(0.25, 0.95))
+    edge_colors <- scales::alpha("#888888", edge_alphas)
+  } else {
+    edge_widths <- 0.7
+    edge_colors <- "#aaaaaa"
+  }
 
   if (!is.null(clusters_df) && nrow(clusters_df) > 0) {
     cl_map  <- setNames(clusters_df$cluster, clusters_df$node)
@@ -485,8 +515,8 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
     vertex.label.color = "black",
     vertex.label.font  = 2,
     edge.arrow.size    = 0,
-    edge.width         = 0.7,
-    edge.color         = "#aaaaaa"
+    edge.width         = edge_widths,
+    edge.color         = edge_colors
   )
   if (length(cl_ids) > 1) {
     leg_labels <- if (!is.null(cluster_labels)) {
@@ -563,9 +593,8 @@ cat("Species (NCBI taxon ID):", params$species, "\n")
 cat("Required interaction score:", params$required_score, "\n")
 cat("FDR threshold:", params$fdr_thr, "\n")
 cat("Top terms per list:", params$top_thr, "\n")
-cat("PPI enrichment test:", params$enable_ppi_enrichment, "\n")
-cat("Network score threshold:", params$network_score_thr, "\n")
-cat("Clustering algorithm: walktrap\n")
+cat("DOMINO network score threshold:", params$domino_network_score_thr, "\n")
+cat("Module finding: DOMINO (Shamir-Lab)\n")
 ```
 
 # Map background to STRING IDs
@@ -665,9 +694,9 @@ prepare_gene_attributes <- function(df) {
     out$pct_bottom10 <- FALSE; out$pct_bottom5 <- FALSE; out$pct_bottom1 <- FALSE
   }
   
-  # Significance gates
-  out$flag_gate_sig <- !is.na(.col("gene_caas_score_global_sig"))
-  out$flag_gate_fdr <- !is.na(.col("gene_caas_score_global_fdr"))
+  # Significance gates (gene has >=1 position passing position-level gate_sig/gate_fdr)
+  out$flag_gate_sig <- .istrue(.col("gene_caas_gate_sig"))
+  out$flag_gate_fdr <- .istrue(.col("gene_caas_gate_fdr"))
   
   # FADE
   out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
@@ -748,8 +777,7 @@ run_single_string <- function(gene_file, use_custom_background) {
       mapped_n       = length(gene_string_ids),
       status         = "skipped_too_few_mapped_genes",
       n_rows         = 0L,
-      results        = tibble(),
-      ppi_result     = NULL
+      results        = tibble()
     ))
   }
 
@@ -799,8 +827,7 @@ run_single_string <- function(gene_file, use_custom_background) {
       mapped_n   = length(gene_string_ids),
       status     = "no_results",
       n_rows     = 0L,
-      results    = tibble(),
-      ppi_result = NULL
+      results    = tibble()
     ))
   }
 
@@ -908,45 +935,13 @@ run_single_string <- function(gene_file, use_custom_background) {
     file.path(string_summary_dir, paste0(list_name, "_results.tsv"))
   )
 
-  # ── PPI density enrichment ─────────────────────────────────────────────────
-  ppi_res <- NULL
-  if (isTRUE(params$enable_ppi_enrichment)) {
-    if (length(gene_string_ids) > 500L) {
-      message(sprintf(
-        "PPI enrichment skipped for %s: gene set too large (%d > 500 STRING IDs).",
-        list_name, length(gene_string_ids)
-      ))
-    } else {
-      ppi_res <- tryCatch(
-        string_db$get_ppi_enrichment(gene_string_ids),
-        error = function(e) {
-          message(sprintf("PPI enrichment failed for %s: %s", list_name, e$message))
-          NULL
-        }
-      )
-    }
-
-    if (!is.null(ppi_res)) {
-      # Replace any NULL fields with NA before coercing to tibble; STRINGdb
-      # returns NULL for 'enrichment' and 'lambda' when no interactions are
-      # found, which makes as_tibble() abort with "column is NULL".
-      ppi_lst <- lapply(as.list(ppi_res), function(x) if (is.null(x)) NA else x)
-      ppi_df  <- as_tibble(ppi_lst) %>% mutate(gene_list = list_name)
-      readr::write_tsv(
-        ppi_df,
-        file.path(string_summary_dir, paste0(list_name, "_ppi.tsv"))
-      )
-    }
-  }
-
   list(
     list_name  = list_name,
     input_n    = length(genes_sym),
     mapped_n   = length(gene_string_ids),
     status     = "ok",
     n_rows     = nrow(enrich_df),
-    results    = enrich_df,
-    ppi_result = ppi_res
+    results    = enrich_df
   )
 }
 
@@ -976,6 +971,8 @@ readr::write_tsv(all_results, file.path(string_summary_dir, "string_all_results.
 kable(run_summary, caption = "STRING enrichment run summary") %>%
   kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
 ```
+
+## Top Enriched Terms by Gene List {.tabset .tabset-fade}
 
 ```{r summary_tables_terms, results='asis'}
 # Render top enriched terms with overlaps
@@ -1042,7 +1039,7 @@ if (nrow(all_results) > 0 && !is.null(gene_scores_df)) {
           )
       }
 
-      cat(sprintf("\n\n#### Top Enriched STRING Terms for %s\n\n", .gl))
+      cat(sprintf("\n\n### %s\n\n", .gl))
       print(
         knitr::kable(display_df, digits = 4, caption = sprintf("Top Enriched STRING Terms and Gene Overlaps for %s", .gl)) %>%
           kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
@@ -1053,312 +1050,266 @@ if (nrow(all_results) > 0 && !is.null(gene_scores_df)) {
 }
 ```
 
-```{r ppi_summary, eval=isTRUE(params$enable_ppi_enrichment)}
-ppi_rows <- purrr::keep(string_runs, ~!is.null(.x$ppi_result))
-if (length(ppi_rows) > 0) {
-  ppi_summary <- purrr::map_dfr(ppi_rows, function(x) {
-    pr <- as.list(x$ppi_result)
-    # get_ppi_enrichment returns only edges (observed), lambda (expected) and
-    # enrichment (p-value); the node/degree/clustering fields are not provided.
-    tibble(
-      gene_list                = x$list_name,
-      number_of_edges          = pr$edges      %||% NA_integer_,
-      expected_number_of_edges = pr$lambda     %||% NA_real_,
-      p_value                  = pr$enrichment %||% NA_real_
-    )
-  })
+# DOMINO Active Modules {.tabset}
 
-  readr::write_tsv(ppi_summary, file.path(string_summary_dir, "string_ppi_summary.tsv"))
+Network score threshold: **`r params$domino_network_score_thr`** (= `r params$domino_network_score_thr / 1000` on the 0–1 STRING scale).
+Only nodes with at least one edge at this confidence level (both endpoints in `cleaned_background`) are in DOMINO's input network.
+Module finding + significance: **DOMINO** (Shamir-Lab) — Bonferroni-corrected hypergeometric p-value per module, computed by DOMINO itself
+(not a STRING PPI-density test, which cannot honour a custom background above 2000 proteins).
 
-  kable(ppi_summary, caption = "STRING PPI enrichment (density test) summary") %>%
-    kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
-}
-```
-
-# STRING Protein Networks {.tabset}
-
-Network score threshold: **`r params$network_score_thr`** (= `r params$network_score_thr / 1000` on the 0–1 STRING scale).
-Only nodes with at least one edge at this confidence level are shown.
-Clustering algorithm: **walktrap** (random-walk community detection; closest available method to STRING's own MCL).
-
-```{r string_networks, fig.width=10, fig.height=8, results='asis'}
+```{r domino_networks, fig.width=10, fig.height=8, results='asis'}
 suppressPackageStartupMessages(library(igraph))
 
-# Map all gene symbols to STRING IDs up-front so we can reverse-annotate network nodes.
-build_id2gene <- function(genes_sym) {
-  if (length(genes_sym) == 0) return(character(0))
-  df_in  <- data.frame(gene = genes_sym, stringsAsFactors = FALSE)
-  mapped <- tryCatch(
-    string_db$map(df_in, "gene", removeUnmappedRows = TRUE, quiet = TRUE),
-    error = function(e) NULL
-  )
-  if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
-  setNames(mapped$gene, mapped$STRING_id)
-}
+# Whole network is built once (nodes are already gene symbols -- no STRING ID
+# round-trip needed here, unlike the functional-enrichment path above).
+.domino_sif <- readr::read_tsv(
+  params$domino_network_sif,
+  col_names = c("from", "interaction", "to"),
+  col_types = "ccc"
+)
+.net_full <- igraph::graph_from_data_frame(.domino_sif[, c("from", "to")], directed = FALSE)
 
 network_summary_rows <- list()
 
 for (.gf in gene_list_files) {
-  .list_name   <- tools::file_path_sans_ext(basename(.gf))
-  .genes_sym   <- read_gene_vector(.gf)
-  .string_ids  <- safe_string_map_ids(.genes_sym)
+  .list_name <- tools::file_path_sans_ext(basename(.gf))
+  .genes_sym <- read_gene_vector(.gf)
+  .mapped    <- intersect(.genes_sym, igraph::V(.net_full)$name)
 
-  if (length(.string_ids) < MIN_MAPPED) next
+  if (length(.mapped) < MIN_MAPPED) next
 
-  .id2gene <- build_id2gene(.genes_sym)
-  cat(sprintf("\n\n## %s {.tabset}\n\n", .list_name))
+  cat(sprintf("\n\n## %s\n\n", .list_name))
 
-  for (.net_type in c("full", "physical")) {
-    .sdb <- if (.net_type == "full") string_db_network else string_db_physical
-    if (is.null(.sdb)) {
-      cat(sprintf("> Physical STRINGdb unavailable — skipping physical network for %s.\n\n", .list_name))
-      next
-    }
+  .net <- igraph::induced_subgraph(.net_full, igraph::V(.net_full)[igraph::V(.net_full)$name %in% .genes_sym])
+  if (igraph::vcount(.net) == 0) {
+    cat(sprintf("> No network retrieved for %s.\n\n", .list_name))
+    next
+  }
 
-    .net <- tryCatch(
-      .sdb$get_subnetwork(.string_ids),
-      error = function(e) {
-        message(sprintf("[%s][%s] get_subnetwork failed: %s", .list_name, .net_type, e$message))
-        NULL
-      }
+  # Keep only connected nodes (nodes with >=1 edge at the score threshold)
+  .connected <- igraph::V(.net)[igraph::degree(.net) > 0]
+  .net_conn  <- igraph::induced_subgraph(.net, .connected)
+  .n_nodes   <- igraph::vcount(.net_conn)
+  .n_edges   <- igraph::ecount(.net_conn)
+
+  cat(sprintf("Connected nodes: **%d** | Edges: **%d** | Input genes in network: **%d**\n\n",
+              .n_nodes, .n_edges, length(.mapped)))
+
+  if (.n_nodes < 3) {
+    cat("> Too few connected nodes — network plot skipped.\n\n")
+    network_summary_rows[[length(network_summary_rows) + 1]] <- tibble(
+      gene_list = .list_name, n_input = length(.mapped), n_connected = .n_nodes,
+      n_edges = .n_edges, n_modules = NA_integer_
     )
-    if (is.null(.net) || igraph::vcount(.net) == 0) {
-      cat(sprintf("> No %s network retrieved for %s.\n\n", .net_type, .list_name))
-      next
+    next
+  }
+
+  .domino <- load_domino_modules(.list_name, params$domino_modules_dir)
+  .net_vnames  <- igraph::V(.net_conn)$name
+  .clusters_df <- if (!is.null(.domino$clusters_df)) {
+    .domino$clusters_df %>% dplyr::filter(node %in% .net_vnames)
+  } else NULL
+  .module_stats <- .domino$module_stats
+
+  # Reorder modules by size (number of genes) descending, capped to the 20
+  # largest -- keeps the network plot legend/description table readable (same
+  # rationale as the old walktrap cap: a 500-5000+ gene list can otherwise
+  # produce many modules that were never going to be individually
+  # interpretable). Renumbering is applied identically to module_stats so the
+  # p_value/p_adj join below stays aligned.
+  .n_mod_total <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
+  if (!is.null(.clusters_df) && nrow(.clusters_df) > 0) {
+    .cl_counts <- .clusters_df %>%
+      dplyr::group_by(cluster) %>%
+      dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
+      dplyr::arrange(desc(n), cluster)
+    .cl_map <- setNames(seq_len(nrow(.cl_counts)), .cl_counts$cluster)
+    .clusters_df$cluster <- .cl_map[as.character(.clusters_df$cluster)]
+    if (!is.null(.module_stats)) {
+      .module_stats <- .module_stats %>%
+        dplyr::filter(cluster %in% as.integer(names(.cl_map))) %>%
+        dplyr::mutate(cluster = .cl_map[as.character(cluster)])
+    }
+    .clusters_df <- .clusters_df %>% dplyr::filter(cluster <= 20)
+  }
+
+  .n_mod <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
+
+  if (!is.null(.clusters_df)) {
+    # DOMINO's nodes ARE gene symbols already, so node == gene here.
+    .clusters_df$gene <- .clusters_df$node
+
+    .clusters_out <- .clusters_df
+    attr_df <- NULL
+    if (!is.null(gene_scores_df)) {
+      attr_df <- prepare_gene_attributes(gene_scores_df)
+      if (!is.null(attr_df)) {
+        .clusters_out <- .clusters_out %>%
+          dplyr::left_join(attr_df, by = c("gene" = "gene"))
+      }
     }
 
-    # Keep only connected nodes (nodes with ≥1 edge at the score threshold)
-    .connected <- igraph::V(.net)[igraph::degree(.net) > 0]
-    .net_conn  <- igraph::induced_subgraph(.net, .connected)
-    .n_nodes   <- igraph::vcount(.net_conn)
-    .n_edges   <- igraph::ecount(.net_conn)
+    .clust_file <- file.path(string_networks_dir, sprintf("%s_domino_clusters.tsv", .list_name))
+    readr::write_tsv(.clusters_out %>% dplyr::arrange(cluster, gene), .clust_file)
+    cat(sprintf("Modules found: **%d** of **%d** total (showing the 20 largest; written to `%s`)\n\n",
+                .n_mod, .n_mod_total, basename(.clust_file)))
 
-    cat(sprintf("### %s\n\n", tools::toTitleCase(.net_type)))
-    cat(sprintf("Connected nodes: **%d** | Edges: **%d** | Input genes mapped: **%d**\n\n",
-                .n_nodes, .n_edges, length(.string_ids)))
+    .clust_desc <- describe_clusters(
+      string_db, .clusters_df, setNames(.clusters_df$node, .clusters_df$node),
+      module_stats = .module_stats, min_cluster_genes = .min_cluster_genes
+    )
 
-    if (.n_nodes < 3) {
-      cat("> Too few connected nodes — network plot skipped.\n\n")
-      network_summary_rows[[length(network_summary_rows) + 1]] <- tibble(
-        gene_list = .list_name, net_type = .net_type,
-        n_input = length(.string_ids), n_connected = .n_nodes,
-        n_edges = .n_edges, n_clusters = NA_integer_
-      )
-      next
+    if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
+      .dir_label <- if (grepl("top", .list_name)) "top" else if (grepl("bottom", .list_name)) "bottom" else "global"
+
+      .cl_pcts <- purrr::map_dfr(sort(unique(.clusters_df$cluster)), function(cl_id) {
+        cl_genes <- .clusters_df$gene[.clusters_df$cluster == cl_id]
+        compute_term_overlap_percentages(paste(cl_genes, collapse = ","), attr_df, .dir_label) %>%
+          mutate(cluster = cl_id)
+      })
+
+      .clust_desc <- .clust_desc %>% dplyr::left_join(.cl_pcts, by = "cluster")
     }
 
-    # Walktrap clustering via STRINGdb (closest to STRING's own MCL)
-    # Run on all mapped IDs so the algorithm sees the full graph topology,
-    # then restrict results to nodes that survive the connectivity filter.
-    .clusters_raw <- run_string_clustering(.sdb, .string_ids)
-    .net_vnames   <- igraph::V(.net_conn)$name
-    .clusters_df  <- if (!is.null(.clusters_raw)) {
-      .clusters_raw %>% dplyr::filter(node %in% .net_vnames)
-    } else NULL
+    # Persist module-level descriptions (incl. DOMINO's own p-value) as a
+    # durable artifact downstream consumers can read.
+    .clust_desc_file <- file.path(string_networks_dir, sprintf("%s_domino_module_descriptions.tsv", .list_name))
+    readr::write_tsv(.clust_desc %>% dplyr::arrange(desc(n_genes)), .clust_desc_file)
 
-    # Reorder clusters by size (number of genes) descending
-    if (!is.null(.clusters_df) && nrow(.clusters_df) > 0) {
-      .cl_counts <- .clusters_df %>%
-        dplyr::group_by(cluster) %>%
-        dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
-        dplyr::arrange(desc(n), cluster)
-      .cl_map <- setNames(seq_len(nrow(.cl_counts)), .cl_counts$cluster)
-      .clusters_df$cluster <- .cl_map[as.character(.clusters_df$cluster)]
-    }
+    .clust_desc_display <- .clust_desc %>%
+      dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
+      dplyr::arrange(desc(n_genes))
 
-    .n_clust <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
-
-    # Annotate clusters with gene symbols and write TSV
-    if (!is.null(.clusters_df)) {
-      .clusters_df$gene <- .id2gene[.clusters_df$node]
-      .clusters_df$gene[is.na(.clusters_df$gene)] <- .clusters_df$node[is.na(.clusters_df$gene)]
-      
-      # Append individual gene-level flags to the exported cluster TSVs
-      .clusters_out <- .clusters_df
+    if (nrow(.clust_desc_display) > 0) {
       if (!is.null(gene_scores_df)) {
-        attr_df <- prepare_gene_attributes(gene_scores_df)
-        if (!is.null(attr_df)) {
-          .clusters_out <- .clusters_out %>%
-            dplyr::left_join(attr_df, by = c("gene" = "gene"))
-        }
-      }
-      
-      .clust_file <- file.path(
-        string_networks_dir,
-        sprintf("%s_%s_clusters.tsv", .list_name, .net_type)
-      )
-      readr::write_tsv(.clusters_out %>% dplyr::arrange(cluster, gene), .clust_file)
-      cat(sprintf("Clusters found: **%d** (written to `%s`)\n\n", .n_clust, basename(.clust_file)))
-
-      # Cluster descriptions from top enriched term per cluster (+ per-cluster PPI
-      # density test when enabled). Uses string_db (required_score) so the PPI null
-      # honours the custom background set via set_background().
-      .clust_desc <- describe_clusters(
-        string_db, .clusters_df, .id2gene,
-        enable_ppi = isTRUE(params$enable_ppi_enrichment),
-        min_cluster_genes = .min_cluster_genes
-      )
-      
-      # Calculate percentages for each cluster if gene_scores_df is available
-      if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
         .dir_label <- if (grepl("top", .list_name)) "top" else if (grepl("bottom", .list_name)) "bottom" else "global"
-        
-        .cl_pcts <- purrr::map_dfr(sort(unique(.clusters_df$cluster)), function(cl_id) {
-          cl_genes <- .clusters_df$gene[.clusters_df$cluster == cl_id]
-          compute_term_overlap_percentages(paste(cl_genes, collapse = ","), attr_df, .dir_label) %>%
-            mutate(cluster = cl_id)
-        })
-        
-        .clust_desc <- .clust_desc %>% dplyr::left_join(.cl_pcts, by = "cluster")
-      }
-      
-      # Persist cluster-level descriptions (incl. per-cluster PPI density) so the
-      # table in the report has a durable artifact downstream consumers can read.
-      .clust_desc_file <- file.path(
-        string_networks_dir,
-        sprintf("%s_%s_cluster_descriptions.tsv", .list_name, .net_type)
-      )
-      readr::write_tsv(.clust_desc %>% dplyr::arrange(desc(n_genes)), .clust_desc_file)
 
-      .clust_desc_display <- .clust_desc %>%
-        dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
-        dplyr::arrange(desc(n_genes))
-        
-      if (nrow(.clust_desc_display) > 0) {
-        if (!is.null(gene_scores_df)) {
-          .dir_label <- if (grepl("top", .list_name)) "top" else if (grepl("bottom", .list_name)) "bottom" else "global"
-          
-          if (.dir_label == "top") {
-            display_df <- .clust_desc_display %>%
-              dplyr::select(
-                Cluster = cluster,
-                Genes = n_genes,
-                `Representative genes` = genes,
-                `Top enriched terms` = description,
-                `gate_sig (%)` = gate_sig,
-                `gate_fdr (%)` = gate_fdr,
-                `top10% (%)` = top10,
-                `top5% (%)` = top5,
-                `top1% (%)` = top1,
-                `fade_top (%)` = fade_top,
-                `rer_acc (%)` = rer_acc,
-                `rer_decc (%)` = rer_decc,
-                `accum (%)` = accum
-              )
-          } else if (.dir_label == "bottom") {
-            display_df <- .clust_desc_display %>%
-              dplyr::select(
-                Cluster = cluster,
-                Genes = n_genes,
-                `Representative genes` = genes,
-                `Top enriched terms` = description,
-                `gate_sig (%)` = gate_sig,
-                `gate_fdr (%)` = gate_fdr,
-                `bot10% (%)` = bot10,
-                `bot5% (%)` = bot5,
-                `bot1% (%)` = bot1,
-                `fade_bottom (%)` = fade_bottom,
-                `rer_acc (%)` = rer_acc,
-                `rer_decc (%)` = rer_decc,
-                `accum (%)` = accum
-              )
-          } else {
-            display_df <- .clust_desc_display %>%
-              dplyr::select(
-                Cluster = cluster,
-                Genes = n_genes,
-                `Representative genes` = genes,
-                `Top enriched terms` = description,
-                `gate_sig (%)` = gate_sig,
-                `gate_fdr (%)` = gate_fdr,
-                `top10% (%)` = top10,
-                `top5% (%)` = top5,
-                `top1% (%)` = top1,
-                `bot10% (%)` = bot10,
-                `bot5% (%)` = bot5,
-                `bot1% (%)` = bot1,
-                `fade (%)` = fade,
-                `rer_acc (%)` = rer_acc,
-                `rer_decc (%)` = rer_decc,
-                `accum (%)` = accum
-              )
-          }
+        if (.dir_label == "top") {
+          display_df <- .clust_desc_display %>%
+            dplyr::select(
+              Module = cluster,
+              Genes = n_genes,
+              `Representative genes` = genes,
+              `Top enriched terms` = description,
+              `gate_sig (%)` = gate_sig,
+              `gate_fdr (%)` = gate_fdr,
+              `top10% (%)` = top10,
+              `top5% (%)` = top5,
+              `top1% (%)` = top1,
+              `fade_top (%)` = fade_top,
+              `rer_acc (%)` = rer_acc,
+              `rer_decc (%)` = rer_decc,
+              `accum (%)` = accum
+            )
+        } else if (.dir_label == "bottom") {
+          display_df <- .clust_desc_display %>%
+            dplyr::select(
+              Module = cluster,
+              Genes = n_genes,
+              `Representative genes` = genes,
+              `Top enriched terms` = description,
+              `gate_sig (%)` = gate_sig,
+              `gate_fdr (%)` = gate_fdr,
+              `bot10% (%)` = bot10,
+              `bot5% (%)` = bot5,
+              `bot1% (%)` = bot1,
+              `fade_bottom (%)` = fade_bottom,
+              `rer_acc (%)` = rer_acc,
+              `rer_decc (%)` = rer_decc,
+              `accum (%)` = accum
+            )
         } else {
           display_df <- .clust_desc_display %>%
             dplyr::select(
-              Cluster = cluster,
+              Module = cluster,
               Genes = n_genes,
               `Representative genes` = genes,
-              `Top enriched terms` = description
+              `Top enriched terms` = description,
+              `gate_sig (%)` = gate_sig,
+              `gate_fdr (%)` = gate_fdr,
+              `top10% (%)` = top10,
+              `top5% (%)` = top5,
+              `top1% (%)` = top1,
+              `bot10% (%)` = bot10,
+              `bot5% (%)` = bot5,
+              `bot1% (%)` = bot1,
+              `fade (%)` = fade,
+              `rer_acc (%)` = rer_acc,
+              `rer_decc (%)` = rer_decc,
+              `accum (%)` = accum
             )
         }
-        
-        # Append per-cluster PPI density columns (row-aligned: display_df derives
-        # from .clust_desc_display via select(), preserving row order). Only when
-        # the PPI test ran and produced at least one non-NA p-value.
-        if (all(c("ppi_edges", "ppi_expected", "ppi_pvalue") %in% names(.clust_desc_display)) &&
-            any(!is.na(.clust_desc_display$ppi_pvalue))) {
-          display_df <- dplyr::bind_cols(
-            display_df,
-            .clust_desc_display %>% dplyr::transmute(
-              `PPI edges` = ppi_edges,
-              `PPI exp.`  = round(ppi_expected, 1),
-              `PPI p`     = signif(ppi_pvalue, 3)
-            )
+      } else {
+        display_df <- .clust_desc_display %>%
+          dplyr::select(
+            Module = cluster,
+            Genes = n_genes,
+            `Representative genes` = genes,
+            `Top enriched terms` = description
           )
-        }
-
-        print(knitr::kable(
-          display_df,
-          caption = sprintf("Cluster functional descriptions — %s %s", .list_name, .net_type)
-        ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed"), full_width = TRUE))
       }
 
-      # Named vector for legend labels: cluster id → short description
-      # Exclude uninformative labels so they don't clutter the legend
-      .cl_labels <- setNames(.clust_desc$description, as.character(.clust_desc$cluster))
-      .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment")]
+      # Append DOMINO's own per-module significance (row-aligned: display_df
+      # derives from .clust_desc_display via select(), preserving row order).
+      if (all(c("domino_p_value", "domino_p_adj") %in% names(.clust_desc_display))) {
+        display_df <- dplyr::bind_cols(
+          display_df,
+          .clust_desc_display %>% dplyr::transmute(
+            `DOMINO p`     = signif(domino_p_value, 3),
+            `DOMINO p.adj` = signif(domino_p_adj, 3)
+          )
+        )
+      }
 
-      # Drop clusters below min_cluster_genes from the network visualisation too
-      # (their nodes fall back to the "ungrouped" bucket in cluster_layout()).
-      .clusters_df_viz <- .clusters_df %>%
-        dplyr::filter(cluster %in% .clust_desc$cluster[.clust_desc$n_genes >= .min_cluster_genes])
-    } else {
-      .cl_labels <- NULL
-      .clusters_df_viz <- .clusters_df
+      print(knitr::kable(
+        display_df,
+        caption = sprintf("Module functional descriptions — %s", .list_name)
+      ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed"), full_width = TRUE))
     }
 
-    # Network plot saved to PNG and rendered inline
-    .png_path <- file.path(
-      string_networks_dir,
-      sprintf("%s_%s_network.png", .list_name, .net_type)
-    )
-    png(.png_path, width = 1800, height = 1500, res = 160)
-    plot_cluster_network(
-      .net_conn, .clusters_df_viz,
-      title          = sprintf("%s — %s network (score ≥ %s)", .list_name, .net_type, params$network_score_thr),
-      id_to_gene     = .id2gene,
-      cluster_labels = .cl_labels
-    )
-    dev.off()
-    # Emit image via cat() so it lands in the text stream at the correct tab position.
-    # Calling plot_cluster_network() inline here causes knitr to flush the plot
-    # through the plot hook *after* the current text buffer, shifting it one tab forward.
-    cat(sprintf("![](%s)\n\n", .png_path))
+    .cl_labels <- setNames(.clust_desc$description, as.character(.clust_desc$cluster))
+    .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment")]
 
-    network_summary_rows[[length(network_summary_rows) + 1]] <- tibble(
-      gene_list  = .list_name, net_type = .net_type,
-      n_input    = length(.string_ids), n_connected = .n_nodes,
-      n_edges    = .n_edges, n_clusters = .n_clust
-    )
+    .clusters_df_viz <- .clusters_df %>%
+      dplyr::filter(cluster %in% .clust_desc$cluster[.clust_desc$n_genes >= .min_cluster_genes])
+  } else {
+    .cl_labels <- NULL
+    .clusters_df_viz <- .clusters_df
   }
+
+  # Restrict the PLOTTED graph to nodes in the shown (top-20,
+  # min_cluster_genes-passing) modules -- not just their colouring.
+  .net_plot <- if (!is.null(.clusters_df_viz) && nrow(.clusters_df_viz) > 0) {
+    igraph::induced_subgraph(
+      .net_conn,
+      igraph::V(.net_conn)[igraph::V(.net_conn)$name %in% .clusters_df_viz$node]
+    )
+  } else {
+    .net_conn
+  }
+
+  .png_path <- file.path(string_networks_dir, sprintf("%s_domino_network.png", .list_name))
+  png(.png_path, width = 1800, height = 1500, res = 160)
+  plot_cluster_network(
+    .net_plot, .clusters_df_viz,
+    title          = sprintf("%s — DOMINO modules (score >= %s, top 20)", .list_name, params$domino_network_score_thr),
+    cluster_labels = .cl_labels
+  )
+  dev.off()
+  # Emit image via cat() so it lands in the text stream at the correct tab position.
+  cat(sprintf("![](%s)\n\n", .png_path))
+
+  network_summary_rows[[length(network_summary_rows) + 1]] <- tibble(
+    gene_list = .list_name, n_input = length(.mapped), n_connected = .n_nodes,
+    n_edges = .n_edges, n_modules = .n_mod
+  )
 }
 
 if (length(network_summary_rows) > 0) {
   .net_summary <- dplyr::bind_rows(network_summary_rows)
   readr::write_tsv(.net_summary, file.path(string_networks_dir, "network_summary.tsv"))
   cat("\n\n## Network summary\n\n")
-  print(knitr::kable(.net_summary, caption = "STRING network summary") %>%
+  print(knitr::kable(.net_summary, caption = "DOMINO network summary") %>%
           kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
 }
 ```
@@ -1385,20 +1336,34 @@ if (nrow(all_results) > 0) {
   desc_col <- desc_col[desc_col %in% names(all_results)][1]
   if (is.na(desc_col) || length(desc_col) == 0) desc_col <- "description"
 
+  # Gene-count column for bubble sizing below (STRING's own enrichmentfigure
+  # sizes bubbles by protein count). If entirely absent, falls back to a
+  # constant (1) rather than NA -- geom_point() silently DROPS every row
+  # whose `size` aesthetic is NA (confirmed empirically), so an all-NA column
+  # would render an empty plot; a constant instead degrades gracefully to
+  # same-size bubbles, same as the old bar chart when this info wasn't used.
+  ngenes_col <- c("number_of_genes", "n_genes", "count")
+  ngenes_col <- ngenes_col[ngenes_col %in% names(all_results)][1]
+
   std_results <- all_results %>%
     mutate(
       FDR_std       = suppressWarnings(as.numeric(.data[[pval_col]])),
       FDR_std       = pmax(FDR_std, .Machine$double.xmin, na.rm = TRUE),
       term_std      = as.character(.data[[desc_col]]),
-      neglog10FDR   = -log10(FDR_std)
+      neglog10FDR   = -log10(FDR_std),
+      n_genes_std   = if (!is.na(ngenes_col)) suppressWarnings(as.numeric(.data[[ngenes_col]])) else 1
     ) %>%
     filter(!is.na(FDR_std), !is.na(term_std), term_std != "")
 
   std_results <- std_results %>%
     mutate(scenario = {
-      # Match _top_ or _bottom_ as a delimited token anywhere in the filename stem.
+      # Match a leading top/bottom token (e.g. "top_all", "top25", "bottom1").
+      # Previously required a LEADING underscore ("_(top|bottom)(?:_|$)"), which
+      # never matched these filenames (no underscore precedes "top"/"bottom" at
+      # the start of the string) -- confirmed empirically, every list silently
+      # fell to "global" and the Top/Bottom tab split never actually happened.
       # Files without either token (i.e. global lists) fall back to "global".
-      s <- stringr::str_match(gene_list, "_(top|bottom)(?:_|$)")[, 2]
+      s <- stringr::str_match(gene_list, "^(top|bottom)")[, 2]
       dplyr::if_else(is.na(s), "global", s)
     })
   std_results_all    <- std_results
@@ -1413,9 +1378,12 @@ if (nrow(all_results) > 0) {
       .gl_hdr <- "##"
     }
 
-  # ── Per-list enrichment barplots (typical STRINGdb style) ──────────────
-  # One plot per gene list; terms coloured by STRING functional category.
-  # Mirrors the canonical barplot shown in the STRINGdb Bioconductor vignette.
+  # ── Per-list enrichment bubble charts (STRING enrichmentfigure-style) ──
+  # One plot per gene list; x=-log10(FDR), y=term, bubble size=gene count
+  # (new dimension, mirrors STRING's own enrichmentfigure), fill=category
+  # (kept, unlike STRING's figure which uses color for FDR -- FDR is already
+  # on the x-axis here, so category color stays more informative than a
+  # redundant color-for-FDR encoding).
   for (.gl in unique(std_results$gene_list)) {
     .gl_dat <- std_results %>%
       dplyr::filter(gene_list == .gl) %>%
@@ -1430,17 +1398,17 @@ if (nrow(all_results) > 0) {
     .n_cats <- dplyr::n_distinct(.gl_dat$category)
     .p_bar <- ggplot(
       .gl_dat,
-      aes(x = reorder(term_short, neglog10FDR), y = neglog10FDR, fill = category)
+      aes(x = neglog10FDR, y = reorder(term_short, neglog10FDR), size = n_genes_std, fill = category)
     ) +
-      geom_col() +
-      coord_flip() +
+      geom_point(shape = 21, color = "grey30", alpha = 0.85) +
+      scale_size_continuous(range = c(2, 10), name = "Genes") +
       safe_fill(.n_cats) +
       theme_minimal(base_size = 11) +
       labs(
         title    = .gl,
         subtitle = sprintf("Top %d enriched STRING terms (FDR ≤ %s)", nrow(.gl_dat), params$fdr_thr),
-        x        = NULL,
-        y        = expression(-log[10](FDR)),
+        x        = expression(-log[10](FDR)),
+        y        = NULL,
         fill     = "Category"
       ) +
       theme(plot.title = element_text(face = "bold"), axis.text.y = element_text(size = 9))
@@ -1459,8 +1427,20 @@ if (nrow(all_results) > 0) {
 }
 ```
 
-## Session Info
+---
 
-```{r session_info}
+## Summary
+
+This report summarizes the results of the **Enrichment** analysis.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
 sessionInfo()
 ```
+</details>
+
+*Generated by PhyloPhere — Enrichment Module*
+*Date of generation: `r Sys.Date()`*

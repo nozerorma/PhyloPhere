@@ -1,6 +1,6 @@
 ---
 title: "FADE — Directional Selection Analysis"
-subtitle: "`r paste0(params$traitname, ' | ', toupper(params$direction), ' direction')`"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
 output:
@@ -24,6 +24,37 @@ params:
   output_dir:     "."
   fg_list_file:   NULL
 ---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -146,17 +177,30 @@ if (!has_fg && length(json_files) > 0) {
 ```
 
 ```{r parse-fade, results='asis', message=TRUE}
-# ── Parse each JSON: extract per-site × amino-acid Bayes Factors ─────────────
+# ── Parse each JSON straight into a per-gene summary row ─────────────────────
 #
 # Expected FADE JSON structure:
 #   $MLE$headers  : list of [col_name, description] pairs (same for all sites)
 #   $MLE$content  : named list, each element = one site (0-indexed)
 #                   each site element = named list by amino acid (20 letters)
 #                   each AA element   = numeric vector matching headers
+#
+# NOTE: this used to materialise one row per (gene, site, target_aa) into a
+# single fade_df — tens of millions of rows across a genome-wide 'all' mode
+# run (16k genes x hundreds of sites x 20 AAs), which is the only thing that
+# actually needs that much memory here (the raw per-file JSON parse itself is
+# cheap and transient). Nothing downstream of this report consumes site-level
+# detail — scoring_compute.R takes the per-gene fade_summary_{direction}.tsv
+# only, and the site-level fade_site_bf_{direction}.tsv this report used to
+# also emit isn't wired into any downstream consumer. So each worker now
+# reduces its file straight down to one gene-level summary row (plus a small
+# 20-entry per-AA significant-site tally for the AA-frequency plot below),
+# and the significant site x AA detail table is not retained at all.
 
 AA_LETTERS <- strsplit("ACDEFGHIKLMNPQRSTVWY", "")[[1]]
+bf_thr <- params$bf_threshold
 
-parse_fade_json <- function(path) {
+parse_fade_json <- function(path, bf_thr) {
   gene_id <- sub("\\.(top|bottom)\\.FADE\\.json$", "", basename(path))
 
   tryCatch({
@@ -176,34 +220,61 @@ parse_fade_json <- function(path) {
 
     content <- js[["MLE"]][["content"]]
 
-    # Vectorized: one data.frame per AA (not one per site×AA), using vapply
-    # for BF extraction — avoids millions of single-row data.frame allocations.
-    aa_frames <- lapply(AA_LETTERS, function(aa) {
-      aa_data <- content[[aa]]
-      if (is.null(aa_data)) return(NULL)
+    # content[[aa]] is keyed by partition (in practice always one key, "0");
+    # the actual per-gene site index is the POSITION within that partition's
+    # list, not the key name — mirrors the original per-row expansion's
+    # `site = seq_along(all_site_rows)`, just without materialising the rows.
+    best_bf   <- -Inf
+    best_site <- NA_integer_
+    best_aa   <- NA_character_
+    n_sig     <- 0L
+    n_sites_tested <- 0L
+    sig_aa_counts <- setNames(integer(length(AA_LETTERS)), AA_LETTERS)
 
-      site_frames <- lapply(names(aa_data), function(site_key) {
+    for (aa in AA_LETTERS) {
+      aa_data <- content[[aa]]
+      if (is.null(aa_data) || length(aa_data) == 0) next
+      for (site_key in names(aa_data)) {
         all_site_rows <- aa_data[[site_key]]
-        if (is.null(all_site_rows) || length(all_site_rows) == 0) return(NULL)
+        if (is.null(all_site_rows) || length(all_site_rows) == 0) next
+        n_sites_tested <- max(n_sites_tested, length(all_site_rows))
 
         bf_vals <- vapply(all_site_rows, function(rep_data) {
           rep_num <- as.numeric(unlist(rep_data))
           if (length(rep_num) >= bf_idx) rep_num[[bf_idx]] else NA_real_
         }, numeric(1))
 
-        data.frame(
-          gene         = gene_id,
-          site         = seq_along(all_site_rows),
-          target_aa    = aa,
-          bayes_factor = bf_vals,
-          stringsAsFactors = FALSE
-        )
-      })
-      bind_rows(site_frames)
-    })
+        sig_idx <- which(!is.na(bf_vals) & bf_vals >= bf_thr)
+        if (length(sig_idx) > 0) {
+          n_sig <- n_sig + length(sig_idx)
+          sig_aa_counts[aa] <- sig_aa_counts[aa] + length(sig_idx)
+        }
 
-    result <- bind_rows(aa_frames)
-    if (nrow(result) == 0) NULL else result
+        finite_idx <- which(is.finite(bf_vals))
+        if (length(finite_idx) > 0) {
+          local_best <- finite_idx[which.max(bf_vals[finite_idx])]
+          if (bf_vals[local_best] > best_bf) {
+            best_bf   <- bf_vals[local_best]
+            best_site <- local_best
+            best_aa   <- aa
+          }
+        }
+      }
+    }
+
+    if (!is.finite(best_bf)) return(NULL)
+
+    out <- data.frame(
+      gene           = gene_id,
+      n_sites_tested = n_sites_tested,
+      n_sig_site_aa  = n_sig,
+      max_bf         = best_bf,
+      top_target_aa  = if (best_bf >= bf_thr) best_aa   else NA_character_,
+      top_site       = if (best_bf >= bf_thr) best_site else NA_integer_,
+      stringsAsFactors = FALSE
+    )
+    for (aa in AA_LETTERS) out[[paste0("sigcount_", aa)]] <- sig_aa_counts[[aa]]
+    out
 
   }, error = function(e) {
     warning("Failed to parse ", gene_id, ": ", conditionMessage(e))
@@ -217,9 +288,9 @@ n_report_cores <- max(1L, as.integer(Sys.getenv("FADE_REPORT_CORES", unset = det
 message(sprintf("Parsing %d FADE JSON files using %d core(s)...", length(json_files), n_report_cores))
 
 all_results <- if (.Platform$OS.type == "unix" && n_report_cores > 1L) {
-  mclapply(json_files, parse_fade_json, mc.cores = n_report_cores)
+  mclapply(json_files, parse_fade_json, bf_thr = bf_thr, mc.cores = n_report_cores)
 } else {
-  lapply(json_files, parse_fade_json)
+  lapply(json_files, parse_fade_json, bf_thr = bf_thr)
 }
 all_results <- Filter(Negate(is.null), all_results)
 
@@ -229,11 +300,12 @@ if (length(all_results) == 0) {
   knitr::knit_exit()
 }
 
-fade_df <- bind_rows(all_results)
+gene_summary <- bind_rows(all_results) %>%
+  arrange(desc(n_sig_site_aa), desc(max_bf))
+
 cat(sprintf(
-  "✓ Parsed %d genes × %d site×AA combinations.\n",
-  n_distinct(fade_df$gene),
-  nrow(fade_df)
+  "✓ Parsed %d genes.\n",
+  nrow(gene_summary)
 ))
 ```
 
@@ -242,30 +314,8 @@ cat(sprintf(
 ## Gene-level Summary
 
 ```{r gene-summary}
-# ── For each gene: how many sites exceed the BF threshold? ───────────────────
-bf_thr <- params$bf_threshold
-
-gene_summary <- fade_df %>%
-  filter(!is.na(bayes_factor)) %>%
-  group_by(gene) %>%
-  summarise(
-    n_sites_tested   = n_distinct(site),
-    n_sig_site_aa    = sum(bayes_factor >= bf_thr, na.rm = TRUE),
-    max_bf           = max(bayes_factor, na.rm = TRUE),
-    top_target_aa    = {
-      sig <- filter(pick(everything()), bayes_factor >= bf_thr)
-      if (nrow(sig) == 0) NA_character_
-      else sig$target_aa[which.max(sig$bayes_factor)]
-    },
-    top_site         = {
-      sig <- filter(pick(everything()), bayes_factor >= bf_thr)
-      if (nrow(sig) == 0) NA_integer_
-      else sig$site[which.max(sig$bayes_factor)]
-    },
-    .groups = "drop"
-  ) %>%
-  arrange(desc(n_sig_site_aa), desc(max_bf))
-
+# gene_summary was already built (one row per gene) while parsing the JSONs
+# above — nothing left to aggregate here, just derive the significant subset.
 sig_genes <- gene_summary %>% filter(n_sig_site_aa > 0)
 
 cat(sprintf(
@@ -277,6 +327,7 @@ cat(sprintf(
 ```{r gene-table}
 DT::datatable(
   gene_summary %>%
+    select(gene, n_sites_tested, n_sig_site_aa, max_bf, top_target_aa, top_site) %>%
     mutate(max_bf = round(max_bf, 2)) %>%
     rename(
       Gene              = gene,
@@ -306,12 +357,15 @@ if (!exists("gene_summary")) {
   stop("ERROR: gene_summary variable does not exist!")
 }
 
-if (nrow(gene_summary) == 0) {
+gene_summary_core <- gene_summary %>%
+  select(gene, n_sites_tested, n_sig_site_aa, max_bf, top_target_aa, top_site)
+
+if (nrow(gene_summary_core) == 0) {
   message("WARNING: gene_summary is empty, no TSV will be written")
 } else {
   out_tsv <- paste0("fade_summary_", params$direction, ".tsv")
-  write.table(gene_summary, out_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
-  
+  write.table(gene_summary_core, out_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
+
   # Verify file was written
   if (!file.exists(out_tsv)) {
     stop(sprintf("ERROR: Failed to create TSV file '%s'", out_tsv))
@@ -319,55 +373,6 @@ if (nrow(gene_summary) == 0) {
 }
 
 invisible(NULL)
-```
-
-```{r write-site-tsv}
-# Write per-site BF summary for downstream SCORING characterisation.
-# Columns: gene, site, max_site_bf, top_target_aa, fade_biased
-if (exists("fade_df") && nrow(fade_df) > 0) {
-  site_summary <- fade_df %>%
-    filter(!is.na(bayes_factor)) %>%
-    group_by(gene, site) %>%
-    summarise(
-      max_site_bf   = max(bayes_factor, na.rm = TRUE),
-      top_target_aa = target_aa[which.max(bayes_factor)],
-      fade_biased   = max(bayes_factor, na.rm = TRUE) >= bf_thr,
-      .groups       = "drop"
-    )
-  out_site_tsv <- paste0("fade_site_bf_", params$direction, ".tsv")
-  write.table(site_summary, out_site_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
-}
-invisible(NULL)
-```
-
----
-
-## Site × Amino-acid Detail
-
-### Top significant site × AA combinations
-
-```{r top-sites-table}
-top_sites <- fade_df %>%
-  filter(bayes_factor >= bf_thr) %>%
-  arrange(desc(bayes_factor)) %>%
-  mutate(bayes_factor = round(bayes_factor, 2)) %>%
-  rename(
-    Gene      = gene,
-    Site      = site,
-    `Target AA` = target_aa,
-    `Bayes Factor` = bayes_factor
-  )
-
-if (nrow(top_sites) == 0) {
-  cat("No site × AA combinations exceed BF ≥", bf_thr, "\n")
-} else {
-  DT::datatable(
-    top_sites,
-    filter   = "top",
-    rownames = FALSE,
-    options  = list(pageLength = 30, scrollX = TRUE)
-  )
-}
 ```
 
 ---
@@ -398,9 +403,14 @@ ggplot(gene_summary, aes(x = max_bf)) +
 if (nrow(sig_genes) == 0) {
   cat("No significant genes to plot.\n")
 } else {
-  aa_freq <- fade_df %>%
-    filter(bayes_factor >= bf_thr) %>%
-    count(target_aa) %>%
+  # Per-AA significant-site counts were tallied per gene while parsing
+  # (sigcount_<AA> columns) — sum across genes instead of re-scanning a
+  # per-site table we no longer keep.
+  aa_freq <- gene_summary %>%
+    select(starts_with("sigcount_")) %>%
+    summarise(across(everything(), sum)) %>%
+    tidyr::pivot_longer(everything(), names_to = "target_aa", names_prefix = "sigcount_", values_to = "n") %>%
+    filter(n > 0) %>%
     arrange(desc(n))
 
   ggplot(aa_freq, aes(x = reorder(target_aa, n), y = n)) +
@@ -416,68 +426,6 @@ if (nrow(sig_genes) == 0) {
 }
 ```
 
-### Heatmap: significant sites per gene × target amino acid
-
-```{r heatmap, fig.height=8, fig.width=11}
-n_sig <- nrow(sig_genes)
-
-if (n_sig < params$min_genes_hmap) {
-  cat(sprintf(
-    "Only %d significant gene(s) found (threshold for heatmap = %d). Skipping heatmap.\n",
-    n_sig, params$min_genes_hmap
-  ))
-} else {
-
-  # Count how many sites each gene × AA pair has above threshold
-  hm_data <- fade_df %>%
-    filter(gene %in% sig_genes$gene, bayes_factor >= bf_thr) %>%
-    group_by(gene, target_aa) %>%
-    summarise(n_sig_sites = n(), max_bf = max(bayes_factor), .groups = "drop")
-
-  # Pivot to wide and back to long for complete grid
-  hm_wide <- hm_data %>%
-    select(gene, target_aa, n_sig_sites) %>%
-    pivot_wider(names_from = target_aa, values_from = n_sig_sites, values_fill = 0) %>%
-    pivot_longer(-gene, names_to = "target_aa", values_to = "n_sig_sites")
-
-  # Order genes by total significant sites
-  gene_order <- hm_data %>%
-    group_by(gene) %>% summarise(tot = sum(n_sig_sites)) %>%
-    arrange(desc(tot)) %>% pull(gene)
-
-  hm_wide <- hm_wide %>%
-    mutate(
-      gene      = factor(gene,      levels = rev(gene_order)),
-      target_aa = factor(target_aa, levels = AA_LETTERS)
-    )
-
-  p <- ggplot(hm_wide, aes(x = target_aa, y = gene, fill = n_sig_sites)) +
-    geom_tile(colour = "white", linewidth = 0.3) +
-    scale_fill_gradient(low = "white", high = "#d7191c",
-                        name = "# significant\nsites") +
-    labs(
-      title    = paste("Significant FADE sites per gene × target AA —",
-                       toupper(params$direction)),
-      subtitle = paste0("BF ≥ ", bf_thr, " | Trait: ", params$traitname),
-      x = "Target amino acid",
-      y = NULL
-    ) +
-    theme_bw(base_size = 16) +
-    theme(
-      axis.text.y = element_text(size = 8),
-      legend.position = "right"
-    )
-
-  # Cap height at 80 genes to keep the plot readable
-  if (n_sig > 80) {
-    keep_genes <- gene_order[seq_len(80)]
-    p <- p %+% filter(hm_wide, gene %in% keep_genes) +
-      labs(caption = paste("Showing top 80 of", n_sig, "significant genes"))
-  }
-
-  print(p)
-}
-```
 
 ---
 
@@ -500,8 +448,18 @@ pipeline parameters for `fade_model`).
 
 ---
 
-## Session Information
+## Summary
 
+This report summarizes the results of the **FADE** analysis.
+
+---
+
+<details>
+<summary>Session Info</summary>
 ```{r session-info}
 sessionInfo()
 ```
+</details>
+
+*Generated by PhyloPhere — FADE Module*
+*Date of generation: `r Sys.Date()`*

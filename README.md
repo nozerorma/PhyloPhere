@@ -82,6 +82,23 @@ Compared with standalone CAAStools usage, PhyloPhere adds:
 
 ---
 
+## Runner GUI
+
+Instead of hand-editing `SBATCH_run_phenotypes_primates.sh` / `run_phenotype_single_primates.sh`,
+a multi-tab desktop GUI (PySide6) can generate that script pair from a form: one tab per pipeline
+module, a phenotype-catalogue table for SLURM array batches, local/slurm resource presets, and
+save/load of the whole configuration as a JSON project file. Dataset paths can be validated (and
+browsed) against a remote HPC cluster over SSH instead of the local filesystem — set a host in the
+General tab (needs passwordless key-based auth already working).
+
+```bash
+./run_gui.sh                 # launches the GUI (uses the phylophere env automatically)
+./install_gui_launcher.sh    # optional: adds a desktop/application-menu entry
+```
+
+Requires the `phylophere` environment (`./environment/install_env.sh`) — it already pins PySide6
+and Jinja2, so no separate GUI install step is needed. Source: [`gui/`](gui/); tests: [`tests/gui/`](tests/gui/).
+
 ## End-to-end workflow (sequential integrated run)
 
 Typical integrated chain:

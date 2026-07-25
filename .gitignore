@@ -31,3 +31,4 @@ subworkflows/VEP/dat/PrimateAI-3D.hg38.txt.gz
 
 # FCS runtime progress log (written to work dir)
 fcs_progress.log
+.venv*

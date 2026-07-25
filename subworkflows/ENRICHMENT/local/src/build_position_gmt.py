@@ -50,6 +50,7 @@ def validate_required_inputs(args):
     }
     optional = {
         "--cosmic_db": "cosmic_db",
+        "--pai3d_db": "pai3d_db",
         "--cleaned_background": "cleaned_background",
         "--custom_marker_file": "custom_marker_file",
     }
@@ -99,8 +100,11 @@ def parse_args():
     parser.add_argument("--egg_annotations_file", required=True, help="Path to 9443_annotations.tsv")
     parser.add_argument("--map_dir", required=True, help="Directory containing <GENE>*.map.tsv files")
     parser.add_argument("--cosmic_db", required=False, help="Path to Cosmic_MutantCensus_v104_GRCh38.tsv.gz")
+    parser.add_argument("--pai3d_db", required=False, help="Path to PrimateAI-3D.hg38.txt.gz")
     parser.add_argument("--cleaned_background", required=False, help="Optional list of genes tested (universe filter)")
     parser.add_argument("--custom_marker_file", required=False, help="Optional custom marker file (gene, position, term, desc)")
+    parser.add_argument("--fade_sites_top_file", required=False, help="Optional fade_sites_top.csv (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV")
+    parser.add_argument("--fade_sites_bottom_file", required=False, help="Optional fade_sites_bottom.csv (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV")
     parser.add_argument("--output_dir", required=True, help="Output directory for generated GMT files")
     return parser.parse_args()
 
@@ -200,6 +204,97 @@ def write_gmt(output_path, terms):
                 member_str = "\t".join(members)
                 f.write(f"{term_name}\t{desc}\t{member_str}\n")
     print(f"Wrote {len(terms)} terms to {output_path}")
+
+
+def write_gene_list(output_path, genes):
+    with open(output_path, 'w') as f:
+        for g in sorted(genes):
+            f.write(f"{g}\n")
+    print(f"Wrote {len(genes)} coverage genes to {output_path}")
+
+
+def build_genomic_to_pos(map_cache):
+    """Codon-level genomic coordinate -> {(gene, col), ...} lookup, shared by
+    every external coordinate-keyed database (COSMIC, PAI3D, ...)."""
+    genomic_to_pos = {}
+    for gene, cache in map_cache.items():
+        strand = cache['strand']
+        for col, genomic in cache['col_to_genomic'].items():
+            match = re.match(r'(chr[0-9XYM]+):(\d+)', genomic)
+            if match:
+                chrom = match.group(1)
+                coord = int(match.group(2))
+                if strand == '+':
+                    codon_positions = [coord, coord + 1, coord + 2]
+                else:
+                    codon_positions = [coord, coord - 1, coord - 2]
+
+                for nt_pos in codon_positions:
+                    key = (chrom, nt_pos)
+                    if key not in genomic_to_pos:
+                        genomic_to_pos[key] = set()
+                    genomic_to_pos[key].add((gene, col))
+    return genomic_to_pos
+
+
+def scan_external_positions(db_path, chr_col_name, pos_col_name, genomic_to_pos,
+                             filter_col_name=None):
+    """Stream a gzip TSV keyed by genomic (chrom, pos) against `genomic_to_pos`.
+
+    Returns (coverage_cols, filtered_cols):
+      - coverage_cols: gene -> {col, ...} for EVERY row matching genomic_to_pos,
+        regardless of filter_col_name. This answers "which genes could this
+        external database structurally have annotated at all" — used to build
+        the coverage-gene list for background restriction, independent of
+        whatever functional filter defines GMT membership.
+      - filtered_cols: gene -> {col, ...} restricted to rows where
+        filter_col_name's value contains "pathogenic" (case-insensitive). If
+        filter_col_name is None (COSMIC has no pathogenicity call — every
+        somatic mutation counts), filtered_cols == coverage_cols.
+    """
+    coverage_cols = {}
+    filtered_cols = {}
+    matched = 0
+    with gzip.open(db_path, 'rt') as f:
+        header_line = f.readline().strip()
+        header_cols = header_line.split('\t')
+        try:
+            chr_col = header_cols.index(chr_col_name)
+            pos_col = header_cols.index(pos_col_name)
+        except ValueError:
+            print(f"Error: {db_path} is missing {chr_col_name}/{pos_col_name} columns.",
+                  file=sys.stderr)
+            return coverage_cols, filtered_cols
+        filter_col = header_cols.index(filter_col_name) if filter_col_name else None
+
+        for line in f:
+            fields = line.strip().split('\t')
+            if len(fields) <= max(chr_col, pos_col):
+                continue
+            chrom = fields[chr_col]
+            if not chrom.startswith('chr'):
+                chrom = f"chr{chrom}"
+            try:
+                pos_nt = int(fields[pos_col])
+            except ValueError:
+                continue
+
+            key = (chrom, pos_nt)
+            if key not in genomic_to_pos:
+                continue
+
+            is_filtered_match = True
+            if filter_col is not None and filter_col < len(fields):
+                is_filtered_match = 'pathogenic' in fields[filter_col].lower()
+
+            for gene, col in genomic_to_pos[key]:
+                coverage_cols.setdefault(gene, set()).add(col)
+                matched += 1
+                if is_filtered_match:
+                    filtered_cols.setdefault(gene, set()).add(col)
+
+    print(f"Mapped {matched} {os.path.basename(db_path)} rows to protein alignment columns.")
+    return coverage_cols, filtered_cols
 
 def main():
     args = parse_args()
@@ -352,64 +447,74 @@ def main():
                 if is_neg == 1:
                     gene_neg_sel_cols.setdefault(gene, set()).add(col)
 
-    # 4. Load COSMIC positions per gene
+    # 3.5 Load FADE directional selection positions per gene (from
+    #     FADE_JSON_TO_CSV's fade_sites_{top,bottom}.csv: gene,position,max_bf,
+    #     target_aa, already restricted to sites clearing the classic BF>=100
+    #     bar). Unlike FUBAR's hg38_aa_pos (a 1-indexed residue number needing
+    #     residue_to_col translation), FADE's `position` is already 0-indexed
+    #     in the same coordinate space CAAS's own Position column uses directly
+    #     (confirmed empirically: joining FADE and CAAS positions with no
+    #     translation gives the expected ~70x position-level enrichment,
+    #     matching posenrich_enrich.py's own "obs-scores Position is prot_ali_col
+    #     space" convention) -- so no map_cache lookup here, same as gene:position
+    #     custom markers below.
+    print("Loading FADE directional selection positions...")
+    gene_fade_top_cols = {}
+    gene_fade_bottom_cols = {}
+    for fade_file, fade_cols in ((args.fade_sites_top_file, gene_fade_top_cols),
+                                  (args.fade_sites_bottom_file, gene_fade_bottom_cols)):
+        if not fade_file or not os.path.exists(fade_file):
+            continue
+        fade_df = pd.read_csv(fade_file, dtype={'gene': str})
+        for row in fade_df.itertuples(index=False):
+            gene = row.gene
+            if gene not in active_genes:
+                continue
+            try:
+                pos = int(row.position)
+            except (ValueError, TypeError):
+                continue
+            fade_cols.setdefault(gene, set()).add(pos)
+
+    # 4. Load COSMIC and PAI3D positions per gene. Both are external,
+    #    coordinate-keyed databases with incomplete real-world coverage (unlike
+    #    the internal deterministic computations above), so besides GMT
+    #    membership we also emit which active genes each database could
+    #    structurally have annotated at all (coverage_genes.txt) — consumed by
+    #    posenrich_enrich.py to restrict the enrichment background for these
+    #    two GMTs specifically, instead of diluting the test with genes/positions
+    #    COSMIC/PAI3D never had a chance to observe.
+    genomic_to_pos = None
+    if (args.cosmic_db and os.path.exists(args.cosmic_db)) or \
+       (args.pai3d_db and os.path.exists(args.pai3d_db)):
+        genomic_to_pos = build_genomic_to_pos(map_cache)
+
     print("Loading COSMIC mutation positions...")
     gene_cosmic_cols = {}
     if args.cosmic_db and os.path.exists(args.cosmic_db):
-        # Build codon-level genomic lookup
-        genomic_to_pos = {}
-        for gene, cache in map_cache.items():
-            strand = cache['strand']
-            for col, genomic in cache['col_to_genomic'].items():
-                match = re.match(r'(chr[0-9XYM]+):(\d+)', genomic)
-                if match:
-                    chrom = match.group(1)
-                    coord = int(match.group(2))
-                    if strand == '+':
-                        codon_positions = [coord, coord + 1, coord + 2]
-                    else:
-                        codon_positions = [coord, coord - 1, coord - 2]
-                    
-                    for nt_pos in codon_positions:
-                        key = (chrom, nt_pos)
-                        if key not in genomic_to_pos:
-                            genomic_to_pos[key] = set()
-                        genomic_to_pos[key].add((gene, col))
-        
-        # Read COSMIC file and map coordinates
         print(f"Streaming {args.cosmic_db}...")
-        matched_cosmic = 0
-        with gzip.open(args.cosmic_db, 'rt') as f:
-            header_line = f.readline().strip()
-            header_cols = header_line.split('\t')
-            try:
-                chr_col = header_cols.index('CHROMOSOME')
-                pos_col = header_cols.index('GENOME_START')
-            except ValueError:
-                print("Error: COSMIC database is missing CHROMOSOME or GENOME_START columns.", file=sys.stderr)
-                chr_col, pos_col = None, None
-            
-            if chr_col is not None and pos_col is not None:
-                for line in f:
-                    fields = line.strip().split('\t')
-                    if len(fields) <= max(chr_col, pos_col):
-                        continue
-                    chrom = fields[chr_col]
-                    if not chrom.startswith('chr'):
-                        chrom = f"chr{chrom}"
-                    try:
-                        pos_nt = int(fields[pos_col])
-                    except ValueError:
-                        continue
-                    
-                    key = (chrom, pos_nt)
-                    if key in genomic_to_pos:
-                        for gene, col in genomic_to_pos[key]:
-                            if gene not in gene_cosmic_cols:
-                                gene_cosmic_cols[gene] = set()
-                            gene_cosmic_cols[gene].add(col)
-                            matched_cosmic += 1
-        print(f"Mapped {matched_cosmic} COSMIC mutations to protein alignment columns.")
+        gene_cosmic_cols, _ = scan_external_positions(
+            args.cosmic_db, 'CHROMOSOME', 'GENOME_START', genomic_to_pos)
+        write_gene_list(os.path.join(args.output_dir, "cosmic_coverage_genes.txt"),
+                         gene_cosmic_cols.keys())
+
+    # 4b. Load PAI3D pathogenic positions per gene. Unlike COSMIC (every
+    #     somatic mutation counts as evidence), PAI3D is a per-variant
+    #     pathogenicity predictor, so GMT membership is restricted to variants
+    #     the `prediction` column calls pathogenic (matching the same
+    #     substring-match convention as 11.Scoring_report.Rmd's is_pathogenic
+    #     — no score-cutoff fallback). Coverage (for background restriction)
+    #     is tracked separately and includes every matched variant regardless
+    #     of predicted pathogenicity, since "could PAI3D see this gene" is a
+    #     coverage question, not a pathogenicity one.
+    print("Loading PAI3D pathogenicity positions...")
+    gene_pai3d_cols = {}
+    if args.pai3d_db and os.path.exists(args.pai3d_db):
+        print(f"Streaming {args.pai3d_db}...")
+        gene_pai3d_coverage, gene_pai3d_cols = scan_external_positions(
+            args.pai3d_db, 'chr', 'pos', genomic_to_pos, filter_col_name='prediction')
+        write_gene_list(os.path.join(args.output_dir, "pai3d_coverage_genes.txt"),
+                         gene_pai3d_coverage.keys())
 
     # 5. Genomic Locations (1 Mbp Chromosome Bins)
     print("Compiling Genomic Locations (1 Mbp bins)...")
@@ -438,7 +543,7 @@ def main():
     write_gmt(os.path.join(args.output_dir, "genomic_locations.gmt"), gen_terms)
 
     # 6. Orthogroups (eggNOG) - Baseline + restrictive GMTs (UCR core/flank,
-    #    positive/purifying selection, COSMIC).
+    #    positive/purifying selection, COSMIC, PAI3D).
     print("Compiling eggNOG Orthogroups...")
     ortho_terms = {}
     ortho_ucr_core_terms = {}
@@ -446,6 +551,7 @@ def main():
     ortho_pos_sel_terms = {}
     ortho_neg_sel_terms = {}
     ortho_cosmic_terms = {}
+    ortho_pai3d_terms = {}
     
     # Load descriptions
     ortho_descs = {}
@@ -484,6 +590,7 @@ def main():
                     pos_sel_members = []
                     neg_sel_members = []
                     cosmic_members = []
+                    pai3d_members = []
 
                     for g in og_genes:
                         for col in map_cache[g]['selected_cols']:
@@ -499,6 +606,8 @@ def main():
                                 neg_sel_members.append(pos_id)
                             if col in gene_cosmic_cols.get(g, set()):
                                 cosmic_members.append(pos_id)
+                            if col in gene_pai3d_cols.get(g, set()):
+                                pai3d_members.append(pos_id)
 
                     def _add(store, members, suffix):
                         if members:
@@ -512,13 +621,15 @@ def main():
                     _add(ortho_pos_sel_terms,   pos_sel_members,   " [positive selection sites]")
                     _add(ortho_neg_sel_terms,   neg_sel_members,   " [purifying selection sites]")
                     _add(ortho_cosmic_terms,    cosmic_members,    " [COSMIC somatic mutation sites]")
+                    _add(ortho_pai3d_terms,     pai3d_members,     " [PAI3D pathogenic sites]")
 
         def _dedup(store):
             for t in store:
                 store[t] = (store[t][0], sorted(set(store[t][1])))
 
         for _store in (ortho_terms, ortho_ucr_core_terms, ortho_ucr_flank_terms,
-                       ortho_pos_sel_terms, ortho_neg_sel_terms, ortho_cosmic_terms):
+                       ortho_pos_sel_terms, ortho_neg_sel_terms, ortho_cosmic_terms,
+                       ortho_pai3d_terms):
             _dedup(_store)
 
         write_gmt(os.path.join(args.output_dir, "orthogroups.gmt"), ortho_terms)
@@ -529,6 +640,9 @@ def main():
 
         if args.cosmic_db and os.path.exists(args.cosmic_db):
             write_gmt(os.path.join(args.output_dir, "cosmic_orthogroups.gmt"), ortho_cosmic_terms)
+
+        if args.pai3d_db and os.path.exists(args.pai3d_db):
+            write_gmt(os.path.join(args.output_dir, "pai3d_orthogroups.gmt"), ortho_pai3d_terms)
 
     # 6.5 Characterization layers — global functional layers for the report's
     #     hypergeometric/Fisher overlap test (NOT ranked by FCS: they are far too
@@ -547,6 +661,8 @@ def main():
         "UCR_flank":       ("UCR flanking positions",               _global_positions(gene_ucr_flank_cols)),
         "FUBAR_positive":  ("FUBAR positive-selection sites (FDR)",  _global_positions(gene_pos_sel_cols)),
         "FUBAR_purifying": ("FUBAR purifying-selection sites",       _global_positions(gene_neg_sel_cols)),
+        "FADE_top_sig":    ("FADE directional selection sites, top (BF >= threshold)",    _global_positions(gene_fade_top_cols)),
+        "FADE_bottom_sig": ("FADE directional selection sites, bottom (BF >= threshold)", _global_positions(gene_fade_bottom_cols)),
     }
     write_gmt(os.path.join(args.output_dir, "characterization_layers.tsv"), char_layers)
 

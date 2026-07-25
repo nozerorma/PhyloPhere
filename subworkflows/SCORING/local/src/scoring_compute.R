@@ -26,7 +26,7 @@
 #   gene_correlations.tsv         — pairwise correlations between gene scores
 #   gene_threshold_enrichment.tsv — gene-level enrichment curve (OR + Fisher) across CAAS thresholds × tools
 #   pos_threshold_enrichment.tsv  — position-level FADE enrichment curve across CAAS thresholds
-#   gene_lists/slice_*.tsv        — 9 ranked gene lists (Global/Top/Bottom × All/Sig/FDR) for STRING
+#   gene_lists/slice_*.tsv        — 8 ranked gene lists (Top/Bottom × 25/10/5/1%) for STRING
 #   position_score_stress_*.tsv   — leave-one-axis-out / PCA stress diagnostics (only when --stress true)
 # =============================================================================
 
@@ -354,6 +354,9 @@ pos_scores <- df %>%
     # Display-only: most-specific scheme via first() after desc(scheme_weight) sort
     pvalue             = first(pvalue),
     pvalue_boot        = first(pvalue_boot),
+    pvalue_fdr         = if ("pvalue_fdr" %in% names(.)) first(pvalue_fdr) else NA_real_,
+    pvalue_boot_fdr    = if ("pvalue_boot_fdr" %in% names(.)) first(pvalue_boot_fdr) else NA_real_,
+    alpha_fdr          = if ("alpha_fdr" %in% names(.)) first(alpha_fdr) else NA_real_,
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
     all_mrca_posterior = first(all_mrca_posterior),
@@ -381,17 +384,34 @@ pos_scores <- df %>%
 # so callers can keep all positions for ranking but filter to a defensible set:
 #   gate_all : every scored position (the full ranked pool)
 #   gate_sig : nominally significant         (pvalue < 0.05)
-#   gate_fdr : significant after BH-FDR       (BH-adjusted pvalue < 0.05)
-# FDR is computed over the whole position pool (one hypergeometric test/position).
+#   gate_fdr : significant after BH-FDR       (BH-adjusted pvalue < alpha_fdr)
+# FDR/alpha_fdr are preferred from the signification metadata (which adjust over
+# the full candidate set); otherwise fallback to R's p.adjust over the aggregated subset.
 pos_scores <- pos_scores %>%
+  mutate(
+    # Use alpha_fdr from input if present, otherwise default to 0.05
+    alpha_fdr_val = if ("alpha_fdr" %in% names(pos_scores) && any(!is.na(pos_scores$alpha_fdr))) {
+      if_else(is.na(alpha_fdr), 0.05, alpha_fdr)
+    } else {
+      0.05
+    }
+  ) %>%
   group_by(caap_group) %>%
-  mutate(pvalue_hyp_fdr = p.adjust(pvalue, method = "BH")) %>%
+  mutate(
+    pvalue_hyp_fdr = if ("pvalue_fdr" %in% names(pos_scores) && any(!is.na(pos_scores$pvalue_fdr))) {
+      pvalue_fdr
+    } else {
+      p.adjust(pvalue, method = "BH")
+    }
+  ) %>%
   ungroup() %>%
   mutate(
     gate_all       = TRUE,
     gate_sig       = !is.na(pvalue) & pvalue < 0.05,
-    gate_fdr       = !is.na(pvalue_hyp_fdr) & pvalue_hyp_fdr < 0.05
-  )
+    gate_fdr       = !is.na(pvalue_hyp_fdr) & pvalue_hyp_fdr < alpha_fdr_val
+  ) %>%
+  mutate(alpha_fdr = alpha_fdr_val) %>%
+  select(-alpha_fdr_val)
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
 cat(sprintf("  Significance gate: %d significant (p<0.05), %d FDR-significant (BH<0.05)\n",
@@ -412,9 +432,26 @@ has_fade_top    <- file_exists(fade_top_file)
 has_fade_bottom <- file_exists(fade_bottom_file)
 has_fade        <- has_fade_top || has_fade_bottom
 
+.load_fade_summary <- function(path, out_col) {
+  df <- read_tsv(path, show_col_types = FALSE)
+  # Standardise column names to lowercase for checking
+  names(df) <- tolower(names(df))
+  if (!"gene" %in% names(df)) {
+    names(df)[1] <- "gene"
+  }
+  bf_col <- intersect(c("max_bf", "max_site_bf", "bayes_factor", "bf"), names(df))[1]
+  if (is.na(bf_col)) {
+    df[[out_col]] <- 0
+  } else {
+    df[[out_col]] <- as.numeric(df[[bf_col]])
+  }
+  df %>%
+    select(Gene = gene, !!out_col := !!sym(out_col)) %>%
+    mutate(Gene = as.character(Gene))
+}
+
 if (has_fade_top) {
-  fade_top_df <- read_tsv(fade_top_file, show_col_types = FALSE) %>%
-    select(Gene = gene, fade_max_bf_top = max_bf)
+  fade_top_df <- .load_fade_summary(fade_top_file, "fade_max_bf_top")
   cat(sprintf("  FADE top: %d genes loaded\n", nrow(fade_top_df)))
 } else {
   cat("FADE top: not available, skipping\n")
@@ -422,8 +459,7 @@ if (has_fade_top) {
 }
 
 if (has_fade_bottom) {
-  fade_bottom_df <- read_tsv(fade_bottom_file, show_col_types = FALSE) %>%
-    select(Gene = gene, fade_max_bf_bottom = max_bf)
+  fade_bottom_df <- .load_fade_summary(fade_bottom_file, "fade_max_bf_bottom")
   cat(sprintf("  FADE bottom: %d genes loaded\n", nrow(fade_bottom_df)))
 } else {
   cat("FADE bottom: not available, skipping\n")
@@ -437,24 +473,55 @@ has_fade_site_top <- file_exists(fade_site_top_file)
 has_fade_site_bot <- file_exists(fade_site_bot_file)
 
 .load_fade_sites <- function(path) {
-  read_tsv(path, show_col_types = FALSE) %>%
-    rename(Gene = gene, Position = site) %>%
-    mutate(Position = Position - 1L) %>%
-    select(Gene, Position, max_site_bf, any_of(c("top_target_aa", "fade_biased")))
+  df <- read_tsv(path, show_col_types = FALSE)
+  names(df) <- tolower(names(df))
+  
+  if (!"gene" %in% names(df)) names(df)[1] <- "gene"
+  if ("site" %in% names(df)) {
+    df$position <- as.integer(df$site) - 1L
+  } else if ("position" %in% names(df)) {
+    df$position <- as.integer(df$position)
+  } else {
+    df$position <- as.integer(df[[2]]) - 1L
+  }
+  
+  bf_col <- intersect(c("max_site_bf", "max_bf", "bayes_factor", "bf"), names(df))[1]
+  if (is.na(bf_col)) {
+    df$max_site_bf <- 0
+  } else {
+    df$max_site_bf <- as.numeric(df[[bf_col]])
+  }
+  
+  aa_col <- intersect(c("top_target_aa", "target_aa", "aa"), names(df))[1]
+  if (!is.na(aa_col)) {
+    df$top_target_aa <- as.character(df[[aa_col]])
+  } else {
+    df$top_target_aa <- NA_character_
+  }
+  
+  bias_col <- intersect(c("fade_biased", "biased"), names(df))[1]
+  if (!is.na(bias_col)) {
+    df$fade_biased <- as.logical(df[[bias_col]])
+  } else {
+    df$fade_biased <- df$max_site_bf >= 100
+  }
+  
+  df %>%
+    select(Gene = gene, Position = position, max_site_bf, top_target_aa, fade_biased)
 }
 
 if (has_fade_site_top) {
   fade_site_top_df <- .load_fade_sites(fade_site_top_file)
   cat(sprintf("  FADE site top: %d positions loaded\n", nrow(fade_site_top_df)))
 } else {
-  fade_site_top_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric())
+  fade_site_top_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric(), top_target_aa = character(), fade_biased = logical())
 }
 
 if (has_fade_site_bot) {
   fade_site_bot_df <- .load_fade_sites(fade_site_bot_file)
   cat(sprintf("  FADE site bot: %d positions loaded\n", nrow(fade_site_bot_df)))
 } else {
-  fade_site_bot_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric())
+  fade_site_bot_df <- tibble(Gene = character(), Position = integer(), max_site_bf = numeric(), top_target_aa = character(), fade_biased = logical())
 }
 
 # Direction filter removed: all positions are retained for scoring.
@@ -648,39 +715,22 @@ cat("\n─── Gene-level scoring ──────────────�
 gene_caas <- pos_scores %>%
   group_by(Gene) %>%
   summarise(
-    gene_caas_score_global_all = quantile(CAAS_score, 0.90, na.rm = TRUE),
-    gene_caas_score_global_sig = {
-      vals <- CAAS_score[gate_sig %in% TRUE]
-      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
-    },
-    gene_caas_score_global_fdr = {
-      vals <- CAAS_score[gate_fdr %in% TRUE]
-      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
-    },
+    gene_caas_score            = quantile(CAAS_score, 0.90, na.rm = TRUE),
     gene_caas_score_top_all    = {
       vals <- CAAS_score[change_side %in% c("top", "both")]
-      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
-    },
-    gene_caas_score_top_sig    = {
-      vals <- CAAS_score[change_side %in% c("top", "both") & gate_sig %in% TRUE]
-      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
-    },
-    gene_caas_score_top_fdr    = {
-      vals <- CAAS_score[change_side %in% c("top", "both") & gate_fdr %in% TRUE]
       if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
     },
     gene_caas_score_bottom_all = {
       vals <- CAAS_score[change_side %in% c("bottom", "both")]
       if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
     },
-    gene_caas_score_bottom_sig = {
-      vals <- CAAS_score[change_side %in% c("bottom", "both") & gate_sig %in% TRUE]
-      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
-    },
-    gene_caas_score_bottom_fdr = {
-      vals <- CAAS_score[change_side %in% c("bottom", "both") & gate_fdr %in% TRUE]
-      if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
-    },
+    # ── Significance gates rolled up to gene level (boolean, not magnitude) ──
+    # TRUE if the gene has >=1 position passing the position-level gate_sig /
+    # gate_fdr (section 2h). Downstream characterization only ever needed
+    # "was this gene touched by a gated position", not a CAAS_score quantile
+    # restricted to gated positions.
+    gene_caas_gate_sig = any(gate_sig %in% TRUE),
+    gene_caas_gate_fdr = any(gate_fdr %in% TRUE),
     # ── ASR-axis rankings (permulation-bearing): 0.90-quantile of asr_path_score ──
     # These mirror the gene_caas_score_*_all columns but aggregate asr_score (the
     # scheme-weighted asr_path_score) instead of the two-axis CAAS_score. The CAAS
@@ -704,7 +754,6 @@ gene_caas <- pos_scores %>%
     .groups = "drop"
   ) %>%
   mutate(
-    gene_caas_score        = gene_caas_score_global_all,
     gene_caas_score_top    = gene_caas_score_top_all,
     gene_caas_score_bottom = gene_caas_score_bottom_all
   )
@@ -818,27 +867,50 @@ has_rer <- file_exists(rer_file)
 if (has_rer) {
   cat("Loading RER summary:", rer_file, "\n")
   rer <- read_tsv(rer_file, show_col_types = FALSE)
+  
+  # Normalize names to lowercase for case-insensitivity
+  names(rer) <- tolower(names(rer))
+  if (!"gene" %in% names(rer)) {
+    names(rer)[1] <- "gene"
+  }
 
-  # Use p.perm if available, otherwise p.adj
-  pval_col <- if ("p.perm" %in% names(rer) && any(!is.na(rer$p.perm) & rer$p.perm > 0)) {
-    "p.perm"
-  } else {
-    "p.adj"
+  # Use p.perm if available, otherwise p.adj / p.value / pval
+  pval_col <- intersect(c("p.perm", "p.adj", "p.value", "pvalue", "pval", "p"), names(rer))[1]
+  if (is.na(pval_col)) {
+    pval_col <- names(rer)[grepl("^p", names(rer))][1]
+    if (is.na(pval_col)) {
+      rer$p.adj <- 1.0
+      pval_col <- "p.adj"
+    }
   }
   cat(sprintf("  Using %s for rer_min_pval\n", pval_col))
 
+  # Find Rho case-insensitively
+  rho_col <- intersect(c("rho", "r", "stat"), names(rer))[1]
+  if (is.na(rho_col)) {
+    rho_col <- names(rer)[grepl("rho", names(rer))][1]
+    if (is.na(rho_col)) {
+      rer$rho <- 0.0
+      rho_col <- "rho"
+    }
+  }
+  cat(sprintf("  Using %s for rer_rho\n", rho_col))
+
   gene_rer <- rer %>%
     filter(!is.na(.data[[pval_col]])) %>%
-    mutate(rer_min_pval     = .data[[pval_col]],
-           rer_significant  = .data[[pval_col]] <= 0.05,
-           rer_rho          = Rho,
-           rer_acceleration = case_when(
-             is.na(Rho) ~ NA_character_,
-             Rho > 0    ~ "accelerated",
-             Rho < 0    ~ "decelerated",
-             TRUE       ~ "neutral"
-           )) %>%
-    select(Gene = gene, rer_min_pval, rer_significant, rer_rho, rer_acceleration)
+    mutate(
+      rer_min_pval     = as.numeric(.data[[pval_col]]),
+      rer_significant  = rer_min_pval <= 0.05,
+      rer_rho          = as.numeric(.data[[rho_col]]),
+      rer_acceleration = case_when(
+        is.na(rer_rho) ~ NA_character_,
+        rer_rho > 0    ~ "accelerated",
+        rer_rho < 0    ~ "decelerated",
+        TRUE           ~ "neutral"
+      )
+    ) %>%
+    select(Gene = gene, rer_min_pval, rer_significant, rer_rho, rer_acceleration) %>%
+    mutate(Gene = as.character(Gene))
 
   cat(sprintf("  RERConverge: %d genes, %d significant (p <= 0.05)\n",
               nrow(gene_rer), sum(gene_rer$rer_significant, na.rm = TRUE)))
@@ -877,10 +949,17 @@ if (nrow(fade_bottom_df) > 0) {
 }
 
 # ── 4e. Assemble gene scores ────────────────────────────────────────────────
+# full_join (not left_join): gene_caas only covers genes with a CAAS-detected
+# position, but gene_rand/gene_rer/gene_fade each have their own, larger gene
+# universe (e.g. RERConverge scores every gene with a sufficiently-populated
+# gene tree). A left_join rooted at gene_caas silently drops every gene that
+# has RER/FADE/accumulation evidence but no CAAS position — which then never
+# reaches gene_scores.tsv or the per-module fcs_stats_*.tsv files, truncating
+# their FCS universe to the CAAS gene set instead of each module's own.
 gene_scores <- gene_caas
 
 if (nrow(gene_rand) > 0) {
-  gene_scores <- gene_scores %>% left_join(gene_rand, by = "Gene")
+  gene_scores <- gene_scores %>% full_join(gene_rand, by = "Gene")
 } else {
   gene_scores$accum_fisher_p    <- NA_real_
   gene_scores$accum_fdr         <- NA_real_
@@ -888,7 +967,7 @@ if (nrow(gene_rand) > 0) {
 }
 
 if (nrow(gene_rer) > 0) {
-  gene_scores <- gene_scores %>% left_join(gene_rer, by = "Gene")
+  gene_scores <- gene_scores %>% full_join(gene_rer, by = "Gene")
 } else {
   gene_scores$rer_min_pval      <- NA_real_
   gene_scores$rer_significant   <- NA
@@ -897,7 +976,7 @@ if (nrow(gene_rer) > 0) {
 }
 
 if (nrow(gene_fade) > 0) {
-  gene_scores <- gene_scores %>% left_join(gene_fade, by = "Gene")
+  gene_scores <- gene_scores %>% full_join(gene_fade, by = "Gene")
 } else {
   gene_scores$fade_max_bf_top         <- NA_real_
   gene_scores$fade_significant_top    <- NA
@@ -965,7 +1044,7 @@ if (length(score_cols) >= 2) {
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
 pos_out <- pos_scores %>%
-  select(Gene, Position, any_of(c("pvalue", "pvalue_boot", "pvalue_hyp_fdr")),
+  select(Gene, Position, any_of(c("pvalue", "pvalue_boot", "pvalue_hyp_fdr", "alpha_fdr")),
          asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core")),
          any_of("phen_score"), biochem_weight_sum, CAAS_score,
          any_of(c("gate_all", "gate_sig", "gate_fdr")), change_side,
@@ -980,9 +1059,8 @@ gene_out <- gene_scores %>%
   select(
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
-    gene_caas_score_global_all, gene_caas_score_global_sig, gene_caas_score_global_fdr,
-    gene_caas_score_top_all, gene_caas_score_top_sig, gene_caas_score_top_fdr,
-    gene_caas_score_bottom_all, gene_caas_score_bottom_sig, gene_caas_score_bottom_fdr,
+    gene_caas_score_top_all, gene_caas_score_bottom_all,
+    gene_caas_gate_sig, gene_caas_gate_fdr,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
     any_of(c("accum_fisher_p", "accum_fdr", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
@@ -1009,11 +1087,11 @@ cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 
 fcs_stats <- tibble(
   gene             = gene_scores$Gene,
-  score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_global_all"))),
+  score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score"))),
   score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top_all"))),
   score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom_all"))),
-  flag_gate_sig    = !is.na(.col(gene_scores, "gene_caas_score_global_sig")),
-  flag_gate_fdr    = !is.na(.col(gene_scores, "gene_caas_score_global_fdr")),
+  flag_gate_sig    = .istrue(.col(gene_scores, "gene_caas_gate_sig")),
+  flag_gate_fdr    = .istrue(.col(gene_scores, "gene_caas_gate_fdr")),
   flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
   flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
   flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),
@@ -1071,42 +1149,53 @@ if (.nonempty("accum_fisher_p")) {
 write_tsv(corr_results, "gene_correlations.tsv")
 
 # =============================================================================
-# 7. EXPORT RASED/SIGNIFICANCE-GATED GENE LISTS
+# 7. EXPORT PERCENTILE-RANKED GENE LISTS FOR STRING
 # =============================================================================
 
 dir.create("gene_lists", showWarnings = FALSE)
 
-# Define the 9 slices
+# Define the 8 percentile slices (top/bottom x 25/10/5/1%), mirroring
+# posenrich_enrich.py's top-fraction-of-scored-positions cutoff at gene
+# granularity: rank genes with a defined score desc, keep the top frac% of
+# THAT ranked set (not the full background) -- same selection axis as
+# 16.Position_enrichment_report.Rmd, just at genes instead of positions.
+# Replaces the previous significance-gated {global,top,bottom}x{all,sig,fdr}
+# scheme (dropped: STRING's own significance/FDR axis duplicated what
+# gate_sig/gate_fdr already report elsewhere, and _all lists were close to
+# the whole gene universe -- a poor foreground for interaction-density tests).
 slices_def <- list(
-  list(name = "global_all", col = "gene_caas_score_global_all", fade_sig = NA),
-  list(name = "global_sig", col = "gene_caas_score_global_sig", fade_sig = NA),
-  list(name = "global_fdr", col = "gene_caas_score_global_fdr", fade_sig = NA),
+  list(name = "top25",    col = "gene_caas_score_top_all",    frac = 0.25, direction = "top",    fade_sig = "fade_significant_top"),
+  list(name = "top10",    col = "gene_caas_score_top_all",    frac = 0.10, direction = "top",    fade_sig = "fade_significant_top"),
+  list(name = "top5",     col = "gene_caas_score_top_all",    frac = 0.05, direction = "top",    fade_sig = "fade_significant_top"),
+  list(name = "top1",     col = "gene_caas_score_top_all",    frac = 0.01, direction = "top",    fade_sig = "fade_significant_top"),
 
-  list(name = "top_all",    col = "gene_caas_score_top_all",    fade_sig = "fade_significant_top"),
-  list(name = "top_sig",    col = "gene_caas_score_top_sig",    fade_sig = "fade_significant_top"),
-  list(name = "top_fdr",    col = "gene_caas_score_top_fdr",    fade_sig = "fade_significant_top"),
-
-  list(name = "bottom_all", col = "gene_caas_score_bottom_all", fade_sig = "fade_significant_bottom"),
-  list(name = "bottom_sig", col = "gene_caas_score_bottom_sig", fade_sig = "fade_significant_bottom"),
-  list(name = "bottom_fdr", col = "gene_caas_score_bottom_fdr", fade_sig = "fade_significant_bottom")
+  list(name = "bottom25", col = "gene_caas_score_bottom_all", frac = 0.25, direction = "bottom", fade_sig = "fade_significant_bottom"),
+  list(name = "bottom10", col = "gene_caas_score_bottom_all", frac = 0.10, direction = "bottom", fade_sig = "fade_significant_bottom"),
+  list(name = "bottom5",  col = "gene_caas_score_bottom_all", frac = 0.05, direction = "bottom", fade_sig = "fade_significant_bottom"),
+  list(name = "bottom1",  col = "gene_caas_score_bottom_all", frac = 0.01, direction = "bottom", fade_sig = "fade_significant_bottom")
 )
 
-cat("\n─── Exporting 9 STRING ranked lists ────────────────────────\n")
+cat("\n─── Exporting 8 STRING percentile ranked lists (top/bottom x 25/10/5/1%) ──\n")
 for (slice in slices_def) {
   col_name <- slice$col
   file_name <- sprintf("gene_lists/slice_%s.tsv", slice$name)
 
-  # Select non-NA genes for this slice
-  slice_df <- gene_out %>%
+  # Rank all non-NA genes by score (desc, stable Gene tiebreak for determinism).
+  ranked <- gene_out %>%
     filter(!is.na(.data[[col_name]])) %>%
-    select(Gene, score = all_of(col_name))
+    select(Gene, score = all_of(col_name)) %>%
+    arrange(desc(score), Gene)
 
-  if (nrow(slice_df) == 0) {
+  n_total <- nrow(ranked)
+  if (n_total == 0) {
     # Write empty file to prevent Nextflow missing output crashes
     write_tsv(tibble(Gene = character(), score = numeric(), is_fade = logical(), is_rer = logical(), is_accum = logical()), file_name)
     cat(sprintf("  %s: empty (0 genes) exported\n", file_name))
     next
   }
+
+  n_keep <- max(1, round(slice$frac * n_total))
+  slice_df <- ranked %>% slice_head(n = n_keep)
 
   # Add validation columns: is_fade, is_rer, is_accum
   f_col <- slice$fade_sig
@@ -1118,9 +1207,9 @@ for (slice in slices_def) {
       is_rer = if ("rer_significant" %in% names(gene_out)) {
         is_sig <- gene_out$rer_significant[match(Gene, gene_out$Gene)] %in% TRUE
         rho_val <- gene_out$rer_rho[match(Gene, gene_out$Gene)]
-        if (slice$name %in% c("top_all", "top_sig", "top_fdr")) {
+        if (slice$direction == "top") {
           is_sig & !is.na(rho_val) & rho_val > 0
-        } else if (slice$name %in% c("bottom_all", "bottom_sig", "bottom_fdr")) {
+        } else if (slice$direction == "bottom") {
           is_sig & !is.na(rho_val) & rho_val < 0
         } else {
           is_sig
@@ -1129,11 +1218,11 @@ for (slice in slices_def) {
       is_accum = if ("accum_significant" %in% names(gene_out)) {
         gene_out$accum_significant[match(Gene, gene_out$Gene)] %in% TRUE
       } else FALSE
-    ) %>%
-    arrange(desc(score))
+    )
+  # slice_df inherits ranked's desc(score) order via slice_head -- already sorted.
 
   write_tsv(slice_df, file_name)
-  cat(sprintf("  %s: %d genes exported\n", file_name, nrow(slice_df)))
+  cat(sprintf("  %s: %d/%d genes exported (top %.0f%%)\n", file_name, nrow(slice_df), n_total, 100 * slice$frac))
 }
 
 # =============================================================================

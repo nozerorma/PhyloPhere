@@ -110,6 +110,14 @@ workflow SCORING {
             .collect()
             .map { it && it.size() > 0 ? it[0] : file('NO_FADE_SITE_BOT.txt') }
 
+        def resolved_background = (cleaned_background_ch ?: Channel.empty())
+            .collect()
+            .ifEmpty {
+                def bg = params.scoring_background_input ?: ''
+                if (bg && file(bg).exists()) [file(bg)] else [file('NO_BACKGROUND')]
+            }
+            .map { it && it.size() > 0 ? it[0] : file('NO_BACKGROUND') }
+
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
             resolved_postproc,
@@ -131,16 +139,19 @@ workflow SCORING {
         // scoring report (permulation-null overview) and the FCS report (p.perm).
         // Value channel via collect()/map (NOT .first(), which warns on a value channel).
         def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
+            .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
             .collect()
-            .map { it && it.size() > 0 ? it[0] : file(params.caas_perms_file ?: 'NO_FILE') }
+            .map { it[0] }
 
         // Lean per-scheme null files → report permulation section.
         def caas_pos_pval_resolved = (caas_pos_pval_ch ?: Channel.empty())
+            .ifEmpty { file('NO_CAAS_POS_PVAL') }
             .collect()
-            .map { it && it.size() > 0 ? it[0] : file('NO_CAAS_POS_PVAL') }
+            .map { it[0] }
         def caas_pos_sample_resolved = (caas_pos_sample_ch ?: Channel.empty())
+            .ifEmpty { file('NO_CAAS_POS_SAMPLE') }
             .collect()
-            .map { it && it.size() > 0 ? it[0] : file('NO_CAAS_POS_SAMPLE') }
+            .map { it[0] }
 
         // filtered_discovery (resolved_postproc, a value channel) = the observed
         // per-(gene,position,scheme) asr_path_score overlaid on the per-scheme null;
@@ -163,7 +174,8 @@ workflow SCORING {
             caas_perms_resolved,
             caas_pos_pval_resolved,
             caas_pos_sample_resolved,
-            resolved_postproc
+            resolved_postproc,
+            resolved_background
         )
 
         def final_reports = report_out.report

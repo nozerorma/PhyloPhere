@@ -19,8 +19,7 @@
 include { CT_ACCUMULATION_AGGREGATE; CT_ACCUMULATION_RANDOMIZE } from "${baseDir}/subworkflows/CT_ACCUMULATION/ctacc_run"
 include { ACCUMULATION_REPORT } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_report"
 include { ACCUMULATION_GENE_LISTS } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_gene_lists.nf"
-include { TOOL_FCS_REPORT as ACCUMULATION_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
-include { TOOL_STRING_REPORT as ACCUMULATION_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
+include { TOOL_STRING_MODULE_REPORT as ACCUMULATION_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 
 workflow CT_ACCUMULATION {
     take:
@@ -155,21 +154,10 @@ workflow CT_ACCUMULATION {
         if (params.enrichment || params.string) {
             def lists_out = ACCUMULATION_GENE_LISTS(randomize_out.direction, randomize_out.results)
 
-            // Skip when SCORING runs: it renders the annotated, centralized accum FCS.
-            if (params.enrichment && !params.scoring) {
-                def fcs_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }
-                def fcs_stats_ch   = lists_out.fcs_stats
-                def fcs_bg_ch      = lists_out.gene_lists.map { files -> files.find { it.name == 'background.txt' } }
-                def fcs_label_ch   = lists_out.direction.map { dir -> "13.FCS_accumulation_${dir}_${params.traitname ?: 'trait'}" }
-
-                ACCUMULATION_FCS_REPORT(
-                    fcs_subpath_ch,
-                    fcs_stats_ch,
-                    fcs_bg_ch,
-                    fcs_label_ch,
-                    Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats
-                )
-            }
+            // Accumulation no longer runs its own FCS ranking — its FCS "significance"
+            // was inflated by the missing permulation null (no compensating check against
+            // the RER/CAAS-tuned FDR threshold). It now contributes as a cross-module
+            // corroboration flag on CAAS's own leading edge instead.
 
             if (params.string) {
                 def str_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }

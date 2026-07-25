@@ -335,6 +335,24 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair", "") or "")),
             sig_hyp=_b(row.get("sig_hyp")) if pd.notna(row.get("sig_hyp")) else None,
             sig_perm=_b(row.get("sig_perm")) if pd.notna(row.get("sig_perm")) else None,
+            pvalue_fdr=(
+                float(row["pvalue_fdr"])
+                if "pvalue_fdr" in row and pd.notna(row["pvalue_fdr"])
+                else None
+            ),
+            pvalue_boot_fdr=(
+                float(row["pvalue_boot_fdr"])
+                if "pvalue_boot_fdr" in row and pd.notna(row["pvalue_boot_fdr"])
+                else None
+            ),
+            alpha_fdr=(
+                float(row["alpha_fdr"])
+                if "alpha_fdr" in row and pd.notna(row["alpha_fdr"])
+                else None
+            ),
+            sig_hyp_fdr=_b(row.get("sig_hyp_fdr")) if pd.notna(row.get("sig_hyp_fdr")) else None,
+            sig_perm_fdr=_b(row.get("sig_perm_fdr")) if pd.notna(row.get("sig_perm_fdr")) else None,
+            is_significant_fdr=_b(row.get("is_significant_fdr")) if pd.notna(row.get("is_significant_fdr")) else None,
         )
         entries.append(entry)
 
@@ -415,6 +433,19 @@ def get_caas_position_info(
             )
             info["pvalue_boot"] = None
 
+    for fld in ["pvalue_fdr", "pvalue_boot_fdr", "alpha_fdr"]:
+        if fld in row.index:
+            try:
+                val = row[fld]
+                info[fld] = float(val) if pd.notna(val) else None
+            except (ValueError, TypeError):
+                info[fld] = None
+
+    for fld in ["sig_hyp_fdr", "sig_perm_fdr", "is_significant_fdr"]:
+        if fld in row.index:
+            val = row[fld]
+            info[fld] = str(val).upper() == "TRUE" if pd.notna(val) else None
+
     logger.debug(
         "Found CAAS info for %s: tag=%s, significant=%s",
         gene_pos,
@@ -459,6 +490,12 @@ def build_caas_positions_map(
                     pvalue=info.get("pvalue"),
                     pvalue_boot=info.get("pvalue_boot"),
                     is_significant=info.get("is_significant", False),
+                    pvalue_fdr=info.get("pvalue_fdr"),
+                    pvalue_boot_fdr=info.get("pvalue_boot_fdr"),
+                    sig_hyp_fdr=info.get("sig_hyp_fdr"),
+                    sig_perm_fdr=info.get("sig_perm_fdr"),
+                    is_significant_fdr=info.get("is_significant_fdr"),
+                    alpha_fdr=info.get("alpha_fdr"),
                 )
 
                 # Parse amino acid conversion string

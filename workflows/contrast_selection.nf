@@ -68,11 +68,15 @@ workflow CONTRAST_SELECTION {
     if (params.reporting && params.prune_data) {
         log.info "Reporting + pruning enabled; running a single prune/exploration pass for contrast selection."
         prune_out = DATASET_PRUNE(trait_file, tree_file)
+        
+        def orig_trait_file = trait_file
+        def orig_tree_file = tree_file
+
         trait_file = prune_out.pruned_trait_file
         tree_file = prune_out.pruned_tree_file
         pruned_trait_emit = prune_out.pruned_trait_file
         pruned_tree_emit = prune_out.pruned_tree_file
-        dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
+        dataset_exploration_out = DATASET_EXPLORATION(orig_trait_file, orig_tree_file, prune_out.pruned_results_dir)
         dataset_out = dataset_exploration_out.results_dir
         contrast_stats_file = dataset_exploration_out.stats_file
     } else if (params.reporting){
@@ -83,11 +87,15 @@ workflow CONTRAST_SELECTION {
     } else if (params.prune_data) {
         log.info "Pruning selected; running data pruning module before contrast selection."
         prune_out = DATASET_PRUNE(trait_file, tree_file)
+        
+        def orig_trait_file = trait_file
+        def orig_tree_file = tree_file
+
         trait_file = prune_out.pruned_trait_file
         tree_file = prune_out.pruned_tree_file
         pruned_trait_emit = prune_out.pruned_trait_file
         pruned_tree_emit = prune_out.pruned_tree_file
-        dataset_exploration_out = DATASET_EXPLORATION(trait_file, tree_file, prune_out.pruned_results_dir)
+        dataset_exploration_out = DATASET_EXPLORATION(orig_trait_file, orig_tree_file, prune_out.pruned_results_dir)
         dataset_out = dataset_exploration_out.results_dir
         contrast_stats_file = dataset_exploration_out.stats_file
     } else {

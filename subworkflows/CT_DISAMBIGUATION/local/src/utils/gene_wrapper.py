@@ -95,6 +95,19 @@ def convert_convergence_result_to_dict(
             if not hasattr(ns, "pair_details") and "pairs" in result:
                 ns.pair_details = result.get("pairs")
 
+            if not hasattr(ns, "pvalue_fdr") and "pvalue_fdr" in result:
+                ns.pvalue_fdr = result.get("pvalue_fdr")
+            if not hasattr(ns, "pvalue_boot_fdr") and "pvalue_boot_fdr" in result:
+                ns.pvalue_boot_fdr = result.get("pvalue_boot_fdr")
+            if not hasattr(ns, "sig_hyp_fdr") and "sig_hyp_fdr" in result:
+                ns.sig_hyp_fdr = result.get("sig_hyp_fdr")
+            if not hasattr(ns, "sig_perm_fdr") and "sig_perm_fdr" in result:
+                ns.sig_perm_fdr = result.get("sig_perm_fdr")
+            if not hasattr(ns, "is_significant_fdr") and "is_significant_fdr" in result:
+                ns.is_significant_fdr = result.get("is_significant_fdr")
+            if not hasattr(ns, "alpha_fdr") and "alpha_fdr" in result:
+                ns.alpha_fdr = result.get("alpha_fdr")
+
             result = ns
         except Exception:
             # If normalization fails, keep original; downstream getattr will be defensive
@@ -117,6 +130,12 @@ def convert_convergence_result_to_dict(
         "sig_hyp": getattr(result, "sig_hyp", None),
         "sig_perm": getattr(result, "sig_perm", None),
         "multi_hypothesis": multi_hypothesis,
+        "pvalue_fdr": getattr(result, "pvalue_fdr", None),
+        "pvalue_boot_fdr": getattr(result, "pvalue_boot_fdr", None),
+        "sig_hyp_fdr": getattr(result, "sig_hyp_fdr", None),
+        "sig_perm_fdr": getattr(result, "sig_perm_fdr", None),
+        "is_significant_fdr": getattr(result, "is_significant_fdr", None),
+        "alpha_fdr": getattr(result, "alpha_fdr", None),
     }
 
     # Node mapping

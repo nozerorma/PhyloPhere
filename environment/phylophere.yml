@@ -131,6 +131,7 @@ dependencies:
   - importlib-metadata=8.7.0=pyhe01879c_1
   - isort=7.0.0=pyhd8ed1ab_0
   - jbig=2.1=h7f98852_2003
+  - jinja2  # gui/generation/render.py (PhyloPhere Runner GUI script templating)
   - jq=1.8.1=h73b1eb8_0
   - kernel-headers_linux-64=6.12.0=he073ed8_5
   - keyutils=1.6.3=hb9d3cd8_0

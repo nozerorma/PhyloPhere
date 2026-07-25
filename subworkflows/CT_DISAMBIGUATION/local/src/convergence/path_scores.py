@@ -13,14 +13,14 @@ modal ancestral state at the pair's MRCA (``focal_state``). The question this
 module answers is: *was each change isolated from the deeper background, or was
 the "derived" state already present above the MRCA?*
 
-To answer it we walk the chain of internal nodes from the pair's MRCA **up to
-the root** and, at each node ``j`` (hop ``k`` above the MRCA), weight its ASR
-posterior by ``w_k = 1 / (k + 1)``. Nodes immediately above the MRCA dominate;
-nodes near the root contribute little. This is topological (hop) weighting,
-deliberately **not** branch-length weighting: gene-tree branch lengths are in
-substitutions/site and are not comparable across genes, and long branches
-conflate evolutionary time with rate heterogeneity and reconstruction
-uncertainty.
+To answer it we walk internal nodes bounded by two regions, never the full
+MRCA-to-root path: the pair's own **private segment** (from the node directly
+above its MRCA up to, but excluding, the nearest point where its lineage
+merges with another changed pair's — the LAC), and the **LAC nodes**
+themselves. Nodes above the LAC are not examined. At each node visited, we
+read its ASR posterior directly (no hop weighting — PAML's posterior
+uncertainty already grows toward the root, so depth robustness instead comes
+from bounding the walk to these two regions rather than weighting a longer one).
 
 Two regimes per side
 --------------------
@@ -28,11 +28,11 @@ For each phenotype side of a pair we compare the tip state to the MRCA's modal
 state (both encoded in the active grouping scheme):
 
 * **Changed side** (tip != MRCA): *signed isolation*. At each node we score
-  ``P(ancestral) - P(derived)``. If the derived state was already present above
-  the MRCA the signal goes negative and the score collapses toward 0. A
-  ``contaminated`` flag is raised when the **modal** state at hop+1 (the node
-  directly above the MRCA) already equals the derived state — a qualitative
-  disqualifier indicating the "change" predates the MRCA.
+  ``1 - P(derived)``. If the derived state was already present above
+  the MRCA the product collapses toward 0. A ``contaminated`` flag is raised
+  when the **modal** state at hop+1 (the node directly above the MRCA) already
+  equals the derived state — a qualitative disqualifier indicating the
+  "change" predates the MRCA.
 * **Conserved side** (tip == MRCA): *not scored*. A side that retains the
   ancestral state is the contrast, not the signal. (``side_path_score`` still
   supports an unsigned-conservation mode for possible future use, but the
@@ -52,9 +52,7 @@ never inflates the convergence signal.
 
 Aggregation
 -----------
-``pair_score`` = mean isolation of a participating pair's changed side(s) (the
-per-pair MRCA→root walk). Across participating pairs the position score is the
-mean of pair scores multiplied by **five factors**:
+Five factors, computed per CAAS position and multiplied together:
 
 * ``independence`` (shared-origin axis): the changed pairs only converged
   *independently* if their shared ancestors did not already carry the derived
@@ -65,31 +63,61 @@ mean of pair scores multiplied by **five factors**:
   factor (and score) crater. Because it ranges over the few LAC nodes, not the
   full root paths, the product is **depth-independent**. Read straight from
   ``P(derived)`` — no ancestral term — so a third residue at a node simply lowers
-  ``P(derived)`` instead of being misread as ancestral (the §i edge case).
+  ``P(derived)`` instead of being misread as ancestral.
 
-* ``mrca_diversity`` (parallel axis, continuous): how distinct are the
-  ancestral starting points of the changed pairs? Compares the **posteriors** at
-  each changed pair's MRCA (in encoded group space), not just modal states.
-  Heavy posterior overlap => shared ancestral state (parallel — weaker, a shared
-  mutational tendency could explain it); disjoint posteriors => independent
-  origins (non-parallel — stronger evidence of selection). Count-independent (a
-  mean over pairwise overlaps), so replication — already in the CAAS p-value —
-  is not double-counted::
+* ``core`` (replication axis): ``P(≥2 independent changes)`` — the combinatorial
+  probability that at least two pairs changed independently in at least one
+  phenotype direction (top or bottom). Computed per side via inclusion-exclusion
+  on the per-pair private-isolation scores (each treated as P(change is
+  genuine)), then combined across directions:
+  ``core = 1 − (1 − core_top)(1 − core_bottom)``. A pair that changed on *both*
+  sides contributes to both halves; opposite-only changes (one pair top-only,
+  another bottom-only) correctly yield ``core = 0`` because neither direction
+  reaches ≥2.
 
-      diversity      = 1 - mean_pairwise_overlap(MRCA posteriors)   # 0..1
+  ``independence`` and ``core`` together form the **replication** tier —
+  ``P(shared ancestor clean AND ≥2 private-clean events)``. Multiplying them is
+  the correct joint probability, not two independent checks: private-segment
+  nodes and LAC nodes are disjoint, conditionally-independent parts of the
+  tree, so ``P(A) · P(B|A) = P(A ∩ B)``.
+
+* ``mrca_diversity`` (parallel axis, continuous): did the changed pairs'
+  private segments (the same MRCA→LAC walks ``core`` scores) pass through
+  genuinely different ancestral backgrounds, or does one pair's own MRCA
+  state show up somewhere along another pair's walk? For every pair of
+  changed pairs, both directions are checked — does A's MRCA state appear
+  anywhere in B's private segment, and does B's appear anywhere in A's —
+  using the same worst-case bound as ``core``/``independence`` at each node
+  visited, combined via the same "found somewhere" union logic. The two
+  directions are unioned into one "these share a background" probability per
+  pairwise comparison; the position's diversity is the mean over every
+  pairwise comparison among changed pairs. Heavy shared-background evidence
+  => parallel origin (weaker — a shared mutational tendency could explain
+  it); genuinely absent from each other's walks => independent origins
+  (non-parallel — stronger evidence of selection). Replication is already
+  captured by ``core``, so it is not double-counted here::
+
+      diversity      = 1 - mean_pairwise("shared background" probability)   # 0..1
       diversity_mult = floor + (1 - floor) * diversity   # floor (def 0.75) .. 1.0
 
-* ``derived_agreement`` (convergence axis): within each phenotype side, do the
-  changed pairs agree on **one** derived (encoded) residue? Multiple distinct
-  derived states on the same side is divergence, not convergence, and the
-  probability that this is a genuine convergent signal is divided across them::
+* ``derived_agreement`` (convergence axis): within each phenotype side that has
+  at least two changed pairs, what fraction land on the position's single most
+  common (plurality) derived residue? A side with exactly one changed pair has
+  nothing to agree or disagree with and is excluded from the average entirely
+  — "agreement" is a ≥2-observer concept. Computed from plain pair counts, not
+  weighted by any ancestral-reconstruction quantity: this axis is a fact about
+  observed tip residues (directly sequenced, no posterior), and weighting it by
+  a posterior-derived score would make it redundant with ``core``/
+  ``independence``, which already own the ancestral-uncertainty question::
 
-      derived_agreement = mean over changed sides of (1 / n_distinct_derived)
+      concentration_s = max_r( count of pairs landing on residue r )
+                         / count of changed pairs on side s          # in (0, 1]
+      derived_agreement = mean over qualifying sides of concentration_s
 
-  One derived residue per side -> 1.0; a side splitting across k residues -> 1/k.
-  Computed **per side**, so a pair changing on *both* sides (e.g. trait1->S,
-  trait0->T) is not penalised — each side is internally coherent (n=1) and a
-  both-sides change is a strong, interesting signal.
+  ``diversity_mult`` and ``derived_agreement`` together form the **strength**
+  tier — two independent discounts on the *quality* of a confirmed replication
+  event: did the lineages start from different places, and did they land on
+  the same place.
 
 * ``conservation_gate`` (conserved-pair axis): the mean conservation-to-root of
   conserved pairs (both tips retained ancestral), softened to
@@ -97,25 +125,18 @@ mean of pair scores multiplied by **five factors**:
   contrast); a pair that drifted -> down to 0.5 (weakens but never annihilates
   the real convergence). Neutral (1.0) when there are no conserved pairs (novel
   position — all lineages changed). The gate can only confirm/undermine, never
-  boost — convergence support is the primary signal.
+  boost, and is computed from a disjoint set of pairs — it stays outside the
+  replication/strength grouping entirely::
 
-* ``core`` (replication axis): ``P(≥2 independent changes)`` — the combinatorial
-  probability that at least two pairs changed independently in at least one
-  phenotype direction (top or bottom). Computed per side via inclusion-exclusion
-  on the per-pair path scores (each treated as P(change is genuine)), then
-  combined across directions: ``core = 1 − (1 − core_top)(1 − core_bottom)``.
-  A pair that changed on *both* sides contributes to both halves; opposite-only
-  changes (one pair top-only, another bottom-only) correctly yield ``core = 0``
-  because neither direction reaches ≥2.
-
-    asr_path_score = core * independence * diversity_mult
-                     * derived_agreement * conservation_gate
+      replication = independence * core
+      strength    = diversity_mult * derived_agreement
+      asr_path_score = replication * strength * conservation_gate
 
 Most-interesting case D->A & S->A maximizes the multipliers (diversity 1.0,
 agreement 1.0); parallel S->A & S->A scores diversity 0.75; a false "S->A & S->V"
-is penalized on agreement (0.5); a conserved-CAAS with a clean control keeps
-gate~1, a drifting control drops it toward 0.5. GS encoding handles biochemistry,
-so agreement is tested on the scheme-encoded residues.
+is penalized on agreement; a conserved-CAAS with a clean control keeps gate~1, a
+drifting control drops it toward 0.5. GS encoding handles biochemistry, so
+agreement is tested on the scheme-encoded residues.
 
 The module is intentionally free of PAML/IO dependencies so it can be unit
 tested with synthetic trees and posteriors.
@@ -210,6 +231,55 @@ def encoded_distribution(
         except (TypeError, ValueError):
             continue
     return enc
+
+
+def worst_case_group_probability(
+    distribution: Optional[Dict[str, float]],
+    target_enc: Optional[str],
+    scheme: Optional[str],
+) -> float:
+    """Upper bound on posterior mass for ``target_enc`` given a possibly
+    incomplete distribution.
+
+    Returns the exact recorded mass if ``target_enc`` is present. Otherwise
+    returns the total *unrecorded* mass (``1 - sum(recorded)``) as a ceiling:
+    everything not accounted for could, in the worst case, belong to
+    ``target_enc``. This requires no assumption about how the unrecorded mass
+    is actually distributed among the residues that aren't recorded, unlike a
+    uniform-fill estimate -- it is a guaranteed bound, not a guess.
+    """
+    if not target_enc:
+        return 0.0
+    enc = encoded_distribution(distribution, scheme)
+    if target_enc in enc:
+        return enc[target_enc]
+    return max(0.0, 1.0 - sum(enc.values()))
+
+
+def worst_case_any_group_probability(
+    distribution: Optional[Dict[str, float]],
+    target_encs,
+    scheme: Optional[str],
+) -> float:
+    """Upper bound on posterior mass for *any* of several target groups.
+
+    Sums the exact recorded mass for targets that are present, plus the
+    shared unrecorded remainder *once* if at least one target is absent from
+    the distribution -- not once per absent target, which would double-count
+    the same unknown pool of probability mass.
+    """
+    if not target_encs:
+        return 0.0
+    enc = encoded_distribution(distribution, scheme)
+    known = 0.0
+    any_unrecorded = False
+    for t in target_encs:
+        if t in enc:
+            known += enc[t]
+        else:
+            any_unrecorded = True
+    remainder = max(0.0, 1.0 - sum(enc.values()))
+    return known + (remainder if any_unrecorded else 0.0)
 
 
 def posterior_overlap(dist_a: Dict[str, float], dist_b: Dict[str, float]) -> float:
@@ -318,8 +388,11 @@ def side_path_score(
 
     For a changed side (is_changed=True), walks the private segment from the
     parent of the MRCA up to stop_at_id (exclusive) and computes the product
-    of (1 - P(derived)). If the private segment is empty (count == 0, e.g. sibling
-    merge), returns 1.0 (no private contamination).
+    of (1 - P(derived)), where P(derived) is the worst-case bound (exact if
+    the derived residue is the node's recorded state, otherwise the total
+    unrecorded mass) rather than a naive lookup that silently reads 0 for any
+    residue that is not the recorded state. If the private segment is empty
+    (count == 0, e.g. sibling merge), returns 1.0 (no private contamination).
 
     For a conserved side (is_changed=False), walks the entire path to the root
     and computes the unweighted mean of P(ancestral) (no stop_at_id).
@@ -341,7 +414,7 @@ def side_path_score(
         p_anc = group_probability(dist, ancestral_enc, scheme)
 
         if is_changed:
-            p_der = group_probability(dist, derived_enc, scheme)
+            p_der = worst_case_group_probability(dist, derived_enc, scheme)
             score *= max(0.0, 1.0 - p_der)
             if k == 1 and modal_encoded(dist, scheme) == derived_enc and derived_enc:
                 contaminated = True
@@ -377,6 +450,24 @@ def parse_conserved_ids(conserved_pair: Optional[str], n_pairs: int) -> List[int
     return [p for p in ids if 1 <= p <= n_pairs]
 
 
+# ── Shared combinatorics ──────────────────────────────────────────────────────
+def _p_at_least_2(p_list: List[float]) -> float:
+    """Exact P(>= 2 successes) via inclusion-exclusion over independent Bernoullis."""
+    if len(p_list) < 2:
+        return 0.0
+    p0 = 1.0
+    for p in p_list:
+        p0 *= (1.0 - p)
+    p1 = 0.0
+    for i in range(len(p_list)):
+        term = p_list[i]
+        for j in range(len(p_list)):
+            if j != i:
+                term *= (1.0 - p_list[j])
+        p1 += term
+    return max(0.0, min(1.0, 1.0 - p0 - p1))
+
+
 # ── Position-level aggregation ───────────────────────────────────────────────
 def compute_asr_path_score(
     pair_details: Optional[List[Dict[str, Any]]],
@@ -405,9 +496,11 @@ def compute_asr_path_score(
             independent one gets 1.0. Default 0.75.
 
     Returns:
-        Dict with ``asr_path_score`` (position level, 0-1), ``independence``,
-        ``mrca_diversity``, ``derived_agreement``, ``conservation_gate``,
-        ``core``, ``pair_scores`` ({pair_id: score}) and ``pair_contaminated``.
+        Dict with ``asr_path_score`` (position level, 0-1), ``replication``
+        (independence * core), ``strength`` (diversity_mult *
+        derived_agreement), ``independence``, ``mrca_diversity``,
+        ``derived_agreement``, ``conservation_gate``, ``core``,
+        ``pair_scores`` ({pair_id: score}), and ``pair_contaminated``.
     """
     pairs = pair_details or []
     n_pairs = len(pairs)
@@ -419,8 +512,12 @@ def compute_asr_path_score(
     conserved_conservations: List[float] = []  # conservation-to-root of conserved pairs
     # Derived (encoded) residues of changed tips, kept per phenotype side so
     # within-side divergence (the non-convergent case) is assessed separately
-    # from a pair changing on *both* sides (a strong convergent signal).
-    derived_by_side: Dict[str, List[str]] = {"top_tip_mode": [], "bottom_tip_mode": []}
+    # from a pair changing on *both* sides (a strong convergent signal). Each
+    # entry also carries the pair id so derived_agreement can count pairs per
+    # residue without a second pass over `pairs`.
+    derived_by_side: Dict[str, List[Tuple[int, str]]] = {
+        "top_tip_mode": [], "bottom_tip_mode": [],
+    }
     derived_pool: set = set()  # all encoded derived states across changed pairs
 
     # ── Phase 1: classify pairs ──────────────────────────────────────────────
@@ -450,7 +547,7 @@ def compute_asr_path_score(
             if tip_enc is None or tip_enc == anc_enc:
                 continue  # missing or conserved side → not scored
             sides.append((side_key, tip_enc))
-            derived_by_side[side_key].append(tip_enc)
+            derived_by_side[side_key].append((pid, tip_enc))
             derived_pool.add(tip_enc)
 
         if sides:
@@ -472,6 +569,8 @@ def compute_asr_path_score(
     if not changed:
         return {
             "asr_path_score": 0.0,
+            "replication": 0.0,
+            "strength": 0.0,
             "independence": 1.0,
             "mrca_diversity": 0.0,
             "derived_agreement": 0.0,
@@ -502,14 +601,25 @@ def compute_asr_path_score(
     # changes" — they are changes in opposite directions.
     top_pair_scores: Dict[int, float] = {}
     bottom_pair_scores: Dict[int, float] = {}
+    # Each pair's own MRCA plus its private-segment node ids (parent-of-MRCA
+    # up to, excluding, its nearest LAC) -- used below by mrca_diversity as
+    # the set of places another pair's background state might be found. The
+    # MRCA itself must be included: for a "sibling merge" (LAC is directly
+    # the MRCA's parent) the private segment is empty, and without the MRCA
+    # as a fallback search point, two pairs with IDENTICAL MRCA states would
+    # wrongly read as maximally diverse (nothing to find them in) rather than
+    # maximally similar.
+    diversity_search_nodes: Dict[int, List[int]] = {}
     for c in changed:
         # Nearest LAC = deepest merge point on this pair's root-path. The private
         # segment (below it) is the pair's own, judged by the core walk; the
         # shared segment (at/above it) is judged by the independence product.
-        stop_at = next(
-            (n for n in path_to_root_ids(node_index, c["mrca_id"]) if n in lac_nodes),
-            None,
+        full_path = path_to_root_ids(node_index, c["mrca_id"])
+        stop_at = next((n for n in full_path if n in lac_nodes), None)
+        private_segment = (
+            full_path if stop_at is None else full_path[: full_path.index(stop_at)]
         )
+        diversity_search_nodes[c["pid"]] = [c["mrca_id"]] + private_segment
         side_scores: List[float] = []
         pair_contam = False
         for side_key, tip_enc in c["sides"]:
@@ -527,52 +637,82 @@ def compute_asr_path_score(
         pair_contaminated[c["pid"]] = pair_contam
 
     # ── Independence: derived state must be ABSENT at the shared merge points ──
-    # For each LAC node, (1 - P(derived_pool there)). Product across LAC nodes:
-    # if any merge point already carries a derived state, the pairs below it did
-    # not converge independently — they inherited it — and the score craters.
-    # This is the direct "probability the pattern predates the shared ancestor"
-    # check, read straight from the posteriors (no ancestral term needed, so a
-    # third residue at a node simply lowers P(derived) rather than misreading).
+    # For each LAC node, (1 - P(any residue in derived_pool present there)).
+    # Product across LAC nodes: if any merge point already carries a derived
+    # state, the pairs below it did not converge independently — they
+    # inherited it — and the score craters. P(any of derived_pool) uses the
+    # same worst-case bound as core (exact for a recorded residue, the
+    # unrecorded remainder added once -- not once per candidate residue,
+    # which would double-count the same unknown mass -- for however many of
+    # derived_pool aren't the node's recorded state).
     independence = 1.0
     for lac in lac_nodes:
         dist = node_dist(per_node_dist, lac)
-        p_derived = sum(group_probability(dist, d, scheme) for d in derived_pool)
+        p_derived = worst_case_any_group_probability(dist, derived_pool, scheme)
         independence *= max(0.0, 1.0 - p_derived)
 
-    # Parallel axis (continuous): how distinct are the ancestral starting points
-    # of the changed pairs? Compares the *posteriors* at each MRCA in encoded
-    # group space. Heavy overlap → same ancestral state (parallel — weaker, a
-    # shared mutational tendency could explain it); disjoint → independent origins
-    # (non-parallel — stronger). Count-independent (mean over pairwise overlaps):
-    # replication already lives in the CAAS p-value.
-    if len(changed_mrcas) >= 2:
-        mrca_dists = [
-            encoded_distribution(node_dist(per_node_dist, m), scheme)
-            for m in changed_mrcas
-        ]
-        overlaps = [posterior_overlap(a, b) for a, b in combinations(mrca_dists, 2)]
-        mean_overlap = sum(overlaps) / len(overlaps) if overlaps else 1.0
-        diversity = 1.0 - mean_overlap  # 0 = all parallel, 1 = all independent
+    # Parallel axis (continuous): did the changed pairs' private segments (the
+    # same MRCA->LAC walks core just scored) pass through genuinely different
+    # ancestral backgrounds, or does one pair's own MRCA state show up
+    # somewhere along another pair's walk (suggesting a shared background)?
+    # For every pair of changed pairs, check both directions -- does pair A's
+    # MRCA state appear anywhere in pair B's private segment, and does pair
+    # B's appear anywhere in A's -- using the same worst-case bound at every
+    # node visited, combined into "found somewhere" via the same P(>=1) union
+    # logic as core's P(>=2): the chance a state is absent at every node in a
+    # segment, flipped. The two directions are then unioned into one
+    # "these share a background" probability for that pair-comparison, and
+    # the position's diversity is the mean over every pairwise comparison
+    # among changed pairs -- the same aggregation the old MRCA-only version
+    # used, just built from richer, multi-node comparisons.
+    def _found_probability(target_enc: Optional[str], segment_nodes: List[int]) -> float:
+        if target_enc is None or not segment_nodes:
+            return 0.0
+        p_absent = 1.0
+        for node_id in segment_nodes:
+            dist = node_dist(per_node_dist, node_id)
+            p_absent *= max(0.0, 1.0 - worst_case_group_probability(dist, target_enc, scheme))
+        return max(0.0, min(1.0, 1.0 - p_absent))
+
+    if len(changed) >= 2:
+        pairwise_diversities: List[float] = []
+        for ca, cb in combinations(changed, 2):
+            a_state = modal_encoded(node_dist(per_node_dist, ca["mrca_id"]), scheme)
+            b_state = modal_encoded(node_dist(per_node_dist, cb["mrca_id"]), scheme)
+            p_a_in_b = _found_probability(a_state, diversity_search_nodes.get(cb["pid"], []))
+            p_b_in_a = _found_probability(b_state, diversity_search_nodes.get(ca["pid"], []))
+            shared = 1.0 - (1.0 - p_a_in_b) * (1.0 - p_b_in_a)
+            pairwise_diversities.append(1.0 - shared)
+        diversity = sum(pairwise_diversities) / len(pairwise_diversities)
     else:
         diversity = 0.5  # single changed pair: parallelism not assessable
     diversity_mult = diversity_floor + (1.0 - diversity_floor) * diversity
 
-    # Convergence axis: within each phenotype side, do the changed pairs agree on
-    # *one* derived residue? Multiple distinct derived states on the same side is
-    # divergence, not convergence, and the "probability this is a real convergent
-    # signal" is divided across them: derived_agreement = 1 / n_distinct_derived.
-    # Computed per side and averaged, so a pair changing on BOTH sides (e.g.
-    # trait1→S, trait0→T) is NOT penalised — each side is internally coherent
-    # (n=1) and a both-sides change is a strong, interesting signal.
-    side_agreements: List[float] = []
-    for side_derived in derived_by_side.values():
-        if side_derived:  # >=1 changed pair on this phenotype side
-            n_distinct_derived = len(set(side_derived))
-            side_agreements.append(1.0 / n_distinct_derived)
-    if side_agreements:
-        derived_agreement = sum(side_agreements) / len(side_agreements)
+    # Convergence axis: within each phenotype side that has at least two
+    # changed pairs, what fraction land on the position's single most common
+    # (plurality) derived residue? A side with exactly one changed pair has
+    # nothing to agree or disagree with and is excluded from the average
+    # entirely — "agreement" is a >=2-observer concept, and crediting a lone
+    # change as trivial (1/1) agreement would dilute a real disagreement
+    # elsewhere on the position. Computed from plain pair counts: this axis is
+    # a fact about observed tip residues (no posterior involved), kept
+    # independent of the ancestral-uncertainty question `core`/`independence`
+    # already own.
+    concentration_by_side: Dict[str, float] = {}
+    for side_key, pid_residues in derived_by_side.items():
+        if len(pid_residues) < 2:
+            continue
+        count_by_residue: Dict[str, int] = {}
+        for _pid, r in pid_residues:
+            count_by_residue[r] = count_by_residue.get(r, 0) + 1
+        total = len(pid_residues)
+        plurality_r = max(count_by_residue, key=count_by_residue.get)
+        concentration_by_side[side_key] = count_by_residue[plurality_r] / total
+
+    if concentration_by_side:
+        derived_agreement = sum(concentration_by_side.values()) / len(concentration_by_side)
     else:
-        derived_agreement = 1.0  # no changed sides (handled above by empty `changed`)
+        derived_agreement = 1.0  # no side has >=2 changed pairs to assess agreement on
 
     # ── Combinatorial Core Score: P(>= 2 independent changes) ──────────────────
     # Computed *per phenotype side* and then combined via union. This is the
@@ -581,40 +721,26 @@ def compute_asr_path_score(
     # directions — not convergence. Without the per-side split they would both
     # enter p_list and produce P(≥2) ≈ 1 even though neither direction has ≥2
     # independent events.
-
-    def _p_at_least_2(p_list: List[float]) -> float:
-        if len(p_list) < 2:
-            return 0.0
-        p0 = 1.0
-        for p in p_list:
-            p0 *= (1.0 - p)
-        p1 = 0.0
-        for i in range(len(p_list)):
-            term = p_list[i]
-            for j in range(len(p_list)):
-                if j != i:
-                    term *= (1.0 - p_list[j])
-            p1 += term
-        return max(0.0, min(1.0, 1.0 - p0 - p1))
-
     core_top = _p_at_least_2(list(top_pair_scores.values()))
     core_bottom = _p_at_least_2(list(bottom_pair_scores.values()))
     core = 1.0 - (1.0 - core_top) * (1.0 - core_bottom)
 
-    asr_path_score = max(
-        0.0,
-        min(
-            1.0,
-            core
-            * independence
-            * diversity_mult
-            * derived_agreement
-            * conservation_gate,
-        ),
-    )
+    # replication: P(shared ancestor clean AND >=2 private-clean events). A
+    # genuine joint probability, not two independent checks — private-segment
+    # nodes and LAC nodes are disjoint, conditionally-independent parts of the
+    # tree, so P(A) * P(B|A) = P(A ∩ B).
+    replication = independence * core
+    # strength: two independent discounts on the quality of a confirmed
+    # replication event — did the lineages start from different places, and
+    # did they land on the same place.
+    strength = diversity_mult * derived_agreement
+
+    asr_path_score = max(0.0, min(1.0, replication * strength * conservation_gate))
 
     return {
         "asr_path_score": asr_path_score,
+        "replication": replication,
+        "strength": strength,
         "independence": independence,
         "mrca_diversity": diversity,
         "derived_agreement": derived_agreement,

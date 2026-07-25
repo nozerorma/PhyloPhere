@@ -19,6 +19,8 @@ choose_solver() {
 SOLVER="$(choose_solver)"
 if [[ "$SOLVER" == "none" ]]; then
   echo "ERROR: Need micromamba, mamba, or conda on PATH." >&2
+  echo "Please install some conda variant. Micromamba is recommended for simplicity."
+  echo "https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html"
   exit 1
 fi
 

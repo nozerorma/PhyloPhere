@@ -118,11 +118,13 @@ export SLURM_ARRAY_TASK_ID
 case $SLURM_ARRAY_TASK_ID in
      1)  CLASS=1; TRAIT="neoplasia_prevalence"; SECONDARY="malignant_prevalence"; NTRAIT="adult_necropsy_count"; CTRAIT="neoplasia_necropsy"; PRUNE="neoplasia_exclude.txt"; PRUNE_SEC="malignant_exclude.txt"; DISCRETE="quintile"
          export SCORING_RER_INPUT="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/neoplasia_prevalence/runtime/filter/rerconverge/rer_results/rerconverge_summary_neoplasia_prevalence.tsv"
+         export SCORING_RER_PERMS_INPUT="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/neoplasia_prevalence/runtime/filter/rerconverge/rer_results/neoplasia_prevalence.continuous.perms.rds"
          export SCORING_FADE_SUMMARY_TOP="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/neoplasia_prevalence/runtime/filter/selection/fade/top/fade_summary_top.tsv"
          export SCORING_FADE_SUMMARY_BOTTOM="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/neoplasia_prevalence/runtime/filter/selection/fade/bottom/fade_summary_bottom.tsv"
          ;;
      2)  CLASS=1; TRAIT="malignant_prevalence"; SECONDARY="neoplasia_prevalence"; NTRAIT="adult_necropsy_count"; CTRAIT="malignant_count"; PRUNE="malignant_exclude.txt"; PRUNE_SEC="neoplasia_exclude.txt"; DISCRETE="quintile"
          export SCORING_RER_INPUT="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/malignant_prevalence/runtime/filter/rerconverge/rer_results/rerconverge_summary_malignant_prevalence.tsv"
+         export SCORING_RER_PERMS_INPUT="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/malignant_prevalence/runtime/filter/rerconverge/rer_results/malignant_prevalence.continuous.perms.rds"
          export SCORING_FADE_SUMMARY_TOP="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/malignant_prevalence/runtime/filter/selection/fade/top/fade_summary_top.tsv"
          export SCORING_FADE_SUMMARY_BOTTOM="/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer/malignant_prevalence/runtime/filter/selection/fade/bottom/fade_summary_bottom.tsv"
          ;;

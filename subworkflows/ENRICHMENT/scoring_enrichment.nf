@@ -47,6 +47,8 @@ process SCORING_STRING_REPORT {
     path gene_lists
     path background
     path gene_scores
+    path domino_network_sif
+    path domino_modules_dir
 
     output:
     path "15.STRING_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -61,13 +63,9 @@ process SCORING_STRING_REPORT {
     def traitname = params.traitname ?: 'unknown_trait'
     def species   = params.string_species           ?: 9606
     def req_score = params.string_required_score    ?: 400
-    def net_score = params.string_network_score_thr ?: 700
+    def net_score = params.domino_network_score_thr ?: 700
     def fdr_thr   = params.string_fdr              ?: 0.1
     def top_thr   = params.string_top_thr          ?: 15
-    // PPI density test. Honours the custom background: set_background(cleaned_background)
-    // is forwarded to the STRING API, so the null is draws from cleaned_background, not
-    // the whole proteome. See string_enable_ppi in conf/enrichment.config.
-    def enable_ppi = 'TRUE'
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
 
@@ -96,12 +94,13 @@ process SCORING_STRING_REPORT {
                     project_name        = '${traitname}',
                     species             = ${species},
                     required_score      = ${req_score},
-                    network_score_thr   = ${net_score},
+                    domino_network_score_thr = ${net_score},
                     fdr_thr             = ${fdr_thr},
                     top_thr             = ${top_thr},
-                    enable_ppi_enrichment = ${enable_ppi},
                     gene_scores_file    = ${gs_arg},
-                    string_db_dir       = '${params.string_db_dir}'
+                    string_db_dir       = '${params.string_db_dir}',
+                    domino_network_sif  = '${domino_network_sif}',
+                    domino_modules_dir  = '${domino_modules_dir}'
                 ),
                 output_file = '15.STRING_report_${traitname}.html'
             )
@@ -164,10 +163,17 @@ process SCORING_COMPARE_REPORT {
     // One fcs_all_results.tsv per module — stageAs distinct names to avoid the
     // same-filename collision; absent modules arrive as the NO_FCS_ALL sentinel and
     // are filtered by the non-empty (-s) guard below + column validation in the Rmd.
+    // FADE/Accumulation no longer run their own FCS ranking (unreliable — see FADE's
+    // max-of-many-sites statistic and Accumulation's missing permulation null); they
+    // remain available as cross-module corroboration flags on CAAS's own leading edge.
     path caas_fcs,  stageAs: 'caas_fcs_all.tsv'    // CAAS (composite) FCS results
     path rer_fcs,   stageAs: 'rer_fcs_all.tsv'     // RER FCS results
-    path fade_fcs,  stageAs: 'fade_fcs_all.tsv'    // FADE FCS results
-    path accum_fcs, stageAs: 'accum_fcs_all.tsv'   // accumulation FCS results
+    // Leading-edge tables feed the orthogonal composite score (percentile
+    // concentration + cross-module corroboration) that orders every table/plot
+    // in the Cross-module convergence section. NO_LEADING_EDGE sentinel when a
+    // module's report didn't run.
+    path caas_le,   stageAs: 'caas_leading_edge.tsv'
+    path rer_le,    stageAs: 'rer_leading_edge.tsv'
     path string_tsvs       // string_results/*_enrichment.tsv files (may be placeholder)
 
     output:
@@ -187,6 +193,7 @@ process SCORING_COMPARE_REPORT {
                 '12.Comparison_report.Rmd',
                 params = list(
                     fcs_dir    = 'cmp_fcs',
+                    fcs_le_dir = 'cmp_fcs_le',
                     string_dir = 'cmp_string',
                     fdr_thr    = ${fdr_thr},
                     pperm_thr  = ${pperm_thr},
@@ -201,12 +208,13 @@ process SCORING_COMPARE_REPORT {
     def stage_cmd = """
         cp -R ${local_dir}/* .
 
-        mkdir -p cmp_fcs cmp_string
+        mkdir -p cmp_fcs cmp_fcs_le cmp_string
 
         # Per-module FCS all-results tables (skip empty/sentinel files via -s).
         # 12.Comparison_report.Rmd derives the module from the <module>_fcs_all.tsv name.
-        for m in caas rer fade accum; do
+        for m in caas rer; do
             [ -s "\${m}_fcs_all.tsv" ] && cp "\${m}_fcs_all.tsv" "cmp_fcs/\${m}_fcs_all.tsv" || true
+            [ -s "\${m}_leading_edge.tsv" ] && cp "\${m}_leading_edge.tsv" "cmp_fcs_le/\${m}_leading_edge.tsv" || true
         done
 
         # STRING enrichment TSVs

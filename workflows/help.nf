@@ -142,6 +142,9 @@ Standalone mode (provide inputs directly):
 --scoring_fade_summary_top  <"fade_summary_top.tsv">     ""
 --scoring_fade_summary_bottom <"fade_summary_bottom.tsv"> ""
 --scoring_rer_input         <"rerconverge_summary.tsv">  ""
+--rer_perms_file            <"trait.continuous.perms.rds"> ""    # RER permulation null → p.perm in centralized RER FCS (standalone-RER path only)
+--rer_universe_file         <"rer_background.txt">        ""    # RER's own tested-gene universe for its FCS report (else falls back to cleaned_background_main.txt)
+--fade_universe_file        <"fade_background.txt">       ""    # FADE's own tested-gene universe for its FCS report (else falls back to cleaned_background_main.txt)
 --scoring_accum_dir                 <"accumulation_dir/">              ""
 --scoring_background_input          <"background.txt">                 ""
 

@@ -1,15 +1,20 @@
 ---
 title: "Independent Contrast Selection for Trait Analysis"
-author: "PhyloPhere Pipeline"
-date: "`r Sys.Date()`"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
 output:
   html_document:
+    theme: flatly
+    syntax_highlighting: tango
     toc: true
-    toc_float: true
-    toc_depth: 3
-    theme: cosmo
+    toc_float:
+      collapsed: false
     code_folding: hide
     df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
 params:
   trait_file: NULL
   tree_file: NULL
@@ -28,6 +33,37 @@ params:
   bottom_quantile: "0.10"
   contrast_max_iter: "3"
 ---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
 
 ```{r header}
 
@@ -84,10 +120,24 @@ if (!exists("debug_log", inherits = TRUE)) {
 }
 
 # Load additional libraries
+library(dplyr)
 library(purrr)
 library(tibble)
 library(ggplot2)
+library(readr)
+library(reshape2)
+library(ggrepel)
 library(ggtree)
+library(ggnewscale)
+library(ggstar)
+library(colorspace)
+library(treeio)
+library(tidytree)
+library(phylolm)
+library(ggtreeExtra)
+library(geiger)
+library(rphylopic)
+library(paletteer)
 
 # Load selection algorithm
 source("./src/selection_algorithm.R")
@@ -237,6 +287,27 @@ This section places the selected contrast pairs onto the phylogeny, highlighting
 
 ```{r selected_pairs_tree, fig.height=15, fig.width=15, dev="png", dpi=320, message=FALSE, warning=FALSE}
 
+# Fan-layout tree with highlighted contrast species — mirrors the base fan
+# tree in 2.Phenotype_exploration.Rmd (ggtree(..., layout="fan", open.angle=15,
+# size=tree_line_width), square-sized via species_plot_profile()$diagnostic_size).
+# A rectangular tree with one tip label per species doesn't scale past a
+# handful of tips (labels overlap / the plot grows unreadably tall); the fan
+# layout fixes that, and only the SELECTED contrast species get a text label
+# (everyone else just gets a coloured tip point) to keep it legible.
+n_tips <- length(pruned_tree$tip.label)
+tree_profile <- species_plot_profile(n_species = n_tips)$tree
+
+dyn_size <- tree_profile$diagnostic_size
+tip_label_size <- clamp_value(6.5 - 0.015 * n_tips, 3.5, 6.5)
+tree_line_size <- tree_profile$tree_line_width * 1.8
+# Offset scales with total tree depth (root-to-tip branch-length units) rather
+# than a fixed constant, since chronogram vs phylogram branch-length scales
+# differ by orders of magnitude across traits/datasets -- a fixed offset would
+# sit on the tips for one tree and float off-panel for another.
+tip_label_offset <- max(ape::node.depth.edgelength(pruned_tree)) * 0.03
+
+knitr::opts_current$set(fig.width = dyn_size, fig.height = dyn_size)
+
 tree_tip_df <- tibble::tibble(species = pruned_tree$tip.label) %>%
   dplyr::left_join(
     traits_res %>% dplyr::select(species, contrast_group),
@@ -247,34 +318,58 @@ tree_tip_df <- tibble::tibble(species = pruned_tree$tip.label) %>%
       contrast_group == 1 ~ "Top/High",
       contrast_group == 0 ~ "Bottom/Low",
       TRUE ~ "Not selected"
-    )
+    ),
+    # Precomputed logical (rather than comparing to a string literal inside
+    # aes(subset=...)) — ggtree's aes_()/aes_string() compatibility shim mangles
+    # a quoted string comparison there and throws a parse error.
+    is_selected = contrast_label != "Not selected"
   )
 
-# Attach tip metadata via tidytree::as.treedata (as in 2.Phenotype_exploration.Rmd)
-# rather than the %<+% + geom_tippoint/geom_tiplab route, which calls ggtree
-# internals (geom_segment2 -> ggplot2:::is.waive) that ggplot2 4.x no longer has.
+# Attach tip metadata via tidytree::as.treedata
 contrast_tree_tibble <- tidytree::as_tibble(pruned_tree) %>%
   dplyr::rename(species = label)
 contrast_tree_with_labels <- dplyr::full_join(contrast_tree_tibble, tree_tip_df, by = "species")
 contrast_tree_data <- tidytree::as.treedata(contrast_tree_with_labels)
 
 selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
-                              layout = "fan", open.angle = 15, size = 0.4) +
-  geom_text2(aes(label = species), hjust = -0.1, size = 2.5) +
+                              layout = "fan", open.angle = 15,
+                              size = tree_line_size) +
+  geom_tippoint(size = tree_line_size * 1.5) +
+  # label = species: the tip tibble renames the tree's own `label` column to
+  # `species` (matching report 2's convention) before rebuilding the treedata
+  # object, so the treedata no longer has a `label` field for geom_tiplab's
+  # default aes(label=label) to fall back on — it silently drew node-index
+  # numbers instead of species names without this explicit mapping.
+  # align=FALSE (report 2's own tiplab/cladelab usage never sets align=TRUE
+  # either): the aligned-connector-line codepath (geom_segment2) errors under
+  # this environment's ggtree/ggplot2 pairing (missing internal `is.waive`).
+  geom_tiplab(aes(subset = is_selected, label = species),
+              size = tip_label_size, offset = tip_label_offset,
+              show.legend = FALSE) +
   scale_color_manual(
     name = "Contrast group",
     values = c("Top/High" = "red", "Bottom/Low" = "forestgreen", "Not selected" = "grey70"),
+    breaks = c("Top/High", "Bottom/Low", "Not selected"),
     na.value = "grey70"
   ) +
   labs(title = paste("Selected contrast pairs for trait:", capitalized_trait)) +
+  # Extra panel expansion (plain ggplot2 scales, not a ggtree-specific helper
+  # -- ggtree's fan layout is Cartesian under the hood) so the offset tip
+  # labels have room to render fully instead of being clipped at the device
+  # edge; the default 5% expansion isn't enough once labels sit off the tips.
+  scale_x_continuous(expand = expansion(mult = 0.18)) +
+  scale_y_continuous(expand = expansion(mult = 0.18)) +
   theme(
     legend.position = "right",
-    plot.title = element_text(hjust = 0.5, face = "bold")
+    legend.title = element_text(size = 16, face = "bold"),
+    legend.text = element_text(size = 13),
+    plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+    plot.margin = margin(20, 20, 20, 20)
   )
 
 ggsave(
   file.path(traitfile_dir, "selected_pairs_tree.png"),
-  selected_pairs_tree, device = "png", width = 15, height = 15, dpi = "retina"
+  selected_pairs_tree, device = "png", width = dyn_size, height = dyn_size, dpi = "retina"
 )
 
 selected_pairs_tree
@@ -313,17 +408,20 @@ head(bootstrap_traitfile)
 
 ```
 
-## Session Information
+---
 
-```{r debug_dump, results='asis'}
+## Summary
 
-if (length(phylo_debug_log) > 0) {
-  cat("### Debug log\n")
-  cat(paste0("[DEBUG] ", phylo_debug_log, "\n"))
-}
+This report summarizes the results of the **Trait Analysis** analysis.
 
-```
+---
 
-```{r session_info}
+<details>
+<summary>Session Info</summary>
+```{r session-info}
 sessionInfo()
 ```
+</details>
+
+*Generated by PhyloPhere — Trait Analysis Module*
+*Date of generation: `r Sys.Date()`*

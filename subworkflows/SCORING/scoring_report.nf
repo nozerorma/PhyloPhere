@@ -57,6 +57,7 @@ process SCORING_REPORT {
     path caas_pos_pval       // optional: lean recovery p-value per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
     path caas_pos_sample     // optional: lean capped per-scheme sample for distribution plots (NO_CAAS_POS_SAMPLE sentinel)
     path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay
+    path background_file
 
     output:
     path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -84,6 +85,7 @@ process SCORING_REPORT {
     def pos_pval_arg = (caas_pos_pval.name =~ /^NO_CAAS_POS_PVAL|^NO_FILE/) ? 'NULL' : "'${caas_pos_pval}'"
     def pos_sample_arg = (caas_pos_sample.name =~ /^NO_CAAS_POS_SAMPLE|^NO_FILE/) ? 'NULL' : "'${caas_pos_sample}'"
     def filt_disc_arg = (filtered_discovery.name =~ /^NO_POSTPROC|^NO_FILE/) ? 'NULL' : "'${filtered_discovery}'"
+    def bg_file_arg = (background_file.name =~ /^NO_BACKGROUND|^NO_FILE/) ? 'NULL' : "'${background_file}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
 
     if (params.use_singularity || params.use_apptainer) {
@@ -116,6 +118,7 @@ process SCORING_REPORT {
                     caas_pos_pval_file   = ${pos_pval_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
                     filtered_discovery_file = ${filt_disc_arg},
+                    background_file      = ${bg_file_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
                 ),
@@ -153,6 +156,7 @@ process SCORING_REPORT {
                     caas_pos_pval_file   = ${pos_pval_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
                     filtered_discovery_file = ${filt_disc_arg},
+                    background_file      = ${bg_file_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined'
                 ),

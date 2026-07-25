@@ -28,15 +28,31 @@ process POSENRICH_BUILD_GMT {
     path egg_annotations_file
     path map_dir
     path cosmic_db
+    path pai3d_db
     path cleaned_background
+    path fade_sites_top_file
+    path fade_sites_bottom_file
 
     output:
     path "*.gmt", emit: gmts
     path "characterization_layers.tsv", emit: charset
+    path "cosmic_coverage_genes.txt", optional: true, emit: cosmic_coverage
+    path "pai3d_coverage_genes.txt", optional: true, emit: pai3d_coverage
 
     script:
-    def cosmic_arg = cosmic_db.name != 'NO_FILE' ? "--cosmic_db ${cosmic_db}" : ""
-    def bg_arg     = cleaned_background.name != 'NO_FILE' ? "--cleaned_background ${cleaned_background}" : ""
+    // Each optional input's absent-value sentinel is a uniquely-named 'NO_FILE_*'
+    // path (see workflows/enrichment.nf) rather than a shared literal 'NO_FILE' —
+    // staging two path inputs under the identical filename in one task directory
+    // is a Nextflow "input file name collision", which is exactly what happens
+    // if two or more of these optional inputs are absent in the same run.
+    def cosmic_arg = !(cosmic_db.name =~ /^NO_FILE/) ? "--cosmic_db ${cosmic_db}" : ""
+    def pai3d_arg  = !(pai3d_db.name =~ /^NO_FILE/) ? "--pai3d_db ${pai3d_db}" : ""
+    def bg_arg     = !(cleaned_background.name =~ /^NO_FILE/) ? "--cleaned_background ${cleaned_background}" : ""
+    // FADE_top_sig/FADE_bottom_sig position group (§ FADE_JSON_TO_CSV) — the
+    // classic BF>=100 sites, joined directly on Gene:Position (same
+    // coordinate space CAAS's own Position column uses, no map_cache lookup).
+    def fade_top_arg    = !(fade_sites_top_file.name    =~ /^NO_FILE/) ? "--fade_sites_top_file ${fade_sites_top_file}"       : ""
+    def fade_bottom_arg = !(fade_sites_bottom_file.name =~ /^NO_FILE/) ? "--fade_sites_bottom_file ${fade_sites_bottom_file}" : ""
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/build_position_gmt.py \
         --gene_ensembl_file ${gene_ensembl_file} \
@@ -47,7 +63,10 @@ process POSENRICH_BUILD_GMT {
         --egg_annotations_file ${egg_annotations_file} \
         --map_dir ${map_dir} \
         ${cosmic_arg} \
+        ${pai3d_arg} \
         ${bg_arg} \
+        ${fade_top_arg} \
+        ${fade_bottom_arg} \
         --output_dir .
     """
 }
@@ -63,11 +82,14 @@ process POSENRICH_RUN {
     path universe
     path background_output
     path annot_file
+    path cosmic_coverage
+    path pai3d_coverage
     val min_size
     val max_size
 
     output:
     path "posenrich_characterization.tsv", emit: results
+    path "posenrich_leading_edge.tsv", emit: leading_edge
 
     script:
     // No permulation here: the exact Fisher p already corrects for the fixed
@@ -77,6 +99,13 @@ process POSENRICH_RUN {
     // p_adj AND fold-enrichment (posenrich_padj_thr / posenrich_fold_thr) —
     // see posenrich_enrich.py's module docstring for why the fold gate exists.
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
+    // cosmic_orthogroups/pai3d_orthogroups are GMTs derived from external,
+    // incompletely-covered databases; restricting their background to genes
+    // the database itself could ever annotate avoids diluting the test with
+    // structurally-uncoverable genes (see build_position_gmt.py's coverage
+    // file comment). Every other GMT keeps the full honest background.
+    def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
+    def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_enrich.py \
         --obs-scores ${caas_file} \
@@ -85,6 +114,8 @@ process POSENRICH_RUN {
         --universe ${universe} \
         --background ${background_output} \
         ${annot_arg} \
+        ${cosmic_cov_arg} \
+        ${pai3d_cov_arg} \
         --min-size ${min_size} \
         --max-size ${max_size} \
         --padj-thr ${params.posenrich_padj_thr} \
@@ -106,6 +137,15 @@ process POSENRICH_REPORT {
 
     input:
     path results
+    path leading_edge
+    // Position Characterisation (PrimateAI-3D + COSMIC validation, moved here from
+    // the Scoring report): all optional, NO_FILE-sentinel-tolerant. Section is
+    // skipped entirely (has_pos_char = FALSE) when position_scores is absent.
+    path position_scores
+    path gene_scores
+    path vep_primateai
+    path vep_cosmic
+    path genomic_info
 
     output:
     path "16.Position_enrichment_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -113,37 +153,38 @@ process POSENRICH_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def traitname = params.traitname ?: 'unknown_trait'
+    def pos_scores_arg = (position_scores.name =~ /^NO_FILE/) ? 'NULL' : "'${position_scores}'"
+    def gene_scores_arg = (gene_scores.name =~ /^NO_FILE/) ? 'NULL' : "'${gene_scores}'"
+    def vep_pai_arg = (vep_primateai.name =~ /^NO_FILE/) ? 'NULL' : "'${vep_primateai}'"
+    def vep_cosmic_arg = (vep_cosmic.name =~ /^NO_FILE/) ? 'NULL' : "'${vep_cosmic}'"
+    def genomic_info_arg = (genomic_info.name =~ /^NO_FILE/) ? 'NULL' : "'${genomic_info}'"
+    def render = """
+        rmarkdown::render(
+            '16.Position_enrichment_report.Rmd',
+            params = list(
+                results_file = '${results}',
+                leading_edge_file = '${leading_edge}',
+                traitname = '${traitname}',
+                padj_thr = ${params.posenrich_padj_thr},
+                fold_thr = ${params.posenrich_fold_thr},
+                position_scores_file = ${pos_scores_arg},
+                gene_scores_file     = ${gene_scores_arg},
+                vep_primateai_file   = ${vep_pai_arg},
+                vep_cosmic_file      = ${vep_cosmic_arg},
+                genomic_info_file    = ${genomic_info_arg}
+            ),
+            output_file = '16.Position_enrichment_report_${traitname}.html'
+        )
+    """
     if (params.use_singularity || params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
-        /usr/local/bin/_entrypoint.sh Rscript -e "
-            rmarkdown::render(
-                '16.Position_enrichment_report.Rmd',
-                params = list(
-                    results_file = '${results}',
-                    traitname = '${traitname}',
-                    padj_thr = ${params.posenrich_padj_thr},
-                    fold_thr = ${params.posenrich_fold_thr}
-                ),
-                output_file = '16.Position_enrichment_report_${traitname}.html'
-            )
-        "
+        /usr/local/bin/_entrypoint.sh Rscript -e "${render}"
         """
     } else {
         """
         cp -R ${local_dir}/* .
-        Rscript -e "
-            rmarkdown::render(
-                '16.Position_enrichment_report.Rmd',
-                params = list(
-                    results_file = '${results}',
-                    traitname = '${traitname}',
-                    padj_thr = ${params.posenrich_padj_thr},
-                    fold_thr = ${params.posenrich_fold_thr}
-                ),
-                output_file = '16.Position_enrichment_report_${traitname}.html'
-            )
-        "
+        Rscript -e "${render}"
         """
     }
 }
@@ -158,12 +199,19 @@ workflow POSENRICH {
     egg_annotations_file
     map_dir
     cosmic_db
+    pai3d_db
     cleaned_background
     caas_file
     background_output
     annot_file
     min_size
     max_size
+    gene_scores_file        // optional: gene_scores.tsv (Position Characterisation)
+    vep_primateai_file      // optional: PrimateAI-3D score TSV (Position Characterisation)
+    vep_cosmic_file         // optional: COSMIC Mutant Census score TSV (Position Characterisation)
+    genomic_info_file       // optional: gene genomic coords TSV (Position Characterisation)
+    fade_sites_top_file     // optional: fade_sites_top.csv (FADE_top_sig position group)
+    fade_sites_bottom_file  // optional: fade_sites_bottom.csv (FADE_bottom_sig position group)
 
     main:
     POSENRICH_BUILD_GMT(
@@ -175,8 +223,14 @@ workflow POSENRICH {
         egg_annotations_file,
         map_dir,
         cosmic_db,
-        cleaned_background
+        pai3d_db,
+        cleaned_background,
+        fade_sites_top_file,
+        fade_sites_bottom_file
     )
+
+    def cosmic_coverage_ch = POSENRICH_BUILD_GMT.out.cosmic_coverage.ifEmpty { file('NO_FILE_COSMIC_COV') }
+    def pai3d_coverage_ch  = POSENRICH_BUILD_GMT.out.pai3d_coverage.ifEmpty { file('NO_FILE_PAI3D_COV') }
 
     POSENRICH_RUN(
         caas_file,
@@ -185,15 +239,24 @@ workflow POSENRICH {
         cleaned_background,
         background_output,
         annot_file,
+        cosmic_coverage_ch,
+        pai3d_coverage_ch,
         min_size,
         max_size
     )
 
     POSENRICH_REPORT(
-        POSENRICH_RUN.out.results
+        POSENRICH_RUN.out.results,
+        POSENRICH_RUN.out.leading_edge,
+        caas_file,
+        gene_scores_file,
+        vep_primateai_file,
+        vep_cosmic_file,
+        genomic_info_file
     )
 
     emit:
-    results = POSENRICH_RUN.out.results
-    report  = POSENRICH_REPORT.out.report
+    results      = POSENRICH_RUN.out.results
+    leading_edge = POSENRICH_RUN.out.leading_edge
+    report       = POSENRICH_REPORT.out.report
 }

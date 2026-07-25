@@ -437,7 +437,11 @@ workflow {
                     scoring_caas_pos_pval_ch,
                     scoring_caas_pos_sample_ch,
                     position_scores_ch,
-                    posenrich_background_ch
+                    posenrich_background_ch,
+                    scoring_vep_pai_ch,
+                    scoring_vep_cosmic_ch,
+                    params.fade ? FADE.out.sites_csv_top    : null,
+                    params.fade ? FADE.out.sites_csv_bottom : null
                 )
             }
         }

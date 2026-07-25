@@ -1,15 +1,19 @@
 ---
 title: "CT Post-Processing and Disambiguation Characterization"
-author: "PhyloPhere Pipeline"
-date: "`r Sys.Date()`"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
 output:
   html_document:
+    theme: flatly
+    syntax_highlighting: tango
     toc: true
-    toc_float: true
-    toc_depth: 3
-    theme: cosmo
+    toc_float:
+      collapsed: false
     code_folding: hide
     df_print: paged
+    fig_width: 10
+    fig_height: 6
     self_contained: true
 params:
   discovery_file: NULL
@@ -24,6 +28,37 @@ params:
   alpha_threshold: 0.1
   gene_filter_mode: "both"
 ---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -1048,17 +1083,19 @@ membership_counts <- gene_filter_flags %>%
   arrange(caap_group, filter_combo)
 print(membership_counts)
 
-cat("\nFilter-specific totals:\n")
-cat(sprintf("  Extreme only or combined : %d genes\n",
-    sum(gene_filter_flags$Extreme, na.rm = TRUE)))
-cat(sprintf("  Dubious only or combined : %d genes\n",
-    sum(gene_filter_flags$Dubious, na.rm = TRUE)))
-cat(sprintf("  Cluster only or combined : %d genes\n",
-    sum(gene_filter_flags$Cluster_removed, na.rm = TRUE)))
-cat(sprintf("  Any filter               : %d / %d genes (%.1f%%)\n",
-    sum(gene_filter_flags$filter_combo != "None"),
-    nrow(gene_filter_flags),
-    100 * mean(gene_filter_flags$filter_combo != "None")))
+cat(
+  "\nFilter-specific totals:\n",
+  sprintf("  Extreme only or combined : %d genes\n",
+          sum(gene_filter_flags$Extreme, na.rm = TRUE)),
+  sprintf("  Dubious only or combined : %d genes\n",
+          sum(gene_filter_flags$Dubious, na.rm = TRUE)),
+  sprintf("  Cluster only or combined : %d genes\n",
+          sum(gene_filter_flags$Cluster_removed, na.rm = TRUE)),
+  sprintf("  Any filter               : %d / %d genes (%.1f%%)\n",
+          sum(gene_filter_flags$filter_combo != "None"),
+          nrow(gene_filter_flags),
+          100 * mean(gene_filter_flags$filter_combo != "None"))
+)
 
 # Fraction of significant sites removed by each filter pathway
 if (nrow(removal_events) > 0) {
@@ -1071,13 +1108,16 @@ if (nrow(removal_events) > 0) {
            caap_group %in% filter(gene_filter_flags, Dubious)$caap_group)
   removed_cluster <- discovery_std %>%
     filter(is_significant, site_id %in% cluster_events$site_id)
-  cat(sprintf("\n  Significant sites in total  : %d\n", total_is_significant))
-  cat(sprintf("  Significant in Extreme genes: %d (%.1f%%)\n",
-      nrow(removed_extreme), 100 * nrow(removed_extreme) / max(total_is_significant, 1)))
-  cat(sprintf("  Significant in Dubious genes: %d (%.1f%%)\n",
-      nrow(removed_dubious), 100 * nrow(removed_dubious) / max(total_is_significant, 1)))
-  cat(sprintf("  Significant in Cluster sites: %d (%.1f%%)\n",
-      nrow(removed_cluster), 100 * nrow(removed_cluster) / max(total_is_significant, 1)))
+  
+  cat(
+    sprintf("\n  Significant sites in total  : %d\n", total_is_significant),
+    sprintf("  Significant in Extreme genes: %d (%.1f%%)\n",
+            nrow(removed_extreme), 100 * nrow(removed_extreme) / max(total_is_significant, 1)),
+    sprintf("  Significant in Dubious genes: %d (%.1f%%)\n",
+            nrow(removed_dubious), 100 * nrow(removed_dubious) / max(total_is_significant, 1)),
+    sprintf("  Significant in Cluster sites: %d (%.1f%%)\n",
+            nrow(removed_cluster), 100 * nrow(removed_cluster) / max(total_is_significant, 1))
+  )
 }
 
 cat("\n")
@@ -1551,38 +1591,54 @@ if (!has_asr) {
   if (nrow(prob_df) == 0) {
     cat("> _All `asr_path_score` values are missing — nothing to compare._\n\n")
   } else {
+    # ── Tertile breaks from the empirical asr_path_score distribution ─────────
+    # A fixed 1/3-2/3 split on the score's [0,1] range assumes it's spread
+    # uniformly; in practice it clusters, which can leave a fixed bin nearly
+    # empty. Tertiles of the OBSERVED distribution instead give High/Mid/Low
+    # a comparable base rate, so pct_high/pct_low/asr_bin reflect each
+    # position's standing relative to the rest of the positions analyzed here,
+    # not an arbitrary absolute cutoff.
+    q_lo <- unname(quantile(prob_df$asr_path_score, 1/3, na.rm = TRUE, type = 7))
+    q_hi <- unname(quantile(prob_df$asr_path_score, 2/3, na.rm = TRUE, type = 7))
+
     # ── (1) Does each geometric label hold up probabilistically? ──────────────
     hold <- prob_df %>%
       group_by(pattern_parallel) %>%
       summarise(
         n          = n(),
         median_asr = round(median(asr_path_score, na.rm = TRUE), 3),
-        pct_high   = round(100 * mean(asr_path_score > 2/3, na.rm = TRUE), 1),
-        pct_low    = round(100 * mean(asr_path_score < 1/3, na.rm = TRUE), 1),
+        pct_high   = round(100 * mean(asr_path_score > q_hi, na.rm = TRUE), 1),
+        pct_low    = round(100 * mean(asr_path_score < q_lo, na.rm = TRUE), 1),
         .groups = "drop"
       ) %>%
       arrange(desc(n))
     write_tsv(hold, file.path(disambig_dir, "disambig_label_vs_asr.tsv"))
+    cat(sprintf("\n_High/low tertiles of the observed `asr_path_score` distribution: low < %.3f, high > %.3f._\n\n",
+                q_lo, q_hi))
     print(
-      kable(hold, caption = "Geometric label vs probabilistic asr_path_score (pct_high = % with score > 0.66)") %>%
+      kable(hold, caption = sprintf(
+              "Geometric label vs probabilistic asr_path_score (pct_high/pct_low = top/bottom tertile of the observed distribution: >%.3f / <%.3f)",
+              q_hi, q_lo)) %>%
         kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
     )
 
     # Stacked composition of ASR support within each geometric label.
+    asr_bin_labels <- c(sprintf("Low (<%.2f)", q_lo), sprintf("Mid (%.2f-%.2f)", q_lo, q_hi), sprintf("High (>%.2f)", q_hi))
     comp <- prob_df %>%
-      mutate(asr_bin = cut(asr_path_score, breaks = c(-Inf, 1/3, 2/3, Inf),
-                           labels = c("Low (<0.33)", "Mid (0.33-0.66)", "High (>0.66)"))) %>%
+      mutate(asr_bin = cut(asr_path_score, breaks = c(-Inf, q_lo, q_hi, Inf),
+                           labels = asr_bin_labels)) %>%
       count(pattern_parallel, asr_bin)
     p_comp <- ggplot(comp, aes(y = forcats::fct_rev(pattern_parallel), x = n, fill = asr_bin)) +
       geom_col(position = "fill") +
       scale_x_continuous(labels = scales::percent) +
       scale_fill_manual(
-        values = c("Low (<0.33)" = "#d73027", "Mid (0.33-0.66)" = "#fee090", "High (>0.66)" = "#1a9850"),
-        name = "ASR support"
+        values = setNames(c("#d73027", "#fee090", "#1a9850"), asr_bin_labels),
+        name = "ASR support (tertile)"
       ) +
       scale_y_discrete(labels = format_pattern_parallel_axis) +
       theme_minimal(base_size = 13) +
       labs(title = "Probabilistic support within each geometric label",
+           subtitle = sprintf("Tertiles of the observed asr_path_score distribution (low < %.2f, high > %.2f)", q_lo, q_hi),
            x = "proportion of positions", y = NULL)
     print(p_comp)
     save_barplot(
@@ -1895,12 +1951,12 @@ if (!"chr" %in% names(gene_ensembl)) {
         x     = "Chromosome",
         y     = "CAAS density (retained positions / gene length)"
       ) +
-      theme_minimal(base_size = 16) +
+      theme_minimal(base_size = 24) +
       theme(
-        plot.title = element_text(face = "bold", size = 20),
-        plot.subtitle = element_text(size = 14),
-        axis.title = element_text(size = 16),
-        axis.text = element_text(size = 13),
+        plot.title = element_text(face = "bold", size = 28),
+        plot.subtitle = element_text(size = 20),
+        axis.title = element_text(size = 22),
+        axis.text = element_text(size = 18),
         panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
         panel.grid.minor.y = element_blank()
@@ -1946,12 +2002,22 @@ kable(summary_table, caption = "CT Post-Processing Summary Statistics", align = 
   kable_styling(bootstrap_options = c("striped", "hover"))
 
 write_tsv(summary_table, file.path(summary_stats_dir, "summary_statistics.tsv"))
-cat("\n✓ Summary statistics exported\n")
-cat("\n=== Analysis Complete ===\n")
 ```
 
-## Session Info
+---
 
-```{r session_info}
+## Summary
+
+This report summarizes the results of the **CT Post-Processing** analysis.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
 sessionInfo()
 ```
+</details>
+
+*Generated by PhyloPhere — CT Post-Processing Module*
+*Date of generation: `r Sys.Date()`*

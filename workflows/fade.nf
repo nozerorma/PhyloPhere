@@ -30,8 +30,8 @@ include { FADE_RUN; FADE_BATCHED  } from "${baseDir}/subworkflows/FADE/fade_run.
 include { FADE_REPORT as FADE_REPORT_TOP    } from "${baseDir}/subworkflows/FADE/fade_report.nf"
 include { FADE_REPORT as FADE_REPORT_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_report.nf"
 include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_gene_lists.nf"
-include { TOOL_FCS_REPORT as FADE_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
-include { TOOL_STRING_REPORT as FADE_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
+include { FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_json_to_csv.nf"
+include { TOOL_STRING_MODULE_REPORT as FADE_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -209,6 +209,11 @@ workflow FADE {
         fade_report_top    = FADE_REPORT_TOP(Channel.value('top'),       top_jsons,    fg_top_ch   )
         fade_report_bottom = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons, fg_bottom_ch)
 
+        // ── Position-level site CSV (always runs — posenrich's FADE evidence
+        // layer, independent of --enrichment/--string) ───────────────────────
+        def fade_sites_top    = FADE_JSON_TO_CSV_TOP(Channel.value('top'),       top_jsons)
+        def fade_sites_bottom = FADE_JSON_TO_CSV_BOTTOM(Channel.value('bottom'), bottom_jsons)
+
         // ── Gene list extraction + FCS/STRING per direction ──────────────────
         if (params.enrichment || params.string) {
             def run_fade_enrich = { direction, summary_tsv_ch, gene_lists_proc ->
@@ -216,16 +221,10 @@ workflow FADE {
                 def subpath      = "selection/fade/${direction}"
                 def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
                 def interest_ch  = lists_out.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
-                // Skip when SCORING runs: it renders the annotated, centralized FADE FCS.
-                if (params.enrichment && !params.scoring) {
-                    FADE_FCS_REPORT(
-                        Channel.value(subpath),
-                        lists_out.fcs_stats,
-                        bg_ch,
-                        Channel.value("13.FCS_fade_${direction}_${params.traitname ?: 'trait'}"),
-                        Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats
-                    )
-                }
+                // FADE no longer runs its own FCS ranking (see fcs.nf/scoring_enrichment.nf —
+                // its max-of-many-sites statistic proved unreliable for gene-set enrichment;
+                // FADE now contributes as cross-module corroboration + a posenrich position
+                // group instead). STRING (set-based, not rank-based) is unaffected.
                 if (params.string) {
                     FADE_STRING_REPORT(
                         Channel.value(subpath), bg_ch, interest_ch,
@@ -246,4 +245,6 @@ workflow FADE {
         site_tsv_top    = fade_report_top.site_tsv
         site_tsv_bottom = fade_report_bottom.site_tsv
         json_results   = fade_results_ch
+        sites_csv_top    = fade_sites_top.sites_csv
+        sites_csv_bottom = fade_sites_bottom.sites_csv
 }

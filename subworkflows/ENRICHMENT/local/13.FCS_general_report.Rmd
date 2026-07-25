@@ -1,15 +1,19 @@
 ---
 title: "FCS Enrichment (Wilcoxon-AUC) — `r params$project_name`"
-author: "PhyloPhere Pipeline"
-date: "`r Sys.Date()`"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
 output:
   html_document:
+    theme: flatly
+    syntax_highlighting: tango
     toc: true
-    toc_float: true
-    toc_depth: 3
-    theme: cosmo
+    toc_float:
+      collapsed: false
     code_folding: hide
     df_print: paged
+    fig_width: 10
+    fig_height: 6
     self_contained: true
     mathjax: null                       # no math in this report
     md_extensions: "-tex_math_dollars"  # gene-set names contain '$' (e.g. V$HNF4_01) — never parse as TeX math
@@ -22,6 +26,13 @@ params:
   fdr_thr:      0.15          # BH (adjusted-p) cutoff — RERconverge categorical default (msae210)
   pperm_thr:    0.025         # permulation-p cutoff — applied in addition to fdr_thr when perms exist
   top_n:        20            # rows shown per database x ranking
+  leading_edge_top_n: 100     # rows shown in the pooled (all-database) leading-edge
+                              # composition table -- deliberately more generous than
+                              # top_n, which caps a single database's slice, not the
+                              # whole significant set for a ranking. A term that IS
+                              # significant but ranks outside this cap will silently
+                              # disappear from the on-page table (though never from
+                              # fcs_results/fcs_leading_edge.tsv, which is unbounded).
   traitname:    "trait"
   enrich:       FALSE         # RER-only permutation enrichment toggle
   perms_file:   "NO_FILE"
@@ -29,6 +40,37 @@ params:
                               # supplies flag_* + CAAS score_top/score_bottom for the leading edge.
                               # When NO_FILE, annotation falls back to the stats file itself.
 ---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
@@ -48,6 +90,12 @@ src_candidates <- c(file.path(this_dir, "src", "fcs_enrich.R"), "src/fcs_enrich.
 src <- src_candidates[file.exists(src_candidates)][1]
 if (is.na(src)) stop("fcs_enrich.R not found under src/ or next to FCS_general.Rmd")
 suppressMessages(invisible(capture.output(source(src))))
+
+orth_candidates <- c(file.path(this_dir, "src", "orthogonal_score.R"), "src/orthogonal_score.R",
+                     file.path(this_dir, "orthogonal_score.R"), "orthogonal_score.R")
+orth_src <- orth_candidates[file.exists(orth_candidates)][1]
+if (is.na(orth_src)) stop("orthogonal_score.R not found under src/ or next to FCS_general.Rmd")
+source(orth_src)
 
 kbl_html <- function(df, height = NULL) {
   k <- kable(df, format = "html", escape = TRUE) %>%
@@ -263,6 +311,68 @@ for (rk in ranking_names) {
 }
 ```
 
+# Overall dotplot {.tabset .tabset-fade}
+
+Pooled across all databases, ranked by the **orthogonal composite signal**
+(this ranking's own directional percentile concentration + independent
+cross-module corroboration — FADE, RER, Accumulation, and PrimateAI-3D/COSMIC
+where available) rather than raw BH p. One dotplot per direction, restricted
+to the top `r params$top_n` significant terms.
+
+```{r overall_dotplot, results='asis', fig.height=6}
+DIR_MAP <- c(top = "top", accelerating = "top", bottom = "bottom", decelerating = "bottom")
+n_universe <- length(universe)
+bg_all <- orth_background_rates(attr_df, c("pct_top10", "pct_top5", "pct_top1",
+                                            "pct_bottom10", "pct_bottom5", "pct_bottom1",
+                                            ORTH_CROSS_COLS))
+
+for (dr in c("top", "bottom")) {
+  cat(sprintf("\n## %s\n\n", tools::toTitleCase(dr)))
+  rks <- intersect(names(DIR_MAP)[DIR_MAP == dr], ranking_names)
+  if (length(rks) == 0) { cat("_No ranking for this direction in this report._\n\n"); next }
+
+  sig_terms <- enrich %>% filter(ranking %in% rks, sig)
+  if (nrow(sig_terms) == 0) { cat(sprintf("_No significant terms (%s)._\n\n", dr)); next }
+
+  le_sub <- leading %>% filter(ranking %in% rks) %>%
+    semi_join(sig_terms, by = c("ranking", "database", "pathway"))
+  if (nrow(le_sub) == 0) { cat("_No leading-edge data for significant terms._\n\n"); next }
+
+  cols <- orth_cols_for_direction(dr)
+  sc <- orthogonal_score(le_sub, bg_all, cols$percentile_cols, cols$cross_cols, n_universe)
+
+  term_meta <- sig_terms %>%
+    dplyr::group_by(database, pathway) %>%
+    dplyr::summarise(p.adj = min(p.adj, na.rm = TRUE),
+                      num.genes = suppressWarnings(max(num.genes, na.rm = TRUE)),
+                      description = dplyr::first(description),
+                      .groups = "drop")
+
+  dp <- sc %>%
+    dplyr::left_join(term_meta, by = c("database", "pathway")) %>%
+    arrange(desc(signal)) %>%
+    head(params$top_n) %>%
+    mutate(label = stringr::str_trunc(dplyr::coalesce(description, pathway), 55),
+           neglog10FDR = -log10(pmax(p.adj, 1e-300)))
+
+  if (nrow(dp) == 0) { cat("_No terms to display._\n\n"); next }
+
+  term_levels <- dp %>% arrange(signal) %>% pull(label) %>% unique()
+  p <- ggplot(dp, aes(x = signal, y = factor(label, levels = term_levels),
+                      size = num.genes, colour = neglog10FDR)) +
+    geom_point(alpha = 0.85) +
+    scale_colour_viridis_c(name = "-log10 BH", option = "C") +
+    scale_size_continuous(name = "set genes") +
+    labs(title = sprintf("%s — %s (pooled across databases)", params$project_name, dr),
+         subtitle = "Ordered top-to-bottom by orthogonal signal",
+         x = "signal (orthogonal composite)", y = NULL) +
+    theme_minimal(base_size = 11) +
+    theme(axis.text.y = element_text(colour = "black",
+                                      size = pmax(8, pmin(11, 220 / length(term_levels)))))
+  print(p); cat("\n")
+}
+```
+
 # Leading-edge composition {.tabset .tabset-fade}
 
 For each significantly-enriched set (BH < `r params$fdr_thr``r if (has_perm_any) sprintf(" ∩ permulation p < %.3g", params$pperm_thr) else ""`), the
@@ -302,7 +412,7 @@ for (rk in ranking_names) {
            p.adj = signif(p.adj, 3), AUC = round(stat + 0.5, 3)) %>%
     select(database, pathway, Description, n_le, AUC, p.adj,
            any_of(intersect(want, names(.)))) %>%
-    head(60)
+    head(params$leading_edge_top_n %||% 100)
   # rename attribute columns to friendly labels
   present_attr <- intersect(want, names(summ))
   names(summ)[match(present_attr, names(summ))] <- disp_names[present_attr]
@@ -319,3 +429,21 @@ cat("Direction : membership rankings (top = {top,both}, bottom = {bottom,both})\
 cat("MTC       : Benjamini-Hochberg, per GMT database\n")
 cat("Highlights: significance gates + directional percentile + cross-module flags\n")
 ```
+
+---
+
+## Summary
+
+This report summarizes the results of the **Enrichment** analysis.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>
+
+*Generated by PhyloPhere — Enrichment Module*
+*Date of generation: `r Sys.Date()`*

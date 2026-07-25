@@ -57,12 +57,20 @@ def parse_args():
     p.add_argument("--background", required=True,
                    help="caastools background.output (gene<TAB>tested positions); "
                         "restricted to --universe genes = the position background")
+    p.add_argument("--cosmic-coverage", default=None,
+                   help="cosmic_coverage_genes.txt from build_position_gmt.py — genes "
+                        "COSMIC itself could annotate; restricts the background used "
+                        "for the cosmic_orthogroups source only (see main() sources loop)")
+    p.add_argument("--pai3d-coverage", default=None,
+                   help="pai3d_coverage_genes.txt from build_position_gmt.py — genes "
+                        "PAI3D itself could annotate; restricts the background used "
+                        "for the pai3d_orthogroups source only")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--min-size", type=int, default=5,
                    help="min positions per set in background (GMT sources only)")
     p.add_argument("--max-size", type=int, default=0,
                    help="max positions per set in background (0 = no cap; GMT sources only)")
-    p.add_argument("--char-fracs", default="0.10,0.05,0.01",
+    p.add_argument("--char-fracs", default="0.25,0.10,0.05,0.01",
                    help="foreground top-fractions among scored positions, per ranking")
     p.add_argument("--padj-thr", type=float, default=0.15,
                    help="BH-adjusted p-value significance threshold")
@@ -234,8 +242,32 @@ def run_fisher_for_terms(terms, descs, foreground_by_frac, bg_set, N, min_size, 
                       expected=expected, fold_enrichment=fold, p_value=p,
                       direction=("enriched" if fold and fold >= 1 else "depleted"))
             row.update(annotate_overlap(overlap, annot or {}, flag_names or []))
+            # Kept only transiently for the leading-edge export; stripped in
+            # main() before the row goes into the main wide table (sig is not
+            # known yet here -- it depends on the BH pass over the whole batch).
+            row["_overlap"] = overlap
             out.append(row)
     return out
+
+
+def restrict_background_to_coverage(bg_set, coverage_genes):
+    """Restrict a Gene:Position background set to positions whose gene is in
+    `coverage_genes`. Used for GMTs derived from external, incompletely-covered
+    databases (COSMIC, PAI3D): a gene that database could never have annotated
+    should not count as a "true negative" in that database's own enrichment
+    test, or the test is diluted by genes it structurally could never see."""
+    return {p for p in bg_set if p.rsplit(":", 1)[0] in coverage_genes}
+
+
+def restrict_foreground(foreground_by_frac, restricted_bg):
+    """Recompute (size, set) foreground pairs against a restricted background.
+    Required alongside restrict_background_to_coverage: the Fisher 2x2 table
+    needs foreground_size <= background_size, so once a database's background
+    (N) shrinks to a coverage subset, its foreground must shrink to the same
+    subset too — not just the background/mm/expected terms — or the table
+    becomes inconsistent (foreground_size can exceed the shrunken N)."""
+    return {frac: (len(fg & restricted_bg), fg & restricted_bg)
+            for frac, (nn, fg) in foreground_by_frac.items()}
 
 
 def bh_adjust(pvals):
@@ -277,6 +309,22 @@ def main():
     print(f"[posenrich] background positions: {N} (background.output∩universe={n_bg_only}) "
           f"| scored: {(obs['CAAS_score']>0).sum()}", flush=True)
 
+    # Per-database background restriction for GMTs derived from external,
+    # incompletely-covered databases (COSMIC, PAI3D) — see
+    # restrict_background_to_coverage()'s docstring. Every other GMT (internal
+    # deterministic computations with complete coverage by construction) keeps
+    # the full honest background untouched.
+    coverage_restricted_bg = {}
+    for db_name, coverage_path in (("cosmic_orthogroups", args.cosmic_coverage),
+                                    ("pai3d_orthogroups", args.pai3d_coverage)):
+        if coverage_path and os.path.exists(coverage_path):
+            coverage_genes = load_universe_genes(coverage_path)
+            restricted_bg = restrict_background_to_coverage(bg_set, coverage_genes)
+            coverage_restricted_bg[db_name] = restricted_bg
+            print(f"[posenrich] {db_name}: background restricted to "
+                  f"{len(coverage_genes)} coverage genes "
+                  f"({len(restricted_bg)}/{N} positions)", flush=True)
+
     gmts = load_gmts(args.gmt_dir)
     char_layers = read_charset(args.characterization)
     annot, flag_names = load_annot(args.annot_file)
@@ -295,8 +343,13 @@ def main():
         sources["characterization"] = (char_terms, char_descs, False)
     print(f"[posenrich] sources: {len(sources)} ({', '.join(sources)})", flush=True)
 
-    directions = ["global", "top", "bottom"]
+    # 'global' dropped: every other report in this pipeline is top/bottom-only,
+    # and posenrich's own scatter now pairs top vs bottom directly (see
+    # 16.Position_enrichment_report.Rmd) -- a 'global' ranking has no partner
+    # axis in that pairing and would just be dead weight in the computation.
+    directions = ["top", "bottom"]
     rows = []
+    leading_edge_rows = []
     for direction in directions:
         obs_scores = direction_scores(obs, direction)
         n_scored = sum(1 for s in obs_scores.values() if s > 0)
@@ -312,8 +365,14 @@ def main():
         print(f"[posenrich] {direction}: {n_scored} scored positions ranked", flush=True)
 
         for db, (terms, descs, apply_size_filter) in sources.items():
+            if db in coverage_restricted_bg:
+                db_bg_set = coverage_restricted_bg[db]
+                db_N = len(db_bg_set)
+                db_foreground_by_frac = restrict_foreground(foreground_by_frac, db_bg_set)
+            else:
+                db_bg_set, db_N, db_foreground_by_frac = bg_set, N, foreground_by_frac
             res = run_fisher_for_terms(
-                terms, descs, foreground_by_frac, bg_set, N,
+                terms, descs, db_foreground_by_frac, db_bg_set, db_N,
                 args.min_size if apply_size_filter else 0,
                 args.max_size if apply_size_filter else 0,
                 annot=annot, flag_names=flag_names)
@@ -326,10 +385,17 @@ def main():
             padj = bh_adjust([r["p_value"] for r in res])
             for i, r in enumerate(res):
                 r["p_adj"] = padj[i]
-                fold = r["fold_enrichment"]
-                r["sig"] = bool(
-                    r["p_adj"] < args.padj_thr and not np.isnan(fold) and
-                    (fold >= args.fold_thr or fold <= 1.0 / args.fold_thr))
+                # No fold-enrichment gate here by design — p_adj alone decides
+                # significance; fold_enrichment stays in the output for the
+                # caller to filter on downstream if they want a magnitude cutoff.
+                r["sig"] = bool(r["p_adj"] < args.padj_thr)
+                overlap = r.pop("_overlap")
+                if r["sig"]:
+                    for pos_id in sorted(overlap):
+                        leading_edge_rows.append(dict(
+                            ranking=direction, database=db, pathway=r["pathway"],
+                            top_frac=r["top_frac"], gene=pos_id.rsplit(":", 1)[0],
+                            gene_position=pos_id))
                 rows.append(dict(ranking=direction, database=db, **r))
 
     results = pd.DataFrame(rows)
@@ -338,6 +404,14 @@ def main():
     out_path = os.path.join(args.output_dir, "posenrich_characterization.tsv")
     results.to_csv(out_path, sep="\t", index=False)
     print(f"[posenrich] wrote {out_path} ({len(results)} rows)", flush=True)
+
+    # Observed gene:position members of the overlap, one row per member, for
+    # significant (ranking, database, pathway, top_frac) terms only — mirrors
+    # fcs_leading_edge.tsv in the gene-level FCS report.
+    leading_edge = pd.DataFrame(leading_edge_rows)
+    le_path = os.path.join(args.output_dir, "posenrich_leading_edge.tsv")
+    leading_edge.to_csv(le_path, sep="\t", index=False)
+    print(f"[posenrich] wrote {le_path} ({len(leading_edge)} rows)", flush=True)
 
 
 if __name__ == "__main__":

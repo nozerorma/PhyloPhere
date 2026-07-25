@@ -75,55 +75,79 @@ if (has.TAX_ID && !"tax_id" %in% names(trait_df)) {
 }
 
 # Map tree species to taxonomy IDs if needed
-if (has.TAX_ID) {
-  # Use tax_id_df to map tree tip labels to tax_ids.
-  # tax_id_df contains tree-side species names (which may differ from trait names
-  # due to taxonomic reclassification, e.g. Nycticebus_pygmaeus -> Xanthonycticebus_pygmaeus).
-  tree_tip_to_taxid <- tax_id_df %>%
-    dplyr::filter(species %in% tree_species) %>%
-    dplyr::rename(tree_name = species)
-  debug_log("tree_tip_to_taxid rows = %d, missing tax_id = %d",
-            nrow(tree_tip_to_taxid), sum(is.na(tree_tip_to_taxid$tax_id)))
+pruned_tree_path <- file.path(resultsDir, "0.Data-pruning", "pruned_tree_file.nwk")
+pruned_trait_path <- file.path(resultsDir, "0.Data-pruning", "pruned_trait_file.tsv")
 
-  # Find common tax_ids: present in both tree (via tax_id_df) and traits (via trait_df$tax_id)
-  common_tax_ids <- intersect(tree_tip_to_taxid$tax_id, trait_df$tax_id)
-  debug_log("common_tax_ids = %d", length(common_tax_ids))
-
-  # Prune tree: keep tips whose tax_id is in common_tax_ids
-  tips_to_keep <- tree_tip_to_taxid$tree_name[tree_tip_to_taxid$tax_id %in% common_tax_ids]
-  pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, tips_to_keep))
-  debug_log("pruned_tree tips (TAX_ID) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
-} else {
-  # Prune the tree to only include species present in the trait data
-  pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, gsub(" ", "_", trait_df$species)))
-  debug_log("pruned_tree tips (species match) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
-}
-
-# Update trait_df to only include species present in the pruned tree.
-if (has.TAX_ID) {
+if (file.exists(pruned_tree_path) && file.exists(pruned_trait_path)) {
+  debug_log("Found existing pruned tree and trait files in 0.Data-pruning. Loading them...")
   trait_df_ori <- trait_df # Save original for reference
-  tree_tax_map <- tax_id_df %>%
-    dplyr::filter(species %in% pruned_tree$tip.label) %>%
-    dplyr::transmute(tax_id, tree_species = species) %>%
-    dplyr::distinct(tax_id, .keep_all = TRUE)
-
-  if (nrow(tree_tax_map) > 0) {
-    trait_df <- trait_df %>%
-      dplyr::left_join(tree_tax_map, by = "tax_id") %>%
-      dplyr::mutate(species = dplyr::coalesce(tree_species, species)) %>%
-      dplyr::filter(species %in% pruned_tree$tip.label) %>%
-      dplyr::select(-tree_species)
-    debug_log("trait_df remapped to tree/alignment species using tax_id: rows = %d", nrow(trait_df))
+  
+  if (endsWith(pruned_trait_path, ".csv")) {
+    p_sep <- ","
+  } else if (endsWith(pruned_trait_path, ".tsv")) {
+    p_sep <- "\t"
   } else {
-    trait_df <- trait_df %>%
-      dplyr::filter(tax_id %in% common_tax_ids)
-    debug_log("trait_df filtered by common_tax_ids only: rows = %d", nrow(trait_df))
+    p_sep <- "\t"
   }
+  
+  trait_df <- read.csv(pruned_trait_path, sep = p_sep, stringsAsFactors = FALSE)
+  trait_df[] <- lapply(trait_df, function(col) {
+    if (is.character(col)) trimws(col) else col
+  })
+  
+  pruned_tree <- ape::read.tree(file = pruned_tree_path)
+  debug_log("Loaded pruned tree tips = %d, pruned trait rows = %d", length(pruned_tree$tip.label), nrow(trait_df))
 } else {
-  trait_df_ori <- trait_df # Save original for reference
-  trait_df <- trait_df %>%
-    dplyr::filter(gsub(" ", "_", species) %in% pruned_tree$tip.label)
-  debug_log("trait_df after species tree filter rows = %d", nrow(trait_df))
+  if (has.TAX_ID) {
+    # Use tax_id_df to map tree tip labels to tax_ids.
+    # tax_id_df contains tree-side species names (which may differ from trait names
+    # due to taxonomic reclassification, e.g. Nycticebus_pygmaeus -> Xanthonycticebus_pygmaeus).
+    tree_tip_to_taxid <- tax_id_df %>%
+      dplyr::filter(species %in% tree_species) %>%
+      dplyr::rename(tree_name = species)
+    debug_log("tree_tip_to_taxid rows = %d, missing tax_id = %d",
+              nrow(tree_tip_to_taxid), sum(is.na(tree_tip_to_taxid$tax_id)))
+
+    # Find common tax_ids: present in both tree (via tax_id_df) and traits (via trait_df$tax_id)
+    common_tax_ids <- intersect(tree_tip_to_taxid$tax_id, trait_df$tax_id)
+    debug_log("common_tax_ids = %d", length(common_tax_ids))
+
+    # Prune tree: keep tips whose tax_id is in common_tax_ids
+    tips_to_keep <- tree_tip_to_taxid$tree_name[tree_tip_to_taxid$tax_id %in% common_tax_ids]
+    pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, tips_to_keep))
+    debug_log("pruned_tree tips (TAX_ID) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
+  } else {
+    # Prune the tree to only include species present in the trait data
+    pruned_tree <- ape::drop.tip(tree, setdiff(tree$tip.label, gsub(" ", "_", trait_df$species)))
+    debug_log("pruned_tree tips (species match) = %d, nodes = %d", length(pruned_tree$tip.label), pruned_tree$Nnode)
+  }
+
+  # Update trait_df to only include species present in the pruned tree.
+  if (has.TAX_ID) {
+    trait_df_ori <- trait_df # Save original for reference
+    tree_tax_map <- tax_id_df %>%
+      dplyr::filter(species %in% pruned_tree$tip.label) %>%
+      dplyr::transmute(tax_id, tree_species = species) %>%
+      dplyr::distinct(tax_id, .keep_all = TRUE)
+
+    if (nrow(tree_tax_map) > 0) {
+      trait_df <- trait_df %>%
+        dplyr::left_join(tree_tax_map, by = "tax_id") %>%
+        dplyr::mutate(species = dplyr::coalesce(tree_species, species)) %>%
+        dplyr::filter(species %in% pruned_tree$tip.label) %>%
+        dplyr::select(-tree_species)
+      debug_log("trait_df remapped to tree/alignment species using tax_id: rows = %d", nrow(trait_df))
+    } else {
+      trait_df <- trait_df %>%
+        dplyr::filter(tax_id %in% common_tax_ids)
+      debug_log("trait_df filtered by common_tax_ids only: rows = %d", nrow(trait_df))
+    }
+  } else {
+    trait_df_ori <- trait_df # Save original for reference
+    trait_df <- trait_df %>%
+      dplyr::filter(gsub(" ", "_", species) %in% pruned_tree$tip.label)
+    debug_log("trait_df after species tree filter rows = %d", nrow(trait_df))
+  }
 }
 
 # ----------------------------------------

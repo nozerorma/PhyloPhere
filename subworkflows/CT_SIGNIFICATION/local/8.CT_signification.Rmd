@@ -1,13 +1,20 @@
 ---
 title: "CT Signification Analysis"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
 output:
   html_document:
+    theme: flatly
+    syntax_highlighting: tango
     toc: true
-    toc_float: true
-    toc_depth: 3
-    theme: cosmo
+    toc_float:
+      collapsed: false
     code_folding: hide
     df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
 params:
   discovery_input: NULL
   background_input: NULL
@@ -15,6 +22,37 @@ params:
   output_dir: "."
   caap_mode: FALSE
 ---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(
@@ -66,8 +104,6 @@ removal_palette <- c(
 This section loads the filtered CAAS data and validates input files.
 
 ```{r data_import, message=FALSE}
-cat("=== Loading Filtered CAAS Data ===\n")
-
 # Load filtered discovery file
 filtered_discovery_path <- params$discovery_input
 if (is.null(filtered_discovery_path)) {
@@ -123,8 +159,8 @@ if (is.null(filtered_background_path) || !file.exists(filtered_background_path))
 }
 
 background_df <- read_tsv(filtered_background_path, show_col_types = FALSE)
-cat(sprintf("\nLoaded background file: %s\n", basename(filtered_background_path)))
-cat(sprintf("  Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
+cat(sprintf("Loaded background file: %s\n", basename(filtered_background_path)))
+cat(sprintf("Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
 
 # Validate required columns
 required_cols <- c("Gene", "Position", "pattern", "pvalue")
@@ -133,7 +169,6 @@ if (length(missing_cols) > 0) {
   stop("Missing required columns in discovery: ", paste(missing_cols, collapse = ", "))
 }
 
-cat("\n=== Data Validation Complete ===\n")
 ```
 
 ## 2. Bootstrap Permutation Integration
@@ -283,29 +318,60 @@ cat("\n=== Applying Significance Thresholds ===\n")
 
 alpha <- 0.05
 
-# Apply filters.
-# Raw thresholds (sig_hyp/sig_perm/sig_both) are kept as the primary calls.
-# Benjamini-Hochberg FDR is added alongside as a multiplicity-controlled
-# validation: q-values (pvalue_fdr / pvalue_boot_fdr) and BH-significant flags
-# (sig_*_fdr). BH is applied *within each biochemical scheme* (caap_group) — each
-# scheme is its own family of position-level tests — so positions are not
-# multiply-counted across schemes. (The permutation "p-value" is not a calibrated
-# p-value under its null; it is BH-adjusted here for a comparable figure, with
-# that caveat.)
+# Apply filters with dynamic FDR threshold selection (0.05 -> 0.10 -> 0.15).
+# If nothing is FDR-significant at 0.05, we check 0.10, then 0.15. If still nothing, default to 0.15.
+# BH is applied *within each biochemical scheme* (caap_group), and only to the
+# hypergeometric pvalue: pvalue_boot is a permutation p-value, not a calibrated
+# test statistic under multiple comparisons, so it is not BH-adjusted.
 caas_filtered <- discovery_with_perm
-if (has_caap_group) caas_filtered <- caas_filtered %>% group_by(caap_group)
-caas_filtered <- caas_filtered %>%
-  mutate(
-    pvalue_fdr      = p.adjust(pvalue,      method = "BH"),
-    pvalue_boot_fdr = p.adjust(pvalue_boot, method = "BH"),
-    is_significant = pvalue <= alpha & pvalue_boot <= alpha,
-    sig_hyp = pvalue <= alpha,
-    sig_perm = pvalue_boot <= alpha,
-    sig_hyp_fdr  = pvalue_fdr      <= alpha,
-    sig_perm_fdr = pvalue_boot_fdr <= alpha,
-    is_significant_fdr = sig_hyp_fdr & sig_perm_fdr
-  ) %>%
-  ungroup()
+
+if (has_caap_group) {
+  caas_filtered <- caas_filtered %>%
+    group_by(caap_group) %>%
+    mutate(
+      pvalue_fdr = p.adjust(pvalue, method = "BH")
+    ) %>%
+    mutate(
+      alpha_fdr = {
+        if (sum(pvalue_fdr <= 0.05, na.rm = TRUE) > 0) {
+          0.05
+        } else if (sum(pvalue_fdr <= 0.10, na.rm = TRUE) > 0) {
+          0.10
+        } else {
+          0.15
+        }
+      }
+    ) %>%
+    mutate(
+      is_significant = pvalue <= alpha & pvalue_boot <= alpha,
+      sig_hyp = pvalue <= alpha,
+      sig_perm = pvalue_boot <= alpha,
+      sig_hyp_fdr = pvalue_fdr <= alpha_fdr
+    ) %>%
+    ungroup()
+} else {
+  caas_filtered <- caas_filtered %>%
+    mutate(
+      pvalue_fdr = p.adjust(pvalue, method = "BH")
+    )
+
+  alpha_fdr_val <- if (sum(caas_filtered$pvalue_fdr <= 0.05, na.rm = TRUE) > 0) {
+    0.05
+  } else if (sum(caas_filtered$pvalue_fdr <= 0.10, na.rm = TRUE) > 0) {
+    0.10
+  } else {
+    0.15
+  }
+
+  caas_filtered <- caas_filtered %>%
+    mutate(
+      alpha_fdr    = alpha_fdr_val,
+      is_significant = pvalue <= alpha & pvalue_boot <= alpha,
+      sig_hyp = pvalue <= alpha,
+      sig_perm = pvalue_boot <= alpha,
+      sig_hyp_fdr = pvalue_fdr <= alpha_fdr
+    )
+}
 
 # Summary statistics
 if (has_caap_group) {
@@ -314,16 +380,15 @@ if (has_caap_group) {
     group_by(caap_group) %>%
     summarize(
       Total = n(),
+      alpha_fdr = first(alpha_fdr),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
       Perm_05 = sum(sig_perm, na.rm = TRUE),
       Both_05 = sum(is_significant, na.rm = TRUE),
       Hyp_FDR = sum(sig_hyp_fdr, na.rm = TRUE),
-      Perm_FDR = sum(sig_perm_fdr, na.rm = TRUE),
-      Both_FDR = sum(is_significant_fdr, na.rm = TRUE),
       .groups = "drop"
     )
 
-  cat("\nSignificance Summary by Group (raw alpha=0.05 vs BH-FDR q<=0.05):\n")
+  cat("\nSignificance Summary by Group (raw alpha=0.05 vs BH-FDR q<=alpha_fdr, hypergeometric only):\n")
   print(kable(summary_stats, format.args = list(big.mark = ",")))
 
   caas_for_export <- caas_filtered
@@ -333,21 +398,18 @@ if (has_caap_group) {
   summary_stats <- caas_filtered %>%
     summarize(
       Total = n(),
+      alpha_fdr = first(alpha_fdr),
       Hyp_05 = sum(sig_hyp, na.rm = TRUE),
       Perm_05 = sum(sig_perm, na.rm = TRUE),
       Both_05 = sum(is_significant, na.rm = TRUE),
-      Hyp_FDR = sum(sig_hyp_fdr, na.rm = TRUE),
-      Perm_FDR = sum(sig_perm_fdr, na.rm = TRUE),
-      Both_FDR = sum(is_significant_fdr, na.rm = TRUE)
+      Hyp_FDR = sum(sig_hyp_fdr, na.rm = TRUE)
     )
 
-  cat("\nSignificance Summary (raw alpha=0.05 vs BH-FDR q<=0.05):\n")
+  cat("\nSignificance Summary (raw alpha=0.05 vs BH-FDR q<=alpha_fdr, hypergeometric only):\n")
   print(kable(summary_stats, format.args = list(big.mark = ",")))
   
   caas_for_export <- caas_filtered
 }
-
-cat("\n=== Significance Filtering Complete ===\n")
 ```
 
 ## 4. Pattern-Based Analysis
@@ -461,8 +523,6 @@ if (has_caap_group) {
   
   print(p_pattern)
 }
-
-cat("\n=== Pattern Analysis Complete ===\n")
 ```
 
 ## 5. Meta-CAAS Extraction
@@ -516,9 +576,9 @@ if (has_caap_group) {
       ) %>%
       select(
         tag, GenePos, Gene, Position, pattern, caap_group,
-        pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, occurrences, total,
+        pvalue, pvalue_boot, pvalue_fdr, alpha_fdr, occurrences, total,
         sig_hyp, sig_perm, is_significant,
-        sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, significance_level,
+        sig_hyp_fdr, significance_level,
         is_conserved_meta, conserved_pair, caas, amino_encoded
       )
 
@@ -550,9 +610,9 @@ if (has_caap_group) {
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern, caap_group,
-      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, occurrences, total,
+      pvalue, pvalue_boot, pvalue_fdr, alpha_fdr, occurrences, total,
       sig_hyp, sig_perm, is_significant,
-      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, significance_level,
+      sig_hyp_fdr, significance_level,
       is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 
@@ -583,9 +643,9 @@ if (has_caap_group) {
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern,
-      pvalue, pvalue_boot, pvalue_fdr, pvalue_boot_fdr, occurrences, total,
+      pvalue, pvalue_boot, pvalue_fdr, alpha_fdr, occurrences, total,
       sig_hyp, sig_perm, is_significant,
-      sig_hyp_fdr, sig_perm_fdr, is_significant_fdr, significance_level,
+      sig_hyp_fdr, significance_level,
       is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 
@@ -596,11 +656,22 @@ if (has_caap_group) {
 }
 
 cat(sprintf("\nMeta-CAAS data exported to: %s\n", meta_dir))
-cat("\n=== Meta-CAAS Export Complete ===\n")
 ```
 
-## Session Information
+---
 
-```{r session_info}
+## Summary
+
+This report summarizes the results of the **CT Signification** analysis.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
 sessionInfo()
 ```
+</details>
+
+*Generated by PhyloPhere — CT Signification Module*
+*Date of generation: `r Sys.Date()`*

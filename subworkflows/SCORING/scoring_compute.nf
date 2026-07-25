@@ -23,7 +23,7 @@
  *   position_scores    : TSV with per Gene×Position scores
  *   gene_scores        : TSV with per Gene scores + directional significance flags
  *   gene_correlations  : TSV with pairwise correlations
- *   gene_lists                : directory of 9 slice TSVs (Global/Top/Bottom × All/Sig/FDR) for STRING
+ *   gene_lists                : directory of 8 slice TSVs (Top/Bottom × 25/10/5/1%) for STRING
  *   gene_threshold_enrichment : TSV — gene-level enrichment curve across CAAS thresholds × tools
  *   pos_threshold_enrichment  : TSV — position-level FADE enrichment curve across CAAS thresholds
  */

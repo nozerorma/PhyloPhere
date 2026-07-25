@@ -255,6 +255,77 @@ def export_posteriors_to_jsonl(
     logger.info(f"Exported posteriors JSONL to {output_file}")
 
 
+_FULL_MARGINAL_SECTION_RE = re.compile(r"Prob distribution at node (\d+), by site")
+_FULL_MARGINAL_SITE_LINE_RE = re.compile(r"^\s*(\d+)\s+\d+\s+\S+:\s*(.+)$", re.MULTILINE)
+_FULL_MARGINAL_TOKEN_RE = re.compile(r"([A-Z*-])\(([\d.]+)\)")
+
+
+def parse_paml_rst_full_marginal(
+    content: str,
+    threshold: float = 0.0,
+    positions: Optional[set] = None,
+) -> Dict[int, Dict[int, Dict[str, float]]]:
+    """
+    Parse PAML's per-node full marginal amino-acid distributions.
+
+    Reads the "Prob distribution at node N, by site" sections that codeml
+    writes when run with ``verbose = 2``: one section per internal node,
+    each listing every site with its complete 20-amino-acid posterior (as
+    opposed to "Prob of best state at each node", which keeps only the
+    single most likely residue per site). Each section is self-labeled with
+    its PAML node id, so no positional node-ordering is needed.
+
+    Args:
+        content: full text of a PAML rst file.
+        threshold: minimum posterior probability for a residue to be kept.
+            The residue with the highest probability at a site is always
+            kept even if below threshold, so a site's distribution is never
+            emptied out entirely.
+        positions: optional set of 1-based site positions to keep; other
+            sites are skipped.
+
+    Returns:
+        Dict mapping node_id -> position -> {AA: posterior}. Empty if the
+        rst file has no "Prob distribution at node" sections (i.e. it was
+        produced with ``verbose = 1``).
+    """
+    posteriors: Dict[int, Dict[int, Dict[str, float]]] = {}
+    section_starts = list(_FULL_MARGINAL_SECTION_RE.finditer(content))
+    for idx, section_marker in enumerate(section_starts):
+        node_id = int(section_marker.group(1))
+        section_end = (
+            section_starts[idx + 1].start()
+            if idx + 1 < len(section_starts)
+            else len(content)
+        )
+        section = content[section_marker.end() : section_end]
+
+        node_posteriors: Dict[int, Dict[str, float]] = {}
+        for site_match in _FULL_MARGINAL_SITE_LINE_RE.finditer(section):
+            site_num = int(site_match.group(1))
+            if positions is not None and site_num not in positions:
+                continue
+
+            dist: Dict[str, float] = {}
+            best_aa, best_prob = None, -1.0
+            for aa, prob_str in _FULL_MARGINAL_TOKEN_RE.findall(site_match.group(2)):
+                if aa in ("-", "*"):
+                    continue
+                prob = float(prob_str)
+                if prob > best_prob:
+                    best_aa, best_prob = aa, prob
+                if prob >= threshold:
+                    dist[aa] = prob
+            if not dist and best_aa is not None:
+                dist[best_aa] = best_prob
+            if dist:
+                node_posteriors[site_num] = dist
+
+        posteriors[node_id] = node_posteriors
+
+    return posteriors
+
+
 def parse_paml_rst_node_level(
     rst_file: Path,
     tree_file: Path,
@@ -270,7 +341,10 @@ def parse_paml_rst_node_level(
 
     This function extracts node-level ancestral state posteriors from PAML
     RST output files. PAML lists nodes starting from the root and then outward
-    (ascending node IDs).
+    (ascending node IDs). When the rst file contains full per-site marginal
+    distributions (``verbose = 2`` in codeml.ctl), those are used directly via
+    :func:`parse_paml_rst_full_marginal`; otherwise this falls back to parsing
+    the single-best-state table.
 
     Args:
         rst_file: Path to PAML rst file
@@ -350,6 +424,17 @@ def parse_paml_rst_node_level(
     # Read RST file
     with open(rst_file, "r") as f:
         content = f.read()
+
+    if "Prob distribution at node" in content:
+        posteriors = parse_paml_rst_full_marginal(
+            content, threshold=threshold, positions=positions
+        )
+        logger.info(
+            f"Parsed full marginal posteriors for {len(posteriors)} nodes from {rst_file}"
+        )
+        if return_mapping:
+            return posteriors, node_id_map
+        return posteriors
 
     # PAML node IDs are already extracted from the labeled tree in build_node_mapping
     logger.debug(
