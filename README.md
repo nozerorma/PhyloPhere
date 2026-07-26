@@ -197,7 +197,7 @@ null built by replaying permuted labelings through disambiguation — when
 Runs FCS (a ranked, Wilcoxon-AUC, GMT-based enrichment engine — the single
 enrichment engine now used for both CAAS and RER gene rankings), an
 orthogonal cross-module Comparison report, optional DOMINO active-module
-detection + STRING functional enrichment (`--scoring_string`), and optional
+detection + STRING functional enrichment (`--scoring_ami`), and optional
 POSENRICH position-level Fisher-exact enrichment (`--posenrich`) integrating
 UCR/FUBAR/domain-variability/PrimateAI-3D/COSMIC evidence per position.
 Universe files are module-specific (`--rer_universe_file`,
@@ -435,7 +435,7 @@ Seqera Platform monitoring (see [Running on Seqera Platform](#running-on-seqera-
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `scoring_string` | `true` | run downstream DOMINO/STRING module analysis |
+| `scoring_ami` | `true` | run downstream DOMINO AMI / STRING module analysis |
 | `scoring_compare_fdr` / `scoring_compare_top_n` | `0.15` / `20` | Comparison-report thresholds |
 | `scoring_stress` / `scoring_stress_top_n` / `scoring_stress_rank_metric` | `true` / `25` / `"spearman"` | stress-test controls |
 | `scoring_position_top_pct` / `scoring_gene_top_pct` | `0.10` / `0.10` | top-N% for gene-list extraction |

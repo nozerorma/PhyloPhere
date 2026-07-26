@@ -6,7 +6,7 @@
  * Runs gene-set and position-level functional enrichment analyses (FCS, STRING).
  */
 
-include { SCORING_STRING_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/scoring_enrichment.nf"
+include { SCORING_AMI_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/scoring_enrichment.nf"
 include { SCORING_FCS_REPORT }                            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { RER_FCS_REPORT  as MODULE_FCS_RER }             from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { POSENRICH }                                      from "${baseDir}/subworkflows/ENRICHMENT/posenrich.nf"
@@ -69,10 +69,10 @@ workflow ENRICHMENT {
             rer_universe_ch, Channel.value("13.FCS_rer_${trait_lbl}"),
             rer_perms_resolved, annot_ch)
 
-        // STRING ppi network
-        def run_string = params.scoring_string ?: false
-        def string_out = null
-        if (run_string) {
+        // AMI active module identification (DOMINO + STRING labelling)
+        def run_ami = params.scoring_ami ?: params.scoring_string ?: false
+        def ami_out = null
+        if (run_ami) {
             def gene_lists_ch = gene_lists.ifEmpty { file('NO_GENE_LISTS') }
             def domino_out = DOMINO_MODULES(
                 fcs_universe_ch,
@@ -82,7 +82,7 @@ workflow ENRICHMENT {
                 params.domino_module_thr ?: 0.05,
                 params.string_db_dir ?: ''
             )
-            string_out = SCORING_STRING_REPORT(
+            ami_out = SCORING_AMI_REPORT(
                 gene_lists_ch, fcs_universe_ch, gene_scores,
                 domino_out.network_sif, domino_out.modules_dir
             )

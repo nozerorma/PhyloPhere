@@ -298,6 +298,7 @@ if [ "${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}" = true ]; then
         --string_species "${STRING_SPECIES:-9606}"
         --string_required_score "${STRING_REQUIRED_SCORE:-400}"
         --string {{ run_defaults.string }}
+        --scoring_ami {{ run_defaults.scoring_ami }}
         --scoring_string {{ run_defaults.scoring_string }}
         --domino_network_score_thr "${DOMINO_NETWORK_SCORE_THR:-700}"
         --domino_slice_thr "${DOMINO_SLICE_THR:-0.3}"

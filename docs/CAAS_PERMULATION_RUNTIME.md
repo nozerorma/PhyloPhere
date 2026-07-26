@@ -130,7 +130,7 @@ as an upper-ish band until the measured number lands.
    core-hours) — already vectorized per gene; lower-priority.
 
 6. **STRING** is expensive per report (~400 s) and grows with gene-list size — keep it
-   gated (`scoring_string`) for production-scale runs.
+   gated (`scoring_ami`) for production-scale runs.
 
 ## Practical recommendation
 For a 16k-gene / 1M-cycle / 1000-full_perm run on a cluster: the significance bootstrap is

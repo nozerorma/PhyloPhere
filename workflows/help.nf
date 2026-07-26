@@ -289,7 +289,8 @@ CT, FADE, RER, accumulation and VEP signals.
 
 Usage:
 --scoring                   <true|false>            false
---scoring_string             <true|false>            true    (downstream DOMINO/STRING module analysis)
+--scoring_ami                <true|false>            true    (downstream DOMINO/AMI active module analysis)
+--scoring_string             <true|false>            true    (legacy alias for --scoring_ami)
 --scoring_compare_fdr          <FLOAT 0-1>             0.15
 --scoring_compare_top_n           <INTEGER>               20
 --scoring_stress                   <true|false>            true

@@ -237,7 +237,7 @@ class WorkflowMap {
             // for CAAS ('fcs') and RER ('scoring/rer') — FADE and accumulation no longer
             // run their own FCS ranking (see subworkflows/ENRICHMENT/fcs.nf), so there is
             // no 13.FCS_fade/13.FCS_accumulation to look for. STRING is separate: the
-            // centralized DOMINO-based run (--scoring_string) lives under ENRICHMENT and
+            // centralized DOMINO-based run (--scoring_ami) lives under ENRICHMENT and
             // publishes to string/*, while each of RER/FADE/accumulation can *also* run
             // its own STRING report directly from its own workflow file (--string, a
             // distinct flag — see workflows/rerconverge.nf, fade.nf, ct_accumulation.nf),

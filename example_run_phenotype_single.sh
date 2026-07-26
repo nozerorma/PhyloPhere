@@ -12,19 +12,17 @@ PRUNE_SECONDARY_FILE="${7:-}"
 DISCRETE_METHOD="${8:-}"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-timestamp=$(date +%Y%m%d_%H%M%S)
 
 # --- ENV ACTIVATION ---
 source ~/.bashrc
-conda deactivate
+conda deactivate 2>/dev/null || true
 conda activate phylophere
 
-# Setup unique Nextflow home directory to avoid file lock collisions on history database
+# Setup unique Nextflow home directory to avoid file lock collisions
 export NXF_HOME="$WORK_BASE/.nextflow/.nextflow_${TRAIT}"
 mkdir -p "$NXF_HOME"
-ln -sfn /homes/users/mramon/.nextflow/plugins "$NXF_HOME/plugins"
 
-# Create and cd into a unique run directory to prevent Nextflow session/cache database lock collisions
+# Create and cd into a unique run directory
 RUN_DIR="$WORK_BASE/${TRAIT}_nxf_run"
 mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
@@ -36,7 +34,6 @@ mkdir -p "${RESULTS_BASE}" "${WORK_DIR}"
 # --- NEXTFLOW FLAGS ---
 NF_FLAGS=(
     -profile slurm
-    -with-tower
     -name "${TRAIT}_$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | cut -c1-8 || printf '%08x' $RANDOM)"
     --alignment "$ALI_DIR"
     --tree "$TREE_FILE"
@@ -44,11 +41,11 @@ NF_FLAGS=(
 )
 
 # General flags
-if [ "$RESUME" = 1 ]; then
+if [ "${RESUME:-1}" = 1 ]; then
     NF_FLAGS+=( -resume )
 fi
 
-if [ "${TOY_MODE:-true}" = true ]; then
+if [ "${TOY_MODE:-false}" = true ]; then
     NF_FLAGS+=(
         --toy_mode
         --toy_n "$TOY_N"
@@ -56,15 +53,11 @@ if [ "${TOY_MODE:-true}" = true ]; then
 fi
 
 if [ "${RUN_REPORTING:-true}" = true ]; then
-    NF_FLAGS+=(
-        --reporting
-    )
+    NF_FLAGS+=( --reporting )
 fi
 
 if [ "${RUN_PRUNE:-true}" = true ]; then
-    NF_FLAGS+=(
-        --prune_data
-    )
+    NF_FLAGS+=( --prune_data )
 fi
 
 if [ "${RUN_CAAS:-true}" = true ]; then
@@ -98,7 +91,7 @@ if [ "${RUN_ACCUMULATION:-true}" = true ]; then
 fi
 
 # RERConverge Flags
-if [ "${RUN_RER:-true}" = true ]; then
+if [ "${RUN_RER:-false}" = true ]; then
     NF_FLAGS+=(
         --rer_tool "${RER_TOOL}"
         --gene_trees "${GENE_TREES}"
@@ -108,13 +101,12 @@ if [ "${RUN_RER:-true}" = true ]; then
 fi
 
 # FADE Flags
-if [ "${RUN_FADE:-true}" = true ]; then
+if [ "${RUN_FADE:-false}" = true ]; then
     NF_FLAGS+=(
         --fade
         --fade_mode "${FADE_MODE}"
     )
 fi
-
 
 # Scoring Flags
 if [ "${RUN_SCORING:-true}" = true ]; then
@@ -147,7 +139,7 @@ if [ "${RUN_ENRICHMENT:-true}" = true ]; then
     )
 fi
 
-# POSENRICH (position-wise enrichment) flags
+# POSENRICH Flags
 if [ "${RUN_POSENRICH:-true}" = true ]; then
     NF_FLAGS+=(
         --posenrich
@@ -164,7 +156,7 @@ fi
 [ -n "${ALI_SP_NAMES:-}" ] && NF_FLAGS+=(--ali_sp_names "$ALI_SP_NAMES")
 [ -n "${INPUT_TAX_ID:-}" ] && NF_FLAGS+=(--tax_id "$INPUT_TAX_ID")
 
-# Precomputed FADE/RER summaries for scoring
+# Precomputed summaries for scoring
 [ -n "${SCORING_RER_INPUT:-}" ] && NF_FLAGS+=(--scoring_rer_input "$SCORING_RER_INPUT")
 [ -n "${SCORING_RER_PERMS_INPUT:-}" ] && NF_FLAGS+=(--rer_perms_file "$SCORING_RER_PERMS_INPUT")
 [ -n "${RER_UNIVERSE_FILE:-}" ] && NF_FLAGS+=(--rer_universe_file "$RER_UNIVERSE_FILE")
@@ -203,15 +195,12 @@ fi
 
 echo "======================================================"
 echo "Running Nextflow Single Phenotype: $TRAIT"
-echo "SLURM TASK ID     : $SLURM_ARRAY_TASK_ID"
-
+echo "SLURM TASK ID     : ${SLURM_ARRAY_TASK_ID:-n/a}"
 echo "Profile           : slurm"
 echo "Trait             : $TRAIT  [CLASS $CLASS]"
 echo "Alignments        : $ALI_DIR"
 echo "Output            : $RESULTS_BASE"
 echo "Work dir          : $WORK_DIR"
-
-echo "Resuming?         : $([ "$RESUME" = 1 ] && echo yes || echo 'no (clean run)')"
 echo "======================================================"
 
 nextflow run "${REPO_DIR}/main.nf" "${NF_FLAGS[@]}" -w "$WORK_DIR"

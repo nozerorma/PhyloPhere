@@ -32,3 +32,17 @@ subworkflows/VEP/dat/PrimateAI-3D.hg38.txt.gz
 # FCS runtime progress log (written to work dir)
 fcs_progress.log
 .venv*
+
+# Execution logs and outputs
+logs/
+out/
+
+# Test directories ignored from Git
+test/
+tests/gui/
+
+# Personal execution scripts (use example_*.sh templates for version control)
+SBATCH_*.sh
+run_phenotype_*.sh
+!example_*.sh
+

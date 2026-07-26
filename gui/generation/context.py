@@ -76,6 +76,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "scoring_stress": _bool_str(scoring.scoring_stress),
         "enrichment": _bool_str(enrichment.enabled),
         "posenrich": _bool_str(enrichment.posenrich_enabled),
+        "scoring_ami": _bool_str(getattr(enrichment, 'scoring_ami', enrichment.scoring_string)),
         "scoring_string": _bool_str(enrichment.scoring_string),
         "string": _bool_str(enrichment.string),
         "rer_permulation_enrichment": _bool_str(enrichment.rer_permulation_enrichment),

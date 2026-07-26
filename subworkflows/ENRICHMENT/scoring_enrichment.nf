@@ -1,25 +1,25 @@
 #!/usr/bin/env nextflow
 
 /*
- * SCORING_STRING / SCORING_COMPARE
+ * SCORING_AMI / SCORING_COMPARE
  * ────────────────────────────────────────────
  * DOMINO active-module identification (AMI) runs on the gated directional
  * 9-slice gene lists produced by SCORING_COMPUTE, with STRING used only for ID
  * mapping + per-module functional labelling. Ranked enrichment is handled by
  * SCORING_FCS_REPORT (subworkflows/ENRICHMENT/fcs.nf).
  *
- *   SCORING_STRING_REPORT  → string_results/**, HTML (15.AMI_analysis — DOMINO modules)
+ *   SCORING_AMI_REPORT     → string_results/**, HTML (15.AMI_analysis — DOMINO modules)
  *   SCORING_COMPARE_REPORT → compare_results/**, HTML (top vs bottom: FCS only)
  */
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCORING_STRING_REPORT
+// SCORING_AMI_REPORT
 // Runs 15.AMI_analysis.Rmd (DOMINO active-module identification, STRING used
 // only for ID mapping + per-module functional labels) on the 9 ranked slices.
 // ─────────────────────────────────────────────────────────────────────────────
-process SCORING_STRING_REPORT {
-    tag "scoring_string|${params.traitname ?: 'unknown_trait'}"
+process SCORING_AMI_REPORT {
+    tag "scoring_ami|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
 
     errorStrategy { task.attempt <= 3 ? 'retry' : 'ignore' }

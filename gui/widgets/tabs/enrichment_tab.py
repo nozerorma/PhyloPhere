@@ -36,7 +36,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="gmt_dir", label="GMT pathway directory", kind="path_dir"),
         FieldSpec(name="string_db_dir", label="STRING database directory", kind="path_dir"),
         FieldSpec(name="string", label="Run per-module STRING (RER/FADE/Accumulation)", kind="bool"),
-        FieldSpec(name="scoring_string", label="Run centralized DOMINO + STRING PPI + COMPARE", kind="bool"),
+        FieldSpec(name="scoring_ami", label="Run centralized DOMINO AMI + STRING PPI + COMPARE", kind="bool"),
         FieldSpec(name="posenrich_enabled", label="Run POSENRICH", kind="bool"),
         FieldSpec(name="egg_members_file", label="eggNOG members file", kind="path_file"),
         FieldSpec(name="egg_annotations_file", label="eggNOG annotations file", kind="path_file"),

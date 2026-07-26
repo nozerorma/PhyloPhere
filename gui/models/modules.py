@@ -296,9 +296,10 @@ class EnrichmentConfig(ModuleConfigBase):
     domino_network_score_thr: str = "700"  # --domino_network_score_thr
     domino_slice_thr: str = "0.3"  # --domino_slice_thr
     domino_module_thr: str = "0.05"  # --domino_module_thr
-    # Centralized DOMINO-based STRING PPI run + cross-module COMPARE report
+    # Centralized DOMINO-based AMI run + cross-module COMPARE report
     # (conf/scoring.config, gated inside workflows/enrichment.nf) — distinct from
     # the per-module `string` flag above.
+    scoring_ami: bool = True  # --scoring_ami
     scoring_string: bool = True  # --scoring_string
     scoring_compare_fdr: str = "0.15"  # --scoring_compare_fdr
     scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
