@@ -138,14 +138,21 @@ process POSENRICH_REPORT {
     input:
     path results
     path leading_edge
-    // Position Characterisation (PrimateAI-3D + COSMIC validation, moved here from
-    // the Scoring report): all optional, NO_FILE-sentinel-tolerant. Section is
-    // skipped entirely (has_pos_char = FALSE) when position_scores is absent.
+    // Position Characterisation (PrimateAI-3D + COSMIC + FADE validation, moved
+    // here from the Scoring report): all optional, NO_FILE-sentinel-tolerant.
+    // Section is skipped entirely (has_pos_char = FALSE) when position_scores
+    // is absent.
     path position_scores
     path gene_scores
     path vep_primateai
     path vep_cosmic
     path genomic_info
+    path fade_sites_top
+    path fade_sites_bottom
+    // SCORING's fcs_stats.tsv (gene + flag_* columns) -- same file POSENRICH_RUN
+    // already consumes as --annot-file, reused here for the Overall dotplot's
+    // orthogonal-support composite (background flag rates via orthogonal_score.R).
+    path fcs_stats
 
     output:
     path "16.Position_enrichment_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -158,6 +165,9 @@ process POSENRICH_REPORT {
     def vep_pai_arg = (vep_primateai.name =~ /^NO_FILE/) ? 'NULL' : "'${vep_primateai}'"
     def vep_cosmic_arg = (vep_cosmic.name =~ /^NO_FILE/) ? 'NULL' : "'${vep_cosmic}'"
     def genomic_info_arg = (genomic_info.name =~ /^NO_FILE/) ? 'NULL' : "'${genomic_info}'"
+    def fade_sites_top_arg = (fade_sites_top.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_top}'"
+    def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_bottom}'"
+    def fcs_stats_arg = (fcs_stats.name =~ /^NO_FILE/) ? 'NULL' : "'${fcs_stats}'"
     def render = """
         rmarkdown::render(
             '16.Position_enrichment_report.Rmd',
@@ -171,7 +181,10 @@ process POSENRICH_REPORT {
                 gene_scores_file     = ${gene_scores_arg},
                 vep_primateai_file   = ${vep_pai_arg},
                 vep_cosmic_file      = ${vep_cosmic_arg},
-                genomic_info_file    = ${genomic_info_arg}
+                genomic_info_file    = ${genomic_info_arg},
+                fade_sites_top_file    = ${fade_sites_top_arg},
+                fade_sites_bottom_file = ${fade_sites_bottom_arg},
+                fcs_stats_file = ${fcs_stats_arg}
             ),
             output_file = '16.Position_enrichment_report_${traitname}.html'
         )
@@ -252,7 +265,10 @@ workflow POSENRICH {
         gene_scores_file,
         vep_primateai_file,
         vep_cosmic_file,
-        genomic_info_file
+        genomic_info_file,
+        fade_sites_top_file,
+        fade_sites_bottom_file,
+        annot_file
     )
 
     emit:

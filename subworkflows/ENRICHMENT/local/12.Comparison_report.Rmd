@@ -20,7 +20,6 @@ output:
 params:
   fcs_dir:    "cmp_fcs"       # dir of per-module <module>_fcs_all.tsv
   fcs_le_dir: "cmp_fcs_le"    # dir of per-module <module>_leading_edge.tsv
-  string_dir: "cmp_string"    # dir of *_enrichment.tsv (optional)
   fdr_thr:    0.15
   pperm_thr:  0.025
   top_n:      20
@@ -137,11 +136,6 @@ for (f in le_files) {
 }
 le <- if (length(le_by_mod)) dplyr::bind_rows(le_by_mod) else tibble()
 has_le <- nrow(le) > 0
-
-string_files <- list.files(params$string_dir, pattern = "_enrichment\\.tsv$", full.names = TRUE)
-string_all <- if (length(string_files) > 0)
-  purrr::map_dfr(string_files, ~readr::read_tsv(.x, show_col_types = FALSE)) else tibble()
-has_string <- nrow(string_all) > 0
 ```
 
 # Overview
@@ -149,8 +143,8 @@ has_string <- nrow(string_all) > 0
 ```{r overview, echo=FALSE}
 mod_rows <- if (has_multi) sapply(fcs_by_mod, nrow) else integer(0)
 tibble::tibble(
-  Source = c(paste0("FCS module: ", names(mod_rows)), "STRING"),
-  Rows   = c(unname(mod_rows), nrow(string_all))
+  Source = paste0("FCS module: ", names(mod_rows)),
+  Rows   = unname(mod_rows)
 ) %>% kbl_html()
 ```
 
@@ -168,7 +162,8 @@ AUC > 0.5.
 
 The report reads bottom-up: **(1)** what is significant *within each module on its
 own*, then **(2)** which terms recur *across* modules (the convergence view, ordered
-by `signal`), and finally **(3)** the STRING directional contrasts.
+by `signal`). DOMINO active-module (AMI) results are not gene-set-ranked in the
+same way and are not part of this comparison — see 15.AMI_analysis.Rmd.
 
 # Per-module significance {.tabset .tabset-fade}
 
@@ -405,7 +400,7 @@ for (dr in c("top", "bottom")) {
     # plots through its plot hook AFTER the surrounding text stream, which
     # shifts them (and everything printed after, incl. the next tab's
     # heading) by one position -- exactly the "next tab renders underneath"
-    # symptom. Same fix already used in 15.STRING_report.Rmd's network plots.
+    # symptom. Same fix already used in 15.AMI_analysis.Rmd's network plots.
     .png_path <- file.path("compare_results", sprintf("xmod_dotplot_%s.png", dr))
     ggsave(.png_path, p, width = 9, height = max(4, length(term_levels) * 0.35 + 2), dpi = 150)
     cat(sprintf("![](%s)\n\n", .png_path))
@@ -480,74 +475,6 @@ if (has_pkg("ggrepel") && nrow(pl) > 0) {
     data = pl, aes(label = stringr::str_trunc(description, 40)), size = 2.6, max.overlaps = Inf, seed = 42)
 }
 print(p)
-```
-
----
-
-# STRING: Top vs Bottom {.tabset .tabset-fade}
-
-`r if (!has_string) "> **No STRING results available — skipping.**"`
-
-```{r string_compare, eval=has_string, results='asis'}
-dir_col <- intersect(c("direction", "gene_list", "list_name"), names(string_all))[1]
-if (is.na(dir_col)) {
-  cat("_STRING results lack a direction column; showing combined table._\n\n")
-  print(kbl_html(head(string_all, params$top_n), height = "420px"))
-} else {
-  sa <- string_all %>% mutate(direction = tolower(as.character(.data[[dir_col]])),
-                              direction = dplyr::case_when(grepl("top", direction) ~ "top",
-                                                           grepl("bottom|bot", direction) ~ "bottom",
-                                                           TRUE ~ "other"))
-  for (d in c("top", "bottom")) {
-    sub <- sa %>% filter(direction == d) %>% head(params$top_n)
-    cat(sprintf("\n## %s\n\n", d))
-    if (nrow(sub) == 0) {
-      cat("_None._\n\n")
-      next
-    }
-    
-    has_pct <- "pct_gate_sig" %in% names(sub)
-    if (has_pct) {
-      if (d == "top") {
-        display_df <- sub %>%
-          dplyr::select(
-            Category = category,
-            Term = description,
-            FDR = fdr,
-            `gate_sig (%)` = pct_gate_sig,
-            `gate_fdr (%)` = pct_gate_fdr,
-            `top10% (%)` = pct_top10,
-            `top5% (%)` = pct_top5,
-            `top1% (%)` = pct_top1,
-            `fade_top (%)` = pct_fade_top,
-            `rer_acc (%)` = pct_rer_acc,
-            `rer_decc (%)` = pct_rer_decc,
-            `accum (%)` = pct_accum
-          )
-      } else {
-        display_df <- sub %>%
-          dplyr::select(
-            Category = category,
-            Term = description,
-            FDR = fdr,
-            `gate_sig (%)` = pct_gate_sig,
-            `gate_fdr (%)` = pct_gate_fdr,
-            `bot10% (%)` = pct_bottom10,
-            `bot5% (%)` = pct_bottom5,
-            `bot1% (%)` = pct_bottom1,
-            `fade_bottom (%)` = pct_fade_bottom,
-            `rer_acc (%)` = pct_rer_acc,
-            `rer_decc (%)` = pct_rer_decc,
-            `accum (%)` = pct_accum
-          )
-      }
-    } else {
-      display_df <- sub
-    }
-    
-    print(kbl_html(display_df, height = "420px"))
-  }
-}
 ```
 
 ---

@@ -46,12 +46,16 @@ fi
 NF_FLAGS+=(
     -name "${TRAIT}_$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | cut -c1-8 || printf '%08x' $RANDOM)"
     --alignment "$ALI_DIR"
+    --ali_format "${ALI_FORMAT:-fasta}"
     --tree "$TREE_FILE"
     --outdir "$RESULTS_BASE"
     --seed "$SEED"
     --max_cpus "$MAX_CPUS"
     --max_memory "$MAX_MEMORY"
     --max_time "$MAX_TIME"
+    --sp_colname "${SP_COLNAME:-species}"
+    --clade_name "${CLADE_NAME:-primates}"
+    --taxon_of_interest "${TAXON_OF_INTEREST:-family}"
 )
 
 # General flags
@@ -77,13 +81,39 @@ if [ "${RUN_CAAS:-{{ run_defaults.caas }}}" = true ]; then
         --contrast_selection
         --ct_tool "{{ ct_tool_string }}"
         --caas_config "$CAAS_CONFIG"
+        --patterns "${PATTERNS:-1,2,3}"
         --perms_cycles "$PERMS_CYCLES"
         --caas_permulation_enrichment {{ run_defaults.caas_permulation_enrichment }}
         --caas_full_perms "$CAAS_FULL_PERMS"
+        --top_quantile "${TOP_QUANTILE:-0.90}"
+        --bottom_quantile "${BOTTOM_QUANTILE:-0.10}"
+        --contrast_max_iter "${CONTRAST_MAX_ITER:-3}"
+        --min_contrasts "${MIN_CONTRASTS:-3}"
+        --publish_intermediates {{ run_defaults.publish_intermediates }}
+        --ct_discovery_batch_size "${CT_DISCOVERY_BATCH_SIZE:-25}"
+        --ct_bootstrap_batch_size "${CT_BOOTSTRAP_BATCH_SIZE:-10}"
+        --min_divergent_fraction "${MIN_DIVERGENT_FRACTION:-0.5}"
+        --max_bg_gaps_fraction "${MAX_BG_GAPS_FRACTION:-0.0}"
+        --max_fg_gaps_fraction "${MAX_FG_GAPS_FRACTION:-0.0}"
+        --max_gaps_fraction "${MAX_GAPS_FRACTION:-0.0}"
+        --max_bg_miss_fraction "${MAX_BG_MISS_FRACTION:-0.0}"
+        --max_fg_miss_fraction "${MAX_FG_MISS_FRACTION:-0.0}"
+        --max_miss_fraction "${MAX_MISS_FRACTION:-0.0}"
+        --miss_pair {{ run_defaults.miss_pair }}
+        --caap_mode {{ run_defaults.caap_mode }}
+        --fgsize "${FGSIZE:-6}"
+        --bgsize "${BGSIZE:-6}"
+        --perm_strategy "${PERM_STRATEGY:-BM}"
+        --chunk_size "${CHUNK_SIZE:-500}"
+        --include_b0 {{ run_defaults.include_b0 }}
+        --alpha_threshold "${ALPHA_THRESHOLD:-0.05}"
+        --export_groups {{ run_defaults.export_groups }}
+        --export_perm_discovery {{ run_defaults.export_perm_discovery }}
 {% if modules.caas.extra_flags %}
         {{ modules.caas.extra_flags }}
 {% endif %}
     )
+    [ -n "${TRAITVALUES:-}" ] && NF_FLAGS+=(--traitvalues "$TRAITVALUES")
 else
     [ -n "${DISCOVERY_FROM:-}" ] && NF_FLAGS+=(--discovery_from "$DISCOVERY_FROM")
     [ -n "${RESAMPLE_FROM:-}" ] && NF_FLAGS+=(--resample_from "$RESAMPLE_FROM")
@@ -94,7 +124,12 @@ if [ "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" = true ]; then
     NF_FLAGS+=(
         --ct_disambiguation
         --ct_disambig_asr_mode "$ASR_MODE"
+        --ct_disambig_asr_model "${ASR_MODEL:-lg}"
         --ct_disambig_asr_cache_dir "$ASR_CACHE_DIR"
+        --ct_disambig_convergence_mode "${CONVERGENCE_MODE:-focal_clade}"
+        --ct_disambig_posterior_threshold "${POSTERIOR_THRESHOLD:-0.1}"
+        --ct_disambig_max_tasks_per_child "${MAX_TASKS_PER_CHILD:-50}"
+        --asr_robustness {{ run_defaults.asr_robustness }}
     )
     if [ "${RUN_CT_POSTPROC:-{{ run_defaults.ct_postproc }}}" = true ]; then
         NF_FLAGS+=(
@@ -103,6 +138,10 @@ if [ "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" = true ]; then
             --filter_minlen "$POSTPROC_MINLEN"
             --filter_maxcaas "$POSTPROC_MAXCAAS"
             --gene_filter_mode "$POSTPROC_GENE_FILTER_MODE"
+            --minlen_values "${POSTPROC_MINLEN_VALUES:-2,3,4,10}"
+            --maxcaas_values "${POSTPROC_MAXCAAS_VALUES:-0.6,0.7,0.8}"
+            --extreme_threshold "${POSTPROC_EXTREME_THRESHOLD:-0.99}"
+            --iqr_multiplier "${POSTPROC_IQR_MULTIPLIER:-3.0}"
         )
     fi
 {% if modules.disambiguation.extra_flags %}
@@ -119,9 +158,14 @@ if [ "${RUN_ACCUMULATION:-{{ run_defaults.accumulation }}}" = true ]; then
     NF_FLAGS+=(
         --ct_accumulation
         --accumulation_n_randomizations "$N_RANDOMIZATIONS"
+        --accumulation_randomization_type "${ACCUMULATION_RANDOMIZATION_TYPE:-cons_decile}"
+        --accumulation_seed "${ACCUMULATION_SEED:-1998}"
         --ct_disambig_asr_mode "$ASR_MODE"
         --ct_disambig_asr_cache_dir "$ASR_CACHE_DIR"
         --accumulation_entropy_dir "$ENTROPY_DIR"
+        --accumulation_fdr "${ACCUMULATION_FDR:-0.1}"
+        --accumulation_pval_threshold "${ACCUMULATION_PVAL_THRESHOLD:-0.05}"
+        --accumulation_report_pval_threshold "${ACCUMULATION_REPORT_PVAL_THRESHOLD:-0.05}"
 {% if modules.accumulation.extra_flags %}
         {{ modules.accumulation.extra_flags }}
 {% endif %}
@@ -138,10 +182,28 @@ if [ "${RUN_RER:-{{ run_defaults.rer }}}" = true ]; then
         --gene_trees "${GENE_TREES}"
         --rer_perm_batches "${RER_PERM_BATCHES}"
         --rer_perms_per_batch "${RER_PERMS_PER_BATCH}"
+        --rer_minsp "${RER_MINSP:-15}"
+        --winsorizeRER "${WINSORIZE_RER:-3}"
+        --winsorizeTrait "${WINSORIZE_TRAIT:-3}"
+        --rer_trait_mode "${RER_TRAIT_MODE:-auto}"
+        --rer_binary_clade "${RER_BINARY_CLADE:-all}"
+        --rer_min_pos "${RER_MIN_POS:-2}"
+        --rer_pval_threshold "${RER_PVAL_THRESHOLD:-0.05}"
+        --rer_pval_column "${RER_PVAL_COLUMN:-p.perm}"
+        --rer_top_n_labels "${RER_TOP_N_LABELS:-20}"
+        --rer_transform "${RER_TRANSFORM:-ha_logit}"
 {% if modules.rer.extra_flags %}
         {{ modules.rer.extra_flags }}
 {% endif %}
     )
+    [ -n "${TRAIT_OUT:-}" ] && NF_FLAGS+=(--trait_out "$TRAIT_OUT")
+    [ -n "${TREES_OUT:-}" ] && NF_FLAGS+=(--trees_out "$TREES_OUT")
+    [ -n "${MATRIX_OUT:-}" ] && NF_FLAGS+=(--matrix_out "$MATRIX_OUT")
+    [ -n "${RER_UNIVERSE_FILE:-}" ] && NF_FLAGS+=(--rer_universe_file "$RER_UNIVERSE_FILE")
+    [ -n "${RER_GENE_SCORES:-}" ] && NF_FLAGS+=(--rer_gene_scores "$RER_GENE_SCORES")
+else
+    [ -n "${RER_CONTINUOUS_FILE:-}" ] && NF_FLAGS+=(--rer_continuous_file "$RER_CONTINUOUS_FILE")
+    [ -n "${RER_PERMS_FILE:-}" ] && NF_FLAGS+=(--rer_perms_file "$RER_PERMS_FILE")
 fi
 
 # FADE Flags
@@ -149,10 +211,29 @@ if [ "${RUN_FADE:-{{ run_defaults.fade }}}" = true ]; then
     NF_FLAGS+=(
         --fade
         --fade_mode "${FADE_MODE}"
+        --selection_prep_batch_size "${SELECTION_PREP_BATCH_SIZE:-500}"
+        --fade_batch_size "${FADE_BATCH_SIZE:-200}"
+        --fade_bf_threshold "${FADE_BF_THRESHOLD:-100}"
+        --fade_model "${FADE_MODEL:-LG}"
+        --fade_method "${FADE_METHOD:-Variational-Bayes}"
+        --fade_grid "${FADE_GRID:-20}"
+        --fade_chains "${FADE_CHAINS:-5}"
+        --fade_chain_length "${FADE_CHAIN_LENGTH:-2000000}"
+        --fade_burn_in "${FADE_BURN_IN:-1000000}"
+        --fade_samples "${FADE_SAMPLES:-1000}"
+        --fade_concentration "${FADE_CONCENTRATION:-0.5}"
+        --fade_min_genes_for_heatmap "${FADE_MIN_GENES_FOR_HEATMAP:-2}"
 {% if modules.fade.extra_flags %}
         {{ modules.fade.extra_flags }}
 {% endif %}
     )
+    [ -n "${FADE_POSTPROC_TOP:-}" ] && NF_FLAGS+=(--fade_postproc_top "$FADE_POSTPROC_TOP")
+    [ -n "${FADE_POSTPROC_BOTTOM:-}" ] && NF_FLAGS+=(--fade_postproc_bottom "$FADE_POSTPROC_BOTTOM")
+    [ -n "${LG_DAT_PATH:-}" ] && NF_FLAGS+=(--lg_dat_path "$LG_DAT_PATH")
+    [ -n "${FADE_UNIVERSE_FILE:-}" ] && NF_FLAGS+=(--fade_universe_file "$FADE_UNIVERSE_FILE")
+else
+    [ -n "${FADE_JSON_DIR_TOP:-}" ] && NF_FLAGS+=(--fade_json_dir_top "$FADE_JSON_DIR_TOP")
+    [ -n "${FADE_JSON_DIR_BOTTOM:-}" ] && NF_FLAGS+=(--fade_json_dir_bottom "$FADE_JSON_DIR_BOTTOM")
 fi
 
 # Scoring Flags
@@ -161,6 +242,10 @@ if [ "${RUN_SCORING:-{{ run_defaults.scoring }}}" = true ]; then
         --scoring
         --scoring_window_size_bp "${SCORING_WINDOW_SIZE_BP:-1000000}"
         --gene_ensembl_file "${GENE_ENSEMBL_FILE}"
+        --scoring_stress_top_n "${SCORING_STRESS_TOP_N:-25}"
+        --scoring_stress_rank_metric "${SCORING_STRESS_RANK_METRIC:-spearman}"
+        --scoring_position_top_pct "${SCORING_POSITION_TOP_PCT:-0.10}"
+        --scoring_gene_top_pct "${SCORING_GENE_TOP_PCT:-0.10}"
 {% if modules.scoring.extra_flags %}
         {{ modules.scoring.extra_flags }}
 {% endif %}
@@ -182,7 +267,7 @@ if [ "${RUN_VEP:-{{ run_defaults.vep }}}" = true ]; then
         --vep
         --vep_primateai_db "${VEP_PRIMATEAI_DB}"
         --vep_map_dir "${MAP_DIR}"
-        --scoring_vep_cosmic "${SCORING_VEP_COSMIC:-}"
+        --cosmic_db "${COSMIC_DB:-}"
 {% if modules.vep.extra_flags %}
         {{ modules.vep.extra_flags }}
 {% endif %}
@@ -196,14 +281,34 @@ if [ "${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}" = true ]; then
     NF_FLAGS+=(
         --enrichment
         --gmt_dir "${GMT_DIR}"
+        --enrichment_organism "${ENRICHMENT_ORGANISM:-hsapiens}"
+        --enrichment_min_num "${ENRICHMENT_MIN_NUM:-5}"
+        --enrichment_max_num "${ENRICHMENT_MAX_NUM:-500}"
+        --enrichment_fdr "${ENRICHMENT_FDR:-0.15}"
+        --enrichment_top_thr "${ENRICHMENT_TOP_THR:-15}"
+        --enrichment_report_num "${ENRICHMENT_REPORT_NUM:-20}"
+        --enrichment_overlap_top_terms "${ENRICHMENT_OVERLAP_TOP_TERMS:-50}"
+        --enrichment_compare_metric "${ENRICHMENT_COMPARE_METRIC:-overlap}"
+        --fcs_min_genes "${FCS_MIN_GENES:-5}"
+        --fcs_fdr "${FCS_FDR:-0.15}"
+        --fcs_pperm_thr "${FCS_PPERM_THR:-0.025}"
+        --fcs_top_n "${FCS_TOP_N:-20}"
+        --rer_permulation_enrichment {{ run_defaults.rer_permulation_enrichment }}
         --string_db_dir "${STRING_DB_DIR:-}"
+        --string_species "${STRING_SPECIES:-9606}"
+        --string_required_score "${STRING_REQUIRED_SCORE:-400}"
+        --string {{ run_defaults.string }}
+        --scoring_string {{ run_defaults.scoring_string }}
+        --domino_network_score_thr "${DOMINO_NETWORK_SCORE_THR:-700}"
+        --domino_slice_thr "${DOMINO_SLICE_THR:-0.3}"
+        --domino_module_thr "${DOMINO_MODULE_THR:-0.05}"
+        --scoring_compare_fdr "${SCORING_COMPARE_FDR:-0.15}"
+        --scoring_compare_top_n "${SCORING_COMPARE_TOP_N:-20}"
 {% if modules.enrichment.extra_flags %}
         {{ modules.enrichment.extra_flags }}
 {% endif %}
     )
 else
-    [ -n "${ENRICHMENT_BACKGROUND_INPUT:-}" ] && NF_FLAGS+=(--enrichment_background_input "$ENRICHMENT_BACKGROUND_INPUT")
-    [ -n "${ENRICHMENT_GENE_LISTS_INPUT:-}" ] && NF_FLAGS+=(--enrichment_gene_lists_input "$ENRICHMENT_GENE_LISTS_INPUT")
     [ -n "${ACCUMULATION_ENRICHMENT_GENE_LISTS_INPUT:-}" ] && NF_FLAGS+=(--accumulation_enrichment_gene_lists_input "$ACCUMULATION_ENRICHMENT_GENE_LISTS_INPUT")
 fi
 
@@ -217,6 +322,10 @@ if [ "${RUN_POSENRICH:-{{ run_defaults.posenrich }}}" = true ]; then
         --domain_variability_file "${DOMAIN_VARIABILITY_FILE}"
         --ucr_positions_file "${UCR_POSITIONS_FILE}"
         --fubar_sites_file "${FUBAR_SITES_FILE}"
+        --posenrich_min_size "${POSENRICH_MIN_SIZE:-5}"
+        --posenrich_max_size "${POSENRICH_MAX_SIZE:-0}"
+        --posenrich_padj_thr "${POSENRICH_PADJ_THR:-0.15}"
+        --posenrich_fold_thr "${POSENRICH_FOLD_THR:-1.5}"
     )
 else
     [ -n "${POSENRICH_BACKGROUND_FILE:-}" ] && NF_FLAGS+=(--posenrich_background_file "$POSENRICH_BACKGROUND_FILE")
@@ -232,11 +341,10 @@ fi
 [ -n "${SCORING_FADE_SUMMARY_BOTTOM:-}" ] && NF_FLAGS+=(--scoring_fade_summary_bottom "$SCORING_FADE_SUMMARY_BOTTOM")
 [ -n "${SCORING_FADE_SITE_TOP:-}" ] && NF_FLAGS+=(--scoring_fade_site_top "$SCORING_FADE_SITE_TOP")
 [ -n "${SCORING_FADE_SITE_BOTTOM:-}" ] && NF_FLAGS+=(--scoring_fade_site_bottom "$SCORING_FADE_SITE_BOTTOM")
+[ -n "${SCORING_VEP_COSMIC:-}" ] && NF_FLAGS+=(--scoring_vep_cosmic "$SCORING_VEP_COSMIC")
 
 # --- CLASS-SPECIFIC FLAGS ---
 if [ "$CLASS" = "1" ]; then
-    PRUNE_LIST="${PRUNE_DIR}/${PRUNE_FILE}"
-    PRUNE_SECONDARY_LIST="${PRUNE_DIR}/${PRUNE_SECONDARY_FILE}"
     NF_FLAGS+=(
         --my_traits "$TRAIT_FILE"
         --traitname "$TRAIT"
@@ -244,9 +352,16 @@ if [ "$CLASS" = "1" ]; then
         --n_trait "$N_TRAIT"
         --c_trait "$C_TRAIT"
         --branch_trait "$BRANCH_TRAIT"
-        --prune_list "$PRUNE_LIST"
-        --prune_list_secondary "$PRUNE_SECONDARY_LIST"
     )
+    # Pruning is triggered by this phenotype specifying a prune list, not by a
+    # separate manual toggle — a row with no PRUNE_FILE just isn't pruned.
+    if [ -n "$PRUNE_FILE" ]; then
+        NF_FLAGS+=(
+            --prune_data
+            --prune_list "${PRUNE_DIR}/${PRUNE_FILE}"
+        )
+        [ -n "$PRUNE_SECONDARY_FILE" ] && NF_FLAGS+=(--prune_list_secondary "${PRUNE_DIR}/${PRUNE_SECONDARY_FILE}")
+    fi
 elif [ "$CLASS" = "2" ]; then
     NF_FLAGS+=(
         --my_traits "$SIMPLE_TRAIT_FILE"

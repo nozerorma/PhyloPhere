@@ -529,7 +529,7 @@ has moved into the Position-level FCS report below.
   "FCS — CAAS (this scoring run)",      sprintf("13.FCS_scoring_%s.html",    .trait),
   "FCS — RERconverge (+ p.perm)",       sprintf("13.FCS_rer_%s.html",        .trait),
   "Position-level FCS (+ Position Characterisation)", sprintf("16.Position_enrichment_report_%s.html", .trait),
-  "STRING (network / PPI / clusters)",  sprintf("15.STRING_report_%s.html", .trait),
+  "AMI (DOMINO active modules)",        sprintf("15.AMI_analysis_%s.html", .trait),
   "COMPARE — cross-module overview",    sprintf("12.Comparison_report_%s.html",.trait)
 )
 cat(paste0("- [", .companions$Report, "](", .companions$File, ")", collapse = "\n"))
@@ -648,9 +648,10 @@ TOP and BOTTOM directions.
 
 ---
 
-### ORA Gene List Extraction
+### Gene List Extraction
 
-Gene lists for Over-Representation Analysis are extracted at three thresholds
+Gene lists for downstream STRING/DOMINO active-module analysis are extracted
+at three thresholds
 (configurable via `--scoring_position_top_pct` / `--scoring_position_top5_pct` /
 `--scoring_position_top1_pct` and their gene-level equivalents) and three
 directional subsets:

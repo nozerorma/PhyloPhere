@@ -12,7 +12,7 @@
  * (STRING hard-caps foreground+background at 2000 proteins combined; our
  * cleaned_background is ~10,447). STRING's functional/term enrichment
  * (get_enrichment_local()/get_enrichment()) is untouched and lives entirely in
- * 15.STRING_report.Rmd.
+ * 15.AMI_analysis.Rmd.
  *
  * DOMINO_BUILD_NETWORK filters STRING v12.0's raw links file (cached once,
  * unfiltered) to domino_network_score_thr and both-endpoints-in-background.

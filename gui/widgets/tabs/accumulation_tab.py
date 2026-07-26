@@ -15,16 +15,26 @@ SPEC = ModuleTabSpec(
         "Tests whether CAAS hits accumulate on specific genes more than expected under "
         "a randomized background, using per-site Valdar-entropy conservation weighting."
     ),
-    disclaimer="Enrichment's accumulation gene lists need this module's output.",
+    disclaimer=(
+        "Enrichment's accumulation gene lists need this module's output. Supply "
+        "accumulation_caas_input/accumulation_background_input on the Precomputed "
+        "Run tab instead."
+    ),
     essential_fields=(
         FieldSpec(name="accumulation_n_randomizations", label="Randomizations"),
         FieldSpec(name="accumulation_entropy_dir", label="Entropy directory", kind="path_dir"),
     ),
-    fallback_fields=(
-        FieldSpec(name="accumulation_caas_input", label="CAAS input file", kind="path_file"),
+    advanced_fields=(
         FieldSpec(
-            name="accumulation_background_input", label="Background input", kind="path_file"
+            name="accumulation_randomization_type",
+            label="Randomization type",
+            kind="choice",
+            choices=("naive", "cons_decile"),
         ),
+        FieldSpec(name="accumulation_seed", label="Randomization seed"),
+        FieldSpec(name="accumulation_fdr", label="FDR threshold"),
+        FieldSpec(name="accumulation_pval_threshold", label="P-value threshold"),
+        FieldSpec(name="accumulation_report_pval_threshold", label="Report p-value threshold"),
     ),
 )
 

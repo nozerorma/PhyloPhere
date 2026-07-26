@@ -7,7 +7,7 @@
 # network itself has to be built and filtered here, not left to DOMINO.
 #
 # STRING v12.0's raw links file is cached once, unfiltered, exactly like
-# 15.STRING_report.Rmd's ensure_string_cache() does for the R/STRINGdb path —
+# 15.AMI_analysis.Rmd's ensure_string_cache() does for the R/STRINGdb path —
 # score_threshold is applied here at use-time so the same cache serves any
 # threshold. Node IDs are mapped ENSP -> gene symbol in a single hop via
 # protein.info.v12.0.txt.gz; do NOT round-trip through Ensembl gene IDs, that

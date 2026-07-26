@@ -93,13 +93,8 @@ workflow CT_POSTPROC {
         
         // Handle global background genes source for cleanup
         def global_background_genes
-        // background_ori_ch: a split of the same source for ORA on excluded genes
-        // Uses multiMap so each branch receives every item without racing.
-        def background_ori_ch
         if (params.ct_tool && background_genes_channel) {
-            def _bg_split = background_genes_channel.multiMap { f -> cleanup: f; ori: f }
-            global_background_genes = _bg_split.cleanup
-            background_ori_ch       = _bg_split.ori
+            global_background_genes = background_genes_channel
             log.info "📥 Using global background genes from CT_DISCOVERY module"
         } else if (params.background_input) {
             def bg_path = file(params.background_input)
@@ -107,15 +102,11 @@ workflow CT_POSTPROC {
 
             if (bg_path.isDirectory()) {
                 // Prefer background_genes-like files in standalone mode directories
-                def _bg_split = Channel.fromPath("${params.background_input}/*background_genes*").multiMap { f -> cleanup: f; ori: f }
-                global_background_genes = _bg_split.cleanup
-                background_ori_ch       = _bg_split.ori
+                global_background_genes = Channel.fromPath("${params.background_input}/*background_genes*")
                 log.info "📂 Loading global background genes from directory: ${params.background_input}"
             } else {
                 // Single file
-                def _bg_split = Channel.fromPath(params.background_input).multiMap { f -> cleanup: f; ori: f }
-                global_background_genes = _bg_split.cleanup
-                background_ori_ch       = _bg_split.ori
+                global_background_genes = Channel.fromPath(params.background_input)
                 log.info "📄 Loading global background genes file: ${params.background_input}"
             }
         } else {
@@ -172,7 +163,6 @@ workflow CT_POSTPROC {
         def filtered_discovery_ch = Channel.empty()
         def cleaned_background_main_ch = Channel.empty()
         def enrichment_gene_lists_files_ch = Channel.empty()
-        def excluded_gene_lists_files_ch = Channel.empty()
         
         if (params.gene_filter_mode != 'none') {
             assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required for gene filtering"
@@ -238,24 +228,19 @@ workflow CT_POSTPROC {
                 gene_filter_results ? gene_filter_results.gene_stats : Channel.empty()
             )
 
-            // Split .txt exports into standard ORA gene lists vs excluded-gene lists.
-            // branch{} routes each item to exactly one consumer (no queue sharing issues).
+            // Keep only the significant (non-excluded) gene-list .txt exports —
+            // these feed FADE's gene_set mode (SELECTION_PREP, see main.nf).
             // NOTE: disambiguation_characterization can emit a collection of files; normalize to
             // single-file items first to avoid calling String methods on ArrayList values.
-            def _txt_branched = characterization_results.disambiguation_characterization
+            enrichment_gene_lists_files_ch = characterization_results.disambiguation_characterization
                 .flatMap { item ->
                     item instanceof Collection ? item : [item]
                 }
                 .filter { f ->
                     def p = f.toString()
-                    p.endsWith('.txt') && p.contains('gene_relation_analysis/txt')
+                    p.endsWith('.txt') && p.contains('gene_relation_analysis/txt') &&
+                        !p.contains('gene_relation_analysis/txt/excluded')
                 }
-                .branch { f ->
-                    excluded:    f.toString().contains('gene_relation_analysis/txt/excluded')
-                    significant: true
-                }
-            enrichment_gene_lists_files_ch      = _txt_branched.significant
-            excluded_gene_lists_files_ch = _txt_branched.excluded
             
             log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"
         }
@@ -268,6 +253,4 @@ workflow CT_POSTPROC {
         filtered_discovery = filtered_discovery_ch
         cleaned_background = cleaned_background_main_ch
         enrichment_gene_lists_files = enrichment_gene_lists_files_ch
-        background_ori = background_ori_ch                        // original (pre-cleanup) background for ORA on excluded genes
-        excluded_gene_lists_files = excluded_gene_lists_files_ch  // txt/excluded/*.txt gene lists from postproc report
 }

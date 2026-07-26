@@ -4,7 +4,7 @@
  * FCS (Functional Class Scoring) report processes
  * ───────────────────────────────────────────────
  * Rank-based, threshold-free gene-set enrichment via the Wilcoxon-AUC test
- * (RERconverge::fastwilcoxGMTall) over the curated GMTs in subworkflows/ORA/dat.
+ * (RERconverge::fastwilcoxGMTall) over the curated GMTs in subworkflows/ENRICHMENT/dat.
  * Each process renders 13.FCS_general_report.Rmd against a generic
  * stats TSV (gene + score_<ranking> + flag_<name> columns) and a universe file
  * (cleaned_background, no-signal genes floored to 0).

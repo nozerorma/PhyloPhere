@@ -9,7 +9,7 @@ import subprocess
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from conftest import golden_project
-from gui.generation.render import render_sbatch, render_single
+from gui.generation.render import render_batch, render_single
 from gui.generation.validate import validate, validate_paths
 from gui.models.runtime import PhenotypeRow
 
@@ -24,12 +24,12 @@ def _bash_syntax_ok(script: str) -> bool:
 def test_caas_disabled_with_fallback_threads_through():
     project = golden_project()
     project.modules.caas.enabled = False
-    project.modules.caas.discovery_from = "/precomputed/discovery"
-    project.modules.caas.bootstrap_from = "/precomputed/bootstrap"
+    project.precomputed.discovery_from = "/precomputed/discovery"
+    project.precomputed.bootstrap_from = "/precomputed/bootstrap"
 
     assert validate(project) == []
 
-    sbatch_out = render_sbatch(project)
+    sbatch_out = render_batch(project)
     single_out = render_single(project)
 
     assert "export RUN_CAAS=false" in sbatch_out
@@ -73,7 +73,7 @@ def test_class2_row_renders_simple_trait_branch():
 
     assert validate(project) == []
 
-    sbatch_out = render_sbatch(project)
+    sbatch_out = render_batch(project)
     single_out = render_single(project)
 
     assert 'CLASS=2; TRAIT="diet_index"' in sbatch_out
@@ -120,7 +120,7 @@ def test_tower_disabled_bakes_false_default():
     assert 'if [ "${RUN_TOWER:-false}" = true ]; then' in single_out
     assert "NF_FLAGS+=( -with-tower )" in single_out
 
-    sbatch_out = render_sbatch(project)
+    sbatch_out = render_batch(project)
     assert "export RUN_TOWER=false" in sbatch_out
 
 

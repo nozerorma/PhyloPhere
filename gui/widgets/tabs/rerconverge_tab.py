@@ -8,6 +8,17 @@
 Off by default (RUN_RER=false in the reference scripts). The 4 rer_tool sub-steps
 are individual checkboxes jointly building --rer_tool, same pattern as CAAS's
 ct_tool discovery/resample/bootstrap checkboxes.
+
+No "gene_set" mode here on purpose, unlike FADE's fade_mode: RERconverge has the
+plumbing for one (subworkflows/RERCONVERGE/rer_filter_trees.nf takes gene_set_top/
+bottom inputs, and subworkflows/SELECTION/selection_prep.nf's shared gene-set
+collection explicitly mentions "RER_MAIN (when RERconverge uses gene_set mode)" in
+a comment) but workflows/rerconverge.nf's RER_MAIN never actually calls it —
+main.nf always passes Channel.empty() for both gene-set channels, and RER_MAIN's
+own take: comment says so explicitly ("Kept for backwards-compatible signature;
+currently unused."). Exposing a mode picker here would silently do nothing, so
+this is left as a real pipeline gap rather than a GUI gap — see the spawned
+follow-up task for wiring it, not a fix to make here.
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -24,11 +35,47 @@ SPEC = ModuleTabSpec(
         "Correlates relative evolutionary rates (RER) across gene trees with the "
         "phenotype, using permutation batches for significance."
     ),
-    disclaimer="Scoring needs a scoring_rer_input fallback per phenotype row (Runtime tab) when this is off.",
+    disclaimer=(
+        "Scoring needs a scoring_rer_input fallback per phenotype row (Runtime tab) "
+        "when this is off. rer_continuous_file/rer_perms_file (a precomputed report "
+        "input, not per-phenotype) live on the Precomputed Run tab."
+    ),
     essential_fields=(
         FieldSpec(name="gene_trees", label="Gene trees file", kind="path_file"),
         FieldSpec(name="rer_perm_batches", label="Permutation batches"),
         FieldSpec(name="rer_perms_per_batch", label="Permutations per batch"),
+    ),
+    advanced_fields=(
+        FieldSpec(name="trait_out", label="Trait output path (build_trait)"),
+        FieldSpec(name="trees_out", label="Trees output path (build_tree)"),
+        FieldSpec(name="matrix_out", label="Matrix output path (build_matrix)"),
+        FieldSpec(name="rer_minsp", label="Minimum species per gene"),
+        FieldSpec(name="winsorize_rer", label="Winsorize RER threshold"),
+        FieldSpec(name="winsorize_trait", label="Winsorize trait threshold"),
+        FieldSpec(
+            name="rer_trait_mode",
+            label="Trait type routing",
+            kind="choice",
+            choices=("auto", "continuous", "binary"),
+        ),
+        FieldSpec(
+            name="rer_binary_clade",
+            label="Binary foreground clade",
+            kind="choice",
+            choices=("all", "ancestral", "terminal"),
+        ),
+        FieldSpec(name="rer_min_pos", label="Min independent foreground lineages"),
+        FieldSpec(name="rer_pval_threshold", label="Report p-value threshold"),
+        FieldSpec(name="rer_pval_column", label="Report p-value column"),
+        FieldSpec(name="rer_top_n_labels", label="Top-N labels on correlation plot"),
+        FieldSpec(
+            name="rer_transform",
+            label="Trait transform",
+            kind="choice",
+            choices=("auto", "ha_logit", "logit", "arcsin", "log10", "none"),
+        ),
+        FieldSpec(name="rer_universe_file", label="RER tested-gene universe file", kind="path_file"),
+        FieldSpec(name="rer_gene_scores", label="Cross-module gene scores (fcs_stats.tsv)", kind="path_file"),
     ),
 )
 

@@ -4,6 +4,16 @@
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
+"""
+cosmic_db (conf/vep.config) is VEP's own COSMIC database path — workflows/vep.nf
+reads params.cosmic_db directly to build its cosmic_db_file channel. An earlier
+version of this tab instead exposed scoring_vep_cosmic here (Scoring's *own*
+standalone fallback for a precomputed COSMIC *scores* TSV, conf/scoring.config),
+which VEP never reads — so filling in "COSMIC database" on this tab silently did
+nothing for VEP's actual COSMIC annotation. scoring_vep_cosmic now lives on the
+Precomputed Run tab where it belongs, alongside the rest of Scoring's fallbacks.
+"""
+
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import VepConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
@@ -15,14 +25,11 @@ SPEC = ModuleTabSpec(
         "Annotates CAAS hits with PrimateAI-3D pathogenicity scores and COSMIC "
         "cancer-mutation overlap."
     ),
-    disclaimer="Scoring needs a vep_caas_input fallback when this is off.",
+    disclaimer="Scoring needs a vep_caas_input fallback (Precomputed Run tab) when this is off.",
     essential_fields=(
         FieldSpec(name="vep_primateai_db", label="PrimateAI-3D database", kind="path_file"),
         FieldSpec(name="vep_map_dir", label="Per-gene MAP directory", kind="path_dir"),
-        FieldSpec(name="scoring_vep_cosmic", label="COSMIC database", kind="path_file"),
-    ),
-    fallback_fields=(
-        FieldSpec(name="vep_caas_input", label="Precomputed CAAS input", kind="path_file"),
+        FieldSpec(name="cosmic_db", label="COSMIC database", kind="path_file"),
     ),
 )
 

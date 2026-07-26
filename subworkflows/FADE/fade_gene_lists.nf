@@ -3,7 +3,7 @@
 /*
  * FADE_GENE_LISTS
  * ───────────────
- * Extract ORA-ready gene lists from a FADE summary TSV for one direction:
+ * Extract STRING-ready gene lists from a FADE summary TSV for one direction:
  *   background.txt                  — all genes tested by FADE for this direction
  *   fade_{direction}_significant.txt — genes with max_bf >= fade_bf_threshold
  *

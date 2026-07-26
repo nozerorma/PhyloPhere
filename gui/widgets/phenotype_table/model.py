@@ -38,6 +38,22 @@ _CLASS1_ONLY = {"secondary", "n_trait", "c_trait", "prune", "prune_secondary"}
 _CLASS2_ONLY = {"discrete_method"}
 _REQUIRED_ALWAYS = {"trait"}
 
+_HEADER_TOOLTIPS = {
+    "trait_class": (
+        "1 = trait file has n_trait/c_trait columns (sample size + observed cases, e.g. "
+        "prevalence) -> Jeffreys CI composition.\n"
+        "2 = a single continuous index value per species, no n/c columns -> discretized "
+        "via DISCRETE instead."
+    ),
+    "prune": (
+        "Optional. Filled in => this row is pruned automatically (joined with the Runtime "
+        "tab's Prune-list directory). Left blank => this row runs unpruned. No separate "
+        "on/off toggle exists — this column is the toggle."
+    ),
+    "prune_secondary": "Optional secondary prune list, same trigger rule as PRUNE.",
+    "discrete_method": "CLASS 2 only: quantile | quintile | decile | median_sd | parameterized.",
+}
+
 _MISSING_TINT = QColor(255, 210, 210)
 _IRRELEVANT_TINT = QColor(235, 235, 235)
 
@@ -56,11 +72,15 @@ class PhenotypeTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(COLUMNS)
 
     def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
-        if role != Qt.ItemDataRole.DisplayRole:
+        if orientation != Qt.Orientation.Horizontal:
+            if role == Qt.ItemDataRole.DisplayRole:
+                return str(section + 1)
             return None
-        if orientation == Qt.Orientation.Horizontal:
+        if role == Qt.ItemDataRole.DisplayRole:
             return COLUMNS[section][1]
-        return str(section + 1)
+        if role == Qt.ItemDataRole.ToolTipRole:
+            return _HEADER_TOOLTIPS.get(COLUMNS[section][0])
+        return None
 
     def _field_name(self, column: int) -> str:
         return COLUMNS[column][0]

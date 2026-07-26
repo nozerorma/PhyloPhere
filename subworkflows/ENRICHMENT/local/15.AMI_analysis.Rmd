@@ -1,5 +1,5 @@
 ---
-title: "STRING Enrichment Analysis"
+title: "AMI Analysis — DOMINO Active Modules"
 subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
@@ -22,12 +22,9 @@ params:
   background_basename: NULL
   gene_list_files: NULL
   output_dir: "string"
-  project_name: "STRING_Analysis"
+  project_name: "AMI_Analysis"
   species: 9606
   required_score: 400
-  fdr_thr: 0.1
-  top_thr: 15
-  report_num: 20
   gene_scores_file: NULL
   string_db_dir: NULL
   min_cluster_genes: 3
@@ -583,18 +580,17 @@ if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
 
 ```
 
-# STRING analysis configuration
+# AMI analysis configuration
 
 ```{r config_overview}
-cat("=== STRING configuration ===\n")
+cat("=== AMI (Active Module Identification) configuration ===\n")
 cat("Background file (cleaned_background):", bg_file, "\n")
 cat("Gene list files:", length(gene_list_files), "\n")
 cat("Species (NCBI taxon ID):", params$species, "\n")
-cat("Required interaction score:", params$required_score, "\n")
-cat("FDR threshold:", params$fdr_thr, "\n")
-cat("Top terms per list:", params$top_thr, "\n")
+cat("STRING interaction score (network edges):", params$required_score, "\n")
 cat("DOMINO network score threshold:", params$domino_network_score_thr, "\n")
-cat("Module finding: DOMINO (Shamir-Lab)\n")
+cat("Module finding + significance: DOMINO (Shamir-Lab)\n")
+cat("Module functional labels: STRING term enrichment (untouched functional-enrichment path)\n")
 ```
 
 # Map background to STRING IDs
@@ -643,6 +639,10 @@ if (length(bg_string_ids) < 5) {
 # Load gene scores for overlap checking
 
 ```{r load_gene_scores}
+# Minimum STRING-mapped genes for a gene list to get a network at all (used by
+# the DOMINO Active Modules section below).
+MIN_MAPPED <- 5L
+
 gene_scores_df <- NULL
 if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
   gene_scores_df <- readr::read_tsv(params$gene_scores_file, show_col_types = FALSE)
@@ -755,298 +755,6 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
     rer_decc = round_pct(sub_attr$flag_rer_decc),
     accum    = round_pct(sub_attr$flag_accum)
   )
-}
-```
-
-# Run STRING enrichment per gene list
-
-```{r run_string_enrichment}
-MIN_MAPPED <- 5L
-
-run_single_string <- function(gene_file, use_custom_background) {
-  genes_sym   <- read_gene_vector(gene_file)
-  list_name   <- tools::file_path_sans_ext(basename(gene_file))
-
-  # Map gene list symbols to STRING IDs
-  gene_string_ids <- safe_string_map_ids(genes_sym)
-
-  if (length(gene_string_ids) < MIN_MAPPED) {
-    return(list(
-      list_name      = list_name,
-      input_n        = length(genes_sym),
-      mapped_n       = length(gene_string_ids),
-      status         = "skipped_too_few_mapped_genes",
-      n_rows         = 0L,
-      results        = tibble()
-    ))
-  }
-
-  # ── Functional enrichment ──────────────────────────────────────────────────
-  enrich_df <- if (!is.null(enrich_terms_db)) {
-    res <- get_enrichment_local(gene_string_ids, bg_string_ids)
-    if (!is.null(res) && nrow(res) > 0) {
-      res %>% mutate(gene_list = list_name)
-    } else {
-      tibble()
-    }
-  } else {
-    # Fallback to online API
-    message(sprintf("[run_string_enrichment] Querying STRING online enrichment for gene list '%s' (%d genes)...", list_name, length(gene_string_ids)))
-    tryCatch(
-      {
-        res <- string_db$get_enrichment(gene_string_ids)
-        if (!is.null(res) && nrow(res) > 0) {
-          # STRINGdb may return an error frame with columns 'error'/'message'
-          # (e.g. background_error when mapped genes fall outside the custom
-          # background set) instead of real enrichment rows.  Detect and skip.
-          if ("error" %in% names(res)) {
-            message(sprintf(
-              "STRING enrichment API error for %s: %s",
-              list_name,
-              paste(as.character(res[["message"]]), collapse = "; ")
-            ))
-            tibble()
-          } else {
-            res %>% mutate(gene_list = list_name)
-          }
-        } else {
-          tibble()
-        }
-      },
-      error = function(e) {
-        message(sprintf("STRING enrichment failed for %s: %s", list_name, e$message))
-        tibble()
-      }
-    )
-  }
-
-  if (nrow(enrich_df) == 0) {
-    return(list(
-      list_name  = list_name,
-      input_n    = length(genes_sym),
-      mapped_n   = length(gene_string_ids),
-      status     = "no_results",
-      n_rows     = 0L,
-      results    = tibble()
-    ))
-  }
-
-  # Standardise FDR / p-value column (STRINGdb uses 'fdr' and 'p_value')
-  pval_col <- c("fdr", "p_value", "pvalue", "p.adjust", "FDR")
-  pval_col <- pval_col[pval_col %in% names(enrich_df)][1] %||% NA_character_
-
-  if (!is.na(pval_col)) {
-    enrich_df <- enrich_df %>%
-      filter(suppressWarnings(as.numeric(.data[[pval_col]])) <= params$fdr_thr)
-    # Rename to canonical 'fdr' so all downstream consumers (all_results,
-    # plots chunk, accumulation) see a consistent column name regardless of
-    # the STRINGdb version that produced it.
-    if (pval_col != "fdr") {
-      enrich_df <- enrich_df %>% dplyr::rename(fdr = dplyr::all_of(pval_col))
-    }
-  }
-
-  # ── Compute Top Overlap Metrics for STRING enriched terms ──
-  enrich_df$n_top_10 <- NA_integer_
-  enrich_df$n_top_5  <- NA_integer_
-  enrich_df$n_top_1  <- NA_integer_
-  enrich_df$n_fade   <- NA_integer_
-  enrich_df$n_rer    <- NA_integer_
-  enrich_df$n_accum  <- NA_integer_
-
-  # Percentage columns
-  enrich_df$pct_gate_sig <- NA_real_
-  enrich_df$pct_gate_fdr <- NA_real_
-  enrich_df$pct_top10 <- NA_real_
-  enrich_df$pct_top5 <- NA_real_
-  enrich_df$pct_top1 <- NA_real_
-  enrich_df$pct_bottom10 <- NA_real_
-  enrich_df$pct_bottom5 <- NA_real_
-  enrich_df$pct_bottom1 <- NA_real_
-  enrich_df$pct_fade <- NA_real_
-  enrich_df$pct_fade_top <- NA_real_
-  enrich_df$pct_fade_bottom <- NA_real_
-  enrich_df$pct_rer_acc <- NA_real_
-  enrich_df$pct_rer_decc <- NA_real_
-  enrich_df$pct_accum <- NA_real_
-
-  if (!is.null(gene_scores_df) && nrow(enrich_df) > 0) {
-    dir_label <- if (grepl("top", list_name)) "top" else if (grepl("bottom", list_name)) "bottom" else "global"
-    score_col <- if (dir_label == "top") "gene_caas_score_top" else if (dir_label == "bottom") "gene_caas_score_bottom" else "gene_caas_score"
-
-    attr_df <- prepare_gene_attributes(gene_scores_df)
-
-    if (score_col %in% names(gene_scores_df)) {
-      ranked_df <- gene_scores_df %>%
-        filter(!is.na(.data[[score_col]])) %>%
-        select(Gene, score = all_of(score_col),
-               any_of(c("fade_significant_top", "fade_significant_bottom",
-                        "rer_significant", "accum_significant")))
-
-      ranked_df <- ranked_df[order(ranked_df$score, decreasing = TRUE), ]
-
-      n_total <- nrow(ranked_df)
-      if (n_total > 0) {
-        top_10_genes <- head(ranked_df$Gene, max(1, round(n_total * 0.10)))
-        top_5_genes  <- head(ranked_df$Gene, max(1, round(n_total * 0.05)))
-        top_1_genes  <- head(ranked_df$Gene, max(1, round(n_total * 0.01)))
-
-        fade_sig_col <- if (dir_label == "bottom") "fade_significant_bottom" else "fade_significant_top"
-        fade_pos  <- ranked_df$Gene[ranked_df[[fade_sig_col]] %in% TRUE]
-        rer_pos   <- ranked_df$Gene[ranked_df$rer_significant %in% TRUE]
-        accum_pos <- ranked_df$Gene[ranked_df$accum_significant %in% TRUE]
-
-        for (i in 1:nrow(enrich_df)) {
-          term_pref <- as.character(enrich_df$preferredNames[i])
-          if (!is.na(term_pref) && term_pref != "") {
-            term_genes <- strsplit(term_pref, ",")[[1]]
-            enrich_df$n_top_10[i] <- length(intersect(term_genes, top_10_genes))
-            enrich_df$n_top_5[i]  <- length(intersect(term_genes, top_5_genes))
-            enrich_df$n_top_1[i]  <- length(intersect(term_genes, top_1_genes))
-            enrich_df$n_fade[i]   <- length(intersect(term_genes, fade_pos))
-            enrich_df$n_rer[i]    <- length(intersect(term_genes, rer_pos))
-            enrich_df$n_accum[i]  <- length(intersect(term_genes, accum_pos))
-
-            if (!is.null(attr_df)) {
-              pcts <- compute_term_overlap_percentages(term_pref, attr_df, dir_label)
-              enrich_df$pct_gate_sig[i] <- pcts$gate_sig
-              enrich_df$pct_gate_fdr[i] <- pcts$gate_fdr
-              enrich_df$pct_top10[i]    <- pcts$top10
-              enrich_df$pct_top5[i]     <- pcts$top5
-              enrich_df$pct_top1[i]     <- pcts$top1
-              enrich_df$pct_bottom10[i] <- pcts$bot10
-              enrich_df$pct_bottom5[i]  <- pcts$bot5
-              enrich_df$pct_bottom1[i]  <- pcts$bot1
-              enrich_df$pct_fade[i]     <- pcts$fade
-              enrich_df$pct_fade_top[i] <- pcts$fade_top
-              enrich_df$pct_fade_bottom[i] <- pcts$fade_bottom
-              enrich_df$pct_rer_acc[i]  <- pcts$rer_acc
-              enrich_df$pct_rer_decc[i] <- pcts$rer_decc
-              enrich_df$pct_accum[i]    <- pcts$accum
-            }
-          }
-        }
-      }
-    }
-  }
-
-  readr::write_tsv(
-    enrich_df,
-    file.path(string_summary_dir, paste0(list_name, "_results.tsv"))
-  )
-
-  list(
-    list_name  = list_name,
-    input_n    = length(genes_sym),
-    mapped_n   = length(gene_string_ids),
-    status     = "ok",
-    n_rows     = nrow(enrich_df),
-    results    = enrich_df
-  )
-}
-
-string_runs <- lapply(
-  gene_list_files,
-  run_single_string,
-  use_custom_background = use_custom_background
-)
-```
-
-# Summary tables
-
-```{r summary_tables}
-run_summary <- purrr::map_dfr(string_runs, ~tibble(
-  gene_list     = .x$list_name,
-  input_genes   = .x$input_n,
-  mapped_string = .x$mapped_n,
-  status        = .x$status,
-  n_results     = .x$n_rows
-))
-
-all_results <- purrr::map_dfr(string_runs, "results")
-
-readr::write_tsv(run_summary, file.path(string_summary_dir, "string_run_summary.tsv"))
-readr::write_tsv(all_results, file.path(string_summary_dir, "string_all_results.tsv"))
-
-kable(run_summary, caption = "STRING enrichment run summary") %>%
-  kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
-```
-
-## Top Enriched Terms by Gene List {.tabset .tabset-fade}
-
-```{r summary_tables_terms, results='asis'}
-# Render top enriched terms with overlaps
-if (nrow(all_results) > 0 && !is.null(gene_scores_df)) {
-  for (.gl in unique(all_results$gene_list)) {
-    .gl_dat <- all_results %>%
-      dplyr::filter(gene_list == .gl) %>%
-      dplyr::arrange(fdr) %>%
-      dplyr::slice_head(n = 10)
-
-    if (nrow(.gl_dat) > 0) {
-      .dir_label <- if (grepl("top", .gl)) "top" else if (grepl("bottom", .gl)) "bottom" else "global"
-      
-      if (.dir_label == "top") {
-        display_df <- .gl_dat %>%
-          dplyr::select(
-            Category = category,
-            Term = description,
-            FDR = fdr,
-            `gate_sig (%)` = pct_gate_sig,
-            `gate_fdr (%)` = pct_gate_fdr,
-            `top10% (%)` = pct_top10,
-            `top5% (%)` = pct_top5,
-            `top1% (%)` = pct_top1,
-            `fade_top (%)` = pct_fade_top,
-            `rer_acc (%)` = pct_rer_acc,
-            `rer_decc (%)` = pct_rer_decc,
-            `accum (%)` = pct_accum
-          )
-      } else if (.dir_label == "bottom") {
-        display_df <- .gl_dat %>%
-          dplyr::select(
-            Category = category,
-            Term = description,
-            FDR = fdr,
-            `gate_sig (%)` = pct_gate_sig,
-            `gate_fdr (%)` = pct_gate_fdr,
-            `bot10% (%)` = pct_bottom10,
-            `bot5% (%)` = pct_bottom5,
-            `bot1% (%)` = pct_bottom1,
-            `fade_bottom (%)` = pct_fade_bottom,
-            `rer_acc (%)` = pct_rer_acc,
-            `rer_decc (%)` = pct_rer_decc,
-            `accum (%)` = pct_accum
-          )
-      } else {
-        display_df <- .gl_dat %>%
-          dplyr::select(
-            Category = category,
-            Term = description,
-            FDR = fdr,
-            `gate_sig (%)` = pct_gate_sig,
-            `gate_fdr (%)` = pct_gate_fdr,
-            `top10% (%)` = pct_top10,
-            `top5% (%)` = pct_top5,
-            `top1% (%)` = pct_top1,
-            `bot10% (%)` = pct_bottom10,
-            `bot5% (%)` = pct_bottom5,
-            `bot1% (%)` = pct_bottom1,
-            `fade (%)` = pct_fade,
-            `rer_acc (%)` = pct_rer_acc,
-            `rer_decc (%)` = pct_rer_decc,
-            `accum (%)` = pct_accum
-          )
-      }
-
-      cat(sprintf("\n\n### %s\n\n", .gl))
-      print(
-        knitr::kable(display_df, digits = 4, caption = sprintf("Top Enriched STRING Terms and Gene Overlaps for %s", .gl)) %>%
-          kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
-      )
-      cat("\n\n")
-    }
-  }
 }
 ```
 
@@ -1314,124 +1022,13 @@ if (length(network_summary_rows) > 0) {
 }
 ```
 
-# Visualisations {.tabset}
-
-```{r plots, fig.width=12, fig.height=8, results='asis'}
-if (nrow(all_results) > 0) {
-
-  # Detect key columns (STRING may return 'description' or 'term').
-  # 'p.adjust' is included for STRINGdb versions that use that name; the
-  # run_string_enrichment chunk normalises it to 'fdr' at source, but we
-  # keep the full list here as a belt-and-suspenders safeguard.
-  pval_col <- c("fdr", "p_value", "pvalue", "p.adjust", "FDR")
-  pval_col <- pval_col[pval_col %in% names(all_results)][1]
-  if (is.na(pval_col) || length(pval_col) == 0) {
-    warning(sprintf(
-      "No recognised FDR/p-value column found in all_results. Available columns: %s. Plots may be empty.",
-      paste(names(all_results), collapse = ", ")
-    ))
-    pval_col <- names(all_results)[1]  # last-resort: use first column
-  }
-  desc_col <- c("description", "term", "name")
-  desc_col <- desc_col[desc_col %in% names(all_results)][1]
-  if (is.na(desc_col) || length(desc_col) == 0) desc_col <- "description"
-
-  # Gene-count column for bubble sizing below (STRING's own enrichmentfigure
-  # sizes bubbles by protein count). If entirely absent, falls back to a
-  # constant (1) rather than NA -- geom_point() silently DROPS every row
-  # whose `size` aesthetic is NA (confirmed empirically), so an all-NA column
-  # would render an empty plot; a constant instead degrades gracefully to
-  # same-size bubbles, same as the old bar chart when this info wasn't used.
-  ngenes_col <- c("number_of_genes", "n_genes", "count")
-  ngenes_col <- ngenes_col[ngenes_col %in% names(all_results)][1]
-
-  std_results <- all_results %>%
-    mutate(
-      FDR_std       = suppressWarnings(as.numeric(.data[[pval_col]])),
-      FDR_std       = pmax(FDR_std, .Machine$double.xmin, na.rm = TRUE),
-      term_std      = as.character(.data[[desc_col]]),
-      neglog10FDR   = -log10(FDR_std),
-      n_genes_std   = if (!is.na(ngenes_col)) suppressWarnings(as.numeric(.data[[ngenes_col]])) else 1
-    ) %>%
-    filter(!is.na(FDR_std), !is.na(term_std), term_std != "")
-
-  std_results <- std_results %>%
-    mutate(scenario = {
-      # Match a leading top/bottom token (e.g. "top_all", "top25", "bottom1").
-      # Previously required a LEADING underscore ("_(top|bottom)(?:_|$)"), which
-      # never matched these filenames (no underscore precedes "top"/"bottom" at
-      # the start of the string) -- confirmed empirically, every list silently
-      # fell to "global" and the Top/Bottom tab split never actually happened.
-      # Files without either token (i.e. global lists) fall back to "global".
-      s <- stringr::str_match(gene_list, "^(top|bottom)")[, 2]
-      dplyr::if_else(is.na(s), "global", s)
-    })
-  std_results_all    <- std_results
-  present_scenarios  <- intersect(c("global", "top", "bottom"), unique(std_results$scenario))
-
-  for (.scen in present_scenarios) {
-    std_results <- std_results_all %>% dplyr::filter(scenario == .scen)
-    if (length(present_scenarios) > 1) {
-      cat(sprintf("\n\n## %s {.tabset}\n\n", tools::toTitleCase(.scen)))
-      .gl_hdr <- "###"
-    } else {
-      .gl_hdr <- "##"
-    }
-
-  # ── Per-list enrichment bubble charts (STRING enrichmentfigure-style) ──
-  # One plot per gene list; x=-log10(FDR), y=term, bubble size=gene count
-  # (new dimension, mirrors STRING's own enrichmentfigure), fill=category
-  # (kept, unlike STRING's figure which uses color for FDR -- FDR is already
-  # on the x-axis here, so category color stays more informative than a
-  # redundant color-for-FDR encoding).
-  for (.gl in unique(std_results$gene_list)) {
-    .gl_dat <- std_results %>%
-      dplyr::filter(gene_list == .gl) %>%
-      dplyr::arrange(FDR_std) %>%
-      dplyr::slice_head(n = as.integer(params$top_thr)) %>%
-      dplyr::mutate(term_short = stringr::str_trunc(term_std, 65))
-
-    if (nrow(.gl_dat) == 0) next
-
-    cat(sprintf("\n\n%s %s\n\n", .gl_hdr, .gl))
-
-    .n_cats <- dplyr::n_distinct(.gl_dat$category)
-    .p_bar <- ggplot(
-      .gl_dat,
-      aes(x = neglog10FDR, y = reorder(term_short, neglog10FDR), size = n_genes_std, fill = category)
-    ) +
-      geom_point(shape = 21, color = "grey30", alpha = 0.85) +
-      scale_size_continuous(range = c(2, 10), name = "Genes") +
-      safe_fill(.n_cats) +
-      theme_minimal(base_size = 11) +
-      labs(
-        title    = .gl,
-        subtitle = sprintf("Top %d enriched STRING terms (FDR ≤ %s)", nrow(.gl_dat), params$fdr_thr),
-        x        = expression(-log[10](FDR)),
-        y        = NULL,
-        fill     = "Category"
-      ) +
-      theme(plot.title = element_text(face = "bold"), axis.text.y = element_text(size = 9))
-    print(.p_bar)
-    ggsave(
-      file.path(string_plots_dir, sprintf("string_enrichment_%s_%s.png", .gl, .scen)),
-      .p_bar,
-      width  = 13,
-      height = max(5, nrow(.gl_dat) * 0.35 + 2),
-      dpi    = 320
-    )
-  } # end for (.gl in unique(std_results$gene_list))
-
-  } # end for (.scen in present_scenarios)
-  if (exists("std_results_all")) std_results <- std_results_all
-}
-```
-
 ---
 
 ## Summary
 
-This report summarizes the results of the **Enrichment** analysis.
+This report summarizes the results of the **AMI (Active Module Identification)**
+analysis: DOMINO-detected network modules per gene list, with STRING-derived
+functional labels and DOMINO's own per-module significance.
 
 ---
 
@@ -1442,5 +1039,5 @@ sessionInfo()
 ```
 </details>
 
-*Generated by PhyloPhere — Enrichment Module*
+*Generated by PhyloPhere — AMI Analysis Module*
 *Date of generation: `r Sys.Date()`*

@@ -5,15 +5,23 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Enable toggle + blurb + disclaimer + essential-fields group + fallback-inputs group
-+ free-text advanced-flags box — built once from a ModuleTabSpec + FieldSpec list
-(see gui/widgets/common/specs.py) rather than 9 separately hand-rolled layouts.
+Enable toggle + blurb + disclaimer + essential-fields group + collapsed-by-
+default advanced-fields disclosure + free-text raw-flags box — built once from a
+ModuleTabSpec + FieldSpec list (see gui/widgets/common/specs.py) rather than 9
+separately hand-rolled layouts.
 
-Enable-toggle behavior: the essential-fields group is disabled when the module is
-off, while the fallback-inputs group becomes enabled at that same moment (inverted
-enabled states driven by one QCheckBox). The tab itself is never hidden or
-tab-disabled — the disclaimer and fallback fields are exactly what a user needs to
-read/fill when a module is off (see implementation plan §5).
+Enable-toggle behavior: the essential-fields group (and the advanced-fields
+disclosure, if the spec has any) is disabled when the module is off. The tab
+itself is never hidden or tab-disabled — the disclaimer is exactly what a user
+needs to read when a module is off, pointing at the Precomputed Run tab
+(gui/widgets/tabs/precomputed_tab.py) for the standalone/resume input that
+substitutes for this module's output.
+
+No tab currently populates its own `fallback_fields` (every standalone/resume
+input now lives on the Precomputed Run tab instead) — the mechanism stays
+available for a future module-specific case, but the group box housing it is
+only built when a spec's `fallback_fields` is actually non-empty, so today no
+tab shows an empty, confusingly-enabled box for it.
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -32,6 +40,7 @@ from PySide6.QtWidgets import (
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import ModuleConfigBase
+from gui.widgets.common.collapsible import CollapsibleSection
 from gui.widgets.common.path_field import PathField
 from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
 
@@ -64,9 +73,30 @@ class ModuleTabWidget(QWidget):
         self._essential_form = QFormLayout(self.essential_group)
         layout.addWidget(self.essential_group)
 
-        self.fallback_group = QGroupBox("Precomputed input (used when disabled)")
-        self._fallback_form = QFormLayout(self.fallback_group)
-        layout.addWidget(self.fallback_group)
+        # Fine-tuning knobs most runs leave at their conf/*.config default, tucked
+        # behind a collapsed-by-default disclosure so they don't read as equally
+        # important to the essential fields above. Only built when the spec
+        # actually lists some (a few small tabs — e.g. VEP — have none).
+        self.advanced_section: CollapsibleSection | None = None
+        self._advanced_form: QFormLayout | None = None
+        if spec.advanced_fields:
+            advanced_box = QGroupBox()
+            advanced_box.setFlat(True)
+            self._advanced_form = QFormLayout(advanced_box)
+            self.advanced_section = CollapsibleSection(
+                f"Advanced parameters ({len(spec.advanced_fields)})", advanced_box
+            )
+            layout.addWidget(self.advanced_section)
+
+        # Only built when the spec actually lists module-specific fallback fields
+        # (none do today — see this file's module docstring); avoids an empty,
+        # always-enabled-when-disabled box with nothing in it.
+        self.fallback_group: QGroupBox | None = None
+        self._fallback_form: QFormLayout | None = None
+        if spec.fallback_fields:
+            self.fallback_group = QGroupBox("Precomputed input (used when disabled)")
+            self._fallback_form = QFormLayout(self.fallback_group)
+            layout.addWidget(self.fallback_group)
 
         self.extra_flags_edit = QPlainTextEdit(config.extra_flags)
         self.extra_flags_edit.setPlaceholderText(
@@ -74,7 +104,7 @@ class ModuleTabWidget(QWidget):
         )
         self.extra_flags_edit.setMaximumHeight(60)
         self.extra_flags_edit.textChanged.connect(self._on_extra_flags_changed)
-        layout.addWidget(QLabel("Advanced: extra Nextflow flags"))
+        layout.addWidget(QLabel("Power-user override: raw extra Nextflow flags"))
         layout.addWidget(self.extra_flags_edit)
 
         layout.addStretch(1)
@@ -82,6 +112,8 @@ class ModuleTabWidget(QWidget):
         self._field_widgets: dict[str, QWidget] = {}
         for f in spec.essential_fields:
             self._add_field(self._essential_form, f)
+        for f in spec.advanced_fields:
+            self._add_field(self._advanced_form, f)
         for f in spec.fallback_fields:
             self._add_field(self._fallback_form, f)
 
@@ -127,7 +159,10 @@ class ModuleTabWidget(QWidget):
     def _sync_group_enabled_state(self) -> None:
         enabled = getattr(self._config, self._spec.enabled_field)
         self.essential_group.setEnabled(enabled)
-        self.fallback_group.setEnabled(not enabled)
+        if self.advanced_section is not None:
+            self.advanced_section.setEnabled(enabled)
+        if self.fallback_group is not None:
+            self.fallback_group.setEnabled(not enabled)
         self.disclaimer_label.setVisible(not enabled)
 
     def _on_extra_flags_changed(self) -> None:

@@ -3,7 +3,7 @@
 /*
  * PHYLOPHERE: Functional Enrichment Workflow
  *
- * Runs gene-set and position-level functional enrichment analyses (FCS, ORA, STRING).
+ * Runs gene-set and position-level functional enrichment analyses (FCS, STRING).
  */
 
 include { SCORING_STRING_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/scoring_enrichment.nf"
@@ -96,13 +96,7 @@ workflow ENRICHMENT {
         def caas_le  = fcs_out.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
         def rer_le   = rer_fcs.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
 
-        def string_tsv_ch = run_string
-            ? string_out.string_enrichment_tsvs
-                .ifEmpty { file('NO_STRING_TSV') }
-                .collect()
-            : Channel.value([ file('NO_STRING_TSV') ])
-
-        def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, caas_le, rer_le, string_tsv_ch)
+        def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, caas_le, rer_le)
 
         def final_reports = fcs_out.report
             .mix(cmp_out.report)

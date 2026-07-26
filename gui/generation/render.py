@@ -32,8 +32,12 @@ def _environment() -> jinja2.Environment:
     )
 
 
-def render_sbatch(project: ProjectConfig) -> str:
-    """Render the SBATCH array-job wrapper script for the given project."""
+def render_batch(project: ProjectConfig) -> str:
+    """Render the batch-runner script for the given project: a SLURM array-job
+    wrapper when runtime.runtime_type == "slurm", or a plain sequential bash loop
+    over every phenotype row when "local" (see sbatch_array.sh.j2's own internal
+    {% if profile == 'slurm' %} branching — one template, two execution modes,
+    sharing the same per-phenotype dispatch logic either way)."""
     ctx = build_context(project)
     return _environment().get_template("sbatch_array.sh.j2").render(**ctx)
 

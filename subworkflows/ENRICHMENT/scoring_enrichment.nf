@@ -3,19 +3,20 @@
 /*
  * SCORING_STRING / SCORING_COMPARE
  * ────────────────────────────────────────────
- * STRING enrichment runs on the gated directional 9-slice gene lists produced
- * by SCORING_COMPUTE. Ranked enrichment is handled by SCORING_FCS_REPORT
- * (subworkflows/ENRICHMENT/fcs.nf).
+ * DOMINO active-module identification (AMI) runs on the gated directional
+ * 9-slice gene lists produced by SCORING_COMPUTE, with STRING used only for ID
+ * mapping + per-module functional labelling. Ranked enrichment is handled by
+ * SCORING_FCS_REPORT (subworkflows/ENRICHMENT/fcs.nf).
  *
- *   SCORING_STRING_REPORT  → string_results/**, HTML (network/set question)
- *   SCORING_COMPARE_REPORT → compare_results/**, HTML (top vs bottom: FCS + STRING)
+ *   SCORING_STRING_REPORT  → string_results/**, HTML (15.AMI_analysis — DOMINO modules)
+ *   SCORING_COMPARE_REPORT → compare_results/**, HTML (top vs bottom: FCS only)
  */
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCORING_STRING_REPORT
-// Runs STRING_scoring.Rmd (STRINGdb walktrap clustering + enrichment) on the
-// 9 ranked slices.
+// Runs 15.AMI_analysis.Rmd (DOMINO active-module identification, STRING used
+// only for ID mapping + per-module functional labels) on the 9 ranked slices.
 // ─────────────────────────────────────────────────────────────────────────────
 process SCORING_STRING_REPORT {
     tag "scoring_string|${params.traitname ?: 'unknown_trait'}"
@@ -51,12 +52,11 @@ process SCORING_STRING_REPORT {
     path domino_modules_dir
 
     output:
-    path "15.STRING_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "15.AMI_analysis_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "string_results/**",                  emit: string_results,          optional: true
     path "string_summary/**",                  emit: string_summary,          optional: true
     path "string_plots/**",                    emit: string_plots,            optional: true
     path "string_networks/**",                 emit: string_networks,         optional: true
-    path "string_results/*_enrichment.tsv",    emit: string_enrichment_tsvs,  optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
@@ -64,8 +64,6 @@ process SCORING_STRING_REPORT {
     def species   = params.string_species           ?: 9606
     def req_score = params.string_required_score    ?: 400
     def net_score = params.domino_network_score_thr ?: 700
-    def fdr_thr   = params.string_fdr              ?: 0.1
-    def top_thr   = params.string_top_thr          ?: 15
     def bg_name   = background.getName().replace("'", "\\'")
     def gs_arg    = (gene_scores.name =~ /^NO_GENE_SCORES/) ? 'NULL' : "'${gene_scores}'"
 
@@ -86,7 +84,7 @@ process SCORING_STRING_REPORT {
     def render_cmd = """
         Rscript -e "
             rmarkdown::render(
-                '15.STRING_report.Rmd',
+                '15.AMI_analysis.Rmd',
                 params = list(
                     background_file     = '${background}',
                     background_basename = '${bg_name}',
@@ -95,55 +93,40 @@ process SCORING_STRING_REPORT {
                     species             = ${species},
                     required_score      = ${req_score},
                     domino_network_score_thr = ${net_score},
-                    fdr_thr             = ${fdr_thr},
-                    top_thr             = ${top_thr},
                     gene_scores_file    = ${gs_arg},
                     string_db_dir       = '${params.string_db_dir}',
                     domino_network_sif  = '${domino_network_sif}',
                     domino_modules_dir  = '${domino_modules_dir}'
                 ),
-                output_file = '15.STRING_report_${traitname}.html'
+                output_file = '15.AMI_analysis_${traitname}.html'
             )
         "
-    """
-
-    def compat_cmd = """
-        mkdir -p string_results
-        if [ -d string_summary ]; then
-            for f in string_summary/*_results.tsv; do
-                if [ -f "\$f" ]; then
-                    basename=\$(basename "\$f" _results.tsv)
-                    cp "\$f" "string_results/\${basename}_enrichment.tsv"
-                fi
-            done
-        fi
     """
 
     if (params.use_singularity || params.use_apptainer) {
         """
         ${stage_cmd}
         /usr/local/bin/_entrypoint.sh ${render_cmd}
-        ${compat_cmd}
         """
     } else {
         """
         ${stage_cmd}
         ${render_cmd}
-        ${compat_cmd}
         """
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SCORING_COMPARE_REPORT
-// Comparative top-vs-bottom analysis across FCS and STRING outputs.
+// Comparative top-vs-bottom analysis across FCS outputs (CAAS + RER). DOMINO/AMI
+// module output is not gene-set-ranked in the same way and is not part of this
+// comparison — see 15.AMI_analysis.Rmd for module-level results.
 //
 // Inputs (all staged flat in work dir by Nextflow):
 //   fcs_all_results : fcs_results/fcs_all_results.tsv  (single file)
-//   string_tsvs     : string_results/*_enrichment.tsv  (collection, optional)
 //
-// The script sorts staged files into cmp_fcs/ and cmp_string/ before
-// invoking 12.Comparison_report.Rmd.
+// The script sorts staged files into cmp_fcs/ before invoking
+// 12.Comparison_report.Rmd.
 // ─────────────────────────────────────────────────────────────────────────────
 process SCORING_COMPARE_REPORT {
     tag "scoring_compare|${params.traitname ?: 'unknown_trait'}"
@@ -174,7 +157,6 @@ process SCORING_COMPARE_REPORT {
     // module's report didn't run.
     path caas_le,   stageAs: 'caas_leading_edge.tsv'
     path rer_le,    stageAs: 'rer_leading_edge.tsv'
-    path string_tsvs       // string_results/*_enrichment.tsv files (may be placeholder)
 
     output:
     path "12.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -194,7 +176,6 @@ process SCORING_COMPARE_REPORT {
                 params = list(
                     fcs_dir    = 'cmp_fcs',
                     fcs_le_dir = 'cmp_fcs_le',
-                    string_dir = 'cmp_string',
                     fdr_thr    = ${fdr_thr},
                     pperm_thr  = ${pperm_thr},
                     top_n      = ${top_n},
@@ -208,18 +189,13 @@ process SCORING_COMPARE_REPORT {
     def stage_cmd = """
         cp -R ${local_dir}/* .
 
-        mkdir -p cmp_fcs cmp_fcs_le cmp_string
+        mkdir -p cmp_fcs cmp_fcs_le
 
         # Per-module FCS all-results tables (skip empty/sentinel files via -s).
         # 12.Comparison_report.Rmd derives the module from the <module>_fcs_all.tsv name.
         for m in caas rer; do
             [ -s "\${m}_fcs_all.tsv" ] && cp "\${m}_fcs_all.tsv" "cmp_fcs/\${m}_fcs_all.tsv" || true
             [ -s "\${m}_leading_edge.tsv" ] && cp "\${m}_leading_edge.tsv" "cmp_fcs_le/\${m}_leading_edge.tsv" || true
-        done
-
-        # STRING enrichment TSVs
-        for f in *_enrichment.tsv; do
-            [ -f "\$f" ] && cp "\$f" cmp_string/ || true
         done
     """
 

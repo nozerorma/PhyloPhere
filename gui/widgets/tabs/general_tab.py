@@ -29,6 +29,7 @@ class GeneralTab(QWidget):
         super().__init__(parent)
         self._config = config
         remote_context.set_remote_host(config.remote_host)  # sync on tab (re)creation
+        remote_context.set_remote_root_dir(config.remote_root_dir)
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_setup_note())
@@ -79,6 +80,13 @@ class GeneralTab(QWidget):
         self.reporting.setChecked(self._config.reporting)
         self.reporting.toggled.connect(self._on_reporting_changed)
         form.addRow(self.reporting)
+        form.addRow(
+            "",
+            QLabel(
+                "Data pruning (--prune_data) is per-phenotype now, not a toggle here — "
+                "see the Runtime tab's phenotype catalogue."
+            ),
+        )
 
         return box
 
@@ -89,8 +97,9 @@ class GeneralTab(QWidget):
         note = QLabel(
             "Dataset paths often live on a remote HPC cluster rather than this machine. Set a "
             "host here (SSH key-based auth must already work, no password prompt) and every "
-            "path field's Browse button and the Validate Paths action will check that host "
-            "instead of the local filesystem."
+            "path field's Browse button (a real file explorer over SSH — lists and navigates "
+            "remote directories, not just a validity check) and the Validate Paths action will "
+            "check that host instead of the local filesystem."
         )
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -100,6 +109,11 @@ class GeneralTab(QWidget):
         self.remote_host.setPlaceholderText("user@cluster.example.edu (blank = local)")
         self.remote_host.textChanged.connect(self._on_remote_host_changed)
         form.addRow("Remote host", self.remote_host)
+
+        self.remote_root_dir = QLineEdit(self._config.remote_root_dir)
+        self.remote_root_dir.setPlaceholderText("/scratch/username (blank = start browsing at /)")
+        self.remote_root_dir.textChanged.connect(self._on_remote_root_dir_changed)
+        form.addRow("Remote root directory", self.remote_root_dir)
         layout.addLayout(form)
 
         return box
@@ -125,4 +139,9 @@ class GeneralTab(QWidget):
     def _on_remote_host_changed(self, value: str) -> None:
         self._config.remote_host = value
         remote_context.set_remote_host(value)
+        self.changed.emit()
+
+    def _on_remote_root_dir_changed(self, value: str) -> None:
+        self._config.remote_root_dir = value
+        remote_context.set_remote_root_dir(value)
         self.changed.emit()

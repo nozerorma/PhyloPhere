@@ -16,7 +16,7 @@ import subprocess
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from conftest import golden_project
-from gui.generation.render import render_sbatch, render_single
+from gui.generation.render import render_batch, render_single
 from gui.generation.validate import validate
 
 
@@ -32,7 +32,7 @@ def test_golden_project_has_no_validation_errors():
 
 
 def test_sbatch_directives():
-    out = render_sbatch(golden_project())
+    out = render_batch(golden_project())
     assert "#SBATCH --job-name=phylophere" in out
     assert "#SBATCH --partition=haswell" in out
     assert "#SBATCH -t 144:00:00" in out
@@ -42,7 +42,7 @@ def test_sbatch_directives():
 
 
 def test_sbatch_exports_module_toggles():
-    out = render_sbatch(golden_project())
+    out = render_batch(golden_project())
     assert "export RUN_REPORTING=true" in out
     assert "export RUN_CAAS=true" in out
     assert "export RUN_DISAMBIGUATION=true" in out
@@ -56,7 +56,7 @@ def test_sbatch_exports_module_toggles():
 
 
 def test_sbatch_phenotype_catalogue_case_block():
-    out = render_sbatch(golden_project())
+    out = render_batch(golden_project())
     assert 'CLASS=1; TRAIT="neoplasia_prevalence"' in out
     assert 'CLASS=1; TRAIT="malignant_prevalence"' in out
     assert 'export SCORING_RER_INPUT="' in out
@@ -69,7 +69,13 @@ def test_single_runner_class1_branch():
     out = render_single(golden_project())
     assert '--my_traits "$TRAIT_FILE"' in out
     assert '--branch_trait "$BRANCH_TRAIT"' in out
-    assert '--prune_list "$PRUNE_LIST"' in out
+    # Pruning is a runtime decision (bash `if [ -n "$PRUNE_FILE" ]`), not baked in
+    # per-project at render time: --prune_data/--prune_list only get added when
+    # whichever phenotype row is currently dispatching actually set a PRUNE file.
+    assert 'if [ -n "$PRUNE_FILE" ]; then' in out
+    assert '--prune_data' in out
+    assert '--prune_list "${PRUNE_DIR}/${PRUNE_FILE}"' in out
+    assert '--prune_list_secondary "${PRUNE_DIR}/${PRUNE_SECONDARY_FILE}"' in out
     assert _bash_syntax_ok(out)
 
 
@@ -91,14 +97,15 @@ def test_single_runner_nf_flags_per_module():
 
 
 def test_scoring_fade_site_fallbacks_are_exported():
-    # Regression test: scoring_fade_site_top/bottom live on ScoringConfig (global,
-    # non-per-row fallback) and must be exported by the SBATCH wrapper, unlike
-    # scoring_fade_summary_top/bottom which are per-phenotype-row (see PhenotypeRow).
+    # Regression test: scoring_fade_site_top/bottom live on PrecomputedConfig
+    # (global, non-per-row fallback) and must be exported by the batch wrapper,
+    # unlike scoring_fade_summary_top/bottom which are per-phenotype-row (see
+    # PhenotypeRow).
     project = golden_project()
-    project.modules.scoring.scoring_fade_site_top = "/x/site_top.tsv"
-    project.modules.scoring.scoring_fade_site_bottom = "/x/site_bottom.tsv"
+    project.precomputed.scoring_fade_site_top = "/x/site_top.tsv"
+    project.precomputed.scoring_fade_site_bottom = "/x/site_bottom.tsv"
 
-    sbatch_out = render_sbatch(project)
+    sbatch_out = render_batch(project)
     assert 'export SCORING_FADE_SITE_TOP="/x/site_top.tsv"' in sbatch_out
     assert 'export SCORING_FADE_SITE_BOTTOM="/x/site_bottom.tsv"' in sbatch_out
 

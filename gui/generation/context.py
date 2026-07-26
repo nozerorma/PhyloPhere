@@ -76,6 +76,16 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "scoring_stress": _bool_str(scoring.scoring_stress),
         "enrichment": _bool_str(enrichment.enabled),
         "posenrich": _bool_str(enrichment.posenrich_enabled),
+        "scoring_string": _bool_str(enrichment.scoring_string),
+        "string": _bool_str(enrichment.string),
+        "rer_permulation_enrichment": _bool_str(enrichment.rer_permulation_enrichment),
+        "miss_pair": _bool_str(caas.miss_pair),
+        "caap_mode": _bool_str(caas.caap_mode),
+        "include_b0": _bool_str(caas.include_b0),
+        "publish_intermediates": _bool_str(caas.publish_intermediates),
+        "export_groups": _bool_str(caas.export_groups),
+        "export_perm_discovery": _bool_str(caas.export_perm_discovery),
+        "asr_robustness": _bool_str(disambig.asr_robustness),
     }
 
     n_rows = len(project.runtime.phenotype_rows)

@@ -10,6 +10,7 @@
 
 import java.util.UUID
 import java.util.Base64
+import groovy.json.JsonOutput
 
 class WorkflowMap {
 
@@ -170,12 +171,12 @@ class WorkflowMap {
                           "${outdir}/resample",  "${outdir}/bootstrap"],
               htmlCandidates: [] ],
 
-            // NOTE: 8.CT_signification.Rmd only ever creates meta_caas/ (meta_dir <-
+            // NOTE: 7.CT_signification.Rmd only ever creates meta_caas/ (meta_dir <-
             // "meta_caas") — there is no gene_lists subdirectory under signification/.
             [ id: 'ct_signif',   name: 'CT signification (convergence)',  type: 'reporting', ran: ctx.ctSignif,
               filesDirs: ["${outdir}/signification",
                           "${outdir}/signification/meta_caas"],
-              htmlCandidates: ["${outdir}/html_reports/8.CT_signification.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/7.CT_signification.html"] ],
 
             [ id: 'ct_disambig', name: 'CT disambiguation (convergence)', type: 'processes', ran: ctx.ctDisambig,
               filesDirs: ["${outdir}/ct_disambiguation"],
@@ -183,23 +184,14 @@ class WorkflowMap {
 
             [ id: 'asr_robustness', name: 'ASR Robustness',              type: 'reporting', ran: ctx.asrRobustness,
               filesDirs: ["${outdir}/asr_robustness"],
-              htmlCandidates: ["${outdir}/html_reports/7.ASR_robustness.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/9.ASR_robustness.html"] ],
 
             [ id: 'ct_postproc', name: 'CT post-processing',              type: 'prepost',   ran: ctx.ctPostproc,
               filesDirs: ["${outdir}/postproc",
                           "${outdir}/postproc/preprocessed",
                           "${outdir}/postproc/gene_filtering",
                           "${outdir}/postproc/cleaned_backgrounds"],
-              htmlCandidates: ["${outdir}/html_reports/9.Characterization_report.html"] ],
-
-            // ENRICHMENT_EXCLUDED (workflows/enrichment_excluded.nf): characterises genes
-            // REMOVED during CT post-processing filtering, using the pre-cleanup background.
-            // Runs when --ct_postproc and --enrichment are both set — distinct from, and
-            // upstream of, the main ENRICHMENT suite (fcs/string/compare/posenrich below),
-            // which instead runs downstream of --scoring.
-            [ id: 'enrichment_excluded', name: 'Enrichment (excluded genes)', type: 'reporting', ran: ctx.enrichmentExcluded,
-              filesDirs: ["${outdir}/enrichment_excluded"],
-              htmlCandidates: ["${outdir}/html_reports/14.Enrichment_excluded.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/8.Characterization_report.html"] ],
 
             [ id: 'ct_acc',      name: 'CT accumulation (convergence)',   type: 'processes', ran: ctx.ctAccum,
               filesDirs: ["${outdir}/accumulation",
@@ -241,29 +233,36 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/html_reports/11.Scoring_report.html"] ],
 
             // The main ENRICHMENT workflow (workflows/enrichment.nf) runs downstream of
-            // --scoring when --enrichment is also set, and fans out into independent
-            // FCS runs per module (CAAS/RER/FADE/accumulation), an optional STRING PPI
-            // network run (--scoring_string), a cross-module COMPARE report, and an
-            // optional position-level enrichment run (--posenrich) — each represented
-            // as its own card below since they publish to separate output directories.
+            // --scoring when --enrichment is also set. It only ever runs per-module FCS
+            // for CAAS ('fcs') and RER ('scoring/rer') — FADE and accumulation no longer
+            // run their own FCS ranking (see subworkflows/ENRICHMENT/fcs.nf), so there is
+            // no 13.FCS_fade/13.FCS_accumulation to look for. STRING is separate: the
+            // centralized DOMINO-based run (--scoring_string) lives under ENRICHMENT and
+            // publishes to string/*, while each of RER/FADE/accumulation can *also* run
+            // its own STRING report directly from its own workflow file (--string, a
+            // distinct flag — see workflows/rerconverge.nf, fade.nf, ct_accumulation.nf),
+            // publishing under that module's own output tree instead of string/.
             [ id: 'fcs',         name: 'Functional enrichment (FCS)',     type: 'reporting', ran: ctx.fcs,
               filesDirs: ["${outdir}/fcs",
-                          "${outdir}/scoring/rer",
-                          "${outdir}/scoring/fade",
-                          "${outdir}/scoring/accum"],
+                          "${outdir}/scoring/rer"],
               htmlCandidates: ["${outdir}/html_reports/13.FCS_scoring.html",
-                               "${outdir}/html_reports/13.FCS_rer.html",
-                               "${outdir}/html_reports/13.FCS_fade.html",
-                               "${outdir}/html_reports/13.FCS_accum.html",
-                               "${outdir}/html_reports/13.FCS_accumulation.html"] ],
+                               "${outdir}/html_reports/13.FCS_rer.html"] ],
 
             [ id: 'string',      name: 'STRING (PPI network)',            type: 'reporting', ran: ctx.string,
               filesDirs: ["${outdir}/string",
                           "${outdir}/string/string_results",
                           "${outdir}/string/string_summary",
                           "${outdir}/string/string_plots",
-                          "${outdir}/string/string_networks"],
-              htmlCandidates: ["${outdir}/html_reports/15.STRING_report.html",
+                          "${outdir}/string/string_networks",
+                          // Per-module STRING (--string, run from each module's own
+                          // workflow file rather than centralized ENRICHMENT/DOMINO).
+                          "${outdir}/rerconverge/string",
+                          "${outdir}/selection/fade/top/string",
+                          "${outdir}/selection/fade/bottom/string",
+                          "${outdir}/accumulation/top/string",
+                          "${outdir}/accumulation/bottom/string",
+                          "${outdir}/accumulation/all/string"],
+              htmlCandidates: ["${outdir}/html_reports/15.AMI_analysis.html",
                                "${outdir}/html_reports/15.STRING_rer.html",
                                "${outdir}/html_reports/15.STRING_fade.html",
                                "${outdir}/html_reports/15.STRING_accumulation.html"] ],
@@ -281,7 +280,7 @@ class WorkflowMap {
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
-                        'ct_disambig','asr_robustness','ct_postproc','enrichment_excluded','ct_acc','vep','rer','fade',
+                        'ct_disambig','asr_robustness','ct_postproc','ct_acc','vep','rer','fade',
                         'scoring','fcs','string','compare','posenrich']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
@@ -295,7 +294,6 @@ class WorkflowMap {
             "${projectDir}/conf/resources.config",
             "${projectDir}/conf/common.config",
             "${projectDir}/conf/ct.config",
-            "${projectDir}/conf/ct_signification.config",
             "${projectDir}/conf/ct_disambiguation.config",
             "${projectDir}/conf/ct_postproc.config",
             "${projectDir}/conf/ct_accumulation.config",
@@ -402,28 +400,11 @@ class WorkflowMap {
       const currentPath = window.location.pathname;
       const baseDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
       
-      // Define canonical directories for each stage
-      const canonicalDirs = {
-        'prune': ['data_exploration/0.Data-pruning'],
-        'dataset_rep': ['data_exploration'],
-        'pheno_rep': ['data_exploration'],
-        'contrast': ['data_exploration/2.CT', 'data_exploration/2.CT/1.Traitfiles'],
-        'ct': ['caastools', 'discovery'],
-        'ct_signif': ['signification', 'signification/meta_caas'],
-        'ct_disambig': ['ct_disambiguation'],
-        'asr_robustness': ['asr_robustness'],
-        'ct_postproc': ['postproc', 'postproc/preprocessed'],
-        'enrichment_excluded': ['enrichment_excluded'],
-        'ct_acc': ['accumulation', 'accumulation/aggregation'],
-        'vep': ['vep'],
-        'rer': ['rerconverge', 'rerconverge/rer_results'],
-        'fade': ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
-        'scoring': ['scoring'],
-        'fcs': ['fcs', 'scoring/rer', 'scoring/fade', 'scoring/accum'],
-        'string': ['string'],
-        'compare': ['compare'],
-        'posenrich': ['posenrich']
-      };
+      // Canonical directories for each stage — generated straight from
+      // getCanonicalDirectories() (single source of truth shared with the
+      // Groovy-side scan) rather than a hand-duplicated literal, so this
+      // list can't silently drift out of sync with it again.
+      const canonicalDirs = ${JsonOutput.toJson(getCanonicalDirectories())};
 
       // Map stage IDs to display stages
       const stageMapping = {
@@ -436,7 +417,6 @@ class WorkflowMap {
         'ct_disambig': 'ct_disambig',
         'asr_robustness': 'asr_robustness',
         'ct_postproc': 'ct_postproc',
-        'enrichment_excluded': 'enrichment_excluded',
         'ct_acc': 'ct_acc',
         'vep': 'vep',
         'rer': 'rer',
@@ -517,7 +497,6 @@ class WorkflowMap {
         'ct_disambig': 'CT disambiguation (convergence)',
         'asr_robustness': 'ASR Robustness',
         'ct_postproc': 'CT post-processing',
-        'enrichment_excluded': 'Enrichment (excluded genes)',
         'ct_acc': 'CT accumulation (convergence)',
         'vep': 'VEP characterization',
         'rer': 'RERconverge (RER)',
@@ -542,7 +521,6 @@ class WorkflowMap {
         'ct_disambig': '#F97316',
         'asr_robustness': '#7C3AED',
         'ct_postproc': '#0EA5E9',
-        'enrichment_excluded': '#7C3AED',
         'ct_acc': '#F97316',
         'vep': '#0EA5E9',
         'rer': '#F97316',
@@ -574,14 +552,15 @@ class WorkflowMap {
             ct_disambig  : ['ct_disambiguation'],
             asr_robustness : ['asr_robustness'],
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
-            enrichment_excluded : ['enrichment_excluded'],
             ct_acc       : ['accumulation', 'accumulation/aggregation'],
             vep          : ['vep'],
             rer          : ['rerconverge', 'rerconverge/rer_results'],
             fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
             scoring      : ['scoring'],
-            fcs          : ['fcs', 'scoring/rer', 'scoring/fade', 'scoring/accum'],
-            string       : ['string'],
+            fcs          : ['fcs', 'scoring/rer'],
+            string       : ['string', 'rerconverge/string',
+                            'selection/fade/top/string', 'selection/fade/bottom/string',
+                            'accumulation/top/string', 'accumulation/bottom/string', 'accumulation/all/string'],
             compare      : ['compare'],
             posenrich    : ['posenrich']
         ]
@@ -647,7 +626,6 @@ class WorkflowMap {
             ctDisambig    : scanResults.ct_disambig ?: false,
             asrRobustness : scanResults.asr_robustness ?: false,
             ctPostproc    : scanResults.ct_postproc ?: false,
-            enrichmentExcluded : scanResults.enrichment_excluded ?: false,
             ctAccum       : scanResults.ct_acc ?: false,
             vep           : scanResults.vep ?: false,
             rer           : scanResults.rer ?: false,

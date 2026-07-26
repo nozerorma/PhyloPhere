@@ -38,6 +38,7 @@ def validate(project: ProjectConfig) -> list[str]:
 
     # --- Runtime ---
     rt = project.runtime
+    pc = project.precomputed
     require(rt.alignment_dir, "Runtime: alignment directory is required.")
     require(rt.tree_file, "Runtime: species tree file is required.")
     require(rt.work_dir, "Runtime: work directory is required.")
@@ -69,10 +70,11 @@ def validate(project: ProjectConfig) -> list[str]:
     if caas.enabled:
         require(caas.caas_config_path, "CAAS: config file is required when CAAS is enabled.")
     else:
-        if not any([caas.discovery_from, caas.resample_from, caas.bootstrap_from]):
+        if not any([pc.discovery_from, pc.resample_from, pc.bootstrap_from]):
             errors.append(
                 "CAAS is disabled but no discovery_from/resample_from/bootstrap_from fallback "
-                "was supplied — downstream modules (Disambiguation, Accumulation) have no input."
+                "was supplied on the Precomputed Run tab — downstream modules (Disambiguation, "
+                "Accumulation) have no input."
             )
 
     # --- Disambiguation (+ Post-processing) ---
@@ -83,24 +85,23 @@ def validate(project: ProjectConfig) -> list[str]:
                 disambig.ct_disambig_asr_cache_dir,
                 "Disambiguation: ASR cache directory is required when asr_mode=precomputed.",
             )
-        if not caas.enabled and not any(
-            [caas.discovery_from, caas.resample_from, caas.bootstrap_from]
-        ):
+        if not caas.enabled and not any([pc.discovery_from, pc.resample_from, pc.bootstrap_from]):
             errors.append(
-                "Disambiguation is enabled but CAAS is disabled with no fallback input supplied."
+                "Disambiguation is enabled but CAAS is disabled with no fallback input supplied "
+                "on the Precomputed Run tab."
             )
     else:
         if not any(
             [
-                disambig.signification_from,
-                disambig.disambiguation_input,
-                disambig.disambiguation_dir,
-                disambig.background_input,
+                pc.signification_from,
+                pc.disambiguation_input,
+                pc.disambiguation_dir,
+                pc.background_input,
             ]
         ):
             errors.append(
-                "Disambiguation is disabled but no fallback input was supplied — Accumulation "
-                "and Scoring may have no input."
+                "Disambiguation is disabled but no fallback input was supplied on the Precomputed "
+                "Run tab — Accumulation and Scoring may have no input."
             )
 
     # --- Accumulation ---
@@ -110,16 +111,16 @@ def validate(project: ProjectConfig) -> list[str]:
             accum.accumulation_entropy_dir,
             "Accumulation: entropy directory is required when Accumulation is enabled.",
         )
-        if not disambig.enabled and not accum.accumulation_caas_input:
+        if not disambig.enabled and not pc.accumulation_caas_input:
             errors.append(
                 "Accumulation is enabled but Disambiguation is disabled with no "
-                "accumulation_caas_input fallback supplied."
+                "accumulation_caas_input fallback supplied on the Precomputed Run tab."
             )
     else:
-        if not any([accum.accumulation_caas_input, accum.accumulation_background_input]):
+        if not any([pc.accumulation_caas_input, pc.accumulation_background_input]):
             errors.append(
-                "Accumulation is disabled but no fallback input was supplied — Enrichment's "
-                "accumulation gene lists may have no input."
+                "Accumulation is disabled but no fallback input was supplied on the Precomputed "
+                "Run tab — Enrichment's accumulation gene lists may have no input."
             )
 
     # --- RERconverge ---
@@ -142,10 +143,10 @@ def validate(project: ProjectConfig) -> list[str]:
             scoring.gene_ensembl_file,
             "Scoring: gene-Ensembl mapping file is required when Scoring is enabled.",
         )
-        if not disambig.ct_postproc and not scoring.scoring_postproc_input:
+        if not disambig.ct_postproc and not pc.scoring_postproc_input:
             errors.append(
                 "Scoring is enabled but Post-processing is disabled with no "
-                "scoring_postproc_input fallback supplied."
+                "scoring_postproc_input fallback supplied on the Precomputed Run tab."
             )
         if not rer.enabled and not all(row.scoring_rer_input for row in rt.phenotype_rows):
             errors.append(
@@ -165,13 +166,6 @@ def validate(project: ProjectConfig) -> list[str]:
     enrichment = project.modules.enrichment
     if enrichment.enabled:
         require(enrichment.gmt_dir, "Enrichment: GMT directory is required when Enrichment is enabled.")
-        if not scoring.enabled and not any(
-            [enrichment.enrichment_gene_lists_input, enrichment.enrichment_background_input]
-        ):
-            errors.append(
-                "Enrichment is enabled but Scoring is disabled with no gene-list/background "
-                "fallback supplied."
-            )
     if enrichment.posenrich_enabled:
         for field_name, label in [
             ("egg_members_file", "eggNOG members file"),
@@ -198,6 +192,7 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
     general = project.general
     runtime = project.runtime
     m = project.modules
+    pc = project.precomputed
 
     entries: list[tuple[str, str, str]] = [
         ("General: repo directory", general.repo_dir, "dir"),
@@ -212,34 +207,20 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Runtime: alignment species names", runtime.ali_sp_names, "file"),
         ("Runtime: taxonomy ID mapping", runtime.tax_id_file, "file"),
         ("CAAS: config file", m.caas.caas_config_path, "file"),
-        ("CAAS: discovery_from", m.caas.discovery_from, "dir"),
-        ("CAAS: resample_from", m.caas.resample_from, "dir"),
-        ("CAAS: bootstrap_from", m.caas.bootstrap_from, "dir"),
+        ("CAAS: trait values file", m.caas.traitvalues, "file"),
         ("Disambiguation: ASR cache directory", m.disambiguation.ct_disambig_asr_cache_dir, "dir"),
-        ("Disambiguation: signification_from", m.disambiguation.signification_from, "dir"),
-        ("Disambiguation: disambiguation_input", m.disambiguation.disambiguation_input, "file"),
-        ("Disambiguation: disambiguation_dir", m.disambiguation.disambiguation_dir, "dir"),
-        ("Disambiguation: background_input", m.disambiguation.background_input, "file"),
         ("Accumulation: entropy directory", m.accumulation.accumulation_entropy_dir, "dir"),
-        ("Accumulation: accumulation_caas_input", m.accumulation.accumulation_caas_input, "file"),
-        (
-            "Accumulation: accumulation_background_input",
-            m.accumulation.accumulation_background_input,
-            "file",
-        ),
         ("RERconverge: gene trees", m.rer.gene_trees, "file"),
+        ("RERconverge: tested-gene universe file", m.rer.rer_universe_file, "file"),
+        ("RERconverge: cross-module gene scores", m.rer.rer_gene_scores, "file"),
+        ("FADE: gene-set top genes", m.fade.fade_postproc_top, "file"),
+        ("FADE: gene-set bottom genes", m.fade.fade_postproc_bottom, "file"),
+        ("FADE: LG substitution matrix", m.fade.lg_dat_path, "file"),
+        ("FADE: tested-gene universe file", m.fade.fade_universe_file, "file"),
         ("VEP: PrimateAI-3D database", m.vep.vep_primateai_db, "file"),
         ("VEP: MAP directory", m.vep.vep_map_dir, "dir"),
-        ("VEP: COSMIC database", m.vep.scoring_vep_cosmic, "file"),
-        ("VEP: vep_caas_input", m.vep.vep_caas_input, "file"),
+        ("VEP: COSMIC database", m.vep.cosmic_db, "file"),
         ("Scoring: gene-Ensembl file", m.scoring.gene_ensembl_file, "file"),
-        ("Scoring: FADE site fallback (top)", m.scoring.scoring_fade_site_top, "file"),
-        ("Scoring: FADE site fallback (bottom)", m.scoring.scoring_fade_site_bottom, "file"),
-        ("Scoring: scoring_postproc_input", m.scoring.scoring_postproc_input, "file"),
-        ("Scoring: scoring_accum_dir", m.scoring.scoring_accum_dir, "dir"),
-        ("Scoring: scoring_vep_primateai", m.scoring.scoring_vep_primateai, "file"),
-        ("Scoring: scoring_background_input", m.scoring.scoring_background_input, "file"),
-        ("Scoring: caas_perms_file", m.scoring.caas_perms_file, "file"),
         ("Enrichment: GMT directory", m.enrichment.gmt_dir, "dir"),
         ("Enrichment: STRING database directory", m.enrichment.string_db_dir, "dir"),
         ("Enrichment: eggNOG members file", m.enrichment.egg_members_file, "file"),
@@ -248,22 +229,35 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Enrichment: domain variability file", m.enrichment.domain_variability_file, "file"),
         ("Enrichment: UCR positions file", m.enrichment.ucr_positions_file, "file"),
         ("Enrichment: FUBAR sites file", m.enrichment.fubar_sites_file, "file"),
+        # --- Precomputed Run tab ---
+        ("Precomputed: discovery_from", pc.discovery_from, "dir"),
+        ("Precomputed: resample_from", pc.resample_from, "dir"),
+        ("Precomputed: bootstrap_from", pc.bootstrap_from, "dir"),
+        ("Precomputed: signification_from", pc.signification_from, "dir"),
+        ("Precomputed: disambiguation_input", pc.disambiguation_input, "file"),
+        ("Precomputed: disambiguation_dir", pc.disambiguation_dir, "dir"),
+        ("Precomputed: background_input", pc.background_input, "file"),
+        ("Precomputed: accumulation_caas_input", pc.accumulation_caas_input, "file"),
+        ("Precomputed: accumulation_background_input", pc.accumulation_background_input, "file"),
+        ("Precomputed: rer_continuous_file", pc.rer_continuous_file, "file"),
+        ("Precomputed: rer_perms_file", pc.rer_perms_file, "file"),
+        ("Precomputed: fade_json_dir_top", pc.fade_json_dir_top, "dir"),
+        ("Precomputed: fade_json_dir_bottom", pc.fade_json_dir_bottom, "dir"),
+        ("Precomputed: vep_caas_input", pc.vep_caas_input, "file"),
+        ("Precomputed: scoring_postproc_input", pc.scoring_postproc_input, "file"),
+        ("Precomputed: scoring_accum_dir", pc.scoring_accum_dir, "dir"),
+        ("Precomputed: scoring_vep_primateai", pc.scoring_vep_primateai, "file"),
+        ("Precomputed: scoring_vep_cosmic", pc.scoring_vep_cosmic, "file"),
+        ("Precomputed: scoring_background_input", pc.scoring_background_input, "file"),
+        ("Precomputed: caas_perms_file", pc.caas_perms_file, "file"),
+        ("Precomputed: scoring_fade_site_top", pc.scoring_fade_site_top, "file"),
+        ("Precomputed: scoring_fade_site_bottom", pc.scoring_fade_site_bottom, "file"),
         (
-            "Enrichment: enrichment_background_input",
-            m.enrichment.enrichment_background_input,
+            "Precomputed: accumulation_enrichment_gene_lists_input",
+            pc.accumulation_enrichment_gene_lists_input,
             "file",
         ),
-        (
-            "Enrichment: enrichment_gene_lists_input",
-            m.enrichment.enrichment_gene_lists_input,
-            "file",
-        ),
-        (
-            "Enrichment: accumulation_enrichment_gene_lists_input",
-            m.enrichment.accumulation_enrichment_gene_lists_input,
-            "file",
-        ),
-        ("Enrichment: posenrich_background_file", m.enrichment.posenrich_background_file, "file"),
+        ("Precomputed: posenrich_background_file", pc.posenrich_background_file, "file"),
     ]
 
     for i, row in enumerate(runtime.phenotype_rows, start=1):

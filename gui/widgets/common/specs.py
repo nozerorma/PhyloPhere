@@ -31,5 +31,9 @@ class ModuleTabSpec:
     blurb: str
     disclaimer: str  # shown when the module is disabled — what downstream needs
     essential_fields: tuple[FieldSpec, ...] = field(default_factory=tuple)
+    # Fine-tuning knobs most runs leave at their conf/*.config default — tucked
+    # behind a collapsed-by-default "Advanced parameters" disclosure instead of
+    # sitting flat alongside essential_fields (see gui/widgets/common/collapsible.py).
+    advanced_fields: tuple[FieldSpec, ...] = field(default_factory=tuple)
     fallback_fields: tuple[FieldSpec, ...] = field(default_factory=tuple)
     enabled_field: str = "enabled"  # attribute name for the top enable toggle

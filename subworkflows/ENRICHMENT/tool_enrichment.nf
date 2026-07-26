@@ -58,9 +58,6 @@ process TOOL_STRING_REPORT {
     def species           = params.string_species           ?: 9606
     def required_score    = params.string_required_score    ?: 400
     def net_score         = params.domino_network_score_thr ?: 700
-    def fdr_thr           = params.string_fdr              ?: 0.1
-    def top_thr           = params.string_top_thr          ?: 15
-    def report_num        = params.string_report_num       ?: 20
     def bg_name           = background_file instanceof List
         ? background_file[0].getName().replace("'", "\\'")
         : background_file.getName().replace("'", "\\'")
@@ -71,7 +68,7 @@ process TOOL_STRING_REPORT {
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                '15.STRING_report.Rmd',
+                '15.AMI_analysis.Rmd',
                 params = list(
                     background_file    = '${background_file}',
                     background_basename = '${bg_name}',
@@ -80,9 +77,6 @@ process TOOL_STRING_REPORT {
                     species            = ${species},
                     required_score     = ${required_score},
                     domino_network_score_thr = ${net_score},
-                    fdr_thr            = ${fdr_thr},
-                    top_thr            = ${top_thr},
-                    report_num         = ${report_num},
                     string_db_dir      = '${params.string_db_dir}',
                     domino_network_sif = '${domino_network_sif}',
                     domino_modules_dir = '${domino_modules_dir}'
@@ -97,7 +91,7 @@ process TOOL_STRING_REPORT {
 
         Rscript -e "
             rmarkdown::render(
-                '15.STRING_report.Rmd',
+                '15.AMI_analysis.Rmd',
                 params = list(
                     background_file    = '${background_file}',
                     background_basename = '${bg_name}',
@@ -106,9 +100,6 @@ process TOOL_STRING_REPORT {
                     species            = ${species},
                     required_score     = ${required_score},
                     domino_network_score_thr = ${net_score},
-                    fdr_thr            = ${fdr_thr},
-                    top_thr            = ${top_thr},
-                    report_num         = ${report_num},
                     string_db_dir      = '${params.string_db_dir}',
                     domino_network_sif = '${domino_network_sif}',
                     domino_modules_dir = '${domino_modules_dir}'

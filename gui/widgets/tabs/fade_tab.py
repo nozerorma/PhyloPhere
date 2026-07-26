@@ -20,10 +20,35 @@ SPEC = ModuleTabSpec(
     disclaimer=(
         "Scoring needs a scoring_fade_summary_top/bottom fallback per phenotype row "
         "(Runtime tab) when this is off, plus optionally scoring_fade_site_top/bottom "
-        "(Scoring tab) for site-level fallback."
+        "(Precomputed Run tab) for site-level fallback. fade_json_dir_top/bottom (a "
+        "precomputed report input, not per-phenotype) also live on the Precomputed "
+        "Run tab."
     ),
     essential_fields=(
         FieldSpec(name="fade_mode", label="Mode", kind="choice", choices=("all", "gene_set")),
+    ),
+    advanced_fields=(
+        FieldSpec(name="fade_postproc_top", label="Gene-set top genes (standalone gene_set mode)", kind="path_file"),
+        FieldSpec(name="fade_postproc_bottom", label="Gene-set bottom genes (standalone gene_set mode)", kind="path_file"),
+        FieldSpec(name="selection_prep_batch_size", label="Alignment-prep genes per task"),
+        FieldSpec(name="fade_batch_size", label="FADE genes per task"),
+        FieldSpec(name="fade_bf_threshold", label="Bayes Factor threshold"),
+        FieldSpec(name="fade_model", label="Substitution model"),
+        FieldSpec(name="lg_dat_path", label="LG substitution matrix path", kind="path_file"),
+        FieldSpec(
+            name="fade_method",
+            label="Inference method",
+            kind="choice",
+            choices=("Variational-Bayes", "Collapsed-Gibbs", "Metropolis-Hastings"),
+        ),
+        FieldSpec(name="fade_grid", label="Posterior grid resolution"),
+        FieldSpec(name="fade_chains", label="MCMC chains"),
+        FieldSpec(name="fade_chain_length", label="MCMC chain length"),
+        FieldSpec(name="fade_burn_in", label="MCMC burn-in"),
+        FieldSpec(name="fade_samples", label="MCMC samples"),
+        FieldSpec(name="fade_concentration", label="Dirichlet concentration prior"),
+        FieldSpec(name="fade_min_genes_for_heatmap", label="Min genes for report heatmaps"),
+        FieldSpec(name="fade_universe_file", label="FADE tested-gene universe file", kind="path_file"),
     ),
 )
 

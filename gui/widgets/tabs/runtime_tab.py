@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QLabel,
     QLineEdit,
     QPushButton,
     QVBoxLayout,
@@ -151,6 +152,10 @@ class RuntimeTab(QWidget):
         self.alignment_dir.textChanged.connect(self._on_alignment_dir_changed)
         form.addRow("Alignments (--alignment)", self.alignment_dir)
 
+        self.ali_format = QLineEdit(self._config.ali_format)
+        self.ali_format.textChanged.connect(self._on_ali_format_changed)
+        form.addRow("Alignment format (--ali_format)", self.ali_format)
+
         self.tree_file = PathField(mode="file")
         self.tree_file.set_text(self._config.tree_file)
         self.tree_file.textChanged.connect(self._on_tree_file_changed)
@@ -166,10 +171,29 @@ class RuntimeTab(QWidget):
         self.simple_trait_file.textChanged.connect(self._on_simple_trait_file_changed)
         form.addRow("CLASS 2 trait file", self.simple_trait_file)
 
+        class_note = QLabel(
+            "CLASS 1 = trait file has n_trait/c_trait columns (sample size + observed-case "
+            "counts, e.g. disease prevalence) — contrast selection uses a Jeffreys "
+            "confidence interval on the proportion, and supports a secondary trait + prune "
+            "lists. CLASS 2 = a single continuous index value per species with no n/c "
+            "columns — contrast selection instead discretizes it into groups via each "
+            "phenotype row's Discrete method (quantile/quintile/decile/median_sd/"
+            "parameterized). Each phenotype row below picks its own CLASS."
+        )
+        class_note.setWordWrap(True)
+        form.addRow("", class_note)
+
         self.prune_dir = PathField(mode="dir")
         self.prune_dir.set_text(self._config.prune_dir)
         self.prune_dir.textChanged.connect(self._on_prune_dir_changed)
         form.addRow("Prune-list directory", self.prune_dir)
+        prune_note = QLabel(
+            "Pruning is per phenotype, not a separate toggle: a CLASS 1 row with its PRUNE "
+            "column filled in (joined with this directory) is pruned automatically; a row "
+            "with PRUNE left blank runs unpruned. CLASS 2 rows don't prune."
+        )
+        prune_note.setWordWrap(True)
+        form.addRow("", prune_note)
 
         self.branch_trait = QLineEdit(self._config.branch_trait)
         self.branch_trait.textChanged.connect(self._on_branch_trait_changed)
@@ -184,6 +208,18 @@ class RuntimeTab(QWidget):
         self.tax_id_file.set_text(self._config.tax_id_file)
         self.tax_id_file.textChanged.connect(self._on_tax_id_file_changed)
         form.addRow("Taxonomy ID mapping (optional)", self.tax_id_file)
+
+        self.sp_colname = QLineEdit(self._config.sp_colname)
+        self.sp_colname.textChanged.connect(self._on_sp_colname_changed)
+        form.addRow("Species column name (--sp_colname)", self.sp_colname)
+
+        self.clade_name = QLineEdit(self._config.clade_name)
+        self.clade_name.textChanged.connect(self._on_clade_name_changed)
+        form.addRow("Clade name (--clade_name)", self.clade_name)
+
+        self.taxon_of_interest = QLineEdit(self._config.taxon_of_interest)
+        self.taxon_of_interest.textChanged.connect(self._on_taxon_of_interest_changed)
+        form.addRow("Taxonomic level of interest (--taxon_of_interest)", self.taxon_of_interest)
 
         return box
 
@@ -291,4 +327,20 @@ class RuntimeTab(QWidget):
 
     def _on_tax_id_file_changed(self, value: str) -> None:
         self._config.tax_id_file = value
+        self.changed.emit()
+
+    def _on_ali_format_changed(self, value: str) -> None:
+        self._config.ali_format = value
+        self.changed.emit()
+
+    def _on_sp_colname_changed(self, value: str) -> None:
+        self._config.sp_colname = value
+        self.changed.emit()
+
+    def _on_clade_name_changed(self, value: str) -> None:
+        self._config.clade_name = value
+        self.changed.emit()
+
+    def _on_taxon_of_interest_changed(self, value: str) -> None:
+        self._config.taxon_of_interest = value
         self.changed.emit()

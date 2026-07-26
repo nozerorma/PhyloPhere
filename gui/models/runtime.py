@@ -67,6 +67,7 @@ class RuntimeConfig:
 
     # --- Dataset paths shared across every phenotype in the batch ---
     alignment_dir: str = ""  # --alignment (ALI_DIR)
+    ali_format: str = "fasta"  # --ali_format
     tree_file: str = ""  # --tree (TREE_FILE)
     trait_file: str = ""  # CLASS 1's --my_traits (TRAIT_FILE)
     simple_trait_file: str = ""  # CLASS 2's --my_traits (SIMPLE_TRAIT_FILE)
@@ -74,6 +75,11 @@ class RuntimeConfig:
     branch_trait: str = "LQ"  # --branch_trait
     ali_sp_names: str = ""  # --ali_sp_names (optional)
     tax_id_file: str = ""  # --tax_id (INPUT_TAX_ID)
+
+    # --- Reporting / contrast-selection dataset shape (conf/common.config) ---
+    sp_colname: str = "species"  # --sp_colname
+    clade_name: str = "primates"  # --clade_name
+    taxon_of_interest: str = "family"  # --taxon_of_interest
 
     # --- Phenotype catalogue ---
     phenotype_rows: list[PhenotypeRow] = field(default_factory=list)

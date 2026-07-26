@@ -165,7 +165,7 @@ workflow RER_MAIN {
             def gene_scores_ch = params.rer_gene_scores ? Channel.value(file(params.rer_gene_scores)) : Channel.value(file('NO_FILE'))
             def rer_lists = RER_GENE_LISTS(effective_report, gene_scores_ch)
 
-            // Separate background from gene lists for the ORA processes
+            // Separate background from gene lists for the FCS/STRING report processes
             def rer_bg_ch = rer_lists.gene_lists
                 .flatten()
                 .filter { it.name == 'background.txt' }

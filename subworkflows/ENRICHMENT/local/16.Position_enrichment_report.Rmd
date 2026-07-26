@@ -32,6 +32,14 @@ params:
   vep_primateai_file:   NULL   # PrimateAI-3D score TSV
   vep_cosmic_file:      NULL   # COSMIC Mutant Census score TSV
   genomic_info_file:    NULL   # gene, chr, start, end, length (no header assumed)
+  # FADE_top_sig/FADE_bottom_sig position group (gene,position,max_bf,target_aa;
+  # BF >= fade_bf_threshold only). Direction-specific, unlike PAI3D/COSMIC.
+  fade_sites_top_file:    NULL
+  fade_sites_bottom_file: NULL
+  # SCORING's fcs_stats.tsv (gene + flag_* columns) -- same file already
+  # consumed as --annot-file by posenrich_enrich.py, reused here for the
+  # Overall dotplot's orthogonal-support composite background rates.
+  fcs_stats_file: NULL
   top_pct:      0.10
   window_size_bp: 1000000
   output_dir:   "."            # regional_accumulation.tsv export target
@@ -83,10 +91,26 @@ PADJ <- params$padj_thr
 FOLD <- params$fold_thr
 TOP_N <- params$table_top_n
 
+this_dir <- tryCatch(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)),
+                     error = function(e) ".")
+orth_candidates <- c(file.path(this_dir, "src", "orthogonal_score.R"), "src/orthogonal_score.R",
+                     file.path(this_dir, "orthogonal_score.R"), "orthogonal_score.R")
+orth_src <- orth_candidates[file.exists(orth_candidates)][1]
+if (is.na(orth_src)) stop("orthogonal_score.R not found under src/ or next to 16.Position_enrichment_report.Rmd")
+source(orth_src)
+
 kbl_html <- function(df, caption = NULL) {
   kable(df, format = "html", escape = TRUE, caption = caption) %>%
     kable_styling(bootstrap_options = c("striped", "condensed", "hover"),
                   full_width = FALSE)
+}
+
+# Safe correlation helper: returns NA (not an error) when inputs have fewer
+# than 3 complete pairs -- avoids crashes in sparse optional-module sections.
+safe_cor <- function(x, y, method = "pearson") {
+  ok <- complete.cases(x, y)
+  if (sum(ok) < 3) return(NA_real_)
+  cor(x[ok], y[ok], method = method)
 }
 ```
 
@@ -153,6 +177,16 @@ flag_cols_by_rk <- list(
   top    = c("pct_gate_sig", "pct_gate_fdr", "pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum"),
   bottom = c("pct_gate_sig", "pct_gate_fdr", "pct_fade_bottom", "pct_rer_acc", "pct_rer_decc", "pct_accum")
 )
+
+# SCORING's fcs_stats.tsv -- universe-level flag_* rates for the Overall
+# dotplot's orthogonal-support composite (orthogonal_score_pct(), sourced
+# above). Optional: the composite section degrades to raw -log10(p_adj)
+# ordering when absent (see overall-dotplot chunk below). Defined here rather
+# than reusing the later .file_ok() (Position Characterisation, further down
+# in this file) since this chunk runs first.
+.fcs_stats_file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
+has_fcs_stats <- .fcs_stats_file_ok(params$fcs_stats_file)
+fcs_stats_df <- if (has_fcs_stats) readr::read_tsv(params$fcs_stats_file, show_col_types = FALSE) else NULL
 ```
 
 # Overview {.tabset .tabset-fade}
@@ -297,6 +331,88 @@ if (!has_res) {
       print(p)
       cat("\n\n")
     }
+  }
+}
+```
+
+# Overall dotplot {.tabset .tabset-fade}
+
+Pooled across all databases and threshold cutoffs, ranked by the same
+**orthogonal composite signal** used in the Comparison and gene-level FCS
+reports: own-test significance combined with independent cross-module
+corroboration (FADE, RER, Accumulation) via Lancaster's weighted Fisher
+method, rather than raw `p.adj` alone. One dotplot per direction, restricted
+to the top `r params$table_top_n` significant terms. `gate_sig`/`gate_fdr`
+are excluded from the composite for the same reason as in the other two
+reports (near-ceiling among already-significant terms, no discriminating
+power). Falls back to plain `-log10(p.adj)` ordering when `fcs_stats_file`
+wasn't supplied (no universe-level background flag rates to test the
+corroboration against).
+
+```{r overall-dotplot, echo=FALSE, results='asis', fig.height=6}
+if (!has_res || !any(res$sig, na.rm = TRUE)) {
+  cat("_No significant sets._\n\n")
+} else {
+  # Background flag rates over the full analysed gene universe (fcs_stats.tsv),
+  # reusing the exact pct_<flag> <-> flag_<flag> naming convention
+  # posenrich_enrich.py::annotate_overlap() already establishes (see
+  # flag_cols_by_rk above -- built from the SAME flag_* columns).
+  pct_to_flag <- c(pct_fade_top = "flag_fade_top", pct_fade_bottom = "flag_fade_bottom",
+                   pct_rer_acc = "flag_rer_acc", pct_rer_decc = "flag_rer_decc",
+                   pct_accum = "flag_accum")
+  bg_rates       <- if (has_fcs_stats) orth_background_rates(fcs_stats_df, unname(pct_to_flag)) else NULL
+  n_universe_fcs <- if (has_fcs_stats) nrow(fcs_stats_df) else NA_integer_
+
+  for (rk in unique(res$ranking[res$sig])) {
+    cat(sprintf("\n## %s\n\n", toupper(rk)))
+    rk_sig <- res %>% filter(ranking == rk, sig)
+    if (nrow(rk_sig) == 0) { cat("_No significant sets for this direction._\n\n"); next }
+
+    if (!is.null(le_summary)) {
+      rk_sig <- rk_sig %>%
+        dplyr::left_join(le_summary, by = c("ranking", "database", "pathway", "top_frac"))
+    }
+    # n_le = distinct leading-edge gene count when available, else fall back
+    # to the raw overlap size (`observed`, position count) -- both are valid
+    # `n_draw` denominators for the hypergeometric test below, just at
+    # slightly different granularity (genes vs positions).
+    rk_sig$n_le <- suppressWarnings(as.integer(rk_sig[["N genes"]]))
+    .fallback <- is.na(rk_sig$n_le)
+    rk_sig$n_le[.fallback] <- rk_sig$observed[.fallback]
+
+    cross_pct <- setdiff(flag_cols_by_rk[[rk]] %||% character(0), c("pct_gate_sig", "pct_gate_fdr"))
+    dp <- if (has_fcs_stats && length(cross_pct) > 0) {
+      orthogonal_score_pct(rk_sig, bg_rates, pct_to_flag[cross_pct], n_universe_fcs)
+    } else {
+      rk_sig %>% dplyr::mutate(signal = -log10(pmax(p_adj, 1e-300)), p_composite = p_adj)
+    }
+
+    dp <- dp %>%
+      arrange(desc(signal)) %>%
+      head(TOP_N) %>%
+      mutate(
+        frac_lab    = sprintf("Top %s%%", format(100 * top_frac, trim = TRUE)),
+        label       = stringr::str_trunc(sprintf("%s (%s, %s)", dplyr::coalesce(description, pathway), database, frac_lab), 60),
+        neglog10FDR = -log10(pmax(p_adj, 1e-300))
+      )
+
+    if (nrow(dp) == 0) { cat("_No terms to display._\n\n"); next }
+
+    term_levels <- dp %>% arrange(signal) %>% pull(label) %>% unique()
+    p <- ggplot(dp, aes(x = signal, y = factor(label, levels = term_levels),
+                        size = n_le, colour = neglog10FDR)) +
+      geom_point(alpha = 0.85) +
+      scale_colour_viridis_c(name = "-log10 p.adj", option = "C") +
+      scale_size_continuous(name = "N genes/positions") +
+      labs(title = sprintf("%s — %s (pooled across databases)", params$traitname, toupper(rk)),
+           subtitle = if (has_fcs_stats) "Ordered by orthogonal composite signal"
+                      else "Ordered by -log10(p.adj) -- no fcs_stats_file supplied",
+           x = if (has_fcs_stats) "signal (orthogonal composite)" else "signal (-log10 p.adj)",
+           y = NULL) +
+      theme_minimal(base_size = 11) +
+      theme(axis.text.y = element_text(colour = "black",
+                                        size = pmax(8, pmin(11, 220 / length(term_levels)))))
+    print(p); cat("\n")
   }
 }
 ```
@@ -459,11 +575,6 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
 
 # Position Characterisation
 
-Moved here from the Scoring report (was a companion-report cross-reference;
-now lives directly alongside the position-level enrichment analysis it
-complements). Logic is unchanged from the original — same US-scheme
-restriction, same CAAS-score-threshold framing.
-
 ```{r poschar-setup, include=FALSE}
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
@@ -486,10 +597,13 @@ gene_df <- if (has_gene_scores)     readr::read_tsv(params$gene_scores_file,    
 has_vep_primateai <- .file_ok(params$vep_primateai_file)
 has_vep_cosmic    <- .file_ok(params$vep_cosmic_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
-# Position scores are required for every sub-tab below (PAI3D/COSMIC joins,
+has_fade_sites_top    <- .file_ok(params$fade_sites_top_file)
+has_fade_sites_bottom <- .file_ok(params$fade_sites_bottom_file)
+# Position scores are required for every sub-tab below (PAI3D/COSMIC/FADE joins,
 # regional accumulation) -- gate the whole section on them, not just on which
 # external database happens to be supplied.
-has_pos_char <- has_position_scores && (has_vep_primateai || has_vep_cosmic || has_genomic)
+has_pos_char <- has_position_scores &&
+  (has_vep_primateai || has_vep_cosmic || has_genomic || has_fade_sites_top || has_fade_sites_bottom)
 
 if (has_vep_primateai) {
   vep_pai_df <- readr::read_tsv(params$vep_primateai_file, show_col_types = FALSE)
@@ -504,6 +618,21 @@ if (has_vep_cosmic) {
 } else {
   vep_cosmic_df <- NULL
 }
+
+# FADE_top_sig/FADE_bottom_sig: gene,position,max_bf,target_aa, direction-specific
+# (never cross-checked -- a TOP-direction position is only ever validated against
+# fade_sites_top, never fade_sites_bottom, and vice versa). Position is already in
+# CAAS's own coordinate space (see build_position_gmt.py), so no map_cache lookup.
+fade_sites_top_df <- if (has_fade_sites_top) {
+  readr::read_csv(params$fade_sites_top_file, show_col_types = FALSE) %>%
+    dplyr::rename(Gene = gene, Position = position) %>%
+    dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
+} else NULL
+fade_sites_bottom_df <- if (has_fade_sites_bottom) {
+  readr::read_csv(params$fade_sites_bottom_file, show_col_types = FALSE) %>%
+    dplyr::rename(Gene = gene, Position = position) %>%
+    dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
+} else NULL
 
 if (has_genomic) {
   # Format: gene, chr, start, end, length (no header assumed; detect if present)
@@ -520,6 +649,42 @@ if (has_genomic) {
     )
 } else {
   genomic_raw <- NULL
+}
+
+# Join scored positions with genomic coordinates via their gene, and lay
+# out chromosome-cumulative offsets for the regional-accumulation section
+# below -- each position inherits its gene's genomic midpoint as x-coordinate.
+if (has_genomic && has_position_scores) {
+  pos_genomic <- pos_df %>%
+    dplyr::inner_join(genomic_raw, by = "Gene") %>%
+    dplyr::mutate(
+      chr_label = sub("^chr", "", chr),
+      chr_num   = suppressWarnings(as.integer(chr_label)),
+      chr_order = dplyr::case_when(
+        !is.na(chr_num)              ~ chr_num,
+        chr_label == "X"             ~ 23L,
+        chr_label == "Y"             ~ 24L,
+        chr_label %in% c("MT", "M")  ~ 25L,
+        TRUE                         ~ 26L
+      )
+    ) %>%
+    dplyr::arrange(chr_order, gene_mid)
+
+  pos_chr_offsets <- pos_genomic %>%
+    dplyr::group_by(chr_order, chr_label) %>%
+    dplyr::summarise(chr_max = max(gene_end, na.rm = TRUE), .groups = "drop") %>%
+    dplyr::arrange(chr_order) %>%
+    dplyr::mutate(offset = cumsum(dplyr::lag(chr_max, default = 0L)) + (chr_order - 1L) * 5e6L)
+
+  pos_genomic <- pos_genomic %>%
+    dplyr::left_join(pos_chr_offsets %>% dplyr::select(chr_order, offset), by = "chr_order") %>%
+    dplyr::mutate(
+      manhattan_x = gene_mid + offset,
+      chr_even    = chr_order %% 2 == 0
+    )
+} else {
+  pos_genomic <- NULL
+  pos_chr_offsets <- NULL
 }
 
 if (has_pos_char) {
@@ -550,17 +715,22 @@ if (has_pos_char) {
 if (has_pos_char) cat(r"(## Position Characterisation {.tabset #position-characterisation}
 
 This section examines how ranked positions behave in relation to external
-signals that do **not** contribute to the `CAAS_score`. Both PrimateAI-3D and
-COSMIC Mutant Census are treated as independent characterisation layers.
+signals that do **not** contribute to the `CAAS_score`. PrimateAI-3D, COSMIC
+Mutant Census, and FADE branch-site selection evidence are treated as
+independent characterisation layers.
 
-Since both databases describe specific amino acid transitions, the biochemical
-Grantham Score (GS) groupings are out of scope (as they group transitions by
-biochemical radicalness rather than modeling the specific substitution directly).
-Therefore, we restrict the characterisation strictly to the **Unweighted Scheme (US)**,
-with all scores and mutation overlaps derived solely from US transitions.
+PrimateAI-3D and COSMIC both describe specific amino acid transitions, so the
+biochemical Grantham Score (GS) groupings are out of scope for those two (as
+they group transitions by biochemical radicalness rather than modeling the
+specific substitution directly). We restrict those two layers strictly to the
+**Unweighted Scheme (US)**, with all scores and mutation overlaps derived
+solely from US transitions. FADE evidence is not transition-specific (it is a
+per-site test of dN/dS shift along phenotype-associated branches) and so is
+not restricted to the US scheme.
 
 - **`pai_char_score`**: The pathogenicity score of mutating the ancestral human reference amino acid to the derived US alternative amino acid(s) in PrimateAI-3D.
 - **COSMIC Overlap**: The presence and recurrence of somatic mutations mapped to the specific codon under the US transition.
+- **FADE Overlap**: Whether the position falls within the direction-specific FADE_top_sig/FADE_bottom_sig significant site set (BF ≥ `fade_bf_threshold`), and its maximum Bayes Factor.
 
 )")
 ```
@@ -824,7 +994,11 @@ run_pai_fisher_dir <- function(df, label) {
     n_top_h  <- sum(in_top & df$high_pai, na.rm = TRUE)
     n_rest   <- sum(!in_top)
     n_rest_h <- sum(!in_top & df$high_pai, na.rm = TRUE)
-    mat <- matrix(c(n_top - n_top_h, n_rest - n_rest_h, n_top_h, n_rest_h), nrow = 2)
+    # Column order is [flag, not-flag] (not [not-flag, flag]) so fisher.test's
+    # odds ratio reads as "odds of pathogenic in-threshold vs out-of-threshold"
+    # the right way round -- verified against an unambiguous 90%-vs-10%
+    # synthetic case (OR=77.3, not the inverted 0.013 the other order gives).
+    mat <- matrix(c(n_top_h, n_rest_h, n_top - n_top_h, n_rest - n_rest_h), nrow = 2)
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
 
@@ -960,7 +1134,12 @@ run_cosmic_fisher_dir <- function(df, label) {
     n_top_c  <- sum(in_top & df$has_cosmic, na.rm = TRUE)
     n_rest   <- sum(!in_top)
     n_rest_c <- sum(!in_top & df$has_cosmic, na.rm = TRUE)
-    mat <- matrix(c(n_top - n_top_c, n_rest - n_rest_c, n_top_c, n_rest_c), nrow = 2)
+    # Column order is [flag, not-flag] (not [not-flag, flag]) so fisher.test's
+    # odds ratio reads as "odds of COSMIC overlap in-threshold vs out-of-
+    # threshold" the right way round -- verified against an unambiguous
+    # 90%-vs-10% synthetic case (OR=77.3, not the inverted 0.013 the other
+    # order gives).
+    mat <- matrix(c(n_top_c, n_rest_c, n_top - n_top_c, n_rest - n_rest_c), nrow = 2)
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
     
@@ -990,6 +1169,146 @@ knitr::kable(
   cosmic_fisher,
   caption = "Fisher exact test for COSMIC somatic mutations overlap enrichment within CAAS score thresholds",
   align = c("l", "l", rep("r", ncol(cosmic_fisher) - 2))
+)
+```
+
+
+```{r fade-subsec, results='asis'}
+if (has_fade_sites_top || has_fade_sites_bottom) cat("### FADE Site Overlap\n\n")
+```
+
+```{r fade-setup, eval=has_fade_sites_top || has_fade_sites_bottom}
+# Direction-specific by construction: TOP positions are only ever checked
+# against fade_sites_top, BOTTOM positions only against fade_sites_bottom --
+# never cross-checked (mirrors the FADE_top_sig/FADE_bottom_sig GMT layers in
+# build_position_gmt.py). Unlike COSMIC/PAI3D, FADE ran on the full analysed
+# gene set (not a partial external database), so no shared-gene / coverage
+# restriction is needed here -- the universe is simply the direction-specific
+# CAAS position set itself (pos_score_meta, already carries in_top_Xpct flags).
+pos_fade_top <- if (has_fade_sites_top) {
+  pos_score_meta %>%
+    dplyr::filter(change_side %in% c("top", "both")) %>%
+    dplyr::left_join(
+      fade_sites_top_df %>% dplyr::select(Gene, Position, max_bf, target_aa),
+      by = c("Gene", "Position")
+    ) %>%
+    dplyr::mutate(has_fade = !is.na(max_bf))
+} else NULL
+
+pos_fade_bottom <- if (has_fade_sites_bottom) {
+  pos_score_meta %>%
+    dplyr::filter(change_side %in% c("bottom", "both")) %>%
+    dplyr::left_join(
+      fade_sites_bottom_df %>% dplyr::select(Gene, Position, max_bf, target_aa),
+      by = c("Gene", "Position")
+    ) %>%
+    dplyr::mutate(has_fade = !is.na(max_bf))
+} else NULL
+```
+
+`r if ((has_fade_sites_top && sum(pos_fade_top$has_fade) == 0) || (has_fade_sites_bottom && sum(pos_fade_bottom$has_fade) == 0)) "> **Note:** FADE site evidence was provided, but no scored positions in at least one direction overlapped a FADE-significant site."`
+
+```{r fade-table, eval=has_fade_sites_top || has_fade_sites_bottom}
+fade_table <- dplyr::bind_rows(
+  if (!is.null(pos_fade_top))    pos_fade_top    %>% dplyr::filter(has_fade) %>% dplyr::mutate(Direction = "TOP"),
+  if (!is.null(pos_fade_bottom)) pos_fade_bottom %>% dplyr::filter(has_fade) %>% dplyr::mutate(Direction = "BOTTOM")
+) %>%
+  dplyr::arrange(dplyr::desc(max_bf)) %>%
+  dplyr::select(Gene, Position, Direction, CAAS_score, change_side, target_aa, max_bf) %>%
+  dplyr::rename(
+    `CAAS Score`      = CAAS_score,
+    `Change Side`     = change_side,
+    `FADE Target AA`  = target_aa,
+    `Max Bayes Factor` = max_bf
+  )
+
+DT::datatable(
+  fade_table,
+  caption = "CAAS positions overlapping with FADE-significant sites (BF >= fade_bf_threshold), ordered by Bayes Factor",
+  options = list(pageLength = 10, scrollX = TRUE),
+  rownames = FALSE
+)
+```
+
+```{r fade-bf-violin, eval=has_fade_sites_top || has_fade_sites_bottom, fig.height=5}
+fade_bf_df <- dplyr::bind_rows(
+  if (!is.null(pos_fade_top))    pos_fade_top    %>% dplyr::filter(has_fade) %>% dplyr::mutate(fade_direction = "TOP"),
+  if (!is.null(pos_fade_bottom)) pos_fade_bottom %>% dplyr::filter(has_fade) %>% dplyr::mutate(fade_direction = "BOTTOM")
+)
+
+ggplot(fade_bf_df, aes(x = fade_direction, y = max_bf, fill = fade_direction)) +
+  geom_violin(alpha = 0.55, trim = TRUE, scale = "width", show.legend = FALSE) +
+  geom_boxplot(width = 0.14, outlier.size = 0.4, alpha = 0.9, fill = "white", colour = "grey30") +
+  scale_fill_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3])) +
+  scale_y_continuous(limits = c(0, NA), expand = expansion(mult = c(0, 0.08))) +
+  labs(
+    title    = "Bayes Factor of FADE-significant Positions by Direction",
+    subtitle = sprintf("TOP: %d sites | BOTTOM: %d sites",
+                       sum(fade_bf_df$fade_direction == "TOP"), sum(fade_bf_df$fade_direction == "BOTTOM")),
+    x = NULL, y = "Max Bayes Factor"
+  ) +
+  theme(plot.title = element_text(face = "bold"))
+```
+
+```{r fade-fisher, eval=has_fade_sites_top || has_fade_sites_bottom}
+# Odds ratio & P-value interpretation:
+# - Odds Ratio: Measures the enrichment of FADE-significant sites (BF >= fade_bf_threshold)
+#   within the specified CAAS threshold compared to the rest of the direction's positions.
+#   An odds ratio > 1 indicates enrichment.
+# - P-value: Reaches significance (via Fisher's exact test) when the proportion of
+#   FADE-significant sites is significantly higher inside the CAAS threshold.
+run_fade_fisher_dir <- function(df, label) {
+  n_all <- nrow(df)
+  thr_50_val <- quantile(df$CAAS_score, 0.50, na.rm = TRUE)
+  pct_rows <- list(
+    list(col = NULL, lbl = "100% (all positions)",    flag = rep(TRUE, n_all)),
+    list(col = NULL, lbl = "50% (top 50% CAAS)",      flag = df$CAAS_score >= thr_50_val),
+    list(col = "in_top_10pct", lbl = sprintf("Top %g%%", top_pct  * 100), flag = NULL),
+    list(col = "in_top_5pct",  lbl = sprintf("Top %g%%", top5_pct * 100), flag = NULL),
+    list(col = "in_top_1pct",  lbl = sprintf("Top %g%%", top1_pct * 100), flag = NULL)
+  )
+
+  purrr::map_dfr(pct_rows, function(thr) {
+    in_top   <- if (!is.null(thr$flag)) thr$flag else df[[thr$col]]
+    in_top   <- replace_na(in_top, FALSE)
+    n_top    <- sum(in_top)
+    n_top_f  <- sum(in_top & df$has_fade, na.rm = TRUE)
+    n_rest   <- sum(!in_top)
+    n_rest_f <- sum(!in_top & df$has_fade, na.rm = TRUE)
+    # Column order is [flag, not-flag] (not [not-flag, flag] as in the sibling
+    # PAI3D/COSMIC Fisher helpers above) so fisher.test's odds ratio reads as
+    # "odds of FADE-sig in-threshold vs out-of-threshold" the right way round --
+    # verified against an unambiguous 90%-vs-10% synthetic case (OR=77.3, not 0.013).
+    mat <- matrix(c(n_top_f, n_rest_f, n_top - n_top_f, n_rest - n_rest_f), nrow = 2)
+    ft  <- tryCatch(fisher.test(mat),
+                    error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
+
+    pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
+    pct_fdr <- if ("gate_fdr" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_fdr[in_top], na.rm = TRUE)) else "0.0%"
+
+    tibble(
+      Direction     = label,
+      Threshold     = thr$lbl,
+      `N positions` = n_top,
+      `N FADE-sig`  = n_top_f,
+      `% FADE-sig`  = sprintf("%.1f%%", 100 * n_top_f / max(n_top, 1)),
+      `% gate_sig`  = pct_sig,
+      `% gate_fdr`  = pct_fdr,
+      `Odds ratio`  = sprintf("%.2f", ft$estimate),
+      `P value`     = formatC(ft$p.value, format = "e", digits = 2)
+    )
+  })
+}
+
+fade_fisher <- dplyr::bind_rows(
+  if (!is.null(pos_fade_top))    run_fade_fisher_dir(pos_fade_top,    "TOP"),
+  if (!is.null(pos_fade_bottom)) run_fade_fisher_dir(pos_fade_bottom, "BOTTOM")
+)
+
+knitr::kable(
+  fade_fisher,
+  caption = "Fisher exact test for FADE-significant site overlap enrichment within CAAS score thresholds. Direction-specific: TOP positions tested only against fade_sites_top, BOTTOM only against fade_sites_bottom.",
+  align = c("l", "l", rep("r", ncol(fade_fisher) - 2))
 )
 ```
 
@@ -1108,6 +1427,119 @@ readr::write_tsv(region_export,
   file.path(params$output_dir, "regional_accumulation.tsv"))
 ```
 
+---
+
+```{r most-interesting-header, results='asis'}
+if (has_pos_char) cat(r"(# Most Interesting Positions {.tabset .tabset-fade}
+
+Individual `Gene:Position` entries, ranked not by any single score but by
+**how many independent lines of evidence corroborate them** — the same
+orthogonal-support idea as the Overall dotplot above, applied at the single
+position rather than at the pathway level. Each criterion is an independent
+data source or test (own significance gates, own-direction CAAS percentile,
+PrimateAI-3D pathogenicity, COSMIC recurrence, FADE branch-site selection,
+membership in a significantly enriched set); a position clearing more of them
+is a stronger follow-up candidate than one with a single high-but-unconfirmed
+score. Available criteria depend on which optional inputs were supplied to
+this report — a criterion whose source wasn't provided is simply excluded
+from both the count and the denominator, not counted as a miss.
+
+)")
+```
+
+```{r most-interesting-setup, eval=has_pos_char}
+# One TRUE/FALSE criterion column per independent evidence source, direction-
+# matched (a TOP position is only ever checked against the TOP-direction PAI3D/
+# COSMIC/FADE subsets already built above, mirroring their own Fisher blocks).
+# CAAS-percentile criteria use the direction-specific thresholds (.thr_top_*/
+# .thr_bot_*, already computed for Regional Accumulation above) rather than the
+# pooled global ones pos_score_meta$in_top_Xpct carries, since a position's
+# "top 10%" standing should be relative to its own direction's population.
+build_interest_table <- function(dir_label, side_vals, thr10, thr5, thr1) {
+  base <- pos_score_meta %>%
+    dplyr::filter(change_side %in% side_vals) %>%
+    dplyr::mutate(
+      gene_position = paste(Gene, Position, sep = ":"),
+      `Gate significant`   = as.logical(gate_sig),
+      `Gate FDR`           = as.logical(gate_fdr),
+      `Top 10% (own dir.)` = CAAS_score >= thr10,
+      `Top 5% (own dir.)`  = CAAS_score >= thr5,
+      `Top 1% (own dir.)`  = CAAS_score >= thr1
+    )
+  crit_cols <- c("Gate significant", "Gate FDR",
+                 "Top 10% (own dir.)", "Top 5% (own dir.)", "Top 1% (own dir.)")
+
+  if (has_vep_primateai) {
+    pai_src <- if (identical(dir_label, "TOP")) pos_vep_pai_top else pos_vep_pai_bottom
+    base <- base %>%
+      dplyr::left_join(
+        pai_src %>% dplyr::transmute(Gene, Position, `PrimateAI-3D pathogenic` = pai_pathogenic),
+        by = c("Gene", "Position")
+      )
+    crit_cols <- c(crit_cols, "PrimateAI-3D pathogenic")
+  }
+  if (has_vep_cosmic) {
+    cosmic_src <- if (identical(dir_label, "TOP")) pos_cosmic_top else pos_cosmic_bottom
+    base <- base %>%
+      dplyr::left_join(
+        cosmic_src %>% dplyr::transmute(Gene, Position, `COSMIC overlap` = has_cosmic),
+        by = c("Gene", "Position")
+      )
+    crit_cols <- c(crit_cols, "COSMIC overlap")
+  }
+  fade_ok <- if (identical(dir_label, "TOP")) has_fade_sites_top else has_fade_sites_bottom
+  if (fade_ok) {
+    fade_src <- if (identical(dir_label, "TOP")) pos_fade_top else pos_fade_bottom
+    base <- base %>%
+      dplyr::left_join(
+        fade_src %>% dplyr::transmute(Gene, Position, `FADE-significant site` = has_fade),
+        by = c("Gene", "Position")
+      )
+    crit_cols <- c(crit_cols, "FADE-significant site")
+  }
+  if (!is.null(le_raw)) {
+    le_members <- le_raw %>% dplyr::distinct(gene_position) %>% dplyr::pull(gene_position)
+    base <- base %>% dplyr::mutate(`Enriched-set member` = gene_position %in% le_members)
+    crit_cols <- c(crit_cols, "Enriched-set member")
+  }
+
+  present_cols <- intersect(crit_cols, names(base))
+  crit_mat <- vapply(present_cols, function(cl) {
+    v <- base[[cl]]
+    ifelse(is.na(v), FALSE, as.logical(v))
+  }, FUN.VALUE = logical(nrow(base)))
+  base$`N criteria met` <- if (is.matrix(crit_mat)) rowSums(crit_mat) else sum(crit_mat)
+  base$`Criteria met`   <- apply(crit_mat, 1, function(row) paste(present_cols[row], collapse = "; "))
+
+  base %>%
+    dplyr::arrange(dplyr::desc(`N criteria met`), dplyr::desc(CAAS_score)) %>%
+    dplyr::transmute(Gene, Position, `CAAS Score` = round(CAAS_score, 4),
+                      `N criteria met`, `Criteria met`) %>%
+    head(TOP_N)
+}
+
+interest_top    <- if (has_pos_char) build_interest_table("TOP",    c("top", "both"),    .thr_top_10, .thr_top_5, .thr_top_1) else NULL
+interest_bottom <- if (has_pos_char) build_interest_table("BOTTOM", c("bottom", "both"), .thr_bot_10, .thr_bot_5, .thr_bot_1) else NULL
+```
+
+```{r most-interesting-tables, eval=has_pos_char, results='asis'}
+n_crit_top <- length(setdiff(names(interest_top), c("Gene", "Position", "CAAS Score", "N criteria met", "Criteria met")))
+n_crit_bot <- length(setdiff(names(interest_bottom), c("Gene", "Position", "CAAS Score", "N criteria met", "Criteria met")))
+
+cat("## TOP\n\n")
+cat(knitr::knit_child(text = c(
+  "```{r most-interesting-dt-top, echo=FALSE}",
+  "DT::datatable(interest_top, caption = sprintf('TOP-direction positions ranked by number of independent corroborating criteria (of %d available), CAAS score as tiebreaker', n_crit_top), options = list(pageLength = 10, scrollX = TRUE), rownames = FALSE)",
+  "```"), envir = environment(), quiet = TRUE))
+cat("\n\n")
+
+cat("## BOTTOM\n\n")
+cat(knitr::knit_child(text = c(
+  "```{r most-interesting-dt-bottom, echo=FALSE}",
+  "DT::datatable(interest_bottom, caption = sprintf('BOTTOM-direction positions ranked by number of independent corroborating criteria (of %d available), CAAS score as tiebreaker', n_crit_bot), options = list(pageLength = 10, scrollX = TRUE), rownames = FALSE)",
+  "```"), envir = environment(), quiet = TRUE))
+cat("\n\n")
+```
 
 # Methods
 

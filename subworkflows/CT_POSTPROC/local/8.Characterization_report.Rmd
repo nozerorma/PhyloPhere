@@ -1804,7 +1804,7 @@ cat("  TSV:  ", gr_tsv_dir,  "\n\n")
 # ── Build per-category excluded gene lists ────────────────────────────────────────────
 # Six lists are exported to
 #   disambiguation_characterization/gene_relation_analysis/txt/excluded/
-# for a separate ORA run against the original (pre-cleanup) background from discovery.
+# for manual inspection of which genes were excluded and why.
 #
 # Categories (mutually exclusive by design for excluded_nonsig):
 #   excluded_preproc             – genes with ≥1 position removed during pre-processing

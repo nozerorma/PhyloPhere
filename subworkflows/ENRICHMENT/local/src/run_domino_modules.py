@@ -79,13 +79,28 @@ def install_capturing_get_final_modules(domino_core):
 
 def run_one_list(domino_core, captured, list_path, network_file, slices_file, slice_threshold, module_threshold):
     captured.clear()
-    final_modules = domino_core.main(
-        active_genes_file=list_path,
-        network_file=network_file,
-        slices_file=slices_file,
-        slice_threshold=slice_threshold,
-        module_threshold=module_threshold,
-    )
+    try:
+        final_modules = domino_core.main(
+            active_genes_file=list_path,
+            network_file=network_file,
+            slices_file=slices_file,
+            slice_threshold=slice_threshold,
+            module_threshold=module_threshold,
+        )
+    except ValueError as e:
+        # DOMINO builds predating nozerorma/DOMINO commit b3ecce1 crash here
+        # when zero modules survive modularity slicing -- a legitimate outcome
+        # for a small/sparse network, not malformed input. Guard defensively
+        # in case the installed build predates that fix (not yet republished
+        # to the miralnso Anaconda channel as of this writing), rather than
+        # failing the whole gene-list batch over a network too sparse to
+        # produce any module.
+        if "union_all" not in str(e):
+            raise
+        print(f"[run_domino_modules] {os.path.basename(list_path)}: 0 modules "
+              f"survived modularity slicing (network too sparse for this "
+              f"gene list) -- treating as zero final modules.", file=sys.stderr)
+        final_modules = []
     sig_scores = captured.get("sig_scores", [None] * len(final_modules))
     n_putative = captured.get("n_putative", len(final_modules))
 

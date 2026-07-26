@@ -112,6 +112,41 @@ orthogonal_score <- function(le, bg, percentile_cols = character(0),
   wide %>% dplyr::select(ranking, database, pathway, n_le, signal, p_composite)
 }
 
+# ── Composite from pre-aggregated percentages (no per-member long table) ─────
+# Same statistical machinery as orthogonal_score() (one-sided hypergeometric
+# per flag, Lancaster-combined at full weight df=2 each -- no percentile trio
+# here, since callers of this entry point have no per-gene percentile-membership
+# concept to nest), for reports whose corroboration is already computed as a
+# set-level pct_<flag> (0-100) rather than carried as a per-member long table
+# -- e.g. posenrich, where posenrich_enrich.py::annotate_overlap() computes
+# these percentages once in Python. Recovers integer counts as
+# round(pct/100 * n_le) before reusing orth_hyperp(), so this entry point
+# agrees exactly with orthogonal_score() when both could apply to the same
+# underlying data (same k, n_draw, rate, n_universe -> same p).
+# df: one row per term, with an `n_le` column (leading-edge/overlap size) and
+#   the columns named in `pct_cols`.
+# pct_cols: named character vector, names(df) -> names(bg), e.g.
+#   c(pct_fade_top = "flag_fade_top", pct_rer_acc = "flag_rer_acc").
+# bg, n_universe: as in orthogonal_score().
+# Returns `df` with `signal`/`p_composite` columns appended.
+orthogonal_score_pct <- function(df, bg, pct_cols, n_universe) {
+  pct_cols <- pct_cols[names(pct_cols) %in% names(df) & pct_cols %in% names(bg)]
+  if (length(pct_cols) == 0) {
+    return(df %>% dplyr::mutate(signal = NA_real_, p_composite = NA_real_))
+  }
+  Q <- rep(0, nrow(df))
+  for (pc in names(pct_cols)) {
+    bgcol <- pct_cols[[pc]]
+    k <- round(df[[pc]] / 100 * df$n_le)
+    k[is.na(k)] <- 0
+    p <- orth_hyperp(k, df$n_le, bg[[bgcol]], n_universe)
+    Q <- Q + qchisq(pmax(p, 1e-300), df = 2, lower.tail = FALSE)
+  }
+  df$p_composite <- pchisq(Q, df = 2 * length(pct_cols), lower.tail = FALSE)
+  df$signal      <- -log10(pmax(df$p_composite, 1e-300))
+  df
+}
+
 # ── Standard cross-source flag set (independent of a report's own direction) ─
 # Reused verbatim by the Comparison report and both surviving FCS reports so
 # the composite means the same thing everywhere it appears.

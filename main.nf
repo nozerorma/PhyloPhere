@@ -63,9 +63,9 @@ include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
 include {CT_SIGNIFICATION} from './workflows/ct_signification.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
-include {ENRICHMENT_EXCLUDED} from './workflows/enrichment_excluded.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
+include {FADE_REPORT as FADE_REPORT_PRECOMP_TOP; FADE_REPORT as FADE_REPORT_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_report.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
@@ -231,13 +231,6 @@ workflow {
             // Capture postproc outputs as reusable references.
             // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
             pp_cleaned_bg = postproc_results.cleaned_background
-
-            if (params.enrichment) {
-                // Enrichment on excluded gene lists only: characterises genes removed during
-                // post-processing using the original (pre-cleanup) background.
-                ENRICHMENT_EXCLUDED(postproc_results.background_ori, postproc_results.excluded_gene_lists_files)
-                ran_any = true
-            }
         }
 
         def accum_results = null
@@ -337,7 +330,28 @@ workflow {
             }
         }
 
-        if (params.rer_tool) {
+        // Precomputed-FADE-input path: render 6.FADE_report_{top,bottom}.html
+        // directly from prior *.FADE.json results when --fade itself doesn't
+        // run this invocation (mirrors rer_continuous_file's role for RER,
+        // just below). SCORING already has its own independent precomputed
+        // fallback for the gene-level summary (scoring_fade_summary_top/bottom)
+        // — this only fills the individual-report gap those params leave open.
+        if (!params.fade && (params.fade_json_dir_top || params.fade_json_dir_bottom)) {
+            def precomp_top_jsons = params.fade_json_dir_top
+                ? Channel.fromPath("${params.fade_json_dir_top}/*.FADE.json").collect().ifEmpty([])
+                : Channel.value([])
+            def precomp_bottom_jsons = params.fade_json_dir_bottom
+                ? Channel.fromPath("${params.fade_json_dir_bottom}/*.FADE.json").collect().ifEmpty([])
+                : Channel.value([])
+            FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, file('NO_FG_LIST'))
+            FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, file('NO_FG_LIST'))
+            ran_any = true
+        }
+
+        // rer_continuous_file lets RER_MAIN render 5.RERconverge_report.html from a
+        // precomputed *.continuous.output RDS even when --rer_tool itself is off
+        // this invocation (see rerconverge.nf's own params.rer_continuous_file branch).
+        if (params.rer_tool || params.rer_continuous_file) {
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
             // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.
@@ -363,8 +377,8 @@ workflow {
             def scoring_fade_bot_ch      = params.fade       ? FADE.out.summary_bottom            : null
             def scoring_fade_site_top_ch = params.fade       ? FADE.out.site_tsv_top              : null
             def scoring_fade_site_bot_ch = params.fade       ? FADE.out.site_tsv_bottom           : null
-            def scoring_rer_ch           = params.rer_tool ? RER_MAIN.out.summary_tsv : null
-            def scoring_rer_perms_ch     = params.rer_tool ? RER_MAIN.out.perms      : null
+            def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.summary_tsv : null
+            def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
             def scoring_vep_cosmic_ch    = params.vep        ? VEP.out.cosmic_tsv                 : null

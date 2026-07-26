@@ -61,7 +61,14 @@ class PathField(QWidget):
         from gui.widgets.common.remote_browse_dialog import RemoteBrowseDialog
 
         current = self.text().strip()
-        start_path = current.rsplit("/", 1)[0] if current.startswith("/") else "/"
+        if current.startswith("/"):
+            start_path = current.rsplit("/", 1)[0]
+        else:
+            # Empty field (or a relative value): start at the configured remote
+            # root directory instead of always "/" — General tab's "Remote root
+            # directory" lets a user set this once (e.g. "/scratch/mramon")
+            # rather than navigating down from "/" on every single field.
+            start_path = remote_context.get_remote_root_dir()
         dialog = RemoteBrowseDialog(host, self._mode, start_path or "/", parent=self)
         if dialog.exec() == dialog.DialogCode.Accepted and dialog.selected_path:
             self.set_text(dialog.selected_path)

@@ -37,7 +37,7 @@ include { CHECK_MIN_CONTRASTS } from "${baseDir}/subworkflows/CT/ct_check_min_co
 include { NAME_CURATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_name_curation"
 
 workflow CONTRAST_SELECTION {
-    assert params.my_traits : "Contrast selection workflow requires --traitfile."
+    assert params.my_traits : "Contrast selection workflow requires --my_traits."
     assert params.tree : "Contrast selection workflow requires --tree."
 
     def trait_file = file(params.my_traits)

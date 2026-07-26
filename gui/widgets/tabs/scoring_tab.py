@@ -15,28 +15,21 @@ SPEC = ModuleTabSpec(
         "Combines CAAS, RERconverge, FADE, Accumulation, and VEP outputs into a "
         "composite per-gene / per-position score."
     ),
-    disclaimer="Enrichment needs Scoring's gene lists/background when this is off.",
+    disclaimer=(
+        "Enrichment needs Scoring's gene lists/background when this is off. All of "
+        "Scoring's standalone-input fallbacks (including the FADE site-level "
+        "fallback) live on the Precomputed Run tab."
+    ),
     essential_fields=(
         FieldSpec(name="scoring_stress", label="Run stress-enrichment analysis", kind="bool"),
         FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)"),
         FieldSpec(name="gene_ensembl_file", label="Gene-Ensembl mapping file", kind="path_file"),
-        FieldSpec(
-            name="scoring_fade_site_top",
-            label="FADE site-level fallback — top (if FADE off)",
-            kind="path_file",
-        ),
-        FieldSpec(
-            name="scoring_fade_site_bottom",
-            label="FADE site-level fallback — bottom (if FADE off)",
-            kind="path_file",
-        ),
     ),
-    fallback_fields=(
-        FieldSpec(name="scoring_postproc_input", label="Post-processing input", kind="path_file"),
-        FieldSpec(name="scoring_accum_dir", label="Accumulation directory", kind="path_dir"),
-        FieldSpec(name="scoring_vep_primateai", label="VEP PrimateAI scores", kind="path_file"),
-        FieldSpec(name="scoring_background_input", label="Background input", kind="path_file"),
-        FieldSpec(name="caas_perms_file", label="CAAS permulation RDS", kind="path_file"),
+    advanced_fields=(
+        FieldSpec(name="scoring_stress_top_n", label="Stress-enrichment top-N"),
+        FieldSpec(name="scoring_stress_rank_metric", label="Stress-enrichment rank metric"),
+        FieldSpec(name="scoring_position_top_pct", label="Top position percentile"),
+        FieldSpec(name="scoring_gene_top_pct", label="Top gene percentile"),
     ),
 )
 

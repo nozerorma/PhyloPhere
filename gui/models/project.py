@@ -21,6 +21,7 @@ from typing import Literal
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.general import GeneralConfig
 from gui.models.modules import ModulesConfig
+from gui.models.precomputed import PrecomputedConfig
 from gui.models.resources import ResourcesConfig
 from gui.models.runtime import RuntimeConfig
 
@@ -34,4 +35,5 @@ class ProjectConfig:
     general: GeneralConfig = field(default_factory=GeneralConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
     modules: ModulesConfig = field(default_factory=ModulesConfig)
+    precomputed: PrecomputedConfig = field(default_factory=PrecomputedConfig)
     resources: ResourcesConfig = field(default_factory=ResourcesConfig)

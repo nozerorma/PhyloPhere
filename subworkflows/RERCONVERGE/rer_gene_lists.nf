@@ -3,7 +3,7 @@
 /*
  * RER_GENE_LISTS
  * ──────────────
- * Extract ORA-ready gene lists from the RERconverge summary TSV:
+ * Extract FCS/STRING-ready gene lists from the RERconverge summary TSV:
  *   background.txt           — all genes tested by RERConverge
  *   rer_significant.txt      — p.perm < threshold & |Rho| >= rho_threshold
  *   rer_accelerating.txt     — significant & Rho > 0

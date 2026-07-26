@@ -1,636 +1,645 @@
-# PHYLOPHERE
-
 ![PhyloPhere logo](res/logo.png)
 
-```text
- PPP   H   H  Y   Y  L     L   Y   Y
- P  P  H   H   Y Y   L     L    Y Y
- PPP   HHHHH    Y    L     L     Y
- P     H   H    Y    L     L     Y
- P     H   H    Y    LLLL  LLLL  Y
-```
+# PhyloPhere
 
-A **Nextflow DSL2 pipeline** to run phylogenetic comparative workflows for genome–phenome analyses, centered on CAAStools-based CAAS/CAAP discovery and extended with downstream significance, disambiguation, post-processing, enrichment, and accumulation analyses.
+A Nextflow pipeline for phylogenetic comparative genomics: it takes a multiple
+sequence alignment, a species tree, and a phenotype, and asks *which genes and
+which amino acid positions evolved differently in species that carry the
+extreme values of that phenotype*. It combines convergent-substitution
+detection, ancestral-state reconstruction, relative evolutionary rate,
+directional selection scanning, and composite scoring/enrichment into one
+reproducible, resumable pipeline — runnable from the CLI, a desktop GUI, or
+Seqera Platform.
 
----
-
-## Why PhyloPhere
-
-PhyloPhere provides:
-
-- Reproducible orchestration of CAAStools modules (`discovery`, `resample`, `bootstrap`) in Nextflow.
-- Integration with trait preprocessing and contrast selection.
-- Extended downstream modules not present in vanilla CAAStools runs:
-  - `ct_signification`
-  - `ct_disambiguation`
-  - `ct_postproc`
-  - `enrichment` (clusterProfiler ORA / Wilcoxon-AUC FCS) and `string` PPI network analysis
-  - `ct_accumulation`
-- Optional RERConverge workflow support (`build_trait`, `build_tree`, `build_matrix`, `continuous`).
-- Both **end-to-end integrated** execution and **standalone module-by-module** execution.
+- **Repository:** https://github.com/nozerorma/PhyloPhere
+- **License:** GNU GPL v3 ([LICENSE](LICENSE))
+- **Requires:** Nextflow ≥ 22.10 (DSL2), a container engine (Singularity/Apptainer) or the bundled conda environment
 
 ---
 
-## Attribution
+## Table of contents
 
-This project builds on and extends major prior tools and contributions:
-
-- **CAAStools** (linudz): https://github.com/linudz/caastools
-- **CAAP/isCAAP extensions in this codebase** (property-based convergence and group-aware logic, including `iscaap` handling in accumulation/randomization paths).
-- **CAAP grouping follows the same logic described in:** Chen, S., & Zou, Z. (2025). *Detecting Convergence of Amino Acid Physicochemical Properties Underlying the Organismal Adaptive Convergent Evolution*. *Molecular Ecology Resources*, 25(1), e70052. https://doi.org/10.1111/1755-0998.70052
-- **RERConverge** (partial integration in PhyloPhere).
-- **María Sánchez Bermúdez** (diet/ethanol phenotype project definitions and test-use scenarios integrated in runner workflows).
-
-Please cite resources listed in [`docs/CITATIONS.md`](docs/CITATIONS.md).
-
----
-
-## What changed vs original `linudz/caastools`
-
-Compared with standalone CAAStools usage, PhyloPhere adds:
-
-1. **Workflow orchestration in Nextflow DSL2** with profile/config-driven execution.
-2. **Integrated trait preprocessing** (`reporting`, `contrast_selection`, optional pruning, CI-aware grouping).
-3. **CAAP-aware pipeline plumbing** across discovery/signification/postproc/accumulation (including CAAP groups and `iscaap`-aware downstream logic).
-4. **Disambiguation stage** (`ct_disambiguation`) with ASR modes:
-   - `precomputed` (cache-backed)
-   - `compute`
-5. **Post-processing modes**:
-   - `filter` (single selected parameters)
-   - `exploratory` (parameter sweep)
-6. **Functional enrichment modules**:
-   - ORA (clusterProfiler) on post-processing excluded genes
-   - STRING enrichment and PPI network context
-   - Wilcoxon-AUC Functional Classification Score (FCS) enrichment
-7. **Accumulation module** (`ct_accumulation`) with independent category randomizations (`us`, `gs1`–`gs4`) to avoid double counting positions. Per-group empirical p-values are combined downstream using Fisher's method, followed by BH FDR correction.
-8. **Integrated + standalone dual model** with robust fallback logic from channels to explicit file inputs.
-
-### Core CT upgrades in PhyloPhere (vs classic CT usage)
-
-- **Pair-aware mode (`miss_pair`)**
-  Missing-data filtering can enforce pair consistency between FG/BG when thresholds are aligned, reducing artifacts from asymmetrically missing taxa.
-- **Conservation-aware mode (`max_conserved`)**
-  Instead of requiring strict zero overlap, CT can tolerate limited overlap between FG/BG amino-acid states (or CAAP groups), while still requiring informative side-specific change. This is useful for biologically conservative substitutions where complete disjointness is too strict.
-- **CAAP mode (`caap_mode`)**
-  Discovery/Bootstrap can run on amino-acid property groupings (GS1–GS4 + US handling), not only exact residue identity. This extends classic CAAS into **property-level convergence** and is propagated downstream (signification, postproc, accumulation, `iscaap`-aware logic).
-- **Optimized permulations / bootstrap execution**
-  PhyloPhere CT implements multiple practical optimizations for large runs:
-  - chunked resample generation / ingestion (`chunk_size`)
-  - directory-based `resample_out` support (not only legacy single-file input)
-  - discovery-guided bootstrap filtering (`discovery_out`) so bootstrap tests only discovered positions/schemes
-  - substantial reduction in total tests (documented in code/help as speedup-oriented optimization)
+1. [Quickstart](#quickstart)
+2. [Workflow](#workflow)
+3. [Modules](#modules)
+4. [Configuration reference](#configuration-reference)
+5. [Resource allocation](#resource-allocation)
+6. [Desktop GUI](#desktop-gui)
+7. [Running on Seqera Platform](#running-on-seqera-platform)
+8. [Contributions & acknowledgements](#contributions--acknowledgements)
+9. [License](#license)
+10. [Additional docs](#additional-docs)
 
 ---
 
-## Runner GUI
-
-Instead of hand-editing `SBATCH_run_phenotypes_primates.sh` / `run_phenotype_single_primates.sh`,
-a multi-tab desktop GUI (PySide6) can generate that script pair from a form: one tab per pipeline
-module, a phenotype-catalogue table for SLURM array batches, local/slurm resource presets, and
-save/load of the whole configuration as a JSON project file. Dataset paths can be validated (and
-browsed) against a remote HPC cluster over SSH instead of the local filesystem — set a host in the
-General tab (needs passwordless key-based auth already working).
+## Quickstart
 
 ```bash
-./run_gui.sh                 # launches the GUI (uses the phylophere env automatically)
-./install_gui_launcher.sh    # optional: adds a desktop/application-menu entry
-```
+# 1. set up the environment (conda/mamba env named "phylophere")
+./environment/install_env.sh
 
-Requires the `phylophere` environment (`./environment/install_env.sh`) — it already pins PySide6
-and Jinja2, so no separate GUI install step is needed. Source: [`gui/`](gui/); tests: [`tests/gui/`](tests/gui/).
-
-## End-to-end workflow (sequential integrated run)
-
-Typical integrated chain:
-
-1. `reporting` (optional phenotype exploration)
-2. `contrast_selection`
-3. `ct_tool=discovery,resample,bootstrap`
-4. `ct_signification`
-5. `ct_disambiguation`
-6. `ct_postproc`
-7. `enrichment` (clusterProfiler ORA on excluded genes) and optionally `string` (STRING enrichment)
-8. `ct_accumulation`
-9. `enrichment` (Wilcoxon-AUC FCS on accumulation results) and optionally `string` (STRING PPI on accumulation results)
-
-### Example integrated run
-
-```bash
-nextflow run main.nf -profile local \
-  --my_traits <traits.csv> \
-  --traitname <trait_column> \
-  --tree <tree.nwk> \
-  --alignment <alignment_dir> \
-  --ct_tool "discovery,resample,bootstrap" \
-  --reporting \
+# 2. run a minimal end-to-end analysis
+nextflow run main.nf \
+  --my_traits       traits.csv \
+  --traitname       my_phenotype \
+  --tree            species.nwk \
+  --alignment       alignments/ \
+  --caas_config     caas_config.tab \
   --contrast_selection \
-  --ct_signification \
-  --ct_disambiguation \
-  --ct_postproc \
-  --enrichment --string \
-  --ct_accumulation \
-  --outdir <results_dir>
+  --ct_tool         discovery,resample,bootstrap \
+  --ct_disambiguation --ct_postproc --ct_accumulation \
+  --scoring --enrichment \
+  -profile singularity \
+  --outdir out/
 ```
+
+The "core" chain — CT, `--ct_disambiguation`, `--ct_postproc`,
+`--ct_accumulation`, `--vep` — runs by default (see [Configuration
+reference](#configuration-reference)); `--scoring`, `--enrichment`,
+`--fade`, `--rer_tool` and `--contrast_selection` are opt-in and default to
+off, so a first-time user should not expect scoring, enrichment, FADE, or RER
+output without explicitly requesting them. `--help` always prints the general
+overview, followed by detail for every module currently enabled by your
+flags — i.e. help for the run you're about to launch:
+
+```bash
+nextflow run main.nf --help                       # overview + help for the default-on chain
+nextflow run main.nf --help --scoring --enrichment --fade --rer_tool continuous
+```
+
+Prefer a form over flags? See the [Desktop GUI](#desktop-gui) section — it
+exposes every parameter below across a set of tabs and generates the launch
+scripts for you (single run, multi-phenotype local loop, or a Slurm array job).
 
 ---
 
-## Pipeline overview (Mermaid)
+## Workflow
+
+PhyloPhere runs as a single Nextflow entry point (`main.nf`) that conditionally
+composes named sub-workflows based on `params.*` toggles — there is no
+`-entry` dispatch, and one invocation processes **one phenotype at a time**
+(multi-phenotype sweeps are handled by looping invocations, e.g. via the GUI's
+generated Slurm array script). Any stage can also be run **standalone** from a
+precomputed input of its upstream stage (the `*_from` / `*_input` /
+`*_dir` parameters throughout the config), which is how individual reports get
+re-rendered without re-running the whole chain.
 
 ```mermaid
 flowchart TD
-  A[Traits input] --> B{Reporting enabled}
-  A --> P{Prune enabled}
-  T[Tree input] --> C
-  ALI[Alignment input] --> D
- 
-  B -->|yes| B1[REPORTING<br/>Explore phenotypes and QC]
-  B -->|no| B0[Skip reporting]
- 
-  P -->|yes| P1[PRUNE<br/>Remove excluded species]
-  P -->|no| P0[Skip prune]
- 
-  B1 --> C
-  B0 --> C
-  P1 --> C
-  P0 --> C
- 
-  C{Contrast selection enabled} -->|yes| C1[CONTRAST_SELECTION<br/>Select contrasts by CI thresholds or discrete groups]
-  C -->|no| D
- 
-  C1 --> C2[CHECK_MIN_CONTRASTS<br/>Stop if too few foreground pairs]
-  C2 -->|pass| D
-  C2 -->|fail| X1[Graceful stop low contrasts]
- 
-  D[CT workflow] --> D1[DISCOVERY<br/>Find candidate convergent sites]
-  D1 --> D2[RESAMPLE<br/>Generate null trait permutations]
-  D2 --> D3[BOOTSTRAP<br/>Estimate empirical support]
- 
-  C1 -->|trait and tree channels| D
-  D1 --> D1A[Discovery and background outputs]
-  D3 --> D3A[Bootstrap output]
- 
-  D1A --> E{Signification enabled}
-  D3A --> E
-  E -->|yes| E1[CT_SIGNIFICATION<br/>Combine p-values and summary metadata]
-  E -->|no| F
- 
-  E1 --> E1A[Global meta CAAS]
-  E1 --> E2{Discovery has CAAS rows}
-  E2 -->|no| X2[Graceful stop no discoveries]
-  E2 -->|yes| F
- 
-  F{Disambiguation enabled} -->|yes| F1[CT_DISAMBIGUATION<br/>ASR-aware convergence filtering]
-  F -->|no| G
-  E1A --> F1
-  C1 -->|trait and tree fallback| F1
-  F1 --> F1A[Convergence master CSV]
- 
-  G{Post processing enabled} -->|yes| G1[CT_POSTPROC<br/>Filter, characterize, and clean outputs]
-  G -->|no| H
-  F1A --> G1
-  D1A --> G1B[Background genes]
-  G1 --> G1C[Filtered discovery]
-  G1 --> G1D[Cleaned background]
-  G1 --> G1E[Excluded gene lists]
- 
-  H{Enrichment enabled} -->|yes| H1[ENRICHMENT_EXCLUDED<br/>Functional over-representation analysis on excluded genes]
-  H -->|no| I
-  G1D --> H1
-  G1E --> H1
-  H1 --> H2{STRING enabled}
-  H2 -->|yes| H3[STRING<br/>PPI context and enrichment]
-  H2 -->|no| I
- 
-  I{CT accumulation enabled} -->|yes| I1[CT_ACCUMULATION<br/>Independent category randomization test for gene burden]
-  I -->|no| K[Final outputs]
-  G1C --> I1
-  G1D --> I1
-  C1 -->|trait context| I1
-  ALI --> I1
-  I1 --> I2[Randomization gene lists]
- 
-  I2 --> J{Enrichment enabled}
-  J -->|yes| J1[FCS_ACCUMULATION<br/>Wilcoxon-AUC FCS on accumulation lists]
-  J -->|no| K
-  J1 --> J2{STRING enabled}
-  J2 -->|yes| J3[STRING_ACCUMULATION<br/>Network enrichment for accumulation lists]
-  J2 -->|no| K
- 
-  I1 --> S{FADE enabled}
-  S -->|no| K
-  S -->|yes| S2[FADE<br/>Directional AA selection<br/>all genes]
-  S2 --> K
- 
-  R{RER tool enabled} -->|no| K
-  R -->|yes| R1[RER_MAIN<br/>Trait, tree, matrix construction & continuous association]
-  R1 --> K
+    A[REPORTING\ndataset / phenotype exploration] --> B[CONTRAST_SELECTION\nprune + pick extremes]
+    B --> C[CT\ndiscovery / resample / bootstrap]
+    C --> D[CT_SIGNIFICATION\ngenome-wide FDR]
+    D --> E[CT_DISAMBIGUATION\nASR: convergent/parallel/divergent]
+    E --> E2[ASR_ROBUSTNESS\nposterior sensitivity, parallel diagnostic]
+    E --> F[CT_POSTPROC\ncluster/gene filtering + characterization]
+    F --> G[CT_ACCUMULATION\nper-gene CAAS burden test]
+    F --> H[VEP\nPrimateAI-3D / COSMIC annotation]
+    F --> I[FADE\nHyPhy directional selection, top+bottom]
+    subgraph independent[independent of CT, same trait]
+      J[RER_MAIN\nRERconverge relative evolutionary rate]
+    end
+    G --> K[SCORING\ncomposite position + gene scores]
+    H --> K
+    I --> K
+    J --> K
+    K --> L[ENRICHMENT\nFCS ranked enrichment, DOMINO/STRING, POSENRICH]
 ```
 
-This diagram reflects the actual **integrated channel flow** plus the same module boundaries you can invoke in **standalone file-input mode**.
+Execution order as wired in `main.nf`:
+
+1. **REPORTING** (`--reporting`) — optional preliminary trait/tree exploration reports; skipped if `--contrast_selection` is also set (it produces its own reports).
+2. **CONTRAST_SELECTION** (`--contrast_selection`) — pruning + independent-contrasts extreme selection; aborts cleanly via `--min_contrasts` if too few foreground pairs exist.
+3. **CT** (`--ct_tool discovery,resample,bootstrap`) — CAAStools discovery/resample/bootstrap.
+4. **CT_SIGNIFICATION** — genome-wide significance/FDR of discovered CAAS (runs whenever bootstrap ran, or standalone via `--bootstrap_from`).
+5. **CT_DISAMBIGUATION** (`--ct_disambiguation`) — ASR-based convergent/parallel/divergent classification.
+6. **CT_POSTPROC** (`--ct_postproc`) — cluster/gene filtering, background cleanup, characterization report; also fans out **ASR_ROBUSTNESS** in parallel as an independent posterior-confidence diagnostic.
+7. **CT_ACCUMULATION** (`--ct_accumulation`), **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — four largely independent evidence-generating stages that can run in any combination.
+8. **SCORING** (`--scoring`) — integrates all of the above into composite position- and gene-level scores; optionally triggers **CAAS_PERMULATION** for a genome-wide permutation null (`--caas_permulation_enrichment`).
+9. **ENRICHMENT** (`--enrichment`, nested under `--scoring`) — FCS ranked gene-set enrichment, DOMINO active-module + STRING functional enrichment, and POSENRICH position-level enrichment.
+
+On completion, `workflow.onComplete` (in `main.nf`, backed by `lib/WorkflowMap.groovy`) writes `workflow_map.html` into `--outdir` — a visual summary of which stages ran and links to every HTML report/output directory produced.
+
+Reports are numbered chronologically across the whole run (`0.Data_pruning` …
+`16.Position_enrichment_report`) so the numeric prefix always tells you where
+a report sits in the pipeline, regardless of which modules were enabled.
 
 ---
 
-## Run by modules (standalone / selective execution)
+## Modules
 
-You can run specific modules without full chaining.
+### CT — convergent substitution discovery
+Runs CAAStools' discovery, resample, and bootstrap tools over per-gene
+alignments to detect Candidate Amino Acid Substitutions (CAAS): positions
+where the phenotype's extremes carry distinct, convergent amino acids.
+Inputs: `--alignment`, `--caas_config`/`--traitvalues`, `--tree`. Supports
+batching large gene sets into fewer Nextflow tasks (`--ct_discovery_batch_size`,
+`--ct_bootstrap_batch_size`) and a `--toy_mode`/`--toy_n` subsampling mode for
+quick smoke tests. Gated by `--ct_tool` (comma list of `discovery,resample,bootstrap`).
 
-### CT only
+### CONTRAST_SELECTION — trait/tree preprocessing
+Prunes the alignment/tree to the species with usable trait data and selects
+foreground/background extremes via an independent-contrasts algorithm, with
+optional Jeffreys-CI-aware composition for population-count traits
+(`--n_trait`/`--c_trait`). Enforces `--min_contrasts` before letting CT run.
 
-```bash
-nextflow run main.nf -profile local \
-  --ct_tool "discovery,resample,bootstrap" \
-  --alignment <alignment_dir> \
-  --caas_config <traitfile.tab> \
-  --tree <tree.nwk> \
-  --traitvalues <boot_traitfile.tab> \
-  --outdir <results_dir>
-```
+### CT_SIGNIFICATION — genome-wide significance
+Computes FDR-corrected statistical significance of discovered CAAS from the
+bootstrap permutation output. Can run standalone from `--discovery_from` +
+`--background_input` + `--bootstrap_from`; exits cleanly if zero CAAS were
+discovered.
 
-### Signification standalone
+### CT_DISAMBIGUATION — convergence classification
+Uses ancestral state reconstruction (ASR) plus significance metadata to
+classify each CAAS as convergent, parallel, or divergent relative to the
+phenotype tree topology (`--ct_disambig_convergence_mode focal_clade|mrca`).
+Standalone via `--signification_from` + `--caas_config`/`--tree`.
 
-```bash
-nextflow run main.nf -profile local \
-  --ct_signification \
-  --discovery_input <discovery.tab> \
-  --bootstrap_input <bootstrap.tab|bootstrap_dir> \
-  --background_input <background_genes.txt|dir> \
-  --outdir <results_dir>
-```
+### CT_POSTPROC — filtering & characterization
+Applies cluster/gene-level filtering (`--caas_postproc_mode filter|exploratory`),
+cleans the gene background, and renders the Characterization report. Also
+triggers **ASR_ROBUSTNESS**, an independent diagnostic that stress-tests the
+disambiguation posterior threshold (τ = 0.90/0.95/0.99) without altering the
+main data path. Emits gene lists consumed by FADE's `gene_set` mode.
 
-### Disambiguation standalone
+### CT_ACCUMULATION — per-gene CAAS burden
+Permutation test for whether a gene accumulates more CAAS than expected by
+chance, run once per direction (top/bottom/all). Requires `--alignment` and
+`--gene_ensembl_file`; standalone via `--accumulation_caas_input`.
 
-```bash
-nextflow run main.nf -profile local \
-  --ct_disambiguation \
-  --ct_disambig_caas_metadata <global_meta_caas.tsv> \
-  --caas_config <traitfile.tab> \
-  --tree <tree.nwk> \
-  --ct_disambig_asr_mode precomputed \
-  --ct_disambig_asr_cache_dir <asr_cache_dir> \
-  --outdir <results_dir>
-```
+### VEP — pathogenicity annotation
+Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores and
+COSMIC somatic-mutation evidence, each skipped independently if its database
+parameter is empty.
 
-### Post-processing standalone
+### FADE — directional selection
+Runs HyPhy FADE, a Bayesian branch-site model, to detect accelerated or
+decelerated amino-acid selection on phenotype-extreme branches — always both
+"top" and "bottom" directions. Alignment prep is shared once across both
+directions (`SELECTION_PREP`). A precomputed-JSON path
+(`--fade_json_dir_top`/`bottom`) renders the report without rerunning HyPhy.
 
-```bash
-nextflow run main.nf -profile local \
-  --ct_postproc \
-  --discovery_input <caas_convergence_master.csv> \
-  --background_input <background_genes.txt|dir> \
-  --caas_postproc_mode filter \
-  --outdir <results_dir>
-```
+### RER_MAIN (RERconverge) — relative evolutionary rate
+Computes branch-length deviations correlated with the trait, auto-routing to
+continuous or binary correlation (`--rer_trait_mode auto|continuous|binary`).
+Emits a permulation null consumed later by SCORING/ENRICHMENT for
+permutation-corrected p-values. `--rer_continuous_file` renders the report
+standalone from a precomputed RDS.
 
-### Enrichment/STRING standalone
+### SCORING — composite integration
+Combines CT_POSTPROC (CAAS), FADE, RERconverge, CT_ACCUMULATION, and VEP into
+unified position-level and gene-level composite scores. See [Composite CAAS
+scoring framework](#composite-caas-scoring-framework) below for the full
+formulation. Also wires in **CAAS_PERMULATION** — a genome-wide permutation
+null built by replaying permuted labelings through disambiguation — when
+`--caas_permulation_enrichment` is set.
 
-```bash
-nextflow run main.nf -profile local \
-  --enrichment --string \
-  --enrichment_gene_lists_input <gene_lists_dir> \
-  --enrichment_background_input <cleaned_background_main.txt|dir> \
-  --outdir <results_dir>
-```
+### ENRICHMENT — functional & network enrichment
+Runs FCS (a ranked, Wilcoxon-AUC, GMT-based enrichment engine — the single
+enrichment engine now used for both CAAS and RER gene rankings), an
+orthogonal cross-module Comparison report, optional DOMINO active-module
+detection + STRING functional enrichment (`--scoring_string`), and optional
+POSENRICH position-level Fisher-exact enrichment (`--posenrich`) integrating
+UCR/FUBAR/domain-variability/PrimateAI-3D/COSMIC evidence per position.
+Universe files are module-specific (`--rer_universe_file`,
+`--fade_universe_file`) rather than shared.
 
-### CT accumulation standalone
-
-```bash
-nextflow run main.nf -profile local \
-  --ct_accumulation \
-  --accumulation_caas_input <filtered_discovery.tsv> \
-  --accumulation_background_input <cleaned_background_main.txt|dir> \
-  --alignment <alignment_dir> \
-  --caas_config <traitfile.tab> \
-  --outdir <results_dir>
-```
-
-### FADE standalone (Directional selection analysis)
-
-```bash
-nextflow run main.nf -profile local \
-  --fade \
-  --my_traits <traits.csv> \
-  --traitname <trait_column> \
-  --tree <tree.nwk> \
-  --outdir <results_dir>
-```
-
-### VEP standalone (Pathogenicity characterization)
-
-```bash
-nextflow run main.nf -profile local \
-  --vep \
-  --vep_caas_input <filtered_discovery.tsv> \
-  --outdir <results_dir>
-```
-
-### CAAS Scoring standalone (Composite integration)
-
-```bash
-nextflow run main.nf -profile local \
-  --scoring \
-  --scoring_postproc_input <filtered_discovery.tsv> \
-  --scoring_fade_summary_top <fade_summary_top.tsv> \
-  --scoring_fade_summary_bottom <fade_summary_bottom.tsv> \
-  --scoring_rer_input <rerconverge_summary.tsv> \
-  --scoring_accum_dir <accumulation_dir> \
-  --scoring_vep_primateai <primateai_scores.tsv> \
-  --outdir <results_dir>
-```
-
----
-
-## Main modules in one sentence each
-
-- **REPORTING**: Builds exploratory phenotype reports (distribution, phylogenetic context, and QC plots).
-- **CONTRAST_SELECTION**: Defines high/low phenotype contrast groups, optionally using pruning and CI-aware logic.
-- **CT (discovery/resample/bootstrap)**: Detects candidate convergent substitutions and tests them against permutation-based null distributions.
-- **CT_SIGNIFICATION**: Combines discovery and bootstrap evidence into significance summaries and meta tables (e.g., `global_meta_caas.tsv`).
-- **CT_DISAMBIGUATION**: Uses ASR-informed logic to separate true convergent events from ambiguous patterns and exports convergence master tables.
-- **CT_POSTPROC**: Filters and characterizes CAAS/CAAP outputs (filter or exploratory mode), producing cleaned sets for downstream analyses.
-- **ENRICHMENT**: Runs ORA (clusterProfiler) on postproc excluded genes, or Wilcoxon-AUC FCS on scoring/accumulation results.
-- **STRING**: Runs STRING enrichment/network-context analysis on selected gene sets.
-- **CT_ACCUMULATION**: Tests whether CAAS burden accumulates in genes more than expected by chance via permutation.
-- **FADE**: Performs directional amino acid selection analysis (e.g. using PAML/BUSTED-like models) on all genes.
-- **VEP**: Validates and maps pathogenicity scores (e.g., PrimateAI-3D) to convergence positions.
-- **SCORING**: Computes composite CAAS scoring at position-level and gene-level, integrating multiple pipeline signals.
-- **RER_MAIN**: Runs integrated RERConverge steps (trait, tree, matrix construction and continuous association mode).
+### REPORTING — preliminary exploration
+Standalone trait/tree exploration and optional tip-name curation/pruning,
+independent of CT; feeds pruned trait/tree into CONTRAST_SELECTION/FADE when
+run with `--reporting`.
 
 ---
 
 ## Composite CAAS Scoring Framework
 
-PhyloPhere integrates multiple independent evidence lines (CT convergence, FADE selection, RER continuous association, accumulation, and VEP characterization) into unified position-level and gene-level scores.
+PhyloPhere integrates multiple independent evidence lines (CT convergence,
+FADE selection, RER continuous association, accumulation, and VEP
+characterization) into unified position-level and gene-level scores.
 
-### 1. Mathematical Formulation
+### Position-level score (`CAAS_score`)
 
-#### A. Position-Level CAAS Score (`CAAS_score`)
-For each alignment position, the composite `CAAS_score` is calculated as the weighted sum of row-level CAAS scores (`caas_row`) across all biochemically grouped schemes:
+For each alignment position, the composite `CAAS_score` is the weighted sum of
+row-level CAAS scores (`caas_row`) across biochemically grouped schemes
+(US, GS1–GS4, weight `0.2` each, max sum `1.0`). Each `caas_row` is the
+product of two orthogonal `[0,1]` evidence axes:
 
-\[\text{CAAS\_score} = \sum_{\text{schemes}} \text{caas\_row} \times \text{scheme\_weight}\]
+1. **Phenotype evolution axis** — `phen_score = 1 - pvalue_boot` (permutation evidence; lower p ⇒ stronger signal).
+2. **Position evolution axis** — `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score, which is count-aware (scales with the number of independent evolutionary transitions).
 
-Where the biochemical groupings are mapped to weights:
-- **US, GS1, GS2, GS3, GS4**: Weight = `0.2` each (maximum achievable sum = `1.0`).
+> The hypergeometric p-value (`Pvalue`) is deliberately excluded from the core
+> score and instead acts as a significance gate (`gate_sig`/`gate_fdr`).
 
-For each biochemically grouped scheme, the row-level CAAS score (`caas_row`) is the product of two orthogonal, non-deciled evidence axes on a raw `[0,1]` scale:
+### Gene-level scores
 
-1. **Phenotype Evolution Axis (`phen_score`)**: Permulation evidence derived from the bootstrap permutation test:
-   \[\text{phen\_score} = 1 - \text{pvalue\_boot}\]
-   A lower permutation p-value indicates a stronger phenotype-partition association, representing robust evolutionary signal.
-2. **Position Evolution Axis (`asr_score` / `asr_path_score`)**: The ancestral state reconstruction (ASR) path score, which is count-aware (i.e. scales up with the number of independent evolutionary transitions/replication events).
+- **Global gene score**: 90th percentile of position-level `CAAS_score` across the gene.
+- **Directional gene scores** (`gene_caas_score_top`/`_bottom`): 90th percentile restricted to positions changing in that direction (or "both").
 
-> [!NOTE]
-> The hypergeometric p-value (`Pvalue`) is deliberately excluded from the core score and acts instead as a significance gate (`gate_sig` / `gate_fdr`).
+### Key output columns
 
-#### B. Gene-Level Scores
-To summarize positional results at the gene level:
-- **Global Gene Score**: Calculated as the **90th percentile** of position-level `CAAS_score` values across all positions in the gene:
-  \[\text{Gene\_CAAS\_Score} = \text{quantile}(\text{CAAS\_score}, 0.90)\]
-- **Directional Gene Scores**: Sliced by the direction of phenotype change:
-  - `gene_caas_score_top`: 90th percentile of positions with top-direction or both-direction changes (`change_side` in `{"top", "both"}`).
-  - `gene_caas_score_bottom`: 90th percentile of positions with bottom-direction or both-direction changes (`change_side` in `{"bottom", "both"}`).
+**`position_scores.tsv`**: `CAAS_score`, `phen_score`, `asr_score`, `Pvalue`,
+`Pvalue_hyp_fdr`, `change_side`, `gate_sig`, `gate_fdr`.
 
----
+**`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `gene_rand_score`
+(Fisher-combined accumulation signal), `accum_significant`, `rer_min_pval`,
+`rer_acceleration`, `fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
 
-### 2. Metric and Column Definitions
+### Downstream slices & enrichment inputs
 
-#### Position-Level Outputs (`position_scores.tsv`)
+- **`gene_lists/slice_*.tsv`** (9 ranked lists = 3 directions `{global,top,bottom}` × 3 significance gates `{all,sig,fdr}`) — the ranked lists FCS/DOMINO consume, each annotated with `is_fade`/`is_rer`/`is_accum` flags.
+- **`fcs_stats.tsv`** — the merged per-gene score table FCS runs ranked enrichment against.
+- **`gene_threshold_enrichment.tsv` / `pos_threshold_enrichment.tsv`** — Fisher's-exact odds-ratio/p-value curves testing whether tighter `CAAS_score` thresholds (top100/50/25/10/5/1) enrich for independent RER/FADE/accumulation significance.
 
-| Column Name | Metric / Concept | Range / Format | Description |
-| :--- | :--- | :--- | :--- |
-| `CAAS_score` | Composite Score | `[0, 1]` | The primary score aggregating boot/ASR evidence across biochemical schemes. |
-| `phen_score` | Phenotype Evolution | `[0, 1]` | Permulation evidence: \(1 - \text{pvalue\_boot}\). |
-| `asr_score` | Position Evolution | `[0, 1]` | Upstream path score combining transition count and MRCA/derived consistency. |
-| `Pvalue` | Hypergeometric | `[0, 1]` | Discovery-stage Fisher's exact p-value (display-only). |
-| `Pvalue_hyp_fdr` | Hypergeometric FDR | `[0, 1]` | BH-adjusted hypergeometric p-value. |
-| `change_side` | Directionality | `top`, `bottom`, `both`, `none` | Direct direction of the change relative to trait values. |
-| `gate_sig` | Significance Gate | Boolean | `TRUE` if `Pvalue` < 0.05. |
-| `gate_fdr` | FDR Gate | Boolean | `TRUE` if `Pvalue_hyp_fdr` < 0.05. |
+### Stress diagnostics (`--scoring_stress true`)
 
-#### Gene-Level Outputs (`gene_scores.tsv`)
-
-| Column Name | Metric / Concept | Range / Format | Description |
-| :--- | :--- | :--- | :--- |
-| `gene_caas_score` | Global Gene Score | `[0, 1]` | 90th percentile of `CAAS_score` across all positions. |
-| `gene_caas_score_top` | Top Gene Score | `[0, 1]` or `NA` | 90th percentile of `CAAS_score` across top-direction positions. |
-| `gene_caas_score_bottom` | Bottom Gene Score | `[0, 1]` or `NA` | 90th percentile of `CAAS_score` across bottom-direction positions. |
-| `gene_rand_score` | Accumulation Score | `[0, +inf)` | Fisher-combined log-likelihood score (\(-\log_{10}(\text{Fisher } p)\)) from accumulation randomizations. |
-| `accum_significant` | Accumulation FDR | Boolean | `TRUE` if BH FDR-adjusted Fisher's combined p-value < 0.05. |
-| `rer_min_pval` | RERConverge Sig | `[0, 1]` | Minimum p-value (permulated or adjusted) from RERConverge continuous association. |
-| `rer_acceleration` | RER direction | `accelerated`, `decelerated`, `neutral` | Phenotypic association direction (based on Rho). |
-| `fade_max_bf_top` | FADE Top | Numeric | Maximum Bayes Factor for selection in the top direction. |
-| `fade_max_bf_bottom` | FADE Bottom | Numeric | Maximum Bayes Factor for selection in the bottom direction. |
-| `fade_significant_top` | FADE Top Sig | Boolean | `TRUE` if `fade_max_bf_top` \(\ge\) 100. |
-| `fade_significant_bottom`| FADE Bottom Sig | Boolean | `TRUE` if `fade_max_bf_bottom` \(\ge\) 100. |
+Leave-one-axis-out scoring variants (`position_score_stress_variants.tsv`),
+rank-stability summaries, LOO-vs-main correlations, top-N% Jaccard overlaps,
+and a PCA over raw score inputs with component loadings — a robustness check
+on the composite formulation, not a scientific output in itself.
 
 ---
 
-### 3. Downstream Slices & Functional Enrichment
+## Configuration reference
 
-The scoring module exports two key formats for downstream analysis:
+Every `params.*` below lives in `conf/*.config`, `includeConfig`-loaded from
+`nextflow.config`. Defaults are the out-of-the-box values; the GUI's tabs
+mirror this same grouping.
 
-#### A. The 9 Ranked Gene Lists (`gene_lists/slice_*.tsv`)
-Used primarily for STRING network PPI enrichment. The slices are defined by slicing across **3 Directions** and **3 Significance Gates**:
+### `conf/common.config` — core paths, reporting, workflow toggles
 
-1. **Directions**:
-   - `global`: All positions.
-   - `top`: Top-direction positions (characterised by selection in FADE and positive RER correlation).
-   - `bottom`: Bottom-direction positions (characterised by selection in FADE and negative RER correlation).
-2. **Significance Gates**:
-   - `all`: Unfiltered (full ranked list).
-   - `sig`: Nominal significance gate (\(P < 0.05\)).
-   - `fdr`: FDR significance gate (\(\text{BH } FDR < 0.05\)).
+| Parameter | Default | Purpose |
+|---|---|---|
+| `help` | `false` | show help and exit |
+| `outdir` | `$baseDir/out` | output directory |
+| `workDir` | `$baseDir/out/work` | Nextflow work directory |
+| `my_traits` | `""` | traits CSV path |
+| `alignment` | `""` | alignment directory or `.tar.gz` |
+| `ali_format` | `"fasta"` | alignment file format |
+| `tree` | `""` | species tree (newick) |
+| `traitname` | `""` | trait column to analyze |
+| `tax_id` | `""` | taxid-to-species mapping |
+| `ali_sp_names` | `""` | precomputed alignment species list (speeds up startup) |
+| `gene_ensembl_file` | `""` | gene Ensembl ID-to-name mapping |
+| `reporting` | `true` | generate HTML reports (implied by `prune_data`) |
+| `sp_colname` | `"species"` | species column in traits CSV |
+| `clade_name` | `"primates"` | clade focus for reports |
+| `taxon_of_interest` | `"family"` | taxonomic level of interest |
+| `seed` | `"1998"` | RNG seed |
+| `toy_mode` / `toy_n` | `false` / `200` | random alignment subsampling for smoke tests |
+| `n_trait` / `c_trait` | `""` | sample-size / case-count columns for population-style traits |
+| `secondary_trait` / `branch_trait` | `""` | extra trait column / branch-coloring trait |
+| `contrast_selection` | `false` | run contrast-selection workflow |
+| `discrete_method` | `"quintile"` | quartile/quintile/decile/median_sd/parameterized |
+| `top_quantile` / `bottom_quantile` | `"0.90"` / `"0.10"` | thresholds for `parameterized` method |
+| `contrast_max_iter` | `"3"` | max contrast-selection iterations |
+| `min_contrasts` | `3` | minimum foreground contrast pairs required |
+| `prune_data` / `prune_list` / `prune_list_secondary` | `""` | data-pruning flag + species lists (requires `--reporting`) |
+| `ct_disambiguation` / `ct_postproc` / `ct_accumulation` | `true` | sequential CT stage toggles |
+| `scoring` / `vep` / `enrichment` / `posenrich` / `string` / `fade` | `false`/`true`/`false`/`true`/`false`/`false` | module toggles |
+| `rer_tool` | `""` | `build_trait,build_trees,build_matrix,continuous` |
 
-Each slice output contains the following annotations:
-- `is_fade`: `TRUE` if the gene exhibits strong selection (Bayes Factor \(\ge\) 100) in the matching direction.
-- `is_rer`: `TRUE` if the gene is significantly associated with the trait in RERConverge with the matching direction (Rho directionality).
-- `is_accum`: `TRUE` if the gene is significantly enriched in CAAS burden.
+Also outside `params{}`: `cleanup=false`; `timeline`/`report`/`trace`/`dag`
+all enabled under `${outdir}/pipeline_info/`; and the `tower{}` block used for
+Seqera Platform monitoring (see [Running on Seqera Platform](#running-on-seqera-platform)).
 
-#### B. FCS stats (`fcs_stats.tsv`)
-Used by clusterProfiler FCS (Functional Classification Scores) to run Wilcoxon-AUC enrichment. Contains global, top, and bottom scores along with boolean flags for FADE, RERConverge, and accumulation significance.
+### `conf/ct.config` — CAAStools discovery / resample / bootstrap
 
-#### C. Threshold Enrichment Curves (`gene_threshold_enrichment.tsv` & `pos_threshold_enrichment.tsv`)
-Tests whether progressively tighter thresholds on the composite `CAAS_score` enrich for independent signals (RER significance, FADE significance, or Accumulation significance). For each threshold decile (`top100`, `top50`, `top25`, `top10`, `top5`, `top1`):
-- Fisher's Exact Test is run to calculate the **Odds Ratio** and **p-value** of overlap between the thresholded set and the independent tool signals.
-- This helps evaluate whether the composite score is successfully prioritizing biologically validated, highly-selected genes.
+| Parameter | Default | Purpose |
+|---|---|---|
+| `ct_tool` | `"discovery,resample,bootstrap"` | which CT stages to run |
+| `publish_intermediates` | `false` | publish intermediate files for debugging |
+| `ct_discovery_batch_size` / `ct_bootstrap_batch_size` | `25` / `10` | genes grouped per task |
+| `caas_config` | `""` | CAAStools config file |
+| `patterns` | `"1,2,3"` | CT patterns to search |
+| `min_divergent_fraction` | `0.5` | min fraction of pairs that must diverge |
+| `max_bg_gaps_fraction` / `max_fg_gaps_fraction` / `max_gaps_fraction` | `0.0` | gap tolerance (background/foreground/either) |
+| `max_bg_miss_fraction` / `max_fg_miss_fraction` / `max_miss_fraction` | `0.0` | missing-data tolerance |
+| `miss_pair` | `true` | enforce paired missingness |
+| `caap_mode` | `true` | use CAAP (properties-based) grouping |
+| `fgsize` / `bgsize` | `"6"` / `"6"` | foreground/background size (random strategy) |
+| `perm_strategy` | `"BM"` | `FGBG` or `BM` |
+| `traitvalues` | `""` | trait values file (BM strategy) |
+| `perms_cycles` | `"100"` | resampling cycles |
+| `chunk_size` | `"500"` | max resampled groups per output file |
+| `include_b0` | `false` | include main hypothesis in analysis |
+| `caas_full_perms` | `1000` | full-pool permulations for the CAAS FCS null (decoupled from `perms_cycles`) |
+| `discovery_from` / `resample_from` / `bootstrap_from` | `""` | resume from a prior stage's output |
+| `alpha_threshold` | `0.05` | alpha for hypergeometric/permutation tests |
+| `export_groups` / `export_perm_discovery` | `false` | debug-only exports |
+
+### `conf/ct_accumulation.config`
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `accumulation_caas_input` | `""` | standalone `filtered_discovery.tsv` |
+| `accumulation_background_input` | `""` | standalone background file/dir |
+| `accumulation_entropy_dir` | `""` | Valdar entropy files |
+| `accumulation_n_randomizations` | `1000000` | permutation count |
+| `accumulation_randomization_type` | `"cons_decile"` | `naive` or `cons_decile` |
+| `accumulation_seed` | `1998` | RNG seed |
+| `accumulation_fdr` | `0.1` | BH FDR threshold |
+| `accumulation_pval_threshold` / `accumulation_report_pval_threshold` | `0.05` | significance thresholds |
+
+### `conf/ct_disambiguation.config`
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `signification_from` | `""` | standalone signification-output input |
+| `ct_disambig_asr_mode` | `"precomputed"` | ASR source mode |
+| `ct_disambig_asr_model` | `"lg"` | ASR substitution model |
+| `ct_disambig_asr_cache_dir` | `""` | ASR cache directory |
+| `ct_disambig_convergence_mode` | `"focal_clade"` | `focal_clade` (per-pair MRCA) vs `mrca` (all-pairs MRCA) |
+| `ct_disambig_posterior_threshold` | `0.1` | canonical posterior cutoff (shared with post-proc row filtering and ASR robustness) |
+| `ct_disambig_max_tasks_per_child` | `50` | worker-recycling cap (memory hygiene) |
+| `asr_robustness` | `true` | run the ASR robustness diagnostic |
+
+### `conf/ct_postproc.config`
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `disambiguation_input` / `disambiguation_dir` | `""` | standalone `caas_convergence_master.csv` or dir/`.tar.gz` |
+| `background_input` | `""` | background file(s)/dir |
+| `caas_postproc_mode` | `"filter"` | `exploratory` (sweep) or `filter` (single run) |
+| `minlen_values` / `maxcaas_values` | `"2,3,4,10"` / `"0.6,0.7,0.8"` | exploratory sweep grids |
+| `filter_minlen` / `filter_maxcaas` | `3` / `0.7` | filter-mode thresholds |
+| `gene_filter_mode` | `"dubious"` | `none`/`extreme`/`dubious`/`both` |
+| `extreme_threshold` | `0.99` | top-quantile cutoff |
+| `iqr_multiplier` | `3.0` | IQR multiplier for "dubious" genes |
+| `postproc_top` / `postproc_bottom` | `""` | gene lists feeding FADE/RER `gene_set` mode |
+
+### `conf/enrichment.config`
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `accumulation_enrichment_gene_lists_input` | `""` | standalone input |
+| `gmt_dir` | `""` | GMT gene-set directory |
+| `string_species` | `9606` | NCBI taxon ID |
+| `string_required_score` | `400` | STRING confidence gate for functional labelling |
+| `string_db_dir` | `""` | STRINGdb local cache dir |
+| `domino_network_score_thr` | `700` | STRING combined_score cutoff for `network.sif` edges |
+| `domino_slice_thr` | `0.3` | DOMINO slice-relevance gate |
+| `domino_module_thr` | `0.05` | DOMINO Bonferroni-style module significance gate |
+| `fcs_min_genes` | `5` | min genes per set |
+| `fcs_fdr` | `0.15` | BH-adjusted p threshold |
+| `fcs_pperm_thr` | `0.025` | permulation p threshold (phylogenetic non-independence filter) |
+| `fcs_top_n` | `20` | leading-edge genes shown |
+| `rer_permulation_enrichment` / `caas_permulation_enrichment` | `true` | enable RER / CAAS permulation nulls |
+| `posenrich_min_size` / `posenrich_max_size` | `5` / `0` (no cap) | position-set size bounds |
+| `posenrich_padj_thr` | `0.15` | BH-adjusted p threshold |
+| `posenrich_fold_thr` | `1.5` | fold-enrichment/depletion threshold |
+| `posenrich_background_file` | `""` | optional static background override |
+| `domain_variability_file`, `ucr_positions_file`, `fubar_sites_file`, `egg_members_file`, `egg_annotations_file` | `""` | position-level annotation sources |
+
+> Note: STRING is functional-enrichment/ID-mapping only — network clustering
+> and module significance are handled by **DOMINO**, not STRINGdb's own
+> walktrap+PPI-enrichment (a deliberate swap; see `subworkflows/ENRICHMENT/domino.nf`).
+
+### `conf/fade.config` — HyPhy FADE
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `selection_prep_batch_size` | `500` | genes per shared alignment-prep task |
+| `fade_batch_size` | `200` | genes per FADE task |
+| `fade_mode` | `"all"` | `all` genes vs `gene_set` (CAAS-hit genes only) |
+| `fade_postproc_top` / `fade_postproc_bottom` | `""` | standalone gene-set mode inputs |
+| `fade_bf_threshold` | `100` | Bayes Factor cutoff for a directional selection call |
+| `fade_model` | `"LG"` | substitution model (consistent with ASR) |
+| `fade_method` | `"Variational-Bayes"` | fastest; alternatives `Collapsed-Gibbs`, `Metropolis-Hastings` |
+| `fade_grid` | `20` | posterior grid resolution |
+| `fade_chains` / `fade_chain_length` / `fade_burn_in` / `fade_samples` | `5` / `2000000` / `1000000` / `1000` | MCMC-only settings |
+| `fade_concentration` | `0.5` | Dirichlet concentration prior |
+| `fade_min_genes_for_heatmap` | `2` | min genes with ≥1 sig. site to render heatmaps |
+| `fade_universe_file` | `""` | FADE's own tested-gene universe for FCS (else falls back to cleaned background) |
+| `fade_json_dir_top` / `fade_json_dir_bottom` | `""` | precomputed `*.FADE.json` dirs to render report without a live run |
+
+### `conf/rerconverge.config`
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `gene_trees` | `$baseDir/Data/Gene_trees/geneTrees.txt` | gene tree file |
+| `trait_out` / `trees_out` / `matrix_out` | — | intermediate outputs of build_trait/build_trees/build_matrix |
+| `rer_minsp` | `"15"` | min species per gene |
+| `winsorizeRER` / `winsorizeTrait` | `"3"` / `"3"` | winsorization thresholds |
+| `rer_perm_batches` / `rer_perms_per_batch` | `10` / `100` | Brownian-motion null batches (0 = skip) |
+| `rer_trait_mode` | `"auto"` | `auto`/`continuous`/`binary` |
+| `rer_binary_clade` | `"all"` | `all`/`ancestral`/`terminal` branch marking |
+| `rer_min_pos` | `2` | min independent foreground lineages per gene |
+| `rer_pval_threshold` | `0.05` | report significance threshold |
+| `rer_pval_column` | `"p.perm"` | which p-value column drives significance |
+| `rer_top_n_labels` | `20` | labeled points in report plots |
+| `rer_transform` | `"ha_logit"` | `auto`/`ha_logit`/`logit`/`arcsin`/`log10`/`none` |
+| `rer_perms_file` / `rer_continuous_file` | `""` | standalone inputs |
+| `rer_universe_file` | `""` | RER's own tested-gene universe for FCS |
+| `rer_gene_scores` | `""` | optional SCORING `fcs_stats.tsv` for cross-module flag annotation |
+
+### `conf/scoring.config`
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `scoring_string` | `true` | run downstream DOMINO/STRING module analysis |
+| `scoring_compare_fdr` / `scoring_compare_top_n` | `0.15` / `20` | Comparison-report thresholds |
+| `scoring_stress` / `scoring_stress_top_n` / `scoring_stress_rank_metric` | `true` / `25` / `"spearman"` | stress-test controls |
+| `scoring_position_top_pct` / `scoring_gene_top_pct` | `0.10` / `0.10` | top-N% for gene-list extraction |
+| `scoring_window_size_bp` | `1000000` | genomic window size for overlap reporting |
+| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_vep_primateai`, `scoring_vep_cosmic`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_perms_file` | `""` | standalone fallback inputs |
+
+### `conf/vep.config`
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| `vep_caas_input` | `""` | standalone CAAS input |
+| `vep_map_dir` | `""` | per-gene MAP files directory (required when `--vep`) |
+| `vep_primateai_db` | `""` | PrimateAI-3D pathogenicity DB |
+| `cosmic_db` | `""` | COSMIC DB path |
 
 ---
 
-### 4. Stress Tests and Diagnostics (`--stress true`)
+## Resource allocation
 
-To evaluate the mathematical robustness of the composite score, setting `--stress true` outputs several diagnostic files:
-- **`position_score_stress_variants.tsv`**: Computes leave-one-axis-out (LOO) scoring variants, such as dropping the permutation axis (`CAAS_no_significance`) or dropping the ASR axis (`CAAS_no_asr`).
-- **`position_score_stress_summary.tsv`**: Reports the standard deviation of ranks across variants to identify positions with unstable scoring.
-- **`position_score_stress_correlations.tsv`**: Measures Pearson/Spearman correlations between LOO variants and the main `CAAS_score`.
-- **`position_score_stress_top_overlap.tsv`**: Computes Jaccard overlaps and smaller-set overlaps for the top-N% (10%, 5%, 1%, and top-25) positions across the variants.
-- **`position_score_stress_latent_loadings.tsv`**: Computes a PCA over the raw inputs (variability, pattern, and ASR deciles) and outputs component loadings and proportion of variance explained.
-
----
-
----
-
-## Key options by module
-
-### Global/common
-
-- `--outdir`
-- `--my_traits`, `--traitname`, `--tree`
-- `--reporting`, `--contrast_selection`
-- `--secondary_trait`, `--branch_trait`, `--n_trait`, `--c_trait`
-
-### CT (`--ct_tool`)
-
-- `discovery|resample|bootstrap` (comma-separated)
-- `--alignment`, `--caas_config`, `--traitvalues`, `--cycles`, `--chunk_size`
-- batching: `--ct_discovery_batch_size`, `--ct_bootstrap_batch_size`
-- Thresholds: `--maxbggaps`, `--maxfggaps`, `--maxgaps`, `--maxbgmiss`, `--maxfgmiss`, `--maxmiss`, `--max_conserved`
-- CAAP mode: `--caap_mode`
-
-For cluster runs, PhyloPhere can batch multiple genes into a single Nextflow task for `discovery` and `bootstrap` to reduce scheduler overhead. The `slurm` profile enables non-1 defaults for these parameters, while local runs keep them at `1`.
-
-Batch execution uses staged TSV manifests plus reusable runner scripts instead of expanding one shell command per gene directly into the Nextflow task body. This keeps Seqera task script payloads bounded even for large batches.
-
-### Signification
-
-- `--discovery_input`, `--bootstrap_input`, `--background_input`
-- significance threshold options from config (`alpha_threshold`, export flags)
-
-### Disambiguation
-
-- `--ct_disambig_caas_metadata`
-- `--ct_disambig_asr_mode (precomputed|compute)`
-- `--ct_disambig_asr_cache_dir`
-- `--ct_disambig_posterior_threshold`
-
-### Post-processing
-
-- `--caas_postproc_mode (filter|exploratory)`
-- `--filter_minlen`, `--filter_maxcaas`
-- exploratory sweep: `--minlen_values`, `--maxcaas_values`
-- gene filtering controls (`gene_filter_mode`, thresholds)
-
-### Enrichment / STRING
-
-- `--enrichment`, `--string`
-- `--enrichment_gene_lists_input`, `--enrichment_background_input`
-- ORA, STRING, and FCS FDR/top thresholds and DB parameters in `conf/enrichment.config`
-
-### CT accumulation
-
-- `--ct_accumulation`
-- `--accumulation_caas_input`
-- `--accumulation_background_input`
-- `--accumulation_n_randomizations`
-- `--accumulation_randomization_type (naive|matched)`
-
-### FADE (Selection)
-
-- `--fade`
-- `--selection_prep_only` (runs only preparation scripts without full FADE)
-- parameters in `conf/fade.config`
-
-### VEP (Pathogenicity)
-
-- `--vep`
-- `--vep_caas_input`
-- `--vep_primateai_db` (defaults to PrimateAI-3D database path)
-
-### SCORING (Composite)
-
-- `--scoring`
-- inputs and thresholds in `conf/scoring.config`
-
-### RERConverge
-
-- `--rer_tool "build_trait,build_tree,build_matrix,continuous"`
-- inputs in `conf/rerconverge.config`
-
-For detailed help:
-
-```bash
-nextflow run main.nf --help
-nextflow run main.nf --ct_tool discovery --help
-nextflow run main.nf --ct_tool resample --help
-nextflow run main.nf --ct_tool bootstrap --help
-```
-
----
-
-## Runners included in this repository
-
-### `run_phenotypes.sh`
-
-Main multi-phenotype runner with two explicit scenario classes:
-
-1. **Pruned-secondary (cancer project)**
-   - paired primary/secondary phenotype runs
-   - pruning lists
-   - CI-aware contrast selection (`n_trait`/`c_trait`)
-2. **Simple (diet/ethanol project, María Sánchez Bermúdez)**
-   - no pruning
-   - no `n_trait`/`c_trait`
-   - serial trait runs
-
-Also includes **toy vs full** toggles (`IS_TOY`) controlling cycles/randomizations.
-
-### `run_scripts/test_stress.sh`
-
-Comprehensive stress matrix:
-- integrated runs
-- standalone runs per module
-- ASR mode variants (compute/precomputed)
-- optional cleanup/input staging
-
-### `run_scripts/test_integrated_pipeline.sh`
-
-Integrated end-to-end validation in both:
-- `filter` mode
-- `exploratory` mode
-
----
-
-## Monitoring with Nextflow Tower (important)
-
-If you enable Tower, **you must provide your own API token**.
-
-In `conf/common.config`:
+`conf/resources.config` sets per-process CPU/memory/time via Nextflow
+`withLabel` blocks (generic labels like `process_low`, `process_medium`,
+`process_reporting`) and `withName` blocks (process-specific overrides, e.g.
+`RER_TREES`, `FADE_BATCHED`). Root-level caps — `params.max_memory` (64 GB),
+`params.max_cpus` (64), `params.max_time` (5 days) — clamp any request that
+exceeds them via `check_max()` in `nextflow.config`; the `slurm` profile
+raises these to 128 GB / 128 cpus / 960 h, the `local` profile lowers them to
+12 GB / 8 cpus / 5 days.
 
 ```groovy
-tower {
-    accessToken = "INSERTCOIN"  // replace with your own token
-    enabled = false
+withLabel:process_low {
+    cpus = { 1 }; memory = { 500.MB }; time = { 2.h }
+}
+withName: 'FADE_BATCHED' {
+    cpus = { 8 }; memory = { 16.GB * task.attempt }; time = { 12.h * task.attempt }
 }
 ```
 
-To use Tower safely:
+Many blocks scale memory/time with `task.attempt`, paired with
+`errorStrategy = 'retry'`, so a process that OOMs or times out retries with
+more headroom automatically.
 
-1. Replace `INSERTCOIN` with your token.
-2. Set `enabled = true` or run with `-with-tower` as desired.
+> **Gotcha:** a `withName` block always overrides a `withLabel` block for the
+> same process, even if the label would grant more resources — Nextflow picks
+> the more specific match silently. When tuning resources for your own
+> cluster, always check both blocks for a process you're changing; a stale
+> `withName` override is the classic cause of an inexplicable OOM despite a
+> generous label.
 
-Do not commit private production tokens.
+To adapt this for your own hardware: raise/lower `max_memory`/`max_cpus`/`max_time`
+(globally or per-profile), and edit the `withName` blocks for the heaviest
+processes (`RER_TREES`, `FADE_RUN`/`FADE_BATCHED`, `BOOTSTRAP_BATCHED`,
+`DISCOVERY_BATCHED`) to match your queue's real ceilings.
 
 ---
 
-## Installation / execution notes
+## Desktop GUI
 
-- Recommended: run with Nextflow + container profile (`local`, `singularity`, `apptainer`, `slurm` as configured).
-- Main config files:
-  - `nextflow.config`
-  - `conf/common.config`
-  - `conf/ct.config`
-  - `conf/ct_postproc.config`
-  - `conf/ct_disambiguation.config`
-  - `conf/enrichment.config`
-  - `conf/ct_accumulation.config`
-  - `conf/rerconverge.config`
+`gui/` is a PySide6 (Qt6) desktop application — not a pipeline executor, but a
+**config-and-launch-script generator**. It exposes essentially every
+parameter above across 12 tabs and renders two Jinja2-templated shell
+scripts (a local multi-phenotype loop and a Slurm array job) that you run
+yourself; it never invokes Nextflow or submits jobs directly.
+
+**Install & launch:**
+
+```bash
+./environment/install_env.sh    # one-time; env already pins PySide6 + Jinja2
+./run_gui.sh                    # launches the GUI
+```
+
+`run_gui.sh` auto-detects `micromamba`/`mamba`/`conda` and patches `PATH`
+before running `<tool> run -n phylophere python -m gui.main`, so it also
+works from a desktop launcher with a bare session `PATH`. Optionally install
+a menu entry with `./install_gui_launcher.sh` (writes a `.desktop` file so
+PhyloPhere shows up in your app menu — safe to re-run after moving the repo).
+
+**Tabs:** General (core paths, remote host), Runtime (execution mode, SBATCH
+params, the phenotype catalogue table), CAAS, Disambiguation, Accumulation,
+RERconverge, FADE, VEP, Scoring, Enrichment, **Precomputed Run** (every
+standalone/resume fallback path, grouped by which module's absence it
+substitutes for), Resources (mirrors `nextflow.config`'s `local`/`slurm`
+caps), and About. Each tab maps directly onto the config groups documented
+above.
+
+**Remote/cluster support:** the GUI never SSHes to *run* anything, but when
+`General > remote_host` is set it can validate that every filled path exists
+on that host (`Ctrl+Shift+V`) and browse remote directories over SSH instead
+of a local file dialog — both assume passwordless key auth is already set up.
+Actual job submission is still: copy the generated script to the cluster and
+run it (`sbatch SBATCH_run_phenotypes.sh`, or `bash run_phenotypes_local.sh`
+for local sequential runs).
+
+Projects (all field values) save/reopen as human-diffable JSON via
+File > Save/Open (`Ctrl+S`/`Ctrl+O`). Generate scripts with `Ctrl+G` — this
+opens a preview window you can inspect before saving.
+
+Seqera Platform: the Runtime tab's `use_tower` toggle only flips
+`tower.enabled`; the access token itself is deliberately never stored in the
+JSON project file — it's written straight to the repo's gitignored `token.tk`
+(owner-only file permissions), which `conf/common.config`'s `tower{}` block
+reads automatically at run time.
+
+---
+
+## Running on Seqera Platform
+
+PhyloPhere ships **monitoring** integration out of the box, but no bundled
+cloud compute profile (there is no Docker/AWS Batch/Google profile — only
+`local`, `singularity`, `apptainer`, and the `slurm` cluster profile in
+`nextflow.config`). Two independent things to know:
+
+### 1. Monitoring an existing run with Seqera Platform (Tower)
+
+`conf/common.config` defines:
+
+```groovy
+tower {
+    accessToken = new File("$baseDir/token.tk").exists()
+                    ? new File("$baseDir/token.tk").text.trim()
+                    : (System.getenv('TOWER_ACCESS_TOKEN') ?: "")
+    enabled = new File("$baseDir/token.tk").exists() || System.getenv('TOWER_ACCESS_TOKEN')
+}
+```
+
+This auto-enables Seqera Platform run monitoring the moment *either* condition
+is true — no code change needed:
+
+```bash
+# Option A: drop a token file (gitignored, owner-only permissions)
+echo "your-seqera-access-token" > token.tk
+chmod 600 token.tk
+
+# Option B: environment variable, no file at all
+export TOWER_ACCESS_TOKEN="your-seqera-access-token"
+```
+
+Then run normally (`nextflow run main.nf ...`) — the run will appear in your
+Seqera Platform workspace with live task-level progress, resource usage, and
+the resulting trace/timeline/report files. **Never commit a real token** —
+`token.tk` is already in `.gitignore`; treat it like any other credential.
+
+### 2. Launching PhyloPhere itself from Seqera Platform
+
+Because PhyloPhere is a standard Nextflow pipeline with a public git remote,
+you can add it as a **Pipeline** in Seqera Platform (Launchpad → Add
+pipeline → point at `https://github.com/nozerorma/PhyloPhere`, main script
+`main.nf`) and launch it against any **Compute Environment** you've already
+configured there (AWS Batch, Google Batch, Kubernetes, or an HPC/Slurm head
+node via Seqera's agent). Two things to set up before your first cloud
+launch, since this repo doesn't provide them:
+
+- **A compute-environment-appropriate `-profile`** — the bundled profiles
+  assume a local filesystem or a specific Slurm cluster (`queue='haswell'`);
+  for AWS/Google Batch you'll want your own profile (or Seqera's compute
+  environment config) supplying a `process.executor` and a container engine
+  Nextflow can pull from that environment (the `singularity`/`apptainer`
+  profiles currently point at a hardcoded local SIF path and cache dir —
+  update those paths, or switch `process.container` to a Docker/OCI image
+  Wave/Fusion can resolve).
+- **A params file** for the run (`-params-file params.yaml`), covering at
+  minimum `--my_traits`, `--traitname`, `--tree`, `--alignment`,
+  `--caas_config`, `--outdir`, and whichever module toggles you need — Seqera
+  Platform's launch form will auto-populate a form from `nextflow_schema.json`
+  if one exists, otherwise from this README's [Configuration
+  reference](#configuration-reference).
+
+Seqera Platform monitoring (part 1, above) works identically whether the run
+itself was started from your terminal or from the Launchpad — the `tower{}`
+block picks up the token either way.
+
+---
+
+## Contributions & acknowledgements
+
+PhyloPhere builds directly on [CAAStools](https://github.com/linudz/caastools)
+and [RERconverge](https://github.com/nclark-lab/RERconverge). See
+[docs/CITATIONS.md](docs/CITATIONS.md) for full citations (Nextflow,
+CAAStools, R, RERconverge, and the packaging/containerization tools used).
+
+**Contributors:**
+- Fabio Barteri (fabio.barteri@upf.edu) — CAAStools original author; general inquiries
+- Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
+- Xavier Farré (xfarrer@igtp.cat)
+- David de Juan (david.juan@upf.edu)
+- Miguel Ramón (miguel.ramon@upf.edu) — Nextflow pipeline (PhyloPhere)
+
+Issues and pull requests are welcome at
+https://github.com/nozerorma/PhyloPhere — please include the module(s)
+involved and, where relevant, the `workflow_map.html` from your run.
 
 ---
 
 ## License
 
-See [LICENSE](LICENSE).
+GNU General Public License v3.0 — see [LICENSE](LICENSE).
+
+---
 
 ## Additional docs
 
 - [Citations](docs/CITATIONS.md)
 - [CAAP mode notes](docs/CAAP_MODE.md)
 - [Multi-phenotype methods](docs/METHODS_multi_phenotype.md)
+- [ASR path score design](docs/ASR_PATH_SCORE.md)
+- [CAAS permulation-excess null](docs/CAAS_PERMULATION_EXCESS.md)
+- [CAAS permulation runtime notes](docs/CAAS_PERMULATION_RUNTIME.md)
+- [Enrichment report orchestration](docs/ENRICHMENT_REPORT_ORCHESTRATION.md)

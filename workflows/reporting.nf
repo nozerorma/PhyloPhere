@@ -34,7 +34,7 @@ include { DATASET_PRUNE } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_data_p
 include { NAME_CURATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_name_curation"
 
 workflow REPORTING {
-    assert params.my_traits : "Reporting workflow requires --traitfile."
+    assert params.my_traits : "Reporting workflow requires --my_traits."
     assert params.tree : "Reporting workflow requires --tree."
 
     def trait_file = file(params.my_traits)

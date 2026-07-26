@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QScrollArea,
     QTabWidget,
     QToolBar,
     QVBoxLayout,
@@ -24,7 +25,7 @@ from PySide6.QtWidgets import (
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui import project_io
-from gui.generation.render import render_sbatch, render_single
+from gui.generation.render import render_batch, render_single
 from gui.generation.validate import path_entries, validate, validate_paths
 from gui.models.about import AboutInfo
 from gui.remote import RemoteCheckError, check_remote_paths
@@ -36,11 +37,22 @@ from gui.widgets.tabs.disambiguation_tab import DisambiguationTab
 from gui.widgets.tabs.enrichment_tab import EnrichmentTab
 from gui.widgets.tabs.fade_tab import FadeTab
 from gui.widgets.tabs.general_tab import GeneralTab
+from gui.widgets.tabs.precomputed_tab import PrecomputedTab
 from gui.widgets.tabs.rerconverge_tab import RerConvergeTab
 from gui.widgets.tabs.resources_tab import ResourcesTab
 from gui.widgets.tabs.runtime_tab import RuntimeTab
 from gui.widgets.tabs.scoring_tab import ScoringTab
 from gui.widgets.tabs.vep_tab import VepTab
+
+
+def _scrollable(widget: QWidget) -> QScrollArea:
+    """Wrap a tab's content in a QScrollArea — several module tabs now carry 20+
+    fields (see the ct.config/enrichment.config coverage pass) and shouldn't force
+    the main window to grow to fit the tallest one."""
+    area = QScrollArea()
+    area.setWidgetResizable(True)
+    area.setWidget(widget)
+    return area
 
 
 class MainWindow(QMainWindow):
@@ -77,8 +89,13 @@ class MainWindow(QMainWindow):
         self.vep_tab = VepTab(modules.vep)
         self.scoring_tab = ScoringTab(modules.scoring)
         self.enrichment_tab = EnrichmentTab(modules.enrichment)
+        self.precomputed_tab = PrecomputedTab(self.project.precomputed)
         self.resources_tab = ResourcesTab(self.project.resources)
 
+        # (inner widget, title) — the inner widget is what emits `changed` and what
+        # holds the actual model reference; each gets wrapped in a QScrollArea only
+        # for insertion into the QTabWidget (several module tabs now carry 20+
+        # fields and shouldn't force the window to grow to fit the tallest one).
         self._project_tabs = [
             (self.general_tab, "General"),
             (self.runtime_tab, "Runtime"),
@@ -90,10 +107,14 @@ class MainWindow(QMainWindow):
             (self.vep_tab, "VEP"),
             (self.scoring_tab, "Scoring"),
             (self.enrichment_tab, "Enrichment"),
+            (self.precomputed_tab, "Precomputed Run"),
             (self.resources_tab, "Resources"),
         ]
+        self._project_tab_wrappers = []
         for index, (tab, title) in enumerate(self._project_tabs):
-            self.tabs.insertTab(index, tab, title)
+            wrapper = _scrollable(tab)
+            self._project_tab_wrappers.append(wrapper)
+            self.tabs.insertTab(index, wrapper, title)
             tab.changed.connect(self._mark_dirty)
 
     # ── Menu ─────────────────────────────────────────────────────────────────
@@ -154,8 +175,8 @@ class MainWindow(QMainWindow):
     def _rebind_tabs_to_project(self) -> None:
         """After New/Open replaces self.project, rebuild every tab bound to it."""
         index = self.tabs.currentIndex()
-        for tab, _title in self._project_tabs:
-            self.tabs.removeTab(self.tabs.indexOf(tab))
+        for wrapper in self._project_tab_wrappers:
+            self.tabs.removeTab(self.tabs.indexOf(wrapper))
         self._build_project_tabs()
         self.tabs.setCurrentIndex(min(index, self.tabs.count() - 1))
 
@@ -213,9 +234,11 @@ class MainWindow(QMainWindow):
             )
             return
 
-        sbatch_text = render_sbatch(self.project)
+        batch_text = render_batch(self.project)
         single_text = render_single(self.project)
-        self._show_preview(sbatch_text, single_text)
+        is_local = self.project.runtime.runtime_type == "local"
+        batch_filename = "run_phenotypes_local.sh" if is_local else "SBATCH_run_phenotypes.sh"
+        self._show_preview(batch_text, batch_filename, single_text)
 
     def validate_paths_dialog(self) -> None:
         """Checks every filled-in path field and reports which ones don't exist.
@@ -248,14 +271,14 @@ class MainWindow(QMainWindow):
             + "\n".join(f"• {p}" for p in problems),
         )
 
-    def _show_preview(self, sbatch_text: str, single_text: str) -> None:
+    def _show_preview(self, batch_text: str, batch_filename: str, single_text: str) -> None:
         preview = QWidget()  # standalone top-level window, not a child of MainWindow
         preview.setWindowTitle("Generated scripts preview")
         layout = QVBoxLayout(preview)
 
         preview_tabs = QTabWidget(preview)
         for title, text in [
-            ("SBATCH_run_phenotypes.sh", sbatch_text),
+            (batch_filename, batch_text),
             ("run_phenotype_single.sh", single_text),
         ]:
             editor = QPlainTextEdit()

@@ -16,12 +16,42 @@ attribute name would otherwise only surface by clicking around in a real window)
 from conftest import golden_project
 from gui.models.about import AboutInfo
 from gui.models.general import GeneralConfig
+from gui.models.modules import CaasConfig, VepConfig
 from gui.models.resources import ResourcesConfig
 from gui.models.runtime import PhenotypeRow, RuntimeConfig
 from gui.widgets.tabs.about_tab import AboutTab
+from gui.widgets.tabs.caas_tab import CaasTab
 from gui.widgets.tabs.general_tab import GeneralTab
 from gui.widgets.tabs.resources_tab import ResourcesTab
 from gui.widgets.tabs.runtime_tab import RuntimeTab
+from gui.widgets.tabs.vep_tab import VepTab
+
+
+def test_advanced_section_collapsed_by_default_and_toggles(qapp):
+    tab = CaasTab(CaasConfig())
+    assert tab.advanced_section is not None
+    assert tab.advanced_section._content.isHidden()
+
+    tab.advanced_section.toggle_button.setChecked(True)
+    assert not tab.advanced_section._content.isHidden()
+
+    tab.advanced_section.toggle_button.setChecked(False)
+    assert tab.advanced_section._content.isHidden()
+
+
+def test_advanced_section_absent_when_spec_has_no_advanced_fields(qapp):
+    tab = VepTab(VepConfig())
+    assert tab.advanced_section is None
+
+
+def test_advanced_section_disabled_alongside_essential_group(qapp):
+    tab = CaasTab(CaasConfig())
+    tab.enable_toggle.setChecked(False)
+    assert not tab.essential_group.isEnabled()
+    assert not tab.advanced_section.isEnabled()
+
+    tab.enable_toggle.setChecked(True)
+    assert tab.advanced_section.isEnabled()
 
 
 def test_general_tab_binds_fields(qapp):
@@ -99,6 +129,7 @@ def test_main_window_assembles_tabs_and_generates_scripts(qapp, tmp_path):
         "VEP",
         "Scoring",
         "Enrichment",
+        "Precomputed Run",
         "Resources",
         "About",
     ]
@@ -226,6 +257,40 @@ def test_general_tab_remote_host_updates_config_and_shared_context(qapp):
 
     assert config.remote_host == "user@cluster.example.edu"
     assert remote_context.get_remote_host() == "user@cluster.example.edu"
+
+
+def test_general_tab_remote_root_dir_updates_config_and_shared_context(qapp):
+    from gui.models.general import GeneralConfig
+    from gui.widgets.common import remote_context
+    from gui.widgets.tabs.general_tab import GeneralTab
+
+    config = GeneralConfig()
+    tab = GeneralTab(config)
+
+    tab.remote_root_dir.setText("/scratch/mramon")
+
+    assert config.remote_root_dir == "/scratch/mramon"
+    assert remote_context.get_remote_root_dir() == "/scratch/mramon"
+    remote_context.set_remote_root_dir("")  # don't leak into other tests
+
+
+def test_path_field_browse_remote_falls_back_to_configured_root_dir(qapp):
+    from unittest.mock import patch
+
+    from gui.widgets.common import remote_context
+    from gui.widgets.common.path_field import PathField
+
+    remote_context.set_remote_host("user@cluster")
+    remote_context.set_remote_root_dir("/scratch/mramon")
+    try:
+        field = PathField(mode="dir")  # empty field
+        with patch("gui.widgets.common.remote_browse_dialog.RemoteBrowseDialog") as mock_dialog_cls:
+            mock_dialog_cls.return_value.exec.return_value = 0  # Rejected, don't need a real dialog
+            field._browse()
+        assert mock_dialog_cls.call_args.args[2] == "/scratch/mramon"
+    finally:
+        remote_context.set_remote_host("")
+        remote_context.set_remote_root_dir("")
 
 
 def test_validate_paths_dialog_uses_remote_check_when_host_configured(qapp):
