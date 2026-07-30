@@ -526,11 +526,11 @@ has moved into the Position-level FCS report below.
 .trait <- if (is.null(params$traitname) || !nzchar(params$traitname)) "unknown_trait" else params$traitname
 .companions <- tibble::tribble(
   ~Report,                              ~File,
-  "FCS — CAAS (this scoring run)",      sprintf("13.FCS_scoring_%s.html",    .trait),
-  "FCS — RERconverge (+ p.perm)",       sprintf("13.FCS_rer_%s.html",        .trait),
-  "Position-level FCS (+ Position Characterisation)", sprintf("16.Position_enrichment_report_%s.html", .trait),
-  "AMI (DOMINO active modules)",        sprintf("15.AMI_analysis_%s.html", .trait),
-  "COMPARE — cross-module overview",    sprintf("12.Comparison_report_%s.html",.trait)
+  "FCS — CAAS (this scoring run)",      sprintf("12.FCS_scoring_%s.html",    .trait),
+  "FCS — RERconverge (+ p.perm)",       sprintf("12.FCS_rer_%s.html",        .trait),
+  "AMI (DOMINO active modules)",        sprintf("13.AMI_analysis_%s.html", .trait),
+  "Position-level FCS (+ Position Characterisation)", sprintf("14.Position_enrichment_report_%s.html", .trait),
+  "COMPARE — cross-module overview",    sprintf("15.Comparison_report_%s.html",.trait)
 )
 cat(paste0("- [", .companions$Report, "](", .companions$File, ")", collapse = "\n"))
 cat("\n")
@@ -1512,6 +1512,153 @@ DT::datatable(
   )
 )
 ```
+
+---
+
+## Geometric convergence vs score thresholds {.tabset}
+
+`convergence_type` (from CT_DISAMBIGUATION) is a **geometric** label — read from tip
+states alone, independent of any score. This section asks: as the CAAS / ASR /
+phenotype score threshold tightens, does the geometric convergence-type composition
+of the retained positions shift? Same six cumulative thresholds SCORING uses
+everywhere else (`top100` = every scored position, tightening to `top1` = the top
+percentile by that score), cut three ways — `CAAS_score`, `asr_path_score`,
+`phen_score` — plus a combined heatmap against all five ASR path-score axes.
+
+Moved here from `8.Characterization_report.Rmd`'s "geometric labels vs probabilistic
+disambiguation" section: CT_POSTPROC runs *before* these score thresholds exist, so
+it never had access to them. This report has both — the thresholds, and (via
+`filtered_discovery_file`, the same file CT_POSTPROC itself produces and consumes)
+the `convergence_type` labels — joined here by (Gene, Position).
+
+```{r convtype-setup, include=FALSE}
+.conv_thr <- tibble::tibble(
+  label = factor(c("top100", "top50", "top25", "top10", "top5", "top1"),
+                 levels = c("top100", "top50", "top25", "top10", "top5", "top1")),
+  q     = c(0.00, 0.50, 0.75, 0.90, 0.95, 0.99)
+)
+.axis5_cols <- c("core", "independence", "mrca_diversity", "derived_agreement", "conservation_gate")
+
+has_convtype <- .file_ok(params$filtered_discovery_file)
+if (has_convtype) {
+  .disc_df <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
+    dplyr::select(Gene, Position, convergence_type, any_of(.axis5_cols), any_of("asr_path_score"))
+  .conv_df <- pos_df %>%
+    dplyr::select(Gene, Position, CAAS_score, phen_score, any_of("change_side")) %>%
+    dplyr::inner_join(.disc_df, by = c("Gene", "Position"))
+  has_convtype <- nrow(.conv_df) > 0 && "convergence_type" %in% names(.conv_df)
+}
+
+# Composition of convergence_type among positions retained at each cumulative
+# threshold (top100 >= top50 >= ... >= top1 by construction -- thresholds are
+# computed and applied independently per row of .conv_thr, not as mutually
+# exclusive bins, so this never double-counts across threshold levels).
+.threshold_composition <- function(df, score_col, dir_label) {
+  sub <- df %>% dplyr::filter(!is.na(.data[[score_col]]))
+  if (dir_label != "Global") {
+    side <- tolower(dir_label)
+    sub <- sub %>% dplyr::filter(change_side %in% c(side, "both"))
+  }
+  if (nrow(sub) == 0) return(NULL)
+  purrr::map_dfr(seq_len(nrow(.conv_thr)), function(i) {
+    thr <- stats::quantile(sub[[score_col]], .conv_thr$q[i], na.rm = TRUE)
+    sel <- sub %>% dplyr::filter(.data[[score_col]] >= thr)
+    if (nrow(sel) == 0) return(tibble::tibble())
+    sel %>% dplyr::count(convergence_type) %>%
+      dplyr::mutate(threshold = .conv_thr$label[i], n_total = nrow(sel), pct = round(100 * n / n_total, 2))
+  })
+}
+
+.plot_threshold_composition <- function(comp, title) {
+  if (is.null(comp) || nrow(comp) == 0) return(NULL)
+  ggplot(comp, aes(x = threshold, y = pct, fill = convergence_type)) +
+    geom_col(position = "stack") +
+    scale_fill_viridis_d(option = "turbo", name = "convergence_type") +
+    labs(title = title, x = "score threshold (cumulative, tightening →)",
+         y = "% of positions retained at that threshold") +
+    theme_minimal(base_size = 12)
+}
+
+.render_convtype_score_tab <- function(score_col, score_title) {
+  for (dr in c("Global", "Top", "Bottom")) {
+    cat(sprintf("\n#### %s\n\n", dr))
+    if (!has_convtype) { cat("_No `filtered_discovery_file` / `convergence_type` available._\n\n"); next }
+    if (!score_col %in% names(.conv_df)) { cat(sprintf("_`%s` not available in this run._\n\n", score_col)); next }
+    comp <- .threshold_composition(.conv_df, score_col, dr)
+    p <- .plot_threshold_composition(comp, sprintf("%s thresholds vs convergence_type (%s)", score_title, dr))
+    if (is.null(p)) { cat("_No data for this direction._\n\n"); next }
+    print(p)
+    cat("\n\n")
+    print(knitr::kable(
+      comp %>% dplyr::arrange(threshold, dplyr::desc(pct)) %>%
+        dplyr::select(threshold, convergence_type, n, n_total, `%` = pct),
+      caption = sprintf("%s threshold composition — %s", score_title, dr)
+    ))
+    cat("\n\n")
+  }
+}
+```
+
+### CAAS score {.tabset}
+
+```{r convtype-caas, results='asis', fig.height=5}
+.render_convtype_score_tab("CAAS_score", "CAAS score")
+```
+
+### ASR path score {.tabset}
+
+```{r convtype-asr, results='asis', fig.height=5}
+.render_convtype_score_tab("asr_path_score", "ASR path score")
+```
+
+### Phenotype score {.tabset}
+
+```{r convtype-phen, results='asis', fig.height=5}
+.render_convtype_score_tab("phen_score", "Phenotype score")
+```
+
+### Axes + scores heatmap {.tabset}
+
+Mean value of each of the five ASR path-score axes, plus `CAAS_score` /
+`asr_path_score` / `phen_score` themselves, per `convergence_type` — shows which
+axis (or score) drives or sinks each geometric class, e.g. parallel labels should
+score low on `mrca_diversity`, divergent ones low on `derived_agreement`.
+
+```{r convtype-heatmap, results='asis', fig.height=6}
+for (dr in c("Global", "Top", "Bottom")) {
+  cat(sprintf("\n#### %s\n\n", dr))
+  if (!has_convtype) { cat("_No `filtered_discovery_file` / `convergence_type` available._\n\n"); next }
+  sub <- .conv_df
+  if (dr != "Global") sub <- sub %>% dplyr::filter(change_side %in% c(tolower(dr), "both"))
+  value_cols <- intersect(c(.axis5_cols, "CAAS_score", "asr_path_score", "phen_score"), names(sub))
+  if (length(value_cols) == 0 || nrow(sub) == 0) { cat("_No data for this direction._\n\n"); next }
+
+  axis_long <- sub %>%
+    dplyr::select(convergence_type, dplyr::all_of(value_cols)) %>%
+    tidyr::pivot_longer(dplyr::all_of(value_cols), names_to = "axis", values_to = "value") %>%
+    dplyr::group_by(convergence_type, axis) %>%
+    dplyr::summarise(mean_value = mean(value, na.rm = TRUE), .groups = "drop")
+
+  p <- ggplot(axis_long, aes(x = axis, y = convergence_type, fill = mean_value)) +
+    geom_tile(colour = "grey90") +
+    geom_text(aes(label = sprintf("%.2f", mean_value)), size = 3) +
+    scale_fill_viridis_c(option = "C", name = "mean") +
+    theme_minimal(base_size = 12) +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+    labs(title = sprintf("Axes + scores by convergence_type (%s)", dr), x = NULL, y = NULL)
+  print(p)
+  cat("\n\n")
+
+  print(knitr::kable(
+    axis_long %>% dplyr::mutate(mean_value = round(mean_value, 3)) %>%
+      tidyr::pivot_wider(names_from = axis, values_from = mean_value),
+    caption = sprintf("Mean axis/score value by convergence_type — %s", dr)
+  ))
+  cat("\n\n")
+}
+```
+
+---
 
 ```{r fade-pos-char-header, results='asis'}
 if (has_fade_pos) cat(r"(

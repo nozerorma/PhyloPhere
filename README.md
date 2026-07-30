@@ -120,7 +120,7 @@ Execution order as wired in `main.nf`:
 On completion, `workflow.onComplete` (in `main.nf`, backed by `lib/WorkflowMap.groovy`) writes `workflow_map.html` into `--outdir` — a visual summary of which stages ran and links to every HTML report/output directory produced.
 
 Reports are numbered chronologically across the whole run (`0.Data_pruning` …
-`16.Position_enrichment_report`) so the numeric prefix always tells you where
+`15.Comparison_report`) so the numeric prefix always tells you where
 a report sits in the pipeline, regardless of which modules were enabled.
 
 ---
@@ -294,7 +294,7 @@ mirror this same grouping.
 | `min_contrasts` | `3` | minimum foreground contrast pairs required |
 | `prune_data` / `prune_list` / `prune_list_secondary` | `""` | data-pruning flag + species lists (requires `--reporting`) |
 | `ct_disambiguation` / `ct_postproc` / `ct_accumulation` | `true` | sequential CT stage toggles |
-| `scoring` / `vep` / `enrichment` / `posenrich` / `string` / `fade` | `false`/`true`/`false`/`true`/`false`/`false` | module toggles |
+| `scoring` / `vep` / `enrichment` / `posenrich` / `ami` / `fade` | `false`/`true`/`false`/`true`/`false`/`false` | module toggles |
 | `rer_tool` | `""` | `build_trait,build_trees,build_matrix,continuous` |
 
 Also outside `params{}`: `cleanup=false`; `timeline`/`report`/`trace`/`dag`

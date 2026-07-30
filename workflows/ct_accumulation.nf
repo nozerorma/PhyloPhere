@@ -19,7 +19,6 @@
 include { CT_ACCUMULATION_AGGREGATE; CT_ACCUMULATION_RANDOMIZE } from "${baseDir}/subworkflows/CT_ACCUMULATION/ctacc_run"
 include { ACCUMULATION_REPORT } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_report"
 include { ACCUMULATION_GENE_LISTS } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_gene_lists.nf"
-include { TOOL_STRING_MODULE_REPORT as ACCUMULATION_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 
 workflow CT_ACCUMULATION {
     take:
@@ -150,29 +149,16 @@ workflow CT_ACCUMULATION {
             .collect()
         ACCUMULATION_REPORT(all_rand_csvs, agg_csvs)
 
-        // ── Gene list extraction + FCS/STRING per direction ──────────────────
-        if (params.enrichment || params.string) {
-            def lists_out = ACCUMULATION_GENE_LISTS(randomize_out.direction, randomize_out.results)
-
-            // Accumulation no longer runs its own FCS ranking — its FCS "significance"
-            // was inflated by the missing permulation null (no compensating check against
-            // the RER/CAAS-tuned FDR threshold). It now contributes as a cross-module
-            // corroboration flag on CAAS's own leading edge instead.
-
-            if (params.string) {
-                def str_subpath_ch = lists_out.direction.map { dir -> "accumulation/${dir}" }
-                def str_bg_ch      = lists_out.gene_lists.map { files -> files.find { it.name == 'background.txt' } }
-                def str_interest_ch = lists_out.gene_lists.map { files -> files.findAll { it.name != 'background.txt' } }
-                def str_label_ch   = lists_out.direction.map { dir -> "15.STRING_accumulation_${dir}_${params.traitname ?: 'trait'}" }
-
-                ACCUMULATION_STRING_REPORT(
-                    str_subpath_ch,
-                    str_bg_ch,
-                    str_interest_ch,
-                    str_label_ch
-                )
-            }
-        }
+        // ── Gene list extraction (always automatic) ───────────────────────
+        // Accumulation no longer runs its own FCS ranking — its FCS "significance"
+        // was inflated by the missing permulation null (no compensating check against
+        // the RER/CAAS-tuned FDR threshold). It now contributes as a cross-module
+        // corroboration flag on CAAS's own leading edge instead. Its standalone AMI
+        // report (DOMINO active modules) was removed too — never produced usable
+        // output and Accumulation isn't part of the unified 13.AMI_analysis.Rmd
+        // (only CAAS/FADE/RER are). There's no separate --ami flag anymore; gene
+        // lists are simply always computed and published whenever Accumulation runs.
+        ACCUMULATION_GENE_LISTS(randomize_out.direction, randomize_out.results)
 
     emit:
         results      = randomize_out.results

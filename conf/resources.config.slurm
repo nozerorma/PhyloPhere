@@ -1,3 +1,9 @@
+/*
+ * Resource configuration: SLURM preset (Marvin cluster, 128cpu/128GB ceiling)
+ * Generated from conf/resources.config -- edit that file and regenerate presets
+ * (or edit this file directly for a one-off tweak), don't hand-diverge silently.
+ */
+
 
 /*
  * Resource configuration: defaults + process label requirements

@@ -88,17 +88,20 @@ class PrecomputedTab(QWidget):
         self._config = config
         self._widgets: dict[str, PathField] = {}
 
+        self._group_boxes: list[tuple[QGroupBox, QLabel, str, str]] = []
+        self._form_labels: list[tuple[QLabel, str]] = []
+
         outer = QVBoxLayout(self)
 
-        note = QLabel(
+        self.note_label = QLabel(
             "Every global standalone/resume input, in one place. Fill in a section only "
             "if you're skipping that module this run and feeding a prior run's output "
             "downstream instead. Per-phenotype fallbacks (RER/FADE summaries used by "
             "Scoring) stay on the Runtime tab's phenotype table, since they can differ "
             "per phenotype in a batch run."
         )
-        note.setWordWrap(True)
-        outer.addWidget(note)
+        self.note_label.setWordWrap(True)
+        outer.addWidget(self.note_label)
 
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -120,12 +123,16 @@ class PrecomputedTab(QWidget):
         subtitle_label.setStyleSheet("color: #6b6b6b; font-style: italic;")
         layout.addWidget(subtitle_label)
 
+        self._group_boxes.append((box, subtitle_label, title, subtitle))
+
         form = QFormLayout()
-        for name, label, kind in fields:
+        for name, label_text, kind in fields:
             widget = PathField(mode=kind)
             widget.set_text(getattr(self._config, name))
             widget.textChanged.connect(lambda v, n=name: self._set_field(n, v))
-            form.addRow(label, widget)
+            lbl = QLabel(label_text)
+            form.addRow(lbl, widget)
+            self._form_labels.append((lbl, label_text))
             self._widgets[name] = widget
         layout.addLayout(form)
 
@@ -134,3 +141,20 @@ class PrecomputedTab(QWidget):
     def _set_field(self, name: str, value: str) -> None:
         setattr(self._config, name, value)
         self.changed.emit()
+
+    def retranslate(self, lang: str = "en") -> None:
+        from gui.i18n import tr
+        if hasattr(self, "note_label"):
+            self.note_label.setText(tr(
+                "Every global standalone/resume input, in one place. Fill in a section only "
+                "if you're skipping that module this run and feeding a prior run's output "
+                "downstream instead. Per-phenotype fallbacks (RER/FADE summaries used by "
+                "Scoring) stay on the Runtime tab's phenotype table, since they can differ "
+                "per phenotype in a batch run.",
+                lang
+            ))
+        for box, sub_lbl, title, subtitle in getattr(self, "_group_boxes", []):
+            box.setTitle(tr(title, lang))
+            sub_lbl.setText(tr(subtitle, lang))
+        for lbl, orig_text in getattr(self, "_form_labels", []):
+            lbl.setText(tr(orig_text, lang))

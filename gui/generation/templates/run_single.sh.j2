@@ -32,13 +32,46 @@ RUN_DIR="$WORK_BASE/${TRAIT}_nxf_run"
 mkdir -p "$RUN_DIR"
 cd "$RUN_DIR"
 
-RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}"
+if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
+    RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
+    RUN_ACCUMULATION=false
+    RUN_VEP=false
+    RUN_FADE=false
+    RUN_SCORING=false
+elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
+    RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_final"
+else
+    RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}"
+fi
 WORK_DIR="${WORK_BASE}/${TRAIT}${TAG}"
 mkdir -p "${RESULTS_BASE}" "${WORK_DIR}"
+
+{% if resources.process_overrides %}
+# Per-process cpus/memory overrides from the Resources tab's advanced table.
+# Nextflow only reads these from a config file, never from --flags, so this is
+# generated here and loaded last via -c below (last-defined selector wins),
+# overriding conf/resources.config's own per-process defaults where set.
+RESOURCES_OVERRIDE="$WORK_DIR/resources.override.config"
+cat > "$RESOURCES_OVERRIDE" <<'EOF'
+process {
+{% for o in resources.process_overrides %}
+    {{ o.selector_type }}: '{{ o.selector }}' {
+{% if o.cpus %}        cpus   = { {{ o.cpus }} }
+{% endif %}
+{% if o.memory %}        memory = { {{ o.memory }} }
+{% endif %}
+    }
+{% endfor %}
+}
+EOF
+{% endif %}
 
 # --- NEXTFLOW FLAGS ---
 NF_FLAGS=(
     -profile {{ profile }}
+{% if resources.process_overrides %}
+    -c "$RESOURCES_OVERRIDE"
+{% endif %}
 )
 if [ "${RUN_TOWER:-{{ run_defaults.tower }}}" = true ]; then
     NF_FLAGS+=( -with-tower )
@@ -70,11 +103,13 @@ if [ "${TOY_MODE:-{{ run_defaults.toy_mode }}}" = true ]; then
     )
 fi
 
-if [ "${RUN_REPORTING:-{{ run_defaults.reporting }}}" = true ]; then
-    NF_FLAGS+=(
-        --reporting
-    )
-fi
+# conf/common.config defaults reporting/ct_disambiguation/ct_postproc/ct_accumulation/
+# vep/posenrich to `?: true` — omitting a bare --flag when a GUI toggle is off does
+# NOT disable them at the Nextflow level, it just silently falls back to their
+# true default. Every flag with a `?: true` config default is therefore emitted
+# with an explicit true/false value below, unconditionally, rather than only
+# being added when its module is on (see the CT_POSTPROC/VEP incident this fixed).
+NF_FLAGS+=( --reporting "${RUN_REPORTING:-{{ run_defaults.reporting }}}" )
 
 if [ "${RUN_CAAS:-{{ run_defaults.caas }}}" = true ]; then
     NF_FLAGS+=(
@@ -120,9 +155,15 @@ else
     [ -n "${BOOTSTRAP_FROM:-}" ] && NF_FLAGS+=(--bootstrap_from "$BOOTSTRAP_FROM")
 fi
 
+# ct_disambiguation and ct_postproc both default true in conf/common.config, so both
+# are always passed explicitly (see the note above) regardless of which branch below
+# runs — ct_postproc's own toggle (disambig.ct_postproc) is independent of whether
+# Disambiguation itself is enabled, so it's emitted unconditionally here too.
+NF_FLAGS+=( --ct_disambiguation "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" )
+NF_FLAGS+=( --ct_postproc "${RUN_CT_POSTPROC:-{{ run_defaults.ct_postproc }}}" )
+
 if [ "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" = true ]; then
     NF_FLAGS+=(
-        --ct_disambiguation
         --ct_disambig_asr_mode "$ASR_MODE"
         --ct_disambig_asr_model "${ASR_MODEL:-lg}"
         --ct_disambig_asr_cache_dir "$ASR_CACHE_DIR"
@@ -133,7 +174,6 @@ if [ "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" = true ]; then
     )
     if [ "${RUN_CT_POSTPROC:-{{ run_defaults.ct_postproc }}}" = true ]; then
         NF_FLAGS+=(
-            --ct_postproc
             --caas_postproc_mode "$POSTPROC_MODE"
             --filter_minlen "$POSTPROC_MINLEN"
             --filter_maxcaas "$POSTPROC_MAXCAAS"
@@ -143,20 +183,32 @@ if [ "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" = true ]; then
             --extreme_threshold "${POSTPROC_EXTREME_THRESHOLD:-0.99}"
             --iqr_multiplier "${POSTPROC_IQR_MULTIPLIER:-3.0}"
         )
+        # ct_postproc.nf's characterization report step always runs when --ct_postproc
+        # is on (its gate is `if (true)`, unconditional — see workflows/ct_postproc.nf)
+        # and asserts params.gene_ensembl_file regardless of gene_filter_mode. This
+        # can't be left gated behind the "if RUN_SCORING" block below: exploratory
+        # mode forces RUN_SCORING=false above, so without this line gene_ensembl_file
+        # never reaches Nextflow even when it's set on the Scoring tab, and the run
+        # fails with "Error: --gene_ensembl_file is required for characterization
+        # reports" (or "...for gene filtering" if gene_filter_mode != 'none' too).
+        NF_FLAGS+=( --gene_ensembl_file "$GENE_ENSEMBL_FILE" )
     fi
 {% if modules.disambiguation.extra_flags %}
     NF_FLAGS+=({{ modules.disambiguation.extra_flags }})
 {% endif %}
 else
+    # Standalone mode: when skipping upstream CT/Disambiguation, pass precomputed inputs
     [ -n "${SIGNIFICATION_FROM:-}" ] && NF_FLAGS+=(--signification_from "$SIGNIFICATION_FROM")
     [ -n "${DISAMBIGUATION_INPUT:-}" ] && NF_FLAGS+=(--disambiguation_input "$DISAMBIGUATION_INPUT")
     [ -n "${DISAMBIGUATION_DIR:-}" ] && NF_FLAGS+=(--disambiguation_dir "$DISAMBIGUATION_DIR")
     [ -n "${BACKGROUND_INPUT:-}" ] && NF_FLAGS+=(--background_input "$BACKGROUND_INPUT")
 fi
 
+# ct_accumulation also defaults true in conf/common.config — see the note above.
+NF_FLAGS+=( --ct_accumulation "${RUN_ACCUMULATION:-{{ run_defaults.accumulation }}}" )
+
 if [ "${RUN_ACCUMULATION:-{{ run_defaults.accumulation }}}" = true ]; then
     NF_FLAGS+=(
-        --ct_accumulation
         --accumulation_n_randomizations "$N_RANDOMIZATIONS"
         --accumulation_randomization_type "${ACCUMULATION_RANDOMIZATION_TYPE:-cons_decile}"
         --accumulation_seed "${ACCUMULATION_SEED:-1998}"
@@ -262,9 +314,11 @@ else
 fi
 
 # VEP Flags
+# vep also defaults true in conf/common.config — see the note above.
+NF_FLAGS+=( --vep "${RUN_VEP:-{{ run_defaults.vep }}}" )
+
 if [ "${RUN_VEP:-{{ run_defaults.vep }}}" = true ]; then
     NF_FLAGS+=(
-        --vep
         --vep_primateai_db "${VEP_PRIMATEAI_DB}"
         --vep_map_dir "${MAP_DIR}"
         --cosmic_db "${COSMIC_DB:-}"
@@ -281,14 +335,6 @@ if [ "${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}" = true ]; then
     NF_FLAGS+=(
         --enrichment
         --gmt_dir "${GMT_DIR}"
-        --enrichment_organism "${ENRICHMENT_ORGANISM:-hsapiens}"
-        --enrichment_min_num "${ENRICHMENT_MIN_NUM:-5}"
-        --enrichment_max_num "${ENRICHMENT_MAX_NUM:-500}"
-        --enrichment_fdr "${ENRICHMENT_FDR:-0.15}"
-        --enrichment_top_thr "${ENRICHMENT_TOP_THR:-15}"
-        --enrichment_report_num "${ENRICHMENT_REPORT_NUM:-20}"
-        --enrichment_overlap_top_terms "${ENRICHMENT_OVERLAP_TOP_TERMS:-50}"
-        --enrichment_compare_metric "${ENRICHMENT_COMPARE_METRIC:-overlap}"
         --fcs_min_genes "${FCS_MIN_GENES:-5}"
         --fcs_fdr "${FCS_FDR:-0.15}"
         --fcs_pperm_thr "${FCS_PPERM_THR:-0.025}"
@@ -296,8 +342,6 @@ if [ "${RUN_ENRICHMENT:-{{ run_defaults.enrichment }}}" = true ]; then
         --rer_permulation_enrichment {{ run_defaults.rer_permulation_enrichment }}
         --string_db_dir "${STRING_DB_DIR:-}"
         --string_species "${STRING_SPECIES:-9606}"
-        --string_required_score "${STRING_REQUIRED_SCORE:-400}"
-        --string {{ run_defaults.string }}
         --scoring_ami {{ run_defaults.scoring_ami }}
         --scoring_string {{ run_defaults.scoring_string }}
         --domino_network_score_thr "${DOMINO_NETWORK_SCORE_THR:-700}"
@@ -314,9 +358,11 @@ else
 fi
 
 # POSENRICH (position-wise enrichment) flags
+# posenrich also defaults true in conf/common.config — see the note above.
+NF_FLAGS+=( --posenrich "${RUN_POSENRICH:-{{ run_defaults.posenrich }}}" )
+
 if [ "${RUN_POSENRICH:-{{ run_defaults.posenrich }}}" = true ]; then
     NF_FLAGS+=(
-        --posenrich
         --egg_members_file "${EGG_MEMBERS_FILE}"
         --egg_annotations_file "${EGG_ANNOTATIONS_FILE}"
         --cosmic_db "${COSMIC_DB}"
@@ -338,6 +384,7 @@ fi
 
 # Precomputed FADE/RER summaries for scoring
 [ -n "${SCORING_RER_INPUT:-}" ] && NF_FLAGS+=(--scoring_rer_input "$SCORING_RER_INPUT")
+[ -n "${SCORING_RER_PERMS_INPUT:-}" ] && NF_FLAGS+=(--rer_perms_file "$SCORING_RER_PERMS_INPUT")
 [ -n "${SCORING_FADE_SUMMARY_TOP:-}" ] && NF_FLAGS+=(--scoring_fade_summary_top "$SCORING_FADE_SUMMARY_TOP")
 [ -n "${SCORING_FADE_SUMMARY_BOTTOM:-}" ] && NF_FLAGS+=(--scoring_fade_summary_bottom "$SCORING_FADE_SUMMARY_BOTTOM")
 [ -n "${SCORING_FADE_SITE_TOP:-}" ] && NF_FLAGS+=(--scoring_fade_site_top "$SCORING_FADE_SITE_TOP")

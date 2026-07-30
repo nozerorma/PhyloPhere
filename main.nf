@@ -66,6 +66,7 @@ include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {FADE_REPORT as FADE_REPORT_PRECOMP_TOP; FADE_REPORT as FADE_REPORT_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_report.nf'
+include {FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_gene_lists.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
@@ -122,6 +123,10 @@ workflow {
         def ran_any = false
         def reporting_results = null
         def contrast_out = null
+        // Populated by the precomputed-FADE-input block below (json_dir -> summary/site
+        // TSVs) so SCORING can reuse them without a separate --scoring_fade_* path.
+        def fade_precomp_top_out = null
+        def fade_precomp_bot_out = null
 
         if (params.reporting && !params.contrast_selection) {
             reporting_results = REPORTING()
@@ -333,9 +338,13 @@ workflow {
         // Precomputed-FADE-input path: render 6.FADE_report_{top,bottom}.html
         // directly from prior *.FADE.json results when --fade itself doesn't
         // run this invocation (mirrors rer_continuous_file's role for RER,
-        // just below). SCORING already has its own independent precomputed
-        // fallback for the gene-level summary (scoring_fade_summary_top/bottom)
-        // — this only fills the individual-report gap those params leave open.
+        // just below). FADE_REPORT already emits summary_tsv/site_tsv as a
+        // side effect of rendering (optional, same process SCORING would use
+        // if --fade ran live) — captured here into fade_precomp_{top,bot}_out
+        // so the SCORING block further down can wire them in directly instead
+        // of requiring a separately-supplied --scoring_fade_summary_*/--scoring_fade_site_*
+        // TSV. Those manual params remain as a fallback inside scoring.nf for
+        // the case where the caller already has the TSV but not the raw JSONs.
         if (!params.fade && (params.fade_json_dir_top || params.fade_json_dir_bottom)) {
             def precomp_top_jsons = params.fade_json_dir_top
                 ? Channel.fromPath("${params.fade_json_dir_top}/*.FADE.json").collect().ifEmpty([])
@@ -343,8 +352,8 @@ workflow {
             def precomp_bottom_jsons = params.fade_json_dir_bottom
                 ? Channel.fromPath("${params.fade_json_dir_bottom}/*.FADE.json").collect().ifEmpty([])
                 : Channel.value([])
-            FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, file('NO_FG_LIST'))
-            FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, file('NO_FG_LIST'))
+            fade_precomp_top_out = FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, file('NO_FG_LIST'))
+            fade_precomp_bot_out = FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, file('NO_FG_LIST'))
             ran_any = true
         }
 
@@ -373,10 +382,15 @@ workflow {
             // Wire upstream outputs into SCORING. Pass null (not Channel.empty())
             // when a module didn't run so if(channel) guards detect absence correctly.
             def scoring_postproc_ch      = postproc_results ? postproc_results.filtered_discovery : null
-            def scoring_fade_top_ch      = params.fade       ? FADE.out.summary_top               : null
-            def scoring_fade_bot_ch      = params.fade       ? FADE.out.summary_bottom            : null
-            def scoring_fade_site_top_ch = params.fade       ? FADE.out.site_tsv_top              : null
-            def scoring_fade_site_bot_ch = params.fade       ? FADE.out.site_tsv_bottom           : null
+            // Precomputed FADE JSONs (--fade_json_dir_top/_bottom, no --fade this run)
+            // feed the exact same summary_tsv/site_tsv SCORING needs, via
+            // fade_precomp_{top,bot}_out captured above — so a --scoring run against a
+            // prior --fade run's JSON output no longer needs separately pre-built
+            // --scoring_fade_summary_*/--scoring_fade_site_* TSVs.
+            def scoring_fade_top_ch      = params.fade ? FADE.out.summary_top    : fade_precomp_top_out?.summary_tsv
+            def scoring_fade_bot_ch      = params.fade ? FADE.out.summary_bottom : fade_precomp_bot_out?.summary_tsv
+            def scoring_fade_site_top_ch = params.fade ? FADE.out.site_tsv_top   : fade_precomp_top_out?.site_tsv
+            def scoring_fade_site_bot_ch = params.fade ? FADE.out.site_tsv_bottom: fade_precomp_bot_out?.site_tsv
             def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.summary_tsv : null
             def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
@@ -433,9 +447,54 @@ workflow {
                 def gene_lists_ch = params.scoring ? SCORING.out.gene_lists : Channel.empty()
                 def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
+                def position_lists_ch = params.scoring ? SCORING.out.position_lists : Channel.empty()
                 // POSENRICH background = caastools background.output (tested positions);
                 // the engine restricts it to the cleaned_background genes.
                 def posenrich_background_ch = (ct_results && ran_discovery) ? ct_results.background_file : file('NO_FILE')
+
+                // RER's own gene universe + gene lists (significant/accelerating/
+                // decelerating) and FADE's per-direction universe + significant
+                // gene lists -- feed the unified 13.AMI_analysis.Rmd's FADE/RER
+                // sections (see ENRICHMENT workflow). Only populated when the
+                // respective tool actually ran this invocation --
+                // OR (FADE, mirroring rer_continuous_file's precomputed-input
+                // role for RER) when its summary TSV is available from a prior
+                // run via --fade_json_dir_top/_bottom without --fade itself
+                // this invocation: FADE_GENE_LISTS only needs that summary TSV,
+                // so it's re-derived here from fade_precomp_{top,bot}_out the
+                // same way scoring_fade_top_ch/scoring_fade_bot_ch already do
+                // above, rather than requiring a live --fade run just for AMI.
+                def rer_ran  = params.rer_tool || params.rer_continuous_file
+                def rer_gene_lists_bg_ch       = rer_ran    ? RER_MAIN.out.gene_lists_bg       : Channel.empty()
+                def rer_gene_lists_interest_ch = rer_ran    ? RER_MAIN.out.gene_lists_interest : Channel.empty()
+
+                def fade_gene_lists_bg_top_ch
+                def fade_gene_lists_sig_top_ch
+                if (params.fade) {
+                    fade_gene_lists_bg_top_ch  = FADE.out.gene_lists_bg_top
+                    fade_gene_lists_sig_top_ch = FADE.out.gene_lists_sig_top
+                } else if (fade_precomp_top_out) {
+                    def precomp_top_lists = FADE_GENE_LISTS_PRECOMP_TOP(Channel.value('top'), fade_precomp_top_out.summary_tsv)
+                    fade_gene_lists_bg_top_ch  = precomp_top_lists.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
+                    fade_gene_lists_sig_top_ch = precomp_top_lists.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
+                } else {
+                    fade_gene_lists_bg_top_ch  = Channel.empty()
+                    fade_gene_lists_sig_top_ch = Channel.empty()
+                }
+
+                def fade_gene_lists_bg_bottom_ch
+                def fade_gene_lists_sig_bottom_ch
+                if (params.fade) {
+                    fade_gene_lists_bg_bottom_ch  = FADE.out.gene_lists_bg_bottom
+                    fade_gene_lists_sig_bottom_ch = FADE.out.gene_lists_sig_bottom
+                } else if (fade_precomp_bot_out) {
+                    def precomp_bot_lists = FADE_GENE_LISTS_PRECOMP_BOTTOM(Channel.value('bottom'), fade_precomp_bot_out.summary_tsv)
+                    fade_gene_lists_bg_bottom_ch  = precomp_bot_lists.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
+                    fade_gene_lists_sig_bottom_ch = precomp_bot_lists.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
+                } else {
+                    fade_gene_lists_bg_bottom_ch  = Channel.empty()
+                    fade_gene_lists_sig_bottom_ch = Channel.empty()
+                }
 
                 ENRICHMENT(
                     fcs_stats_ch,
@@ -451,11 +510,18 @@ workflow {
                     scoring_caas_pos_pval_ch,
                     scoring_caas_pos_sample_ch,
                     position_scores_ch,
+                    position_lists_ch,
                     posenrich_background_ch,
                     scoring_vep_pai_ch,
                     scoring_vep_cosmic_ch,
                     params.fade ? FADE.out.sites_csv_top    : null,
-                    params.fade ? FADE.out.sites_csv_bottom : null
+                    params.fade ? FADE.out.sites_csv_bottom : null,
+                    rer_gene_lists_bg_ch,
+                    rer_gene_lists_interest_ch,
+                    fade_gene_lists_bg_top_ch,
+                    fade_gene_lists_bg_bottom_ch,
+                    fade_gene_lists_sig_top_ch,
+                    fade_gene_lists_sig_bottom_ch
                 )
             }
         }

@@ -75,12 +75,12 @@ elif command -v mamba >/dev/null 2>&1; then
 elif command -v conda >/dev/null 2>&1; then
     RUN=(conda run -n "$ENV_NAME")
 else
-    notify_failure "none of micromamba, mamba, or conda were found. Set up the environment first with: ./environment/install_env.sh"
+    notify_failure "none of micromamba, mamba, or conda were found. Set up the environment first with: ../environment/install_env.sh"
     exit 1
 fi
 
 if ! "${RUN[@]}" python --version >/dev/null 2>&1; then
-    notify_failure "the '$ENV_NAME' environment was not found. Set it up first with: ./environment/install_env.sh"
+    notify_failure "the '$ENV_NAME' environment was not found. Set it up first with: ../environment/install_env.sh"
     exit 1
 fi
 

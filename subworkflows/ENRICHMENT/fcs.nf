@@ -5,7 +5,7 @@
  * ───────────────────────────────────────────────
  * Rank-based, threshold-free gene-set enrichment via the Wilcoxon-AUC test
  * (RERconverge::fastwilcoxGMTall) over the curated GMTs in subworkflows/ENRICHMENT/dat.
- * Each process renders 13.FCS_general_report.Rmd against a generic
+ * Each process renders 12.FCS_general_report.Rmd against a generic
  * stats TSV (gene + score_<ranking> + flag_<name> columns) and a universe file
  * (cleaned_background, no-signal genes floored to 0).
  *
@@ -39,9 +39,10 @@ process SCORING_FCS_REPORT {
     path fcs_stats
     path universe
     path perms_file
+    path gene_lists
 
     output:
-    path "13.FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "12.FCS_scoring_${params.traitname ?: 'unknown_trait'}.html", emit: report
     path "fcs_results/**",                       emit: fcs_results,      optional: true
     path "fcs_results/fcs_all_results.tsv",      emit: fcs_all_results,  optional: true
     path "fcs_results/fcs_leading_edge.tsv",     emit: fcs_leading_edge, optional: true
@@ -54,9 +55,13 @@ process SCORING_FCS_REPORT {
     def fdr_thr   = params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
+    // SCORING's own published gene_lists/ -- this IS the CAAS report, so
+    // score_top/score_bottom here really are CAAS's gene_caas_score_top_all/
+    // bottom_all (see 12.FCS_general_report.Rmd's gene_lists_dir param doc).
+    def gene_lists_arg = (gene_lists.name =~ /^NO_/) ? 'NULL' : "'${gene_lists}'"
     def render = """
         rmarkdown::render(
-            '13.FCS_general_report.Rmd',
+            '12.FCS_general_report.Rmd',
             params = list(
                 stats_file    = '${fcs_stats}',
                 universe_file = '${universe}',
@@ -67,9 +72,10 @@ process SCORING_FCS_REPORT {
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
-                perms_file    = '${perms_file}'
+                perms_file    = '${perms_file}',
+                gene_lists_dir = ${gene_lists_arg}
             ),
-            output_file = '13.FCS_scoring_${traitname}.html'
+            output_file = '12.FCS_scoring_${traitname}.html'
         )
     """
     if (params.use_singularity || params.use_apptainer) {
@@ -123,7 +129,7 @@ process RER_FCS_REPORT {
     def enrich_flag = (params.rer_permulation_enrichment ?: false)
     def render = """
         rmarkdown::render(
-            '13.FCS_general_report.Rmd',
+            '12.FCS_general_report.Rmd',
             params = list(
                 stats_file    = '${fcs_stats}',
                 universe_file = '${universe}',

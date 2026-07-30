@@ -12,7 +12,7 @@
  * (STRING hard-caps foreground+background at 2000 proteins combined; our
  * cleaned_background is ~10,447). STRING's functional/term enrichment
  * (get_enrichment_local()/get_enrichment()) is untouched and lives entirely in
- * 15.AMI_analysis.Rmd.
+ * 13.AMI_analysis.Rmd.
  *
  * DOMINO_BUILD_NETWORK filters STRING v12.0's raw links file (cached once,
  * unfiltered) to domino_network_score_thr and both-endpoints-in-background.
@@ -35,8 +35,9 @@ process DOMINO_BUILD_NETWORK {
     val  string_db_dir
 
     output:
-    path "network.sif", emit: network_sif
-    path "slices.txt",  emit: slices
+    path "network.sif",              emit: network_sif
+    path "network_edge_scores.tsv",  emit: edge_scores
+    path "slices.txt",               emit: slices
 
     script:
     def db_dir_arg = string_db_dir ? "--string-db-dir ${string_db_dir}" : ""
@@ -114,5 +115,6 @@ workflow DOMINO_MODULES {
 
     emit:
     network_sif = DOMINO_BUILD_NETWORK.out.network_sif
+    edge_scores = DOMINO_BUILD_NETWORK.out.edge_scores
     modules_dir = DOMINO_RUN_MODULES.out.modules_dir
 }

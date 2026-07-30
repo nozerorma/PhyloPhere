@@ -16,7 +16,7 @@
 >    fcs_stats_{rer,fade,accum} emit is absent (empty channel). Confirm.
 > 3. **Duplication — RESOLVED (commit 144fa26).** In-branch RER/FADE/accum FCS reports
 >    are now gated on `!params.scoring`; when SCORING runs it renders the single
->    centralized annotated set. Gene-list extraction (for STRING) still runs in-branch.
+>    centralized annotated set. Gene-list extraction (for AMI) still runs in-branch.
 > 4. **RER p.perm — RESOLVED (commit 144fa26).** RER_MAIN emits `perms`; main.nf threads
 >    it into SCORING (11th arg); scoring.nf renders RER via RER_FCS_REPORT (perms +
 >    annot) so the centralized/COMPARE RER carries p.perm. FADE/accum BH-only (no

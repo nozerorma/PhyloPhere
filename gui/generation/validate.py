@@ -66,10 +66,13 @@ def validate(project: ProjectConfig) -> list[str]:
             require(row.discrete_method, f"Phenotype row {i}: discrete method is required for CLASS 2.")
 
     # --- CAAS ---
+    # caas_config_path is NOT required when CAAS is enabled: this GUI always emits
+    # --contrast_selection alongside --ct_tool (see caas_tab.py's docstring), and
+    # main.nf then always wires CONTRAST_SELECTION()'s own trait/tree output into
+    # CT(...) (main.nf:137-146) — the --caas_config fallback in ct.nf:110-124 is
+    # only reached when --contrast_selection is absent, which never happens here.
     caas = project.modules.caas
-    if caas.enabled:
-        require(caas.caas_config_path, "CAAS: config file is required when CAAS is enabled.")
-    else:
+    if not caas.enabled:
         if not any([pc.discovery_from, pc.resample_from, pc.bootstrap_from]):
             errors.append(
                 "CAAS is disabled but no discovery_from/resample_from/bootstrap_from fallback "
@@ -89,6 +92,18 @@ def validate(project: ProjectConfig) -> list[str]:
             errors.append(
                 "Disambiguation is enabled but CAAS is disabled with no fallback input supplied "
                 "on the Precomputed Run tab."
+            )
+        # ct_postproc's characterization report step always runs when Post-processing
+        # is on (workflows/ct_postproc.nf's own gate is unconditional) and needs
+        # gene_ensembl_file regardless of whether Scoring itself is enabled — checked
+        # here too (not just under Scoring below) since exploratory-sweep runs force
+        # Scoring off but still hit this requirement.
+        if disambig.ct_postproc and not project.modules.scoring.gene_ensembl_file:
+            errors.append(
+                "Disambiguation: Post-processing is enabled, so Scoring's gene-Ensembl "
+                "mapping file is required for its characterization reports (and for gene "
+                "filtering too, unless Gene filter mode is set to 'none') — fill it in on "
+                "the Scoring tab even if Scoring itself is disabled."
             )
     else:
         if not any(
@@ -139,10 +154,13 @@ def validate(project: ProjectConfig) -> list[str]:
     # --- Scoring ---
     scoring = project.modules.scoring
     if scoring.enabled:
-        require(
-            scoring.gene_ensembl_file,
-            "Scoring: gene-Ensembl mapping file is required when Scoring is enabled.",
-        )
+        if not disambig.ct_postproc:
+            # Already reported above (Disambiguation section) when ct_postproc is on,
+            # so this doesn't duplicate that message for the same missing field.
+            require(
+                scoring.gene_ensembl_file,
+                "Scoring: gene-Ensembl mapping file is required when Scoring is enabled.",
+            )
         if not disambig.ct_postproc and not pc.scoring_postproc_input:
             errors.append(
                 "Scoring is enabled but Post-processing is disabled with no "
@@ -167,10 +185,12 @@ def validate(project: ProjectConfig) -> list[str]:
     if enrichment.enabled:
         require(enrichment.gmt_dir, "Enrichment: GMT directory is required when Enrichment is enabled.")
     if enrichment.posenrich_enabled:
+        # cosmic_db is NOT required: workflows/enrichment.nf and subworkflows/VEP/cosmic.nf
+        # both fall back to a NO_FILE sentinel and skip the COSMIC overlap section
+        # gracefully rather than failing when it's absent.
         for field_name, label in [
             ("egg_members_file", "eggNOG members file"),
             ("egg_annotations_file", "eggNOG annotations file"),
-            ("cosmic_db", "COSMIC database"),
             ("domain_variability_file", "domain variability file"),
             ("ucr_positions_file", "UCR positions file"),
             ("fubar_sites_file", "FUBAR sites file"),

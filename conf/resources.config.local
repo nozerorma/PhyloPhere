@@ -1,3 +1,9 @@
+/*
+ * Resource configuration: Local preset (32cpu/64GB workstation)
+ * Generated from conf/resources.config -- edit that file and regenerate presets
+ * (or edit this file directly for a one-off tweak), don't hand-diverge silently.
+ */
+
 
 /*
  * Resource configuration: defaults + process label requirements
@@ -6,7 +12,7 @@
 params {
     // Defaults used when no profile overrides are active
     max_memory = 64.GB
-    max_cpus   = 64
+    max_cpus   = 32
     max_time   = 5.day
 }
 
@@ -112,7 +118,7 @@ process {
         cpus   = { 1 }
         memory = { 16.GB }
         time   = { 72.h * task.attempt }
-        maxForks   = 8
+        maxForks   = 3
     }
     withName: 'DISCOVERY_BATCHED' {
         cpus   = { 4 }

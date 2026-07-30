@@ -86,6 +86,7 @@ process POSENRICH_RUN {
     path pai3d_coverage
     val min_size
     val max_size
+    path position_lists_dir
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -106,6 +107,12 @@ process POSENRICH_RUN {
     // file comment). Every other GMT keeps the full honest background.
     def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
+    // SCORING's own published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv
+    // (scoring_compute.R) is posenrich's SOLE foreground source -- SCORING is a
+    // mandatory upstream dependency, never optional, so this is passed
+    // unconditionally (no NO_FILE-sentinel guard): if it's absent,
+    // posenrich_enrich.py hard-fails with a clear message rather than silently
+    // re-deriving its own ranking.
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_enrich.py \
         --obs-scores ${caas_file} \
@@ -116,6 +123,7 @@ process POSENRICH_RUN {
         ${annot_arg} \
         ${cosmic_cov_arg} \
         ${pai3d_cov_arg} \
+        --position-lists-dir ${position_lists_dir} \
         --min-size ${min_size} \
         --max-size ${max_size} \
         --padj-thr ${params.posenrich_padj_thr} \
@@ -134,6 +142,9 @@ process POSENRICH_REPORT {
     publishDir path: "${params.outdir}/html_reports",
                mode: 'copy', overwrite: true,
                pattern: '*.html'
+    publishDir path: "${params.outdir}/posenrich",
+               mode: 'copy', overwrite: true,
+               pattern: 'posenrich_overall_dotplot.tsv'
 
     input:
     path results
@@ -149,13 +160,26 @@ process POSENRICH_REPORT {
     path genomic_info
     path fade_sites_top
     path fade_sites_bottom
+    // SCORING's published position_lists/ dir -- same channel POSENRICH_RUN
+    // already consumes as its foreground source; reused here so Position
+    // Characterisation's own 10/5/1% membership (test_glob_*/test_top_*/
+    // test_bot_* in 14.Position_enrichment_report.Rmd) reads the identical
+    // published cutoff instead of re-deriving its own quantile().
+    path position_lists
     // SCORING's fcs_stats.tsv (gene + flag_* columns) -- same file POSENRICH_RUN
     // already consumes as --annot-file, reused here for the Overall dotplot's
     // orthogonal-support composite (background flag rates via orthogonal_score.R).
     path fcs_stats
+    // cleaned_background_main.txt -- the SAME universe_file 12.FCS_general_report.Rmd
+    // uses (n_universe = length(universe)), so the Overall dotplot's gene-level
+    // composite background is pinned to the identical universe everywhere it's
+    // computed, not inferred from nrow(fcs_stats.tsv) (a different file that
+    // usually, but isn't guaranteed to, agree in size).
+    path cleaned_background
 
     output:
-    path "16.Position_enrichment_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "14.Position_enrichment_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
+    path "posenrich_overall_dotplot.tsv",       emit: overall_dotplot,       optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
@@ -168,9 +192,11 @@ process POSENRICH_REPORT {
     def fade_sites_top_arg = (fade_sites_top.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_FILE/) ? 'NULL' : "'${fade_sites_bottom}'"
     def fcs_stats_arg = (fcs_stats.name =~ /^NO_FILE/) ? 'NULL' : "'${fcs_stats}'"
+    def universe_arg  = (cleaned_background.name =~ /^NO_FILE/) ? 'NULL' : "'${cleaned_background}'"
+    def position_lists_arg = (position_lists.name =~ /^NO_/) ? 'NULL' : "'${position_lists}'"
     def render = """
         rmarkdown::render(
-            '16.Position_enrichment_report.Rmd',
+            '14.Position_enrichment_report.Rmd',
             params = list(
                 results_file = '${results}',
                 leading_edge_file = '${leading_edge}',
@@ -184,9 +210,11 @@ process POSENRICH_REPORT {
                 genomic_info_file    = ${genomic_info_arg},
                 fade_sites_top_file    = ${fade_sites_top_arg},
                 fade_sites_bottom_file = ${fade_sites_bottom_arg},
-                fcs_stats_file = ${fcs_stats_arg}
+                fcs_stats_file = ${fcs_stats_arg},
+                universe_file  = ${universe_arg},
+                position_lists_dir = ${position_lists_arg}
             ),
-            output_file = '16.Position_enrichment_report_${traitname}.html'
+            output_file = '14.Position_enrichment_report_${traitname}.html'
         )
     """
     if (params.use_singularity || params.use_apptainer) {
@@ -215,6 +243,7 @@ workflow POSENRICH {
     pai3d_db
     cleaned_background
     caas_file
+    position_lists_file     // SCORING's published position_lists/ dir -- mandatory, posenrich's sole foreground source
     background_output
     annot_file
     min_size
@@ -255,7 +284,8 @@ workflow POSENRICH {
         cosmic_coverage_ch,
         pai3d_coverage_ch,
         min_size,
-        max_size
+        max_size,
+        position_lists_file
     )
 
     POSENRICH_REPORT(
@@ -268,11 +298,14 @@ workflow POSENRICH {
         genomic_info_file,
         fade_sites_top_file,
         fade_sites_bottom_file,
-        annot_file
+        position_lists_file,
+        annot_file,
+        cleaned_background
     )
 
     emit:
-    results      = POSENRICH_RUN.out.results
-    leading_edge = POSENRICH_RUN.out.leading_edge
-    report       = POSENRICH_REPORT.out.report
+    results               = POSENRICH_RUN.out.results
+    leading_edge          = POSENRICH_RUN.out.leading_edge
+    report                = POSENRICH_REPORT.out.report
+    overall_dotplot       = POSENRICH_REPORT.out.overall_dotplot
 }

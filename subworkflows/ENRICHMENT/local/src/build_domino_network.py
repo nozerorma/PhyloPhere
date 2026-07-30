@@ -7,7 +7,7 @@
 # network itself has to be built and filtered here, not left to DOMINO.
 #
 # STRING v12.0's raw links file is cached once, unfiltered, exactly like
-# 15.AMI_analysis.Rmd's ensure_string_cache() does for the R/STRINGdb path —
+# 13.AMI_analysis.Rmd's ensure_string_cache() does for the R/STRINGdb path —
 # score_threshold is applied here at use-time so the same cache serves any
 # threshold. Node IDs are mapped ENSP -> gene symbol in a single hop via
 # protein.info.v12.0.txt.gz; do NOT round-trip through Ensembl gene IDs, that
@@ -15,7 +15,13 @@
 #
 # Output is a plain 3-column SIF (geneA\tpp\tgeneB) — this is exactly what
 # DOMINO's own build_network() expects (src/core/network_builder.py reads
-# columns 0 and 2 of a tab-separated file, ignoring column 1).
+# columns 0 and 2 of a tab-separated file, ignoring column 1). combined_score
+# is read only to filter edges here and used to be discarded once an edge
+# passed threshold, leaving 13.AMI_analysis.Rmd's plot_cluster_network() with
+# no score to vary edge width/opacity by (every edge rendered identically
+# thick). Also written to a sidecar network_edge_scores.tsv (gene1, gene2,
+# combined_score) instead — network.sif itself stays untouched/3-column since
+# DOMINO's own tools (slicer, run_domino_modules.py) expect exactly that shape.
 # =============================================================================
 
 import argparse
@@ -89,9 +95,11 @@ def load_background(path):
 
 def build_edges(links_path, id2sym, background, score_threshold):
     """STRING links file: 'protein1 protein2 combined_score', space-separated,
-    each undirected edge listed once per direction — dedup via a sorted-pair set."""
-    seen = set()
-    edges = []
+    each undirected edge listed once per direction — dedup via a sorted-pair
+    dict keyed on the gene pair, keeping the max score seen for that pair
+    (the two directions can carry slightly different values in STRING's
+    links file; max is the conservative/informative choice for display)."""
+    edge_scores = {}
     n_lines = 0
     with gzip.open(links_path, "rt") as f:
         next(f)  # header
@@ -114,13 +122,10 @@ def build_edges(links_path, id2sym, background, score_threshold):
             if s1 not in background or s2 not in background:
                 continue
             key = (s1, s2) if s1 < s2 else (s2, s1)
-            if key in seen:
-                continue
-            seen.add(key)
-            edges.append(key)
-    print(f"[build_domino_network] scanned {n_lines} links, kept {len(edges)} edges "
+            edge_scores[key] = max(score, edge_scores.get(key, 0))
+    print(f"[build_domino_network] scanned {n_lines} links, kept {len(edge_scores)} edges "
           f"(score >= {score_threshold}, both endpoints in background)", file=sys.stderr)
-    return edges
+    return edge_scores
 
 
 def main():
@@ -135,19 +140,26 @@ def main():
     print(f"[build_domino_network] background genes: {len(background)}, "
           f"STRING IDs with a symbol: {len(id2sym)}", file=sys.stderr)
 
-    edges = build_edges(links_path, id2sym, background, args.score_threshold)
-    if len(edges) == 0:
+    edge_scores = build_edges(links_path, id2sym, background, args.score_threshold)
+    if len(edge_scores) == 0:
         raise RuntimeError("no edges survived filtering — check score_threshold and cleaned_background overlap with STRING")
 
-    nodes_covered = {g for pair in edges for g in pair}
+    nodes_covered = {g for pair in edge_scores for g in pair}
     print(f"[build_domino_network] network covers {len(nodes_covered)}/{len(background)} "
           f"background genes ({100 * len(nodes_covered) / len(background):.1f}%)", file=sys.stderr)
 
     sif_path = os.path.join(args.output_dir, "network.sif")
     with open(sif_path, "w") as f:
-        for a, b in edges:
+        for a, b in edge_scores:
             f.write(f"{a}\tpp\t{b}\n")
-    print(f"[build_domino_network] wrote {sif_path} ({len(edges)} edges, {len(nodes_covered)} nodes)", file=sys.stderr)
+    print(f"[build_domino_network] wrote {sif_path} ({len(edge_scores)} edges, {len(nodes_covered)} nodes)", file=sys.stderr)
+
+    scores_path = os.path.join(args.output_dir, "network_edge_scores.tsv")
+    with open(scores_path, "w") as f:
+        f.write("gene1\tgene2\tcombined_score\n")
+        for (a, b), score in edge_scores.items():
+            f.write(f"{a}\t{b}\t{score}\n")
+    print(f"[build_domino_network] wrote {scores_path}", file=sys.stderr)
 
 
 if __name__ == "__main__":

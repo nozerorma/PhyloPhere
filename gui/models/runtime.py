@@ -36,6 +36,8 @@ class PhenotypeRow:
 
     # Optional per-row precomputed-input overrides for Scoring (only emitted if non-empty).
     scoring_rer_input: str = ""
+    scoring_rer_perms_input: str = ""  # --rer_perms_file, per-phenotype (distinct from
+    # PrecomputedConfig.rer_perms_file, the global fallback used when RER itself is off)
     scoring_fade_summary_top: str = ""
     scoring_fade_summary_bottom: str = ""
 

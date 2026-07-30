@@ -60,9 +60,9 @@ class ModuleTabWidget(QWidget):
         self.enable_toggle.toggled.connect(self._on_enable_toggled)
         layout.addWidget(self.enable_toggle)
 
-        blurb_label = QLabel(spec.blurb)
-        blurb_label.setWordWrap(True)
-        layout.addWidget(blurb_label)
+        self.blurb_label = QLabel(spec.blurb)
+        self.blurb_label.setWordWrap(True)
+        layout.addWidget(self.blurb_label)
 
         self.disclaimer_label = QLabel(f"If disabled: {spec.disclaimer}")
         self.disclaimer_label.setWordWrap(True)
@@ -110,6 +110,7 @@ class ModuleTabWidget(QWidget):
         layout.addStretch(1)
 
         self._field_widgets: dict[str, QWidget] = {}
+        self._label_widgets: list[tuple[QLabel, str]] = []
         for f in spec.essential_fields:
             self._add_field(self._essential_form, f)
         for f in spec.advanced_fields:
@@ -125,25 +126,54 @@ class ModuleTabWidget(QWidget):
         current_value = getattr(self._config, f.name)
 
         if f.kind == "bool":
-            widget = QCheckBox()
+            widget = QCheckBox(f.label)
             widget.setChecked(bool(current_value))
             widget.toggled.connect(lambda v, name=f.name: self._set_field(name, v))
+            form.addRow(widget)
+            self._label_widgets.append((widget, f.label))
         elif f.kind == "choice":
             widget = QComboBox()
             widget.addItems(list(f.choices))
             widget.setCurrentText(str(current_value))
             widget.currentTextChanged.connect(lambda v, name=f.name: self._set_field(name, v))
+            label_lbl = QLabel(f.label)
+            form.addRow(label_lbl, widget)
+            self._label_widgets.append((label_lbl, f.label))
         elif f.kind in ("path_file", "path_dir"):
             widget = PathField(mode="file" if f.kind == "path_file" else "dir")
             widget.set_text(str(current_value))
             widget.textChanged.connect(lambda v, name=f.name: self._set_field(name, v))
+            label_lbl = QLabel(f.label)
+            form.addRow(label_lbl, widget)
+            self._label_widgets.append((label_lbl, f.label))
         else:  # "str"
             widget = QLineEdit(str(current_value))
             widget.setPlaceholderText(f.placeholder)
             widget.textChanged.connect(lambda v, name=f.name: self._set_field(name, v))
+            label_lbl = QLabel(f.label)
+            form.addRow(label_lbl, widget)
+            self._label_widgets.append((label_lbl, f.label))
 
-        form.addRow(f.label, widget)
         self._field_widgets[f.name] = widget
+
+    def retranslate(self, lang: str = "en") -> None:
+        from gui.i18n import tr
+        self.enable_toggle.setText(f"{tr('Enable', lang)} {tr(self._spec.title, lang)}")
+        if hasattr(self, "blurb_label") and self.blurb_label:
+            self.blurb_label.setText(tr(self._spec.blurb, lang))
+        if hasattr(self, "disclaimer_label") and self.disclaimer_label:
+            self.disclaimer_label.setText(f"{tr('If disabled', lang)}: {tr(self._spec.disclaimer, lang)}")
+        if hasattr(self, "essential_group") and self.essential_group:
+            self.essential_group.setTitle(tr("Essential fields", lang))
+        if hasattr(self, "advanced_section") and self.advanced_section:
+            self.advanced_section.set_title(f"{tr('Advanced parameters', lang)} ({len(self._spec.advanced_fields)})")
+        if hasattr(self, "fallback_group") and self.fallback_group:
+            self.fallback_group.setTitle(tr("Precomputed input (used when disabled)", lang))
+        for label_widget, orig_text in getattr(self, "_label_widgets", []):
+            if isinstance(label_widget, QCheckBox):
+                label_widget.setText(tr(orig_text, lang))
+            elif isinstance(label_widget, QLabel):
+                label_widget.setText(tr(orig_text, lang))
 
     def _set_field(self, name: str, value) -> None:
         setattr(self._config, name, value)

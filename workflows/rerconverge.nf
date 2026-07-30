@@ -40,7 +40,6 @@ include { RER_CONT }           from "${baseDir}/subworkflows/RERCONVERGE/rer_con
 include { RER_BIN }            from "${baseDir}/subworkflows/RERCONVERGE/rer_bin"
 include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
 include { RER_GENE_LISTS }    from "${baseDir}/subworkflows/RERCONVERGE/rer_gene_lists.nf"
-include { TOOL_STRING_MODULE_REPORT as RER_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 include { RER_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 
 // Main workflow
@@ -77,6 +76,12 @@ workflow RER_MAIN {
         // Populated when 'continuous' or 'binary' tool is run; empty otherwise.
         def rer_report_out = null
         def rer_perms_out  = null
+        // RER's own gene universe (background.txt) + gene lists (significant/
+        // accelerating/decelerating) for the unified 13.AMI_analysis.Rmd RER
+        // section. Always computed automatically whenever RER itself produced
+        // a report; empty otherwise.
+        def rer_gene_lists_bg_out       = null
+        def rer_gene_lists_interest_out = null
 
         def rerToolStr = params.rer_tool ? params.rer_tool.toString().trim() : ""
         if (rerToolStr && rerToolStr != 'false') {
@@ -153,52 +158,57 @@ workflow RER_MAIN {
             }
         }
 
-        // ── Gene list extraction + Enrichment/STRING (gated on --enrichment / --string) ──
-        if (params.enrichment || params.string) {
-            def effective_report = rer_report_out ?: Channel.empty()
-            def effective_perms  = rer_perms_out  ?: (params.rer_perms_file  ? Channel.value(file(params.rer_perms_file))  : Channel.empty())
-            def perms_file_ch    = effective_perms.ifEmpty(file('NO_FILE'))
+        // ── Gene list extraction (always automatic — no --ami flag anymore) ──
+        // Cheap (just an R script producing .txt files), so it always runs
+        // whenever RER itself produced a report; feeds the unified
+        // 13.AMI_analysis.Rmd (ENRICHMENT workflow)'s RER section directly.
+        // Safe to call unconditionally even when RER didn't run this
+        // invocation: RER_GENE_LISTS' input channel is then empty, so
+        // Nextflow never actually executes it.
+        def effective_report = rer_report_out ?: Channel.empty()
+        def effective_perms  = rer_perms_out  ?: (params.rer_perms_file  ? Channel.value(file(params.rer_perms_file))  : Channel.empty())
+        def perms_file_ch    = effective_perms.ifEmpty(file('NO_FILE'))
 
-            // Optional cross-module annotation source (CAAS gates, FADE, accum,
-            // CAAS directional scores) from a scoring gene-scores TSV. Mirrors the
-            // rer_perms_file pattern; NO_FILE when unset → only RER columns appear.
-            def gene_scores_ch = params.rer_gene_scores ? Channel.value(file(params.rer_gene_scores)) : Channel.value(file('NO_FILE'))
-            def rer_lists = RER_GENE_LISTS(effective_report, gene_scores_ch)
+        // Optional cross-module annotation source (CAAS gates, FADE, accum,
+        // CAAS directional scores) from a scoring gene-scores TSV. Mirrors the
+        // rer_perms_file pattern; NO_FILE when unset → only RER columns appear.
+        def gene_scores_ch = params.rer_gene_scores ? Channel.value(file(params.rer_gene_scores)) : Channel.value(file('NO_FILE'))
+        def rer_lists = RER_GENE_LISTS(effective_report, gene_scores_ch)
 
-            // Separate background from gene lists for the FCS/STRING report processes
-            def rer_bg_ch = rer_lists.gene_lists
-                .flatten()
-                .filter { it.name == 'background.txt' }
-                .collect()
-            def rer_interest_ch = rer_lists.gene_lists
-                .flatten()
-                .filter { it.name != 'background.txt' }
-                .collect()
+        // Separate background from gene lists for the FCS/AMI report processes
+        def rer_bg_ch = rer_lists.gene_lists
+            .flatten()
+            .filter { it.name == 'background.txt' }
+            .collect()
+        def rer_interest_ch = rer_lists.gene_lists
+            .flatten()
+            .filter { it.name != 'background.txt' }
+            .collect()
+        rer_gene_lists_bg_out       = rer_bg_ch
+        rer_gene_lists_interest_out = rer_interest_ch
 
-            // Skip when SCORING runs: it renders the annotated, centralized RER FCS
-            // (with p.perm + cross-module flags). Avoids per-tool + centralized duplication.
-            if (params.enrichment && !params.scoring) {
-                RER_FCS_REPORT(
-                    Channel.value('rerconverge'),
-                    rer_lists.fcs_stats,
-                    rer_bg_ch,
-                    Channel.value("13.FCS_rer_${params.traitname}"),
-                    perms_file_ch,
-                    Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
-                )
-            }
-            if (params.string) {
-                RER_STRING_REPORT(
-                    Channel.value('rerconverge'),
-                    rer_bg_ch,
-                    rer_interest_ch,
-                    Channel.value("15.STRING_rer_${params.traitname}")
-                )
-            }
+        // FCS report itself remains opt-in (--enrichment), skipped when SCORING
+        // runs: it renders the annotated, centralized RER FCS (with p.perm +
+        // cross-module flags). Avoids per-tool + centralized duplication.
+        if (params.enrichment && !params.scoring) {
+            RER_FCS_REPORT(
+                Channel.value('rerconverge'),
+                rer_lists.fcs_stats,
+                rer_bg_ch,
+                Channel.value("12.FCS_rer_${params.traitname}"),
+                perms_file_ch,
+                Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
+            )
         }
 
     emit:
         summary_tsv = rer_report_out ?: Channel.empty()
         // Permulation null matrix (corStat RDS) for downstream FCS p.perm in SCORING.
         perms = (rer_perms_out ?: (params.rer_perms_file ? Channel.value(file(params.rer_perms_file)) : Channel.empty()))
+        // RER's own gene universe/background.txt (verified to match the
+        // manually-published universes/rer_background_*.txt exactly on real
+        // cluster data) + its 3 gene lists (significant/accelerating/
+        // decelerating) -- feeds the unified 13.AMI_analysis.Rmd's RER section.
+        gene_lists_bg       = rer_gene_lists_bg_out       ?: Channel.empty()
+        gene_lists_interest = rer_gene_lists_interest_out ?: Channel.empty()
 }

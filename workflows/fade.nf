@@ -31,7 +31,6 @@ include { FADE_REPORT as FADE_REPORT_TOP    } from "${baseDir}/subworkflows/FADE
 include { FADE_REPORT as FADE_REPORT_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_report.nf"
 include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_gene_lists.nf"
 include { FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_json_to_csv.nf"
-include { TOOL_STRING_MODULE_REPORT as FADE_STRING_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/tool_enrichment.nf"
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -210,32 +209,32 @@ workflow FADE {
         fade_report_bottom = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons, fg_bottom_ch)
 
         // ── Position-level site CSV (always runs — posenrich's FADE evidence
-        // layer, independent of --enrichment/--string) ───────────────────────
+        // layer, independent of --enrichment) ──────────────────────────────
         def fade_sites_top    = FADE_JSON_TO_CSV_TOP(Channel.value('top'),       top_jsons)
         def fade_sites_bottom = FADE_JSON_TO_CSV_BOTTOM(Channel.value('bottom'), bottom_jsons)
 
-        // ── Gene list extraction + FCS/STRING per direction ──────────────────
-        if (params.enrichment || params.string) {
-            def run_fade_enrich = { direction, summary_tsv_ch, gene_lists_proc ->
-                def lists_out    = gene_lists_proc(Channel.value(direction), summary_tsv_ch)
-                def subpath      = "selection/fade/${direction}"
-                def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
-                def interest_ch  = lists_out.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
-                // FADE no longer runs its own FCS ranking (see fcs.nf/scoring_enrichment.nf —
-                // its max-of-many-sites statistic proved unreliable for gene-set enrichment;
-                // FADE now contributes as cross-module corroboration + a posenrich position
-                // group instead). STRING (set-based, not rank-based) is unaffected.
-                if (params.string) {
-                    FADE_STRING_REPORT(
-                        Channel.value(subpath), bg_ch, interest_ch,
-                        Channel.value("15.STRING_fade_${direction}_${params.traitname ?: 'trait'}")
-                    )
-                }
-            }
-
-            run_fade_enrich('top',    fade_report_top.summary_tsv,    { d, s -> FADE_GENE_LISTS_TOP(d, s) })
-            run_fade_enrich('bottom', fade_report_bottom.summary_tsv, { d, s -> FADE_GENE_LISTS_BOTTOM(d, s) })
+        // ── Gene list extraction per direction (always automatic) ─────────
+        // FADE no longer runs its own FCS ranking (see fcs.nf/scoring_enrichment.nf —
+        // its max-of-many-sites statistic proved unreliable for gene-set enrichment;
+        // FADE now contributes as cross-module corroboration + a posenrich position
+        // group instead). Its standalone AMI report (DOMINO active modules) was
+        // removed too — never produced usable output; there's no separate --ami
+        // flag anymore. FADE's own gene lists/background per direction are always
+        // computed automatically and feed the unified 13.AMI_analysis.Rmd
+        // (ENRICHMENT workflow) via gene_lists_bg_*/gene_lists_sig_* below.
+        def run_fade_enrich = { direction, summary_tsv_ch, gene_lists_proc ->
+            def lists_out    = gene_lists_proc(Channel.value(direction), summary_tsv_ch)
+            def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
+            def interest_ch  = lists_out.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
+            [bg: bg_ch, interest: interest_ch]
         }
+
+        def top_lists    = run_fade_enrich('top',    fade_report_top.summary_tsv,    { d, s -> FADE_GENE_LISTS_TOP(d, s) })
+        def bottom_lists = run_fade_enrich('bottom', fade_report_bottom.summary_tsv, { d, s -> FADE_GENE_LISTS_BOTTOM(d, s) })
+        def fade_gene_lists_bg_top_out     = top_lists.bg
+        def fade_gene_lists_sig_top_out    = top_lists.interest
+        def fade_gene_lists_bg_bottom_out  = bottom_lists.bg
+        def fade_gene_lists_sig_bottom_out = bottom_lists.interest
 
     emit:
         report_top     = fade_report_top.report
@@ -247,4 +246,12 @@ workflow FADE {
         json_results   = fade_results_ch
         sites_csv_top    = fade_sites_top.sites_csv
         sites_csv_bottom = fade_sites_bottom.sites_csv
+        // FADE's own per-direction gene universe (background.txt) + its
+        // significant-gene list -- feeds the unified 13.AMI_analysis.Rmd's
+        // FADE section (Top/Bottom tabs; Global = union of both, built in
+        // enrichment.nf since it needs both directions at once).
+        gene_lists_bg_top     = fade_gene_lists_bg_top_out     ?: Channel.empty()
+        gene_lists_bg_bottom  = fade_gene_lists_bg_bottom_out  ?: Channel.empty()
+        gene_lists_sig_top    = fade_gene_lists_sig_top_out    ?: Channel.empty()
+        gene_lists_sig_bottom = fade_gene_lists_sig_bottom_out ?: Channel.empty()
 }

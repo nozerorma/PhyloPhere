@@ -62,6 +62,11 @@ class PhenotypeTableModel(QAbstractTableModel):
     def __init__(self, rows: list[PhenotypeRow], parent=None):
         super().__init__(parent)
         self._rows = rows  # shared reference into RuntimeConfig.phenotype_rows
+        self.lang = "en"
+
+    def set_lang(self, lang: str) -> None:
+        self.lang = lang
+        self.headerDataChanged.emit(Qt.Orientation.Horizontal, 0, len(COLUMNS) - 1)
 
     # ── Required overrides ─────────────────────────────────────────────────
 
@@ -71,13 +76,15 @@ class PhenotypeTableModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(COLUMNS)
 
-    def headerData(self, section, orientation, role=Qt.ItemDataRole.DisplayRole):
+    def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole):
+        if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
+            col_key = COLUMNS[section][1]
+            from gui.i18n import tr
+            return tr(col_key, getattr(self, "lang", "en"))
         if orientation != Qt.Orientation.Horizontal:
             if role == Qt.ItemDataRole.DisplayRole:
                 return str(section + 1)
             return None
-        if role == Qt.ItemDataRole.DisplayRole:
-            return COLUMNS[section][1]
         if role == Qt.ItemDataRole.ToolTipRole:
             return _HEADER_TOOLTIPS.get(COLUMNS[section][0])
         return None
@@ -162,6 +169,7 @@ class PhenotypeTableModel(QAbstractTableModel):
 
 assert {name for name, _ in COLUMNS} == {f.name for f in fields(PhenotypeRow)} - {
     "scoring_rer_input",
+    "scoring_rer_perms_input",
     "scoring_fade_summary_top",
     "scoring_fade_summary_bottom",
 }, "COLUMNS must track PhenotypeRow's fields (excluding the per-row scoring overrides, edited via a detail dialog, not a visible column)"

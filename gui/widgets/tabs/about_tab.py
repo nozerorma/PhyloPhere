@@ -22,12 +22,13 @@ from PySide6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.about import AboutInfo
 
-_GUI_PACKAGE_ROOT = Path(__file__).resolve().parents[2]  # .../gui/widgets/tabs -> repo root
+_GUI_PACKAGE_ROOT = Path(__file__).resolve().parents[3]  # .../gui/widgets/tabs -> repo root
 
 
 class AboutTab(QWidget):
     def __init__(self, info: AboutInfo, parent=None):
         super().__init__(parent)
+        self._info = info
 
         layout = QVBoxLayout(self)
 
@@ -37,24 +38,33 @@ class AboutTab(QWidget):
             if not pixmap.isNull():
                 logo_label = QLabel()
                 logo_label.setPixmap(
-                    pixmap.scaledToHeight(120, Qt.TransformationMode.SmoothTransformation)
+                    pixmap.scaledToHeight(220, Qt.TransformationMode.SmoothTransformation)
                 )
-                logo_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+                logo_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
                 layout.addWidget(logo_label)
 
-        attributions_html = "".join(f"<li>{a}</li>" for a in info.attributions)
-        html = f"""
-        <h2>{info.name} <span style="font-weight:normal">v{info.version}</span></h2>
-        <p>{info.description}</p>
-        <p><b>Repository:</b> <a href="{info.repo_url}">{info.repo_url}</a></p>
-        <p><b>Author:</b> {info.author} (&lt;{info.author_email}&gt;)</p>
-        <p><b>Institution:</b> {info.institution}</p>
-        <p><b>License:</b> {info.license_name}</p>
-        <p><b>Built on:</b></p>
-        <ul>{attributions_html}</ul>
-        """
+        self.browser = QTextBrowser()
+        self.browser.setOpenExternalLinks(True)
+        layout.addWidget(self.browser, stretch=1)
+        self.retranslate("en")
 
-        browser = QTextBrowser()
-        browser.setOpenExternalLinks(True)
-        browser.setHtml(html)
-        layout.addWidget(browser, stretch=1)
+    def retranslate(self, lang: str = "en") -> None:
+        from gui.i18n import tr
+        if hasattr(self, "browser") and hasattr(self, "_info"):
+            attributions_html = "".join(f"<li>{a}</li>" for a in self._info.attributions)
+            repo_label = tr("Repository", lang)
+            author_label = tr("Author", lang)
+            institution_label = tr("Institution", lang)
+            license_label = tr("License", lang)
+            built_on_label = tr("Built on", lang)
+            html = f"""
+            <h2>{self._info.name} <span style="font-weight:normal">v{self._info.version}</span></h2>
+            <p>{self._info.description}</p>
+            <p><b>{repo_label}:</b> <a href="{self._info.repo_url}">{self._info.repo_url}</a></p>
+            <p><b>{author_label}:</b> {self._info.author} (&lt;{self._info.author_email}&gt;)</p>
+            <p><b>{institution_label}:</b> {self._info.institution}</p>
+            <p><b>{license_label}:</b> {self._info.license_name}</p>
+            <p><b>{built_on_label}:</b></p>
+            <ul>{attributions_html}</ul>
+            """
+            self.browser.setHtml(html)

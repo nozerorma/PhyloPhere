@@ -1,0 +1,1728 @@
+---
+title: "AMI Analysis — DOMINO Active Modules"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    syntax_highlighting: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
+    mathjax: null                       # no math in this report
+    md_extensions: "-tex_math_dollars"  # gene-set names contain '$' (e.g. V$HNF4_01) — never parse as TeX math
+params:
+  background_file: NULL
+  background_basename: NULL
+  gene_list_files: NULL
+  output_dir: "ami"
+  project_name: "AMI_Analysis"
+  species: 9606
+  gene_scores_file: NULL
+  string_db_dir: NULL
+  min_cluster_genes: 3
+  domino_network_sif: NULL
+  domino_modules_dir: NULL
+  domino_network_score_thr: 700
+  domino_edge_scores_file: NULL  # gene1/gene2/combined_score TSV alongside domino_network_sif
+                                  # (STRING's own combined_score, discarded from network.sif
+                                  # itself since DOMINO's tools expect a plain 3-col SIF) --
+                                  # optional: NULL/absent degrades to fixed-width edges.
+  # FADE and RER each get their own DOMINO network + gene lists, built against
+  # their own gene universe (verified to differ meaningfully from CAAS's
+  # cleaned_background and from each other on real data -- see
+  # ENRICHMENT workflow / bugfix_fcs_universe_wrong_background.md). NULL when
+  # that tool didn't run this invocation; that tool's section is then skipped.
+  fade_gene_lists_dir: NULL          # dir containing fade_{top,bottom,global}_significant.txt
+  fade_background_file: NULL        # union of both directions' own background.txt
+  fade_domino_network_sif: NULL
+  fade_domino_modules_dir: NULL
+  fade_domino_edge_scores_file: NULL
+  rer_gene_lists_dir: NULL          # dir containing rer_{significant,accelerating,decelerating}.txt
+  rer_background_file: NULL        # RER's own background.txt
+  rer_domino_network_sif: NULL
+  rer_domino_modules_dir: NULL
+  rer_domino_edge_scores_file: NULL
+---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7,
+  dev = 'png',
+  dpi = 320
+)
+
+# Prevent hangs by setting connection timeouts for RCurl and httr
+options(timeout = 30)
+options(RCurlOptions = list(connecttimeout = 10, timeout = 30))
+if (requireNamespace("httr", quietly = TRUE)) {
+  httr::set_config(httr::config(connecttimeout = 10, timeout = 30))
+}
+
+# Minimum cluster size (genes) to keep in the cluster description table and
+# the network visualisation; smaller clusters are labelled "Too small" and
+# dropped from both.
+.min_cluster_genes <- if (!is.null(params$min_cluster_genes)) as.integer(params$min_cluster_genes) else 3L
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(kableExtra)
+  library(STRINGdb)
+  library(paletteer)
+})
+
+# ── Global ENSP -> Symbol Mapping Cache ──────────────────────────────────────
+global_id2gene <- new.env(parent = emptyenv())
+
+# ── Local offline enrichment implementation ───────────────────────────────────
+enrich_terms_db <- NULL
+
+find_enrichment_terms_file <- function(species, cache_dir) {
+  fname <- paste0(species, ".protein.enrichment.terms.v12.0.txt.gz")
+  
+  # Search paths in order of preference, starting with parameterized string_db_dir
+  paths <- c(
+    if (!is.null(params$string_db_dir) && nzchar(params$string_db_dir)) file.path(params$string_db_dir, fname) else NULL,
+    file.path(cache_dir, fname)
+  )
+  
+  for (p in paths) {
+    if (!is.null(p) && nzchar(p) && file.exists(p)) {
+      return(normalizePath(p))
+    }
+  }
+  NULL
+}
+
+load_local_enrichment_db <- function(species, cache_dir) {
+  terms_file <- find_enrichment_terms_file(species, cache_dir)
+  
+  if (is.null(terms_file)) {
+    # If not found locally, try downloading it (fallback if internet is available)
+    message(sprintf("[local_enrichment] Local file not found. Attempting to download for species %s...", species))
+    dest_file <- file.path(cache_dir, paste0(species, ".protein.enrichment.terms.v12.0.txt.gz"))
+    url <- sprintf("https://stringdb-downloads.org/download/protein.enrichment.terms.v12.0/%s.protein.enrichment.terms.v12.0.txt.gz", species)
+    
+    download_ok <- tryCatch({
+      download.file(url, dest_file, quiet = TRUE)
+      TRUE
+    }, error = function(e) {
+      message(sprintf("[local_enrichment] Download failed: %s", e$message))
+      FALSE
+    })
+    
+    if (download_ok && file.exists(dest_file)) {
+      terms_file <- dest_file
+    } else {
+      stop("Local enrichment terms file not found and download failed.")
+    }
+  }
+  
+  message(sprintf("[local_enrichment] Loading enrichment database from: %s", terms_file))
+  db <- readr::read_tsv(
+    terms_file,
+    col_types = "cccc",
+    comment = "#",
+    col_names = c("string_protein_id", "category", "term", "description")
+  )
+  db
+}
+
+get_enrichment_local <- function(fg_ids, bg_ids = NULL, fdr_threshold = 0.1) {
+  if (is.null(enrich_terms_db)) return(NULL)
+  if (length(fg_ids) == 0) return(tibble::tibble())
+  
+  # If bg_ids is too small/empty, default to all proteins present in the terms db
+  if (is.null(bg_ids) || length(bg_ids) < 5) {
+    bg_ids <- unique(enrich_terms_db$string_protein_id)
+  }
+  
+  # Ensure fg_ids is constrained by background
+  fg_ids <- intersect(fg_ids, bg_ids)
+  if (length(fg_ids) == 0) return(tibble::tibble())
+  
+  # Filter database to background proteins
+  bg_data <- enrich_terms_db %>% dplyr::filter(string_protein_id %in% bg_ids)
+  
+  # Count term sizes in background (STRING requires >= 2 genes in background for test)
+  term_bg_counts <- bg_data %>%
+    dplyr::group_by(category, term, description) %>%
+    dplyr::summarise(M = dplyr::n(), .groups = "drop") %>%
+    dplyr::filter(M >= 2)
+    
+  # Filter database to foreground and count
+  fg_data <- enrich_terms_db %>% dplyr::filter(string_protein_id %in% fg_ids)
+  fg_counts <- fg_data %>%
+    dplyr::group_by(category, term, description) %>%
+    dplyr::summarise(k = dplyr::n(), .groups = "drop")
+    
+  N <- length(bg_ids)
+  n <- length(fg_ids)
+  
+  # Run hypergeometric test: phyper(k-1, M, N-M, n, lower.tail = FALSE) -> P(X >= k)
+  res <- term_bg_counts %>%
+    dplyr::inner_join(fg_counts, by = c("category", "term", "description")) %>%
+    dplyr::mutate(
+      pvalue = phyper(k - 1, M, N - M, n, lower.tail = FALSE)
+    ) %>%
+    dplyr::group_by(category) %>%
+    dplyr::mutate(fdr = p.adjust(pvalue, method = "fdr")) %>%
+    dplyr::ungroup() %>%
+    dplyr::filter(fdr <= fdr_threshold) %>%
+    dplyr::arrange(category, fdr)
+    
+  if (nrow(res) == 0) return(tibble::tibble())
+  
+  # Map protein IDs in foreground to symbols using our global cache
+  fg_mapped <- fg_data %>%
+    dplyr::mutate(gene = sapply(string_protein_id, function(id) {
+      sym <- global_id2gene[[id]]
+      if (is.null(sym)) id else sym
+    }))
+    
+  # Append preferredNames (comma-separated list of symbols)
+  term_genes <- fg_mapped %>%
+    dplyr::group_by(category, term) %>%
+    dplyr::summarise(
+      preferredNames = paste(sort(unique(gene)), collapse = ","),
+      .groups = "drop"
+    )
+    
+  res <- res %>%
+    dplyr::left_join(term_genes, by = c("category", "term")) %>%
+    dplyr::rename(
+      number_of_genes = k,
+      number_of_genes_in_background = M,
+      p_value = pvalue
+    )
+    
+  res
+}
+
+# ── Palette helpers (overflow-safe Tableau_10) ────────────────────────────────
+.pal10_base <- as.character(paletteer_d("ggthemes::Tableau_10"))
+.safe_pal   <- function(n) if (n <= 10L) .pal10_base[seq_len(n)] else colorRampPalette(.pal10_base)(n)
+safe_fill   <- function(n) scale_fill_manual(values  = .safe_pal(n))
+safe_color  <- function(n) scale_color_manual(values = .safe_pal(n))
+
+has_pkg <- function(pkg) requireNamespace(pkg, quietly = TRUE)
+
+`%||%` <- function(a, b) {
+  if (!is.null(a) && length(a) > 0 && !all(is.na(a))) a else b
+}
+
+createDir <- function(directory) {
+  if (!dir.exists(directory)) dir.create(directory, recursive = TRUE, showWarnings = FALSE)
+}
+
+download_with_retry <- function(url, destfile, tries = 4L, timeout_sec = 1800L) {
+  old_timeout <- getOption("timeout")
+  on.exit(options(timeout = old_timeout), add = TRUE)
+  options(timeout = max(as.integer(old_timeout), as.integer(timeout_sec), 600L))
+
+  for (i in seq_len(tries)) {
+    ok <- tryCatch({
+      utils::download.file(url, destfile = destfile, mode = "wb", quiet = FALSE, method = "libcurl")
+      TRUE
+    }, error = function(e) {
+      message(sprintf("Download failed (%d/%d): %s", i, tries, e$message))
+      FALSE
+    })
+
+    if (isTRUE(ok) && file.exists(destfile) && file.size(destfile) > 0) return(invisible(TRUE))
+    if (i < tries) Sys.sleep(min(30, i * 5))
+  }
+
+  stop(sprintf("Failed to download after %d attempts: %s", tries, url))
+}
+
+ensure_string_cache <- function(species, version = "12.0", input_directory = "string_cache") {
+  createDir(input_directory)
+
+  species <- as.integer(species)
+  base <- "https://stringdb-downloads.org/download"
+  files <- c(
+    sprintf("protein.aliases.v%s/%d.protein.aliases.v%s.txt.gz", version, species, version),
+    sprintf("protein.info.v%s/%d.protein.info.v%s.txt.gz", version, species, version),
+    sprintf("protein.links.v%s/%d.protein.links.v%s.txt.gz", version, species, version),
+    sprintf("protein.physical.links.v%s/%d.protein.physical.links.v%s.txt.gz", version, species, version)
+  )
+
+  for (rel in files) {
+    url <- sprintf("%s/%s", base, rel)
+    fname <- basename(rel)
+    dest <- file.path(input_directory, fname)
+    if (!file.exists(dest) || file.size(dest) == 0) {
+      # Try finding in params$string_db_dir first
+      local_src <- if (!is.null(params$string_db_dir) && nzchar(params$string_db_dir)) file.path(params$string_db_dir, fname) else NULL
+      if (!is.null(local_src) && file.exists(local_src) && file.size(local_src) > 0) {
+        message(sprintf("[ensure_string_cache] Using local pre-cached file: %s", local_src))
+        file.copy(local_src, dest, overwrite = TRUE)
+      } else {
+        message(sprintf("Caching STRING file from online: %s", fname))
+        tryCatch({
+          download_with_retry(url, destfile = dest)
+        }, error = function(e) {
+          stop(sprintf("Failed to retrieve required STRING cache file %s: %s", fname, e$message))
+        })
+      }
+    }
+  }
+
+  invisible(normalizePath(input_directory, winslash = "/", mustWork = FALSE))
+}
+
+read_gene_vector <- function(path) {
+  x <- readr::read_lines(path)
+  x <- trimws(x)
+  x <- x[x != ""]
+  unique(x)
+}
+
+ami_root <- "."
+ami_results_dir <- "ami_results"
+ami_summary_dir <- "ami_summary"
+ami_plots_dir   <- "ami_plots"
+string_cache_dir   <- "string_cache"
+
+createDir(ami_results_dir)
+createDir(ami_summary_dir)
+createDir(ami_plots_dir)
+createDir(string_cache_dir)
+
+# Load local enrichment database
+enrich_terms_db <- tryCatch({
+  load_local_enrichment_db(as.integer(params$species), string_cache_dir)
+}, error = function(e) {
+  warning(sprintf("Could not load local enrichment database: %s. Will fallback to online queries.", e$message))
+  NULL
+})
+
+# Pre-cache STRING DB files with retry/timeout guards to avoid transient
+# network failures during set_background()/enrichment calls.
+ensure_string_cache(
+  species = as.integer(params$species),
+  version = "12.0",
+  input_directory = string_cache_dir
+)
+
+# ── STRINGdb instance ─────────────────────────────────────────────────────────
+# STRING is used ONLY for ID mapping ($map()), background caching, and the
+# functional/term enrichment path (get_enrichment_local()/get_enrichment())
+# below. Module finding + per-module significance is DOMINO's job (see the
+# "DOMINO Active Modules" section) — STRINGdb's walktrap clustering and
+# get_ppi_enrichment() (both per-cluster and whole-list) have been removed
+# entirely: get_ppi_enrichment() cannot honour a custom background above 2000
+# proteins combined (confirmed empirically against the live API), while our
+# cleaned_background is ~10k genes.
+string_db <- STRINGdb$new(
+  version         = "12.0",
+  species         = as.integer(params$species),
+  input_directory = string_cache_dir
+)
+
+ami_networks_dir <- "ami_networks"
+createDir(ami_networks_dir)
+# ── DOMINO module loading ─────────────────────────────────────────────────────
+# DOMINO (Shamir-Lab) replaces STRING's walktrap clustering here: it recovers
+# known complexes more fully than walktrap at our typical list sizes (10-40
+# genes), validated in a prior investigation session against AMINE/SIMBA on
+# real bottom-direction CAAS gene lists. Modules + their DOMINO-native
+# Bonferroni-corrected hypergeometric p-value were precomputed upstream
+# (subworkflows/ENRICHMENT/domino.nf's DOMINO_RUN_MODULES, via
+# src/run_domino_modules.py calling DOMINO's Python API directly so the
+# p-value survives — the `domino` CLI itself discards it). This just reads
+# those two TSVs back in; column names (node/cluster) are kept identical to
+# the old walktrap clusters_df shape so cluster_layout()/plot_cluster_network()
+# below are unchanged.
+load_domino_modules <- function(list_name, modules_dir) {
+  mod_file   <- file.path(modules_dir, sprintf("%s_domino_modules.tsv", list_name))
+  stats_file <- file.path(modules_dir, sprintf("%s_domino_module_stats.tsv", list_name))
+  if (!file.exists(mod_file) || !file.exists(stats_file)) {
+    return(list(clusters_df = NULL, module_stats = NULL))
+  }
+  list(
+    clusters_df  = readr::read_tsv(mod_file, col_types = "ci"),
+    module_stats = readr::read_tsv(stats_file, col_types = "iicdd")
+  )
+}
+
+# ── Cluster-aware FR layout ───────────────────────────────────────────────────
+# Seeds node positions by cluster centroid before Fruchterman-Reingold so that
+# same-cluster nodes start near each other and the final layout mirrors the
+# STRING web interface (clusters appear as visual blobs, not scattered).
+cluster_layout <- function(net, clusters_df, seed = 42) {
+  set.seed(seed)
+  n <- igraph::vcount(net)
+  if (is.null(clusters_df) || n < 2) return(igraph::layout_with_fr(net))
+
+  vnames  <- igraph::V(net)$name
+  cl_map  <- setNames(clusters_df$cluster, clusters_df$node)
+  clusters <- cl_map[vnames]
+  clusters[is.na(clusters)] <- max(clusters_df$cluster, na.rm = TRUE) + 1L
+
+  unique_cl <- sort(unique(clusters))
+  n_cl <- length(unique_cl)
+  if (n_cl <= 1) return(igraph::layout_with_fr(net))
+
+  theta  <- seq(0, 2 * pi * (1 - 1 / n_cl), length.out = n_cl)
+  spread <- max(5, sqrt(n) * 0.9)
+  cx     <- spread * cos(theta)
+  cy     <- spread * sin(theta)
+
+  init <- matrix(0, nrow = n, ncol = 2)
+  for (i in seq_along(unique_cl)) {
+    mask  <- clusters == unique_cl[i]
+    n_sub <- sum(mask)
+    sd_jit <- max(0.5, sqrt(n_sub) * 0.35)
+    init[mask, 1] <- cx[i] + rnorm(n_sub, 0, sd_jit)
+    init[mask, 2] <- cy[i] + rnorm(n_sub, 0, sd_jit)
+  }
+  igraph::layout_with_fr(net, coords = init, niter = 300)
+}
+
+# ── Cluster functional descriptions ──────────────────────────────────────────
+# Runs STRING enrichment (untouched functional-enrichment path) on each
+# DOMINO module's genes to derive a descriptive label from the top significant
+# GO/pathway term. Significance itself is no longer computed here — it comes
+# straight from DOMINO's own module_stats (p_value/p_adj, joined in below),
+# replacing the old per-cluster get_ppi_enrichment() density test.
+describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, top_terms = 3,
+                               min_cluster_genes = 3, bg_string_ids = NULL) {
+  if (is.null(clusters_df) || nrow(clusters_df) == 0) return(tibble())
+  # bg_string_ids defaults to the report-global CAAS background (set below at
+  # parse_background) for backward compatibility, but callers SHOULD pass
+  # their own tool's mapped background explicitly -- compute_gene_list_result()
+  # does this for all three tools (CAAS/FADE/RER each enrich against their own
+  # universe, not just CAAS's, matching the DOMINO network itself).
+  if (is.null(bg_string_ids)) bg_string_ids <- get("bg_string_ids", envir = .GlobalEnv)
+  desc <- purrr::map_dfr(sort(unique(clusters_df$cluster)), function(cl_id) {
+    cl_nodes <- clusters_df$node[clusters_df$cluster == cl_id]
+    genes    <- id2gene[cl_nodes]
+    genes_sorted <- sort(genes[!is.na(genes)])
+    # `genes` stays capped at 8 for the display table (kept readable at a
+    # glance); `all_genes` carries EVERY member gene, uncapped, so durable
+    # artifacts (per-list *_domino_module_descriptions.tsv and the
+    # module_descriptions_all_lists.tsv rollup) don't silently lose a large
+    # module's true membership -- 15.Comparison_report.Rmd's cross-angle
+    # corroboration composite was previously computed over the capped `genes`
+    # only, undercounting support for any module bigger than 8 genes.
+    gene_str     <- paste(head(genes_sorted, 8), collapse = ", ")
+    all_gene_str <- paste(genes_sorted, collapse = ", ")
+
+    if (length(cl_nodes) < min_cluster_genes) {
+      return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
+                    genes = gene_str, all_genes = all_gene_str, description = "Too small"))
+    }
+    message(sprintf("[describe_clusters] Querying STRING enrichment for module %d (%d genes)...", cl_id, length(cl_nodes)))
+    # cl_nodes/genes are gene SYMBOLs (DOMINO's node ids, resolved through
+    # id2gene) -- both get_enrichment_local() and STRINGdb's own
+    # $get_enrichment() key their lookups on STRING protein ids, same as the
+    # background (bg_string_ids, this tool's own mapped universe). Without
+    # this mapping the foreground/background intersection is always empty
+    # (symbols never match protein ids), so every module silently fell back
+    # to "No enrichment" regardless of its real content.
+    cl_string_ids <- safe_string_map_ids(unique(stats::na.omit(genes)))
+    enrich <- if (length(cl_string_ids) == 0) {
+      NULL
+    } else if (!is.null(enrich_terms_db)) {
+      get_enrichment_local(cl_string_ids, bg_string_ids)
+    } else {
+      # Fallback to online API
+      message(sprintf("[describe_clusters] Querying STRING online enrichment for module %d (%d genes)...", cl_id, length(cl_nodes)))
+      tryCatch(
+        sdb$get_enrichment(cl_string_ids),
+        error = function(e) {
+          message(sprintf("[describe_clusters] Warning: STRING enrichment failed for module %d: %s", cl_id, e$message))
+          NULL
+        }
+      )
+    }
+    if (is.null(enrich) || nrow(enrich) == 0 || "error" %in% names(enrich)) {
+      return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
+                    genes = gene_str, all_genes = all_gene_str, description = "No enrichment"))
+    }
+    pvcol   <- intersect(c("fdr", "p_value", "pvalue", "p.adjust"), names(enrich))[1]
+    if (!is.na(pvcol)) enrich <- enrich[order(enrich[[pvcol]]), ]
+    dcol    <- intersect(c("description", "term", "name"), names(enrich))[1]
+    top     <- head(as.character(enrich[[dcol]]), top_terms)
+    tibble(cluster = cl_id, n_genes = length(cl_nodes),
+           genes = gene_str, all_genes = all_gene_str, description = paste(top, collapse = " / "))
+  })
+
+  if (!is.null(module_stats) && nrow(module_stats) > 0) {
+    desc <- desc %>%
+      dplyr::left_join(
+        module_stats %>% dplyr::select(cluster, domino_p_value = p_value, domino_p_adj = p_adj),
+        by = "cluster"
+      )
+  }
+  desc
+}
+
+# ── Network plot (cluster-aware layout, no isolated nodes) ───────────────────
+# Edge width/opacity encode STRING's combined_score (attached as an edge
+# attribute by the domino_networks chunk below, from the domino_edge_scores_file
+# sidecar -- network.sif itself is a plain 3-column SIF with no score, since
+# DOMINO's own tools expect exactly that shape), mirroring STRING's own network
+# images where thicker/more solid lines mean higher-confidence interactions.
+# Node size encodes node_signal (see call site) -- cluster membership owns colour.
+# ── Custom igraph vertex shapes (diamond/hexagon/star) ───────────────────────
+# igraph ships circle/square/rectangle/csquare/crectangle/vrectangle/pie/sphere/
+# none out of the box (see igraph::shapes()) -- square covers the FADE overlay
+# below, but diamond/hexagon/star need registering. Built via base graphics'
+# symbols(stars=) glyph (a polygon connecting n points at evenly-spaced angles,
+# one radius per point): equal radii at 4/6 points give a diamond/hexagon,
+# alternating long/short radii give a spiky star. clip reuses circle's clip
+# function, the standard trick from igraph's own add_shape() vignette for
+# polygon shapes (edge-clipping only needs an approximate bounding shape).
+.make_polygon_shape_fn <- function(radii) {
+  force(radii)
+  function(coords, v = NULL, params) {
+    vertex.color <- params("vertex", "color")
+    if (length(vertex.color) != 1 && !is.null(v)) vertex.color <- vertex.color[v]
+    vertex.size <- (1 / 150) * params("vertex", "size")
+    if (length(vertex.size) != 1 && !is.null(v)) vertex.size <- vertex.size[v]
+    graphics::symbols(
+      x = coords[, 1], y = coords[, 2], bg = vertex.color,
+      stars = outer(vertex.size, radii),
+      add = TRUE, inches = FALSE
+    )
+  }
+}
+if (!"diamond" %in% names(igraph::shapes())) {
+  igraph::add_shape("diamond", clip = igraph::shapes("circle")$clip, plot = .make_polygon_shape_fn(rep(1, 4)))
+}
+if (!"hexagon" %in% names(igraph::shapes())) {
+  igraph::add_shape("hexagon", clip = igraph::shapes("circle")$clip, plot = .make_polygon_shape_fn(rep(1, 6)))
+}
+if (!"star" %in% names(igraph::shapes())) {
+  igraph::add_shape("star", clip = igraph::shapes("circle")$clip, plot = .make_polygon_shape_fn(rep(c(1, 0.4), 5)))
+}
+
+# Cross-tool corroboration shape for CAAS's own network plots (FADE/RER's own
+# sections use plain circles -- this overlay only applies to CAAS's plots).
+# FADE significance is direction-matched to whichever CAAS list is on screen
+# (top list -> flag_fade_top, bottom -> flag_fade_bottom, else -> flag_fade);
+# RER acceleration/deceleration are NOT direction-matched -- shown regardless
+# of the CAAS list's own direction, per explicit design. RER acc/decc are
+# mutually exclusive (a gene can't be both), so the only real overlap case is
+# FADE-sig with either RER flag, collapsed to a single combined shape (star)
+# rather than trying to distinguish which RER direction it overlapped with.
+compute_gene_shapes <- function(dir_label, attr_df) {
+  if (is.null(attr_df)) return(NULL)
+  fade_flag <- if (dir_label == "top") attr_df$flag_fade_top
+               else if (dir_label == "bottom") attr_df$flag_fade_bottom
+               else attr_df$flag_fade
+  rer_flag <- attr_df$flag_rer_acc | attr_df$flag_rer_decc
+  shape <- dplyr::case_when(
+    fade_flag & rer_flag ~ "star",
+    fade_flag            ~ "square",
+    attr_df$flag_rer_acc  ~ "diamond",
+    attr_df$flag_rer_decc ~ "hexagon",
+    TRUE                  ~ "circle"
+  )
+  setNames(shape, attr_df$gene)
+}
+
+plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
+                                  cluster_labels = NULL, node_signal = NULL,
+                                  active_genes = NULL, vertex_shape = NULL) {
+  n_clust <- if (!is.null(clusters_df)) length(unique(clusters_df$cluster)) else 1L
+  pal     <- .safe_pal(max(n_clust, 2L))
+
+  # Scale edge width/opacity by combined_score when present and varying;
+  # fall back to the previous fixed width/color otherwise (e.g. a subgraph
+  # with only one edge, or one built without that attribute).
+  .escore <- igraph::E(net)$combined_score
+  if (!is.null(.escore) && length(unique(stats::na.omit(.escore))) > 1) {
+    edge_widths <- scales::rescale(.escore, to = c(0.4, 3))
+    edge_alphas <- scales::rescale(.escore, to = c(0.25, 0.95))
+    edge_colors <- scales::alpha("#888888", edge_alphas)
+  } else {
+    edge_widths <- 0.7
+    edge_colors <- "#aaaaaa"
+  }
+
+  if (!is.null(clusters_df) && nrow(clusters_df) > 0) {
+    cl_map  <- setNames(clusters_df$cluster, clusters_df$node)
+    v_cl    <- cl_map[igraph::V(net)$name]
+    v_cl[is.na(v_cl)] <- n_clust + 1L
+    cl_ids  <- sort(unique(clusters_df$cluster))
+    vertex_colors <- pal[match(v_cl, c(cl_ids, n_clust + 1L))]
+  } else {
+    cl_ids        <- integer(0)
+    vertex_colors <- rep(pal[1], igraph::vcount(net))
+  }
+
+  labels <- if (!is.null(id_to_gene)) id_to_gene[igraph::V(net)$name] else igraph::V(net)$name
+  labels[is.na(labels)] <- igraph::V(net)$name[is.na(labels)]
+
+  # Node SIZE encodes each gene's own primary statistic FROM THIS TOOL (cluster
+  # membership already owns node COLOUR): CAAS's own gene score, RER's
+  # significance (-log10 p.perm-or-fallback), or FADE's own max Bayes factor
+  # (log10'd) -- see caas_node_score()/rer_node_score()/fade_node_score()
+  # above. Not a cross-tool composite; a gene's node size in the CAAS section
+  # means "how strong is CAAS's own evidence for this gene", independently of
+  # what FADE/RER say about it (that cross-tool corroboration is instead shown
+  # by node SHAPE on CAAS's plots -- see compute_gene_shapes() below). Falls
+  # back to the flat size when no signal was supplied (e.g. no
+  # gene_scores_file, or the relevant column is absent) or it doesn't vary here.
+  .base_vsize <- pmin(18, pmax(4, 55 / sqrt(igraph::vcount(net))))
+  vertex_sizes <- if (!is.null(node_signal)) {
+    sig <- node_signal[igraph::V(net)$name]
+    sig[is.na(sig)] <- 0
+    if (length(unique(sig)) > 1) .base_vsize * scales::rescale(sig, to = c(0.6, 1.7)) else .base_vsize
+  } else {
+    .base_vsize
+  }
+
+  # Node BORDER + FILL ALPHA distinguish active input genes from DOMINO-added
+  # "passenger"/connector genes -- module members DOMINO's PCST solver pulled
+  # in purely to connect active genes topologically, not because they were
+  # individually active (see get_pcst_prize()/run_pcst() in DOMINO's own
+  # src/core/domino.py: every non-active node gets a small distance-decayed
+  # prize, and pcst_fast can and does include some of them in the optimal
+  # tree). Without this distinction a genuinely well-connected module can look
+  # like scattered near-disconnected nodes, since the edges that justify
+  # grouping them together run through the connectors. Dimmed (not just
+  # outlined) so they read as clearly secondary at a glance, not just on close
+  # inspection of the border. No active_genes supplied -> treat everything as
+  # active (previous behaviour, e.g. call sites that don't distinguish the two).
+  is_active <- if (!is.null(active_genes)) igraph::V(net)$name %in% active_genes else rep(TRUE, igraph::vcount(net))
+  vertex_colors        <- ifelse(is_active, vertex_colors, scales::alpha(vertex_colors, 0.35))
+  vertex_frame_colors  <- ifelse(is_active, "black", "grey55")
+  vertex_frame_widths  <- ifelse(is_active, 1.4, 0.6)
+
+  # Node SHAPE = cross-tool corroboration (CAAS's own plots only -- see
+  # compute_gene_shapes()); everything else defaults to a plain circle.
+  vertex_shapes <- if (!is.null(vertex_shape)) {
+    vs <- vertex_shape[igraph::V(net)$name]
+    vs[is.na(vs)] <- "circle"
+    vs
+  } else {
+    "circle"
+  }
+
+  lo <- cluster_layout(net, clusters_df)
+
+  old_par <- par(mar = c(0, 0, 2, 5))
+  on.exit(par(old_par), add = TRUE)
+  igraph::plot.igraph(
+    net,
+    main               = title,
+    layout             = lo,
+    vertex.color       = vertex_colors,
+    vertex.size        = vertex_sizes,
+    vertex.shape       = vertex_shapes,
+    vertex.frame.color = vertex_frame_colors,
+    vertex.frame.width = vertex_frame_widths,
+    vertex.label       = labels,
+    vertex.label.cex   = max(0.55, min(1.1, 10 / sqrt(igraph::vcount(net)))),
+    vertex.label.color = "black",
+    vertex.label.font  = 2,
+    edge.arrow.size    = 0,
+    edge.width         = edge_widths,
+    edge.color         = edge_colors
+  )
+  if (length(cl_ids) > 1) {
+    leg_labels <- if (!is.null(cluster_labels)) {
+      vapply(as.character(cl_ids), function(k) {
+        lbl <- cluster_labels[k]
+        if (is.na(lbl)) paste0("Cluster ", k) else paste0("C", k, ": ", stringr::str_trunc(lbl, 35))
+      }, character(1))
+    } else {
+      paste0("Cluster ", cl_ids)
+    }
+    legend("topright", legend = leg_labels,
+           fill = pal[seq_along(cl_ids)], cex = 0.55, bty = "n", title = "Cluster")
+  }
+
+  # Explanatory legend for the encodings that don't have a discrete swatch
+  # (size, edge width/opacity, border) -- printed as plain text lines, same
+  # spot every time so it's discoverable without re-reading the caption prose.
+  encoding_lines <- c("Node size = this tool's own gene score (CAAS score / RER -log10(p) / FADE log10(max BF))",
+                      "Solid + black border = active input gene",
+                      "Faded + grey border = DOMINO connector gene (not in input list)")
+  if (!is.null(igraph::E(net)$combined_score)) {
+    encoding_lines <- c(encoding_lines, "Edge width/opacity = STRING interaction confidence")
+  }
+  if (!is.null(vertex_shape)) {
+    encoding_lines <- c(encoding_lines,
+      "Shape: circle=none, square=FADE-sig, diamond=RER-accelerating,",
+      "  hexagon=RER-decelerating, star=FADE+RER overlap")
+  }
+  legend("bottomleft", legend = encoding_lines, bty = "n", cex = 0.5, text.col = "grey30")
+}
+
+# Map a character vector of gene SYMBOLs to STRING identifiers.
+# Returns a character vector of STRING_id values.
+safe_string_map_ids <- function(genes) {
+  if (length(genes) == 0) return(character(0))
+  df_in <- data.frame(gene = genes, stringsAsFactors = FALSE)
+  mapped <- tryCatch(
+    string_db$map(df_in, "gene", removeUnmappedRows = TRUE, quiet = TRUE),
+    error = function(e) {
+      message(sprintf("STRING ID mapping failed: %s", e$message))
+      NULL
+    }
+  )
+  if (is.null(mapped) || nrow(mapped) == 0) return(character(0))
+  
+  # Populate the global ENSP -> symbol cache
+  for (i in 1:nrow(mapped)) {
+    global_id2gene[[mapped$STRING_id[i]]] <- mapped$gene[i]
+  }
+  
+  unique(as.character(mapped$STRING_id))
+}
+
+# Resolve background file path and normalize to absolute path
+bg_file <- params$background_file
+if (!file.exists(bg_file) && !is.null(params$background_basename)) {
+  if (file.exists(params$background_basename)) bg_file <- params$background_basename
+}
+
+if (is.null(bg_file) || !file.exists(bg_file)) {
+  stop("Error: background_file not found")
+}
+bg_file <- normalizePath(bg_file, mustWork = TRUE)
+bg_basename <- basename(bg_file)
+
+# Auto-detect gene list files from the current working directory, excluding the
+# background file.  Using normalizePath() ensures that subsequent reads succeed
+# even if the working directory changes during report rendering.
+gene_list_files <- params$gene_list_files
+if (is.null(gene_list_files) || length(gene_list_files) == 0) {
+  gene_list_files <- list.files(pattern = "\\.txt$", full.names = TRUE)
+  gene_list_files <- gene_list_files[basename(gene_list_files) != bg_basename]
+}
+gene_list_files <- gene_list_files[file.exists(gene_list_files)]
+# Always normalize to absolute paths
+gene_list_files <- normalizePath(gene_list_files, mustWork = FALSE)
+gene_list_files <- gene_list_files[file.exists(gene_list_files)]
+if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
+
+# Order tabs sensibly: direction (top before bottom, matching every other report's
+# convention) then descending percentile width (25 -> 10 -> 5 -> 1, broadest slice
+# first). list.files()'s default alphabetical order instead interleaves directions
+# and puts "10" before "5" (bottom1, bottom10, bottom25, bottom5, top1, ...).
+# Names that don't match "<top|bottom><pct>" sort after the recognized ones, in
+# their original alphabetical order.
+.ami_list_order <- function(paths) {
+  base <- tools::file_path_sans_ext(basename(paths))
+  dir_rank <- dplyr::case_when(
+    grepl("^top", base, ignore.case = TRUE)    ~ 0L,
+    grepl("^bottom", base, ignore.case = TRUE) ~ 1L,
+    TRUE                                       ~ 2L
+  )
+  pct <- suppressWarnings(as.numeric(sub("^(top|bottom)", "", base, ignore.case = TRUE)))
+  pct[is.na(pct)] <- -Inf  # unrecognized names sort last within their bucket
+  paths[order(dir_rank, -pct, base)]
+}
+gene_list_files <- .ami_list_order(gene_list_files)
+
+```
+
+# AMI analysis configuration
+
+```{r config_overview}
+cat("=== AMI (Active Module Identification) configuration ===\n")
+cat("Background file (cleaned_background):", bg_file, "\n")
+cat("Gene list files:", length(gene_list_files), "\n")
+cat("Species (NCBI taxon ID):", params$species, "\n")
+cat("DOMINO network score threshold:", params$domino_network_score_thr, "\n")
+cat("Module finding + significance: DOMINO (Shamir-Lab)\n")
+cat("Module functional labels: STRING term enrichment (untouched functional-enrichment path)\n")
+```
+
+# Map background to STRING IDs
+
+> **Note:** A custom background (`cleaned_background`) constrains enrichment to the experimental proteome (all tested genes).
+> When background genes are provided, they are mapped to STRING identifiers and set
+> on the `STRINGdb` object via `set_background()`, which applies to all subsequent
+> `get_enrichment()` calls.
+
+```{r parse_background}
+bg_symbols  <- read_gene_vector(bg_file)
+bg_string_ids <- safe_string_map_ids(bg_symbols)
+
+cat("Background symbols supplied:", length(bg_symbols), "\n")
+cat("Background STRING IDs successfully mapped:", length(bg_string_ids), "\n")
+
+if (length(bg_string_ids) < 5) {
+  warning(
+    sprintf(
+      "Only %d background genes mapped to STRING IDs. ",
+      length(bg_string_ids)
+    ),
+    "Proceeding without a custom background (STRING will use the full proteome)."
+  )
+  use_custom_background <- FALSE
+} else {
+  # Set the background on the STRINGdb object so all subsequent enrichment
+  # calls are constrained to the experimental proteome.
+  use_custom_background <- tryCatch({
+    string_db$set_background(bg_string_ids)
+    TRUE
+  }, error = function(e) {
+    warning(
+      sprintf("Could not set custom STRING background: %s", e$message),
+      " Proceeding with STRING default background."
+    )
+    FALSE
+  })
+
+  if (isTRUE(use_custom_background)) {
+    cat("Custom background set on STRINGdb object (", length(bg_string_ids), " proteins).\n")
+  }
+}
+```
+
+# Load gene scores for overlap checking
+
+```{r load_gene_scores}
+# Minimum STRING-mapped genes for a gene list to get a network at all (used by
+# the DOMINO Active Modules section below).
+MIN_MAPPED <- 5L
+
+gene_scores_df <- NULL
+if (!is.null(params$gene_scores_file) && file.exists(params$gene_scores_file)) {
+  gene_scores_df <- readr::read_tsv(params$gene_scores_file, show_col_types = FALSE)
+  cat("Loaded gene_scores_file:", params$gene_scores_file, "with", nrow(gene_scores_df), "genes.\n")
+} else {
+  cat("No gene_scores_file provided or file not found. Overlap checks will be skipped.\n")
+}
+
+prepare_gene_attributes <- function(df) {
+  if (is.null(df) || nrow(df) == 0) return(NULL)
+  
+  # Helper to compute percentile flags
+  pct_of <- function(v) {
+    ok <- !is.na(v) & v > 0
+    p <- rep(NA_real_, length(v))
+    if (any(ok)) p[ok] <- 1 - (rank(v[ok], ties.method = "max") - 1) / sum(ok)
+    p
+  }
+  
+  .col <- function(c, default = NA) if (c %in% names(df)) df[[c]] else rep(default, nrow(df))
+  .istrue <- function(x) !is.na(x) & x %in% c(TRUE, "TRUE", "True", "true", 1, "1")
+  
+  out <- tibble::tibble(gene = df$Gene)
+  
+  # CAAS score columns for percentiles
+  score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top_all")))
+  if (all(is.na(score_top))) score_top <- suppressWarnings(as.numeric(.col("gene_caas_score_top")))
+  
+  score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom_all")))
+  if (all(is.na(score_bot))) score_bot <- suppressWarnings(as.numeric(.col("gene_caas_score_bottom")))
+  
+  # Percentiles
+  breaks <- c(0.10, 0.05, 0.01)
+  if (!all(is.na(score_top))) {
+    pt <- pct_of(score_top)
+    out$pct_top10 <- !is.na(pt) & pt <= breaks[1]
+    out$pct_top5  <- !is.na(pt) & pt <= breaks[2]
+    out$pct_top1  <- !is.na(pt) & pt <= breaks[3]
+  } else {
+    out$pct_top10 <- FALSE; out$pct_top5 <- FALSE; out$pct_top1 <- FALSE
+  }
+  
+  if (!all(is.na(score_bot))) {
+    pb <- pct_of(score_bot)
+    out$pct_bottom10 <- !is.na(pb) & pb <= breaks[1]
+    out$pct_bottom5  <- !is.na(pb) & pb <= breaks[2]
+    out$pct_bottom1  <- !is.na(pb) & pb <= breaks[3]
+  } else {
+    out$pct_bottom10 <- FALSE; out$pct_bottom5 <- FALSE; out$pct_bottom1 <- FALSE
+  }
+  
+  # Significance gates (gene has >=1 position passing position-level gate_sig/gate_fdr)
+  out$flag_gate_sig <- .istrue(.col("gene_caas_gate_sig"))
+  out$flag_gate_fdr <- .istrue(.col("gene_caas_gate_fdr"))
+  
+  # FADE
+  out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
+  out$flag_fade_bottom <- .istrue(.col("fade_significant_bottom"))
+  out$flag_fade        <- out$flag_fade_top | out$flag_fade_bottom
+  
+  # RER
+  .rer_dir <- tolower(as.character(.col("rer_acceleration")))
+  out$flag_rer_acc     <- .istrue(.col("rer_significant")) & grepl("acc", .rer_dir)
+  out$flag_rer_decc    <- .istrue(.col("rer_significant")) & grepl("dec", .rer_dir)
+  
+  # Accumulation: flag_accum is the non-directional accumulation_all_* pooled
+  # test; flag_accum_top/flag_accum_bottom are the direction-restricted
+  # accumulation_top_*/accumulation_bottom_* tests -- same convention as
+  # flag_fade/flag_fade_top/flag_fade_bottom above.
+  out$flag_accum        <- .istrue(.col("accum_significant"))
+  out$flag_accum_top    <- .istrue(.col("accum_significant_top"))
+  out$flag_accum_bottom <- .istrue(.col("accum_significant_bottom"))
+
+  out
+}
+
+compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label) {
+  if (is.na(preferred_names) || preferred_names == "" || is.null(attr_df)) {
+    return(tibble::tibble(
+      gate_sig = NA_real_, gate_fdr = NA_real_,
+      top10 = NA_real_, top5 = NA_real_, top1 = NA_real_,
+      bot10 = NA_real_, bot5 = NA_real_, bot1 = NA_real_,
+      fade = NA_real_, fade_top = NA_real_, fade_bottom = NA_real_,
+      rer_acc = NA_real_, rer_decc = NA_real_,
+      accum = NA_real_, accum_top = NA_real_, accum_bottom = NA_real_
+    ))
+  }
+  genes <- strsplit(preferred_names, "[,;]")[[1]]
+  sub_attr <- attr_df %>% dplyr::filter(gene %in% genes)
+  if (nrow(sub_attr) == 0) {
+    return(tibble::tibble(
+      gate_sig = 0, gate_fdr = 0,
+      top10 = 0, top5 = 0, top1 = 0,
+      bot10 = 0, bot5 = 0, bot1 = 0,
+      fade = 0, fade_top = 0, fade_bottom = 0,
+      rer_acc = 0, rer_decc = 0,
+      accum = 0, accum_top = 0, accum_bottom = 0
+    ))
+  }
+
+  # Calculate percentages (mean * 100)
+  round_pct <- function(x) round(100 * mean(x, na.rm = TRUE), 1)
+
+  tibble::tibble(
+    gate_sig = round_pct(sub_attr$flag_gate_sig),
+    gate_fdr = round_pct(sub_attr$flag_gate_fdr),
+    top10    = round_pct(sub_attr$pct_top10),
+    top5     = round_pct(sub_attr$pct_top5),
+    top1     = round_pct(sub_attr$pct_top1),
+    bot10    = round_pct(sub_attr$pct_bottom10),
+    bot5     = round_pct(sub_attr$pct_bottom5),
+    bot1     = round_pct(sub_attr$pct_bottom1),
+    fade     = round_pct(sub_attr$flag_fade),
+    fade_top = round_pct(sub_attr$flag_fade_top),
+    fade_bottom = round_pct(sub_attr$flag_fade_bottom),
+    rer_acc  = round_pct(sub_attr$flag_rer_acc),
+    rer_decc = round_pct(sub_attr$flag_rer_decc),
+    accum_top    = round_pct(sub_attr$flag_accum_top),
+    accum_bottom = round_pct(sub_attr$flag_accum_bottom),
+    accum    = round_pct(sub_attr$flag_accum)
+  )
+}
+```
+
+# Shared DOMINO helpers (CAAS/FADE/RER) {-}
+
+```{r domino_shared_helpers}
+suppressPackageStartupMessages(library(igraph))
+
+# Builds one tool's DOMINO network from its own network.sif + optional
+# edge-scores sidecar. Called once per tool (CAAS/FADE/RER) -- each has its
+# own network built against its own gene universe, never shared/reused across
+# tools (see domino.nf's own doc comment on why this is rebuilt per report).
+build_tool_network <- function(sif_path, edge_scores_path = NULL) {
+  .sif <- readr::read_tsv(sif_path, col_names = c("from", "interaction", "to"), col_types = "ccc")
+  .edge_sif <- .sif[, c("from", "to")]
+  if (!is.null(edge_scores_path) && !is.na(edge_scores_path) && file.exists(edge_scores_path)) {
+    .edge_scores <- readr::read_tsv(edge_scores_path, show_col_types = FALSE)
+    .scores_fwd <- .edge_scores %>% dplyr::rename(from = gene1, to = gene2)
+    .scores_rev <- .edge_scores %>% dplyr::rename(from = gene2, to = gene1) %>%
+      dplyr::select(from, to, combined_score)
+    .score_lookup <- dplyr::bind_rows(.scores_fwd, .scores_rev) %>%
+      dplyr::distinct(from, to, .keep_all = TRUE)
+    .edge_sif <- .edge_sif %>% dplyr::left_join(.score_lookup, by = c("from", "to"))
+  }
+  igraph::graph_from_data_frame(.edge_sif, directed = FALSE)
+}
+
+# Per-gene attribute table shared across every tool's DISPLAY tables (module
+# description tables' top10%/fade_top%/etc columns) and the cross-tool
+# corroboration SHAPE overlay (compute_gene_shapes()) -- both plain membership
+# flags, unrelated to node size below.
+.attr_df_global <- if (!is.null(gene_scores_df)) prepare_gene_attributes(gene_scores_df) else NULL
+
+# Node SIZE builders -- each tool's own primary per-gene statistic, not a
+# cross-tool composite: CAAS's own gene score (gene_caas_score_top_all/
+# _bottom_all, direction-matched), RER's significance p-value (rer_min_pval,
+# -log10'd so smaller p draws bigger), FADE's own max Bayes factor
+# (fade_max_bf_top/_bottom, log10'd -- BFs span orders of magnitude and
+# FADE's own significance cutoff is BF>=100). All three columns already live
+# in gene_scores.tsv (params$gene_scores_file / gene_scores_df), scoring_compute.R's
+# full-join of CAAS/RER/FADE per-gene output -- no extra data source needed.
+# Each returns a named numeric vector (gene -> size value); NULL/NA where the
+# column or gene_scores_df itself is unavailable, which plot_cluster_network()
+# already falls back to the flat node size for.
+.col_num <- function(df, col) if (col %in% names(df)) suppressWarnings(as.numeric(df[[col]])) else rep(NA_real_, nrow(df))
+
+caas_node_score <- function(dir_label) {
+  if (is.null(gene_scores_df)) return(NULL)
+  col <- if (dir_label == "top") "gene_caas_score_top_all" else if (dir_label == "bottom") "gene_caas_score_bottom_all" else NA
+  if (is.na(col)) return(NULL)
+  setNames(.col_num(gene_scores_df, col), gene_scores_df$Gene)
+}
+
+rer_node_score <- function(dir_label) {
+  if (is.null(gene_scores_df) || !"rer_min_pval" %in% names(gene_scores_df)) return(NULL)
+  p <- .col_num(gene_scores_df, "rer_min_pval")
+  setNames(-log10(pmax(p, 1e-300)), gene_scores_df$Gene)
+}
+
+fade_node_score <- function(dir_label) {
+  if (is.null(gene_scores_df)) return(NULL)
+  top <- .col_num(gene_scores_df, "fade_max_bf_top")
+  bot <- .col_num(gene_scores_df, "fade_max_bf_bottom")
+  v <- if (dir_label == "top") top
+       else if (dir_label == "bottom") bot
+       else pmax(top, bot, na.rm = TRUE)  # Global: whichever direction has a BF for this gene
+  setNames(log10(pmax(v, 1)), gene_scores_df$Gene)
+}
+
+# Direction classifiers -- decide (a) which "direction" bucket a gene list's
+# modules roll up into in the Module summary tabset, and (b) which CAAS
+# percentile/flag columns apply when annotating a module's genes for the
+# display table, and which direction's column the node_score_fn builders
+# above read (gene_caas_score_top_all vs _bottom_all, fade_max_bf_top vs
+# _bottom). CAAS and
+# FADE share the same top/bottom vocabulary (both have real top/bottom
+# directions); RER's own axis is accelerating/decelerating, which doesn't map
+# onto CAAS's top/bottom percentiles, so RER always gets the "global" (both-
+# columns) treatment for percentile annotation, with its own Acc/Decc/Global
+# rollup grouping instead. Substring (not anchored) match so e.g.
+# "fade_top_significant" still matches "top" despite not starting with it.
+top_bottom_pct_classifier <- function(nm) {
+  if (grepl("top", nm, ignore.case = TRUE)) "top"
+  else if (grepl("bottom", nm, ignore.case = TRUE)) "bottom"
+  else "global"
+}
+top_bottom_roll_classifier <- function(other_label = "Other") {
+  force(other_label)
+  function(nm) {
+    if (grepl("top", nm, ignore.case = TRUE)) "Top"
+    else if (grepl("bottom", nm, ignore.case = TRUE)) "Bottom"
+    else other_label
+  }
+}
+always_global_pct_classifier <- function(nm) "global"
+rer_roll_classifier <- function(nm) {
+  if (grepl("accelerat", nm, ignore.case = TRUE)) "Acc"
+  else if (grepl("decelerat", nm, ignore.case = TRUE)) "Decc"
+  else "Global"
+}
+
+# ── One gene list's full computation (STRING enrichment + DOMINO + network
+# plot rendering) -- split from PRINTING (print_gene_list_result() below) so
+# this expensive work (STRING enrichment queries, PNG rendering) happens
+# EXACTLY ONCE per gene list, even though the nested-tabs layout below shows
+# every gene list under both its own direction tab AND the pooling "Global"
+# tab. use_shape_overlay is TRUE only for CAAS's own call (cross-tool FADE/RER
+# corroboration shapes -- see compute_gene_shapes()); FADE/RER's own sections
+# use plain circles. Returns a list of cached, print-ready pieces (strings/
+# data.frames/file paths); see print_gene_list_result() for how they're used.
+compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
+                                      roll_dir_classifier, pct_dir_classifier,
+                                      use_shape_overlay = FALSE, bg_string_ids = NULL,
+                                      node_score_fn = NULL) {
+  .list_name <- tools::file_path_sans_ext(basename(.gf))
+  .genes_sym <- read_gene_vector(.gf)
+  .mapped    <- intersect(.genes_sym, igraph::V(net_full)$name)
+  .direction <- roll_dir_classifier(.list_name)
+
+  res <- list(list_name = .list_name, direction = .direction, skip_message = NULL,
+              connectivity_line = NULL, modules_line = NULL, display_df = NULL,
+              png_path = NULL, clust_desc = NULL, network_summary_row = NULL)
+
+  if (length(.mapped) < MIN_MAPPED) {
+    res$skip_message <- sprintf("> Too few mapped genes for %s (need >= %d).", .list_name, MIN_MAPPED)
+    return(res)
+  }
+
+  # Load DOMINO's module membership BEFORE building the plotted network, and
+  # do NOT restrict it to the active input list: DOMINO's PCST optimizer
+  # legitimately adds "passenger"/connector genes to a module -- genes that
+  # weren't individually active but sit topologically between active genes,
+  # which is exactly what makes network-based module discovery meaningful
+  # (vs. plain set overlap).
+  .domino <- load_domino_modules(.list_name, modules_dir)
+  .clusters_df <- if (!is.null(.domino$clusters_df)) {
+    .domino$clusters_df %>% dplyr::filter(node %in% igraph::V(net_full)$name)
+  } else NULL
+  .module_stats <- .domino$module_stats
+
+  # Reorder modules by size (number of genes) descending, capped to the 20
+  # largest -- keeps the network plot legend/description table readable.
+  # Renumbering is applied identically to module_stats so the p_value/p_adj
+  # join below stays aligned.
+  .n_mod_total <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
+  if (!is.null(.clusters_df) && nrow(.clusters_df) > 0) {
+    .cl_counts <- .clusters_df %>%
+      dplyr::group_by(cluster) %>%
+      dplyr::summarise(n = dplyr::n(), .groups = "drop") %>%
+      dplyr::arrange(desc(n), cluster)
+    .cl_map <- setNames(seq_len(nrow(.cl_counts)), .cl_counts$cluster)
+    .clusters_df$cluster <- .cl_map[as.character(.clusters_df$cluster)]
+    if (!is.null(.module_stats)) {
+      .module_stats <- .module_stats %>%
+        dplyr::filter(cluster %in% as.integer(names(.cl_map))) %>%
+        dplyr::mutate(cluster = .cl_map[as.character(cluster)])
+    }
+    .clusters_df <- .clusters_df %>% dplyr::filter(cluster <= 20)
+  }
+  .n_mod <- if (!is.null(.clusters_df)) length(unique(.clusters_df$cluster)) else NA_integer_
+
+  # Plotted/analysed network = active input genes UNION every (capped,
+  # renumbered) module's member genes, so DOMINO's connector genes are visible.
+  .plot_gene_pool <- union(.genes_sym, if (!is.null(.clusters_df)) .clusters_df$node else character(0))
+  .net <- igraph::induced_subgraph(net_full, igraph::V(net_full)[igraph::V(net_full)$name %in% .plot_gene_pool])
+  if (igraph::vcount(.net) == 0) {
+    res$skip_message <- sprintf("> No network retrieved for %s.", .list_name)
+    return(res)
+  }
+
+  # Keep only connected nodes (nodes with >=1 edge at the score threshold)
+  .connected <- igraph::V(.net)[igraph::degree(.net) > 0]
+  .net_conn  <- igraph::induced_subgraph(.net, .connected)
+  .n_nodes   <- igraph::vcount(.net_conn)
+  .n_edges   <- igraph::ecount(.net_conn)
+  .n_connector <- sum(!igraph::V(.net_conn)$name %in% .genes_sym)
+
+  res$connectivity_line <- sprintf(
+    "Connected nodes: **%d** (%d input genes + %d DOMINO connector genes) | Edges: **%d** | Input genes in network: **%d**",
+    .n_nodes, .n_nodes - .n_connector, .n_connector, .n_edges, length(.mapped))
+
+  if (.n_nodes < 3) {
+    res$skip_message <- "> Too few connected nodes — network plot skipped."
+    res$network_summary_row <- tibble(
+      gene_list = .list_name, n_input = length(.mapped), n_connected = .n_nodes,
+      n_edges = .n_edges, n_modules = .n_mod_total)
+    return(res)
+  }
+
+  .pct_dir_label <- pct_dir_classifier(.list_name)
+
+  if (!is.null(.clusters_df)) {
+    # DOMINO's nodes ARE gene symbols already, so node == gene here.
+    .clusters_df$gene <- .clusters_df$node
+
+    .clusters_out <- .clusters_df
+    attr_df <- .attr_df_global  # same table for every gene list/tool, computed once above
+    if (!is.null(attr_df)) {
+      .clusters_out <- .clusters_out %>%
+        dplyr::left_join(attr_df, by = c("gene" = "gene"))
+    }
+
+    .clust_file <- file.path(ami_networks_dir, sprintf("%s_%s_domino_clusters.tsv", prefix, .list_name))
+    readr::write_tsv(.clusters_out %>% dplyr::arrange(cluster, gene), .clust_file)
+    res$modules_line <- sprintf("Modules found: **%d** of **%d** total (showing the 20 largest; written to `%s`)",
+                                 .n_mod, .n_mod_total, basename(.clust_file))
+
+    .clust_desc <- describe_clusters(
+      string_db, .clusters_df, setNames(.clusters_df$node, .clusters_df$node),
+      module_stats = .module_stats, min_cluster_genes = .min_cluster_genes,
+      bg_string_ids = bg_string_ids
+    )
+
+    if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
+      .cl_pcts <- purrr::map_dfr(sort(unique(.clusters_df$cluster)), function(cl_id) {
+        cl_genes <- .clusters_df$gene[.clusters_df$cluster == cl_id]
+        compute_term_overlap_percentages(paste(cl_genes, collapse = ","), attr_df, .pct_dir_label) %>%
+          mutate(cluster = cl_id)
+      })
+      .clust_desc <- .clust_desc %>% dplyr::left_join(.cl_pcts, by = "cluster")
+    }
+
+    # Persist module-level descriptions (incl. DOMINO's own p-value) as a
+    # durable artifact downstream consumers can read.
+    .clust_desc_file <- file.path(ami_networks_dir, sprintf("%s_%s_domino_module_descriptions.tsv", prefix, .list_name))
+    readr::write_tsv(.clust_desc %>% dplyr::arrange(desc(n_genes)), .clust_desc_file)
+
+    if (nrow(.clust_desc) > 0) {
+      res$clust_desc <- .clust_desc %>%
+        dplyr::mutate(gene_list = .list_name, direction = .direction, .before = 1)
+    }
+
+    .clust_desc_display <- .clust_desc %>%
+      dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
+      dplyr::arrange(desc(n_genes))
+
+    if (nrow(.clust_desc_display) > 0) {
+      if (!is.null(gene_scores_df)) {
+        if (.pct_dir_label == "top") {
+          display_df <- .clust_desc_display %>%
+            dplyr::select(
+              Module = cluster, Genes = n_genes,
+              `Representative genes` = genes, `Top enriched terms` = description,
+              `gate_sig (%)` = gate_sig, `gate_fdr (%)` = gate_fdr,
+              `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
+              `fade_top (%)` = fade_top, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `accum_top (%)` = accum_top
+            )
+        } else if (.pct_dir_label == "bottom") {
+          display_df <- .clust_desc_display %>%
+            dplyr::select(
+              Module = cluster, Genes = n_genes,
+              `Representative genes` = genes, `Top enriched terms` = description,
+              `gate_sig (%)` = gate_sig, `gate_fdr (%)` = gate_fdr,
+              `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
+              `fade_bottom (%)` = fade_bottom, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `accum_bottom (%)` = accum_bottom
+            )
+        } else {
+          display_df <- .clust_desc_display %>%
+            dplyr::select(
+              Module = cluster, Genes = n_genes,
+              `Representative genes` = genes, `Top enriched terms` = description,
+              `gate_sig (%)` = gate_sig, `gate_fdr (%)` = gate_fdr,
+              `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
+              `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
+              `fade (%)` = fade, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
+              `accum (%)` = accum
+            )
+        }
+      } else {
+        display_df <- .clust_desc_display %>%
+          dplyr::select(Module = cluster, Genes = n_genes,
+                         `Representative genes` = genes, `Top enriched terms` = description)
+      }
+
+      # Append DOMINO's own per-module significance (row-aligned: display_df
+      # derives from .clust_desc_display via select(), preserving row order).
+      if (all(c("domino_p_value", "domino_p_adj") %in% names(.clust_desc_display))) {
+        display_df <- dplyr::bind_cols(
+          display_df,
+          .clust_desc_display %>% dplyr::transmute(
+            `DOMINO p`     = signif(domino_p_value, 3),
+            `DOMINO p.adj` = signif(domino_p_adj, 3)
+          )
+        )
+      }
+
+      res$display_df <- collapsible_table(display_df)
+    }
+
+    .cl_labels <- setNames(.clust_desc$description, as.character(.clust_desc$cluster))
+    .cl_labels <- .cl_labels[!.cl_labels %in% c("Too small", "No enrichment")]
+
+    .clusters_df_viz <- .clusters_df %>%
+      dplyr::filter(cluster %in% .clust_desc$cluster[.clust_desc$n_genes >= .min_cluster_genes])
+  } else {
+    .cl_labels <- NULL
+    .clusters_df_viz <- .clusters_df
+  }
+
+  # Restrict the PLOTTED graph to nodes in the shown (top-20,
+  # min_cluster_genes-passing) modules -- not just their colouring.
+  .net_plot <- if (!is.null(.clusters_df_viz) && nrow(.clusters_df_viz) > 0) {
+    igraph::induced_subgraph(
+      .net_conn,
+      igraph::V(.net_conn)[igraph::V(.net_conn)$name %in% .clusters_df_viz$node]
+    )
+  } else {
+    .net_conn
+  }
+
+  # Direction-matched node signal -- node_score_fn is this tool's own raw
+  # per-gene statistic builder (caas_node_score/rer_node_score/fade_node_score
+  # above), evaluated for whichever direction this gene list belongs to.
+  .node_signal <- if (!is.null(node_score_fn)) node_score_fn(.pct_dir_label) else NULL
+
+  .node_shape <- if (use_shape_overlay) compute_gene_shapes(.pct_dir_label, .attr_df_global) else NULL
+
+  .png_path <- file.path(ami_networks_dir, sprintf("%s_%s_domino_network.png", prefix, .list_name))
+  png(.png_path, width = 1800, height = 1500, res = 160)
+  plot_cluster_network(
+    .net_plot, .clusters_df_viz,
+    title          = sprintf("%s — DOMINO modules (score >= %s, top 20 modules)", .list_name, params$domino_network_score_thr),
+    cluster_labels = .cl_labels,
+    node_signal    = .node_signal,
+    active_genes   = .genes_sym,
+    vertex_shape   = .node_shape
+  )
+  dev.off()
+  res$png_path <- .png_path
+
+  res$network_summary_row <- tibble(
+    gene_list = .list_name, n_input = length(.mapped), n_connected = .n_nodes,
+    n_edges = .n_edges, n_modules = .n_mod
+  )
+  res
+}
+
+# Cheap re-emission of a compute_gene_list_result() -- no recomputation, just
+# cat()/kable() on already-cached strings/data.frames/file paths. Called once
+# per direction tab a gene list belongs to (its own direction AND "Global").
+print_gene_list_result <- function(res) {
+  cat(sprintf("\n\n#### %s\n\n", res$list_name))
+  if (!is.null(res$skip_message)) { cat(res$skip_message, "\n\n"); return(invisible(NULL)) }
+  if (!is.null(res$connectivity_line)) cat(res$connectivity_line, "\n\n")
+  if (!is.null(res$modules_line)) cat(res$modules_line, "\n\n")
+  if (!is.null(res$display_df)) {
+    print(knitr::kable(
+      res$display_df,
+      caption = sprintf("Module functional descriptions — %s", res$list_name),
+      escape = FALSE
+    ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed"), full_width = TRUE))
+  }
+  if (!is.null(res$png_path)) cat(sprintf("![](%s)\n\n", res$png_path))
+  invisible(NULL)
+}
+
+# ── "Module summary across gene lists" rollup (term x threshold heatmap etc) ─
+# Generic over any tool's clust_desc_all; used identically by CAAS/FADE/RER.
+.normalize_term <- function(x) {
+  x <- tolower(x)
+  x <- gsub("[^a-z0-9 ]", " ", x)
+  gsub("\\s+", " ", trimws(x))
+}
+# A module's description can recur, worded slightly differently, across
+# nested/related gene lists sharing most of their genes -- "loose similarity"
+# (near-duplicate strings: case, punctuation, minor rewording) collapses to
+# the same row via normalized edit-distance (base R's own utils::adist()),
+# not just exact string equality. A SECOND, distinct kind of duplicate is
+# genuine NESTING: one term's full word set contained inside another's (e.g.
+# "Primary ciliary dyskinesia" inside "Axonemal dynein complex and Primary
+# ciliary dyskinesia", or "NADPH oxidase complex" inside "phagocyte NADPH
+# oxidase complex") -- character-level edit distance alone rejects these
+# (the extra words dominate the ratio even though one term is wholly
+# contained in the other), so containment is checked explicitly and forces a
+# merge regardless of the edit-distance threshold. Genuinely different terms
+# (no containment, low edit-distance similarity) stay separate.
+.term_contains <- function(a, b) {
+  wa <- strsplit(a, " ")[[1]]; wb <- strsplit(b, " ")[[1]]
+  if (length(wa) == 0 || length(wb) == 0) return(FALSE)
+  short <- if (length(wa) <= length(wb)) wa else wb
+  long  <- if (length(wa) <= length(wb)) wb else wa
+  all(short %in% long)
+}
+.cluster_terms <- function(terms, sim_thr = 0.85) {
+  norm <- vapply(terms, .normalize_term, character(1))
+  reps_norm <- character(0); reps_orig <- character(0)
+  assign <- integer(length(terms))
+  for (i in seq_along(terms)) {
+    if (length(reps_norm) == 0) { reps_norm <- norm[i]; reps_orig <- terms[i]; assign[i] <- 1L; next }
+    d <- utils::adist(norm[i], reps_norm)[1, ]
+    sim <- 1 - d / pmax(nchar(norm[i]), nchar(reps_norm), 1)
+    contained <- vapply(reps_norm, function(r) .term_contains(norm[i], r), logical(1))
+    sim[contained] <- 1
+    best <- which.max(sim)
+    if (sim[best] >= sim_thr) {
+      assign[i] <- best
+      # A nested/compound description folding into a shorter existing one
+      # (containment match) adopts the SHORTER original text as the cluster's
+      # representative -- the compound phrasing is just the longer term's own
+      # verbose restatement of the shorter, more canonical one. Plain
+      # near-duplicate merges (no containment) keep whichever was seen first.
+      if (contained[best] && nchar(terms[i]) < nchar(reps_orig[best])) {
+        reps_orig[best] <- terms[i]
+      }
+    } else {
+      reps_norm <- c(reps_norm, norm[i]); reps_orig <- c(reps_orig, terms[i])
+      assign[i] <- length(reps_norm)
+    }
+  }
+  reps_orig[assign]
+}
+
+# ── Collapsible long-cell helper (kable HTML tables) ─────────────────────────
+# Wraps any character value that would run past ~3 rendered lines in a native
+# <details>/<summary> disclosure (no JS needed) so wide representative-gene or
+# multi-term description cells don't blow out a table row -- collapsed to a
+# short preview by default, click to expand. Always HTML-escapes its input
+# first, so every character column in a table can be safely piped through
+# this before calling kable(..., escape = FALSE) -- short values still come
+# back escaped-but-unwrapped, so mixing collapsible and plain columns in one
+# escape=FALSE table stays safe from accidental HTML injection out of gene
+# symbols/term text.
+.html_escape <- function(x) {
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;",  x, fixed = TRUE)
+  x <- gsub(">", "&gt;",  x, fixed = TRUE)
+  x <- gsub('"', "&quot;", x, fixed = TRUE)
+  x
+}
+collapsible_cell <- function(x, char_thr = 180, preview_chars = 100) {
+  x <- as.character(x)
+  out <- rep(NA_character_, length(x))
+  ok <- !is.na(x)
+  long <- ok & nchar(x) > char_thr
+  if (any(long)) {
+    out[long] <- sprintf(
+      '<details><summary>%s&hellip; <span style="color:#888;font-size:0.85em;">(click to expand)</span></summary>%s</details>',
+      .html_escape(substr(x[long], 1, preview_chars)), .html_escape(x[long])
+    )
+  }
+  short <- ok & !long
+  out[short] <- .html_escape(x[short])
+  out
+}
+# Applies collapsible_cell() to every character column of a display data.frame
+# (numeric/logical columns pass through untouched -- they can't carry stray
+# HTML) so a whole table can move to escape=FALSE safely in one call.
+collapsible_table <- function(df) {
+  df %>% dplyr::mutate(dplyr::across(dplyr::where(is.character), collapsible_cell))
+}
+
+.render_rollup <- function(df, caption) {
+  if (is.null(df) || nrow(df) == 0) { cat(sprintf("_No modules to show (%s)._\n\n", caption)); return(invisible(NULL)) }
+  df <- df %>% dplyr::filter(!description %in% c("Too small", "No enrichment"))
+  if (nrow(df) == 0) { cat(sprintf("_No described modules to show (%s)._\n\n", caption)); return(invisible(NULL)) }
+
+  if ("domino_p_adj" %in% names(df)) {
+    df <- df %>% dplyr::arrange(domino_p_adj, dplyr::desc(n_genes))
+  } else {
+    df <- df %>% dplyr::arrange(dplyr::desc(n_genes))
+  }
+
+  disp <- df %>% dplyr::transmute(
+    `Gene list` = gene_list, Module = cluster, Genes = n_genes,
+    # Full (untruncated) representative-gene text -- collapsible_table() below
+    # folds anything past ~3 lines into a click-to-expand <details>, so this no
+    # longer needs str_trunc()'s hard 60-char cut to stay readable.
+    `Representative genes` = genes,
+    `Top enriched terms` = description,
+    `gate_sig (%)` = if ("gate_sig" %in% names(df)) gate_sig else NA,
+    `gate_fdr (%)` = if ("gate_fdr" %in% names(df)) gate_fdr else NA,
+    `DOMINO p` = if ("domino_p_value" %in% names(df)) signif(domino_p_value, 3) else NA,
+    `DOMINO p.adj` = if ("domino_p_adj" %in% names(df)) signif(domino_p_adj, 3) else NA
+  ) %>% dplyr::select(dplyr::where(~ !all(is.na(.))))
+
+  print(knitr::kable(collapsible_table(disp), caption = caption, escape = FALSE) %>%
+          kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE))
+}
+
+.render_term_heatmap <- function(term_rows, gene_list_order, title) {
+  if (is.null(term_rows) || nrow(term_rows) == 0) { cat(sprintf("_No described terms to show (%s)._\n\n", title)); return(invisible(NULL)) }
+  term_rows <- term_rows %>% dplyr::filter(gene_list %in% gene_list_order)
+  if (nrow(term_rows) == 0) { cat(sprintf("_No described terms for these gene lists (%s)._\n\n", title)); return(invisible(NULL)) }
+
+  pres <- term_rows %>% dplyr::distinct(term, gene_list)
+  # Order terms by how many lists they appear under (most pervasive first),
+  # then alphabetically as a tiebreaker.
+  term_counts <- pres %>% dplyr::count(term, name = "n_thresholds") %>%
+    dplyr::arrange(dplyr::desc(n_thresholds), term)
+  pres <- pres %>%
+    dplyr::mutate(gene_list = factor(gene_list, levels = gene_list_order),
+                  term = factor(term, levels = rev(term_counts$term)))
+
+  n_terms <- nrow(term_counts)
+  p <- ggplot(pres, aes(x = gene_list, y = term)) +
+    geom_tile(fill = "#2c7fb8", colour = "white", linewidth = 0.6) +
+    scale_x_discrete(drop = FALSE) +
+    theme_minimal(base_size = 11) +
+    theme(axis.text.x = element_text(angle = 30, hjust = 1),
+          axis.text.y = element_text(size = pmax(6, pmin(10, 260 / max(n_terms, 1))))) +
+    labs(title = sprintf("Described terms by gene list — %s", title),
+         x = "gene list", y = NULL)
+  print(p)
+  cat("\n\n")
+
+  # "Numbers" alongside the plot: which exact gene lists each term appears
+  # under (a plot alone isn't enough -- always pair it with the underlying
+  # counts/membership).
+  disp <- pres %>%
+    dplyr::mutate(gene_list = as.character(gene_list)) %>%
+    dplyr::arrange(term, gene_list) %>%
+    dplyr::group_by(term) %>%
+    dplyr::summarise(`N lists` = dplyr::n(),
+                      `Gene lists` = paste(gene_list, collapse = ", "),
+                      .groups = "drop") %>%
+    dplyr::arrange(dplyr::desc(`N lists`), term) %>%
+    dplyr::rename(Term = term)
+  print(knitr::kable(collapsible_table(disp), caption = sprintf("Term -> gene-list membership — %s", title),
+                      escape = FALSE) %>%
+          kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE))
+  cat("\n\n")
+}
+
+# ── Full nested-tab rendering for one tool ───────────────────────────────────
+# Direction is the OUTER tab (Global/Top/Bottom or Global/Acc/Decc, matching
+# every other report's Global-first convention), each with THREE sub-tabs:
+# Modules (this direction's own gene-list networks), Recurrence Table (the
+# module-description rollup), Recurrence Heatmap (term x gene-list heatmap +
+# membership table) -- replacing the old separate "Active Modules" / "Module
+# summary" top-level tabsets with one merged structure.
+#
+# `direction_tabs` is a named list, tab label -> `direction` filter value
+# (NULL = show everything unfiltered, e.g. the Global tab -- matches each
+# gene list's own `direction`, from roll_dir_classifier()). `gene_list_orders`
+# is a named list, same names, -> the ordered vector of gene-list names shown
+# in that tab's term x list heatmap. write_all_lists_file = TRUE only for
+# CAAS, to preserve the original unprefixed filenames (SCORING_COMPARE_REPORT
+# already consumes module_descriptions_all_lists.tsv downstream).
+#
+# Each gene list's (expensive) computation runs exactly ONCE via
+# compute_gene_list_result(), even though a list is displayed under both its
+# own direction tab and "Global" -- print_gene_list_result() just re-emits the
+# cached result there, no recomputation.
+render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, prefix,
+                                        roll_dir_classifier, pct_dir_classifier,
+                                        direction_tabs, gene_list_orders,
+                                        use_shape_overlay = FALSE, bg_string_ids = NULL,
+                                        node_score_fn = NULL, write_all_lists_file = FALSE) {
+  results <- lapply(gene_list_files, compute_gene_list_result,
+                     net_full = net_full, modules_dir = modules_dir, prefix = prefix,
+                     roll_dir_classifier = roll_dir_classifier, pct_dir_classifier = pct_dir_classifier,
+                     use_shape_overlay = use_shape_overlay, bg_string_ids = bg_string_ids,
+                     node_score_fn = node_score_fn)
+
+  clust_desc_all <- dplyr::bind_rows(lapply(results, `[[`, "clust_desc"))
+  if (nrow(clust_desc_all) == 0) clust_desc_all <- NULL
+  network_summary_all <- dplyr::bind_rows(lapply(results, `[[`, "network_summary_row"))
+
+  term_rows_all <- if (!is.null(clust_desc_all)) {
+    clust_desc_all %>%
+      dplyr::filter(!description %in% c("Too small", "No enrichment")) %>%
+      dplyr::mutate(term_raw = strsplit(description, "\\s*/\\s*")) %>%
+      tidyr::unnest(term_raw) %>%
+      dplyr::mutate(term_raw = trimws(term_raw)) %>%
+      dplyr::filter(nzchar(term_raw))
+  } else NULL
+  if (!is.null(term_rows_all) && nrow(term_rows_all) > 0) {
+    term_rows_all$term <- .cluster_terms(term_rows_all$term_raw)
+  }
+
+  for (dir_label in names(direction_tabs)) {
+    filter_val <- direction_tabs[[dir_label]]
+    cat(sprintf("\n\n## %s {.tabset}\n\n", dir_label))
+
+    sel <- if (is.null(filter_val)) results else Filter(function(r) r$direction == filter_val, results)
+
+    cat("\n\n### Modules\n\n")
+    if (length(sel) == 0) {
+      cat("_No gene lists for this direction._\n\n")
+    } else {
+      for (r in sel) print_gene_list_result(r)
+    }
+
+    cat("\n\n### Recurrence Table\n\n")
+    df <- if (is.null(filter_val)) clust_desc_all
+          else if (!is.null(clust_desc_all)) dplyr::filter(clust_desc_all, direction == filter_val)
+          else NULL
+    .render_rollup(df, sprintf("%s gene lists", dir_label))
+
+    cat("\n\n### Recurrence Heatmap\n\n")
+    .render_term_heatmap(term_rows_all, gene_list_orders[[dir_label]], dir_label)
+  }
+
+  if (!is.null(network_summary_all) && nrow(network_summary_all) > 0) {
+    readr::write_tsv(network_summary_all, file.path(ami_networks_dir, sprintf("%s_network_summary.tsv", prefix)))
+    cat("\n\n## Network summary\n\n")
+    print(knitr::kable(network_summary_all, caption = "DOMINO network summary") %>%
+            kableExtra::kable_styling(bootstrap_options = c("striped", "hover", "condensed")))
+  }
+
+  desc_file <- if (write_all_lists_file) "module_descriptions_all_lists.tsv" else sprintf("%s_module_descriptions_all_lists.tsv", prefix)
+  term_file <- if (write_all_lists_file) "term_threshold_membership.tsv" else sprintf("%s_term_threshold_membership.tsv", prefix)
+  if (!is.null(clust_desc_all)) {
+    readr::write_tsv(clust_desc_all, file.path(ami_networks_dir, desc_file))
+  }
+  if (!is.null(term_rows_all) && nrow(term_rows_all) > 0) {
+    readr::write_tsv(term_rows_all, file.path(ami_networks_dir, term_file))
+  }
+  invisible(clust_desc_all)
+}
+
+.TOP_THRESHOLDS    <- c("top25", "top10", "top5", "top1")
+.BOTTOM_THRESHOLDS <- c("bottom25", "bottom10", "bottom5", "bottom1")
+.ALL_THRESHOLDS    <- c(.TOP_THRESHOLDS, .BOTTOM_THRESHOLDS)
+```
+
+# CAAS Modules {.tabset}
+
+Network score threshold: **`r params$domino_network_score_thr`** (= `r params$domino_network_score_thr / 1000` on the 0–1 STRING scale).
+Only nodes with at least one edge at this confidence level (both endpoints in `cleaned_background`) are in DOMINO's input network.
+Module finding + significance: **DOMINO** (Shamir-Lab) — Bonferroni-corrected hypergeometric p-value per module, computed by DOMINO itself
+(not a STRING PPI-density test, which cannot honour a custom background above 2000 proteins).
+
+Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant
+(direction-matched to this list), diamond = RER-accelerating, hexagon = RER-decelerating (both regardless of this
+list's own direction), star = FADE-significant overlapping either RER direction.
+
+Each direction below (**Global**/**Top**/**Bottom**) has three sub-tabs: **Modules** (network
+plot + module description table, one per gene list in this direction), **Recurrence Table**
+(every DOMINO module's best describing term pooled across this direction's gene lists, sorted
+by DOMINO significance (Bonferroni p.adj) when available else module size — full detail,
+including direction-specific percentile/cross-module columns, remains in Modules), and
+**Recurrence Heatmap** (a term x gene-list-threshold heatmap + membership table — each
+described term named once, near-duplicate/nested wording collapsed together, see
+`.cluster_terms()` — with the thresholds it was recovered under; a term recurring across
+several thresholds is a stronger candidate than one appearing at a single cutoff). **Global**
+pools all gene lists (`top25`...`top1`, `bottom25`...`bottom1`); **Top**/**Bottom** restrict to
+that direction's own lists.
+
+```{r caas_domino_networks, fig.width=10, fig.height=8, results='asis'}
+.caas_net_full <- build_tool_network(params$domino_network_sif, params$domino_edge_scores_file)
+CAAS_clust_desc_all <- render_tool_section_nested(
+  gene_list_files, .caas_net_full, params$domino_modules_dir, "caas",
+  roll_dir_classifier = top_bottom_roll_classifier("Other"),
+  pct_dir_classifier  = top_bottom_pct_classifier,
+  direction_tabs      = list(Global = NULL, Top = "Top", Bottom = "Bottom"),
+  gene_list_orders    = list(Global = .ALL_THRESHOLDS, Top = .TOP_THRESHOLDS, Bottom = .BOTTOM_THRESHOLDS),
+  use_shape_overlay   = TRUE,
+  bg_string_ids       = bg_string_ids,  # report-global CAAS background, already mapped above
+  node_score_fn       = caas_node_score,
+  write_all_lists_file = TRUE
+)
+```
+
+# FADE Modules {.tabset}
+
+FADE's own DOMINO network, built against FADE's own gene universe (its own tested-gene
+background per direction, unioned for Global -- verified on real data to differ
+meaningfully from CAAS's cleaned_background; see `[bugfix_fcs_universe_wrong_background]`).
+Skipped entirely when FADE didn't run this invocation. Same nested layout as CAAS above:
+each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Table** /
+**Recurrence Heatmap** sub-tabs.
+
+```{r fade_domino_networks, fig.width=10, fig.height=8, results='asis'}
+FADE_clust_desc_all <- NULL
+if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_dir)) {
+  .fade_net_full <- build_tool_network(params$fade_domino_network_sif, params$fade_domino_edge_scores_file)
+  .fade_gene_list_files <- list.files(params$fade_gene_lists_dir, pattern = "\\.txt$", full.names = TRUE)
+  # Order lists Global, Top, Bottom within the Modules sub-tab (matching the
+  # section's own tab order), not the alphabetical default list.files() would give.
+  .fade_rank <- dplyr::case_when(
+    grepl("global", basename(.fade_gene_list_files), ignore.case = TRUE) ~ 0L,
+    grepl("top",    basename(.fade_gene_list_files), ignore.case = TRUE) ~ 1L,
+    grepl("bottom", basename(.fade_gene_list_files), ignore.case = TRUE) ~ 2L,
+    TRUE ~ 3L
+  )
+  .fade_gene_list_files <- .fade_gene_list_files[order(.fade_rank)]
+
+  if (length(.fade_gene_list_files) > 0) {
+    # FADE's own background, mapped to STRING ids -- module functional-term
+    # enrichment (describe_clusters()) uses this instead of CAAS's background,
+    # matching FADE's own DOMINO network already being built against it.
+    .fade_bg_string_ids <- if (!is.null(params$fade_background_file) && file.exists(params$fade_background_file)) {
+      safe_string_map_ids(read_gene_vector(params$fade_background_file))
+    } else bg_string_ids
+    FADE_clust_desc_all <- render_tool_section_nested(
+      .fade_gene_list_files, .fade_net_full, params$fade_domino_modules_dir, "fade",
+      roll_dir_classifier = top_bottom_roll_classifier("Global"),
+      pct_dir_classifier  = top_bottom_pct_classifier,
+      direction_tabs      = list(Global = NULL, Top = "Top", Bottom = "Bottom"),
+      gene_list_orders    = list(
+        Global = c("fade_global_significant", "fade_top_significant", "fade_bottom_significant"),
+        Top    = "fade_top_significant",
+        Bottom = "fade_bottom_significant"
+      ),
+      use_shape_overlay   = FALSE,
+      bg_string_ids       = .fade_bg_string_ids,
+      node_score_fn       = fade_node_score
+    )
+  } else {
+    cat("_No FADE gene list files found._\n\n")
+  }
+} else {
+  cat("_FADE did not run this invocation — section skipped._\n\n")
+}
+```
+
+# RER Modules {.tabset}
+
+RER's own DOMINO network, built against RER's own gene universe (every gene RERConverge
+actually attempted -- verified on real data to exactly match RER's own published universe
+file). Skipped entirely when RER didn't run this invocation. Same nested layout as CAAS
+above: each direction tab (**Global**/**Acc**/**Decc**) holds **Modules** / **Recurrence
+Table** / **Recurrence Heatmap** sub-tabs.
+
+```{r rer_domino_networks, fig.width=10, fig.height=8, results='asis'}
+RER_clust_desc_all <- NULL
+if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_dir)) {
+  .rer_net_full <- build_tool_network(params$rer_domino_network_sif, params$rer_domino_edge_scores_file)
+  .rer_gene_list_files <- list.files(params$rer_gene_lists_dir, pattern = "\\.txt$", full.names = TRUE)
+  # Order lists Global (rer_significant), Acc, Decc within the Modules sub-tab.
+  .rer_rank <- dplyr::case_when(
+    grepl("accelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 1L,
+    grepl("decelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 2L,
+    TRUE ~ 0L
+  )
+  .rer_gene_list_files <- .rer_gene_list_files[order(.rer_rank)]
+
+  if (length(.rer_gene_list_files) > 0) {
+    # RER's own background, mapped to STRING ids (verified on real data to
+    # exactly match RER's own published universe file) -- same rationale as FADE above.
+    .rer_bg_string_ids <- if (!is.null(params$rer_background_file) && file.exists(params$rer_background_file)) {
+      safe_string_map_ids(read_gene_vector(params$rer_background_file))
+    } else bg_string_ids
+    RER_clust_desc_all <- render_tool_section_nested(
+      .rer_gene_list_files, .rer_net_full, params$rer_domino_modules_dir, "rer",
+      roll_dir_classifier = rer_roll_classifier,
+      pct_dir_classifier  = always_global_pct_classifier,
+      direction_tabs      = list(Global = NULL, Acc = "Acc", Decc = "Decc"),
+      gene_list_orders    = list(
+        Global = c("rer_significant", "rer_accelerating", "rer_decelerating"),
+        Acc    = "rer_accelerating",
+        Decc   = "rer_decelerating"
+      ),
+      use_shape_overlay   = FALSE,
+      bg_string_ids       = .rer_bg_string_ids,
+      node_score_fn       = rer_node_score
+    )
+  } else {
+    cat("_No RER gene list files found._\n\n")
+  }
+} else {
+  cat("_RER did not run this invocation — section skipped._\n\n")
+}
+```
+
+---
+
+## Summary
+
+This report summarizes the results of the **AMI (Active Module Identification)**
+analysis: DOMINO-detected network modules per gene list, with STRING-derived
+functional labels and DOMINO's own per-module significance.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>
+
+*Generated by PhyloPhere — AMI Analysis Module*
+*Date of generation: `r Sys.Date()`*

@@ -3,7 +3,7 @@
 /*
  * ACCUMULATION_GENE_LISTS
  * ───────────────────────
- * Extract STRING-ready gene lists and stats from CT_ACCUMULATION randomization output:
+ * Extract AMI-ready gene lists and stats from CT_ACCUMULATION randomization output:
  *   background.txt                  — all genes tested by accumulation for this direction
  *   accumulation_${direction}_significant.txt — genes with Fisher FDR < threshold
  *   fcs_stats.tsv                   — ranked by -log10(Fisher combined p)

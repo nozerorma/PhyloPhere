@@ -1,3 +1,9 @@
+/*
+ * Resource configuration: Local low-spec preset (8cpu/16GB laptop-class box; small/toy runs)
+ * Generated from conf/resources.config -- edit that file and regenerate presets
+ * (or edit this file directly for a one-off tweak), don't hand-diverge silently.
+ */
+
 
 /*
  * Resource configuration: defaults + process label requirements
@@ -5,8 +11,8 @@
 
 params {
     // Defaults used when no profile overrides are active
-    max_memory = 64.GB
-    max_cpus   = 64
+    max_memory = 16.GB
+    max_cpus   = 8
     max_time   = 5.day
 }
 
@@ -28,12 +34,12 @@ process {
         time   = { 12.h * task.attempt }
     }
     withLabel:process_reporting {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
     withLabel:process_reporting_phenotype {
-        cpus   = { 10 }
+        cpus   = { 6 }
         memory = { 6.GB * task.attempt }
         time   = { 2.h  * task.attempt }
     }
@@ -46,13 +52,13 @@ process {
     // process_reporting_dataset defaults on first attempt.
     withName: 'DATASET_PRUNE' {
         cpus          = { 4 }
-        memory        = { 16.GB * task.attempt }
+        memory        = { 12.GB * task.attempt }
         time          = { 4.h   * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
     withLabel:process_contrast_selection {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
@@ -66,7 +72,7 @@ process {
 
     // ── Trait Exploration ───────────────────────────────────────────────────
     withName: 'PHENOTYPE_EXPLORATION' {
-        cpus   = { 10 }
+        cpus   = { 6 }
         memory = { 6.GB * task.attempt }
         time   = { 2.h  * task.attempt }
     }
@@ -76,12 +82,12 @@ process {
         time   = { 2.h  * task.attempt }
     }
     withName: 'CONTRAST_ALGORITHM' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
     withName: 'CI_COMPOSITION_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
@@ -101,18 +107,18 @@ process {
         cpus   = { 1 }
         memory = { 2.GB }
         time   = { 1.h * task.attempt }
-        maxForks   = 8 // Number of parallel jobs to run. Should be total assigned cores % cores per job
+        maxForks   = 2 // Number of parallel jobs to run. Should be total assigned cores % cores per job
     }
     withLabel:process_resample {
-        cpus   = { 12 }
+        cpus   = { 6 }
         memory = { 4.GB }
         time   = { 4.h * task.attempt }
     }
     withLabel:process_boot {
         cpus   = { 1 }
-        memory = { 16.GB }
+        memory = { 12.GB }
         time   = { 72.h * task.attempt }
-        maxForks   = 8
+        maxForks   = 1
     }
     withName: 'DISCOVERY_BATCHED' {
         cpus   = { 4 }
@@ -126,13 +132,13 @@ process {
     }
 
     withName: 'BOOTSTRAP_BATCHED' {
-        cpus   = { 8 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 128.h * task.attempt }
     }
     withLabel:process_boot_batched {
-        cpus   = { 8 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 128.h * task.attempt }
     }
 
@@ -190,36 +196,36 @@ process {
         time   = { 10.m * task.attempt }
     }
     withName: 'CT_POSTPROC_REPORT' {
-        cpus   = { 12 }
+        cpus   = { 6 }
         memory = { 6.GB * task.attempt }
         time   = { 4.h * task.attempt }
     }
 
     // ── CT Signification ──────────────────────────────────────────────────
     withName: 'CAAS_SIGNIFICATION_REPORT' {
-        cpus   = { 12 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 2.h * task.attempt }
     }
 
     // ── CT Disambiguation (increased memory for large metadata; scales on retry) ──
     withName: 'CT_DISAMBIGUATION_RUN' {
-        cpus   = { 12 }
+        cpus   = { 6 }
         memory = { 8.GB * task.attempt }
         time   = { 16.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
     withName: 'CAAS_PERMS_DISAMBIGUATE' {
-        cpus   = { 16 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 24.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
     withName: 'CAAS_PERMS_AGGREGATE' {
         cpus   = { 1 }
-        memory = { 16.GB * task.attempt }
+        memory = { 12.GB * task.attempt }
         time   = { 4.h   * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
@@ -232,24 +238,24 @@ process {
         time   = { 1.h * task.attempt }
     }
     withName: 'ASR_ROBUSTNESS_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
 
     // ── CT Accumulation ───────────────────────────────────────────────────
     withName: 'CT_ACCUMULATION_AGGREGATE' {
-        cpus   = { 16 }
+        cpus   = { 6 }
         memory = { 8.GB  * task.attempt }
         time   = { 4.h   * task.attempt }
     }
     withName: 'CT_ACCUMULATION_RANDOMIZE' {
-        cpus   = { 12 }
-        memory = { 24.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 12.h  * task.attempt }
     }
     withName: 'ACCUMULATION_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h * task.attempt }
     }
@@ -278,7 +284,7 @@ process {
         time   = { 30.m  * task.attempt }
     }
     withName: 'PREP_ALIGNMENTS_BATCHED' {
-        cpus   = { 10 }
+        cpus   = { 6 }
         memory = { 2.GB * task.attempt }
         time   = { 1.h  * task.attempt }
     }
@@ -289,12 +295,12 @@ process {
         time   = { 30.m * task.attempt }
     }
     withName: 'ANNOTATE_TREE_FG' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 30.m * task.attempt }
     }
     withName: 'ANNOTATE_TREE_FG_BATCHED' {
-        cpus          = { 8 }
+        cpus          = { 6 }
         memory        = { 8.GB * task.attempt }
         time          = { 1.h  * task.attempt }
         errorStrategy = { task.exitStatus in [140, 137, 143] ? 'retry' : 'terminate' }
@@ -305,8 +311,8 @@ process {
         // Each HyPhy call gets --cpu 1 and OMP/BLAS thread vars = 1, so N workers
         // use exactly N CPUs — matching the SLURM allocation and stopping node saturation.
         // Increase cpus here (the researcher knob) for more intra-task parallelism.
-        cpus   = { 8 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 12.h * task.attempt }
     }
     withName: 'COLLECT_GENE_SETS' {
@@ -315,12 +321,12 @@ process {
         time   = { 30.m * task.attempt }
     }
     withName: 'FADE_RUN' {
-        cpus   = { 12 }
-        memory = { 16.GB  * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB  * task.attempt }
         time   = { 12.h  * task.attempt }
     }
     withName: 'FADE_REPORT' {
-        cpus   = { 12 }
+        cpus   = { 6 }
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
@@ -340,7 +346,7 @@ process {
         // Streams the full PrimateAI-3D database (~2 GB gz); needs enough memory
         // to hold the in-memory position lookup table.
         cpus   = { 2 }
-        memory = { 16.GB * task.attempt }
+        memory = { 12.GB * task.attempt }
         time   = { 8.h  * task.attempt }
     }
     withName: 'COSMIC_MAP' {
@@ -360,32 +366,32 @@ process {
     // RER_TREES reads all gene trees into R at once; needs significantly more
     // memory than the generic process_reporting label provides (8 GB × attempt).
     withName: 'RER_TREES' {
-        cpus   = { 8 }
-        memory = { 32.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 8.h   * task.attempt }
     }
     // RER_MATRIX loads the same gene-tree forest as RER_TREES and then calls
     // getAllResiduals() — needs at least as much memory as RER_TREES.
     withName: 'RER_MATRIX' {
-        cpus   = { 8 }
-        memory = { 32.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 8.h   * task.attempt }
     }
     // RER analysis as such loads the same gene-tree forest as RER_TREES and then calls
     // getAllResiduals() — needs at least as much memory as RER_TREES.
     withName: 'RER_CONT' {
-        cpus   = { 8 }
-        memory = { 32.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 8.h   * task.attempt }
     }
     withName: 'RER_BIN' {
         cpus   = { 4 }
-        memory = { 32.GB * task.attempt }
+        memory = { 12.GB * task.attempt }
         time   = { 8.h   * task.attempt }
     }
 
     withName: 'RER_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
@@ -398,68 +404,68 @@ process {
     // ── FCS, STRING and POSENRICH ────────────────────────────────
     // ── SCORING ────────────────────────────────
     withName: 'SCORING_COMPUTE' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
     withName: 'SCORING_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
     // ── FCS ────────────────────────────────
     withName: 'SCORING_FCS_REPORT' {
-        cpus          = { 12 }
-        memory        = { 16.GB * task.attempt }
+        cpus          = { 6 }
+        memory        = { 12.GB * task.attempt }
         time          = { 8.h * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
     withName: 'TOOL_FCS_REPORT' {
-        cpus          = { 12 }
-        memory        = { 16.GB * task.attempt }
+        cpus          = { 6 }
+        memory        = { 12.GB * task.attempt }
         time          = { 8.h * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
     withName: 'RER_FCS_REPORT' {
-        cpus          = { 8 }
-        memory        = { 32.GB * task.attempt }
+        cpus          = { 6 }
+        memory        = { 12.GB * task.attempt }
         time          = { 8.h * task.attempt }
         errorStrategy = { task.exitStatus in [3, 137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
     withName: 'EXCLUDED_ENRICHMENT_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h * task.attempt }
     }
     withName: 'SCORING_COMPARE_REPORT' {
-        cpus   = { 12 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 4.h * task.attempt }
 
     }
     // ── AMI (DOMINO active modules) ───────────
     withName: 'SCORING_AMI_REPORT' {
-        cpus   = { 12 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 4.h * task.attempt }
     }
     withName: 'TOOL_AMI_REPORT' {
-        cpus   = { 12 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 4.h * task.attempt }
     }
     // ── POSENRICH ────────────────────────────────
     withName: 'POSENRICH_BUILD_GMT' {
-        cpus   = { 8 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 2.h  * task.attempt }
     }
     withName: 'POSENRICH_RUN' {
-        cpus   = { 8 }
-        memory = { 16.GB * task.attempt }
+        cpus   = { 6 }
+        memory = { 12.GB * task.attempt }
         time   = { 8.h  * task.attempt }
     }
 }

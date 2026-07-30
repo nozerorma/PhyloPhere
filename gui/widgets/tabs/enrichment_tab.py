@@ -9,14 +9,13 @@ POSENRICH is bundled here rather than its own tab, matching the reference script
 RUN_ENRICHMENT / RUN_POSENRICH pairing and conf/enrichment.config, which covers
 both FCS/STRING gene-set enrichment and position-wise enrichment in one file.
 
-Two independent STRING-related toggles, both real and both worth keeping distinct
-rather than merging into one checkbox:
-  - scoring_string: the centralized DOMINO-based PPI run + cross-module COMPARE
-    report, driven from workflows/enrichment.nf.
-  - string: each of RER/FADE/Accumulation can *also* run its own STRING report
-    directly from its own workflow file (workflows/rerconverge.nf, fade.nf,
-    ct_accumulation.nf) — publishing under that module's own output tree instead
-    of string/.
+scoring_string (alias scoring_ami) is the single AMI toggle: the centralized
+DOMINO-based AMI run + cross-module COMPARE report, driven from
+workflows/enrichment.nf, covering CAAS/FADE/RER in one unified
+13.AMI_analysis.Rmd. RER/FADE/Accumulation's own gene lists are always computed
+automatically whenever those tools run — no separate --ami flag; the old
+standalone per-module AMI reports (one HTML per tool) were retired since they
+never produced usable output.
 """
 
 # ── Local ─────────────────────────────────────────────────────────────────────
@@ -35,7 +34,6 @@ SPEC = ModuleTabSpec(
     essential_fields=(
         FieldSpec(name="gmt_dir", label="GMT pathway directory", kind="path_dir"),
         FieldSpec(name="string_db_dir", label="STRING database directory", kind="path_dir"),
-        FieldSpec(name="string", label="Run per-module STRING (RER/FADE/Accumulation)", kind="bool"),
         FieldSpec(name="scoring_ami", label="Run centralized DOMINO AMI + STRING PPI + COMPARE", kind="bool"),
         FieldSpec(name="posenrich_enabled", label="Run POSENRICH", kind="bool"),
         FieldSpec(name="egg_members_file", label="eggNOG members file", kind="path_file"),
@@ -58,7 +56,6 @@ SPEC = ModuleTabSpec(
         # CAAS_PERMULATION subworkflow and this report's null, so it has one home.
 
         FieldSpec(name="string_species", label="STRING species (NCBI taxid)"),
-        FieldSpec(name="string_required_score", label="STRING required combined score"),
 
         FieldSpec(name="domino_network_score_thr", label="DOMINO network score threshold"),
         FieldSpec(name="domino_slice_thr", label="DOMINO slice threshold"),

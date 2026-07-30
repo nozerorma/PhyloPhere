@@ -72,6 +72,11 @@ def parse_args():
                    help="max positions per set in background (0 = no cap; GMT sources only)")
     p.add_argument("--char-fracs", default="0.25,0.10,0.05,0.01",
                    help="foreground top-fractions among scored positions, per ranking")
+    p.add_argument("--position-lists-dir", required=True,
+                   help="SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv "
+                        "dir (scoring_compute.R) -- the sole source of posenrich's foreground. SCORING "
+                        "is a mandatory upstream dependency of posenrich (never optional), so there is "
+                        "no local re-ranking fallback: a missing directory or slice file is a hard error.")
     p.add_argument("--padj-thr", type=float, default=0.15,
                    help="BH-adjusted p-value significance threshold")
     p.add_argument("--fold-thr", type=float, default=1.5,
@@ -188,6 +193,31 @@ def direction_scores(df, direction):
     return dict(zip(sub["pos_id"], sub["CAAS_score"]))
 
 
+def load_published_foreground(position_lists_dir, direction, char_fracs):
+    """Read SCORING's published position_lists/slice_<direction><pct>.tsv files
+    (scoring_compute.R) as the foreground_by_frac for one direction. SCORING is
+    a mandatory upstream dependency -- there is no local re-ranking fallback,
+    so a missing directory or slice file is a hard error, not a silent
+    degrade. Returns {frac: (n, set-of-pos_id)}, one entry per requested frac
+    (an empty set for a frac whose published slice is legitimately empty, e.g.
+    no scored positions in that direction -- distinct from the file being
+    absent, which is an error)."""
+    if not position_lists_dir or not os.path.isdir(position_lists_dir):
+        sys.exit(f"[posenrich] --position-lists-dir not found or not a directory: "
+                  f"{position_lists_dir!r}. SCORING's position_lists/ output is mandatory.")
+    out = {}
+    for frac in char_fracs:
+        pct = int(round(frac * 100))
+        path = os.path.join(position_lists_dir, f"slice_{direction}{pct}.tsv")
+        if not os.path.exists(path):
+            sys.exit(f"[posenrich] missing published slice: {path}. "
+                      f"SCORING must publish position_lists/slice_{direction}{pct}.tsv.")
+        df = pd.read_csv(path, sep="\t")
+        pos_ids = set() if df.empty else set(df["Gene"].astype(str) + ":" + df["Position"].astype(str))
+        out[frac] = (len(pos_ids), pos_ids)
+    return out
+
+
 # ── Fisher overlap test ───────────────────────────────────────────────────────
 def annotate_overlap(overlap, annot, flag_names):
     """Cross-module corroboration: of the DISTINCT genes contributing to this
@@ -240,7 +270,14 @@ def run_fisher_for_terms(terms, descs, foreground_by_frac, bg_set, N, min_size, 
             row = dict(pathway=term, description=desc, top_frac=frac,
                       layer_size=mm, foreground_size=nn, observed=k,
                       expected=expected, fold_enrichment=fold, p_value=p,
-                      direction=("enriched" if fold and fold >= 1 else "depleted"))
+                      direction=("enriched" if fold and fold >= 1 else "depleted"),
+                      # N as actually used for THIS row's Fisher test (respects
+                      # per-database coverage restriction, e.g. COSMIC/PAI3D) --
+                      # exposed so report consumers can run their own honest
+                      # position-level hypergeometric tests (e.g. the Overall
+                      # dotplot's position-native FADE-overlap component)
+                      # against the exact same universe, not a re-derived guess.
+                      background_n=N)
             row.update(annotate_overlap(overlap, annot or {}, flag_names or []))
             # Kept only transiently for the leading-edge export; stripped in
             # main() before the row goes into the main wide table (sig is not
@@ -343,11 +380,13 @@ def main():
         sources["characterization"] = (char_terms, char_descs, False)
     print(f"[posenrich] sources: {len(sources)} ({', '.join(sources)})", flush=True)
 
-    # 'global' dropped: every other report in this pipeline is top/bottom-only,
-    # and posenrich's own scatter now pairs top vs bottom directly (see
-    # 16.Position_enrichment_report.Rmd) -- a 'global' ranking has no partner
-    # axis in that pairing and would just be dead weight in the computation.
-    directions = ["top", "bottom"]
+    # 'global' restored alongside top/bottom: FCS scoring (12.FCS_general_report.Rmd)
+    # and AMI (13.AMI_analysis.Rmd) both carry a global/top/bottom triad, and
+    # posenrich should offer the same non-directional view (every position,
+    # no change_side filter) rather than being the odd one out. direction_scores()
+    # already implements "global" -- see its docstring -- it just wasn't in
+    # this loop.
+    directions = ["global", "top", "bottom"]
     rows = []
     leading_edge_rows = []
     for direction in directions:
@@ -355,14 +394,14 @@ def main():
         n_scored = sum(1 for s in obs_scores.values() if s > 0)
         if n_scored == 0:
             continue
-        # Stable, deterministic ranking: sort scored positions by (-score, id).
-        scored_sorted = sorted((p for p in background if obs_scores.get(p, 0.0) > 0),
-                               key=lambda p: (-obs_scores[p], p))
-        foreground_by_frac = {}
-        for frac in char_fracs:
-            n = max(1, int(round(frac * len(scored_sorted))))
-            foreground_by_frac[frac] = (n, set(scored_sorted[:n]))
-        print(f"[posenrich] {direction}: {n_scored} scored positions ranked", flush=True)
+        # Foreground comes exclusively from SCORING's published
+        # position_lists/slice_<direction><pct>.tsv (the same canonical
+        # top/bottom/global x 25/10/5/1% cutoff every other report/module
+        # reads) -- no local re-ranking; see load_published_foreground()'s
+        # docstring for why there is no fallback.
+        foreground_by_frac = load_published_foreground(args.position_lists_dir, direction, char_fracs)
+        print(f"[posenrich] {direction}: {n_scored} scored positions ranked "
+              f"(foreground from published position_lists)", flush=True)
 
         for db, (terms, descs, apply_size_filter) in sources.items():
             if db in coverage_restricted_bg:
@@ -385,6 +424,13 @@ def main():
             padj = bh_adjust([r["p_value"] for r in res])
             for i, r in enumerate(res):
                 r["p_adj"] = padj[i]
+                # Scored-position population for THIS direction (constant across
+                # every term/database in this direction's loop iteration) --
+                # top_frac cutoffs are fractions of n_scored, NOT of background_n
+                # (the honest tested-position pool, which also includes untested/
+                # zero-score positions) -- exposed so report consumers computing
+                # their own top-fraction-recurrence tests use the matching universe.
+                r["n_scored"] = n_scored
                 # No fold-enrichment gate here by design — p_adj alone decides
                 # significance; fold_enrichment stays in the output for the
                 # caller to filter on downstream if they want a magnitude cutoff.

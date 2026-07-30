@@ -11,8 +11,8 @@
  * layer, analogous to UCR core/flank and FUBAR positive/purifying, built
  * from the classic FADE significance criterion (BF >= fade_bf_threshold).
  *
- * Runs unconditionally (not gated behind --enrichment/--string) so the
- * position-level FADE evidence is always available for posenrich.
+ * Runs unconditionally (not gated behind --enrichment) so the position-level
+ * FADE evidence is always available for posenrich.
  *
  * Inputs
  * ──────

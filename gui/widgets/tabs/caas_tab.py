@@ -17,7 +17,7 @@ exposing a redundant toggle here.
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
-from PySide6.QtWidgets import QCheckBox
+from PySide6.QtWidgets import QCheckBox, QLabel
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import CaasConfig
@@ -37,7 +37,7 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         FieldSpec(name="caas_config_path", label="CAAS config file", kind="path_file"),
-        FieldSpec(name="perms_cycles", label="Permutation cycles"),
+        FieldSpec(name="perms_cycles", label="Permulation cycles"),
         FieldSpec(name="caas_full_perms", label="Full-pool permulations"),
         FieldSpec(
             name="caas_permulation_enrichment", label="Permulation-excess for enrichment", kind="bool"
@@ -93,9 +93,18 @@ class CaasTab(ModuleTabWidget):
         self.ct_tool_bootstrap.setChecked(config.ct_tool_bootstrap)
         self.ct_tool_bootstrap.toggled.connect(self._on_ct_tool_bootstrap)
 
-        self._essential_form.insertRow(0, "CT tools (--ct_tool)", self.ct_tool_discovery)
+        self._ct_tool_label = QLabel("CT tools (--ct_tool)")
+        self._essential_form.insertRow(0, self._ct_tool_label, self.ct_tool_discovery)
         self._essential_form.insertRow(1, "", self.ct_tool_resample)
         self._essential_form.insertRow(2, "", self.ct_tool_bootstrap)
+
+    def retranslate(self, lang: str = "en") -> None:
+        super().retranslate(lang)
+        from gui.i18n import tr
+        self._ct_tool_label.setText(tr("CT tools (--ct_tool)", lang))
+        self.ct_tool_discovery.setText(tr("discovery", lang))
+        self.ct_tool_resample.setText(tr("resample", lang))
+        self.ct_tool_bootstrap.setText(tr("bootstrap", lang))
 
     def _on_ct_tool_discovery(self, value: bool) -> None:
         self._config.ct_tool_discovery = value

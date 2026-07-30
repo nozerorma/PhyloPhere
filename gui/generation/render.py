@@ -32,17 +32,22 @@ def _environment() -> jinja2.Environment:
     )
 
 
-def render_batch(project: ProjectConfig) -> str:
-    """Render the batch-runner script for the given project: a SLURM array-job
-    wrapper when runtime.runtime_type == "slurm", or a plain sequential bash loop
-    over every phenotype row when "local" (see sbatch_array.sh.j2's own internal
-    {% if profile == 'slurm' %} branching — one template, two execution modes,
-    sharing the same per-phenotype dispatch logic either way)."""
+def render_batch(project: ProjectConfig, postproc_mode: str | None = None) -> str:
+    """Render the batch-runner script for the given project."""
     ctx = build_context(project)
+    if postproc_mode:
+        ctx["postproc_mode"] = postproc_mode
+        ctx["single_runner_filename"] = f"run_phenotype_single_{postproc_mode if postproc_mode != 'filter' else 'filtering'}.sh"
+        if "modules" in ctx and "disambiguation" in ctx["modules"]:
+            ctx["modules"]["disambiguation"]["caas_postproc_mode"] = postproc_mode
     return _environment().get_template("sbatch_array.sh.j2").render(**ctx)
 
 
-def render_single(project: ProjectConfig) -> str:
+def render_single(project: ProjectConfig, postproc_mode: str | None = None) -> str:
     """Render the single-phenotype runner script for the given project."""
     ctx = build_context(project)
+    if postproc_mode:
+        ctx["postproc_mode"] = postproc_mode
+        if "modules" in ctx and "disambiguation" in ctx["modules"]:
+            ctx["modules"]["disambiguation"]["caas_postproc_mode"] = postproc_mode
     return _environment().get_template("run_single.sh.j2").render(**ctx)

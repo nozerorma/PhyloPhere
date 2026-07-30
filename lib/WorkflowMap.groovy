@@ -236,52 +236,52 @@ class WorkflowMap {
             // --scoring when --enrichment is also set. It only ever runs per-module FCS
             // for CAAS ('fcs') and RER ('scoring/rer') — FADE and accumulation no longer
             // run their own FCS ranking (see subworkflows/ENRICHMENT/fcs.nf), so there is
-            // no 13.FCS_fade/13.FCS_accumulation to look for. STRING is separate: the
+            // no 12.FCS_fade/12.FCS_accumulation to look for. AMI is separate: the
             // centralized DOMINO-based run (--scoring_ami) lives under ENRICHMENT and
-            // publishes to string/*, while each of RER/FADE/accumulation can *also* run
-            // its own STRING report directly from its own workflow file (--string, a
+            // publishes to ami/*, while each of RER/FADE/accumulation can *also* run
+            // its own AMI report directly from its own workflow file (--ami, a
             // distinct flag — see workflows/rerconverge.nf, fade.nf, ct_accumulation.nf),
-            // publishing under that module's own output tree instead of string/.
+            // publishing under that module's own output tree instead of ami/.
             [ id: 'fcs',         name: 'Functional enrichment (FCS)',     type: 'reporting', ran: ctx.fcs,
               filesDirs: ["${outdir}/fcs",
                           "${outdir}/scoring/rer"],
-              htmlCandidates: ["${outdir}/html_reports/13.FCS_scoring.html",
-                               "${outdir}/html_reports/13.FCS_rer.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/12.FCS_scoring.html",
+                               "${outdir}/html_reports/12.FCS_rer.html"] ],
 
-            [ id: 'string',      name: 'STRING (PPI network)',            type: 'reporting', ran: ctx.string,
-              filesDirs: ["${outdir}/string",
-                          "${outdir}/string/string_results",
-                          "${outdir}/string/string_summary",
-                          "${outdir}/string/string_plots",
-                          "${outdir}/string/string_networks",
-                          // Per-module STRING (--string, run from each module's own
+            [ id: 'ami',         name: 'AMI (DOMINO active modules)',     type: 'reporting', ran: ctx.ami,
+              filesDirs: ["${outdir}/ami",
+                          "${outdir}/ami/ami_results",
+                          "${outdir}/ami/ami_summary",
+                          "${outdir}/ami/ami_plots",
+                          "${outdir}/ami/ami_networks",
+                          // Per-module AMI (--ami, run from each module's own
                           // workflow file rather than centralized ENRICHMENT/DOMINO).
-                          "${outdir}/rerconverge/string",
-                          "${outdir}/selection/fade/top/string",
-                          "${outdir}/selection/fade/bottom/string",
-                          "${outdir}/accumulation/top/string",
-                          "${outdir}/accumulation/bottom/string",
-                          "${outdir}/accumulation/all/string"],
-              htmlCandidates: ["${outdir}/html_reports/15.AMI_analysis.html",
-                               "${outdir}/html_reports/15.STRING_rer.html",
-                               "${outdir}/html_reports/15.STRING_fade.html",
-                               "${outdir}/html_reports/15.STRING_accumulation.html"] ],
-
-            [ id: 'compare',     name: 'Cross-module comparison',         type: 'reporting', ran: ctx.compare,
-              filesDirs: ["${outdir}/compare",
-                          "${outdir}/compare/compare_results"],
-              htmlCandidates: ["${outdir}/html_reports/12.Comparison_report.html"] ],
+                          "${outdir}/rerconverge/ami",
+                          "${outdir}/selection/fade/top/ami",
+                          "${outdir}/selection/fade/bottom/ami",
+                          "${outdir}/accumulation/top/ami",
+                          "${outdir}/accumulation/bottom/ami",
+                          "${outdir}/accumulation/all/ami"],
+              htmlCandidates: ["${outdir}/html_reports/13.AMI_analysis.html",
+                               "${outdir}/html_reports/13.AMI_rer.html",
+                               "${outdir}/html_reports/13.AMI_fade.html",
+                               "${outdir}/html_reports/13.AMI_accumulation.html"] ],
 
             [ id: 'posenrich', name: 'Position Enrichment',              type: 'reporting', ran: ctx.posenrich,
               filesDirs: ["${outdir}/posenrich",
                           "${outdir}/posenrich/gmts"],
-              htmlCandidates: ["${outdir}/html_reports/16.Position_enrichment_report.html"] ]
+              htmlCandidates: ["${outdir}/html_reports/14.Position_enrichment_report.html"] ],
+
+            [ id: 'compare',     name: 'Cross-module comparison',         type: 'reporting', ran: ctx.compare,
+              filesDirs: ["${outdir}/compare",
+                          "${outdir}/compare/compare_results"],
+              htmlCandidates: ["${outdir}/html_reports/15.Comparison_report.html"] ]
 
         ].collect { st -> st + [color: colors[st.type]] }
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
                         'ct_disambig','asr_robustness','ct_postproc','ct_acc','vep','rer','fade',
-                        'scoring','fcs','string','compare','posenrich']
+                        'scoring','fcs','ami','posenrich','compare']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -423,7 +423,7 @@ class WorkflowMap {
         'fade': 'fade',
         'scoring': 'scoring',
         'fcs': 'fcs',
-        'string': 'string',
+        'ami': 'ami',
         'compare': 'compare',
         'posenrich': 'posenrich'
       };
@@ -503,7 +503,7 @@ class WorkflowMap {
         'fade': 'FADE (selection)',
         'scoring': 'CAAS Scoring',
         'fcs': 'Functional enrichment (FCS)',
-        'string': 'STRING (PPI network)',
+        'ami': 'AMI (DOMINO active modules)',
         'compare': 'Cross-module comparison',
         'posenrich': 'Position Enrichment'
       };
@@ -527,7 +527,7 @@ class WorkflowMap {
         'fade': '#F97316',
         'scoring': '#7C3AED',
         'fcs': '#7C3AED',
-        'string': '#7C3AED',
+        'ami': '#7C3AED',
         'compare': '#7C3AED',
         'posenrich': '#7C3AED'
       };
@@ -558,9 +558,9 @@ class WorkflowMap {
             fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
             scoring      : ['scoring'],
             fcs          : ['fcs', 'scoring/rer'],
-            string       : ['string', 'rerconverge/string',
-                            'selection/fade/top/string', 'selection/fade/bottom/string',
-                            'accumulation/top/string', 'accumulation/bottom/string', 'accumulation/all/string'],
+            ami          : ['ami', 'rerconverge/ami',
+                            'selection/fade/top/ami', 'selection/fade/bottom/ami',
+                            'accumulation/top/ami', 'accumulation/bottom/ami', 'accumulation/all/ami'],
             compare      : ['compare'],
             posenrich    : ['posenrich']
         ]
@@ -632,7 +632,7 @@ class WorkflowMap {
             fade          : scanResults.fade ?: false,
             scoring       : scanResults.scoring ?: false,
             fcs           : scanResults.fcs ?: false,
-            string        : scanResults.string ?: false,
+            ami           : scanResults.ami ?: false,
             compare       : scanResults.compare ?: false,
             posenrich     : scanResults.posenrich ?: false
         ]

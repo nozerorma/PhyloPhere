@@ -25,7 +25,13 @@ SPEC = ModuleTabSpec(
     title="Disambiguation",
     blurb=(
         "Resolves CAAS convergence direction via ancestral state reconstruction (ASR), "
-        "then (if Post-processing is on) filters/clusters the disambiguated hits."
+        "and manages CAAS cluster & gene-level Post-processing.\n\n"
+        "ℹ️ Post-Processing Execution Modes:\n"
+        "• Exploratory Sweep (run_postproc_exploratory): Performs parameter grid search across "
+        "minlen_values × maxcaas_values. Writes output to ${OUTDIR}_exploratory/ and automatically skips downstream tasks.\n"
+        "• Production Filtering (run_postproc_filter): Executes single filtering pass with "
+        "filter_minlen & filter_maxcaas. Writes output to ${OUTDIR}_final/ and runs downstream modules.\n"
+        "• Both Selected: Produces separate script pairs (sbatch_exploratory.sh and sbatch_filtering.sh) for parallel or sequential execution."
     ),
     disclaimer=(
         "Accumulation and Scoring need this module's output. Supply "
@@ -42,12 +48,8 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="ct_disambig_asr_cache_dir", label="ASR cache directory", kind="path_dir"),
         FieldSpec(name="asr_robustness", label="Run ASR Robustness diagnostics report", kind="bool"),
         FieldSpec(name="ct_postproc", label="Run Post-processing (--ct_postproc)", kind="bool"),
-        FieldSpec(
-            name="caas_postproc_mode",
-            label="Post-processing mode",
-            kind="choice",
-            choices=("filter", "exploratory"),
-        ),
+        FieldSpec(name="run_postproc_exploratory", label="Run Exploratory Post-Processing Sweep", kind="bool"),
+        FieldSpec(name="run_postproc_filter", label="Run Filtering Production Post-Processing", kind="bool"),
         FieldSpec(name="filter_minlen", label="Cluster min length (filter mode)"),
         FieldSpec(name="filter_maxcaas", label="Cluster max CAAS value (filter mode)"),
         FieldSpec(
@@ -78,3 +80,14 @@ SPEC = ModuleTabSpec(
 class DisambiguationTab(ModuleTabWidget):
     def __init__(self, config: DisambiguationConfig, parent=None):
         super().__init__(SPEC, config, parent)
+
+    def retranslate(self, lang: str = "en") -> None:
+        super().retranslate(lang)
+        from gui.i18n import tr
+        main_blurb = tr(
+            "Resolves CAAS convergence direction via ancestral state reconstruction (ASR), "
+            "and manages CAAS cluster & gene-level Post-processing.",
+            lang
+        )
+        guidance = tr("Postproc Guidance", lang)
+        self.blurb_label.setText(f"{main_blurb}\n\n{guidance}")

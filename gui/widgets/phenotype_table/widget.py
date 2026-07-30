@@ -5,11 +5,11 @@
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-The 3 per-row Scoring fallback overrides (scoring_rer_input, scoring_fade_summary_top/
-bottom) aren't visible columns — they're edited via a small dialog opened from the
-"Row overrides..." button, per the implementation plan (§4/§5): most rows won't need
-them (only relevant when RER/FADE are disabled), so a dedicated dialog keeps the
-main table from growing 3 more mostly-empty columns.
+The 4 per-row Scoring fallback overrides (scoring_rer_input, scoring_rer_perms_input,
+scoring_fade_summary_top/bottom) aren't visible columns — they're edited via a small
+dialog opened from the "Row overrides..." button, per the implementation plan (§4/§5):
+most rows won't need them (only relevant when RER/FADE are disabled), so a dedicated
+dialog keeps the main table from growing 4 more mostly-empty columns.
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
@@ -41,6 +41,8 @@ class RowOverridesDialog(QDialog):
 
         self.rer_input = PathField(mode="file")
         self.rer_input.set_text(row.scoring_rer_input)
+        self.rer_perms_input = PathField(mode="file")
+        self.rer_perms_input.set_text(row.scoring_rer_perms_input)
         self.fade_top = PathField(mode="file")
         self.fade_top.set_text(row.scoring_fade_summary_top)
         self.fade_bottom = PathField(mode="file")
@@ -48,6 +50,7 @@ class RowOverridesDialog(QDialog):
 
         form = QFormLayout()
         form.addRow("RERconverge summary (scoring_rer_input)", self.rer_input)
+        form.addRow("RERconverge perms RDS (scoring_rer_perms_input)", self.rer_perms_input)
         form.addRow("FADE summary — top (scoring_fade_summary_top)", self.fade_top)
         form.addRow("FADE summary — bottom (scoring_fade_summary_bottom)", self.fade_bottom)
 
@@ -63,6 +66,7 @@ class RowOverridesDialog(QDialog):
 
     def apply_to_row(self) -> None:
         self._row.scoring_rer_input = self.rer_input.text().strip()
+        self._row.scoring_rer_perms_input = self.rer_perms_input.text().strip()
         self._row.scoring_fade_summary_top = self.fade_top.text().strip()
         self._row.scoring_fade_summary_bottom = self.fade_bottom.text().strip()
 
@@ -84,22 +88,33 @@ class PhenotypeTableWidget(QWidget):
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
 
-        add_btn = QPushButton("Add row")
-        remove_btn = QPushButton("Remove selected")
-        overrides_btn = QPushButton("Row overrides...")
-        add_btn.clicked.connect(self._add_row)
-        remove_btn.clicked.connect(self._remove_selected)
-        overrides_btn.clicked.connect(self._edit_overrides)
+        self.add_btn = QPushButton("Add row")
+        self.remove_btn = QPushButton("Remove selected")
+        self.overrides_btn = QPushButton("Row overrides...")
+        self.add_btn.clicked.connect(self._add_row)
+        self.remove_btn.clicked.connect(self._remove_selected)
+        self.overrides_btn.clicked.connect(self._edit_overrides)
 
         button_row = QHBoxLayout()
-        button_row.addWidget(add_btn)
-        button_row.addWidget(remove_btn)
-        button_row.addWidget(overrides_btn)
+        button_row.addWidget(self.add_btn)
+        button_row.addWidget(self.remove_btn)
+        button_row.addWidget(self.overrides_btn)
         button_row.addStretch(1)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(button_row)
         layout.addWidget(self.table)
+        layout.addLayout(button_row)
+
+    def retranslate(self, lang: str = "en") -> None:
+        from gui.i18n import tr
+        if hasattr(self, "add_btn"):
+            self.add_btn.setText(tr("Add row", lang))
+        if hasattr(self, "remove_btn"):
+            self.remove_btn.setText(tr("Remove selected", lang))
+        if hasattr(self, "overrides_btn"):
+            self.overrides_btn.setText(tr("Row overrides...", lang))
+        if hasattr(self, "model") and hasattr(self.model, "set_lang"):
+            self.model.set_lang(lang)
 
     def _add_row(self) -> None:
         self.model.insertRows(self.model.rowCount(), 1)

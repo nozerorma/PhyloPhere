@@ -100,12 +100,13 @@ class DisambiguationConfig(ModuleConfigBase):
     ct_postproc: bool = True  # --ct_postproc (bundled toggle, matches reference script)
 
     # Post-processing sub-section (conf/ct_postproc.config), only meaningful if ct_postproc=True.
-    caas_postproc_mode: str = "filter"  # --caas_postproc_mode (filter|exploratory)
+    run_postproc_exploratory: bool = True  # Run exploratory parameter sweep
+    run_postproc_filter: bool = True  # Run filtering production run
+    caas_postproc_mode: str = "filter"  # Legacy compatibility field
     # Filter-mode (single run) thresholds.
     filter_minlen: str = "3"  # --filter_minlen
     filter_maxcaas: str = "0.7"  # --filter_maxcaas
-    # Exploratory-mode (parameter sweep) threshold lists — only read when
-    # caas_postproc_mode=exploratory.
+    # Exploratory-mode (parameter sweep) threshold lists.
     minlen_values: str = "2,3,4,10"  # --minlen_values
     maxcaas_values: str = "0.6,0.7,0.8"  # --maxcaas_values
     gene_filter_mode: str = "dubious"  # --gene_filter_mode (none|extreme|dubious|both)
@@ -287,18 +288,16 @@ class EnrichmentConfig(ModuleConfigBase):
     # module-finding is DOMINO's job; no standalone STRING term-enrichment report)
     string_db_dir: str = ""  # --string_db_dir
     string_species: str = "9606"  # --string_species
-    string_required_score: str = "400"  # --string_required_score
-    # Per-module STRING report (RER/FADE/Accumulation each run their own directly
-    # from their own workflow file) — distinct from scoring_string below.
-    string: bool = False  # --string
 
     # DOMINO active-module identification (replaces STRING's walktrap clustering)
     domino_network_score_thr: str = "700"  # --domino_network_score_thr
     domino_slice_thr: str = "0.3"  # --domino_slice_thr
     domino_module_thr: str = "0.05"  # --domino_module_thr
     # Centralized DOMINO-based AMI run + cross-module COMPARE report
-    # (conf/scoring.config, gated inside workflows/enrichment.nf) — distinct from
-    # the per-module `string` flag above.
+    # (conf/scoring.config, gated inside workflows/enrichment.nf). RER/FADE/
+    # Accumulation's own gene lists are always computed automatically whenever
+    # those tools run (no separate --ami flag) and feed this unified report's
+    # FADE/RER sections directly.
     scoring_ami: bool = True  # --scoring_ami
     scoring_string: bool = True  # --scoring_string
     scoring_compare_fdr: str = "0.15"  # --scoring_compare_fdr

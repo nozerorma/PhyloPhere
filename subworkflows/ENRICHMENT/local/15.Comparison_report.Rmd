@@ -1,0 +1,1247 @@
+---
+title: "Comparative Enrichment Across Modules — `r params$traitname`"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    syntax_highlighting: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
+    mathjax: null                       # no math in this report
+    md_extensions: "-tex_math_dollars"  # gene-set names contain '$' (e.g. V$HNF4_01) — never parse as TeX math
+params:
+  fcs_dir:    "cmp_fcs"       # dir of per-module <module>_fcs_all.tsv
+  fcs_le_dir: "cmp_fcs_le"    # dir of per-module <module>_leading_edge.tsv
+  fdr_thr:    0.15
+  pperm_thr:  0.025
+  domino_module_thr: 0.05  # DOMINO's own module-significance cutoff (domino.nf's domino_module_thr)
+  top_n:      20
+  traitname:  "trait"
+  ami_module_desc_file:       NULL  # AMI's ami_networks/module_descriptions_all_lists.tsv (optional)
+  posenrich_dotplot_file:     NULL  # posenrich's posenrich_overall_dotplot.tsv (optional)
+  # posenrich_leading_edge.tsv (gene:position members of significant posenrich
+  # terms, already position-granular) -- drives the scorecard's posenrich angle
+  # AND the Interesting Genes/Interesting Positions tables below.
+  posenrich_leading_edge_file: NULL
+  # SCORING's own gene-level table (percentile flags + FADE/RER/Accumulation
+  # significance) -- same file 12.FCS_general_report.Rmd/14.Position_enrichment_report.Rmd
+  # consume, reused here for the Interesting Genes/Positions tables.
+  fcs_stats_file: NULL
+  # Position-level CAAS scores + FADE-site/VEP annotations -- same optional
+  # inputs 14.Position_enrichment_report.Rmd's Position Characterisation
+  # section consumes, reused here for the Interesting Positions table.
+  position_scores_file:  NULL
+  vep_primateai_file:    NULL
+  vep_cosmic_file:       NULL
+  fade_sites_top_file:    NULL
+  fade_sites_bottom_file: NULL
+  # SCORING's published percentile slices (scoring_compute.R) -- when
+  # supplied, gene/position 25/10/5/1% membership is read from these
+  # directories instead of being re-derived independently in this report (see
+  # fcs_percentile_flags()'s gene_lists_dir param / .position_pct_flags()).
+  gene_lists_dir:     NULL
+  position_lists_dir: NULL
+---
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
+                      fig.width = 9, fig.height = 7, dev = "png", dpi = 200)
+suppressPackageStartupMessages({ library(igraph); library(tidyverse); library(knitr); library(kableExtra) })
+filter <- dplyr::filter; select <- dplyr::select; rename <- dplyr::rename; mutate <- dplyr::mutate
+has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
+.src_dir <- file.path(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)), "src")
+# fcs_percentile_flags() (used by the Interesting Genes/Positions tables) now
+# lives in orthogonal_score.R itself -- deliberately NOT sourcing fcs_enrich.R
+# here, which would drag in a hard RERconverge dependency this report never
+# otherwise needs (fcs_enrich.R's fastwilcoxGMT/fcs_run_all machinery is
+# report 12/RER-report-specific).
+source(file.path(.src_dir, "orthogonal_score.R"))
+
+kbl_html <- function(df, height = NULL, escape = TRUE) {
+  k <- kable(df, format = "html", escape = escape) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = FALSE)
+  if (!is.null(height)) k <- scroll_box(k, height = height)
+  k
+}
+```
+
+```{r load, include=FALSE}
+`%||%` <- function(a, b) if (!is.null(a)) a else b
+REQ <- c("ranking", "database", "pathway", "stat", "p.adj")
+
+# Per-module FCS results: cmp_fcs/<module>_fcs_all.tsv (caas/rer).
+mod_files <- list.files(params$fcs_dir, pattern = "_fcs_all\\.tsv$", full.names = TRUE)
+fcs_by_mod <- list()
+for (f in mod_files) {
+  mod <- sub("_fcs_all\\.tsv$", "", basename(f))
+  d <- tryCatch(readr::read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
+  if (!is.null(d) && nrow(d) > 0 && all(REQ %in% names(d))) {
+    fcs_by_mod[[mod]] <- dplyr::mutate(d, module = mod)
+  }
+}
+fcs_all_mod <- if (length(fcs_by_mod)) dplyr::bind_rows(fcs_by_mod) else tibble()
+modules_present <- names(fcs_by_mod)
+has_multi <- length(fcs_by_mod) >= 1
+
+# Direction facet (Global/top/bottom), derived once here since every
+# directional section below groups by it. Each module's `ranking` vocabulary
+# differs: CAAS uses top/bottom/global directly; RER's accelerating/
+# decelerating is the same two-way split framed around RER's own statistic
+# (RER carries no separate undirected ranking, so it contributes no "global"
+# rows). CAAS's "global" ranking is its OWN direction here, kept fully
+# separate from top/bottom -- it used to be duplicated into BOTH the top and
+# bottom buckets under the same (module, direction, database, pathway) group
+# key permod_prep groups by below, which silently blended two different
+# statistical tests (the real directional stat and the undirected global stat
+# for the same pathway) into one summarised row. That's now impossible: a
+# "global" row can never share a group key with a "top" or "bottom" row.
+if (has_multi) {
+  fcs_dir_mod <- fcs_all_mod %>%
+    mutate(direction = dplyr::case_when(
+      ranking %in% c("top", "accelerating")    ~ "top",
+      ranking %in% c("bottom", "decelerating") ~ "bottom",
+      ranking == "global"                      ~ "global",
+      TRUE                                      ~ NA_character_
+    )) %>%
+    dplyr::filter(!is.na(direction))
+} else {
+  fcs_dir_mod <- fcs_all_mod
+}
+
+# Per-module leading-edge tables (cmp_fcs_le/<module>_leading_edge.tsv) feed the
+# orthogonal composite score: each module's own directional percentile
+# concentration + cross-module corroboration flags (FADE/RER/Accumulation,
+# and PrimateAI-3D/COSMIC once wired in from posenrich). Percentile columns
+# reflect CAAS's own ranking in every module's leading edge (per-module FCS
+# reports are annotated with CAAS's fcs_stats.tsv as their overlay) — that's
+# intentional, not a bug: it's the shared reference axis every module's
+# leading edge is cross-checked against.
+le_files <- list.files(params$fcs_le_dir, pattern = "_leading_edge\\.tsv$", full.names = TRUE)
+le_by_mod <- list()
+for (f in le_files) {
+  mod <- sub("_leading_edge\\.tsv$", "", basename(f))
+  d <- tryCatch(readr::read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
+  if (!is.null(d) && nrow(d) > 0) le_by_mod[[mod]] <- dplyr::mutate(d, module = mod)
+}
+le <- if (length(le_by_mod)) dplyr::bind_rows(le_by_mod) else tibble()
+has_le <- nrow(le) > 0
+
+# ── Cross-angle inputs: AMI (network modules) + posenrich (position-level) ──
+# Neither is gene-set-ranked the way CAAS/RER FCS is, so they don't fold into
+# fcs_all_mod/le above -- each gets its own section below, and all three feed
+# the Integrated gene scorecard via the genes they involve.
+.file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
+
+has_ami <- .file_ok(params$ami_module_desc_file)
+ami_df  <- if (has_ami) readr::read_tsv(params$ami_module_desc_file, show_col_types = FALSE) else NULL
+
+has_posenrich_dotplot <- .file_ok(params$posenrich_dotplot_file)
+posenrich_dotplot_df  <- if (has_posenrich_dotplot) readr::read_tsv(params$posenrich_dotplot_file, show_col_types = FALSE) else NULL
+
+# posenrich_leading_edge.tsv: gene:position members of significant posenrich
+# terms (already position-granular -- ranking, database, pathway, top_frac,
+# gene, gene_position). Drives the scorecard's posenrich angle AND the
+# Interesting Genes/Interesting Positions tables below.
+has_posenrich_le <- .file_ok(params$posenrich_leading_edge_file)
+posenrich_le_df  <- if (has_posenrich_le) readr::read_tsv(params$posenrich_leading_edge_file, show_col_types = FALSE) else NULL
+
+# ── Gene/position-level inputs for the Interesting Genes/Positions tables ──
+# Same optional files 12.FCS_general_report.Rmd (fcs_stats) and
+# 14.Position_enrichment_report.Rmd (position_scores, VEP, FADE sites) already
+# consume -- reused here rather than re-derived.
+has_fcs_stats_cmp <- .file_ok(params$fcs_stats_file)
+fcs_stats_cmp_df  <- if (has_fcs_stats_cmp) readr::read_tsv(params$fcs_stats_file, show_col_types = FALSE) else NULL
+
+has_position_scores_cmp <- .file_ok(params$position_scores_file)
+position_scores_cmp_df  <- if (has_position_scores_cmp) readr::read_tsv(params$position_scores_file, show_col_types = FALSE) else NULL
+
+has_vep_primateai_cmp <- .file_ok(params$vep_primateai_file)
+vep_primateai_cmp_df  <- if (has_vep_primateai_cmp) readr::read_tsv(params$vep_primateai_file, show_col_types = FALSE) else NULL
+
+has_vep_cosmic_cmp <- .file_ok(params$vep_cosmic_file)
+vep_cosmic_cmp_df  <- if (has_vep_cosmic_cmp) readr::read_tsv(params$vep_cosmic_file, show_col_types = FALSE) else NULL
+
+has_fade_sites_top_cmp    <- .file_ok(params$fade_sites_top_file)
+has_fade_sites_bottom_cmp <- .file_ok(params$fade_sites_bottom_file)
+fade_sites_top_cmp_df <- if (has_fade_sites_top_cmp) {
+  readr::read_csv(params$fade_sites_top_file, show_col_types = FALSE) %>%
+    dplyr::rename(gene = gene, Position = position) %>%
+    dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
+} else NULL
+fade_sites_bottom_cmp_df <- if (has_fade_sites_bottom_cmp) {
+  readr::read_csv(params$fade_sites_bottom_file, show_col_types = FALSE) %>%
+    dplyr::rename(gene = gene, Position = position) %>%
+    dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
+} else NULL
+
+# Per-gene attribute table: percentile flags (from fcs_stats' own score_top/
+# score_bottom, same derivation as 12.FCS_general_report.Rmd) + the gene-level
+# flag_* columns fcs_stats.tsv already carries (gate/FADE/RER/Accumulation,
+# direction-aware -- see orthogonal_score.R's ORTH_CROSS_COLS for the
+# flag_accum_top/flag_accum_bottom convention).
+gene_attr_df <- if (has_fcs_stats_cmp) {
+  pf <- fcs_percentile_flags(fcs_stats_cmp_df, gene_lists_dir = params$gene_lists_dir)
+  flag_cols_cmp <- grep("^flag_", names(fcs_stats_cmp_df), value = TRUE)
+  dplyr::left_join(pf, fcs_stats_cmp_df[, c("gene", flag_cols_cmp)], by = "gene")
+} else NULL
+```
+
+```{r cross_angle_gene_hits, include=FALSE}
+# ── Cross-angle gene-level hit sets ───────────────────────────────────────
+# Hoisted here (was previously computed only inside the Integrated gene
+# scorecard, at the bottom of the report) because the per-module significance
+# and AMI module description sections above the scorecard now also need
+# per-gene FCS/posenrich corroboration -- one shared definition, reused by
+# three sections, rather than three drifting copies.
+#
+# Each angle uses ITS OWN module's significance definition (not "any
+# leading-edge/described membership") -- FCS/RER's dual p.adj+p.perm gate,
+# posenrich's own p_adj gate, DOMINO's own module-significance cutoff.
+# FCS and posenrich both carry a genuine "global" ranking (CAAS's undirected
+# composite; posenrich's own directions = ["global","top","bottom"]), so
+# fcs_genes/posenrich_genes have real direction=="Global" rows. AMI has no
+# equivalent -- DOMINO only ever runs on Top/Bottom percentile gene lists
+# (.TOP_THRESHOLDS/.BOTTOM_THRESHOLDS in 13.AMI_analysis.Rmd, no undirected
+# list), so ami_genes' direction column is only ever "Top"/"Bottom"; a
+# "Global" row for AMI never exists here. This means the scorecard's Global
+# tab (a plain full_join keyed on gene+direction) can never carry an AMI
+# contribution -- unlike .ami_desc_for(dir_filter = NULL), used by the
+# Interesting Genes/Positions AMI cells, which pools Top+Bottom explicitly
+# for its own "Global" view instead of relying on a literal direction match.
+
+# FCS/RER own significance: BH < fdr_thr AND (p.perm < pperm_thr when
+# present) -- same formula permod_prep below applies, computed once here off
+# fcs_dir_mod so this chunk and permod_prep agree on what "significant" means.
+# fcs_leading_edge.tsv (`le`) is NOT itself restricted to significant terms
+# (12.FCS_general_report.Rmd's leading-edge export only requires drv_score >
+# 0, i.e. "this gene drives some signal in this term", not "this term
+# cleared BH") -- inner_join against fcs_sig_terms is what actually restricts
+# fcs_genes to genes belonging to a term each module itself calls significant.
+fcs_sig_terms <- if (has_multi) {
+  fcs_dir_mod %>%
+    dplyr::filter(stat > 0, !is.na(p.adj), p.adj < params$fdr_thr,
+                  !("p.perm" %in% names(.)) | is.na(p.perm) | p.perm < (params$pperm_thr %||% 1)) %>%
+    dplyr::mutate(description = dplyr::coalesce(description, pathway)) %>%
+    dplyr::distinct(module, direction, database, pathway, description)
+} else {
+  tibble::tibble(module = character(), direction = character(), database = character(),
+                 pathway = character(), description = character())
+}
+
+fcs_genes <- if (has_le && has_multi) {
+  le %>%
+    dplyr::mutate(direction = dplyr::case_when(
+      ranking %in% c("top", "accelerating")    ~ "top",
+      ranking %in% c("bottom", "decelerating") ~ "bottom",
+      ranking == "global"                      ~ "global",
+      TRUE                                      ~ NA_character_
+    )) %>%
+    dplyr::filter(!is.na(direction)) %>%
+    dplyr::inner_join(fcs_sig_terms, by = c("module", "direction", "database", "pathway")) %>%
+    dplyr::mutate(direction = tools::toTitleCase(direction)) %>%
+    dplyr::distinct(gene, direction) %>%
+    dplyr::mutate(fcs_hit = TRUE)
+} else {
+  tibble::tibble(gene = character(), direction = character(), fcs_hit = logical())
+}
+
+# AMI angle: DOMINO's own module-significance cutoff (domino_module_thr,
+# domino.nf's own default 0.05) gates which described modules count --
+# "described" alone (not Too small/No enrichment) was never a significance
+# claim, just "STRING could summarise it". Expands each significant module's
+# FULL membership into one row per gene: `all_genes` (every member gene,
+# uncapped -- describe_clusters() in 13.AMI_analysis.Rmd) when present, else
+# the older capped `genes` column (top-8 representatives) for
+# module_descriptions_all_lists.tsv files written before all_genes existed.
+# direction is only ever "Top"/"Bottom" here (DOMINO never runs on an
+# undirected gene list, so there's no "Global" value to filter for -- see
+# this chunk's opening comment).
+ami_genes <- if (has_ami) {
+  .ami_gene_col <- if ("all_genes" %in% names(ami_df)) "all_genes" else "genes"
+  ami_df %>%
+    dplyr::filter(!description %in% c("Too small", "No enrichment"),
+                  direction %in% c("Top", "Bottom"),
+                  !is.na(domino_p_adj), domino_p_adj < params$domino_module_thr) %>%
+    dplyr::mutate(gene = strsplit(.data[[.ami_gene_col]], ",\\s*")) %>%
+    tidyr::unnest(gene) %>%
+    dplyr::mutate(gene = trimws(gene)) %>%
+    dplyr::distinct(gene, direction) %>%
+    dplyr::mutate(ami_hit = TRUE)
+} else {
+  tibble::tibble(gene = character(), direction = character(), ami_hit = logical())
+}
+
+# Posenrich angle: posenrich_leading_edge.tsv is ALREADY restricted to
+# significant (p_adj < posenrich's own padj_thr) terms by posenrich_enrich.py
+# itself (only rows with r["sig"] get written) -- no additional gate needed
+# here, just direction mapping (now including "global"). Also carries the
+# actual Position(s) behind each hit (kept for the scorecard's Position
+# column below -- lets a reader see whether the specific position posenrich
+# flagged for a gene is the same one driving that gene's FCS/AMI signal, not
+# just that the gene appears in both).
+posenrich_genes <- if (has_posenrich_le) {
+  posenrich_le_df %>%
+    dplyr::mutate(direction = dplyr::case_when(
+      ranking %in% c("top", "accelerating")    ~ "top",
+      ranking %in% c("bottom", "decelerating") ~ "bottom",
+      ranking == "global"                      ~ "global",
+      TRUE                                      ~ NA_character_
+    ),
+    Position = sub(".*:", "", gene_position)) %>%
+    dplyr::filter(!is.na(direction)) %>%
+    dplyr::mutate(direction = tools::toTitleCase(direction)) %>%
+    dplyr::group_by(gene, direction) %>%
+    dplyr::summarise(Position = paste(sort(unique(Position)), collapse = ", "), .groups = "drop") %>%
+    dplyr::mutate(posenrich_hit = TRUE)
+} else {
+  tibble::tibble(gene = character(), direction = character(), Position = character(), posenrich_hit = logical())
+}
+
+# ── Orthogonal composite signal, per (module, direction, database, pathway) ──
+# Lancaster-weighted composite of each module's own directional percentile
+# concentration (from CAAS's percentile quartet, 25/10/5/1%, the shared
+# reference axis every per-module report is annotated against) plus
+# independent cross-module flags
+# -- excluding whichever flag would be self-referential for the CURRENT module
+# (e.g. RER's own leading edge doesn't get to cite flag_rer_acc/flag_rer_decc
+# as "corroboration"). Background rates are estimated from each module's own
+# observed leading-edge gene pool (this report doesn't carry the full universe
+# file). Computed once here, ahead of every section that needs it (Per-module
+# significance's `Orthog. signal` column).
+signal_by_mod <- tibble()
+if (has_le) {
+  self_ref <- list(caas = character(0), rer = c("flag_rer_acc", "flag_rer_decc"))
+  signal_rows <- list()
+  for (mod in unique(le$module)) {
+    le_mod <- le %>% filter(module == mod)
+    for (rk in unique(le_mod$ranking)) {
+      le_rk <- le_mod %>% filter(ranking == rk)
+      # "global" (CAAS's undirected ranking) is kept as its own direction, NOT
+      # coerced to "top" -- orth_cols_for_direction() already has a correct
+      # non-directional branch (no percentile quartet, both directions' cross
+      # flags) for any direction string other than "top"/"bottom"; passing
+      # "global" straight through reaches it instead of silently scoring the
+      # undirected ranking as if it were the top direction.
+      rk_dir <- dplyr::case_when(rk %in% c("top", "accelerating") ~ "top",
+                                  rk %in% c("bottom", "decelerating") ~ "bottom",
+                                  TRUE ~ "global")
+      cols <- orth_cols_for_direction(rk_dir)
+      cross_cols <- setdiff(cols$cross_cols, self_ref[[mod]] %||% character(0))
+      uni_genes <- le_rk %>% distinct(gene, .keep_all = TRUE)
+      n_uni <- nrow(uni_genes)
+      if (n_uni < 10) next
+      bg <- orth_background_rates(uni_genes, c(cols$percentile_cols, cross_cols))
+      sc <- orthogonal_score(le_rk, bg, cols$percentile_cols, cross_cols, n_uni) %>%
+        mutate(
+          module_label = dplyr::case_when(
+            mod == "rer" & rk == "accelerating" ~ "rer_accelerating",
+            mod == "rer" & rk == "decelerating" ~ "rer_decelerating",
+            TRUE ~ mod
+          ),
+          direction = rk_dir
+        )
+      signal_rows[[paste(mod, rk)]] <- sc
+    }
+  }
+  signal_by_mod <- dplyr::bind_rows(signal_rows) %>%
+    dplyr::select(module_label, direction, database, pathway, signal)
+}
+if (nrow(signal_by_mod) == 0) {
+  signal_by_mod <- tibble(module_label = character(), direction = character(),
+                           database = character(), pathway = character(), signal = double())
+}
+
+# module + direction -> module_label, for joining signal_by_mod (keyed by
+# module_label, which splits RER into rer_accelerating/rer_decelerating) onto
+# tables keyed by the plain (module, direction) pair -- e.g. permod_best below.
+mod_dir_to_label <- tibble::tribble(
+  ~module, ~direction, ~module_label,
+  "caas",  "top",      "caas",
+  "caas",  "bottom",   "caas",
+  "caas",  "global",   "caas",
+  "rer",   "top",      "rer_accelerating",
+  "rer",   "bottom",   "rer_decelerating"
+  # RER has no undirected ranking, so no "rer"/"global" row.
+)
+```
+
+# Overview
+
+```{r overview, echo=FALSE}
+mod_rows <- if (has_multi) sapply(fcs_by_mod, nrow) else integer(0)
+tibble::tibble(
+  Source = paste0("FCS module: ", names(mod_rows)),
+  Rows   = unname(mod_rows)
+) %>% kbl_html()
+```
+
+This report compares enrichment **across CAAS and RERconverge** (the two modules
+with well-behaved FCS rankings and real permulation nulls) for `r params$traitname`.
+FADE and Accumulation no longer run their own FCS ranking — both proved unreliable
+for genome-wide gene-set enrichment (FADE's max-of-many-sites statistic and
+Accumulation's missing permulation null each inflated false "significance") — but
+both remain available as **cross-module corroboration**: a term's `signal` (the
+orthogonal composite score) combines each module's own directional percentile
+concentration with independent hypergeometric enrichment against FADE/RER/
+Accumulation flags (and PrimateAI-3D/COSMIC once wired in). A set is "significant"
+at BH < `r params$fdr_thr` (and permulation p < threshold where available) with
+AUC > 0.5.
+
+DOMINO active-module (AMI) results and posenrich's position-level enrichment are
+neither gene-set-ranked the same way as FCS, so they get their own sections below
+— but all three angles (FCS, AMI, posenrich) are cross-referenced by gene in the
+Integrated gene scorecard at the end.
+
+# Per-module significance {.tabset .tabset-fade}
+
+What does each module call significant on its own, faceted Global/Top/Bottom?
+Tables are sorted by this module's own AUC (its own evidence), but each row also
+carries `Orthog. signal` — a Lancaster-weighted, hypergeometric orthogonal-support
+composite (percentile concentration + independent cross-module corroboration
+against FADE/RER/Accumulation flags), so a term that looks marginal on its own AUC
+but is already well-corroborated by other modules stands out here too.
+
+`r if (!has_multi) "> **No module FCS results available — skipping.**"`
+
+```{r permod_prep, eval=has_multi}
+thr <- params$fdr_thr
+# Per (module, direction, database, pathway): best positively-enriched ranking
+# within that direction (max AUC, min p.adj). Significance reuses
+# fcs_sig_terms (cross_angle_gene_hits chunk above) -- the SAME BH+p.perm gate
+# fcs_genes filters its leading-edge membership by, so this table and the
+# scorecard's FCS angle never disagree on what "significant" means.
+permod_best <- fcs_dir_mod %>%
+  filter(stat > 0) %>%
+  group_by(module, direction, database, pathway) %>%
+  summarise(AUC = max(stat, na.rm = TRUE) + 0.5,
+            p.adj = min(p.adj, na.rm = TRUE),
+            description = dplyr::first(dplyr::coalesce(description, pathway)),
+            .groups = "drop") %>%
+  dplyr::left_join(fcs_sig_terms %>% dplyr::select(-description) %>% dplyr::mutate(sig = TRUE),
+                    by = c("module", "direction", "database", "pathway")) %>%
+  dplyr::mutate(sig = dplyr::coalesce(sig, FALSE)) %>%
+  # signal_by_mod is keyed by module_label (splits RER into
+  # rer_accelerating/rer_decelerating) -- mod_dir_to_label resolves the plain
+  # (module, direction) pair here to the right module_label before the join.
+  dplyr::left_join(mod_dir_to_label, by = c("module", "direction")) %>%
+  dplyr::left_join(signal_by_mod, by = c("module_label", "direction", "database", "pathway")) %>%
+  dplyr::select(-module_label)
+
+permod_summary <- permod_best %>%
+  group_by(direction, module) %>%
+  summarise(`Terms tested` = dplyr::n(),
+            `Significant`  = sum(sig, na.rm = TRUE),
+            `% significant` = round(100 * mean(sig, na.rm = TRUE), 1),
+            .groups = "drop") %>%
+  arrange(direction, desc(Significant))
+
+dir.create("compare_results", showWarnings = FALSE)
+readr::write_tsv(permod_summary, "compare_results/per_module_significance_summary.tsv")
+readr::write_tsv(permod_best,    "compare_results/per_module_best_per_term.tsv")
+```
+
+```{r permod_tabs, eval=has_multi, results='asis'}
+# Direction is the primary split (per the report-wide per-direction design,
+# Global/Top/Bottom order matching every other tabset in this report); module
+# is a second-level tab within each direction. "global" is CAAS's own
+# undirected ranking (RER never produces one, so its Global tab is always
+# empty for RER) -- a genuine third direction now, not folded into top/bottom.
+for (dr in c("global", "top", "bottom")) {
+  cat(sprintf("\n## %s {.tabset}\n\n", tools::toTitleCase(dr)))
+
+  dr_summary <- permod_summary %>% filter(direction == dr) %>% select(-direction)
+  cat("### Summary\n\n")
+  if (nrow(dr_summary) == 0) {
+    cat("_No module produced enriched terms for this direction._\n\n")
+  } else {
+    print(kbl_html(dr_summary))
+  }
+
+  for (m in modules_present) {
+    cat(sprintf("\n### %s\n\n", toupper(m)))
+    d <- permod_best %>%
+      filter(module == m, direction == dr, sig) %>%
+      mutate(Description = stringr::str_trunc(description, 60),
+             AUC = round(AUC, 3), p.adj = signif(p.adj, 3),
+             `Orthog. signal` = round(signal, 2)) %>%
+      arrange(desc(AUC)) %>%
+      select(database, pathway, Description, AUC, p.adj, `Orthog. signal`) %>%
+      head(params$top_n)
+    if (nrow(d) == 0) {
+      cat(sprintf("_No gene set is significant in %s (%s) at BH < %.2g._\n\n", toupper(m), dr, thr))
+    } else {
+      print(kbl_html(d, height = if (nrow(d) > 15) "420px" else NULL))
+    }
+  }
+}
+```
+
+---
+
+# AMI module descriptions {.tabset .tabset-fade}
+
+`r if (!has_ami) "> **No AMI module descriptions available (AMI/DOMINO didn't run, or the file wasn't wired in) — skipping.**"`
+
+DOMINO active modules ([13.AMI_analysis.Rmd](13.AMI_analysis.Rmd)) aren't gene-set-ranked
+like CAAS/RER FCS, so they don't fold into the FCS tables above — but a described
+module's best term and DOMINO significance are useful context here, and genes inside
+a significant module (DOMINO p.adj < `r params$domino_module_thr`) feed the
+Integrated gene scorecard below. Rows here are **collapsed across gene lists**, the
+same near-duplicate-term clustering [13.AMI_analysis.Rmd](13.AMI_analysis.Rmd)'s own
+"Module summary across gene lists" section already applies (normalized edit-distance
+over each module's description, e.g. `"V$HNF4_01 / HNF4A"` and `"HNF4A"` merge into
+one term) — so a term recurring, worded slightly differently, across several nested
+gene lists shows up as ONE row rather than fragmenting into near-duplicates.
+
+```{r ami_desc_prep, eval=has_ami}
+# Restricted to DOMINO-significant modules (domino_p_adj < domino_module_thr)
+# -- the SAME gate ami_genes/.ami_desc_for() apply (cross_angle_gene_hits /
+# interesting_shared_helpers chunks), so the visible table here, the
+# scorecard's AMI angle, and the Interesting Genes/Positions AMI cells never
+# disagree on which modules count as significant. Mirrors Per-module
+# significance above, which likewise only displays `sig` rows, not every
+# tested term.
+ami_disp <- ami_df %>%
+  dplyr::filter(!description %in% c("Too small", "No enrichment"),
+                !is.na(domino_p_adj), domino_p_adj < params$domino_module_thr)
+
+# Verbatim copy of 13.AMI_analysis.Rmd's .normalize_term()/.cluster_terms() --
+# kept in sync with that copy if this clustering logic ever changes. Collapses
+# near-duplicate description strings (case, punctuation, minor rewording) to
+# one row via normalized edit-distance (base R's own utils::adist()), not
+# just exact string equality.
+.normalize_term <- function(x) {
+  x <- tolower(x)
+  x <- gsub("[^a-z0-9 ]", " ", x)
+  gsub("\\s+", " ", trimws(x))
+}
+.cluster_terms <- function(terms, sim_thr = 0.85) {
+  norm <- vapply(terms, .normalize_term, character(1))
+  reps_norm <- character(0); reps_orig <- character(0)
+  assign <- integer(length(terms))
+  for (i in seq_along(terms)) {
+    if (length(reps_norm) == 0) { reps_norm <- norm[i]; reps_orig <- terms[i]; assign[i] <- 1L; next }
+    d <- utils::adist(norm[i], reps_norm)[1, ]
+    sim <- 1 - d / pmax(nchar(norm[i]), nchar(reps_norm), 1)
+    best <- which.max(sim)
+    if (sim[best] >= sim_thr) {
+      assign[i] <- best
+    } else {
+      reps_norm <- c(reps_norm, norm[i]); reps_orig <- c(reps_orig, terms[i])
+      assign[i] <- length(reps_norm)
+    }
+  }
+  reps_orig[assign]
+}
+
+# Clustered ONCE over the full pool (not re-clustered per Global/Top/Bottom
+# tab below) so a term's cluster assignment never depends on which tab is
+# looking at it -- mirrors 13.AMI_analysis.Rmd's render_module_rollup_tabset(),
+# which clusters term_rows_all once and only filters per tab afterward.
+ami_disp$term <- .cluster_terms(ami_disp$description)
+
+.build_ami_rollup <- function(df) {
+  df %>%
+    dplyr::group_by(term) %>%
+    dplyr::summarise(
+      `N modules`    = dplyr::n(),
+      `Gene lists`   = paste(sort(unique(gene_list)), collapse = ", "),
+      `DOMINO p.adj` = { v <- domino_p_adj[!is.na(domino_p_adj)]; if (length(v)) signif(min(v), 3) else NA_real_ },
+      Genes          = suppressWarnings(max(n_genes, na.rm = TRUE)),
+      .groups = "drop"
+    ) %>%
+    dplyr::rename(Term = term) %>%
+    dplyr::arrange(`DOMINO p.adj`)
+}
+```
+
+```{r ami_desc_tabs, eval=has_ami, results='asis'}
+for (dr in c("Global", "Top", "Bottom")) {
+  cat(sprintf("\n## %s\n\n", dr))
+  sub <- if (dr == "Global") ami_disp else ami_disp %>% dplyr::filter(direction == dr)
+  if (nrow(sub) == 0) { cat("_No described modules for this direction._\n\n"); next }
+  disp <- .build_ami_rollup(sub) %>% head(params$top_n)
+  print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
+}
+```
+
+---
+
+# Posenrich position-level enrichment {.tabset .tabset-fade}
+
+`r if (!has_posenrich_dotplot && !has_posenrich_le) "> **No posenrich outputs available (--posenrich was off, or the files weren't wired in) — skipping.**"`
+
+Position-level enrichment ([14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd))
+operates on individual CAAS positions rather than genes, so it gets its own section
+here rather than folding into the gene-set FCS tables above. Its most-corroborated terms
+(Overall dotplot) feed the Integrated gene scorecard below via the genes they
+involve; the Interesting Genes/Interesting Positions tables further down cover
+individual gene- and position-level corroboration in full detail. Faceted by
+direction below (`r params$top_n` rows each, not one shared budget split
+across both) so a direction with fewer but stronger hits isn't crowded out of
+a single pooled table by the other.
+
+## Overall dotplot terms — merged summary {.tabset}
+
+One row per significant term, **merged across name variants** that are
+themselves `/`-joined synonyms in their own description (e.g. a term
+described as `"V$HNF4_01 / HNF4A"` is treated as the same underlying term as
+one independently named `"HNF4A"` elsewhere) — connected via shared segments,
+not just identical full strings, so synonym spelling drift across databases
+doesn't fragment one biological term into several rows. `Merged from` lists
+every original (database, pathway) pair folded into the row, so the merge is
+auditable rather than a silent black box.
+
+`list_threshold` and `n occurrences` show which top-fraction cutoffs (25/10/5/1%)
+the term recurred significant at *before* merging — this recurrence already
+feeds into `Orthog. signal` itself (position-granularity, computed in
+[14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd): nested
+top-fraction recurrence + gene-inherited RER/Accumulation flags at
+distinct-gene resolution + position-native FADE-site overlap, Lancaster-
+combined — same weighted-by-term-size logic as the gene-level FCS reports, see
+that report's Overall dotplot section for the full explanation), so a term
+recurring across many cutoffs already scores higher; these two columns are
+kept as a human-readable audit trail alongside the number, not a second
+scoring mechanism. When a term is merged, `Orthog. signal` takes the
+**maximum** across its aliases (the strongest evidence among the synonym
+variants), and `list_threshold`/`n occurrences` are unioned across them.
+
+```{r posenrich_dotplot_prep, eval=has_posenrich_dotplot}
+posenrich_dotplot_disp <- posenrich_dotplot_df %>%
+  dplyr::mutate(Description = dplyr::coalesce(description, pathway),
+                signal = round(signal, 2),
+                .direction = dplyr::case_when(
+                  ranking %in% c("top", "accelerating")    ~ "Top",
+                  ranking %in% c("bottom", "decelerating") ~ "Bottom",
+                  TRUE                                      ~ tools::toTitleCase(ranking)
+                ))
+
+# Fuzzy '/'-synonym merge: two rows merge iff they share at least one trimmed
+# '/'-segment of their own Description, within the same direction (never
+# across direction -- a top-direction term and a bottom-direction term merging
+# would conflate two different biological claims). Connected-components over
+# a segment-sharing graph, not exact-string grouping, so "HNF4A" and
+# "V$HNF4_01 / HNF4A" merge even though neither string contains the other.
+fuzzy_merge_terms <- function(df) {
+  if (nrow(df) == 0) return(df %>% dplyr::mutate(.merge_id = integer(0)))
+  df <- df %>% dplyr::mutate(.row_id = dplyr::row_number())
+  segs <- df %>%
+    dplyr::mutate(seg = strsplit(Description, "\\s*/\\s*")) %>%
+    tidyr::unnest(seg) %>%
+    dplyr::mutate(seg = trimws(tolower(seg))) %>%
+    dplyr::filter(nzchar(seg))
+  if (nrow(segs) == 0 || dplyr::n_distinct(segs$seg) == nrow(segs)) {
+    # Nothing shares a segment with anything else -- every row is its own component.
+    return(df %>% dplyr::mutate(.merge_id = .row_id))
+  }
+  edges <- segs %>%
+    dplyr::inner_join(segs, by = "seg", suffix = c("_a", "_b"), relationship = "many-to-many") %>%
+    dplyr::filter(.row_id_a < .row_id_b) %>%
+    dplyr::distinct(.row_id_a, .row_id_b)
+  g <- igraph::graph_from_data_frame(edges, directed = FALSE, vertices = df$.row_id)
+  comp <- igraph::components(g)
+  df %>% dplyr::mutate(.merge_id = comp$membership[as.character(.row_id)])
+}
+```
+
+```{r posenrich_dotplot_tabs, eval=has_posenrich_dotplot, results='asis'}
+for (dr in c("Global", "Top", "Bottom")) {
+  cat(sprintf("\n### %s\n\n", dr))
+  dr_df <- posenrich_dotplot_disp %>% dplyr::filter(.direction == dr)
+  if (nrow(dr_df) == 0) { cat("_No terms for this direction._\n\n"); next }
+
+  merged <- fuzzy_merge_terms(dr_df) %>%
+    dplyr::group_by(.merge_id) %>%
+    dplyr::summarise(
+      Description   = dplyr::first(Description[order(-signal)]),
+      `Merged from`  = paste(unique(sprintf("%s: %s", database, pathway)), collapse = "; "),
+      list_threshold = paste(unique(unlist(strsplit(list_threshold, ",\\s*"))), collapse = ", "),
+      `n occurrences` = suppressWarnings(max(n_occurrences, na.rm = TRUE)),
+      `N merged`      = dplyr::n(),
+      `Orthog. signal` = max(signal, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::arrange(dplyr::desc(`Orthog. signal`)) %>%
+    dplyr::select(-.merge_id) %>%
+    head(params$top_n)
+
+  print(kbl_html(merged, height = if (nrow(merged) > 15) "460px" else NULL))
+}
+```
+
+---
+
+# Interesting Genes {.tabset .tabset-fade}
+
+One row per gene carrying at least one of the criteria below, faceted
+Global/Top/Bottom. Each criterion is a plain boolean (or bool + supporting
+list, e.g. which enriched term(s) a gene belongs to) — deliberately not
+collapsed into a single opaque score, so every claim in this table is
+independently checkable. `FCS term(s)`/`AMI description(s)`/`PE term(s)` show
+each term's **description** (not its bare database id), restricted to terms
+that module itself calls significant (FCS/RER's own BH+p.perm gate, DOMINO's
+own module-significance cutoff — posenrich's leading edge is already
+significance-restricted at the source), and collapse behind a `<details>`
+toggle when a gene carries more than one. `Composite score` still ranks rows (surprisal-
+weighted: rare criteria count for more than common ones, `-log2` of each
+criterion's own background rate across **all** genes in this direction, not
+just the ones shown here — a criterion's rarity has to be measured against
+the true population, not the already-enriched subset that cleared the filter
+below) — the 25/10/5/1% percentile quartet is nested (1% ⊂ 5% ⊂ 10% ⊂ 25%), so
+each of the four contributes at **1/4 weight** rather than full weight, the
+same one-family-shouldn't-quadruple-count idea as the Lancaster discount used
+elsewhere in this pipeline, just expressed as a plain fraction here to match
+the simpler surprisal-sum mechanism (not a hypergeometric test). 25% is
+included alongside 10/5/1% because it's a real, tested tier elsewhere in this
+pipeline (posenrich's own Fisher test, AMI's DOMINO module search both run at
+25%), not an arbitrary extra cutoff.
+
+```{r interesting_shared_helpers}
+# Shared by both Interesting Genes AND Interesting Positions below -- defined
+# unconditionally (not gated on has_fcs_stats_cmp/has_position_scores_cmp)
+# because either table's own gate can be TRUE independently of the other's,
+# and build_interesting_positions() below calls these same helpers. Gating
+# them behind only one of the two flags would leave them undefined whenever
+# that flag was FALSE but the other (needing them) was TRUE.
+
+# Dependency-free HTML escaping (avoids requiring htmltools be attached) and
+# a collapsible-<details> renderer for semicolon-joined multi-term cells --
+# any kable() call including a column built by .collapsible_list() MUST be
+# passed escape = FALSE, or the markup renders as literal text.
+.html_escape <- function(x) {
+  x <- gsub("&", "&amp;", x, fixed = TRUE)
+  x <- gsub("<", "&lt;",  x, fixed = TRUE)
+  gsub(">", "&gt;", x, fixed = TRUE)
+}
+.collapsible_list <- function(joined, sep = "; ") {
+  vapply(joined, function(x) {
+    if (is.na(x) || !nzchar(x)) return("")
+    items <- strsplit(x, sep, fixed = TRUE)[[1]]
+    if (length(items) <= 1) return(.html_escape(x))
+    sprintf("<details><summary>%d terms</summary>%s</details>",
+            length(items),
+            paste(sprintf("<div>%s</div>", .html_escape(items)), collapse = ""))
+  }, character(1), USE.NAMES = FALSE)
+}
+
+# FCS term membership per gene, direction-matched ranking set -- restricted to
+# terms FCS/RER itself calls significant (fcs_sig_terms, cross_angle_gene_hits
+# chunk above: BH < fdr_thr AND p.perm < pperm_thr when present), using each
+# term's description (not the bare pathway id). `le` alone is NOT already
+# significance-restricted (12.FCS_general_report.Rmd's leading-edge export
+# only requires drv_score > 0) -- the inner_join against fcs_sig_terms is
+# what actually restricts this to genuinely enriched terms.
+.fcs_terms_for <- function(rk_set) {
+  if (!has_le || !has_multi) return(tibble::tibble(gene = character(), fcs_terms = character()))
+  le %>%
+    dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
+    dplyr::mutate(direction = dplyr::case_when(
+      ranking %in% c("top", "accelerating")    ~ "top",
+      ranking %in% c("bottom", "decelerating") ~ "bottom",
+      ranking == "global"                      ~ "global",
+      TRUE                                      ~ NA_character_
+    )) %>%
+    dplyr::filter(!is.na(direction)) %>%
+    dplyr::inner_join(fcs_sig_terms, by = c("module", "direction", "database", "pathway")) %>%
+    dplyr::group_by(gene) %>%
+    dplyr::summarise(fcs_terms = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "),
+                      .groups = "drop")
+}
+# AMI module descriptions per gene, direction-matched -- restricted to
+# DOMINO-significant modules (domino_p_adj < domino_module_thr, same gate
+# ami_genes above applies), using the COLLAPSED/clustered description
+# (ami_disp$term, task: AMI collapsed rollup above) rather than each module's
+# raw near-duplicate-worded description, and tagged with which direction and
+# gene-list threshold (e.g. top10, bottom5) it was found at.
+.ami_desc_for <- function(dir_filter) {
+  if (!has_ami) return(tibble::tibble(gene = character(), ami_desc = character()))
+  ami_disp %>%
+    dplyr::filter(is.null(dir_filter) | direction %in% dir_filter,
+                  !is.na(domino_p_adj), domino_p_adj < params$domino_module_thr) %>%
+    dplyr::mutate(gene = strsplit(.data[[.ami_gene_col]], ",\\s*"),
+                  hit_label = sprintf("%s (%s: %s)", term, direction, gene_list)) %>%
+    tidyr::unnest(gene) %>%
+    dplyr::mutate(gene = trimws(gene)) %>%
+    dplyr::group_by(gene) %>%
+    dplyr::summarise(ami_desc = paste(unique(hit_label), collapse = "; "), .groups = "drop")
+}
+# Posenrich significant-term positions per gene, direction-matched ranking
+# set. posenrich_leading_edge.tsv is ALREADY significance-restricted by
+# posenrich_enrich.py itself (only sig rows get written), so no additional
+# filter is needed here -- just resolving each term's description (not the
+# bare pathway id) via posenrich's own dotplot table when available.
+.posenrich_for <- function(rk_set) {
+  if (!has_posenrich_le) return(tibble::tibble(gene = character(), pe_position = character(), pe_terms = character()))
+  pe <- posenrich_le_df %>%
+    dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
+    dplyr::mutate(Position = sub(".*:", "", gene_position))
+  if (has_posenrich_dotplot) {
+    pe <- pe %>%
+      dplyr::left_join(
+        posenrich_dotplot_df %>% dplyr::mutate(description = dplyr::coalesce(description, pathway)) %>%
+          dplyr::distinct(ranking, database, pathway, description),
+        by = c("ranking", "database", "pathway")
+      ) %>%
+      dplyr::mutate(description = dplyr::coalesce(description, pathway))
+  } else {
+    pe$description <- pe$pathway
+  }
+  pe %>%
+    dplyr::group_by(gene) %>%
+    dplyr::summarise(pe_position = paste(sort(unique(Position)), collapse = ", "),
+                      pe_terms    = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "),
+                      .groups = "drop")
+}
+
+# Position-level percentile membership, from SCORING's published
+# position_lists/slice_<dir><pct>.tsv (scoring_compute.R) when
+# params$position_lists_dir is supplied and all 4 files for a direction
+# exist -- so this table's 25/10/5/1% agrees, by construction, with whatever
+# else in the pipeline reads the same published cutoff, rather than
+# re-deriving its own quantile() cut over base$CAAS_score at render time
+# (the previous behaviour, kept as the fallback below). dir_key is the
+# lowercase direction ("global"/"top"/"bottom"), matching the published
+# filenames exactly. Quartet, not a trio -- 25% is a real, tested tier
+# elsewhere (posenrich's own Fisher test, AMI's DOMINO search).
+.pos_slice_positions <- function(dir_key, pct) {
+  if (is.null(params$position_lists_dir)) return(NULL)
+  f <- file.path(params$position_lists_dir, sprintf("slice_%s%d.tsv", dir_key, pct))
+  if (!file.exists(f)) return(NULL)
+  d <- tryCatch(readr::read_tsv(f, show_col_types = FALSE), error = function(e) NULL)
+  if (is.null(d) || !all(c("Gene", "Position") %in% names(d))) return(NULL)
+  unique(paste(d$Gene, d$Position))
+}
+.position_pct_flags <- function(base, dir_key) {
+  pub25 <- .pos_slice_positions(dir_key, 25)
+  pub10 <- .pos_slice_positions(dir_key, 10)
+  pub5  <- .pos_slice_positions(dir_key, 5)
+  pub1  <- .pos_slice_positions(dir_key, 1)
+  if (!is.null(pub25) && !is.null(pub10) && !is.null(pub5) && !is.null(pub1)) {
+    ids <- paste(base$Gene, base$Position)
+    base %>%
+      dplyr::transmute(gene = Gene, Position, CAAS_score,
+                        `25%` = ids %in% pub25, `10%` = ids %in% pub10,
+                        `5%` = ids %in% pub5, `1%` = ids %in% pub1)
+  } else {
+    thr <- quantile(base$CAAS_score, c(0.75, 0.90, 0.95, 0.99), na.rm = TRUE)
+    base %>%
+      dplyr::transmute(gene = Gene, Position, CAAS_score,
+                        `25%` = CAAS_score >= thr[1], `10%` = CAAS_score >= thr[2],
+                        `5%` = CAAS_score >= thr[3], `1%` = CAAS_score >= thr[4])
+  }
+}
+
+# Safe column getter: FALSE for every row when the column is absent (older
+# fcs_stats.tsv without flag_accum_top/bottom, etc.) rather than erroring --
+# `.data[[col]]` throws on a genuinely missing column, it does not return
+# NULL for `%||%` to catch.
+.gcol <- function(df, col) if (col %in% names(df)) df[[col]] else rep(FALSE, nrow(df))
+```
+
+```{r interesting_genes_prep, eval=has_fcs_stats_cmp}
+build_interesting_genes <- function(direction) {
+  rk_set   <- switch(direction, Top = c("top", "accelerating"), Bottom = c("bottom", "decelerating"), NULL)
+  ami_dirf <- switch(direction, Top = "Top", Bottom = "Bottom", NULL)
+
+  base <- gene_attr_df
+  if (direction == "Top") {
+    base <- base %>% dplyr::transmute(gene, `25%` = pct_top25, `10%` = pct_top10, `5%` = pct_top5, `1%` = pct_top1,
+                                       FADE_dir = .gcol(gene_attr_df, "flag_fade_top"),
+                                       Accum_dir = .gcol(gene_attr_df, "flag_accum_top"))
+  } else if (direction == "Bottom") {
+    base <- base %>% dplyr::transmute(gene, `25%` = pct_bottom25, `10%` = pct_bottom10, `5%` = pct_bottom5, `1%` = pct_bottom1,
+                                       FADE_dir = .gcol(gene_attr_df, "flag_fade_bottom"),
+                                       Accum_dir = .gcol(gene_attr_df, "flag_accum_bottom"))
+  } else {
+    base <- base %>% dplyr::transmute(
+      gene,
+      `25%` = dplyr::coalesce(pct_top25, FALSE) | dplyr::coalesce(pct_bottom25, FALSE),
+      `10%` = dplyr::coalesce(pct_top10, FALSE) | dplyr::coalesce(pct_bottom10, FALSE),
+      `5%`  = dplyr::coalesce(pct_top5,  FALSE) | dplyr::coalesce(pct_bottom5,  FALSE),
+      `1%`  = dplyr::coalesce(pct_top1,  FALSE) | dplyr::coalesce(pct_bottom1,  FALSE),
+      FADE_dir  = .gcol(gene_attr_df, "flag_fade"),
+      Accum_dir = .gcol(gene_attr_df, "flag_accum"))
+  }
+  base$RER_acc  <- .gcol(gene_attr_df, "flag_rer_acc")
+  base$RER_decc <- .gcol(gene_attr_df, "flag_rer_decc")
+
+  all_genes <- base %>%
+    dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
+    dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene") %>%
+    dplyr::left_join(.posenrich_for(rk_set), by = "gene") %>%
+    dplyr::mutate(
+      dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_dir, Accum_dir, RER_acc, RER_decc), ~ dplyr::coalesce(.x, FALSE)),
+      FCS_sig  = !is.na(fcs_terms) & nzchar(fcs_terms),
+      AMI_net  = !is.na(ami_desc)  & nzchar(ami_desc),
+      PE_sig   = !is.na(pe_terms)  & nzchar(pe_terms)
+    )
+
+  # Surprisal-weighted composite: percentile quartet at 1/4 weight each
+  # (nested, 1% subset of 5% subset of 10% subset of 25% -- see the section
+  # text above), every other criterion at full weight. 25% is included
+  # alongside 10/5/1% because it's a real, tested tier elsewhere in this
+  # pipeline (posenrich's own Fisher test, AMI's DOMINO search both run at
+  # 25%; SCORING now publishes a 25% gene list too), not an arbitrary extra
+  # cutoff. Background rates computed from the FULL, UNFILTERED gene pool
+  # (all_genes, before restricting to "meets >=1 criterion") -- using the
+  # filtered/displayed subset here would inflate every criterion's apparent
+  # background rate (since it's already an enriched subpopulation) and
+  # understate how rare/surprising each one really is, defeating the whole
+  # point of the surprisal weighting.
+  crit_full  <- c("FADE_dir", "Accum_dir", "RER_acc", "RER_decc", "FCS_sig", "AMI_net", "PE_sig")
+  crit_quart <- c("25%", "10%", "5%", "1%")
+  bg_full  <- vapply(crit_full,  function(cl) mean(all_genes[[cl]], na.rm = TRUE), numeric(1))
+  bg_quart <- vapply(crit_quart, function(cl) mean(all_genes[[cl]], na.rm = TRUE), numeric(1))
+
+  out <- all_genes %>%
+    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_dir | Accum_dir | RER_acc | RER_decc | FCS_sig | AMI_net | PE_sig)
+  if (nrow(out) == 0) return(out)
+
+  w_full  <- -log2(pmax(bg_full, 1e-6))
+  w_quart <- -log2(pmax(bg_quart, 1e-6)) / 4
+  out$`Composite score` <- round(as.numeric(
+    as.matrix(out[, crit_full])  %*% w_full +
+    as.matrix(out[, crit_quart]) %*% w_quart), 2)
+  out$`N criteria` <- rowSums(out[, c(crit_full, crit_quart)])
+
+  # Collapsible <details> rendering for the multi-term text columns -- applied
+  # AFTER FCS_sig/AMI_net/PE_sig and the composite score are already computed
+  # from the raw semicolon-joined text (the HTML wrapping below must never
+  # feed back into those). interesting_genes_tabs below must render this
+  # table with escape = FALSE for the markup to actually collapse.
+  out <- out %>%
+    dplyr::mutate(
+      `FCS term(s)`         = .collapsible_list(fcs_terms),
+      `AMI description(s)`  = .collapsible_list(ami_desc),
+      `PE term(s)`          = .collapsible_list(pe_terms)
+    )
+
+  out %>%
+    dplyr::arrange(dplyr::desc(`Composite score`)) %>%
+    dplyr::select(Gene = gene, `25%`, `10%`, `5%`, `1%`, FADE_dir, RER_acc, RER_decc, Accum_dir,
+                  FCS_sig, `FCS term(s)`, AMI_net, `AMI description(s)`,
+                  PE_sig, `PE position` = pe_position, `PE term(s)`,
+                  `N criteria`, `Composite score`) %>%
+    head(params$top_n * 3)
+}
+```
+
+```{r interesting_genes_tabs, eval=has_fcs_stats_cmp, results='asis'}
+for (dr in c("Global", "Top", "Bottom")) {
+  cat(sprintf("\n## %s\n\n", dr))
+  tbl <- build_interesting_genes(dr)
+  if (nrow(tbl) == 0) { cat("_No genes meet any criterion for this direction._\n\n"); next }
+  print(kbl_html(tbl, height = if (nrow(tbl) > 15) "480px" else NULL, escape = FALSE))
+}
+```
+
+`r if (!has_fcs_stats_cmp) "> **fcs_stats_file not supplied — Interesting Genes table skipped.**"`
+
+---
+
+# Interesting Positions {.tabset .tabset-fade}
+
+One row per position carrying at least one of the criteria below, faceted
+Global/Top/Bottom. Same philosophy as Interesting Genes, but at the position's
+own native resolution — each criterion is either **position-native** (this
+exact position: CAAS percentile, FADE-site overlap, posenrich significant-term
+membership) or **gene-inherited** (every position in a flagged gene carries
+the same value: RER acceleration/deceleration, Accumulation significance, FCS
+gene-set membership, AMI module membership). That distinction matters — a
+gene can be FADE-significant overall while this specific position isn't the
+site driving it, so gene-level and position-level FADE overlap are genuinely
+different claims, not duplicated information. `COSMIC`/`PAI3D_pathogenic` are
+**EXTRAS**: shown for characterisation only, excluded from `Composite score`
+(they describe a different kind of evidence — external database overlap
+rather than corroboration from this pipeline's own modules — mixing them into
+the same weighted sum would conflate the two). Both are reported as 3-state
+tags rather than TRUE/FALSE, so a real negative is never conflated with "never
+checked": `PAI3D_pathogenic` is `pathogenic` / `benign` / `missing`; `COSMIC`
+is `hit` / `no_hit` / `missing` (COSMIC's own file only ever lists positive
+hits, so "checked, no record" is inferred from PrimateAI-3D's exhaustive
+per-position coverage as the "was this position checkable at all" reference).
+
+```{r interesting_positions_prep, eval=has_position_scores_cmp}
+build_interesting_positions <- function(direction) {
+  rk_set    <- switch(direction, Top = c("top", "accelerating"), Bottom = c("bottom", "decelerating"), NULL)
+  side_vals <- switch(direction, Top = c("top", "both"), Bottom = c("bottom", "both"), NULL)
+
+  base <- position_scores_cmp_df
+  if (!is.null(side_vals)) base <- base %>% dplyr::filter(change_side %in% side_vals)
+  if (nrow(base) == 0) return(base)
+
+  base <- .position_pct_flags(base, tolower(direction))
+
+  # Position-native FADE-site overlap.
+  fade_df <- switch(direction,
+    Top = fade_sites_top_cmp_df, Bottom = fade_sites_bottom_cmp_df,
+    dplyr::bind_rows(fade_sites_top_cmp_df, fade_sites_bottom_cmp_df))
+  base$FADE_overlap <- if (!is.null(fade_df)) {
+    paste(base$gene, base$Position) %in% paste(fade_df$gene, fade_df$Position)
+  } else FALSE
+
+  # Gene-inherited flags (every position in a flagged gene shares its value).
+  # gene_attr_df can be NULL here even when has_position_scores_cmp is TRUE --
+  # the two gates (fcs_stats_file vs position_scores_file) are independent, so
+  # this table must degrade gracefully (RER/Accum flags just come back FALSE
+  # via .gcol) rather than assume fcs_stats_file was also supplied.
+  if (!is.null(gene_attr_df)) {
+    base <- base %>%
+      dplyr::left_join(gene_attr_df %>% dplyr::select(gene, dplyr::any_of(c(
+        "flag_rer_acc", "flag_rer_decc", "flag_accum_top", "flag_accum_bottom", "flag_accum"))),
+        by = "gene")
+  }
+  base$RER_acc  <- .gcol(base, "flag_rer_acc")
+  base$RER_decc <- .gcol(base, "flag_rer_decc")
+  base$Accum_dir <- switch(direction,
+    Top = .gcol(base, "flag_accum_top"), Bottom = .gcol(base, "flag_accum_bottom"), .gcol(base, "flag_accum"))
+
+  ami_dirf <- switch(direction, Top = "Top", Bottom = "Bottom", NULL)
+  base <- base %>%
+    dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
+    dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene") %>%
+    dplyr::mutate(FCS_sig = !is.na(fcs_terms) & nzchar(fcs_terms),
+                  AMI_net = !is.na(ami_desc)  & nzchar(ami_desc))
+
+  # Position-native posenrich significance: exact Gene:Position match, not
+  # just gene -- a gene can have OTHER significant positions without this one
+  # being among them.
+  if (has_posenrich_le) {
+    pe <- posenrich_le_df %>%
+      dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
+      dplyr::mutate(gene = sub(":.*", "", gene_position), Position = suppressWarnings(as.integer(sub(".*:", "", gene_position)))) %>%
+      dplyr::group_by(gene, Position) %>%
+      dplyr::summarise(pe_terms = paste(sort(unique(pathway)), collapse = "; "), .groups = "drop")
+    base <- base %>% dplyr::left_join(pe, by = c("gene", "Position"))
+  } else {
+    base$pe_terms <- NA_character_
+  }
+  base$PE_sig <- !is.na(base$pe_terms) & nzchar(base$pe_terms)
+
+  # EXTRAS -- characterisation only, never in the score (see section text).
+  # Both reported as 3-state tags (not TRUE/FALSE) so "checked, negative" is
+  # never conflated with "never checked":
+  #   PAI3D_pathogenic: "pathogenic" / "benign" / "missing"
+  #   COSMIC:           "hit" / "no_hit" / "missing"
+
+  # PrimateAI-3D's own table is exhaustive (one row per position it scored,
+  # `prediction` always benign/pathogenic) -- a position simply absent from it
+  # was never scored by PrimateAI at all, a genuine "missing", not a benign
+  # call. Also doubles as the "was this position even checkable" reference for
+  # COSMIC below (COSMIC's own file is hits-only -- see there).
+  .pai_pos <- NULL
+  if (has_vep_primateai_cmp) {
+    .pai <- vep_primateai_cmp_df
+    if ("caap_group" %in% names(.pai)) .pai <- dplyr::filter(.pai, caap_group == "US")
+    .pred_col <- intersect(c("prediction"), names(.pai))[1]
+    if (!is.na(.pred_col)) {
+      .pai_pos <- .pai %>%
+        dplyr::mutate(.patho = grepl("pathogenic", .data[[.pred_col]], ignore.case = TRUE)) %>%
+        dplyr::group_by(Gene, Position) %>% dplyr::summarise(.patho = any(.patho), .groups = "drop")
+    }
+  }
+  base$PAI3D_pathogenic <- if (!is.null(.pai_pos)) {
+    .m <- .pai_pos[match(paste(base$gene, base$Position), paste(.pai_pos$Gene, .pai_pos$Position)), ]
+    dplyr::case_when(is.na(.m$.patho) ~ "missing", .m$.patho ~ "pathogenic", TRUE ~ "benign")
+  } else rep("missing", nrow(base))
+
+  # COSMIC's own file (cosmic_scores.tsv) is HITS-ONLY -- every row IS a
+  # documented COSMIC mutation, unlike PrimateAI's exhaustive per-position
+  # table. A position absent from it could mean either "checked, no COSMIC
+  # record" (a real negative) or "never genomically checkable at all" (e.g.
+  # liftover/coordinate mapping failed) -- the file alone can't tell the two
+  # apart. PrimateAI-3D's own position set is used as the "was this position
+  # checkable" reference instead (verified against real data: 116/118 COSMIC
+  # hits also appear in PrimateAI's set, i.e. the two databases draw from
+  # essentially the same genomically-mapped position universe).
+  base$COSMIC <- if (has_vep_cosmic_cmp) {
+    .cosmic <- if ("caap_group" %in% names(vep_cosmic_cmp_df)) dplyr::filter(vep_cosmic_cmp_df, caap_group == "US") else vep_cosmic_cmp_df
+    .cosmic_hit <- paste(base$gene, base$Position) %in% paste(.cosmic$Gene, .cosmic$Position)
+    .checkable <- if (!is.null(.pai_pos)) {
+      paste(base$gene, base$Position) %in% paste(.pai_pos$Gene, .pai_pos$Position)
+    } else rep(TRUE, nrow(base))  # no PrimateAI reference available -- can't distinguish no_hit from missing
+    dplyr::case_when(.cosmic_hit ~ "hit", .checkable ~ "no_hit", TRUE ~ "missing")
+  } else rep("missing", nrow(base))
+
+  all_positions <- base %>%
+    dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, Accum_dir, FCS_sig, AMI_net, PE_sig),
+                                 ~ dplyr::coalesce(.x, FALSE)))
+
+  # Background rates from the FULL, UNFILTERED position pool for this
+  # direction (all_positions) -- see build_interesting_genes() above for why
+  # computing them from the filtered/displayed subset would be wrong. Quartet
+  # (25/10/5/1%), not a trio -- same reasoning as build_interesting_genes().
+  crit_full  <- c("FADE_overlap", "RER_acc", "RER_decc", "Accum_dir", "FCS_sig", "AMI_net", "PE_sig")
+  crit_quart <- c("25%", "10%", "5%", "1%")
+  bg_full  <- vapply(crit_full,  function(cl) mean(all_positions[[cl]], na.rm = TRUE), numeric(1))
+  bg_quart <- vapply(crit_quart, function(cl) mean(all_positions[[cl]], na.rm = TRUE), numeric(1))
+
+  out <- all_positions %>%
+    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | RER_acc | RER_decc | Accum_dir | FCS_sig | AMI_net | PE_sig)
+  if (nrow(out) == 0) return(out)
+
+  w_full  <- -log2(pmax(bg_full, 1e-6))
+  w_quart <- -log2(pmax(bg_quart, 1e-6)) / 4
+  out$`Composite score` <- round(as.numeric(
+    as.matrix(out[, crit_full]) %*% w_full + as.matrix(out[, crit_quart]) %*% w_quart), 2)
+  out$`N criteria` <- rowSums(out[, c(crit_full, crit_quart)])
+
+  # Collapsible <details> rendering, applied AFTER FCS_sig/AMI_net/PE_sig and
+  # the composite score are already computed from the raw text -- see
+  # build_interesting_genes() above. interesting_positions_tabs below must
+  # render this table with escape = FALSE.
+  out <- out %>%
+    dplyr::mutate(
+      `FCS term(s)`         = .collapsible_list(fcs_terms),
+      `AMI description(s)`  = .collapsible_list(ami_desc),
+      `PE term(s)`          = .collapsible_list(pe_terms)
+    )
+
+  out %>%
+    dplyr::arrange(dplyr::desc(`Composite score`)) %>%
+    dplyr::select(Gene = gene, Position, `CAAS Score` = CAAS_score, `25%`, `10%`, `5%`, `1%`,
+                  FADE_overlap, RER_acc, RER_decc, Accum_dir,
+                  FCS_sig, `FCS term(s)`, AMI_net, `AMI description(s)`,
+                  PE_sig, `PE term(s)`,
+                  COSMIC, PAI3D_pathogenic,
+                  `N criteria`, `Composite score`) %>%
+    head(params$top_n * 3)
+}
+```
+
+```{r interesting_positions_tabs, eval=has_position_scores_cmp, results='asis'}
+for (dr in c("Global", "Top", "Bottom")) {
+  cat(sprintf("\n## %s\n\n", dr))
+  tbl <- build_interesting_positions(dr)
+  if (nrow(tbl) == 0) { cat("_No positions meet any criterion for this direction._\n\n"); next }
+  print(kbl_html(tbl, height = if (nrow(tbl) > 15) "480px" else NULL, escape = FALSE))
+}
+```
+
+`r if (!has_position_scores_cmp) "> **position_scores_file not supplied — Interesting Positions table skipped.**"`
+
+---
+
+# Integrated gene scorecard {.tabset .tabset-fade}
+
+One row per gene that shows up in at least one of the three independent angles
+analysed across this pipeline: **FCS** (leading-edge member of a significant
+CAAS/RER gene set, above), **AMI** (member of a described DOMINO module,
+[13.AMI_analysis.Rmd](13.AMI_analysis.Rmd)), and **posenrich** (source of an
+"interesting" CAAS position, [14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd)).
+Ranked by a surprisal-weighted composite of which angles corroborate it — rare
+*combinations* outweigh common ones, same philosophy as the per-position/per-gene
+composite scores elsewhere in this pipeline (`surprisal_weighted_scores()` in
+`orthogonal_score.R`) — not a p-value, a ranking heuristic. `N angles` (the raw
+count, out of 3) is kept alongside for a human-readable summary. Each TRUE flag
+is paired with a collapsible description cell (`FCS term(s)`/`AMI description(s)`/
+`PE term(s)`) — the same significance-restricted, description-based lookups the
+Interesting Genes/Positions tables use above, so a reader never has to take a
+flag on faith. `Position` shows the actual posenrich-flagged position(s) for
+that gene (when it has a posenrich hit) — so a reader can see whether the
+specific position driving the posenrich signal is one worth cross-checking
+directly in [14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd),
+rather than just knowing the gene overlaps in both angles.
+
+```{r scorecard_prep}
+# fcs_genes / ami_genes / posenrich_genes are computed once, earlier in the
+# document (cross_angle_gene_hits chunk, right after `load`) -- reused as-is
+# here (and by the Per-module significance and AMI sections above).
+scorecard <- dplyr::full_join(fcs_genes, ami_genes, by = c("gene", "direction")) %>%
+  dplyr::full_join(posenrich_genes, by = c("gene", "direction")) %>%
+  dplyr::mutate(dplyr::across(c(fcs_hit, ami_hit, posenrich_hit), ~ dplyr::coalesce(.x, FALSE)),
+                Position = dplyr::coalesce(Position, "")) %>%
+  dplyr::filter(fcs_hit | ami_hit | posenrich_hit)
+
+has_scorecard <- nrow(scorecard) > 0
+if (has_scorecard) {
+  .sc_bg <- c(fcs_hit = mean(scorecard$fcs_hit), ami_hit = mean(scorecard$ami_hit),
+              posenrich_hit = mean(scorecard$posenrich_hit))
+  scorecard$`N angles` <- rowSums(scorecard[, c("fcs_hit", "ami_hit", "posenrich_hit")])
+  scorecard$`Composite score` <- round(
+    surprisal_weighted_scores(scorecard, c("fcs_hit", "ami_hit", "posenrich_hit"), .sc_bg), 2
+  )
+  scorecard <- scorecard %>%
+    dplyr::arrange(direction, dplyr::desc(`Composite score`), dplyr::desc(`N angles`))
+}
+```
+
+```{r scorecard_tabs, results='asis'}
+for (dr in c("Global", "Top", "Bottom")) {
+  cat(sprintf("\n## %s\n\n", dr))
+  if (!has_scorecard) { cat("_No cross-angle data available (need at least one of FCS leading-edge, AMI module descriptions, or posenrich interesting-positions)._\n\n"); next }
+  sub <- scorecard %>% dplyr::filter(direction == dr) %>% head(params$top_n * 3)
+  if (nrow(sub) == 0) { cat("_No genes for this direction._\n\n"); next }
+
+  # Same direction-scoped, significance-restricted, description-based helpers
+  # as the Interesting Genes/Positions tables above -- so a TRUE flag here is
+  # always backed by an actual description, not just a bare boolean.
+  rk_set   <- switch(dr, Top = c("top", "accelerating"), Bottom = c("bottom", "decelerating"), NULL)
+  ami_dirf <- switch(dr, Top = "Top", Bottom = "Bottom", NULL)
+  disp <- sub %>%
+    dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
+    dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene") %>%
+    dplyr::left_join(.posenrich_for(rk_set) %>% dplyr::select(gene, pe_terms), by = "gene") %>%
+    dplyr::mutate(
+      `FCS term(s)`        = .collapsible_list(fcs_terms),
+      `AMI description(s)` = .collapsible_list(ami_desc),
+      `PE term(s)`         = .collapsible_list(pe_terms)
+    ) %>%
+    dplyr::transmute(Gene = gene, FCS = fcs_hit, `FCS term(s)`,
+                      AMI = ami_hit, `AMI description(s)`,
+                      Posenrich = posenrich_hit, `PE term(s)`,
+                      Position, `N angles`, `Composite score`)
+  print(kbl_html(disp, height = if (nrow(disp) > 15) "480px" else NULL, escape = FALSE))
+}
+```
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>
+
+*Generated by PhyloPhere — Enrichment Module*
+*Date of generation: `r Sys.Date()`*

@@ -22,7 +22,7 @@ follow-up task for wiring it, not a fix to make here.
 """
 
 # ── Third-party ───────────────────────────────────────────────────────────────
-from PySide6.QtWidgets import QCheckBox
+from PySide6.QtWidgets import QCheckBox, QLabel
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import RerConfig
@@ -100,10 +100,20 @@ class RerConvergeTab(ModuleTabWidget):
         self.rer_tool_continuous.setChecked(config.rer_tool_continuous)
         self.rer_tool_continuous.toggled.connect(self._on_continuous)
 
-        self._essential_form.insertRow(0, "RER tools (--rer_tool)", self.rer_tool_build_trait)
+        self._rer_tool_label = QLabel("RER tools (--rer_tool)")
+        self._essential_form.insertRow(0, self._rer_tool_label, self.rer_tool_build_trait)
         self._essential_form.insertRow(1, "", self.rer_tool_build_tree)
         self._essential_form.insertRow(2, "", self.rer_tool_build_matrix)
         self._essential_form.insertRow(3, "", self.rer_tool_continuous)
+
+    def retranslate(self, lang: str = "en") -> None:
+        super().retranslate(lang)
+        from gui.i18n import tr
+        self._rer_tool_label.setText(tr("RER tools (--rer_tool)", lang))
+        self.rer_tool_build_trait.setText(tr("build_trait", lang))
+        self.rer_tool_build_tree.setText(tr("build_tree", lang))
+        self.rer_tool_build_matrix.setText(tr("build_matrix", lang))
+        self.rer_tool_continuous.setText(tr("continuous", lang))
 
     def _on_build_trait(self, value: bool) -> None:
         self._config.rer_tool_build_trait = value

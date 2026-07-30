@@ -90,6 +90,21 @@ def check_remote_paths(
     return problems
 
 
+def write_remote_file(
+    host: str, path: str, content: str, mode: str = "600", timeout: int = DEFAULT_TIMEOUT
+) -> None:
+    """Writes `content` to `path` on `host` over SSH and chmods it `mode`.
+    Default 600 suits secrets (see gui/secrets_io.py); generated run scripts
+    pass mode="755" (see MainWindow._save_generated_scripts)."""
+    remote_command = f"cat > {shlex.quote(path)} && chmod {mode} {shlex.quote(path)}"
+    _run_ssh(host, remote_command, stdin=content, timeout=timeout)
+
+
+def remove_remote_file(host: str, path: str, timeout: int = DEFAULT_TIMEOUT) -> None:
+    remote_command = f"rm -f {shlex.quote(path)}"
+    _run_ssh(host, remote_command, stdin=None, timeout=timeout)
+
+
 def list_remote_directory(
     host: str, path: str, timeout: int = DEFAULT_TIMEOUT
 ) -> list[tuple[str, bool]]:

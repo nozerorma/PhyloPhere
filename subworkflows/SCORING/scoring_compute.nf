@@ -23,7 +23,9 @@
  *   position_scores    : TSV with per Gene×Position scores
  *   gene_scores        : TSV with per Gene scores + directional significance flags
  *   gene_correlations  : TSV with pairwise correlations
- *   gene_lists                : directory of 8 slice TSVs (Top/Bottom × 25/10/5/1%) for STRING
+ *   gene_lists                : directory of 12 slice TSVs (Top/Bottom/Global × 25/10/5/1%) for AMI/reports
+ *   position_lists            : directory of 12 slice TSVs (Top/Bottom/Global × 25/10/5/1%), position-level,
+ *                               for posenrich/reports (Gene, Position, CAAS_score)
  *   gene_threshold_enrichment : TSV — gene-level enrichment curve across CAAS thresholds × tools
  *   pos_threshold_enrichment  : TSV — position-level FADE enrichment curve across CAAS thresholds
  */
@@ -38,6 +40,9 @@ process SCORING_COMPUTE {
     publishDir path: "${params.outdir}/scoring",
                mode: 'copy', overwrite: true,
                pattern: 'gene_lists'
+    publishDir path: "${params.outdir}/scoring",
+               mode: 'copy', overwrite: true,
+               pattern: 'position_lists'
 
     input:
     path postproc_file
@@ -63,6 +68,7 @@ process SCORING_COMPUTE {
     path "position_score_stress_variants.tsv",        optional: true, emit: stress_variants
     path "position_score_stress_latent_loadings.tsv", optional: true, emit: stress_latent_loadings
     path "gene_lists",                                 optional: true, emit: gene_lists
+    path "position_lists",                             optional: true, emit: position_lists
     path "gene_threshold_enrichment.tsv",             optional: true, emit: gene_threshold_enrichment
     path "pos_threshold_enrichment.tsv",              optional: true, emit: pos_threshold_enrichment
 

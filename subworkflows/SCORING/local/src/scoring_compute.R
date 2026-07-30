@@ -473,7 +473,11 @@ has_fade_site_top <- file_exists(fade_site_top_file)
 has_fade_site_bot <- file_exists(fade_site_bot_file)
 
 .load_fade_sites <- function(path) {
-  df <- read_tsv(path, show_col_types = FALSE)
+  # FADE_JSON_TO_CSV's real (and only) producer of this file
+  # (parse_fade_json_sites.R) writes comma-delimited (write.csv()), not tab --
+  # read_tsv() here would silently parse the whole line as one column and
+  # crash downstream at df[[2]]. read_csv() matches the actual pipeline output.
+  df <- read_csv(path, show_col_types = FALSE)
   names(df) <- tolower(names(df))
   
   if (!"gene" %in% names(df)) names(df)[1] <- "gene"
@@ -764,31 +768,41 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
             sum(!is.na(gene_caas$gene_caas_score_bottom))))
 
 # ── 4b. Gene Accumulation Score (optional) ──────────────────────────────────
-# Uses accumulation_all_* files: all non-none positions (change_side != 'none').
+# Uses accumulation_<direction>_* files: direction in {all, top, bottom}.
+# "all" = every non-none position pooled (change_side != 'none'); "top"/"bottom"
+# restrict to that direction's positions only (change_side %in% c(dir, 'both')),
+# matching how every other cross-module flag (FADE, RER) is direction-aware.
+# Both accumulation_{top,bottom,all}_<scheme>_aggregated_results.csv already
+# exist on disk (ct_accumulation.nf runs Channel.of("top","bottom","all")) and
+# are staged into accum_dir together -- only "all" was ever read here before.
 # Score: accumulation_score = 1 - mean(w_i * p_i) / n_available_schemes
 #   where w_i are scheme weights and p_i are PValueEmpirical per scheme.
 # Significance: top 5% of accumulation_score (genome-wide empirical threshold).
-has_accum <- file_exists(accum_dir) && dir.exists(accum_dir)
-if (has_accum) {
-  # Check if any accumulation_all_* files exist; skip accumulation if not
-  all_accum_files <- list.files(accum_dir, pattern = "^accumulation_all_", full.names = TRUE)
-  if (length(all_accum_files) == 0) {
-    cat("Accumulation: no accumulation_all_* files found (full pool), skipping\n")
-    has_accum <- FALSE
-  }
-}
-
-if (has_accum) {
-  cat("Loading accumulation (all positions) from:", accum_dir, "\n")
-
+#
+# Returns a tibble with Gene + accum_fisher_p<suffix>/accum_fdr<suffix>/
+# accum_significant<suffix>/accum_pval_<scheme><suffix> (suffix = "" for "all",
+# "_top"/"_bottom" otherwise) -- suffixed so the three direction-specific
+# results can full_join onto gene_scores without colliding.
+compute_accum_significance <- function(accum_dir, direction, suffix) {
   scheme_names <- c("us", "gs4", "gs3", "gs2", "gs1")
-  scheme_w     <- c(0.2,  0.2,   0.2,   0.2,   0.2)
-  names(scheme_w) <- scheme_names
+  empty <- tibble(
+    Gene = character(),
+    !!paste0("accum_fisher_p", suffix) := numeric(),
+    !!paste0("accum_fdr", suffix)      := numeric(),
+    !!paste0("accum_significant", suffix) := logical()
+  )
 
+  files_found <- list.files(accum_dir, pattern = paste0("^accumulation_", direction, "_"), full.names = TRUE)
+  if (length(files_found) == 0) {
+    cat(sprintf("Accumulation (%s): no accumulation_%s_* files found, skipping\n", direction, direction))
+    return(list(df = empty, ok = FALSE))
+  }
+
+  cat(sprintf("Loading accumulation (%s) from: %s\n", direction, accum_dir))
   accum_pval_df <- NULL  # will hold Gene + one pval col per scheme
 
   for (scheme in scheme_names) {
-    pattern <- paste0("accumulation_all_", scheme, "_aggregated_results.csv")
+    pattern <- paste0("accumulation_", direction, "_", scheme, "_aggregated_results.csv")
     f <- list.files(accum_dir, pattern = pattern, full.names = TRUE)
     if (length(f) == 0) {
       cat(sprintf("    %s: file not found, skipping\n", scheme))
@@ -804,7 +818,7 @@ if (has_accum) {
     }
 
     scheme_pvals <- d %>%
-      select(Gene, !!paste0("accum_pval_", scheme) := all_of(pval_col))
+      select(Gene, !!paste0("accum_pval_", scheme, suffix) := all_of(pval_col))
 
     if (is.null(accum_pval_df)) {
       accum_pval_df <- scheme_pvals
@@ -813,54 +827,56 @@ if (has_accum) {
     }
   }
 
-  if (!is.null(accum_pval_df)) {
-    available_schemes <- intersect(scheme_names,
-                                   sub("^accum_pval_", "", grep("^accum_pval_", names(accum_pval_df), value = TRUE)))
+  if (is.null(accum_pval_df)) return(list(df = empty, ok = FALSE))
 
-    # Fisher's combined p-value across available per-group schemes.
-    # Each group draws independently, so the per-group p-values are uncorrelated
-    # and Fisher's χ²= -2Σln(p) ~ χ²(2k) is valid.
-    # Groups absent for a gene contribute p=1 → ln(1)=0, adding no spurious signal.
-    gene_rand <- accum_pval_df %>%
-      rowwise() %>%
-      mutate(
-        accum_fisher_p = {
-          pvals <- c_across(starts_with("accum_pval_"))
-          valid <- !is.na(pvals)
-          if (sum(valid) == 0) NA_real_
-          else {
-            ps   <- pmax(pvals[valid], 1e-300)
-            pchisq(-2 * sum(log(ps)), df = 2 * sum(valid), lower.tail = FALSE)
-          }
+  pval_cols <- grep(paste0("^accum_pval_.*", suffix, "$"), names(accum_pval_df), value = TRUE)
+
+  # Fisher's combined p-value across available per-group schemes.
+  # Each group draws independently, so the per-group p-values are uncorrelated
+  # and Fisher's χ²= -2Σln(p) ~ χ²(2k) is valid.
+  # Groups absent for a gene contribute p=1 → ln(1)=0, adding no spurious signal.
+  out <- accum_pval_df %>%
+    rowwise() %>%
+    mutate(
+      !!paste0("accum_fisher_p", suffix) := {
+        pvals <- c_across(all_of(pval_cols))
+        valid <- !is.na(pvals)
+        if (sum(valid) == 0) NA_real_
+        else {
+          ps <- pmax(pvals[valid], 1e-300)
+          pchisq(-2 * sum(log(ps)), df = 2 * sum(valid), lower.tail = FALSE)
         }
-      ) %>%
-      ungroup() %>%
-      select(Gene, accum_fisher_p, starts_with("accum_pval_"))
+      }
+    ) %>%
+    ungroup() %>%
+    select(Gene, !!paste0("accum_fisher_p", suffix), all_of(pval_cols))
 
-    # BH FDR on genes with at least one observed CAAS (p < 1 strictly).
-    # Genes with no CAAS in any group have accum_fisher_p = 1 by construction —
-    # they are background members only and must not enter the FDR denominator.
-    tested <- !is.na(gene_rand$accum_fisher_p) & gene_rand$accum_fisher_p < 1
-    fdr_q  <- rep(NA_real_, nrow(gene_rand))
-    if (any(tested))
-      fdr_q[tested] <- p.adjust(gene_rand$accum_fisher_p[tested], method = "BH")
-    gene_rand$accum_fdr <- fdr_q
-    gene_rand <- gene_rand %>%
-      mutate(accum_significant = !is.na(accum_fdr) & accum_fdr < 0.05)
+  fp_col <- paste0("accum_fisher_p", suffix)
+  # BH FDR on genes with at least one observed CAAS (p < 1 strictly). Genes
+  # with no CAAS in any group have accum_fisher_p = 1 by construction — they
+  # are background members only and must not enter the FDR denominator.
+  tested <- !is.na(out[[fp_col]]) & out[[fp_col]] < 1
+  fdr_q  <- rep(NA_real_, nrow(out))
+  if (any(tested)) fdr_q[tested] <- p.adjust(out[[fp_col]][tested], method = "BH")
+  out[[paste0("accum_fdr", suffix)]] <- fdr_q
+  out[[paste0("accum_significant", suffix)]] <- !is.na(fdr_q) & fdr_q < 0.05
 
-    cat(sprintf("  Accumulation: %d genes, %d significant (Fisher p, BH FDR < 0.05)\n",
-                nrow(gene_rand),
-                sum(gene_rand$accum_significant, na.rm = TRUE)))
-  } else {
-    gene_rand <- tibble(Gene = character(), accum_fisher_p = numeric(),
-                        accum_fdr = numeric(), accum_significant = logical())
-    has_accum <- FALSE
-  }
-} else {
-  cat("Accumulation: not available, skipping\n")
-  gene_rand <- tibble(Gene = character(), accum_fisher_p = numeric(),
-                      accum_fdr = numeric(), accum_significant = logical())
+  cat(sprintf("  Accumulation (%s): %d genes, %d significant (Fisher p, BH FDR < 0.05)\n",
+              direction, nrow(out), sum(out[[paste0("accum_significant", suffix)]], na.rm = TRUE)))
+  list(df = out, ok = TRUE)
 }
+
+has_accum_dir <- file_exists(accum_dir) && dir.exists(accum_dir)
+if (!has_accum_dir) cat("Accumulation: directory not available, skipping\n")
+
+.accum_all    <- if (has_accum_dir) compute_accum_significance(accum_dir, "all",    "")        else list(df = tibble(Gene = character(), accum_fisher_p = numeric(), accum_fdr = numeric(), accum_significant = logical()), ok = FALSE)
+.accum_top    <- if (has_accum_dir) compute_accum_significance(accum_dir, "top",    "_top")    else list(df = tibble(Gene = character(), accum_fisher_p_top = numeric(), accum_fdr_top = numeric(), accum_significant_top = logical()), ok = FALSE)
+.accum_bottom <- if (has_accum_dir) compute_accum_significance(accum_dir, "bottom", "_bottom") else list(df = tibble(Gene = character(), accum_fisher_p_bottom = numeric(), accum_fdr_bottom = numeric(), accum_significant_bottom = logical()), ok = FALSE)
+
+has_accum <- .accum_all$ok
+gene_rand <- .accum_all$df %>%
+  full_join(.accum_top$df,    by = "Gene") %>%
+  full_join(.accum_bottom$df, by = "Gene")
 
 # ── 4c. Gene RERConverge Score (optional) ───────────────────────────────────
 has_rer <- file_exists(rer_file)
@@ -961,9 +977,15 @@ gene_scores <- gene_caas
 if (nrow(gene_rand) > 0) {
   gene_scores <- gene_scores %>% full_join(gene_rand, by = "Gene")
 } else {
-  gene_scores$accum_fisher_p    <- NA_real_
-  gene_scores$accum_fdr         <- NA_real_
-  gene_scores$accum_significant <- NA
+  gene_scores$accum_fisher_p           <- NA_real_
+  gene_scores$accum_fdr                <- NA_real_
+  gene_scores$accum_significant        <- NA
+  gene_scores$accum_fisher_p_top       <- NA_real_
+  gene_scores$accum_fdr_top            <- NA_real_
+  gene_scores$accum_significant_top    <- NA
+  gene_scores$accum_fisher_p_bottom    <- NA_real_
+  gene_scores$accum_fdr_bottom         <- NA_real_
+  gene_scores$accum_significant_bottom <- NA
 }
 
 if (nrow(gene_rer) > 0) {
@@ -1064,7 +1086,13 @@ gene_out <- gene_scores %>%
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
     any_of(c("accum_fisher_p", "accum_fdr", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
-             "accum_pval_gs2", "accum_pval_gs1")),
+             "accum_pval_gs2", "accum_pval_gs1",
+             "accum_fisher_p_top", "accum_fdr_top", "accum_significant_top",
+             "accum_pval_us_top", "accum_pval_gs4_top", "accum_pval_gs3_top",
+             "accum_pval_gs2_top", "accum_pval_gs1_top",
+             "accum_fisher_p_bottom", "accum_fdr_bottom", "accum_significant_bottom",
+             "accum_pval_us_bottom", "accum_pval_gs4_bottom", "accum_pval_gs3_bottom",
+             "accum_pval_gs2_bottom", "accum_pval_gs1_bottom")),
     any_of(c("rer_min_pval", "rer_significant", "rer_rho", "rer_acceleration")),
     any_of(c("fade_max_bf_top", "fade_significant_top",
              "fade_max_bf_bottom", "fade_significant_bottom"))
@@ -1096,7 +1124,15 @@ fcs_stats <- tibble(
   flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
   flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),
   flag_rer_decc    = .istrue(.col(gene_scores, "rer_significant")) & grepl("dec", .rer_dir),
-  flag_accum       = .istrue(.col(gene_scores, "accum_significant"))
+  # flag_accum: Fisher-combined significance over ALL non-none positions pooled
+  # (accumulation_all_*) -- a genuinely non-directional test, not an OR of
+  # top/bottom. flag_accum_top/flag_accum_bottom are the direction-restricted
+  # tests (accumulation_top_*/accumulation_bottom_*), analogous to flag_fade_top/
+  # flag_fade_bottom -- use these two for directional corroboration, flag_accum
+  # only where the ranking itself is non-directional.
+  flag_accum        = .istrue(.col(gene_scores, "accum_significant")),
+  flag_accum_top    = .istrue(.col(gene_scores, "accum_significant_top")),
+  flag_accum_bottom = .istrue(.col(gene_scores, "accum_significant_bottom"))
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
 write_tsv(fcs_stats, "fcs_stats.tsv")
@@ -1154,7 +1190,7 @@ write_tsv(corr_results, "gene_correlations.tsv")
 
 dir.create("gene_lists", showWarnings = FALSE)
 
-# Define the 8 percentile slices (top/bottom x 25/10/5/1%), mirroring
+# Define the 12 percentile slices (top/bottom/global x 25/10/5/1%), mirroring
 # posenrich_enrich.py's top-fraction-of-scored-positions cutoff at gene
 # granularity: rank genes with a defined score desc, keep the top frac% of
 # THAT ranked set (not the full background) -- same selection axis as
@@ -1163,6 +1199,13 @@ dir.create("gene_lists", showWarnings = FALSE)
 # scheme (dropped: STRING's own significance/FDR axis duplicated what
 # gate_sig/gate_fdr already report elsewhere, and _all lists were close to
 # the whole gene universe -- a poor foreground for interaction-density tests).
+#
+# "global" slices (added alongside top/bottom): ranked on gene_caas_score, the
+# undirected 90th-percentile-of-all-positions aggregate -- the gene-level
+# analog of CAAS FCS's own undirected "global" ranking (fcs_all_results.tsv's
+# ranking=="global" rows). fade_sig is NA for global (FADE has no undirected
+# significance flag); is_fade in the export loop below already treats a
+# missing/NA fade_sig as FALSE.
 slices_def <- list(
   list(name = "top25",    col = "gene_caas_score_top_all",    frac = 0.25, direction = "top",    fade_sig = "fade_significant_top"),
   list(name = "top10",    col = "gene_caas_score_top_all",    frac = 0.10, direction = "top",    fade_sig = "fade_significant_top"),
@@ -1172,10 +1215,15 @@ slices_def <- list(
   list(name = "bottom25", col = "gene_caas_score_bottom_all", frac = 0.25, direction = "bottom", fade_sig = "fade_significant_bottom"),
   list(name = "bottom10", col = "gene_caas_score_bottom_all", frac = 0.10, direction = "bottom", fade_sig = "fade_significant_bottom"),
   list(name = "bottom5",  col = "gene_caas_score_bottom_all", frac = 0.05, direction = "bottom", fade_sig = "fade_significant_bottom"),
-  list(name = "bottom1",  col = "gene_caas_score_bottom_all", frac = 0.01, direction = "bottom", fade_sig = "fade_significant_bottom")
+  list(name = "bottom1",  col = "gene_caas_score_bottom_all", frac = 0.01, direction = "bottom", fade_sig = "fade_significant_bottom"),
+
+  list(name = "global25", col = "gene_caas_score", frac = 0.25, direction = "global", fade_sig = NA_character_),
+  list(name = "global10", col = "gene_caas_score", frac = 0.10, direction = "global", fade_sig = NA_character_),
+  list(name = "global5",  col = "gene_caas_score", frac = 0.05, direction = "global", fade_sig = NA_character_),
+  list(name = "global1",  col = "gene_caas_score", frac = 0.01, direction = "global", fade_sig = NA_character_)
 )
 
-cat("\n─── Exporting 8 STRING percentile ranked lists (top/bottom x 25/10/5/1%) ──\n")
+cat("\n─── Exporting 12 STRING percentile ranked lists (top/bottom/global x 25/10/5/1%) ──\n")
 for (slice in slices_def) {
   col_name <- slice$col
   file_name <- sprintf("gene_lists/slice_%s.tsv", slice$name)
@@ -1215,14 +1263,83 @@ for (slice in slices_def) {
           is_sig
         }
       } else FALSE,
-      is_accum = if ("accum_significant" %in% names(gene_out)) {
-        gene_out$accum_significant[match(Gene, gene_out$Gene)] %in% TRUE
-      } else FALSE
+      # Direction-matched, mirroring is_fade above -- a "top" slice checks
+      # accum_significant_top (accumulation_top_* pooled positions), not the
+      # non-directional accum_significant (accumulation_all_* pooled).
+      is_accum = {
+        acc_col <- if (slice$direction == "top") "accum_significant_top"
+                   else if (slice$direction == "bottom") "accum_significant_bottom"
+                   else "accum_significant"
+        if (acc_col %in% names(gene_out)) {
+          gene_out[[acc_col]][match(Gene, gene_out$Gene)] %in% TRUE
+        } else FALSE
+      }
     )
   # slice_df inherits ranked's desc(score) order via slice_head -- already sorted.
 
   write_tsv(slice_df, file_name)
   cat(sprintf("  %s: %d/%d genes exported (top %.0f%%)\n", file_name, nrow(slice_df), n_total, 100 * slice$frac))
+}
+
+# =============================================================================
+# 7b. EXPORT PERCENTILE-RANKED POSITION LISTS FOR POSENRICH/REPORTS
+# =============================================================================
+# Position-level analog of the gene_lists/ slices above, published so
+# posenrich_enrich.py and the FCS/comparison reports (12/14/15) all read ONE
+# canonical top/bottom/global x 25/10/5/1% position ranking instead of each
+# independently re-deriving their own cutoff over position_scores.tsv (which
+# invited drift -- see e.g. a single outlier position ranking in a gene's top
+# 1% of ALL positions while that gene's own aggregate score doesn't crack the
+# gene-level top 5%; both were "correct" under their own re-derivation, just
+# never guaranteed to agree). Mirrors posenrich_enrich.py's direction_scores()
+# + top-frac cutoff exactly (subworkflows/ENRICHMENT/local/src/posenrich_enrich.py):
+# direction filters on change_side (top: {top,both}, bottom: {bottom,both},
+# global: unfiltered), ranked over positions with CAAS_score > 0 only, cut at
+# round(frac * n_scored), stable sort by (desc score, Gene, Position).
+dir.create("position_lists", showWarnings = FALSE)
+
+pos_slices_def <- list(
+  list(name = "top25",    frac = 0.25, direction = "top"),
+  list(name = "top10",    frac = 0.10, direction = "top"),
+  list(name = "top5",     frac = 0.05, direction = "top"),
+  list(name = "top1",     frac = 0.01, direction = "top"),
+  list(name = "bottom25", frac = 0.25, direction = "bottom"),
+  list(name = "bottom10", frac = 0.10, direction = "bottom"),
+  list(name = "bottom5",  frac = 0.05, direction = "bottom"),
+  list(name = "bottom1",  frac = 0.01, direction = "bottom"),
+  list(name = "global25", frac = 0.25, direction = "global"),
+  list(name = "global10", frac = 0.10, direction = "global"),
+  list(name = "global5",  frac = 0.05, direction = "global"),
+  list(name = "global1",  frac = 0.01, direction = "global")
+)
+
+cat("\n─── Exporting 12 position-level percentile ranked lists (top/bottom/global x 25/10/5/1%) ──\n")
+for (slice in pos_slices_def) {
+  file_name <- sprintf("position_lists/slice_%s.tsv", slice$name)
+
+  sub <- if (slice$direction == "top") {
+    pos_out %>% dplyr::filter(change_side %in% c("top", "both"))
+  } else if (slice$direction == "bottom") {
+    pos_out %>% dplyr::filter(change_side %in% c("bottom", "both"))
+  } else {
+    pos_out
+  }
+  scored <- sub %>%
+    dplyr::filter(!is.na(CAAS_score) & CAAS_score > 0) %>%
+    dplyr::arrange(dplyr::desc(CAAS_score), Gene, Position)
+
+  n_scored <- nrow(scored)
+  if (n_scored == 0) {
+    write_tsv(tibble(Gene = character(), Position = integer(), CAAS_score = numeric()), file_name)
+    cat(sprintf("  %s: empty (0 scored positions) exported\n", file_name))
+    next
+  }
+
+  n_keep <- max(1, round(slice$frac * n_scored))
+  slice_df <- scored %>% dplyr::slice_head(n = n_keep) %>% dplyr::select(Gene, Position, CAAS_score)
+
+  write_tsv(slice_df, file_name)
+  cat(sprintf("  %s: %d/%d scored positions exported (top %.0f%%)\n", file_name, nrow(slice_df), n_scored, 100 * slice$frac))
 }
 
 # =============================================================================
@@ -1285,6 +1402,18 @@ for (dir in c("top", "bottom", "global")) {
       tool_sigs[["rer_decel"]] <- gene_out %>%
         filter(rer_significant == TRUE, !is.na(rer_rho), rer_rho < 0) %>% pull(Gene)
   }
+  # Direction-matched, mirroring fade_top/fade_bottom and rer_accel/rer_decel
+  # above -- "top"/"bottom" test against accumulation_top_*/accumulation_bottom_*
+  # (positions restricted to that direction), "global" against the
+  # accumulation_all_* pool (all non-none positions, non-directional).
+  if (dir == "top" && "accum_significant_top" %in% names(gene_out) &&
+      any(gene_out$accum_significant_top %in% TRUE))
+    tool_sigs[["accum_top"]] <- gene_out %>%
+      filter(accum_significant_top == TRUE) %>% pull(Gene)
+  if (dir == "bottom" && "accum_significant_bottom" %in% names(gene_out) &&
+      any(gene_out$accum_significant_bottom %in% TRUE))
+    tool_sigs[["accum_bottom"]] <- gene_out %>%
+      filter(accum_significant_bottom == TRUE) %>% pull(Gene)
   if (dir == "global" && has_accum && any(gene_out$accum_significant %in% TRUE))
     tool_sigs[["accum"]] <- gene_out %>%
       filter(accum_significant == TRUE) %>% pull(Gene)

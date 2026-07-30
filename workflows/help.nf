@@ -339,7 +339,6 @@ Usage:
 
 DOMINO / STRING:
 --string_species                    <NCBI taxon id>          9606
---string_required_score                <INTEGER>                400
 --string_db_dir                           <"string_cache_dir">     null
 --domino_network_score_thr                  <INTEGER>                700
 --domino_slice_thr                             <FLOAT 0-1>              0.3

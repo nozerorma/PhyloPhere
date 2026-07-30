@@ -188,5 +188,6 @@ workflow SCORING {
         fcs_stats_fade   = compute_out.fcs_stats_fade
         fcs_stats_accum  = compute_out.fcs_stats_accum
         gene_lists       = compute_out.gene_lists
+        position_lists   = compute_out.position_lists
         report           = final_reports
 }
