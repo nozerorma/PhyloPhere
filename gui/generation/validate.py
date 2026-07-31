@@ -19,6 +19,7 @@ conf/*.config parameter space.
 import os
 
 # ── Local ─────────────────────────────────────────────────────────────────────
+from gui.models.precomputed import derive_paths
 from gui.models.project import ProjectConfig
 
 
@@ -65,6 +66,19 @@ def validate(project: ProjectConfig) -> list[str]:
         if row.trait_class == 2:
             require(row.discrete_method, f"Phenotype row {i}: discrete method is required for CLASS 2.")
 
+    # --- Precomputed Run tab: base_path required whenever any reuse box is checked ---
+    any_precomp_checked = any(
+        [
+            pc.use_discovery, pc.use_resample, pc.use_bootstrap, pc.use_disambiguation,
+            pc.use_postproc, pc.use_accumulation, pc.use_rer, pc.use_fade, pc.use_vep,
+        ]
+    )
+    if any_precomp_checked:
+        require(
+            pc.base_path,
+            "Precomputed Run: base path is required — at least one reuse checkbox is checked.",
+        )
+
     # --- CAAS ---
     # caas_config_path is NOT required when CAAS is enabled: this GUI always emits
     # --contrast_selection alongside --ct_tool (see caas_tab.py's docstring), and
@@ -73,11 +87,11 @@ def validate(project: ProjectConfig) -> list[str]:
     # only reached when --contrast_selection is absent, which never happens here.
     caas = project.modules.caas
     if not caas.enabled:
-        if not any([pc.discovery_from, pc.resample_from, pc.bootstrap_from]):
+        if not any([pc.use_discovery, pc.use_resample, pc.use_bootstrap]):
             errors.append(
-                "CAAS is disabled but no discovery_from/resample_from/bootstrap_from fallback "
-                "was supplied on the Precomputed Run tab — downstream modules (Disambiguation, "
-                "Accumulation) have no input."
+                "CAAS is disabled but no Discovery/Resample/Bootstrap reuse box is checked on "
+                "the Precomputed Run tab — downstream modules (Disambiguation, Accumulation) "
+                "have no input."
             )
 
     # --- Disambiguation (+ Post-processing) ---
@@ -88,10 +102,10 @@ def validate(project: ProjectConfig) -> list[str]:
                 disambig.ct_disambig_asr_cache_dir,
                 "Disambiguation: ASR cache directory is required when asr_mode=precomputed.",
             )
-        if not caas.enabled and not any([pc.discovery_from, pc.resample_from, pc.bootstrap_from]):
+        if not caas.enabled and not any([pc.use_discovery, pc.use_resample, pc.use_bootstrap]):
             errors.append(
-                "Disambiguation is enabled but CAAS is disabled with no fallback input supplied "
-                "on the Precomputed Run tab."
+                "Disambiguation is enabled but CAAS is disabled with no reuse box checked on "
+                "the Precomputed Run tab."
             )
         # ct_postproc's characterization report step always runs when Post-processing
         # is on (workflows/ct_postproc.nf's own gate is unconditional) and needs
@@ -106,17 +120,10 @@ def validate(project: ProjectConfig) -> list[str]:
                 "the Scoring tab even if Scoring itself is disabled."
             )
     else:
-        if not any(
-            [
-                pc.signification_from,
-                pc.disambiguation_input,
-                pc.disambiguation_dir,
-                pc.background_input,
-            ]
-        ):
+        if not pc.use_disambiguation:
             errors.append(
-                "Disambiguation is disabled but no fallback input was supplied on the Precomputed "
-                "Run tab — Accumulation and Scoring may have no input."
+                "Disambiguation is disabled but 'Use precomputed Disambiguation output' isn't "
+                "checked on the Precomputed Run tab — Accumulation and Scoring may have no input."
             )
 
     # --- Accumulation ---
@@ -126,16 +133,17 @@ def validate(project: ProjectConfig) -> list[str]:
             accum.accumulation_entropy_dir,
             "Accumulation: entropy directory is required when Accumulation is enabled.",
         )
-        if not disambig.enabled and not pc.accumulation_caas_input:
+        if not disambig.ct_postproc and not pc.use_postproc:
             errors.append(
-                "Accumulation is enabled but Disambiguation is disabled with no "
-                "accumulation_caas_input fallback supplied on the Precomputed Run tab."
+                "Accumulation is enabled but Post-processing is disabled with no "
+                "'Use precomputed Post-processing output' box checked on the Precomputed Run tab."
             )
     else:
-        if not any([pc.accumulation_caas_input, pc.accumulation_background_input]):
+        if not pc.use_accumulation:
             errors.append(
-                "Accumulation is disabled but no fallback input was supplied on the Precomputed "
-                "Run tab — Enrichment's accumulation gene lists may have no input."
+                "Accumulation is disabled but 'Use precomputed Accumulation output' isn't "
+                "checked on the Precomputed Run tab — Enrichment's accumulation gene lists may "
+                "have no input."
             )
 
     # --- RERconverge ---
@@ -161,23 +169,20 @@ def validate(project: ProjectConfig) -> list[str]:
                 scoring.gene_ensembl_file,
                 "Scoring: gene-Ensembl mapping file is required when Scoring is enabled.",
             )
-        if not disambig.ct_postproc and not pc.scoring_postproc_input:
+        if not disambig.ct_postproc and not pc.use_postproc:
             errors.append(
-                "Scoring is enabled but Post-processing is disabled with no "
-                "scoring_postproc_input fallback supplied on the Precomputed Run tab."
+                "Scoring is enabled but Post-processing is disabled with no 'Use precomputed "
+                "Post-processing output' box checked on the Precomputed Run tab."
             )
-        if not rer.enabled and not all(row.scoring_rer_input for row in rt.phenotype_rows):
+        if not rer.enabled and not pc.use_rer:
             errors.append(
-                "Scoring is enabled and RERconverge is disabled — every phenotype row needs a "
-                "scoring_rer_input fallback (some rows are missing one)."
+                "Scoring is enabled and RERconverge is disabled — 'Use precomputed RERconverge "
+                "output' isn't checked on the Precomputed Run tab."
             )
-        if not project.modules.fade.enabled and not all(
-            row.scoring_fade_summary_top and row.scoring_fade_summary_bottom
-            for row in rt.phenotype_rows
-        ):
+        if not project.modules.fade.enabled and not pc.use_fade:
             errors.append(
-                "Scoring is enabled and FADE is disabled — every phenotype row needs "
-                "scoring_fade_summary_top/bottom fallbacks (some rows are missing one)."
+                "Scoring is enabled and FADE is disabled — 'Use precomputed FADE output' isn't "
+                "checked on the Precomputed Run tab."
             )
 
     # --- Enrichment (+ POSENRICH) ---
@@ -249,36 +254,14 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Enrichment: domain variability file", m.enrichment.domain_variability_file, "file"),
         ("Enrichment: UCR positions file", m.enrichment.ucr_positions_file, "file"),
         ("Enrichment: FUBAR sites file", m.enrichment.fubar_sites_file, "file"),
-        # --- Precomputed Run tab ---
-        ("Precomputed: discovery_from", pc.discovery_from, "dir"),
-        ("Precomputed: resample_from", pc.resample_from, "dir"),
-        ("Precomputed: bootstrap_from", pc.bootstrap_from, "dir"),
-        ("Precomputed: signification_from", pc.signification_from, "dir"),
-        ("Precomputed: disambiguation_input", pc.disambiguation_input, "file"),
-        ("Precomputed: disambiguation_dir", pc.disambiguation_dir, "dir"),
-        ("Precomputed: background_input", pc.background_input, "file"),
-        ("Precomputed: accumulation_caas_input", pc.accumulation_caas_input, "file"),
-        ("Precomputed: accumulation_background_input", pc.accumulation_background_input, "file"),
-        ("Precomputed: rer_continuous_file", pc.rer_continuous_file, "file"),
-        ("Precomputed: rer_perms_file", pc.rer_perms_file, "file"),
-        ("Precomputed: fade_json_dir_top", pc.fade_json_dir_top, "dir"),
-        ("Precomputed: fade_json_dir_bottom", pc.fade_json_dir_bottom, "dir"),
-        ("Precomputed: vep_caas_input", pc.vep_caas_input, "file"),
-        ("Precomputed: scoring_postproc_input", pc.scoring_postproc_input, "file"),
-        ("Precomputed: scoring_accum_dir", pc.scoring_accum_dir, "dir"),
-        ("Precomputed: scoring_vep_primateai", pc.scoring_vep_primateai, "file"),
-        ("Precomputed: scoring_vep_cosmic", pc.scoring_vep_cosmic, "file"),
-        ("Precomputed: scoring_background_input", pc.scoring_background_input, "file"),
-        ("Precomputed: caas_perms_file", pc.caas_perms_file, "file"),
-        ("Precomputed: scoring_fade_site_top", pc.scoring_fade_site_top, "file"),
-        ("Precomputed: scoring_fade_site_bottom", pc.scoring_fade_site_bottom, "file"),
-        (
-            "Precomputed: accumulation_enrichment_gene_lists_input",
-            pc.accumulation_enrichment_gene_lists_input,
-            "file",
-        ),
-        ("Precomputed: posenrich_background_file", pc.posenrich_background_file, "file"),
     ]
+
+    # --- Precomputed Run tab: real per-phenotype derived paths, not stored strings ---
+    for i, row in enumerate(runtime.phenotype_rows, start=1):
+        if not row.trait:
+            continue
+        for name, path, kind in derive_paths(pc, row.trait):
+            entries.append((f"Precomputed ({row.trait}): {name}", path, kind))
 
     for i, row in enumerate(runtime.phenotype_rows, start=1):
         if row.prune:
@@ -288,20 +271,6 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
                 (
                     f"Phenotype row {i}: prune_secondary",
                     os.path.join(runtime.prune_dir, row.prune_secondary),
-                    "file",
-                )
-            )
-        if row.scoring_rer_input:
-            entries.append((f"Phenotype row {i}: scoring_rer_input", row.scoring_rer_input, "file"))
-        if row.scoring_fade_summary_top:
-            entries.append(
-                (f"Phenotype row {i}: scoring_fade_summary_top", row.scoring_fade_summary_top, "file")
-            )
-        if row.scoring_fade_summary_bottom:
-            entries.append(
-                (
-                    f"Phenotype row {i}: scoring_fade_summary_bottom",
-                    row.scoring_fade_summary_bottom,
                     "file",
                 )
             )

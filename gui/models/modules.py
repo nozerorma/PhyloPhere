@@ -180,10 +180,10 @@ class RerConfig(ModuleConfigBase):
     # leading-edge table.
     rer_gene_scores: str = ""  # --rer_gene_scores
 
-    # NOTE: no scoring_rer_input here — the reference script sets it per phenotype
-    # (see gui/models/runtime.py's PhenotypeRow). rer_continuous_file/rer_perms_file
-    # (the global precomputed-report-input path, used when RER itself is off) moved
-    # to gui/models/precomputed.py::PrecomputedConfig.
+    # NOTE: rer_continuous_file/rer_perms_file/scoring_rer_input/scoring_rer_perms_input
+    # (used when RER itself is off) all live on gui/models/precomputed.py::PrecomputedConfig
+    # (use_rer), auto-derived per phenotype from one base_path rather than typed in here
+    # or per-row on PhenotypeRow.
 
 
 # ── FADE ─────────────────────────────────────────────────────────────────────
@@ -225,10 +225,11 @@ class FadeConfig(ModuleConfigBase):
     # background when unset).
     fade_universe_file: str = ""  # --fade_universe_file
 
-    # NOTE: no scoring_fade_summary_top/bottom here — the reference script sets
-    # those per phenotype (see gui/models/runtime.py's PhenotypeRow). The
-    # global fade_json_dir_top/bottom precomputed-report path (used when FADE
-    # itself is off) moved to gui/models/precomputed.py::PrecomputedConfig.
+    # NOTE: fade_json_dir_top/bottom/scoring_fade_summary_top/bottom/
+    # scoring_fade_site_top/bottom (used when FADE itself is off) all live on
+    # gui/models/precomputed.py::PrecomputedConfig (use_fade), auto-derived per
+    # phenotype from one base_path rather than typed in here or per-row on
+    # PhenotypeRow.
 
 
 # ── VEP ──────────────────────────────────────────────────────────────────────
@@ -317,8 +318,10 @@ class EnrichmentConfig(ModuleConfigBase):
     posenrich_padj_thr: str = "0.15"  # --posenrich_padj_thr
     posenrich_fold_thr: str = "1.5"  # --posenrich_fold_thr
 
-    # NOTE: accumulation_enrichment_gene_lists_input/posenrich_background_file
-    # moved to gui/models/precomputed.py::PrecomputedConfig.
+    # NOTE: posenrich_background_file (CT's own background.output — used when CT
+    # is off) is derived per phenotype via PrecomputedConfig.use_discovery, not a
+    # separate field here. accumulation_enrichment_gene_lists_input was removed
+    # entirely: no producer or consumer of it existed anywhere in the pipeline.
 
 
 # ── Aggregate ─────────────────────────────────────────────────────────────────

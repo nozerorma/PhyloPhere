@@ -103,7 +103,15 @@ class MainWindow(QMainWindow):
         self.vep_tab = VepTab(modules.vep)
         self.scoring_tab = ScoringTab(modules.scoring)
         self.enrichment_tab = EnrichmentTab(modules.enrichment)
-        self.precomputed_tab = PrecomputedTab(self.project.precomputed)
+        self.precomputed_tab = PrecomputedTab(
+            self.project.precomputed,
+            caas_tab=self.caas_tab,
+            disambiguation_tab=self.disambiguation_tab,
+            accumulation_tab=self.accumulation_tab,
+            rer_tab=self.rerconverge_tab,
+            fade_tab=self.fade_tab,
+            vep_tab=self.vep_tab,
+        )
         self.resources_tab = ResourcesTab(self.project.resources)
 
         # (inner widget, title) — the inner widget is what emits `changed` and what
@@ -136,10 +144,10 @@ class MainWindow(QMainWindow):
     def _build_menu(self) -> None:
         file_menu = self.menuBar().addMenu("&File")
 
-        new_action = QAction("&New Project", self)
-        new_action.setShortcut(QKeySequence.StandardKey.New)
-        new_action.triggered.connect(self.new_project)
-        file_menu.addAction(new_action)
+        self.new_project_action = QAction("&New Project", self)
+        self.new_project_action.setShortcut(QKeySequence.StandardKey.New)
+        self.new_project_action.triggered.connect(self.new_project)
+        file_menu.addAction(self.new_project_action)
 
         open_action = QAction("&Open Project...", self)
         open_action.setShortcut(QKeySequence.StandardKey.Open)
@@ -148,7 +156,7 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
-        self.save_template_action = QAction("&Save Template", self)
+        self.save_template_action = QAction("&Save Project As...", self)
         self.save_template_action.setShortcut(QKeySequence.StandardKey.Save)
         self.save_template_action.triggered.connect(self.save_template)
         file_menu.addAction(self.save_template_action)
@@ -174,7 +182,7 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        # Language selection combo box to the LEFT of Save Template + Separator
+        # Language selection combo box to the LEFT of Save Project As + Separator
         self.lang_combo = QComboBox(self)
         for code, label in LANGUAGES.items():
             self.lang_combo.addItem(label, userData=code)
@@ -189,6 +197,14 @@ class MainWindow(QMainWindow):
         self.lang_combo.currentIndexChanged.connect(self._on_toolbar_language_changed)
 
         toolbar.addWidget(self.lang_combo)
+        toolbar.addSeparator()
+
+        # Ahead of Save Project As so switching to a fresh project (clearing
+        # project_path) is the obvious first move before editing an unrelated
+        # trait — Save Project As always prompts for a filename now (no more
+        # silent in-place overwrite), but starting from a clean project is
+        # still the more obvious move than renaming your way out of one.
+        toolbar.addAction(self.new_project_action)
         toolbar.addSeparator()
 
         toolbar.addAction(self.save_template_action)
@@ -215,7 +231,7 @@ class MainWindow(QMainWindow):
                 translated_title = tr(orig_title, lang)
             self.tabs.setTabText(idx, translated_title)
 
-        self.save_template_action.setText(tr("Save Template", lang))
+        self.save_template_action.setText(tr("Save Project As...", lang))
         self.load_template_action.setText(tr("Load Template...", lang))
         self.validate_paths_action.setText(tr("Validate Paths...", lang))
         self.generate_action.setText(tr("Generate Scripts...", lang))
@@ -239,7 +255,11 @@ class MainWindow(QMainWindow):
         autosave_io.write_autosave(self.project, self.project_path, self._dirty)
 
     def _update_title(self) -> None:
-        name = self.project_path.name if self.project_path else "Untitled project"
+        name = (
+            self.project.general.project_name.strip()
+            or (self.project_path.name if self.project_path else "")
+            or "Untitled project"
+        )
         star = "*" if self._dirty else ""
         self.setWindowTitle(f"PhyloPhere Runner GUI — {name}{star}")
 
@@ -285,21 +305,31 @@ class MainWindow(QMainWindow):
         self._write_autosave()
 
     def save_template(self) -> None:
-        """The sole save action — Save Project/Save Project As were folded into
-        this one. Writes in place to self.project_path if already set (old Save
-        Project behavior); otherwise prompts via a save dialog defaulting to
-        gui/templates/ and adopts the chosen path as project_path going forward
-        (old Save Project As behavior). There is no more distinction between
-        "my working project file" and "a template" — every save is a template,
-        reloadable via Load Template."""
-        if self.project_path is None:
-            TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-            path_str, _ = QFileDialog.getSaveFileName(
-                self, "Save template", str(TEMPLATES_DIR), "PhyloPhere GUI project (*.json)"
-            )
-            if not path_str:
-                return
-            self.project_path = Path(path_str)
+        """Always prompts for a filename — a real "Save As", not a silent in-place
+        overwrite (see the toolbar's New Project + this dialog's own prior
+        confirmation-on-overwrite for the incident that motivated this: loading
+        "primates_full_run", tweaking it for a one-off trait, and saving clobbered
+        the original template with no warning). Pre-fills the suggested filename
+        from General > Project name when set, so naming the project once feeds
+        straight into where it gets saved. The native save dialog's own "file
+        exists, overwrite?" prompt covers the case where you deliberately pick an
+        existing path again — no separate custom confirmation needed."""
+        start_dir = str(self.project_path.parent) if self.project_path else str(TEMPLATES_DIR)
+        TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
+        suggested_name = self.project.general.project_name.strip()
+        if not suggested_name:
+            suggested_name = self.project_path.stem if self.project_path else "untitled"
+        suggested_name = "".join(
+            c if (c.isalnum() or c in "-_") else "_" for c in suggested_name
+        )
+        start_path = str(Path(start_dir) / f"{suggested_name}.json")
+
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, "Save Project As", start_path, "PhyloPhere GUI project (*.json)"
+        )
+        if not path_str:
+            return
+        self.project_path = Path(path_str)
         project_io.save_project(self.project_path, self.project)
         self._dirty = False
         self._update_title()
@@ -327,6 +357,21 @@ class MainWindow(QMainWindow):
 
         is_local = self.project.runtime.runtime_type == "local"
         disambig = self.project.modules.disambiguation
+        base = self.project.runtime.script_base_name.strip()
+
+        def script_names(tag: str) -> tuple[str, str]:
+            """(batch_name, single_name) for one postproc-mode tag ("", "_exploratory",
+            "_complete") — base_name blank reproduces the exact default filenames;
+            set, it overrides the "phenotypes"/"phenotype" token everywhere so both
+            names change together (they must, see render_batch's single_runner_filename)."""
+            if not base:
+                plural = "phenotypes"
+                singular = "phenotype"
+            else:
+                plural = singular = base
+            batch_name = f"run_{plural}_local{tag}.sh" if is_local else f"SBATCH_run_{plural}{tag}.sh"
+            single_name = f"run_{singular}_single{tag}.sh"
+            return batch_name, single_name
 
         scripts: list[tuple[str, str]] = []
 
@@ -335,44 +380,59 @@ class MainWindow(QMainWindow):
 
         if disambig.ct_postproc and (run_expl or run_filt):
             if run_expl:
-                batch_name = "run_phenotypes_local_exploratory.sh" if is_local else "SBATCH_run_phenotypes_exploratory.sh"
-                single_name = "run_phenotype_single_exploratory.sh"
-                batch_text = render_batch(self.project, postproc_mode="exploratory")
+                batch_name, single_name = script_names("_exploratory")
+                batch_text = render_batch(
+                    self.project, postproc_mode="exploratory", single_runner_filename=single_name
+                )
                 single_text = render_single(self.project, postproc_mode="exploratory")
                 scripts.append((batch_name, batch_text))
                 scripts.append((single_name, single_text))
 
             if run_filt:
-                batch_name = "run_phenotypes_local_filtering.sh" if is_local else "SBATCH_run_phenotypes_filtering.sh"
-                single_name = "run_phenotype_single_filtering.sh"
-                batch_text = render_batch(self.project, postproc_mode="filter")
-                single_text = render_single(self.project, postproc_mode="filter")
+                # reuse_exploratory=True (both selected) skips re-running CAAS/Disambiguation
+                # live in the _complete pass — it reads their output straight from the
+                # sibling _exploratory run's outdir instead (see run_single.sh.j2's
+                # POSTPROC_MODE="filter" branch). Standalone (run_expl off), everything
+                # in _complete stays live, same as before.
+                reuse_exploratory = run_expl
+                batch_name, single_name = script_names("_complete")
+                batch_text = render_batch(
+                    self.project,
+                    postproc_mode="filter",
+                    reuse_exploratory=reuse_exploratory,
+                    single_runner_filename=single_name,
+                )
+                single_text = render_single(
+                    self.project, postproc_mode="filter", reuse_exploratory=reuse_exploratory
+                )
                 scripts.append((batch_name, batch_text))
                 scripts.append((single_name, single_text))
 
             if run_expl and run_filt:
-                expl_name = "run_phenotypes_local_exploratory.sh" if is_local else "SBATCH_run_phenotypes_exploratory.sh"
-                filt_name = "run_phenotypes_local_filtering.sh" if is_local else "SBATCH_run_phenotypes_filtering.sh"
+                expl_name, _ = script_names("_exploratory")
+                complete_name, _ = script_names("_complete")
                 QMessageBox.information(
                     self,
                     "Two-step Post-processing workflow",
-                    "Both Exploratory Sweep and Filtering were selected, so two independent "
+                    "Both Exploratory Sweep and Complete were selected, so two independent "
                     f"sets of scripts were generated.\n\n"
                     f"1. Run {expl_name} first and check its report — it sweeps "
                     "minlen_values × maxcaas_values so you can pick the cluster-filtering "
                     "values that work best for your data.\n\n"
                     f"2. Set Cluster min length / Cluster max CAAS value (filter mode) on the "
-                    f"Disambiguation tab to your chosen values (or hand-edit "
-                    f"POSTPROC_MINLEN/POSTPROC_MAXCAAS directly in {filt_name}), then run "
-                    f"{filt_name} for the full downstream workflow.\n\n"
+                    f"Disambiguation tab to your chosen values, regenerate, then run "
+                    f"{complete_name} — it reuses {expl_name}'s CAAS/Disambiguation output "
+                    "directly (no recomputation) and runs the full downstream workflow "
+                    "(Accumulation/VEP/Scoring/Enrichment, plus RER/FADE if you've enabled "
+                    "them) on top of it.\n\n"
                     "Enjoy!",
                 )
         else:
-            batch_name = "run_phenotypes_local.sh" if is_local else "SBATCH_run_phenotypes.sh"
-            batch_text = render_batch(self.project)
+            batch_name, single_name = script_names("")
+            batch_text = render_batch(self.project, single_runner_filename=single_name)
             single_text = render_single(self.project)
             scripts.append((batch_name, batch_text))
-            scripts.append(("run_phenotype_single.sh", single_text))
+            scripts.append((single_name, single_text))
 
         self._show_preview(scripts)
 

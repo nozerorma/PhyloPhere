@@ -876,7 +876,8 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
 }
 
 if (!plot_ready) {
-  message("Skipping ASR plot: missing or empty trait stats.")
+  plot.new()
+  text(0.5, 0.5, "ASR plot skipped: missing or empty trait stats.", cex = 1.2)
 } else {
   asr_plot_path <- file.path(asr_trees, paste0(trait, "_asr_tree.png"))
   asr_dims <- species_plot_profile(
@@ -884,24 +885,28 @@ if (!plot_ready) {
     n_taxa = dplyr::n_distinct(stats_df[[taxon_of_interest]])
   )$asr
   knitr::opts_current$set(fig.width = asr_dims$width, fig.height = asr_dims$height)
-  tryCatch(
-    {
-      grDevices::png(
-        filename = asr_plot_path,
-        width = asr_dims$width, height = asr_dims$height, res = 320, bg = "white", units = "in"
-      )
-      asr_result <- asr_tree.f(stats_df, pruned_tree, trait, taxon_of_interest)
-      grDevices::dev.off()
-    },
+  # Single invocation (was called twice — once into a standalone png() device
+  # to save the file, once again from scratch to render into the doc — doubling
+  # the phylolm/ACE/contMap cost). A failure previously went to message(),
+  # which this chunk's message=FALSE silently swallows -- leaving a blank
+  # section with no plot, no visible reason why, and no saved file.
+  asr_result <- tryCatch(
+    asr_tree.f(stats_df, pruned_tree, trait, taxon_of_interest),
     error = function(e) {
-      message("ASR plot file failed: ", e$message)
-      try(grDevices::dev.off(), silent = TRUE)
+      plot.new()
+      text(0.5, 0.5, paste("ASR plot failed:", conditionMessage(e)), cex = 1.1, col = "firebrick")
+      NULL
     }
   )
-  tryCatch(
-    asr_tree.f(stats_df, pruned_tree, trait, taxon_of_interest),
-    error = function(e) message("ASR report plot failed: ", e$message)
-  )
+  # Always persist whatever is on the device (real tree, or the failure
+  # placeholder above) so the ASR_trees output folder never ends up silently
+  # empty when this fails on production data.
+  tryCatch({
+    grDevices::dev.copy(grDevices::png, filename = asr_plot_path,
+                         width = asr_dims$width, height = asr_dims$height,
+                         res = 320, bg = "white", units = "in")
+    grDevices::dev.off()
+  }, error = function(e) message("ASR plot file save failed: ", conditionMessage(e)))
 }
 
 ```

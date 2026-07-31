@@ -167,9 +167,6 @@ class PhenotypeTableModel(QAbstractTableModel):
         return True
 
 
-assert {name for name, _ in COLUMNS} == {f.name for f in fields(PhenotypeRow)} - {
-    "scoring_rer_input",
-    "scoring_rer_perms_input",
-    "scoring_fade_summary_top",
-    "scoring_fade_summary_bottom",
-}, "COLUMNS must track PhenotypeRow's fields (excluding the per-row scoring overrides, edited via a detail dialog, not a visible column)"
+assert {name for name, _ in COLUMNS} == {
+    f.name for f in fields(PhenotypeRow)
+}, "COLUMNS must track PhenotypeRow's fields"

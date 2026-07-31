@@ -36,9 +36,9 @@ SPEC = ModuleTabSpec(
         "phenotype, using permutation batches for significance."
     ),
     disclaimer=(
-        "Scoring needs a scoring_rer_input fallback per phenotype row (Runtime tab) "
-        "when this is off. rer_continuous_file/rer_perms_file (a precomputed report "
-        "input, not per-phenotype) live on the Precomputed Run tab."
+        "Scoring needs this module's output when it's off. Check 'Use precomputed "
+        "RERconverge output' on the Precomputed Run tab — it's auto-derived per "
+        "phenotype from one base path, no per-row entry needed."
     ),
     essential_fields=(
         FieldSpec(name="gene_trees", label="Gene trees file", kind="path_file"),

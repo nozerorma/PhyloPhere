@@ -421,24 +421,12 @@ process {
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
-    withName: 'TOOL_FCS_REPORT' {
-        cpus          = { 12 }
-        memory        = { 16.GB * task.attempt }
-        time          = { 8.h * task.attempt }
-        errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
-        maxRetries    = 2
-    }
     withName: 'RER_FCS_REPORT' {
         cpus          = { 8 }
         memory        = { 32.GB * task.attempt }
         time          = { 8.h * task.attempt }
         errorStrategy = { task.exitStatus in [3, 137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
-    }
-    withName: 'EXCLUDED_ENRICHMENT_REPORT' {
-        cpus   = { 8 }
-        memory = { 4.GB * task.attempt }
-        time   = { 4.h * task.attempt }
     }
     withName: 'SCORING_COMPARE_REPORT' {
         cpus   = { 12 }
@@ -448,11 +436,6 @@ process {
     }
     // ── AMI (DOMINO active modules) ───────────
     withName: 'SCORING_AMI_REPORT' {
-        cpus   = { 12 }
-        memory = { 16.GB * task.attempt }
-        time   = { 4.h * task.attempt }
-    }
-    withName: 'TOOL_AMI_REPORT' {
         cpus   = { 12 }
         memory = { 16.GB * task.attempt }
         time   = { 4.h * task.attempt }

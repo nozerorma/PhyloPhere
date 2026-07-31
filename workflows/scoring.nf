@@ -68,10 +68,15 @@ workflow SCORING {
         if (params.scoring_accum_dir) {
             def accum_dir = params.scoring_accum_dir ?: ''
             accum_source = accum_source.ifEmpty {
+                // Recursive: live output is accumulation/{top,bottom,all}/randomization/*.csv,
+                // three levels below accum_dir, not flat inside it — a plain listFiles() here
+                // would find zero matches against the real directory-layout.
                 if (accum_dir && file(accum_dir).isDirectory()) {
-                    def csvs = file(accum_dir).listFiles()
-                        ?.findAll { it.name.endsWith('.csv') && it.name.startsWith('accumulation_') }
-                    if (csvs && csvs.size() > 0) return csvs
+                    def csvs = []
+                    file(accum_dir).eachFileRecurse(groovy.io.FileType.FILES) { f ->
+                        if (f.name.endsWith('.csv') && f.name.startsWith('accumulation_')) csvs << f
+                    }
+                    if (csvs.size() > 0) return csvs
                 }
                 [file('NO_ACCUM')]
             }

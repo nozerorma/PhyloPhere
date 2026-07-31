@@ -63,7 +63,7 @@ process PHENOTYPE_EXPLORATION {
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'
                 ),
-                output_file = '2.Phenotype_exploration.html',
+                output_file = '2.Phenotype_exploration_complete.html',
                 envir = new.env()
             )
         "
@@ -92,7 +92,7 @@ process PHENOTYPE_EXPLORATION {
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'
                 ),
-                output_file = '2.Phenotype_exploration.html',
+                output_file = '2.Phenotype_exploration_complete.html',
                 envir = new.env()
             )
         "

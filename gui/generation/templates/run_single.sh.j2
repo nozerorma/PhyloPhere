@@ -34,17 +34,136 @@ cd "$RUN_DIR"
 
 if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
+    RUN_TAG="_exploratory"
+    # Exploratory only sweeps minlen_values x maxcaas_values and stops there — every
+    # downstream module (and RER/FADE, neither of which even depend on postproc) waits
+    # for the _complete pass. If RER/FADE are enabled in the project, they run there.
     RUN_ACCUMULATION=false
     RUN_VEP=false
     RUN_FADE=false
+    RUN_RER=false
     RUN_SCORING=false
 elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
-    RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_final"
+    RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_complete"
+    RUN_TAG="_complete"
+{% if reuse_exploratory %}
+    # An _exploratory pass was generated alongside this script — reuse its already-computed
+    # CAAS/Disambiguation output by file instead of recomputing it (no -resume/shared-workdir
+    # reliance): CT discovery/resample/bootstrap and live Disambiguation are both switched off,
+    # and CT_POSTPROC (still on, now applying the single chosen filter_minlen/filter_maxcaas
+    # pair instead of the exploratory sweep) reads Disambiguation's master CSV + background
+    # genes straight from the _exploratory outdir. ASR robustness was already produced during
+    # _exploratory (same disambiguation data), so it's not regenerated here.
+    RUN_CAAS=false
+    RUN_DISAMBIGUATION=false
+    ASR_ROBUSTNESS=false
+    EXPLORATORY_OUTDIR="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
+    DISAMBIGUATION_INPUT="${EXPLORATORY_OUTDIR}/ct_disambiguation/caas_convergence_master.csv"
+    DISAMBIGUATION_DIR="${EXPLORATORY_OUTDIR}/ct_disambiguation"
+    BACKGROUND_INPUT="${EXPLORATORY_OUTDIR}/caastools/background_genes.output"
+
+    # REPORTING (dataset exploration + tree name-curation, and pruning for CLASS 1 rows
+    # with a PRUNE_FILE) ran identically during _exploratory — same --my_traits/--tree
+    # inputs regardless of POSTPROC_MODE — so rerunning it here would only reproduce the
+    # same HTML/data_exploration reports a second time. Reuse instead: substitute the
+    # tree/trait file the _complete pass hands to Nextflow with _exploratory's already-
+    # curated (and, if this row prunes species, already-pruned) output, published
+    # unconditionally by TREE_CLEANUP/DATASET_PRUNE regardless of which subworkflow
+    # (REPORTING vs CONTRAST_SELECTION) invoked them. Overriding $TREE_FILE/$TRAIT_FILE
+    # here — rather than wiring a new main.nf param — means every downstream consumer
+    # that already falls back to params.tree (e.g. FADE's SELECTION_PREP) transparently
+    # gets the curated tree with no further plumbing. Pruning is CLASS 1-only in this
+    # GUI (see the CLASS-specific block below), and 0.Data_pruning.Rmd's pruned_trait_file
+    # is a plain row-filtered copy of the original --my_traits file (same columns,
+    # tab-separated) — safe to substitute for CLASS 1's own tab-separated TRAIT_FILE;
+    # never applies to CLASS 2 (SIMPLE_TRAIT_FILE, comma-separated), which never prunes.
+    RUN_REPORTING=false
+    PRUNED_TREE_CANDIDATE="${EXPLORATORY_OUTDIR}/data_exploration/0.Data-pruning/pruned_tree_file.nwk"
+    if [ -f "$PRUNED_TREE_CANDIDATE" ]; then
+        TREE_FILE="$PRUNED_TREE_CANDIDATE"
+        TRAIT_FILE="${EXPLORATORY_OUTDIR}/data_exploration/0.Data-pruning/pruned_trait_file.tsv"
+    else
+        TREE_FILE="${EXPLORATORY_OUTDIR}/name_curation/curated_tree.nwk"
+    fi
+{% endif %}
 else
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}"
+    RUN_TAG=""
 fi
 WORK_DIR="${WORK_BASE}/${TRAIT}${TAG}"
 mkdir -p "${RESULTS_BASE}" "${WORK_DIR}"
+
+# --- PRECOMPUTED REUSE (Precomputed Run tab) ---
+# Every path below is base_path/<TRAIT>/<known-subpath> — verified against each
+# producing process's actual publishDir, see gui/models/precomputed.py's module
+# docstring for the full table. Checking a box in the GUI both sets one of these
+# and switches the corresponding module off (via that module's own enable_toggle,
+# so RUN_* above already reflects it) — this block only supplies the *value* each
+# module's existing precomputed-fallback branch (below) was already able to consume.
+PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}"
+
+if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
+    DISCOVERY_FROM="${PRECOMP_OUTDIR}/caastools/discovery.tab"
+    SIGNIFICATION_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/global_meta_caas.tsv"
+    [ -f "$SIGNIFICATION_FROM" ] || SIGNIFICATION_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/meta_caas.tsv"
+    BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
+    POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
+    # caas_perms.rds only exists if the source run had --caas_permulation_enrichment on.
+    CAAS_PERMS_FILE="${PRECOMP_OUTDIR}/caas_permulation/caas_perms.rds"
+fi
+if [ "${PRECOMP_USE_RESAMPLE:-false}" = true ]; then
+    RESAMPLE_FROM="${PRECOMP_OUTDIR}/caastools/resample.tab"
+fi
+if [ "${PRECOMP_USE_BOOTSTRAP:-false}" = true ]; then
+    BOOTSTRAP_FROM="${PRECOMP_OUTDIR}/caastools/bootstrap.tab"
+fi
+
+if [ "${PRECOMP_USE_DISAMBIGUATION:-false}" = true ]; then
+    DISAMBIGUATION_INPUT="${PRECOMP_OUTDIR}/ct_disambiguation/caas_convergence_master.csv"
+    DISAMBIGUATION_DIR="${PRECOMP_OUTDIR}/ct_disambiguation"
+fi
+
+if [ "${PRECOMP_USE_POSTPROC:-false}" = true ]; then
+    # gene_filtering/cleaned_backgrounds only exist if the source run had
+    # gene_filter_mode != 'none' (the default).
+    ACCUMULATION_CAAS_INPUT="${PRECOMP_OUTDIR}/postproc/gene_filtering/filtered_discovery.tsv"
+    VEP_CAAS_INPUT="$ACCUMULATION_CAAS_INPUT"
+    SCORING_POSTPROC_INPUT="$ACCUMULATION_CAAS_INPUT"
+    ACCUMULATION_BACKGROUND_INPUT="${PRECOMP_OUTDIR}/postproc/cleaned_backgrounds/cleaned_background_main.txt"
+    SCORING_BACKGROUND_INPUT="$ACCUMULATION_BACKGROUND_INPUT"
+fi
+
+if [ "${PRECOMP_USE_ACCUMULATION:-false}" = true ]; then
+    SCORING_ACCUM_DIR="${PRECOMP_OUTDIR}/accumulation"
+fi
+
+if [ "${PRECOMP_USE_RER:-false}" = true ]; then
+    RER_CONTINUOUS_FILE="${PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.output"
+    # perms RDS only exists if the source run's phenotype actually had permulation on.
+    RER_PERMS_FILE="${PRECOMP_OUTDIR}/rerconverge/rer_results/${TRAIT}.continuous.perms.rds"
+    SCORING_RER_PERMS_INPUT="$RER_PERMS_FILE"
+    # Scoring's own RER fallback is RER_REPORT's rendered summary, not RER_CONT's raw
+    # output above — different producer, filename carries a variable suffix so it's
+    # resolved with a glob at generation time here rather than a fixed path.
+    SCORING_RER_INPUT="$(ls "${PRECOMP_OUTDIR}/rerconverge/rer_results/"rerconverge_summary_*.tsv 2>/dev/null | head -n1 || true)"
+fi
+
+if [ "${PRECOMP_USE_FADE:-false}" = true ]; then
+    FADE_JSON_DIR_TOP="${PRECOMP_OUTDIR}/selection/fade/top/json"
+    FADE_JSON_DIR_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/json"
+    # summary/site TSVs are optional emits — only exist if FADE's report step actually
+    # produced them for the source run.
+    SCORING_FADE_SUMMARY_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_summary_top.tsv"
+    SCORING_FADE_SUMMARY_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_summary_bottom.tsv"
+    SCORING_FADE_SITE_TOP="${PRECOMP_OUTDIR}/selection/fade/top/fade_site_bf_top.tsv"
+    SCORING_FADE_SITE_BOTTOM="${PRECOMP_OUTDIR}/selection/fade/bottom/fade_site_bf_bottom.tsv"
+fi
+
+if [ "${PRECOMP_USE_VEP:-false}" = true ]; then
+    # only exist if the source run had the matching DB (PrimateAI-3D/COSMIC) configured.
+    SCORING_VEP_PRIMATEAI="${PRECOMP_OUTDIR}/vep/primateai_mapped.tsv"
+    SCORING_VEP_COSMIC="${PRECOMP_OUTDIR}/vep/cosmic_scores.tsv"
+fi
 
 {% if resources.process_overrides %}
 # Per-process cpus/memory overrides from the Resources tab's advanced table.
@@ -77,7 +196,7 @@ if [ "${RUN_TOWER:-{{ run_defaults.tower }}}" = true ]; then
     NF_FLAGS+=( -with-tower )
 fi
 NF_FLAGS+=(
-    -name "${TRAIT}_$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | cut -c1-8 || printf '%08x' $RANDOM)"
+    -name "${TRAIT}${RUN_TAG}_$(cat /proc/sys/kernel/random/uuid 2>/dev/null | tr -d '-' | cut -c1-8 || printf '%08x' $RANDOM)"
     --alignment "$ALI_DIR"
     --ali_format "${ALI_FORMAT:-fasta}"
     --tree "$TREE_FILE"
@@ -150,6 +269,24 @@ if [ "${RUN_CAAS:-{{ run_defaults.caas }}}" = true ]; then
     )
     [ -n "${TRAITVALUES:-}" ] && NF_FLAGS+=(--traitvalues "$TRAITVALUES")
 else
+    # conf/ct.config defaults ct_tool to "discovery,resample,bootstrap" (same `?: true`-
+    # style gotcha as reporting/ct_disambiguation/etc — see the note above), so leaving
+    # --ct_tool unset here does NOT turn CT() off: main.nf's `if (params.ct_tool)` stays
+    # true, CT() still runs, and since neither --contrast_selection nor --caas_config is
+    # passed in this branch it immediately hits ct.nf's `assert params.caas_config :
+    # "CT workflow requires --caas_config."` — the crash this fixes, hit by every
+    # precomputed-CT-reuse run (Precomputed Run tab's Discovery/Resample/Bootstrap boxes,
+    # or a _complete pass reusing an _exploratory sibling's CAAS output) before this line
+    # existed. An explicit empty string makes params.ct_tool falsy in Groovy, so CT()
+    # is skipped entirely — CT_SIGNIFICATION/CT_DISAMBIGUATION still pick up
+    # discovery_from/bootstrap_from/background_input/disambiguation_input directly from
+    # params (see workflows/ct_signification.nf), independent of CT() ever running.
+    # Must be `--ct_tool=` (one array element, embedded `=`), NOT `--ct_tool ""` (two
+    # elements) — Nextflow's CLI parser treats a space-separated empty value as a bare
+    # boolean flag (params.ct_tool becomes Boolean true, still truthy!); only the
+    # `--flag=` form actually delivers a real, Elvis-proof empty string. Verified
+    # directly against this repo's conf/ct.config before landing this fix.
+    NF_FLAGS+=( --ct_tool= )
     [ -n "${DISCOVERY_FROM:-}" ] && NF_FLAGS+=(--discovery_from "$DISCOVERY_FROM")
     [ -n "${RESAMPLE_FROM:-}" ] && NF_FLAGS+=(--resample_from "$RESAMPLE_FROM")
     [ -n "${BOOTSTRAP_FROM:-}" ] && NF_FLAGS+=(--bootstrap_from "$BOOTSTRAP_FROM")
@@ -158,9 +295,16 @@ fi
 # ct_disambiguation and ct_postproc both default true in conf/common.config, so both
 # are always passed explicitly (see the note above) regardless of which branch below
 # runs — ct_postproc's own toggle (disambig.ct_postproc) is independent of whether
-# Disambiguation itself is enabled, so it's emitted unconditionally here too.
+# Disambiguation itself is enabled, so both it and its own params (below) are emitted
+# unconditionally rather than nested inside "if RUN_DISAMBIGUATION" — a _complete run
+# reusing an _exploratory pass needs ct_postproc to run with Disambiguation OFF.
 NF_FLAGS+=( --ct_disambiguation "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" )
 NF_FLAGS+=( --ct_postproc "${RUN_CT_POSTPROC:-{{ run_defaults.ct_postproc }}}" )
+# asr_robustness also defaults true in conf/ct_disambiguation.config — see the note
+# above. Not meaningful without live Disambiguation or a precomputed disambiguation_dir,
+# so a _complete reuse pass (which already got its ASR robustness report during
+# _exploratory, from the same underlying disambiguation data) sets ASR_ROBUSTNESS=false.
+NF_FLAGS+=( --asr_robustness "${ASR_ROBUSTNESS:-{{ run_defaults.asr_robustness }}}" )
 
 if [ "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" = true ]; then
     NF_FLAGS+=(
@@ -170,38 +314,40 @@ if [ "${RUN_DISAMBIGUATION:-{{ run_defaults.disambiguation }}}" = true ]; then
         --ct_disambig_convergence_mode "${CONVERGENCE_MODE:-focal_clade}"
         --ct_disambig_posterior_threshold "${POSTERIOR_THRESHOLD:-0.1}"
         --ct_disambig_max_tasks_per_child "${MAX_TASKS_PER_CHILD:-50}"
-        --asr_robustness {{ run_defaults.asr_robustness }}
     )
-    if [ "${RUN_CT_POSTPROC:-{{ run_defaults.ct_postproc }}}" = true ]; then
-        NF_FLAGS+=(
-            --caas_postproc_mode "$POSTPROC_MODE"
-            --filter_minlen "$POSTPROC_MINLEN"
-            --filter_maxcaas "$POSTPROC_MAXCAAS"
-            --gene_filter_mode "$POSTPROC_GENE_FILTER_MODE"
-            --minlen_values "${POSTPROC_MINLEN_VALUES:-2,3,4,10}"
-            --maxcaas_values "${POSTPROC_MAXCAAS_VALUES:-0.6,0.7,0.8}"
-            --extreme_threshold "${POSTPROC_EXTREME_THRESHOLD:-0.99}"
-            --iqr_multiplier "${POSTPROC_IQR_MULTIPLIER:-3.0}"
-        )
-        # ct_postproc.nf's characterization report step always runs when --ct_postproc
-        # is on (its gate is `if (true)`, unconditional — see workflows/ct_postproc.nf)
-        # and asserts params.gene_ensembl_file regardless of gene_filter_mode. This
-        # can't be left gated behind the "if RUN_SCORING" block below: exploratory
-        # mode forces RUN_SCORING=false above, so without this line gene_ensembl_file
-        # never reaches Nextflow even when it's set on the Scoring tab, and the run
-        # fails with "Error: --gene_ensembl_file is required for characterization
-        # reports" (or "...for gene filtering" if gene_filter_mode != 'none' too).
-        NF_FLAGS+=( --gene_ensembl_file "$GENE_ENSEMBL_FILE" )
-    fi
 {% if modules.disambiguation.extra_flags %}
     NF_FLAGS+=({{ modules.disambiguation.extra_flags }})
 {% endif %}
 else
     # Standalone mode: when skipping upstream CT/Disambiguation, pass precomputed inputs
+    # (populated above for a _complete pass reusing _exploratory's output, or from the
+    # Precomputed Run tab otherwise).
     [ -n "${SIGNIFICATION_FROM:-}" ] && NF_FLAGS+=(--signification_from "$SIGNIFICATION_FROM")
     [ -n "${DISAMBIGUATION_INPUT:-}" ] && NF_FLAGS+=(--disambiguation_input "$DISAMBIGUATION_INPUT")
     [ -n "${DISAMBIGUATION_DIR:-}" ] && NF_FLAGS+=(--disambiguation_dir "$DISAMBIGUATION_DIR")
     [ -n "${BACKGROUND_INPUT:-}" ] && NF_FLAGS+=(--background_input "$BACKGROUND_INPUT")
+fi
+
+if [ "${RUN_CT_POSTPROC:-{{ run_defaults.ct_postproc }}}" = true ]; then
+    NF_FLAGS+=(
+        --caas_postproc_mode "$POSTPROC_MODE"
+        --filter_minlen "$POSTPROC_MINLEN"
+        --filter_maxcaas "$POSTPROC_MAXCAAS"
+        --gene_filter_mode "$POSTPROC_GENE_FILTER_MODE"
+        --minlen_values "${POSTPROC_MINLEN_VALUES:-2,3,4,10}"
+        --maxcaas_values "${POSTPROC_MAXCAAS_VALUES:-0.6,0.7,0.8}"
+        --extreme_threshold "${POSTPROC_EXTREME_THRESHOLD:-0.99}"
+        --iqr_multiplier "${POSTPROC_IQR_MULTIPLIER:-3.0}"
+    )
+    # ct_postproc.nf's characterization report step always runs when --ct_postproc
+    # is on (its gate is `if (true)`, unconditional — see workflows/ct_postproc.nf)
+    # and asserts params.gene_ensembl_file regardless of gene_filter_mode. This
+    # can't be left gated behind the "if RUN_SCORING" block below: exploratory
+    # mode forces RUN_SCORING=false above, so without this line gene_ensembl_file
+    # never reaches Nextflow even when it's set on the Scoring tab, and the run
+    # fails with "Error: --gene_ensembl_file is required for characterization
+    # reports" (or "...for gene filtering" if gene_filter_mode != 'none' too).
+    NF_FLAGS+=( --gene_ensembl_file "$GENE_ENSEMBL_FILE" )
 fi
 
 # ct_accumulation also defaults true in conf/common.config — see the note above.

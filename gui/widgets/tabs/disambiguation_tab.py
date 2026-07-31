@@ -34,9 +34,8 @@ SPEC = ModuleTabSpec(
         "• Both Selected: Produces separate script pairs (sbatch_exploratory.sh and sbatch_filtering.sh) for parallel or sequential execution."
     ),
     disclaimer=(
-        "Accumulation and Scoring need this module's output. Supply "
-        "signification_from/disambiguation_input/disambiguation_dir/background_input "
-        "on the Precomputed Run tab instead."
+        "Accumulation and Scoring need this module's output. Check 'Use precomputed "
+        "Disambiguation output' on the Precomputed Run tab instead."
     ),
     essential_fields=(
         FieldSpec(

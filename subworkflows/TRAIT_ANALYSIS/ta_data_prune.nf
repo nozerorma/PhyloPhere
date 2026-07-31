@@ -65,7 +65,7 @@ process DATASET_PRUNE {
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'
                 ),
-                output_file = '0.Data_pruning.html',
+                output_file = '2.Phenotype_exploration_pruned.html',
                 envir = new.env()
             )
         "
@@ -96,7 +96,7 @@ process DATASET_PRUNE {
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'
                 ),
-                output_file = '0.Data_pruning.html',
+                output_file = '2.Phenotype_exploration_pruned.html',
                 envir = new.env()
             )
         "

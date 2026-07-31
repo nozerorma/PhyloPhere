@@ -22,7 +22,7 @@ Type=Application
 Name=PhyloPhere Runner GUI
 Comment=Generate PhyloPhere SBATCH/runner scripts
 Exec=$REPO_DIR/run_gui.sh
-Icon=$REPO_DIR/res/logo.png
+Icon=$REPO_DIR/res/icon.png
 Terminal=false
 Categories=Science;Biology;
 EOF

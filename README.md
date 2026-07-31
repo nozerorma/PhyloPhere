@@ -119,9 +119,13 @@ Execution order as wired in `main.nf`:
 
 On completion, `workflow.onComplete` (in `main.nf`, backed by `lib/WorkflowMap.groovy`) writes `workflow_map.html` into `--outdir` — a visual summary of which stages ran and links to every HTML report/output directory produced.
 
-Reports are numbered chronologically across the whole run (`0.Data_pruning` …
+Reports are numbered chronologically across the whole run (`1.Dataset_exploration` …
 `15.Comparison_report`) so the numeric prefix always tells you where
-a report sits in the pipeline, regardless of which modules were enabled.
+a report sits in the pipeline, regardless of which modules were enabled. When
+`--prune_data` is set, report 2 is produced twice — `2.Phenotype_exploration_complete.html`
+(whole species pool) and `2.Phenotype_exploration_pruned.html` (species-pruned pool,
+rendered from `0.Data_pruning.Rmd`, whose artifacts still publish under
+`data_exploration/0.Data-pruning/`).
 
 ---
 
@@ -512,13 +516,37 @@ works from a desktop launcher with a bare session `PATH`. Optionally install
 a menu entry with `./install_gui_launcher.sh` (writes a `.desktop` file so
 PhyloPhere shows up in your app menu — safe to re-run after moving the repo).
 
-**Tabs:** General (core paths, remote host), Runtime (execution mode, SBATCH
-params, the phenotype catalogue table), CAAS, Disambiguation, Accumulation,
-RERconverge, FADE, VEP, Scoring, Enrichment, **Precomputed Run** (every
-standalone/resume fallback path, grouped by which module's absence it
-substitutes for), Resources (mirrors `nextflow.config`'s `local`/`slurm`
-caps), and About. Each tab maps directly onto the config groups documented
-above.
+**Wayland taskbar/task-switcher icon:** the app advertises itself to the
+compositor as `phylophere-gui` (`QApplication.setDesktopFileName`), matching
+`install_gui_launcher.sh`'s `phylophere-gui.desktop` — install that launcher
+once and the taskbar/Alt-Tab switcher will show `res/logo.png` instead of a
+generic placeholder icon. Without it, GNOME/KDE under Wayland can't match the
+running window to any `.desktop` entry and fall back to a default icon.
+
+**Native Plasma/GNOME theming:** the GUI never forces a Qt style or palette,
+so it already follows the system theme once Qt has a platform-theme plugin to
+load one from. Qt has none loaded by default, though — `run_gui.sh` sets
+`QT_QPA_PLATFORMTHEME=xdgdesktopportal` for you (the `xdg-desktop-portal`
+theme plugin, which reads Plasma's/GNOME's native color scheme, dark mode, and
+fonts over the desktop portal — no extra system packages needed on a modern
+Wayland session; `environment/phylophere.yml`'s `qt6-main` package already
+ships it under `lib/qt6/plugins/platformthemes/`). If you'd rather use
+something else (`qt6ct`, `gnome` via `qgnomeplatform-qt6`, ...), export your
+own `QT_QPA_PLATFORMTHEME` before launching — `run_gui.sh` only sets it when
+it isn't already set, so your choice always wins.
+
+**Tabs:** General (core paths, remote host, **project name** — shown in the
+window title), Runtime (execution mode, SBATCH params, generated-script name
+override, the phenotype catalogue table), CAAS, Disambiguation, Accumulation,
+RERconverge, FADE, VEP, Scoring, Enrichment, **Precomputed Run** (a base path
++ one "reuse this stage's output" checkbox per module — CAAS gets a general
+checkbox plus 3 specific ones for discovery/resample/bootstrap; every other
+module is one checkbox. Checking a box both feeds in that stage's
+already-computed output, auto-derived per phenotype as `base_path/<TRAIT>/...`,
+and switches that stage off — no more one global path per field, which broke
+the moment a batch had more than one phenotype), Resources (mirrors
+`nextflow.config`'s `local`/`slurm` caps), and About. Each tab maps directly
+onto the config groups documented above.
 
 **Remote/cluster support:** the GUI never SSHes to *run* anything, but when
 `General > remote_host` is set it can validate that every filled path exists
@@ -526,11 +554,17 @@ on that host (`Ctrl+Shift+V`) and browse remote directories over SSH instead
 of a local file dialog — both assume passwordless key auth is already set up.
 Actual job submission is still: copy the generated script to the cluster and
 run it (`sbatch SBATCH_run_phenotypes.sh`, or `bash run_phenotypes_local.sh`
-for local sequential runs).
+for local sequential runs — override the `run_phenotypes`/`run_phenotype`
+token in these names from the Runtime tab if you'd rather they matched your
+project).
 
-Projects (all field values) save/reopen as human-diffable JSON via
-File > Save/Open (`Ctrl+S`/`Ctrl+O`). Generate scripts with `Ctrl+G` — this
-opens a preview window you can inspect before saving.
+Projects (all field values) round-trip as human-diffable JSON: File > **New
+Project** (`Ctrl+N`) starts a clean one, **Save Project As...** (`Ctrl+S`)
+always prompts for a filename — pre-filled from General > Project name — so
+editing a loaded template for a one-off run never silently overwrites the
+original, and **Load Template...** reopens any saved project file. Generate
+scripts with `Ctrl+G` — this opens a preview window you can inspect before
+saving. The toolbar's language picker remembers your choice across restarts.
 
 Seqera Platform: the Runtime tab's `use_tower` toggle only flips
 `tower.enabled`; the access token itself is deliberately never stored in the

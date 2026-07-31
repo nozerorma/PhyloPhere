@@ -96,6 +96,12 @@ class RuntimeTab(QWidget):
         self.batched.toggled.connect(self._on_batched_changed)
         form.addRow(self.batched)
 
+        self.script_base_name = QLineEdit(self._config.script_base_name)
+        self.script_base_name.setPlaceholderText("phenotypes (default)")
+        self.script_base_name.textChanged.connect(self._on_script_base_name_changed)
+        self.script_base_name_label = QLabel("Generated script name")
+        form.addRow(self.script_base_name_label, self.script_base_name)
+
         self.work_dir = PathField(mode="dir")
         self.work_dir.set_text(self._config.work_dir)
         self.work_dir.textChanged.connect(self._on_work_dir_changed)
@@ -280,6 +286,10 @@ class RuntimeTab(QWidget):
         self._config.batched = value
         self.changed.emit()
 
+    def _on_script_base_name_changed(self, value: str) -> None:
+        self._config.script_base_name = value
+        self.changed.emit()
+
     def _on_work_dir_changed(self, value: str) -> None:
         self._config.work_dir = value
         self.changed.emit()
@@ -425,6 +435,8 @@ class RuntimeTab(QWidget):
             self.toy_mode.setText(tr("Toy mode (--toy_mode)", lang))
         if hasattr(self, "batched"):
             self.batched.setText(tr("Batched SLURM array job (generates the SBATCH wrapper)", lang))
+        if hasattr(self, "script_base_name_label"):
+            self.script_base_name_label.setText(tr("Generated script name", lang))
         if hasattr(self, "alignment_label"):
             self.alignment_label.setText(tr("Alignments (--alignment)", lang))
         if hasattr(self, "ali_format_label"):

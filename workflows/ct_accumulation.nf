@@ -90,6 +90,29 @@ workflow CT_ACCUMULATION {
                 tf_path
             }
         }
+        if (params.my_traits) {
+            // Last-resort fallback. trait_file_channel only carries a value when CT
+            // actually ran live (main.nf only populates ct_results when --ct_tool is
+            // set); the moment CT/CONTRAST_SELECTION is fully precomputed-reused
+            // instead — whether via the Precomputed Run tab's Discovery/Resample/
+            // Bootstrap boxes, or a _complete pass reusing an _exploratory sibling's
+            // CAAS output — trait_file_channel is empty. --caas_config above doesn't
+            // help either: the GUI always drives CLASS 1/2 phenotypes through
+            // --my_traits, never the legacy --caas_config path, so that condition is
+            // never true for a GUI-generated run. Without this, species_list_ch never
+            // emits and CT_ACCUMULATION_AGGREGATE (a process with a plain, non-optional
+            // `path species_list` input) silently never executes — no error, just a
+            // permanently pending process. params.my_traits is always required for
+            // both CLASS 1 and CLASS 2 rows, so it's always safe to fall back to here.
+            species_list_ch = species_list_ch.ifEmpty {
+                def tf_path = file(params.my_traits)
+                assert tf_path.exists() \
+                    : "Error: my_traits not found: ${params.my_traits}"
+
+                log.info "📄 CT_ACCUMULATION: using --my_traits for species list (CT precomputed-reused): ${tf_path}"
+                tf_path
+            }
+        }
 
         def species_list_val = species_list_ch
             .collect()

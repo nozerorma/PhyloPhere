@@ -1,77 +1,151 @@
 #!/usr/bin/env python3
-# precomputed.py — Precomputed-input fallbacks, consolidated from every module tab.
+# precomputed.py — Precomputed-input reuse, consolidated from every module tab.
 # PhyloPhere | gui/models/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-Every module tab used to carry its own "used when disabled" fallback fields
-(discovery_from on CAAS, signification_from on Disambiguation, vep_caas_input on
-VEP, ...). In practice a user configuring a standalone/resume run has to fill in
-several of these across several tabs to skip straight to a later module, and two of
-them (RER's rer_continuous_file/rer_perms_file, FADE's fade_json_dir_top/bottom)
-were previously grayed-out-looking dead ends: those tabs had an empty fallback
-group because the *per-phenotype* scoring_rer_input / scoring_fade_summary_top/
-bottom fields live on PhenotypeRow instead, and nothing filled the *global*
-precomputed-report-input slot documented in conf/rerconverge.config and
-conf/fade.config. This dataclass gathers every global (non-per-phenotype)
-precomputed/fallback path into one place so they're all visible together instead
-of hidden one-per-tab.
+One base_path + one checkbox per producing stage, instead of one manually-typed
+global path per field. A single global path field can't work once a batch run has
+more than one phenotype (TRAIT varies per row) — the same problem the old per-row
+Scoring fallback overrides on PhenotypeRow (scoring_rer_input, scoring_rer_perms_input,
+scoring_fade_summary_top/bottom) existed to solve, one dialog at a time. Every file
+this GUI generates writes to a known, stable layout under an outdir
+(see run_single.sh.j2/sbatch_array.sh.j2's RESULTS_BASE), so the actual per-phenotype
+path is always base_path/<TRAIT>/<known-subpath> — computed in the generated shell
+script itself (using $TRAIT), not typed in here.
 
-Per-phenotype fallbacks (scoring_rer_input, scoring_fade_summary_top/bottom) stay
-on PhenotypeRow (gui/models/runtime.py) — they legitimately vary per phenotype in
-a batch run, so centralizing them here would be a regression, not a consolidation.
+Checking a box both supplies the precomputed input AND turns off the module that
+would otherwise recompute it live (see gui/generation/templates/run_single.sh.j2's
+PRECOMP_* wiring) — recomputing something you're also feeding a precomputed answer
+for is never what you want.
+
+Path templates (relative to base_path/<TRAIT>), verified against each process's
+actual publishDir rather than guessed:
+  CT/CAAS      : caastools/{discovery,resample,bootstrap}.tab, caastools/background_genes.output,
+                 caastools/background.output, signification/meta_caas/global_meta_caas.tsv,
+                 caas_permulation/caas_perms.rds
+  Disambiguation: ct_disambiguation/caas_convergence_master.csv, ct_disambiguation/ (dir)
+  Post-processing: postproc/gene_filtering/filtered_discovery.tsv,
+                 postproc/cleaned_backgrounds/cleaned_background_main.txt
+  Accumulation : accumulation/ (dir; workflows/scoring.nf recurses into
+                 <dir>/{top,bottom,all}/randomization/*.csv)
+  RER          : rerconverge/rer_results/<TRAIT>.continuous.{output,perms.rds},
+                 rerconverge/rer_results/rerconverge_summary_<TRAIT>.tsv (glob-resolved
+                 at generation time in the shell script, filename carries a variable suffix)
+  FADE         : selection/fade/{top,bottom}/json (dir),
+                 selection/fade/{top,bottom}/fade_summary_{top,bottom}.tsv,
+                 selection/fade/{top,bottom}/fade_site_bf_{top,bottom}.tsv
+  VEP          : vep/primateai_mapped.tsv, vep/cosmic_scores.tsv
+
+Some of these are conditionally published (gene_filter_mode != 'none' for the
+Post-processing pair; optional emits for RER perms, FADE summary/site, VEP scores;
+whole-subworkflow opt-in for caas_perms.rds) — checking the box still wires the path,
+but the file only exists if the source run actually had the matching settings on.
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
+import glob
+import os
 from dataclasses import dataclass
 
 
 @dataclass(kw_only=True)
 class PrecomputedConfig:
-    """Global standalone/resume-run inputs, used when the producing module is off."""
+    """Base path + per-stage reuse toggles. See module docstring for path layout."""
 
-    # --- CAAS / CT (used when CAAS is disabled) ---
-    discovery_from: str = ""  # --discovery_from
-    resample_from: str = ""  # --resample_from
-    bootstrap_from: str = ""  # --bootstrap_from
+    base_path: str = ""  # per-phenotype dir = base_path/<TRAIT> (no toy/postproc-mode tag)
 
-    # --- Disambiguation (used when Disambiguation is disabled) ---
-    signification_from: str = ""  # --signification_from
-    disambiguation_input: str = ""  # --disambiguation_input
-    disambiguation_dir: str = ""  # --disambiguation_dir
-    background_input: str = ""  # --background_input
+    # --- CT / CAAS (general + 3 specific, mirroring the CAAS tab's own
+    # discovery/resample/bootstrap checkboxes) ---
+    use_ct: bool = False  # turns off CAAS; also wires background_input, signification_from,
+    # caas_perms_file, posenrich_background_file — all derive from CT's own concat/
+    # permulation outputs, not from any of the 3 specific steps individually.
+    use_discovery: bool = False  # wires discovery_from
+    use_resample: bool = False  # wires resample_from
+    use_bootstrap: bool = False  # wires bootstrap_from
 
-    # --- Accumulation (used when Accumulation is disabled) ---
-    accumulation_caas_input: str = ""  # --accumulation_caas_input
-    accumulation_background_input: str = ""  # --accumulation_background_input
+    # --- Disambiguation (live ASR/convergence compute) ---
+    use_disambiguation: bool = False  # turns off Disambiguation; wires disambiguation_input/_dir
 
-    # --- RERconverge (used when RER is disabled) ---
-    # rer_continuous_file: precomputed RERconverge continuous-analysis RDS, renders
-    # 5.RERconverge_report.html directly without running RER live (mirrors
-    # fade_json_dir_top/bottom's role for FADE below).
-    rer_continuous_file: str = ""  # --rer_continuous_file
-    rer_perms_file: str = ""  # --rer_perms_file
+    # --- Post-processing (Disambiguation tab's own ct_postproc sub-toggle) ---
+    use_postproc: bool = False  # turns off ct_postproc; wires the filtered-discovery/
+    # cleaned-background pair that Accumulation/VEP/Scoring each fall back to
 
-    # --- FADE (used when FADE is disabled) ---
-    # Directories of prior *.FADE.json results (one per gene); when set, FADE's own
-    # report renders directly from them even with --fade off this invocation.
-    fade_json_dir_top: str = ""  # --fade_json_dir_top
-    fade_json_dir_bottom: str = ""  # --fade_json_dir_bottom
+    # --- Accumulation ---
+    use_accumulation: bool = False  # turns off Accumulation; wires scoring_accum_dir
 
-    # --- VEP (used when VEP is disabled) ---
-    vep_caas_input: str = ""  # --vep_caas_input
+    # --- RERconverge ---
+    use_rer: bool = False  # turns off RER; wires rer_continuous_file/rer_perms_file plus
+    # the per-phenotype scoring_rer_input/scoring_rer_perms_input Scoring falls back to
 
-    # --- Scoring (used when Scoring is disabled, or when a producing module is off) ---
-    scoring_postproc_input: str = ""  # --scoring_postproc_input
-    scoring_accum_dir: str = ""  # --scoring_accum_dir
-    scoring_vep_primateai: str = ""  # --scoring_vep_primateai
-    scoring_vep_cosmic: str = ""  # --scoring_vep_cosmic (COSMIC *scores* TSV fallback — distinct from VEP's own cosmic_db)
-    scoring_background_input: str = ""  # --scoring_background_input
-    caas_perms_file: str = ""  # --caas_perms_file
-    scoring_fade_site_top: str = ""  # --scoring_fade_site_top (FADE site-level fallback, if FADE off)
-    scoring_fade_site_bottom: str = ""  # --scoring_fade_site_bottom
+    # --- FADE ---
+    use_fade: bool = False  # turns off FADE; wires fade_json_dir_top/bottom plus the
+    # per-phenotype scoring_fade_summary_top/bottom and scoring_fade_site_top/bottom
 
-    # --- Enrichment (used when Enrichment/Scoring is disabled) ---
-    accumulation_enrichment_gene_lists_input: str = ""  # --accumulation_enrichment_gene_lists_input
-    posenrich_background_file: str = ""  # --posenrich_background_file
+    # --- VEP ---
+    use_vep: bool = False  # turns off VEP; wires scoring_vep_primateai/scoring_vep_cosmic
+
+
+def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str, str]]:
+    """(label, path, kind) for every path implied by config's checked boxes, for one
+    phenotype's TRAIT. Python-side mirror of run_single.sh.j2's own PRECOMP_OUTDIR
+    construction — used by gui/generation/validate.py for real existence checks (the
+    shell script builds the identical paths at generation/run time; keep both in sync
+    if the layout ever changes, see this module's docstring for the source of truth).
+    """
+    if not config.base_path or not trait:
+        return []
+    outdir = os.path.join(config.base_path, trait)
+    entries: list[tuple[str, str, str]] = []
+
+    if config.use_discovery:
+        entries.append(("discovery_from", os.path.join(outdir, "caastools", "discovery.tab"), "file"))
+        sig = os.path.join(outdir, "signification", "meta_caas", "global_meta_caas.tsv")
+        if not os.path.isfile(sig):
+            sig = os.path.join(outdir, "signification", "meta_caas", "meta_caas.tsv")
+        entries.append(("signification_from", sig, "file"))
+        entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
+        entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
+        entries.append(("caas_perms_file", os.path.join(outdir, "caas_permulation", "caas_perms.rds"), "file"))
+    if config.use_resample:
+        entries.append(("resample_from", os.path.join(outdir, "caastools", "resample.tab"), "file"))
+    if config.use_bootstrap:
+        entries.append(("bootstrap_from", os.path.join(outdir, "caastools", "bootstrap.tab"), "file"))
+
+    if config.use_disambiguation:
+        entries.append(
+            ("disambiguation_input", os.path.join(outdir, "ct_disambiguation", "caas_convergence_master.csv"), "file")
+        )
+        entries.append(("disambiguation_dir", os.path.join(outdir, "ct_disambiguation"), "dir"))
+
+    if config.use_postproc:
+        gene_list = os.path.join(outdir, "postproc", "gene_filtering", "filtered_discovery.tsv")
+        background = os.path.join(outdir, "postproc", "cleaned_backgrounds", "cleaned_background_main.txt")
+        entries.append(("accumulation_caas_input / vep_caas_input / scoring_postproc_input", gene_list, "file"))
+        entries.append(("accumulation_background_input / scoring_background_input", background, "file"))
+
+    if config.use_accumulation:
+        entries.append(("scoring_accum_dir", os.path.join(outdir, "accumulation"), "dir"))
+
+    if config.use_rer:
+        rer_dir = os.path.join(outdir, "rerconverge", "rer_results")
+        entries.append(("rer_continuous_file", os.path.join(rer_dir, f"{trait}.continuous.output"), "file"))
+        entries.append(("rer_perms_file / scoring_rer_perms_input", os.path.join(rer_dir, f"{trait}.continuous.perms.rds"), "file"))
+        matches = sorted(glob.glob(os.path.join(rer_dir, "rerconverge_summary_*.tsv")))
+        if matches:
+            entries.append(("scoring_rer_input", matches[0], "file"))
+
+    if config.use_fade:
+        for direction in ("top", "bottom"):
+            fade_dir = os.path.join(outdir, "selection", "fade", direction)
+            entries.append((f"fade_json_dir_{direction}", os.path.join(fade_dir, "json"), "dir"))
+            entries.append((f"scoring_fade_summary_{direction}", os.path.join(fade_dir, f"fade_summary_{direction}.tsv"), "file"))
+            entries.append((f"scoring_fade_site_{direction}", os.path.join(fade_dir, f"fade_site_bf_{direction}.tsv"), "file"))
+
+    if config.use_vep:
+        vep_dir = os.path.join(outdir, "vep")
+        entries.append(("scoring_vep_primateai", os.path.join(vep_dir, "primateai_mapped.tsv"), "file"))
+        entries.append(("scoring_vep_cosmic", os.path.join(vep_dir, "cosmic_scores.tsv"), "file"))
+
+    return entries

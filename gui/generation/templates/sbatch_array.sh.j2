@@ -132,9 +132,10 @@ export PERM_STRATEGY="{{ modules.caas.perm_strategy }}"
 export TRAITVALUES="{{ modules.caas.traitvalues }}"
 export CHUNK_SIZE="{{ modules.caas.chunk_size }}"
 export ALPHA_THRESHOLD="{{ modules.caas.alpha_threshold }}"
-export DISCOVERY_FROM="{{ precomputed.discovery_from }}"
-export RESAMPLE_FROM="{{ precomputed.resample_from }}"
-export BOOTSTRAP_FROM="{{ precomputed.bootstrap_from }}"
+export PRECOMP_BASE_PATH="{{ precomputed.base_path }}"
+export PRECOMP_USE_DISCOVERY="{{ 'true' if precomputed.use_discovery else 'false' }}"
+export PRECOMP_USE_RESAMPLE="{{ 'true' if precomputed.use_resample else 'false' }}"
+export PRECOMP_USE_BOOTSTRAP="{{ 'true' if precomputed.use_bootstrap else 'false' }}"
 
 # --- DISAMBIGUATION / POST-PROCESSING ---
 export ASR_MODE="{{ modules.disambiguation.ct_disambig_asr_mode }}"
@@ -152,14 +153,11 @@ export POSTPROC_MAXCAAS_VALUES="{{ modules.disambiguation.maxcaas_values }}"
 export POSTPROC_EXTREME_THRESHOLD="{{ modules.disambiguation.extreme_threshold }}"
 export POSTPROC_IQR_MULTIPLIER="{{ modules.disambiguation.iqr_multiplier }}"
 # --- STANDALONE / PRECOMPUTED UPSTREAM INPUTS ---
-# If skipping upstream CT/Disambiguation steps after an exploratory sweep, you can
-# populate DISAMBIGUATION_INPUT and BACKGROUND_INPUT from expected exploratory outputs:
-#   export DISAMBIGUATION_INPUT="${CAAS_OUTBASE}/${TRAIT}_exploratory/ct_disambiguation/caas_convergence_master.csv"
-#   export BACKGROUND_INPUT="${CAAS_OUTBASE}/${TRAIT}_exploratory/ct_discovery/background_genes.txt"
-export SIGNIFICATION_FROM="{{ precomputed.signification_from }}"
-export DISAMBIGUATION_INPUT="{{ precomputed.disambiguation_input }}"
-export DISAMBIGUATION_DIR="{{ precomputed.disambiguation_dir }}"
-export BACKGROUND_INPUT="{{ precomputed.background_input }}"
+# Actual per-phenotype paths (base_path/<TRAIT>/...) are constructed in
+# run_single.sh.j2, where $TRAIT is bound — see gui/models/precomputed.py's
+# module docstring for the full path-template table.
+export PRECOMP_USE_DISAMBIGUATION="{{ 'true' if precomputed.use_disambiguation else 'false' }}"
+export PRECOMP_USE_POSTPROC="{{ 'true' if precomputed.use_postproc else 'false' }}"
 
 # --- ACCUMULATION ---
 export ACCUMULATION_RANDOMIZATION_TYPE="{{ modules.accumulation.accumulation_randomization_type }}"
@@ -168,8 +166,7 @@ export ENTROPY_DIR="{{ modules.accumulation.accumulation_entropy_dir }}"
 export ACCUMULATION_FDR="{{ modules.accumulation.accumulation_fdr }}"
 export ACCUMULATION_PVAL_THRESHOLD="{{ modules.accumulation.accumulation_pval_threshold }}"
 export ACCUMULATION_REPORT_PVAL_THRESHOLD="{{ modules.accumulation.accumulation_report_pval_threshold }}"
-export ACCUMULATION_CAAS_INPUT="{{ precomputed.accumulation_caas_input }}"
-export ACCUMULATION_BACKGROUND_INPUT="{{ precomputed.accumulation_background_input }}"
+export PRECOMP_USE_ACCUMULATION="{{ 'true' if precomputed.use_accumulation else 'false' }}"
 
 # --- RERCONVERGE ---
 export RER_TOOL="{{ rer_tool_string }}"
@@ -189,8 +186,7 @@ export RER_TOP_N_LABELS="{{ modules.rer.rer_top_n_labels }}"
 export RER_TRANSFORM="{{ modules.rer.rer_transform }}"
 export RER_UNIVERSE_FILE="{{ modules.rer.rer_universe_file }}"
 export RER_GENE_SCORES="{{ modules.rer.rer_gene_scores }}"
-export RER_CONTINUOUS_FILE="{{ precomputed.rer_continuous_file }}"
-export RER_PERMS_FILE="{{ precomputed.rer_perms_file }}"
+export PRECOMP_USE_RER="{{ 'true' if precomputed.use_rer else 'false' }}"
 
 # --- FADE ---
 export FADE_MODE="{{ modules.fade.fade_mode }}"
@@ -210,14 +206,13 @@ export FADE_SAMPLES="{{ modules.fade.fade_samples }}"
 export FADE_CONCENTRATION="{{ modules.fade.fade_concentration }}"
 export FADE_MIN_GENES_FOR_HEATMAP="{{ modules.fade.fade_min_genes_for_heatmap }}"
 export FADE_UNIVERSE_FILE="{{ modules.fade.fade_universe_file }}"
-export FADE_JSON_DIR_TOP="{{ precomputed.fade_json_dir_top }}"
-export FADE_JSON_DIR_BOTTOM="{{ precomputed.fade_json_dir_bottom }}"
+export PRECOMP_USE_FADE="{{ 'true' if precomputed.use_fade else 'false' }}"
 
 # --- VEP ---
 export VEP_PRIMATEAI_DB="{{ modules.vep.vep_primateai_db }}"
 export MAP_DIR="{{ modules.vep.vep_map_dir }}"
 export COSMIC_DB="{{ modules.vep.cosmic_db }}"
-export VEP_CAAS_INPUT="{{ precomputed.vep_caas_input }}"
+export PRECOMP_USE_VEP="{{ 'true' if precomputed.use_vep else 'false' }}"
 
 # --- SCORING ---
 export SCORING_WINDOW_SIZE_BP="{{ modules.scoring.scoring_window_size_bp }}"
@@ -226,14 +221,6 @@ export SCORING_STRESS_TOP_N="{{ modules.scoring.scoring_stress_top_n }}"
 export SCORING_STRESS_RANK_METRIC="{{ modules.scoring.scoring_stress_rank_metric }}"
 export SCORING_POSITION_TOP_PCT="{{ modules.scoring.scoring_position_top_pct }}"
 export SCORING_GENE_TOP_PCT="{{ modules.scoring.scoring_gene_top_pct }}"
-export SCORING_POSTPROC_INPUT="{{ precomputed.scoring_postproc_input }}"
-export SCORING_ACCUM_DIR="{{ precomputed.scoring_accum_dir }}"
-export SCORING_VEP_PRIMATEAI="{{ precomputed.scoring_vep_primateai }}"
-export SCORING_VEP_COSMIC="{{ precomputed.scoring_vep_cosmic }}"
-export SCORING_BACKGROUND_INPUT="{{ precomputed.scoring_background_input }}"
-export CAAS_PERMS_FILE="{{ precomputed.caas_perms_file }}"
-export SCORING_FADE_SITE_TOP="{{ precomputed.scoring_fade_site_top }}"
-export SCORING_FADE_SITE_BOTTOM="{{ precomputed.scoring_fade_site_bottom }}"
 
 # --- ENRICHMENT / POSENRICH ---
 export GMT_DIR="{{ modules.enrichment.gmt_dir }}"
@@ -257,8 +244,6 @@ export POSENRICH_MIN_SIZE="{{ modules.enrichment.posenrich_min_size }}"
 export POSENRICH_MAX_SIZE="{{ modules.enrichment.posenrich_max_size }}"
 export POSENRICH_PADJ_THR="{{ modules.enrichment.posenrich_padj_thr }}"
 export POSENRICH_FOLD_THR="{{ modules.enrichment.posenrich_fold_thr }}"
-export ACCUMULATION_ENRICHMENT_GENE_LISTS_INPUT="{{ precomputed.accumulation_enrichment_gene_lists_input }}"
-export POSENRICH_BACKGROUND_FILE="{{ precomputed.posenrich_background_file }}"
 
 REPO_DIR="{{ general.repo_dir }}"
 SINGLE_RUNNER="${REPO_DIR}/{{ single_runner_filename if single_runner_filename else 'run_phenotype_single.sh' }}"
@@ -272,18 +257,6 @@ dispatch_phenotype() {
     case "$task_id" in
 {% for row in runtime.phenotype_rows %}
     {{ loop.index }}) CLASS={{ row.trait_class }}; TRAIT="{{ row.trait }}"; SECONDARY="{{ row.secondary }}"; NTRAIT="{{ row.n_trait }}"; CTRAIT="{{ row.c_trait }}"; PRUNE="{{ row.prune }}"; PRUNE_SEC="{{ row.prune_secondary }}"; DISCRETE="{{ row.discrete_method }}"
-{% if row.scoring_rer_input %}
-        export SCORING_RER_INPUT="{{ row.scoring_rer_input }}"
-{% endif %}
-{% if row.scoring_rer_perms_input %}
-        export SCORING_RER_PERMS_INPUT="{{ row.scoring_rer_perms_input }}"
-{% endif %}
-{% if row.scoring_fade_summary_top %}
-        export SCORING_FADE_SUMMARY_TOP="{{ row.scoring_fade_summary_top }}"
-{% endif %}
-{% if row.scoring_fade_summary_bottom %}
-        export SCORING_FADE_SUMMARY_BOTTOM="{{ row.scoring_fade_summary_bottom }}"
-{% endif %}
         ;;
 {% endfor %}
     *)

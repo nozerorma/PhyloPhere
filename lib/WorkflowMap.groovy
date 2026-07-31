@@ -143,7 +143,7 @@ class WorkflowMap {
         def stages = [
             [ id: 'prune',       name: 'Data pruning',                    type: 'prepost',   ran: ctx.prune,
               filesDirs: ["${outdir}/data_exploration/0.Data-pruning"],
-              htmlCandidates: ["${outdir}/html_reports/0.Data_pruning.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration_pruned.html"] ],
 
             [ id: 'dataset_rep', name: 'Dataset reporting',               type: 'reporting', ran: ctx.datasetReport,
               filesDirs: ["${outdir}/data_exploration"],
@@ -151,7 +151,7 @@ class WorkflowMap {
 
             [ id: 'pheno_rep',   name: 'Phenotype reporting',             type: 'reporting', ran: ctx.phenotypeRep,
               filesDirs: ["${outdir}/data_exploration"],
-              htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration.html"] ],
+              htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration_complete.html"] ],
 
             // NOTE: directories.R (TRAIT_ANALYSIS) only ever creates 1.Traitfiles and
             // 2.Bootstrap_traitfiles under 2.CT — there is no 3.Tree subdirectory.

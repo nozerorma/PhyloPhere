@@ -25,7 +25,10 @@ SPEC = ModuleTabSpec(
         "Annotates CAAS hits with PrimateAI-3D pathogenicity scores and COSMIC "
         "cancer-mutation overlap."
     ),
-    disclaimer="Scoring needs a vep_caas_input fallback (Precomputed Run tab) when this is off.",
+    disclaimer=(
+        "Scoring can fall back to this module's PrimateAI-3D/COSMIC score outputs "
+        "when it's off — check 'Use precomputed VEP output' on the Precomputed Run tab."
+    ),
     essential_fields=(
         FieldSpec(name="vep_primateai_db", label="PrimateAI-3D database", kind="path_file"),
         FieldSpec(name="vep_map_dir", label="Per-gene MAP directory", kind="path_dir"),

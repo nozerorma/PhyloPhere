@@ -48,6 +48,16 @@ if [ -z "${MAMBA_ROOT_PREFIX:-}" ] && [ -d "$HOME/micromamba/envs" ]; then
     export MAMBA_ROOT_PREFIX="$HOME/micromamba"
 fi
 
+# Qt has no platform-theme plugin loaded by default, so without this the GUI
+# renders with Qt's plain built-in look instead of matching Plasma/GNOME (dark
+# mode, accent color, fonts) — even though nothing in the app code forces a
+# style. conf/phylophere.yml's qt6-main package already ships the
+# xdg-desktop-portal theme plugin (reads native theme over the portal, no
+# extra system packages needed on modern Plasma/GNOME); only opt in if the
+# user hasn't already set their own (e.g. qt6ct).
+: "${QT_QPA_PLATFORMTHEME:=xdgdesktopportal}"
+export QT_QPA_PLATFORMTHEME
+
 set -Eeuo pipefail
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

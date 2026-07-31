@@ -849,14 +849,15 @@ if (!plot_ready) {
       NULL
     }
   )
-  if (!is.null(asr_result)) {
-    tryCatch({
-      grDevices::dev.copy(grDevices::png, filename = asr_plot_path,
-                           width = asr_dims$width, height = asr_dims$height,
-                           res = 320, bg = "white", units = "in")
-      grDevices::dev.off()
-    }, error = function(e) message("ASR plot file save failed: ", conditionMessage(e)))
-  }
+  # Always persist whatever is on the device (real tree, or the failure
+  # placeholder above) so the ASR_trees output folder never ends up silently
+  # empty when this fails on production data.
+  tryCatch({
+    grDevices::dev.copy(grDevices::png, filename = asr_plot_path,
+                         width = asr_dims$width, height = asr_dims$height,
+                         res = 320, bg = "white", units = "in")
+    grDevices::dev.off()
+  }, error = function(e) message("ASR plot file save failed: ", conditionMessage(e)))
 }
 
 ```

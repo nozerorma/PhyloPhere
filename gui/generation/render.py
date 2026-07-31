@@ -32,20 +32,40 @@ def _environment() -> jinja2.Environment:
     )
 
 
-def render_batch(project: ProjectConfig, postproc_mode: str | None = None) -> str:
-    """Render the batch-runner script for the given project."""
+def render_batch(
+    project: ProjectConfig,
+    postproc_mode: str | None = None,
+    reuse_exploratory: bool = False,
+    single_runner_filename: str | None = None,
+) -> str:
+    """Render the batch-runner script for the given project.
+
+    single_runner_filename overrides the auto-computed name of the companion
+    per-phenotype script this one dispatches to (SINGLE_RUNNER=...) — must match
+    whatever filename that script is actually saved as (see
+    MainWindow.generate_scripts, which overrides RuntimeConfig.script_base_name),
+    or the generated batch script looks for a file that doesn't exist.
+    """
     ctx = build_context(project)
+    ctx["reuse_exploratory"] = reuse_exploratory
+    ctx["postproc_mode"] = postproc_mode or ""
+    ctx["single_runner_filename"] = ""
     if postproc_mode:
         ctx["postproc_mode"] = postproc_mode
-        ctx["single_runner_filename"] = f"run_phenotype_single_{postproc_mode if postproc_mode != 'filter' else 'filtering'}.sh"
+        ctx["single_runner_filename"] = f"run_phenotype_single_{postproc_mode if postproc_mode != 'filter' else 'complete'}.sh"
         if "modules" in ctx and "disambiguation" in ctx["modules"]:
             ctx["modules"]["disambiguation"]["caas_postproc_mode"] = postproc_mode
+    if single_runner_filename is not None:
+        ctx["single_runner_filename"] = single_runner_filename
     return _environment().get_template("sbatch_array.sh.j2").render(**ctx)
 
 
-def render_single(project: ProjectConfig, postproc_mode: str | None = None) -> str:
+def render_single(
+    project: ProjectConfig, postproc_mode: str | None = None, reuse_exploratory: bool = False
+) -> str:
     """Render the single-phenotype runner script for the given project."""
     ctx = build_context(project)
+    ctx["reuse_exploratory"] = reuse_exploratory
     if postproc_mode:
         ctx["postproc_mode"] = postproc_mode
         if "modules" in ctx and "disambiguation" in ctx["modules"]:

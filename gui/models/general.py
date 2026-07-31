@@ -20,6 +20,11 @@ from dataclasses import dataclass
 
 @dataclass(kw_only=True)
 class GeneralConfig:
+    # Display-only identity, independent of the project file's path/name (which
+    # might be a generic template filename or an autosave path) — shown in the
+    # main window's title bar (see MainWindow._update_title).
+    project_name: str = ""
+
     # --- Core nextflow.config / conf/common.config knobs ---
     seed: str = "1998"  # --seed
     reporting: bool = True  # --reporting (RUN_REPORTING in reference script)

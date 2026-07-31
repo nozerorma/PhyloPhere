@@ -16,9 +16,8 @@ SPEC = ModuleTabSpec(
         "a randomized background, using per-site Valdar-entropy conservation weighting."
     ),
     disclaimer=(
-        "Enrichment's accumulation gene lists need this module's output. Supply "
-        "accumulation_caas_input/accumulation_background_input on the Precomputed "
-        "Run tab instead."
+        "Enrichment's accumulation gene lists need this module's output. Check 'Use "
+        "precomputed Accumulation output' on the Precomputed Run tab instead."
     ),
     essential_fields=(
         FieldSpec(name="accumulation_n_randomizations", label="Randomizations"),

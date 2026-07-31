@@ -60,20 +60,39 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
 
     ctx["profile"] = project.runtime.runtime_type  # "local" | "slurm"
 
+    pc = project.precomputed
+    # A "use precomputed X" box checked on the Precomputed Run tab must win over that
+    # module's own enabled toggle, no matter what — the two are supposed to stay
+    # mutually exclusive via the tab's UI cascade (PrecomputedTab._toggle_module), but
+    # that cascade only fires on an interactive checkbox click. A project loaded from a
+    # hand-edited/older/template JSON, or one whose tabs got out of sync before "Generate
+    # Scripts" was clicked, can carry enabled=true and use_x=true at once; rendering that
+    # combination verbatim double-runs the stage live AND feeds it a precomputed answer,
+    # which is never correct and (for Disambiguation/Accumulation/etc, whose live inputs
+    # come from the sibling module that DID get switched off) fails fast on missing
+    # upstream input. Enforced here, once, rather than trusted to have happened upstream.
+    caas_enabled = caas.enabled and not (pc.use_discovery or pc.use_resample or pc.use_bootstrap or pc.use_ct)
+    disambiguation_enabled = disambig.enabled and not pc.use_disambiguation
+    ct_postproc_enabled = disambig.ct_postproc and not pc.use_postproc
+    accumulation_enabled = project.modules.accumulation.enabled and not pc.use_accumulation
+    rer_enabled = project.modules.rer.enabled and not pc.use_rer
+    fade_enabled = project.modules.fade.enabled and not pc.use_fade
+    vep_enabled = project.modules.vep.enabled and not pc.use_vep
+
     ctx["run_defaults"] = {
         "reporting": _bool_str(project.general.reporting),
         "tower": _bool_str(project.runtime.use_tower),
         "toy_mode": _bool_str(project.runtime.toy_mode),
-        "caas": _bool_str(caas.enabled),
+        "caas": _bool_str(caas_enabled),
         "caas_permulation_enrichment": _bool_str(caas.caas_permulation_enrichment),
-        "disambiguation": _bool_str(disambig.enabled),
-        "ct_postproc": _bool_str(disambig.ct_postproc),
+        "disambiguation": _bool_str(disambiguation_enabled),
+        "ct_postproc": _bool_str(ct_postproc_enabled),
         "run_postproc_exploratory": _bool_str(getattr(disambig, 'run_postproc_exploratory', True)),
         "run_postproc_filter": _bool_str(getattr(disambig, 'run_postproc_filter', True)),
-        "accumulation": _bool_str(project.modules.accumulation.enabled),
-        "rer": _bool_str(project.modules.rer.enabled),
-        "fade": _bool_str(project.modules.fade.enabled),
-        "vep": _bool_str(project.modules.vep.enabled),
+        "accumulation": _bool_str(accumulation_enabled),
+        "rer": _bool_str(rer_enabled),
+        "fade": _bool_str(fade_enabled),
+        "vep": _bool_str(vep_enabled),
         "scoring": _bool_str(scoring.enabled),
         "scoring_stress": _bool_str(scoring.scoring_stress),
         "enrichment": _bool_str(enrichment.enabled),

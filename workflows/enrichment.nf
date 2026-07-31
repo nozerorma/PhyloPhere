@@ -194,6 +194,13 @@ workflow ENRICHMENT {
             fade_union_bg_ch  = Channel.value(file('NO_FADE_BACKGROUND'))
             fade_union_sig_ch = Channel.value(file('NO_FADE_SIGNIFICANT'))
         }
+        // Manual override, mirroring rer_universe_ch above -- unlike RER (which
+        // falls back to CAAS's background when unset), FADE's own union background
+        // computed above is already correct on its own; this only matters when you
+        // want to substitute a hand-picked universe file instead.
+        if (params.fade_universe_file) {
+            fade_union_bg_ch = Channel.value(file(params.fade_universe_file))
+        }
 
         def rer_universe_for_publish_ch = rer_ran ? rer_bg_r : Channel.value(file('NO_RER_BACKGROUND'))
         PUBLISH_UNIVERSES(rer_universe_for_publish_ch, fade_union_bg_ch, fcs_universe_ch, Channel.value(trait_lbl))

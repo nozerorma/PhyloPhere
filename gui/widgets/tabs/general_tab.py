@@ -35,9 +35,23 @@ class GeneralTab(QWidget):
 
         layout = QVBoxLayout(self)
         layout.addWidget(self._build_setup_note())
+        layout.addLayout(self._build_project_name_row())
         layout.addWidget(self._build_nextflow_group())
         layout.addWidget(self._build_remote_group())
         layout.addStretch(1)
+
+    def _build_project_name_row(self) -> QFormLayout:
+        self.project_name_edit = QLineEdit(self._config.project_name)
+        self.project_name_edit.setPlaceholderText("Untitled project")
+        self.project_name_edit.textChanged.connect(self._on_project_name_changed)
+        form = QFormLayout()
+        self.project_name_label = QLabel("Project name")
+        form.addRow(self.project_name_label, self.project_name_edit)
+        return form
+
+    def _on_project_name_changed(self, value: str) -> None:
+        self._config.project_name = value
+        self.changed.emit()
 
     def _build_setup_note(self) -> QGroupBox:
         self.setup_box = QGroupBox("First-time setup")
@@ -126,6 +140,8 @@ class GeneralTab(QWidget):
         self.reporting.setText(tr("Generate HTML trait-analysis reports (--reporting)", lang))
         self.remote_host_label.setText(tr("Remote host", lang))
         self.remote_root_dir_label.setText(tr("Remote root directory", lang))
+        if hasattr(self, "project_name_label"):
+            self.project_name_label.setText(tr("Project name", lang))
         if hasattr(self, "setup_note"):
             self.setup_note.setText(tr(
                 "This GUI runs inside the <code>phylophere</code> conda environment, so it can't "

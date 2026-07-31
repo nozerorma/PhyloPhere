@@ -47,7 +47,20 @@ def load_ali_sp_names(path: str) -> set:
 
 
 def load_tax_id_map(path: str):
-    """Return (name_to_taxid, taxid_to_names) from a TSV/CSV taxid file."""
+    """Return (name_to_taxid, taxid_to_names) from a TSV/CSV taxid file.
+
+    "NO_FILE" is the repo-wide Nextflow sentinel for an absent optional file
+    (see fcs_enrich.R/scoring_compute.R/scoring_caas_perms.R for the same
+    `path != "NO_FILE" && file.exists(path)` pattern) — tax_id is optional in
+    ta_name_curation.nf's own take (`tax_id_ch = tax_id_param ? ... : NO_FILE`),
+    but this loader never checked for it and crashed with a bare
+    FileNotFoundError whenever a run omitted --tax_id. Without a taxid map,
+    tips are still matched/pruned purely by exact name (see main(), tip in
+    ali_sp), just with no cross-naming-convention translation.
+    """
+    if not path or path == "NO_FILE" or not Path(path).exists():
+        return {}, {}
+
     sep = "\t" if path.endswith(".tsv") else ","
     name_to_taxid: dict[str, str] = {}
     taxid_to_names: dict[str, list[str]] = {}

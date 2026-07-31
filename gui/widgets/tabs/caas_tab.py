@@ -31,9 +31,9 @@ SPEC = ModuleTabSpec(
         "amino-acid substitutions (CAAS) associated with the phenotype."
     ),
     disclaimer=(
-        "Disambiguation and Accumulation need this module's output. Supply "
-        "discovery_from/resample_from/bootstrap_from on the Precomputed Run tab to "
-        "feed them precomputed results instead."
+        "Disambiguation and Accumulation need this module's output. Check Discovery/"
+        "Resample/Bootstrap on the Precomputed Run tab to feed them precomputed "
+        "results instead."
     ),
     essential_fields=(
         FieldSpec(name="caas_config_path", label="CAAS config file", kind="path_file"),

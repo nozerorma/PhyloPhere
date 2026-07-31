@@ -34,12 +34,10 @@ class PhenotypeRow:
     prune_secondary: str = ""  # PRUNE_SEC filename (CLASS 1 only)
     discrete_method: str = ""  # DISCRETE / --discrete_method (CLASS 2 only)
 
-    # Optional per-row precomputed-input overrides for Scoring (only emitted if non-empty).
-    scoring_rer_input: str = ""
-    scoring_rer_perms_input: str = ""  # --rer_perms_file, per-phenotype (distinct from
-    # PrecomputedConfig.rer_perms_file, the global fallback used when RER itself is off)
-    scoring_fade_summary_top: str = ""
-    scoring_fade_summary_bottom: str = ""
+    # Per-row Scoring fallback overrides (scoring_rer_input, scoring_rer_perms_input,
+    # scoring_fade_summary_top/bottom) moved to the Precomputed Run tab (see
+    # gui/models/precomputed.py) — auto-derived per phenotype as base_path/<trait>/...
+    # instead of hand-entered once per row.
 
 
 @dataclass(kw_only=True)
@@ -52,6 +50,11 @@ class RuntimeConfig:
     # --- Execution target ---
     runtime_type: str = "slurm"  # "local" | "slurm"
     batched: bool = True  # slurm-only: generate the SBATCH array-job wrapper
+
+    # Overrides the "phenotypes"/"phenotype" token in generated script filenames
+    # (run_phenotypes_local.sh, SBATCH_run_phenotypes.sh, run_phenotype_single.sh,
+    # ..._exploratory.sh/..._complete.sh) — blank keeps the exact default names.
+    script_base_name: str = ""
 
     # --- Directories ---
     work_dir: str = ""  # WORK_BASE — base for per-trait Nextflow work dirs

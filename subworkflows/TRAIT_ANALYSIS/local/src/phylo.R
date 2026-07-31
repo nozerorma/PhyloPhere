@@ -37,7 +37,15 @@ if (nzchar(tax_id_file) && file.exists(tax_id_file)) {
   }
 } else {
   message("No TAX_ID file provided.")
-  # Check if TAX_ID column is in trait_df
+  # Check if TAX_ID column is in trait_df. NOTE: this only means trait_df has its
+  # own tax_id column — it does NOT create tax_id_df (that requires an external
+  # file mapping TREE-side species names, which may differ from trait_df's own
+  # naming, to tax_id). Every later `if (has.TAX_ID)` block that reads tax_id_df
+  # must also check `exists("tax_id_df")` (see line ~48's existing guard) or it
+  # crashes with "object 'tax_id_df' not found" whenever this branch is the one
+  # that set has.TAX_ID — hit for real by any trait CSV that already carries its
+  # own tax_id column (e.g. test/inputs/traits/cancer_traits_processed-LQ.csv)
+  # when no separate --tax_id file is passed.
   if ("tax_id" %in% names(trait_df)) {
     has.TAX_ID <- TRUE
   }
@@ -98,7 +106,7 @@ if (file.exists(pruned_tree_path) && file.exists(pruned_trait_path)) {
   pruned_tree <- ape::read.tree(file = pruned_tree_path)
   debug_log("Loaded pruned tree tips = %d, pruned trait rows = %d", length(pruned_tree$tip.label), nrow(trait_df))
 } else {
-  if (has.TAX_ID) {
+  if (has.TAX_ID && exists("tax_id_df")) {
     # Use tax_id_df to map tree tip labels to tax_ids.
     # tax_id_df contains tree-side species names (which may differ from trait names
     # due to taxonomic reclassification, e.g. Nycticebus_pygmaeus -> Xanthonycticebus_pygmaeus).
@@ -123,7 +131,7 @@ if (file.exists(pruned_tree_path) && file.exists(pruned_trait_path)) {
   }
 
   # Update trait_df to only include species present in the pruned tree.
-  if (has.TAX_ID) {
+  if (has.TAX_ID && exists("tax_id_df")) {
     trait_df_ori <- trait_df # Save original for reference
     tree_tax_map <- tax_id_df %>%
       dplyr::filter(species %in% pruned_tree$tip.label) %>%

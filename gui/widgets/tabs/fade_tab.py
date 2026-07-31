@@ -18,11 +18,9 @@ SPEC = ModuleTabSpec(
         "either every gene or just the CAAS hit set (fade_mode)."
     ),
     disclaimer=(
-        "Scoring needs a scoring_fade_summary_top/bottom fallback per phenotype row "
-        "(Runtime tab) when this is off, plus optionally scoring_fade_site_top/bottom "
-        "(Precomputed Run tab) for site-level fallback. fade_json_dir_top/bottom (a "
-        "precomputed report input, not per-phenotype) also live on the Precomputed "
-        "Run tab."
+        "Scoring needs this module's output when it's off. Check 'Use precomputed "
+        "FADE output' on the Precomputed Run tab — it's auto-derived per phenotype "
+        "from one base path, no per-row entry needed."
     ),
     essential_fields=(
         FieldSpec(name="fade_mode", label="Mode", kind="choice", choices=("all", "gene_set")),
