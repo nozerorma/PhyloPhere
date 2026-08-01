@@ -238,6 +238,21 @@ workflow {
             pp_cleaned_bg = postproc_results.cleaned_background
         }
 
+        // Fallback resolution for precomputed / standalone runs where --ct_postproc did not run live
+        if (!pp_cleaned_bg) {
+            def bg_candidate = params.background_input ?: (params.scoring_background_input ?: (params.accumulation_background_input ?: ''))
+            if (!bg_candidate && params.scoring_postproc_input) {
+                def pfile = file(params.scoring_postproc_input)
+                def pdir = pfile ? pfile.parent : null
+                if (pdir && file("${pdir}/cleaned_background_main.txt").exists()) {
+                    bg_candidate = "${pdir}/cleaned_background_main.txt"
+                }
+            }
+            if (bg_candidate && file(bg_candidate).exists()) {
+                pp_cleaned_bg = Channel.value(file(bg_candidate))
+            }
+        }
+
         def accum_results = null
 
         if (params.ct_accumulation) {

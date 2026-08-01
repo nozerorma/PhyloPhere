@@ -31,6 +31,7 @@ process DOMINO_BUILD_NETWORK {
 
     input:
     path background_file
+    path gene_list_files  // Trigger dependency: guarantees DOMINO network building waits for upstream scoring/gene lists
     val  score_threshold
     val  string_db_dir
 
@@ -42,13 +43,19 @@ process DOMINO_BUILD_NETWORK {
     script:
     def db_dir_arg = string_db_dir ? "--string-db-dir ${string_db_dir}" : ""
     """
-    python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py \
-        --cleaned-background ${background_file} \
-        --score-threshold ${score_threshold} \
-        ${db_dir_arg} \
-        --output-dir .
+    bg_name=\$(basename ${background_file})
+    if [ ! -f "${background_file}" ] || [[ "\${bg_name}" == NO_* ]]; then
+        echo "[DOMINO_BUILD_NETWORK] Skipping network build: background file is absent or sentinel (\${bg_name})"
+        touch network.sif network_edge_scores.tsv slices.txt
+    else
+        python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/build_domino_network.py \
+            --cleaned-background ${background_file} \
+            --score-threshold ${score_threshold} \
+            ${db_dir_arg} \
+            --output-dir .
 
-    slicer -n network.sif -o slices.txt
+        slicer -n network.sif -o slices.txt
+    fi
     """
 }
 
@@ -68,6 +75,11 @@ process DOMINO_RUN_MODULES {
     script:
     """
     mkdir -p domino_gene_lists domino_modules
+
+    if [ ! -s "${network_sif}" ] || [ ! -s "${slices_file}" ]; then
+        echo "[DOMINO_RUN_MODULES] Skipping module identification: network or slices file is empty/absent"
+        exit 0
+    fi
 
     # SCORING call site: gene_lists is a directory of slice_*.tsv (Gene column + header)
     if [ -d "${gene_lists}" ]; then
@@ -104,7 +116,7 @@ workflow DOMINO_MODULES {
     string_db_dir
 
     main:
-    DOMINO_BUILD_NETWORK(background_file, score_threshold, string_db_dir)
+    DOMINO_BUILD_NETWORK(background_file, gene_list_files, score_threshold, string_db_dir)
     DOMINO_RUN_MODULES(
         DOMINO_BUILD_NETWORK.out.network_sif,
         DOMINO_BUILD_NETWORK.out.slices,

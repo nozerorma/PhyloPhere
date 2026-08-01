@@ -38,7 +38,12 @@ class AboutTab(QWidget):
             if not pixmap.isNull():
                 logo_label = QLabel()
                 logo_label.setPixmap(
-                    pixmap.scaledToHeight(220, Qt.TransformationMode.SmoothTransformation)
+                    pixmap.scaled(
+                        512,
+                        512,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
                 )
                 logo_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
                 layout.addWidget(logo_label)
@@ -51,7 +56,8 @@ class AboutTab(QWidget):
     def retranslate(self, lang: str = "en") -> None:
         from gui.i18n import tr
         if hasattr(self, "browser") and hasattr(self, "_info"):
-            attributions_html = "".join(f"<li>{a}</li>" for a in self._info.attributions)
+            attributions_html = "".join(f"<li>{tr(a, lang)}</li>" for a in self._info.attributions)
+            description_text = tr(self._info.description, lang)
             repo_label = tr("Repository", lang)
             author_label = tr("Author", lang)
             institution_label = tr("Institution", lang)
@@ -59,7 +65,7 @@ class AboutTab(QWidget):
             built_on_label = tr("Built on", lang)
             html = f"""
             <h2>{self._info.name} <span style="font-weight:normal">v{self._info.version}</span></h2>
-            <p>{self._info.description}</p>
+            <p>{description_text}</p>
             <p><b>{repo_label}:</b> <a href="{self._info.repo_url}">{self._info.repo_url}</a></p>
             <p><b>{author_label}:</b> {self._info.author} (&lt;{self._info.author_email}&gt;)</p>
             <p><b>{institution_label}:</b> {self._info.institution}</p>
@@ -68,3 +74,4 @@ class AboutTab(QWidget):
             <ul>{attributions_html}</ul>
             """
             self.browser.setHtml(html)
+

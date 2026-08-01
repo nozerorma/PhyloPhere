@@ -78,9 +78,15 @@ workflow CT {
         def allFiles = file(alignParam).listFiles()?.findAll { it.isFile() && !it.name.matches('.*\\.txt$|.*\\.tsv$|.*\\.csv$|.*\\.log$|.*\\.map$') } ?: []
         if (params.toy_mode) {
             def n = (params.toy_n ?: 50) as int
-            Collections.shuffle(allFiles)
+            // Seeded (not a bare `Collections.shuffle(allFiles)`) so the same gene subset
+            // is picked every run with the same --seed. Without this, -resume is close to
+            // useless for toy_mode runs: DISCOVERY_BATCHED/BOOTSTRAP_BATCHED cache hits
+            // depend on which specific alignment files a batch contains, and an unseeded
+            // shuffle picks a genuinely different random subset on every invocation, so
+            // essentially nothing from a prior run's cache ever matches a resume attempt.
+            Collections.shuffle(allFiles, new Random(params.seed as long))
             allFiles = allFiles.take(n)
-            log.info "[toy_mode] CT: using ${allFiles.size()} randomly sampled alignments from directory"
+            log.info "[toy_mode] CT: using ${allFiles.size()} randomly sampled alignments from directory (seed=${params.seed})"
         }
         align_tuple = Channel
             .fromList(allFiles.collect { f -> tuple(f.baseName, f) })

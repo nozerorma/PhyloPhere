@@ -31,6 +31,12 @@ class AboutInfo:
     attributions: tuple[str, ...] = (
         "Builds on CAAStools (github.com/linudz/caastools)",
         "CAAP grouping: Chen, S. & Zou, Z. (2025), Molecular Ecology Resources 25(1), e70052",
-        "RERconverge (partial integration)",
+        "RERconverge: Kowalczyk et al. (2019), Bioinformatics 35(22)",
+        "HyPhy FADE directional selection: Kosakovsky Pond et al. (2021), Mol. Biol. Evol. 37(1)",
+        "PrimateAI-3D variant pathogenicity: Gao et al. (2023), Science 380(6648)",
+        "COSMIC somatic mutation census: Tate et al. (2019), Nucleic Acids Res. 47(D1)",
+        "DOMINO active module identification: Levi et al. (2021), Bioinformatics 37(21)",
+        "STRING DB protein interaction database: Szklarczyk et al. (2023), Nucleic Acids Res. 51(D1)",
+        "Ortholog Characterizator (github.com/nozerorma/ortholog_characterizator.git)",
         "Phenotype/test-scenario contributions: Maria Sanchez Bermudez",
     )

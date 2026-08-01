@@ -177,6 +177,12 @@ class MainWindow(QMainWindow):
         self.generate_action.triggered.connect(self.generate_scripts)
         file_menu.addAction(self.generate_action)
 
+        file_menu.addSeparator()
+
+        self.readme_action = QAction("&Readme", self)
+        self.readme_action.triggered.connect(self.show_readme_dialog)
+        file_menu.addAction(self.readme_action)
+
     def _build_toolbar(self) -> None:
         toolbar = QToolBar("Main", self)
         toolbar.setMovable(False)
@@ -199,11 +205,6 @@ class MainWindow(QMainWindow):
         toolbar.addWidget(self.lang_combo)
         toolbar.addSeparator()
 
-        # Ahead of Save Project As so switching to a fresh project (clearing
-        # project_path) is the obvious first move before editing an unrelated
-        # trait — Save Project As always prompts for a filename now (no more
-        # silent in-place overwrite), but starting from a clean project is
-        # still the more obvious move than renaming your way out of one.
         toolbar.addAction(self.new_project_action)
         toolbar.addSeparator()
 
@@ -212,10 +213,9 @@ class MainWindow(QMainWindow):
         toolbar.addSeparator()
         toolbar.addAction(self.validate_paths_action)
         toolbar.addAction(self.generate_action)
+        toolbar.addSeparator()
+        toolbar.addAction(self.readme_action)
 
-        # setCurrentIndex above only fires currentIndexChanged when the restored
-        # index differs from the combo's default (0) — apply explicitly so the UI
-        # is translated on first paint even when the saved language IS English.
         self._apply_language(current_lang)
 
     def _on_toolbar_language_changed(self, index: int) -> None:
@@ -225,6 +225,7 @@ class MainWindow(QMainWindow):
             self._apply_language(code)
 
     def _apply_language(self, lang: str = "en") -> None:
+        self._current_lang = lang
         for idx, (tab, orig_title) in enumerate(self._project_tabs):
             translated_title = tr(f"Tab: {orig_title}", lang)
             if translated_title == f"Tab: {orig_title}":
@@ -235,10 +236,24 @@ class MainWindow(QMainWindow):
         self.load_template_action.setText(tr("Load Template...", lang))
         self.validate_paths_action.setText(tr("Validate Paths...", lang))
         self.generate_action.setText(tr("Generate Scripts...", lang))
+        self.readme_action.setText(tr("Readme", lang))
+
+        if hasattr(self, "about_tab") and hasattr(self.about_tab, "retranslate"):
+            self.about_tab.retranslate(lang)
+            about_idx = self.tabs.count() - 1
+            if about_idx >= 0:
+                self.tabs.setTabText(about_idx, tr("Tab: About", lang))
 
         for tab, _ in self._project_tabs:
             if hasattr(tab, "retranslate"):
                 tab.retranslate(lang)
+
+    def show_readme_dialog(self) -> None:
+        from gui.widgets.common.readme_dialog import ReadmeDialog
+        lang = getattr(self, "_current_lang", "en")
+        dialog = ReadmeDialog(self, repo_dir=self.project.general.repo_dir, lang=lang)
+        dialog.exec()
+
 
     # ── Dirty tracking ───────────────────────────────────────────────────────
 

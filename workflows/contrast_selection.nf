@@ -43,11 +43,21 @@ workflow CONTRAST_SELECTION {
     def trait_file = file(params.my_traits)
     def tree_file_ch = Channel.value(file(params.tree))
 
-    // NAME_CURATION: normalise tree tip labels to alignment-canonical species names.
-    // Run it here whenever CONTRAST_SELECTION is driving the tree path itself.
-    // When params.reporting=true and params.prune_data=false, REPORTING() handles curation internally.
-    def run_name_curation_here = (!params.reporting || params.prune_data)
-    if (run_name_curation_here && (params.ali_sp_names || params.alignment)) {
+    // NAME_CURATION: normalise tree tip labels to alignment-canonical species names,
+    // pruning any tip with no real alignment coverage. Always run it here, regardless
+    // of params.reporting/prune_data: REPORTING() (called below when reporting=true and
+    // prune_data=false) does curate its own tree internally, but that curation is
+    // scoped to REPORTING's own DATASET_EXPLORATION/PHENOTYPE_EXPLORATION calls -- its
+    // emit: block never exposes the plain curated tree back to this caller (only
+    // pruned_tree_file, which stays empty whenever prune_data=false). Without this fix,
+    // `tree_file` below silently stayed the RAW, uncurated params.tree for that whole
+    // branch, so CI_COMPOSITION_REPORT/CONTRAST_ALGORITHM could (and did, in production)
+    // select a contrast pair partner that exists in the tree/trait data but has zero
+    // real alignment coverage anywhere -- e.g. Papio_ursinus (tax_id 36229, no synonym
+    // under that tax_id in ali_sp_names.txt either) -- silently dooming that pair to
+    // never produce a CAAS discovery for any gene. TREE_CLEANUP is cheap; running it a
+    // second time when REPORTING() also curates internally is a non-issue next to that.
+    if (params.ali_sp_names || params.alignment) {
         def tax_id_param = params.tax_id
         def tax_id_ch = tax_id_param
             ? Channel.value(file(tax_id_param))

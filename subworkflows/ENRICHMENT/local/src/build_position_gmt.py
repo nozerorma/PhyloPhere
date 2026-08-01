@@ -64,9 +64,11 @@ def validate_required_inputs(args):
         else:
             setattr(args, attr, resolved)
 
-    # map_dir is a directory, not a file.
-    if not (args.map_dir and os.path.isdir(args.map_dir)):
-        missing.append(f"  --map_dir {args.map_dir} (directory not found)")
+    # map_dir is an optional directory for genomic coordinate mapping
+    if args.map_dir:
+        if args.map_dir.startswith("NO_FILE") or not os.path.isdir(args.map_dir):
+            print(f"WARNING: optional input --map_dir was not provided or not found (skipping genomic coordinate mapping): {args.map_dir}", file=sys.stderr)
+            args.map_dir = None
 
     for flag, attr in optional.items():
         given = getattr(args, attr)
@@ -98,7 +100,7 @@ def parse_args():
     parser.add_argument("--fubar_sites_file", required=True, help="Path to fubar_sites.tsv")
     parser.add_argument("--egg_members_file", required=True, help="Path to 9443_members.tsv")
     parser.add_argument("--egg_annotations_file", required=True, help="Path to 9443_annotations.tsv")
-    parser.add_argument("--map_dir", required=True, help="Directory containing <GENE>*.map.tsv files")
+    parser.add_argument("--map_dir", required=False, help="Optional directory containing <GENE>*.map.tsv files")
     parser.add_argument("--cosmic_db", required=False, help="Path to Cosmic_MutantCensus_v104_GRCh38.tsv.gz")
     parser.add_argument("--pai3d_db", required=False, help="Path to PrimateAI-3D.hg38.txt.gz")
     parser.add_argument("--cleaned_background", required=False, help="Optional list of genes tested (universe filter)")
@@ -177,6 +179,9 @@ def parse_map_file(path):
 
 def build_map_cache(map_dir, universe_genes):
     map_cache = {}
+    if not map_dir or not os.path.exists(map_dir):
+        print("No valid map_dir provided; skipping MAP coordinate caching.")
+        return map_cache
     map_files = glob.glob(os.path.join(map_dir, "*.map.tsv"))
     print(f"Scanning {len(map_files)} MAP files...")
     for path in map_files:
@@ -309,6 +314,11 @@ def main():
     map_cache = build_map_cache(args.map_dir, universe_genes)
 
     active_genes = set(map_cache.keys())
+    if not active_genes:
+        if universe_genes:
+            active_genes = set(universe_genes)
+        else:
+            active_genes = set(ensp_to_gene.values())
 
     # 1. PFAM Domains & Clans
     print("Compiling PFAM Domains & Clans...")
@@ -337,12 +347,14 @@ def main():
             except (ValueError, TypeError):
                 continue
 
-            residue_to_col = map_cache[gene]['residue_to_col']
+            map_entry = map_cache.get(gene)
+            residue_to_col = map_entry['residue_to_col'] if map_entry else {}
             start_col = residue_to_col.get(ali_start)
             end_col = residue_to_col.get(ali_end)
+            selected_cols = map_entry['selected_cols'] if map_entry else []
             
             if start_col is not None and end_col is not None:
-                columns = [c for c in map_cache[gene]['selected_cols'] if start_col <= c <= end_col]
+                columns = [c for c in selected_cols if start_col <= c <= end_col]
                 members = [f"{gene}:{c}" for c in columns]
                 
                 if pfam_id not in pfam_terms:
@@ -397,8 +409,10 @@ def main():
                     pos_residue = int(row.position)
                 except (ValueError, TypeError):
                     continue
-
-                col = map_cache[gene]['residue_to_col'].get(pos_residue)
+                map_entry = map_cache.get(gene)
+                if not map_entry:
+                    continue
+                col = map_entry['residue_to_col'].get(pos_residue)
                 if col is None:
                     continue
                 region = str(row.region_type)
@@ -408,15 +422,10 @@ def main():
                     gene_ucr_flank_cols.setdefault(gene, set()).add(col)
 
     # 3. Load FUBAR Selection Positions per gene, SPLIT by selection sign.
-    #    Positive-selection sites (is_pos_hit_fdr) are expected to be ENRICHED for
-    #    trait-associated change; purifying sites (is_neg_hit) quantify constraint.
-    #    Kept as separate layers rather than a single "selection" set.
     print("Loading FUBAR selection positions...")
     gene_pos_sel_cols = {}   # positive selection (FDR)
     gene_neg_sel_cols = {}   # purifying selection
     if os.path.exists(args.fubar_sites_file):
-        # fubar_sites.tsv is per-codon genome-wide (~750 MB): read only the
-        # needed columns in chunks and iterate with itertuples.
         reader = pd.read_csv(args.fubar_sites_file, sep='\t',
                              usecols=['gene', 'is_pos_hit_fdr',
                                       'is_neg_hit', 'hg38_aa_pos'],
@@ -439,7 +448,10 @@ def main():
                 except (ValueError, TypeError):
                     continue
 
-                col = map_cache[gene]['residue_to_col'].get(pos_residue)
+                map_entry = map_cache.get(gene)
+                if not map_entry:
+                    continue
+                col = map_entry['residue_to_col'].get(pos_residue)
                 if col is None:
                     continue
                 if is_pos == 1:
@@ -447,39 +459,10 @@ def main():
                 if is_neg == 1:
                     gene_neg_sel_cols.setdefault(gene, set()).add(col)
 
-    # 3.5 Load FADE directional selection positions per gene (from
-    #     FADE_JSON_TO_CSV's fade_sites_{top,bottom}.csv: gene,position,max_bf,
-    #     target_aa, already restricted to sites clearing the classic BF>=100
-    #     bar). Unlike FUBAR's hg38_aa_pos (a 1-indexed residue number needing
-    #     residue_to_col translation), FADE's `position` is already 0-indexed
-    #     in the same coordinate space CAAS's own Position column uses directly
-    #     (confirmed empirically: joining FADE and CAAS positions with no
-    #     translation gives the expected ~70x position-level enrichment,
-    #     matching posenrich_enrich.py's own "obs-scores Position is prot_ali_col
-    #     space" convention) -- so no map_cache lookup here, same as gene:position
-    #     custom markers below.
+    # 3.5 Load FADE directional selection positions per gene
     print("Loading FADE directional selection positions...")
     gene_fade_top_cols = {}
     gene_fade_bottom_cols = {}
-    for fade_file, fade_cols in ((args.fade_sites_top_file, gene_fade_top_cols),
-                                  (args.fade_sites_bottom_file, gene_fade_bottom_cols)):
-        if not fade_file or not os.path.exists(fade_file):
-            continue
-        fade_df = pd.read_csv(fade_file, dtype={'gene': str})
-        for row in fade_df.itertuples(index=False):
-            gene = row.gene
-            if gene not in active_genes:
-                continue
-            try:
-                pos = int(row.position)
-            except (ValueError, TypeError):
-                continue
-            fade_cols.setdefault(gene, set()).add(pos)
-
-    # 4. Load COSMIC and PAI3D positions per gene. Both are external,
-    #    coordinate-keyed databases with incomplete real-world coverage (unlike
-    #    the internal deterministic computations above), so besides GMT
-    #    membership we also emit which active genes each database could
     #    structurally have annotated at all (coverage_genes.txt) — consumed by
     #    posenrich_enrich.py to restrict the enrichment background for these
     #    two GMTs specifically, instead of diluting the test with genes/positions

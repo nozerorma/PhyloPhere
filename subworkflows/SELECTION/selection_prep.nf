@@ -233,9 +233,12 @@ workflow SELECTION_PREP {
                     } else {
                         def n = (params.toy_n ?: 50) as int
                         def all_tuples = ali_tuples_from_dir(ali_dir, null)
-                        Collections.shuffle(all_tuples)
+                        // Seeded — see workflows/ct.nf's identical fix for why: an unseeded
+                        // shuffle picks a different random gene subset every run, making
+                        // -resume unable to hit this stage's cache.
+                        Collections.shuffle(all_tuples, new Random(params.seed as long))
                         toy_genes = all_tuples.take(n).collect { it[0] }.toSet()
-                        log.info "[toy_mode] SELECTION_PREP: using ${toy_genes.size()} randomly sampled genes"
+                        log.info "[toy_mode] SELECTION_PREP: using ${toy_genes.size()} randomly sampled genes (seed=${params.seed})"
                     }
                     ali_tuples_from_dir(ali_dir, toy_genes)
                 }

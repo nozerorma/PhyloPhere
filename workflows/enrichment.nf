@@ -10,7 +10,13 @@ include { SCORING_AMI_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkf
 include { SCORING_FCS_REPORT }                            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { RER_FCS_REPORT  as MODULE_FCS_RER }             from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { POSENRICH }                                      from "${baseDir}/subworkflows/ENRICHMENT/posenrich.nf"
-include { DOMINO_MODULES }                                 from "${baseDir}/subworkflows/ENRICHMENT/domino.nf"
+// Nextflow forbids invoking the same process/subworkflow more than once in one workflow
+// scope without a distinct alias per call site (DuplicateProcessInvocation) -- DOMINO_MODULES
+// is called up to 3 times below (main/CAAS, FADE, RER), each against a different
+// gene-list/universe/background, so each needs its own imported name.
+include { DOMINO_MODULES as DOMINO_MODULES_MAIN }          from "${baseDir}/subworkflows/ENRICHMENT/domino.nf"
+include { DOMINO_MODULES as DOMINO_MODULES_FADE }          from "${baseDir}/subworkflows/ENRICHMENT/domino.nf"
+include { DOMINO_MODULES as DOMINO_MODULES_RER }           from "${baseDir}/subworkflows/ENRICHMENT/domino.nf"
 
 // ── FADE Global background/gene-list union ──────────────────────────────────
 // FADE's AMI network is built once per trait (not once per direction) against
@@ -156,7 +162,7 @@ workflow ENRICHMENT {
 
         def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch)
 
-        def annot_ch = fcs_stats.first()
+        def annot_ch = fcs_stats
         def trait_lbl = params.traitname ?: 'trait'
 
         def rer_perms_resolved = (rer_perms_ch ?: Channel.empty())
@@ -209,7 +215,7 @@ workflow ENRICHMENT {
         def run_ami = params.scoring_ami ?: params.scoring_string ?: false
         def ami_out = null
         if (run_ami) {
-            def domino_out = DOMINO_MODULES(
+            def domino_out = DOMINO_MODULES_MAIN(
                 fcs_universe_ch,
                 gene_lists_ch,
                 params.domino_network_score_thr ?: 700,
@@ -235,7 +241,7 @@ workflow ENRICHMENT {
                     .mix(fade_sig_bottom_r)
                     .mix(fade_union_sig_ch)
                     .collect()
-                def fade_domino_out = DOMINO_MODULES(
+                def fade_domino_out = DOMINO_MODULES_FADE(
                     fade_union_bg_ch,
                     fade_gene_lists_final_ch,
                     params.domino_network_score_thr ?: 700,
@@ -262,7 +268,7 @@ workflow ENRICHMENT {
             def rer_domino_modules_arg
             def rer_domino_edges_arg
             if (rer_ran) {
-                def rer_domino_out = DOMINO_MODULES(
+                def rer_domino_out = DOMINO_MODULES_RER(
                     rer_bg_r,
                     rer_gene_lists_interest_ch,
                     params.domino_network_score_thr ?: 700,

@@ -133,10 +133,18 @@ workflow CT_POSTPROC {
             log.info "   (Cluster filtering will respect caap_group boundaries)"
             
         } else if (params.caas_postproc_mode == 'filter') {
-            // Single filter run: use provided minlen and maxcaas
-            // Combine with discovery file channel
+            // Single filter run: use provided minlen and maxcaas.
+            // Cast to numeric here, same as the exploratory branch's minlen_list/
+            // maxcaas_list above — params.filter_minlen/filter_maxcaas arrive as plain
+            // Strings (JSON/CLI params are always Strings), and CT_FILTER's script does
+            // `(maxcaas * 100).toInteger()`. Groovy's `*` on a String is repetition, not
+            // multiplication ("0.7" * 100 -> "0.70.70.7..." repeated 100 times, not 70),
+            // so leaving maxcaas as a String there made every _complete/filter-mode run
+            // crash with "For input string: '0.70.70.7...'" the moment CT_FILTER ran.
+            def filter_minlen_val = params.filter_minlen.toInteger()
+            def filter_maxcaas_val = params.filter_maxcaas.toDouble()
             param_combinations = Channel
-                .of(tuple('filter', params.filter_minlen, params.filter_maxcaas))
+                .of(tuple('filter', filter_minlen_val, filter_maxcaas_val))
                 .combine(prepared_discovery_ch)
                 .map { mode, minlen, maxcaas, disc_file ->
                     tuple(mode, minlen, maxcaas, disc_file)

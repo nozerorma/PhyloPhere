@@ -113,6 +113,13 @@ process POSENRICH_RUN {
     // unconditionally (no NO_FILE-sentinel guard): if it's absent,
     // posenrich_enrich.py hard-fails with a clear message rather than silently
     // re-deriving its own ranking.
+    // --background (caastools background.output, tested positions) is equally
+    // mandatory: without it the Fisher-test background collapses to scored
+    // positions only, invalidating the test. Also passed unconditionally;
+    // posenrich_enrich.py hard-fails on any NO_FILE* sentinel or missing path.
+    // In _complete runs (CT skipped), the caller must supply it via
+    // params.posenrich_background_file (wired in run_single.sh.j2's
+    // reuse_exploratory block from the _exploratory caastools/background.output).
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_enrich.py \
         --obs-scores ${caas_file} \

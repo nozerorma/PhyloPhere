@@ -96,6 +96,7 @@ export SEED="{{ general.seed }}"
 export MAX_CPUS="{{ resources.slurm_max_cpus if profile == 'slurm' else resources.local_max_cpus }}"
 export MAX_MEMORY="{{ resources.slurm_max_memory if profile == 'slurm' else resources.local_max_memory }}"
 export MAX_TIME="{{ resources.slurm_max_time if profile == 'slurm' else resources.local_max_time }}"
+export SLURM_QUEUE="{{ runtime.sbatch_partition }}"
 
 export ALI_DIR="{{ runtime.alignment_dir }}"
 export ALI_FORMAT="{{ runtime.ali_format }}"

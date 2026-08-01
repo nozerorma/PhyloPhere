@@ -56,7 +56,10 @@ def parse_args():
                    help="cleaned_background_main.txt gene list (postproc-surviving)")
     p.add_argument("--background", required=True,
                    help="caastools background.output (gene<TAB>tested positions); "
-                        "restricted to --universe genes = the position background")
+                        "restricted to --universe genes = the position background. "
+                        "Always required: without it the Fisher-test background collapses "
+                        "to scored positions only, invalidating the test. Use "
+                        "--posenrich_background_file (params) to supply it in standalone runs.")
     p.add_argument("--cosmic-coverage", default=None,
                    help="cosmic_coverage_genes.txt from build_position_gmt.py — genes "
                         "COSMIC itself could annotate; restricts the background used "
@@ -101,7 +104,28 @@ def build_background(background_file, universe_genes):
     tested (caastools `background.output`: `gene<TAB>comma-separated positions`,
     or NULL), RESTRICTED to the cleaned-background genes (i.e. background.output
     minus the negative overlap with cleaned_background — the postproc-dropped
-    genes). Positions are in the same prot_ali_col space as the GMTs and scores."""
+    genes). Positions are in the same prot_ali_col space as the GMTs and scores.
+
+    This file is always mandatory. Without it the Fisher-test background collapses
+    to scored positions only (via the union in main()), making every foreground
+    hit appear enriched — statistically invalid. A missing or sentinel value is
+    therefore a hard error, not a silent fallback.
+    In the _complete run scenario (CT skipped, reusing _exploratory outputs) the
+    caller must supply the exploratory run's caastools/background.output via
+    --posenrich_background_file / POSENRICH_BACKGROUND_FILE; the run_single.sh.j2
+    template does this in its reuse_exploratory block.
+    """
+    if not background_file or background_file.startswith("NO_FILE") or not os.path.exists(background_file):
+        sys.exit(
+            f"[posenrich] ERROR: background file is required but was not supplied or "
+            f"does not exist: {background_file!r}.\n"
+            f"In a _complete run reusing a prior _exploratory pass, set "
+            f"POSENRICH_BACKGROUND_FILE to the exploratory run's "
+            f"caastools/background.output (the run_single.sh.j2 template handles "
+            f"this automatically via its reuse_exploratory block).\n"
+            f"In a standalone enrichment-only run, pass --posenrich_background_file "
+            f"pointing to the relevant caastools/background.output."
+        )
     bg = []
     with open(background_file) as f:
         for line in f:

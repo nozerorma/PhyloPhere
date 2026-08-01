@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "Primates Partial Run",
+    "project_name": "diet_test",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -11,20 +11,20 @@
     "remote_root_dir": "/homes/users/mramon/scratch/"
   },
   "runtime": {
-    "resume": false,
-    "toy_mode": false,
-    "toy_n": "",
+    "resume": true,
+    "toy_mode": true,
+    "toy_n": "1000",
     "runtime_type": "slurm",
     "batched": true,
-    "script_base_name": "cancer_part",
+    "script_base_name": "diet_test",
     "work_dir": "/homes/users/mramon/scratch/3.Work_dirs2",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final",
+    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/diet_test",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
     "sbatch_partition": "high-cpu",
     "sbatch_time": "144:00:00",
     "sbatch_mail_user": "miguel.ramon@upf.edu",
-    "sbatch_array_concurrency": "2",
+    "sbatch_array_concurrency": "",
     "alignment_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge",
     "ali_format": "fasta",
     "tree_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/science.abn7829_data_s4.nex.tree",
@@ -39,24 +39,44 @@
     "taxon_of_interest": "family",
     "phenotype_rows": [
       {
-        "trait_class": 1,
-        "trait": "neoplasia_prevalence",
-        "secondary": "malignant_prevalence",
-        "n_trait": "adult_necropsy_count",
-        "c_trait": "neoplasia_necropsy",
-        "prune": "neoplasia_exclude.txt",
-        "prune_secondary": "malignant_exclude.txt",
-        "discrete_method": ""
+        "trait_class": 2,
+        "trait": "fol_idx",
+        "secondary": "",
+        "n_trait": "",
+        "c_trait": "",
+        "prune": "",
+        "prune_secondary": "",
+        "discrete_method": "quintile"
       },
       {
-        "trait_class": 1,
-        "trait": "malignant_prevalence",
-        "secondary": "neoplasia_prevalence",
-        "n_trait": "adult_necropsy_count",
-        "c_trait": "malignant_count",
-        "prune": "malignant_exclude.txt",
-        "prune_secondary": "neoplasia_exclude.txt",
-        "discrete_method": ""
+        "trait_class": 2,
+        "trait": "omn_idx",
+        "secondary": "",
+        "n_trait": "",
+        "c_trait": "",
+        "prune": "",
+        "prune_secondary": "",
+        "discrete_method": "quintile"
+      },
+      {
+        "trait_class": 2,
+        "trait": "omn_spec_idx",
+        "secondary": "",
+        "n_trait": "",
+        "c_trait": "",
+        "prune": "",
+        "prune_secondary": "",
+        "discrete_method": "quintile"
+      },
+      {
+        "trait_class": 2,
+        "trait": "ins_idx",
+        "secondary": "",
+        "n_trait": "",
+        "c_trait": "",
+        "prune": "",
+        "prune_secondary": "",
+        "discrete_method": "quintile"
       }
     ]
   },
@@ -108,7 +128,7 @@
       "ct_disambig_posterior_threshold": "0.1",
       "ct_disambig_max_tasks_per_child": "50",
       "asr_robustness": true,
-      "ct_postproc": false,
+      "ct_postproc": true,
       "run_postproc_exploratory": true,
       "run_postproc_filter": true,
       "caas_postproc_mode": "filter",
@@ -132,7 +152,7 @@
       "accumulation_report_pval_threshold": "0.05"
     },
     "rer": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,
@@ -160,7 +180,7 @@
     "fade": {
       "enabled": true,
       "extra_flags": "",
-      "fade_mode": "all",
+      "fade_mode": "gene_set",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
       "fade_postproc_top": "",
@@ -181,9 +201,9 @@
     "vep": {
       "enabled": true,
       "extra_flags": "",
-      "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
+      "vep_primateai_db": "",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
-      "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz"
+      "cosmic_db": ""
     },
     "scoring": {
       "enabled": true,
@@ -217,7 +237,7 @@
       "scoring_compare_top_n": "20",
       "egg_members_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv",
       "egg_annotations_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv",
-      "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz",
+      "cosmic_db": "",
       "domain_variability_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/domain_variability.tsv",
       "ucr_positions_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/ucr_positions.tsv",
       "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
@@ -228,17 +248,17 @@
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/final_true2",
-    "use_ct": true,
-    "use_discovery": true,
-    "use_resample": true,
-    "use_bootstrap": true,
-    "use_disambiguation": true,
-    "use_postproc": true,
-    "use_accumulation": true,
+    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/diet",
+    "use_ct": false,
+    "use_discovery": false,
+    "use_resample": false,
+    "use_bootstrap": false,
+    "use_disambiguation": false,
+    "use_postproc": false,
+    "use_accumulation": false,
     "use_rer": true,
-    "use_fade": true,
-    "use_vep": true
+    "use_fade": false,
+    "use_vep": false
   },
   "resources": {
     "local_max_cpus": "8",

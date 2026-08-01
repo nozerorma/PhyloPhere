@@ -431,7 +431,15 @@ cluster_layout <- function(net, clusters_df, seed = 42) {
 # replacing the old per-cluster get_ppi_enrichment() density test.
 describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, top_terms = 3,
                                min_cluster_genes = 3, bg_string_ids = NULL) {
-  if (is.null(clusters_df) || nrow(clusters_df) == 0) return(tibble())
+  # Zero-module case (e.g. DOMINO found no active modules for a small/toy gene
+  # sample) must return the SAME column schema as the populated path below, not
+  # a bare tibble() — downstream code (e.g. the .clust_desc %>% arrange(desc(n_genes))
+  # write_tsv call) references n_genes unconditionally, before any nrow()>0 guard,
+  # and dplyr::arrange() can't resolve a column that was never there to begin with.
+  if (is.null(clusters_df) || nrow(clusters_df) == 0) {
+    return(tibble(cluster = integer(), n_genes = integer(), genes = character(),
+                  all_genes = character(), description = character()))
+  }
   # bg_string_ids defaults to the report-global CAAS background (set below at
   # parse_background) for backward compatibility, but callers SHOULD pass
   # their own tool's mapped background explicitly -- compute_gene_list_result()
