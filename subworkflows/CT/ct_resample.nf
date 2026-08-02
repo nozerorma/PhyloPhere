@@ -86,7 +86,10 @@ process RESAMPLE {
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
-        ${params.include_b0}
+        ${params.include_b0} \\
+        ${params.target_pairs ?: 0} \\
+        ${params.discrete_method ?: 'quintile'} \\
+        ${params.max_tries ?: 1000000}
         """
     } else {
         """
@@ -124,7 +127,10 @@ process RESAMPLE {
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
-        ${params.include_b0}
+        ${params.include_b0} \\
+        ${params.target_pairs ?: 0} \\
+        ${params.discrete_method ?: 'quintile'} \\
+        ${params.max_tries ?: 1000000}
         """
     }
 }

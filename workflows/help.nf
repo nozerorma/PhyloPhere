@@ -99,10 +99,12 @@ Resamples virtual phenotypes for CAAS bootstrap analysis.
 
 Usage:
 --tree                      <"nwtree_file">              null
---perm_strategy              <"FGBG|BM">                  "BM"
+--perm_strategy              <"FGBG|BM|lambda">            "BM"
 --fgsize                     <INTEGER>                    6
 --bgsize                     <INTEGER>                    6
---traitvalues                 <"traitvalues_file">          null   (required for BM)
+--traitvalues                 <"traitvalues_file">          null   (required for BM/lambda)
+--target_pairs               <INTEGER>                    0      (target independent pairs for lean contrast filter)
+--max_tries                  <INTEGER>                    1000000 (maximum simulation attempts limit)
 --perms_cycles               <INTEGER>                    100
 --chunk_size                  <INTEGER>                    500
 --include_b0                  <true|false>                 false

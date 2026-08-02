@@ -69,7 +69,9 @@ class CaasConfig(ModuleConfigBase):
     caap_mode: bool = True  # --caap_mode
     fgsize: str = "6"  # --fgsize
     bgsize: str = "6"  # --bgsize
-    perm_strategy: str = "BM"  # --perm_strategy (FGBG|BM)
+    perm_strategy: str = "BM"  # --perm_strategy (FGBG|BM|lambda)
+    target_pairs: str = "0"  # --target_pairs
+    max_tries: str = "1000000"  # --max_tries
     traitvalues: str = ""  # --traitvalues
     chunk_size: str = "500"  # --chunk_size
     include_b0: bool = False  # --include_b0
