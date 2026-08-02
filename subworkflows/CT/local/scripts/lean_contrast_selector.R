@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# subworkflows/TRAIT_ANALYSIS/local/src/lean_contrast_selector.R
+# subworkflows/CT/local/scripts/lean_contrast_selector.R
 # Branch: perms_lambda
 # =============================================================================
-# Lean contrast selection & Dunn validation module.
+# Lean contrast selection & Dunn validation module for CAASTOOLS (CT).
 # Evaluates whether a permulated trait vector yields N_pairs_obs independent
 # contrasts (Tier 1) or N_pairs_obs - 1 contrasts (Tier 2) with overall mod_dunn >= 1.0.
 # =============================================================================

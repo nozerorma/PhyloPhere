@@ -168,9 +168,9 @@ if (selection.strategy == "lambda") {
 use_lean_filter <- (target_pairs > 0)
 if (use_lean_filter) {
   possible_paths <- c(
-    file.path(dirname(normalizePath(sys.frames()[[1]]$ofile %||% ".")), "../../TRAIT_ANALYSIS/local/src/lean_contrast_selector.R"),
-    "subworkflows/TRAIT_ANALYSIS/local/src/lean_contrast_selector.R",
-    "/homes/users/mramon/scratch/PhyloPhere/subworkflows/TRAIT_ANALYSIS/local/src/lean_contrast_selector.R"
+    file.path(dirname(normalizePath(sys.frames()[[1]]$ofile %||% ".")), "lean_contrast_selector.R"),
+    "subworkflows/CT/local/scripts/lean_contrast_selector.R",
+    "/homes/users/mramon/scratch/PhyloPhere/subworkflows/CT/local/scripts/lean_contrast_selector.R"
   )
   lean_script <- possible_paths[file.exists(possible_paths)][1]
   
