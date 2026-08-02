@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "diet_test",
+    "project_name": "carn_test_reportonly",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -12,25 +12,25 @@
   },
   "runtime": {
     "resume": false,
-    "toy_mode": true,
+    "toy_mode": false,
     "toy_n": "1000",
     "runtime_type": "slurm",
     "batched": true,
-    "script_base_name": "diet_test",
+    "script_base_name": "carn_test_reportonly",
     "work_dir": "/homes/users/mramon/scratch/3.Work_dirs2",
     "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/diet_test",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
-    "sbatch_partition": "std-cpu",
+    "sbatch_partition": "high-cpu",
     "sbatch_time": "144:00:00",
     "sbatch_mail_user": "miguel.ramon@upf.edu",
     "sbatch_array_concurrency": "",
     "alignment_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge",
     "ali_format": "fasta",
     "tree_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/science.abn7829_data_s4.nex.tree",
-    "trait_file": "",
-    "simple_trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/6.Other-primate-phenotypes/merged_traits_with_LQ.csv",
-    "prune_dir": "",
+    "trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/1.Cancer_data/Neoplasia_species360/cancer_traits_processed-LQ.csv",
+    "simple_trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/maria_caas/Datos_fenotipos/diet_traitfile_comma.csv",
+    "prune_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP",
     "branch_trait": "LQ",
     "ali_sp_names": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ali_sp_names.txt",
     "tax_id_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family_primates.tsv",
@@ -40,37 +40,7 @@
     "phenotype_rows": [
       {
         "trait_class": 2,
-        "trait": "fol_idx",
-        "secondary": "",
-        "n_trait": "",
-        "c_trait": "",
-        "prune": "",
-        "prune_secondary": "",
-        "discrete_method": "quintile"
-      },
-      {
-        "trait_class": 2,
-        "trait": "omn_idx",
-        "secondary": "",
-        "n_trait": "",
-        "c_trait": "",
-        "prune": "",
-        "prune_secondary": "",
-        "discrete_method": "quintile"
-      },
-      {
-        "trait_class": 2,
-        "trait": "omn_spec_idx",
-        "secondary": "",
-        "n_trait": "",
-        "c_trait": "",
-        "prune": "",
-        "prune_secondary": "",
-        "discrete_method": "quintile"
-      },
-      {
-        "trait_class": 2,
-        "trait": "ins_idx",
+        "trait": "Carn",
         "secondary": "",
         "n_trait": "",
         "c_trait": "",
@@ -82,7 +52,7 @@
   },
   "modules": {
     "caas": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "ct_tool_discovery": true,
       "ct_tool_resample": true,
@@ -119,7 +89,7 @@
       "export_perm_discovery": false
     },
     "disambiguation": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "ct_disambig_asr_mode": "precomputed",
       "ct_disambig_asr_model": "lg",
@@ -128,7 +98,6 @@
       "ct_disambig_posterior_threshold": "0.1",
       "ct_disambig_max_tasks_per_child": "50",
       "asr_robustness": true,
-      "ct_postproc": true,
       "run_postproc_exploratory": true,
       "run_postproc_filter": true,
       "caas_postproc_mode": "filter",
@@ -141,7 +110,7 @@
       "iqr_multiplier": "3.0"
     },
     "accumulation": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
@@ -178,9 +147,9 @@
       "rer_gene_scores": ""
     },
     "fade": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
-      "fade_mode": "gene_set",
+      "fade_mode": "all",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
       "fade_postproc_top": "",
@@ -199,14 +168,14 @@
       "fade_universe_file": ""
     },
     "vep": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "vep_primateai_db": "",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "cosmic_db": ""
     },
     "scoring": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "scoring_stress": true,
       "scoring_stress_top_n": "25",
@@ -217,7 +186,7 @@
       "scoring_gene_top_pct": "0.10"
     },
     "enrichment": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "posenrich_enabled": true,
       "gmt_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/GMTs",
@@ -248,7 +217,7 @@
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/diet",
+    "base_path": "",
     "use_ct": false,
     "use_discovery": false,
     "use_resample": false,
@@ -256,7 +225,7 @@
     "use_disambiguation": false,
     "use_postproc": false,
     "use_accumulation": false,
-    "use_rer": true,
+    "use_rer": false,
     "use_fade": false,
     "use_vep": false
   },

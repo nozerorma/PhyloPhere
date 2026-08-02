@@ -73,7 +73,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
     # upstream input. Enforced here, once, rather than trusted to have happened upstream.
     caas_enabled = caas.enabled and not (pc.use_discovery or pc.use_resample or pc.use_bootstrap or pc.use_ct)
     disambiguation_enabled = disambig.enabled and not pc.use_disambiguation
-    ct_postproc_enabled = disambig.ct_postproc and not pc.use_postproc
+    ct_postproc_enabled = disambig.enabled and not pc.use_postproc
     accumulation_enabled = project.modules.accumulation.enabled and not pc.use_accumulation
     rer_enabled = project.modules.rer.enabled and not pc.use_rer
     fade_enabled = project.modules.fade.enabled and not pc.use_fade

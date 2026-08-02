@@ -160,24 +160,41 @@ source(file.path(objDir, "phylo.R"))
 # Secondary traits (optional)
 # ----------------------------------------
 
-secondary_trait <- if (exists("params")) params$secondary_trait else ""
-debug_log("secondary_trait = %s", ifelse(nzchar(secondary_trait), secondary_trait, "<none>"))
+# Resolve a requested trait name against the trait_df columns, tolerating
+# case differences between GUI/params defaults and curated file headers
+# (e.g. params `branch_trait = "LQ"` vs a column literally named "lq").
+resolve_trait_column <- function(trait_name, df_names) {
+  if (!nzchar(trait_name)) return(NA_character_)
+  if (trait_name %in% df_names) return(trait_name)
+  match_idx <- match(tolower(trait_name), tolower(df_names))
+  if (!is.na(match_idx)) return(df_names[match_idx])
+  NA_character_
+}
+
+secondary_trait_requested <- if (exists("params")) params$secondary_trait else ""
+secondary_trait_resolved <- resolve_trait_column(secondary_trait_requested, names(trait_df))
+debug_log("secondary_trait = %s", ifelse(nzchar(secondary_trait_requested), secondary_trait_requested, "<none>"))
 has.secondary <- FALSE
-if (nzchar(secondary_trait) && secondary_trait %in% names(trait_df)) {
+if (!is.na(secondary_trait_resolved)) {
+  secondary_trait <- secondary_trait_resolved
   has.secondary <- TRUE
-  debug_log("has.secondary = TRUE, missing = %d", sum(is.na(trait_df[[secondary_trait]])))
+  debug_log("has.secondary = TRUE, resolved column = %s, missing = %d", secondary_trait, sum(is.na(trait_df[[secondary_trait]])))
 } else {
+  secondary_trait <- secondary_trait_requested
   message("No valid secondary trait provided; proceeding without it.")
   debug_log("has.secondary = FALSE")
 }
 
-branch_trait <- if (exists("params")) params$branch_trait else ""
-debug_log("branch_trait = %s", ifelse(nzchar(branch_trait), branch_trait, "<none>"))
+branch_trait_requested <- if (exists("params")) params$branch_trait else ""
+branch_trait_resolved <- resolve_trait_column(branch_trait_requested, names(trait_df))
+debug_log("branch_trait = %s", ifelse(nzchar(branch_trait_requested), branch_trait_requested, "<none>"))
 has.branch <- FALSE
-if (nzchar(branch_trait) && branch_trait %in% names(trait_df)) {
+if (!is.na(branch_trait_resolved)) {
+  branch_trait <- branch_trait_resolved
   has.branch <- TRUE
-  debug_log("has.branch = TRUE, missing = %d", sum(is.na(trait_df[[branch_trait]])))
+  debug_log("has.branch = TRUE, resolved column = %s, missing = %d", branch_trait, sum(is.na(trait_df[[branch_trait]])))
 } else {
+  branch_trait <- branch_trait_requested
   message("No valid branch trait provided; proceeding without it.")
   debug_log("has.branch = FALSE")
 }

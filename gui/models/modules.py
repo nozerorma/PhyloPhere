@@ -97,9 +97,9 @@ class DisambiguationConfig(ModuleConfigBase):
     # Separate ASR Robustness diagnostics report/stage (conf/ct_disambiguation.config).
     asr_robustness: bool = True  # --asr_robustness
 
-    ct_postproc: bool = True  # --ct_postproc (bundled toggle, matches reference script)
-
-    # Post-processing sub-section (conf/ct_postproc.config), only meaningful if ct_postproc=True.
+    # Post-processing (--ct_postproc) always runs whenever Disambiguation itself is
+    # enabled — no separate toggle; see DisambiguationConfig.enabled (ModuleConfigBase).
+    # Post-processing sub-section (conf/ct_postproc.config), only meaningful when enabled.
     run_postproc_exploratory: bool = True  # Run exploratory parameter sweep
     run_postproc_filter: bool = True  # Run filtering production run
     caas_postproc_mode: str = "filter"  # Legacy compatibility field

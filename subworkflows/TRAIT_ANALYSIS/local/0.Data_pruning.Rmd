@@ -963,14 +963,12 @@ debug_log("visual_distribution: circular_tree tips retained for visualization = 
 
 n_tips <- length(circular_tree$tip.label)
 n_taxa_tree <- dplyr::n_distinct(tree_plot_trait_df$taxa)
-n_fruit_rings <- 2L
+n_fruit_rings <- if (isTRUE(has.secondary)) 2L else 1L
 tree_profile <- species_plot_profile(n_species = n_tips, n_taxa = n_taxa_tree, n_rings = n_fruit_rings)$tree
 tree_profile$taxa_bar_offset <- tree_profile$taxa_bar_offset + 0.10
 tree_profile$n_label_nudge <- tree_profile$n_label_nudge + 0.45
 tree_profile$asterisk_nudge <- tree_profile$asterisk_nudge + 0.10
 tree_profile$asterisk_y <- tree_profile$asterisk_y + 0.04
-tree_profile$cladelab_offset_phylopic <- tree_profile$cladelab_offset_phylopic + 1.40
-tree_profile$cladelab_offset_text <- tree_profile$cladelab_offset_text + 1.20
 trait_axis_nbreak <- as.integer(max(1, round(tree_profile$axis_nbreak)))
 trait_axis_text_size <- as.numeric(tree_profile$axis_text_size)
 secondary_axis_text_size <- as.numeric(tree_profile$axis_text_size * 0.8)
@@ -981,28 +979,21 @@ tree_trait_data <- tree_plot_trait_df %>%
   group_by(species, taxa)
 
 # Is there a branch color trait specified?
+# Ancestral state reconstruction of the branch trait is delegated to
+# branch_trait_node_values(), which tolerates duplicated species rows and the
+# partial coverage a secondary trait normally has (see src/plotting_fun.R).
+# This plot keeps the un-pruned visualization tree, so coverage is usually
+# thinner here than in the phenotype report.
 if (isTRUE(has.branch)) {
-  tree_trait_data <- tree_trait_data %>%
-    mutate(
-      br_trait = .data[[branch_trait]]
-    )
-
-  # Perform ancestral state reconstruction for LQ trait
-  br_trait_vec <- tree_trait_data$br_trait
-  names(br_trait_vec) <- tree_trait_data$species
-  br_asr_fit <- phytools::fastAnc(circular_tree, br_trait_vec, vars = TRUE, CI = TRUE)
-
-  # Create data frames for tip and node values
-  tip_br_data <- data.frame(
-    node = nodeid(circular_tree, names(br_trait_vec)),
-    BR = br_trait_vec
+  combined_br_data <- branch_trait_node_values(
+    circular_tree,
+    tree_trait_data$species,
+    tree_trait_data[[branch_trait]]
   )
-  node_br_data <- data.frame(
-    node = names(br_asr_fit$ace), 
-    BR = br_asr_fit$ace
-  )
-  combined_br_data <- rbind(tip_br_data, node_br_data)
-  combined_br_data$node <- as.numeric(combined_br_data$node)
+  if (is.null(combined_br_data)) {
+    debug_log("visual_distribution: branch trait '%s' unusable for ASR; drawing plain branches", branch_trait)
+    has.branch <- FALSE
+  }
 }
   
 if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secondary TRUE
@@ -1105,8 +1096,11 @@ if (isTRUE(has.branch)) {
                                   open.angle=15, 
                                   size=tree_profile$tree_line_width) +
     scale_color_gradient(
-      name = capitalized_branch_trait, 
+      name = capitalized_branch_trait,
       low = "#F4EBD0", high = "#2B2D42",
+      # Branches subtending too few covered species carry no reconstruction;
+      # grey them out rather than letting them inherit an endpoint colour.
+      na.value = "grey70",
                         guide = guide_colorbar(order = 3)) +  # BR last
     new_scale_color()
 } else {
@@ -1252,6 +1246,18 @@ tip_df <- tip_df %>%
 # Save for debug
 write.csv(tip_df, file.path(phylo_distribution_dir, "taxon_node_mapping.csv"), row.names = FALSE)
 
+# Place the label rings relative to where the fruit rings actually ended up,
+# rather than at a fixed distance that only suits one tree (see plotting_fun.R).
+label_offsets <- fan_label_offsets(
+  tree_plot_step3,
+  labels = tip_df$taxa,
+  label_fontsize = tree_profile$branch_label_size,
+  canvas_in = dyn_height,
+  ring_gap = tree_profile$label_ring_gap,
+  image_gap = tree_profile$label_image_gap,
+  image_size = tree_profile$image_size
+)
+
 # Add family labels and phylopic images
 final_tree_plot <- tree_plot_step3 +
   geom_cladelab(data = tip_df,
@@ -1262,7 +1268,7 @@ final_tree_plot <- tree_plot_step3 +
                   color = taxa),
                 geom="phylopic",
                 barsize = NA,
-                offset = tree_profile$cladelab_offset_phylopic,
+                offset = label_offsets$phylopic,
                 imagesize = tree_profile$image_size,
                 alpha = 0.75)
 
@@ -1279,7 +1285,7 @@ final_tree_plot <- final_tree_plot +
                           color = "black",
                 angle = "auto",
                 horizontal = TRUE,
-                offset = tree_profile$cladelab_offset_text,
+                offset = label_offsets$text,
                 barsize = NA,
                 fontsize = tree_profile$branch_label_size,
                 fontface = "bold") +
@@ -1287,11 +1293,14 @@ final_tree_plot <- final_tree_plot +
   theme(panel.background = element_rect(fill = "transparent", colour = NA),  
         plot.background = element_rect(fill = "transparent", colour = NA),
         legend.position = "right",
-        legend.spacing.y = unit(1.5, 'cm'),
+        # Key size and spacing are absolute lengths, so they have to grow with
+        # the canvas alongside the legend text -- a fixed 1cm key on the 30in
+        # canvas of a large tree is what made the legend unreadable.
+        legend.spacing.y = unit(tree_profile$legend_spacing_cm, 'cm'),
         legend.title = element_text(
-          size = tree_profile$legend_title_size, face = "bold", 
+          size = tree_profile$legend_title_size, face = "bold",
           margin = margin(b = 15)),
-        legend.key.size = unit(1, 'cm'),
+        legend.key.size = unit(tree_profile$legend_key_cm, 'cm'),
         legend.text = element_text(size = tree_profile$legend_text_size),
         plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
         plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))

@@ -68,9 +68,11 @@ class PrecomputedConfig:
     # --- Disambiguation (live ASR/convergence compute) ---
     use_disambiguation: bool = False  # turns off Disambiguation; wires disambiguation_input/_dir
 
-    # --- Post-processing (Disambiguation tab's own ct_postproc sub-toggle) ---
-    use_postproc: bool = False  # turns off ct_postproc; wires the filtered-discovery/
-    # cleaned-background pair that Accumulation/VEP/Scoring each fall back to
+    # --- Post-processing (no separate enable toggle — always runs alongside
+    # Disambiguation; see gui/generation/context.py's ct_postproc_enabled) ---
+    use_postproc: bool = False  # wires the filtered-discovery/cleaned-background
+    # pair that Accumulation/VEP/Scoring each fall back to, without turning off
+    # Disambiguation's own live compute (check use_disambiguation for that)
 
     # --- Accumulation ---
     use_accumulation: bool = False  # turns off Accumulation; wires scoring_accum_dir

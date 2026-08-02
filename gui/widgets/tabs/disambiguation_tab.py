@@ -10,6 +10,12 @@ tab: the reference scripts only ever expose it as a bare --ct_postproc boolean
 nested inside RUN_DISAMBIGUATION's block, and matching that keeps the GUI aligned
 with the scripts it replaces (see implementation plan §5, "Decision").
 
+--ct_postproc has no separate on/off checkbox: it always runs whenever this tab's
+own enable toggle is on (gui/generation/context.py's ct_postproc_enabled is derived
+straight from disambig.enabled, not a sibling field) — Post-processing was never
+meaningfully independent of Disambiguation in practice, so the extra checkbox only
+added a state (Disambiguation on, Post-processing off) nobody used on purpose.
+
 ASR mode: disambiguation_main.py's own argparse only accepts "compute" or
 "precomputed" (subworkflows/CT_DISAMBIGUATION/local/disambiguation_main.py) — an
 earlier version of this tab only offered "precomputed" as a choice, silently ruling
@@ -46,7 +52,6 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(name="ct_disambig_asr_cache_dir", label="ASR cache directory", kind="path_dir"),
         FieldSpec(name="asr_robustness", label="Run ASR Robustness diagnostics report", kind="bool"),
-        FieldSpec(name="ct_postproc", label="Run Post-processing (--ct_postproc)", kind="bool"),
         FieldSpec(name="run_postproc_exploratory", label="Run Exploratory Post-Processing Sweep", kind="bool"),
         FieldSpec(name="run_postproc_filter", label="Run Filtering Production Post-Processing", kind="bool"),
         FieldSpec(name="filter_minlen", label="Cluster min length (filter mode)"),

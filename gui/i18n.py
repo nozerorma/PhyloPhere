@@ -1034,14 +1034,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Esegui report diagnostico di robustezza ASR',
         'de': 'ASR-Robustheitsdiagnosebericht ausführen',
     },
-    'Run Post-processing (--ct_postproc)': {
-        'en': 'Run Post-processing (--ct_postproc)',
-        'es': 'Ejecutar postprocesado (--ct_postproc)',
-        'ca': 'Executar postprocessament (--ct_postproc)',
-        'fr': 'Exécuter le post-traitement (--ct_postproc)',
-        'it': 'Esegui post-processing (--ct_postproc)',
-        'de': 'Nachbearbeitung ausführen (--ct_postproc)',
-    },
     'Run Exploratory Post-Processing Sweep': {
         'en': 'Run Exploratory Post-Processing Sweep',
         'es': 'Ejecutar barrido exploratorio de postprocesado',

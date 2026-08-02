@@ -140,10 +140,16 @@ workflow ENRICHMENT {
         def fade_sig_bottom_r = unwrap1(fade_gene_lists_sig_bottom_ch)
 
         // RER has its own natural gene universe (every gene RERConverge actually
-        // attempted), independent of the CAAS-discovery background. Falls back to
-        // the CAAS background when no module-specific universe file is supplied,
-        // preserving prior behaviour for runs that don't set this.
-        def rer_universe_ch  = params.rer_universe_file  ? Channel.value(file(params.rer_universe_file))  : fcs_universe_ch
+        // attempted), independent of the CAAS-discovery background. Priority:
+        // explicit --rer_universe_file override > RER's own live-run background
+        // (rer_bg_r, from RER_MAIN.out.gene_lists_bg -- already computed above for
+        // PUBLISH_UNIVERSES/DOMINO but previously never reached the FCS report) >
+        // CAAS's background as a last-resort fallback for runs where RER didn't
+        // run this invocation and no override was given (preserves prior behaviour).
+        def rer_ran = (params.rer_tool || params.rer_continuous_file) as boolean
+        def rer_universe_ch  = params.rer_universe_file
+            ? Channel.value(file(params.rer_universe_file))
+            : (rer_ran ? rer_bg_r : fcs_universe_ch)
 
         def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
             .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
@@ -187,7 +193,7 @@ workflow ENRICHMENT {
         // it derives scoring_fade_top_ch/scoring_fade_bot_ch), mirroring how
         // rer_ran already treats rer_continuous_file as equivalent to rer_tool.
         def fade_ran = (params.fade || params.fade_json_dir_top || params.fade_json_dir_bottom) as boolean
-        def rer_ran  = (params.rer_tool || params.rer_continuous_file) as boolean
+        // rer_ran already hoisted above (needed earlier for rer_universe_ch).
 
         def fade_union_bg_ch
         def fade_union_sig_ch

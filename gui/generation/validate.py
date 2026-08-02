@@ -85,8 +85,16 @@ def validate(project: ProjectConfig) -> list[str]:
     # main.nf then always wires CONTRAST_SELECTION()'s own trait/tree output into
     # CT(...) (main.nf:137-146) — the --caas_config fallback in ct.nf:110-124 is
     # only reached when --contrast_selection is absent, which never happens here.
+    #
+    # CAAS's own output (discovery/resample/bootstrap) is only ever consumed
+    # downstream by Disambiguation, via run_signification (main.nf:184-199) — so this
+    # is only a real problem when Disambiguation is actually enabled. The more precise
+    # version of this same check lives in the `disambig.enabled` branch below; a
+    # phenotype/reporting-only run (main.nf:155's standalone --contrast_selection path,
+    # or --reporting alone) has no downstream module reading CAAS output at all.
     caas = project.modules.caas
-    if not caas.enabled:
+    disambig = project.modules.disambiguation
+    if not caas.enabled and disambig.enabled:
         if not any([pc.use_discovery, pc.use_resample, pc.use_bootstrap]):
             errors.append(
                 "CAAS is disabled but no Discovery/Resample/Bootstrap reuse box is checked on "
@@ -95,7 +103,6 @@ def validate(project: ProjectConfig) -> list[str]:
             )
 
     # --- Disambiguation (+ Post-processing) ---
-    disambig = project.modules.disambiguation
     if disambig.enabled:
         if disambig.ct_disambig_asr_mode == "precomputed":
             require(
@@ -107,43 +114,44 @@ def validate(project: ProjectConfig) -> list[str]:
                 "Disambiguation is enabled but CAAS is disabled with no reuse box checked on "
                 "the Precomputed Run tab."
             )
-        # ct_postproc's characterization report step always runs when Post-processing
-        # is on (workflows/ct_postproc.nf's own gate is unconditional) and needs
-        # gene_ensembl_file regardless of whether Scoring itself is enabled — checked
-        # here too (not just under Scoring below) since exploratory-sweep runs force
-        # Scoring off but still hit this requirement.
-        if disambig.ct_postproc and not project.modules.scoring.gene_ensembl_file:
+        # Post-processing's characterization report step always runs alongside
+        # Disambiguation now (no separate --ct_postproc toggle; see
+        # gui/models/modules.py's DisambiguationConfig) and needs gene_ensembl_file
+        # regardless of whether Scoring itself is enabled — checked here too (not
+        # just under Scoring below) since exploratory-sweep runs force Scoring off
+        # but still hit this requirement.
+        if not project.modules.scoring.gene_ensembl_file:
             errors.append(
-                "Disambiguation: Post-processing is enabled, so Scoring's gene-Ensembl "
+                "Disambiguation: Post-processing runs alongside it, so Scoring's gene-Ensembl "
                 "mapping file is required for its characterization reports (and for gene "
                 "filtering too, unless Gene filter mode is set to 'none') — fill it in on "
                 "the Scoring tab even if Scoring itself is disabled."
             )
-    else:
-        if not pc.use_disambiguation:
-            errors.append(
-                "Disambiguation is disabled but 'Use precomputed Disambiguation output' isn't "
-                "checked on the Precomputed Run tab — Accumulation and Scoring may have no input."
-            )
+    # else: Disambiguation disabled means Post-processing is too (they're no longer
+    # independently toggleable) — Accumulation/Scoring's own checks below already
+    # cover the case where they still need Post-processing's output via pc.use_postproc.
 
     # --- Accumulation ---
     accum = project.modules.accumulation
+    scoring = project.modules.scoring
     if accum.enabled:
         require(
             accum.accumulation_entropy_dir,
             "Accumulation: entropy directory is required when Accumulation is enabled.",
         )
-        if not disambig.ct_postproc and not pc.use_postproc:
+        if not disambig.enabled and not pc.use_postproc:
             errors.append(
                 "Accumulation is enabled but Post-processing is disabled with no "
                 "'Use precomputed Post-processing output' box checked on the Precomputed Run tab."
             )
-    else:
+    elif scoring.enabled:
+        # scoring_accum_ch (main.nf:411) is Accumulation's only downstream consumer —
+        # Enrichment reads Scoring's gene lists, never Accumulation's directory
+        # directly, so this only matters when Scoring is actually enabled.
         if not pc.use_accumulation:
             errors.append(
-                "Accumulation is disabled but 'Use precomputed Accumulation output' isn't "
-                "checked on the Precomputed Run tab — Enrichment's accumulation gene lists may "
-                "have no input."
+                "Accumulation is disabled but Scoring is enabled and 'Use precomputed Accumulation "
+                "output' isn't checked on the Precomputed Run tab — Scoring may have no input."
             )
 
     # --- RERconverge ---
@@ -160,16 +168,16 @@ def validate(project: ProjectConfig) -> list[str]:
         require(vep.vep_map_dir, "VEP: per-gene MAP directory is required when VEP is enabled.")
 
     # --- Scoring ---
-    scoring = project.modules.scoring
     if scoring.enabled:
-        if not disambig.ct_postproc:
-            # Already reported above (Disambiguation section) when ct_postproc is on,
-            # so this doesn't duplicate that message for the same missing field.
+        if not disambig.enabled:
+            # Already reported above (Disambiguation section) when Disambiguation
+            # (and therefore Post-processing) is on, so this doesn't duplicate that
+            # message for the same missing field.
             require(
                 scoring.gene_ensembl_file,
                 "Scoring: gene-Ensembl mapping file is required when Scoring is enabled.",
             )
-        if not disambig.ct_postproc and not pc.use_postproc:
+        if not disambig.enabled and not pc.use_postproc:
             errors.append(
                 "Scoring is enabled but Post-processing is disabled with no 'Use precomputed "
                 "Post-processing output' box checked on the Precomputed Run tab."

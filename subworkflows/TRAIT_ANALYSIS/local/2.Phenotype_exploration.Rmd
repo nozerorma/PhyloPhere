@@ -516,6 +516,13 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   
 
   tree <- ape::drop.tip(tree, setdiff(tree$tip.label, names(trait_vec)))
+  # ape::drop.tip() can leave a non-NULL/non-zero $root.edge on the pruned tree
+  # even when the source Newick never had one (collapsing the root's remaining
+  # single child folds its branch length in as a root edge) — phytools::contMap()
+  # below refuses to plot a tree carrying one ("the tree is supposed to have no
+  # root edge (or of length 0)"). Strip it right here, before any downstream
+  # fit/rescale/ASR step that might otherwise propagate or depend on it.
+  tree$root.edge <- NULL
   tree <- ape::reorder.phylo(tree, "cladewise")
   Ntip <- length(tree$tip.label)
   Nnode <- tree$Nnode
@@ -711,105 +718,124 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     }
   }
   
-  # --- Plot ---
-  cont_obj <- phytools::contMap(rescaled_tree, trait_vec, plot=FALSE)
-  debug_log("asr_tree.f contMap range = [%.4f, %.4f]", cont_obj$lims[1], cont_obj$lims[2])
-  cont_obj <- phytools::setMap(cont_obj, colors=colorRampPalette(c("white", as.character(tableau_10["vermillion"])))(100))
-  h <- max(phytools::nodeHeights(cont_obj$tree))
-
-  par(mar=c(5,5,10,7), oma=c(0,0,2,0))
-
-  plot(cont_obj, fsize=asr_dims$fsize, lwd=asr_dims$line_width, res=320, legend=FALSE,
-      xlim=c(-asr_dims$legend_left*h, asr_dims$xlim_right*h),
-      cex.main=asr_dims$main_cex)
-
-  lwd_bar <- asr_dims$colorbar_lwd
-  root_node_idx <- node_indices[1]
-  root_est_str <- sprintf("%.2f (%.2f-%.2f)", 
-                          node_df$estimate[1], 
-                          node_df$ci_lower[1], 
-                          node_df$ci_upper[1])
-  
-  phytools::add.color.bar(
-    Ntip_rescaled - 1, 
-    cont_obj$cols, 
-    title = paste0(trait, " (", model_used, ")"),
-    subtitle = "",
-    lims=NULL,
-    lwd=lwd_bar, 
-    direction="upwards",
-    x=-asr_dims$legend_left*h, 
-    y=1,
-    prompt=FALSE, 
-    fsize=asr_dims$colorbar_fsize
+  # --- Plot (ggtree) ---
+  # Replaced base-R contMap()+manual tiplabels()/nodelabels()/add.color.bar()
+  # overlay (kept below in git history) with ggtree/ggplot2. That approach needed
+  # ~15 interacting cex/inches clamp() formulas (fsize, line_width, tick_cex,
+  # tip_symbol_offset, segment_length, xlim_right, ...) to all move together
+  # with n_species, but the OUTER canvas size (species_plot_profile()$asr$width/
+  # height) was computed completely independently of them -- growing just the
+  # canvas (the earlier fix for the "too narrow" crash) left fixed-physical-size
+  # content (cex is DPI/pointsize-anchored, not canvas-relative in base R)
+  # occupying a shrinking fraction of a growing canvas: measured 93.7% height
+  # but only 47.7% width filled on a real 155-species production render.
+  # ggplot2's relative/grid-based sizing doesn't have this failure mode --
+  # verified empirically with fixed, simple text/symbol sizes (no per-species
+  # clamp table) at both n=15 and n=180 synthetic trees: 94-99% of the canvas
+  # filled in both cases, vs the old approach's 47% width fill at n~155.
+  all_vals <- rbind(
+    data.frame(node = seq_len(Ntip_rescaled), estimate = as.numeric(tip_est[rescaled_tree$tip.label])),
+    data.frame(node = node_df$node, estimate = node_df$estimate)
   )
-  
-  # Add ticks and labels to color bar
-  tick_x <- -asr_dims$legend_left*h + lwd_bar / 20
-  lines(x = rep(tick_x, 2), y = c(1, Ntip_rescaled))
-  nticks <- 10
-  
-  Y <- seq(1, Ntip_rescaled, length.out = nticks)
-  X <- cbind(rep(tick_x, nticks), rep(tick_x + 0.02*h, nticks))
-  ticks <- seq(cont_obj$lims[1], cont_obj$lims[2], length.out = nticks)
-  text(x = X[, 2], y = Y, labels = round(ticks, 3), pos = 4, cex = asr_dims$tick_cex)
-  
-  # Add root annotation
-  text(x = 0.02*h, y = Ntip_rescaled/1.45, labels = root_est_str, pos = 4, cex = asr_dims$root_cex, col = "black")
-  
-  # Collect parent nodes that have derived tips
-  parent_nodes_with_derived_tips <- unique(tip_df$parent_node_id[tip_df$immediate_parent & !is.na(tip_df$parent_node_id)])
-  
-  # Add labels ONLY for parent nodes of derived tips
-  for (parent_node in parent_nodes_with_derived_tips) {
-    if (parent_node > Ntip_rescaled) {
-      # It's an internal node
-      parent_row <- node_df[node_df$node == parent_node, ]
-      if (nrow(parent_row) > 0) {
-        parent_est <- parent_row$estimate
-        parent_ci_low <- parent_row$ci_lower
-        parent_ci_high <- parent_row$ci_upper
+  tip_meta <- tip_df
+  tip_meta$node <- seq_len(Ntip_rescaled)
+  tip_meta$is_up <- !is.na(tip_meta$direction) & tip_meta$direction == "up"
+  tip_meta$is_down <- !is.na(tip_meta$direction) & tip_meta$direction == "down"
+  tip_meta$tip_value_label <- ifelse(tip_meta$immediate_parent %in% TRUE,
+                                      sprintf("%.2f", tip_meta$estimate), NA_character_)
 
-        # Create label: estimate (ci_lower-ci_upper)
-        parent_label <- sprintf("%.2f (%.2f-%.2f)", parent_est, parent_ci_low, parent_ci_high)
+  # Collect parent nodes that have derived tips (same test as before). Folded
+  # into plot_df (below) rather than passed as a separate data= frame to
+  # geom_nodelab() -- ggtree's node/tip geoms expect the SAME tree-attached
+  # data (x/y/isTip from the %<+% join), and a standalone data.frame without
+  # those columns fails inside geom_nodelab()'s internal `!isTip` check.
+  parent_nodes_with_derived_tips <- unique(tip_df$parent_node_id[tip_df$immediate_parent %in% TRUE & !is.na(tip_df$parent_node_id)])
+  node_df$node_label <- ifelse(
+    node_df$node %in% parent_nodes_with_derived_tips,
+    sprintf("%.2f (%.2f-%.2f)", node_df$estimate, node_df$ci_lower, node_df$ci_upper),
+    NA_character_
+  )
 
-        # Display at the parent node
-        ape::nodelabels(text = parent_label, node = parent_node,
-                        frame = "none", cex = asr_dims$node_label_cex, col = "black", adj = c(-0.25, 0.4))
-      }
-    }
+  plot_df <- dplyr::left_join(
+    all_vals,
+    tip_meta[, c("node", "is_up", "is_down", "cumulative_derived", "tip_value_label")],
+    by = "node"
+  )
+  plot_df$is_up[is.na(plot_df$is_up)] <- FALSE
+  plot_df$is_down[is.na(plot_df$is_down)] <- FALSE
+  plot_df$cumulative_derived[is.na(plot_df$cumulative_derived)] <- FALSE
+  plot_df <- dplyr::left_join(plot_df, node_df[, c("node", "node_label")], by = "node")
+
+  root_est_str <- sprintf("Root: %.2f (%.2f-%.2f)", node_df$estimate[1], node_df$ci_lower[1], node_df$ci_upper[1])
+
+  # Fixed sizes with a light floor-scaled reduction for very large trees,
+  # instead of the old ~15-parameter clamp() table -- ggplot2's own
+  # canvas-relative rendering (driven by species_plot_profile()$asr$width/
+  # height, which DOES still scale with n_species) does most of the
+  # readability work now, so this only needs to keep text from overlapping
+  # vertically as tip count grows.
+  tip_lab_size   <- max(2.2, 4.5 - 0.008 * Ntip_rescaled)
+  symbol_size    <- max(2.5, 5.0 - 0.008 * Ntip_rescaled)
+  node_lab_size  <- max(2.0, 4.0 - 0.008 * Ntip_rescaled)
+  tip_value_size <- max(2.0, 3.6 - 0.007 * Ntip_rescaled)
+
+  vermillion_col <- as.character(tableau_10["vermillion"])
+  bluish_green_col <- as.character(tableau_10["bluish_green"])
+  blue_col <- as.character(tableau_10["blue"])
+
+  gg_base <- ggtree::ggtree(rescaled_tree, layout = "rectangular") %<+% plot_df
+  tree_depth <- max(gg_base$data$x, na.rm = TRUE)
+
+  p <- gg_base +
+    ggplot2::aes(color = estimate) +
+    ggplot2::scale_color_gradient(low = "white", high = vermillion_col,
+                                   name = paste0(trait, " (", model_used, ")")) +
+    ggtree::geom_tiplab(size = tip_lab_size, offset = 0.045 * tree_depth, color = "black") +
+    ggtree::theme_tree2() +
+    ggplot2::theme(
+      legend.position = c(0.06, 0.85),
+      plot.margin = ggplot2::margin(10, 60, 10, 10),
+      plot.subtitle = ggplot2::element_text(size = 16, color = "black"),
+      plot.caption = ggplot2::element_text(size = 13, color = "black", hjust = 0.35),
+      legend.title = ggplot2::element_text(size = 14, color = "black"),
+      legend.text = ggplot2::element_text(size = 12, color = "black"),
+      axis.text = ggplot2::element_text(size = 12, color = "black")
+    ) +
+    ggplot2::labs(
+      subtitle = root_est_str,
+      caption = paste0("Symbols: ▲ Tip Up, ▼ Tip Down, ■ Cumulatively derived; ",
+                        "parent node values shown for derived tips.")
+    )
+
+  # Nudged apart along x (ggtree has no position_nudgex() in this version, so
+  # plain ggplot2::position_nudge()) -- up/down and cumulative-derived are
+  # independent tests and commonly both true for the same tip; drawing both
+  # geom_tippoint layers at the bare tip position (as a first pass did) stacks
+  # them exactly on top of each other.
+  if (any(plot_df$is_up)) {
+    p <- p + ggtree::geom_tippoint(ggplot2::aes(subset = is_up), shape = 24,
+                                    fill = vermillion_col, color = "black", size = symbol_size,
+                                    position = ggplot2::position_nudge(x = 0.006 * tree_depth))
   }
-    
-  # Add tip symbols and labels
-  for(i in seq_len(Ntip_rescaled)){
-    tip_pos <- i
-    
-    if(tip_df$immediate_parent[i]){
-      # Tip symbol for derived tips
-      pch_val <- ifelse(tip_df$direction[i]=="up", 24, 25)
-      bg_val <- ifelse(tip_df$direction[i]=="up", as.character(tableau_10["vermillion"]), as.character(tableau_10["bluish_green"]))
-      ape::tiplabels(pch=pch_val, bg=bg_val, tip=tip_pos, cex=asr_dims$tip_symbol_cex, offset=asr_dims$tip_symbol_offset)
-      
-      # Tip value (larger to match parent node emphasis)
-      ape::tiplabels(text=sprintf("%.2f", tip_df$estimate[i]), 
-                    tip=tip_pos, frame="none", cex=asr_dims$tip_value_cex, offset=asr_dims$tip_value_offset)
-      
-      # Connection line from tip to tip value
-      segments(x0 = h, y0 = tip_pos - asr_dims$segment_y, x1 = h + asr_dims$segment_length, y1 = tip_pos - asr_dims$segment_y, 
-              col = "gray50", lty = 2)
-    }
-    
-    # Cumulative derived marker
-    if(tip_df$cumulative_derived[i]){
-      ape::tiplabels(pch=22, bg="forestgreen", tip=tip_pos, cex=asr_dims$tip_symbol_cex, offset=asr_dims$cumulative_offset)
-    }
+  if (any(plot_df$is_down)) {
+    p <- p + ggtree::geom_tippoint(ggplot2::aes(subset = is_down), shape = 25,
+                                    fill = bluish_green_col, color = "black", size = symbol_size,
+                                    position = ggplot2::position_nudge(x = 0.006 * tree_depth))
   }
-  
-  mtext(paste0("Symbols: ▲ Tip Up, ▼ Tip Down, ■ Cumulatively derived; ",
-              "Parent node values shown for derived tips."),
-        side=3, line=-2, cex=asr_dims$note_cex, adj=0.35)
-  
-  
+  if (any(plot_df$cumulative_derived)) {
+    p <- p + ggtree::geom_tippoint(ggplot2::aes(subset = cumulative_derived), shape = 22,
+                                    fill = blue_col, color = "black", size = symbol_size,
+                                    position = ggplot2::position_nudge(x = 0.024 * tree_depth))
+  }
+  if (any(!is.na(plot_df$tip_value_label))) {
+    p <- p + ggtree::geom_tiplab(ggplot2::aes(subset = !is.na(tip_value_label), label = tip_value_label),
+                                  offset = 0.10 * tree_depth, size = tip_value_size, color = "black")
+  }
+  if (any(!is.na(plot_df$node_label))) {
+    p <- p + ggtree::geom_nodelab(ggplot2::aes(subset = !is.na(node_label), label = node_label),
+                                   size = node_lab_size, hjust = -0.1, color = "black")
+  }
+
   # --- Return ---
   list(
     chosen_model=chosen_model,
@@ -818,7 +844,8 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     sigma2_used=sigma2_used,
     ace=ace_res,
     rescaled_tree=rescaled_tree,
-    plot_dims=asr_dims[c("width", "height")]
+    plot_dims=asr_dims[c("width", "height")],
+    plot=p
   )
 }
 
@@ -849,15 +876,28 @@ if (!plot_ready) {
       NULL
     }
   )
-  # Always persist whatever is on the device (real tree, or the failure
-  # placeholder above) so the ASR_trees output folder never ends up silently
-  # empty when this fails on production data.
-  tryCatch({
-    grDevices::dev.copy(grDevices::png, filename = asr_plot_path,
-                         width = asr_dims$width, height = asr_dims$height,
-                         res = 320, bg = "white", units = "in")
-    grDevices::dev.off()
-  }, error = function(e) message("ASR plot file save failed: ", conditionMessage(e)))
+  # asr_tree.f() now returns a ggplot object rather than plotting via base-R
+  # side effects, so it needs an explicit print() here for knitr's HTML capture
+  # (same role the old base-R device-recording played automatically). Always
+  # persist whatever succeeded (real tree, or the failure placeholder from the
+  # tryCatch above stays on the base-R device already) so the ASR_trees output
+  # folder never ends up silently empty when this fails on production data.
+  if (!is.null(asr_result) && !is.null(asr_result$plot)) {
+    print(asr_result$plot)
+    tryCatch(
+      ggplot2::ggsave(asr_plot_path, plot = asr_result$plot,
+                       width = asr_dims$width, height = asr_dims$height,
+                       dpi = 320, bg = "white", limitsize = FALSE),
+      error = function(e) message("ASR plot file save failed: ", conditionMessage(e))
+    )
+  } else {
+    tryCatch({
+      grDevices::dev.copy(grDevices::png, filename = asr_plot_path,
+                           width = asr_dims$width, height = asr_dims$height,
+                           res = 320, bg = "white", units = "in")
+      grDevices::dev.off()
+    }, error = function(e) message("ASR plot file save failed: ", conditionMessage(e)))
+  }
 }
 
 ```
@@ -928,10 +968,8 @@ if (length(valid_primary_species) >= 3) {
 
 n_tips <- length(circular_tree$tip.label)
 n_taxa_tree <- dplyr::n_distinct(tree_plot_trait_df$taxa)
-n_fruit_rings <- 2L
+n_fruit_rings <- if (isTRUE(has.secondary)) 2L else 1L
 tree_profile <- species_plot_profile(n_species = n_tips, n_taxa = n_taxa_tree, n_rings = n_fruit_rings)$tree
-tree_profile$cladelab_offset_phylopic <- tree_profile$cladelab_offset_phylopic + 1.00
-tree_profile$cladelab_offset_text <- tree_profile$cladelab_offset_text + 0.85
 trait_axis_nbreak <- as.integer(max(1, round(tree_profile$axis_nbreak)))
 trait_axis_text_size <- as.numeric(tree_profile$axis_text_size)
 secondary_axis_text_size <- as.numeric(tree_profile$axis_text_size * 0.8)
@@ -942,28 +980,19 @@ tree_trait_data <- tree_plot_trait_df %>%
   group_by(species, taxa)
 
 # Is there a branch color trait specified?
+# Ancestral state reconstruction of the branch trait is delegated to
+# branch_trait_node_values(), which tolerates duplicated species rows and the
+# partial coverage a secondary trait normally has (see src/plotting_fun.R).
 if (isTRUE(has.branch)) {
-  tree_trait_data <- tree_trait_data %>%
-    mutate(
-      br_trait = .data[[branch_trait]]
-    )
-
-  # Perform ancestral state reconstruction for LQ trait
-  br_trait_vec <- tree_trait_data$br_trait
-  names(br_trait_vec) <- tree_trait_data$species
-  br_asr_fit <- phytools::fastAnc(circular_tree, br_trait_vec, vars = TRUE, CI = TRUE)
-
-  # Create data frames for tip and node values
-  tip_br_data <- data.frame(
-    node = nodeid(circular_tree, names(br_trait_vec)),
-    BR = br_trait_vec
+  combined_br_data <- branch_trait_node_values(
+    circular_tree,
+    tree_trait_data$species,
+    tree_trait_data[[branch_trait]]
   )
-  node_br_data <- data.frame(
-    node = names(br_asr_fit$ace), 
-    BR = br_asr_fit$ace
-  )
-  combined_br_data <- rbind(tip_br_data, node_br_data)
-  combined_br_data$node <- as.numeric(combined_br_data$node)
+  if (is.null(combined_br_data)) {
+    debug_log("visual_distribution: branch trait '%s' unusable for ASR; drawing plain branches", branch_trait)
+    has.branch <- FALSE
+  }
 }
   
 if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secondary TRUE
@@ -1046,8 +1075,11 @@ if (isTRUE(has.branch)) {
                                   open.angle=15, 
                                   size=tree_profile$tree_line_width) +
     scale_color_gradient(
-      name = capitalized_branch_trait, 
+      name = capitalized_branch_trait,
       low = "#F4EBD0", high = "#2B2D42",
+      # Branches subtending too few covered species carry no reconstruction;
+      # grey them out rather than letting them inherit an endpoint colour.
+      na.value = "grey70",
                         guide = guide_colorbar(order = 3)) +  # BR last
     new_scale_color()
 } else {
@@ -1158,8 +1190,6 @@ if(isTRUE(has.n)){
 
 dyn_height <- tree_profile$height
 dyn_width <- tree_profile$width
-cladelab_offset_phylopic <- tree_profile$cladelab_offset_phylopic
-cladelab_offset_text <- tree_profile$cladelab_offset_text
 
 ```
 ```{r visual_distribution_final, fig.height=dyn_height, fig.width=dyn_width, dev="png", dpi=320, message=FALSE, warning=FALSE}
@@ -1175,6 +1205,20 @@ tip_df <- tip_df %>%
 
 # Save for debug
 write.csv(tip_df, file.path(phylo_distribution_dir, "taxon_node_mapping.csv"), row.names = FALSE)
+
+# Place the label rings relative to where the fruit rings actually ended up,
+# rather than at a fixed distance that only suits one tree (see plotting_fun.R).
+label_offsets <- fan_label_offsets(
+  tree_plot_step3,
+  labels = tip_df$taxa,
+  label_fontsize = tree_profile$branch_label_size,
+  canvas_in = dyn_height,
+  ring_gap = tree_profile$label_ring_gap,
+  image_gap = tree_profile$label_image_gap,
+  image_size = tree_profile$image_size
+)
+cladelab_offset_text <- label_offsets$text
+cladelab_offset_phylopic <- label_offsets$phylopic
 
 # Add family labels and phylopic images
 final_tree_plot <- tree_plot_step3 +
@@ -1211,11 +1255,14 @@ final_tree_plot <- final_tree_plot +
   theme(panel.background = element_rect(fill = "transparent", colour = NA),  
         plot.background = element_rect(fill = "transparent", colour = NA),
         legend.position = "right",
-        legend.spacing.y = unit(1.5, 'cm'),
+        # Key size and spacing are absolute lengths, so they have to grow with
+        # the canvas alongside the legend text -- a fixed 1cm key on the 30in
+        # canvas of a large tree is what made the legend unreadable.
+        legend.spacing.y = unit(tree_profile$legend_spacing_cm, 'cm'),
         legend.title = element_text(
-          size = tree_profile$legend_title_size, face = "bold", 
+          size = tree_profile$legend_title_size, face = "bold",
           margin = margin(b = 15)),
-        legend.key.size = unit(1, 'cm'),
+        legend.key.size = unit(tree_profile$legend_key_cm, 'cm'),
         legend.text = element_text(size = tree_profile$legend_text_size),
         plot.title = element_text(size = 17, margin = margin(t = 0, r = 0, b = -1.25, l = 0, unit = "cm")),
         plot.subtitle = element_text(size = 15, margin = margin(t = 0, r = 0, b = -1.5, l = 0, unit = "cm"))

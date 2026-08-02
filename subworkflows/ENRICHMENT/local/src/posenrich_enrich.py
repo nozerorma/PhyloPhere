@@ -468,7 +468,22 @@ def main():
                             gene_position=pos_id))
                 rows.append(dict(ranking=direction, database=db, **r))
 
-    results = pd.DataFrame(rows)
+    # Same pd.DataFrame([]) column-loss risk as leading_edge_rows below, for a
+    # much rarer trigger (needs n_scored==0 across ALL of global/top/bottom, not
+    # just zero terms clearing significance) — but the schema here is dynamic
+    # (pct_<flag> columns depend on flag_names, known from load_annot() above,
+    # before this loop runs), so it can't be a fixed literal list the way
+    # leading_edge_rows' can. Built explicitly rather than left to infer from
+    # (possibly zero) rows, so a degenerate run still gets a properly-headered
+    # empty characterization.tsv instead of a ~1-byte column-less one.
+    result_cols = (
+        ["ranking", "database", "pathway", "description", "top_frac", "layer_size",
+         "foreground_size", "observed", "expected", "fold_enrichment", "p_value",
+         "direction", "background_n"]
+        + [f"pct_{f[len('flag_'):]}" for f in flag_names]
+        + ["p_adj", "n_scored", "sig"]
+    )
+    results = pd.DataFrame(rows, columns=result_cols) if not rows else pd.DataFrame(rows)
     if not results.empty:
         results = results.sort_values(["p_adj", "p_value"], na_position="last")
     out_path = os.path.join(args.output_dir, "posenrich_characterization.tsv")
@@ -478,7 +493,19 @@ def main():
     # Observed gene:position members of the overlap, one row per member, for
     # significant (ranking, database, pathway, top_frac) terms only — mirrors
     # fcs_leading_edge.tsv in the gene-level FCS report.
-    leading_edge = pd.DataFrame(leading_edge_rows)
+    # pd.DataFrame([]) on an empty list has NO columns to infer (pandas needs at
+    # least one row to know the schema) -- when zero terms clear the significance
+    # gate (a legitimate outcome, not an error), that produced a degenerate ~1-byte
+    # file with no header at all instead of a proper empty TSV. Downstream readers
+    # (15.Comparison_report.Rmd's cross_angle_gene_hits chunk) reference the
+    # `ranking` column unconditionally once the file exists, so a header-less empty
+    # file crashed the report with "object 'ranking' not found" rather than being
+    # treated as "posenrich found nothing here". Pin the columns explicitly so the
+    # empty case still gets the same header the populated case has.
+    leading_edge = pd.DataFrame(
+        leading_edge_rows,
+        columns=["ranking", "database", "pathway", "top_frac", "gene", "gene_position"],
+    )
     le_path = os.path.join(args.output_dir, "posenrich_leading_edge.tsv")
     leading_edge.to_csv(le_path, sep="\t", index=False)
     print(f"[posenrich] wrote {le_path} ({len(leading_edge)} rows)", flush=True)

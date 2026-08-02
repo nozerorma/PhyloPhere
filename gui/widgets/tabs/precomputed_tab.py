@@ -57,9 +57,9 @@ class PrecomputedTab(QWidget):
     ):
         """The 6 *_tab args are the already-built module tabs (see
         MainWindow._build_project_tabs, which constructs this tab last) — checking a
-        box here calls straight into that tab's own enable_toggle/ct_postproc
-        checkbox, so its config field and visuals update through its existing logic
-        rather than this tab reaching into another module's config directly."""
+        box here calls straight into that tab's own enable_toggle, so its config
+        field and visuals update through its existing logic rather than this tab
+        reaching into another module's config directly."""
         super().__init__(parent)
         self._config = config
         self._module_tabs = {
@@ -70,9 +70,6 @@ class PrecomputedTab(QWidget):
             "fade": fade_tab,
             "vep": vep_tab,
         }
-        # ct_postproc lives inside disambiguation_tab as a FieldSpec checkbox, not a
-        # separate tab's own enable_toggle.
-        self._postproc_checkbox: QCheckBox = disambiguation_tab._field_widgets["ct_postproc"]
 
         self._group_boxes: list[tuple[QGroupBox, str]] = []
         self._checkbox_labels: list[tuple[QCheckBox, str]] = []
@@ -107,7 +104,11 @@ class PrecomputedTab(QWidget):
             "Disambiguation", "use_disambiguation", self._on_disambiguation_toggled
         ))
         content_layout.addWidget(self._build_simple_section(
-            "Post-processing", "use_postproc", self._on_postproc_toggled
+            # Post-processing has no separate enable toggle of its own to flip off
+            # here — it's derived straight from Disambiguation's enable_toggle in
+            # gui/generation/context.py, so checking this box just supplies the
+            # precomputed files without any module-toggle cascade.
+            "Post-processing", "use_postproc", lambda v: None
         ))
         content_layout.addWidget(self._build_simple_section(
             "Accumulation", "use_accumulation", lambda v: self._toggle_module("accumulation", v)
@@ -190,10 +191,6 @@ class PrecomputedTab(QWidget):
 
     def _on_disambiguation_toggled(self, value: bool) -> None:
         self._toggle_module("disambiguation", value)
-
-    def _on_postproc_toggled(self, value: bool) -> None:
-        if self._postproc_checkbox.isChecked() != (not value):
-            self._postproc_checkbox.setChecked(not value)
 
     def _toggle_module(self, key: str, value: bool) -> None:
         tab = self._module_tabs[key]

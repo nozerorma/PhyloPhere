@@ -393,7 +393,7 @@ class MainWindow(QMainWindow):
         run_expl = getattr(disambig, "run_postproc_exploratory", False)
         run_filt = getattr(disambig, "run_postproc_filter", False)
 
-        if disambig.ct_postproc and (run_expl or run_filt):
+        if disambig.enabled and (run_expl or run_filt):
             if run_expl:
                 batch_name, single_name = script_names("_exploratory")
                 batch_text = render_batch(
