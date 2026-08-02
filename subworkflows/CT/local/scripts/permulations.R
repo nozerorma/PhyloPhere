@@ -6,6 +6,7 @@
 # =============================================================================
 # Generates null trait permulations supporting BM, FGBG, and Pagel's Lambda modes.
 # Implements 2-Tier pool harvesting (Tier 1: N_obs, Tier 2: N_obs - 1) with overall Dunn index validation.
+# Auto-detects observed independent pair count (N_pairs_obs) directly from config.file (V3 cluster IDs).
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -74,6 +75,17 @@ background.df <- subset(cfg, cfg$V2 == "0")
 
 foreground.species <- foreground.df$V1
 background.species <- background.df$V1
+
+# Auto-detect observed pair count (N_pairs_obs) from config V3 cluster IDs if target_pairs <= 0
+if (target_pairs <= 0) {
+  if (ncol(cfg) >= 3) {
+    auto_obs_pairs <- max(suppressWarnings(as.integer(cfg$V3)), na.rm = TRUE)
+    if (is.finite(auto_obs_pairs) && auto_obs_pairs > 0) {
+      target_pairs <- auto_obs_pairs
+      write(paste("[INFO]", Sys.time(), sprintf("Auto-detected observed independent pair count from config (V3 cluster IDs): N_pairs_obs = %d", target_pairs)), stdout())
+    }
+  }
+}
 
 # Read phenotype file (supports 2-col TSV or multi-col TSV with header)
 pheno_raw <- read.delim(
@@ -152,7 +164,7 @@ if (selection.strategy == "lambda") {
   simulation_tree$edge.length[simulation_tree$edge.length <= 0] <- 1e-8
 }
 
-# Source lean contrast selector if pair filtering is requested
+# Source lean contrast selector if pair filtering is requested or lambda strategy is active
 use_lean_filter <- (target_pairs > 0)
 if (use_lean_filter) {
   possible_paths <- c(
