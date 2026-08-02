@@ -14,6 +14,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 # ── Local ─────────────────────────────────────────────────────────────────────
+from gui.theme import apply_theme
 from gui.widgets.main_window import MainWindow
 
 _REPO_DIR = Path(__file__).resolve().parent.parent
@@ -40,6 +41,7 @@ def run(initial_project_path: Path | None = None) -> int:
     app.setDesktopFileName("phylophere-gui")
     if _ICON_PATH.is_file():
         app.setWindowIcon(QIcon(str(_ICON_PATH)))
+    apply_theme(app)
     _install_exception_hook()
 
     window = MainWindow()

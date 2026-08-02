@@ -37,8 +37,16 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         FieldSpec(name="caas_config_path", label="CAAS config file", kind="path_file"),
-        FieldSpec(name="perms_cycles", label="Permulation cycles"),
-        FieldSpec(name="caas_full_perms", label="Full-pool permulations"),
+        FieldSpec(
+            name="perm_pool_size",
+            label="Permulation pool size",
+            placeholder="accepted permulations to harvest (position-level null)",
+        ),
+        FieldSpec(
+            name="caas_full_perms",
+            label="Full-pool permulations",
+            placeholder="drawn from the pool for the CAAS FCS null",
+        ),
         FieldSpec(
             name="caas_permulation_enrichment", label="Permulation-excess for enrichment", kind="bool"
         ),
@@ -66,8 +74,16 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fgsize", label="Foreground size (strategy random)"),
         FieldSpec(name="bgsize", label="Background size (strategy random)"),
         FieldSpec(name="perm_strategy", label="Permutation strategy", kind="choice", choices=("FGBG", "BM", "lambda")),
-        FieldSpec(name="target_pairs", label="Lean filter target pairs (0 = unconstrained)"),
-        FieldSpec(name="max_tries", label="Max simulation attempts limit"),
+        FieldSpec(
+            name="max_tries",
+            label="Max permulation tries",
+            placeholder="draw budget; raised 50% up to twice if the pool falls short",
+        ),
+        FieldSpec(
+            name="perm_pheno_col",
+            label="Trait column in trait values file",
+            placeholder="empty = auto-detect the first numeric column",
+        ),
         FieldSpec(name="traitvalues", label="Trait values file (strategy BM/lambda)", kind="path_file"),
         FieldSpec(name="chunk_size", label="Resampled groups per output file"),
         FieldSpec(name="include_b0", label="Include main hypothesis (b0)", kind="bool"),

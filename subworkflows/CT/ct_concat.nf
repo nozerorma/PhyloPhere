@@ -126,12 +126,26 @@ process CONCAT_RESAMPLE {
 
     output:
     path("resample.tab"), emit: resample_concat
+    // The per-cycle audit trail written by permulations.R (tier, pair count,
+    // overall Dunn, and the permulated trait values the FG/BG were selected on).
+    // Published alongside resample.tab so the pool can be checked from the
+    // results directory rather than only from the Nextflow work dir. Optional:
+    // resample_from / precomputed runs stage a directory that has no manifest.
+    path("permulation_manifest.tsv"), emit: resample_manifest, optional: true
 
     script:
     """
     #!/usr/bin/env bash
     set -euo pipefail
-    
+
+    # Carry the manifest through when the staged directory has one.
+    if [ -f "${resample_dir}/permulation_manifest.tsv" ]; then
+        cp "${resample_dir}/permulation_manifest.tsv" permulation_manifest.tsv
+        echo "Manifest carried through: \$(wc -l < permulation_manifest.tsv) lines"
+    else
+        echo "No permulation_manifest.tsv in staged dir (precomputed or legacy resample)"
+    fi
+
     echo "=== CONCAT_RESAMPLE ==="
     echo "Working directory: \$(pwd)"
     echo "Staged directory: ${resample_dir}"

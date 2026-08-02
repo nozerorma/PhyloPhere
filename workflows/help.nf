@@ -103,12 +103,14 @@ Usage:
 --fgsize                     <INTEGER>                    6
 --bgsize                     <INTEGER>                    6
 --traitvalues                 <"traitvalues_file">          null   (required for BM/lambda)
---target_pairs               <INTEGER>                    0      (target independent pairs for lean contrast filter)
---max_tries                  <INTEGER>                    1000000 (maximum simulation attempts limit)
---perms_cycles               <INTEGER>                    100
+--perm_pheno_col             <STRING>                     ""     (trait column in --traitvalues; empty = auto-detect)
 --chunk_size                  <INTEGER>                    500
 --include_b0                  <true|false>                 false
---caas_full_perms             <INTEGER>                    1000  (full-pool null for CAAS FCS/permulation)
+
+Permulation sizing (three distinct quantities):
+--max_tries                  <INTEGER>                    1000000 (draw budget; raised 50% up to twice if the pool is short, then fails)
+--perm_pool_size             <INTEGER>                    100000  (accepted permulations harvested; the position-level null)
+--caas_full_perms            <INTEGER>                    1000    (drawn from the pool for the CAAS FCS null)
 
 Output: directory of resample_*.tab files (one per chunk_size cycles).
 

@@ -66,7 +66,10 @@ class ModuleTabWidget(QWidget):
 
         self.disclaimer_label = QLabel(f"If disabled: {spec.disclaimer}")
         self.disclaimer_label.setWordWrap(True)
-        self.disclaimer_label.setStyleSheet("color: #8a6d3b;")  # amber note, not an error
+        self.disclaimer_label.setStyleSheet(
+            "QLabel { background-color: rgba(234, 179, 8, 0.12); color: #d97706; "
+            "border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 8px 12px; font-weight: 500; }"
+        )
         layout.addWidget(self.disclaimer_label)
 
         self.essential_group = QGroupBox("Essential fields")

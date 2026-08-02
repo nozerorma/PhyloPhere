@@ -97,10 +97,10 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
     The kernel identifies WHICH (position, scheme, labeling) are CAAS; each rare
     hit's row is then rebuilt by calling the SAME functions caasboot uses
     (iscaas / check_caap_pattern / encode_to_groups) with the SAME inputs, so the
-    emitted fields are byte-identical to the scalar perm_discovery_out. The
-    resample multiconfig carries no pairs, so species sort is alphabetical
-    (matching caasboot's _pair_sort_key fallback) and the substitution / tag
-    strings reproduce exactly.
+    emitted fields are byte-identical to the scalar perm_discovery_out. Species
+    sort by pair id via the same _pair_sort_key caasboot uses (alphabetical
+    fallback for pairless species), so the substitution / tag strings reproduce
+    exactly.
     """
     if not hits:
         return
@@ -109,10 +109,17 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
         pn = genename + "@" + str(_posnum_from_posdict(pos_dict))
         posname_to_posdict[pn] = pos_dict
 
-    def _ungapped_sorted(species_iter, pos_dict):
+    def _ungapped_sorted(species_iter, pos_dict, trait=None):
         keep = [sp for sp in species_iter
                 if sp in pos_dict and pos_dict[sp].split("@")[0].upper() not in _VEC_GAP_SYMBOLS]
-        keep.sort()  # no pairs in resample cfg -> alphabetical, matches caasboot
+        # Sort by pair id so FG[i] and BG[i] are the two members of the same pair —
+        # this is what makes the positional comparison inside check_caap_pattern
+        # (and iscaas) report WHICH pairs are conserved. The resample cfg now carries
+        # per-cycle pairs (init_bootstrap.simtrait_revive), recovered from the
+        # matched FG/BG ordering permulations.R writes. _pair_sort_key falls back to
+        # alphabetical for any species without a pair, which reproduces the previous
+        # behaviour for legacy/hand-written resample files.
+        keep.sort(key=lambda sp: _pair_sort_key(cfg, sp, trait))
         return keep
 
     for key, trait_names in hits.items():
@@ -127,14 +134,14 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
         posnum = position_name.split("@", 1)[1]
 
         for trait in trait_names:
-            fg = _ungapped_sorted(cfg.trait2fg.get(trait, ()), pos_dict)
-            bg = _ungapped_sorted(cfg.trait2bg.get(trait, ()), pos_dict)
+            fg = _ungapped_sorted(cfg.trait2fg.get(trait, ()), pos_dict, trait)
+            bg = _ungapped_sorted(cfg.trait2bg.get(trait, ()), pos_dict, trait)
             fg_aas = "".join(pos_dict[sp].split("@")[0] for sp in fg)
             bg_aas = "".join(pos_dict[sp].split("@")[0] for sp in bg)
 
             if caap_mode:
                 is_caap, pattern, substitution, conserved_pairs = check_caap_pattern(
-                    fg_aas, bg_aas, scheme_dict, max_conserved, cfg, fg, bg
+                    fg_aas, bg_aas, scheme_dict, max_conserved, cfg, fg, bg, trait
                 )
                 encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
                 fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
@@ -156,8 +163,8 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
             perm_discovery_out.write("\t".join(fields) + "\n")
 
 
-def _pair_sort_key(multiconfig, sp):
-    pair_id = multiconfig.get_pair(sp)
+def _pair_sort_key(multiconfig, sp, trait=None):
+    pair_id = multiconfig.get_pair(sp, trait) if trait is not None else multiconfig.get_pair(sp)
     if pair_id:
         try:
             return (int(pair_id), sp)
@@ -458,8 +465,8 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                 bg_species = processed_position.trait2ungapped_bg[trait][:]
 
                 # Always sort by pair number (mandatory paired mode)
-                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
-                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
+                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
 
                 # Extract amino acids per species
                 fg_aas = "".join([(processed_position.d[sp].split("@")[0] or "") for sp in fg_species])
@@ -472,7 +479,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                 for scheme_name, scheme_dict in schemes_to_test:
                     is_caap, pattern, substitution, conserved_pairs = check_caap_pattern(
                         fg_aas, bg_aas, scheme_dict, max_conserved,
-                        multiconfig, fg_species, bg_species
+                        multiconfig, fg_species, bg_species, trait
                     )
                     pattern_by_scheme[scheme_name] = pattern
                     if is_caap and pattern in admitted_patterns:
@@ -560,8 +567,8 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                 bg_species = processed_position.trait2ungapped_bg[trait][:]
 
                 # Always sort by pair number (mandatory paired mode)
-                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
-                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
+                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
                 
                 aa_tag_fg = "".join([processed_position.d[sp].split("@")[0] for sp in fg_species])
                 aa_tag_bg = "".join([processed_position.d[sp].split("@")[0] for sp in bg_species])
@@ -577,8 +584,8 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                         bg_species_number = str(len(processed_position.trait2ungapped_bg[trait]))
                         fg_ungapped = processed_position.trait2ungapped_fg[trait][:]
                         bg_ungapped = processed_position.trait2ungapped_bg[trait][:]
-                        fg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
-                        bg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+                        fg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
+                        bg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
                         missings = "-"
                         if len(processed_position.trait2missings.get(trait, [])) > 0:
                             missings = ",".join(processed_position.trait2missings[trait])

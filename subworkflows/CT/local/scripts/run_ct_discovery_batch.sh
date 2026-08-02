@@ -9,6 +9,7 @@ ali_format=""
 runner_mode=""
 ct_bin=""
 extra_args_file=""
+stall_timeout="1200"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -42,6 +43,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --extra-args-file)
             extra_args_file="$2"
+            shift 2
+            ;;
+        --stall-timeout)
+            stall_timeout="$2"
             shift 2
             ;;
         *)
@@ -88,6 +93,34 @@ terminate_children() {
     fi
 }
 
+# Kills $1 if it burns zero CPU time for $stall_timeout seconds straight.
+# Guards against workers wedged in a filesystem/import stall (0% CPU,
+# indefinite openat() block on the shared conda env) rather than genuinely
+# slow computation, which keeps accruing CPU time and is left alone.
+watchdog_guard() {
+    local pid="$1" poll=30 last_cpu=-1 same=0
+    local max_same=$(( stall_timeout / poll ))
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep "$poll"
+        local cpu
+        cpu="$(awk '{print $14+$15}' "/proc/$pid/stat" 2>/dev/null)" || break
+        [[ -z "$cpu" ]] && break
+        if [[ "$cpu" == "$last_cpu" ]]; then
+            same=$((same + 1))
+            if [[ "$same" -ge "$max_same" ]]; then
+                echo "[DISCOVERY_BATCHED] Worker pid $pid stalled at 0% CPU for ${stall_timeout}s; killing" >&2
+                kill -TERM "$pid" 2>/dev/null || true
+                sleep 5
+                kill -KILL "$pid" 2>/dev/null || true
+                break
+            fi
+        else
+            same=0
+        fi
+        last_cpu="$cpu"
+    done
+}
+
 wait_for_slot() {
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -ge "$workers" ]]; do
         if ! wait -n; then
@@ -123,9 +156,16 @@ while IFS=$'\t' read -r alignment_id alignment_name; do
             -o "${alignment_id}.output" \
             --background_output "${alignment_id}.background.tsv" \
             --fmt "$ali_format" \
-            "${extra_args[@]}"
+            "${extra_args[@]}" &
+        worker_pid=$!
+        watchdog_guard "$worker_pid" &
+        watchdog_pid=$!
+        worker_status=0
+        wait "$worker_pid" || worker_status=$?
+        kill "$watchdog_pid" 2>/dev/null || true
         echo "[DISCOVERY_BATCHED] Completed $alignment_id"
-    ) &
+        exit "$worker_status"
+    ) </dev/null &
 done <"$manifest"
 
 wait_for_all

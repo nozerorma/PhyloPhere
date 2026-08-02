@@ -75,7 +75,7 @@
    "ct_tool_bootstrap": true,
    "caas_config_path": "",
    "patterns": "1,2,3",
-   "perms_cycles": "1000000",
+   "perm_pool_size": "100000",
    "caas_full_perms": "1000",
    "caas_permulation_enrichment": true,
    "top_quantile": "0.90",

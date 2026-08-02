@@ -104,8 +104,14 @@ def load_cfg(input_path, mode = "mono"):
                     except:
                         self.pair2bg_species[pair] = [species]
         
-        def get_pair(self, species):
-            """Get pair for species with caching"""
+        def get_pair(self, species, trait=None):
+            """Get pair for species with caching.
+
+            `trait` is accepted for interface parity with the resample-derived
+            multicfg in init_bootstrap.py (where pairs are per-cycle) and ignored
+            here: a discovery config describes a single labeling, so a species
+            belongs to exactly one pair.
+            """
             if species not in self._pair_cache:
                 self._pair_cache[species] = self.species2pair.get(species)
             return self._pair_cache[species]

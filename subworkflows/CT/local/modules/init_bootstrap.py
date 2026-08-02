@@ -123,16 +123,16 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
             self.allpairs = []
             self._pair_cache = {}
 
-        def get_pair(self, species):
+        def get_pair(self, species, trait=None):
             """Get the pair for a species (for compatibility with caas_id.py)"""
             return self.species2pair.get(species, None)
 
-        def update_dictionary(self, traitname, species, group):
+        def update_dictionary(self, traitname, species, group, pair=None):
             try:
                 self.s2t[species].append(traitname + "_" + group)
             except:
                 self.s2t[species] = [traitname + "_" + group]
-                
+
             if group == "1":
                 try:
                     self.trait2fg[traitname].append(species)
@@ -144,7 +144,7 @@ def simtrait(fg_len, bg_len, template, tree_file, mode, groupfile, phenotype_val
                     self.trait2bg[traitname].append(species)
                 except:
                     self.trait2bg[traitname] = [species]
-        
+
         def print_traits(self, outfile):
 
             o = open(outfile, "w")
@@ -368,24 +368,36 @@ def simtrait_revive(traitfile):
             self.trait2bg = {}
             self.cycles = 0
             self.paired_mode = True
-            
+
             # Pair-aware attributes (for compatibility with caas_id.py)
-            self.species2pair = {}
+            # Unlike the single-config case in pindex.py, ONE multicfg here holds
+            # every cycle in a resample file, and a species sits in a different
+            # pair from one cycle to the next — so pair lookup is keyed by
+            # (cycle, species), not by species alone.
+            self.trait2species2pair = {}
+            self.species2pair = {}       # kept for interface compatibility; unused
             self.pair2fg_species = {}
             self.pair2bg_species = {}
             self.allpairs = []
             self._pair_cache = {}
 
-        def get_pair(self, species):
-            """Get the pair for a species (for compatibility with caas_id.py)"""
+        def get_pair(self, species, trait=None):
+            """Pair id for a species within a given cycle.
+
+            `trait` is the cycle id (b_1, b_2, ...). Without it there is no
+            unambiguous answer, since the same species belongs to different pairs
+            in different cycles — callers inside a per-cycle loop must pass it.
+            """
+            if trait is not None:
+                return self.trait2species2pair.get(trait, {}).get(species)
             return self.species2pair.get(species, None)
 
-        def update_dictionary(self, traitname, species, group):
+        def update_dictionary(self, traitname, species, group, pair=None):
             try:
                 self.s2t[species].append(traitname + "_" + group)
             except:
                 self.s2t[species] = [traitname + "_" + group]
-                
+
             if group == "1":
                 try:
                     self.trait2fg[traitname].append(species)
@@ -397,7 +409,16 @@ def simtrait_revive(traitfile):
                     self.trait2bg[traitname].append(species)
                 except:
                     self.trait2bg[traitname] = [species]
-            
+
+            if pair is not None:
+                self.trait2species2pair.setdefault(traitname, {})[species] = pair
+                if pair not in self.allpairs:
+                    self.allpairs.append(pair)
+                if group == "1":
+                    self.pair2fg_species.setdefault((traitname, pair), []).append(species)
+                if group == "0":
+                    self.pair2bg_species.setdefault((traitname, pair), []).append(species)
+
             self.alltraits.append(traitname)
         
         
@@ -428,16 +449,28 @@ def simtrait_revive(traitfile):
             fg = c[1].split(",")
             bg = c[2].split(",")
 
+            # Pair identity is POSITIONAL: the i-th foreground species and the
+            # i-th background species are the two members of pair i.
+            # permulations.R writes both lists in matched pair order (see the
+            # sel_fg/sel_bg accumulation in lean_contrast_selector.R), so index
+            # correspondence is the contract between the two files. Recovering it
+            # here is what lets conserved_pair report WHICH pairs are conserved
+            # rather than only how many — the identity permulation disambiguation
+            # needs. If the lists differ in length (a Tier-2 style shortfall, or a
+            # hand-written resample), only the common prefix gets a pair id and
+            # the rest degrade to the previous "count only" behaviour.
+            paired_n = min(len(fg), len(bg))
+
             # Foreground update
 
-            for s in fg:
-                z.update_dictionary(cycleid, s, "1")
+            for i, s in enumerate(fg):
+                z.update_dictionary(cycleid, s, "1", str(i + 1) if i < paired_n else None)
 
 
             # Background update
 
-            for s in bg:
-                z.update_dictionary(cycleid, s, "0")
+            for i, s in enumerate(bg):
+                z.update_dictionary(cycleid, s, "0", str(i + 1) if i < paired_n else None)
 
         except:
             pass

@@ -72,8 +72,8 @@ def _prepare_reduced_line_dict_for_pvalue(position_dict, fg_species, bg_species)
     return reduced_line_dict, effective_fg_size, effective_bg_size
 
 
-def _pair_sort_key(multiconfig, sp):
-    pair_id = multiconfig.get_pair(sp)
+def _pair_sort_key(multiconfig, sp, trait=None):
+    pair_id = multiconfig.get_pair(sp, trait) if trait is not None else multiconfig.get_pair(sp)
     if pair_id:
         try:
             return (int(pair_id), sp)
@@ -226,11 +226,11 @@ def process_position(position, multiconfig, species_in_alignment):
         miss_pairs_fg = set()
         miss_pairs_bg = set()
         for sp in miss_fg:
-            pair = multiconfig.get_pair(sp)
+            pair = multiconfig.get_pair(sp, trait)
             if pair:
                 miss_pairs_fg.add(pair)
         for sp in miss_bg:
-            pair = multiconfig.get_pair(sp)
+            pair = multiconfig.get_pair(sp, trait)
             if pair:
                 miss_pairs_bg.add(pair)
 
@@ -244,11 +244,11 @@ def process_position(position, multiconfig, species_in_alignment):
         gapped_bg = set(multiconfig.trait2bg[trait]).intersection(set(z.gapped))
 
         for sp in gapped_fg:
-            pair = multiconfig.get_pair(sp)
+            pair = multiconfig.get_pair(sp, trait)
             if pair:
                 gap_pairs_fg.add(pair)
         for sp in gapped_bg:
-            pair = multiconfig.get_pair(sp)
+            pair = multiconfig.get_pair(sp, trait)
             if pair:
                 gap_pairs_bg.add(pair)
 
@@ -316,7 +316,7 @@ def iscaas(input_string, multiconfig=None, position_dict=None, max_conserved=0, 
                 if fg_string[i] == bg_string[i]:
                     if fg_species_list and bg_species_list and i < len(fg_species_list) and i < len(bg_species_list):
                         fg_sp = fg_species_list[i]
-                        pair_id = multiconfig.get_pair(fg_sp)
+                        pair_id = multiconfig.get_pair(fg_sp, trait)
                         if pair_id:
                             conserved_pair_indices.append(pair_id)
             
@@ -437,8 +437,8 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
             bg_species = processed_position.trait2ungapped_bg[x][:]
             
             # Always sort by pair number (mandatory paired mode)
-            fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
-            bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+            fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, x))
+            bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, x))
 
             # Extract amino acid for each species to create expanded pattern
             aa_tag_fg = "".join([processed_position.d[sp].split("@")[0] for sp in fg_species])
@@ -481,8 +481,8 @@ def fetch_caas(genename, processed_position, list_of_traits, output_file, maxgap
                 bg_ungapped = processed_position.trait2ungapped_bg[traitname][:]
 
                 # Always sort by pair number (mandatory paired mode)
-                fg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
-                bg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+                fg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
+                bg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
 
                 missings = "-"
 

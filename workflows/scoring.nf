@@ -149,12 +149,15 @@ workflow SCORING {
             .map { it[0] }
 
         // Lean per-scheme null files → report permulation section.
+        // Fall back to --caas_pos_pval_file / --caas_pos_sample_file so a pass that
+        // did not run CAAS_PERMULATION itself (no live CT) can still reuse a prior
+        // run's position-level null, mirroring how caas_perms_file is resolved above.
         def caas_pos_pval_resolved = (caas_pos_pval_ch ?: Channel.empty())
-            .ifEmpty { file('NO_CAAS_POS_PVAL') }
+            .ifEmpty { file(params.caas_pos_pval_file ?: 'NO_CAAS_POS_PVAL') }
             .collect()
             .map { it[0] }
         def caas_pos_sample_resolved = (caas_pos_sample_ch ?: Channel.empty())
-            .ifEmpty { file('NO_CAAS_POS_SAMPLE') }
+            .ifEmpty { file(params.caas_pos_sample_file ?: 'NO_CAAS_POS_SAMPLE') }
             .collect()
             .map { it[0] }
 

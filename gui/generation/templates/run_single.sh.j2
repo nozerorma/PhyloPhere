@@ -69,6 +69,19 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # than falling back to the NO_FILE sentinel and crashing.
     POSENRICH_BACKGROUND_FILE="${EXPLORATORY_OUTDIR}/caastools/background.output"
 
+    # CAAS permulation-excess null. CAAS_PERMULATION only runs where CT ran — i.e.
+    # the _exploratory pass — but SCORING/ENRICHMENT, which consume it, run only
+    # here. Point them at _exploratory's published outputs, exactly as the tree /
+    # trait / background substitutions above do. Without this the CAAS FCS p.perm
+    # and the report's position-level permulation section silently come out empty
+    # even though the (expensive) permulation null was already computed.
+    CAAS_PERMS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/caas_perms.rds"
+    CAAS_POS_PVAL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_pval.tsv"
+    CAAS_POS_SAMPLE_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
+    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_PVAL_FILE" "$CAAS_POS_SAMPLE_FILE"; do
+        [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
+    done
+
     # REPORTING (dataset exploration + tree name-curation, and pruning for CLASS 1 rows
     # with a PRUNE_FILE) ran identically during _exploratory — same --my_traits/--tree
     # inputs regardless of POSTPROC_MODE — so rerunning it here would only reproduce the
@@ -349,7 +362,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ct_tool": "$_CT_TOOL",
   "caas_config": "$CAAS_CONFIG",
   "patterns": "${PATTERNS:-1,2,3}",
-  "perms_cycles": "$PERMS_CYCLES",
+  "perm_pool_size": "$PERM_POOL_SIZE",
   "caas_permulation_enrichment": {{ run_defaults.caas_permulation_enrichment }},
   "caas_full_perms": "$CAAS_FULL_PERMS",
   "top_quantile": "${TOP_QUANTILE:-0.90}",
@@ -371,6 +384,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fgsize": "${FGSIZE:-6}",
   "bgsize": "${BGSIZE:-6}",
   "perm_strategy": "${PERM_STRATEGY:-BM}",
+  "max_tries": "${MAX_TRIES:-1000000}",
+  "perm_pheno_col": "${PERM_PHENO_COL:-}",
   "chunk_size": "${CHUNK_SIZE:-500}",
   "include_b0": {{ run_defaults.include_b0 }},
   "alpha_threshold": "${ALPHA_THRESHOLD:-0.05}",
@@ -477,6 +492,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_fade_site_bottom": "${SCORING_FADE_SITE_BOTTOM:-}",
   "scoring_vep_cosmic": "${SCORING_VEP_COSMIC:-}",
   "caas_perms_file": "${CAAS_PERMS_FILE:-}",
+  "caas_pos_pval_file": "${CAAS_POS_PVAL_FILE:-}",
+  "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",
 
   "vep": $_RUN_VEP,
   "vep_map_dir": "${MAP_DIR:-}",

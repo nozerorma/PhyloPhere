@@ -64,8 +64,8 @@ from os.path import exists
 from typing import Dict, List, Tuple, Optional
 
 
-def _pair_sort_key(multiconfig, sp):
-    pair_id = multiconfig.get_pair(sp)
+def _pair_sort_key(multiconfig, sp, trait=None):
+    pair_id = multiconfig.get_pair(sp, trait) if trait is not None else multiconfig.get_pair(sp)
     if pair_id:
         try:
             return (int(pair_id), sp)
@@ -309,7 +309,8 @@ def _prepare_reduced_group_line_dict_for_pvalue(line_dict, fg_species, bg_specie
 
 def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
                         max_conserved: int = 0, multiconfig=None,
-                        fg_species_list=None, bg_species_list=None) -> Tuple[bool, str, str, str]:
+                        fg_species_list=None, bg_species_list=None,
+                        trait=None) -> Tuple[bool, str, str, str]:
     """
     Check if a foreground/background pattern represents a CAAP for a given scheme.
 
@@ -411,7 +412,7 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
                 if fg_groups[i] == bg_groups[i]:
                     if i < len(fg_species_list) and i < len(bg_species_list):
                         fg_sp = fg_species_list[i]
-                        pair_id = multiconfig.get_pair(fg_sp)
+                        pair_id = multiconfig.get_pair(fg_sp, trait)
                         if pair_id:
                             conserved_pair_indices.append(pair_id)
 
@@ -530,8 +531,8 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
             continue
 
         # Always sort species by pair ID (mandatory paired mode)
-        fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
-        bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp))
+        fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
+        bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
 
         # Extract amino acid for each species to create pattern string
         # Same as classical CAAS: get AA from position_obj.d[species]
@@ -548,7 +549,7 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
             # Check if this scheme detects a CAAP
             is_caap, pattern, substitution, conserved_pairs = check_caap_pattern(
                 fg_aas, bg_aas, scheme_dict, max_conserved,
-                multiconfig, fg_species, bg_species
+                multiconfig, fg_species, bg_species, trait
             )
 
             if not is_caap:

@@ -389,6 +389,37 @@ workflow {
         }
 
         println "DEBUG: params.traitname = '${params.traitname}'"
+
+        // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) + the
+        // lean position-level recovery p-values. Deliberately OUTSIDE the
+        // if (params.scoring) block below: its only real dependency is CT
+        // (ct_results.caas_perm_discovery / caas_resample_subset), and in the
+        // two-pass exploratory→complete split the pass that HAS ct_results is the
+        // exploratory one, which runs with scoring=false. Nesting this under
+        // scoring meant CAAS_PERMS_PREP's full-pool perm bootstrap ran (it is
+        // gated only on caas_permulation_enrichment, inside CT) while the consumer
+        // that turns its output into caas_perms.rds never did — in EITHER pass:
+        // exploratory has ct_results but scoring=false, complete has scoring=true
+        // but RUN_CAAS=false so ct_results is null.
+        def scoring_caas_perms_ch = null
+        def scoring_caas_perm_scores_ch = null
+        def scoring_caas_pos_pval_ch = null
+        def scoring_caas_pos_sample_ch = null
+        def caas_perm_out = null
+        if (params.caas_permulation_enrichment && ct_results) {
+            def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
+            caas_perm_out = CAAS_PERMULATION(
+                ct_results.caas_perm_discovery,
+                ct_results.caas_resample_subset,
+                ct_results.tree_file,
+                caas_universe_ch
+            )
+            scoring_caas_perms_ch = caas_perm_out.perms
+            scoring_caas_perm_scores_ch = Channel.empty()
+            scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // lean recovery p-value per (gene,position,scheme)
+            scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // lean capped sample for distribution plots
+        }
+
         if (params.scoring) {
             if (!params.ct_postproc && !params.scoring_postproc_input) {
                 error "SCORING requires CT post-processing output (--ct_postproc) or --scoring_postproc_input."
@@ -412,28 +443,7 @@ workflow {
             def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
             def scoring_vep_cosmic_ch    = params.vep        ? VEP.out.cosmic_tsv                 : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
-
-            // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) feeding
-            // the CAAS FCS p.perm path. Gated on --caas_permulation_enrichment; needs
-            // the full-pool perm-discovery + resample subset emitted by CT.
-            def scoring_caas_perms_ch = null
-            def scoring_caas_perm_scores_ch = null
-            def scoring_caas_pos_pval_ch = null
-            def scoring_caas_pos_sample_ch = null
-            def caas_perm_out = null
-            if (params.caas_permulation_enrichment && ct_results) {
-                def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
-                caas_perm_out = CAAS_PERMULATION(
-                    ct_results.caas_perm_discovery,
-                    ct_results.caas_resample_subset,
-                    ct_results.tree_file,
-                    caas_universe_ch
-                )
-                scoring_caas_perms_ch = caas_perm_out.perms
-                scoring_caas_perm_scores_ch = Channel.empty()
-                scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // lean recovery p-value per (gene,position,scheme)
-                scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // lean capped sample for distribution plots
-            }
+            // scoring_caas_* are built above, outside this block — see the comment there.
 
             SCORING(
                 scoring_postproc_ch,

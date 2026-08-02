@@ -81,15 +81,17 @@ process RESAMPLE {
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "${caas_config}" \\
-        ${params.perms_cycles} \\
+        ${params.perm_pool_size} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0} \\
-        ${params.target_pairs ?: 0} \\
         ${params.discrete_method ?: 'quintile'} \\
-        ${params.max_tries ?: 1000000}
+        ${params.max_tries ?: 1000000} \\
+        "${params.perm_pheno_col ?: ''}" \\
+        ${params.bottom_quantile ?: 0.10} \\
+        ${params.top_quantile ?: 0.90}
         """
     } else {
         """
@@ -122,15 +124,17 @@ process RESAMPLE {
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "${caas_config}" \\
-        ${params.perms_cycles} \\
+        ${params.perm_pool_size} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0} \\
-        ${params.target_pairs ?: 0} \\
         ${params.discrete_method ?: 'quintile'} \\
-        ${params.max_tries ?: 1000000}
+        ${params.max_tries ?: 1000000} \\
+        "${params.perm_pheno_col ?: ''}" \\
+        ${params.bottom_quantile ?: 0.10} \\
+        ${params.top_quantile ?: 0.90}
         """
     }
 }

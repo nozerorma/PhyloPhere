@@ -56,8 +56,15 @@ if [ "{{ run_defaults.toy_mode }}" = true ]; then
     export TAG="_toy"
     export TOY_MODE=true
     export TOY_N="{{ runtime.toy_n }}"
-    export PERMS_CYCLES="1000"
+    export PERM_POOL_SIZE="1000"
     export CAAS_FULL_PERMS="100"
+    # The draw budget must scale with the toy pool, not stay at the full-run value:
+    # toy_mode subsamples alignments, never species, so the permulation step still
+    # works on the full tree at the full acceptance rate. 1000 accepted needs ~3k
+    # draws under lambda and ~7k under BM, so 20k is ample — and it caps a run that
+    # CANNOT fill the pool at ~1 min instead of grinding through 1M draws plus two
+    # escalations before failing, which would defeat the point of a smoke test.
+    export MAX_TRIES="20000"
     export N_RANDOMIZATIONS="1000"
     export RER_PERM_BATCHES="10"
     export RER_PERMS_PER_BATCH="10"
@@ -65,8 +72,9 @@ else
     export TAG=""
     export TOY_MODE=false
     export TOY_N=""
-    export PERMS_CYCLES="{{ modules.caas.perms_cycles }}"
+    export PERM_POOL_SIZE="{{ modules.caas.perm_pool_size }}"
     export CAAS_FULL_PERMS="${CAAS_FULL_PERMS:-{{ modules.caas.caas_full_perms }}}"
+    export MAX_TRIES="{{ modules.caas.max_tries }}"
     export N_RANDOMIZATIONS="{{ modules.accumulation.accumulation_n_randomizations }}"
     export RER_PERM_BATCHES="{{ modules.rer.rer_perm_batches }}"
     export RER_PERMS_PER_BATCH="{{ modules.rer.rer_perms_per_batch }}"
@@ -130,6 +138,8 @@ export MAX_MISS_FRACTION="{{ modules.caas.max_miss_fraction }}"
 export FGSIZE="{{ modules.caas.fgsize }}"
 export BGSIZE="{{ modules.caas.bgsize }}"
 export PERM_STRATEGY="{{ modules.caas.perm_strategy }}"
+# MAX_TRIES is set in the toy_mode branch above, alongside PERM_POOL_SIZE it has to track.
+export PERM_PHENO_COL="{{ modules.caas.perm_pheno_col }}"
 export TRAITVALUES="{{ modules.caas.traitvalues }}"
 export CHUNK_SIZE="{{ modules.caas.chunk_size }}"
 export ALPHA_THRESHOLD="{{ modules.caas.alpha_threshold }}"

@@ -17,7 +17,7 @@ from pathlib import Path
 # ── Third-party ───────────────────────────────────────────────────────────────
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QTextBrowser, QVBoxLayout, QWidget
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.about import AboutInfo
@@ -36,7 +36,15 @@ class AboutTab(QWidget):
         if logo_path.is_file():
             pixmap = QPixmap(str(logo_path))
             if not pixmap.isNull():
+                logo_container = QWidget()
+                logo_container.setStyleSheet(
+                    "QWidget { background-color: #ffffff; border: 1px solid #d4d4d8; border-radius: 8px; }"
+                )
+                container_layout = QHBoxLayout(logo_container)
+                container_layout.setContentsMargins(12, 12, 12, 12)
+
                 logo_label = QLabel()
+                logo_label.setStyleSheet("background-color: transparent; border: none;")
                 logo_label.setPixmap(
                     pixmap.scaled(
                         512,
@@ -46,7 +54,9 @@ class AboutTab(QWidget):
                     )
                 )
                 logo_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
-                layout.addWidget(logo_label)
+                container_layout.addWidget(logo_label)
+                container_layout.addStretch(1)
+                layout.addWidget(logo_container)
 
         self.browser = QTextBrowser()
         self.browser.setOpenExternalLinks(True)

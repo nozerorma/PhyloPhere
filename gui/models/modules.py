@@ -43,7 +43,7 @@ class CaasConfig(ModuleConfigBase):
     ct_tool_bootstrap: bool = True
     caas_config_path: str = ""  # --caas_config
     patterns: str = "1,2,3"  # --patterns
-    perms_cycles: str = "1000000"  # --perms_cycles
+    perm_pool_size: str = "100000"  # --perm_pool_size
     caas_full_perms: str = "1000"  # --caas_full_perms
     caas_permulation_enrichment: bool = True  # --caas_permulation_enrichment
 
@@ -70,8 +70,8 @@ class CaasConfig(ModuleConfigBase):
     fgsize: str = "6"  # --fgsize
     bgsize: str = "6"  # --bgsize
     perm_strategy: str = "BM"  # --perm_strategy (FGBG|BM|lambda)
-    target_pairs: str = "0"  # --target_pairs
     max_tries: str = "1000000"  # --max_tries
+    perm_pheno_col: str = ""  # --perm_pheno_col
     traitvalues: str = ""  # --traitvalues
     chunk_size: str = "500"  # --chunk_size
     include_b0: bool = False  # --include_b0

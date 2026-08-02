@@ -2,295 +2,364 @@
 # =============================================================================
 # PHYLOPHERE: A Nextflow pipeline for Phenome-Genome studies
 # File: subworkflows/CT/local/scripts/permulations.R
-# Branch: perms_lambda
 # =============================================================================
-# Generates null trait permulations supporting BM, FGBG, and Pagel's Lambda modes.
-# Implements 2-Tier pool harvesting (Tier 1: N_obs, Tier 2: N_obs - 1) with overall Dunn index validation.
-# Auto-detects observed independent pair count (N_pairs_obs) directly from config.file (V3 cluster IDs).
+# Generates null trait permulations for CAAS significance calibration.
+#
+# Strategies (--perm_strategy):
+#   FGBG   : plain label shuffle, no phylogenetic structure.
+#   BM     : RERconverge permulation — Brownian simulation on the real tree,
+#            rank-matched back onto the observed values (simpermvec).
+#   lambda : same, but simulated on a tree rescaled by the ML Pagel's lambda of
+#            the empirical trait. Rank-matching preserves the empirical marginal
+#            exactly, so the ONLY thing the evolutionary model controls is the
+#            phylogenetic dependence structure — which is exactly what lambda
+#            parameterises. With lambda < 1 the nulls are less clade-clumped and
+#            therefore closer to the observed contrast design.
+#
+# Pool harvesting: the observed design is not a random draw — it is the output of
+# an optimiser (TRAIT_ANALYSIS pair selection) that maximises phylogenetic
+# independence. Comparing it against unfiltered nulls is not like-for-like, so
+# each draw is run through the same selection rule (lean_contrast_selector.R).
+# Every accepted permulation carries EXACTLY N_pairs_obs pairs — the null must
+# contain the same number of species as the observed design. The tiers relax only
+# the independence requirement:
+#   Tier 1 : all N_pairs_obs pairs have mod_dunn >= 1
+#   Tier 2 : exactly one pair falls below mod_dunn 1 (fallback, only used if
+#            Tier 1 cannot fill the pool within max_tries)
+# The pool is assembled Tier 1 first, so Tier 2 records only ever appear when
+# Tier 1 came up short — which keeps the downstream seeded random subset in
+# caas_permulation.nf::SUBSET_RESAMPLE_PERMS Tier-1-dominant by construction.
+#
+# The species written to resample_*.tab ARE the selector's chosen pairs: FG holds
+# the high-extreme member of each pair, BG the low-extreme member, in matched
+# pair order.
 # =============================================================================
 
 suppressPackageStartupMessages({
-  library(tibble)
-  library(readr)
   library(ape)
   library(geiger)
-  library(dplyr)
 })
 
-# Functions used by CT Resample
+log_msg <- function(tag, ...) write(paste0("[", tag, "] ", format(Sys.time()), " ", paste0(...)), stdout())
+
+# ── RERconverge permulation primitives ───────────────────────────────────────
 simulatevec <- function(namedvec, treewithbranchlengths) {
-  rm = ratematrix(treewithbranchlengths, namedvec)
-  sims = sim.char(treewithbranchlengths, rm, nsim = 1)
-  nam = rownames(sims)
-  s = as.data.frame(sims)
-  simulatedvec = s[, 1]
-  names(simulatedvec) = nam
-  simulatedvec
+  rm   <- ratematrix(treewithbranchlengths, namedvec)
+  sims <- sim.char(treewithbranchlengths, rm, nsim = 1)
+  setNames(as.data.frame(sims)[, 1], rownames(sims))
 }
 
+# Rank-matching: the simulated vector supplies the ORDERING, the observed vector
+# supplies the VALUES. The permulated marginal distribution is therefore
+# identical to the real one by construction.
 simpermvec <- function(namedvec, treewithbranchlengths) {
-  vec = simulatevec(namedvec, treewithbranchlengths)
-  simsorted = sort(vec)
-  realsorted = sort(namedvec)
-  l = length(simsorted)
-  c = 1
-  while (c <= l) {
-    simsorted[c] = realsorted[c]
-    c = c + 1
-  }
+  vec       <- simulatevec(namedvec, treewithbranchlengths)
+  simsorted <- sort(vec)
+  simsorted[] <- sort(namedvec)
   simsorted
 }
 
-# Parse positional CLI arguments
-args = commandArgs(trailingOnly=TRUE)
+# ── CLI ──────────────────────────────────────────────────────────────────────
+args <- commandArgs(trailingOnly = TRUE)
+if (length(args) < 6) {
+  stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
+       "[chunk_size] [include_b0] [discrete_method] [max_tries] [pheno_col] ",
+       "[bottom_quantile] [top_quantile]")
+}
 
-tree               <- args[1]
+arg_or <- function(i, default, cast = as.character) {
+  if (length(args) >= i && nzchar(args[i])) cast(args[i]) else default
+}
+
+tree.path          <- args[1]
 config.file        <- args[2]
-number.of.cycles   <- as.integer(args[3])
-selection.strategy <- tolower(as.character(args[4])) # "bm", "fgbg", or "lambda"
+number.of.cycles   <- as.integer(args[3])   # size of the harvested pool
+selection.strategy <- tolower(args[4])      # "bm" | "fgbg" | "lambda"
 phenotypes         <- args[5]
 outdir             <- args[6]
-chunk.size         <- ifelse(length(args) >= 7, as.integer(args[7]), 500)
-include.b0         <- TRUE
-if (length(args) >= 8) {
-  include.b0 <- tolower(as.character(args[8])) %in% c("1", "true", "t", "yes", "y")
-}
-target_pairs    <- ifelse(length(args) >= 9, as.integer(args[9]), 0L)
-discrete_method <- ifelse(length(args) >= 10, as.character(args[10]), "quintile")
-max_tries       <- ifelse(length(args) >= 11, as.integer(args[11]), 1000000L)
-pheno_col_name  <- ifelse(length(args) >= 12, as.character(args[12]), "")
+chunk.size         <- arg_or(7,  500L,       as.integer)
+include.b0         <- tolower(arg_or(8, "true")) %in% c("1", "true", "t", "yes", "y")
+discrete_method    <- arg_or(9,  "quintile")
+max_tries          <- arg_or(10, 1000000L,   as.integer)
+pheno_col_name     <- arg_or(11, "")
+bottom_quantile    <- arg_or(12, 0.10,       as.numeric)
+top_quantile       <- arg_or(13, 0.90,       as.numeric)
 
-# Create output directory
 if (!dir.exists(outdir)) {
   dir.create(outdir, recursive = TRUE)
-  write(paste("[INFO]", Sys.time(), "Created output directory:", outdir), stdout())
+  log_msg("INFO", "Created output directory: ", outdir)
 }
 
-tree.o <- read.tree(tree)
-
-# Read config file (species | binary label | cluster)
-cfg <- read.table(config.file, sep ="\t", header = FALSE, stringsAsFactors = FALSE)
-foreground.df <- subset(cfg, cfg$V2 == "1")
-background.df <- subset(cfg, cfg$V2 == "0")
-
-foreground.species <- foreground.df$V1
-background.species <- background.df$V1
-
-# Auto-detect observed pair count (N_pairs_obs) from config V3 cluster IDs if target_pairs <= 0
-if (target_pairs <= 0) {
-  if (ncol(cfg) >= 3) {
-    auto_obs_pairs <- max(suppressWarnings(as.integer(cfg$V3)), na.rm = TRUE)
-    if (is.finite(auto_obs_pairs) && auto_obs_pairs > 0) {
-      target_pairs <- auto_obs_pairs
-      write(paste("[INFO]", Sys.time(), sprintf("Auto-detected observed independent pair count from config (V3 cluster IDs): N_pairs_obs = %d", target_pairs)), stdout())
-    }
-  }
+# ── Locate the lean selector next to this script ─────────────────────────────
+# Rscript exposes the script path via `--file=` in the full commandArgs; the
+# `sys.frames()$ofile` idiom only works for source()d files and is NULL here.
+script_dir <- {
+  full <- commandArgs(trailingOnly = FALSE)
+  hit  <- grep("^--file=", full, value = TRUE)
+  if (length(hit)) dirname(normalizePath(sub("^--file=", "", hit[1]))) else getwd()
 }
+lean_script <- file.path(script_dir, "lean_contrast_selector.R")
 
-# Read phenotype file (supports 2-col TSV or multi-col TSV with header)
-pheno_raw <- read.delim(
-  phenotypes,
-  sep = "\t",
-  header = TRUE,
-  stringsAsFactors = FALSE,
-  na.strings = c("", "NA", "NaN", "nan", "NULL", "null")
-)
+# ── Config: species | binary label | pair (cluster) id ───────────────────────
+cfg <- read.table(config.file, sep = "\t", header = FALSE, stringsAsFactors = FALSE)
+foreground.species <- cfg$V1[cfg$V2 == "1"]
+background.species <- cfg$V1[cfg$V2 == "0"]
 
-# Determine species and trait columns
-if ("species" %in% names(pheno_raw)) {
-  sp_col <- "species"
-} else if ("V1" %in% names(pheno_raw)) {
-  sp_col <- "V1"
+# N_pairs_obs is ALWAYS read from the V3 cluster ids that the contrast selection
+# step wrote into the discovery config. It is deliberately not a parameter: a null
+# filtered to a different pair count than the observed design would not be
+# calibrating that design.
+if (ncol(cfg) < 3) {
+  stop("Discovery config '", config.file, "' has no V3 cluster-id column, so the ",
+       "observed independent pair count cannot be determined. Permulations must ",
+       "match the pair count produced by the contrast selection step.")
+}
+target_pairs <- suppressWarnings(max(as.integer(cfg$V3), na.rm = TRUE))
+if (!is.finite(target_pairs) || target_pairs <= 0L) {
+  stop("Could not parse a positive pair count from the config V3 column.")
+}
+n_fg <- sum(cfg$V2 == "1"); n_bg <- sum(cfg$V2 == "0")
+if (n_fg != target_pairs || n_bg != target_pairs) {
+  log_msg("WARN", sprintf(
+    "Config has %d FG / %d BG species but %d pair ids — permulations will target %d pairs",
+    n_fg, n_bg, target_pairs, target_pairs))
+}
+log_msg("INFO", sprintf("Observed independent pair count from config V3: N_pairs_obs = %d", target_pairs))
+
+# ── Phenotype table ──────────────────────────────────────────────────────────
+# Accepts both the headerless two-column traitfile the pipeline emits and a full
+# annotated TSV. Sniffed rather than assumed: reading a headerless file with
+# header=TRUE silently consumes the first species as a column name.
+first_line <- readLines(phenotypes, n = 1L, warn = FALSE)
+first_flds <- strsplit(first_line, "\t", fixed = TRUE)[[1]]
+has_header <- length(first_flds) < 2 || is.na(suppressWarnings(as.numeric(first_flds[2])))
+
+pheno_raw <- read.delim(phenotypes, sep = "\t", header = has_header,
+                        stringsAsFactors = FALSE,
+                        na.strings = c("", "NA", "NaN", "nan", "NULL", "null"))
+log_msg("INFO", sprintf("Read %d phenotype rows from %s (header=%s)",
+                        nrow(pheno_raw), basename(phenotypes), has_header))
+
+sp_col <- if ("species" %in% names(pheno_raw)) "species" else names(pheno_raw)[1]
+val_col <- if (nzchar(pheno_col_name) && pheno_col_name %in% names(pheno_raw)) {
+  pheno_col_name
 } else {
-  sp_col <- names(pheno_raw)[1]
+  cand <- setdiff(names(pheno_raw)[vapply(pheno_raw, is.numeric, logical(1))], sp_col)
+  if (length(cand)) cand[1] else names(pheno_raw)[2]
 }
-
-if (nzchar(pheno_col_name) && pheno_col_name %in% names(pheno_raw)) {
-  val_col <- pheno_col_name
-} else if ("V2" %in% names(pheno_raw)) {
-  val_col <- "V2"
-} else {
-  num_cols <- names(pheno_raw)[sapply(pheno_raw, function(x) canCoerce(x, "numeric") || is.numeric(x))]
-  num_cols <- setdiff(num_cols, sp_col)
-  val_col <- if (length(num_cols) > 0) num_cols[1] else names(pheno_raw)[2]
-}
+log_msg("INFO", sprintf("Using species column '%s' and value column '%s'", sp_col, val_col))
 
 phenotype.df <- data.frame(
-  V1 = as.character(pheno_raw[[sp_col]]),
-  V2 = suppressWarnings(as.numeric(pheno_raw[[val_col]])),
+  species = as.character(pheno_raw[[sp_col]]),
+  value   = suppressWarnings(as.numeric(pheno_raw[[val_col]])),
   stringsAsFactors = FALSE
 )
+phenotype.df <- phenotype.df[!is.na(phenotype.df$species) &
+                             is.finite(phenotype.df$value), , drop = FALSE]
+if (nrow(phenotype.df) == 0) stop("No valid phenotype rows remain after NA filtering")
 
-phenotype.df <- subset(phenotype.df, !is.na(V1) & !is.na(V2) & is.finite(V2))
+# ── Tree ─────────────────────────────────────────────────────────────────────
+tree.o <- read.tree(tree.path)
+starting.values <- setNames(phenotype.df$value, phenotype.df$species)
 
-if (nrow(phenotype.df) == 0) {
-  stop("No valid phenotype rows remain after NA filtering")
+pruned.tree <- drop.tip(tree.o, setdiff(tree.o$tip.label, names(starting.values)))
+pruned.tree <- multi2di(pruned.tree)
+pruned.tree$edge.length[pruned.tree$edge.length <= 0] <- 1e-8
+starting.values <- starting.values[pruned.tree$tip.label]
+if (any(is.na(starting.values))) stop("Internal error: NA trait values after pruning to tree tips")
+
+missing_fg <- setdiff(foreground.species, pruned.tree$tip.label)
+missing_bg <- setdiff(background.species, pruned.tree$tip.label)
+if (length(missing_fg) || length(missing_bg)) {
+  log_msg("WARN", sprintf("%d FG and %d BG config species absent from the pruned tree",
+                          length(missing_fg), length(missing_bg)))
 }
+log_msg("INFO", sprintf("Pruned tree: %d tips | target_pairs = %d | discrete_method = %s",
+                        Ntip(pruned.tree), target_pairs, discrete_method))
 
-available.species <- phenotype.df$V1
-foreground.species <- intersect(foreground.species, available.species)
-background.species <- intersect(background.species, available.species)
+# Distances are measured on the REAL tree, always — lambda rescaling belongs to
+# the generative model, not to the geometry the Dunn index is evaluated in.
+D <- cophenetic(pruned.tree)
 
-foreground.size <- length(foreground.species)
-background.size <- length(background.species)
-
-if (foreground.size == 0 || background.size == 0) {
-  stop("Foreground or background group is empty after missing-trait filtering")
-}
-
-foreground.values <- subset(phenotype.df, phenotype.df$V1 %in% foreground.species)$V2
-background.values <- subset(phenotype.df, phenotype.df$V1 %in% background.species)$V2
-
-starting.values <- phenotype.df$V2
-all.species     <- phenotype.df$V1
-names(starting.values) <- all.species
-
-pruned.tree.o <- drop.tip(tree.o, setdiff(tree.o$tip.label, all.species))
-starting.values <- starting.values[names(starting.values) %in% pruned.tree.o$tip.label]
-
-# Ensure tree is strictly bifurcating with positive branch lengths
-pruned.tree.o <- multi2di(pruned.tree.o)
-pruned.tree.o$edge.length[pruned.tree.o$edge.length <= 0] <- 1e-8
-
-# Tree Rescaling for Pagel's Lambda Mode
-simulation_tree <- pruned.tree.o
+# ── Simulation tree (lambda rescaling) ───────────────────────────────────────
+simulation_tree <- pruned.tree
+lambda_hat <- NA_real_
 if (selection.strategy == "lambda") {
-  write(paste("[INFO]", Sys.time(), "Fitting ML Pagel's lambda on empirical trait vector..."), stdout())
-  fitl <- fitContinuous(pruned.tree.o, starting.values, model = "lambda")
+  log_msg("INFO", "Fitting ML Pagel's lambda on the empirical trait vector...")
+  fitl <- fitContinuous(pruned.tree, starting.values, model = "lambda")
   lambda_hat <- as.numeric(fitl$opt$lambda)
-  write(paste("[INFO]", Sys.time(), sprintf("Estimated ML Pagel's lambda: %.4f", lambda_hat)), stdout())
-  
-  simulation_tree <- rescale(pruned.tree.o, "lambda", lambda_hat)
+  log_msg("INFO", sprintf("ML Pagel's lambda = %.4f", lambda_hat))
+  simulation_tree <- rescale(pruned.tree, "lambda", lambda_hat)
   simulation_tree$edge.length[simulation_tree$edge.length <= 0] <- 1e-8
 }
 
-# Source lean contrast selector if pair filtering is requested or lambda strategy is active
-use_lean_filter <- (target_pairs > 0)
-if (use_lean_filter) {
-  possible_paths <- c(
-    file.path(dirname(normalizePath(sys.frames()[[1]]$ofile %||% ".")), "lean_contrast_selector.R"),
-    "subworkflows/CT/local/scripts/lean_contrast_selector.R",
-    "/homes/users/mramon/scratch/PhyloPhere/subworkflows/CT/local/scripts/lean_contrast_selector.R"
-  )
-  lean_script <- possible_paths[file.exists(possible_paths)][1]
-  
-  if (!is.na(lean_script) && file.exists(lean_script)) {
-    source(lean_script)
-    write(paste("[INFO]", Sys.time(), sprintf("Lean contrast filtering ENABLED from %s (target_pairs = %d, discrete_method = %s)", lean_script, target_pairs, discrete_method)), stdout())
-  } else {
-    warning("lean_contrast_selector.R not found; proceeding without pair count filtering")
-    use_lean_filter <- FALSE
-  }
+# ── Lean selector ────────────────────────────────────────────────────────────
+if (!file.exists(lean_script)) {
+  stop("lean_contrast_selector.R not found next to permulations.R (looked in '",
+       script_dir, "'). Pair-count and independence filtering cannot be applied.")
 }
+source(lean_script)
+log_msg("INFO", "Lean contrast filtering enabled from ", lean_script)
 
-# Write b_0 if requested
+# ── b_0: the real labeling ───────────────────────────────────────────────────
 if (include.b0) {
-  write(paste("[INFO]", Sys.time(), "Writing b_0 (original trait configuration) to resample_000.tab"), stdout())
-  b0.df <- data.frame(matrix(ncol = 3, nrow = 1))
-  b0.outline <- c("b_0", paste(foreground.species, collapse=","), paste(background.species, collapse=","))
-  b0.df[1,] <- b0.outline
-  b0.filepath <- file.path(outdir, "resample_000.tab")
-  write.table(b0.df, sep="\t", col.names=FALSE, row.names=FALSE, file=b0.filepath, quote=FALSE)
+  write.table(
+    data.frame("b_0", paste(foreground.species, collapse = ","),
+               paste(background.species, collapse = ",")),
+    file = file.path(outdir, "resample_000.tab"),
+    sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE
+  )
+  log_msg("INFO", "Wrote b_0 (original trait configuration) to resample_000.tab")
 }
 
-# HARVESTING LOOP WITH TIER 1 & TIER 2 POOLING
+# ── Harvest ──────────────────────────────────────────────────────────────────
+# Three quantities govern this step and they are deliberately distinct:
+#   max_tries      — draw budget (escalated below if the pool comes up short)
+#   pool_size      — accepted permulations to harvest; the position-level null
+#   caas_full_perms— drawn downstream from the pool for the FCS null (not seen here)
+#
+# If the budget is exhausted before the pool is full, the budget is raised by 50%
+# and harvesting RESUMES (accepted records are kept, not discarded). After two
+# escalations the run fails loudly rather than silently producing a thin null.
 start.time <- Sys.time()
-write(paste("[START]", start.time, sprintf("Beginning permulation generation (strategy: %s, max_tries: %d)...", selection.strategy, max_tries)), stdout())
+log_msg("START", sprintf("Harvesting pool (strategy: %s, pool_size: %d, max_tries: %d)",
+                         selection.strategy, number.of.cycles, max_tries))
 
-tier1_list <- list() # N_pairs_perm == target_pairs & mod_dunn >= 1.0
-tier2_list <- list() # N_pairs_perm == target_pairs - 1 & mod_dunn >= 1.0
-
+tier1 <- vector("list", number.of.cycles)
+tier2 <- vector("list", number.of.cycles)
+n1 <- 0L; n2 <- 0L
 total_draws <- 0L
+reject_reasons <- character(0)
 
-while (length(tier1_list) < number.of.cycles && total_draws < max_tries) {
-  total_draws <- total_draws + 1L
-  
-  if (selection.strategy == "fgbg") {
-    permulated_phenotype <- sample(starting.values)
-  } else {
-    permulated_phenotype <- simpermvec(starting.values, simulation_tree)
-  }
-  
-  if (use_lean_filter) {
-    eval_res <- evaluate_lean_contrast_selection(
-      trait_vec = permulated_phenotype,
-      tree = pruned.tree.o,
-      target_pairs = target_pairs,
-      discrete_method = discrete_method
-    )
-    
-    if (eval_res$tier == 1L) {
-      tier1_list[[length(tier1_list) + 1L]] <- permulated_phenotype
-    } else if (eval_res$tier == 2L && length(tier2_list) < number.of.cycles) {
-      tier2_list[[length(tier2_list) + 1L]] <- permulated_phenotype
+MAX_ESCALATIONS  <- 2L
+ESCALATION_FACTOR <- 1.5
+budget      <- max_tries
+escalations <- 0L
+
+repeat {
+  while (n1 < number.of.cycles && total_draws < budget) {
+    total_draws <- total_draws + 1L
+
+    pvec <- if (selection.strategy == "fgbg") {
+      setNames(sample(unname(starting.values)), names(starting.values))
+    } else {
+      simpermvec(starting.values, simulation_tree)
     }
-  } else {
-    tier1_list[[length(tier1_list) + 1L]] <- permulated_phenotype
+
+    e <- evaluate_lean_contrast_selection(
+      trait_vec = pvec, D = D, target_pairs = target_pairs,
+      discrete_method = discrete_method,
+      bottom_quantile = bottom_quantile, top_quantile = top_quantile
+    )
+
+    if (e$tier == 1L) {
+      n1 <- n1 + 1L; tier1[[n1]] <- e
+    } else if (e$tier == 2L && n2 < number.of.cycles) {
+      n2 <- n2 + 1L; tier2[[n2]] <- e
+    } else if (e$tier == 0L) {
+      reject_reasons <- c(reject_reasons, e$reason)
+    }
+
+    if (total_draws %% 5000 == 0 || n1 == number.of.cycles) {
+      el <- as.numeric(difftime(Sys.time(), start.time, units = "secs"))
+      log_msg("PROGRESS", sprintf("draws=%d/%d | Tier1=%d/%d | Tier2=%d | %.0f draws/s | %.1f min",
+                                  total_draws, budget, n1, number.of.cycles, n2,
+                                  total_draws / el, el / 60))
+    }
   }
-  
-  if (total_draws %% 500 == 0 || length(tier1_list) == number.of.cycles) {
-    elapsed <- as.numeric(difftime(Sys.time(), start.time, units="secs"))
-    write(sprintf("[%s] Draws: %d | Tier 1: %d/%d | Tier 2: %d | Elapsed: %.1f min",
-                  format(Sys.time(), "%H:%M:%S"),
-                  total_draws,
-                  length(tier1_list),
-                  number.of.cycles,
-                  length(tier2_list),
-                  elapsed / 60), stdout())
-  }
+
+  if (n1 >= number.of.cycles || escalations >= MAX_ESCALATIONS) break
+
+  escalations <- escalations + 1L
+  budget <- as.integer(ceiling(budget * ESCALATION_FACTOR))
+  log_msg("WARN", sprintf(
+    "Pool not filled from Tier 1 (%d/%d) after %d draws — escalating max_tries by %.0f%% to %d (escalation %d of %d)",
+    n1, number.of.cycles, total_draws, 100 * (ESCALATION_FACTOR - 1), budget, escalations, MAX_ESCALATIONS))
 }
 
-# Assemble final accepted pool of permulations (Priority: Tier 1 -> Tier 2)
-n_tier1 <- length(tier1_list)
-needed  <- number.of.cycles - n_tier1
-
-if (needed <= 0) {
-  final_pool <- tier1_list[1:number.of.cycles]
-  write(paste("[INFO]", Sys.time(), sprintf("Target pool achieved using 100%% Tier 1 permulations (%d/%d)", number.of.cycles, number.of.cycles)), stdout())
+# ── Assemble the pool: Tier 1 first, Tier 2 only to fill a shortfall ─────────
+if (n1 >= number.of.cycles) {
+  pool <- tier1[seq_len(number.of.cycles)]
+  log_msg("INFO", sprintf("Pool filled entirely from Tier 1 (%d/%d) in %d draws%s",
+                          number.of.cycles, number.of.cycles, total_draws,
+                          if (escalations) sprintf(" after %d escalation(s)", escalations) else ""))
+} else if (n1 + n2 >= number.of.cycles) {
+  use2 <- number.of.cycles - n1
+  pool <- c(tier1[seq_len(n1)], tier2[seq_len(use2)])
+  log_msg("WARN", sprintf(
+    "Tier 1 exhausted after %d draws and %d escalation(s): topping up with Tier 2 (one pair below Dunn 1). %d Tier-1 + %d Tier-2 = %d/%d records",
+    total_draws, escalations, n1, use2, length(pool), number.of.cycles))
 } else {
-  n_tier2_use <- min(needed, length(tier2_list))
-  final_pool <- c(tier1_list, tier2_list[seq_len(n_tier2_use)])
-  write(paste("[WARN]", Sys.time(), sprintf("Harvested %d Tier 1 permulations + %d Tier 2 permulations (Total: %d/%d)",
-                                            n_tier1, n_tier2_use, length(final_pool), number.of.cycles)), stdout())
+  tab <- sort(table(reject_reasons), decreasing = TRUE)
+  top <- seq_len(min(3, length(tab)))
+  stop(sprintf(
+    paste0("Permulation pool could not be filled: %d Tier-1 + %d Tier-2 = %d of the requested %d ",
+           "after %d draws and %d escalation(s) of max_tries (final budget %d).\n",
+           "  The downstream FCS null (caas_full_perms) is drawn from this pool, so continuing ",
+           "would silently under-power it.\n",
+           "  Top rejection reasons: %s\n",
+           "  Consider: %sa larger --max_tries, or a smaller --perm_pool_size."),
+    n1, n2, n1 + n2, number.of.cycles, total_draws, escalations, budget,
+    if (length(tab)) paste(sprintf("%s (%d)", names(tab)[top], as.integer(tab)[top]), collapse = "; ") else "none recorded",
+    if (selection.strategy != "lambda") "--perm_strategy lambda (accepts far more designs than BM), " else ""))
 }
 
-if (length(final_pool) == 0) {
-  stop("Failed to harvest any valid permulations within max_tries limit")
+# ── Write resample chunks + a tier/Dunn manifest ─────────────────────────────
+rows      <- vector("list", length(pool))
+manifest  <- vector("list", length(pool))
+file.counter <- 1L; chunk.start <- 1L
+
+flush_chunk <- function(from, to) {
+  fp <- file.path(outdir, sprintf("resample_%03d.tab", file.counter))
+  write.table(do.call(rbind, rows[from:to]), file = fp, sep = "\t",
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+  file.counter <<- file.counter + 1L
 }
 
-# Write resample chunks to disk
-simulated.traits.df <- data.frame(matrix(ncol = 3, nrow = 0))
-chunk.counter <- 1
-file.counter  <- 1
-
-for (b in seq_along(final_pool)) {
-  pvec <- final_pool[[b]]
-  cycle.tag <- paste("b", as.character(b), sep = "_")
-  x <- enframe(pvec)
-  
-  potential.fg.df <- subset(x, value %in% foreground.values)
-  potential.bg.df <- subset(x, value %in% background.values)
-  
-  fg.species <- sample(potential.fg.df$name, foreground.size)
-  bg.species <- sample(potential.bg.df$name, background.size)
-  
-  outline <- c(cycle.tag, paste(fg.species, collapse=","), paste(bg.species, collapse=","))
-  simulated.traits.df[nrow(simulated.traits.df) + 1, ] <- outline
-  
-  chunk.counter <- chunk.counter + 1
-  
-  if (chunk.counter > chunk.size || b == length(final_pool)) {
-    filename <- sprintf("resample_%03d.tab", file.counter)
-    filepath <- file.path(outdir, filename)
-    
-    write.table(simulated.traits.df, sep="\t", col.names=FALSE, row.names=FALSE, file=filepath, quote=FALSE)
-    
-    simulated.traits.df <- data.frame(matrix(ncol = 3, nrow = 0))
-    chunk.counter <- 1
-    file.counter  <- file.counter + 1
+for (b in seq_along(pool)) {
+  e <- pool[[b]]
+  rows[[b]] <- data.frame(
+    cycle = paste0("b_", b),
+    fg    = paste(e$fg, collapse = ","),
+    bg    = paste(e$bg, collapse = ","),
+    stringsAsFactors = FALSE
+  )
+  # fg_values/bg_values are the PERMULATED trait values of the written species,
+  # with the quantile cut-offs they were selected against — so the pool can be
+  # audited: every fg value >= q_upper, every bg value <= q_lower, in every row.
+  # Written at full precision on purpose: a quantile cut-off is itself an
+  # observed trait value, so a species sitting exactly ON the threshold is the
+  # common case, and rounding the value but not the threshold makes those rows
+  # look like violations.
+  fmt <- function(x) paste(format(x, digits = 15, trim = TRUE), collapse = ",")
+  manifest[[b]] <- data.frame(cycle = paste0("b_", b), tier = e$tier,
+                              n_pairs = e$n_pairs, dunn_min = e$dunn_min,
+                              n_pairs_below_1 = e$n_below,
+                              q_lower = e$q_lower, q_upper = e$q_upper,
+                              fg_values = fmt(e$fg_values),
+                              bg_values = fmt(e$bg_values),
+                              stringsAsFactors = FALSE)
+  if (b - chunk.start + 1L >= chunk.size || b == length(pool)) {
+    flush_chunk(chunk.start, b)
+    chunk.start <- b + 1L
   }
 }
 
-end.time <- Sys.time()
-total.elapsed <- as.numeric(difftime(end.time, start.time, units="mins"))
-write(paste("[COMPLETE]", end.time, "| Generated", length(final_pool), "permulation records from", total_draws, "draws in", round(total.elapsed, 2), "minutes"), stdout())
+write.table(do.call(rbind, manifest), file = file.path(outdir, "permulation_manifest.tsv"),
+            sep = "\t", row.names = FALSE, quote = FALSE)
+
+# ── Summary ──────────────────────────────────────────────────────────────────
+tiers <- vapply(pool, function(e) e$tier, integer(1))
+dunns <- vapply(pool, function(e) e$dunn_min, numeric(1))
+elapsed <- as.numeric(difftime(Sys.time(), start.time, units = "mins"))
+log_msg("COMPLETE", sprintf(
+  "%d records (Tier1=%d, Tier2=%d) from %d draws | acceptance %.2f%% | median overall Dunn %.3f | %.2f min%s",
+  length(pool), sum(tiers == 1L), sum(tiers == 2L), total_draws,
+  100 * length(pool) / total_draws, median(dunns), elapsed,
+  if (is.finite(lambda_hat)) sprintf(" | lambda = %.4f", lambda_hat) else ""))
+if (length(reject_reasons)) {
+  tab <- sort(table(reject_reasons), decreasing = TRUE)
+  for (i in seq_len(min(3, length(tab)))) {
+    log_msg("INFO", sprintf("  rejected %6d x %s", as.integer(tab)[i], names(tab)[i]))
+  }
+}

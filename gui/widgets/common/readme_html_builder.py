@@ -87,7 +87,12 @@ def build_qtextbrowser_html(
         src = m.group(2)
         is_logo = "logo" in alt.lower() or "logo" in src.lower()
         if is_logo or src.endswith("logo.png"):
-            return f'<p align="left"><img src="{src}" height="240" alt="{html.escape(alt)}"></p>'
+            return (
+                f'<p align="left" style="margin: 12px 0;">'
+                f'<span style="background-color: #ffffff; border: 1px solid #d4d4d8; border-radius: 8px; padding: 10px 16px; display: inline-block;">'
+                f'<img src="{src}" height="240" alt="{html.escape(alt)}" style="background-color: #ffffff; border: none;">'
+                f'</span></p>'
+            )
         return f'<p><img src="{src}" alt="{html.escape(alt)}" style="max-width: 100%; height: auto;"></p>'
 
     text = re.sub(r"!\[([^\]]*)\]\(([^)]+)\)", parse_img, text)
