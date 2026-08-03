@@ -381,14 +381,22 @@ selected_pairs_tree
 This section extracts species  for use in bootstrap/permutation testing.
 ```{r bootstrap_traitfiles, message=FALSE, warning=FALSE}
 
-# Extract malignant prevalence traitfile with ZIMS-ACE validation
+# Extract bootstrap traitfile, retaining count columns (n_trait/c_trait) if present
+boot_cols <- c("species", trait)
+if (exists("n_trait", inherits = TRUE) && nzchar(n_trait) && n_trait %in% names(trait_df)) {
+  boot_cols <- c(boot_cols, n_trait)
+}
+if (exists("c_trait", inherits = TRUE) && nzchar(c_trait) && c_trait %in% names(trait_df)) {
+  boot_cols <- c(boot_cols, c_trait)
+}
+
 bootstrap_traitfile <- trait_df %>%
-  dplyr::select(species, trait) %>%
-  dplyr::filter(!is.na(trait))
+  dplyr::select(all_of(boot_cols)) %>%
+  dplyr::filter(!is.na(.data[[trait]]))
 
 cat("Removed", nrow(trait_df) - nrow(bootstrap_traitfile), "species with NA trait values from bootstrap traitfile\n")
 
-# Save malignant traitfile
+# Save bootstrap traitfile with headers so permulations.R can auto-detect count columns
 boot_path <- file.path(bootstrap_traitfile_dir)
 createDir(boot_path)
 write.table(
@@ -396,7 +404,7 @@ write.table(
   file.path(boot_path, "boot_traitfile.tab"), 
   quote = FALSE, 
   row.names = FALSE, 
-  col.names = FALSE, 
+  col.names = TRUE, 
   sep = "\t"
 )
 

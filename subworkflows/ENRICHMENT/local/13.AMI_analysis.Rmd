@@ -887,10 +887,9 @@ prepare_gene_attributes <- function(df) {
     out$pct_bottom10 <- FALSE; out$pct_bottom5 <- FALSE; out$pct_bottom1 <- FALSE
   }
   
-  # Significance gates (gene has >=1 position passing position-level gate_sig/gate_fdr)
+  # Significance gate (gene has >=1 position passing position-level gate_sig)
   out$flag_gate_sig <- .istrue(.col("gene_caas_gate_sig"))
-  out$flag_gate_fdr <- .istrue(.col("gene_caas_gate_fdr"))
-  
+
   # FADE
   out$flag_fade_top    <- .istrue(.col("fade_significant_top"))
   out$flag_fade_bottom <- .istrue(.col("fade_significant_bottom"))
@@ -915,7 +914,7 @@ prepare_gene_attributes <- function(df) {
 compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label) {
   if (is.na(preferred_names) || preferred_names == "" || is.null(attr_df)) {
     return(tibble::tibble(
-      gate_sig = NA_real_, gate_fdr = NA_real_,
+      gate_sig = NA_real_,
       top10 = NA_real_, top5 = NA_real_, top1 = NA_real_,
       bot10 = NA_real_, bot5 = NA_real_, bot1 = NA_real_,
       fade = NA_real_, fade_top = NA_real_, fade_bottom = NA_real_,
@@ -927,7 +926,7 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
   sub_attr <- attr_df %>% dplyr::filter(gene %in% genes)
   if (nrow(sub_attr) == 0) {
     return(tibble::tibble(
-      gate_sig = 0, gate_fdr = 0,
+      gate_sig = 0,
       top10 = 0, top5 = 0, top1 = 0,
       bot10 = 0, bot5 = 0, bot1 = 0,
       fade = 0, fade_top = 0, fade_bottom = 0,
@@ -941,7 +940,6 @@ compute_term_overlap_percentages <- function(preferred_names, attr_df, dir_label
 
   tibble::tibble(
     gate_sig = round_pct(sub_attr$flag_gate_sig),
-    gate_fdr = round_pct(sub_attr$flag_gate_fdr),
     top10    = round_pct(sub_attr$pct_top10),
     top5     = round_pct(sub_attr$pct_top5),
     top1     = round_pct(sub_attr$pct_top1),
@@ -1200,7 +1198,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
             dplyr::select(
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `gate_sig (%)` = gate_sig, `gate_fdr (%)` = gate_fdr,
+              `gate_sig (%)` = gate_sig,
               `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
               `fade_top (%)` = fade_top, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
               `accum_top (%)` = accum_top
@@ -1210,7 +1208,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
             dplyr::select(
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `gate_sig (%)` = gate_sig, `gate_fdr (%)` = gate_fdr,
+              `gate_sig (%)` = gate_sig,
               `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
               `fade_bottom (%)` = fade_bottom, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
               `accum_bottom (%)` = accum_bottom
@@ -1220,7 +1218,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
             dplyr::select(
               Module = cluster, Genes = n_genes,
               `Representative genes` = genes, `Top enriched terms` = description,
-              `gate_sig (%)` = gate_sig, `gate_fdr (%)` = gate_fdr,
+              `gate_sig (%)` = gate_sig,
               `top10% (%)` = top10, `top5% (%)` = top5, `top1% (%)` = top1,
               `bot10% (%)` = bot10, `bot5% (%)` = bot5, `bot1% (%)` = bot1,
               `fade (%)` = fade, `rer_acc (%)` = rer_acc, `rer_decc (%)` = rer_decc,
@@ -1429,7 +1427,6 @@ collapsible_table <- function(df) {
     `Representative genes` = genes,
     `Top enriched terms` = description,
     `gate_sig (%)` = if ("gate_sig" %in% names(df)) gate_sig else NA,
-    `gate_fdr (%)` = if ("gate_fdr" %in% names(df)) gate_fdr else NA,
     `DOMINO p` = if ("domino_p_value" %in% names(df)) signif(domino_p_value, 3) else NA,
     `DOMINO p.adj` = if ("domino_p_adj" %in% names(df)) signif(domino_p_adj, 3) else NA
   ) %>% dplyr::select(dplyr::where(~ !all(is.na(.))))
@@ -1535,7 +1532,7 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
 
     sel <- if (is.null(filter_val)) results else Filter(function(r) r$direction == filter_val, results)
 
-    cat("\n\n### Modules\n\n")
+    cat("\n\n### Modules {.tabset}\n\n")
     if (length(sel) == 0) {
       cat("_No gene lists for this direction._\n\n")
     } else {

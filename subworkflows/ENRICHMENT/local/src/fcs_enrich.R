@@ -15,7 +15,7 @@
 #     genes and floors everyone else to 0; "bottom" keeps {bottom, both}. A
 #     both-direction gene contributes its full score to BOTH — never penalised.
 #   * Significance is NEVER gated into the input. It rides along as annotation on
-#     the leading-edge genes (gate_sig / gate_fdr / top-1/5/10% / cross-module).
+#     the leading-edge genes (gate_sig / top-1/5/10% / cross-module).
 #   * Multiple testing: BH per GMT (each database is its own hypothesis family);
 #     fastwilcoxGMT already BH-adjusts within a single GMT call.
 #

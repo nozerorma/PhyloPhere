@@ -91,7 +91,10 @@ process RESAMPLE {
         ${params.max_tries ?: 1000000} \\
         "${params.perm_pheno_col ?: ''}" \\
         ${params.bottom_quantile ?: 0.10} \\
-        ${params.top_quantile ?: 0.90}
+        ${params.top_quantile ?: 0.90} \\
+        "${params.n_trait ?: ''}" \\
+        "${params.c_trait ?: ''}" \\
+        ${params.resample_use_n != null ? params.resample_use_n : true}
         """
     } else {
         """
@@ -134,7 +137,10 @@ process RESAMPLE {
         ${params.max_tries ?: 1000000} \\
         "${params.perm_pheno_col ?: ''}" \\
         ${params.bottom_quantile ?: 0.10} \\
-        ${params.top_quantile ?: 0.90}
+        ${params.top_quantile ?: 0.90} \\
+        "${params.n_trait ?: ''}" \\
+        "${params.c_trait ?: ''}" \\
+        ${params.resample_use_n != null ? params.resample_use_n : true}
         """
     }
 }

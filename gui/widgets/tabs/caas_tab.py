@@ -74,6 +74,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fgsize", label="Foreground size (strategy random)"),
         FieldSpec(name="bgsize", label="Background size (strategy random)"),
         FieldSpec(name="perm_strategy", label="Permutation strategy", kind="choice", choices=("FGBG", "BM", "lambda")),
+        FieldSpec(name="resample_use_n", label="Use N (sample size) for resample if available", kind="bool"),
         FieldSpec(
             name="max_tries",
             label="Max permulation tries",

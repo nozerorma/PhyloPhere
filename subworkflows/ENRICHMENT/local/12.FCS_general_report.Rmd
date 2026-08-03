@@ -442,7 +442,7 @@ for exactly that reason — always weigh a percentage against its `n_le`.
 ```{r leadingedge, results='asis'}
 # Friendly display names per attribute column.
 disp_names <- c(
-  flag_gate_sig = "gate_sig", flag_gate_fdr = "gate_fdr",
+  flag_gate_sig = "gate_sig",
   pct_top25 = "top25%", pct_top10 = "top10%", pct_top5 = "top5%", pct_top1 = "top1%",
   pct_bottom25 = "bot25%", pct_bottom10 = "bot10%", pct_bottom5 = "bot5%", pct_bottom1 = "bot1%",
   flag_fade = "fade", flag_fade_top = "fade_top", flag_fade_bottom = "fade_bottom",
@@ -456,12 +456,12 @@ disp_names <- c(
 # quartet (25/10/5/1%), not a trio -- 25% is a real, tested tier elsewhere
 # (posenrich's own Fisher test, AMI's DOMINO search), so it belongs here too.
 cols_by_rk <- list(
-  global = c("flag_gate_sig","flag_gate_fdr","pct_top25","pct_top10","pct_top5","pct_top1",
+  global = c("flag_gate_sig","pct_top25","pct_top10","pct_top5","pct_top1",
              "pct_bottom25","pct_bottom10","pct_bottom5","pct_bottom1",
              "flag_fade","flag_rer_acc","flag_rer_decc","flag_accum"),
-  top    = c("flag_gate_sig","flag_gate_fdr","pct_top25","pct_top10","pct_top5","pct_top1",
+  top    = c("flag_gate_sig","pct_top25","pct_top10","pct_top5","pct_top1",
              "flag_fade_top","flag_rer_acc","flag_rer_decc","flag_accum_top"),
-  bottom = c("flag_gate_sig","flag_gate_fdr","pct_bottom25","pct_bottom10","pct_bottom5","pct_bottom1",
+  bottom = c("flag_gate_sig","pct_bottom25","pct_bottom10","pct_bottom5","pct_bottom1",
              "flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum_bottom")
 )
 

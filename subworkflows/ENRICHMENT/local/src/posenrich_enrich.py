@@ -2,6 +2,14 @@
 # =============================================================================
 # posenrich_enrich.py — Position-wise enrichment via fixed-cutoff Fisher tests
 # =============================================================================
+# *** PROOF OF CONCEPT — NOT VALIDATED FOR STANDALONE SIGNIFICANCE CLAIMS ***
+# This module has not had a real end-to-end production run, and its GMT
+# construction, background handling at ~1.47M positions, and significance
+# gating have not been validated against any known-truth signal. Treat its
+# output as descriptive characterization only (e.g. "does this term show up
+# near CAAS-high positions") — do not use posenrich_characterization.tsv or
+# its report tables as evidence for a biological claim on their own.
+#
 # This is NOT the gene-level FCS: FCS is a Wilcoxon rank-shift over gene scores;
 # this is a position-wise over-representation test. Rationale for testing at the
 # position level at all: the honest testable position background (all
@@ -16,19 +24,22 @@
 #                       background = the full honest tested position pool
 #                       (never restricted to "scored", so negative evidence is
 #                       never silently discarded).
-# Significance         : dual-gated on p_adj (BH per ranking x database) AND
-#                       fold_enrichment clearing a minimum effect size. This
-#                       matters because Fisher/hypergeometric tests gain
-#                       enormous power at this N (~1.47M) -- a barely-there
-#                       deviation from the null ratio (e.g. fold=0.95) can
-#                       reach a "significant" p-value on its own. That is the
-#                       general fact that any correctly-calibrated test's
-#                       power grows with N, so p-value alone is not an
-#                       adequate decision criterion at this scale. Pairing it
-#                       with a fold-enrichment floor (posenrich_fold_thr,
-#                       ~DAVID/PANTHER "moderate enrichment" convention)
-#                       mirrors the dual-threshold design already used by the
-#                       gene-level FCS report (p.adj AND p.perm).
+# Significance         : gated on p_adj (BH per ranking x database) ONLY.
+#                       fold_enrichment is computed and exposed per row but is
+#                       NOT part of the `sig` gate below (see the "sig" line in
+#                       main() for the one-line implementation) -- this matters
+#                       because Fisher/hypergeometric tests gain enormous power
+#                       at this N (~1.47M): a barely-there deviation from the
+#                       null ratio (e.g. fold=0.95) can reach a "significant"
+#                       p-value on its own. That is the general fact that any
+#                       correctly-calibrated test's power grows with N, so
+#                       p-value alone is not an adequate decision criterion at
+#                       this scale. Unlike the gene-level FCS report (dual-
+#                       gated on p.adj AND p.perm), this module does NOT
+#                       enforce a fold-enrichment floor -- `posenrich_fold_thr`
+#                       is accepted as a CLI arg but currently unused; callers
+#                       reading posenrich_characterization.tsv must apply their
+#                       own fold_enrichment cutoff if they want one.
 # =============================================================================
 
 import os
@@ -50,7 +61,7 @@ def parse_args():
                    help="characterization_layers.tsv (broad functional layers)")
     p.add_argument("--annot-file", default=None,
                    help="SCORING's fcs_stats.tsv (gene + flag_* columns) — cross-module "
-                        "corroboration flags (gate_sig/gate_fdr/fade/rer/accum), reported "
+                        "corroboration flags (gate_sig/fade/rer/accum), reported "
                         "as the %% of distinct genes in each overlap carrying each flag")
     p.add_argument("--universe", required=True,
                    help="cleaned_background_main.txt gene list (postproc-surviving)")
@@ -83,8 +94,10 @@ def parse_args():
     p.add_argument("--padj-thr", type=float, default=0.15,
                    help="BH-adjusted p-value significance threshold")
     p.add_argument("--fold-thr", type=float, default=1.5,
-                   help="minimum fold-enrichment magnitude for significance "
-                        "(fold >= thr for enrichment, or <= 1/thr for depletion)")
+                   help="NOT CURRENTLY ENFORCED (see module header) -- accepted for "
+                        "forward-compatibility but not applied to the significance gate. "
+                        "Intended meaning: minimum fold-enrichment magnitude for "
+                        "significance (fold >= thr for enrichment, or <= 1/thr for depletion)")
     return p.parse_args()
 
 

@@ -70,6 +70,7 @@ class CaasConfig(ModuleConfigBase):
     fgsize: str = "6"  # --fgsize
     bgsize: str = "6"  # --bgsize
     perm_strategy: str = "BM"  # --perm_strategy (FGBG|BM|lambda)
+    resample_use_n: bool = True  # --resample_use_n
     max_tries: str = "1000000"  # --max_tries
     perm_pheno_col: str = ""  # --perm_pheno_col
     traitvalues: str = ""  # --traitvalues

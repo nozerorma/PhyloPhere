@@ -120,9 +120,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "is_significant",
         "pvalue",
         "pvalue_boot",
-        "pvalue_fdr",
-        "pvalue_boot_fdr",
-        "alpha_fdr",
         # Pattern classification
         "convergence_type",
         # Metadata-driven convergence context
@@ -132,9 +129,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "conserved_pair",
         "sig_hyp",
         "sig_perm",
-        "sig_hyp_fdr",
-        "sig_perm_fdr",
-        "is_significant_fdr",
         # Change tracking
         "change_top",
         "change_bottom",

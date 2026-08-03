@@ -81,6 +81,7 @@
       "fgsize": "6",
       "bgsize": "6",
       "perm_strategy": "BM",
+      "resample_use_n": true,
       "max_tries": "1000000",
       "perm_pheno_col": "",
       "traitvalues": "",

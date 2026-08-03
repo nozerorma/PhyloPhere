@@ -64,7 +64,7 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [include_b0] [discrete_method] [max_tries] [pheno_col] ",
-       "[bottom_quantile] [top_quantile]")
+       "[bottom_quantile] [top_quantile] [n_col] [c_col] [resample_use_n]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -84,6 +84,9 @@ max_tries          <- arg_or(10, 1000000L,   as.integer)
 pheno_col_name     <- arg_or(11, "")
 bottom_quantile    <- arg_or(12, 0.10,       as.numeric)
 top_quantile       <- arg_or(13, 0.90,       as.numeric)
+n_col              <- arg_or(14, "")   # denominator column (e.g. adult_necropsy_count)
+c_col              <- arg_or(15, "")   # numerator column   (e.g. malignant_count)
+resample_use_n     <- tolower(arg_or(16, "true")) %in% c("1", "true", "t", "yes", "y")
 
 if (!dir.exists(outdir)) {
   dir.create(outdir, recursive = TRUE)
@@ -154,8 +157,57 @@ phenotype.df <- data.frame(
   value   = suppressWarnings(as.numeric(pheno_raw[[val_col]])),
   stringsAsFactors = FALSE
 )
-phenotype.df <- phenotype.df[!is.na(phenotype.df$species) &
-                             is.finite(phenotype.df$value), , drop = FALSE]
+
+# ── Count data → Jeffreys CIs, so the permulation can apply the SAME candidate
+# filter the observed contrast selection used. TRAIT_ANALYSIS/3.CI-composition.Rmd
+# takes the count path when both n_trait and c_trait exist, and there a pair is a
+# valid candidate iff its intervals do not overlap; otherwise it takes the discrete
+# path, whose trait_overlap rule ("one top, one bottom") the percentile selection
+# already reproduces exactly. Traits with no counts therefore need nothing here.
+if (resample_use_n) {
+  if (!nzchar(n_col) || !n_col %in% names(pheno_raw)) {
+    cand_n <- c("n_trait", "n", "n_population", "sample_size", "total_count", "N")
+    found_n <- intersect(cand_n, names(pheno_raw))
+    if (length(found_n) > 0) n_col <- found_n[1]
+  }
+  if (!nzchar(c_col) || !c_col %in% names(pheno_raw)) {
+    cand_c <- c("c_trait", "c", "c_cases", "n_cases", "cases", "C")
+    found_c <- intersect(cand_c, names(pheno_raw))
+    if (length(found_c) > 0) c_col <- found_c[1]
+  }
+}
+
+use_ci <- resample_use_n && nzchar(n_col) && nzchar(c_col) &&
+          n_col %in% names(pheno_raw) && c_col %in% names(pheno_raw)
+if (use_ci) {
+  if (!requireNamespace("binom", quietly = TRUE)) {
+    stop("Count columns were supplied but the 'binom' package is unavailable, so the ",
+         "Jeffreys CIs the observed selection used cannot be reproduced.")
+  }
+  np <- suppressWarnings(as.numeric(pheno_raw[[n_col]]))
+  nc <- suppressWarnings(as.numeric(pheno_raw[[c_col]]))
+  good <- is.finite(np) & is.finite(nc) & np > 0 & nc >= 0 & nc <= np
+  phenotype.df$ci_lb <- NA_real_; phenotype.df$ci_ub <- NA_real_
+  if (any(good)) {
+    b <- binom::binom.confint(nc[good], np[good], method = "bayes",
+                              priors = c(0.5, 0.5), conf.level = 0.95)
+    phenotype.df$ci_lb[good] <- b[, 5]; phenotype.df$ci_ub[good] <- b[, 6]
+  }
+  log_msg("INFO", sprintf("Count columns '%s'/'%s' found (resample_use_n=TRUE): %d/%d species have Jeffreys CIs — ",
+                          n_col, c_col, sum(good), length(good)),
+          "candidate pairs will be filtered on CI non-overlap (count path)")
+} else {
+  if (!resample_use_n) {
+    log_msg("INFO", "resample_use_n is FALSE in config: using the percentile/top-bottom candidate rule (discrete path)")
+  } else {
+    log_msg("INFO", "No usable count columns found: using the percentile/top-bottom candidate rule ",
+            "(the discrete path's trait_overlap)")
+  }
+}
+
+keep <- !is.na(phenotype.df$species) & is.finite(phenotype.df$value)
+if (use_ci) keep <- keep & is.finite(phenotype.df$ci_lb) & is.finite(phenotype.df$ci_ub)
+phenotype.df <- phenotype.df[keep, , drop = FALSE]
 if (nrow(phenotype.df) == 0) stop("No valid phenotype rows remain after NA filtering")
 
 # ── Tree ─────────────────────────────────────────────────────────────────────
@@ -225,6 +277,21 @@ start.time <- Sys.time()
 log_msg("START", sprintf("Harvesting pool (strategy: %s, pool_size: %d, max_tries: %d)",
                          selection.strategy, number.of.cycles, max_tries))
 
+# Phenotype records in ascending value order — the order simpermvec's rank-matching
+# assigns them in. rank_order is the identity on that table, kept explicit so the
+# BM/lambda and FGBG branches below index it the same way.
+rec_ord    <- order(starting.values)
+rec_value  <- unname(starting.values[rec_ord])
+n_rec      <- length(rec_value)
+rank_order <- seq_len(n_rec)
+rec_lb <- rec_ub <- NULL
+if (use_ci) {
+  ci_map <- setNames(phenotype.df$ci_lb, phenotype.df$species)
+  rec_lb <- unname(ci_map[names(starting.values)[rec_ord]])
+  ci_map <- setNames(phenotype.df$ci_ub, phenotype.df$species)
+  rec_ub <- unname(ci_map[names(starting.values)[rec_ord]])
+}
+
 tier1 <- vector("list", number.of.cycles)
 tier2 <- vector("list", number.of.cycles)
 n1 <- 0L; n2 <- 0L
@@ -240,16 +307,32 @@ repeat {
   while (n1 < number.of.cycles && total_draws < budget) {
     total_draws <- total_draws + 1L
 
+    # A permulation moves whole PHENOTYPE RECORDS between tips, not bare numbers:
+    # when a tip receives another species' prevalence it receives that prevalence's
+    # uncertainty too, so its confidence interval travels with it. simpermvec
+    # returns tips ordered by their simulated value with the sorted observed values
+    # assigned by rank, so rank i carries record i of the value-sorted table.
+    ord <- NULL
     pvec <- if (selection.strategy == "fgbg") {
-      setNames(sample(unname(starting.values)), names(starting.values))
+      ord <- sample.int(n_rec)
+      setNames(rec_value[ord], names(starting.values))
     } else {
-      simpermvec(starting.values, simulation_tree)
+      v <- simpermvec(starting.values, simulation_tree)
+      ord <- rank_order                       # ascending value order = record order
+      v
+    }
+
+    ci_lb_draw <- NULL; ci_ub_draw <- NULL
+    if (use_ci) {
+      ci_lb_draw <- setNames(rec_lb[ord], names(pvec))
+      ci_ub_draw <- setNames(rec_ub[ord], names(pvec))
     }
 
     e <- evaluate_lean_contrast_selection(
       trait_vec = pvec, D = D, target_pairs = target_pairs,
       discrete_method = discrete_method,
-      bottom_quantile = bottom_quantile, top_quantile = top_quantile
+      bottom_quantile = bottom_quantile, top_quantile = top_quantile,
+      ci_lb = ci_lb_draw, ci_ub = ci_ub_draw
     )
 
     if (e$tier == 1L) {

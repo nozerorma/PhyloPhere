@@ -302,7 +302,7 @@ df$core <- suppressWarnings(as.numeric(df$core))
 #   2. position evolution  = asr_path_score (asr_score). The unified ASR signal,
 #      replication-weighted via core = P(≥2 independent changes).
 # The hypergeometric pvalue is deliberately absent from the score — it became the
-# significance gate (gate_all / gate_sig / gate_fdr, section 2h).
+# significance gate (gate_all / gate_sig, section 2h).
 # row_caas:  each scheme contributes at most scheme_weight/5 to the position score
 #   (US=GS4=GS3=GS2=GS1=0.2 each; maximum achievable sum = 1.0). The /5 reflects
 #   the sum of scheme weights, not the component/axis count, so it is unchanged.
@@ -320,7 +320,7 @@ df <- df %>%
     # permutation p-value); position evolution = asr_path_score (asr_score,
     # already 0..1 and count-aware). Both raw [0,1], higher = better — NO deciles.
     # Their product gives the rank. The hypergeometric pvalue is NOT here: it is
-    # demoted to the significance gate (gate_sig / gate_fdr below).
+    # demoted to the significance gate (gate_sig below).
     phen_score = 1 - pmin(pmax(pvalue_boot, 0), 1),
     caas_row   = phen_score * asr_score,
     row_caas   = caas_row * scheme_weight
@@ -354,9 +354,6 @@ pos_scores <- df %>%
     # Display-only: most-specific scheme via first() after desc(scheme_weight) sort
     pvalue             = first(pvalue),
     pvalue_boot        = first(pvalue_boot),
-    pvalue_fdr         = if ("pvalue_fdr" %in% names(.)) first(pvalue_fdr) else NA_real_,
-    pvalue_boot_fdr    = if ("pvalue_boot_fdr" %in% names(.)) first(pvalue_boot_fdr) else NA_real_,
-    alpha_fdr          = if ("alpha_fdr" %in% names(.)) first(alpha_fdr) else NA_real_,
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
     all_mrca_posterior = first(all_mrca_posterior),
@@ -378,45 +375,30 @@ pos_scores <- df %>%
   ) %>%
   select(-has_change_top, -has_change_bottom)
 
-# ── 2h. Three-way significance gate (hypergeometric pvalue) ──────────────
+# ── 2h. Significance gate (hypergeometric pvalue) ─────────────────────────
 # The hypergeometric CAAS p-value no longer feeds CAAS_score (that is now the
-# permulation × asr_path product). Instead it gates the result into three tiers,
+# permulation × asr_path product). Instead it gates the result into two tiers,
 # so callers can keep all positions for ranking but filter to a defensible set:
 #   gate_all : every scored position (the full ranked pool)
 #   gate_sig : nominally significant         (pvalue < 0.05)
-#   gate_fdr : significant after BH-FDR       (BH-adjusted pvalue < alpha_fdr)
-# FDR/alpha_fdr are preferred from the signification metadata (which adjust over
-# the full candidate set); otherwise fallback to R's p.adjust over the aggregated subset.
+# A BH-FDR tier (gate_fdr / pvalue_hyp_fdr) used to be derived here from
+# CT_SIGNIFICATION's escalating-alpha metadata (alpha_fdr moves 0.05->0.10->0.15
+# depending on how many positions clear each threshold). That escalation is
+# legitimate within CT_SIGNIFICATION's own report, but by the time it reached
+# downstream consumers (SCORING, ENRICHMENT) it looked like a plain FDR gate
+# with no visibility into which alpha was actually used — producing the
+# confusing appearance of more positions "passing FDR" than pass raw p<0.05.
+# Removed rather than fixed in place: see CT_SIGNIFICATION's own report for
+# the legitimate escalating-FDR analysis.
 pos_scores <- pos_scores %>%
   mutate(
-    # Use alpha_fdr from input if present, otherwise default to 0.05
-    alpha_fdr_val = if ("alpha_fdr" %in% names(pos_scores) && any(!is.na(pos_scores$alpha_fdr))) {
-      if_else(is.na(alpha_fdr), 0.05, alpha_fdr)
-    } else {
-      0.05
-    }
-  ) %>%
-  group_by(caap_group) %>%
-  mutate(
-    pvalue_hyp_fdr = if ("pvalue_fdr" %in% names(pos_scores) && any(!is.na(pos_scores$pvalue_fdr))) {
-      pvalue_fdr
-    } else {
-      p.adjust(pvalue, method = "BH")
-    }
-  ) %>%
-  ungroup() %>%
-  mutate(
     gate_all       = TRUE,
-    gate_sig       = !is.na(pvalue) & pvalue < 0.05,
-    gate_fdr       = !is.na(pvalue_hyp_fdr) & pvalue_hyp_fdr < alpha_fdr_val
-  ) %>%
-  mutate(alpha_fdr = alpha_fdr_val) %>%
-  select(-alpha_fdr_val)
+    gate_sig       = !is.na(pvalue) & pvalue < 0.05
+  )
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
-cat(sprintf("  Significance gate: %d significant (p<0.05), %d FDR-significant (BH<0.05)\n",
-            sum(pos_scores$gate_sig, na.rm = TRUE),
-            sum(pos_scores$gate_fdr, na.rm = TRUE)))
+cat(sprintf("  Significance gate: %d significant (p<0.05)\n",
+            sum(pos_scores$gate_sig, na.rm = TRUE)))
 
 cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             min(pos_scores$CAAS_score, na.rm = TRUE),
@@ -728,13 +710,12 @@ gene_caas <- pos_scores %>%
       vals <- CAAS_score[change_side %in% c("bottom", "both")]
       if (length(vals) > 0) quantile(vals, 0.90, na.rm = TRUE) else NA_real_
     },
-    # ── Significance gates rolled up to gene level (boolean, not magnitude) ──
-    # TRUE if the gene has >=1 position passing the position-level gate_sig /
-    # gate_fdr (section 2h). Downstream characterization only ever needed
-    # "was this gene touched by a gated position", not a CAAS_score quantile
-    # restricted to gated positions.
+    # ── Significance gate rolled up to gene level (boolean, not magnitude) ──
+    # TRUE if the gene has >=1 position passing the position-level gate_sig
+    # (section 2h). Downstream characterization only ever needed "was this
+    # gene touched by a gated position", not a CAAS_score quantile restricted
+    # to gated positions.
     gene_caas_gate_sig = any(gate_sig %in% TRUE),
-    gene_caas_gate_fdr = any(gate_fdr %in% TRUE),
     # ── ASR-axis rankings (permulation-bearing): 0.90-quantile of asr_path_score ──
     # These mirror the gene_caas_score_*_all columns but aggregate asr_score (the
     # scheme-weighted asr_path_score) instead of the two-axis CAAS_score. The CAAS
@@ -1066,10 +1047,10 @@ if (length(score_cols) >= 2) {
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
 pos_out <- pos_scores %>%
-  select(Gene, Position, any_of(c("pvalue", "pvalue_boot", "pvalue_hyp_fdr", "alpha_fdr")),
+  select(Gene, Position, any_of(c("pvalue", "pvalue_boot")),
          asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core")),
          any_of("phen_score"), biochem_weight_sum, CAAS_score,
-         any_of(c("gate_all", "gate_sig", "gate_fdr")), change_side,
+         any_of(c("gate_all", "gate_sig")), change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))
 
@@ -1082,7 +1063,7 @@ gene_out <- gene_scores %>%
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
     gene_caas_score_top_all, gene_caas_score_bottom_all,
-    gene_caas_gate_sig, gene_caas_gate_fdr,
+    gene_caas_gate_sig,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
     any_of(c("accum_fisher_p", "accum_fdr", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
@@ -1119,7 +1100,6 @@ fcs_stats <- tibble(
   score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top_all"))),
   score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom_all"))),
   flag_gate_sig    = .istrue(.col(gene_scores, "gene_caas_gate_sig")),
-  flag_gate_fdr    = .istrue(.col(gene_scores, "gene_caas_gate_fdr")),
   flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
   flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
   flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),

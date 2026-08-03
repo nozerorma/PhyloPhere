@@ -100,6 +100,7 @@ Resamples virtual phenotypes for CAAS bootstrap analysis.
 Usage:
 --tree                      <"nwtree_file">              null
 --perm_strategy              <"FGBG|BM|lambda">            "BM"
+--resample_use_n             <true|false>                 true   (use N/C sample size count traits for Jeffreys CI filtering if available)
 --fgsize                     <INTEGER>                    6
 --bgsize                     <INTEGER>                    6
 --traitvalues                 <"traitvalues_file">          null   (required for BM/lambda)

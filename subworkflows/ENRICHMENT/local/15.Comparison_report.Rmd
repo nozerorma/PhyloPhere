@@ -174,8 +174,14 @@ has_le <- nrow(le) > 0
 has_ami <- .file_ok(params$ami_module_desc_file)
 ami_df  <- if (has_ami) readr::read_tsv(params$ami_module_desc_file, show_col_types = FALSE) else NULL
 
-has_posenrich_dotplot <- .file_ok(params$posenrich_dotplot_file)
-posenrich_dotplot_df  <- if (has_posenrich_dotplot) readr::read_tsv(params$posenrich_dotplot_file, show_col_types = FALSE) else NULL
+# Unwired for now (proof-of-concept module, not validated -- see
+# posenrich_enrich.py's header): the merged cross-database dotplot below drew
+# directly on posenrich's Fisher-test output, which has not had a real
+# end-to-end run or any check against a known-truth signal. Forced off here
+# rather than reading the file, so the file itself is a no-op input until
+# posenrich is validated. Re-enable by restoring the .file_ok(...) check.
+has_posenrich_dotplot <- FALSE
+posenrich_dotplot_df  <- NULL
 
 # posenrich_leading_edge.tsv: gene:position members of significant posenrich
 # terms (already position-granular -- ranking, database, pathway, top_frac,
@@ -608,6 +614,15 @@ for (dr in c("Global", "Top", "Bottom")) {
 
 # Posenrich position-level enrichment {.tabset .tabset-fade}
 
+> [!NOTE]
+> **The cross-database merged dotplot/table below is temporarily unwired.**
+> posenrich is a proof-of-concept module (no real end-to-end run yet, no
+> validation against a known-truth signal — see `posenrich_enrich.py`'s
+> header) and its comparative view here has been disabled until that
+> validation happens. The per-gene leading-edge corroboration used in the
+> Integrated gene scorecard and Interesting Genes/Positions tables further
+> down is unaffected.
+
 `r if (!has_posenrich_dotplot && !has_posenrich_le) "> **No posenrich outputs available (--posenrich was off, or the files weren't wired in) — skipping.**"`
 
 Position-level enrichment ([14.Position_enrichment_report.Rmd](14.Position_enrichment_report.Rmd))
@@ -700,7 +715,11 @@ for (dr in c("Global", "Top", "Bottom")) {
       `Orthog. signal` = max(signal, na.rm = TRUE),
       .groups = "drop"
     ) %>%
-    dplyr::arrange(dplyr::desc(`Orthog. signal`)) %>%
+    # Same convention as 14.Position_enrichment_report.Rmd's "Term -> cutoff
+    # membership" table: recurrence (n occurrences) first, alphabetical tie-break
+    # -- not Orthog. signal, which answers a different question (corroboration
+    # strength) than "how many cutoffs did this term recur at".
+    dplyr::arrange(dplyr::desc(`n occurrences`), Description) %>%
     dplyr::select(-.merge_id) %>%
     head(params$top_n)
 

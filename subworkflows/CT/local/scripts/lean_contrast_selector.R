@@ -79,6 +79,15 @@ lean_thresholds <- function(trait_vec, discrete_method, bottom_quantile, top_qua
 #'                        "median_sd", or "parameterized" — as in common.config.
 #' @param bottom_quantile Lower cut-off when method = "parameterized".
 #' @param top_quantile    Upper cut-off when method = "parameterized".
+#' @param ci_lb,ci_ub     Optional named numeric vectors of per-tip confidence
+#'                        bounds for THIS permulated vector. When supplied the
+#'                        selector uses the count-data rule of
+#'                        TRAIT_ANALYSIS/3.CI-composition.Rmd — a pair is a valid
+#'                        candidate iff its intervals do not overlap — instead of
+#'                        the percentile rule. Traits with no n/c columns (the
+#'                        categorical path) simply omit these and keep the
+#'                        percentile behaviour, which is itself the faithful
+#'                        replication of that path's `trait_overlap`.
 #' @return list(tier, n_pairs, dunn_min, n_below, fg, bg, reason)
 #'   Both accepted tiers carry EXACTLY target_pairs pairs — the permulated design
 #'   must contain the same number of species as the observed one. The tiers differ
@@ -93,7 +102,9 @@ evaluate_lean_contrast_selection <- function(trait_vec,
                                              target_pairs,
                                              discrete_method = "quintile",
                                              bottom_quantile = 0.10,
-                                             top_quantile = 0.90) {
+                                             top_quantile = 0.90,
+                                             ci_lb = NULL,
+                                             ci_ub = NULL) {
 
   reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_) {
     list(tier = 0L, n_pairs = n_pairs, dunn_min = dunn, n_below = n_below,
@@ -106,25 +117,46 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   if (length(sp) < 2L * target_pairs) return(reject("too few species with distances"))
   trait_vec <- trait_vec[sp]
 
-  th <- lean_thresholds(trait_vec, discrete_method, bottom_quantile, top_quantile)
-  high_sp <- names(trait_vec)[trait_vec >= th$upper & trait_vec > th$med]
-  low_sp  <- names(trait_vec)[trait_vec <= th$lower & trait_vec < th$med]
-  if (length(high_sp) < target_pairs || length(low_sp) < target_pairs) {
-    return(reject("not enough extreme species to form target_pairs"))
+  use_ci <- !is.null(ci_lb) && !is.null(ci_ub)
+
+  if (use_ci) {
+    # Count-data path: candidates are ALL ordered pairs whose confidence
+    # intervals do not overlap, with no percentile restriction — matching
+    # create_pairwise_data()'s trait_overlap = ci_overlap(...) branch.
+    lb <- ci_lb[sp]; ub <- ci_ub[sp]
+    ok <- is.finite(lb) & is.finite(ub)
+    if (sum(ok) < 2L * target_pairs) return(reject("too few species with usable CIs"))
+    sp <- sp[ok]; trait_vec <- trait_vec[sp]; lb <- lb[sp]; ub <- ub[sp]
+    high_sp <- low_sp <- sp
+  } else {
+    th <- lean_thresholds(trait_vec, discrete_method, bottom_quantile, top_quantile)
+    high_sp <- names(trait_vec)[trait_vec >= th$upper & trait_vec > th$med]
+    low_sp  <- names(trait_vec)[trait_vec <= th$lower & trait_vec < th$med]
+    if (length(high_sp) < target_pairs || length(low_sp) < target_pairs) {
+      return(reject("not enough extreme species to form target_pairs"))
+    }
   }
 
-  # ---- candidate pairs: every high x low combination -------------------------
+  # ---- candidate pairs -------------------------------------------------------
   n_cand <- length(high_sp) * length(low_sp)
   c_hi   <- character(n_cand); c_lo <- character(n_cand)
   c_dist <- numeric(n_cand);   c_dif <- numeric(n_cand)
   i <- 0L
   for (h in high_sp) for (l in low_sp) {
-    d <- abs(trait_vec[[h]] - trait_vec[[l]])
+    if (h == l) next
+    d <- trait_vec[[h]] - trait_vec[[l]]
+    # Orientation matters: the high-extreme member must actually be the higher one.
     if (d <= 0) next
+    # ci_overlap(lb1, ub1, lb2, ub2) = (lb1 <= ub2) & (lb2 <= ub1); keep only
+    # NON-overlapping pairs, exactly as pair_sel.f's input filter does.
+    if (use_ci && (lb[[h]] <= ub[[l]]) && (lb[[l]] <= ub[[h]])) next
     i <- i + 1L
     c_hi[i] <- h; c_lo[i] <- l; c_dist[i] <- D[h, l]; c_dif[i] <- d
   }
-  if (i == 0L) return(reject("no candidate pair with non-zero trait difference"))
+  if (i == 0L) {
+    return(reject(if (use_ci) "no pair with non-overlapping CIs"
+                  else "no candidate pair with non-zero trait difference"))
+  }
   keep   <- seq_len(i)
   c_hi   <- c_hi[keep]; c_lo <- c_lo[keep]; c_dist <- c_dist[keep]; c_dif <- c_dif[keep]
 
@@ -183,5 +215,10 @@ evaluate_lean_contrast_selection <- function(trait_vec,
        n_pairs = n_pairs, dunn_min = dunn_min, n_below = n_below,
        fg = sel_fg, bg = sel_bg,
        fg_values = unname(trait_vec[sel_fg]), bg_values = unname(trait_vec[sel_bg]),
-       q_lower = th$lower, q_upper = th$upper, reason = "accepted")
+       # In CI mode there is no percentile cut-off to audit against; the auditable
+       # invariant is instead that every emitted pair had non-overlapping intervals.
+       q_lower = if (use_ci) NA_real_ else th$lower,
+       q_upper = if (use_ci) NA_real_ else th$upper,
+       mode = if (use_ci) "ci" else "percentile",
+       reason = "accepted")
 }

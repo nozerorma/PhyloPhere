@@ -54,7 +54,7 @@ process RER_GENE_LISTS {
         writeLines(sig\$gene[sig\$Rho > 0], "rer_accelerating.txt")
         writeLines(sig\$gene[sig\$Rho < 0], "rer_decelerating.txt")
 
-        # RER own directional significance. NOTE: gate_sig/gate_fdr are CAAS concepts
+        # RER own directional significance. NOTE: gate_sig is a CAAS concept
         # and are deliberately NOT set here — RER significance lives in flag_rer_acc/
         # flag_rer_decc. The CAAS gates (and FADE/accum/CAAS-directional) flags are
         # joined from the scoring gene-scores file below when one is provided.
@@ -72,7 +72,7 @@ process RER_GENE_LISTS {
             stringsAsFactors = FALSE
         )
 
-        # Optional cross-module annotation: CAAS gates (gate_sig/gate_fdr), CAAS
+        # Optional cross-module annotation: CAAS gate (gate_sig), CAAS
         # directional scores (score_top/score_bottom -> top/bottom percentiles), FADE
         # and accumulation flags — imported from a scoring gene-scores TSV when given.
         # Absent columns are simply not joined, so the report omits them gracefully.
@@ -84,7 +84,7 @@ process RER_GENE_LISTS {
                     gcol <- intersect(c("Gene","GENE"), colnames(gs))[1]
                     if (!is.na(gcol)) colnames(gs)[colnames(gs) == gcol] <- "gene"
                 }
-                want <- c("flag_gate_sig","flag_gate_fdr","score_top","score_bottom",
+                want <- c("flag_gate_sig","score_top","score_bottom",
                           "flag_fade","flag_fade_top","flag_fade_bottom","flag_accum")
                 want <- intersect(want, colnames(gs))
                 if ("gene" %in% colnames(gs) && length(want) > 0) {

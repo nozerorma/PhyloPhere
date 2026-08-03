@@ -24,7 +24,8 @@
 #     independent partial-chi-squares with df=w_i sum to a chi-square with
 #     df=sum(w_i).
 #
-# gate_sig/gate_fdr are deliberately NOT included: checked against a real
+# gate_sig is deliberately NOT included (gate_fdr no longer exists — see
+# SCORING's scoring_compute.R for why it was removed entirely): checked against a real
 # leading-edge table this session, they sit at 87-100% for essentially every
 # term regardless of significance rank (every leading-edge gene already
 # cleared the gate before it could carry a nonzero score at all) — a ceiling

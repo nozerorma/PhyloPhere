@@ -194,9 +194,9 @@ le_summary <- if (!is.null(le_raw)) {
 # columns actually present (i.e. an --annot-file was supplied to
 # posenrich_enrich.py) are ever shown.
 flag_cols_by_rk <- list(
-  global = c("pct_gate_sig", "pct_gate_fdr", "pct_rer_acc", "pct_rer_decc", "pct_accum"),
-  top    = c("pct_gate_sig", "pct_gate_fdr", "pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum_top"),
-  bottom = c("pct_gate_sig", "pct_gate_fdr", "pct_fade_bottom", "pct_rer_acc", "pct_rer_decc", "pct_accum_bottom")
+  global = c("pct_gate_sig", "pct_rer_acc", "pct_rer_decc", "pct_accum"),
+  top    = c("pct_gate_sig", "pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum_top"),
+  bottom = c("pct_gate_sig", "pct_fade_bottom", "pct_rer_acc", "pct_rer_decc", "pct_accum_bottom")
 )
 
 # SCORING's fcs_stats.tsv -- universe-level flag_* rates for the Overall
@@ -244,6 +244,18 @@ fade_sites_bottom_df <- if (has_fade_sites_bottom) {
 ```
 
 # Overview {.tabset .tabset-fade}
+
+> [!WARNING]
+> **Proof of concept — not validated for standalone significance claims.** This
+> module has not had a real end-to-end production run, and its GMT construction,
+> its handling of the very large (~1.47M-position) background, and its
+> significance gating (p_adj only — see `posenrich_enrich.py`'s header for why
+> the intended fold-enrichment floor is not currently enforced) have not been
+> checked against any known-truth signal. Treat everything in this report as
+> descriptive characterization only (e.g. "does this term show up near
+> CAAS-high positions") — do not cite it as evidence for a biological claim on
+> its own, and do not build downstream decisions on top of its "significant"
+> term counts without independent corroboration.
 
 This report summarises **position-level enrichment** for `r params$traitname`. Unlike
 the gene-level FCS (a Wilcoxon-AUC rank-shift test), the position background is a
@@ -295,7 +307,7 @@ tested-and-negative positions are never silently dropped from the null.
 `fold > 1` = enriched, `< 1` = depleted. UCR core and UCR flank (and their
 per-orthogroup counterparts) are tested as independent, potentially-overlapping
 layers, not a forced partition — nothing here requires them to be disjoint.
-When available, `%gate_sig`/`%gate_fdr`/`%fade_*`/`%rer_*`/`%accum` columns
+When available, `%gate_sig`/`%fade_*`/`%rer_*`/`%accum` columns
 report the percentage of *distinct genes* contributing to the overlap (never
 raw positions — one gene must not dominate) that are independently flagged by
 SCORING's own significance/FADE/RER/accumulation criteria — a cross-module
@@ -329,7 +341,7 @@ if (!has_res) {
                     `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
         # Cross-module corroboration: % of the DISTINCT genes in the overlap
         # (never % of raw positions — one gene must not dominate) carrying
-        # each SCORING flag (gate_sig/gate_fdr/fade/rer/accum). Only present
+        # each SCORING flag (gate_sig/fade/rer/accum). Only present
         # when POSENRICH was run with --annot-file. Direction-restricted via
         # flag_cols_by_rk (same convention as the Leading edge section below) --
         # posenrich_enrich.py computes pct_<flag> for every flag regardless of
@@ -375,7 +387,7 @@ whatever grain it's actually native to and Lancaster-combined:
   since every position in the same gene shares that gene's flag value and
   isn't an independent draw with respect to it.
 
-`gate_sig`/`gate_fdr` are excluded for the same reason as elsewhere
+`gate_sig` is excluded for the same reason as elsewhere
 (near-ceiling among already-significant terms, no discriminating power). One
 dotplot per direction, restricted to the top `r params$table_top_n` terms.
 Falls back to plain `-log10(p.adj)` ordering when `fcs_stats_file` wasn't
@@ -572,7 +584,7 @@ if (nrow(sc_all) == 0 || !any(c("top", "bottom") %in% sc_all$ranking)) {
 
 For every **significant** (`p.adj < `r PADJ``) pathway, the
 observed `gene:position` members of the overlap, plus the same cross-module
-corroboration columns as above (`%gate_sig`/`%gate_fdr`/`%fade_*`/`%rer_*`/
+corroboration columns as above (`%gate_sig`/`%fade_*`/`%rer_*`/
 `%accum`, direction-aware — `%fade_bottom` only appears under `BOTTOM`,
 `%fade_top` only under `TOP`, plain `%fade` under `GLOBAL`). The full member
 list is also written to `posenrich_leading_edge.tsv` alongside this report.
@@ -641,7 +653,7 @@ switching cutoff tabs above — mirrors the AMI report's "Module summary across
 gene lists" rollup, with DOMINO modules replaced by posenrich's own enriched
 terms (posenrich has no module-finding step of its own). Sorted by best
 (smallest) `p.adj`, then by how many cutoffs recovered it. Corroboration
-columns (`%gate_sig`/`%gate_fdr`/`%fade_*`/`%rer_*`/`%accum*`) are
+columns (`%gate_sig`/`%fade_*`/`%rer_*`/`%accum*`) are
 direction-matched via the same `flag_cols_by_rk` used in the Leading edge
 section above — a `bottom`-direction row never carries `%accum_top`/`%fade_top`.
 
@@ -1014,7 +1026,7 @@ not restricted to the US scheme.
 .glob10 <- test_glob_10(pos_df); .glob5 <- test_glob_5(pos_df); .glob1 <- test_glob_1(pos_df)
 
 pos_score_meta <- pos_df %>%
-  select(Gene, Position, CAAS_score, biochem_weight_sum, change_side, gate_sig, gate_fdr) %>%
+  select(Gene, Position, CAAS_score, biochem_weight_sum, change_side, gate_sig) %>%
   mutate(
     caas_decile  = dplyr::ntile(CAAS_score, 10),
     in_top_10pct = .glob10,
@@ -1282,7 +1294,6 @@ run_pai_fisher_dir <- function(df, label) {
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
 
     pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
-    pct_fdr <- if ("gate_fdr" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_fdr[in_top], na.rm = TRUE)) else "0.0%"
 
     tibble(
       Direction            = label,
@@ -1422,7 +1433,6 @@ run_cosmic_fisher_dir <- function(df, label) {
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
     
     pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
-    pct_fdr <- if ("gate_fdr" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_fdr[in_top], na.rm = TRUE)) else "0.0%"
 
     tibble(
       Direction            = label,
@@ -1431,7 +1441,6 @@ run_cosmic_fisher_dir <- function(df, label) {
       `N COSMIC`           = n_top_c,
       `% COSMIC`           = sprintf("%.1f%%", 100 * n_top_c / max(n_top, 1)),
       `% gate_sig`         = pct_sig,
-      `% gate_fdr`         = pct_fdr,
       `Odds ratio`         = sprintf("%.2f", ft$estimate),
       `P value`            = formatC(ft$p.value, format = "e", digits = 2)
     )
@@ -1561,7 +1570,6 @@ run_fade_fisher_dir <- function(df, label) {
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
 
     pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
-    pct_fdr <- if ("gate_fdr" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_fdr[in_top], na.rm = TRUE)) else "0.0%"
 
     tibble(
       Direction     = label,
@@ -1570,7 +1578,6 @@ run_fade_fisher_dir <- function(df, label) {
       `N FADE-sig`  = n_top_f,
       `% FADE-sig`  = sprintf("%.1f%%", 100 * n_top_f / max(n_top, 1)),
       `% gate_sig`  = pct_sig,
-      `% gate_fdr`  = pct_fdr,
       `Odds ratio`  = sprintf("%.2f", ft$estimate),
       `P value`     = formatC(ft$p.value, format = "e", digits = 2)
     )
@@ -1753,7 +1760,7 @@ readr::write_tsv(region_export,
 - **`p.adj`**: BH-adjusted per (ranking, database) — a handful of huge broad
   layers and up to thousands of small GMT terms carry very different
   multiple-testing burdens, so they are not pooled into one BH family.
-- **Cross-module corroboration (`%gate_sig`, `%gate_fdr`, `%fade_*`, `%rer_*`,
+- **Cross-module corroboration (`%gate_sig`, `%fade_*`, `%rer_*`,
   `%accum`)**: optional, present when POSENRICH is run with an `--annot-file`
   (SCORING's `fcs_stats.tsv`). For each overlap, the distinct genes
   contributing to it (never raw positions — a single gene contributing many

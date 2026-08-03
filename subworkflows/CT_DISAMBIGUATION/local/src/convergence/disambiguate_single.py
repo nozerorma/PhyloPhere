@@ -484,12 +484,6 @@ def analyze_caas_position_disambiguation(
         score=None,
         pvalue=caas_pos.pvalue,
         pvalue_boot=getattr(caas_pos, "pvalue_boot", None),
-        pvalue_fdr=getattr(caas_pos, "pvalue_fdr", None),
-        pvalue_boot_fdr=getattr(caas_pos, "pvalue_boot_fdr", None),
-        sig_hyp_fdr=getattr(caas_pos, "sig_hyp_fdr", None),
-        sig_perm_fdr=getattr(caas_pos, "sig_perm_fdr", None),
-        is_significant_fdr=getattr(caas_pos, "is_significant_fdr", None),
-        alpha_fdr=getattr(caas_pos, "alpha_fdr", None),
     )
 
 
