@@ -90,6 +90,7 @@ process SCORING_AMI_REPORT {
     path "ami_plots/**",                       emit: ami_plots,               optional: true
     path "ami_networks/**",                    emit: ami_networks,            optional: true
     path "ami_networks/module_descriptions_all_lists.tsv", emit: module_descriptions, optional: true
+    path "ami_networks/term_threshold_membership.tsv",      emit: term_membership,       optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
@@ -228,6 +229,7 @@ process SCORING_COMPARE_REPORT {
     // Optional cross-angle inputs (AMI network modules, posenrich position-level
     // results) -- NO_FILE-prefixed sentinels tolerated when their module didn't run.
     path ami_module_desc,     stageAs: 'ami_module_descriptions.tsv'
+    path ami_term_membership, stageAs: 'ami_term_membership.tsv'
     path posenrich_dotplot,   stageAs: 'posenrich_overall_dotplot.tsv'
     // posenrich_leading_edge.tsv (gene:position members of significant posenrich
     // terms, already position-granular) drives both the Integrated gene scorecard's
@@ -262,8 +264,9 @@ process SCORING_COMPARE_REPORT {
     def fdr_thr   = params.scoring_compare_fdr   ?: params.fcs_fdr ?: 0.15
     def pperm_thr = params.fcs_pperm_thr         ?: 0.025
     def domino_module_thr = params.domino_module_thr ?: 0.05
-    def top_n     = params.scoring_compare_top_n  ?: 20
-    def ami_arg            = (ami_module_desc.name =~ /^NO_/)    ? 'NULL' : "'${ami_module_desc}'"
+    def top_n     = params.scoring_compare_top_n  ?: 100
+    def ami_arg            = (ami_module_desc.name =~ /^NO_/)     ? 'NULL' : "'${ami_module_desc}'"
+    def ami_tm_arg         = (ami_term_membership.name =~ /^NO_/) ? 'NULL' : "'${ami_term_membership}'"
     def posenrich_dot_arg  = (posenrich_dotplot.name  =~ /^NO_/) ? 'NULL' : "'${posenrich_dotplot}'"
     def posenrich_le_arg   = (posenrich_le.name  =~ /^NO_/)      ? 'NULL' : "'${posenrich_le}'"
     def fcs_stats_arg      = (fcs_stats.name =~ /^NO_/)          ? 'NULL' : "'${fcs_stats}'"
@@ -288,6 +291,7 @@ process SCORING_COMPARE_REPORT {
                     top_n      = ${top_n},
                     traitname  = '${traitname}',
                     ami_module_desc_file      = ${ami_arg},
+                    ami_term_membership_file  = ${ami_tm_arg},
                     posenrich_dotplot_file     = ${posenrich_dot_arg},
                     posenrich_leading_edge_file = ${posenrich_le_arg},
                     fcs_stats_file           = ${fcs_stats_arg},

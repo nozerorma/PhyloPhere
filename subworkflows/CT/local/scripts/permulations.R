@@ -417,7 +417,7 @@ for (b in seq_along(pool)) {
   fmt <- function(x) paste(format(x, digits = 15, trim = TRUE), collapse = ",")
   manifest[[b]] <- data.frame(cycle = paste0("b_", b), tier = e$tier,
                               n_pairs = e$n_pairs, dunn_min = e$dunn_min,
-                              n_pairs_below_1 = e$n_below,
+                              n_pairs_below_1 = e$n_below, mode = e$mode,
                               q_lower = e$q_lower, q_upper = e$q_upper,
                               fg_values = fmt(e$fg_values),
                               bg_values = fmt(e$bg_values),

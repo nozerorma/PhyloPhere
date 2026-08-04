@@ -18,6 +18,16 @@
 #
 # Everything is base R over a precomputed distance matrix — no data frames in
 # the inner loop — because this runs once per permulation draw (up to max_tries).
+#
+# Candidate construction and the greedy add-loop are vectorized rather than
+# scalar R `for` loops: candidate count grows as (percentile_frac * n_tips)^2,
+# so a scalar loop is fine at ~31 tips (primates) but collapses at ~150+ tips
+# (e.g. Carn: 1,024 candidates vs ~42, a 24x jump that measured as a 25x drop
+# in draws/s — the dominant cost, not the BM/lambda simulation itself, which
+# barely slows down over the same range). The vectorized form computes the
+# SAME quantities via matrix indexing instead of per-candidate function calls;
+# see the tie-break note by the greedy loop for why this is bit-identical to
+# the original scalar implementation, not just equivalent in expectation.
 # =============================================================================
 
 # Modified Dunn index for one cluster, verbatim semantics of
@@ -137,28 +147,28 @@ evaluate_lean_contrast_selection <- function(trait_vec,
     }
   }
 
-  # ---- candidate pairs -------------------------------------------------------
-  n_cand <- length(high_sp) * length(low_sp)
-  c_hi   <- character(n_cand); c_lo <- character(n_cand)
-  c_dist <- numeric(n_cand);   c_dif <- numeric(n_cand)
-  i <- 0L
-  for (h in high_sp) for (l in low_sp) {
-    if (h == l) next
-    d <- trait_vec[[h]] - trait_vec[[l]]
-    # Orientation matters: the high-extreme member must actually be the higher one.
-    if (d <= 0) next
+  # ---- candidate pairs (vectorized) ------------------------------------------
+  # rep(..., each=)/rep(..., times=) reproduces `for (h in high_sp) for (l in
+  # low_sp)` row-for-row (h varies slowest) — kept identical to the original
+  # generation order so that if two candidates ever tie exactly on both sort
+  # keys below, the tie-break (stable order()) resolves the same way.
+  c_hi_all <- rep(high_sp, each = length(low_sp))
+  c_lo_all <- rep(low_sp, times = length(high_sp))
+  dif_all  <- trait_vec[c_hi_all] - trait_vec[c_lo_all]
+  # Orientation matters: the high-extreme member must actually be the higher one.
+  keep <- (c_hi_all != c_lo_all) & (dif_all > 0)
+  if (use_ci) {
     # ci_overlap(lb1, ub1, lb2, ub2) = (lb1 <= ub2) & (lb2 <= ub1); keep only
     # NON-overlapping pairs, exactly as pair_sel.f's input filter does.
-    if (use_ci && (lb[[h]] <= ub[[l]]) && (lb[[l]] <= ub[[h]])) next
-    i <- i + 1L
-    c_hi[i] <- h; c_lo[i] <- l; c_dist[i] <- D[h, l]; c_dif[i] <- d
+    overlap <- (lb[c_hi_all] <= ub[c_lo_all]) & (lb[c_lo_all] <= ub[c_hi_all])
+    keep <- keep & !overlap
   }
-  if (i == 0L) {
+  if (!any(keep)) {
     return(reject(if (use_ci) "no pair with non-overlapping CIs"
                   else "no candidate pair with non-zero trait difference"))
   }
-  keep   <- seq_len(i)
-  c_hi   <- c_hi[keep]; c_lo <- c_lo[keep]; c_dist <- c_dist[keep]; c_dif <- c_dif[keep]
+  c_hi  <- c_hi_all[keep]; c_lo <- c_lo_all[keep]; c_dif <- dif_all[keep]
+  c_dist <- D[cbind(c_hi, c_lo)]   # name-pair matrix indexing, vectorized
 
   # Production order: smallest patristic distance first, largest trait diff to break ties.
   ord    <- order(c_dist, -c_dif)
@@ -168,26 +178,45 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   members  <- list(c(c_hi[1], c_lo[1]))
   sel_fg   <- c_hi[1]; sel_bg <- c_lo[1]
   used     <- c(c_hi[1], c_lo[1])
+  used_flag <- setNames(logical(length(unique(c(c_hi, c_lo)))), unique(c(c_hi, c_lo)))
+  used_flag[used] <- TRUE
 
   # ---- greedily add the HIGHEST-Dunn candidate until target_pairs is reached --
   # No Dunn gate during construction: the pair COUNT is the hard constraint (a
   # permulated design must contain as many species as the observed one), and how
   # independent the assembled set turned out is scored afterwards as the tier.
+  #
+  # Vectorized re-derivation of mod_dunn_lean(D, c(members, candidate), last) for
+  # every remaining candidate at once: intra of a 2-member cluster is just its
+  # own hi-lo distance (== c_dist, already computed); inter is the closest
+  # distance from either member to ANY already-placed species. min() is exactly
+  # associative under IEEE754 (a pure comparison, no rounding), so taking the
+  # min over the union `used` in one shot equals mod_dunn_lean's min-of-per-
+  # cluster-mins — same bits, not merely the same value in expectation. That, plus
+  # generating candidates in the original nested-loop order, is what makes
+  # order(-dv, -dif) select the identical candidate order(): a stable sort
+  # breaks exact ties in favour of the earlier (dist-ascending) entry, same as
+  # the scalar loop only ever overwriting `best` on a strict improvement.
   while (length(members) < target_pairs) {
-    best_d <- -Inf; best_i <- NA_integer_
-    for (j in seq_along(c_hi)) {
-      if (c_hi[j] %in% used || c_lo[j] %in% used) next
-      cand <- c(members, list(c(c_hi[j], c_lo[j])))
-      dv   <- mod_dunn_lean(D, cand, length(cand))
-      # ties broken by larger trait difference, matching the production arrange()
-      if (dv > best_d || (dv == best_d && !is.na(best_i) && c_dif[j] > c_dif[best_i])) {
-        best_d <- dv; best_i <- j
-      }
-    }
-    if (is.na(best_i)) break                   # no non-overlapping candidate left
+    avail <- !used_flag[c_hi] & !used_flag[c_lo]
+    if (!any(avail)) break
+    idx   <- which(avail)
+    hi_a  <- c_hi[idx]; lo_a <- c_lo[idx]; dist_a <- c_dist[idx]; dif_a <- c_dif[idx]
+
+    D_hi <- D[hi_a, used, drop = FALSE]
+    D_lo <- D[lo_a, used, drop = FALSE]
+    inter_hi <- D_hi[, 1]; if (ncol(D_hi) > 1) for (cc in 2:ncol(D_hi)) inter_hi <- pmin(inter_hi, D_hi[, cc])
+    inter_lo <- D_lo[, 1]; if (ncol(D_lo) > 1) for (cc in 2:ncol(D_lo)) inter_lo <- pmin(inter_lo, D_lo[, cc])
+    inter <- pmin(inter_hi, inter_lo)
+    dv    <- ifelse(dist_a == 0, Inf, inter / dist_a)
+
+    best_local <- order(-dv, -dif_a)[1]
+    best_i <- idx[best_local]
+
     members <- c(members, list(c(c_hi[best_i], c_lo[best_i])))
     sel_fg  <- c(sel_fg, c_hi[best_i]); sel_bg <- c(sel_bg, c_lo[best_i])
     used    <- c(used, c_hi[best_i], c_lo[best_i])
+    used_flag[c(c_hi[best_i], c_lo[best_i])] <- TRUE
   }
 
   n_pairs <- length(members)

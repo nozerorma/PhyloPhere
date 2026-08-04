@@ -465,6 +465,8 @@ cols_by_rk <- list(
              "flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum_bottom")
 )
 
+le_comp_all <- list()  # collect leading-edge composition tables for export
+
 for (rk in ranking_names) {
   cat(sprintf("\n## %s\n\n", rk))
   want <- cols_by_rk[[rk]] %||% attr_cols_all
@@ -517,6 +519,16 @@ for (rk in ranking_names) {
   present_attr <- intersect(want, names(summ))
   names(summ)[match(present_attr, names(summ))] <- disp_names[present_attr]
   print(kbl_html(summ, height = if (nrow(summ) > 15) "480px" else NULL))
+
+  # Collect for export (add ranking column for identification)
+  le_comp_all[[rk]] <- summ %>% dplyr::mutate(ranking = rk, .before = 1)
+}
+
+# Export the full leading-edge composition table (all rankings) for
+# downstream consumption by 15.Comparison_report.Rmd.
+le_comp_export <- dplyr::bind_rows(le_comp_all)
+if (nrow(le_comp_export) > 0) {
+  readr::write_tsv(le_comp_export, "fcs_results/fcs_leading_edge_composition.tsv")
 }
 ```
 

@@ -799,10 +799,23 @@ dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
 has_caas_null <- has_perms && !is.null(perm_null_gene) && any(perm_null_gene$metric == "caas_score", na.rm = TRUE)
 
 .gene_null_table <- function(metric_name, obs_df) {
+  # Both metrics are exactly 0 whenever a permulated labeling produced zero
+  # CAAS/CAAP hits anywhere in the gene that cycle (gene_wrapper.py writes an
+  # explicit 0.0 row, not NA, when there is nothing to aggregate over) — a
+  # structural point mass, not sampling noise. At >=75% zero (typical here) the
+  # unconditional median/IQR are both 0 and say nothing; p_zero plus the
+  # nonzero-conditional median/IQR are what actually separates directions/runs.
+  # null_q90 is kept because a tail quantile stays informative even under heavy
+  # zero-inflation, as long as p_zero < 90%.
   perm_null_gene %>% filter(metric == metric_name) %>% group_by(direction) %>%
-    summarise(`n (gene×cycle)` = dplyr::n(), null_mean = mean(null_score, na.rm = TRUE),
-              null_median = median(null_score, na.rm = TRUE), null_sd = sd(null_score, na.rm = TRUE),
-              null_IQR = IQR(null_score, na.rm = TRUE), .groups = "drop") %>%
+    summarise(`n (gene×cycle)` = dplyr::n(),
+              p_zero          = mean(null_score == 0, na.rm = TRUE),
+              null_median_nz  = median(null_score[null_score > 0], na.rm = TRUE),
+              null_IQR_nz     = IQR(null_score[null_score > 0], na.rm = TRUE),
+              null_q90        = quantile(null_score, .90, na.rm = TRUE),
+              null_median     = median(null_score, na.rm = TRUE),
+              null_IQR        = IQR(null_score, na.rm = TRUE),
+              .groups = "drop") %>%
     mutate(direction = as.character(direction)) %>%
     left_join(obs_df, by = "direction") %>%
     arrange(factor(direction, levels = c("global", "top", "bottom")))
@@ -815,11 +828,27 @@ has_caas_null <- has_perms && !is.null(perm_null_gene) && any(perm_null_gene$met
   combined <- dplyr::bind_rows(nd, od) %>%
     mutate(direction = factor(direction, levels = c("global", "top", "bottom")),
            source = factor(source, levels = c("Null", "Observed")))
-  ggplot(combined, aes(direction, value, fill = source)) +
+
+  # A violin's density estimate is dominated by any point mass at a boundary —
+  # with most of the null sitting at exactly 0 (see table above), the KDE puts
+  # almost all its area in a spike at y=0 and squashes the actual shape of "what
+  # happens when there IS a signal" into an invisible sliver near the top. Plot
+  # the conditional (>0) distribution, which a density can actually represent,
+  # and report the discarded zero fraction as a label under each violin instead
+  # — the two pieces of information don't fit in one geometry, so keep them
+  # visually separate rather than let one silently overwhelm the other.
+  zero_frac <- combined %>% group_by(direction, source) %>%
+    summarise(pct_zero = sprintf("0: %.0f%%", 100 * mean(value == 0)), .groups = "drop")
+  nz <- combined %>% filter(value > 0)
+
+  ggplot(nz, aes(direction, value, fill = source)) +
     geom_violin(scale = "width", alpha = .7, colour = "grey30",
                 position = position_dodge(width = 0.8)) +
+    geom_text(data = zero_frac, aes(x = direction, y = -Inf, label = pct_zero, group = source),
+              position = position_dodge(width = 0.8), vjust = -0.6, size = 3, colour = "grey40") +
     scale_fill_manual(values = c(Null = "grey60", Observed = "#E15759"), name = NULL) +
-    labs(title = title, subtitle = "Null (permulation, 100k random sample) vs observed gene-level distribution, by direction",
+    labs(title = title,
+         subtitle = "Distribution CONDITIONAL on a nonzero score — null: permulation, 100k random sample. Exact-zero fraction labelled below each violin (not part of the density).",
          x = "Direction", y = ylab) +
     theme_minimal(base_size = 12)
 }

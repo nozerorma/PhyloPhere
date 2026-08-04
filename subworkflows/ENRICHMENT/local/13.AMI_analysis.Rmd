@@ -762,11 +762,12 @@ if (length(gene_list_files) == 0) stop("Error: no valid gene list files found")
 .ami_list_order <- function(paths) {
   base <- tools::file_path_sans_ext(basename(paths))
   dir_rank <- dplyr::case_when(
-    grepl("^top", base, ignore.case = TRUE)    ~ 0L,
-    grepl("^bottom", base, ignore.case = TRUE) ~ 1L,
-    TRUE                                       ~ 2L
+    grepl("^global", base, ignore.case = TRUE) ~ 0L,
+    grepl("^top", base, ignore.case = TRUE)    ~ 1L,
+    grepl("^bottom", base, ignore.case = TRUE) ~ 2L,
+    TRUE                                       ~ 3L
   )
-  pct <- suppressWarnings(as.numeric(sub("^(top|bottom)", "", base, ignore.case = TRUE)))
+  pct <- suppressWarnings(as.numeric(sub("^(global|top|bottom)", "", base, ignore.case = TRUE)))
   pct[is.na(pct)] <- -Inf  # unrecognized names sort last within their bucket
   paths[order(dir_rank, -pct, base)]
 }
@@ -1044,7 +1045,8 @@ top_bottom_pct_classifier <- function(nm) {
 top_bottom_roll_classifier <- function(other_label = "Other") {
   force(other_label)
   function(nm) {
-    if (grepl("top", nm, ignore.case = TRUE)) "Top"
+    if (grepl("^global", nm, ignore.case = TRUE)) "Global"
+    else if (grepl("top", nm, ignore.case = TRUE)) "Top"
     else if (grepl("bottom", nm, ignore.case = TRUE)) "Bottom"
     else other_label
   }
@@ -1460,10 +1462,19 @@ collapsible_table <- function(df) {
          x = "gene list", y = NULL)
   print(p)
   cat("\n\n")
+}
 
-  # "Numbers" alongside the plot: which exact gene lists each term appears
-  # under (a plot alone isn't enough -- always pair it with the underlying
-  # counts/membership).
+.render_term_recurrence_table <- function(term_rows, gene_list_order, title) {
+  if (is.null(term_rows) || nrow(term_rows) == 0) { cat(sprintf("_No described terms to show (%s)._\n\n", title)); return(invisible(NULL)) }
+  term_rows <- term_rows %>% dplyr::filter(gene_list %in% gene_list_order)
+  if (nrow(term_rows) == 0) { cat(sprintf("_No described terms for these gene lists (%s)._\n\n", title)); return(invisible(NULL)) }
+
+  pres <- term_rows %>% dplyr::distinct(term, gene_list)
+  term_counts <- pres %>% dplyr::count(term, name = "n_thresholds") %>%
+    dplyr::arrange(dplyr::desc(n_thresholds), term)
+  pres <- pres %>%
+    dplyr::mutate(gene_list = factor(gene_list, levels = gene_list_order))
+
   disp <- pres %>%
     dplyr::mutate(gene_list = as.character(gene_list)) %>%
     dplyr::arrange(term, gene_list) %>%
@@ -1481,11 +1492,10 @@ collapsible_table <- function(df) {
 
 # ── Full nested-tab rendering for one tool ───────────────────────────────────
 # Direction is the OUTER tab (Global/Top/Bottom or Global/Acc/Decc, matching
-# every other report's Global-first convention), each with THREE sub-tabs:
-# Modules (this direction's own gene-list networks), Recurrence Table (the
-# module-description rollup), Recurrence Heatmap (term x gene-list heatmap +
-# membership table) -- replacing the old separate "Active Modules" / "Module
-# summary" top-level tabsets with one merged structure.
+# every other report's Global-first convention), each with FOUR sub-tabs:
+# Modules (this direction's own gene-list networks), Recurrence Heatmap
+# (term x gene-list heatmap), Recurrence Table (term -> gene-list membership
+# table), Gene lists (the module-description rollup).
 #
 # `direction_tabs` is a named list, tab label -> `direction` filter value
 # (NULL = show everything unfiltered, e.g. the Global tab -- matches each
@@ -1539,14 +1549,17 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
       for (r in sel) print_gene_list_result(r)
     }
 
+    cat("\n\n### Recurrence Heatmap\n\n")
+    .render_term_heatmap(term_rows_all, gene_list_orders[[dir_label]], dir_label)
+
     cat("\n\n### Recurrence Table\n\n")
+    .render_term_recurrence_table(term_rows_all, gene_list_orders[[dir_label]], dir_label)
+
+    cat("\n\n### Gene lists\n\n")
     df <- if (is.null(filter_val)) clust_desc_all
           else if (!is.null(clust_desc_all)) dplyr::filter(clust_desc_all, direction == filter_val)
           else NULL
     .render_rollup(df, sprintf("%s gene lists", dir_label))
-
-    cat("\n\n### Recurrence Heatmap\n\n")
-    .render_term_heatmap(term_rows_all, gene_list_orders[[dir_label]], dir_label)
   }
 
   if (!is.null(network_summary_all) && nrow(network_summary_all) > 0) {
@@ -1567,9 +1580,10 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
   invisible(clust_desc_all)
 }
 
+.GLOBAL_THRESHOLDS <- c("global25", "global10", "global5", "global1")
 .TOP_THRESHOLDS    <- c("top25", "top10", "top5", "top1")
 .BOTTOM_THRESHOLDS <- c("bottom25", "bottom10", "bottom5", "bottom1")
-.ALL_THRESHOLDS    <- c(.TOP_THRESHOLDS, .BOTTOM_THRESHOLDS)
+.ALL_THRESHOLDS    <- c(.GLOBAL_THRESHOLDS, .TOP_THRESHOLDS, .BOTTOM_THRESHOLDS)
 ```
 
 # CAAS Modules {.tabset}
@@ -1583,17 +1597,16 @@ Network plots additionally mark cross-tool corroboration by node **shape**: circ
 (direction-matched to this list), diamond = RER-accelerating, hexagon = RER-decelerating (both regardless of this
 list's own direction), star = FADE-significant overlapping either RER direction.
 
-Each direction below (**Global**/**Top**/**Bottom**) has three sub-tabs: **Modules** (network
-plot + module description table, one per gene list in this direction), **Recurrence Table**
-(every DOMINO module's best describing term pooled across this direction's gene lists, sorted
-by DOMINO significance (Bonferroni p.adj) when available else module size — full detail,
-including direction-specific percentile/cross-module columns, remains in Modules), and
-**Recurrence Heatmap** (a term x gene-list-threshold heatmap + membership table — each
-described term named once, near-duplicate/nested wording collapsed together, see
-`.cluster_terms()` — with the thresholds it was recovered under; a term recurring across
-several thresholds is a stronger candidate than one appearing at a single cutoff). **Global**
-pools all gene lists (`top25`...`top1`, `bottom25`...`bottom1`); **Top**/**Bottom** restrict to
-that direction's own lists.
+Each direction below (**Global**/**Top**/**Bottom**) has four sub-tabs: **Modules** (network
+plot + module description table, one per gene list in this direction), **Recurrence Heatmap**
+(a term × gene-list-threshold heatmap — each described term named once, near-duplicate/nested
+wording collapsed together, see `.cluster_terms()` — with the thresholds it was recovered
+under; a term recurring across several thresholds is a stronger candidate than one appearing
+at a single cutoff), **Recurrence Table** (term → gene-list membership table: which exact gene
+lists each term appears under), and **Gene lists** (every DOMINO module's best describing term
+pooled across this direction's gene lists, sorted by DOMINO significance). **Global** pools all
+gene lists (`global25`...`global1`, `top25`...`top1`, `bottom25`...`bottom1`); **Top**/**Bottom**
+restrict to that direction's own lists.
 
 ```{r caas_domino_networks, fig.width=10, fig.height=8, results='asis'}
 .caas_net_full <- build_tool_network(params$domino_network_sif, params$domino_edge_scores_file)
@@ -1616,8 +1629,8 @@ FADE's own DOMINO network, built against FADE's own gene universe (its own teste
 background per direction, unioned for Global -- verified on real data to differ
 meaningfully from CAAS's cleaned_background; see `[bugfix_fcs_universe_wrong_background]`).
 Skipped entirely when FADE didn't run this invocation. Same nested layout as CAAS above:
-each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Table** /
-**Recurrence Heatmap** sub-tabs.
+each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Heatmap** /
+**Recurrence Table** / **Gene lists** sub-tabs.
 
 ```{r fade_domino_networks, fig.width=10, fig.height=8, results='asis'}
 FADE_clust_desc_all <- NULL
@@ -1669,7 +1682,7 @@ RER's own DOMINO network, built against RER's own gene universe (every gene RERC
 actually attempted -- verified on real data to exactly match RER's own published universe
 file). Skipped entirely when RER didn't run this invocation. Same nested layout as CAAS
 above: each direction tab (**Global**/**Acc**/**Decc**) holds **Modules** / **Recurrence
-Table** / **Recurrence Heatmap** sub-tabs.
+Heatmap** / **Recurrence Table** / **Gene lists** sub-tabs.
 
 ```{r rer_domino_networks, fig.width=10, fig.height=8, results='asis'}
 RER_clust_desc_all <- NULL
