@@ -189,16 +189,37 @@ orthogonal_score <- function(le, bg, percentile_cols = character(0),
     Q <- Q + qchisq(pmax(p, 1e-300), df = w, lower.tail = FALSE)
     list(Q = Q, total_w = total_w + w)
   }
-  # Nested-family discount: 4 percentile columns (25/10/5/1%) each get 1/2 the
-  # normal df=2 weight, so the family totals 4 x 1/2 = 2 -- the same weight as
-  # ONE undiscounted flag, avoiding a single evidence source (CAAS percentile
-  # concentration) from quadruple-counting just because it's expressed as 4
-  # nested cutoffs.
-  for (cl in percentile_cols) {
-    r <- add_component(Q, total_w, cl, w = 1/2); Q <- r$Q; total_w <- r$total_w
+  # CAAS Family: percentile columns (25/10/5/1%) + Accumulation flags (derived from CAAS positions).
+  # The ENTIRE CAAS family shares a total budget of df = 2.0 (the weight of ONE independent test).
+  # Individual member weights are distributed proportionally to their surprisals -log2(bg_rate).
+  caas_accum_cols  <- cross_cols[grepl("^flag_accum", cross_cols)]
+  independent_cols <- cross_cols[!grepl("^flag_accum", cross_cols)]
+  caas_family_cols <- c(percentile_cols, caas_accum_cols)
+
+  if (length(caas_family_cols) > 0) {
+    caas_surprisals <- numeric(length(caas_family_cols))
+    for (i in seq_along(caas_family_cols)) {
+      cl <- caas_family_cols[i]
+      if (cl %in% percentile_cols) {
+        num <- as.numeric(sub(".*?(25|10|5|1)$", "\\1", cl))
+        alpha <- if (!is.na(num)) num / 100 else 0.10
+        caas_surprisals[i] <- -log2(alpha)
+      } else {
+        rate <- if (!is.null(bg[[cl]]) && !is.na(bg[[cl]])) bg[[cl]] else 0.05
+        caas_surprisals[i] <- -log2(pmax(rate, 1e-6))
+      }
+    }
+    caas_family_weights <- 2.0 * caas_surprisals / sum(caas_surprisals)
+    for (i in seq_along(caas_family_cols)) {
+      cl <- caas_family_cols[i]
+      w  <- caas_family_weights[i]
+      r  <- add_component(Q, total_w, cl, w = w); Q <- r$Q; total_w <- r$total_w
+    }
   }
-  for (cl in cross_cols) {
-    r <- add_component(Q, total_w, cl, w = 2); Q <- r$Q; total_w <- r$total_w
+
+  # Truly independent external tools (FADE, RER, PAI3D, COSMIC) get full df=2.0 each
+  for (cl in independent_cols) {
+    r <- add_component(Q, total_w, cl, w = 2.0); Q <- r$Q; total_w <- r$total_w
   }
 
   wide$p_composite <- pchisq(Q, df = total_w, lower.tail = FALSE)

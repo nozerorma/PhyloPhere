@@ -1,5 +1,5 @@
 ---
-title: "FCS Enrichment (Wilcoxon-AUC) — `r params$project_name`"
+title: "FCS Enrichment (Multi-Method) — `r params$project_name`"
 subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
@@ -36,6 +36,7 @@ params:
   traitname:    "trait"
   enrich:       FALSE         # RER-only permutation enrichment toggle
   perms_file:   "NO_FILE"
+  n_perms_sum:  10000          # permulation replicates for Path Sum Permulation (p-value floor = 1/(n+1))
   annot_file:   "NO_FILE"     # optional cross-module annotation overlay (SCORING fcs_stats.tsv):
                               # supplies flag_* + CAAS score_top/score_bottom for the leading edge.
                               # When NO_FILE, annotation falls back to the stats file itself.
@@ -202,7 +203,11 @@ for (sc in score_cols) {
   rk <- sub("^score_", "", sc)
   rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
 }
-enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g, perms_file = params$perms_file)) %>%
+enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g,
+                                       perms_file   = params$perms_file,
+                                       fdr_thr      = params$fdr_thr,
+                                       p_perm_thr   = params$pperm_thr,
+                                       n_perms_sum  = params$n_perms_sum %||% 10000)) %>%
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%
   dplyr::mutate(description = dplyr::coalesce(description, pathway))
 
@@ -251,21 +256,74 @@ readr::write_tsv(leading, "fcs_results/fcs_leading_edge.tsv")
 #   the MRCA axes), not the phenotype in isolation. A within-pair fg/bg swap would
 #   isolate the phenotype but only spans 2^n labelings (too coarse unless n is
 #   large). See docs / scoring_caas_perms.R.
-enrich <- enrich %>% dplyr::mutate(
-  sig = stat > 0 & !is.na(p.adj) & p.adj < params$fdr_thr &
-        (is.na(p.perm) | p.perm < params$pperm_thr)
-)
+# evidence_count / evidence_label / sig_* already computed by fcs_run_all().
+# sig = evidence_count >= 1 (any method passed), used to gate dotplots + leading edge.
+# For the Wilcoxon-only gate we still need p.perm-awareness in the tables below.
+enrich <- enrich %>% dplyr::mutate(sig = evidence_count >= 1L)
 has_perm_any <- any(!is.na(enrich$p.perm))
 n_sig <- sum(enrich$sig, na.rm = TRUE)
 ```
 
-`r if (has_perm_any) sprintf("**%d** gene sets are significantly enriched (BH < %.2g **and** permulation p < %.3g) across %d databases.", n_sig, params$fdr_thr, params$pperm_thr, dplyr::n_distinct(enrich$database)) else sprintf("**%d** gene sets are positively enriched at BH < %.2g across %d databases. _(No permulations: permulation-p threshold not applied.)_", n_sig, params$fdr_thr, dplyr::n_distinct(enrich$database))`
+```{r banner, echo=FALSE, results='asis'}
+n_hard  <- sum(enrich$evidence_count == 3L, na.rm = TRUE)
+n_supp  <- sum(enrich$evidence_count == 2L, na.rm = TRUE)
+n_expl  <- sum(enrich$evidence_count == 1L, na.rm = TRUE)
+n_dbs   <- dplyr::n_distinct(enrich$database)
+cat(sprintf(
+  "**%d hard-evidence** (3/3) | **%d supported** (2/3) | **%d exploratory** (1/3) gene sets across %d databases.\n\n",
+  n_hard, n_supp, n_expl, n_dbs))
+cat("_Methods: Wilcoxon-AUC FCS &nbsp;|&nbsp; Lachenbruch Two-Part &nbsp;|&nbsp; Path Sum Permulation. FDR threshold: ",
+    params$fdr_thr, "_\n\n")
+```
+
+# Multi-Method Evidence {.tabset .tabset-fade}
+
+All terms where **at least one test** passed its significance gate, grouped by
+direction. Columns: `AUC` (Wilcoxon effect size), `W.adj` (Wilcoxon BH p),
+`L.adj` (Lachenbruch BH p), `L.frac_mag` (fraction of Lachenbruch signal from
+magnitude vs prevalence), `P.adj` (Permulation BH p), `NES` (Permulation
+normalised enrichment score). NA = test not applicable (signed ranking) or
+not run. Green = Hard evidence (3/3), orange = Supported (2/3), grey = Exploratory (1/3).
+
+```{r evidence_table, results='asis'}
+evidence_colours <- c(
+  "Hard evidence" = "#27ae60",
+  "Supported"     = "#e67e22",
+  "Exploratory"   = "#7f8c8d"
+)
+for (rk in ranking_names) {
+  cat(sprintf("\n## %s\n\n", rk))
+  ev <- enrich %>%
+    dplyr::filter(ranking == rk, evidence_count >= 1L) %>%
+    dplyr::arrange(dplyr::desc(evidence_count), lach_p.adj, p.adj) %>%
+    dplyr::mutate(
+      Description  = stringr::str_trunc(description, 60),
+      AUC          = round(stat + 0.5, 3),
+      W.adj        = signif(p.adj, 3),
+      L.adj        = signif(lach_p.adj, 3),
+      L.frac_mag   = round(lach_frac_magnitude, 2),
+      P.adj        = signif(perm_p.adj, 3),
+      NES          = round(perm_nes, 2)
+    ) %>%
+    dplyr::select(evidence_label, pathway, Description, num.genes,
+                  AUC, W.adj, L.adj, L.frac_mag, P.adj, NES)
+  if (nrow(ev) == 0) { cat("_No terms passed any significance gate._\n"); next }
+  # Colour the evidence_label column via kableExtra cell_spec
+  ev$evidence_label <- kableExtra::cell_spec(
+    ev$evidence_label, "html",
+    color = "white",
+    background = evidence_colours[ev$evidence_label],
+    bold = TRUE, extra_css = "padding: 2px 6px; border-radius: 3px;"
+  )
+  print(kbl_html(ev, escape = FALSE, height = if (nrow(ev) > 15) "460px" else NULL))
+}
+```
 
 # Enriched gene sets {.tabset .tabset-fade}
 
 Positive `stat` (AUC − 0.5 > 0) means the ranking's genes sit systematically
 **high** for that set. Top `r params$top_n` positively-enriched sets per database,
-ordered by permulation p (when available) then BH p — the same selection and order
+ordered by evidence count then Wilcoxon BH p — the same selection and order
 used by the dotplots below, so every point there has a matching row here (rows
 shown are not all significant; see the per-tab pass count and the dashed
 significance line on the dotplots).
@@ -282,15 +340,8 @@ for (rk in ranking_names) {
   sub <- enrich %>% filter(ranking == rk, stat > 0)
   if (nrow(sub) == 0) { cat("\n_No positively-enriched sets._\n"); top_sel[[rk]] <- sub; next }
 
-  # Check if permutations exist for this ranking
-  has_perm <- "p.perm" %in% names(sub) && any(!is.na(sub$p.perm))
-
-  # Arrange by p.perm if available, otherwise by p.adj
-  if (has_perm) {
-    sub <- sub %>% arrange(p.perm, p.adj, desc(stat))
-  } else {
-    sub <- sub %>% arrange(p.adj, desc(stat))
-  }
+  # Primary sort: evidence_count desc (most-corroborated first), secondary: p.adj asc.
+  sub <- sub %>% dplyr::arrange(dplyr::desc(evidence_count), p.adj, dplyr::desc(stat))
 
   db_sel <- sub %>% dplyr::group_by(database) %>% dplyr::slice_head(n = params$top_n) %>% dplyr::ungroup()
   top_sel[[rk]] <- db_sel
@@ -301,23 +352,24 @@ for (rk in ranking_names) {
              Description = stringr::str_trunc(description, 70),
              pval = signif(pval, 3),
              p.adj = signif(p.adj, 3))
-    n_pass <- sum(dbres$sig, na.rm = TRUE)   # dual-threshold significance among shown sets
+    n_hard_db  <- sum(dbres$evidence_count == 3L, na.rm = TRUE)
+    n_supp_db  <- sum(dbres$evidence_count == 2L, na.rm = TRUE)
+    n_expl_db  <- sum(dbres$evidence_count == 1L, na.rm = TRUE)
 
-    if (has_perm) {
-      disp <- dbres %>% mutate(p.perm = signif(p.perm, 3)) %>%
-        select(pathway, Description, AUC, num.genes, pval, p.adj, p.perm)
-    } else {
-      disp <- dbres %>% select(pathway, Description, AUC, num.genes, pval, p.adj)
-    }
+    has_lach <- any(!is.na(dbres$lach_p.adj))
+    has_perm_rk <- any(!is.na(dbres$perm_p.adj))
+
+    disp <- dbres %>%
+      mutate(evidence = evidence_label,
+             L.adj = if (has_lach) signif(lach_p.adj, 3) else NA_real_,
+             P.adj = if (has_perm_rk) signif(perm_p.adj, 3) else NA_real_,
+             NES   = if (has_perm_rk) round(perm_nes, 2) else NA_real_) %>%
+      select(evidence, pathway, Description, AUC, num.genes, p.adj,
+             any_of(c("L.adj", "P.adj", "NES")))
 
     cat(sprintf("\n### %s\n\n", db))
-    if (has_perm) {
-      cat(sprintf("_%d shown, %d significant (BH < %.2g ∩ permulation p < %.3g)._\n\n",
-                  nrow(disp), n_pass, params$fdr_thr, params$pperm_thr))
-    } else {
-      cat(sprintf("_%d shown, %d significant (BH < %.2g)._\n\n",
-                  nrow(disp), n_pass, params$fdr_thr))
-    }
+    cat(sprintf("_%d shown — hard: %d | supported: %d | exploratory: %d._\n\n",
+                nrow(disp), n_hard_db, n_supp_db, n_expl_db))
     print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
   }
 }
@@ -333,6 +385,7 @@ shows them so near-misses are visible relative to the threshold. Ranking →
 database tabs.
 
 ```{r dotplots, results='asis', fig.height=5}
+evidence_shapes <- c("Hard evidence" = 16, "Supported" = 17, "Exploratory" = 15)
 for (rk in ranking_names) {
   cat(sprintf("\n## %s {.tabset}\n", rk))
   subrk <- top_sel[[rk]]
@@ -342,14 +395,19 @@ for (rk in ranking_names) {
   for (db in unique(subrk$database)) {
     sub <- subrk %>% filter(database == db) %>%
       mutate(label = stringr::str_trunc(description, 55),
-             label = forcats::fct_reorder(label, -log10(p.adj)))
+             label = forcats::fct_reorder(label, -log10(p.adj)),
+             ev_shape = factor(evidence_label,
+                               levels = c("Hard evidence", "Supported", "Exploratory")))
     cat(sprintf("\n### %s\n\n", db))
-    p <- ggplot(sub, aes(x = -log10(p.adj), y = label, size = num.genes, colour = stat + 0.5)) +
+    p <- ggplot(sub, aes(x = -log10(p.adj), y = label,
+                         size = num.genes, colour = stat + 0.5,
+                         shape = ev_shape)) +
       geom_point() +
       scale_colour_viridis_c(name = "AUC", option = "C", limits = c(0.5, 1)) +
       scale_size_continuous(name = "set genes") +
+      scale_shape_manual(name = "evidence", values = evidence_shapes, drop = FALSE) +
       geom_vline(xintercept = -log10(params$fdr_thr), linetype = "dashed", colour = "grey50") +
-      labs(title = sprintf("%s — %s", db, rk), x = expression(-log[10]~"BH p"), y = NULL) +
+      labs(title = sprintf("%s — %s", db, rk), x = expression(-log[10]~"Wilcoxon BH p"), y = NULL) +
       theme_minimal(base_size = 11)
     print(p); cat("\n")
   }
@@ -400,6 +458,7 @@ for (dr in c("global", "top", "bottom")) {
     dplyr::summarise(p.adj = min(p.adj, na.rm = TRUE),
                       num.genes = suppressWarnings(max(num.genes, na.rm = TRUE)),
                       description = dplyr::first(description),
+                      evidence_label = dplyr::first(evidence_label),
                       .groups = "drop")
 
   dp <- sc %>%
@@ -412,11 +471,14 @@ for (dr in c("global", "top", "bottom")) {
   if (nrow(dp) == 0) { cat("_No terms to display._\n\n"); next }
 
   term_levels <- dp %>% arrange(signal) %>% pull(label) %>% unique()
+  ev_fac <- factor(dp$evidence_label, levels = c("Hard evidence", "Supported", "Exploratory"))
   p <- ggplot(dp, aes(x = signal, y = factor(label, levels = term_levels),
-                      size = num.genes, colour = neglog10FDR)) +
+                      size = num.genes, colour = neglog10FDR,
+                      shape = ev_fac)) +
     geom_point(alpha = 0.85) +
     scale_colour_viridis_c(name = "-log10 BH", option = "C") +
     scale_size_continuous(name = "set genes") +
+    scale_shape_manual(name = "evidence", values = evidence_shapes, drop = FALSE) +
     labs(title = sprintf("%s — %s (pooled across databases)", params$project_name, dr),
          subtitle = "Ordered top-to-bottom by orthogonal signal",
          x = "signal (orthogonal composite)", y = NULL) +
@@ -524,8 +586,8 @@ for (rk in ranking_names) {
     mutate(Description = stringr::str_trunc(coalesce(description, pathway), 50),
            p.adj = signif(p.adj, 3), AUC = round(stat + 0.5, 3),
            `Orthog. signal` = round(signal, 2)) %>%
-    select(database, pathway, Description, n_le, AUC, p.adj, `Orthog. signal`,
-           any_of(intersect(want, names(.))))
+    select(database, pathway, Description, n_le, evidence_label, AUC, p.adj,
+           `Orthog. signal`, any_of(intersect(want, names(.))))
   # rename attribute columns to friendly labels
   present_attr <- intersect(want, names(summ))
   names(summ)[match(present_attr, names(summ))] <- disp_names[present_attr]
@@ -546,11 +608,14 @@ if (nrow(le_comp_export) > 0) {
 # Method
 
 ```{r method, echo=FALSE}
-cat("Engine    : RERconverge::fastwilcoxGMTall (Wilcoxon rank-sum / Mann-Whitney AUC)\n")
+cat("Engines   : (1) Wilcoxon-AUC FCS | (2) Lachenbruch Two-Part | (3) Path Sum Permulation\n")
+cat("Evidence  : 3/3 Hard | 2/3 Supported | 1/3 Exploratory — FDR <", params$fdr_thr, "per method\n")
+cat("Wilcoxon  : RERconverge::fastwilcoxGMTall; one-sided 'greater'; BH per GMT\n")
+cat("Lachenbruch: Fisher exact (prevalence) + Wilcoxon (magnitude), chi2(df=2) combined\n")
+cat("Permulation: label-permuted score-sum; NES = (obs-mu)/sd; p-floor = 1/(n_perms+1)\n")
 cat("Universe  : cleaned_background; no-signal genes floored to 0 (zero-floor)\n")
-cat("Direction : membership rankings (top = {top,both}, bottom = {bottom,both})\n")
-cat("MTC       : Benjamini-Hochberg, per GMT database\n")
-cat("Highlights: significance gates + directional percentile + cross-module flags\n")
+cat("MTC       : Benjamini-Hochberg, per GMT database, per method\n")
+cat("n_perms_sum:", params$n_perms_sum %||% 10000, "(Path Sum Permulation replicates)\n")
 ```
 
 ---

@@ -316,12 +316,13 @@ df <- df %>%
     pre_score           = rowMeans(cbind(significance_score, asr_decile), na.rm = TRUE),
 
     # ── Two-way CAAS score (per row): phenotype × position evolution ──────────
-    # phenotype evolution = permulation evidence (1 - pvalue_boot, the bootstrap
-    # permutation p-value); position evolution = asr_path_score (asr_score,
-    # already 0..1 and count-aware). Both raw [0,1], higher = better — NO deciles.
+    # phenotype evolution = permulation evidence (empirical rank transformation
+    # of pvalue_boot over the scored pool, higher = better, 0..1 scale); position
+    # evolution = asr_path_score (asr_score, already 0..1 and count-aware).
+    # Both raw [0,1], higher = better — NO deciles.
     # Their product gives the rank. The hypergeometric pvalue is NOT here: it is
     # demoted to the significance gate (gate_sig below).
-    phen_score = 1 - pmin(pmax(pvalue_boot, 0), 1),
+    phen_score = 1 - dplyr::percent_rank(pvalue_boot),
     caas_row   = phen_score * asr_score,
     row_caas   = caas_row * scheme_weight
   )
@@ -812,10 +813,10 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
 
   pval_cols <- grep(paste0("^accum_pval_.*", suffix, "$"), names(accum_pval_df), value = TRUE)
 
-  # Fisher's combined p-value across available per-group schemes.
-  # Each group draws independently, so the per-group p-values are uncorrelated
-  # and Fisher's χ²= -2Σln(p) ~ χ²(2k) is valid.
-  # Groups absent for a gene contribute p=1 → ln(1)=0, adding no spurious signal.
+  # Cauchy Combination Test (CCT / ACAT) across available per-group schemes.
+  # Replaces Fisher's combined test to account for non-independence (positive
+  # correlation) among nested evolutionary filtering schemes (US, GS4, GS3, GS2, GS1).
+  # Stat: T = sum(w_i * tan((0.5 - p_i) * pi)), p_CCT = pcauchy(T, lower.tail = FALSE).
   out <- accum_pval_df %>%
     rowwise() %>%
     mutate(
@@ -823,9 +824,12 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
         pvals <- c_across(all_of(pval_cols))
         valid <- !is.na(pvals)
         if (sum(valid) == 0) NA_real_
+        else if (all(pvals[valid] >= 1)) 1.0
         else {
-          ps <- pmax(pvals[valid], 1e-300)
-          pchisq(-2 * sum(log(ps)), df = 2 * sum(valid), lower.tail = FALSE)
+          ps <- pmin(pmax(pvals[valid], 1e-15), 1 - 1e-15)
+          w <- 1 / length(ps)
+          stat <- sum(w * tan((0.5 - ps) * pi))
+          pcauchy(stat, lower.tail = FALSE)
         }
       }
     ) %>%
@@ -842,7 +846,7 @@ compute_accum_significance <- function(accum_dir, direction, suffix) {
   out[[paste0("accum_fdr", suffix)]] <- fdr_q
   out[[paste0("accum_significant", suffix)]] <- !is.na(fdr_q) & fdr_q < 0.05
 
-  cat(sprintf("  Accumulation (%s): %d genes, %d significant (Fisher p, BH FDR < 0.05)\n",
+  cat(sprintf("  Accumulation (%s): %d genes, %d significant (Cauchy CCT p, BH FDR < 0.05)\n",
               direction, nrow(out), sum(out[[paste0("accum_significant", suffix)]], na.rm = TRUE)))
   list(df = out, ok = TRUE)
 }

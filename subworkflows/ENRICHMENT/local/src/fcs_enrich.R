@@ -2,10 +2,18 @@
 # =============================================================================
 # fcs_enrich.R — shared Functional Class Scoring (FCS) enrichment core
 # =============================================================================
-# Rank-based, threshold-free gene-set enrichment via the Wilcoxon rank-sum /
-# Mann-Whitney AUC test (RERconverge::fastwilcoxGMT). This is the single
-# enrichment engine for the ranked question across CAAS / RER / FADE /
-# accumulation, replacing GSEA. STRING handles the set/network question.
+# Multi-method gene-set enrichment combining three complementary tests:
+#   1. Wilcoxon-AUC FCS  (RERconverge::fastwilcoxGMT) — rank-shift test.
+#   2. Lachenbruch Two-Part — binary prevalence (Fisher) + magnitude among
+#      positive scorers (Wilcoxon), combined via χ²(df=2). Zero-safe.
+#   3. Path Sum Permulation — label-permutation test on raw pathway score
+#      accumulation. Zero-safe; NES is a z-score vs permuted null.
+# Each method casts one vote (FDR < fdr_thr + direction check); terms are
+# classified Hard evidence (3/3) / Supported (2/3) / Exploratory (1/3).
+# Methods 2 & 3 only run for non-negative (zero-floored) rankings; signed
+# RER rankings (two.sided alternative) use Wilcoxon only.
+# Replaces GSEA for accumulation / CAAS / FADE / RER pipelines.
+# STRING handles the network/set question.
 #
 # Design (locked in design discussion):
 #   * Universe = the full tested background (cleaned_background). Genes with no
@@ -156,6 +164,135 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, alternative = "two.sided") {
 # per-module plumbing is needed.
 fcs_alternative <- function(vals) if (any(vals < 0, na.rm = TRUE)) "two.sided" else "greater"
 
+# ── Lachenbruch Two-Part Test (per ranking over all GMTs) ─────────────────────
+# Tests enrichment in zero-inflated distributions by combining:
+#   Part 1: Fisher exact on 2×2 prevalence table (score > 0 vs = 0, one-sided)
+#   Part 2: Wilcoxon on positive-scoring genes only (magnitude, one-sided)
+# Each part → χ²(df=1); sum → χ²(df=2) combined p-value. BH per GMT.
+# Only appropriate for non-negative/zero-floored vals (alternative="greater").
+# Returns per-pathway: lach_pval, lach_p.adj, lach_chi_binary (Part 1 χ²),
+#   lach_chi_nonzero (Part 2 χ²), lach_chi_total, lach_frac_magnitude
+#   (= chi_nonzero/chi_total; high value = signal driven by magnitude, not
+#   just prevalence of any signal).
+fcs_run_lachenbruch <- function(vals, gmts, num_g = 10) {
+  vals[is.na(vals)] <- 0
+  universe   <- names(vals)
+  hits       <- names(vals[vals > 0])
+  pos_scores <- vals[vals > 0]
+
+  out <- list()
+  for (db in names(gmts)) {
+    gmt <- gmts[[db]]
+    gs  <- gmt$genesets
+    if (is.null(names(gs))) names(gs) <- gmt$geneset.names
+
+    rows <- list()
+    for (pname in names(gs)) {
+      p_genes <- intersect(gs[[pname]], universe)
+      n1 <- length(p_genes)
+      if (n1 < num_g) next
+
+      k1 <- length(intersect(p_genes, hits))
+      k0 <- n1 - k1
+      b1 <- length(hits) - k1
+      b0 <- (length(universe) - n1) - b1
+
+      mat  <- matrix(c(k1, k0, b1, b0), nrow = 2, byrow = TRUE)
+      ft   <- tryCatch(fisher.test(mat, alternative = "greater"), error = function(e) NULL)
+      if (is.null(ft)) next
+      p1   <- max(ft$p.value, 1e-15)
+      chi1 <- qchisq(p1, df = 1, lower.tail = FALSE)
+
+      p_pos  <- intersect(p_genes, names(pos_scores))
+      n1_pos <- length(p_pos)
+      chi2   <- 0
+      if (n1_pos >= 2 && (length(pos_scores) - n1_pos) >= 2) {
+        bg_pos <- setdiff(names(pos_scores), p_pos)
+        wt     <- tryCatch(
+          wilcox.test(pos_scores[p_pos], pos_scores[bg_pos], alternative = "greater"),
+          error = function(e) NULL)
+        if (!is.null(wt)) {
+          p2   <- max(wt$p.value, 1e-15)
+          chi2 <- qchisq(p2, df = 1, lower.tail = FALSE)
+        }
+      }
+
+      chi_total <- chi1 + chi2
+      rows[[pname]] <- tibble::tibble(
+        database            = db,
+        pathway             = pname,
+        lach_pval           = pchisq(chi_total, df = 2, lower.tail = FALSE),
+        lach_chi_binary     = chi1,
+        lach_chi_nonzero    = chi2,
+        lach_chi_total      = chi_total,
+        lach_frac_magnitude = if (chi_total > 0) chi2 / chi_total else NA_real_
+      )
+    }
+    if (length(rows) == 0) next
+    db_df <- dplyr::bind_rows(rows)
+    db_df$lach_p.adj <- p.adjust(db_df$lach_pval, method = "BH")
+    out[[db]] <- db_df
+  }
+  if (length(out) == 0) return(tibble::tibble())
+  dplyr::bind_rows(out)
+}
+
+# ── Path Sum Permulation (per ranking over all GMTs) ──────────────────────────
+# Score-accumulation test: observed pathway sum vs label-permuted null.
+# Zero-floored genes contribute 0 → neutral (do not distort null).
+# BH per GMT. NES = (obs_sum - null_mean) / null_sd; NES > 0 = enrichment.
+# p-value floor = 1 / (n_perms + 1). Only for non-negative vals.
+# Returns per-pathway: perm_pval, perm_p.adj, perm_nes.
+fcs_run_permulation <- function(vals, gmts, num_g = 10, n_perms = 2000, seed = 42) {
+  vals[is.na(vals)] <- 0
+  genes_all <- names(vals)
+  N_genes   <- length(genes_all)
+
+  set.seed(seed)
+  perm_mat <- vapply(seq_len(n_perms), function(i) sample(vals), numeric(N_genes))
+  rownames(perm_mat) <- genes_all
+
+  out <- list()
+  for (db in names(gmts)) {
+    gmt <- gmts[[db]]
+    gs  <- gmt$genesets
+    if (is.null(names(gs))) names(gs) <- gmt$geneset.names
+
+    valid <- sapply(gs, function(g) length(intersect(g, genes_all)) >= num_g)
+    gs_v  <- gs[valid]
+    if (length(gs_v) == 0) next
+    pnames <- names(gs_v)
+
+    gene_idx <- setNames(seq_along(genes_all), genes_all)
+    ri <- integer(0); ci <- integer(0)
+    for (i in seq_along(gs_v)) {
+      g_in <- intersect(gs_v[[i]], genes_all)
+      if (length(g_in)) { ri <- c(ri, rep(i, length(g_in))); ci <- c(ci, gene_idx[g_in]) }
+    }
+    M <- Matrix::sparseMatrix(i = ri, j = ci, x = 1,
+                              dims = c(length(gs_v), N_genes),
+                              dimnames = list(pnames, genes_all))
+
+    obs_sums  <- as.numeric(M %*% vals)
+    null_sums <- as.matrix(M %*% perm_mat)   # pathways × n_perms
+    null_mu   <- rowMeans(null_sums)
+    null_sd   <- apply(null_sums, 1, sd)
+    nes       <- (obs_sums - null_mu) / ifelse(null_sd == 0, 1, null_sd)
+    pvals     <- (rowSums(null_sums >= obs_sums) + 1) / (n_perms + 1)
+
+    db_df <- tibble::tibble(
+      database   = db,
+      pathway    = pnames,
+      perm_pval  = pvals,
+      perm_p.adj = p.adjust(pvals, method = "BH"),
+      perm_nes   = nes
+    )
+    out[[db]] <- db_df
+  }
+  if (length(out) == 0) return(tibble::tibble())
+  dplyr::bind_rows(out)
+}
+
 # ── Progress logging (flushed; survives knitr chunk buffering) ────────────────
 # Writes a timestamped line to stderr AND appends to fcs_progress.log in the work
 # dir, so a run can be followed with `tail -f` even while an Rmd chunk is mid-flight
@@ -266,7 +403,8 @@ fcs_permpvalenrich_vectorized <- function(realenrich, enrichStat, alternative = 
 }
 
 # rankings: named list of named-numeric vectors (already zero-floored).
-fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
+fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
+                        fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000) {
   res <- list(); alts <- list()
   for (rk in names(rankings)) {
     alts[[rk]] <- fcs_alternative(rankings[[rk]])
@@ -274,9 +412,16 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
     if (nrow(r) > 0) res[[rk]] <- dplyr::mutate(r, ranking = rk)
   }
   if (length(res) == 0) {
-    return(tibble::tibble(ranking = character(), database = character(), pathway = character(),
-                          stat = numeric(), pval = numeric(), p.adj = numeric(), p.perm = numeric(),
-                          num.genes = numeric(), gene.vals = character()))
+    return(tibble::tibble(
+      ranking = character(), database = character(), pathway = character(),
+      stat = numeric(), pval = numeric(), p.adj = numeric(), p.perm = numeric(),
+      num.genes = numeric(), gene.vals = character(),
+      lach_pval = numeric(), lach_p.adj = numeric(), lach_chi_binary = numeric(),
+      lach_chi_nonzero = numeric(), lach_chi_total = numeric(), lach_frac_magnitude = numeric(),
+      perm_pval = numeric(), perm_p.adj = numeric(), perm_nes = numeric(),
+      sig_wilcoxon = logical(), sig_lachenbruch = logical(), sig_permulation = logical(),
+      evidence_count = integer(), evidence_label = character()
+    ))
   }
   enrich_df <- dplyr::bind_rows(res)
   enrich_df$p.perm <- NA_real_
@@ -349,7 +494,77 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE") {
     }
   }
 
-  enrich_df %>% dplyr::relocate(ranking, database, pathway)
+  # ── Lachenbruch Two-Part and Path Sum Permulation (non-negative rankings) ──
+  # Skipped for two-sided rankings (signed RER vals) where score > 0 has no
+  # "signal present" meaning — Wilcoxon-only for those.
+  lach_res <- list()
+  perm_res <- list()
+  for (rk in names(rankings)) {
+    if (alts[[rk]] != "greater") next
+    vals_rk <- rankings[[rk]]
+
+    fcs_progress(sprintf("Lachenbruch two-part test: ranking %s", rk))
+    lach_rk <- tryCatch(
+      fcs_run_lachenbruch(vals_rk, gmts, num_g = num_g),
+      error = function(e) {
+        fcs_progress(sprintf("  Lachenbruch failed [%s]: %s", rk, e$message))
+        tibble::tibble()
+      })
+    if (nrow(lach_rk) > 0) lach_res[[rk]] <- dplyr::mutate(lach_rk, ranking = rk)
+
+    fcs_progress(sprintf("Path sum permulation: ranking %s (%d perms)", rk, n_perms_sum))
+    perm_rk <- tryCatch(
+      fcs_run_permulation(vals_rk, gmts, num_g = num_g, n_perms = n_perms_sum),
+      error = function(e) {
+        fcs_progress(sprintf("  Permulation failed [%s]: %s", rk, e$message))
+        tibble::tibble()
+      })
+    if (nrow(perm_rk) > 0) perm_res[[rk]] <- dplyr::mutate(perm_rk, ranking = rk)
+  }
+
+  lach_df <- if (length(lach_res) > 0) dplyr::bind_rows(lach_res) else tibble::tibble()
+  perm_df <- if (length(perm_res) > 0) dplyr::bind_rows(perm_res) else tibble::tibble()
+
+  if (nrow(lach_df) > 0) {
+    enrich_df <- dplyr::left_join(enrich_df, lach_df, by = c("ranking", "database", "pathway"))
+  } else {
+    enrich_df <- dplyr::mutate(enrich_df,
+      lach_pval = NA_real_, lach_p.adj = NA_real_, lach_chi_binary = NA_real_,
+      lach_chi_nonzero = NA_real_, lach_chi_total = NA_real_, lach_frac_magnitude = NA_real_)
+  }
+  if (nrow(perm_df) > 0) {
+    enrich_df <- dplyr::left_join(enrich_df, perm_df, by = c("ranking", "database", "pathway"))
+  } else {
+    enrich_df <- dplyr::mutate(enrich_df,
+      perm_pval = NA_real_, perm_p.adj = NA_real_, perm_nes = NA_real_)
+  }
+
+  # ── Evidence gates and classification ────────────────────────────────────────
+  # sig_wilcoxon: FDR gate + optional Wilcoxon permulation gate + direction.
+  #   p.perm is NA when no perms_file is supplied — gate skipped in that case.
+  # sig_lachenbruch: FDR gate only (both sub-tests are exact/analytic).
+  # sig_permulation: FDR gate + direction (NES > 0 = enrichment).
+  enrich_df <- enrich_df %>%
+    dplyr::mutate(
+      sig_wilcoxon    = !is.na(p.adj)       & p.adj       < fdr_thr &
+                        (is.na(p.perm) | p.perm < p_perm_thr) &
+                        !is.na(stat)  & stat > 0,
+      sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_thr,
+      sig_permulation = !is.na(perm_p.adj)  & perm_p.adj  < fdr_thr &
+                        !is.na(perm_nes) & perm_nes > 0,
+      evidence_count  = as.integer(sig_wilcoxon) +
+                        as.integer(sig_lachenbruch) +
+                        as.integer(sig_permulation),
+      evidence_label  = dplyr::case_when(
+        evidence_count == 3L ~ "Hard evidence",
+        evidence_count == 2L ~ "Supported",
+        evidence_count == 1L ~ "Exploratory",
+        TRUE                 ~ "Not significant"
+      )
+    )
+
+  enrich_df %>% dplyr::relocate(ranking, database, pathway,
+                                 evidence_count, evidence_label)
 }
 
 # ── Per-gene percentile flags (directional) ──────────────────────────────────

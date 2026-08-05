@@ -1,5 +1,5 @@
 ---
-title: "Position-level Enrichment (Fisher, fixed cutoffs) — `r params$traitname`"
+title: "Position-level Enrichment (Path Sum Permulation) — `r params$traitname`"
 subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else if (exists('params') && !is.null(params$trait)) paste0('Trait: ', params$trait) else if (exists('params') && !is.null(params$project_name)) paste0('Project: ', params$project_name) else ''`"
 date: "`r format(Sys.time(), '%d %B %Y')`"
 author: "PhyloPhere pipeline"
@@ -268,22 +268,14 @@ fade_sites_bottom_df <- if (has_fade_sites_bottom) {
 > term counts without independent corroboration.
 
 This report summarises **position-level enrichment** for `r params$traitname`. Unlike
-the gene-level FCS (a Wilcoxon-AUC rank-shift test), the position background is a
-sea of invariant columns that can never carry a CAAS change — a rank-shift test
-degenerates there. Instead we use **Fisher's exact test** at four fixed
-foreground cutoffs (top 25 / 10 / 5 / 1% of scored positions, per direction), run
-against every pathway across 9 GMT-style databases plus the broad functional
-`characterization` layers (UCR core/flank, FUBAR positive/purifying) — all on
-the same mechanism.
+the gene-level FCS (a Wilcoxon-AUC rank-shift test over genes), the position background is a
+sea of invariant columns where <0.2% of positions carry a non-zero CAAS score. A rank-shift test
+degenerates there, and fixed-cutoff Fisher tests suffer from extreme sample-size sensitivity at $N \approx 1.47\text{M}$.
+Instead, we use **Position-Level Path Sum Permulation**: accumulating continuous CAAS score magnitudes per term ($T_\text{obs} = \sum_{p \in \text{term}} s_p$)
+and comparing against a label-permuted null distribution across the full ~1.47M position background ($N_\text{perms} = 2,000$).
 
 A set is flagged **significant** when `p.adj < `r PADJ`` (BH-adjusted per
-ranking × database). No fold-enrichment magnitude gate is applied here —
-`fold_enrichment` is still reported alongside every result so a magnitude
-cutoff can be applied downstream, but it does not affect which sets are
-marked significant in this report. Fisher/hypergeometric tests gain enormous
-power at this background size (~1.47M positions), so a barely-there deviation
-from the null ratio can still reach a "significant" p-value on its own — keep
-this in mind when filtering (see Methods).
+ranking × database) and `NES > 0`.
 
 ```{r overview, echo=FALSE, results='asis'}
 if (!has_res) {
@@ -1730,60 +1722,26 @@ readr::write_tsv(region_export,
 
 # Methods
 
-- **Test**: Fisher's exact test, one 2x2 table per (ranking, database, pathway,
-  top_frac): foreground = the top 25/10/5/1% of scored positions (by `CAAS_score`,
-  `scoring` module `position_scores.tsv`) in that direction; background = the
-  full honest tested position universe (all non-gapped "selected" alignment
-  columns of the cleaned-background genes) — never restricted to the scored
-  subset. Run separately for the **global / top / bottom** directions
-  (`change_side`); `top`/`bottom` filter to `change_side` first (matching the
-  `scoring` module's own percentile convention — see `11.Scoring_report.Rmd`),
-  `global` does not.
+- **Test**: Position-Level Path Sum Permulation test. Raw CAAS score magnitude
+  is summed for every position in a set ($T_\text{obs} = \sum_{p \in \text{term}} s_p$).
+  The non-zero position scores ($K \approx 3{,}000$) are randomly permuted $N_\text{perms} = 2,000$ times
+  across the full ~1.47M position background to build an exact empirical null distribution.
+  Normalized Enrichment Score ($\text{NES} = (T_\text{obs} - \mu_\text{null}) / \sigma_\text{null}$)
+  and empirical p-values ($p_\text{perm} = \frac{\#\{T_\text{null} \ge T_\text{obs}\} + 1}{N_\text{perms} + 1}$)
+  are computed per term. Run separately for the **global / top / bottom** directions (`change_side`).
 - **Two background conventions.** Every database above tests against the
   **full honest background** *except* `cosmic_orthogroups` and
   `pai3d_orthogroups`, which test against a **coverage-restricted background**
-  (foreground *and* background both intersected with the set of genes the
-  external database itself could ever annotate — see
+  (background intersected with the set of genes the external database itself could ever annotate — see
   `cosmic_coverage_genes.txt` / `pai3d_coverage_genes.txt`, emitted by
-  `build_position_gmt.py`). The distinction is *why* a position is absent from
-  a term: `orthogroups`/`pfam_domains`/`selection_*`/`ucr_*` are internal
-  deterministic computations with complete coverage by construction, so an
-  absent position is genuine negative evidence. COSMIC and PAI3D are external
-  observational/curated databases with incomplete real-world coverage — a gene
-  COSMIC never sequenced, or PAI3D never scored, is absent from the term for a
-  reason that has nothing to do with the trait being tested. Testing those two
-  GMTs against the full ~1.47M-position background would dilute the signal
-  with genes/positions the database could never have annotated regardless of
-  outcome; restricting both foreground and background to the coverage subset
-  keeps the 2x2 table's implicit universe honest to what was actually tested.
+  `build_position_gmt.py`).
 - **Databases**: 10 GMT-style position-set databases (Pfam domains/clans,
   COSMIC and PAI3D and general orthogroups, genomic locations,
   positive/purifying-selection orthogroups, UCR core/flank orthogroups) plus
   the broad `characterization` layers (UCR core/flank, FUBAR
-  positive/purifying) — unified onto the same Fisher mechanism. `min`/`max`
-  set-size filtering applies only to the GMT-style databases; the broad layers
-  were never size-filtered. PAI3D membership is restricted to variants the
-  `prediction` column calls pathogenic (substring match, no score-cutoff
-  fallback — the same convention as `11.Scoring_report.Rmd`'s
-  `is_pathogenic`); COSMIC has no such filter since every somatic mutation
-  counts as evidence.
-- **`p.adj`**: BH-adjusted per (ranking, database) — a handful of huge broad
-  layers and up to thousands of small GMT terms carry very different
-  multiple-testing burdens, so they are not pooled into one BH family.
-- **Cross-module corroboration (`%gate_sig`, `%fade_*`, `%rer_*`,
-  `%accum`)**: optional, present when POSENRICH is run with an `--annot-file`
-  (SCORING's `fcs_stats.tsv`). For each overlap, the distinct genes
-  contributing to it (never raw positions — a single gene contributing many
-  overlapping positions must not dominate the percentage) are looked up
-  against SCORING's own `flag_*` columns, and the percentage carrying each
-  flag is reported alongside the Fisher result — the same idea as the
-  gene-level FCS report's leading-edge composition, applied to positions.
-- **Significance is `p.adj < `r PADJ`` alone** — no fold-enrichment magnitude
-  gate is applied. `fold_enrichment` is still computed and reported for every
-  result so a minimum-effect-size cutoff can be applied downstream; be aware
-  that at this background size (~1.47M positions) even a biologically
-  negligible deviation from the expected ratio (e.g. fold ≈ 0.95) can reach a
-  "significant" p-value on p-value alone.
+  positive/purifying). `min`/`max` set-size filtering applies only to the GMT-style databases.
+- **`p.adj`**: BH-adjusted per (ranking, database).
+- **Significance**: `p.adj < `r PADJ`` and `NES > 0`.
 - **No permulation (`p.perm`) at position level.** The CAAS permulation null is a
   *naive random relabeling*: when the phenotype is permuted, the fg/bg species are
   paired at **random across the tree**, not as the observed **matched sister

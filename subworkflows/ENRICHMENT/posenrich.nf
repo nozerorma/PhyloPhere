@@ -133,8 +133,8 @@ process POSENRICH_RUN {
         --position-lists-dir ${position_lists_dir} \
         --min-size ${min_size} \
         --max-size ${max_size} \
+        --n-perms ${params.posenrich_n_perms ?: 10000} \
         --padj-thr ${params.posenrich_padj_thr} \
-        --fold-thr ${params.posenrich_fold_thr} \
         --output-dir .
     """
 }
