@@ -88,7 +88,7 @@ re-rendered without re-running the whole chain.
 flowchart TD
     A[REPORTING\ndataset / phenotype exploration] --> B[CONTRAST_SELECTION\nprune + pick extremes]
     B --> C[CT\ndiscovery / resample / bootstrap]
-    C --> D[CT_SIGNIFICATION\ngenome-wide FDR]
+    C --> D[CT_SIGNIFICATION\ngenome-wide characterization of hypergeometric significance. Metafile production.]
     D --> E[CT_DISAMBIGUATION\nASR: convergent/parallel/divergent]
     E --> E2[ASR_ROBUSTNESS\nposterior sensitivity, parallel diagnostic]
     E --> F[CT_POSTPROC\ncluster/gene filtering + characterization]
