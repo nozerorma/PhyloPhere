@@ -94,8 +94,8 @@ flowchart TD
     E --> F[CT_POSTPROC\ncluster/gene filtering + characterization]
     F --> G[CT_ACCUMULATION\nper-gene CAAS burden test]
     F --> H[VEP\nPrimateAI-3D / COSMIC annotation]
-    F --> I[FADE\nHyPhy directional selection, top+bottom]
     subgraph independent[independent of CT, same trait]
+      I[FADE\nHyPhy directional selection, top+bottom]
       J[RER_MAIN\nRERconverge relative evolutionary rate]
     end
     G --> K[SCORING\ncomposite position + gene scores]
