@@ -98,7 +98,8 @@ flowchart TD
       I[FADE\nHyPhy directional selection, top+bottom]
       J[RER_MAIN\nRERconverge relative evolutionary rate]
     end
-    G --> K[SCORING\ncomposite position + gene scores]
+    F --> K[SCORING\ncomposite position + gene scores]
+    G --> K
     H --> K
     I --> K
     J --> K
