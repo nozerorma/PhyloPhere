@@ -235,10 +235,10 @@ ggplot2::ggsave(file.path(species_distribution_dir, paste0(clade_name, "_", taxo
 p1
 
 # Prune taxa distribution to only include species in the pruned tree
-pruned_taxa_distribution <- taxa_distribution %>%
-  dplyr::filter(taxa %in% (trait_df %>%
-                             dplyr::pull(!!sym(taxon_of_interest)) %>%
-                             unique()))
+pruned_taxa_distribution <- trait_df %>%
+  dplyr::rename(taxa = !!sym(taxon_of_interest)) %>%
+  dplyr::group_by(taxa) %>%
+  dplyr::summarise(count = n(), .groups = "drop")
 
 # Create bar plot for pruned taxa distribution
 pruned_taxa_distribution <- pruned_taxa_distribution %>%

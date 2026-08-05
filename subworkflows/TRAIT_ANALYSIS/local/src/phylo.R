@@ -159,6 +159,32 @@ if (file.exists(pruned_tree_path) && file.exists(pruned_trait_path)) {
 }
 
 # ----------------------------------------
+# Central NA Phenotype Pruning
+# ----------------------------------------
+# Automatically filter out species with NA values in the primary trait
+# (or in n_trait/c_trait when count data is specified)
+if (exists("trait") && trait %in% names(trait_df)) {
+  na_mask <- is.na(trait_df[[trait]])
+  if (isTRUE(get0("has.n", ifnotfound = FALSE)) && exists("n_trait") && n_trait %in% names(trait_df)) {
+    na_mask <- na_mask | is.na(trait_df[[n_trait]])
+  }
+  if (isTRUE(get0("has.c", ifnotfound = FALSE)) && exists("c_trait") && c_trait %in% names(trait_df)) {
+    na_mask <- na_mask | is.na(trait_df[[c_trait]])
+  }
+
+  na_sp <- trait_df$species[na_mask]
+  na_sp <- unique(na_sp[!is.na(na_sp)])
+
+  if (length(na_sp) > 0) {
+    debug_log("phylo.R: Removing %d species with NA phenotype/count values from dataset", length(na_sp))
+    trait_df <- trait_df[!na_mask, , drop = FALSE]
+    if (exists("pruned_tree") && !is.null(pruned_tree)) {
+      pruned_tree <- ape::drop.tip(pruned_tree, intersect(pruned_tree$tip.label, na_sp))
+    }
+  }
+}
+
+# ----------------------------------------
 # Node MRCA Identification
 # ----------------------------------------
 

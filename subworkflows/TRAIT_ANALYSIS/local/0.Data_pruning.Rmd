@@ -177,11 +177,31 @@ stats_df <- stats.f(trait_df)
 # Cleanup data frame and tree
 `%ni%` <- Negate(`%in%`)
 
+# Automatic NA phenotype pruning: remove species with NA values in the primary trait column
+# or in the n_trait/c_trait count columns when count data is used
+na_mask <- is.na(trait_df[[trait]])
+if (isTRUE(has.n) && n_trait %in% names(trait_df)) {
+  na_mask <- na_mask | is.na(trait_df[[n_trait]])
+}
+if (isTRUE(has.c) && c_trait %in% names(trait_df)) {
+  na_mask <- na_mask | is.na(trait_df[[c_trait]])
+}
+
+prune_species_na <- trait_df$species[na_mask]
+prune_species_na <- unique(prune_species_na[!is.na(prune_species_na)])
+
+if (length(prune_species_na) > 0) {
+  prune_log_msgs <- c(prune_log_msgs, sprintf("Identified %d species with NA phenotype/count values to prune\n", length(prune_species_na)))
+}
+
+# Combine explicit prune list and NA prune species
+all_prune_species <- unique(c(prune_species_primary, prune_species_na))
+
 visualization_tree <- pruned_tree
 
-pruned_trait_df <- trait_df[trait_df$species %ni% prune_species_primary, ]
-clean_tree <- ape::drop.tip(pruned_tree, prune_species_primary)
-pruned_stats <- stats_df[stats_df$species %ni% prune_species_primary, ]
+pruned_trait_df <- trait_df[trait_df$species %ni% all_prune_species, ]
+clean_tree <- ape::drop.tip(pruned_tree, intersect(pruned_tree$tip.label, all_prune_species))
+pruned_stats <- stats_df[stats_df$species %ni% all_prune_species, ]
 
 prune_log_msgs <- c(
   prune_log_msgs,
@@ -780,7 +800,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
 
   plot(cont_obj, fsize=asr_dims$fsize, lwd=asr_dims$line_width, res=320, legend=FALSE,
       xlim=c(-asr_dims$legend_left*h, asr_dims$xlim_right*h),
-      cex.main=asr_dims$main_cex)
+      cex.main=asr_dims$main_cex, outline=TRUE)
 
   lwd_bar <- asr_dims$colorbar_lwd
   root_est_str <- sprintf("%.2f (%.2f-%.2f)", 

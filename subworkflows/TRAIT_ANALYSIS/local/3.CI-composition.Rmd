@@ -187,6 +187,19 @@ if (use_count_data) {
   debug_log("compute_CI: Jeffreys CI method (n_trait = %s, c_trait = %s)", n_trait, c_trait)
   library(binom)
 
+  # Safe wrapper for binom.confint to handle NA or invalid values
+  safe_binom_bound <- function(k, n, bound_col) {
+    if (is.na(k) || is.na(n) || n <= 0 || k < 0 || k > n) {
+      return(NA_real_)
+    }
+    res <- tryCatch(
+      binom::binom.confint(k, n, method = "bayes", priors = c(0.5, 0.5), conf.level = 0.95),
+      error = function(e) NULL
+    )
+    if (is.null(res)) return(NA_real_)
+    return(res[[bound_col]])
+  }
+
   trait_ci <- trait_df %>%
     group_by(species) %>%
     dplyr::rename(n_population = .data[[n_trait]],
@@ -194,13 +207,11 @@ if (use_count_data) {
                   trait        = .data[[trait]]) %>%
     dplyr::mutate(
       # Jeffreys beta method CIs
-      trait_ci_lb = binom::binom.confint(n_cases, n_population,
-                                         method = "bayes", priors = c(0.5, 0.5),
-                                         conf.level = 0.95)[, 5],
-      trait_ci_ub = binom::binom.confint(n_cases, n_population,
-                                         method = "bayes", priors = c(0.5, 0.5),
-                                         conf.level = 0.95)[, 6],
-      trait_ci = paste0("[", round(trait_ci_lb, 2), "-", round(trait_ci_ub, 2), "]"),
+      trait_ci_lb = safe_binom_bound(n_cases, n_population, 5),
+      trait_ci_ub = safe_binom_bound(n_cases, n_population, 6),
+      trait_ci = ifelse(is.na(trait_ci_lb) | is.na(trait_ci_ub),
+                        NA_character_,
+                        paste0("[", round(trait_ci_lb, 2), "-", round(trait_ci_ub, 2), "]")),
       # Category follows the active global discretization policy for colouring/annotation
       category = dplyr::case_when(
         trait >= upper_thresh ~ "top",

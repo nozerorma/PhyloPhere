@@ -13,7 +13,7 @@
   "runtime": {
     "resume": false,
     "toy_mode": true,
-    "toy_n": "1000",
+    "toy_n": "2000",
     "runtime_type": "slurm",
     "batched": true,
     "script_base_name": "diet_cancer_compo",
@@ -30,7 +30,7 @@
     "tree_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/science.abn7829_data_s4.nex.tree",
     "trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/6.Other-primate-phenotypes/merged_traits_with_LQ.csv",
     "simple_trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/6.Other-primate-phenotypes/merged_traits_with_LQ.csv",
-    "prune_dir": "",
+    "prune_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP",
     "branch_trait": "LQ",
     "ali_sp_names": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ali_sp_names.txt",
     "tax_id_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family_primates.tsv",
@@ -74,7 +74,7 @@
       "caas_permulation_enrichment": true,
       "top_quantile": "0.90",
       "bottom_quantile": "0.10",
-      "contrast_max_iter": "3",
+      "contrast_max_iter": "4",
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_discovery_batch_size": "25",
@@ -90,7 +90,7 @@
       "caap_mode": true,
       "fgsize": "6",
       "bgsize": "6",
-      "perm_strategy": "lambda",
+      "perm_strategy": "BM",
       "resample_use_n": true,
       "max_tries": "1000000",
       "perm_pheno_col": "",
@@ -111,7 +111,7 @@
       "ct_disambig_posterior_threshold": "0.1",
       "ct_disambig_max_tasks_per_child": "50",
       "asr_robustness": true,
-      "run_postproc_exploratory": true,
+      "run_postproc_exploratory": false,
       "run_postproc_filter": true,
       "caas_postproc_mode": "filter",
       "filter_minlen": "3",
@@ -123,7 +123,7 @@
       "iqr_multiplier": "3.0"
     },
     "accumulation": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
@@ -181,14 +181,14 @@
       "fade_universe_file": ""
     },
     "vep": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
-      "vep_primateai_db": "",
+      "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
-      "cosmic_db": ""
+      "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz"
     },
     "scoring": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "scoring_stress": true,
       "scoring_stress_top_n": "25",
@@ -199,7 +199,7 @@
       "scoring_gene_top_pct": "0.10"
     },
     "enrichment": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "posenrich_enabled": true,
       "gmt_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/GMTs",
@@ -219,7 +219,7 @@
       "scoring_compare_top_n": "20",
       "egg_members_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv",
       "egg_annotations_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv",
-      "cosmic_db": "",
+      "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz",
       "domain_variability_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/domain_variability.tsv",
       "ucr_positions_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/ucr_positions.tsv",
       "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
@@ -238,8 +238,8 @@
     "use_disambiguation": false,
     "use_postproc": false,
     "use_accumulation": false,
-    "use_rer": false,
-    "use_fade": false,
+    "use_rer": true,
+    "use_fade": true,
     "use_vep": false
   },
   "resources": {

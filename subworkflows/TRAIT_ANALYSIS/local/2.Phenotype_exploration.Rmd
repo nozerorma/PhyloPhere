@@ -783,11 +783,11 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   bluish_green_col <- as.character(tableau_10["bluish_green"])
   blue_col <- as.character(tableau_10["blue"])
 
-  gg_base <- ggtree::ggtree(rescaled_tree, layout = "rectangular") %<+% plot_df
+  gg_base <- ggtree::ggtree(rescaled_tree, layout = "rectangular", color = "black", linewidth = 1.2) %<+% plot_df
   tree_depth <- max(gg_base$data$x, na.rm = TRUE)
 
   p <- gg_base +
-    ggplot2::aes(color = estimate) +
+    ggtree::geom_tree(ggplot2::aes(color = estimate), linewidth = 0.7) +
     ggplot2::scale_color_gradient(low = "white", high = vermillion_col,
                                    name = paste0(trait, " (", model_used, ")")) +
     ggtree::geom_tiplab(size = tip_lab_size, offset = 0.045 * tree_depth, color = "black") +
