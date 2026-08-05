@@ -194,8 +194,8 @@ taxa_plot.f <- function(df, ordered_taxa_levels, caption_text = NULL){
         color = "black"
       ),
       axis.text.x = element_blank(),
-      plot.title = element_text(size = plot_profile$title_size, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
-      axis.title.x = element_text(size = plot_profile$axis_title, hjust = 0.5, margin = margin(t = 20), face = "bold", color = "black"),
+      plot.title = element_text(size = plot_profile$title_size, hjust = 0, margin = ggplot2::margin(t = 20, b = 6), face = "bold", color = "black"),
+      axis.title.x = element_text(size = plot_profile$axis_title, margin = ggplot2::margin(t = 12), face = "bold", color = "black"),
       axis.title.y = element_blank(),
       plot.caption = element_text(size = plot_profile$caption_size, hjust = 0, face = "italic", color = "grey30", margin = margin(t = 14)),
       plot.margin = margin(20, right_margin, 35, 20),

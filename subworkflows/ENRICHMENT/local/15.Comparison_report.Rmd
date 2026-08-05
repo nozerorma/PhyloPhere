@@ -87,6 +87,17 @@ params:
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE,
                       fig.width = 9, fig.height = 7, dev = "png", dpi = 200)
 suppressPackageStartupMessages({ library(igraph); library(tidyverse); library(knitr); library(kableExtra) })
+
+theme_set(
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
+    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
+    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
+  )
+)
 filter <- dplyr::filter; select <- dplyr::select; rename <- dplyr::rename; mutate <- dplyr::mutate
 has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
 .src_dir <- file.path(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)), "src")
@@ -174,6 +185,7 @@ has_le <- nrow(le) > 0
 
 has_ami <- .file_ok(params$ami_module_desc_file)
 ami_df  <- if (has_ami) readr::read_tsv(params$ami_module_desc_file, show_col_types = FALSE) else NULL
+ami_disp <- NULL
 
 # AMI term membership recurrence table (term_threshold_membership.tsv from
 # 13.AMI_analysis.Rmd's render_tool_section_nested()) — imported directly
@@ -321,17 +333,75 @@ fcs_genes <- if (has_le && has_multi) {
 # direction is only ever "Top"/"Bottom" here (DOMINO never runs on an
 # undirected gene list, so there's no "Global" value to filter for -- see
 # this chunk's opening comment).
-ami_genes <- if (has_ami) {
-  .ami_gene_col <- if ("all_genes" %in% names(ami_df)) "all_genes" else "genes"
-  ami_df %>%
-    dplyr::filter(!description %in% c("Too small", "No enrichment"),
-                  direction %in% c("Top", "Bottom"),
-                  !is.na(domino_p_adj), domino_p_adj < params$domino_module_thr) %>%
-    dplyr::mutate(gene = strsplit(.data[[.ami_gene_col]], ",\\s*")) %>%
-    tidyr::unnest(gene) %>%
-    dplyr::mutate(gene = trimws(gene)) %>%
-    dplyr::distinct(gene, direction) %>%
-    dplyr::mutate(ami_hit = TRUE)
+.normalize_term <- function(x) {
+  x <- tolower(x)
+  x <- gsub("[^a-z0-9 ]", " ", x)
+  gsub("\\s+", " ", trimws(x))
+}
+.cluster_terms <- function(terms, sim_thr = 0.85) {
+  if (length(terms) == 0) return(character(0))
+  norm <- vapply(terms, .normalize_term, character(1))
+  reps_norm <- character(0); reps_orig <- character(0)
+  assign <- integer(length(terms))
+  for (i in seq_along(terms)) {
+    if (length(reps_norm) == 0) { reps_norm <- norm[i]; reps_orig <- terms[i]; assign[i] <- 1L; next }
+    d <- utils::adist(norm[i], reps_norm)[1, ]
+    sim <- 1 - d / pmax(nchar(norm[i]), nchar(reps_norm), 1)
+    best <- which.max(sim)
+    if (sim[best] >= sim_thr) {
+      assign[i] <- best
+    } else {
+      reps_norm <- c(reps_norm, norm[i]); reps_orig <- c(reps_orig, terms[i])
+      assign[i] <- length(reps_norm)
+    }
+  }
+  reps_orig[assign]
+}
+
+ami_disp <- if (has_ami && !is.null(ami_df) && nrow(ami_df) > 0) {
+  d <- ami_df
+  if ("description" %in% names(d)) {
+    d <- d %>% dplyr::filter(!description %in% c("Too small", "No enrichment"))
+  }
+  if ("domino_p_adj" %in% names(d)) {
+    d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj < (params$domino_module_thr %||% 0.05))
+  }
+  if (nrow(d) > 0 && "description" %in% names(d)) {
+    d$term <- .cluster_terms(d$description)
+  } else if (nrow(d) > 0) {
+    d$term <- character(nrow(d))
+  } else {
+    d$term <- character(0)
+  }
+  d
+} else NULL
+
+ami_genes <- if (has_ami && !is.null(ami_df) && nrow(ami_df) > 0) {
+  .ami_gene_col <- if ("all_genes" %in% names(ami_df)) "all_genes" else if ("genes" %in% names(ami_df)) "genes" else NULL
+  if (is.null(.ami_gene_col)) {
+    tibble::tibble(gene = character(), direction = character(), ami_hit = logical())
+  } else {
+    d <- ami_df
+    if ("description" %in% names(d)) {
+      d <- d %>% dplyr::filter(!description %in% c("Too small", "No enrichment"))
+    }
+    if ("direction" %in% names(d)) {
+      d <- d %>% dplyr::filter(direction %in% c("Top", "Bottom"))
+    }
+    if ("domino_p_adj" %in% names(d)) {
+      d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj < (params$domino_module_thr %||% 0.05))
+    }
+    if (nrow(d) > 0) {
+      d %>%
+        dplyr::mutate(gene = strsplit(.data[[.ami_gene_col]], ",\\s*")) %>%
+        tidyr::unnest(gene) %>%
+        dplyr::mutate(gene = trimws(gene)) %>%
+        dplyr::distinct(gene, direction) %>%
+        dplyr::mutate(ami_hit = TRUE)
+    } else {
+      tibble::tibble(gene = character(), direction = character(), ami_hit = logical())
+    }
+  }
 } else {
   tibble::tibble(gene = character(), direction = character(), ami_hit = logical())
 }
@@ -585,42 +655,13 @@ for (dr in c("Global", "Top", "Bottom")) {
 
 ```{r ami_desc_fallback_prep, eval=has_ami && !has_ami_term_membership}
 # Fallback: re-derive when the imported term membership file isn't available.
-ami_disp <- ami_df %>%
-  dplyr::filter(!description %in% c("Too small", "No enrichment"),
-                !is.na(domino_p_adj), domino_p_adj < params$domino_module_thr)
-
-.normalize_term <- function(x) {
-  x <- tolower(x)
-  x <- gsub("[^a-z0-9 ]", " ", x)
-  gsub("\\s+", " ", trimws(x))
-}
-.cluster_terms <- function(terms, sim_thr = 0.85) {
-  norm <- vapply(terms, .normalize_term, character(1))
-  reps_norm <- character(0); reps_orig <- character(0)
-  assign <- integer(length(terms))
-  for (i in seq_along(terms)) {
-    if (length(reps_norm) == 0) { reps_norm <- norm[i]; reps_orig <- terms[i]; assign[i] <- 1L; next }
-    d <- utils::adist(norm[i], reps_norm)[1, ]
-    sim <- 1 - d / pmax(nchar(norm[i]), nchar(reps_norm), 1)
-    best <- which.max(sim)
-    if (sim[best] >= sim_thr) {
-      assign[i] <- best
-    } else {
-      reps_norm <- c(reps_norm, norm[i]); reps_orig <- c(reps_orig, terms[i])
-      assign[i] <- length(reps_norm)
-    }
-  }
-  reps_orig[assign]
-}
-ami_disp$term <- .cluster_terms(ami_disp$description)
-
 .build_ami_rollup <- function(df) {
   df %>%
     dplyr::group_by(term) %>%
     dplyr::summarise(
       `N modules`    = dplyr::n(),
       `Gene lists`   = paste(sort(unique(gene_list)), collapse = ", "),
-      `DOMINO p.adj` = { v <- domino_p_adj[!is.na(domino_p_adj)]; if (length(v)) signif(min(v), 3) else NA_real_ },
+      `DOMINO p.adj` = { v <- if ("domino_p_adj" %in% names(.data)) domino_p_adj[!is.na(domino_p_adj)] else numeric(0); if (length(v)) signif(min(v), 3) else NA_real_ },
       Genes          = suppressWarnings(max(n_genes, na.rm = TRUE)),
       .groups = "drop"
     ) %>%
@@ -632,7 +673,8 @@ ami_disp$term <- .cluster_terms(ami_disp$description)
 ```{r ami_desc_fallback_tabs, eval=has_ami && !has_ami_term_membership, results='asis'}
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n## %s\n\n", dr))
-  sub <- if (dr == "Global") ami_disp else ami_disp %>% dplyr::filter(direction == dr)
+  if (!exists("ami_disp") || is.null(ami_disp) || nrow(ami_disp) == 0) { cat("_No described modules for this direction._\n\n"); next }
+  sub <- if (dr == "Global") ami_disp else if ("direction" %in% names(ami_disp)) ami_disp %>% dplyr::filter(direction == dr) else ami_disp
   if (nrow(sub) == 0) { cat("_No described modules for this direction._\n\n"); next }
   disp <- .build_ami_rollup(sub) %>% head(params$top_n)
   print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
@@ -841,10 +883,20 @@ pipeline (posenrich's own Fisher test, AMI's DOMINO module search both run at
 # raw near-duplicate-worded description, and tagged with which direction and
 # gene-list threshold (e.g. top10, bottom5) it was found at.
 .ami_desc_for <- function(dir_filter) {
-  if (!has_ami) return(tibble::tibble(gene = character(), ami_desc = character()))
-  ami_disp %>%
-    dplyr::filter(is.null(dir_filter) | direction %in% dir_filter,
-                  !is.na(domino_p_adj), domino_p_adj < params$domino_module_thr) %>%
+  if (!has_ami || !exists("ami_disp") || is.null(ami_disp) || nrow(ami_disp) == 0) return(tibble::tibble(gene = character(), ami_desc = character()))
+  .ami_gene_col <- if ("all_genes" %in% names(ami_disp)) "all_genes" else if ("genes" %in% names(ami_disp)) "genes" else NULL
+  if (is.null(.ami_gene_col) || !"term" %in% names(ami_disp)) return(tibble::tibble(gene = character(), ami_desc = character()))
+  
+  d <- ami_disp
+  if ("direction" %in% names(d) && !is.null(dir_filter)) {
+    d <- d %>% dplyr::filter(direction %in% dir_filter)
+  }
+  if ("domino_p_adj" %in% names(d)) {
+    d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj < (params$domino_module_thr %||% 0.05))
+  }
+  if (nrow(d) == 0) return(tibble::tibble(gene = character(), ami_desc = character()))
+  
+  d %>%
     dplyr::mutate(gene = strsplit(.data[[.ami_gene_col]], ",\\s*"),
                   hit_label = sprintf("%s (%s: %s)", term, direction, gene_list)) %>%
     tidyr::unnest(gene) %>%

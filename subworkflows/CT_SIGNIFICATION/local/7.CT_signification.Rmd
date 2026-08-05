@@ -468,6 +468,10 @@ if (has_caap_group) {
       "Both_05" = tableau_10[["vermillion"]]
     )) +
     theme(
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+      plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10)),
       axis.text.x = element_text(angle = 0, hjust = 0.5),
       panel.grid.major = element_line(color = "darkgray", size = 0.5),
       legend.position = "bottom"
@@ -516,6 +520,10 @@ if (has_caap_group) {
       "Both_05" = tableau_10[["vermillion"]]
     )) +
     theme(
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+      plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10)),
       axis.text.x = element_text(angle = 0, hjust = 0.5),
       panel.grid.major = element_line(color = "darkgray", size = 0.5),
       legend.position = "bottom"

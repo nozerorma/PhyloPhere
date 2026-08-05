@@ -350,12 +350,12 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
-      plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0.5, margin = ggplot2::margin(t = 20), face = "bold"),
-      plot.subtitle = ggplot2::element_text(size = contrast_dims$subtitle_size, hjust = 0.5, color = "grey40"),
+      plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0, margin = ggplot2::margin(t = 20, b = 6), face = "bold"),
+      plot.subtitle = ggplot2::element_text(size = contrast_dims$subtitle_size, hjust = 0, color = "grey40", margin = ggplot2::margin(b = 10)),
       axis.text.y = ggplot2::element_text(size = contrast_dims$axis_text_y),
-      axis.title.x = ggplot2::element_text(size = contrast_dims$axis_title, hjust = 0.5, margin = ggplot2::margin(t = 20, b = 20)),
-      axis.title.y = ggplot2::element_text(size = contrast_dims$axis_title, angle = 90, hjust = 0.5, margin = ggplot2::margin(l = 20, r = 20)),
-      plot.caption = ggplot2::element_text(size = contrast_dims$caption_size, hjust = 0.5, margin = ggplot2::margin(t = 20)),
+      axis.title.x = ggplot2::element_text(size = contrast_dims$axis_title, margin = ggplot2::margin(t = 12)),
+      axis.title.y = ggplot2::element_text(size = contrast_dims$axis_title, angle = 90, margin = ggplot2::margin(l = 20, r = 20)),
+      plot.caption = ggplot2::element_text(size = contrast_dims$caption_size, hjust = 0, margin = ggplot2::margin(t = 20)),
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "bottom"
     )
@@ -474,7 +474,7 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     ggplot2::theme_minimal() +
     ggplot2::theme(
       axis.text.y = ggplot2::element_text(size = violin_dims$axis_text_y, hjust = 0.5, face = "bold"),
-      axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 20, b = 20)),
+      axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, face = "bold", margin = ggplot2::margin(t = 12)),
       axis.title.y = ggplot2::element_blank(),
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "none"

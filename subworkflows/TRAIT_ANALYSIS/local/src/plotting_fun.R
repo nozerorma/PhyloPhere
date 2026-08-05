@@ -326,7 +326,7 @@ species_plot_profile <- function(n_species, n_taxa = n_species, n_rings = 0L) {
       fruit_pwidth = clamp_value(0.62 - 0.05 * pmax(0, n_rings - 1), 0.35, 0.62),
       fruit_gap = 0.03,
       secondary_offset = 0.03,
-      taxa_bar_offset = 0.12,
+      taxa_bar_offset = 0.15,
       taxa_bar_pwidth = 0.09,
 
       # --- Annotation sizing ------------------------------------------------

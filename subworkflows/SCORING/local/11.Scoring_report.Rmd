@@ -111,7 +111,16 @@ if (requireNamespace("paletteer", quietly = TRUE)) {
     "#EDC948", "#B07AA1", "#FF9DA7", "#9C755F", "#BAB0AC"
   )
 }
-theme_set(theme_minimal(base_size = 13))
+theme_set(
+  theme_minimal(base_size = 13) +
+  theme(
+    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
+    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
+    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
+  )
+)
 
 # Safe correlation helper: returns NA (not an error) when inputs have fewer
 # than 3 complete pairs — avoids crashes in sparse optional-module sections.
@@ -476,7 +485,7 @@ rank_norm <- function(x) {
     annotate("text", x=0.50, y=0.02, label=or_txt, size=3, fontface="bold", colour="grey20") +
     ggtitle(title) + theme_void() +
     coord_cartesian(xlim = c(0, 1), ylim = c(-0.06, 1.02), clip = "off") +
-    theme(plot.title  = element_text(face="bold", hjust=0.5, size=11),
+    theme(plot.title  = element_text(face="bold", hjust=0, size=11, margin = ggplot2::margin(b = 6)),
           plot.margin = margin(t = 4, r = 4, b = 14, l = 4))
 }
 ```
@@ -739,10 +748,10 @@ ggplot(joint_df, aes(x = hyp_val, y = boot_val, colour = CAAS_score)) +
     colours = c("#4E79A7", "#76B7B2", "#EDC948", "#F28E2B", "#E15759"),
     name    = "CAAS\nscore"
   ) +
-  annotate("text", x = -Inf, y = Inf,
+  annotate("text", x = Inf, y = Inf,
            label = sprintf("r(hyp, CAAS) = %.2f\nr(perm, CAAS) = %.2f\nr(hyp, perm) = %.2f",
                            .r_hyp_caas, .r_boot_caas, .r_hyp_boot),
-           hjust = -0.05, vjust = 1.3, size = 3.2, colour = "grey30") +
+           hjust = 1.05, vjust = 1.3, size = 3.2, colour = "grey30") +
   labs(
     title    = "Hypergeometric vs Permulation evidence",
     subtitle = "High CAAS scores cluster toward the top-right",
@@ -850,7 +859,12 @@ has_caas_null <- has_perms && !is.null(perm_null_gene) && any(perm_null_gene$met
     labs(title = title,
          subtitle = "Distribution CONDITIONAL on a nonzero score — null: permulation, 100k random sample. Exact-zero fraction labelled below each violin (not part of the density).",
          x = "Direction", y = ylab) +
-    theme_minimal(base_size = 12)
+    theme_minimal(base_size = 12) +
+    theme(
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      axis.text.x  = element_text(margin = ggplot2::margin(t = 5))
+    )
 }
 ```
 
@@ -923,13 +937,24 @@ src_pal <- c(null = "#BAB0AC", observed = "#E15759")
     facet_wrap(~ caap_group, scales = "free_y", ncol = 3) +
     scale_fill_manual(values = src_pal) + scale_colour_manual(values = src_pal) +
     labs(title = title, subtitle = "observed (red) overlaid on permulation null (grey)",
-         x = xlab, y = "density") + theme_minimal(base_size = 12) + theme(legend.position = "top")
+         x = xlab, y = "density") +
+    theme_minimal(base_size = 12) +
+    theme(
+      legend.position = "top",
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      axis.text.x  = element_text(margin = ggplot2::margin(t = 5))
+    )
 }
 .pos_table <- function(value_col) {
   scheme_overlay %>% group_by(caap_group, source) %>%
-    summarise(n = dplyr::n(), mean = mean(.data[[value_col]], na.rm = TRUE),
-              median = median(.data[[value_col]], na.rm = TRUE), .groups = "drop") %>%
-    arrange(caap_group, source)
+    summarise(
+      n = n(),
+      median = median(.data[[value_col]], na.rm = TRUE),
+      q90    = quantile(.data[[value_col]], .90, na.rm = TRUE),
+      max    = max(.data[[value_col]], na.rm = TRUE),
+      .groups = "drop"
+    )
 }
 ```
 
@@ -1668,7 +1693,7 @@ has_fade_any <- has_fade_top || has_fade_bot
     coord_fixed(xlim = c(-5.5, 5.5), ylim = c(-3.2, 3.5)) +
     labs(title = title_str) +
     theme_void() +
-    theme(plot.title = element_text(face = "bold", hjust = 0.5, size = 12))
+    theme(plot.title = element_text(face = "bold", hjust = 0, size = 12, margin = ggplot2::margin(b = 6)))
 }
 
 # Helper: compute Venn counts (CAAS dir positions vs full FADE sig set)

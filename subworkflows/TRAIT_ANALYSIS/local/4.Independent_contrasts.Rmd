@@ -363,7 +363,9 @@ selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
     legend.position = "right",
     legend.title = element_text(size = 16, face = "bold"),
     legend.text = element_text(size = 13),
-    plot.title = element_text(size = 20, hjust = 0.5, face = "bold"),
+    axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+    plot.title = element_text(size = 20, hjust = 0, face = "bold", margin = ggplot2::margin(b = 6)),
     plot.margin = margin(20, 20, 20, 20)
   )
 

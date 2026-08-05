@@ -85,6 +85,17 @@ suppressPackageStartupMessages({
   library(knitr)
   library(kableExtra)
 })
+
+theme_set(
+  theme_minimal(base_size = 11) +
+  theme(
+    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
+    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
+    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
+  )
+)
 filter <- dplyr::filter; select <- dplyr::select; rename <- dplyr::rename
 mutate <- dplyr::mutate; arrange <- dplyr::arrange
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && nzchar(as.character(a)[1])) a else b

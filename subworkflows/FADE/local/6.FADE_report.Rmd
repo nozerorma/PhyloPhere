@@ -77,6 +77,17 @@ suppressPackageStartupMessages({
 
 # Tableau_10 colour swatch (10 named colours for pipeline-wide consistency)
 .tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
+
+theme_set(
+  theme_bw(base_size = 13) +
+  theme(
+    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
+    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
+    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
+  )
+)
 ```
 
 ---

@@ -155,13 +155,12 @@ This section loads the prune list, prunes the trait data frame and phylogenetic 
 prune_list <- params$prune_list
 prune_list_secondary <- params$prune_list_secondary
 
-# print(paste("Prune list primary:", prune_list))
-# print(paste("Prune list secondary:", prune_list_secondary))
+prune_log_msgs <- c()
 
 # Load the prune list
 if (prune_list != "") {
   prune_species_primary <- readLines(prune_list)
-  cat("Loaded prune list with", length(prune_species_primary), "species\n")
+  prune_log_msgs <- c(prune_log_msgs, sprintf("Loaded prune list with %d species\n", length(prune_species_primary)))
 } else {
   stop("No prune list provided. Please provide a valid list of species to prune.")
 }
@@ -169,7 +168,7 @@ if (prune_list != "") {
 # Optional secondary prune list (e.g., for secondary trait)
 if (prune_list_secondary != "") {
   prune_species_secondary <- readLines(prune_list_secondary)
-  cat("Loaded secondary prune list with", length(prune_species_secondary), "species\n")
+  prune_log_msgs <- c(prune_log_msgs, sprintf("Loaded secondary prune list with %d species\n", length(prune_species_secondary)))
 }
 
 # Generate stats_df
@@ -184,9 +183,12 @@ pruned_trait_df <- trait_df[trait_df$species %ni% prune_species_primary, ]
 clean_tree <- ape::drop.tip(pruned_tree, prune_species_primary)
 pruned_stats <- stats_df[stats_df$species %ni% prune_species_primary, ]
 
-cat("Pruned trait data frame has", nrow(pruned_trait_df), "species\n")
-cat("Pruned tree has", length(clean_tree$tip.label), "species\n")
-cat("Pruned stats data frame has", nrow(pruned_stats), "species\n")
+prune_log_msgs <- c(
+  prune_log_msgs,
+  sprintf("Pruned trait data frame has %d species\n", nrow(pruned_trait_df)),
+  sprintf("Pruned tree has %d species\n", length(clean_tree$tip.label)),
+  sprintf("Pruned stats data frame has %d species\n", nrow(pruned_stats))
+)
 
 # Save pruned data
 pruned_trait_file <- file.path(data_pruning_dir, "pruned_trait_file.tsv")
@@ -203,14 +205,16 @@ nulled_stats_df <- stats_df
 if (length(prune_species_primary) > 0 && trait %in% names(nulled_trait_df)) {
   nulled_trait_df[nulled_trait_df$species %in% prune_species_primary, trait] <- NA
   nulled_stats_df[nulled_stats_df$species %in% prune_species_primary, trait] <- NA
-  cat("Nulled primary trait for", sum(nulled_trait_df$species %in% prune_species_primary), "species\n")
+  prune_log_msgs <- c(prune_log_msgs, sprintf("Nulled primary trait for %d species\n", sum(nulled_trait_df$species %in% prune_species_primary)))
 }
 
 if (length(prune_species_secondary) > 0 && nzchar(secondary_trait) && secondary_trait %in% names(nulled_trait_df)) {
   nulled_trait_df[nulled_trait_df$species %in% prune_species_secondary, secondary_trait] <- NA
   nulled_stats_df[nulled_stats_df$species %in% prune_species_secondary, secondary_trait] <- NA
-  cat("Nulled secondary trait for", sum(nulled_trait_df$species %in% prune_species_secondary), "species\n")
+  prune_log_msgs <- c(prune_log_msgs, sprintf("Nulled secondary trait for %d species\n", sum(nulled_trait_df$species %in% prune_species_secondary)))
 }
+
+cat(paste(prune_log_msgs, collapse = ""))
 
 # Rename the variables for downstream use (plots use nulled data, emitted files stay pruned)
 trait_df <- nulled_trait_df
@@ -398,12 +402,12 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
-      plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0.5, margin = ggplot2::margin(t = 20), face = "bold"),
-      plot.subtitle = ggplot2::element_text(size = contrast_dims$subtitle_size, hjust = 0.5, color = "grey40"),
+      plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0, margin = ggplot2::margin(t = 20, b = 6), face = "bold"),
+      plot.subtitle = ggplot2::element_text(size = contrast_dims$subtitle_size, hjust = 0, color = "grey40", margin = ggplot2::margin(b = 10)),
       axis.text.y = ggplot2::element_text(size = contrast_dims$axis_text_y),
-      axis.title.x = ggplot2::element_text(size = contrast_dims$axis_title, hjust = 0.5, margin = ggplot2::margin(t = 20, b = 20)),
-      axis.title.y = ggplot2::element_text(size = contrast_dims$axis_title, angle = 90, hjust = 0.5, margin = ggplot2::margin(l = 20, r = 20)),
-      plot.caption = ggplot2::element_text(size = contrast_dims$caption_size, hjust = 0.5, margin = ggplot2::margin(t = 20)),
+      axis.title.x = ggplot2::element_text(size = contrast_dims$axis_title, margin = ggplot2::margin(t = 12)),
+      axis.title.y = ggplot2::element_text(size = contrast_dims$axis_title, angle = 90, margin = ggplot2::margin(l = 20, r = 20)),
+      plot.caption = ggplot2::element_text(size = contrast_dims$caption_size, hjust = 0, margin = ggplot2::margin(t = 20)),
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "bottom"
     )
@@ -528,7 +532,7 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     ggplot2::theme_minimal() +
     ggplot2::theme(
       axis.text.y = ggplot2::element_text(size = violin_dims$axis_text_y, hjust = 0.5, face = "bold"),
-      axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 20, b = 20)),
+      axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, face = "bold", margin = ggplot2::margin(t = 12)),
       axis.title.y = ggplot2::element_blank(),
       legend.text = ggplot2::element_text(size = 15),
       legend.position = "none"
@@ -570,6 +574,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   
 
   tree <- ape::drop.tip(tree, setdiff(tree$tip.label, names(trait_vec)))
+  tree$root.edge <- NULL
   tree <- ape::reorder.phylo(tree, "cladewise")
   Ntip <- length(tree$tip.label)
   Nnode <- tree$Nnode

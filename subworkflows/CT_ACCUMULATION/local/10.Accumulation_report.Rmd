@@ -72,6 +72,17 @@ suppressPackageStartupMessages({
 
 .tableau10 <- as.character(paletteer_d("ggthemes::Tableau_10"))
 dir_colours <- c(top = .tableau10[1], bottom = .tableau10[2], all = .tableau10[3])
+
+theme_set(
+  theme_bw(base_size = 16) +
+  theme(
+    axis.title.y  = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x  = element_text(margin = ggplot2::margin(t = 12)),
+    axis.text.x   = element_text(margin = ggplot2::margin(t = 5)),
+    plot.title    = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
+  )
+)
 scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "fisher")
 
 pval_thr  <- params$pval_threshold

@@ -29,6 +29,7 @@
 
 // Import local modules/subworkflows
 include { DATASET_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration"
+include { PHENOTYPE_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration"
 include { DATASET_PRUNE } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_data_prune"
 include { REPORTING } from "${baseDir}/workflows/reporting"
 include { CI_COMPOSITION_REPORT } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ct_ci"
@@ -87,7 +88,8 @@ workflow CONTRAST_SELECTION {
         pruned_trait_emit = prune_out.pruned_trait_file
         pruned_tree_emit = prune_out.pruned_tree_file
         dataset_exploration_out = DATASET_EXPLORATION(orig_trait_file, orig_tree_file, prune_out.pruned_results_dir)
-        dataset_out = dataset_exploration_out.results_dir
+        phenotype_out = PHENOTYPE_EXPLORATION(orig_trait_file, orig_tree_file, dataset_exploration_out.results_dir)
+        dataset_out = phenotype_out.results_dir
         contrast_stats_file = dataset_exploration_out.stats_file
     } else if (params.reporting){
         log.info "stats_df generated during reporting"
