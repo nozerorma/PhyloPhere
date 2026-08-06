@@ -47,7 +47,7 @@ def parse_args():
     p.add_argument("--annot-file", default=None,
                    help="SCORING's fcs_stats.tsv (gene + flag_* columns) — cross-module "
                         "corroboration flags (gate_sig/fade/rer/accum), reported "
-                        "as the % of distinct genes in each overlap carrying each flag")
+                        "as the %% of distinct genes in each overlap carrying each flag")
     p.add_argument("--universe", required=True,
                    help="cleaned_background_main.txt gene list (postproc-surviving)")
     p.add_argument("--background", required=True,

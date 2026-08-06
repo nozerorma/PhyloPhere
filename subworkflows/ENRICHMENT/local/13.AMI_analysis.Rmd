@@ -1597,27 +1597,17 @@ render_tool_section_nested <- function(gene_list_files, net_full, modules_dir, p
 .ALL_THRESHOLDS    <- c(.GLOBAL_THRESHOLDS, .TOP_THRESHOLDS, .BOTTOM_THRESHOLDS)
 ```
 
-# CAAS Modules {.tabset}
+# Active Network Modules (AMI) {.tabset .tabset-fade}
+
+## CAAS {.tabset}
 
 Network score threshold: **`r params$domino_network_score_thr`** (= `r params$domino_network_score_thr / 1000` on the 0–1 STRING scale).
 Only nodes with at least one edge at this confidence level (both endpoints in `cleaned_background`) are in DOMINO's input network.
-Module finding + significance: **DOMINO** (Shamir-Lab) — Bonferroni-corrected hypergeometric p-value per module, computed by DOMINO itself
-(not a STRING PPI-density test, which cannot honour a custom background above 2000 proteins).
+Module finding + significance: **DOMINO** (Shamir-Lab) — Bonferroni-corrected hypergeometric p-value per module, computed by DOMINO itself.
 
-Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant
-(direction-matched to this list), diamond = RER-accelerating, hexagon = RER-decelerating (both regardless of this
-list's own direction), star = FADE-significant overlapping either RER direction.
+Network plots additionally mark cross-tool corroboration by node **shape**: circle = none, square = FADE-significant, diamond = RER-accelerating, hexagon = RER-decelerating, star = FADE-significant overlapping either RER direction.
 
-Each direction below (**Global**/**Top**/**Bottom**) has four sub-tabs: **Modules** (network
-plot + module description table, one per gene list in this direction), **Recurrence Heatmap**
-(a term × gene-list-threshold heatmap — each described term named once, near-duplicate/nested
-wording collapsed together, see `.cluster_terms()` — with the thresholds it was recovered
-under; a term recurring across several thresholds is a stronger candidate than one appearing
-at a single cutoff), **Recurrence Table** (term → gene-list membership table: which exact gene
-lists each term appears under), and **Gene lists** (every DOMINO module's best describing term
-pooled across this direction's gene lists, sorted by DOMINO significance). **Global** pools all
-gene lists (`global25`...`global1`, `top25`...`top1`, `bottom25`...`bottom1`); **Top**/**Bottom**
-restrict to that direction's own lists.
+Each direction below (**Global**/**Top**/**Bottom**) has four sub-tabs: **Modules**, **Recurrence Heatmap**, **Recurrence Table**, and **Gene lists**.
 
 ```{r caas_domino_networks, fig.width=10, fig.height=8, results='asis'}
 .caas_net_full <- build_tool_network(params$domino_network_sif, params$domino_edge_scores_file)
@@ -1634,22 +1624,58 @@ CAAS_clust_desc_all <- render_tool_section_nested(
 )
 ```
 
-# FADE Modules {.tabset}
+## RER {.tabset}
 
-FADE's own DOMINO network, built against FADE's own gene universe (its own tested-gene
-background per direction, unioned for Global -- verified on real data to differ
-meaningfully from CAAS's cleaned_background; see `[bugfix_fcs_universe_wrong_background]`).
-Skipped entirely when FADE didn't run this invocation. Same nested layout as CAAS above:
-each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Heatmap** /
-**Recurrence Table** / **Gene lists** sub-tabs.
+RER's own DOMINO network, built against RER's own gene universe. Skipped entirely when RER didn't run this invocation. Same nested layout as CAAS above: each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Heatmap** / **Recurrence Table** / **Gene lists** sub-tabs.
+
+```{r rer_domino_networks, fig.width=10, fig.height=8, results='asis'}
+RER_clust_desc_all <- NULL
+if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_dir)) {
+  .rer_net_full <- build_tool_network(params$rer_domino_network_sif, params$rer_domino_edge_scores_file)
+  .rer_gene_list_files <- list.files(params$rer_gene_lists_dir, pattern = "\\.txt$", full.names = TRUE)
+  # Order lists Global (rer_significant), Top (accelerating), Bottom (decelerating) within the Modules sub-tab.
+  .rer_rank <- dplyr::case_when(
+    grepl("accelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 1L,
+    grepl("decelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 2L,
+    TRUE ~ 0L
+  )
+  .rer_gene_list_files <- .rer_gene_list_files[order(.rer_rank)]
+
+  if (length(.rer_gene_list_files) > 0) {
+    .rer_bg_string_ids <- if (!is.null(params$rer_background_file) && file.exists(params$rer_background_file)) {
+      safe_string_map_ids(read_gene_vector(params$rer_background_file))
+    } else bg_string_ids
+    RER_clust_desc_all <- render_tool_section_nested(
+      .rer_gene_list_files, .rer_net_full, params$rer_domino_modules_dir, "rer",
+      roll_dir_classifier = rer_roll_classifier,
+      pct_dir_classifier  = always_global_pct_classifier,
+      direction_tabs      = list(Global = NULL, Top = "Acc", Bottom = "Decc"),
+      gene_list_orders    = list(
+        Global = c("rer_significant", "rer_accelerating", "rer_decelerating"),
+        Top    = "rer_accelerating",
+        Bottom = "rer_decelerating"
+      ),
+      use_shape_overlay   = FALSE,
+      bg_string_ids       = .rer_bg_string_ids,
+      node_score_fn       = rer_node_score
+    )
+  } else {
+    cat("_No RER gene list files found._\n\n")
+  }
+} else {
+  cat("_RER did not run this invocation — section skipped._\n\n")
+}
+```
+
+## FADE {.tabset}
+
+FADE's own DOMINO network, built against FADE's own gene universe. Skipped entirely when FADE didn't run this invocation. Same nested layout as CAAS above: each direction tab (**Global**/**Top**/**Bottom**) holds **Modules** / **Recurrence Heatmap** / **Recurrence Table** / **Gene lists** sub-tabs.
 
 ```{r fade_domino_networks, fig.width=10, fig.height=8, results='asis'}
 FADE_clust_desc_all <- NULL
 if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_dir)) {
   .fade_net_full <- build_tool_network(params$fade_domino_network_sif, params$fade_domino_edge_scores_file)
   .fade_gene_list_files <- list.files(params$fade_gene_lists_dir, pattern = "\\.txt$", full.names = TRUE)
-  # Order lists Global, Top, Bottom within the Modules sub-tab (matching the
-  # section's own tab order), not the alphabetical default list.files() would give.
   .fade_rank <- dplyr::case_when(
     grepl("global", basename(.fade_gene_list_files), ignore.case = TRUE) ~ 0L,
     grepl("top",    basename(.fade_gene_list_files), ignore.case = TRUE) ~ 1L,
@@ -1659,9 +1685,6 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
   .fade_gene_list_files <- .fade_gene_list_files[order(.fade_rank)]
 
   if (length(.fade_gene_list_files) > 0) {
-    # FADE's own background, mapped to STRING ids -- module functional-term
-    # enrichment (describe_clusters()) uses this instead of CAAS's background,
-    # matching FADE's own DOMINO network already being built against it.
     .fade_bg_string_ids <- if (!is.null(params$fade_background_file) && file.exists(params$fade_background_file)) {
       safe_string_map_ids(read_gene_vector(params$fade_background_file))
     } else bg_string_ids
@@ -1684,55 +1707,6 @@ if (!is.null(params$fade_domino_network_sif) && !is.null(params$fade_gene_lists_
   }
 } else {
   cat("_FADE did not run this invocation — section skipped._\n\n")
-}
-```
-
-# RER Modules {.tabset}
-
-RER's own DOMINO network, built against RER's own gene universe (every gene RERConverge
-actually attempted -- verified on real data to exactly match RER's own published universe
-file). Skipped entirely when RER didn't run this invocation. Same nested layout as CAAS
-above: each direction tab (**Global**/**Acc**/**Decc**) holds **Modules** / **Recurrence
-Heatmap** / **Recurrence Table** / **Gene lists** sub-tabs.
-
-```{r rer_domino_networks, fig.width=10, fig.height=8, results='asis'}
-RER_clust_desc_all <- NULL
-if (!is.null(params$rer_domino_network_sif) && !is.null(params$rer_gene_lists_dir)) {
-  .rer_net_full <- build_tool_network(params$rer_domino_network_sif, params$rer_domino_edge_scores_file)
-  .rer_gene_list_files <- list.files(params$rer_gene_lists_dir, pattern = "\\.txt$", full.names = TRUE)
-  # Order lists Global (rer_significant), Acc, Decc within the Modules sub-tab.
-  .rer_rank <- dplyr::case_when(
-    grepl("accelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 1L,
-    grepl("decelerat", basename(.rer_gene_list_files), ignore.case = TRUE) ~ 2L,
-    TRUE ~ 0L
-  )
-  .rer_gene_list_files <- .rer_gene_list_files[order(.rer_rank)]
-
-  if (length(.rer_gene_list_files) > 0) {
-    # RER's own background, mapped to STRING ids (verified on real data to
-    # exactly match RER's own published universe file) -- same rationale as FADE above.
-    .rer_bg_string_ids <- if (!is.null(params$rer_background_file) && file.exists(params$rer_background_file)) {
-      safe_string_map_ids(read_gene_vector(params$rer_background_file))
-    } else bg_string_ids
-    RER_clust_desc_all <- render_tool_section_nested(
-      .rer_gene_list_files, .rer_net_full, params$rer_domino_modules_dir, "rer",
-      roll_dir_classifier = rer_roll_classifier,
-      pct_dir_classifier  = always_global_pct_classifier,
-      direction_tabs      = list(Global = NULL, Acc = "Acc", Decc = "Decc"),
-      gene_list_orders    = list(
-        Global = c("rer_significant", "rer_accelerating", "rer_decelerating"),
-        Acc    = "rer_accelerating",
-        Decc   = "rer_decelerating"
-      ),
-      use_shape_overlay   = FALSE,
-      bg_string_ids       = .rer_bg_string_ids,
-      node_score_fn       = rer_node_score
-    )
-  } else {
-    cat("_No RER gene list files found._\n\n")
-  }
-} else {
-  cat("_RER did not run this invocation — section skipped._\n\n")
 }
 ```
 

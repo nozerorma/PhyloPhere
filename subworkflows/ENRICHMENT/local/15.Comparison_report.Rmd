@@ -108,8 +108,8 @@ has_pkg <- function(p) requireNamespace(p, quietly = TRUE)
 # report 12/RER-report-specific).
 source(file.path(.src_dir, "orthogonal_score.R"))
 
-kbl_html <- function(df, height = NULL, escape = TRUE) {
-  k <- kable(df, format = "html", escape = escape) %>%
+kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
+  k <- kable(df, format = "html", escape = escape, caption = caption, ...) %>%
     kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = FALSE)
   if (!is.null(height)) k <- scroll_box(k, height = height)
   k
@@ -149,10 +149,10 @@ has_multi <- length(fcs_by_mod) >= 1
 if (has_multi) {
   fcs_dir_mod <- fcs_all_mod %>%
     mutate(direction = dplyr::case_when(
-      ranking %in% c("top", "accelerating")    ~ "top",
-      ranking %in% c("bottom", "decelerating") ~ "bottom",
-      ranking == "global"                      ~ "global",
-      TRUE                                      ~ NA_character_
+      tolower(ranking) %in% c("top", "accelerating")    ~ "top",
+      tolower(ranking) %in% c("bottom", "decelerating") ~ "bottom",
+      tolower(ranking) == "global"                      ~ "global",
+      TRUE                                              ~ NA_character_
     )) %>%
     dplyr::filter(!is.na(direction))
 } else {
@@ -548,12 +548,13 @@ dir.create("compare_results", showWarnings = FALSE)
                        decelerating = "Bottom", global = "Global")
 
 le_comp_all_mod <- le_comp_all_mod %>%
-  dplyr::mutate(direction = dplyr::coalesce(.le_comp_dir_map[ranking], "Global"))
+  dplyr::mutate(direction = dplyr::coalesce(.le_comp_dir_map[tolower(ranking)], "Global"))
 
 for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n## %s {.tabset}\n\n", dr))
 
-  for (m in unique(le_comp_all_mod$module)) {
+  mods_to_show <- union(modules_present, unique(le_comp_all_mod$module))
+  for (m in mods_to_show) {
     cat(sprintf("\n### %s\n\n", toupper(m)))
     d <- le_comp_all_mod %>%
       dplyr::filter(module == m, direction == dr) %>%
@@ -620,36 +621,56 @@ directly from the AMI report so the table shown here matches that report exactly
 
 ```{r ami_term_membership_tabs, eval=has_ami_term_membership, results='asis'}
 # Imported term membership recurrence table from AMI report.
-# The 'direction' column comes from the gene_list name (top*/bottom*/global*),
-# and the 'gene_list' column identifies which threshold list the term appeared in.
-# Filter per direction tab, then summarise term -> gene-list membership.
+.ami_tool_classifier <- function(gl) {
+  dplyr::case_when(
+    grepl("^rer_",  gl, ignore.case = TRUE) ~ "RER",
+    grepl("^fade_", gl, ignore.case = TRUE) ~ "FADE",
+    TRUE                                    ~ "CAAS"
+  )
+}
+
 .ami_tm_direction <- function(gl) {
   dplyr::case_when(
-    grepl("^global", gl, ignore.case = TRUE) ~ "Global",
-    grepl("^top",    gl, ignore.case = TRUE) ~ "Top",
-    grepl("^bottom", gl, ignore.case = TRUE) ~ "Bottom",
-    TRUE                                      ~ "Other"
+    grepl("global|significant$", gl, ignore.case = TRUE) & !grepl("top|bottom|accelerating|decelerating", gl, ignore.case = TRUE) ~ "Global",
+    grepl("top|accelerating", gl, ignore.case = TRUE) ~ "Top",
+    grepl("bottom|decelerating", gl, ignore.case = TRUE) ~ "Bottom",
+    TRUE ~ "Global"
   )
 }
 
 ami_tm <- ami_term_membership_df %>%
-  dplyr::mutate(.direction = .ami_tm_direction(gene_list))
+  dplyr::mutate(
+    .tool      = .ami_tool_classifier(gene_list),
+    .direction = .ami_tm_direction(gene_list)
+  )
 
-for (dr in c("Global", "Top", "Bottom")) {
-  cat(sprintf("\n## %s\n\n", dr))
-  sub <- if (dr == "Global") ami_tm else ami_tm %>% dplyr::filter(.direction == dr)
-  if (nrow(sub) == 0) { cat("_No described terms for this direction._\n\n"); next }
+for (tl in c("CAAS", "RER", "FADE")) {
+  cat(sprintf("\n## %s {.tabset}\n\n", tl))
+  tl_df <- ami_tm %>% dplyr::filter(.tool == tl)
+  if (nrow(tl_df) == 0) {
+    cat(sprintf("_No AMI active modules for %s._\n\n", tl))
+    next
+  }
 
-  disp <- sub %>%
-    dplyr::distinct(term, gene_list) %>%
-    dplyr::group_by(term) %>%
-    dplyr::summarise(`N lists` = dplyr::n(),
-                      `Gene lists` = paste(sort(unique(gene_list)), collapse = ", "),
-                      .groups = "drop") %>%
-    dplyr::arrange(dplyr::desc(`N lists`), term) %>%
-    dplyr::rename(Term = term) %>%
-    head(params$top_n)
-  print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
+  for (dr in c("Global", "Top", "Bottom")) {
+    cat(sprintf("\n### %s\n\n", dr))
+    sub <- if (dr == "Global") tl_df else tl_df %>% dplyr::filter(.direction == dr)
+    if (nrow(sub) == 0) {
+      cat(sprintf("_No described terms for %s (%s)._\n\n", tl, dr))
+      next
+    }
+
+    disp <- sub %>%
+      dplyr::distinct(term, gene_list) %>%
+      dplyr::group_by(term) %>%
+      dplyr::summarise(`N lists` = dplyr::n(),
+                        `Gene lists` = paste(sort(unique(gene_list)), collapse = ", "),
+                        .groups = "drop") %>%
+      dplyr::arrange(dplyr::desc(`N lists`), term) %>%
+      dplyr::rename(Term = term) %>%
+      head(params$top_n)
+    print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
+  }
 }
 ```
 
@@ -671,13 +692,24 @@ for (dr in c("Global", "Top", "Bottom")) {
 ```
 
 ```{r ami_desc_fallback_tabs, eval=has_ami && !has_ami_term_membership, results='asis'}
-for (dr in c("Global", "Top", "Bottom")) {
-  cat(sprintf("\n## %s\n\n", dr))
-  if (!exists("ami_disp") || is.null(ami_disp) || nrow(ami_disp) == 0) { cat("_No described modules for this direction._\n\n"); next }
-  sub <- if (dr == "Global") ami_disp else if ("direction" %in% names(ami_disp)) ami_disp %>% dplyr::filter(direction == dr) else ami_disp
-  if (nrow(sub) == 0) { cat("_No described modules for this direction._\n\n"); next }
-  disp <- .build_ami_rollup(sub) %>% head(params$top_n)
-  print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
+for (tl in c("CAAS", "RER", "FADE")) {
+  cat(sprintf("\n## %s {.tabset}\n\n", tl))
+  if (!exists("ami_disp") || is.null(ami_disp) || nrow(ami_disp) == 0) {
+    cat(sprintf("_No described modules for %s._\n\n", tl))
+    next
+  }
+  tl_disp <- if (".tool" %in% names(ami_disp)) ami_disp %>% dplyr::filter(.tool == tl) else ami_disp
+  if (nrow(tl_disp) == 0) {
+    cat(sprintf("_No described modules for %s._\n\n", tl))
+    next
+  }
+  for (dr in c("Global", "Top", "Bottom")) {
+    cat(sprintf("\n### %s\n\n", dr))
+    sub <- if (dr == "Global") tl_disp else if ("direction" %in% names(tl_disp)) tl_disp %>% dplyr::filter(direction == dr) else tl_disp
+    if (nrow(sub) == 0) { cat(sprintf("_No described modules for %s (%s)._\n\n", tl, dr)); next }
+    disp <- .build_ami_rollup(sub) %>% head(params$top_n)
+    print(kbl_html(disp, height = if (nrow(disp) > 15) "420px" else NULL))
+  }
 }
 ```
 
@@ -853,39 +885,38 @@ pipeline (posenrich's own Fisher test, AMI's DOMINO module search both run at
   }, character(1), USE.NAMES = FALSE)
 }
 
-# FCS term membership per gene, direction-matched ranking set -- restricted to
-# terms FCS/RER itself calls significant (fcs_sig_terms, cross_angle_gene_hits
-# chunk above: BH < fdr_thr AND p.perm < pperm_thr when present), using each
-# term's description (not the bare pathway id). `le` alone is NOT already
-# significance-restricted (12.FCS_general_report.Rmd's leading-edge export
-# only requires drv_score > 0) -- the inner_join against fcs_sig_terms is
-# what actually restricts this to genuinely enriched terms.
 .fcs_terms_for <- function(rk_set) {
-  if (!has_le || !has_multi) return(tibble::tibble(gene = character(), fcs_terms = character()))
-  le %>%
+  if (!has_le || !has_multi) return(tibble::tibble(gene = character(), caas_fcs_terms = character(), rer_fcs_terms = character()))
+  res <- le %>%
     dplyr::filter(is.null(rk_set) | ranking %in% rk_set) %>%
     dplyr::mutate(direction = dplyr::case_when(
-      ranking %in% c("top", "accelerating")    ~ "top",
-      ranking %in% c("bottom", "decelerating") ~ "bottom",
-      ranking == "global"                      ~ "global",
-      TRUE                                      ~ NA_character_
+      tolower(ranking) %in% c("top", "accelerating")    ~ "top",
+      tolower(ranking) %in% c("bottom", "decelerating") ~ "bottom",
+      tolower(ranking) == "global"                      ~ "global",
+      TRUE                                              ~ NA_character_
     )) %>%
     dplyr::filter(!is.na(direction)) %>%
-    dplyr::inner_join(fcs_sig_terms, by = c("module", "direction", "database", "pathway")) %>%
+    dplyr::inner_join(fcs_sig_terms, by = c("module", "direction", "database", "pathway"))
+  
+  caas <- res %>% dplyr::filter(module == "caas") %>%
     dplyr::group_by(gene) %>%
-    dplyr::summarise(fcs_terms = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "),
-                      .groups = "drop")
+    dplyr::summarise(caas_fcs_terms = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "), .groups = "drop")
+  
+  rer <- res %>% dplyr::filter(module == "rer") %>%
+    dplyr::group_by(gene) %>%
+    dplyr::summarise(rer_fcs_terms = paste(sort(unique(stringr::str_trunc(description, 50))), collapse = "; "), .groups = "drop")
+  
+  dplyr::full_join(caas, rer, by = "gene")
 }
-# AMI module descriptions per gene, direction-matched -- restricted to
-# DOMINO-significant modules (domino_p_adj < domino_module_thr, same gate
-# ami_genes above applies), using the COLLAPSED/clustered description
-# (ami_disp$term, task: AMI collapsed rollup above) rather than each module's
-# raw near-duplicate-worded description, and tagged with which direction and
-# gene-list threshold (e.g. top10, bottom5) it was found at.
+
 .ami_desc_for <- function(dir_filter) {
-  if (!has_ami || !exists("ami_disp") || is.null(ami_disp) || nrow(ami_disp) == 0) return(tibble::tibble(gene = character(), ami_desc = character()))
+  if (!has_ami || !exists("ami_disp") || is.null(ami_disp) || nrow(ami_disp) == 0) {
+    return(tibble::tibble(gene = character(), caas_ami_desc = character(), rer_ami_desc = character(), fade_ami_desc = character()))
+  }
   .ami_gene_col <- if ("all_genes" %in% names(ami_disp)) "all_genes" else if ("genes" %in% names(ami_disp)) "genes" else NULL
-  if (is.null(.ami_gene_col) || !"term" %in% names(ami_disp)) return(tibble::tibble(gene = character(), ami_desc = character()))
+  if (is.null(.ami_gene_col) || !"term" %in% names(ami_disp)) {
+    return(tibble::tibble(gene = character(), caas_ami_desc = character(), rer_ami_desc = character(), fade_ami_desc = character()))
+  }
   
   d <- ami_disp
   if ("direction" %in% names(d) && !is.null(dir_filter)) {
@@ -894,21 +925,36 @@ pipeline (posenrich's own Fisher test, AMI's DOMINO module search both run at
   if ("domino_p_adj" %in% names(d)) {
     d <- d %>% dplyr::filter(!is.na(domino_p_adj), domino_p_adj < (params$domino_module_thr %||% 0.05))
   }
-  if (nrow(d) == 0) return(tibble::tibble(gene = character(), ami_desc = character()))
+  if (nrow(d) == 0) {
+    return(tibble::tibble(gene = character(), caas_ami_desc = character(), rer_ami_desc = character(), fade_ami_desc = character()))
+  }
   
-  d %>%
-    dplyr::mutate(gene = strsplit(.data[[.ami_gene_col]], ",\\s*"),
-                  hit_label = sprintf("%s (%s: %s)", term, direction, gene_list)) %>%
+  d_unnest <- d %>%
+    dplyr::mutate(
+      tool = .ami_tool_classifier(gene_list),
+      gene = strsplit(.data[[.ami_gene_col]], ",\\s*"),
+      hit_label = sprintf("%s (%s: %s)", term, direction, gene_list)
+    ) %>%
     tidyr::unnest(gene) %>%
-    dplyr::mutate(gene = trimws(gene)) %>%
+    dplyr::mutate(gene = trimws(gene))
+  
+  caas <- d_unnest %>% dplyr::filter(tool == "CAAS") %>%
     dplyr::group_by(gene) %>%
-    dplyr::summarise(ami_desc = paste(unique(hit_label), collapse = "; "), .groups = "drop")
+    dplyr::summarise(caas_ami_desc = paste(unique(hit_label), collapse = "; "), .groups = "drop")
+  
+  rer <- d_unnest %>% dplyr::filter(tool == "RER") %>%
+    dplyr::group_by(gene) %>%
+    dplyr::summarise(rer_ami_desc = paste(unique(hit_label), collapse = "; "), .groups = "drop")
+  
+  fade <- d_unnest %>% dplyr::filter(tool == "FADE") %>%
+    dplyr::group_by(gene) %>%
+    dplyr::summarise(fade_ami_desc = paste(unique(hit_label), collapse = "; "), .groups = "drop")
+  
+  caas %>%
+    dplyr::full_join(rer, by = "gene") %>%
+    dplyr::full_join(fade, by = "gene")
 }
-# Posenrich significant-term positions per gene, direction-matched ranking
-# set. posenrich_leading_edge.tsv is ALREADY significance-restricted by
-# posenrich_enrich.py itself (only sig rows get written), so no additional
-# filter is needed here -- just resolving each term's description (not the
-# bare pathway id) via posenrich's own dotplot table when available.
+
 .posenrich_for <- function(rk_set) {
   if (!has_posenrich_le) return(tibble::tibble(gene = character(), pe_position = character(), pe_terms = character()))
   pe <- posenrich_le_df %>%
@@ -932,16 +978,6 @@ pipeline (posenrich's own Fisher test, AMI's DOMINO module search both run at
                       .groups = "drop")
 }
 
-# Position-level percentile membership, from SCORING's published
-# position_lists/slice_<dir><pct>.tsv (scoring_compute.R) when
-# params$position_lists_dir is supplied and all 4 files for a direction
-# exist -- so this table's 25/10/5/1% agrees, by construction, with whatever
-# else in the pipeline reads the same published cutoff, rather than
-# re-deriving its own quantile() cut over base$CAAS_score at render time
-# (the previous behaviour, kept as the fallback below). dir_key is the
-# lowercase direction ("global"/"top"/"bottom"), matching the published
-# filenames exactly. Quartet, not a trio -- 25% is a real, tested tier
-# elsewhere (posenrich's own Fisher test, AMI's DOMINO search).
 .pos_slice_positions <- function(dir_key, pct) {
   if (is.null(params$position_lists_dir)) return(NULL)
   f <- file.path(params$position_lists_dir, sprintf("slice_%s%d.tsv", dir_key, pct))
@@ -970,10 +1006,6 @@ pipeline (posenrich's own Fisher test, AMI's DOMINO module search both run at
   }
 }
 
-# Safe column getter: FALSE for every row when the column is absent (older
-# fcs_stats.tsv without flag_accum_top/bottom, etc.) rather than erroring --
-# `.data[[col]]` throws on a genuinely missing column, it does not return
-# NULL for `%||%` to catch.
 .gcol <- function(df, col) if (col %in% names(df)) df[[col]] else rep(FALSE, nrow(df))
 ```
 
@@ -1010,55 +1042,54 @@ build_interesting_genes <- function(direction) {
     dplyr::left_join(.posenrich_for(rk_set), by = "gene") %>%
     dplyr::mutate(
       dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_dir, Accum_dir, RER_acc, RER_decc), ~ dplyr::coalesce(.x, FALSE)),
-      FCS_sig  = !is.na(fcs_terms) & nzchar(fcs_terms),
-      AMI_net  = !is.na(ami_desc)  & nzchar(ami_desc),
-      PE_sig   = !is.na(pe_terms)  & nzchar(pe_terms)
+      CAAS_FCS_sig = !is.na(caas_fcs_terms) & nzchar(caas_fcs_terms),
+      RER_FCS_sig  = !is.na(rer_fcs_terms)  & nzchar(rer_fcs_terms),
+      CAAS_AMI_net = !is.na(caas_ami_desc)  & nzchar(caas_ami_desc),
+      RER_AMI_net  = !is.na(rer_ami_desc)   & nzchar(rer_ami_desc),
+      FADE_AMI_net = !is.na(fade_ami_desc)  & nzchar(fade_ami_desc),
+      PE_sig       = !is.na(pe_terms)       & nzchar(pe_terms)
     )
 
-  # Surprisal-weighted composite: percentile quartet at 1/4 weight each
-  # (nested, 1% subset of 5% subset of 10% subset of 25% -- see the section
-  # text above), every other criterion at full weight. 25% is included
-  # alongside 10/5/1% because it's a real, tested tier elsewhere in this
-  # pipeline (posenrich's own Fisher test, AMI's DOMINO search both run at
-  # 25%; SCORING now publishes a 25% gene list too), not an arbitrary extra
-  # cutoff. Background rates computed from the FULL, UNFILTERED gene pool
-  # (all_genes, before restricting to "meets >=1 criterion") -- using the
-  # filtered/displayed subset here would inflate every criterion's apparent
-  # background rate (since it's already an enriched subpopulation) and
-  # understate how rare/surprising each one really is, defeating the whole
-  # point of the surprisal weighting.
-  crit_full  <- c("FADE_dir", "Accum_dir", "RER_acc", "RER_decc", "FCS_sig", "AMI_net", "PE_sig")
-  crit_quart <- c("25%", "10%", "5%", "1%")
-  bg_full  <- vapply(crit_full,  function(cl) mean(all_genes[[cl]], na.rm = TRUE), numeric(1))
-  bg_quart <- vapply(crit_quart, function(cl) mean(all_genes[[cl]], na.rm = TRUE), numeric(1))
+  # Score calculation matching orthogonal_score.R:
+  # Independent tools get full surprisal weight -log2(bg_rate).
+  # The CAAS Family (percentile quartet + Accum) shares a budget equal to 1 independent test,
+  # distributed proportionally to their surprisals -log2(bg_rate).
+  crit_indep <- c("FADE_dir", "RER_acc", "RER_decc", "CAAS_FCS_sig", "RER_FCS_sig", "CAAS_AMI_net", "RER_AMI_net", "FADE_AMI_net", "PE_sig")
+  crit_caas  <- c("25%", "10%", "5%", "1%", "Accum_dir")
+
+  bg_indep <- vapply(crit_indep, function(cl) mean(all_genes[[cl]], na.rm = TRUE), numeric(1))
+  bg_caas  <- vapply(crit_caas,  function(cl) mean(all_genes[[cl]], na.rm = TRUE), numeric(1))
 
   out <- all_genes %>%
-    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_dir | Accum_dir | RER_acc | RER_decc | FCS_sig | AMI_net | PE_sig)
+    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_dir | Accum_dir | RER_acc | RER_decc |
+                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
   if (nrow(out) == 0) return(out)
 
-  w_full  <- -log2(pmax(bg_full, 1e-6))
-  w_quart <- -log2(pmax(bg_quart, 1e-6)) / 4
-  out$`Composite score` <- round(as.numeric(
-    as.matrix(out[, crit_full])  %*% w_full +
-    as.matrix(out[, crit_quart]) %*% w_quart), 2)
-  out$`N criteria` <- rowSums(out[, c(crit_full, crit_quart)])
+  w_indep <- -log2(pmax(bg_indep, 1e-6))
+  s_caas  <- -log2(pmax(bg_caas, 1e-6))
+  caas_budget <- if (length(w_indep) > 0) mean(w_indep) else mean(s_caas)
+  w_caas      <- caas_budget * (s_caas / pmax(sum(s_caas), 1e-6))
 
-  # Collapsible <details> rendering for the multi-term text columns -- applied
-  # AFTER FCS_sig/AMI_net/PE_sig and the composite score are already computed
-  # from the raw semicolon-joined text (the HTML wrapping below must never
-  # feed back into those). interesting_genes_tabs below must render this
-  # table with escape = FALSE for the markup to actually collapse.
+  out$`Composite score` <- round(as.numeric(
+    as.matrix(out[, crit_indep]) %*% w_indep +
+    as.matrix(out[, crit_caas])  %*% w_caas), 2)
+  out$`N criteria` <- rowSums(out[, c(crit_indep, crit_caas)])
+
   out <- out %>%
     dplyr::mutate(
-      `FCS term(s)`         = .collapsible_list(fcs_terms),
-      `AMI description(s)`  = .collapsible_list(ami_desc),
+      `CAAS FCS term(s)`    = .collapsible_list(caas_fcs_terms),
+      `RER FCS term(s)`     = .collapsible_list(rer_fcs_terms),
+      `CAAS AMI desc(s)`    = .collapsible_list(caas_ami_desc),
+      `RER AMI desc(s)`     = .collapsible_list(rer_ami_desc),
+      `FADE AMI desc(s)`    = .collapsible_list(fade_ami_desc),
       `PE term(s)`          = .collapsible_list(pe_terms)
     )
 
   out %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
     dplyr::select(Gene = gene, `25%`, `10%`, `5%`, `1%`, FADE_dir, RER_acc, RER_decc, Accum_dir,
-                  FCS_sig, `FCS term(s)`, AMI_net, `AMI description(s)`,
+                  CAAS_FCS_sig, `CAAS FCS term(s)`, RER_FCS_sig, `RER FCS term(s)`,
+                  CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,
                   PE_sig, `PE position` = pe_position, `PE term(s)`,
                   `N criteria`, `Composite score`) %>%
     head(params$top_n * 3)
@@ -1139,8 +1170,13 @@ build_interesting_positions <- function(direction) {
   base <- base %>%
     dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
     dplyr::left_join(.ami_desc_for(ami_dirf), by = "gene") %>%
-    dplyr::mutate(FCS_sig = !is.na(fcs_terms) & nzchar(fcs_terms),
-                  AMI_net = !is.na(ami_desc)  & nzchar(ami_desc))
+    dplyr::mutate(
+      CAAS_FCS_sig = !is.na(caas_fcs_terms) & nzchar(caas_fcs_terms),
+      RER_FCS_sig  = !is.na(rer_fcs_terms)  & nzchar(rer_fcs_terms),
+      CAAS_AMI_net = !is.na(caas_ami_desc)  & nzchar(caas_ami_desc),
+      RER_AMI_net  = !is.na(rer_ami_desc)   & nzchar(rer_ami_desc),
+      FADE_AMI_net = !is.na(fade_ami_desc)  & nzchar(fade_ami_desc)
+    )
 
   # Position-native posenrich significance: exact Gene:Position match, not
   # just gene -- a gene can have OTHER significant positions without this one
@@ -1203,27 +1239,33 @@ build_interesting_positions <- function(direction) {
   } else rep("missing", nrow(base))
 
   all_positions <- base %>%
-    dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, Accum_dir, FCS_sig, AMI_net, PE_sig),
+    dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, Accum_dir,
+                                 CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig),
                                  ~ dplyr::coalesce(.x, FALSE)))
 
   # Background rates from the FULL, UNFILTERED position pool for this
   # direction (all_positions) -- see build_interesting_genes() above for why
   # computing them from the filtered/displayed subset would be wrong. Quartet
   # (25/10/5/1%), not a trio -- same reasoning as build_interesting_genes().
-  crit_full  <- c("FADE_overlap", "RER_acc", "RER_decc", "Accum_dir", "FCS_sig", "AMI_net", "PE_sig")
-  crit_quart <- c("25%", "10%", "5%", "1%")
-  bg_full  <- vapply(crit_full,  function(cl) mean(all_positions[[cl]], na.rm = TRUE), numeric(1))
-  bg_quart <- vapply(crit_quart, function(cl) mean(all_positions[[cl]], na.rm = TRUE), numeric(1))
+  crit_indep <- c("FADE_overlap", "RER_acc", "RER_decc", "CAAS_FCS_sig", "RER_FCS_sig", "CAAS_AMI_net", "RER_AMI_net", "FADE_AMI_net", "PE_sig")
+  crit_caas  <- c("25%", "10%", "5%", "1%", "Accum_dir")
+
+  bg_indep <- vapply(crit_indep, function(cl) mean(all_positions[[cl]], na.rm = TRUE), numeric(1))
+  bg_caas  <- vapply(crit_caas,  function(cl) mean(all_positions[[cl]], na.rm = TRUE), numeric(1))
 
   out <- all_positions %>%
-    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | RER_acc | RER_decc | Accum_dir | FCS_sig | AMI_net | PE_sig)
+    dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | RER_acc | RER_decc | Accum_dir |
+                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
   if (nrow(out) == 0) return(out)
 
-  w_full  <- -log2(pmax(bg_full, 1e-6))
-  w_quart <- -log2(pmax(bg_quart, 1e-6)) / 4
+  w_indep <- -log2(pmax(bg_indep, 1e-6))
+  s_caas  <- -log2(pmax(bg_caas, 1e-6))
+  caas_budget <- if (length(w_indep) > 0) mean(w_indep) else mean(s_caas)
+  w_caas      <- caas_budget * (s_caas / pmax(sum(s_caas), 1e-6))
+
   out$`Composite score` <- round(as.numeric(
-    as.matrix(out[, crit_full]) %*% w_full + as.matrix(out[, crit_quart]) %*% w_quart), 2)
-  out$`N criteria` <- rowSums(out[, c(crit_full, crit_quart)])
+    as.matrix(out[, crit_indep]) %*% w_indep + as.matrix(out[, crit_caas]) %*% w_caas), 2)
+  out$`N criteria` <- rowSums(out[, c(crit_indep, crit_caas)])
 
   # Collapsible <details> rendering, applied AFTER FCS_sig/AMI_net/PE_sig and
   # the composite score are already computed from the raw text -- see
@@ -1231,8 +1273,11 @@ build_interesting_positions <- function(direction) {
   # render this table with escape = FALSE.
   out <- out %>%
     dplyr::mutate(
-      `FCS term(s)`         = .collapsible_list(fcs_terms),
-      `AMI description(s)`  = .collapsible_list(ami_desc),
+      `CAAS FCS term(s)`    = .collapsible_list(caas_fcs_terms),
+      `RER FCS term(s)`     = .collapsible_list(rer_fcs_terms),
+      `CAAS AMI desc(s)`    = .collapsible_list(caas_ami_desc),
+      `RER AMI desc(s)`     = .collapsible_list(rer_ami_desc),
+      `FADE AMI desc(s)`    = .collapsible_list(fade_ami_desc),
       `PE term(s)`          = .collapsible_list(pe_terms)
     )
 
@@ -1240,7 +1285,8 @@ build_interesting_positions <- function(direction) {
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
     dplyr::select(Gene = gene, Position, `CAAS Score` = CAAS_score, `25%`, `10%`, `5%`, `1%`,
                   FADE_overlap, RER_acc, RER_decc, Accum_dir,
-                  FCS_sig, `FCS term(s)`, AMI_net, `AMI description(s)`,
+                  CAAS_FCS_sig, `CAAS FCS term(s)`, RER_FCS_sig, `RER FCS term(s)`,
+                  CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,
                   PE_sig, `PE term(s)`,
                   COSMIC, PAI3D_pathogenic,
                   `N criteria`, `Composite score`) %>%

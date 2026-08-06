@@ -123,10 +123,11 @@ orth_src <- orth_candidates[file.exists(orth_candidates)][1]
 if (is.na(orth_src)) stop("orthogonal_score.R not found under src/ or next to 14.Position_enrichment_report.Rmd")
 source(orth_src)
 
-kbl_html <- function(df, caption = NULL) {
-  kable(df, format = "html", escape = TRUE, caption = caption) %>%
-    kable_styling(bootstrap_options = c("striped", "condensed", "hover"),
-                  full_width = FALSE)
+kbl_html <- function(df, caption = NULL, height = NULL, escape = TRUE, ...) {
+  k <- kable(df, format = "html", escape = escape, caption = caption, ...) %>%
+    kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = FALSE)
+  if (!is.null(height)) k <- scroll_box(k, height = height)
+  k
 }
 
 # Safe correlation helper: returns NA (not an error) when inputs have fewer
@@ -146,6 +147,14 @@ res <- readr::read_tsv(params$results_file, show_col_types = FALSE)
 # but older results_file/leading_edge_file runs may still carry them.
 if (!is.null(res) && "top_frac" %in% names(res)) {
   res <- res %>% dplyr::filter(!top_frac %in% c(1.0, 0.5))
+} else if (!is.null(res)) {
+  res$top_frac <- NA_real_
+}
+if (!is.null(res)) {
+  if (!"foreground_size" %in% names(res)) res$foreground_size <- if ("n_pos_with_score" %in% names(res)) res$n_pos_with_score else NA_real_
+  if (!"observed" %in% names(res)) res$observed <- if ("obs_sum" %in% names(res)) res$obs_sum else NA_real_
+  if (!"expected" %in% names(res)) res$expected <- if ("null_mean" %in% names(res)) res$null_mean else NA_real_
+  if (!"fold_enrichment" %in% names(res)) res$fold_enrichment <- if ("perm_nes" %in% names(res)) res$perm_nes else NA_real_
 }
 has_res <- !is.null(res) && nrow(res) > 0
 # Canonical tab order everywhere `res$ranking`/`sig_res$ranking` drives a tab
@@ -184,12 +193,16 @@ if (!is.null(params$leading_edge_file) && file.exists(params$leading_edge_file))
                      error = function(e) NULL)
   if (!is.null(le_raw) && "top_frac" %in% names(le_raw)) {
     le_raw <- le_raw %>% dplyr::filter(!top_frac %in% c(1.0, 0.5))
+  } else if (!is.null(le_raw)) {
+    le_raw$top_frac <- NA_real_
   }
   if (!is.null(le_raw) && nrow(le_raw) == 0) le_raw <- NULL
 }
 le_summary <- if (!is.null(le_raw)) {
+  grp_cols <- c("ranking", "database", "pathway")
+  if ("top_frac" %in% names(le_raw)) grp_cols <- c(grp_cols, "top_frac")
   le_raw %>%
-    dplyr::group_by(ranking, database, pathway, top_frac) %>%
+    dplyr::group_by(dplyr::across(dplyr::all_of(grp_cols))) %>%
     dplyr::summarise(`Genes/positions` = paste(sort(unique(gene_position)), collapse = ", "),
                      `N genes` = dplyr::n_distinct(gene),
                      .groups = "drop")
@@ -326,21 +339,34 @@ if (!has_res) {
       cat(sprintf("\n### %s {.tabset}\n\n", db))
       db_df <- rk_df %>% filter(database == db)
 
-      for (tf in sort(unique(db_df$top_frac), decreasing = TRUE)) {
-        cat(sprintf("\n#### Top %s%%\n\n", format(100 * tf, trim = TRUE)))
-        tf_all <- db_df %>% filter(top_frac == tf) %>% arrange(desc(sig), p_adj, p_value)
+      has_tf_vals <- "top_frac" %in% names(db_df) && !all(is.na(db_df$top_frac))
+      tf_vals <- if (has_tf_vals) sort(unique(db_df$top_frac), decreasing = TRUE) else NA_real_
+      for (tf in tf_vals) {
+        if (!is.na(tf)) cat(sprintf("\n#### Top %s%%\n\n", format(100 * tf, trim = TRUE)))
+        tf_all <- if (!is.na(tf)) db_df %>% filter(top_frac == tf) else db_df
+        tf_all <- tf_all %>% arrange(desc(sig), p_adj, p_value)
         n_total_tf <- nrow(tf_all)
         tf_src <- tf_all %>% head(TOP_N)
         if (n_total_tf > TOP_N) {
           cat(sprintf("_Showing top %d of %d tested pathways (sorted by significance)._\n\n", TOP_N, n_total_tf))
         }
-        tf_df <- tf_src %>%
-          transmute(Pathway = pathway, Description = description,
-                    `Layer size` = layer_size, `Foreground` = foreground_size,
-                    Observed = observed, Expected = round(expected, 1),
-                    Fold = round(fold_enrichment, 3), Direction = direction,
-                    `p (Fisher)` = signif(p_value, 3),
-                    `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
+        if ("perm_nes" %in% names(tf_src)) {
+          tf_df <- tf_src %>%
+            transmute(Pathway = pathway, Description = description,
+                      `Layer size` = layer_size, `N scored` = n_pos_with_score,
+                      `Observed sum` = round(obs_sum, 2), `Null mean` = round(null_mean, 2),
+                      NES = round(perm_nes, 3), Direction = direction,
+                      `p (Perm)` = signif(p_value, 3),
+                      `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
+        } else {
+          tf_df <- tf_src %>%
+            transmute(Pathway = pathway, Description = description,
+                      `Layer size` = layer_size, `Foreground` = foreground_size,
+                      Observed = observed, Expected = round(expected, 1),
+                      Fold = round(fold_enrichment, 3), Direction = direction,
+                      `p (Fisher)` = signif(p_value, 3),
+                      `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
+        }
         # Cross-module corroboration: % of the DISTINCT genes in the overlap
         # (never % of raw positions — one gene must not dominate) carrying
         # each SCORING flag (gate_sig/fade/rer/accum). Only present
@@ -448,13 +474,14 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     # human-readable/auditable column rather than making the reader reverse-
     # engineer it from the composite number. The Comparison report displays
     # both this and the merged signal side by side.
+    .has_tf_col <- "top_frac" %in% names(rk_sig) && !all(is.na(rk_sig$top_frac))
     term_meta <- rk_sig %>%
       dplyr::group_by(database, pathway) %>%
       dplyr::summarise(p_adj = min(p_adj, na.rm = TRUE),
                         background_n = if (.has_bg_n) dplyr::first(background_n) else NA_integer_,
                         description = dplyr::first(dplyr::coalesce(description, pathway)),
-                        list_threshold = paste(sort(100 * unique(top_frac), decreasing = TRUE), "%", sep = "", collapse = ", "),
-                        n_occurrences = dplyr::n_distinct(top_frac),
+                        list_threshold = if (.has_tf_col) paste(sort(100 * unique(na.omit(top_frac)), decreasing = TRUE), "%", sep = "", collapse = ", ") else "N/A",
+                        n_occurrences = if (.has_tf_col) dplyr::n_distinct(top_frac, na.rm = TRUE) else 1L,
                         .groups = "drop")
 
     sc_rows <- vector("list", nrow(term_meta))
@@ -606,15 +633,24 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     present_flags <- intersect(want, names(rk_sig))
 
     if (!is.null(le_summary)) {
+      join_cols <- intersect(c("ranking", "database", "pathway", "top_frac"), names(le_summary))
       rk_sig <- rk_sig %>%
-        dplyr::left_join(le_summary, by = c("ranking", "database", "pathway", "top_frac"))
+        dplyr::left_join(le_summary, by = join_cols)
     }
 
-    le_df <- rk_sig %>%
-      transmute(Database = database, Pathway = pathway, Description = description,
-                `Top frac` = sprintf("%s%%", format(100 * top_frac, trim = TRUE)),
-                Fold = round(fold_enrichment, 3), Direction = direction,
-                `p.adj` = signif(p_adj, 3))
+    if ("perm_nes" %in% names(rk_sig)) {
+      le_df <- rk_sig %>%
+        transmute(Database = database, Pathway = pathway, Description = description,
+                  `Top frac` = if (!all(is.na(top_frac))) sprintf("%s%%", format(100 * top_frac, trim = TRUE)) else "N/A",
+                  NES = round(perm_nes, 3), Direction = direction,
+                  `p.adj` = signif(p_adj, 3))
+    } else {
+      le_df <- rk_sig %>%
+        transmute(Database = database, Pathway = pathway, Description = description,
+                  `Top frac` = if (!all(is.na(top_frac))) sprintf("%s%%", format(100 * top_frac, trim = TRUE)) else "N/A",
+                  Fold = round(fold_enrichment, 3), Direction = direction,
+                  `p.adj` = signif(p_adj, 3))
+    }
     if (length(present_flags) > 0) {
       flag_df <- rk_sig %>% transmute(across(all_of(present_flags), ~round(.x, 1)))
       names(flag_df) <- paste0("%", sub("^pct_", "", present_flags))
@@ -716,12 +752,21 @@ candidate than one appearing at a single cutoff.
 
 .render_posenrich_heatmap <- function(rk_sig, cluster_map, title) {
   if (nrow(rk_sig) == 0) { cat(sprintf("_No terms to show (%s)._\n\n", title)); return(invisible(NULL)) }
+  .has_tf_heat <- "top_frac" %in% names(rk_sig) && !all(is.na(rk_sig$top_frac))
   pres <- rk_sig %>%
     dplyr::mutate(description = dplyr::coalesce(description, pathway),
-                  description = unname(cluster_map[description])) %>%
-    dplyr::distinct(description, top_frac) %>%
-    dplyr::mutate(cutoff = sprintf("%s%%", format(100 * top_frac, trim = TRUE)))
-  cutoff_levels <- sprintf("%s%%", format(sort(unique(100 * rk_sig$top_frac), decreasing = TRUE), trim = TRUE))
+                  description = unname(cluster_map[description]))
+  if (.has_tf_heat) {
+    pres <- pres %>%
+      dplyr::distinct(description, top_frac) %>%
+      dplyr::mutate(cutoff = sprintf("%s%%", format(100 * top_frac, trim = TRUE)))
+    cutoff_levels <- sprintf("%s%%", format(sort(unique(100 * rk_sig$top_frac), decreasing = TRUE), trim = TRUE))
+  } else {
+    pres <- pres %>%
+      dplyr::distinct(description) %>%
+      dplyr::mutate(top_frac = NA_real_, cutoff = "N/A")
+    cutoff_levels <- "N/A"
+  }
 
   # Term order recomputed post-clustering (most cutoffs recovered first) --
   # a term merged from several pathways can now recur at more cutoffs than
@@ -789,7 +834,7 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
       dplyr::summarise(
         description = dplyr::first(dplyr::coalesce(description, pathway)),
         `p.adj (min)` = signif(min(p_adj, na.rm = TRUE), 3),
-        `N cutoffs` = dplyr::n_distinct(top_frac),
+        `N cutoffs` = if ("top_frac" %in% names(rk_sig) && !all(is.na(rk_sig$top_frac))) dplyr::n_distinct(top_frac, na.rm = TRUE) else 1L,
         dplyr::across(dplyr::all_of(present_flags), ~round(mean(.x, na.rm = TRUE), 1)),
         .groups = "drop"
       ) %>%

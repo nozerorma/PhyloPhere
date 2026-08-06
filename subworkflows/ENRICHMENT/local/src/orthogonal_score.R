@@ -267,8 +267,7 @@ surprisal_weighted_scores <- function(df, cols, bg_rates) {
 # and is deliberately excluded here (see orth_cols_for_direction()'s "global"
 # fallback below, which is the only place it belongs).
 ORTH_CROSS_COLS <- c("flag_fade_top", "flag_fade_bottom", "flag_rer_acc",
-                      "flag_rer_decc", "flag_accum_top", "flag_accum_bottom",
-                      "flag_pai3d_pathogenic", "flag_cosmic_overlap")
+                      "flag_rer_decc", "flag_accum_top", "flag_accum_bottom")
 
 # Direction-matched percentile quartet + cross-source flags for one ranking.
 # direction: "top", "bottom", or anything else (treated as non-directional —

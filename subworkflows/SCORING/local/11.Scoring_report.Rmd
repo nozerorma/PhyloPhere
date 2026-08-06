@@ -857,7 +857,7 @@ has_caas_null <- has_perms && !is.null(perm_null_gene) && any(perm_null_gene$met
               position = position_dodge(width = 0.8), vjust = -0.6, size = 3, colour = "grey40") +
     scale_fill_manual(values = c(Null = "grey60", Observed = "#E15759"), name = NULL) +
     labs(title = title,
-         subtitle = "Distribution CONDITIONAL on a nonzero score — null: permulation, 100k random sample. Exact-zero fraction labelled below each violin (not part of the density).",
+         subtitle = "Distribution CONDITIONAL on a nonzero score — null: permulation, 100k random sample.\nExact-zero fraction labelled below each violin (not part of the density).",
          x = "Direction", y = ylab) +
     theme_minimal(base_size = 12) +
     theme(

@@ -114,8 +114,8 @@ orth_src <- orth_candidates[file.exists(orth_candidates)][1]
 if (is.na(orth_src)) stop("orthogonal_score.R not found under src/ or next to FCS_general.Rmd")
 source(orth_src)
 
-kbl_html <- function(df, height = NULL) {
-  k <- kable(df, format = "html", escape = TRUE) %>%
+kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
+  k <- kable(df, format = "html", escape = escape, caption = caption, ...) %>%
     kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = FALSE)
   if (!is.null(height)) k <- scroll_box(k, height = height)
   k
@@ -279,9 +279,9 @@ cat("_Methods: Wilcoxon-AUC FCS &nbsp;|&nbsp; Lachenbruch Two-Part &nbsp;|&nbsp;
 # Multi-Method Evidence {.tabset .tabset-fade}
 
 All terms where **at least one test** passed its significance gate, grouped by
-direction. Columns: `AUC` (Wilcoxon effect size), `W.adj` (Wilcoxon BH p),
+direction. Columns: `W.AUC` (Wilcoxon effect size), `W.adj` (Wilcoxon BH p), `W.perm` (Wilcoxon permulation p),
 `L.adj` (Lachenbruch BH p), `L.frac_mag` (fraction of Lachenbruch signal from
-magnitude vs prevalence), `P.adj` (Permulation BH p), `NES` (Permulation
+magnitude vs prevalence), `P.adj` (Path Sum Permulation BH p), `NES` (Permulation
 normalised enrichment score). NA = test not applicable (signed ranking) or
 not run. Green = Hard evidence (3/3), orange = Supported (2/3), grey = Exploratory (1/3).
 
@@ -293,20 +293,26 @@ evidence_colours <- c(
 )
 for (rk in ranking_names) {
   cat(sprintf("\n## %s\n\n", rk))
+  has_w_perm <- any(!is.na(enrich$p.perm))
   ev <- enrich %>%
     dplyr::filter(ranking == rk, evidence_count >= 1L) %>%
     dplyr::arrange(dplyr::desc(evidence_count), lach_p.adj, p.adj) %>%
     dplyr::mutate(
       Description  = stringr::str_trunc(description, 60),
-      AUC          = round(stat + 0.5, 3),
+      W.AUC        = round(stat + 0.5, 3),
       W.adj        = signif(p.adj, 3),
+      W.perm       = if (has_w_perm) signif(p.perm, 3) else NA_real_,
       L.adj        = signif(lach_p.adj, 3),
       L.frac_mag   = round(lach_frac_magnitude, 2),
       P.adj        = signif(perm_p.adj, 3),
-      NES          = round(perm_nes, 2)
+      NES          = round(perm_nes, 2),
+      Wilcoxon     = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
+      Lachenbruch  = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", ""),
+      Permulation  = ifelse(dplyr::coalesce(sig_permulation, FALSE), "X", "")
     ) %>%
     dplyr::select(evidence_label, pathway, Description, num.genes,
-                  AUC, W.adj, L.adj, L.frac_mag, P.adj, NES)
+                  Wilcoxon, Lachenbruch, Permulation,
+                  W.AUC, W.adj, any_of("W.perm"), L.adj, L.frac_mag, P.adj, NES)
   if (nrow(ev) == 0) { cat("_No terms passed any significance gate._\n"); next }
   # Colour the evidence_label column via kableExtra cell_spec
   ev$evidence_label <- kableExtra::cell_spec(
@@ -321,12 +327,7 @@ for (rk in ranking_names) {
 
 # Enriched gene sets {.tabset .tabset-fade}
 
-Positive `stat` (AUC − 0.5 > 0) means the ranking's genes sit systematically
-**high** for that set. Top `r params$top_n` positively-enriched sets per database,
-ordered by evidence count then Wilcoxon BH p — the same selection and order
-used by the dotplots below, so every point there has a matching row here (rows
-shown are not all significant; see the per-tab pass count and the dashed
-significance line on the dotplots).
+Displays the top `r params$top_n` positively-enriched sets per database (`stat` > 0, i.e. Wilcoxon AUC > 0.5), ordered by multi-method evidence count (`evidence_count`) then Wilcoxon BH p-value. Significance is evaluated independently by three complementary tests—**Wilcoxon** (rank-sum AUC / BH p), **Lachenbruch** (two-part test), and **Permulation** (path-sum null model)—each against its own threshold. The **Wilcoxon**, **Lachenbruch**, and **Permulation** columns indicate which tests passed (`X`).
 
 ```{r tables, results='asis'}
 # `top_sel[[rk]]` captures the exact rows (full precision, table order) shown per
@@ -358,14 +359,21 @@ for (rk in ranking_names) {
 
     has_lach <- any(!is.na(dbres$lach_p.adj))
     has_perm_rk <- any(!is.na(dbres$perm_p.adj))
+    has_w_perm_db <- any(!is.na(dbres$p.perm))
 
     disp <- dbres %>%
       mutate(evidence = evidence_label,
+             W.AUC = round(stat + 0.5, 3),
+             W.adj = signif(p.adj, 3),
+             W.perm = if (has_w_perm_db) signif(p.perm, 3) else NA_real_,
              L.adj = if (has_lach) signif(lach_p.adj, 3) else NA_real_,
              P.adj = if (has_perm_rk) signif(perm_p.adj, 3) else NA_real_,
-             NES   = if (has_perm_rk) round(perm_nes, 2) else NA_real_) %>%
-      select(evidence, pathway, Description, AUC, num.genes, p.adj,
-             any_of(c("L.adj", "P.adj", "NES")))
+             NES   = if (has_perm_rk) round(perm_nes, 2) else NA_real_,
+             Wilcoxon    = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
+             Lachenbruch = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", ""),
+             Permulation = ifelse(dplyr::coalesce(sig_permulation, FALSE), "X", "")) %>%
+      select(evidence, pathway, Description, num.genes, Wilcoxon, Lachenbruch, Permulation,
+             W.AUC, W.adj, any_of(c("W.perm", "L.adj", "P.adj", "NES")))
 
     cat(sprintf("\n### %s\n\n", db))
     cat(sprintf("_%d shown — hard: %d | supported: %d | exploratory: %d._\n\n",
@@ -582,11 +590,15 @@ for (rk in ranking_names) {
     dplyr::arrange(.rank) %>%
     dplyr::select(-.rank) %>%
     dplyr::left_join(sc_rk_all %>% dplyr::select(database, pathway, signal), by = c("database", "pathway")) %>%
+    dplyr::left_join(sig_terms_rk %>% dplyr::select(database, pathway, evidence_label, sig_wilcoxon, sig_lachenbruch, sig_permulation), by = c("database", "pathway")) %>%
     left_join(desc_map, by = c("database", "pathway")) %>%
     mutate(Description = stringr::str_trunc(coalesce(description, pathway), 50),
-           p.adj = signif(p.adj, 3), AUC = round(stat + 0.5, 3),
-           `Orthog. signal` = round(signal, 2)) %>%
-    select(database, pathway, Description, n_le, evidence_label, AUC, p.adj,
+           `Orthog. signal` = round(signal, 2),
+           Wilcoxon    = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
+           Lachenbruch = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", ""),
+           Permulation = ifelse(dplyr::coalesce(sig_permulation, FALSE), "X", "")) %>%
+    select(database, pathway, Description, n_le, any_of("evidence_label"),
+           Wilcoxon, Lachenbruch, Permulation,
            `Orthog. signal`, any_of(intersect(want, names(.))))
   # rename attribute columns to friendly labels
   present_attr <- intersect(want, names(summ))
