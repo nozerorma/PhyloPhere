@@ -99,7 +99,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "posenrich": _bool_str(enrichment.posenrich_enabled),
         "scoring_ami": _bool_str(getattr(enrichment, 'scoring_ami', enrichment.scoring_string)),
         "scoring_string": _bool_str(enrichment.scoring_string),
-        "rer_permulation_enrichment": _bool_str(enrichment.rer_permulation_enrichment),
         "miss_pair": _bool_str(caas.miss_pair),
         "caap_mode": _bool_str(caas.caap_mode),
         "include_b0": _bool_str(caas.include_b0),

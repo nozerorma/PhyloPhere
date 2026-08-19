@@ -10,9 +10,12 @@ Author: ASR Integration
 Date: 2025-12-03 (revised 2025-12-09)
 """
 
+import bisect
+import gzip
 import logging
 import multiprocessing as mp
 import os
+import random
 import sys
 import threading
 from pathlib import Path
@@ -939,6 +942,64 @@ def _load_gene_asr_context(
     }
 
 
+# Convergence states that count as "this position changed on this side". Shared by
+# the perms worker and the pass-B finalizer so change_side can never drift between
+# the two halves of the null computation.
+_CHANGE_STATES = ("convergent", "codivergent", "divergent")
+
+# No per-scheme weight any more. scoring_compute.R section 2g aggregates a
+# position's schemes with a MEAN of caas_row, not a 0.2-weighted sum, because the
+# number of detecting schemes is a biochemical-distance property of the
+# substitution rather than evidence strength. The null mirrors that exactly.
+
+
+def build_percent_rank_lookup(hist_by_cycle: Dict[str, Dict[int, int]]) -> Dict[str, Dict[int, float]]:
+    """Exact dplyr::percent_rank over each cycle's genome-wide candidate pool.
+
+    The null's phenotype axis is a rank, matching how the observed side builds its
+    own (scoring_compute.R: `1 - percent_rank(pvalue_boot)` over the whole scored
+    pool). The rank is what makes the axis usable: the underlying recovery
+    statistic is heavily concentrated near zero (mean ~0.03), so `1 - raw` would be
+    a near-constant ~0.97, whereas `1 - percent_rank` is uniform on [0, 1] with
+    mean 0.50 — the same scale the observed axis occupies, which is the condition
+    for the two being comparable at all.
+
+    Each cycle is ranked within its OWN candidate pool, so the pool is the set of
+    (gene, position, scheme) triples that cycle discovered. This is what gives the
+    axis per-cycle variation: a position's raw LOO value is fixed, but its rank
+    depends on the composition of the cycle it appears in.
+
+    `null_pvalue_boot` is monotone in n_detected, so ranking n_detected ranks the
+    p-value identically. That collapses the pool to a per-cycle histogram
+    (n_detected -> count), a few MB rather than tens of millions of rows, which is
+    what allows the rank to be formed without holding the full detail in memory.
+
+    dplyr defines percent_rank(x) = (rank(x, ties="min") - 1) / (n - 1), i.e. the
+    fraction of the pool STRICTLY BELOW x. A cumulative sweep over the histogram
+    reproduces that exactly, ties included.
+
+    Returns {cycle: {n_detected: percent_rank}}.
+    """
+    lookup: Dict[str, Dict[int, float]] = {}
+    for cycle, hist in hist_by_cycle.items():
+        total = sum(hist.values())
+        # dplyr yields NaN for a single-element vector; a lone candidate has
+        # nothing to be ranked against, so treat it as the bottom of its pool
+        # (percent_rank 0 -> phen_score 1), consistent with the strictly-below
+        # definition.
+        if total <= 1:
+            lookup[cycle] = {d: 0.0 for d in hist}
+            continue
+        denom = float(total - 1)
+        cum_below = 0
+        per_cycle: Dict[int, float] = {}
+        for d in sorted(hist):
+            per_cycle[d] = cum_below / denom
+            cum_below += hist[d]
+        lookup[cycle] = per_cycle
+    return lookup
+
+
 def _perms_worker(
     gene: str,
     alignment_dir: str,
@@ -962,7 +1023,7 @@ def _perms_worker(
             asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
         )
         if ctx is None:
-            return (gene, [], [], [])
+            return (gene, [], [])
 
         alignment_data = ctx["alignment_data"]
         tree_data = ctx["tree_data"]
@@ -1130,12 +1191,31 @@ def _perms_worker(
                 continue
 
         if not all_cycle_results:
-            return (gene, [], [], [])
+            return (gene, [], [])
 
-        # ── 1. Calculate recovery p-values on the fly ──────────────────────────
-        scheme_weights_int = {"US": 0.2, "GS4": 0.2, "GS3": 0.2, "GS2": 0.2, "GS1": 0.2}
+        # ── 1. Leave-one-out null_pvalue_boot per (position, scheme) ───────────
+        # This is the null-side analogue of the observed pvalue_boot, which
+        # modules/boot.py computes as count/cycles: "of the resampling cycles,
+        # what fraction still recovered THIS position". Here the resampling axis
+        # is phenotype relabeling rather than species bootstrap, but the
+        # statistic is the same shape and its empirical distribution matches
+        # closely (observed mean 0.048 vs null 0.030 on cancer_complete_bm).
+        #
+        # LEAVE-ONE-OUT: when scoring cycle i, cycle i must not count toward its
+        # own replication evidence, or every cycle's score is contaminated by the
+        # very draw it is meant to be an independent sample of. Since a position
+        # is only ever scored in the cycles that detected it, k_{-i} is simply
+        # n_detected - 1 for every such cycle, so the LOO value is one number per
+        # (position, scheme) rather than per (cycle, position, scheme).
+        #
+        # NOTE the LOO correction is numerically inert once the caller applies
+        # percent_rank downstream ((d-1)/(N-1) and d/N are both monotone in d, so
+        # they rank identically). It is kept because perm_pos_pval.tsv is read
+        # directly as an observed-vs-null crosscheck, and a self-inclusive value
+        # would misstate replication there.
         n_cycles_total = len(cycle_tags)
-        
+        loo_denom = max(n_cycles_total - 1, 1)
+
         n_detected = {}
         for cyc, biochem_results in all_cycle_results:
             for r in biochem_results:
@@ -1147,151 +1227,363 @@ def _perms_worker(
                         n_detected[key] = set()
                     n_detected[key].add(cyc)
 
-        recovery_pval = {}
+        n_detected_count = {}
         perm_pos_pval_rows = []
         for key, cycles_set in n_detected.items():
             k = len(cycles_set)
-            pval = (k + 1) / (n_cycles_total + 1)
-            recovery_pval[key] = pval
+            n_detected_count[key] = k
             perm_pos_pval_rows.append({
                 "Gene": gene,
                 "Position": key[0],
                 "caap_group": key[1],
                 "n_detected": k,
                 "n_cycles": n_cycles_total,
-                "recovery_pval": pval
+                "null_pvalue_boot": (k - 1) / loo_denom,
             })
 
-        # ── 2. Group by (cycle, Position) and calculate asr+caas scores ────────
-        pos_groups = {}
+        # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
+        # Scoring itself is deliberately NOT done here. null_row_caas needs
+        # 1 - percent_rank(null_pvalue_boot) ranked over the cycle's GENOME-WIDE
+        # candidate pool, and this worker only ever sees one gene — so the rank
+        # cannot be formed at this level. The parent finalizes it in pass B
+        # (see _finalize_perm_scores) once every gene's rows have been counted.
+        #
+        # change_top/change_bottom are emitted per scheme row as 0/1 and OR-ed
+        # across a position's schemes in pass B to derive change_side: a position
+        # counts as "top" if ANY of its schemes changed on the top side, "bottom"
+        # likewise, "both" when both hold, "none" otherwise.
+        detail_rows = []
         for cyc, biochem_results in all_cycle_results:
             for r in biochem_results:
                 pos = getattr(r, "position", None)
-                if pos is not None:
-                    key = (cyc, pos)
-                    if key not in pos_groups:
-                        pos_groups[key] = []
-                    pos_groups[key].append(r)
-
-        pos_scores_by_cycle = {}
-        for (cyc, pos), r_list in pos_groups.items():
-            asr_vals = []
-            row_caas_sum = 0.0
-            has_change_top = False
-            has_change_bottom = False
-            
-            for r in r_list:
+                if pos is None:
+                    continue
                 group = getattr(r, "caap_group", "US")
                 asr_val = getattr(r, "asr_path_score", 0.0)
                 if asr_val is None:
                     asr_val = 0.0
                 change_top = getattr(r, "change_top", "no_change")
                 change_bottom = getattr(r, "change_bottom", "no_change")
-                
-                pval = recovery_pval[(pos, group)]
-                weight = scheme_weights_int.get(group, 0.2)
-                
-                asr_vals.append(asr_val)
-                row_caas_sum += (1.0 - pval) * asr_val * weight
-                
-                if change_top in ("convergent", "codivergent", "divergent"):
-                    has_change_top = True
-                if change_bottom in ("convergent", "codivergent", "divergent"):
-                    has_change_bottom = True
-
-            asr_score = sum(asr_vals) / len(asr_vals) if asr_vals else 0.0
-            
-            if has_change_top and has_change_bottom:
-                change_side = "both"
-            elif has_change_top:
-                change_side = "top"
-            elif has_change_bottom:
-                change_side = "bottom"
-            else:
-                change_side = "none"
-
-            if cyc not in pos_scores_by_cycle:
-                pos_scores_by_cycle[cyc] = []
-            pos_scores_by_cycle[cyc].append((asr_score, row_caas_sum, change_side))
-
-        # ── 3. Calculate 90th percentile scores per cycle (gene_cycle_rows) ────
-        import numpy as np
-        gene_cycle_rows = []
-        for cyc in cycle_tags:
-            items = pos_scores_by_cycle.get(cyc, [])
-            if not items:
-                gene_cycle_rows.append({
+                detail_rows.append({
                     "Gene": gene,
                     "cycle": cyc,
-                    "global_asr": 0.0, "top_asr": 0.0, "bottom_asr": 0.0,
-                    "global_caas": 0.0, "top_caas": 0.0, "bottom_caas": 0.0
+                    "Position": pos,
+                    "caap_group": group,
+                    "asr_path_score": asr_val,
+                    "n_detected": n_detected_count.get((pos, group), 1),
+                    "ct": 1 if change_top in _CHANGE_STATES else 0,
+                    "cb": 1 if change_bottom in _CHANGE_STATES else 0,
                 })
-                continue
-                
-            asr_vals_global = [item[0] for item in items]
-            asr_vals_top = [item[0] for item in items if item[2] in ("top", "both")]
-            asr_vals_bottom = [item[0] for item in items if item[2] in ("bottom", "both")]
-            
-            caas_vals_global = [item[1] for item in items]
-            caas_vals_top = [item[1] for item in items if item[2] in ("top", "both")]
-            caas_vals_bottom = [item[1] for item in items if item[2] in ("bottom", "both")]
-            
-            def q90(vals):
-                return float(np.percentile(vals, 90)) if vals else 0.0
 
-            gene_cycle_rows.append({
-                "Gene": gene,
-                "cycle": cyc,
-                "global_asr": q90(asr_vals_global),
-                "top_asr": q90(asr_vals_top),
-                "bottom_asr": q90(asr_vals_bottom),
-                "global_caas": q90(caas_vals_global),
-                "top_caas": q90(caas_vals_top),
-                "bottom_caas": q90(caas_vals_bottom)
-            })
-
-        # ── 4. Sub-sample rows for distribution plotting ───────────────────────
-        import random
-        # Seed locally inside the worker for deterministic sub-sampling
-        random.seed(hash(gene) & 0xffffffff)
-        
-        perm_pos_sample_rows = []
-        by_group = {g: [] for g in ["US", "GS1", "GS2", "GS3", "GS4"]}
-        for cyc, biochem_results in all_cycle_results:
-            for r in biochem_results:
-                pos = getattr(r, "position", None)
-                if pos is not None:
-                    group = getattr(r, "caap_group", "US")
-                    asr_val = getattr(r, "asr_path_score", 0.0)
-                    if asr_val is None:
-                        asr_val = 0.0
-                    pval = recovery_pval[(pos, group)]
-                    weight = scheme_weights_int.get(group, 0.2)
-                    row_caas = (1.0 - pval) * asr_val * weight
-                    
-                    by_group[group].append({
-                        "Gene": gene,
-                        "Position": pos,
-                        "caap_group": group,
-                        "cycle": cyc,
-                        "asr_path_score": asr_val,
-                        "recovery_pval": pval,
-                        "row_caas": row_caas
-                    })
-        for g, rows in by_group.items():
-            if len(rows) > 5:
-                perm_pos_sample_rows.extend(random.sample(rows, 5))
-            else:
-                perm_pos_sample_rows.extend(rows)
-
-        return (gene, gene_cycle_rows, perm_pos_pval_rows, perm_pos_sample_rows)
+        return (gene, detail_rows, perm_pos_pval_rows)
     except Exception as e:
         logger.error(f"[perms] worker failed for {gene}: {e}", exc_info=True)
-        return (gene, [], [], [])
+        return (gene, [], [])
 
 
 def _perms_worker_wrapper(args):
     return _perms_worker(*args)
+
+
+def _null_row_caas(row: Dict[str, Any], rank_lookup: Dict[str, Dict[int, float]]) -> float:
+    """phen x asr for one null detail row (scoring_compute.R's caas_row).
+
+    Single definition shared by BOTH finalize sub-passes, so the pool that
+    defines the size-adjust reference and the genes scored against it cannot
+    drift apart.
+    """
+    phen = 1.0 - rank_lookup.get(row["cycle"], {}).get(int(row["n_detected"]), 0.0)
+    return phen * float(row["asr_path_score"])
+
+
+def _build_cycle_score_pools(
+    detail_path: Path,
+    rank_lookup: Dict[str, Dict[int, float]],
+) -> Dict[str, Dict[str, Any]]:
+    """Sub-pass B1: per-cycle, per-direction pool of position-level null scores.
+
+    The gene-level null statistic is size_adj_max = F(max)^n, mirroring
+    scoring_compute.R section 4a. F must be the ECDF of the pool the gene's
+    positions were actually drawn from, so every cycle needs its OWN pool --
+    exactly as the observed side calibrates against the pool it discovered, and
+    as build_percent_rank_lookup already does for the phen axis. Without this the
+    null would be calibrated against a different reference than the observed
+    score and the FCS p.perm comparison would be invalid.
+
+    Directions are kept separate because scoring_compute.R uses direction-matched
+    reference pools for the _top/_bottom scores.
+
+    Pools are stored EXACTLY (sorted array.array('d')), not as a binned
+    histogram. Binning was tried at 1e-4 resolution and rejected: F is raised to
+    the power n, so a small ECDF error is amplified n-fold, and because the null
+    score distribution is heavily tied a single bin absorbs many distinct values.
+    Measured against exact pools on real detail data that gave errors up to 145%
+    relative. Exactness is affordable because a pool is PER CYCLE -- ~15k
+    positions, not the ~15M in the whole file -- so all 1000 cycles together cost
+    on the order of 240 MB.
+
+    Returns {cycle: {"all"|"top"|"bottom": sorted array.array('d') of scores}}.
+    """
+    import array
+    import csv as _csv
+
+    acc: Dict[str, Dict[str, Any]] = {}
+
+    def _bump(cyc: str, score: float, ct: int, cb: int) -> None:
+        per_cycle = acc.get(cyc)
+        if per_cycle is None:
+            per_cycle = {k: array.array("d") for k in ("all", "top", "bottom")}
+            acc[cyc] = per_cycle
+        per_cycle["all"].append(score)
+        if ct:
+            per_cycle["top"].append(score)
+        if cb:
+            per_cycle["bottom"].append(score)
+
+    def _drain(agg: Dict[Tuple[str, int], List[float]]) -> None:
+        for (cyc, _pos), entry in agg.items():
+            # MEAN over the position's schemes -- mirrors scoring_compute.R 2g.
+            score = entry[0] / entry[1] if entry[1] else 0.0
+            _bump(cyc, score, int(entry[2]), int(entry[3]))
+
+    with gzip.open(detail_path, "rt", newline="") as f_in:
+        reader = _csv.DictReader(f_in, delimiter="\t")
+        current_gene: Optional[str] = None
+        pos_agg: Dict[Tuple[str, int], List[float]] = {}
+        for row in reader:
+            gene = row["Gene"]
+            if gene != current_gene:
+                if current_gene is not None:
+                    _drain(pos_agg)
+                current_gene = gene
+                pos_agg = {}
+            key = (row["cycle"], int(row["Position"]))
+            entry = pos_agg.setdefault(key, [0.0, 0, 0, 0])
+            entry[0] += _null_row_caas(row, rank_lookup)
+            entry[1] += 1
+            entry[2] |= int(row["ct"])
+            entry[3] |= int(row["cb"])
+        if current_gene is not None:
+            _drain(pos_agg)
+
+    return {cyc: {k: array.array("d", sorted(v)) for k, v in per_cycle.items()}
+            for cyc, per_cycle in acc.items()}
+
+
+def _size_adj_max_null(vals: List[float], cyc: str, direction: str,
+                       pools: Dict[str, Dict[str, Any]]) -> float:
+    """F_cycle(max)^n -- the null mirror of scoring_compute.R's size_adj_max()."""
+    if not vals:
+        return 0.0
+    per_cycle = pools.get(cyc)
+    if per_cycle is None:
+        return 0.0
+    pool = per_cycle[direction]
+    n_pool = len(pool)
+    if n_pool == 0:
+        return 0.0
+    # bisect_right gives #{pool <= m}, matching findInterval() on the observed
+    # side; both count ties at m as below-or-equal so the two agree exactly.
+    return (bisect.bisect_right(pool, max(vals)) / n_pool) ** len(vals)
+
+
+def _finalize_perm_scores(
+    detail_path: Path,
+    output_dir: Path,
+    cycle_tags: List[str],
+    rank_lookup: Dict[str, Dict[int, float]],
+    sample_per_cycle_group: Optional[int] = None,
+) -> None:
+    """Pass B: rank within each cycle, score, and aggregate to gene x cycle stats.
+
+    Mirrors scoring_compute.R's observed pipeline term for term:
+
+        null_phen_score = 1 - percent_rank(null_pvalue_boot)   # within cycle i's pool
+        null_row_caas   = null_phen_score * asr
+        position score  = mean(null_row_caas) over that position's schemes
+        gene x cycle    = size_adj_max over the cycle's positions, per direction
+                          (CAAS axis; the unwired ASR axis stays on q90)
+
+    Runs as two sub-passes over the detail file: B1 builds each cycle's
+    position-score pool (_build_cycle_score_pools), B2 scores genes against it.
+    The second read is unavoidable -- size_adj_max calibrates a gene against the
+    distribution of its own cycle, which is not known until every position in
+    that cycle has been seen.
+
+    The detail file is gene-contiguous (the parent writes one worker result at a
+    time), so a single streaming pass can aggregate per gene without ever holding
+    more than one gene's rows in memory.
+    """
+    import csv as _csv
+    import numpy as np
+
+    scores_path = output_dir / "gene_cycle_scores.tsv"
+    sample_path = output_dir / "perm_pos_sample.tsv"
+    quant_path = output_dir / "perm_pos_quantiles.tsv"
+
+    # Reservoir size per (cycle, scheme). Bounds both the violin sample and the
+    # quantile summaries at ~K * n_cycles * 5 rows regardless of run size. The
+    # full detail file stays on disk, so exact statistics remain recoverable.
+    if sample_per_cycle_group is None:
+        sample_per_cycle_group = int(os.environ.get("CAAS_PERMS_SAMPLE_PER_CYCLE_GROUP", "200"))
+
+    scores_fields = ["Gene", "cycle", "global_asr", "top_asr", "bottom_asr",
+                     "global_caas", "top_caas", "bottom_caas"]
+
+    rng = random.Random(1998)
+    reservoirs: Dict[Tuple[str, str], List[Tuple[str, int, float, float, float]]] = {}
+    seen: Dict[Tuple[str, str], int] = {}
+
+    # ── Sub-pass B1: per-cycle reference pools for the size-adjusted max ──────
+    cycle_pools = _build_cycle_score_pools(detail_path, rank_lookup)
+    logger.info("[perms] pass B1 done: size-adjust reference pools built for %d cycles",
+                len(cycle_pools))
+
+    def _q90(vals) -> float:
+        return float(np.percentile(vals, 90)) if vals else 0.0
+
+    def _flush(gene: str, pos_agg: Dict[Tuple[str, int], List[float]], writer) -> None:
+        by_cycle: Dict[str, List[Tuple[float, float, str]]] = {}
+        for (cyc, _pos), agg in pos_agg.items():
+            asr_sum, n_schemes, caas_sum, ct, cb = agg
+            asr_score = asr_sum / n_schemes if n_schemes else 0.0
+            # Position score = MEAN of caas_row over the schemes that detected it
+            # (scoring_compute.R section 2g); previously a 0.2-weighted sum.
+            caas_score = caas_sum / n_schemes if n_schemes else 0.0
+            if ct and cb:
+                side = "both"
+            elif ct:
+                side = "top"
+            elif cb:
+                side = "bottom"
+            else:
+                side = "none"
+            by_cycle.setdefault(cyc, []).append((asr_score, caas_score, side))
+
+        rows = []
+        for cyc in cycle_tags:
+            items = by_cycle.get(cyc, [])
+            if not items:
+                # A permuted labeling that produced no hit anywhere in this gene is
+                # a structural zero, not missing data -- keep the explicit 0.0 row so
+                # the genes x N null matrix stays dense (scoring_caas_perms.R and the
+                # report's p_zero diagnostics both rely on this).
+                rows.append({"Gene": gene, "cycle": cyc,
+                             "global_asr": 0.0, "top_asr": 0.0, "bottom_asr": 0.0,
+                             "global_caas": 0.0, "top_caas": 0.0, "bottom_caas": 0.0})
+                continue
+            asr_g = [i[0] for i in items]
+            asr_t = [i[0] for i in items if i[2] in ("top", "both")]
+            asr_b = [i[0] for i in items if i[2] in ("bottom", "both")]
+            caas_g = [i[1] for i in items]
+            caas_t = [i[1] for i in items if i[2] in ("top", "both")]
+            caas_b = [i[1] for i in items if i[2] in ("bottom", "both")]
+            rows.append({
+                "Gene": gene, "cycle": cyc,
+                # ASR axis: not wired into any ranking downstream, so it stays on
+                # q90 -- matching the observed gene_caas_asr_* columns, which are
+                # also still q90. The two must move together if ever wired up.
+                "global_asr": _q90(asr_g), "top_asr": _q90(asr_t), "bottom_asr": _q90(asr_b),
+                # CAAS axis: this is what FCS actually consumes (as
+                # caas_corStat_byrank), so it MUST match scoring_compute.R's
+                # size_adj_max term for term or p.perm compares two different
+                # statistics and silently goes wrong.
+                "global_caas": _size_adj_max_null(caas_g, cyc, "all",    cycle_pools),
+                "top_caas":    _size_adj_max_null(caas_t, cyc, "top",    cycle_pools),
+                "bottom_caas": _size_adj_max_null(caas_b, cyc, "bottom", cycle_pools),
+            })
+        writer.writerows(rows)
+
+    n_rows = 0
+    with gzip.open(detail_path, "rt", newline="") as f_in, \
+         open(scores_path, "w", newline="") as f_scores:
+        reader = _csv.DictReader(f_in, delimiter="\t")
+        writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t")
+        writer_scores.writeheader()
+
+        current_gene: Optional[str] = None
+        pos_agg: Dict[Tuple[str, int], List[float]] = {}
+
+        for row in reader:
+            gene = row["Gene"]
+            if gene != current_gene:
+                if current_gene is not None:
+                    _flush(current_gene, pos_agg, writer_scores)
+                current_gene = gene
+                pos_agg = {}
+
+            cyc = row["cycle"]
+            grp = row["caap_group"]
+            pos = int(row["Position"])
+            asr = float(row["asr_path_score"])
+            d = int(row["n_detected"])
+
+            phen = 1.0 - rank_lookup.get(cyc, {}).get(d, 0.0)
+            rc = phen * asr
+
+            agg = pos_agg.setdefault((cyc, pos), [0.0, 0, 0.0, 0, 0])
+            agg[0] += asr
+            agg[1] += 1
+            agg[2] += rc
+            agg[3] |= int(row["ct"])
+            agg[4] |= int(row["cb"])
+
+            # Reservoir sample stratified by (cycle, scheme): every cycle
+            # contributes up to the same K rows regardless of how many detections
+            # it produced, so each cycle is equally represented in the report's
+            # distribution plots and per-cycle summaries can be formed. Stratifying
+            # on the cycle (rather than on the gene) is what preserves per-cycle
+            # resolution; sampling per gene would weight genes by how many cycles
+            # happened to hit them.
+            key = (cyc, grp)
+            seen[key] = seen.get(key, 0) + 1
+            res = reservoirs.setdefault(key, [])
+            item = (gene, pos, asr, phen, rc)
+            if len(res) < sample_per_cycle_group:
+                res.append(item)
+            else:
+                j = rng.randrange(seen[key])
+                if j < sample_per_cycle_group:
+                    res[j] = item
+            n_rows += 1
+
+        if current_gene is not None:
+            _flush(current_gene, pos_agg, writer_scores)
+
+    # ── Sample + quantile summaries ────────────────────────────────────────────
+    sample_fields = ["Gene", "Position", "caap_group", "cycle",
+                     "asr_path_score", "null_phen_score", "null_row_caas"]
+    with open(sample_path, "w", newline="") as f_sample:
+        writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t")
+        writer_sample.writeheader()
+        for (cyc, grp), res in reservoirs.items():
+            writer_sample.writerows({
+                "Gene": g, "Position": p, "caap_group": grp, "cycle": cyc,
+                "asr_path_score": a, "null_phen_score": ph, "null_row_caas": rc,
+            } for (g, p, a, ph, rc) in res)
+
+    quant_levels = [5, 10, 25, 50, 75, 90, 95]
+    quant_fields = (["cycle", "caap_group", "metric", "n_sampled", "n_total", "mean"]
+                    + [f"q{q}" for q in quant_levels])
+    with open(quant_path, "w", newline="") as f_quant:
+        writer_quant = _csv.DictWriter(f_quant, fieldnames=quant_fields, delimiter="\t")
+        writer_quant.writeheader()
+        for (cyc, grp), res in reservoirs.items():
+            if not res:
+                continue
+            for metric, idx in (("asr_path_score", 2), ("null_phen_score", 3), ("null_row_caas", 4)):
+                vals = np.asarray([r[idx] for r in res], dtype=float)
+                rec = {"cycle": cyc, "caap_group": grp, "metric": metric,
+                       "n_sampled": len(vals), "n_total": seen.get((cyc, grp), len(vals)),
+                       "mean": float(vals.mean())}
+                for q, v in zip(quant_levels, np.percentile(vals, quant_levels)):
+                    rec[f"q{q}"] = float(v)
+                writer_quant.writerow(rec)
+
+    logger.info(
+        "[perms] pass B done: scored %d rows -> %s; sample=%s quantiles=%s",
+        n_rows, scores_path.name, sample_path.name, quant_path.name,
+    )
 
 
 def process_all_genes_perms(
@@ -1312,12 +1604,25 @@ def process_all_genes_perms(
     max_tasks_per_child: Optional[int] = None,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
-    labelings, and stream on-the-fly aggregated summaries to output TSV files.
+    labelings, and score them the same way the observed pipeline scores itself.
+
+    Two passes, because the null's phenotype axis is a percent_rank over each
+    cycle's genome-wide candidate pool while workers only ever see a single gene:
+
+      Pass A (parallel, one gene per worker) replays the labelings and streams raw
+        per-(gene, cycle, position, scheme) detail to perm_pos_detail.tsv.gz,
+        accumulating a per-cycle histogram of n_detected as rows go by.
+      Pass B (single process, streaming) turns those histograms into exact
+        per-cycle percent_rank lookups, re-reads the detail file, and derives
+        null_row_caas -> position scores -> per-(gene, cycle) q90.
 
     Outputs:
-      - output_dir/gene_cycle_scores.tsv
-      - output_dir/perm_pos_pval.tsv
-      - output_dir/perm_pos_sample.tsv
+      - output_dir/gene_cycle_scores.tsv   (schema unchanged; feeds caas_perms.rds)
+      - output_dir/perm_pos_pval.tsv       (LOO null_pvalue_boot crosscheck table)
+      - output_dir/perm_pos_detail.tsv.gz  (full per-cycle detail; re-scoring needs
+                                            no ASR replay)
+      - output_dir/perm_pos_quantiles.tsv  (per (cycle, scheme) distribution shape)
+      - output_dir/perm_pos_sample.tsv     (cycle-stratified sample for violins)
     """
     import csv as _csv
 
@@ -1352,13 +1657,11 @@ def process_all_genes_perms(
     else:
         maxtasks = int(os.environ.get("CAAS_MAX_TASKS_PER_CHILD", "50"))
 
-    scores_path = output_dir / "gene_cycle_scores.tsv"
     pval_path = output_dir / "perm_pos_pval.tsv"
-    sample_path = output_dir / "perm_pos_sample.tsv"
+    detail_path = output_dir / "perm_pos_detail.tsv.gz"
 
-    scores_fields = ["Gene", "cycle", "global_asr", "top_asr", "bottom_asr", "global_caas", "top_caas", "bottom_caas"]
-    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "recovery_pval"]
-    sample_fields = ["Gene", "Position", "caap_group", "cycle", "asr_path_score", "recovery_pval", "row_caas"]
+    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot"]
+    detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "ct", "cb"]
 
     # Generate arguments lazily
     args_generator = (
@@ -1368,32 +1671,64 @@ def process_all_genes_perms(
         for gene in genes
     )
 
+    # ── Pass A: replay labelings, stream detail, count per-cycle candidate pools ─
+    # hist_by_cycle[cycle][n_detected] = how many (gene, position, scheme)
+    # candidates that cycle discovered at that replication level. Bounded by
+    # n_cycles^2 counters (~1000x1000 ints, a few MB) no matter how many rows the
+    # detail file holds.
+    hist_by_cycle: Dict[str, Dict[int, int]] = {}
     pool = mp.Pool(processes=effective_workers, maxtasksperchild=maxtasks)
     n_genes = 0
+    n_detail_rows = 0
     try:
         results_iterator = pool.imap_unordered(_perms_worker_wrapper, args_generator, chunksize=10)
-        
-        with open(scores_path, "w", newline="") as f_scores, \
-             open(pval_path, "w", newline="") as f_pval, \
-             open(sample_path, "w", newline="") as f_sample:
-             
-             writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t")
-             writer_pval = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
-             writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t")
-             
-             writer_scores.writeheader()
-             writer_pval.writeheader()
-             writer_sample.writeheader()
-             
-             for _gene, scores_rows, pval_rows, sample_rows in results_iterator:
-                 if scores_rows:
-                     writer_scores.writerows(scores_rows)
-                     writer_pval.writerows(pval_rows)
-                     writer_sample.writerows(sample_rows)
-                     n_genes += 1
+
+        with open(pval_path, "w", newline="") as f_pval, \
+             gzip.open(detail_path, "wt", newline="") as f_detail:
+
+            writer_pval = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
+            writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t")
+
+            writer_pval.writeheader()
+            writer_detail.writeheader()
+
+            for _gene, detail_rows, pval_rows in results_iterator:
+                if not detail_rows:
+                    continue
+                writer_pval.writerows(pval_rows)
+                writer_detail.writerows(detail_rows)
+                n_detail_rows += len(detail_rows)
+                for row in detail_rows:
+                    cyc_hist = hist_by_cycle.setdefault(row["cycle"], {})
+                    d = row["n_detected"]
+                    cyc_hist[d] = cyc_hist.get(d, 0) + 1
+                n_genes += 1
     finally:
         pool.close()
         pool.join()
+
+    logger.info(
+        f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position,scheme) "
+        f"rows across {len(hist_by_cycle)} cycles -> {detail_path.name}"
+    )
+
+    # ── Pass B: rank within each cycle, score, aggregate ────────────────────────
+    rank_lookup = build_percent_rank_lookup(hist_by_cycle)
+    pool_sizes = {c: sum(h.values()) for c, h in hist_by_cycle.items()}
+    if pool_sizes:
+        sizes = sorted(pool_sizes.values())
+        logger.info(
+            "[perms] per-cycle candidate pool size: min=%d median=%d max=%d "
+            "(observed side ranks over its own discovered pool the same way)",
+            sizes[0], sizes[len(sizes) // 2], sizes[-1],
+        )
+
+    _finalize_perm_scores(
+        detail_path=detail_path,
+        output_dir=output_dir,
+        cycle_tags=cycle_tags,
+        rank_lookup=rank_lookup,
+    )
 
     logger.info(f"[perms] successfully aggregated {n_genes} genes to summaries inside {output_dir}")
     return output_dir

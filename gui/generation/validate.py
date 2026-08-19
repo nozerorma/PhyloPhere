@@ -80,11 +80,17 @@ def validate(project: ProjectConfig) -> list[str]:
         )
 
     # --- CAAS ---
-    # caas_config_path is NOT required when CAAS is enabled: this GUI always emits
-    # --contrast_selection alongside --ct_tool (see caas_tab.py's docstring), and
-    # main.nf then always wires CONTRAST_SELECTION()'s own trait/tree output into
-    # CT(...) (main.nf:137-146) — the --caas_config fallback in ct.nf:110-124 is
-    # only reached when --contrast_selection is absent, which never happens here.
+    # caas_config_path is never required from this GUI. CONTRAST_SELECTION is the
+    # trait-file supplier, and run_single.sh.j2 turns it on whenever CAAS **or**
+    # Disambiguation is enabled — so a trait file always exists for whichever
+    # consumer needs one:
+    #   • CAAS on  -> CONTRAST_SELECTION's trait/tree feed CT(...) directly.
+    #   • CAAS off, Disambiguation on (Precomputed Run reuse) -> ct_tool is empty so
+    #     CT() never runs, but CONTRAST_SELECTION still does, and main.nf hands its
+    #     trait_file_out/tree_file_out to CT_DISAMBIGUATION.
+    # The --caas_config fallbacks (ct.nf, ct_disambiguation.nf) are therefore only
+    # reachable by standalone non-GUI invocations, which is why the GUI can drive
+    # phenotypes purely through --my_traits.
     #
     # CAAS's own output (discovery/resample/bootstrap) is only ever consumed
     # downstream by Disambiguation, via run_signification (main.nf:184-199) — so this

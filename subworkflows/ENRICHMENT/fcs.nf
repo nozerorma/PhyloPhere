@@ -12,13 +12,11 @@
  *   SCORING_FCS_REPORT : CAAS scoring (global/top/bottom + full cross-module flags)
  *   RER_FCS_REPORT     : RERconverge-specific report process (takes perms_file)
  *
- * FADE and Accumulation no longer run their own FCS ranking (see this session's
- * diagnosis: FADE's max-of-many-sites statistic and Accumulation's missing
- * permulation null both made their own FCS "significance" unreliable). They
- * remain available as cross-module corroboration flags on CAAS's/RER's own
- * leading edge, and FADE additionally contributes a position-level group in
- * posenrich. The generic TOOL_FCS_REPORT process that used to serve both has
- * been removed as dead code (no remaining callers).
+ * FADE and Accumulation do not run their own FCS ranking: FADE's statistic is a
+ * max over many sites and Accumulation has no permulation null, so neither
+ * supports a reliable standalone significance test. They contribute as
+ * cross-module corroboration flags on CAAS's/RER's leading edge instead, and
+ * FADE additionally gets its own position-level group in posenrich.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -46,6 +44,7 @@ process SCORING_FCS_REPORT {
     path "fcs_results/**",                       emit: fcs_results,      optional: true
     path "fcs_results/fcs_all_results.tsv",      emit: fcs_all_results,  optional: true
     path "fcs_results/fcs_leading_edge.tsv",     emit: fcs_leading_edge, optional: true
+    path "fcs_results/fcs_leading_edge_composition.tsv", emit: fcs_leading_edge_composition, optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
@@ -92,7 +91,7 @@ process SCORING_FCS_REPORT {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RER_FCS_REPORT — RERconverge specific report process that takes perms_file
+// RER_FCS_REPORT - RERconverge specific report process that takes perms_file
 // ─────────────────────────────────────────────────────────────────────────────
 process RER_FCS_REPORT {
     tag "rer_fcs|${report_label}"
@@ -118,6 +117,7 @@ process RER_FCS_REPORT {
     path "fcs_results/**",                   emit: fcs_results,      optional: true
     path "fcs_results/fcs_all_results.tsv",  emit: fcs_all_results,  optional: true
     path "fcs_results/fcs_leading_edge.tsv", emit: fcs_leading_edge, optional: true
+    path "fcs_results/fcs_leading_edge_composition.tsv", emit: fcs_leading_edge_composition, optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
@@ -126,7 +126,6 @@ process RER_FCS_REPORT {
     def fdr_thr   = params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
-    def enrich_flag = (params.rer_permulation_enrichment ?: false)
     def render = """
         rmarkdown::render(
             '12.FCS_general_report.Rmd',
@@ -141,7 +140,6 @@ process RER_FCS_REPORT {
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
                 perms_file    = '${perms_file}',
-                enrich        = ${enrich_flag ? 'TRUE' : 'FALSE'},
                 annot_file    = '${annot_file}'
             ),
             output_file = '${report_label}.html'

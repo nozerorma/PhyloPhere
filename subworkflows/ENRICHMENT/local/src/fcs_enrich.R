@@ -1,34 +1,30 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# fcs_enrich.R — shared Functional Class Scoring (FCS) enrichment core
+# fcs_enrich.R - shared Functional Class Scoring (FCS) enrichment core
 # =============================================================================
 # Multi-method gene-set enrichment combining three complementary tests:
-#   1. Wilcoxon-AUC FCS  (RERconverge::fastwilcoxGMT) — rank-shift test.
-#   2. Lachenbruch Two-Part — binary prevalence (Fisher) + magnitude among
+#   1. Wilcoxon-AUC FCS  (RERconverge::fastwilcoxGMT) - rank-shift test.
+#   2. Lachenbruch Two-Part - binary prevalence (Fisher) + magnitude among
 #      positive scorers (Wilcoxon), combined via χ²(df=2). Zero-safe.
-#   3. Path Sum Permulation — label-permutation test on raw pathway score
+#   3. Path Sum Permulation - label-permutation test on raw pathway score
 #      accumulation. Zero-safe; NES is a z-score vs permuted null.
 # Each method casts one vote (FDR < fdr_thr + direction check); terms are
 # classified Hard evidence (3/3) / Supported (2/3) / Exploratory (1/3).
 # Methods 2 & 3 only run for non-negative (zero-floored) rankings; signed
 # RER rankings (two.sided alternative) use Wilcoxon only.
-# Replaces GSEA for accumulation / CAAS / FADE / RER pipelines.
 # STRING handles the network/set question.
 #
-# Design (locked in design discussion):
+# Design:
 #   * Universe = the full tested background (cleaned_background). Genes with no
-#     signal are floored to 0 — never dropped, never penalised (zero-floor),
+#     signal are floored to 0 - never dropped, never penalised (zero-floor),
 #     mirroring RERconverge's accel/decel rankings.
 #   * Direction via membership: a "top" ranking keeps the score for {top, both}
 #     genes and floors everyone else to 0; "bottom" keeps {bottom, both}. A
-#     both-direction gene contributes its full score to BOTH — never penalised.
+#     both-direction gene contributes its full score to BOTH - never penalised.
 #   * Significance is NEVER gated into the input. It rides along as annotation on
 #     the leading-edge genes (gate_sig / top-1/5/10% / cross-module).
 #   * Multiple testing: BH per GMT (each database is its own hypothesis family);
 #     fastwilcoxGMT already BH-adjusts within a single GMT call.
-#
-# Statistic returned by fastwilcoxGMT: stat = AUC - 0.5 in [-0.5, 0.5].
-#   stat > 0 → pathway genes rank systematically HIGH on the score.
 #
 # This file defines functions only; it is sourced by FCS_general.Rmd.
 # =============================================================================
@@ -41,6 +37,23 @@ suppressPackageStartupMessages({
   library(parallel)
   library(Matrix)        # sparse membership matrix + %*% for the vectorized null
 })
+
+# fcs_percentile_flags() lives in percentile_flags.R, shared verbatim with
+# 15.Comparison_report.Rmd, which sources it directly to avoid this file's
+# library() calls above. Skipped if a caller already sourced it (e.g.
+# fcs_enrich_equivtest.R, which resolves its own directory independently of
+# cwd via commandArgs and sources percentile_flags.R itself before this file).
+# Otherwise falls back to cwd-relative candidates matching how every Rmd
+# caller stages/finds this very file (see 12.FCS_general_report.Rmd's
+# src_candidates); stack-frame introspection (sys.frame()$ofile) is not
+# reliable across a source() call nested inside rmarkdown::render()'s own
+# chunk evaluation, so it isn't used here.
+if (!exists("fcs_percentile_flags", mode = "function")) {
+  .pflags_candidates <- c("src/percentile_flags.R", "percentile_flags.R")
+  .pflags_path <- .pflags_candidates[file.exists(.pflags_candidates)][1]
+  if (is.na(.pflags_path)) stop("percentile_flags.R not found under src/ or next to fcs_enrich.R")
+  source(.pflags_path)
+}
 
 # ── GMT loading ──────────────────────────────────────────────────────────────
 # Clean, version-agnostic database label from a GMT file name:
@@ -70,11 +83,11 @@ fcs_load_descriptions <- function(gmt_dir) {
     desc <- vapply(sp, function(x) if (length(x) >= 2) x[2] else NA_character_, character(1))
     desc <- ifelse(is.na(desc) | !nzchar(desc) | grepl("^https?://", desc), id, desc)
     # TRANSFAC-style TF motif IDs (e.g. V$HNF4_01, TGTTTGY_V$HNF3_Q6) carry no
-    # separate description — surface the transcription factor symbol so the
+    # separate description - surface the transcription factor symbol so the
     # Description column is informative. Only applied when desc just repeats id.
     tf <- ifelse(grepl("V\\$", id), sub(".*V\\$([A-Za-z0-9]+).*", "\\1", id), NA_character_)
     desc <- ifelse(!is.na(tf) & nzchar(tf) & desc == id,
-                   paste0(tf, " — TF target motif"), desc)
+                   paste0(tf, " - TF target motif"), desc)
     rows[[db]] <- data.frame(database = db, pathway = id, description = desc,
                              stringsAsFactors = FALSE)
   }
@@ -82,7 +95,7 @@ fcs_load_descriptions <- function(gmt_dir) {
 }
 
 # Load every *.gmt in gmt_dir as a named list of RERconverge gmt objects
-# (each has $genesets and $geneset.names — the structure fastwilcoxGMT expects).
+# (each has $genesets and $geneset.names - the structure fastwilcoxGMT expects).
 fcs_load_gmts <- function(gmt_dir) {
   files <- list.files(gmt_dir, pattern = "\\.gmt$", full.names = TRUE)
   if (length(files) == 0) stop(sprintf("No GMT files found in: %s", gmt_dir))
@@ -132,8 +145,8 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, alternative = "two.sided") {
     res <- reslist[[db]]
     if (is.null(res) || nrow(res) == 0) next
     # fastwilcoxGMT's simple-mode p-value (simpleAUCgenesRanks) is ALWAYS two-sided.
-    # For one-sided ("greater") magnitude rankings — CAAS/FADE/accum scores and RER
-    # accel/decel (all non-negative, zero-floored) — recompute the analytic p one-
+    # For one-sided ("greater") magnitude rankings - CAAS/FADE/accum scores and RER
+    # accel/decel (all non-negative, zero-floored) - recompute the analytic p one-
     # sided from the AUC so a DEPLETED set (stat < 0) is not falsely flagged, then
     # re-BH per GMT. Matches RERconverge's alternative="greater" omnibus convention.
     # (Background = the GMT's own annotated genes, exactly as fastwilcoxGMT.)
@@ -431,14 +444,32 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
     corperms <- tryCatch(readRDS(perms_file), error = function(e) NULL)
 
     # Two perms-RDS shapes are supported:
-    #   • RER  : corperms$corStat (genes×N) [+ optional corRho] — ONE matrix shared
+    #   • RER  : corperms$corStat (genes×N) [+ optional corRho] - ONE matrix shared
     #            across rankings; accel/decel derived from corRho per ranking.
     #   • CAAS : corperms$corStat_byrank, a named list keyed by ranking name
     #            (global/top/bottom), each a genes×N null matrix. The matching
-    #            matrix is selected per ranking — directionality is precomputed
+    #            matrix is selected per ranking - directionality is precomputed
     #            upstream (each labeling's change_side partitions the directions),
     #            so no corRho transform is needed.
     corStat_byrank <- c(corperms[["corStat_byrank"]], corperms[["caas_corStat_byrank"]])
+
+    if (!is.null(corperms[["caas_corStat_byrank"]])) {
+      .stat_have <- corperms[["gene_stat"]]
+      if (is.null(.stat_have) || !identical(as.character(.stat_have), "size_adj_max")) {
+        warning(sprintf(paste0(
+          "CAAS permulation null is STALE: built with gene statistic '%s', but the ",
+          "observed gene_caas_score uses 'size_adj_max'. p.perm left NA for the CAAS ",
+          "rankings. Rebuild it (no ASR replay needed, minutes):\n",
+          "  python3 subworkflows/CT_DISAMBIGUATION/local/reaggregate_perm_scores.py ",
+          "--detail <run>/caas_permulation/perm_pos_detail.tsv.gz --output-dir <run>/caas_permulation\n",
+          "  Rscript subworkflows/SCORING/local/src/scoring_caas_perms.R ",
+          "--gene-cycle-scores <run>/caas_permulation/gene_cycle_scores.tsv ",
+          "--output <run>/caas_permulation/caas_perms.rds"),
+          if (is.null(.stat_have)) "<unstamped: pre-size_adj_max>" else as.character(.stat_have)))
+        corStat_byrank <- corStat_byrank[
+          !names(corStat_byrank) %in% names(corperms[["caas_corStat_byrank"]])]
+      }
+    }
     if (!is.null(corperms) && (!is.null(corperms[["corStat"]]) || !is.null(corStat_byrank))) {
       base_corStat <- if (!is.null(corperms[["corStat"]])) as.matrix(corperms[["corStat"]]) else NULL
       base_corRho  <- if (!is.null(corperms[["corRho"]])) as.matrix(corperms[["corRho"]]) else NULL
@@ -496,7 +527,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
 
   # ── Lachenbruch Two-Part and Path Sum Permulation (non-negative rankings) ──
   # Skipped for two-sided rankings (signed RER vals) where score > 0 has no
-  # "signal present" meaning — Wilcoxon-only for those.
+  # "signal present" meaning - Wilcoxon-only for those.
   lach_res <- list()
   perm_res <- list()
   for (rk in names(rankings)) {
@@ -541,7 +572,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
 
   # ── Evidence gates and classification ────────────────────────────────────────
   # sig_wilcoxon: FDR gate + optional Wilcoxon permulation gate + direction.
-  #   p.perm is NA when no perms_file is supplied — gate skipped in that case.
+  #   p.perm is NA when no perms_file is supplied - gate skipped in that case.
   # sig_lachenbruch: FDR gate only (both sub-tests are exact/analytic).
   # sig_permulation: FDR gate + direction (NES > 0 = enrichment).
   enrich_df <- enrich_df %>%
@@ -567,87 +598,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
                                  evidence_count, evidence_label)
 }
 
-# ── Per-gene percentile flags (directional) ──────────────────────────────────
-# From score_top / score_bottom columns, derive cumulative top-X% membership
-# among the NON-ZERO (signal) genes of each directional ranking:
-#   pct_top25  = gene is in the top 25% of the top ranking (⊇ top10 ⊇ top5 ⊇ top1)
-#   pct_top10  = gene is in the top 10% of the top ranking      (⊇ top5 ⊇ top1)
-#   pct_bottom10 = gene is in the top 10% of the bottom ranking (strongly bottom)
-# Returns a per-gene data.frame of logical columns (gene + pct_*). Quartet, not
-# a trio -- 25% is a real, tested tier elsewhere in this pipeline (posenrich's
-# own Fisher test runs at char_fracs 0.25/0.10/0.05/0.01, AMI's DOMINO module
-# search runs on top25/bottom25 gene lists), so leaving it out here would be
-# inconsistent with what's actually tested.
-#
-# gene_lists_dir (optional): SCORING's published gene_lists/slice_<dir><pct>.tsv
-# (scoring_compute.R) -- when supplied AND all 4 files for a direction exist,
-# membership comes from there instead of re-ranking score_top/score_bottom
-# here. Only valid when score_top/score_bottom actually ARE CAAS's
-# gene_caas_score_top_all/bottom_all -- the CAAS report (SCORING_FCS_REPORT)
-# passes this, RER's report (RER_FCS_REPORT, same template + function, its
-# own ranking under the same column names) never does. Falls back to
-# re-ranking (all 4 files for a direction, not a mix) when gene_lists_dir is
-# NULL or a file is missing. Kept in sync with orthogonal_score.R's copy.
-fcs_percentile_flags <- function(stats, breaks = c(0.25, 0.10, 0.05, 0.01), gene_lists_dir = NULL) {
-  pct_of <- function(v) {
-    ok <- !is.na(v) & v > 0
-    p <- rep(NA_real_, length(v))
-    if (any(ok)) p[ok] <- 1 - (rank(v[ok], ties.method = "max") - 1) / sum(ok)
-    p
-  }
-  .slice_genes <- function(direction, pct) {
-    if (is.null(gene_lists_dir)) return(NULL)
-    f <- file.path(gene_lists_dir, sprintf("slice_%s%d.tsv", direction, pct))
-    if (!file.exists(f)) return(NULL)
-    d <- tryCatch(utils::read.delim(f, stringsAsFactors = FALSE), error = function(e) NULL)
-    if (is.null(d) || !"Gene" %in% names(d)) return(NULL)
-    unique(as.character(d$Gene))
-  }
-  .published_quartet <- function(direction) {
-    g25 <- .slice_genes(direction, 25); g10 <- .slice_genes(direction, 10)
-    g5  <- .slice_genes(direction, 5);  g1  <- .slice_genes(direction, 1)
-    if (is.null(g25) || is.null(g10) || is.null(g5) || is.null(g1)) return(NULL)
-    list(g25 = g25, g10 = g10, g5 = g5, g1 = g1)
-  }
-
-  out <- data.frame(gene = stats$gene, stringsAsFactors = FALSE)
-  if ("score_top" %in% names(stats)) {
-    pub <- .published_quartet("top")
-    if (!is.null(pub)) {
-      out$pct_top25 <- out$gene %in% pub$g25
-      out$pct_top10 <- out$gene %in% pub$g10
-      out$pct_top5  <- out$gene %in% pub$g5
-      out$pct_top1  <- out$gene %in% pub$g1
-    } else {
-      pt <- pct_of(stats$score_top)
-      out$pct_top25 <- !is.na(pt) & pt <= breaks[1]
-      out$pct_top10 <- !is.na(pt) & pt <= breaks[2]
-      out$pct_top5  <- !is.na(pt) & pt <= breaks[3]
-      out$pct_top1  <- !is.na(pt) & pt <= breaks[4]
-    }
-  }
-  if ("score_bottom" %in% names(stats)) {
-    pub <- .published_quartet("bottom")
-    if (!is.null(pub)) {
-      out$pct_bottom25 <- out$gene %in% pub$g25
-      out$pct_bottom10 <- out$gene %in% pub$g10
-      out$pct_bottom5  <- out$gene %in% pub$g5
-      out$pct_bottom1  <- out$gene %in% pub$g1
-    } else {
-      pb <- pct_of(stats$score_bottom)
-      out$pct_bottom25 <- !is.na(pb) & pb <= breaks[1]
-      out$pct_bottom10 <- !is.na(pb) & pb <= breaks[2]
-      out$pct_bottom5  <- !is.na(pb) & pb <= breaks[3]
-      out$pct_bottom1  <- !is.na(pb) & pb <= breaks[4]
-    }
-  }
-  out
-}
-
 # ── Leading-edge annotation ──────────────────────────────────────────────────
-# Parse fastwilcoxGMT's "gene:rank, gene:rank, ..." gene.vals into one row per
-# (ranking, database, pathway, gene) and left-join the per-gene attribute table
-# (flag_* + pct_* logical columns).
 fcs_annotate_leading_edge <- function(enrich_df, attr_df = NULL) {
   if (nrow(enrich_df) == 0) {
     cols <- c("ranking", "database", "pathway", "stat", "p.adj", "gene", "gene_rank")

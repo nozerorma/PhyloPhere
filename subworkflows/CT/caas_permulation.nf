@@ -25,6 +25,7 @@
 process SUBSET_RESAMPLE_PERMS {
     tag "caas_perms_subset|N=${n_perms}"
     label 'process_low'
+    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'resample_perms.tab'
 
     input:
     path resample_dir
@@ -43,7 +44,13 @@ process SUBSET_RESAMPLE_PERMS {
     # reproduces the same subset. We tag each candidate with a seeded rand() key,
     # sort by it, write to a file, then awk-limit by reading that FILE and exit-ing
     # early — avoids the SIGPIPE that `sort | head` triggers under pipefail.
-    cat \$(find -L ${resample_dir} -name 'resample_*.tab' | sort) > all_resamples.tab
+    if [ -d "${resample_dir}" ]; then
+        cat \$(find -L ${resample_dir} -name 'resample_*.tab' | sort) > all_resamples.tab
+    elif [ -f "${resample_dir}" ]; then
+        cat ${resample_dir} > all_resamples.tab
+    else
+        echo "ERROR: resample input not found: ${resample_dir}" >&2; exit 1
+    fi
     awk -F'\\t' 'NF>=3 && \$1!="b_0"' all_resamples.tab > candidates.tab
     awk -v seed=${seed} 'BEGIN{srand(seed)} {print rand()"\\t"\$0}' candidates.tab \\
         | sort -k1,1g > shuffled.tab
@@ -60,6 +67,7 @@ process SUBSET_RESAMPLE_PERMS {
 process BOOTSTRAP_PERMS {
     tag "$alignmentID"
     label 'process_boot'
+    publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true, pattern: '*.bootstrap.discovery.output'
 
     input:
     tuple val(alignmentID), path(alignmentFile), path(resampledPath)
@@ -114,6 +122,7 @@ _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{prin
 process BOOTSTRAP_PERMS_BATCHED {
     tag "$batchID (${batchSize} genes)"
     label 'process_boot_batched'
+    publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true, pattern: '*.bootstrap.discovery.output'
 
     input:
     tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(resampledPath)
@@ -186,9 +195,11 @@ process CAAS_PERMS_DISAMBIGUATE {
     path tree_file
 
     output:
-    path "gene_cycle_scores.tsv", emit: gene_cycle_scores
-    path "perm_pos_pval.tsv",     emit: pos_pval
-    path "perm_pos_sample.tsv",   emit: pos_sample
+    path "gene_cycle_scores.tsv",    emit: gene_cycle_scores
+    path "perm_pos_pval.tsv",        emit: pos_pval
+    path "perm_pos_sample.tsv",      emit: pos_sample
+    path "perm_pos_quantiles.tsv",   emit: pos_quantiles
+    path "perm_pos_detail.tsv.gz",   emit: pos_detail
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
@@ -221,6 +232,8 @@ process CAAS_PERMS_DISAMBIGUATE {
     cp caas_perms_out/gene_cycle_scores.tsv gene_cycle_scores.tsv
     cp caas_perms_out/perm_pos_pval.tsv perm_pos_pval.tsv
     cp caas_perms_out/perm_pos_sample.tsv perm_pos_sample.tsv
+    cp caas_perms_out/perm_pos_quantiles.tsv perm_pos_quantiles.tsv
+    cp caas_perms_out/perm_pos_detail.tsv.gz perm_pos_detail.tsv.gz
     """
 }
 
@@ -230,17 +243,22 @@ process CAAS_PERMS_AGGREGATE {
     label 'process_low'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'caas_perms.rds'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_pos_*.tsv'
+    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_pos_detail.tsv.gz'
 
     input:
     path gene_cycle_scores
     path perm_pos_pval, stageAs: 'input_perm_pos_pval.tsv'
     path perm_pos_sample, stageAs: 'input_perm_pos_sample.tsv'
+    path perm_pos_quantiles, stageAs: 'input_perm_pos_quantiles.tsv'
+    path perm_pos_detail, stageAs: 'input_perm_pos_detail.tsv.gz'
     path universe
 
     output:
-    path "caas_perms.rds",      emit: perms
-    path "perm_pos_pval.tsv",   emit: pos_pval
-    path "perm_pos_sample.tsv", emit: pos_sample
+    path "caas_perms.rds",         emit: perms
+    path "perm_pos_pval.tsv",      emit: pos_pval
+    path "perm_pos_sample.tsv",    emit: pos_sample
+    path "perm_pos_quantiles.tsv", emit: pos_quantiles
+    path "perm_pos_detail.tsv.gz", emit: pos_detail
 
     script:
     def local_dir = "${baseDir}/subworkflows/SCORING/local"
@@ -249,9 +267,68 @@ process CAAS_PERMS_AGGREGATE {
     """
     cp ${perm_pos_pval} perm_pos_pval.tsv
     cp ${perm_pos_sample} perm_pos_sample.tsv
+    cp ${perm_pos_quantiles} perm_pos_quantiles.tsv
+    cp ${perm_pos_detail} perm_pos_detail.tsv.gz
 
     ${run} ${local_dir}/src/scoring_caas_perms.R \\
         --gene-cycle-scores ${gene_cycle_scores} \\
+        ${universe_arg} \\
+        --output caas_perms.rds
+    """
+}
+
+// ── 6. Rebuild the null from an existing detail file (no ASR replay) ─────────
+// The gene-level null must hold the SAME statistic as the observed gene score, or
+// the FCS p.perm compares two different quantities. A caas_perms.rds imported from
+// a previous run is a cached artifact with no such guarantee — it was built with
+// whatever formula was current then.
+//
+// Re-deriving it does NOT need the expensive part: perm_pos_detail.tsv.gz already
+// holds every (Gene, cycle, Position, caap_group, asr_path_score, n_detected,
+// ct, cb) row, so only pass B (the aggregation) has to re-run. That is minutes
+// against the hours of CAAS_PERMS_DISAMBIGUATE's ASR replay.
+//
+// Deliberately reuses gene_wrapper.py's own aggregation via
+// reaggregate_perm_scores.py rather than reimplementing: the gene statistic is
+// F(max)^n over heavily tied values, so a 1e-16 difference in how the per-position
+// sum accumulates can flip a tie and the ^n amplifies it.
+process CAAS_PERMS_REBUILD {
+    tag "caas_perms_rebuild"
+    label 'process_medium'
+    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true,
+               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv}'
+
+    input:
+    path perm_pos_detail, stageAs: 'input_perm_pos_detail.tsv.gz'
+    path universe
+
+    output:
+    path "caas_perms.rds",         emit: perms
+    path "gene_cycle_scores.tsv",  emit: gene_cycle_scores
+    path "perm_pos_sample.tsv",    emit: pos_sample,    optional: true
+    path "perm_pos_quantiles.tsv", emit: pos_quantiles, optional: true
+
+    script:
+    def disambig_local = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
+    def scoring_local  = "${baseDir}/subworkflows/SCORING/local"
+    // Sentinel convention is a NO_* basename (NO_FILE here, NO_BACKGROUND from
+    // SCORING's resolved_background) — match the prefix, not one literal.
+    def universe_arg   = universe.name.startsWith('NO_') ? "" : "--universe ${universe}"
+    def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
+    """
+    export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own
+    # location, so stage the disambiguation local tree exactly as CAAS_PERMS_DISAMBIGUATE does.
+    cp -R ${disambig_local}/* .
+    find . -name '*.pyc' -delete 2>/dev/null || true
+
+    ${py} ./reaggregate_perm_scores.py \\
+        --detail input_perm_pos_detail.tsv.gz \\
+        --output-dir .
+
+    ${rs} ${scoring_local}/src/scoring_caas_perms.R \\
+        --gene-cycle-scores gene_cycle_scores.tsv \\
         ${universe_arg} \\
         --output caas_perms.rds
     """
@@ -308,10 +385,13 @@ workflow CAAS_PERMULATION {
 
     main:
         def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, tree_file)
-        def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_sample, universe)
+        def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_sample,
+                                       scores.pos_quantiles, scores.pos_detail, universe)
 
     emit:
-        perms       = agg.perms
-        pos_pval    = agg.pos_pval          // lean recovery p-value per (gene,position,scheme)
-        pos_sample  = agg.pos_sample        // lean capped sample for distribution plots
+        perms         = agg.perms
+        pos_pval      = agg.pos_pval        // LOO null_pvalue_boot per (gene,position,scheme)
+        pos_sample    = agg.pos_sample      // cycle-stratified sample for distribution plots
+        pos_quantiles = agg.pos_quantiles   // per (cycle,scheme) distribution shape
+        pos_detail    = agg.pos_detail      // full per-cycle detail; re-scoring needs no ASR replay
 }

@@ -1,6 +1,6 @@
 #!/usr/bin/env Rscript
 # =============================================================================
-# fcs_enrich_equivtest.R — numerical equivalence test for the vectorized null
+# fcs_enrich_equivtest.R - numerical equivalence test for the vectorized null
 # =============================================================================
 # Proves fcs_null_enrichstat_vectorized() reproduces RERconverge::fastwilcoxGMTall()$stat
 # EXACTLY (the slow path it replaces), across: clean data, ties, NAs, and the
@@ -13,6 +13,7 @@
 suppressPackageStartupMessages(library(RERconverge))
 here <- dirname(sub("--file=", "", grep("--file=", commandArgs(FALSE), value = TRUE)[1]))
 if (is.na(here) || !nzchar(here)) here <- "."
+source(file.path(here, "percentile_flags.R"))
 source(file.path(here, "fcs_enrich.R"))
 
 set.seed(42)
@@ -98,11 +99,11 @@ if (!ok) fails <- fails + 1
 # 6. corStat_byrank per-ranking selection via fcs_run_all (the CAAS perms shape).
 #    Proves fcs_run_all routes each ranking to ITS OWN null matrix when the RDS
 #    carries corStat_byrank, and that the RER single-corStat path is unaffected.
-#    Strategy: same observed rankings, two RDS shapes —
+#    Strategy: same observed rankings, two RDS shapes:
 #      • byrank : list(global=Mg, top=Mt, bottom=Mb)  (distinct null matrices)
 #      • single : list(corStat=Mg)                    (RER-style, shared)
 #    Then: global p.perm must MATCH across shapes (both use Mg); top/bottom must
-#    DIFFER (byrank uses Mt/Mb, single reuses Mg) — i.e. selection actually happens.
+#    DIFFER (byrank uses Mt/Mb, single reuses Mg) - i.e. selection actually happens.
 {
   set.seed(7)
   genes6 <- paste0("G", 1:400)
@@ -141,5 +142,5 @@ if (!ok) fails <- fails + 1
   if (!ok) fails <- fails + 1
 }
 
-cat(sprintf("\n%s — %d failure(s)\n", ifelse(fails == 0, "ALL PASS", "FAILURES"), fails))
+cat(sprintf("\n%s - %d failure(s)\n", ifelse(fails == 0, "ALL PASS", "FAILURES"), fails))
 quit(status = if (fails == 0) 0 else 1)

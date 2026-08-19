@@ -191,12 +191,13 @@ permutation-corrected p-values. `--rer_continuous_file` renders the report
 standalone from a precomputed RDS.
 
 ### SCORING — composite integration
-Combines CT_POSTPROC (CAAS), FADE, RERconverge, CT_ACCUMULATION, and VEP into
+Combines CT_POSTPROC (CAAS), FADE, RERconverge, and CT_ACCUMULATION into
 unified position-level and gene-level composite scores. See [Composite CAAS
 scoring framework](#composite-caas-scoring-framework) below for the full
 formulation. Also wires in **CAAS_PERMULATION** — a genome-wide permutation
 null built by replaying permuted labelings through disambiguation — when
-`--caas_permulation_enrichment` is set.
+`--caas_permulation_enrichment` is set. PrimateAI-3D/COSMIC position
+characterization is handled by ENRICHMENT (POSENRICH), not SCORING.
 
 ### ENRICHMENT — functional & network enrichment
 Runs FCS (a ranked, Wilcoxon-AUC, GMT-based enrichment engine — the single
@@ -209,7 +210,7 @@ Universe files are module-specific (`--rer_universe_file`,
 `--fade_universe_file`) rather than shared.
 
 ### Upstream Data Preparation: Ortholog Characterizator
-Position-level characterization layers integrated by VEP (`--vep_map_dir`), SCORING, and POSENRICH (including MAP alignment-to-protein coordinate mappings, HyPhy FUBAR site selection, UCR ultraconserved regions, and amino-acid domain variability files) are generated using the dedicated [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) workflow:
+Position-level characterization layers integrated by VEP (`--vep_map_dir`) and POSENRICH (including MAP alignment-to-protein coordinate mappings, HyPhy FUBAR site selection, UCR ultraconserved regions, and amino-acid domain variability files) are generated using the dedicated [Ortholog Characterizator](https://github.com/nozerorma/ortholog_characterizator.git) workflow:
 - **Repository:** https://github.com/nozerorma/ortholog_characterizator.git
 - **Generated Input Files:**
   - `vep_map_dir` — per-gene MAP files mapping alignment columns to canonical protein residue positions.
@@ -227,47 +228,61 @@ run with `--reporting`.
 ## Composite CAAS Scoring Framework
 
 PhyloPhere integrates multiple independent evidence lines (CT convergence,
-FADE selection, RER continuous association, accumulation, and VEP
-characterization) into unified position-level and gene-level scores.
+FADE selection, RER continuous association, and accumulation) into unified
+position-level and gene-level scores. VEP/PrimateAI-3D/COSMIC position
+characterization is a separate evidence line handled by ENRICHMENT
+(POSENRICH), not part of this composite.
 
 ### Position-level score (`CAAS_score`)
 
-For each alignment position, the composite `CAAS_score` is the weighted sum of
-row-level CAAS scores (`caas_row`) across biochemically grouped schemes
-(US, GS1–GS4, weight `0.2` each, max sum `1.0`). Each `caas_row` is the
-product of two orthogonal `[0,1]` evidence axes:
+For each alignment position, `CAAS_score` is the mean of `caas_row` across the
+biochemical schemes (US, GS1-GS4) that detected the substitution. `caas_row`
+is the product of two orthogonal `[0,1]` evidence axes:
 
-1. **Phenotype evolution axis** — `phen_score = 1 - pvalue_boot` (permutation evidence; lower p ⇒ stronger signal).
-2. **Position evolution axis** — `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score, which is count-aware (scales with the number of independent evolutionary transitions).
+1. **Phenotype evolution axis**: `phen_score = 1 - pvalue_boot` (permutation evidence; lower p means stronger signal).
+2. **Position evolution axis**: `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score.
 
-> The hypergeometric p-value (`Pvalue`) is deliberately excluded from the core
-> score and instead acts as a significance gate (`gate_sig`/`gate_fdr`).
+How many of the five schemes detect a position (`n_schemes`) and which ones
+(`scheme_set`) are reported as descriptors, not inputs to the score: a
+substitution can trip 1 to 5 schemes purely as a function of which amino acids
+are involved, so summing (rather than averaging) would let that breadth
+inflate the score independently of evidence strength.
+
+> The hypergeometric p-value (`pvalue`) is deliberately excluded from the core
+> score and instead acts as a significance gate (`gate_sig`: `pvalue < 0.05`).
 
 ### Gene-level scores
 
-- **Global gene score**: 90th percentile of position-level `CAAS_score` across the gene.
-- **Directional gene scores** (`gene_caas_score_top`/`_bottom`): 90th percentile restricted to positions changing in that direction (or "both").
+- **Global gene score**: size-adjusted max of position-level `CAAS_score` across the gene,
+  `F(max)^n` (the percentile of the gene's best position within the distribution of the max
+  of `n` draws from the genome-wide position pool, `n` = the gene's own position count).
+  A plain max or upper quantile rewards genes for merely having more detected positions
+  (an order-statistic artifact); dividing through by that expectation removes it, so genes
+  with different numbers of positions are comparable.
+- **Directional gene scores** (`gene_caas_score_top`/`_bottom`): same statistic restricted to
+  positions changing in that direction (or "both"), calibrated against the direction-matched pool.
 
 ### Key output columns
 
-**`position_scores.tsv`**: `CAAS_score`, `phen_score`, `asr_score`, `Pvalue`,
-`Pvalue_hyp_fdr`, `change_side`, `gate_sig`, `gate_fdr`.
+**`position_scores.tsv`**: `CAAS_score`, `phen_score`, `asr_score`, `pvalue`,
+`change_side`, `gate_sig`, `n_schemes`, `scheme_set`.
 
-**`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `gene_rand_score`
-(Fisher-combined accumulation signal), `accum_significant`, `rer_min_pval`,
-`rer_acceleration`, `fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
+**`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_cct_p`
+(Cauchy-combined accumulation signal) with BH FDR `accum_fdr` and
+`accum_significant`, `rer_min_pval`, `rer_acceleration`,
+`fade_max_bf_top`/`_bottom`, `fade_significant_top`/`_bottom`.
 
 ### Downstream slices & enrichment inputs
 
-- **`gene_lists/slice_*.tsv`** (9 ranked lists = 3 directions `{global,top,bottom}` × 3 significance gates `{all,sig,fdr}`) — the ranked lists FCS/DOMINO consume, each annotated with `is_fade`/`is_rer`/`is_accum` flags.
-- **`fcs_stats.tsv`** — the merged per-gene score table FCS runs ranked enrichment against.
-- **`gene_threshold_enrichment.tsv` / `pos_threshold_enrichment.tsv`** — Fisher's-exact odds-ratio/p-value curves testing whether tighter `CAAS_score` thresholds (top100/50/25/10/5/1) enrich for independent RER/FADE/accumulation significance.
+- **`gene_lists/slice_*.tsv`** (12 ranked lists: 3 directions `{global,top,bottom}` x 4 percentile cuts `{25,10,5,1}`) - the ranked lists FCS/DOMINO consume, each annotated with `is_fade`/`is_rer`/`is_accum` flags.
+- **`fcs_stats.tsv`**: the merged per-gene score table FCS runs ranked enrichment against.
+- **`gene_threshold_enrichment.tsv` / `pos_threshold_enrichment.tsv`**: Fisher's-exact odds-ratio/p-value curves testing whether tighter `CAAS_score` thresholds (top100/50/25/10/5/1) enrich for independent RER/FADE/accumulation significance.
 
 ### Stress diagnostics (`--scoring_stress true`)
 
 Leave-one-axis-out scoring variants (`position_score_stress_variants.tsv`),
 rank-stability summaries, LOO-vs-main correlations, top-N% Jaccard overlaps,
-and a PCA over raw score inputs with component loadings — a robustness check
+and a PCA over raw score inputs with component loadings: a robustness check
 on the composite formulation, not a scientific output in itself.
 
 ---
@@ -385,7 +400,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `scoring_weight_caas` | `1.0` | Relative weight assigned to the CAAS score component. |
 | `scoring_weight_rer` | `1.0` | Relative weight assigned to the RERconverge component. |
 | `scoring_weight_fade` | `1.0` | Relative weight assigned to the FADE directional selection component. |
-| `scoring_weight_vep` | `1.0` | Relative weight assigned to the VEP pathogenicity component. |
 | `scoring_rer_direction` | `"both"` | Direction filter for RERconverge correlation (`"accelerated"`, `"decelerated"`, `"both"`). |
 
 #### Advanced Parameters
@@ -401,7 +415,8 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `scoring_stress` / `scoring_stress_top_n` | `true` / `25` | Enables leave-one-axis-out stress testing and top-N stability checks. |
 | `scoring_stress_rank_metric` | `"spearman"` | Correlation metric used in scoring stress tests (`spearman`, `kendall`, `pearson`). |
 | `scoring_window_size_bp` | `1000000` | Genomic window size (bp) for genomic overlap reporting. |
-| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_vep_primateai`, `scoring_vep_cosmic`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_perms_file` | `""` | Standalone input file/directory fallbacks when running SCORING independently. |
+| `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_perms_file` | `""` | Standalone input file/directory fallbacks when running SCORING independently. |
+| `scoring_vep_primateai`, `scoring_vep_cosmic` | `""` | Precomputed PrimateAI-3D/COSMIC score TSVs. Not read by SCORING itself; ENRICHMENT (POSENRICH) reuses these as its own precomputed-VEP fallback when `--vep` did not run live. |
 
 </details>
 
@@ -431,10 +446,9 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg FDR threshold for FCS gene-set significance. |
 | `fcs_pperm_thr` | `0.025` | Permulation p-value threshold for filtering phylogenetic non-independence. |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
-| `rer_permulation_enrichment` / `caas_permulation_enrichment` | `true` | Enables RER and CAAS permulation null distributions for FCS enrichment. |
+| `caas_permulation_enrichment` | `true` | Runs CAAS_PERMULATION to build the genome-wide null used for CAAS's FCS permulation p-value. |
 | `posenrich_min_size` / `posenrich_max_size` | `5` / `0` | Position set size boundaries for POSENRICH (0 = un-capped). |
-| `posenrich_padj_thr` | `0.15` | Adjusted p-value threshold for POSENRICH position enrichment. |
-| `posenrich_fold_thr` | `1.5` | Fold-enrichment/depletion ratio threshold for POSENRICH. |
+| `posenrich_padj_thr` | `0.15` | Adjusted p-value threshold for POSENRICH position enrichment (NES > 0 also required). |
 | `posenrich_background_file` | `""` | Optional static background override file. |
 | `domain_variability_file`, `ucr_positions_file`, `fubar_sites_file`, `egg_members_file`, `egg_annotations_file` | `""` | Upstream position annotation files (generated by `ortholog_characterizator`). |
 

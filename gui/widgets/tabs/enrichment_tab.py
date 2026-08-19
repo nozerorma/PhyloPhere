@@ -50,9 +50,8 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fcs_fdr", label="FCS FDR threshold"),
         FieldSpec(name="fcs_pperm_thr", label="FCS permulation p threshold"),
         FieldSpec(name="fcs_top_n", label="FCS top-N leading edge"),
-        FieldSpec(name="rer_permulation_enrichment", label="RER permulation-excess null", kind="bool"),
         # NOTE: CAAS's own permulation-excess null is controlled from the CAAS tab
-        # (caas_permulation_enrichment) — one param, gates both CT's own
+        # (caas_permulation_enrichment) -- one param, gates both CT's own
         # CAAS_PERMULATION subworkflow and this report's null, so it has one home.
 
         FieldSpec(name="string_species", label="STRING species (NCBI taxid)"),
@@ -66,7 +65,6 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="posenrich_min_size", label="POSENRICH min set size"),
         FieldSpec(name="posenrich_max_size", label="POSENRICH max set size (0 = uncapped)"),
         FieldSpec(name="posenrich_padj_thr", label="POSENRICH adjusted p threshold"),
-        FieldSpec(name="posenrich_fold_thr", label="POSENRICH fold-enrichment threshold"),
     ),
 )
 

@@ -25,6 +25,8 @@ workflow CT_ACCUMULATION {
         caas_channel          // filtered_discovery.tsv from CT_POSTPROC gene_filtering (or Channel.empty())
         background_channel    // cleaned_background_main.txt from CT_POSTPROC  (or Channel.empty())
         trait_file_channel    // traitfile from CT (pruned when contrast_selection is on; or Channel.empty())
+        tested_positions_channel // caastools background.output — TESTED positions; the
+                                 // randomization null's eligible pool (or Channel.empty())
 
     main:
         // ── Resolve CAAS source (filtered_discovery.tsv from postproc) ────────
@@ -77,6 +79,14 @@ workflow CT_ACCUMULATION {
                 }
             }
         }
+
+        // Value channel so the cleaned background can feed BOTH AGGREGATE and
+        // RANDOMIZE (as the null pool's gene universe). A queue channel can only be
+        // consumed once — same reason meta_caas_val exists above.
+        def background_val = background_ch
+            .collect()
+            .filter { files -> files && files.size() > 0 }
+            .map { files -> files[0] }
 
         // ── Resolve species-list / traitfile ─────────────────────────────────
         def species_list_ch = (trait_file_channel ?: Channel.empty())
@@ -140,7 +150,7 @@ workflow CT_ACCUMULATION {
             genomic_info_ch,
             species_list_val,
             meta_caas_val,
-            background_ch,
+            background_val,
             params.accumulation_entropy_dir ?: ""
         )
 
@@ -150,26 +160,39 @@ workflow CT_ACCUMULATION {
         // accumulation_{direction}_{cat}_aggregated_results.csv.
         // "all" uses --change-side both (retains all non-none positions) for the
         // global accumulation score used in gene-level significance characterisation.
+        // Eligible null pool inputs, broadcast to every direction. Sentinels (not
+        // Channel.empty()) so a run without them still executes — randomize.py warns
+        // and falls back to the ungapped-column pool rather than failing.
+        def tested_pos_val = (tested_positions_channel ?: Channel.empty())
+            .ifEmpty { file('NO_TESTED_POSITIONS') }
+            .collect()
+            .map { it[0] }
+        def bg_universe_val = background_val.ifEmpty { file('NO_BG_UNIVERSE') }
+
         def rand_in = Channel.of("top", "bottom", "all")
             .combine(aggregate_out.global_csv)
             .combine(meta_caas_val)
-            .multiMap { dir, global_csv, caas_csv ->
+            .combine(tested_pos_val)
+            .combine(bg_universe_val)
+            .multiMap { dir, global_csv, caas_csv, tested_pos, bg_universe ->
                 direction: dir
                 global:    global_csv
                 caas:      caas_csv
+                tested:    tested_pos
+                universe:  bg_universe
             }
 
         randomize_out = CT_ACCUMULATION_RANDOMIZE(
             rand_in.direction,
             rand_in.global,
-            rand_in.caas
+            rand_in.caas,
+            rand_in.tested,
+            rand_in.universe
         )
 
         // ── Accumulation report (rendered after all directions complete) ──────
         def all_rand_csvs = randomize_out.results.collect()
-        def agg_csvs      = aggregate_out.global_csv
-            .mix(aggregate_out.deciles.ifEmpty(Channel.empty()))
-            .collect()
+        def agg_csvs      = aggregate_out.global_csv.collect()
         ACCUMULATION_REPORT(all_rand_csvs, agg_csvs)
 
         // ── Gene list extraction (always automatic) ───────────────────────

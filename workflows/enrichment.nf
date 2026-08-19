@@ -352,9 +352,19 @@ workflow ENRICHMENT {
             // Position Characterisation (PrimateAI-3D + COSMIC validation, moved here
             // from the Scoring report) reuses gene_scores (already a take: param) plus
             // the same VEP outputs SCORING's own report renders with.
+            // vep_primateai_ch/vep_cosmic_ch are null whenever --vep didn't run
+            // this invocation (main.nf: `params.vep ? VEP.out.primateai_tsv :
+            // null`) -- fall back to the same --scoring_vep_primateai/
+            // --scoring_vep_cosmic precomputed-file params SCORING's own
+            // report already resolves (workflows/scoring.nf's
+            // resolved_vep_primateai/resolved_vep_cosmic), so a precomputed-
+            // VEP run (--scoring_vep_primateai set, no live --vep) still
+            // reaches Position Characterisation instead of silently going NULL.
             def pos_gene_scores_ch = gene_scores ? gene_scores : file('NO_FILE_GENE_SCORES')
-            def pos_vep_primateai_ch = (vep_primateai_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_VEP_PAI') }
-            def pos_vep_cosmic_ch   = (vep_cosmic_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_VEP_COSMIC') }
+            def pos_vep_primateai_ch = (vep_primateai_ch ?: Channel.empty())
+                .ifEmpty { params.scoring_vep_primateai ? file(params.scoring_vep_primateai) : file('NO_FILE_VEP_PAI') }
+            def pos_vep_cosmic_ch   = (vep_cosmic_ch ?: Channel.empty())
+                .ifEmpty { params.scoring_vep_cosmic ? file(params.scoring_vep_cosmic) : file('NO_FILE_VEP_COSMIC') }
 
             // FADE_top_sig / FADE_bottom_sig position group (the classic BF>=100
             // sites, always produced by FADE_JSON_TO_CSV when --fade runs).
@@ -393,10 +403,12 @@ workflow ENRICHMENT {
         // above so their outputs exist as real objects by this point in the DAG. ──
         def caas_all = fcs_out.fcs_all_results.ifEmpty { file('NO_FCS_ALL') }
         def rer_all  = rer_fcs.fcs_all_results.ifEmpty  { file('NO_FCS_ALL') }
-        // Leading-edge tables feed the Comparison report's orthogonal composite
-        // score (percentile concentration + cross-module corroboration).
+        // Leading-edge tables feed the Comparison report's Per-module
+        // significance / Interesting Genes-Positions tables.
         def caas_le  = fcs_out.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
         def rer_le   = rer_fcs.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
+        def caas_le_comp = fcs_out.fcs_leading_edge_composition.ifEmpty { file('NO_LEADING_EDGE_COMPOSITION') }
+        def rer_le_comp  = rer_fcs.fcs_leading_edge_composition.ifEmpty  { file('NO_LEADING_EDGE_COMPOSITION') }
 
         def ami_module_desc_ch = (run_ami ? ami_out.module_descriptions : Channel.empty())
             .ifEmpty { file('NO_AMI_MODULE_DESC') }
@@ -406,6 +418,8 @@ workflow ENRICHMENT {
             .ifEmpty { file('NO_POSENRICH_DOTPLOT') }
         def posenrich_le_ch = (posenrich_out ? posenrich_out.leading_edge : Channel.empty())
             .ifEmpty { file('NO_POSENRICH_LE') }
+        def posenrich_le_summary_ch = (posenrich_out ? posenrich_out.leading_edge_summary : Channel.empty())
+            .ifEmpty { file('NO_POSENRICH_LE_SUMMARY') }
         // Interesting Genes/Positions tables reuse the SAME optional gene/position-
         // level inputs POSENRICH's own report already consumes (fcs_stats,
         // position_scores, VEP, FADE sites) -- all workflow-level take: params, so
@@ -415,8 +429,11 @@ workflow ENRICHMENT {
         // touching the raw fcs_stats channel a further time.
         def cmp_fcs_stats_ch  = annot_ch ?: file('NO_FCS_STATS')
         def cmp_pos_scores_ch = position_scores ? position_scores : file('NO_POS_SCORES')
-        def cmp_vep_pai_ch    = (vep_primateai_ch ?: Channel.empty()).ifEmpty { file('NO_VEP_PAI') }
-        def cmp_vep_cosmic_ch = (vep_cosmic_ch ?: Channel.empty()).ifEmpty { file('NO_VEP_COSMIC') }
+        // Same precomputed-VEP fallback as pos_vep_primateai_ch/pos_vep_cosmic_ch above.
+        def cmp_vep_pai_ch    = (vep_primateai_ch ?: Channel.empty())
+            .ifEmpty { params.scoring_vep_primateai ? file(params.scoring_vep_primateai) : file('NO_VEP_PAI') }
+        def cmp_vep_cosmic_ch = (vep_cosmic_ch ?: Channel.empty())
+            .ifEmpty { params.scoring_vep_cosmic ? file(params.scoring_vep_cosmic) : file('NO_VEP_COSMIC') }
         def cmp_fade_top_ch   = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_TOP') }
         def cmp_fade_bot_ch   = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FADE_BOTTOM') }
         // SCORING's published percentile slices -- gene_lists_ch already
@@ -425,8 +442,10 @@ workflow ENRICHMENT {
         def cmp_position_lists_ch = position_lists ? position_lists.ifEmpty { file('NO_POSITION_LISTS') } : file('NO_POSITION_LISTS')
 
         def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, caas_le, rer_le,
+                                              caas_le_comp, rer_le_comp,
                                               ami_module_desc_ch, ami_term_membership_ch,
                                               posenrich_dotplot_ch, posenrich_le_ch,
+                                              posenrich_le_summary_ch,
                                               cmp_fcs_stats_ch, cmp_pos_scores_ch,
                                               cmp_vep_pai_ch, cmp_vep_cosmic_ch,
                                               cmp_fade_top_ch, cmp_fade_bot_ch,

@@ -330,8 +330,6 @@ def aggregate(args):
     aggregated_writer = csv.DictWriter(aggregated_file, fieldnames=aggregated_fieldnames)
     aggregated_writer.writeheader()
 
-    overall_caas_cons = []
-
     # Use '*' (no extension filter) to match flat alignment directory — same as CT discovery
     # Split on the first '.' to extract the gene symbol, handling multi-dot names like
     # GENE.Species.filter2.phy produced by the CT discovery step.
@@ -413,8 +411,6 @@ def aggregate(args):
                     'masked':   is_masked,
                     'iscaas':   is_caas,
                 })
-                if is_caas and cons_val != "":
-                    overall_caas_cons.append(float(cons_val))
 
             genes_written += 1
             del alignment
@@ -435,20 +431,6 @@ def aggregate(args):
     else:
         logging.info(f"Aggregation wrote {genes_written} genes to {aggregated_filename}.")
 
-    # Deciles
-    decile_file = f"{args.output_prefix}_deciles.csv"
-    if overall_caas_cons:
-        decile_thresholds = np.percentile(overall_caas_cons, list(range(10, 100, 10)))
-        logging.info(f"Computed decile thresholds: {decile_thresholds}")
-    else:
-        decile_thresholds = []
-        logging.warning("No CAAS cons_idx values recorded; deciles cannot be computed.")
-    with open(decile_file, 'w', newline='') as df:
-        writer = csv.writer(df)
-        writer.writerow(['Decile', 'Threshold'])
-        for i, threshold in enumerate(decile_thresholds, start=1):
-            writer.writerow([i, threshold])
-    logging.info(f"Decile thresholds written to: {decile_file}")
     logging.info("Aggregation complete.")
 
 

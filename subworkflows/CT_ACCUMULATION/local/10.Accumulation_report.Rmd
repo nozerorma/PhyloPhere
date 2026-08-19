@@ -83,7 +83,7 @@ theme_set(
     plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
   )
 )
-scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "fisher")
+scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "cct")
 
 pval_thr  <- params$pval_threshold
 accum_dir <- params$accum_dir
@@ -114,37 +114,58 @@ if (!has_data) stop("No accumulation CSVs found under: ", accum_dir)
 # Standardise column names (Gene / gene)
 if ("Gene" %in% names(raw) && !"gene" %in% names(raw)) raw <- rename(raw, gene = Gene)
 
-# ── Fisher's combined p-value across the 5 group schemes ─────────────────────
-# Replaces full_pool: each group draws independently so their p-values are
-# uncorrelated, making Fisher's χ²= -2Σln(p) ~ χ²(2k) valid.
-# Groups with ActualCount=0 contribute p=1 → ln(1)=0, adding no spurious signal.
-.fisher_combine <- function(ps) {
-  ps <- pmax(ps, 1e-300)   # guard log(0)
-  pchisq(-2 * sum(log(ps)), df = 2 * length(ps), lower.tail = FALSE)
+# ── Combined p-value across the 5 group schemes (Cauchy Combination Test) ────
+# Produces a single per-(gene, direction) p-value from the five per-scheme ones.
+# The same combiner runs in scoring_compute.R and accum_gene_lists.nf on these
+# same inputs; all three must agree, since they feed the scoring table, the AMI
+# gene lists and this report respectively.
+#
+# Why CCT and not an independence-based combiner: a single physical position can
+# be a CAAS under several nested grouping schemes, so the per-scheme counts —
+# and therefore their p-values — are positively correlated. Drawing each group's
+# null separately calibrates each p-value marginally but does nothing to that
+# correlation, which lives in the observed data. CCT's Cauchy tail keeps its null
+# valid under arbitrary dependence between the combined p-values; a combiner
+# assuming independence inflates the type-I rate several-fold at this level of
+# correlation.
+.cct_combine <- function(ps) {
+  ps <- ps[!is.na(ps)]
+  if (length(ps) == 0) return(NA_real_)
+  # Groups reporting exactly p=1 are short-circuited: tan((0.5-1)*pi) diverges to
+  # a large negative value, so including them would drag the statistic down and
+  # cancel signal contributed by the other groups.
+  if (all(ps >= 1)) return(1.0)
+  ps   <- pmin(pmax(ps, 1e-15), 1 - 1e-15)
+  stat <- sum((1 / length(ps)) * tan((0.5 - ps) * pi))
+  pcauchy(stat, lower.tail = FALSE)
 }
 
 group_schemes <- c("us", "gs1", "gs2", "gs3", "gs4")
 
-fisher_df <- raw %>%
+cct_df <- raw %>%
   filter(scheme %in% group_schemes, !is.na(PValueEmpirical)) %>%
   group_by(gene, direction) %>%
   summarise(
-    PValueEmpirical = .fisher_combine(PValueEmpirical),
+    PValueEmpirical = .cct_combine(PValueEmpirical),
     ActualCount     = sum(ActualCount, na.rm = TRUE),
-    # Pooled under independence: sums combine, variances add, RandsAbove/RandsBelow
-    # (order statistics of a single group's null draws) don't carry a pooled meaning
-    # across independently-drawn groups and are therefore omitted (kept NA).
+    # MeanSim/SD are pooled as if independent — adequate as a descriptive summary
+    # of the combined draw sizes, but note it is NOT the basis of the p-value above
+    # (CCT works on the p-values directly and makes no independence assumption).
+    # RandsAbove/RandsBelow are order statistics of one group's own null draws and
+    # carry no pooled meaning, so they are omitted.
     MeanSim         = sum(MeanSim, na.rm = TRUE),
     SD              = sqrt(sum(SD^2, na.rm = TRUE)),
     RandsAbove      = NA_integer_,
     RandsBelow      = NA_integer_,
     NumRands        = max(NumRands, na.rm = TRUE),
-    scheme          = "fisher",
+    scheme          = "cct",
     .groups         = "drop"
   )
 
-# Drop full_pool rows if present (legacy runs), append Fisher
-raw <- bind_rows(raw %>% filter(scheme != "full_pool"), fisher_df)
+# Keep only the five per-group schemes and append the combined one. A `full_pool`
+# scheme is dropped if the input carries one: it sums counts across groups, which
+# double-counts any position satisfying more than one grouping scheme.
+raw <- bind_rows(raw %>% filter(scheme != "full_pool"), cct_df)
 
 # ── BH FDR — applied per direction × scheme, excluding ActualCount=0 genes ───
 # Genes with ActualCount=0 have p=1 by construction (not by test) and must not
@@ -169,11 +190,8 @@ accum <- raw %>%
 
 # Load aggregation-level files if present
 global_path  <- file.path(accum_dir, "aggregation", "accumulation_global.csv")
-deciles_path <- file.path(accum_dir, "aggregation", "accumulation_deciles.csv")
 has_global   <- file.exists(global_path)
-has_deciles  <- file.exists(deciles_path)
 if (has_global)  global_df  <- read_csv(global_path,  show_col_types = FALSE)
-if (has_deciles) deciles_df <- read_csv(deciles_path, show_col_types = FALSE)
 ```
 
 ---
@@ -215,7 +233,7 @@ DT::datatable(
 ```{r scatter-tabs, results='asis'}
 for (dir in directions) {
   cat(sprintf("\n\n### %s\n\n", str_to_title(dir)))
-  sub <- accum %>% filter(direction == dir, scheme != "fisher")
+  sub <- accum %>% filter(direction == dir, scheme != "cct")
   if (nrow(sub) == 0) { cat("*No data.*\n\n"); next }
 
   p <- ggplot(sub, aes(x = MeanSim, y = ActualCount, colour = significant)) +
@@ -270,12 +288,15 @@ for (dir in directions) {
 
 ## Significant genes {.tabset}
 
-> **Note on the `fisher` scheme:** rows for the `fisher` scheme are pooled across the five
-> group schemes (`us`, `gs1`-`gs4`) under the assumption that each group's randomization draws
-> independently. `MeanSim` and `SD` are combined accordingly (sum of means; SD from summed
-> variances), and `PValueEmpirical` is Fisher's combined p-value. `RandsAbove`/`RandsBelow` are
-> per-group order statistics that have no valid pooled interpretation across independent groups
-> and are therefore omitted (shown as `NA`) for `fisher` rows.
+> **Note on the `cct` scheme:** these rows combine the five group schemes (`us`, `gs1`-`gs4`)
+> into one p-value per gene using the **Cauchy Combination Test**, which stays valid under
+> arbitrary dependence between the p-values it combines. That property is what the data
+> requires: one physical position can be a CAAS under several nested schemes, so the per-scheme
+> p-values are positively correlated, and a combiner assuming independence would report far
+> more significant genes than the evidence supports. `MeanSim`/`SD` are pooled as if the groups
+> were independent and are descriptive only — the combined p-value is computed from the
+> p-values directly, not from these. `RandsAbove`/`RandsBelow` are order statistics of a single
+> group's own null draws, carry no pooled meaning, and are shown as `NA` here.
 
 ```{r sig-tables, results='asis'}
 for (dir in directions) {
@@ -379,14 +400,14 @@ sig_summary <- accum %>%
 out_tsv <- file.path(params$output_dir, paste0("accumulation_summary_", params$traitname, ".tsv"))
 write_tsv(sig_summary, out_tsv)
 
-# Write independent Fisher file (all tested genes, sorted by FDR)
-fisher_export <- accum %>%
-  filter(scheme == "fisher") %>%
+# Write the combined-scheme file (all tested genes, sorted by FDR)
+cct_export <- accum %>%
+  filter(scheme == "cct") %>%
   select(gene, direction, ActualCount, PValueEmpirical, FDR, significant) %>%
   arrange(direction, FDR)
 
-out_fisher <- file.path(params$output_dir, paste0("accumulation_summary_fisher_", params$traitname, ".tsv"))
-write_tsv(fisher_export, out_fisher)
+out_cct <- file.path(params$output_dir, paste0("accumulation_summary_cct_", params$traitname, ".tsv"))
+write_tsv(cct_export, out_cct)
 
 invisible(NULL)
 ```

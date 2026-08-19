@@ -67,10 +67,16 @@ include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
 include {FADE}           from './workflows/fade.nf'
 include {FADE_REPORT as FADE_REPORT_PRECOMP_TOP; FADE_REPORT as FADE_REPORT_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_report.nf'
 include {FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_gene_lists.nf'
+// Position-level FADE-site CSV (gene,position,max_bf,target_aa) — same process
+// FADE() itself calls, re-run standalone against the precomputed *.FADE.json
+// dir so posenrich's Position Characterisation FADE-overlap check and
+// ENRICHMENT's fade_sites_top/bottom_ch aren't silently null on a
+// --fade_json_dir_top/_bottom-only (no live --fade) invocation.
+include {FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_json_to_csv.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}            from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
-include {CAAS_PERMULATION} from './subworkflows/CT/caas_permulation.nf'
+include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
 // Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
@@ -127,6 +133,8 @@ workflow {
         // TSVs) so SCORING can reuse them without a separate --scoring_fade_* path.
         def fade_precomp_top_out = null
         def fade_precomp_bot_out = null
+        def fade_precomp_sites_top_ch = null
+        def fade_precomp_sites_bot_ch = null
 
         if (params.reporting && !params.contrast_selection) {
             reporting_results = REPORTING()
@@ -154,6 +162,16 @@ workflow {
         }
         if (params.contrast_selection && !params.ct_tool) {
             contrast_out = CONTRAST_SELECTION()
+
+            // Same graceful stop as the CT branch above. This path is reached when
+            // CAAStools output is reused but contrast selection still runs to supply
+            // the trait file (e.g. recomputing disambiguation over a precomputed
+            // discovery). Without it, an under-powered trait emits no traitfile_ok.tab
+            // and the run fails further down reporting a missing --caas_config, which
+            // says nothing about the actual cause.
+            contrast_out.low_contrasts_skip.view { skip_file ->
+                exit 0, "Minimum contrast threshold not met for trait '${params.traitname ?: 'unknown'}' (flag: ${skip_file}). Stopping pipeline gracefully."
+            }
             ran_any = true
         }
         def signification_results = null
@@ -193,6 +211,13 @@ workflow {
             ran_any = true
         }
 
+        def scoring_caas_perms_ch = null
+        def scoring_caas_perm_scores_ch = null
+        def scoring_caas_pos_pval_ch = null
+        def scoring_caas_pos_sample_ch = null
+        def scoring_caas_pos_quantiles_ch = null
+        def caas_perm_out = null
+
         if (params.ct_disambiguation) {
             if (!run_signification && !params.signification_from) {
                 error "CT disambiguation requires upstream signification (run CAAStools bootstrap via --ct_tool ...,bootstrap) or a standalone metadata file (--signification_from)."
@@ -204,11 +229,154 @@ workflow {
             def meta_for_disambiguation = signification_results
                 ? signification_results.signification_global_meta.mix(signification_results.signification_meta_caas)
                 : null
-            def trait_for_disambiguation = ct_results ? ct_results.trait_file : Channel.empty()
-            def tree_for_disambiguation = ct_results ? ct_results.tree_file : Channel.empty()
+            // Disambiguation needs the fg/bg trait file that defined the contrasts the
+            // CAAS were discovered under. Two suppliers, in order of preference:
+            //   • CT ran live            -> ct_results.trait_file
+            //   • CAAStools is precomputed but CONTRAST_SELECTION still ran (ct_tool
+            //     empty, contrast_selection on) -> contrast_out.trait_file_out
+            // CONTRAST_SELECTION is deterministic given the same --my_traits and tree,
+            // so the pairing it emits here matches the one the precomputed discovery
+            // used. Falling through to Channel.empty() lands on --caas_config, which
+            // only standalone (non-GUI) runs set. Same resolution as the stats/tree
+            // channels built for POSENRICH below.
+            def trait_for_disambiguation = ct_results
+                ? ct_results.trait_file
+                : (contrast_out ? contrast_out.trait_file_out : Channel.empty())
+            def tree_for_disambiguation = ct_results
+                ? ct_results.tree_file
+                : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
 
             disambiguation_results = CT_DISAMBIGUATION(meta_for_disambiguation, trait_for_disambiguation, tree_for_disambiguation)
             ran_any = true
+        }
+
+        if (params.ct_disambiguation || params.caas_permulation_enrichment) {
+            def perm_disc_ch = null
+            def perm_subset_ch = null
+            def perm_tree_ch = ct_results ? ct_results.tree_file : (contrast_out ? contrast_out.tree_file_out : (params.tree ? file(params.tree) : Channel.empty()))
+
+            if (ct_results && ct_results.caas_perm_discovery && ct_results.caas_resample_subset) {
+                perm_disc_ch = ct_results.caas_perm_discovery
+                perm_subset_ch = ct_results.caas_resample_subset
+            } else {
+                // 1. Check if precomputed permulation discovery outputs already exist from exploratory pass:
+                def precomp_disc_files = null
+                def precomp_subset_file = null
+
+                def candidate_base_dirs = []
+                if (params.resample_from)           candidate_base_dirs.add(file(params.resample_from).parent.parent)
+                if (params.disambiguation_input)    candidate_base_dirs.add(file(params.disambiguation_input).parent.parent)
+                if (params.discovery_from)         candidate_base_dirs.add(file(params.discovery_from).parent.parent)
+                if (params.background_input)        candidate_base_dirs.add(file(params.background_input).parent.parent)
+                if (params.signification_from)     candidate_base_dirs.add(file(params.signification_from).parent.parent)
+                candidate_base_dirs.add(file(params.outdir))
+
+                for (base_dir in candidate_base_dirs) {
+                    if (!base_dir || !base_dir.exists()) continue
+
+                    // 1. Resample file resolution
+                    def subset_f = null
+                    def resample_candidates = [
+                        file("${base_dir}/caas_permulation/resample_perms.tab"),
+                        file("${base_dir}/caastools/resample.tab"),
+                        file("${base_dir}/caastools/resample"),
+                        params.resample_from ? file(params.resample_from) : null
+                    ]
+                    for (rf in resample_candidates) {
+                        if (rf && rf.exists()) { subset_f = rf; break }
+                    }
+
+                    // 2. Discovery / Bootstrap permulation files resolution
+                    // NOTE: Must be per-cycle *.bootstrap.discovery.output files. Summary bootstrap.tab
+                    // lacks the per-cycle 'cycle' column needed by disambiguation_perms_main.py.
+                    def disc_candidates = []
+                    def disc_dir = file("${base_dir}/caas_permulation/perm_disc")
+                    def runtime_boot_dir = file("${base_dir}/runtime/filter/bootstrap")
+                    def caas_boot_dir = file("${base_dir}/caastools/bootstrap")
+
+                    if (disc_dir.exists() && file("${disc_dir}/*.bootstrap.discovery.output")) {
+                        disc_candidates = file("${disc_dir}/*.bootstrap.discovery.output")
+                    } else if (runtime_boot_dir.exists() && file("${runtime_boot_dir}/*.bootstrap.discovery.output")) {
+                        disc_candidates = file("${runtime_boot_dir}/*.bootstrap.discovery.output")
+                    } else if (caas_boot_dir.exists() && file("${caas_boot_dir}/*.bootstrap.discovery.output")) {
+                        disc_candidates = file("${caas_boot_dir}/*.bootstrap.discovery.output")
+                    } else if (file("${base_dir}/caas_permulation/*.bootstrap.discovery.output")) {
+                        disc_candidates = file("${base_dir}/caas_permulation/*.bootstrap.discovery.output")
+                    } else if (file("${base_dir}/caastools/*.bootstrap.discovery.output")) {
+                        disc_candidates = file("${base_dir}/caastools/*.bootstrap.discovery.output")
+                    }
+
+                    if (disc_candidates && subset_f) {
+                        precomp_disc_files = disc_candidates
+                        precomp_subset_file = subset_f
+                        break
+                    }
+                }
+
+                if (precomp_disc_files && precomp_subset_file) {
+                    log.info "[CAAS_PERMULATION] Reusing precomputed permulation discovery (${precomp_disc_files.size()} file(s)) + resample file (${precomp_subset_file.name}) for ASR re-disambiguation"
+                    perm_disc_ch = Channel.fromPath(precomp_disc_files).collect()
+                    perm_subset_ch = Channel.value(precomp_subset_file)
+                } else {
+                    // 2. Precomputed CAAStools run without precomputed perm_disc: check if resample source is available for CAAS_PERMS_PREP
+                    def resample_src = null
+                    def candidate_resamples = []
+                    if (params.resample_from) candidate_resamples.add(params.resample_from)
+                    if (params.discovery_from) {
+                        def p = file(params.discovery_from).parent
+                        candidate_resamples.add("${p}/resample.tab")
+                        candidate_resamples.add("${p}/resample")
+                    }
+                    if (params.background_input) {
+                        def p = file(params.background_input).parent
+                        candidate_resamples.add("${p}/resample.tab")
+                        candidate_resamples.add("${p}/resample")
+                    }
+                    candidate_resamples.add("${params.outdir}/caastools/resample.tab")
+                    candidate_resamples.add("${params.outdir}/caastools/resample")
+
+                    for (cp in candidate_resamples) {
+                        if (cp && file(cp).exists()) {
+                            resample_src = file(cp)
+                            break
+                        }
+                    }
+
+                    if (resample_src && params.alignment) {
+                        def align_dir_f = file(params.alignment)
+                        def all_ali_files = align_dir_f.exists() ? (align_dir_f.listFiles()?.findAll { it.isFile() && !it.name.matches('.*\\.txt$|.*\\.tsv$|.*\\.csv$|.*\\.log$|.*\\.map$') } ?: []) : []
+                        if (all_ali_files) {
+                            if (params.toy_mode) {
+                                def n = (params.toy_n ?: 50) as int
+                                Collections.shuffle(all_ali_files, new Random((params.seed ?: 1998) as long))
+                                all_ali_files = all_ali_files.take(n)
+                            }
+                            def align_tuple_standalone = Channel.fromList(all_ali_files.collect { f -> tuple(f.baseName, f) })
+                            def caas_cfg_standalone = contrast_out ? contrast_out.trait_file_out : (params.caas_config ? file(params.caas_config) : (ct_results ? ct_results.trait_file : Channel.empty()))
+
+                            def perms_prep = CAAS_PERMS_PREP(align_tuple_standalone, caas_cfg_standalone, resample_src)
+                            perm_disc_ch = perms_prep.perm_discovery
+                            perm_subset_ch = perms_prep.resample_subset
+                        }
+                    }
+                }
+            }
+
+            if (perm_disc_ch && perm_subset_ch) {
+                def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
+                caas_perm_out = CAAS_PERMULATION(
+                    perm_disc_ch,
+                    perm_subset_ch,
+                    perm_tree_ch,
+                    caas_universe_ch
+                )
+                scoring_caas_perms_ch = caas_perm_out.perms
+                scoring_caas_perm_scores_ch = Channel.empty()
+                scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // LOO null_pvalue_boot per (gene,position,scheme)
+                scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // cycle-stratified sample for distribution plots
+                scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles  // per (cycle,scheme) distribution shape
+                ran_any = true
+            }
         }
 
 
@@ -267,8 +435,18 @@ workflow {
             def acc_caas_ch       = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
             def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()
             def acc_trait_file_ch = ct_results       ? ct_results.trait_file               : Channel.empty()
+            // background.output = the positions CAAStools actually TESTED. This is the
+            // accumulation null's eligible pool (intersected with the cleaned-background
+            // genes inside the subworkflow). Resolved exactly like POSENRICH's own
+            // background: live CT output when discovery ran, else the precomputed param.
+            def acc_tested_pos_ch = (ct_results && ran_discovery)
+                ? ct_results.background_file
+                : (params.posenrich_background_file
+                    ? Channel.fromPath(params.posenrich_background_file)
+                    : Channel.empty())
 
-            accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch)
+            accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch,
+                                            acc_tested_pos_ch)
             ran_any = true
 
         }
@@ -369,6 +547,13 @@ workflow {
                 : Channel.value([])
             fade_precomp_top_out = FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, file('NO_FG_LIST'))
             fade_precomp_bot_out = FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, file('NO_FG_LIST'))
+            // Position-level FADE-site CSV -- posenrich's Position
+            // Characterisation FADE-overlap check needs this (gene,position,
+            // max_bf,target_aa), a different file than summary_tsv/site_tsv
+            // above (see fade_json_to_csv.nf), so it needs its own precomputed
+            // re-run rather than falling out of FADE_REPORT_PRECOMP_*.
+            fade_precomp_sites_top_ch = FADE_JSON_TO_CSV_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons).sites_csv
+            fade_precomp_sites_bot_ch = FADE_JSON_TO_CSV_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons).sites_csv
             ran_any = true
         }
 
@@ -378,7 +563,6 @@ workflow {
         if (params.rer_tool || params.rer_continuous_file) {
             // NOTE: RER_TRAIT requires the original phenotype file (with proper column
             // headers), NOT the caastools traitfile (headerless 3-col format).
-            // Always pass Channel.empty() so RER_MAIN falls back to --my_traits.
             def rer_traitfile_ch = Channel.empty()
             RER_MAIN(
                 rer_traitfile_ch,
@@ -391,34 +575,11 @@ workflow {
         println "DEBUG: params.traitname = '${params.traitname}'"
 
         // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) + the
-        // lean position-level recovery p-values. Deliberately OUTSIDE the
-        // if (params.scoring) block below: its only real dependency is CT
-        // (ct_results.caas_perm_discovery / caas_resample_subset), and in the
-        // two-pass exploratory→complete split the pass that HAS ct_results is the
-        // exploratory one, which runs with scoring=false. Nesting this under
-        // scoring meant CAAS_PERMS_PREP's full-pool perm bootstrap ran (it is
-        // gated only on caas_permulation_enrichment, inside CT) while the consumer
-        // that turns its output into caas_perms.rds never did — in EITHER pass:
-        // exploratory has ct_results but scoring=false, complete has scoring=true
-        // but RUN_CAAS=false so ct_results is null.
-        def scoring_caas_perms_ch = null
-        def scoring_caas_perm_scores_ch = null
-        def scoring_caas_pos_pval_ch = null
-        def scoring_caas_pos_sample_ch = null
-        def caas_perm_out = null
-        if (params.caas_permulation_enrichment && ct_results) {
-            def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
-            caas_perm_out = CAAS_PERMULATION(
-                ct_results.caas_perm_discovery,
-                ct_results.caas_resample_subset,
-                ct_results.tree_file,
-                caas_universe_ch
-            )
-            scoring_caas_perms_ch = caas_perm_out.perms
-            scoring_caas_perm_scores_ch = Channel.empty()
-            scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // lean recovery p-value per (gene,position,scheme)
-            scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // lean capped sample for distribution plots
-        }
+        // lean position-level LOO null_pvalue_boot. Runs whenever caas_permulation_enrichment
+        // is enabled. If live CT ran, consumes ct_results channels; if CT is precomputed
+        // (RUN_CAAS=false), resolves precomputed resample + alignment inputs to run
+        // CAAS_PERMS_PREP and CAAS_PERMULATION.
+
 
         if (params.scoring) {
             if (!params.ct_postproc && !params.scoring_postproc_input) {
@@ -451,20 +612,25 @@ workflow {
                 scoring_fade_bot_ch,
                 scoring_rer_ch,
                 scoring_accum_ch,
-                scoring_vep_pai_ch,
-                scoring_vep_cosmic_ch,
                 null,  // genomic_info — resolved from params.gene_ensembl_file in scoring.nf
                 scoring_fade_site_top_ch,
                 scoring_fade_site_bot_ch,
                 pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
                 scoring_rer_perms_ch,  // RER permulation RDS → p.perm in centralized RER FCS
                 scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
-                scoring_caas_pos_pval_ch,    // lean recovery p-value per (gene,position,scheme)
-                scoring_caas_pos_sample_ch   // lean capped sample for report distribution plots
+                scoring_caas_pos_pval_ch,    // LOO null_pvalue_boot per (gene,position,scheme)
+                scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
+                scoring_caas_pos_quantiles_ch // per (cycle,scheme) null distribution shape
             )
             ran_any = true
 
             if (params.enrichment) {
+                // SCORING may have REBUILT the CAAS null from --caas_pos_detail_file
+                // instead of importing caas_perms.rds. Take the null it actually
+                // resolved so ENRICHMENT's FCS p.perm uses the same matrices the
+                // scoring report did; re-resolving here would silently fall back to
+                // the cached (possibly stale) file.
+                def caas_perms_for_enrich = params.scoring ? SCORING.out.caas_perms : scoring_caas_perms_ch
                 def fcs_stats_ch = params.scoring ? SCORING.out.fcs_stats : Channel.empty()
                 def fcs_stats_rer_ch = params.scoring ? SCORING.out.fcs_stats_rer : Channel.empty()
                 def fcs_stats_fade_ch = params.scoring ? SCORING.out.fcs_stats_fade : Channel.empty()
@@ -530,7 +696,7 @@ workflow {
                     gene_scores_ch,
                     pp_cleaned_bg,
                     scoring_rer_perms_ch,
-                    scoring_caas_perms_ch,
+                    caas_perms_for_enrich,
                     scoring_caas_perm_scores_ch,
                     scoring_caas_pos_pval_ch,
                     scoring_caas_pos_sample_ch,
@@ -539,8 +705,8 @@ workflow {
                     posenrich_background_ch,
                     scoring_vep_pai_ch,
                     scoring_vep_cosmic_ch,
-                    params.fade ? FADE.out.sites_csv_top    : null,
-                    params.fade ? FADE.out.sites_csv_bottom : null,
+                    params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch,
+                    params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch,
                     rer_gene_lists_bg_ch,
                     rer_gene_lists_interest_ch,
                     fade_gene_lists_bg_top_ch,

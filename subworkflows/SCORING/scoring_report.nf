@@ -6,7 +6,7 @@
  * Render an HTML summary report for position-level and gene-level
  * CAAS scores.  Calls 11.Scoring_report.Rmd.
  *
- * Inputs (15)
+ * Inputs
  * ──────
  *   position_scores      : path — position_scores.tsv
  *   gene_scores          : path — gene_scores.tsv
@@ -16,10 +16,8 @@
  *   stress_rank_agreement: path — position_score_stress_rank_agreement.tsv (or NO_SCORING_STRESS_RANK sentinel)
  *   stress_top_overlap   : path — position_score_stress_top_overlap.tsv (or NO_SCORING_STRESS_OVERLAP sentinel)
  *   stress_variants      : path — position_score_stress_variants.tsv (or NO_SCORING_STRESS_VARIANTS sentinel)
- *   stress_latent_loadings: path — position_score_stress_latent_loadings.tsv (or NO_SCORING_STRESS_LOADINGS sentinel)
  *   fade_site_top_file   : path — per-site FADE BF TSV top direction (or NO_FADE_SITE_TOP sentinel)
  *   fade_site_bot_file   : path — per-site FADE BF TSV bottom direction (or NO_FADE_SITE_BOT sentinel)
- *   vep_primateai        : path — PrimateAI-3D score TSV (or NO_VEP_PRIMATEAI sentinel)
  *   genomic_info         : path — gene genomic coords TSV (or NO_GENOMIC_INFO sentinel)
  *
  * Outputs
@@ -47,15 +45,13 @@ process SCORING_REPORT {
     path stress_rank_agreement
     path stress_top_overlap
     path stress_variants
-    path stress_latent_loadings
     path fade_site_top_file  // optional: per-site FADE BF TSV top direction  (NO_FADE_SITE sentinel when absent)
     path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
-    path vep_primateai       // optional: PrimateAI-3D score TSV  (NO_VEP_PRIMATEAI sentinel when absent)
-    path vep_cosmic          // optional: COSMIC score TSV  (NO_VEP_COSMIC sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
     path caas_perms          // optional: CAAS permulation RDS (asr + caas null) (NO_FILE/NO_CAAS_PERMS sentinel when absent)
-    path caas_pos_pval       // optional: lean recovery p-value per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
-    path caas_pos_sample     // optional: lean capped per-scheme sample for distribution plots (NO_CAAS_POS_SAMPLE sentinel)
+    path caas_pos_pval       // optional: LOO null_pvalue_boot per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
+    path caas_pos_sample     // optional: cycle-stratified per-scheme sample for distribution plots (NO_CAAS_POS_SAMPLE sentinel)
+    path caas_pos_quantiles  // optional: per (cycle,scheme) null distribution shape (NO_CAAS_POS_QUANTILES sentinel)
     path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay
     path background_file
 
@@ -74,16 +70,14 @@ process SCORING_REPORT {
     def stress_rank_arg = (stress_rank_agreement.name =~ /^NO_SCORING_STRESS_RANK/) ? 'NULL' : "'${stress_rank_agreement}'"
     def stress_overlap_arg = (stress_top_overlap.name =~ /^NO_SCORING_STRESS_OVERLAP/) ? 'NULL' : "'${stress_top_overlap}'"
     def stress_variants_arg = (stress_variants.name =~ /^NO_SCORING_STRESS_VARIANTS/) ? 'NULL' : "'${stress_variants}'"
-    def stress_loadings_arg = (stress_latent_loadings.name =~ /^NO_SCORING_STRESS_LOADINGS/) ? 'NULL' : "'${stress_latent_loadings}'"
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
 
-    def pai_arg = (vep_primateai.name =~ /^NO_VEP_PRIMATEAI/) ? 'NULL' : "'${vep_primateai}'"
-    def cosmic_arg = (vep_cosmic.name =~ /^NO_VEP_COSMIC/) ? 'NULL' : "'${vep_cosmic}'"
     def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
     def perms_arg = (caas_perms.name =~ /^NO_CAAS_PERMS|^NO_FILE/) ? 'NULL' : "'${caas_perms}'"
     def pos_pval_arg = (caas_pos_pval.name =~ /^NO_CAAS_POS_PVAL|^NO_FILE/) ? 'NULL' : "'${caas_pos_pval}'"
     def pos_sample_arg = (caas_pos_sample.name =~ /^NO_CAAS_POS_SAMPLE|^NO_FILE/) ? 'NULL' : "'${caas_pos_sample}'"
+    def pos_quantiles_arg = (caas_pos_quantiles.name =~ /^NO_CAAS_POS_QUANTILES|^NO_FILE/) ? 'NULL' : "'${caas_pos_quantiles}'"
     def filt_disc_arg = (filtered_discovery.name =~ /^NO_POSTPROC|^NO_FILE/) ? 'NULL' : "'${filtered_discovery}'"
     def bg_file_arg = (background_file.name =~ /^NO_BACKGROUND|^NO_FILE/) ? 'NULL' : "'${background_file}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
@@ -108,15 +102,13 @@ process SCORING_REPORT {
                     stress_rank_file     = ${stress_rank_arg},
                     stress_overlap_file  = ${stress_overlap_arg},
                     stress_variants_file = ${stress_variants_arg},
-                    stress_loadings_file = ${stress_loadings_arg},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
-                    vep_primateai_file   = ${pai_arg},
-                    vep_cosmic_file      = ${cosmic_arg},
                     genomic_info_file    = ${gi_arg},
                     caas_perms_file      = ${perms_arg},
                     caas_pos_pval_file   = ${pos_pval_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
+                    caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
                     window_size_bp       = ${win_size},
@@ -146,15 +138,13 @@ process SCORING_REPORT {
                     stress_rank_file     = ${stress_rank_arg},
                     stress_overlap_file  = ${stress_overlap_arg},
                     stress_variants_file = ${stress_variants_arg},
-                    stress_loadings_file = ${stress_loadings_arg},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
-                    vep_primateai_file   = ${pai_arg},
-                    vep_cosmic_file      = ${cosmic_arg},
                     genomic_info_file    = ${gi_arg},
                     caas_perms_file      = ${perms_arg},
                     caas_pos_pval_file   = ${pos_pval_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
+                    caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
                     window_size_bp       = ${win_size},

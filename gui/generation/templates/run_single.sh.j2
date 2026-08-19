@@ -78,9 +78,19 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     CAAS_PERMS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/caas_perms.rds"
     CAAS_POS_PVAL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_pval.tsv"
     CAAS_POS_SAMPLE_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
-    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_PVAL_FILE" "$CAAS_POS_SAMPLE_FILE"; do
+    CAAS_POS_QUANTILES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
+    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_PVAL_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
         [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
     done
+    # When set, SCORING REBUILDS the null from this instead of importing caas_perms.rds
+    # as-is (CAAS_PERMS_REBUILD — minutes, no ASR replay). A cached null is only valid
+    # while it holds the same gene-level statistic as the observed score; rebuilding
+    # guarantees that, and fcs_enrich.R leaves p.perm NA when it does not hold.
+    CAAS_POS_DETAIL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"
+    [ -f "$CAAS_POS_DETAIL_FILE" ] || {
+        echo "[WARN] perm_pos_detail.tsv.gz missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
+        CAAS_POS_DETAIL_FILE=""
+    }
 
     # REPORTING (dataset exploration + tree name-curation, and pruning for CLASS 1 rows
     # with a PRUNE_FILE) ran identically during _exploratory — same --my_traits/--tree
@@ -143,8 +153,21 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     [ -f "$SIGNIFICATION_FROM" ] || SIGNIFICATION_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/meta_caas.tsv"
     BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
     POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
-    # caas_perms.rds only exists if the source run had --caas_permulation_enrichment on.
+    # These only exist if the source run had --caas_permulation_enrichment on.
+    # All four must be wired together: caas_perms.rds alone gives the FCS p.perm but
+    # leaves the report's entire position-level permulation section empty, since that
+    # section is gated on the per-position files. The reuse_exploratory branch above
+    # sets the same four -- keep the two lists in sync.
     CAAS_PERMS_FILE="${PRECOMP_OUTDIR}/caas_permulation/caas_perms.rds"
+    CAAS_POS_PVAL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_pval.tsv"
+    CAAS_POS_SAMPLE_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
+    CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
+    # Triggers CAAS_PERMS_REBUILD in SCORING -- see the reuse_exploratory branch for why.
+    CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"
+    [ -f "$CAAS_POS_DETAIL_FILE" ] || {
+        echo "[WARN] perm_pos_detail.tsv.gz missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
+        CAAS_POS_DETAIL_FILE=""
+    }
 fi
 if [ "${PRECOMP_USE_RESAMPLE:-false}" = true ]; then
     RESAMPLE_FROM="${PRECOMP_OUTDIR}/caastools/resample.tab"
@@ -247,15 +270,30 @@ _RUN_POSENRICH="${RUN_POSENRICH:-{{ run_defaults.posenrich }}}"
 _ASR_ROBUSTNESS="${ASR_ROBUSTNESS:-{{ run_defaults.asr_robustness }}}"
 _TOY_MODE="${TOY_MODE:-false}"
 
-# CAAS: when enabled, pass tool string + contrast_selection; when off, empty ct_tool
-# disables the CT() workflow in main.nf (empty string is falsy in Groovy, unlike
-# CLI's --ct_tool "" which becomes Boolean true). In JSON, "ct_tool": "" cleanly
-# delivers an empty string — no --ct_tool= workaround needed.
+# CAAS: when enabled, pass the tool string; when off, an empty ct_tool disables the
+# CT() workflow in main.nf (empty string is falsy in Groovy, unlike CLI's
+# --ct_tool "" which becomes Boolean true). In JSON, "ct_tool": "" cleanly delivers
+# an empty string — no --ct_tool= workaround needed.
 if [ "$_RUN_CAAS" = true ]; then
     _CT_TOOL="{{ ct_tool_string }}"
-    _CONTRAST_SELECTION=true
 else
     _CT_TOOL=""
+fi
+
+# Contrast selection is tracked separately from CAAS because it is the only producer
+# of the fg/bg trait file (CHECK_MIN_CONTRASTS' traitfile_ok.tab), and that file is
+# consumed by more than CT itself. CT_DISAMBIGUATION needs it to know which species
+# are foreground vs background when it re-analyses convergence, so a run that reuses
+# a precomputed CAAStools discovery but still computes disambiguation must keep
+# contrast selection on — otherwise no trait file exists anywhere and main.nf stops
+# with "CT disambiguation requires a trait file from CT/contrast_selection or
+# --caas_config" (the GUI drives phenotypes through --my_traits and never sets
+# --caas_config). Re-deriving it is safe: the contrast algorithm is deterministic
+# given the same --my_traits and tree, so it reproduces the pairing the precomputed
+# discovery was built on.
+if [ "$_RUN_CAAS" = true ] || [ "$_RUN_DISAMBIGUATION" = true ]; then
+    _CONTRAST_SELECTION=true
+else
     _CONTRAST_SELECTION=false
 fi
 
@@ -494,6 +532,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_perms_file": "${CAAS_PERMS_FILE:-}",
   "caas_pos_pval_file": "${CAAS_POS_PVAL_FILE:-}",
   "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",
+  "caas_pos_quantiles_file": "${CAAS_POS_QUANTILES_FILE:-}",
+  "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",
 
   "vep": $_RUN_VEP,
   "vep_map_dir": "${MAP_DIR:-}",
@@ -507,7 +547,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fcs_fdr": "${FCS_FDR:-0.15}",
   "fcs_pperm_thr": "${FCS_PPERM_THR:-0.025}",
   "fcs_top_n": "${FCS_TOP_N:-20}",
-  "rer_permulation_enrichment": {{ run_defaults.rer_permulation_enrichment }},
   "string_db_dir": "${STRING_DB_DIR:-}",
   "string_species": "${STRING_SPECIES:-9606}",
   "scoring_ami": {{ run_defaults.scoring_ami }},
@@ -527,7 +566,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "posenrich_min_size": "${POSENRICH_MIN_SIZE:-5}",
   "posenrich_max_size": "${POSENRICH_MAX_SIZE:-0}",
   "posenrich_padj_thr": "${POSENRICH_PADJ_THR:-0.15}",
-  "posenrich_fold_thr": "${POSENRICH_FOLD_THR:-1.5}",
   "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}"
 }
 PARAMS_EOF

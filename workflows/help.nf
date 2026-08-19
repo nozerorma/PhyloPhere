@@ -314,9 +314,10 @@ Standalone mode (provide inputs directly):
 --scoring_fade_site_bottom                  <"fade_site_bottom.tsv">           ""
 --scoring_rer_input                           <"rerconverge_summary.tsv">        ""
 --scoring_accum_dir                              <"accumulation_dir/">              ""
---scoring_vep_primateai                            <"vep_primateai.tsv">              ""
---scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""
+--scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
+--scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --caas_perms_file                                        <"caas_perms.rds">                  ""    (genome-wide CAAS permulation null)
+--caas_pos_detail_file                                   <"perm_pos_detail.tsv.gz">          ""    (rebuild the null from a prior run's per-cycle detail; preferred over --caas_perms_file for reruns, minutes, no ASR replay)
 
 Position-level components: biochem, ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite
@@ -339,7 +340,6 @@ Usage:
 --fcs_fdr                                <FLOAT 0-1>              0.15
 --fcs_pperm_thr                            <FLOAT 0-1>              0.025
 --fcs_top_n                                  <INTEGER>                20
---rer_permulation_enrichment                   <true|false>             true
 --caas_permulation_enrichment                    <true|false>             true
 
 DOMINO / STRING:
@@ -354,7 +354,6 @@ POSENRICH (position-level):
 --posenrich_min_size                 <INTEGER>                5
 --posenrich_max_size                   <INTEGER>                0    (0 = no cap)
 --posenrich_padj_thr                     <FLOAT 0-1>              0.15
---posenrich_fold_thr                       <FLOAT>                  1.5
 --posenrich_background_file                  <"background_file">      null
 --domain_variability_file, --ucr_positions_file, --fubar_sites_file,
 --egg_members_file, --egg_annotations_file   (position-level annotation sources)

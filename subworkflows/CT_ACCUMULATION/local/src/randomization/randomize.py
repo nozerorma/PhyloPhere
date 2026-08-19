@@ -2,13 +2,48 @@
 """
 Randomization / permutation analysis for CT_ACCUMULATION in PhyloPhere.
 
-Exports aggregated randomization outputs for five independent per-group tests:
+Exports aggregated randomization outputs for five per-group tests:
   - us, gs1, gs2, gs3, gs4
 
-Each group receives an independent random draw so their p-values are uncorrelated.
-Fisher's combined probability test (χ²= -2Σln(p), df=2k) is then computed
-downstream (report, gene-lists, scoring) to combine evidence across groups without
-the position double-counting that a joint full_pool draw would introduce.
+Test design
+-----------
+Occupancy null. For each group, the OBSERVED number of CAAS positions is
+redrawn uniformly (without replacement) from the eligible position pool, and
+the per-gene counts are recounted. The empirical p-value per gene is
+    p = (#{null count >= observed count} + 1) / (N + 1)
+so a gene is significant when it accumulates more CAAS than its share of the
+eligible pool would predict. Because the pool is position-level, gene length
+(strictly, each gene's number of eligible positions) is controlled for by
+construction.
+
+Eligible pool
+-------------
+The pool is the set of positions an observed CAAS could actually have come from:
+the positions CAAStools tested (background.output), restricted to the genes
+surviving post-processing (cleaned_background_main.txt). This mirrors posenrich's
+build_background(), and the restriction matters in both directions — a position
+that failed the gap/missingness/pattern filters can never be a CAAS, and neither
+can any position in a gene post-processing removed.
+
+Getting this set right is what makes the per-gene p-values comparable to one
+another. A gene's null expectation is proportional to its share of the pool, so
+the pool must be proportional to each gene's genuine opportunity to carry a CAAS.
+Widening it to every ungapped alignment column would break that proportionality
+gene by gene: on cancer_complete_bm the tested/ungapped ratio ranges from 0.06
+(p10) through 0.24 (median) to 0.51 (p90), so poorly covered genes would be
+handed a ~4x too-high expectation (conservative) and well covered genes a ~2x
+too-low one (anti-conservative), concentrating false positives in the
+best-covered genes.
+
+Per-group draws are independent
+-------------------------------
+Each group draws separately, which is what keeps each group's MARGINAL p-value
+correctly calibrated. It does not make the five p-values independent of one
+another: a single physical position can be a CAAS under several nested schemes,
+so the OBSERVED counts — and hence the p-values — are positively correlated
+whatever the null does. Evidence is therefore combined across groups with the
+Cauchy Combination Test in scoring_compute.R, which is valid under arbitrary
+dependence between the combined p-values.
 
 No significance/convergence/divergence category families are exported.
 No FDR or gene-list outputs are generated here.
@@ -25,6 +60,59 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import logging
 import random
 import multiprocessing.shared_memory as shm
+
+
+# ---------------------------
+# Eligible position pool
+# ---------------------------
+
+def load_universe_genes(path):
+    """Post-processing-surviving gene list (cleaned_background_main.txt)."""
+    genes = set()
+    with open(path) as f:
+        for line in f:
+            g = line.strip()
+            if g and g != "Gene":
+                genes.add(g)
+    return genes
+
+
+def load_tested_positions(background_file, universe_genes=None):
+    """Positions CAAStools actually tested, as a set of (gene, msa_pos) pairs.
+
+    Format mirrors posenrich's build_background(): `gene<TAB>comma-separated
+    positions`, one line per gene. The positions are in the SAME coordinate space
+    as filtered_discovery's `Position` — i.e. `msa_pos` after _remap_caas_df, which
+    is also the key the global/CAAS merge joins on. (Verified against real output:
+    every observed CAAS position is present in this file.) Do NOT match on the
+    global table's `position` column — that is a globally unique running row index,
+    not an alignment coordinate.
+
+    Restricting to `universe_genes` drops positions belonging to genes that
+    post-processing removed, which can never contribute an observed CAAS.
+    """
+    tested = set()
+    with open(background_file) as f:
+        for line in f:
+            parts = line.rstrip("\n").rstrip("\r").split("\t")
+            if len(parts) < 2:
+                continue
+            gene, positions = parts[0], parts[1]
+            if gene == "Gene":
+                continue
+            if universe_genes is not None and gene not in universe_genes:
+                continue
+            if positions in ("", "NULL", "Position"):
+                continue
+            for p in positions.split(","):
+                p = p.strip()
+                if not p:
+                    continue
+                try:
+                    tested.add((gene, int(p)))
+                except ValueError:
+                    continue
+    return tested
 
 
 # ---------------------------
@@ -217,9 +305,12 @@ class RandomizationWorker:
             uid = f"{os.getpid()}_{chunk_idx}_{r}" if self.export_individual else None
 
             for elig, cat_slices, key in decile_plans:
-                # Independent draw per group — no shared pool slice.
-                # This ensures per-group p-values are uncorrelated and Fisher's
-                # combination is statistically valid.
+                # Each group draws its own positions from this decile's eligible
+                # set, rather than partitioning one shared draw. That keeps every
+                # group's marginal p-value calibrated against the same pool its
+                # observed count came from. Cross-group dependence (a position can
+                # be a CAAS under several schemes) is a property of the observed
+                # data and is handled at combination time — see the module docstring.
                 for cat, (dest_start, dest_end) in cat_slices.items():
                     n_cat = dest_end - dest_start
                     if len(elig) < n_cat:
@@ -406,8 +497,68 @@ def main(args):
     n_rows  = len(merged_df)
 
     positions     = merged_df['position'].values.astype(np.int64)
-    masked        = merged_df['masked'].values.astype(bool)
     cons_idx_arr  = merged_df['cons_idx'].values.astype(np.float32)
+
+    # ── Eligible pool ────────────────────────────────────────────────────────
+    # A row is eligible to be drawn by the null only if it satisfies BOTH
+    # conditions an observed CAAS satisfies:
+    #   1. not `masked` — the alignment column is not a gap;
+    #   2. present in background.output — CAAStools actually tested it, in a gene
+    #      that survived post-processing.
+    # Condition 1 alone admits columns that were never testable, which the null
+    # would then scatter CAAS into; see the module docstring for how that
+    # miscalibrates each gene by its own tested/ungapped ratio.
+    #
+    # `--background-positions` is optional at the CLI so the module still runs
+    # when only the global table is available; that path logs a warning because
+    # the resulting pool is condition-1-only.
+    masked = merged_df['masked'].values.astype(bool)
+    if getattr(args, 'background_positions', None):
+        universe_genes = None
+        if getattr(args, 'bg_caas', None) and os.path.exists(args.bg_caas):
+            universe_genes = load_universe_genes(args.bg_caas)
+            logging.info(f"Universe (cleaned background) genes: {len(universe_genes)}")
+        tested = load_tested_positions(args.background_positions, universe_genes)
+        logging.info(f"Tested positions in eligible pool: {len(tested)}")
+
+        gene_arr = merged_df['gene'].to_numpy()
+        mpos_arr = merged_df['msa_pos'].to_numpy()
+        in_tested = np.fromiter(
+            ((g, int(p)) in tested for g, p in zip(gene_arr, mpos_arr)),
+            dtype=bool, count=len(merged_df))
+        masked = masked | ~in_tested
+
+        n_elig = int((~masked).sum())
+        logging.info(
+            f"Eligible pool: {n_elig} positions "
+            f"({n_elig / max(len(merged_df), 1):.1%} of {len(merged_df)} rows; "
+            f"{int((~merged_df['masked'].values.astype(bool)).sum())} are ungapped, "
+            f"of which the tested subset is kept)")
+
+        # Every observed CAAS must live inside the pool. A CAAS outside it is one
+        # the null can never reproduce, which both understates that gene's null
+        # counts and pushes the per-decile draw toward the replace=True branch
+        # below (when a decile holds fewer eligible positions than observed CAAS).
+        caas_mask_chk = np.asarray(
+            merged_df['iscaas'].replace({'TRUE': True, 'FALSE': False})
+                .astype('boolean').fillna(False), dtype=bool)
+        n_unreachable = int((caas_mask_chk & masked).sum())
+        if n_unreachable:
+            logging.warning(
+                f"{n_unreachable} observed CAAS positions are OUTSIDE the eligible pool "
+                f"and can never be drawn by the null — p-values for their genes will be "
+                f"anti-conservative. Check that background.output matches this run's discovery.")
+        else:
+            logging.info("All observed CAAS positions are inside the eligible pool.")
+    else:
+        logging.warning(
+            "No --background-positions supplied: the eligible pool is every ungapped "
+            "alignment column, which includes positions CAAStools never tested and so "
+            "cannot be the source of an observed CAAS. The pool is roughly 4x larger than "
+            "the testable set, and each gene's null expectation is scaled by its own "
+            "tested/ungapped ratio rather than by its genuine opportunity to carry a CAAS. "
+            "Pass caastools background.output (with --bg-caas) to define the pool properly.")
+
     genes_int_arr = genes_int.astype(np.int32)
     caas_bool     = np.asarray(
         merged_df['iscaas'].replace({'TRUE': True, 'FALSE': False})
@@ -464,9 +615,12 @@ def main(args):
         )
 
     # Apply row validity and keep only per-group output pools.
-    # full_pool is intentionally removed: the same physical position can appear in
-    # multiple groups, so summing across groups inflates counts. Fisher's combined
-    # test on the independent per-group p-values is computed downstream instead.
+    # Counts are kept strictly per group. There is deliberately no pooled
+    # "all groups" count: a single physical position can satisfy several grouping
+    # schemes, so summing the five counts would count that position once per
+    # scheme. Cross-group evidence is instead combined at the p-value level
+    # downstream (Cauchy Combination Test), which needs no such sum and tolerates
+    # the positive dependence that the shared positions induce.
     pool_mask = caas_filter
 
     us_mask  = pool_mask & _gu.eq('US')
@@ -483,8 +637,8 @@ def main(args):
     def _bc(mask):
         return np.bincount(np.asarray(genes_int[np.asarray(mask, dtype=bool)], dtype=np.int32), minlength=n_genes)
 
-    # Each group gets an independent draw so per-group p-values are uncorrelated,
-    # making Fisher's combination statistically valid.
+    # Each group gets an independent draw, which calibrates its marginal p-value.
+    # Cross-group dependence is handled at combination time (CCT), not here.
     actual_counts_masks = dict([
         ('us',  us_mask),
         ('gs1', gs1_mask),
@@ -588,7 +742,9 @@ def main(args):
                       compression='gzip' if args.compress else None)
         logging.info(f"Results ({cat}): {out_cat}")
 
-    # Decile window info
+    # Decile window info (diagnostic: how many eligible positions land in
+    # each decile, globally and per gene — lets a run be sanity-checked
+    # against the replace=True fallback in process_chunk without rerunning).
     if args.randomization_type == 'cons_decile':
         df_elig = merged_df[merged_df['masked'] == False].copy()
         bins = decile_bins if decile_bins is not None else _compute_bins_from_series(
@@ -610,6 +766,13 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='CT_ACCUMULATION: permutation randomization (full pool + per-group)')
     parser.add_argument('--global_csv',   required=True)
     parser.add_argument('--caas_csv',     required=True)
+    parser.add_argument('--background-positions', dest='background_positions', default=None,
+                        help='caastools background.output (gene<TAB>tested msa positions). '
+                             'Defines the eligible null pool; without it the pool falls back '
+                             'to ungapped alignment columns, which is ~4x too large.')
+    parser.add_argument('--bg-caas', dest='bg_caas', default=None,
+                        help='cleaned_background_main.txt gene list; restricts the eligible '
+                             'pool to post-processing-surviving genes.')
     parser.add_argument('--output-prefix', required=True)
     parser.add_argument('--randomization-type', choices=['naive', 'cons_decile'], required=True)
     parser.add_argument('--n-randomizations', type=int, default=100000)

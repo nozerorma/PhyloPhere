@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # =============================================================================
-# posenrich_enrich.py — Position-wise enrichment via Path Sum Permulation Tests
+# posenrich_enrich.py - Position-wise enrichment via Path Sum Permulation Tests
 # =============================================================================
 # Rank-free, magnitude-aware position-level gene-set enrichment via sparse-matrix
 # vectorized label permutations over the full ~1.47M position background.
@@ -45,7 +45,7 @@ def parse_args():
     p.add_argument("--characterization", default=None,
                    help="characterization_layers.tsv (broad functional layers)")
     p.add_argument("--annot-file", default=None,
-                   help="SCORING's fcs_stats.tsv (gene + flag_* columns) — cross-module "
+                   help="SCORING's fcs_stats.tsv (gene + flag_* columns) - cross-module "
                         "corroboration flags (gate_sig/fade/rer/accum), reported "
                         "as the %% of distinct genes in each overlap carrying each flag")
     p.add_argument("--universe", required=True,
@@ -54,11 +54,11 @@ def parse_args():
                    help="caastools background.output (gene<TAB>tested positions); "
                         "restricted to --universe genes = the position background.")
     p.add_argument("--cosmic-coverage", default=None,
-                   help="cosmic_coverage_genes.txt from build_position_gmt.py — genes "
+                   help="cosmic_coverage_genes.txt from build_position_gmt.py - genes "
                         "COSMIC itself could annotate; restricts the background used "
                         "for cosmic_orthogroups")
     p.add_argument("--pai3d-coverage", default=None,
-                   help="pai3d_coverage_genes.txt from build_position_gmt.py — genes "
+                   help="pai3d_coverage_genes.txt from build_position_gmt.py - genes "
                         "PAI3D itself could annotate; restricts the background used "
                         "for pai3d_orthogroups")
     p.add_argument("--output-dir", required=True)
@@ -66,7 +66,7 @@ def parse_args():
                    help="min positions per set in background (GMT sources only)")
     p.add_argument("--max-size", type=int, default=0,
                    help="max positions per set in background (0 = no cap; GMT sources only)")
-    p.add_argument("--n-perms", type=int, default=10000,
+    p.add_argument("--n-perms", type=int, default=100000,
                    help="number of label permutations for Path Sum Permulation (default 10000)")
     p.add_argument("--seed", type=int, default=42,
                    help="random seed for permulations (default 42)")

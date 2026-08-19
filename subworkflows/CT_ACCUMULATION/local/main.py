@@ -54,6 +54,10 @@ def main():
 
     # Randomization args
     parser.add_argument("--global-csv",                 help="Path to _global.csv from aggregation (contains masked + iscaas)")
+    parser.add_argument("--background-positions", dest="background_positions",
+                        help="caastools background.output (gene<TAB>tested msa positions). "
+                             "Defines the eligible null pool; combined with --bg-caas to drop "
+                             "positions in post-processing-removed genes.")
     parser.add_argument("--caas-csv",                   help="Meta-CAAS file (global_meta_caas.tsv or CAAS CSV)")
     parser.add_argument("--randomization-type",         choices=["naive", "cons_decile"])
     parser.add_argument("--n-randomizations",           type=int, default=10000)
@@ -110,6 +114,9 @@ def main():
             rand_args = argparse.Namespace(
                 global_csv=args.global_csv,
                 caas_csv=args.caas_csv,
+                # Eligible null pool = tested positions ∩ cleaned-background genes.
+                background_positions=args.background_positions,
+                bg_caas=args.bg_caas,
                 output_prefix=args.output_prefix,
                 randomization_type=args.randomization_type,
                 n_randomizations=args.n_randomizations,

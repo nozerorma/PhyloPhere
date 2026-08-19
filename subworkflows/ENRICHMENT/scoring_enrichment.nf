@@ -8,7 +8,7 @@
  * mapping + per-module functional labelling. Ranked enrichment is handled by
  * SCORING_FCS_REPORT (subworkflows/ENRICHMENT/fcs.nf).
  *
- *   SCORING_AMI_REPORT     → ami_results/**, HTML (13.AMI_analysis — DOMINO modules)
+ *   SCORING_AMI_REPORT     → ami_results/**, HTML (13.AMI_analysis - DOMINO modules)
  *   SCORING_COMPARE_REPORT → compare_results/**, HTML (top vs bottom: FCS only)
  */
 
@@ -89,8 +89,8 @@ process SCORING_AMI_REPORT {
     path "ami_summary/**",                     emit: ami_summary,             optional: true
     path "ami_plots/**",                       emit: ami_plots,               optional: true
     path "ami_networks/**",                    emit: ami_networks,            optional: true
-    path "ami_networks/module_descriptions_all_lists.tsv", emit: module_descriptions, optional: true
-    path "ami_networks/term_threshold_membership.tsv",      emit: term_membership,       optional: true
+    path "ami_networks/ami_module_descriptions_all_tools.tsv",     emit: module_descriptions, optional: true
+    path "ami_networks/ami_term_threshold_membership_all_tools.tsv", emit: term_membership,     optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
@@ -147,7 +147,6 @@ process SCORING_AMI_REPORT {
                 params = list(
                     background_file     = '${background}',
                     background_basename = '${bg_name}',
-                    output_dir          = 'ami_results',
                     project_name        = '${traitname}',
                     species             = ${species},
                     domino_network_score_thr = ${net_score},
@@ -189,7 +188,7 @@ process SCORING_AMI_REPORT {
 // SCORING_COMPARE_REPORT
 // Comparative top-vs-bottom analysis across FCS outputs (CAAS + RER). DOMINO/AMI
 // module output is not gene-set-ranked in the same way and is not part of this
-// comparison — see 13.AMI_analysis.Rmd for module-level results.
+// comparison - see 13.AMI_analysis.Rmd for module-level results.
 //
 // Inputs (all staged flat in work dir by Nextflow):
 //   fcs_all_results : fcs_results/fcs_all_results.tsv  (single file)
@@ -212,12 +211,11 @@ process SCORING_COMPARE_REPORT {
                pattern: 'compare_results/**'
 
     input:
-    // One fcs_all_results.tsv per module — stageAs distinct names to avoid the
+    // One fcs_all_results.tsv per module -- stageAs distinct names to avoid the
     // same-filename collision; absent modules arrive as the NO_FCS_ALL sentinel and
     // are filtered by the non-empty (-s) guard below + column validation in the Rmd.
-    // FADE/Accumulation no longer run their own FCS ranking (unreliable — see FADE's
-    // max-of-many-sites statistic and Accumulation's missing permulation null); they
-    // remain available as cross-module corroboration flags on CAAS's own leading edge.
+    // FADE and Accumulation do not run their own FCS ranking (see fcs.nf); they
+    // contribute as cross-module corroboration flags on CAAS's own leading edge.
     path caas_fcs,  stageAs: 'caas_fcs_all.tsv'    // CAAS (composite) FCS results
     path rer_fcs,   stageAs: 'rer_fcs_all.tsv'     // RER FCS results
     // Leading-edge tables feed the orthogonal composite score (percentile
@@ -226,6 +224,10 @@ process SCORING_COMPARE_REPORT {
     // module's report didn't run.
     path caas_le,   stageAs: 'caas_leading_edge.tsv'
     path rer_le,    stageAs: 'rer_leading_edge.tsv'
+    // Exact leading-edge composition tables as rendered/exported by each
+    // module's own 12.FCS_general_report.Rmd.
+    path caas_le_comp, stageAs: 'caas_leading_edge_composition.tsv'
+    path rer_le_comp,  stageAs: 'rer_leading_edge_composition.tsv'
     // Optional cross-angle inputs (AMI network modules, posenrich position-level
     // results) -- NO_FILE-prefixed sentinels tolerated when their module didn't run.
     path ami_module_desc,     stageAs: 'ami_module_descriptions.tsv'
@@ -235,6 +237,10 @@ process SCORING_COMPARE_REPORT {
     // terms, already position-granular) drives both the Integrated gene scorecard's
     // posenrich angle AND the Interesting Genes/Interesting Positions tables below.
     path posenrich_le,        stageAs: 'posenrich_leading_edge.tsv'
+    // posenrich's own pooled-per-term Leading edge table (one row per
+    // significant term, not per cutoff) -- 14.Position_enrichment_report.Rmd's
+    // export, imported directly for the Posenrich section's Leading edge sub-tab.
+    path posenrich_le_summary, stageAs: 'posenrich_leading_edge_summary.tsv'
     // SCORING's own gene-level table (percentile flags + FADE/RER/Accumulation
     // significance) -- same file 12.FCS_general_report.Rmd/14.Position_enrichment_report.Rmd
     // already consume, reused here for the Interesting Genes/Positions tables.
@@ -269,6 +275,7 @@ process SCORING_COMPARE_REPORT {
     def ami_tm_arg         = (ami_term_membership.name =~ /^NO_/) ? 'NULL' : "'${ami_term_membership}'"
     def posenrich_dot_arg  = (posenrich_dotplot.name  =~ /^NO_/) ? 'NULL' : "'${posenrich_dotplot}'"
     def posenrich_le_arg   = (posenrich_le.name  =~ /^NO_/)      ? 'NULL' : "'${posenrich_le}'"
+    def posenrich_le_summary_arg = (posenrich_le_summary.name =~ /^NO_/) ? 'NULL' : "'${posenrich_le_summary}'"
     def fcs_stats_arg      = (fcs_stats.name =~ /^NO_/)          ? 'NULL' : "'${fcs_stats}'"
     def position_scores_arg = (position_scores.name =~ /^NO_/)   ? 'NULL' : "'${position_scores}'"
     def vep_primateai_arg  = (vep_primateai.name =~ /^NO_/)      ? 'NULL' : "'${vep_primateai}'"
@@ -294,6 +301,7 @@ process SCORING_COMPARE_REPORT {
                     ami_term_membership_file  = ${ami_tm_arg},
                     posenrich_dotplot_file     = ${posenrich_dot_arg},
                     posenrich_leading_edge_file = ${posenrich_le_arg},
+                    posenrich_leading_edge_summary_file = ${posenrich_le_summary_arg},
                     fcs_stats_file           = ${fcs_stats_arg},
                     position_scores_file     = ${position_scores_arg},
                     vep_primateai_file       = ${vep_primateai_arg},
@@ -318,6 +326,7 @@ process SCORING_COMPARE_REPORT {
         for m in caas rer; do
             [ -s "\${m}_fcs_all.tsv" ] && cp "\${m}_fcs_all.tsv" "cmp_fcs/\${m}_fcs_all.tsv" || true
             [ -s "\${m}_leading_edge.tsv" ] && cp "\${m}_leading_edge.tsv" "cmp_fcs_le/\${m}_leading_edge.tsv" || true
+            [ -s "\${m}_leading_edge_composition.tsv" ] && cp "\${m}_leading_edge_composition.tsv" "cmp_fcs_le/\${m}_leading_edge_composition.tsv" || true
         done
     """
 

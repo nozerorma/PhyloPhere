@@ -11,7 +11,7 @@
  * Inputs
  * ──────
  *   rand_csvs  : path — all accumulation_{dir}_{scheme}_aggregated_results.csv files (collected)
- *   agg_csvs   : path — accumulation_global.csv and accumulation_deciles.csv (collected)
+ *   agg_csvs   : path — accumulation_global.csv (collected)
  *
  * Outputs
  * ───────
@@ -36,7 +36,7 @@ process ACCUMULATION_REPORT {
 
     input:
     path rand_csvs   // all *_aggregated_results.csv files staged flat
-    path agg_csvs    // *_global.csv and *_deciles.csv staged flat
+    path agg_csvs    // *_global.csv staged flat
 
     output:
     path "10.Accumulation_report.html",      emit: report
@@ -62,7 +62,7 @@ process ACCUMULATION_REPORT {
         for f in accumulation_top_*.csv;    do [ -f "\$f" ] && cp "\$f" accum_root/top/randomization/;    done
         for f in accumulation_bottom_*.csv; do [ -f "\$f" ] && cp "\$f" accum_root/bottom/randomization/; done
         for f in accumulation_all_*.csv;    do [ -f "\$f" ] && cp "\$f" accum_root/all/randomization/;    done
-        for f in *_global.csv *_deciles.csv; do [ -f "\$f" ] && cp "\$f" accum_root/aggregation/ || true; done
+        for f in *_global.csv; do [ -f "\$f" ] && cp "\$f" accum_root/aggregation/ || true; done
 
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
@@ -90,7 +90,7 @@ process ACCUMULATION_REPORT {
         for f in accumulation_top_*.csv;    do [ -f "\$f" ] && cp "\$f" accum_root/top/randomization/;    done
         for f in accumulation_bottom_*.csv; do [ -f "\$f" ] && cp "\$f" accum_root/bottom/randomization/; done
         for f in accumulation_all_*.csv;    do [ -f "\$f" ] && cp "\$f" accum_root/all/randomization/;    done
-        for f in *_global.csv *_deciles.csv; do [ -f "\$f" ] && cp "\$f" accum_root/aggregation/ || true; done
+        for f in *_global.csv; do [ -f "\$f" ] && cp "\$f" accum_root/aggregation/ || true; done
 
         Rscript -e "
             rmarkdown::render(

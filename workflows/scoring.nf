@@ -14,6 +14,7 @@
 
 include { SCORING_COMPUTE }                                                           from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
 include { SCORING_REPORT }                                                            from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
+include { CAAS_PERMS_REBUILD }                                                        from "${baseDir}/subworkflows/CT/caas_permulation.nf"
 
 
 workflow SCORING {
@@ -24,16 +25,15 @@ workflow SCORING {
         fade_summary_bottom_ch   // Channel<path> or null — fade_summary_bottom.tsv
         rer_summary_ch           // Channel<path> or null — rerconverge_summary_{trait}.tsv
         accum_ch                 // Channel<path> or null — collected accumulation CSVs (all directions)
-        vep_primateai_ch         // Channel<path> or null — primateai_scores.tsv     (optional)
-        vep_cosmic_ch            // Channel<path> or null — cosmic_scores.tsv        (optional)
         genomic_info_ch          // Channel<path> or null — gene genomic coords TSV  (optional)
         fade_site_top_ch         // Channel<path> or null — fade_site_bf_top.tsv     (optional)
         fade_site_bot_ch         // Channel<path> or null — fade_site_bf_bottom.tsv  (optional)
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
         caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm + report
-        caas_pos_pval_ch         // Channel<path> or null — lean recovery p-value per (gene,position,scheme)
-        caas_pos_sample_ch       // Channel<path> or null — lean capped per-scheme sample for report distribution plots
+        caas_pos_pval_ch         // Channel<path> or null — LOO null_pvalue_boot per (gene,position,scheme)
+        caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
+        caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -86,13 +86,6 @@ workflow SCORING {
             .collect()
             .ifEmpty { [file('NO_ACCUM')] }
 
-        // VEP optional inputs
-        def resolved_vep_primateai = (vep_primateai_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_vep_primateai ?: 'NO_VEP_PRIMATEAI') }
-
-        def resolved_vep_cosmic = (vep_cosmic_ch ?: Channel.empty())
-            .ifEmpty { file(params.scoring_vep_cosmic ?: 'NO_VEP_COSMIC') }
-
         def resolved_genomic_info = (genomic_info_ch ?: Channel.empty())
             .ifEmpty {
                 def gi = params.gene_ensembl_file ?: ''
@@ -143,10 +136,33 @@ workflow SCORING {
         // CAAS permulation null (corStat_byrank rds) — resolved once, shared by the
         // scoring report (permulation-null overview) and the FCS report (p.perm).
         // Value channel via collect()/map (NOT .first(), which warns on a value channel).
-        def caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
-            .collect()
-            .map { it[0] }
+        //
+        // Three ways to get here, in precedence order:
+        //   1. caas_perms_ch      — CAAS_PERMULATION ran live in this pass; always valid.
+        //   2. caas_pos_detail_file — no live null, but a prior run's raw per-cycle
+        //      detail is available: REBUILD rather than import a cached RDS. The null
+        //      must hold the same gene-level statistic as the observed gene score
+        //      (see scoring_compute.R section 4a); a cached caas_perms.rds carries no
+        //      such guarantee, and rebuilding costs minutes because no ASR replay is
+        //      involved. fcs_enrich.R detects the mismatch and NAs p.perm otherwise,
+        //      so this is the difference between working p.perm and no p.perm.
+        //   3. caas_perms_file    — import as-is; only safe if it was produced by the
+        //      current scoring formula.
+        def caas_perms_resolved
+        if (!caas_perms_ch && params.caas_pos_detail_file) {
+            def _detail = file(params.caas_pos_detail_file)
+            assert _detail.exists() : "SCORING: --caas_pos_detail_file not found: ${params.caas_pos_detail_file}"
+            log.info "SCORING: rebuilding CAAS permulation null from ${_detail.name} (no ASR replay)"
+            caas_perms_resolved = CAAS_PERMS_REBUILD(Channel.value(_detail), resolved_background)
+                .perms
+                .collect()
+                .map { it[0] }
+        } else {
+            caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
+                .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
+                .collect()
+                .map { it[0] }
+        }
 
         // Lean per-scheme null files → report permulation section.
         // Fall back to --caas_pos_pval_file / --caas_pos_sample_file so a pass that
@@ -158,6 +174,10 @@ workflow SCORING {
             .map { it[0] }
         def caas_pos_sample_resolved = (caas_pos_sample_ch ?: Channel.empty())
             .ifEmpty { file(params.caas_pos_sample_file ?: 'NO_CAAS_POS_SAMPLE') }
+            .collect()
+            .map { it[0] }
+        def caas_pos_quantiles_resolved = (caas_pos_quantiles_ch ?: Channel.empty())
+            .ifEmpty { file(params.caas_pos_quantiles_file ?: 'NO_CAAS_POS_QUANTILES') }
             .collect()
             .map { it[0] }
 
@@ -173,15 +193,13 @@ workflow SCORING {
             _opt(compute_out.stress_rank_agreement,  'NO_SCORING_STRESS_RANK'),
             _opt(compute_out.stress_top_overlap,     'NO_SCORING_STRESS_OVERLAP'),
             _opt(compute_out.stress_variants,        'NO_SCORING_STRESS_VARIANTS'),
-            _opt(compute_out.stress_latent_loadings, 'NO_SCORING_STRESS_LOADINGS'),
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
-            resolved_vep_primateai,
-            resolved_vep_cosmic,
             resolved_genomic_info,
             caas_perms_resolved,
             caas_pos_pval_resolved,
             caas_pos_sample_resolved,
+            caas_pos_quantiles_resolved,
             resolved_postproc,
             resolved_background
         )
@@ -198,4 +216,10 @@ workflow SCORING {
         gene_lists       = compute_out.gene_lists
         position_lists   = compute_out.position_lists
         report           = final_reports
+        // The CAAS null actually used here — which may have been REBUILT from
+        // --caas_pos_detail_file rather than imported. ENRICHMENT must consume this
+        // one, not re-resolve from params, or its FCS p.perm would fall back to the
+        // cached (possibly stale) caas_perms.rds while the scoring report used the
+        // rebuilt one — two different nulls in the same run.
+        caas_perms       = caas_perms_resolved
 }

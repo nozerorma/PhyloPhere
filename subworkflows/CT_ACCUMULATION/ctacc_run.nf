@@ -21,7 +21,6 @@ process CT_ACCUMULATION_AGGREGATE {
 
     output:
     path "*_global.csv",    emit: global_csv
-    path "*_deciles.csv",   emit: deciles, optional: true
 
     script:
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
@@ -80,6 +79,8 @@ process CT_ACCUMULATION_RANDOMIZE {
     val  direction
     path global_csv
     path caas_csv
+    path background_positions   // caastools background.output (tested positions)
+    path bg_caas_universe       // cleaned_background_main.txt (surviving genes)
 
     output:
     val  direction,                           emit: direction
@@ -88,6 +89,11 @@ process CT_ACCUMULATION_RANDOMIZE {
     script:
     def local_dir    = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
     def out_pfx        = "accumulation_${direction}"
+    // Eligible null pool = tested positions ∩ surviving genes. Both are optional at
+    // the channel level (sentinel names when absent); randomize.py falls back to the
+    // ungapped-column pool with a loud warning if the tested positions are missing.
+    def bgpos_flag = (background_positions.name =~ /^NO_/) ? '' : "--background-positions '${background_positions}'"
+    def bgcaas_flag = (bg_caas_universe.name =~ /^NO_/) ? '' : "--bg-caas '${bg_caas_universe}'"
     // 'all' direction uses --change-side both: retains all non-none positions
     def change_side_arg = (direction == 'all') ? 'both' : direction
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
@@ -117,6 +123,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
             --change-side '${change_side_arg}' \\
+            ${bgpos_flag} ${bgcaas_flag} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """
@@ -135,6 +142,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --randomization-type '${rand_type}' \\
             --n-randomizations ${n_rands} \\
             --change-side '${change_side_arg}' \\
+            ${bgpos_flag} ${bgcaas_flag} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """

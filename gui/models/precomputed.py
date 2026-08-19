@@ -24,7 +24,12 @@ Path templates (relative to base_path/<TRAIT>), verified against each process's
 actual publishDir rather than guessed:
   CT/CAAS      : caastools/{discovery,resample,bootstrap}.tab, caastools/background_genes.output,
                  caastools/background.output, signification/meta_caas/global_meta_caas.tsv,
-                 caas_permulation/caas_perms.rds
+                 caas_permulation/caas_perms.rds,
+                 caas_permulation/perm_pos_{pval,sample,quantiles}.tsv,
+                 caas_permulation/perm_pos_detail.tsv.gz  (triggers CAAS_PERMS_REBUILD:
+                   SCORING re-derives the null from this rather than trusting the cached
+                   caas_perms.rds, which is only valid while it holds the same gene-level
+                   statistic as the observed score)
   Disambiguation: ct_disambiguation/caas_convergence_master.csv, ct_disambiguation/ (dir)
   Post-processing: postproc/gene_filtering/filtered_discovery.tsv,
                  postproc/cleaned_backgrounds/cleaned_background_main.txt
@@ -109,7 +114,24 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("signification_from", sig, "file"))
         entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
         entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
-        entries.append(("caas_perms_file", os.path.join(outdir, "caas_permulation", "caas_perms.rds"), "file"))
+        # The permulation outputs travel together: caas_perms.rds alone feeds the
+        # FCS p.perm but leaves the report's position-level permulation section empty,
+        # which is gated on the per-position files. Mirrors run_single.sh.j2's
+        # PRECOMP_USE_DISCOVERY block -- keep both in sync.
+        perm_dir = os.path.join(outdir, "caas_permulation")
+        entries.append(("caas_perms_file", os.path.join(perm_dir, "caas_perms.rds"), "file"))
+        entries.append(("caas_pos_pval_file", os.path.join(perm_dir, "perm_pos_pval.tsv"), "file"))
+        entries.append(("caas_pos_sample_file", os.path.join(perm_dir, "perm_pos_sample.tsv"), "file"))
+        entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
+        # caas_pos_detail_file makes SCORING REBUILD the null (CAAS_PERMS_REBUILD)
+        # instead of importing caas_perms.rds as a cached artifact. That matters
+        # because a cached null is only valid while it holds the same gene-level
+        # statistic as the observed score; rebuilding guarantees it by construction,
+        # costs minutes (no ASR replay), and is what keeps p.perm populated --
+        # fcs_enrich.R leaves it NA when it detects a stale null. Wired last so it
+        # takes precedence over caas_perms_file above.
+        entries.append(("caas_pos_detail_file",
+                        os.path.join(perm_dir, "perm_pos_detail.tsv.gz"), "file"))
     if config.use_resample:
         entries.append(("resample_from", os.path.join(outdir, "caastools", "resample.tab"), "file"))
     if config.use_bootstrap:

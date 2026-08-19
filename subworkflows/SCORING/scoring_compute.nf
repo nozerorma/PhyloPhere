@@ -66,7 +66,6 @@ process SCORING_COMPUTE {
     path "position_score_stress_rank_agreement.tsv",  optional: true, emit: stress_rank_agreement
     path "position_score_stress_top_overlap.tsv",     optional: true, emit: stress_top_overlap
     path "position_score_stress_variants.tsv",        optional: true, emit: stress_variants
-    path "position_score_stress_latent_loadings.tsv", optional: true, emit: stress_latent_loadings
     path "gene_lists",                                 optional: true, emit: gene_lists
     path "position_lists",                             optional: true, emit: position_lists
     path "gene_threshold_enrichment.tsv",             optional: true, emit: gene_threshold_enrichment
