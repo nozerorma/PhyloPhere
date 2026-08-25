@@ -73,16 +73,8 @@ caas_corStat_byrank <- list(
   bottom = build_matrix(gcs, "bottom_caas")
 )
 
-# gene_stat stamps WHICH gene-level statistic the caas_* null matrices hold. The
-# observed score (scoring_compute.R section 4a) and this null must be the same
-# statistic or the FCS p.perm compares two different quantities and is silently
-# wrong. An RDS from before the q90 -> size-adjusted-max change carries no stamp,
-# which fcs_enrich.R treats as "stale" rather than assuming it matches. This
-# matters most for precomputed/GUI reruns, which wire caas_perms.rds straight
-# from an older run's output directory.
 saveRDS(list(corStat_byrank = corStat_byrank,
-             caas_corStat_byrank = caas_corStat_byrank,
-             gene_stat = "size_adj_max"), out_file)
+             caas_corStat_byrank = caas_corStat_byrank), out_file)
 cat(sprintf("[caas_perms] wrote %s — %d genes × %d cycles, asr+caas nulls (%s)\n",
             out_file, length(universe), n_perms,
             paste(names(corStat_byrank), collapse = ", ")))

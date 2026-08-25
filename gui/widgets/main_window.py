@@ -34,6 +34,7 @@ from gui.i18n import LANGUAGES, tr
 from gui.models.about import AboutInfo
 from gui.remote import RemoteCheckError, check_remote_paths
 from gui.models.project import ProjectConfig
+from gui.widgets.common.regenerate_dialog import RegenerateReportsDialog
 from gui.widgets.tabs.about_tab import AboutTab
 from gui.widgets.tabs.accumulation_tab import AccumulationTab
 from gui.widgets.tabs.caas_tab import CaasTab
@@ -179,6 +180,13 @@ class MainWindow(QMainWindow):
 
         file_menu.addSeparator()
 
+        self.regenerate_action = QAction("Regenerate &HTML Reports...", self)
+        self.regenerate_action.setShortcut("Ctrl+Shift+G")
+        self.regenerate_action.triggered.connect(self.regenerate_reports_dialog)
+        file_menu.addAction(self.regenerate_action)
+
+        file_menu.addSeparator()
+
         self.readme_action = QAction("&Readme", self)
         self.readme_action.triggered.connect(self.show_readme_dialog)
         file_menu.addAction(self.readme_action)
@@ -214,6 +222,8 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.validate_paths_action)
         toolbar.addAction(self.generate_action)
         toolbar.addSeparator()
+        toolbar.addAction(self.regenerate_action)
+        toolbar.addSeparator()
         toolbar.addAction(self.readme_action)
 
         self._apply_language(current_lang)
@@ -236,6 +246,7 @@ class MainWindow(QMainWindow):
         self.load_template_action.setText(tr("Load Template...", lang))
         self.validate_paths_action.setText(tr("Validate Paths...", lang))
         self.generate_action.setText(tr("Generate Scripts...", lang))
+        self.regenerate_action.setText(tr("Regenerate HTML Reports...", lang))
         self.readme_action.setText(tr("Readme", lang))
 
         if hasattr(self, "about_tab") and hasattr(self.about_tab, "retranslate"):
@@ -451,6 +462,11 @@ class MainWindow(QMainWindow):
 
         self._show_preview(scripts)
 
+    def regenerate_reports_dialog(self) -> None:
+        dialog = RegenerateReportsDialog(self, repo_dir=self.project.general.repo_dir)
+        if dialog.exec() == RegenerateReportsDialog.DialogCode.Accepted and dialog.generated_scripts:
+            self._show_preview(dialog.generated_scripts, default_dir=dialog.outdir_field.text().strip())
+
     def validate_paths_dialog(self) -> None:
         """Checks every filled-in path field and reports which ones don't exist.
         Complements Generate Scripts' validate() call, which only checks
@@ -482,7 +498,7 @@ class MainWindow(QMainWindow):
             + "\n".join(f"• {p}" for p in problems),
         )
 
-    def _show_preview(self, scripts: list[tuple[str, str]]) -> None:
+    def _show_preview(self, scripts: list[tuple[str, str]], default_dir: str = "") -> None:
         preview = QWidget()  # standalone top-level window, not a child of MainWindow
         preview.setWindowTitle("Generated scripts preview")
         layout = QVBoxLayout(preview)
@@ -499,7 +515,7 @@ class MainWindow(QMainWindow):
         button_row = QHBoxLayout()
         save_btn = QPushButton("Save to disk...")
         save_btn.clicked.connect(
-            lambda: self._save_generated_scripts(scripts)
+            lambda: self._save_generated_scripts(scripts, default_dir=default_dir)
         )
         button_row.addStretch(1)
         button_row.addWidget(save_btn)
@@ -509,8 +525,8 @@ class MainWindow(QMainWindow):
         preview.show()
         self._preview_window = preview  # keep a reference alive
 
-    def _save_generated_scripts(self, scripts: list[tuple[str, str]]) -> None:
-        repo_dir = self.project.general.repo_dir.strip()
+    def _save_generated_scripts(self, scripts: list[tuple[str, str]], default_dir: str = "") -> None:
+        repo_dir = default_dir.strip() or self.project.general.repo_dir.strip()
         if not repo_dir:
             QMessageBox.warning(
                 self,
@@ -519,6 +535,11 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # default_dir (e.g. a regenerate-dialog output directory) only changes
+        # *where* scripts save — remote_host still comes from General > Remote
+        # host either way, since default_dir itself is a path on that same
+        # host when one's set (PathField's Browse opens the SSH-backed picker
+        # whenever remote_context has a host — see path_field.py).
         remote_host = self.project.general.remote_host.strip()
         target = remote_host or "the local filesystem"
         filenames_str = ", ".join([f[0] for f in scripts])

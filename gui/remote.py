@@ -105,6 +105,32 @@ def remove_remote_file(host: str, path: str, timeout: int = DEFAULT_TIMEOUT) -> 
     _run_ssh(host, remote_command, stdin=None, timeout=timeout)
 
 
+def list_all_remote(host: str, root: str, timeout: int = DEFAULT_TIMEOUT) -> dict[str, bool]:
+    """Recursively lists everything under `root` on `host` in a single SSH round
+    trip, returning {relative_posix_path: is_dir}. Used by the Regenerate HTML
+    Reports dialog (gui/widgets/common/regenerate_dialog.py) to build an
+    in-memory stand-in for gui.generation.report_registry's local glob search
+    when the pipeline output directory lives on a remote host — report_registry
+    itself stays network-call-free (see its own module docstring); this is the
+    one round trip its caller does up front to feed it a fnmatch-able listing.
+
+    Uses `find -L` (follows symlinks, matching list_remote_directory's choice)
+    with `%y`/`%P` (type char / path relative to root) so no client-side path
+    surgery is needed on the results.
+    """
+    remote_command = (
+        f"find -L {shlex.quote(root)} -mindepth 1 -printf '%y\\t%P\\n' 2>/dev/null"
+    )
+    stdout = _run_ssh(host, remote_command, stdin=None, timeout=timeout)
+
+    entries: dict[str, bool] = {}
+    for line in stdout.splitlines():
+        kind, _, relpath = line.partition("\t")
+        if relpath:
+            entries[relpath] = kind == "d"
+    return entries
+
+
 def list_remote_directory(
     host: str, path: str, timeout: int = DEFAULT_TIMEOUT
 ) -> list[tuple[str, bool]]:

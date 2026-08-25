@@ -437,7 +437,7 @@ cluster_layout <- function(net, clusters_df, seed = 42) {
 # GO/pathway term. Significance comes from DOMINO's own module_stats
 # (p_value/p_adj, joined in below), not from this function.
 describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, top_terms = 3,
-                               min_cluster_genes = 3, bg_string_ids = NULL) {
+                               min_cluster_genes = 3, bg_string_ids = NULL, active_genes = NULL) {
   # Zero-module case (e.g. DOMINO found no active modules for a small/toy gene
   # sample) must return the SAME column schema as the populated path below, not
   # a bare tibble() - downstream code (e.g. the .clust_desc %>% arrange(desc(n_genes))
@@ -457,6 +457,14 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
     cl_nodes <- clusters_df$node[clusters_df$cluster == cl_id]
     genes    <- id2gene[cl_nodes]
     genes_sorted <- sort(genes[!is.na(genes)])
+    # The displayed/persisted gene list is restricted to the active (scored)
+    # input genes -- DOMINO's connector genes are structurally part of the
+    # module (and stay in it for the min_cluster_genes gate + STRING
+    # enrichment below, since dropping them there would defeat the point of
+    # network-based module discovery) but they are not genes this gene list
+    # actually "hit", so the table should not report them as such. The
+    # network plot still renders them (see .n_connector / connectivity_line).
+    display_genes <- if (!is.null(active_genes)) intersect(genes_sorted, active_genes) else genes_sorted
     # `genes` stays capped at 8 for the display table (kept readable at a
     # glance); `all_genes` carries EVERY member gene, uncapped, so durable
     # artifacts (per-list *_domino_module_descriptions.tsv and the
@@ -464,11 +472,11 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
     # module's true membership. 15.Comparison_report.Rmd's cross-angle
     # corroboration composite reads all_genes for this reason: capped genes
     # would undercount support for any module bigger than 8 genes.
-    gene_str     <- paste(head(genes_sorted, 8), collapse = ", ")
-    all_gene_str <- paste(genes_sorted, collapse = ", ")
+    gene_str     <- paste(head(display_genes, 8), collapse = ", ")
+    all_gene_str <- paste(display_genes, collapse = ", ")
 
     if (length(cl_nodes) < min_cluster_genes) {
-      return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
+      return(tibble(cluster = cl_id, n_genes = length(display_genes),
                     genes = gene_str, all_genes = all_gene_str, description = "Too small"))
     }
     message(sprintf("[describe_clusters] Querying STRING enrichment for module %d (%d genes)...", cl_id, length(cl_nodes)))
@@ -496,14 +504,14 @@ describe_clusters <- function(sdb, clusters_df, id2gene, module_stats = NULL, to
       )
     }
     if (is.null(enrich) || nrow(enrich) == 0 || "error" %in% names(enrich)) {
-      return(tibble(cluster = cl_id, n_genes = length(cl_nodes),
+      return(tibble(cluster = cl_id, n_genes = length(display_genes),
                     genes = gene_str, all_genes = all_gene_str, description = "No enrichment"))
     }
     pvcol   <- intersect(c("fdr", "p_value", "pvalue", "p.adjust"), names(enrich))[1]
     if (!is.na(pvcol)) enrich <- enrich[order(enrich[[pvcol]]), ]
     dcol    <- intersect(c("description", "term", "name"), names(enrich))[1]
     top     <- head(as.character(enrich[[dcol]]), top_terms)
-    tibble(cluster = cl_id, n_genes = length(cl_nodes),
+    tibble(cluster = cl_id, n_genes = length(display_genes),
            genes = gene_str, all_genes = all_gene_str, description = paste(top, collapse = " / "))
   })
 
@@ -1185,7 +1193,7 @@ compute_gene_list_result <- function(.gf, net_full, modules_dir, prefix,
     .clust_desc <- describe_clusters(
       string_db, .clusters_df, setNames(.clusters_df$node, .clusters_df$node),
       module_stats = .module_stats, min_cluster_genes = .min_cluster_genes,
-      bg_string_ids = bg_string_ids
+      bg_string_ids = bg_string_ids, active_genes = .genes_sym
     )
 
     if (!is.null(gene_scores_df) && !is.null(attr_df) && nrow(.clust_desc) > 0) {
