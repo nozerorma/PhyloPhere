@@ -554,6 +554,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "domino_network_score_thr": "${DOMINO_NETWORK_SCORE_THR:-700}",
   "domino_slice_thr": "${DOMINO_SLICE_THR:-0.3}",
   "domino_module_thr": "${DOMINO_MODULE_THR:-0.05}",
+  "publish_domino_intermediates": {{ run_defaults.publish_domino_intermediates }},
   "scoring_compare_fdr": "${SCORING_COMPARE_FDR:-0.15}",
   "scoring_compare_top_n": "${SCORING_COMPARE_TOP_N:-20}",
 

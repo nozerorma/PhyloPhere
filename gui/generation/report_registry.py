@@ -265,16 +265,20 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(fade_top, "fade_site_bf_top.tsv")),
         _slot("fade_site_bot", "FADE per-site BF (bottom)", False,
               _first_match(fade_bot, "fade_site_bf_bottom.tsv")),
+        # genomic_info_file is literally params.gene_ensembl_file (main.nf
+        # resolves it from there) — same regeneration copy as CT_POSTPROC's slot.
         _slot("genomic_info", "Gene genomic coordinates TSV", False,
-              _first_match(outdir, "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
+              _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
         _slot("caas_perms", "CAAS permulation RDS", False,
               _first_match(outdir, "**/*caas*perm*.rds")),
+        # published under caas_permulation/ as perm_pos_*.tsv — the filename
+        # itself doesn't contain "caas".
         _slot("caas_pos_pval", "CAAS position p-value TSV", False,
-              _first_match(outdir, "**/*caas*pos*pval*.tsv")),
+              _first_match(outdir, "caas_permulation/perm_pos_pval.tsv", "**/*pos*pval*.tsv")),
         _slot("caas_pos_sample", "CAAS position sample TSV", False,
-              _first_match(outdir, "**/*caas*pos*sample*.tsv")),
+              _first_match(outdir, "caas_permulation/perm_pos_sample.tsv", "**/*pos*sample*.tsv")),
         _slot("caas_pos_quantiles", "CAAS position quantiles TSV", False,
-              _first_match(outdir, "**/*caas*pos*quantiles*.tsv")),
+              _first_match(outdir, "caas_permulation/perm_pos_quantiles.tsv", "**/*pos*quantiles*.tsv")),
         _slot("filtered_discovery", "Filtered discovery TSV", False,
               _first_match(outdir, "**/filtered_discovery.tsv")),
         _slot("background_file", "Background gene list", False,
@@ -369,14 +373,19 @@ def _rer_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
 
 def _make_fade_spec(direction: str) -> ReportSpec:
     def find_slots(outdir: Listing) -> list[InputSlot]:
+        # fade_run.nf publishes *.FADE.json one level deeper, under a "json"
+        # subdir (selection/fade/{direction}/json/), not directly in fade_dir.
         fade_dir = outdir / "selection" / "fade" / direction
-        json_files = sorted(fade_dir.glob("*.FADE.json"))
+        json_dir = fade_dir / "json"
+        json_files = sorted(json_dir.glob("*.FADE.json"))
         return [
             _slot("json_dir", f"FADE JSON directory ({direction})", True,
-                  fade_dir if json_files else None,
+                  json_dir if json_files else None,
                   note=f"{len(json_files)} *.FADE.json file(s) found" if json_files else "no *.FADE.json files found"),
+            # selection_utils.nf publishes these direction-named files into a
+            # shared selection/species_sets/ dir, not inside fade_dir.
             _slot("fg_list_file", "Foreground species list", False,
-                  _first_match(fade_dir, "*foreground*species*.txt", "*fg_list*.txt")),
+                  _first_match(outdir / "selection" / "species_sets", f"{direction}_species.txt")),
         ]
 
     def build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
@@ -478,7 +487,7 @@ def _postproc_find_slots(outdir: Listing) -> list[InputSlot]:
         _slot("filter_summary", "Filter summary TSV", True,
               _first_match(postproc, "summary_statistics/filter_summary.tsv")),
         _slot("gene_ensembl_file", "Gene Ensembl length file", True,
-              _first_match(outdir, "**/*gene_ensembl*", "**/*ensembl*length*")),
+              _first_match(outdir, "postproc/postproc_inputs/*", "**/*gene_ensembl*", "**/*ensembl*length*")),
         _slot("gene_stats_file", "Gene stats file (discarded summary)", True,
               _first_match(postproc, "gene_filtering/discarded_summary.tsv")),
     ]
@@ -649,13 +658,17 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
 def _posenrich_find_slots(outdir: Listing) -> list[InputSlot]:
     posenrich = outdir / "posenrich"
     return [
-        _slot("results", "Posenrich results TSV", True, _first_match(posenrich, "*results*.tsv")),
+        # posenrich.nf emits this as "posenrich_characterization.tsv" (emit:
+        # results) — the filename itself doesn't contain "results".
+        _slot("results", "Posenrich results TSV", True,
+              _first_match(posenrich, "posenrich_characterization.tsv", "*results*.tsv")),
         _slot("leading_edge", "Posenrich leading-edge TSV", True, _first_match(posenrich, "*leading_edge*.tsv")),
         _slot("position_scores", "Position scores TSV", False, _first_match(outdir, "scoring/position_scores.tsv")),
         _slot("gene_scores", "Gene scores TSV", False, _first_match(outdir, "scoring/gene_scores.tsv")),
         _slot("vep_primateai", "VEP PrimateAI TSV", False, _first_match(outdir, "**/*primateai*.tsv")),
         _slot("vep_cosmic", "VEP COSMIC TSV", False, _first_match(outdir, "**/*cosmic*.tsv")),
-        _slot("genomic_info", "Gene genomic coordinates TSV", False, _first_match(outdir, "**/*genomic_info*.tsv")),
+        _slot("genomic_info", "Gene genomic coordinates TSV", False,
+              _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv")),
         _slot("fade_sites_top", "FADE per-site BF (top)", False,
               _first_match(outdir, "selection/fade/top/fade_site_bf_top.tsv")),
         _slot("fade_sites_bottom", "FADE per-site BF (bottom)", False,
@@ -775,21 +788,28 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
 # ── ENRICHMENT: COMPARE (SCORING_COMPARE_REPORT) ────────────────────────────
 
 def _compare_find_slots(outdir: Listing) -> list[InputSlot]:
-    fcs = outdir / "fcs" / "fcs_results"
+    # fcs.nf publishes with `publishDir ".../fcs/fcs_results", pattern:
+    # 'fcs_results/**'` — the emitted path already starts with "fcs_results/",
+    # so the real files land one level deeper than that publishDir alone
+    # suggests: fcs/fcs_results/fcs_results/*.tsv.
+    fcs = outdir / "fcs" / "fcs_results" / "fcs_results"
     return [
         _slot("caas_fcs", "CAAS FCS all-results TSV", False, _first_match(fcs, "fcs_all_results.tsv")),
         _slot("rer_fcs", "RER FCS all-results TSV", False,
-              _first_match(outdir, "rerconverge/**/fcs_all_results.tsv")),
+              _first_match(outdir, "rerconverge/**/fcs_results/fcs_all_results.tsv")),
         _slot("caas_le", "CAAS leading-edge TSV", False, _first_match(fcs, "fcs_leading_edge.tsv")),
-        _slot("rer_le", "RER leading-edge TSV", False, _first_match(outdir, "rerconverge/**/fcs_leading_edge.tsv")),
+        _slot("rer_le", "RER leading-edge TSV", False,
+              _first_match(outdir, "rerconverge/**/fcs_results/fcs_leading_edge.tsv")),
         _slot("caas_le_comp", "CAAS leading-edge composition TSV", False,
               _first_match(fcs, "fcs_leading_edge_composition.tsv")),
         _slot("rer_le_comp", "RER leading-edge composition TSV", False,
-              _first_match(outdir, "rerconverge/**/fcs_leading_edge_composition.tsv")),
+              _first_match(outdir, "rerconverge/**/fcs_results/fcs_leading_edge_composition.tsv")),
+        # scoring_enrichment.nf publishes with `publishDir ".../ami/ami_networks",
+        # pattern: 'ami_networks/**'` — same double-nesting as fcs above.
         _slot("ami_module_desc", "AMI module descriptions TSV", False,
-              _first_match(outdir, "ami/ami_networks/ami_module_descriptions_all_tools.tsv")),
+              _first_match(outdir, "ami/ami_networks/ami_networks/ami_module_descriptions_all_tools.tsv")),
         _slot("ami_term_membership", "AMI term membership TSV", False,
-              _first_match(outdir, "ami/ami_networks/ami_term_threshold_membership_all_tools.tsv")),
+              _first_match(outdir, "ami/ami_networks/ami_networks/ami_term_threshold_membership_all_tools.tsv")),
         _slot("posenrich_dotplot", "Posenrich overall dotplot TSV", False,
               _first_match(outdir, "posenrich/posenrich_overall_dotplot.tsv")),
         _slot("posenrich_le", "Posenrich leading-edge TSV", False, _first_match(outdir, "**/posenrich_leading_edge.tsv")),
@@ -870,12 +890,16 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
 #    unless a copy happens to sit under outdir) ─────────────────────────────
 
 def _ta_common_slots(outdir: Listing, extra_dir_glob: Optional[str] = None) -> list[InputSlot]:
+    # pruned_trait_file.tsv only exists when --prune_data ran (ta_data_prune,
+    # optional); original_trait_file.tsv is DATASET_EXPLORATION's own copy of
+    # the raw --trait_file, published unconditionally since that process
+    # always runs — the reliable fallback when pruning was skipped.
     slots = [
         _slot("trait_file", "Original trait file (--trait_file)", True,
-              _first_match(outdir, "**/pruned_trait_file.tsv"),
+              _first_match(outdir, "**/pruned_trait_file.tsv", "**/original_trait_file.tsv"),
               note="original pipeline input — browse to it if not auto-found"),
         _slot("tree_file", "Original tree file (--tree_file)", True,
-              _first_match(outdir, "**/pruned_tree_file.nwk"),
+              _first_match(outdir, "**/pruned_tree_file.nwk", "**/original_tree_file.nwk"),
               note="original pipeline input — browse to it if not auto-found"),
     ]
     return slots

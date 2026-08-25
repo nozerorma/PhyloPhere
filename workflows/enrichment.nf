@@ -227,7 +227,8 @@ workflow ENRICHMENT {
                 params.domino_network_score_thr ?: 700,
                 params.domino_slice_thr ?: 0.3,
                 params.domino_module_thr ?: 0.05,
-                params.string_db_dir ?: ''
+                params.string_db_dir ?: '',
+                'caas'
             )
 
             // FADE and RER each get their own DOMINO network, built against
@@ -253,7 +254,8 @@ workflow ENRICHMENT {
                     params.domino_network_score_thr ?: 700,
                     params.domino_slice_thr ?: 0.3,
                     params.domino_module_thr ?: 0.05,
-                    params.string_db_dir ?: ''
+                    params.string_db_dir ?: '',
+                    'fade'
                 )
                 fade_gene_list_files_arg = fade_gene_lists_final_ch
                 fade_background_arg      = fade_union_bg_ch
@@ -280,7 +282,8 @@ workflow ENRICHMENT {
                     params.domino_network_score_thr ?: 700,
                     params.domino_slice_thr ?: 0.3,
                     params.domino_module_thr ?: 0.05,
-                    params.string_db_dir ?: ''
+                    params.string_db_dir ?: '',
+                    'rer'
                 )
                 rer_gene_list_files_arg = rer_gene_lists_interest_ch
                 rer_background_arg      = rer_bg_r

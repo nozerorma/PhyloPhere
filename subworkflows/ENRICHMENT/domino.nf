@@ -28,12 +28,15 @@
 
 process DOMINO_BUILD_NETWORK {
     label 'process_medium'
+    publishDir path: "${params.outdir}/ami/domino/${consumer_label}", mode: 'copy', overwrite: true,
+               enabled: { params.publish_domino_intermediates ?: false }
 
     input:
     path background_file
     path gene_list_files  // Trigger dependency: guarantees DOMINO network building waits for upstream scoring/gene lists
     val  score_threshold
     val  string_db_dir
+    val  consumer_label   // 'caas' | 'fade' | 'rer' -- only used to namespace the optional publishDir above
 
     output:
     path "network.sif",              emit: network_sif
@@ -61,6 +64,8 @@ process DOMINO_BUILD_NETWORK {
 
 process DOMINO_RUN_MODULES {
     label 'process_medium'
+    publishDir path: "${params.outdir}/ami/domino/${consumer_label}", mode: 'copy', overwrite: true,
+               enabled: { params.publish_domino_intermediates ?: false }
 
     input:
     path network_sif
@@ -68,6 +73,7 @@ process DOMINO_RUN_MODULES {
     path gene_lists
     val  slice_threshold
     val  module_threshold
+    val  consumer_label   // 'caas' | 'fade' | 'rer' -- only used to namespace the optional publishDir above
 
     output:
     path "domino_modules", emit: modules_dir
@@ -114,15 +120,17 @@ workflow DOMINO_MODULES {
     slice_threshold
     module_threshold
     string_db_dir
+    consumer_label   // 'caas' | 'fade' | 'rer'
 
     main:
-    DOMINO_BUILD_NETWORK(background_file, gene_list_files, score_threshold, string_db_dir)
+    DOMINO_BUILD_NETWORK(background_file, gene_list_files, score_threshold, string_db_dir, consumer_label)
     DOMINO_RUN_MODULES(
         DOMINO_BUILD_NETWORK.out.network_sif,
         DOMINO_BUILD_NETWORK.out.slices,
         gene_list_files,
         slice_threshold,
-        module_threshold
+        module_threshold,
+        consumer_label
     )
 
     emit:

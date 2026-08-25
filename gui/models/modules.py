@@ -296,6 +296,9 @@ class EnrichmentConfig(ModuleConfigBase):
     domino_network_score_thr: str = "700"  # --domino_network_score_thr
     domino_slice_thr: str = "0.3"  # --domino_slice_thr
     domino_module_thr: str = "0.05"  # --domino_module_thr
+    # Off by default: network.sif/domino_modules/edge_scores are large and not
+    # needed by the AMI report itself, only for manually regenerating it later.
+    publish_domino_intermediates: bool = False  # --publish_domino_intermediates
     # Centralized DOMINO-based AMI run + cross-module COMPARE report
     # (conf/scoring.config, gated inside workflows/enrichment.nf). RER/FADE/
     # Accumulation's own gene lists are always computed automatically whenever

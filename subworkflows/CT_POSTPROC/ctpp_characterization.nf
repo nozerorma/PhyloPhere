@@ -7,16 +7,16 @@
 process CT_POSTPROC_REPORT {
     tag "caas_postproc_report"
     label 'process_reporting'
-    publishDir path: "${params.outdir}/postproc", mode: 'copy', overwrite: true, pattern: '{CT_postproc_files/**,outliers/**,clusters/**,summary_statistics/**,disambiguation_characterization/**}'
+    publishDir path: "${params.outdir}/postproc", mode: 'copy', overwrite: true, pattern: '{CT_postproc_files/**,outliers/**,clusters/**,summary_statistics/**,disambiguation_characterization/**,postproc_inputs/**}'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
-    
+
     input:
     path discovery_file
     path filter_summary
     val filter_dir
     path gene_ensembl_file
     path gene_stats_file
-    
+
     output:
     path "*.html", emit: report
     path "CT_postproc_files/**", emit: assets, optional: true
@@ -24,7 +24,12 @@ process CT_POSTPROC_REPORT {
     path "clusters/**", emit: clusters, optional: true
     path "summary_statistics/**", emit: summary_stats, optional: true
     path "disambiguation_characterization/**", emit: disambiguation_characterization, optional: true
-    
+    // Regeneration copy of the raw --gene_ensembl_file input: this and
+    // genomic_info_file (SCORING/POSENRICH) are the same file
+    // (main.nf resolves genomic_info from params.gene_ensembl_file), so
+    // publishing it here also backs the "gene genomic coordinates" slot.
+    path "postproc_inputs/**", emit: gene_ensembl_input, optional: true
+
     script:
     def local_dir = "${baseDir}/subworkflows/CT_POSTPROC/local"
     def discovery = discovery_file.toString()
@@ -45,7 +50,10 @@ process CT_POSTPROC_REPORT {
         cp -R ${local_dir}/* .
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find . -name '*.pyc' -delete 2>/dev/null || true
-        
+
+        mkdir -p postproc_inputs
+        [[ "\$(basename '${gene_len}')" == NO_* ]] || cp '${gene_len}' postproc_inputs/
+
         REPORT_CORES=${task.cpus} /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 '8.Characterization_report.Rmd',
@@ -71,7 +79,10 @@ process CT_POSTPROC_REPORT {
         cp -R ${local_dir}/* .
         find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
         find . -name '*.pyc' -delete 2>/dev/null || true
-        
+
+        mkdir -p postproc_inputs
+        [[ "\$(basename '${gene_len}')" == NO_* ]] || cp '${gene_len}' postproc_inputs/
+
         REPORT_CORES=${task.cpus} Rscript -e "
             rmarkdown::render(
                 '8.Characterization_report.Rmd',

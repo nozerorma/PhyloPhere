@@ -21,6 +21,12 @@ process DATASET_EXPLORATION {
     path "data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv", emit: stats_file, optional: true
     path "data_exploration/**/*.csv", emit: data_tables, optional: true
     path "data_exploration/**/*.png", emit: plots, optional: true
+    // Regeneration copy of the raw --trait_file/--tree_file inputs. This
+    // process always runs (unlike the optional DATASET_PRUNE step), so it's
+    // the one guaranteed place to recover these when pruning was skipped and
+    // ta_data_prune's pruned_trait_file.tsv/pruned_tree_file.nwk never existed.
+    path "data_exploration/1.Data-exploration/1.Species_distribution/original_trait_file.tsv", emit: original_trait_file, optional: true
+    path "data_exploration/1.Data-exploration/1.Species_distribution/original_tree_file.nwk", emit: original_tree_file, optional: true
 
     script:
     def local_dir = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local"
@@ -44,6 +50,9 @@ process DATASET_EXPLORATION {
         if [ -n "${prune_dir}" ] && [ -d "${prune_dir}" ] && [ "${prune_dir}" != "data_exploration" ]; then
           cp -R "${prune_dir}"/* data_exploration
         fi
+        mkdir -p data_exploration/1.Data-exploration/1.Species_distribution
+        cp '${trait_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_trait_file.tsv
+        cp '${tree_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_tree_file.nwk
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
                 '1.Dataset_exploration.Rmd',
@@ -75,6 +84,9 @@ process DATASET_EXPLORATION {
         if [ -n "${prune_dir}" ] && [ -d "${prune_dir}" ] && [ "${prune_dir}" != "data_exploration" ]; then
           cp -R "${prune_dir}"/* data_exploration
         fi
+        mkdir -p data_exploration/1.Data-exploration/1.Species_distribution
+        cp '${trait_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_trait_file.tsv
+        cp '${tree_file}' data_exploration/1.Data-exploration/1.Species_distribution/original_tree_file.nwk
         Rscript -e "
             rmarkdown::render(
                 '1.Dataset_exploration.Rmd',

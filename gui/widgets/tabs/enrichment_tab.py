@@ -59,6 +59,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="domino_network_score_thr", label="DOMINO network score threshold"),
         FieldSpec(name="domino_slice_thr", label="DOMINO slice threshold"),
         FieldSpec(name="domino_module_thr", label="DOMINO module significance threshold"),
+        FieldSpec(name="publish_domino_intermediates", label="Publish DOMINO network.sif/modules/edge scores to outdir (large; needed only for manual AMI report regeneration)", kind="bool"),
         FieldSpec(name="scoring_compare_fdr", label="COMPARE report FDR threshold"),
         FieldSpec(name="scoring_compare_top_n", label="COMPARE report top-N"),
 
