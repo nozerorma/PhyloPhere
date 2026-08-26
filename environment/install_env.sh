@@ -63,7 +63,7 @@ install.packages("remotes")
 
 # Install CRAN package without pulling/compiling deps
 # I am very unsure why r-dt in anaconda does not behave properly :(
-install.packages('DT', repos='https://cloud.r-project.org')
+install.packages("DT", repos="https://cloud.r-project.org")
 
 # Install dependencies for RERconverge
 install.packages("BiocManager")
@@ -71,8 +71,16 @@ BiocManager::install("ggtree")
 BiocManager::install("impute")
 BiocManager::install("data.table")
 
-# Install GitHub package only if missing
-remotes::install_github("nclark-lab/RERconverge@2bd328f7530b4aca9b48c0b3997875c9b77a7026", dependencies = TRUE, upgrade="never")
+# dependencies = NA (not TRUE): install what RERconverge itself needs to load
+# (its Depends/Imports/LinkingTo, e.g. FSA), without recursing into the
+# optional Suggests of those dependencies (e.g. FSA own Suggests pull in
+# car/doBy/pbkrtest/Deriv, none of which RERconverge actually uses, and Deriv
+# CRAN source does not compile against this R version anyway).
+remotes::install_github("nclark-lab/RERconverge@2bd328f7530b4aca9b48c0b3997875c9b77a7026", dependencies = NA, upgrade="never")
+
+if (!requireNamespace("RERconverge", quietly = TRUE)) {
+  stop("RERconverge failed to install")
+}
 
 cat("OK: R deps installed\n")
 '

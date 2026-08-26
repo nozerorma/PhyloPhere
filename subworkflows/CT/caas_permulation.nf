@@ -87,7 +87,7 @@ _max_bg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_miss_fraction}" 'BEGI
 _max_fg_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
 _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{printf "%d", int(n*f)}')
 """
-    def ct_bin = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh ct' : "$baseDir/subworkflows/CT/local/ct"
+    def ct_bin = (params.use_singularity || params.use_apptainer) ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct" : "$baseDir/subworkflows/CT/local/ct"
     """
     # Full-pool perms bootstrap now runs the vectorized CAAS kernel
     # (modules/boot_vec.py): the per-cycle CAAS test is a Level-3 BLAS matmul and
@@ -133,9 +133,8 @@ process BOOTSTRAP_PERMS_BATCHED {
     path("*.bootstrap.discovery.output"), emit: perm_discovery, optional: true
 
     script:
-    def runnerMode = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
     def ctBinary = (params.use_singularity || params.use_apptainer)
-        ? '/usr/local/bin/_entrypoint.sh'
+        ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct"
         : "$baseDir/subworkflows/CT/local/ct"
     """
     # Pin BLAS/OpenMP to 1 thread: the concurrency comes from the worker pool
@@ -174,7 +173,6 @@ process BOOTSTRAP_PERMS_BATCHED {
         --resampled-path ${resampledPath} \\
         --workers ${task.cpus} \\
         --ali-format ${params.ali_format} \\
-        --runner-mode ${runnerMode} \\
         --ct-bin ${ctBinary} \\
         --progress-log 0 \\
         --export-groups 0 \\

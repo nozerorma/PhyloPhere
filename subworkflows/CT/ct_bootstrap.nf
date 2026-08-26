@@ -74,7 +74,7 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
         # are unused here and pinned to 1 to avoid stray oversubscription.
         export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
         ${pairArgs}
-        /usr/local/bin/_entrypoint.sh ct bootstrap \\
+        /usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct bootstrap \\
             -a ${alignmentFile} \\
             -t ${caas_config} \\
             -s ${resampledPath} \\
@@ -140,9 +140,8 @@ process BOOTSTRAP_BATCHED {
 
     script:
     def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
-    def runnerMode = (params.use_singularity || params.use_apptainer) ? 'container' : 'local'
     def ctBinary = (params.use_singularity || params.use_apptainer)
-        ? '/usr/local/bin/_entrypoint.sh'
+        ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct"
         : "$baseDir/subworkflows/CT/local/ct"
 
     """
@@ -176,7 +175,6 @@ bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
     --resampled-path ${resampledPath} \\
     --workers ${task.cpus} \\
     --ali-format ${params.ali_format} \\
-    --runner-mode ${runnerMode} \\
     --ct-bin ${ctBinary} \\
     --progress-log 0 \\
     --export-groups ${params.export_groups != null && params.export_groups != "none" ? '1' : '0'} \\

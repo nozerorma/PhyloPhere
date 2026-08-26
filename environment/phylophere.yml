@@ -338,6 +338,7 @@ dependencies:
   - r-bslib=0.10.0=r44hc72bb7e_0
   - r-cachem=1.1.0=r44h54b55ab_2
   - r-callr=3.7.6=r44hc72bb7e_2
+  - r-car=3.1_5=r44hc72bb7e_0
   - r-catools=1.18.3=r44h3697838_1
   - r-cellranger=1.1.0=r44hc72bb7e_1008
   - r-checkmate=2.3.3=r44h54b55ab_1
@@ -363,11 +364,13 @@ dependencies:
   - r-dbplyr=2.5.2=r44hc72bb7e_0
   - r-deldir=2.0_4=r44heaba542_2
   - r-deoptim=2.2_8=r44h54b55ab_3
+  - r-deriv=4.2.0=r44hc72bb7e_1
   - r-desc=1.4.3=r44hc72bb7e_2
   - r-desolve=1.41=r44h11cdb10_0
   - r-devtools=2.4.6=r44hc72bb7e_0
   - r-diffobj=0.3.6=r44h54b55ab_1
   - r-digest=0.6.39=r44h3697838_0
+  - r-doby=4.7.2=r44hc72bb7e_0
   - r-doparallel=1.0.17=r44hc72bb7e_4
   - r-dorng=1.8.6.3=r44hc72bb7e_0
   - r-downlit=0.4.5=r44hc72bb7e_0
@@ -390,6 +393,7 @@ dependencies:
   - r-formatr=1.14=r44hc72bb7e_3
   - r-formula=1.2_5=r44hc72bb7e_3
   - r-fs=1.6.6=r44h3697838_1
+  - r-fsa=0.10.1=r44hc72bb7e_0
   - r-futile.logger=1.4.9=r44hc72bb7e_0
   - r-futile.options=1.0.1=r44hc72bb7e_1006
   - r-future=1.69.0=r44h785f33e_0
@@ -500,6 +504,7 @@ dependencies:
   - r-parallelly=1.46.1=r44h54b55ab_0
   - r-patchwork=1.3.2=r44hc72bb7e_1
   - r-pbapply=1.7_4=r44hc72bb7e_1
+  - r-pbkrtest=0.5.5=r44hc72bb7e_1
   - r-phangorn=2.12.1=r44hf1899b2_3
   - r-phylolm=2.6.5=r44h54b55ab_1
   - r-phytools=2.5_2=r44hc72bb7e_1

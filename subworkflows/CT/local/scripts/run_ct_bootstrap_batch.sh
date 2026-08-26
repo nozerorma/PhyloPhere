@@ -7,7 +7,6 @@ caas_config=""
 resampled_path=""
 workers="1"
 ali_format=""
-runner_mode=""
 ct_bin=""
 progress_log="0"
 export_groups="0"
@@ -41,10 +40,6 @@ while [[ $# -gt 0 ]]; do
             ali_format="$2"
             shift 2
             ;;
-        --runner-mode)
-            runner_mode="$2"
-            shift 2
-            ;;
         --ct-bin)
             ct_bin="$2"
             shift 2
@@ -76,7 +71,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-if [[ -z "$batch_id" || -z "$manifest" || -z "$caas_config" || -z "$resampled_path" || -z "$ali_format" || -z "$runner_mode" || -z "$ct_bin" ]]; then
+if [[ -z "$batch_id" || -z "$manifest" || -z "$caas_config" || -z "$resampled_path" || -z "$ali_format" || -z "$ct_bin" ]]; then
     echo "Missing required arguments for bootstrap batch runner" >&2
     exit 1
 fi
@@ -92,12 +87,11 @@ if [[ -n "$extra_args_file" && -s "$extra_args_file" ]]; then
     read -r -a extra_args < <(tr '\n' ' ' < "$extra_args_file"; echo)
 fi
 
-declare -a base_cmd
-if [[ "$runner_mode" == "container" ]]; then
-    base_cmd=("$ct_bin" "ct" "bootstrap")
-else
-    base_cmd=("$ct_bin" "bootstrap")
-fi
+# ct_bin may be a single path (local mode) or a space-separated command
+# prefix such as "/usr/local/bin/_entrypoint.sh <path-to-ct>" (container mode).
+declare -a ct_bin_arr
+read -ra ct_bin_arr <<< "$ct_bin"
+declare -a base_cmd=("${ct_bin_arr[@]}" "bootstrap")
 
 gene_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
 echo "Running batched bootstrap task $batch_id"
