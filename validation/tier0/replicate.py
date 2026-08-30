@@ -105,8 +105,18 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     rng.shuffle(planted_flags)
 
     genes: dict = {}
+    ensembl_rows = ["gene\tchr\tstart\tend\tstrand\tlength\thuman_protein_id"]
     for gi in range(rcfg.n_genes):
         gid = f"gene_{gi + 1:04d}"
+        # synthetic genomic coordinates: genes spread ~1 Mb apart over 3 fake
+        # chromosomes. No deliberate physical clustering of planted genes yet
+        # (that would be a separate positional-enrichment validation).
+        chrom = f"chr{gi % 3 + 1}"
+        start = (gi // 3) * 1_000_000 + 100_000
+        length_bp = rcfg.n_sites * 3
+        ensembl_rows.append(
+            f"{gid}\t{chrom}\t{start}\t{start + length_bp}\t+\t{rcfg.n_sites}\tSYN{gi + 1:05d}"
+        )
         is_planted = bool(planted_flags[gi])
         scfg = SimConfig(
             n_sites=rcfg.n_sites, concentration=rcfg.concentration,
@@ -129,6 +139,7 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     _write_newick(tree, outdir / "tree.nwk")
     # species list — NAME_CURATION scans every alignment to derive this if absent
     (outdir / "ali_sp_names.txt").write_text("\n".join(sorted(tree.tips)) + "\n")
+    (outdir / "gene_ensembl.tsv").write_text("\n".join(ensembl_rows) + "\n")
     with (outdir / "my_traits.tsv").open("w") as fh:
         fh.write(f"species\t{rcfg.traitname}\n")
         for sp, v in sorted(ph.values.items()):
