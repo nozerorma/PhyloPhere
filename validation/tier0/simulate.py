@@ -243,16 +243,25 @@ def simulate(tree: PhyloTree, fg: Foreground | None, cfg: SimConfig,
     ], dtype=np.int64)
     node_states[tree.root] = root_seq
 
-    # identical-aa planting: at the first foreground edge of each origin, seed the
-    # target residue so every independent lineage starts converged; drift within
-    # the clade is then governed by Q_fg (near point mass -> it stays).
-    origin_edges: set[int] = set()
+    # Seed the planted residue at the FIRST foreground edge of each origin so
+    # every independent lineage starts converged; Q_fg (near point mass) then
+    # holds it. origin_edge_rank maps that edge -> the origin's index, so
+    # grouped-CAAP can hand DISTINCT residues to distinct origins.
+    origin_edge_rank: dict[int, int] = {}
     if fg:
         parent_of = {c: p for p, c, _ in tree.edges}
         edge_index = {(p, c): i for i, (p, c, bl) in enumerate(tree.edges)}
-        for node in fg.origin_nodes:
+        for k, node in enumerate(fg.origin_nodes):
             if node in parent_of:
-                origin_edges.add(edge_index[(parent_of[node], node)])
+                origin_edge_rank[edge_index[(parent_of[node], node)]] = k
+
+    # grouped-CAAP: a fixed permutation of the target class per site, so origin k
+    # gets residue perm[k % class_size] — the first min(n_origins, class_size)
+    # origins are guaranteed distinct residues (US divergent, GS* convergent).
+    group_perm: dict[int, list[int]] = {
+        s: list(rng.permutation([AA_INDEX[a] for a in gt["residues"]]))
+        for s, gt in group_targets.items()
+    }
 
     for ei, (p, c, bl) in enumerate(tree.edges):
         parent = node_states[p]
@@ -260,14 +269,12 @@ def simulate(tree: PhyloTree, fg: Foreground | None, cfg: SimConfig,
         Q = Q_fg if is_fg else Q_bg
         T = bl * rates
         child = parent.copy()
-        if ei in origin_edges:
+        if ei in origin_edge_rank:
+            k = origin_edge_rank[ei]
             for s, tgt in targets.items():
                 child[s] = tgt
-            # grouped-CAAP: seed a residue drawn from the target class — a fresh
-            # draw per origin edge, so origins land on the SAME class but usually
-            # DIFFERENT residues (US divergent, GS* convergent).
-            for s, gt in group_targets.items():
-                child[s] = int(rng.choice([AA_INDEX[a] for a in gt["residues"]]))
+            for s, perm in group_perm.items():
+                child[s] = int(perm[k % len(perm)])
         child = _evolve_branch(child, Q, T, rng)
         node_states[c] = child
 
