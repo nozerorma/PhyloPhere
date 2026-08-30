@@ -74,11 +74,24 @@ rate. End-to-end recall = product of the two, recoverable but not the headline.
 Rationale in PIPELINE_MODEL.md §6.4 / §7.2 — the gap is expected to be small
 because planting is on clade stems and origins are non-nested.
 
-### D-T0-B — ad-hoc (reversible): `perm_strategy = BM` for the primary Tier 0
-BM is the shipped default (`CaasConfig.perm_strategy = "BM"`). `lambda` (the
-`perms_lambda` branch, uncommitted; λ̂≈0.74, higher acceptance) and `FGBG` are
-added as variant sub-sets once BM is calibrated. RER's own null is BM-only
-(`getPermsContinuous`), so BM keeps the two modules' nulls comparable.
+### D-T0-B — MIGUEL: `perm_strategy = BM` only
+BM is the shipped default and matches RER's own BM-only null (`getPermsContinuous`),
+so the two modules' nulls stay comparable. lambda/FGBG not run.
+
+### D-T0-F — MIGUEL: `rer_transform = "auto"`
+echo runs RER binary (no transform). bodysize is a real-valued BM trait (~normal,
+centred at 0), so `auto` -> raw values. (log10 is the natural allometric transform
+but N/A for a zero-centred BM trait unless we simulate exp(BM); noted, not done.)
+
+### D-T0-G — MIGUEL: CAAS detection = production defaults **+ strict-divergent variant**
+Production: `caap_mode` ON (US + GS1/GS2/GS3), `patterns` 1,2,3,
+`ct_disambig_convergence_mode` = focal_clade, `fade_method` = Variational-Bayes
+(FADE config advanced defaults). Run each replicate at **two**
+`min_divergent_fraction` values as separate sub-sets:
+- `0.5` (production; `max_conserved` = half the pairs)
+- `1.0` (strict; `max_conserved` = 0, no pair may share the residue)
+`run_replicates.py --divergent-fractions 0.5,1.0`. Nothing else changes between
+the two.
 
 ### D-T0-E — MIGUEL: fix `lean_contrast_selector.R` (option A)
 The `& trait_vec > th$med` / `& trait_vec < th$med` extreme filters relaxed to

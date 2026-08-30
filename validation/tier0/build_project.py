@@ -52,6 +52,7 @@ def tier0_project(
     rer_perms_per_batch: str = "100",
     top_quantile: str = "0.90",
     bottom_quantile: str = "0.10",
+    min_divergent_fraction: str = "0.5",   # 0.5 = production; 1.0 = strict (no conserved pair)
     ct_batch_size: str = "25",
     max_cpus: str = "8",
     max_memory: str = "24.GB",
@@ -107,7 +108,7 @@ def tier0_project(
     c.top_quantile = top_quantile
     c.bottom_quantile = bottom_quantile
     c.min_contrasts = "3"
-    c.min_divergent_fraction = "0.5"
+    c.min_divergent_fraction = min_divergent_fraction
     c.ct_discovery_batch_size = ct_batch_size
     c.ct_bootstrap_batch_size = ct_batch_size
 
@@ -126,9 +127,11 @@ def tier0_project(
     r.rer_tool_build_trait = r.rer_tool_build_tree = r.rer_tool_build_matrix = True
     r.rer_tool_continuous = True
     r.rer_trait_mode = "auto"       # echo -> binary (2 unique vals); bodysize -> continuous
-    # NOT the GUI default "ha_logit" (that needs n_trait/c_trait count columns and
-    # would stop() without them). "auto": binary path takes no transform; the BM
-    # bodysize trait is ~normal so auto -> raw values. OPEN — Q-T0-F.
+    # NOT the GUI default "ha_logit" (needs n_trait/c_trait count columns; stop()s
+    # without them). MIGUEL (D-T0-F): "auto". echo takes the binary path (no
+    # transform); the BM bodysize trait is ~normal and real-valued so auto -> raw
+    # (log10 is the natural allometric transform but our BM trait is centred at 0,
+    # so log10 is N/A unless we simulate exp(BM) instead — noted, not done).
     r.rer_transform = "auto"
     r.rer_perm_batches = rer_perm_batches
     r.rer_perms_per_batch = rer_perms_per_batch

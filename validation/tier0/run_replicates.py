@@ -55,7 +55,7 @@ def _load_tree(spec: dict, rng: np.random.Generator) -> T.PhyloTree:
 
 _RUN_SH = """\
 #!/bin/bash
-# Tier 0 replicate: {rep} | archetype={arch} set={set} tree={tree} seed={seed}
+# Tier 0 replicate: {rep} | archetype={arch} set={set} tree={tree} min_divergent_fraction={mdf} seed={seed}
 set -Eeuo pipefail
 cd "{repo}"
 set -a
@@ -66,6 +66,7 @@ TRAIT_FILE="{traits}"
 SIMPLE_TRAIT_FILE="{traits}"
 TOP_QUANTILE="{tq}"
 BOTTOM_QUANTILE="{bq}"
+MIN_DIVERGENT_FRACTION="{mdf}"
 SEED="{seed}"
 CAAS_OUTBASE="{outbase}"
 WORK_BASE="{workbase}"
@@ -81,6 +82,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--archetypes", default="echo,bodysize")
     ap.add_argument("--sets", default="null,power", help="null = no planted signal; power = planted")
     ap.add_argument("--trees", default="primate", help="comma list of keys in grid.json trees")
+    ap.add_argument("--divergent-fractions", default="0.5,1.0",
+                    help="min_divergent_fraction sub-sets: 0.5 = production, 1.0 = strict (D-T0-G)")
     ap.add_argument("--n-replicates", type=int, default=20)
     ap.add_argument("--n-genes", type=int, default=40)
     ap.add_argument("--frac-planted-genes", type=float, default=0.25)
@@ -95,6 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     tree_keys = a.trees.split(",")
     archetypes = a.archetypes.split(",")
     sets = a.sets.split(",")
+    mdfs = [x.strip() for x in a.divergent_fractions.split(",") if x.strip()]
     a.out.mkdir(parents=True, exist_ok=True)
 
     # render the GUI project once (paths are per-replicate, overridden in run.sh)
@@ -113,38 +117,42 @@ def main(argv: list[str] | None = None) -> int:
     for arch in archetypes:
         for setname in sets:
             for tkey in tree_keys:
-                for k in range(a.n_replicates):
-                    i += 1
-                    seed = a.seed0 + i
-                    rng = np.random.default_rng(seed)
-                    tree = _load_tree(grid["trees"][tkey], rng)
-                    repdir = a.out / f"{arch}_{setname}_{tkey}" / f"rep{k:03d}"
-                    rcfg = ReplicateConfig(
-                        archetype=arch, n_genes=a.n_genes,
-                        frac_planted_genes=a.frac_planted_genes,
-                        traitname=TRAITNAME, n_sites=a.n_sites,
-                        n_transitions=a.n_transitions,
-                        planted=(setname == "power"),
-                    )
-                    row = build_replicate(tree, rcfg, seed, repdir)
-                    row.update(set=setname, tree_key=tkey,
-                               dir=str(repdir.relative_to(a.out)))
-                    rows.append(row)
+                for mdf in mdfs:
+                    mtag = f"mdf{mdf.replace('.', '')}"
+                    for k in range(a.n_replicates):
+                        i += 1
+                        seed = a.seed0 + i
+                        rng = np.random.default_rng(seed)
+                        tree = _load_tree(grid["trees"][tkey], rng)
+                        subset = f"{arch}_{setname}_{tkey}_{mtag}"
+                        repdir = a.out / subset / f"rep{k:03d}"
+                        rcfg = ReplicateConfig(
+                            archetype=arch, n_genes=a.n_genes,
+                            frac_planted_genes=a.frac_planted_genes,
+                            traitname=TRAITNAME, n_sites=a.n_sites,
+                            n_transitions=a.n_transitions,
+                            planted=(setname == "power"),
+                        )
+                        row = build_replicate(tree, rcfg, seed, repdir)
+                        row.update(set=setname, tree_key=tkey,
+                                   min_divergent_fraction=mdf,
+                                   dir=str(repdir.relative_to(a.out)))
+                        rows.append(row)
 
-                    run_sh = repdir / "run.sh"
-                    run_sh.write_text(_RUN_SH.format(
-                        rep=row["dir"], arch=arch, set=setname, tree=tkey, seed=seed,
-                        repo=_REPO, env_sh=env_sh,
-                        align=(repdir / "align").resolve(),
-                        tree_nwk=(repdir / "tree.nwk").resolve(),
-                        traits=(repdir / "my_traits.tsv").resolve(),
-                        tq=row["top_quantile"], bq=row["bottom_quantile"],
-                        outbase=(repdir / "out").resolve(),
-                        workbase=(repdir / "work").resolve(),
-                        trait=TRAITNAME,
-                    ))
-                    run_sh.chmod(0o755)
-                    run_scripts.append(run_sh)
+                        run_sh = repdir / "run.sh"
+                        run_sh.write_text(_RUN_SH.format(
+                            rep=row["dir"], arch=arch, set=setname, tree=tkey, seed=seed,
+                            repo=_REPO, env_sh=env_sh,
+                            align=(repdir / "align").resolve(),
+                            tree_nwk=(repdir / "tree.nwk").resolve(),
+                            traits=(repdir / "my_traits.tsv").resolve(),
+                            tq=row["top_quantile"], bq=row["bottom_quantile"], mdf=mdf,
+                            outbase=(repdir / "out").resolve(),
+                            workbase=(repdir / "work").resolve(),
+                            trait=TRAITNAME,
+                        ))
+                        run_sh.chmod(0o755)
+                        run_scripts.append(run_sh)
 
     (a.out / "manifest.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
     run_all = a.out / "run_all.sh"
