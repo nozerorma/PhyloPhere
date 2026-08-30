@@ -185,8 +185,14 @@ stats.f <- function(df) {
         TRUE ~ "normal"
       ),
       global_label = dplyr::case_when(
-        (.data[[trait_col]] <= lower_thresh) & (.data[[trait_col]] < g_median) ~ "low_extreme",
-        (.data[[trait_col]] >= upper_thresh) & (.data[[trait_col]] > g_median) ~ "high_extreme",
+        # `<= g_median` / `>= g_median` (was `<` / `>`): the strict form makes a
+        # minority-foreground binary/bimodal trait un-labelable — median == the
+        # lower threshold == 0, so no species can be `< g_median`, and FADE's
+        # EXTRACT_EXTREME_SPECIES then finds no low_extreme set. No-op for a
+        # continuous trait (upper_thresh >= median >= lower_thresh always).
+        # Mirrors the same relaxation in lean_contrast_selector.R.
+        (.data[[trait_col]] <= lower_thresh) & (.data[[trait_col]] <= g_median) ~ "low_extreme",
+        (.data[[trait_col]] >= upper_thresh) & (.data[[trait_col]] >= g_median) ~ "high_extreme",
         TRUE ~ "normal"
       )
     ) %>%
@@ -203,8 +209,9 @@ stats.f <- function(df) {
         TRUE ~ "normal"
       ),
       taxa_label = dplyr::case_when(
-        (.data[[trait_col]] < taxa_q25) & (.data[[trait_col]] < taxa_median) ~ "low_extreme",
-        (.data[[trait_col]] > taxa_q75) & (.data[[trait_col]] > taxa_median) ~ "high_extreme",
+        # median-guard relaxed to `<=` / `>=` as in global_label above
+        (.data[[trait_col]] < taxa_q25) & (.data[[trait_col]] <= taxa_median) ~ "low_extreme",
+        (.data[[trait_col]] > taxa_q75) & (.data[[trait_col]] >= taxa_median) ~ "high_extreme",
         TRUE ~ "normal"
       )
     ) %>%

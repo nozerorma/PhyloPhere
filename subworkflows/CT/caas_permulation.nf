@@ -380,9 +380,23 @@ workflow CAAS_PERMULATION {
         resample_subset    // path resample_perms.tab
         tree_file          // path species tree
         universe           // path cleaned_background or NO_FILE
+        asr_ready          // gate: emits once the live CT_DISAMBIGUATION has
+                           // finished writing the shared ASR cache. A 'NO_GATE'
+                           // sentinel when ASR is precomputed / disambiguation
+                           // is off (no wait needed then).
 
     main:
-        def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, tree_file)
+        // CAAS_PERMS_DISAMBIGUATE ("load precomputed ASR once, replay N
+        // labelings") has NO compute-on-miss — it only reads --asr-cache-dir. In
+        // asr_mode=compute the live CT_DISAMBIGUATION_RUN populates that dir
+        // lazily and there is no other dependency edge between the two, so on a
+        // fast run the replay reads the cache before it is written and the whole
+        // permulation null comes out empty, silently. Hold the tree input until
+        // asr_ready emits so the replay always runs after the cache is complete.
+        def gated_tree = tree_file
+            .combine(asr_ready)
+            .map { t, _ready -> t }
+        def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree)
         def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_sample,
                                        scores.pos_quantiles, scores.pos_detail, universe)
 
