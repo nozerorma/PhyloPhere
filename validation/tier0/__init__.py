@@ -8,12 +8,16 @@ than a shared assumption, and background (non-adaptive) convergence actually
 arises the way it does in real data.
 
 Modules:
-    model.py          PAML rate-matrix parsing, reversible Q construction,
-                      per-site profile draws, discrete/continuous gamma rates
-    trees.py          tree loading / depth-preserving pruning / pathological
-                      trees (star, ladder) / foreground-transition sampling
+    model.py          PAML rate-matrix parsing, reversible Q, per-site profile
+                      draws, gamma rates
+    groups.py         GS1-GS4 amino-acid class tables (vendored from the pipeline)
+    trees.py          tree loading / depth-preserving pruning / star + ladder
+    pheno.py          make_paired_foreground — n_pairs fg/bg contrast pairs;
+                      binary (0/1 code) or rate (c/n + count columns) archetype
     simulate.py       evolve a sequence down a tree, inject planted positives
-                      (profile-shift and identical-AA convergence), write
-                      FASTA + phenotype.tsv + truth.json
-    make_replicates.py driver that emits the `null` and `power` replicate sets
+                      (identical_aa + grouped_caap), write FASTA + truth
+    replicate.py      one (tree, phenotype) draw -> n_genes alignments + support
+                      files + truth.json
+    build_project.py  the pipeline entrypoint via the GUI generation recipe
+    run_replicates.py stage + run the {binary, rate} x {null, power} gate
 """
