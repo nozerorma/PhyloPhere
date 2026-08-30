@@ -32,10 +32,13 @@ COLUMNS = [
     ("prune", "PRUNE"),
     ("prune_secondary", "PRUNE_SEC"),
     ("discrete_method", "DISCRETE"),
+    ("trait_type", "TRAIT_TYPE"),
 ]
 
 _CLASS1_ONLY = {"secondary", "n_trait", "c_trait", "prune", "prune_secondary"}
 _CLASS2_ONLY = {"discrete_method"}
+# CLASS 2 but never required — blank means auto-infer.
+_CLASS2_OPTIONAL = {"trait_type"}
 _REQUIRED_ALWAYS = {"trait"}
 
 _HEADER_TOOLTIPS = {
@@ -52,6 +55,13 @@ _HEADER_TOOLTIPS = {
     ),
     "prune_secondary": "Optional secondary prune list, same trigger rule as PRUNE.",
     "discrete_method": "CLASS 2 only: quantile | quintile | decile | median_sd | parameterized.",
+    "trait_type": (
+        "CLASS 2, optional. Blank/auto = infer (2-5 integer levels => coded fg/bg).\n"
+        "ordinal = force coded: highest level foreground, lowest background, any middle "
+        "level intermediate (excluded from contrasts) — use for binary presence/absence "
+        "or ordinal category phenotypes.\n"
+        "continuous = force quantile discretization via DISCRETE."
+    ),
 }
 
 _MISSING_TINT = QColor(255, 210, 210)
@@ -94,7 +104,7 @@ class PhenotypeTableModel(QAbstractTableModel):
 
     def _is_irrelevant(self, row: PhenotypeRow, field_name: str) -> bool:
         if row.trait_class == 1:
-            return field_name in _CLASS2_ONLY
+            return field_name in _CLASS2_ONLY or field_name in _CLASS2_OPTIONAL
         if row.trait_class == 2:
             return field_name in _CLASS1_ONLY
         return False

@@ -5,7 +5,7 @@ set -Eeuo pipefail
 # rather than hand-editing this file, unless you're making a one-off tweak.
 
 # --- ARGUMENTS ---
-CLASS="${1:?Usage: $0 <CLASS> <TRAIT> [SECONDARY_TRAIT] [N_TRAIT] [C_TRAIT] [PRUNE_FILE] [PRUNE_SECONDARY_FILE] [DISCRETE_METHOD]}"
+CLASS="${1:?Usage: $0 <CLASS> <TRAIT> [SECONDARY_TRAIT] [N_TRAIT] [C_TRAIT] [PRUNE_FILE] [PRUNE_SECONDARY_FILE] [DISCRETE_METHOD] [TRAIT_TYPE]}"
 TRAIT="${2:?TRAIT must be provided}"
 SECONDARY_TRAIT="${3:-}"
 N_TRAIT="${4:-}"
@@ -13,6 +13,7 @@ C_TRAIT="${5:-}"
 PRUNE_FILE="${6:-}"
 PRUNE_SECONDARY_FILE="${7:-}"
 DISCRETE_METHOD="${8:-}"
+TRAIT_TYPE="${9:-}"   # "" / auto = infer, ordinal = coded fg/bg, continuous = force quantiles
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 timestamp=$(date +%Y%m%d_%H%M%S)
@@ -306,6 +307,10 @@ fi
 
 # Class-specific values: resolve my_traits source, secondary/n/c traits, pruning,
 # and discrete_method based on CLASS before writing params.json.
+# trait_type applies to both classes: CLASS 1 count-rate traits are always
+# continuous (auto-detect won't fire), CLASS 2 discrete traits are where an
+# "ordinal" coded fg/bg phenotype lives. Pass through unchanged.
+_TRAIT_TYPE="$TRAIT_TYPE"
 if [ "$CLASS" = "1" ]; then
     _MY_TRAITS="$TRAIT_FILE"
     _SECONDARY_TRAIT="$SECONDARY_TRAIT"
@@ -388,6 +393,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "c_trait": "$_C_TRAIT",
   "branch_trait": "$BRANCH_TRAIT",
   "discrete_method": "$_DISCRETE_METHOD",
+  "trait_type": "$_TRAIT_TYPE",
   "prune_data": $_PRUNE_DATA,
   "prune_list": "$_PRUNE_LIST",
   "prune_list_secondary": "$_PRUNE_LIST_SECONDARY",
