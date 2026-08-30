@@ -46,3 +46,47 @@ SBATCH_*.sh
 run_phenotype_*.sh
 !example_*.sh
 
+
+# ── Cluster-local: personal run drivers ──
+/run_cancer_*.sh
+/run_carn_*.sh
+/run_diet_*.sh
+run_*_single_complete.sh
+run_*_single_exploratory.sh
+run_*_single.sh
+
+# ── Cluster-local: sbatch wrappers & job output ──
+SBATCH-scripts/
+SBATCH_runner/
+Slurm/
+slurm-*.out
+slurm-*.err
+
+# ── Cluster-local: ad-hoc GUI test run trees ──
+gui_carn_tests/
+gui_diet_tests/
+
+# ── Cluster-local: nested single-run pipeline copy ──
+/single/
+
+# ── Cluster-local: scratch work ──
+/scratch/
+delayed_run.log
+
+# ── Data blobs / debug under res/ (res/*.svg, res/*.png stay tracked) ──
+/res/debug/
+/res/*.tsv.gz
+
+# ── Run artifacts never to be committed again ──
+*.output
+*.phy.out
+/ali_sp_names.txt
+
+# ── Editor workspaces ──
+*.code-workspace
+
+# ── docs/ kept untracked (methods notes + bundled papers, curated out of band) ──
+/docs/
+
+# Keep example templates tracked (re-assert after the rules above)
+!example_*.sh
