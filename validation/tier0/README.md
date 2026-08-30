@@ -80,11 +80,12 @@ history flags it as a recurring hang).
 | `pheno.py` — `echo` (bimodal-continuous 0/1) + `bodysize` (BM) archetypes | **done**, tested (DECISIONS.md D-T0-C) |
 | `replicate.py` — genome-wide replicate: N genes on one tree+phenotype, planted fraction | **done**, tested |
 | `build_project.py` — Tier 0 `ProjectConfig` → `gui.generation.render` → `run_phenotype_single.sh` + `tier0_env.sh` (module set = D-T0-D) | **done** |
-| `run_replicates.py` — stage the replicate set + per-replicate `run.sh`; `--run` executes | **done**, staging verified end-to-end |
-| **first real pipeline smoke run** | **TODO** — needs the `phylophere` env + nextflow (local or cluster). One `echo_power` + one `echo_null` replicate, small `n_genes`. |
-| `harness/cli.py score` / `calibrate` — the pipeline-output adapter (which table, which column) | **TODO** — write against the first real run's `runs/tier0/**/out/` |
-| contrast-selection recovery metric (D-T0-A) | **TODO** — in the adapter |
-| `perm_strategy` lambda/FGBG variant sub-sets (D-T0-B) | later |
+| `run_replicates.py` — stage the replicate set + per-replicate `run.sh`; `--run` executes | **done** |
+| **first end-to-end pipeline run** | **DONE** (2026-08-30). `echo_power`, full 237-tip primate tree, 15 genes, 200 sites, `asr_mode=compute`. 28 processes, 3m, exit 0. `gene_scores.tsv` = exactly the 4 planted genes ranked by `gene_caas_score` (1.00 / 0.78 / 0.60 / 0.27); top `position_scores` all planted sites. CAAS permulation null non-empty (needed the pipeline race fix, D-T0-L). SCORING_REPORT renders. |
+| ASR precompute for all replicate genes + `asr_mode=precomputed` | **TODO** — `compute` only caches observed-significant genes, so null-only genes are excluded from the permulation null (visible warning). Precompute all (via `asr_only.py`) for a complete null; matches production. |
+| `harness/cli.py score` / `calibrate` — the pipeline-output adapter | **TODO** — write against `out_min/scoring/{gene,position}_scores.tsv` + `caas_permulation/perm_pos_*.tsv` |
+| contrast-selection recovery metric (D-T0-A) | **TODO** — operative fg = `traitfile_ok.tab` pairs vs planted origins |
+| `echo` + `bodysize` × `null` + `power` matrix, replicate count, scale-up | **TODO** |
 
 ### Run
 
