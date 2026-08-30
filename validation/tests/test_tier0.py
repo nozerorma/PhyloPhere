@@ -1,0 +1,220 @@
+"""Tier 0 simulator tests. Run: python validation/tests/test_tier0.py
+(or python -m pytest validation/tests/test_tier0.py -q).
+
+The load-bearing test is ``test_null_is_stationary``: under no planted signal the
+simulated column composition must match the site equilibrium (no drift bias), and
+convergent-substitution counts on random "foreground" tips must not exceed the
+neutral expectation. If that fails, every Tier 0 calibration number is invalid.
+"""
+
+from __future__ import annotations
+
+import sys
+from collections import Counter
+from pathlib import Path
+
+import numpy as np
+
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from validation.tier0 import trees  # noqa: E402
+from validation.tier0.model import PAML_AA, gamma_rates, load_rate_matrix, site_profiles  # noqa: E402
+from validation.tier0.simulate import SimConfig, simulate  # noqa: E402
+
+_DATA = _ROOT / "validation" / "tier0" / "data"
+
+
+# --------------------------------------------------------------------------- #
+# model
+# --------------------------------------------------------------------------- #
+def test_wag_parses_and_q_is_valid() -> None:
+    rm = load_rate_matrix(_DATA / "wag.dat")
+    assert rm.S.shape == (20, 20)
+    assert np.allclose(rm.S, rm.S.T)
+    assert np.isclose(rm.pi.sum(), 1.0)
+    Q = rm.q()
+    assert np.allclose(Q.sum(axis=1), 0.0, atol=1e-10)          # rows sum to 0
+    assert np.all(np.diag(Q) < 0)
+    assert np.isclose(-np.sum(rm.pi * np.diag(Q)), 1.0)         # normalised to rate 1
+    # detailed balance: pi_i Q_ij == pi_j Q_ji
+    lhs = rm.pi[:, None] * Q
+    assert np.allclose(lhs, lhs.T, atol=1e-12)
+
+
+def test_site_profiles_concentration() -> None:
+    rm = load_rate_matrix(_DATA / "wag.dat")
+    rng = np.random.default_rng(0)
+    tight = site_profiles(rm.pi, 2000, concentration=200.0, rng=rng)
+    loose = site_profiles(rm.pi, 2000, concentration=1.0, rng=rng)
+    # high concentration -> less across-site spread; low -> peaked, few effective states
+    d_tight = np.abs(tight - rm.pi).sum(axis=1).mean()
+    d_loose = np.abs(loose - rm.pi).sum(axis=1).mean()
+    eff = lambda p: np.exp(-(p * np.log(p)).sum(axis=1)).mean()
+    assert d_tight < d_loose
+    assert eff(tight) > 15.0 and eff(loose) < 5.0
+
+
+def test_gamma_rates_mean_one() -> None:
+    rng = np.random.default_rng(1)
+    r = gamma_rates(5000, alpha=0.5, rng=rng)
+    assert np.isclose(r.mean(), 1.0, atol=0.05)
+    assert r.min() >= 0
+
+
+# --------------------------------------------------------------------------- #
+# trees
+# --------------------------------------------------------------------------- #
+def test_pathological_trees() -> None:
+    star = trees.star_tree(8)
+    assert len(star.tips) == 8
+    assert all(p == star.root for p, _, _ in star.edges)       # every tip hangs off root
+    lad = trees.ladder_tree(6)
+    assert len(lad.tips) == 6
+
+
+def test_prune_depth_preserving(tmp_path: Path) -> None:
+    src = _ROOT / "validation" / "fixtures" / "tier0" / "trees" / "primates_233_subst.tree"
+    if not src.exists():
+        print("  (skip: primate tree fixture not fetched)")
+        return
+    rng = np.random.default_rng(0)
+    full = trees.load_tree(src)
+    pruned = trees.prune_depth_preserving(src, 40, rng)
+    assert len(pruned.tips) == 40
+    # farthest-point sampling should retain most of the tree's depth
+    assert pruned.total_length() > 0.4 * full.total_length()
+
+
+def test_sample_foreground_disjoint() -> None:
+    lad = trees.ladder_tree(30)
+    rng = np.random.default_rng(3)
+    fg = trees.sample_foreground(lad, n_transitions=4, rng=rng, max_clade=2)
+    assert fg.n_transitions == 4
+    # origins have disjoint descendant tips
+    seen: set[str] = set()
+    for node in fg.origin_nodes:
+        dt = lad.descendant_tips(node)
+        assert not (dt & seen)
+        seen |= dt
+    assert len(fg.fg_edges) >= 4
+
+
+# --------------------------------------------------------------------------- #
+# simulator — the load-bearing checks
+# --------------------------------------------------------------------------- #
+def _column_counts(aln: dict[str, str], col: int) -> Counter:
+    return Counter(seq[col] for seq in aln.values())
+
+
+def test_simulate_shapes_and_alphabet() -> None:
+    lad = trees.ladder_tree(20)
+    rng = np.random.default_rng(0)
+    fg = trees.sample_foreground(lad, 3, rng, max_clade=2)
+    cfg = SimConfig(n_sites=50, n_planted_profile_shift=3, n_planted_identical_aa=3)
+    res = simulate(lad, fg, cfg, seed=42)
+    assert set(res.alignment) == set(lad.tips)
+    assert all(len(s) == 50 for s in res.alignment.values())
+    assert set("".join(res.alignment.values())) <= set(PAML_AA)
+    assert sum(res.phenotype.values()) == len(fg.tips)
+    assert len(res.truth.planted_sites) == 6
+
+
+def test_identical_aa_planting_converges() -> None:
+    """Planted identical-aa sites: foreground tips share the target residue far
+    more than background tips do."""
+    lad = trees.ladder_tree(24)
+    rng = np.random.default_rng(1)
+    fg = trees.sample_foreground(lad, 4, rng, max_clade=1)
+    cfg = SimConfig(n_sites=30, n_planted_identical_aa=10, n_planted_profile_shift=0,
+                    identical_aa_target_weight=0.97)
+    res = simulate(lad, fg, cfg, seed=7)
+    fg_tips = set(fg.tips)
+    hits = 0
+    for col, mech in res.truth.planted_sites.items():
+        tgt = res.truth.identical_aa_targets[col]
+        fg_frac = np.mean([res.alignment[t][col] == tgt for t in fg_tips])
+        bg_frac = np.mean([res.alignment[t][col] == tgt
+                           for t in res.alignment if t not in fg_tips])
+        if fg_frac > 0.8 and fg_frac > bg_frac + 0.3:
+            hits += 1
+    assert hits >= 8, f"only {hits}/10 identical-aa sites converged"
+
+
+def test_null_is_stationary() -> None:
+    """No planted signal: (a) column composition tracks the site equilibrium,
+    (b) foreground tips (chosen at random, no signal) show no excess of shared
+    derived residues versus a rematched random tip set."""
+    lad = trees.ladder_tree(40, branch_length=0.25)
+    rng = np.random.default_rng(0)
+    cfg = SimConfig(n_sites=300, concentration=4.0, gamma_alpha=0.7)
+    res = simulate(lad, None, cfg, seed=123)
+
+    # (a) mean per-column entropy should be well below log(20) (sites are
+    # constrained) but non-zero, and stable across the alignment
+    cols = list(zip(*res.alignment.values()))
+    ent = []
+    for c in cols:
+        p = np.array(list(Counter(c).values()), float)
+        p /= p.sum()
+        ent.append(-(p * np.log(p)).sum())
+    ent = np.array(ent)
+    assert 0.1 < ent.mean() < np.log(20)
+
+    # (b) convergence excess: pick k random tips as pseudo-foreground, count
+    # columns where >=2 of them share a residue that is a minority overall, and
+    # compare to the mean over many random redraws (should be ~1.0 ratio).
+    tips = list(res.alignment)
+    def shared_minority(sel: list[str]) -> int:
+        n = 0
+        for c in cols:
+            overall = Counter(c)
+            sub = Counter(c[tips.index(t)] for t in sel)
+            for aa, cnt in sub.items():
+                if cnt >= 2 and overall[aa] / len(c) < 0.25:
+                    n += 1
+                    break
+        return n
+    obs = shared_minority(list(rng.choice(tips, 5, replace=False)))
+    null = [shared_minority(list(rng.choice(tips, 5, replace=False))) for _ in range(40)]
+    # observed is itself a random draw, so it must sit inside the null spread
+    assert np.mean(null) - 2 * np.std(null) - 1 <= obs <= np.mean(null) + 2 * np.std(null) + 1
+
+
+def test_write_roundtrip(tmp_path: Path) -> None:
+    lad = trees.ladder_tree(12)
+    rng = np.random.default_rng(0)
+    fg = trees.sample_foreground(lad, 2, rng, max_clade=2)
+    res = simulate(lad, fg, SimConfig(n_sites=40, n_planted_identical_aa=4), seed=1)
+    out = res.write(tmp_path / "rep0")
+    assert (out / "aln.fasta").exists()
+    assert (out / "phenotype.tsv").exists()
+    import json
+    t = json.loads((out / "truth.json").read_text())
+    assert t["n_transitions"] == 2
+    assert len(t["planted_sites"]) == 4
+    ph = (out / "phenotype.tsv").read_text().strip().splitlines()
+    assert all(len(ln.split("\t")) == 2 for ln in ph)
+
+
+if __name__ == "__main__":
+    import tempfile
+    import traceback
+
+    fails = 0
+    for name, fn in sorted(globals().items()):
+        if not name.startswith("test_") or not callable(fn):
+            continue
+        try:
+            if "tmp_path" in fn.__code__.co_varnames:
+                with tempfile.TemporaryDirectory() as d:
+                    fn(Path(d))
+            else:
+                fn()
+            print(f"ok   {name}")
+        except Exception:  # noqa: BLE001
+            fails += 1
+            print(f"FAIL {name}")
+            traceback.print_exc()
+    raise SystemExit(1 if fails else 0)

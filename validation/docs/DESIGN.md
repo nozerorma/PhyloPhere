@@ -23,7 +23,7 @@ makes tier *n+1* uninterpretable. Run in order: **3 → 1 → 0 → 2**.
 
 | Tier | Dataset | Phenotype axes covered | Truth | Source |
 |------|---------|------------------------|-------|--------|
-| 0 | simulated (empirical tree + planted shifts) | all cells of the trait matrix, by construction | generative | pyvolve/INDELible over a pruned Zoonomia tree + a star-topology pathological tree |
+| 0 | simulated (WAG + site-specific Dirichlet profiles, Gillespie; planted profile-shift & identical-AA convergence) | categorical/direct now; continuous + multi TODO | generative | primate tree (233→50, native + ×5) + mammal tree (719→50, deep null stress) + star/ladder pathological. See `tier0/` |
 | 1 | PEPC / C4 in sedges & grasses | categorical · single | ~21 manual sites (pos 780 validated) | Besnard 2009; Christin 2007; PCOC repo alignment |
 | 1 | RH1 spectral tuning in fish | continuous · single · direct **and** percentilized; categorical recode | ~12–30 mutagenesis/manual sites | Hauser 2017; Yokoyama 2008 |
 | 1 | echolocation (bats + toothed whales) | categorical · single; multi (n_trait=2) when paired with marine | 6 hearing genes + neutral-inflation expectation | Parker 2013 + the two reanalyses |

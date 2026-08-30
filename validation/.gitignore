@@ -9,6 +9,11 @@ fixtures/**/*.fa
 fixtures/**/*.phy
 fixtures/**/*.aln
 fixtures/**/*.newick
+fixtures/**/*.nwk
+fixtures/**/*.nh
+fixtures/**/*.tree
+fixtures/**/*.tre
+fixtures/**/*.tsv
 
 # Pipeline outputs
 runs/**
