@@ -58,12 +58,15 @@ The pipeline's ASR defaults to **LG, one profile per site** (`ct_disambig_asr_mo
 - exact **Gillespie** evolution along each branch — no matrix exponential;
   branch-specific rate matrices (planted positives) are free
 
-Two planted-positive mechanisms, recorded separately in `truth.json`:
-- `profile_shift` — foreground edges use a *different* Dirichlet profile (PCOC's
-  preference-shift model)
+One planted-positive mechanism (D-T0-02, revised):
 - `identical_aa` — foreground edges have a near-point-mass equilibrium on one
-  target residue → every fg lineage converges to the *same* residue (Zou & Zhang;
-  the strict-CAAS positive). Seeded at each origin edge.
+  target residue (the least-favoured residue under the site's background
+  profile) → every fg lineage converges to the *same* residue. Hard-set on each
+  origin edge, held by `Q_fg`. This is the strict-CAAS (US) positive and a
+  grouped-CAAP (GS1-GS4) hit for free.
+- `profile_shift` is **stripped** — a random preference shift is neither a US
+  nor a clean CAAP positive (CAAP schemes are grouped on `amino_encoded`). The
+  `SimConfig` hook stays dormant; a real grouped-CAAP mechanism is D-T0-N.
 
 ### Phenotype archetypes (`pheno.py`, DECISIONS.md D-T0-C)
 

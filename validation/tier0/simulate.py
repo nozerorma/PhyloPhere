@@ -7,14 +7,21 @@ Generative model (see ``tier0/__init__.py`` for why it differs from inference):
     * simulation by exact Gillespie along each branch (no matrix exponential;
       trivially handles branch-specific rate matrices)
 
-Planted positives, two mechanisms, recorded separately so recall can be reported
-per mechanism:
-    * ``profile_shift``  — on foreground edges the site uses a *different*
-      Dirichlet profile (a convergent shift in amino-acid preference; PCOC's
-      model).  Detected by preference-shift methods, not necessarily strict CAAS.
+Planted positives, recorded per site with their mechanism so recall can be
+reported per mechanism:
     * ``identical_aa``   — on foreground edges the site's equilibrium is a near
-      point mass on one target residue, so every foreground lineage converges to
-      the *same* amino acid (Zou & Zhang style; the strict-CAAS positive).
+      point mass on one target residue (the least-favoured residue under the
+      site's background profile), so every foreground lineage converges to the
+      *same* amino acid: the strict-CAAS (US) positive, and trivially also a
+      grouped-CAAP (GS*) hit since the shared residue is in one group.
+      The target is hard-set on each origin edge, then held by Q_fg.
+    * ``profile_shift``  — DORMANT (``n_planted_profile_shift`` defaults to 0 and
+      the replicate driver never sets it). On foreground edges the site would use
+      a *different* Dirichlet profile — a preference shift with no shared target
+      residue *or* group, so it is neither a US positive nor a clean CAAP
+      positive. Kept as a hook for a future grouped-CAAP planted mechanism
+      (target a shared ``amino_encoded`` physicochemical group, residue free
+      within it) — see DECISIONS.md D-T0-N.
 
 Output per replicate (``<outdir>/``):
     aln.fasta        amino-acid alignment, tips only, PAML/uppercase

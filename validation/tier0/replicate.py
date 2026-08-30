@@ -42,11 +42,13 @@ class ReplicateConfig:
     concentration: float = 4.0
     gamma_alpha: float = 0.7
     matrix: str = "wag"
-    # planted-gene signal
-    n_planted_profile_shift: int = 12
-    n_planted_identical_aa: int = 12
+    # planted-gene signal — identical-AA convergence only (D-T0-02). profile_shift
+    # is stripped: it is neither a strict-CAAS (US) positive nor a clean grouped
+    # CAAP positive (it does not target a shared amino_encoded group), so it only
+    # muddied the recall denominator. A proper grouped-CAAP planted mechanism is
+    # deferred (D-T0-N).
+    n_planted_identical_aa: int = 24
     identical_aa_target_weight: float = 0.95
-    shift_concentration: float = 2.0
     # phenotype
     n_transitions: int = 4               # echo: number of independent origins
     bodysize_quantile: float = 0.15      # bodysize: fg = top q of the BM draw
@@ -126,10 +128,9 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
         scfg = SimConfig(
             n_sites=rcfg.n_sites, concentration=rcfg.concentration,
             gamma_alpha=rcfg.gamma_alpha, matrix=rcfg.matrix,
-            n_planted_profile_shift=rcfg.n_planted_profile_shift if is_planted else 0,
+            n_planted_profile_shift=0,
             n_planted_identical_aa=rcfg.n_planted_identical_aa if is_planted else 0,
             identical_aa_target_weight=rcfg.identical_aa_target_weight,
-            shift_concentration=rcfg.shift_concentration,
         )
         res = simulate(tree, fg if is_planted else None, scfg, seed=seed * 100_000 + gi)
         _write_fasta(outdir / "align" / f"{gid}.fasta", res.alignment)

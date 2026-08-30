@@ -38,11 +38,26 @@ makes background convergence arise. `data/{wag,dayhoff,lg}.dat` vendored from th
 cluster PAML 4.10.10. Alternative considered: `iqtree2 --alisim` (rejected — less
 control over the profile-shift mechanism, and would share the inference tool).
 
-### D-T0-02 — ad-hoc: two planted-positive mechanisms, scored separately
-`profile_shift` (PCOC-style preference shift on fg edges) and `identical_aa`
-(Zou & Zhang same-residue convergence, seeded at each origin edge). Recorded
-separately in `truth.json` because CAAS strict mode and CAAP/FADE target
-different definitions.
+### D-T0-02 — MIGUEL (REVISED): one planted mechanism — `identical_aa` only
+`identical_aa` = same-residue convergence (Zou & Zhang / caastools US), hard-set
+on each origin edge, held by a near-point-mass Q_fg. Target = the least-favoured
+residue under the site's background Dirichlet profile, so the signal is
+unambiguous. It is also a grouped-CAAP (GS1-GS4) hit for free (shared residue ⊂
+shared group). `profile_shift` (the earlier PCOC-style preference shift) is
+**stripped** — Miguel: it is neither a strict-CAAS positive nor a clean CAAP
+positive because CAAP schemes are *grouped* on `amino_encoded`, and a random
+alternate profile does not converge to a shared physicochemical group. It only
+inflated the recall denominator with sites CAAS was never meant to call. The
+`SimConfig.n_planted_profile_shift` hook stays (dead-defaulted to 0).
+
+### D-T0-N — deferred: a real grouped-CAAP planted mechanism
+To exercise GS1-GS4 as more than a trivial by-product of `identical_aa`: on fg
+edges force the equilibrium onto a shared *amino_encoded group* (e.g. hydrophobic)
+but leave the residue free within it, so US sees divergent residues while the
+grouped schemes see convergence. Would let `score` separate US recall from GS
+recall. Needs the pipeline's group definitions (the `amino_encoded` recoding
+tables) mirrored in `model.py`. Not built — reopen if CAAP-scheme calibration
+becomes a Tier 0 goal.
 
 ### D-T0-01 — MIGUEL: trees  (REVISED — full primate tree, no prune)
 `primates_233_subst.tree` used **whole** (237 tips = 233 primates + 4 outgroups,
@@ -95,15 +110,25 @@ modules. Smoke run: gene precision@k 1.0, ranks 1-4 exact; site recall
 identical-residue detector); contrast Jaccard 0.8 (one origin's sister tip
 picked instead of the origin tip).
 
-### D-T0-M — ad-hoc: null-calibration p-value source is selectable (`--pcol`)
-`harness.cli calibrate --pcol` chooses among `meta_caas_boot` (default,
-`US_meta_caas.tsv:pvalue_boot`), `meta_caas_hyp`, `perm_pos_boot`
-(`perm_pos_pval.tsv:null_pvalue_boot`), `position_boot`, `position_hyp`. It
-pools the column across every null context (whole null-set replicates + the
-unplanted genes of power replicates) and runs `null_calibration` (KS uniformity
-+ type-I at nominal alpha). The gate is `meta_caas_boot`; the others are
-diagnostic. `perm_pos_boot` on the smoke run is degenerate-discrete (`n_cycles`
-50, many exact-zero) — needs a real null-set run to read.
+### D-T0-M — ad-hoc: what the null set actually tests + selectable p-value source
+The pipeline's null **is** the BM permulation (D-T0-B): `CAAS_PERMS_DISAMBIGUATE`
+replays N phenotype relabelings through detection + ASR, and `pvalue_boot` /
+`null_pvalue_boot` are that permulation p-value. So the Tier 0 null set (no
+planted signal, random foreground) is a *calibration check on the permulation*:
+when nothing convergent is associated with the trait, are those permulation
+p-values ~ U(0,1)? That is exactly `null_calibration` (KS uniformity + observed
+type-I at nominal α). It certifies **trait-association** type-I control; it does
+not by itself certify robustness to profile-heterogeneity background convergence
+except insofar as those chance convergences sometimes align with the random
+foreground across many replicates (which the KS test integrates over).
+
+`harness.cli calibrate --pcol` chooses the column: `meta_caas_boot` (default,
+gate — `US_meta_caas.tsv:pvalue_boot`), `meta_caas_hyp`, `perm_pos_boot`
+(`perm_pos_pval.tsv:null_pvalue_boot`), `position_boot`, `position_hyp`. Pooled
+across every null context = whole null-set replicates **plus** the unplanted
+genes of power replicates (primary source = the null-set replicates; the
+unplanted-gene tail is a secondary top-up). `perm_pos_boot` on the smoke run is
+degenerate-discrete (`n_cycles` 50) — needs a real null-set run to read.
 
 ### D-T0-B — MIGUEL: `perm_strategy = BM` only
 BM is the shipped default and matches RER's own BM-only null (`getPermsContinuous`),
