@@ -1023,6 +1023,15 @@ def _perms_worker(
             asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
         )
         if ctx is None:
+            # No cached ASR for this gene (asr-cache-dir is precomputed-only, no
+            # compute-on-miss). Genes that only ever appear under a NULL labeling
+            # are never processed by the observed-run disambiguation and so have
+            # no cache — they are excluded from the null. Warn rather than drop
+            # silently.
+            logger.warning(
+                f"[perms] no cached ASR for {gene} in {asr_cache_dir} — "
+                f"excluded from the permulation null"
+            )
             return (gene, [], [])
 
         alignment_data = ctx["alignment_data"]
@@ -1711,6 +1720,21 @@ def process_all_genes_perms(
         f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position,scheme) "
         f"rows across {len(hist_by_cycle)} cycles -> {detail_path.name}"
     )
+    if n_genes < len(genes):
+        logger.warning(
+            f"[perms] pass A scored {n_genes}/{len(genes)} genes with per-cycle CAAS — "
+            f"{len(genes) - n_genes} contributed nothing (no cached ASR, or no CAAS "
+            f"survived any replayed labeling). If asr_mode=compute, ensure the live "
+            f"disambiguation completed before this step and covers every gene that "
+            f"appears in the permulation discovery."
+        )
+    if n_detail_rows == 0:
+        logger.error(
+            "[perms] pass A produced ZERO detail rows — the permulation null is empty. "
+            "Downstream caas_perms.rds / FCS p.perm will be degenerate. Most common "
+            "cause: asr_mode=compute with the ASR cache not yet populated when this "
+            "step ran (see the gate in caas_permulation.nf / CAAS_PERMULATION)."
+        )
 
     # ── Pass B: rank within each cycle, score, aggregate ────────────────────────
     rank_lookup = build_percent_rank_lookup(hist_by_cycle)

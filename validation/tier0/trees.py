@@ -166,19 +166,50 @@ class Foreground:
         self.n_transitions = len(self.origin_nodes)
 
 
+def _node_depths(tree: PhyloTree) -> dict[int, float]:
+    """Root-to-node distance for every node (preorder over tree.edges)."""
+    d = {tree.root: 0.0}
+    for p, c, bl in tree.edges:
+        d[c] = d[p] + max(bl, 0.0)
+    return d
+
+
+def _clade_separation(tree: PhyloTree, a: int, b: int,
+                      depths: dict[int, float], parent_of: dict[int, int]) -> float:
+    """Patristic distance between two nodes = depth(a)+depth(b)-2*depth(lca)."""
+    anc_a = set()
+    x = a
+    while True:
+        anc_a.add(x)
+        if x == tree.root:
+            break
+        x = parent_of[x]
+    y = b
+    while y not in anc_a:
+        y = parent_of[y]
+    return depths[a] + depths[b] - 2 * depths[y]
+
+
 def sample_foreground(tree: PhyloTree, n_transitions: int, rng: np.random.Generator,
                       *, min_clade: int = 1, max_clade: int = 3,
                       max_fg_fraction: float = 0.5) -> Foreground:
-    """Pick ``n_transitions`` disjoint subtrees to be independent origins of the
-    foreground phenotype. Each origin is a node whose descendant tips (1..max_clade
-    of them) all become foreground; the subtending edge and every edge inside the
-    clade are "phenotype on".
+    """Pick ``n_transitions`` disjoint, **phylogenetically well-separated** subtrees
+    as independent origins of the foreground.
+
+    The separation matters: production contrast selection (independent-contrasts +
+    Dunn-gated pairing) merges origins that are too close, so poorly-spread planted
+    clades yield < ``min_contrasts`` operative pairs and the run skips. Origins are
+    chosen farthest-point: seed with a random candidate, then repeatedly add the
+    disjoint candidate that maximises its minimum patristic distance to the ones
+    already picked.
     """
     leaves = tree._leaves()
     n_tips = len(leaves)
     edge_index = {(p, c): i for i, (p, c, _) in enumerate(tree.edges)}
-    # candidate origin nodes: those with descendant-tip count in [min_clade, max_clade]
+    parent_of = {c: p for p, c, _ in tree.edges}
+    depths = _node_depths(tree)
     child_of = {c for _, c, _ in tree.edges}
+
     cand = []
     for node in range(tree.n_nodes):
         if node == tree.root and tree.root not in child_of:
@@ -186,21 +217,27 @@ def sample_foreground(tree: PhyloTree, n_transitions: int, rng: np.random.Genera
         dt = tree.descendant_tips(node)
         if min_clade <= len(dt) <= max_clade:
             cand.append(node)
-    rng.shuffle(cand)
+    rng.shuffle(cand)  # tie-break / seed randomness
 
-    chosen: list[int] = []
-    used_tips: set[str] = set()
     budget = int(n_tips * max_fg_fraction)
-    for node in cand:
-        if len(chosen) >= n_transitions:
+    chosen: list[int] = [cand[0]] if cand else []
+    used_tips: set[str] = set(tree.descendant_tips(cand[0])) if cand else set()
+
+    while len(chosen) < n_transitions:
+        best, best_sep = None, -1.0
+        for node in cand:
+            if node in chosen:
+                continue
+            dt = tree.descendant_tips(node)
+            if dt & used_tips or len(used_tips) + len(dt) > budget:
+                continue
+            sep = min(_clade_separation(tree, node, c, depths, parent_of) for c in chosen)
+            if sep > best_sep:
+                best, best_sep = node, sep
+        if best is None:
             break
-        dt = tree.descendant_tips(node)
-        if dt & used_tips:
-            continue
-        if len(used_tips) + len(dt) > budget:
-            continue
-        chosen.append(node)
-        used_tips |= dt
+        chosen.append(best)
+        used_tips |= tree.descendant_tips(best)
 
     if len(chosen) < n_transitions:
         raise ValueError(
