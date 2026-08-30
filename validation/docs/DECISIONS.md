@@ -93,15 +93,20 @@ Production: `caap_mode` ON (US + GS1/GS2/GS3), `patterns` 1,2,3,
 `run_replicates.py --divergent-fractions 0.5,1.0`. Nothing else changes between
 the two.
 
-### D-T0-E — MIGUEL: fix `lean_contrast_selector.R` (option A)
-The `& trait_vec > th$med` / `& trait_vec < th$med` extreme filters relaxed to
-`>= th$med` / `<= th$med`. A minority-foreground 0/1 vector has `median == lower
-== 0`, so the strict form left `low_sp` empty and the CAAS permulation pool could
-not fill. Production `3.CI-composition.Rmd` has no median gate; this brings the
-lean selector into line and is a no-op for any continuous trait. Committed on
-`validation`. **Coordinate**: `perms_lambda` branch has its own rewrite of this
-file that keeps the strict form — the same relax must be applied there before
-that branch merges, or it will regress.
+### D-T0-E — MIGUEL: relax the `& trait </> median` extreme-filter guard (option A)
+The strict median guard makes a minority-foreground binary/bimodal trait
+un-labelable (median == lower threshold == 0, nothing can be `< median`).
+Relaxed `<` -> `<=` and `>` -> `>=` at the median in **two** places, both no-ops
+for continuous traits (upper_thresh >= median >= lower_thresh always), both
+committed on `validation`:
+1. `lean_contrast_selector.R:143-144` — else `low_sp` empty -> CAAS permulation
+   pool cannot fill.
+2. `subworkflows/TRAIT_ANALYSIS/local/src/stats.R:188-189` (`global_label`) and
+   `206-207` (`taxa_label`) — else `trait_stats.csv` has no `low_extreme` and
+   FADE's `EXTRACT_EXTREME_SPECIES` crashes ("No bottom species found").
+Production `3.CI-composition.Rmd` categorises with no median gate, so this brings
+the three into line. **Coordinate**: `perms_lambda` branch has its own rewrite of
+`lean_contrast_selector.R` that keeps the strict form — reapply there before merge.
 
 ### D-T0-C — MIGUEL-approved (via D-T0-E): trait encoding per archetype
 - `echo` archetype: **exact 0/1** `--my_traits` column. RER auto-detects binary
