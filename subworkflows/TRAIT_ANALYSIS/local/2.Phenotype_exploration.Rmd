@@ -278,20 +278,31 @@ contrast_plot.f <- function(df, palette_values = NULL) {
 
   # --- Threshold boundary vlines: all four methods, active visually prominent ---
   .active_method <- if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile"
-  .q10  <- if ("g_q10"    %in% names(df)) df$g_q10[1]    else unname(quantile(df$value, 0.10, na.rm = TRUE))
-  .q20  <- if ("g_q20"    %in% names(df)) df$g_q20[1]    else unname(quantile(df$value, 0.20, na.rm = TRUE))
-  .q25  <- if ("g_q25"    %in% names(df)) df$g_q25[1]    else unname(quantile(df$value, 0.25, na.rm = TRUE))
-  .q75  <- if ("g_q75"    %in% names(df)) df$g_q75[1]    else unname(quantile(df$value, 0.75, na.rm = TRUE))
-  .q80  <- if ("g_q80"    %in% names(df)) df$g_q80[1]    else unname(quantile(df$value, 0.80, na.rm = TRUE))
-  .q90  <- if ("g_q90"    %in% names(df)) df$g_q90[1]    else unname(quantile(df$value, 0.90, na.rm = TRUE))
-  .sd.v <- if ("g_sd"     %in% names(df)) df$g_sd[1]     else sd(df$value, na.rm = TRUE)
+  .is_ordinal <- exists("is_ordinal_trait", inherits = TRUE) &&
+    is_ordinal_trait(df$value, if (exists("trait_type", inherits = TRUE)) trait_type else "auto")
   .med  <- if ("g_median" %in% names(df)) df$g_median[1] else median(df$value, na.rm = TRUE)
-  .thresh_methods <- list(
-    quartile  = list(lo = .q25,          hi = .q75,          style = "solid"),
-    quintile  = list(lo = .q20,          hi = .q80,          style = "dotdash"),
-    decile    = list(lo = .q10,          hi = .q90,          style = "dashed"),
-    median_sd = list(lo = .med - .sd.v,  hi = .med + .sd.v,  style = "dotted")
-  )
+  if (.is_ordinal) {
+    # Coded fg/bg trait: quantile methods are meaningless. One line per extreme
+    # code level (highest = foreground, lowest = background).
+    .lo <- if ("lower_thresh" %in% names(df)) df$lower_thresh[1] else min(df$value, na.rm = TRUE)
+    .hi <- if ("upper_thresh" %in% names(df)) df$upper_thresh[1] else max(df$value, na.rm = TRUE)
+    .active_method <- "ordinal"
+    .thresh_methods <- list(ordinal = list(lo = .lo, hi = .hi, style = "solid"))
+  } else {
+    .q10  <- if ("g_q10"    %in% names(df)) df$g_q10[1]    else unname(quantile(df$value, 0.10, na.rm = TRUE))
+    .q20  <- if ("g_q20"    %in% names(df)) df$g_q20[1]    else unname(quantile(df$value, 0.20, na.rm = TRUE))
+    .q25  <- if ("g_q25"    %in% names(df)) df$g_q25[1]    else unname(quantile(df$value, 0.25, na.rm = TRUE))
+    .q75  <- if ("g_q75"    %in% names(df)) df$g_q75[1]    else unname(quantile(df$value, 0.75, na.rm = TRUE))
+    .q80  <- if ("g_q80"    %in% names(df)) df$g_q80[1]    else unname(quantile(df$value, 0.80, na.rm = TRUE))
+    .q90  <- if ("g_q90"    %in% names(df)) df$g_q90[1]    else unname(quantile(df$value, 0.90, na.rm = TRUE))
+    .sd.v <- if ("g_sd"     %in% names(df)) df$g_sd[1]     else sd(df$value, na.rm = TRUE)
+    .thresh_methods <- list(
+      quartile  = list(lo = .q25,          hi = .q75,          style = "solid"),
+      quintile  = list(lo = .q20,          hi = .q80,          style = "dotdash"),
+      decile    = list(lo = .q10,          hi = .q90,          style = "dashed"),
+      median_sd = list(lo = .med - .sd.v,  hi = .med + .sd.v,  style = "dotted")
+    )
+  }
 
   # Create the plot base
   p <- ggplot(df, aes(x = value, y = taxa)) +
@@ -337,8 +348,14 @@ contrast_plot.f <- function(df, palette_values = NULL) {
     ggplot2::labs(x = capitalized_trait, 
                   y = paste(capitalized_taxon, "-", capitalized_clade), 
                   title = paste("Trait differential plot for trait:", capitalized_trait, "in", clade_name),
-                  subtitle = paste0("Active extreme threshold: ", .active_method,
-                                    "  |  styles \u2014 solid: quartile  dot-dash: quintile  dashed: decile  dotted: median\u00b1SD"),
+                  subtitle = if (.is_ordinal) {
+                    paste0("Ordinal fg/bg code \u2014 foreground = ", .thresh_methods$ordinal$hi,
+                           ", background = ", .thresh_methods$ordinal$lo,
+                           "; any middle level is intermediate (excluded from contrasts)")
+                  } else {
+                    paste0("Active extreme threshold: ", .active_method,
+                           "  |  styles \u2014 solid: quartile  dot-dash: quintile  dashed: decile  dotted: median\u00b1SD")
+                  },
                   caption = "Global median: longdash red line. Per-taxa median: blue error bars. Labelled: extreme-classified species.") +
     ggrepel::geom_text_repel(
       data = subset(df, global_label %in% c("low_extreme", "high_extreme")),

@@ -65,6 +65,11 @@ def validate(project: ProjectConfig) -> list[str]:
             errors.append(f"Phenotype row {i}: CLASS must be 1 or 2, got {row.trait_class!r}.")
         if row.trait_class == 2:
             require(row.discrete_method, f"Phenotype row {i}: discrete method is required for CLASS 2.")
+        if str(row.trait_type).strip().lower() not in ("", "auto", "ordinal", "continuous"):
+            errors.append(
+                f"Phenotype row {i}: TRAIT_TYPE must be blank, auto, ordinal, or continuous "
+                f"(got {row.trait_type!r})."
+            )
 
     # --- Precomputed Run tab: base_path required whenever any reuse box is checked ---
     any_precomp_checked = any(
