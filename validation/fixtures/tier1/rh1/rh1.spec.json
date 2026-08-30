@@ -1,0 +1,49 @@
+{
+  "name": "rh1_spectral",
+  "tree": "tree.nwk",
+  "provenance": "Hauser et al. 2017 MBE; Yokoyama 2008. Photic depth = approx. max depth of species' habitat (m); habitat recode by depth band. TOY VALUES for format illustration — replace with the real Hauser 2017 taxon set before running.",
+  "traits": [
+    {
+      "name": "photic_depth",
+      "kind": "continuous",
+      "higher_is_foreground": true,
+      "values": {
+        "bovine_RHO": 0.0,
+        "Danio_rerio": 5.0,
+        "Astyanax_mexicanus": 10.0,
+        "Oreochromis_niloticus": 8.0,
+        "Gasterosteus_aculeatus": 15.0,
+        "Oryzias_latipes": 6.0,
+        "Anoplopoma_fimbria": 900.0,
+        "Coryphaenoides_rupestris": 2000.0,
+        "Bathylagus_euryops": 1500.0,
+        "Sebastes_norvegicus": 400.0,
+        "Cyclothone_pallida": 1800.0,
+        "Chauliodus_sloani": 1200.0
+      }
+    },
+    {
+      "name": "habitat_deep",
+      "kind": "categorical",
+      "labels": {
+        "Anoplopoma_fimbria": "fg",
+        "Coryphaenoides_rupestris": "fg",
+        "Bathylagus_euryops": "fg",
+        "Cyclothone_pallida": "fg",
+        "Chauliodus_sloani": "fg",
+        "Danio_rerio": "bg",
+        "Astyanax_mexicanus": "bg",
+        "Oreochromis_niloticus": "bg",
+        "Gasterosteus_aculeatus": "bg",
+        "Oryzias_latipes": "bg"
+      },
+      "pairs": [
+        ["Anoplopoma_fimbria", "Sebastes_norvegicus"],
+        ["Coryphaenoides_rupestris", "Gasterosteus_aculeatus"],
+        ["Bathylagus_euryops", "Oryzias_latipes"],
+        ["Cyclothone_pallida", "Danio_rerio"],
+        ["Chauliodus_sloani", "Astyanax_mexicanus"]
+      ]
+    }
+  ]
+}

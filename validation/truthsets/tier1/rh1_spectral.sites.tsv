@@ -1,0 +1,24 @@
+# RH1 (rhodopsin) spectral-tuning sites — Tier 1 site-level truth set
+#
+# Numbering: bovine rhodopsin (RHO, UniProt P02699), the field-standard reference.
+# `ref_seq` must match the id of the bovine RH1 row carried in the fixture alignment.
+# tier: mutagenesis  = spectral shift confirmed by site-directed mutagenesis / regeneration
+#       manual-align  = repeatedly reported as convergent/adaptive in curated alignments
+# Sources (full refs in README.md): Yokoyama2008, Hauser2017, Yokoyama2014, Hunt2001
+#
+# NOTE: this is the high-confidence core. The broader "spectral tuning site" set
+# (~30 positions) should be transcribed from Hauser et al. 2017 Table S-x before
+# using recall as a headline number.
+gene	ref_seq	position	ref_aa	alt_aa	tier	source
+RH1	bovine_RHO	83	D	N	mutagenesis	Yokoyama2008
+RH1	bovine_RHO	122	E	Q	mutagenesis	Yokoyama2008
+RH1	bovine_RHO	292	A	S	mutagenesis	Yokoyama2008
+RH1	bovine_RHO	261	F	Y	mutagenesis	Yokoyama2008
+RH1	bovine_RHO	269	A	T	mutagenesis	Yokoyama2014
+RH1	bovine_RHO	164	A	S	mutagenesis	Yokoyama2008
+RH1	bovine_RHO	96	Y	.	manual-align	Hauser2017
+RH1	bovine_RHO	102	G	.	manual-align	Hauser2017
+RH1	bovine_RHO	183	M	.	manual-align	Hauser2017
+RH1	bovine_RHO	195	P	.	manual-align	Hauser2017
+RH1	bovine_RHO	299	A	.	manual-align	Hauser2017
+RH1	bovine_RHO	300	I	.	manual-align	Hauser2017

@@ -1,0 +1,18 @@
+# PEPC (phosphoenolpyruvate carboxylase, ppc-1E1c) C4-associated sites — Tier 1
+#
+# Phenotype: C3 vs C4 photosynthesis in Cyperaceae / grasses.
+# Numbering: maize C4 PEPC (ZmPEPC, "C4-form"); `ref_seq` = the maize/reference
+# PEPC row in the fixture alignment.
+# tier: mutagenesis  = functional effect shown (malate sensitivity / kinetics)
+#       manual-align  = positive selection on the C4 branches (Christin/Besnard)
+# Sources (README.md): Blasing2000, Christin2007, Besnard2009, Christin2012
+#
+# NOTE: position 780 is the well-validated C4 determinant (Ala->Ser). The
+# remaining ~20 codons under C4-associated positive selection must be transcribed
+# from Christin et al. 2007 Table 1 / Besnard et al. 2009 before recall is
+# reported as a headline number. Rows below marked TODO are placeholders.
+gene	ref_seq	position	ref_aa	alt_aa	tier	source
+PEPC	maize_PEPC	780	A	S	mutagenesis	Blasing2000
+PEPC	maize_PEPC	733	.	.	manual-align	Christin2007
+PEPC	maize_PEPC	761	.	.	manual-align	Christin2007
+# TODO transcribe remaining C4-selected codons from Christin2007 / Besnard2009

@@ -1,0 +1,21 @@
+# Echolocation (laryngeal) — Tier 1 gene-level truth set
+#
+# Phenotype: echolocating bats (Yangochiroptera + Rhinolophoidea) + toothed
+# whales (Odontoceti) vs non-echolocating outgroups.
+# direction: fg-shift = convergent AA change / preference shift on echolocating branches
+# tier: mutagenesis = functional convergence demonstrated
+#       reanalysis  = reported as convergent in >=1 of Parker2013 / Thomas2015 /
+#                     ZouZhang2015 / Davies2012 (treat as weak positive)
+#
+# IMPORTANT: this dataset is also a NEGATIVE control for the null. Parker et al.
+# 2013 claimed genome-wide convergence that Thomas & Hahn 2015 and Zou & Zhang
+# 2015 showed was mostly expected under a neutral model. PhyloPhere passes this
+# tier only if it (a) ranks the genes below highly AND (b) the permulation /
+# bootstrap null suppresses the genome-wide inflation. See ../../tier1/README.md.
+gene	direction	tier	source
+SLC26A5	fg-shift	mutagenesis	Liu2010
+TMC1	fg-shift	reanalysis	Davies2012
+PJVK	fg-shift	reanalysis	Davies2012
+CDH23	fg-shift	reanalysis	Shen2012
+OTOF	fg-shift	reanalysis	Shen2012
+KCNQ4	fg-shift	reanalysis	Liu2011

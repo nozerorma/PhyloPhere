@@ -1,0 +1,20 @@
+# Heavy / derived fixture content — never committed.
+# Specs and per-fixture READMEs ARE tracked (they are small and describe how to
+# rebuild everything else).
+fixtures/**/align/
+fixtures/**/aln/
+fixtures/**/*.nwk
+fixtures/**/*.fasta
+fixtures/**/*.fa
+fixtures/**/*.phy
+fixtures/**/*.aln
+fixtures/**/*.newick
+
+# Pipeline outputs
+runs/**
+!runs/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.metrics_cache/
