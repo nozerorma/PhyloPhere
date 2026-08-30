@@ -125,7 +125,11 @@ def tier0_project(
     r.enabled = True
     r.rer_tool_build_trait = r.rer_tool_build_tree = r.rer_tool_build_matrix = True
     r.rer_tool_continuous = True
-    r.rer_trait_mode = "auto"
+    r.rer_trait_mode = "auto"       # echo -> binary (2 unique vals); bodysize -> continuous
+    # NOT the GUI default "ha_logit" (that needs n_trait/c_trait count columns and
+    # would stop() without them). "auto": binary path takes no transform; the BM
+    # bodysize trait is ~normal so auto -> raw values. OPEN — Q-T0-F.
+    r.rer_transform = "auto"
     r.rer_perm_batches = rer_perm_batches
     r.rer_perms_per_batch = rer_perms_per_batch
     r.rer_minsp = "10"

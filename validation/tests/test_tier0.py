@@ -184,19 +184,19 @@ def test_null_is_stationary() -> None:
     assert np.mean(null) - 2 * np.std(null) - 1 <= obs <= np.mean(null) + 2 * np.std(null) + 1
 
 
-def test_pheno_echo_bimodal_and_edges() -> None:
+def test_pheno_echo_exact_binary_and_cuts() -> None:
     lad = trees.ladder_tree(40, branch_length=0.2)
     rng = np.random.default_rng(0)
     ph = _pheno.make_echo(lad, n_transitions=4, rng=rng)
     vals = np.array(list(ph.values.values()))
     fg = set(ph.foreground_tips)
-    # bimodal: fg high, bg low, clear gap
-    assert min(ph.values[t] for t in fg) > 0.8
-    assert max(ph.values[t] for t in ph.values if t not in fg) < 0.2
-    # quantile cuts sit inside their clusters
-    lo, hi = np.quantile(vals, ph.bottom_quantile), np.quantile(vals, ph.top_quantile)
-    assert lo < 0.2 and hi > 0.8
-    # every fg edge's child subtree is entirely foreground
+    assert ph.kind == "binary"
+    assert set(vals.tolist()) == {0.0, 1.0}                       # exact 0/1
+    assert all(ph.values[t] == 1.0 for t in fg)
+    assert all(ph.values[t] == 0.0 for t in ph.values if t not in fg)
+    # quantile cuts: top threshold lands on the 1s, bottom on the 0s
+    assert np.quantile(vals, ph.top_quantile) == 1.0
+    assert np.quantile(vals, ph.bottom_quantile) == 0.0
     assert ph.n_transitions >= 3
     assert len(ph.fg_edges) >= ph.n_transitions
 

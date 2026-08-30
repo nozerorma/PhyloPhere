@@ -140,8 +140,16 @@ evaluate_lean_contrast_selection <- function(trait_vec,
     high_sp <- low_sp <- sp
   } else {
     th <- lean_thresholds(trait_vec, discrete_method, bottom_quantile, top_quantile)
-    high_sp <- names(trait_vec)[trait_vec >= th$upper & trait_vec > th$med]
-    low_sp  <- names(trait_vec)[trait_vec <= th$lower & trait_vec < th$med]
+    # The `>= th$med` / `<= th$med` guard (was `>` / `<`) only matters when the
+    # median coincides with a threshold, which is exactly the binary / bimodal
+    # case: a minority-foreground 0/1 vector has median == lower == 0, so the
+    # strict `< th$med` made `low_sp` empty and the permulation pool unfillable.
+    # The production discrete path (3.CI-composition.Rmd) has no median gate at
+    # all — it categorises purely on `trait >= upper_thresh` / `<= lower_thresh` —
+    # so relaxing to non-strict here brings the two into line and is a no-op for
+    # every continuous trait (upper_thresh >= median >= lower_thresh always).
+    high_sp <- names(trait_vec)[trait_vec >= th$upper & trait_vec >= th$med]
+    low_sp  <- names(trait_vec)[trait_vec <= th$lower & trait_vec <= th$med]
     if (length(high_sp) < target_pairs || length(low_sp) < target_pairs) {
       return(reject("not enough extreme species to form target_pairs"))
     }

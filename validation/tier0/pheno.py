@@ -106,38 +106,36 @@ def _fg_edges_for_tips(tree: PhyloTree, fg_tips: set[str]) -> tuple[set[int], li
 # archetypes
 # --------------------------------------------------------------------------- #
 def make_echo(tree: PhyloTree, n_transitions: int, rng: np.random.Generator,
-              *, max_clade: int = 3, gap: tuple[float, float] = (0.15, 0.85)) -> Phenotype:
-    """Presence/absence archetype.
+              *, max_clade: int = 3) -> Phenotype:
+    """Presence/absence archetype — **exact 0/1** ``--my_traits`` column.
 
-    NOT fed as exact 0/1: the lean permulation selector
-    (``lean_contrast_selector.R``) filters extremes with ``trait > median`` /
-    ``trait < median``, and a minority-foreground 0/1 vector has median 0, so its
-    low group comes out empty and the CAAS permulation pool cannot fill (the run
-    then fails loudly). Instead the trait is **bimodal continuous** — foreground
-    tips just below 1, background just above 0, with a clear gap — which is
-    morally binary for contrast selection / FADE while keeping the permulation
-    selector's median split well-defined. RER consequently runs in continuous
-    mode for this archetype too (see DECISIONS.md D-T0-C).
+    RER auto-detects this as binary (exactly two unique values) and runs
+    ``foreground2Tree`` / the binary path. Contrast selection's production
+    discrete path categorises it trivially (1s -> top, 0s -> bottom). The CAAS
+    permulation works only because ``lean_contrast_selector.R`` was relaxed from
+    ``trait > median`` to ``trait >= median`` (DECISIONS.md D-T0-E / the pipeline
+    fix) — a minority-foreground 0/1 vector has ``median == 0`` and the strict
+    form left ``low_sp`` empty.
+
+    ``top_quantile`` / ``bottom_quantile`` are set from the foreground fraction so
+    ``quantile(trait, top_quantile) == 1`` (picks exactly the 1s as "top") and
+    ``quantile(trait, bottom_quantile) == 0`` (picks the 0s as "bottom"), which
+    is also what FADE's ``EXTRACT_EXTREME_SPECIES`` uses.
     """
     fg = sample_foreground(tree, n_transitions, rng, max_clade=max_clade)
     fg_set = set(fg.tips)
-    n_tips = len(tree.tips)
-    fg_frac = len(fg_set) / n_tips
-    lo_hi, hi_lo = gap
-    values = {
-        t: (float(rng.uniform(hi_lo, 1.0)) if t in fg_set
-            else float(rng.uniform(0.0, lo_hi)))
-        for t in tree.tips
-    }
+    fg_frac = len(fg_set) / len(tree.tips)
+    values = {t: (1.0 if t in fg_set else 0.0) for t in tree.tips}
     return Phenotype(
-        archetype="echo", kind="continuous", values=values,
+        archetype="echo", kind="binary", values=values,
         foreground_tips=sorted(fg_set), origin_nodes=list(fg.origin_nodes),
         fg_edges=set(fg.fg_edges),
-        # cuts land safely inside the high / low clusters
+        # top_quantile above (1 - fg_frac) => threshold falls on the 1s;
+        # bottom_quantile below (1 - fg_frac) => threshold falls on the 0s.
         top_quantile=float(np.clip(1.0 - 0.5 * fg_frac, 0.55, 0.98)),
-        bottom_quantile=float(np.clip(0.5 * (1.0 - fg_frac), 0.02, 0.45)),
+        bottom_quantile=float(np.clip((1.0 - fg_frac) * 0.5, 0.02, 0.45)),
         notes={"fg_fraction": fg_frac, "n_transitions_requested": n_transitions,
-               "encoding": "bimodal-continuous (see docstring)"},
+               "encoding": "exact 0/1"},
     )
 
 

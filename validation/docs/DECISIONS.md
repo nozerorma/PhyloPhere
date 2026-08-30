@@ -80,20 +80,22 @@ BM is the shipped default (`CaasConfig.perm_strategy = "BM"`). `lambda` (the
 added as variant sub-sets once BM is calibrated. RER's own null is BM-only
 (`getPermsContinuous`), so BM keeps the two modules' nulls comparable.
 
-### D-T0-C — ad-hoc (reversible): trait encoding per archetype
-- `echo` archetype: **bimodal continuous**, NOT exact 0/1. Foreground tips get
-  U(0.85, 1.0), background U(0.0, 0.15), clear gap. Reason: the lean permulation
-  selector (`lean_contrast_selector.R`) filters extremes with `trait > median`
-  and `trait < median`; a minority-foreground 0/1 vector has median 0 so its low
-  group is empty and `permulations.R` cannot fill the pool → the run fails. The
-  bimodal encoding is morally binary for contrast selection / FADE but keeps the
-  median split well-defined. **Cost**: RER runs continuous (not binary) for this
-  archetype, so the RER binary-mode path is not exercised by Tier 0.
-  **Flag for Miguel**: the `& trait_vec < th$med` / `& trait_vec > th$med`
-  clauses in `lean_contrast_selector.R::evaluate_lean_contrast_selection` look
-  like they make a genuinely binary trait un-permulable in production too — the
-  production `3.CI-composition.Rmd` discrete path has no such median clause. Not
-  fixed here; noted.
+### D-T0-E — MIGUEL: fix `lean_contrast_selector.R` (option A)
+The `& trait_vec > th$med` / `& trait_vec < th$med` extreme filters relaxed to
+`>= th$med` / `<= th$med`. A minority-foreground 0/1 vector has `median == lower
+== 0`, so the strict form left `low_sp` empty and the CAAS permulation pool could
+not fill. Production `3.CI-composition.Rmd` has no median gate; this brings the
+lean selector into line and is a no-op for any continuous trait. Committed on
+`validation`. **Coordinate**: `perms_lambda` branch has its own rewrite of this
+file that keeps the strict form — the same relax must be applied there before
+that branch merges, or it will regress.
+
+### D-T0-C — MIGUEL-approved (via D-T0-E): trait encoding per archetype
+- `echo` archetype: **exact 0/1** `--my_traits` column. RER auto-detects binary
+  and runs `foreground2Tree` / the binary path. Contrast selection's production
+  discrete path categorises trivially; the CAAS permulation works because of the
+  D-T0-E fix. `top_quantile` / `bottom_quantile` set so the cut lands on the 1s
+  (top) / 0s (bottom), which is also FADE's `EXTRACT_EXTREME_SPECIES` input.
 - `bodysize` archetype: a **simulated Brownian-motion continuous trait** on the
   tree; foreground = its top-quantile tips (emergent, not pre-sampled); the
   molecular signal is planted on exactly those tips' lineages. RER continuous.
