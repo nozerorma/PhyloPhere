@@ -44,13 +44,18 @@ control over the profile-shift mechanism, and would share the inference tool).
 separately in `truth.json` because CAAS strict mode and CAAP/FADE target
 different definitions.
 
-### D-T0-01 — MIGUEL: trees
-`primates_233_subst.tree` (233 tips, total length 1.30) pruned to 50 by
-farthest-point = the regime actually run + `primate_x5` (branch lengths ×5,
-**synthetic**, for a non-degenerate power curve) + `speciesTree_speciesname_pruned.nh`
-(719 tips, length 29.3) pruned to 50 = deep-tree null stress + star/ladder
-(built in code) = ASR path-score edge cases. Fetched from cluster
-`external_phylogenies/`, gitignored.
+### D-T0-01 — MIGUEL: trees  (REVISED — full primate tree, no prune)
+`primates_233_subst.tree` used **whole** (237 tips = 233 primates + 4 outgroups,
+total length 1.30) — exactly what production runs on. The earlier 50-tip prune
+left production contrast selection unable to form ≥ `min_contrasts` (3)
+Dunn-independent pairs (50 tips is too sparse for the independent-contrasts
+algorithm on a shallow tree; the run skipped at CHECK_MIN_CONTRASTS). Miguel:
+disambiguation on 233 species is ~minutes at Tier 0 gene counts, no reason to
+prune. `primate_x5` = same tree, branch lengths ×5 (**synthetic**, non-degenerate
+power curve). `mammal` = `speciesTree_speciesname_pruned.nh` pruned to 60 (deep
+null stress). `star`/`ladder` (in code) = ASR path-score edge cases.
+`sample_foreground` auto-excludes the 4 outgroups (Mus/Oryctolagus/Tupaia/
+Galeopterus — terminal branch > 5× the 95th pct) from being foreground.
 
 ---
 
@@ -156,6 +161,22 @@ name/sequence delimiter — a latent PAML-format bug, flagged), `family` column 
 the `filtered_discovery.tsv` emitter is `when: gene_filter_mode != 'none'` and
 SCORING starves without it; "dubious" only drops IQR-outlier genes with
 spatially-clustered CAAS, which planted genes are not).
+
+### D-T0-L — MIGUEL: fix the `asr_mode=compute` permulation race in the PIPELINE
+Miguel: "ideally on compute, caas_perms_disambiguate should run after, reusing
+the computed asr." Done (commit `8d8b7e7`):
+- `caas_permulation.nf` `CAAS_PERMULATION` gains an `asr_ready` gate; the replay's
+  tree input is held via `.combine(asr_ready)` until it emits.
+- `main.nf` passes `disambiguation_results.master_csv` as the gate when
+  `ct_disambiguation && asr_mode==compute`; `NO_GATE` sentinel otherwise.
+- `gene_wrapper.py`: the perms replay now WARNs per uncached gene (was silent),
+  WARNs on partial coverage, ERRORs on a zero-row pass A.
+Known residual: in `compute` mode, genes that appear only under a NULL labeling
+(never in the observed-significant set) have no cached ASR and contribute nothing
+to the null — now visible as a warning, but for a complete null use
+`precomputed` with a full ASR cache (which is what production does).
+Tier 0 stays on `asr_mode=compute` (D-T0-D) with the gate; the residual is small
+at Tier 0's gene count and the warning makes it auditable.
 
 ## Pipeline bugs surfaced by Tier 0 (all on `validation`)
 - `lean_contrast_selector.R:143` + `stats.R:188,206` — `& trait </> median` guard
