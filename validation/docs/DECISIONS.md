@@ -171,12 +171,16 @@ the computed asr." Done (commit `8d8b7e7`):
   `ct_disambiguation && asr_mode==compute`; `NO_GATE` sentinel otherwise.
 - `gene_wrapper.py`: the perms replay now WARNs per uncached gene (was silent),
   WARNs on partial coverage, ERRORs on a zero-row pass A.
-Known residual: in `compute` mode, genes that appear only under a NULL labeling
-(never in the observed-significant set) have no cached ASR and contribute nothing
-to the null — now visible as a warning, but for a complete null use
-`precomputed` with a full ASR cache (which is what production does).
-Tier 0 stays on `asr_mode=compute` (D-T0-D) with the gate; the residual is small
-at Tier 0's gene count and the warning makes it auditable.
+Follow-up (commit `fe5279b`, Miguel-approved): `_load_gene_asr_context` now uses
+`run_asr_pipeline(skip_if_exists=True)` — loads the cache on a hit, **computes
+ASR into the cache on a miss**. So the perms replay is robust to null-only genes
+(appear only under a shuffled labeling, never observed-significant, never cached
+by the main disambiguation). Gate + compute-on-miss together: the gate ensures
+the observed genes are cached first (no duplicate work / no race), compute-on-miss
+handles the null-only tail. `asr_mode=compute` now yields a **complete**
+permulation null. Verified on the smoke: null went from 4 → 9 contributing genes
+(4 planted + 5 null-only), `asr_cache/` ends with all 15 genes, `perm_pos_pval`
+30 → 208 rows, `null_pvalue_boot` no longer degenerate-flat.
 
 ## Pipeline bugs surfaced by Tier 0 (all on `validation`)
 - `lean_contrast_selector.R:143` + `stats.R:188,206` — `& trait </> median` guard
