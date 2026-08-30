@@ -143,9 +143,11 @@ quick smoke tests. Gated by `--ct_tool` (comma list of `discovery,resample,boots
 
 ### CONTRAST_SELECTION — trait/tree preprocessing
 Prunes the alignment/tree to the species with usable trait data and selects
-foreground/background extremes via an independent-contrasts algorithm, with
-optional Jeffreys-CI-aware composition for population-count traits
-(`--n_trait`/`--c_trait`). Enforces `--min_contrasts` before letting CT run.
+foreground/background extremes via an independent-contrasts algorithm: quantile
+discretisation for continuous traits, Jeffreys-CI non-overlap for population-count
+traits (`--n_trait`/`--c_trait`), or a direct foreground/background split for
+binary and ordinal-code traits (`--trait_type ordinal`, auto-detected for 2–5
+integer levels). Enforces `--min_contrasts` before letting CT run.
 
 ### CT_SIGNIFICATION — genome-wide significance
 Computes FDR-corrected statistical significance of discovered CAAS from the
@@ -335,8 +337,9 @@ These parameters define the primary input data files, phenotype target, and modu
 | `toy_mode` / `toy_n` | `false` / `200` | Subsamples `N` random alignments for quick end-to-end smoke testing. |
 | `n_trait` / `c_trait` | `""` | Total sample size (`n_trait`) and case count (`c_trait`) for prevalence/frequency phenotypes. |
 | `secondary_trait` / `branch_trait` | `""` | Optional secondary trait column for reports / trait column for branch coloring. |
-| `discrete_method` | `"quintile"` | Method for discrete phenotype categorization (`quartile`, `quintile`, `decile`, `median_sd`, `parameterized`). |
+| `discrete_method` | `"quintile"` | Method for discrete phenotype categorization (`quartile`, `quintile`, `decile`, `median_sd`, `parameterized`). Ignored when the trait is treated as ordinal (see `trait_type`). |
 | `top_quantile` / `bottom_quantile` | `"0.90"` / `"0.10"` | Upper and lower quantiles used when `discrete_method = "parameterized"`. |
+| `trait_type` | `""` | `""`/`auto` infers; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) instead of quantile-discretising it — use for binary presence/absence or ordinal category phenotypes; `continuous` forces quantile discretisation. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. |
 | `contrast_max_iter` | `"3"` | Maximum iteration depth for contrast selection. |
 | `min_contrasts` | `3` | Minimum foreground contrast pairs required to proceed with CT analysis. |
 | `prune_data` / `prune_list` | `""` / `""` | Flags and species list files for species-level dataset pruning. |

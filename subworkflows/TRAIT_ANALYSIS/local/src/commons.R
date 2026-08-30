@@ -208,8 +208,12 @@ if (!is.na(branch_trait_resolved)) {
 discrete_method <- if (exists("params") && !is.null(params$discrete_method) && nzchar(params$discrete_method)) params$discrete_method else "decile"
 top_quantile    <- if (exists("params") && !is.null(params$top_quantile)    && nzchar(params$top_quantile))    as.numeric(params$top_quantile)    else 0.90
 bottom_quantile <- if (exists("params") && !is.null(params$bottom_quantile) && nzchar(params$bottom_quantile)) as.numeric(params$bottom_quantile) else 0.10
-debug_log("discrete_method = %s, top_quantile = %.2f, bottom_quantile = %.2f",
-          discrete_method, top_quantile, bottom_quantile)
+# trait_type: "" / "auto" (infer coded vs continuous), "ordinal" (force fg/bg
+# code — highest level = foreground, lowest = background), "continuous" (force
+# quantile discretisation). Consumed by stats.R::compute_trait_thresholds.
+trait_type <- if (exists("params") && !is.null(params$trait_type) && nzchar(params$trait_type)) tolower(params$trait_type) else "auto"
+debug_log("discrete_method = %s, top_quantile = %.2f, bottom_quantile = %.2f, trait_type = %s",
+          discrete_method, top_quantile, bottom_quantile, trait_type)
 
 # Maximum iterations for the contrast selection algorithm
 contrast_max_iter <- if (exists("params") && !is.null(params$contrast_max_iter) && nzchar(params$contrast_max_iter)) as.integer(params$contrast_max_iter) else 3L

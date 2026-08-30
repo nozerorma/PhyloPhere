@@ -31,6 +31,7 @@ params:
   discrete_method: "decile"
   top_quantile: "0.90"
   bottom_quantile: "0.10"
+  trait_type: ""
   contrast_max_iter: "3"
 ---
 

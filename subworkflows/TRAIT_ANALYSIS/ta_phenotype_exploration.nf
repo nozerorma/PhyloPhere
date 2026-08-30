@@ -36,6 +36,7 @@ process PHENOTYPE_EXPLORATION {
     def discrete_method = params.discrete_method ?: 'quartile'
     def top_quantile = params.top_quantile ?: '0.75'
     def bottom_quantile = params.bottom_quantile ?: '0.25'
+    def trait_type = params.trait_type ?: ''
     def contrast_max_iter = params.contrast_max_iter ?: '3'
 
     if (params.use_singularity | params.use_apptainer) {
@@ -59,6 +60,7 @@ process PHENOTYPE_EXPLORATION {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'
@@ -88,6 +90,7 @@ process PHENOTYPE_EXPLORATION {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'
