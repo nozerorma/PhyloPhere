@@ -73,8 +73,9 @@ MIN_DIVERGENT_FRACTION="{mdf}"
 SEED="{seed}"
 CAAS_OUTBASE="{outbase}"
 WORK_BASE="{workbase}"
+ASR_CACHE_DIR="{asr_cache}"
 set +a
-mkdir -p "$CAAS_OUTBASE" "$WORK_BASE"
+mkdir -p "$CAAS_OUTBASE" "$WORK_BASE" "$ASR_CACHE_DIR"
 exec bash "{repo}/run_phenotype_single.sh" 2 {trait} "" "" "" "" "" parameterized
 """
 
@@ -153,6 +154,7 @@ def main(argv: list[str] | None = None) -> int:
                     tq=row["top_quantile"], bq=row["bottom_quantile"], mdf=mdf,
                     outbase=(repdir / "out").resolve(),
                     workbase=(repdir / "work").resolve(),
+                    asr_cache=(repdir / "asr_cache").resolve(),
                     trait=TRAITNAME,
                 ))
                 run_sh.chmod(0o755)
