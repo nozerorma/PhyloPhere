@@ -54,15 +54,19 @@ farthest-point = the regime actually run + `primate_x5` (branch lengths ×5,
 
 ---
 
-### D-T0-D — MIGUEL: Tier 0 module set, final
+### D-T0-D — MIGUEL: Tier 0 module set, FINAL (revised — RER/FADE dropped)
 `contrast_selection` + `CAAS` (discovery, resample, bootstrap, permulation) +
-`CT_DISAMBIGUATION` (+ CT_POSTPROC + ASR robustness) + `RER` + `FADE` + `SCORING`.
-**OFF**: `CT_ACCUMULATION` (little meaning at low gene count — revisit only if we
-decide to validate accumulation itself), `ENRICHMENT` / STRING / DOMINO (pathway
-level is Tier 2's job, "does not belong to Tier 0"), `VEP`.
-Consequence: `scoring_compute.R` handles absent `accumulation_all_*` gracefully
-(memory: SCORING Issue 1 fix), so SCORING runs fine with accumulation off — the
-`accum_*` gene columns are just NA.
+`CT_DISAMBIGUATION` (+ CT_POSTPROC + ASR robustness) + `SCORING`.
+**OFF**: `RER` + `FADE` ("not much need to validate rer and fade" — published,
+author-validated methods; Tier 0's target is the novel machinery: CAAS discovery
++ permulation + disambiguation / ASR-path-score + SCORING integration),
+`CT_ACCUMULATION` (little meaning at low gene count), `ENRICHMENT` / STRING /
+DOMINO (Tier 2), `VEP`, `reporting` (exploration Rmds assume real taxonomy;
+contrast_selection runs its own dataset_exploration + emits trait_stats anyway).
+Consequences: SCORING runs with just the CAAS axis (`gene_caas_score`); its
+`rer_*` / `fade_*` / `accum_*` columns come out NA (full_join + file_exists
+guards). Removes the RER gene-trees problem (no ML tree builder in the env) and
+supersedes D-T0-F (rer_transform).
 
 ### D-T0-A — ad-hoc (reversible): scoring truth = operative foreground per module
 Score each module against the foreground **it actually used** (CAAS: contrast

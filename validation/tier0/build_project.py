@@ -130,36 +130,19 @@ def tier0_project(
     # simulated genes. Tier 0 keeps the full postproc gene pool.
     d.gene_filter_mode = "none"
 
-    # ── RER ────────────────────────────────────────────────────────────────
-    r = p.modules.rer
-    r.enabled = True
-    r.rer_tool_build_trait = r.rer_tool_build_tree = r.rer_tool_build_matrix = True
-    r.rer_tool_continuous = True
-    r.rer_trait_mode = "auto"       # echo -> binary (2 unique vals); bodysize -> continuous
-    # NOT the GUI default "ha_logit" (needs n_trait/c_trait count columns; stop()s
-    # without them). MIGUEL (D-T0-F): "auto". echo takes the binary path (no
-    # transform); the BM bodysize trait is ~normal and real-valued so auto -> raw
-    # (log10 is the natural allometric transform but our BM trait is centred at 0,
-    # so log10 is N/A unless we simulate exp(BM) instead — noted, not done).
-    r.rer_transform = "auto"
-    r.rer_perm_batches = rer_perm_batches
-    r.rer_perms_per_batch = rer_perms_per_batch
-    r.rer_minsp = "10"
-
-    # ── FADE ───────────────────────────────────────────────────────────────
-    f = p.modules.fade
-    f.enabled = True
-    f.fade_mode = "all"
-    f.fade_method = "Variational-Bayes"
-    f.fade_model = "LG"
-    f.fade_batch_size = "50"
-    f.selection_prep_batch_size = "100"
-
     # ── SCORING on ─────────────────────────────────────────────────────────
     p.modules.scoring.enabled = True
     p.modules.scoring.scoring_stress = False
 
-    # ── OFF (D-T0-D) ───────────────────────────────────────────────────────
+    # ── OFF (D-T0-D revised) ───────────────────────────────────────────────
+    # RER (RERconverge) and FADE (HyPhy) are published, author-validated
+    # methods — not what Tier 0 needs to certify. Tier 0's target is the novel
+    # PhyloPhere machinery: CAAS discovery + permulation + disambiguation /
+    # ASR-path-score + SCORING integration. SCORING still runs; its rer_* /
+    # fade_* gene columns just come out NA (scoring_compute.R full_joins and
+    # file_exists-guards them).
+    p.modules.rer.enabled = False
+    p.modules.fade.enabled = False
     p.modules.accumulation.enabled = False
     p.modules.vep.enabled = False
     e = p.modules.enrichment
