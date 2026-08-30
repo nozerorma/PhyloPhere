@@ -236,7 +236,7 @@ def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
     assert (d / "my_traits.tsv").read_text().splitlines()[0] == "species\tsim_trait\tfamily"
     assert (d / "ali_sp_names.txt").exists()
     assert (d / "gene_ensembl.tsv").read_text().splitlines()[0].startswith("gene\tchr\t")
-    assert len(list((d / "align").glob("gene_*.fasta"))) == 6
+    assert len(list((d / "align").glob("g*.fasta"))) == 6
     import json
     t = json.loads((d / "truth.json").read_text())
     assert t["n_planted_genes"] == 2

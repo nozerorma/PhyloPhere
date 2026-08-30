@@ -10,7 +10,7 @@ substitutions (the power genes), the rest are pure null. This gives:
 
 Output (pipeline-shaped, consumed by the rendered ``run_single.sh``):
 
-    align/gene_0001.fasta ... gene_NNNN.fasta   amino-acid alignments, tips only
+    align/g0001.fasta ... gNNNN.fasta   amino-acid alignments, tips only
     my_traits.tsv                               species <tab> <traitname>   (header)
     tree.nwk                                    the (pruned/scaled) tree
     phenotype.tsv                               species <tab> operative-fg 1|0
@@ -107,7 +107,12 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     genes: dict = {}
     ensembl_rows = ["gene\tchr\tstart\tend\tstrand\tlength\thuman_protein_id"]
     for gi in range(rcfg.n_genes):
-        gid = f"gene_{gi + 1:04d}"
+        # NO underscore in the gene id: disambiguation_main.py derives the gene
+        # name as GenePos.split("_")[0], so "gene_0002_18" -> "gene" and the gene
+        # is skipped as "missing alignment". Real HGNC symbols rarely contain "_"
+        # so the bug is latent; flagged for Miguel (the `Gene` column is right
+        # there in the metadata and should be used instead).
+        gid = f"g{gi + 1:04d}"
         # synthetic genomic coordinates: genes spread ~1 Mb apart over 3 fake
         # chromosomes. No deliberate physical clustering of planted genes yet
         # (that would be a separate positional-enrichment validation).
