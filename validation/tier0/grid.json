@@ -1,19 +1,10 @@
 {
-  "_comment": "Tier 0 replicate grid. Trees are fetched separately (see validation/fixtures/tier0/README.md). primate = the regime we actually run; primate_x5 = branch-length-scaled for a non-degenerate power curve (synthetic, label it as such); mammal = the deep-tree null stress case; star/ladder = ASR path-score pathological fixtures.",
+  "_comment": "Tier 0 tree fixtures. Trees fetched separately (validation/fixtures/tier0/README.md). primate = the regime we run; primate_x5 = branch-length-scaled for a non-degenerate power curve (synthetic, label it so); mammal = the deep-tree null stress case; star/ladder = ASR path-score pathological fixtures. Used by run_replicates.py --trees <key,key>.",
   "trees": {
     "primate":    {"path": "validation/fixtures/tier0/trees/primates_233_subst.tree", "k": 50, "scale": 1.0},
     "primate_x5": {"path": "validation/fixtures/tier0/trees/primates_233_subst.tree", "k": 50, "scale": 5.0},
     "mammal":     {"path": "validation/fixtures/tier0/trees/speciesTree_speciesname_pruned.nh", "k": 50, "scale": 1.0},
     "star":       {"builtin": "star",   "k": 12, "branch_length": 0.30},
     "ladder":     {"builtin": "ladder", "k": 16, "branch_length": 0.15}
-  },
-  "base_sim": {"n_sites": 400, "concentration": 4.0, "gamma_alpha": 0.7, "matrix": "wag"},
-  "null":  {"n_replicates": 1000, "transitions": [2, 3, 5, 7]},
-  "power": {
-    "n_replicates": 1000,
-    "transitions": [2, 3, 5, 7],
-    "n_planted_profile_shift": 20,
-    "n_planted_identical_aa": 20,
-    "sweep": {"concentration": [2.0, 4.0, 8.0], "shift_concentration": [1.0, 2.0]}
   }
 }

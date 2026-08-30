@@ -19,8 +19,10 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from validation.tier0 import pheno as _pheno  # noqa: E402
 from validation.tier0 import trees  # noqa: E402
 from validation.tier0.model import PAML_AA, gamma_rates, load_rate_matrix, site_profiles  # noqa: E402
+from validation.tier0.replicate import ReplicateConfig, build_replicate  # noqa: E402
 from validation.tier0.simulate import SimConfig, simulate  # noqa: E402
 
 _DATA = _ROOT / "validation" / "tier0" / "data"
@@ -180,6 +182,67 @@ def test_null_is_stationary() -> None:
     null = [shared_minority(list(rng.choice(tips, 5, replace=False))) for _ in range(40)]
     # observed is itself a random draw, so it must sit inside the null spread
     assert np.mean(null) - 2 * np.std(null) - 1 <= obs <= np.mean(null) + 2 * np.std(null) + 1
+
+
+def test_pheno_echo_bimodal_and_edges() -> None:
+    lad = trees.ladder_tree(40, branch_length=0.2)
+    rng = np.random.default_rng(0)
+    ph = _pheno.make_echo(lad, n_transitions=4, rng=rng)
+    vals = np.array(list(ph.values.values()))
+    fg = set(ph.foreground_tips)
+    # bimodal: fg high, bg low, clear gap
+    assert min(ph.values[t] for t in fg) > 0.8
+    assert max(ph.values[t] for t in ph.values if t not in fg) < 0.2
+    # quantile cuts sit inside their clusters
+    lo, hi = np.quantile(vals, ph.bottom_quantile), np.quantile(vals, ph.top_quantile)
+    assert lo < 0.2 and hi > 0.8
+    # every fg edge's child subtree is entirely foreground
+    assert ph.n_transitions >= 3
+    assert len(ph.fg_edges) >= ph.n_transitions
+
+
+def test_pheno_bodysize_emergent_foreground() -> None:
+    lad = trees.ladder_tree(50, branch_length=0.1)
+    rng = np.random.default_rng(1)
+    ph = _pheno.make_bodysize(lad, rng, quantile=0.2)
+    assert ph.kind == "continuous"
+    k = len(ph.foreground_tips)
+    assert 8 <= k <= 12  # ~20% of 50
+    # foreground tips really are the top of the BM draw
+    fg_vals = [ph.values[t] for t in ph.foreground_tips]
+    bg_vals = [ph.values[t] for t in ph.values if t not in set(ph.foreground_tips)]
+    assert min(fg_vals) >= max(bg_vals)
+
+
+def test_pheno_null_has_no_edges() -> None:
+    lad = trees.ladder_tree(30)
+    for arch in ("echo", "bodysize"):
+        ph = _pheno.make_null(lad, np.random.default_rng(2), arch)
+        assert ph.fg_edges == set()
+        assert ph.notes.get("null") is True
+        assert len(ph.values) == 30  # trait still drawn
+
+
+def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
+    src = _ROOT / "validation" / "fixtures" / "tier0" / "trees" / "primates_233_subst.tree"
+    if src.exists():
+        tree = trees.prune_depth_preserving(src, 40, np.random.default_rng(0))
+    else:
+        tree = trees.ladder_tree(40, branch_length=0.2)
+    rcfg = ReplicateConfig(archetype="echo", n_genes=6, frac_planted_genes=0.34,
+                           n_sites=50, n_transitions=4, planted=True)
+    row = build_replicate(tree, rcfg, seed=99, outdir=tmp_path / "rep")
+    d = tmp_path / "rep"
+    assert (d / "my_traits.tsv").read_text().splitlines()[0] == "species\tsim_trait"
+    assert len(list((d / "align").glob("gene_*.fasta"))) == 6
+    import json
+    t = json.loads((d / "truth.json").read_text())
+    assert t["n_planted_genes"] == 2
+    planted = [g for g, v in t["genes"].items() if v["planted"]]
+    assert len(planted) == 2
+    assert all(t["genes"][g]["n_planted"] > 0 for g in planted)
+    assert all(t["genes"][g]["n_planted"] == 0 for g in t["genes"] if g not in planted)
+    assert 0.0 < row["top_quantile"] < 1.0
 
 
 def test_write_roundtrip(tmp_path: Path) -> None:

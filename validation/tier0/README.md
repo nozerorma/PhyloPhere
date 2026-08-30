@@ -76,18 +76,30 @@ history flags it as a recurring hang).
 
 | piece | state |
 |-------|-------|
-| `model.py` / `trees.py` / `simulate.py` | **done**, tested (`validation/tests/test_tier0.py`) |
-| `make_replicates.py` + `grid.json` | **done** — emits `null` / `power` sets + `manifest.jsonl` |
-| continuous / multi trait cells | TODO (needs simulated BM phenotype) |
-| `tier0/run.sh` — batch replicates through the standalone CAAS/FADE/RER entrypoints | **TODO** (next; needs the module CLI invocations — write against one real run) |
-| `harness/cli.py calibrate` — collect null p-values → `NullReport` | **TODO** (shares the output adapter with `score`) |
+| `model.py` / `trees.py` / `simulate.py` | **done**, tested |
+| `pheno.py` — `echo` (bimodal-continuous 0/1) + `bodysize` (BM) archetypes | **done**, tested (DECISIONS.md D-T0-C) |
+| `replicate.py` — genome-wide replicate: N genes on one tree+phenotype, planted fraction | **done**, tested |
+| `build_project.py` — Tier 0 `ProjectConfig` → `gui.generation.render` → `run_phenotype_single.sh` + `tier0_env.sh` (module set = D-T0-D) | **done** |
+| `run_replicates.py` — stage the replicate set + per-replicate `run.sh`; `--run` executes | **done**, staging verified end-to-end |
+| **first real pipeline smoke run** | **TODO** — needs the `phylophere` env + nextflow (local or cluster). One `echo_power` + one `echo_null` replicate, small `n_genes`. |
+| `harness/cli.py score` / `calibrate` — the pipeline-output adapter (which table, which column) | **TODO** — write against the first real run's `runs/tier0/**/out/` |
+| contrast-selection recovery metric (D-T0-A) | **TODO** — in the adapter |
+| `perm_strategy` lambda/FGBG variant sub-sets (D-T0-B) | later |
 
 ### Run
 
 ```bash
-# fetch trees once (validation/fixtures/tier0/README.md), then:
-python -m validation.tier0.make_replicates \
-    --config validation/tier0/grid.json \
-    --out validation/runs/tier0 --set all
-# smoke test: add --limit 6
+# 1. fetch trees once (validation/fixtures/tier0/README.md)
+# 2. stage replicates (does NOT run the pipeline):
+python -m validation.tier0.run_replicates \
+    --out validation/runs/tier0 \
+    --archetypes echo,bodysize --sets null,power \
+    --trees primate --n-replicates 20 --n-genes 40
+# review runs/tier0/<set>/repNNN/run.sh, then:
+python -m validation.tier0.run_replicates ... --run --jobs 4
+# or bash runs/tier0/run_all.sh
 ```
+
+Module set (DECISIONS.md D-T0-D): contrast_selection + CAAS(discovery, resample,
+bootstrap, permulation) + CT_DISAMBIGUATION(+POSTPROC+ASR robustness) + RER +
+FADE + SCORING. OFF: accumulation, enrichment/STRING/DOMINO, VEP.
