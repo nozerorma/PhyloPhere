@@ -140,10 +140,15 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     # species list — NAME_CURATION scans every alignment to derive this if absent
     (outdir / "ali_sp_names.txt").write_text("\n".join(sorted(tree.tips)) + "\n")
     (outdir / "gene_ensembl.tsv").write_text("\n".join(ensembl_rows) + "\n")
+    # `family` column: the reporting / dataset-exploration Rmds require a
+    # `taxon_of_interest` column (default "family") for their per-group tables.
+    # Synthetic: spread the tips over a handful of fake families.
+    sp_sorted = sorted(ph.values)
+    fam_of = {sp: f"simfam{i % 5 + 1}" for i, sp in enumerate(sp_sorted)}
     with (outdir / "my_traits.tsv").open("w") as fh:
-        fh.write(f"species\t{rcfg.traitname}\n")
-        for sp, v in sorted(ph.values.items()):
-            fh.write(f"{sp}\t{v:.6g}\n")
+        fh.write(f"species\t{rcfg.traitname}\tfamily\n")
+        for sp in sp_sorted:
+            fh.write(f"{sp}\t{ph.values[sp]:.6g}\t{fam_of[sp]}\n")
     fg_set = set(ph.foreground_tips)
     with (outdir / "phenotype.tsv").open("w") as fh:
         for sp in sorted(ph.values):

@@ -64,7 +64,11 @@ def tier0_project(
     p.general = GeneralConfig(
         project_name="tier0_validation",
         seed=str(seed),
-        reporting=True,  # FADE's SELECTION_PREP needs trait_stats.csv
+        # reporting OFF (MIGUEL): the dataset/phenotype-exploration Rmds assume
+        # real data (PhyloPic silhouette lookups on taxon names, real taxonomy).
+        # contrast_selection runs its own dataset_exploration regardless and
+        # emits trait_stats.csv, which is FADE's SELECTION_PREP fallback.
+        reporting=False,
         repo_dir=str(repo_dir),
         # the template symlinks this into each run's NXF_HOME; must be a real,
         # writable plugins dir (default: the user's ~/.nextflow/plugins).
