@@ -117,6 +117,24 @@ that branch merges, or it will regress.
   `EXTRACT_EXTREME_SPECIES` top set and contrast selection's high set both land
   on the operative foreground.
 
+### D-T0-H — MIGUEL: planted-gene fraction is a sweep axis (0.1 / 0.25)
+`run_replicates.py --planted-fractions 0.1,0.25`. Applies only to the `power` set
+(null has no planted genes). Checks whether null calibration is sensitive to how
+much real signal is mixed into a replicate. Sub-set dir gets a `pfNN` tag.
+
+### D-T0-I — MIGUEL: disambiguation cost is not a concern
+`ct_disambig_asr_mode = "compute"` on every replicate. Miguel: disambiguation on
+the full 16k-primate / 233-species production set runs in ~6h on the cluster, so
+the Tier 0 volume (tens of genes × tens of species × ~hundreds of replicates) is
+comfortably within budget. Earlier "days" estimate was wrong. No gene/site
+shrinking, no disambiguation subsetting.
+
+### D-T0-J — MIGUEL: first run = local smoke
+2 replicates per sub-set, `--trees primate`, small `n_genes` / `n_sites`, on the
+laptop (native `phylophere` micromamba env, `-profile local`, no containers).
+Goal: shake out pipeline wiring / crashes, not calibration. Then size up on the
+cluster.
+
 ---
 
 ## Still genuinely open
