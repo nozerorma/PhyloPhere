@@ -61,13 +61,32 @@ overall_dunn_lean <- function(D, members) {
   min(vapply(seq_along(members), function(k) mod_dunn_lean(D, members, k), numeric(1)))
 }
 
+# Is this permulated vector an ordinal fg/bg code (not a continuous measure)?
+# Mirrors stats.R::is_ordinal_trait so the permulation applies the SAME rule the
+# observed selection used. `trait_type`: "ordinal"/"continuous" force it,
+# ""/"auto" infers from 2-5 all-integer levels.
+lean_is_ordinal <- function(trait_vec, trait_type = "auto") {
+  tt <- tolower(as.character(trait_type)[1])
+  if (is.na(tt) || !nzchar(tt)) tt <- "auto"
+  if (tt == "ordinal") return(TRUE)
+  if (tt == "continuous") return(FALSE)
+  u <- unique(trait_vec[!is.na(trait_vec)])
+  length(u) >= 2 && length(u) <= 5 && all(u == round(u))
+}
+
 # Resolve the low/high trait cut-offs for a discretisation method.
 # Mirrors the discrete_method / top_quantile / bottom_quantile semantics used by
-# the contrast selection step (conf/common.config).
-lean_thresholds <- function(trait_vec, discrete_method, bottom_quantile, top_quantile) {
+# the contrast selection step (conf/common.config). For an ordinal fg/bg code
+# the cut-offs are the extreme levels themselves (no quantiles).
+lean_thresholds <- function(trait_vec, discrete_method, bottom_quantile, top_quantile,
+                            trait_type = "auto") {
   g_med <- median(trait_vec, na.rm = TRUE)
   g_sd  <- stats::sd(trait_vec, na.rm = TRUE)
   q <- function(p) unname(stats::quantile(trait_vec, p, na.rm = TRUE))
+  if (lean_is_ordinal(trait_vec, trait_type)) {
+    lv <- sort(unique(trait_vec[!is.na(trait_vec)]))
+    return(list(lower = lv[1], upper = lv[length(lv)], med = g_med))
+  }
   switch(discrete_method,
     "quartile"      = list(lower = q(0.25), upper = q(0.75), med = g_med),
     "quintile"      = list(lower = q(0.20), upper = q(0.80), med = g_med),
@@ -114,7 +133,8 @@ evaluate_lean_contrast_selection <- function(trait_vec,
                                              bottom_quantile = 0.10,
                                              top_quantile = 0.90,
                                              ci_lb = NULL,
-                                             ci_ub = NULL) {
+                                             ci_ub = NULL,
+                                             trait_type = "auto") {
 
   reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_) {
     list(tier = 0L, n_pairs = n_pairs, dunn_min = dunn, n_below = n_below,
@@ -139,7 +159,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
     sp <- sp[ok]; trait_vec <- trait_vec[sp]; lb <- lb[sp]; ub <- ub[sp]
     high_sp <- low_sp <- sp
   } else {
-    th <- lean_thresholds(trait_vec, discrete_method, bottom_quantile, top_quantile)
+    th <- lean_thresholds(trait_vec, discrete_method, bottom_quantile, top_quantile, trait_type)
     # The `>= th$med` / `<= th$med` guard (was `>` / `<`) only matters when the
     # median coincides with a threshold, which is exactly the binary / bimodal
     # case: a minority-foreground 0/1 vector has median == lower == 0, so the
