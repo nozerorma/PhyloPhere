@@ -489,11 +489,22 @@ workflow {
                 ? ct_results.discovery_file
                 : Channel.empty()
 
-            // gene_set mode sources its directional gene lists from the
-            // --fade_postproc_top / --fade_postproc_bottom params (resolved inside
-            // SELECTION_PREP); the empty channels here keep the take: signature.
+            // Postproc directional gene lists for gene_set mode.
+            // SELECTION_PREP uses all_top.txt (top+both CAAS hits) to restrict
+            // the top FADE run, and all_bottom.txt for the bottom run.
+            // collectFile() merges multi-phenotype emissions into a single file so
+            // COLLECT_GENE_SETS inside SELECTION_PREP runs exactly once.
             def sel_pp_top_ch    = Channel.empty()
             def sel_pp_bottom_ch = Channel.empty()
+            if (postproc_results) {
+                def pp_gene_lists_val = postproc_results.enrichment_gene_lists_files.collect()
+                sel_pp_top_ch    = pp_gene_lists_val
+                    .flatMap { files -> files.findAll { f -> f.name == 'all_top.txt' } }
+                    .collectFile(name: 'merged_pp_top.txt')
+                sel_pp_bottom_ch = pp_gene_lists_val
+                    .flatMap { files -> files.findAll { f -> f.name == 'all_bottom.txt' } }
+                    .collectFile(name: 'merged_pp_bottom.txt')
+            }
 
             // Run alignment prep ONCE for FADE.
             // SELECTION_PREP outputs value channels for species/tree files

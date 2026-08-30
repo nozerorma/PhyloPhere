@@ -34,11 +34,8 @@ theme_phylo <- function(base_size = 12) {
         panel.grid.minor  = ggplot2::element_blank(),
         strip.text        = ggplot2::element_text(face = "bold"),
         legend.position   = "bottom",
-        axis.title.y      = ggplot2::element_text(margin = ggplot2::margin(l = 20, r = 20)),
-        axis.title.x      = ggplot2::element_text(margin = ggplot2::margin(t = 12)),
-        axis.text.x       = ggplot2::element_text(margin = ggplot2::margin(t = 5)),
-        plot.title        = ggplot2::element_text(face = "bold", size = base_size + 2, hjust = 0, margin = ggplot2::margin(b = 6)),
-        plot.subtitle     = ggplot2::element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
+        plot.title        = ggplot2::element_text(face = "bold", size = base_size + 2),
+        plot.subtitle     = ggplot2::element_text(colour = "grey40"),
     )
 }
 

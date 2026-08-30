@@ -347,63 +347,80 @@ n_tips <- length(pruned_tree$tip.label)
 tree_profile <- species_plot_profile(n_species = n_tips)$tree
 
 dyn_size <- tree_profile$diagnostic_size
-# Prune tree to trait exploration species for clear visualization
-viz_species <- intersect(pruned_tree$tip.label, trait_df$species)
-viz_tree <- if (length(viz_species) > 0) ape::keep.tip(pruned_tree, viz_species) else pruned_tree
+tip_label_size <- clamp_value(6.5 - 0.015 * n_tips, 3.5, 6.5)
+tree_line_size <- tree_profile$tree_line_width * 1.8
+# Offset scales with total tree depth (root-to-tip branch-length units) rather
+# than a fixed constant, since chronogram vs phylogram branch-length scales
+# differ by orders of magnitude across traits/datasets -- a fixed offset would
+# sit on the tips for one tree and float off-panel for another.
+tip_label_offset <- max(ape::node.depth.edgelength(pruned_tree)) * 0.03
 
-dyn_size_w <- 16
-dyn_size_h <- 18.5
-tip_label_size <- 3.8
-tree_line_size <- 0.95
-max_depth <- max(ape::node.depth.edgelength(viz_tree))
-tip_label_offset <- max_depth * 0.006
+knitr::opts_current$set(fig.width = dyn_size, fig.height = dyn_size)
 
-knitr::opts_current$set(fig.width = dyn_size_w, fig.height = dyn_size_h)
-
-tree_tip_df <- tibble::tibble(species = viz_tree$tip.label) %>%
-  dplyr::left_join(contrast_df, by = "species") %>%
+tree_tip_df <- tibble::tibble(species = pruned_tree$tip.label) %>%
+  dplyr::left_join(
+    traits_res %>% dplyr::select(species, contrast_group),
+    by = "species"
+  ) %>%
   dplyr::mutate(
     contrast_label = dplyr::case_when(
       contrast_group == 1 ~ "Top/High",
       contrast_group == 0 ~ "Bottom/Low",
       TRUE ~ "Not selected"
     ),
+    # Precomputed logical (rather than comparing to a string literal inside
+    # aes(subset=...)) — ggtree's aes_()/aes_string() compatibility shim mangles
+    # a quoted string comparison there and throws a parse error.
     is_selected = contrast_label != "Not selected"
   )
 
-contrast_tree_tibble <- tidytree::as_tibble(viz_tree) %>% dplyr::rename(species = label)
+# Attach tip metadata via tidytree::as.treedata
+contrast_tree_tibble <- tidytree::as_tibble(pruned_tree) %>%
+  dplyr::rename(species = label)
 contrast_tree_with_labels <- dplyr::full_join(contrast_tree_tibble, tree_tip_df, by = "species")
 contrast_tree_data <- tidytree::as.treedata(contrast_tree_with_labels)
 
 selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
-                              layout = "fan", open.angle = 25,
+                              layout = "fan", open.angle = 15,
                               size = tree_line_size) +
-  geom_tippoint(aes(subset = is_selected), size = tree_line_size * 2.8) +
+  geom_tippoint(size = tree_line_size * 1.5) +
+  # label = species: the tip tibble renames the tree's own `label` column to
+  # `species` (matching report 2's convention) before rebuilding the treedata
+  # object, so the treedata no longer has a `label` field for geom_tiplab's
+  # default aes(label=label) to fall back on — it silently drew node-index
+  # numbers instead of species names without this explicit mapping.
+  # align=FALSE (report 2's own tiplab/cladelab usage never sets align=TRUE
+  # either): the aligned-connector-line codepath (geom_segment2) errors under
+  # this environment's ggtree/ggplot2 pairing (missing internal `is.waive`).
   geom_tiplab(aes(subset = is_selected, label = species),
               size = tip_label_size, offset = tip_label_offset,
-              fontface = "bold",
               show.legend = FALSE) +
   scale_color_manual(
-    name = "Contrast group:",
-    values = c("Top/High" = "red", "Bottom/Low" = "forestgreen", "Not selected" = "grey75"),
+    name = "Contrast group",
+    values = c("Top/High" = "red", "Bottom/Low" = "forestgreen", "Not selected" = "grey70"),
     breaks = c("Top/High", "Bottom/Low", "Not selected"),
-    na.value = "grey75"
+    na.value = "grey70"
   ) +
   labs(title = paste("Selected contrast pairs for trait:", capitalized_trait)) +
-  hexpand(0.35) +
-  vexpand(0.35) +
+  # Extra panel expansion (plain ggplot2 scales, not a ggtree-specific helper
+  # -- ggtree's fan layout is Cartesian under the hood) so the offset tip
+  # labels have room to render fully instead of being clipped at the device
+  # edge; the default 5% expansion isn't enough once labels sit off the tips.
+  scale_x_continuous(expand = expansion(mult = 0.18)) +
+  scale_y_continuous(expand = expansion(mult = 0.18)) +
   theme(
-    legend.position = "bottom",
-    legend.title = element_text(size = 15, face = "bold"),
+    legend.position = "right",
+    legend.title = element_text(size = 16, face = "bold"),
     legend.text = element_text(size = 13),
-    plot.title = element_text(size = 18, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 15, b = 25)),
-    legend.box.margin = margin(t = 35, b = 15),
-    plot.margin = margin(20, 25, 20, 25)
+    axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+    plot.title = element_text(size = 20, hjust = 0, face = "bold", margin = ggplot2::margin(b = 6)),
+    plot.margin = margin(20, 20, 20, 20)
   )
 
 ggsave(
   file.path(traitfile_dir, "selected_pairs_tree.png"),
-  selected_pairs_tree, device = "png", width = dyn_size_w, height = dyn_size_h, dpi = "retina"
+  selected_pairs_tree, device = "png", width = dyn_size, height = dyn_size, dpi = "retina"
 )
 
 selected_pairs_tree
@@ -420,7 +437,7 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       .groups = "drop"
     )
   
-  tree_tip_df_all <- tibble::tibble(species = viz_tree$tip.label) %>%
+  tree_tip_df_all <- tibble::tibble(species = pruned_tree$tip.label) %>%
     dplyr::left_join(sp_hyp_summary, by = "species") %>%
     dplyr::mutate(
       contrast_label = dplyr::case_when(
@@ -431,7 +448,7 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       is_selected = contrast_label != "Not selected",
       display_label = dplyr::if_else(
         is_selected,
-        paste0(species, "\n(", contrast_label, " - ", n_hyp, "/", total_hypotheses, " hyp)"),
+        paste0(species, " (", contrast_label, " - ", n_hyp, "/", total_hypotheses, " hyp)"),
         species
       )
     )
@@ -439,39 +456,40 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
   contrast_tree_with_labels_all <- dplyr::full_join(contrast_tree_tibble, tree_tip_df_all, by = "species")
   contrast_tree_data_all <- tidytree::as.treedata(contrast_tree_with_labels_all)
 
+
   selected_pairs_tree_all <- ggtree(contrast_tree_data_all, aes(color = contrast_label),
-                                   layout = "fan", open.angle = 25,
+                                   layout = "fan", open.angle = 15,
                                    size = tree_line_size) +
-    geom_tippoint(aes(subset = is_selected), size = tree_line_size * 2.8) +
+    geom_tippoint(size = tree_line_size * 1.5) +
     geom_tiplab(aes(subset = is_selected, label = display_label),
-                size = tip_label_size, offset = tip_label_offset,
-                fontface = "bold",
+                size = tip_label_size * 0.85, offset = tip_label_offset,
                 show.legend = FALSE) +
     scale_color_manual(
-      name = "Contrast group:",
-      values = c("Top/High" = "red", "Bottom/Low" = "forestgreen", "Not selected" = "grey75"),
+      name = "Contrast group",
+      values = c("Top/High" = "red", "Bottom/Low" = "forestgreen", "Not selected" = "grey70"),
       breaks = c("Top/High", "Bottom/Low", "Not selected"),
-      na.value = "grey75"
+      na.value = "grey70"
     ) +
     labs(
       title = paste("All Selected Species Across", total_hypotheses, "Parallel Hypotheses for Trait:", capitalized_trait),
       subtitle = "Includes selection frequency across FOP non-replacement hypotheses"
     ) +
-    hexpand(0.35) +
-    vexpand(0.35) +
+    scale_x_continuous(expand = expansion(mult = 0.32)) +
+    scale_y_continuous(expand = expansion(mult = 0.32)) +
     theme(
-      legend.position = "bottom",
-      legend.title = element_text(size = 15, face = "bold"),
+      legend.position = "right",
+      legend.title = element_text(size = 16, face = "bold"),
       legend.text = element_text(size = 13),
-      plot.title = element_text(size = 18, hjust = 0.5, face = "bold", margin = ggplot2::margin(t = 15, b = 4)),
-      plot.subtitle = element_text(size = 14, hjust = 0.5, margin = ggplot2::margin(b = 35)),
-      legend.box.margin = margin(t = 35, b = 15),
-      plot.margin = margin(20, 25, 20, 25)
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+      plot.title = element_text(size = 18, hjust = 0, face = "bold", margin = ggplot2::margin(b = 4)),
+      plot.subtitle = element_text(size = 14, hjust = 0, margin = ggplot2::margin(b = 6)),
+      plot.margin = margin(20, 20, 20, 20)
     )
 
   ggsave(
     file.path(traitfile_dir, "selected_pairs_tree_all_hypotheses.png"),
-    selected_pairs_tree_all, device = "png", width = dyn_size_w, height = dyn_size_h, dpi = "retina"
+    selected_pairs_tree_all, device = "png", width = dyn_size * 1.2, height = dyn_size * 1.2, dpi = "retina"
   )
 
   selected_pairs_tree_all
