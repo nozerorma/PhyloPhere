@@ -146,6 +146,27 @@ cluster.
 
 ---
 
+### D-T0-K — ad-hoc: synthetic support files per replicate + `gene_filter_mode = dubious`
+Real primate runs always ship inputs the synthetic data lacks; `build_replicate`
+now writes them: `ali_sp_names.txt`, `gene_ensembl.tsv` (fake coords, 3 fake chrs,
+length = n_sites·3), `taxid.tsv` (fake taxids 9000001+; disambiguation renames
+tips to numeric ids before PAML, dodging `_write_phylip`'s single-space
+name/sequence delimiter — a latent PAML-format bug, flagged), `family` column in
+`my_traits.tsv`. `gene_filter_mode = "dubious"` (production default, NOT "none":
+the `filtered_discovery.tsv` emitter is `when: gene_filter_mode != 'none'` and
+SCORING starves without it; "dubious" only drops IQR-outlier genes with
+spatially-clustered CAAS, which planted genes are not).
+
+## Pipeline bugs surfaced by Tier 0 (all on `validation`)
+- `lean_contrast_selector.R:143` + `stats.R:188,206` — `& trait </> median` guard
+  breaks minority-fg binary traits (D-T0-E, FIXED, Miguel-approved).
+- `disambiguation_main.py:200` — gene name = `GenePos.split("_")[0]`, breaks on
+  any id containing `_`; the `Gene` column exists and should be used. Worked
+  around in Tier 0 (gene ids `gNNNN`); real fix pending Miguel.
+- `reconstruct.py:388` (`_write_phylip`) — single space between PAML name and
+  sequence; PAML needs 2+. Latent (production renames tips to numeric taxids).
+  Worked around in Tier 0 via `taxid.tsv`; real fix pending.
+
 ## Still genuinely open
 
 *(none blocking the build — reopen any D-T0-A/B/C if the first calibration run

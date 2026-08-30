@@ -125,10 +125,13 @@ def tier0_project(
     d.ct_disambig_asr_model = "lg"
     d.ct_disambig_convergence_mode = "focal_clade"
     d.asr_robustness = True
-    # "none": the dubious/extreme gene filters need a --gene_ensembl_file mapping
-    # synthetic gene ids to genomic coordinates, which does not exist for
-    # simulated genes. Tier 0 keeps the full postproc gene pool.
-    d.gene_filter_mode = "none"
+    # "dubious" = the production default. It needs --gene_ensembl_file (we supply
+    # a synthetic one). NOT "none": the process that emits filtered_discovery.tsv
+    # has `when: gene_filter_mode != 'none'`, and SCORING waits on that channel —
+    # 'none' silently starves SCORING. 'dubious' only drops genes that are BOTH
+    # IQR outliers in CAAS/length AND have spatially-clustered CAAS; our planted
+    # sites are scattered, so planted genes pass.
+    d.gene_filter_mode = "dubious"
 
     # ── SCORING on ─────────────────────────────────────────────────────────
     p.modules.scoring.enabled = True
