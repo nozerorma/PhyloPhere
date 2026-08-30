@@ -127,6 +127,8 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
 
     # ── phenotype / trait files ─────────────────────────────────────────────
     _write_newick(tree, outdir / "tree.nwk")
+    # species list — NAME_CURATION scans every alignment to derive this if absent
+    (outdir / "ali_sp_names.txt").write_text("\n".join(sorted(tree.tips)) + "\n")
     with (outdir / "my_traits.tsv").open("w") as fh:
         fh.write(f"species\t{rcfg.traitname}\n")
         for sp, v in sorted(ph.values.items()):

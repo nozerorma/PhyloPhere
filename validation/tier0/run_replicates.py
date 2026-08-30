@@ -62,6 +62,7 @@ cd "{repo}"
 set -a
 source "{env_sh}"
 ALI_DIR="{align}"
+ALI_SP_NAMES="{sp_names}"
 TREE_FILE="{tree_nwk}"
 TRAIT_FILE="{traits}"
 SIMPLE_TRAIT_FILE="{traits}"
@@ -144,6 +145,7 @@ def main(argv: list[str] | None = None) -> int:
                     rep=row["dir"], arch=arch, set=setname, tree=tkey, seed=seed,
                     repo=_REPO, env_sh=env_sh,
                     align=(repdir / "align").resolve(),
+                    sp_names=(repdir / "ali_sp_names.txt").resolve(),
                     tree_nwk=(repdir / "tree.nwk").resolve(),
                     traits=(repdir / "my_traits.tsv").resolve(),
                     tq=row["top_quantile"], bq=row["bottom_quantile"], mdf=mdf,

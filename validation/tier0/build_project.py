@@ -66,7 +66,9 @@ def tier0_project(
         seed=str(seed),
         reporting=True,  # FADE's SELECTION_PREP needs trait_stats.csv
         repo_dir=str(repo_dir),
-        nextflow_plugins_dir=nextflow_plugins_dir or str(repo_dir / ".nextflow" / "plugins"),
+        # the template symlinks this into each run's NXF_HOME; must be a real,
+        # writable plugins dir (default: the user's ~/.nextflow/plugins).
+        nextflow_plugins_dir=nextflow_plugins_dir or str(Path.home() / ".nextflow" / "plugins"),
     )
 
     p.runtime = RuntimeConfig(
@@ -119,7 +121,10 @@ def tier0_project(
     d.ct_disambig_asr_model = "lg"
     d.ct_disambig_convergence_mode = "focal_clade"
     d.asr_robustness = True
-    d.gene_filter_mode = "dubious"
+    # "none": the dubious/extreme gene filters need a --gene_ensembl_file mapping
+    # synthetic gene ids to genomic coordinates, which does not exist for
+    # simulated genes. Tier 0 keeps the full postproc gene pool.
+    d.gene_filter_mode = "none"
 
     # ── RER ────────────────────────────────────────────────────────────────
     r = p.modules.rer
@@ -168,13 +173,37 @@ def tier0_project(
 _ENV_START = "conda activate phylophere"
 _ENV_END = "# --- PHENOTYPE CATALOGUE ---"
 
+_PORTABLE_ACTIVATE = """\
+# [tier0] portable env activation (local runs) — see build_project.render()
+set +u
+if command -v micromamba >/dev/null 2>&1; then
+    eval "$(micromamba shell hook --shell bash)"
+    micromamba activate phylophere
+elif [ -n "${CONDA_EXE:-}" ] || command -v conda >/dev/null 2>&1; then
+    __base="$(conda info --base 2>/dev/null || dirname "$(dirname "${CONDA_EXE:-}")")"
+    [ -f "$__base/etc/profile.d/conda.sh" ] && . "$__base/etc/profile.d/conda.sh"
+    conda activate phylophere
+fi
+set -u"""
+
 
 def render(project: ProjectConfig, *, out_dir: Path) -> dict:
     """Write `run_phenotype_single.sh` to the repo root and `tier0_env.sh` (the
     batch wrapper's `export` preamble) to `out_dir`. Returns the paths."""
     repo = Path(project.general.repo_dir)
+    single = render_single(project)
+    if project.runtime.runtime_type == "local":
+        # The template hardcodes `source ~/.bashrc; conda deactivate; conda
+        # activate phylophere`, which assumes `conda init` was run. On a
+        # micromamba box (conda is a shell function, ~/.bashrc early-returns for
+        # non-interactive shells) `conda deactivate` errors under `set -e`.
+        # Swap in a portable activation for local Tier 0 runs only.
+        marker = "source ~/.bashrc\nconda deactivate\nconda activate phylophere"
+        if marker not in single:
+            raise RuntimeError("env-activation marker not found in rendered run_single — template changed")
+        single = single.replace(marker, _PORTABLE_ACTIVATE)
     single_path = repo / "run_phenotype_single.sh"
-    single_path.write_text(render_single(project))
+    single_path.write_text(single)
     single_path.chmod(0o755)
 
     batch = render_batch(project, single_runner_filename="run_phenotype_single.sh")
