@@ -88,12 +88,14 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--archetypes", default="echo,bodysize")
     ap.add_argument("--sets", default="null,power", help="null = no planted signal; power = planted")
     ap.add_argument("--trees", default="primate", help="comma list of keys in grid.json trees")
-    ap.add_argument("--divergent-fractions", default="0.5,1.0",
-                    help="min_divergent_fraction sub-sets: 0.5 = production, 1.0 = strict (D-T0-G)")
+    ap.add_argument("--divergent-fractions", default="0.5",
+                    help="min_divergent_fraction: 0.5 = production (the gate). "
+                         "Add 1.0 for the strict-divergent characterisation (D-T0-G)")
     ap.add_argument("--n-replicates", type=int, default=20)
     ap.add_argument("--n-genes", type=int, default=40)
-    ap.add_argument("--planted-fractions", default="0.1,0.25",
-                    help="frac_planted_genes sub-sets for the power set (D-T0-H); null ignores this")
+    ap.add_argument("--planted-fractions", default="0.25",
+                    help="frac_planted_genes for the power set (the gate). Add 0.1 "
+                         "for the weak-signal characterisation (D-T0-H); null ignores this")
     ap.add_argument("--n-sites", type=int, default=400)
     ap.add_argument("--n-transitions", type=int, default=4)
     ap.add_argument("--seed0", type=int, default=70000)

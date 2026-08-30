@@ -37,12 +37,12 @@ from pathlib import Path
 from .metrics import NullReport, ScoreReport, null_calibration, score_metrics
 
 # name -> (relative path under the results dir, column)
+#   meta_caas_boot : the permulation p that drives the significance call (the gate)
+#   perm_pos_boot  : the raw per-position permulation p, before meta-aggregation
+#                    and FDR (diagnostic — shows the null before smoothing)
 PCOLS: dict[str, tuple[str, str]] = {
     "meta_caas_boot": ("signification/meta_caas/US_meta_caas.tsv", "pvalue_boot"),
-    "meta_caas_hyp": ("signification/meta_caas/US_meta_caas.tsv", "pvalue"),
     "perm_pos_boot": ("caas_permulation/perm_pos_pval.tsv", "null_pvalue_boot"),
-    "position_boot": ("scoring/position_scores.tsv", "pvalue_boot"),
-    "position_hyp": ("scoring/position_scores.tsv", "pvalue"),
 }
 
 
@@ -227,6 +227,9 @@ class ReplicateScore:
     site_recall_by_mechanism: dict[str, float]
     n_sites_planted: int
     n_sites_detected: int
+    identical_aa_us_recall: float      # planted same-residue sites called by US
+    grouped_caap_gs_recall: float      # planted same-class sites called by any GS
+    grouped_caap_us_leakage: float     # of those, fraction that also tripped US (want ~0)
     contrast_jaccard: float
     contrast_fg_precision: float
     contrast_pairs_recovered: int
@@ -254,29 +257,47 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
         topk = {g for g, _ in sorted(gs.items(), key=lambda kv: -kv[1])[:k]}
         prec_k = len(topk & planted) / k
 
-    # -- sites: SCORING only lists detected positions --------------------- #
-    detected: dict[str, set[int]] = {}
+    # -- sites: SCORING only lists detected positions, with the schemes that
+    #    fired in the `scheme_set` column (e.g. "GS1+GS2+US") ----------------- #
+    detected: dict[str, dict[int, set[str]]] = {}
     for r in rp.position_rows():
-        detected.setdefault(r["Gene"], set()).add(int(r["Position"]))
+        schemes = set((r.get("scheme_set") or "").replace(" ", "").split("+")) - {""}
+        detected.setdefault(r["Gene"], {})[int(r["Position"])] = schemes
     all_planted_sites = 0
     hit = 0
     total_detected = 0
     mech_tot: dict[str, int] = {}
     mech_hit: dict[str, int] = {}
+    ia_tot = ia_us = 0                 # identical_aa: planted / called by US
+    gc_tot = gc_gs = gc_us_leak = 0    # grouped_caap: planted / called by GS / also US
     for g in planted:
         ps = rp.planted_sites(g)
         mech = rp.site_mechanism(g)
-        det = detected.get(g, set())
+        det = detected.get(g, {})
         all_planted_sites += len(ps)
         total_detected += len(det)
-        hit += len(ps & det)
+        hit += len(ps & set(det))
         for s, m in mech.items():
             mech_tot[m] = mech_tot.get(m, 0) + 1
-            if s in det:
+            sch = det.get(s)
+            if sch is not None:
                 mech_hit[m] = mech_hit.get(m, 0) + 1
+            if m == "identical_aa":
+                ia_tot += 1
+                if sch and "US" in sch:
+                    ia_us += 1
+            elif m == "grouped_caap":
+                gc_tot += 1
+                if sch and (sch - {"US"}):
+                    gc_gs += 1
+                    if "US" in sch:
+                        gc_us_leak += 1
     site_recall = hit / all_planted_sites if all_planted_sites else math.nan
     site_prec = hit / total_detected if total_detected else math.nan
     mech_recall = {m: mech_hit.get(m, 0) / n for m, n in mech_tot.items()}
+    ia_us_recall = ia_us / ia_tot if ia_tot else math.nan
+    gc_gs_recall = gc_gs / gc_tot if gc_tot else math.nan
+    gc_us_leak_frac = gc_us_leak / gc_gs if gc_gs else math.nan
 
     # -- contrast selection recovery (D-T0-A) ---------------------------- #
     tf = rp.traitfile()
@@ -310,6 +331,9 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
         site_recall_by_mechanism=mech_recall,
         n_sites_planted=all_planted_sites,
         n_sites_detected=total_detected,
+        identical_aa_us_recall=ia_us_recall,
+        grouped_caap_gs_recall=gc_gs_recall,
+        grouped_caap_us_leakage=gc_us_leak_frac,
         contrast_jaccard=jac,
         contrast_fg_precision=fg_prec,
         contrast_pairs_recovered=recovered,
@@ -350,6 +374,9 @@ def score(run_root: Path) -> ScoreResult:
         "gene_precision_at_k": _mean([s.gene_precision_at_k for s in scored]),
         "site_recall": _mean([s.site_recall for s in scored]),
         "site_precision": _mean([s.site_precision for s in scored]),
+        "identical_aa_us_recall": _mean([s.identical_aa_us_recall for s in scored]),
+        "grouped_caap_gs_recall": _mean([s.grouped_caap_gs_recall for s in scored]),
+        "grouped_caap_us_leakage": _mean([s.grouped_caap_us_leakage for s in scored]),
         "contrast_jaccard": _mean([s.contrast_jaccard for s in scored]),
         "contrast_fg_precision": _mean([s.contrast_fg_precision for s in scored]),
         "contrast_pairs_recovered_frac": _mean(

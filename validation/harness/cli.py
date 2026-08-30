@@ -66,6 +66,9 @@ def _cmd_score(args: argparse.Namespace) -> int:
         f"precision@k {_fmt(s['gene_precision_at_k'])}\n"
         f"  sites  : recall {_fmt(s['site_recall'])}  precision {_fmt(s['site_precision'])}  "
         f"by-mechanism {{{', '.join(f'{m}:{_fmt(v)}' for m, v in s['site_recall_by_mechanism'].items())}}}\n"
+        f"  schemes: identical_aa->US {_fmt(s['identical_aa_us_recall'])}  "
+        f"grouped_caap->GS {_fmt(s['grouped_caap_gs_recall'])}  "
+        f"(US leakage {_fmt(s['grouped_caap_us_leakage'])})\n"
         f"  contrast: jaccard {_fmt(s['contrast_jaccard'])}  fg-precision {_fmt(s['contrast_fg_precision'])}  "
         f"pairs-recovered {_fmt(s['contrast_pairs_recovered_frac'])}",
         file=sys.stderr,

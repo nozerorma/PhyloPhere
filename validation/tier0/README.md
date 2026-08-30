@@ -4,12 +4,12 @@
 error, and does it rank the planted convergent signal to the top?
 
 **Gate (see `docs/DESIGN.md`):**
-- null CAAS `pvalue_boot` (`harness.cli calibrate --pcol meta_caas_boot`) passes
-  KS uniformity (p > 0.05); observed type-I error within Monte Carlo error of
-  nominal α. `perm_pos_boot` / `position_boot` are diagnostic secondaries.
-- power: planted genes/positions in the top decile of the SCORING ranking
-- contrast-selection recovers the planted origins (D-T0-A metric)
-- zero crashes on the star / ladder pathological trees
+- null CAAS `pvalue_boot` (`harness.cli calibrate`, default `--pcol meta_caas_boot`)
+  passes KS uniformity (p > 0.05); type-I error near nominal α. `perm_pos_boot`
+  is the diagnostic secondary.
+- power: planted genes/positions ranked to the top of SCORING; `identical_aa`
+  recovered by US, `grouped_caap` recovered by GS (not US)
+- contrast selection recovers the planted origins (D-T0-A)
 
 ## Design
 
@@ -30,17 +30,14 @@ observed run never cached.
 
 ### Trees (`grid.json`)
 
-- **`primate`**: `primates_233_subst.tree` used **whole** (237 tips = 233
-  primates + 4 outgroups, total length 1.30 subst/site) — exactly what production
-  runs on. A 50-tip prune left contrast selection unable to form ≥ `min_contrasts`
-  Dunn-independent pairs (D-T0-01).
-- **`primate_x5`**: same tree, branch lengths ×5 — a non-degenerate power curve.
-  **Synthetic**; label it so.
-- **`mammal`**: `speciesTree_speciesname_pruned.nh` pruned to 60 — deep enough
-  for real homoplasy, the null **stress** case.
-- **pathological**: 12-tip `star` + 16-tip `ladder`, built in `trees.py` — the
-  star is the empty-private-segment / degenerate-MRCA fixture from
-  `asr_path_score_axis_redundancy`.
+- **`primate`** (the gate): `primates_233_subst.tree` used **whole** (237 tips =
+  233 primates + 4 outgroups, total length 1.30 subst/site) — exactly what
+  production runs on. A 50-tip prune left contrast selection unable to form ≥
+  `min_contrasts` Dunn-independent pairs (D-T0-01).
+- **characterisation-only**: `primate_x5` (branch lengths ×5, synthetic power
+  curve), `mammal` (`speciesTree_speciesname_pruned.nh` pruned to 60, deep-homoplasy
+  null stress), `star`/`ladder` (12/16 tips, built in `trees.py`, the
+  degenerate-MRCA `asr_path_score` fixtures).
 
 `sample_foreground` picks origins farthest-point (pairwise patristic separation)
 so the planted clades are Dunn-independent, and auto-excludes the 4 outgroups
@@ -58,15 +55,16 @@ The pipeline's ASR defaults to **LG, one profile per site** (`ct_disambig_asr_mo
 - exact **Gillespie** evolution along each branch — no matrix exponential;
   branch-specific rate matrices (planted positives) are free
 
-One planted-positive mechanism (D-T0-02, revised):
-- `identical_aa` — foreground edges have a near-point-mass equilibrium on one
-  target residue (the least-favoured residue under the site's background
-  profile) → every fg lineage converges to the *same* residue. Hard-set on each
-  origin edge, held by `Q_fg`. This is the strict-CAAS (US) positive and a
-  grouped-CAAP (GS1-GS4) hit for free.
-- `profile_shift` is **stripped** — a random preference shift is neither a US
-  nor a clean CAAP positive (CAAP schemes are grouped on `amino_encoded`). The
-  `SimConfig` hook stays dormant; a real grouped-CAAP mechanism is D-T0-N.
+Two planted-positive mechanisms (D-T0-02), 12 sites each per planted gene:
+- `identical_aa` — near-point-mass equilibrium on one target residue (the
+  least-favoured under the site background) → every fg lineage converges to the
+  *same* residue. A **US and GS1-GS4** positive.
+- `grouped_caap` — equilibrium ~uniform over one GS class (default GS1, the
+  class most disfavoured in the site background); a fresh residue from the class
+  is seeded per origin, so origins share the *class* but usually differ in
+  *residue*. A **GS-only** positive — US should not call it. This is what
+  exercises the grouped schemes. GS tables vendored in `groups.py`.
+- `profile_shift` is **stripped** (dormant `SimConfig` hook).
 
 ### Phenotype archetypes (`pheno.py`, DECISIONS.md D-T0-C)
 
@@ -90,11 +88,17 @@ data would carry): `align/gNNNN.fasta` (gene ids have **no `_`** — see the
 `ali_sp_names.txt`, `taxid.tsv` (fake taxids — production renames tips to numeric
 ids before PAML), `gene_ensembl.tsv` (fake coords), `truth.json`.
 
-### Sub-set axes (`run_replicates.py`)
+### Scope (D-T0-O)
 
-`archetype` {echo, bodysize} × `set` {null, power} × `tree` × `min_divergent_fraction`
-{0.5 production, 1.0 strict — D-T0-G} × `planted_fraction` {0.1, 0.25 — D-T0-H,
-power only}.
+**The gate** — what certifies the pipeline — is a single configuration:
+`primate` tree × {`echo`, `bodysize`} × {`null`, `power`} at
+`min_divergent_fraction 0.5`, `planted_fraction 0.25`, 20 replicates each. That
+is `run_replicates.py`'s default.
+
+**Characterisation** (optional, only if the gate passes and we want curves for
+the paper): the other trees (`primate_x5`, `mammal`, `star`, `ladder`) and the
+extra axis values (`--divergent-fractions 0.5,1.0`, `--planted-fractions 0.1,0.25`).
+Not run by default.
 
 ### Compute
 
@@ -111,21 +115,19 @@ locally. `perm_pool_size` / `caas_full_perms` scale the null.
 | `build_project.py` — Tier 0 `ProjectConfig` → `gui.generation.render` | **done** |
 | `run_replicates.py` — stage + `--run` | **done** |
 | **end-to-end pipeline run** | **GREEN** (2026-08-30). `echo_power`, full primate tree, 15 genes, `asr_mode=compute`. 28 processes, 4.5 min, exit 0. `gene_scores.tsv` = exactly the planted genes ranked by `gene_caas_score`; top `position_scores` all planted sites. Permulation null covers every gene with per-cycle CAAS. |
-| `harness/cli.py score` / `calibrate` — pipeline-output adapter (`harness/tier0_adapter.py`) | **done**, 2 tests |
-| contrast-selection recovery metric (D-T0-A) | **done** (in `score`: fg Jaccard + pair recovery) |
-| full `echo`/`bodysize` × `null`/`power` matrix + scale | **TODO** |
+| `harness/cli.py score` / `calibrate` — adapter (`harness/tier0_adapter.py`) | **done**, tests |
+| contrast recovery (D-T0-A) + grouped-CAAP scheme recovery (D-T0-N) in `score` | **done** |
+| **gate run** (`primate` × echo,bodysize × null,power, 20 reps) | **running** |
 
 ## Run
 
 ```bash
-# fetch trees once (validation/fixtures/tier0/README.md), then stage:
-python -m validation.tier0.run_replicates \
-    --out validation/runs/tier0 \
+# fetch trees once (validation/fixtures/tier0/README.md), then stage (gate config
+# is the default) + run:
+python -m validation.tier0.run_replicates --out validation/runs/tier0 \
     --archetypes echo,bodysize --sets null,power --trees primate \
-    --n-replicates 20 --n-genes 40
-# review runs/tier0/**/run.sh, then execute:
-python -m validation.tier0.run_replicates ... --run --jobs 4
+    --n-replicates 20 --n-genes 40 --run --jobs 4
 # then score:
-python -m validation.harness.cli calibrate --run validation/runs/tier0
-python -m validation.harness.cli score    --run validation/runs/tier0
+python -m validation.harness.cli calibrate --run validation/runs/tier0   # KS gate
+python -m validation.harness.cli score     --run validation/runs/tier0 --json validation/runs/tier0/score.json
 ```

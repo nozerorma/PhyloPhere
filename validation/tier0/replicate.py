@@ -42,12 +42,13 @@ class ReplicateConfig:
     concentration: float = 4.0
     gamma_alpha: float = 0.7
     matrix: str = "wag"
-    # planted-gene signal — identical-AA convergence only (D-T0-02). profile_shift
-    # is stripped: it is neither a strict-CAAS (US) positive nor a clean grouped
-    # CAAP positive (it does not target a shared amino_encoded group), so it only
-    # muddied the recall denominator. A proper grouped-CAAP planted mechanism is
-    # deferred (D-T0-N).
-    n_planted_identical_aa: int = 24
+    # planted-gene signal — two mechanisms, scored separately (D-T0-02):
+    #   identical_aa  : same residue across fg lineages  -> US + all GS
+    #   grouped_caap  : same GS class, residue free      -> GS only, US should not
+    # profile_shift stays stripped (neither a US nor a clean CAAP positive).
+    n_planted_identical_aa: int = 12
+    n_planted_grouped_caap: int = 12
+    grouped_caap_scheme: str = "GS1"
     identical_aa_target_weight: float = 0.95
     # phenotype
     n_transitions: int = 4               # echo: number of independent origins
@@ -130,6 +131,8 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
             gamma_alpha=rcfg.gamma_alpha, matrix=rcfg.matrix,
             n_planted_profile_shift=0,
             n_planted_identical_aa=rcfg.n_planted_identical_aa if is_planted else 0,
+            n_planted_grouped_caap=rcfg.n_planted_grouped_caap if is_planted else 0,
+            grouped_caap_scheme=rcfg.grouped_caap_scheme,
             identical_aa_target_weight=rcfg.identical_aa_target_weight,
         )
         res = simulate(tree, fg if is_planted else None, scfg, seed=seed * 100_000 + gi)
@@ -138,6 +141,7 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
             "planted": is_planted,
             "planted_sites": {str(k): v for k, v in res.truth.planted_sites.items()},
             "identical_aa_targets": res.truth.identical_aa_targets,
+            "grouped_caap_targets": res.truth.grouped_caap_targets,
             "n_planted": len(res.truth.planted_sites),
         }
 

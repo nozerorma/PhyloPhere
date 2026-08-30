@@ -144,6 +144,31 @@ def test_identical_aa_planting_converges() -> None:
     assert hits >= 8, f"only {hits}/10 identical-aa sites converged"
 
 
+def test_grouped_caap_planting_shares_class_not_residue() -> None:
+    """Planted grouped-CAAP sites: fg tips share one GS class but not (mostly)
+    a single residue; the class differs from the background majority."""
+    from validation.tier0.groups import SCHEMES
+
+    lad = trees.ladder_tree(28)
+    rng = np.random.default_rng(3)
+    fg = trees.sample_foreground(lad, 4, rng, max_clade=1)
+    cfg = SimConfig(n_sites=40, n_planted_identical_aa=0, n_planted_grouped_caap=12,
+                    grouped_caap_scheme="GS1", identical_aa_target_weight=0.96)
+    res = simulate(lad, fg, cfg, seed=11)
+    fg_tips = set(fg.tips)
+    gs1 = SCHEMES["GS1"]
+    class_share = residue_share = 0
+    for col, gt in res.truth.grouped_caap_targets.items():
+        fg_classes = {gs1.get(res.alignment[t][col]) for t in fg_tips}
+        fg_residues = {res.alignment[t][col] for t in fg_tips}
+        if fg_classes == {gt["group"]}:
+            class_share += 1
+        if len(fg_residues) == 1:
+            residue_share += 1
+    assert class_share >= 10, f"only {class_share}/12 sites are class-convergent"
+    assert residue_share <= 4, f"{residue_share}/12 collapsed to one residue (US leakage)"
+
+
 def test_null_is_stationary() -> None:
     """No planted signal: (a) column composition tracks the site equilibrium,
     (b) foreground tips (chosen at random, no signal) show no excess of shared

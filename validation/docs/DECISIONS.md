@@ -38,26 +38,37 @@ makes background convergence arise. `data/{wag,dayhoff,lg}.dat` vendored from th
 cluster PAML 4.10.10. Alternative considered: `iqtree2 --alisim` (rejected — less
 control over the profile-shift mechanism, and would share the inference tool).
 
-### D-T0-02 — MIGUEL (REVISED): one planted mechanism — `identical_aa` only
-`identical_aa` = same-residue convergence (Zou & Zhang / caastools US), hard-set
-on each origin edge, held by a near-point-mass Q_fg. Target = the least-favoured
-residue under the site's background Dirichlet profile, so the signal is
-unambiguous. It is also a grouped-CAAP (GS1-GS4) hit for free (shared residue ⊂
-shared group). `profile_shift` (the earlier PCOC-style preference shift) is
-**stripped** — Miguel: it is neither a strict-CAAS positive nor a clean CAAP
-positive because CAAP schemes are *grouped* on `amino_encoded`, and a random
-alternate profile does not converge to a shared physicochemical group. It only
-inflated the recall denominator with sites CAAS was never meant to call. The
-`SimConfig.n_planted_profile_shift` hook stays (dead-defaulted to 0).
+### D-T0-02 — MIGUEL (REVISED): two planted mechanisms — `identical_aa` + `grouped_caap`
+- `identical_aa` = same-residue convergence (caastools US), hard-set on each
+  origin edge, held by a near-point-mass Q_fg. Target = the least-favoured
+  residue under the site's background profile. A US **and** GS1-GS4 positive.
+- `grouped_caap` = same-*class* convergence (D-T0-N, now built). On fg edges the
+  equilibrium is ~uniform over one GS class (default GS1), the class chosen as
+  the one most disfavoured in the site background; a fresh residue from the class
+  is seeded per origin edge, so origins share the class but usually differ in
+  residue. A GS-only positive — US should **not** call it. This exercises what
+  distinguishes the grouped schemes; Miguel: "that's more important".
+- `profile_shift` stays **stripped** (neither a US nor a clean CAAP positive —
+  a random alternate profile has no shared class). `SimConfig` hook dead at 0.
 
-### D-T0-N — deferred: a real grouped-CAAP planted mechanism
-To exercise GS1-GS4 as more than a trivial by-product of `identical_aa`: on fg
-edges force the equilibrium onto a shared *amino_encoded group* (e.g. hydrophobic)
-but leave the residue free within it, so US sees divergent residues while the
-grouped schemes see convergence. Would let `score` separate US recall from GS
-recall. Needs the pipeline's group definitions (the `amino_encoded` recoding
-tables) mirrored in `model.py`. Not built — reopen if CAAP-scheme calibration
-becomes a Tier 0 goal.
+Default load: 12 `identical_aa` + 12 `grouped_caap` per planted gene.
+GS class tables vendored in `validation/tier0/groups.py` from the pipeline's
+`biochem/grouping.py` (keep in sync).
+
+### D-T0-O — MIGUEL: separate the gate from the characterisation
+Miguel: "isn't it too much for tier0". The **gate** (pass/fail, what certifies
+the pipeline) is one config: `primate` tree × {echo, bodysize} × {null, power}
+at `min_divergent_fraction 0.5` / `planted_fraction 0.25`, 20 reps. That is the
+`run_replicates.py` default. Everything else — `primate_x5` / `mammal` /
+`star` / `ladder`, and the `0.5,1.0` × `0.1,0.25` axis sweep — is **optional
+characterisation**, run only if the gate passes and we want the degradation
+curves for the paper. Kept in `grid.json` / behind flags, off by default.
+
+### D-T0-N — DONE (see D-T0-02): grouped-CAAP planted mechanism built
+`score` now reports `identical_aa_us_recall` (planted same-residue sites called
+by US), `grouped_caap_gs_recall` (planted same-class sites called by any GS,
+read from `position_scores.tsv:scheme_set`), and `grouped_caap_us_leakage` (of
+those, the fraction that also tripped US — want ~0).
 
 ### D-T0-01 — MIGUEL: trees  (REVISED — full primate tree, no prune)
 `primates_233_subst.tree` used **whole** (237 tips = 233 primates + 4 outgroups,
@@ -122,13 +133,17 @@ not by itself certify robustness to profile-heterogeneity background convergence
 except insofar as those chance convergences sometimes align with the random
 foreground across many replicates (which the KS test integrates over).
 
-`harness.cli calibrate --pcol` chooses the column: `meta_caas_boot` (default,
-gate — `US_meta_caas.tsv:pvalue_boot`), `meta_caas_hyp`, `perm_pos_boot`
-(`perm_pos_pval.tsv:null_pvalue_boot`), `position_boot`, `position_hyp`. Pooled
-across every null context = whole null-set replicates **plus** the unplanted
-genes of power replicates (primary source = the null-set replicates; the
-unplanted-gene tail is a secondary top-up). `perm_pos_boot` on the smoke run is
-degenerate-discrete (`n_cycles` 50) — needs a real null-set run to read.
+`harness.cli calibrate --pcol` chooses the column, now just two:
+`meta_caas_boot` (default, **the gate** — `US_meta_caas.tsv:pvalue_boot`, the
+permulation p that drives the significance call) and `perm_pos_boot`
+(`perm_pos_pval.tsv:null_pvalue_boot`, the raw per-position permulation p before
+meta-aggregation and FDR — diagnostic, shows the null before smoothing).
+Dropped: `meta_caas_hyp` / `position_hyp` (the analytic hypergeometric p is
+anticonservative by design — testing it for uniformity is uninformative) and
+`position_boot` (just `meta_caas_boot` carried into SCORING). Pooled across every
+null context = whole null-set replicates **plus** the unplanted genes of power
+replicates (primary = the null-set replicates). `perm_pos_boot` is
+degenerate-discrete at low `n_cycles`.
 
 ### D-T0-B — MIGUEL: `perm_strategy = BM` only
 BM is the shipped default and matches RER's own BM-only null (`getPermsContinuous`),

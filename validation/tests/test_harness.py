@@ -117,7 +117,7 @@ def _fake_run(root: Path, *, planted: bool) -> Path:
         is_p = planted and i <= 2
         genes[g] = {
             "planted": is_p,
-            "planted_sites": ({"3": "identical_aa", "7": "profile_shift"} if is_p else {}),
+            "planted_sites": ({"3": "identical_aa", "7": "grouped_caap"} if is_p else {}),
             "n_planted": 2 if is_p else 0,
         }
     (rep / "truth.json").write_text(json.dumps({
@@ -130,9 +130,14 @@ def _fake_run(root: Path, *, planted: bool) -> Path:
     grows += "g0003\t2\t0.10\ng0004\t2\t0.05\ng0005\t2\t0.02\n"
     (res / "gene_scores.tsv").write_text(gh + grows)
 
-    ph = "Gene\tPosition\tpvalue\tpvalue_boot\tCAAS_score\n"
-    prows = ("g0001\t3\t0.001\t0.01\t0.8\ng0002\t3\t0.002\t0.02\t0.7\n" if planted else "")
-    prows += "g0003\t44\t0.2\t0.6\t0.1\n"
+    ph = "Gene\tPosition\tpvalue\tpvalue_boot\tscheme_set\tCAAS_score\n"
+    prows = (
+        "g0001\t3\t0.001\t0.01\tGS1+GS2+US\t0.8\n"   # identical_aa -> US fires
+        "g0001\t7\t0.003\t0.03\tGS1+GS3\t0.6\n"       # grouped_caap -> GS only
+        "g0002\t3\t0.002\t0.02\tGS1+US\t0.7\n"
+        if planted else ""
+    )
+    prows += "g0003\t44\t0.2\t0.6\tGS1\t0.1\n"
     (res / "position_scores.tsv").write_text(ph + prows)
 
     perm_h = "Gene\tPosition\tcaap_group\tn_detected\tn_cycles\tnull_pvalue_boot\n"
@@ -155,8 +160,11 @@ def test_tier0_adapter_score(tmp_path: Path) -> None:
     rs = res.per_replicate[0]
     assert rs.gene_planted_ranks == {"g0001": 1, "g0002": 2}
     assert rs.gene_precision_at_k == 1.0
-    assert rs.site_recall_by_mechanism["identical_aa"] == 1.0
-    assert rs.site_recall_by_mechanism["profile_shift"] == 0.0
+    assert rs.site_recall_by_mechanism["identical_aa"] == 1.0   # g0001:3, g0002:3
+    assert rs.site_recall_by_mechanism["grouped_caap"] == 0.5   # g0001:7 only
+    assert rs.identical_aa_us_recall == 1.0
+    assert rs.grouped_caap_gs_recall == 0.5
+    assert rs.grouped_caap_us_leakage == 0.0                    # g0001:7 was GS-only
     assert rs.contrast_pairs_recovered == 2
     assert rs.contrast_fg_precision == 1.0
 

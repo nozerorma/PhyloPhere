@@ -15,6 +15,11 @@ reported per mechanism:
       *same* amino acid: the strict-CAAS (US) positive, and trivially also a
       grouped-CAAP (GS*) hit since the shared residue is in one group.
       The target is hard-set on each origin edge, then held by Q_fg.
+    * ``grouped_caap``   — on foreground edges the equilibrium is ~uniform over
+      one physicochemical *class* of a GS scheme (default GS1), the class chosen
+      as the one most disfavoured in the site background. A fresh residue from
+      the class is seeded per origin edge, so origins share the CLASS but
+      usually differ in RESIDUE: a GS1-GS4 positive that US should NOT call.
     * ``profile_shift``  — DORMANT (``n_planted_profile_shift`` defaults to 0 and
       the replicate driver never sets it). On foreground edges the site would use
       a *different* Dirichlet profile — a preference shift with no shared target
@@ -38,7 +43,8 @@ from pathlib import Path
 
 import numpy as np
 
-from .model import N_AA, PAML_AA, RateMatrix, gamma_rates, load_rate_matrix, site_profiles
+from .groups import GS_SCHEMES, SCHEMES, groups_of
+from .model import AA_INDEX, N_AA, PAML_AA, RateMatrix, gamma_rates, load_rate_matrix, site_profiles
 from .trees import Foreground, PhyloTree
 
 _DATA = Path(__file__).parent / "data"
@@ -53,9 +59,11 @@ class SimConfig:
     concentration: float = 4.0          # Dirichlet concentration for site profiles
     gamma_alpha: float = 0.7            # across-site rate heterogeneity
     matrix: str = "wag"                 # data/<matrix>.dat  (NOT "lg" — see module doc)
-    n_planted_profile_shift: int = 0    # sites with a convergent preference shift
-    n_planted_identical_aa: int = 0     # sites converging to the same residue
-    identical_aa_target_weight: float = 0.95  # equilibrium mass on the target residue
+    n_planted_profile_shift: int = 0    # DORMANT — see module doc
+    n_planted_identical_aa: int = 0     # sites converging to the same residue (US positive)
+    n_planted_grouped_caap: int = 0     # sites converging to a shared GS class (GS-only positive)
+    identical_aa_target_weight: float = 0.95  # equilibrium mass on the target residue / group
+    grouped_caap_scheme: str = "GS1"    # scheme whose class the grouped sites converge to
     shift_concentration: float = 2.0    # concentration of the alternate (shifted) profile
 
     def matrix_path(self) -> Path:
@@ -66,6 +74,7 @@ class SimConfig:
 class Truth:
     planted_sites: dict[int, str] = field(default_factory=dict)   # 0-based col -> mechanism
     identical_aa_targets: dict[int, str] = field(default_factory=dict)  # col -> residue
+    grouped_caap_targets: dict[int, dict] = field(default_factory=dict)  # col -> {scheme, group, residues}
     foreground_tips: list[str] = field(default_factory=list)
     n_transitions: int = 0
     n_foreground_edges: int = 0
@@ -78,6 +87,7 @@ class Truth:
         d = asdict(self)
         d["planted_sites"] = {str(k): v for k, v in self.planted_sites.items()}
         d["identical_aa_targets"] = {str(k): v for k, v in self.identical_aa_targets.items()}
+        d["grouped_caap_targets"] = {str(k): v for k, v in self.grouped_caap_targets.items()}
         return json.dumps(d, indent=2, sort_keys=True) + "\n"
 
 
@@ -112,6 +122,14 @@ def _point_mass_profile(target: int, weight: float) -> np.ndarray:
     return pi
 
 
+def _group_profile(members: list[int], weight: float) -> np.ndarray:
+    """Equilibrium ~uniform over ``members`` (total mass ``weight``), tiny elsewhere."""
+    pi = np.full(N_AA, (1.0 - weight) / (N_AA - len(members)))
+    for m in members:
+        pi[m] = weight / len(members)
+    return pi
+
+
 def _build_site_matrices(cfg: SimConfig, rm: RateMatrix, rng: np.random.Generator):
     """Return (Q_bg, Q_fg, targets) where Q_bg/Q_fg are (n_sites, 20, 20) stacks
     of normalised rate matrices for background / foreground edges, and ``targets``
@@ -124,6 +142,10 @@ def _build_site_matrices(cfg: SimConfig, rm: RateMatrix, rng: np.random.Generato
 
     planted: dict[int, str] = {}
     targets: dict[int, int] = {}
+    group_targets: dict[int, dict] = {}
+
+    scheme = cfg.grouped_caap_scheme
+    scheme_groups = groups_of(scheme, min_size=3)  # label -> [residues]
 
     all_sites = rng.permutation(n)
     cur = 0
@@ -140,8 +162,25 @@ def _build_site_matrices(cfg: SimConfig, rm: RateMatrix, rng: np.random.Generato
         Q_fg[s] = rm.q(_point_mass_profile(tgt, cfg.identical_aa_target_weight))
         planted[s] = "identical_aa"
         targets[s] = tgt
+    for _ in range(cfg.n_planted_grouped_caap):
+        s = int(all_sites[cur]); cur += 1
+        # pick the scheme class whose summed background probability at this site
+        # is lowest, so foreground convergence onto it is unambiguous; the
+        # residue stays free inside the class (US sees divergence, GS* sees one
+        # shared class).
+        label = min(
+            scheme_groups,
+            key=lambda g: base_prof[s][[AA_INDEX[a] for a in scheme_groups[g]]].sum(),
+        )
+        members = [AA_INDEX[a] for a in scheme_groups[label]]
+        Q_fg[s] = rm.q(_group_profile(members, cfg.identical_aa_target_weight))
+        planted[s] = "grouped_caap"
+        group_targets[s] = {
+            "scheme": scheme, "group": label,
+            "residues": sorted(scheme_groups[label]),
+        }
 
-    return Q_bg, Q_fg, base_prof, planted, targets
+    return Q_bg, Q_fg, base_prof, planted, targets, group_targets
 
 
 # --------------------------------------------------------------------------- #
@@ -192,7 +231,7 @@ def simulate(tree: PhyloTree, fg: Foreground | None, cfg: SimConfig,
     rng = np.random.default_rng(seed)
     rm = load_rate_matrix(cfg.matrix_path())
 
-    Q_bg, Q_fg, base_prof, planted, targets = _build_site_matrices(cfg, rm, rng)
+    Q_bg, Q_fg, base_prof, planted, targets, group_targets = _build_site_matrices(cfg, rm, rng)
     rates = gamma_rates(cfg.n_sites, cfg.gamma_alpha, rng)
 
     fg_edge_set = fg.fg_edges if fg else set()
@@ -224,6 +263,11 @@ def simulate(tree: PhyloTree, fg: Foreground | None, cfg: SimConfig,
         if ei in origin_edges:
             for s, tgt in targets.items():
                 child[s] = tgt
+            # grouped-CAAP: seed a residue drawn from the target class — a fresh
+            # draw per origin edge, so origins land on the SAME class but usually
+            # DIFFERENT residues (US divergent, GS* convergent).
+            for s, gt in group_targets.items():
+                child[s] = int(rng.choice([AA_INDEX[a] for a in gt["residues"]]))
         child = _evolve_branch(child, Q, T, rng)
         node_states[c] = child
 
@@ -237,6 +281,7 @@ def simulate(tree: PhyloTree, fg: Foreground | None, cfg: SimConfig,
     truth = Truth(
         planted_sites=planted,
         identical_aa_targets={s: PAML_AA[t] for s, t in targets.items()},
+        grouped_caap_targets=group_targets,
         foreground_tips=sorted(fg_tips),
         n_transitions=fg.n_transitions if fg else 0,
         n_foreground_edges=len(fg_edge_set),
