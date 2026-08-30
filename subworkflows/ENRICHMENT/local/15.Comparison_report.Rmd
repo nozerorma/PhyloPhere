@@ -1368,6 +1368,7 @@ build_interesting_positions <- function(direction) {
   out <- out %>%
     .grouped_composite(fade_col = "FADE_overlap") %>%
     dplyr::mutate(
+      `Hypotheses`          = if ("supporting_hypotheses" %in% names(.)) .collapsible_list(supporting_hypotheses) else NA_character_,
       `CAAS FCS term(s)`    = .collapsible_list(caas_fcs_terms),
       `RER FCS term(s)`     = .collapsible_list(rer_fcs_terms),
       `CAAS AMI desc(s)`    = .collapsible_list(caas_ami_desc),
@@ -1380,7 +1381,10 @@ build_interesting_positions <- function(direction) {
 
   out %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
-    dplyr::select(Gene = gene, Position, `CAAS Score` = CAAS_score, `25%`, `10%`, `5%`, `1%`,
+    dplyr::select(Gene = gene, Position, `CAAS Score` = CAAS_score,
+                  `N Hypotheses` = dplyr::any_of("n_hypotheses"),
+                  `Hypotheses`,
+                  `25%`, `10%`, `5%`, `1%`,
                   FADE_overlap, RER_acc, RER_decc, Accum_dir,
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,

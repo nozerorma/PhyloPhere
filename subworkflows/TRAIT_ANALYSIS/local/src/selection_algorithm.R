@@ -18,6 +18,7 @@
 library(ape)
 library(dplyr)
 library(tidyr)
+library(tibble)
 
 if (!exists("debug_log", inherits = TRUE)) {
   debug_log <- function(...) {
@@ -386,3 +387,166 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     distance_matrix = distance_matrix
   ))
 }
+
+# Overall Dunn index across all clusters in a hypothesis set
+overall_dunn_calc <- function(mat, members) {
+  if (length(members) <= 1) return(Inf)
+  dunn_vals <- numeric(length(members))
+  for (k in seq_along(members)) {
+    c1 <- members[[k]]
+    intra <- if (length(c1) > 1) max(mat[c1, c1]) else 0
+    if (intra == 0) {
+      dunn_vals[k] <- Inf
+      next
+    }
+    inter <- Inf
+    for (j in seq_along(members)) {
+      if (j == k) next
+      c2 <- members[[j]]
+      inter <- min(inter, min(mat[c1, c2]))
+    }
+    dunn_vals[k] <- if (is.finite(inter)) inter / intra else Inf
+  }
+  min(dunn_vals)
+}
+
+# FOP Non-Greedy Pair Selection Algorithm
+# Generates canonical baseline (H1) and harvests parallel independent hypotheses (H2...HM)
+fop_pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait, max_fop = 100, seed = 42) {
+  set.seed(seed)
+  mat <- as.matrix(distance_matrix)
+  
+  # Step 1: Run canonical greedy selection
+  canon_res <- pair_sel.f(distance_matrix, overlap_df, traits_df, my_trait)
+  canon_pairs <- canon_res$selected_pairs
+  K <- nrow(canon_pairs)
+  
+  if (K == 0) {
+    return(list(
+      canon_pairs = canon_pairs,
+      hypotheses = list(),
+      summary_df = data.frame()
+    ))
+  }
+  
+  canon_members <- lapply(seq_len(K), function(i) c(canon_pairs$species1[i], canon_pairs$species2[i]))
+  
+  # Step 2: Voronoi Clade Domain Partitioning
+  all_species <- rownames(mat)
+  species_domain <- setNames(integer(length(all_species)), all_species)
+  for (sp in all_species) {
+    dists_to_canon <- sapply(seq_len(K), function(k) {
+      min(mat[sp, canon_members[[k]][1]], mat[sp, canon_members[[k]][2]])
+    })
+    species_domain[sp] <- which.min(dists_to_canon)
+  }
+  
+  # Step 3: Domain Pools from valid candidates
+  cand_df <- canon_res$distance_df
+  alt_pools <- list()
+  for (k in seq_len(K)) {
+    dom_sp <- names(species_domain)[species_domain == k]
+    alt_pools[[k]] <- cand_df %>%
+      dplyr::filter(species1 %in% dom_sp & species2 %in% dom_sp)
+  }
+  
+  # Step 4: Harvest Hypotheses (H1 = Canonical, plus random draws without replacement)
+  harvested_list <- list()
+  unique_sigs <- character()
+
+  # H1 Canonical Baseline
+  h1_members <- canon_members
+  h1_sig <- paste(sapply(h1_members, function(x) paste(sort(x), collapse = "-")), collapse = " | ")
+  h1_dunn <- overall_dunn_calc(mat, h1_members)
+  h1_sum_diff <- sum(sapply(seq_len(K), function(i) {
+    sub <- cand_df %>% dplyr::filter(species1 == canon_pairs$species1[i] & species2 == canon_pairs$species2[i])
+    if (nrow(sub) > 0) sub$abs_diff[1] else 0
+  }))
+
+  unique_sigs <- c(unique_sigs, h1_sig)
+  harvested_list[[1]] <- list(
+    members = h1_members,
+    overall_dunn = h1_dunn,
+    sum_diff = h1_sum_diff,
+    id = "H1"
+  )
+
+  # Stochastic draws for alternative hypotheses
+  n_draws <- 1000
+  for (draw in seq_len(n_draws)) {
+    if (length(harvested_list) >= max_fop) break
+    shuffled_cands <- cand_df[sample(nrow(cand_df)), ]
+    current_members <- list()
+    used_sp <- character()
+
+    for (r in seq_len(nrow(shuffled_cands))) {
+      t <- shuffled_cands$top[r]; if (is.null(t)) t <- shuffled_cands$species1[r]
+      b <- shuffled_cands$bot[r]; if (is.null(b)) b <- shuffled_cands$species2[r]
+      if (t %in% used_sp || b %in% used_sp) next
+
+      test_members <- c(current_members, list(c(t, b)))
+      if (overall_dunn_calc(mat, test_members) >= 1.0) {
+        current_members <- test_members
+        used_sp <- c(used_sp, t, b)
+      }
+    }
+
+    if (length(current_members) == K) {
+      pair_strs <- sapply(current_members, function(x) paste(sort(x), collapse = "-"))
+      sorted_sig <- paste(sort(pair_strs), collapse = " | ")
+
+      if (!sorted_sig %in% unique_sigs) {
+        unique_sigs <- c(unique_sigs, sorted_sig)
+        ov_dunn <- overall_dunn_calc(mat, current_members)
+        sum_diff <- sum(sapply(current_members, function(pair) {
+          sub <- cand_df %>% dplyr::filter(species1 == pair[1] & species2 == pair[2])
+          if (nrow(sub) > 0) sub$abs_diff[1] else 0
+        }))
+
+        harvested_list[[length(harvested_list) + 1]] <- list(
+          members = current_members,
+          overall_dunn = ov_dunn,
+          sum_diff = sum_diff,
+          id = paste0("H", length(harvested_list) + 1)
+        )
+      }
+    }
+  }
+
+  # Build summary dataframe
+  summary_rows <- list()
+  hypotheses_dict <- list()
+
+  for (idx in seq_along(harvested_list)) {
+    h_item <- harvested_list[[idx]]
+    h_id <- paste0("H", idx)
+
+    # Format pair dataframe
+    pair_df <- data.frame(
+      species1 = sapply(h_item$members, `[`, 1),
+      species2 = sapply(h_item$members, `[`, 2),
+      stringsAsFactors = FALSE
+    )
+    hypotheses_dict[[h_id]] <- pair_df
+
+    summary_rows[[idx]] <- data.frame(
+      hypothesis_id = h_id,
+      n_pairs = length(h_item$members),
+      sum_abs_diff = round(h_item$sum_diff, 4),
+      overall_dunn = round(h_item$overall_dunn, 4),
+      is_canonical = (idx == 1),
+      pairs_str = paste(sapply(h_item$members, function(p) paste0("(", p[1], " vs ", p[2], ")")), collapse = "; "),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  summary_df <- do.call(rbind, summary_rows)
+
+  return(list(
+    canon_pairs = canon_pairs,
+    hypotheses = hypotheses_dict,
+    summary_df = summary_df,
+    domain_pools = alt_pools
+  ))
+}
+

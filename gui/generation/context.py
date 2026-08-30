@@ -103,6 +103,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "miss_pair": _bool_str(caas.miss_pair),
         "caap_mode": _bool_str(caas.caap_mode),
         "include_b0": _bool_str(caas.include_b0),
+        "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),
         "publish_intermediates": _bool_str(caas.publish_intermediates),
         "export_groups": _bool_str(caas.export_groups),
         "export_perm_discovery": _bool_str(caas.export_perm_discovery),

@@ -211,7 +211,7 @@ def read_caas_metadata_table(
         raise ValueError(f"Error reading CAAS metadata file: {e}") from e
 
     # Validate required columns
-    required_cols = ["tag", "caas", "is_significant", "GenePos"]
+    required_cols = ["tag", "caas", "GenePos"]
 
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
@@ -226,8 +226,6 @@ def read_caas_metadata_table(
         "amino_encoded": "",
         "conserved_pair": "",
         "is_conserved_meta": False,
-        "sig_hyp": None,
-        "sig_perm": None,
     }.items():
         if col not in df.columns:
             df[col] = default
@@ -318,23 +316,15 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             caas=caas,
             trait1_aa=trait1,
             trait0_aa=trait0,
-            pvalue=(
-                float(row["pvalue"])
-                if "pvalue" in row and pd.notna(row["pvalue"])
-                else None
-            ),
             pvalue_boot=(
                 float(row["pvalue_boot"])
                 if "pvalue_boot" in row and pd.notna(row["pvalue_boot"])
                 else None
             ),
-            is_significant=_b(row.get("is_significant")),
             caap_group=str(row.get("caap_group", "US") or "US"),
             amino_encoded=str(row.get("amino_encoded", "") or ""),
             is_conserved_meta=_b(row.get("is_conserved_meta")),
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair", "") or "")),
-            sig_hyp=_b(row.get("sig_hyp")) if pd.notna(row.get("sig_hyp")) else None,
-            sig_perm=_b(row.get("sig_perm")) if pd.notna(row.get("sig_perm")) else None,
         )
         entries.append(entry)
 
@@ -384,7 +374,6 @@ def get_caas_position_info(
         "gene_pos": str(row["GenePos"]),
         "tag": str(row["tag"]),
         "caas": str(row["caas"]),
-        "is_significant": str(row["is_significant"]).upper() == "TRUE",
     }
 
     _, zero_based_pos = _parse_gene_pos_token(str(info["gene_pos"]))
@@ -456,9 +445,7 @@ def build_caas_positions_map(
                     caas=info.get("caas", ""),
                     trait1_aa=[],
                     trait0_aa=[],
-                    pvalue=info.get("pvalue"),
                     pvalue_boot=info.get("pvalue_boot"),
-                    is_significant=info.get("is_significant", False),
                 )
 
                 # Parse amino acid conversion string
@@ -488,20 +475,42 @@ def parse_trait_pairs(
     trait_file_path: Path,
 ) -> Dict[int, List[Tuple[str, str]]]:
     """
-    Parse trait file once and return species pairs grouped by contrast.
+    Parse trait file or directory of trait files and return species pairs grouped by contrast.
 
     Expected tab-separated format (only supported format):
     - No header
     - Exactly 3 columns per row: species, trait, pair
-    - contrast defaults to 1 for all rows
     - Returns {contrast: [(high_species, low_species), ...]} with pairs sorted by
       numeric pair_id where possible
     - Ignores rows with missing fields or invalid trait values
-    - No taxid mapping or validation here (pure parsing)
+    - If a directory is provided, all *.tab files are parsed with contrast derived
+      from filename (e.g. traitfile_H5.tab -> contrast 5) or sequential index.
     """
     if not trait_file_path.exists():
         logger.error("Trait file not found: %s", trait_file_path)
         raise FileNotFoundError(f"Trait file not found: {trait_file_path}")
+
+    files_to_read: List[Path] = []
+    if trait_file_path.is_dir():
+        # Specifically match H_n hypothesis files (traitfile_H1.tab, traitfile_H2.tab, ...)
+        h_files = sorted(trait_file_path.glob("traitfile_H*.tab"))
+        if h_files:
+            files_to_read = h_files
+        else:
+            files_to_read = [
+                f for f in sorted(trait_file_path.glob("*.tab"))
+                if f.name != "traitfile_fop.tab"
+            ]
+        if not files_to_read:
+            files_to_read = [f for f in sorted(trait_file_path.glob("*")) if f.is_file()]
+    else:
+        files_to_read = [trait_file_path]
+
+    if not files_to_read:
+        logger.warning("No trait files found in %s", trait_file_path)
+        return {}
+
+    import re
 
     # Structure: contrast -> pair_id -> {'high': [species], 'low': [species]}
     by_contrast_and_pair: Dict[int, Dict[str, Dict[str, list]]] = defaultdict(
@@ -515,50 +524,56 @@ def parse_trait_pairs(
             return None
 
     try:
-        with open(trait_file_path, "r", encoding="utf-8-sig") as f:
-            reader = csv.reader(f, delimiter="\t")
-            rows_seen = 0
+        for file_idx, fpath in enumerate(files_to_read, start=1):
+            h_match = re.search(r"H(\d+)", fpath.name)
+            default_contrast = int(h_match.group(1)) if h_match else file_idx
 
-            def _consume_row(cells: List[str], row_num: int) -> None:
-                if not cells or all(not str(c).strip() for c in cells):
-                    return
+            with open(fpath, "r", encoding="utf-8-sig") as f:
+                reader = csv.reader(f, delimiter="\t")
+                rows_seen = 0
 
-                if len(cells) != 3:
-                    logger.debug(
-                        "Skipping malformed trait row %d (expected 3 columns): %s",
-                        row_num,
-                        cells,
-                    )
-                    return
+                def _consume_row(cells: List[str], row_num: int, contrast_num: int) -> None:
+                    if not cells or all(not str(c).strip() for c in cells):
+                        return
 
-                species = cells[0].strip()
-                trait_val = _to_int(cells[1])
-                pair_id = cells[2].strip()
-                contrast_num = 1
+                    if len(cells) != 3:
+                        logger.debug(
+                            "Skipping malformed trait row %d in %s (expected 3 columns): %s",
+                            row_num,
+                            fpath.name,
+                            cells,
+                        )
+                        return
 
-                if not species or trait_val is None or not pair_id:
-                    logger.debug("Skipping malformed trait row %d: %s", row_num, cells)
-                    return
+                    species = cells[0].strip()
+                    trait_val = _to_int(cells[1])
+                    pair_id = cells[2].strip()
 
-                if trait_val == 1:
-                    by_contrast_and_pair[contrast_num][pair_id]["high"].append(species)
-                elif trait_val == 0:
-                    by_contrast_and_pair[contrast_num][pair_id]["low"].append(species)
-                else:
-                    logger.debug(
-                        "Skipping row %d with non-binary trait value (%s): %s",
-                        row_num,
-                        trait_val,
-                        cells,
-                    )
+                    if not species or trait_val is None or not pair_id:
+                        logger.debug(
+                            "Skipping malformed trait row %d in %s: %s",
+                            row_num,
+                            fpath.name,
+                            cells,
+                        )
+                        return
 
-            for row_num, row in enumerate(reader, start=1):
-                rows_seen += 1
-                _consume_row(row, row_num)
+                    if trait_val == 1:
+                        by_contrast_and_pair[contrast_num][pair_id]["high"].append(species)
+                    elif trait_val == 0:
+                        by_contrast_and_pair[contrast_num][pair_id]["low"].append(species)
+                    else:
+                        logger.debug(
+                            "Skipping row %d in %s with non-binary trait value (%s): %s",
+                            row_num,
+                            fpath.name,
+                            trait_val,
+                            cells,
+                        )
 
-            if rows_seen == 0:
-                logger.warning("Trait file is empty: %s", trait_file_path)
-                return {}
+                for row_num, row in enumerate(reader, start=1):
+                    rows_seen += 1
+                    _consume_row(row, row_num, default_contrast)
 
         # Build final structure: contrast -> list of pairs
         contrast_to_pairs = {}
@@ -599,9 +614,10 @@ def parse_trait_pairs(
 
         total_pairs = sum(len(p) for p in contrast_to_pairs.values())
         logger.info(
-            "Loaded %d contrasts with %d total pairs from %s",
+            "Loaded %d contrasts with %d total pairs across %d traitfile(s) from %s",
             len(contrast_to_pairs),
             total_pairs,
+            len(files_to_read),
             trait_file_path,
         )
         return contrast_to_pairs

@@ -145,7 +145,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
                 )
                 encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
                 fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
-                          substitution, encoded, "NA", pattern]
+                          substitution, encoded, pattern]
                 if max_conserved > 0:
                     oc = conserved_pairs.split(":")[0] if conserved_pairs else "0"
                     pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
@@ -154,7 +154,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
                 tag = "/".join([fg_aas, bg_aas])
                 check = iscaas(tag, cfg, pos_dict, max_conserved, trait, fg, bg)
                 fields = [trait, genename, "CAAS", "US", trait, str(posnum),
-                          tag, "NA", f"pattern{check.pattern}"]
+                          tag, f"pattern{check.pattern}"]
                 if max_conserved > 0:
                     ci = getattr(check, "conserved_pairs", "0:")
                     cc = ci.split(":")[0] if ci else "0"
@@ -502,7 +502,6 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                                 str(processed_position.position),
                                 substitution,
                                 encoded,
-                                "NA",
                                 pattern,
                             ]
                             if max_conserved > 0:
@@ -597,7 +596,6 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                             trait,
                             str(processed_position.position),
                             tag,
-                            "NA",
                             f"pattern{check.pattern}",
                         ]
                         if max_conserved > 0:
@@ -657,7 +655,6 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 "position",
                 "caas",
                 "amino_encoded",
-                "pvalue",
                 "pattern"
             ]
         else:
@@ -669,7 +666,6 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 "trait",
                 "position",
                 "caas",
-                "pvalue",
                 "pattern"
             ]
         if max_conserved > 0:

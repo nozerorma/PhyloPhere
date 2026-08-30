@@ -6,12 +6,8 @@ Changes vs. original to_integrate version:
   - read_species_list(): reads 3-col headerless traitfile (species, trait, pair);
     assigns contrast = 1 for every entry (single group accumulation mode).
   - read_metadata_caas(): reads filtered_discovery.tsv produced by CT_POSTPROC.
-    Columns are the unique source of truth:
-      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, convergence_type,
-      convergence_description, convergence_mode, caap_group, amino_encoded,
-      is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
-      top_change_type, bottom_change_type, change_side, low_confidence_nodes,
-      asr_is_conserved, comments, ..., trait
+    Only the (group, gene, msa_pos) keys are consumed downstream (position
+    membership → iscaas flag); no per-position metadata values are read.
     No fallback to legacy formats.
 """
 
@@ -20,6 +16,7 @@ import os
 import glob
 import gc
 import csv
+from pathlib import Path
 
 import numpy as np
 import logging
@@ -61,7 +58,7 @@ def natural_sort_key(chromosome):
 # --------------------------
 
 def read_species_list(species_file):
-    """Read the CT traitfile (3-col, no header): species, trait, pair.
+    """Read the CT traitfile or directory of traitfiles (3-col, no header): species, trait, pair.
 
     All species are assigned to contrast group 1 (single-group accumulation mode).
     """
@@ -70,29 +67,46 @@ def read_species_list(species_file):
         return {'contrast': set(), 'trait': set(), 'pair': set(),
                 'trait_by_contrast': {}, 'trait_by_pair': {}}
     species_data = defaultdict(_default_species_entry)
-    with open(species_file) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith('#'):
-                continue
-            parts = line.split('\t')
-            if len(parts) < 3:
-                # Try whitespace split as fallback
-                parts = line.split()
-            if len(parts) >= 3:
-                species = parts[0]
-                try:
-                    trait = int(parts[1])
-                    pair  = int(parts[2])
-                except ValueError:
-                    logging.warning(f"Skipping malformed traitfile line: {line[:100]}")
+
+    species_path = Path(species_file)
+    files_to_read = []
+    if species_path.is_dir():
+        h_files = sorted(species_path.glob("traitfile_H*.tab"))
+        if h_files:
+            files_to_read = h_files
+        else:
+            files_to_read = [
+                f for f in sorted(species_path.glob("*.tab"))
+                if f.name != "traitfile_fop.tab"
+            ]
+        if not files_to_read:
+            files_to_read = [f for f in sorted(species_path.glob("*")) if f.is_file()]
+    elif species_path.is_file():
+        files_to_read = [species_path]
+
+    for fpath in files_to_read:
+        with open(fpath, "r", encoding="utf-8-sig") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith('#'):
                     continue
-                contrast = 1  # fixed — single accumulation group
-                entry = species_data[species]
-                entry['contrast'].add(contrast)
-                entry['trait'].add(trait)
-                entry['pair'].add(pair)
-    logging.info(f"Loaded {len(species_data)} species (all assigned to contrast group 1)")
+                parts = line.split('\t')
+                if len(parts) < 3:
+                    parts = line.split()
+                if len(parts) >= 3:
+                    species = parts[0]
+                    try:
+                        trait = int(parts[1])
+                        pair  = int(parts[2])
+                    except ValueError:
+                        logging.warning(f"Skipping malformed traitfile line in {fpath}: {line[:100]}")
+                        continue
+                    contrast = 1  # fixed — single accumulation group
+                    entry = species_data[species]
+                    entry['contrast'].add(contrast)
+                    entry['trait'].add(trait)
+                    entry['pair'].add(pair)
+    logging.info(f"Loaded {len(species_data)} species across {len(files_to_read)} traitfile(s) (all assigned to contrast group 1)")
     return species_data
 
 
@@ -139,15 +153,12 @@ def read_bg_info(bg_file):
 def read_metadata_caas(metadata_file):
     """Read CAAS metadata from a filtered_discovery.tsv file.
 
-    Source-of-truth columns (tab-separated):
-      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, convergence_type,
-      convergence_description, convergence_mode, caap_group, amino_encoded,
-      is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
-      top_change_type, bottom_change_type, change_side, low_confidence_nodes,
-      asr_is_conserved, comments, ..., Trait
+    Reads the disambiguation-canonical columns Gene, Position, tag, caas,
+    pvalue_boot, convergence_type, caap_group, amino_encoded, is_conserved_meta,
+    asr_is_conserved. No fallback to legacy formats.
 
-    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, amino_encoded, pvalue,
-                                           pvalue_boot, isSignificant}
+    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas, pvalue_boot}
+    Only the (group, gene, msa_pos) keys are consumed downstream.
     """
     logging.info(f"Reading metadata CAAS from {metadata_file if metadata_file else 'None'}")
     metadata = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
@@ -172,9 +183,6 @@ def read_metadata_caas(metadata_file):
         tag_idx           = h.index('tag')
         convergence_idx   = h.index('convergence_type')
         amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
-        pvalue_idx        = h.index('pvalue')
-
-        sig_idx           = h.index('is_significant')
         pboot_idx         = h.index('pvalue_boot') if 'pvalue_boot' in h else None
         group_idx         = h.index('caap_group')
         conserved_idx     = h.index('is_conserved_meta') if 'is_conserved_meta' in h else None
@@ -190,11 +198,6 @@ def read_metadata_caas(metadata_file):
                 tag       = parts[tag_idx].strip()
                 convergence   = parts[convergence_idx].strip()
                 amino_conv = parts[amino_idx].strip() if amino_idx is not None else ''
-                try:
-                    caas_pval = float(parts[pvalue_idx])
-                except Exception:
-                    caas_pval = float('inf')
-                is_sig = _as_bool(parts[sig_idx])
                 pboot  = None
                 if pboot_idx is not None:
                     try:
@@ -219,9 +222,7 @@ def read_metadata_caas(metadata_file):
                 'tag': tag,
                 'convergence_type': convergence,
                 'caas': amino_conv,
-                'pvalue': caas_pval,
                 'pvalue_boot': pboot,
-                'isSignificant': is_sig,
             }
 
     logging.debug(f"Meta-CAAS loaded. Groups: {list(metadata.keys())}")

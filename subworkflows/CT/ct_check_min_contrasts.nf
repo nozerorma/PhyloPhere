@@ -34,10 +34,12 @@ process CHECK_MIN_CONTRASTS {
     input:
     path traitfile
     path boot_traitfile
+    path trait_dir, stageAs: 'trait_dir_in'
 
     output:
     path "traitfile_ok.tab",      emit: traitfile_out,      optional: true
     path "boot_traitfile_ok.tab", emit: boot_traitfile_out, optional: true
+    path "traitfiles_ok_dir",     emit: trait_dir_out,      optional: true
     path "low_contrasts.skip",    emit: skip_flag,          optional: true
 
     script:
@@ -55,8 +57,20 @@ process CHECK_MIN_CONTRASTS {
     else
         cp ${traitfile}      traitfile_ok.tab
         cp ${boot_traitfile} boot_traitfile_ok.tab
+        mkdir -p traitfiles_ok_dir
+        # Copy traitfiles based on params.multi_hypothesis toggle (multi vs single canonical hypothesis mode)
+        if [ "${params.multi_hypothesis}" = "true" ] && [ -d "${trait_dir}" ]; then
+            cp ${trait_dir}/traitfile_H*.tab traitfiles_ok_dir/ 2>/dev/null || cp ${traitfile} traitfiles_ok_dir/traitfile_H1.tab
+        else
+            if [ -f "${trait_dir}/traitfile_H1.tab" ]; then
+                cp ${trait_dir}/traitfile_H1.tab traitfiles_ok_dir/traitfile_H1.tab
+            else
+                cp ${traitfile} traitfiles_ok_dir/traitfile_H1.tab
+            fi
+        fi
         echo "OK [CHECK_MIN_CONTRASTS]: \${n_fg} foreground contrasts found" \\
              "for trait '${tname}' — proceeding with CT pipeline."
     fi
     """
+
 }

@@ -117,8 +117,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "msa_pos",
         "tag",
         "caas",
-        "is_significant",
-        "pvalue",
         "pvalue_boot",
         # Pattern classification
         "convergence_type",
@@ -127,8 +125,6 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "amino_encoded",
         "is_conserved_meta",
         "conserved_pair",
-        "sig_hyp",
-        "sig_perm",
         # Change tracking
         "change_top",
         "change_bottom",

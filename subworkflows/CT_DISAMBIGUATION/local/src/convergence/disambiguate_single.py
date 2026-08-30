@@ -131,6 +131,7 @@ def analyze_caas_position_disambiguation(
     convergence_mode: str = "focal_clade",
     node_index: Optional[Dict[int, Any]] = None,
     build_node_posteriors: bool = False,
+    per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
 ) -> ConvergenceResult:
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
@@ -416,7 +417,7 @@ def analyze_caas_position_disambiguation(
         # was built above, so the score here stays bit-identical while guaranteeing
         # the perm null scores each position through the same helper.
         path_result = _position_axes(
-            caas_pos, tree_data, posterior_data, node_index, pair_details_list
+            caas_pos, tree_data, posterior_data, node_index, pair_details_list, per_site_dist_cache=per_site_dist_cache
         )
         asr_path_score = path_result["asr_path_score"]
         independence = path_result.get("independence", 1.0)
@@ -436,7 +437,6 @@ def analyze_caas_position_disambiguation(
         position=caas_pos.position,
         tag=caas_pos.tag,
         caas=caas_pos.caas,
-        is_significant=caas_pos.is_significant,
         position_one_based=caas_pos.position_one_based,
         ancestral=ancestral,
         derived=derived,
@@ -471,8 +471,6 @@ def analyze_caas_position_disambiguation(
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
         conserved_pair=conserved_pair,
-        sig_hyp=getattr(caas_pos, "sig_hyp", None),
-        sig_perm=getattr(caas_pos, "sig_perm", None),
         asr_path_score=asr_path_score,
         independence=independence,
         mrca_diversity=mrca_diversity,
@@ -482,7 +480,6 @@ def analyze_caas_position_disambiguation(
         pair_path_scores=pair_path_scores or None,
         pair_path_contaminated=pair_path_contaminated or None,
         score=None,
-        pvalue=caas_pos.pvalue,
         pvalue_boot=getattr(caas_pos, "pvalue_boot", None),
     )
 
@@ -538,6 +535,9 @@ def analyze_gene_disambiguation(
     logger.debug(
         f"Using posterior threshold {posterior_threshold:.3f} for node state extraction"
     )
+
+    if per_site_dist_cache is None:
+        per_site_dist_cache = {}
 
     results: List[ConvergenceResult] = []
     diagnostics: Dict[str, Any] = {
@@ -823,6 +823,7 @@ def analyze_gene_disambiguation(
                 convergence_mode=convergence_mode,
                 node_index=hoisted_node_index,
                 build_node_posteriors=build_node_posteriors,
+                per_site_dist_cache=per_site_dist_cache,
             )
 
             results.append(result)

@@ -136,17 +136,11 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # CT p-value measures
-hyper_measure_col <- if ("pvalue" %in% names(pos_df)) {
-  "pvalue"
-} else {
-  stop("position_scores.tsv must contain pvalue column")
-}
 boot_measure_col <- if ("pvalue_boot" %in% names(pos_df)) {
   "pvalue_boot"
 } else {
   stop("position_scores.tsv must contain pvalue_boot column")
 }
-hyper_measure_is_raw <- identical(hyper_measure_col, "pvalue")
 boot_measure_is_raw  <- identical(boot_measure_col,  "pvalue_boot")
 
 # Provisional detection - overridden in the load-data block after directional scores are computed
@@ -413,19 +407,12 @@ gene_df <- gene_df %>% left_join(gene_direction_df, by = "Gene")
     pos_sub %>% pull(Gene) %>% unique()
 }
 
-gene_global_top <- .gate_genes(pos_top)
-gene_global_bot <- .gate_genes(pos_bottom)
-gene_sig_top    <- .gate_genes(pos_top,    "gate_sig")
-gene_sig_bot    <- .gate_genes(pos_bottom, "gate_sig")
+gene_top_list <- .gate_genes(pos_top)
+gene_bot_list <- .gate_genes(pos_bottom)
 
-# Primary aliases used in tables - p-val sig gate is most informative default
-gene_top_list <- gene_sig_top
-gene_bot_list <- gene_sig_bot
-
-# Named list for looping over both gates in overlap sections
+# Named list for looping in overlap sections
 .caas_gates <- list(
-  list(lbl = "Global",        top = gene_global_top, bot = gene_global_bot),
-  list(lbl = "Sig (p<0.05)", top = gene_sig_top,    bot = gene_sig_bot)
+  list(lbl = "All Positions", top = gene_top_list, bot = gene_bot_list)
 )
 
 # Background universe for gene-set overlap Fisher tests (RER / FADE / Accumulation
@@ -548,9 +535,7 @@ reproduced independently of the pipeline code.
 
 ### Position-Level Score
 
-`CAAS_score` combines two evidence axes, each on a raw [0, 1] scale with no
-decile transform. The hypergeometric p-value is not one of them; it is a
-separate significance gate (below).
+`CAAS_score` combines two orthogonal evidence axes, each on a continuous [0, 1] scale:
 
 #### 1. Phenotype evolution: `phen_score`
 
@@ -587,12 +572,7 @@ $$\text{CAAS\_score} = \operatorname{mean}_{s \in \text{detected schemes}} \text
 Biochemistry tab for what the five schemes are and why breadth is not treated
 as extra evidence.
 
-#### 4. Significance gate (hypergeometric `pvalue`)
 
-| Tier | Column | Condition |
-|------|--------|-----------|
-| All | `gate_all` | every scored position |
-| Significant | `gate_sig` | `pvalue < 0.05` |
 
 ---
 
@@ -657,85 +637,32 @@ direction) and `gene_caas_bot` (BOTTOM direction) independently.
 
 ## Input Distributions {.tabset}
 
-This section displays the distributions of the primary input significance measures (Hypergeometric P-values and Permutation P-values) along with a joint comparison to show how they behave relative to each other and to the final CAAS score. Values are shown on their raw measure scale throughout, not decile-bucketed: `dplyr::ntile()` breaks ties by row order rather than by value, and the permulation p-value is coarse enough (bounded by cycle count) that decile bucketing would smear its boundaries.
+This section displays the distributions of the primary input significance measures (Permutation P-values and Phenotype Evolution scores) along with a joint comparison to show how they behave relative to the ancestral reconstruction axis and the final CAAS score.
 
-### Hypergeometric P-value
+### Phenotype Evolution vs Ancestral Reconstruction
 
-```{r hyper-pval-dist, fig.height=8}
-plot_df_h <- pos_df %>%
-  filter(!is.na(.data[[hyper_measure_col]])) %>%
-  mutate(
-    plot_value = if (hyper_measure_is_raw) -log10(pmax(.data[[hyper_measure_col]], 1e-300)) else .data[[hyper_measure_col]]
-  )
-
-p_hyp_density <- ggplot(plot_df_h, aes(x = plot_value)) +
-  geom_histogram(aes(y = after_stat(density)), bins = 60,
-                 fill = .tableau10[1], alpha = 0.6) +
-  geom_density(linewidth = 0.8, colour = .tableau10[2]) +
-  labs(
-    title = if (hyper_measure_is_raw) "Hypergeometric P-value Distribution (-log10 scale)" else "Variability Score Distribution",
-    x     = if (hyper_measure_is_raw) "-log10(pvalue)" else "variability_score",
-    y     = "Density"
-  ) +
-  scale_x_continuous(
-    breaks = scales::pretty_breaks(n = 14),
-    minor_breaks = scales::pretty_breaks(n = 28)
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-
-print(p_hyp_density)
-```
-
-### Significance Gate
-
-The hypergeometric p-value is not part of `CAAS_score`; it tiers positions into
-nested significance levels. Rank by `CAAS_score`, then keep whichever tier you need.
-
-```{r gate-summary}
-if (all(c("gate_all", "gate_sig") %in% names(pos_df))) {
-  gate_tbl <- tibble::tibble(
-    Tier = c("All (ranked pool)", "Significant (pvalue < 0.05)"),
-    Positions = c(sum(pos_df$gate_all, na.rm = TRUE),
-                  sum(pos_df$gate_sig, na.rm = TRUE))
-  ) %>% mutate(`% of pool` = round(100 * Positions / max(Positions, 1), 1))
-  knitr::kable(gate_tbl,
-               caption = "Hypergeometric significance gate - positions per tier")
-} else {
-  cat("_Significance gate columns (gate_all / gate_sig) not present in this run._\n")
-}
-```
-
-### Hypergeometric vs Permulation
-
-```{r hyp-vs-perm-scatter, fig.height=7, fig.width=8}
-# Classic scatter on the raw measure scale -- no decile bucketing. See the
-# note at the top of this section for why deciles were dropped (ntile() tie
-# smearing on the coarse permulation p-value).
+```{r phen-vs-asr-scatter, fig.height=7, fig.width=8}
 joint_df <- pos_df %>%
-  filter(!is.na(.data[[hyper_measure_col]]), !is.na(.data[[boot_measure_col]])) %>%
-  mutate(
-    hyp_val  = if (hyper_measure_is_raw) -log10(pmax(.data[[hyper_measure_col]], 1e-300)) else .data[[hyper_measure_col]],
-    boot_val = if (boot_measure_is_raw) -log10(pmax(.data[[boot_measure_col]], 1e-300)) else .data[[boot_measure_col]]
-  )
+  filter(!is.na(phen_score), !is.na(asr_score))
 
-.r_hyp_caas  <- round(cor(joint_df$hyp_val,  joint_df$CAAS_score, use = "complete.obs"), 2)
-.r_boot_caas <- round(cor(joint_df$boot_val, joint_df$CAAS_score, use = "complete.obs"), 2)
-.r_hyp_boot  <- round(cor(joint_df$hyp_val,  joint_df$boot_val,   use = "complete.obs"), 2)
+.r_phen_caas <- round(cor(joint_df$phen_score, joint_df$CAAS_score, use = "complete.obs"), 2)
+.r_asr_caas  <- round(cor(joint_df$asr_score,  joint_df$CAAS_score, use = "complete.obs"), 2)
+.r_phen_asr  <- round(cor(joint_df$phen_score, joint_df$asr_score,  use = "complete.obs"), 2)
 
-ggplot(joint_df, aes(x = hyp_val, y = boot_val, colour = CAAS_score)) +
+ggplot(joint_df, aes(x = asr_score, y = phen_score, colour = CAAS_score)) +
   geom_point(alpha = 0.45, size = 1.6) +
   scale_colour_gradientn(
     colours = c("#4E79A7", "#76B7B2", "#EDC948", "#F28E2B", "#E15759"),
     name    = "CAAS\nscore"
   ) +
-  annotate("text", x = Inf, y = Inf,
-           label = sprintf("r(hyp, CAAS) = %.2f\nr(perm, CAAS) = %.2f\nr(hyp, perm) = %.2f",
-                           .r_hyp_caas, .r_boot_caas, .r_hyp_boot),
-           hjust = 1.05, vjust = 1.3, size = 3.2, colour = "grey30") +
+  annotate("text", x = -Inf, y = Inf,
+           label = sprintf("r(phen, CAAS) = %.2f\nr(asr, CAAS) = %.2f\nr(phen, asr) = %.2f",
+                           .r_phen_caas, .r_asr_caas, .r_phen_asr),
+           hjust = -0.05, vjust = 1.3, size = 3.2, colour = "grey30") +
   labs(
-    title    = "Hypergeometric vs Permulation evidence",
-    x        = if (hyper_measure_is_raw) "-log10(pvalue)" else "variability_score",
-    y        = if (boot_measure_is_raw) "-log10(pvalue_boot)" else "pattern_score"
+    title    = "Orthogonal Evidence Axes: ASR Path Score vs Phenotype Evolution Score",
+    x        = "asr_score (Ancestral State Path Confidence)",
+    y        = "phen_score (1 - percent_rank(pvalue_boot))"
   ) +
   theme(plot.title = element_text(face = "bold"))
 ```
@@ -1112,16 +1039,15 @@ knitr::kable(
 )
 obs_tbl <- purrr::imap_dfr(.dir_subsets, function(d, dir) {
   tibble::tibble(
-    direction           = dir,
-    positions           = nrow(d),
-    `median pvalue`     = if ("pvalue" %in% names(d)) median(d$pvalue, na.rm = TRUE) else NA_real_,
-    `mean pvalue`       = if ("pvalue" %in% names(d)) mean(d$pvalue, na.rm = TRUE) else NA_real_,
-    `% gate_sig`        = if ("gate_sig" %in% names(d)) round(100 * mean(d$gate_sig, na.rm = TRUE), 1) else NA_real_,
-    `median CAAS score` = if ("CAAS_score" %in% names(d)) median(d$CAAS_score, na.rm = TRUE) else NA_real_
+    direction               = dir,
+    positions               = nrow(d),
+    `median permutation p`  = if ("pvalue_boot" %in% names(d)) median(d$pvalue_boot, na.rm = TRUE) else NA_real_,
+    `mean permutation p`    = if ("pvalue_boot" %in% names(d)) mean(d$pvalue_boot,   na.rm = TRUE) else NA_real_,
+    `median CAAS score`     = if ("CAAS_score" %in% names(d))  median(d$CAAS_score,  na.rm = TRUE) else NA_real_
   )
 })
 knitr::kable(obs_tbl, digits = 4,
-  caption = "Observed hypergeometric p-values and significance-gate pass-rates by direction.")
+  caption = "Observed permutation p-values and CAAS scores by direction.")
 ```
 
 ### CAAS Score Distribution
@@ -1347,11 +1273,8 @@ DT::datatable(
 # supplementary diagnostics. any_of() keeps this robust to absent columns.
 display_cols <- c("Gene", "Position", "CAAS_score",
                   "phen_score", "asr_score", "core",
-                  "gate_sig",
-                  "pvalue", "pvalue_boot",
+                  "pvalue_boot",
                   "n_schemes", "scheme_set", "change_side",
-                  "pre_score",
-                  "variability_score", "pattern_score",
                   "is_top_10pct", "is_top_5pct", "is_top_1pct",
                   "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
 
@@ -1513,42 +1436,20 @@ make_dir_pval_panel <- function(df, measure_col, is_raw, dir_label, col) {
     theme(plot.title = element_text(face = "bold", size = 10))
 }
 
-p_hyp_top <- make_dir_pval_panel(pos_top,    hyper_measure_col, hyper_measure_is_raw, "TOP",    .tableau10[1])
-p_hyp_bot <- make_dir_pval_panel(pos_bottom, hyper_measure_col, hyper_measure_is_raw, "BOTTOM", .tableau10[3])
+p_boot_top <- make_dir_pval_panel(pos_top,    boot_measure_col, boot_measure_is_raw, "TOP",    .tableau10[1])
+p_boot_bot <- make_dir_pval_panel(pos_bottom, boot_measure_col, boot_measure_is_raw, "BOTTOM", .tableau10[3])
 
-# Permulation (pvalue_boot) distribution omitted here - it is the phen_score axis,
-# already shown in the Score axis tab below.
 gridExtra::grid.arrange(
-  p_hyp_top, p_hyp_bot,
+  p_boot_top, p_boot_bot,
   ncol = 2,
   top  = grid::textGrob(
-    "Hypergeometric p-value distribution by direction",
+    "Permutation p-value (pvalue_boot) distribution by direction",
     gp = grid::gpar(fontface = "bold", fontsize = 12)
   )
 )
 ```
 
-### Significance Gate
 
-```{r dir-gate-summary}
-if (all(c("gate_all", "gate_sig") %in% names(pos_df))) {
-  gate_dir_tbl <- bind_rows(
-    pos_top    %>% summarise(Direction = "TOP",
-                              `All positions`        = sum(gate_all, na.rm = TRUE),
-                              `Significant (p<0.05)` = sum(gate_sig, na.rm = TRUE)),
-    pos_bottom %>% summarise(Direction = "BOTTOM",
-                              `All positions`        = sum(gate_all, na.rm = TRUE),
-                              `Significant (p<0.05)` = sum(gate_sig, na.rm = TRUE))
-  ) %>%
-    mutate(
-      `% sig`     = round(100 * `Significant (p<0.05)` / pmax(`All positions`, 1), 1)
-    )
-  knitr::kable(gate_dir_tbl,
-               caption = "Hypergeometric significance gate by direction - positions per tier")
-} else {
-  cat("_Significance gate columns not present in this run._\n")
-}
-```
 
 ### Score axis
 
@@ -1588,12 +1489,9 @@ has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       "phen_score", "asr_score", "core",
-                      "gate_sig",
                       if (has_caas_col) "caas",
                       "n_schemes", "scheme_set",
-                      "variability_score", "pattern_score",
-                      "pre_score",
-                      "pvalue", "pvalue_boot",
+                      "pvalue_boot",
                       "change_side",
                       "is_top_10pct", "is_top_5pct", "is_top_1pct",
                       "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
@@ -2146,14 +2044,13 @@ rer_tbl <- gene_df %>%
     rer_direction = case_when(rer_rho > 0 ~ "accelerating",
                                rer_rho < 0 ~ "decelerating",
                                TRUE        ~ "neutral"),
-    in_top_global = Gene %in% gene_global_top, in_top_sig = Gene %in% gene_sig_top,
-    in_bot_global = Gene %in% gene_global_bot, in_bot_sig = Gene %in% gene_sig_bot
+    in_top = Gene %in% gene_top_list,
+    in_bot = Gene %in% gene_bot_list
   ) %>%
   arrange(rer_min_pval) %>%
   select(Gene, rer_min_pval, rer_rho, rer_direction,
          gene_caas_score, gene_caas_top, gene_caas_bot,
-         in_top_global, in_top_sig,
-         in_bot_global, in_bot_sig) %>%
+         in_top, in_bot) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
 
 DT::datatable(
@@ -2284,16 +2181,15 @@ gridExtra::grid.arrange(
 ```{r gene-fade-table, eval=has_fade_gene}
 fade_tbl <- gene_fade_df %>%
   mutate(
-    in_top_global = Gene %in% gene_global_top, in_top_sig = Gene %in% gene_sig_top,
-    in_bot_global = Gene %in% gene_global_bot, in_bot_sig = Gene %in% gene_sig_bot
+    in_top = Gene %in% gene_top_list,
+    in_bot = Gene %in% gene_bot_list
   ) %>%
   arrange(desc(pmax(replace_na(fade_top_max_bf, 0), replace_na(fade_bot_max_bf, 0)))) %>%
   select(Gene,
          fade_top_max_bf, fade_top_sig,
          fade_bot_max_bf, fade_bot_sig,
          gene_caas_score, gene_caas_top, gene_caas_bot,
-         in_top_global, in_top_sig,
-         in_bot_global, in_bot_sig) %>%
+         in_top, in_bot) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
 
 DT::datatable(
@@ -2346,14 +2242,13 @@ accum_pval_cols <- grep("^accum_pval_", names(gene_df), value = TRUE)
 accum_tbl <- gene_df %>%
   filter(!is.na(accum_cct_p)) %>%
   mutate(
-    in_top_global = Gene %in% gene_global_top, in_top_sig = Gene %in% gene_sig_top,
-    in_bot_global = Gene %in% gene_global_bot, in_bot_sig = Gene %in% gene_sig_bot
+    in_top = Gene %in% gene_top_list,
+    in_bot = Gene %in% gene_bot_list
   ) %>%
   arrange(accum_cct_p) %>%
   select(Gene, accum_cct_p, any_of("accum_fdr"), accum_significant, any_of(accum_pval_cols),
          gene_caas_score, gene_caas_top, gene_caas_bot,
-         in_top_global, in_top_sig,
-         in_bot_global, in_bot_sig) %>%
+         in_top, in_bot) %>%
   mutate(across(where(is.numeric), ~round(., 4)))
 
 DT::datatable(

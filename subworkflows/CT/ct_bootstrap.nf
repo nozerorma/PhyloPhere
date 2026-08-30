@@ -54,7 +54,12 @@ process BOOTSTRAP {
     def export_perm_discovery_arg = (params.export_perm_discovery != null && params.export_perm_discovery != "none") ? "--export_perm_discovery ${alignmentID}.bootstrap.discovery.output" : ""
 
     def pairArgs = """
-n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+if [ -d "${caas_config}" ]; then
+    sample_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$sample_file" | sort -nu | wc -l | tr -d ' ')
+else
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+fi
 _max_conserved=\$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}')
 _max_bg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
 _max_fg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
@@ -157,7 +162,12 @@ cat > .ct_bootstrap_batch_args <<'EOF'
 ${args.replaceAll('\n', ' ')}
 EOF
 
-n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+if [ -d "${caas_config}" ]; then
+    sample_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$sample_file" | sort -nu | wc -l | tr -d ' ')
+else
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+fi
 _max_conserved=\$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}')
 _max_bg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
 _max_fg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')

@@ -107,8 +107,13 @@ process RESAMPLE {
             ls -la >&2
             exit 1
         fi
-        if [ ! -f "${caas_config}" ]; then
-            echo "[ERROR] Missing caas config input: ${caas_config}" >&2
+        if [ -d "${caas_config}" ]; then
+            actual_caas_config=\$(find -L "${caas_config}" -type f -name '*.tab' | head -n 1)
+        else
+            actual_caas_config="${caas_config}"
+        fi
+        if [ ! -f "\$actual_caas_config" ]; then
+            echo "[ERROR] Missing caas config input: \$actual_caas_config" >&2
             echo "[DEBUG] workdir:" >&2
             pwd >&2
             ls -la >&2
@@ -126,7 +131,7 @@ process RESAMPLE {
         Rscript \\
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
-        "${caas_config}" \\
+        "\$actual_caas_config" \\
         ${params.perm_pool_size} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\

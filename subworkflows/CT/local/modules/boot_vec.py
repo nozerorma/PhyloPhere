@@ -353,11 +353,18 @@ class VectorizedBootstrap:
                 caas = (overlap <= max_conserved) & ((non_fg >= 2) | (non_bg >= 2))
 
                 # --- pattern classification (mirror iscaas / check_caap_pattern) ---
-                is_null = (nfg_unique == 0) | (nbg_unique == 0)
-                p1 = (nfg_unique == 1) & (nbg_unique == 1)
-                p2 = (nfg_unique == 1) & (nbg_unique != 1)
-                p3 = (nfg_unique != 1) & (nbg_unique == 1)
-                p4 = (nfg_unique != 1) & (nbg_unique != 1)
+                non_fg_unique = ((C_fg > 0) & ~present_bg).sum(axis=1)
+                non_bg_unique = ((C_bg > 0) & ~present_fg).sum(axis=1)
+                has_non_overlap = (non_fg_unique > 0) & (non_bg_unique > 0)
+
+                pat_nfg = np.where(has_non_overlap, non_fg_unique, nfg_unique)
+                pat_nbg = np.where(has_non_overlap, non_bg_unique, nbg_unique)
+
+                is_null = (pat_nfg == 0) | (pat_nbg == 0)
+                p1 = (pat_nfg == 1) & (pat_nbg == 1)
+                p2 = (pat_nfg == 1) & (pat_nbg > 1)
+                p3 = (pat_nfg > 1) & (pat_nbg == 1)
+                p4 = (pat_nfg > 1) & (pat_nbg > 1)
                 admitted = np.zeros(C_fg.shape[0], dtype=bool)
                 if adm[1]:
                     admitted |= p1

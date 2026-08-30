@@ -146,12 +146,9 @@ def extract_convergence_summary(
         "amino_encoded": result_dict.get("amino_encoded", ""),
         "is_conserved_meta": bool(result_dict.get("is_conserved_meta", False)),
         "conserved_pair": result_dict.get("conserved_pair", ""),
-        "sig_hyp": result_dict.get("sig_hyp"),
-        "sig_perm": result_dict.get("sig_perm"),
         "change_top": result_dict.get("change_top", "no_change"),
         "change_bottom": result_dict.get("change_bottom", "no_change"),
         "change_side": result_dict.get("change_side", "none"),
-        "is_significant": result_dict.get("is_significant"),
     }
 
     summary["pairs"] = extract_pair_info(result_dict, num_pairs)

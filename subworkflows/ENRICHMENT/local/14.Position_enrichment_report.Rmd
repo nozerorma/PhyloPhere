@@ -201,9 +201,9 @@ le_summary <- if (!is.null(le_raw)) {
 # (non-directional, accumulation_all_* pooled) is reserved for `global`. Only
 # columns actually present are ever shown.
 flag_cols_by_rk <- list(
-  global = c("pct_gate_sig", "pct_rer_acc", "pct_rer_decc", "pct_accum"),
-  top    = c("pct_gate_sig", "pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum_top"),
-  bottom = c("pct_gate_sig", "pct_fade_bottom", "pct_rer_acc", "pct_rer_decc", "pct_accum_bottom")
+  global = c("pct_rer_acc", "pct_rer_decc", "pct_accum"),
+  top    = c("pct_fade_top", "pct_rer_acc", "pct_rer_decc", "pct_accum_top"),
+  bottom = c("pct_fade_bottom", "pct_rer_acc", "pct_rer_decc", "pct_accum_bottom")
 )
 
 .fcs_stats_file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
@@ -1151,7 +1151,7 @@ not restricted to the US scheme.
 .glob10 <- test_glob_10(pos_df); .glob5 <- test_glob_5(pos_df); .glob1 <- test_glob_1(pos_df)
 
 pos_score_meta <- pos_df %>%
-  select(Gene, Position, CAAS_score, n_schemes, change_side, gate_sig) %>%
+  select(Gene, Position, CAAS_score, n_schemes, change_side) %>%
   mutate(
     caas_decile  = dplyr::ntile(CAAS_score, 10),
     in_top_10pct = .glob10,
@@ -1426,15 +1426,12 @@ run_pai_fisher_dir <- function(df, label) {
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
 
-    pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
-
     tibble(
       Direction            = label,
       Threshold            = thr$lbl,
       `N positions`        = n_top,
       `N pathogenic`       = n_top_h,
       `% pathogenic`       = sprintf("%.1f%%", 100 * n_top_h / max(n_top, 1)),
-      `% gate_sig`         = pct_sig,
       `Odds ratio`         = sprintf("%.2f", ft$estimate),
       `P value`            = formatC(ft$p.value, format = "e", digits = 2)
     )
@@ -1566,15 +1563,12 @@ run_cosmic_fisher_dir <- function(df, label) {
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
     
-    pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
-
     tibble(
       Direction            = label,
       Threshold            = thr$lbl,
       `N positions`        = n_top,
       `N COSMIC`           = n_top_c,
       `% COSMIC`           = sprintf("%.1f%%", 100 * n_top_c / max(n_top, 1)),
-      `% gate_sig`         = pct_sig,
       `Odds ratio`         = sprintf("%.2f", ft$estimate),
       `P value`            = formatC(ft$p.value, format = "e", digits = 2)
     )
@@ -1635,12 +1629,14 @@ fade_table <- dplyr::bind_rows(
   if (!is.null(pos_fade_bottom)) pos_fade_bottom %>% dplyr::filter(has_fade) %>% dplyr::mutate(Direction = "BOTTOM")
 ) %>%
   dplyr::arrange(dplyr::desc(max_bf)) %>%
-  dplyr::select(Gene, Position, Direction, CAAS_score, change_side, target_aa, max_bf) %>%
+  dplyr::select(Gene, Position, Direction, CAAS_score, dplyr::any_of(c("n_hypotheses", "supporting_hypotheses")), change_side, target_aa, max_bf) %>%
   dplyr::rename(
-    `CAAS Score`      = CAAS_score,
-    `Change Side`     = change_side,
-    `FADE Target AA`  = target_aa,
-    `Max Bayes Factor` = max_bf
+    `CAAS Score`        = CAAS_score,
+    `N Hypotheses`      = dplyr::any_of("n_hypotheses"),
+    `Hypotheses`        = dplyr::any_of("supporting_hypotheses"),
+    `Change Side`       = change_side,
+    `FADE Target AA`    = target_aa,
+    `Max Bayes Factor`   = max_bf
   )
 
 DT::datatable(
@@ -1703,15 +1699,12 @@ run_fade_fisher_dir <- function(df, label) {
     ft  <- tryCatch(fisher.test(mat),
                     error = function(e) list(estimate = NA, conf.int = c(NA, NA), p.value = NA))
 
-    pct_sig <- if ("gate_sig" %in% names(df)) sprintf("%.1f%%", 100 * mean(df$gate_sig[in_top], na.rm = TRUE)) else "0.0%"
-
     tibble(
       Direction     = label,
       Threshold     = thr$lbl,
       `N positions` = n_top,
       `N FADE-sig`  = n_top_f,
       `% FADE-sig`  = sprintf("%.1f%%", 100 * n_top_f / max(n_top, 1)),
-      `% gate_sig`  = pct_sig,
       `Odds ratio`  = sprintf("%.2f", ft$estimate),
       `P value`     = formatC(ft$p.value, format = "e", digits = 2)
     )

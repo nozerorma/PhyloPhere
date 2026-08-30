@@ -58,7 +58,6 @@ https://doi.org/10.1111/1755-0998.70052
 
 from modules.pindex import *
 from modules.alimport import *
-from modules.hyper import *
 from modules.caas_id import process_position
 from os.path import exists
 from typing import Dict, List, Tuple, Optional
@@ -234,77 +233,7 @@ def encode_to_groups(amino_acids: str, scheme_dict: Dict[str, str]) -> str:
     return encoded
 
 
-def build_group_line_dictionary(position_obj, trait: str, scheme_dict: Dict[str, str],
-                                  species_in_alignment: List[str]) -> Dict[str, str]:
-    """
-    Transform position data to group-level format for p-value calculation.
 
-    This function creates a line_dictionary compatible with calcpval_random() from hyper.py,
-    but with amino acids replaced by their group codes according to the scheme.
-
-    Args:
-        position_obj: Position object from process_position() containing aa2spp, aa2trait, etc.
-        trait: Trait name to process
-        scheme_dict: Dictionary mapping amino acids to groups
-        species_in_alignment: List of all species in the alignment
-
-    Returns:
-        Dictionary mapping species to "GROUP@POSITION" format (e.g., {"Human": "AGPS@42"})
-    """
-    line_dict = {}
-
-    # Get position number from position_obj
-    position_num = position_obj.position
-
-    # For each species in the alignment, find its amino acid and encode to group
-    for species in species_in_alignment:
-        # Find which amino acid this species has
-        aa_found = None
-        for aa, species_list in position_obj.aas2species.items():
-            if species in species_list:
-                aa_found = aa
-                break
-
-        # Encode amino acid to group
-        if aa_found and aa_found != "-":  # Skip gaps
-            group = scheme_dict.get(aa_found, aa_found)
-            line_dict[species] = f"{group}@{position_num}"
-
-    return line_dict
-
-
-def _prepare_reduced_group_line_dict_for_pvalue(line_dict, fg_species, bg_species):
-    """
-    Build a reduced group line dictionary for hypergeometric p-value calculation by
-    removing pairwise conserved residues (same group code at matched FG/BG index).
-
-    Mirrors _prepare_reduced_line_dict_for_pvalue() in caas_id.py but operates on
-    already-encoded group line_dict entries ("GROUP@POSITION" format) rather than
-    raw amino acid position dicts.
-
-    Returns:
-        (reduced_line_dict, effective_fg_size, effective_bg_size)
-    """
-    reduced_line_dict = dict(line_dict)
-    remove_fg = set()
-    remove_bg = set()
-
-    for i in range(min(len(fg_species), len(bg_species))):
-        fg_sp = fg_species[i]
-        bg_sp = bg_species[i]
-        fg_group = line_dict.get(fg_sp, "-").split("@")[0]
-        bg_group = line_dict.get(bg_sp, "-").split("@")[0]
-        if fg_group == bg_group and fg_group != "-":
-            remove_fg.add(fg_sp)
-            remove_bg.add(bg_sp)
-
-    for sp in remove_fg.union(remove_bg):
-        reduced_line_dict.pop(sp, None)
-
-    effective_fg_size = len(fg_species) - len(remove_fg)
-    effective_bg_size = len(bg_species) - len(remove_bg)
-
-    return reduced_line_dict, effective_fg_size, effective_bg_size
 
 
 def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
@@ -363,15 +292,28 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
     fg_unique = set(fg_groups)
     bg_unique = set(bg_groups)
 
-    # Pattern classification (same as caas_id.py iscaas())
-    if len(fg_unique) == 1 and len(bg_unique) == 1:
+    # Pattern classification (Computed across divergent pairs, ignoring conserved pairs)
+    min_len = min(len(fg_groups), len(bg_groups))
+    fg_div_groups = [fg_groups[i] for i in range(min_len) if fg_groups[i] != bg_groups[i]]
+    bg_div_groups = [bg_groups[i] for i in range(min_len) if fg_groups[i] != bg_groups[i]]
+
+    if fg_div_groups and bg_div_groups:
+        fg_pat_unique = set(fg_div_groups)
+        bg_pat_unique = set(bg_div_groups)
+    else:
+        fg_pat_unique = set(fg_groups)
+        bg_pat_unique = set(bg_groups)
+
+    if len(fg_pat_unique) == 1 and len(bg_pat_unique) == 1:
         z.pattern = "1"
-    elif len(fg_unique) == 1:
+    elif len(fg_pat_unique) == 1 and len(bg_pat_unique) > 1:
         z.pattern = "2"
-    elif len(bg_unique) == 1:
+    elif len(fg_pat_unique) > 1 and len(bg_pat_unique) == 1:
         z.pattern = "3"
-    elif len(fg_unique) > 1 and len(bg_unique) > 1:
+    elif len(fg_pat_unique) > 1 and len(bg_pat_unique) > 1:
         z.pattern = "4"
+    else:
+        z.pattern = "null"
 
     if len(fg_unique) == 0 or len(bg_unique) == 0:
         z.pattern = "null"
@@ -542,8 +484,6 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
         if not fg_aas or not bg_aas:
             continue
 
-        print(f"[CAAP] Position {position_obj.position}, Trait {trait}: FG_species={fg_species}, BG_species={bg_species}, FG={fg_aas}, BG={bg_aas}")
-
         # Check each grouping scheme
         for scheme_name, scheme_dict in SCHEMES.items():
             # Check if this scheme detects a CAAP
@@ -559,35 +499,9 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
             if allowed_patterns is not None and pattern not in allowed_patterns:
                 continue
 
-            print(f"CAAP found in alignment {genename} on position {position_obj.position} for scheme {scheme_name} with pattern {pattern}")
-
             # Encode amino acids to groups for this scheme
             encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + \
                      encode_to_groups(bg_aas, scheme_dict)
-
-            # Calculate p-value using group-level data
-            # Build line_dictionary with single-character group codes for ALL species
-            # The hypergeometric calculation uses all species in alignment as the population
-            line_dict = build_group_line_dictionary(
-                position_obj, trait, scheme_dict, species_in_alignment
-            )
-
-            # Calculate group-based p-value
-            fg_size_for_p = len(fg_species)
-            bg_size_for_p = len(bg_species)
-            line_dict_for_p = line_dict
-
-            # When overlap tolerance is enabled, exclude conserved paired residues
-            # from p-value computation only (keep reported pattern unchanged).
-            if max_conserved > 0:
-                line_dict_for_p, fg_size_for_p, bg_size_for_p = _prepare_reduced_group_line_dict_for_pvalue(
-                    line_dict, fg_species, bg_species
-                )
-
-            if fg_size_for_p <= 0 or bg_size_for_p <= 0:
-                pvalue = 1.0
-            else:
-                pvalue = calcpval_random(line_dict_for_p, genename, fg_size_for_p, bg_size_for_p)
 
             # Prepare output row
             # Preserve the same sorted pair order used for substitution/encoded strings
@@ -609,7 +523,6 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
                 str(position_obj.position),
                 substitution,
                 encoded,
-                str(pvalue),
                 pattern,
                 str(len(fg_species_ordered)),  # FFGN - Final foreground number
                 str(len(bg_species_ordered)),  # FBGN - Final background number

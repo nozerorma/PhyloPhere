@@ -41,16 +41,12 @@ class CAASPosition:
     trait0_aa: List[str] = field(
         default_factory=list
     )  # Low phenotype amino acids (trait=0)
-    pvalue: Optional[float] = None
     pvalue_boot: Optional[float] = None
-    is_significant: bool = False
     is_focus: bool = False
     caap_group: str = "US"
     amino_encoded: str = ""
     is_conserved_meta: bool = False
     conserved_pair: str = ""
-    sig_hyp: Optional[bool] = None
-    sig_perm: Optional[bool] = None
 
 
 @dataclass
@@ -64,7 +60,6 @@ class ConvergenceResult:
     position: int
     tag: str
     caas: str
-    is_significant: bool
 
     # State information (from CAAS metadata or ASR)
     ancestral: str  # Used for display/legacy compatibility
@@ -83,8 +78,6 @@ class ConvergenceResult:
     amino_encoded: str = ""
     is_conserved_meta: bool = False
     conserved_pair: str = ""
-    sig_hyp: Optional[bool] = None
-    sig_perm: Optional[bool] = None
 
     # Node mapping and state tracking
     node_mapping: Optional[Dict[str, int]] = None

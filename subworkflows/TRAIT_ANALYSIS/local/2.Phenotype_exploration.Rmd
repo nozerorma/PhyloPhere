@@ -1009,7 +1009,7 @@ if (isTRUE(has.n) && isTRUE(has.secondary)) { # Now for both has.n and has.secon
   tree_trait_data <- tree_trait_data %>%
     summarize(
       trait_sum = sum(value, na.rm = TRUE),
-      p_sum = sum(p, na.rm = TRUE),
+      n_sum = sum(N, na.rm = TRUE),
       .groups = "drop") %>%
     ungroup()
 } else if (isTRUE(has.secondary)) { # If has.secondary are TRUE, we would need to adjust accordingly.

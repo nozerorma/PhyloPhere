@@ -170,8 +170,7 @@ workflow CT_POSTPROC {
         def characterization_results = null
         def filtered_discovery_ch = Channel.empty()
         def cleaned_background_main_ch = Channel.empty()
-        def enrichment_gene_lists_files_ch = Channel.empty()
-        
+
         if (params.gene_filter_mode != 'none') {
             assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required for gene filtering"
             
@@ -236,20 +235,6 @@ workflow CT_POSTPROC {
                 gene_filter_results ? gene_filter_results.gene_stats : Channel.empty()
             )
 
-            // Keep only the significant (non-excluded) gene-list .txt exports —
-            // these feed FADE's gene_set mode (SELECTION_PREP, see main.nf).
-            // NOTE: disambiguation_characterization can emit a collection of files; normalize to
-            // single-file items first to avoid calling String methods on ArrayList values.
-            enrichment_gene_lists_files_ch = characterization_results.disambiguation_characterization
-                .flatMap { item ->
-                    item instanceof Collection ? item : [item]
-                }
-                .filter { f ->
-                    def p = f.toString()
-                    p.endsWith('.txt') && p.contains('gene_relation_analysis/txt') &&
-                        !p.contains('gene_relation_analysis/txt/excluded')
-                }
-            
             log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"
         }
     
@@ -260,5 +245,4 @@ workflow CT_POSTPROC {
         precluster_removed_patterns = precluster_removed_ch
         filtered_discovery = filtered_discovery_ch
         cleaned_background = cleaned_background_main_ch
-        enrichment_gene_lists_files = enrichment_gene_lists_files_ch
 }

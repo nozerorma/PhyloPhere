@@ -88,6 +88,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="traitvalues", label="Trait values file (strategy BM/lambda)", kind="path_file"),
         FieldSpec(name="chunk_size", label="Resampled groups per output file"),
         FieldSpec(name="include_b0", label="Include main hypothesis (b0)", kind="bool"),
+        FieldSpec(name="multi_hypothesis", label="Multi-hypothesis mode (all non-replacement hypotheses)", kind="bool"),
         FieldSpec(name="alpha_threshold", label="Alpha threshold (significance)"),
         FieldSpec(name="export_groups", label="Export groups (DEBUG)", kind="bool"),
         FieldSpec(name="export_perm_discovery", label="Export permuted discovery (DEBUG)", kind="bool"),

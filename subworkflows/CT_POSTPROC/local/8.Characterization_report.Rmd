@@ -112,14 +112,7 @@ format_threshold <- function(x) {
   formatC(as.numeric(x), format = "f", digits = 2)
 }
 
-make_significance_class <- function(sig_hyp, sig_perm) {
-  case_when(
-    sig_hyp & sig_perm ~ "both",
-    sig_hyp ~ "hyper_only",
-    sig_perm ~ "perm_only",
-    TRUE ~ "none"
-  )
-}
+
 
 collapse_change_side <- function(x) {
   x <- tolower(as.character(x))
@@ -197,32 +190,6 @@ save_barplot <- function(filename, plot, n_labels, n_facets = 1, facet_cols = 1,
     facet_row_height = facet_row_height
   )
   ggsave(filename, plot, width = dims$width, height = dims$height, dpi = dpi)
-}
-
-build_orientation_rows <- function(df) {
-  bind_rows(
-    df %>% mutate(orientation = "global"),
-    df %>% filter(change_side %in% c("top", "both")) %>% mutate(orientation = "top"),
-    df %>% filter(change_side %in% c("bottom", "both")) %>% mutate(orientation = "bottom"),
-    df %>% filter(change_side == "both") %>% mutate(orientation = "both")
-  ) %>%
-    mutate(
-      orientation = factor(orientation, levels = c("global", "top", "bottom", "both"))
-    )
-}
-
-build_group_flag_table <- function(df) {
-  df %>%
-    mutate(caap_group = toupper(caap_group)) %>%
-    group_by(orientation, site_id, gene, position) %>%
-    summarise(
-      us = any(caap_group == "US"),
-      gs1 = any(caap_group == "GS1"),
-      gs2 = any(caap_group == "GS2"),
-      gs3 = any(caap_group == "GS3"),
-      gs4 = any(caap_group == "GS4"),
-      .groups = "drop"
-    )
 }
 
 build_threshold_line_df <- function(alpha_threshold) {
@@ -338,8 +305,6 @@ normalize_disambig_schema <- function(df) {
   if (!'change_top' %in% names(df)) df$change_top <- 'no_change'
   if (!'change_bottom' %in% names(df)) df$change_bottom <- 'no_change'
   if (!'is_conserved_meta' %in% names(df)) df$is_conserved_meta <- FALSE
-  if (!'pvalue' %in% names(df)) df$pvalue <- NA_real_
-  if (!'pvalue_boot' %in% names(df)) df$pvalue_boot <- NA_real_
 
   df %>%
     mutate(
@@ -351,20 +316,6 @@ normalize_disambig_schema <- function(df) {
       change_top = tolower(as.character(change_top)),
       change_bottom = tolower(as.character(change_bottom)),
       is_conserved_meta = as_bool(is_conserved_meta),
-      pvalue = suppressWarnings(as.numeric(pvalue)),
-      pvalue_boot = suppressWarnings(as.numeric(pvalue_boot)),
-      sig_hyp = !is.na(pvalue) & pvalue <= alpha_threshold,
-      sig_perm = !is.na(pvalue_boot) & pvalue_boot <= alpha_threshold,
-      is_significant = sig_hyp & sig_perm,
-      sig_hyp_010 = !is.na(pvalue) & pvalue <= 0.10,
-      sig_perm_010 = !is.na(pvalue_boot) & pvalue_boot <= 0.10,
-      is_significant_010 = sig_hyp_010 & sig_perm_010,
-      sig_hyp_005 = !is.na(pvalue) & pvalue <= 0.05,
-      sig_perm_005 = !is.na(pvalue_boot) & pvalue_boot <= 0.05,
-      is_significant_005 = sig_hyp_005 & sig_perm_005,
-      significance_class = make_significance_class(sig_hyp, sig_perm),
-      significance_class_010 = make_significance_class(sig_hyp_010, sig_perm_010),
-      significance_class_005 = make_significance_class(sig_hyp_005, sig_perm_005),
       site_id = paste(gene, position, sep = '@')
     )
 }
@@ -462,24 +413,14 @@ convergence_plot_df <- discovery_std %>%
     pattern_parallel = make_pattern_parallel_label(convergence_type),
     pattern_parallel = forcats::fct_infreq(pattern_parallel)
   )
-orientation_rows <- build_orientation_rows(convergence_plot_df) %>%
-  mutate(caap_group = toupper(caap_group))
-orientation_flags <- build_group_flag_table(orientation_rows)
 
 discovery_df <- discovery_std %>%
   transmute(
-    caap_group = caap_group,
     Gene = gene,
     Position = position,
     convergence_type = convergence_type,
     change_side,
     is_conserved_meta,
-    pvalue = pvalue,
-    pvalue_boot = pvalue_boot,
-    sig_hyp,
-    sig_perm,
-    is_significant,
-    significance_class,
     site_id
   )
 
@@ -511,44 +452,31 @@ cat(
 )
 ```
 
-## Conserved metadata composition after precluster pruning
+## Conserved metadata composition of retained positions
 
 ```{r conserved_meta_composition}
-precluster_removed_burden <- tibble()
-if (!is.na(removed_precluster_file)) {
-  precluster_removed_burden <- read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE) %>%
-    normalize_disambig_schema() %>%
-    mutate(removal_reason = if_else(is.na(removal_reason), "unknown", removal_reason))
-}
-
 rows_retained <- nrow(discovery_std)
-rows_removed_mrca <- sum(str_detect(precluster_removed_burden$removal_reason, "^mrca_posterior_below_"), na.rm = TRUE)
-rows_total <- rows_retained + rows_removed_mrca
 
 conserved_status_burden <- tibble(
-  scenario = c("all_positions", "retained_positions", "retained_conserved_meta", "retained_meta_not_conserved", "removed_low_mrca"),
+  scenario = c("retained_positions", "retained_conserved_meta", "retained_meta_not_conserved"),
   description = c(
-    "Retained plus precluster-removed positions tracked by CT postproc",
     "Positions retained after precluster hard filters",
     "Retained positions where is_conserved_meta = TRUE",
-    "Retained positions where is_conserved_meta = FALSE",
-    "Precluster removals due to MRCA posterior threshold"
+    "Retained positions where is_conserved_meta = FALSE"
   ),
   rows = c(
-    rows_total,
     rows_retained,
     sum(discovery_std$is_conserved_meta, na.rm = TRUE),
-    sum(!discovery_std$is_conserved_meta, na.rm = TRUE),
-    rows_removed_mrca
+    sum(!discovery_std$is_conserved_meta, na.rm = TRUE)
   )
 ) %>%
-  mutate(fraction_of_total = if (rows_total > 0) rows / rows_total else NA_real_)
+  mutate(fraction_of_total = if (rows_retained > 0) rows / rows_retained else NA_real_)
 
 write_tsv(conserved_status_burden, file.path(disambig_dir, "conserved_status_burden.tsv"))
 
 kable(
   conserved_status_burden %>% mutate(fraction_of_total = percent(fraction_of_total, accuracy = 0.1)),
-  caption = "Conserved-status burden across retained and precluster-removed CT positions"
+  caption = "Conserved-status composition of retained CT positions"
 ) %>% kable_styling()
 ```
 
@@ -962,9 +890,8 @@ precluster_events <- tibble()
 if (!is.na(removed_precluster_file)) {
   precluster_df <- normalize_disambig_schema(read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE))
   precluster_events <- precluster_df %>% transmute(
-    site_id, gene, position, caap_group, convergence_type, pvalue, pvalue_boot,
+    site_id, gene, position, caap_group, convergence_type,
     change_top, change_bottom, change_side,
-    sig_hyp, sig_perm, is_significant, significance_class,
     removal_stage = case_when(
       str_detect(removal_reason, "^mrca_posterior_below_") ~ "precluster_mrca_threshold",
       TRUE ~ "precluster_other"
@@ -979,9 +906,8 @@ if (length(cluster_files) > 0) {
   cluster_events <- discovery_std %>%
     inner_join(cluster_hits, by = c("gene", "position", "caap_group")) %>%
     transmute(
-      site_id, gene, position, caap_group, convergence_type, pvalue, pvalue_boot,
+      site_id, gene, position, caap_group, convergence_type,
       change_top, change_bottom, change_side,
-      sig_hyp, sig_perm, is_significant, significance_class,
       removal_stage = "cluster"
     ) %>%
     distinct()
@@ -1003,9 +929,8 @@ if (!is.na(removed_genes_file)) {
       TRUE ~ "gene_filter"
     )) %>%
     transmute(
-      site_id, gene, position, caap_group, convergence_type, pvalue, pvalue_boot,
-      change_top, change_bottom, change_side,
-      sig_hyp, sig_perm, is_significant, significance_class, removal_stage
+      site_id, gene, position, caap_group, convergence_type,
+      change_top, change_bottom, change_side, removal_stage
     ) %>%
     distinct()
 }
@@ -1017,17 +942,9 @@ write_tsv(removal_events, file.path(disambig_dir, "removal_events.tsv"))
 
 ```{r filter_overlap_gene_table, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n### B.1a Gene-Level Filter Overlap Diagnostics {.tabset}\n\n")
-# ─────────────────────────────────────────────────────────────────────────────
-# Build a gene-level membership table that records for each gene whether it
-# was flagged by each of the three independent filters:
-#   • Extreme   – top 1% CAAS density (gene_summary_annotated$Extreme)
-#   • Dubious   – IQR-outlier CAAS count (gene_summary_annotated$Dubious)
-#   • Cluster   – at least one position removed by the cluster filter
-# ─────────────────────────────────────────────────────────────────────────────
 
 # --- 1. Gene-level filter flags -------------------------------------------
 
-# Extreme / Dubious come straight from the already-computed gene_summary_annotated
 gene_filter_flags <- gene_summary_annotated %>%
   transmute(
     Gene        = Gene,
@@ -1039,7 +956,6 @@ gene_filter_flags <- gene_summary_annotated %>%
     Dubious     = as.logical(Dubious)
   )
 
-# Cluster_removed: any gene that contributed at least one site to cluster_events
 cluster_removed_genes <- if (nrow(cluster_events) > 0) {
   cluster_events %>%
     transmute(Gene = gene, caap_group = caap_group) %>%
@@ -1053,7 +969,6 @@ gene_filter_flags <- gene_filter_flags %>%
   left_join(cluster_removed_genes, by = c("Gene", "caap_group")) %>%
   mutate(
     Cluster_removed = coalesce(Cluster_removed, FALSE),
-    # Composite label
     filter_combo = case_when(
       Extreme & Dubious & Cluster_removed ~ "Extreme+Dubious+Cluster",
       Extreme & Dubious                  ~ "Extreme+Dubious",
@@ -1071,24 +986,7 @@ gene_filter_flags <- gene_filter_flags %>%
     ))
   )
 
-# --- 2. Per-gene significance descriptors from full discovery data ----------
-
-gene_sig_stats <- discovery_std %>%
-  group_by(gene, caap_group) %>%
-  summarise(
-    frac_is_significant = mean(is_significant, na.rm = TRUE),
-    median_pval_hyp  = median(pvalue,      na.rm = TRUE),
-    min_pval_hyp     = min(pvalue,         na.rm = TRUE),
-    median_pval_boot = median(pvalue_boot, na.rm = TRUE),
-    min_pval_boot    = min(pvalue_boot,    na.rm = TRUE),
-    .groups = "drop"
-  ) %>%
-  rename(Gene = gene, caap_group = caap_group)
-
-gene_filter_flags <- gene_filter_flags %>%
-  left_join(gene_sig_stats, by = c("Gene", "caap_group"))
-
-# --- 3. Quick membership summary printed to console ------------------------
+# --- 2. Quick membership summary printed to console ------------------------
 
 membership_counts <- gene_filter_flags %>%
   count(caap_group, filter_combo, .drop = FALSE) %>%
@@ -1104,33 +1002,12 @@ filter_totals_msg <- sprintf(
   100 * mean(gene_filter_flags$filter_combo != "None")
 )
 
-sig_sites_msg <- ""
-if (nrow(removal_events) > 0) {
-  total_is_significant  <- sum(discovery_std$is_significant, na.rm = TRUE)
-  removed_extreme <- discovery_std %>%
-    filter(is_significant, gene %in% filter(gene_filter_flags, Extreme)$Gene,
-           caap_group %in% filter(gene_filter_flags, Extreme)$caap_group)
-  removed_dubious <- discovery_std %>%
-    filter(is_significant, gene %in% filter(gene_filter_flags, Dubious)$Gene,
-           caap_group %in% filter(gene_filter_flags, Dubious)$caap_group)
-  removed_cluster <- discovery_std %>%
-    filter(is_significant, site_id %in% cluster_events$site_id)
-  
-  sig_sites_msg <- sprintf(
-    "  Significant sites in total  : %d\n  Significant in Extreme genes: %d (%.1f%%)\n  Significant in Dubious genes: %d (%.1f%%)\n  Significant in Cluster sites: %d (%.1f%%)\n",
-    total_is_significant,
-    nrow(removed_extreme), 100 * nrow(removed_extreme) / max(total_is_significant, 1),
-    nrow(removed_dubious), 100 * nrow(removed_dubious) / max(total_is_significant, 1),
-    nrow(removed_cluster), 100 * nrow(removed_cluster) / max(total_is_significant, 1)
-  )
-}
-
 cat("\n=== Gene-Level Filter Overlap Summary ===\n")
 print(membership_counts)
-cat(filter_totals_msg, sig_sites_msg, "\n")
+cat(filter_totals_msg, "\n")
 ```
 
-```{r filter_overlap_stats, fig.width=14, fig.height=16, eval=(processing_mode != 'exploratory'), results='asis'}
+```{r filter_overlap_stats, fig.width=14, fig.height=5.5, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n#### Descriptor distributions by filter membership\n\n")
 # Ordered factor for x-axis: None → single → double → triple
 combo_levels <- c(
@@ -1140,42 +1017,18 @@ combo_levels <- c(
 )
 
 gene_filter_plot <- gene_filter_flags %>%
-  mutate(filter_combo = factor(as.character(filter_combo), levels = combo_levels))
+  filter(!is.na(filter_combo)) %>%
+  mutate(filter_combo = factor(filter_combo, levels = combo_levels))
 
-# Colour palette for combos
-combo_palette <- setNames(
-  c(
-    tableau_10[["gray"]],
-    tableau_10[["vermillion"]], tableau_10[["blue"]], tableau_10[["green"]],
-    tableau_10[["reddish_purple"]], tableau_10[["orange"]], tableau_10[["bluish_green"]],
-    tableau_10[["pink"]]
-  ),
-  combo_levels
-)
-
-make_descriptor_plot <- function(data, y_var, y_label, log_scale = FALSE) {
-  plot_data <- data %>% filter(!is.na(.data[[y_var]]), !is.na(caap_group))
-  if (nrow(plot_data) == 0 || length(unique(plot_data$caap_group)) == 0) {
-    return(
-      ggplot() +
-        annotate("text", x = 0.5, y = 0.5, label = paste("No data for:", y_label),
-                 size = 5, hjust = 0.5) +
-        theme_void()
-    )
-  }
-  p <- ggplot(plot_data,
-              aes(x = filter_combo, y = .data[[y_var]],
-                  fill = filter_combo, colour = filter_combo)) +
-    geom_boxplot(alpha = 0.5, outlier.shape = NA, linewidth = 0.6) +
-    geom_jitter(width = 0.18, alpha = 0.35, size = 0.9, shape = 16) +
+make_descriptor_plot <- function(df, var_name, y_label, log_scale = FALSE) {
+  p <- ggplot(df, aes(x = filter_combo, y = .data[[var_name]], fill = filter_combo)) +
+    geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.5, alpha = 0.8, show.legend = FALSE) +
     facet_wrap(~ caap_group, scales = "free_y") +
-    scale_fill_manual(values   = combo_palette, drop = TRUE) +
-    scale_colour_manual(values = combo_palette, drop = TRUE) +
-    labs(x = NULL, y = y_label) +
+    scale_fill_paletteer_d("ggthemes::Tableau_10") +
     theme_minimal(base_size = 12) +
+    labs(x = NULL, y = y_label) +
     theme(
-      legend.position  = "none",
-      axis.text.x      = element_text(angle = 40, hjust = 1, size = 9),
+      axis.text.x      = element_text(angle = 35, hjust = 1, size = 9),
       strip.text       = element_text(face = "bold"),
       panel.grid.minor = element_blank()
     )
@@ -1186,14 +1039,9 @@ make_descriptor_plot <- function(data, y_var, y_label, log_scale = FALSE) {
 p_length     <- make_descriptor_plot(gene_filter_plot, "length",           "Gene length (aa)",              log_scale = TRUE)
 p_ncaas      <- make_descriptor_plot(gene_filter_plot, "n_CAAS",           "Total CAAS count",              log_scale = TRUE)
 p_density    <- make_descriptor_plot(gene_filter_plot, "n_CAAS_per_length","CAAS density (per 100 aa)",     log_scale = TRUE)
-p_fracsig    <- make_descriptor_plot(gene_filter_plot, "frac_is_significant","Fraction significant sites",    log_scale = FALSE)
-p_medpval    <- make_descriptor_plot(gene_filter_plot, "median_pval_hyp",  "Median hyperg. p-value",        log_scale = FALSE)
-p_minpval    <- make_descriptor_plot(gene_filter_plot, "min_pval_hyp",     "Min hyperg. p-value",           log_scale = FALSE)
 
 desc_grid <- (
   p_length  | p_ncaas  | p_density
-) / (
-  p_fracsig | p_medpval | p_minpval
 ) +
   plot_annotation(
     title    = "Gene descriptor distributions by filter membership",
@@ -1207,12 +1055,11 @@ desc_grid <- (
 
 print(desc_grid)
 ggsave(file.path(outliers_dir, "filter_overlap_descriptors.png"),
-       desc_grid, width = 14, height = 10, dpi = 280)
+       desc_grid, width = 14, height = 5.5, dpi = 280)
 ```
 
 ```{r filter_overlap_summary_table, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n#### Filter overlap summary table\n\n")
-# Per-combo × per-group mean ± SD for all five descriptors
 overlap_summary <- gene_filter_flags %>%
   group_by(caap_group, filter_combo) %>%
   summarise(
@@ -1223,10 +1070,6 @@ overlap_summary <- gene_filter_flags %>%
     sd_n_CAAS                = round(sd(n_CAAS,              na.rm = TRUE), 2),
     mean_density             = round(mean(n_CAAS_per_length, na.rm = TRUE), 4),
     sd_density               = round(sd(n_CAAS_per_length,   na.rm = TRUE), 4),
-    mean_frac_is_significant = round(mean(frac_is_significant, na.rm = TRUE), 4),
-    sd_frac_is_significant   = round(sd(frac_is_significant,   na.rm = TRUE), 4),
-    mean_median_pval         = round(mean(median_pval_hyp,   na.rm = TRUE), 4),
-    sd_median_pval           = round(sd(median_pval_hyp,     na.rm = TRUE), 4),
     .groups = "drop"
   ) %>%
   arrange(caap_group, filter_combo)
@@ -1241,7 +1084,7 @@ kable(
 ```
 
 ```{r removed_pattern_sig, eval=(processing_mode != 'exploratory'), results='asis'}
-cat("\n## B.2 Removed positions by `convergence_type` and significance\n\n")
+cat("\n## B.2 Removed positions by `convergence_type`\n\n")
 if (nrow(removal_events) > 0) {
   removal_events_plot <- removal_events %>%
     mutate(
@@ -1251,11 +1094,7 @@ if (nrow(removal_events) > 0) {
 
   by_pattern <- removal_events_plot %>%
     count(removal_stage, change_side, pattern_parallel, sort = TRUE)
-  by_sig <- removal_events %>%
-    count(removal_stage, significance_class, sort = TRUE)
-
   kable(by_pattern, caption = "Removed positions by stage, change_side, and pattern/parallel label") %>% kable_styling()
-  kable(by_sig, caption = "Removed positions by stage and descriptive significance class") %>% kable_styling()
 
   p_rm <- ggplot(
     by_pattern,
@@ -1284,230 +1123,19 @@ if (nrow(removal_events) > 0) {
 }
 ```
 
-```{r pvalue_removed_vs_retained, fig.width=12, fig.height=9, eval=(processing_mode != 'exploratory'), results='asis'}
-cat("\n## B.2b P-value distributions: removed vs retained positions\n\n")
-if (nrow(discovery_std) > 0) {
-  removed_site_ids <- if (nrow(removal_events) > 0) unique(removal_events$site_id) else character(0)
-
-  pval_df <- discovery_std %>%
-    mutate(
-      filter_status = if_else(site_id %in% removed_site_ids, "removed", "retained"),
-      filter_status = factor(filter_status, levels = c("retained", "removed"))
-    ) %>%
-    filter(!is.na(pvalue) | !is.na(pvalue_boot)) %>%
-    pivot_longer(
-      cols      = c(pvalue, pvalue_boot),
-      names_to  = "pval_type",
-      values_to = "p"
-    ) %>%
-    filter(!is.na(p)) %>%
-    mutate(
-      pval_type = recode(pval_type,
-        pvalue      = "Hypothesis p-value",
-        pvalue_boot = "Permutation p-value (boot)"
-      )
-    )
-
-  status_colours <- c(
-    retained = tableau_10[["blue"]],
-    removed = tableau_10[["vermillion"]]
-  )
-  threshold_scope_levels <- c("all", "<= 0.10", "<= 0.05")
-
-  pvalue_burden_summary <- pval_df %>%
-    group_by(pval_type, filter_status) %>%
-    summarise(
-      total = n(),
-      `all` = n(),
-      `<= 0.10` = sum(p <= 0.10, na.rm = TRUE),
-      `<= 0.05` = sum(p <= 0.05, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    pivot_longer(cols = c("all", "<= 0.10", "<= 0.05"), names_to = "threshold_scope", values_to = "count") %>%
-    mutate(
-      threshold_scope = factor(threshold_scope, levels = threshold_scope_levels),
-      proportion = count / total
-    ) %>%
-    arrange(pval_type, filter_status, threshold_scope)
-
-  kable(
-    pvalue_burden_summary %>% mutate(proportion = percent(proportion, accuracy = 0.1)),
-    caption = paste0("Removed vs retained burden by p-value threshold (configured alpha = ", alpha_threshold_label, ")")
-  ) %>% kable_styling(bootstrap_options = c("striped", "hover", "condensed"))
-
-  write_tsv(
-    pvalue_burden_summary %>% mutate(threshold_scope = as.character(threshold_scope)),
-    file.path(disambig_dir, "pvalue_burden_summary.tsv")
-  )
-
-  p_burden <- ggplot(
-    pvalue_burden_summary,
-    aes(x = threshold_scope, y = proportion, fill = filter_status)
-  ) +
-    geom_col(position = position_dodge(width = 0.7), width = 0.65, colour = "black", linewidth = 0.2) +
-    geom_text(
-      aes(label = sprintf("%d", count)),
-      position = position_dodge(width = 0.7),
-      vjust = -0.25,
-      size = 3
-    ) +
-    facet_wrap(~pval_type, ncol = 2) +
-    scale_fill_manual(values = status_colours, name = "Status") +
-    scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1.05)) +
-    labs(
-      title = "P-value burden comparison: all vs <= 0.10 vs <= 0.05",
-      subtitle = paste0("Configured alpha = ", alpha_threshold_label, " | labels show counts"),
-      x = "Threshold scope",
-      y = "Proportion of positions"
-    ) +
-    theme_minimal(base_size = 14) +
-    theme(
-      legend.position = "bottom",
-      panel.grid.minor = element_blank(),
-      axis.text.x = element_text(angle = 25, hjust = 1)
-    )
-  print(p_burden)
-  save_barplot(
-    file.path(disambig_dir, "pvalue_burden_summary.png"),
-    p_burden,
-    n_labels = n_distinct(pvalue_burden_summary$threshold_scope),
-    n_facets = n_distinct(pvalue_burden_summary$pval_type),
-    facet_cols = 2,
-    dpi = 160,
-    base_width = 9,
-    base_height = 5
-  )
-
-  # ── Plot 1: global double-layered histogram ─────────────────────────────────
-  p_glob <- ggplot(pval_df, aes(x = p, fill = filter_status)) +
-    geom_histogram(
-      aes(y = after_stat(density)),
-      bins      = 40,
-      alpha     = 0.55,
-      position  = "identity",
-      colour    = "black",
-      linewidth = 0.25
-    ) +
-    geom_vline(
-      data = threshold_line_df,
-      aes(xintercept = threshold, colour = line_label, linetype = line_label),
-      linewidth = 0.6,
-      show.legend = TRUE,
-      inherit.aes = FALSE
-    ) +
-    facet_wrap(~pval_type, scales = "free_y", ncol = 2) +
-    scale_fill_manual(values = status_colours, name = "Status") +
-    scale_colour_manual(
-      values = setNames(threshold_line_colours[threshold_line_df$line_key], threshold_line_df$line_label),
-      guide = "none"
-    ) +
-    scale_linetype_manual(
-      values = setNames(threshold_line_types[threshold_line_df$line_key], threshold_line_df$line_label),
-      name = "Threshold lines"
-    ) +
-    scale_x_continuous(breaks = c(0, 0.05, 0.10, 0.25, 0.5, 0.75, 1), limits = c(0, 1)) +
-    labs(
-      title    = "P-value distribution: removed vs retained positions",
-      subtitle = sprintf(
-        "%d retained · %d removed | configured alpha = %s | comparison lines = 0.10 and 0.05",
-        sum(pval_df$pval_type == "Hypothesis p-value" & pval_df$filter_status == "retained"),
-        sum(pval_df$pval_type == "Hypothesis p-value" & pval_df$filter_status == "removed"),
-        alpha_threshold_label
-      ),
-      x = "p-value", y = "Density"
-    ) +
-    theme_minimal(base_size = 16) +
-    theme(
-      legend.position  = "bottom",
-      strip.text       = element_text(face = "bold"),
-      panel.grid.minor = element_blank(),
-      axis.text.x      = element_text(angle = 60, hjust = 1, vjust = 1)
-    )
-  print(p_glob)
-  ggsave(file.path(disambig_dir, "pvalue_removed_vs_retained_global.png"),
-         p_glob, width = 12, height = 5, dpi = 160)
-
-  # ── Plot 2: same, faceted by convergence_type ───────────────────────────────────
-  pt_counts <- pval_df %>%
-    filter(pval_type == "Hypothesis p-value") %>%
-    count(convergence_type, filter_status) %>%
-    pivot_wider(names_from = filter_status, values_from = n, values_fill = 0)
-
-  pval_df_pt <- pval_df %>%
-    filter(convergence_type %in% (
-      pval_df %>%
-        filter(pval_type == "Hypothesis p-value") %>%
-        count(convergence_type) %>%
-        filter(n >= 5) %>%
-        pull(convergence_type)
-    ))
-
-  if (nrow(pval_df_pt) > 0 && n_distinct(pval_df_pt$convergence_type) >= 1) {
-    p_pt <- ggplot(pval_df_pt, aes(x = p, fill = filter_status)) +
-      geom_histogram(
-        aes(y = after_stat(density)),
-        bins      = 30,
-        alpha     = 0.55,
-        position  = "identity",
-        colour    = "black",
-        linewidth = 0.25
-      ) +
-      geom_vline(
-        data = threshold_line_df,
-        aes(xintercept = threshold, colour = line_label, linetype = line_label),
-        linewidth = 0.55,
-        show.legend = TRUE,
-        inherit.aes = FALSE
-      ) +
-      facet_grid(convergence_type ~ pval_type, scales = "free_y") +
-      scale_fill_manual(values = status_colours, name = "Status") +
-      scale_colour_manual(
-        values = setNames(threshold_line_colours[threshold_line_df$line_key], threshold_line_df$line_label),
-        guide = "none"
-      ) +
-      scale_linetype_manual(
-        values = setNames(threshold_line_types[threshold_line_df$line_key], threshold_line_df$line_label),
-        name = "Threshold lines"
-      ) +
-      scale_x_continuous(breaks = c(0, 0.05, 0.10, 0.5, 1), limits = c(0, 1)) +
-      labs(
-        title = "P-value distribution by convergence_type: removed vs retained",
-        subtitle = paste0("Configured alpha = ", alpha_threshold_label, " | comparison lines = 0.10 and 0.05"),
-        x = "p-value", y = "Density"
-      ) +
-      theme_minimal(base_size = 11) +
-      theme(
-        legend.position  = "bottom",
-        strip.text       = element_text(face = "bold", size = 9),
-        panel.grid.minor = element_blank(),
-        axis.text.x      = element_text(angle = 60, hjust = 1, vjust = 1)
-      )
-    print(p_pt)
-    ggsave(file.path(disambig_dir, "pvalue_removed_vs_retained_by_pattern.png"),
-           p_pt, width = 12, height = max(4, 2.5 * n_distinct(pval_df_pt$convergence_type)), dpi = 160)
-  } else {
-    cat("Skipping per-convergence_type p-value plot: no convergence_type with \u2265 5 observations.\n")
-  }
-} else {
-  cat("No discovery data available — skipping p-value removal histograms.\n")
-}
-
 ```{r excluded_gene_lists, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n## B.2c Excluded gene list exports\n\n")
 # ── Build per-category excluded gene lists ────────────────────────────────────────────
-# Six lists are exported to
+# Four lists are exported to
 #   disambiguation_characterization/gene_relation_analysis/txt/excluded/
 # for manual inspection of which genes were excluded and why.
 #
-# Categories (mutually exclusive by design for excluded_nonsig):
+# Categories:
 #   excluded_preproc             – genes with ≥1 position removed during pre-processing
 #                                  (pattern-type filter / MRCA-posterior threshold)
 #   excluded_postproc_clusters   – genes with ≥1 position discarded by cluster filter
 #   excluded_postproc_genefilter – genes flagged Extreme and/or Dubious (gene-level filter)
 #   excluded_postproc            – union of the two postproc exclusion categories
-#   excluded_nonsig              – genes that survived ALL filters but never achieved
-#                                  sig_both == TRUE; does NOT overlap with preproc/postproc
-#   excluded_overall             – union of all four categories
 
 # 1. Pre-processing exclusions (from precluster_events, loaded in B.1)
 excluded_preproc <- sort(unique(precluster_events$gene))
@@ -1525,16 +1153,6 @@ excluded_postproc_genefilter <- sort(unique(
 # 4. All post-processing exclusions (union of 2 and 3)
 excluded_postproc <- sort(unique(c(excluded_postproc_clusters, excluded_postproc_genefilter)))
 
-# 5. Non-significant genes: survived all filters, but zero sig_both positions;
-#    explicitly does NOT overlap with preproc / postproc categories
-any_filtered_genes <- sort(unique(filter(gene_filter_flags, filter_combo != "None")$Gene))
-genes_ever_sig     <- sort(unique(filter(discovery_std, is_significant)$gene))
-survived_genes     <- sort(setdiff(unique(gene_filter_flags$Gene), any_filtered_genes))
-excluded_nonsig    <- sort(setdiff(survived_genes, c(genes_ever_sig, excluded_preproc)))
-
-# 6. Overall: union of all exclusion categories
-excluded_overall <- sort(unique(c(excluded_preproc, excluded_postproc, excluded_nonsig)))
-
 # ── Write to gene_relation_analysis/txt/excluded/ ────────────────────────────────────
 gr_excl_dir <- file.path(disambig_dir, "gene_relation_analysis", "txt", "excluded")
 createDir(gr_excl_dir)
@@ -1543,8 +1161,6 @@ readr::write_lines(excluded_preproc,             file.path(gr_excl_dir, "exclude
 readr::write_lines(excluded_postproc_clusters,   file.path(gr_excl_dir, "excluded_postproc_clusters.txt"))
 readr::write_lines(excluded_postproc_genefilter, file.path(gr_excl_dir, "excluded_postproc_genefilter.txt"))
 readr::write_lines(excluded_postproc,            file.path(gr_excl_dir, "excluded_postproc.txt"))
-readr::write_lines(excluded_nonsig,              file.path(gr_excl_dir, "excluded_nonsig.txt"))
-readr::write_lines(excluded_overall,             file.path(gr_excl_dir, "excluded_overall.txt"))
 
 cat(
   "\n=== Excluded Gene Lists ===\n",
@@ -1552,8 +1168,6 @@ cat(
   sprintf("  excluded_postproc_clusters   : %d genes\n", length(excluded_postproc_clusters)),
   sprintf("  excluded_postproc_genefilter : %d genes\n", length(excluded_postproc_genefilter)),
   sprintf("  excluded_postproc (union)    : %d genes\n", length(excluded_postproc)),
-  sprintf("  excluded_nonsig              : %d genes\n", length(excluded_nonsig)),
-  sprintf("  excluded_overall             : %d genes\n", length(excluded_overall)),
   sprintf("  Written to: %s\n\n", gr_excl_dir)
 )
 ```
@@ -1594,45 +1208,6 @@ save_barplot(
 )
 ```
 
-```{r pattern_sig_descriptor, eval=(processing_mode != 'exploratory'), results='asis'}
-cat("\n## B.3b Convergence descriptors by significance class\n\n")
-pattern_parallel_sig <- convergence_plot_df %>%
-  count(change_side, significance_class, pattern_parallel, sort = TRUE)
-
-# Long count table dropped — barplot below conveys the same; counts exported.
-write_tsv(pattern_parallel_sig, file.path(disambig_dir, "pattern_parallel_significance_descriptor.tsv"))
-
-if (nrow(pattern_parallel_sig) > 0) {
-  pg_sig <- ggplot(
-    pattern_parallel_sig,
-    aes(y = forcats::fct_rev(pattern_parallel), x = n, fill = significance_class)
-  ) +
-    geom_col(position = position_dodge(width = 0.75), width = 0.7) +
-    facet_wrap(~change_side, scales = "free_y", ncol = 2) +
-    scale_fill_paletteer_d("ggthemes::Tableau_10") +
-    scale_y_discrete(labels = format_pattern_parallel_axis) +
-    theme_minimal(base_size = 14) +
-    labs(title = "Descriptive significance classes across convergence labels", x = "n", y = "convergence label") +
-    theme(
-      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-      plot.title   = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-      axis.text.y = element_text(size = 10, lineheight = 0.95),
-      strip.text = element_text(face = "bold")
-    )
-  print(pg_sig)
-  save_barplot(
-    file.path(disambig_dir, "pattern_parallel_significance_descriptor.png"),
-    pg_sig,
-    n_labels = n_distinct(pattern_parallel_sig$pattern_parallel),
-    n_facets = n_distinct(pattern_parallel_sig$change_side),
-    facet_cols = 2,
-    base_width = 11,
-    base_height = 7.5
-  )
-}
-```
-
 ```{r manhattan_disambiguation, fig.height=8, fig.width=16, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n## B.5 Manhattan: genomic distribution of genes (CAAS density per gene length)\n\n")
 if (!"chr" %in% names(gene_ensembl)) {
@@ -1643,7 +1218,6 @@ if (!"chr" %in% names(gene_ensembl)) {
     group_by(gene) %>%
     summarise(
       n_caas_positions = n_distinct(site_id),
-      frac_is_significant = mean(is_significant, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     left_join(gene_ensembl %>% 

@@ -34,22 +34,32 @@ def runslice(options_object):
     
     # Alignment slice: 1- Calculate column treshold
 
-    with open(options_object.config_file) as cfg_handle:
-        cfg_list = cfg_handle.read().splitlines()
-    
-    values = []
+    import os
+    if os.path.isdir(options_object.config_file):
+        import glob
+        cfg_files = [f for f in glob.glob(os.path.join(options_object.config_file, "*")) if f.endswith(".tab") or "traitfile" in os.path.basename(f)]
+        fg_counts = []
+        bg_counts = []
+        for f in cfg_files:
+            if not os.path.isfile(f):
+                continue
+            try:
+                with open(f, encoding="utf-8", errors="ignore") as cfg_handle:
+                    lines = cfg_handle.read().splitlines()
+                vals = [l.split("\t")[1] for l in lines if len(l.split("\t")) >= 3]
+                fg_counts.append(vals.count("1"))
+                bg_counts.append(vals.count("0"))
+            except Exception:
+                continue
+        fg_species = min(fg_counts) if fg_counts else 0
+        bg_species = min(bg_counts) if bg_counts else 0
+    else:
+        with open(options_object.config_file, encoding="utf-8", errors="ignore") as cfg_handle:
+            lines = cfg_handle.read().splitlines()
+        vals = [l.split("\t")[1] for l in lines if len(l.split("\t")) >= 3]
+        fg_species = vals.count("1")
+        bg_species = vals.count("0")
 
-    for x in cfg_list:
-        c = x.split("\t")
-        if len(c) < 3:
-            raise ValueError(
-                f"ERROR: Paired mode is mandatory but config file has only {len(c)} columns. "
-                f"Trait config must be: species, trait, pair"
-            )
-        values.append(c[1])
-    
-    fg_species = values.count("1")
-    bg_species = values.count("0")
 
 
     # Alignment slicing: sum the null values (allowed_gaps + allowed_missing_species)

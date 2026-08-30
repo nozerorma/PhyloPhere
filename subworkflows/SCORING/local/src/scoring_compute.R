@@ -229,7 +229,10 @@ scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
 
 df <- df %>%
-  mutate(scheme_priority = scheme_priority_int[caap_group]) %>%
+  mutate(
+    scheme_priority = scheme_priority_int[caap_group],
+    hyp_id = if ("trait" %in% names(df)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), trait) else NA_character_
+  ) %>%
   filter(caap_group %in% scoring_schemes)
 cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring schemes\n",
             nrow(df), n_distinct(df$caap_group)))
@@ -281,27 +284,14 @@ df <- df %>%
 # deterministically picks the US scheme (falling back to GS4..GS1) for
 # display/gating-only columns (pvalue, change_top, asr_is_conserved, etc.).
 # Priority is display-only and never enters a scored quantity.
-#
-# CAAS_score is the MEAN of caas_row over the schemes that detected the
-# position, not a sum: a substitution can register under 1 to 5 of the five
-# schemes purely as a function of which amino acids are involved (section 2a),
-# so summing would let breadth of detection inflate the score independently of
-# evidence strength. Mean (not max) because the schemes are correlated readings
-# of one physical substitution, so averaging is the honest summary; contrast
-# the gene level (section 4a), where positions are distinct events and a
-# size-adjusted max is appropriate. n_schemes and scheme_set are exposed as
-# descriptors and do not scale the score.
 df <- df %>% arrange(desc(scheme_priority))
 
 pos_scores <- df %>%
   group_by(Gene, Position) %>%
   summarise(
     CAAS_score         = mean(caas_row, na.rm = TRUE),
-    # Descriptors, not score inputs. n_schemes is how many of the five partitions
-    # registered this substitution, a discretised biochemical-distance proxy.
-    # scheme_set records which ones, since the partitions differ in criteria
-    # (charge, polarity, volume, thiol chemistry), so the combination indicates
-    # what kind of physicochemical boundary was crossed rather than merely how many.
+    n_hypotheses       = dplyr::n_distinct(hyp_id[!is.na(hyp_id) & hyp_id != ""]),
+    supporting_hypotheses = paste(sort(unique(hyp_id[!is.na(hyp_id) & hyp_id != ""])), collapse = ","),
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
     asr_score          = mean(asr_score,          na.rm = TRUE),
@@ -310,8 +300,6 @@ pos_scores <- df %>%
     conservation_gate  = mean(conservation_gate,  na.rm = TRUE),
     core               = mean(core,               na.rm = TRUE),
     phen_score         = mean(phen_score,         na.rm = TRUE),
-    # Display-only: most-specific scheme via first() after desc(scheme_priority) sort
-    pvalue             = first(pvalue),
     pvalue_boot        = first(pvalue_boot),
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
@@ -334,21 +322,7 @@ pos_scores <- df %>%
   ) %>%
   select(-has_change_top, -has_change_bottom)
 
-# ── 2h. Significance gate (hypergeometric pvalue) ─────────────────────────
-# The hypergeometric CAAS p-value is not part of CAAS_score (the phen_score x
-# asr_score product). It gates the result into two tiers instead, so callers
-# rank by CAAS_score and filter to a defensible set:
-#   gate_all : every scored position (the full ranked pool)
-#   gate_sig : nominally significant         (pvalue < 0.05)
-pos_scores <- pos_scores %>%
-  mutate(
-    gate_all       = TRUE,
-    gate_sig       = !is.na(pvalue) & pvalue < 0.05
-  )
-
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
-cat(sprintf("  Significance gate: %d significant (p<0.05)\n",
-            sum(pos_scores$gate_sig, na.rm = TRUE)))
 
 cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             min(pos_scores$CAAS_score, na.rm = TRUE),
@@ -599,15 +573,11 @@ gene_caas <- pos_scores %>%
       vals <- CAAS_score[change_side %in% c("bottom", "both")]
       if (length(vals) > 0) size_adj_max(vals, .pool_bottom) else NA_real_
     },
-    # ── Significance gate rolled up to gene level (boolean, not magnitude) ──
-    # TRUE if the gene has >=1 position passing the position-level gate_sig
-    # (section 2h). Downstream characterization only ever needed "was this
-    # gene touched by a gated position", not a CAAS_score quantile restricted
-    # to gated positions.
-    gene_caas_gate_sig = any(gate_sig %in% TRUE),
     n_positions        = n(),
     n_positions_top    = sum(change_side %in% c("top",    "both"), na.rm = TRUE),
     n_positions_bottom = sum(change_side %in% c("bottom", "both"), na.rm = TRUE),
+    max_hypotheses     = if ("n_hypotheses" %in% names(pos_scores)) max(n_hypotheses, na.rm = TRUE) else NA_integer_,
+    mean_hypotheses    = if ("n_hypotheses" %in% names(pos_scores)) round(mean(n_hypotheses, na.rm = TRUE), 1) else NA_real_,
     .groups = "drop"
   ) %>%
   mutate(
@@ -928,11 +898,12 @@ if (length(score_cols) >= 2) {
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
+# Position scores
 pos_out <- pos_scores %>%
-  select(Gene, Position, any_of(c("pvalue", "pvalue_boot")),
+  select(Gene, Position, any_of("pvalue_boot"),
          asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core")),
          any_of("phen_score"), n_schemes, any_of("scheme_set"), CAAS_score,
-         any_of(c("gate_all", "gate_sig")), change_side,
+         change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))
 
@@ -945,7 +916,6 @@ gene_out <- gene_scores %>%
     Gene,
     n_positions, n_positions_top, n_positions_bottom,
     gene_caas_score_top_all, gene_caas_score_bottom_all,
-    gene_caas_gate_sig,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
     any_of(c("accum_cct_p", "accum_fdr", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
@@ -981,26 +951,19 @@ fcs_stats <- tibble(
   score_global     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score"))),
   score_top        = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_top_all"))),
   score_bottom     = suppressWarnings(as.numeric(.col(gene_scores, "gene_caas_score_bottom_all"))),
-  flag_gate_sig    = .istrue(.col(gene_scores, "gene_caas_gate_sig")),
   flag_fade_top    = .istrue(.col(gene_scores, "fade_significant_top")),
   flag_fade_bottom = .istrue(.col(gene_scores, "fade_significant_bottom")),
   flag_rer_acc     = .istrue(.col(gene_scores, "rer_significant")) & grepl("acc", .rer_dir),
   flag_rer_decc    = .istrue(.col(gene_scores, "rer_significant")) & grepl("dec", .rer_dir),
-  # flag_accum: CCT-combined significance over ALL non-none positions pooled
-  # (accumulation_all_*) -- a genuinely non-directional test, not an OR of
-  # top/bottom. flag_accum_top/flag_accum_bottom are the direction-restricted
-  # tests (accumulation_top_*/accumulation_bottom_*), analogous to flag_fade_top/
-  # flag_fade_bottom -- use these two for directional corroboration, flag_accum
-  # only where the ranking itself is non-directional.
   flag_accum        = .istrue(.col(gene_scores, "accum_significant")),
   flag_accum_top    = .istrue(.col(gene_scores, "accum_significant_top")),
   flag_accum_bottom = .istrue(.col(gene_scores, "accum_significant_bottom"))
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
 write_tsv(fcs_stats, "fcs_stats.tsv")
-cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom, %d gate_sig)\n",
+cat(sprintf("  fcs_stats.tsv: %d genes (%d top, %d bottom)\n",
             nrow(fcs_stats), sum(!is.na(fcs_stats$score_top)),
-            sum(!is.na(fcs_stats$score_bottom)), sum(fcs_stats$flag_gate_sig)))
+            sum(!is.na(fcs_stats$score_bottom))))
 
 # ── Per-module FCS RANKING files (rankings only) ─────────────────────────────
 # Each carries only its module's score_<ranking> columns. The cross-module

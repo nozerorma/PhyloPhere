@@ -426,6 +426,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "perm_pheno_col": "${PERM_PHENO_COL:-}",
   "chunk_size": "${CHUNK_SIZE:-500}",
   "include_b0": {{ run_defaults.include_b0 }},
+  "multi_hypothesis": {{ run_defaults.multi_hypothesis }},
   "alpha_threshold": "${ALPHA_THRESHOLD:-0.05}",
   "export_groups": {{ run_defaults.export_groups }},
   "export_perm_discovery": {{ run_defaults.export_perm_discovery }},

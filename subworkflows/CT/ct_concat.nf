@@ -34,8 +34,8 @@ process CONCAT_DISCOVERY {
     # Check if we have any files
     if [ \${#discovery_files[@]} -eq 0 ]; then
         echo "WARNING: No discovery files found - creating empty discovery table with expected schema"
-        # Keep schema aligned with CT_SIGNIFICATION expectations (pattern + pvalue required)
-        echo "gene\tmode\tcaap_group\ttrait\tposition\tcaas\tamino_encoded\tpvalue\tpattern\tffgn\tfbgn\tgfg\tgbg\tmfg\tmbg\tffg\tfbg\tms\tis_conserved_meta\tconserved_pair" > discovery.tab
+        # Keep schema aligned with CT_SIGNIFICATION expectations (pattern required)
+        echo "gene\tmode\tcaap_group\ttrait\tposition\tcaas\tamino_encoded\tpattern\tffgn\tfbgn\tgfg\tgbg\tmfg\tmbg\tffg\tfbg\tms\tis_conserved_meta\tconserved_pair" > discovery.tab
         exit 0
     fi
     
@@ -54,10 +54,11 @@ process CONCAT_DISCOVERY {
     done
     
     echo ""
-    echo "Final concatenated file line count: \$(wc -l < discovery.tab)"
-    echo "Final file preview:"
+    echo "Discovery concatenation complete: \$(wc -l < discovery.tab) lines (full multi-hypothesis set preserved)."
+    echo "Final discovery file preview:"
     head -10 discovery.tab
     """
+
 }
 
 process CONCAT_BACKGROUND {

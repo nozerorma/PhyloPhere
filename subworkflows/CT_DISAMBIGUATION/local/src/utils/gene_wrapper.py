@@ -110,15 +110,11 @@ def convert_convergence_result_to_dict(
         "position": getattr(result, "position", None),
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
-        "is_significant": bool(getattr(result, "is_significant", False)),
-        "pvalue": getattr(result, "pvalue", None),
         "pvalue_boot": getattr(result, "pvalue_boot", None),
         "caap_group": getattr(result, "caap_group", "US"),
         "amino_encoded": getattr(result, "amino_encoded", ""),
         "is_conserved_meta": bool(getattr(result, "is_conserved_meta", False)),
         "conserved_pair": getattr(result, "conserved_pair", ""),
-        "sig_hyp": getattr(result, "sig_hyp", None),
-        "sig_perm": getattr(result, "sig_perm", None),
         "multi_hypothesis": multi_hypothesis,
     }
 
@@ -194,14 +190,6 @@ def convert_convergence_result_to_dict(
                 k.endswith("_path_score") or k.endswith("_contaminated")
             ):
                 result_dict[k] = v
-
-    # Keep rich payloads for downstream viz/reporting
-    if getattr(result, "pair_details", None):
-        result_dict["pair_details"] = getattr(result, "pair_details")
-    if getattr(result, "node_mapping", None):
-        result_dict["node_mapping"] = getattr(result, "node_mapping")
-    if getattr(result, "node_state_details", None):
-        result_dict["node_state_details"] = getattr(result, "node_state_details")
 
     return result_dict
 
@@ -1085,9 +1073,7 @@ def _perms_worker(
                                 caas=caas,
                                 trait1_aa=trait1,
                                 trait0_aa=trait0,
-                                pvalue=float(parts[pval_idx]) if pval_idx is not None and pval_idx < len(parts) and parts[pval_idx] not in ("", "NA") else None,
                                 pvalue_boot=None,
-                                is_significant=False,
                                 caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
                                 amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
                                 is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
@@ -1146,9 +1132,7 @@ def _perms_worker(
                                     caas=caas,
                                     trait1_aa=trait1,
                                     trait0_aa=trait0,
-                                    pvalue=float(parts[pval_idx]) if pval_idx is not None and pval_idx < len(parts) and parts[pval_idx] not in ("", "NA") else None,
                                     pvalue_boot=None,
-                                    is_significant=False,
                                     caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
                                     amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
                                     is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,

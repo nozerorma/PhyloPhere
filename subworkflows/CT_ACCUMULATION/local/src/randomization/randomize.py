@@ -123,14 +123,12 @@ def _remap_caas_df(df):
     """Normalise a filtered_discovery.tsv DataFrame to the internal column schema.
 
     Source-of-truth columns (tab-separated):
-      Gene, Position, tag, caas, is_significant, pvalue, pvalue_boot, convergence_type,
-      convergence_description, convergence_mode, caap_group, amino_encoded,
-      is_conserved_meta, conserved_pair, sig_hyp, sig_perm,
-      top_change_type, bottom_change_type, change_side, low_confidence_nodes,
-      asr_is_conserved, comments, ..., Trait
+      Gene, Position, tag, caas, pvalue_boot, convergence_type, caap_group,
+      amino_encoded, is_conserved_meta, conserved_pair, change_top, change_bottom,
+      change_side, asr_is_conserved, ..., Trait
 
     Produces internal schema columns:
-      gene, msa_pos, is_significant, tag, convergence_type, caap_group (uppercased),
+      gene, msa_pos, tag, convergence_type, caap_group (uppercased),
       iscaap, change_side, is_conserved_meta, asr_is_conserved
     """
     # Rename Gene→gene, Position→msa_pos (structural keys; concept columns are
@@ -138,9 +136,6 @@ def _remap_caas_df(df):
     df = df.rename(columns={'Gene': 'gene', 'Position': 'msa_pos'})
 
     _bool = lambda x: str(x).strip().lower() in {'true', 't', '1', 'yes', 'y'}
-
-    # is_significant: coerce to boolean
-    df['is_significant'] = df['is_significant'].map(_bool)
 
     # Coerce conserved-state columns to bool
     df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
@@ -457,7 +452,7 @@ def main(args):
         caas_raw  = pd.read_csv(args.caas_csv, sep=None, engine='python')
 
     # Keep only needed columns to save memory
-    required_cols = ['gene', 'msa_pos', 'is_significant',
+    required_cols = ['gene', 'msa_pos',
                      'change_side', 'tag', 'convergence_type', 'iscaap', 'caap_group',
                      'is_conserved_meta']
 

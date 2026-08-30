@@ -374,6 +374,9 @@ def main():
         sources["characterization"] = (char_terms, char_descs, False)
     print(f"[posenrich] sources: {len(sources)} ({', '.join(sources)})", flush=True)
 
+    hyp_dict = dict(zip(obs["pos_id"], obs["n_hypotheses"])) if "n_hypotheses" in obs.columns else {}
+    supp_dict = dict(zip(obs["pos_id"], obs["supporting_hypotheses"])) if "supporting_hypotheses" in obs.columns else {}
+
     directions = ["global", "top", "bottom"]
     rows = []
     leading_edge_rows = []
@@ -408,7 +411,9 @@ def main():
                             ranking=direction, database=db, pathway=r["pathway"],
                             gene=pos_id.rsplit(":", 1)[0],
                             gene_position=pos_id,
-                            CAAS_score=obs_scores.get(pos_id, 0.0)
+                            CAAS_score=obs_scores.get(pos_id, 0.0),
+                            n_hypotheses=hyp_dict.get(pos_id, 1),
+                            supporting_hypotheses=supp_dict.get(pos_id, "")
                         ))
                 rows.append(dict(ranking=direction, database=db, **r))
 
@@ -426,9 +431,12 @@ def main():
     results.to_csv(out_path, sep="\t", index=False)
     print(f"[posenrich] wrote {out_path} ({len(results)} rows)", flush=True)
 
+    leading_edge_cols = ["ranking", "database", "pathway", "gene", "gene_position", "CAAS_score"]
+    if hyp_dict:
+        leading_edge_cols.extend(["n_hypotheses", "supporting_hypotheses"])
     leading_edge = pd.DataFrame(
         leading_edge_rows,
-        columns=["ranking", "database", "pathway", "gene", "gene_position", "CAAS_score"],
+        columns=leading_edge_cols,
     )
     le_path = os.path.join(args.output_dir, "posenrich_leading_edge.tsv")
     leading_edge.to_csv(le_path, sep="\t", index=False)

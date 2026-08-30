@@ -151,7 +151,9 @@ workflow {
                     exit 0, "Minimum contrast threshold not met for trait '${params.traitname ?: 'unknown'}' (flag: ${skip_file}). Stopping pipeline gracefully."
                 }
 
-                ct_results = CT(contrast_out.trait_file_out, contrast_out.bootstrap_trait_file_out, contrast_out.tree_file_out)
+                def trait_input_for_ct = (contrast_out && contrast_out.trait_dir_out) ? contrast_out.trait_dir_out : contrast_out.trait_file_out
+                ct_results = CT(trait_input_for_ct, contrast_out.bootstrap_trait_file_out, contrast_out.tree_file_out)
+
             } else {
                 def trait_file_in = null
                 def bootstrap_trait_file_in = null
@@ -195,6 +197,18 @@ workflow {
         // No separate --ct_signification toggle: it is implied by running bootstrap.
         def run_signification = ran_bootstrap || params.bootstrap_from
 
+        def toBool = { val ->
+            if (val == null) return false
+            if (val instanceof Boolean) return val
+            if (val instanceof String) return !(val.trim().toLowerCase() in ['false', '0', 'no', 'f', ''])
+            return (boolean) val
+        }
+
+        def run_ct_disambiguation = toBool(params.ct_disambiguation) && (run_signification || params.signification_from || params.disambiguation_input)
+        def run_ct_postproc       = toBool(params.ct_postproc) && (run_ct_disambiguation || params.disambiguation_input)
+        def run_ct_accumulation   = toBool(params.ct_accumulation) && (run_ct_postproc || params.accumulation_background_input)
+        def run_caas_permulation  = run_ct_disambiguation || (toBool(params.enrichment) && toBool(params.caas_permulation_enrichment))
+
         // Stable channel references for CT_POSTPROC outputs used by multiple consumers.
         // Populated inside the ct_postproc block when --ct_postproc is enabled.
         def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
@@ -218,22 +232,17 @@ workflow {
         def scoring_caas_pos_quantiles_ch = null
         def caas_perm_out = null
 
-        if (params.ct_disambiguation) {
-            if (!run_signification && !params.signification_from) {
-                error "CT disambiguation requires upstream signification (run CAAStools bootstrap via --ct_tool ...,bootstrap) or a standalone metadata file (--signification_from)."
-            }
-
+        if (run_ct_disambiguation) {
             // Forward both possible signification metadata artifacts; CT_DISAMBIGUATION
             // will prefer global_meta_caas.tsv when present and otherwise accept
             // the per-run meta_caas.tsv fallback.
             def meta_for_disambiguation = signification_results
                 ? signification_results.signification_global_meta.mix(signification_results.signification_meta_caas)
                 : null
-            // Disambiguation needs the fg/bg trait file that defined the contrasts the
+            // Disambiguation needs the fg/bg trait file(s) that defined the contrasts the
             // CAAS were discovered under. Two suppliers, in order of preference:
-            //   • CT ran live            -> ct_results.trait_file
-            //   • CAAStools is precomputed but CONTRAST_SELECTION still ran (ct_tool
-            //     empty, contrast_selection on) -> contrast_out.trait_file_out
+            //   • CT ran live            -> ct_results.trait_file (carries traitfiles_ok_dir in multi-hypothesis mode)
+            //   • CONTRAST_SELECTION ran -> (contrast_out.trait_dir_out ?: contrast_out.trait_file_out)
             // CONTRAST_SELECTION is deterministic given the same --my_traits and tree,
             // so the pairing it emits here matches the one the precomputed discovery
             // used. Falling through to Channel.empty() lands on --caas_config, which
@@ -241,7 +250,7 @@ workflow {
             // channels built for POSENRICH below.
             def trait_for_disambiguation = ct_results
                 ? ct_results.trait_file
-                : (contrast_out ? contrast_out.trait_file_out : Channel.empty())
+                : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : Channel.empty())
             def tree_for_disambiguation = ct_results
                 ? ct_results.tree_file
                 : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
@@ -250,7 +259,9 @@ workflow {
             ran_any = true
         }
 
-        if (params.ct_disambiguation || params.caas_permulation_enrichment) {
+        if (run_caas_permulation) {
+
+
             def perm_disc_ch = null
             def perm_subset_ch = null
             def perm_tree_ch = ct_results ? ct_results.tree_file : (contrast_out ? contrast_out.tree_file_out : (params.tree ? file(params.tree) : Channel.empty()))
@@ -380,11 +391,7 @@ workflow {
         }
 
 
-        if (params.ct_postproc) {
-            if (!params.ct_disambiguation && !params.disambiguation_input) {
-                error "CT post-processing now runs downstream of disambiguation. Enable --ct_disambiguation or provide --disambiguation_input (caas_convergence_master.csv)."
-            }
-
+        if (run_ct_postproc) {
             // Post-processing is downstream from disambiguation; consume disambiguation master CSV when available
             // Pass null (not Channel.empty()) when there is no upstream result so that the
             // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
@@ -423,7 +430,8 @@ workflow {
 
         def accum_results = null
 
-        if (params.ct_accumulation) {
+        if (run_ct_accumulation) {
+
             if (!params.ct_postproc && !params.accumulation_background_input) {
                 error "CT_ACCUMULATION requires CT post-processing output (--ct_postproc) or a standalone background file (--accumulation_background_input)."
             }
@@ -434,7 +442,8 @@ workflow {
             // Use filtered_discovery.tsv from postproc (gene_filtering stage)
             def acc_caas_ch       = postproc_results ? postproc_results.filtered_discovery : Channel.empty()
             def acc_background_ch = pp_cleaned_bg    ?: Channel.empty()
-            def acc_trait_file_ch = ct_results       ? ct_results.trait_file               : Channel.empty()
+            def acc_trait_file_ch = ct_results       ? ct_results.trait_file
+                : (contrast_out ? (contrast_out.trait_dir_out ?: contrast_out.trait_file_out) : Channel.empty())
             // background.output = the positions CAAStools actually TESTED. This is the
             // accumulation null's eligible pool (intersected with the cleaned-background
             // genes inside the subworkflow). Resolved exactly like POSENRICH's own
@@ -480,22 +489,11 @@ workflow {
                 ? ct_results.discovery_file
                 : Channel.empty()
 
-            // Postproc directional gene lists for gene_set mode.
-            // SELECTION_PREP uses all_top.txt (top+both CAAS hits) to restrict
-            // the top FADE run, and all_bottom.txt for the bottom run.
-            // collectFile() merges multi-phenotype emissions into a single file so
-            // COLLECT_GENE_SETS inside SELECTION_PREP runs exactly once.
+            // gene_set mode sources its directional gene lists from the
+            // --fade_postproc_top / --fade_postproc_bottom params (resolved inside
+            // SELECTION_PREP); the empty channels here keep the take: signature.
             def sel_pp_top_ch    = Channel.empty()
             def sel_pp_bottom_ch = Channel.empty()
-            if (postproc_results) {
-                def pp_gene_lists_val = postproc_results.enrichment_gene_lists_files.collect()
-                sel_pp_top_ch    = pp_gene_lists_val
-                    .flatMap { files -> files.findAll { f -> f.name == 'all_top.txt' } }
-                    .collectFile(name: 'merged_pp_top.txt')
-                sel_pp_bottom_ch = pp_gene_lists_val
-                    .flatMap { files -> files.findAll { f -> f.name == 'all_bottom.txt' } }
-                    .collectFile(name: 'merged_pp_bottom.txt')
-            }
 
             // Run alignment prep ONCE for FADE.
             // SELECTION_PREP outputs value channels for species/tree files

@@ -148,18 +148,38 @@ def _compute_max_pairs_from_trait(trait_file: Path) -> int:
     import csv
 
     max_pair_id = 0
-    with open(trait_file, "r") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-        for row in reader:
-            pair_val = row.get("pair")
-            # Skip missing or empty values before attempting conversion
-            if pair_val is None or str(pair_val).strip() == "":
-                continue
-            try:
-                pair_id = int(str(pair_val).strip())
-                max_pair_id = max(max_pair_id, pair_id)
-            except Exception:
-                continue
+    files_to_read = []
+    if trait_file.is_dir():
+        h_files = sorted(trait_file.glob("traitfile_H*.tab"))
+        if h_files:
+            files_to_read = h_files
+        else:
+            files_to_read = [
+                f for f in sorted(trait_file.glob("*.tab"))
+                if f.name != "traitfile_fop.tab"
+            ]
+        if not files_to_read:
+            files_to_read = [f for f in sorted(trait_file.glob("*")) if f.is_file()]
+    elif trait_file.is_file():
+        files_to_read = [trait_file]
+
+    for fpath in files_to_read:
+        try:
+            with open(fpath, "r", encoding="utf-8-sig") as f:
+                reader = csv.reader(f, delimiter="\t")
+                for row in reader:
+                    if not row or len(row) < 3:
+                        continue
+                    pair_val = row[2]
+                    if pair_val is None or str(pair_val).strip() == "":
+                        continue
+                    try:
+                        pair_id = int(str(pair_val).strip())
+                        max_pair_id = max(max_pair_id, pair_id)
+                    except Exception:
+                        continue
+        except Exception as e:
+            logger.warning(f"Could not read traitfile {fpath}: {e}")
     return max_pair_id or 1
 
 

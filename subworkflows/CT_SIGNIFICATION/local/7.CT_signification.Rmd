@@ -163,7 +163,7 @@ cat(sprintf("Loaded background file: %s\n", basename(filtered_background_path)))
 cat(sprintf("Total genes in background: %s\n", format(nrow(background_df), big.mark = ",")))
 
 # Validate required columns
-required_cols <- c("Gene", "Position", "pattern", "pvalue")
+required_cols <- c("Gene", "Position", "pattern")
 missing_cols <- setdiff(required_cols, names(discovery_df))
 if (length(missing_cols) > 0) {
   stop("Missing required columns in discovery: ", paste(missing_cols, collapse = ", "))
@@ -290,7 +290,7 @@ if (has_caap_group && bootstrap_has_groups) {
 # Handle missing permutation p-values
 discovery_with_perm <- discovery_with_perm %>%
   mutate(
-    pvalue_boot = if_else(is.na(pvalue_boot), pvalue, pvalue_boot),
+    pvalue_boot = if_else(is.na(pvalue_boot), 1.0, pvalue_boot),
     occurrences = if_else(is.na(occurrences), 0L, as.integer(occurrences)),
     total = if_else(is.na(total), 0L, as.integer(total))
   )
@@ -309,129 +309,25 @@ cat(sprintf("Integrated bootstrap p-values for %d positions\n",
 cat("\n=== Bootstrap Integration Complete ===\n")
 ```
 
-## 3. Significance Filtering
+## 3. Pattern-Based Analysis
 
-Apply hypergeometric and permutation significance thresholds.
-
-```{r significance_filtering}
-cat("\n=== Applying Significance Thresholds ===\n")
-
-alpha <- 0.05
-
-# Apply filters with dynamic FDR threshold selection (0.05 -> 0.10 -> 0.15).
-# If nothing is FDR-significant at 0.05, we check 0.10, then 0.15. If still nothing, default to 0.15.
-# BH is applied *within each biochemical scheme* (caap_group), and only to the
-# hypergeometric pvalue: pvalue_boot is a permutation p-value, not a calibrated
-# test statistic under multiple comparisons, so it is not BH-adjusted.
-caas_filtered <- discovery_with_perm
-
-if (has_caap_group) {
-  caas_filtered <- caas_filtered %>%
-    group_by(caap_group) %>%
-    mutate(
-      pvalue_fdr = p.adjust(pvalue, method = "BH")
-    ) %>%
-    mutate(
-      alpha_fdr = {
-        if (sum(pvalue_fdr <= 0.05, na.rm = TRUE) > 0) {
-          0.05
-        } else if (sum(pvalue_fdr <= 0.10, na.rm = TRUE) > 0) {
-          0.10
-        } else {
-          0.15
-        }
-      }
-    ) %>%
-    mutate(
-      is_significant = pvalue <= alpha & pvalue_boot <= alpha,
-      sig_hyp = pvalue <= alpha,
-      sig_perm = pvalue_boot <= alpha,
-      sig_hyp_fdr = pvalue_fdr <= alpha_fdr
-    ) %>%
-    ungroup()
-} else {
-  caas_filtered <- caas_filtered %>%
-    mutate(
-      pvalue_fdr = p.adjust(pvalue, method = "BH")
-    )
-
-  alpha_fdr_val <- if (sum(caas_filtered$pvalue_fdr <= 0.05, na.rm = TRUE) > 0) {
-    0.05
-  } else if (sum(caas_filtered$pvalue_fdr <= 0.10, na.rm = TRUE) > 0) {
-    0.10
-  } else {
-    0.15
-  }
-
-  caas_filtered <- caas_filtered %>%
-    mutate(
-      alpha_fdr    = alpha_fdr_val,
-      is_significant = pvalue <= alpha & pvalue_boot <= alpha,
-      sig_hyp = pvalue <= alpha,
-      sig_perm = pvalue_boot <= alpha,
-      sig_hyp_fdr = pvalue_fdr <= alpha_fdr
-    )
-}
-
-# Summary statistics
-if (has_caap_group) {
-  # Group-aware summary
-  summary_stats <- caas_filtered %>%
-    group_by(caap_group) %>%
-    summarize(
-      Total = n(),
-      alpha_fdr = first(alpha_fdr),
-      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
-      Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(is_significant, na.rm = TRUE),
-      Hyp_FDR = sum(sig_hyp_fdr, na.rm = TRUE),
-      .groups = "drop"
-    )
-
-  cat("\nSignificance Summary by Group (raw alpha=0.05 vs BH-FDR q<=alpha_fdr, hypergeometric only):\n")
-  print(kable(summary_stats, format.args = list(big.mark = ",")))
-
-  caas_for_export <- caas_filtered
-
-} else {
-  # Standard summary
-  summary_stats <- caas_filtered %>%
-    summarize(
-      Total = n(),
-      alpha_fdr = first(alpha_fdr),
-      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
-      Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(is_significant, na.rm = TRUE),
-      Hyp_FDR = sum(sig_hyp_fdr, na.rm = TRUE)
-    )
-
-  cat("\nSignificance Summary (raw alpha=0.05 vs BH-FDR q<=alpha_fdr, hypergeometric only):\n")
-  print(kable(summary_stats, format.args = list(big.mark = ",")))
-  
-  caas_for_export <- caas_filtered
-}
-```
-
-## 4. Pattern-Based Analysis
-
-Analyze CAAS patterns and their significance profiles.
+Analyze CAAS patterns across discovered positions.
 
 ```{r pattern_analysis}
 cat("\n=== Pattern-Based Analysis ===\n")
 
+caas_for_export <- discovery_with_perm
+
 # Detect available patterns
-patterns_present <- unique(caas_filtered$pattern)
+patterns_present <- unique(caas_for_export$pattern)
 cat(sprintf("Patterns detected: %s\n", paste(patterns_present, collapse = ", ")))
 
 # Pattern distribution
 if (has_caap_group) {
-  pattern_summary <- caas_filtered %>%
+  pattern_summary <- caas_for_export %>%
     group_by(caap_group, pattern) %>%
     summarize(
       Total = n(),
-      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
-      Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(is_significant, na.rm = TRUE),
       .groups = "drop"
     ) %>%
     arrange(caap_group, pattern)
@@ -439,103 +335,61 @@ if (has_caap_group) {
   cat("\nPattern Distribution by Group:\n")
   print(kable(pattern_summary, format.args = list(big.mark = ",")))
   
-  # Visualization: faceted by group
-  plot_data <- pattern_summary %>%
-    pivot_longer(
-      cols = c(Total, Hyp_05, Perm_05, Both_05),
-      names_to = "Filter",
-      values_to = "Count"
-    ) %>%
-    mutate(
-      Filter = factor(Filter, levels = c("Total", "Hyp_05", "Perm_05", "Both_05")),
-      pattern = factor(pattern)
-    )
-  
-  p_pattern <- ggplot(plot_data, aes(x = pattern, y = Count, fill = Filter)) +
-    geom_bar(stat = "identity", position = "dodge") +
+  p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
+    geom_bar(stat = "identity") +
     facet_wrap(~ caap_group, scales = "free_y") +
     theme_minimal() +
     labs(
-      title = "CAAS Pattern Distribution by Significance Filter",
-      subtitle = "Hyp_05 = Hypergeometric | Perm_05 = Permutation | Both_05 = Combined",
+      title = "CAAS Pattern Distribution by Group",
       x = "Pattern",
-      y = "Count"
+      y = "Candidate Count",
+      fill = "Pattern"
     ) +
-    scale_fill_manual(values = c(
-      "Total" = tableau_10[["gray"]],
-      "Hyp_05" = tableau_10[["blue"]],
-      "Perm_05" = tableau_10[["green"]],
-      "Both_05" = tableau_10[["vermillion"]]
-    )) +
     theme(
       axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
       axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
       plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-      plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10)),
       axis.text.x = element_text(angle = 0, hjust = 0.5),
       panel.grid.major = element_line(color = "darkgray", size = 0.5),
-      legend.position = "bottom"
+      legend.position = "none"
     )
   
   print(p_pattern)
 } else {
-  pattern_summary <- caas_filtered %>%
+  pattern_summary <- caas_for_export %>%
     group_by(pattern) %>%
     summarize(
       Total = n(),
-      Hyp_05 = sum(sig_hyp, na.rm = TRUE),
-      Perm_05 = sum(sig_perm, na.rm = TRUE),
-      Both_05 = sum(is_significant, na.rm = TRUE),
       .groups = "drop"
     )
   
   cat("\nPattern Distribution:\n")
   print(kable(pattern_summary, format.args = list(big.mark = ",")))
   
-  # Visualization
-  plot_data <- pattern_summary %>%
-    pivot_longer(
-      cols = c(Total, Hyp_05, Perm_05, Both_05),
-      names_to = "Filter",
-      values_to = "Count"
-    ) %>%
-    mutate(
-      Filter = factor(Filter, levels = c("Total", "Hyp_05", "Perm_05", "Both_05")),
-      pattern = factor(pattern)
-    )
-  
-  p_pattern <- ggplot(plot_data, aes(x = pattern, y = Count, fill = Filter)) +
-    geom_bar(stat = "identity", position = "dodge") +
+  p_pattern <- ggplot(pattern_summary, aes(x = factor(pattern), y = Total, fill = factor(pattern))) +
+    geom_bar(stat = "identity") +
     theme_minimal() +
     labs(
-      title = "CAAS Pattern Distribution by Significance Filter",
-      subtitle = "Hyp_05 = Hypergeometric | Perm_05 = Permutation | Both_05 = Combined",
+      title = "CAAS Pattern Distribution",
       x = "Pattern",
-      y = "Count"
+      y = "Candidate Count"
     ) +
-    scale_fill_manual(values = c(
-      "Total" = tableau_10[["gray"]],
-      "Hyp_05" = tableau_10[["blue"]],
-      "Perm_05" = tableau_10[["green"]],
-      "Both_05" = tableau_10[["vermillion"]]
-    )) +
     theme(
       axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
       axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
       plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
-      plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10)),
       axis.text.x = element_text(angle = 0, hjust = 0.5),
       panel.grid.major = element_line(color = "darkgray", size = 0.5),
-      legend.position = "bottom"
+      legend.position = "none"
     )
   
   print(p_pattern)
 }
 ```
 
-## 5. Meta-CAAS Extraction
+## 4. Meta-CAAS Extraction
 
-Extract comprehensive CAAS metadata for meta-analysis and cross-study comparison.
+Export standardized meta-CAAS tables for downstream disambiguation and post-processing.
 
 ```{r meta_caas_export}
 cat("\n=== Exporting Meta-CAAS Data ===\n")
@@ -566,12 +420,6 @@ if (has_caap_group) {
     grp_meta <- grp_data %>%
       mutate(
         GenePos = paste(Gene, Position, sep = "_"),
-        significance_level = case_when(
-          is_significant ~ "Both",
-          sig_hyp ~ "Hypergeometric",
-          sig_perm ~ "Permutation",
-          TRUE ~ "Not Significant"
-        ),
         tag = assign_caas_tags(n()),
         is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
         conserved_pair = if_else(
@@ -584,10 +432,9 @@ if (has_caap_group) {
       ) %>%
       select(
         tag, GenePos, Gene, Position, pattern, caap_group,
-        pvalue, pvalue_boot, pvalue_fdr, alpha_fdr, occurrences, total,
-        sig_hyp, sig_perm, is_significant,
-        sig_hyp_fdr, significance_level,
-        is_conserved_meta, conserved_pair, caas, amino_encoded
+        pvalue_boot, occurrences, total,
+        is_conserved_meta, conserved_pair, caas, amino_encoded,
+        dplyr::any_of(c("trait", "hyp_id"))
       )
 
     output_file <- file.path(meta_dir, paste0(grp, "_meta_caas.tsv"))
@@ -600,12 +447,6 @@ if (has_caap_group) {
   global_meta <- caas_for_export %>%
     mutate(
       GenePos = paste(Gene, Position, sep = "_"),
-      significance_level = case_when(
-        is_significant ~ "Both",
-        sig_hyp ~ "Hypergeometric",
-        sig_perm ~ "Permutation",
-        TRUE ~ "Not Significant"
-      ),
       tag = assign_caas_tags(n()),
       is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
       conserved_pair = if_else(
@@ -614,14 +455,14 @@ if (has_caap_group) {
         NA_character_
       ),
       caas = if ("caas" %in% names(.)) caas else NA_character_,
-      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_
+      amino_encoded = if ("amino_encoded" %in% names(.)) amino_encoded else NA_character_,
+      hyp_id = if ("trait" %in% names(.)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), trait) else NA_character_
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern, caap_group,
-      pvalue, pvalue_boot, pvalue_fdr, alpha_fdr, occurrences, total,
-      sig_hyp, sig_perm, is_significant,
-      sig_hyp_fdr, significance_level,
-      is_conserved_meta, conserved_pair, caas, amino_encoded
+      pvalue_boot, occurrences, total,
+      is_conserved_meta, conserved_pair, caas, amino_encoded,
+      dplyr::any_of(c("trait", "hyp_id"))
     )
 
   output_file <- file.path(meta_dir, "global_meta_caas.tsv")
@@ -633,12 +474,6 @@ if (has_caap_group) {
   meta_caas <- caas_for_export %>%
     mutate(
       GenePos = paste(Gene, Position, sep = "_"),
-      significance_level = case_when(
-        is_significant ~ "Both",
-        sig_hyp ~ "Hypergeometric",
-        sig_perm ~ "Permutation",
-        TRUE ~ "Not Significant"
-      ),
       tag = assign_caas_tags(n()),
       is_conserved_meta = if_else(!is.na(is_conserved_meta) & toupper(trimws(as.character(is_conserved_meta))) == "TRUE", TRUE, FALSE),
       conserved_pair = if_else(
@@ -651,9 +486,7 @@ if (has_caap_group) {
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern,
-      pvalue, pvalue_boot, pvalue_fdr, alpha_fdr, occurrences, total,
-      sig_hyp, sig_perm, is_significant,
-      sig_hyp_fdr, significance_level,
+      pvalue_boot, occurrences, total,
       is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 

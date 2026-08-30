@@ -60,24 +60,29 @@ process CT_DISAMBIGUATION_RUN {
       exit 1
     fi
 
-    if [ ! -s "${trait_file}" ]; then
-      echo "ERROR: trait file is missing or empty: ${trait_file}" >&2
+    if [ ! -e "${trait_file}" ]; then
+      echo "ERROR: trait file or directory is missing: ${trait_file}" >&2
       exit 1
     fi
 
     meta_rows=\$(wc -l < "${meta_caas}")
-    trait_rows=\$(wc -l < "${trait_file}")
-
-    echo "  meta_rows=\${meta_rows}"
-    echo "  trait_rows=\${trait_rows}"
+    if [ -d "${trait_file}" ]; then
+      trait_rows=\$(find -L "${trait_file}" -maxdepth 1 -type f -name '*.tab' -exec wc -l {} + | awk 'END {print \$1+0}')
+      echo "  meta_rows=\${meta_rows}"
+      echo "  trait_rows=\${trait_rows} (across all traitfiles in directory ${trait_file})"
+    else
+      trait_rows=\$(wc -l < "${trait_file}")
+      echo "  meta_rows=\${meta_rows}"
+      echo "  trait_rows=\${trait_rows}"
+    fi
 
     if [ "\${meta_rows}" -le 1 ]; then
       echo "ERROR: metadata file has header only (no data rows): ${meta_caas}" >&2
       exit 1
     fi
 
-    if [ "\${trait_rows}" -le 1 ]; then
-      echo "ERROR: trait file has header only (no data rows): ${trait_file}" >&2
+    if [ "\${trait_rows}" -le 0 ]; then
+      echo "ERROR: trait file/directory has no data rows: ${trait_file}" >&2
       exit 1
     fi
 

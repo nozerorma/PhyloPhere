@@ -189,8 +189,9 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
     (
         "${cmd[@]}" "${extra_args[@]}" &
         worker_pid=$!
-        watchdog_guard "$worker_pid" &
+        ( watchdog_guard "$worker_pid" ) >/dev/null 2>&1 &
         watchdog_pid=$!
+        disown "$watchdog_pid" 2>/dev/null || true
         worker_status=0
         wait "$worker_pid" || worker_status=$?
         kill "$watchdog_pid" 2>/dev/null || true

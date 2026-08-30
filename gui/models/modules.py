@@ -76,6 +76,7 @@ class CaasConfig(ModuleConfigBase):
     traitvalues: str = ""  # --traitvalues
     chunk_size: str = "500"  # --chunk_size
     include_b0: bool = False  # --include_b0
+    multi_hypothesis: bool = True  # --multi_hypothesis
     alpha_threshold: str = "0.05"  # --alpha_threshold
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).

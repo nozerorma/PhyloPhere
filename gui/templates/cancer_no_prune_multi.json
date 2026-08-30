@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "cancer_complete_cancer_bm_postdisamb",
+    "project_name": "cancer_no_prune_multi",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -16,9 +16,9 @@
     "toy_n": "",
     "runtime_type": "slurm",
     "batched": true,
-    "script_base_name": "cancer_bm_postdisamb",
-    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_postdisamb",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_complete_bm",
+    "script_base_name": "cancer_no_prune_multi",
+    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_final_noprune_multi",
+    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
     "sbatch_partition": "high-cpu",
@@ -44,8 +44,8 @@
         "secondary": "malignant_prevalence",
         "n_trait": "adult_necropsy_count",
         "c_trait": "neoplasia_necropsy",
-        "prune": "neoplasia_exclude.txt",
-        "prune_secondary": "malignant_exclude.txt",
+        "prune": "",
+        "prune_secondary": "",
         "discrete_method": ""
       },
       {
@@ -54,15 +54,15 @@
         "secondary": "neoplasia_prevalence",
         "n_trait": "adult_necropsy_count",
         "c_trait": "malignant_count",
-        "prune": "malignant_exclude.txt",
-        "prune_secondary": "neoplasia_exclude.txt",
+        "prune": "",
+        "prune_secondary": "",
         "discrete_method": ""
       }
     ]
   },
   "modules": {
     "caas": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "ct_tool_discovery": true,
       "ct_tool_resample": true,
@@ -79,7 +79,7 @@
       "publish_intermediates": false,
       "ct_discovery_batch_size": "25",
       "ct_bootstrap_batch_size": "10",
-      "min_divergent_fraction": "0.5",
+      "min_divergent_fraction": "0.75",
       "max_bg_gaps_fraction": "0.0",
       "max_fg_gaps_fraction": "0.0",
       "max_gaps_fraction": "0.0",
@@ -99,11 +99,11 @@
       "include_b0": false,
       "multi_hypothesis": true,
       "alpha_threshold": "0.05",
-      "export_groups": false,
+      "export_groups": true,
       "export_perm_discovery": false
     },
     "disambiguation": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "ct_disambig_asr_mode": "precomputed",
       "ct_disambig_asr_model": "lg",
@@ -124,13 +124,13 @@
       "iqr_multiplier": "3.0"
     },
     "accumulation": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
       "accumulation_seed": "1998",
       "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
-      "accumulation_fdr": "0.1",
+      "accumulation_fdr": "0.15",
       "accumulation_pval_threshold": "0.05",
       "accumulation_report_pval_threshold": "0.05"
     },
@@ -182,7 +182,7 @@
       "fade_universe_file": ""
     },
     "vep": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
@@ -207,13 +207,13 @@
       "fcs_min_genes": "5",
       "fcs_fdr": "0.15",
       "fcs_pperm_thr": "0.025",
-      "fcs_top_n": "20",
-      "rer_permulation_enrichment": true,
+      "fcs_top_n": "30",
       "string_db_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/STRING",
       "string_species": "9606",
       "domino_network_score_thr": "700",
       "domino_slice_thr": "0.3",
       "domino_module_thr": "0.05",
+      "publish_domino_intermediates": false,
       "scoring_ami": true,
       "scoring_string": true,
       "scoring_compare_fdr": "0.15",
@@ -226,22 +226,21 @@
       "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
       "posenrich_min_size": "5",
       "posenrich_max_size": "0",
-      "posenrich_padj_thr": "0.15",
-      "posenrich_fold_thr": "1.5"
+      "posenrich_padj_thr": "0.15"
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_complete_bm",
-    "use_ct": true,
-    "use_discovery": true,
-    "use_resample": true,
-    "use_bootstrap": true,
-    "use_disambiguation": true,
-    "use_postproc": true,
-    "use_accumulation": true,
+    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_final_noprune",
+    "use_ct": false,
+    "use_discovery": false,
+    "use_resample": false,
+    "use_bootstrap": false,
+    "use_disambiguation": false,
+    "use_postproc": false,
+    "use_accumulation": false,
     "use_rer": true,
     "use_fade": true,
-    "use_vep": true
+    "use_vep": false
   },
   "resources": {
     "local_max_cpus": "8",

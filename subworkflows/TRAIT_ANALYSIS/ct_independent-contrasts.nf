@@ -19,6 +19,8 @@ process CONTRAST_ALGORITHM {
     path "data_exploration", emit: contrast_results_dir
     path "*.html", emit: reports, optional: true
     path "data_exploration/2.CT/1.Traitfiles/traitfile.tab", emit: trait_file_out
+    path "data_exploration/2.CT/1.Traitfiles", emit: trait_dir_out
+
     path "data_exploration/2.CT/3.Tree/pruned_tree_file.nwk", emit: tree_file_out
     path "data_exploration/2.CT/2.Bootstrap_traitfiles/boot_traitfile.tab", emit: bootstrap_trait_file_out
     path "data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv", emit: stats_file_out, optional: true

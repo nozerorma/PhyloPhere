@@ -48,6 +48,10 @@ def update_dictionary(dictionary, key, value):
 # Loads the multi cfg dictionary
 
 def load_cfg(input_path, mode = "mono"):
+    import os
+    if os.path.isdir(input_path):
+        mode = "multi"
+
 
     class multicfg():
 
@@ -60,6 +64,7 @@ def load_cfg(input_path, mode = "mono"):
             
             # Pair-aware attributes
             self.species2pair = {}
+            self.trait_species2pair = {}
             self.pair2fg_species = {}
             self.pair2bg_species = {}
             self.allpairs = []
@@ -88,11 +93,16 @@ def load_cfg(input_path, mode = "mono"):
             # Handle pair information (mandatory paired mode)
             if pair is not None:
                 self.species2pair[species] = pair
+                self.trait_species2pair[(traitname, species)] = pair
                 
                 if pair not in self.allpairs:
                     self.allpairs.append(pair)
                 
                 if group == "1":
+                    try:
+                        self.pair2fg_species[(traitname, pair)].append(species)
+                    except:
+                        self.pair2fg_species[(traitname, pair)] = [species]
                     try:
                         self.pair2fg_species[pair].append(species)
                     except:
@@ -100,33 +110,45 @@ def load_cfg(input_path, mode = "mono"):
                 
                 if group == "0":
                     try:
+                        self.pair2bg_species[(traitname, pair)].append(species)
+                    except:
+                        self.pair2bg_species[(traitname, pair)] = [species]
+                    try:
                         self.pair2bg_species[pair].append(species)
                     except:
                         self.pair2bg_species[pair] = [species]
         
         def get_pair(self, species, trait=None):
-            """Get pair for species with caching.
+            """Get pair for species with per-trait caching."""
+            if trait is not None:
+                key = (trait, species)
+                if key not in self._pair_cache:
+                    p = self.trait_species2pair.get(key)
+                    if p is None:
+                        p = self.species2pair.get(species)
+                    self._pair_cache[key] = p
+                return self._pair_cache[key]
+            else:
+                if species not in self._pair_cache:
+                    self._pair_cache[species] = self.species2pair.get(species)
+                return self._pair_cache[species]
 
-            `trait` is accepted for interface parity with the resample-derived
-            multicfg in init_bootstrap.py (where pairs are per-cycle) and ignored
-            here: a discovery config describes a single labeling, so a species
-            belongs to exactly one pair.
-            """
-            if species not in self._pair_cache:
-                self._pair_cache[species] = self.species2pair.get(species)
-            return self._pair_cache[species]
 
     z = multicfg()
 
     if mode == "multi":
-
-        for x in glob.glob(input_path + "/*"):
-
-            traitname = x.split("/")[-1]
+        cfg_files = [f for f in glob.glob(os.path.join(input_path, "*")) if f.endswith(".tab") or "traitfile" in os.path.basename(f)]
+        for x in cfg_files:
+            if not os.path.isfile(x):
+                continue
+            traitname = os.path.basename(x)
             z.alltraits.append(traitname)
 
-            with open(x) as singlecfg_f:
-                singlecfg =  singlecfg_f.read().splitlines()
+            try:
+                with open(x, encoding="utf-8", errors="ignore") as singlecfg_f:
+                    singlecfg = singlecfg_f.read().splitlines()
+            except Exception:
+                continue
             
             for line in singlecfg:
                 try:

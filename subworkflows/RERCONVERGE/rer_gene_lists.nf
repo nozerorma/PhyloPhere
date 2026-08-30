@@ -84,7 +84,7 @@ process RER_GENE_LISTS {
                     gcol <- intersect(c("Gene","GENE"), colnames(gs))[1]
                     if (!is.na(gcol)) colnames(gs)[colnames(gs) == gcol] <- "gene"
                 }
-                want <- c("flag_gate_sig","score_top","score_bottom",
+                want <- c("score_top","score_bottom",
                           "flag_fade","flag_fade_top","flag_fade_bottom","flag_accum")
                 want <- intersect(want, colnames(gs))
                 if ("gene" %in% colnames(gs) && length(want) > 0) {
