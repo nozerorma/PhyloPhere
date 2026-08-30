@@ -899,18 +899,30 @@ def _load_gene_asr_context(
         Path(taxid_mapping_path) if taxid_mapping_path else None,
     )
 
-    from src.asr.asr_single import SingleGeneASRConfig
+    from src.asr.asr_single import SingleGeneASRConfig, run_asr_pipeline
 
     asr_config = SingleGeneASRConfig(
         alignment_path=alignment_path,
         tree_path=Path(tree_file),
+        taxid_path=Path(taxid_mapping_path) if taxid_mapping_path else None,
         model=asr_model,
         posterior_threshold=posterior_threshold,
         output_dir=Path(asr_cache_dir),
     )
+    # run_asr_pipeline loads the cached ASR when present (rst + rst1) and COMPUTES
+    # it into asr_cache_dir on a miss. This makes the permulation replay robust to
+    # genes that appear only under a null labeling — never in the observed run, so
+    # never cached by CT_DISAMBIGUATION_RUN — which in asr_mode=compute would
+    # otherwise be silently dropped from the null. Observed-significant genes are
+    # already cached by the time this runs (the asr_ready gate in
+    # caas_permulation.nf), so this only computes the null-only tail.
     try:
-        node_posteriors = load_precomputed_asr(gene, asr_config, alignment_data)
-    except FileNotFoundError:
+        node_posteriors = run_asr_pipeline(
+            gene, asr_config, skip_if_exists=True,
+            alignment_data=alignment_data, tree_data=tree_data,
+        )
+    except Exception as exc:  # noqa: BLE001 — codeml / parse failure for this one gene
+        logger.warning(f"[perms] ASR unavailable for {gene} ({exc}) — excluded from the null")
         return None
     if not node_posteriors:
         return None
@@ -1023,15 +1035,9 @@ def _perms_worker(
             asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
         )
         if ctx is None:
-            # No cached ASR for this gene (asr-cache-dir is precomputed-only, no
-            # compute-on-miss). Genes that only ever appear under a NULL labeling
-            # are never processed by the observed-run disambiguation and so have
-            # no cache — they are excluded from the null. Warn rather than drop
-            # silently.
-            logger.warning(
-                f"[perms] no cached ASR for {gene} in {asr_cache_dir} — "
-                f"excluded from the permulation null"
-            )
+            # _load_gene_asr_context now computes ASR on a cache miss, so ctx is
+            # None only means the alignment could not be found or codeml/parse
+            # failed for this one gene (already warned inside). Skip it.
             return (gene, [], [])
 
         alignment_data = ctx["alignment_data"]
@@ -1721,19 +1727,16 @@ def process_all_genes_perms(
         f"rows across {len(hist_by_cycle)} cycles -> {detail_path.name}"
     )
     if n_genes < len(genes):
-        logger.warning(
+        logger.info(
             f"[perms] pass A scored {n_genes}/{len(genes)} genes with per-cycle CAAS — "
-            f"{len(genes) - n_genes} contributed nothing (no cached ASR, or no CAAS "
-            f"survived any replayed labeling). If asr_mode=compute, ensure the live "
-            f"disambiguation completed before this step and covers every gene that "
-            f"appears in the permulation discovery."
+            f"{len(genes) - n_genes} contributed nothing (no CAAS survived any replayed "
+            f"labeling, or the alignment / ASR failed for that gene)."
         )
     if n_detail_rows == 0:
         logger.error(
             "[perms] pass A produced ZERO detail rows — the permulation null is empty. "
-            "Downstream caas_perms.rds / FCS p.perm will be degenerate. Most common "
-            "cause: asr_mode=compute with the ASR cache not yet populated when this "
-            "step ran (see the gate in caas_permulation.nf / CAAS_PERMULATION)."
+            "Downstream caas_perms.rds / FCS p.perm will be degenerate. Check the "
+            "per-cycle bootstrap discovery (export_perm_discovery) and the ASR cache."
         )
 
     # ── Pass B: rank within each cycle, score, aggregate ────────────────────────
