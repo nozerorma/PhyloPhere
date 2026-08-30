@@ -145,11 +145,21 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     # species list — NAME_CURATION scans every alignment to derive this if absent
     (outdir / "ali_sp_names.txt").write_text("\n".join(sorted(tree.tips)) + "\n")
     (outdir / "gene_ensembl.tsv").write_text("\n".join(ensembl_rows) + "\n")
-    # `family` column: the reporting / dataset-exploration Rmds require a
-    # `taxon_of_interest` column (default "family") for their per-group tables.
-    # Synthetic: spread the tips over a handful of fake families.
+
     sp_sorted = sorted(ph.values)
+    # `family` — the reporting / CI Rmds need a `taxon_of_interest` column; the
+    # taxid map needs a `family` column too. Synthetic: 5 fake families.
     fam_of = {sp: f"simfam{i % 5 + 1}" for i, sp in enumerate(sp_sorted)}
+
+    # taxid mapping — disambiguation renames tips to numeric ids before writing
+    # the PAML alignment (reconstruct.py::_write_phylip uses a single-space name
+    # delimiter that breaks on species names containing letters like 'O';
+    # production always supplies --tax_id so this path is what real runs use).
+    tax_rows = ["tax_id\tspecies\tfamily\trank\tname_class"]
+    for i, sp in enumerate(sp_sorted):
+        tax_rows.append(f"{9_000_001 + i}\t{sp}\t{fam_of[sp]}\tspecies\tscientific name")
+    (outdir / "taxid.tsv").write_text("\n".join(tax_rows) + "\n")
+
     with (outdir / "my_traits.tsv").open("w") as fh:
         fh.write(f"species\t{rcfg.traitname}\tfamily\n")
         for sp in sp_sorted:

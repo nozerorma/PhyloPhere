@@ -63,6 +63,7 @@ set -a
 source "{env_sh}"
 ALI_DIR="{align}"
 ALI_SP_NAMES="{sp_names}"
+INPUT_TAX_ID="{taxid}"
 GENE_ENSEMBL_FILE="{gene_ensembl}"
 TREE_FILE="{tree_nwk}"
 TRAIT_FILE="{traits}"
@@ -148,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
                     repo=_REPO, env_sh=env_sh,
                     align=(repdir / "align").resolve(),
                     sp_names=(repdir / "ali_sp_names.txt").resolve(),
+                    taxid=(repdir / "taxid.tsv").resolve(),
                     gene_ensembl=(repdir / "gene_ensembl.tsv").resolve(),
                     tree_nwk=(repdir / "tree.nwk").resolve(),
                     traits=(repdir / "my_traits.tsv").resolve(),
