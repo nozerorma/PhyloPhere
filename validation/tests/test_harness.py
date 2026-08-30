@@ -102,6 +102,74 @@ def test_null_calibration_flags_uniform_vs_skewed() -> None:
     assert bad.verdict("0.05") != "OK"
 
 
+def _fake_run(root: Path, *, planted: bool) -> Path:
+    """A minimal Tier 0 replicate tree the adapter can read."""
+    rep = root / ("power_x" if planted else "null_x") / "rep000"
+    res = rep / "out" / "scoring"
+    perm = rep / "out" / "caas_permulation"
+    ct = rep / "out" / "data_exploration" / "2.CT" / "1.Traitfiles"
+    for d in (res, perm, ct):
+        d.mkdir(parents=True, exist_ok=True)
+
+    genes = {}
+    for i in range(1, 6):
+        g = f"g{i:04d}"
+        is_p = planted and i <= 2
+        genes[g] = {
+            "planted": is_p,
+            "planted_sites": ({"3": "identical_aa", "7": "profile_shift"} if is_p else {}),
+            "n_planted": 2 if is_p else 0,
+        }
+    (rep / "truth.json").write_text(json.dumps({
+        "planted": planted, "archetype": "echo", "genes": genes,
+        "phenotype": {"foreground_tips": ["spA", "spB", "spC"]},
+    }))
+
+    gh = "Gene\tn_positions\tgene_caas_score\n"
+    grows = ("g0001\t2\t0.9\ng0002\t2\t0.7\n" if planted else "")
+    grows += "g0003\t2\t0.10\ng0004\t2\t0.05\ng0005\t2\t0.02\n"
+    (res / "gene_scores.tsv").write_text(gh + grows)
+
+    ph = "Gene\tPosition\tpvalue\tpvalue_boot\tCAAS_score\n"
+    prows = ("g0001\t3\t0.001\t0.01\t0.8\ng0002\t3\t0.002\t0.02\t0.7\n" if planted else "")
+    prows += "g0003\t44\t0.2\t0.6\t0.1\n"
+    (res / "position_scores.tsv").write_text(ph + prows)
+
+    perm_h = "Gene\tPosition\tcaap_group\tn_detected\tn_cycles\tnull_pvalue_boot\n"
+    perm_rows = "".join(
+        f"g000{3 + j}\t{10 + j}\tUS\t1\t50\t{v}\n"
+        for j, v in enumerate([0.3, 0.6])
+    )
+    (perm / "perm_pos_pval.tsv").write_text(perm_h + perm_rows)
+
+    (ct / "traitfile.tab").write_text("spA\t1\t1\nspX\t0\t1\nspB\t1\t2\nspY\t0\t2\n")
+    return root
+
+
+def test_tier0_adapter_score(tmp_path: Path) -> None:
+    from validation.harness import tier0_adapter as t0
+
+    _fake_run(tmp_path, planted=True)
+    res = t0.score(tmp_path)
+    assert res.n_power_replicates == 1
+    rs = res.per_replicate[0]
+    assert rs.gene_planted_ranks == {"g0001": 1, "g0002": 2}
+    assert rs.gene_precision_at_k == 1.0
+    assert rs.site_recall_by_mechanism["identical_aa"] == 1.0
+    assert rs.site_recall_by_mechanism["profile_shift"] == 0.0
+    assert rs.contrast_pairs_recovered == 2
+    assert rs.contrast_fg_precision == 1.0
+
+
+def test_tier0_adapter_calibrate(tmp_path: Path) -> None:
+    from validation.harness import tier0_adapter as t0
+
+    _fake_run(tmp_path, planted=False)
+    res = t0.calibrate(tmp_path, "perm_pos_boot")
+    assert res.n_pvalues == 2
+    assert res.report.n == 2
+
+
 def test_map_site_to_alignment() -> None:
     # ref row: 2 leading gaps, residue 1 at col 3, gap, residue 2 at col 5
     assert truthset.map_site_to_alignment(1, "--M-K-R") == 3

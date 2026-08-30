@@ -83,6 +83,28 @@ rate. End-to-end recall = product of the two, recoverable but not the headline.
 Rationale in PIPELINE_MODEL.md §6.4 / §7.2 — the gap is expected to be small
 because planting is on clade stems and origins are non-nested.
 
+*Implemented* (`validation/harness/tier0_adapter.py`, `harness.cli score`): per
+power replicate it emits gene recovery (`score_metrics` on `gene_caas_score`:
+ROC/PR-AUC, precision@k, planted ranks), planted-**site** detection
+precision/recall split by mechanism (SCORING only lists *detected* positions, so
+no full ROC there), and contrast recovery = Jaccard(operative fg from
+`traitfile.tab` `label==1`, `truth.phenotype.foreground_tips`) + fraction of
+pair ids whose fg member is a true origin. RER/FADE arms deferred with those
+modules. Smoke run: gene precision@k 1.0, ranks 1-4 exact; site recall
+`identical_aa` 1.0 / `profile_shift` 0.0 (CAAS is by construction the
+identical-residue detector); contrast Jaccard 0.8 (one origin's sister tip
+picked instead of the origin tip).
+
+### D-T0-M — ad-hoc: null-calibration p-value source is selectable (`--pcol`)
+`harness.cli calibrate --pcol` chooses among `meta_caas_boot` (default,
+`US_meta_caas.tsv:pvalue_boot`), `meta_caas_hyp`, `perm_pos_boot`
+(`perm_pos_pval.tsv:null_pvalue_boot`), `position_boot`, `position_hyp`. It
+pools the column across every null context (whole null-set replicates + the
+unplanted genes of power replicates) and runs `null_calibration` (KS uniformity
++ type-I at nominal alpha). The gate is `meta_caas_boot`; the others are
+diagnostic. `perm_pos_boot` on the smoke run is degenerate-discrete (`n_cycles`
+50, many exact-zero) — needs a real null-set run to read.
+
 ### D-T0-B — MIGUEL: `perm_strategy = BM` only
 BM is the shipped default and matches RER's own BM-only null (`getPermsContinuous`),
 so the two modules' nulls stay comparable. lambda/FGBG not run.

@@ -4,8 +4,9 @@
 error, and does it rank the planted convergent signal to the top?
 
 **Gate (see `docs/DESIGN.md`):**
-- null CAAS `p.perm` / `pvalue_boot` and the FCS `p.perm` pass KS uniformity
-  (p > 0.05); observed type-I error within Monte Carlo error of nominal α
+- null CAAS `pvalue_boot` (`harness.cli calibrate --pcol meta_caas_boot`) passes
+  KS uniformity (p > 0.05); observed type-I error within Monte Carlo error of
+  nominal α. `perm_pos_boot` / `position_boot` are diagnostic secondaries.
 - power: planted genes/positions in the top decile of the SCORING ranking
 - contrast-selection recovers the planted origins (D-T0-A metric)
 - zero crashes on the star / ladder pathological trees
@@ -107,8 +108,8 @@ locally. `perm_pool_size` / `caas_full_perms` scale the null.
 | `build_project.py` — Tier 0 `ProjectConfig` → `gui.generation.render` | **done** |
 | `run_replicates.py` — stage + `--run` | **done** |
 | **end-to-end pipeline run** | **GREEN** (2026-08-30). `echo_power`, full primate tree, 15 genes, `asr_mode=compute`. 28 processes, 4.5 min, exit 0. `gene_scores.tsv` = exactly the planted genes ranked by `gene_caas_score`; top `position_scores` all planted sites. Permulation null covers every gene with per-cycle CAAS. |
-| `harness/cli.py score` / `calibrate` — pipeline-output adapter | **in progress** |
-| contrast-selection recovery metric (D-T0-A) | **TODO** |
+| `harness/cli.py score` / `calibrate` — pipeline-output adapter (`harness/tier0_adapter.py`) | **done**, 2 tests |
+| contrast-selection recovery metric (D-T0-A) | **done** (in `score`: fg Jaccard + pair recovery) |
 | full `echo`/`bodysize` × `null`/`power` matrix + scale | **TODO** |
 
 ## Run
