@@ -48,7 +48,8 @@ def _load_tree(spec: dict, rng: np.random.Generator) -> T.PhyloTree:
     path = _REPO / spec["path"]
     if not path.exists():
         raise FileNotFoundError(f"{path} — fetch Tier 0 trees (validation/fixtures/tier0/README.md)")
-    tree = T.prune_depth_preserving(path, spec["k"], rng)
+    k = spec.get("k")
+    tree = T.load_tree(path) if not k else T.prune_depth_preserving(path, k, rng)
     if spec.get("scale", 1.0) != 1.0:
         tree = T.scale_branches(tree, spec["scale"])
     return tree

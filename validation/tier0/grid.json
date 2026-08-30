@@ -1,9 +1,9 @@
 {
-  "_comment": "Tier 0 tree fixtures. Trees fetched separately (validation/fixtures/tier0/README.md). primate = the regime we run; primate_x5 = branch-length-scaled for a non-degenerate power curve (synthetic, label it so); mammal = the deep-tree null stress case; star/ladder = ASR path-score pathological fixtures. Used by run_replicates.py --trees <key,key>.",
+  "_comment": "Tier 0 tree fixtures. Trees fetched separately (validation/fixtures/tier0/README.md). primate = the FULL 237-tip primate tree (233 primates + 4 outgroups), exactly what production runs on — no prune (disambiguation on 233 species is ~minutes at Tier 0 gene counts; a 50-tip prune left contrast selection unable to form >= min_contrasts independent pairs). Omit `k` = use the full tree. `k` present = farthest-point prune to k tips. primate_x5 = branch lengths x5 for a non-degenerate power curve (synthetic). mammal = deep-tree null stress. star/ladder = ASR path-score pathological fixtures.",
   "trees": {
-    "primate":    {"path": "validation/fixtures/tier0/trees/primates_233_subst.tree", "k": 50, "scale": 1.0},
-    "primate_x5": {"path": "validation/fixtures/tier0/trees/primates_233_subst.tree", "k": 50, "scale": 5.0},
-    "mammal":     {"path": "validation/fixtures/tier0/trees/speciesTree_speciesname_pruned.nh", "k": 50, "scale": 1.0},
+    "primate":    {"path": "validation/fixtures/tier0/trees/primates_233_subst.tree", "scale": 1.0},
+    "primate_x5": {"path": "validation/fixtures/tier0/trees/primates_233_subst.tree", "scale": 5.0},
+    "mammal":     {"path": "validation/fixtures/tier0/trees/speciesTree_speciesname_pruned.nh", "k": 60, "scale": 1.0},
     "star":       {"builtin": "star",   "k": 12, "branch_length": 0.30},
     "ladder":     {"builtin": "ladder", "k": 16, "branch_length": 0.15}
   }

@@ -190,9 +190,25 @@ def _clade_separation(tree: PhyloTree, a: int, b: int,
     return depths[a] + depths[b] - 2 * depths[y]
 
 
+def _outgroup_tips(tree: PhyloTree, factor: float = 5.0) -> set[str]:
+    """Tips whose terminal branch is a gross outlier (> factor x the 95th
+    percentile of terminal branch lengths) — the deep outgroups. Foreground on
+    these distorts contrast selection (an outgroup pairs trivially with anything)
+    and is biologically odd. On the primate tree this is exactly Mus /
+    Oryctolagus / Tupaia / Galeopterus."""
+    bl = {c: b for _, c, b in tree.edges}
+    leaves = tree._leaves()
+    term = np.array([bl.get(l, 0.0) for l in leaves])
+    if term.size == 0:
+        return set()
+    thr = factor * float(np.quantile(term, 0.95))
+    return {tree.labels[l] for l in leaves if bl.get(l, 0.0) > thr}
+
+
 def sample_foreground(tree: PhyloTree, n_transitions: int, rng: np.random.Generator,
                       *, min_clade: int = 1, max_clade: int = 3,
-                      max_fg_fraction: float = 0.5) -> Foreground:
+                      max_fg_fraction: float = 0.5,
+                      exclude_tips: set[str] | None = None) -> Foreground:
     """Pick ``n_transitions`` disjoint, **phylogenetically well-separated** subtrees
     as independent origins of the foreground.
 
@@ -210,12 +226,13 @@ def sample_foreground(tree: PhyloTree, n_transitions: int, rng: np.random.Genera
     depths = _node_depths(tree)
     child_of = {c for _, c, _ in tree.edges}
 
+    banned = set(exclude_tips or ()) | _outgroup_tips(tree)
     cand = []
     for node in range(tree.n_nodes):
         if node == tree.root and tree.root not in child_of:
             continue
         dt = tree.descendant_tips(node)
-        if min_clade <= len(dt) <= max_clade:
+        if min_clade <= len(dt) <= max_clade and not (dt & banned):
             cand.append(node)
     rng.shuffle(cand)  # tie-break / seed randomness
 
