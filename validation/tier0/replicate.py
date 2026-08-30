@@ -33,26 +33,23 @@ from .trees import PhyloTree
 
 @dataclass
 class ReplicateConfig:
-    archetype: str = "bodysize"          # "echo" | "bodysize"
-    n_genes: int = 60
-    frac_planted_genes: float = 0.25
+    archetype: str = "binary"            # "binary" (0/1 code) | "rate" (c/n + counts)
+    n_pairs: int = 4                     # foreground/background contrast pairs
+    n_genes: int = 150
+    frac_planted_genes: float = 0.2
     traitname: str = "sim_trait"
     # per-gene sequence model (SimConfig knobs)
     n_sites: int = 400
-    concentration: float = 4.0
+    concentration: float = 2.0           # lower = more profile heterogeneity (realistic)
     gamma_alpha: float = 0.7
     matrix: str = "wag"
     # planted-gene signal — two mechanisms, scored separately (D-T0-02):
     #   identical_aa  : same residue across fg lineages  -> US + all GS
     #   grouped_caap  : same GS class, residue free      -> GS only, US should not
-    # profile_shift stays stripped (neither a US nor a clean CAAP positive).
     n_planted_identical_aa: int = 12
     n_planted_grouped_caap: int = 12
     grouped_caap_scheme: str = "GS1"
     identical_aa_target_weight: float = 0.95
-    # phenotype
-    n_transitions: int = 4               # echo: number of independent origins
-    bodysize_quantile: float = 0.15      # bodysize: fg = top q of the BM draw
     planted: bool = True                 # False -> null replicate (no planted signal)
 
 
@@ -87,17 +84,14 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     (outdir / "align").mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
 
-    # ── phenotype ───────────────────────────────────────────────────────────
-    if not rcfg.planted:
-        ph = _pheno.make_null(tree, rng, rcfg.archetype,
-                              n_transitions=rcfg.n_transitions,
-                              quantile=rcfg.bodysize_quantile)
-    elif rcfg.archetype == "echo":
-        ph = _pheno.make_echo(tree, rcfg.n_transitions, rng)
-    elif rcfg.archetype == "bodysize":
-        ph = _pheno.make_bodysize(tree, rng, quantile=rcfg.bodysize_quantile)
-    else:
+    # ── phenotype: n_pairs fg/bg contrast pairs (planted=False -> null) ─────
+    if rcfg.archetype not in ("binary", "rate"):
         raise ValueError(f"unknown archetype {rcfg.archetype!r}")
+    ph = _pheno.make_paired_foreground(
+        tree, rcfg.n_pairs, rng,
+        kind=("binary" if rcfg.archetype == "binary" else "rate"),
+        planted=rcfg.planted,
+    )
 
     fg = ph.as_foreground()
 
@@ -151,27 +145,35 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     (outdir / "ali_sp_names.txt").write_text("\n".join(sorted(tree.tips)) + "\n")
     (outdir / "gene_ensembl.tsv").write_text("\n".join(ensembl_rows) + "\n")
 
-    sp_sorted = sorted(ph.values)
+    all_sp = sorted(tree.tips)
     # `family` — the reporting / CI Rmds need a `taxon_of_interest` column; the
     # taxid map needs a `family` column too. Synthetic: 5 fake families.
-    fam_of = {sp: f"simfam{i % 5 + 1}" for i, sp in enumerate(sp_sorted)}
+    fam_of = {sp: f"simfam{i % 5 + 1}" for i, sp in enumerate(all_sp)}
 
     # taxid mapping — disambiguation renames tips to numeric ids before writing
     # the PAML alignment (reconstruct.py::_write_phylip uses a single-space name
     # delimiter that breaks on species names containing letters like 'O';
     # production always supplies --tax_id so this path is what real runs use).
     tax_rows = ["tax_id\tspecies\tfamily\trank\tname_class"]
-    for i, sp in enumerate(sp_sorted):
+    for i, sp in enumerate(all_sp):
         tax_rows.append(f"{9_000_001 + i}\t{sp}\t{fam_of[sp]}\tspecies\tscientific name")
     (outdir / "taxid.tsv").write_text("\n".join(tax_rows) + "\n")
 
+    # my_traits.tsv — binary: every tip a 0/1 code. rate: only species with data,
+    # plus n_pop / n_cases count columns (CLASS 1 Jeffreys-CI path).
+    data_sp = sorted(ph.values)
     with (outdir / "my_traits.tsv").open("w") as fh:
-        fh.write(f"species\t{rcfg.traitname}\tfamily\n")
-        for sp in sp_sorted:
-            fh.write(f"{sp}\t{ph.values[sp]:.6g}\t{fam_of[sp]}\n")
+        if rcfg.archetype == "rate":
+            fh.write(f"species\t{rcfg.traitname}\tn_pop\tn_cases\tfamily\n")
+            for sp in data_sp:
+                fh.write(f"{sp}\t{ph.values[sp]:.6g}\t{ph.n_pop[sp]}\t{ph.n_cases[sp]}\t{fam_of[sp]}\n")
+        else:
+            fh.write(f"species\t{rcfg.traitname}\tfamily\n")
+            for sp in all_sp:
+                fh.write(f"{sp}\t{int(ph.values[sp])}\t{fam_of[sp]}\n")
     fg_set = set(ph.foreground_tips)
     with (outdir / "phenotype.tsv").open("w") as fh:
-        for sp in sorted(ph.values):
+        for sp in data_sp:
             fh.write(f"{sp}\t{1 if sp in fg_set else 0}\n")
 
     # ── truth ───────────────────────────────────────────────────────────────
@@ -184,6 +186,7 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
         "phenotype": {
             "values": {k: round(v, 6) for k, v in ph.values.items()},
             "foreground_tips": ph.foreground_tips,
+            "pairs": [list(pr) for pr in ph.pairs],
             "n_origins": ph.n_transitions,
             "top_quantile": ph.top_quantile,
             "bottom_quantile": ph.bottom_quantile,

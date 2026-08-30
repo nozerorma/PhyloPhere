@@ -102,13 +102,13 @@ def test_null_calibration_flags_uniform_vs_skewed() -> None:
     assert bad.verdict("0.05") != "OK"
 
 
-def _fake_run(root: Path, *, planted: bool) -> Path:
-    """A minimal Tier 0 replicate tree the adapter can read."""
-    rep = root / ("power_x" if planted else "null_x") / "rep000"
-    res = rep / "out" / "scoring"
-    perm = rep / "out" / "caas_permulation"
-    ct = rep / "out" / "data_exploration" / "2.CT" / "1.Traitfiles"
-    for d in (res, perm, ct):
+def _fake_rep(root: Path, subset: str, *, planted: bool) -> None:
+    """One Tier 0 replicate tree the adapter can read."""
+    rep = root / subset / "rep000"
+    res = rep / "out" / "sim_trait_complete" / "scoring"
+    lists = res / "gene_lists"
+    ct = rep / "out" / "sim_trait_complete" / "data_exploration" / "2.CT" / "1.Traitfiles"
+    for d in (lists, ct):
         d.mkdir(parents=True, exist_ok=True)
 
     genes = {}
@@ -121,61 +121,55 @@ def _fake_run(root: Path, *, planted: bool) -> Path:
             "n_planted": 2 if is_p else 0,
         }
     (rep / "truth.json").write_text(json.dumps({
-        "planted": planted, "archetype": "echo", "genes": genes,
-        "phenotype": {"foreground_tips": ["spA", "spB", "spC"]},
+        "planted": planted, "archetype": "binary", "genes": genes,
+        "phenotype": {"foreground_tips": ["spA", "spB"],
+                      "pairs": [["spA", "spX"], ["spB", "spY"]]},
     }))
 
     gh = "Gene\tn_positions\tgene_caas_score\n"
-    grows = ("g0001\t2\t0.9\ng0002\t2\t0.7\n" if planted else "")
-    grows += "g0003\t2\t0.10\ng0004\t2\t0.05\ng0005\t2\t0.02\n"
+    if planted:  # planted genes score high, background genes low
+        grows = "g0001\t2\t0.95\ng0002\t2\t0.88\ng0003\t2\t0.12\ng0004\t2\t0.05\ng0005\t2\t0.03\n"
+    else:        # null: nothing scores high
+        grows = "g0001\t2\t0.20\ng0002\t2\t0.15\ng0003\t2\t0.10\ng0004\t2\t0.06\ng0005\t2\t0.02\n"
     (res / "gene_scores.tsv").write_text(gh + grows)
 
     ph = "Gene\tPosition\tpvalue\tpvalue_boot\tscheme_set\tCAAS_score\n"
     prows = (
-        "g0001\t3\t0.001\t0.01\tGS1+GS2+US\t0.8\n"   # identical_aa -> US fires
-        "g0001\t7\t0.003\t0.03\tGS1+GS3\t0.6\n"       # grouped_caap -> GS only
+        "g0001\t3\t0.001\t0.01\tGS1+GS2+US\t0.8\n"
+        "g0001\t7\t0.003\t0.03\tGS1+GS3\t0.6\n"
         "g0002\t3\t0.002\t0.02\tGS1+US\t0.7\n"
-        if planted else ""
+        if planted else "g0003\t44\t0.2\t0.6\tGS1\t0.1\n"
     )
-    prows += "g0003\t44\t0.2\t0.6\tGS1\t0.1\n"
     (res / "position_scores.tsv").write_text(ph + prows)
 
-    perm_h = "Gene\tPosition\tcaap_group\tn_detected\tn_cycles\tnull_pvalue_boot\n"
-    perm_rows = "".join(
-        f"g000{3 + j}\t{10 + j}\tUS\t1\t50\t{v}\n"
-        for j, v in enumerate([0.3, 0.6])
-    )
-    (perm / "perm_pos_pval.tsv").write_text(perm_h + perm_rows)
-
+    (lists / "slice_global1.tsv").write_text("Gene\tscore\ng0001\t1.0\n")
+    (lists / "slice_global5.tsv").write_text("Gene\tscore\ng0001\t1.0\ng0002\t0.9\n")
     (ct / "traitfile.tab").write_text("spA\t1\t1\nspX\t0\t1\nspB\t1\t2\nspY\t0\t2\n")
-    return root
 
 
 def test_tier0_adapter_score(tmp_path: Path) -> None:
     from validation.harness import tier0_adapter as t0
 
-    _fake_run(tmp_path, planted=True)
+    _fake_rep(tmp_path, "binary_power_primate", planted=True)
+    _fake_rep(tmp_path, "binary_null_primate", planted=False)
     res = t0.score(tmp_path)
+
     assert res.n_power_replicates == 1
     rs = res.per_replicate[0]
     assert rs.gene_planted_ranks == {"g0001": 1, "g0002": 2}
     assert rs.gene_precision_at_k == 1.0
-    assert rs.site_recall_by_mechanism["identical_aa"] == 1.0   # g0001:3, g0002:3
-    assert rs.site_recall_by_mechanism["grouped_caap"] == 0.5   # g0001:7 only
+    assert rs.planted_in_slice_global5 == 1.0        # both planted genes in the top-5% slice
+    assert rs.planted_in_slice_global1 == 0.5        # only g0001 in the top-1%
     assert rs.identical_aa_us_recall == 1.0
     assert rs.grouped_caap_gs_recall == 0.5
-    assert rs.grouped_caap_us_leakage == 0.0                    # g0001:7 was GS-only
-    assert rs.contrast_pairs_recovered == 2
-    assert rs.contrast_fg_precision == 1.0
+    assert rs.grouped_caap_us_leakage == 0.0
+    assert rs.contrast_pairs_recovered == 2 and rs.contrast_fg_precision == 1.0
 
-
-def test_tier0_adapter_calibrate(tmp_path: Path) -> None:
-    from validation.harness import tier0_adapter as t0
-
-    _fake_run(tmp_path, planted=False)
-    res = t0.calibrate(tmp_path, "perm_pos_boot")
-    assert res.n_pvalues == 2
-    assert res.report.n == 2
+    assert len(res.separation) == 1
+    sep = res.separation[0]
+    assert sep.auc_planted_vs_null == 1.0            # planted 0.88/0.95 >> null max 0.20
+    assert sep.separated is True
+    assert res.verdict == "PASS"
 
 
 def test_map_site_to_alignment() -> None:

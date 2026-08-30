@@ -8,6 +8,39 @@ chosen by Miguel.
 
 ## Tier 0
 
+### D-T0-P — FINAL design (2026-08-30, supersedes D-T0-A / D-T0-C / D-T0-M / D-T0-H)
+After inspecting the real cancer run and the permulation code, the Tier 0 design
+was rebuilt:
+
+- **The pipeline is a prioritisation engine.** Its permulation p-values
+  (`pvalue_boot`, `null_pvalue_boot`) are conditional foreground-specificity
+  scores — 0% exact zero on the real run, but ~78% ≤ 0.05 because discovery
+  pre-selects positions that align with the foreground. They are *never*
+  Uniform(0,1), on a real trait or a null. `phen_score = 1 - percent_rank(...)`
+  is a well-behaved uniform *ranking* input (verified against the real
+  `position_scores.tsv` to machine precision). The FCS `p.perm` (Wilcoxon-AUC vs
+  the 1000 Dunn-resample columns) *is* empirically uniform — the one calibrated
+  null in the system. See [[project_tier0_scoping_reframe]].
+- **Drop the KS `calibrate` command.** No "null permulation p ~ U(0,1)" test.
+- **Foreground = `n_pairs` (default 4) explicit contrast pairs.** Real run =
+  3 pairs from `traitfile.tab`, NOT 10v10 (`top_species.txt`/`bottom_species.txt`
+  are FADE's percentilised proxy). `pheno.make_paired_foreground`: farthest-point
+  anchor tips + nearest bg neighbour each; planted signal on the anchor terminal
+  edges; contrast selection recovers those pairs.
+- **Two archetypes** (D-T0-04 kept, reshaped): `binary` (0/1 code,
+  `--trait_type ordinal`, CLASS 2) and `rate` (`c/n` + `n_pop`/`n_cases` count
+  columns, CLASS 1 Jeffreys-CI). `echo`/`bodysize` (BM-threshold, clade-sample)
+  are gone. `binary` needs the binary-trait contrast-selection fix (landed on
+  `main` `1fbdfbf`).
+- **Scoring** (`harness score`): (1) prioritisation — planted in
+  `slice_global1`/`slice_global5`; (2) **null-vs-power separation** — AUC of
+  planted-gene `gene_caas_score` (power) vs every gene's score (matched null),
+  `separated` = AUC ≥ 0.9 AND planted p50 > null p95; (3) site recall by
+  mechanism × scheme (`identical_aa→US`, `grouped_caap→GS`, US leakage);
+  (4) contrast recovery (`traitfile.tab` fg vs planted pairs).
+- Scale: ~150 genes, ~400 sites, `concentration ≈ 2`, production permulation
+  settings, 15 reps/cell. Gate = `primate` × {binary, rate} × {null, power}.
+
 ### D-T0-06 — pipeline studied before further integration design  (2026-08-30)
 After D-T0-05 it became clear the integration was being designed on a wrong model
 of contrast selection / the permulation null. Stopped, read the CAAS / contrast /

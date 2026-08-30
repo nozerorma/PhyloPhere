@@ -209,43 +209,42 @@ def test_null_is_stationary() -> None:
     assert np.mean(null) - 2 * np.std(null) - 1 <= obs <= np.mean(null) + 2 * np.std(null) + 1
 
 
-def test_pheno_echo_exact_binary_and_cuts() -> None:
+def test_pheno_binary_paired_foreground() -> None:
     lad = trees.ladder_tree(40, branch_length=0.2)
-    rng = np.random.default_rng(0)
-    ph = _pheno.make_echo(lad, n_transitions=4, rng=rng)
-    vals = np.array(list(ph.values.values()))
+    ph = _pheno.make_paired_foreground(lad, 4, np.random.default_rng(0),
+                                       kind="binary", planted=True)
     fg = set(ph.foreground_tips)
     assert ph.kind == "binary"
-    assert set(vals.tolist()) == {0.0, 1.0}                       # exact 0/1
-    assert all(ph.values[t] == 1.0 for t in fg)
-    assert all(ph.values[t] == 0.0 for t in ph.values if t not in fg)
-    # quantile cuts: top threshold lands on the 1s, bottom on the 0s
-    assert np.quantile(vals, ph.top_quantile) == 1.0
-    assert np.quantile(vals, ph.bottom_quantile) == 0.0
-    assert ph.n_transitions >= 3
-    assert len(ph.fg_edges) >= ph.n_transitions
+    assert len(ph.pairs) == 4 and len(fg) == 4
+    assert set(ph.values.values()) == {0.0, 1.0}                  # exact 0/1
+    assert all(ph.values[a] == 1.0 for a, _ in ph.pairs)
+    assert all(ph.values[b] == 0.0 for _, b in ph.pairs)
+    assert len(ph.values) == 40                                   # every tip coded
+    assert len(ph.fg_edges) == 4                                  # one terminal edge per anchor
+    # anchors are mutually distinct from their partners
+    assert not (set(a for a, _ in ph.pairs) & set(b for _, b in ph.pairs))
 
 
-def test_pheno_bodysize_emergent_foreground() -> None:
-    lad = trees.ladder_tree(50, branch_length=0.1)
-    rng = np.random.default_rng(1)
-    ph = _pheno.make_bodysize(lad, rng, quantile=0.2)
+def test_pheno_rate_paired_foreground() -> None:
+    lad = trees.ladder_tree(60, branch_length=0.1)
+    ph = _pheno.make_paired_foreground(lad, 3, np.random.default_rng(1),
+                                       kind="rate", planted=True)
     assert ph.kind == "continuous"
-    k = len(ph.foreground_tips)
-    assert 8 <= k <= 12  # ~20% of 50
-    # foreground tips really are the top of the BM draw
-    fg_vals = [ph.values[t] for t in ph.foreground_tips]
-    bg_vals = [ph.values[t] for t in ph.values if t not in set(ph.foreground_tips)]
-    assert min(fg_vals) >= max(bg_vals)
+    assert len(ph.pairs) == 3
+    assert ph.n_pop is not None and ph.n_cases is not None
+    for a, b in ph.pairs:
+        assert ph.values[a] > ph.values[b] + 0.1                  # anchor clearly above partner
+        assert ph.n_pop[a] >= 100 and ph.n_pop[b] >= 100          # tight CI on the pair
+    assert len(ph.values) < 60                                    # only a data subset
 
 
 def test_pheno_null_has_no_edges() -> None:
     lad = trees.ladder_tree(30)
-    for arch in ("echo", "bodysize"):
-        ph = _pheno.make_null(lad, np.random.default_rng(2), arch)
+    for kind in ("binary", "rate"):
+        ph = _pheno.make_paired_foreground(lad, 3, np.random.default_rng(2),
+                                           kind=kind, planted=False)
         assert ph.fg_edges == set()
-        assert ph.notes.get("null") is True
-        assert len(ph.values) == 30  # trait still drawn
+        assert len(ph.pairs) == 3                                 # trait + pairs still built
 
 
 def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
@@ -254,8 +253,8 @@ def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
         tree = trees.prune_depth_preserving(src, 40, np.random.default_rng(0))
     else:
         tree = trees.ladder_tree(40, branch_length=0.2)
-    rcfg = ReplicateConfig(archetype="echo", n_genes=6, frac_planted_genes=0.34,
-                           n_sites=50, n_transitions=4, planted=True)
+    rcfg = ReplicateConfig(archetype="binary", n_pairs=4, n_genes=6,
+                           frac_planted_genes=0.34, n_sites=50, planted=True)
     row = build_replicate(tree, rcfg, seed=99, outdir=tmp_path / "rep")
     d = tmp_path / "rep"
     assert (d / "my_traits.tsv").read_text().splitlines()[0] == "species\tsim_trait\tfamily"
@@ -265,11 +264,17 @@ def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
     import json
     t = json.loads((d / "truth.json").read_text())
     assert t["n_planted_genes"] == 2
+    assert len(t["phenotype"]["pairs"]) == 4
     planted = [g for g, v in t["genes"].items() if v["planted"]]
     assert len(planted) == 2
     assert all(t["genes"][g]["n_planted"] > 0 for g in planted)
     assert all(t["genes"][g]["n_planted"] == 0 for g in t["genes"] if g not in planted)
-    assert 0.0 < row["top_quantile"] < 1.0
+
+    # rate archetype: my_traits carries count columns
+    rcfg2 = ReplicateConfig(archetype="rate", n_pairs=3, n_genes=3, n_sites=40, planted=True)
+    build_replicate(tree, rcfg2, seed=7, outdir=tmp_path / "rep_rate")
+    hdr = (tmp_path / "rep_rate" / "my_traits.tsv").read_text().splitlines()[0]
+    assert hdr == "species\tsim_trait\tn_pop\tn_cases\tfamily"
 
 
 def test_write_roundtrip(tmp_path: Path) -> None:
