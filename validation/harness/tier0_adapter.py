@@ -245,6 +245,8 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
     planted = rp.planted_genes
     if not planted:
         return None
+    if rp.results_dir is None:            # replicate crashed / never produced SCORING
+        return None
     gs = rp.gene_scores()
     gene_report = None
     prec_k = math.nan
