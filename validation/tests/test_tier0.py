@@ -233,7 +233,9 @@ def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
                            n_sites=50, n_transitions=4, planted=True)
     row = build_replicate(tree, rcfg, seed=99, outdir=tmp_path / "rep")
     d = tmp_path / "rep"
-    assert (d / "my_traits.tsv").read_text().splitlines()[0] == "species\tsim_trait"
+    assert (d / "my_traits.tsv").read_text().splitlines()[0] == "species\tsim_trait\tfamily"
+    assert (d / "ali_sp_names.txt").exists()
+    assert (d / "gene_ensembl.tsv").read_text().splitlines()[0].startswith("gene\tchr\t")
     assert len(list((d / "align").glob("gene_*.fasta"))) == 6
     import json
     t = json.loads((d / "truth.json").read_text())
