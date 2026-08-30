@@ -18,7 +18,11 @@ permulation / RER / FADE / disambiguation code + a real result, wrote
 Disambiguation (and bundled CT_POSTPROC + ASR robustness) is IN, to bring the
 `asr_path_score` into Tier 0 coverage (the star/ladder pathological trees).
 Needs `ct_disambig_asr_mode = "compute"` (no precomputed ASR for simulated data),
-`asr_model = "lg"`. Scoring / accumulation / enrichment / VEP stay OFF.
+`asr_model = "lg"`.
+**SUPERSEDED IN PART by Q-T0-D**: originally said "Scoring / accumulation /
+enrichment / VEP stay OFF", but PIPELINE_MODEL.md §6 shows SCORING is what
+produces the gene/position rankings — without it Tier 0 has nothing to score
+power against. VEP stays off. Accumulation / enrichment / scoring: see Q-T0-D.
 
 ### D-T0-04 — MIGUEL: two phenotype archetypes, both through contrast selection
 - `echo`-like: binary 1/0, contrast selection extracts one pair per non-nested `1`.
@@ -65,3 +69,10 @@ farthest-point = the regime actually run + `primate_x5` (branch lengths ×5,
   Feed raw 0/1 (RER auto-detects binary; contrast selection discretises trivially;
   FADE quantile-extremes on a 0/1 vector is degenerate) vs feed a bimodal
   near-0/near-1 continuous vector. Affects FADE's foreground most.
+- **Q-T0-D — does SCORING (± accumulation, ± FCS/enrichment) run in Tier 0?**
+  PIPELINE_MODEL.md §6.4: the power metric needs `gene_scores.tsv` /
+  `position_scores.tsv` / `gene_lists/`, which only SCORING produces; the FCS
+  `p.perm` null also needs it. Proposal: SCORING **on** (+ CT_ACCUMULATION on,
+  since `accum_cct_p` is a gene axis and `accumulation_all_*` feeds scoring);
+  ENRICHMENT/STRING/DOMINO **off** for Tier 0 (pathway-level is Tier 2's job),
+  VEP **off**. Needs Miguel's call.

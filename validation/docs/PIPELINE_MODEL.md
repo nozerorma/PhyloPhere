@@ -173,7 +173,69 @@ FADE does **not** use contrast selection's pairs either.
 
 ---
 
-## 6. Implications for Tier 0 (to resolve WITH Miguel, not unilaterally)
+## 6. SCORING — where the rankings actually come from
+
+`scoring_compute.R` (`--scoring`, requires `--ct_postproc` output) integrates
+CT_POSTPROC + FADE + RER + CT_ACCUMULATION into the tables the pipeline's
+headline claims rest on. **Turning it off means Tier 0 has no gene/position
+ranking to score power against** — the raw module outputs are evidence columns,
+not a prioritisation.
+
+### 6.1 Position level (`position_scores.tsv`)
+
+Per (Gene, Position, scheme) row — schemes are `US, GS4, GS3, GS2, GS1` (the
+CAAP encodings), treated **symmetrically, no per-scheme weight**:
+
+```
+phen_score  = 1 - percent_rank(pvalue_boot)      # permutation confidence, 0..1
+asr_score   = asr_path_score                     # unified ASR/convergence/parallel signal
+caas_row    = phen_score * asr_score
+```
+
+Aggregate to (Gene, Position): `CAAS_score = mean(caas_row over detecting schemes)`
+(mean, not max — schemes are correlated readings of the same position; how *many*
+schemes fire is already evidence). `n_schemes` / `scheme_set` kept as descriptors.
+FADE site-level BF joined per position. The hypergeometric `pvalue` is used only
+as a **significance gate** (`gate_fdr` / `gate_pvalue`), never as a score input.
+
+### 6.2 Gene level (`gene_scores.tsv`) — separate axes, not one composite
+
+| axis | how |
+|------|-----|
+| `gene_caas_score` | **size-adjusted max** of `CAAS_score` over the gene's positions — `F(max)^n`, which removes the `Spearman(n_positions, raw max) ≈ +0.47` order-statistic bias (memory `gene_caas_score_size_adjusted`). Also `_top` / `_bottom` by `change_side`. |
+| `accum_cct_p` | Cauchy combination (CCT/ACAT) of the per-scheme accumulation empirical p-values; BH FDR over genes with ≥1 observed CAAS. |
+| `rer_min_pval`, `rer_rho`, `rer_acceleration` | from the RER summary (`p.perm` preferred), `rer_significant = p ≤ 0.05`. |
+| `fade_max_bf_top/bottom`, `fade_significant_*` | BF ≥ 100 per direction. |
+
+Joins are **`full_join`** (memory `bugfix_scoring_gene_scores_caas_truncation`):
+each module has its own, larger gene universe. `gene_scores.tsv` is sorted by
+`gene_caas_score` desc. Cross-module correlation is computed on `gene_caas_score`
+only; RER/FADE/accum enter as their native significance, not as score axes.
+
+### 6.3 Ranked outputs
+
+- `gene_lists/slice_*.tsv` — 12 slices (top/bottom/global × 25/10/5/1%), each
+  ranked on its own axis (`gene_caas_score`, `gene_caas_score_top/bottom`), used
+  by STRING/DOMINO.
+- `fcs_stats*.tsv` — per-module ranking files feeding FCS (`fastwilcoxGMT`
+  rank-shift AUC = Wilcoxon; plus a label-permuted score-accumulation NES null;
+  plus the `caas_perms.rds` genome-wide **permulation-corrected `p.perm`** for
+  the CAAS module, mirroring RER's pathway permulation).
+- `gate_fdr` / `gate_pvalue` — deterministic scheme-priority pick (US > GS4 > …)
+  for the significance gate (memory `bugfix_scoring_scheme_priority_tie`).
+
+### 6.4 Consequence for Tier 0
+
+The power question — "did the pipeline rank the planted genes / positions
+highly?" — is a question about `position_scores.tsv` / `gene_scores.tsv` /
+`gene_lists/`, i.e. it **needs SCORING to run**. The null question ("is `p.perm`
+uniform?") is answerable from the CAAS-permulation / RER outputs alone, but the
+*FCS* `p.perm` null also needs SCORING. So SCORING almost certainly belongs in
+the Tier 0 module set — see Q-T0-D.
+
+---
+
+## 7. Implications for Tier 0 (to resolve WITH Miguel, not unilaterally)
 
 1. **The planted foreground must be expressible as a continuous (or binary)
    `--my_traits` column**, because contrast selection / RER / FADE all start
