@@ -1,18 +1,15 @@
 """Stage (and optionally run) the Tier 0 gate replicate set.
 
     python -m validation.tier0.run_replicates --out validation/runs/tier0 \
-        --archetypes binary,rate --sets null,power \
-        --n-replicates 15 --n-genes 150 [--run --jobs 2]
+        --archetypes binary,rate,continuous --sets null,power --trees primate_half \
+        --lambdas 0,0.5,1 --n-replicates 10 --n-genes 120 [--run --jobs 2]
 
-The gate = one config: the full primate tree x {binary, rate} x {null, power}.
-Each replicate:
-  1. load the primate tree (grid.json)
-  2. replicate.build_replicate -> <repdir>/{align/, my_traits.tsv, tree.nwk,
-     taxid.tsv, gene_ensembl.tsv, phenotype.tsv, truth.json}
-  3. write <repdir>/run.sh: source tier0_env.sh, export the per-replicate paths,
-     call <repo>/run_phenotype_single.sh with the archetype's CLASS/args
-       binary -> CLASS 2, DISCRETE=parameterized, TRAIT_TYPE=ordinal
-       rate   -> CLASS 1, N_TRAIT=n_pop, C_TRAIT=n_cases (Jeffreys-CI path)
+Gate = primate_half (k=118) x {binary, rate, continuous} x {null, power} x
+lambda {0, 0.5, 1}. Per replicate: build_replicate -> support files + truth.json,
+then run.sh calls run_phenotype_single.sh with the archetype's CLASS/args
+  binary     -> CLASS 2, TRAIT_TYPE=ordinal   (discrete 0/1 top/bottom)
+  rate       -> CLASS 1, N_TRAIT/C_TRAIT      (Jeffreys-CI non-overlap)
+  continuous -> CLASS 2, TRAIT_TYPE=continuous, DISCRETE=quintile
 
 Default is stage-only (writes run.sh + run_all.sh + manifest.jsonl); --run executes.
 Score with `python -m validation.harness.cli score --run <out>`.
@@ -42,8 +39,9 @@ _GRID = Path(__file__).parent / "grid.json"
 # archetype -> positional args to run_phenotype_single.sh after the trait name:
 #   SECONDARY N_TRAIT C_TRAIT PRUNE PRUNE_SEC DISCRETE TRAIT_TYPE
 _ARCH_ARGS = {
-    "binary": ('2', '"" "" "" "" "" parameterized ordinal'),
-    "rate":   ('1', '"" n_pop n_cases "" "" "" ""'),
+    "binary":     ('2', '"" "" "" "" "" quintile ordinal'),     # discrete 0/1 -> top/bottom
+    "rate":       ('1', '"" n_pop n_cases "" "" "" ""'),         # Jeffreys CI non-overlap
+    "continuous": ('2', '"" "" "" "" "" quintile continuous'),   # quantile discretisation
 }
 
 
@@ -92,9 +90,9 @@ exec bash "{repo}/run_phenotype_single.sh" {cls} {trait} {arch_args}
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="validation.tier0.run_replicates")
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--archetypes", default="binary,rate")
+    ap.add_argument("--archetypes", default="binary,rate,continuous")
     ap.add_argument("--sets", default="null,power", help="null = no planted signal; power = planted")
-    ap.add_argument("--trees", default="primate", help="comma list of keys in grid.json trees")
+    ap.add_argument("--trees", default="primate_half", help="comma list of keys in grid.json trees")
     ap.add_argument("--lambdas", default="0,0.5,1", help="Pagel's lambda for the latent trait")
     ap.add_argument("--n-replicates", type=int, default=10)
     ap.add_argument("--n-genes", type=int, default=120)
@@ -129,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     i = 0
     for arch, setname, tkey, lam in itertools.product(archetypes, sets, tree_keys, lambdas):
         if arch not in _ARCH_ARGS:
-            raise SystemExit(f"unknown archetype {arch!r} (binary | rate)")
+            raise SystemExit(f"unknown archetype {arch!r} (binary | rate | continuous)")
         lamtag = f"lam{lam:g}".replace(".", "")
         subset = f"{arch}_{setname}_{tkey}_{lamtag}"
         for k in range(a.n_replicates):

@@ -24,8 +24,16 @@ Replaced with:
   are comparable across lambda — the latent is resampled until it supports >= 4.
   `notes['n_possible_pairs']` (how many it *could* support: ~20 at lambda 0, ~5
   at lambda 1) is REPORTED as the structure diagnostic.
-- **Observed trait** = latent + sampling noise: binary threshold + flipped bits;
-  rate `c ~ Binomial(n, rate(latent_pctile))`, n ~ U(25,70).
+- **Three archetypes**, one per contrast-selection candidate path, all on the
+  SAME latent (2026-08-31, MIGUEL — was two):
+  `binary` (threshold + flipped bits, `--trait_type ordinal`, discrete top/bottom),
+  `rate` (`c ~ Binomial(n, rate(latent_pctile))`, n ~ U(25,70), Jeffreys-CI path),
+  `continuous` (raw latent + Gaussian obs-noise, `--trait_type continuous`,
+  quintile discretisation). Every non-outgroup tip carries data in all three.
+- **Tree = `primate_half`** (`primates_233_subst.tree` farthest-point-pruned to
+  k=118, 2026-08-31, MIGUEL — was the full 237-tip tree). Half the tree gives all
+  three archetypes homogeneous species coverage, ~4x lighter, still forms >= 4
+  Dunn-independent tail pairs at every lambda (verified, 0 fails/10).
 - **Plant on the TRUE lineages, not the operative pairs.** Contrast recovery
   (operative `traitfile.tab` vs true pairs) is now an honest lambda-dependent
   measurement: anchor recall / partner recall / exact-pair / lineage Jaccard,

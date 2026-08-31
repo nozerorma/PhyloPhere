@@ -232,7 +232,9 @@ def test_pheno_lambda_foreground_rate_and_lambda_effect() -> None:
     assert ph.kind == "continuous" and ph.n_pop is not None
     for a, b in ph.pairs:
         assert ph.values[a] > ph.values[b]           # anchor above partner (with noise)
-    assert len(ph.values) < 120
+    # every non-outgroup tip carries data now (ladder has no outgroup)
+    assert len(ph.values) == 120
+    assert all(0.0 <= v <= 1.0 for v in ph.values.values())   # c/n rates
 
     # higher lambda -> the latent clumps -> fewer independent tail pairs on average
     def mean_pairs(lam):
@@ -242,9 +244,22 @@ def test_pheno_lambda_foreground_rate_and_lambda_effect() -> None:
     assert mean_pairs(0.0) >= mean_pairs(1.0)
 
 
+def test_pheno_lambda_foreground_continuous() -> None:
+    lad = trees.ladder_tree(100, branch_length=0.12)
+    ph = _pheno.make_lambda_foreground(lad, 5, np.random.default_rng(3),
+                                       kind="continuous", lam=1.0, planted=True)
+    assert ph.archetype == "continuous" and ph.kind == "continuous"
+    assert ph.n_pop is None and ph.n_cases is None
+    assert len(ph.values) == 100                       # all non-outgroup tips
+    # raw noisy latent -> not confined to [0, 1], real-valued spread
+    assert len({round(v, 4) for v in ph.values.values()}) > 50
+    for a, b in ph.pairs:
+        assert ph.values[a] > ph.values[b]
+
+
 def test_pheno_null_has_no_edges() -> None:
     lad = trees.ladder_tree(60)
-    for kind in ("binary", "rate"):
+    for kind in ("binary", "rate", "continuous"):
         ph = _pheno.make_lambda_foreground(lad, 4, np.random.default_rng(2),
                                            kind=kind, lam=0.5, planted=False)
         assert ph.anchor_edges == set() and ph.partner_edges == set()

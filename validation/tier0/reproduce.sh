@@ -17,7 +17,7 @@ JOBS="${JOBS:-2}"
 
 echo "=== stage + run: $OUT ($NREP reps/cell, $NGENES genes, lambda=$LAMBDAS, jobs=$JOBS) ==="
 python -m validation.tier0.run_replicates --out "$OUT" \
-    --archetypes binary,rate --sets null,power --trees primate \
+    --archetypes binary,rate,continuous --sets null,power --trees primate_half \
     --lambdas "$LAMBDAS" --n-replicates "$NREP" --n-genes "$NGENES" \
     --n-sites 350 --n-pairs 4 --run --jobs "$JOBS"
 

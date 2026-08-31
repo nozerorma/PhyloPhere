@@ -26,7 +26,7 @@ if str(_REPO) not in sys.path:
 
 from validation.harness import tier0_adapter as t0  # noqa: E402
 
-_AC = {"binary": "#3a6ea5", "rate": "#c9832b"}
+_AC = {"binary": "#3a6ea5", "rate": "#c9832b", "continuous": "#4c9a5a"}
 
 
 def _lams(reps):

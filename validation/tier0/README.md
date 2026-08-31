@@ -26,9 +26,13 @@ never Uniform(0,1) — no KS gate).
    How many it *could* support (`n_possible_pairs`, ~20 at lambda 0, ~5 at
    lambda 1) is **reported** as the structure-dependence diagnostic.
 3. **Observed trait** handed to the pipeline = latent + sampling noise:
+   Three archetypes, one per contrast-selection candidate path, all on the same latent:
    - `binary` — threshold the latent → 0/1 (`--trait_type ordinal`), a few bits flipped.
    - `rate` — `c ~ Binomial(n, rate(latent_percentile))`, `n ~ U(25, 70)` → CLASS 1
      (Jeffreys CI). This is the shape of the real cancer run.
+   - `continuous` — raw latent + Gaussian observation noise → CLASS 2 quintile
+     discretisation (`--trait_type continuous`).
+   Every non-outgroup tip carries data in all three.
 4. **Molecular convergence is planted on the TRUE foreground lineages** — not on
    whatever contrast selection outputs. Each planted gene is planted in one
    direction, `top` or `bottom` (the pipeline scores a convergent change in the
@@ -37,7 +41,8 @@ never Uniform(0,1) — no KS gate).
    pairs, which differ from the true foreground. That gap, **as a function of
    lambda**, is the non-circular measurement.
 
-Gate axes: `primate` tree × {binary, rate} × {null, power} × **lambda ∈ {0, 0.5, 1}**.
+Gate axes: `primate_half` tree (k=118, homogeneous coverage) × {binary, rate,
+continuous} × {null, power} × **lambda ∈ {0, 0.5, 1}**.
 ~120 genes, 350 sites, `concentration ≈ 2`, production permulation settings.
 Modules: `contrast_selection` + `CAAS` + `CT_DISAMBIGUATION` + `SCORING`.
 
@@ -89,13 +94,13 @@ validation/tier0/reproduce.sh          # -> validation/runs/tier0_gate/
 
 # step by step:
 python -m validation.tier0.run_replicates --out validation/runs/tier0_gate \
-    --archetypes binary,rate --sets null,power --trees primate \
+    --archetypes binary,rate,continuous --sets null,power --trees primate_half \
     --lambdas 0,0.5,1 --n-replicates 10 --n-genes 120 --run --jobs 2
 python -m validation.harness.cli score --run validation/runs/tier0_gate --json .../score.json
 python -m validation.tier0.plots       --run validation/runs/tier0_gate
 ```
 
-`3 lambda × 2 archetypes × 2 sets × 10 reps = 120 replicates`, ~10–20 min each,
+`3 lambda × 3 archetypes × 2 sets × 10 reps = 180 replicates`, ~10–20 min each,
 memory-bound (each is a full Nextflow run).
 
 ## Tests
@@ -110,7 +115,7 @@ Rscript subworkflows/TRAIT_ANALYSIS/local/src/ordinal_trait_test.R
 | piece | state |
 |-------|-------|
 | `model.py` / `trees.py` / `simulate.py` / `groups.py` / `pheno.py` (lambda) | done |
-| `replicate.py` (top/bottom direction) / `run_replicates.py` (lambda axis) | done |
+| `replicate.py` (top/bottom direction) / `run_replicates.py` (lambda axis, 3 archetypes, `primate_half`) | done |
 | `tier0_adapter.py` + `cli.py score` (per-cell, directional, score-level) | done |
 | `plots.py` (separation, recovery-vs-lambda, score-separation, site) | done |
 | binary-trait pipeline support | landed on `main` (`1fbdfbf`) |

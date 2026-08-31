@@ -33,7 +33,7 @@ from .trees import PhyloTree
 
 @dataclass
 class ReplicateConfig:
-    archetype: str = "binary"            # "binary" (0/1 code) | "rate" (c/n + counts)
+    archetype: str = "binary"            # "binary" (0/1) | "rate" (c/n + counts) | "continuous" (noisy latent)
     lam: float = 0.5                     # Pagel's lambda for the latent trait (0 | 0.5 | 1)
     n_pairs: int = 4                     # FIXED contrast count (pipeline contrast_max_iter=3 -> 4)
     n_genes: int = 150
@@ -86,11 +86,10 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     rng = np.random.default_rng(seed)
 
     # ── phenotype: BM-under-lambda latent -> independent tail pairs ────────
-    if rcfg.archetype not in ("binary", "rate"):
+    if rcfg.archetype not in ("binary", "rate", "continuous"):
         raise ValueError(f"unknown archetype {rcfg.archetype!r}")
     ph = _pheno.make_lambda_foreground(
-        tree, rcfg.n_pairs, rng,
-        kind=("binary" if rcfg.archetype == "binary" else "rate"),
+        tree, rcfg.n_pairs, rng, kind=rcfg.archetype,
         planted=rcfg.planted, lam=rcfg.lam,
     )
 
@@ -165,8 +164,8 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
         tax_rows.append(f"{9_000_001 + i}\t{sp}\t{fam_of[sp]}\tspecies\tscientific name")
     (outdir / "taxid.tsv").write_text("\n".join(tax_rows) + "\n")
 
-    # my_traits.tsv — binary: every tip a 0/1 code. rate: only species with data,
-    # plus n_pop / n_cases count columns (CLASS 1 Jeffreys-CI path).
+    # my_traits.tsv — rate: c/n value + n_pop/n_cases (CLASS 1 Jeffreys).
+    # binary: 0/1 code. continuous: the raw noisy latent. Both -> CLASS 2.
     data_sp = sorted(ph.values)
     with (outdir / "my_traits.tsv").open("w") as fh:
         if rcfg.archetype == "rate":
@@ -175,8 +174,9 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
                 fh.write(f"{sp}\t{ph.values[sp]:.6g}\t{ph.n_pop[sp]}\t{ph.n_cases[sp]}\t{fam_of[sp]}\n")
         else:
             fh.write(f"species\t{rcfg.traitname}\tfamily\n")
-            for sp in all_sp:
-                fh.write(f"{sp}\t{int(ph.values[sp])}\t{fam_of[sp]}\n")
+            for sp in data_sp:
+                v = int(ph.values[sp]) if rcfg.archetype == "binary" else f"{ph.values[sp]:.6g}"
+                fh.write(f"{sp}\t{v}\t{fam_of[sp]}\n")
     fg_set = set(ph.foreground_tips)
     with (outdir / "phenotype.tsv").open("w") as fh:
         for sp in data_sp:

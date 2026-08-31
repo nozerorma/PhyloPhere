@@ -2,7 +2,7 @@
 
 A staged Tier 0 run (``validation.tier0.run_replicates``) lays out
 
-    <run_root>/<archetype>_<set>_<tree>/rep###/
+    <run_root>/<archetype>_<set>_<tree>_lam<tag>/rep###/
         truth.json
         out/<trait>_complete/scoring/{gene_scores,position_scores}.tsv
         out/<trait>_complete/scoring/gene_lists/slice_*.tsv

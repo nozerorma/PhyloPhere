@@ -24,9 +24,14 @@ Each planted gene is planted in one direction, ``top`` or ``bottom`` — the
 pipeline scores a convergent change in the high-trait species and in the
 low-trait species symmetrically (`change_top` / `change_bottom`).
 
-Two archetypes differ only in the trait column:
-    binary : threshold the latent -> 0/1 (`--trait_type ordinal`), a few bits flipped
-    rate   : c ~ Binomial(n, rate(latent_percentile)), n ~ U(25, 70) -> CLASS 1
+Three archetypes exercise the three contrast-selection candidate paths; each gets
+data for EVERY (non-outgroup) tip of the (pruned) tree:
+    binary     : threshold the latent -> 0/1 (`--trait_type ordinal`), a few bits
+                 flipped -> discrete top/bottom candidate path
+    rate       : c ~ Binomial(n, rate(latent percentile)), n ~ U(25, 70), with
+                 n_pop / n_cases columns -> Jeffreys-CI non-overlap path (CLASS 1)
+    continuous : the raw latent + observation noise, handed straight -> quantile
+                 (discrete_method) discretisation path
 """
 
 from __future__ import annotations
@@ -50,7 +55,7 @@ class NotEnoughPairs(RuntimeError):
 
 @dataclass
 class Phenotype:
-    archetype: str                          # "binary" | "rate"
+    archetype: str                          # "binary" | "rate" | "continuous"
     kind: str                               # "binary" | "continuous"
     lam: float                              # Pagel's lambda used for the latent
     values: dict[str, float]                # tip -> observed trait value
@@ -176,8 +181,8 @@ def make_lambda_foreground(
     independent pairs the latent could support is recorded as
     notes['n_possible_pairs'] — the interesting lambda-dependent diagnostic.
     Resamples the latent until it supports at least `n_pairs`."""
-    if kind not in ("binary", "rate"):
-        raise ValueError(f"kind must be 'binary' or 'rate', got {kind!r}")
+    if kind not in ("binary", "rate", "continuous"):
+        raise ValueError(f"kind must be 'binary' | 'rate' | 'continuous', got {kind!r}")
 
     tips = tree.tips
     idx_of = _tip_index(tree)
@@ -229,37 +234,36 @@ def make_lambda_foreground(
     lat_rank = {t: r / (len(tips) - 1) for r, t in
                 enumerate(sorted(tips, key=lambda t: latent[t]))}
 
+    data_tips = [t for t in tips if t not in banned]   # every non-outgroup tip carries data
+    n_pop = n_cases = None
     if kind == "binary":
-        thr = np.quantile(lat_vals, 1.0 - tail_frac)
-        val = {t: (1.0 if latent[t] >= thr and t not in banned else 0.0) for t in tips}
-        # noise: flip a few anchors off, a few non-anchors on
-        for a in list(rng.permutation(anchors))[:binary_flip]:
+        thr = np.quantile([latent[t] for t in data_tips], 1.0 - tail_frac)
+        val = {t: (1.0 if latent[t] >= thr else 0.0) for t in data_tips}
+        for a in list(rng.permutation(anchors))[:binary_flip]:      # missed foreground
             val[a] = 0.0
-        pos_pool = [t for t in tips if t not in used and t not in banned and val[t] == 0.0]
+        pos_pool = [t for t in data_tips if t not in used and val[t] == 0.0]
         rng.shuffle(pos_pool)
-        for t in pos_pool[:binary_flip]:
+        for t in pos_pool[:binary_flip]:                            # spurious foreground
             val[t] = 1.0
-        values = {t: val[t] for t in tips}
-        n_pop = n_cases = None
+        values = val
         kind_out = "binary"
-    else:
-        others = [t for t in tips if t not in used and t not in banned]
-        rng.shuffle(others)
-        data_sp = anchor_set | partner_set | set(others[: max(0, n_mid_species)])
+    elif kind == "rate":
         values, n_pop, n_cases = {}, {}, {}
-        for t in tips:
-            if t not in data_sp:
-                continue
-            rate = bg_rate + (fg_rate - bg_rate) * (lat_rank[t] ** 2)  # top-latent -> high rate
+        for t in data_tips:
+            rate = bg_rate + (fg_rate - bg_rate) * (lat_rank[t] ** 2)
             nn = int(rng.integers(n_min, n_max + 1))
             c = int(rng.binomial(nn, min(rate, 1.0)))
             values[t] = c / nn
             n_pop[t] = nn
             n_cases[t] = c
         kind_out = "continuous"
+    else:  # continuous — raw value + observation noise, quantile-discretised by the pipeline
+        sd = float(np.std([latent[t] for t in data_tips])) or 1.0
+        values = {t: round(latent[t] + rng.normal(0.0, 0.35 * sd), 6) for t in data_tips}
+        kind_out = "continuous"
 
     return Phenotype(
-        archetype=("binary" if kind == "binary" else "rate"),
+        archetype=kind,
         kind=kind_out,
         lam=lam,
         values=values,
