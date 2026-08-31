@@ -1,5 +1,9 @@
 """Tier 0 — simulation-based null calibration and planted-positive recovery.
 
+DEMOTED / UNMAINTAINED (D-DIR-01). Moved to validation/.demoted/; package
+imports are broken by the move. See validation/.demoted/README.md.
+
+
 The generative model here is deliberately *not* the pipeline's inference model
 (PhyloPhere ASR / FADE default to LG, single profile per site). Tier 0 simulates
 under WAG exchangeabilities with **site-specific Dirichlet profiles**

@@ -6,10 +6,19 @@ makes tier *n+1* uninterpretable, so they run in order and gate on each.
 
 | Tier | Question | Truth | Cost | Status |
 |------|----------|-------|------|--------|
-| 0 | Under a known generative process, is the null calibrated and what is the power? | simulated | low–med | design |
-| 1 | Does it recover experimentally/manually supported convergent **sites**? | curated site lists | minutes | scaffolding |
-| 2 | Does the integrated pipeline recover the biology four other tools agree on? | published tool outputs (marine mammals) | one cluster run | not started |
+| ~~0~~ | ~~Under a known generative process, is the null calibrated and what is the power?~~ | simulated | — | **DEMOTED** — see below |
+| 1 | Does it recover experimentally/manually supported convergent **sites**? | curated site lists | minutes | in progress (PEPC fixture done) |
+| 2 | Does the integrated pipeline recover the biology other tools agree on? | published tool outputs (marine mammals, CAAP/RER/CSUBST) | one cluster run | not started |
 | 3 | Does the CAAS core reproduce a published analysis given the same input? | CAAStools `/test` lifespan set; RERconverge marine/subterranean | low | not started |
+
+**Tier 0 is demoted** (`.demoted/`, decision D-DIR-01). The planted-simulation
+design is irreducibly circular: making planted signal detectable forces the
+observed trait to point at the planted lineages, which makes contrast-recovery
+tautological; leaving it non-circular collapses detection (the pipeline's
+contrast selector prefers shallow congeneric pairs that miss the planted deep
+lineages). Precedent: CAAP (Chen 2025) uses only a minimal neutral-sim null and
+does all recovery on real data. The suite is now Tiers 1–3 on real datasets,
+pipeline unchanged. Code kept, unmaintained, under `validation/.demoted/`.
 
 Full rationale and dataset provenance: `docs/DESIGN.md`.
 
@@ -80,9 +89,9 @@ validation/
   truthsets/             — curated known-positive tables (version controlled, small)
     tier1/
   fixtures/              — alignments + trees (NOT committed; built/fetched, see each tier's README)
-  tier0/                 — simulation: null calibration + planted-positive recovery
   tier1/                 — site-level truth sets: PEPC C4, RH1 spectral tuning, echolocation
   runs/                  — pipeline outputs (NOT committed)
+  .demoted/              — Tier 0 (simulation): demoted, unmaintained (D-DIR-01)
 ```
 
 ## Running

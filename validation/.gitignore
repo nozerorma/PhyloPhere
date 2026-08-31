@@ -27,6 +27,11 @@ fixtures/**/*.nex
 runs/**
 !runs/.gitkeep
 
+# Demoted Tier 0 — heavy fixture content stays out (code + READMEs tracked)
+.demoted/fixtures_tier0/trees/
+.demoted/**/*.tree
+.demoted/**/*.nh
+
 # Python
 __pycache__/
 *.pyc

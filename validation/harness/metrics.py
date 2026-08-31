@@ -7,7 +7,9 @@ Two families:
   and the rank of every known positive.
 * ``null_calibration`` — given the permulation / bootstrap p-values from a
   no-signal run: KS distance to Uniform(0,1), observed type-I error at nominal
-  alphas, and QQ points. This is the Tier 0 gate and the Tier 2 sanity check.
+  alphas, and QQ points. Was the Tier 0 gate (Tier 0 demoted, D-DIR-01); still
+  the Tier 2 subsampled-null sanity check, and available for a future minimal
+  neutral-sim null.
 
 Pure stdlib + numpy (no scipy): the KS test uses the asymptotic
 Kolmogorov distribution, which is fine for n >= ~50 null replicates.

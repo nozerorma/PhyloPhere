@@ -3,6 +3,10 @@
 Built from reading the code (2026-08-30), not from assumptions. Cited by
 `DESIGN.md`. If any of this drifts from the code, the code wins — fix this file.
 
+> **NOTE**: sections 6.4 and 7 discuss "Implications for Tier 0". Tier 0 is
+> demoted (D-DIR-01) — read those as background on the pipeline's
+> operative-fg/min-contrasts behaviour, not as live Tier 0 design.
+
 Sources read: `subworkflows/CT/local/modules/{pindex,caas_id,disco,hyper}.py`,
 `subworkflows/CT/local/scripts/{permulations.R,lean_contrast_selector.R}`,
 `subworkflows/CT/{ct_resample,ct_bootstrap,ct_check_min_contrasts,caas_permulation}.nf`,

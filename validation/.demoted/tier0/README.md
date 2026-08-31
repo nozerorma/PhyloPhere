@@ -1,5 +1,10 @@
 # Tier 0 — simulation: does the pipeline recover planted convergence?
 
+> **DEMOTED / UNMAINTAINED** (D-DIR-01). See `../README.md`. The design is
+> irreducibly circular; the suite is now Tiers 1–3 on real data. Kept for the
+> record only.
+
+
 **Question.** Plant convergent substitutions on lineages a phylogenetic process
 picked out, hand the pipeline a noisy trait for those lineages, and ask: does it
 rank those genes and sites to the top, assign them to the right direction, and

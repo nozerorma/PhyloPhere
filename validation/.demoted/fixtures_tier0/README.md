@@ -1,4 +1,4 @@
-# Tier 0 fixtures — trees
+# Tier 0 fixtures — trees  (DEMOTED, D-DIR-01 — see ../README.md)
 
 Not committed (external data). Fetch from the cluster:
 

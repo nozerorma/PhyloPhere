@@ -49,7 +49,12 @@ Tier 0 separately. Tier 0 code stays on the branch, unmaintained.
 
 ---
 
-## Tier 0
+## Tier 0  —  DEMOTED (D-DIR-01, 2026-08-31)
+
+> Everything in this section is **superseded**. Tier 0 is demoted to
+> `validation/.demoted/` and unmaintained. The decisions below (D-T0-*) are kept
+> for the record — they document what was tried and why it did not work, which is
+> the input to any future non-circular Tier 0. Do not act on them.
 
 ### D-T0-Q — evolutionary-model planting (2026-08-31, MIGUEL, supersedes the D-T0-P foreground)
 The D-T0-P "farthest-point anchors + engineered trait" made contrast recovery a
