@@ -127,10 +127,10 @@ def _fake_rep(root: Path, subset: str, *, planted: bool) -> None:
     }))
 
     gh = "Gene\tn_positions\tgene_caas_score\n"
-    if planted:  # planted genes score high, background genes low
-        grows = "g0001\t2\t0.95\ng0002\t2\t0.88\ng0003\t2\t0.12\ng0004\t2\t0.05\ng0005\t2\t0.03\n"
-    else:        # null: nothing scores high
-        grows = "g0001\t2\t0.20\ng0002\t2\t0.15\ng0003\t2\t0.10\ng0004\t2\t0.06\ng0005\t2\t0.02\n"
+    if planted:  # planted genes carry many CAAS positions; background ~1
+        grows = "g0001\t18\t0.95\ng0002\t16\t0.88\ng0003\t1\t0.12\ng0004\t1\t0.05\ng0005\t1\t0.03\n"
+    else:        # null: every gene ~1 spurious CAAS
+        grows = "g0001\t1\t0.20\ng0002\t2\t0.15\ng0003\t1\t0.10\ng0004\t1\t0.06\ng0005\t1\t0.02\n"
     (res / "gene_scores.tsv").write_text(gh + grows)
 
     ph = "Gene\tPosition\tpvalue\tpvalue_boot\tscheme_set\tCAAS_score\n"
@@ -138,12 +138,13 @@ def _fake_rep(root: Path, subset: str, *, planted: bool) -> None:
         "g0001\t3\t0.001\t0.01\tGS1+GS2+US\t0.8\n"
         "g0001\t7\t0.003\t0.03\tGS1+GS3\t0.6\n"
         "g0002\t3\t0.002\t0.02\tGS1+US\t0.7\n"
+        "g0002\t7\t0.004\t0.04\tGS1+GS3\t0.55\n"
         if planted else "g0003\t44\t0.2\t0.6\tGS1\t0.1\n"
     )
     (res / "position_scores.tsv").write_text(ph + prows)
 
-    (lists / "slice_global1.tsv").write_text("Gene\tscore\ng0001\t1.0\n")
-    (lists / "slice_global5.tsv").write_text("Gene\tscore\ng0001\t1.0\ng0002\t0.9\n")
+    (lists / "slice_global5.tsv").write_text("Gene\tscore\ng0001\t1.0\n")
+    (lists / "slice_global25.tsv").write_text("Gene\tscore\ng0001\t1.0\ng0002\t0.9\n")
     (ct / "traitfile.tab").write_text("spA\t1\t1\nspX\t0\t1\nspB\t1\t2\nspY\t0\t2\n")
 
 
@@ -158,16 +159,16 @@ def test_tier0_adapter_score(tmp_path: Path) -> None:
     rs = res.per_replicate[0]
     assert rs.gene_planted_ranks == {"g0001": 1, "g0002": 2}
     assert rs.gene_precision_at_k == 1.0
-    assert rs.planted_in_slice_global5 == 1.0        # both planted genes in the top-5% slice
-    assert rs.planted_in_slice_global1 == 0.5        # only g0001 in the top-1%
+    assert rs.planted_in_slice_global25 == 1.0       # both planted genes in the top-25% slice
+    assert rs.planted_in_slice_global5 == 0.5        # only g0001 in the top-5%
     assert rs.identical_aa_us_recall == 1.0
-    assert rs.grouped_caap_gs_recall == 0.5
-    assert rs.grouped_caap_us_leakage == 0.0
+    assert rs.grouped_caap_gs_recall == 1.0
+    assert rs.grouped_caap_us_leakage == 0.0        # both grouped sites were GS-only
     assert rs.contrast_pairs_recovered == 2 and rs.contrast_fg_precision == 1.0
 
     assert len(res.separation) == 1
     sep = res.separation[0]
-    assert sep.auc_planted_vs_null == 1.0            # planted 0.88/0.95 >> null max 0.20
+    assert sep.auc_npos == 1.0                       # planted 16/18 positions >> null max 2
     assert sep.separated is True
     assert res.verdict == "PASS"
 

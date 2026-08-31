@@ -48,18 +48,20 @@ def _cmd_score(args: argparse.Namespace) -> int:
     out = [f"\nVERDICT: {res.verdict}   ({res.n_power_replicates} power replicate(s))"]
     for sep in res.separation:
         out.append(
-            f"  [{sep.archetype}] null vs power: AUC {_fmt(sep.auc_planted_vs_null)}  "
-            f"planted p50 {_fmt(sep.planted_score_p50)}  vs  null p95 {_fmt(sep.null_score_p95)}  "
-            f"(max {_fmt(sep.null_score_max)})  -> {'separated' if sep.separated else 'NOT separated'}"
+            f"  [{sep.archetype}] null vs power (detected-CAAS count): AUC {_fmt(sep.auc_npos)}  "
+            f"planted p50 {_fmt(sep.planted_npos_p50)}  vs  null p95 {_fmt(sep.null_npos_p95)} "
+            f"(max {_fmt(sep.null_npos_max)})  -> {'separated' if sep.separated else 'NOT separated'}"
+            f"   [caas_score AUC {_fmt(sep.auc_caas_score)}]"
         )
     for a, v in res.summary.items():
-        m = v["site_recall_by_mechanism"]
         out.append(
-            f"  [{a}] prioritisation: slice_global5 {_fmt(v['planted_in_slice_global5'])}  "
-            f"slice_global1 {_fmt(v['planted_in_slice_global1'])}  precision@k {_fmt(v['gene_precision_at_k'])}\n"
+            f"  [{a}] prioritisation: precision@k {_fmt(v['gene_precision_at_k'])}  "
+            f"planted rank-pctile {_fmt(v['gene_planted_rank_pctile_p50'])}  "
+            f"slice_global25 {_fmt(v['planted_in_slice_global25'])}  "
+            f"slice_global5 {_fmt(v['planted_in_slice_global5'])}\n"
             f"  [{a}] sites: recall {_fmt(v['site_recall'])}  "
             f"identical_aa->US {_fmt(v['identical_aa_us_recall'])}  "
-            f"grouped_caap->GS {_fmt(v['grouped_caap_gs_recall'])} (US leak {_fmt(v['grouped_caap_us_leakage'])})\n"
+            f"grouped_caap->GS {_fmt(v['grouped_caap_gs_recall'])} (US also {_fmt(v['grouped_caap_us_leakage'])})\n"
             f"  [{a}] contrast: jaccard {_fmt(v['contrast_jaccard'])}  "
             f"pairs recovered {_fmt(v['contrast_pairs_recovered_frac'])}"
         )

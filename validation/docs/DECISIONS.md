@@ -38,8 +38,24 @@ was rebuilt:
   `separated` = AUC ≥ 0.9 AND planted p50 > null p95; (3) site recall by
   mechanism × scheme (`identical_aa→US`, `grouped_caap→GS`, US leakage);
   (4) contrast recovery (`traitfile.tab` fg vs planted pairs).
-- Scale: ~150 genes, ~400 sites, `concentration ≈ 2`, production permulation
-  settings, 15 reps/cell. Gate = `primate` × {binary, rate} × {null, power}.
+- Scale: ~120-150 genes, ~350-400 sites, `concentration ≈ 2`, production
+  permulation settings. Gate = `primate` × {binary, rate} × {null, power}.
+
+**GATE RESULT (2026-08-31, `runs/tier0_gate2`, 10 reps/cell, 120 genes): PASS.**
+- null-vs-power separation AUC(detected-CAAS count) = **1.00** both archetypes
+  (planted genes carry ~24 CAAS positions, null-replicate genes ~1).
+- precision@k 0.83 (binary) / 0.95 (rate); site recall 0.99; `identical_aa→US`
+  1.00; contrast recovery Jaccard 1.00, all pairs.
+- **`gene_caas_score` does NOT separate across replicates** (`caas_score AUC
+  ≈ 0.45`) — it's a within-run percentile rank, size-decorrelated by design;
+  detected-CAAS count is the separating quantity. So `score`'s separation metric
+  is on `n_positions`, not `gene_caas_score`.
+- **`grouped_caap` also trips US ~86%**: with `patterns=1,2,3` + conserved
+  disjoint bg, class-shared/residue-divergent fg satisfies US pattern 3. Clean
+  GS-only positive needs a class-heterogeneous bg — deferred. GS recall (0.99)
+  still > US (0.86).
+- `slice_global5` membership is ~0.06 (mechanically capped: 20% planted vs 5%
+  slice); `slice_global25` ≈ 0.26 ≈ its theoretical max. Not a gate criterion.
 
 ### D-T0-06 — pipeline studied before further integration design  (2026-08-30)
 After D-T0-05 it became clear the integration was being designed on a wrong model

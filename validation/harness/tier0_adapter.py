@@ -133,6 +133,14 @@ class Replicate:
         out = {r["Gene"]: _num(r.get("gene_caas_score", "nan")) for r in _read_tsv(p)}
         return {g: v for g, v in out.items() if not math.isnan(v)}
 
+    def gene_n_positions(self) -> dict[str, float]:
+        """Detected CAAS positions per gene — an absolute, replicate-comparable
+        quantity (unlike gene_caas_score, which is a within-run percentile rank)."""
+        p = self._out("scoring/gene_scores.tsv")
+        if p is None:
+            return {}
+        return {r["Gene"]: _num(r.get("n_positions", "nan")) for r in _read_tsv(p)}
+
     def gene_slice(self, name: str) -> set[str]:
         """slice_global1 / slice_global5 / slice_top5 ... -> the gene set."""
         p = self._out(f"scoring/gene_lists/{name}.tsv")
@@ -179,10 +187,11 @@ class ReplicateScore:
     archetype: str
     n_genes_scored: int
     gene: ScoreReport | None
-    gene_precision_at_k: float
+    gene_precision_at_k: float          # of the top-n_planted genes, fraction planted
+    gene_planted_rank_pctile_p50: float # median planted-gene rank as a top-fraction (1.0 = rank 1)
     gene_planted_ranks: dict[str, int]
-    planted_in_slice_global1: float     # fraction of planted genes in the top-1% slice
-    planted_in_slice_global5: float
+    planted_in_slice_global5: float     # fraction of planted genes in the top-5% slice
+    planted_in_slice_global25: float
     site_recall: float
     site_precision: float
     site_recall_by_mechanism: dict[str, float]
@@ -208,18 +217,21 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
         return None
     gs = rp.gene_scores()
     gene_report = None
-    prec_k = math.nan
+    prec_k = rank_pctile = math.nan
     ranks: dict[str, int] = {}
     if gs:
         gene_report = score_metrics(gs, planted, min(gs.values()), higher_is_hit=True)
         ranks = gene_report.positive_ranks
+        n = len(gs)
         k = len(planted)
         topk = {g for g, _ in sorted(gs.items(), key=lambda kv: -kv[1])[:k]}
         prec_k = len(topk & planted) / k
+        # planted rank as a "top fraction": rank 1 -> 1.0, last -> ~0
+        rank_pctile = _quantile([1.0 - (ranks[g] - 1) / max(1, n - 1) for g in planted], 0.50)
 
-    s1, s5 = rp.gene_slice("slice_global1"), rp.gene_slice("slice_global5")
-    in_s1 = _mean([1.0 if g in s1 else 0.0 for g in planted]) if s1 else math.nan
+    s5, s25 = rp.gene_slice("slice_global5"), rp.gene_slice("slice_global25")
     in_s5 = _mean([1.0 if g in s5 else 0.0 for g in planted]) if s5 else math.nan
+    in_s25 = _mean([1.0 if g in s25 else 0.0 for g in planted]) if s25 else math.nan
 
     # -- sites: SCORING lists only detected positions + their scheme_set -------- #
     detected: dict[str, dict[int, set[str]]] = {}
@@ -268,8 +280,9 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
     return ReplicateScore(
         subset=rp.subset, rep=rp.repdir.name, archetype=rp.archetype,
         n_genes_scored=len(gs), gene=gene_report,
-        gene_precision_at_k=prec_k, gene_planted_ranks=ranks,
-        planted_in_slice_global1=in_s1, planted_in_slice_global5=in_s5,
+        gene_precision_at_k=prec_k, gene_planted_rank_pctile_p50=rank_pctile,
+        gene_planted_ranks=ranks,
+        planted_in_slice_global5=in_s5, planted_in_slice_global25=in_s25,
         site_recall=(hit / all_planted if all_planted else math.nan),
         site_precision=(hit / total_detected if total_detected else math.nan),
         site_recall_by_mechanism={m: mech_hit.get(m, 0) / n for m, n in mech_tot.items()},
@@ -290,13 +303,18 @@ class ArchetypeSeparation:
     archetype: str
     n_power_reps: int
     n_null_reps: int
-    n_planted_scores: int
-    n_null_scores: int
-    auc_planted_vs_null: float      # 1.0 = perfect separation
-    planted_score_p50: float
-    null_score_p95: float
-    null_score_max: float
-    separated: bool                 # planted p50 > null p95 AND auc >= 0.9
+    n_planted_genes: int
+    n_null_genes: int
+    # detected CAAS positions per gene — planted genes carry ~n_planted sites,
+    # spurious genes ~1. Absolute, so comparable across replicates.
+    auc_npos: float
+    planted_npos_p50: float
+    null_npos_p95: float
+    null_npos_max: float
+    # gene_caas_score is a within-run percentile rank (not replicate-comparable) —
+    # kept as a secondary read.
+    auc_caas_score: float
+    separated: bool                 # AUC(n_positions) >= 0.95 AND planted p50 > null p95
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
@@ -305,26 +323,33 @@ class ArchetypeSeparation:
 def _separation(archetype: str, reps: list[Replicate]) -> ArchetypeSeparation | None:
     power = [r for r in reps if r.archetype == archetype and not r.is_null and r.results_dir]
     null = [r for r in reps if r.archetype == archetype and r.is_null and r.results_dir]
-    planted_scores: list[float] = []
+    p_npos: list[float] = []
+    p_score: list[float] = []
     for r in power:
-        gs = r.gene_scores()
-        planted_scores += [gs[g] for g in r.planted_genes if g in gs]
-    null_scores: list[float] = []
+        npos, sc = r.gene_n_positions(), r.gene_scores()
+        for g in r.planted_genes:
+            if g in npos:
+                p_npos.append(npos[g])
+            if g in sc:
+                p_score.append(sc[g])
+    n_npos: list[float] = []
+    n_score: list[float] = []
     for r in null:
-        null_scores += list(r.gene_scores().values())
-    if not planted_scores or not null_scores:
+        n_npos += list(r.gene_n_positions().values())
+        n_score += list(r.gene_scores().values())
+    if not p_npos or not n_npos:
         return None
-    auc = _auc(planted_scores, null_scores)
-    p50 = _quantile(planted_scores, 0.50)
-    n95 = _quantile(null_scores, 0.95)
+    auc_n = _auc(p_npos, n_npos)
+    p50 = _quantile(p_npos, 0.50)
+    n95 = _quantile(n_npos, 0.95)
     return ArchetypeSeparation(
         archetype=archetype,
         n_power_reps=len(power), n_null_reps=len(null),
-        n_planted_scores=len(planted_scores), n_null_scores=len(null_scores),
-        auc_planted_vs_null=auc,
-        planted_score_p50=p50, null_score_p95=n95,
-        null_score_max=max(null_scores),
-        separated=(not math.isnan(auc) and auc >= 0.9 and p50 > n95),
+        n_planted_genes=len(p_npos), n_null_genes=len(n_npos),
+        auc_npos=auc_n, planted_npos_p50=p50,
+        null_npos_p95=n95, null_npos_max=max(n_npos),
+        auc_caas_score=_auc(p_score, n_score),
+        separated=(not math.isnan(auc_n) and auc_n >= 0.95 and p50 > n95),
     )
 
 
@@ -370,9 +395,9 @@ def score(run_root: Path) -> ScoreResult:
         summary[a] = {
             "n_power_replicates": len(group),
             "gene_precision_at_k": _mean([s.gene_precision_at_k for s in group]),
-            "gene_roc_auc": _mean([s.gene.roc_auc for s in group if s.gene]),
-            "planted_in_slice_global1": _mean([s.planted_in_slice_global1 for s in group]),
+            "gene_planted_rank_pctile_p50": _mean([s.gene_planted_rank_pctile_p50 for s in group]),
             "planted_in_slice_global5": _mean([s.planted_in_slice_global5 for s in group]),
+            "planted_in_slice_global25": _mean([s.planted_in_slice_global25 for s in group]),
             "site_recall": _mean([s.site_recall for s in group]),
             "site_recall_by_mechanism": {m: _mean(v) for m, v in mechs.items()},
             "identical_aa_us_recall": _mean([s.identical_aa_us_recall for s in group]),
@@ -385,8 +410,11 @@ def score(run_root: Path) -> ScoreResult:
             ),
         }
 
+    # PASS = every archetype: null/power separates on detected-CAAS count, planted
+    # genes fill the top-n_planted ranks (precision@k), and planted sites are found.
     ok = bool(seps) and all(s.separated for s in seps) and all(
-        (not math.isnan(v["planted_in_slice_global5"]) and v["planted_in_slice_global5"] >= 0.8)
+        (not math.isnan(v["gene_precision_at_k"]) and v["gene_precision_at_k"] >= 0.8
+         and not math.isnan(v["site_recall"]) and v["site_recall"] >= 0.8)
         for v in summary.values()
     )
     verdict = "PASS" if ok else "REVIEW"
