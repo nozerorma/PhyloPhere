@@ -159,6 +159,7 @@ def test_tier0_adapter_score(tmp_path: Path) -> None:
     rs = res.per_replicate[0]
     assert rs.gene_planted_ranks == {"g0001": 1, "g0002": 2}
     assert rs.gene_precision_at_k == 1.0
+    assert rs.gene_precision_at_k_npos == 1.0
     assert rs.planted_in_slice_global25 == 1.0       # both planted genes in the top-25% slice
     assert rs.planted_in_slice_global5 == 0.5        # only g0001 in the top-5%
     assert rs.identical_aa_us_recall == 1.0

@@ -87,42 +87,62 @@ Per archetype:
 ## Run
 
 ```bash
-# fetch trees once (validation/fixtures/tier0/README.md), then:
-python -m validation.tier0.run_replicates --out validation/runs/tier0 \
-    --archetypes binary,rate --sets null,power --trees primate \
-    --n-replicates 15 --n-genes 150 --run --jobs 2
-python -m validation.harness.cli score --run validation/runs/tier0 --json validation/runs/tier0/score.json
+# fetch trees once (validation/fixtures/tier0/README.md), then one command:
+validation/tier0/reproduce.sh                       # -> validation/runs/tier0_gate/
+#   stage + run (binary,rate x null,power x primate) + score + figures
+# args: reproduce.sh [OUT_DIR] [N_REPLICATES] [N_GENES]   (JOBS=N env var)
 ```
 
-`~60 replicates × ~5–15 min` each; use `--jobs` to parallelise (memory-bound —
-each replicate is a full Nextflow run).
+Or step by step:
 
-## Gate result (2026-08-31, `runs/tier0_gate2`, 10 reps/cell, 120 genes, 350 sites)
+```bash
+python -m validation.tier0.run_replicates --out validation/runs/tier0 \
+    --archetypes binary,rate --sets null,power --trees primate \
+    --n-replicates 10 --n-genes 120 --run --jobs 2
+python -m validation.harness.cli score --run validation/runs/tier0 --json validation/runs/tier0/score.json
+python -m validation.tier0.plots       --run validation/runs/tier0
+```
 
-**`VERDICT: PASS`** — both archetypes.
+`~40 replicates × ~10–20 min` each; memory-bound (each replicate is a full
+Nextflow run). The reference result is committed under `gate_result/` — see its
+`SUMMARY.md` to re-score/re-plot without re-running.
+
+## Tests
+
+```bash
+python -m pytest validation/tests -q                # harness + tier0 unit tests
+Rscript subworkflows/TRAIT_ANALYSIS/local/src/ordinal_trait_test.R   # binary-trait contrast selection
+```
+
+## Gate result — `VERDICT: PASS`
+
+Full numbers, figures and reproduce instructions: **`gate_result/SUMMARY.md`**.
+Reference run: `primate` × {binary, rate} × {null, power}, 10 reps/cell, 120
+genes, 350 sites, 2026-08-31.
 
 | metric | binary | rate |
 |---|---|---|
 | null-vs-power separation, AUC(detected-CAAS count) | **1.00** | **1.00** |
-| — planted p50 / null p95 (max) | 24 / 1 (2) | 24 / 1 (2) |
-| precision@k (top-n_planted genes are planted) | 0.83 | 0.95 |
-| site recall | 0.99 | 0.99 |
-| `identical_aa → US` | 1.00 | 1.00 |
-| `grouped_caap → GS` | 0.99 | 0.99 |
+| — planted p50 / null p95 (null max) | 24 / 1 (2) | 24 / 1 (2) |
+| precision@k, by detected-CAAS count | 1.00 | 1.00 |
+| precision@k, by `gene_caas_score` | 0.82 | 0.95 |
+| site recall / `identical_aa → US` / `grouped_caap → GS` | 0.99 / 1.00 / 0.99 | 0.99 / 1.00 / 0.99 |
 | contrast recovery (Jaccard, pairs) | 1.00, all | 1.00, all |
+
+`separation.png`: planted genes carry 22–26 detected CAAS, every non-planted
+gene (~170) carries ≤ 2 — zero overlap. **Not worth a bigger run** (the gap is
+saturated; cycles don't touch it — it's discovery-driven, not permulation-driven).
 
 Two characterisation findings (not gate blockers):
 
 - **`gene_caas_score` does not separate null from power across replicates**
-  (`caas_score AUC ≈ 0.45`). It is a within-run percentile rank whose
-  size-adjustment (`F(max)^n`) deliberately decorrelates it from position count,
-  so it is a *within-study prioritisation* device, not a cross-study effect
-  size. Detected-CAAS count is the separating quantity.
-- **`grouped_caap` sites also trip `US` ~86% of the time.** With `patterns=1,2,3`
-  and a conserved, disjoint background, a foreground with class-shared /
-  residue-divergent substitutions satisfies US pattern 3 (fg variable, bg
-  conserved). A clean GS-only positive needs a class-heterogeneous background —
-  a mechanism refinement, deferred. GS recall (0.99) still exceeds US (0.86).
+  (`caas_score AUC ≈ 0.45`) — a within-run percentile rank, size-decorrelated by
+  design (`F(max)^n`). A within-study prioritisation device, not a cross-study
+  effect size. Detected-CAAS count is the separating quantity.
+- **`grouped_caap` sites also trip `US` ~86%.** With `patterns=1,2,3` and a
+  conserved disjoint background, a foreground with class-shared / residue-divergent
+  substitutions satisfies US pattern 3. A clean GS-only positive needs a
+  class-heterogeneous background — deferred. GS recall (0.99) still exceeds US (0.86).
 
 ## Status
 

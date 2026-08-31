@@ -55,8 +55,9 @@ def _cmd_score(args: argparse.Namespace) -> int:
         )
     for a, v in res.summary.items():
         out.append(
-            f"  [{a}] prioritisation: precision@k {_fmt(v['gene_precision_at_k'])}  "
-            f"planted rank-pctile {_fmt(v['gene_planted_rank_pctile_p50'])}  "
+            f"  [{a}] prioritisation: precision@k(n_pos) {_fmt(v['gene_precision_at_k_npos'])}  "
+            f"precision@k(caas_score) {_fmt(v['gene_precision_at_k'])}  "
+            f"rank-pctile {_fmt(v['gene_planted_rank_pctile_p50'])}  "
             f"slice_global25 {_fmt(v['planted_in_slice_global25'])}  "
             f"slice_global5 {_fmt(v['planted_in_slice_global5'])}\n"
             f"  [{a}] sites: recall {_fmt(v['site_recall'])}  "

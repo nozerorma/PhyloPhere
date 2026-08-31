@@ -13,13 +13,16 @@ The pipeline is a **prioritisation engine** (see project memory
 foreground-specificity scores, never Uniform(0,1). So the gate is NOT a KS
 uniformity test. It is:
 
-  1. prioritisation  — planted genes/positions in ``slice_global1`` / ``slice_global5``
-  2. null vs power   — pooled per archetype: planted-gene ``gene_caas_score`` in
-     power replicates must separate (AUC) from every gene's score in the matched
-     null replicates. If a no-signal replicate reaches the same scores, the
-     ranking cannot tell signal from noise.
+  1. null vs power   — pooled per archetype: AUC of the **detected-CAAS count**
+     (``n_positions``) of planted genes in power replicates vs every gene in the
+     matched null replicates. Absolute and replicate-comparable, unlike
+     ``gene_caas_score`` (a within-run percentile rank, size-decorrelated by
+     design — reported as ``caas_score AUC`` only).
+  2. prioritisation  — precision@k (planted share of the top-n_planted genes, by
+     n_positions and by gene_caas_score), planted rank percentile, slice_global25.
   3. site recovery   — planted-site detection recall, split by mechanism and by
-     which CAAP scheme fired (``identical_aa`` -> US, ``grouped_caap`` -> GS only).
+     which CAAP scheme fired (``identical_aa`` -> US; ``grouped_caap`` -> GS, with
+     ``US also`` = the fraction that additionally tripped US).
   4. contrast recovery — operative foreground from ``traitfile.tab`` vs the
      planted pairs in ``truth``.
 
@@ -187,7 +190,8 @@ class ReplicateScore:
     archetype: str
     n_genes_scored: int
     gene: ScoreReport | None
-    gene_precision_at_k: float          # of the top-n_planted genes, fraction planted
+    gene_precision_at_k: float          # top-n_planted by gene_caas_score, fraction planted
+    gene_precision_at_k_npos: float     # top-n_planted by detected-CAAS count, fraction planted
     gene_planted_rank_pctile_p50: float # median planted-gene rank as a top-fraction (1.0 = rank 1)
     gene_planted_ranks: dict[str, int]
     planted_in_slice_global5: float     # fraction of planted genes in the top-5% slice
@@ -216,8 +220,9 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
     if not planted or rp.results_dir is None:
         return None
     gs = rp.gene_scores()
+    npos = rp.gene_n_positions()
     gene_report = None
-    prec_k = rank_pctile = math.nan
+    prec_k = prec_k_npos = rank_pctile = math.nan
     ranks: dict[str, int] = {}
     if gs:
         gene_report = score_metrics(gs, planted, min(gs.values()), higher_is_hit=True)
@@ -226,8 +231,11 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
         k = len(planted)
         topk = {g for g, _ in sorted(gs.items(), key=lambda kv: -kv[1])[:k]}
         prec_k = len(topk & planted) / k
-        # planted rank as a "top fraction": rank 1 -> 1.0, last -> ~0
         rank_pctile = _quantile([1.0 - (ranks[g] - 1) / max(1, n - 1) for g in planted], 0.50)
+    if npos:
+        k = len(planted)
+        topk_n = {g for g, _ in sorted(npos.items(), key=lambda kv: -kv[1])[:k]}
+        prec_k_npos = len(topk_n & planted) / k
 
     s5, s25 = rp.gene_slice("slice_global5"), rp.gene_slice("slice_global25")
     in_s5 = _mean([1.0 if g in s5 else 0.0 for g in planted]) if s5 else math.nan
@@ -280,7 +288,8 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
     return ReplicateScore(
         subset=rp.subset, rep=rp.repdir.name, archetype=rp.archetype,
         n_genes_scored=len(gs), gene=gene_report,
-        gene_precision_at_k=prec_k, gene_planted_rank_pctile_p50=rank_pctile,
+        gene_precision_at_k=prec_k, gene_precision_at_k_npos=prec_k_npos,
+        gene_planted_rank_pctile_p50=rank_pctile,
         gene_planted_ranks=ranks,
         planted_in_slice_global5=in_s5, planted_in_slice_global25=in_s25,
         site_recall=(hit / all_planted if all_planted else math.nan),
@@ -395,6 +404,7 @@ def score(run_root: Path) -> ScoreResult:
         summary[a] = {
             "n_power_replicates": len(group),
             "gene_precision_at_k": _mean([s.gene_precision_at_k for s in group]),
+            "gene_precision_at_k_npos": _mean([s.gene_precision_at_k_npos for s in group]),
             "gene_planted_rank_pctile_p50": _mean([s.gene_planted_rank_pctile_p50 for s in group]),
             "planted_in_slice_global5": _mean([s.planted_in_slice_global5 for s in group]),
             "planted_in_slice_global25": _mean([s.planted_in_slice_global25 for s in group]),
@@ -413,7 +423,7 @@ def score(run_root: Path) -> ScoreResult:
     # PASS = every archetype: null/power separates on detected-CAAS count, planted
     # genes fill the top-n_planted ranks (precision@k), and planted sites are found.
     ok = bool(seps) and all(s.separated for s in seps) and all(
-        (not math.isnan(v["gene_precision_at_k"]) and v["gene_precision_at_k"] >= 0.8
+        (not math.isnan(v["gene_precision_at_k_npos"]) and v["gene_precision_at_k_npos"] >= 0.9
          and not math.isnan(v["site_recall"]) and v["site_recall"] >= 0.8)
         for v in summary.values()
     )
