@@ -19,8 +19,12 @@ never Uniform(0,1) — no KS gate).
    - `lambda = 1` — full BM → the extremes **clump into clades**.
    - `lambda = 0.5` — in between (the real cancer-prevalence trait fitted ≈ 0.74).
 2. **True foreground** = the independent top- and bottom-tail origins of that
-   latent draw, reduced to non-nested clusters that are mutually Dunn ≥ 1.
-   However many that yields (fewer as lambda rises); resample if < 3.
+   latent draw, reduced to non-nested clusters that are mutually Dunn ≥ 1. The
+   number **used is fixed** (`--n-pairs 4`, matching the pipeline's
+   `contrast_max_iter = 3` → seed + 3 = 4 pairs) so replicates are comparable
+   across lambda; the latent is resampled until it supports at least that many.
+   How many it *could* support (`n_possible_pairs`, ~20 at lambda 0, ~5 at
+   lambda 1) is **reported** as the structure-dependence diagnostic.
 3. **Observed trait** handed to the pipeline = latent + sampling noise:
    - `binary` — threshold the latent → 0/1 (`--trait_type ordinal`), a few bits flipped.
    - `rate` — `c ~ Binomial(n, rate(latent_percentile))`, `n ~ U(25, 70)` → CLASS 1

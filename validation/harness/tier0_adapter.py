@@ -8,26 +8,24 @@ A staged Tier 0 run (``validation.tier0.run_replicates``) lays out
         out/<trait>_complete/scoring/gene_lists/slice_*.tsv
         out/<trait>_complete/data_exploration/2.CT/1.Traitfiles/traitfile.tab
 
-The pipeline is a **prioritisation engine** (see project memory
-``project_tier0_scoping_reframe``): its permulation p-values are conditional
-foreground-specificity scores, never Uniform(0,1). So the gate is NOT a KS
-uniformity test. It is:
+Metrics are reported **per (archetype, lambda) cell** (D-T0-Q). The pipeline is a
+prioritisation engine (``project_tier0_scoping_reframe``); its permulation
+p-values are foreground-specificity scores, never Uniform(0,1) — no KS gate.
 
-  1. null vs power   — pooled per archetype: AUC of the **detected-CAAS count**
-     (``n_positions``) of planted genes in power replicates vs every gene in the
-     matched null replicates. Absolute and replicate-comparable, unlike
-     ``gene_caas_score`` (a within-run percentile rank, size-decorrelated by
-     design — reported as ``caas_score AUC`` only).
-  2. prioritisation  — precision@k (planted share of the top-n_planted genes, by
-     n_positions and by gene_caas_score), planted rank percentile, slice_global25.
-  3. site recovery   — planted-site detection recall, split by mechanism and by
-     which CAAP scheme fired (``identical_aa`` -> US; ``grouped_caap`` -> GS, with
-     ``US also`` = the fraction that additionally tripped US).
-  4. contrast recovery — operative foreground from ``traitfile.tab`` vs the
-     planted pairs in ``truth``.
+  1. null vs power (occurrence) — AUC of the detected-CAAS count of planted genes
+     vs every gene in the matched null replicates. Score-level AUCs (position
+     CAAS_score, position -log10 p, gene_caas_score) reported, NOT gated.
+  2. prioritisation — precision@k by CAAS count and by gene_caas_score, planted
+     rank percentile, slice_global25.
+  3. site recovery — detection recall, directional recall (right top/bottom
+     side), split by mechanism x CAAP scheme.
+  4. contrast recovery — operative pairs (traitfile.tab) vs the TRUE lambda-drawn
+     pairs (anchor / partner recall, exact-pair, lineage Jaccard). n_pairs is
+     FIXED; n_possible_pairs (how many the latent supported) is reported.
+     REPORTED as a lambda-curve, NOT gated.
 
-``truth["genes"][g]["planted_sites"]`` keys are 0-based columns; the pipeline's
-``Position`` column matches them directly (verified: 12/12 exact, 0/12 at +1).
+VERDICT: occurrence separation at every cell + precision@k/site_recall at the
+lowest lambda.
 """
 
 from __future__ import annotations
@@ -99,6 +97,10 @@ class Replicate:
     @property
     def lam(self) -> float:
         return float(self.truth.get("phenotype", {}).get("lambda", -1.0))
+
+    @property
+    def n_possible_pairs(self) -> float:
+        return float(self.truth.get("phenotype", {}).get("notes", {}).get("n_possible_pairs", math.nan))
 
     @property
     def planted_genes(self) -> set[str]:
@@ -208,6 +210,7 @@ class ReplicateScore:
     planted_in_slice_global5: float     # fraction of planted genes in the top-5% slice
     planted_in_slice_global25: float
     lam: float
+    n_possible_pairs: float
     site_recall: float
     site_precision: float
     site_recall_by_mechanism: dict[str, float]
@@ -307,6 +310,7 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
     n_true = max(1, len(true_pairs))
     return ReplicateScore(
         subset=rp.subset, rep=rp.repdir.name, archetype=rp.archetype, lam=rp.lam,
+        n_possible_pairs=rp.n_possible_pairs,
         n_genes_scored=len(gs), gene=gene_report,
         gene_precision_at_k=prec_k, gene_precision_at_k_npos=prec_k_npos,
         gene_planted_rank_pctile_p50=rank_pctile,
@@ -448,6 +452,7 @@ def score(run_root: Path) -> ScoreResult:
                 mechs.setdefault(m, []).append(v)
         cells[f"{a}|lambda={lm:g}"] = {
             "n_power_replicates": len(g),
+            "n_possible_pairs": _mean([s.n_possible_pairs for s in g]),
             "gene_precision_at_k_npos": _mean([s.gene_precision_at_k_npos for s in g]),
             "gene_precision_at_k_score": _mean([s.gene_precision_at_k for s in g]),
             "gene_planted_rank_pctile_p50": _mean([s.gene_planted_rank_pctile_p50 for s in g]),

@@ -35,7 +35,7 @@ from .trees import PhyloTree
 class ReplicateConfig:
     archetype: str = "binary"            # "binary" (0/1 code) | "rate" (c/n + counts)
     lam: float = 0.5                     # Pagel's lambda for the latent trait (0 | 0.5 | 1)
-    n_pairs: int = 6                     # max independent tail pairs to take
+    n_pairs: int = 4                     # FIXED contrast count (pipeline contrast_max_iter=3 -> 4)
     n_genes: int = 150
     frac_planted_genes: float = 0.2
     traitname: str = "sim_trait"

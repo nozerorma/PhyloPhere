@@ -19,8 +19,11 @@ Replaced with:
   lambda=0.5 ~ the real cancer trait (fitted ~0.74). **lambda in {0, 0.5, 1}** is a
   gate axis (`--lambdas`).
 - **True foreground** = the independent top/bottom tail origins of that latent
-  (`_independent_pairs`, Dunn >= 1), however many it yields (fewer as lambda rises;
-  resample if < 3). NOT a forced count.
+  (`_independent_pairs`, Dunn >= 1). MIGUEL: the number **used is FIXED**
+  (`n_pairs = 4`, matching the pipeline's `contrast_max_iter = 3`) so replicates
+  are comparable across lambda — the latent is resampled until it supports >= 4.
+  `notes['n_possible_pairs']` (how many it *could* support: ~20 at lambda 0, ~5
+  at lambda 1) is REPORTED as the structure diagnostic.
 - **Observed trait** = latent + sampling noise: binary threshold + flipped bits;
   rate `c ~ Binomial(n, rate(latent_pctile))`, n ~ U(25,70).
 - **Plant on the TRUE lineages, not the operative pairs.** Contrast recovery

@@ -19,7 +19,7 @@ echo "=== stage + run: $OUT ($NREP reps/cell, $NGENES genes, lambda=$LAMBDAS, jo
 python -m validation.tier0.run_replicates --out "$OUT" \
     --archetypes binary,rate --sets null,power --trees primate \
     --lambdas "$LAMBDAS" --n-replicates "$NREP" --n-genes "$NGENES" \
-    --n-sites 350 --n-pairs 6 --run --jobs "$JOBS"
+    --n-sites 350 --n-pairs 4 --run --jobs "$JOBS"
 
 echo "=== score ==="
 python -m validation.harness.cli score --run "$OUT" --json "$OUT/score.json"

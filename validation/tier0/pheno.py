@@ -114,16 +114,16 @@ def _independent_pairs(
     tree: PhyloTree,
     top_ranked: list[str],
     bot_ranked: list[str],
-    rng: np.random.Generator,
     *,
-    n_max: int,
-    banned: set[str],
+    hard_cap: int = 20,
 ) -> list[tuple[str, str]]:
-    """Greedily build (top, bottom) pairs that are mutually Dunn>=1 independent.
+    """Greedily build ALL (top, bottom) pairs that are mutually Dunn>=1
+    independent, up to hard_cap. The caller slices the fixed number it uses and
+    keeps len(this) as the diagnostic "how many contrasts the trait supports".
 
     top_ranked / bot_ranked: tail tips, most-extreme first. Each top tip is
-    paired with its nearest available bottom tip; a candidate pair joins the set
-    only if every already-placed cluster stays Dunn>=1 from it.
+    paired with its nearest available bottom tip; a pair joins only if every
+    already-placed cluster stays Dunn>=1 from it.
     """
     idx = _tip_index(tree)
     depths = _node_depths(tree)
@@ -133,22 +133,19 @@ def _independent_pairs(
         return _clade_separation(tree, idx[a], idx[b], depths, parent_of)
 
     chosen: list[tuple[str, str]] = []
-    used: set[str] = set(banned)
-    bot_avail = [b for b in bot_ranked if b not in used]
-
+    used: set[str] = set()
     for a in top_ranked:
-        if a in used or len(chosen) >= n_max:
+        if a in used or len(chosen) >= hard_cap:
             continue
-        cand_b = [b for b in bot_avail if b not in used and b != a]
+        cand_b = [b for b in bot_ranked if b not in used and b != a]
         if not cand_b:
             break
         b = min(cand_b, key=lambda x: pd(a, x))
         new = {a, b}
         ok = True
         for (ta, tb) in chosen:
-            clust = {ta, tb}
             intra = max(pd(ta, tb), pd(a, b))
-            inter = min(pd(x, y) for x in new for y in clust)
+            inter = min(pd(x, y) for x in new for y in {ta, tb})
             if intra > 0 and inter / intra < 1.0:
                 ok = False
                 break
@@ -160,15 +157,14 @@ def _independent_pairs(
 
 def make_lambda_foreground(
     tree: PhyloTree,
-    n_pairs_max: int,
+    n_pairs: int,
     rng: np.random.Generator,
     *,
     kind: str = "binary",
     planted: bool = True,
     lam: float = 0.5,
     tail_frac: float = 0.25,
-    min_pairs: int = 3,
-    max_tries: int = 40,
+    max_tries: int = 60,
     fg_rate: float = 0.22,
     bg_rate: float = 0.03,
     n_min: int = 25,
@@ -176,6 +172,10 @@ def make_lambda_foreground(
     n_mid_species: int = 30,
     binary_flip: int = 1,
 ) -> Phenotype:
+    """`n_pairs` is FIXED (used = min(n_pairs, possible)); the number of
+    independent pairs the latent could support is recorded as
+    notes['n_possible_pairs'] — the interesting lambda-dependent diagnostic.
+    Resamples the latent until it supports at least `n_pairs`."""
     if kind not in ("binary", "rate"):
         raise ValueError(f"kind must be 'binary' or 'rate', got {kind!r}")
 
@@ -186,24 +186,31 @@ def make_lambda_foreground(
     banned = _outgroup_tips(tree)
     rescaled = _lambda_rescale(tree, lam)
 
-    # ── latent BM draw -> independent tail pairs (resample if too clumped) ──
-    pairs: list[tuple[str, str]] = []
+    # ── latent BM draw -> independent tail pairs (resample until it supports
+    #    n_pairs, so every replicate contributes the SAME contrast count) ─────
+    all_pairs: list[tuple[str, str]] = []
     latent: dict[str, float] = {}
+    best: list[tuple[str, str]] = []
     for _try in range(max_tries):
         latent = _bm_latent(rescaled, rng)
         ranked = sorted((t for t in tips if t not in banned), key=lambda t: latent[t])
-        k = max(min_pairs + 1, int(len(ranked) * tail_frac))
-        bot_ranked = ranked[:k]                 # lowest latent
-        top_ranked = list(reversed(ranked[-k:]))  # highest latent, most-extreme first
-        pairs = _independent_pairs(tree, top_ranked, bot_ranked, rng,
-                                   n_max=n_pairs_max, banned=banned)
-        if len(pairs) >= min_pairs:
+        k = max(n_pairs + 2, int(len(ranked) * tail_frac))
+        bot_ranked = ranked[:k]
+        top_ranked = list(reversed(ranked[-k:]))
+        all_pairs = _independent_pairs(tree, top_ranked, bot_ranked)
+        if len(all_pairs) > len(best):
+            best, best_latent = all_pairs, dict(latent)
+        if len(all_pairs) >= n_pairs:
             break
-    if len(pairs) < min_pairs:
+    if len(all_pairs) < n_pairs:
+        all_pairs, latent = best, best_latent
+    if len(all_pairs) < n_pairs:
         raise NotEnoughPairs(
-            f"lambda={lam}: only {len(pairs)} independent tail pairs after "
-            f"{max_tries} draws (need {min_pairs})"
+            f"lambda={lam}: only {len(all_pairs)} independent tail pairs after "
+            f"{max_tries} draws (need {n_pairs})"
         )
+    n_possible = len(all_pairs)
+    pairs = all_pairs[:n_pairs]                 # FIXED count -> comparable
 
     anchors = [a for a, _ in pairs]
     partners = [b for _, b in pairs]
@@ -265,7 +272,9 @@ def make_lambda_foreground(
         n_cases=n_cases,
         notes={
             "lambda": lam, "planted": planted,
-            "n_pairs": len(pairs), "tries": _try + 1,
+            "n_pairs": len(pairs),                 # FIXED, used in the analysis
+            "n_possible_pairs": n_possible,        # how many the latent supported
+            "tries": _try + 1,
             "anchors": anchors, "partners": partners,
             "n_species_with_data": len(values),
         },

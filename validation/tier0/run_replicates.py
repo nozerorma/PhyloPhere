@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--lambdas", default="0,0.5,1", help="Pagel's lambda for the latent trait")
     ap.add_argument("--n-replicates", type=int, default=10)
     ap.add_argument("--n-genes", type=int, default=120)
-    ap.add_argument("--n-pairs", type=int, default=6, help="max independent tail pairs")
+    ap.add_argument("--n-pairs", type=int, default=4, help="FIXED contrast pairs (homogeneous across lambda)")
     ap.add_argument("--planted-fraction", type=float, default=0.2)
     ap.add_argument("--n-sites", type=int, default=400)
     ap.add_argument("--concentration", type=float, default=2.0)

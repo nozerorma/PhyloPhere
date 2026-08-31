@@ -91,18 +91,22 @@ def fig_recovery_vs_lambda(scored, out: Path) -> None:
     fig, axes = plt.subplots(1, len(arches), figsize=(5.5 * len(arches), 4), squeeze=False)
     for ax, a in zip(axes[0], arches):
         for attr, lbl in series:
-            ys = []
-            for lm in lams:
-                vals = [getattr(s, attr) for s in scored
-                        if s.archetype == a and round(s.lam, 3) == lm]
-                ys.append(t0._mean(vals))
+            ys = [t0._mean([getattr(s, attr) for s in scored
+                            if s.archetype == a and round(s.lam, 3) == lm]) for lm in lams]
             ax.plot(lams, ys, marker="o", label=lbl)
         ax.set_title(a)
         ax.set_xlabel("Pagel's lambda")
         ax.set_ylabel("mean over power replicates")
         ax.set_ylim(0, 1.05)
         ax.set_xticks(lams)
-        ax.legend(fontsize=7)
+        ax.legend(fontsize=7, loc="lower left")
+        # secondary axis: how many independent pairs the latent could support
+        ax2 = ax.twinx()
+        npos = [t0._mean([s.n_possible_pairs for s in scored
+                          if s.archetype == a and round(s.lam, 3) == lm]) for lm in lams]
+        ax2.plot(lams, npos, marker="s", ls="--", color="grey", label="n possible pairs")
+        ax2.set_ylabel("n independent pairs the trait supports", color="grey")
+        ax2.tick_params(axis="y", colors="grey")
     fig.tight_layout()
     fig.savefig(out / "recovery_vs_lambda.png", dpi=130)
     plt.close(fig)
