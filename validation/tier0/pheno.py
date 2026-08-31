@@ -1,25 +1,32 @@
-"""Tier 0 phenotype construction.
+"""Tier 0 phenotype construction — evolutionary-model planting.
 
-The real pipeline's operative hypothesis is a handful (~3) of phylogenetically
-independent foreground/background contrast pairs that CONTRAST SELECTION picks
-from the trait (see the real cancer run: `traitfile.tab` = 3 pairs). Tier 0
-mirrors that directly: pick `n_pairs` well-separated foreground anchor tips, pair
-each with its nearest background neighbour, and build a trait whose contrast
-selection recovers exactly those pairs.
+The circularity we removed: previous versions hand-picked artificially
+independent foreground tips and engineered a trait around them, so contrast
+selection "recovered" them by construction.
 
-Two archetypes, differing only in how the trait column is emitted:
+Instead: simulate a latent trait by **Brownian motion on the tree rescaled by
+Pagel's lambda** — the same family the permulation draws its nulls from
+(`permulations.R` `simpermvec`). lambda tunes phylogenetic clustering:
 
-    binary : a 0/1 presence/absence code (`--trait_type ordinal`). Anchors = 1,
-             everyone else = 0.  Discrete top/bottom candidate path.
-    rate   : a `c / n` proportion with `n_pop` / `n_cases` count columns
-             (CLASS 1). Anchors get a high rate with a tight Jeffreys CI, their
-             partners a low rate tight CI, everyone else a mid rate wide CI so
-             only the anchor/partner pairs are CI-separated candidates.
+    lambda = 0   internal branches collapse -> star -> latent is iid ->
+                 the trait extremes are scattered across the tree
+    lambda = 1   full BM -> the trait extremes clump into clades
+    lambda = 0.5 in between (the real cancer-prevalence trait fitted ~0.74)
 
-The planted molecular signal is placed on the anchor lineages' terminal edges
-(each anchor is its own single-tip origin — "one pair per non-nested foreground").
-For a null replicate the trait and pairs are still built (so the pipeline runs
-identically) but `fg_edges` is empty, so `simulate()` plants nothing.
+The **true foreground** is whatever comes out at the tail of that latent draw,
+reduced to phylogenetically independent origins (Dunn >= 1). The observed trait
+handed to the pipeline is that latent + sampling noise. The molecular signal is
+planted on the TRUE foreground lineages by a separate process (the Gillespie
+substitution sim), so contrast-recovery (operative fg vs true pairs) is an
+honest measurement that varies with lambda, not a tautology.
+
+Each planted gene is planted in one direction, ``top`` or ``bottom`` — the
+pipeline scores a convergent change in the high-trait species and in the
+low-trait species symmetrically (`change_top` / `change_bottom`).
+
+Two archetypes differ only in the trait column:
+    binary : threshold the latent -> 0/1 (`--trait_type ordinal`), a few bits flipped
+    rate   : c ~ Binomial(n, rate(latent_percentile)), n ~ U(25, 70) -> CLASS 1
 """
 
 from __future__ import annotations
@@ -37,119 +44,208 @@ from .trees import (
 )
 
 
+class NotEnoughPairs(RuntimeError):
+    """The latent draw produced < min_pairs independent tail origins."""
+
+
 @dataclass
 class Phenotype:
     archetype: str                          # "binary" | "rate"
     kind: str                               # "binary" | "continuous"
-    values: dict[str, float]                # tip -> trait value (species with data only)
-    foreground_tips: list[str]              # anchors — signal planted on their lineages
-    origin_nodes: list[int]                 # anchor leaf node ids
-    fg_edges: set[int]                      # anchor terminal edges (empty for a null)
-    pairs: list[tuple[str, str]]            # (foreground anchor, background partner)
-    n_pop: dict[str, int] | None = None     # rate archetype: sample size per species
-    n_cases: dict[str, int] | None = None   # rate archetype: event count per species
-    top_quantile: float = 0.90
-    bottom_quantile: float = 0.10
+    lam: float                              # Pagel's lambda used for the latent
+    values: dict[str, float]                # tip -> observed trait value
+    pairs: list[tuple[str, str]]            # TRUE (top anchor, bottom partner) pairs
+    anchor_nodes: list[int]
+    partner_nodes: list[int]
+    anchor_edges: set[int]
+    partner_edges: set[int]
+    n_pop: dict[str, int] | None = None
+    n_cases: dict[str, int] | None = None
     notes: dict = field(default_factory=dict)
 
     @property
-    def n_transitions(self) -> int:
-        return len(self.origin_nodes)
+    def foreground_tips(self) -> list[str]:
+        return sorted(a for a, _ in self.pairs)
 
-    def as_foreground(self) -> Foreground:
-        return Foreground(tips=sorted(self.foreground_tips),
-                          origin_nodes=list(self.origin_nodes),
-                          fg_edges=set(self.fg_edges))
+    @property
+    def n_transitions(self) -> int:
+        return len(self.pairs)
+
+    def foreground(self, direction: str) -> Foreground:
+        if direction == "top":
+            return Foreground(tips=[a for a, _ in self.pairs],
+                              origin_nodes=list(self.anchor_nodes),
+                              fg_edges=set(self.anchor_edges))
+        if direction == "bottom":
+            return Foreground(tips=[b for _, b in self.pairs],
+                              origin_nodes=list(self.partner_nodes),
+                              fg_edges=set(self.partner_edges))
+        raise ValueError(f"direction must be 'top' or 'bottom', got {direction!r}")
 
 
 def _tip_index(tree: PhyloTree) -> dict[str, int]:
     return {tree.labels[l]: l for l in tree._leaves()}
 
 
-def make_paired_foreground(
+def _lambda_rescale(tree: PhyloTree, lam: float) -> PhyloTree:
+    """Pagel's lambda: internal branches x lambda; each terminal branch extended
+    so every root-to-tip distance is preserved. lambda in [0, 1]."""
+    lam = float(np.clip(lam, 0.0, 1.0))
+    leaves = set(tree._leaves())
+    depth_parent = _node_depths(tree)  # root-to-node on the ORIGINAL tree
+    new_edges = []
+    for p, c, bl in tree.edges:
+        if c in leaves:
+            new_edges.append((p, c, bl + (1.0 - lam) * depth_parent[p]))
+        else:
+            new_edges.append((p, c, bl * lam))
+    return PhyloTree(labels=list(tree.labels), edges=new_edges, root=tree.root)
+
+
+def _bm_latent(tree: PhyloTree, rng: np.random.Generator) -> dict[str, float]:
+    """Exact BM down the tree: child = parent + N(0, branch_length)."""
+    v = {tree.root: 0.0}
+    for p, c, bl in tree.edges:
+        v[c] = v[p] + rng.normal(0.0, np.sqrt(max(bl, 0.0)))
+    return {tree.labels[i]: float(v[i]) for i in tree._leaves()}
+
+
+def _independent_pairs(
     tree: PhyloTree,
-    n_pairs: int,
+    top_ranked: list[str],
+    bot_ranked: list[str],
+    rng: np.random.Generator,
+    *,
+    n_max: int,
+    banned: set[str],
+) -> list[tuple[str, str]]:
+    """Greedily build (top, bottom) pairs that are mutually Dunn>=1 independent.
+
+    top_ranked / bot_ranked: tail tips, most-extreme first. Each top tip is
+    paired with its nearest available bottom tip; a candidate pair joins the set
+    only if every already-placed cluster stays Dunn>=1 from it.
+    """
+    idx = _tip_index(tree)
+    depths = _node_depths(tree)
+    parent_of = {c: p for p, c, _ in tree.edges}
+
+    def pd(a: str, b: str) -> float:
+        return _clade_separation(tree, idx[a], idx[b], depths, parent_of)
+
+    chosen: list[tuple[str, str]] = []
+    used: set[str] = set(banned)
+    bot_avail = [b for b in bot_ranked if b not in used]
+
+    for a in top_ranked:
+        if a in used or len(chosen) >= n_max:
+            continue
+        cand_b = [b for b in bot_avail if b not in used and b != a]
+        if not cand_b:
+            break
+        b = min(cand_b, key=lambda x: pd(a, x))
+        new = {a, b}
+        ok = True
+        for (ta, tb) in chosen:
+            clust = {ta, tb}
+            intra = max(pd(ta, tb), pd(a, b))
+            inter = min(pd(x, y) for x in new for y in clust)
+            if intra > 0 and inter / intra < 1.0:
+                ok = False
+                break
+        if ok:
+            chosen.append((a, b))
+            used |= new
+    return chosen
+
+
+def make_lambda_foreground(
+    tree: PhyloTree,
+    n_pairs_max: int,
     rng: np.random.Generator,
     *,
     kind: str = "binary",
     planted: bool = True,
-    fg_rate: float = 0.25,
-    bg_rate: float = 0.02,
-    mid_rate: float = 0.08,
-    tight_n: int = 150,
-    wide_n: int = 18,
+    lam: float = 0.5,
+    tail_frac: float = 0.25,
+    min_pairs: int = 3,
+    max_tries: int = 40,
+    fg_rate: float = 0.22,
+    bg_rate: float = 0.03,
+    n_min: int = 25,
+    n_max: int = 70,
     n_mid_species: int = 30,
+    binary_flip: int = 1,
 ) -> Phenotype:
     if kind not in ("binary", "rate"):
         raise ValueError(f"kind must be 'binary' or 'rate', got {kind!r}")
 
     tips = tree.tips
     idx_of = _tip_index(tree)
-    depths = _node_depths(tree)
     parent_of = {c: p for p, c, _ in tree.edges}
     edge_index = {(p, c): i for i, (p, c, _) in enumerate(tree.edges)}
     banned = _outgroup_tips(tree)
+    rescaled = _lambda_rescale(tree, lam)
 
-    def pd(a: str, b: str) -> float:
-        return _clade_separation(tree, idx_of[a], idx_of[b], depths, parent_of)
+    # ── latent BM draw -> independent tail pairs (resample if too clumped) ──
+    pairs: list[tuple[str, str]] = []
+    latent: dict[str, float] = {}
+    for _try in range(max_tries):
+        latent = _bm_latent(rescaled, rng)
+        ranked = sorted((t for t in tips if t not in banned), key=lambda t: latent[t])
+        k = max(min_pairs + 1, int(len(ranked) * tail_frac))
+        bot_ranked = ranked[:k]                 # lowest latent
+        top_ranked = list(reversed(ranked[-k:]))  # highest latent, most-extreme first
+        pairs = _independent_pairs(tree, top_ranked, bot_ranked, rng,
+                                   n_max=n_pairs_max, banned=banned)
+        if len(pairs) >= min_pairs:
+            break
+    if len(pairs) < min_pairs:
+        raise NotEnoughPairs(
+            f"lambda={lam}: only {len(pairs)} independent tail pairs after "
+            f"{max_tries} draws (need {min_pairs})"
+        )
 
-    # ── foreground anchors: farthest-point over non-outgroup tips ────────────
-    pool = [t for t in tips if t not in banned]
-    if len(pool) < 2 * n_pairs:
-        raise ValueError(f"{len(pool)} usable tips < 2 * n_pairs ({2 * n_pairs})")
-    rng.shuffle(pool)
-    anchors = [pool[0]]
-    while len(anchors) < n_pairs:
-        best, best_sep = None, -1.0
-        for t in pool:
-            if t in anchors:
-                continue
-            sep = min(pd(t, a) for a in anchors)
-            if sep > best_sep:
-                best, best_sep = t, sep
-        anchors.append(best)
-
-    # ── background partner = nearest unused tip to each anchor ──────────────
-    used = set(anchors)
-    partners: list[str] = []
-    for a in anchors:
-        cand = [t for t in tips if t not in used and t not in banned]
-        p = min(cand, key=lambda t: pd(a, t))
-        partners.append(p)
-        used.add(p)
-    pairs = list(zip(anchors, partners))
-
-    origin_nodes = [idx_of[a] for a in anchors]
-    fg_edges: set[int] = set()
-    if planted:
-        for a in anchors:
-            n = idx_of[a]
-            if n in parent_of:
-                fg_edges.add(edge_index[(parent_of[n], n)])
-
+    anchors = [a for a, _ in pairs]
+    partners = [b for _, b in pairs]
     anchor_set, partner_set = set(anchors), set(partners)
+    used = anchor_set | partner_set
 
-    # ── trait values ───────────────────────────────────────────────────────
+    def _terms(names) -> set[int]:
+        return {edge_index[(parent_of[idx_of[t]], idx_of[t])]
+                for t in names if idx_of[t] in parent_of}
+
+    anchor_edges = _terms(anchors) if planted else set()
+    partner_edges = _terms(partners) if planted else set()
+
+    # ── observed trait: latent + sampling noise ──────────────────────────
+    lat_vals = np.array([latent[t] for t in tips])
+    lat_rank = {t: r / (len(tips) - 1) for r, t in
+                enumerate(sorted(tips, key=lambda t: latent[t]))}
+
     if kind == "binary":
-        values = {t: (1.0 if t in anchor_set else 0.0) for t in tips}
+        thr = np.quantile(lat_vals, 1.0 - tail_frac)
+        val = {t: (1.0 if latent[t] >= thr and t not in banned else 0.0) for t in tips}
+        # noise: flip a few anchors off, a few non-anchors on
+        for a in list(rng.permutation(anchors))[:binary_flip]:
+            val[a] = 0.0
+        pos_pool = [t for t in tips if t not in used and t not in banned and val[t] == 0.0]
+        rng.shuffle(pos_pool)
+        for t in pos_pool[:binary_flip]:
+            val[t] = 1.0
+        values = {t: val[t] for t in tips}
         n_pop = n_cases = None
         kind_out = "binary"
     else:
-        others = [t for t in tips if t not in used]
+        others = [t for t in tips if t not in used and t not in banned]
         rng.shuffle(others)
         data_sp = anchor_set | partner_set | set(others[: max(0, n_mid_species)])
         values, n_pop, n_cases = {}, {}, {}
         for t in tips:
             if t not in data_sp:
                 continue
-            if t in anchor_set:
-                r, nn = fg_rate * (1.0 + rng.uniform(-0.15, 0.15)), tight_n
-            elif t in partner_set:
-                r, nn = bg_rate * (1.0 + rng.uniform(-0.30, 0.30)), tight_n
-            else:
-                r, nn = mid_rate * (1.0 + rng.uniform(-0.4, 0.4)), int(wide_n * rng.uniform(0.7, 1.5))
-            nn = max(int(nn), 5)
-            c = int(round(np.clip(r, 0.0, 1.0) * nn))
+            rate = bg_rate + (fg_rate - bg_rate) * (lat_rank[t] ** 2)  # top-latent -> high rate
+            nn = int(rng.integers(n_min, n_max + 1))
+            c = int(rng.binomial(nn, min(rate, 1.0)))
             values[t] = c / nn
             n_pop[t] = nn
             n_cases[t] = c
@@ -158,20 +254,19 @@ def make_paired_foreground(
     return Phenotype(
         archetype=("binary" if kind == "binary" else "rate"),
         kind=kind_out,
+        lam=lam,
         values=values,
-        foreground_tips=sorted(anchor_set),
-        origin_nodes=origin_nodes,
-        fg_edges=fg_edges,
         pairs=pairs,
+        anchor_nodes=[idx_of[a] for a in anchors],
+        partner_nodes=[idx_of[b] for b in partners],
+        anchor_edges=anchor_edges,
+        partner_edges=partner_edges,
         n_pop=n_pop,
         n_cases=n_cases,
-        top_quantile=0.90,
-        bottom_quantile=0.10,
         notes={
-            "n_pairs": n_pairs,
-            "planted": planted,
-            "anchors": list(anchors),
-            "partners": list(partners),
+            "lambda": lam, "planted": planted,
+            "n_pairs": len(pairs), "tries": _try + 1,
+            "anchors": anchors, "partners": partners,
             "n_species_with_data": len(values),
         },
     )

@@ -117,29 +117,33 @@ def _fake_rep(root: Path, subset: str, *, planted: bool) -> None:
         is_p = planted and i <= 2
         genes[g] = {
             "planted": is_p,
+            "direction": ("top" if i == 1 else "bottom") if is_p else None,
             "planted_sites": ({"3": "identical_aa", "7": "grouped_caap"} if is_p else {}),
             "n_planted": 2 if is_p else 0,
         }
     (rep / "truth.json").write_text(json.dumps({
         "planted": planted, "archetype": "binary", "genes": genes,
-        "phenotype": {"foreground_tips": ["spA", "spB"],
+        "phenotype": {"lambda": 0.0,
+                      "foreground_tips": ["spA", "spB"], "partner_tips": ["spX", "spY"],
                       "pairs": [["spA", "spX"], ["spB", "spY"]]},
     }))
 
-    gh = "Gene\tn_positions\tgene_caas_score\n"
-    if planted:  # planted genes carry many CAAS positions; background ~1
-        grows = "g0001\t18\t0.95\ng0002\t16\t0.88\ng0003\t1\t0.12\ng0004\t1\t0.05\ng0005\t1\t0.03\n"
-    else:        # null: every gene ~1 spurious CAAS
-        grows = "g0001\t1\t0.20\ng0002\t2\t0.15\ng0003\t1\t0.10\ng0004\t1\t0.06\ng0005\t1\t0.02\n"
+    gh = "Gene\tn_positions\tgene_caas_score\tgene_caas_score_top\tgene_caas_score_bottom\n"
+    if planted:
+        grows = ("g0001\t18\t0.95\t0.95\tNA\ng0002\t16\t0.88\tNA\t0.88\n"
+                 "g0003\t1\t0.12\t0.1\tNA\ng0004\t1\t0.05\tNA\t0.05\ng0005\t1\t0.03\t0.03\tNA\n")
+    else:
+        grows = ("g0001\t1\t0.20\t0.2\tNA\ng0002\t2\t0.15\tNA\t0.15\n"
+                 "g0003\t1\t0.10\t0.1\tNA\ng0004\t1\t0.06\tNA\t0.06\ng0005\t1\t0.02\t0.02\tNA\n")
     (res / "gene_scores.tsv").write_text(gh + grows)
 
-    ph = "Gene\tPosition\tpvalue\tpvalue_boot\tscheme_set\tCAAS_score\n"
+    ph = "Gene\tPosition\tpvalue\tpvalue_boot\tscheme_set\tCAAS_score\tchange_side\n"
     prows = (
-        "g0001\t3\t0.001\t0.01\tGS1+GS2+US\t0.8\n"
-        "g0001\t7\t0.003\t0.03\tGS1+GS3\t0.6\n"
-        "g0002\t3\t0.002\t0.02\tGS1+US\t0.7\n"
-        "g0002\t7\t0.004\t0.04\tGS1+GS3\t0.55\n"
-        if planted else "g0003\t44\t0.2\t0.6\tGS1\t0.1\n"
+        "g0001\t3\t1e-6\t0.01\tGS1+GS2+US\t0.8\ttop\n"
+        "g0001\t7\t3e-6\t0.03\tGS1+GS3\t0.6\ttop\n"
+        "g0002\t3\t2e-6\t0.02\tGS1+US\t0.7\tbottom\n"
+        "g0002\t7\t4e-6\t0.04\tGS1+GS3\t0.55\tbottom\n"
+        if planted else "g0003\t44\t0.2\t0.6\tGS1\t0.1\ttop\n"
     )
     (res / "position_scores.tsv").write_text(ph + prows)
 
@@ -151,25 +155,26 @@ def _fake_rep(root: Path, subset: str, *, planted: bool) -> None:
 def test_tier0_adapter_score(tmp_path: Path) -> None:
     from validation.harness import tier0_adapter as t0
 
-    _fake_rep(tmp_path, "binary_power_primate", planted=True)
-    _fake_rep(tmp_path, "binary_null_primate", planted=False)
+    _fake_rep(tmp_path, "binary_power_primate_lam0", planted=True)
+    _fake_rep(tmp_path, "binary_null_primate_lam0", planted=False)
     res = t0.score(tmp_path)
 
     assert res.n_power_replicates == 1
     rs = res.per_replicate[0]
+    assert rs.lam == 0.0
     assert rs.gene_planted_ranks == {"g0001": 1, "g0002": 2}
-    assert rs.gene_precision_at_k == 1.0
     assert rs.gene_precision_at_k_npos == 1.0
-    assert rs.planted_in_slice_global25 == 1.0       # both planted genes in the top-25% slice
-    assert rs.planted_in_slice_global5 == 0.5        # only g0001 in the top-5%
+    assert rs.site_recall == 1.0
+    assert rs.site_directional_recall == 1.0          # all 4 sites on the right side
     assert rs.identical_aa_us_recall == 1.0
     assert rs.grouped_caap_gs_recall == 1.0
-    assert rs.grouped_caap_us_leakage == 0.0        # both grouped sites were GS-only
-    assert rs.contrast_pairs_recovered == 2 and rs.contrast_fg_precision == 1.0
+    assert rs.grouped_caap_us_leakage == 0.0
+    assert rs.contrast_anchor_recall == 1.0 and rs.contrast_pair_exact == 1.0
 
     assert len(res.separation) == 1
     sep = res.separation[0]
-    assert sep.auc_npos == 1.0                       # planted 16/18 positions >> null max 2
+    assert sep.archetype == "binary" and sep.lam == 0.0
+    assert sep.auc_npos == 1.0
     assert sep.separated is True
     assert res.verdict == "PASS"
 

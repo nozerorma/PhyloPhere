@@ -8,6 +8,34 @@ chosen by Miguel.
 
 ## Tier 0
 
+### D-T0-Q — evolutionary-model planting (2026-08-31, MIGUEL, supersedes the D-T0-P foreground)
+The D-T0-P "farthest-point anchors + engineered trait" made contrast recovery a
+tautology (we cherry-picked independent lineages and built the trait around them).
+Replaced with:
+
+- **Latent trait = BM on the tree rescaled by Pagel's lambda** (`pheno._lambda_rescale`
+  + `_bm_latent`) — the same family the permulation's `simpermvec` draws its nulls
+  from. lambda=0 star -> scattered extremes; lambda=1 full BM -> clade-clumped;
+  lambda=0.5 ~ the real cancer trait (fitted ~0.74). **lambda in {0, 0.5, 1}** is a
+  gate axis (`--lambdas`).
+- **True foreground** = the independent top/bottom tail origins of that latent
+  (`_independent_pairs`, Dunn >= 1), however many it yields (fewer as lambda rises;
+  resample if < 3). NOT a forced count.
+- **Observed trait** = latent + sampling noise: binary threshold + flipped bits;
+  rate `c ~ Binomial(n, rate(latent_pctile))`, n ~ U(25,70).
+- **Plant on the TRUE lineages, not the operative pairs.** Contrast recovery
+  (operative `traitfile.tab` vs true pairs) is now an honest lambda-dependent
+  measurement: anchor recall / partner recall / exact-pair / lineage Jaccard,
+  reported as a curve, NOT gated.
+- **Top vs bottom**: each planted gene planted in one direction; the pipeline
+  scores `change_top`/`change_bottom`, `gene_caas_score_top/bottom` symmetrically.
+  Adapter reports `site_directional_recall` (detected AND on the right side).
+- **Score-level separation** reported (not gated): position `CAAS_score` AUC,
+  position `-log10 pvalue` AUC (the hypergeometric p separates strongly),
+  `gene_caas_score` AUC (does not — size-decorrelated by design).
+- VERDICT: occurrence separation at every cell + precision@k / site_recall at the
+  lowest lambda.
+
 ### D-T0-P — FINAL design (2026-08-30, supersedes D-T0-A / D-T0-C / D-T0-M / D-T0-H)
 After inspecting the real cancer run and the permulation code, the Tier 0 design
 was rebuilt:

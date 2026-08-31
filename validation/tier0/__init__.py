@@ -12,8 +12,8 @@ Modules:
                       draws, gamma rates
     groups.py         GS1-GS4 amino-acid class tables (vendored from the pipeline)
     trees.py          tree loading / depth-preserving pruning / star + ladder
-    pheno.py          make_paired_foreground — n_pairs fg/bg contrast pairs;
-                      binary (0/1 code) or rate (c/n + count columns) archetype
+    pheno.py          make_lambda_foreground — BM-under-lambda latent trait ->
+                      independent tail pairs; binary or rate archetype; lambda axis
     simulate.py       evolve a sequence down a tree, inject planted positives
                       (identical_aa + grouped_caap), write FASTA + truth
     replicate.py      one (tree, phenotype) draw -> n_genes alignments + support

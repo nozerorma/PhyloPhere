@@ -34,7 +34,8 @@ from .trees import PhyloTree
 @dataclass
 class ReplicateConfig:
     archetype: str = "binary"            # "binary" (0/1 code) | "rate" (c/n + counts)
-    n_pairs: int = 4                     # foreground/background contrast pairs
+    lam: float = 0.5                     # Pagel's lambda for the latent trait (0 | 0.5 | 1)
+    n_pairs: int = 6                     # max independent tail pairs to take
     n_genes: int = 150
     frac_planted_genes: float = 0.2
     traitname: str = "sim_trait"
@@ -84,22 +85,24 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
     (outdir / "align").mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(seed)
 
-    # ── phenotype: n_pairs fg/bg contrast pairs (planted=False -> null) ─────
+    # ── phenotype: BM-under-lambda latent -> independent tail pairs ────────
     if rcfg.archetype not in ("binary", "rate"):
         raise ValueError(f"unknown archetype {rcfg.archetype!r}")
-    ph = _pheno.make_paired_foreground(
+    ph = _pheno.make_lambda_foreground(
         tree, rcfg.n_pairs, rng,
         kind=("binary" if rcfg.archetype == "binary" else "rate"),
-        planted=rcfg.planted,
+        planted=rcfg.planted, lam=rcfg.lam,
     )
-
-    fg = ph.as_foreground()
 
     # ── genes ───────────────────────────────────────────────────────────────
     n_planted = 0 if not rcfg.planted else max(1, round(rcfg.n_genes * rcfg.frac_planted_genes))
     planted_flags = np.zeros(rcfg.n_genes, dtype=bool)
     planted_flags[:n_planted] = True
     rng.shuffle(planted_flags)
+    # per planted gene: alternate top / bottom planting direction
+    directions = ["top" if i % 2 == 0 else "bottom" for i in range(n_planted)]
+    rng.shuffle(directions)
+    fg_top, fg_bot = ph.foreground("top"), ph.foreground("bottom")
 
     genes: dict = {}
     ensembl_rows = ["gene\tchr\tstart\tend\tstrand\tlength\thuman_protein_id"]
@@ -120,6 +123,7 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
             f"{gid}\t{chrom}\t{start}\t{start + length_bp}\t+\t{rcfg.n_sites}\tSYN{gi + 1:05d}"
         )
         is_planted = bool(planted_flags[gi])
+        direction = directions[sum(planted_flags[:gi])] if is_planted else None
         scfg = SimConfig(
             n_sites=rcfg.n_sites, concentration=rcfg.concentration,
             gamma_alpha=rcfg.gamma_alpha, matrix=rcfg.matrix,
@@ -129,10 +133,12 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
             grouped_caap_scheme=rcfg.grouped_caap_scheme,
             identical_aa_target_weight=rcfg.identical_aa_target_weight,
         )
-        res = simulate(tree, fg if is_planted else None, scfg, seed=seed * 100_000 + gi)
+        gene_fg = (fg_top if direction == "top" else fg_bot) if is_planted else None
+        res = simulate(tree, gene_fg, scfg, seed=seed * 100_000 + gi)
         _write_fasta(outdir / "align" / f"{gid}.fasta", res.alignment)
         genes[gid] = {
             "planted": is_planted,
+            "direction": direction,
             "planted_sites": {str(k): v for k, v in res.truth.planted_sites.items()},
             "identical_aa_targets": res.truth.identical_aa_targets,
             "grouped_caap_targets": res.truth.grouped_caap_targets,
@@ -184,12 +190,12 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
         "traitname": rcfg.traitname,
         "planted": rcfg.planted,
         "phenotype": {
+            "lambda": ph.lam,
             "values": {k: round(v, 6) for k, v in ph.values.items()},
-            "foreground_tips": ph.foreground_tips,
+            "foreground_tips": ph.foreground_tips,          # true top anchors
+            "partner_tips": sorted(b for _, b in ph.pairs),  # true bottom partners
             "pairs": [list(pr) for pr in ph.pairs],
             "n_origins": ph.n_transitions,
-            "top_quantile": ph.top_quantile,
-            "bottom_quantile": ph.bottom_quantile,
             "notes": ph.notes,
         },
         "tree": {
@@ -207,12 +213,11 @@ def build_replicate(tree: PhyloTree, rcfg: ReplicateConfig, seed: int,
         "dir": outdir.name,
         "seed": seed,
         "archetype": rcfg.archetype,
+        "lambda": rcfg.lam,
         "planted": rcfg.planted,
         "n_tips": len(tree.tips),
         "n_genes": rcfg.n_genes,
         "n_planted_genes": int(n_planted),
         "n_origins": ph.n_transitions,
         "trait_kind": ph.kind,
-        "top_quantile": ph.top_quantile,
-        "bottom_quantile": ph.bottom_quantile,
     }

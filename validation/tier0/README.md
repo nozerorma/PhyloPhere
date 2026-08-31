@@ -1,161 +1,116 @@
 # Tier 0 — simulation: does the pipeline recover planted convergence?
 
-**Question.** If I plant convergent substitutions in genes/sites I choose, on
-foreground lineages I choose, does PhyloPhere rank those genes and sites to the
-top — and do genes with nothing planted stay at the bottom?
+**Question.** Plant convergent substitutions on lineages a phylogenetic process
+picked out, hand the pipeline a noisy trait for those lineages, and ask: does it
+rank those genes and sites to the top, assign them to the right direction, and
+keep genes with nothing planted at the bottom — and how does all of that hold up
+as the trait becomes more phylogenetically clustered?
 
-That is the whole test. It is a **signal-recovery check on a prioritisation
-engine** (the pipeline's permulation p-values are foreground-specificity scores,
-never Uniform(0,1) — see `../docs/DECISIONS.md` D-T0-M and the project memory).
-There is no KS uniformity gate.
+It is a **signal-recovery check on a prioritisation engine** (`../docs/DECISIONS.md`
+D-T0-P; the pipeline's permulation p-values are foreground-specificity scores,
+never Uniform(0,1) — no KS gate).
 
-## The experiment (the gate)
+## The design — evolutionary-model planting (D-T0-Q)
 
-One configuration, two runs per archetype:
+1. **Latent trait = Brownian motion on the tree rescaled by Pagel's lambda.**
+   Same family the permulation draws its nulls from (`permulations.R` `simpermvec`).
+   - `lambda = 0` — internal branches collapse to a star → latent is iid → the
+     trait extremes are **scattered** across the tree.
+   - `lambda = 1` — full BM → the extremes **clump into clades**.
+   - `lambda = 0.5` — in between (the real cancer-prevalence trait fitted ≈ 0.74).
+2. **True foreground** = the independent top- and bottom-tail origins of that
+   latent draw, reduced to non-nested clusters that are mutually Dunn ≥ 1.
+   However many that yields (fewer as lambda rises); resample if < 3.
+3. **Observed trait** handed to the pipeline = latent + sampling noise:
+   - `binary` — threshold the latent → 0/1 (`--trait_type ordinal`), a few bits flipped.
+   - `rate` — `c ~ Binomial(n, rate(latent_percentile))`, `n ~ U(25, 70)` → CLASS 1
+     (Jeffreys CI). This is the shape of the real cancer run.
+4. **Molecular convergence is planted on the TRUE foreground lineages** — not on
+   whatever contrast selection outputs. Each planted gene is planted in one
+   direction, `top` or `bottom` (the pipeline scores a convergent change in the
+   high-trait and the low-trait species symmetrically).
+5. Contrast selection runs on the *observed* trait and produces its own operative
+   pairs, which differ from the true foreground. That gap, **as a function of
+   lambda**, is the non-circular measurement.
 
-| | genes | planted |
-|---|---|---|
-| **power** | ~150 | convergence in ~20% of them |
-| **null** | ~150 | none |
-
-Everything else identical: full 237-tip primate tree, `n_pairs = 4` foreground/
-background contrast pairs, ~400 sites, `concentration ≈ 2`, production permulation
-settings. Modules: `contrast_selection` + `CAAS` + `CT_DISAMBIGUATION` + `SCORING`
-(RER / FADE / accumulation / enrichment / VEP off).
-
-### Two archetypes
-
-Both build the foreground the same way — `n_pairs` phylogenetically independent
-anchor tips, each paired with its nearest background neighbour — and run through
-contrast selection in the loop. They differ only in the trait column:
-
-- **`binary`** — a 0/1 presence/absence code (`--trait_type ordinal`, CLASS 2).
-  Anchors = 1, everyone else = 0. Discrete top/bottom candidate path.
-- **`rate`** — a `c / n` proportion with `n_pop` / `n_cases` count columns
-  (CLASS 1). Anchors get a high rate + tight Jeffreys CI, partners a low rate +
-  tight CI, ~30 other species a mid rate + wide CI, so only the anchor/partner
-  pairs are CI-separated candidates. This is the shape of the real cancer run
-  (`malignant_prevalence`: 3 pairs from a `malignant_count / necropsy_count`
-  trait).
-
-The planted molecular signal is placed on the anchor lineages' terminal edges
-(each anchor is its own single-tip origin). For a `null` replicate the trait and
-pairs are still built — the pipeline runs identically — but nothing is planted.
+Gate axes: `primate` tree × {binary, rate} × {null, power} × **lambda ∈ {0, 0.5, 1}**.
+~120 genes, 350 sites, `concentration ≈ 2`, production permulation settings.
+Modules: `contrast_selection` + `CAAS` + `CT_DISAMBIGUATION` + `SCORING`.
 
 ## Planted mechanisms (D-T0-02)
 
 Per planted gene, ~12 + ~12 sites:
 
-- **`identical_aa`** — near-point-mass equilibrium on one target residue (the
-  least-favoured under the site's background profile). Every foreground lineage
+- **`identical_aa`** — near-point-mass on one residue → every planted lineage
   converges to the *same* residue → a strict-CAAS (`US`) positive, and a
   grouped-CAAP (`GS1–GS4`) hit for free.
-- **`grouped_caap`** — equilibrium ~uniform over one GS1 physicochemical class
-  (the class most disfavoured in the background); a fresh residue from the class
-  is seeded per origin, so origins share the *class* but usually differ in
-  *residue* → a **GS-only** positive that `US` should not call. This is what
-  tests whether the grouped schemes add signal.
+- **`grouped_caap`** — ~uniform over one GS1 class, a distinct residue seeded per
+  origin → origins share the *class*, differ in *residue*. GS should call it;
+  whether US also calls it depends on the background (see gate result).
 
-Generative model differs from the pipeline's inference model on purpose: WAG
-exchangeabilities, per-site Dirichlet profiles (CAT-like), continuous Γ, exact
-Gillespie evolution.
+Generative model differs from the pipeline's inference model on purpose (WAG
+exchangeabilities, per-site Dirichlet profiles, continuous Γ, Gillespie).
 
 ## Scoring (`harness score`)
 
 `python -m validation.harness.cli score --run validation/runs/tier0`
 
-Per archetype:
+Reported **per (archetype, lambda) cell**:
 
-1. **Null vs power separation** (the "type-I" analogue) — pooled: AUC of the
-   **detected-CAAS count** (`n_positions`) of planted genes in power replicates
-   vs *every* gene in the matched null replicates. This is absolute and
-   replicate-comparable; `gene_caas_score` is a within-run percentile rank and
-   is reported only as a secondary read (`caas_score AUC`). `separated` = AUC ≥
-   0.95 **and** planted p50 > null p95.
-2. **Prioritisation** — `precision@k` (of the top-n_planted genes, fraction
-   planted), median planted-gene rank percentile, `slice_global25` /
-   `slice_global5` membership.
-3. **Site recovery** — planted-site detection recall, split by mechanism and by
-   scheme: `identical_aa → US`, `grouped_caap → GS` (`US also` = fraction of
-   grouped sites that also tripped US).
-4. **Contrast recovery** — operative foreground from `traitfile.tab` vs the
-   planted pairs (Jaccard + per-pair recovery).
+1. **Null vs power — occurrence** (the "type-I" analogue): AUC of the
+   **detected-CAAS count** of planted genes vs every gene in the matched null
+   replicates. `separated` = AUC ≥ 0.95 and planted p50 > null p95. Score-level
+   AUCs (position `CAAS_score`, position `−log10 p`, `gene_caas_score`) are
+   **reported, not gated** — `gene_caas_score` is a within-run percentile rank
+   and does not separate across replicates by design.
+2. **Prioritisation** — `precision@k` (top-n_planted genes by CAAS count that are
+   planted), planted rank percentile, `slice_global25` membership.
+3. **Site recovery** — planted-site detection recall, `directional` recall
+   (detected *and* on the right top/bottom side), split by mechanism × scheme.
+4. **Contrast recovery** — operative pairs (`traitfile.tab`) vs the true
+   lambda-drawn pairs: anchor recall, partner recall, exact-pair rate, lineage
+   Jaccard. **Reported as a lambda-curve, not gated** — expected to degrade as
+   the trait clumps.
 
-`VERDICT: PASS` when every archetype separates on detected-CAAS count,
-`precision@k ≥ 0.8`, and `site_recall ≥ 0.8`.
+`VERDICT: PASS` when, at **every** cell, the pipeline manufactures no false
+signal (occurrence separates) and, **at the lowest lambda**, `precision@k ≥ 0.85`
+and `site_recall ≥ 0.8`.
 
 ## Run
 
 ```bash
 # fetch trees once (validation/fixtures/tier0/README.md), then one command:
-validation/tier0/reproduce.sh                       # -> validation/runs/tier0_gate/
-#   stage + run (binary,rate x null,power x primate) + score + figures
-# args: reproduce.sh [OUT_DIR] [N_REPLICATES] [N_GENES]   (JOBS=N env var)
-```
+validation/tier0/reproduce.sh          # -> validation/runs/tier0_gate/
+#   reproduce.sh [OUT_DIR] [N_REPLICATES] [N_GENES];  LAMBDAS= JOBS= env vars
 
-Or step by step:
-
-```bash
-python -m validation.tier0.run_replicates --out validation/runs/tier0 \
+# step by step:
+python -m validation.tier0.run_replicates --out validation/runs/tier0_gate \
     --archetypes binary,rate --sets null,power --trees primate \
-    --n-replicates 10 --n-genes 120 --run --jobs 2
-python -m validation.harness.cli score --run validation/runs/tier0 --json validation/runs/tier0/score.json
-python -m validation.tier0.plots       --run validation/runs/tier0
+    --lambdas 0,0.5,1 --n-replicates 10 --n-genes 120 --run --jobs 2
+python -m validation.harness.cli score --run validation/runs/tier0_gate --json .../score.json
+python -m validation.tier0.plots       --run validation/runs/tier0_gate
 ```
 
-`~40 replicates × ~10–20 min` each; memory-bound (each replicate is a full
-Nextflow run). The reference result is committed under `gate_result/` — see its
-`SUMMARY.md` to re-score/re-plot without re-running.
+`3 lambda × 2 archetypes × 2 sets × 10 reps = 120 replicates`, ~10–20 min each,
+memory-bound (each is a full Nextflow run).
 
 ## Tests
 
 ```bash
-python -m pytest validation/tests -q                # harness + tier0 unit tests
-Rscript subworkflows/TRAIT_ANALYSIS/local/src/ordinal_trait_test.R   # binary-trait contrast selection
+python -m pytest validation/tests -q
+Rscript subworkflows/TRAIT_ANALYSIS/local/src/ordinal_trait_test.R
 ```
-
-## Gate result — `VERDICT: PASS`
-
-Full numbers, figures and reproduce instructions: **`gate_result/SUMMARY.md`**.
-Reference run: `primate` × {binary, rate} × {null, power}, 10 reps/cell, 120
-genes, 350 sites, 2026-08-31.
-
-| metric | binary | rate |
-|---|---|---|
-| null-vs-power separation, AUC(detected-CAAS count) | **1.00** | **1.00** |
-| — planted p50 / null p95 (null max) | 24 / 1 (2) | 24 / 1 (2) |
-| precision@k, by detected-CAAS count | 1.00 | 1.00 |
-| precision@k, by `gene_caas_score` | 0.82 | 0.95 |
-| site recall / `identical_aa → US` / `grouped_caap → GS` | 0.99 / 1.00 / 0.99 | 0.99 / 1.00 / 0.99 |
-| contrast recovery (Jaccard, pairs) | 1.00, all | 1.00, all |
-
-`separation.png`: planted genes carry 22–26 detected CAAS, every non-planted
-gene (~170) carries ≤ 2 — zero overlap. **Not worth a bigger run** (the gap is
-saturated; cycles don't touch it — it's discovery-driven, not permulation-driven).
-
-Two characterisation findings (not gate blockers):
-
-- **`gene_caas_score` does not separate null from power across replicates**
-  (`caas_score AUC ≈ 0.45`) — a within-run percentile rank, size-decorrelated by
-  design (`F(max)^n`). A within-study prioritisation device, not a cross-study
-  effect size. Detected-CAAS count is the separating quantity.
-- **`grouped_caap` sites also trip `US` ~86%.** With `patterns=1,2,3` and a
-  conserved disjoint background, a foreground with class-shared / residue-divergent
-  substitutions satisfies US pattern 3. A clean GS-only positive needs a
-  class-heterogeneous background — deferred. GS recall (0.99) still exceeds US (0.86).
 
 ## Status
 
 | piece | state |
 |-------|-------|
-| `model.py` / `trees.py` / `simulate.py` / `groups.py` / `pheno.py` | done |
-| `replicate.py` / `build_project.py` / `run_replicates.py` | done |
-| `harness/tier0_adapter.py` + `cli.py score` | done |
-| binary-trait pipeline support (contrast selection) | landed on `main` (`1fbdfbf`) |
-| **gate run** | **PASS** — Tier 0 closed |
+| `model.py` / `trees.py` / `simulate.py` / `groups.py` / `pheno.py` (lambda) | done |
+| `replicate.py` (top/bottom direction) / `run_replicates.py` (lambda axis) | done |
+| `tier0_adapter.py` + `cli.py score` (per-cell, directional, score-level) | done |
+| `plots.py` (separation, recovery-vs-lambda, score-separation, site) | done |
+| binary-trait pipeline support | landed on `main` (`1fbdfbf`) |
+| **lambda gate run** | **pending** — external drive was disconnected; `reproduce.sh` when back |
 
-## Characterisation (optional, D-T0-O)
-
-Only after the gate passes, for the paper's curves: the other trees
-(`primate_x5`, `mammal`, `star`, `ladder` in `grid.json`), lower
-`--planted-fraction`, `--min-divergent-fraction 1.0`. Not run by default.
+`gate_result/` holds the previous (no-lambda) reference — superseded, kept until
+the lambda gate replaces it.

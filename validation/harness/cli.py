@@ -46,25 +46,25 @@ def _cmd_score(args: argparse.Namespace) -> int:
     print(json.dumps(d, indent=2))
 
     out = [f"\nVERDICT: {res.verdict}   ({res.n_power_replicates} power replicate(s))"]
-    for sep in res.separation:
+    for sep in sorted(res.separation, key=lambda s: (s.archetype, s.lam)):
         out.append(
-            f"  [{sep.archetype}] null vs power (detected-CAAS count): AUC {_fmt(sep.auc_npos)}  "
-            f"planted p50 {_fmt(sep.planted_npos_p50)}  vs  null p95 {_fmt(sep.null_npos_p95)} "
-            f"(max {_fmt(sep.null_npos_max)})  -> {'separated' if sep.separated else 'NOT separated'}"
-            f"   [caas_score AUC {_fmt(sep.auc_caas_score)}]"
+            f"  [{sep.archetype} lambda={sep.lam:g}] null vs power:\n"
+            f"      occurrence  AUC(CAAS count) {_fmt(sep.auc_npos)}  "
+            f"(planted p50 {_fmt(sep.planted_npos_p50)} vs null p95 {_fmt(sep.null_npos_p95)}, max {_fmt(sep.null_npos_max)})"
+            f"  -> {'separated' if sep.separated else 'NOT separated'}\n"
+            f"      score-level AUC(pos CAAS_score) {_fmt(sep.auc_pos_caas_score)}  "
+            f"AUC(pos -log10 p) {_fmt(sep.auc_pos_neglog_pvalue)}  "
+            f"AUC(gene_caas_score) {_fmt(sep.auc_gene_caas_score)}"
         )
-    for a, v in res.summary.items():
+    for k, v in sorted(res.cells.items()):
         out.append(
-            f"  [{a}] prioritisation: precision@k(n_pos) {_fmt(v['gene_precision_at_k_npos'])}  "
-            f"precision@k(caas_score) {_fmt(v['gene_precision_at_k'])}  "
-            f"rank-pctile {_fmt(v['gene_planted_rank_pctile_p50'])}  "
-            f"slice_global25 {_fmt(v['planted_in_slice_global25'])}  "
-            f"slice_global5 {_fmt(v['planted_in_slice_global5'])}\n"
-            f"  [{a}] sites: recall {_fmt(v['site_recall'])}  "
-            f"identical_aa->US {_fmt(v['identical_aa_us_recall'])}  "
+            f"  [{k}]  precision@k {_fmt(v['gene_precision_at_k_npos'])} (score {_fmt(v['gene_precision_at_k_score'])})  "
+            f"site_recall {_fmt(v['site_recall'])}  directional {_fmt(v['site_directional_recall'])}\n"
+            f"      identical_aa->US {_fmt(v['identical_aa_us_recall'])}  "
             f"grouped_caap->GS {_fmt(v['grouped_caap_gs_recall'])} (US also {_fmt(v['grouped_caap_us_leakage'])})\n"
-            f"  [{a}] contrast: jaccard {_fmt(v['contrast_jaccard'])}  "
-            f"pairs recovered {_fmt(v['contrast_pairs_recovered_frac'])}"
+            f"      contrast: anchor {_fmt(v['contrast_anchor_recall'])}  partner {_fmt(v['contrast_partner_recall'])}  "
+            f"pair-exact {_fmt(v['contrast_pair_exact'])}  jaccard {_fmt(v['contrast_jaccard'])}  "
+            f"op-pairs {_fmt(v['contrast_n_operative_pairs'])}"
         )
     print("\n".join(out), file=sys.stderr)
     return 0 if res.verdict == "PASS" else 3

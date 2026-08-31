@@ -209,42 +209,46 @@ def test_null_is_stationary() -> None:
     assert np.mean(null) - 2 * np.std(null) - 1 <= obs <= np.mean(null) + 2 * np.std(null) + 1
 
 
-def test_pheno_binary_paired_foreground() -> None:
-    lad = trees.ladder_tree(40, branch_length=0.2)
-    ph = _pheno.make_paired_foreground(lad, 4, np.random.default_rng(0),
-                                       kind="binary", planted=True)
-    fg = set(ph.foreground_tips)
-    assert ph.kind == "binary"
-    assert len(ph.pairs) == 4 and len(fg) == 4
-    assert set(ph.values.values()) == {0.0, 1.0}                  # exact 0/1
-    assert all(ph.values[a] == 1.0 for a, _ in ph.pairs)
-    assert all(ph.values[b] == 0.0 for _, b in ph.pairs)
-    assert len(ph.values) == 40                                   # every tip coded
-    assert len(ph.fg_edges) == 4                                  # one terminal edge per anchor
-    # anchors are mutually distinct from their partners
-    assert not (set(a for a, _ in ph.pairs) & set(b for _, b in ph.pairs))
+def test_pheno_lambda_foreground_binary() -> None:
+    lad = trees.ladder_tree(80, branch_length=0.15)
+    ph = _pheno.make_lambda_foreground(lad, 6, np.random.default_rng(0),
+                                       kind="binary", lam=0.5, planted=True)
+    assert ph.kind == "binary" and ph.lam == 0.5
+    assert len(ph.pairs) >= 3
+    assert set(ph.values.values()) <= {0.0, 1.0}
+    assert len(ph.values) == 80
+    # one terminal edge per anchor and per partner
+    assert len(ph.anchor_edges) == len(ph.pairs)
+    assert len(ph.partner_edges) == len(ph.pairs)
+    # top and bottom foregrounds are disjoint
+    top = set(ph.foreground("top").tips); bot = set(ph.foreground("bottom").tips)
+    assert not (top & bot)
 
 
-def test_pheno_rate_paired_foreground() -> None:
-    lad = trees.ladder_tree(60, branch_length=0.1)
-    ph = _pheno.make_paired_foreground(lad, 3, np.random.default_rng(1),
-                                       kind="rate", planted=True)
-    assert ph.kind == "continuous"
-    assert len(ph.pairs) == 3
-    assert ph.n_pop is not None and ph.n_cases is not None
+def test_pheno_lambda_foreground_rate_and_lambda_effect() -> None:
+    lad = trees.ladder_tree(120, branch_length=0.1)
+    ph = _pheno.make_lambda_foreground(lad, 6, np.random.default_rng(1),
+                                       kind="rate", lam=0.0, planted=True)
+    assert ph.kind == "continuous" and ph.n_pop is not None
     for a, b in ph.pairs:
-        assert ph.values[a] > ph.values[b] + 0.1                  # anchor clearly above partner
-        assert ph.n_pop[a] >= 100 and ph.n_pop[b] >= 100          # tight CI on the pair
-    assert len(ph.values) < 60                                    # only a data subset
+        assert ph.values[a] > ph.values[b]           # anchor above partner (with noise)
+    assert len(ph.values) < 120
+
+    # higher lambda -> the latent clumps -> fewer independent tail pairs on average
+    def mean_pairs(lam):
+        return np.mean([len(_pheno.make_lambda_foreground(
+            lad, 6, np.random.default_rng(s), kind="binary", lam=lam).pairs)
+            for s in range(6)])
+    assert mean_pairs(0.0) >= mean_pairs(1.0)
 
 
 def test_pheno_null_has_no_edges() -> None:
-    lad = trees.ladder_tree(30)
+    lad = trees.ladder_tree(60)
     for kind in ("binary", "rate"):
-        ph = _pheno.make_paired_foreground(lad, 3, np.random.default_rng(2),
-                                           kind=kind, planted=False)
-        assert ph.fg_edges == set()
-        assert len(ph.pairs) == 3                                 # trait + pairs still built
+        ph = _pheno.make_lambda_foreground(lad, 4, np.random.default_rng(2),
+                                           kind=kind, lam=0.5, planted=False)
+        assert ph.anchor_edges == set() and ph.partner_edges == set()
+        assert len(ph.pairs) >= 3
 
 
 def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
@@ -253,7 +257,7 @@ def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
         tree = trees.prune_depth_preserving(src, 40, np.random.default_rng(0))
     else:
         tree = trees.ladder_tree(40, branch_length=0.2)
-    rcfg = ReplicateConfig(archetype="binary", n_pairs=4, n_genes=6,
+    rcfg = ReplicateConfig(archetype="binary", lam=0.5, n_pairs=5, n_genes=6,
                            frac_planted_genes=0.34, n_sites=50, planted=True)
     row = build_replicate(tree, rcfg, seed=99, outdir=tmp_path / "rep")
     d = tmp_path / "rep"
@@ -264,14 +268,16 @@ def test_build_replicate_pipeline_shaped(tmp_path: Path) -> None:
     import json
     t = json.loads((d / "truth.json").read_text())
     assert t["n_planted_genes"] == 2
-    assert len(t["phenotype"]["pairs"]) == 4
+    assert t["phenotype"]["lambda"] == 0.5
+    assert len(t["phenotype"]["pairs"]) >= 3
     planted = [g for g, v in t["genes"].items() if v["planted"]]
     assert len(planted) == 2
     assert all(t["genes"][g]["n_planted"] > 0 for g in planted)
+    assert all(t["genes"][g]["direction"] in ("top", "bottom") for g in planted)
     assert all(t["genes"][g]["n_planted"] == 0 for g in t["genes"] if g not in planted)
 
     # rate archetype: my_traits carries count columns
-    rcfg2 = ReplicateConfig(archetype="rate", n_pairs=3, n_genes=3, n_sites=40, planted=True)
+    rcfg2 = ReplicateConfig(archetype="rate", lam=0.0, n_pairs=4, n_genes=3, n_sites=40, planted=True)
     build_replicate(tree, rcfg2, seed=7, outdir=tmp_path / "rep_rate")
     hdr = (tmp_path / "rep_rate" / "my_traits.tsv").read_text().splitlines()[0]
     assert hdr == "species\tsim_trait\tn_pop\tn_cases\tfamily"

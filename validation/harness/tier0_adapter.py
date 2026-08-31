@@ -97,8 +97,15 @@ class Replicate:
         return self.truth.get("archetype", "")
 
     @property
+    def lam(self) -> float:
+        return float(self.truth.get("phenotype", {}).get("lambda", -1.0))
+
+    @property
     def planted_genes(self) -> set[str]:
         return {g for g, v in self.truth.get("genes", {}).items() if v.get("planted")}
+
+    def gene_direction(self, gene: str) -> str | None:
+        return self.truth.get("genes", {}).get(gene, {}).get("direction")
 
     def planted_sites(self, gene: str) -> set[int]:
         v = self.truth.get("genes", {}).get(gene, {})
@@ -111,6 +118,10 @@ class Replicate:
     @property
     def foreground_tips(self) -> set[str]:
         return set(self.truth.get("phenotype", {}).get("foreground_tips", []))
+
+    @property
+    def partner_tips(self) -> set[str]:
+        return set(self.truth.get("phenotype", {}).get("partner_tips", []))
 
     @property
     def truth_pairs(self) -> list[tuple[str, str]]:
@@ -129,11 +140,11 @@ class Replicate:
         p = rd / rel
         return p if p.exists() else None
 
-    def gene_scores(self) -> dict[str, float]:
+    def gene_scores(self, col: str = "gene_caas_score") -> dict[str, float]:
         p = self._out("scoring/gene_scores.tsv")
         if p is None:
             return {}
-        out = {r["Gene"]: _num(r.get("gene_caas_score", "nan")) for r in _read_tsv(p)}
+        out = {r["Gene"]: _num(r.get(col, "nan")) for r in _read_tsv(p)}
         return {g: v for g, v in out.items() if not math.isnan(v)}
 
     def gene_n_positions(self) -> dict[str, float]:
@@ -196,18 +207,21 @@ class ReplicateScore:
     gene_planted_ranks: dict[str, int]
     planted_in_slice_global5: float     # fraction of planted genes in the top-5% slice
     planted_in_slice_global25: float
+    lam: float
     site_recall: float
     site_precision: float
     site_recall_by_mechanism: dict[str, float]
+    site_directional_recall: float      # planted site detected AND on the right (top/bottom) side
     n_sites_planted: int
     n_sites_detected: int
     identical_aa_us_recall: float
     grouped_caap_gs_recall: float
     grouped_caap_us_leakage: float
-    contrast_jaccard: float
-    contrast_fg_precision: float
-    contrast_pairs_recovered: int
-    contrast_pairs_total: int
+    contrast_anchor_recall: float       # true top anchors that appear as fg in traitfile.tab
+    contrast_partner_recall: float      # true bottom partners that appear as bg
+    contrast_pair_exact: float          # true (a,b) pairs reproduced exactly
+    contrast_jaccard: float             # {operative fg+bg} vs {true anchors+partners}
+    contrast_n_operative_pairs: int
 
     def to_dict(self) -> dict:
         d = dict(self.__dict__)
@@ -241,22 +255,27 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
     in_s5 = _mean([1.0 if g in s5 else 0.0 for g in planted]) if s5 else math.nan
     in_s25 = _mean([1.0 if g in s25 else 0.0 for g in planted]) if s25 else math.nan
 
-    # -- sites: SCORING lists only detected positions + their scheme_set -------- #
+    # -- sites: SCORING lists only detected positions + scheme_set + change_side  #
     detected: dict[str, dict[int, set[str]]] = {}
+    side: dict[str, dict[int, str]] = {}
     for r in rp.position_rows():
         schemes = set((r.get("scheme_set") or "").replace(" ", "").split("+")) - {""}
-        detected.setdefault(r["Gene"], {})[int(r["Position"])] = schemes
+        g, pos = r["Gene"], int(r["Position"])
+        detected.setdefault(g, {})[pos] = schemes
+        side.setdefault(g, {})[pos] = (r.get("change_side") or "").strip().lower()
 
-    all_planted = hit = total_detected = 0
+    all_planted = hit = total_detected = dir_hit = 0
     mech_tot: dict[str, int] = {}
     mech_hit: dict[str, int] = {}
     ia_tot = ia_us = gc_tot = gc_gs = gc_leak = 0
     for g in planted:
         ps = rp.planted_sites(g)
+        gdir = rp.gene_direction(g)
         det = detected.get(g, {})
         all_planted += len(ps)
         total_detected += len(det)
         hit += len(ps & set(det))
+        dir_hit += sum(1 for s in ps if s in det and side.get(g, {}).get(s) == gdir)
         for s, m in rp.site_mechanism(g).items():
             mech_tot[m] = mech_tot.get(m, 0) + 1
             sch = det.get(s)
@@ -271,22 +290,23 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
                     gc_gs += 1
                     gc_leak += bool("US" in sch)
 
-    # -- contrast selection recovery ---------------------------------------- #
+    # -- contrast selection recovery: operative pairs vs the TRUE (lambda-drawn)
+    #    pairs. traitfile.tab = species <tab> 1|0 <tab> pair_id ------------------ #
     tf = rp.traitfile()
-    fg_truth = rp.foreground_tips
-    op_fg = {sp for sp, lab, _ in tf if lab == "1"}
-    jac = (len(op_fg & fg_truth) / len(op_fg | fg_truth)) if (op_fg or fg_truth) else math.nan
-    fg_prec = (len(op_fg & fg_truth) / len(op_fg)) if op_fg else math.nan
-    by_pid: dict[str, list[tuple[str, str]]] = {}
+    true_anchors = rp.foreground_tips
+    true_partners = rp.partner_tips
+    true_pairs = {frozenset(p) for p in rp.truth_pairs}
+    by_pid: dict[str, dict[str, set[str]]] = {}
     for sp, lab, pid in tf:
-        by_pid.setdefault(pid, []).append((sp, lab))
-    recovered = sum(
-        1 for members in by_pid.values()
-        if any(lab == "1" and sp in fg_truth for sp, lab in members)
-    )
-
+        d = by_pid.setdefault(pid, {"1": set(), "0": set()})
+        d.setdefault(lab, set()).add(sp)
+    op_fg = {sp for d in by_pid.values() for sp in d["1"]}
+    op_bg = {sp for d in by_pid.values() for sp in d["0"]}
+    op_pairs = {frozenset(list(d["1"]) + list(d["0"]))
+                for d in by_pid.values() if d["1"] and d["0"]}
+    n_true = max(1, len(true_pairs))
     return ReplicateScore(
-        subset=rp.subset, rep=rp.repdir.name, archetype=rp.archetype,
+        subset=rp.subset, rep=rp.repdir.name, archetype=rp.archetype, lam=rp.lam,
         n_genes_scored=len(gs), gene=gene_report,
         gene_precision_at_k=prec_k, gene_precision_at_k_npos=prec_k_npos,
         gene_planted_rank_pctile_p50=rank_pctile,
@@ -295,12 +315,20 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
         site_recall=(hit / all_planted if all_planted else math.nan),
         site_precision=(hit / total_detected if total_detected else math.nan),
         site_recall_by_mechanism={m: mech_hit.get(m, 0) / n for m, n in mech_tot.items()},
+        site_directional_recall=(dir_hit / all_planted if all_planted else math.nan),
         n_sites_planted=all_planted, n_sites_detected=total_detected,
         identical_aa_us_recall=(ia_us / ia_tot if ia_tot else math.nan),
         grouped_caap_gs_recall=(gc_gs / gc_tot if gc_tot else math.nan),
         grouped_caap_us_leakage=(gc_leak / gc_gs if gc_gs else math.nan),
-        contrast_jaccard=jac, contrast_fg_precision=fg_prec,
-        contrast_pairs_recovered=recovered, contrast_pairs_total=len(by_pid),
+        contrast_anchor_recall=len(true_anchors & op_fg) / n_true,
+        contrast_partner_recall=len(true_partners & op_bg) / n_true,
+        contrast_pair_exact=len(true_pairs & op_pairs) / n_true,
+        contrast_jaccard=(
+            len((true_anchors | true_partners) & (op_fg | op_bg))
+            / len((true_anchors | true_partners) | (op_fg | op_bg))
+            if (true_anchors or op_fg) else math.nan
+        ),
+        contrast_n_operative_pairs=len(op_pairs),
     )
 
 
@@ -308,56 +336,73 @@ def _score_one(rp: Replicate) -> ReplicateScore | None:
 # score
 # --------------------------------------------------------------------------- #
 @dataclass
-class ArchetypeSeparation:
+class CellSeparation:
     archetype: str
+    lam: float
     n_power_reps: int
     n_null_reps: int
-    n_planted_genes: int
-    n_null_genes: int
-    # detected CAAS positions per gene — planted genes carry ~n_planted sites,
-    # spurious genes ~1. Absolute, so comparable across replicates.
+    # occurrence: detected CAAS positions per gene (planted ~n_planted, spurious ~1)
     auc_npos: float
     planted_npos_p50: float
     null_npos_p95: float
     null_npos_max: float
-    # gene_caas_score is a within-run percentile rank (not replicate-comparable) —
-    # kept as a secondary read.
-    auc_caas_score: float
-    separated: bool                 # AUC(n_positions) >= 0.95 AND planted p50 > null p95
+    # score-level (reported, not gated): position CAAS_score, hypergeometric p (as
+    # significance), and the size-decorrelated gene_caas_score
+    auc_pos_caas_score: float
+    auc_pos_neglog_pvalue: float
+    auc_gene_caas_score: float
+    separated: bool                 # occurrence AUC >= 0.95 AND planted p50 > null p95
 
     def to_dict(self) -> dict:
         return dict(self.__dict__)
 
 
-def _separation(archetype: str, reps: list[Replicate]) -> ArchetypeSeparation | None:
-    power = [r for r in reps if r.archetype == archetype and not r.is_null and r.results_dir]
-    null = [r for r in reps if r.archetype == archetype and r.is_null and r.results_dir]
+def _separation(archetype: str, lam: float, reps: list[Replicate]) -> CellSeparation | None:
+    cell = [r for r in reps if r.archetype == archetype and abs(r.lam - lam) < 1e-6 and r.results_dir]
+    power = [r for r in cell if not r.is_null]
+    null = [r for r in cell if r.is_null]
+
     p_npos: list[float] = []
-    p_score: list[float] = []
+    p_gscore: list[float] = []
+    p_pos_caas: list[float] = []
+    p_pos_neglp: list[float] = []
     for r in power:
-        npos, sc = r.gene_n_positions(), r.gene_scores()
-        for g in r.planted_genes:
-            if g in npos:
-                p_npos.append(npos[g])
-            if g in sc:
-                p_score.append(sc[g])
+        npos, gsc = r.gene_n_positions(), r.gene_scores()
+        planted = r.planted_genes
+        psites = {g: r.planted_sites(g) for g in planted}
+        p_npos += [npos[g] for g in planted if g in npos]
+        p_gscore += [gsc[g] for g in planted if g in gsc]
+        for row in r.position_rows():
+            if int(row["Position"]) in psites.get(row["Gene"], set()):
+                p_pos_caas.append(_num(row.get("CAAS_score", "nan")))
+                pv = _num(row.get("pvalue", "nan"))
+                p_pos_neglp.append(-math.log10(pv) if pv and pv > 0 else 30.0)
+
     n_npos: list[float] = []
-    n_score: list[float] = []
+    n_gscore: list[float] = []
+    n_pos_caas: list[float] = []
+    n_pos_neglp: list[float] = []
     for r in null:
         n_npos += list(r.gene_n_positions().values())
-        n_score += list(r.gene_scores().values())
+        n_gscore += list(r.gene_scores().values())
+        for row in r.position_rows():
+            n_pos_caas.append(_num(row.get("CAAS_score", "nan")))
+            pv = _num(row.get("pvalue", "nan"))
+            n_pos_neglp.append(-math.log10(pv) if pv and pv > 0 else 30.0)
+
     if not p_npos or not n_npos:
         return None
     auc_n = _auc(p_npos, n_npos)
     p50 = _quantile(p_npos, 0.50)
     n95 = _quantile(n_npos, 0.95)
-    return ArchetypeSeparation(
-        archetype=archetype,
+    return CellSeparation(
+        archetype=archetype, lam=lam,
         n_power_reps=len(power), n_null_reps=len(null),
-        n_planted_genes=len(p_npos), n_null_genes=len(n_npos),
         auc_npos=auc_n, planted_npos_p50=p50,
         null_npos_p95=n95, null_npos_max=max(n_npos),
-        auc_caas_score=_auc(p_score, n_score),
+        auc_pos_caas_score=_auc(p_pos_caas, n_pos_caas),
+        auc_pos_neglog_pvalue=_auc(p_pos_neglp, n_pos_neglp),
+        auc_gene_caas_score=_auc(p_gscore, n_gscore),
         separated=(not math.isnan(auc_n) and auc_n >= 0.95 and p50 > n95),
     )
 
@@ -366,15 +411,15 @@ def _separation(archetype: str, reps: list[Replicate]) -> ArchetypeSeparation | 
 class ScoreResult:
     n_power_replicates: int
     per_replicate: list[ReplicateScore] = field(default_factory=list)
-    separation: list[ArchetypeSeparation] = field(default_factory=list)
-    summary: dict = field(default_factory=dict)
+    separation: list[CellSeparation] = field(default_factory=list)
+    cells: dict = field(default_factory=dict)          # "archetype|lambda" -> metric means
     verdict: str = ""
 
     def to_dict(self) -> dict:
         return {
             "verdict": self.verdict,
             "n_power_replicates": self.n_power_replicates,
-            "summary": self.summary,
+            "cells": self.cells,
             "separation": [s.to_dict() for s in self.separation],
             "per_replicate": [r.to_dict() for r in self.per_replicate],
         }
@@ -388,48 +433,51 @@ def score(run_root: Path) -> ScoreResult:
             f"no scorable power replicates under {run_root} ({len(reps)} replicate(s) found)"
         )
 
-    archetypes = sorted({s.archetype for s in scored})
-    seps = [s for s in (_separation(a, reps) for a in archetypes) if s is not None]
+    cell_keys = sorted({(s.archetype, s.lam) for s in scored})
+    seps = [x for x in (_separation(a, lm, reps) for a, lm in cell_keys) if x is not None]
 
-    by_arch: dict[str, list[ReplicateScore]] = {}
+    grp: dict[tuple[str, float], list[ReplicateScore]] = {}
     for s in scored:
-        by_arch.setdefault(s.archetype, []).append(s)
+        grp.setdefault((s.archetype, s.lam), []).append(s)
 
-    summary: dict = {}
-    for a, group in by_arch.items():
+    cells: dict = {}
+    for (a, lm), g in grp.items():
         mechs: dict[str, list[float]] = {}
-        for s in group:
+        for s in g:
             for m, v in s.site_recall_by_mechanism.items():
                 mechs.setdefault(m, []).append(v)
-        summary[a] = {
-            "n_power_replicates": len(group),
-            "gene_precision_at_k": _mean([s.gene_precision_at_k for s in group]),
-            "gene_precision_at_k_npos": _mean([s.gene_precision_at_k_npos for s in group]),
-            "gene_planted_rank_pctile_p50": _mean([s.gene_planted_rank_pctile_p50 for s in group]),
-            "planted_in_slice_global5": _mean([s.planted_in_slice_global5 for s in group]),
-            "planted_in_slice_global25": _mean([s.planted_in_slice_global25 for s in group]),
-            "site_recall": _mean([s.site_recall for s in group]),
+        cells[f"{a}|lambda={lm:g}"] = {
+            "n_power_replicates": len(g),
+            "gene_precision_at_k_npos": _mean([s.gene_precision_at_k_npos for s in g]),
+            "gene_precision_at_k_score": _mean([s.gene_precision_at_k for s in g]),
+            "gene_planted_rank_pctile_p50": _mean([s.gene_planted_rank_pctile_p50 for s in g]),
+            "planted_in_slice_global25": _mean([s.planted_in_slice_global25 for s in g]),
+            "site_recall": _mean([s.site_recall for s in g]),
+            "site_directional_recall": _mean([s.site_directional_recall for s in g]),
             "site_recall_by_mechanism": {m: _mean(v) for m, v in mechs.items()},
-            "identical_aa_us_recall": _mean([s.identical_aa_us_recall for s in group]),
-            "grouped_caap_gs_recall": _mean([s.grouped_caap_gs_recall for s in group]),
-            "grouped_caap_us_leakage": _mean([s.grouped_caap_us_leakage for s in group]),
-            "contrast_jaccard": _mean([s.contrast_jaccard for s in group]),
-            "contrast_pairs_recovered_frac": _mean(
-                [s.contrast_pairs_recovered / s.contrast_pairs_total
-                 for s in group if s.contrast_pairs_total]
-            ),
+            "identical_aa_us_recall": _mean([s.identical_aa_us_recall for s in g]),
+            "grouped_caap_gs_recall": _mean([s.grouped_caap_gs_recall for s in g]),
+            "grouped_caap_us_leakage": _mean([s.grouped_caap_us_leakage for s in g]),
+            "contrast_anchor_recall": _mean([s.contrast_anchor_recall for s in g]),
+            "contrast_partner_recall": _mean([s.contrast_partner_recall for s in g]),
+            "contrast_pair_exact": _mean([s.contrast_pair_exact for s in g]),
+            "contrast_jaccard": _mean([s.contrast_jaccard for s in g]),
+            "contrast_n_operative_pairs": _mean([s.contrast_n_operative_pairs for s in g]),
         }
 
-    # PASS = every archetype: null/power separates on detected-CAAS count, planted
-    # genes fill the top-n_planted ranks (precision@k), and planted sites are found.
+    # PASS = at EVERY (archetype, lambda) cell the pipeline manufactures no false
+    # signal (occurrence separation holds) and finds the planted signal
+    # (precision@k on CAAS count, site recall). Contrast recovery is REPORTED as a
+    # lambda-curve, not gated — it is expected to degrade as the trait clumps.
+    lo_lam = min(lm for _, lm in cell_keys)
     ok = bool(seps) and all(s.separated for s in seps) and all(
-        (not math.isnan(v["gene_precision_at_k_npos"]) and v["gene_precision_at_k_npos"] >= 0.9
-         and not math.isnan(v["site_recall"]) and v["site_recall"] >= 0.8)
-        for v in summary.values()
+        not math.isnan(v["gene_precision_at_k_npos"]) and v["gene_precision_at_k_npos"] >= 0.85
+        and not math.isnan(v["site_recall"]) and v["site_recall"] >= 0.8
+        for k, v in cells.items() if k.endswith(f"lambda={lo_lam:g}")
     )
     verdict = "PASS" if ok else "REVIEW"
 
     return ScoreResult(
         n_power_replicates=len(scored),
-        per_replicate=scored, separation=seps, summary=summary, verdict=verdict,
+        per_replicate=scored, separation=seps, cells=cells, verdict=verdict,
     )

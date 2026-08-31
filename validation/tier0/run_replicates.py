@@ -95,9 +95,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--archetypes", default="binary,rate")
     ap.add_argument("--sets", default="null,power", help="null = no planted signal; power = planted")
     ap.add_argument("--trees", default="primate", help="comma list of keys in grid.json trees")
-    ap.add_argument("--n-replicates", type=int, default=15)
-    ap.add_argument("--n-genes", type=int, default=150)
-    ap.add_argument("--n-pairs", type=int, default=4, help="foreground/background contrast pairs")
+    ap.add_argument("--lambdas", default="0,0.5,1", help="Pagel's lambda for the latent trait")
+    ap.add_argument("--n-replicates", type=int, default=10)
+    ap.add_argument("--n-genes", type=int, default=120)
+    ap.add_argument("--n-pairs", type=int, default=6, help="max independent tail pairs")
     ap.add_argument("--planted-fraction", type=float, default=0.2)
     ap.add_argument("--n-sites", type=int, default=400)
     ap.add_argument("--concentration", type=float, default=2.0)
@@ -111,6 +112,7 @@ def main(argv: list[str] | None = None) -> int:
     tree_keys = a.trees.split(",")
     archetypes = a.archetypes.split(",")
     sets = a.sets.split(",")
+    lambdas = [float(x) for x in a.lambdas.split(",") if x.strip()]
     a.out.mkdir(parents=True, exist_ok=True)
 
     proj = tier0_project(
@@ -125,10 +127,11 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict] = []
     run_scripts: list[Path] = []
     i = 0
-    for arch, setname, tkey in itertools.product(archetypes, sets, tree_keys):
+    for arch, setname, tkey, lam in itertools.product(archetypes, sets, tree_keys, lambdas):
         if arch not in _ARCH_ARGS:
             raise SystemExit(f"unknown archetype {arch!r} (binary | rate)")
-        subset = f"{arch}_{setname}_{tkey}"
+        lamtag = f"lam{lam:g}".replace(".", "")
+        subset = f"{arch}_{setname}_{tkey}_{lamtag}"
         for k in range(a.n_replicates):
             i += 1
             seed = a.seed0 + i
@@ -136,12 +139,19 @@ def main(argv: list[str] | None = None) -> int:
             tree = _load_tree(grid["trees"][tkey], rng)
             repdir = a.out / subset / f"rep{k:03d}"
             rcfg = ReplicateConfig(
-                archetype=arch, n_pairs=a.n_pairs, n_genes=a.n_genes,
+                archetype=arch, lam=lam, n_pairs=a.n_pairs, n_genes=a.n_genes,
                 frac_planted_genes=(a.planted_fraction if setname == "power" else 0.0),
                 traitname=TRAITNAME, n_sites=a.n_sites, concentration=a.concentration,
                 planted=(setname == "power"),
             )
-            row = build_replicate(tree, rcfg, seed, repdir)
+            from validation.tier0.pheno import NotEnoughPairs
+            for attempt in range(5):
+                try:
+                    row = build_replicate(tree, rcfg, seed + 999_000 * attempt, repdir)
+                    break
+                except NotEnoughPairs as e:
+                    if attempt == 4:
+                        raise SystemExit(f"{subset}/rep{k:03d}: {e}")
             row.update(set=setname, tree_key=tkey, dir=str(repdir.relative_to(a.out)))
             rows.append(row)
 
@@ -156,7 +166,7 @@ def main(argv: list[str] | None = None) -> int:
                 gene_ensembl=(repdir / "gene_ensembl.tsv").resolve(),
                 tree_nwk=(repdir / "tree.nwk").resolve(),
                 traits=(repdir / "my_traits.tsv").resolve(),
-                tq=row["top_quantile"], bq=row["bottom_quantile"],
+                tq="0.9", bq="0.1",
                 mdf=a.min_divergent_fraction,
                 outbase=(repdir / "out").resolve(),
                 workbase=(repdir / "work").resolve(),

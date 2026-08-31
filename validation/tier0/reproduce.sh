@@ -12,13 +12,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")/../.."
 OUT="${1:-validation/runs/tier0_gate}"
 NREP="${2:-10}"
 NGENES="${3:-120}"
+LAMBDAS="${LAMBDAS:-0,0.5,1}"
 JOBS="${JOBS:-2}"
 
-echo "=== stage + run: $OUT ($NREP reps/cell, $NGENES genes, jobs=$JOBS) ==="
+echo "=== stage + run: $OUT ($NREP reps/cell, $NGENES genes, lambda=$LAMBDAS, jobs=$JOBS) ==="
 python -m validation.tier0.run_replicates --out "$OUT" \
     --archetypes binary,rate --sets null,power --trees primate \
-    --n-replicates "$NREP" --n-genes "$NGENES" --n-sites 350 --n-pairs 4 \
-    --run --jobs "$JOBS"
+    --lambdas "$LAMBDAS" --n-replicates "$NREP" --n-genes "$NGENES" \
+    --n-sites 350 --n-pairs 6 --run --jobs "$JOBS"
 
 echo "=== score ==="
 python -m validation.harness.cli score --run "$OUT" --json "$OUT/score.json"
