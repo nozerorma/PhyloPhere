@@ -6,6 +6,49 @@ chosen by Miguel.
 
 ---
 
+## Direction
+
+### D-DIR-01 — Tier 0 shelved; suite is Tiers 1–3 on real data (2026-08-31, MIGUEL)
+Tier 0's planted-simulation design kept running into circularity: to make planted
+signal *detectable* the observed trait has to point at the planted lineages, but
+then contrast-recovery is tautological; leaving it non-circular (BM-latent tail +
+noise) collapses detection because the pipeline's contrast selector prefers
+shallow congeneric high/low pairs that miss the planted deep lineages entirely
+(smoke2: binary/rate AUC ≈ 0.5, 0 site recall; continuous partial). Precedent:
+CAAP (Chen 2025, PMC12550464) uses only a **minimal** neutral-sim null (R = O/E
+stays 1, p > 0.4) and does all recovery/power evidence on real datasets vs prior
+literature.
+
+DECISION: stop developing planted Tier 0. Keep at most the trivial version later
+(N neutral alignments → confirm the genome-wide permulation p-value stays flat;
+no phenotype, no planting). Focus the suite on **Tiers 1–3, pipeline unchanged,
+recovering what others already established**. Miguel will revisit a non-circular
+Tier 0 separately. Tier 0 code stays on the branch, unmaintained.
+
+### D-DIR-02 — Tier 1 plan (2026-08-31, MIGUEL: "go for it")
+- **Datasets**: RH1 spectral tuning + PEPC/C4 as the paired core (RH1 = least
+  circular, mutagenesis-measured spectral shifts; PEPC = most independent origins,
+  categorical trait, one platinum site 780). Echolocation afterwards, used only as
+  the **null-suppression** check (contested truth, 2–3 origins, contrast-poor).
+- **Per dataset build**: (1) fixture — codon-aware CDS alignment + species tree +
+  an in-alignment reference row (`bovine_RHO` / `maize_PEPC`) for coordinate
+  mapping; (2) complete the `.sites.tsv` truth set from primary tables
+  (Hauser 2017 SI; Christin 2007 Table 1); (3) write `harness/cli.py score`
+  against the FIRST real pipeline output, not a guess.
+- **Controls folded into every run** (CAAP-style): wrong-foreground negative
+  control (labels → phylo-matched sister lineages without the phenotype; known
+  sites must drop out — the real pass/fail); ASR robustness (already emitted);
+  method comparison (PCOC, + ConDor for RH1) on the identical fixture.
+- **Gate** (softened; n ≈ 6–30): recall of mutagenesis-tier sites at default
+  threshold WITH a CI (not a hard fraction); median rank-percentile of validated
+  sites in the position score (expect > 0.8); wrong-foreground recall ≈ 0.
+- **GS0 calibration** (Chen 2025): random AA partition matched to a GS1–4
+  group-size profile; check GS1–4 permulation excess > GS0. This is a separate
+  small pipeline addition (`caap_id.py` SCHEMES has US + GS1–4), not a Tier 1
+  blocker.
+
+---
+
 ## Tier 0
 
 ### D-T0-Q — evolutionary-model planting (2026-08-31, MIGUEL, supersedes the D-T0-P foreground)
