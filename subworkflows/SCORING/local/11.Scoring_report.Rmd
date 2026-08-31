@@ -718,9 +718,11 @@ joint_df <- pos_df %>%
     boot_val = if (boot_measure_is_raw) -log10(pmax(.data[[boot_measure_col]], 1e-300)) else .data[[boot_measure_col]]
   )
 
-.r_hyp_caas  <- round(cor(joint_df$hyp_val,  joint_df$CAAS_score, use = "complete.obs"), 2)
-.r_boot_caas <- round(cor(joint_df$boot_val, joint_df$CAAS_score, use = "complete.obs"), 2)
-.r_hyp_boot  <- round(cor(joint_df$hyp_val,  joint_df$boot_val,   use = "complete.obs"), 2)
+# safe_cor() returns NA when < 3 complete pairs (sparse null replicates) instead
+# of erroring out ("no complete element pairs").
+.r_hyp_caas  <- round(safe_cor(joint_df$hyp_val,  joint_df$CAAS_score), 2)
+.r_boot_caas <- round(safe_cor(joint_df$boot_val, joint_df$CAAS_score), 2)
+.r_hyp_boot  <- round(safe_cor(joint_df$hyp_val,  joint_df$boot_val),   2)
 
 ggplot(joint_df, aes(x = hyp_val, y = boot_val, colour = CAAS_score)) +
   geom_point(alpha = 0.45, size = 1.6) +
@@ -2033,8 +2035,8 @@ if (has_fade_pos) cat("### CAAS vs FADE Correlation\n\n")
 .corr_label <- .fade_corr_df %>%
   group_by(fade_direction) %>%
   summarise(
-    r_pearson  = cor(norm_caas, norm_log_bf, use = "complete.obs"),
-    r_spearman = cor(CAAS_score, log10_bf, method = "spearman", use = "complete.obs"),
+    r_pearson  = safe_cor(norm_caas, norm_log_bf),
+    r_spearman = safe_cor(CAAS_score, log10_bf, method = "spearman"),
     .groups = "drop"
   ) %>%
   mutate(label = sprintf("%s: r=%.3f (rank-norm Pearson) / \u03c1=%.3f (Spearman)",
