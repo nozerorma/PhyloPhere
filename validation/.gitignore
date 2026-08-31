@@ -14,6 +14,14 @@ fixtures/**/*.nh
 fixtures/**/*.tree
 fixtures/**/*.tre
 fixtures/**/*.tsv
+fixtures/**/*.txt
+fixtures/**/*.phyml_tree*
+# fetched raw inputs (build.py re-fetches); keep build.py + README + *.spec.json
+fixtures/**/*.coor_*
+fixtures/**/*.nex
+!fixtures/**/README.md
+!fixtures/**/build.py
+!fixtures/**/*.spec.json
 
 # Pipeline outputs
 runs/**
