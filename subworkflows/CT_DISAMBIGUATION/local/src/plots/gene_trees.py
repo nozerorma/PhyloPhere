@@ -49,7 +49,7 @@ def plot_random_gene_trees(
 
     # Cache per-gene result entries assembled from CSV rows
     gene_results_cache: Dict[str, list] = {}
-    gene_posteriors_cache: Dict[str, Optional[Dict]] = {}
+    gene_posteriors_cache: Dict[tuple, Optional[Dict]] = {}  # (gene, pos) -> node states
 
     def _load_node_posteriors(
         gene: str, focus_pos: Optional[int] = None, explicit_path: Optional[Path] = None
@@ -162,7 +162,12 @@ def plot_random_gene_trees(
 
         # Load node posteriors from JSONL and attach to results
         # NOTE: JSONL contains 1-based PAML positions, so convert from CAAS 0-based
-        if gene not in gene_posteriors_cache:
+        # Cache key MUST include `pos`: _load_node_posteriors filters on focus_pos,
+        # so a gene-only key freezes every plot's internal-node states at whatever
+        # position was rendered first (tips/focal MRCAs still update from each
+        # result's own node_state_details, which is why the bug looked partial).
+        pcache_key = (gene, pos)
+        if pcache_key not in gene_posteriors_cache:
             # Try default node_dumps_root first
             post = _load_node_posteriors(
                 gene, focus_pos=pos + 1 if pos is not None else None
@@ -182,9 +187,9 @@ def plot_random_gene_trees(
                         focus_pos=pos + 1 if pos is not None else None,
                         explicit_path=dump_path,
                     )
-            gene_posteriors_cache[gene] = post
+            gene_posteriors_cache[pcache_key] = post
 
-        node_posteriors = gene_posteriors_cache[gene]
+        node_posteriors = gene_posteriors_cache[pcache_key]
         if node_posteriors:
             for result in results:
                 result["node_posteriors"] = node_posteriors
