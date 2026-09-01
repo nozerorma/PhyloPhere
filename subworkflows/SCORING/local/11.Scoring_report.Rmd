@@ -128,6 +128,16 @@ safe_cor <- function(x, y, method = "pearson") {
   cor(x[ok], y[ok], method = method)
 }
 
+# Safe quantile: base quantile(x, p, na.rm = TRUE) still ERRORS ("missing values
+# and NaN's not allowed if 'na.rm' is FALSE") when na.rm drops every element -
+# which happens on small/degenerate permulation pools (e.g. strict
+# min_divergent_fraction with few positions). Return NA there instead of halting.
+.safe_q <- function(v, p) {
+  v <- v[is.finite(v)]
+  if (!length(v)) return(NA_real_)
+  as.numeric(stats::quantile(v, p, names = FALSE))
+}
+
 ```
 
 ```{r load-data}
@@ -645,9 +655,10 @@ This section displays the distributions of the primary input significance measur
 joint_df <- pos_df %>%
   filter(!is.na(phen_score), !is.na(asr_score))
 
-.r_phen_caas <- round(cor(joint_df$phen_score, joint_df$CAAS_score, use = "complete.obs"), 2)
-.r_asr_caas  <- round(cor(joint_df$asr_score,  joint_df$CAAS_score, use = "complete.obs"), 2)
-.r_phen_asr  <- round(cor(joint_df$phen_score, joint_df$asr_score,  use = "complete.obs"), 2)
+# safe_cor() returns NA when < 3 complete pairs instead of erroring out
+.r_phen_caas <- round(safe_cor(joint_df$phen_score, joint_df$CAAS_score), 2)
+.r_asr_caas  <- round(safe_cor(joint_df$asr_score,  joint_df$CAAS_score), 2)
+.r_phen_asr  <- round(safe_cor(joint_df$phen_score, joint_df$asr_score), 2)
 
 ggplot(joint_df, aes(x = asr_score, y = phen_score, colour = CAAS_score)) +
   geom_point(alpha = 0.45, size = 1.6) +
@@ -994,8 +1005,12 @@ cat("_Per-cycle null envelope unavailable (needs `perm_pos_quantiles.tsv` from C
 .obs_cyc <- scheme_overlay %>% filter(source == "observed") %>%
   group_by(caap_group) %>%
   summarise(q50 = median(caas_row, na.rm = TRUE),
-            q90 = quantile(caas_row, .90, na.rm = TRUE), .groups = "drop")
+            q90 = .safe_q(caas_row, .90), .groups = "drop")
 
+if (nrow(.cyc) == 0 || nrow(.obs_cyc) == 0) {
+  cat("_Per-cycle null envelope unavailable (empty null or observed pool ",
+      "- degenerate permulation).\n_")
+} else {
 print(
   ggplot(.cyc, aes(caap_group)) +
     geom_violin(aes(y = q50, fill = "Null cycles"), scale = "width",
@@ -1016,11 +1031,12 @@ knitr::kable(
   .cyc %>% group_by(caap_group) %>%
     summarise(n_cycles = dplyr::n(),
               `null median (across cycles)` = median(q50, na.rm = TRUE),
-              `null q90 (across cycles)`    = quantile(q50, .90, na.rm = TRUE),
+              `null q90 (across cycles)`    = .safe_q(q50, .90),
               .groups = "drop") %>%
     left_join(.obs_cyc %>% select(caap_group, `observed median` = q50), by = "caap_group"),
   digits = 5,
   caption = "Per-cycle null medians summarised across cycles, against the single observed median.")
+}
 ```
 
 ---
@@ -1931,8 +1947,8 @@ if (has_fade_pos) cat("### CAAS vs FADE Correlation\n\n")
 .corr_label <- .fade_corr_df %>%
   group_by(fade_direction) %>%
   summarise(
-    r_pearson  = cor(norm_caas, norm_log_bf, use = "complete.obs"),
-    r_spearman = cor(CAAS_score, log10_bf, method = "spearman", use = "complete.obs"),
+    r_pearson  = safe_cor(norm_caas, norm_log_bf),
+    r_spearman = safe_cor(CAAS_score, log10_bf, method = "spearman"),
     .groups = "drop"
   ) %>%
   mutate(label = sprintf("%s: r=%.3f (rank-norm Pearson) / \u03c1=%.3f (Spearman)",

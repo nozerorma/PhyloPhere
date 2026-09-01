@@ -64,7 +64,7 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [include_b0] [discrete_method] [max_tries] [pheno_col] ",
-       "[bottom_quantile] [top_quantile] [n_col] [c_col] [resample_use_n]")
+       "[bottom_quantile] [top_quantile] [n_col] [c_col] [resample_use_n] [trait_type]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -87,6 +87,7 @@ top_quantile       <- arg_or(13, 0.90,       as.numeric)
 n_col              <- arg_or(14, "")   # denominator column (e.g. adult_necropsy_count)
 c_col              <- arg_or(15, "")   # numerator column   (e.g. malignant_count)
 resample_use_n     <- tolower(arg_or(16, "true")) %in% c("1", "true", "t", "yes", "y")
+trait_type         <- tolower(arg_or(17, "auto"))   # "" / auto / ordinal / continuous
 
 if (!dir.exists(outdir)) {
   dir.create(outdir, recursive = TRUE)
@@ -332,7 +333,8 @@ repeat {
       trait_vec = pvec, D = D, target_pairs = target_pairs,
       discrete_method = discrete_method,
       bottom_quantile = bottom_quantile, top_quantile = top_quantile,
-      ci_lb = ci_lb_draw, ci_ub = ci_ub_draw
+      ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
+      trait_type = trait_type
     )
 
     if (e$tier == 1L) {

@@ -266,7 +266,7 @@ dispatch_phenotype() {
     local task_id="$1"
     case "$task_id" in
 {% for row in runtime.phenotype_rows %}
-    {{ loop.index }}) CLASS={{ row.trait_class }}; TRAIT="{{ row.trait }}"; SECONDARY="{{ row.secondary }}"; NTRAIT="{{ row.n_trait }}"; CTRAIT="{{ row.c_trait }}"; PRUNE="{{ row.prune }}"; PRUNE_SEC="{{ row.prune_secondary }}"; DISCRETE="{{ row.discrete_method }}"
+    {{ loop.index }}) CLASS={{ row.trait_class }}; TRAIT="{{ row.trait }}"; SECONDARY="{{ row.secondary }}"; NTRAIT="{{ row.n_trait }}"; CTRAIT="{{ row.c_trait }}"; PRUNE="{{ row.prune }}"; PRUNE_SEC="{{ row.prune_secondary }}"; DISCRETE="{{ row.discrete_method }}"; TRAIT_TYPE="{{ row.trait_type }}"
         ;;
 {% endfor %}
     *)
@@ -280,7 +280,7 @@ dispatch_phenotype() {
     echo " TRAIT         : $TRAIT  [CLASS $CLASS]"
     echo "======================================================"
 
-    bash "$SINGLE_RUNNER" "$CLASS" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$DISCRETE"
+    bash "$SINGLE_RUNNER" "$CLASS" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$DISCRETE" "$TRAIT_TYPE"
 }
 
 {% if profile == 'slurm' %}

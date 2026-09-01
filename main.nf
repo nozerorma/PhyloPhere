@@ -375,11 +375,22 @@ workflow {
 
             if (perm_disc_ch && perm_subset_ch) {
                 def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
+                // In asr_mode=compute the live CT_DISAMBIGUATION_RUN writes the
+                // shared ASR cache that CAAS_PERMS_DISAMBIGUATE reads — gate the
+                // replay on it completing (its master_csv is written only after
+                // every gene's ASR is cached). No gate when ASR is precomputed
+                // (cache already on disk) or disambiguation didn't run live.
+                def asr_gate_ch = (params.ct_disambiguation
+                                   && (params.ct_disambig_asr_mode ?: 'precomputed') == 'compute'
+                                   && disambiguation_results)
+                    ? disambiguation_results.master_csv
+                    : Channel.value('NO_GATE')
                 caas_perm_out = CAAS_PERMULATION(
                     perm_disc_ch,
                     perm_subset_ch,
                     perm_tree_ch,
-                    caas_universe_ch
+                    caas_universe_ch,
+                    asr_gate_ch
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms
                 scoring_caas_perm_scores_ch = Channel.empty()

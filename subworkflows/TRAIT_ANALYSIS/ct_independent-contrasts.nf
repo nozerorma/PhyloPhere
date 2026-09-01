@@ -41,6 +41,7 @@ process CONTRAST_ALGORITHM {
     def discrete_method = params.discrete_method ?: 'decile'
     def top_quantile = params.top_quantile ?: '0.90'
     def bottom_quantile = params.bottom_quantile ?: '0.10'
+    def trait_type = params.trait_type ?: ''
     def contrast_max_iter = params.contrast_max_iter ?: '3'
 
     if (params.use_singularity | params.use_apptainer) {
@@ -68,6 +69,7 @@ process CONTRAST_ALGORITHM {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'
@@ -106,6 +108,7 @@ process CONTRAST_ALGORITHM {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}',
                     contrast_max_iter = '${contrast_max_iter}'

@@ -35,6 +35,7 @@ process CI_COMPOSITION_REPORT {
     def discrete_method = params.discrete_method ?: 'quartile'
     def top_quantile = params.top_quantile ?: '0.75'
     def bottom_quantile = params.bottom_quantile ?: '0.25'
+    def trait_type = params.trait_type ?: ''
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -61,6 +62,7 @@ process CI_COMPOSITION_REPORT {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}'
                 ),
@@ -94,6 +96,7 @@ process CI_COMPOSITION_REPORT {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}'
                 ),

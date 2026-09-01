@@ -230,6 +230,24 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     }
   debug_log("pair_sel.f candidate pairs = %d", nrow(distance_df))
 
+  # No non-overlapping candidate pair exists (e.g. a trait where the CI /
+  # categorisation step produced no `bottom` species). Return empty rather than
+  # indexing an empty frame downstream — CHECK_MIN_CONTRASTS then reports the
+  # shortfall cleanly instead of the run dying with "subscript out of bounds".
+  if (nrow(distance_df) == 0) {
+    warning("pair_sel.f: no candidate contrast pairs (no non-overlapping ",
+            "high/low species for trait '", my_trait, "'). Returning 0 pairs.")
+    empty_pairs <- data.frame(species1 = character(), species2 = character(),
+                              stringsAsFactors = FALSE)
+    return(list(
+      dunn_results = empty_pairs,
+      selected_pairs = empty_pairs,
+      dunn_result_cummulative = data.frame(),
+      distance_df = distance_df,
+      distance_matrix = distance_matrix
+    ))
+  }
+
   # Select initial pair: smallest phylogenetic distance with largest trait difference
   selected_pairs <- data.frame()
 

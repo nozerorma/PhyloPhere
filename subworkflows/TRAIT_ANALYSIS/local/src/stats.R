@@ -9,6 +9,24 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
+# Decide whether a trait vector is an ordinal fg/bg code rather than a
+# continuous measurement. `trait_type` (from params / commons.R) forces it:
+#   "ordinal"    -> always treat as coded
+#   "continuous" -> never
+#   ""/"auto"    -> infer: 2-5 distinct, all-integer levels => coded
+# A genuine continuous trait (prevalence, body mass, ...) has many distinct
+# non-integer values over the sampled species, so "auto" leaves it alone.
+is_ordinal_trait <- function(trait_values, trait_type = "auto") {
+  tt <- as.character(trait_type)
+  if (length(tt) == 0 || is.na(tt[1]) || !nzchar(tt[1])) tt <- "auto"
+  tt <- tolower(tt[1])
+  if (tt == "ordinal") return(TRUE)
+  if (tt == "continuous") return(FALSE)
+  v <- trait_values[!is.na(trait_values)]
+  u <- unique(v)
+  length(u) >= 2 && length(u) <= 5 && all(u == round(u))
+}
+
 compute_trait_thresholds <- function(trait_values,
                                      discrete_method = if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile",
                                      top_quantile = if (exists("top_quantile", inherits = TRUE)) as.numeric(top_quantile) else 0.90,
@@ -18,6 +36,27 @@ compute_trait_thresholds <- function(trait_values,
 
   if (length(trait_values) == 0) {
     stop("compute_trait_thresholds() received no non-missing trait values.")
+  }
+
+  # trait_type: set by commons.R from params ("" / auto / ordinal / continuous).
+  .trait_type <- if (exists("trait_type", inherits = TRUE)) get("trait_type", inherits = TRUE) else "auto"
+
+  # ── Ordinal fg/bg code: the extremes ARE the top/bottom levels, no quantiles.
+  # `quantile([mostly 0s], 0.9)` collapses to 0 and labels every species "top";
+  # for a coded trait the highest level is foreground, the lowest is background,
+  # any middle level is intermediate (kept in the tree, excluded from contrasts).
+  if (is_ordinal_trait(trait_values, .trait_type)) {
+    levels_sorted <- sort(unique(trait_values))
+    lo <- levels_sorted[1]
+    hi <- levels_sorted[length(levels_sorted)]
+    return(list(
+      discrete_method = "ordinal", top_quantile = NA_real_, bottom_quantile = NA_real_,
+      trait_type = "ordinal", ordinal_levels = levels_sorted,
+      g_mean = mean(trait_values), g_median = median(trait_values), g_sd = sd(trait_values),
+      g_q10 = lo, g_q20 = lo, g_q25 = lo, g_q75 = hi, g_q80 = hi, g_q90 = hi,
+      g_iqr = hi - lo,
+      lower_thresh = unname(lo), upper_thresh = unname(hi)
+    ))
   }
 
   g_mean <- mean(trait_values, na.rm = TRUE)
@@ -185,8 +224,14 @@ stats.f <- function(df) {
         TRUE ~ "normal"
       ),
       global_label = dplyr::case_when(
-        (.data[[trait_col]] <= lower_thresh) & (.data[[trait_col]] < g_median) ~ "low_extreme",
-        (.data[[trait_col]] >= upper_thresh) & (.data[[trait_col]] > g_median) ~ "high_extreme",
+        # `<= g_median` / `>= g_median` (was `<` / `>`): the strict form makes a
+        # minority-foreground binary/bimodal trait un-labelable — median == the
+        # lower threshold == 0, so no species can be `< g_median`, and FADE's
+        # EXTRACT_EXTREME_SPECIES then finds no low_extreme set. No-op for a
+        # continuous trait (upper_thresh >= median >= lower_thresh always).
+        # Mirrors the same relaxation in lean_contrast_selector.R.
+        (.data[[trait_col]] <= lower_thresh) & (.data[[trait_col]] <= g_median) ~ "low_extreme",
+        (.data[[trait_col]] >= upper_thresh) & (.data[[trait_col]] >= g_median) ~ "high_extreme",
         TRUE ~ "normal"
       )
     ) %>%
@@ -203,8 +248,9 @@ stats.f <- function(df) {
         TRUE ~ "normal"
       ),
       taxa_label = dplyr::case_when(
-        (.data[[trait_col]] < taxa_q25) & (.data[[trait_col]] < taxa_median) ~ "low_extreme",
-        (.data[[trait_col]] > taxa_q75) & (.data[[trait_col]] > taxa_median) ~ "high_extreme",
+        # median-guard relaxed to `<=` / `>=` as in global_label above
+        (.data[[trait_col]] < taxa_q25) & (.data[[trait_col]] <= taxa_median) ~ "low_extreme",
+        (.data[[trait_col]] > taxa_q75) & (.data[[trait_col]] >= taxa_median) ~ "high_extreme",
         TRUE ~ "normal"
       )
     ) %>%

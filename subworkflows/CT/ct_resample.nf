@@ -94,7 +94,8 @@ process RESAMPLE {
         ${params.top_quantile ?: 0.90} \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
-        ${params.resample_use_n != null ? params.resample_use_n : true}
+        ${params.resample_use_n != null ? params.resample_use_n : true} \\
+        "${params.trait_type ?: 'auto'}"
         """
     } else {
         """
@@ -145,7 +146,8 @@ process RESAMPLE {
         ${params.top_quantile ?: 0.90} \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
-        ${params.resample_use_n != null ? params.resample_use_n : true}
+        ${params.resample_use_n != null ? params.resample_use_n : true} \\
+        "${params.trait_type ?: 'auto'}"
         """
     }
 }

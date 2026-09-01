@@ -42,6 +42,7 @@ process DATASET_EXPLORATION {
     def discrete_method = params.discrete_method ?: 'quartile'
     def top_quantile = params.top_quantile ?: '0.75'
     def bottom_quantile = params.bottom_quantile ?: '0.25'
+    def trait_type = params.trait_type ?: ''
     def prune_dir = prune_results_dir ?: ''
 
     if (params.use_singularity | params.use_apptainer) {
@@ -70,6 +71,7 @@ process DATASET_EXPLORATION {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}'
                 ),
@@ -104,6 +106,7 @@ process DATASET_EXPLORATION {
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
                     discrete_method = '${discrete_method}',
+                    trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}'
                 ),
