@@ -39,7 +39,7 @@ process ACCUMULATION_GENE_LISTS {
     path "fcs_stats.tsv",  emit: fcs_stats
 
     script:
-    def pval_thr = params.accumulation_pval_threshold ?: 0.05
+    def fdr_thr = params.accumulation_fdr ?: 0.1
     """
     Rscript -e "
         # Load the per-group scheme CSVs and combine their p-values with the
@@ -108,7 +108,7 @@ process ACCUMULATION_GENE_LISTS {
         if (any(tested))
             fdr_q[tested] <- p.adjust(cct_p[tested], method = 'BH')
 
-        sig_mask  <- !is.na(fdr_q) & fdr_q < ${pval_thr}
+        sig_mask  <- !is.na(fdr_q) & fdr_q < ${fdr_thr}
         sig_genes <- gene_syms[sig_mask]
 
         writeLines(gene_syms, 'background.txt')
@@ -124,7 +124,7 @@ process ACCUMULATION_GENE_LISTS {
         write.table(fcs_stats, 'fcs_stats.tsv', sep = '\\t', row.names = FALSE, quote = FALSE)
 
         cat(sprintf('[ACCUMULATION_GENE_LISTS] direction=${direction}  bg=%d  sig=%d (FDR<%g)\\\\n',
-            length(gene_syms), length(sig_genes), ${pval_thr}))
+            length(gene_syms), length(sig_genes), ${fdr_thr}))
     "
     """
 }

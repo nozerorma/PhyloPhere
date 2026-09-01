@@ -46,7 +46,7 @@ process ACCUMULATION_REPORT {
     def local_dir = "${baseDir}/subworkflows/CT_ACCUMULATION/local"
     def outdir    = "${params.outdir}/accumulation/aggregation"
     def traitname = params.traitname ?: 'unknown_trait'
-    def pval_thr  = params.accumulation_report_pval_threshold ?: 0.05
+    def fdr_thr   = params.accumulation_fdr ?: 0.1
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -70,7 +70,7 @@ process ACCUMULATION_REPORT {
                 params = list(
                     accum_dir      = 'accum_root',
                     traitname      = '${traitname}',
-                    pval_threshold = ${pval_thr},
+                    fdr_threshold  = ${fdr_thr},
                     output_dir     = '${outdir}'
                 ),
                 output_file = '10.Accumulation_report.html'
@@ -98,7 +98,7 @@ process ACCUMULATION_REPORT {
                 params = list(
                     accum_dir      = 'accum_root',
                     traitname      = '${traitname}',
-                    pval_threshold = ${pval_thr},
+                    fdr_threshold  = ${fdr_thr},
                     output_dir     = '${outdir}'
                 ),
                 output_file = '10.Accumulation_report.html'

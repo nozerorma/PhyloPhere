@@ -127,8 +127,8 @@ workflow CT {
             trait_file_out = file(params.caas_config)
             tree_file_out = file(params.tree)
             if (toolsToRun.contains('resample') || toolsToRun.contains('bootstrap')) {
-                if (params.traitvalues) {
-                    trait_val = file(params.traitvalues)
+                if (params.my_traits) {
+                    trait_val = file(params.my_traits)
                 }
             }
         }

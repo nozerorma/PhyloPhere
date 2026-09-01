@@ -112,7 +112,8 @@ process SCORING_REPORT {
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
                     window_size_bp       = ${win_size},
-                    direction            = 'combined'
+                    direction            = 'combined',
+                    seed                 = '${params.seed ?: 1998}'
                 ),
                 output_file = '11.Scoring_report_${traitname}.html'
             )
@@ -148,7 +149,8 @@ process SCORING_REPORT {
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
                     window_size_bp       = ${win_size},
-                    direction            = 'combined'
+                    direction            = 'combined',
+                    seed                 = '${params.seed ?: 1998}'
                 ),
                 output_file = '11.Scoring_report_${traitname}.html'
             )

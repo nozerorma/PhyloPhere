@@ -164,7 +164,8 @@ process SCORING_AMI_REPORT {
                     rer_background_file      = ${rer_bg_arg},
                     rer_domino_network_sif   = ${rer_sif_arg},
                     rer_domino_modules_dir   = ${rer_mod_arg},
-                    rer_domino_edge_scores_file = ${rer_edge_arg}
+                    rer_domino_edge_scores_file = ${rer_edge_arg},
+                    seed                     = '${params.seed ?: 1998}'
                 ),
                 output_file = '13.AMI_analysis_${traitname}.html'
             )
@@ -309,7 +310,8 @@ process SCORING_COMPARE_REPORT {
                     fade_sites_top_file      = ${fade_sites_top_arg},
                     fade_sites_bottom_file   = ${fade_sites_bottom_arg},
                     gene_lists_dir     = ${gene_lists_arg},
-                    position_lists_dir = ${position_lists_arg}
+                    position_lists_dir = ${position_lists_arg},
+                    seed               = '${params.seed ?: 1998}'
                 ),
                 output_file = '15.Comparison_report_${traitname}.html'
             )

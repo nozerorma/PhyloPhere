@@ -128,14 +128,29 @@ fcs_build_vals <- function(scores, universe, floor = 0) {
 # vals: named numeric vector (full universe, zero-floored).
 # gmts: named list of RERconverge gmt objects.
 # num_g: minimum genes per set (fastwilcoxGMT num.g).
+# max_g: maximum genes per set (0 / Inf = no limit).
 # Returns a tibble: database, pathway, stat (AUC-0.5), pval, p.adj (BH per GMT),
 #                   num.genes, gene.vals (leading-edge members as "gene:rank").
 # NOTE: fastwilcoxGMT is internal to RERconverge; fastwilcoxGMTall is the exported
 # wrapper (loops fastwilcoxGMT over a named annotation list and BH-adjusts per
 # GMT). We call it once over all GMTs and stitch the per-database results.
-fcs_run_ranking <- function(vals, gmts, num_g = 10, alternative = "two.sided") {
+fcs_run_ranking <- function(vals, gmts, num_g = 10, max_g = 500, alternative = "two.sided") {
+  if (!is.null(max_g) && is.finite(max_g) && max_g > 0) {
+    gmts_to_run <- lapply(gmts, function(gmt) {
+      gs <- gmt$genesets
+      if (is.null(names(gs)) && !is.null(gmt$geneset.names)) names(gs) <- gmt$geneset.names
+      keep <- vapply(gs, function(set) length(intersect(set, names(vals))) <= max_g, logical(1))
+      list(
+        genesets = gs[keep],
+        geneset.names = if (!is.null(gmt$geneset.names)) gmt$geneset.names[keep] else names(gs)[keep]
+      )
+    })
+  } else {
+    gmts_to_run <- gmts
+  }
+
   reslist <- tryCatch(
-    RERconverge::fastwilcoxGMTall(vals, gmts, outputGeneVals = TRUE, num.g = num_g),
+    RERconverge::fastwilcoxGMTall(vals, gmts_to_run, outputGeneVals = TRUE, num.g = num_g),
     error = function(e) { message(sprintf("  fastwilcoxGMTall failed: %s", e$message)); NULL }
   )
   if (is.null(reslist) || length(reslist) == 0) return(tibble::tibble())
@@ -144,6 +159,10 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, alternative = "two.sided") {
   for (db in names(reslist)) {
     res <- reslist[[db]]
     if (is.null(res) || nrow(res) == 0) next
+    if (!is.null(max_g) && is.finite(max_g) && max_g > 0 && "num.genes" %in% names(res)) {
+      res <- res[res$num.genes <= max_g, , drop = FALSE]
+      if (nrow(res) == 0) next
+    }
     # fastwilcoxGMT's simple-mode p-value (simpleAUCgenesRanks) is ALWAYS two-sided.
     # For one-sided ("greater") magnitude rankings - CAAS/FADE/accum scores and RER
     # accel/decel (all non-negative, zero-floored) - recompute the analytic p one-
@@ -151,7 +170,7 @@ fcs_run_ranking <- function(vals, gmts, num_g = 10, alternative = "two.sided") {
     # re-BH per GMT. Matches RERconverge's alternative="greater" omnibus convention.
     # (Background = the GMT's own annotated genes, exactly as fastwilcoxGMT.)
     if (alternative == "greater") {
-      gmt  <- gmts[[db]]
+      gmt  <- gmts_to_run[[db]]
       n_db <- length(intersect(unique(unlist(gmt$genesets)), names(vals)))
       n1   <- res$num.genes
       n2   <- n_db - n1
@@ -187,7 +206,7 @@ fcs_alternative <- function(vals) if (any(vals < 0, na.rm = TRUE)) "two.sided" e
 #   lach_chi_nonzero (Part 2 χ²), lach_chi_total, lach_frac_magnitude
 #   (= chi_nonzero/chi_total; high value = signal driven by magnitude, not
 #   just prevalence of any signal).
-fcs_run_lachenbruch <- function(vals, gmts, num_g = 10) {
+fcs_run_lachenbruch <- function(vals, gmts, num_g = 10, max_g = 500) {
   vals[is.na(vals)] <- 0
   universe   <- names(vals)
   hits       <- names(vals[vals > 0])
@@ -203,7 +222,7 @@ fcs_run_lachenbruch <- function(vals, gmts, num_g = 10) {
     for (pname in names(gs)) {
       p_genes <- intersect(gs[[pname]], universe)
       n1 <- length(p_genes)
-      if (n1 < num_g) next
+      if (n1 < num_g || (!is.null(max_g) && is.finite(max_g) && max_g > 0 && n1 > max_g)) next
 
       k1 <- length(intersect(p_genes, hits))
       k0 <- n1 - k1
@@ -256,7 +275,7 @@ fcs_run_lachenbruch <- function(vals, gmts, num_g = 10) {
 # BH per GMT. NES = (obs_sum - null_mean) / null_sd; NES > 0 = enrichment.
 # p-value floor = 1 / (n_perms + 1). Only for non-negative vals.
 # Returns per-pathway: perm_pval, perm_p.adj, perm_nes.
-fcs_run_permulation <- function(vals, gmts, num_g = 10, n_perms = 2000, seed = 42) {
+fcs_run_permulation <- function(vals, gmts, num_g = 10, max_g = 500, n_perms = 2000, seed = 1998) {
   vals[is.na(vals)] <- 0
   genes_all <- names(vals)
   N_genes   <- length(genes_all)
@@ -271,7 +290,10 @@ fcs_run_permulation <- function(vals, gmts, num_g = 10, n_perms = 2000, seed = 4
     gs  <- gmt$genesets
     if (is.null(names(gs))) names(gs) <- gmt$geneset.names
 
-    valid <- sapply(gs, function(g) length(intersect(g, genes_all)) >= num_g)
+    valid <- sapply(gs, function(g) {
+      n <- length(intersect(g, genes_all))
+      n >= num_g && (is.null(max_g) || !is.finite(max_g) || max_g <= 0 || n <= max_g)
+    })
     gs_v  <- gs[valid]
     if (length(gs_v) == 0) next
     pnames <- names(gs_v)
@@ -352,7 +374,7 @@ fcs_membership_matrix <- function(genesets_named, set_names, genes) {
 # become NA for that column. Output: named list db -> (sets x N) AUC-0.5 matrix,
 # rows aligned to rownames(realenrich[[db]]). Equivalence to fastwilcoxGMT is
 # proven numerically by fcs_enrich_equivtest.R.
-fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10) {
+fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10, max_g = 500) {
   enrichStat <- list()
   genes_all  <- rownames(corStat)
   for (db in names(realenrich)) {
@@ -379,7 +401,7 @@ fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10
       n2   <- length(genes_db) - n1
       U    <- ranksum - (n1 * (n1 + 1) / 2)                # n1/U recycle down columns
       stat <- (U / (n1 * n2)) - 0.5
-      stat[(n1 < num_g) | (n2 <= 2), ] <- NA_real_
+      stat[(n1 < num_g) | (!is.null(max_g) & is.finite(max_g) & max_g > 0 & n1 > max_g) | (n2 <= 2), ] <- NA_real_
     } else {
       notNA <- !is.na(sub)
       n1    <- as.matrix(M %*% (notNA * 1.0))              # sets x N
@@ -387,7 +409,7 @@ fcs_null_enrichstat_vectorized <- function(corStat, gmts, realenrich, num_g = 10
       n2    <- ntot - n1
       U     <- ranksum - (n1 * (n1 + 1) / 2)
       stat  <- (U / (n1 * n2)) - 0.5
-      stat[(n1 < num_g) | (n2 <= 2)] <- NA_real_
+      stat[(n1 < num_g) | (!is.null(max_g) & is.finite(max_g) & max_g > 0 & n1 > max_g) | (n2 <= 2)] <- NA_real_
     }
     rownames(stat) <- set_names
     enrichStat[[db]] <- stat
@@ -416,12 +438,12 @@ fcs_permpvalenrich_vectorized <- function(realenrich, enrichStat, alternative = 
 }
 
 # rankings: named list of named-numeric vectors (already zero-floored).
-fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
+fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "NO_FILE",
                         fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000) {
   res <- list(); alts <- list()
   for (rk in names(rankings)) {
     alts[[rk]] <- fcs_alternative(rankings[[rk]])
-    r <- fcs_run_ranking(rankings[[rk]], gmts, num_g = num_g, alternative = alts[[rk]])
+    r <- fcs_run_ranking(rankings[[rk]], gmts, num_g = num_g, max_g = max_g, alternative = alts[[rk]])
     if (nrow(r) > 0) res[[rk]] <- dplyr::mutate(r, ranking = rk)
   }
   if (length(res) == 0) {
@@ -509,7 +531,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
         }
 
         enrichStat <- tryCatch(
-          fcs_null_enrichstat_vectorized(corStat_rk, gmts, realenrich, num_g = num_g),
+          fcs_null_enrichstat_vectorized(corStat_rk, gmts, realenrich, num_g = num_g, max_g = max_g),
           error = function(e) { fcs_progress(sprintf("null stats failed [%s]: %s", rk, e$message)); NULL })
         if (is.null(enrichStat)) next
 
@@ -536,7 +558,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
 
     fcs_progress(sprintf("Lachenbruch two-part test: ranking %s", rk))
     lach_rk <- tryCatch(
-      fcs_run_lachenbruch(vals_rk, gmts, num_g = num_g),
+      fcs_run_lachenbruch(vals_rk, gmts, num_g = num_g, max_g = max_g),
       error = function(e) {
         fcs_progress(sprintf("  Lachenbruch failed [%s]: %s", rk, e$message))
         tibble::tibble()
@@ -545,7 +567,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, perms_file = "NO_FILE",
 
     fcs_progress(sprintf("Path sum permulation: ranking %s (%d perms)", rk, n_perms_sum))
     perm_rk <- tryCatch(
-      fcs_run_permulation(vals_rk, gmts, num_g = num_g, n_perms = n_perms_sum),
+      fcs_run_permulation(vals_rk, gmts, num_g = num_g, max_g = max_g, n_perms = n_perms_sum),
       error = function(e) {
         fcs_progress(sprintf("  Permulation failed [%s]: %s", rk, e$message))
         tibble::tibble()

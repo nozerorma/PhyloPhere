@@ -20,9 +20,6 @@ params:
   traitname:         "unknown_trait"
   pval_threshold:    0.05
   top_n_labels:      15
-  top_pct:           0.10   # prioritization: top fraction per direction (acc/dec)
-  top5_pct:          0.05
-  top1_pct:          0.01
   output_dir:        "."
 ---
 
@@ -206,15 +203,19 @@ rer_df <- rer_df %>%
   flag
 }
 
+top_pct  <- 0.10
+top5_pct <- 0.05
+top1_pct <- 0.01
+
 rer_df <- rer_df %>%
   mutate(
     rer_stat      = sign(Rho) * -log10(pmax(P, 1e-300)),
-    is_top_10_acc = .dir_top(rer_stat, params$top_pct,  "acc"),
-    is_top_5_acc  = .dir_top(rer_stat, params$top5_pct, "acc"),
-    is_top_1_acc  = .dir_top(rer_stat, params$top1_pct, "acc"),
-    is_top_10_dec = .dir_top(rer_stat, params$top_pct,  "dec"),
-    is_top_5_dec  = .dir_top(rer_stat, params$top5_pct, "dec"),
-    is_top_1_dec  = .dir_top(rer_stat, params$top1_pct, "dec")
+    is_top_10_acc = .dir_top(rer_stat, top_pct,  "acc"),
+    is_top_5_acc  = .dir_top(rer_stat, top5_pct, "acc"),
+    is_top_1_acc  = .dir_top(rer_stat, top1_pct, "acc"),
+    is_top_10_dec = .dir_top(rer_stat, top_pct,  "dec"),
+    is_top_5_dec  = .dir_top(rer_stat, top5_pct, "dec"),
+    is_top_1_dec  = .dir_top(rer_stat, top1_pct, "dec")
   )
 
 cat(sprintf(
@@ -224,7 +225,7 @@ cat(sprintf(
 ))
 cat(sprintf(
   "Prioritised (top %.0f%%/%.0f%%/%.0f%% by signed stat): accelerated %d/%d/%d, decelerated %d/%d/%d.\n",
-  100 * params$top_pct, 100 * params$top5_pct, 100 * params$top1_pct,
+  100 * top_pct, 100 * top5_pct, 100 * top1_pct,
   sum(rer_df$is_top_10_acc), sum(rer_df$is_top_5_acc), sum(rer_df$is_top_1_acc),
   sum(rer_df$is_top_10_dec), sum(rer_df$is_top_5_dec), sum(rer_df$is_top_1_dec)
 ))

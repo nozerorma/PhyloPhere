@@ -23,6 +23,7 @@ params:
   gmt_dir:      NULL          # directory of curated *.gmt files
   project_name: "FCS"
   num_g:        10            # min genes per set (fastwilcoxGMT num.g)
+  max_g:        500           # max genes per set (0 / Inf = no limit)
   fdr_thr:      0.15          # BH (adjusted-p) cutoff - RERconverge categorical default (msae210)
   pperm_thr:    0.025         # permulation-p cutoff - applied in addition to fdr_thr when perms exist
   top_n:        20            # rows shown per database x ranking
@@ -44,6 +45,7 @@ params:
                               # re-ranking score_top/score_bottom here. ONLY pass this for the CAAS
                               # report (SCORING_FCS_REPORT), never for RER's (RER_FCS_REPORT),
                               # whose score_top/score_bottom are RER's own ranking, not CAAS's.
+  seed:         "1998"
 ---
 
 <style type="text/css">
@@ -102,6 +104,9 @@ theme_set(
 filter <- dplyr::filter; select <- dplyr::select; rename <- dplyr::rename
 mutate <- dplyr::mutate; arrange <- dplyr::arrange
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && nzchar(as.character(a)[1])) a else b
+
+seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+set.seed(seed_val)
 
 this_dir <- tryCatch(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)),
                      error = function(e) ".")
@@ -180,11 +185,13 @@ desc_map <- suppressMessages(fcs_load_descriptions(gmt_dir))
 ```{r overview, echo=FALSE}
 tibble::tibble(
   Field = c("Project", "Trait", "Genes (stats)", "Universe genes", "Rankings",
-            "Flags", "GMT databases", "num.g (min set)", "BH threshold"),
+            "Flags", "GMT databases", "num.g (min set)", "max.g (max set)", "BH threshold"),
   Value = c(params$project_name, params$traitname, nrow(stats), length(universe),
             paste(ranking_names, collapse = ", "),
             if (length(flag_cols)) paste(sub("^flag_", "", flag_cols), collapse = ", ") else "(none)",
-            length(gmts), params$num_g, params$fdr_thr)
+            length(gmts), params$num_g,
+            ifelse(is.null(params$max_g) || params$max_g <= 0 || !is.finite(params$max_g), "(none)", as.character(params$max_g)),
+            params$fdr_thr)
 ) %>% kbl_html()
 ```
 
@@ -263,6 +270,7 @@ for (sc in score_cols) {
   rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
 }
 enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g,
+                                       max_g        = params$max_g,
                                        perms_file   = params$perms_file,
                                        fdr_thr      = params$fdr_thr,
                                        p_perm_thr   = params$pperm_thr,

@@ -28,9 +28,8 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
-  discrete_method: "decile"
-  top_quantile: "0.90"
-  bottom_quantile: "0.10"
+  pss_top_pct: "0.01"
+  perm_strategy: "best_model"
   trait_type: ""
 ---
 
@@ -76,11 +75,9 @@ This section configures the working environment, sets directories, and loads nec
 
 ```{r setup, message=FALSE, warning=FALSE}
 
-# Make params available in environment before sourcing commons.R
-if (!exists("params")) {
-  stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
+if (exists("params")) {
+  tryCatch(assign("params", params, envir = .GlobalEnv), error = function(e) NULL)
 }
-assign("params", params, envir = .GlobalEnv)
 
 # Call the setup function from commons.R
 source("./src/commons.R")

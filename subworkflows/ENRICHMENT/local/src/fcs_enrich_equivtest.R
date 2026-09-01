@@ -31,7 +31,7 @@ make_gmt <- function(genes, n_sets = 12, min_sz = 3, max_sz = 40) {
 }
 
 # Run fastwilcoxGMTall (truth) and the vectorized null on the SAME vals, compare stat.
-check_case <- function(label, vals, gmt, num_g = 10) {
+check_case <- function(label, vals, gmt, num_g = 10, max_g = 0) {
   gmts <- list(testdb = gmt)
   truth <- tryCatch(RERconverge::fastwilcoxGMTall(vals, gmts, outputGeneVals = FALSE,
                                                   num.g = num_g)$testdb,
@@ -42,7 +42,7 @@ check_case <- function(label, vals, gmt, num_g = 10) {
   realenrich <- list(testdb = data.frame(pval = truth$pval, stat = truth$stat,
                                           row.names = rownames(truth)))
   corStat <- matrix(vals, ncol = 1, dimnames = list(names(vals), NULL))
-  vec <- fcs_null_enrichstat_vectorized(corStat, gmts, realenrich, num_g = num_g)$testdb
+  vec <- fcs_null_enrichstat_vectorized(corStat, gmts, realenrich, num_g = num_g, max_g = max_g)$testdb
 
   common <- intersect(rownames(truth), rownames(vec))
   d <- abs(truth[common, "stat"] - vec[common, 1])

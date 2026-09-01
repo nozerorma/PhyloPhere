@@ -28,9 +28,8 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
-  discrete_method: "decile"
-  top_quantile: "0.90"
-  bottom_quantile: "0.10"
+  pss_top_pct: "0.01"
+  perm_strategy: "best_model"
   trait_type: ""
 ---
 
@@ -97,19 +96,16 @@ This script computes contrasting species pairs for the trait of interest using o
 This section configures the working environment, sets directories, and loads necessary functions and libraries.
 
 ```{r setup, message=FALSE, warning=FALSE}
-# Make params available in environment before sourcing commons.R
-if (!exists("params")) {
-  stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
+if (exists("params")) {
+  tryCatch(assign("params", params, envir = .GlobalEnv), error = function(e) NULL)
 }
-assign("params", params, envir = .GlobalEnv)
 
 # Call the setup function from commons.R
 source("./src/commons.R")
 setup_rmd()
 
-# discrete_method, top_quantile, bottom_quantile are set by commons.R from params
-debug_log("discrete_method = %s, top_quantile = %s, bottom_quantile = %s",
-          discrete_method, top_quantile, bottom_quantile)
+# pss_top_pct and perm_strategy are set by commons.R from params
+debug_log("pss_top_pct = %.4f, perm_strategy = %s", pss_top_pct, perm_strategy)
 
 # Debug helper (prints into HTML output)
 if (is.null(getOption("phylo_debug"))) {
@@ -153,35 +149,12 @@ createDir(ci_dir)
 
 ## 1. Composition Analysis
 
-When population count columns (`n_trait` / `c_trait`) are present, 95% Jeffreys credibility intervals are computed. Otherwise, species are categorised into *top*, *bottom*, and *intermediate* groups using the selected `discrete_method`.
+When population count columns (`n_trait` / `c_trait`) are present, 95% Jeffreys credibility intervals are computed. For continuous traits, candidate divergence is evaluated analytically using the Phylogenetic Shift Score (PSS) under the best-fitting evolutionary model (OU / BM).
 
 ```{r compute_CI, message=FALSE, warning=FALSE}
 # Determine which analysis path to follow
 use_count_data <- has.n && has.c
 debug_log("use_count_data = %s", use_count_data)
-
-threshold_info <- compute_trait_thresholds(
-  trait_values = trait_df[[trait]],
-  discrete_method = discrete_method,
-  top_quantile = top_quantile,
-  bottom_quantile = bottom_quantile
-)
-lower_thresh <- threshold_info$lower_thresh
-upper_thresh <- threshold_info$upper_thresh
-
-threshold_label <- switch(
-  threshold_info$discrete_method,
-  "quartile" = "quartile (25/75)",
-  "quintile" = "quintile (20/80)",
-  "decile" = "decile (10/90)",
-  "median_sd" = "median +/- SD",
-  "parameterized" = sprintf("parameterized (%.2f/%.2f)", threshold_info$bottom_quantile, threshold_info$top_quantile),
-  threshold_info$discrete_method
-)
-debug_log(
-  "compute_CI thresholds: method = %s, lower_thresh = %.4f, upper_thresh = %.4f",
-  threshold_info$discrete_method, lower_thresh, upper_thresh
-)
 
 if (use_count_data) {
   # ---- Jeffreys CI path ----
@@ -201,6 +174,8 @@ if (use_count_data) {
     return(res[[bound_col]])
   }
 
+  g_med <- median(trait_df[[trait]], na.rm = TRUE)
+
   trait_ci <- trait_df %>%
     group_by(species) %>%
     dplyr::rename(n_population = .data[[n_trait]],
@@ -213,44 +188,36 @@ if (use_count_data) {
       trait_ci = ifelse(is.na(trait_ci_lb) | is.na(trait_ci_ub),
                         NA_character_,
                         paste0("[", round(trait_ci_lb, 2), "-", round(trait_ci_ub, 2), "]")),
-      # Category follows the active global discretization policy for colouring/annotation
       category = dplyr::case_when(
-        trait >= upper_thresh ~ "top",
-        trait <= lower_thresh ~ "bottom",
+        trait > g_med ~ "top",
+        trait < g_med ~ "bottom",
         TRUE ~ "intermediate"
       )
     ) %>%
     ungroup()
 
-  cat(sprintf(
-    "Jeffreys CI categorization thresholds: %s | lower threshold = %.4f | upper threshold = %.4f\n",
-    threshold_label, lower_thresh, upper_thresh
-  ))
+  cat("Jeffreys Bayesian 95% Credible Intervals computed for count data.\n")
 
 } else {
-  # ---- Discrete categorization path ----
-  debug_log("compute_CI: discrete method = %s", discrete_method)
+  # ---- Continuous trait path ----
+  debug_log("compute_CI: Continuous trait mode (PSS top pct = %.4f)", pss_top_pct)
+  g_med <- median(trait_df[[trait]], na.rm = TRUE)
 
   trait_ci <- trait_df %>%
     dplyr::rename(trait = .data[[trait]]) %>%
     dplyr::mutate(
       category     = dplyr::case_when(
-        trait >= upper_thresh ~ "top",
-        trait <= lower_thresh ~ "bottom",
-        TRUE                  ~ "intermediate"
+        trait > g_med ~ "top",
+        trait < g_med ~ "bottom",
+        TRUE          ~ "intermediate"
       ),
       n_population = NA_real_,
-      n_cases      = NA_real_,
-      # Pseudo-bounds: the thresholds themselves, so downstream columns are consistent
-      trait_ci_lb  = lower_thresh,
-      trait_ci_ub  = upper_thresh,
-      trait_ci     = category
+      trait_ci_lb  = NA_real_,
+      trait_ci_ub  = NA_real_,
+      trait_ci     = NA_character_
     )
 
-  cat("Discrete categorization summary:\n")
-  # print(table(trait_ci$category))
-  cat(sprintf("Method: %s | lower threshold = %.4f | upper threshold = %.4f\n",
-              threshold_label, lower_thresh, upper_thresh))
+  cat("Continuous trait mode: candidate pairs are selected via continuous Phylogenetic Shift Score (PSS) under the best-fitting evolutionary model.\n")
 }
 
 # Save results
@@ -274,6 +241,57 @@ create_pairwise_data <- function(ci_data) {
     dplyr::select(species, n_population, n_cases, trait,
                   trait_ci_lb, trait_ci_ub, category)
 
+  pss_df <- data.frame(species1 = character(), species2 = character(), pss_score = numeric(), S_score = numeric(), stringsAsFactors = FALSE)
+  pss_top1pct_pairs <- character(0)
+  
+  if (exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
+    tryCatch({
+      sp_avail <- intersect(tree$tip.label, ci_subset$species)
+      tr_sub <- ape::drop.tip(tree, setdiff(tree$tip.label, sp_avail))
+      tr_sub <- ape::multi2di(tr_sub)
+      tr_sub$edge.length[tr_sub$edge.length <= 0] <- 1e-8
+      t_vec <- setNames(ci_subset$trait, ci_subset$species)[tr_sub$tip.label]
+      fit_ou <- suppressWarnings(geiger::fitContinuous(tr_sub, t_vec, model = "OU", ncores = 1))
+      alpha_v <- as.numeric(fit_ou$opt$alpha)
+      sigsq_v <- as.numeric(fit_ou$opt$sigsq)
+      shared <- ape::vcv.phylo(tr_sub)[tr_sub$tip.label, tr_sub$tip.label]
+      dp <- diag(shared)
+      pat <- outer(dp, dp, "+") - 2 * shared; pat[pat < 0] <- 0
+      cov_mat <- (sigsq_v / (2 * alpha_v)) * exp(-alpha_v * pat) * (-expm1(-2 * alpha_v * shared))
+      cov_mat <- (cov_mat + t(cov_mat)) / 2
+      dimnames(cov_mat) <- list(tr_sub$tip.label, tr_sub$tip.label)
+      D_mat <- ape::cophenetic.phylo(tr_sub)
+
+      sp_cand <- tr_sub$tip.label
+      cand_grid <- expand.grid(s1 = sp_cand, s2 = sp_cand, stringsAsFactors = FALSE)
+      cand_grid <- cand_grid[cand_grid$s1 != cand_grid$s2, ]
+      cand_dif  <- t_vec[cand_grid$s1] - t_vec[cand_grid$s2]
+      cand_grid <- cand_grid[cand_dif > 0, ]
+      cand_dif  <- cand_dif[cand_dif > 0]
+      cand_dst  <- D_mat[cbind(cand_grid$s1, cand_grid$s2)]
+      
+      pv <- diag(cov_mat)[cand_grid$s1] + diag(cov_mat)[cand_grid$s2] - 2 * cov_mat[cbind(cand_grid$s1, cand_grid$s2)]
+      z <- cand_dif / sqrt(pmax(pv, 1e-12))
+      S <- -expm1(log(2) + stats::pnorm(z, lower.tail = FALSE, log.p = TRUE))
+      fs <- S * (cand_dif / max(cand_dif)) / (cand_dst / max(cand_dst))
+      
+      pss_df <- data.frame(
+        species1 = cand_grid$s1,
+        species2 = cand_grid$s2,
+        pss_score = round(fs, 4),
+        S_score = round(S, 4),
+        stringsAsFactors = FALSE
+      )
+      
+      n_keep <- max(8L, ceiling(length(fs) * 0.01))
+      thresh <- sort(fs, decreasing = TRUE)[n_keep]
+      top_cand <- cand_grid[fs >= thresh, ]
+      pss_top1pct_pairs <- paste(top_cand$s1, top_cand$s2, sep = "__")
+    }, error = function(e) {
+      debug_log("Error in PSS calculation: %s", conditionMessage(e))
+    })
+  }
+
   # Generate all pairwise species combinations
   pairwise <- expand.grid(species1 = ci_subset$species,
                           species2 = ci_subset$species,
@@ -286,14 +304,26 @@ create_pairwise_data <- function(ci_data) {
     left_join(ci_subset %>% rename_with(~paste0(.x, "2"), .cols = -species),
               by = c("species2" = "species"))
 
+  if (nrow(pss_df) > 0) {
+    pairwise <- pairwise %>%
+      left_join(pss_df, by = c("species1", "species2"))
+  } else {
+    pairwise$pss_score <- NA_real_
+    pairwise$S_score <- NA_real_
+  }
+
   pairwise <- pairwise %>%
     mutate(
       trait_diff = trait1 - trait2,
       trait_overlap = if (use_count_data) {
         # CI-based: overlapping when intervals share any range
         ci_overlap(trait_ci_lb1, trait_ci_ub1, trait_ci_lb2, trait_ci_ub2)
+      } else if (length(pss_top1pct_pairs) > 0) {
+        # Global Top 1% PSS: non-overlapping iff pair is in top 1% PSS
+        !((paste(species1, species2, sep = "__") %in% pss_top1pct_pairs) |
+          (paste(species2, species1, sep = "__") %in% pss_top1pct_pairs))
       } else {
-        # Discrete: non-overlapping only for top vs bottom contrasts
+        # Discrete fallback: non-overlapping only for top vs bottom contrasts
         !(category1 %in% c("top", "bottom") &
           category2 %in% c("top", "bottom") &
           category1 != category2)
@@ -382,15 +412,10 @@ This section creates heatmaps to visualize pairwise differences in prevalence. S
 
 ```{r plot_CI, fig.height=12, fig.width=15, message=FALSE, warning=FALSE, dev="ragg_png", dpi=320}
 # Build plain-text species labels and explicit categories for a version-stable heatmap.
-create_species_labels <- function(trait_data, lower_thresh, upper_thresh) {
+create_species_labels <- function(trait_data) {
   trait_data %>%
-    distinct(species, trait) %>%
+    distinct(species, trait, category) %>%
     mutate(
-      category = case_when(
-        trait >= upper_thresh ~ "Top",
-        trait <= lower_thresh ~ "Bottom",
-        TRUE ~ "Intermediate"
-      ),
       label_text = gsub("_", " ", species)
     ) %>%
     arrange(species)
@@ -530,11 +555,7 @@ create_heatmap <- function(pairwise_data, species_labels,
 
 if (has_heatmap_extremes) {
   # Create plain-text species labels directly from extreme trait data.
-  species_labels <- create_species_labels(
-    trait_ci_extreme,
-    lower_thresh = lower_thresh,
-    upper_thresh = upper_thresh
-  )
+  species_labels <- create_species_labels(trait_ci_extreme)
 
   # Save label metadata for debugging and downstream inspection.
   write.csv(species_labels, file.path(ci_dir, "my_labels_colored.csv"), 

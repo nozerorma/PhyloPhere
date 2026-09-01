@@ -38,7 +38,8 @@ process CAAS_SIGNIFICATION_REPORT {
                     background_input = '${background_input}',
                     bootstrap_file = '${bootstrap_input}',
                     output_dir = '${outdir}',
-                    caap_mode = ${caap_mode_r}
+                    caap_mode = ${caap_mode_r},
+                    seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '7.CT_signification.html'
             )
@@ -57,7 +58,8 @@ process CAAS_SIGNIFICATION_REPORT {
                     background_input = '${background_input}',
                     bootstrap_file = '${bootstrap_input}',
                     output_dir = '${outdir}',
-                    caap_mode = ${caap_mode_r}
+                    caap_mode = ${caap_mode_r},
+                    seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '7.CT_signification.html'
             )

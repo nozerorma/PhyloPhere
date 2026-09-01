@@ -18,7 +18,7 @@ output:
 params:
   accum_dir:      "."       # path to accumulation/ root (contains top/, bottom/, all/, aggregation/)
   traitname:      "unknown_trait"
-  pval_threshold: 0.05
+  fdr_threshold:  0.1
   output_dir:     "."
 ---
 
@@ -85,7 +85,8 @@ theme_set(
 )
 scheme_order <- c("us", "gs1", "gs2", "gs3", "gs4", "cct")
 
-pval_thr  <- params$pval_threshold
+fdr_thr   <- params$fdr_threshold
+pval_thr  <- fdr_thr
 accum_dir <- params$accum_dir
 ```
 
@@ -213,8 +214,8 @@ DT::datatable(
   summary_tbl,
   caption  = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Significant genes (p < %g) per direction × scheme | Trait: %s",
-            pval_thr, params$traitname)
+    sprintf("Significant genes (FDR < %g) per direction × scheme | Trait: %s",
+            fdr_thr, params$traitname)
   ),
   rownames = FALSE,
   options  = list(pageLength = 21, dom = "t")
@@ -248,7 +249,7 @@ for (dir in directions) {
     labs(
       x      = "Mean simulated count",
       y      = "Actual count",
-      colour = sprintf("p < %g", pval_thr),
+      colour = sprintf("FDR < %g", fdr_thr),
       title  = sprintf("Direction: %s | Trait: %s", str_to_title(dir), params$traitname)
     ) +
     theme_bw(base_size = 16) +
@@ -271,7 +272,7 @@ for (dir in directions) {
 
   p <- ggplot(sub, aes(x = PValueEmpirical, fill = scheme)) +
     geom_histogram(bins = 40, alpha = 0.7, colour = "white") +
-    geom_vline(xintercept = pval_thr, linetype = "dashed", colour = "red") +
+    geom_vline(xintercept = fdr_thr, linetype = "dashed", colour = "red") +
     facet_wrap(~ scheme, nrow = 2, scales = "free_y") +
     scale_fill_manual(values = setNames(.tableau10[seq_along(scheme_order)], scheme_order)) +
     labs(x = "Empirical p-value", y = "Gene count",
@@ -311,7 +312,7 @@ for (dir in directions) {
   print(
     knitr::kable(
       sig, rownames = FALSE, digits = 4, format = "html", escape = TRUE,
-      caption = sprintf("Significant genes | direction: %s | p < %g", str_to_title(dir), pval_thr)
+      caption = sprintf("Significant genes | direction: %s | FDR < %g", str_to_title(dir), fdr_thr)
     ) %>% kableExtra::kable_styling(bootstrap_options = c("striped", "condensed", "hover"), full_width = TRUE)
   )
   cat("\n\n")

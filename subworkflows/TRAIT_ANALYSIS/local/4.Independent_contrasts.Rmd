@@ -28,11 +28,10 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
-  discrete_method: "decile"
-  top_quantile: "0.90"
-  bottom_quantile: "0.10"
+  pss_top_pct: "0.01"
+  perm_strategy: "best_model"
   trait_type: ""
-  contrast_max_iter: "3"
+  max_contrasts: "0"
 ---
 
 <style type="text/css">
@@ -95,11 +94,9 @@ This section configures the working environment, sets directories, and loads nec
 
 ```{r setup, message=FALSE, warning=FALSE}
 
-# Make params available in environment before sourcing commons.R
-if (!exists("params")) {
-  stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
+if (exists("params")) {
+  tryCatch(assign("params", params, envir = .GlobalEnv), error = function(e) NULL)
 }
-assign("params", params, envir = .GlobalEnv)
 
 # Call the setup function from commons.R
 source("./src/commons.R")
@@ -359,7 +356,7 @@ tree_line_size <- 0.95
 max_depth <- max(ape::node.depth.edgelength(viz_tree))
 tip_label_offset <- max_depth * 0.006
 
-knitr::opts_current$set(fig.width = dyn_size_w, fig.height = dyn_size_h)
+contrast_df <- traits_res
 
 tree_tip_df <- tibble::tibble(species = viz_tree$tip.label) %>%
   dplyr::left_join(contrast_df, by = "species") %>%

@@ -171,7 +171,7 @@ def validate(project: ProjectConfig) -> list[str]:
         require(rer.gene_trees, "RERconverge: gene trees file is required when RER is enabled.")
 
     # --- FADE ---
-    # fade_mode always has a default; nothing else strictly required.
+    # FADE parameters always have defaults; nothing strictly required.
 
     # --- VEP ---
     vep = project.modules.vep

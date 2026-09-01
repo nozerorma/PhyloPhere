@@ -27,7 +27,12 @@ SPEC = ModuleTabSpec(
     ),
     advanced_fields=(
         FieldSpec(name="scoring_stress_top_n", label="Stress-enrichment top-N"),
-        FieldSpec(name="scoring_stress_rank_metric", label="Stress-enrichment rank metric"),
+        FieldSpec(
+            name="scoring_stress_rank_metric",
+            label="Stress-enrichment rank metric",
+            kind="choice",
+            choices=("spearman", "pearson"),
+        ),
         FieldSpec(name="scoring_position_top_pct", label="Top position percentile"),
         FieldSpec(name="scoring_gene_top_pct", label="Top gene percentile"),
     ),

@@ -6,33 +6,16 @@
 # Generates null trait permulations for CAAS significance calibration.
 #
 # Strategies (--perm_strategy):
-#   FGBG   : plain label shuffle, no phylogenetic structure.
-#   BM     : RERconverge permulation — Brownian simulation on the real tree,
-#            rank-matched back onto the observed values (simpermvec).
-#   lambda : same, but simulated on a tree rescaled by the ML Pagel's lambda of
-#            the empirical trait. Rank-matching preserves the empirical marginal
-#            exactly, so the ONLY thing the evolutionary model controls is the
-#            phylogenetic dependence structure — which is exactly what lambda
-#            parameterises. With lambda < 1 the nulls are less clade-clumped and
-#            therefore closer to the observed contrast design.
+#   OU : (Default) Fits an Ornstein-Uhlenbeck evolutionary model (alpha, sigsq),
+#        simulates traits under OU on the tree, and selects candidate pairs
+#        using Global Top 1% PSS (or non-overlapping Bayesian CIs for count data).
+#   BM : Brownian Motion simulation on the real tree, rank-matched back onto
+#        observed values (simpermvec).
 #
-# Pool harvesting: the observed design is not a random draw — it is the output of
-# an optimiser (TRAIT_ANALYSIS pair selection) that maximises phylogenetic
-# independence. Comparing it against unfiltered nulls is not like-for-like, so
-# each draw is run through the same selection rule (lean_contrast_selector.R).
-# Every accepted permulation carries EXACTLY N_pairs_obs pairs — the null must
-# contain the same number of species as the observed design. The tiers relax only
-# the independence requirement:
-#   Tier 1 : all N_pairs_obs pairs have mod_dunn >= 1
-#   Tier 2 : exactly one pair falls below mod_dunn 1 (fallback, only used if
-#            Tier 1 cannot fill the pool within max_tries)
-# The pool is assembled Tier 1 first, so Tier 2 records only ever appear when
-# Tier 1 came up short — which keeps the downstream seeded random subset in
-# caas_permulation.nf::SUBSET_RESAMPLE_PERMS Tier-1-dominant by construction.
-#
-# The species written to resample_*.tab ARE the selector's chosen pairs: FG holds
-# the high-extreme member of each pair, BG the low-extreme member, in matched
-# pair order.
+# Pool harvesting:
+# Every accepted permulation carries EXACTLY N_pairs_obs pairs with Dunn validation:
+#   Tier 1 : all N_pairs_obs pairs have mod_dunn >= 1 (fully independent)
+#   Tier 2 : exactly one pair falls below mod_dunn 1 (fallback)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -41,6 +24,22 @@ suppressPackageStartupMessages({
 })
 
 log_msg <- function(tag, ...) write(paste0("[", tag, "] ", format(Sys.time()), " ", paste0(...)), stdout())
+
+# ── Evolutionary Covariance Helpers ──────────────────────────────────────────
+bm_covariance <- function(tree, sigsq) {
+  sigsq * vcv.phylo(tree)[tree$tip.label, tree$tip.label]
+}
+
+ou_covariance <- function(tree, alpha, sigsq) {
+  shared <- vcv.phylo(tree)[tree$tip.label, tree$tip.label]
+  depths <- diag(shared)
+  patristic <- outer(depths, depths, "+") - 2 * shared
+  patristic[patristic < 0] <- 0
+  cov <- (sigsq / (2 * alpha)) * exp(-alpha * patristic) * (-expm1(-2 * alpha * shared))
+  cov <- (cov + t(cov)) / 2
+  dimnames(cov) <- list(tree$tip.label, tree$tip.label)
+  cov
+}
 
 # ── RERconverge permulation primitives ───────────────────────────────────────
 simulatevec <- function(namedvec, treewithbranchlengths) {
@@ -63,8 +62,8 @@ simpermvec <- function(namedvec, treewithbranchlengths) {
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
-       "[chunk_size] [include_b0] [discrete_method] [max_tries] [pheno_col] ",
-       "[bottom_quantile] [top_quantile] [n_col] [c_col] [resample_use_n] [trait_type]")
+       "[chunk_size] [include_b0] [pss_top_pct] [max_tries] [pheno_col] ",
+       "[n_col] [c_col] [resample_use_n] [trait_type]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -74,20 +73,23 @@ arg_or <- function(i, default, cast = as.character) {
 tree.path          <- args[1]
 config.file        <- args[2]
 number.of.cycles   <- as.integer(args[3])   # size of the harvested pool
-selection.strategy <- tolower(args[4])      # "bm" | "fgbg" | "lambda"
+selection.strategy <- tolower(args[4])      # "ou" | "bm"
 phenotypes         <- args[5]
 outdir             <- args[6]
 chunk.size         <- arg_or(7,  500L,       as.integer)
 include.b0         <- tolower(arg_or(8, "true")) %in% c("1", "true", "t", "yes", "y")
-discrete_method    <- arg_or(9,  "quintile")
+pss_top_pct        <- arg_or(9,  0.01,       as.numeric)
 max_tries          <- arg_or(10, 1000000L,   as.integer)
 pheno_col_name     <- arg_or(11, "")
-bottom_quantile    <- arg_or(12, 0.10,       as.numeric)
-top_quantile       <- arg_or(13, 0.90,       as.numeric)
-n_col              <- arg_or(14, "")   # denominator column (e.g. adult_necropsy_count)
-c_col              <- arg_or(15, "")   # numerator column   (e.g. malignant_count)
-resample_use_n     <- tolower(arg_or(16, "true")) %in% c("1", "true", "t", "yes", "y")
-trait_type         <- tolower(arg_or(17, "auto"))   # "" / auto / ordinal / continuous
+n_col              <- arg_or(12, "")   # denominator column (e.g. adult_necropsy_count)
+c_col              <- arg_or(13, "")   # numerator column   (e.g. malignant_count)
+resample_use_n     <- tolower(arg_or(14, "true")) %in% c("1", "true", "t", "yes", "y")
+trait_type         <- tolower(arg_or(15, "auto"))
+
+if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
+  log_msg("WARN", sprintf("Unknown strategy '%s', defaulting to 'auto'", selection.strategy))
+  selection.strategy <- "auto"
+}
 
 if (!dir.exists(outdir)) {
   dir.create(outdir, recursive = TRUE)
@@ -95,8 +97,6 @@ if (!dir.exists(outdir)) {
 }
 
 # ── Locate the lean selector next to this script ─────────────────────────────
-# Rscript exposes the script path via `--file=` in the full commandArgs; the
-# `sys.frames()$ofile` idiom only works for source()d files and is NULL here.
 script_dir <- {
   full <- commandArgs(trailingOnly = FALSE)
   hit  <- grep("^--file=", full, value = TRUE)
@@ -109,10 +109,6 @@ cfg <- read.table(config.file, sep = "\t", header = FALSE, stringsAsFactors = FA
 foreground.species <- cfg$V1[cfg$V2 == "1"]
 background.species <- cfg$V1[cfg$V2 == "0"]
 
-# N_pairs_obs is ALWAYS read from the V3 cluster ids that the contrast selection
-# step wrote into the discovery config. It is deliberately not a parameter: a null
-# filtered to a different pair count than the observed design would not be
-# calibrating that design.
 if (ncol(cfg) < 3) {
   stop("Discovery config '", config.file, "' has no V3 cluster-id column, so the ",
        "observed independent pair count cannot be determined. Permulations must ",
@@ -130,15 +126,12 @@ if (n_fg != target_pairs || n_bg != target_pairs) {
 }
 log_msg("INFO", sprintf("Observed independent pair count from config V3: N_pairs_obs = %d", target_pairs))
 
-# ── Phenotype table ──────────────────────────────────────────────────────────
-# Accepts both the headerless two-column traitfile the pipeline emits and a full
-# annotated TSV. Sniffed rather than assumed: reading a headerless file with
-# header=TRUE silently consumes the first species as a column name.
 first_line <- readLines(phenotypes, n = 1L, warn = FALSE)
-first_flds <- strsplit(first_line, "\t", fixed = TRUE)[[1]]
+delim_char <- if (grepl(",", first_line) && !grepl("\t", first_line)) "," else "\t"
+first_flds <- strsplit(first_line, delim_char, fixed = TRUE)[[1]]
 has_header <- length(first_flds) < 2 || is.na(suppressWarnings(as.numeric(first_flds[2])))
 
-pheno_raw <- read.delim(phenotypes, sep = "\t", header = has_header,
+pheno_raw <- read.delim(phenotypes, sep = delim_char, header = has_header,
                         stringsAsFactors = FALSE,
                         na.strings = c("", "NA", "NaN", "nan", "NULL", "null"))
 log_msg("INFO", sprintf("Read %d phenotype rows from %s (header=%s)",
@@ -159,12 +152,7 @@ phenotype.df <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# ── Count data → Jeffreys CIs, so the permulation can apply the SAME candidate
-# filter the observed contrast selection used. TRAIT_ANALYSIS/3.CI-composition.Rmd
-# takes the count path when both n_trait and c_trait exist, and there a pair is a
-# valid candidate iff its intervals do not overlap; otherwise it takes the discrete
-# path, whose trait_overlap rule ("one top, one bottom") the percentile selection
-# already reproduces exactly. Traits with no counts therefore need nothing here.
+# ── Count data → Jeffreys CIs ────────────────────────────────────────────────
 if (resample_use_n) {
   if (!nzchar(n_col) || !n_col %in% names(pheno_raw)) {
     cand_n <- c("n_trait", "n", "n_population", "sample_size", "total_count", "N")
@@ -182,8 +170,7 @@ use_ci <- resample_use_n && nzchar(n_col) && nzchar(c_col) &&
           n_col %in% names(pheno_raw) && c_col %in% names(pheno_raw)
 if (use_ci) {
   if (!requireNamespace("binom", quietly = TRUE)) {
-    stop("Count columns were supplied but the 'binom' package is unavailable, so the ",
-         "Jeffreys CIs the observed selection used cannot be reproduced.")
+    stop("Count columns were supplied but the 'binom' package is unavailable.")
   }
   np <- suppressWarnings(as.numeric(pheno_raw[[n_col]]))
   nc <- suppressWarnings(as.numeric(pheno_raw[[c_col]]))
@@ -194,16 +181,8 @@ if (use_ci) {
                               priors = c(0.5, 0.5), conf.level = 0.95)
     phenotype.df$ci_lb[good] <- b[, 5]; phenotype.df$ci_ub[good] <- b[, 6]
   }
-  log_msg("INFO", sprintf("Count columns '%s'/'%s' found (resample_use_n=TRUE): %d/%d species have Jeffreys CIs — ",
-                          n_col, c_col, sum(good), length(good)),
-          "candidate pairs will be filtered on CI non-overlap (count path)")
-} else {
-  if (!resample_use_n) {
-    log_msg("INFO", "resample_use_n is FALSE in config: using the percentile/top-bottom candidate rule (discrete path)")
-  } else {
-    log_msg("INFO", "No usable count columns found: using the percentile/top-bottom candidate rule ",
-            "(the discrete path's trait_overlap)")
-  }
+  log_msg("INFO", sprintf("Count columns '%s'/'%s' found: %d/%d species have Jeffreys CIs",
+                          n_col, c_col, sum(good), length(good)))
 }
 
 keep <- !is.na(phenotype.df$species) & is.finite(phenotype.df$value)
@@ -219,31 +198,48 @@ pruned.tree <- drop.tip(tree.o, setdiff(tree.o$tip.label, names(starting.values)
 pruned.tree <- multi2di(pruned.tree)
 pruned.tree$edge.length[pruned.tree$edge.length <= 0] <- 1e-8
 starting.values <- starting.values[pruned.tree$tip.label]
-if (any(is.na(starting.values))) stop("Internal error: NA trait values after pruning to tree tips")
 
-missing_fg <- setdiff(foreground.species, pruned.tree$tip.label)
-missing_bg <- setdiff(background.species, pruned.tree$tip.label)
-if (length(missing_fg) || length(missing_bg)) {
-  log_msg("WARN", sprintf("%d FG and %d BG config species absent from the pruned tree",
-                          length(missing_fg), length(missing_bg)))
-}
-log_msg("INFO", sprintf("Pruned tree: %d tips | target_pairs = %d | discrete_method = %s",
-                        Ntip(pruned.tree), target_pairs, discrete_method))
-
-# Distances are measured on the REAL tree, always — lambda rescaling belongs to
-# the generative model, not to the geometry the Dunn index is evaluated in.
 D <- cophenetic(pruned.tree)
 
-# ── Simulation tree (lambda rescaling) ───────────────────────────────────────
+# ── Evolutionary Model Fitting & Covariance Matrix ───────────────────────────
 simulation_tree <- pruned.tree
-lambda_hat <- NA_real_
-if (selection.strategy == "lambda") {
-  log_msg("INFO", "Fitting ML Pagel's lambda on the empirical trait vector...")
-  fitl <- fitContinuous(pruned.tree, starting.values, model = "lambda")
-  lambda_hat <- as.numeric(fitl$opt$lambda)
-  log_msg("INFO", sprintf("ML Pagel's lambda = %.4f", lambda_hat))
-  simulation_tree <- rescale(pruned.tree, "lambda", lambda_hat)
+cov_matrix <- NULL
+
+chosen_model <- if (selection.strategy %in% c("auto", "best_model")) "auto" else selection.strategy
+
+if (chosen_model == "auto") {
+  log_msg("INFO", "Evaluating BM vs OU evolutionary models on empirical trait values...")
+  fit_bm <- tryCatch(suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "BM", ncores = 1)), error = function(e) NULL)
+  fit_ou <- tryCatch(suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "OU", ncores = 1)), error = function(e) NULL)
+  
+  aicc_bm <- if (!is.null(fit_bm) && !is.null(fit_bm$opt$aicc)) fit_bm$opt$aicc else Inf
+  aicc_ou <- if (!is.null(fit_ou) && !is.null(fit_ou$opt$aicc)) fit_ou$opt$aicc else Inf
+  
+  if (is.finite(aicc_ou) && (aicc_bm - aicc_ou >= 2)) {
+    chosen_model <- "ou"
+    log_msg("INFO", sprintf("Selected OU model (AICc OU = %.2f vs BM = %.2f, delta AICc = %.2f >= 2)",
+                            aicc_ou, aicc_bm, aicc_bm - aicc_ou))
+  } else {
+    chosen_model <- "bm"
+    log_msg("INFO", sprintf("Selected BM model (AICc BM = %.2f vs OU = %.2f, delta AICc = %.2f < 2)",
+                            aicc_bm, aicc_ou, aicc_bm - aicc_ou))
+  }
+}
+
+if (chosen_model == "ou") {
+  log_msg("INFO", "Fitting Ornstein-Uhlenbeck (OU) model on the empirical trait vector...")
+  fit_ou <- suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "OU", ncores = 1))
+  alpha_hat <- as.numeric(fit_ou$opt$alpha)
+  sigsq_hat <- as.numeric(fit_ou$opt$sigsq)
+  simulation_tree <- rescale(pruned.tree, "OU", alpha_hat)
   simulation_tree$edge.length[simulation_tree$edge.length <= 0] <- 1e-8
+  cov_matrix <- ou_covariance(pruned.tree, alpha_hat, sigsq_hat)
+} else {
+  log_msg("INFO", "Fitting Brownian Motion (BM) model on the empirical trait vector...")
+  fit_bm <- suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "BM", ncores = 1))
+  sigsq_hat <- as.numeric(fit_bm$opt$sigsq)
+  simulation_tree <- pruned.tree
+  cov_matrix <- bm_covariance(pruned.tree, sigsq_hat)
 }
 
 # ── Lean selector ────────────────────────────────────────────────────────────
@@ -266,21 +262,10 @@ if (include.b0) {
 }
 
 # ── Harvest ──────────────────────────────────────────────────────────────────
-# Three quantities govern this step and they are deliberately distinct:
-#   max_tries      — draw budget (escalated below if the pool comes up short)
-#   pool_size      — accepted permulations to harvest; the position-level null
-#   caas_full_perms— drawn downstream from the pool for the FCS null (not seen here)
-#
-# If the budget is exhausted before the pool is full, the budget is raised by 50%
-# and harvesting RESUMES (accepted records are kept, not discarded). After two
-# escalations the run fails loudly rather than silently producing a thin null.
 start.time <- Sys.time()
 log_msg("START", sprintf("Harvesting pool (strategy: %s, pool_size: %d, max_tries: %d)",
                          selection.strategy, number.of.cycles, max_tries))
 
-# Phenotype records in ascending value order — the order simpermvec's rank-matching
-# assigns them in. rank_order is the identity on that table, kept explicit so the
-# BM/lambda and FGBG branches below index it the same way.
 rec_ord    <- order(starting.values)
 rec_value  <- unname(starting.values[rec_ord])
 n_rec      <- length(rec_value)
@@ -308,33 +293,21 @@ repeat {
   while (n1 < number.of.cycles && total_draws < budget) {
     total_draws <- total_draws + 1L
 
-    # A permulation moves whole PHENOTYPE RECORDS between tips, not bare numbers:
-    # when a tip receives another species' prevalence it receives that prevalence's
-    # uncertainty too, so its confidence interval travels with it. simpermvec
-    # returns tips ordered by their simulated value with the sorted observed values
-    # assigned by rank, so rank i carries record i of the value-sorted table.
-    ord <- NULL
-    pvec <- if (selection.strategy == "fgbg") {
-      ord <- sample.int(n_rec)
-      setNames(rec_value[ord], names(starting.values))
-    } else {
-      v <- simpermvec(starting.values, simulation_tree)
-      ord <- rank_order                       # ascending value order = record order
-      v
-    }
+    sim_v <- simulatevec(starting.values, simulation_tree)
+    sim_ord <- order(sim_v)
+    
+    pvec <- setNames(rec_value[order(sim_ord)], names(sim_v))
 
     ci_lb_draw <- NULL; ci_ub_draw <- NULL
     if (use_ci) {
-      ci_lb_draw <- setNames(rec_lb[ord], names(pvec))
-      ci_ub_draw <- setNames(rec_ub[ord], names(pvec))
+      ci_lb_draw <- setNames(rec_lb[order(sim_ord)], names(sim_v))
+      ci_ub_draw <- setNames(rec_ub[order(sim_ord)], names(sim_v))
     }
 
     e <- evaluate_lean_contrast_selection(
       trait_vec = pvec, D = D, target_pairs = target_pairs,
-      discrete_method = discrete_method,
-      bottom_quantile = bottom_quantile, top_quantile = top_quantile,
       ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
-      trait_type = trait_type
+      cov_matrix = cov_matrix, top_pct = 0.01
     )
 
     if (e$tier == 1L) {
@@ -372,21 +345,17 @@ if (n1 >= number.of.cycles) {
   use2 <- number.of.cycles - n1
   pool <- c(tier1[seq_len(n1)], tier2[seq_len(use2)])
   log_msg("WARN", sprintf(
-    "Tier 1 exhausted after %d draws and %d escalation(s): topping up with Tier 2 (one pair below Dunn 1). %d Tier-1 + %d Tier-2 = %d/%d records",
-    total_draws, escalations, n1, use2, length(pool), number.of.cycles))
+    "Tier 1 exhausted after %d draws: topping up with Tier 2. %d Tier-1 + %d Tier-2 = %d/%d records",
+    n1, use2, length(pool), number.of.cycles))
 } else {
   tab <- sort(table(reject_reasons), decreasing = TRUE)
   top <- seq_len(min(3, length(tab)))
   stop(sprintf(
     paste0("Permulation pool could not be filled: %d Tier-1 + %d Tier-2 = %d of the requested %d ",
            "after %d draws and %d escalation(s) of max_tries (final budget %d).\n",
-           "  The downstream FCS null (caas_full_perms) is drawn from this pool, so continuing ",
-           "would silently under-power it.\n",
-           "  Top rejection reasons: %s\n",
-           "  Consider: %sa larger --max_tries, or a smaller --perm_pool_size."),
+           "  Top rejection reasons: %s"),
     n1, n2, n1 + n2, number.of.cycles, total_draws, escalations, budget,
-    if (length(tab)) paste(sprintf("%s (%d)", names(tab)[top], as.integer(tab)[top]), collapse = "; ") else "none recorded",
-    if (selection.strategy != "lambda") "--perm_strategy lambda (accepts far more designs than BM), " else ""))
+    if (length(tab)) paste(sprintf("%s (%d)", names(tab)[top], as.integer(tab)[top]), collapse = "; ") else "none recorded"))
 }
 
 # ── Write resample chunks + a tier/Dunn manifest ─────────────────────────────
@@ -409,18 +378,10 @@ for (b in seq_along(pool)) {
     bg    = paste(e$bg, collapse = ","),
     stringsAsFactors = FALSE
   )
-  # fg_values/bg_values are the PERMULATED trait values of the written species,
-  # with the quantile cut-offs they were selected against — so the pool can be
-  # audited: every fg value >= q_upper, every bg value <= q_lower, in every row.
-  # Written at full precision on purpose: a quantile cut-off is itself an
-  # observed trait value, so a species sitting exactly ON the threshold is the
-  # common case, and rounding the value but not the threshold makes those rows
-  # look like violations.
   fmt <- function(x) paste(format(x, digits = 15, trim = TRUE), collapse = ",")
   manifest[[b]] <- data.frame(cycle = paste0("b_", b), tier = e$tier,
                               n_pairs = e$n_pairs, dunn_min = e$dunn_min,
-                              n_pairs_below_1 = e$n_below, mode = e$mode,
-                              q_lower = e$q_lower, q_upper = e$q_upper,
+                              n_below = e$n_below, mode = e$mode,
                               fg_values = fmt(e$fg_values),
                               bg_values = fmt(e$bg_values),
                               stringsAsFactors = FALSE)
@@ -438,13 +399,6 @@ tiers <- vapply(pool, function(e) e$tier, integer(1))
 dunns <- vapply(pool, function(e) e$dunn_min, numeric(1))
 elapsed <- as.numeric(difftime(Sys.time(), start.time, units = "mins"))
 log_msg("COMPLETE", sprintf(
-  "%d records (Tier1=%d, Tier2=%d) from %d draws | acceptance %.2f%% | median overall Dunn %.3f | %.2f min%s",
+  "%d records (Tier1=%d, Tier2=%d) from %d draws | acceptance %.2f%% | median overall Dunn %.3f | %.2f min",
   length(pool), sum(tiers == 1L), sum(tiers == 2L), total_draws,
-  100 * length(pool) / total_draws, median(dunns), elapsed,
-  if (is.finite(lambda_hat)) sprintf(" | lambda = %.4f", lambda_hat) else ""))
-if (length(reject_reasons)) {
-  tab <- sort(table(reject_reasons), decreasing = TRUE)
-  for (i in seq_len(min(3, length(tab)))) {
-    log_msg("INFO", sprintf("  rejected %6d x %s", as.integer(tab)[i], names(tab)[i]))
-  }
-}
+  100 * length(pool) / total_draws, median(dunns), elapsed))

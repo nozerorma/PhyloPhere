@@ -104,7 +104,6 @@ fi
 if [ "${RUN_FADE:-false}" = true ]; then
     NF_FLAGS+=(
         --fade
-        --fade_mode "${FADE_MODE}"
     )
 fi
 

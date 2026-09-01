@@ -41,6 +41,7 @@ params:
   window_size_bp: 1000000
   direction: "combined"
   background_file: NULL
+  seed: "1998"
 ---
 
 <style type="text/css">
@@ -119,6 +120,9 @@ theme_set(
     plot.subtitle = element_text(colour = "grey40", hjust = 0, margin = ggplot2::margin(b = 10))
   )
 )
+
+seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+set.seed(seed_val)
 
 # Safe correlation helper: returns NA (not an error) when inputs have fewer
 # than 3 complete pairs - avoids crashes in sparse optional-module sections.
@@ -210,7 +214,7 @@ if (has_perms) {
       mat <- as.matrix(mat)
       val <- as.numeric(mat)
       if (length(val) > 100000) {
-        set.seed(42)
+        set.seed(seed_val)
         val <- sample(val, 100000)
       }
       tibble::tibble(metric = metric, direction = sub("_asr$", "", rank_name),
@@ -898,7 +902,7 @@ cat("_Position-level null overlay unavailable (needs the cycle-stratified perm s
 ```{r perm-pos-setup, eval=has_scheme_overlay}
 src_pal <- c(null = "#BAB0AC", observed = "#E15759")
 .pos_density <- function(value_col, xlab, title) {
-  set.seed(1)
+  set.seed(seed_val)
   nd <- scheme_overlay %>% filter(source == "null") %>% group_by(caap_group) %>%
         slice_sample(n = 20000) %>% ungroup()
   od <- scheme_overlay %>% filter(source == "observed")

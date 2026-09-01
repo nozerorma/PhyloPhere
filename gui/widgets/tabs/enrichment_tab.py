@@ -47,6 +47,7 @@ SPEC = ModuleTabSpec(
     ),
     advanced_fields=(
         FieldSpec(name="fcs_min_genes", label="FCS minimum genes per set"),
+        FieldSpec(name="fcs_max_genes", label="FCS maximum genes per set (0 = uncapped)"),
         FieldSpec(name="fcs_fdr", label="FCS FDR threshold"),
         FieldSpec(name="fcs_pperm_thr", label="FCS permulation p threshold"),
         FieldSpec(name="fcs_top_n", label="FCS top-N leading edge"),

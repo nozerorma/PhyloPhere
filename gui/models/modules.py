@@ -49,9 +49,8 @@ class CaasConfig(ModuleConfigBase):
 
     # Contrast-selection tuning (conf/common.config) — used when --contrast_selection
     # runs upstream of CT (bundled unconditionally with CAAS, see run_single.sh.j2).
-    top_quantile: str = "0.90"  # --top_quantile
-    bottom_quantile: str = "0.10"  # --bottom_quantile
-    contrast_max_iter: str = "3"  # --contrast_max_iter
+    pss_top_pct: str = "0.01"  # --pss_top_pct
+    max_contrasts: str = "0"  # --max_contrasts (0 = dynamic discovery)
     min_contrasts: str = "3"  # --min_contrasts
 
     # Discovery/resample fine-tuning (conf/ct.config)
@@ -67,17 +66,11 @@ class CaasConfig(ModuleConfigBase):
     max_miss_fraction: str = "0.0"  # --max_miss_fraction
     miss_pair: bool = True  # --miss_pair
     caap_mode: bool = True  # --caap_mode
-    fgsize: str = "6"  # --fgsize
-    bgsize: str = "6"  # --bgsize
-    perm_strategy: str = "BM"  # --perm_strategy (FGBG|BM|lambda)
-    resample_use_n: bool = True  # --resample_use_n
+    perm_strategy: str = "auto"  # --perm_strategy (auto|OU|BM)
     max_tries: str = "1000000"  # --max_tries
-    perm_pheno_col: str = ""  # --perm_pheno_col
-    traitvalues: str = ""  # --traitvalues
     chunk_size: str = "500"  # --chunk_size
     include_b0: bool = False  # --include_b0
     multi_hypothesis: bool = True  # --multi_hypothesis
-    alpha_threshold: str = "0.05"  # --alpha_threshold
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).
     export_groups: bool = False  # --export_groups
@@ -128,11 +121,8 @@ class DisambiguationConfig(ModuleConfigBase):
 class AccumulationConfig(ModuleConfigBase):
     accumulation_n_randomizations: str = "1000000"  # --accumulation_n_randomizations
     accumulation_randomization_type: str = "cons_decile"  # --accumulation_randomization_type (naive|cons_decile)
-    accumulation_seed: str = "1998"  # --accumulation_seed
     accumulation_entropy_dir: str = ""  # --accumulation_entropy_dir
     accumulation_fdr: str = "0.1"  # --accumulation_fdr
-    accumulation_pval_threshold: str = "0.05"  # --accumulation_pval_threshold
-    accumulation_report_pval_threshold: str = "0.05"  # --accumulation_report_pval_threshold
 
     # NOTE: accumulation_caas_input/accumulation_background_input moved to
     # gui/models/precomputed.py::PrecomputedConfig.
@@ -197,17 +187,9 @@ class RerConfig(ModuleConfigBase):
 class FadeConfig(ModuleConfigBase):
     # Off by default — matches RUN_FADE=false in the reference scripts.
     enabled: bool = False
-    fade_mode: str = "all"  # --fade_mode (all|gene_set)
-
     # Shared alignment-prep / FADE-run batching (SLURM/Seqera scheduler overhead).
     selection_prep_batch_size: str = "500"  # --selection_prep_batch_size
     fade_batch_size: str = "200"  # --fade_batch_size
-
-    # Standalone postproc gene-list paths for gene_set mode (used when FADE runs
-    # without an upstream --ct_postproc step) — distinct from fade_json_dir_top/
-    # bottom (a precomputed *report*, not a gene-set restriction).
-    fade_postproc_top: str = ""  # --fade_postproc_top
-    fade_postproc_bottom: str = ""  # --fade_postproc_bottom
 
     # Statistical threshold
     fade_bf_threshold: str = "100"  # --fade_bf_threshold
@@ -279,6 +261,7 @@ class EnrichmentConfig(ModuleConfigBase):
 
     # FCS (ranked-Wilcoxon) enrichment
     fcs_min_genes: str = "5"  # --fcs_min_genes
+    fcs_max_genes: str = "500"  # --fcs_max_genes (0 = no limit)
     fcs_fdr: str = "0.15"  # --fcs_fdr
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr
     fcs_top_n: str = "20"  # --fcs_top_n

@@ -315,6 +315,7 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"background_file      = {_r_arg(s['background_file'])}",
             "window_size_bp       = 1000000",
             "direction            = 'combined'",
+            "seed                 = '1998'",
         ],
         output_file,
     )
@@ -350,9 +351,6 @@ def _rer_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
             f"traitname         = '{report.traitname}'",
             "pval_threshold    = 0.05",
             "top_n_labels      = 15",
-            "top_pct           = 0.10",
-            "top5_pct          = 0.05",
-            "top1_pct          = 0.01",
             "output_dir        = '.'",
         ],
         output_file,
@@ -511,6 +509,7 @@ def _postproc_build_script(report: DetectedReport, repo_dir: Path, use_singulari
             "iqr_multiplier = 1.5",
             "alpha_threshold = 0.05",
             "gene_filter_mode = 'strict'",
+            "seed = '1998'",
         ],
         output_file,
     )
@@ -552,6 +551,7 @@ def _signification_build_script(report: DetectedReport, repo_dir: Path, use_sing
             f"bootstrap_file = '{s['bootstrap_file']}'",
             "output_dir = '.'",
             "caap_mode = FALSE",
+            "seed = '1998'",
         ],
         output_file,
     )
@@ -633,6 +633,7 @@ def _fcs_scoring_build_script(report: DetectedReport, repo_dir: Path, use_singul
             f"traitname     = '{report.traitname}'",
             f"perms_file    = {_r_arg(s['perms_file'])}",
             f"gene_lists_dir = {_r_arg(s['gene_lists'])}",
+            "seed           = '1998'",
         ],
         output_file,
     )
@@ -701,6 +702,7 @@ def _posenrich_build_script(report: DetectedReport, repo_dir: Path, use_singular
             f"fcs_stats_file = {_r_arg(s['fcs_stats'])}",
             f"universe_file  = {_r_arg(s['cleaned_background'])}",
             f"position_lists_dir = {_r_arg(s['position_lists'])}",
+            "seed = '1998'",
         ],
         output_file,
     )
@@ -769,6 +771,7 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
             "rer_domino_network_sif   = NULL",
             "rer_domino_modules_dir   = NULL",
             "rer_domino_edge_scores_file = NULL",
+            "seed                     = '1998'",
         ],
         output_file,
     )
@@ -870,6 +873,7 @@ def _compare_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"fade_sites_bottom_file   = {_r_arg(s['fade_sites_bottom'])}",
             f"gene_lists_dir     = {_r_arg(s['gene_lists'])}",
             f"position_lists_dir = {_r_arg(s['position_lists'])}",
+            "seed               = '1998'",
         ],
         output_file,
     )
@@ -926,7 +930,7 @@ def _ta_data_prune_build_script(report: DetectedReport, repo_dir: Path, use_sing
             "discrete_method = 'quartile'",
             "trait_type = ''",
             "top_quantile = '0.75'", "bottom_quantile = '0.25'",
-            "contrast_max_iter = '3'",
+            "max_contrasts = '0'",
         ],
         output_file,
     )
@@ -1009,7 +1013,7 @@ def _ta_phenotype_exploration_build_script(report: DetectedReport, repo_dir: Pat
             "discrete_method = 'quartile'",
             "trait_type = ''",
             "top_quantile = '0.75'", "bottom_quantile = '0.25'",
-            "contrast_max_iter = '3'",
+            "max_contrasts = '0'",
         ],
         output_file,
     )
@@ -1090,7 +1094,7 @@ def _ta_contrast_build_script(report: DetectedReport, repo_dir: Path, use_singul
             "discrete_method = 'decile'",
             "trait_type = ''",
             "top_quantile = '0.90'", "bottom_quantile = '0.10'",
-            "contrast_max_iter = '3'",
+            "max_contrasts = '0'",
         ],
         output_file,
     )

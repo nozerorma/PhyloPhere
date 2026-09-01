@@ -51,6 +51,7 @@ process SCORING_FCS_REPORT {
     def traitname = params.traitname ?: 'unknown_trait'
     def gmt_dir   = params.gmt_dir
     def num_g     = params.fcs_min_genes
+    def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
@@ -67,12 +68,14 @@ process SCORING_FCS_REPORT {
                 gmt_dir       = '${gmt_dir}',
                 project_name  = 'Scoring_FCS_${traitname}',
                 num_g         = ${num_g},
+                max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
                 perms_file    = '${perms_file}',
-                gene_lists_dir = ${gene_lists_arg}
+                gene_lists_dir = ${gene_lists_arg},
+                seed          = '${params.seed ?: 1998}'
             ),
             output_file = '12.FCS_scoring_${traitname}.html'
         )
@@ -123,6 +126,7 @@ process RER_FCS_REPORT {
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def gmt_dir   = params.gmt_dir
     def num_g     = params.fcs_min_genes
+    def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
@@ -135,12 +139,14 @@ process RER_FCS_REPORT {
                 gmt_dir       = '${gmt_dir}',
                 project_name  = '${report_label}',
                 num_g         = ${num_g},
+                max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',
                 perms_file    = '${perms_file}',
-                annot_file    = '${annot_file}'
+                annot_file    = '${annot_file}',
+                seed          = '${params.seed ?: 1998}'
             ),
             output_file = '${report_label}.html'
         )

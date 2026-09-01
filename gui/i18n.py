@@ -1464,13 +1464,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'FADE',
         'de': 'FADE',
     },
-    'Directional selection analysis (HyPhy FADE) across the phylogeny, run on either every gene or just the CAAS hit set (fade_mode).': {
-        'en': 'Directional selection analysis (HyPhy FADE) across the phylogeny, run on either every gene or just the CAAS hit set (fade_mode).',
-        'es': 'Análisis de selección direccional (HyPhy FADE) a lo largo de la filogenia, ejecutado sobre todos los genes o solo sobre el conjunto de aciertos CAAS (fade_mode).',
-        'ca': "Anàlisi de selecció direccional (HyPhy FADE) al llarg de la filogènia, executat sobre tots els gens o només sobre el conjunt d'encerts CAAS (fade_mode).",
-        'fr': "Analyse de sélection directionnelle (HyPhy FADE) sur la phylogénie, exécutée sur chaque gène ou uniquement sur l'ensemble des hits CAAS (fade_mode).",
-        'it': 'Analisi di selezione direzionale (HyPhy FADE) lungo la filogenesi, eseguita su ogni gene o solo sul set di hit CAAS (fade_mode).',
-        'de': 'Analyse zur gerichteten Selektion (HyPhy FADE) über die Phylogenie hinweg, ausgeführt entweder für jedes Gen oder nur für das CAAS-Treffer-Set (fade_mode).',
+    'Directional selection analysis (HyPhy FADE) across the phylogeny.': {
+        'en': 'Directional selection analysis (HyPhy FADE) across the phylogeny.',
+        'es': 'Análisis de selección direccional (HyPhy FADE) a lo largo de la filogenia.',
+        'ca': "Anàlisi de selecció direccional (HyPhy FADE) al llarg de la filogènia.",
+        'fr': "Analyse de sélection directionnelle (HyPhy FADE) sur la phylogénie.",
+        'it': 'Analisi di selezione direzionale (HyPhy FADE) lungo la filogenesi.',
+        'de': 'Analyse zur gerichteten Selektion (HyPhy FADE) über die Phylogenie hinweg.',
     },
     'Scoring needs a scoring_fade_summary_top/bottom fallback per phenotype row (Runtime tab) when this is off, plus optionally scoring_fade_site_top/bottom (Precomputed Run tab) for site-level fallback. fade_json_dir_top/bottom (a precomputed report input, not per-phenotype) also live on the Precomputed Run tab.': {
         'en': 'Scoring needs a scoring_fade_summary_top/bottom fallback per phenotype row (Runtime tab) when this is off, plus optionally scoring_fade_site_top/bottom (Precomputed Run tab) for site-level fallback. fade_json_dir_top/bottom (a precomputed report input, not per-phenotype) also live on the Precomputed Run tab.',

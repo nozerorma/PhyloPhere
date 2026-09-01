@@ -200,24 +200,23 @@ if (!is.na(branch_trait_resolved)) {
 }
 
 # ----------------------------------------
-# Categorization / discretization method
+# Trait type and PSS parameters
 # ----------------------------------------
-# Used by stats.f() for global_label and by the CI-composition Rmd.
-# Options: quartile, quintile, decile, median_sd, parameterized
-
-discrete_method <- if (exists("params") && !is.null(params$discrete_method) && nzchar(params$discrete_method)) params$discrete_method else "decile"
-top_quantile    <- if (exists("params") && !is.null(params$top_quantile)    && nzchar(params$top_quantile))    as.numeric(params$top_quantile)    else 0.90
-bottom_quantile <- if (exists("params") && !is.null(params$bottom_quantile) && nzchar(params$bottom_quantile)) as.numeric(params$bottom_quantile) else 0.10
-# trait_type: "" / "auto" (infer coded vs continuous), "ordinal" (force fg/bg
-# code — highest level = foreground, lowest = background), "continuous" (force
-# quantile discretisation). Consumed by stats.R::compute_trait_thresholds.
 trait_type <- if (exists("params") && !is.null(params$trait_type) && nzchar(params$trait_type)) tolower(params$trait_type) else "auto"
-debug_log("discrete_method = %s, top_quantile = %.2f, bottom_quantile = %.2f, trait_type = %s",
-          discrete_method, top_quantile, bottom_quantile, trait_type)
+pss_top_pct <- if (exists("params") && !is.null(params$pss_top_pct) && nzchar(as.character(params$pss_top_pct))) as.numeric(params$pss_top_pct) else 0.01
+perm_strategy <- if (exists("params") && !is.null(params$perm_strategy) && nzchar(params$perm_strategy)) params$perm_strategy else "best_model"
 
-# Maximum iterations for the contrast selection algorithm
-contrast_max_iter <- if (exists("params") && !is.null(params$contrast_max_iter) && nzchar(params$contrast_max_iter)) as.integer(params$contrast_max_iter) else 3L
-debug_log("contrast_max_iter = %d", contrast_max_iter)
+debug_log("trait_type = %s, pss_top_pct = %.4f, perm_strategy = %s", trait_type, pss_top_pct, perm_strategy)
+
+# Maximum contrasts for the contrast selection algorithm (0 or Inf = dynamic discovery)
+max_contrasts <- if (exists("params") && !is.null(params$max_contrasts) && nzchar(as.character(params$max_contrasts)) && as.integer(params$max_contrasts) > 0L) {
+  as.integer(params$max_contrasts)
+} else if (exists("params") && !is.null(params$contrast_max_iter) && nzchar(as.character(params$contrast_max_iter)) && as.integer(params$contrast_max_iter) > 0L) {
+  as.integer(params$contrast_max_iter)
+} else {
+  Inf
+}
+debug_log("max_contrasts = %s", ifelse(is.finite(max_contrasts), as.character(max_contrasts), "<dynamic>"))
 
 # Lets try sourcing stats.R after all the parameters and data are loaded, since it relies on some of these variables being defined
 source(file.path(objDir, "stats.R"))

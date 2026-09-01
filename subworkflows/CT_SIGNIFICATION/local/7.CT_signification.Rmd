@@ -21,6 +21,7 @@ params:
   bootstrap_file: NULL
   output_dir: "."
   caap_mode: FALSE
+  seed: "1998"
 ---
 
 <style type="text/css">
@@ -396,7 +397,8 @@ cat("\n=== Exporting Meta-CAAS Data ===\n")
 
 # Function to assign random CAAS tags
 assign_caas_tags <- function(n_rows) {
-  set.seed(1234)  # For reproducibility
+  seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+  set.seed(seed_val)  # For reproducibility
   
   tags <- sapply(1:n_rows, function(i) {
     paste0("CAAS_", 

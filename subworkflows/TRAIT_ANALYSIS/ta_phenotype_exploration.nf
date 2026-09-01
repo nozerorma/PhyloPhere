@@ -37,7 +37,7 @@ process PHENOTYPE_EXPLORATION {
     def top_quantile = params.top_quantile ?: '0.75'
     def bottom_quantile = params.bottom_quantile ?: '0.25'
     def trait_type = params.trait_type ?: ''
-    def contrast_max_iter = params.contrast_max_iter ?: '3'
+    def max_contrasts = params.max_contrasts ?: '0'
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -63,7 +63,7 @@ process PHENOTYPE_EXPLORATION {
                     trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}',
-                    contrast_max_iter = '${contrast_max_iter}'
+                    max_contrasts = '${max_contrasts}'
                 ),
                 output_file = '2.Phenotype_exploration_complete.html',
                 envir = new.env()
@@ -93,7 +93,7 @@ process PHENOTYPE_EXPLORATION {
                     trait_type = '${trait_type}',
                     top_quantile = '${top_quantile}',
                     bottom_quantile = '${bottom_quantile}',
-                    contrast_max_iter = '${contrast_max_iter}'
+                    max_contrasts = '${max_contrasts}'
                 ),
                 output_file = '2.Phenotype_exploration_complete.html',
                 envir = new.env()

@@ -124,7 +124,7 @@ export CAAS_CONFIG="{{ modules.caas.caas_config_path }}"
 export PATTERNS="{{ modules.caas.patterns }}"
 export TOP_QUANTILE="{{ modules.caas.top_quantile }}"
 export BOTTOM_QUANTILE="{{ modules.caas.bottom_quantile }}"
-export CONTRAST_MAX_ITER="{{ modules.caas.contrast_max_iter }}"
+export MAX_CONTRASTS="{{ modules.caas.max_contrasts }}"
 export MIN_CONTRASTS="{{ modules.caas.min_contrasts }}"
 export CT_DISCOVERY_BATCH_SIZE="{{ modules.caas.ct_discovery_batch_size }}"
 export CT_BOOTSTRAP_BATCH_SIZE="{{ modules.caas.ct_bootstrap_batch_size }}"
@@ -172,11 +172,8 @@ export PRECOMP_USE_POSTPROC="{{ 'true' if precomputed.use_postproc else 'false' 
 
 # --- ACCUMULATION ---
 export ACCUMULATION_RANDOMIZATION_TYPE="{{ modules.accumulation.accumulation_randomization_type }}"
-export ACCUMULATION_SEED="{{ modules.accumulation.accumulation_seed }}"
 export ENTROPY_DIR="{{ modules.accumulation.accumulation_entropy_dir }}"
 export ACCUMULATION_FDR="{{ modules.accumulation.accumulation_fdr }}"
-export ACCUMULATION_PVAL_THRESHOLD="{{ modules.accumulation.accumulation_pval_threshold }}"
-export ACCUMULATION_REPORT_PVAL_THRESHOLD="{{ modules.accumulation.accumulation_report_pval_threshold }}"
 export PRECOMP_USE_ACCUMULATION="{{ 'true' if precomputed.use_accumulation else 'false' }}"
 
 # --- RERCONVERGE ---
@@ -200,11 +197,8 @@ export RER_GENE_SCORES="{{ modules.rer.rer_gene_scores }}"
 export PRECOMP_USE_RER="{{ 'true' if precomputed.use_rer else 'false' }}"
 
 # --- FADE ---
-export FADE_MODE="{{ modules.fade.fade_mode }}"
 export SELECTION_PREP_BATCH_SIZE="{{ modules.fade.selection_prep_batch_size }}"
 export FADE_BATCH_SIZE="{{ modules.fade.fade_batch_size }}"
-export FADE_POSTPROC_TOP="{{ modules.fade.fade_postproc_top }}"
-export FADE_POSTPROC_BOTTOM="{{ modules.fade.fade_postproc_bottom }}"
 export FADE_BF_THRESHOLD="{{ modules.fade.fade_bf_threshold }}"
 export FADE_MODEL="{{ modules.fade.fade_model }}"
 export LG_DAT_PATH="{{ modules.fade.lg_dat_path }}"
@@ -236,6 +230,7 @@ export SCORING_GENE_TOP_PCT="{{ modules.scoring.scoring_gene_top_pct }}"
 # --- ENRICHMENT / POSENRICH ---
 export GMT_DIR="{{ modules.enrichment.gmt_dir }}"
 export FCS_MIN_GENES="{{ modules.enrichment.fcs_min_genes }}"
+export FCS_MAX_GENES="{{ modules.enrichment.fcs_max_genes }}"
 export FCS_FDR="{{ modules.enrichment.fcs_fdr }}"
 export FCS_PPERM_THR="{{ modules.enrichment.fcs_pperm_thr }}"
 export FCS_TOP_N="{{ modules.enrichment.fcs_top_n }}"

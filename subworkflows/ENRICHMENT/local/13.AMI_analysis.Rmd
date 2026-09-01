@@ -48,6 +48,7 @@ params:
   rer_domino_network_sif: NULL
   rer_domino_modules_dir: NULL
   rer_domino_edge_scores_file: NULL
+  seed: "1998"
 ---
 
 <style type="text/css">
@@ -111,6 +112,9 @@ suppressPackageStartupMessages({
   library(STRINGdb)
   library(paletteer)
 })
+
+seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+set.seed(seed_val)
 
 theme_set(
   theme_minimal(base_size = 13) +
@@ -401,7 +405,7 @@ load_domino_modules <- function(list_name, modules_dir) {
 # Seeds node positions by cluster centroid before Fruchterman-Reingold so that
 # same-cluster nodes start near each other and the final layout mirrors the
 # STRING web interface (clusters appear as visual blobs, not scattered).
-cluster_layout <- function(net, clusters_df, seed = 42) {
+cluster_layout <- function(net, clusters_df, seed = seed_val) {
   set.seed(seed)
   n <- igraph::vcount(net)
   if (is.null(clusters_df) || n < 2) return(igraph::layout_with_fr(net))

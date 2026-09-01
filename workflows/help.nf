@@ -155,7 +155,7 @@ Usage:
 --discrete_method              <"quartile|quintile|decile|median_sd|parameterized">  "quintile"
 --top_quantile                  <FLOAT 0-1>                   0.90   (parameterized method only)
 --bottom_quantile                <FLOAT 0-1>                   0.10   (parameterized method only)
---contrast_max_iter               <INTEGER>                     3
+--max_contrasts                   <INTEGER>                     0     (0 = dynamic discovery)
 --min_contrasts                    <INTEGER>                     3     (min foreground pairs required)
 --prune_data                        <true|false>                   false  (requires --reporting)
 --prune_list                         <"species_list">               null
@@ -213,10 +213,7 @@ Usage:
 --accumulation_entropy_dir               <"entropy_dir">                null
 --accumulation_randomization_type          <"naive|cons_decile">          "cons_decile"
 --accumulation_n_randomizations              <INTEGER>                      1000000
---accumulation_seed                            <INTEGER>                      1998
 --accumulation_fdr                               <FLOAT 0-1>                    0.1
---accumulation_pval_threshold                      <FLOAT 0-1>                    0.05
---accumulation_report_pval_threshold                 <FLOAT 0-1>                    0.05
 '''
 
 // ── VEP ──────────────────────────────────────────────────────────────────────
@@ -244,9 +241,6 @@ decelerated amino-acid selection on phenotype-extreme branches. Always runs
 both "top" and "bottom" directions.
 
 Usage:
---fade_mode                    <"all|gene_set">        "all"
---fade_postproc_top              <"gene_list">            null  (gene_set mode)
---fade_postproc_bottom             <"gene_list">            null  (gene_set mode)
 --selection_prep_batch_size          <INTEGER>                500
 --fade_batch_size                      <INTEGER>                200
 --fade_bf_threshold                      <INTEGER>                100  (Bayes Factor cutoff)
@@ -300,7 +294,7 @@ Usage:
 --scoring_compare_top_n           <INTEGER>               20
 --scoring_stress                   <true|false>            true
 --scoring_stress_top_n                <INTEGER>               25
---scoring_stress_rank_metric            <"spearman">            "spearman"
+--scoring_stress_rank_metric            <"spearman|pearson">    "spearman"
 --scoring_position_top_pct                <FLOAT 0-1>             0.10
 --scoring_gene_top_pct                       <FLOAT 0-1>             0.10
 --scoring_window_size_bp                       <INTEGER>               1000000
@@ -337,6 +331,7 @@ Usage:
 --enrichment                        <true|false>          false
 --gmt_dir                            <"gmt_dir">              null
 --fcs_min_genes                        <INTEGER>                5
+--fcs_max_genes                        <INTEGER>                500   (0 = no cap)
 --fcs_fdr                                <FLOAT 0-1>              0.15
 --fcs_pperm_thr                            <FLOAT 0-1>              0.025
 --fcs_top_n                                  <INTEGER>                20

@@ -54,6 +54,7 @@ params:
   # fcs_percentile_flags()'s gene_lists_dir param / .position_pct_flags()).
   gene_lists_dir:     NULL
   position_lists_dir: NULL
+  seed:               "1998"
 ---
 
 <style type="text/css">
@@ -105,6 +106,10 @@ theme_set(
   )
 )
 filter <- dplyr::filter; select <- dplyr::select; rename <- dplyr::rename; mutate <- dplyr::mutate
+
+seed_val <- if (exists("params") && !is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+set.seed(seed_val)
+
 .src_dir <- file.path(dirname(normalizePath(knitr::current_input(), mustWork = FALSE)), "src")
 # fcs_percentile_flags() (used by the Interesting Genes/Positions tables) lives
 # in percentile_flags.R, sourced directly rather than via fcs_enrich.R, which

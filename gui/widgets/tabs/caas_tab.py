@@ -54,9 +54,8 @@ SPEC = ModuleTabSpec(
     advanced_fields=(
         FieldSpec(name="patterns", label="CT patterns"),
         # Contrast-selection tuning (conf/common.config)
-        FieldSpec(name="top_quantile", label="Top quantile (parameterized method)"),
-        FieldSpec(name="bottom_quantile", label="Bottom quantile (parameterized method)"),
-        FieldSpec(name="contrast_max_iter", label="Contrast max iterations"),
+        FieldSpec(name="pss_top_pct", label="PSS top percentile candidate gate"),
+        FieldSpec(name="max_contrasts", label="Max contrasts (0 = dynamic)"),
         FieldSpec(name="min_contrasts", label="Minimum foreground contrasts"),
         # Discovery/resample fine-tuning (conf/ct.config)
         FieldSpec(name="publish_intermediates", label="Publish intermediate files", kind="bool"),
@@ -71,25 +70,15 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="max_miss_fraction", label="Max any-missing fraction"),
         FieldSpec(name="miss_pair", label="Enforce missing pairs", kind="bool"),
         FieldSpec(name="caap_mode", label="CAAP mode (properties-based)", kind="bool"),
-        FieldSpec(name="fgsize", label="Foreground size (strategy random)"),
-        FieldSpec(name="bgsize", label="Background size (strategy random)"),
-        FieldSpec(name="perm_strategy", label="Permutation strategy", kind="choice", choices=("FGBG", "BM", "lambda")),
-        FieldSpec(name="resample_use_n", label="Use N (sample size) for resample if available", kind="bool"),
+        FieldSpec(name="perm_strategy", label="Permutation strategy", kind="choice", choices=("auto", "OU", "BM")),
         FieldSpec(
             name="max_tries",
             label="Max permulation tries",
             placeholder="draw budget; raised 50% up to twice if the pool falls short",
         ),
-        FieldSpec(
-            name="perm_pheno_col",
-            label="Trait column in trait values file",
-            placeholder="empty = auto-detect the first numeric column",
-        ),
-        FieldSpec(name="traitvalues", label="Trait values file (strategy BM/lambda)", kind="path_file"),
         FieldSpec(name="chunk_size", label="Resampled groups per output file"),
         FieldSpec(name="include_b0", label="Include main hypothesis (b0)", kind="bool"),
         FieldSpec(name="multi_hypothesis", label="Multi-hypothesis mode (all non-replacement hypotheses)", kind="bool"),
-        FieldSpec(name="alpha_threshold", label="Alpha threshold (significance)"),
         FieldSpec(name="export_groups", label="Export groups (DEBUG)", kind="bool"),
         FieldSpec(name="export_perm_discovery", label="Export permuted discovery (DEBUG)", kind="bool"),
     ),

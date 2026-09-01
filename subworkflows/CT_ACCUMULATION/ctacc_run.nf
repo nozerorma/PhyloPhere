@@ -102,7 +102,7 @@ process CT_ACCUMULATION_RANDOMIZE {
     // Fall back to task.cpus so the process never defaults to os.cpu_count()
     // (which reads the full hardware CPU count of the node, not the Slurm allocation).
     def workers_flag = "--workers ${task.cpus}"
-    def seed_flag    = params.accumulation_seed    ? "--global-seed ${params.accumulation_seed}"   : ''
+    def seed_flag    = params.seed ? "--global-seed ${params.seed}" : '--global-seed 1998'
 
     if (params.use_singularity || params.use_apptainer) {
         """

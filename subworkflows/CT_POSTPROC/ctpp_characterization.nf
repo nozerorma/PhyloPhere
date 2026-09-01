@@ -41,7 +41,6 @@ process CT_POSTPROC_REPORT {
     def outdir = "${params.outdir}/postproc"
     def extreme_thresh = params.extreme_threshold
     def iqr_mult = params.iqr_multiplier
-    def alpha_thresh = params.alpha_threshold
     def gene_filter = params.gene_filter_mode
 
 
@@ -67,8 +66,8 @@ process CT_POSTPROC_REPORT {
                     output_dir = '${outdir}',
                     extreme_threshold = ${extreme_thresh},
                     iqr_multiplier = ${iqr_mult},
-                    alpha_threshold = ${alpha_thresh},
-                    gene_filter_mode = '${gene_filter}'
+                    gene_filter_mode = '${gene_filter}',
+                    seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '8.Characterization_report.html'
             )
@@ -96,8 +95,8 @@ process CT_POSTPROC_REPORT {
                     output_dir = '${outdir}',
                     extreme_threshold = ${extreme_thresh},
                     iqr_multiplier = ${iqr_mult},
-                    alpha_threshold = ${alpha_thresh},
-                    gene_filter_mode = '${gene_filter}'
+                    gene_filter_mode = '${gene_filter}',
+                    seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '8.Characterization_report.html'
             )

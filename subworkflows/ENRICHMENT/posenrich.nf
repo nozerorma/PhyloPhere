@@ -133,6 +133,7 @@ process POSENRICH_RUN {
         --min-size ${min_size} \
         --max-size ${max_size} \
         --n-perms ${params.posenrich_n_perms ?: 10000} \
+        --seed ${params.seed ?: 1998} \
         --padj-thr ${params.posenrich_padj_thr} \
         --output-dir .
     """
@@ -221,7 +222,8 @@ process POSENRICH_REPORT {
                 fade_sites_bottom_file = ${fade_sites_bottom_arg},
                 fcs_stats_file = ${fcs_stats_arg},
                 universe_file  = ${universe_arg},
-                position_lists_dir = ${position_lists_arg}
+                position_lists_dir = ${position_lists_arg},
+                seed = '${params.seed ?: 1998}'
             ),
             output_file = '14.Position_enrichment_report_${traitname}.html'
         )

@@ -30,10 +30,7 @@ SPEC = ModuleTabSpec(
             kind="choice",
             choices=("naive", "cons_decile"),
         ),
-        FieldSpec(name="accumulation_seed", label="Randomization seed"),
         FieldSpec(name="accumulation_fdr", label="FDR threshold"),
-        FieldSpec(name="accumulation_pval_threshold", label="P-value threshold"),
-        FieldSpec(name="accumulation_report_pval_threshold", label="Report p-value threshold"),
     ),
 )
 

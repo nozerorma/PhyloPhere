@@ -87,11 +87,9 @@ process RESAMPLE {
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0} \\
-        ${params.discrete_method ?: 'quintile'} \\
+        ${params.pss_top_pct ?: 0.01} \\
         ${params.max_tries ?: 1000000} \\
-        "${params.perm_pheno_col ?: ''}" \\
-        ${params.bottom_quantile ?: 0.10} \\
-        ${params.top_quantile ?: 0.90} \\
+        "${params.traitname ?: (params.trait ?: '')}" \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
@@ -139,11 +137,9 @@ process RESAMPLE {
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0} \\
-        ${params.discrete_method ?: 'quintile'} \\
+        ${params.pss_top_pct ?: 0.01} \\
         ${params.max_tries ?: 1000000} \\
-        "${params.perm_pheno_col ?: ''}" \\
-        ${params.bottom_quantile ?: 0.10} \\
-        ${params.top_quantile ?: 0.90} \\
+        "${params.traitname ?: (params.trait ?: '')}" \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\

@@ -9,11 +9,8 @@ Off by default (RUN_RER=false in the reference scripts). The 4 rer_tool sub-step
 are individual checkboxes jointly building --rer_tool, same pattern as CAAS's
 ct_tool discovery/resample/bootstrap checkboxes.
 
-No "gene_set" mode here on purpose, unlike FADE's fade_mode: RERconverge has the
-plumbing for one (subworkflows/RERCONVERGE/rer_filter_trees.nf takes gene_set_top/
-bottom inputs, and subworkflows/SELECTION/selection_prep.nf's shared gene-set
-collection explicitly mentions "RER_MAIN (when RERconverge uses gene_set mode)" in
-a comment) but workflows/rerconverge.nf's RER_MAIN never actually calls it —
+No "gene_set" mode here: RERconverge operates genome-wide across all
+gene trees. Subworkflows take full gene trees as standard input.
 main.nf always passes Channel.empty() for both gene-set channels, and RER_MAIN's
 own take: comment says so explicitly ("Kept for backwards-compatible signature;
 currently unused."). Exposing a mode picker here would silently do nothing, so

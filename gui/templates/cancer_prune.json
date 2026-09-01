@@ -74,7 +74,7 @@
       "caas_permulation_enrichment": true,
       "top_quantile": "0.90",
       "bottom_quantile": "0.10",
-      "contrast_max_iter": "3",
+      "max_contrasts": "3",
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_discovery_batch_size": "25",
@@ -127,11 +127,8 @@
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
-      "accumulation_seed": "1998",
       "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
-      "accumulation_fdr": "0.1",
-      "accumulation_pval_threshold": "0.05",
-      "accumulation_report_pval_threshold": "0.05"
+      "accumulation_fdr": "0.1"
     },
     "rer": {
       "enabled": false,
@@ -162,11 +159,8 @@
     "fade": {
       "enabled": false,
       "extra_flags": "",
-      "fade_mode": "all",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
-      "fade_postproc_top": "",
-      "fade_postproc_bottom": "",
       "fade_bf_threshold": "100",
       "fade_model": "LG",
       "lg_dat_path": "",
@@ -204,6 +198,7 @@
       "posenrich_enabled": true,
       "gmt_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/GMTs",
       "fcs_min_genes": "5",
+      "fcs_max_genes": "500",
       "fcs_fdr": "0.15",
       "fcs_pperm_thr": "0.025",
       "fcs_top_n": "30",

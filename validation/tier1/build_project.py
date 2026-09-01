@@ -104,7 +104,6 @@ def tier1_project(
     # ── FADE (amino-acid in PhyloPhere; runs on the AA alignment) ──────────
     f = p.modules.fade
     f.enabled = True
-    f.fade_mode = "all"
     f.fade_model = "LG"
     f.fade_method = "Variational-Bayes"
 

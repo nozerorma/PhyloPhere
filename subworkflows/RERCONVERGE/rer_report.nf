@@ -45,9 +45,6 @@ process RER_REPORT {
     def pval_thr         = params.rer_pval_threshold  ?: 0.05
     def top_n            = params.rer_top_n_labels    ?: 15
     def traitname        = params.traitname           ?: 'unknown_trait'
-    def top_pct          = params.rer_top_pct          ?: 0.10
-    def top5_pct         = params.rer_top5_pct         ?: 0.05
-    def top1_pct         = params.rer_top1_pct         ?: 0.01
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -63,9 +60,6 @@ process RER_REPORT {
                     traitname         = '${traitname}',
                     pval_threshold    = ${pval_thr},
                     top_n_labels      = ${top_n},
-                    top_pct           = ${top_pct},
-                    top5_pct          = ${top5_pct},
-                    top1_pct          = ${top1_pct},
                     output_dir        = '${outdir}'
                 ),
                 output_file = '5.RERconverge_report.html'
@@ -92,9 +86,6 @@ process RER_REPORT {
                     traitname         = '${traitname}',
                     pval_threshold    = ${pval_thr},
                     top_n_labels      = ${top_n},
-                    top_pct           = ${top_pct},
-                    top5_pct          = ${top5_pct},
-                    top1_pct          = ${top1_pct},
                     output_dir        = '${outdir}'
                 ),
                 output_file = '5.RERconverge_report.html'

@@ -34,7 +34,7 @@ params:
   top_quantile: "0.90"
   bottom_quantile: "0.10"
   trait_type: ""
-  contrast_max_iter: "4"
+  max_contrasts: "0"
 ---
 
 <style type="text/css">
@@ -85,7 +85,7 @@ if (!exists("params")) {
   stop("params object not found - ensure this Rmd is rendered with rmarkdown::render()")
 }
 # Assign to parent environment so commons.R can access it
-assign("params", params, envir = .GlobalEnv)
+tryCatch(assign("params", params, envir = .GlobalEnv), error = function(e) NULL)
 
 # Call the setup function from commons.R
 source("./src/commons.R")

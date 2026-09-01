@@ -68,8 +68,8 @@ def parse_args():
                    help="max positions per set in background (0 = no cap; GMT sources only)")
     p.add_argument("--n-perms", type=int, default=100000,
                    help="number of label permutations for Path Sum Permulation (default 10000)")
-    p.add_argument("--seed", type=int, default=42,
-                   help="random seed for permulations (default 42)")
+    p.add_argument("--seed", type=int, default=1998,
+                   help="random seed for permulations (default 1998)")
     p.add_argument("--padj-thr", type=float, default=0.15,
                    help="BH-adjusted p-value significance threshold")
     p.add_argument("--position-lists-dir", required=False, default=None,
@@ -214,7 +214,7 @@ def bh_adjust(pvals):
 
 # ── Sparse Path Sum Permulation Engine ───────────────────────────────────────
 def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_size, max_size,
-                             n_perms=10000, seed=42, annot=None, flag_names=None):
+                             n_perms=10000, seed=1998, annot=None, flag_names=None):
     """
     Position-Level Path Sum Permulation test.
     Vectorized sparse matrix multiplication over background pool (N positions).

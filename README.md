@@ -340,7 +340,7 @@ These parameters define the primary input data files, phenotype target, and modu
 | `discrete_method` | `"quintile"` | Method for discrete phenotype categorization (`quartile`, `quintile`, `decile`, `median_sd`, `parameterized`). Ignored when the trait is treated as ordinal (see `trait_type`). |
 | `top_quantile` / `bottom_quantile` | `"0.90"` / `"0.10"` | Upper and lower quantiles used when `discrete_method = "parameterized"`. |
 | `trait_type` | `""` | `""`/`auto` infers; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) instead of quantile-discretising it — use for binary presence/absence or ordinal category phenotypes; `continuous` forces quantile discretisation. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. |
-| `contrast_max_iter` | `"3"` | Maximum iteration depth for contrast selection. |
+| `max_contrasts` | `"0"` | Maximum number of contrast pairs to select (`0` = dynamic discovery until Dunn < 1). |
 | `min_contrasts` | `3` | Minimum foreground contrast pairs required to proceed with CT analysis. |
 | `prune_data` / `prune_list` | `""` / `""` | Flags and species list files for species-level dataset pruning. |
 | `ct_disambiguation` | `true` | Toggle for CT ancestral-state reconstruction (ASR) disambiguation stage. |
@@ -416,7 +416,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `scoring_string` | `true` | Enables STRING DB integration for module functional term enrichment. |
 | `scoring_compare_fdr` / `scoring_compare_top_n` | `0.15` / `20` | Significance FDR and top-N gene count for cross-tool comparison reports. |
 | `scoring_stress` / `scoring_stress_top_n` | `true` / `25` | Enables leave-one-axis-out stress testing and top-N stability checks. |
-| `scoring_stress_rank_metric` | `"spearman"` | Correlation metric used in scoring stress tests (`spearman`, `kendall`, `pearson`). |
+| `scoring_stress_rank_metric` | `"spearman"` | Correlation metric used in scoring stress tests (`spearman` or `pearson`). |
 | `scoring_window_size_bp` | `1000000` | Genomic window size (bp) for genomic overlap reporting. |
 | `scoring_postproc_input`, `scoring_fade_summary_top/bottom`, `scoring_rer_input`, `scoring_accum_dir`, `scoring_fade_site_top/bottom`, `scoring_background_input`, `caas_perms_file` | `""` | Standalone input file/directory fallbacks when running SCORING independently. |
 | `scoring_vep_primateai`, `scoring_vep_cosmic` | `""` | Precomputed PrimateAI-3D/COSMIC score TSVs. Not read by SCORING itself; ENRICHMENT (POSENRICH) reuses these as its own precomputed-VEP fallback when `--vep` did not run live. |
@@ -445,7 +445,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `domino_network_score_thr` | `700` | STRING combined-score threshold for edges included in DOMINO network construction. |
 | `domino_slice_thr` | `0.3` | Relevance threshold for DOMINO network slicing. |
 | `domino_module_thr` | `0.05` | Bonferroni-corrected p-value cutoff for accepting DOMINO active modules. |
-| `fcs_min_genes` | `5` | Minimum gene set size required for FCS enrichment evaluation. |
+| `fcs_min_genes` / `fcs_max_genes` | `5` / `500` | Minimum / maximum gene set size required for FCS enrichment evaluation (`0` = no upper limit). |
 | `fcs_fdr` | `0.15` | Benjamini-Hochberg FDR threshold for FCS gene-set significance. |
 | `fcs_pperm_thr` | `0.025` | Permulation p-value threshold for filtering phylogenetic non-independence. |
 | `fcs_top_n` | `20` | Number of top-ranked gene sets highlighted in report tables. |
@@ -476,8 +476,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 |---|---|---|
 | `selection_prep_batch_size` | `500` | Number of genes batched per alignment-prep task. |
 | `fade_batch_size` | `200` | Number of genes batched per HyPhy FADE execution task. |
-| `fade_mode` | `"all"` | Selection scope: `"all"` (all alignment genes) or `"gene_set"` (CAAS-hit genes only). |
-| `fade_postproc_top` / `fade_postproc_bottom` | `""` | Standalone CAAS gene list inputs for `gene_set` mode. |
 | `fade_bf_threshold` | `100` | Bayes Factor threshold for identifying sites under directional selection (BF $\ge 100$). |
 | `lg_dat_path` | `.../lg.dat` | Path to substitution matrix file staged into HyPhy work directories. |
 | `fade_method` | `"Variational-Bayes"` | Inference method (`"Variational-Bayes"`, `"Collapsed-Gibbs"`, `"Metropolis-Hastings"`). |
@@ -543,9 +541,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `accumulation_entropy_dir` | `""` | Directory containing Valdar entropy (`.entropy.tsv`) files per gene. |
 | `accumulation_n_randomizations` | `1000000` | Number of randomizations for gene burden permutation test. |
 | `accumulation_randomization_type` | `"cons_decile"` | Randomization strategy (`"cons_decile"` or `"naive"`). |
-| `accumulation_seed` | `1998` | Random seed for accumulation permutations. |
-| `accumulation_fdr` | `0.1` | Benjamini-Hochberg FDR cutoff for significant accumulation. |
-| `accumulation_pval_threshold` / `accumulation_report_pval_threshold` | `0.05` | P-value significance thresholds. |
+| `accumulation_fdr` | `0.1` | Benjamini-Hochberg FDR cutoff for significant accumulation (governs both gene lists and report tables). |
 
 </details>
 
