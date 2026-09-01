@@ -59,14 +59,108 @@ calc_pss_scores <- function(hi, lo, dif, dist, C_mat) {
   length(u) >= 2 && length(u) <= 5 && all(u == round(u))
 }
 
+# ---------------------------------------------------------------------------
+# SHARED CORE — used by both the observed selector (selection_algorithm.R::
+# pair_sel.f) and the permulation null (evaluate_lean_contrast_selection below)
+# so the two apply an identical candidate-ranking + greedy-Dunn rule.
+# ---------------------------------------------------------------------------
+
+#' Unified candidate ranking policy.
+#'
+#' @param df data.frame of candidate pairs. Required: species1, species2,
+#'   distance, abs_diff. Optional: pss_score (divergence signal), pair_n
+#'   (combined sample size, count data only).
+#' @return df row-reordered, best candidate first.
+#'
+#' Primary key: PSS score descending when any finite pss_score is present
+#' (continuous, count and ordinal all get an OU/BM PSS); patristic distance
+#' ascending otherwise (PSS fit failed). Ties: |trait difference| desc, then
+#' combined pair sample size desc when available.
+rank_candidates <- function(df) {
+  if (nrow(df) == 0) return(df)
+  has_pss <- "pss_score" %in% names(df) && any(is.finite(df$pss_score))
+  keys <- if (has_pss) list(-df$pss_score) else list(df$distance)
+  keys <- c(keys, list(-df$abs_diff))
+  if ("pair_n" %in% names(df)) keys <- c(keys, list(-df$pair_n))
+  keys <- c(keys, list(seq_len(nrow(df))))  # stable: preserve incoming order on full ties
+  df[do.call(order, keys), , drop = FALSE]
+}
+
+#' Unified greedy Dunn-gated pair assembly.
+#'
+#' @param ranked candidate pairs already ordered best-first by rank_candidates().
+#'   Needs species1, species2, distance, abs_diff (+ pair_n optional).
+#' @param D patristic distance matrix (species x species).
+#' @param target stop after this many pairs (Inf = run until enforce_dunn stops it).
+#' @param enforce_dunn TRUE  -> only accept a pair that keeps every cluster's
+#'                              modified Dunn >= 1; stop when none qualifies
+#'                              (observed selector: variable pair count).
+#'                     FALSE -> always take the highest-Dunn available candidate
+#'                              up to `target`, even below 1; caller grades the
+#'                              result (permulation null: fixed N, tiered).
+#' @return list(selected = data.frame of chosen rows + Dunn_index + cluster,
+#'              members  = list of c(species1, species2)).
+greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
+  D <- as.matrix(D)
+  empty <- ranked[0, , drop = FALSE]
+  if (nrow(ranked) == 0 || target < 1) return(list(selected = empty, members = list()))
+
+  seed <- ranked[1, , drop = FALSE]
+  seed$Dunn_index <- Inf
+  seed$cluster    <- 1L
+  selected <- seed
+  members  <- list(c(seed$species1, seed$species2))
+  used     <- c(seed$species1, seed$species2)
+
+  while (length(members) < target) {
+    avail <- !(ranked$species1 %in% used | ranked$species2 %in% used)
+    if (!any(avail)) break
+    cand <- ranked[avail, , drop = FALSE]
+
+    dunn <- vapply(seq_len(nrow(cand)), function(i) {
+      mod_dunn_lean(D, c(members, list(c(cand$species1[i], cand$species2[i]))), length(members) + 1L)
+    }, numeric(1))
+    cand$Dunn_index <- round(dunn, 4)
+
+    if (enforce_dunn) {
+      cand <- cand[cand$Dunn_index >= 1, , drop = FALSE]
+      if (nrow(cand) == 0) break
+    }
+
+    # Highest Dunn; ties resolved by the incoming rank order (stable sort).
+    cand <- cand[order(-cand$Dunn_index, seq_len(nrow(cand))), , drop = FALSE]
+    best <- cand[1, , drop = FALSE]
+
+    new_members <- c(members, list(c(best$species1, best$species2)))
+    if (enforce_dunn && overall_dunn_lean(D, new_members) < 1) break
+
+    best$cluster <- length(members) + 1L
+    selected <- rbind(selected, best)
+    members  <- new_members
+    used     <- c(used, best$species1, best$species2)
+  }
+
+  list(selected = selected, members = members)
+}
+
 #' Lean contrast selection + tiered Dunn validation for one permulated vector.
 #'
-#' @param trait_vec       Named numeric vector of permulated trait values.
-#' @param D               Precomputed patristic distance matrix on the REAL tree.
-#' @param target_pairs    N_pairs_obs, the observed independent pair count.
-#' @param ci_lb,ci_ub     Optional named numeric vectors of per-tip confidence bounds.
-#' @param cov_matrix      Optional phylogenetic covariance matrix (OU / BM) for PSS calculation.
-#' @param top_pct         Top percentile of PSS scores to retain (default: 0.01 for Top 1%).
+#' Candidate gate + ranking are identical to the observed selector
+#' (selection_algorithm.R::pair_sel.f) via the shared rank_candidates() /
+#' greedy_dunn_select() core. The only deliberate difference: the null runs to
+#' exactly `target_pairs` and grades independence into tiers, rather than
+#' stopping when overall Dunn drops below 1.
+#'
+#' @param trait_vec    Named numeric vector of permulated trait values.
+#' @param D            Patristic distance matrix on the REAL tree.
+#' @param target_pairs N_pairs_obs, the observed independent pair count.
+#' @param ci_lb,ci_ub  Optional per-tip Jeffreys bounds (count data → CI gate).
+#' @param cov_matrix   Phylogenetic covariance matrix (OU/BM). When supplied, PSS
+#'                     scores every pair and the top `top_pct` slice is a gate
+#'                     (universal, all trait types) and the ranking key.
+#' @param top_pct      Top PSS fraction to keep as the gate (params.pss_top_pct).
+#' @param ordinal      TRUE/FALSE to force the ordinal level gate; NULL = auto.
+#' @param n_vec        Optional named per-tip sample sizes → pair_n tiebreak.
 #' @return list(tier, n_pairs, dunn_min, n_below, fg, bg, reason)
 evaluate_lean_contrast_selection <- function(trait_vec,
                                              D,
@@ -75,7 +169,8 @@ evaluate_lean_contrast_selection <- function(trait_vec,
                                              ci_ub = NULL,
                                              cov_matrix = NULL,
                                              top_pct = 0.01,
-                                             ordinal = NULL) {
+                                             ordinal = NULL,
+                                             n_vec = NULL) {
 
   reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_) {
     list(tier = 0L, n_pairs = n_pairs, dunn_min = dunn, n_below = n_below,
@@ -83,6 +178,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   }
 
   if (target_pairs <= 0L) return(reject("target_pairs <= 0"))
+  D <- as.matrix(D)
 
   sp <- intersect(names(trait_vec), rownames(D))
   if (length(sp) < 2L * target_pairs) return(reject("too few species with distances"))
@@ -98,111 +194,73 @@ evaluate_lean_contrast_selection <- function(trait_vec,
     sp <- sp[ok]; trait_vec <- trait_vec[sp]; lb <- lb[sp]; ub <- ub[sp]
   }
 
-  # Build all ordered pairwise candidates
+  # All ordered candidate pairs with a positive trait difference (hi > lo).
   c_hi_all <- rep(sp, each = length(sp))
   c_lo_all <- rep(sp, times = length(sp))
   dif_all  <- trait_vec[c_hi_all] - trait_vec[c_lo_all]
   valid    <- (c_hi_all != c_lo_all) & (dif_all > 0)
-
   if (!any(valid)) return(reject("no candidate pairs with positive trait difference"))
-
   c_hi   <- c_hi_all[valid]
   c_lo   <- c_lo_all[valid]
   c_dif  <- dif_all[valid]
   c_dist <- D[cbind(c_hi, c_lo)]
 
+  # --- Gate 1 (universal): top `top_pct` by PSS under the fitted OU/BM model ---
+  pss <- rep(NA_real_, length(c_hi))
+  pss_mask <- rep(TRUE, length(c_hi))
+  if (!is.null(cov_matrix)) {
+    pss <- calc_pss_scores(c_hi, c_lo, c_dif, c_dist, cov_matrix)
+    n_keep <- max(8L, ceiling(length(pss) * top_pct))
+    thresh <- sort(pss, decreasing = TRUE)[min(n_keep, length(pss))]
+    pss_mask <- pss >= thresh
+  }
+
+  # --- Gate 2 (trait-type non-overlap) ---
   if (use_ci) {
-    # Count data: candidate gate is non-overlapping Bayesian CIs
-    ci_nonoverlap <- (lb[c_hi] > ub[c_lo])
-    if (!any(ci_nonoverlap)) return(reject("no pair with non-overlapping CIs"))
-    c_hi   <- c_hi[ci_nonoverlap]
-    c_lo   <- c_lo[ci_nonoverlap]
-    c_dif  <- c_dif[ci_nonoverlap]
-    c_dist <- c_dist[ci_nonoverlap]
-    c_score <- -c_dist + (c_dif / max(c_dif)) * 1e-4
+    type_mask <- (lb[c_hi] > ub[c_lo])
   } else if (isTRUE(ordinal)) {
-    # Ordinal coded trait: candidate gate is max-level (fg) vs min-level (bg);
-    # middle-level species never form a contrast. Mirrors 3.CI-composition.Rmd.
-    lv_hi <- max(trait_vec, na.rm = TRUE)
-    lv_lo <- min(trait_vec, na.rm = TRUE)
-    ord_mask <- (trait_vec[c_hi] >= lv_hi) & (trait_vec[c_lo] <= lv_lo)
-    if (!any(ord_mask)) return(reject("no top-level vs bottom-level candidate pair"))
-    c_hi   <- c_hi[ord_mask]
-    c_lo   <- c_lo[ord_mask]
-    c_dif  <- c_dif[ord_mask]
-    c_dist <- c_dist[ord_mask]
-    c_score <- -c_dist + (c_dif / max(c_dif)) * 1e-4
-  } else if (!is.null(cov_matrix)) {
-    # Continuous trait: candidate gate is Global Top 1% PSS under the evolutionary model
-    pss_scores <- calc_pss_scores(c_hi, c_lo, c_dif, c_dist, cov_matrix)
-    n_keep <- max(8L, ceiling(length(pss_scores) * top_pct))
-    thresh <- sort(pss_scores, decreasing = TRUE)[n_keep]
-    top_mask <- (pss_scores >= thresh)
-    if (!any(top_mask)) return(reject("no candidate pairs in top PSS slice"))
-    c_hi   <- c_hi[top_mask]
-    c_lo   <- c_lo[top_mask]
-    c_dif  <- c_dif[top_mask]
-    c_dist <- c_dist[top_mask]
-    c_score <- pss_scores[top_mask]
+    lv_hi <- max(trait_vec, na.rm = TRUE); lv_lo <- min(trait_vec, na.rm = TRUE)
+    type_mask <- (trait_vec[c_hi] >= lv_hi) & (trait_vec[c_lo] <= lv_lo)
   } else {
-    # Fallback when no covariance matrix is provided
-    c_score <- -c_dist + (c_dif / max(c_dif)) * 1e-4
+    type_mask <- rep(TRUE, length(c_hi))
   }
 
-  # Sort candidate pairs by score descending
-  ord    <- order(-c_score)
-  c_hi   <- c_hi[ord]; c_lo <- c_lo[ord]; c_dist <- c_dist[ord]; c_dif <- c_dif[ord]; c_score <- c_score[ord]
+  keep <- pss_mask & type_mask
+  if (!any(keep)) return(reject("no pair passes both gates"))
 
-  # Seed with top-ranked candidate pair
-  members   <- list(c(c_hi[1], c_lo[1]))
-  sel_fg    <- c_hi[1]; sel_bg <- c_lo[1]
-  used      <- c(c_hi[1], c_lo[1])
-  used_flag <- setNames(logical(length(unique(c(c_hi, c_lo)))), unique(c(c_hi, c_lo)))
-  used_flag[used] <- TRUE
-
-  # Greedily add the HIGHEST-Dunn candidate until target_pairs is reached
-  while (length(members) < target_pairs) {
-    avail <- !used_flag[c_hi] & !used_flag[c_lo]
-    if (!any(avail)) break
-    idx   <- which(avail)
-    hi_a  <- c_hi[idx]; lo_a <- c_lo[idx]; dist_a <- c_dist[idx]; dif_a <- c_dif[idx]
-
-    D_hi <- D[hi_a, used, drop = FALSE]
-    D_lo <- D[lo_a, used, drop = FALSE]
-    inter_hi <- D_hi[, 1]; if (ncol(D_hi) > 1) for (cc in 2:ncol(D_hi)) inter_hi <- pmin(inter_hi, D_hi[, cc])
-    inter_lo <- D_lo[, 1]; if (ncol(D_lo) > 1) for (cc in 2:ncol(D_lo)) inter_lo <- pmin(inter_lo, D_lo[, cc])
-    inter <- pmin(inter_hi, inter_lo)
-    dv    <- ifelse(dist_a == 0, Inf, inter / dist_a)
-
-    best_local <- order(-dv, -dif_a)[1]
-    best_i <- idx[best_local]
-
-    members <- c(members, list(c(c_hi[best_i], c_lo[best_i])))
-    sel_fg  <- c(sel_fg, c_hi[best_i]); sel_bg <- c(sel_bg, c_lo[best_i])
-    used    <- c(used, c_hi[best_i], c_lo[best_i])
-    used_flag[c(c_hi[best_i], c_lo[best_i])] <- TRUE
+  cand_df <- data.frame(
+    species1 = c_hi[keep], species2 = c_lo[keep],
+    distance = c_dist[keep], abs_diff = c_dif[keep],
+    pss_score = pss[keep], stringsAsFactors = FALSE
+  )
+  if (!is.null(n_vec)) {
+    cand_df$pair_n <- as.numeric(n_vec[cand_df$species1]) + as.numeric(n_vec[cand_df$species2])
   }
 
+  ranked <- rank_candidates(cand_df)
+  res <- greedy_dunn_select(ranked, D, target = target_pairs, enforce_dunn = FALSE)
+
+  members <- res$members
   n_pairs <- length(members)
   if (n_pairs < target_pairs) {
     return(reject("could not form target_pairs non-overlapping pairs", n_pairs))
   }
 
-  # Score independence on the FINAL set
   dunn_vec <- vapply(seq_along(members), function(k) mod_dunn_lean(D, members, k), numeric(1))
   n_below  <- sum(dunn_vec < 1)
   dunn_min <- min(dunn_vec)
-
   if (n_below >= 2L) {
     return(reject("two or more pairs below Dunn 1", n_pairs, dunn_min, n_below))
   }
 
+  sel_fg <- res$selected$species1
+  sel_bg <- res$selected$species2
   list(tier = if (n_below == 0L) 1L else 2L,
        n_pairs = n_pairs, dunn_min = dunn_min, n_below = n_below,
        fg = sel_fg, bg = sel_bg,
        fg_values = unname(trait_vec[sel_fg]), bg_values = unname(trait_vec[sel_bg]),
        mean_pd = mean(vapply(members, function(x) D[x[1], x[2]], numeric(1))),
        mean_df = mean(vapply(members, function(x) abs(trait_vec[x[1]] - trait_vec[x[2]]), numeric(1))),
-       mode = if (use_ci) "ci" else if (isTRUE(ordinal)) "ordinal" else "pss_top1pct",
+       mode = if (use_ci) "ci" else if (isTRUE(ordinal)) "ordinal" else "pss",
        reason = "accepted")
 }

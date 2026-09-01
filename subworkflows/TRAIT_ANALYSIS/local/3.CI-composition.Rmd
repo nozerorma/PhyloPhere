@@ -260,8 +260,8 @@ head(trait_ci)
 ## 3. Pairwise Comparison Preparation
 
 This section prepares data for comparing trait values between all pairs of species.
-For the **Jeffreys CI** path, two species are considered non-overlapping when their credibility intervals do not overlap.
-For the **discrete** path, a pair is considered non-overlapping only when one species is in the *top* group and the other in the *bottom* group.
+
+A pair is an eligible contrast candidate when it clears **both** gates: (1) it sits in the top `pss_top_pct` of pairs by Phylogenetic Shift Score (PSS) under the fitted OU/BM model — applied for every trait type — and (2) it passes the trait-type non-overlap test: Jeffreys credible intervals that do not overlap (count data), or one species at the top coded level and the other at the bottom level (ordinal). Continuous traits have no second test; the PSS slice is the whole gate. Eligible candidates are then ranked by PSS for the independent-contrast selection in the next report.
 
 ```{r prep_CI, paged.print=TRUE, message=FALSE, warning=FALSE}
 # Helper function to create pairwise comparisons
@@ -271,25 +271,36 @@ create_pairwise_data <- function(ci_data) {
                   trait_ci_lb, trait_ci_ub, category)
 
   pss_df <- data.frame(species1 = character(), species2 = character(), pss_score = numeric(), S_score = numeric(), stringsAsFactors = FALSE)
-  pss_top1pct_pairs <- character(0)
+  pss_top_pairs <- character(0)
 
-  # PSS (OU/BM) pair scoring is for continuous traits only. Count and ordinal
-  # traits fall through to the discrete top-vs-bottom overlap rule below.
-  if (!use_count_data && !is_ordinal &&
-      exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
+  # PSS (OU/BM) pair scoring runs for EVERY trait type — continuous, count, and
+  # ordinal (an OU/BM model on a coded fg/bg vector is well-posed, cf. RERconverge).
+  # It provides two things, uniformly:
+  #   * pss_score        — the per-pair divergence signal used to RANK candidates
+  #   * pss_top_pairs    — the top `pss_top_pct` slice, a candidate GATE applied on
+  #                        top of the trait-type-specific non-overlap test below.
+  # If the model fit fails, both stay empty and selection falls back to the
+  # trait-type gate + patristic-distance ranking.
+  if (exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
     tryCatch({
       sp_avail <- intersect(tree$tip.label, ci_subset$species)
       tr_sub <- ape::drop.tip(tree, setdiff(tree$tip.label, sp_avail))
       tr_sub <- ape::multi2di(tr_sub)
       tr_sub$edge.length[tr_sub$edge.length <= 0] <- 1e-8
       t_vec <- setNames(ci_subset$trait, ci_subset$species)[tr_sub$tip.label]
-      fit_ou <- suppressWarnings(geiger::fitContinuous(tr_sub, t_vec, model = "OU", ncores = 1))
-      alpha_v <- as.numeric(fit_ou$opt$alpha)
-      sigsq_v <- as.numeric(fit_ou$opt$sigsq)
+      .model <- if (exists("perm_strategy", inherits = TRUE) && tolower(perm_strategy) %in% c("bm", "ou")) tolower(perm_strategy) else "OU"
+      fit_m <- suppressWarnings(geiger::fitContinuous(tr_sub, t_vec, model = toupper(.model), ncores = 1))
       shared <- ape::vcv.phylo(tr_sub)[tr_sub$tip.label, tr_sub$tip.label]
-      dp <- diag(shared)
-      pat <- outer(dp, dp, "+") - 2 * shared; pat[pat < 0] <- 0
-      cov_mat <- (sigsq_v / (2 * alpha_v)) * exp(-alpha_v * pat) * (-expm1(-2 * alpha_v * shared))
+      if (toupper(.model) == "OU") {
+        alpha_v <- as.numeric(fit_m$opt$alpha)
+        sigsq_v <- as.numeric(fit_m$opt$sigsq)
+        dp <- diag(shared)
+        pat <- outer(dp, dp, "+") - 2 * shared; pat[pat < 0] <- 0
+        cov_mat <- (sigsq_v / (2 * alpha_v)) * exp(-alpha_v * pat) * (-expm1(-2 * alpha_v * shared))
+      } else {
+        sigsq_v <- as.numeric(fit_m$opt$sigsq)
+        cov_mat <- sigsq_v * shared
+      }
       cov_mat <- (cov_mat + t(cov_mat)) / 2
       dimnames(cov_mat) <- list(tr_sub$tip.label, tr_sub$tip.label)
       D_mat <- ape::cophenetic.phylo(tr_sub)
@@ -301,12 +312,12 @@ create_pairwise_data <- function(ci_data) {
       cand_grid <- cand_grid[cand_dif > 0, ]
       cand_dif  <- cand_dif[cand_dif > 0]
       cand_dst  <- D_mat[cbind(cand_grid$s1, cand_grid$s2)]
-      
+
       pv <- diag(cov_mat)[cand_grid$s1] + diag(cov_mat)[cand_grid$s2] - 2 * cov_mat[cbind(cand_grid$s1, cand_grid$s2)]
       z <- cand_dif / sqrt(pmax(pv, 1e-12))
       S <- -expm1(log(2) + stats::pnorm(z, lower.tail = FALSE, log.p = TRUE))
       fs <- S * (cand_dif / max(cand_dif)) / (cand_dst / max(cand_dst))
-      
+
       pss_df <- data.frame(
         species1 = cand_grid$s1,
         species2 = cand_grid$s2,
@@ -314,11 +325,14 @@ create_pairwise_data <- function(ci_data) {
         S_score = round(S, 4),
         stringsAsFactors = FALSE
       )
-      
-      n_keep <- max(8L, ceiling(length(fs) * 0.01))
-      thresh <- sort(fs, decreasing = TRUE)[n_keep]
+
+      .pct    <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.01
+      n_keep  <- max(8L, ceiling(length(fs) * .pct))
+      thresh  <- sort(fs, decreasing = TRUE)[min(n_keep, length(fs))]
       top_cand <- cand_grid[fs >= thresh, ]
-      pss_top1pct_pairs <- paste(top_cand$s1, top_cand$s2, sep = "__")
+      pss_top_pairs <- paste(top_cand$s1, top_cand$s2, sep = "__")
+      debug_log("PSS: model=%s, %d scored pairs, top %.1f%% -> %d gate pairs",
+                toupper(.model), nrow(pss_df), 100 * .pct, length(pss_top_pairs))
     }, error = function(e) {
       debug_log("Error in PSS calculation: %s", conditionMessage(e))
     })
@@ -344,26 +358,40 @@ create_pairwise_data <- function(ci_data) {
     pairwise$S_score <- NA_real_
   }
 
+  # Candidate eligibility (trait_overlap == FALSE) = passes BOTH gates:
+  #   1. top `pss_top_pct` by PSS (universal, all trait types)
+  #   2. trait-type non-overlap:
+  #        count      -> Jeffreys CIs do not overlap
+  #        ordinal    -> one species top coded level, the other bottom level
+  #        continuous -> (no extra test; the PSS slice is the whole gate)
+  # If PSS could not be fit, gate 1 is dropped and only gate 2 applies.
   pairwise <- pairwise %>%
     mutate(
       trait_diff = trait1 - trait2,
-      trait_overlap = if (use_count_data) {
-        # CI-based: overlapping when intervals share any range
-        ci_overlap(trait_ci_lb1, trait_ci_ub1, trait_ci_lb2, trait_ci_ub2)
-      } else if (length(pss_top1pct_pairs) > 0) {
-        # Global Top 1% PSS: non-overlapping iff pair is in top 1% PSS
-        !((paste(species1, species2, sep = "__") %in% pss_top1pct_pairs) |
-          (paste(species2, species1, sep = "__") %in% pss_top1pct_pairs))
+      .in_top_pss = if (length(pss_top_pairs) > 0) {
+        (paste(species1, species2, sep = "__") %in% pss_top_pairs) |
+        (paste(species2, species1, sep = "__") %in% pss_top_pairs)
       } else {
-        # Ordinal / discrete: non-overlapping only for a top-level vs bottom-level
-        # pair; intermediate-level species never form a contrast.
-        !(category1 %in% c("top", "bottom") &
-          category2 %in% c("top", "bottom") &
-          category1 != category2)
+        NA
+      },
+      .type_nonoverlap = if (use_count_data) {
+        !ci_overlap(trait_ci_lb1, trait_ci_ub1, trait_ci_lb2, trait_ci_ub2)
+      } else if (isTRUE(is_ordinal)) {
+        (category1 %in% c("top", "bottom")) &
+          (category2 %in% c("top", "bottom")) &
+          (category1 != category2)
+      } else {
+        TRUE
+      },
+      trait_overlap = if (length(pss_top_pairs) > 0) {
+        !(.in_top_pss & .type_nonoverlap)
+      } else {
+        !.type_nonoverlap
       },
       diff_value  = trait_diff,
       overlap_use = trait_overlap
-    )
+    ) %>%
+    dplyr::select(-.in_top_pss, -.type_nonoverlap)
 
   return(pairwise)
 }

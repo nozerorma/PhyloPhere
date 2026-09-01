@@ -40,23 +40,9 @@ selector_script_path <- {
 if (nzchar(selector_script_path) && file.exists(selector_script_path)) {
   source(selector_script_path)
 } else {
-  # Fallback inline definitions if path cannot be resolved
-  mod_dunn_lean <- function(D, members, k) {
-    c1 <- members[[k]]
-    intra <- if (length(c1) > 1) max(D[c1, c1]) else 0
-    if (intra == 0) return(Inf)
-    inter <- Inf
-    for (j in seq_along(members)) {
-      if (j == k) next
-      inter <- min(inter, min(D[c1, members[[j]]]))
-    }
-    if (!is.finite(inter)) return(Inf)
-    inter / intra
-  }
-  overall_dunn_lean <- function(D, members) {
-    if (length(members) <= 1) return(Inf)
-    min(vapply(seq_along(members), function(k) mod_dunn_lean(D, members, k), numeric(1)))
-  }
+  stop("selection_algorithm.R: could not locate lean_contrast_selector.R ",
+       "(the shared rank_candidates() / greedy_dunn_select() / mod_dunn_lean() ",
+       "core). Looked in: ", paste(cand_paths, collapse = " ; "))
 }
 
 # Calculate patristic distances between species in a phylogenetic tree
@@ -134,15 +120,16 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     distance_df$pss_score <- round(distance_df$pss_score, 4)
   }
 
-  distance_df <- distance_df %>%
-    {
-      if (has.n) arrange(., distance, desc(abs_diff), desc(pair_n)) else arrange(., distance, desc(abs_diff))
-    } %>%
-    filter(!is.na(abs_diff)) %>%
+  # Unified candidate ranking (shared with the permulation null):
+  #   PSS score desc when available (continuous, count, ordinal all carry an
+  #   OU/BM PSS from 3.CI-composition.Rmd), else patristic distance asc; ties
+  #   broken by |trait difference| then combined pair sample size.
+  distance_df <- distance_df %>% filter(!is.na(abs_diff))
+  distance_df <- rank_candidates(as.data.frame(distance_df)) %>%
     {
       cols <- c("species1", "species2", "distance", "abs_diff", "pss_score")
       if (has.n) cols <- c(cols, "pair_n")
-      select(., any_of(cols))
+      dplyr::select(., dplyr::any_of(cols))
     }
 
   debug_log("pair_sel.f candidate pairs = %d", nrow(distance_df))
@@ -159,14 +146,6 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     ))
   }
 
-  # Greedy selection with Dunn >= 1 gating
-  selected_pairs <- data.frame()
-  top_pair <- distance_df %>% slice_head(n = 1) %>% mutate(Dunn_index = Inf, cluster = 1)
-  selected_pairs <- rbind(selected_pairs, top_pair)
-  
-  used_sp <- c(top_pair$species1, top_pair$species2)
-  members <- list(used_sp)
-  
   max_cap <- if (exists("max_contrasts", inherits = TRUE) &&
                 !is.null(max_contrasts) &&
                 !is.na(suppressWarnings(as.integer(max_contrasts))) &&
@@ -181,51 +160,11 @@ pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
     Inf
   }
 
-  dunn_results <- data.frame(
-    species1 = character(), species2 = character(),
-    Dunn_index = numeric(), abs_diff = numeric(),
-    cluster = numeric(), stringsAsFactors = FALSE
-  )
-  if (has.n) dunn_results$pair_n <- numeric()
-
-  repeat {
-    if (length(members) >= max_cap) break
-    
-    avail <- !(distance_df$species1 %in% used_sp | distance_df$species2 %in% used_sp)
-    if (!any(avail)) break
-    
-    cand <- distance_df[avail, , drop = FALSE]
-    
-    # Calculate modified Dunn index for each available candidate
-    dunn_scores <- vapply(seq_len(nrow(cand)), function(i) {
-      test_members <- c(members, list(c(cand$species1[i], cand$species2[i])))
-      mod_dunn_lean(mat, test_members, length(test_members))
-    }, numeric(1))
-    
-    cand$Dunn_index <- round(dunn_scores, 4)
-    cand_passing <- cand[cand$Dunn_index >= 1.0, , drop = FALSE]
-    if (nrow(cand_passing) == 0) break
-    
-    # Pick candidate that maximizes Dunn index (with trait diff and pair_n tie-breakers)
-    best_cand <- cand_passing %>%
-      {
-        if (has.n) arrange(., desc(Dunn_index), desc(abs_diff), desc(pair_n))
-        else arrange(., desc(Dunn_index), desc(abs_diff))
-      } %>%
-      slice_head(n = 1)
-    
-    next_cluster <- length(members) + 1L
-    best_cand$cluster <- next_cluster
-    
-    # Verify overall Dunn across all clusters remains >= 1.0
-    new_members <- c(members, list(c(best_cand$species1, best_cand$species2)))
-    if (overall_dunn_lean(mat, new_members) < 1.0) break
-    
-    members <- new_members
-    used_sp <- c(used_sp, best_cand$species1, best_cand$species2)
-    selected_pairs <- rbind(selected_pairs, best_cand)
-    dunn_results <- rbind(dunn_results, best_cand)
-  }
+  # Greedy Dunn-gated assembly via the shared core (stop when overall Dunn < 1).
+  sel <- greedy_dunn_select(as.data.frame(distance_df), mat,
+                            target = max_cap, enforce_dunn = TRUE)
+  selected_pairs <- sel$selected
+  dunn_results <- if (nrow(selected_pairs) > 1L) selected_pairs[-1L, , drop = FALSE] else selected_pairs[0L, , drop = FALSE]
 
   list(
     dunn_results = dunn_results,

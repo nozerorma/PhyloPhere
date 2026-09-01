@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "cancer_no_prune_multi05",
+    "project_name": "cancer_no_prune_multi05_toy",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -46,7 +46,6 @@
         "c_trait": "neoplasia_necropsy",
         "prune": "",
         "prune_secondary": "",
-        "discrete_method": "",
         "trait_type": ""
       },
       {
@@ -57,7 +56,6 @@
         "c_trait": "malignant_count",
         "prune": "",
         "prune_secondary": "",
-        "discrete_method": "",
         "trait_type": ""
       }
     ]

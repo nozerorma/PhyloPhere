@@ -175,6 +175,7 @@ if (use_ci) {
   np <- suppressWarnings(as.numeric(pheno_raw[[n_col]]))
   nc <- suppressWarnings(as.numeric(pheno_raw[[c_col]]))
   good <- is.finite(np) & is.finite(nc) & np > 0 & nc >= 0 & nc <= np
+  phenotype.df$n_pop <- np   # denominator, for the pair_n ranking tiebreak
   phenotype.df$ci_lb <- NA_real_; phenotype.df$ci_ub <- NA_real_
   if (any(good)) {
     b <- binom::binom.confint(nc[good], np[good], method = "bayes",
@@ -270,12 +271,14 @@ rec_ord    <- order(starting.values)
 rec_value  <- unname(starting.values[rec_ord])
 n_rec      <- length(rec_value)
 rank_order <- seq_len(n_rec)
-rec_lb <- rec_ub <- NULL
+rec_lb <- rec_ub <- rec_n <- NULL
 if (use_ci) {
   ci_map <- setNames(phenotype.df$ci_lb, phenotype.df$species)
   rec_lb <- unname(ci_map[names(starting.values)[rec_ord]])
   ci_map <- setNames(phenotype.df$ci_ub, phenotype.df$species)
   rec_ub <- unname(ci_map[names(starting.values)[rec_ord]])
+  n_map <- setNames(phenotype.df$n_pop, phenotype.df$species)
+  rec_n <- unname(n_map[names(starting.values)[rec_ord]])
 }
 
 tier1 <- vector("list", number.of.cycles)
@@ -298,16 +301,17 @@ repeat {
     
     pvec <- setNames(rec_value[order(sim_ord)], names(sim_v))
 
-    ci_lb_draw <- NULL; ci_ub_draw <- NULL
+    ci_lb_draw <- NULL; ci_ub_draw <- NULL; n_draw <- NULL
     if (use_ci) {
       ci_lb_draw <- setNames(rec_lb[order(sim_ord)], names(sim_v))
       ci_ub_draw <- setNames(rec_ub[order(sim_ord)], names(sim_v))
+      n_draw     <- setNames(rec_n[order(sim_ord)], names(sim_v))
     }
 
     e <- evaluate_lean_contrast_selection(
       trait_vec = pvec, D = D, target_pairs = target_pairs,
       ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
-      cov_matrix = cov_matrix, top_pct = 0.01,
+      cov_matrix = cov_matrix, top_pct = pss_top_pct, n_vec = n_draw,
       ordinal = if (trait_type == "ordinal") TRUE
                 else if (trait_type == "continuous") FALSE
                 else NULL
