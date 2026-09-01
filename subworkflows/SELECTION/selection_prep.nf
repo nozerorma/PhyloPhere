@@ -6,7 +6,8 @@
  * SELECTION_PREP runs the alignment preparation pipeline ONCE and shares the
  * results with FADE:
  *
- *   1. EXTRACT_EXTREME_SPECIES  – top/bottom species lists from trait_stats.csv
+ *   1. EXTRACT_EXTREME_SPECIES  – top/bottom species lists from the pre-Dunn
+ *                                  candidate pool (3.CI-composition.Rmd)
  *   2. [Alignment channel]      – build gene list (all / toy_mode)
  *   3. PREP_ALIGNMENTS_BATCHED  – convert PHYLIP→FASTA + filter to tree taxa
  *                                  (or PREP_ALIGNMENTS for batch_size=1)
@@ -161,7 +162,9 @@ ${manifestText}MANIFEST_EOF
 workflow SELECTION_PREP {
 
     take:
-        stats_file_input   // Channel<path> or null → falls back to canonical outdir path
+        species_source_input // Channel<path> to the pre-Dunn candidate fg/bg pool
+                             // (candidate_species.tab, species\tcontrast_group\tpair) from
+                             // 3.CI-composition.Rmd; or null → falls back to canonical outdir path
         tree_input         // Channel<path> or null → falls back to params.tree
         pp_top_ch          // Legacy input, unused (kept for backwards-compatible signature)
         pp_bottom_ch       // Legacy input, unused (kept for backwards-compatible signature)
@@ -183,11 +186,12 @@ workflow SELECTION_PREP {
             .filter { files -> files && files.size() > 0 }
             .map { files -> files[0] }
 
-        def stats_file_ch = (stats_file_input ?: Channel.empty())
+        def species_source_ch = (species_source_input ?: Channel.empty())
             .ifEmpty {
-                def fallback = "${params.outdir}/data_exploration/1.Data-exploration/1.Species_distribution/trait_stats.csv"
+                // Pre-Dunn candidate fg/bg pool from CI_COMPOSITION_REPORT (3.CI-composition.Rmd).
+                def fallback = "${params.outdir}/data_exploration/1.Data-exploration/5.CI_overlaps/candidate_species.tab"
                 def f = file(fallback)
-                // Don't assert existence here — file is created by upstream DATASET_EXPLORATION process
+                // Don't assert existence here — file is created by upstream CI_COMPOSITION_REPORT process
                 f
             }
             .collect()
@@ -198,7 +202,7 @@ workflow SELECTION_PREP {
             error("SELECTION_PREP: no alignment directory specified (--alignment)")
 
         // ── Extract foreground species (once, shared with FADE) ───
-        def species_lists      = EXTRACT_EXTREME_SPECIES(stats_file_ch)
+        def species_lists      = EXTRACT_EXTREME_SPECIES(species_source_ch)
         top_species_val        = species_lists.top_species.collect().map { it[0] }
         bottom_species_val     = species_lists.bottom_species.collect().map { it[0] }
 

@@ -122,8 +122,7 @@ export TAXON_OF_INTEREST="{{ runtime.taxon_of_interest }}"
 # --- CAAS ---
 export CAAS_CONFIG="{{ modules.caas.caas_config_path }}"
 export PATTERNS="{{ modules.caas.patterns }}"
-export TOP_QUANTILE="{{ modules.caas.top_quantile }}"
-export BOTTOM_QUANTILE="{{ modules.caas.bottom_quantile }}"
+export PSS_TOP_PCT="{{ modules.caas.pss_top_pct }}"
 export MAX_CONTRASTS="{{ modules.caas.max_contrasts }}"
 export MIN_CONTRASTS="{{ modules.caas.min_contrasts }}"
 export CT_DISCOVERY_BATCH_SIZE="{{ modules.caas.ct_discovery_batch_size }}"
@@ -135,14 +134,9 @@ export MAX_GAPS_FRACTION="{{ modules.caas.max_gaps_fraction }}"
 export MAX_BG_MISS_FRACTION="{{ modules.caas.max_bg_miss_fraction }}"
 export MAX_FG_MISS_FRACTION="{{ modules.caas.max_fg_miss_fraction }}"
 export MAX_MISS_FRACTION="{{ modules.caas.max_miss_fraction }}"
-export FGSIZE="{{ modules.caas.fgsize }}"
-export BGSIZE="{{ modules.caas.bgsize }}"
 export PERM_STRATEGY="{{ modules.caas.perm_strategy }}"
 # MAX_TRIES is set in the toy_mode branch above, alongside PERM_POOL_SIZE it has to track.
-export PERM_PHENO_COL="{{ modules.caas.perm_pheno_col }}"
-export TRAITVALUES="{{ modules.caas.traitvalues }}"
 export CHUNK_SIZE="{{ modules.caas.chunk_size }}"
-export ALPHA_THRESHOLD="{{ modules.caas.alpha_threshold }}"
 export PRECOMP_BASE_PATH="{{ precomputed.base_path }}"
 export PRECOMP_USE_DISCOVERY="{{ 'true' if precomputed.use_discovery else 'false' }}"
 export PRECOMP_USE_RESAMPLE="{{ 'true' if precomputed.use_resample else 'false' }}"
@@ -261,7 +255,7 @@ dispatch_phenotype() {
     local task_id="$1"
     case "$task_id" in
 {% for row in runtime.phenotype_rows %}
-    {{ loop.index }}) CLASS={{ row.trait_class }}; TRAIT="{{ row.trait }}"; SECONDARY="{{ row.secondary }}"; NTRAIT="{{ row.n_trait }}"; CTRAIT="{{ row.c_trait }}"; PRUNE="{{ row.prune }}"; PRUNE_SEC="{{ row.prune_secondary }}"; DISCRETE="{{ row.discrete_method }}"; TRAIT_TYPE="{{ row.trait_type }}"
+    {{ loop.index }}) CLASS={{ row.trait_class }}; TRAIT="{{ row.trait }}"; SECONDARY="{{ row.secondary }}"; NTRAIT="{{ row.n_trait }}"; CTRAIT="{{ row.c_trait }}"; PRUNE="{{ row.prune }}"; PRUNE_SEC="{{ row.prune_secondary }}"; TRAIT_TYPE="{{ row.trait_type }}"
         ;;
 {% endfor %}
     *)
@@ -275,7 +269,7 @@ dispatch_phenotype() {
     echo " TRAIT         : $TRAIT  [CLASS $CLASS]"
     echo "======================================================"
 
-    bash "$SINGLE_RUNNER" "$CLASS" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$DISCRETE" "$TRAIT_TYPE"
+    bash "$SINGLE_RUNNER" "$CLASS" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$TRAIT_TYPE"
 }
 
 {% if profile == 'slurm' %}

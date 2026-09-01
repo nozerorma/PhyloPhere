@@ -392,6 +392,15 @@ Production: `caap_mode` ON (US + GS1/GS2/GS3), `patterns` 1,2,3,
 the two.
 
 ### D-T0-E — MIGUEL: relax the `& trait </> median` extreme-filter guard (option A)
+> **SUPERSEDED 2026-09-01 (branch `nongreedy_dunn`).** `compute_trait_thresholds()`
+> was deleted from `stats.R`; it no longer emits `global_label` / `lower_thresh` /
+> `upper_thresh`. The fg/bg partition is now produced by `4.Independent_contrasts.Rmd`
+> from the selected pairs, and FADE's `EXTRACT_EXTREME_SPECIES` reads
+> `candidate_species.tab` (pre-Dunn candidate pool from `3.CI-composition.Rmd`),
+> not `trait_stats.csv`. The median-guard relaxation still lives (self-contained)
+> in `lean_contrast_selector.R` and in `stats.f`'s `taxa_label`. Line numbers below
+> are historical. See `[[project_report4_owns_discretization]]`.
+
 The strict median guard makes a minority-foreground binary/bimodal trait
 un-labelable (median == lower threshold == 0, nothing can be `< median`).
 Relaxed `<` -> `<=` and `>` -> `>=` at the median in **two** places, both no-ops
@@ -407,6 +416,13 @@ the three into line. **Coordinate**: `perms_lambda` branch has its own rewrite o
 `lean_contrast_selector.R` that keeps the strict form — reapply there before merge.
 
 ### D-T0-C — MIGUEL-approved (via D-T0-E): trait encoding per archetype
+> **PARTIALLY SUPERSEDED 2026-09-01 (branch `nongreedy_dunn`).** `discrete_method` /
+> `top_quantile` / `bottom_quantile` no longer exist. `echo` (0/1) is now handled by
+> the ordinal branch of `3.CI-composition.Rmd` (`trait_type=ordinal` or auto-detect:
+> highest level fg, lowest bg). `bodysize` continuous goes through the PSS (OU/BM)
+> pair-selection path. FADE's foreground = the pre-Dunn candidate-pair members
+> (`candidate_species.tab`), not a quantile cut. See `[[project_report4_owns_discretization]]`.
+
 - `echo` archetype: **exact 0/1** `--my_traits` column. RER auto-detects binary
   and runs `foreground2Tree` / the binary path. Contrast selection's production
   discrete path categorises trivially; the CAAS permulation works because of the
@@ -474,6 +490,8 @@ permulation null. Verified on the smoke: null went from 4 → 9 contributing gen
 ## Pipeline bugs surfaced by Tier 0 (all on `validation`)
 - `lean_contrast_selector.R:143` + `stats.R:188,206` — `& trait </> median` guard
   breaks minority-fg binary traits (D-T0-E, FIXED, Miguel-approved).
+  NOTE 2026-09-01: `stats.R`'s `global_label` path is gone (see D-T0-E banner);
+  the guard now only matters for `lean_contrast_selector.R` and `taxa_label`.
 - `disambiguation_main.py:200` — gene name = `GenePos.split("_")[0]`, breaks on
   any id containing `_`; the `Gene` column exists and should be used. Worked
   around in Tier 0 (gene ids `gNNNN`); real fix pending Miguel.

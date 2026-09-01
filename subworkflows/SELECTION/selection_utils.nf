@@ -5,7 +5,9 @@
  *
  * PHYLIP_TO_FASTA       – normalize a supported alignment file to FASTA
  * FILTER_FASTA_TO_TREE  – drop FASTA sequences whose taxa are absent from a tree
- * EXTRACT_EXTREME_SPECIES – derive top/bottom species lists from trait_stats.csv
+ * EXTRACT_EXTREME_SPECIES – derive top/bottom species lists from the contrast
+ *                           traitfile (species<TAB>contrast_group<TAB>pair) or,
+ *                           for back-compat, a trait_stats.csv with global_label
  * ANNOTATE_TREE_FG        – label foreground leaf branches in a Newick tree for FADE
  * COLLECT_GENE_SETS     – build TOP / BOTTOM gene lists from postproc outputs
  */

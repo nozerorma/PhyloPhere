@@ -7,8 +7,8 @@
 """
 Backed directly by RuntimeConfig.phenotype_rows: list[PhenotypeRow] — table edits
 flow straight into the serializable model, no separate view-only state (see
-implementation plan §4). CLASS 1 rows need SECONDARY/NTRAIT/CTRAIT/PRUNE/PRUNE_SEC;
-CLASS 2 rows only need DISCRETE — irrelevant columns are disabled (not just hidden)
+implementation plan §4). CLASS 1 rows need SECONDARY/NTRAIT/CTRAIT/PRUNE/PRUNE_SEC; CLASS 2 rows need only
+TRAIT (TRAIT_TYPE is optional) — irrelevant columns are disabled (not just hidden)
 per-row via flags(), and missing-but-required cells are background-tinted so the
 mistake is visible without opening a separate validation dialog.
 """
@@ -31,12 +31,11 @@ COLUMNS = [
     ("c_trait", "CTRAIT"),
     ("prune", "PRUNE"),
     ("prune_secondary", "PRUNE_SEC"),
-    ("discrete_method", "DISCRETE"),
     ("trait_type", "TRAIT_TYPE"),
 ]
 
 _CLASS1_ONLY = {"secondary", "n_trait", "c_trait", "prune", "prune_secondary"}
-_CLASS2_ONLY = {"discrete_method"}
+_CLASS2_ONLY: set[str] = set()  # no CLASS-2-only required field (TRAIT_TYPE is optional)
 # CLASS 2 but never required — blank means auto-infer.
 _CLASS2_OPTIONAL = {"trait_type"}
 _REQUIRED_ALWAYS = {"trait"}
@@ -45,8 +44,8 @@ _HEADER_TOOLTIPS = {
     "trait_class": (
         "1 = trait file has n_trait/c_trait columns (sample size + observed cases, e.g. "
         "prevalence) -> Jeffreys CI composition.\n"
-        "2 = a single continuous index value per species, no n/c columns -> discretized "
-        "via DISCRETE instead."
+        "2 = a single index value per species, no n/c columns -> PSS pair selection "
+        "(continuous) or coded fg/bg (ordinal); see TRAIT_TYPE."
     ),
     "prune": (
         "Optional. Filled in => this row is pruned automatically (joined with the Runtime "
@@ -54,13 +53,12 @@ _HEADER_TOOLTIPS = {
         "on/off toggle exists — this column is the toggle."
     ),
     "prune_secondary": "Optional secondary prune list, same trigger rule as PRUNE.",
-    "discrete_method": "CLASS 2 only: quantile | quintile | decile | median_sd | parameterized.",
     "trait_type": (
         "CLASS 2, optional. Blank/auto = infer (2-5 integer levels => coded fg/bg).\n"
         "ordinal = force coded: highest level foreground, lowest background, any middle "
         "level intermediate (excluded from contrasts) — use for binary presence/absence "
         "or ordinal category phenotypes.\n"
-        "continuous = force quantile discretization via DISCRETE."
+        "continuous = force the Phylogenetic Shift Score (PSS) pair-selection path."
     ),
 }
 

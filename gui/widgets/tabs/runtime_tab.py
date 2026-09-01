@@ -201,10 +201,10 @@ class RuntimeTab(QWidget):
             "CLASS 1 = trait file has n_trait/c_trait columns (sample size + observed-case "
             "counts, e.g. disease prevalence) — contrast selection uses a Jeffreys "
             "confidence interval on the proportion, and supports a secondary trait + prune "
-            "lists. CLASS 2 = a single continuous index value per species with no n/c "
-            "columns — contrast selection instead discretizes it into groups via each "
-            "phenotype row's Discrete method (quantile/quintile/decile/median_sd/"
-            "parameterized). Each phenotype row below picks its own CLASS."
+            "lists. CLASS 2 = a single index value per species with no n/c columns — "
+            "contrast selection picks divergent species pairs via the Phylogenetic Shift "
+            "Score (PSS, OU/BM), or coded foreground/background levels when the trait is "
+            "ordinal (see TRAIT_TYPE). Each phenotype row below picks its own CLASS."
         )
         self.class_note.setWordWrap(True)
         form.addRow("", self.class_note)
@@ -452,10 +452,10 @@ class RuntimeTab(QWidget):
                 "CLASS 1 = trait file has n_trait/c_trait columns (sample size + observed-case "
                 "counts, e.g. disease prevalence) — contrast selection uses a Jeffreys "
                 "confidence interval on the proportion, and supports a secondary trait + prune "
-                "lists. CLASS 2 = a single continuous index value per species with no n/c "
-                "columns — contrast selection instead discretizes it into groups via each "
-                "phenotype row's Discrete method (quantile/quintile/decile/median_sd/"
-                "parameterized). Each phenotype row below picks its own CLASS.",
+                "lists. CLASS 2 = a single index value per species with no n/c columns — "
+                "contrast selection picks divergent species pairs via the Phylogenetic Shift "
+                "Score (PSS, OU/BM), or coded foreground/background levels when the trait is "
+                "ordinal (see TRAIT_TYPE). Each phenotype row below picks its own CLASS.",
                 lang,
             ))
         if hasattr(self, "prune_dir_label"):

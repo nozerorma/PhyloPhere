@@ -152,9 +152,9 @@ Usage:
 --my_traits                  <"traits.csv">               null
 --traitname                   <"column_name">               null
 --sp_colname                  <"species">                    "species"
---discrete_method              <"quartile|quintile|decile|median_sd|parameterized">  "quintile"
---top_quantile                  <FLOAT 0-1>                   0.90   (parameterized method only)
---bottom_quantile                <FLOAT 0-1>                   0.10   (parameterized method only)
+--trait_type                   <"auto|continuous|ordinal">   "auto"  (auto-infers; continuous = PSS, ordinal = coded fg/bg)
+--pss_top_pct                   <FLOAT 0-1>                   0.01   (top PSS percentile gate, continuous traits)
+--perm_strategy                  <"auto|OU|BM">               "auto"  (evolutionary model for PSS / permulation)
 --max_contrasts                   <INTEGER>                     0     (0 = dynamic discovery)
 --min_contrasts                    <INTEGER>                     3     (min foreground pairs required)
 --prune_data                        <true|false>                   false  (requires --reporting)

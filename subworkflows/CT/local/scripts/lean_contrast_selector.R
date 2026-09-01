@@ -6,8 +6,11 @@
 # Lean port of contrast selection for use inside the permulation harvesting loop.
 #
 # For count data (with confidence bounds), candidates are filtered by CI non-overlap.
+# For ordinal fg/bg-coded traits, candidates are max-level vs min-level pairs only.
 # For continuous traits without CIs, candidates are filtered by the Global Top 1%
 # Phylogenetic Shift Score (PSS) under the fitted evolutionary model (OU / BM).
+# These mirror the three branches of 3.CI-composition.Rmd exactly so the
+# permulation null applies the same rule the observed selection used.
 #
 # Selection algorithm: seed with the highest-ranked candidate pair, then greedily
 # add candidate pairs that maximize the modified Dunn index, enforcing independence
@@ -50,6 +53,12 @@ calc_pss_scores <- function(hi, lo, dif, dist, C_mat) {
   S * (dif / max_dif) / (dist / max_dst)
 }
 
+# Ordinal fg/bg code auto-detection (mirrors stats.R::is_ordinal_trait "auto").
+.is_ordinal_vec <- function(v) {
+  u <- unique(v[!is.na(v)])
+  length(u) >= 2 && length(u) <= 5 && all(u == round(u))
+}
+
 #' Lean contrast selection + tiered Dunn validation for one permulated vector.
 #'
 #' @param trait_vec       Named numeric vector of permulated trait values.
@@ -65,7 +74,8 @@ evaluate_lean_contrast_selection <- function(trait_vec,
                                              ci_lb = NULL,
                                              ci_ub = NULL,
                                              cov_matrix = NULL,
-                                             top_pct = 0.01) {
+                                             top_pct = 0.01,
+                                             ordinal = NULL) {
 
   reject <- function(reason, n_pairs = 0L, dunn = 0, n_below = NA_integer_) {
     list(tier = 0L, n_pairs = n_pairs, dunn_min = dunn, n_below = n_below,
@@ -79,6 +89,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   trait_vec <- trait_vec[sp]
 
   use_ci <- !is.null(ci_lb) && !is.null(ci_ub)
+  if (is.null(ordinal)) ordinal <- !use_ci && .is_ordinal_vec(trait_vec)
 
   if (use_ci) {
     lb <- ci_lb[sp]; ub <- ci_ub[sp]
@@ -108,6 +119,18 @@ evaluate_lean_contrast_selection <- function(trait_vec,
     c_lo   <- c_lo[ci_nonoverlap]
     c_dif  <- c_dif[ci_nonoverlap]
     c_dist <- c_dist[ci_nonoverlap]
+    c_score <- -c_dist + (c_dif / max(c_dif)) * 1e-4
+  } else if (isTRUE(ordinal)) {
+    # Ordinal coded trait: candidate gate is max-level (fg) vs min-level (bg);
+    # middle-level species never form a contrast. Mirrors 3.CI-composition.Rmd.
+    lv_hi <- max(trait_vec, na.rm = TRUE)
+    lv_lo <- min(trait_vec, na.rm = TRUE)
+    ord_mask <- (trait_vec[c_hi] >= lv_hi) & (trait_vec[c_lo] <= lv_lo)
+    if (!any(ord_mask)) return(reject("no top-level vs bottom-level candidate pair"))
+    c_hi   <- c_hi[ord_mask]
+    c_lo   <- c_lo[ord_mask]
+    c_dif  <- c_dif[ord_mask]
+    c_dist <- c_dist[ord_mask]
     c_score <- -c_dist + (c_dif / max(c_dif)) * 1e-4
   } else if (!is.null(cov_matrix)) {
     # Continuous trait: candidate gate is Global Top 1% PSS under the evolutionary model
@@ -180,6 +203,6 @@ evaluate_lean_contrast_selection <- function(trait_vec,
        fg_values = unname(trait_vec[sel_fg]), bg_values = unname(trait_vec[sel_bg]),
        mean_pd = mean(vapply(members, function(x) D[x[1], x[2]], numeric(1))),
        mean_df = mean(vapply(members, function(x) abs(trait_vec[x[1]] - trait_vec[x[2]]), numeric(1))),
-       mode = if (use_ci) "ci" else "pss_top1pct",
+       mode = if (use_ci) "ci" else if (isTRUE(ordinal)) "ordinal" else "pss_top1pct",
        reason = "accepted")
 }

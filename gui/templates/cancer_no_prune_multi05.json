@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "cancer_no_prune_multi",
+    "project_name": "cancer_no_prune_multi05",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -16,9 +16,9 @@
     "toy_n": "",
     "runtime_type": "slurm",
     "batched": true,
-    "script_base_name": "cancer_no_prune_multi",
-    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_final_noprune_multi",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi",
+    "script_base_name": "cancer_no_prune_multi05",
+    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_final_noprune_multi05",
+    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi05",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
     "sbatch_partition": "high-cpu",
@@ -125,10 +125,10 @@
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
       "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
-      "accumulation_fdr": "0.15"
+      "accumulation_fdr": "0.1"
     },
     "rer": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,
@@ -148,13 +148,13 @@
       "rer_min_pos": "2",
       "rer_pval_threshold": "0.05",
       "rer_pval_column": "p.perm",
-      "rer_top_n_labels": "20",
+      "rer_top_n_labels": "25",
       "rer_transform": "ha_logit",
       "rer_universe_file": "",
       "rer_gene_scores": ""
     },
     "fade": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
@@ -237,8 +237,8 @@
     "use_disambiguation": false,
     "use_postproc": false,
     "use_accumulation": false,
-    "use_rer": true,
-    "use_fade": true,
+    "use_rer": false,
+    "use_fade": false,
     "use_vep": false
   },
   "resources": {

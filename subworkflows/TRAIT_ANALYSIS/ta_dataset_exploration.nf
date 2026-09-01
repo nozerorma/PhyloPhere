@@ -39,9 +39,8 @@ process DATASET_EXPLORATION {
     def tax_id = params.tax_id ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
-    def discrete_method = params.discrete_method ?: 'quartile'
-    def top_quantile = params.top_quantile ?: '0.75'
-    def bottom_quantile = params.bottom_quantile ?: '0.25'
+    def pss_top_pct = params.pss_top_pct ?: '0.01'
+    def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
     def prune_dir = prune_results_dir ?: ''
 
@@ -70,10 +69,9 @@ process DATASET_EXPLORATION {
                     tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
-                    discrete_method = '${discrete_method}',
                     trait_type = '${trait_type}',
-                    top_quantile = '${top_quantile}',
-                    bottom_quantile = '${bottom_quantile}'
+                    pss_top_pct = '${pss_top_pct}',
+                    perm_strategy = '${perm_strategy}'
                 ),
                 output_file = '1.Dataset_exploration.html',
                 envir = new.env()
@@ -105,10 +103,9 @@ process DATASET_EXPLORATION {
                     tax_id = '${tax_id}',
                     secondary_trait = '${secondary_trait}',
                     branch_trait = '${branch_trait}',
-                    discrete_method = '${discrete_method}',
                     trait_type = '${trait_type}',
-                    top_quantile = '${top_quantile}',
-                    bottom_quantile = '${bottom_quantile}'
+                    pss_top_pct = '${pss_top_pct}',
+                    perm_strategy = '${perm_strategy}'
                 ),
                 output_file = '1.Dataset_exploration.html',
                 envir = new.env()

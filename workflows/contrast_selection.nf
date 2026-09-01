@@ -141,6 +141,8 @@ workflow CONTRAST_SELECTION {
         trait_dir_out            = check_out.trait_dir_out
         tree_file_out            = contrast_out.tree_file_out
         stats_file_out           = contrast_stats_file
+        // Pre-Dunn candidate fg/bg species pool for FADE (see 3.CI-composition.Rmd).
+        candidate_species_out    = ci_composition_out.candidate_species_out
         contrast_results_dir     = contrast_out.contrast_results_dir
         low_contrasts_skip       = check_out.skip_flag
         pruned_trait_file        = pruned_trait_emit

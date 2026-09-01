@@ -30,9 +30,8 @@ params:
   branch_trait: ""
   prune_list: ""
   prune_list_secondary: ""
-  discrete_method: "decile"
-  top_quantile: "0.90"
-  bottom_quantile: "0.10"
+  pss_top_pct: "0.01"
+  perm_strategy: "best_model"
   trait_type: ""
   max_contrasts: "0"
 ---
@@ -348,36 +347,15 @@ contrast_plot.f <- function(df, palette_values = NULL) {
 
   global_median <- df$g_median[1]
 
-  # --- Threshold boundary vlines: all four methods, active visually prominent ---
-  .active_method <- if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile"
-  .q10  <- if ("g_q10"    %in% names(df)) df$g_q10[1]    else unname(quantile(df$value, 0.10, na.rm = TRUE))
-  .q20  <- if ("g_q20"    %in% names(df)) df$g_q20[1]    else unname(quantile(df$value, 0.20, na.rm = TRUE))
-  .q25  <- if ("g_q25"    %in% names(df)) df$g_q25[1]    else unname(quantile(df$value, 0.25, na.rm = TRUE))
-  .q75  <- if ("g_q75"    %in% names(df)) df$g_q75[1]    else unname(quantile(df$value, 0.75, na.rm = TRUE))
-  .q80  <- if ("g_q80"    %in% names(df)) df$g_q80[1]    else unname(quantile(df$value, 0.80, na.rm = TRUE))
-  .q90  <- if ("g_q90"    %in% names(df)) df$g_q90[1]    else unname(quantile(df$value, 0.90, na.rm = TRUE))
-  .sd.v <- if ("g_sd"     %in% names(df)) df$g_sd[1]     else sd(df$value, na.rm = TRUE)
-  .med  <- if ("g_median" %in% names(df)) df$g_median[1] else median(df$value, na.rm = TRUE)
-  .thresh_methods <- list(
-    quartile  = list(lo = .q25,          hi = .q75,          style = "solid"),
-    quintile  = list(lo = .q20,          hi = .q80,          style = "dotdash"),
-    decile    = list(lo = .q10,          hi = .q90,          style = "dashed"),
-    median_sd = list(lo = .med - .sd.v,  hi = .med + .sd.v,  style = "dotted")
-  )
-
-  # Create the plot base
+  # Create the plot base \u2014 one uniform point layer per species. The
+  # foreground/background partition is not drawn here; 4.Independent_contrasts.Rmd
+  # owns it (PSS for continuous traits, extreme coded levels for ordinal).
   p <- ggplot(df, aes(x = value, y = taxa)) +
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
     ggplot2::geom_point(
-      data = subset(df, global_label == "normal"),
-      aes(shape = global_label, color = taxa), size = contrast_dims$point_size
-    ) +
-    ggplot2::geom_point(
-      data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
-      aes(shape = global_label, color = taxa, fill = taxa), size = contrast_dims$point_size
-    ) +
-    ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17))
-  
+      aes(color = taxa), shape = 1, size = contrast_dims$point_size
+    )
+
   # Add color/fill scales with breaks = 0 to hide legends but keep colors
   if (!is.null(palette_values) && length(palette_values) > 0) {
     p <- p +
@@ -385,42 +363,17 @@ contrast_plot.f <- function(df, palette_values = NULL) {
       ggplot2::scale_color_manual(values = palette_values, breaks = 0)
   }
 
-  # Add threshold boundary lines for all four methods (active = visually prominent)
-  for (.nm in names(.thresh_methods)) {
-    .t      <- .thresh_methods[[.nm]]
-    .is_act <- .nm == .active_method
-    .lw     <- if (.is_act) 1.3 else 0.55
-    .alpha  <- if (.is_act) 0.90 else 0.25
-    .col    <- if (.is_act) "#2B2D42" else "grey40"
-    p <- p +
-      ggplot2::geom_vline(xintercept = .t$lo, linetype = .t$style,
-                          linewidth = .lw, color = .col, alpha = .alpha,
-                          show.legend = FALSE) +
-      ggplot2::geom_vline(xintercept = .t$hi, linetype = .t$style,
-                          linewidth = .lw, color = .col, alpha = .alpha,
-                          show.legend = FALSE)
-  }
-
+  # Reference lines: global median (independent of any fg/bg partition) and
+  # per-taxa median error bars.
   p <- p +
     ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = tableau_10["vermillion"]) +
     ggplot2::stat_summary(fun = median, geom = "errorbar",
                           aes(xmax = after_stat(x), xmin = after_stat(x), y = taxa),
-                          linewidth = 1.2, color = tableau_10["bluish_green"], alpha = 0.8) +
-    ggplot2::labs(x = capitalized_trait, 
-                  y = paste(capitalized_taxon, "-", capitalized_clade), 
-                  title = paste("Trait differential plot for trait:", capitalized_trait, "in", clade_name),
-                  subtitle = paste0("Active extreme threshold: ", .active_method,
-                                    "  |  styles \u2014 solid: quartile  dot-dash: quintile  dashed: decile  dotted: median\u00b1SD"),
-                  caption = "Global median: longdash red line. Per-taxa median: green error bars. Labelled: extreme-classified species.") +
-    ggrepel::geom_text_repel(
-      data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
-      aes(label = species), size = contrast_dims$label_size, hjust = 0, vjust = 0, family = "Inter",
-      segment.size = contrast_dims$segment_size, nudge_x = contrast_dims$nudge_x,
-      nudge_y = contrast_dims$nudge_y, max.overlaps = contrast_dims$max_overlaps,
-      force = contrast_dims$force, direction = "y", max.iter = 10000,
-      label.padding = contrast_dims$label_padding,
-      min.segment.length = contrast_dims$min_segment_length, seed = seed_val, show.legend = FALSE
-    ) +
+                          linewidth = 1.2, color = tableau_10["blue"], alpha = 0.8) +
+    ggplot2::labs(x = capitalized_trait,
+                  y = paste(capitalized_taxon, "-", capitalized_clade),
+                  title = paste("Trait distribution for trait:", capitalized_trait, "in", clade_name),
+                  caption = "Global median: longdash red line. Per-taxa median: blue error bars.") +
     ggplot2::theme_minimal() +
     ggplot2::theme(
       plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0, margin = ggplot2::margin(t = 20, b = 6), face = "bold"),
@@ -530,7 +483,7 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     fill_scale_dark +
     ggplot2::geom_point(
       data = subset(df, outlier == "normal"),
-      aes(shape = global_label, color = taxa),
+      aes(color = taxa), shape = 1,
       size = violin_dims$point_size, position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
     ggplot2::geom_point(
@@ -539,7 +492,6 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
       shape = 21, size = violin_dims$point_size, stroke = violin_dims$stroke,
       position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
-    ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17)) +
     color_scale_dark +
     ggplot2::geom_vline(
       aes(xintercept = median_value), linewidth = 1, color = tableau_10["vermillion"], alpha = 0.5

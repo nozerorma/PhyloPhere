@@ -27,88 +27,31 @@ is_ordinal_trait <- function(trait_values, trait_type = "auto") {
   length(u) >= 2 && length(u) <= 5 && all(u == round(u))
 }
 
-compute_trait_thresholds <- function(trait_values,
-                                     discrete_method = if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile",
-                                     top_quantile = if (exists("top_quantile", inherits = TRUE)) as.numeric(top_quantile) else 0.90,
-                                     bottom_quantile = if (exists("bottom_quantile", inherits = TRUE)) as.numeric(bottom_quantile) else 0.10) {
+# Descriptive global summary of a trait vector: location, spread, and the
+# quantiles used for IQR outlier fences and summary tables. This is pure
+# description — the fg/bg (foreground/background) partition that drives contrast
+# selection and FADE is produced downstream by 4.Independent_contrasts.Rmd from
+# the phylogenetically-independent selected pairs (PSS for continuous traits,
+# extreme coded levels for ordinal), never here.
+compute_trait_summary <- function(trait_values) {
   trait_values <- as.numeric(trait_values)
   trait_values <- trait_values[!is.na(trait_values)]
 
   if (length(trait_values) == 0) {
-    stop("compute_trait_thresholds() received no non-missing trait values.")
+    stop("compute_trait_summary() received no non-missing trait values.")
   }
-
-  # trait_type: set by commons.R from params ("" / auto / ordinal / continuous).
-  .trait_type <- if (exists("trait_type", inherits = TRUE)) get("trait_type", inherits = TRUE) else "auto"
-
-  # ── Ordinal fg/bg code: the extremes ARE the top/bottom levels, no quantiles.
-  # `quantile([mostly 0s], 0.9)` collapses to 0 and labels every species "top";
-  # for a coded trait the highest level is foreground, the lowest is background,
-  # any middle level is intermediate (kept in the tree, excluded from contrasts).
-  if (is_ordinal_trait(trait_values, .trait_type)) {
-    levels_sorted <- sort(unique(trait_values))
-    lo <- levels_sorted[1]
-    hi <- levels_sorted[length(levels_sorted)]
-    return(list(
-      discrete_method = "ordinal", top_quantile = NA_real_, bottom_quantile = NA_real_,
-      trait_type = "ordinal", ordinal_levels = levels_sorted,
-      g_mean = mean(trait_values), g_median = median(trait_values), g_sd = sd(trait_values),
-      g_q10 = lo, g_q20 = lo, g_q25 = lo, g_q75 = hi, g_q80 = hi, g_q90 = hi,
-      g_iqr = hi - lo,
-      lower_thresh = unname(lo), upper_thresh = unname(hi)
-    ))
-  }
-
-  g_mean <- mean(trait_values, na.rm = TRUE)
-  g_median <- median(trait_values, na.rm = TRUE)
-  g_sd <- sd(trait_values, na.rm = TRUE)
-  g_q10 <- unname(quantile(trait_values, 0.10, na.rm = TRUE))
-  g_q20 <- unname(quantile(trait_values, 0.20, na.rm = TRUE))
-  g_q25 <- unname(quantile(trait_values, 0.25, na.rm = TRUE))
-  g_q75 <- unname(quantile(trait_values, 0.75, na.rm = TRUE))
-  g_q80 <- unname(quantile(trait_values, 0.80, na.rm = TRUE))
-  g_q90 <- unname(quantile(trait_values, 0.90, na.rm = TRUE))
-  g_iqr <- IQR(trait_values, na.rm = TRUE)
-
-  lower_thresh <- switch(discrete_method,
-    "quartile"      = g_q25,
-    "quintile"      = g_q20,
-    "decile"        = g_q10,
-    "median_sd"     = g_median - g_sd,
-    "parameterized" = unname(quantile(trait_values, bottom_quantile, na.rm = TRUE)),
-    stop(sprintf(
-      "Unknown discrete_method: '%s'. Choose one of: quartile, quintile, decile, median_sd, parameterized",
-      discrete_method
-    ))
-  )
-  upper_thresh <- switch(discrete_method,
-    "quartile"      = g_q75,
-    "quintile"      = g_q80,
-    "decile"        = g_q90,
-    "median_sd"     = g_median + g_sd,
-    "parameterized" = unname(quantile(trait_values, top_quantile, na.rm = TRUE)),
-    stop(sprintf(
-      "Unknown discrete_method: '%s'. Choose one of: quartile, quintile, decile, median_sd, parameterized",
-      discrete_method
-    ))
-  )
 
   list(
-    discrete_method = discrete_method,
-    top_quantile = top_quantile,
-    bottom_quantile = bottom_quantile,
-    g_mean = g_mean,
-    g_median = g_median,
-    g_sd = g_sd,
-    g_q10 = g_q10,
-    g_q20 = g_q20,
-    g_q25 = g_q25,
-    g_q75 = g_q75,
-    g_q80 = g_q80,
-    g_q90 = g_q90,
-    g_iqr = g_iqr,
-    lower_thresh = unname(lower_thresh),
-    upper_thresh = unname(upper_thresh)
+    g_mean   = mean(trait_values),
+    g_median = median(trait_values),
+    g_sd     = sd(trait_values),
+    g_q10    = unname(quantile(trait_values, 0.10)),
+    g_q20    = unname(quantile(trait_values, 0.20)),
+    g_q25    = unname(quantile(trait_values, 0.25)),
+    g_q75    = unname(quantile(trait_values, 0.75)),
+    g_q80    = unname(quantile(trait_values, 0.80)),
+    g_q90    = unname(quantile(trait_values, 0.90)),
+    g_iqr    = IQR(trait_values)
   )
 }
 
@@ -161,30 +104,20 @@ stats.f <- function(df) {
   # Normalize to numeric once
   df_num <- df %>% dplyr::mutate("{trait_col}" := as.numeric(.data[[trait_col]]))
 
-  # Global stats
-  disc_method <- if (exists("discrete_method", inherits = TRUE)) discrete_method else "decile"
-  tq <- if (exists("top_quantile",    inherits = TRUE)) as.numeric(top_quantile)    else 0.90
-  bq <- if (exists("bottom_quantile", inherits = TRUE)) as.numeric(bottom_quantile) else 0.10
-  threshold_info <- compute_trait_thresholds(
-    trait_values = df_num[[trait]],
-    discrete_method = disc_method,
-    top_quantile = tq,
-    bottom_quantile = bq
-  )
-  g_mean <- threshold_info$g_mean
-  g_median <- threshold_info$g_median
-  g_sd <- threshold_info$g_sd
-  g_q10 <- threshold_info$g_q10
-  g_q20 <- threshold_info$g_q20
-  g_q25 <- threshold_info$g_q25
-  g_q75 <- threshold_info$g_q75
-  g_q80 <- threshold_info$g_q80
-  g_q90 <- threshold_info$g_q90
-  g_iqr <- threshold_info$g_iqr
-  lower_thresh <- threshold_info$lower_thresh
-  upper_thresh <- threshold_info$upper_thresh
-  debug_log("stats.f: disc_method = %s, lower_thresh = %.4f, upper_thresh = %.4f",
-            disc_method, lower_thresh, upper_thresh)
+  # Global descriptive stats (location, spread, quantiles for outlier fences).
+  # No fg/bg partition here — 4.Independent_contrasts.Rmd owns that.
+  trait_summary <- compute_trait_summary(df_num[[trait]])
+  g_mean <- trait_summary$g_mean
+  g_median <- trait_summary$g_median
+  g_sd <- trait_summary$g_sd
+  g_q10 <- trait_summary$g_q10
+  g_q20 <- trait_summary$g_q20
+  g_q25 <- trait_summary$g_q25
+  g_q75 <- trait_summary$g_q75
+  g_q80 <- trait_summary$g_q80
+  g_q90 <- trait_summary$g_q90
+  g_iqr <- trait_summary$g_iqr
+  debug_log("stats.f: g_median = %.4f, g_iqr = %.4f", g_median, g_iqr)
 
   # Taxon stats separately, then join
   taxon_stats <- df_num %>%
@@ -211,8 +144,6 @@ stats.f <- function(df) {
       g_q75 = g_q75,
       g_q80 = g_q80,
       g_q90 = g_q90,
-      lower_thresh = lower_thresh,
-      upper_thresh = upper_thresh,
       outlier = dplyr::case_when(
         .data[[trait_col]] < (g_q25 - 1.5 * g_iqr) ~ "low_outlier",
         .data[[trait_col]] > (g_q75 + 1.5 * g_iqr) ~ "high_outlier",
@@ -221,17 +152,6 @@ stats.f <- function(df) {
       extreme_outlier = dplyr::case_when(
         .data[[trait_col]] < (g_q25 - 3 * g_iqr) ~ "low_outlier",
         .data[[trait_col]] > (g_q75 + 3 * g_iqr) ~ "high_outlier",
-        TRUE ~ "normal"
-      ),
-      global_label = dplyr::case_when(
-        # `<= g_median` / `>= g_median` (was `<` / `>`): the strict form makes a
-        # minority-foreground binary/bimodal trait un-labelable — median == the
-        # lower threshold == 0, so no species can be `< g_median`, and FADE's
-        # EXTRACT_EXTREME_SPECIES then finds no low_extreme set. No-op for a
-        # continuous trait (upper_thresh >= median >= lower_thresh always).
-        # Mirrors the same relaxation in lean_contrast_selector.R.
-        (.data[[trait_col]] <= lower_thresh) & (.data[[trait_col]] <= g_median) ~ "low_extreme",
-        (.data[[trait_col]] >= upper_thresh) & (.data[[trait_col]] >= g_median) ~ "high_extreme",
         TRUE ~ "normal"
       )
     ) %>%
@@ -248,7 +168,8 @@ stats.f <- function(df) {
         TRUE ~ "normal"
       ),
       taxa_label = dplyr::case_when(
-        # median-guard relaxed to `<=` / `>=` as in global_label above
+        # descriptive per-taxon tail flag for exploration plots only; the
+        # median guard keeps a minority-tail trait labelable (see compute_trait_summary)
         (.data[[trait_col]] < taxa_q25) & (.data[[trait_col]] <= taxa_median) ~ "low_extreme",
         (.data[[trait_col]] > taxa_q75) & (.data[[trait_col]] >= taxa_median) ~ "high_extreme",
         TRUE ~ "normal"

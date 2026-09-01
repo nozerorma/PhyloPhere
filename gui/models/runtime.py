@@ -32,9 +32,10 @@ class PhenotypeRow:
     c_trait: str = ""  # CTRAIT / --c_trait (CLASS 1 only)
     prune: str = ""  # PRUNE filename, joined with runtime.prune_dir (CLASS 1 only)
     prune_secondary: str = ""  # PRUNE_SEC filename (CLASS 1 only)
-    discrete_method: str = ""  # DISCRETE / --discrete_method (CLASS 2 only)
     trait_type: str = ""  # TRAIT_TYPE / --trait_type (CLASS 2, optional): "" = auto-infer,
-    # "ordinal" = coded fg/bg (highest level FG, lowest BG), "continuous" = force quantiles
+    # "ordinal" = coded fg/bg (highest level FG, lowest BG), "continuous" = force the
+    # Phylogenetic Shift Score (PSS) pair-selection path. The fg/bg partition itself is
+    # produced by 4.Independent_contrasts.Rmd, not by a quantile cut.
 
     # Per-row Scoring fallback overrides (scoring_rer_input, scoring_rer_perms_input,
     # scoring_fade_summary_top/bottom) moved to the Precomputed Run tab (see

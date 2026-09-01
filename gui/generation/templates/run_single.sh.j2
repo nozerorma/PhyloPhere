@@ -5,15 +5,14 @@ set -Eeuo pipefail
 # rather than hand-editing this file, unless you're making a one-off tweak.
 
 # --- ARGUMENTS ---
-CLASS="${1:?Usage: $0 <CLASS> <TRAIT> [SECONDARY_TRAIT] [N_TRAIT] [C_TRAIT] [PRUNE_FILE] [PRUNE_SECONDARY_FILE] [DISCRETE_METHOD] [TRAIT_TYPE]}"
+CLASS="${1:?Usage: $0 <CLASS> <TRAIT> [SECONDARY_TRAIT] [N_TRAIT] [C_TRAIT] [PRUNE_FILE] [PRUNE_SECONDARY_FILE] [TRAIT_TYPE]}"
 TRAIT="${2:?TRAIT must be provided}"
 SECONDARY_TRAIT="${3:-}"
 N_TRAIT="${4:-}"
 C_TRAIT="${5:-}"
 PRUNE_FILE="${6:-}"
 PRUNE_SECONDARY_FILE="${7:-}"
-DISCRETE_METHOD="${8:-}"
-TRAIT_TYPE="${9:-}"   # "" / auto = infer, ordinal = coded fg/bg, continuous = force quantiles
+TRAIT_TYPE="${8:-}"   # "" / auto = infer, ordinal = coded fg/bg, continuous = force PSS
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 timestamp=$(date +%Y%m%d_%H%M%S)
@@ -305,18 +304,17 @@ else
     _RER_TOOL_STR=""
 fi
 
-# Class-specific values: resolve my_traits source, secondary/n/c traits, pruning,
-# and discrete_method based on CLASS before writing params.json.
+# Class-specific values: resolve my_traits source, secondary/n/c traits, and
+# pruning based on CLASS before writing params.json.
 # trait_type applies to both classes: CLASS 1 count-rate traits are always
-# continuous (auto-detect won't fire), CLASS 2 discrete traits are where an
-# "ordinal" coded fg/bg phenotype lives. Pass through unchanged.
+# continuous (auto-detect won't fire), CLASS 2 traits are where an "ordinal"
+# coded fg/bg phenotype lives. Pass through unchanged.
 _TRAIT_TYPE="$TRAIT_TYPE"
 if [ "$CLASS" = "1" ]; then
     _MY_TRAITS="$TRAIT_FILE"
     _SECONDARY_TRAIT="$SECONDARY_TRAIT"
     _N_TRAIT="$N_TRAIT"
     _C_TRAIT="$C_TRAIT"
-    _DISCRETE_METHOD=""
     if [ -n "$PRUNE_FILE" ]; then
         _PRUNE_DATA=true
         _PRUNE_LIST="${PRUNE_DIR}/${PRUNE_FILE}"
@@ -332,7 +330,6 @@ elif [ "$CLASS" = "2" ]; then
     _SECONDARY_TRAIT=""
     _N_TRAIT=""
     _C_TRAIT=""
-    _DISCRETE_METHOD="$DISCRETE_METHOD"
     _PRUNE_DATA=false
     _PRUNE_LIST=""
     _PRUNE_LIST_SECONDARY=""
@@ -392,7 +389,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "n_trait": "$_N_TRAIT",
   "c_trait": "$_C_TRAIT",
   "branch_trait": "$BRANCH_TRAIT",
-  "discrete_method": "$_DISCRETE_METHOD",
   "trait_type": "$_TRAIT_TYPE",
   "prune_data": $_PRUNE_DATA,
   "prune_list": "$_PRUNE_LIST",
@@ -409,8 +405,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "perm_pool_size": "$PERM_POOL_SIZE",
   "caas_permulation_enrichment": {{ run_defaults.caas_permulation_enrichment }},
   "caas_full_perms": "$CAAS_FULL_PERMS",
-  "top_quantile": "${TOP_QUANTILE:-0.90}",
-  "bottom_quantile": "${BOTTOM_QUANTILE:-0.10}",
+  "pss_top_pct": "${PSS_TOP_PCT:-0.01}",
   "max_contrasts": "${MAX_CONTRASTS:-0}",
   "min_contrasts": "${MIN_CONTRASTS:-3}",
   "publish_intermediates": {{ run_defaults.publish_intermediates }},
@@ -425,18 +420,14 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "max_miss_fraction": "${MAX_MISS_FRACTION:-0.0}",
   "miss_pair": {{ run_defaults.miss_pair }},
   "caap_mode": {{ run_defaults.caap_mode }},
-  "fgsize": "${FGSIZE:-6}",
-  "bgsize": "${BGSIZE:-6}",
+  "resample_use_n": {{ run_defaults.resample_use_n }},
   "perm_strategy": "${PERM_STRATEGY:-BM}",
   "max_tries": "${MAX_TRIES:-1000000}",
-  "perm_pheno_col": "${PERM_PHENO_COL:-}",
   "chunk_size": "${CHUNK_SIZE:-500}",
   "include_b0": {{ run_defaults.include_b0 }},
   "multi_hypothesis": {{ run_defaults.multi_hypothesis }},
-  "alpha_threshold": "${ALPHA_THRESHOLD:-0.05}",
   "export_groups": {{ run_defaults.export_groups }},
   "export_perm_discovery": {{ run_defaults.export_perm_discovery }},
-  "traitvalues": "${TRAITVALUES:-}",
   "discovery_from": "${DISCOVERY_FROM:-}",
   "resample_from": "${RESAMPLE_FROM:-}",
   "bootstrap_from": "${BOOTSTRAP_FROM:-}",

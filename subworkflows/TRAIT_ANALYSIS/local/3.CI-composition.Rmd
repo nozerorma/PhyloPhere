@@ -154,7 +154,12 @@ When population count columns (`n_trait` / `c_trait`) are present, 95% Jeffreys 
 ```{r compute_CI, message=FALSE, warning=FALSE}
 # Determine which analysis path to follow
 use_count_data <- has.n && has.c
-debug_log("use_count_data = %s", use_count_data)
+# Ordinal fg/bg-coded trait (2-5 integer levels, or trait_type=ordinal): the
+# extremes are the coded levels themselves, no PSS / OU modelling.
+is_ordinal <- !use_count_data &&
+  exists("is_ordinal_trait", inherits = TRUE) &&
+  is_ordinal_trait(trait_df[[trait]], if (exists("trait_type", inherits = TRUE)) trait_type else "auto")
+debug_log("use_count_data = %s, is_ordinal = %s", use_count_data, is_ordinal)
 
 if (use_count_data) {
   # ---- Jeffreys CI path ----
@@ -197,6 +202,30 @@ if (use_count_data) {
     ungroup()
 
   cat("Jeffreys Bayesian 95% Credible Intervals computed for count data.\n")
+
+} else if (is_ordinal) {
+  # ---- Ordinal fg/bg-coded trait path ----
+  debug_log("compute_CI: Ordinal trait mode (coded levels)")
+  .levels <- sort(unique(stats::na.omit(trait_df[[trait]])))
+  .lo_lvl <- .levels[1]
+  .hi_lvl <- .levels[length(.levels)]
+  g_med <- median(trait_df[[trait]], na.rm = TRUE)
+
+  trait_ci <- trait_df %>%
+    dplyr::rename(trait = .data[[trait]]) %>%
+    dplyr::mutate(
+      category = dplyr::case_when(
+        trait >= .hi_lvl ~ "top",
+        trait <= .lo_lvl ~ "bottom",
+        TRUE             ~ "intermediate"
+      ),
+      n_population = NA_real_,
+      trait_ci_lb  = NA_real_,
+      trait_ci_ub  = NA_real_,
+      trait_ci     = NA_character_
+    )
+
+  cat("Ordinal trait mode: foreground = highest coded level, background = lowest; middle levels are intermediate (excluded from contrasts).\n")
 
 } else {
   # ---- Continuous trait path ----
@@ -243,8 +272,11 @@ create_pairwise_data <- function(ci_data) {
 
   pss_df <- data.frame(species1 = character(), species2 = character(), pss_score = numeric(), S_score = numeric(), stringsAsFactors = FALSE)
   pss_top1pct_pairs <- character(0)
-  
-  if (exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
+
+  # PSS (OU/BM) pair scoring is for continuous traits only. Count and ordinal
+  # traits fall through to the discrete top-vs-bottom overlap rule below.
+  if (!use_count_data && !is_ordinal &&
+      exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
     tryCatch({
       sp_avail <- intersect(tree$tip.label, ci_subset$species)
       tr_sub <- ape::drop.tip(tree, setdiff(tree$tip.label, sp_avail))
@@ -323,7 +355,8 @@ create_pairwise_data <- function(ci_data) {
         !((paste(species1, species2, sep = "__") %in% pss_top1pct_pairs) |
           (paste(species2, species1, sep = "__") %in% pss_top1pct_pairs))
       } else {
-        # Discrete fallback: non-overlapping only for top vs bottom contrasts
+        # Ordinal / discrete: non-overlapping only for a top-level vs bottom-level
+        # pair; intermediate-level species never form a contrast.
         !(category1 %in% c("top", "bottom") &
           category2 %in% c("top", "bottom") &
           category1 != category2)
@@ -369,8 +402,36 @@ if (!has_heatmap_extremes) {
 }
 
 # Save results
-write.csv(pairwise_data, file.path(ci_dir, "pairwise_data.csv"), 
+write.csv(pairwise_data, file.path(ci_dir, "pairwise_data.csv"),
           quote = FALSE, row.names = FALSE)
+
+# --- Candidate foreground / background species for FADE (pre-Dunn) ----------
+# Union of the members of every non-overlapping candidate pair, taken BEFORE the
+# phylogenetic-independence (Dunn) compositing done in 4.Independent_contrasts.Rmd.
+# FADE tests directional selection on foreground branches and does not require
+# the contrast pairs to be mutually independent, so it uses the full candidate
+# pool rather than the Dunn-thinned canonical set. Written in traitfile format
+# (species <TAB> contrast_group <TAB> pair) so EXTRACT_EXTREME_SPECIES consumes
+# it exactly like a real traitfile.
+.nonoverlap  <- pairwise_data %>%
+  dplyr::filter(trait_overlap == FALSE, !is.na(species1), !is.na(species2))
+.cand_species <- unique(c(.nonoverlap$species1, .nonoverlap$species2))
+.cat_by_sp   <- setNames(as.character(trait_ci$category), trait_ci$species)
+.fg_species  <- .cand_species[which(.cat_by_sp[.cand_species] == "top")]
+.bg_species  <- .cand_species[which(.cat_by_sp[.cand_species] == "bottom")]
+candidate_species <- rbind(
+  if (length(.fg_species)) data.frame(species = .fg_species, contrast_group = 1L, stringsAsFactors = FALSE) else NULL,
+  if (length(.bg_species)) data.frame(species = .bg_species, contrast_group = 0L, stringsAsFactors = FALSE) else NULL
+)
+if (!is.null(candidate_species) && nrow(candidate_species) > 0) {
+  candidate_species$pair <- seq_len(nrow(candidate_species))
+} else {
+  candidate_species <- data.frame(species = character(), contrast_group = integer(), pair = integer())
+}
+write.table(candidate_species, file.path(ci_dir, "candidate_species.tab"),
+            quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+debug_log("candidate_species: %d foreground, %d background (pre-Dunn pool)",
+          length(.fg_species), length(.bg_species))
 
 # Display preview
 head(pairwise_data)

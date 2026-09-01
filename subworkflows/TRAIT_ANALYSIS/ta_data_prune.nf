@@ -34,9 +34,8 @@ process DATASET_PRUNE {
     def secondary_trait = params.secondary_trait ?: ''
     def prune_list = params.prune_list ?: ''
     def prune_list_secondary = params.prune_list_secondary ?: ''
-    def discrete_method = params.discrete_method ?: 'quartile'
-    def top_quantile = params.top_quantile ?: '0.75'
-    def bottom_quantile = params.bottom_quantile ?: '0.25'
+    def pss_top_pct = params.pss_top_pct ?: '0.01'
+    def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
     def max_contrasts = params.max_contrasts ?: '0'
 
@@ -61,10 +60,9 @@ process DATASET_PRUNE {
                     branch_trait = '${branch_trait}',
                     prune_list = '${prune_list}',
                     prune_list_secondary = '${prune_list_secondary}',
-                    discrete_method = '${discrete_method}',
                     trait_type = '${trait_type}',
-                    top_quantile = '${top_quantile}',
-                    bottom_quantile = '${bottom_quantile}',
+                    pss_top_pct = '${pss_top_pct}',
+                    perm_strategy = '${perm_strategy}',
                     max_contrasts = '${max_contrasts}'
                 ),
                 output_file = '2.Phenotype_exploration_pruned.html',
@@ -93,10 +91,9 @@ process DATASET_PRUNE {
                     branch_trait = '${branch_trait}',
                     prune_list = '${prune_list}',
                     prune_list_secondary = '${prune_list_secondary}',
-                    discrete_method = '${discrete_method}',
                     trait_type = '${trait_type}',
-                    top_quantile = '${top_quantile}',
-                    bottom_quantile = '${bottom_quantile}',
+                    pss_top_pct = '${pss_top_pct}',
+                    perm_strategy = '${perm_strategy}',
                     max_contrasts = '${max_contrasts}'
                 ),
                 output_file = '2.Phenotype_exploration_pruned.html',

@@ -337,9 +337,9 @@ These parameters define the primary input data files, phenotype target, and modu
 | `toy_mode` / `toy_n` | `false` / `200` | Subsamples `N` random alignments for quick end-to-end smoke testing. |
 | `n_trait` / `c_trait` | `""` | Total sample size (`n_trait`) and case count (`c_trait`) for prevalence/frequency phenotypes. |
 | `secondary_trait` / `branch_trait` | `""` | Optional secondary trait column for reports / trait column for branch coloring. |
-| `discrete_method` | `"quintile"` | Method for discrete phenotype categorization (`quartile`, `quintile`, `decile`, `median_sd`, `parameterized`). Ignored when the trait is treated as ordinal (see `trait_type`). |
-| `top_quantile` / `bottom_quantile` | `"0.90"` / `"0.10"` | Upper and lower quantiles used when `discrete_method = "parameterized"`. |
-| `trait_type` | `""` | `""`/`auto` infers; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) instead of quantile-discretising it — use for binary presence/absence or ordinal category phenotypes; `continuous` forces quantile discretisation. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. |
+| `trait_type` | `""` | `""`/`auto` infers; `continuous` forces the Phylogenetic Shift Score (PSS, OU/BM) pair-selection path; `ordinal` treats the trait as a foreground/background code (highest level = foreground, lowest = background, any middle level = intermediate and excluded from contrasts) — use for binary presence/absence or ordinal category phenotypes. Auto-inference flags a trait as ordinal when it has 2–5 distinct integer values. The foreground/background partition is produced by `4.Independent_contrasts.Rmd` from the phylogenetically-independent selected pairs. |
+| `pss_top_pct` | `"0.01"` | Top percentile of candidate species pairs (by PSS) kept as contrast candidates for continuous traits. |
+| `perm_strategy` | `"auto"` | Evolutionary model for PSS and permulation: `auto` (best-fit BM vs OU by AICc), `OU`, or `BM`. |
 | `max_contrasts` | `"0"` | Maximum number of contrast pairs to select (`0` = dynamic discovery until Dunn < 1). |
 | `min_contrasts` | `3` | Minimum foreground contrast pairs required to proceed with CT analysis. |
 | `prune_data` / `prune_list` | `""` / `""` | Flags and species list files for species-level dataset pruning. |

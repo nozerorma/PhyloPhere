@@ -165,10 +165,10 @@ if (!file.exists(stats_path)) {
 }
 stats_df <- read.csv(stats_path, stringsAsFactors = FALSE)
 
-# If threshold columns are absent (e.g., loaded from an older CSV), recompute via stats.f
-.required_thresh_cols <- c("g_q10", "g_q20", "g_q80", "g_q90", "lower_thresh", "upper_thresh", "global_label")
-if (!is.data.frame(stats_df) || !all(.required_thresh_cols %in% names(stats_df))) {
-  message("Recomputing stats from trait_df (threshold columns missing from loaded CSV).")
+# If the descriptive summary columns are absent (e.g. loaded from an older CSV), recompute via stats.f
+.required_summary_cols <- c("g_q10", "g_q20", "g_q80", "g_q90", "outlier")
+if (!is.data.frame(stats_df) || !all(.required_summary_cols %in% names(stats_df))) {
+  message("Recomputing stats from trait_df (summary columns missing from loaded CSV).")
   stats_df <- stats.f(trait_df)
   if (is.null(stats_df)) stop("stats.f returned NULL; check trait_df validity.")
 }
@@ -273,31 +273,15 @@ contrast_plot.f <- function(df, palette_values = NULL) {
 
   global_median <- df$g_median[1]
 
-  # --- Threshold boundary vlines: all four methods, active visually prominent ---
-  .is_ordinal <- exists("is_ordinal_trait", inherits = TRUE) &&
-    is_ordinal_trait(df$value, if (exists("trait_type", inherits = TRUE)) trait_type else "auto")
-  .med  <- if ("g_median" %in% names(df)) df$g_median[1] else median(df$value, na.rm = TRUE)
-  if (.is_ordinal) {
-    .lo <- if ("lower_thresh" %in% names(df)) df$lower_thresh[1] else min(df$value, na.rm = TRUE)
-    .hi <- if ("upper_thresh" %in% names(df)) df$upper_thresh[1] else max(df$value, na.rm = TRUE)
-    .thresh_methods <- list(ordinal = list(lo = .lo, hi = .hi, style = "solid"))
-  } else {
-    .thresh_methods <- list()
-  }
-
-  # Create the plot base
+  # Create the plot base \u2014 one uniform point layer per species. The
+  # foreground/background partition is not drawn here; 4.Independent_contrasts.Rmd
+  # owns it (PSS for continuous traits, extreme coded levels for ordinal).
   p <- ggplot(df, aes(x = value, y = taxa)) +
     ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
     ggplot2::geom_point(
-      data = subset(df, global_label == "normal"),
-      aes(shape = global_label, color = taxa), size = contrast_dims$point_size
-    ) +
-    ggplot2::geom_point(
-      data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
-      aes(shape = global_label, color = taxa, fill = taxa), size = contrast_dims$point_size
-    ) +
-    ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17))
-  
+      aes(color = taxa), shape = 1, size = contrast_dims$point_size
+    )
+
   # Add color/fill scales with breaks = 0 to hide legends but keep colors
   if (!is.null(palette_values) && length(palette_values) > 0) {
     p <- p +
@@ -305,45 +289,17 @@ contrast_plot.f <- function(df, palette_values = NULL) {
       ggplot2::scale_color_manual(values = palette_values, breaks = 0)
   }
 
-  # Add threshold boundary lines if ordinal
-  for (.nm in names(.thresh_methods)) {
-    .t      <- .thresh_methods[[.nm]]
-    p <- p +
-      ggplot2::geom_vline(xintercept = .t$lo, linetype = .t$style,
-                          linewidth = 1.2, color = "#2B2D42", alpha = 0.85,
-                          show.legend = FALSE) +
-      ggplot2::geom_vline(xintercept = .t$hi, linetype = .t$style,
-                          linewidth = 1.2, color = "#2B2D42", alpha = 0.85,
-                          show.legend = FALSE)
-  }
-
+  # Reference lines: global median (independent of any fg/bg partition) and
+  # per-taxa median error bars.
   p <- p +
     ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = tableau_10["vermillion"]) +
     ggplot2::stat_summary(fun = median, geom = "errorbar",
                           aes(xmax = after_stat(x), xmin = after_stat(x), y = taxa),
                           linewidth = 1.2, color = tableau_10["blue"], alpha = 0.8) +
-    ggplot2::labs(x = capitalized_trait, 
-                  y = paste(capitalized_taxon, "-", capitalized_clade), 
-                  title = paste("Trait differential plot for trait:", capitalized_trait, "in", clade_name),
-                  subtitle = if (.is_ordinal) {
-                    paste0("Ordinal fg/bg code \u2014 foreground = ", .thresh_methods$ordinal$hi,
-                           ", background = ", .thresh_methods$ordinal$lo,
-                           "; any middle level is intermediate (excluded from contrasts)")
-                  } else {
-                    "Continuous trait distribution \u2014 contrast candidates selected via continuous phylogenetic shift modeling (OU / BM)"
-                  },
+    ggplot2::labs(x = capitalized_trait,
+                  y = paste(capitalized_taxon, "-", capitalized_clade),
+                  title = paste("Trait distribution for trait:", capitalized_trait, "in", clade_name),
                   caption = "Global median: longdash red line. Per-taxa median: blue error bars.") +
-    ggrepel::geom_text_repel(
-      data = subset(df, global_label %in% c("low_extreme", "high_extreme")),
-      aes(label = species), size = contrast_dims$label_size, hjust = 0, vjust = 0, family = "Inter",
-      segment.size = contrast_dims$segment_size, nudge_x = contrast_dims$nudge_x,
-      nudge_y = contrast_dims$nudge_y, max.overlaps = contrast_dims$max_overlaps,
-      force = contrast_dims$force, direction = "y", max.iter = 10000,
-      label.padding = contrast_dims$label_padding,
-      min.segment.length = contrast_dims$min_segment_length,
-      seed = if (nzchar(seed_val) && !is.na(suppressWarnings(as.integer(seed_val)))) as.integer(seed_val) else 42,
-      show.legend = FALSE
-    ) +
     ggplot2::theme_minimal() +
     ggplot2::theme(
       plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0, margin = ggplot2::margin(t = 20, b = 6), face = "bold"),
@@ -447,7 +403,7 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
     fill_scale_dark +
     ggplot2::geom_point(
       data = subset(df, outlier == "normal"),
-      aes(shape = global_label, color = taxa),
+      aes(color = taxa), shape = 1,
       size = violin_dims$point_size, position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
     ggplot2::geom_point(
@@ -456,7 +412,6 @@ violin_extremes.f <- function(df, trait, taxon_of_interest) {
       shape = 21, size = violin_dims$point_size, stroke = violin_dims$stroke,
       position = ggplot2::position_jitter(height = violin_dims$jitter_height)
     ) +
-    ggplot2::scale_shape_manual(values = c("low_extreme" = 15, "normal" = 1, "high_extreme" = 17)) +
     color_scale_dark +
     ggplot2::geom_vline(
       aes(xintercept = median_value), linewidth = 1, color = tableau_10["vermillion"], alpha = 0.5

@@ -136,7 +136,10 @@ workflow {
         def fade_precomp_sites_top_ch = null
         def fade_precomp_sites_bot_ch = null
 
-        if (params.reporting && !params.contrast_selection) {
+        // FADE (like --ct_tool) pulls in CONTRAST_SELECTION below, which runs
+        // REPORTING() itself when --reporting is set. Skip the standalone call
+        // here in that case to avoid invoking REPORTING() twice.
+        if (params.reporting && !params.contrast_selection && !params.fade) {
             reporting_results = REPORTING()
             ran_any = true
         }
@@ -171,6 +174,18 @@ workflow {
             // discovery). Without it, an under-powered trait emits no traitfile_ok.tab
             // and the run fails further down reporting a missing --caas_config, which
             // says nothing about the actual cause.
+            contrast_out.low_contrasts_skip.view { skip_file ->
+                exit 0, "Minimum contrast threshold not met for trait '${params.traitname ?: 'unknown'}' (flag: ${skip_file}). Stopping pipeline gracefully."
+            }
+            ran_any = true
+        }
+        // FADE needs the foreground/background partition defined by
+        // 4.Independent_contrasts.Rmd. When FADE runs standalone (no --ct_tool,
+        // no --contrast_selection) trigger CONTRAST_SELECTION here, the same way
+        // --ct_tool does — FADE stays independently runnable, the user only
+        // passes --fade.
+        if (params.fade && !contrast_out) {
+            contrast_out = CONTRAST_SELECTION()
             contrast_out.low_contrasts_skip.view { skip_file ->
                 exit 0, "Minimum contrast threshold not met for trait '${params.traitname ?: 'unknown'}' (flag: ${skip_file}). Stopping pipeline gracefully."
             }
@@ -484,16 +499,22 @@ workflow {
             // These channels are now consumed by a single SELECTION_PREP call
             // (instead of being split separately for FADE).
 
-            def stats_source_ch = contrast_out
-                ? contrast_out.stats_file_out
-                : (reporting_results ? reporting_results.stats_file : Channel.empty())
+            // Foreground/background pool for FADE: the PRE-Dunn candidate species
+            // from 3.CI-composition.Rmd (candidate_species.tab, traitfile format).
+            // FADE tests directional selection on foreground branches and does not
+            // need mutually-independent pairs, so it uses the full candidate pool
+            // rather than the Dunn-composited canonical set that CAAS uses.
+            // contrast_out is always populated here — the block above triggers
+            // CONTRAST_SELECTION for standalone --fade.
+            def species_source_ch = contrast_out
+                ? contrast_out.candidate_species_out
+                : Channel.empty()
 
-            // Tree: prefer phenotype-pruned tree from reporting; fall back to
-            // CT-pruned tree from contrast_selection; otherwise SELECTION_PREP
-            // falls back to params.tree via its .ifEmpty {} guard.
-            def tree_source_ch = reporting_results
-                ? reporting_results.pruned_tree_file
-                : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
+            // Tree: CT-pruned tree from contrast_selection; otherwise
+            // SELECTION_PREP falls back to params.tree via its .ifEmpty {} guard.
+            def tree_source_ch = contrast_out
+                ? contrast_out.tree_file_out
+                : Channel.empty()
 
             // CT discovery output for toy_mode gene reuse (null when CT didn't run)
             def ct_discovery_source_ch = (ct_results && ran_discovery)
@@ -511,7 +532,7 @@ workflow {
             // (can be safely consumed by multiple downstream operators) and
             // queue channels for the per-gene filtered FASTAs.
             SELECTION_PREP(
-                stats_source_ch,
+                species_source_ch,
                 tree_source_ch,
                 sel_pp_top_ch,
                 sel_pp_bottom_ch,

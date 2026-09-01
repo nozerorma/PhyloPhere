@@ -307,7 +307,10 @@ repeat {
     e <- evaluate_lean_contrast_selection(
       trait_vec = pvec, D = D, target_pairs = target_pairs,
       ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
-      cov_matrix = cov_matrix, top_pct = 0.01
+      cov_matrix = cov_matrix, top_pct = 0.01,
+      ordinal = if (trait_type == "ordinal") TRUE
+                else if (trait_type == "continuous") FALSE
+                else NULL
     )
 
     if (e$tier == 1L) {
