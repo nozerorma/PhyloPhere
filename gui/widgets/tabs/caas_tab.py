@@ -22,7 +22,7 @@ from PySide6.QtWidgets import QCheckBox, QLabel
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import CaasConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
-from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
+from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 
 SPEC = ModuleTabSpec(
     title="CAAS / Contrast Selection",
@@ -36,7 +36,16 @@ SPEC = ModuleTabSpec(
         "results instead."
     ),
     essential_fields=(
-        FieldSpec(name="caas_config_path", label="CAAS config file", kind="path_file"),
+        Section("Discovery params"),
+        FieldSpec(name="patterns", label="CT patterns"),
+        FieldSpec(name="min_divergent_fraction", label="Min divergent fraction"),
+        FieldSpec(name="caap_mode", label="CAAP mode (properties-based)", kind="bool"),
+        FieldSpec(name="multi_hypothesis", label="Multi-hypothesis mode", kind="bool"),
+        Section("Resample / Bootstrap params"),
+        FieldSpec(name="chunk_size", label="Resampled groups per output file"),
+        FieldSpec(name="include_b0", label="Include main hypothesis (b0)", kind="bool"),
+        FieldSpec(name="resample_use_n", label="Use sample size counts (n/c)", kind="bool"),
+        FieldSpec(name="perm_strategy", label="Permutation strategy", kind="choice", choices=("auto", "OU", "BM")),
         FieldSpec(
             name="perm_pool_size",
             label="Permulation pool size",
@@ -48,20 +57,19 @@ SPEC = ModuleTabSpec(
             placeholder="drawn from the pool for the CAAS FCS null",
         ),
         FieldSpec(
-            name="caas_permulation_enrichment", label="Permulation-excess for enrichment", kind="bool"
+            name="max_tries",
+            label="Max permulation tries",
+            placeholder="draw budget; raised 50% up to twice if the pool falls short",
         ),
     ),
     advanced_fields=(
-        FieldSpec(name="patterns", label="CT patterns"),
-        # Contrast-selection tuning (conf/common.config)
-        FieldSpec(name="pss_top_pct", label="PSS top percentile candidate gate"),
-        FieldSpec(name="max_contrasts", label="Max contrasts (0 = dynamic)"),
-        FieldSpec(name="min_contrasts", label="Minimum foreground contrasts"),
-        # Discovery/resample fine-tuning (conf/ct.config)
-        FieldSpec(name="publish_intermediates", label="Publish intermediate files", kind="bool"),
-        FieldSpec(name="ct_discovery_batch_size", label="Discovery genes per task"),
-        FieldSpec(name="ct_bootstrap_batch_size", label="Bootstrap genes per task"),
-        FieldSpec(name="min_divergent_fraction", label="Min divergent fraction"),
+        Section("Missingness parameters in discovery/bootstrap modes and otherwise"),
+        FieldSpec(
+            name="caas_config_path",
+            label="CAAS config file (auto-derived if empty)",
+            kind="path_file",
+            placeholder="auto-derived from contrast_selection.nf when empty",
+        ),
         FieldSpec(name="max_bg_gaps_fraction", label="Max background gaps fraction"),
         FieldSpec(name="max_fg_gaps_fraction", label="Max foreground gaps fraction"),
         FieldSpec(name="max_gaps_fraction", label="Max any-gaps fraction"),
@@ -69,18 +77,17 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="max_fg_miss_fraction", label="Max foreground missing fraction"),
         FieldSpec(name="max_miss_fraction", label="Max any-missing fraction"),
         FieldSpec(name="miss_pair", label="Enforce missing pairs", kind="bool"),
-        FieldSpec(name="caap_mode", label="CAAP mode (properties-based)", kind="bool"),
-        FieldSpec(name="perm_strategy", label="Permutation strategy", kind="choice", choices=("auto", "OU", "BM")),
-        FieldSpec(
-            name="max_tries",
-            label="Max permulation tries",
-            placeholder="draw budget; raised 50% up to twice if the pool falls short",
-        ),
-        FieldSpec(name="chunk_size", label="Resampled groups per output file"),
-        FieldSpec(name="include_b0", label="Include main hypothesis (b0)", kind="bool"),
-        FieldSpec(name="multi_hypothesis", label="Multi-hypothesis mode (all non-replacement hypotheses)", kind="bool"),
+        Section("Batching logic (performance)"),
+        FieldSpec(name="ct_discovery_batch_size", label="Discovery genes per task"),
+        FieldSpec(name="ct_bootstrap_batch_size", label="Bootstrap genes per task"),
+        Section("Publishing norms (debug)"),
+        FieldSpec(name="publish_intermediates", label="Publish intermediate files", kind="bool"),
         FieldSpec(name="export_groups", label="Export groups (DEBUG)", kind="bool"),
         FieldSpec(name="export_perm_discovery", label="Export permuted discovery (DEBUG)", kind="bool"),
+        Section("Contrast-selection tuning (conf/common.config)"),
+        FieldSpec(name="pss_top_pct", label="PSS top percentile candidate gate"),
+        FieldSpec(name="max_contrasts", label="Max contrasts (0 = dynamic)"),
+        FieldSpec(name="min_contrasts", label="Minimum foreground contrasts"),
     ),
 )
 

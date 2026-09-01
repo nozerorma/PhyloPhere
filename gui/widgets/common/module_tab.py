@@ -86,8 +86,9 @@ class ModuleTabWidget(QWidget):
             advanced_box = QGroupBox()
             advanced_box.setFlat(True)
             self._advanced_form = QFormLayout(advanced_box)
+            n_adv = len([f for f in spec.advanced_fields if f.kind != "section"])
             self.advanced_section = CollapsibleSection(
-                f"Advanced parameters ({len(spec.advanced_fields)})", advanced_box
+                f"Advanced parameters ({n_adv})", advanced_box
             )
             layout.addWidget(self.advanced_section)
 
@@ -126,6 +127,15 @@ class ModuleTabWidget(QWidget):
     # ── Field widget construction ────────────────────────────────────────────
 
     def _add_field(self, form: QFormLayout, f: FieldSpec) -> None:
+        if f.kind == "section":
+            header_lbl = QLabel(f"// {f.label}")
+            header_lbl.setStyleSheet(
+                "QLabel { font-weight: bold; color: #475569; padding-top: 10px; padding-bottom: 2px; border-bottom: 1px solid rgba(0,0,0,0.12); margin-top: 4px; }"
+            )
+            form.addRow(header_lbl)
+            self._label_widgets.append((header_lbl, f"// {f.label}"))
+            return
+
         current_value = getattr(self._config, f.name)
 
         if f.kind == "bool":

@@ -25,7 +25,7 @@ out live ASR computation.
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import DisambiguationConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
-from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
+from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 
 SPEC = ModuleTabSpec(
     title="Disambiguation",
@@ -44,14 +44,22 @@ SPEC = ModuleTabSpec(
         "Disambiguation output' on the Precomputed Run tab instead."
     ),
     essential_fields=(
+        Section("Disambiguation parameters (conf/ct_disambiguation.config)"),
         FieldSpec(
             name="ct_disambig_asr_mode",
             label="ASR mode",
             kind="choice",
             choices=("precomputed", "compute"),
         ),
-        FieldSpec(name="ct_disambig_asr_cache_dir", label="ASR cache directory", kind="path_dir"),
-        FieldSpec(name="asr_robustness", label="Run ASR Robustness diagnostics report", kind="bool"),
+        FieldSpec(name="ct_disambig_asr_model", label="ASR substitution model"),
+        FieldSpec(
+            name="ct_disambig_convergence_mode",
+            label="Convergence mode",
+            kind="choice",
+            choices=("focal_clade", "mrca"),
+        ),
+        FieldSpec(name="ct_disambig_posterior_threshold", label="Posterior probability threshold"),
+        Section("Post-processing filter parameters (conf/ct_postproc.config)"),
         FieldSpec(name="run_postproc_exploratory", label="Run Exploratory Post-Processing Sweep", kind="bool"),
         FieldSpec(name="run_postproc_filter", label="Run Filtering Production Post-Processing", kind="bool"),
         FieldSpec(name="filter_minlen", label="Cluster min length (filter mode)"),
@@ -64,17 +72,15 @@ SPEC = ModuleTabSpec(
         ),
     ),
     advanced_fields=(
-        FieldSpec(name="ct_disambig_asr_model", label="ASR substitution model"),
-        FieldSpec(
-            name="ct_disambig_convergence_mode",
-            label="Convergence mode",
-            kind="choice",
-            choices=("focal_clade", "mrca"),
-        ),
-        FieldSpec(name="ct_disambig_posterior_threshold", label="Posterior probability threshold"),
+        Section("Sensitivity and robustness testing"),
+        FieldSpec(name="asr_robustness", label="Run ASR Robustness diagnostics report", kind="bool"),
+        Section("Performance and batching"),
         FieldSpec(name="ct_disambig_max_tasks_per_child", label="Max tasks per worker child"),
+        FieldSpec(name="ct_disambig_asr_cache_dir", label="ASR cache directory", kind="path_dir"),
+        Section("Exploratory parameter sweep values (conf/ct_postproc.config)"),
         FieldSpec(name="minlen_values", label="Cluster min length sweep (exploratory mode)"),
         FieldSpec(name="maxcaas_values", label="Cluster max CAAS sweep (exploratory mode)"),
+        Section("Gene-level outlier thresholds (conf/ct_postproc.config)"),
         FieldSpec(name="extreme_threshold", label="Extreme-gene quantile threshold"),
         FieldSpec(name="iqr_multiplier", label="Dubious-gene IQR multiplier"),
     ),

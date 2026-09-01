@@ -9,7 +9,7 @@
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import FadeConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
-from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
+from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 
 SPEC = ModuleTabSpec(
     title="FADE",
@@ -22,13 +22,17 @@ SPEC = ModuleTabSpec(
         "from one base path, no per-row entry needed."
     ),
     essential_fields=(
-        FieldSpec(name="fade_model", label="Substitution model"),
+        Section("Selection parameters"),
+        FieldSpec(
+            name="fade_model",
+            label="Substitution model",
+            kind="choice",
+            choices=("LG", "JTT", "WAG", "Blosum62", "GTR"),
+        ),
         FieldSpec(name="fade_bf_threshold", label="Bayes Factor threshold"),
     ),
     advanced_fields=(
-        FieldSpec(name="selection_prep_batch_size", label="Alignment-prep genes per task"),
-        FieldSpec(name="fade_batch_size", label="FADE genes per task"),
-        FieldSpec(name="lg_dat_path", label="LG substitution matrix path", kind="path_file"),
+        Section("HyPhy inference and MCMC sampling"),
         FieldSpec(
             name="fade_method",
             label="Inference method",
@@ -41,6 +45,11 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fade_burn_in", label="MCMC burn-in"),
         FieldSpec(name="fade_samples", label="MCMC samples"),
         FieldSpec(name="fade_concentration", label="Dirichlet concentration prior"),
+        FieldSpec(name="lg_dat_path", label="LG substitution matrix path", kind="path_file"),
+        Section("Batching and performance"),
+        FieldSpec(name="selection_prep_batch_size", label="Alignment-prep genes per task"),
+        FieldSpec(name="fade_batch_size", label="FADE genes per task"),
+        Section("Reporting and precomputed inputs"),
         FieldSpec(name="fade_min_genes_for_heatmap", label="Min genes for report heatmaps"),
         FieldSpec(name="fade_universe_file", label="FADE tested-gene universe file", kind="path_file"),
     ),

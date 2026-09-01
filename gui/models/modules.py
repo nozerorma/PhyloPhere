@@ -70,6 +70,7 @@ class CaasConfig(ModuleConfigBase):
     max_tries: str = "1000000"  # --max_tries
     chunk_size: str = "500"  # --chunk_size
     include_b0: bool = False  # --include_b0
+    resample_use_n: bool = True  # --resample_use_n
     multi_hypothesis: bool = True  # --multi_hypothesis
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).
@@ -238,13 +239,23 @@ class VepConfig(ModuleConfigBase):
 
 @dataclass(kw_only=True)
 class ScoringConfig(ModuleConfigBase):
+    scoring_gene_top_pct: str = "0.10"  # --scoring_gene_top_pct
+    scoring_position_top_pct: str = "0.10"  # --scoring_position_top_pct
+    scoring_weight_caas: str = "1.0"  # --scoring_weight_caas
+    scoring_weight_rer: str = "1.0"  # --scoring_weight_rer
+    scoring_weight_fade: str = "1.0"  # --scoring_weight_fade
+    scoring_rer_direction: str = "both"  # --scoring_rer_direction (both|accelerated|decelerated)
+    gene_ensembl_file: str = ""  # --gene_ensembl_file
+
+    # Advanced parameters (conf/scoring.config)
+    scoring_ami: bool = True  # --scoring_ami
+    scoring_string: bool = True  # --scoring_string
+    scoring_compare_fdr: str = "0.1"  # --scoring_compare_fdr
+    scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
     scoring_stress: bool = True  # RUN_SCORING_STRESS -> --scoring_stress
     scoring_stress_top_n: str = "25"  # --scoring_stress_top_n
-    scoring_stress_rank_metric: str = "spearman"  # --scoring_stress_rank_metric
+    scoring_stress_rank_metric: str = "spearman"  # --scoring_stress_rank_metric (spearman|pearson)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
-    gene_ensembl_file: str = ""  # --gene_ensembl_file
-    scoring_position_top_pct: str = "0.10"  # --scoring_position_top_pct
-    scoring_gene_top_pct: str = "0.10"  # --scoring_gene_top_pct
 
     # NOTE: scoring_postproc_input/scoring_accum_dir/scoring_vep_primateai/
     # scoring_background_input/caas_perms_file/scoring_fade_site_top/bottom moved

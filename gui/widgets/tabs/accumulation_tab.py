@@ -7,7 +7,7 @@
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import AccumulationConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
-from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
+from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 
 SPEC = ModuleTabSpec(
     title="Accumulation",
@@ -20,17 +20,19 @@ SPEC = ModuleTabSpec(
         "precomputed Accumulation output' on the Precomputed Run tab instead."
     ),
     essential_fields=(
-        FieldSpec(name="accumulation_n_randomizations", label="Randomizations"),
-        FieldSpec(name="accumulation_entropy_dir", label="Entropy directory", kind="path_dir"),
-    ),
-    advanced_fields=(
+        Section("Randomization and burden parameters"),
         FieldSpec(
             name="accumulation_randomization_type",
             label="Randomization type",
             kind="choice",
-            choices=("naive", "cons_decile"),
+            choices=("cons_decile", "naive"),
         ),
+        FieldSpec(name="accumulation_n_randomizations", label="Randomizations"),
         FieldSpec(name="accumulation_fdr", label="FDR threshold"),
+    ),
+    advanced_fields=(
+        Section("Entropy and standalone inputs"),
+        FieldSpec(name="accumulation_entropy_dir", label="Entropy directory", kind="path_dir"),
     ),
 )
 

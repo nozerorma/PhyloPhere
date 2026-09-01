@@ -17,7 +17,7 @@ Precomputed Run tab where it belongs, alongside the rest of Scoring's fallbacks.
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import VepConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
-from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
+from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 
 SPEC = ModuleTabSpec(
     title="VEP",
@@ -30,9 +30,10 @@ SPEC = ModuleTabSpec(
         "when it's off — check 'Use precomputed VEP output' on the Precomputed Run tab."
     ),
     essential_fields=(
+        Section("Variant effect prediction databases"),
         FieldSpec(name="vep_primateai_db", label="PrimateAI-3D database", kind="path_file"),
-        FieldSpec(name="vep_map_dir", label="Per-gene MAP directory", kind="path_dir"),
         FieldSpec(name="cosmic_db", label="COSMIC database", kind="path_file"),
+        FieldSpec(name="vep_map_dir", label="Per-gene MAP directory", kind="path_dir"),
     ),
 )
 

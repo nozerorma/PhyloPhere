@@ -13,16 +13,21 @@ this is the mechanism that keeps ~90% of module-tab structure shared.
 # ── Standard library ──────────────────────────────────────────────────────────
 from dataclasses import dataclass, field
 
-FieldKind = str  # "bool" | "str" | "path_file" | "path_dir" | "choice"
+FieldKind = str  # "bool" | "str" | "path_file" | "path_dir" | "choice" | "section"
 
 
 @dataclass(frozen=True, kw_only=True)
 class FieldSpec:
-    name: str  # attribute name on the module's config dataclass
+    name: str = ""  # attribute name on the module's config dataclass (empty for sections)
     label: str
     kind: FieldKind = "str"
     choices: tuple[str, ...] = ()  # only used when kind == "choice"
     placeholder: str = ""
+
+
+def Section(label: str) -> FieldSpec:
+    """Convenience constructor for visual section sub-headers matching conf/*.config comment blocks."""
+    return FieldSpec(name="", label=label, kind="section")
 
 
 @dataclass(frozen=True, kw_only=True)

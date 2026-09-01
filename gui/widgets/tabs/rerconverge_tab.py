@@ -24,7 +24,7 @@ from PySide6.QtWidgets import QCheckBox, QLabel
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import RerConfig
 from gui.widgets.common.module_tab import ModuleTabWidget
-from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
+from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 
 SPEC = ModuleTabSpec(
     title="RERconverge",
@@ -38,17 +38,7 @@ SPEC = ModuleTabSpec(
         "phenotype from one base path, no per-row entry needed."
     ),
     essential_fields=(
-        FieldSpec(name="gene_trees", label="Gene trees file", kind="path_file"),
-        FieldSpec(name="rer_perm_batches", label="Permutation batches"),
-        FieldSpec(name="rer_perms_per_batch", label="Permutations per batch"),
-    ),
-    advanced_fields=(
-        FieldSpec(name="trait_out", label="Trait output path (build_trait)"),
-        FieldSpec(name="trees_out", label="Trees output path (build_tree)"),
-        FieldSpec(name="matrix_out", label="Matrix output path (build_matrix)"),
-        FieldSpec(name="rer_minsp", label="Minimum species per gene"),
-        FieldSpec(name="winsorize_rer", label="Winsorize RER threshold"),
-        FieldSpec(name="winsorize_trait", label="Winsorize trait threshold"),
+        Section("RER trait analysis"),
         FieldSpec(
             name="rer_trait_mode",
             label="Trait type routing",
@@ -56,21 +46,42 @@ SPEC = ModuleTabSpec(
             choices=("auto", "continuous", "binary"),
         ),
         FieldSpec(
+            name="rer_transform",
+            label="Trait transform",
+            kind="choice",
+            choices=("ha_logit", "auto", "logit", "arcsin", "log10", "none"),
+        ),
+        FieldSpec(
+            name="rer_pval_column",
+            label="Report p-value column",
+            kind="choice",
+            choices=("p.perm", "p.adj"),
+        ),
+    ),
+    advanced_fields=(
+        Section("Gene tree and matrix output paths"),
+        FieldSpec(name="gene_trees", label="Gene trees file", kind="path_file"),
+        FieldSpec(name="trait_out", label="Trait output path (build_trait)"),
+        FieldSpec(name="trees_out", label="Trees output path (build_tree)"),
+        FieldSpec(name="matrix_out", label="Matrix output path (build_matrix)"),
+        Section("Quality thresholds and winsorization"),
+        FieldSpec(name="rer_minsp", label="Minimum species per gene"),
+        FieldSpec(name="winsorize_rer", label="Winsorize RER threshold"),
+        FieldSpec(name="winsorize_trait", label="Winsorize trait threshold"),
+        Section("Permutation null calibration"),
+        FieldSpec(name="rer_perm_batches", label="Permutation batches"),
+        FieldSpec(name="rer_perms_per_batch", label="Permutations per batch"),
+        Section("Binary mode options"),
+        FieldSpec(
             name="rer_binary_clade",
             label="Binary foreground clade",
             kind="choice",
             choices=("all", "ancestral", "terminal"),
         ),
         FieldSpec(name="rer_min_pos", label="Min independent foreground lineages"),
+        Section("Reporting and visualization thresholds"),
         FieldSpec(name="rer_pval_threshold", label="Report p-value threshold"),
-        FieldSpec(name="rer_pval_column", label="Report p-value column"),
         FieldSpec(name="rer_top_n_labels", label="Top-N labels on correlation plot"),
-        FieldSpec(
-            name="rer_transform",
-            label="Trait transform",
-            kind="choice",
-            choices=("auto", "ha_logit", "logit", "arcsin", "log10", "none"),
-        ),
         FieldSpec(name="rer_universe_file", label="RER tested-gene universe file", kind="path_file"),
         FieldSpec(name="rer_gene_scores", label="Cross-module gene scores (fcs_stats.tsv)", kind="path_file"),
     ),
