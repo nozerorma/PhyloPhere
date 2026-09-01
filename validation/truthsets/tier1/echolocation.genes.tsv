@@ -1,0 +1,22 @@
+# Echolocation (laryngeal) — Tier 1 gene-level truth set
+#
+# Phenotype: echolocating bats (Yangochiroptera + Rhinolophoidea) + toothed
+# whales (Odontoceti) vs non-echolocating relatives.
+# direction: fg-shift = convergent AA change / preference shift on echolocating branches
+# tier: mutagenesis = function-altering convergent site demonstrated (see
+#                     echolocation.sites.tsv for the residues)
+#       reanalysis  = reported as a convergent hearing gene by >=1 of Parker2013 /
+#                     Davies2012 / Shen2012 / Liu2011 (weak positive)
+#
+# Tier 1 question for this dataset: does the pipeline recover these
+# externally-validated convergent hearing genes / the prestin sites, and where do
+# they rank. (The genome-wide inflation / null-calibration debate — Thomas & Hahn
+# 2015, Zou & Zhang 2015 — is out of scope for Tier 1; that lives in the CAAP
+# comparison track.)
+gene	direction	tier	source
+SLC26A5	fg-shift	mutagenesis	Liu2010
+TMC1	fg-shift	reanalysis	Davies2012
+PJVK	fg-shift	reanalysis	Davies2012
+CDH23	fg-shift	reanalysis	Shen2012
+OTOF	fg-shift	reanalysis	Shen2012
+KCNQ4	fg-shift	reanalysis	Liu2011

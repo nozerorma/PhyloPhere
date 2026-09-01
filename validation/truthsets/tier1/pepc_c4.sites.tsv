@@ -1,0 +1,39 @@
+# PEPC (phosphoenolpyruvate carboxylase, ppc-1E1c / "ppc") C4-associated sites — Tier 1
+#
+# Phenotype: C3 vs C4 photosynthesis in Cyperaceae (sedges). Fixture =
+# validation/fixtures/tier1/pepc/ (79 tips, 23 "genotypic" C4 by the A780S
+# determinant, from Besnard et al. 2009 via the PCOC / ConDor test data).
+#
+# Numbering: maize C4 PEPC1 (UniProt P04711, 970 aa). The fixture alignment is
+# projected onto maize coordinates and is exactly 970 columns, so
+#   ref position N  ==  alignment column N   (1:1, no ref row needed).
+#
+# Evidence tiers (column `tier`):
+#   mutagenesis  : residue change functionally demonstrated (kinetics / folding)
+#   selection    : Besnard 2009 BEB positive selection on C4 branches AND
+#                  recovered by >=1 reanalysis (PCOC / ConDor / FADE, Morel 2024)
+#   parallel     : Besnard 2009 positive-selection site with a parallel change
+#                  also reported in grass / eudicot C4 PEPC (cross-family)
+#   weak         : Besnard 2009 candidate, <3 independent emergences in the
+#                  ConDor reanalysis, not otherwise confirmed
+#
+# Sources: Blasing2000 (780 kinetics); Paulus2013 / Engelmann2002 (665 folding/
+#   activity); Besnard2009 (MBE 26:1909, 16 positive-selection codons);
+#   Christin2007 (Curr Biol, grass PEPC parallel codons); Morel2024 (ConDor,
+#   GBE, doi:10.1093/gbe/evae040 — 5 TP: M749T P540T E572Q A780S H665N).
+#
+# NOTE: Besnard 2009 lists 16 positive-selection codons; only the subset below is
+# transcribed with confidence. The remaining ~7 need the Besnard 2009 Table 1 /
+# Christin 2007 Table 1 PDFs before recall is quoted as a headline fraction.
+gene	ref_seq	position	ref_aa	alt_aa	tier	source
+PEPC	maize_P04711	780	A	S	mutagenesis	Blasing2000
+PEPC	maize_P04711	665	H	N	mutagenesis	Paulus2013
+PEPC	maize_P04711	540	P	T	selection	Besnard2009;Morel2024
+PEPC	maize_P04711	572	E	Q	selection	Besnard2009;Morel2024
+PEPC	maize_P04711	749	M	T	selection	Besnard2009;Morel2024
+PEPC	maize_P04711	733	F	V	parallel	Besnard2009;Christin2007
+PEPC	maize_P04711	761	S	A	parallel	Besnard2009;Christin2007
+PEPC	maize_P04711	770	.	.	weak	Besnard2009
+PEPC	maize_P04711	810	.	.	weak	Besnard2009
+PEPC	maize_P04711	839	.	.	weak	Besnard2009
+PEPC	maize_P04711	906	.	.	weak	Besnard2009

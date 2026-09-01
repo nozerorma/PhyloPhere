@@ -1,0 +1,23 @@
+# Conda env for BUILDING Tier 1 fixtures (alignment + tree inference).
+# These tools are outside PhyloPhere's own scope (the pipeline gets its
+# aligners/tree builders from Nextflow process containers), so the fixture
+# build.py scripts shell out to this env instead of polluting `phylophere`.
+#
+#   micromamba env create -f validation/fixtures/fixture-tools.yml
+#   micromamba run -n phylophere-fixtures mafft --version
+#
+# Pinned loosely on purpose — fixtures are rebuilt rarely and the build.py
+# scripts assert on the biological landmarks (e.g. PEPC col 780, Hb alphaA 34),
+# so a minor tool version drift is caught, not silently absorbed.
+name: phylophere-fixtures
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python =3.12
+  - biopython >=1.85
+  - dendropy >=4.6
+  - mafft >=7.520
+  - iqtree >=2.3
+  - seqkit >=2.8
+  - trimal >=1.5

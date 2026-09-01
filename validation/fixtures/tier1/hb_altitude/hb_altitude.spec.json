@@ -1,0 +1,74 @@
+{
+  "name": "hb_altitude",
+  "tree": "tree.nwk",
+  "provenance": "Zhu et al. 2018 PNAS 115(8):1865 (doi:10.1073/pnas.1720487115). Sequences: GenBank MG772099-MG772439. Tree topology: Fig S1 (Johansson 2013 MPE 69:852 + Li 2016 MPE 104:14), branch lengths ML-fit on the concatenated alphaA/alphaD/betaA alignment. elev_mid = midpoint of each species' elevational range (7 ranges verbatim from the paper text, 9 read off Fig S1 +/-150 m, checked by MR); the CONTINUOUS encoding is ours - Zhu et al. analyse altitude categorically. altitude H/L = elev_mid >= 2500 m. Truth: truthsets/tier1/hb_altitude.sites.tsv.",
+  "traits": [
+    {
+      "name": "elev_mid",
+      "kind": "continuous",
+      "higher_is_foreground": true,
+      "values": {
+        "Aegithalos_bonvaloti": 3050,
+        "Aegithalos_fuliginosus": 1700,
+        "Cyanistes_cyanus": 1500,
+        "Lophophanes_dichrous": 3450,
+        "Machlolophus_spilonotus": 1850,
+        "Pardaliparus_venustulus": 1900,
+        "Parus_minor": 1000,
+        "Parus_monticolus": 2400,
+        "Periparus_ater_aemodius": 3350,
+        "Periparus_ater_pekinensis": 900,
+        "Periparus_rubidiventris": 3350,
+        "Poecile_davidi": 2900,
+        "Poecile_montanus": 2750,
+        "Poecile_palustris": 1050,
+        "Pseudopodoces_humilis": 4300,
+        "Sylviparus_modestus": 2000
+      }
+    },
+    {
+      "name": "altitude",
+      "kind": "categorical",
+      "labels": {
+        "Aegithalos_bonvaloti": "fg",
+        "Aegithalos_fuliginosus": "bg",
+        "Cyanistes_cyanus": "bg",
+        "Lophophanes_dichrous": "fg",
+        "Machlolophus_spilonotus": "bg",
+        "Pardaliparus_venustulus": "bg",
+        "Parus_minor": "bg",
+        "Parus_monticolus": "bg",
+        "Periparus_ater_aemodius": "fg",
+        "Periparus_ater_pekinensis": "bg",
+        "Periparus_rubidiventris": "fg",
+        "Poecile_davidi": "fg",
+        "Poecile_montanus": "fg",
+        "Poecile_palustris": "bg",
+        "Pseudopodoces_humilis": "fg",
+        "Sylviparus_modestus": "bg"
+      },
+      "pairs": [
+        [
+          "Pseudopodoces_humilis",
+          "Parus_minor"
+        ],
+        [
+          "Lophophanes_dichrous",
+          "Poecile_palustris"
+        ],
+        [
+          "Periparus_ater_aemodius",
+          "Periparus_ater_pekinensis"
+        ],
+        [
+          "Aegithalos_bonvaloti",
+          "Aegithalos_fuliginosus"
+        ],
+        [
+          "Periparus_rubidiventris",
+          "Pardaliparus_venustulus"
+        ]
+      ]
+    }
+  ]
+}

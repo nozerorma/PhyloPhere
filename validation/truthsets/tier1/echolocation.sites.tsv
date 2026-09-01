@@ -1,0 +1,30 @@
+# Echolocation — Tier 1 site-level truth set
+#
+# Phenotype: laryngeal echolocation — echolocating bats (Yangochiroptera +
+# Rhinolophoidea) + toothed whales (Odontoceti) vs non-echolocating relatives.
+# Fixture: validation/fixtures/tier1/echolocation/ (Parker et al. 2013 /
+# Thomas & Hahn 2015 alignments, ~22 mammals).
+#
+# The one gene with function-altering convergent sites demonstrated by
+# heterologous expression + electrophysiology is prestin (SLC26A5), the outer
+# hair cell motor protein:
+#   Liu et al. 2014, MBE 31:2415 — "Parallel sites implicate functional
+#   convergence of the hearing gene prestin among echolocating mammals":
+#     N7T   -> convergent increase in 1/alpha in ALL echolocating mammals
+#     I384T -> convergent V1/2 shift shared by toothed whales + CF (rhinolophoid)
+#              bats
+#   both parameters correlate with high-frequency hearing.
+#
+# Numbering: prestin / SLC26A5 protein, as used by Liu et al. 2010/2014
+#   (Curr Biol 20:R55 / MBE 31:2415). `ref_seq` = the SLC26A5 row / consensus in
+#   the fixture alignment; map with truthset.map_site_to_alignment if the fixture
+#   alignment column != position.
+#
+# tier: mutagenesis = heterologous-expression functional assay (Liu 2014)
+#
+# TODO: confirm N7 / I384 land on the expected alignment columns once the fixture
+#   is built; add TMC1 pore-domain convergent site (Sadanandan et al. 2023) if it
+#   is in the Parker gene set.
+gene	ref_seq	position	ref_aa	alt_aa	tier	source
+SLC26A5	prestin	7	N	T	mutagenesis	Liu2014
+SLC26A5	prestin	384	I	T	mutagenesis	Liu2014

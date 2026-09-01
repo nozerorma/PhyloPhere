@@ -1,0 +1,41 @@
+# Heavy / derived fixture content — never committed.
+# Specs and per-fixture READMEs ARE tracked (they are small and describe how to
+# rebuild everything else).
+fixtures/**/align/
+fixtures/**/aln/
+fixtures/**/*.nwk
+fixtures/**/*.fasta
+fixtures/**/*.fa
+fixtures/**/*.phy
+fixtures/**/*.aln
+fixtures/**/*.newick
+fixtures/**/*.nwk
+fixtures/**/*.nh
+fixtures/**/*.tree
+fixtures/**/*.tre
+fixtures/**/*.tsv
+fixtures/**/*.txt
+fixtures/**/*.phyml_tree*
+# fetched raw inputs (build.py re-fetches); keep build.py + README + *.spec.json
+fixtures/**/*.coor_*
+fixtures/**/*.nex
+fixtures/**/*.gb
+fixtures/**/*.gbk
+fixtures/**/*.genbank
+!fixtures/**/README.md
+!fixtures/**/build.py
+!fixtures/**/*.spec.json
+
+# Pipeline outputs
+runs/**
+!runs/.gitkeep
+
+# Demoted Tier 0 — heavy fixture content stays out (code + READMEs tracked)
+.demoted/fixtures_tier0/trees/
+.demoted/**/*.tree
+.demoted/**/*.nh
+
+# Python
+__pycache__/
+*.pyc
+.metrics_cache/

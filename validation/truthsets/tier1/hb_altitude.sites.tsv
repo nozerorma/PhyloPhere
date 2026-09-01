@@ -1,0 +1,48 @@
+# Haemoglobin high-altitude adaptation sites — Tier 1 site-level truth set
+#
+# Phenotype: altitude in Sino-Himalayan tits (Paridae) + long-tailed tits
+# (Aegithalidae). Fixture = validation/fixtures/tier1/hb_altitude/ (16 tips,
+# 7 high / 9 low by elevational-range midpoint; three globin genes alphaA / alphaD
+# / betaA). Source: Zhu et al. 2018, PNAS 115(8):1865, doi:10.1073/pnas.1720487115.
+#
+# Numbering: mature globin chain, standard Hb convention.
+#   alphaA : initiator Met cleaved -> residue 1 = Val. Fixture align/HBA.fasta has
+#            the Met stripped, so alignment column N == alphaA residue N (1:1,
+#            verified in build.py:_assert_landmarks; no ref row needed).
+#   alphaD : N-terminal Met retained -> column N == alphaD residue N.
+#   betaA  : initiator Met cleaved -> residue 1 = Val; column N == betaA residue N.
+# `gene` column: HBA | HBD | HBB  (== the fixture alignment file stem).
+#
+# Evidence tiers (column `tier`):
+#   mutagenesis        : function-altering effect on Hb-O2 affinity demonstrated
+#                        by site-directed mutagenesis (Zhu 2018 / cited work),
+#                        AND the derived state arose independently in >=2 lineages
+#   parallel-candidate : residue is high-altitude-private in THIS fixture (carried
+#                        by >=2 phylogenetically independent high-altitude tips,
+#                        absent from every low-altitude tip) but not individually
+#                        functionally tested here. Partly alignment-derived — use
+#                        with care, not as a headline precision number.
+#
+# Sources: Zhu2018 (PNAS, the fixture's own dataset); Natarajan2015 (PLoS Genet
+#   11:e1005681, Andean waterfowl); Natarajan2016 (Science 354:336).
+#
+# KNOWN COMPLICATIONS (see fixture README "Known complications"):
+#  - alphaA34: Sylviparus modestus (LOW, basal Paridae) also carries Thr34 — this
+#    is retention of the ancestral avian state (chicken alphaA is Thr34; the
+#    Paridae-crown ancestor is the derived Ala34), NOT the CpG-driven convergent
+#    substitution. Machlolophus spilonotus (LOW) carries Ile34. So a clean CAAS
+#    call at alphaA34 requires the contrast selector NOT to pair Sylviparus as a
+#    background partner. Recovery here is a genuine test, not a gimme.
+#  - The Natarajan Andean betaA sites 86, 94, 116 are invariant in this fixture
+#    (Zhu 2018) and are deliberately NOT listed — they are neither positives nor
+#    scorable here. betaA83 IS variable (Poecile davidi) and is listed.
+#
+# TODO: transcribe the full AncParidae -> P. humilis (12 sites) / L. dichrous
+#   (6 sites) alphaA substitution lists from Zhu 2018 Fig S3 for a "divergent"
+#   tier, before quoting divergent-site recall as a headline fraction.
+gene	ref_seq	position	ref_aa	alt_aa	tier	source
+HBA	alphaA_mature	34	A	T	mutagenesis	Zhu2018
+HBA	alphaA_mature	119	P	A	mutagenesis	Zhu2018
+HBA	alphaA_mature	109	V	I	parallel-candidate	Zhu2018
+HBD	alphaD_mature	18	G	S	parallel-candidate	Zhu2018
+HBB	betaA_mature	83	N	G	parallel-candidate	Zhu2018;Natarajan2015
