@@ -26,6 +26,11 @@ process CI_COMPOSITION_REPORT {
 
     script:
     def local_dir = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local"
+    // Shared contrast-selection core (rank_candidates / greedy_dunn_select /
+    // fit_evo_model / mod_dunn_lean) lives with the CT permulation scripts;
+    // stage it into src/ so 3.CI-composition.Rmd and selection_algorithm.R
+    // resolve it via the getwd()/src/ path candidate.
+    def ct_scripts = "${baseDir}/subworkflows/CT/local/scripts"
     def seed = params.seed ?: ''
     def clade = params.clade_name ?: ''
     def taxon = params.taxon_of_interest ?: ''
@@ -42,6 +47,7 @@ process CI_COMPOSITION_REPORT {
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then
             target=\$(readlink -f "${results_dir}")
             rm -f "${results_dir}"
@@ -75,6 +81,7 @@ process CI_COMPOSITION_REPORT {
     } else {
         """
         cp -R ${local_dir}/* .
+        cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then
             target=\$(readlink -f "${results_dir}")
             rm -f "${results_dir}"

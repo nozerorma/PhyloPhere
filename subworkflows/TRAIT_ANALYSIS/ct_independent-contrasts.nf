@@ -29,6 +29,9 @@ process CONTRAST_ALGORITHM {
 
     script:
     def local_dir = "${baseDir}/subworkflows/TRAIT_ANALYSIS/local"
+    // selection_algorithm.R sources the shared contrast-selection core from
+    // src/lean_contrast_selector.R; stage it in (it lives with the CT scripts).
+    def ct_scripts = "${baseDir}/subworkflows/CT/local/scripts"
     def seed = params.seed ?: ''
     def clade = params.clade_name ?: ''
     def taxon = params.taxon_of_interest ?: ''
@@ -46,6 +49,7 @@ process CONTRAST_ALGORITHM {
     if (params.use_singularity | params.use_apptainer) {
         """
         cp -R ${local_dir}/* .
+        cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then
             target=\$(readlink -f "${results_dir}")
             rm -f "${results_dir}"
@@ -84,6 +88,7 @@ process CONTRAST_ALGORITHM {
     } else {
         """
         cp -R ${local_dir}/* .
+        cp ${ct_scripts}/lean_contrast_selector.R ${ct_scripts}/pss_core.R src/
         if [ -L "${results_dir}" ]; then
             target=\$(readlink -f "${results_dir}")
             rm -f "${results_dir}"

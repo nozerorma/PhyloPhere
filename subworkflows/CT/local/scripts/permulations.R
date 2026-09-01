@@ -25,21 +25,8 @@ suppressPackageStartupMessages({
 
 log_msg <- function(tag, ...) write(paste0("[", tag, "] ", format(Sys.time()), " ", paste0(...)), stdout())
 
-# ── Evolutionary Covariance Helpers ──────────────────────────────────────────
-bm_covariance <- function(tree, sigsq) {
-  sigsq * vcv.phylo(tree)[tree$tip.label, tree$tip.label]
-}
-
-ou_covariance <- function(tree, alpha, sigsq) {
-  shared <- vcv.phylo(tree)[tree$tip.label, tree$tip.label]
-  depths <- diag(shared)
-  patristic <- outer(depths, depths, "+") - 2 * shared
-  patristic[patristic < 0] <- 0
-  cov <- (sigsq / (2 * alpha)) * exp(-alpha * patristic) * (-expm1(-2 * alpha * shared))
-  cov <- (cov + t(cov)) / 2
-  dimnames(cov) <- list(tree$tip.label, tree$tip.label)
-  cov
-}
+# Evolutionary model fit + BM/OU covariances + AIC model selection come from the
+# vendored phyloq engine (pss_core.R), sourced below once script_dir is known.
 
 # ── RERconverge permulation primitives ───────────────────────────────────────
 simulatevec <- function(namedvec, treewithbranchlengths) {
@@ -202,54 +189,34 @@ starting.values <- starting.values[pruned.tree$tip.label]
 
 D <- cophenetic(pruned.tree)
 
-# ── Evolutionary Model Fitting & Covariance Matrix ───────────────────────────
-simulation_tree <- pruned.tree
-cov_matrix <- NULL
-
-chosen_model <- if (selection.strategy %in% c("auto", "best_model")) "auto" else selection.strategy
-
-if (chosen_model == "auto") {
-  log_msg("INFO", "Evaluating BM vs OU evolutionary models on empirical trait values...")
-  fit_bm <- tryCatch(suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "BM", ncores = 1)), error = function(e) NULL)
-  fit_ou <- tryCatch(suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "OU", ncores = 1)), error = function(e) NULL)
-  
-  aicc_bm <- if (!is.null(fit_bm) && !is.null(fit_bm$opt$aicc)) fit_bm$opt$aicc else Inf
-  aicc_ou <- if (!is.null(fit_ou) && !is.null(fit_ou$opt$aicc)) fit_ou$opt$aicc else Inf
-  
-  if (is.finite(aicc_ou) && (aicc_bm - aicc_ou >= 2)) {
-    chosen_model <- "ou"
-    log_msg("INFO", sprintf("Selected OU model (AICc OU = %.2f vs BM = %.2f, delta AICc = %.2f >= 2)",
-                            aicc_ou, aicc_bm, aicc_bm - aicc_ou))
-  } else {
-    chosen_model <- "bm"
-    log_msg("INFO", sprintf("Selected BM model (AICc BM = %.2f vs OU = %.2f, delta AICc = %.2f < 2)",
-                            aicc_bm, aicc_ou, aicc_bm - aicc_ou))
-  }
+# ── Vendored phyloq engine + lean selector ──────────────────────────────────
+pss_core_script <- file.path(script_dir, "pss_core.R")
+for (.f in c(lean_script, pss_core_script)) {
+  if (!file.exists(.f)) stop(basename(.f), " not found next to permulations.R (looked in '", script_dir, "').")
 }
+source(pss_core_script)   # fit_models / covariances_from_fits / select_model / calculate_pairwise_scores
+source(lean_script)       # evaluate_lean_contrast_selection + shared Dunn core
+log_msg("INFO", "Lean contrast filtering + phyloq PSS enabled from ", script_dir)
 
-if (chosen_model == "ou") {
-  log_msg("INFO", "Fitting Ornstein-Uhlenbeck (OU) model on the empirical trait vector...")
-  fit_ou <- suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "OU", ncores = 1))
-  alpha_hat <- as.numeric(fit_ou$opt$alpha)
-  sigsq_hat <- as.numeric(fit_ou$opt$sigsq)
-  simulation_tree <- rescale(pruned.tree, "OU", alpha_hat)
+# ── Evolutionary model: phyloq's fit + AIC selection (verbatim), once, on the
+#    observed trait. Covariances are held fixed across all permulation draws.
+.force_model <- if (selection.strategy %in% c("bm", "ou")) toupper(selection.strategy) else NULL
+obs_fits       <- fit_models(pruned.tree, starting.values)
+selected_model <- select_model(obs_fits, force_model = .force_model)
+obs_cov        <- covariances_from_fits(pruned.tree, obs_fits)
+cov_bm         <- obs_cov$BM
+cov_ou         <- obs_cov$OU
+log_msg("INFO", sprintf("Evolutionary model: %s (AIC BM = %.3f, OU = %.3f; delta = %.3f)",
+                        selected_model, fit_aic(obs_fits$BM), fit_aic(obs_fits$OU),
+                        fit_aic(obs_fits$BM) - fit_aic(obs_fits$OU)))
+
+# Simulation tree for the rank-match null: OU-rescaled when OU is selected.
+if (selected_model == "OU") {
+  simulation_tree <- rescale(pruned.tree, "OU", as.numeric(obs_fits$OU$opt$alpha))
   simulation_tree$edge.length[simulation_tree$edge.length <= 0] <- 1e-8
-  cov_matrix <- ou_covariance(pruned.tree, alpha_hat, sigsq_hat)
 } else {
-  log_msg("INFO", "Fitting Brownian Motion (BM) model on the empirical trait vector...")
-  fit_bm <- suppressWarnings(fitContinuous(pruned.tree, starting.values, model = "BM", ncores = 1))
-  sigsq_hat <- as.numeric(fit_bm$opt$sigsq)
   simulation_tree <- pruned.tree
-  cov_matrix <- bm_covariance(pruned.tree, sigsq_hat)
 }
-
-# ── Lean selector ────────────────────────────────────────────────────────────
-if (!file.exists(lean_script)) {
-  stop("lean_contrast_selector.R not found next to permulations.R (looked in '",
-       script_dir, "'). Pair-count and independence filtering cannot be applied.")
-}
-source(lean_script)
-log_msg("INFO", "Lean contrast filtering enabled from ", lean_script)
 
 # ── b_0: the real labeling ───────────────────────────────────────────────────
 if (include.b0) {
@@ -308,13 +275,20 @@ repeat {
       n_draw     <- setNames(rec_n[order(sim_ord)], names(sim_v))
     }
 
-    e <- evaluate_lean_contrast_selection(
-      trait_vec = pvec, D = D, target_pairs = target_pairs,
-      ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
-      cov_matrix = cov_matrix, top_pct = pss_top_pct, n_vec = n_draw,
-      ordinal = if (trait_type == "ordinal") TRUE
-                else if (trait_type == "continuous") FALSE
-                else NULL
+    e <- tryCatch(
+      evaluate_lean_contrast_selection(
+        trait_vec = pvec, D = D, target_pairs = target_pairs,
+        tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
+        selected_model = selected_model,
+        ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
+        top_pct = pss_top_pct, n_vec = n_draw,
+        ordinal = if (trait_type == "ordinal") TRUE
+                  else if (trait_type == "continuous") FALSE
+                  else NULL
+      ),
+      error = function(err) list(tier = 0L, n_pairs = 0L, dunn_min = 0,
+                                 n_below = NA_integer_, fg = NULL, bg = NULL,
+                                 reason = paste0("error: ", conditionMessage(err)))
     )
 
     if (e$tier == 1L) {

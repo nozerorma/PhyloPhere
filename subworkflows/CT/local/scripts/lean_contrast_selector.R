@@ -39,18 +39,17 @@ overall_dunn_lean <- function(D, members) {
   min(vapply(seq_along(members), function(k) mod_dunn_lean(D, members, k), numeric(1)))
 }
 
-# Analytical shift score S and composite PSS score
-calc_pss_scores <- function(hi, lo, dif, dist, C_mat) {
-  pv <- diag(C_mat)[hi] + diag(C_mat)[lo] - 2 * C_mat[cbind(hi, lo)]
-  tolerance <- 100 * .Machine$double.eps * max(abs(pv), 1)
-  pv[pv < 0 & pv >= -tolerance] <- 0
-  z <- dif / sqrt(pmax(pv, 1e-12))
-  S <- -expm1(log(2) + stats::pnorm(z, lower.tail = FALSE, log.p = TRUE))
-  max_dif <- max(dif, na.rm = TRUE)
-  max_dst <- max(dist, na.rm = TRUE)
-  if (max_dif <= 0) max_dif <- 1
-  if (max_dst <= 0) max_dst <- 1
-  S * (dif / max_dif) / (dist / max_dst)
+# PSS scoring is provided by the vendored phyloq engine (src/pss_core.R):
+# analytical_s() and calculate_pairwise_scores(). This file only needs to be
+# sourced alongside it — permulations.R and the report modules stage both.
+if (!exists("calculate_pairwise_scores", mode = "function")) {
+  .pss_core_paths <- c(
+    file.path(getwd(), "src", "pss_core.R"),
+    file.path(getwd(), "pss_core.R"),
+    "/home/miguel/IBE-UPF/PhD/PhyloPhere/subworkflows/CT/local/scripts/pss_core.R"
+  )
+  .hit <- .pss_core_paths[file.exists(.pss_core_paths)]
+  if (length(.hit)) source(.hit[1])
 }
 
 # Ordinal fg/bg code auto-detection (mirrors stats.R::is_ordinal_trait "auto").
@@ -151,23 +150,27 @@ greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
 #' exactly `target_pairs` and grades independence into tiers, rather than
 #' stopping when overall Dunn drops below 1.
 #'
-#' @param trait_vec    Named numeric vector of permulated trait values.
-#' @param D            Patristic distance matrix on the REAL tree.
-#' @param target_pairs N_pairs_obs, the observed independent pair count.
-#' @param ci_lb,ci_ub  Optional per-tip Jeffreys bounds (count data → CI gate).
-#' @param cov_matrix   Phylogenetic covariance matrix (OU/BM). When supplied, PSS
-#'                     scores every pair and the top `top_pct` slice is a gate
-#'                     (universal, all trait types) and the ranking key.
-#' @param top_pct      Top PSS fraction to keep as the gate (params.pss_top_pct).
-#' @param ordinal      TRUE/FALSE to force the ordinal level gate; NULL = auto.
-#' @param n_vec        Optional named per-tip sample sizes → pair_n tiebreak.
+#' @param trait_vec       Named numeric vector of permulated trait values.
+#' @param D               Patristic distance matrix on the REAL tree.
+#' @param target_pairs    N_pairs_obs, the observed independent pair count.
+#' @param tree            phylo on the analysis species (for calculate_pairwise_scores).
+#' @param cov_bm,cov_ou   BM / OU covariance matrices from the OBSERVED fit
+#'                        (pss_core.R::covariances_from_fits), dimnamed by species.
+#' @param selected_model  "BM" | "OU" — the observed AIC-selected model.
+#' @param ci_lb,ci_ub     Optional per-tip Jeffreys bounds (count data → CI gate).
+#' @param top_pct         Top PSS fraction kept as the gate (params.pss_top_pct).
+#' @param ordinal         TRUE/FALSE to force the ordinal level gate; NULL = auto.
+#' @param n_vec           Optional named per-tip sample sizes → pair_n tiebreak.
 #' @return list(tier, n_pairs, dunn_min, n_below, fg, bg, reason)
 evaluate_lean_contrast_selection <- function(trait_vec,
                                              D,
                                              target_pairs,
+                                             tree = NULL,
+                                             cov_bm = NULL,
+                                             cov_ou = NULL,
+                                             selected_model = "OU",
                                              ci_lb = NULL,
                                              ci_ub = NULL,
-                                             cov_matrix = NULL,
                                              top_pct = 0.01,
                                              ordinal = NULL,
                                              n_vec = NULL) {
@@ -194,26 +197,34 @@ evaluate_lean_contrast_selection <- function(trait_vec,
     sp <- sp[ok]; trait_vec <- trait_vec[sp]; lb <- lb[sp]; ub <- ub[sp]
   }
 
-  # All ordered candidate pairs with a positive trait difference (hi > lo).
-  c_hi_all <- rep(sp, each = length(sp))
-  c_lo_all <- rep(sp, times = length(sp))
-  dif_all  <- trait_vec[c_hi_all] - trait_vec[c_lo_all]
-  valid    <- (c_hi_all != c_lo_all) & (dif_all > 0)
-  if (!any(valid)) return(reject("no candidate pairs with positive trait difference"))
-  c_hi   <- c_hi_all[valid]
-  c_lo   <- c_lo_all[valid]
-  c_dif  <- dif_all[valid]
-  c_dist <- D[cbind(c_hi, c_lo)]
-
-  # --- Gate 1 (universal): top `top_pct` by PSS under the fitted OU/BM model ---
-  pss <- rep(NA_real_, length(c_hi))
-  pss_mask <- rep(TRUE, length(c_hi))
-  if (!is.null(cov_matrix)) {
-    pss <- calc_pss_scores(c_hi, c_lo, c_dif, c_dist, cov_matrix)
-    n_keep <- max(8L, ceiling(length(pss) * top_pct))
-    thresh <- sort(pss, decreasing = TRUE)[min(n_keep, length(pss))]
-    pss_mask <- pss >= thresh
+  # --- PSS: vendored phyloq calculate_pairwise_scores (verbatim), on the fixed
+  #     observed-model covariances. Returns unordered pairs, FinalScore desc.
+  if (is.null(tree) || is.null(cov_bm) || is.null(cov_ou)) {
+    return(reject("PSS inputs missing (tree / cov_bm / cov_ou)"))
   }
+  tr <- if (length(sp) < length(tree$tip.label)) ape::drop.tip(tree, setdiff(tree$tip.label, sp)) else tree
+  tr_sp <- tr$tip.label
+  cb <- cov_bm[tr_sp, tr_sp, drop = FALSE]
+  co <- cov_ou[tr_sp, tr_sp, drop = FALSE]
+  sc <- calculate_pairwise_scores(trait_vec[tr_sp], tr, cb, co, selected_model)
+
+  # Orient each unordered pair: hi = higher trait value (foreground).
+  hi_is_1 <- sc$TraitValue1 >= sc$TraitValue2
+  c_hi   <- ifelse(hi_is_1, sc$Species1, sc$Species2)
+  c_lo   <- ifelse(hi_is_1, sc$Species2, sc$Species1)
+  c_dif  <- abs(sc$TraitValue1 - sc$TraitValue2)
+  c_dist <- sc$PatristicDistance
+  pss    <- sc$FinalScore
+
+  drop0 <- c_dif > 0
+  if (!any(drop0)) return(reject("no candidate pairs with positive trait difference"))
+  c_hi <- c_hi[drop0]; c_lo <- c_lo[drop0]; c_dif <- c_dif[drop0]
+  c_dist <- c_dist[drop0]; pss <- pss[drop0]
+
+  # --- Gate 1 (universal): top `top_pct` by PSS ---
+  n_keep   <- max(8L, ceiling(length(pss) * top_pct))
+  thresh   <- sort(pss, decreasing = TRUE)[min(n_keep, length(pss))]
+  pss_mask <- pss >= thresh
 
   # --- Gate 2 (trait-type non-overlap) ---
   if (use_ci) {

@@ -104,6 +104,9 @@ if (exists("params")) {
 source("./src/commons.R")
 setup_rmd()
 
+# Vendored phyloq PSS engine (Fabio Barteri) — staged into src/ by ct_ci.nf.
+source("./src/pss_core.R")
+
 # pss_top_pct and perm_strategy are set by commons.R from params
 debug_log("pss_top_pct = %.4f, perm_strategy = %s", pss_top_pct, perm_strategy)
 
@@ -270,71 +273,51 @@ create_pairwise_data <- function(ci_data) {
     dplyr::select(species, n_population, n_cases, trait,
                   trait_ci_lb, trait_ci_ub, category)
 
-  pss_df <- data.frame(species1 = character(), species2 = character(), pss_score = numeric(), S_score = numeric(), stringsAsFactors = FALSE)
+  pss_df <- data.frame(species1 = character(), species2 = character(),
+                       pss_score = numeric(), S_score = numeric(), stringsAsFactors = FALSE)
   pss_top_pairs <- character(0)
 
-  # PSS (OU/BM) pair scoring runs for EVERY trait type — continuous, count, and
-  # ordinal (an OU/BM model on a coded fg/bg vector is well-posed, cf. RERconverge).
-  # It provides two things, uniformly:
-  #   * pss_score        — the per-pair divergence signal used to RANK candidates
-  #   * pss_top_pairs    — the top `pss_top_pct` slice, a candidate GATE applied on
-  #                        top of the trait-type-specific non-overlap test below.
-  # If the model fit fails, both stay empty and selection falls back to the
-  # trait-type gate + patristic-distance ranking.
+  # Analytical Phylogenetic Shift Score — Fabio Barteri's phyloq engine, vendored
+  # verbatim in src/pss_core.R (fit BM + OU, validate, select by AIC: OU iff
+  # AIC_OU + 2 < AIC_BM else BM; score every species pair as
+  # S * normDelta / normPatristic). Runs for every trait type. It provides:
+  #   * pss_score     — per-pair divergence signal used to RANK candidates
+  #   * pss_top_pairs — top `pss_top_pct` slice, a candidate GATE on top of the
+  #                     trait-type non-overlap test below.
+  # If the fit fails, both stay empty and selection falls back to the type gate
+  # + patristic-distance ranking.
+  .force <- if (exists("perm_strategy", inherits = TRUE) &&
+                tolower(perm_strategy) %in% c("bm", "ou")) toupper(perm_strategy) else NULL
+  .pct   <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.01
   if (exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
     tryCatch({
-      sp_avail <- intersect(tree$tip.label, ci_subset$species)
-      tr_sub <- ape::drop.tip(tree, setdiff(tree$tip.label, sp_avail))
-      tr_sub <- ape::multi2di(tr_sub)
-      tr_sub$edge.length[tr_sub$edge.length <= 0] <- 1e-8
-      t_vec <- setNames(ci_subset$trait, ci_subset$species)[tr_sub$tip.label]
-      .model <- if (exists("perm_strategy", inherits = TRUE) && tolower(perm_strategy) %in% c("bm", "ou")) tolower(perm_strategy) else "OU"
-      fit_m <- suppressWarnings(geiger::fitContinuous(tr_sub, t_vec, model = toupper(.model), ncores = 1))
-      shared <- ape::vcv.phylo(tr_sub)[tr_sub$tip.label, tr_sub$tip.label]
-      if (toupper(.model) == "OU") {
-        alpha_v <- as.numeric(fit_m$opt$alpha)
-        sigsq_v <- as.numeric(fit_m$opt$sigsq)
-        dp <- diag(shared)
-        pat <- outer(dp, dp, "+") - 2 * shared; pat[pat < 0] <- 0
-        cov_mat <- (sigsq_v / (2 * alpha_v)) * exp(-alpha_v * pat) * (-expm1(-2 * alpha_v * shared))
-      } else {
-        sigsq_v <- as.numeric(fit_m$opt$sigsq)
-        cov_mat <- sigsq_v * shared
-      }
-      cov_mat <- (cov_mat + t(cov_mat)) / 2
-      dimnames(cov_mat) <- list(tr_sub$tip.label, tr_sub$tip.label)
-      D_mat <- ape::cophenetic.phylo(tr_sub)
-
-      sp_cand <- tr_sub$tip.label
-      cand_grid <- expand.grid(s1 = sp_cand, s2 = sp_cand, stringsAsFactors = FALSE)
-      cand_grid <- cand_grid[cand_grid$s1 != cand_grid$s2, ]
-      cand_dif  <- t_vec[cand_grid$s1] - t_vec[cand_grid$s2]
-      cand_grid <- cand_grid[cand_dif > 0, ]
-      cand_dif  <- cand_dif[cand_dif > 0]
-      cand_dst  <- D_mat[cbind(cand_grid$s1, cand_grid$s2)]
-
-      pv <- diag(cov_mat)[cand_grid$s1] + diag(cov_mat)[cand_grid$s2] - 2 * cov_mat[cbind(cand_grid$s1, cand_grid$s2)]
-      z <- cand_dif / sqrt(pmax(pv, 1e-12))
-      S <- -expm1(log(2) + stats::pnorm(z, lower.tail = FALSE, log.p = TRUE))
-      fs <- S * (cand_dif / max(cand_dif)) / (cand_dst / max(cand_dst))
-
-      pss_df <- data.frame(
-        species1 = cand_grid$s1,
-        species2 = cand_grid$s2,
-        pss_score = round(fs, 4),
-        S_score = round(S, 4),
-        stringsAsFactors = FALSE
+      .pss <- phylogenetic_shift_score(
+        data = as.data.frame(ci_subset[, c("species", "trait")]),
+        tree = tree, trait = "trait", species_col = "species",
+        verbose = FALSE, force_model = .force
       )
-
-      .pct    <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.01
-      n_keep  <- max(8L, ceiling(length(fs) * .pct))
-      thresh  <- sort(fs, decreasing = TRUE)[min(n_keep, length(fs))]
-      top_cand <- cand_grid[fs >= thresh, ]
-      pss_top_pairs <- paste(top_cand$s1, top_cand$s2, sep = "__")
-      debug_log("PSS: model=%s, %d scored pairs, top %.1f%% -> %d gate pairs",
-                toupper(.model), nrow(pss_df), 100 * .pct, length(pss_top_pairs))
+      sc <- .pss$scores
+      sc_S <- if (identical(.pss$selected_model, "BM")) sc$Sbm else sc$Sou
+      pss_df <- rbind(
+        data.frame(species1 = sc$Species1, species2 = sc$Species2,
+                   pss_score = round(sc$FinalScore, 6), S_score = round(sc_S, 6),
+                   stringsAsFactors = FALSE),
+        data.frame(species1 = sc$Species2, species2 = sc$Species1,
+                   pss_score = round(sc$FinalScore, 6), S_score = round(sc_S, 6),
+                   stringsAsFactors = FALSE)
+      )
+      keep_n  <- min(max(8L, ceiling(nrow(sc) * .pct)), nrow(sc))
+      top_sc  <- sc[order(sc$FinalScore, decreasing = TRUE)[seq_len(keep_n)], , drop = FALSE]
+      pss_top_pairs <- c(paste(top_sc$Species1, top_sc$Species2, sep = "__"),
+                         paste(top_sc$Species2, top_sc$Species1, sep = "__"))
+      if (exists("ci_dir", inherits = TRUE) && dir.exists(ci_dir)) {
+        write.table(.pss$model_fit, file.path(ci_dir, "evo_model.tsv"),
+                    sep = "\t", row.names = FALSE, quote = FALSE)
+      }
+      debug_log("PSS: model=%s (AIC BM=%.2f OU=%.2f), %d pairs, top %.1f%% -> %d gate pairs",
+                .pss$selected_model, sc$AIC_BM[1], sc$AIC_OU[1], nrow(sc), 100 * .pct, keep_n)
     }, error = function(e) {
-      debug_log("Error in PSS calculation: %s", conditionMessage(e))
+      debug_log("PSS calculation failed: %s", conditionMessage(e))
     })
   }
 
