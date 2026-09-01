@@ -264,7 +264,7 @@ head(trait_ci)
 
 This section prepares data for comparing trait values between all pairs of species.
 
-A pair is an eligible contrast candidate when it clears **both** gates: (1) it sits in the top `pss_top_pct` of pairs by Phylogenetic Shift Score (PSS) under the fitted OU/BM model — applied for every trait type — and (2) it passes the trait-type non-overlap test: Jeffreys credible intervals that do not overlap (count data), or one species at the top coded level and the other at the bottom level (ordinal). Continuous traits have no second test; the PSS slice is the whole gate. Eligible candidates are then ranked by PSS for the independent-contrast selection in the next report.
+A pair is an eligible contrast candidate when it passes the trait-type non-overlap test: **count** — Jeffreys credible intervals that do not overlap; **ordinal** — one species at the top coded level, the other at the bottom; **continuous** — the top `pss_top_pct` of hi>lo pairs by Phylogenetic Shift Score (PSS) under the AIC-selected OU/BM model (continuous has no other significance test). For every trait type the PSS is computed and used to **rank** the eligible candidates for the independent-contrast selection in the next report.
 
 ```{r prep_CI, paged.print=TRUE, message=FALSE, warning=FALSE}
 # Helper function to create pairwise comparisons
@@ -306,20 +306,17 @@ create_pairwise_data <- function(ci_data) {
                    pss_score = round(sc$FinalScore, 6), S_score = round(sc_S, 6),
                    stringsAsFactors = FALSE)
       )
-      keep_n  <- min(max(8L, ceiling(nrow(sc) * .pct)), nrow(sc))
-      top_sc  <- sc[order(sc$FinalScore, decreasing = TRUE)[seq_len(keep_n)], , drop = FALSE]
-      pss_top_pairs <- c(paste(top_sc$Species1, top_sc$Species2, sep = "__"),
-                         paste(top_sc$Species2, top_sc$Species1, sep = "__"))
       if (exists("ci_dir", inherits = TRUE) && dir.exists(ci_dir)) {
         write.table(.pss$model_fit, file.path(ci_dir, "evo_model.tsv"),
                     sep = "\t", row.names = FALSE, quote = FALSE)
       }
-      debug_log("PSS: model=%s (AIC BM=%.2f OU=%.2f), %d pairs, top %.1f%% -> %d gate pairs",
-                .pss$selected_model, sc$AIC_BM[1], sc$AIC_OU[1], nrow(sc), 100 * .pct, keep_n)
+      debug_log("PSS: model=%s (AIC BM=%.2f OU=%.2f), %d scored pairs",
+                .pss$selected_model, sc$AIC_BM[1], sc$AIC_OU[1], nrow(sc))
     }, error = function(e) {
       debug_log("PSS calculation failed: %s", conditionMessage(e))
     })
   }
+  have_pss <- nrow(pss_df) > 0
 
   # Generate all pairwise species combinations
   pairwise <- expand.grid(species1 = ci_subset$species,
@@ -341,22 +338,17 @@ create_pairwise_data <- function(ci_data) {
     pairwise$S_score <- NA_real_
   }
 
-  # Candidate eligibility (trait_overlap == FALSE) = passes BOTH gates:
-  #   1. top `pss_top_pct` by PSS (universal, all trait types)
-  #   2. trait-type non-overlap:
-  #        count      -> Jeffreys CIs do not overlap
-  #        ordinal    -> one species top coded level, the other bottom level
-  #        continuous -> (no extra test; the PSS slice is the whole gate)
-  # If PSS could not be fit, gate 1 is dropped and only gate 2 applies.
+  # Candidate eligibility (trait_overlap == FALSE):
+  #   count   -> Jeffreys CIs do not overlap. That IS the gate; PSS only ranks
+  #              the survivors (see 4.Independent_contrasts.Rmd).
+  #   ordinal -> one species top coded level, the other bottom. Gate as above.
+  #   continuous -> no separate significance test exists, so the top `pss_top_pct`
+  #                 of hi>lo pairs by PSS is the gate.
+  # If the PSS fit failed for a continuous trait, fall back to keeping every
+  # hi>lo pair (patristic-distance ranking then takes over).
   pairwise <- pairwise %>%
     mutate(
       trait_diff = trait1 - trait2,
-      .in_top_pss = if (length(pss_top_pairs) > 0) {
-        (paste(species1, species2, sep = "__") %in% pss_top_pairs) |
-        (paste(species2, species1, sep = "__") %in% pss_top_pairs)
-      } else {
-        NA
-      },
       .type_nonoverlap = if (use_count_data) {
         !ci_overlap(trait_ci_lb1, trait_ci_ub1, trait_ci_lb2, trait_ci_ub2)
       } else if (isTRUE(is_ordinal)) {
@@ -365,16 +357,30 @@ create_pairwise_data <- function(ci_data) {
           (category1 != category2)
       } else {
         TRUE
-      },
-      trait_overlap = if (length(pss_top_pairs) > 0) {
-        !(.in_top_pss & .type_nonoverlap)
-      } else {
-        !.type_nonoverlap
-      },
-      diff_value  = trait_diff,
-      overlap_use = trait_overlap
-    ) %>%
-    dplyr::select(-.in_top_pss, -.type_nonoverlap)
+      }
+    )
+
+  .stage1 <- which(pairwise$.type_nonoverlap & pairwise$trait_diff > 0 &
+                   !is.na(pairwise$trait_diff))
+  pairwise$trait_overlap <- TRUE
+  if (length(.stage1) > 0) {
+    .continuous_pss_gate <- !use_count_data && !isTRUE(is_ordinal) &&
+      isTRUE(have_pss) && any(is.finite(pairwise$pss_score[.stage1]))
+    if (.continuous_pss_gate) {
+      .pct  <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.01
+      .keep <- min(max(8L, ceiling(length(.stage1) * .pct)), length(.stage1))
+      .ord  <- .stage1[order(pairwise$pss_score[.stage1], decreasing = TRUE)]
+      pairwise$trait_overlap[.ord[seq_len(.keep)]] <- FALSE
+      debug_log("Continuous PSS gate: %d pairs -> top %.1f%% -> %d candidates",
+                length(.stage1), 100 * .pct, .keep)
+    } else {
+      pairwise$trait_overlap[.stage1] <- FALSE
+      debug_log("Type gate: %d candidate pairs (PSS ranks, does not gate)", length(.stage1))
+    }
+  }
+  pairwise$diff_value  <- pairwise$trait_diff
+  pairwise$overlap_use <- pairwise$trait_overlap
+  pairwise$.type_nonoverlap <- NULL
 
   return(pairwise)
 }

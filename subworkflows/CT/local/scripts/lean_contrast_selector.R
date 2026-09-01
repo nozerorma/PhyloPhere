@@ -221,12 +221,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   c_hi <- c_hi[drop0]; c_lo <- c_lo[drop0]; c_dif <- c_dif[drop0]
   c_dist <- c_dist[drop0]; pss <- pss[drop0]
 
-  # --- Gate 1 (universal): top `top_pct` by PSS ---
-  n_keep   <- max(8L, ceiling(length(pss) * top_pct))
-  thresh   <- sort(pss, decreasing = TRUE)[min(n_keep, length(pss))]
-  pss_mask <- pss >= thresh
-
-  # --- Gate 2 (trait-type non-overlap) ---
+  # --- Stage 1: trait-type non-overlap ---
   if (use_ci) {
     type_mask <- (lb[c_hi] > ub[c_lo])
   } else if (isTRUE(ordinal)) {
@@ -235,9 +230,18 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   } else {
     type_mask <- rep(TRUE, length(c_hi))
   }
+  if (!any(type_mask)) return(reject("no pair passes the trait-type gate"))
+  s1 <- which(type_mask)
 
-  keep <- pss_mask & type_mask
-  if (!any(keep)) return(reject("no pair passes both gates"))
+  # --- Stage 2 (continuous only): top `top_pct` of stage-1 survivors by PSS.
+  #     Count/ordinal keep every stage-1 pair; PSS just ranks them. ---
+  if (!use_ci && !isTRUE(ordinal)) {
+    n_keep <- min(max(8L, ceiling(length(s1) * top_pct)), length(s1))
+    keep_i <- s1[order(pss[s1], decreasing = TRUE)][seq_len(n_keep)]
+  } else {
+    keep_i <- s1
+  }
+  keep <- logical(length(c_hi)); keep[keep_i] <- TRUE
 
   cand_df <- data.frame(
     species1 = c_hi[keep], species2 = c_lo[keep],
