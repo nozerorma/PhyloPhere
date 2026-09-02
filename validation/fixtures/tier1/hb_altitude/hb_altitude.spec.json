@@ -1,7 +1,7 @@
 {
   "name": "hb_altitude",
   "tree": "tree.nwk",
-  "provenance": "Zhu et al. 2018 PNAS 115(8):1865 (doi:10.1073/pnas.1720487115). Sequences: GenBank MG772099-MG772439. Tree topology: Fig S1 (Johansson 2013 MPE 69:852 + Li 2016 MPE 104:14), branch lengths ML-fit on the concatenated alphaA/alphaD/betaA alignment. elev_mid = midpoint of each species' elevational range (7 ranges verbatim from the paper text, 9 read off Fig S1 +/-150 m, checked by MR); the CONTINUOUS encoding is ours - Zhu et al. analyse altitude categorically. altitude H/L = elev_mid >= 2500 m. Truth: truthsets/tier1/hb_altitude.sites.tsv.",
+  "provenance": "Zhu et al. 2018 PNAS 115(8):1865 (doi:10.1073/pnas.1720487115). Sequences: GenBank MG772099-MG772439. Tree topology: Fig S1 (Johansson 2013 MPE 69:852 + Li 2016 MPE 104:14), ML branch lengths on the concatenated alphaA/alphaD/betaA alignment, then rooted on the Aegithalidae outgroup and time-scaled to an ultrametric chronogram (ape::chronos, penalised likelihood) - PhyloPhere contrast selection assumes a time tree; raw phylogram kept as tree_substitution.nwk. elev_mid = midpoint of each species' elevational range (7 ranges verbatim from the paper text, 9 read off Fig S1 +/-150 m, checked by MR); the CONTINUOUS encoding is ours - Zhu et al. analyse altitude categorically. altitude H/L = elev_mid >= 2500 m. Truth: truthsets/tier1/hb_altitude.sites.tsv.",
   "traits": [
     {
       "name": "elev_mid",
@@ -68,7 +68,8 @@
           "Periparus_rubidiventris",
           "Pardaliparus_venustulus"
         ]
-      ]
+      ],
+      "pairs_note": "On the dated tree.nwk all 5 pairs are Dunn-independent and recoverable by the pipeline. Pairs 3 (Periparus_ater_aemodius~Periparus_ater_pekinensis) and 5 (Periparus_rubidiventris~Pardaliparus_venustulus) share the Periparus/Pardaliparus corner of the tree and their contrast paths are close enough that no single K-pair set can hold both: expect at most one of {3,5} per hypothesis. The canonical greedy H1 takes pair 3 (higher PSS); pair 5 appears in ~1/4 of the FOP alternative hypotheses (e.g. one holds pairs 1,2,4,5 together). So 'canonical H1 recovers 4/5, the FOP hypothesis set recovers 5/5' is the expected outcome, not a miss. On the raw phylogram (tree_substitution.nwk) pair 1 also fails - see build.py::_datetree."
     }
   ]
 }

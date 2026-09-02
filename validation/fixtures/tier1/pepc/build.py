@@ -14,7 +14,10 @@ originally Besnard et al. 2009, MBE 26:1909, courtesy of the authors via PCOC):
 Output (pipeline-shaped, tips = sanitised species names, "." -> "_"):
 
     align/PEPC.fasta
-    tree.nwk
+    tree.nwk             PhyML tree rooted on the Chrysithrix outgroup and
+                         time-scaled to an ultrametric chronogram (ape::chronos)
+                         - PhyloPhere contrast selection assumes a time tree
+    tree_substitution.nwk   the raw PhyML phylogram, kept for provenance
     my_traits.tsv        species <tab> c4 (1|0) <tab> family
     phenotype.tsv        species <tab> 1|0     (C4 foreground, outgroup dropped)
     ali_sp_names.txt / gene_ensembl.tsv / taxid.tsv    synthetic support files
@@ -26,6 +29,7 @@ in maize P04711 coordinates, which equal alignment columns 1:1 here.
 from __future__ import annotations
 
 import re
+import subprocess
 import urllib.request
 from pathlib import Path
 
@@ -57,6 +61,35 @@ def _fetch() -> None:
 
 def _san(name: str) -> str:
     return name.replace(".", "_")
+
+
+def _datetree(outdir: Path, outgroup: set[str]) -> None:
+    """tree.nwk = the PhyML phylogram rooted on the Chrysithrix outgroup and
+    time-scaled to an ultrametric chronogram (ape::chronos, penalised
+    likelihood, lambda=1, correlated rates; root age = 1).
+
+    PhyloPhere's contrast-independence test (modified Dunn) and its OU/BM
+    Phylogenetic Shift Score assume a TIME tree. The Besnard 2009 PhyML tree has
+    ~14x rate variation across terminals (e.g. *Killinga* at 13.8x the median):
+    on the raw phylogram that molecular rate inflates the contrast-pair diameter
+    of any fast-evolving C4 lineage and can push a valid independent contrast
+    below the Dunn threshold. The raw phylogram is kept as tree_substitution.nwk.
+    """
+    phylo = outdir / "tree_substitution.nwk"
+    (outdir / "tree.nwk").rename(phylo)
+    og = ", ".join(f'"{s}"' for s in sorted(outgroup))
+    rscript = (
+        "suppressPackageStartupMessages(library(ape)); "
+        f'p <- read.tree("{phylo}"); '
+        f"r <- root(p, outgroup = c({og}), resolve.root = TRUE); "
+        "r <- multi2di(r); r$edge.length[r$edge.length <= 0] <- 1e-8; "
+        'u <- chronos(r, lambda = 1, model = "correlated", quiet = TRUE); '
+        'u <- ladderize(structure(unclass(u), class = "phylo")); '
+        "stopifnot(is.rooted(u), is.ultrametric(u, tol = 1e-6)); "
+        f'write.tree(u, "{outdir / "tree.nwk"}")'
+    )
+    subprocess.run(["Rscript", "-e", rscript], check=True,
+                   capture_output=True, text=True)
 
 
 def _read_fasta(path: Path) -> dict[str, str]:
@@ -100,6 +133,7 @@ def main() -> None:
             for i in range(0, len(seq), 60):
                 fh.write(seq[i:i + 60] + "\n")
     (HERE / "tree.nwk").write_text(tree + "\n")
+    _datetree(HERE, outgroup)
 
     species = sorted(aln)
     fam_of = {sp: "Cyperaceae" for sp in species}

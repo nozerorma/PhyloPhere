@@ -11,16 +11,19 @@ python3 validation/fixtures/tier1/pepc/build.py
 ```
 
 Fetches the raw inputs (gitignored) and writes the pipeline-shaped fixture:
-`align/PEPC.fasta`, `tree.nwk`, `my_traits.tsv`, `phenotype.tsv`, plus synthetic
-`ali_sp_names.txt` / `gene_ensembl.tsv` / `taxid.tsv`. Only `build.py` and this
-README are committed.
+`align/PEPC.fasta`, `tree.nwk` (PhyML tree rooted on *Chrysithrix* and
+time-scaled to an ultrametric chronogram via `ape::chronos` — PhyloPhere
+contrast selection assumes a time tree, and the Besnard 2009 phylogram has
+~14x terminal-rate variation), `tree_substitution.nwk` (raw phylogram),
+`my_traits.tsv`, `phenotype.tsv`, plus synthetic `ali_sp_names.txt` /
+`gene_ensembl.tsv` / `taxid.tsv`. Only `build.py` and this README are committed.
 
 ## Provenance
 
 | file | source |
 |------|--------|
 | `cyp_coding.aa.coor_mays.fa` | `github.com/evolbioinfo/condor/test_data/` — 79 Cyperaceae PEPC AA sequences, projected onto maize PEPC1 coordinates. Originally Besnard et al. 2009 (MBE 26:1909), provided by the authors, redistributed via PCOC (`CarineRey/pcoc/data/det/`) and ConDor. |
-| `cyp_coding.phy_phyml_tree.txt` | same — PhyML tree, aLRT support on internal nodes. |
+| `cyp_coding.phy_phyml_tree.txt` | same — PhyML tree, aLRT support on internal nodes. `build.py` roots it on the *Chrysithrix* outgroup and dates it (`ape::chronos`, penalised likelihood) so `tree.nwk` is an ultrametric chronogram; the raw phylogram is kept as `tree_substitution.nwk`. |
 | `besnard2009_convergent_species.txt` | ConDor test data — 23 tips with the **"genotypic" C4 annotation** (presence of the A780S determinant). |
 | `outgroup.txt` | ConDor test data — Chrysithrix, root; dropped from fg/bg. |
 
