@@ -34,7 +34,7 @@ process DATASET_PRUNE {
     def secondary_trait = params.secondary_trait ?: ''
     def prune_list = params.prune_list ?: ''
     def prune_list_secondary = params.prune_list_secondary ?: ''
-    def pss_top_pct = params.pss_top_pct ?: '0.01'
+    def pss_top_pct = params.pss_top_pct ?: '0.05'
     def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
     def max_contrasts = params.max_contrasts ?: '0'

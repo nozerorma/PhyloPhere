@@ -87,7 +87,7 @@ process RESAMPLE {
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0} \\
-        ${params.pss_top_pct ?: 0.01} \\
+        ${params.pss_top_pct ?: 0.05} \\
         ${params.max_tries ?: 1000000} \\
         "${params.traitname ?: (params.trait ?: '')}" \\
         "${params.n_trait ?: ''}" \\
@@ -137,7 +137,7 @@ process RESAMPLE {
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
         ${params.include_b0} \\
-        ${params.pss_top_pct ?: 0.01} \\
+        ${params.pss_top_pct ?: 0.05} \\
         ${params.max_tries ?: 1000000} \\
         "${params.traitname ?: (params.trait ?: '')}" \\
         "${params.n_trait ?: ''}" \\

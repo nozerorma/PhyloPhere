@@ -30,7 +30,7 @@ params:
   branch_trait: ""
   prune_list: ""
   prune_list_secondary: ""
-  pss_top_pct: "0.01"
+  pss_top_pct: "0.05"
   perm_strategy: "best_model"
   trait_type: ""
   max_contrasts: "0"

@@ -28,7 +28,7 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
-  pss_top_pct: "0.01"
+  pss_top_pct: "0.05"
   perm_strategy: "best_model"
   trait_type: ""
 ---
@@ -290,7 +290,7 @@ create_pairwise_data <- function(ci_data) {
   # + patristic-distance ranking.
   .force <- if (exists("perm_strategy", inherits = TRUE) &&
                 tolower(perm_strategy) %in% c("bm", "ou")) toupper(perm_strategy) else NULL
-  .pct   <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.01
+  .pct   <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.05
   if (exists("tree") && !is.null(tree) && length(tree$tip.label) >= 2) {
     tryCatch({
       .pss <- phylogenetic_shift_score(
@@ -369,7 +369,7 @@ create_pairwise_data <- function(ci_data) {
     .continuous_pss_gate <- !use_count_data && !isTRUE(is_ordinal) &&
       isTRUE(have_pss) && any(is.finite(pairwise$pss_score[.stage1]))
     if (.continuous_pss_gate) {
-      .pct  <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.01
+      .pct  <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.05
       .keep <- min(max(1L, ceiling(length(.stage1) * .pct)), length(.stage1))
       .ord  <- .stage1[order(pairwise$pss_score[.stage1], decreasing = TRUE)]
       pairwise$trait_overlap[.ord[seq_len(.keep)]] <- FALSE

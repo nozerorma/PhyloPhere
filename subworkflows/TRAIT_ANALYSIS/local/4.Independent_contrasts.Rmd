@@ -28,7 +28,7 @@ params:
   tax_id: ""
   secondary_trait: ""
   branch_trait: ""
-  pss_top_pct: "0.01"
+  pss_top_pct: "0.05"
   perm_strategy: "best_model"
   trait_type: ""
   max_contrasts: "0"

@@ -40,7 +40,7 @@ process CI_COMPOSITION_REPORT {
     def tax_id = params.tax_id ?: ''
     def branch_trait = params.branch_trait ?: ''
     def secondary_trait = params.secondary_trait ?: ''
-    def pss_top_pct = params.pss_top_pct ?: '0.01'
+    def pss_top_pct = params.pss_top_pct ?: '0.05'
     def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
 

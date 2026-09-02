@@ -49,7 +49,7 @@ class CaasConfig(ModuleConfigBase):
 
     # Contrast-selection tuning (conf/common.config) — used when --contrast_selection
     # runs upstream of CT (bundled unconditionally with CAAS, see run_single.sh.j2).
-    pss_top_pct: str = "0.01"  # --pss_top_pct
+    pss_top_pct: str = "0.05"  # --pss_top_pct
     max_contrasts: str = "0"  # --max_contrasts (0 = dynamic discovery)
     min_contrasts: str = "3"  # --min_contrasts
 

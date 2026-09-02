@@ -153,7 +153,7 @@ Usage:
 --traitname                   <"column_name">               null
 --sp_colname                  <"species">                    "species"
 --trait_type                   <"auto|continuous|ordinal">   "auto"  (auto-infers; continuous = PSS, ordinal = coded fg/bg)
---pss_top_pct                   <FLOAT 0-1>                   0.01   (top PSS percentile gate, continuous traits)
+--pss_top_pct                   <FLOAT 0-1>                   0.05   (top PSS percentile gate, continuous traits)
 --perm_strategy                  <"auto|OU|BM">               "auto"  (evolutionary model for PSS / permulation)
 --max_contrasts                   <INTEGER>                     0     (0 = dynamic discovery)
 --min_contrasts                    <INTEGER>                     3     (min foreground pairs required)
