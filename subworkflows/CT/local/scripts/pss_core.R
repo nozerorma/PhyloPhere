@@ -177,6 +177,15 @@ select_model <- function(fits, force_model = NULL) {
     fm <- toupper(force_model)
     if (fm %in% c("BM", "OU")) return(fm)
   }
+  # PHYLOPHERE: never AIC-select an OU fit whose alpha optimised to a bound.
+  # geiger 2.0.11 fitContinuous() clamps OU alpha to [exp(-500), exp(1)]; a fit
+  # sitting on the upper bound is non-identified (typical on non-ultrametric or
+  # near-star trees) and its AIC/lnL are not trustworthy. Treat OU as unavailable
+  # and fall back to BM. `force_model = "OU"` above still overrides this.
+  ou_alpha <- fits$OU$opt$alpha
+  if (is.null(ou_alpha) || !is.finite(ou_alpha) || ou_alpha >= exp(1) - 1e-8) {
+    return("BM")
+  }
   bm <- fit_aic(fits$BM)
   ou <- fit_aic(fits$OU)
   if (ou + 2 < bm) "OU" else "BM"

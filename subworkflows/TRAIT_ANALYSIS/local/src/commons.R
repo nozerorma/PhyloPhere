@@ -125,8 +125,42 @@ tree <- debug_stage(
   "read tree",
   ape::read.tree(file = tree_path)
 )
+
+# ----------------------------------------
+# Ultrametric gate
+# ----------------------------------------
+# Contrast independence (the modified Dunn index in selection_algorithm.R) and
+# the OU/BM Phylogenetic Shift Score (pss_core.R) both assume a TIME tree. On an
+# ML phylogram a fast-evolving lineage carries a long terminal branch that is
+# *rate*, not *time*: it inflates that species' contrast-pair diameter and its
+# patristic distance to its true sister, so a perfectly valid independent
+# contrast gets a sub-1 Dunn and is dropped (observed e.g. for the Sino-Himalayan
+# ground tit Pseudopodoces humilis). The same non-ultrametric input drives the
+# geiger OU optimiser to its alpha bound. Rate-smooth to ultrametric here, once,
+# so every downstream report shares one time tree.
+if (!ape::is.ultrametric(tree, tol = 1e-6)) {
+  debug_log("tree is NOT ultrametric (phylogram) -> penalised-likelihood rate smoothing via ape::chronos()")
+  .di <- ape::multi2di(tree, random = FALSE)
+  .smoothed <- tryCatch(
+    suppressWarnings(ape::chronos(.di, quiet = TRUE)),
+    error = function(e) { debug_log("chronos() failed: %s", conditionMessage(e)); NULL }
+  )
+  if (!is.null(.smoothed) && ape::is.ultrametric(.smoothed, tol = 1e-6)) {
+    .smoothed <- structure(unclass(.smoothed), class = "phylo")  # drop "chronos" subclass, keep phylo
+    attr(.smoothed, "rates") <- NULL; attr(.smoothed, "ploglik") <- NULL; attr(.smoothed, "PHIIC") <- NULL
+    tree <- .smoothed
+    debug_log("chronos() OK: tree is now ultrametric (relative time, root age = 1)")
+  } else {
+    warning("commons.R: chronos() did not return an ultrametric tree; ",
+            "falling back to phytools::force.ultrametric(method = 'extend'). ",
+            "Supply a time-calibrated tree for a principled result.")
+    tree <- phytools::force.ultrametric(.di, method = "extend")
+  }
+}
+
 tree_species <- tree$tip.label # Tree species
-debug_log("tree tips = %d, nodes = %d", length(tree$tip.label), tree$Nnode)
+debug_log("tree tips = %d, nodes = %d, ultrametric = %s",
+          length(tree$tip.label), tree$Nnode, ape::is.ultrametric(tree, tol = 1e-6))
 
 # ----------------------------------------
 # Optional parameters (from YAML params)
