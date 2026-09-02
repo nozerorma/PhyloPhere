@@ -223,6 +223,7 @@ if (use_count_data) {
         TRUE             ~ "intermediate"
       ),
       n_population = NA_real_,
+      n_cases      = NA_real_,
       trait_ci_lb  = NA_real_,
       trait_ci_ub  = NA_real_,
       trait_ci     = NA_character_
@@ -244,6 +245,7 @@ if (use_count_data) {
         TRUE          ~ "intermediate"
       ),
       n_population = NA_real_,
+      n_cases      = NA_real_,
       trait_ci_lb  = NA_real_,
       trait_ci_ub  = NA_real_,
       trait_ci     = NA_character_
