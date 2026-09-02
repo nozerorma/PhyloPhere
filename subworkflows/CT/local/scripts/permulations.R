@@ -187,29 +187,15 @@ pruned.tree <- multi2di(pruned.tree, random = FALSE)
 pruned.tree$edge.length[pruned.tree$edge.length <= 0] <- 1e-8
 starting.values <- starting.values[pruned.tree$tip.label]
 
-# ── Ultrametric gate ────────────────────────────────────────────────────────
-# KEEP IN SYNC with subworkflows/TRAIT_ANALYSIS/local/src/commons.R. The observed
-# contrast selection now runs on a rate-smoothed (ultrametric) tree; the
-# permulation null MUST use the same tree, otherwise its Dunn tiers and PSS
-# ranking are calibrated against a different geometry than the observed set they
-# score. An ML phylogram lets a long terminal branch (rate, not time) inflate a
-# species' contrast-pair diameter and wrongly fail otherwise-independent pairs.
+# ── Ultrametric check (warn-only) ───────────────────────────────────────────
+# KEEP IN SYNC with subworkflows/TRAIT_ANALYSIS/local/src/commons.R. Contrast
+# independence (Dunn) and the OU/BM PSS assume a time tree; an ML phylogram lets
+# a long terminal branch (rate, not time) inflate a species' contrast-pair
+# diameter and wrongly fail otherwise-independent pairs. PhyloPhere expects a
+# dated species tree — warn rather than rate-smooth an arbitrary phylogram here.
 if (!is.ultrametric(pruned.tree, tol = 1e-6)) {
-  log_msg("INFO", "Permulation tree is not ultrametric (phylogram) -> ape::chronos() rate smoothing")
-  .sm <- tryCatch(suppressWarnings(chronos(pruned.tree, quiet = TRUE)),
-                  error = function(e) { log_msg("WARN", "chronos() failed: ", conditionMessage(e)); NULL })
-  if (!is.null(.sm) && is.ultrametric(.sm, tol = 1e-6)) {
-    pruned.tree <- structure(unclass(.sm), class = "phylo")
-    pruned.tree$edge.length[pruned.tree$edge.length <= 0] <- 1e-8
-    log_msg("INFO", "chronos() OK: permulation tree is now ultrametric (root age = 1)")
-  } else if (requireNamespace("phytools", quietly = TRUE)) {
-    log_msg("WARN", "chronos() unusable; falling back to phytools::force.ultrametric(method='extend')")
-    pruned.tree <- phytools::force.ultrametric(pruned.tree, method = "extend")
-    pruned.tree$edge.length[pruned.tree$edge.length <= 0] <- 1e-8
-  } else {
-    stop("permulations.R: could not ultrametricise the tree (chronos failed, phytools absent). ",
-         "Supply a time-calibrated tree.")
-  }
+  log_msg("WARN", "permulation tree is NOT ultrametric (phylogram); contrast ",
+          "independence assumes a time tree. Supply a dated species tree.")
 }
 
 D <- cophenetic(pruned.tree)

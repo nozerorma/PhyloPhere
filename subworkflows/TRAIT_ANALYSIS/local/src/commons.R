@@ -127,35 +127,24 @@ tree <- debug_stage(
 )
 
 # ----------------------------------------
-# Ultrametric gate
+# Ultrametric check (warn-only)
 # ----------------------------------------
 # Contrast independence (the modified Dunn index in selection_algorithm.R) and
 # the OU/BM Phylogenetic Shift Score (pss_core.R) both assume a TIME tree. On an
 # ML phylogram a fast-evolving lineage carries a long terminal branch that is
 # *rate*, not *time*: it inflates that species' contrast-pair diameter and its
-# patristic distance to its true sister, so a perfectly valid independent
-# contrast gets a sub-1 Dunn and is dropped (observed e.g. for the Sino-Himalayan
-# ground tit Pseudopodoces humilis). The same non-ultrametric input drives the
-# geiger OU optimiser to its alpha bound. Rate-smooth to ultrametric here, once,
-# so every downstream report shares one time tree.
+# patristic distance to its true sister, so a valid independent contrast can get
+# a sub-1 Dunn and be dropped (seen for the Sino-Himalayan ground tit
+# Pseudopodoces humilis in the hb_altitude fixture). PhyloPhere expects a dated
+# (ultrametric) species tree; warn rather than silently rate-smooth here —
+# rooting + penalised-likelihood dating on an arbitrary phylogram is not robust
+# (midpoint rooting fails under the very rate variation that motivates it). The
+# hb_altitude fixture is now rebuilt ultrametric by its own build.py.
 if (!ape::is.ultrametric(tree, tol = 1e-6)) {
-  debug_log("tree is NOT ultrametric (phylogram) -> penalised-likelihood rate smoothing via ape::chronos()")
-  .di <- ape::multi2di(tree, random = FALSE)
-  .smoothed <- tryCatch(
-    suppressWarnings(ape::chronos(.di, quiet = TRUE)),
-    error = function(e) { debug_log("chronos() failed: %s", conditionMessage(e)); NULL }
-  )
-  if (!is.null(.smoothed) && ape::is.ultrametric(.smoothed, tol = 1e-6)) {
-    .smoothed <- structure(unclass(.smoothed), class = "phylo")  # drop "chronos" subclass, keep phylo
-    attr(.smoothed, "rates") <- NULL; attr(.smoothed, "ploglik") <- NULL; attr(.smoothed, "PHIIC") <- NULL
-    tree <- .smoothed
-    debug_log("chronos() OK: tree is now ultrametric (relative time, root age = 1)")
-  } else {
-    warning("commons.R: chronos() did not return an ultrametric tree; ",
-            "falling back to phytools::force.ultrametric(method = 'extend'). ",
-            "Supply a time-calibrated tree for a principled result.")
-    tree <- phytools::force.ultrametric(.di, method = "extend")
-  }
+  warning("commons.R: input tree is NOT ultrametric (phylogram). Contrast ",
+          "independence (Dunn) and the OU/BM PSS assume a time tree; ",
+          "rate-variation branch-length artifacts may distort pair selection. ",
+          "Supply a dated species tree.")
 }
 
 tree_species <- tree$tip.label # Tree species
