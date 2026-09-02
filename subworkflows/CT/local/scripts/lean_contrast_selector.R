@@ -236,7 +236,7 @@ evaluate_lean_contrast_selection <- function(trait_vec,
   # --- Stage 2 (continuous only): top `top_pct` of stage-1 survivors by PSS.
   #     Count/ordinal keep every stage-1 pair; PSS just ranks them. ---
   if (!use_ci && !isTRUE(ordinal)) {
-    n_keep <- min(max(8L, ceiling(length(s1) * top_pct)), length(s1))
+    n_keep <- min(max(1L, ceiling(length(s1) * top_pct)), length(s1))
     keep_i <- s1[order(pss[s1], decreasing = TRUE)][seq_len(n_keep)]
   } else {
     keep_i <- s1

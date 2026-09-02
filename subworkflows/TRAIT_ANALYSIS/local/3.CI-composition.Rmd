@@ -370,7 +370,7 @@ create_pairwise_data <- function(ci_data) {
       isTRUE(have_pss) && any(is.finite(pairwise$pss_score[.stage1]))
     if (.continuous_pss_gate) {
       .pct  <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.01
-      .keep <- min(max(8L, ceiling(length(.stage1) * .pct)), length(.stage1))
+      .keep <- min(max(1L, ceiling(length(.stage1) * .pct)), length(.stage1))
       .ord  <- .stage1[order(pairwise$pss_score[.stage1], decreasing = TRUE)]
       pairwise$trait_overlap[.ord[seq_len(.keep)]] <- FALSE
       debug_log("Continuous PSS gate: %d pairs -> top %.1f%% -> %d candidates",
