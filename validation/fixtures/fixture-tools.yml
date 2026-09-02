@@ -21,3 +21,4 @@ dependencies:
   - iqtree >=2.3
   - seqkit >=2.8
   - trimal >=1.5
+  - r-ape >=5.7          # hb_altitude build.py: root + chronos time-scaling of the species tree

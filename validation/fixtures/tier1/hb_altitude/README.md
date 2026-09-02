@@ -18,8 +18,10 @@ micromamba run -n phylophere-fixtures python3 \
 ```
 
 Fetches GenBank MG772099–MG772439 (gitignored), builds per-gene AA alignments
-(MAFFT L-INS-i), infers trees (IQ-TREE), writes the pipeline-shaped fixture:
-`align/{HBA,HBD,HBB}.fasta`, `tree.nwk`, `gene_trees/{HBA,HBD,HBB}.nwk`,
+(MAFFT L-INS-i), infers trees (IQ-TREE), roots + time-scales the species tree
+(`ape::chronos`), writes the pipeline-shaped fixture:
+`align/{HBA,HBD,HBB}.fasta`, `tree.nwk` (ultrametric chronogram),
+`tree_substitution.nwk` (raw ML phylogram), `gene_trees/{HBA,HBD,HBB}.nwk`,
 `my_traits.tsv`, `phenotype.tsv`, synthetic `ali_sp_names.txt` /
 `gene_ensembl.tsv` / `taxid.tsv`. Only `build.py`, this README and
 `hb_altitude.spec.json` are committed.
@@ -31,7 +33,7 @@ Fetches GenBank MG772099–MG772439 (gitignored), builds per-gene AA alignments
 | sequences | GenBank **MG772099–MG772439** (341 records: αA/αD/βA globin, 3–16 population isolates per species per gene). One **per-column majority consensus** per species per gene; initiator Met stripped from αA/βA (cleaved in the mature chain), retained for αD. |
 | species set | the **16 focal taxa of Fig S1** (14 Paridae + 2 Aegithalidae). GenBank also carries extra *Aegithalos* and a pooled *Periparus ater* entry — not used. |
 | tree topology | **Fig S1** (Johansson et al. 2013, MPE 69:852; Li et al. 2016, MPE 104:14). *Sylviparus* basal in Paridae; *Pseudopodoces* nested in the *Parus* group; the two Aegithalidae are the outgroup. Hard-coded in `build.py:_TOPOLOGY`. |
-| branch lengths | ML (LG+G) on the concatenated αA+αD+βA alignment with the topology fixed (`iqtree -te`). |
+| branch lengths | ML (LG+G) on the concatenated αA+αD+βA alignment with the topology fixed (`iqtree -te`), then rooted on the Aegithalidae outgroup and time-scaled to an **ultrametric chronogram** (`ape::chronos`, penalised likelihood, λ=1, correlated rates; root age = 1). PhyloPhere contrast selection (modified Dunn + OU/BM PSS) assumes a time tree — on the raw phylogram *Pseudopodoces humilis*' fast-evolving long terminal branch inflates its contrast-pair diameter and the *Pseudopodoces*~*Parus_minor* truth contrast (αA A34T) scores a sub-1 Dunn. The raw phylogram is kept as `tree_substitution.nwk`. See `build.py:_datetree`. |
 | gene trees | unconstrained ML per gene — reproduce the Fig S2 genealogical discordance (see below). |
 
 ConDor / PCOC / CAAStools have **not** been run on this dataset — there is no

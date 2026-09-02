@@ -28,7 +28,11 @@ Output (pipeline-shaped, tips = binomials, "." / " " -> "_"):
                    residue N, 1:1, so the truth set needs no ref row - verified
                    in _assert_landmarks below)
   tree.nwk         species tree: Fig S1 topology (Johansson 2013 + Li 2016),
-                   branch lengths ML-optimised on the concatenated alignment
+                   ML branch lengths on the concatenation, then rooted on the
+                   Aegithalidae outgroup and time-scaled to an ultrametric
+                   chronogram (ape::chronos, penalised likelihood) — PhyloPhere
+                   contrast selection assumes a time tree (see _datetree below)
+  tree_substitution.nwk   the raw ML phylogram, kept for provenance
   gene_trees/HBA.nwk HBD.nwk HBB.nwk   unconstrained per-gene ML trees
                    (reproduce the Fig S2 genealogical discordance)
   my_traits.tsv    species <tab> elev_mid <tab> altitude(H|L) <tab> family
@@ -232,6 +236,9 @@ def _assert_landmarks(aln: dict[str, dict[str, str]]) -> None:
           f"(truth: {sorted(truth34)}); alphaA119 Ala in {sorted(ala119)}")
 
 
+_OUTGROUP = ("Aegithalos_bonvaloti", "Aegithalos_fuliginosus")  # Aegithalidae
+
+
 def _iqtree(concat: Path, per_gene: dict[str, Path], outdir: Path) -> None:
     work = outdir / "_iqtree"
     work.mkdir(exist_ok=True)
@@ -240,14 +247,46 @@ def _iqtree(concat: Path, per_gene: dict[str, Path], outdir: Path) -> None:
     topo.write_text(_TOPOLOGY + "\n")
     _run(["iqtree", "-s", str(concat), "-te", str(topo), "-m", "LG+G",
           "-pre", str(work / "sp"), "-redo", "-quiet"])
-    (outdir / "tree.nwk").write_text((work / "sp.treefile").read_text())
-    # per-gene unconstrained ML trees (Fig S2 discordance)
+    (outdir / "tree_substitution.nwk").write_text((work / "sp.treefile").read_text())
+    _datetree(outdir)
+    # per-gene unconstrained ML trees (Fig S2 discordance) — left as substitution
+    # phylograms on purpose: these exist to reproduce the genealogical discordance.
     gt = outdir / "gene_trees"
     gt.mkdir(exist_ok=True)
     for g, fa in per_gene.items():
         _run(["iqtree", "-s", str(fa), "-m", "LG+G", "-pre", str(work / g),
               "-redo", "-quiet"])
         (gt / f"{g}.nwk").write_text((work / f"{g}.treefile").read_text())
+
+
+def _datetree(outdir: Path) -> None:
+    """tree.nwk = the ML phylogram rooted on Aegithalidae and time-scaled to an
+    ultrametric chronogram (ape::chronos, penalised likelihood, lambda=1,
+    correlated rates; root age = 1, relative time).
+
+    PhyloPhere's contrast-independence test (modified Dunn index) and its OU/BM
+    Phylogenetic Shift Score both assume a TIME tree. On the raw ML phylogram the
+    Sino-Himalayan ground tit *Pseudopodoces humilis* carries a terminal branch
+    ~4x its sister's — that is molecular *rate*, not divergence *time*. It
+    inflates the diameter of any contrast pair containing P. humilis, so the
+    Pseudopodoces~Parus_minor contrast (truth pair for alphaA A34T) scores a
+    sub-1 Dunn on the phylogram and is dropped. Dating fixes this: on the
+    chronogram it clears the Dunn threshold. The unmodified phylogram is kept as
+    tree_substitution.nwk for provenance / methods that want substitution lengths.
+    """
+    phylo = outdir / "tree_substitution.nwk"
+    og = ", ".join(f'"{s}"' for s in _OUTGROUP)
+    rscript = (
+        "suppressPackageStartupMessages(library(ape)); "
+        f'p <- read.tree("{phylo}"); '
+        f"r <- root(p, outgroup = c({og}), resolve.root = TRUE); "
+        "r <- multi2di(r); r$edge.length[r$edge.length <= 0] <- 1e-8; "
+        'u <- chronos(r, lambda = 1, model = "correlated", quiet = TRUE); '
+        'u <- ladderize(structure(unclass(u), class = "phylo")); '
+        "stopifnot(is.rooted(u), is.ultrametric(u, tol = 1e-6)); "
+        f'write.tree(u, "{outdir / "tree.nwk"}")'
+    )
+    _run(["Rscript", "-e", rscript])
 
 
 def _write_fasta(path: Path, seqs: dict[str, str]) -> None:
