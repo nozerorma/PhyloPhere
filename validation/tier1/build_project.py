@@ -17,6 +17,7 @@ repo root, it resolves REPO_DIR from its own path) and ``<out>/tier0_env.sh``
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -81,9 +82,13 @@ def tier1_project(
     c.enabled = True
     c.ct_tool_discovery = c.ct_tool_resample = c.ct_tool_bootstrap = True
     c.caas_permulation_enrichment = True
+    # FOP multi-hypothesis harvest is on (multi_hypothesis defaults True) and the
+    # permulation null mirrors it, so p.perm calibrates the domain-pooled score.
+    c.caas_perms_fop = True
+    c.max_fop = os.environ.get("MAX_FOP", "15")
     c.caap_mode = True                       # US + GS1..GS4 encodings
     c.patterns = "1,2,3"
-    c.perm_strategy = "BM"
+    c.perm_strategy = "auto"                 # best-fit BM vs OU by AICc
     c.perm_pool_size = perm_pool_size
     c.caas_full_perms = caas_full_perms
     c.max_tries = max_tries

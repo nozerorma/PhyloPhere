@@ -11,7 +11,7 @@
     "remote_root_dir": "/homes/users/mramon/scratch/"
   },
   "runtime": {
-    "resume": false,
+    "resume": true,
     "toy_mode": true,
     "toy_n": "",
     "runtime_type": "slurm",
@@ -87,12 +87,14 @@
       "max_miss_fraction": "0.0",
       "miss_pair": true,
       "caap_mode": true,
-      "perm_strategy": "BM",
+      "perm_strategy": "auto",
       "max_tries": "1000000",
       "chunk_size": "500",
       "include_b0": false,
       "resample_use_n": true,
       "multi_hypothesis": true,
+      "max_fop": "100",
+      "caas_perms_fop": true,
       "export_groups": true,
       "export_perm_discovery": false
     },
@@ -126,7 +128,7 @@
       "accumulation_fdr": "0.1"
     },
     "rer": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,

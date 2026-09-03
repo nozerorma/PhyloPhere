@@ -153,15 +153,10 @@ def validate(project: ProjectConfig) -> list[str]:
                 "Accumulation is enabled but Post-processing is disabled with no "
                 "'Use precomputed Post-processing output' box checked on the Precomputed Run tab."
             )
-    elif scoring.enabled:
-        # scoring_accum_ch (main.nf:411) is Accumulation's only downstream consumer —
-        # Enrichment reads Scoring's gene lists, never Accumulation's directory
-        # directly, so this only matters when Scoring is actually enabled.
-        if not pc.use_accumulation:
-            errors.append(
-                "Accumulation is disabled but Scoring is enabled and 'Use precomputed Accumulation "
-                "output' isn't checked on the Precomputed Run tab — Scoring may have no input."
-            )
+    # NOTE: Scoring does NOT require Accumulation. When the accum channel is absent
+    # main.nf passes null -> scoring.nf resolves a NO_ACCUM sentinel -> scoring_compute.R's
+    # has_accum_dir guard skips every accumulation code path. Scoring's only hard
+    # upstream is CT post-processing, checked below.
 
     # --- RERconverge ---
     rer = project.modules.rer
@@ -191,16 +186,11 @@ def validate(project: ProjectConfig) -> list[str]:
                 "Scoring is enabled but Post-processing is disabled with no 'Use precomputed "
                 "Post-processing output' box checked on the Precomputed Run tab."
             )
-        if not rer.enabled and not pc.use_rer:
-            errors.append(
-                "Scoring is enabled and RERconverge is disabled — 'Use precomputed RERconverge "
-                "output' isn't checked on the Precomputed Run tab."
-            )
-        if not project.modules.fade.enabled and not pc.use_fade:
-            errors.append(
-                "Scoring is enabled and FADE is disabled — 'Use precomputed FADE output' isn't "
-                "checked on the Precomputed Run tab."
-            )
+        # NOTE: RER and FADE are OPTIONAL inputs to Scoring, not requirements. When
+        # either is absent main.nf passes null -> scoring.nf resolves a NO_RER /
+        # NO_FADE_* sentinel -> scoring_compute.R's file_exists() guard (rejects any
+        # ^NO_ basename) drives has_rer / has_fade, skipping every RER/FADE code path.
+        # A CAAS-only Scoring run is valid; do not block it here.
 
     # --- Enrichment (+ POSENRICH) ---
     enrichment = project.modules.enrichment
