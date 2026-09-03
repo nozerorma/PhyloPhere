@@ -630,8 +630,14 @@ workflow {
             // --scoring_fade_summary_*/--scoring_fade_site_* TSVs.
             def scoring_fade_top_ch      = params.fade ? FADE.out.summary_top    : fade_precomp_top_out?.summary_tsv
             def scoring_fade_bot_ch      = params.fade ? FADE.out.summary_bottom : fade_precomp_bot_out?.summary_tsv
-            def scoring_fade_site_top_ch = params.fade ? FADE.out.site_tsv_top   : fade_precomp_top_out?.site_tsv
-            def scoring_fade_site_bot_ch = params.fade ? FADE.out.site_tsv_bottom: fade_precomp_bot_out?.site_tsv
+            // Position-level FADE evidence for scoring: the per-significant-site
+            // table (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV /
+            // parse_fade_json_sites.R — NOT the report's old site_tsv emit,
+            // which 6.FADE_report.Rmd no longer produces. scoring_compute.R's
+            // .load_fade_sites() is written for exactly this comma-delimited
+            // schema, and ENRICHMENT already consumes the same channel.
+            def scoring_fade_site_top_ch = params.fade ? FADE.out.sites_csv_top    : fade_precomp_sites_top_ch
+            def scoring_fade_site_bot_ch = params.fade ? FADE.out.sites_csv_bottom : fade_precomp_sites_bot_ch
             def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.summary_tsv : null
             def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null

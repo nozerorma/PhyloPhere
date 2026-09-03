@@ -162,6 +162,18 @@ def convert_convergence_result_to_dict(
             result_dict[f"mrca_{idx}_state"] = state
             result_dict[f"mrca_{idx}_posterior"] = prob
 
+    # Round-trip fallback: when this is called a second time on a dict that was
+    # already flattened (the DB exporter re-converts stored results), the
+    # structured node_mapping / node_state_details may be absent but the flat
+    # mrca_<i>_node / _state / _posterior keys are still on the input — carry
+    # them through rather than dropping the per-pair MRCA columns.
+    src_flat = vars(result) if hasattr(result, "__dict__") else {}
+    for k, v in src_flat.items():
+        if isinstance(k, str) and k.startswith("mrca_") and k not in result_dict and (
+            k.endswith("_node") or k.endswith("_state") or k.endswith("_posterior")
+        ):
+            result_dict[k] = v
+
     # Pattern classification
     result_dict["convergence_type"] = getattr(result, "convergence_type", None)
 
@@ -193,6 +205,49 @@ def convert_convergence_result_to_dict(
         for k, v in src.items():
             if k.startswith("mrca_") and (
                 k.endswith("_path_score") or k.endswith("_contaminated")
+            ):
+                result_dict[k] = v
+
+    # Conserved-pair block (POINT 2): a parallel per-conserved-pair flat block so
+    # the FOP domain-pooler can rebuild conservation_gate from the DISTINCT
+    # conserved pairs shared across hypotheses (dedup by node), symmetric with the
+    # node-deduped mrca_<i>_path_score pool. Emitted as conserved_<j>_node /
+    # conserved_<j>_cons for j = 1..M, j ordered by pair_id ascending.
+    cons_pair_scores = getattr(result, "conserved_pair_path_scores", None) or {}
+    cons_pair_nodes = getattr(result, "conserved_pair_path_nodes", None) or {}
+    if cons_pair_scores or cons_pair_nodes:
+        for j, pid in enumerate(sorted(cons_pair_scores.keys()), 1):
+            result_dict[f"conserved_{j}_node"] = cons_pair_nodes.get(pid)
+            result_dict[f"conserved_{j}_cons"] = cons_pair_scores.get(pid)
+    else:
+        # Round-trip: carry any flat conserved_<j>_* keys already on the input.
+        src = vars(result) if hasattr(result, "__dict__") else {}
+        for k, v in src.items():
+            if isinstance(k, str) and k.startswith("conserved_") and (
+                k.endswith("_node") or k.endswith("_cons")
+            ):
+                result_dict[k] = v
+
+    # Raw derived/ancestral residue block (POINT 3): a per-pair flat block
+    # parallel to mrca_<i>_node, so the FOP domain-pooler recomputes
+    # derived_agreement HARVEST-WIDE and PER SCHEME (a position unanimous within
+    # each hypothesis but split BETWEEN them gets a low harvest-wide da under US
+    # and 1.0 under a scheme that co-encodes the residues). Emitted as
+    # mrca_<i>_anc_aa / mrca_<i>_top_aa / mrca_<i>_bot_aa; the _top/_bot cell is
+    # empty when that side did not change.
+    anc_aa = getattr(result, "pair_ancestral_aa", None) or {}
+    der_top_aa = getattr(result, "pair_derived_top_aa", None) or {}
+    der_bot_aa = getattr(result, "pair_derived_bot_aa", None) or {}
+    if anc_aa or der_top_aa or der_bot_aa:
+        for pid in set(anc_aa) | set(der_top_aa) | set(der_bot_aa):
+            result_dict[f"mrca_{pid}_anc_aa"] = anc_aa.get(pid)
+            result_dict[f"mrca_{pid}_top_aa"] = der_top_aa.get(pid, "")
+            result_dict[f"mrca_{pid}_bot_aa"] = der_bot_aa.get(pid, "")
+    else:
+        src = vars(result) if hasattr(result, "__dict__") else {}
+        for k, v in src.items():
+            if isinstance(k, str) and k.startswith("mrca_") and (
+                k.endswith("_anc_aa") or k.endswith("_top_aa") or k.endswith("_bot_aa")
             ):
                 result_dict[k] = v
 
@@ -470,6 +525,22 @@ def process_single_gene(
                         ),
                     )
 
+                    # Carry the STRUCTURED per-pair fields alongside the flat
+                    # columns. Without them the DB stores pair_count=1 (so the
+                    # master CSV only gets mrca_1_* columns) and the exporter's
+                    # re-conversion can't rebuild mrca_<i>_node/state/posterior
+                    # (it only emits those from node_mapping / node_state_details).
+                    # disambiguation_db._extract_pair_count and the exporter both
+                    # read these keys off the reloaded dict.
+                    # (deliberately NOT pair_details — its nested tip records
+                    # would bloat every DB row; node_mapping.focal_nodes already
+                    # gives _extract_pair_count the right K.)
+                    for _k in ("node_mapping", "node_state_details",
+                               "pair_path_scores", "pair_path_contaminated"):
+                        _v = getattr(r, _k, None)
+                        if _v is not None:
+                            caas_dict[_k] = _v
+
                     db_queue.put(
                         {
                             "type": "result",
@@ -731,9 +802,9 @@ def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], Li
     import csv
 
     labelings: Dict[str, Tuple[List[str], List[str]]] = {}
-    # resample_fop.tab (FOP mirror: "<base>~H<m>" tags) takes precedence over the
+    # fop_labelings.tab (FOP mirror: "<base>~H<m>" tags) takes precedence over the
     # plain resample_*.tab chunks when present.
-    _tabs = sorted(Path(resample_dir).glob("resample_fop.tab")) or \
+    _tabs = sorted(Path(resample_dir).glob("fop_labelings.tab")) or \
             sorted(Path(resample_dir).glob("resample_*.tab"))
     for tab in _tabs:
         try:
@@ -1190,6 +1261,15 @@ def _perms_worker(
                         "derived_agreement": getattr(r, "derived_agreement", None),
                         "conservation_gate": getattr(r, "conservation_gate", None),
                         "core": getattr(r, "core", None),
+                        "conserved_pair_scores": getattr(r, "conserved_pair_scores", None) or {},
+                        "conserved_pair_nodes": getattr(r, "conserved_pair_nodes", None) or {},
+                        # POINT 3: raw per-side derived residues per domain, so the
+                        # null recomputes derived_agreement harvest-wide under its
+                        # active scheme (mirrors fop_pool.R). Observed-only
+                        # descriptors (convergence_schemes / residue_support /
+                        # derived_residues) are NOT computed on the null.
+                        "pair_derived_top": getattr(r, "pair_derived_top", None) or {},
+                        "pair_derived_bot": getattr(r, "pair_derived_bot", None) or {},
                     })
                     ct_prev, cb_prev = change_by_pos.get(key, (False, False))
                     change_by_pos[key] = (
@@ -1200,7 +1280,7 @@ def _perms_worker(
             pooled_by_cycle: Dict[str, List[Any]] = {}
             for (base, pos, grp), hyp_recs in by_pos.items():
                 pss_map = fop_pairs.get(base, {})  # {(hyp, domain) -> pss}
-                pooled = pool_hypotheses(hyp_recs, pss_map)
+                pooled = pool_hypotheses(hyp_recs, pss_map, scheme=grp)
                 ct, cb = change_by_pos[(base, pos, grp)]
                 pooled_by_cycle.setdefault(base, []).append(
                     PositionAxes(

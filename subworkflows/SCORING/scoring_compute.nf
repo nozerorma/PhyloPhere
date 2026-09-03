@@ -85,7 +85,7 @@ process SCORING_COMPUTE {
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        cp ${local_dir}/scoring_compute.R .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/fop_pool.R ${local_dir}/aa_grouping.R .
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -96,6 +96,7 @@ process SCORING_COMPUTE {
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
+            --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
@@ -109,7 +110,7 @@ process SCORING_COMPUTE {
         """
     } else {
         """
-        cp ${local_dir}/scoring_compute.R .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/fop_pool.R ${local_dir}/aa_grouping.R .
 
         Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -120,6 +121,7 @@ process SCORING_COMPUTE {
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
+            --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \

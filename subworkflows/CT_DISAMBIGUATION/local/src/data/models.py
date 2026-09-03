@@ -126,6 +126,19 @@ class ConvergenceResult:
     core: Optional[float] = None
     pair_path_scores: Optional[Dict[int, float]] = None
     pair_path_contaminated: Optional[Dict[int, bool]] = None
+    # Per-conserved-pair conservation-to-root + MRCA node id, analogous to
+    # pair_path_scores/pair_path_contaminated. Used by the FOP domain-pooler to
+    # rebuild conservation_gate from the DISTINCT conserved pairs shared across
+    # hypotheses (dedup by node) rather than averaging per-hypothesis gates.
+    conserved_pair_path_scores: Optional[Dict[int, float]] = None
+    conserved_pair_path_nodes: Optional[Dict[int, Any]] = None
+    # Raw (un-encoded) ancestral + per-side derived residues per changed pair.
+    # Plumbed to the flat TSV as mrca_<i>_anc_aa / _top_aa / _bot_aa so the FOP
+    # domain-pooler can recompute derived_agreement HARVEST-WIDE and PER SCHEME
+    # (POINT 3) instead of pooling per-hypothesis derived_agreement.
+    pair_ancestral_aa: Optional[Dict[int, Any]] = None
+    pair_derived_top_aa: Optional[Dict[int, str]] = None
+    pair_derived_bot_aa: Optional[Dict[int, str]] = None
 
 
 @dataclass

@@ -605,7 +605,14 @@ def compute_asr_path_score(
         (independence * core), ``strength`` (diversity_mult *
         derived_agreement), ``independence``, ``mrca_diversity``,
         ``derived_agreement``, ``conservation_gate``, ``core``,
-        ``pair_scores`` ({pair_id: score}), and ``pair_contaminated``.
+        ``pair_scores`` ({pair_id: score}), ``pair_contaminated``,
+        ``conserved_pair_scores`` ({pair_id: conservation-to-root}) and
+        ``conserved_pair_nodes`` ({pair_id: mrca_node_id}) for the conserved
+        pairs folded into ``conservation_gate`` (both empty when none), and
+        ``pair_ancestral`` / ``pair_derived_top`` / ``pair_derived_bot``
+        ({pair_id: raw AA}) — the un-encoded ancestral and per-side derived
+        residues of each changed pair, for the FOP harvest-wide, per-scheme
+        derived_agreement rebuild (POINT 3).
     """
     pairs = pair_details or []
     n_pairs = len(pairs)
@@ -615,6 +622,13 @@ def compute_asr_path_score(
 
     pair_contaminated: Dict[int, bool] = {}
     conserved_conservations: List[float] = []  # conservation-to-root of conserved pairs
+    # Per-conserved-pair record, analogous to pair_scores / pair_contaminated for
+    # changed pairs. Lets the FOP domain-pooler (fop_pool.R / fop_pool.py)
+    # reconstruct conservation_gate from the DISTINCT conserved pairs shared
+    # across hypotheses instead of averaging already-transformed per-hypothesis
+    # gates. Keyed by pair_id.
+    conserved_pair_scores: Dict[int, float] = {}
+    conserved_pair_nodes: Dict[int, Any] = {}
     # Derived (encoded) residues of changed tips, kept per phenotype side so
     # within-side divergence (the non-convergent case) is assessed separately
     # from a pair changing on *both* sides (a strong convergent signal). Each
@@ -624,6 +638,18 @@ def compute_asr_path_score(
         "top_tip_mode": [], "bottom_tip_mode": [],
     }
     derived_pool: set = set()  # all encoded derived states across changed pairs
+
+    # Raw (un-encoded) residues per changed pair, kept so the FOP domain-pooler
+    # (fop_pool.R / fop_pool.py POINT 3) can recompute derived_agreement
+    # HARVEST-WIDE and PER SCHEME over the pooled, node-deduplicated changed-pair
+    # set — a position that is unanimous within each hypothesis but split BETWEEN
+    # hypotheses (US: V/I/L) then gets a low harvest-wide da under US and 1.0
+    # under a scheme that co-encodes those residues, automatically. Keyed by
+    # pair_id. ``pair_derived_top`` / ``pair_derived_bot`` only carry a residue
+    # for the side that actually changed (empty otherwise).
+    pair_ancestral: Dict[int, Optional[str]] = {}
+    pair_derived_top: Dict[int, str] = {}
+    pair_derived_bot: Dict[int, str] = {}
 
     # ── Phase 1: classify pairs ──────────────────────────────────────────────
     # Conserved pairs (conserved_ids) did not acquire the expected derived amino
@@ -645,16 +671,28 @@ def compute_asr_path_score(
                 walk_cache=walk_cache, cache_scope=(site_key, scheme),
             )
             conserved_conservations.append(cons)
+            conserved_pair_scores[pid] = cons
+            conserved_pair_nodes[pid] = mrca_id
             continue
 
         sides: List[Tuple[str, str]] = []
         for side_key in ("top_tip_mode", "bottom_tip_mode"):
-            tip_enc = encode_aa(pair.get(side_key), scheme)
+            raw_tip = pair.get(side_key)
+            tip_enc = encode_aa(raw_tip, scheme)
             if tip_enc is None or tip_enc == anc_enc:
                 continue  # missing or conserved side → not scored
             sides.append((side_key, tip_enc))
             derived_by_side[side_key].append((pid, tip_enc))
             derived_pool.add(tip_enc)
+            raw_tip_u = str(raw_tip).strip().upper()
+            if side_key == "top_tip_mode":
+                pair_derived_top[pid] = raw_tip_u
+            else:
+                pair_derived_bot[pid] = raw_tip_u
+
+        if sides:
+            fs = pair.get("focal_state")
+            pair_ancestral[pid] = str(fs).strip().upper() if fs else None
 
         if sides:
             changed.append(
@@ -684,6 +722,11 @@ def compute_asr_path_score(
             "core": 0.0,
             "pair_scores": {},
             "pair_contaminated": {},
+            "conserved_pair_scores": conserved_pair_scores,
+            "conserved_pair_nodes": conserved_pair_nodes,
+            "pair_ancestral": pair_ancestral,
+            "pair_derived_top": pair_derived_top,
+            "pair_derived_bot": pair_derived_bot,
         }
 
     # ── LAC merge points ─────────────────────────────────────────────────────
@@ -881,4 +924,9 @@ def compute_asr_path_score(
         "core": core,
         "pair_scores": pair_scores,
         "pair_contaminated": pair_contaminated,
+        "conserved_pair_scores": conserved_pair_scores,
+        "conserved_pair_nodes": conserved_pair_nodes,
+        "pair_ancestral": pair_ancestral,
+        "pair_derived_top": pair_derived_top,
+        "pair_derived_bot": pair_derived_bot,
     }

@@ -22,15 +22,46 @@
 #     weights when PSS is missing). A pair the harvest kept but that scores a
 #     weak isolation is genuine evidence the clade's signal is fragile, so it
 #     is not discarded, only down-weighted.
+#
+# TWO-JOB PSS WEIGHTING (refined 2026-09-03). One PSS number per hypothesis is
+# the wrong instrument for both consumers, because every FOP hypothesis shares
+# the harvest's globally weakest domain (min-across-domains is near-constant
+# across H1..Hn -> the weighting silently collapses to equal-weight). So the
+# PSS split does two distinct jobs:
+#   Job A -- the per-domain c_i pool: weight each DISTINCT deduped MRCA node by
+#     THAT candidate pair's own PSS in domain i (lookup (hyp_id, domain) -> pss
+#     from contrast_hypotheses_pairs.tsv; per node, max over the rows sharing
+#     it, since PSS is a property of the species pair). A pair with strong own
+#     isolation still drives its domain even when it rides in a hypothesis whose
+#     other domain is weak.
+#   Job B -- the axis pools (independence / mrca_diversity / derived_agreement /
+#     row-level core): per-hypothesis weight = MEAN pair PSS across the
+#     hypothesis's K domains (a hypothesis's overall credibility, not its
+#     weakest link).
+#
+# CONSERVATION_GATE (POINT 2, refined 2026-09-03). A conserved pair is a PURE
+# conservation_gate input in path_scores.py (scored by conservation-to-root, then
+# `continue` — never touches core/independence/diversity/derived_agreement).
+# Pooling the per-hypothesis gates counts a conserved pair shared by several
+# hypotheses once PER hypothesis (asymmetric with the node-deduped c_i pool) and
+# breaks the 0.5+0.5*mean transform when conserved-pair counts differ across
+# hypotheses. So when the flat TSV carries a parallel conserved_<j>_node /
+# conserved_<j>_cons block, the gate is rebuilt from the DISTINCT conserved pairs
+# of the harvest group (dedup by conserved_<j>_node):
+#     cg = 0.5 + 0.5 * wmean(cons over distinct conserved pairs, w)
+# w = that pair's own PSS in the domain whose mrca_<i>_node it matches on the
+# same row (else equal weight); no distinct conserved pairs -> cg = 1.0. Older
+# inputs without the conserved_<j>_* columns keep the per-hypothesis-gate wmean.
+# Both keep the equal-weight fallback when no PSS file / all PSS non-finite.
 #   * recombine c_1..c_K into the position score with the SAME algebra as
 #     path_scores.py::compute_asr_path_score:
 #       core        = P(>=2 domains carry a clean change)   [inclusion-exclusion]
 #       replication = independence * core
 #       strength    = (0.75 + 0.25 * diversity) * derived_agreement
 #       asr         = replication * strength * conservation_gate
-#     independence / diversity / derived_agreement / conservation_gate are NOT
-#     re-derivable from the flat TSV (they need the LAC tree structure), so the
-#     per-hypothesis values are pooled by the same PSS weights. Voronoi domains
+#     independence / diversity / derived_agreement are NOT re-derivable from the
+#     flat TSV (they need the LAC tree structure), so the per-hypothesis values
+#     are pooled by the same PSS weights. Voronoi domains
 #     are disjoint, so cross-domain independence is ~1 by construction and the
 #     pooled independence only ever mildly discounts.
 #   * `core` here treats each c_i as P(genuine change) without the per-side
@@ -40,6 +71,32 @@
 #     per-hypothesis `core` column (pooled, below) is carried alongside as the
 #     conservative cross-check.
 #
+# POINT 3 (harvest-wide, scheme-resolved derived-residue reconciliation, added
+# 2026-09-03). `derived_agreement` in path_scores.py is measured WITHIN one
+# hypothesis: the fraction of that hypothesis's changed pairs landing on its own
+# plurality derived residue. Two FOP hypotheses can each be internally unanimous
+# (da = 1.0) yet land on DIFFERENT residues from one another; pooling their da
+# values (the old `.wmean(df$derived_agreement, row_w)`) never sees that split.
+#
+# When the flat TSV carries the raw-residue block (mrca_<i>_anc_aa / _top_aa /
+# _bot_aa — the un-encoded ancestral and per-side derived residues), da is
+# recomputed HARVEST-WIDE: over the pooled, node-deduplicated changed-pair set of
+# the group, per side, applying the EXACT path_scores.py plurality logic, but on
+# residues encoded under the ROW'S OWN scheme (`encode_aa_r`). A genuinely split
+# position (US: V/I/L) then gets a low harvest-wide da under US and 1.0 under a
+# scheme that co-encodes those residues — and §2g's mean(caas_row) over schemes
+# does the reconciliation with NO new multiplier. Older inputs without the *_aa
+# columns keep the per-hypothesis `.wmean` fallback.
+#
+# apply_fop_pooling also emits three POSITION-LEVEL descriptor columns (raw-AA,
+# joined back by (Gene, Position), so they sit OUTSIDE the per-caap_group
+# grouping): `derived_residues` (compact "<anc>/<sorted derived>"),
+# `residue_support` (per side, per raw derived residue, distinct-pair count), and
+# `convergence_schemes` — the SUBSET of US,GS1,GS2,GS3,GS4 whose harvest-wide da
+# on the raw pooled pairs is >= tau (default 0.8). `convergence_schemes` is a
+# SET/PROFILE, never an ordinal: the 5 schemes are non-nested partitions along
+# different physicochemical axes (see aa_grouping.R).
+#
 # Single-hypothesis / non-FOP input is a no-op: the one row passes through with
 # its asr_path_score untouched (verified by test_fop_pool.R).
 # =============================================================================
@@ -47,6 +104,89 @@
 suppressPackageStartupMessages({
   library(dplyr)
 })
+
+# Grouping schemes for the harvest-wide, per-scheme derived_agreement rebuild.
+.aa_grouping_src <- file.path(
+  dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])),
+  "aa_grouping.R")
+if (!file.exists(.aa_grouping_src)) .aa_grouping_src <- "aa_grouping.R"
+if (file.exists(.aa_grouping_src)) {
+  source(.aa_grouping_src)
+} else if (!exists("encode_aa_r")) {
+  # Degrade gracefully: without the scheme maps, harvest-wide da can only be
+  # computed under identity (US-equivalent). Fallback path still works.
+  AA_SCHEME_NAMES <- c("US", "GS1", "GS2", "GS3", "GS4")
+  encode_aa_r <- function(aa, scheme) {
+    if (is.null(aa) || length(aa) == 0) return(NA_character_)
+    r <- toupper(trimws(as.character(aa)[1]))
+    if (is.na(r) || !nzchar(r)) NA_character_ else r
+  }
+}
+
+#' Harvest-wide, per-scheme derived_agreement over a group's DISTINCT changed pairs.
+#'
+#' Mirrors path_scores.py::compute_asr_path_score's derived_agreement EXACTLY,
+#' but over the pooled, node-deduplicated changed-pair set of the whole harvest
+#' group instead of one hypothesis, and on residues encoded under `scheme`.
+#'
+#' @param changed_df data.frame with columns node, side ("top"/"bot"), raw_aa —
+#'   one row per (distinct MRCA node, side) that carried a change. Callers dedup
+#'   by (node, side) before passing (a node's derived residue on a side is a
+#'   fixed observed fact).
+#' @param scheme one of AA_SCHEME_NAMES.
+#' @return derived_agreement in (0, 1]. 1.0 when no side has >= 2 distinct
+#'   changed pairs (matches path_scores.py).
+rebuild_derived_agreement <- function(changed_df, scheme) {
+  if (is.null(changed_df) || nrow(changed_df) == 0) return(1.0)
+  concentrations <- c()
+  for (sd in c("top", "bot")) {
+    rs <- changed_df$raw_aa[changed_df$side == sd]
+    rs <- rs[!is.na(rs) & nzchar(rs)]
+    if (length(rs) < 2) next
+    enc <- vapply(rs, encode_aa_r, character(1), scheme = scheme)
+    tab <- table(enc)
+    concentrations <- c(concentrations, max(tab) / length(enc))
+  }
+  if (length(concentrations) == 0) return(1.0)
+  mean(concentrations)
+}
+
+#' Distinct (node, side, raw_aa) changed-pair records from a harvest group's rows.
+#'
+#' Scans every mrca_<i>_top_aa / mrca_<i>_bot_aa cell across all rows, pairing it
+#' with the matching mrca_<i>_node. Deduplicates by (node, side): the same
+#' physical pair recurring across hypotheses / schemes is one changed pair.
+#' Voronoi domains are disjoint, so a node identifies its pair unambiguously.
+.collect_changed_pairs <- function(df, node_cols, top_cols, bot_cols) {
+  recs <- list()
+  add <- function(node, side, aa) {
+    if (is.na(node) || !nzchar(as.character(node))) return(invisible())
+    aa <- toupper(trimws(as.character(aa)))
+    if (is.na(aa) || !nzchar(aa)) return(invisible())
+    recs[[length(recs) + 1L]] <<- data.frame(
+      node = as.character(node), side = side, raw_aa = aa, stringsAsFactors = FALSE)
+  }
+  K <- length(node_cols)
+  for (i in seq_len(K)) {
+    ncol <- node_cols[i]
+    if (!(ncol %in% names(df))) next
+    nodes <- as.character(df[[ncol]])
+    if (i <= length(top_cols) && top_cols[i] %in% names(df)) {
+      tv <- as.character(df[[top_cols[i]]])
+      for (r in seq_along(nodes)) add(nodes[r], "top", tv[r])
+    }
+    if (i <= length(bot_cols) && bot_cols[i] %in% names(df)) {
+      bv <- as.character(df[[bot_cols[i]]])
+      for (r in seq_along(nodes)) add(nodes[r], "bot", bv[r])
+    }
+  }
+  if (length(recs) == 0) {
+    return(data.frame(node = character(0), side = character(0),
+                      raw_aa = character(0), stringsAsFactors = FALSE))
+  }
+  out <- do.call(rbind, recs)
+  out[!duplicated(out[, c("node", "side")]), , drop = FALSE]
+}
 
 # Exact P(>= 2 successes) over independent Bernoullis — verbatim algebra of
 # path_scores.py::_p_at_least_2 (inclusion-exclusion on P0 and P1).
@@ -108,7 +248,12 @@ read_hypothesis_pairs <- function(path) {
 #'   derived_agreement, conservation_gate, core, core_perside_pooled,
 #'   n_hypotheses, plus c_1..c_K as pooled_domain_<i>.
 pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
-                       diversity_floor = 0.75) {
+                       diversity_floor = 0.75,
+                       conserved_node_cols = character(0),
+                       conserved_cons_cols = character(0),
+                       top_aa_cols = character(0),
+                       bot_aa_cols = character(0),
+                       scheme = NA_character_) {
   hyps <- unique(df$hyp_id[!is.na(df$hyp_id) & nzchar(df$hyp_id)])
 
   # No FOP structure (single contrast, or a lone hypothesis) -> pass through.
@@ -129,13 +274,20 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
     ))
   }
 
-  # Per-hypothesis weight = min pair PSS across its K domains (a hypothesis is
-  # only as strong as its weakest contrast — mirrors the FOP ranking key).
+  # Job B weight: per-hypothesis MEAN pair PSS across its K domains (overall
+  # credibility of the hypothesis, used for the axis pools). Job A weight:
+  # each candidate pair's OWN PSS in a given domain, via (hyp_id, domain) -> pss.
   hyp_w <- setNames(rep(NA_real_, length(hyps)), hyps)
+  pair_pss <- function(h, dom) NA_real_
   if (!is.null(hyp_pairs)) {
     for (h in hyps) {
       w <- hyp_pairs$pss_score[hyp_pairs$hyp_id == h]
-      if (length(w) && any(is.finite(w))) hyp_w[h] <- min(w[is.finite(w)])
+      if (length(w) && any(is.finite(w))) hyp_w[h] <- mean(w[is.finite(w)])
+    }
+    pair_pss <- function(h, dom) {
+      v <- hyp_pairs$pss_score[hyp_pairs$hyp_id == h & hyp_pairs$pair == dom]
+      v <- v[is.finite(v)]
+      if (length(v)) v[1] else NA_real_
     }
   }
   row_w <- unname(hyp_w[df$hyp_id])
@@ -150,11 +302,13 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
     } else {
       as.character(df$hyp_id)  # fall back: treat every hypothesis's pair as distinct
     }
+    # Job A weight: this row's candidate pair's own PSS in domain i.
+    wr_all <- vapply(as.character(df$hyp_id), function(h) pair_pss(h, i), numeric(1))
     keep <- is.finite(s)
     if (!any(keep)) { c_vec[i] <- NA_real_; next }
-    s <- s[keep]; nd <- nd[keep]; wr <- row_w[keep]
+    s <- s[keep]; nd <- nd[keep]; wr <- wr_all[keep]
     # Distinct candidate pairs in this domain (dedup by MRCA node); weight each
-    # by its hypothesis PSS (min-pair), else equal.
+    # by that pair's own PSS in domain i (max over rows sharing the node), else equal.
     dd <- data.frame(nd = nd, s = s, w = wr, stringsAsFactors = FALSE) %>%
       group_by(nd) %>%
       summarise(s = dplyr::first(s),
@@ -166,9 +320,75 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   core_pooled <- .p_at_least_2(c_vec)
   indep_pooled <- .wmean(suppressWarnings(as.numeric(df$independence)), row_w)
   div_pooled   <- .wmean(suppressWarnings(as.numeric(df$mrca_diversity)), row_w)
-  da_pooled    <- .wmean(suppressWarnings(as.numeric(df$derived_agreement)), row_w)
-  cg_pooled    <- .wmean(suppressWarnings(as.numeric(df$conservation_gate)), row_w)
   core_row_pooled <- .wmean(suppressWarnings(as.numeric(df$core)), row_w)
+
+  # ── derived_agreement (POINT 3): harvest-wide, per-scheme ─────────────────────
+  # `derived_agreement` in path_scores.py is a within-hypothesis fraction. Two
+  # FOP hypotheses can each be unanimous yet land on DIFFERENT residues; pooling
+  # their da never sees that. When the raw-residue block is present, recompute da
+  # over the group's DISTINCT changed pairs (dedup by node), per side, with the
+  # EXACT path_scores.py plurality logic, on residues encoded under THIS row's
+  # own scheme. Older inputs (no *_aa columns) keep the per-hypothesis wmean.
+  have_aa_cols <- length(top_aa_cols) > 0 &&
+    (any(top_aa_cols %in% names(df)) || any(bot_aa_cols %in% names(df)))
+  if (have_aa_cols && !is.na(scheme) && nzchar(scheme)) {
+    cp_group <- .collect_changed_pairs(df, node_cols, top_aa_cols, bot_aa_cols)
+    da_pooled <- rebuild_derived_agreement(cp_group, scheme)
+  } else {
+    da_pooled <- .wmean(suppressWarnings(as.numeric(df$derived_agreement)), row_w)
+  }
+
+  # ── conservation_gate (POINT 2) ─────────────────────────────────────────────
+  # A conserved pair hits EXACTLY the conservation_gate branch of
+  # path_scores.py::compute_asr_path_score (scored by conservation-to-root, then
+  # `continue` — never a `core`/`independence`/`diversity` input). Within one
+  # hypothesis: gate = 0.5 + 0.5 * mean(cons over that hypothesis's conserved
+  # pairs). Pooling the already-transformed per-hypothesis gates double-counts a
+  # conserved pair shared by several hypotheses (asymmetric with the node-deduped
+  # c_i pool) and, when hypotheses differ in conserved-pair count,
+  # mean(0.5+0.5 cons_h) != 0.5 + 0.5 mean(cons_p). So when the conserved_<j>_*
+  # columns are present, rebuild the gate from the DISTINCT conserved pairs of
+  # the harvest group, deduped by conserved_<j>_node.
+  have_cons_cols <- length(conserved_node_cols) > 0 && length(conserved_cons_cols) > 0 &&
+    any(conserved_node_cols %in% names(df)) && any(conserved_cons_cols %in% names(df))
+  if (have_cons_cols) {
+    cons_recs <- list()
+    for (jj in seq_along(conserved_node_cols)) {
+      ncol <- conserved_node_cols[jj]; ccol <- conserved_cons_cols[jj]
+      if (!(ncol %in% names(df)) || !(ccol %in% names(df))) next
+      nd_j <- as.character(df[[ncol]])
+      cs_j <- suppressWarnings(as.numeric(df[[ccol]]))
+      for (rr in seq_len(nrow(df))) {
+        node <- nd_j[rr]
+        if (is.na(node) || !nzchar(node) || !is.finite(cs_j[rr])) next
+        # Weight: map this conserved node back to a Voronoi domain via the row's
+        # own mrca_<i>_node columns; if it matches domain i, use that candidate
+        # pair's own PSS in domain i (pair_pss). Otherwise equal weight.
+        w_j <- NA_real_
+        for (ii in seq_along(node_cols)) {
+          if (node_cols[ii] %in% names(df) &&
+              identical(as.character(df[[node_cols[ii]]][rr]), node)) {
+            w_j <- pair_pss(as.character(df$hyp_id[rr]), ii); break
+          }
+        }
+        cons_recs[[length(cons_recs) + 1L]] <-
+          data.frame(nd = node, cons = cs_j[rr], w = w_j, stringsAsFactors = FALSE)
+      }
+    }
+    if (length(cons_recs) == 0) {
+      cg_pooled <- 1.0  # FOP structure but no conserved pairs -> novel position
+    } else {
+      cdd <- do.call(rbind, cons_recs) %>%
+        group_by(nd) %>%
+        summarise(cons = dplyr::first(cons),
+                  w = suppressWarnings(max(w, na.rm = TRUE)), .groups = "drop")
+      cg_pooled <- 0.5 + 0.5 * .wmean(cdd$cons, cdd$w)
+    }
+  } else {
+    # Fallback (older inputs, no conserved_<j>_* columns): pool the per-hypothesis
+    # transformed gates as before. Residual double-counting noted above.
+    cg_pooled <- .wmean(suppressWarnings(as.numeric(df$conservation_gate)), row_w)
+  }
 
   if (!is.finite(indep_pooled)) indep_pooled <- 1
   if (!is.finite(div_pooled))   div_pooled   <- 0
@@ -196,6 +416,75 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   out
 }
 
+#' Position-level raw-AA descriptors for one (Gene, Position).
+#'
+#' Computed across ALL rows of the position (every scheme, every hypothesis) —
+#' the raw residues are scheme-independent facts, so this sits OUTSIDE the
+#' per-caap_group pooling and is joined back by (Gene, Position).
+#'
+#'   derived_residues     "<anc>/<sorted distinct derived>" (top+bottom merged);
+#'                        "<anc>/top:<..>/bot:<..>" when the two sides differ.
+#'   residue_support      per side, per raw derived residue, DISTINCT-pair count,
+#'                        e.g. "bot:L:3,S:2;top:V:2". (Species-level support is
+#'                        joined downstream from candidate_species.tab — NOT here.)
+#'   convergence_schemes  comma-joined subset of US,GS1,GS2,GS3,GS4 whose
+#'                        harvest-wide da on the raw pooled pairs is >= tau.
+#'                        A SET/PROFILE (non-nested schemes), never an ordinal.
+#'                        "" when none pass / no changed pairs.
+.position_descriptors <- function(sub_df, node_cols, top_aa_cols, bot_aa_cols,
+                                  anc_aa_cols, tau) {
+  empty <- data.frame(derived_residues = "", residue_support = "",
+                      convergence_schemes = "", stringsAsFactors = FALSE)
+  cp <- .collect_changed_pairs(sub_df, node_cols, top_aa_cols, bot_aa_cols)
+  if (nrow(cp) == 0) return(empty)
+
+  # Ancestral residue(s): scan mrca_<i>_anc_aa cells against the changed nodes.
+  anc_vals <- c()
+  for (i in seq_along(node_cols)) {
+    ncol <- node_cols[i]
+    if (!(ncol %in% names(sub_df)) || i > length(anc_aa_cols)) next
+    acol <- anc_aa_cols[i]
+    if (!(acol %in% names(sub_df))) next
+    nn <- as.character(sub_df[[ncol]]); aa <- toupper(trimws(as.character(sub_df[[acol]])))
+    keep <- nn %in% cp$node & !is.na(aa) & nzchar(aa)
+    anc_vals <- c(anc_vals, aa[keep])
+  }
+  anc_str <- paste(sort(unique(anc_vals)), collapse = "")
+  if (!nzchar(anc_str)) anc_str <- "?"
+
+  top_set <- sort(unique(cp$raw_aa[cp$side == "top"]))
+  bot_set <- sort(unique(cp$raw_aa[cp$side == "bot"]))
+  if (length(top_set) > 0 && length(bot_set) > 0 &&
+      !identical(top_set, bot_set)) {
+    derived_residues <- sprintf("%s/top:%s/bot:%s", anc_str,
+                                paste(top_set, collapse = ""),
+                                paste(bot_set, collapse = ""))
+  } else {
+    derived_residues <- sprintf("%s/%s", anc_str,
+                                paste(sort(unique(c(top_set, bot_set))), collapse = ""))
+  }
+
+  # residue_support: distinct-pair (node) counts per side per raw residue.
+  seg <- c()
+  for (sd in c("bot", "top")) {
+    rs <- cp$raw_aa[cp$side == sd]
+    if (length(rs) == 0) next
+    tb <- sort(table(rs), decreasing = TRUE)
+    seg <- c(seg, sprintf("%s:%s", sd,
+             paste(sprintf("%s:%d", names(tb), as.integer(tb)), collapse = ",")))
+  }
+  residue_support <- paste(seg, collapse = ";")
+
+  kept <- AA_SCHEME_NAMES[vapply(AA_SCHEME_NAMES, function(sc)
+    isTRUE(rebuild_derived_agreement(cp, sc) >= tau), logical(1))]
+  convergence_schemes <- paste(kept, collapse = ",")
+
+  data.frame(derived_residues = derived_residues,
+             residue_support = residue_support,
+             convergence_schemes = convergence_schemes,
+             stringsAsFactors = FALSE)
+}
+
 #' Apply domain-pooling across a whole disambiguation data.frame.
 #'
 #' Groups by (Gene, Position, caap_group) and replaces the per-hypothesis
@@ -207,12 +496,31 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
 #' @param df full disambiguation data.frame (needs Gene, Position, caap_group,
 #'   hyp_id + the asr columns + mrca_<i>_path_score/_node).
 #' @param hyp_pairs_path path to contrast_hypotheses_pairs.tsv (or NULL/NO_*).
+#' @param tau harvest-wide da threshold for `convergence_schemes` (default 0.8).
 #' @return df with one row per (Gene, Position, caap_group); adds n_hypotheses,
-#'   core_perside_pooled, pooled_domain_<i>.
-apply_fop_pooling <- function(df, hyp_pairs_path = NULL) {
+#'   core_perside_pooled, pooled_domain_<i>, and the POSITION-level descriptors
+#'   derived_residues / residue_support / convergence_schemes (empty strings when
+#'   the raw-residue block is absent or the position has no changed pairs).
+apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
   path_cols <- grep("^mrca_\\d+_path_score$", names(df), value = TRUE)
   path_cols <- path_cols[order(as.integer(sub("^mrca_(\\d+)_path_score$", "\\1", path_cols)))]
   node_cols <- sub("_path_score$", "_node", path_cols)
+
+  # Raw derived/ancestral residue block (POINT 3). Ordered by pair index i so the
+  # i-th entry lines up with node_cols[i].
+  idx_of <- function(cols, pat) as.integer(sub(pat, "\\1", cols))
+  top_aa_cols <- grep("^mrca_\\d+_top_aa$", names(df), value = TRUE)
+  top_aa_cols <- top_aa_cols[order(idx_of(top_aa_cols, "^mrca_(\\d+)_top_aa$"))]
+  bot_aa_cols <- grep("^mrca_\\d+_bot_aa$", names(df), value = TRUE)
+  bot_aa_cols <- bot_aa_cols[order(idx_of(bot_aa_cols, "^mrca_(\\d+)_bot_aa$"))]
+  anc_aa_cols <- grep("^mrca_\\d+_anc_aa$", names(df), value = TRUE)
+  anc_aa_cols <- anc_aa_cols[order(idx_of(anc_aa_cols, "^mrca_(\\d+)_anc_aa$"))]
+
+  # Parallel conserved-pair block (j ordered by pair_id ascending upstream).
+  conserved_node_cols <- grep("^conserved_\\d+_node$", names(df), value = TRUE)
+  conserved_node_cols <- conserved_node_cols[order(as.integer(
+    sub("^conserved_(\\d+)_node$", "\\1", conserved_node_cols)))]
+  conserved_cons_cols <- sub("_node$", "_cons", conserved_node_cols)
 
   if (!"hyp_id" %in% names(df)) df$hyp_id <- NA_character_
   for (col in c("asr_path_score", "independence", "mrca_diversity",
@@ -236,6 +544,10 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL) {
       ) %>%
       ungroup()
     if (!"core_perside_pooled" %in% names(df)) df$core_perside_pooled <- df$core
+    # Stable schema: position-level descriptor columns, empty for non-FOP input.
+    for (col in c("derived_residues", "residue_support", "convergence_schemes")) {
+      if (!col %in% names(df)) df[[col]] <- ""
+    }
     return(df)
   }
 
@@ -267,7 +579,12 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL) {
                          df$.grp[df$.grp %in% multi_grps])
     pooled_list <- lapply(split_multi, function(g) {
       base <- g[1, , drop = FALSE]
-      pooled <- pool_group(g, path_cols, node_cols, hyp_pairs)
+      pooled <- pool_group(g, path_cols, node_cols, hyp_pairs,
+                           conserved_node_cols = conserved_node_cols,
+                           conserved_cons_cols = conserved_cons_cols,
+                           top_aa_cols = top_aa_cols,
+                           bot_aa_cols = bot_aa_cols,
+                           scheme = as.character(g$caap_group[1]))
       for (col in names(pooled)) base[[col]] <- pooled[[col]][1]
       base
     })
@@ -275,5 +592,20 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL) {
 
   out <- dplyr::bind_rows(c(list(simple), pooled_list))
   out$.grp <- NULL
+
+  # ── Position-level descriptor pass (POINT 3) ────────────────────────────────
+  # Across ALL schemes/hypotheses of a (Gene, Position); joined back by it.
+  for (col in c("derived_residues", "residue_support", "convergence_schemes")) {
+    out[[col]] <- NULL
+  }
+  desc <- df %>%
+    group_by(Gene, Position) %>%
+    group_modify(~ .position_descriptors(.x, node_cols, top_aa_cols, bot_aa_cols,
+                                         anc_aa_cols, tau)) %>%
+    ungroup()
+  out <- dplyr::left_join(out, desc, by = c("Gene", "Position"))
+  for (col in c("derived_residues", "residue_support", "convergence_schemes")) {
+    out[[col]][is.na(out[[col]])] <- ""
+  }
   out
 }

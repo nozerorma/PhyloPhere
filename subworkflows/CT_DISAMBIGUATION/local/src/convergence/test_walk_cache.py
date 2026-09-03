@@ -90,6 +90,18 @@ def run():
         same_pairs = base["pair_scores"] == c1["pair_scores"]
         print(f"  {scheme:4s} pair_scores identical: {same_pairs}")
         ok &= same_pairs
+        # POINT 3: raw derived/ancestral residue maps are returned and unaffected
+        # by the walk memoisation.
+        raw_ok = all(
+            base.get(k) == c1.get(k) and isinstance(base.get(k), dict)
+            for k in ("pair_ancestral", "pair_derived_top", "pair_derived_bot")
+        )
+        if scheme == "US":
+            # pair 1 (node 4) changed top A->V; both pairs' bottom sides conserved
+            raw_ok &= base["pair_derived_top"].get(1) == "V" and base["pair_ancestral"].get(1) == "A"
+            raw_ok &= base["pair_derived_bot"] == {}
+        print(f"  {scheme:4s} raw residue maps returned + cache-invariant: {raw_ok}")
+        ok &= raw_ok
         reused = (len(cache) == n_after_first) and (c2["asr_path_score"] == c1["asr_path_score"])
         print(f"  {scheme:4s} cache reused on 2nd call (no growth): {reused} "
               f"({n_after_first} entries)")
@@ -105,6 +117,22 @@ def run():
     print(f"  conserved-pair conservation_gate: uncached={base_c['conservation_gate']:.10f} "
           f"cached={cc['conservation_gate']:.10f} {'OK' if same else 'MISMATCH'}")
     ok &= same
+
+    # POINT 2: conserved-pair identity maps are returned and non-empty when the
+    # position has conserved pairs (pid "3" here), both early and normal returns.
+    cps = base_c.get("conserved_pair_scores")
+    cpn = base_c.get("conserved_pair_nodes")
+    have_maps = isinstance(cps, dict) and isinstance(cpn, dict) and cps and \
+        set(cps) == set(cpn)
+    print(f"  conserved_pair_scores/nodes returned: {have_maps} ({cps})")
+    ok &= bool(have_maps)
+    same_maps = (cps == cc.get("conserved_pair_scores")
+                 and cpn == cc.get("conserved_pair_nodes"))
+    ok &= same_maps
+    # A position with no conserved pairs -> empty maps present in the return.
+    base_nc = ps.compute_asr_path_score(pd, pnd, node_index, "US", False, "")
+    ok &= base_nc.get("conserved_pair_scores") == {} and \
+        base_nc.get("conserved_pair_nodes") == {}
 
     print("\n" + ("ALL EQUIVALENCE CHECKS PASSED" if ok else "SOME CHECKS FAILED"))
     return 0 if ok else 1

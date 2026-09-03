@@ -314,8 +314,17 @@ def insert_result(
                     if isinstance(focal_nodes, (list, tuple)):
                         return int(len(focal_nodes))
                     count = sum(1 for k in nm.keys() if str(k).startswith("focal_"))
-                    return int(count) if count else 1
-                return 1
+                    if count:
+                        return int(count)
+                # Last resort: a fully-flattened result dict — count its
+                # mrca_<i>_node columns directly.
+                import re as _re
+                idxs = {
+                    int(m.group(1))
+                    for k in r
+                    if isinstance(k, str) and (m := _re.match(r"^mrca_(\d+)_node$", k))
+                }
+                return max(idxs) if idxs else 1
 
             if getattr(r, "pair_details", None):
                 return int(len(getattr(r, "pair_details") or [])) or 1

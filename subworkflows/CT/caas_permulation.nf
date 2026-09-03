@@ -34,7 +34,7 @@ process SUBSET_RESAMPLE_PERMS {
 
     output:
     path "resample_perms.tab", emit: subset
-    path "resample_fop_pairs.tsv", emit: fop_pairs, optional: true
+    path "fop_pairs.tsv", emit: fop_pairs, optional: true
 
     script:
     """
@@ -47,14 +47,14 @@ process SUBSET_RESAMPLE_PERMS {
     # early — avoids the SIGPIPE that `sort | head` triggers under pipefail.
     FOP_TAB=""
     if [ -d "${resample_dir}" ]; then
-        FOP_TAB=\$(find -L ${resample_dir} -name 'resample_fop.tab' | head -n 1)
+        FOP_TAB=\$(find -L ${resample_dir} -name 'fop_labelings.tab' | head -n 1)
     fi
 
     if [ -n "\$FOP_TAB" ]; then
         # ── FOP mirror: labelings are "<base>~H<m>". Sample N distinct BASE
         #    cycles and keep ALL their hypothesis rows together, plus the
-        #    matching resample_fop_pairs.tsv rows (PSS weights for domain pooling).
-        FOP_PAIRS=\$(find -L ${resample_dir} -name 'resample_fop_pairs.tsv' | head -n 1)
+        #    matching fop_pairs.tsv rows (PSS weights for domain pooling).
+        FOP_PAIRS=\$(find -L ${resample_dir} -name 'fop_pairs.tsv' | head -n 1)
         awk -F'\\t' 'NF>=3 && \$1!="b_0"' "\$FOP_TAB" > candidates.tab
         awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u > base_all.txt
         awk -v seed=${seed} 'BEGIN{srand(seed)} {print rand()"\\t"\$0}' base_all.txt \\
@@ -64,7 +64,7 @@ process SUBSET_RESAMPLE_PERMS {
             keep_base.txt candidates.tab > resample_perms.tab
         if [ -n "\$FOP_PAIRS" ]; then
             awk -F'\\t' 'NR==FNR{k[\$1]=1; next} FNR==1{if(!seen){print; seen=1}; next} (\$1 in k){print}' \\
-                keep_base.txt "\$FOP_PAIRS" > resample_fop_pairs.tsv
+                keep_base.txt "\$FOP_PAIRS" > fop_pairs.tsv
         fi
         n=\$(awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' resample_perms.tab | sort -u | wc -l)
         rows=\$(wc -l < resample_perms.tab)
@@ -108,7 +108,14 @@ process BOOTSTRAP_PERMS {
 
     script:
     def pairArgs = """
-n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+# multi_hypothesis mode passes a directory of traitfile_H*.tab (all share the
+# same pair count K) — resolve it to one .tab so the awk reads a real file.
+if [ -d "${caas_config}" ]; then
+    _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+else
+    _cfg_file="${caas_config}"
+fi
+n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$_cfg_file" | sort -nu | wc -l | tr -d ' ')
 _max_conserved=\$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}')
 _max_bg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
 _max_fg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
@@ -173,7 +180,14 @@ process BOOTSTRAP_PERMS_BATCHED {
     cat > ${batchID}.manifest.tsv <<'EOF'
 """ + batchManifestText + """EOF
 
-    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
+    # multi_hypothesis mode passes a directory of traitfile_H*.tab (same K) —
+    # resolve to one .tab so awk reads a real file, not a directory.
+    if [ -d "${caas_config}" ]; then
+        _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+    else
+        _cfg_file="${caas_config}"
+    fi
+    n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$_cfg_file" | sort -nu | wc -l | tr -d ' ')
     _max_conserved=\$(awk -v n="\$n_pairs" -v f="${params.min_divergent_fraction}" 'BEGIN{printf "%d", int(n*(1-f))}')
     _max_bg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_bg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
     _max_fg_gaps=\$(awk -v n="\$n_pairs" -v f="${params.max_fg_gaps_fraction}" 'BEGIN{printf "%d", int(n*f)}')
@@ -221,7 +235,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     path "perm_disc/*"
     path resample_subset
     path tree_file
-    path fop_pairs   // resample_fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS sentinel
+    path fop_pairs   // fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS sentinel
 
     output:
     path "gene_cycle_scores.tsv",    emit: gene_cycle_scores
@@ -413,7 +427,7 @@ workflow CAAS_PERMULATION {
         resample_subset    // path resample_perms.tab
         tree_file          // path species tree
         universe           // path cleaned_background or NO_FILE
-        fop_pairs          // path resample_fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS
+        fop_pairs          // path fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS
         asr_ready          // gate: emits once the live CT_DISAMBIGUATION has
                            // finished writing the shared ASR cache. A 'NO_GATE'
                            // sentinel when ASR is precomputed / disambiguation

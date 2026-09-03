@@ -89,9 +89,10 @@ def tier1_project(
     c.caap_mode = True                       # US + GS1..GS4 encodings
     c.patterns = "1,2,3"
     c.perm_strategy = "auto"                 # best-fit BM vs OU by AICc
-    c.perm_pool_size = perm_pool_size
-    c.caas_full_perms = caas_full_perms
-    c.max_tries = max_tries
+    # env overrides for quick smoke runs (small pool + few null draws)
+    c.perm_pool_size = os.environ.get("PERM_POOL_SIZE", perm_pool_size)
+    c.caas_full_perms = os.environ.get("CAAS_FULL_PERMS", caas_full_perms)
+    c.max_tries = os.environ.get("MAX_TRIES", max_tries)
     c.min_contrasts = "3"
     c.min_divergent_fraction = min_divergent_fraction
     c.ct_discovery_batch_size = ct_batch_size

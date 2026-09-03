@@ -49,14 +49,18 @@ PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score", "change_top", "change_bottom",
      "hypothesis", "pair_scores", "independence", "mrca_diversity",
-     "derived_agreement", "conservation_gate", "core"],
+     "derived_agreement", "conservation_gate", "core",
+     "conserved_pair_scores", "conserved_pair_nodes",
+     "pair_ancestral", "pair_derived_top", "pair_derived_bot"],
 )
 # All fields after `change_bottom` are optional. Single-contrast perm replay
 # leaves `hypothesis` None and the FOP axis fields None. For the FOP null they
 # carry the full compute_asr_path_score output so the aggregation domain-pools
 # with the exact same algebra scoring_compute.R §2b / fop_pool.R use on the
 # observed side.
-PositionAxes.__new__.__defaults__ = (None, None, None, None, None, None, None)
+PositionAxes.__new__.__defaults__ = (
+    None, None, None, None, None, None, None, None, None, None, None, None,
+)
 
 
 def _build_per_node_dist(
@@ -425,6 +429,11 @@ def analyze_caas_position_disambiguation(
     core = 0.0
     pair_path_scores: Dict[int, float] = {}
     pair_path_contaminated: Dict[int, bool] = {}
+    conserved_pair_path_scores: Dict[int, float] = {}
+    conserved_pair_path_nodes: Dict[int, Any] = {}
+    pair_ancestral_aa: Dict[int, Any] = {}
+    pair_derived_top_aa: Dict[int, str] = {}
+    pair_derived_bot_aa: Dict[int, str] = {}
     try:
         # Single code path with the axes-only perm replay: _position_axes rebuilds
         # per_node_dist from posterior_data exactly as node_posteriors["per_node"]
@@ -442,6 +451,11 @@ def analyze_caas_position_disambiguation(
         core = path_result.get("core", 0.0)
         pair_path_scores = path_result["pair_scores"]
         pair_path_contaminated = path_result["pair_contaminated"]
+        conserved_pair_path_scores = path_result.get("conserved_pair_scores", {}) or {}
+        conserved_pair_path_nodes = path_result.get("conserved_pair_nodes", {}) or {}
+        pair_ancestral_aa = path_result.get("pair_ancestral", {}) or {}
+        pair_derived_top_aa = path_result.get("pair_derived_top", {}) or {}
+        pair_derived_bot_aa = path_result.get("pair_derived_bot", {}) or {}
     except Exception as e:  # never let path scoring break disambiguation
         logger.warning(
             f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
@@ -495,6 +509,11 @@ def analyze_caas_position_disambiguation(
         core=core,
         pair_path_scores=pair_path_scores or None,
         pair_path_contaminated=pair_path_contaminated or None,
+        conserved_pair_path_scores=conserved_pair_path_scores or None,
+        conserved_pair_path_nodes=conserved_pair_path_nodes or None,
+        pair_ancestral_aa=pair_ancestral_aa or None,
+        pair_derived_top_aa=pair_derived_top_aa or None,
+        pair_derived_bot_aa=pair_derived_bot_aa or None,
         score=None,
         pvalue_boot=getattr(caas_pos, "pvalue_boot", None),
     )
@@ -881,6 +900,11 @@ def analyze_gene_disambiguation(
                     )
                     axes_score = path_result.get("asr_path_score", 0.0)
                     axes_pair_scores = path_result.get("pair_scores", None)
+                    axes_cons_scores = path_result.get("conserved_pair_scores", None) or None
+                    axes_cons_nodes = path_result.get("conserved_pair_nodes", None) or None
+                    axes_anc = path_result.get("pair_ancestral", None) or None
+                    axes_der_top = path_result.get("pair_derived_top", None) or None
+                    axes_der_bot = path_result.get("pair_derived_bot", None) or None
                     axes_extra = {
                         k: path_result.get(k)
                         for k in ("independence", "mrca_diversity",
@@ -892,6 +916,9 @@ def analyze_gene_disambiguation(
                     )
                     axes_score = 0.0
                     axes_pair_scores = None
+                    axes_cons_scores = None
+                    axes_cons_nodes = None
+                    axes_anc = axes_der_top = axes_der_bot = None
                     axes_extra = {}
                 results.append(
                     PositionAxes(
@@ -907,6 +934,11 @@ def analyze_gene_disambiguation(
                         derived_agreement=axes_extra.get("derived_agreement"),
                         conservation_gate=axes_extra.get("conservation_gate"),
                         core=axes_extra.get("core"),
+                        conserved_pair_scores=axes_cons_scores,
+                        conserved_pair_nodes=axes_cons_nodes,
+                        pair_ancestral=axes_anc,
+                        pair_derived_top=axes_der_top,
+                        pair_derived_bot=axes_der_bot,
                     )
                 )
                 logger.debug(

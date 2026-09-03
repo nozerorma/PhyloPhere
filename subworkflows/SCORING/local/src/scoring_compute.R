@@ -53,6 +53,8 @@ fade_site_bot_file   <- parse_arg("--fade_site_bot")
 rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
+concordance_tau      <- as.numeric(parse_arg("--concordance_tau", "0.8"))  # POINT 3: da threshold for convergence_schemes
+if (!is.finite(concordance_tau) || concordance_tau <= 0 || concordance_tau > 1) concordance_tau <- 0.8
 stress_enabled_raw        <- parse_arg("--stress", "false")
 stress_top_n              <- as.integer(parse_arg("--stress_top_n", "25"))
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -253,7 +255,7 @@ cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring sche
 if (!file.exists(.fop_pool_src)) .fop_pool_src <- "fop_pool.R"
 source(.fop_pool_src)
 .n_before <- nrow(df)
-df <- apply_fop_pooling(df, hyp_pairs_file)
+df <- apply_fop_pooling(df, hyp_pairs_file, tau = concordance_tau)
 if (nrow(df) != .n_before) {
   cat(sprintf("  FOP pooling: %d rows -> %d after collapsing hypotheses (max n_hypotheses = %d)\n",
               .n_before, nrow(df),
@@ -332,6 +334,10 @@ pos_scores <- df %>%
     } else "",
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
+    # POINT 3 descriptors: position-level after §2b pooling -> first() carries them.
+    derived_residues    = if ("derived_residues" %in% names(df)) dplyr::first(derived_residues) else "",
+    residue_support     = if ("residue_support" %in% names(df)) dplyr::first(residue_support) else "",
+    convergence_schemes = if ("convergence_schemes" %in% names(df)) dplyr::first(convergence_schemes) else "",
     asr_score          = mean(asr_score,          na.rm = TRUE),
     mrca_diversity     = mean(mrca_diversity,     na.rm = TRUE),
     derived_agreement  = mean(derived_agreement,  na.rm = TRUE),
@@ -943,7 +949,8 @@ pos_out <- pos_scores %>%
          asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core",
                              "core_perside_pooled")),
          any_of("phen_score"), n_schemes, any_of("scheme_set"),
-         any_of(c("n_hypotheses", "supporting_hypotheses")), CAAS_score,
+         any_of(c("n_hypotheses", "supporting_hypotheses",
+                  "derived_residues", "residue_support", "convergence_schemes")), CAAS_score,
          change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))

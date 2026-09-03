@@ -241,6 +241,12 @@ parse_fade_json <- function(path, bf_thr) {
     n_sig     <- 0L
     n_sites_tested <- 0L
     sig_aa_counts <- setNames(integer(length(AA_LETTERS)), AA_LETTERS)
+    # Per-site running max BF (across the 20 target AAs) for sites that clear
+    # bf_thr — this is the ALL-significant-sites detail, one entry per site.
+    # Bounded by the significant-site count (~1e3 genome-wide), not the
+    # site x AA product that the earlier full expansion blew memory on.
+    sig_site_bf <- numeric(0)   # names = 1-based site index (character)
+    sig_site_aa <- character(0)
 
     for (aa in AA_LETTERS) {
       aa_data <- content[[aa]]
@@ -259,6 +265,13 @@ parse_fade_json <- function(path, bf_thr) {
         if (length(sig_idx) > 0) {
           n_sig <- n_sig + length(sig_idx)
           sig_aa_counts[aa] <- sig_aa_counts[aa] + length(sig_idx)
+          for (si in sig_idx) {
+            k <- as.character(si)
+            if (!(k %in% names(sig_site_bf)) || bf_vals[si] > sig_site_bf[[k]]) {
+              sig_site_bf[k] <- bf_vals[si]
+              sig_site_aa[k] <- aa
+            }
+          }
         }
 
         finite_idx <- which(is.finite(bf_vals))
@@ -285,6 +298,20 @@ parse_fade_json <- function(path, bf_thr) {
       stringsAsFactors = FALSE
     )
     for (aa in AA_LETTERS) out[[paste0("sigcount_", aa)]] <- sig_aa_counts[[aa]]
+
+    # ALL significant sites for this gene (one row per site), carried alongside
+    # the gene-level row as an attribute so the single return type is unchanged.
+    if (length(sig_site_bf) > 0) {
+      si_int <- as.integer(names(sig_site_bf))
+      attr(out, "sig_sites") <- data.frame(
+        gene      = gene_id,
+        site      = si_int,            # 1-based FADE site index
+        position  = si_int - 1L,       # 0-based, matches CAAS/CT coordinates
+        max_bf    = as.numeric(sig_site_bf),
+        target_aa = unname(sig_site_aa[names(sig_site_bf)]),
+        stringsAsFactors = FALSE
+      )
+    }
     out
 
   }, error = function(e) {
@@ -314,9 +341,14 @@ if (length(all_results) == 0) {
 gene_summary <- bind_rows(all_results) %>%
   arrange(desc(n_sig_site_aa), desc(max_bf))
 
+# ALL significant sites across ALL genes (one row per (gene, site)), recovered
+# from the per-gene "sig_sites" attribute attached during parsing.
+sig_sites <- bind_rows(lapply(all_results, function(x) attr(x, "sig_sites"))) %>%
+  { if (nrow(.) == 0) . else arrange(., desc(max_bf)) }
+
 cat(sprintf(
-  "✓ Parsed %d genes.\n",
-  nrow(gene_summary)
+  "✓ Parsed %d genes | %d significant (gene, site) rows recovered.\n",
+  nrow(gene_summary), nrow(sig_sites)
 ))
 ```
 
@@ -383,6 +415,53 @@ if (nrow(gene_summary_core) == 0) {
   }
 }
 
+invisible(NULL)
+```
+
+---
+
+## Significant Sites (all)
+
+```{r sig-sites-table}
+if (nrow(sig_sites) == 0) {
+  cat(sprintf("No sites cleared BF ≥ %g in the %s direction.\n",
+              bf_thr, toupper(params$direction)))
+} else {
+  DT::datatable(
+    sig_sites %>%
+      transmute(
+        Gene            = gene,
+        `Site (1-based)` = site,
+        `Position (0-based)` = position,
+        `Max BF`        = round(max_bf, 2),
+        `Target AA`     = target_aa
+      ),
+    filter   = "top",
+    rownames = FALSE,
+    options  = list(pageLength = 25, scrollX = TRUE),
+    caption  = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      sprintf("All significant FADE sites | BF ≥ %g | Direction: %s | %d sites across %d genes",
+              bf_thr, toupper(params$direction),
+              nrow(sig_sites), length(unique(sig_sites$gene)))
+    )
+  )
+}
+```
+
+```{r write-sites-tsv}
+# Per-significant-site table for downstream consumers (scoring_compute.R's
+# .load_fade_sites / position-level FADE enrichment). Same schema as
+# FADE_JSON_TO_CSV's fade_sites_<dir>.csv. Header always written so the
+# Nextflow output declaration is satisfied even with zero significant sites.
+out_sites_tsv <- paste0("fade_site_bf_", params$direction, ".tsv")
+sites_core <- if (nrow(sig_sites) == 0) {
+  data.frame(gene = character(), position = integer(),
+             max_bf = numeric(), target_aa = character())
+} else {
+  sig_sites %>% select(gene, position, max_bf, target_aa)
+}
+write.table(sites_core, out_sites_tsv, sep = "\t", row.names = FALSE, quote = FALSE)
 invisible(NULL)
 ```
 

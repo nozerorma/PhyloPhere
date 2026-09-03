@@ -402,8 +402,8 @@ write.table(do.call(rbind, manifest), file = file.path(outdir, "permulation_mani
 # statistic scoring_compute.R §2b builds on the observed data. H1 is the cycle's
 # already-accepted canonical contrast; H2..Hn are Dunn-independent alternatives
 # drawn from the same Voronoi domains, ranked by min-PSS, capped at max_fop.
-#   resample_fop.tab         : "<cycle>~H<m>" \t fg_csv \t bg_csv   (fanned discovery input)
-#   resample_fop_pairs.tsv   : cycle, hypothesis_id, pair(domain), species1, species2, pss_score
+#   fop_labelings.tab         : "<cycle>~H<m>" \t fg_csv \t bg_csv   (fanned discovery input)
+#   fop_pairs.tsv   : cycle, hypothesis_id, pair(domain), species1, species2, pss_score
 if (fop_null) {
   log_msg("START", sprintf("FOP mirror harvest for %d accepted cycles (max_fop=%d)",
                            length(pool), max_fop))
@@ -451,14 +451,14 @@ if (fop_null) {
     n_hyp_tot <- n_hyp_tot + length(hv$hypotheses)
   }
   if (length(fop_rows) > 0) {
-    write.table(do.call(rbind, fop_rows), file = file.path(outdir, "resample_fop.tab"),
+    write.table(do.call(rbind, fop_rows), file = file.path(outdir, "fop_labelings.tab"),
                 sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE)
   }
   if (length(pair_rows) > 0) {
-    write.table(do.call(rbind, pair_rows), file = file.path(outdir, "resample_fop_pairs.tsv"),
+    write.table(do.call(rbind, pair_rows), file = file.path(outdir, "fop_pairs.tsv"),
                 sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
   }
-  log_msg("COMPLETE", sprintf("FOP mirror: %d cycles -> %d hypothesis labelings (mean %.1f/cycle) -> resample_fop.tab",
+  log_msg("COMPLETE", sprintf("FOP mirror: %d cycles -> %d hypothesis labelings (mean %.1f/cycle) -> fop_labelings.tab",
                               length(pool), n_hyp_tot,
                               if (length(pool)) n_hyp_tot / length(pool) else 0))
 }

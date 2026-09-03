@@ -97,7 +97,25 @@ def _detect_max_pairs(results: List[Dict]) -> int:
     return max(max_pairs, 1)
 
 
-def _generate_dynamic_fields(max_pairs: int) -> List[str]:
+def _detect_max_conserved(results: List[Dict]) -> int:
+    """Max number of conserved_<j>_node columns across results (0 if none).
+
+    Mirrors :func:`_detect_max_pairs`; drives the parallel conserved-pair block
+    that lets the FOP domain-pooler rebuild conservation_gate from deduplicated
+    conserved pairs. 0 -> no columns emitted (older inputs, single-contrast).
+    """
+    max_c = 0
+    for result in results:
+        c = 0
+        idx = 1
+        while f"conserved_{idx}_node" in result or f"conserved_{idx}_cons" in result:
+            c += 1
+            idx += 1
+        max_c = max(max_c, c)
+    return max_c
+
+
+def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str]:
     """
     Generate field list with dynamic focal node columns.
 
@@ -153,8 +171,19 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
                 f"mrca_{idx}_posterior",
                 f"mrca_{idx}_path_score",
                 f"mrca_{idx}_contaminated",
+                # Raw derived/ancestral residues (POINT 3): parallel to
+                # mrca_<i>_node, feeds the FOP harvest-wide per-scheme
+                # derived_agreement rebuild. _top_aa / _bot_aa empty when that
+                # side did not change.
+                f"mrca_{idx}_anc_aa",
+                f"mrca_{idx}_top_aa",
+                f"mrca_{idx}_bot_aa",
             ]
         )
+
+    # Parallel conserved-pair block (j ordered by pair_id ascending upstream).
+    for j in range(1, max_conserved + 1):
+        fields.extend([f"conserved_{j}_node", f"conserved_{j}_cons"])
 
     return fields
 
@@ -178,7 +207,7 @@ def _write_csv(
     max_pairs = max_pairs or _detect_max_pairs(results)
 
     # Generate dynamic field list
-    fields = _generate_dynamic_fields(max_pairs)
+    fields = _generate_dynamic_fields(max_pairs, _detect_max_conserved(results))
 
     # Serialize list fields to strings for CSV
     def serialize_value(val):
@@ -235,8 +264,24 @@ def export_from_db(
             except Exception:
                 max_pairs = 1
 
+        # Cheap scan for the conserved-pair block width (string containment on the
+        # stored JSON; 0 for older / single-contrast runs -> no columns).
+        max_conserved = 0
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT result_json FROM results")
+            for (rj,) in cur.fetchall():
+                if not rj or '"conserved_1_node"' not in rj:
+                    continue
+                k = 1
+                while f'"conserved_{k}_node"' in rj or f'"conserved_{k}_cons"' in rj:
+                    k += 1
+                max_conserved = max(max_conserved, k - 1)
+        except Exception:
+            max_conserved = 0
+
         # Prepare CSV writers (streaming)
-        master_fields = _generate_dynamic_fields(max_pairs)
+        master_fields = _generate_dynamic_fields(max_pairs, max_conserved)
 
         def serialize_value(val):
             if isinstance(val, (list, tuple)):
