@@ -1362,7 +1362,7 @@ ggplot(pos_vep_pai_dir, aes(x = phen_score, y = pai_char_score,
     title    = "Phenotype Evolution Score vs PrimateAI-3D Score by Direction",
     subtitle = sprintf("Pearson r (rank-norm): TOP = %.3f | BOTTOM = %.3f",
                        .pai_phen_r_top, .pai_phen_r_bot),
-    x = "phen_score (1 - pvalue_boot)", y = "PrimateAI-3D Score"
+    x = "phen_score (1 - recovery_boot)", y = "PrimateAI-3D Score"
   ) +
   theme(plot.title = element_text(face = "bold"))
 ```

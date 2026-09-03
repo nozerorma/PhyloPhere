@@ -403,12 +403,15 @@ workflow {
                                    && disambiguation_results)
                     ? disambiguation_results.master_csv
                     : Channel.value('NO_GATE')
+                def caas_gene_lengths_ch = Channel.value(
+                    params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE'))
                 caas_perm_out = CAAS_PERMULATION(
                     perm_disc_ch,
                     perm_subset_ch,
                     perm_tree_ch,
                     caas_universe_ch,
                     perm_fop_pairs_ch,
+                    caas_gene_lengths_ch,
                     asr_gate_ch
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms

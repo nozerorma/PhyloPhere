@@ -35,8 +35,46 @@ from modules.alimport import *
 
 from os.path import exists
 import functools
+import re
 import time
 from datetime import datetime
+
+# ---------------------------------------------------------------------------
+# FOP multi-hypothesis (Gap A) — base-cycle collapse of the fanned observed
+# bootstrap. Under params.caas_perms_fop the observed bootstrap resamples over
+# fop_labelings.tab, whose cycle tags are "<base>~H<m>" (one row per null cycle
+# and fanned Dunn-independent alternative hypothesis). recovery_boot must be
+# reported in BASE-CYCLE units: a base cycle HITS an observed (Gene@Position,
+# scheme) iff ANY of its ~H<m> labelings calls a CAAS there (a cheap
+# discovery-level OR — no ASR, no domain pooling; that is Gap B's job on a
+# different set of cycles).
+# ---------------------------------------------------------------------------
+_FOP_H_SUFFIX = re.compile(r"~H\d+$")
+
+
+def _fop_base_cycle(labeling_tag):
+    """'b_12~H3' -> 'b_12'. A tag with no ~H<m> suffix is its own base cycle."""
+    return _FOP_H_SUFFIX.sub("", labeling_tag)
+
+
+def collapse_fop_hits_by_base(per_key_hits, all_labelings):
+    """Collapse per-labeling CAAS hits to base-cycle units (Gap A).
+
+    Args:
+        per_key_hits: {key: [labeling_tag, ...]} — the labeling-unit hits the
+            kernel (or scalar loop) produced. key is a position_name (classical)
+            or (position_name, scheme_name) (caap_mode); tag is "<base>~H<m>".
+        all_labelings: iterable of every labeling tag present in fop_labelings.tab
+            (used for the denominator = number of distinct base cycles).
+
+    Returns:
+        (collapsed_counts, base_total) where collapsed_counts[key] is the number
+        of DISTINCT base cycles with >=1 hit (the recovery_boot numerator) and
+        base_total is the number of distinct base cycles (the denominator).
+    """
+    base_total = len({_fop_base_cycle(t) for t in all_labelings})
+    collapsed = {k: len({_fop_base_cycle(t) for t in v}) for k, v in per_key_hits.items()}
+    return collapsed, base_total
 
 # ---------------------------------------------------------------------------
 # Vectorized (Level-3 BLAS) counting kernel. Optional: if numpy / the module is
@@ -370,15 +408,30 @@ def filter_for_missings(max_m_bg, max_m_fg, max_m_all, mfg, mbg):
 
 
 
-def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all, cycles, multiconfig, miss_pair=False, max_conserved=0, admitted_patterns=["1","2","3"], chunk_size=1000, caap_mode=False, discovery_schemes=None, debug_rejects=False, groups_out=None, perm_discovery_out=None):
+def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all, cycles, multiconfig, miss_pair=False, max_conserved=0, admitted_patterns=["1","2","3"], chunk_size=1000, caap_mode=False, discovery_schemes=None, debug_rejects=False, groups_out=None, perm_discovery_out=None, base_collapse=0):
     """Chunked bootstrap - processes traits in batches to handle large resample files
-    
+
     Args:
         caap_mode: If True, test CAAP grouping schemes instead of classical CAAS
         discovery_schemes: Set of grouping schemes found in discovery for this position (US, GS1-GS4, or CAAS)
                           If None, test all schemes. If provided, only test those schemes.
+        base_collapse: FOP (Gap A) — when > 0, collapse the hit traits to
+                          "<base>~H<m>" base cycles: the returned count is the
+                          number of DISTINCT base cycles with >=1 hit and the
+                          denominator field is base_collapse (the number of
+                          distinct base cycles). When 0 (default) the count is
+                          the plain per-labeling hit count over `cycles`.
     """
-    
+    def _emit_count(hit_traits, position_name, scheme_name):
+        if base_collapse:
+            n = len({_fop_base_cycle(t) for t in hit_traits})
+            denom = base_collapse
+        else:
+            n = len(hit_traits)
+            denom = cycles
+        return "\t".join([position_name, scheme_name, str(n), str(denom),
+                          str(n / denom if denom else 0.0)])
+
     a = set(list_of_traits)
     b = set(processed_position.trait2aas_fg.keys())
     c = set(processed_position.trait2aas_bg.keys())
@@ -393,12 +446,10 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             schemes = [("US", US), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
             outlines = []
             for scheme_name, _ in schemes:
-                outline = "\t".join([position_name, scheme_name, "0", str(cycles), "0.0"])
-                outlines.append(outline)
+                outlines.append(_emit_count([], position_name, scheme_name))
             return "\n".join(outlines)
         else:
-            outline = "\t".join([position_name, "US", "0", str(cycles), "0.0"])
-            return outline
+            return _emit_count([], position_name, "US")
     
     # Process traits in chunks to avoid memory issues with large files
     total_output_traits = []
@@ -553,11 +604,8 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             scheme_set = {name for name, _ in schemes_to_test}
             ordered_schemes = [name for name in ["US", "GS1", "GS2", "GS3", "GS4"] if name in scheme_set]
             for scheme_name in ordered_schemes:
-                count = str(len(scheme_counts[scheme_name]))
-                empval = str(len(scheme_counts[scheme_name])/cycles)
-                outline = "\t".join([position_name, scheme_name, count, str(cycles), empval])
-                outlines.append(outline)
-            
+                outlines.append(_emit_count(scheme_counts[scheme_name], position_name, scheme_name))
+
             return "\n".join(outlines)
         else:
             # Classical CAAS mode
@@ -612,18 +660,23 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             
             # Return aggregated result
             position_name = genename + "@" + str(processed_position.position)
-            count = str(len(total_output_traits))
-            empval = str(int(count)/cycles)
-            outline = "\t".join([position_name, "US", count, str(cycles), empval])
-            
-            return outline
+            return _emit_count(total_output_traits, position_name, "US")
 
 # FUNCTION boot_on_single_alignment()
 # Launches the bootstrap in several lines. Returns a dictionary gene@position --> pvalue
 
-def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None):
+def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None, fop_mode=False):
     """
     Run bootstrap analysis on a single alignment.
+
+    fop_mode (Gap A): resample source is the single fanned file fop_labelings.tab
+    (cycle tags "<base>~H<m>"). Per-labeling CAAS hits are collapsed to base-cycle
+    units before writing: a base cycle counts once iff ANY of its ~H<m> labelings
+    is a CAAS at that (position, scheme). The output row format is unchanged
+    (Gene@Position \\t scheme \\t hits \\t total \\t proportion) with hits/total in
+    base-cycle units. Requires the single-file resample path (fop_labelings.tab is
+    one file); a directory is transparently redirected to fop_labelings.tab inside
+    it when present.
     
     Supports both single-file and directory-based resampled traits:
     - Single file: resampled_traits is a multicfg object loaded from one file
@@ -636,7 +689,23 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
         ... (other parameters as before)
     """
     the_genename = sliced_object.genename
-    
+
+    # FOP (Gap A): fop_labelings.tab is a single file. If a directory was passed,
+    # redirect to the fanned file inside it; degrade to a normal run if absent.
+    if fop_mode:
+        from modules.init_bootstrap import simtrait_revive
+        if isinstance(resampled_traits, str) and os.path.isdir(resampled_traits):
+            _fop_file = os.path.join(resampled_traits, "fop_labelings.tab")
+            if os.path.exists(_fop_file):
+                print(f"[FOP] base-cycle collapse over {_fop_file}")
+                resampled_traits = simtrait_revive(_fop_file)
+            else:
+                print(f"[FOP] WARNING: {_fop_file} not found; running standard bootstrap")
+                fop_mode = False
+        elif isinstance(resampled_traits, str) and os.path.isfile(resampled_traits):
+            print(f"[FOP] base-cycle collapse over {resampled_traits}")
+            resampled_traits = simtrait_revive(resampled_traits)
+
     groups_handle = None
     if export_groups:
         groups_handle = open(export_groups, "w")
@@ -681,7 +750,9 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
         and _VECTORIZE_BOOTSTRAP
         and groups_handle is None
     )
-    collect_hits = perm_discovery_handle is not None
+    # FOP mode needs per-labeling hit identity to collapse to base cycles, even
+    # when no perm_discovery export was requested.
+    collect_hits = perm_discovery_handle is not None or fop_mode
 
     try:
         # Detect if resampled_traits is a directory path or a multicfg object
@@ -907,10 +978,11 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                         max_conserved, the_admitted_patterns, caap_mode,
                         collect_hits=True,
                     )
-                    _emit_perm_discovery_rows(
-                        perm_discovery_handle, resampled_traits_obj, the_genename,
-                        positions_with_schemes, hits, caap_mode, max_conserved,
-                    )
+                    if perm_discovery_handle is not None:
+                        _emit_perm_discovery_rows(
+                            perm_discovery_handle, resampled_traits_obj, the_genename,
+                            positions_with_schemes, hits, caap_mode, max_conserved,
+                        )
                 else:
                     counts = _vectorized_position_counts(
                         resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,
@@ -918,7 +990,13 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                         max_fg_miss, max_bg_miss, max_overall_miss,
                         max_conserved, the_admitted_patterns, caap_mode,
                     )
-                cyc = resampled_traits_obj.cycles
+                if fop_mode:
+                    # Gap A: collapse per-labeling hits to base-cycle units.
+                    collapsed, cyc = collapse_fop_hits_by_base(hits, resampled_traits_obj.alltraits)
+                    counts = collapsed
+                    print(f"[FOP] {len(resampled_traits_obj.alltraits)} labelings -> {cyc} base cycles")
+                else:
+                    cyc = resampled_traits_obj.cycles
                 ooout = open(output_file, "w")
                 if caap_mode:
                     for (position_name, scheme_name), count in counts.items():
@@ -932,6 +1010,8 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 print(f"Results written to {output_file}")
             else:
               # Step 3 & 4: process positions with their specific schemes and run bootstrap
+              _fop_base_total = (len({_fop_base_cycle(t) for t in resampled_traits_obj.alltraits})
+                                 if fop_mode else 0)
               output_lines = []
               for pos_dict, schemes in positions_with_schemes:
                 # Process position
@@ -957,7 +1037,8 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 discovery_schemes=schemes,
                 debug_rejects=False,
                 groups_out=groups_handle,
-                perm_discovery_out=perm_discovery_handle
+                perm_discovery_out=perm_discovery_handle,
+                base_collapse=_fop_base_total,
             )
                 output_lines.append(line_output)
 

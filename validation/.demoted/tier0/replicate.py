@@ -5,7 +5,7 @@ simulated on the SAME tree and phenotype; a fraction carry planted convergent
 substitutions (the power genes), the rest are pure null. This gives:
 
   * a population for the gene/position ranking SCORING produces
-  * a meaningful ``percent_rank(pvalue_boot)`` (needs many positions)
+  * a meaningful ``percent_rank(recovery_boot)`` (needs many positions)
   * many null p-values for the KS-uniformity gate
 
 Output (pipeline-shaped, consumed by the rendered ``run_single.sh``):

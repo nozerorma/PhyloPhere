@@ -190,7 +190,7 @@ TP53	0.9854	8.421	4	top	0.482	0.00099	0.00010	245.8	0.9654
 
 ### 5.2 `position_scores.tsv`
 ```tsv
-gene	position	pos_score	pvalue_hyp	pvalue_boot	asr_path_score	fade_bf	grantham	change_side
+gene	position	pos_score	pvalue_hyp	recovery_boot	asr_path_score	fade_bf	grantham	change_side
 TP53	175	8.421	0.00042	0.00199	0.9421	245.8	29.0	top
 ```
 

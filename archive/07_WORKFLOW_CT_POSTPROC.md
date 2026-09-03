@@ -184,7 +184,7 @@ $$\mathcal{U}_{\text{clean}} = \mathcal{U}_{\text{initial}} \setminus \left( \ma
 ### 5.1 `filtered_discovery.tsv`
 Filtered CAAS dataset free of localized cluster artifacts:
 ```tsv
-Gene	Position	pattern	pvalue	pvalue_boot	is_significant	convergence_type	change_top	change_bottom	caap_group
+Gene	Position	pattern	pvalue	recovery_boot	is_significant	convergence_type	change_top	change_bottom	caap_group
 TP53	175	1	0.00042	0.00199	TRUE	convergent_top	convergent	no_change	US
 ```
 

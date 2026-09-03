@@ -30,7 +30,7 @@ Data Contracts & Validation
 ------------------------------
 1. **CAAS Metadata** (read_caas_metadata_table, get_caas_position_info):
      - Required columns: tag, caas, is_significant, GenePos
-     - Optional columns: pvalue, pvalue_boot
+     - Optional columns: pvalue, recovery_boot
      - FileNotFoundError raised if file missing; ValueError for missing columns
 
 2. **Trait Pairs** (parse_trait_pairs):
@@ -176,7 +176,7 @@ def read_caas_metadata_table(
     metadata_file: Path, gene_name: Optional[str] = None
 ) -> pd.DataFrame:
     """
-    Load CAAS metadata (tag, caas, is_significant, optional pvalue_boot).
+    Load CAAS metadata (tag, caas, is_significant, optional recovery_boot).
 
     - Tries comma-separated first, falls back to tab-separated.
     - Returns a filtered DataFrame if `gene_name` is provided.
@@ -317,9 +317,9 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             caas=caas,
             trait1_aa=trait1,
             trait0_aa=trait0,
-            pvalue_boot=(
-                float(row["pvalue_boot"])
-                if "pvalue_boot" in row and pd.notna(row["pvalue_boot"])
+            recovery_boot=(
+                float(row["recovery_boot"])
+                if "recovery_boot" in row and pd.notna(row["recovery_boot"])
                 else None
             ),
             caap_group=str(row.get("caap_group", "US") or "US"),
@@ -392,19 +392,19 @@ def get_caas_position_info(
             logger.warning("Could not parse pvalue for %s: %s", gene_pos, row["pvalue"])
             info["pvalue"] = None
 
-    # Add pvalue_boot if present (optional column)
-    if "pvalue_boot" in row.index:
+    # Add recovery_boot if present (optional column)
+    if "recovery_boot" in row.index:
         try:
-            pvalue_boot = row["pvalue_boot"]
-            if pd.notna(pvalue_boot):
-                info["pvalue_boot"] = float(pvalue_boot)
+            recovery_boot = row["recovery_boot"]
+            if pd.notna(recovery_boot):
+                info["recovery_boot"] = float(recovery_boot)
             else:
-                info["pvalue_boot"] = None
+                info["recovery_boot"] = None
         except (ValueError, TypeError):
             logger.warning(
-                "Could not parse pvalue_boot for %s: %s", gene_pos, row["pvalue_boot"]
+                "Could not parse recovery_boot for %s: %s", gene_pos, row["recovery_boot"]
             )
-            info["pvalue_boot"] = None
+            info["recovery_boot"] = None
 
     logger.debug(
         "Found CAAS info for %s: tag=%s, significant=%s",
@@ -447,7 +447,7 @@ def build_caas_positions_map(
                     caas=info.get("caas", ""),
                     trait1_aa=[],
                     trait0_aa=[],
-                    pvalue_boot=info.get("pvalue_boot"),
+                    recovery_boot=info.get("recovery_boot"),
                 )
 
                 # Parse amino acid conversion string

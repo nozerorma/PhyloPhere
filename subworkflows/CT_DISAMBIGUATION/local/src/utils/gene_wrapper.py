@@ -25,7 +25,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root / "single_gene_pipeline"))
 sys.path.insert(0, str(project_root / "src"))
 
-from src.convergence.disambiguate_single import analyze_gene_disambiguation
+from src.convergence.disambiguate_single import analyze_gene_disambiguation, PositionAxes
 from src.asr.asr_single import (
     load_alignment_and_mappings,
     load_and_match_tree,
@@ -80,8 +80,8 @@ def convert_convergence_result_to_dict(
             if not hasattr(ns, "pvalue") and "pvalue" in result:
                 ns.pvalue = result.get("pvalue")
 
-            if not hasattr(ns, "pvalue_boot") and "pvalue_boot" in result:
-                ns.pvalue_boot = result.get("pvalue_boot")
+            if not hasattr(ns, "recovery_boot") and "recovery_boot" in result:
+                ns.recovery_boot = result.get("recovery_boot")
 
             if not hasattr(ns, "is_significant") and "is_significant" in result:
                 ns.is_significant = result.get("is_significant")
@@ -110,7 +110,7 @@ def convert_convergence_result_to_dict(
         "position": getattr(result, "position", None),
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
-        "pvalue_boot": getattr(result, "pvalue_boot", None),
+        "recovery_boot": getattr(result, "recovery_boot", None),
         "caap_group": getattr(result, "caap_group", "US"),
         "amino_encoded": getattr(result, "amino_encoded", ""),
         "is_conserved_meta": bool(getattr(result, "is_conserved_meta", False)),
@@ -997,7 +997,7 @@ def build_percent_rank_lookup(hist_by_cycle: Dict[str, Dict[int, int]]) -> Dict[
     """Exact dplyr::percent_rank over each cycle's genome-wide candidate pool.
 
     The null's phenotype axis is a rank, matching how the observed side builds its
-    own (scoring_compute.R: `1 - percent_rank(pvalue_boot)` over the whole scored
+    own (scoring_compute.R: `1 - percent_rank(recovery_boot)` over the whole scored
     pool). The rank is what makes the axis usable: the underlying recovery
     statistic is heavily concentrated near zero (mean ~0.03), so `1 - raw` would be
     a near-constant ~0.97, whereas `1 - percent_rank` is uniform on [0, 1] with
@@ -1054,6 +1054,9 @@ def _perms_worker(
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
+    postproc_filter: bool = False,
+    clust_minlen: int = 3,
+    clust_maxcaas: float = 0.7,
 ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Replay N labelings over one gene's cached ASR. One gene = one worker task.
     Performs on-the-fly aggregation inside the worker, avoiding outputting huge files.
@@ -1129,7 +1132,7 @@ def _perms_worker(
                                 caas=caas,
                                 trait1_aa=trait1,
                                 trait0_aa=trait0,
-                                pvalue_boot=None,
+                                recovery_boot=None,
                                 caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
                                 amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
                                 is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
@@ -1188,7 +1191,7 @@ def _perms_worker(
                                     caas=caas,
                                     trait1_aa=trait1,
                                     trait0_aa=trait0,
-                                    pvalue_boot=None,
+                                    recovery_boot=None,
                                     caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
                                     amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
                                     is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
@@ -1302,7 +1305,7 @@ def _perms_worker(
             cycle_tags = sorted({_bc(c) for c in cycle_tags})
 
         # ── 1. Leave-one-out null_pvalue_boot per (position, scheme) ───────────
-        # This is the null-side analogue of the observed pvalue_boot, which
+        # This is the null-side analogue of the observed recovery_boot, which
         # modules/boot.py computes as count/cycles: "of the resampling cycles,
         # what fraction still recovered THIS position". Here the resampling axis
         # is phenotype relabeling rather than species bootstrap, but the
@@ -1360,6 +1363,32 @@ def _perms_worker(
         # across a position's schemes in pass B to derive change_side: a position
         # counts as "top" if ANY of its schemes changed on the top side, "bottom"
         # likewise, "both" when both hold, "none" otherwise.
+        # ── CT_POSTPROC cluster filter (Gap B) ────────────────────────────────
+        # Per (base cycle, caap_group) run ctrain over this gene's detected
+        # positions, verbatim to filter_caas_clusters-param.py. The `clust` flag
+        # is emitted per detail row (0/1) and, like the observed CT_FILTER step,
+        # it does NOT drop the position from scoring — pass B's cycle-aware gene
+        # filter (dubious mode) is its only consumer. No-op unless
+        # postproc_filter is on (keeps the non-postproc null path unchanged).
+        clust_by: Dict[Tuple[str, str], set] = {}
+        if postproc_filter:
+            from src.convergence.null_postproc import clustering_discards
+            pos_by_cycgrp: Dict[Tuple[str, str], set] = {}
+            for cyc, biochem_results in all_cycle_results:
+                for r in biochem_results:
+                    p = getattr(r, "position", None)
+                    if p is None:
+                        continue
+                    pos_by_cycgrp.setdefault(
+                        (cyc, getattr(r, "caap_group", "US")), set()).add(int(p))
+            by_cyc: Dict[str, Dict[str, set]] = {}
+            for (cyc, grp), pset in pos_by_cycgrp.items():
+                by_cyc.setdefault(cyc, {})[grp] = pset
+            for cyc, pbg in by_cyc.items():
+                for grp, disc in clustering_discards(
+                        pbg, clust_maxcaas, clust_minlen).items():
+                    clust_by[(cyc, grp)] = disc
+
         detail_rows = []
         for cyc, biochem_results in all_cycle_results:
             for r in biochem_results:
@@ -1384,6 +1413,7 @@ def _perms_worker(
                     "n_detected": n_detected_count.get((pos, group), 1),
                     "ct": 1 if change_top in _CHANGE_STATES else 0,
                     "cb": 1 if change_bottom in _CHANGE_STATES else 0,
+                    "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
                 })
 
         return (gene, detail_rows, perm_pos_pval_rows)
@@ -1407,9 +1437,49 @@ def _null_row_caas(row: Dict[str, Any], rank_lookup: Dict[str, Dict[int, float]]
     return phen * float(row["asr_path_score"])
 
 
+def _cycle_gene_removal_from_detail(
+    detail_path: Path,
+    gene_lengths: Dict[str, float],
+    mode: str,
+    iqr_multiplier: float,
+    extreme_percentile: float,
+) -> Set[Tuple[str, str, str]]:
+    """Sub-pass B0 (Gap B): cycle-aware dubious/extreme gene filter.
+
+    One streaming read of perm_pos_detail.tsv.gz. Per (cycle, caap_group, Gene)
+    accumulate the distinct detected Position count and whether any row is
+    ctrain-flagged (`clust`), then apply filter_caas_genes.py's IQR + density
+    logic per (cycle, caap_group) — the base cycle standing in for `trait`.
+    Returns the (cycle, caap_group, Gene) units to drop from the null pool.
+    """
+    import csv as _csv
+    from src.convergence.null_postproc import cycle_gene_removal
+
+    if (mode or "none").lower() == "none":
+        return set()
+
+    seen_pos: Dict[Tuple[str, str, str], set] = {}
+    has_clust: Dict[Tuple[str, str, str], bool] = {}
+    with gzip.open(detail_path, "rt", newline="") as f_in:
+        for row in _csv.DictReader(f_in, delimiter="\t"):
+            key = (row["cycle"], row["caap_group"], row["Gene"])
+            seen_pos.setdefault(key, set()).add(int(row["Position"]))
+            if int(row.get("clust", 0) or 0):
+                has_clust[key] = True
+
+    rows = (
+        (cyc, grp, gene, len(pset), has_clust.get((cyc, grp, gene), False))
+        for (cyc, grp, gene), pset in seen_pos.items()
+    )
+    return cycle_gene_removal(rows, gene_lengths, mode=mode,
+                              iqr_multiplier=iqr_multiplier,
+                              extreme_percentile=extreme_percentile)
+
+
 def _build_cycle_score_pools(
     detail_path: Path,
     rank_lookup: Dict[str, Dict[int, float]],
+    removed: Optional[Set[Tuple[str, str, str]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Sub-pass B1: per-cycle, per-direction pool of position-level null scores.
 
@@ -1438,6 +1508,7 @@ def _build_cycle_score_pools(
     import array
     import csv as _csv
 
+    _rm = removed or set()
     acc: Dict[str, Dict[str, Any]] = {}
 
     def _bump(cyc: str, score: float, ct: int, cb: int) -> None:
@@ -1468,6 +1539,8 @@ def _build_cycle_score_pools(
                     _drain(pos_agg)
                 current_gene = gene
                 pos_agg = {}
+            if _rm and (row["cycle"], row["caap_group"], gene) in _rm:
+                continue
             key = (row["cycle"], int(row["Position"]))
             entry = pos_agg.setdefault(key, [0.0, 0, 0, 0])
             entry[0] += _null_row_caas(row, rank_lookup)
@@ -1504,6 +1577,7 @@ def _finalize_perm_scores(
     cycle_tags: List[str],
     rank_lookup: Dict[str, Dict[int, float]],
     sample_per_cycle_group: Optional[int] = None,
+    removed: Optional[Set[Tuple[str, str, str]]] = None,
 ) -> None:
     """Pass B: rank within each cycle, score, and aggregate to gene x cycle stats.
 
@@ -1544,9 +1618,10 @@ def _finalize_perm_scores(
     rng = random.Random(1998)
     reservoirs: Dict[Tuple[str, str], List[Tuple[str, int, float, float, float]]] = {}
     seen: Dict[Tuple[str, str], int] = {}
+    _rm = removed or set()
 
     # ── Sub-pass B1: per-cycle reference pools for the size-adjusted max ──────
-    cycle_pools = _build_cycle_score_pools(detail_path, rank_lookup)
+    cycle_pools = _build_cycle_score_pools(detail_path, rank_lookup, removed=_rm)
     logger.info("[perms] pass B1 done: size-adjust reference pools built for %d cycles",
                 len(cycle_pools))
 
@@ -1625,6 +1700,8 @@ def _finalize_perm_scores(
 
             cyc = row["cycle"]
             grp = row["caap_group"]
+            if _rm and (cyc, grp, gene) in _rm:
+                continue
             pos = int(row["Position"])
             asr = float(row["asr_path_score"])
             d = int(row["n_detected"])
@@ -1714,6 +1791,13 @@ def process_all_genes_perms(
     cycles: Optional[List[str]] = None,
     max_tasks_per_child: Optional[int] = None,
     fop_pairs_file: Optional[str] = None,
+    gene_lengths_file: Optional[str] = None,
+    clust_minlen: int = 3,
+    clust_maxcaas: float = 0.7,
+    gene_filter_mode: str = "none",
+    iqr_multiplier: float = 3.0,
+    extreme_percentile: float = 0.99,
+    postproc_filter: bool = False,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -1783,13 +1867,30 @@ def process_all_genes_perms(
     detail_path = output_dir / "perm_pos_detail.tsv.gz"
 
     pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot"]
-    detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "ct", "cb"]
+    detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "ct", "cb", "clust"]
+
+    # Gap B: CT_POSTPROC filtering of the null candidate pool. Off by default so
+    # the non-postproc null path is byte-identical; the nextflow layer flips it
+    # on (params.caas_perms_postproc) to distribution-match the observed
+    # filtered_discovery.tsv -> scoring_compute.R chain.
+    gene_lengths: Dict[str, float] = {}
+    if postproc_filter and gene_lengths_file:
+        try:
+            from src.convergence.null_postproc import load_gene_lengths
+            gene_lengths = load_gene_lengths(gene_lengths_file)
+            logger.info(f"[perms] CT_POSTPROC filter ON: {len(gene_lengths)} gene lengths, "
+                        f"cluster minlen={clust_minlen} maxcaas={clust_maxcaas}, "
+                        f"gene_filter_mode={gene_filter_mode}")
+        except Exception as exc:
+            logger.warning(f"[perms] could not load gene lengths ({exc}); "
+                           "extreme-gene filter disabled")
 
     # Generate arguments lazily
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold, convergence_mode,
-         cycle_tags, cycle_trait_files, perm_discovery_file, None, fop_pairs)
+         cycle_tags, cycle_trait_files, perm_discovery_file, None, fop_pairs,
+         postproc_filter, clust_minlen, clust_maxcaas)
         for gene in genes
     )
 
@@ -1857,11 +1958,23 @@ def process_all_genes_perms(
             sizes[0], sizes[len(sizes) // 2], sizes[-1],
         )
 
+    # ── Sub-pass B0 (Gap B): cycle-aware dubious/extreme gene removal ──────────
+    removed: Set[Tuple[str, str, str]] = set()
+    if postproc_filter and (gene_filter_mode or "none").lower() != "none":
+        removed = _cycle_gene_removal_from_detail(
+            detail_path, gene_lengths, gene_filter_mode,
+            iqr_multiplier, extreme_percentile,
+        )
+        logger.info("[perms] pass B0: %d (cycle, group, gene) units removed "
+                    "(mode=%s) — mirrors CAAS_FILTER_GENES on the null pool",
+                    len(removed), gene_filter_mode)
+
     _finalize_perm_scores(
         detail_path=detail_path,
         output_dir=output_dir,
         cycle_tags=cycle_tags,
         rank_lookup=rank_lookup,
+        removed=removed,
     )
 
     logger.info(f"[perms] successfully aggregated {n_genes} genes to summaries inside {output_dir}")

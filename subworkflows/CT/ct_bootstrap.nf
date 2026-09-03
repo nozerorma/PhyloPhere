@@ -49,6 +49,9 @@ process BOOTSTRAP {
 
     script:
     def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
+    // FOP (Gap A): resample over the fanned fop_labelings.tab (staged inside
+    // resampledPath) and collapse recovery_boot to base-cycle units.
+    def fop_arg = (params.caas_perms_fop && params.multi_hypothesis) ? "--fop" : ""
     def discovery_arg = discoveryFile.name != 'NO_FILE' ? "--discovery ${discoveryFile}" : ""
     def export_groups_arg = (params.export_groups != null && params.export_groups != "none") ? "--export_groups ${alignmentID}.bootstrap.groups.output" : ""
     def export_perm_discovery_arg = (params.export_perm_discovery != null && params.export_perm_discovery != "none") ? "--export_perm_discovery ${alignmentID}.bootstrap.discovery.output" : ""
@@ -88,6 +91,7 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
             ${discovery_arg} \\
             ${export_groups_arg} \\
             ${export_perm_discovery_arg} \\
+            ${fop_arg} \\
             ${args.replaceAll('\n', ' ')} \\
             --max_conserved \$_max_conserved \\
             --max_bg_gaps \$_max_bg_gaps \\
@@ -111,6 +115,7 @@ echo "Resolved thresholds for \$n_pairs pairs: max_conserved=\$_max_conserved bg
             ${discovery_arg} \\
             ${export_groups_arg} \\
             ${export_perm_discovery_arg} \\
+            ${fop_arg} \\
             ${args.replaceAll('\n', ' ')} \\
             --max_conserved \$_max_conserved \\
             --max_bg_gaps \$_max_bg_gaps \\
@@ -145,6 +150,8 @@ process BOOTSTRAP_BATCHED {
 
     script:
     def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
+    // FOP (Gap A): base-cycle-collapsed bootstrap over the fanned fop_labelings.tab.
+    def fopFlag = (params.caas_perms_fop && params.multi_hypothesis) ? '1' : '0'
     def ctBinary = (params.use_singularity || params.use_apptainer)
         ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct"
         : "$baseDir/subworkflows/CT/local/ct"
@@ -189,6 +196,7 @@ bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
     --progress-log 0 \\
     --export-groups ${params.export_groups != null && params.export_groups != "none" ? '1' : '0'} \\
     --export-perm-discovery ${params.export_perm_discovery != null && params.export_perm_discovery != "none" ? '1' : '0'} \\
+    --fop ${fopFlag} \\
     --extra-args-file .ct_bootstrap_batch_args
 """
 }

@@ -226,7 +226,7 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
 # Priority ONLY for picking a representative scheme's display/gating columns
-# (pvalue, pvalue_boot, change_side, caap_group, ...) at the Gene×Position
+# (pvalue, recovery_boot, change_side, caap_group, ...) at the Gene×Position
 # aggregation below (section 2g). Deliberately separate from the scoring itself,
 # which treats all five schemes symmetrically.
 scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
@@ -297,17 +297,17 @@ df$core <- suppressWarnings(as.numeric(df$core))
 # ── 2f. Per-row two-way CAAS score ────────────────────────────────────────────
 # caas_row is the product of two orthogonal [0,1] evidence axes, computed per
 # (position, scheme) row:
-#   phen_score = 1 - percent_rank(pvalue_boot): permutation confidence.
+#   phen_score = 1 - percent_rank(recovery_boot): permutation confidence.
 #   asr_score  = asr_path_score: the unified ASR signal (section above).
 # The hypergeometric pvalue is not part of this product; it is the significance
 # gate (gate_all / gate_sig, section 2h).
 # percent_rank is genome-wide, so it must see each (Gene, Position, scheme)
-# exactly once. §2b already collapsed the FOP hypothesis rows, so pvalue_boot
+# exactly once. §2b already collapsed the FOP hypothesis rows, so recovery_boot
 # here is the representative (highest-asr) hypothesis's permutation p and the
 # rank is undistorted by how many hypotheses a position happened to harvest.
 df <- df %>%
   mutate(
-    phen_score = 1 - dplyr::percent_rank(pvalue_boot),
+    phen_score = 1 - dplyr::percent_rank(recovery_boot),
     caas_row   = phen_score * asr_score
   )
 
@@ -335,9 +335,10 @@ pos_scores <- df %>%
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
     # POINT 3 descriptors: position-level after §2b pooling -> first() carries them.
-    derived_residues    = if ("derived_residues" %in% names(df)) dplyr::first(derived_residues) else "",
-    residue_support     = if ("residue_support" %in% names(df)) dplyr::first(residue_support) else "",
-    convergence_schemes = if ("convergence_schemes" %in% names(df)) dplyr::first(convergence_schemes) else "",
+    derived_residues       = if ("derived_residues" %in% names(df)) dplyr::first(derived_residues) else "",
+    top_residue_support    = if ("top_residue_support" %in% names(df)) dplyr::first(top_residue_support) else "",
+    bottom_residue_support = if ("bottom_residue_support" %in% names(df)) dplyr::first(bottom_residue_support) else "",
+    convergence_schemes    = if ("convergence_schemes" %in% names(df)) dplyr::first(convergence_schemes) else "",
     asr_score          = mean(asr_score,          na.rm = TRUE),
     mrca_diversity     = mean(mrca_diversity,     na.rm = TRUE),
     derived_agreement  = mean(derived_agreement,  na.rm = TRUE),
@@ -345,7 +346,7 @@ pos_scores <- df %>%
     core               = mean(core,               na.rm = TRUE),
     core_perside_pooled = if ("core_perside_pooled" %in% names(df)) mean(core_perside_pooled, na.rm = TRUE) else NA_real_,
     phen_score         = mean(phen_score,         na.rm = TRUE),
-    pvalue_boot        = first(pvalue_boot),
+    recovery_boot        = first(recovery_boot),
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
     all_mrca_posterior = first(all_mrca_posterior),
@@ -945,12 +946,13 @@ cat("\n─── Writing outputs ───────────────�
 
 # Position scores
 pos_out <- pos_scores %>%
-  select(Gene, Position, any_of("pvalue_boot"),
+  select(Gene, Position, any_of("recovery_boot"),
          asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core",
                              "core_perside_pooled")),
          any_of("phen_score"), n_schemes, any_of("scheme_set"),
          any_of(c("n_hypotheses", "supporting_hypotheses",
-                  "derived_residues", "residue_support", "convergence_schemes")), CAAS_score,
+                  "derived_residues", "top_residue_support", "bottom_residue_support",
+                  "convergence_schemes")), CAAS_score,
          change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))

@@ -150,12 +150,12 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # CT p-value measures
-boot_measure_col <- if ("pvalue_boot" %in% names(pos_df)) {
-  "pvalue_boot"
+boot_measure_col <- if ("recovery_boot" %in% names(pos_df)) {
+  "recovery_boot"
 } else {
-  stop("position_scores.tsv must contain pvalue_boot column")
+  stop("position_scores.tsv must contain recovery_boot column")
 }
-boot_measure_is_raw  <- identical(boot_measure_col,  "pvalue_boot")
+boot_measure_is_raw  <- identical(boot_measure_col,  "recovery_boot")
 
 # Provisional detection - overridden in the load-data block after directional scores are computed
 # NOTE: what for then?
@@ -174,7 +174,7 @@ has_genomic       <- .file_ok(params$genomic_info_file)
 has_perms         <- .file_ok(params$caas_perms_file)
 has_pos_pval      <- .file_ok(params$caas_pos_pval_file)      # LOO null_pvalue_boot per (gene,position,scheme)
 has_pos_sample    <- .file_ok(params$caas_pos_sample_file)    # cycle-stratified null sample (asr + phen + row_caas)
-has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score + pvalue_boot
+has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score + recovery_boot
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
 # FADE gene-level data: computed independently by scoring_compute.R from
@@ -241,7 +241,7 @@ if (has_perms) {
 # Position-level null (cycle-stratified sample) + observed (filtered_discovery).
 # The observed side re-derives caas_row exactly as scoring_compute.R section 2f
 # does, so the values plotted here are what the pipeline actually scores on:
-#     phen_score = 1 - percent_rank(pvalue_boot)   ranked over filtered_discovery
+#     phen_score = 1 - percent_rank(recovery_boot)   ranked over filtered_discovery
 #     caas_row   = phen_score * asr_path_score
 # The null side arrives pre-ranked from gene_wrapper.py pass B: null_phen_score is
 # 1 - percent_rank of the leave-one-out null_pvalue_boot within that cycle's
@@ -275,11 +275,11 @@ if (has_pos_sample && has_filtered) {
     transmute(caap_group,
               cycle          = NA_character_,
               asr_path_score = suppressWarnings(as.numeric(asr_path_score)),
-              pvalue_boot    = suppressWarnings(as.numeric(pvalue_boot)),
-              phen_score     = 1 - dplyr::percent_rank(pvalue_boot),
+              recovery_boot    = suppressWarnings(as.numeric(recovery_boot)),
+              phen_score     = 1 - dplyr::percent_rank(recovery_boot),
               caas_row       = phen_score * asr_path_score,
               source = "observed") %>%
-    select(-pvalue_boot)
+    select(-recovery_boot)
   scheme_overlay <- bind_rows(null_pos, obs_pos) %>%
     filter(caap_group %in% scheme_levels) %>%
     mutate(caap_group = factor(caap_group, levels = scheme_levels),
@@ -305,7 +305,7 @@ if (has_pos_quantiles) {
 
 # Full LOO null_pvalue_boot table (small) - the direct observed-vs-null crosscheck
 # for the phenotype axis BEFORE ranking. null_pvalue_boot = (n_detected - 1)/(N - 1)
-# is the null's analogue of the observed pvalue_boot = count/cycles: same statistic
+# is the null's analogue of the observed recovery_boot = count/cycles: same statistic
 # ("what fraction of resampling cycles recovered this position"), different
 # resampling axis (phenotype relabeling vs species bootstrap).
 .unranked_perm_pval <- FALSE
@@ -323,12 +323,12 @@ if (has_pos_pval) {
   perm_pos_pval <- NULL
 }
 
-# Observed pvalue_boot per scheme, paired against the null table above.
+# Observed recovery_boot per scheme, paired against the null table above.
 if (has_filtered) {
   obs_pos_pval <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
     transmute(caap_group,
-              pvalue_boot = suppressWarnings(as.numeric(pvalue_boot))) %>%
-    filter(caap_group %in% scheme_levels, is.finite(pvalue_boot)) %>%
+              recovery_boot = suppressWarnings(as.numeric(recovery_boot))) %>%
+    filter(caap_group %in% scheme_levels, is.finite(recovery_boot)) %>%
     mutate(caap_group = factor(caap_group, levels = scheme_levels))
 } else {
   obs_pos_pval <- NULL
@@ -553,7 +553,7 @@ reproduced independently of the pipeline code.
 
 #### 1. Phenotype evolution: `phen_score`
 
-One minus the permutation p-value (`pvalue_boot`), which permutes the phenotype
+One minus the permutation p-value (`recovery_boot`), which permutes the phenotype
 on the tree:
 
 $$\text{phen\_score} = 1 - P_{\text{boot}}$$
@@ -677,7 +677,7 @@ ggplot(joint_df, aes(x = asr_score, y = phen_score, colour = CAAS_score)) +
   labs(
     title    = "Orthogonal Evidence Axes: ASR Path Score vs Phenotype Evolution Score",
     x        = "asr_score (Ancestral State Path Confidence)",
-    y        = "phen_score (1 - percent_rank(pvalue_boot))"
+    y        = "phen_score (1 - percent_rank(recovery_boot))"
   ) +
   theme(plot.title = element_text(face = "bold"))
 ```
@@ -701,11 +701,11 @@ observed pipeline:
   `null_phen_score = 1 − percent_rank(null_pvalue_boot)` and
   `null_pvalue_boot = (n_detected − 1)/(N − 1)` is the leave-one-out share of the *other*
   cycles that also recovered that position - the null analogue of the observed
-  `pvalue_boot = count/cycles`.
+  `recovery_boot = count/cycles`.
 
 > [!IMPORTANT]
 > **Both sides are `percent_rank`ed, and they must be.** The observed
-> `phen_score = 1 − percent_rank(pvalue_boot)` is ranked across the whole scored pool;
+> `phen_score = 1 − percent_rank(recovery_boot)` is ranked across the whole scored pool;
 > the null's is ranked across that cycle's genome-wide candidate pool. The rank is what
 > escapes the `1/N` resolution floor - the raw statistic is heavily concentrated near 0
 > (observed mean ≈ 0.05), so without ranking the axis collapses to a near-constant ≈ 0.97
@@ -960,7 +960,7 @@ substantially, the two sides are not being built the same way.
 ```{r perm-pos-pval, eval=has_pval_pair, fig.height=6, fig.width=10}
 .pval_pair <- dplyr::bind_rows(
   perm_pos_pval %>% transmute(grp = caap_group, value = null_pvalue_boot, source = "Null"),
-  obs_pos_pval  %>% transmute(grp = caap_group, value = pvalue_boot,      source = "Observed")
+  obs_pos_pval  %>% transmute(grp = caap_group, value = recovery_boot,      source = "Observed")
 )
 knitr::kable(
   .pval_pair %>% group_by(grp, source) %>%
@@ -970,7 +970,7 @@ knitr::kable(
   digits = 4,
   caption = sprintf(paste0("RAW phenotype statistic per scheme. Null `null_pvalue_boot` = ",
                            "(n_detected-1)/(N-1), leave-one-out over N=%d cycles; observed ",
-                           "`pvalue_boot` = count/cycles from the species bootstrap."),
+                           "`recovery_boot` = count/cycles from the species bootstrap."),
                     perm_pos_pval$n_cycles[1]))
 print(.paired_violin(
   .pval_pair, xlab = "CAAP scheme", ylab = "raw p-value",
@@ -1061,8 +1061,8 @@ obs_tbl <- purrr::imap_dfr(.dir_subsets, function(d, dir) {
   tibble::tibble(
     direction               = dir,
     positions               = nrow(d),
-    `median permutation p`  = if ("pvalue_boot" %in% names(d)) median(d$pvalue_boot, na.rm = TRUE) else NA_real_,
-    `mean permutation p`    = if ("pvalue_boot" %in% names(d)) mean(d$pvalue_boot,   na.rm = TRUE) else NA_real_,
+    `median permutation p`  = if ("recovery_boot" %in% names(d)) median(d$recovery_boot, na.rm = TRUE) else NA_real_,
+    `mean permutation p`    = if ("recovery_boot" %in% names(d)) mean(d$recovery_boot,   na.rm = TRUE) else NA_real_,
     `median CAAS score`     = if ("CAAS_score" %in% names(d))  median(d$CAAS_score,  na.rm = TRUE) else NA_real_
   )
 })
@@ -1130,7 +1130,7 @@ agreement x conservation); those sub-factors are not shown here.
   .axis_plot("asr_score", "ASR Path Score (position evolution)",
              "Unified five-factor ASR path score (core x independence x diversity x agreement x conservation)",
              .tableau10[3], .tableau10[4]),
-  .axis_plot("phen_score", "Phenotype Evolution (1 - pvalue_boot)",
+  .axis_plot("phen_score", "Phenotype Evolution (1 - recovery_boot)",
              "Permulation evidence",
              .tableau10[1], .tableau10[2])
 ))
@@ -1293,7 +1293,7 @@ DT::datatable(
 # supplementary diagnostics. any_of() keeps this robust to absent columns.
 display_cols <- c("Gene", "Position", "CAAS_score",
                   "phen_score", "asr_score", "core",
-                  "pvalue_boot",
+                  "recovery_boot",
                   "n_schemes", "scheme_set", "change_side",
                   "is_top_10pct", "is_top_5pct", "is_top_1pct",
                   "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
@@ -1463,7 +1463,7 @@ gridExtra::grid.arrange(
   p_boot_top, p_boot_bot,
   ncol = 2,
   top  = grid::textGrob(
-    "Permutation p-value (pvalue_boot) distribution by direction",
+    "Permutation p-value (recovery_boot) distribution by direction",
     gp = grid::gpar(fontface = "bold", fontsize = 12)
   )
 )
@@ -1511,7 +1511,7 @@ dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       "phen_score", "asr_score", "core",
                       if (has_caas_col) "caas",
                       "n_schemes", "scheme_set",
-                      "pvalue_boot",
+                      "recovery_boot",
                       "change_side",
                       "is_top_10pct", "is_top_5pct", "is_top_1pct",
                       "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
@@ -1699,8 +1699,17 @@ if (has_fade_pos) cat(r"(
 # Subtract 1 here to align coordinate systems before joining.
 .load_fade_sites <- function(path) {
   if (!.file_ok(path)) return(NULL)
-  df <- read_tsv(path, show_col_types = FALSE)
+  # FADE_JSON_TO_CSV emits a comma-separated file (fade_sites_*.csv); older
+  # paths handed a .tsv. Pick the reader by the delimiter actually present on
+  # the header line rather than trusting the extension.
+  hdr <- tryCatch(readLines(path, n = 1L, warn = FALSE), error = function(e) "")
+  df <- if (length(hdr) && grepl(",", hdr) && !grepl("\t", hdr)) {
+    read_csv(path, show_col_types = FALSE)
+  } else {
+    read_tsv(path, show_col_types = FALSE)
+  }
   names(df) <- tolower(names(df))
+  if (ncol(df) < 2) return(NULL)  # malformed / single-column: nothing to join
   
   if (!"gene" %in% names(df)) names(df)[1] <- "gene"
   if ("site" %in% names(df)) {

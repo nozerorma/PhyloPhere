@@ -33,7 +33,7 @@ graph TD
     subgraph SignificationEngine["2. Statistical Testing Engine (7.CT_signification.Rmd)"]
         Join["Relational Join by Gene + Position + CAAP Group"]
         Hyp["Analytical Hypergeometric Significance (pvalue)"]
-        Perm["Empirical Permutation Significance (pvalue_boot)"]
+        Perm["Empirical Permutation Significance (recovery_boot)"]
         FDR["Stratified Benjamini-Hochberg FDR (pvalue_fdr)"]
         DynFDR["Dynamic FDR Threshold Calibration (alpha = 0.05 -> 0.10 -> 0.15)"]
     end
@@ -160,7 +160,7 @@ This prevents zero-discovery bottlenecks in underpowered comparative cohorts whi
 ### 5.1 `global_meta_caas.tsv` / `meta_caas.tsv`
 Comprehensive position-level metadata file linking discovery features, empirical statistics, and significance flags:
 ```tsv
-Gene	Position	GenePos	pattern	pvalue	pvalue_boot	occurrences	total	pvalue_fdr	alpha_fdr	is_significant	sig_hyp	sig_perm	sig_hyp_fdr	caap_group	FG_AAs	BG_AAs	FG_Species	BG_Species
+Gene	Position	GenePos	pattern	pvalue	recovery_boot	occurrences	total	pvalue_fdr	alpha_fdr	is_significant	sig_hyp	sig_perm	sig_hyp_fdr	caap_group	FG_AAs	BG_AAs	FG_Species	BG_Species
 TP53	175	TP53@175	1	0.00042	0.00199	2	1000	0.01250	0.05	TRUE	TRUE	TRUE	TRUE	US	R,R,R	H,H,H	Homo_sapiens,Loxodonta_africana,Balaenoptera_musculus	Pan_troglodytes,Procavia_capensis,Hippopotamus_amphibius
 ```
 

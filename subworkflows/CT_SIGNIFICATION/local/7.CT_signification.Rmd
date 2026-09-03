@@ -193,8 +193,8 @@ cat(sprintf("Loading bootstrap file: %s\n", basename(bootstrap_file_path)))
 
 # Load bootstrap data (headerless expected, but tolerate legacy variants)
 # Supported formats:
-#   5 cols: GenePos caap_group occurrences total pvalue_boot
-#   4 cols: GenePos occurrences total pvalue_boot   (legacy CAAS)
+#   5 cols: GenePos caap_group occurrences total recovery_boot
+#   4 cols: GenePos occurrences total recovery_boot   (legacy CAAS)
 bootstrap_raw <- tryCatch({
   read_tsv(
     bootstrap_file_path,
@@ -210,9 +210,9 @@ if (ncol(bootstrap_raw) < 4) {
 }
 
 if (ncol(bootstrap_raw) >= 5) {
-  names(bootstrap_raw)[1:5] <- c("GenePos", "caap_group", "occurrences", "total", "pvalue_boot")
+  names(bootstrap_raw)[1:5] <- c("GenePos", "caap_group", "occurrences", "total", "recovery_boot")
 } else {
-  names(bootstrap_raw)[1:4] <- c("GenePos", "occurrences", "total", "pvalue_boot")
+  names(bootstrap_raw)[1:4] <- c("GenePos", "occurrences", "total", "recovery_boot")
   bootstrap_raw <- bootstrap_raw %>% mutate(caap_group = "US")
 }
 
@@ -226,7 +226,7 @@ bootstrap_raw <- bootstrap_raw %>%
     caap_group = if_else(is.na(caap_group) | caap_group == "", "US", caap_group),
     occurrences = suppressWarnings(as.integer(occurrences)),
     total = suppressWarnings(as.integer(total)),
-    pvalue_boot = suppressWarnings(as.numeric(pvalue_boot))
+    recovery_boot = suppressWarnings(as.numeric(recovery_boot))
   )
 
 # Split GenePos into Gene and Position
@@ -235,8 +235,8 @@ bootstrap_df <- bootstrap_raw %>%
   mutate(Position = as.integer(Position))
 
 # Final safeguard for expected columns
-if (!"pvalue_boot" %in% names(bootstrap_df)) {
-  stop("Bootstrap integration requires pvalue_boot column after normalization")
+if (!"recovery_boot" %in% names(bootstrap_df)) {
+  stop("Bootstrap integration requires recovery_boot column after normalization")
 }
 
 cat(sprintf("Loaded bootstrap data: %s permutations\n", 
@@ -259,13 +259,13 @@ if (bootstrap_has_groups) {
 # Calculate empirical p-values
 cat("\nIntegrating bootstrap p-values...\n")
 
-# Bootstrap file already contains pvalue_boot, just need to join
+# Bootstrap file already contains recovery_boot, just need to join
 if (has_caap_group && bootstrap_has_groups) {
   # Group-aware permutation p-values
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, caap_group, pvalue_boot, occurrences, total),
+        select(Gene, Position, caap_group, recovery_boot, occurrences, total),
       by = c("Gene", "Position", "caap_group")
     )
 } else if (has_caap_group && !bootstrap_has_groups) {
@@ -274,7 +274,7 @@ if (has_caap_group && bootstrap_has_groups) {
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, pvalue_boot, occurrences, total) %>%
+        select(Gene, Position, recovery_boot, occurrences, total) %>%
         distinct(Gene, Position, .keep_all = TRUE),
       by = c("Gene", "Position")
     )
@@ -283,7 +283,7 @@ if (has_caap_group && bootstrap_has_groups) {
   discovery_with_perm <- discovery_df %>%
     left_join(
       bootstrap_df %>%
-        select(Gene, Position, pvalue_boot, occurrences, total),
+        select(Gene, Position, recovery_boot, occurrences, total),
       by = c("Gene", "Position")
     )
 }
@@ -291,7 +291,7 @@ if (has_caap_group && bootstrap_has_groups) {
 # Handle missing permutation p-values
 discovery_with_perm <- discovery_with_perm %>%
   mutate(
-    pvalue_boot = if_else(is.na(pvalue_boot), 1.0, pvalue_boot),
+    recovery_boot = if_else(is.na(recovery_boot), 1.0, recovery_boot),
     occurrences = if_else(is.na(occurrences), 0L, as.integer(occurrences)),
     total = if_else(is.na(total), 0L, as.integer(total))
   )
@@ -305,7 +305,7 @@ if (!"conserved_pair" %in% names(discovery_with_perm)) {
 }
 
 cat(sprintf("Integrated bootstrap p-values for %d positions\n", 
-            sum(!is.na(discovery_with_perm$pvalue_boot))))
+            sum(!is.na(discovery_with_perm$recovery_boot))))
 
 cat("\n=== Bootstrap Integration Complete ===\n")
 ```
@@ -434,7 +434,7 @@ if (has_caap_group) {
       ) %>%
       select(
         tag, GenePos, Gene, Position, pattern, caap_group,
-        pvalue_boot, occurrences, total,
+        recovery_boot, occurrences, total,
         is_conserved_meta, conserved_pair, caas, amino_encoded,
         dplyr::any_of(c("trait", "hyp_id"))
       )
@@ -462,7 +462,7 @@ if (has_caap_group) {
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern, caap_group,
-      pvalue_boot, occurrences, total,
+      recovery_boot, occurrences, total,
       is_conserved_meta, conserved_pair, caas, amino_encoded,
       dplyr::any_of(c("trait", "hyp_id"))
     )
@@ -488,7 +488,7 @@ if (has_caap_group) {
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern,
-      pvalue_boot, occurrences, total,
+      recovery_boot, occurrences, total,
       is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 

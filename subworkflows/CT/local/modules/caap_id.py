@@ -292,28 +292,15 @@ def check_caap_pattern(fg_aas: str, bg_aas: str, scheme_dict: Dict[str, str],
     fg_unique = set(fg_groups)
     bg_unique = set(bg_groups)
 
-    # Pattern classification (Computed across divergent pairs, ignoring conserved pairs)
-    min_len = min(len(fg_groups), len(bg_groups))
-    fg_div_groups = [fg_groups[i] for i in range(min_len) if fg_groups[i] != bg_groups[i]]
-    bg_div_groups = [bg_groups[i] for i in range(min_len) if fg_groups[i] != bg_groups[i]]
-
-    if fg_div_groups and bg_div_groups:
-        fg_pat_unique = set(fg_div_groups)
-        bg_pat_unique = set(bg_div_groups)
-    else:
-        fg_pat_unique = set(fg_groups)
-        bg_pat_unique = set(bg_groups)
-
-    if len(fg_pat_unique) == 1 and len(bg_pat_unique) == 1:
+    # Pattern classification (same as caas_id.py iscaas())
+    if len(fg_unique) == 1 and len(bg_unique) == 1:
         z.pattern = "1"
-    elif len(fg_pat_unique) == 1 and len(bg_pat_unique) > 1:
+    elif len(fg_unique) == 1:
         z.pattern = "2"
-    elif len(fg_pat_unique) > 1 and len(bg_pat_unique) == 1:
+    elif len(bg_unique) == 1:
         z.pattern = "3"
-    elif len(fg_pat_unique) > 1 and len(bg_pat_unique) > 1:
+    elif len(fg_unique) > 1 and len(bg_unique) > 1:
         z.pattern = "4"
-    else:
-        z.pattern = "null"
 
     if len(fg_unique) == 0 or len(bg_unique) == 0:
         z.pattern = "null"

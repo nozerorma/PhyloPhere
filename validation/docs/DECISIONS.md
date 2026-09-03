@@ -191,7 +191,7 @@ After inspecting the real cancer run and the permulation code, the Tier 0 design
 was rebuilt:
 
 - **The pipeline is a prioritisation engine.** Its permulation p-values
-  (`pvalue_boot`, `null_pvalue_boot`) are conditional foreground-specificity
+  (`recovery_boot`, `null_pvalue_boot`) are conditional foreground-specificity
   scores — 0% exact zero on the real run, but ~78% ≤ 0.05 because discovery
   pre-selects positions that align with the foreground. They are *never*
   Uniform(0,1), on a real trait or a null. `phen_score = 1 - percent_rank(...)`
@@ -350,7 +350,7 @@ picked instead of the origin tip).
 
 ### D-T0-M — ad-hoc: what the null set actually tests + selectable p-value source
 The pipeline's null **is** the BM permulation (D-T0-B): `CAAS_PERMS_DISAMBIGUATE`
-replays N phenotype relabelings through detection + ASR, and `pvalue_boot` /
+replays N phenotype relabelings through detection + ASR, and `recovery_boot` /
 `null_pvalue_boot` are that permulation p-value. So the Tier 0 null set (no
 planted signal, random foreground) is a *calibration check on the permulation*:
 when nothing convergent is associated with the trait, are those permulation
@@ -361,7 +361,7 @@ except insofar as those chance convergences sometimes align with the random
 foreground across many replicates (which the KS test integrates over).
 
 `harness.cli calibrate --pcol` chooses the column, now just two:
-`meta_caas_boot` (default, **the gate** — `US_meta_caas.tsv:pvalue_boot`, the
+`meta_caas_boot` (default, **the gate** — `US_meta_caas.tsv:recovery_boot`, the
 permulation p that drives the significance call) and `perm_pos_boot`
 (`perm_pos_pval.tsv:null_pvalue_boot`, the raw per-position permulation p before
 meta-aggregation and FDR — diagnostic, shows the null before smoothing).

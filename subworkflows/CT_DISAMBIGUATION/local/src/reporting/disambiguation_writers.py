@@ -135,7 +135,7 @@ def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str
         "msa_pos",
         "tag",
         "caas",
-        "pvalue_boot",
+        "recovery_boot",
         # Pattern classification
         "convergence_type",
         # Metadata-driven convergence context

@@ -63,6 +63,23 @@ def parse_arguments():
              "weights. When given, the resample dir is expected to hold resample_fop.tab "
              "('<base>~H<m>' labelings) and each base cycle's hypotheses are domain-pooled.",
     )
+    # ── Gap B: CT_POSTPROC filtering of the null candidate pool ───────────────
+    p.add_argument("--postproc-filter", action="store_true",
+                   help="Apply the observed CT_POSTPROC cluster + gene filters to "
+                        "the per-cycle null CAAS pool before scoring (distribution-"
+                        "matches caas_perms.rds to the observed filtered_discovery).")
+    p.add_argument("--gene-lengths", default=None,
+                   help="Gene annotation TSV (gene, length ...) for the extreme-gene "
+                        "density filter. Same file as CT_POSTPROC's gene_ensembl_file.")
+    p.add_argument("--clust-minlen", type=int, default=3,
+                   help="CT_FILTER minlen (params.filter_minlen; default 3)")
+    p.add_argument("--clust-maxcaas", type=float, default=0.7,
+                   help="CT_FILTER maxcaas density (params.filter_maxcaas; default 0.7)")
+    p.add_argument("--gene-filter-mode", default="none",
+                   choices=["none", "extreme", "dubious", "both"],
+                   help="CAAS_FILTER_GENES mode (params.gene_filter_mode)")
+    p.add_argument("--iqr-multiplier", type=float, default=3.0)
+    p.add_argument("--extreme-percentile", type=float, default=0.99)
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     return p.parse_args()
@@ -145,6 +162,13 @@ def main():
         cycles=cycles,
         max_tasks_per_child=args.max_tasks_per_child,
         fop_pairs_file=args.fop_pairs,
+        gene_lengths_file=args.gene_lengths,
+        clust_minlen=args.clust_minlen,
+        clust_maxcaas=args.clust_maxcaas,
+        gene_filter_mode=args.gene_filter_mode,
+        iqr_multiplier=args.iqr_multiplier,
+        extreme_percentile=args.extreme_percentile,
+        postproc_filter=args.postproc_filter,
     )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 

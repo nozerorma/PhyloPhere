@@ -515,7 +515,7 @@ def analyze_caas_position_disambiguation(
         pair_derived_top_aa=pair_derived_top_aa or None,
         pair_derived_bot_aa=pair_derived_bot_aa or None,
         score=None,
-        pvalue_boot=getattr(caas_pos, "pvalue_boot", None),
+        recovery_boot=getattr(caas_pos, "recovery_boot", None),
     )
 
 

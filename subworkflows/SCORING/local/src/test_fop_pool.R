@@ -185,8 +185,10 @@ check(identical(resP3$convergence_schemes, "GS3,GS4"),
       "POINT3: convergence_schemes == GS3,GS4 (da >= 0.8 only there)")
 check(identical(resP3$derived_residues, "A/IV"),
       "POINT3: derived_residues == A/IV")
-check(identical(resP3$residue_support, "bot:I:2,V:2"),
-      "POINT3: residue_support == bot:I:2,V:2 (distinct-pair counts)")
+check(identical(resP3$bottom_residue_support, "I:2,V:2"),
+      "POINT3: bottom_residue_support == I:2,V:2 (distinct-pair counts)")
+check(identical(resP3$top_residue_support, ""),
+      "POINT3: top_residue_support empty (all changes on bottom side)")
 
 resP3g <- apply_fop_pooling(mk_p3("GS4"), NULL)
 check(approx(resP3g$derived_agreement, 1.0),
@@ -203,7 +205,8 @@ check(identical(resP3n$convergence_schemes, ""),
       "POINT3 fallback: convergence_schemes empty without raw residues")
 
 # Non-FOP input still gets the (empty) descriptor columns for a stable schema.
-check(all(c("derived_residues", "residue_support", "convergence_schemes") %in% names(res1)),
+check(all(c("derived_residues", "top_residue_support", "bottom_residue_support",
+            "convergence_schemes") %in% names(res1)),
       "POINT3: single-hyp output carries empty descriptor columns")
 check(identical(res1$convergence_schemes, ""), "POINT3: single-hyp descriptors empty")
 

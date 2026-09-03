@@ -295,27 +295,16 @@ def iscaas(input_string, multiconfig=None, position_dict=None, max_conserved=0, 
             pair_list = ",".join(conserved_pair_indices) if conserved_pair_indices else ""
             z.conserved_pairs = f"{overlap}:{pair_list}"
 
-    # What is the pattern? (Computed across divergent pairs, ignoring conserved pairs)
-    min_len = min(len(fg_string), len(bg_string))
-    fg_div = [fg_string[i] for i in range(min_len) if fg_string[i] != bg_string[i]]
-    bg_div = [bg_string[i] for i in range(min_len) if fg_string[i] != bg_string[i]]
-
-    if fg_div and bg_div:
-        fg_pat_unique = set(fg_div)
-        bg_pat_unique = set(bg_div)
-    else:
-        fg_pat_unique = set(fg_unique)
-        bg_pat_unique = set(bg_unique)
-
-    if len(fg_pat_unique) == 1 and len(bg_pat_unique) == 1:
+    # What is the pattern?
+    if len(fg_unique) == 1 and len(bg_unique) == 1:
         z.pattern = "1"
-    elif len(fg_pat_unique) == 1 and len(bg_pat_unique) > 1:
+
+    elif len(fg_unique) == 1:
         z.pattern = "2"
-    elif len(fg_pat_unique) > 1 and len(bg_pat_unique) == 1:
+    elif len(bg_unique) == 1:
         z.pattern = "3"
-    elif len(fg_pat_unique) > 1 and len(bg_pat_unique) > 1:
-        z.pattern = "4"
-    else:
+
+    if len(fg_unique) == 0 or len(bg_unique) == 0:
         z.pattern = "null"
 
     return z

@@ -578,6 +578,15 @@ if tool.lower() == "bootstrap":
     parser.add_option("--export_perm_discovery", dest="export_perm_discovery",
                     help="Path to output file for exporting the per-cycle permuted discovery results (DEBUG). Default = disabled.", default = None)
 
+    ###     3.3.12 FOP multi-hypothesis mode (Gap A)
+    parser.add_option("--fop", dest="fop_mode", action="store_true",
+                    help="FOP multi-hypothesis mode. Use fop_labelings.tab (fanned '<base>~H<m>' labelings, \
+                        one per null cycle x Dunn-independent alternative hypothesis) as the resample source \
+                        instead of resample_*.tab, and collapse CAAS hits to base-cycle units: a base cycle \
+                        counts once iff ANY of its ~H<m> labelings is a CAAS at that (position, scheme). \
+                        pvalue_boot = base-cycles-with-a-hit / n_distinct_base_cycles. When -s is a directory, \
+                        fop_labelings.tab is looked up inside it. Default = disabled.", default = False)
+
     ### 3.4 Usage
 
     parser.usage = "ct bootstrap -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA\nNOTE: Use --export_groups $file to export permuted groups (DEBUG)\nNOTE: Use --export_perm_discovery $file to export permuted discovery results (DEBUG)"
@@ -633,7 +642,13 @@ if tool.lower() == "bootstrap":
 
     ###     3.8.2 - Detect if input is directory or file, load accordingly
 
-    if os.path.isdir(options.simtraits):
+    if options.fop_mode:
+        # FOP (Gap A): resample source is the single fanned file fop_labelings.tab.
+        # boot_on_single_alignment resolves a directory to fop_labelings.tab inside
+        # it and does the base-cycle collapse; just pass the path through.
+        print(f"[FOP] multi-hypothesis mode: resample source = {options.simtraits}")
+        bootstrap_input = options.simtraits
+    elif os.path.isdir(options.simtraits):
         # Directory mode: pass directory path directly, boot_on_single_alignment will handle loading
         print(f"Detected directory-based resampled traits: {options.simtraits}")
         bootstrap_input = options.simtraits
@@ -672,7 +687,8 @@ if tool.lower() == "bootstrap":
                     progress_log = progress_log_input,
                     caap_mode = options.caap_mode,
                     export_groups = options.export_groups,
-                    export_perm_discovery = options.export_perm_discovery
+                    export_perm_discovery = options.export_perm_discovery,
+                    fop_mode = options.fop_mode
                     )
 
     ###     3.8.4 Final output

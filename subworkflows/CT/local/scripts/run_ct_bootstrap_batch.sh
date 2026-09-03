@@ -11,6 +11,7 @@ ct_bin=""
 progress_log="0"
 export_groups="0"
 export_perm_discovery="0"
+fop_mode="0"
 extra_args_file=""
 stall_timeout="1800"
 
@@ -54,6 +55,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --export-perm-discovery)
             export_perm_discovery="$2"
+            shift 2
+            ;;
+        --fop)
+            fop_mode="$2"
             shift 2
             ;;
         --extra-args-file)
@@ -184,6 +189,9 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
     fi
     if [[ "$export_perm_discovery" == "1" ]]; then
         cmd+=(--export_perm_discovery "${alignment_id}.bootstrap.discovery.output")
+    fi
+    if [[ "$fop_mode" == "1" ]]; then
+        cmd+=(--fop)
     fi
 
     (

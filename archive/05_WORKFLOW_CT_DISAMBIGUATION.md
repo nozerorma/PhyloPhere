@@ -162,7 +162,7 @@ For every ancestral-to-derived substitution step ($A_{\text{anc}} \to a_{\text{d
 ### 5.1 `caas_convergence_master.csv`
 Master dataset consolidating all CAAS events, directional categories, ancestral probabilities, and physicochemical transitions:
 ```csv
-gene,position,caap_group,pattern,pvalue,pvalue_boot,pvalue_fdr,is_significant,convergence_type,change_top,change_bottom,anc_state_root,anc_state_mrca,grantham_distance_top,charge_diff_top,hydropathy_diff_top,volume_diff_top
+gene,position,caap_group,pattern,pvalue,recovery_boot,pvalue_fdr,is_significant,convergence_type,change_top,change_bottom,anc_state_root,anc_state_mrca,grantham_distance_top,charge_diff_top,hydropathy_diff_top,volume_diff_top
 TP53,175,US,1,0.00042,0.00199,0.0125,TRUE,convergent_top,convergent,no_change,H,H,29,1,-1.2,15.4
 ```
 

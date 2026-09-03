@@ -236,6 +236,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     path resample_subset
     path tree_file
     path fop_pairs   // fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS sentinel
+    path gene_lengths // gene_ensembl_file (Gap B CT_POSTPROC filter) or NO_FILE
 
     output:
     path "gene_cycle_scores.tsv",    emit: gene_cycle_scores
@@ -253,6 +254,13 @@ process CAAS_PERMS_DISAMBIGUATE {
     def workers = task.cpus ?: 1
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    // Gap B: mirror the observed CT_POSTPROC cluster + gene filters on the null
+    // per-cycle CAAS pool. Opt-in via params.caas_perms_postproc (default true);
+    // needs the gene annotation file for the extreme-gene density test.
+    def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
+    def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
+    def do_postproc = _pp_on && !(gene_lengths.name =~ /^NO_/)
+    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cp -R ${local_dir}/* .
@@ -264,7 +272,7 @@ process CAAS_PERMS_DISAMBIGUATE {
         --perm-discovery perm_disc \\
         --resample-dir . \\
         --output-dir caas_perms_out \\
-        ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} \\
+        ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} ${postproc_args} \\
         --asr-model ${params.ct_disambig_asr_model} \\
         --convergence-mode ${params.ct_disambig_convergence_mode} \\
         --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
@@ -428,6 +436,7 @@ workflow CAAS_PERMULATION {
         tree_file          // path species tree
         universe           // path cleaned_background or NO_FILE
         fop_pairs          // path fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS
+        gene_lengths       // path gene_ensembl_file (Gap B CT_POSTPROC filter) or NO_FILE
         asr_ready          // gate: emits once the live CT_DISAMBIGUATION has
                            // finished writing the shared ASR cache. A 'NO_GATE'
                            // sentinel when ASR is precomputed / disambiguation
@@ -444,7 +453,7 @@ workflow CAAS_PERMULATION {
         def gated_tree = tree_file
             .combine(asr_ready)
             .map { t, _ready -> t }
-        def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree, fop_pairs)
+        def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree, fop_pairs, gene_lengths)
         def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_sample,
                                        scores.pos_quantiles, scores.pos_detail, universe)
 

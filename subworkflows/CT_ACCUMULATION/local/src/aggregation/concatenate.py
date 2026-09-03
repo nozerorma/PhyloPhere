@@ -154,10 +154,10 @@ def read_metadata_caas(metadata_file):
     """Read CAAS metadata from a filtered_discovery.tsv file.
 
     Reads the disambiguation-canonical columns Gene, Position, tag, caas,
-    pvalue_boot, convergence_type, caap_group, amino_encoded, is_conserved_meta,
+    recovery_boot, convergence_type, caap_group, amino_encoded, is_conserved_meta,
     asr_is_conserved. No fallback to legacy formats.
 
-    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas, pvalue_boot}
+    Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas, recovery_boot}
     Only the (group, gene, msa_pos) keys are consumed downstream.
     """
     logging.info(f"Reading metadata CAAS from {metadata_file if metadata_file else 'None'}")
@@ -183,7 +183,7 @@ def read_metadata_caas(metadata_file):
         tag_idx           = h.index('tag')
         convergence_idx   = h.index('convergence_type')
         amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
-        pboot_idx         = h.index('pvalue_boot') if 'pvalue_boot' in h else None
+        pboot_idx         = h.index('recovery_boot') if 'recovery_boot' in h else None
         group_idx         = h.index('caap_group')
         conserved_idx     = h.index('is_conserved_meta') if 'is_conserved_meta' in h else None
         asr_conserved_idx = h.index('asr_is_conserved') if 'asr_is_conserved' in h else None
@@ -222,7 +222,7 @@ def read_metadata_caas(metadata_file):
                 'tag': tag,
                 'convergence_type': convergence,
                 'caas': amino_conv,
-                'pvalue_boot': pboot,
+                'recovery_boot': pboot,
             }
 
     logging.debug(f"Meta-CAAS loaded. Groups: {list(metadata.keys())}")

@@ -116,7 +116,7 @@ This is the null the DESIGN gate cares about ("KS-uniform p.perm").
 
 - **Classic bootstrap** (`ct_bootstrap` with `--discovery` + `-s resample`):
   for each real CAAS, re-test that position under the pool → `bootstrap.tab`,
-  `pvalue_boot` ≈ fraction of pool labelings that also call a CAAS there.
+  `recovery_boot` ≈ fraction of pool labelings that also call a CAAS there.
 - **Permulation-excess / FCS null** (`caas_permulation.nf`, gated on
   `caas_permulation_enrichment`): seeded random subset of `caas_full_perms` pool
   labelings → full-pool bootstrap with `--export_perm_discovery` → **replay
@@ -191,7 +191,7 @@ Per (Gene, Position, scheme) row — schemes are `US, GS4, GS3, GS2, GS1` (the
 CAAP encodings), treated **symmetrically, no per-scheme weight**:
 
 ```
-phen_score  = 1 - percent_rank(pvalue_boot)      # permutation confidence, 0..1
+phen_score  = 1 - percent_rank(recovery_boot)      # permutation confidence, 0..1
 asr_score   = asr_path_score                     # unified ASR/convergence/parallel signal
 caas_row    = phen_score * asr_score
 ```
