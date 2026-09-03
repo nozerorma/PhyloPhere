@@ -1295,6 +1295,9 @@ display_cols <- c("Gene", "Position", "CAAS_score",
                   "phen_score", "asr_score", "core",
                   "recovery_boot",
                   "n_schemes", "scheme_set", "change_side",
+                  # raw-AA descriptors (position-level, from position_scores.tsv)
+                  "derived_residues", "top_residue_support", "bottom_residue_support",
+                  "n_conserved_pairs", "convergence_schemes",
                   "is_top_10pct", "is_top_5pct", "is_top_1pct",
                   "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
 
@@ -1513,6 +1516,8 @@ dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       "n_schemes", "scheme_set",
                       "recovery_boot",
                       "change_side",
+                      "derived_residues", "top_residue_support", "bottom_residue_support",
+                      "convergence_schemes",
                       "is_top_10pct", "is_top_5pct", "is_top_1pct",
                       "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
 

@@ -417,80 +417,36 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   out
 }
 
-#' Position-level raw-AA descriptors for one (Gene, Position).
+#' Position-level `convergence_schemes` descriptor for one (Gene, Position).
 #'
 #' Computed across ALL rows of the position (every scheme, every hypothesis) —
-#' the raw residues are scheme-independent facts, so this sits OUTSIDE the
+#' scheme convergence is a residue-identity question, so this sits OUTSIDE the
 #' per-caap_group pooling and is joined back by (Gene, Position).
 #'
-#'   derived_residues     "<anc>/<sorted distinct derived>" (top+bottom merged);
-#'                        "<anc>/top:<..>/bot:<..>" when the two sides differ.
-#'   top_residue_support  per raw derived residue on the TOP side, DISTINCT-pair
-#'   bottom_residue_support   count; e.g. "L:3,S:2". Side-separate because top and
-#'                        bottom changes are opposite-direction events.
-#'                        (Species-level support is joined downstream from
-#'                        candidate_species.tab — NOT here.)
 #'   convergence_schemes  comma-joined subset of US,GS1,GS2,GS3,GS4 whose
 #'                        harvest-wide da on the raw pooled pairs is >= tau.
 #'                        A SET/PROFILE (non-nested schemes), never an ordinal.
 #'                        "" when none pass / no changed pairs.
-.position_descriptors <- function(sub_df, node_cols, top_aa_cols, bot_aa_cols,
-                                  anc_aa_cols, tau) {
-  empty <- data.frame(derived_residues = "", top_residue_support = "",
-                      bottom_residue_support = "",
-                      convergence_schemes = "", stringsAsFactors = FALSE)
+#'
+#' The raw-AA descriptors `derived_residues` / `top_residue_support` /
+#' `bottom_residue_support` are NO LONGER computed here — they are produced once,
+#' upstream, in CT_POSTPROC's `residue_descriptors.py` (which follows the
+#' `change_side` field rather than scanning both sides), and `apply_fop_pooling`
+#' carries them straight through from the input frame.
+.position_descriptors <- function(sub_df, node_cols, top_aa_cols, bot_aa_cols, tau) {
   cp <- .collect_changed_pairs(sub_df, node_cols, top_aa_cols, bot_aa_cols)
-  if (nrow(cp) == 0) return(empty)
-
-  # Ancestral residue(s): scan mrca_<i>_anc_aa cells against the changed nodes.
-  anc_vals <- c()
-  for (i in seq_along(node_cols)) {
-    ncol <- node_cols[i]
-    if (!(ncol %in% names(sub_df)) || i > length(anc_aa_cols)) next
-    acol <- anc_aa_cols[i]
-    if (!(acol %in% names(sub_df))) next
-    nn <- as.character(sub_df[[ncol]]); aa <- toupper(trimws(as.character(sub_df[[acol]])))
-    keep <- nn %in% cp$node & !is.na(aa) & nzchar(aa)
-    anc_vals <- c(anc_vals, aa[keep])
-  }
-  anc_str <- paste(sort(unique(anc_vals)), collapse = "")
-  if (!nzchar(anc_str)) anc_str <- "?"
-
-  top_set <- sort(unique(cp$raw_aa[cp$side == "top"]))
-  bot_set <- sort(unique(cp$raw_aa[cp$side == "bot"]))
-  if (length(top_set) > 0 && length(bot_set) > 0 &&
-      !identical(top_set, bot_set)) {
-    derived_residues <- sprintf("%s/top:%s/bot:%s", anc_str,
-                                paste(top_set, collapse = ""),
-                                paste(bot_set, collapse = ""))
-  } else {
-    derived_residues <- sprintf("%s/%s", anc_str,
-                                paste(sort(unique(c(top_set, bot_set))), collapse = ""))
-  }
-
-  # {top,bottom}_residue_support: distinct-pair (node) counts per raw residue,
-  # one column per phenotype side (e.g. "L:3,S:2"). Kept side-separate because
-  # top and bottom changes are opposite-direction events (see path_scores.py
-  # core_top/core_bottom) and downstream (VEP / visualization) needs them apart.
-  .side_support <- function(sd) {
-    rs <- cp$raw_aa[cp$side == sd]
-    if (length(rs) == 0) return("")
-    tb <- sort(table(rs), decreasing = TRUE)
-    paste(sprintf("%s:%d", names(tb), as.integer(tb)), collapse = ",")
-  }
-  top_residue_support    <- .side_support("top")
-  bottom_residue_support <- .side_support("bot")
+  if (nrow(cp) == 0) return(data.frame(convergence_schemes = "", stringsAsFactors = FALSE))
 
   kept <- AA_SCHEME_NAMES[vapply(AA_SCHEME_NAMES, function(sc)
     isTRUE(rebuild_derived_agreement(cp, sc) >= tau), logical(1))]
-  convergence_schemes <- paste(kept, collapse = ",")
-
-  data.frame(derived_residues = derived_residues,
-             top_residue_support = top_residue_support,
-             bottom_residue_support = bottom_residue_support,
-             convergence_schemes = convergence_schemes,
+  data.frame(convergence_schemes = paste(kept, collapse = ","),
              stringsAsFactors = FALSE)
 }
+
+# Position-level descriptor columns produced upstream (CT_POSTPROC
+# residue_descriptors.py) and carried through here untouched.
+FOP_CARRIED_DESCRIPTORS <- c("derived_residues", "top_residue_support",
+                             "bottom_residue_support", "n_conserved_pairs")
 
 #' Apply domain-pooling across a whole disambiguation data.frame.
 #'
@@ -505,23 +461,21 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
 #' @param hyp_pairs_path path to contrast_hypotheses_pairs.tsv (or NULL/NO_*).
 #' @param tau harvest-wide da threshold for `convergence_schemes` (default 0.8).
 #' @return df with one row per (Gene, Position, caap_group); adds n_hypotheses,
-#'   core_perside_pooled, pooled_domain_<i>, and the POSITION-level descriptors
-#'   derived_residues / {top,bottom}_residue_support / convergence_schemes (empty when
-#'   the raw-residue block is absent or the position has no changed pairs).
+#'   core_perside_pooled, pooled_domain_<i>, `convergence_schemes` (computed here),
+#'   and passes through the upstream `derived_residues` / {top,bottom}_residue_support
+#'   columns (empty strings when the input frame lacks them).
 apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
   path_cols <- grep("^mrca_\\d+_path_score$", names(df), value = TRUE)
   path_cols <- path_cols[order(as.integer(sub("^mrca_(\\d+)_path_score$", "\\1", path_cols)))]
   node_cols <- sub("_path_score$", "_node", path_cols)
 
-  # Raw derived/ancestral residue block (POINT 3). Ordered by pair index i so the
-  # i-th entry lines up with node_cols[i].
+  # Raw derived residue cells — still needed by .collect_changed_pairs (feeds
+  # derived_agreement pooling and convergence_schemes).
   idx_of <- function(cols, pat) as.integer(sub(pat, "\\1", cols))
   top_aa_cols <- grep("^mrca_\\d+_top_aa$", names(df), value = TRUE)
   top_aa_cols <- top_aa_cols[order(idx_of(top_aa_cols, "^mrca_(\\d+)_top_aa$"))]
   bot_aa_cols <- grep("^mrca_\\d+_bot_aa$", names(df), value = TRUE)
   bot_aa_cols <- bot_aa_cols[order(idx_of(bot_aa_cols, "^mrca_(\\d+)_bot_aa$"))]
-  anc_aa_cols <- grep("^mrca_\\d+_anc_aa$", names(df), value = TRUE)
-  anc_aa_cols <- anc_aa_cols[order(idx_of(anc_aa_cols, "^mrca_(\\d+)_anc_aa$"))]
 
   # Parallel conserved-pair block (j ordered by pair_id ascending upstream).
   conserved_node_cols <- grep("^conserved_\\d+_node$", names(df), value = TRUE)
@@ -551,8 +505,8 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
       ) %>%
       ungroup()
     if (!"core_perside_pooled" %in% names(df)) df$core_perside_pooled <- df$core
-    # Stable schema: position-level descriptor columns, empty for non-FOP input.
-    for (col in c("derived_residues", "top_residue_support", "bottom_residue_support", "convergence_schemes")) {
+    # Stable schema: carried raw-AA descriptors + convergence_schemes, empty when absent.
+    for (col in c(FOP_CARRIED_DESCRIPTORS, "convergence_schemes")) {
       if (!col %in% names(df)) df[[col]] <- ""
     }
     return(df)
@@ -600,18 +554,19 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
   out <- dplyr::bind_rows(c(list(simple), pooled_list))
   out$.grp <- NULL
 
-  # ── Position-level descriptor pass (POINT 3) ────────────────────────────────
-  # Across ALL schemes/hypotheses of a (Gene, Position); joined back by it.
-  for (col in c("derived_residues", "top_residue_support", "bottom_residue_support", "convergence_schemes")) {
-    out[[col]] <- NULL
-  }
+  # ── Position-level convergence_schemes pass ─────────────────────────────────
+  # Across ALL schemes/hypotheses of a (Gene, Position); joined back by it. The
+  # raw-AA descriptors (derived_residues / {top,bottom}_residue_support) are
+  # carried through from `out` untouched — they were produced upstream in
+  # CT_POSTPROC's residue_descriptors.py.
+  out$convergence_schemes <- NULL
   desc <- df %>%
     group_by(Gene, Position) %>%
-    group_modify(~ .position_descriptors(.x, node_cols, top_aa_cols, bot_aa_cols,
-                                         anc_aa_cols, tau)) %>%
+    group_modify(~ .position_descriptors(.x, node_cols, top_aa_cols, bot_aa_cols, tau)) %>%
     ungroup()
   out <- dplyr::left_join(out, desc, by = c("Gene", "Position"))
-  for (col in c("derived_residues", "top_residue_support", "bottom_residue_support", "convergence_schemes")) {
+  for (col in c(FOP_CARRIED_DESCRIPTORS, "convergence_schemes")) {
+    if (!col %in% names(out)) out[[col]] <- ""
     out[[col]][is.na(out[[col]])] <- ""
   }
   out

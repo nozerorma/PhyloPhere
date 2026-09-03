@@ -32,68 +32,57 @@ Usage
 import sys
 import os
 import gzip
-import re
 import glob
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _uc_letters(text):
-    """Return the set of uppercase A–Z letters (1-letter AA codes) in *text*."""
-    return set(re.findall(r'[A-Z]', text))
-
-
-AMBIGSYMS = {'-', 'X', 'B', 'Z', 'J', 'U', 'O'}
-
 SCHEME_WEIGHTS = {
     "US":  1.0,
 }
 
 
-def pair_aware_caas_letters_gs(caas_pattern, amino_encoded, change_side, caap_group):
-    """Return (ancestral_aas, derived_aas) as raw AA sets, with GS-aware conserved-pair exclusion.
+def _support_letters(support_str):
+    """Raw AA letters from a `{top,bottom}_residue_support` cell.
 
-    Uses group-aware logic while keeping raw AAs for PrimateAI lookup.
+    "L:3,S:2" -> {'L', 'S'}. Empty / malformed -> set().
     """
-    if '/' not in caas_pattern:
-        return set(), _uc_letters(caas_pattern)
+    out = set()
+    for tok in str(support_str or "").split(","):
+        tok = tok.strip()
+        if not tok or ":" not in tok:
+            continue
+        aa = tok.split(":", 1)[0].strip().upper()
+        if aa:
+            out.add(aa)
+    return out
 
-    raw_top, raw_bot = caas_pattern.split('/', 1)
-    top_nc = set()
-    bot_nc = set()
 
-    use_enc = (caap_group != 'US'
-               and amino_encoded
-               and '/' in str(amino_encoded))
+def anc_der_from_descriptor(derived_residues, top_residue_support,
+                            bottom_residue_support, change_side):
+    """(ancestral_aas, derived_aas) from the upstream position-level descriptor.
 
-    if use_enc:
-        enc_top, enc_bot = str(amino_encoded).split('/', 1)
-        # Conserved at group level when enc_top[i] == enc_bot[i]; collect raw letters otherwise
-        for enc_la, enc_ra, raw_la, raw_ra in zip(enc_top, enc_bot, raw_top, raw_bot):
-            if enc_la == enc_ra:
-                continue   # conserved at group level — skip
-            if raw_la and raw_la.upper() not in AMBIGSYMS:
-                top_nc.add(raw_la.upper())
-            if raw_ra and raw_ra.upper() not in AMBIGSYMS:
-                bot_nc.add(raw_ra.upper())
-    else:
-        # US or no amino_encoded: compare raw letters directly
-        for la, ra in zip(raw_top, raw_bot):
-            if la == ra:
-                continue   # conserved at AA level — skip
-            if la and la.upper() not in AMBIGSYMS:
-                top_nc.add(la.upper())
-            if ra and ra.upper() not in AMBIGSYMS:
-                bot_nc.add(ra.upper())
+    The descriptor (built in CT_POSTPROC's residue_descriptors.py) uses the
+    ``caas`` left/right convention: ``top_residue_support`` letters are the top
+    clade's residues at the position, ``bottom_residue_support`` the bottom
+    clade's. ``change_side`` says which clade carries the derived change; the
+    other clade's residues are the ancestral state. Only US rows reach this
+    (caap_group filter below), so no GS-grouping handling is needed.
 
-    if change_side == 'top':
-        return bot_nc, top_nc          # ancestral=bottom, derived=top
-    elif change_side == 'bottom':
-        return top_nc, bot_nc          # ancestral=top, derived=bottom
-    else:
-        # Ambiguous / none: no defined ancestral; return all non-conserved letters
-        return set(), top_nc | bot_nc
+    `derived_residues` itself is not parsed — the support columns already carry
+    the per-side residue letters unambiguously.
+    """
+    top_set = _support_letters(top_residue_support)
+    bot_set = _support_letters(bottom_residue_support)
+    cs = str(change_side or "").strip().lower()
+    if cs == "top":
+        return bot_set, top_set          # ancestral = bottom, derived = top
+    if cs == "bottom":
+        return top_set, bot_set          # ancestral = top, derived = bottom
+    if cs == "both":
+        return set(), top_set | bot_set  # both sides derived, no single ancestral
+    return set(), top_set | bot_set
 
 
 def load_map_file(gene, vep_map_dir):
@@ -191,7 +180,7 @@ def write_header_only(primateai_gz, output_tsv):
         pai_header = gz_in.readline().rstrip('\n')
         out.write(
             "Gene\tPosition\t"
-            "hg38_ref_aa\tcaas_alt_aas\t"
+            "hg38_ref_aa\tcaas_alt_aas\tcaas_change\t"
             "caap_group\tscheme_weight\t"
             + pai_header + "\n"
         )
@@ -234,10 +223,21 @@ with open(caas_file) as fh:
     cside_col = col.get('change_side')
     amino_col = col_lc.get('amino_encoded')
     caap_col = col.get('caap_group') or col_lc.get('caap_group')
+    dres_col = col_lc.get('derived_residues')
+    top_sup_col = col_lc.get('top_residue_support')
+    bot_sup_col = col_lc.get('bottom_residue_support')
 
     if any(c is None for c in [tag_col, caas_col, gene_col, pos_col]):
         print("Missing required columns in CAAS file header.", file=sys.stderr)
         write_header_only(primateai_gz, output_tsv)
+
+    if dres_col is None:
+        print(
+            "WARN: `derived_residues` column absent from CAAS file — regenerate "
+            "filtered_discovery.tsv through CT_POSTPROC. Falling back to raw `caas` "
+            "pattern letters for this run.",
+            file=sys.stderr,
+        )
 
     for line in fh:
         fields = line.rstrip('\n').split('\t')
@@ -261,9 +261,21 @@ with open(caas_file) as fh:
         caas_change = amino_enc
         weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
 
-        anc_aas, der_aas = pair_aware_caas_letters_gs(
-            caas_pat, amino_enc, cside, caap_grp
-        )
+        if dres_col is not None:
+            anc_aas, der_aas = anc_der_from_descriptor(
+                fields[dres_col],
+                fields[top_sup_col] if top_sup_col is not None else '',
+                fields[bot_sup_col] if bot_sup_col is not None else '',
+                cside,
+            )
+        else:
+            # Degraded fallback: raw caas pattern letters (anc before "/", derived after).
+            raw_top, _, raw_bot = caas_pat.partition('/')
+            anc_aas = {c for c in raw_bot.upper() if c.isalpha()} if cside == 'top' else \
+                      ({c for c in raw_top.upper() if c.isalpha()} if cside == 'bottom' else set())
+            der_aas = {c for c in raw_top.upper() if c.isalpha()} if cside == 'top' else \
+                      ({c for c in raw_bot.upper() if c.isalpha()} if cside == 'bottom' else
+                       {c for c in (raw_top + raw_bot).upper() if c.isalpha()})
 
         key = (gene, position)
         if key not in caas_targets:

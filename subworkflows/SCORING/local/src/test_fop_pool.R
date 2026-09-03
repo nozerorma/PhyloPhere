@@ -183,12 +183,18 @@ check(approx(resP3$derived_agreement, 0.5),
       "POINT3: harvest-wide da under US == 0.5 (I/V split, plurality 2/4)")
 check(identical(resP3$convergence_schemes, "GS3,GS4"),
       "POINT3: convergence_schemes == GS3,GS4 (da >= 0.8 only there)")
-check(identical(resP3$derived_residues, "A/IV"),
-      "POINT3: derived_residues == A/IV")
-check(identical(resP3$bottom_residue_support, "I:2,V:2"),
-      "POINT3: bottom_residue_support == I:2,V:2 (distinct-pair counts)")
-check(identical(resP3$top_residue_support, ""),
-      "POINT3: top_residue_support empty (all changes on bottom side)")
+
+# derived_residues / {top,bottom}_residue_support are produced UPSTREAM now
+# (CT_POSTPROC residue_descriptors.py, tested there); apply_fop_pooling only
+# carries them through. Absent in this fixture -> stable empty strings.
+check(identical(resP3$derived_residues, ""),
+      "POINT3: derived_residues empty when the input frame lacks it")
+mk_p3_carry <- mk_p3("US"); mk_p3_carry$derived_residues <- "A/IV"
+mk_p3_carry$top_residue_support <- ""; mk_p3_carry$bottom_residue_support <- "I:2,V:2"
+resP3c <- apply_fop_pooling(mk_p3_carry, NULL)
+check(identical(resP3c$derived_residues, "A/IV") &&
+      identical(resP3c$bottom_residue_support, "I:2,V:2"),
+      "POINT3: apply_fop_pooling carries upstream descriptor columns through")
 
 resP3g <- apply_fop_pooling(mk_p3("GS4"), NULL)
 check(approx(resP3g$derived_agreement, 1.0),
@@ -204,10 +210,10 @@ check(approx(resP3n$derived_agreement, 1.0),
 check(identical(resP3n$convergence_schemes, ""),
       "POINT3 fallback: convergence_schemes empty without raw residues")
 
-# Non-FOP input still gets the (empty) descriptor columns for a stable schema.
+# Non-FOP input still gets the descriptor columns for a stable schema.
 check(all(c("derived_residues", "top_residue_support", "bottom_residue_support",
             "convergence_schemes") %in% names(res1)),
-      "POINT3: single-hyp output carries empty descriptor columns")
+      "POINT3: single-hyp output carries descriptor columns")
 check(identical(res1$convergence_schemes, ""), "POINT3: single-hyp descriptors empty")
 
 # tau argument is honoured.

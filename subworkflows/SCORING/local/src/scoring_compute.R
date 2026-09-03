@@ -338,6 +338,7 @@ pos_scores <- df %>%
     derived_residues       = if ("derived_residues" %in% names(df)) dplyr::first(derived_residues) else "",
     top_residue_support    = if ("top_residue_support" %in% names(df)) dplyr::first(top_residue_support) else "",
     bottom_residue_support = if ("bottom_residue_support" %in% names(df)) dplyr::first(bottom_residue_support) else "",
+    n_conserved_pairs      = if ("n_conserved_pairs" %in% names(df)) dplyr::first(n_conserved_pairs) else "",
     convergence_schemes    = if ("convergence_schemes" %in% names(df)) dplyr::first(convergence_schemes) else "",
     asr_score          = mean(asr_score,          na.rm = TRUE),
     mrca_diversity     = mean(mrca_diversity,     na.rm = TRUE),
@@ -952,7 +953,7 @@ pos_out <- pos_scores %>%
          any_of("phen_score"), n_schemes, any_of("scheme_set"),
          any_of(c("n_hypotheses", "supporting_hypotheses",
                   "derived_residues", "top_residue_support", "bottom_residue_support",
-                  "convergence_schemes")), CAAS_score,
+                  "n_conserved_pairs", "convergence_schemes")), CAAS_score,
          change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))

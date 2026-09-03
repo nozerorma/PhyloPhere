@@ -7,6 +7,8 @@ import sys
 
 import pandas as pd
 
+from residue_descriptors import add_residue_descriptors
+
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     # Structural-key normalization only (gene/msa_pos → Gene/Position, used pervasively
@@ -88,6 +90,11 @@ def main() -> int:
     )
 
     cleaned["Position"] = pd.to_numeric(cleaned["Position"], errors="raise").astype(int)
+
+    # Position-level raw-AA descriptors (derived_residues, {top,bottom}_residue_support).
+    # Computed here, upstream of the filtered_discovery.tsv fork, so SCORING and VEP
+    # share one canonical column set. See residue_descriptors.py.
+    cleaned = add_residue_descriptors(cleaned)
 
     if removed_frames:
         removed = pd.concat(removed_frames, ignore_index=True)

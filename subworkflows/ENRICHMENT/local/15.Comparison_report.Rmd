@@ -1252,6 +1252,19 @@ build_interesting_positions <- function(direction) {
 
   base <- .position_pct_flags(base, tolower(direction))
 
+  # .position_pct_flags transmutes base down to gene/Position/CAAS_score/pcts, so
+  # re-attach the raw-AA descriptors (position_scores.tsv carries them per position).
+  .desc_cols <- intersect(
+    c("derived_residues", "top_residue_support", "bottom_residue_support",
+      "n_conserved_pairs", "convergence_schemes"),
+    names(position_scores_cmp_df))
+  if (length(.desc_cols)) {
+    base <- base %>% dplyr::left_join(
+      position_scores_cmp_df %>%
+        dplyr::transmute(gene = Gene, Position, dplyr::across(dplyr::all_of(.desc_cols))),
+      by = c("gene", "Position"))
+  }
+
   # Position-native FADE-site overlap.
   fade_df <- switch(direction,
     Top = fade_sites_top_cmp_df, Bottom = fade_sites_bottom_cmp_df,
@@ -1381,12 +1394,18 @@ build_interesting_positions <- function(direction) {
       `FADE AMI desc(s)`    = .collapsible_list(fade_ami_desc),
       `PE term(s)`          = .collapsible_list(pe_terms),
       `CAAS evidence`       = .evidence_badge(evidence_label_caas),
-      `RER evidence`        = .evidence_badge(evidence_label_rer)
+      `RER evidence`        = .evidence_badge(evidence_label_rer),
+      `Top support`         = if ("top_residue_support" %in% names(.)) top_residue_support else NA_character_,
+      `Bottom support`      = if ("bottom_residue_support" %in% names(.)) bottom_residue_support else NA_character_
     )
 
   out %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
     dplyr::select(Gene = gene, Position, `CAAS Score` = CAAS_score,
+                  `Top/Bottom residues` = dplyr::any_of("derived_residues"),
+                  `Top support`, `Bottom support`,
+                  `N conserved pairs` = dplyr::any_of("n_conserved_pairs"),
+                  `Conv. schemes` = dplyr::any_of("convergence_schemes"),
                   `N Hypotheses` = dplyr::any_of("n_hypotheses"),
                   `Hypotheses`,
                   `25%`, `10%`, `5%`, `1%`,
