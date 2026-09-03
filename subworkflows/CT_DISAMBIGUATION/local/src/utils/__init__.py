@@ -38,13 +38,6 @@ def convert_biochem_result_to_dict(*args, **kwargs):
     return _impl(*args, **kwargs)
 
 
-def merge_multi_hypothesis_results(*args, **kwargs):
-    """Proxy to :func:`src.utils.gene_wrapper.merge_multi_hypothesis_results`."""
-    from .gene_wrapper import merge_multi_hypothesis_results as _impl
-
-    return _impl(*args, **kwargs)
-
-
 def process_single_gene(*args, **kwargs):
     """Proxy to :func:`src.utils.gene_wrapper.process_single_gene`."""
     from .gene_wrapper import process_single_gene as _impl
@@ -76,7 +69,6 @@ __all__ = [
     "iter_results_for_group",
     "convert_convergence_result_to_dict",
     "convert_biochem_result_to_dict",
-    "merge_multi_hypothesis_results",
     "process_single_gene",
     "process_all_genes",
 ]

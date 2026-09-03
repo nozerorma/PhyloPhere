@@ -142,6 +142,189 @@ greedy_dunn_select <- function(ranked, D, target = Inf, enforce_dunn = TRUE) {
   list(selected = selected, members = members)
 }
 
+#' Candidate-pair gate + ranking for one (permulated) trait vector.
+#'
+#' Shared by evaluate_lean_contrast_selection() (the tiered Dunn null) and
+#' lean_fop_harvest() (the per-cycle FOP mirror). Reproduces stages 1-2 of the
+#' observed selector: PSS via the vendored phyloq engine on the fixed observed-
+#' model covariances, then the trait-type non-overlap gate (CI / ordinal /
+#' continuous top_pct), then rank_candidates().
+#'
+#' @return list(cand_df = ranked data.frame | NULL, mode = "ci"|"ordinal"|"pss",
+#'              reason = NULL | character). cand_df carries species1, species2,
+#'              distance, abs_diff, pss_score (+ pair_n when n_vec given).
+lean_candidate_df <- function(trait_vec, D, target_pairs,
+                              tree = NULL, cov_bm = NULL, cov_ou = NULL,
+                              selected_model = "OU", ci_lb = NULL, ci_ub = NULL,
+                              top_pct = 0.01, ordinal = NULL, n_vec = NULL) {
+  D <- as.matrix(D)
+  sp <- intersect(names(trait_vec), rownames(D))
+  if (length(sp) < 2L * target_pairs) return(list(cand_df = NULL, mode = "na", reason = "too few species with distances"))
+  trait_vec <- trait_vec[sp]
+
+  use_ci <- !is.null(ci_lb) && !is.null(ci_ub)
+  if (is.null(ordinal)) ordinal <- !use_ci && .is_ordinal_vec(trait_vec)
+  if (use_ci) {
+    lb <- ci_lb[sp]; ub <- ci_ub[sp]
+    ok <- is.finite(lb) & is.finite(ub)
+    if (sum(ok) < 2L * target_pairs) return(list(cand_df = NULL, mode = "ci", reason = "too few species with usable CIs"))
+    sp <- sp[ok]; trait_vec <- trait_vec[sp]; lb <- lb[sp]; ub <- ub[sp]
+  }
+  if (is.null(tree) || is.null(cov_bm) || is.null(cov_ou)) {
+    return(list(cand_df = NULL, mode = "na", reason = "PSS inputs missing (tree / cov_bm / cov_ou)"))
+  }
+  tr <- if (length(sp) < length(tree$tip.label)) ape::drop.tip(tree, setdiff(tree$tip.label, sp)) else tree
+  tr_sp <- tr$tip.label
+  sc <- calculate_pairwise_scores(trait_vec[tr_sp], tr,
+                                  cov_bm[tr_sp, tr_sp, drop = FALSE],
+                                  cov_ou[tr_sp, tr_sp, drop = FALSE], selected_model)
+  hi_is_1 <- sc$TraitValue1 >= sc$TraitValue2
+  c_hi  <- ifelse(hi_is_1, sc$Species1, sc$Species2)
+  c_lo  <- ifelse(hi_is_1, sc$Species2, sc$Species1)
+  c_dif <- abs(sc$TraitValue1 - sc$TraitValue2)
+  c_dist <- sc$PatristicDistance
+  pss   <- sc$FinalScore
+  drop0 <- c_dif > 0
+  if (!any(drop0)) return(list(cand_df = NULL, mode = if (use_ci) "ci" else if (isTRUE(ordinal)) "ordinal" else "pss",
+                               reason = "no candidate pairs with positive trait difference"))
+  c_hi <- c_hi[drop0]; c_lo <- c_lo[drop0]; c_dif <- c_dif[drop0]
+  c_dist <- c_dist[drop0]; pss <- pss[drop0]
+
+  if (use_ci) {
+    type_mask <- (lb[c_hi] > ub[c_lo])
+  } else if (isTRUE(ordinal)) {
+    lv_hi <- max(trait_vec, na.rm = TRUE); lv_lo <- min(trait_vec, na.rm = TRUE)
+    type_mask <- (trait_vec[c_hi] >= lv_hi) & (trait_vec[c_lo] <= lv_lo)
+  } else {
+    type_mask <- rep(TRUE, length(c_hi))
+  }
+  if (!any(type_mask)) return(list(cand_df = NULL, mode = if (use_ci) "ci" else if (isTRUE(ordinal)) "ordinal" else "pss",
+                                   reason = "no pair passes the trait-type gate"))
+  s1 <- which(type_mask)
+  if (!use_ci && !isTRUE(ordinal)) {
+    n_keep <- min(max(1L, ceiling(length(s1) * top_pct)), length(s1))
+    keep_i <- s1[order(pss[s1], decreasing = TRUE)][seq_len(n_keep)]
+  } else {
+    keep_i <- s1
+  }
+  keep <- logical(length(c_hi)); keep[keep_i] <- TRUE
+
+  cand_df <- data.frame(
+    species1 = c_hi[keep], species2 = c_lo[keep],
+    distance = c_dist[keep], abs_diff = c_dif[keep],
+    pss_score = pss[keep], stringsAsFactors = FALSE
+  )
+  if (!is.null(n_vec)) {
+    cand_df$pair_n <- as.numeric(n_vec[cand_df$species1]) + as.numeric(n_vec[cand_df$species2])
+  }
+  list(cand_df = rank_candidates(cand_df),
+       mode = if (use_ci) "ci" else if (isTRUE(ordinal)) "ordinal" else "pss",
+       reason = NULL)
+}
+
+#' Per-cycle FOP hypothesis harvest — the null mirror of
+#' selection_algorithm.R::fop_pair_sel.f steps 2-4.
+#'
+#' Same candidate gate/rank as the observed harvest and as
+#' evaluate_lean_contrast_selection (shared lean_candidate_df). Canonical H1 =
+#' greedy_dunn_select(enforce_dunn = TRUE); Voronoi-partition the species by
+#' nearest canonical pair; draw one in-domain candidate per domain (exhaustive
+#' <= ITER_CAP, else capped random); keep Dunn >= 1; rank by min-PSS and keep
+#' the top (max_fop - 1). Returns per-hypothesis fg/bg species and per-domain
+#' PSS so the permulation null domain-pools exactly as the observed §2b does.
+#'
+#' @return list(hypotheses = named list H1..Hn of data.frame(species1, species2,
+#'              pss_score, cluster), K = int) or list(hypotheses = list(), K = 0).
+#' @param canon_pairs optional data.frame(species1, species2) — the canonical
+#'   H1 pairs from the null's own tiered fixed-N selection
+#'   (evaluate_lean_contrast_selection). When supplied, H1 is taken verbatim and
+#'   the Voronoi partition is seeded from it, so the FOP mirror harvests
+#'   alternatives around the SAME canonical contrast the null already accepted
+#'   (rather than re-running an enforce_dunn greedy that could diverge from it).
+lean_fop_harvest <- function(trait_vec, D, target_pairs,
+                             tree = NULL, cov_bm = NULL, cov_ou = NULL,
+                             selected_model = "OU", ci_lb = NULL, ci_ub = NULL,
+                             top_pct = 0.01, ordinal = NULL, n_vec = NULL,
+                             max_fop = 100L, seed = 42L, canon_pairs = NULL) {
+  set.seed(seed)
+  cc <- lean_candidate_df(trait_vec, D, target_pairs, tree, cov_bm, cov_ou,
+                          selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec)
+  cand_df <- cc$cand_df
+  if (is.null(cand_df) || nrow(cand_df) < 1) return(list(hypotheses = list(), K = 0L))
+
+  Dm <- as.matrix(D)
+  add_cluster <- function(df) { df$cluster <- seq_len(nrow(df)); df }
+
+  # PSS lookup over the candidate pool (either orientation) for canon_pairs.
+  .pss_of <- function(s1, s2) {
+    hit <- which((cand_df$species1 == s1 & cand_df$species2 == s2) |
+                 (cand_df$species1 == s2 & cand_df$species2 == s1))
+    if (length(hit)) cand_df$pss_score[hit[1]] else NA_real_
+  }
+
+  if (!is.null(canon_pairs) && nrow(canon_pairs) >= 1) {
+    cp <- data.frame(
+      species1  = as.character(canon_pairs$species1),
+      species2  = as.character(canon_pairs$species2),
+      pss_score = mapply(.pss_of, canon_pairs$species1, canon_pairs$species2),
+      stringsAsFactors = FALSE
+    )
+    canon <- list(selected = cp,
+                  members = lapply(seq_len(nrow(cp)), function(i) c(cp$species1[i], cp$species2[i])))
+  } else {
+    canon <- greedy_dunn_select(cand_df, Dm, target = target_pairs, enforce_dunn = TRUE)
+  }
+  K <- length(canon$members)
+  if (K < 1) return(list(hypotheses = list(), K = 0L))
+  cm <- canon$members
+
+  hyps <- list(H1 = add_cluster(canon$selected[, c("species1", "species2", "pss_score"), drop = FALSE]))
+  if (K < target_pairs) return(list(hypotheses = hyps, K = K))  # H1 only, degenerate
+
+  all_sp <- rownames(Dm)
+  dom <- vapply(all_sp, function(s)
+    which.min(vapply(seq_len(K), function(k) min(Dm[s, cm[[k]][1]], Dm[s, cm[[k]][2]]), numeric(1))),
+    integer(1)); names(dom) <- all_sp
+  pools <- lapply(seq_len(K), function(k) {
+    ds <- names(dom)[dom == k]
+    cand_df[cand_df$species1 %in% ds & cand_df$species2 %in% ds, , drop = FALSE]
+  })
+  psz <- vapply(pools, nrow, integer(1))
+  if (any(psz == 0L)) return(list(hypotheses = hyps, K = K))
+
+  ITER_CAP <- as.integer(max_fop) * 20L
+  total <- prod(as.numeric(psz))
+  idx <- if (total <= ITER_CAP)
+    do.call(expand.grid, c(lapply(psz, seq_len), list(KEEP.OUT.ATTRS = FALSE)))
+  else
+    as.data.frame(lapply(psz, function(n) sample.int(n, ITER_CAP, replace = TRUE)))
+
+  seen <- list(paste(sort(c(hyps$H1$species1, hyps$H1$species2)), collapse = "|"))
+  harvested <- list(); minpss <- numeric(0)
+  for (it in seq_len(nrow(idx))) {
+    ci <- as.integer(unlist(idx[it, , drop = FALSE], use.names = FALSE))
+    rows <- do.call(rbind, lapply(seq_len(K), function(k) pools[[k]][ci[k], ]))
+    spv <- c(rows$species1, rows$species2)
+    if (length(unique(spv)) < 2L * K) next
+    sig <- paste(sort(spv), collapse = "|")
+    if (sig %in% seen) next
+    seen <- c(seen, sig)
+    mem <- lapply(seq_len(K), function(i) c(rows$species1[i], rows$species2[i]))
+    if (overall_dunn_lean(Dm, mem) >= 1.0) {
+      harvested[[length(harvested) + 1L]] <- add_cluster(
+        rows[, c("species1", "species2", "pss_score"), drop = FALSE])
+      minpss <- c(minpss, suppressWarnings(min(rows$pss_score, na.rm = TRUE)))
+    }
+  }
+  if (length(harvested) > 0L) {
+    ord  <- order(-replace(minpss, is.na(minpss), -Inf))
+    keep <- head(ord, max(0L, as.integer(max_fop) - 1L))
+    harvested <- harvested[keep]
+    for (m in seq_along(harvested)) hyps[[paste0("H", m + 1L)]] <- harvested[[m]]
+  }
+  list(hypotheses = hyps, K = K)
+}
+
 #' Lean contrast selection + tiered Dunn validation for one permulated vector.
 #'
 #' Candidate gate + ranking are identical to the observed selector

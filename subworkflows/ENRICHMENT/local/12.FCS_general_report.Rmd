@@ -24,8 +24,12 @@ params:
   project_name: "FCS"
   num_g:        10            # min genes per set (fastwilcoxGMT num.g)
   max_g:        500           # max genes per set (0 / Inf = no limit)
-  fdr_thr:      0.15          # BH (adjusted-p) cutoff - RERconverge categorical default (msae210)
-  pperm_thr:    0.025         # permulation-p cutoff - applied in addition to fdr_thr when perms exist
+  fdr_thr:      0.15          # BH (adjusted-p) cutoff - RERconverge categorical default (msae210);
+                              # display default + fallback for the per-method gates below
+  fdr_wilcoxon:    0.15       # sig_wilcoxon BH gate (defaults to fdr_thr if NULL)
+  fdr_lachenbruch: 0.05       # sig_lachenbruch BH gate - analytic, stricter
+  fdr_permsum:     0.05       # sig_permulation BH gate - gene-label shuffle null, stricter
+  pperm_thr:    0.025         # permulation-p cutoff - applied in addition to fdr_wilcoxon when perms exist
   top_n:        20            # rows shown per database x ranking
   leading_edge_top_n: 100     # rows shown in the pooled (all-database) leading-edge
                               # composition table, deliberately more generous than
@@ -273,6 +277,9 @@ enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g,
                                        max_g        = params$max_g,
                                        perms_file   = params$perms_file,
                                        fdr_thr      = params$fdr_thr,
+                                       fdr_wilcoxon    = params$fdr_wilcoxon    %||% params$fdr_thr,
+                                       fdr_lachenbruch = params$fdr_lachenbruch %||% params$fdr_thr,
+                                       fdr_permsum     = params$fdr_permsum     %||% params$fdr_thr,
                                        p_perm_thr   = params$pperm_thr,
                                        n_perms_sum  = params$n_perms_sum %||% 10000)) %>%
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%

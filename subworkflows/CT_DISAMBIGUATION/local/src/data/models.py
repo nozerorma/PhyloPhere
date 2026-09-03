@@ -47,6 +47,11 @@ class CAASPosition:
     amino_encoded: str = ""
     is_conserved_meta: bool = False
     conserved_pair: str = ""
+    # Discovering hypothesis for this row. FOP runs carry the source traitfile
+    # token (e.g. "…/traitfile_H5.tab"); a single non-FOP traitfile leaves this
+    # empty. Disambiguation uses it to score the row against that hypothesis's
+    # contrast pairs only, never the union across hypotheses.
+    trait: str = ""
 
 
 @dataclass
@@ -78,6 +83,9 @@ class ConvergenceResult:
     amino_encoded: str = ""
     is_conserved_meta: bool = False
     conserved_pair: str = ""
+    # Discovering hypothesis (FOP: "H<n>"; single-contrast run: None). One
+    # ConvergenceResult is emitted per (position, scheme, hypothesis).
+    hypothesis: Optional[str] = None
 
     # Node mapping and state tracking
     node_mapping: Optional[Dict[str, int]] = None

@@ -45,6 +45,7 @@ process CONTRAST_ALGORITHM {
     def perm_strategy = params.perm_strategy ?: 'best_model'
     def trait_type = params.trait_type ?: ''
     def max_contrasts = params.max_contrasts ?: '0'
+    def max_fop = params.max_fop ?: 100
 
     if (params.use_singularity | params.use_apptainer) {
         """
@@ -74,7 +75,8 @@ process CONTRAST_ALGORITHM {
                     trait_type = '${trait_type}',
                     pss_top_pct = '${pss_top_pct}',
                     perm_strategy = '${perm_strategy}',
-                    max_contrasts = '${max_contrasts}'
+                    max_contrasts = '${max_contrasts}',
+                    max_fop = '${max_fop}'
                 ),
                 output_file = '4.Independent_contrasts.html',
                 envir = new.env()
@@ -113,7 +115,8 @@ process CONTRAST_ALGORITHM {
                     trait_type = '${trait_type}',
                     pss_top_pct = '${pss_top_pct}',
                     perm_strategy = '${perm_strategy}',
-                    max_contrasts = '${max_contrasts}'
+                    max_contrasts = '${max_contrasts}',
+                    max_fop = '${max_fop}'
                 ),
                 output_file = '4.Independent_contrasts.html',
                 envir = new.env()

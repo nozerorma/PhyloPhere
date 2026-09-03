@@ -439,7 +439,9 @@ fcs_permpvalenrich_vectorized <- function(realenrich, enrichStat, alternative = 
 
 # rankings: named list of named-numeric vectors (already zero-floored).
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "NO_FILE",
-                        fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000) {
+                        fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000,
+                        fdr_wilcoxon = fdr_thr, fdr_lachenbruch = fdr_thr,
+                        fdr_permsum = fdr_thr) {
   res <- list(); alts <- list()
   for (rk in names(rankings)) {
     alts[[rk]] <- fcs_alternative(rankings[[rk]])
@@ -593,17 +595,18 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
   }
 
   # ── Evidence gates and classification ────────────────────────────────────────
+  # Per-method FDR gates (see conf/enrichment.config). Each defaults to fdr_thr.
   # sig_wilcoxon: FDR gate + optional Wilcoxon permulation gate + direction.
   #   p.perm is NA when no perms_file is supplied - gate skipped in that case.
-  # sig_lachenbruch: FDR gate only (both sub-tests are exact/analytic).
-  # sig_permulation: FDR gate + direction (NES > 0 = enrichment).
+  # sig_lachenbruch: FDR gate only (both sub-tests are exact/analytic -> stricter).
+  # sig_permulation: FDR gate + direction; gene-label shuffle null -> stricter.
   enrich_df <- enrich_df %>%
     dplyr::mutate(
-      sig_wilcoxon    = !is.na(p.adj)       & p.adj       < fdr_thr &
+      sig_wilcoxon    = !is.na(p.adj)       & p.adj       < fdr_wilcoxon &
                         (is.na(p.perm) | p.perm < p_perm_thr) &
                         !is.na(stat)  & stat > 0,
-      sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_thr,
-      sig_permulation = !is.na(perm_p.adj)  & perm_p.adj  < fdr_thr &
+      sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_lachenbruch,
+      sig_permulation = !is.na(perm_p.adj)  & perm_p.adj  < fdr_permsum &
                         !is.na(perm_nes) & perm_nes > 0,
       evidence_count  = as.integer(sig_wilcoxon) +
                         as.integer(sig_lachenbruch) +

@@ -52,6 +52,7 @@ fade_site_top_file   <- parse_arg("--fade_site_top")
 fade_site_bot_file   <- parse_arg("--fade_site_bot")
 rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
+hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
 stress_enabled_raw        <- parse_arg("--stress", "false")
 stress_top_n              <- as.integer(parse_arg("--stress_top_n", "25"))
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -231,11 +232,36 @@ scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
 df <- df %>%
   mutate(
     scheme_priority = scheme_priority_int[caap_group],
-    hyp_id = if ("trait" %in% names(df)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), trait) else NA_character_
+    # FOP discovering-hypothesis tag ("H<n>") or NA for a single-contrast run
+    # (trait == "post_disambiguation" or similar). Only H-tags drive fop_pool.R.
+    hyp_id = if ("trait" %in% names(df)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), NA_character_) else NA_character_
   ) %>%
   filter(caap_group %in% scoring_schemes)
 cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring schemes\n",
             nrow(df), n_distinct(df$caap_group)))
+
+# ── 2b. FOP domain-pooling (collapse H1..Hn -> one row per Gene×Position×scheme) ─
+# A FOP run emits one disambiguation row per (Gene, Position, scheme, hypothesis).
+# H1..Hn are overlapping K-pair designs over the same Voronoi domains, NOT
+# independent replicates, so §2g's per-scheme mean must not also average over
+# them uniformly (it would dilute a strong canonical signal and let a position
+# with many harvested hypotheses distort every genome-wide rank). fop_pool.R
+# pools s(p,site) within each Voronoi domain (PSS-weighted mean, weights from
+# contrast_hypotheses_pairs.tsv) and recombines with the path_scores.py algebra.
+# Non-FOP input (single contrast) passes through unchanged.
+.fop_pool_src <- file.path(dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "fop_pool.R")
+if (!file.exists(.fop_pool_src)) .fop_pool_src <- "fop_pool.R"
+source(.fop_pool_src)
+.n_before <- nrow(df)
+df <- apply_fop_pooling(df, hyp_pairs_file)
+if (nrow(df) != .n_before) {
+  cat(sprintf("  FOP pooling: %d rows -> %d after collapsing hypotheses (max n_hypotheses = %d)\n",
+              .n_before, nrow(df),
+              if ("n_hypotheses" %in% names(df)) max(df$n_hypotheses, na.rm = TRUE) else 0L))
+} else {
+  cat("  FOP pooling: no multi-hypothesis positions (single-contrast run) — pass-through\n")
+}
+df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
 
 # TRUE when a change label indicates an assessable directional event.
 assessable_change <- function(x) x %in% c("convergent", "codivergent", "divergent")
@@ -273,6 +299,10 @@ df$core <- suppressWarnings(as.numeric(df$core))
 #   asr_score  = asr_path_score: the unified ASR signal (section above).
 # The hypergeometric pvalue is not part of this product; it is the significance
 # gate (gate_all / gate_sig, section 2h).
+# percent_rank is genome-wide, so it must see each (Gene, Position, scheme)
+# exactly once. §2b already collapsed the FOP hypothesis rows, so pvalue_boot
+# here is the representative (highest-asr) hypothesis's permutation p and the
+# rank is undistorted by how many hypotheses a position happened to harvest.
 df <- df %>%
   mutate(
     phen_score = 1 - dplyr::percent_rank(pvalue_boot),
@@ -290,8 +320,16 @@ pos_scores <- df %>%
   group_by(Gene, Position) %>%
   summarise(
     CAAS_score         = mean(caas_row, na.rm = TRUE),
-    n_hypotheses       = dplyr::n_distinct(hyp_id[!is.na(hyp_id) & hyp_id != ""]),
-    supporting_hypotheses = paste(sort(unique(hyp_id[!is.na(hyp_id) & hyp_id != ""])), collapse = ","),
+    # FOP descriptors: §2b already pooled H1..Hn, so these are per-position
+    # columns now, not a re-count over rows. Recurrence stays descriptor-only —
+    # it never multiplies CAAS_score.
+    n_hypotheses       = if ("n_hypotheses" %in% names(df)) {
+      .nh <- n_hypotheses[is.finite(n_hypotheses)]; if (length(.nh)) max(.nh) else 0L
+    } else 0L,
+    supporting_hypotheses = if ("supporting_hypotheses" %in% names(df)) {
+      .sh <- unique(supporting_hypotheses[!is.na(supporting_hypotheses) & nzchar(supporting_hypotheses)])
+      if (length(.sh)) paste(sort(unique(unlist(strsplit(.sh, ",")))), collapse = ",") else ""
+    } else "",
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
     asr_score          = mean(asr_score,          na.rm = TRUE),
@@ -299,6 +337,7 @@ pos_scores <- df %>%
     derived_agreement  = mean(derived_agreement,  na.rm = TRUE),
     conservation_gate  = mean(conservation_gate,  na.rm = TRUE),
     core               = mean(core,               na.rm = TRUE),
+    core_perside_pooled = if ("core_perside_pooled" %in% names(df)) mean(core_perside_pooled, na.rm = TRUE) else NA_real_,
     phen_score         = mean(phen_score,         na.rm = TRUE),
     pvalue_boot        = first(pvalue_boot),
     is_conserved_meta  = first(is_conserved_meta),
@@ -901,8 +940,10 @@ cat("\n─── Writing outputs ───────────────�
 # Position scores
 pos_out <- pos_scores %>%
   select(Gene, Position, any_of("pvalue_boot"),
-         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core")),
-         any_of("phen_score"), n_schemes, any_of("scheme_set"), CAAS_score,
+         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core",
+                             "core_perside_pooled")),
+         any_of("phen_score"), n_schemes, any_of("scheme_set"),
+         any_of(c("n_hypotheses", "supporting_hypotheses")), CAAS_score,
          change_side,
          any_of(c("caas", "change_top", "change_bottom"))) %>%
   arrange(desc(CAAS_score))

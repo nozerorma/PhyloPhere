@@ -52,6 +52,7 @@ process SCORING_COMPUTE {
     path fade_site_bot
     path rer_summary
     path accum_files
+    path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
 
     output:
     path "position_scores.tsv",                              emit: position_scores
@@ -80,6 +81,7 @@ process SCORING_COMPUTE {
                               : (accum_files.name.startsWith('NO_') ? 'NO_ACCUM' : '.'))
     def fs_top_arg        = fade_site_top.name =~ /^NO_FADE_SITE_TOP/ ? 'NO_FADE_SITE_TOP' : "${fade_site_top}"
     def fs_bot_arg        = fade_site_bot.name =~ /^NO_FADE_SITE_BOT/ ? 'NO_FADE_SITE_BOT' : "${fade_site_bot}"
+    def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -93,6 +95,7 @@ process SCORING_COMPUTE {
             --fade_site_bot  '${fs_bot_arg}' \
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
+            --hypotheses_pairs '${hp_arg}' \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
@@ -116,6 +119,7 @@ process SCORING_COMPUTE {
             --fade_site_bot  '${fs_bot_arg}' \
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
+            --hypotheses_pairs '${hp_arg}' \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \

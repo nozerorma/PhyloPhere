@@ -229,66 +229,110 @@ fop_pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait, max
     mean_distance = round(mean(canon_pairs$distance), 4),
     mean_abs_diff = round(mean(canon_pairs$abs_diff), 4),
     mean_pss_score = h1_mean_pss,
+    min_pss_score = if ("pss_score" %in% names(canon_pairs) && any(is.finite(canon_pairs$pss_score)))
+                      round(min(canon_pairs$pss_score, na.rm = TRUE), 4) else NA_real_,
     jaccard_to_h1 = 1.0,
     pair_composition = paste(paste(canon_pairs$species1, canon_pairs$species2, sep = "~"), collapse = "; "),
     stringsAsFactors = FALSE
   )
   
-  # Combinatorial harvest across Voronoi domains
-  pool_sizes <- sapply(alt_pools, nrow)
-  total_combos <- prod(pmax(pool_sizes, 1))
-  
-  if (total_combos > 1) {
-    n_sample <- min(as.numeric(total_combos), max_fop * 20)
-    
-    for (iter in seq_len(n_sample)) {
-      if (length(hypotheses) >= max_fop) break
-      
-      chosen_idx <- sapply(seq_len(K), function(k) {
-        if (pool_sizes[k] == 0) return(NA_integer_)
-        sample.int(pool_sizes[k], 1)
-      })
-      
-      if (any(is.na(chosen_idx))) next
-      
-      cand_pairs_list <- lapply(seq_len(K), function(k) alt_pools[[k]][chosen_idx[k], ])
-      cand_h_df <- do.call(rbind, cand_pairs_list)
-      
+  # ── Combinatorial harvest across Voronoi domains ────────────────────────────
+  # Hard-bounded on every axis:
+  #   * iterations  <= min(total_combos, ITER_CAP)   (ITER_CAP = max_fop * 20)
+  #   * harvested   <= iterations
+  #   * returned Hm <= max_fop - 1, selected AFTER ranking (quality truncation)
+  # Spaces no larger than ITER_CAP are swept exhaustively (expand.grid); only
+  # larger spaces fall back to capped random draws. A Voronoi domain with no
+  # in-domain candidate pair makes the harvest unsatisfiable, so abort it up
+  # front instead of burning the whole budget on NA draws.
+  pool_sizes <- vapply(alt_pools, nrow, integer(1))
+  ITER_CAP   <- as.integer(max_fop) * 20L
+  harvested  <- list()   # each: list(df =, dunn =)
+
+  if (any(pool_sizes == 0L)) {
+    debug_log("FOP: Voronoi domain(s) [%s] have no in-domain candidate pair; no parallel hypotheses harvested",
+              paste(which(pool_sizes == 0L), collapse = ","))
+  } else if (prod(as.numeric(pool_sizes)) > 1) {
+    total_combos <- prod(as.numeric(pool_sizes))
+    enumerate    <- total_combos <= ITER_CAP
+
+    idx_iter <- if (enumerate) {
+      do.call(expand.grid, c(lapply(pool_sizes, seq_len), list(KEEP.OUT.ATTRS = FALSE)))
+    } else {
+      as.data.frame(lapply(pool_sizes, function(n) sample.int(n, ITER_CAP, replace = TRUE)))
+    }
+    n_iter <- nrow(idx_iter)
+    debug_log("FOP harvest: K=%d pools=[%s] total_combos=%.3g mode=%s iters=%d",
+              K, paste(pool_sizes, collapse = ","), total_combos,
+              if (enumerate) "enumerate" else "sample", n_iter)
+
+    for (iter in seq_len(n_iter)) {
+      chosen_idx <- as.integer(unlist(idx_iter[iter, , drop = FALSE], use.names = FALSE))
+      cand_h_df  <- do.call(rbind, lapply(seq_len(K), function(k) alt_pools[[k]][chosen_idx[k], ]))
+
       all_sp <- c(cand_h_df$species1, cand_h_df$species2)
-      if (length(unique(all_sp)) < 2 * K) next
-      
+      if (length(unique(all_sp)) < 2L * K) next
+
       sig <- paste(sort(all_sp), collapse = "|")
       if (sig %in% seen_sigs) next
-      
+      seen_sigs <- c(seen_sigs, sig)   # also dedups repeat draws in sample mode
+
       h_members <- lapply(seq_len(K), function(i) c(cand_h_df$species1[i], cand_h_df$species2[i]))
       h_dunn <- overall_dunn_lean(mat, h_members)
-      
       if (h_dunn >= 1.0) {
-        h_id <- paste0("H", length(hypotheses) + 1)
-        cand_h_df$cluster <- seq_len(K)
-        hypotheses[[h_id]] <- cand_h_df
-        seen_sigs <- c(seen_sigs, sig)
-        
-        h1_sp <- c(canon_pairs$species1, canon_pairs$species2)
-        jaccard <- length(intersect(h1_sp, all_sp)) / length(union(h1_sp, all_sp))
-        h_mean_pss <- if ("pss_score" %in% names(cand_h_df)) round(mean(cand_h_df$pss_score, na.rm = TRUE), 4) else NA_real_
-        
-        summary_rows[[length(summary_rows) + 1]] <- data.frame(
-          hypothesis_id = h_id,
-          is_canonical = FALSE,
-          num_pairs = K,
-          min_dunn = round(h_dunn, 4),
-          mean_distance = round(mean(cand_h_df$distance), 4),
-          mean_abs_diff = round(mean(cand_h_df$abs_diff), 4),
-          mean_pss_score = h_mean_pss,
-          jaccard_to_h1 = round(jaccard, 4),
-          pair_composition = paste(paste(cand_h_df$species1, cand_h_df$species2, sep = "~"), collapse = "; "),
-          stringsAsFactors = FALSE
-        )
+        harvested[[length(harvested) + 1L]] <- list(df = cand_h_df, dunn = h_dunn)
       }
     }
   }
-  
+
+  # ── Rank the harvested hypotheses, then keep the top (max_fop - 1) ──────────
+  # Priority key (all descending): min PSS across the K pairs (a hypothesis is
+  # only as strong as its weakest contrast), then mean PSS, then overall Dunn.
+  # Makes the post-H1 numbering a quality order rather than a discovery order,
+  # and turns the max_fop cap into a quality truncation.
+  .pss_agg <- function(df, f) {
+    p <- suppressWarnings(as.numeric(df$pss_score))
+    if (all(is.na(p))) NA_real_ else f(p, na.rm = TRUE)
+  }
+  if (length(harvested) > 0L) {
+    min_pss  <- vapply(harvested, function(h) .pss_agg(h$df, min),  numeric(1))
+    mean_pss <- vapply(harvested, function(h) .pss_agg(h$df, mean), numeric(1))
+    dunn_v   <- vapply(harvested, `[[`, numeric(1), "dunn")
+    n_valid  <- length(harvested)
+    ord <- order(-replace(min_pss,  is.na(min_pss),  -Inf),
+                 -replace(mean_pss, is.na(mean_pss), -Inf),
+                 -dunn_v)
+    harvested <- harvested[ord]
+    keep_n <- min(n_valid, as.integer(max_fop) - 1L)
+    harvested <- if (keep_n > 0L) harvested[seq_len(keep_n)] else list()
+
+    h1_sp <- c(canon_pairs$species1, canon_pairs$species2)
+    for (m in seq_along(harvested)) {
+      hdf <- harvested[[m]]$df
+      hdf$cluster <- seq_len(K)
+      h_id <- paste0("H", m + 1L)
+      hypotheses[[h_id]] <- hdf
+
+      all_sp  <- c(hdf$species1, hdf$species2)
+      jaccard <- length(intersect(h1_sp, all_sp)) / length(union(h1_sp, all_sp))
+      summary_rows[[length(summary_rows) + 1L]] <- data.frame(
+        hypothesis_id  = h_id,
+        is_canonical   = FALSE,
+        num_pairs      = K,
+        min_dunn       = round(harvested[[m]]$dunn, 4),
+        mean_distance  = round(mean(hdf$distance), 4),
+        mean_abs_diff  = round(mean(hdf$abs_diff), 4),
+        mean_pss_score = round(.pss_agg(hdf, mean), 4),
+        min_pss_score  = round(.pss_agg(hdf, min), 4),
+        jaccard_to_h1  = round(jaccard, 4),
+        pair_composition = paste(paste(hdf$species1, hdf$species2, sep = "~"), collapse = "; "),
+        stringsAsFactors = FALSE
+      )
+    }
+    debug_log("FOP: %d distinct Dunn-valid hypotheses harvested, kept top %d after PSS ranking",
+              n_valid, length(harvested))
+  }
+
   summary_df <- do.call(rbind, summary_rows)
   
   list(

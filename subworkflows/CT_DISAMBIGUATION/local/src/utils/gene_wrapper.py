@@ -116,6 +116,11 @@ def convert_convergence_result_to_dict(
         "is_conserved_meta": bool(getattr(result, "is_conserved_meta", False)),
         "conserved_pair": getattr(result, "conserved_pair", ""),
         "multi_hypothesis": multi_hypothesis,
+        # Discovering hypothesis (FOP: "H<n>"); empty for single-contrast runs.
+        # Read downstream as `trait` (scoring_compute.R derives hyp_id from it).
+        "trait": getattr(result, "hypothesis", None)
+        or getattr(result, "trait", "")
+        or "",
     }
 
     # Node mapping
@@ -192,74 +197,6 @@ def convert_convergence_result_to_dict(
                 result_dict[k] = v
 
     return result_dict
-
-
-def merge_multi_hypothesis_results(
-    results_group: List,
-    alignment=None,
-    seq_by_id: Optional[Dict] = None,
-    seq_by_species: Optional[Dict] = None,
-    trait_pairs: Optional[Dict[int, List[Tuple[str, str]]]] = None,
-    taxid_to_species: Optional[Dict] = None,
-) -> Dict:
-    """
-    Merge multiple ConvergenceResult rows for same (gene, msa_pos) into one dict.
-
-    This function is intentionally side-effect free: it does not mutate
-    the input results.
-    """
-    base = results_group[0]
-    tags = [
-        str(getattr(r, "tag", "")) for r in results_group if getattr(r, "tag", None)
-    ]
-    multi_hypothesis = ",".join(sorted(set(tags))) if tags else None
-
-    merged = convert_convergence_result_to_dict(
-        base,
-        multi_hypothesis=multi_hypothesis,
-        alignment=alignment,
-        seq_by_id=seq_by_id,
-        seq_by_species=seq_by_species,
-        trait_pairs=trait_pairs,
-        taxid_to_species=taxid_to_species,
-    )
-
-    # Merge CAAS labels
-    caass = [
-        getattr(r, "caas", None) for r in results_group if getattr(r, "caas", None)
-    ]
-    if caass:
-        merged["caas_merged"] = "; ".join(sorted(set(str(x) for x in caass)))
-
-    # Merge boolean/meta flags across hypothesis rows
-    merged["is_conserved_meta"] = any(
-        bool(getattr(r, "is_conserved_meta", False)) for r in results_group
-    )
-    path_scores = [
-        getattr(r, "asr_path_score", None)
-        for r in results_group
-        if getattr(r, "asr_path_score", None) is not None
-    ]
-    if path_scores:
-        merged["asr_path_score"] = max(path_scores)
-
-    groups = [
-        str(getattr(r, "caap_group", "")).strip()
-        for r in results_group
-        if getattr(r, "caap_group", None)
-    ]
-    if groups:
-        merged["caap_group"] = ",".join(sorted(set(g for g in groups if g)))
-
-    encoded = [
-        str(getattr(r, "amino_encoded", "")).strip()
-        for r in results_group
-        if getattr(r, "amino_encoded", None)
-    ]
-    if encoded:
-        merged["amino_encoded"] = ",".join(sorted(set(e for e in encoded if e)))
-
-    return merged
 
 
 def process_single_gene(
@@ -794,7 +731,11 @@ def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], Li
     import csv
 
     labelings: Dict[str, Tuple[List[str], List[str]]] = {}
-    for tab in sorted(Path(resample_dir).glob("resample_*.tab")):
+    # resample_fop.tab (FOP mirror: "<base>~H<m>" tags) takes precedence over the
+    # plain resample_*.tab chunks when present.
+    _tabs = sorted(Path(resample_dir).glob("resample_fop.tab")) or \
+            sorted(Path(resample_dir).glob("resample_*.tab"))
+    for tab in _tabs:
         try:
             with open(tab, "r") as f:
                 for row in csv.reader(f, delimiter="\t"):
@@ -808,6 +749,34 @@ def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], Li
         except Exception as e:
             logger.warning(f"[perms] failed to read {tab}: {e}")
     return labelings
+
+
+def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], float]]:
+    """resample_fop_pairs.tsv -> {base_cycle: {(hypothesis_id, domain): pss_score}}.
+
+    Header: cycle, hypothesis_id, pair, species1, species2, pss_score
+    (permulations.R FOP mirror). `pair` == Voronoi domain id.
+    """
+    import csv as _csvmod
+
+    out: Dict[str, Dict[Tuple[str, int], float]] = {}
+    try:
+        with open(path, "r") as f:
+            reader = _csvmod.DictReader(f, delimiter="\t")
+            for row in reader:
+                cyc = (row.get("cycle") or "").strip()
+                hyp = (row.get("hypothesis_id") or "").strip()
+                if not cyc or not hyp:
+                    continue
+                try:
+                    domain = int(float(row.get("pair", "")))
+                    pss = float(row.get("pss_score", "nan"))
+                except (TypeError, ValueError):
+                    continue
+                out.setdefault(cyc, {})[(hyp, domain)] = pss
+    except Exception as e:
+        logger.warning(f"[perms] could not read FOP pairs file {path}: {e}")
+    return out
 
 
 def _write_cycle_trait_file(fg: List[str], bg: List[str], out_path: Path) -> None:
@@ -1013,6 +982,7 @@ def _perms_worker(
     cycle_trait_files: Dict[str, str],
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
+    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
 ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Replay N labelings over one gene's cached ASR. One gene = one worker task.
     Performs on-the-fly aggregation inside the worker, avoiding outputting huge files.
@@ -1192,6 +1162,65 @@ def _perms_worker(
         if not all_cycle_results:
             return (gene, [], [])
 
+        # ── FOP domain-pooling: collapse the "<base>~H*" replays of each cycle ──
+        # into one record per (base cycle, position, scheme), mirroring
+        # scoring_compute.R §2b / fop_pool.R on the observed side. From here the
+        # worker (and both aggregation passes) see one row per base cycle.
+        if fop_pairs is not None:
+            from src.convergence.fop_pool import pool_hypotheses, base_cycle as _bc
+
+            # (base_cyc, pos, scheme) -> [ {hyp, asr_path_score, pair_scores, ...} ]
+            by_pos: Dict[Tuple[str, int, str], List[Dict[str, Any]]] = {}
+            change_by_pos: Dict[Tuple[str, int, str], Tuple[bool, bool]] = {}
+            for cyc, results_list in all_cycle_results:
+                base = _bc(cyc)
+                hyp = cyc.split("~", 1)[1] if "~" in cyc else "H1"
+                for r in results_list:
+                    pos = getattr(r, "position", None)
+                    if pos is None:
+                        continue
+                    grp = getattr(r, "caap_group", "US")
+                    key = (base, pos, grp)
+                    by_pos.setdefault(key, []).append({
+                        "hyp": hyp,
+                        "asr_path_score": getattr(r, "asr_path_score", 0.0) or 0.0,
+                        "pair_scores": getattr(r, "pair_scores", None) or {},
+                        "independence": getattr(r, "independence", None),
+                        "mrca_diversity": getattr(r, "mrca_diversity", None),
+                        "derived_agreement": getattr(r, "derived_agreement", None),
+                        "conservation_gate": getattr(r, "conservation_gate", None),
+                        "core": getattr(r, "core", None),
+                    })
+                    ct_prev, cb_prev = change_by_pos.get(key, (False, False))
+                    change_by_pos[key] = (
+                        ct_prev or getattr(r, "change_top", "no_change") in _CHANGE_STATES,
+                        cb_prev or getattr(r, "change_bottom", "no_change") in _CHANGE_STATES,
+                    )
+
+            pooled_by_cycle: Dict[str, List[Any]] = {}
+            for (base, pos, grp), hyp_recs in by_pos.items():
+                pss_map = fop_pairs.get(base, {})  # {(hyp, domain) -> pss}
+                pooled = pool_hypotheses(hyp_recs, pss_map)
+                ct, cb = change_by_pos[(base, pos, grp)]
+                pooled_by_cycle.setdefault(base, []).append(
+                    PositionAxes(
+                        position=pos, caap_group=grp,
+                        asr_path_score=pooled["asr_path_score"],
+                        change_top="convergent" if ct else "no_change",
+                        change_bottom="convergent" if cb else "no_change",
+                        hypothesis=None, pair_scores=None,
+                        independence=pooled.get("independence"),
+                        mrca_diversity=pooled.get("mrca_diversity"),
+                        derived_agreement=pooled.get("derived_agreement"),
+                        conservation_gate=pooled.get("conservation_gate"),
+                        core=pooled.get("core"),
+                    )
+                )
+            all_cycle_results = list(pooled_by_cycle.items())
+            # n_cycles_total below must be the FULL base-cycle universe, not just
+            # the ones this gene produced hits for.
+            cycle_tags = sorted({_bc(c) for c in cycle_tags})
+
         # ── 1. Leave-one-out null_pvalue_boot per (position, scheme) ───────────
         # This is the null-side analogue of the observed pvalue_boot, which
         # modules/boot.py computes as count/cycles: "of the resampling cycles,
@@ -1263,6 +1292,9 @@ def _perms_worker(
                     asr_val = 0.0
                 change_top = getattr(r, "change_top", "no_change")
                 change_bottom = getattr(r, "change_bottom", "no_change")
+                # `r` is already FOP-domain-pooled (or a single-contrast record)
+                # by the time we get here, so asr_path_score is the final
+                # per-(base cycle, position, scheme) value.
                 detail_rows.append({
                     "Gene": gene,
                     "cycle": cyc,
@@ -1601,6 +1633,7 @@ def process_all_genes_perms(
     ensembl_genes_file: Optional[str] = None,
     cycles: Optional[List[str]] = None,
     max_tasks_per_child: Optional[int] = None,
+    fop_pairs_file: Optional[str] = None,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -1641,6 +1674,16 @@ def process_all_genes_perms(
     if ensembl_genes is not None:
         genes = [g for g in genes if g in ensembl_genes]
 
+    # FOP mirror: when resample_fop_pairs.tsv is present the resample dir carries
+    # "<base>~H<m>" hypothesis labelings (resample_fop.tab) instead of / alongside
+    # the plain resample_*.tab. build_cycle_inputs writes one trait file per
+    # hypothesis labeling; _perms_worker then domain-pools them back to one score
+    # per base cycle. Parse the per-(hypothesis, domain) PSS weights once here.
+    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None
+    if fop_pairs_file and Path(fop_pairs_file).exists():
+        fop_pairs = _read_fop_pairs(fop_pairs_file)
+        logger.info(f"[perms] FOP mirror ON: PSS weights for {len(fop_pairs)} base cycles")
+
     cycle_tags, cycle_trait_files, cycle_meta_files = build_cycle_inputs(
         perm_discovery_file, resample_dir, output_dir / "cycle_inputs", cycles
     )
@@ -1666,7 +1709,7 @@ def process_all_genes_perms(
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold, convergence_mode,
-         cycle_tags, cycle_trait_files, perm_discovery_file, None)
+         cycle_tags, cycle_trait_files, perm_discovery_file, None, fop_pairs)
         for gene in genes
     )
 

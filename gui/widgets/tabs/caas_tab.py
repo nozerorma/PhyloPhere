@@ -41,6 +41,11 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="min_divergent_fraction", label="Min divergent fraction"),
         FieldSpec(name="caap_mode", label="CAAP mode (properties-based)", kind="bool"),
         FieldSpec(name="multi_hypothesis", label="Multi-hypothesis mode", kind="bool"),
+        FieldSpec(
+            name="max_fop",
+            label="Max FOP hypotheses (H1..Hn)",
+            placeholder="alternative Dunn-independent hypotheses per contrast (observed + null); default 100",
+        ),
         Section("Resample / Bootstrap params"),
         FieldSpec(name="chunk_size", label="Resampled groups per output file"),
         FieldSpec(name="include_b0", label="Include main hypothesis (b0)", kind="bool"),
@@ -60,6 +65,11 @@ SPEC = ModuleTabSpec(
             name="max_tries",
             label="Max permulation tries",
             placeholder="draw budget; raised 50% up to twice if the pool falls short",
+        ),
+        FieldSpec(
+            name="caas_perms_fop",
+            label="Mirror FOP harvest in the CAAS permulation null",
+            kind="bool",
         ),
     ),
     advanced_fields=(

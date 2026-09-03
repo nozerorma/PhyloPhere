@@ -374,6 +374,63 @@ def find_lca(
 EMPTY_PATH_SCORE = 0.5
 
 
+def _changed_side_walk(
+    node_index: Dict[int, Any],
+    per_node_dist: Dict[Any, Dict[str, float]],
+    mrca_id: Optional[int],
+    derived_enc: Optional[str],
+    scheme: Optional[str],
+) -> Tuple[List[int], List[float], bool]:
+    """The labeling-invariant part of a changed-side score.
+
+    Returns ``(path_ids, cumprod, contam_hop1)`` where ``path_ids`` is the node
+    walk (parent-of-MRCA .. root), ``cumprod[i] = product_{0..i} (1 - P(derived))``
+    with P(derived) the worst-case bound, and ``contam_hop1`` is whether the
+    node directly above the MRCA already has the derived state as its mode.
+
+    None of these depend on the phenotype labeling or on which hypothesis is
+    being scored — only on ``(mrca_id, site, scheme, derived_enc)`` — so the
+    FOP null and multi-hypothesis observed runs memoise this once per
+    ``(mrca_id, derived_enc)`` within a ``(site, scheme)`` and index into
+    ``cumprod`` by each hypothesis's LAC cut (see :func:`_apply_changed_stop`).
+    """
+    path = path_to_root_ids(node_index, mrca_id)
+    cumprod: List[float] = []
+    running = 1.0
+    contam_hop1 = False
+    for k, node_id in enumerate(path, start=1):
+        dist = node_dist(per_node_dist, node_id)
+        p_der = worst_case_group_probability(dist, derived_enc, scheme)
+        running *= max(0.0, 1.0 - p_der)
+        cumprod.append(running)
+        if k == 1 and derived_enc and modal_encoded(dist, scheme) == derived_enc:
+            contam_hop1 = True
+    return path, cumprod, contam_hop1
+
+
+def _apply_changed_stop(
+    path: List[int], cumprod: List[float], contam_hop1: bool,
+    stop_at_id: Optional[int],
+) -> Tuple[float, bool]:
+    """Index a precomputed changed-side walk at one hypothesis's LAC cut.
+
+    Bit-identical to the inline loop in :func:`side_path_score`: the walk stops
+    *before* ``stop_at_id`` (the shared LAC), so ``n_walk`` nodes are scored and
+    the score is ``cumprod[n_walk - 1]`` (or 1.0 when nothing is walked).
+    """
+    if not path:
+        return EMPTY_PATH_SCORE, False
+    n_walk = len(path)
+    if stop_at_id is not None:
+        for j, nid in enumerate(path):
+            if nid == stop_at_id:
+                n_walk = j
+                break
+    if n_walk == 0:
+        return 1.0, False  # count == 0: no private nodes; hop+1 never reached
+    return max(0.0, min(1.0, cumprod[n_walk - 1])), contam_hop1
+
+
 def side_path_score(
     node_index: Dict[int, Any],
     per_node_dist: Dict[Any, Dict[str, float]],
@@ -383,6 +440,8 @@ def side_path_score(
     scheme: Optional[str],
     is_changed: bool,
     stop_at_id: Optional[int] = None,
+    walk_cache: Optional[Dict[Any, Any]] = None,
+    cache_scope: Optional[Tuple[Any, Optional[str]]] = None,
 ) -> Tuple[float, bool]:
     """Score private isolation (changed) or global conservation (conserved).
 
@@ -396,7 +455,30 @@ def side_path_score(
 
     For a conserved side (is_changed=False), walks the entire path to the root
     and computes the unweighted mean of P(ancestral) (no stop_at_id).
+
+    ``walk_cache`` + ``cache_scope`` (``(site_key, scheme)``): when both are
+    supplied the labeling-invariant walk is memoised, so scoring N FOP
+    hypotheses for one (site, scheme) walks each distinct pair once instead of
+    N times. Results are bit-identical to the uncached path.
     """
+    if walk_cache is not None and cache_scope is not None:
+        if is_changed:
+            key = (cache_scope[0], cache_scope[1], "chg", mrca_id, derived_enc)
+            entry = walk_cache.get(key)
+            if entry is None:
+                entry = _changed_side_walk(
+                    node_index, per_node_dist, mrca_id, derived_enc, scheme
+                )
+                walk_cache[key] = entry
+            return _apply_changed_stop(entry[0], entry[1], entry[2], stop_at_id)
+        else:
+            key = (cache_scope[0], cache_scope[1], "cons", mrca_id, ancestral_enc)
+            if key not in walk_cache:
+                walk_cache[key] = _conserved_side_score(
+                    node_index, per_node_dist, mrca_id, ancestral_enc, scheme
+                )
+            return walk_cache[key], False
+
     path = path_to_root_ids(node_index, mrca_id)
     if not path:
         return EMPTY_PATH_SCORE, False
@@ -431,6 +513,27 @@ def side_path_score(
         if count == 0:
             return EMPTY_PATH_SCORE, False
         return max(0.0, min(1.0, total_anc / count)), False
+
+
+def _conserved_side_score(
+    node_index: Dict[int, Any],
+    per_node_dist: Dict[Any, Dict[str, float]],
+    mrca_id: Optional[int],
+    ancestral_enc: str,
+    scheme: Optional[str],
+) -> float:
+    """Conserved-side score (mean P(ancestral) over the full MRCA→root path).
+
+    Split out so it can be memoised; identical arithmetic to the
+    ``is_changed=False`` branch of :func:`side_path_score`.
+    """
+    path = path_to_root_ids(node_index, mrca_id)
+    if not path:
+        return EMPTY_PATH_SCORE
+    total_anc = 0.0
+    for node_id in path:
+        total_anc += group_probability(node_dist(per_node_dist, node_id), ancestral_enc, scheme)
+    return max(0.0, min(1.0, total_anc / len(path)))
 
 
 # ── Conserved-pair id parsing ────────────────────────────────────────────────
@@ -477,6 +580,8 @@ def compute_asr_path_score(
     is_conserved_meta: bool,
     conserved_pair: Optional[str],
     diversity_floor: float = 0.75,
+    walk_cache: Optional[Dict[Any, Any]] = None,
+    site_key: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """Compute the unified ASR path score for one CAAS position row.
 
@@ -537,6 +642,7 @@ def compute_asr_path_score(
             cons, _ = side_path_score(
                 node_index, per_node_dist, mrca_id, anc_enc, None, scheme,
                 is_changed=False,
+                walk_cache=walk_cache, cache_scope=(site_key, scheme),
             )
             conserved_conservations.append(cons)
             continue
@@ -626,6 +732,7 @@ def compute_asr_path_score(
             score, contam = side_path_score(
                 node_index, per_node_dist, c["mrca_id"], c["anc_enc"], tip_enc,
                 scheme, is_changed=True, stop_at_id=stop_at,
+                walk_cache=walk_cache, cache_scope=(site_key, scheme),
             )
             side_scores.append(score)
             pair_contam = pair_contam or contam
@@ -665,9 +772,33 @@ def compute_asr_path_score(
     # the position's diversity is the mean over every pairwise comparison
     # among changed pairs -- the same aggregation the old MRCA-only version
     # used, just built from richer, multi-node comparisons.
-    def _found_probability(target_enc: Optional[str], segment_nodes: List[int]) -> float:
+    def _found_probability(
+        target_enc: Optional[str], segment_nodes: List[int],
+        owner_mrca_id: Optional[int] = None,
+    ) -> float:
         if target_enc is None or not segment_nodes:
             return 0.0
+        # diversity_search_nodes[pid] is always [mrca_id] + a prefix of that
+        # pair's MRCA->root path, so the "absent at every node" product is a
+        # prefix of the cumulative product over [mrca_id] + full_path. Memoise
+        # that once per (site, scheme, owner_mrca, target_enc) and slice by
+        # segment length -- same labeling-invariance argument as core.
+        if walk_cache is not None and site_key is not None and owner_mrca_id is not None:
+            key = (site_key, scheme, "found", owner_mrca_id, target_enc)
+            cp = walk_cache.get(key)
+            if cp is None:
+                full = [owner_mrca_id] + path_to_root_ids(node_index, owner_mrca_id)
+                cp = []
+                running = 1.0
+                for nid in full:
+                    running *= max(0.0, 1.0 - worst_case_group_probability(
+                        node_dist(per_node_dist, nid), target_enc, scheme))
+                    cp.append(running)
+                walk_cache[key] = cp
+            n = len(segment_nodes)
+            if n == 0 or not cp:
+                return 0.0
+            return max(0.0, min(1.0, 1.0 - cp[min(n, len(cp)) - 1]))
         p_absent = 1.0
         for node_id in segment_nodes:
             dist = node_dist(per_node_dist, node_id)
@@ -679,8 +810,10 @@ def compute_asr_path_score(
         for ca, cb in combinations(changed, 2):
             a_state = modal_encoded(node_dist(per_node_dist, ca["mrca_id"]), scheme)
             b_state = modal_encoded(node_dist(per_node_dist, cb["mrca_id"]), scheme)
-            p_a_in_b = _found_probability(a_state, diversity_search_nodes.get(cb["pid"], []))
-            p_b_in_a = _found_probability(b_state, diversity_search_nodes.get(ca["pid"], []))
+            p_a_in_b = _found_probability(
+                a_state, diversity_search_nodes.get(cb["pid"], []), cb["mrca_id"])
+            p_b_in_a = _found_probability(
+                b_state, diversity_search_nodes.get(ca["pid"], []), ca["mrca_id"])
             shared = 1.0 - (1.0 - p_a_in_b) * (1.0 - p_b_in_a)
             pairwise_diversities.append(1.0 - shared)
         diversity = sum(pairwise_diversities) / len(pairwise_diversities)

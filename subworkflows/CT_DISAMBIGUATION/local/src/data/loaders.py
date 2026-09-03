@@ -226,6 +226,7 @@ def read_caas_metadata_table(
         "amino_encoded": "",
         "conserved_pair": "",
         "is_conserved_meta": False,
+        "trait": "",
     }.items():
         if col not in df.columns:
             df[col] = default
@@ -325,6 +326,7 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             amino_encoded=str(row.get("amino_encoded", "") or ""),
             is_conserved_meta=_b(row.get("is_conserved_meta")),
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair", "") or "")),
+            trait=str(row.get("trait", "") or ""),
         )
         entries.append(entry)
 

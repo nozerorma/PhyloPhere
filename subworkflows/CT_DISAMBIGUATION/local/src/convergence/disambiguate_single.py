@@ -11,6 +11,7 @@ Author: Refactored from test_nutm2a_real_caas.py
 Date: 2025-11-24
 """
 
+import re
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
@@ -46,8 +47,16 @@ logger = logging.getLogger(__name__)
 # a drop-in for a ConvergenceResult on that path.
 PositionAxes = namedtuple(
     "PositionAxes",
-    ["position", "caap_group", "asr_path_score", "change_top", "change_bottom"],
+    ["position", "caap_group", "asr_path_score", "change_top", "change_bottom",
+     "hypothesis", "pair_scores", "independence", "mrca_diversity",
+     "derived_agreement", "conservation_gate", "core"],
 )
+# All fields after `change_bottom` are optional. Single-contrast perm replay
+# leaves `hypothesis` None and the FOP axis fields None. For the FOP null they
+# carry the full compute_asr_path_score output so the aggregation domain-pools
+# with the exact same algebra scoring_compute.R §2b / fop_pool.R use on the
+# observed side.
+PositionAxes.__new__.__defaults__ = (None, None, None, None, None, None, None)
 
 
 def _build_per_node_dist(
@@ -80,6 +89,7 @@ def _position_axes(
     node_index: Optional[Dict[int, Any]],
     pair_details_list: Optional[List[Dict[str, Any]]],
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
+    walk_cache: Optional[Dict[Any, Any]] = None,
 ) -> Dict[str, Any]:
     """Reduced ASR-path-score kernel shared by the full scorer and the perm replay.
 
@@ -117,6 +127,8 @@ def _position_axes(
         scheme=getattr(caas_pos, "caap_group", "US") or "US",
         is_conserved_meta=bool(getattr(caas_pos, "is_conserved_meta", False)),
         conserved_pair=str(getattr(caas_pos, "conserved_pair", "") or "").strip(),
+        walk_cache=walk_cache,
+        site_key=paml_site,
     )
 
 
@@ -132,6 +144,8 @@ def analyze_caas_position_disambiguation(
     node_index: Optional[Dict[int, Any]] = None,
     build_node_posteriors: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
+    hypothesis: Optional[str] = None,
+    walk_cache: Optional[Dict[Any, Any]] = None,
 ) -> ConvergenceResult:
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
@@ -417,7 +431,8 @@ def analyze_caas_position_disambiguation(
         # was built above, so the score here stays bit-identical while guaranteeing
         # the perm null scores each position through the same helper.
         path_result = _position_axes(
-            caas_pos, tree_data, posterior_data, node_index, pair_details_list, per_site_dist_cache=per_site_dist_cache
+            caas_pos, tree_data, posterior_data, node_index, pair_details_list,
+            per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
         )
         asr_path_score = path_result["asr_path_score"]
         independence = path_result.get("independence", 1.0)
@@ -471,6 +486,7 @@ def analyze_caas_position_disambiguation(
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
         conserved_pair=conserved_pair,
+        hypothesis=hypothesis,
         asr_path_score=asr_path_score,
         independence=independence,
         mrca_diversity=mrca_diversity,
@@ -539,6 +555,14 @@ def analyze_gene_disambiguation(
     if per_site_dist_cache is None:
         per_site_dist_cache = {}
 
+    # Memoises the labeling-invariant MRCA->root walks inside compute_asr_path_score
+    # (see path_scores._changed_side_walk). Shared across every position, scheme and
+    # FOP hypothesis of this gene: a candidate pair recurring across hypotheses /
+    # cycles is walked once. Per-node posteriors for a site are content-identical on
+    # every rebuild, so the cache stays valid for the observed path too. Bounded by
+    # (#sites x #schemes x #distinct pair MRCAs x #residues) entries per gene.
+    gene_walk_cache: Dict[Any, Any] = {}
+
     results: List[ConvergenceResult] = []
     diagnostics: Dict[str, Any] = {
         "skipped_positions": 0,
@@ -572,18 +596,62 @@ def analyze_gene_disambiguation(
                 for pos in caas_positions
             ]
 
-    # Load all trait pairs once for uniform processing
+    # ── Trait pairs, grouped by contrast ──────────────────────────────────────
+    # parse_trait_pairs returns {contrast -> pairs}: one contrast per FOP
+    # hypothesis (traitfile_H<n>.tab -> n), or a single contrast for a plain
+    # non-FOP traitfile. Each CAAS metadata row belongs to the hypothesis that
+    # discovered it (its `trait` field); it is disambiguated against THAT
+    # hypothesis's pairs only. Unioning every hypothesis's pairs (the old
+    # `flattened_pairs`) polluted every multi-pair axis of the ASR path score —
+    # LAC merge points, independence, mrca_diversity — with contrasts from
+    # unrelated hypotheses, and discarded the per-hypothesis Dunn independence
+    # the FOP harvest enforces.
     trait_pairs_all: Dict[int, List[Tuple[str, str]]] = {}
-    flattened_pairs: List[Tuple[str, str]] = []
     if trait_file_path:
         trait_pairs_all = parse_trait_pairs(Path(trait_file_path))
-        seen_pairs = set()
-        for contrast_num in sorted(trait_pairs_all.keys()):
-            for pair in trait_pairs_all[contrast_num]:
-                pair_tuple = tuple(pair)
-                if pair_tuple not in seen_pairs:
-                    flattened_pairs.append(pair)
-                    seen_pairs.add(pair_tuple)
+
+    def _dedup_pairs(pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+        seen: set = set()
+        out: List[Tuple[str, str]] = []
+        for pair in pairs:
+            key = tuple(pair)
+            if key not in seen:
+                seen.add(key)
+                out.append(pair)
+        return out
+
+    contrast_pairs_by_key: Dict[int, List[Tuple[str, str]]] = {
+        k: _dedup_pairs(v) for k, v in trait_pairs_all.items()
+    }
+    _multi_contrast = len(contrast_pairs_by_key) > 1
+    _single_contrast_key = (
+        next(iter(contrast_pairs_by_key)) if len(contrast_pairs_by_key) == 1 else None
+    )
+    # Safety net only: a multi-contrast run whose metadata row carries no
+    # resolvable hypothesis tag falls back to the union (with a warning) rather
+    # than silently dropping the position.
+    _flattened_fallback = _dedup_pairs(
+        [p for pairs in trait_pairs_all.values() for p in pairs]
+    )
+    any_pairs = bool(_flattened_fallback)
+
+    def _resolve_contrast(entry) -> Tuple[Optional[int], Optional[str]]:
+        """(contrast key, hypothesis label) for one CAAS metadata row.
+
+        FOP rows carry `trait` containing "H<n>"; map to contrast <n>. A single
+        non-FOP traitfile ignores `trait` and uses its lone contrast, emitting no
+        hypothesis label so downstream output is byte-identical to before.
+        """
+        raw = str(getattr(entry, "trait", "") or "").strip()
+        m = re.search(r"H(\d+)", raw)
+        if m:
+            k = int(m.group(1))
+            return (k if k in contrast_pairs_by_key else None), f"H{k}"
+        if _single_contrast_key is not None and not _multi_contrast:
+            return _single_contrast_key, None
+        if _single_contrast_key is not None:
+            return _single_contrast_key, (raw or None)
+        return None, (raw or None)
 
     # ── Hoisted per-gene/tree invariants (computed ONCE, not per position) ──────
     # The alignment lookup, the tree node index, and each species-pair's MRCA
@@ -593,7 +661,7 @@ def analyze_gene_disambiguation(
     # speeds up both the observed disambiguation and the perm replay with NO change
     # to results.
     hoisted_seq_by_id = hoisted_seq_by_species = None
-    if flattened_pairs and taxid_mapping:
+    if any_pairs and taxid_mapping:
         hoisted_seq_by_id, hoisted_seq_by_species = build_alignment_lookup(
             alignment_data.alignment, alignment_data.taxid_to_species
         )
@@ -610,6 +678,25 @@ def analyze_gene_disambiguation(
 
     for idx, caas_pos in enumerate(caas_entries):
         pos = caas_pos.position
+        # Contrast (hypothesis) this row belongs to; its pairs are the ONLY ones
+        # this row is scored against.
+        _ckey, _hyp_label = _resolve_contrast(caas_pos)
+        if _ckey is not None:
+            contrast_pairs = contrast_pairs_by_key.get(_ckey, [])
+        elif _hyp_label and _hyp_label.startswith("H"):
+            # Row names a hypothesis whose traitfile is absent → cannot score it.
+            contrast_pairs = []
+            logger.warning(
+                f"{gene} pos {pos}: metadata hypothesis {_hyp_label} has no "
+                "matching traitfile; position skipped"
+            )
+        else:
+            if _multi_contrast:
+                logger.warning(
+                    f"{gene} pos {pos}: multi-hypothesis run but row has no "
+                    "resolvable hypothesis tag; falling back to the pooled union"
+                )
+            contrast_pairs = _flattened_fallback
         try:
             # Skip if no amino acid conversion data
             if not caas_pos.caas:
@@ -631,7 +718,7 @@ def analyze_gene_disambiguation(
             tip_level_pattern = None
             tip_diagnostics: Dict[str, Any] = {}
             try:
-                if flattened_pairs and taxid_mapping:
+                if contrast_pairs and taxid_mapping:
                     seq_by_id, seq_by_species = hoisted_seq_by_id, hoisted_seq_by_species
 
                     pair_details = []
@@ -651,7 +738,7 @@ def analyze_gene_disambiguation(
                         return aa, prob
 
                     for pair_idx, (high_species, low_species) in enumerate(
-                        flattened_pairs, 1
+                        contrast_pairs, 1
                     ):
                         top_taxid = str(taxid_mapping.get(high_species, high_species))
                         bottom_taxid = str(taxid_mapping.get(low_species, low_species))
@@ -790,13 +877,22 @@ def analyze_gene_disambiguation(
                         hoisted_node_index,
                         tip_diagnostics.get("pair_details"),
                         per_site_dist_cache=per_site_dist_cache,
+                        walk_cache=gene_walk_cache,
                     )
                     axes_score = path_result.get("asr_path_score", 0.0)
+                    axes_pair_scores = path_result.get("pair_scores", None)
+                    axes_extra = {
+                        k: path_result.get(k)
+                        for k in ("independence", "mrca_diversity",
+                                  "derived_agreement", "conservation_gate", "core")
+                    }
                 except Exception as e:  # never let path scoring break the replay
                     logger.warning(
                         f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
                     )
                     axes_score = 0.0
+                    axes_pair_scores = None
+                    axes_extra = {}
                 results.append(
                     PositionAxes(
                         position=caas_pos.position,
@@ -804,6 +900,13 @@ def analyze_gene_disambiguation(
                         asr_path_score=axes_score,
                         change_top=cp.get("change_top", "no_change"),
                         change_bottom=cp.get("change_bottom", "no_change"),
+                        hypothesis=_hyp_label,
+                        pair_scores=axes_pair_scores,
+                        independence=axes_extra.get("independence"),
+                        mrca_diversity=axes_extra.get("mrca_diversity"),
+                        derived_agreement=axes_extra.get("derived_agreement"),
+                        conservation_gate=axes_extra.get("conservation_gate"),
+                        core=axes_extra.get("core"),
                     )
                 )
                 logger.debug(
@@ -824,6 +927,8 @@ def analyze_gene_disambiguation(
                 node_index=hoisted_node_index,
                 build_node_posteriors=build_node_posteriors,
                 per_site_dist_cache=per_site_dist_cache,
+                hypothesis=_hyp_label,
+                walk_cache=gene_walk_cache,
             )
 
             results.append(result)

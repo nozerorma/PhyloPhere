@@ -72,6 +72,8 @@ n_col              <- arg_or(12, "")   # denominator column (e.g. adult_necropsy
 c_col              <- arg_or(13, "")   # numerator column   (e.g. malignant_count)
 resample_use_n     <- tolower(arg_or(14, "true")) %in% c("1", "true", "t", "yes", "y")
 trait_type         <- tolower(arg_or(15, "auto"))
+fop_null           <- tolower(arg_or(16, "false")) %in% c("1", "true", "t", "yes", "y")
+max_fop            <- arg_or(17, 100L, as.integer)
 
 if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
   log_msg("WARN", sprintf("Unknown strategy '%s', defaulting to 'auto'", selection.strategy))
@@ -302,6 +304,14 @@ repeat {
                                  reason = paste0("error: ", conditionMessage(err)))
     )
 
+    # Retain the permuted vector (+ CI/n draws) on accepted cycles so the FOP
+    # mirror can harvest alternative hypotheses around this exact labeling after
+    # the pool is assembled.
+    if (fop_null && e$tier %in% c(1L, 2L)) {
+      e$pvec <- pvec
+      e$ci_lb_draw <- ci_lb_draw; e$ci_ub_draw <- ci_ub_draw; e$n_draw <- n_draw
+    }
+
     if (e$tier == 1L) {
       n1 <- n1 + 1L; tier1[[n1]] <- e
     } else if (e$tier == 2L && n2 < number.of.cycles) {
@@ -385,6 +395,73 @@ for (b in seq_along(pool)) {
 
 write.table(do.call(rbind, manifest), file = file.path(outdir, "permulation_manifest.tsv"),
             sep = "\t", row.names = FALSE, quote = FALSE)
+
+# ── FOP mirror: per-cycle alternative-hypothesis harvest ─────────────────────
+# Mirrors the observed FOP harvest (selection_algorithm.R::fop_pair_sel.f) for
+# every accepted permulation cycle, so the null holds the SAME domain-pooled
+# statistic scoring_compute.R §2b builds on the observed data. H1 is the cycle's
+# already-accepted canonical contrast; H2..Hn are Dunn-independent alternatives
+# drawn from the same Voronoi domains, ranked by min-PSS, capped at max_fop.
+#   resample_fop.tab         : "<cycle>~H<m>" \t fg_csv \t bg_csv   (fanned discovery input)
+#   resample_fop_pairs.tsv   : cycle, hypothesis_id, pair(domain), species1, species2, pss_score
+if (fop_null) {
+  log_msg("START", sprintf("FOP mirror harvest for %d accepted cycles (max_fop=%d)",
+                           length(pool), max_fop))
+  fop_rows  <- list()
+  pair_rows <- list()
+  n_hyp_tot <- 0L
+  for (b in seq_along(pool)) {
+    e <- pool[[b]]
+    cyc <- paste0("b_", b)
+    if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg)) next
+    hv <- tryCatch(
+      lean_fop_harvest(
+        trait_vec = e$pvec, D = D, target_pairs = target_pairs,
+        tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
+        selected_model = selected_model,
+        ci_lb = e$ci_lb_draw, ci_ub = e$ci_ub_draw, n_vec = e$n_draw,
+        top_pct = pss_top_pct, max_fop = max_fop,
+        ordinal = if (trait_type == "ordinal") TRUE
+                  else if (trait_type == "continuous") FALSE else NULL,
+        canon_pairs = data.frame(species1 = e$fg, species2 = e$bg,
+                                 stringsAsFactors = FALSE)),
+      error = function(err) { log_msg("WARN", sprintf("FOP harvest %s: %s", cyc, conditionMessage(err))); NULL })
+    if (is.null(hv) || length(hv$hypotheses) == 0L) {
+      # fall back to H1-only so the cycle still enters the fanned discovery
+      fop_rows[[length(fop_rows) + 1L]] <- data.frame(
+        cycle = paste0(cyc, "~H1"),
+        fg = paste(e$fg, collapse = ","), bg = paste(e$bg, collapse = ","),
+        stringsAsFactors = FALSE)
+      next
+    }
+    for (h_id in names(hv$hypotheses)) {
+      hd <- hv$hypotheses[[h_id]]
+      fop_rows[[length(fop_rows) + 1L]] <- data.frame(
+        cycle = paste0(cyc, "~", h_id),
+        fg = paste(hd$species1, collapse = ","),
+        bg = paste(hd$species2, collapse = ","),
+        stringsAsFactors = FALSE)
+      pair_rows[[length(pair_rows) + 1L]] <- data.frame(
+        cycle = cyc, hypothesis_id = h_id,
+        pair = if ("cluster" %in% names(hd)) as.integer(hd$cluster) else seq_len(nrow(hd)),
+        species1 = hd$species1, species2 = hd$species2,
+        pss_score = if ("pss_score" %in% names(hd)) hd$pss_score else NA_real_,
+        stringsAsFactors = FALSE)
+    }
+    n_hyp_tot <- n_hyp_tot + length(hv$hypotheses)
+  }
+  if (length(fop_rows) > 0) {
+    write.table(do.call(rbind, fop_rows), file = file.path(outdir, "resample_fop.tab"),
+                sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE)
+  }
+  if (length(pair_rows) > 0) {
+    write.table(do.call(rbind, pair_rows), file = file.path(outdir, "resample_fop_pairs.tsv"),
+                sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
+  }
+  log_msg("COMPLETE", sprintf("FOP mirror: %d cycles -> %d hypothesis labelings (mean %.1f/cycle) -> resample_fop.tab",
+                              length(pool), n_hyp_tot,
+                              if (length(pool)) n_hyp_tot / length(pool) else 0))
+}
 
 # ── Summary ──────────────────────────────────────────────────────────────────
 tiers <- vapply(pool, function(e) e$tier, integer(1))

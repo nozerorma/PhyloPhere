@@ -34,6 +34,7 @@ workflow SCORING {
         caas_pos_pval_ch         // Channel<path> or null — LOO null_pvalue_boot per (gene,position,scheme)
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
+        hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -116,6 +117,17 @@ workflow SCORING {
             }
             .map { it && it.size() > 0 ? it[0] : file('NO_BACKGROUND') }
 
+        // FOP per-pair PSS weights for domain-pooled scoring (contrast_hypotheses_pairs.tsv).
+        // Absent for single-contrast runs -> NO_HYP_PAIRS sentinel, scoring_compute.R
+        // then treats every position as single-hypothesis (pass-through).
+        def resolved_hyp_pairs = (hypotheses_pairs_ch ?: Channel.empty())
+            .collect()
+            .ifEmpty {
+                def hp = params.scoring_hypotheses_pairs ?: ''
+                if (hp && file(hp).exists()) [file(hp)] else [file('NO_HYP_PAIRS')]
+            }
+            .map { it && it.size() > 0 ? it[0] : file('NO_HYP_PAIRS') }
+
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
             resolved_postproc,
@@ -124,7 +136,8 @@ workflow SCORING {
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
             resolved_rer,
-            accum_all_ch
+            accum_all_ch,
+            resolved_hyp_pairs
         )
 
         // ── Render report ──────────────────────────────────────────────────

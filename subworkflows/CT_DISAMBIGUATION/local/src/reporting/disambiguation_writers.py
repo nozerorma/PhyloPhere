@@ -125,6 +125,8 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "amino_encoded",
         "is_conserved_meta",
         "conserved_pair",
+        # Discovering hypothesis ("H<n>" for FOP runs; empty otherwise)
+        "trait",
         # Change tracking
         "change_top",
         "change_bottom",

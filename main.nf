@@ -279,11 +279,13 @@ workflow {
 
             def perm_disc_ch = null
             def perm_subset_ch = null
+            def perm_fop_pairs_ch = Channel.value(file('NO_FOP_PAIRS'))
             def perm_tree_ch = ct_results ? ct_results.tree_file : (contrast_out ? contrast_out.tree_file_out : (params.tree ? file(params.tree) : Channel.empty()))
 
             if (ct_results && ct_results.caas_perm_discovery && ct_results.caas_resample_subset) {
                 perm_disc_ch = ct_results.caas_perm_discovery
                 perm_subset_ch = ct_results.caas_resample_subset
+                if (ct_results.caas_fop_pairs) perm_fop_pairs_ch = ct_results.caas_fop_pairs
             } else {
                 // 1. Check if precomputed permulation discovery outputs already exist from exploratory pass:
                 def precomp_disc_files = null
@@ -383,6 +385,7 @@ workflow {
                             def perms_prep = CAAS_PERMS_PREP(align_tuple_standalone, caas_cfg_standalone, resample_src)
                             perm_disc_ch = perms_prep.perm_discovery
                             perm_subset_ch = perms_prep.resample_subset
+                            perm_fop_pairs_ch = perms_prep.fop_pairs
                         }
                     }
                 }
@@ -405,6 +408,7 @@ workflow {
                     perm_subset_ch,
                     perm_tree_ch,
                     caas_universe_ch,
+                    perm_fop_pairs_ch,
                     asr_gate_ch
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms
@@ -636,6 +640,17 @@ workflow {
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
             // scoring_caas_* are built above, outside this block — see the comment there.
 
+            // FOP per-pair PSS weights (contrast_hypotheses_pairs.tsv) for
+            // domain-pooled scoring. Emitted by 4.Independent_contrasts.Rmd into
+            // the Traitfiles dir; absent on CT-live / single-contrast runs, where
+            // scoring_compute.R then treats every position as one hypothesis.
+            def scoring_hyp_pairs_ch = contrast_out
+                ? (contrast_out.trait_dir_out ?: Channel.empty()).map { d ->
+                      def f = d ? file("${d}/contrast_hypotheses_pairs.tsv") : null
+                      (f && f.exists()) ? f : file('NO_HYP_PAIRS')
+                  }
+                : null
+
             SCORING(
                 scoring_postproc_ch,
                 scoring_fade_top_ch,
@@ -650,7 +665,8 @@ workflow {
                 scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
                 scoring_caas_pos_pval_ch,    // LOO null_pvalue_boot per (gene,position,scheme)
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
-                scoring_caas_pos_quantiles_ch // per (cycle,scheme) null distribution shape
+                scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
+                scoring_hyp_pairs_ch          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
             )
             ran_any = true
 

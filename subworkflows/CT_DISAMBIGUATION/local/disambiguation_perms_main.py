@@ -57,6 +57,12 @@ def parse_arguments():
         "--cycles", default=None,
         help="Comma-separated cycle tags to process (default: all cycles in the export)",
     )
+    p.add_argument(
+        "--fop-pairs", default=None,
+        help="resample_fop_pairs.tsv (FOP mirror): per-(cycle, hypothesis, domain) PSS "
+             "weights. When given, the resample dir is expected to hold resample_fop.tab "
+             "('<base>~H<m>' labelings) and each base cycle's hypotheses are domain-pooled.",
+    )
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     return p.parse_args()
@@ -138,6 +144,7 @@ def main():
         ensembl_genes_file=args.ensembl_genes_file,
         cycles=cycles,
         max_tasks_per_child=args.max_tasks_per_child,
+        fop_pairs_file=args.fop_pairs,
     )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 

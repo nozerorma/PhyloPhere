@@ -23,6 +23,7 @@ params:
   clade_name: "clade"
   taxon_of_interest: "family"
   traitname: "trait"
+  max_fop: 100
   n_trait: ""
   c_trait: ""
   tax_id: ""
@@ -85,7 +86,9 @@ params:
 ```
 
 # Independent Contrast Selection for Neoplasia Analysis in Primates
-This document outlines the process of selecting phylogenetically independent species pairs for trait analysis using CAASTools-paired. 
+This document outlines the process of selecting phylogenetically independent species pairs for trait analysis using CAASTools-paired.
+
+The eligible candidate pairs and their **Phylogenetic Shift Score (PSS)** are produced upstream in `3.CI-composition.Rmd`: each pair carries a `pss_score` computed under the AIC-selected OU/BM model (Fabio Barteri's phyloq engine, vendored in `src/pss_core.R`), and for continuous traits only the top `pss_top_pct` slice of hi>lo pairs is kept. This report consumes that `pairwise_data.csv` and uses the PSS as the **primary ranking key** for the greedy Dunn selection below; patristic distance is only the fallback when no finite PSS is available (e.g. the model fit failed upstream).
 
 
 ## Setup and Directory Configuration
@@ -170,9 +173,9 @@ head(distance_matrix[, 1:5])
 
 ## 3. Independent Contrast Pair Selection
 
-This section selects phylogenetically independent species pairs for CAAS analysis. The algorithm prioritizes pairs with small evolutionary distances but large trait differences, while ensuring phylogenetic independence between pairs using the Dunn index.
+This section selects phylogenetically independent species pairs for CAAS analysis. Candidates are ranked by **Phylogenetic Shift Score (PSS) descending** (the per-pair trait-divergence signal under the AIC-selected OU/BM model, carried over from `3.CI-composition.Rmd`); when no finite PSS is available the ranking falls back to smallest patristic distance. The shared `rank_candidates()` / `greedy_dunn_select()` core then walks that ranked list, admitting a pair only if it keeps the selected set phylogenetically independent (Dunn index above threshold).
 
-When the input `traits_df` contains a numeric `p` column (population size), tie-breaking now follows: highest Dunn index → highest absolute trait difference (`diff`) → highest combined `n` for the pair. If `n` is absent, behaviour is unchanged.
+Tie-breaking after the PSS (or distance) key: highest absolute trait difference (`abs_diff`) → highest combined pair `n` (population size, when a numeric `p`/`n` column is present) → incoming order.
 
 ```{r pair_selection, message=FALSE, warning=FALSE}
 
@@ -197,7 +200,7 @@ fop_results <- fop_pair_sel.f(
   overlap_df = pairwise_data,
   traits_df = stats_df,
   my_trait = trait,
-  max_fop = 100
+  max_fop = { .mf <- suppressWarnings(as.integer(params$max_fop)); if (is.na(.mf) || .mf < 1) 100L else .mf }
 )
 
 selected_pairs <- fop_results$canon_pairs
@@ -215,6 +218,8 @@ print(selected_pairs)
 ## 4. Trait File Generation
 
 This section generates trait files in the format required for CAAS discovery, assigning contrast groups (high/low extremes) to each species across all harvested parallel hypotheses.
+
+`fop_pair_sel.f` partitions the species into one Voronoi domain per canonical pair and harvests alternative Dunn-independent K-pair configurations from those domains. When the domain product is small the space is swept exhaustively; larger spaces fall back to capped random draws. The harvested hypotheses are then ranked and `H2 … Hn` are numbered by **decreasing minimum PSS across their K pairs** (then mean PSS, then overall Dunn), so the post-`H1` order is a quality order and the `max_fop` cap is a quality truncation. `contrast_hypotheses_summary.tsv` carries both `min_pss_score` and `mean_pss_score` per hypothesis.
 
 ```{r traitfile_generation, message=FALSE, warning=FALSE}
 
@@ -304,6 +309,42 @@ if (length(fop_master_rows) > 0) {
     col.names = TRUE,
     sep = "\t"
   )
+}
+
+# ── Per-pair hypothesis table (drives domain-pooled scoring downstream) ───────
+# One row per (hypothesis, Voronoi domain). `pair` == the domain id: the FOP
+# harvest draws exactly one pair per domain and numbers them in domain order
+# (selection_algorithm.R::fop_pair_sel.f, `hdf$cluster <- seq_len(K)`), and
+# disambiguation enumerates each traitfile_H{m}.tab's pairs in that same order.
+# So SCORING can key `mrca_<i>_path_score` (domain i's isolation score under
+# hypothesis h) back to this pair's PSS weight via (hypothesis_id, pair).
+# H1 is the canonical baseline; H2..Hn are PSS-ranked alternatives.
+pair_rows <- lapply(names(hypotheses), function(h_id) {
+  hd <- hypotheses[[h_id]]
+  if (is.null(hd) || nrow(hd) == 0) return(NULL)
+  data.frame(
+    hypothesis_id = h_id,
+    pair          = if ("cluster" %in% names(hd)) as.integer(hd$cluster) else seq_len(nrow(hd)),
+    species1      = hd$species1,
+    species2      = hd$species2,
+    distance      = if ("distance"  %in% names(hd)) hd$distance  else NA_real_,
+    abs_diff      = if ("abs_diff"  %in% names(hd)) hd$abs_diff  else NA_real_,
+    pss_score     = if ("pss_score" %in% names(hd)) hd$pss_score else NA_real_,
+    stringsAsFactors = FALSE
+  )
+})
+contrast_pairs_df <- do.call(rbind, pair_rows)
+if (!is.null(contrast_pairs_df) && nrow(contrast_pairs_df) > 0) {
+  write.table(
+    contrast_pairs_df,
+    file.path(trait_path, "contrast_hypotheses_pairs.tsv"),
+    quote = FALSE,
+    row.names = FALSE,
+    col.names = TRUE,
+    sep = "\t"
+  )
+  cat(sprintf("Wrote contrast_hypotheses_pairs.tsv (%d hypothesis x domain rows)\n",
+              nrow(contrast_pairs_df)))
 }
 
 # Save metadata summary

@@ -93,7 +93,9 @@ process RESAMPLE {
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
-        "${params.trait_type ?: 'auto'}"
+        "${params.trait_type ?: 'auto'}" \\
+        ${params.caas_perms_fop ?: false} \\
+        ${params.max_fop ?: 100}
         """
     } else {
         """
@@ -143,7 +145,9 @@ process RESAMPLE {
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
-        "${params.trait_type ?: 'auto'}"
+        "${params.trait_type ?: 'auto'}" \\
+        ${params.caas_perms_fop ?: false} \\
+        ${params.max_fop ?: 100}
         """
     }
 }

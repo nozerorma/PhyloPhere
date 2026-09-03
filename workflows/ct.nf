@@ -60,6 +60,7 @@ workflow CT {
         // only when --caas_permulation_enrichment is set and bootstrap+resample run.
         def caas_perm_discovery_out = Channel.empty()
         def caas_resample_subset_out = Channel.empty()
+        def caas_fop_pairs_out = Channel.value(file('NO_FOP_PAIRS'))
         def tree_file_emit = Channel.empty()
         
     if (params.ct_tool) {
@@ -336,6 +337,7 @@ workflow CT {
                 def perms_prep = CAAS_PERMS_PREP(align_tuple, trait_file_out, resample_dir_out)
                 caas_perm_discovery_out  = perms_prep.perm_discovery
                 caas_resample_subset_out = perms_prep.resample_subset
+                caas_fop_pairs_out       = perms_prep.fop_pairs
             }
         }
     }
@@ -352,4 +354,5 @@ workflow CT {
         // subset, consumed downstream by CAAS_PERMULATION (main.nf) → caas_perms.rds.
         caas_perm_discovery = caas_perm_discovery_out
         caas_resample_subset = caas_resample_subset_out
+        caas_fop_pairs = caas_fop_pairs_out
 }

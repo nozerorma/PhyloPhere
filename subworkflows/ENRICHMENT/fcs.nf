@@ -53,6 +53,9 @@ process SCORING_FCS_REPORT {
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
+    def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
+    def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
+    def fdr_permsum     = params.fcs_fdr_permsum     ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     // SCORING's own published gene_lists/ -- this IS the CAAS report, so
@@ -70,6 +73,9 @@ process SCORING_FCS_REPORT {
                 num_g         = ${num_g},
                 max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
+                fdr_wilcoxon    = ${fdr_wilcoxon},
+                fdr_lachenbruch = ${fdr_lachenbruch},
+                fdr_permsum     = ${fdr_permsum},
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${traitname}',
@@ -128,6 +134,9 @@ process RER_FCS_REPORT {
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
+    def fdr_wilcoxon    = params.fcs_fdr_wilcoxon    ?: params.fcs_fdr
+    def fdr_lachenbruch = params.fcs_fdr_lachenbruch ?: params.fcs_fdr
+    def fdr_permsum     = params.fcs_fdr_permsum     ?: params.fcs_fdr
     def pperm_thr = params.fcs_pperm_thr
     def top_n     = params.fcs_top_n
     def render = """
@@ -141,6 +150,9 @@ process RER_FCS_REPORT {
                 num_g         = ${num_g},
                 max_g         = ${max_g},
                 fdr_thr       = ${fdr_thr},
+                fdr_wilcoxon    = ${fdr_wilcoxon},
+                fdr_lachenbruch = ${fdr_lachenbruch},
+                fdr_permsum     = ${fdr_permsum},
                 pperm_thr     = ${pperm_thr},
                 top_n         = ${top_n},
                 traitname     = '${params.traitname ?: "trait"}',

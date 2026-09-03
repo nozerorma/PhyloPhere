@@ -34,6 +34,7 @@ process SUBSET_RESAMPLE_PERMS {
 
     output:
     path "resample_perms.tab", emit: subset
+    path "resample_fop_pairs.tsv", emit: fop_pairs, optional: true
 
     script:
     """
@@ -44,6 +45,35 @@ process SUBSET_RESAMPLE_PERMS {
     # reproduces the same subset. We tag each candidate with a seeded rand() key,
     # sort by it, write to a file, then awk-limit by reading that FILE and exit-ing
     # early — avoids the SIGPIPE that `sort | head` triggers under pipefail.
+    FOP_TAB=""
+    if [ -d "${resample_dir}" ]; then
+        FOP_TAB=\$(find -L ${resample_dir} -name 'resample_fop.tab' | head -n 1)
+    fi
+
+    if [ -n "\$FOP_TAB" ]; then
+        # ── FOP mirror: labelings are "<base>~H<m>". Sample N distinct BASE
+        #    cycles and keep ALL their hypothesis rows together, plus the
+        #    matching resample_fop_pairs.tsv rows (PSS weights for domain pooling).
+        FOP_PAIRS=\$(find -L ${resample_dir} -name 'resample_fop_pairs.tsv' | head -n 1)
+        awk -F'\\t' 'NF>=3 && \$1!="b_0"' "\$FOP_TAB" > candidates.tab
+        awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u > base_all.txt
+        awk -v seed=${seed} 'BEGIN{srand(seed)} {print rand()"\\t"\$0}' base_all.txt \\
+            | sort -k1,1g \\
+            | awk -v n=${n_perms} '{sub(/^[^\\t]*\\t/,""); print; if(++c>=n) exit}' > keep_base.txt
+        awk -F'\\t' 'NR==FNR{k[\$1]=1; next} {b=\$1; sub(/~.*/,"",b); if(b in k) print}' \\
+            keep_base.txt candidates.tab > resample_perms.tab
+        if [ -n "\$FOP_PAIRS" ]; then
+            awk -F'\\t' 'NR==FNR{k[\$1]=1; next} FNR==1{if(!seen){print; seen=1}; next} (\$1 in k){print}' \\
+                keep_base.txt "\$FOP_PAIRS" > resample_fop_pairs.tsv
+        fi
+        n=\$(awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' resample_perms.tab | sort -u | wc -l)
+        rows=\$(wc -l < resample_perms.tab)
+        avail=\$(wc -l < base_all.txt)
+        echo "[caas_perms] FOP mirror seed=${seed}: \$n of \$avail base cycles (\$rows hypothesis labelings)"
+        if [ "\$rows" -eq 0 ]; then echo "ERROR: no FOP labelings selected" >&2; exit 1; fi
+        exit 0
+    fi
+
     if [ -d "${resample_dir}" ]; then
         cat \$(find -L ${resample_dir} -name 'resample_*.tab' | sort) > all_resamples.tab
     elif [ -f "${resample_dir}" ]; then
@@ -191,6 +221,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     path "perm_disc/*"
     path resample_subset
     path tree_file
+    path fop_pairs   // resample_fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS sentinel
 
     output:
     path "gene_cycle_scores.tsv",    emit: gene_cycle_scores
@@ -219,6 +250,7 @@ process CAAS_PERMS_DISAMBIGUATE {
         --perm-discovery perm_disc \\
         --resample-dir . \\
         --output-dir caas_perms_out \\
+        ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} \\
         --asr-model ${params.ct_disambig_asr_model} \\
         --convergence-mode ${params.ct_disambig_convergence_mode} \\
         --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
@@ -371,6 +403,7 @@ workflow CAAS_PERMS_PREP {
     emit:
         perm_discovery = discovery_files
         resample_subset = subset.subset
+        fop_pairs = subset.fop_pairs.ifEmpty(file('NO_FOP_PAIRS'))
 }
 
 // ── Subworkflow: build the null matrices — runs in main.nf after CT ───────────
@@ -380,6 +413,7 @@ workflow CAAS_PERMULATION {
         resample_subset    // path resample_perms.tab
         tree_file          // path species tree
         universe           // path cleaned_background or NO_FILE
+        fop_pairs          // path resample_fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS
         asr_ready          // gate: emits once the live CT_DISAMBIGUATION has
                            // finished writing the shared ASR cache. A 'NO_GATE'
                            // sentinel when ASR is precomputed / disambiguation
@@ -396,7 +430,7 @@ workflow CAAS_PERMULATION {
         def gated_tree = tree_file
             .combine(asr_ready)
             .map { t, _ready -> t }
-        def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree)
+        def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree, fop_pairs)
         def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_sample,
                                        scores.pos_quantiles, scores.pos_detail, universe)
 
