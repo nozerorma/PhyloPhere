@@ -426,6 +426,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "chunk_size": "${CHUNK_SIZE:-500}",
   "include_b0": {{ run_defaults.include_b0 }},
   "multi_hypothesis": {{ run_defaults.multi_hypothesis }},
+  "max_fop": "${MAX_FOP:-100}",
+  "caas_perms_fop": {{ run_defaults.caas_perms_fop }},
   "export_groups": {{ run_defaults.export_groups }},
   "export_perm_discovery": {{ run_defaults.export_perm_discovery }},
   "discovery_from": "${DISCOVERY_FROM:-}",

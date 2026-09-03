@@ -72,6 +72,8 @@ class CaasConfig(ModuleConfigBase):
     include_b0: bool = False  # --include_b0
     resample_use_n: bool = True  # --resample_use_n
     multi_hypothesis: bool = True  # --multi_hypothesis
+    max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
+    caas_perms_fop: bool = False  # --caas_perms_fop (mirror FOP harvest in the permulation null)
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).
     export_groups: bool = False  # --export_groups
