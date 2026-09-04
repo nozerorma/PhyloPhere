@@ -297,6 +297,7 @@ Usage:
 --scoring_stress_rank_metric            <"spearman|pearson">    "spearman"
 --scoring_position_top_pct                <FLOAT 0-1>             0.10
 --scoring_gene_top_pct                       <FLOAT 0-1>             0.10
+--scoring_gene_perm_pooled                <true|false>            false  (opt-in n-stratified pooled-null variant of gene_caas_pperm, higher resolution than the per-gene-row floor -- valid only within an n_positions stratum)
 --scoring_window_size_bp                       <INTEGER>               1000000
 
 Standalone mode (provide inputs directly):

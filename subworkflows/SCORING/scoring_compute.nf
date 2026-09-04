@@ -53,6 +53,7 @@ process SCORING_COMPUTE {
     path rer_summary
     path accum_files
     path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
+    path caas_perms         // optional: caas_perms.rds (CAAS permulation-excess null); NO_FILE sentinel otherwise
 
     output:
     path "position_scores.tsv",                              emit: position_scores
@@ -82,6 +83,8 @@ process SCORING_COMPUTE {
     def fs_top_arg        = fade_site_top.name =~ /^NO_FADE_SITE_TOP/ ? 'NO_FADE_SITE_TOP' : "${fade_site_top}"
     def fs_bot_arg        = fade_site_bot.name =~ /^NO_FADE_SITE_BOT/ ? 'NO_FADE_SITE_BOT' : "${fade_site_bot}"
     def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
+    def cp_arg            = caas_perms.name =~ /^NO_/ ? 'NO_FILE' : "${caas_perms}"
+    def gene_perm_pooled  = params.scoring_gene_perm_pooled ?: false
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -96,6 +99,8 @@ process SCORING_COMPUTE {
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
+            --caas_perms      '${cp_arg}' \
+            --gene_perm_pooled '${gene_perm_pooled}' \
             --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
@@ -121,6 +126,8 @@ process SCORING_COMPUTE {
             --rer            '${rer_summary}' \
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
+            --caas_perms      '${cp_arg}' \
+            --gene_perm_pooled '${gene_perm_pooled}' \
             --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \

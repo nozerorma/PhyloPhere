@@ -2297,6 +2297,16 @@ DT::datatable(
 
 ### Top Genes
 
+`gene_caas_pperm` is the CAAS permulation-excess null's per-gene right-tailed
+p-value (fraction of permuted-labeling cycles whose genome-wide gene score
+matches or exceeds this gene's observed `gene_caas_score`), `gene_caas_pperm_adj`
+its BH adjustment across genes. At the pipeline's typical
+`caas_full_perms` this floors around 1/(N+1) (~1e-3 at N=1000), so treat it as a
+**prioritisation** signal with FDR context, not by itself a genome-wide-significant
+call — a gene at the floor is "no cycle beat it", which does not distinguish
+between genes that all cleared every cycle. Blank when no CAAS permulation null
+was supplied to this run.
+
 ```{r top-genes-table}
 top_genes_df <- gene_df %>%
   arrange(desc(gene_caas_score))
@@ -2340,7 +2350,8 @@ top_genes_df <- top_genes_df %>%
 gene_display_cols <- c("Gene", "n_positions",
                        "gene_caas_score", "gene_caas_top", "gene_caas_bot",
                        "in_top_10pct", "in_top_50pct",
-                       "in_bot_10pct", "in_bot_50pct")
+                       "in_bot_10pct", "in_bot_50pct",
+                       "gene_caas_pperm", "gene_caas_pperm_adj")
 if (has_accum_score)
   gene_display_cols <- c(gene_display_cols, "accum_cct_p")
 if (has_rer)

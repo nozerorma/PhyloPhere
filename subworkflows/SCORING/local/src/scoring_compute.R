@@ -53,6 +53,8 @@ fade_site_bot_file   <- parse_arg("--fade_site_bot")
 rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
+caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
+gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
 concordance_tau      <- as.numeric(parse_arg("--concordance_tau", "0.8"))  # POINT 3: da threshold for convergence_schemes
 if (!is.finite(concordance_tau) || concordance_tau <= 0 || concordance_tau > 1) concordance_tau <- 0.8
 stress_enabled_raw        <- parse_arg("--stress", "false")
@@ -66,6 +68,7 @@ gene_top25_pct    <- 0.25
 gene_top5_pct     <- 0.05
 gene_top1_pct     <- 0.01
 stress_enabled        <- tolower(as.character(stress_enabled_raw)) %in% c("true", "1", "yes")
+gene_perm_pooled      <- tolower(as.character(gene_perm_pooled_raw)) %in% c("true", "1", "yes")
 if (!is.finite(stress_top_n)      || is.na(stress_top_n)      || stress_top_n < 1)  stress_top_n      <- 25
 # direction removed: scoring always runs on the full postproc pool.
 # Directional characterisation happens post-scoring via change_side column.
@@ -886,6 +889,118 @@ if (nrow(gene_fade) > 0) {
   gene_scores$fade_significant_bottom <- NA
 }
 
+# ── 4f. Per-gene CAAS permulation p (Tier 1A) ───────────────────────────────
+# gene_caas_score{,_top_all,_bottom_all} vs. the matching direction's
+# caas_corStat_byrank null row (genes x N cycles, dense -- structural zeros
+# kept, so N is always the full cycle count) from caas_perms.rds. Per-gene-row
+# nominal p, right-tailed and BH-adjusted within direction -- same idiom as
+# the RER permulation p (continuous_rer.R) and every other FDR site in this
+# pipeline. At the production caas_full_perms this floors around 1/(N+1) per
+# gene, so it is a prioritisation signal with FDR context, not by itself a
+# genome-wide-significant call (the optional pooled variant below trades that
+# floor for validity only within an n-stratum). A gene absent from the null's
+# own universe gets NA -- never an implicit-zero-row 1/(N+1) (break-point #4a).
+cat("\n─── CAAS permulation gene p (Tier 1A) ─────────────────────────\n")
+for (col in c("gene_caas_pperm", "gene_caas_pperm_top", "gene_caas_pperm_bottom",
+              "gene_caas_pperm_adj", "gene_caas_pperm_adj_top", "gene_caas_pperm_adj_bottom")) {
+  gene_scores[[col]] <- NA_real_
+}
+if (gene_perm_pooled) {
+  for (col in c("gene_caas_pperm_pooled", "gene_caas_pperm_pooled_top", "gene_caas_pperm_pooled_bottom")) {
+    gene_scores[[col]] <- NA_real_
+  }
+}
+
+if (!file_exists(caas_perms_file)) {
+  cat("  no --caas_perms provided, skipping gene p.perm\n")
+} else {
+  caas_perms <- tryCatch(readRDS(caas_perms_file), error = function(e) NULL)
+  if (is.null(caas_perms) || is.null(caas_perms[["caas_corStat_byrank"]])) {
+    cat("  CAAS permulation null unreadable or missing caas_corStat_byrank, skipping gene p.perm\n")
+  } else {
+    .stat <- caas_perms[["gene_stat"]]
+    if (!is.null(.stat) && !identical(as.character(.stat), "size_adj_max")) {
+      stop(sprintf(paste0(
+        "gene_caas_pperm: CAAS permulation null is STALE (gene_stat='%s'), but the observed ",
+        "gene_caas_score uses 'size_adj_max'. Rebuild it (no ASR replay needed, minutes):\n",
+        "  python3 subworkflows/CT_DISAMBIGUATION/local/reaggregate_perm_scores.py --detail ",
+        "<run>/caas_permulation/perm_pos_detail --output-dir <run>/caas_permulation\n",
+        "  Rscript subworkflows/SCORING/local/src/scoring_caas_perms.R --gene-cycle-scores ",
+        "<run>/caas_permulation/gene_cycle_scores.tsv --output <run>/caas_permulation/caas_perms.rds"),
+        as.character(.stat)))
+    }
+    byrank <- caas_perms[["caas_corStat_byrank"]]
+
+    # Right-tailed nominal p against a single gene's own null row.
+    .perm_p_row <- function(obs, null_row) {
+      if (is.na(obs) || length(null_row) == 0) return(NA_real_)
+      nr <- null_row[!is.na(null_row)]
+      if (length(nr) == 0) return(NA_real_)
+      (sum(nr >= obs) + 1) / (length(nr) + 1)
+    }
+    .apply_direction <- function(obs_col, mat) {
+      out <- rep(NA_real_, nrow(gene_scores))
+      if (is.null(mat) || nrow(mat) == 0) return(out)
+      idx <- match(gene_scores$Gene, rownames(mat))
+      for (i in seq_along(idx)) {
+        if (is.na(idx[i])) next  # gene outside the null's universe -> NA, never 1/(N+1)
+        out[i] <- .perm_p_row(gene_scores[[obs_col]][i], mat[idx[i], ])
+      }
+      out
+    }
+
+    gene_scores$gene_caas_pperm        <- .apply_direction("gene_caas_score",            byrank[["global"]])
+    gene_scores$gene_caas_pperm_top    <- .apply_direction("gene_caas_score_top_all",    byrank[["top"]])
+    gene_scores$gene_caas_pperm_bottom <- .apply_direction("gene_caas_score_bottom_all", byrank[["bottom"]])
+
+    for (pair in list(c("gene_caas_pperm",        "gene_caas_pperm_adj"),
+                       c("gene_caas_pperm_top",    "gene_caas_pperm_adj_top"),
+                       c("gene_caas_pperm_bottom", "gene_caas_pperm_adj_bottom"))) {
+      p <- gene_scores[[pair[1]]]
+      tested <- !is.na(p)
+      if (any(tested)) gene_scores[[pair[2]]][tested] <- p.adjust(p[tested], method = "BH")
+    }
+    .n_cycles <- if (!is.null(byrank[["global"]])) ncol(byrank[["global"]]) else NA_integer_
+    cat(sprintf("  gene_caas_pperm: %d/%d genes scored (N=%s cycles, floor~%.4g)\n",
+                sum(!is.na(gene_scores$gene_caas_pperm)), nrow(gene_scores),
+                ifelse(is.na(.n_cycles), "?", as.character(.n_cycles)),
+                if (!is.na(.n_cycles) && .n_cycles > 0) 1 / (.n_cycles + 1) else NA_real_))
+
+    if (gene_perm_pooled) {
+      # Optional n-stratified pooled null: pool ALL genes' null rows within the
+      # same n_positions decile as the tested gene, for higher resolution than
+      # the per-gene-row floor above. Valid ONLY within an n-stratum -- the
+      # size_adj_max null is n-dependent (F(max)^n) by construction, so pooling
+      # across strata would compare a gene against a null it was never drawn
+      # from (break-point #4b). Default off (params.scoring_gene_perm_pooled).
+      .pooled_direction <- function(obs_col, n_col, mat) {
+        out <- rep(NA_real_, nrow(gene_scores))
+        if (is.null(mat) || nrow(mat) == 0 || !(n_col %in% names(gene_scores))) return(out)
+        n_vals <- gene_scores[[n_col]]
+        strata <- suppressWarnings(dplyr::ntile(n_vals, 10))
+        idx <- match(gene_scores$Gene, rownames(mat))
+        for (s in sort(unique(strata[!is.na(strata)]))) {
+          members <- which(strata == s & !is.na(idx))
+          if (length(members) == 0) next
+          pool <- as.vector(mat[idx[members], , drop = FALSE])
+          pool <- pool[!is.na(pool)]
+          if (length(pool) == 0) next
+          for (i in members) {
+            obs <- gene_scores[[obs_col]][i]
+            if (!is.na(obs)) out[i] <- (sum(pool >= obs) + 1) / (length(pool) + 1)
+          }
+        }
+        out
+      }
+      gene_scores$gene_caas_pperm_pooled        <- .pooled_direction("gene_caas_score",            "n_positions",        byrank[["global"]])
+      gene_scores$gene_caas_pperm_pooled_top    <- .pooled_direction("gene_caas_score_top_all",    "n_positions_top",    byrank[["top"]])
+      gene_scores$gene_caas_pperm_pooled_bottom <- .pooled_direction("gene_caas_score_bottom_all", "n_positions_bottom", byrank[["bottom"]])
+      cat(sprintf("  gene_caas_pperm_pooled: %d/%d genes scored (n-stratified pooled null)\n",
+                  sum(!is.na(gene_scores$gene_caas_pperm_pooled)), nrow(gene_scores)))
+    }
+  }
+}
+
 # =============================================================================
 # 5. CORRELATION ANALYSIS (gene-level)
 # =============================================================================
@@ -968,6 +1083,9 @@ gene_out <- gene_scores %>%
     n_positions, n_positions_top, n_positions_bottom,
     gene_caas_score_top_all, gene_caas_score_bottom_all,
     gene_caas_score, gene_caas_score_top, gene_caas_score_bottom,
+    any_of(c("gene_caas_pperm", "gene_caas_pperm_top", "gene_caas_pperm_bottom",
+             "gene_caas_pperm_adj", "gene_caas_pperm_adj_top", "gene_caas_pperm_adj_bottom",
+             "gene_caas_pperm_pooled", "gene_caas_pperm_pooled_top", "gene_caas_pperm_pooled_bottom")),
     any_of(c("accum_cct_p", "accum_fdr", "accum_significant",
              "accum_pval_us", "accum_pval_gs4", "accum_pval_gs3",
              "accum_pval_gs2", "accum_pval_gs1",

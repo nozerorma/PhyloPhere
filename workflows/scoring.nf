@@ -128,26 +128,10 @@ workflow SCORING {
             }
             .map { it && it.size() > 0 ? it[0] : file('NO_HYP_PAIRS') }
 
-        // ── Run scoring — single pass on full postproc pool ────────────────
-        def compute_out = SCORING_COMPUTE(
-            resolved_postproc,
-            resolved_fade_top,
-            resolved_fade_bottom,
-            resolved_fade_site_top_ch,
-            resolved_fade_site_bot_ch,
-            resolved_rer,
-            accum_all_ch,
-            resolved_hyp_pairs
-        )
-
-        // ── Render report ──────────────────────────────────────────────────
-        // Helper: for optional compute outputs, emit a sentinel when absent.
-        def _opt = { ch, sentinel ->
-            ch.ifEmpty { file(sentinel) }
-        }
-
-        // CAAS permulation null (corStat_byrank rds) — resolved once, shared by the
-        // scoring report (permulation-null overview) and the FCS report (p.perm).
+        // CAAS permulation null (corStat_byrank rds) — resolved ONCE, before
+        // SCORING_COMPUTE, so both it (Tier 1A per-gene p.perm) and the scoring
+        // report / FCS report (p.perm) consume the SAME null. Hoisted above the
+        // SCORING_COMPUTE call for exactly this reason.
         // Value channel via collect()/map (NOT .first(), which warns on a value channel).
         //
         // Three ways to get here, in precedence order:
@@ -175,6 +159,25 @@ workflow SCORING {
                 .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
                 .collect()
                 .map { it[0] }
+        }
+
+        // ── Run scoring — single pass on full postproc pool ────────────────
+        def compute_out = SCORING_COMPUTE(
+            resolved_postproc,
+            resolved_fade_top,
+            resolved_fade_bottom,
+            resolved_fade_site_top_ch,
+            resolved_fade_site_bot_ch,
+            resolved_rer,
+            accum_all_ch,
+            resolved_hyp_pairs,
+            caas_perms_resolved
+        )
+
+        // ── Render report ──────────────────────────────────────────────────
+        // Helper: for optional compute outputs, emit a sentinel when absent.
+        def _opt = { ch, sentinel ->
+            ch.ifEmpty { file(sentinel) }
         }
 
         // Lean per-scheme null files → report permulation section.
