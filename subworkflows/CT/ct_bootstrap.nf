@@ -51,9 +51,16 @@ process BOOTSTRAP {
     def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
     // FOP (Gap A): resample over the fanned fop_labelings.tab (staged inside
     // resampledPath) and collapse recovery_boot to base-cycle units.
-    def fop_arg = (params.caas_perms_fop && params.multi_hypothesis) ? "--fop" : ""
+    def fop_on = (params.caas_perms_fop && params.multi_hypothesis)
+    def fop_arg = fop_on ? "--fop" : ""
     def discovery_arg = discoveryFile.name != 'NO_FILE' ? "--discovery ${discoveryFile}" : ""
-    def export_groups_arg = (params.export_groups != null && params.export_groups != "none") ? "--export_groups ${alignmentID}.bootstrap.groups.output" : ""
+    // Belt-and-braces: --export_groups opens groups_handle, which forces boot.py
+    // onto the scalar caasboot loop (use_vectorized requires `groups_handle is
+    // None`). Under FOP that loop walks ~max_fop x cycles labelings per position,
+    // so the flag turns a minutes-long vectorized run into a multi-hour one to
+    // produce a ~90k-labeling groups dump nothing downstream consumes. Never emit
+    // groups in FOP mode; the flag stays honored for plain-bootstrap debugging.
+    def export_groups_arg = (!fop_on && params.export_groups != null && params.export_groups != "none") ? "--export_groups ${alignmentID}.bootstrap.groups.output" : ""
     def export_perm_discovery_arg = (params.export_perm_discovery != null && params.export_perm_discovery != "none") ? "--export_perm_discovery ${alignmentID}.bootstrap.discovery.output" : ""
 
     def pairArgs = """
@@ -152,6 +159,11 @@ process BOOTSTRAP_BATCHED {
     def args = "--patterns ${params.patterns} ${params.miss_pair ? '--miss_pair' : ''} ${params.caap_mode ? '--caap_mode' : ''}"
     // FOP (Gap A): base-cycle-collapsed bootstrap over the fanned fop_labelings.tab.
     def fopFlag = (params.caas_perms_fop && params.multi_hypothesis) ? '1' : '0'
+    // Belt-and-braces: --export_groups forces the scalar caasboot loop (see the
+    // non-batched process above). It is prohibitively expensive over the FOP
+    // fan and produces a debug artifact nothing reads, so suppress it whenever
+    // FOP is active — the flag still works for plain-bootstrap debugging.
+    def exportGroupsFlag = (fopFlag == '0' && params.export_groups != null && params.export_groups != "none") ? '1' : '0'
     def ctBinary = (params.use_singularity || params.use_apptainer)
         ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct"
         : "$baseDir/subworkflows/CT/local/ct"
@@ -194,7 +206,7 @@ bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
     --ali-format ${params.ali_format} \\
     --ct-bin ${ctBinary} \\
     --progress-log 0 \\
-    --export-groups ${params.export_groups != null && params.export_groups != "none" ? '1' : '0'} \\
+    --export-groups ${exportGroupsFlag} \\
     --export-perm-discovery ${params.export_perm_discovery != null && params.export_perm_discovery != "none" ? '1' : '0'} \\
     --fop ${fopFlag} \\
     --extra-args-file .ct_bootstrap_batch_args
