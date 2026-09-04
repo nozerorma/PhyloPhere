@@ -35,6 +35,8 @@ workflow SCORING {
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
+        caas_pos_detail_ch       // Channel<path> or null — perm_pos_detail/ shard dir (report FPR calibration figure)
+        caas_gene_cycle_scores_ch // Channel<path> or null — gene_cycle_scores.tsv (report FPR calibration figure)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -197,6 +199,20 @@ workflow SCORING {
             .collect()
             .map { it[0] }
 
+        // Report-only FPR calibration inputs (Tier 1C): the sharded detail dir +
+        // the raw gene x cycle scores table. Neither is consumed by SCORING_COMPUTE,
+        // only by the report, so they are resolved independently of caas_perms_resolved
+        // above (which may have been REBUILT and so already points at a detail dir --
+        // but this fallback also covers a caas_perms_file-only run with no detail at all).
+        def caas_pos_detail_resolved = (caas_pos_detail_ch ?: Channel.empty())
+            .ifEmpty { file(params.caas_pos_detail_file ?: 'NO_CAAS_POS_DETAIL') }
+            .collect()
+            .map { it[0] }
+        def caas_gene_cycle_scores_resolved = (caas_gene_cycle_scores_ch ?: Channel.empty())
+            .ifEmpty { file(params.caas_gene_cycle_scores_file ?: 'NO_CAAS_GENE_CYCLE_SCORES') }
+            .collect()
+            .map { it[0] }
+
         // filtered_discovery (resolved_postproc, a value channel) = the observed
         // per-(gene,position,scheme) asr_path_score overlaid on the per-scheme null;
         // when scoring runs it is always present (same condition as position_scores).
@@ -217,7 +233,9 @@ workflow SCORING {
             caas_pos_sample_resolved,
             caas_pos_quantiles_resolved,
             resolved_postproc,
-            resolved_background
+            resolved_background,
+            caas_pos_detail_resolved,
+            caas_gene_cycle_scores_resolved
         )
 
         def final_reports = report_out.report

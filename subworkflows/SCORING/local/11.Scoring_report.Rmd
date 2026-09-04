@@ -41,6 +41,8 @@ params:
   window_size_bp: 1000000
   direction: "combined"
   background_file: NULL
+  caas_pos_detail_dir: NULL
+  caas_gene_cycle_scores_file: NULL
   seed: "1998"
 ---
 
@@ -871,6 +873,129 @@ cat("#### asr_path_score\n\n")
 knitr::kable(.gene_null_table("asr_path_score", .obs_gene_asr), digits = 4,
   caption = "Gene-level null asr_path_score by direction (q90 over positions). obs_median = observed q90(asr_score).")
 print(.gene_null_plot("asr_path_score", .obs_gene_asr_dist, "asr_path_score (q90)", "Gene-level null vs observed asr_path_score"))
+```
+
+```{r fpr-calib-setup, include=FALSE}
+# ── FPR / threshold calibration (Tier 1C) ──────────────────────────────────
+# Two genome-wide count calibrations against the SAME permulation cycles as
+# the gene/position p.perm above, at NO extra ASR cost (reuses the already-
+# staged detail shards / gene_cycle_scores.tsv). This is a check on the
+# CURRENT thresholds only (caas_perms_postproc / gap_fraction / etc. as they
+# stood when the null was built) -- not a threshold sweep; a changed
+# postproc setting needs the null rebuilt, not just re-plotted.
+has_gcs         <- .file_ok(params$caas_gene_cycle_scores_file)
+has_pos_detail  <- .file_ok(params$caas_pos_detail_dir)
+
+# Position-level: per cycle, genome-wide count of distinct (Gene, Position,
+# caap_group) candidate triples. One shard == one gene, so "distinct
+# (Position, caap_group)" WITHIN a shard is already gene-disambiguated --
+# summing each shard's per-cycle counts gives the true genome-wide total
+# without ever holding more than one shard in memory at a time.
+.count_per_cycle_from_detail <- function(detail_path) {
+  shards <- if (dir.exists(detail_path)) {
+    sort(list.files(detail_path, pattern = "\\.tsv\\.gz$", full.names = TRUE))
+  } else {
+    detail_path
+  }
+  if (length(shards) == 0) return(tibble::tibble(cycle = character(), n_triples = integer()))
+  per_shard <- vector("list", length(shards))
+  for (i in seq_along(shards)) {
+    df <- tryCatch(
+      readr::read_tsv(shards[i],
+        col_types = readr::cols_only(cycle = "c", Position = "i", caap_group = "c"),
+        show_col_types = FALSE),
+      error = function(e) NULL)
+    per_shard[[i]] <- if (is.null(df) || nrow(df) == 0) NULL else
+      df %>% dplyr::distinct(cycle, Position, caap_group) %>% dplyr::count(cycle, name = "n")
+  }
+  dplyr::bind_rows(per_shard) %>% dplyr::group_by(cycle) %>%
+    dplyr::summarise(n_triples = sum(n), .groups = "drop")
+}
+
+if (has_pos_detail) {
+  pos_cycle_counts <- .count_per_cycle_from_detail(params$caas_pos_detail_dir)
+  obs_pos_triples <- if (has_filtered) {
+    readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
+      dplyr::distinct(Gene, Position, caap_group) %>% nrow()
+  } else NA_integer_
+  pos_calib_p <- if (nrow(pos_cycle_counts) > 0 && !is.na(obs_pos_triples)) {
+    (sum(pos_cycle_counts$n_triples >= obs_pos_triples) + 1) / (nrow(pos_cycle_counts) + 1)
+  } else NA_real_
+} else {
+  pos_cycle_counts <- tibble::tibble(cycle = character(), n_triples = integer())
+  obs_pos_triples <- NA_integer_
+  pos_calib_p <- NA_real_
+}
+
+# Gene-level: per cycle, count of genes with a nonzero global_caas hit
+# (gene_wrapper.py writes an explicit 0.0 row for a cycle that scored
+# nothing, so this is a real "no hit" count, not missing data).
+if (has_gcs) {
+  gcs_raw <- readr::read_tsv(params$caas_gene_cycle_scores_file, show_col_types = FALSE)
+  gene_cycle_counts <- gcs_raw %>% dplyr::group_by(cycle) %>%
+    dplyr::summarise(n_genes_hit = sum(global_caas > 0, na.rm = TRUE), .groups = "drop")
+  obs_genes_hit <- sum(gene_df$gene_caas_score > 0, na.rm = TRUE)
+  gene_calib_p <- if (nrow(gene_cycle_counts) > 0) {
+    (sum(gene_cycle_counts$n_genes_hit >= obs_genes_hit) + 1) / (nrow(gene_cycle_counts) + 1)
+  } else NA_real_
+} else {
+  gene_cycle_counts <- tibble::tibble(cycle = character(), n_genes_hit = integer())
+  obs_genes_hit <- NA_integer_
+  gene_calib_p <- NA_real_
+}
+
+.calib_hist <- function(counts_df, count_col, obs_val, xlab, title) {
+  ggplot(counts_df, aes(x = .data[[count_col]])) +
+    geom_histogram(bins = min(40, max(5, length(unique(counts_df[[count_col]])))),
+                    fill = "grey60", colour = "grey30") +
+    { if (is.finite(obs_val)) geom_vline(xintercept = obs_val, colour = "#E15759", linewidth = 1) } +
+    labs(title = title, x = xlab, y = sprintf("cycles (N=%d)", nrow(counts_df)),
+         subtitle = if (is.finite(obs_val)) sprintf("Observed = %s (red line)", format(obs_val, big.mark = ",")) else NULL) +
+    theme_minimal(base_size = 12)
+}
+```
+
+```{r fpr-calib-header, eval=has_gcs || has_pos_detail, results='asis'}
+cat("#### FPR calibration\n\n")
+cat("How large would the observed genome-wide CAAS discovery look if it were pure",
+    "phenotype-tree-confound noise? Each histogram is the genome-wide count over",
+    sprintf("N=%d permuted-labeling cycles", max(nrow(pos_cycle_counts), nrow(gene_cycle_counts))),
+    "at the SAME thresholds this run used; the red line is the observed count.",
+    "This calibrates the current thresholds only -- it is not a threshold sweep,",
+    "and if `--caas_perms_postproc` differed between when this null was built and",
+    "this run's `filtered_discovery.tsv`, the two sides are not distribution-matched",
+    "and this figure should not be read literally (rebuild the null instead).\n\n")
+```
+
+```{r fpr-calib-pos, eval=has_pos_detail, results='asis', fig.height=4.5, fig.width=9}
+if (nrow(pos_cycle_counts) > 0) {
+  cat(sprintf("**Position-level** (Gene, Position, scheme) candidate triples per cycle. p = %s\n\n",
+              if (is.na(pos_calib_p)) "NA (no `filtered_discovery.tsv` to compare against)" else sprintf("%.4g", pos_calib_p)))
+  print(.calib_hist(pos_cycle_counts, "n_triples", obs_pos_triples,
+                     "Genome-wide candidate triples / cycle",
+                     "Position-level FPR calibration"))
+} else {
+  cat("_No cycles recovered from `perm_pos_detail`._\n\n")
+}
+```
+
+```{r fpr-calib-gene, eval=has_gcs, results='asis', fig.height=4.5, fig.width=9}
+if (nrow(gene_cycle_counts) > 0) {
+  cat(sprintf("**Gene-level** genes with a nonzero CAAS hit per cycle. p = %s\n\n",
+              if (is.na(gene_calib_p)) "NA" else sprintf("%.4g", gene_calib_p)))
+  print(.calib_hist(gene_cycle_counts, "n_genes_hit", obs_genes_hit,
+                     "Genes with CAAS_score > 0 / cycle",
+                     "Gene-level FPR calibration"))
+} else {
+  cat("_No cycles recovered from `gene_cycle_scores.tsv`._\n\n")
+}
+```
+
+```{r fpr-calib-missing, eval=!has_gcs && !has_pos_detail, results='asis'}
+cat("#### FPR calibration\n\n")
+cat("_Neither `perm_pos_detail` nor `gene_cycle_scores.tsv` was supplied to this run",
+    "(pass `--caas_pos_detail_file` / `--caas_gene_cycle_scores_file`, or rerun with",
+    "`--caas_permulation_enrichment`)._\n\n")
 ```
 
 ### Position Level {.tabset}

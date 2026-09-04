@@ -54,6 +54,8 @@ process SCORING_REPORT {
     path caas_pos_quantiles  // optional: per (cycle,scheme) null distribution shape (NO_CAAS_POS_QUANTILES sentinel)
     path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay
     path background_file
+    path caas_pos_detail          // optional: perm_pos_detail/ shard dir (or legacy .tsv.gz) — FPR calibration figure (NO_CAAS_POS_DETAIL sentinel)
+    path caas_gene_cycle_scores   // optional: gene_cycle_scores.tsv — gene-level FPR calibration (NO_CAAS_GENE_CYCLE_SCORES sentinel)
 
     output:
     path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -80,6 +82,8 @@ process SCORING_REPORT {
     def pos_quantiles_arg = (caas_pos_quantiles.name =~ /^NO_CAAS_POS_QUANTILES|^NO_FILE/) ? 'NULL' : "'${caas_pos_quantiles}'"
     def filt_disc_arg = (filtered_discovery.name =~ /^NO_POSTPROC|^NO_FILE/) ? 'NULL' : "'${filtered_discovery}'"
     def bg_file_arg = (background_file.name =~ /^NO_BACKGROUND|^NO_FILE/) ? 'NULL' : "'${background_file}'"
+    def pos_detail_arg = (caas_pos_detail.name =~ /^NO_CAAS_POS_DETAIL|^NO_FILE/) ? 'NULL' : "'${caas_pos_detail}'"
+    def gcs_arg = (caas_gene_cycle_scores.name =~ /^NO_CAAS_GENE_CYCLE_SCORES|^NO_FILE/) ? 'NULL' : "'${caas_gene_cycle_scores}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
 
     if (params.use_singularity || params.use_apptainer) {
@@ -111,6 +115,8 @@ process SCORING_REPORT {
                     caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
+                    caas_pos_detail_dir  = ${pos_detail_arg},
+                    caas_gene_cycle_scores_file = ${gcs_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
@@ -148,6 +154,8 @@ process SCORING_REPORT {
                     caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
+                    caas_pos_detail_dir  = ${pos_detail_arg},
+                    caas_gene_cycle_scores_file = ${gcs_arg},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'

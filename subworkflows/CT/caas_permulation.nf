@@ -311,6 +311,7 @@ process CAAS_PERMS_AGGREGATE {
     path "perm_pos_sample.tsv",    emit: pos_sample
     path "perm_pos_quantiles.tsv", emit: pos_quantiles
     path "perm_pos_detail",        emit: pos_detail
+    path "gene_cycle_scores.tsv",  emit: gene_cycle_scores   // pass-through of the staged input; already published from DISAMBIGUATE
 
     script:
     def local_dir = "${baseDir}/subworkflows/SCORING/local"
@@ -459,9 +460,10 @@ workflow CAAS_PERMULATION {
                                        scores.pos_quantiles, scores.pos_detail, universe)
 
     emit:
-        perms         = agg.perms
-        pos_pval      = agg.pos_pval        // LOO null_pvalue_boot per (gene,position,scheme)
-        pos_sample    = agg.pos_sample      // cycle-stratified sample for distribution plots
-        pos_quantiles = agg.pos_quantiles   // per (cycle,scheme) distribution shape
-        pos_detail    = agg.pos_detail      // full per-cycle detail; re-scoring needs no ASR replay
+        perms              = agg.perms
+        pos_pval           = agg.pos_pval        // LOO null_pvalue_boot per (gene,position,scheme)
+        pos_sample         = agg.pos_sample      // cycle-stratified sample for distribution plots
+        pos_quantiles      = agg.pos_quantiles   // per (cycle,scheme) distribution shape
+        pos_detail         = agg.pos_detail      // full per-cycle detail (sharded dir); re-scoring needs no ASR replay
+        gene_cycle_scores  = agg.gene_cycle_scores // genes x cycles raw scores; feeds the report's FPR calibration figure
 }

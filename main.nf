@@ -245,6 +245,8 @@ workflow {
         def scoring_caas_pos_pval_ch = null
         def scoring_caas_pos_sample_ch = null
         def scoring_caas_pos_quantiles_ch = null
+        def scoring_caas_pos_detail_ch = null        // sharded perm_pos_detail dir — report FPR calibration figure (Tier 1C)
+        def scoring_caas_gene_cycle_scores_ch = null // gene_cycle_scores.tsv — report FPR calibration figure (Tier 1C)
         def caas_perm_out = null
 
         if (run_ct_disambiguation) {
@@ -419,6 +421,8 @@ workflow {
                 scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // LOO null_pvalue_boot per (gene,position,scheme)
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // cycle-stratified sample for distribution plots
                 scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles  // per (cycle,scheme) distribution shape
+                scoring_caas_pos_detail_ch = caas_perm_out.pos_detail                   // sharded perm_pos_detail dir
+                scoring_caas_gene_cycle_scores_ch = caas_perm_out.gene_cycle_scores     // genes x cycles raw scores
                 ran_any = true
             }
         }
@@ -675,7 +679,9 @@ workflow {
                 scoring_caas_pos_pval_ch,    // LOO null_pvalue_boot per (gene,position,scheme)
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
                 scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
-                scoring_hyp_pairs_ch          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
+                scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
+                scoring_caas_pos_detail_ch,          // sharded perm_pos_detail dir — report FPR calibration figure
+                scoring_caas_gene_cycle_scores_ch    // gene_cycle_scores.tsv — report FPR calibration figure
             )
             ran_any = true
 

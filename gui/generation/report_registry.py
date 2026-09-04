@@ -283,6 +283,12 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "**/filtered_discovery.tsv")),
         _slot("background_file", "Background gene list", False,
               _first_match(outdir, "**/cleaned_background*.txt", "**/*background*.txt")),
+        # perm_pos_detail is a directory (one gz shard per gene) since PR-0s;
+        # _first_match's underlying glob() matches directories as well as files.
+        _slot("caas_pos_detail", "CAAS perm_pos_detail directory (FPR calibration)", False,
+              _first_match(outdir, "caas_permulation/perm_pos_detail", "**/perm_pos_detail")),
+        _slot("caas_gene_cycle_scores", "CAAS gene_cycle_scores TSV (FPR calibration)", False,
+              _first_match(outdir, "caas_permulation/gene_cycle_scores.tsv", "**/gene_cycle_scores.tsv")),
     ]
 
 
@@ -313,6 +319,8 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"caas_pos_quantiles_file = {_r_arg(s['caas_pos_quantiles'])}",
             f"filtered_discovery_file = {_r_arg(s['filtered_discovery'])}",
             f"background_file      = {_r_arg(s['background_file'])}",
+            f"caas_pos_detail_dir  = {_r_arg(s['caas_pos_detail'])}",
+            f"caas_gene_cycle_scores_file = {_r_arg(s['caas_gene_cycle_scores'])}",
             "window_size_bp       = 1000000",
             "direction            = 'combined'",
             "seed                 = '1998'",
