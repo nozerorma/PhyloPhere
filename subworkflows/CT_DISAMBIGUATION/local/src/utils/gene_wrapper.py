@@ -1437,6 +1437,40 @@ def _null_row_caas(row: Dict[str, Any], rank_lookup: Dict[str, Dict[int, float]]
     return phen * float(row["asr_path_score"])
 
 
+def _sanitize_gene_shard(gene: str) -> str:
+    """Filesystem-safe stem for a per-gene detail shard. Gene ids are already
+    clean in practice (Ensembl ids / HGNC symbols); this only neutralises path
+    separators so a stray one cannot escape the shard directory."""
+    return gene.replace(os.sep, "__").replace("/", "__").replace("\\", "__").strip() or "_"
+
+
+def iter_detail_rows(detail_path: Path):
+    """Yield perm_pos_detail rows (dicts) from either layout:
+
+      * a per-gene shard directory  ``perm_pos_detail/<Gene>.tsv.gz``  (current)
+      * a single concatenated       ``perm_pos_detail.tsv.gz``         (legacy /
+        externally supplied inputs)
+
+    Shards are read in sorted-filename order and one shard holds exactly one
+    gene, so gene-contiguity — which ``_build_cycle_score_pools`` and
+    ``_finalize_perm_scores`` pass B2 both rely on — is preserved by
+    construction.
+    """
+    import csv as _csv
+
+    p = Path(detail_path)
+    if p.is_dir():
+        shards = sorted(p.glob("*.tsv.gz"))
+        if not shards:
+            raise FileNotFoundError(f"[perms] no *.tsv.gz shards under {p}")
+        for shard in shards:
+            with gzip.open(shard, "rt", newline="") as f_in:
+                yield from _csv.DictReader(f_in, delimiter="\t")
+    else:
+        with gzip.open(p, "rt", newline="") as f_in:
+            yield from _csv.DictReader(f_in, delimiter="\t")
+
+
 def _cycle_gene_removal_from_detail(
     detail_path: Path,
     gene_lengths: Dict[str, float],
@@ -1460,12 +1494,11 @@ def _cycle_gene_removal_from_detail(
 
     seen_pos: Dict[Tuple[str, str, str], set] = {}
     has_clust: Dict[Tuple[str, str, str], bool] = {}
-    with gzip.open(detail_path, "rt", newline="") as f_in:
-        for row in _csv.DictReader(f_in, delimiter="\t"):
-            key = (row["cycle"], row["caap_group"], row["Gene"])
-            seen_pos.setdefault(key, set()).add(int(row["Position"]))
-            if int(row.get("clust", 0) or 0):
-                has_clust[key] = True
+    for row in iter_detail_rows(detail_path):
+        key = (row["cycle"], row["caap_group"], row["Gene"])
+        seen_pos.setdefault(key, set()).add(int(row["Position"]))
+        if int(row.get("clust", 0) or 0):
+            has_clust[key] = True
 
     rows = (
         (cyc, grp, gene, len(pset), has_clust.get((cyc, grp, gene), False))
@@ -1528,27 +1561,25 @@ def _build_cycle_score_pools(
             score = entry[0] / entry[1] if entry[1] else 0.0
             _bump(cyc, score, int(entry[2]), int(entry[3]))
 
-    with gzip.open(detail_path, "rt", newline="") as f_in:
-        reader = _csv.DictReader(f_in, delimiter="\t")
-        current_gene: Optional[str] = None
-        pos_agg: Dict[Tuple[str, int], List[float]] = {}
-        for row in reader:
-            gene = row["Gene"]
-            if gene != current_gene:
-                if current_gene is not None:
-                    _drain(pos_agg)
-                current_gene = gene
-                pos_agg = {}
-            if _rm and (row["cycle"], row["caap_group"], gene) in _rm:
-                continue
-            key = (row["cycle"], int(row["Position"]))
-            entry = pos_agg.setdefault(key, [0.0, 0, 0, 0])
-            entry[0] += _null_row_caas(row, rank_lookup)
-            entry[1] += 1
-            entry[2] |= int(row["ct"])
-            entry[3] |= int(row["cb"])
-        if current_gene is not None:
-            _drain(pos_agg)
+    current_gene: Optional[str] = None
+    pos_agg: Dict[Tuple[str, int], List[float]] = {}
+    for row in iter_detail_rows(detail_path):
+        gene = row["Gene"]
+        if gene != current_gene:
+            if current_gene is not None:
+                _drain(pos_agg)
+            current_gene = gene
+            pos_agg = {}
+        if _rm and (row["cycle"], row["caap_group"], gene) in _rm:
+            continue
+        key = (row["cycle"], int(row["Position"]))
+        entry = pos_agg.setdefault(key, [0.0, 0, 0, 0])
+        entry[0] += _null_row_caas(row, rank_lookup)
+        entry[1] += 1
+        entry[2] |= int(row["ct"])
+        entry[3] |= int(row["cb"])
+    if current_gene is not None:
+        _drain(pos_agg)
 
     return {cyc: {k: array.array("d", sorted(v)) for k, v in per_cycle.items()}
             for cyc, per_cycle in acc.items()}
@@ -1681,9 +1712,8 @@ def _finalize_perm_scores(
         writer.writerows(rows)
 
     n_rows = 0
-    with gzip.open(detail_path, "rt", newline="") as f_in, \
-         open(scores_path, "w", newline="") as f_scores:
-        reader = _csv.DictReader(f_in, delimiter="\t")
+    with open(scores_path, "w", newline="") as f_scores:
+        reader = iter_detail_rows(detail_path)
         writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t")
         writer_scores.writeheader()
 
@@ -1806,19 +1836,23 @@ def process_all_genes_perms(
     cycle's genome-wide candidate pool while workers only ever see a single gene:
 
       Pass A (parallel, one gene per worker) replays the labelings and streams raw
-        per-(gene, cycle, position, scheme) detail to perm_pos_detail.tsv.gz,
-        accumulating a per-cycle histogram of n_detected as rows go by.
+        per-(gene, cycle, position, scheme) detail to perm_pos_detail/<Gene>.tsv.gz
+        (one gz shard per gene, since each worker result is one gene's complete
+        row list), accumulating a per-cycle histogram of n_detected as rows go by.
       Pass B (single process, streaming) turns those histograms into exact
-        per-cycle percent_rank lookups, re-reads the detail file, and derives
-        null_row_caas -> position scores -> per-(gene, cycle) q90.
+        per-cycle percent_rank lookups, re-reads the detail shards via
+        iter_detail_rows(), and derives null_row_caas -> position scores ->
+        per-(gene, cycle) q90.
 
     Outputs:
-      - output_dir/gene_cycle_scores.tsv   (schema unchanged; feeds caas_perms.rds)
-      - output_dir/perm_pos_pval.tsv       (LOO null_pvalue_boot crosscheck table)
-      - output_dir/perm_pos_detail.tsv.gz  (full per-cycle detail; re-scoring needs
-                                            no ASR replay)
-      - output_dir/perm_pos_quantiles.tsv  (per (cycle, scheme) distribution shape)
-      - output_dir/perm_pos_sample.tsv     (cycle-stratified sample for violins)
+      - output_dir/gene_cycle_scores.tsv     (schema unchanged; feeds caas_perms.rds)
+      - output_dir/perm_pos_pval.tsv         (LOO null_pvalue_boot crosscheck table)
+      - output_dir/perm_pos_detail/<Gene>.tsv.gz  (one shard per gene; re-scoring
+                                              needs no ASR replay, and re-aggregation
+                                              stays at one-gene peak RAM)
+      - output_dir/perm_pos_detail.manifest.tsv   (Gene, n_rows per shard)
+      - output_dir/perm_pos_quantiles.tsv    (per (cycle, scheme) distribution shape)
+      - output_dir/perm_pos_sample.tsv       (cycle-stratified sample for violins)
     """
     import csv as _csv
 
@@ -1864,7 +1898,15 @@ def process_all_genes_perms(
         maxtasks = int(os.environ.get("CAAS_MAX_TASKS_PER_CHILD", "50"))
 
     pval_path = output_dir / "perm_pos_pval.tsv"
-    detail_path = output_dir / "perm_pos_detail.tsv.gz"
+    # One gz shard per gene rather than one monolithic file: Pass A already
+    # iterates gene-by-gene (imap_unordered yields one gene's complete row list
+    # at a time), so this is a writer-only change. Keeps every downstream
+    # re-aggregation (CAAS_PERMS_REBUILD, this same finalizer) at one-gene peak
+    # RAM instead of streaming a single multi-GB file, and lets consumers read
+    # shard-by-shard. `iter_detail_rows()` is the matching reader.
+    detail_dir = output_dir / "perm_pos_detail"
+    detail_dir.mkdir(parents=True, exist_ok=True)
+    manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
     pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot"]
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "ct", "cb", "clust"]
@@ -1903,23 +1945,26 @@ def process_all_genes_perms(
     pool = mp.Pool(processes=effective_workers, maxtasksperchild=maxtasks)
     n_genes = 0
     n_detail_rows = 0
+    manifest_rows: List[Tuple[str, int]] = []
     try:
         results_iterator = pool.imap_unordered(_perms_worker_wrapper, args_generator, chunksize=10)
 
-        with open(pval_path, "w", newline="") as f_pval, \
-             gzip.open(detail_path, "wt", newline="") as f_detail:
-
+        with open(pval_path, "w", newline="") as f_pval:
             writer_pval = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
-            writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t")
-
             writer_pval.writeheader()
-            writer_detail.writeheader()
 
             for _gene, detail_rows, pval_rows in results_iterator:
                 if not detail_rows:
                     continue
                 writer_pval.writerows(pval_rows)
-                writer_detail.writerows(detail_rows)
+
+                shard_path = detail_dir / f"{_sanitize_gene_shard(_gene)}.tsv.gz"
+                with gzip.open(shard_path, "wt", newline="") as f_detail:
+                    writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t")
+                    writer_detail.writeheader()
+                    writer_detail.writerows(detail_rows)
+                manifest_rows.append((_gene, len(detail_rows)))
+
                 n_detail_rows += len(detail_rows)
                 for row in detail_rows:
                     cyc_hist = hist_by_cycle.setdefault(row["cycle"], {})
@@ -1930,9 +1975,14 @@ def process_all_genes_perms(
         pool.close()
         pool.join()
 
+    with open(manifest_path, "w", newline="") as f_man:
+        w = _csv.writer(f_man, delimiter="\t")
+        w.writerow(["Gene", "n_rows"])
+        w.writerows(sorted(manifest_rows))
+
     logger.info(
         f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position,scheme) "
-        f"rows across {len(hist_by_cycle)} cycles -> {detail_path.name}"
+        f"rows across {len(hist_by_cycle)} cycles -> {detail_dir.name}/ ({n_genes} shards)"
     )
     if n_genes < len(genes):
         logger.info(
@@ -1962,7 +2012,7 @@ def process_all_genes_perms(
     removed: Set[Tuple[str, str, str]] = set()
     if postproc_filter and (gene_filter_mode or "none").lower() != "none":
         removed = _cycle_gene_removal_from_detail(
-            detail_path, gene_lengths, gene_filter_mode,
+            detail_dir, gene_lengths, gene_filter_mode,
             iqr_multiplier, extreme_percentile,
         )
         logger.info("[perms] pass B0: %d (cycle, group, gene) units removed "
@@ -1970,7 +2020,7 @@ def process_all_genes_perms(
                     len(removed), gene_filter_mode)
 
     _finalize_perm_scores(
-        detail_path=detail_path,
+        detail_path=detail_dir,
         output_dir=output_dir,
         cycle_tags=cycle_tags,
         rank_lookup=rank_lookup,

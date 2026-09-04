@@ -243,7 +243,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     path "perm_pos_pval.tsv",        emit: pos_pval
     path "perm_pos_sample.tsv",      emit: pos_sample
     path "perm_pos_quantiles.tsv",   emit: pos_quantiles
-    path "perm_pos_detail.tsv.gz",   emit: pos_detail
+    path "perm_pos_detail",          emit: pos_detail   // dir: one gz shard per gene
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
@@ -285,7 +285,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     cp caas_perms_out/perm_pos_pval.tsv perm_pos_pval.tsv
     cp caas_perms_out/perm_pos_sample.tsv perm_pos_sample.tsv
     cp caas_perms_out/perm_pos_quantiles.tsv perm_pos_quantiles.tsv
-    cp caas_perms_out/perm_pos_detail.tsv.gz perm_pos_detail.tsv.gz
+    cp -R caas_perms_out/perm_pos_detail perm_pos_detail
     """
 }
 
@@ -295,14 +295,14 @@ process CAAS_PERMS_AGGREGATE {
     label 'process_low'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'caas_perms.rds'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_pos_*.tsv'
-    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_pos_detail.tsv.gz'
+    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'perm_pos_detail'
 
     input:
     path gene_cycle_scores
     path perm_pos_pval, stageAs: 'input_perm_pos_pval.tsv'
     path perm_pos_sample, stageAs: 'input_perm_pos_sample.tsv'
     path perm_pos_quantiles, stageAs: 'input_perm_pos_quantiles.tsv'
-    path perm_pos_detail, stageAs: 'input_perm_pos_detail.tsv.gz'
+    path perm_pos_detail, stageAs: 'input_perm_pos_detail'   // dir: one gz shard per gene
     path universe
 
     output:
@@ -310,7 +310,7 @@ process CAAS_PERMS_AGGREGATE {
     path "perm_pos_pval.tsv",      emit: pos_pval
     path "perm_pos_sample.tsv",    emit: pos_sample
     path "perm_pos_quantiles.tsv", emit: pos_quantiles
-    path "perm_pos_detail.tsv.gz", emit: pos_detail
+    path "perm_pos_detail",        emit: pos_detail
 
     script:
     def local_dir = "${baseDir}/subworkflows/SCORING/local"
@@ -320,7 +320,7 @@ process CAAS_PERMS_AGGREGATE {
     cp ${perm_pos_pval} perm_pos_pval.tsv
     cp ${perm_pos_sample} perm_pos_sample.tsv
     cp ${perm_pos_quantiles} perm_pos_quantiles.tsv
-    cp ${perm_pos_detail} perm_pos_detail.tsv.gz
+    cp -R ${perm_pos_detail} perm_pos_detail
 
     ${run} ${local_dir}/src/scoring_caas_perms.R \\
         --gene-cycle-scores ${gene_cycle_scores} \\
@@ -335,10 +335,11 @@ process CAAS_PERMS_AGGREGATE {
 // a previous run is a cached artifact with no such guarantee — it was built with
 // whatever formula was current then.
 //
-// Re-deriving it does NOT need the expensive part: perm_pos_detail.tsv.gz already
-// holds every (Gene, cycle, Position, caap_group, asr_path_score, n_detected,
-// ct, cb) row, so only pass B (the aggregation) has to re-run. That is minutes
-// against the hours of CAAS_PERMS_DISAMBIGUATE's ASR replay.
+// Re-deriving it does NOT need the expensive part: perm_pos_detail/ (one gz shard
+// per gene) already holds every (Gene, cycle, Position, caap_group,
+// asr_path_score, n_detected, ct, cb) row, so only pass B (the aggregation) has
+// to re-run. That is minutes against the hours of CAAS_PERMS_DISAMBIGUATE's ASR
+// replay. A legacy single perm_pos_detail.tsv.gz file also still works.
 //
 // Deliberately reuses gene_wrapper.py's own aggregation via
 // reaggregate_perm_scores.py rather than reimplementing: the gene statistic is
@@ -351,7 +352,7 @@ process CAAS_PERMS_REBUILD {
                pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv}'
 
     input:
-    path perm_pos_detail, stageAs: 'input_perm_pos_detail.tsv.gz'
+    path perm_pos_detail, stageAs: 'input_perm_pos_detail'   // dir (current) or legacy .tsv.gz file
     path universe
 
     output:
@@ -376,7 +377,7 @@ process CAAS_PERMS_REBUILD {
     find . -name '*.pyc' -delete 2>/dev/null || true
 
     ${py} ./reaggregate_perm_scores.py \\
-        --detail input_perm_pos_detail.tsv.gz \\
+        --detail input_perm_pos_detail \\
         --output-dir .
 
     ${rs} ${scoring_local}/src/scoring_caas_perms.R \\

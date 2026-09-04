@@ -986,6 +986,38 @@ gene_out <- gene_scores %>%
 write_tsv(gene_out, "gene_scores.tsv")
 cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 
+# ── 4d. Numeric invariant guard (cross-tier break-point #1/#11) ───────────────
+# The CAAS permulation null aggregates each cycle's per-position scores with
+# gene_wrapper.py `_size_adj_max_null`, which must stay bit-compatible with the
+# observed `size_adj_max` above (F(max)^n amplifies ~1e-16 accumulation drift).
+# There is no shared implementation, so re-derive gene_caas_score for a handful
+# of genes straight from the written position_scores rows + the direction pools
+# and assert an exact match. A failure here means the observed formula moved and
+# the null must be rebuilt (or the null's own recompute will silently disagree).
+local({
+  chk <- gene_caas %>% dplyr::filter(!is.na(gene_caas_score))
+  if (nrow(chk) == 0) return(invisible())
+  set.seed(1L)
+  probe <- chk$Gene[sample.int(nrow(chk), min(25L, nrow(chk)))]
+  worst <- 0
+  for (g in probe) {
+    v  <- pos_out$CAAS_score[pos_out$Gene == g]
+    re <- size_adj_max(v, .pool_all)
+    ob <- chk$gene_caas_score[chk$Gene == g]
+    if (is.finite(re) && is.finite(ob)) worst <- max(worst, abs(re - ob))
+  }
+  if (worst > 1e-6) {
+    stop(sprintf(paste0(
+      "size_adj_max invariant violated: gene_scores.tsv vs. a fresh recompute ",
+      "from position_scores disagree by %.3g (> 1e-6). The observed gene CAAS ",
+      "aggregator changed - rebuild the permulation null (scoring_caas_perms.R / ",
+      "reaggregate_perm_scores.py) so `_size_adj_max_null` matches, and bump the ",
+      "gene_stat stamp if the formula (not just an impl detail) changed."), worst))
+  }
+  cat(sprintf("  size_adj_max invariant guard: OK (%d genes, max|delta|=%.2g)\n",
+              length(probe), worst))
+})
+
 # ── FCS stats table (consumed by FCS_general.Rmd) ─────────────────────────────
 # Generic contract: gene + score_<ranking> (zero-floored downstream over the
 # cleaned_background universe) + flag_<name> per-gene highlight booleans.

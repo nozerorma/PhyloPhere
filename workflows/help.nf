@@ -311,7 +311,7 @@ Standalone mode (provide inputs directly):
 --scoring_vep_primateai                            <"vep_primateai.tsv">              ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --scoring_vep_cosmic                                  <"vep_cosmic.tsv">                  ""    (also POSENRICH's precomputed-VEP fallback, see enrichment.nf)
 --caas_perms_file                                        <"caas_perms.rds">                  ""    (genome-wide CAAS permulation null)
---caas_pos_detail_file                                   <"perm_pos_detail.tsv.gz">          ""    (rebuild the null from a prior run's per-cycle detail; preferred over --caas_perms_file for reruns, minutes, no ASR replay)
+--caas_pos_detail_file                                   <"perm_pos_detail/">          ""    (rebuild the null from a prior run's per-cycle detail shard dir, or a legacy perm_pos_detail.tsv.gz; preferred over --caas_perms_file for reruns, minutes, no ASR replay)
 
 Position-level components: biochem, ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite

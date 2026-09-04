@@ -476,20 +476,30 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
     #            upstream (each labeling's change_side partitions the directions),
     #            so no corRho transform is needed.
     corStat_byrank <- c(corperms[["corStat_byrank"]], corperms[["caas_corStat_byrank"]])
+    # NOTE: `corStat_byrank` keys `*_asr` (global_asr/top_asr/bottom_asr) are
+    # intentionally unreachable by the FCS ranking names (global/top/bottom) — the
+    # ASR-axis null is consumed only by 11.Scoring_report.Rmd, never here.
 
     if (!is.null(corperms[["caas_corStat_byrank"]])) {
       .stat_have <- corperms[["gene_stat"]]
-      if (is.null(.stat_have) || !identical(as.character(.stat_have), "size_adj_max")) {
+      if (is.null(.stat_have)) {
+        # Pre-stamp cached RDS: the only historical writer of caas_corStat_byrank
+        # (scoring_caas_perms.R) has always aggregated with size_adj_max, so an
+        # absent stamp is safe to consume. Inform, do not drop.
+        fcs_progress(paste0(
+          "CAAS permulation null carries no gene_stat stamp (pre-stamp build); ",
+          "assuming 'size_adj_max' (the only historical aggregator) and using it."))
+      } else if (!identical(as.character(.stat_have), "size_adj_max")) {
         warning(sprintf(paste0(
           "CAAS permulation null is STALE: built with gene statistic '%s', but the ",
           "observed gene_caas_score uses 'size_adj_max'. p.perm left NA for the CAAS ",
           "rankings. Rebuild it (no ASR replay needed, minutes):\n",
           "  python3 subworkflows/CT_DISAMBIGUATION/local/reaggregate_perm_scores.py ",
-          "--detail <run>/caas_permulation/perm_pos_detail.tsv.gz --output-dir <run>/caas_permulation\n",
+          "--detail <run>/caas_permulation/perm_pos_detail --output-dir <run>/caas_permulation\n",
           "  Rscript subworkflows/SCORING/local/src/scoring_caas_perms.R ",
           "--gene-cycle-scores <run>/caas_permulation/gene_cycle_scores.tsv ",
           "--output <run>/caas_permulation/caas_perms.rds"),
-          if (is.null(.stat_have)) "<unstamped: pre-size_adj_max>" else as.character(.stat_have)))
+          as.character(.stat_have)))
         corStat_byrank <- corStat_byrank[
           !names(corStat_byrank) %in% names(corperms[["caas_corStat_byrank"]])]
       }

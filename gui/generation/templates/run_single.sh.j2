@@ -86,9 +86,10 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # as-is (CAAS_PERMS_REBUILD — minutes, no ASR replay). A cached null is only valid
     # while it holds the same gene-level statistic as the observed score; rebuilding
     # guarantees that, and fcs_enrich.R leaves p.perm NA when it does not hold.
-    CAAS_POS_DETAIL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"
-    [ -f "$CAAS_POS_DETAIL_FILE" ] || {
-        echo "[WARN] perm_pos_detail.tsv.gz missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
+    CAAS_POS_DETAIL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_detail"
+    [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # legacy single-file layout
+    [ -e "$CAAS_POS_DETAIL_FILE" ] || {
+        echo "[WARN] perm_pos_detail missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
         CAAS_POS_DETAIL_FILE=""
     }
 
@@ -163,9 +164,10 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     CAAS_POS_SAMPLE_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
     # Triggers CAAS_PERMS_REBUILD in SCORING -- see the reuse_exploratory branch for why.
-    CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"
-    [ -f "$CAAS_POS_DETAIL_FILE" ] || {
-        echo "[WARN] perm_pos_detail.tsv.gz missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
+    CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail"
+    [ -d "$CAAS_POS_DETAIL_FILE" ] || CAAS_POS_DETAIL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_detail.tsv.gz"  # legacy single-file layout
+    [ -e "$CAAS_POS_DETAIL_FILE" ] || {
+        echo "[WARN] perm_pos_detail missing: cannot rebuild the null, falling back to the cached caas_perms.rds (p.perm will be NA if it is stale)" >&2
         CAAS_POS_DETAIL_FILE=""
     }
 fi

@@ -26,7 +26,7 @@ actual publishDir rather than guessed:
                  caastools/background.output, signification/meta_caas/global_meta_caas.tsv,
                  caas_permulation/caas_perms.rds,
                  caas_permulation/perm_pos_{pval,sample,quantiles}.tsv,
-                 caas_permulation/perm_pos_detail.tsv.gz  (triggers CAAS_PERMS_REBUILD:
+                 caas_permulation/perm_pos_detail/  (one gz shard per gene; triggers CAAS_PERMS_REBUILD:
                    SCORING re-derives the null from this rather than trusting the cached
                    caas_perms.rds, which is only valid while it holds the same gene-level
                    statistic as the observed score)
@@ -131,7 +131,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         # fcs_enrich.R leaves it NA when it detects a stale null. Wired last so it
         # takes precedence over caas_perms_file above.
         entries.append(("caas_pos_detail_file",
-                        os.path.join(perm_dir, "perm_pos_detail.tsv.gz"), "file"))
+                        os.path.join(perm_dir, "perm_pos_detail"), "dir"))
     if config.use_resample:
         entries.append(("resample_from", os.path.join(outdir, "caastools", "resample.tab"), "file"))
     if config.use_bootstrap:
