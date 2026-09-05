@@ -444,6 +444,12 @@ workflow ENRICHMENT {
         // has no other consumer in this workflow yet, so it's resolved here.
         def cmp_position_lists_ch = position_lists ? position_lists.ifEmpty { file('NO_POSITION_LISTS') } : file('NO_POSITION_LISTS')
 
+        // Tier 4D: unpaired CAAS x RER gene-score concordance null. caas_perms_resolved
+        // and rer_perms_resolved are already resolved above (for SCORING_FCS_REPORT /
+        // MODULE_FCS_RER); gene_scores is the workflow take: param (SCORING's
+        // gene_scores.tsv -- observed gene_caas_score + rer_rho).
+        def cmp_gene_scores_ch = gene_scores ? gene_scores : file('NO_FILE_GENE_SCORES')
+
         def cmp_out = SCORING_COMPARE_REPORT(caas_all, rer_all, caas_le, rer_le,
                                               caas_le_comp, rer_le_comp,
                                               ami_module_desc_ch, ami_term_membership_ch,
@@ -452,7 +458,9 @@ workflow ENRICHMENT {
                                               cmp_fcs_stats_ch, cmp_pos_scores_ch,
                                               cmp_vep_pai_ch, cmp_vep_cosmic_ch,
                                               cmp_fade_top_ch, cmp_fade_bot_ch,
-                                              gene_lists_ch, cmp_position_lists_ch)
+                                              gene_lists_ch, cmp_position_lists_ch,
+                                              caas_perms_resolved, rer_perms_resolved,
+                                              cmp_gene_scores_ch)
         final_reports = final_reports.mix(cmp_out.report)
 
     emit:

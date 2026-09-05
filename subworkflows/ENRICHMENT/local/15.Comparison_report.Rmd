@@ -54,6 +54,25 @@ params:
   # fcs_percentile_flags()'s gene_lists_dir param / .position_pct_flags()).
   gene_lists_dir:     NULL
   position_lists_dir: NULL
+  # Tier 4D -- unpaired CAAS x RER gene-score concordance null.
+  #   caas_perms_file : SCORING's caas_perms.rds (caas_corStat_byrank -- one
+  #                     genes x N matrix per ranking, N permuted phenotype
+  #                     labelings, size_adj_max gene aggregate).
+  #   rer_perms_file  : RERconverge's *.perms.rds (corStat / corRho, genes x N
+  #                     Brownian-motion null trait draws).
+  #   gene_scores_file: SCORING's gene_scores.tsv -- observed gene_caas_score
+  #                     and rer_rho for the observed side of the statistic.
+  # The two nulls share NO seed / cycle order, so their columns are matched only
+  # as exchangeable independent draws: this is a RANDOMIZATION null on the
+  # concordance statistic ("observed CAAS/RER agreement no larger than for two
+  # independent gene-score vectors of matched marginal shape"), NOT a joint
+  # permulation p. Do not report it as a permulation p.
+  caas_perms_file:       NULL
+  rer_perms_file:        NULL
+  gene_scores_file:      NULL
+  comparison_perm_null:  true
+  comparison_perm_stat:  "spearman"   # "spearman" | "topk_overlap"
+  comparison_perm_topk:  0.05         # top-fraction for the topk_overlap statistic
   seed:               "1998"
 ---
 
@@ -877,6 +896,197 @@ for (dr in c("GLOBAL", "TOP", "BOTTOM")) {
 `r if (!has_posenrich_le_summary) "> **posenrich_leading_edge_summary_file not supplied - Leading edge table skipped.**"`
 
 </details>
+
+---
+
+# CAAS x RER gene-score concordance (unpaired null)
+
+```{r xmod_concord_setup, echo=FALSE}
+# ── Tier 4D: unpaired randomization null on the CAAS/RER gene-score concordance ──
+# Question answered: is the observed agreement between the genome-wide CAAS
+# convergence score and the RERconverge rate-shift score larger than what two
+# INDEPENDENT gene-score vectors of the same marginal shape would produce?
+#
+# Observed  : concordance( gene_caas_score , rer_rho ) over the gene set shared
+#             by both null matrices (break-point #9 -- observed and null are
+#             always computed on the SAME intersected gene set).
+# Null      : for draw i, concordance( caas_null[, i] , rer_null[, i] ) where
+#             caas_null is caas_corStat_byrank[[dir]] (N permuted phenotype
+#             labelings) and rer_null is the RER BM-null corStat (N null trait
+#             draws). The two share no seed / cycle order, so column i of one is
+#             paired with column i of the other only as two exchangeable
+#             independent draws -- a randomization null, not a joint permulation.
+# p         : (#{ null_i >= observed } + 1) / (N_used + 1), one-sided (excess
+#             concordance), N_used = min(ncol(caas_null), ncol(rer_null)).
+#
+# Directions (break-point #10 -- the SAME sign transform is applied to observed
+# and null on both sides):
+#   global : |CAAS convergence| vs |RER shift|   -> caas as-is, |rer|
+#   top    : CAAS "top" ranking vs RER acceleration -> caas_corStat_byrank$top,
+#            rer signal restricted to corRho > 0 (observed: pmax(rer_rho, 0))
+#   bottom : CAAS "bottom" ranking vs RER deceleration -> $bottom, corRho < 0
+#            (observed: pmax(-rer_rho, 0))
+
+.cmp_perm_enabled <- isTRUE(as.logical(params$comparison_perm_null))
+has_xmod_concord <- .cmp_perm_enabled &&
+  .file_ok(params$caas_perms_file) && .file_ok(params$rer_perms_file) &&
+  .file_ok(params$gene_scores_file)
+
+xmod_concord_res  <- NULL      # per-direction result tibble
+xmod_concord_null <- NULL      # long null draws for the histogram
+xmod_concord_msg  <- NULL      # human-readable skip reason
+
+if (has_xmod_concord) {
+  .caas_obj <- tryCatch(readRDS(params$caas_perms_file), error = function(e) NULL)
+  .rer_obj  <- tryCatch(readRDS(params$rer_perms_file),  error = function(e) NULL)
+  .gs       <- tryCatch(readr::read_tsv(params$gene_scores_file, show_col_types = FALSE),
+                        error = function(e) NULL)
+
+  .caas_by <- if (!is.null(.caas_obj)) .caas_obj[["caas_corStat_byrank"]] else NULL
+  # gene_stat gate (invariant break-point #11): the only historical writer of
+  # caas_corStat_byrank always used size_adj_max, so an absent stamp is safe.
+  .caas_stat <- if (!is.null(.caas_obj)) .caas_obj[["gene_stat"]] else NULL
+  .caas_stat_ok <- is.null(.caas_stat) || identical(as.character(.caas_stat), "size_adj_max")
+
+  # RER raw perms object: getPermsContinuous() -> $corStat (signed stat, genes x N)
+  # and $corRho (rho, same shape). fcs_enrich.R consumes the same two fields.
+  .rer_stat <- if (!is.null(.rer_obj)) .rer_obj[["corStat"]] else NULL
+  .rer_rho  <- if (!is.null(.rer_obj)) .rer_obj[["corRho"]]  else NULL
+
+  if (is.null(.caas_by) || !length(.caas_by)) {
+    xmod_concord_msg <- "CAAS permulation null carries no `caas_corStat_byrank` matrices -- concordance null skipped."
+  } else if (!.caas_stat_ok) {
+    xmod_concord_msg <- sprintf(
+      "CAAS permulation null is STALE (gene_stat = '%s', expected 'size_adj_max') -- concordance null skipped.",
+      as.character(.caas_stat))
+  } else if (is.null(.rer_stat)) {
+    xmod_concord_msg <- "RER permulation object carries no `corStat` matrix -- concordance null skipped."
+  } else if (is.null(.gs) || !all(c("Gene", "gene_caas_score", "rer_rho") %in% names(.gs))) {
+    xmod_concord_msg <- "gene_scores.tsv missing Gene / gene_caas_score / rer_rho -- concordance null skipped."
+  } else if (all(!is.finite(.gs$rer_rho))) {
+    xmod_concord_msg <- "gene_scores.tsv carries no finite rer_rho (RER did not run for this trait) -- concordance null skipped."
+  } else {
+    .rer_stat <- as.matrix(.rer_stat)
+    .rer_rho  <- if (!is.null(.rer_rho)) as.matrix(.rer_rho) else
+                 matrix(1, nrow = nrow(.rer_stat), ncol = ncol(.rer_stat),
+                        dimnames = dimnames(.rer_stat))
+
+    .stat_name <- if (identical(as.character(params$comparison_perm_stat), "topk_overlap"))
+                    "topk_overlap" else "spearman"
+    .topk <- suppressWarnings(as.numeric(params$comparison_perm_topk))
+    if (!is.finite(.topk) || .topk <= 0 || .topk >= 1) .topk <- 0.05
+
+    .concord <- function(x, y) {
+      ok <- is.finite(x) & is.finite(y)
+      if (sum(ok) < 5L) return(NA_real_)
+      x <- x[ok]; y <- y[ok]
+      if (.stat_name == "topk_overlap") {
+        k <- max(1L, ceiling(.topk * length(x)))
+        length(intersect(order(x, decreasing = TRUE)[seq_len(k)],
+                         order(y, decreasing = TRUE)[seq_len(k)])) / k
+      } else {
+        suppressWarnings(stats::cor(x, y, method = "spearman"))
+      }
+    }
+
+    # RER null direction transforms (matched to the observed transforms below).
+    .rer_null_for <- function(dir) {
+      switch(dir,
+        global = abs(.rer_stat),
+        top    = ifelse(.rer_rho > 0, .rer_stat, 0),
+        bottom = ifelse(.rer_rho < 0, abs(.rer_stat), 0))
+    }
+    .rer_obs_for <- function(rho) {
+      switch(attr(rho, "dir"),
+        global = abs(rho),
+        top    = pmax(rho, 0),
+        bottom = pmax(-rho, 0))
+    }
+
+    .rows <- list(); .null_long <- list()
+    for (dir in c("global", "top", "bottom")) {
+      caas_mat <- .caas_by[[dir]]
+      if (is.null(caas_mat)) next
+      caas_mat <- as.matrix(caas_mat)
+
+      shared <- Reduce(intersect, list(rownames(caas_mat), rownames(.rer_stat),
+                                       .gs$Gene[is.finite(.gs$gene_caas_score) & is.finite(.gs$rer_rho)]))
+      if (length(shared) < 20L) next
+
+      gsi <- .gs[match(shared, .gs$Gene), ]
+      rho_obs <- gsi$rer_rho; attr(rho_obs, "dir") <- dir
+      x_obs <- gsi$gene_caas_score
+      y_obs <- .rer_obs_for(rho_obs)
+      obs   <- .concord(x_obs, y_obs)
+
+      caas_null <- caas_mat[shared, , drop = FALSE]
+      rer_null  <- .rer_null_for(dir)[shared, , drop = FALSE]
+      n_use <- min(ncol(caas_null), ncol(rer_null))
+      if (!is.finite(obs) || n_use < 1L) next
+      null_vals <- vapply(seq_len(n_use),
+                          function(i) .concord(caas_null[, i], rer_null[, i]),
+                          numeric(1))
+      null_vals <- null_vals[is.finite(null_vals)]
+      if (!length(null_vals)) next
+
+      p_emp <- (sum(null_vals >= obs) + 1) / (length(null_vals) + 1)
+      .rows[[dir]] <- tibble::tibble(
+        Direction   = tools::toTitleCase(dir),
+        `N genes`   = length(shared),
+        `N null`    = length(null_vals),
+        Observed    = obs,
+        `Null mean` = mean(null_vals),
+        `Null p95`  = as.numeric(stats::quantile(null_vals, 0.95)),
+        p           = p_emp)
+      .null_long[[dir]] <- tibble::tibble(Direction = tools::toTitleCase(dir),
+                                          value = null_vals)
+    }
+
+    if (length(.rows)) {
+      xmod_concord_res  <- dplyr::bind_rows(.rows)
+      xmod_concord_null <- dplyr::bind_rows(.null_long)
+      xmod_concord_res$p.adj <- p.adjust(xmod_concord_res$p, method = "BH")
+      xmod_concord_stat_name <- .stat_name
+    } else {
+      xmod_concord_msg <- "No CAAS/RER direction had >= 20 shared genes with a finite statistic -- concordance null skipped."
+    }
+  }
+}
+```
+
+`r if (!.cmp_perm_enabled) "> **Cross-module concordance null disabled (\x60comparison_perm_null = false\x60).**"`
+`r if (.cmp_perm_enabled && !has_xmod_concord) "> **CAAS perms / RER perms / gene_scores.tsv not all supplied -- cross-module concordance null skipped.**"`
+`r if (!is.null(xmod_concord_msg)) paste0("> **", xmod_concord_msg, "**")`
+
+```{r xmod_concord_render, echo=FALSE, eval=!is.null(xmod_concord_res), results='asis'}
+cat(sprintf(paste0(
+  "\nThis is a **randomization null**, not a permulation p: the CAAS labeling null ",
+  "and the RER Brownian-motion null share no seed or cycle order, so their columns ",
+  "are matched only as independent exchangeable draws. It asks whether the observed ",
+  "**%s** concordance between `gene_caas_score` and `rer_rho` exceeds that of two ",
+  "independent gene-score vectors of matched marginal shape. Observed and null are ",
+  "computed on the same shared-gene set per direction. One-sided p (excess ",
+  "concordance), BH-adjusted across the three directions.\n\n"),
+  xmod_concord_stat_name))
+
+kbl_html(
+  xmod_concord_res %>%
+    dplyr::mutate(dplyr::across(c(Observed, `Null mean`, `Null p95`), ~ round(.x, 4)),
+                  p = signif(p, 3), p.adj = signif(p.adj, 3)),
+  caption = "Observed CAAS x RER concordance vs the unpaired randomization null."
+) %>% print()
+
+print(
+  ggplot(xmod_concord_null, aes(value)) +
+    geom_histogram(bins = 40, fill = "grey70", colour = "white") +
+    geom_vline(data = xmod_concord_res, aes(xintercept = Observed),
+               colour = "#c0392b", linewidth = 0.9) +
+    facet_wrap(~ Direction, scales = "free", ncol = 1) +
+    labs(x = paste0(xmod_concord_stat_name, " concordance"), y = "null draws",
+         title = "CAAS x RER gene-score concordance",
+         subtitle = "grey = unpaired randomization null; red = observed")
+)
+```
 
 ---
 

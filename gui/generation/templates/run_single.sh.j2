@@ -555,6 +555,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "publish_domino_intermediates": {{ run_defaults.publish_domino_intermediates }},
   "scoring_compare_fdr": "${SCORING_COMPARE_FDR:-0.15}",
   "scoring_compare_top_n": "${SCORING_COMPARE_TOP_N:-20}",
+  "comparison_perm_null": {{ run_defaults.comparison_perm_null }},
+  "comparison_perm_stat": "${COMPARISON_PERM_STAT:-spearman}",
+  "comparison_perm_topk": "${COMPARISON_PERM_TOPK:-0.05}",
 
   "posenrich": $_RUN_POSENRICH,
   "egg_members_file": "${EGG_MEMBERS_FILE:-}",

@@ -100,6 +100,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "scoring_ami": _bool_str(getattr(enrichment, 'scoring_ami', enrichment.scoring_string)),
         "scoring_string": _bool_str(enrichment.scoring_string),
         "publish_domino_intermediates": _bool_str(enrichment.publish_domino_intermediates),
+        "comparison_perm_null": _bool_str(getattr(enrichment, 'comparison_perm_null', True)),
         "miss_pair": _bool_str(caas.miss_pair),
         "caap_mode": _bool_str(caas.caap_mode),
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),

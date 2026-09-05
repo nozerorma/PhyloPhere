@@ -306,6 +306,11 @@ class EnrichmentConfig(ModuleConfigBase):
     scoring_string: bool = True  # --scoring_string
     scoring_compare_fdr: str = "0.15"  # --scoring_compare_fdr
     scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
+    # Tier 4D: unpaired CAAS x RER gene-score concordance null in the COMPARE
+    # report (randomization null, not a joint permulation p).
+    comparison_perm_null: bool = True  # --comparison_perm_null
+    comparison_perm_stat: str = "spearman"  # --comparison_perm_stat ("spearman" | "topk_overlap")
+    comparison_perm_topk: str = "0.05"  # --comparison_perm_topk
 
     # POSENRICH data files (conf/enrichment.config).
     egg_members_file: str = ""  # --egg_members_file

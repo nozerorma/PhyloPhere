@@ -260,6 +260,13 @@ process SCORING_COMPARE_REPORT {
     // position_lists_dir params).
     path gene_lists,          stageAs: 'gene_lists'
     path position_lists,      stageAs: 'position_lists'
+    // Tier 4D -- unpaired CAAS x RER gene-score concordance null. caas_perms is
+    // SCORING's caas_perms.rds (caas_corStat_byrank), rer_perms is RERconverge's
+    // *.perms.rds (corStat/corRho), gene_scores_cmp is SCORING's gene_scores.tsv
+    // (observed gene_caas_score + rer_rho). NO_FILE sentinels when unavailable.
+    path caas_perms,          stageAs: 'caas_perms_cmp.rds'
+    path rer_perms,           stageAs: 'rer_perms_cmp.rds'
+    path gene_scores_cmp,     stageAs: 'gene_scores_cmp.tsv'
 
     output:
     path "15.Comparison_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -285,6 +292,12 @@ process SCORING_COMPARE_REPORT {
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
     def gene_lists_arg     = (gene_lists.name =~ /^NO_/)     ? 'NULL' : "'${gene_lists}'"
     def position_lists_arg = (position_lists.name =~ /^NO_/) ? 'NULL' : "'${position_lists}'"
+    def caas_perms_arg     = (caas_perms.name =~ /^NO_/)      ? 'NULL' : "'${caas_perms}'"
+    def rer_perms_arg      = (rer_perms.name =~ /^NO_/)       ? 'NULL' : "'${rer_perms}'"
+    def gene_scores_cmp_arg = (gene_scores_cmp.name =~ /^NO_/) ? 'NULL' : "'${gene_scores_cmp}'"
+    def cmp_perm_null      = (params.comparison_perm_null == null) ? true : params.comparison_perm_null
+    def cmp_perm_stat      = params.comparison_perm_stat ?: 'spearman'
+    def cmp_perm_topk      = params.comparison_perm_topk ?: 0.05
 
     def render_cmd = """
         Rscript -e "
@@ -311,6 +324,12 @@ process SCORING_COMPARE_REPORT {
                     fade_sites_bottom_file   = ${fade_sites_bottom_arg},
                     gene_lists_dir     = ${gene_lists_arg},
                     position_lists_dir = ${position_lists_arg},
+                    caas_perms_file       = ${caas_perms_arg},
+                    rer_perms_file        = ${rer_perms_arg},
+                    gene_scores_file      = ${gene_scores_cmp_arg},
+                    comparison_perm_null  = '${cmp_perm_null}',
+                    comparison_perm_stat  = '${cmp_perm_stat}',
+                    comparison_perm_topk  = ${cmp_perm_topk},
                     seed               = '${params.seed ?: 1998}'
                 ),
                 output_file = '15.Comparison_report_${traitname}.html'
