@@ -142,5 +142,159 @@ if (!ok) fails <- fails + 1
   if (!ok) fails <- fails + 1
 }
 
+# 7. Lachenbruch null (Part 1 Fisher/hypergeometric + Part 2 Wilcoxon-among-
+#    positive-scorers), vectorized vs. literal per-(set,column) fisher.test/
+#    wilcox.test, on a small synthetic corStat_rk + one gmt.
+#    Part 1 is EXACT (phyper == fisher.test's one-sided p, closed form) so it
+#    gets the file's normal TOL. Part 2 uses a closed-form normal
+#    approximation to the Wilcoxon U-statistic UNCONDITIONALLY, while
+#    wilcox.test() itself silently switches to an EXACT permutation p-value
+#    for small samples with no ties (n1,n2 < 50 by default) - so a gap vs.
+#    wilcox.test() is EXPECTED for small n, not a bug. Large n1/n2 (both
+#    methods then use the same normal approximation) still gets the tight
+#    tolerance, so a real bug in that regime isn't masked.
+{
+  set.seed(99)
+  genes7 <- paste0("G", 1:120)
+  gmt7   <- make_gmt(genes7, n_sets = 6, min_sz = 8, max_sz = 40)
+  gmts7  <- list(testdb = gmt7)
+  Ncol   <- 8
+  corStat7 <- matrix(pmax(0, rnorm(length(genes7) * Ncol)), nrow = length(genes7),
+                     dimnames = list(genes7, NULL))
+
+  set_names7 <- names(gmt7$genesets)
+  realenrich7 <- list(testdb = data.frame(stat = rep(0, length(set_names7)), row.names = set_names7))
+
+  chi1_vec <- fcs_null_lachenbruch_binary_vectorized(corStat7, gmts7, realenrich7,
+                                                     num_g = 8, max_g = 40)$testdb
+  chi2_vec <- fcs_null_lachenbruch_magnitude_vectorized(corStat7, gmts7, realenrich7,
+                                                        max_g = 40)$testdb
+
+  universe7 <- genes7
+  max_d1 <- 0; max_d2_small <- 0
+  for (s in set_names7) {
+    p_genes <- intersect(gmt7$genesets[[s]], universe7)
+    n1 <- length(p_genes)
+    if (n1 < 8 || n1 > 40) next
+    for (j in seq_len(Ncol)) {
+      col <- corStat7[, j]
+      hits <- names(col[col > 0])
+      k1 <- length(intersect(p_genes, hits)); k0 <- n1 - k1
+      b1 <- length(hits) - k1; b0 <- (length(universe7) - n1) - b1
+      ft <- fisher.test(matrix(c(k1, k0, b1, b0), 2, byrow = TRUE), alternative = "greater")
+      chi1_ref <- qchisq(max(ft$p.value, 1e-15), df = 1, lower.tail = FALSE)
+      max_d1 <- max(max_d1, abs(chi1_ref - chi1_vec[s, j]), na.rm = TRUE)
+
+      pos <- col[col > 0]; p_pos <- intersect(p_genes, names(pos))
+      if (length(p_pos) >= 2 && (length(pos) - length(p_pos)) >= 2) {
+        bg_pos <- setdiff(names(pos), p_pos)
+        wt <- wilcox.test(pos[p_pos], pos[bg_pos], alternative = "greater")
+        chi2_ref <- qchisq(max(wt$p.value, 1e-15), df = 1, lower.tail = FALSE)
+        max_d2_small <- max(max_d2_small, abs(chi2_ref - chi2_vec[s, j]), na.rm = TRUE)
+      }
+    }
+  }
+  ok1 <- is.finite(max_d1) && max_d1 < TOL
+  cat(sprintf("  [%s] lachenbruch-null-part1  max|Δchi1|=%.2e (exact, TOL=%.0e)\n",
+              ifelse(ok1, "PASS", "FAIL"), max_d1, TOL))
+  cat(sprintf("  [info] lachenbruch-null-part2 (small-n) max|Δchi2|=%.2e (approx vs wilcox.test's own EXACT branch here -- gap expected, not asserted)\n",
+              max_d2_small))
+  if (!ok1) fails <- fails + 1
+
+  # Dedicated large-n scenario: wilcox.test() only switches to ITS OWN normal
+  # approximation once both samples are >= 50 (no ties) -- genes7's small
+  # universe can't reach that on both sides at once, so build one big enough
+  # to. Once both sides use the SAME normal-approximation formula (with
+  # wilcox.test's continuity correction, which the vectorized Part 2 now also
+  # applies), agreement should be tight.
+  set.seed(100)
+  # All-positive draws (no zero-floor shrinkage) so the realized positive-
+  # scorer counts equal n1L/n2L exactly, comfortably clearing the >= 50
+  # threshold on both sides.
+  n1L <- 70; n2L <- 100
+  xL <- abs(rnorm(n1L, mean = 0.3)) + 0.05; yL <- abs(rnorm(n2L, mean = 0)) + 0.05
+  genesL <- c(paste0("S", seq_len(n1L)), paste0("B", seq_len(n2L)))
+  valsL  <- setNames(c(xL, yL), genesL)
+  # A second, throwaway geneset covering the B genes is required so that
+  # fcs_null_enrichstat_vectorized's genes_db (the union of ALL genesets in
+  # the GMT, matching fastwilcoxGMT's own background convention) includes a
+  # background distinct from SETL -- with only one geneset, genes_db would
+  # equal SETL itself and n2 would be 0 (NA), which is a test-construction
+  # artifact, not a real degenerate case.
+  gmtL <- list(genesets = list(SETL = paste0("S", seq_len(n1L)),
+                               OTHER = paste0("B", seq_len(n2L))),
+              geneset.names = c("SETL", "OTHER"))
+  corStatL <- matrix(valsL, ncol = 1, dimnames = list(genesL, NULL))
+  realenrichL <- list(testdb = data.frame(stat = 0, row.names = "SETL"))
+  chi2L <- fcs_null_lachenbruch_magnitude_vectorized(corStatL, list(testdb = gmtL), realenrichL,
+                                                     max_g = n1L)$testdb
+  posL <- valsL[valsL > 0]
+  pL   <- intersect(paste0("S", seq_len(n1L)), names(posL))
+  bgL  <- setdiff(names(posL), pL)
+  wtL  <- wilcox.test(posL[pL], posL[bgL], alternative = "greater")
+  chi2L_ref <- qchisq(max(wtL$p.value, 1e-15), df = 1, lower.tail = FALSE)
+  max_d2_large <- abs(chi2L_ref - chi2L["SETL", 1])
+  ok2 <- is.finite(max_d2_large) && max_d2_large < TOL
+  cat(sprintf("  [%s] lachenbruch-null-part2 (large-n, n1=%d n2=%d) max|Δchi2|=%.2e (TOL=%.0e)\n",
+              ifelse(ok2, "PASS", "FAIL"), length(pL), length(bgL), max_d2_large, TOL))
+  if (!ok2) fails <- fails + 1
+}
+
+# 8. Path-sum with null_mat= supplied: (a) reproduces M %*% null_mat sums/NES
+#    exactly (the downstream math is untouched by this change - this tests
+#    the alignment/plumbing in fcs_run_permulation's new branch, not new
+#    statistics), and (b) a gene present in `vals` but absent from
+#    null_mat's rownames gets a neutral (0) null row and does not perturb
+#    results for sets that don't contain it.
+{
+  set.seed(123)
+  genes8 <- paste0("G", 1:200)
+  gmt8   <- make_gmt(genes8, n_sets = 8, min_sz = 5, max_sz = 40)
+  gmts8  <- list(testdb = gmt8)
+  vals8  <- setNames(pmax(0, rnorm(length(genes8))), genes8)
+  Ncol8  <- 50
+  null8  <- matrix(pmax(0, rnorm(length(genes8) * Ncol8)), nrow = length(genes8),
+                   dimnames = list(genes8, NULL))
+
+  res8 <- fcs_run_permulation(vals8, gmts8, num_g = 5, max_g = 40, null_mat = null8)
+
+  # Hand-computed reference using the exact same M %*% null_mat formula.
+  gs8 <- gmt8$genesets; names(gs8) <- gmt8$geneset.names
+  valid8 <- sapply(gs8, function(g) length(intersect(g, genes8)) >= 5 && length(intersect(g, genes8)) <= 40)
+  gs8v <- gs8[valid8]
+  ref_rows <- lapply(names(gs8v), function(pname) {
+    g_in <- intersect(gs8v[[pname]], genes8)
+    obs_sum <- sum(vals8[g_in])
+    null_sums <- colSums(null8[g_in, , drop = FALSE])
+    p_ref <- (sum(null_sums >= obs_sum) + 1) / (Ncol8 + 1)
+    c(pathway = pname, perm_pval = p_ref)
+  })
+  ref8 <- data.frame(pathway = sapply(ref_rows, `[[`, "pathway"),
+                     perm_pval_ref = as.numeric(sapply(ref_rows, `[[`, "perm_pval")))
+  cmp8 <- merge(res8, ref8, by = "pathway")
+  maxd8 <- max(abs(cmp8$perm_pval - cmp8$perm_pval_ref), na.rm = TRUE)
+  n_perms_ok <- all(res8$perm_pval >= 1 / (Ncol8 + 1) - 1e-12)
+  ok8 <- is.finite(maxd8) && maxd8 < TOL && nrow(cmp8) == nrow(res8) && n_perms_ok
+  cat(sprintf("  [%s] pathsum-null-mat-plumbing  sets=%d  max|Δp|=%.2e  (N=%d from null_mat, not n_perms_sum)\n",
+              ifelse(ok8, "PASS", "FAIL"), nrow(cmp8), maxd8, Ncol8))
+  if (!ok8) fails <- fails + 1
+
+  # Neutral-row check: a gene in vals8 but absent from null_mat must not
+  # change results for sets that don't contain it.
+  extra_gene <- "GX_not_in_null"
+  vals8b <- c(vals8, setNames(0.7, extra_gene))
+  res8b <- fcs_run_permulation(vals8b, gmts8, num_g = 5, max_g = 40, null_mat = null8)
+  # No geneset in make_gmt() can contain extra_gene (drawn only from genes8),
+  # so every set's result must be identical with/without the extra gene.
+  cmp8b <- merge(res8[, c("pathway", "perm_pval", "perm_nes")],
+                res8b[, c("pathway", "perm_pval", "perm_nes")],
+                by = "pathway", suffixes = c("_a", "_b"))
+  maxd8b <- max(abs(cmp8b$perm_pval_a - cmp8b$perm_pval_b),
+               abs(cmp8b$perm_nes_a - cmp8b$perm_nes_b), na.rm = TRUE)
+  ok8b <- is.finite(maxd8b) && maxd8b < TOL
+  cat(sprintf("  [%s] pathsum-null-mat-neutral-row  max|Δ|=%.2e\n", ifelse(ok8b, "PASS", "FAIL"), maxd8b))
+  if (!ok8b) fails <- fails + 1
+}
+
 cat(sprintf("\n%s - %d failure(s)\n", ifelse(fails == 0, "ALL PASS", "FAILURES"), fails))
 quit(status = if (fails == 0) 0 else 1)

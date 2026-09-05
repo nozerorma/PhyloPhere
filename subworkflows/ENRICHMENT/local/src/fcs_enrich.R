@@ -275,14 +275,30 @@ fcs_run_lachenbruch <- function(vals, gmts, num_g = 10, max_g = 500) {
 # BH per GMT. NES = (obs_sum - null_mean) / null_sd; NES > 0 = enrichment.
 # p-value floor = 1 / (n_perms + 1). Only for non-negative vals.
 # Returns per-pathway: perm_pval, perm_p.adj, perm_nes.
-fcs_run_permulation <- function(vals, gmts, num_g = 10, max_g = 500, n_perms = 2000, seed = 1998) {
+fcs_run_permulation <- function(vals, gmts, num_g = 10, max_g = 500, n_perms = 2000, seed = 1998,
+                                null_mat = NULL) {
   vals[is.na(vals)] <- 0
   genes_all <- names(vals)
   N_genes   <- length(genes_all)
 
-  set.seed(seed)
-  perm_mat <- vapply(seq_len(n_perms), function(i) sample(vals), numeric(N_genes))
-  rownames(perm_mat) <- genes_all
+  if (!is.null(null_mat)) {
+    # Prefer the shared CAAS/RER permulation null over a private label
+    # shuffle: same underlying null model as Wilcoxon's p.perm. Align rows to
+    # this ranking's gene universe -- a gene in `vals` but absent from
+    # null_mat's rownames gets a neutral all-0 null row (matches the
+    # zero-floor convention: an unscored gene contributes nothing to the
+    # OBSERVED sum either), a gene in null_mat but absent from `vals` is
+    # simply dropped (not part of this ranking's universe).
+    common   <- intersect(genes_all, rownames(null_mat))
+    perm_mat <- matrix(0, nrow = N_genes, ncol = ncol(null_mat),
+                       dimnames = list(genes_all, NULL))
+    perm_mat[common, ] <- null_mat[common, , drop = FALSE]
+    n_perms <- ncol(perm_mat)   # the null's OWN size, not the caller's n_perms_sum default
+  } else {
+    set.seed(seed)
+    perm_mat <- vapply(seq_len(n_perms), function(i) sample(vals), numeric(N_genes))
+    rownames(perm_mat) <- genes_all
+  }
 
   out <- list()
   for (db in names(gmts)) {
@@ -437,11 +453,194 @@ fcs_permpvalenrich_vectorized <- function(realenrich, enrichStat, alternative = 
   out
 }
 
+# ── Lachenbruch null, Part 1 (Fisher/hypergeometric prevalence) ──────────────
+# A one-sided "greater" Fisher exact test on a 2x2 prevalence table is
+# mathematically identical to the hypergeometric upper-tail probability
+# (verified numerically: fisher.test(matrix(c(k1,k0,b1,b0),2,byrow=TRUE),
+# alternative="greater")$p.value == phyper(k1-1, m=k1+b1, n=k0+b0, k=k1+k0,
+# lower.tail=FALSE), agreement to float precision) -- so this vectorizes
+# EXACTLY, not approximately, via one phyper() call per db over every
+# (set, null-column) cell at once.
+#
+# Universe: the FULL ranking domain (rownames(corStat_rk)), matching
+# fcs_run_lachenbruch's OWN observed-side convention (`universe <-
+# names(vals)`, fcs_enrich.R:211 -- the whole cleaned background) --
+# deliberately NOT genes_db (the GMT-annotated-genes-only universe
+# fcs_null_enrichstat_vectorized uses, matching fastwilcoxGMT's own
+# background convention). Each test's null must match ITS OWN observed-side
+# background, not another test's.
+#
+# Returns: named list db -> (sets x N) chi1 matrix (qchisq-transformed, NA
+# where the set fails num_g/max_g -- same convention as
+# fcs_null_enrichstat_vectorized's enrichStat).
+fcs_null_lachenbruch_binary_vectorized <- function(corStat_rk, gmts, realenrich, num_g = 10, max_g = 500) {
+  chi1 <- list()
+  genes_all  <- rownames(corStat_rk)
+  N          <- ncol(corStat_rk)
+  n_universe <- length(genes_all)
+
+  hitmat <- (corStat_rk > 0) * 1.0
+  hitmat[is.na(hitmat)] <- 0        # NA scores treated as non-hit (zero-floor convention)
+  m_col <- Matrix::colSums(hitmat)  # total hits in universe, per column
+
+  for (db in names(realenrich)) {
+    gmt <- gmts[[db]]
+    set_names <- rownames(realenrich[[db]])
+    if (is.null(gmt) || length(set_names) == 0) {
+      chi1[[db]] <- matrix(NA_real_, nrow = length(set_names), ncol = N,
+                           dimnames = list(set_names, NULL))
+      next
+    }
+    gs <- gmt$genesets; names(gs) <- gmt$geneset.names
+    M  <- fcs_membership_matrix(gs, set_names, genes_all)   # sets x genes_all
+
+    n1 <- as.numeric(Matrix::rowSums(M))          # geneset size within universe, constant per set
+    k1 <- as.matrix(M %*% hitmat)                 # sets x N -- hits within set, per column
+    m  <- matrix(m_col, nrow = nrow(M), ncol = N, byrow = TRUE)
+    n  <- n_universe - m
+    k  <- matrix(n1, nrow = nrow(M), ncol = N)
+
+    p1 <- matrix(
+      phyper(as.vector(k1) - 1, m = as.vector(m), n = as.vector(n), k = as.vector(k),
+             lower.tail = FALSE),
+      nrow = nrow(M), ncol = N, dimnames = list(set_names, NULL))
+    p1  <- pmax(p1, 1e-15)                         # same floor as fcs_run_lachenbruch Part 1 (fcs_enrich.R:235)
+    chi <- qchisq(p1, df = 1, lower.tail = FALSE)
+    fail <- (n1 < num_g) | (!is.null(max_g) & is.finite(max_g) & max_g > 0 & n1 > max_g) | (n1 == 0)
+    chi[fail, ] <- NA_real_
+    chi1[[db]] <- chi
+  }
+  chi1
+}
+
+# ── Lachenbruch null, Part 2 (Wilcoxon on positive-scoring genes) ────────────
+# Under the null, "positive-scoring gene" membership varies PER null column
+# (a gene can be zero-floored in one permuted labeling and positive in
+# another) -- exactly the per-column-varying-membership case
+# fcs_null_enrichstat_vectorized's NA branch (fcs_enrich.R ~405-412) already
+# handles, by masking non-participating genes to NA before ranking. Reused
+# UNMODIFIED here (no change to that function) with a masked copy of
+# corStat_rk restricted to positive entries.
+#
+# num_g is hardcoded to 2 for the inner call (NOT the caller's pathway-level
+# num_g) because fcs_run_lachenbruch's Part 2 gates membership separately, at
+# `n1_pos >= 2` (fcs_enrich.R:241) -- independent of and more permissive than
+# Part 1's num_g (default 10). Passing the caller's num_g here would
+# incorrectly NA out sets whose positive-scorer count is between 2 and
+# num_g-1 but whose full pathway size clears Part 1's num_g -- a case
+# fcs_run_lachenbruch's observed side explicitly allows.
+#
+# Returns: named list db -> (sets x N) chi2 matrix (qchisq-transformed via
+# the closed-form normal approximation to the Wilcoxon U-statistic; 0 -- not
+# NA -- where Part 2 can't run, mirroring fcs_run_lachenbruch's own
+# `chi2 <- 0` default, fcs_enrich.R:240, so chi_total stays defined whenever
+# chi1 is).
+fcs_null_lachenbruch_magnitude_vectorized <- function(corStat_rk, gmts, realenrich, max_g = 500) {
+  corStat_pos <- corStat_rk
+  corStat_pos[corStat_rk <= 0] <- NA
+
+  auc_pos <- fcs_null_enrichstat_vectorized(corStat_pos, gmts, realenrich, num_g = 2, max_g = max_g)
+
+  chi2 <- list()
+  for (db in names(realenrich)) {
+    auc <- auc_pos[[db]]
+    if (is.null(auc) || nrow(auc) == 0) { chi2[[db]] <- auc; next }
+
+    gmt <- gmts[[db]]
+    set_names <- rownames(realenrich[[db]])
+    gs <- gmt$genesets; names(gs) <- gmt$geneset.names
+    genes_db <- intersect(unique(unlist(gs)), rownames(corStat_pos))
+    M_pos    <- fcs_membership_matrix(gs, set_names, genes_db)
+    sub_pos  <- corStat_pos[genes_db, , drop = FALSE]
+
+    # Recompute the SAME per-column n1/n2 fcs_null_enrichstat_vectorized
+    # derived internally (from sub_pos's own NA pattern) rather than changing
+    # that function's return shape -- 3 cheap lines, mechanically identical.
+    notNA <- !is.na(sub_pos)
+    n1n   <- as.matrix(M_pos %*% (notNA * 1.0))
+    ntot  <- matrix(colSums(notNA), nrow = nrow(M_pos), ncol = ncol(sub_pos), byrow = TRUE)
+    n2n   <- ntot - n1n
+
+    U    <- (auc + 0.5) * n1n * n2n
+    mu   <- n1n * n2n / 2
+    sdv  <- sqrt(n1n * n2n * (n1n + n2n + 1) / 12)
+    # Continuity correction, matching wilcox.test()'s own normal-approximation
+    # branch (stats:::wilcox.test.default: z <- (U - mu - CORRECTION)/SIGMA,
+    # CORRECTION = 0.5 for alternative="greater") -- without it the two
+    # diverge noticeably even at large n1/n2, since qchisq is steep near
+    # small p.
+    z    <- (U - mu - 0.5) / sdv
+    p2   <- pmax(pnorm(z, lower.tail = FALSE), 1e-15)   # same floor as fcs_run_lachenbruch Part 2 (fcs_enrich.R:247)
+    chi  <- qchisq(p2, df = 1, lower.tail = FALSE)
+    chi[is.na(auc)] <- 0   # Part 2 unavailable -> 0, never NA (matches observed-side default)
+    chi2[[db]] <- chi
+  }
+  chi2
+}
+
+# ── Lachenbruch: combine Part 1 + Part 2 into an empirical lach_p.perm ───────
+# Reuses fcs_permpvalenrich_vectorized VERBATIM (zero new empirical-p code)
+# against the already-computed OBSERVED lach_chi_total. fcs_run_lachenbruch
+# itself is unchanged; this only adds a null-based empirical p alongside its
+# existing analytic lach_pval/lach_p.adj.
+fcs_compute_lach_p_perm <- function(lach_rk, corStat_rk, gmts, num_g = 10, max_g = 500) {
+  realenrich <- list()
+  for (db in unique(lach_rk$database)) {
+    db_df <- lach_rk[lach_rk$database == db, , drop = FALSE]
+    realenrich[[db]] <- data.frame(stat = db_df$lach_chi_total, row.names = db_df$pathway)
+  }
+
+  chi1_null <- fcs_null_lachenbruch_binary_vectorized(corStat_rk, gmts, realenrich, num_g = num_g, max_g = max_g)
+  chi2_null <- fcs_null_lachenbruch_magnitude_vectorized(corStat_rk, gmts, realenrich, max_g = max_g)
+  chi_total_null <- setNames(
+    lapply(names(realenrich), function(db) chi1_null[[db]] + chi2_null[[db]]),
+    names(realenrich))
+
+  ppv <- fcs_permpvalenrich_vectorized(realenrich, chi_total_null, alternative = "greater")
+
+  out <- rep(NA_real_, nrow(lach_rk))
+  for (db in names(ppv)) {
+    idx <- which(lach_rk$database == db)
+    out[idx] <- ppv[[db]][lach_rk$pathway[idx]]
+  }
+  out
+}
+
+# Per-ranking null matrix resolution, shared by the Wilcoxon loop AND the
+# Lachenbruch/path-sum loop below (both need "the same null this ranking's
+# Wilcoxon test uses") — factored out so both loops read one precomputed
+# lookup (corStat_byrk) instead of re-deriving it, and so a stale/absent null
+# is handled in exactly one place. CAAS supplies a precomputed per-direction
+# matrix; RER shares one base matrix and derives the accel/decel transform
+# from corRho. Pure function, no side effects.
+fcs_resolve_corstat_rk <- function(rk, corStat_byrank, base_corStat, base_corRho) {
+  if (!is.null(corStat_byrank) && !is.null(corStat_byrank[[rk]])) {
+    return(as.matrix(corStat_byrank[[rk]]))
+  }
+  if (!is.null(base_corStat)) {
+    corStat_rk <- base_corStat
+    if (rk == "accelerating" && !is.null(base_corRho)) {
+      corStat_rk <- ifelse(base_corRho > 0,  base_corStat, 0)
+    } else if (rk == "decelerating" && !is.null(base_corRho)) {
+      corStat_rk <- ifelse(base_corRho < 0, -base_corStat, 0)
+    }
+    rownames(corStat_rk) <- rownames(base_corStat)
+    return(corStat_rk)
+  }
+  NULL
+}
+
 # rankings: named list of named-numeric vectors (already zero-floored).
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "NO_FILE",
                         fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000,
                         fdr_wilcoxon = fdr_thr, fdr_lachenbruch = fdr_thr,
                         fdr_permsum = fdr_thr) {
+  # Always defined (even with no perms file) so the Lachenbruch/path-sum loop
+  # below — which runs unconditionally, unlike the Wilcoxon loop — can look up
+  # corStat_byrk without an "object not found" error. Overwritten below with
+  # the real per-ranking resolution once/if a perms file loads successfully.
+  corStat_byrank <- NULL; base_corStat <- NULL; base_corRho <- NULL
+  corStat_byrk   <- setNames(vector("list", length(rankings)), names(rankings))
   res <- list(); alts <- list()
   for (rk in names(rankings)) {
     alts[[rk]] <- fcs_alternative(rankings[[rk]])
@@ -455,6 +654,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       num.genes = numeric(), gene.vals = character(),
       lach_pval = numeric(), lach_p.adj = numeric(), lach_chi_binary = numeric(),
       lach_chi_nonzero = numeric(), lach_chi_total = numeric(), lach_frac_magnitude = numeric(),
+      lach_p.perm = numeric(),
       perm_pval = numeric(), perm_p.adj = numeric(), perm_nes = numeric(),
       sig_wilcoxon = logical(), sig_lachenbruch = logical(), sig_permulation = logical(),
       evidence_count = integer(), evidence_label = character()
@@ -512,26 +712,23 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       fcs_progress(sprintf("Vectorized pathway permulations: N=%d, %d GMTs, %d rankings",
                            n_perms, length(gmts), length(rankings)))
 
+      # Resolve every ranking's null matrix ONCE, shared by this loop and the
+      # Lachenbruch/path-sum loop below (fcs_resolve_corstat_rk).
+      corStat_byrk <- setNames(
+        lapply(names(rankings), fcs_resolve_corstat_rk,
+               corStat_byrank = corStat_byrank, base_corStat = base_corStat, base_corRho = base_corRho),
+        names(rankings))
+
       for (rk in names(rankings)) {
         obs_rk <- enrich_df %>% dplyr::filter(ranking == rk)
         if (nrow(obs_rk) == 0) next
         t0  <- Sys.time()
         alt <- alts[[rk]]
 
-        # Per-ranking null matrix. CAAS supplies a precomputed per-direction matrix;
-        # RER shares one base matrix and derives the accel/decel transform from corRho.
-        corStat_rk <- NULL
-        if (!is.null(corStat_byrank) && !is.null(corStat_byrank[[rk]])) {
-          corStat_rk <- as.matrix(corStat_byrank[[rk]])
-        } else if (!is.null(base_corStat)) {
-          corStat_rk <- base_corStat
-          if (rk == "accelerating" && !is.null(base_corRho)) {
-            corStat_rk <- ifelse(base_corRho > 0,  base_corStat, 0)
-          } else if (rk == "decelerating" && !is.null(base_corRho)) {
-            corStat_rk <- ifelse(base_corRho < 0, -base_corStat, 0)
-          }
-          rownames(corStat_rk) <- rownames(base_corStat)
-        }
+        # Per-ranking null matrix, pre-resolved once for every ranking (see
+        # corStat_byrk below fcs_resolve_corstat_rk's definition) and shared
+        # with the Lachenbruch/path-sum loop.
+        corStat_rk <- corStat_byrk[[rk]]
         if (is.null(corStat_rk)) next  # no null for this ranking → p.perm stays NA
 
         # Observed stat per set, per db (rows = pathways).
@@ -567,6 +764,10 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
   for (rk in names(rankings)) {
     if (alts[[rk]] != "greater") next
     vals_rk <- rankings[[rk]]
+    # Same per-ranking null the Wilcoxon loop uses above (corStat_byrk,
+    # resolved once via fcs_resolve_corstat_rk). NULL when no perms file /
+    # no null for this ranking -- both tests below degrade gracefully (G).
+    corStat_rk <- corStat_byrk[[rk]]
 
     fcs_progress(sprintf("Lachenbruch two-part test: ranking %s", rk))
     lach_rk <- tryCatch(
@@ -575,11 +776,24 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
         fcs_progress(sprintf("  Lachenbruch failed [%s]: %s", rk, e$message))
         tibble::tibble()
       })
-    if (nrow(lach_rk) > 0) lach_res[[rk]] <- dplyr::mutate(lach_rk, ranking = rk)
+    if (nrow(lach_rk) > 0) {
+      lach_rk$lach_p.perm <- if (!is.null(corStat_rk)) {
+        tryCatch(
+          fcs_compute_lach_p_perm(lach_rk, corStat_rk, gmts, num_g = num_g, max_g = max_g),
+          error = function(e) {
+            fcs_progress(sprintf("  Lachenbruch null failed [%s]: %s", rk, e$message))
+            NA_real_
+          })
+      } else NA_real_
+      lach_res[[rk]] <- dplyr::mutate(lach_rk, ranking = rk)
+    }
 
-    fcs_progress(sprintf("Path sum permulation: ranking %s (%d perms)", rk, n_perms_sum))
+    fcs_progress(sprintf("Path sum permulation: ranking %s (%s null, %d perms)", rk,
+                         if (!is.null(corStat_rk)) "CAAS/RER" else "private-shuffle",
+                         if (!is.null(corStat_rk)) ncol(corStat_rk) else n_perms_sum))
     perm_rk <- tryCatch(
-      fcs_run_permulation(vals_rk, gmts, num_g = num_g, max_g = max_g, n_perms = n_perms_sum),
+      fcs_run_permulation(vals_rk, gmts, num_g = num_g, max_g = max_g, n_perms = n_perms_sum,
+                          null_mat = corStat_rk),
       error = function(e) {
         fcs_progress(sprintf("  Permulation failed [%s]: %s", rk, e$message))
         tibble::tibble()
@@ -595,7 +809,8 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
   } else {
     enrich_df <- dplyr::mutate(enrich_df,
       lach_pval = NA_real_, lach_p.adj = NA_real_, lach_chi_binary = NA_real_,
-      lach_chi_nonzero = NA_real_, lach_chi_total = NA_real_, lach_frac_magnitude = NA_real_)
+      lach_chi_nonzero = NA_real_, lach_chi_total = NA_real_, lach_frac_magnitude = NA_real_,
+      lach_p.perm = NA_real_)
   }
   if (nrow(perm_df) > 0) {
     enrich_df <- dplyr::left_join(enrich_df, perm_df, by = c("ranking", "database", "pathway"))
@@ -608,14 +823,21 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
   # Per-method FDR gates (see conf/enrichment.config). Each defaults to fdr_thr.
   # sig_wilcoxon: FDR gate + optional Wilcoxon permulation gate + direction.
   #   p.perm is NA when no perms_file is supplied - gate skipped in that case.
-  # sig_lachenbruch: FDR gate only (both sub-tests are exact/analytic -> stricter).
-  # sig_permulation: FDR gate + direction; gene-label shuffle null -> stricter.
+  # sig_lachenbruch: FDR gate + optional Lachenbruch permulation gate (same
+  #   dual-gate pattern as sig_wilcoxon, same shared CAAS/RER null now that
+  #   lach_p.perm exists). lach_p.perm is NA when no perms_file is supplied
+  #   (or this ranking has no null) - gate then reduces to FDR-only, exactly
+  #   as before this null was wired in.
+  # sig_permulation: FDR gate + direction; null source is now the shared
+  #   CAAS/RER permulation null when available (private label-shuffle
+  #   fallback otherwise) - same gate, same columns, different null.
   enrich_df <- enrich_df %>%
     dplyr::mutate(
       sig_wilcoxon    = !is.na(p.adj)       & p.adj       < fdr_wilcoxon &
                         (is.na(p.perm) | p.perm < p_perm_thr) &
                         !is.na(stat)  & stat > 0,
-      sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_lachenbruch,
+      sig_lachenbruch = !is.na(lach_p.adj)  & lach_p.adj  < fdr_lachenbruch &
+                        (is.na(lach_p.perm) | lach_p.perm < p_perm_thr),
       sig_permulation = !is.na(perm_p.adj)  & perm_p.adj  < fdr_permsum &
                         !is.na(perm_nes) & perm_nes > 0,
       evidence_count  = as.integer(sig_wilcoxon) +
