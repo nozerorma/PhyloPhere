@@ -64,12 +64,23 @@
 #     are pooled by the same PSS weights. Voronoi domains
 #     are disjoint, so cross-domain independence is ~1 by construction and the
 #     pooled independence only ever mildly discounts.
-#   * `core` here treats each c_i as P(genuine change) without the per-side
-#     (top/bottom) split path_scores.py uses, because the flat TSV already
-#     averaged the two sides into `mrca_<i>_path_score`. Opposite-direction
-#     pairs in different domains can therefore be over-credited slightly; the
-#     per-hypothesis `core` column (pooled, below) is carried alongside as the
-#     conservative cross-check.
+#   * DIRECTIONAL core (FIXED 2026-09-04). `mrca_<i>_path_score` is only the
+#     per-pair TOP/BOTTOM *average* — pooling that single number per domain
+#     into one P(>=2 domains) let a domain whose pair changed on the top
+#     phenotype side and an unrelated domain whose pair changed on the bottom
+#     side count as "2 domains agreeing", when they are opposite-direction
+#     events (exactly what path_scores.py's own core_top/core_bottom split
+#     exists to rule out — see disambiguate_single.py's directional core note).
+#     The disambiguation writer now also emits `mrca_<i>_top_path_score` /
+#     `mrca_<i>_bot_path_score` (the un-averaged per-side scores); when present,
+#     `pool_group` pools each side SEPARATELY (dedup by MRCA node, same PSS
+#     weighting as above) into c_top_i / c_bot_i and combines them exactly like
+#     compute_asr_path_score: `core = 1 - (1-core_top)*(1-core_bottom)`. Older
+#     `filtered_discovery.tsv` inputs without those columns fall back to the
+#     collapsed, direction-blind pool over `mrca_<i>_path_score` (a known
+#     approximation, kept only so a stale file still scores instead of erroring).
+#     The per-hypothesis `core` column (pooled, below, as `core_perside_pooled`)
+#     is carried alongside as a cross-check either way.
 #
 # POINT 3 (harvest-wide, scheme-resolved derived-residue reconciliation, added
 # 2026-09-03). `derived_agreement` in path_scores.py is measured WITHIN one
@@ -245,6 +256,11 @@ read_hypothesis_pairs <- function(path) {
 #'   or NULL for equal-weight pooling.
 #' @param diversity_floor lower bound of the diversity multiplier (path_scores.py
 #'   default 0.75).
+#' @param top_path_cols / bot_path_cols character vectors of the
+#'   mrca_<i>_top_path_score / mrca_<i>_bot_path_score column names (same order
+#'   as path_cols), when present — the un-averaged per-side scores `core` is
+#'   actually built from (directional core_top/core_bottom). Absent ->
+#'   `core` falls back to the collapsed, direction-blind pool over path_cols.
 #' @return one-row data.frame: asr_path_score, independence, mrca_diversity,
 #'   derived_agreement, conservation_gate, core, core_perside_pooled,
 #'   n_hypotheses, plus c_1..c_K as pooled_domain_<i>.
@@ -254,6 +270,8 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
                        conserved_cons_cols = character(0),
                        top_aa_cols = character(0),
                        bot_aa_cols = character(0),
+                       top_path_cols = character(0),
+                       bot_path_cols = character(0),
                        scheme = NA_character_) {
   hyps <- unique(df$hyp_id[!is.na(df$hyp_id) & nzchar(df$hyp_id)])
 
@@ -294,19 +312,21 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   row_w <- unname(hyp_w[df$hyp_id])
 
   # ── Per-domain pool: c_i over the distinct pairs domain i contributed ──────
+  # Pools ONE score column into a single scalar for domain i, deduped by MRCA
+  # node (a physical pair), weighted by that pair's own PSS in domain i (Job
+  # A). Shared by the display column below and by the directional core split.
   K <- length(path_cols)
-  c_vec <- numeric(K)
-  for (i in seq_len(K)) {
-    s <- suppressWarnings(as.numeric(df[[path_cols[i]]]))
-    nd <- if (i <= length(node_cols) && node_cols[i] %in% names(df)) {
-      as.character(df[[node_cols[i]]])
+  .pool_domain_col <- function(col_name, node_col, i) {
+    if (is.na(col_name) || !(col_name %in% names(df))) return(NA_real_)
+    s <- suppressWarnings(as.numeric(df[[col_name]]))
+    nd <- if (!is.na(node_col) && node_col %in% names(df)) {
+      as.character(df[[node_col]])
     } else {
       as.character(df$hyp_id)  # fall back: treat every hypothesis's pair as distinct
     }
-    # Job A weight: this row's candidate pair's own PSS in domain i.
     wr_all <- vapply(as.character(df$hyp_id), function(h) pair_pss(h, i), numeric(1))
     keep <- is.finite(s)
-    if (!any(keep)) { c_vec[i] <- NA_real_; next }
+    if (!any(keep)) return(NA_real_)
     s <- s[keep]; nd <- nd[keep]; wr <- wr_all[keep]
     # Distinct candidate pairs in this domain (dedup by MRCA node); weight each
     # by that pair's own PSS in domain i (max over rows sharing the node), else equal.
@@ -314,11 +334,36 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
       group_by(nd) %>%
       summarise(s = dplyr::first(s),
                 w = suppressWarnings(max(w, na.rm = TRUE)), .groups = "drop")
-    c_vec[i] <- .wmean(dd$s, dd$w)
+    .wmean(dd$s, dd$w)
   }
 
-  # ── Recombine with path_scores.py algebra ────────────────────────────────
-  core_pooled <- .p_at_least_2(c_vec)
+  # Display / back-compat column (`pooled_domain_<i>`): pooled from the
+  # side-averaged mrca_<i>_path_score, unchanged from before this fix. NOT what
+  # `core` is computed from below when the directional columns are available.
+  c_vec <- vapply(seq_len(K), function(i) .pool_domain_col(path_cols[i], node_cols[i], i), numeric(1))
+
+  # ── DIRECTIONAL core (the actual path_scores.py algebra) ────────────────────
+  # mrca_<i>_path_score is the per-pair TOP/BOTTOM *average* — pooling it
+  # directly into one P(>=2 domains) lets a domain whose corroborating pair
+  # changed on the top phenotype side and a different domain whose pair
+  # changed on the bottom side count as "2 domains agreeing", when they are
+  # two unrelated, opposite-direction events. When the flat TSV carries
+  # mrca_<i>_top_path_score / _bot_path_score (the un-averaged per-side
+  # scores), pool each side SEPARATELY and combine exactly like
+  # compute_asr_path_score's core_top/core_bottom/core. Older inputs without
+  # those columns fall back to the collapsed, direction-blind pool (documented
+  # known approximation) so a stale filtered_discovery.tsv still scores.
+  has_side_path <- length(top_path_cols) == K && length(bot_path_cols) == K &&
+    (any(top_path_cols %in% names(df)) || any(bot_path_cols %in% names(df)))
+  if (has_side_path) {
+    c_top <- vapply(seq_len(K), function(i) .pool_domain_col(top_path_cols[i], node_cols[i], i), numeric(1))
+    c_bot <- vapply(seq_len(K), function(i) .pool_domain_col(bot_path_cols[i], node_cols[i], i), numeric(1))
+    core_top    <- .p_at_least_2(c_top)
+    core_bottom <- .p_at_least_2(c_bot)
+    core_pooled <- 1 - (1 - core_top) * (1 - core_bottom)
+  } else {
+    core_pooled <- .p_at_least_2(c_vec)
+  }
   indep_pooled <- .wmean(suppressWarnings(as.numeric(df$independence)), row_w)
   div_pooled   <- .wmean(suppressWarnings(as.numeric(df$mrca_diversity)), row_w)
   core_row_pooled <- .wmean(suppressWarnings(as.numeric(df$core)), row_w)
@@ -468,6 +513,11 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
   path_cols <- grep("^mrca_\\d+_path_score$", names(df), value = TRUE)
   path_cols <- path_cols[order(as.integer(sub("^mrca_(\\d+)_path_score$", "\\1", path_cols)))]
   node_cols <- sub("_path_score$", "_node", path_cols)
+  # Directional per-domain scores (may be absent in older filtered_discovery.tsv
+  # files — pool_group falls back to the collapsed pool when so). Same order/
+  # index as path_cols by construction (both derived from mrca_<i>_*).
+  top_path_cols <- sub("_path_score$", "_top_path_score", path_cols)
+  bot_path_cols <- sub("_path_score$", "_bot_path_score", path_cols)
 
   # Raw derived residue cells — still needed by .collect_changed_pairs (feeds
   # derived_agreement pooling and convergence_schemes).
@@ -545,6 +595,8 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
                            conserved_cons_cols = conserved_cons_cols,
                            top_aa_cols = top_aa_cols,
                            bot_aa_cols = bot_aa_cols,
+                           top_path_cols = top_path_cols,
+                           bot_path_cols = bot_path_cols,
                            scheme = as.character(g$caap_group[1]))
       for (col in names(pooled)) base[[col]] <- pooled[[col]][1]
       base

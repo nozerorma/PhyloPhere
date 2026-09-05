@@ -117,6 +117,7 @@ process SCORING_REPORT {
                     background_file      = ${bg_file_arg},
                     caas_pos_detail_dir  = ${pos_detail_arg},
                     caas_gene_cycle_scores_file = ${gcs_arg},
+                    scoring_pos_perm_p_thr = ${params.scoring_pos_perm_p_thr ?: 0.1},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
@@ -156,6 +157,7 @@ process SCORING_REPORT {
                     background_file      = ${bg_file_arg},
                     caas_pos_detail_dir  = ${pos_detail_arg},
                     caas_gene_cycle_scores_file = ${gcs_arg},
+                    scoring_pos_perm_p_thr = ${params.scoring_pos_perm_p_thr ?: 0.1},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'

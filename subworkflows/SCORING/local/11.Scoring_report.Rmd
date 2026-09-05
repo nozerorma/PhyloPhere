@@ -43,6 +43,7 @@ params:
   background_file: NULL
   caas_pos_detail_dir: NULL
   caas_gene_cycle_scores_file: NULL
+  scoring_pos_perm_p_thr: 0.1
   seed: "1998"
 ---
 
@@ -996,6 +997,48 @@ cat("#### FPR calibration\n\n")
 cat("_Neither `perm_pos_detail` nor `gene_cycle_scores.tsv` was supplied to this run",
     "(pass `--caas_pos_detail_file` / `--caas_gene_cycle_scores_file`, or rerun with",
     "`--caas_permulation_enrichment`)._\n\n")
+```
+
+```{r pos-perm-p-setup}
+# Tier 2: calibrated position-level permulation p. scoring_compute.R joins
+# perm_pos_pval.tsv's pos_perm_p onto position_scores.tsv BEFORE the per-scheme
+# collapse (mean across schemes), then BH-adjusts within the tested set -- so
+# pos_df already carries both columns whenever --caas_pos_pval was supplied to
+# SCORING_COMPUTE. Guard on column presence, same as every other optional
+# section in this report.
+has_pos_perm_p <- "pos_perm_p" %in% names(pos_df) && any(!is.na(pos_df$pos_perm_p))
+pos_perm_p_thr <- suppressWarnings(as.numeric(params$scoring_pos_perm_p_thr))
+if (!is.finite(pos_perm_p_thr) || pos_perm_p_thr <= 0 || pos_perm_p_thr > 1) pos_perm_p_thr <- 0.1
+```
+
+```{r pos-perm-p-header, eval=has_pos_perm_p, results='asis'}
+cat("#### Position-level calibrated permulation p\n\n")
+cat(sprintf(paste0(
+  "`pos_perm_p` is a genuine per-position empirical p-value (NOT leave-one-out, unlike ",
+  "`null_pvalue_boot` above): of the permuted-labeling cycles, how many independently ",
+  "reproduced this exact (Gene, Position, caap_group) as a CAAS, add-one smoothed. ",
+  "`pos_perm_p_adj` is its BH adjustment within the tested set. %d/%d scored positions ",
+  "have a value; %d (%.1f%%) are significant at `pos_perm_p_adj <= %.3g`.\n\n"),
+  sum(!is.na(pos_df$pos_perm_p)), nrow(pos_df),
+  sum(pos_df$pos_perm_p_adj <= pos_perm_p_thr, na.rm = TRUE),
+  100 * mean(pos_df$pos_perm_p_adj <= pos_perm_p_thr, na.rm = TRUE),
+  pos_perm_p_thr))
+```
+
+```{r pos-perm-p-dist, eval=has_pos_perm_p, fig.height=4.5, fig.width=9}
+ggplot(pos_df %>% filter(!is.na(pos_perm_p)), aes(x = pos_perm_p)) +
+  geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
+  geom_vline(xintercept = pos_perm_p_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
+  labs(title = "pos_perm_p distribution across scored positions",
+       subtitle = sprintf("Dashed line: pos_perm_p_adj threshold = %.3g", pos_perm_p_thr),
+       x = "pos_perm_p", y = "positions") +
+  theme_minimal(base_size = 12)
+```
+
+```{r pos-perm-p-missing, eval=!has_pos_perm_p, results='asis'}
+cat("#### Position-level calibrated permulation p\n\n")
+cat("_No `pos_perm_p` column in `position_scores.tsv` (no `--caas_pos_pval` supplied to",
+    "SCORING_COMPUTE for this run)._\n\n")
 ```
 
 ### Position Level {.tabset}

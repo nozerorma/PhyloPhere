@@ -251,6 +251,32 @@ def convert_convergence_result_to_dict(
             ):
                 result_dict[k] = v
 
+    # Directional path-score block: the per-domain, per-side score core_top /
+    # core_bottom are actually built from (path_scores.py's own
+    # top_pair_scores / bottom_pair_scores), parallel to mrca_<i>_path_score
+    # (which is only their per-pair side-average and cannot tell the FOP
+    # domain-pooler which side a domain's change was on). Without this, pooling
+    # H1..Hn treats a top-side change in one domain and a bottom-side change in
+    # another as if they corroborated each other — exactly the failure mode
+    # core_top/core_bottom exist to prevent. Emitted as mrca_<i>_top_path_score
+    # / mrca_<i>_bot_path_score; empty on the side a domain's pair did not
+    # change on.
+    top_scores = getattr(result, "pair_top_path_scores", None) or {}
+    bot_scores = getattr(result, "pair_bottom_path_scores", None) or {}
+    if top_scores or bot_scores:
+        for pid in set(top_scores) | set(bot_scores):
+            if pid in top_scores:
+                result_dict[f"mrca_{pid}_top_path_score"] = top_scores.get(pid)
+            if pid in bot_scores:
+                result_dict[f"mrca_{pid}_bot_path_score"] = bot_scores.get(pid)
+    else:
+        src = vars(result) if hasattr(result, "__dict__") else {}
+        for k, v in src.items():
+            if isinstance(k, str) and k.startswith("mrca_") and (
+                k.endswith("_top_path_score") or k.endswith("_bot_path_score")
+            ):
+                result_dict[k] = v
+
     return result_dict
 
 
@@ -1259,6 +1285,13 @@ def _perms_worker(
                         "hyp": hyp,
                         "asr_path_score": getattr(r, "asr_path_score", 0.0) or 0.0,
                         "pair_scores": getattr(r, "pair_scores", None) or {},
+                        # Directional per-domain scores core_top/core_bottom are
+                        # actually built from (path_scores.py's own
+                        # top_pair_scores/bottom_pair_scores); pair_scores above
+                        # is only their per-pair side-average and cannot rebuild
+                        # a directional core. See fop_pool.py::pool_hypotheses.
+                        "pair_top_scores": getattr(r, "pair_top_scores", None) or {},
+                        "pair_bottom_scores": getattr(r, "pair_bottom_scores", None) or {},
                         "independence": getattr(r, "independence", None),
                         "mrca_diversity": getattr(r, "mrca_diversity", None),
                         "derived_agreement": getattr(r, "derived_agreement", None),
@@ -1350,6 +1383,15 @@ def _perms_worker(
                 "n_detected": k,
                 "n_cycles": n_cycles_total,
                 "null_pvalue_boot": (k - 1) / loo_denom,
+                # Tier 2: calibrated position-level permulation p, add-one smoothed
+                # (Davison & Hinkley) so a triple detected in EVERY cycle still gets
+                # a nonzero p and one detected in NO cycle still gets < 1. Unlike
+                # null_pvalue_boot this is NOT leave-one-out -- it is a genuine
+                # per-position empirical p-value: "of the N_cycles permuted
+                # labelings, how many independently reproduced this exact
+                # (Gene, Position, caap_group) as a CAAS", read directly off the
+                # sharded perm_pos_detail/ output with no new ASR computation.
+                "pos_perm_p": (k + 1) / (n_cycles_total + 1),
             })
 
         # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
@@ -1804,6 +1846,53 @@ def _finalize_perm_scores(
     )
 
 
+def _finalize_perm_pos_pval(
+    detail_path: Path,
+    output_dir: Path,
+    cycle_tags: List[str],
+) -> Path:
+    """Rebuild perm_pos_pval.tsv from perm_pos_detail/ shards alone.
+
+    Tier 2 companion to _finalize_perm_scores: process_all_genes_perms's pass A
+    writes perm_pos_pval.tsv straight from _perms_worker's in-memory per-gene
+    result (it already replayed every cycle for that gene, so n_detected per
+    (Position, caap_group) is final the moment the worker returns). A rebuild
+    from an EXISTING run's detail shards -- e.g. reaggregate_perm_scores.py,
+    used when perm_pos_pval.tsv predates the pos_perm_p column and re-running
+    the ASR replay is not worth it -- has no such worker result, but does not
+    need one: each detail row already carries n_detected finalized by that
+    row's own worker, and it is identical across every row that shares the
+    same (Gene, Position, caap_group), so one streaming pass suffices.
+    """
+    import csv as _csv
+
+    n_cycles_total = len(cycle_tags)
+    loo_denom = max(n_cycles_total - 1, 1)
+
+    seen: Dict[Tuple[str, int, str], int] = {}
+    for row in iter_detail_rows(detail_path):
+        key = (row["Gene"], int(row["Position"]), row["caap_group"])
+        if key not in seen:
+            seen[key] = int(row["n_detected"])
+
+    pval_path = Path(output_dir) / "perm_pos_pval.tsv"
+    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles",
+                   "null_pvalue_boot", "pos_perm_p"]
+    with open(pval_path, "w", newline="") as f_pval:
+        writer = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
+        writer.writeheader()
+        for (gene, pos, grp), k in seen.items():
+            writer.writerow({
+                "Gene": gene, "Position": pos, "caap_group": grp,
+                "n_detected": k, "n_cycles": n_cycles_total,
+                "null_pvalue_boot": (k - 1) / loo_denom,
+                "pos_perm_p": (k + 1) / (n_cycles_total + 1),
+            })
+    logger.info("[perms] rebuilt %s (%d distinct (Gene, Position, caap_group) rows)",
+                pval_path.name, len(seen))
+    return pval_path
+
+
 def process_all_genes_perms(
     genes: List[str],
     alignment_dir: str,
@@ -1846,7 +1935,9 @@ def process_all_genes_perms(
 
     Outputs:
       - output_dir/gene_cycle_scores.tsv     (schema unchanged; feeds caas_perms.rds)
-      - output_dir/perm_pos_pval.tsv         (LOO null_pvalue_boot crosscheck table)
+      - output_dir/perm_pos_pval.tsv         (LOO null_pvalue_boot crosscheck table,
+                                              plus the add-one-smoothed pos_perm_p
+                                              calibrated position-level permulation p)
       - output_dir/perm_pos_detail/<Gene>.tsv.gz  (one shard per gene; re-scoring
                                               needs no ASR replay, and re-aggregation
                                               stays at one-gene peak RAM)
@@ -1908,7 +1999,7 @@ def process_all_genes_perms(
     detail_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
-    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot"]
+    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "ct", "cb", "clust"]
 
     # Gap B: CT_POSTPROC filtering of the null candidate pool. Off by default so

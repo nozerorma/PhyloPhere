@@ -54,6 +54,7 @@ rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
 caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
+caas_pos_pval_file   <- parse_arg("--caas_pos_pval")  # perm_pos_pval.tsv (position-level calibrated null p); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
 concordance_tau      <- as.numeric(parse_arg("--concordance_tau", "0.8"))  # POINT 3: da threshold for convergence_schemes
 if (!is.finite(concordance_tau) || concordance_tau <= 0 || concordance_tau > 1) concordance_tau <- 0.8
@@ -314,6 +315,47 @@ df <- df %>%
     caas_row   = phen_score * asr_score
   )
 
+# ── 2f-bis. Tier 2: position-level calibrated permulation null ──────────────
+# perm_pos_pval.tsv (CT_DISAMBIGUATION's CAAS permulation-excess null, see
+# subworkflows/CT_DISAMBIGUATION/local/src/utils/gene_wrapper.py) carries
+# pos_perm_p per (Gene, Position, caap_group) straight off the sharded
+# perm_pos_detail/ output -- no new ASR computation. Joined here, at the same
+# (Gene, Position, caap_group) granularity the observed side is still at,
+# BEFORE §2g's per-position scheme collapse, so pos_perm_p rides through that
+# same mean() aggregation as every other per-scheme axis (phen_score,
+# asr_score, ...) instead of needing its own bespoke collapse rule.
+has_caas_pos_pval <- file_exists(caas_pos_pval_file)
+if (has_caas_pos_pval) {
+  cat("Loading position-level permulation null:", caas_pos_pval_file, "\n")
+  pos_pval_df <- read_tsv(caas_pos_pval_file, show_col_types = FALSE) %>%
+    mutate(Position = as.integer(Position)) %>%
+    select(Gene, Position, caap_group, pos_perm_p)
+
+  .n_obs_pos <- n_distinct(paste(df$Gene, df$Position))
+  df <- df %>%
+    mutate(Position = as.integer(Position)) %>%
+    left_join(pos_pval_df, by = c("Gene", "Position", "caap_group"))
+  .n_matched_pos <- df %>% filter(!is.na(pos_perm_p)) %>%
+    distinct(Gene, Position) %>% nrow()
+  .match_rate <- if (.n_obs_pos > 0) .n_matched_pos / .n_obs_pos else 0
+  cat(sprintf("  pos_perm_p: matched %d/%d observed positions (%.1f%%)\n",
+              .n_matched_pos, .n_obs_pos, 100 * .match_rate))
+  if (.match_rate < 0.5) {
+    cat(sprintf(
+      paste0("  WARNING: pos_perm_p join rate %.1f%% is below 50%% -- this usually means the ",
+             "observed positions (alignment-based coordinates from filtered_discovery.tsv) and ",
+             "the null's perm_pos_pval.tsv positions (also meant to be alignment-based -- check ",
+             "disambiguation_perms_main.py against disambiguation_main.py if this fires) are on ",
+             "different coordinate systems. Treat pos_perm_p/pos_perm_p_adj as unreliable until ",
+             "resolved.\n"),
+      100 * .match_rate),
+      file = stderr())
+  }
+} else {
+  cat("  no --caas_pos_pval provided, skipping pos_perm_p\n")
+  df$pos_perm_p <- NA_real_
+}
+
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
 # Sort descending by scheme_priority (US > GS4 > GS3 > GS2 > GS1) so first()
 # deterministically picks the US scheme (falling back to GS4..GS1) for
@@ -350,6 +392,7 @@ pos_scores <- df %>%
     core               = mean(core,               na.rm = TRUE),
     core_perside_pooled = if ("core_perside_pooled" %in% names(df)) mean(core_perside_pooled, na.rm = TRUE) else NA_real_,
     phen_score         = mean(phen_score,         na.rm = TRUE),
+    pos_perm_p         = if (has_caas_pos_pval && any(!is.na(pos_perm_p))) mean(pos_perm_p, na.rm = TRUE) else NA_real_,
     recovery_boot        = first(recovery_boot),
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
@@ -378,6 +421,20 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             min(pos_scores$CAAS_score, na.rm = TRUE),
             median(pos_scores$CAAS_score, na.rm = TRUE),
             max(pos_scores$CAAS_score, na.rm = TRUE)))
+
+# ── 2h. Tier 2: BH-adjust pos_perm_p within the tested set ──────────────────
+# Mirrors the gene_caas_pperm_adj idiom (Tier 1A, section below): BH over
+# exactly the positions that got a null match, so genes/positions absent from
+# the null's own universe (NA) never enter or dilute the adjustment.
+pos_scores$pos_perm_p_adj <- NA_real_
+if (has_caas_pos_pval) {
+  .tested <- !is.na(pos_scores$pos_perm_p)
+  if (any(.tested)) {
+    pos_scores$pos_perm_p_adj[.tested] <- p.adjust(pos_scores$pos_perm_p[.tested], method = "BH")
+  }
+  cat(sprintf("  pos_perm_p_adj: %d/%d positions BH-adjusted\n",
+              sum(.tested), nrow(pos_scores)))
+}
 
 # ── 2i. FADE (gene-level - see section 4d) ──────────────────────────────────
 # FADE operates at gene level (max Bayes Factor per gene across sites).
@@ -1070,7 +1127,8 @@ pos_out <- pos_scores %>%
                   "derived_residues", "top_residue_support", "bottom_residue_support",
                   "n_conserved_pairs", "convergence_schemes")), CAAS_score,
          change_side,
-         any_of(c("caas", "change_top", "change_bottom"))) %>%
+         any_of(c("caas", "change_top", "change_bottom")),
+         any_of(c("pos_perm_p", "pos_perm_p_adj"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")

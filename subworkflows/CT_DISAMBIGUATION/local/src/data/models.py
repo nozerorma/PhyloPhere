@@ -139,6 +139,13 @@ class ConvergenceResult:
     pair_ancestral_aa: Optional[Dict[int, Any]] = None
     pair_derived_top_aa: Optional[Dict[int, str]] = None
     pair_derived_bot_aa: Optional[Dict[int, str]] = None
+    # Per-domain, per-side path score (path_scores.py's own top_pair_scores /
+    # bottom_pair_scores) — the un-collapsed inputs core_top/core_bottom are
+    # built from. pair_path_scores is their side-average and cannot rebuild the
+    # directional core; these two let the FOP domain-pooler do so (see
+    # fop_pool.R::pool_group / fop_pool.py::pool_hypotheses).
+    pair_top_path_scores: Optional[Dict[int, float]] = None
+    pair_bottom_path_scores: Optional[Dict[int, float]] = None
 
 
 @dataclass

@@ -28,8 +28,24 @@ the harvest's globally weakest domain), so the split does two jobs:
 Residual R/py difference (unchanged, documented in the memory): the null record
 carries no pair identity, so ``c_d`` here has no MRCA-node dedup — it wmean's the
 per-hypothesis domain scores directly. Same weight *scheme*, not bit-identical.
-* ``core   = P(>=2 domains carry a clean change)``  (inclusion-exclusion, the
-  same ``_p_at_least_2`` as path_scores.py, over the pooled ``c_d``);
+
+DIRECTIONAL core (fixed 2026-09-04; mirrors path_scores.py's own
+``core_top``/``core_bottom`` split and fop_pool.R::pool_group). ``pair_scores``
+is only the per-pair TOP/BOTTOM *average* — pooling it directly let a domain
+whose corroborating pair changed on the top phenotype side and a different
+domain whose pair changed on the bottom side count as ">=2 domains carrying a
+clean change", when they are two unrelated, opposite-direction events (exactly
+what ``_p_at_least_2`` requiring >=2 *same-side* observations exists to rule
+out). When hypothesis records carry ``pair_top_scores``/``pair_bottom_scores``
+(``{domain_id -> s}``, the un-averaged per-side scores), each side is pooled
+SEPARATELY over its own distinct domains and combined the way
+``compute_asr_path_score`` does:
+* ``core_top    = P(>=2 domains carry a clean TOP-side change)``
+* ``core_bottom = P(>=2 domains carry a clean BOTTOM-side change)``
+* ``core = 1 - (1 - core_top) * (1 - core_bottom)``
+Older records without the directional fields fall back to pooling the
+side-averaged ``pair_scores`` in one undifferentiated ``core`` (the prior,
+known-approximate behaviour) so a stale cache still scores instead of erroring.
 * ``independence`` / ``mrca_diversity`` / ``derived_agreement`` /
   ``conservation_gate`` are pooled across hypotheses by the same PSS weights
   (they are carried on the null's PositionAxes record for exactly this);
@@ -136,8 +152,11 @@ def pool_hypotheses(
 
     Args:
         hyp_records: list of dicts, one per hypothesis, each with keys
-            ``hyp`` (e.g. "H3"), ``asr_path_score`` (float), and
-            ``pair_scores`` ({domain_id:int -> s(p, site):float}).
+            ``hyp`` (e.g. "H3"), ``asr_path_score`` (float), ``pair_scores``
+            ({domain_id:int -> s(p, site):float}, the per-pair side-average),
+            and — when available — ``pair_top_scores`` / ``pair_bottom_scores``
+            (same shape, the un-averaged per-side scores `core` should
+            actually be built from; see the DIRECTIONAL core note above).
         pss_by_hyp_domain: {(hyp, domain) -> pss_score}; None -> equal weights.
 
     Returns:
@@ -172,21 +191,49 @@ def pool_hypotheses(
     # Job A: c_d = PSS-weighted mean of s(p, site) over the pairs domain d
     # contributed, each weighted by ITS OWN PSS in domain d (not the hypothesis
     # summary weight). No node-dedup here — the null record has no pair identity.
-    domains = sorted({d for r in hyps for d in (r.get("pair_scores") or {}).keys()})
-    c_vec: List[float] = []
-    for d in domains:
-        xs, ws = [], []
-        for r in hyps:
-            s = (r.get("pair_scores") or {}).get(d)
-            if s is None:
-                continue
-            xs.append(float(s))
-            ws.append(pss_by_hyp_domain.get((r["hyp"], d)) if pss_by_hyp_domain else None)
-        m = _wmean(xs, ws)
-        if m is not None:
-            c_vec.append(m)
+    domains = sorted({
+        d for r in hyps
+        for d in list((r.get("pair_scores") or {}).keys())
+        + list((r.get("pair_top_scores") or {}).keys())
+        + list((r.get("pair_bottom_scores") or {}).keys())
+    })
 
-    core_pooled = p_at_least_2(c_vec)
+    def _domain_pool(field: str) -> List[float]:
+        out: List[float] = []
+        for d in domains:
+            xs, ws = [], []
+            for r in hyps:
+                s = (r.get(field) or {}).get(d)
+                if s is None:
+                    continue
+                xs.append(float(s))
+                ws.append(pss_by_hyp_domain.get((r["hyp"], d)) if pss_by_hyp_domain else None)
+            m = _wmean(xs, ws)
+            if m is not None:
+                out.append(m)
+        return out
+
+    # DIRECTIONAL core (mirrors path_scores.py::compute_asr_path_score and
+    # fop_pool.R::pool_group). `pair_scores` is only the per-pair TOP/BOTTOM
+    # average — pooling it directly lets a domain that changed on top and a
+    # different domain that changed on bottom count as "2 corroborating
+    # domains" when they are two unrelated, opposite-direction events. Pool
+    # each side's per-domain scores SEPARATELY and combine the way
+    # core_top/core_bottom do, using `pair_top_scores`/`pair_bottom_scores`
+    # when the hop record carries them.
+    has_side_scores = any(
+        (r.get("pair_top_scores") or r.get("pair_bottom_scores")) for r in hyps
+    )
+    if has_side_scores:
+        core_top = p_at_least_2(_domain_pool("pair_top_scores"))
+        core_bottom = p_at_least_2(_domain_pool("pair_bottom_scores"))
+        core_pooled = 1.0 - (1.0 - core_top) * (1.0 - core_bottom)
+    else:
+        # Fallback for older null records without the directional fields:
+        # collapses both directions into one pool (the known approximation —
+        # can over-credit opposite-direction domains as if they corroborated).
+        # Kept only so stale/older cached inputs still score instead of erroring.
+        core_pooled = p_at_least_2(_domain_pool("pair_scores"))
 
     def _pool(field: str, default: float) -> float:
         v = _wmean([_num(r.get(field)) for r in hyps], row_w)

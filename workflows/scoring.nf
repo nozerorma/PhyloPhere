@@ -163,6 +163,18 @@ workflow SCORING {
                 .map { it[0] }
         }
 
+        // Position-level calibrated permulation null (perm_pos_pval.tsv, Tier 2).
+        // Resolved ONCE here — same hoist-above-SCORING_COMPUTE reasoning as
+        // caas_perms_resolved above — so SCORING_COMPUTE's pos_perm_p/pos_perm_p_adj
+        // columns and the report's permulation section read the SAME file. Fall back
+        // to --caas_pos_pval_file so a pass that did not run CAAS_PERMULATION itself
+        // (no live CT) can still reuse a prior run's position-level null, mirroring
+        // how caas_perms_file is resolved above.
+        def caas_pos_pval_resolved = (caas_pos_pval_ch ?: Channel.empty())
+            .ifEmpty { file(params.caas_pos_pval_file ?: 'NO_CAAS_POS_PVAL') }
+            .collect()
+            .map { it[0] }
+
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
             resolved_postproc,
@@ -173,7 +185,8 @@ workflow SCORING {
             resolved_rer,
             accum_all_ch,
             resolved_hyp_pairs,
-            caas_perms_resolved
+            caas_perms_resolved,
+            caas_pos_pval_resolved
         )
 
         // ── Render report ──────────────────────────────────────────────────
@@ -182,14 +195,6 @@ workflow SCORING {
             ch.ifEmpty { file(sentinel) }
         }
 
-        // Lean per-scheme null files → report permulation section.
-        // Fall back to --caas_pos_pval_file / --caas_pos_sample_file so a pass that
-        // did not run CAAS_PERMULATION itself (no live CT) can still reuse a prior
-        // run's position-level null, mirroring how caas_perms_file is resolved above.
-        def caas_pos_pval_resolved = (caas_pos_pval_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_pos_pval_file ?: 'NO_CAAS_POS_PVAL') }
-            .collect()
-            .map { it[0] }
         def caas_pos_sample_resolved = (caas_pos_sample_ch ?: Channel.empty())
             .ifEmpty { file(params.caas_pos_sample_file ?: 'NO_CAAS_POS_SAMPLE') }
             .collect()

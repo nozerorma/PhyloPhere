@@ -51,6 +51,7 @@ SPEC = ModuleTabSpec(
             choices=("spearman", "pearson"),
         ),
         FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)"),
+        FieldSpec(name="scoring_pos_perm_p_thr", label="Position-level permulation p (BH) threshold"),
     ),
 )
 

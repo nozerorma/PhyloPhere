@@ -258,6 +258,7 @@ class ScoringConfig(ModuleConfigBase):
     scoring_stress_top_n: str = "25"  # --scoring_stress_top_n
     scoring_stress_rank_metric: str = "spearman"  # --scoring_stress_rank_metric (spearman|pearson)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
+    scoring_pos_perm_p_thr: str = "0.1"  # --scoring_pos_perm_p_thr (position-level CAAS permulation p, Tier 2)
 
     # NOTE: scoring_postproc_input/scoring_accum_dir/scoring_vep_primateai/
     # scoring_background_input/caas_perms_file/scoring_fade_site_top/bottom moved

@@ -97,6 +97,53 @@ def test_fop_equal_weights_no_pss():
     assert approx(out["mrca_diversity"], 0.75)
 
 
+def test_directional_core_opposite_sides_do_not_corroborate():
+    # Twin of test_fop_pool.R's "DIRECTIONAL core fix" case. Domain 1's pair
+    # changed on the TOP side (0.85); domain 2's DIFFERENT pair changed on the
+    # BOTTOM side (0.80). Two unrelated, opposite-direction single events, not
+    # "2 domains agreeing" -> directional core must be 0, matching
+    # path_scores.py's own core_top/core_bottom split. The pre-fix collapsed
+    # `pair_scores` pool would have scored core = p_at_least_2([.85,.80]) =~ 0.68.
+    recs = [
+        {"hyp": "H1", "asr_path_score": 0.5, "independence": 1.0,
+         "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+         "core": 0.5, "pair_scores": {1: 0.85, 2: 0.80},
+         "pair_top_scores": {1: 0.85}, "pair_bottom_scores": {2: 0.80}},
+        {"hyp": "H2", "asr_path_score": 0.5, "independence": 1.0,
+         "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+         "core": 0.5, "pair_scores": {1: 0.85, 2: 0.80},
+         "pair_top_scores": {1: 0.85}, "pair_bottom_scores": {2: 0.80}},
+    ]
+    out = pool_hypotheses(recs, {})
+    assert approx(out["core"], 0.0), out["core"]
+
+    # Same records minus the directional fields -> old collapsed fallback,
+    # which does over-credit the opposite-direction pair (known approximation).
+    plain = [{k: v for k, v in r.items()
+              if k not in ("pair_top_scores", "pair_bottom_scores")} for r in recs]
+    out_fallback = pool_hypotheses(plain, {})
+    assert approx(out_fallback["core"], p_at_least_2([0.85, 0.80])), out_fallback["core"]
+    assert out_fallback["core"] - out["core"] > 0.3
+
+
+def test_directional_core_same_side_still_corroborates():
+    # Same two scores, but both on the TOP side (genuine convergence): the
+    # directional core must equal the plain p_at_least_2 of the two -- nothing
+    # is lost when domains actually agree in direction.
+    recs = [
+        {"hyp": "H1", "asr_path_score": 0.5, "independence": 1.0,
+         "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+         "core": 0.5, "pair_scores": {1: 0.85, 2: 0.80},
+         "pair_top_scores": {1: 0.85, 2: 0.80}},
+        {"hyp": "H2", "asr_path_score": 0.5, "independence": 1.0,
+         "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+         "core": 0.5, "pair_scores": {1: 0.85, 2: 0.80},
+         "pair_top_scores": {1: 0.85, 2: 0.80}},
+    ]
+    out = pool_hypotheses(recs, {})
+    assert approx(out["core"], p_at_least_2([0.85, 0.80])), out["core"]
+
+
 def test_point2_conserved_gate_dedup():
     # Same scenario as test_fop_pool.R's POINT 2 case. H1 and H2 SHARE one
     # conserved pair (same node "cn_shared", cons 0.6); H3 has a unique conserved

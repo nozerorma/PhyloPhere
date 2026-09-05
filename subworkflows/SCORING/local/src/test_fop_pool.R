@@ -104,6 +104,54 @@ check(approx(resE$pooled_domain_1, 0.55), "FOP no-PSS: c_1 equal-weight == 0.55"
 check(approx(resE$core, .p_at_least_2(c(0.55, 0.8))), "FOP no-PSS: core from equal-weight c")
 check(approx(resE$mrca_diversity, 0.75), "FOP no-PSS: diversity equal-weight == 0.75")
 
+# ── DIRECTIONAL core fix ────────────────────────────────────────────────────
+# Two hypotheses, same pair in each of 2 domains (dedup is a no-op here so the
+# fix is isolated to the direction split). Domain 1's pair changed on TOP
+# (0.85); domain 2's DIFFERENT pair changed on BOTTOM (0.80). These are two
+# unrelated, opposite-direction single events — not "2 domains agreeing" — so
+# the directional core must be 0 (each side has < 2 observations, exactly like
+# path_scores.py's own core_top/core_bottom). The pre-fix collapsed pool would
+# have scored core = p_at_least_2(.85, .80) =~ 0.68, treating them as if they
+# corroborated each other.
+fop_dir_opp <- data.frame(
+  Gene = "G", Position = 40L, caap_group = "US",
+  hyp_id = c("H1", "H2"),
+  asr_path_score = c(0.5, 0.5),
+  independence = c(1, 1), mrca_diversity = c(0, 0),
+  derived_agreement = c(1, 1), conservation_gate = c(1, 1),
+  core = c(0.5, 0.5),
+  mrca_1_path_score = c(0.85, 0.85), mrca_1_node = c("d1", "d1"),
+  mrca_1_top_path_score = c(0.85, 0.85),
+  mrca_2_path_score = c(0.80, 0.80), mrca_2_node = c("d2", "d2"),
+  mrca_2_bot_path_score = c(0.80, 0.80),
+  stringsAsFactors = FALSE
+)
+resDirOpp <- apply_fop_pooling(fop_dir_opp, NULL)
+check(approx(resDirOpp$core, 0),
+      "DIRECTIONAL: a top-only domain and a bottom-only domain do NOT corroborate -> core == 0")
+check(approx(resDirOpp$pooled_domain_1, 0.85) && approx(resDirOpp$pooled_domain_2, 0.80),
+      "DIRECTIONAL: display column pooled_domain_<i> is unaffected (still side-averaged)")
+
+# Same fixture MINUS the directional columns -> old collapsed fallback, which
+# does over-credit the opposite-direction pair (documented known approximation).
+fop_dir_opp_nocols <- fop_dir_opp[, setdiff(
+  names(fop_dir_opp), c("mrca_1_top_path_score", "mrca_2_bot_path_score")
+)]
+resDirOppFallback <- apply_fop_pooling(fop_dir_opp_nocols, NULL)
+check(approx(resDirOppFallback$core, .p_at_least_2(c(0.85, 0.80))),
+      "DIRECTIONAL fallback: no side columns -> collapsed pool (core ~= 0.68)")
+check(resDirOppFallback$core - resDirOpp$core > 0.3,
+      "DIRECTIONAL: the fix materially lowers core vs the pre-fix approximation")
+
+# Contrast: the SAME two scores, but now BOTH on the top side (genuine
+# convergence). The directional core must equal the plain p_at_least_2 of the
+# two — nothing is lost when domains actually agree in direction.
+fop_dir_same <- fop_dir_opp
+names(fop_dir_same)[names(fop_dir_same) == "mrca_2_bot_path_score"] <- "mrca_2_top_path_score"
+resDirSame <- apply_fop_pooling(fop_dir_same, NULL)
+check(approx(resDirSame$core, .p_at_least_2(c(0.85, 0.80))),
+      "DIRECTIONAL: two domains agreeing on the SAME side still corroborate normally")
+
 # ── POINT 2: conservation_gate rebuilt from deduplicated conserved pairs ────
 # Three hypotheses. H1 and H2 SHARE one conserved pair (same conserved_1_node
 # "cn_shared", cons 0.6); H3 carries a hypothesis-unique conserved pair

@@ -171,6 +171,13 @@ def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str
                 f"mrca_{idx}_posterior",
                 f"mrca_{idx}_path_score",
                 f"mrca_{idx}_contaminated",
+                # Directional path score (core_top/core_bottom's actual inputs,
+                # not their per-pair average): parallel to mrca_<i>_path_score,
+                # empty on the side this domain's pair did not change on. Lets
+                # the FOP domain-pooler rebuild core per side instead of
+                # collapsing all K domains into one direction-blind pool.
+                f"mrca_{idx}_top_path_score",
+                f"mrca_{idx}_bot_path_score",
                 # Raw derived/ancestral residues (POINT 3): parallel to
                 # mrca_<i>_node, feeds the FOP harvest-wide per-scheme
                 # derived_agreement rebuild. _top_aa / _bot_aa empty when that
