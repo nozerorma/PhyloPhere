@@ -19,6 +19,7 @@ params:
   accum_dir:      "."       # path to accumulation/ root (contains top/, bottom/, all/, aggregation/)
   traitname:      "unknown_trait"
   fdr_threshold:  0.1
+  randomization_type: "cons_decile"
   output_dir:     "."
 ---
 
@@ -196,6 +197,25 @@ if (has_global)  global_df  <- read_csv(global_path,  show_col_types = FALSE)
 ```
 
 ---
+
+```{r rand-type-caveat, results='asis'}
+rand_type <- if (!is.null(params$randomization_type)) params$randomization_type else "cons_decile"
+if (identical(rand_type, "permulation")) {
+  cat(
+    "> **Null model: permulation.** The randomised CAAS set for each gene at each ",
+    "cycle is that gene's ACTUAL detections replayed from a prior CAAS permulation ",
+    "run (the same phenotype-label permutations CAAS's own genome-wide null uses ",
+    "elsewhere), not a synthetic draw from a conservation- or position-matched pool. ",
+    "This holds the phenotype-tree confound but is **not** conservation-decile ",
+    "matched -- it answers a different question than `cons_decile`, not a stricter ",
+    "version of it. The per-gene CAAS count is free to vary per cycle (it is not ",
+    "pinned to the observed count, as an occupancy null would pin it), so this is ",
+    "an *excess* null: a gene is significant when it accumulates more CAAS across ",
+    "permuted labelings than its own null replay would predict.\n\n",
+    sep = ""
+  )
+}
+```
 
 ## Overview
 

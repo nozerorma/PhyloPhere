@@ -123,7 +123,7 @@ class DisambiguationConfig(ModuleConfigBase):
 @dataclass(kw_only=True)
 class AccumulationConfig(ModuleConfigBase):
     accumulation_n_randomizations: str = "1000000"  # --accumulation_n_randomizations
-    accumulation_randomization_type: str = "cons_decile"  # --accumulation_randomization_type (naive|cons_decile)
+    accumulation_randomization_type: str = "cons_decile"  # --accumulation_randomization_type (naive|cons_decile|permulation)
     accumulation_entropy_dir: str = ""  # --accumulation_entropy_dir
     accumulation_fdr: str = "0.1"  # --accumulation_fdr
 

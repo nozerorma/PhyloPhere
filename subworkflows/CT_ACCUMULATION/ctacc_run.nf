@@ -81,6 +81,9 @@ process CT_ACCUMULATION_RANDOMIZE {
     path caas_csv
     path background_positions   // caastools background.output (tested positions)
     path bg_caas_universe       // cleaned_background_main.txt (surviving genes)
+    path perm_pos_detail        // sharded perm_pos_detail/ dir from CAAS_PERMULATION (NO_ sentinel when absent)
+    path gene_cycle_scores      // gene_cycle_scores.tsv from the SAME run (NO_ sentinel when absent) —
+                                 // authoritative cycle count for the permulation null (see randomize.py)
 
     output:
     val  direction,                           emit: direction
@@ -94,6 +97,10 @@ process CT_ACCUMULATION_RANDOMIZE {
     // ungapped-column pool with a loud warning if the tested positions are missing.
     def bgpos_flag = (background_positions.name =~ /^NO_/) ? '' : "--background-positions '${background_positions}'"
     def bgcaas_flag = (bg_caas_universe.name =~ /^NO_/) ? '' : "--bg-caas '${bg_caas_universe}'"
+    // Only relevant when accumulation_randomization_type == permulation; harmless
+    // to omit otherwise (randomize.py ignores it for naive/cons_decile).
+    def permdetail_flag = (perm_pos_detail.name =~ /^NO_/) ? '' : "--perm-pos-detail '${perm_pos_detail}'"
+    def genecyclescores_flag = (gene_cycle_scores.name =~ /^NO_/) ? '' : "--gene-cycle-scores '${gene_cycle_scores}'"
     // 'all' direction uses --change-side both: retains all non-none positions
     def change_side_arg = (direction == 'all') ? 'both' : direction
     def rand_type    = params.accumulation_randomization_type ?: 'naive'
@@ -124,6 +131,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --n-randomizations ${n_rands} \\
             --change-side '${change_side_arg}' \\
             ${bgpos_flag} ${bgcaas_flag} \\
+            ${permdetail_flag} ${genecyclescores_flag} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """
@@ -143,6 +151,7 @@ process CT_ACCUMULATION_RANDOMIZE {
             --n-randomizations ${n_rands} \\
             --change-side '${change_side_arg}' \\
             ${bgpos_flag} ${bgcaas_flag} \\
+            ${permdetail_flag} ${genecyclescores_flag} \\
             ${workers_flag} ${seed_flag} \\
             --log-level '${log_level}'
         """

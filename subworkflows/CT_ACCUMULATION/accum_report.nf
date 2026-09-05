@@ -47,6 +47,7 @@ process ACCUMULATION_REPORT {
     def outdir    = "${params.outdir}/accumulation/aggregation"
     def traitname = params.traitname ?: 'unknown_trait'
     def fdr_thr   = params.accumulation_fdr ?: 0.1
+    def rand_type = params.accumulation_randomization_type ?: 'cons_decile'
 
     if (params.use_singularity || params.use_apptainer) {
         """
@@ -71,6 +72,7 @@ process ACCUMULATION_REPORT {
                     accum_dir      = 'accum_root',
                     traitname      = '${traitname}',
                     fdr_threshold  = ${fdr_thr},
+                    randomization_type = '${rand_type}',
                     output_dir     = '${outdir}'
                 ),
                 output_file = '10.Accumulation_report.html'
@@ -99,6 +101,7 @@ process ACCUMULATION_REPORT {
                     accum_dir      = 'accum_root',
                     traitname      = '${traitname}',
                     fdr_threshold  = ${fdr_thr},
+                    randomization_type = '${rand_type}',
                     output_dir     = '${outdir}'
                 ),
                 output_file = '10.Accumulation_report.html'

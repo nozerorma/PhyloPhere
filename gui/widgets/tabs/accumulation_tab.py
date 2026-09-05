@@ -25,7 +25,7 @@ SPEC = ModuleTabSpec(
             name="accumulation_randomization_type",
             label="Randomization type",
             kind="choice",
-            choices=("cons_decile", "naive"),
+            choices=("cons_decile", "naive", "permulation"),
         ),
         FieldSpec(name="accumulation_n_randomizations", label="Randomizations"),
         FieldSpec(name="accumulation_fdr", label="FDR threshold"),

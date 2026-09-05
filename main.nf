@@ -491,8 +491,20 @@ workflow {
                     ? Channel.fromPath(params.posenrich_background_file)
                     : Channel.empty())
 
+            // sharded perm_pos_detail dir + its companion gene_cycle_scores.tsv —
+            // only consumed when accumulation_randomization_type == 'permulation'
+            // (Tier 3E); NO_FILE sentinel otherwise, with the standalone
+            // --caas_pos_detail_file / --caas_gene_cycle_scores_file params as a
+            // fallback for reruns without a live CAAS_PERMULATION. The gene_cycle_scores
+            // file is what gives the permulation null its exact cycle count instead of
+            // inferring it from perm_pos_detail alone (see randomize.py).
+            def acc_pos_detail_ch = (scoring_caas_pos_detail_ch ?: Channel.empty())
+                .ifEmpty { file(params.caas_pos_detail_file ?: 'NO_FILE') }
+            def acc_gene_cycle_scores_ch = (scoring_caas_gene_cycle_scores_ch ?: Channel.empty())
+                .ifEmpty { file(params.caas_gene_cycle_scores_file ?: 'NO_FILE') }
+
             accum_results = CT_ACCUMULATION(acc_caas_ch, acc_background_ch, acc_trait_file_ch,
-                                            acc_tested_pos_ch)
+                                            acc_tested_pos_ch, acc_pos_detail_ch, acc_gene_cycle_scores_ch)
             ran_any = true
 
         }

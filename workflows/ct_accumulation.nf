@@ -27,6 +27,10 @@ workflow CT_ACCUMULATION {
         trait_file_channel    // traitfile from CT (pruned when contrast_selection is on; or Channel.empty())
         tested_positions_channel // caastools background.output — TESTED positions; the
                                  // randomization null's eligible pool (or Channel.empty())
+        pos_detail_channel       // sharded perm_pos_detail/ dir from CAAS_PERMULATION; the
+                                 // permulation randomization type's null (or Channel.empty())
+        gene_cycle_scores_channel // gene_cycle_scores.tsv from the SAME CAAS_PERMULATION run;
+                                 // authoritative cycle count for the permulation null (or Channel.empty())
 
     main:
         // ── Resolve CAAS source (filtered_discovery.tsv from postproc) ────────
@@ -168,18 +172,33 @@ workflow CT_ACCUMULATION {
             .collect()
             .map { it[0] }
         def bg_universe_val = background_val.ifEmpty { file('NO_BG_UNIVERSE') }
+        // Only consumed when accumulation_randomization_type == 'permulation'; the
+        // NO_ sentinel keeps every other randomization type unaffected (ctacc_run.nf
+        // turns a NO_-prefixed path into an empty CLI flag).
+        def pos_detail_val = (pos_detail_channel ?: Channel.empty())
+            .ifEmpty { file(params.caas_pos_detail_file ?: 'NO_PERM_POS_DETAIL') }
+            .collect()
+            .map { it[0] }
+        def gene_cycle_scores_val = (gene_cycle_scores_channel ?: Channel.empty())
+            .ifEmpty { file(params.caas_gene_cycle_scores_file ?: 'NO_GENE_CYCLE_SCORES') }
+            .collect()
+            .map { it[0] }
 
         def rand_in = Channel.of("top", "bottom", "all")
             .combine(aggregate_out.global_csv)
             .combine(meta_caas_val)
             .combine(tested_pos_val)
             .combine(bg_universe_val)
-            .multiMap { dir, global_csv, caas_csv, tested_pos, bg_universe ->
-                direction: dir
-                global:    global_csv
-                caas:      caas_csv
-                tested:    tested_pos
-                universe:  bg_universe
+            .combine(pos_detail_val)
+            .combine(gene_cycle_scores_val)
+            .multiMap { dir, global_csv, caas_csv, tested_pos, bg_universe, pos_detail, gene_cycle_scores ->
+                direction:         dir
+                global:            global_csv
+                caas:              caas_csv
+                tested:            tested_pos
+                universe:          bg_universe
+                pos_detail:        pos_detail
+                gene_cycle_scores: gene_cycle_scores
             }
 
         randomize_out = CT_ACCUMULATION_RANDOMIZE(
@@ -187,7 +206,9 @@ workflow CT_ACCUMULATION {
             rand_in.global,
             rand_in.caas,
             rand_in.tested,
-            rand_in.universe
+            rand_in.universe,
+            rand_in.pos_detail,
+            rand_in.gene_cycle_scores
         )
 
         // ── Accumulation report (rendered after all directions complete) ──────

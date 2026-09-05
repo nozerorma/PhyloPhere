@@ -211,7 +211,7 @@ Usage:
 --accumulation_caas_input             <"filtered_discovery.tsv">   null  (standalone entry)
 --accumulation_background_input        <"background_file">           null
 --accumulation_entropy_dir               <"entropy_dir">                null
---accumulation_randomization_type          <"naive|cons_decile">          "cons_decile"
+--accumulation_randomization_type          <"naive|cons_decile|permulation">          "cons_decile"
 --accumulation_n_randomizations              <INTEGER>                      1000000
 --accumulation_fdr                               <FLOAT 0-1>                    0.1
 '''

@@ -7,14 +7,23 @@ Exports aggregated randomization outputs for five per-group tests:
 
 Test design
 -----------
-Occupancy null. For each group, the OBSERVED number of CAAS positions is
-redrawn uniformly (without replacement) from the eligible position pool, and
-the per-gene counts are recounted. The empirical p-value per gene is
+Two randomization families, selected by --randomization-type:
+
+'naive' / 'cons_decile' — an occupancy null. For each group, the OBSERVED
+number of CAAS positions is redrawn uniformly (without replacement) from the
+eligible position pool, and the per-gene counts are recounted. Because the
+pool is position-level, gene length (strictly, each gene's number of eligible
+positions) is controlled for by construction.
+
+'permulation' — an excess null, opt-in (see run_permulation_null below). The
+randomised CAAS set for a gene at cycle i is that gene's ACTUAL detections
+replayed from a prior CAAS_PERMULATION run, not a synthetic draw from a pool;
+the per-gene count is free per cycle rather than pinned to the observed count.
+It holds the phenotype-tree confound but is NOT conservation-decile matched.
+
+In every case the empirical p-value per gene is
     p = (#{null count >= observed count} + 1) / (N + 1)
-so a gene is significant when it accumulates more CAAS than its share of the
-eligible pool would predict. Because the pool is position-level, gene length
-(strictly, each gene's number of eligible positions) is controlled for by
-construction.
+so a gene is significant when it accumulates more CAAS than its null predicts.
 
 Eligible pool
 -------------
@@ -50,10 +59,12 @@ No FDR or gene-list outputs are generated here.
 """
 
 import argparse
+import gzip
 import os
 import numpy as np
 import pandas as pd
 from collections import defaultdict
+from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -401,6 +412,201 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
     return unique_keys, caas_data
 
 
+# ---------------------------
+# Permulation null (Tier 3E)
+# ---------------------------
+#
+# Unlike 'naive'/'cons_decile', this type does not draw synthetic positions from
+# an eligible pool. The randomised CAAS set for a gene at cycle i IS that gene's
+# actually-detected positions in the CAAS permulation replay (caas_permulation.nf /
+# gene_wrapper.py's run_permulation) at cycle i, subject to the same change_side
+# filter the observed pool uses. This holds the phenotype-tree confound (the same
+# thing the permulation null holds everywhere else in the pipeline) but is NOT
+# conservation-decile matched like 'cons_decile' -- a different question, not a
+# stricter version of it. The per-gene CAAS count is free per cycle (not fixed to
+# the observed count), so this is an excess null like the rest of the permulation
+# family, not an occupancy null.
+
+_PERM_CATS = ['us', 'gs1', 'gs2', 'gs3', 'gs4']
+_PERM_GROUP_OF_CAT = {'us': 'US', 'gs1': 'GS1', 'gs2': 'GS2', 'gs3': 'GS3', 'gs4': 'GS4'}
+_PERM_CAT_OF_GROUP = {v: k for k, v in _PERM_GROUP_OF_CAT.items()}
+
+
+def _iter_perm_detail_rows(detail_path):
+    """Minimal, self-contained reader for perm_pos_detail: either a per-gene shard
+    directory (perm_pos_detail/<Gene>.tsv.gz, current) or a single concatenated
+    perm_pos_detail.tsv.gz (legacy). Mirrors CT_DISAMBIGUATION's gene_wrapper.py
+    iter_detail_rows(), duplicated here rather than imported because
+    CT_ACCUMULATION stages its own `local/` tree independently (ctacc_run.nf
+    does `cp -R local/*`, not a cross-subworkflow import)."""
+    import csv as _csv
+
+    p = Path(detail_path)
+    if p.is_dir():
+        shards = sorted(p.glob("*.tsv.gz"))
+        if not shards:
+            raise FileNotFoundError(f"[permulation] no *.tsv.gz shards under {p}")
+        for shard in shards:
+            with gzip.open(shard, "rt", newline="") as f_in:
+                yield from _csv.DictReader(f_in, delimiter="\t")
+    else:
+        with gzip.open(p, "rt", newline="") as f_in:
+            yield from _csv.DictReader(f_in, delimiter="\t")
+
+
+def _perm_row_passes_change_side(ct, cb, change_side):
+    """Same semantics as the observed-side change_side filter in main(): 'top'/
+    'bottom' each admit rows tagged with that direction OR 'both' (ct==1 alone, or
+    cb==1 alone, already covers the 'both' case since a both-direction position has
+    ct==1 AND cb==1); the default 'both' admits any row with directional signal."""
+    if change_side == 'top':
+        return ct == 1
+    if change_side == 'bottom':
+        return cb == 1
+    return ct == 1 or cb == 1
+
+
+def _read_authoritative_cycles(gene_cycle_scores_path):
+    """The exact cycle enumeration, read from gene_cycle_scores.tsv rather than
+    inferred from perm_pos_detail. gene_wrapper.py's _flush() writes one row per
+    (gene, cycle) for EVERY cycle in cycle_tags unconditionally -- "a permuted
+    labeling that produced no hit anywhere in this gene is a structural zero, not
+    missing data" -- so every gene's rows alone already enumerate every cycle.
+    Reading just the first gene's block is enough, but reading the whole file's
+    distinct `cycle` column is cheap (this file is genes x cycles rows, not the
+    full per-position detail) and does not depend on row ordering.
+    """
+    import csv as _csv
+    cycles = set()
+    with open(gene_cycle_scores_path, newline="") as f:
+        reader = _csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            cycles.add(row.get('cycle'))
+    return cycles
+
+
+def run_permulation_null(detail_path, gene_to_id, n_genes, actual_counts, change_side,
+                          gene_cycle_scores_path=None):
+    """Build the permulation null's (sum, sum_sq, count_above) accumulators by
+    streaming perm_pos_detail once. Returns a `results` list with the same shape
+    process_chunk() produces, so main()'s existing aggregation/output-writing tail
+    (which just does np.sum([r[cat][...] for r in results]) over that list) needs
+    no changes to consume it.
+
+    Per (gene, cycle) category counts are accumulated in a dict rather than a
+    dense genes x cycles x categories array: most (gene, cycle) pairs have zero
+    detections (Pass A in gene_wrapper.py only ever emits a row for an actually
+    detected position), so the dict is sized by the real detail-row volume, not
+    by the full cross product.
+
+    `gene_cycle_scores_path`, when given, provides the AUTHORITATIVE cycle count
+    (see _read_authoritative_cycles). Without it, N falls back to the union of
+    `cycle` values that happen to appear in perm_pos_detail, which silently
+    understates N by one for any cycle with zero detections genome-wide across
+    every gene and every scheme -- an edge case at production scale, but not a
+    zero-probability one, and one the pipeline's own null-generation code
+    explicitly guards against elsewhere (see the docstring above). Always pass
+    gene_cycle_scores_path when it is available.
+    """
+    per_gene_cycle_counts = {}   # gene_id -> {cycle_str: np.ndarray(len(_PERM_CATS), int64)}
+    all_cycles = set()
+    n_gene_missing = 0
+    n_group_unrecognised = 0
+
+    for row in _iter_perm_detail_rows(detail_path):
+        gid = gene_to_id.get(row.get('Gene'))
+        if gid is None:
+            n_gene_missing += 1
+            continue
+        cyc = row.get('cycle')
+        all_cycles.add(cyc)
+
+        try:
+            ct = int(row.get('ct', 0) or 0)
+            cb = int(row.get('cb', 0) or 0)
+        except (TypeError, ValueError):
+            ct, cb = 0, 0
+        if not _perm_row_passes_change_side(ct, cb, change_side):
+            continue
+
+        cat = _PERM_CAT_OF_GROUP.get((row.get('caap_group') or '').strip().upper())
+        if cat is None:
+            n_group_unrecognised += 1
+            continue
+
+        cyc_map = per_gene_cycle_counts.setdefault(gid, {})
+        vec = cyc_map.get(cyc)
+        if vec is None:
+            vec = np.zeros(len(_PERM_CATS), dtype=np.int64)
+            cyc_map[cyc] = vec
+        vec[_PERM_CATS.index(cat)] += 1
+
+    if n_gene_missing:
+        logging.warning(
+            f"[permulation] {n_gene_missing} perm_pos_detail rows referenced genes "
+            f"outside the current gene universe (dropped -- e.g. removed by post-processing "
+            f"after the null was generated).")
+    if n_group_unrecognised:
+        logging.warning(
+            f"[permulation] {n_group_unrecognised} perm_pos_detail rows had an "
+            f"unrecognised caap_group (dropped).")
+
+    if gene_cycle_scores_path:
+        authoritative_cycles = _read_authoritative_cycles(gene_cycle_scores_path)
+        n_missing_from_detail = len(authoritative_cycles - all_cycles)
+        if n_missing_from_detail:
+            logging.warning(
+                f"[permulation] {n_missing_from_detail} cycle(s) had zero detections "
+                f"genome-wide across every gene and scheme in perm_pos_detail -- caught "
+                f"exactly because gene_cycle_scores.tsv was supplied; without it these "
+                f"would have silently understated N.")
+        n_total = len(authoritative_cycles)
+    else:
+        logging.warning(
+            "[permulation] no --gene-cycle-scores supplied: N is inferred from the union "
+            "of cycles seen in perm_pos_detail, which silently understates N by one for "
+            "any cycle with zero detections genome-wide across every gene and scheme. "
+            "Pass --gene-cycle-scores (gene_cycle_scores.tsv from the same "
+            "CAAS_PERMULATION run) for an exact count.")
+        n_total = len(all_cycles)
+
+    if n_total == 0:
+        raise RuntimeError(
+            "[permulation] found zero cycles -- check --perm-pos-detail/--gene-cycle-scores")
+    logging.info(f"[permulation] {n_total} cycles; "
+                 f"{len(per_gene_cycle_counts)} genes have at least one detection")
+
+    S = {cat: [np.zeros(n_genes, dtype=np.int64),
+               np.zeros(n_genes, dtype=np.float64),
+               np.zeros(n_genes, dtype=np.int64)]
+         for cat in _PERM_CATS}
+
+    # Genes with zero detections in every cycle: the null count is 0 in every
+    # cycle, so count_above = n_total when the observed count is also <= 0
+    # (0 >= obs holds for every cycle), else 0. sum/sum_sq stay at 0.
+    for cat in _PERM_CATS:
+        obs_vec = actual_counts[cat]
+        S[cat][2][:] = np.where(obs_vec <= 0, n_total, 0)
+
+    for gid, cyc_map in per_gene_cycle_counts.items():
+        mat = np.array(list(cyc_map.values()), dtype=np.int64)  # (n_present_cycles, len(_PERM_CATS))
+        n_present = mat.shape[0]
+        n_absent = n_total - n_present
+        for cat_idx, cat in enumerate(_PERM_CATS):
+            col = mat[:, cat_idx]
+            obs = actual_counts[cat][gid]
+            S[cat][0][gid] = col.sum()
+            S[cat][1][gid] = float((col.astype(np.float64) ** 2).sum())
+            above_present = int((col >= obs).sum())
+            above_absent = n_absent if obs <= 0 else 0
+            S[cat][2][gid] = above_present + above_absent
+
+    def _pack(Sv):
+        return {'sum': Sv[0], 'sum_sq': Sv[1], 'count_above': Sv[2]}
+
+    return [{'chunk_idx': 0, 'n_rands': n_total, **{cat: _pack(S[cat]) for cat in S}}]
+
+
 def _write_empty_outputs_and_exit(args):
     """Write empty-but-valid outputs when no rows are available for randomization."""
     categories = ['us', 'gs1', 'gs2', 'gs3', 'gs4']
@@ -508,7 +714,14 @@ def main(args):
     # when only the global table is available; that path logs a warning because
     # the resulting pool is condition-1-only.
     masked = merged_df['masked'].values.astype(bool)
-    if getattr(args, 'background_positions', None):
+    if args.randomization_type == 'permulation':
+        # No eligible-pool sampling for this type — the null's positions are the
+        # ACTUAL detections replayed from perm_pos_detail (see run_permulation_null),
+        # so --background-positions/--bg-caas are accepted but unused.
+        logging.info(
+            "[permulation] randomization type reads its null from --perm-pos-detail "
+            "and does not draw from an eligible pool.")
+    elif getattr(args, 'background_positions', None):
         universe_genes = None
         if getattr(args, 'bg_caas', None) and os.path.exists(args.bg_caas):
             universe_genes = load_universe_genes(args.bg_caas)
@@ -554,40 +767,41 @@ def main(args):
             "tested/ungapped ratio rather than by its genuine opportunity to carry a CAAS. "
             "Pass caastools background.output (with --bg-caas) to define the pool properly.")
 
-    genes_int_arr = genes_int.astype(np.int32)
-    caas_bool     = np.asarray(
-        merged_df['iscaas'].replace({'TRUE': True, 'FALSE': False})
-            .astype('boolean').fillna(False),
-        dtype=bool
-    )
+    if args.randomization_type != 'permulation':
+        genes_int_arr = genes_int.astype(np.int32)
+        caas_bool     = np.asarray(
+            merged_df['iscaas'].replace({'TRUE': True, 'FALSE': False})
+                .astype('boolean').fillna(False),
+            dtype=bool
+        )
 
-    # Shared memory
-    logging.info("Creating shared memory")
-    SHM_positions = shm.SharedMemory(create=True, size=positions.nbytes)
-    np.ndarray(positions.shape,     dtype=np.int64,   buffer=SHM_positions.buf)[:] = positions
-    SHM_masked    = shm.SharedMemory(create=True, size=masked.nbytes)
-    np.ndarray(masked.shape,        dtype=bool,        buffer=SHM_masked.buf)[:] = masked
-    SHM_cons      = shm.SharedMemory(create=True, size=cons_idx_arr.nbytes)
-    np.ndarray(cons_idx_arr.shape,  dtype=np.float32, buffer=SHM_cons.buf)[:] = cons_idx_arr
-    SHM_genes     = shm.SharedMemory(create=True, size=genes_int_arr.nbytes)
-    np.ndarray(genes_int_arr.shape, dtype=np.int32,   buffer=SHM_genes.buf)[:] = genes_int_arr
-    SHM_caas      = shm.SharedMemory(create=True, size=caas_bool.nbytes)
-    np.ndarray(caas_bool.shape,     dtype=bool,        buffer=SHM_caas.buf)[:] = caas_bool
+        # Shared memory
+        logging.info("Creating shared memory")
+        SHM_positions = shm.SharedMemory(create=True, size=positions.nbytes)
+        np.ndarray(positions.shape,     dtype=np.int64,   buffer=SHM_positions.buf)[:] = positions
+        SHM_masked    = shm.SharedMemory(create=True, size=masked.nbytes)
+        np.ndarray(masked.shape,        dtype=bool,        buffer=SHM_masked.buf)[:] = masked
+        SHM_cons      = shm.SharedMemory(create=True, size=cons_idx_arr.nbytes)
+        np.ndarray(cons_idx_arr.shape,  dtype=np.float32, buffer=SHM_cons.buf)[:] = cons_idx_arr
+        SHM_genes     = shm.SharedMemory(create=True, size=genes_int_arr.nbytes)
+        np.ndarray(genes_int_arr.shape, dtype=np.int32,   buffer=SHM_genes.buf)[:] = genes_int_arr
+        SHM_caas      = shm.SharedMemory(create=True, size=caas_bool.nbytes)
+        np.ndarray(caas_bool.shape,     dtype=bool,        buffer=SHM_caas.buf)[:] = caas_bool
 
-    shm_names = {
-        'positions': SHM_positions.name, 'masked': SHM_masked.name,
-        'cons_idx':  SHM_cons.name,      'genes':  SHM_genes.name,
-        'iscaas':    SHM_caas.name,
-    }
-    shapes = {
-        'positions': positions.shape,     'masked': masked.shape,
-        'cons_idx':  cons_idx_arr.shape,  'genes':  genes_int_arr.shape,
-        'iscaas':    caas_bool.shape,
-    }
-    dtypes = {
-        'positions': np.int64, 'masked': bool,
-        'cons_idx':  np.float32, 'genes': np.int32, 'iscaas': bool,
-    }
+        shm_names = {
+            'positions': SHM_positions.name, 'masked': SHM_masked.name,
+            'cons_idx':  SHM_cons.name,      'genes':  SHM_genes.name,
+            'iscaas':    SHM_caas.name,
+        }
+        shapes = {
+            'positions': positions.shape,     'masked': masked.shape,
+            'cons_idx':  cons_idx_arr.shape,  'genes':  genes_int_arr.shape,
+            'iscaas':    caas_bool.shape,
+        }
+        dtypes = {
+            'positions': np.int64, 'masked': bool,
+            'cons_idx':  np.float32, 'genes': np.int32, 'iscaas': bool,
+        }
 
     # Base pool candidates by group + event side
     _gu = merged_df['caap_group'].fillna('').astype(str).str.strip().str.upper()
@@ -643,68 +857,77 @@ def main(args):
     ])
     actual_counts = {cat: _bc(mask) for cat, mask in actual_counts_masks.items()}
 
-    _, caas_data = _build_caas_payload(merged_df, args.randomization_type, decile_bins, pool_mask)
+    if args.randomization_type == 'permulation':
+        if not getattr(args, 'perm_pos_detail', None):
+            raise ValueError("--perm-pos-detail is required for --randomization-type permulation")
+        logging.info(f"[permulation] reading null from {args.perm_pos_detail}")
+        results = run_permulation_null(
+            args.perm_pos_detail, gene_to_id, n_genes, actual_counts, args.change_side,
+            gene_cycle_scores_path=getattr(args, 'gene_cycle_scores', None),
+        )
+    else:
+        _, caas_data = _build_caas_payload(merged_df, args.randomization_type, decile_bins, pool_mask)
 
-    def _key_of(row):
-        if args.randomization_type == 'naive':
-            return 'global'
-        if decile_bins is None:
-            raise ValueError("decile_bins is required for cons_decile randomization")
-        k = int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
-        return np.clip(k - 1, 0, len(decile_bins) - 2)
+        def _key_of(row):
+            if args.randomization_type == 'naive':
+                return 'global'
+            if decile_bins is None:
+                raise ValueError("decile_bins is required for cons_decile randomization")
+            k = int(np.digitize([row['cons_idx']], bins=decile_bins[:-1], right=False)[0])
+            return np.clip(k - 1, 0, len(decile_bins) - 2)
 
-    extra_key_sizes = {}
-    for cat, m in actual_counts_masks.items():
-        name = f'n_{cat}'
-        sub = merged_df.loc[m]
-        for _, row in sub.iterrows():
-            try:
-                k = _key_of(row)
-            except Exception:
-                continue
-            d = extra_key_sizes.setdefault(k, {})
-            d[name] = d.get(name, 0) + 1
+        extra_key_sizes = {}
+        for cat, m in actual_counts_masks.items():
+            name = f'n_{cat}'
+            sub = merged_df.loc[m]
+            for _, row in sub.iterrows():
+                try:
+                    k = _key_of(row)
+                except Exception:
+                    continue
+                d = extra_key_sizes.setdefault(k, {})
+                d[name] = d.get(name, 0) + 1
 
-    position_to_tag = dict(zip(merged_df['position'].to_numpy(),
-                               merged_df['tag'].astype(str).fillna('').to_numpy()))
+        position_to_tag = dict(zip(merged_df['position'].to_numpy(),
+                                   merged_df['tag'].astype(str).fillna('').to_numpy()))
 
-    # Parallel plan
-    total_rands = int(args.n_randomizations)
-    workers     = args.workers if args.workers else os.cpu_count() or 1
-    chunk_size  = max(1, total_rands // workers)
-    chunks      = [(chunk_size, i) for i in range(total_rands // chunk_size)]
-    if total_rands % chunk_size > 0:
-        chunks.append((total_rands % chunk_size, len(chunks)))
-    logging.info(f"Total randomizations: {total_rands} in {len(chunks)} chunks of ~{chunk_size}")
+        # Parallel plan
+        total_rands = int(args.n_randomizations)
+        workers     = args.workers if args.workers else os.cpu_count() or 1
+        chunk_size  = max(1, total_rands // workers)
+        chunks      = [(chunk_size, i) for i in range(total_rands // chunk_size)]
+        if total_rands % chunk_size > 0:
+            chunks.append((total_rands % chunk_size, len(chunks)))
+        logging.info(f"Total randomizations: {total_rands} in {len(chunks)} chunks of ~{chunk_size}")
 
-    output_dir = f"{args.output_prefix}_randomizations"
-    results = []
-    SHM_list = [SHM_positions, SHM_masked, SHM_cons, SHM_genes, SHM_caas]
+        output_dir = f"{args.output_prefix}_randomizations"
+        results = []
+        SHM_list = [SHM_positions, SHM_masked, SHM_cons, SHM_genes, SHM_caas]
 
-    try:
-        with ProcessPoolExecutor(
-            max_workers=workers,
-            initializer=init_worker,
-            initargs=(
-                args.randomization_type, decile_bins, args.export_individual_rand,
-                output_dir, args.global_seed, args.precompute_masks,
-                n_rows, n_genes, shm_names, shapes, dtypes, extra_key_sizes,
-                caas_data if args.export_individual_rand else None,
-                position_to_tag if args.export_individual_rand else None,
-                actual_counts,
-            ),
-        ) as executor:
-            futures = [executor.submit(process_wrapper, ch) for ch in chunks]
-            for fut in as_completed(futures):
-                res = fut.result()
-                results.append(res)
-                logging.info(f"Completed chunk {res['chunk_idx']}")
-    finally:
-        for seg in SHM_list:
-            try:
-                seg.close(); seg.unlink()
-            except FileNotFoundError:
-                pass
+        try:
+            with ProcessPoolExecutor(
+                max_workers=workers,
+                initializer=init_worker,
+                initargs=(
+                    args.randomization_type, decile_bins, args.export_individual_rand,
+                    output_dir, args.global_seed, args.precompute_masks,
+                    n_rows, n_genes, shm_names, shapes, dtypes, extra_key_sizes,
+                    caas_data if args.export_individual_rand else None,
+                    position_to_tag if args.export_individual_rand else None,
+                    actual_counts,
+                ),
+            ) as executor:
+                futures = [executor.submit(process_wrapper, ch) for ch in chunks]
+                for fut in as_completed(futures):
+                    res = fut.result()
+                    results.append(res)
+                    logging.info(f"Completed chunk {res['chunk_idx']}")
+        finally:
+            for seg in SHM_list:
+                try:
+                    seg.close(); seg.unlink()
+                except FileNotFoundError:
+                    pass
 
     total_n_rands = sum(r['n_rands'] for r in results)
 
@@ -769,7 +992,20 @@ if __name__ == "__main__":
                         help='cleaned_background_main.txt gene list; restricts the eligible '
                              'pool to post-processing-surviving genes.')
     parser.add_argument('--output-prefix', required=True)
-    parser.add_argument('--randomization-type', choices=['naive', 'cons_decile'], required=True)
+    parser.add_argument('--randomization-type', choices=['naive', 'cons_decile', 'permulation'], required=True)
+    parser.add_argument('--perm-pos-detail', dest='perm_pos_detail', default=None,
+                        help='perm_pos_detail/ shard dir (or legacy perm_pos_detail.tsv.gz) from '
+                             'a prior CAAS_PERMULATION run. Required iff --randomization-type '
+                             'permulation: the null-anchored accumulation type replays the SAME '
+                             'permulation cycles CAAS uses elsewhere, rather than drawing from an '
+                             'eligible pool.')
+    parser.add_argument('--gene-cycle-scores', dest='gene_cycle_scores', default=None,
+                        help='gene_cycle_scores.tsv from the SAME CAAS_PERMULATION run as '
+                             '--perm-pos-detail. Optional but strongly recommended for '
+                             '--randomization-type permulation: gives the exact cycle count '
+                             '(N) instead of inferring it from which cycles happen to appear '
+                             'in perm_pos_detail, which understates N for any cycle with zero '
+                             'detections genome-wide.')
     parser.add_argument('--n-randomizations', type=int, default=100000)
     parser.add_argument('--workers',      type=int, default=None)
     parser.add_argument('--compress',     action='store_true')
