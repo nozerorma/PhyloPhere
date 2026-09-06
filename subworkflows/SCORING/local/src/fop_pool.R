@@ -491,7 +491,10 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
 # Position-level descriptor columns produced upstream (CT_POSTPROC
 # residue_descriptors.py) and carried through here untouched.
 FOP_CARRIED_DESCRIPTORS <- c("derived_residues", "top_residue_support",
-                             "bottom_residue_support", "n_conserved_pairs")
+                             "bottom_residue_support",
+                             "top_residue_support_detail",
+                             "bottom_residue_support_detail",
+                             "n_conserved_pairs")
 
 #' Apply domain-pooling across a whole disambiguation data.frame.
 #'

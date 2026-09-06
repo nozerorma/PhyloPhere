@@ -233,7 +233,18 @@ class RandomizationWorker:
 
     def _prepare_keyed_eligibles(self):
         self.eligible_by_key = {}
-        all_eligible = self.row_indices[~self.masked]
+        # One draw slot per physical position, not one per fanned scheme row.
+        # `self.positions` is the globally-unique position id (gene_offset +
+        # msa_pos from the aggregate step), so `merged_df`'s per-scheme (and,
+        # pre-dedup, per-hypothesis) repeats of the same position share one
+        # `positions` value. Without this, a position that is a CAAS under k
+        # schemes sits in the eligible pool k times and the null preferentially
+        # re-lands on already-CAAS-dense genes.
+        _, _first_idx = np.unique(self.positions, return_index=True)
+        _distinct_pos = np.zeros(self.n_rows, dtype=bool)
+        _distinct_pos[_first_idx] = True
+        eff_mask = self.masked | ~_distinct_pos
+        all_eligible = self.row_indices[~eff_mask]
         if self.randomization_type == 'naive':
             self.eligible_by_key['global'] = all_eligible
             print(f"Total eligible positions for 'naive' randomization: {len(all_eligible)}")
@@ -245,7 +256,7 @@ class RandomizationWorker:
             dec = np.digitize(self.cons_idx, bins=self.decile_bins[:-1], right=False)
             dec = np.clip(dec - 1, 0, len(self.decile_bins) - 2)
             for d in range(len(self.decile_bins) - 1):
-                mask = (dec == d) & ~self.masked
+                mask = (dec == d) & ~eff_mask
                 self.eligible_by_key[d] = self.row_indices[mask]
             return
         raise ValueError(f"Unknown randomization_type: {self.randomization_type}")
@@ -553,6 +564,19 @@ def run_permulation_null(detail_path, gene_to_id, n_genes, actual_counts, change
 
     if gene_cycle_scores_path:
         authoritative_cycles = _read_authoritative_cycles(gene_cycle_scores_path)
+        # perm_pos_detail is keyed by BASE cycle ("b_106"); a correct
+        # gene_cycle_scores.tsv is too. A file still carrying the FOP mirror's
+        # "<base>~H<m>" replay tags (pre-fix gene_wrapper.py) would inflate N by
+        # ~n_hypotheses and make every per-gene p anti-conservative. Detect and
+        # collapse rather than trust it blindly.
+        if any("~" in c for c in authoritative_cycles if c):
+            collapsed = {c.split("~", 1)[0] for c in authoritative_cycles if c}
+            logging.warning(
+                f"[permulation] gene_cycle_scores.tsv carries {len(authoritative_cycles)} "
+                f"'<base>~H*' hypothesis-replay tags; collapsing to {len(collapsed)} base "
+                f"cycles (these are domain-pooled, not independent draws). Regenerate the "
+                f"file with the fixed gene_wrapper.py to silence this.")
+            authoritative_cycles = collapsed
         n_missing_from_detail = len(authoritative_cycles - all_cycles)
         if n_missing_from_detail:
             logging.warning(
@@ -673,6 +697,32 @@ def main(args):
     caas_df = caas_df[available]
     logging.info(f"CAAS df: {len(caas_df)} rows, columns: {available}")
 
+    # One slot per (gene, position, scheme): filtered_discovery.tsv carries one
+    # row per discovering hypothesis under the FOP mirror (`trait` = H1..Hn), so a
+    # single physical (gene, msa_pos, caap_group) CAAS appears n_hypotheses times.
+    # Left-joining that raw table fans every position out by n_hypotheses and
+    # inflates both the observed per-gene counts (bincount over rows) and the
+    # eligible draw pool. Collapse to the physical unit here; `change_side` is a
+    # per-position call, but if hypotheses disagree keep the union ("both") rather
+    # than an arbitrary first.
+    if not caas_df.empty and {'gene', 'msa_pos', 'caap_group'}.issubset(caas_df.columns):
+        n_before = len(caas_df)
+        if 'change_side' in caas_df.columns:
+            def _resolve_side(s):
+                vals = {str(v).strip().lower() for v in s if str(v).strip()}
+                vals.discard('')
+                vals.discard('none')
+                if {'top', 'bottom'}.issubset(vals) or 'both' in vals:
+                    return 'both'
+                return next(iter(vals)) if vals else 'none'
+            side = (caas_df.groupby(['gene', 'msa_pos', 'caap_group'])['change_side']
+                    .transform(_resolve_side))
+            caas_df = caas_df.assign(change_side=side)
+        caas_df = caas_df.drop_duplicates(['gene', 'msa_pos', 'caap_group'], keep='first')
+        logging.info(
+            f"CAAS df after (gene, position, scheme) dedup: {len(caas_df)} rows "
+            f"(collapsed {n_before - len(caas_df)} hypothesis-replay duplicates)")
+
     # Dedup
     if global_df.duplicated('position').any():
         logging.warning('global_df has duplicate positions; keeping first occurrence.')
@@ -736,12 +786,15 @@ def main(args):
             dtype=bool, count=len(merged_df))
         masked = masked | ~in_tested
 
-        n_elig = int((~masked).sum())
+        # Report in DISTINCT-position units (the draw pool is deduped by position
+        # in _prepare_keyed_eligibles), not fanned-row units.
+        _pos_arr = merged_df['position'].to_numpy()
+        n_elig = int(np.unique(_pos_arr[~masked]).size)
+        n_ungapped = int(np.unique(
+            _pos_arr[~merged_df['masked'].values.astype(bool)]).size)
         logging.info(
-            f"Eligible pool: {n_elig} positions "
-            f"({n_elig / max(len(merged_df), 1):.1%} of {len(merged_df)} rows; "
-            f"{int((~merged_df['masked'].values.astype(bool)).sum())} are ungapped, "
-            f"of which the tested subset is kept)")
+            f"Eligible pool: {n_elig} distinct positions "
+            f"({n_ungapped} ungapped, of which the tested subset is kept)")
 
         # Every observed CAAS must live inside the pool. A CAAS outside it is one
         # the null can never reproduce, which both understates that gene's null
@@ -964,7 +1017,10 @@ def main(args):
     # each decile, globally and per gene — lets a run be sanity-checked
     # against the replace=True fallback in process_chunk without rerunning).
     if args.randomization_type == 'cons_decile':
-        df_elig = merged_df[merged_df['masked'] == False].copy()
+        # One row per physical position (matches _prepare_keyed_eligibles):
+        # merged_df repeats each position once per scheme after the join.
+        df_elig = (merged_df[merged_df['masked'] == False]
+                   .drop_duplicates('position').copy())
         bins = decile_bins if decile_bins is not None else _compute_bins_from_series(
             merged_df.loc[pool_mask, 'cons_idx']
         )

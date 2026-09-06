@@ -30,9 +30,17 @@ Columns produced (one value per ``(Gene, Position)``, broadcast to every row):
     the derived residues on both sides. ``""`` when the position has no changed
     pair.
 ``top_residue_support`` / ``bottom_residue_support``
-    ``"L:3,S:2"`` — per residue listed on that side, the count of DISTINCT MRCA
-    nodes (pairs) supporting it, count-descending then alphabetical. ``""`` when
-    that side has no residue.
+    ``"L:3,S:2"`` — per residue listed on that side, the number of DISTINCT CAAS
+    contrast pairs (``mrca_<i>`` blocks) that carry it, count-descending then
+    alphabetical. This is the *actual* support the position has: it is bounded by
+    the CAAS's pair count and is NOT inflated by the number of discovering
+    hypotheses. ``""`` when that side has no residue.
+``top_residue_support_detail`` / ``bottom_residue_support_detail``
+    Same shape, but counting DISTINCT reconstructed ancestral nodes across every
+    discovering hypothesis rather than physical pairs. A single pair can resolve
+    to different ``mrca_<i>_node`` values under different hypotheses, so this
+    number blends pair count with reconstruction/hypothesis multiplicity — kept
+    as a secondary, finer-grained view, not an evidence count.
 ``n_conserved_pairs``
     Count of DISTINCT ``conserved_<j>_node`` values across the position's rows
     (``""`` / ``0`` when the conserved-pair block is absent).
@@ -53,11 +61,14 @@ DESCRIPTOR_COLUMNS = (
     "derived_residues",
     "top_residue_support",
     "bottom_residue_support",
+    "top_residue_support_detail",
+    "bottom_residue_support_detail",
     "n_conserved_pairs",
 )
 
 _EMPTY = {"derived_residues": "", "top_residue_support": "",
-          "bottom_residue_support": "", "n_conserved_pairs": ""}
+          "bottom_residue_support": "", "top_residue_support_detail": "",
+          "bottom_residue_support_detail": "", "n_conserved_pairs": ""}
 
 # change_side -> which side(s) show DERIVED residues (the other shows ancestral).
 _DERIVED_SIDES: Dict[str, Set[str]] = {
@@ -106,15 +117,25 @@ def _node_str(val) -> str:
 
 
 def _collect(group: pd.DataFrame, pair_idx: List[int]):
-    """Per side, ``{residue: {nodes}}`` for derived changes and for ancestral cells.
+    """Per side, ``{residue: {support units}}`` for derived changes and ancestral cells.
 
     A ``mrca_<i>_top_aa`` / ``mrca_<i>_bot_aa`` cell is a *derived* change on that
-    side; ``mrca_<i>_anc_aa`` is the ancestral residue of pair *i*. Both are keyed
-    by residue with the set of distinct ``mrca_<i>_node`` values supporting them.
+    side; ``mrca_<i>_anc_aa`` is the ancestral residue of pair *i*.
+
+    Returns two (derived, ancestral) pairs of dicts:
+      * ``*_pairs``: support unit = the CAAS contrast pair index *i* (physical
+        support — bounded by the CAAS's pair count, hypothesis-invariant).
+      * ``*_nodes``: support unit = the distinct reconstructed ``mrca_<i>_node``
+        value (finer, but blends pair count with hypothesis multiplicity because
+        one pair can reconstruct to different nodes under different hypotheses).
     """
-    # Dedup by (node, side): a physical pair has one derived residue on a side
-    # (first non-empty wins, matching fop_pool.R::.collect_changed_pairs). Same
-    # for the ancestral cell, keyed by node.
+    # (i, side) -> {derived residues seen for that pair across hypotheses};
+    # (i) -> {ancestral residues seen}. A pair keeps its full residue set so
+    # `derived_residues` stays complete under hypothesis disagreement, but each
+    # residue counts that pair only ONCE (physical support, hypothesis-invariant).
+    dp_seen: Dict[Tuple[int, str], Set[str]] = {}
+    ap_seen: Dict[int, Set[str]] = {}
+    # (node, side) -> derived residue; node -> ancestral residue.
     d_seen: Dict[Tuple[str, str], str] = {}
     a_seen: Dict[str, str] = {}
     for i in pair_idx:
@@ -128,23 +149,39 @@ def _collect(group: pd.DataFrame, pair_idx: List[int]):
             for node_val, aa_val in zip(nodes, group[acol]):
                 node = _node_str(node_val)
                 aa = _clean_aa(aa_val)
-                if node and aa:
+                if not aa:
+                    continue
+                dp_seen.setdefault((i, side), set()).add(aa)
+                if node:
                     d_seen.setdefault((node, side), aa)
         acol = f"mrca_{i}_anc_aa"
         if acol in group.columns:
             for node_val, aa_val in zip(nodes, group[acol]):
                 node = _node_str(node_val)
                 aa = _clean_aa(aa_val)
-                if node and aa:
+                if not aa:
+                    continue
+                ap_seen.setdefault(i, set()).add(aa)
+                if node:
                     a_seen.setdefault(node, aa)
 
-    derived: Dict[str, Dict[str, Set[str]]] = {"top": {}, "bot": {}}
+    derived_pairs: Dict[str, Dict[str, Set[int]]] = {"top": {}, "bot": {}}
+    for (i, side), aas in dp_seen.items():
+        for aa in aas:
+            derived_pairs[side].setdefault(aa, set()).add(i)
+    ancestral_pairs: Dict[str, Set[int]] = {}
+    for i, aas in ap_seen.items():
+        for aa in aas:
+            ancestral_pairs.setdefault(aa, set()).add(i)
+
+    derived_nodes: Dict[str, Dict[str, Set[str]]] = {"top": {}, "bot": {}}
     for (node, side), aa in d_seen.items():
-        derived[side].setdefault(aa, set()).add(node)
-    ancestral: Dict[str, Set[str]] = {}
+        derived_nodes[side].setdefault(aa, set()).add(node)
+    ancestral_nodes: Dict[str, Set[str]] = {}
     for node, aa in a_seen.items():
-        ancestral.setdefault(aa, set()).add(node)
-    return derived, ancestral
+        ancestral_nodes.setdefault(aa, set()).add(node)
+
+    return derived_pairs, ancestral_pairs, derived_nodes, ancestral_nodes
 
 
 def _fmt_support(res_nodes: Dict[str, Set[str]]) -> str:
@@ -172,10 +209,10 @@ def _n_conserved(group: pd.DataFrame, cons_idx: List[int]) -> str:
 
 def _descriptors_for_group(group: pd.DataFrame, pair_idx: List[int],
                            cons_idx: List[int]) -> Dict[str, str]:
-    derived, ancestral = _collect(group, pair_idx)
+    derived_p, ancestral_p, derived_n, ancestral_n = _collect(group, pair_idx)
     n_cons = _n_conserved(group, cons_idx)
 
-    changed = bool(derived["top"]) or bool(derived["bot"])
+    changed = bool(derived_p["top"]) or bool(derived_p["bot"])
     if not changed:
         out = dict(_EMPTY)
         out["n_conserved_pairs"] = n_cons
@@ -191,32 +228,34 @@ def _descriptors_for_group(group: pd.DataFrame, pair_idx: List[int],
         der_sides = _DERIVED_SIDES[cside]
     else:
         # No usable change_side -> infer from which sides actually substituted.
-        der_sides = {s for s in ("top", "bot") if derived[s]}
+        der_sides = {s for s in ("top", "bot") if derived_p[s]}
 
-    # Ancestral residues: only those attached to a node that actually carried a
-    # change (keeps the descriptor tied to the CAAS pairs, not the whole column).
-    changed_nodes: Set[str] = set()
-    for side in ("top", "bot"):
-        for nodes in derived[side].values():
-            changed_nodes |= nodes
-    anc_at_change = {
-        aa: (nodes & changed_nodes) for aa, nodes in ancestral.items()
-    }
-    anc_at_change = {aa: nodes for aa, nodes in anc_at_change.items() if nodes}
+    def _side_fields(derived, ancestral):
+        # Ancestral residues restricted to the support units that actually
+        # carried a change (keeps the descriptor tied to the CAAS pairs).
+        changed_units: Set = set()
+        for side in ("top", "bot"):
+            for units in derived[side].values():
+                changed_units |= units
+        anc_at_change = {aa: (units & changed_units) for aa, units in ancestral.items()}
+        anc_at_change = {aa: units for aa, units in anc_at_change.items() if units}
 
-    def side_map(side: str) -> Dict[str, Set[str]]:
-        # Sanctioned side -> its derived residues; the other side -> ancestral.
-        return derived[side] if side in der_sides else anc_at_change
+        def side_map(side):
+            return derived[side] if side in der_sides else anc_at_change
 
-    top_map = side_map("top")
-    bot_map = side_map("bot")
+        return side_map("top"), side_map("bot")
 
-    top_field = "".join(sorted(top_map)) or "?"
-    bot_field = "".join(sorted(bot_map)) or "?"
+    top_p, bot_p = _side_fields(derived_p, ancestral_p)
+    top_n, bot_n = _side_fields(derived_n, ancestral_n)
+
+    top_field = "".join(sorted(top_p)) or "?"
+    bot_field = "".join(sorted(bot_p)) or "?"
     return {
         "derived_residues": f"{top_field}/{bot_field}",
-        "top_residue_support": _fmt_support(top_map),
-        "bottom_residue_support": _fmt_support(bot_map),
+        "top_residue_support": _fmt_support(top_p),
+        "bottom_residue_support": _fmt_support(bot_p),
+        "top_residue_support_detail": _fmt_support(top_n),
+        "bottom_residue_support_detail": _fmt_support(bot_n),
         "n_conserved_pairs": n_cons,
     }
 

@@ -36,8 +36,12 @@ def test_point3_top_is_ancestral_bottom_is_derived():
     out = add_residue_descriptors(_mk_p3())
     row = out.iloc[0]
     assert row["derived_residues"] == "A/IV"          # top=anc A, bottom=derived IV
-    assert row["top_residue_support"] == "A:4"
-    assert row["bottom_residue_support"] == "I:2,V:2"
+    # actual support = distinct CAAS pairs (2 pairs; pair1->I, pair2->V, both anc A)
+    assert row["top_residue_support"] == "A:2"
+    assert row["bottom_residue_support"] == "I:1,V:1"
+    # _detail = distinct reconstructed nodes (pair1 nodes {p1,p3}, pair2 {p2,p4})
+    assert row["top_residue_support_detail"] == "A:4"
+    assert row["bottom_residue_support_detail"] == "I:2,V:2"
     assert row["n_conserved_pairs"] == ""             # no conserved block
     assert (out["derived_residues"] == "A/IV").all()  # broadcast
 
@@ -58,8 +62,10 @@ def test_change_side_top_puts_derived_left_ancestral_right():
     )
     out = add_residue_descriptors(df)
     assert out.iloc[0]["derived_residues"] == "T/P"       # top derived T, bottom anc P
-    assert out.iloc[0]["top_residue_support"] == "T:3"
-    assert out.iloc[0]["bottom_residue_support"] == "P:3"
+    assert out.iloc[0]["top_residue_support"] == "T:1"    # 1 physical pair
+    assert out.iloc[0]["bottom_residue_support"] == "P:1"
+    assert out.iloc[0]["top_residue_support_detail"] == "T:3"     # 3 hypothesis reconstructions
+    assert out.iloc[0]["bottom_residue_support_detail"] == "P:3"
 
 
 def test_change_side_bottom_puts_derived_right():
@@ -78,6 +84,8 @@ def test_change_side_bottom_puts_derived_right():
     assert out.iloc[0]["derived_residues"] == "A/C"       # top anc A, bottom derived C
     assert out.iloc[0]["top_residue_support"] == "A:1"
     assert out.iloc[0]["bottom_residue_support"] == "C:1"
+    assert out.iloc[0]["top_residue_support_detail"] == "A:1"
+    assert out.iloc[0]["bottom_residue_support_detail"] == "C:1"
 
 
 def test_change_side_both_shows_derived_on_both():
@@ -94,8 +102,10 @@ def test_change_side_both_shows_derived_on_both():
     )
     out = add_residue_descriptors(df)
     assert out.iloc[0]["derived_residues"] == "L/F"
-    assert out.iloc[0]["top_residue_support"] == "L:2"
-    assert out.iloc[0]["bottom_residue_support"] == "F:2"
+    assert out.iloc[0]["top_residue_support"] == "L:1"           # 1 physical pair
+    assert out.iloc[0]["bottom_residue_support"] == "F:1"
+    assert out.iloc[0]["top_residue_support_detail"] == "L:2"    # nodes a, b
+    assert out.iloc[0]["bottom_residue_support_detail"] == "F:2"
 
 
 def test_multi_residue_side_sorted():
@@ -112,7 +122,9 @@ def test_multi_residue_side_sorted():
     )
     out = add_residue_descriptors(df)
     assert out.iloc[0]["derived_residues"] == "MS/I"
+    # one pair, but hypotheses disagree S vs M -> the pair counts once for each
     assert out.iloc[0]["top_residue_support"] == "M:1,S:1"
+    assert out.iloc[0]["top_residue_support_detail"] == "M:1,S:1"
 
 
 def test_n_conserved_pairs_counts_distinct_nodes():
@@ -165,7 +177,8 @@ def test_no_raw_block_stable_schema():
         assert out.iloc[0][c] == ""
 
 
-def test_distinct_node_counting_dedups_repeats():
+def test_pair_vs_node_support_diverge():
+    # One physical pair whose 3 hypothesis rows resolve to 2 distinct nodes.
     df = pd.DataFrame(
         {
             "Gene": ["G", "G", "G"],
@@ -178,5 +191,6 @@ def test_distinct_node_counting_dedups_repeats():
         }
     )
     out = add_residue_descriptors(df)
-    assert out.iloc[0]["bottom_residue_support"] == "L:2"  # nodes a, b
+    assert out.iloc[0]["bottom_residue_support"] == "L:1"          # 1 physical pair
+    assert out.iloc[0]["bottom_residue_support_detail"] == "L:2"   # nodes a, b
     assert out.iloc[0]["derived_residues"] == "A/L"

@@ -405,7 +405,12 @@ evidence_colours <- c(
 )
 for (rk in ranking_names) {
   cat(sprintf("\n## %s\n\n", rk))
+  # Raw permulation p-values against the shared CAAS/RER null (empirical, floor
+  # 1/(N+1)). All three are shown so the reader sees the null-model verdict of
+  # each test directly, not only the pass/fail X and the BH-adjusted value.
   has_w_perm <- any(!is.na(enrich$p.perm))
+  has_l_perm <- "lach_p.perm" %in% names(enrich) && any(!is.na(enrich$lach_p.perm))
+  has_p_perm <- "perm_pval"   %in% names(enrich) && any(!is.na(enrich$perm_pval))
   ev <- enrich %>%
     dplyr::filter(ranking == rk, evidence_count >= 1L) %>%
     dplyr::arrange(evidence_rank, dplyr::desc(evidence_score), description) %>%
@@ -415,8 +420,10 @@ for (rk in ranking_names) {
       W.adj        = signif(p.adj, 3),
       W.perm       = if (has_w_perm) signif(p.perm, 3) else NA_real_,
       L.adj        = signif(lach_p.adj, 3),
+      L.perm       = if (has_l_perm) signif(lach_p.perm, 3) else NA_real_,
       L.frac_mag   = round(lach_frac_magnitude, 2),
       P.adj        = signif(perm_p.adj, 3),
+      P.perm       = if (has_p_perm) signif(perm_pval, 3) else NA_real_,
       NES          = round(perm_nes, 2),
       Wilcoxon     = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
       Lachenbruch  = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", ""),
@@ -424,7 +431,9 @@ for (rk in ranking_names) {
     ) %>%
     dplyr::select(evidence_label, pathway, Description, num.genes,
                   Wilcoxon, Lachenbruch, Permulation,
-                  W.AUC, W.adj, any_of("W.perm"), L.adj, L.frac_mag, P.adj, NES)
+                  W.AUC, W.adj, any_of("W.perm"),
+                  L.adj, any_of("L.perm"), L.frac_mag,
+                  P.adj, any_of("P.perm"), NES)
   if (nrow(ev) == 0) { cat("_No terms passed any significance gate._\n"); next }
   # Colour the evidence_label column via kableExtra cell_spec
   ev$evidence_label <- kableExtra::cell_spec(
@@ -471,6 +480,8 @@ for (rk in ranking_names) {
     has_lach <- any(!is.na(dbres$lach_p.adj))
     has_perm_rk <- any(!is.na(dbres$perm_p.adj))
     has_w_perm_db <- any(!is.na(dbres$p.perm))
+    has_l_perm_db <- "lach_p.perm" %in% names(dbres) && any(!is.na(dbres$lach_p.perm))
+    has_p_perm_db <- "perm_pval"   %in% names(dbres) && any(!is.na(dbres$perm_pval))
 
     disp <- dbres %>%
       mutate(evidence = evidence_label,
@@ -478,14 +489,16 @@ for (rk in ranking_names) {
              W.adj = signif(p.adj, 3),
              W.perm = if (has_w_perm_db) signif(p.perm, 3) else NA_real_,
              L.adj = if (has_lach) signif(lach_p.adj, 3) else NA_real_,
+             L.perm = if (has_l_perm_db) signif(lach_p.perm, 3) else NA_real_,
              L.frac_mag = if (has_lach) round(lach_frac_magnitude, 2) else NA_real_,
              P.adj = if (has_perm_rk) signif(perm_p.adj, 3) else NA_real_,
+             P.perm = if (has_p_perm_db) signif(perm_pval, 3) else NA_real_,
              NES   = if (has_perm_rk) round(perm_nes, 2) else NA_real_,
              Wilcoxon    = ifelse(dplyr::coalesce(sig_wilcoxon, FALSE), "X", ""),
              Lachenbruch = ifelse(dplyr::coalesce(sig_lachenbruch, FALSE), "X", ""),
              Permulation = ifelse(dplyr::coalesce(sig_permulation, FALSE), "X", "")) %>%
       select(evidence, pathway, Description, num.genes, Wilcoxon, Lachenbruch, Permulation,
-             W.AUC, W.adj, any_of(c("W.perm", "L.adj", "L.frac_mag", "P.adj", "NES")))
+             W.AUC, W.adj, any_of(c("W.perm", "L.adj", "L.perm", "L.frac_mag", "P.adj", "P.perm", "NES")))
 
     cat(sprintf("\n### %s\n\n", db))
     cat(sprintf("_%d shown - hard: %d | supported: %d | exploratory: %d._\n\n",

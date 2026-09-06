@@ -2110,10 +2110,27 @@ def process_all_genes_perms(
                     "(mode=%s) — mirrors CAAS_FILTER_GENES on the null pool",
                     len(removed), gene_filter_mode)
 
+    # _finalize_perm_scores aggregates the base-cycle-keyed detail shards. Under
+    # the FOP mirror, build_cycle_inputs' `cycle_tags` are the "<base>~H<m>"
+    # hypothesis-replay tags, but _perms_worker domain-pools those down to ONE
+    # record per base cycle before it writes any detail row (see the "FOP
+    # domain-pooling" block above; it also does `cycle_tags = {_bc(c) ...}`
+    # locally). Pass the base-collapsed list here too, or _flush's
+    # `for cyc in cycle_tags` loop never matches the detail's `cycle` column and
+    # every gene x cycle row is written as a false structural zero -> an all-zero
+    # gene_cycle_scores.tsv / caas_perms.rds and a degenerate FCS p.perm.
+    finalize_cycle_tags = cycle_tags
+    if fop_pairs is not None:
+        from src.convergence.fop_pool import base_cycle as _bc
+        finalize_cycle_tags = sorted({_bc(c) for c in cycle_tags})
+        logger.info("[perms] FOP mirror: collapsed %d '<base>~H*' replay tags to "
+                    "%d base cycles for gene x cycle aggregation",
+                    len(cycle_tags), len(finalize_cycle_tags))
+
     _finalize_perm_scores(
         detail_path=detail_dir,
         output_dir=output_dir,
-        cycle_tags=cycle_tags,
+        cycle_tags=finalize_cycle_tags,
         rank_lookup=rank_lookup,
         removed=removed,
     )
