@@ -58,8 +58,9 @@ process SUBSET_RESAMPLE_PERMS {
         awk -F'\\t' 'NF>=3 && \$1!="b_0"' "\$FOP_TAB" > candidates.tab
         awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u > base_all.txt
         awk -v seed=${seed} 'BEGIN{srand(seed)} {print rand()"\\t"\$0}' base_all.txt \\
-            | sort -k1,1g \\
-            | awk -v n=${n_perms} '{sub(/^[^\\t]*\\t/,""); print; if(++c>=n) exit}' > keep_base.txt
+            | sort -k1,1g > base_shuffled.tab
+        awk -v n=${n_perms} '{sub(/^[^\\t]*\\t/,""); print; if(++c>=n) exit}' \\
+            base_shuffled.tab > keep_base.txt
         awk -F'\\t' 'NR==FNR{k[\$1]=1; next} {b=\$1; sub(/~.*/,"",b); if(b in k) print}' \\
             keep_base.txt candidates.tab > resample_perms.tab
         if [ -n "\$FOP_PAIRS" ]; then
