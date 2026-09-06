@@ -47,3 +47,16 @@ SBATCH_*.sh
 run_phenotype_*.sh
 !example_*.sh
 
+# HPC checkout-root run scaffolding & logs (the cluster clone accumulates these
+# in its working root; none belong in version control -- see project_cluster_git_reconcile)
+/Slurm/
+/single/
+/SBATCH-scripts/
+/SBATCH_runner/
+/gui_*_tests/
+/run_*.sh
+!/run_gui.sh
+*.log
+/res/*.tsv
+/res/*.tsv.gz
+

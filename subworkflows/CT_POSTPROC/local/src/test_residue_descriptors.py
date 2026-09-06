@@ -10,7 +10,12 @@ Run: ``python3 -m pytest subworkflows/CT_POSTPROC/local/src/test_residue_descrip
 
 import pandas as pd
 
-from residue_descriptors import DESCRIPTOR_COLUMNS, add_residue_descriptors
+from residue_descriptors import (
+    DESCRIPTOR_COLUMNS,
+    SPECIES_TALLY_COLUMNS,
+    add_residue_descriptors,
+    add_species_tally,
+)
 
 
 def _mk_p3() -> pd.DataFrame:
@@ -194,3 +199,50 @@ def test_pair_vs_node_support_diverge():
     assert out.iloc[0]["bottom_residue_support"] == "L:1"          # 1 physical pair
     assert out.iloc[0]["bottom_residue_support_detail"] == "L:2"   # nodes a, b
     assert out.iloc[0]["derived_residues"] == "A/L"
+
+
+# ── add_species_tally ───────────────────────────────────────────────────────
+
+def _write_fasta(path, records):
+    with open(path, "w") as fh:
+        for name, seq in records.items():
+            fh.write(f">{name}\n{seq}\n")
+
+
+def test_species_tally_counts_contrast_species(tmp_path):
+    aln_dir = tmp_path / "alignments"
+    aln_dir.mkdir()
+    # column index 2 (0-based, = Position value): fg mostly N, bg all A
+    _write_fasta(aln_dir / "GENE.filtered.fa", {
+        "sp_fg1": "AANXX", "sp_fg2": "AANXX", "sp_fg3": "AAAXX",  # 2 N, 1 A
+        "sp_bg1": "AAAXX", "sp_bg2": "AAAXX",                     # 2 A
+        "sp_bg3": "AA-XX",                                        # gap -> not counted
+        "outgroup": "AAKXX",                                     # not in either list
+    })
+    df = pd.DataFrame({"Gene": ["GENE", "GENE"], "Position": [2, 2]})
+    out = add_species_tally(
+        df, str(aln_dir),
+        ["sp_fg1", "sp_fg2", "sp_fg3"],
+        ["sp_bg1", "sp_bg2", "sp_bg3"],
+    )
+    assert out.iloc[0]["top_species_residues"] == "N:2,A:1"
+    assert out.iloc[0]["bottom_species_residues"] == "A:2"
+    assert out.iloc[0]["n_top_species"] == "3"
+    assert out.iloc[0]["n_bottom_species"] == "2"          # bg3 is a gap
+    assert (out["top_species_residues"] == "N:2,A:1").all()  # broadcast
+
+
+def test_species_tally_noop_without_alignment(tmp_path):
+    df = pd.DataFrame({"Gene": ["G"], "Position": [1]})
+    out = add_species_tally(df, None, ["a"], ["b"])
+    for c in SPECIES_TALLY_COLUMNS:
+        assert c in out.columns and out.iloc[0][c] == ""
+
+
+def test_species_tally_out_of_range_position(tmp_path):
+    aln_dir = tmp_path / "alignments"
+    aln_dir.mkdir()
+    _write_fasta(aln_dir / "G.fa", {"a": "MMM", "b": "MMM"})
+    df = pd.DataFrame({"Gene": ["G"], "Position": [99]})
+    out = add_species_tally(df, str(aln_dir), ["a"], ["b"])
+    assert out.iloc[0]["top_species_residues"] == ""

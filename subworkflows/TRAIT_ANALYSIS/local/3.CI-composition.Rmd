@@ -345,7 +345,9 @@ create_pairwise_data <- function(ci_data) {
   #              the survivors (see 4.Independent_contrasts.Rmd).
   #   ordinal -> one species top coded level, the other bottom. Gate as above.
   #   continuous -> no separate significance test exists, so the top `pss_top_pct`
-  #                 of hi>lo pairs by PSS is the gate.
+  #                 of hi>lo pairs by PSS is the gate. Set pss_top_pct outside
+  #                 (0,1) (e.g. 1) to DISABLE the gate: keep every hi>lo pair and
+  #                 let PSS rank only, exactly like the ordinal/count paths.
   # If the PSS fit failed for a continuous trait, fall back to keeping every
   # hi>lo pair (patristic-distance ranking then takes over).
   pairwise <- pairwise %>%
@@ -366,10 +368,11 @@ create_pairwise_data <- function(ci_data) {
                    !is.na(pairwise$trait_diff))
   pairwise$trait_overlap <- TRUE
   if (length(.stage1) > 0) {
+    .pct  <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.05
     .continuous_pss_gate <- !use_count_data && !isTRUE(is_ordinal) &&
-      isTRUE(have_pss) && any(is.finite(pairwise$pss_score[.stage1]))
+      isTRUE(have_pss) && any(is.finite(pairwise$pss_score[.stage1])) &&
+      is.finite(.pct) && .pct > 0 && .pct < 1
     if (.continuous_pss_gate) {
-      .pct  <- if (exists("pss_top_pct", inherits = TRUE)) as.numeric(pss_top_pct) else 0.05
       .keep <- min(max(1L, ceiling(length(.stage1) * .pct)), length(.stage1))
       .ord  <- .stage1[order(pairwise$pss_score[.stage1], decreasing = TRUE)]
       pairwise$trait_overlap[.ord[seq_len(.keep)]] <- FALSE

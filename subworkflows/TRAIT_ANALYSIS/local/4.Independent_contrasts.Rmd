@@ -88,7 +88,7 @@ params:
 # Independent Contrast Selection for Neoplasia Analysis in Primates
 This document outlines the process of selecting phylogenetically independent species pairs for trait analysis using CAASTools-paired.
 
-The eligible candidate pairs and their **Phylogenetic Shift Score (PSS)** are produced upstream in `3.CI-composition.Rmd`: each pair carries a `pss_score` computed under the AIC-selected OU/BM model (Fabio Barteri's phyloq engine, vendored in `src/pss_core.R`), and for continuous traits only the top `pss_top_pct` slice of hi>lo pairs is kept. This report consumes that `pairwise_data.csv` and uses the PSS as the **primary ranking key** for the greedy Dunn selection below; patristic distance is only the fallback when no finite PSS is available (e.g. the model fit failed upstream).
+The eligible candidate pairs and their **Phylogenetic Shift Score (PSS)** are produced upstream in `3.CI-composition.Rmd`: each pair carries a `pss_score` computed under the AIC-selected OU/BM model (Fabio Barteri's phyloq engine, vendored in `src/pss_core.R`); for continuous traits only the top `pss_top_pct` slice of hi>lo pairs is kept unless `pss_top_pct` is set outside `(0,1)`, which disables the slice and keeps every hi>lo pair (PSS then ranks only). This report consumes that `pairwise_data.csv` and uses the PSS as the **primary ranking key** for the greedy Dunn selection below; patristic distance is only the fallback when no finite PSS is available (e.g. the model fit failed upstream).
 
 
 ## Setup and Directory Configuration

@@ -15,6 +15,13 @@ import sys
 from pathlib import Path
 import pandas as pd
 
+# The CAAS table carries categorical amino-acid columns (caas, amino_encoded,
+# derived_residues) whose values can legitimately equal NA-sentinel strings --
+# "N/A" is Asn on the changed side against Ala -- and pandas' default NA parsing
+# would silently blank them (this is exactly how derived_residues was being lost).
+# Only a truly empty cell is missing data in these files.
+_CAAS_READ_KW = dict(keep_default_na=False, na_values=["", "nan", "NaN"])
+
 
 def detect_extreme_genes(discovery_df, gene_length_df, percentile=0.99, trait_col="trait"):
     """
@@ -186,7 +193,7 @@ def detect_dubious_genes(discovery_df, gene_length_df, cluster_file, iqr_multipl
         empty_cols = groupby_cols + ['Gene', 'n_CAAS', 'length', 'n_CAAS_per_length', 'category']
         return pd.DataFrame(columns=empty_cols)
     
-    cluster_df = pd.read_csv(cluster_file, sep='\t')
+    cluster_df = pd.read_csv(cluster_file, sep='\t', **_CAAS_READ_KW)
     
     # Check required columns
     required_cols = ['Gene', 'Position', 'clustering_flag']
@@ -446,7 +453,7 @@ Examples:
     
     # Load data
     print(f"Loading disambiguation data: {args.disambiguation_input}", file=sys.stderr)
-    discovery_df = pd.read_csv(args.disambiguation_input, sep='\t')
+    discovery_df = pd.read_csv(args.disambiguation_input, sep='\t', **_CAAS_READ_KW)
     # CAAP-awareness keys on the canonical lowercase 'caap_group' column emitted
     # by the disambiguation/postproc input (see has_caap_group checks below).
 

@@ -269,5 +269,37 @@ resP3t <- apply_fop_pooling(mk_p3("US"), NULL, tau = 0.4)
 check(identical(resP3t$convergence_schemes, "US,GS1,GS2,GS3,GS4"),
       "POINT3: tau=0.4 admits all five schemes")
 
+# ── convergence_schemes: identity vs chemical vs no-statement ───────────────
+# Single exact derived residue across 2 pairs -> "US" ONLY (not all five). The
+# GS entries would be tautological: a single residue is 100%-concentrated under
+# any partition.
+mk_single <- function() data.frame(
+  Gene = "G", Position = 5L, caap_group = "US",
+  hyp_id = c("H1", "H2", "H3"),
+  asr_path_score = c(0.5, 0.5, 0.5), independence = 1, mrca_diversity = 0,
+  derived_agreement = 1, conservation_gate = 1, core = 0.5,
+  mrca_1_path_score = c(0.7, 0.7, 0.7), mrca_1_node = c("p1", "p3", "p1"),
+  mrca_2_path_score = c(0.6, 0.6, 0.6), mrca_2_node = c("p2", "p4", "p2"),
+  mrca_1_anc_aa = "L", mrca_2_anc_aa = "L",
+  mrca_1_top_aa = c("I", "I", "I"), mrca_2_top_aa = c("I", "I", "I"),
+  mrca_1_bot_aa = "", mrca_2_bot_aa = "",
+  stringsAsFactors = FALSE
+)
+check(identical(apply_fop_pooling(mk_single(), NULL)$convergence_schemes, "US"),
+      "POINT3: single exact derived residue over 2 pairs -> 'US' only")
+
+# Fewer than 2 changed pairs on any side -> "" (no convergence statement).
+mk_onepair <- mk_single()
+mk_onepair$mrca_2_top_aa <- ""   # kill the second changed pair
+check(identical(apply_fop_pooling(mk_onepair, NULL)$convergence_schemes, ""),
+      "POINT3: <2 changed pairs -> convergence_schemes empty")
+
+# Pair-index (not node) dedup: pair 1 is I under H1/H3 but a stray V under H2 ->
+# modal I wins, so it still reads as identity convergence with pair 2 (also I).
+mk_hypdisagree <- mk_single()
+mk_hypdisagree$mrca_1_top_aa <- c("I", "V", "I")
+check(identical(apply_fop_pooling(mk_hypdisagree, NULL)$convergence_schemes, "US"),
+      "POINT3: pair-modal residue survives one disagreeing hypothesis")
+
 cat("\n", if (ok) "ALL TESTS PASSED" else "SOME TESTS FAILED", "\n", sep = "")
 quit(status = if (ok) 0 else 1)

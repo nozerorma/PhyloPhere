@@ -49,5 +49,5 @@ mkdir -p "$CAAS_OUTBASE" "$WORK_BASE" "$ASR_CACHE_DIR"
 
 echo "=== PEPC Tier 1 run  min_divergent_fraction=${MDF} ==="
 echo "  out : ${OUT}"
-#            CLASS TRAIT SECONDARY N_TRAIT C_TRAIT PRUNE PRUNE_SEC DISCRETE TRAIT_TYPE
-exec bash "${REPO_DIR}/run_phenotype_single.sh" 2 c4 "" "" "" "" "" "" ordinal
+#            CLASS TRAIT SECONDARY N_TRAIT C_TRAIT PRUNE PRUNE_SEC TRAIT_TYPE
+exec bash "${REPO_DIR}/run_phenotype_single.sh" 2 c4 "" "" "" "" "" ordinal

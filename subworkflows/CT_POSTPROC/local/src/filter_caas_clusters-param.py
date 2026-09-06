@@ -207,7 +207,13 @@ def filterCAAS(infile, maxcaas, minlen, logger):
     
     # Validate input file format and required columns
     try:
-        df = pd.read_csv(path, sep="\t", header=0)
+        # keep_default_na=False + na_values=[""]: the CAAS table has categorical
+        # amino-acid columns (caas, amino_encoded, derived_residues) whose values
+        # can legitimately be NA-sentinel strings -- "N/A" is Asn-on-the-changed-
+        # side against Ala, and pandas' default NA parsing would silently blank it.
+        # Only a truly empty cell is missing data here.
+        df = pd.read_csv(path, sep="\t", header=0,
+                         keep_default_na=False, na_values=["", "nan", "NaN"])
         
         # Check for required columns
         for col in ("Gene", "Position"):

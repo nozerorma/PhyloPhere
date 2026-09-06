@@ -39,7 +39,9 @@ def tier1_project(
     *,
     traitname: str,
     trait_type: str = "ordinal",              # "ordinal" | "continuous" | ""
-    discrete_method: str = "quintile",        # only used when trait_type != ordinal
+    pss_top_pct: str = "",                     # continuous only: fraction of hi>lo
+                                              # pairs kept as eligible candidates
+                                              # (empty -> pipeline default 0.05)
     min_divergent_fraction: str = "0.75",
     asr_model: str = "lg",                    # lg | jtt | wag  (ASR-robustness control)
     clade_name: str = "tier1",
@@ -63,8 +65,6 @@ def tier1_project(
     )
 
     row = PhenotypeRow(trait_class=2, trait=traitname, trait_type=trait_type)
-    if trait_type != "ordinal":
-        row.discrete_method = discrete_method
 
     p.runtime = RuntimeConfig(
         resume=False, toy_mode=False, runtime_type="local", batched=False,
@@ -85,7 +85,11 @@ def tier1_project(
     # FOP multi-hypothesis harvest is on (multi_hypothesis defaults True) and the
     # permulation null mirrors it, so p.perm calibrates the domain-pooled score.
     c.caas_perms_fop = True
-    c.max_fop = os.environ.get("MAX_FOP", "15")
+    c.max_fop = os.environ.get("MAX_FOP", "100")   # pipeline default; the old 15
+                                                   # truncated the FOP harvest hard
+                                                   # (e.g. 47 valid -> 14 kept), which
+                                                   # dropped every alternative that
+                                                   # would have recovered Hb alphaA34
     c.caap_mode = True                       # US + GS1..GS4 encodings
     c.patterns = "1,2,3"
     c.perm_strategy = "auto"                 # best-fit BM vs OU by AICc
@@ -94,6 +98,8 @@ def tier1_project(
     c.caas_full_perms = os.environ.get("CAAS_FULL_PERMS", caas_full_perms)
     c.max_tries = os.environ.get("MAX_TRIES", max_tries)
     c.min_contrasts = "3"
+    if pss_top_pct:
+        c.pss_top_pct = pss_top_pct
     c.min_divergent_fraction = min_divergent_fraction
     c.ct_discovery_batch_size = ct_batch_size
     c.ct_bootstrap_batch_size = ct_batch_size
@@ -140,12 +146,15 @@ if __name__ == "__main__":
     ap.add_argument("--trait-type", default="ordinal")
     ap.add_argument("--mdf", default="0.75")
     ap.add_argument("--asr-model", default="lg")
+    ap.add_argument("--pss-top-pct", default="",
+                    help="continuous only: fraction of hi>lo pairs kept as "
+                         "eligible contrast candidates (empty -> pipeline default)")
     ap.add_argument("--clade", default="tier1")
     ap.add_argument("--print", action="store_true")
     a = ap.parse_args()
 
     proj = tier1_project(
-        traitname=a.trait, trait_type=a.trait_type,
+        traitname=a.trait, trait_type=a.trait_type, pss_top_pct=a.pss_top_pct,
         min_divergent_fraction=a.mdf, asr_model=a.asr_model, clade_name=a.clade,
     )
     proj.runtime.alignment_dir = "REPLICATE/align"

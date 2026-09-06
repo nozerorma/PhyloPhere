@@ -1456,15 +1456,48 @@ DT::datatable(
 
 ### Top Positions
 
+**Reading the scheme / hypothesis / support columns** — these describe *different*
+things and are not expected to agree:
+
+| column | question it answers | stage |
+|---|---|---|
+| `n_schemes` / `scheme_set` | which AA-grouping schemes **discovery** emitted a row for (US = exact identity, GS1–4 = physico-chemical classes) | CAAStools discovery |
+| `convergence_schemes` | at what AA resolution the **changed pairs still agree** with each other (never looks at the background state). `""` = <2 changed pairs or genuine disagreement; `US` = identical residue in every changed pair; `GS1,GS2,…` = same physico-chemical class but not identical | disambiguation + FOP pooling |
+| `n_hypotheses` / `supporting_hypotheses` | how many independent FOP contrast-pair samplings (H1..Hn) recovered this position | FOP mirror |
+| `top_residue_support` / `bottom_residue_support` | how many distinct CAAS contrast **pairs** carry each residue on that side — bounded by the contrast's pair count (~2–5), so small by design | descriptor |
+| `*_residue_support_detail` | same but counting distinct reconstructed ancestral **nodes** across all hypotheses (finer, inflated by hypothesis count) | descriptor |
+| `top_species_residues` / `bottom_species_residues` | the residues actually carried by the **foreground / background contrast species** at this alignment column, `AA:count` (e.g. `N:15,A:8` = 15 of the foreground species have Asn) — the "X of N species" check, hypothesis-independent | alignment tally |
+| `n_top_species` / `n_bottom_species` | foreground / background contrast species with a non-gap residue here | alignment tally |
+
+`scheme_set` and `convergence_schemes` are orthogonal — each can name a scheme the
+other omits. Example: a Leu→Ile substitution is discovered only under `US`
+(`scheme_set = US`), because Ile and Leu fall in the same class under every GS
+scheme so foreground and background don't differ there; but `convergence_schemes`
+depends only on whether the changed pairs agree with each other, so a clean single
+substitution reads `convergence_schemes = US`. Conversely, pairs that split I/L
+across lineages fail the `US` agreement test but pass every GS test, giving
+`convergence_schemes = GS1,GS2,GS3,GS4` even when discovery flagged `US`.
+
 ```{r top-positions-table}
 # Two-way score axes first (phen_score × asr_score), then the gate tiers, then
 # supplementary diagnostics. any_of() keeps this robust to absent columns.
 display_cols <- c("Gene", "Position", "CAAS_score",
                   "phen_score", "asr_score", "core",
                   "recovery_boot",
-                  "n_schemes", "scheme_set", "change_side",
-                  # raw-AA descriptors (position-level, from position_scores.tsv)
+                  "n_schemes", "scheme_set",
+                  # how many FOP hypotheses (H1..Hn) recovered this position, and which
+                  "n_hypotheses", "supporting_hypotheses",
+                  "change_side",
+                  # raw-AA descriptors (position-level, from position_scores.tsv).
+                  # *_support = distinct CAAS contrast pairs carrying the residue
+                  # (the actual support); *_support_detail = distinct reconstructed
+                  # ancestral nodes across hypotheses (finer, hypothesis-inflated).
                   "derived_residues", "top_residue_support", "bottom_residue_support",
+                  "top_residue_support_detail", "bottom_residue_support_detail",
+                  # extant-species tally: actual residues carried by the fg/bg
+                  # contrast species at this column ("X of N species")
+                  "top_species_residues", "bottom_species_residues",
+                  "n_top_species", "n_bottom_species",
                   "n_conserved_pairs", "convergence_schemes",
                   "is_top_10pct", "is_top_5pct", "is_top_1pct",
                   "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
@@ -1682,9 +1715,13 @@ dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       "phen_score", "asr_score", "core",
                       if (has_caas_col) "caas",
                       "n_schemes", "scheme_set",
+                      "n_hypotheses", "supporting_hypotheses",
                       "recovery_boot",
                       "change_side",
                       "derived_residues", "top_residue_support", "bottom_residue_support",
+                      "top_residue_support_detail", "bottom_residue_support_detail",
+                      "top_species_residues", "bottom_species_residues",
+                      "n_top_species", "n_bottom_species",
                       "convergence_schemes",
                       "is_top_10pct", "is_top_5pct", "is_top_1pct",
                       "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")

@@ -17,12 +17,29 @@ process CAAS_PREPARE_POSTPROC_INPUT {
 
     script:
     def mrca_threshold = params.ct_disambig_posterior_threshold
+    // Optional extant-species residue tally: needs the alignment dir + the full
+    // contrast species lists. params.alignment is a global; the species lists are
+    // read from selection's own publish path (same idiom as selection_prep.nf's
+    // candidate_species.tab fallback). All optional -- the script no-ops the
+    // top/bottom_species_residues + n_top/bottom_species columns when absent.
+    def ali_dir  = params.alignment ?: ''
+    def ali_fmt  = params.ali_format ?: 'fasta'
+    def sp_dir   = "${params.outdir}/selection/species_sets"
+    def ali_flag = ali_dir ? "--alignment '${ali_dir}' --alignment-format '${ali_fmt}'" : ''
     """
+    FG="${sp_dir}/top_species.txt"
+    BG="${sp_dir}/bottom_species.txt"
+    SP_FLAGS=""
+    if [ -f "\$FG" ] && [ -f "\$BG" ]; then
+        SP_FLAGS="--fg-species \$FG --bg-species \$BG"
+    fi
+
     python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/prepare_postproc_input.py \
         --input ${disambiguation_input} \
         --mrca-threshold ${mrca_threshold} \
         --output postproc_disambiguation_input.tsv \
-        --removed-output removed_patterns_precluster.tsv
+        --removed-output removed_patterns_precluster.tsv \
+        ${ali_flag} \$SP_FLAGS
     """
 }
 

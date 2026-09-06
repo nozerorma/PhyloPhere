@@ -2,12 +2,13 @@
 """Normalize ct_disambiguation output for CT post-processing."""
 
 import argparse
+import os
 import re
 import sys
 
 import pandas as pd
 
-from residue_descriptors import add_residue_descriptors
+from residue_descriptors import add_residue_descriptors, add_species_tally
 
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -76,9 +77,24 @@ def main() -> int:
         default="removed_patterns_precluster.tsv",
         help="Precluster removal output TSV",
     )
+    # Optional: extant-species residue tally (top/bottom_species_residues,
+    # n_top/bottom_species). Needs the alignment dir + the full contrast species
+    # lists. All four are optional -- absent -> the columns stay empty.
+    parser.add_argument("--alignment", default=None,
+                        help="Alignment directory (flat, gene = basename up to first '.')")
+    parser.add_argument("--alignment-format", default="fasta",
+                        help="Bio.AlignIO format for --alignment (default: fasta)")
+    parser.add_argument("--fg-species", default=None,
+                        help="top_species.txt (foreground contrast species, one per line)")
+    parser.add_argument("--bg-species", default=None,
+                        help="bottom_species.txt (background contrast species, one per line)")
     args = parser.parse_args()
 
-    df = pd.read_csv(args.input, sep=None, engine="python")
+    # keep_default_na=False + na_values=[""]: the disambiguation master has
+    # categorical amino-acid columns (caas, amino_encoded, mrca_*_aa) that can
+    # equal NA-sentinel strings; only an empty cell means missing here.
+    df = pd.read_csv(args.input, sep=None, engine="python",
+                     keep_default_na=False, na_values=["", "nan", "NaN"])
     df = _normalize_schema(df)
 
     for col in ("Gene", "Position"):
@@ -95,6 +111,18 @@ def main() -> int:
     # Computed here, upstream of the filtered_discovery.tsv fork, so SCORING and VEP
     # share one canonical column set. See residue_descriptors.py.
     cleaned = add_residue_descriptors(cleaned)
+
+    # Extant-species residue tally (no-op when the alignment / species lists are
+    # not supplied -- e.g. standalone --disambiguation_input runs).
+    def _opt(p):
+        return p if p and os.path.exists(p) else None
+    cleaned = add_species_tally(
+        cleaned,
+        _opt(args.alignment),
+        _opt(args.fg_species),
+        _opt(args.bg_species),
+        ali_format=args.alignment_format,
+    )
 
     if removed_frames:
         removed = pd.concat(removed_frames, ignore_index=True)

@@ -99,15 +99,17 @@
 # does the reconciliation with NO new multiplier. Older inputs without the *_aa
 # columns keep the per-hypothesis `.wmean` fallback.
 #
-# apply_fop_pooling also emits four POSITION-LEVEL descriptor columns (raw-AA,
-# joined back by (Gene, Position), so they sit OUTSIDE the per-caap_group
-# grouping): `derived_residues` (compact "<anc>/<sorted derived>"),
-# `top_residue_support` / `bottom_residue_support` (per raw derived residue,
-# distinct-pair count, one column per phenotype side), and
-# `convergence_schemes` — the SUBSET of US,GS1,GS2,GS3,GS4 whose harvest-wide da
-# on the raw pooled pairs is >= tau (default 0.8). `convergence_schemes` is a
-# SET/PROFILE, never an ordinal: the 5 schemes are non-nested partitions along
-# different physicochemical axes (see aa_grouping.R).
+# apply_fop_pooling also carries the POSITION-LEVEL raw-AA descriptor columns
+# produced upstream in CT_POSTPROC (`derived_residues`, `top_residue_support` /
+# `bottom_residue_support` = distinct-pair count per residue, the `_detail`
+# node-count variants), and computes ONE descriptor itself: `convergence_schemes`.
+#
+# `convergence_schemes` is an AMONG-LINEAGE AGREEMENT test on the reconstructed
+# derived residues — "at what AA resolution do the changed pairs still look like
+# the same change" — NOT a discovery/contrast test and NOT parallel to
+# `scheme_set` (see .position_descriptors). "" = <2 changed pairs / genuine
+# disagreement; "US" = identical residue in every changed pair; "GS1,GS2,.." =
+# same physicochemical class but not identical (the informative case).
 #
 # Single-hypothesis / non-FOP input is a no-op: the one row passes through with
 # its asr_path_score untouched (verified by test_fop_pool.R).
@@ -138,13 +140,14 @@ if (file.exists(.aa_grouping_src)) {
 #' Harvest-wide, per-scheme derived_agreement over a group's DISTINCT changed pairs.
 #'
 #' Mirrors path_scores.py::compute_asr_path_score's derived_agreement EXACTLY,
-#' but over the pooled, node-deduplicated changed-pair set of the whole harvest
-#' group instead of one hypothesis, and on residues encoded under `scheme`.
+#' but over the pooled changed-pair set of the whole harvest group instead of one
+#' hypothesis, and on residues encoded under `scheme`.
 #'
-#' @param changed_df data.frame with columns node, side ("top"/"bot"), raw_aa —
-#'   one row per (distinct MRCA node, side) that carried a change. Callers dedup
-#'   by (node, side) before passing (a node's derived residue on a side is a
-#'   fixed observed fact).
+#' @param changed_df data.frame with columns pair (mrca_<i> block index), side
+#'   ("top"/"bot"), raw_aa — one row per (pair, side) that carried a change, the
+#'   residue being that pair's modal reconstruction across hypotheses. Keyed on
+#'   the pair INDEX, not the node value: the same Voronoi domain resolves to
+#'   different node ids under different FOP hypotheses (see .collect_changed_pairs).
 #' @param scheme one of AA_SCHEME_NAMES.
 #' @return derived_agreement in (0, 1]. 1.0 when no side has >= 2 distinct
 #'   changed pairs (matches path_scores.py).
@@ -163,41 +166,43 @@ rebuild_derived_agreement <- function(changed_df, scheme) {
   mean(concentrations)
 }
 
-#' Distinct (node, side, raw_aa) changed-pair records from a harvest group's rows.
+#' One (pair index, side, raw_aa) record per changed CAAS pair from a group's rows.
 #'
-#' Scans every mrca_<i>_top_aa / mrca_<i>_bot_aa cell across all rows, pairing it
-#' with the matching mrca_<i>_node. Deduplicates by (node, side): the same
-#' physical pair recurring across hypotheses / schemes is one changed pair.
-#' Voronoi domains are disjoint, so a node identifies its pair unambiguously.
+#' Scans every mrca_<i>_top_aa / mrca_<i>_bot_aa cell across all rows of the
+#' (Gene, Position) group. Keyed on the pair INDEX `i` (the mrca_<i> block), NOT
+#' the mrca_<i>_node VALUE: under the FOP mirror the same physical Voronoi domain
+#' reconstructs to different ancestral node ids across hypotheses, so node-keying
+#' counts one pair many times and lets a hypothesis that disagreed on the residue
+#' distort the agreement statistic. Each pair contributes ONE residue per side —
+#' its modal reconstruction across the rows that carried a change there — so this
+#' matches residue_descriptors.py's pair-based {top,bottom}_residue_support unit.
 .collect_changed_pairs <- function(df, node_cols, top_cols, bot_cols) {
-  recs <- list()
-  add <- function(node, side, aa) {
-    if (is.na(node) || !nzchar(as.character(node))) return(invisible())
-    aa <- toupper(trimws(as.character(aa)))
-    if (is.na(aa) || !nzchar(aa)) return(invisible())
-    recs[[length(recs) + 1L]] <<- data.frame(
-      node = as.character(node), side = side, raw_aa = aa, stringsAsFactors = FALSE)
-  }
+  by_ps <- list()   # "i|side" -> character() of residues seen for that pair/side
+  bad_aa <- c("NA", "NAN", "NONE")
   K <- length(node_cols)
   for (i in seq_len(K)) {
-    ncol <- node_cols[i]
-    if (!(ncol %in% names(df))) next
-    nodes <- as.character(df[[ncol]])
-    if (i <= length(top_cols) && top_cols[i] %in% names(df)) {
-      tv <- as.character(df[[top_cols[i]]])
-      for (r in seq_along(nodes)) add(nodes[r], "top", tv[r])
-    }
-    if (i <= length(bot_cols) && bot_cols[i] %in% names(df)) {
-      bv <- as.character(df[[bot_cols[i]]])
-      for (r in seq_along(nodes)) add(nodes[r], "bot", bv[r])
+    for (sd in c("top", "bot")) {
+      acol <- if (sd == "top") (if (i <= length(top_cols)) top_cols[i] else NA_character_)
+              else               (if (i <= length(bot_cols)) bot_cols[i] else NA_character_)
+      if (is.na(acol) || !(acol %in% names(df))) next
+      v <- toupper(trimws(as.character(df[[acol]])))
+      v <- v[!is.na(v) & nzchar(v) & !(v %in% bad_aa)]
+      if (!length(v)) next
+      k <- paste0(i, "|", sd)
+      by_ps[[k]] <- c(by_ps[[k]], v)
     }
   }
-  if (length(recs) == 0) {
-    return(data.frame(node = character(0), side = character(0),
+  if (length(by_ps) == 0) {
+    return(data.frame(pair = integer(0), side = character(0),
                       raw_aa = character(0), stringsAsFactors = FALSE))
   }
-  out <- do.call(rbind, recs)
-  out[!duplicated(out[, c("node", "side")]), , drop = FALSE]
+  do.call(rbind, lapply(names(by_ps), function(k) {
+    parts <- strsplit(k, "|", fixed = TRUE)[[1]]
+    v     <- by_ps[[k]]
+    modal <- names(sort(table(v), decreasing = TRUE))[1]
+    data.frame(pair = as.integer(parts[1]), side = parts[2],
+               raw_aa = modal, stringsAsFactors = FALSE)
+  }))
 }
 
 # Exact P(>= 2 successes) over independent Bernoullis — verbatim algebra of
@@ -372,9 +377,16 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   # `derived_agreement` in path_scores.py is a within-hypothesis fraction. Two
   # FOP hypotheses can each be unanimous yet land on DIFFERENT residues; pooling
   # their da never sees that. When the raw-residue block is present, recompute da
-  # over the group's DISTINCT changed pairs (dedup by node), per side, with the
-  # EXACT path_scores.py plurality logic, on residues encoded under THIS row's
-  # own scheme. Older inputs (no *_aa columns) keep the per-hypothesis wmean.
+  # over the group's DISTINCT changed pairs (one modal residue per mrca_<i> block
+  # — pair-indexed, NOT node-value keyed; see .collect_changed_pairs), per side,
+  # with the EXACT path_scores.py plurality logic, on residues encoded under THIS
+  # row's own scheme. Older inputs (no *_aa columns) keep the per-hypothesis wmean.
+  # NOTE: pair-indexing changed this from the earlier node-value dedup — a pair
+  # that reconstructs to several nodes across hypotheses now counts ONCE, so
+  # da_pooled (and hence CAAS_score) shifts slightly on multi-hypothesis
+  # positions where pairs reconstruct to unequal node counts. This is the
+  # intended "distinct changed pairs" semantics; the node dedup only approximated
+  # it while Voronoi domains resolved 1:1 to nodes.
   have_aa_cols <- length(top_aa_cols) > 0 &&
     (any(top_aa_cols %in% names(df)) || any(bot_aa_cols %in% names(df)))
   if (have_aa_cols && !is.na(scheme) && nzchar(scheme)) {
@@ -464,24 +476,48 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
 
 #' Position-level `convergence_schemes` descriptor for one (Gene, Position).
 #'
-#' Computed across ALL rows of the position (every scheme, every hypothesis) —
-#' scheme convergence is a residue-identity question, so this sits OUTSIDE the
-#' per-caap_group pooling and is joined back by (Gene, Position).
+#' This is an AMONG-LINEAGE AGREEMENT test on the RECONSTRUCTED derived residues,
+#' NOT a discovery/contrast test. It never looks at the ancestral or background
+#' state. It answers: "at what amino-acid resolution do the pairs that changed
+#' still look like they made the same change?" — it does NOT say which schemes
+#' would have discovered this position (that is `scheme_set` / `n_schemes`, a
+#' separate question about foreground-vs-background discriminability).
 #'
-#'   convergence_schemes  comma-joined subset of US,GS1,GS2,GS3,GS4 whose
-#'                        harvest-wide da on the raw pooled pairs is >= tau.
-#'                        A SET/PROFILE (non-nested schemes), never an ordinal.
-#'                        "" when none pass / no changed pairs.
+#' Semantics:
+#'   ""    fewer than 2 changed pairs on any one side, or genuine disagreement
+#'         (no scheme concentrates the derived residues to >= tau).
+#'   "US"  every changed pair carries the SAME exact residue — convergence at
+#'         identity. The coarser GS groupings are NOT listed: a single residue is
+#'         trivially 100%-concentrated under any partition, so listing them would
+#'         read as a stronger multi-scheme signal than it is.
+#'   "GS.." >= 2 DISTINCT derived residues that still share a physicochemical
+#'         class under those grouping schemes — "chemical convergence, not
+#'         identical" (the informative case; US is absent here by construction).
 #'
-#' The raw-AA descriptors `derived_residues` / `top_residue_support` /
-#' `bottom_residue_support` are NO LONGER computed here — they are produced once,
-#' upstream, in CT_POSTPROC's `residue_descriptors.py` (which follows the
-#' `change_side` field rather than scanning both sides), and `apply_fop_pooling`
-#' carries them straight through from the input frame.
+#' Computed across ALL rows of the position (every scheme, every hypothesis),
+#' one modal residue per changed pair (see .collect_changed_pairs — pair-indexed,
+#' matching residue_descriptors.py). Sits OUTSIDE the per-caap_group pooling,
+#' joined back by (Gene, Position). `derived_residues` / `{top,bottom}_residue_support`
+#' are produced upstream (CT_POSTPROC residue_descriptors.py) and only carried here.
 .position_descriptors <- function(sub_df, node_cols, top_aa_cols, bot_aa_cols, tau) {
   cp <- .collect_changed_pairs(sub_df, node_cols, top_aa_cols, bot_aa_cols)
-  if (nrow(cp) == 0) return(data.frame(convergence_schemes = "", stringsAsFactors = FALSE))
 
+  # Need >= 2 changed pairs on one side for any convergence statement.
+  side_n <- if (nrow(cp)) table(cp$side) else integer(0)
+  if (nrow(cp) == 0 || length(side_n) == 0 || max(side_n) < 2) {
+    return(data.frame(convergence_schemes = "", stringsAsFactors = FALSE))
+  }
+
+  # Single exact residue on every changed side -> identity convergence ("US").
+  multi_residue <- any(vapply(
+    split(cp$raw_aa, cp$side),
+    function(rs) length(unique(rs)) >= 2, logical(1)))
+  if (!multi_residue) {
+    return(data.frame(convergence_schemes = "US", stringsAsFactors = FALSE))
+  }
+
+  # >= 2 distinct residues: report the GS grouping schemes that still concentrate
+  # them (US will fail here by definition — the residues are not identical).
   kept <- AA_SCHEME_NAMES[vapply(AA_SCHEME_NAMES, function(sc)
     isTRUE(rebuild_derived_agreement(cp, sc) >= tau), logical(1))]
   data.frame(convergence_schemes = paste(kept, collapse = ","),
@@ -494,6 +530,8 @@ FOP_CARRIED_DESCRIPTORS <- c("derived_residues", "top_residue_support",
                              "bottom_residue_support",
                              "top_residue_support_detail",
                              "bottom_residue_support_detail",
+                             "top_species_residues", "bottom_species_residues",
+                             "n_top_species", "n_bottom_species",
                              "n_conserved_pairs")
 
 #' Apply domain-pooling across a whole disambiguation data.frame.

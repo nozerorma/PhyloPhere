@@ -53,10 +53,17 @@ def import_position(position, imported_alignment):
 
 
 
-# FUNCTION filter_position()                       
+# FUNCTION filter_position()
 # #devnote TO BE EXPORTED IN FILE, GAPSRATIO INCLUDED
-# This function is designed to exclude those positions that are so conserved
-# that it is impossible (or unlikely) for them to return a CAAS.
+# Drops a column only when its gap fraction exceeds max_gaps_ratio.
+#
+# The amino-acid-diversity ("seconds < changes_threshold") pre-filter was removed:
+# it was a speed shortcut from when the per-column CAAS test was expensive, but it
+# scaled the diversity requirement with the contrast count (changes_threshold =
+# min(#fg,#bg) = K) while the CAAS rule only ever needs 2 changes on one side. It
+# therefore silently discarded genuine low-origin convergent sites (e.g. a 3-origin
+# change is dropped as soon as K reaches 4) — precisely the signal contrast-poor
+# analyses exist to find. `changes_threshold` is kept in the signature for callers.
 
 def filter_position(imported_position, changes_threshold, max_gaps_ratio):
 
@@ -67,34 +74,9 @@ def filter_position(imported_position, changes_threshold, max_gaps_ratio):
     outflag = True
 
     # Filter per gaps
-    gaps_ratio = 0
     gaps_ratio = seq.count("-")/float(len(seq))
 
     if gaps_ratio > max_gaps_ratio:
-        outflag = False
-        return outflag
- 
-    # Filter per amino acid diversity (minimum changes)
-    single_symbols = list(set(seq))
-
-    try:
-        single_symbols.remove("-")
-    except:
-        pass
-
-    all_symbols = list(seq)
-
-    if len(single_symbols) == 1:
-        seconds = 0
-    elif len(single_symbols) > 1:
-        counts = []
-        for x in single_symbols:
-            counts.append(all_symbols.count(x))
-        
-        counts.remove(max(counts))        
-        seconds = sum(counts)
-    
-    if seconds < changes_threshold:
         outflag = False
 
     return outflag
