@@ -158,6 +158,13 @@ process {
         memory = { 2.GB * task.attempt }
         time   = { 1.h * task.attempt }
     }
+    // See conf/resources.config for rationale — permulations.R harvest + serial
+    // FOP-mirror at perm_pool_size=1e5 outgrows the shared process_resample box.
+    withName: 'RESAMPLE' {
+        cpus   = { 12 }
+        memory = { 24.GB * task.attempt }
+        time   = { 12.h * task.attempt }
+    }
     withName: 'CONCAT_BOOTSTRAP' {
         cpus   = { 2 }
         memory = { 2.GB * task.attempt }

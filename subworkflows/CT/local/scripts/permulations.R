@@ -267,10 +267,25 @@ n1 <- 0L; n2 <- 0L
 total_draws <- 0L
 reject_reasons <- character(0)
 
-MAX_ESCALATIONS  <- 2L
-ESCALATION_FACTOR <- 1.5
-budget      <- max_tries
-escalations <- 0L
+# Escalation is TARGET-AWARE. `max_tries` exists to abort a trait whose Dunn
+# geometry makes a full pool essentially unreachable (low Tier-1 acceptance),
+# NOT to cap a run that is merely draw-starved because the pool is large and the
+# starting budget small. So when the inner loop stalls short of the pool:
+#   * estimate the Tier-1 acceptance rate from the draws so far;
+#   * if it is healthy, project the budget needed to finish (+ headroom) and keep
+#     going, bounded only by HARVEST_HARD_CAP x pool_size;
+#   * if it is genuinely poor, bump modestly, count it, and give up after
+#     MAX_LOWRATE_ESCALATIONS with a diagnostic that names the acceptance rate.
+HARVEST_HARD_CAP        <- 50L    # x number.of.cycles — absolute draw ceiling
+MIN_VIABLE_TIER1_RATE   <- 0.05   # below this the trait cannot realistically fill the pool
+MAX_LOWRATE_ESCALATIONS <- 3L
+LOWRATE_FACTOR          <- 1.5
+BUDGET_HEADROOM         <- 1.15   # over the point estimate of draws still needed
+
+hard_cap            <- max(as.numeric(max_tries), HARVEST_HARD_CAP * number.of.cycles)
+budget              <- max_tries
+lowrate_escalations <- 0L
+escalations         <- 0L         # kept for the "filled after N escalation(s)" log below
 
 repeat {
   while (n1 < number.of.cycles && total_draws < budget) {
@@ -328,13 +343,35 @@ repeat {
     }
   }
 
-  if (n1 >= number.of.cycles || escalations >= MAX_ESCALATIONS) break
+  if (n1 >= number.of.cycles) break
 
-  escalations <- escalations + 1L
-  budget <- as.integer(ceiling(budget * ESCALATION_FACTOR))
-  log_msg("WARN", sprintf(
-    "Pool not filled from Tier 1 (%d/%d) after %d draws — escalating max_tries by %.0f%% to %d (escalation %d of %d)",
-    n1, number.of.cycles, total_draws, 100 * (ESCALATION_FACTOR - 1), budget, escalations, MAX_ESCALATIONS))
+  tier1_rate <- (n1 + 1) / (total_draws + 1)
+
+  if (tier1_rate >= MIN_VIABLE_TIER1_RATE) {
+    # Draw-starved, not rejection-bound: extend the budget toward the projected
+    # finish. Does NOT count against the low-acceptance abort counter.
+    proj       <- total_draws + ceiling((number.of.cycles - n1) / tier1_rate * BUDGET_HEADROOM)
+    new_budget <- min(max(proj, ceiling(budget * 1.25)), hard_cap)
+    if (new_budget <= budget) break   # already at the hard cap and still short
+    log_msg("INFO", sprintf(
+      paste0("Pool %d/%d after %d draws at %.1f%% Tier-1 acceptance — draw-starved, not ",
+             "rejection-bound; extending budget %d -> %d (hard cap %d)"),
+      n1, number.of.cycles, total_draws, 100 * tier1_rate,
+      as.integer(budget), as.integer(new_budget), as.integer(hard_cap)))
+    budget <- new_budget
+  } else {
+    if (lowrate_escalations >= MAX_LOWRATE_ESCALATIONS) break
+    lowrate_escalations <- lowrate_escalations + 1L
+    escalations         <- escalations + 1L
+    new_budget <- min(ceiling(budget * LOWRATE_FACTOR), hard_cap)
+    if (new_budget <= budget) break
+    budget <- new_budget
+    log_msg("WARN", sprintf(
+      paste0("Pool not filled from Tier 1 (%d/%d) after %d draws at only %.1f%% Tier-1 ",
+             "acceptance — escalating budget to %d (escalation %d of %d)"),
+      n1, number.of.cycles, total_draws, 100 * tier1_rate,
+      as.integer(budget), lowrate_escalations, MAX_LOWRATE_ESCALATIONS))
+  }
 }
 
 # ── Assemble the pool: Tier 1 first, Tier 2 only to fill a shortfall ─────────
@@ -352,22 +389,47 @@ if (n1 >= number.of.cycles) {
 } else {
   tab <- sort(table(reject_reasons), decreasing = TRUE)
   top <- seq_len(min(3, length(tab)))
+  final_rate <- (n1 + 1) / (total_draws + 1)
+  # Name the failure mode so the fix is obvious from the log alone.
+  diag <- if (final_rate >= MIN_VIABLE_TIER1_RATE) sprintf(
+      paste0("Tier-1 acceptance was healthy (%.1f%%) — the run was DRAW-STARVED and hit ",
+             "the hard cap (%d). Raise --max_tries / MAX_TRIES (>= ~%d for this pool) or ",
+             "lower --perm_pool_size."),
+      100 * final_rate, as.integer(hard_cap),
+      as.integer(ceiling(number.of.cycles / final_rate * BUDGET_HEADROOM)))
+    else sprintf(
+      paste0("Tier-1 acceptance was only %.1f%% — this trait's Dunn geometry cannot ",
+             "realistically fill a pool this size; lower --perm_pool_size or relax the ",
+             "contrast-selection strategy."),
+      100 * final_rate)
   stop(sprintf(
     paste0("Permulation pool could not be filled: %d Tier-1 + %d Tier-2 = %d of the requested %d ",
-           "after %d draws and %d escalation(s) of max_tries (final budget %d).\n",
+           "after %d draws and %d low-acceptance escalation(s) (final budget %d, hard cap %d).\n",
+           "  %s\n",
            "  Top rejection reasons: %s"),
-    n1, n2, n1 + n2, number.of.cycles, total_draws, escalations, budget,
+    n1, n2, n1 + n2, number.of.cycles, total_draws, escalations,
+    as.integer(budget), as.integer(hard_cap), diag,
     if (length(tab)) paste(sprintf("%s (%d)", names(tab)[top], as.integer(tab)[top]), collapse = "; ") else "none recorded"))
 }
 
 # ── Write resample chunks + a tier/Dunn manifest ─────────────────────────────
+# O(n) row-binding: do.call(rbind, <list of n 1-row data.frames>) is O(n^2) and
+# becomes the wall-clock bottleneck once the pool is ~1e5 (and the FOP mirror
+# below produces up to max_fop x that many rows). data.table::rbindlist is linear.
+rbind_fast <- function(lst) {
+  lst <- lst[!vapply(lst, is.null, logical(1))]
+  if (!length(lst)) return(NULL)
+  as.data.frame(data.table::rbindlist(lst, use.names = TRUE, fill = TRUE),
+                stringsAsFactors = FALSE)
+}
+
 rows      <- vector("list", length(pool))
 manifest  <- vector("list", length(pool))
 file.counter <- 1L; chunk.start <- 1L
 
 flush_chunk <- function(from, to) {
   fp <- file.path(outdir, sprintf("resample_%03d.tab", file.counter))
-  write.table(do.call(rbind, rows[from:to]), file = fp, sep = "\t",
+  write.table(rbind_fast(rows[from:to]), file = fp, sep = "\t",
               col.names = FALSE, row.names = FALSE, quote = FALSE)
   file.counter <<- file.counter + 1L
 }
@@ -393,7 +455,7 @@ for (b in seq_along(pool)) {
   }
 }
 
-write.table(do.call(rbind, manifest), file = file.path(outdir, "permulation_manifest.tsv"),
+write.table(rbind_fast(manifest), file = file.path(outdir, "permulation_manifest.tsv"),
             sep = "\t", row.names = FALSE, quote = FALSE)
 
 # ── FOP mirror: per-cycle alternative-hypothesis harvest ─────────────────────
@@ -451,11 +513,11 @@ if (fop_null) {
     n_hyp_tot <- n_hyp_tot + length(hv$hypotheses)
   }
   if (length(fop_rows) > 0) {
-    write.table(do.call(rbind, fop_rows), file = file.path(outdir, "fop_labelings.tab"),
+    write.table(rbind_fast(fop_rows), file = file.path(outdir, "fop_labelings.tab"),
                 sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE)
   }
   if (length(pair_rows) > 0) {
-    write.table(do.call(rbind, pair_rows), file = file.path(outdir, "fop_pairs.tsv"),
+    write.table(rbind_fast(pair_rows), file = file.path(outdir, "fop_pairs.tsv"),
                 sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
   }
   log_msg("COMPLETE", sprintf("FOP mirror: %d cycles -> %d hypothesis labelings (mean %.1f/cycle) -> fop_labelings.tab",
