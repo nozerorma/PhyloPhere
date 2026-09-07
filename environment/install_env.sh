@@ -19,8 +19,6 @@ choose_solver() {
 SOLVER="$(choose_solver)"
 if [[ "$SOLVER" == "none" ]]; then
   echo "ERROR: Need micromamba, mamba, or conda on PATH." >&2
-  echo "Please install some conda variant. Micromamba is recommended for simplicity."
-  echo "https://mamba.readthedocs.io/en/latest/installation/micromamba-installation.html"
   exit 1
 fi
 
@@ -32,20 +30,20 @@ case "$SOLVER" in
     : "${MAMBA_ROOT_PREFIX:=$HOME/.micromamba}"
     export MAMBA_ROOT_PREFIX
     micromamba config set channel_priority flexible >/dev/null
-    # Force env name explicitly
-    micromamba env create -n "$ENV_NAME" -f "$ENV_YML" -y
+    micromamba env create -n "$ENV_NAME" -f "$ENV_YML" -y || micromamba env update -n "$ENV_NAME" -f "$ENV_YML" -y
+    micromamba install -n "$ENV_NAME" -c conda-forge r-data.table compilers make pkg-config -y
     RUN=(micromamba run -n "$ENV_NAME")
     ;;
   mamba)
     mamba config --set channel_priority flexible >/dev/null
-    # Force env name explicitly
-    mamba env create -n "$ENV_NAME" -f "$ENV_YML" -y
+    mamba env create -n "$ENV_NAME" -f "$ENV_YML" -y || mamba env update -n "$ENV_NAME" -f "$ENV_YML" -y
+    mamba install -n "$ENV_NAME" -c conda-forge r-data.table compilers make pkg-config -y
     RUN=(mamba run -n "$ENV_NAME")
     ;;
   conda)
     conda config --set channel_priority flexible >/dev/null
-    # Force env name explicitly
-    conda env create -n "$ENV_NAME" -f "$ENV_YML" -y
+    conda env create -n "$ENV_NAME" -f "$ENV_YML" -y || conda env update -n "$ENV_NAME" -f "$ENV_YML" -y
+    conda install -n "$ENV_NAME" -c conda-forge r-data.table compilers make pkg-config -y
     RUN=(conda run -n "$ENV_NAME")
     ;;
 esac
@@ -55,31 +53,21 @@ echo "Installing R packages (CRAN + GitHub) into: $ENV_NAME"
 "${RUN[@]}" Rscript -e '
 options(
   repos = c(CRAN="https://cloud.r-project.org"),
-  Ncpus = max(1L, parallel::detectCores() - 1L)
+  Ncpus = max(1L, parallel::detectCores() - 1L),
+  buildtools.check = function(action) TRUE
 )
 
-# Make sure remotes exists before GitHub installs
-install.packages("remotes")
+if (!requireNamespace("BiocManager", quietly = TRUE)) install.packages("BiocManager")
+if (!requireNamespace("remotes", quietly = TRUE)) install.packages("remotes")
+if (!requireNamespace("DT", quietly = TRUE)) install.packages("DT")
 
-# Install CRAN package without pulling/compiling deps
-# I am very unsure why r-dt in anaconda does not behave properly :(
-install.packages("DT", repos="https://cloud.r-project.org")
+BiocManager::install(c("ggtree", "impute", "data.table", "castor"), update = FALSE, ask = FALSE)
 
-# Install dependencies for RERconverge
-# install.packages("BiocManager")
-BiocManager::install("ggtree")
-BiocManager::install("impute")
-BiocManager::install("data.table")
-
-# dependencies = NA (not TRUE): install what RERconverge itself needs to load
-# (its Depends/Imports/LinkingTo, e.g. FSA), without recursing into the
-# optional Suggests of those dependencies (e.g. FSA own Suggests pull in
-# car/doBy/pbkrtest/Deriv, none of which RERconverge actually uses, and Deriv
-# CRAN source does not compile against this R version anyway).
-# Prevent pkgbuild from throwing missing-toolchain warnings
-# options(buildtools.check = function(action) TRUE)
-
-remotes::install_github("nclark-lab/RERconverge@2bd328f7530b4aca9b48c0b3997875c9b77a7026", dependencies = NA, upgrade="never")
+remotes::install_github(
+  "nclark-lab/RERconverge@2bd328f7530b4aca9b48c0b3997875c9b77a7026",
+  dependencies = NA,
+  upgrade = "never"
+)
 
 if (!requireNamespace("RERconverge", quietly = TRUE)) {
   stop("RERconverge failed to install")
