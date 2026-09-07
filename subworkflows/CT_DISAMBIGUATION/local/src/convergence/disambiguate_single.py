@@ -634,7 +634,7 @@ def analyze_gene_disambiguation(
     # discovered it (its `trait` field); it is disambiguated against THAT
     # hypothesis's pairs only. Unioning every hypothesis's pairs (the old
     # `flattened_pairs`) polluted every multi-pair axis of the ASR path score —
-    # LAC merge points, independence, mrca_diversity — with contrasts from
+    # LCA merge points, independence, mrca_diversity — with contrasts from
     # unrelated hypotheses, and discarded the per-hypothesis Dunn independence
     # the FOP harvest enforces.
     trait_pairs_all: Dict[int, List[Tuple[str, str]]] = {}

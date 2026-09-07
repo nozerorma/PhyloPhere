@@ -122,11 +122,17 @@ workflow SCORING {
         // FOP per-pair PSS weights for domain-pooled scoring (contrast_hypotheses_pairs.tsv).
         // Absent for single-contrast runs -> NO_HYP_PAIRS sentinel, scoring_compute.R
         // then treats every position as single-hypothesis (pass-through).
+        // Resolution order: live channel -> --scoring_hypotheses_pairs -> auto-discover
+        // in the prior run's outdir (so a bare `--scoring --outdir <run>` re-run keeps
+        // PSS weighting without an extra flag, same convenience as scoring_accum_dir).
         def resolved_hyp_pairs = (hypotheses_pairs_ch ?: Channel.empty())
             .collect()
             .ifEmpty {
                 def hp = params.scoring_hypotheses_pairs ?: ''
-                if (hp && file(hp).exists()) [file(hp)] else [file('NO_HYP_PAIRS')]
+                if (hp && file(hp).exists()) return [file(hp)]
+                def auto = "${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv"
+                if (file(auto).exists()) return [file(auto)]
+                [file('NO_HYP_PAIRS')]
             }
             .map { it && it.size() > 0 ? it[0] : file('NO_HYP_PAIRS') }
 

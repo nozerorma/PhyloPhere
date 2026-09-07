@@ -26,7 +26,11 @@ The script enforces a directional constraint to align PrimateAI lookups with evo
 
 Usage
 -----
-    map_to_primateai.py <caas_file> <vep_map_dir> <primateai_gz> <output_tsv>
+    map_to_primateai.py <caas_file> <vep_map_dir> <primateai_gz> <output_tsv> [position_scores_tsv]
+
+`position_scores_tsv` (SCORING output) is optional: when given, positions whose
+`convergence_schemes` is empty (the fractional FOP rule found the derived
+residues genuinely disagree) are skipped. Absent -> every position processed.
 """
 
 import sys
@@ -72,17 +76,63 @@ def anc_der_from_descriptor(derived_residues, top_residue_support,
 
     `derived_residues` itself is not parsed — the support columns already carry
     the per-side residue letters unambiguously.
+
+    Conservation logic: a residue present on BOTH clades did not change, so it is
+    dropped from the derived set (``der - anc``). The support columns should
+    already exclude it — residue_descriptors.py only fills ``mrca_<i>_<side>_aa``
+    for a genuine substitution — but this keeps the filter honest if one leaks.
+    A keep-all safety applies if the subtraction empties the set.
     """
     top_set = _support_letters(top_residue_support)
     bot_set = _support_letters(bottom_residue_support)
     cs = str(change_side or "").strip().lower()
     if cs == "top":
-        return bot_set, top_set          # ancestral = bottom, derived = top
-    if cs == "bottom":
-        return top_set, bot_set          # ancestral = top, derived = bottom
-    if cs == "both":
-        return set(), top_set | bot_set  # both sides derived, no single ancestral
-    return set(), top_set | bot_set
+        anc, der = bot_set, top_set          # ancestral = bottom, derived = top
+    elif cs == "bottom":
+        anc, der = top_set, bot_set          # ancestral = top, derived = bottom
+    else:                                    # "both" / unknown: both sides derived
+        anc, der = set(), top_set | bot_set
+    der = (der - anc) or der
+    return anc, der
+
+
+def load_convergence_skip(position_scores_tsv):
+    """{(gene, int(position))} to SKIP because the fractional FOP rule found the
+    derived residues genuinely disagree (``convergence_schemes`` == "").
+
+    Reads SCORING's position_scores.tsv (optional 2nd input). Returns None when
+    the file is absent/empty or lacks the needed columns -> the gate is a no-op
+    (every position processed, same as before this feature).
+    """
+    if not position_scores_tsv or position_scores_tsv in ("NO_FILE", "-"):
+        print("WARN: no position_scores.tsv given — convergence gate is a no-op.",
+              file=sys.stderr)
+        return None
+    if not os.path.exists(position_scores_tsv) or os.path.getsize(position_scores_tsv) == 0:
+        print(f"WARN: position_scores.tsv '{position_scores_tsv}' missing/empty — "
+              "convergence gate is a no-op.", file=sys.stderr)
+        return None
+    with open(position_scores_tsv) as fh:
+        head = fh.readline().rstrip("\n").split("\t")
+        lc = {n.strip().lower(): i for i, n in enumerate(head)}
+        g_i, p_i, c_i = lc.get("gene"), lc.get("position"), lc.get("convergence_schemes")
+        if g_i is None or p_i is None or c_i is None:
+            print("WARN: position_scores.tsv lacks gene/position/convergence_schemes "
+                  "— convergence gate is a no-op.", file=sys.stderr)
+            return None
+        skip = set()
+        for line in fh:
+            f = line.rstrip("\n").split("\t")
+            if len(f) <= max(g_i, p_i, c_i):
+                continue
+            if f[c_i].strip() == "":
+                try:
+                    skip.add((f[g_i], int(f[p_i])))
+                except ValueError:
+                    continue
+    print(f"  convergence gate: {len(skip)} position(s) will be skipped "
+          "(convergence_schemes empty).", file=sys.stderr)
+    return skip
 
 
 def load_map_file(gene, vep_map_dir):
@@ -192,13 +242,15 @@ def write_header_only(primateai_gz, output_tsv):
 # Argument parsing
 # ---------------------------------------------------------------------------
 
-if len(sys.argv) != 5:
+if len(sys.argv) not in (5, 6):
     sys.exit(
         "Usage: map_to_primateai.py "
-        "<caas_file> <vep_map_dir> <primateai_gz> <output_tsv>"
+        "<caas_file> <vep_map_dir> <primateai_gz> <output_tsv> [position_scores_tsv]"
     )
 
-caas_file, vep_map_dir, primateai_gz, output_tsv = sys.argv[1:]
+caas_file, vep_map_dir, primateai_gz, output_tsv = sys.argv[1:5]
+position_scores_tsv = sys.argv[5] if len(sys.argv) == 6 else None
+skip_positions = load_convergence_skip(position_scores_tsv)
 
 # ---------------------------------------------------------------------------
 # Step 1: Load CAAS file → group targets by (Gene, Position)
@@ -254,6 +306,9 @@ with open(caas_file) as fh:
         except ValueError:
             continue
 
+        if skip_positions is not None and (gene, position) in skip_positions:
+            continue  # fractional FOP rule: derived residues genuinely disagree
+
         tag = fields[tag_col]
         caas_pat = fields[caas_col]
         cside = fields[cside_col] if cside_col is not None else ''
@@ -276,6 +331,7 @@ with open(caas_file) as fh:
             der_aas = {c for c in raw_top.upper() if c.isalpha()} if cside == 'top' else \
                       ({c for c in raw_bot.upper() if c.isalpha()} if cside == 'bottom' else
                        {c for c in (raw_top + raw_bot).upper() if c.isalpha()})
+            der_aas = (der_aas - anc_aas) or der_aas  # drop unchanged residues
 
         key = (gene, position)
         if key not in caas_targets:

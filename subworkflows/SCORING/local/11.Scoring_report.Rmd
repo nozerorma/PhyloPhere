@@ -569,7 +569,7 @@ definitions in [`docs/ASR_PATH_SCORE.md`](../../docs/ASR_PATH_SCORE.md)):
 | Factor | What it rewards |
 |--------|-----------------|
 | `core` | P(>=2 independent changes): combinatorial replication across directions, from per-pair isolation (the change occurs above the MRCA, not inherited) |
-| `independence` | derived state absent at the pairs' shared ancestors (LAC nodes) |
+| `independence` | derived state absent at the pairs' shared ancestors (LCA nodes) |
 | `mrca_diversity` | non-parallel origins (distinct ancestral starting posteriors) |
 | `derived_agreement` | changed pairs landing on the same derived residue per side |
 | `conservation_gate` | conserved pairs holding the ancestral state deeply |

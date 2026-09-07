@@ -66,7 +66,7 @@ install.packages("remotes")
 install.packages("DT", repos="https://cloud.r-project.org")
 
 # Install dependencies for RERconverge
-install.packages("BiocManager")
+# install.packages("BiocManager")
 BiocManager::install("ggtree")
 BiocManager::install("impute")
 BiocManager::install("data.table")
@@ -76,6 +76,9 @@ BiocManager::install("data.table")
 # optional Suggests of those dependencies (e.g. FSA own Suggests pull in
 # car/doBy/pbkrtest/Deriv, none of which RERconverge actually uses, and Deriv
 # CRAN source does not compile against this R version anyway).
+# Prevent pkgbuild from throwing missing-toolchain warnings
+# options(buildtools.check = function(action) TRUE)
+
 remotes::install_github("nclark-lab/RERconverge@2bd328f7530b4aca9b48c0b3997875c9b77a7026", dependencies = NA, upgrade="never")
 
 if (!requireNamespace("RERconverge", quietly = TRUE)) {

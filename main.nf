@@ -74,7 +74,8 @@ include {FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_TOP; FADE_GENE_LISTS as FADE
 // --fade_json_dir_top/_bottom-only (no live --fade) invocation.
 include {FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_json_to_csv.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
-include {VEP}            from './workflows/vep.nf'
+include {VEP}                       from './workflows/vep.nf'
+include {VEP as VEP_STANDALONE}      from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
@@ -509,13 +510,10 @@ workflow {
 
         }
 
-        if (params.vep) {
-            // Pass null (not Channel.empty()) when there is no upstream postproc
-            // output so VEP can correctly fall back to --vep_caas_input.
-            def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : null
-            VEP(vep_caas_ch)
-            ran_any = true
-        }
+        // VEP is invoked further down: with --scoring it runs AFTER SCORING so it
+        // can consume position_scores.tsv for the convergence_schemes gate
+        // (SCORING -> VEP -> ENRICHMENT); without --scoring it runs standalone
+        // via VEP_STANDALONE after the scoring block. See both call sites below.
 
         if (params.fade) {
             // Resolve upstream channel sources for SELECTION_PREP.
@@ -660,20 +658,22 @@ workflow {
             def scoring_rer_ch           = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.summary_tsv : null
             def scoring_rer_perms_ch     = (params.rer_tool || params.rer_continuous_file) ? RER_MAIN.out.perms      : null
             def scoring_accum_ch         = accum_results     ? accum_results.results               : null
-            def scoring_vep_pai_ch       = params.vep        ? VEP.out.primateai_tsv              : null
-            def scoring_vep_cosmic_ch    = params.vep        ? VEP.out.cosmic_tsv                 : null
             // genomic_info comes from params.gene_ensembl_file (resolved inside scoring.nf)
             // scoring_caas_* are built above, outside this block — see the comment there.
 
             // FOP per-pair PSS weights (contrast_hypotheses_pairs.tsv) for
-            // domain-pooled scoring. Emitted by 4.Independent_contrasts.Rmd into
-            // the Traitfiles dir; absent on CT-live / single-contrast runs, where
-            // scoring_compute.R then treats every position as one hypothesis.
+            // domain-pooled scoring. Written by 4.Independent_contrasts.Rmd into
+            // the Traitfiles dir and carried through CHECK_MIN_CONTRASTS's
+            // traitfiles_ok_dir. Emit ONLY when the file is actually present so
+            // that an empty channel lets scoring.nf's fallback chain
+            // (--scoring_hypotheses_pairs -> outdir auto-discovery) engage;
+            // emitting a NO_HYP_PAIRS sentinel here would short-circuit it.
+            // Absent on CT-live / single-contrast runs -> scoring_compute.R then
+            // treats every position as one hypothesis.
             def scoring_hyp_pairs_ch = contrast_out
-                ? (contrast_out.trait_dir_out ?: Channel.empty()).map { d ->
-                      def f = d ? file("${d}/contrast_hypotheses_pairs.tsv") : null
-                      (f && f.exists()) ? f : file('NO_HYP_PAIRS')
-                  }
+                ? (contrast_out.trait_dir_out ?: Channel.empty())
+                      .map { d -> d ? file("${d}/contrast_hypotheses_pairs.tsv") : null }
+                      .filter { f -> f && f.exists() }
                 : null
 
             SCORING(
@@ -697,6 +697,12 @@ workflow {
             )
             ran_any = true
 
+            // VEP after SCORING: the convergence_schemes gate reads position_scores.tsv.
+            if (params.vep) {
+                def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : null
+                VEP(vep_caas_ch, SCORING.out.position_scores)
+            }
+
             if (params.enrichment) {
                 // SCORING may have REBUILT the CAAS null from --caas_pos_detail_file
                 // instead of importing caas_perms.rds. Take the null it actually
@@ -712,6 +718,8 @@ workflow {
                 def gene_scores_ch = params.scoring ? SCORING.out.gene_scores : Channel.empty()
                 def position_scores_ch = params.scoring ? SCORING.out.position_scores : Channel.empty()
                 def position_lists_ch = params.scoring ? SCORING.out.position_lists : Channel.empty()
+                def scoring_vep_pai_ch    = params.vep ? VEP.out.primateai_tsv : null
+                def scoring_vep_cosmic_ch = params.vep ? VEP.out.cosmic_tsv    : null
                 // POSENRICH background = caastools background.output (tested positions);
                 // the engine restricts it to the cleaned_background genes.
                 def posenrich_background_ch = (ct_results && ran_discovery) ? ct_results.background_file : file('NO_FILE')
@@ -788,6 +796,15 @@ workflow {
                     fade_gene_lists_sig_bottom_ch
                 )
             }
+        }
+
+        // Standalone VEP (no --scoring this run): the convergence gate then falls
+        // back to --vep_position_scores, or is a no-op. The --scoring path runs
+        // VEP inside the scoring block above with SCORING.out.position_scores.
+        if (params.vep && !params.scoring) {
+            def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : null
+            VEP_STANDALONE(vep_caas_ch, null)
+            ran_any = true
         }
 
         if (!ran_any) {

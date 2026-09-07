@@ -68,6 +68,15 @@ process CHECK_MIN_CONTRASTS {
                 cp ${traitfile} traitfiles_ok_dir/traitfile_H1.tab
             fi
         fi
+        # FOP per-pair PSS weights (contrast_hypotheses_pairs.tsv, written by
+        # 4.Independent_contrasts.Rmd) must travel WITH the passing traitfiles:
+        # traitfiles_ok_dir is what flows to SCORING as the FOP domain-pool
+        # weight source (main.nf scoring_hyp_pairs_ch). Absent on single-contrast
+        # runs — harmless.
+        if [ -d "${trait_dir}" ]; then
+            cp ${trait_dir}/contrast_hypotheses_pairs.tsv traitfiles_ok_dir/ 2>/dev/null || true
+            cp ${trait_dir}/contrast_hypotheses_summary.tsv traitfiles_ok_dir/ 2>/dev/null || true
+        fi
         echo "OK [CHECK_MIN_CONTRASTS]: \${n_fg} foreground contrasts found" \\
              "for trait '${tname}' — proceeding with CT pipeline."
     fi

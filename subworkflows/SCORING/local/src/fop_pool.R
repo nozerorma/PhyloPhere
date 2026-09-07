@@ -60,7 +60,7 @@
 #       strength    = (0.75 + 0.25 * diversity) * derived_agreement
 #       asr         = replication * strength * conservation_gate
 #     independence / diversity / derived_agreement are NOT re-derivable from the
-#     flat TSV (they need the LAC tree structure), so the per-hypothesis values
+#     flat TSV (they need the LCA tree structure), so the per-hypothesis values
 #     are pooled by the same PSS weights. Voronoi domains
 #     are disjoint, so cross-domain independence is ~1 by construction and the
 #     pooled independence only ever mildly discounts.
@@ -83,21 +83,30 @@
 #     is carried alongside as a cross-check either way.
 #
 # POINT 3 (harvest-wide, scheme-resolved derived-residue reconciliation, added
-# 2026-09-03). `derived_agreement` in path_scores.py is measured WITHIN one
-# hypothesis: the fraction of that hypothesis's changed pairs landing on its own
-# plurality derived residue. Two FOP hypotheses can each be internally unanimous
-# (da = 1.0) yet land on DIFFERENT residues from one another; pooling their da
-# values (the old `.wmean(df$derived_agreement, row_w)`) never sees that split.
+# 2026-09-03; fractional form 2026-09-07). `derived_agreement` in path_scores.py
+# is measured WITHIN one hypothesis: the fraction of that hypothesis's changed
+# pairs landing on its own plurality derived residue. Two FOP hypotheses can each
+# be internally unanimous (da = 1.0) yet land on DIFFERENT residues in the SAME
+# Voronoi domain; pooling their da values (the old
+# `.wmean(df$derived_agreement, row_w)`) never sees that split.
 #
 # When the flat TSV carries the raw-residue block (mrca_<i>_anc_aa / _top_aa /
 # _bot_aa — the un-encoded ancestral and per-side derived residues), da is
-# recomputed HARVEST-WIDE: over the pooled, node-deduplicated changed-pair set of
-# the group, per side, applying the EXACT path_scores.py plurality logic, but on
-# residues encoded under the ROW'S OWN scheme (`encode_aa_r`). A genuinely split
-# position (US: V/I/L) then gets a low harvest-wide da under US and 1.0 under a
-# scheme that co-encodes those residues — and §2g's mean(caas_row) over schemes
-# does the reconciliation with NO new multiplier. Older inputs without the *_aa
-# columns keep the per-hypothesis `.wmean` fallback.
+# recomputed HARVEST-WIDE. Per (Voronoi domain i, side s), build a PSS-weighted
+# residue DISTRIBUTION p_i(r) over the hypotheses that recorded a change at that
+# cell (weight = that pair's own PSS in domain i, the Job-A instrument;
+# `.collect_changed_pair_dists`). Then, per side with >= 2 changed domains,
+#     concentration_s = max_g( sum_i p_i^enc(g) ) / |D_s|
+# on residues encoded under the ROW'S OWN scheme (`rebuild_derived_agreement_frac`),
+# da = mean over qualifying sides. A domain unanimous across the harvest is a
+# point mass, so da == the earlier MODAL value bit-for-bit — runs without split
+# domains do not move. A genuinely split position (US: V/I/L) gets a low
+# harvest-wide da under US and 1.0 under a scheme that co-encodes those residues,
+# and §2g's mean(caas_row) over schemes does the reconciliation with NO new
+# multiplier. The earlier MODAL collapse (one majority-vote residue per domain,
+# alphabetical tie-break) is gone: its tie-break was load-bearing and either
+# fabricated or destroyed agreement. Older inputs without the *_aa columns keep
+# the per-hypothesis `.wmean` fallback.
 #
 # apply_fop_pooling also carries the POSITION-LEVEL raw-AA descriptor columns
 # produced upstream in CT_POSTPROC (`derived_residues`, `top_residue_support` /
@@ -205,6 +214,86 @@ rebuild_derived_agreement <- function(changed_df, scheme) {
   }))
 }
 
+#' PSS-weighted residue DISTRIBUTION per (Voronoi domain, side) for a harvest group.
+#'
+#' The distribution-form input to `rebuild_derived_agreement_frac` — it replaces
+#' the single MODAL residue per (domain, side) that `.collect_changed_pairs`
+#' returns. Rationale (POINT 3, refined): the modal collapses genuine
+#' between-hypothesis disagreement inside a domain (two FOP hypotheses whose
+#' contrast pair in the same Voronoi domain reconstruct to different derived
+#' residues) into one vote decided by an arbitrary alphabetical tie-break. A
+#' distribution keeps the split visible and lets a partially-aligned domain
+#' contribute its actual weight to the plurality.
+#'
+#' For (domain i, side s): over the rows (= FOP hypotheses) that recorded a
+#' change at that cell, accumulate weight `pair_pss(hyp_id, i)` (the same Job-A
+#' instrument the c_i pool uses; 1 when no PSS file / non-finite), then normalise
+#' to sum 1 -> p_i(r). Keyed on the pair INDEX i, not the mrca_<i>_node value
+#' (same argument as .collect_changed_pairs).
+#'
+#' @return named list "i|side" -> named-numeric residue -> weight (each sums to 1).
+#'   Empty list when nothing changed.
+.collect_changed_pair_dists <- function(df, node_cols, top_cols, bot_cols,
+                                        pair_pss = function(h, i) NA_real_) {
+  bad_aa <- c("NA", "NAN", "NONE")
+  K <- length(node_cols)
+  hids <- if ("hyp_id" %in% names(df)) as.character(df$hyp_id) else rep(NA_character_, nrow(df))
+  out <- list()
+  for (i in seq_len(K)) {
+    for (sd in c("top", "bot")) {
+      acol <- if (sd == "top") (if (i <= length(top_cols)) top_cols[i] else NA_character_)
+              else               (if (i <= length(bot_cols)) bot_cols[i] else NA_character_)
+      if (is.na(acol) || !(acol %in% names(df))) next
+      v <- toupper(trimws(as.character(df[[acol]])))
+      acc <- c()   # residue -> summed weight
+      for (r in seq_len(nrow(df))) {
+        aa <- v[r]
+        if (is.na(aa) || !nzchar(aa) || aa %in% bad_aa) next
+        w <- pair_pss(hids[r], i)
+        if (!is.finite(w)) w <- 1
+        acc[aa] <- (if (aa %in% names(acc)) acc[[aa]] else 0) + w
+      }
+      if (!length(acc)) next
+      out[[paste0(i, "|", sd)]] <- acc / sum(acc)
+    }
+  }
+  out
+}
+
+#' Harvest-wide, per-scheme derived_agreement from PSS-weighted residue distributions.
+#'
+#' The fractional generalisation of `rebuild_derived_agreement`: identical when
+#' every domain's distribution is a point mass (a domain unanimous across the
+#' harvest), so runs without split domains score bit-identically.
+#'
+#'   p_i^enc(g)      = sum of p_i(r) over residues r that encode to group g
+#'   concentration_s = max_g( sum over domains i in D_s of p_i^enc(g) ) / |D_s|
+#'   da              = mean over sides s with |D_s| >= 2 of concentration_s
+#'                     (1.0 when no side has >= 2 changed domains)
+#'
+#' @param dists output of `.collect_changed_pair_dists`.
+#' @param scheme one of AA_SCHEME_NAMES.
+#' @return derived_agreement in (0, 1].
+rebuild_derived_agreement_frac <- function(dists, scheme) {
+  if (is.null(dists) || !length(dists)) return(1.0)
+  concentrations <- c()
+  for (sd in c("top", "bot")) {
+    keys <- names(dists)[endsWith(names(dists), paste0("|", sd))]
+    if (length(keys) < 2) next
+    gtot <- c()   # encoded group -> summed p_i^enc
+    for (k in keys) {
+      p <- dists[[k]]
+      for (res in names(p)) {
+        g <- encode_aa_r(res, scheme)
+        gtot[g] <- (if (g %in% names(gtot)) gtot[[g]] else 0) + p[[res]]
+      }
+    }
+    concentrations <- c(concentrations, max(gtot) / length(keys))
+  }
+  if (length(concentrations) == 0) return(1.0)
+  mean(concentrations)
+}
+
 # Exact P(>= 2 successes) over independent Bernoullis — verbatim algebra of
 # path_scores.py::_p_at_least_2 (inclusion-exclusion on P0 and P1).
 .p_at_least_2 <- function(p) {
@@ -247,6 +336,25 @@ read_hypothesis_pairs <- function(path) {
     pss_score = suppressWarnings(as.numeric(hp$pss_score)),
     stringsAsFactors = FALSE
   )
+}
+
+#' Build the Job-A per-(hypothesis, domain) PSS lookup closure.
+#'
+#' Shared by `pool_group` (the c_i pool) and `apply_fop_pooling` (the
+#' `.position_descriptors` / `.collect_changed_pair_dists` weighting), so the
+#' harvest-wide derived_agreement and the position-level convergence_schemes use
+#' one identical instrument and cannot disagree on the weighting.
+#'
+#' @param hyp_pairs (hyp_id, pair, pss_score) from read_hypothesis_pairs(), or NULL.
+#' @return function(h, dom) -> that candidate pair's own PSS in domain `dom`
+#'   (NA_real_ when no PSS file / not found -> callers treat NA as weight 1).
+.make_pair_pss <- function(hyp_pairs) {
+  if (is.null(hyp_pairs)) return(function(h, dom) NA_real_)
+  function(h, dom) {
+    v <- hyp_pairs$pss_score[hyp_pairs$hyp_id == h & hyp_pairs$pair == dom]
+    v <- v[is.finite(v)]
+    if (length(v)) v[1] else NA_real_
+  }
 }
 
 #' Domain-pool the FOP hypothesis rows of one scheme-level data.frame.
@@ -302,16 +410,11 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   # credibility of the hypothesis, used for the axis pools). Job A weight:
   # each candidate pair's OWN PSS in a given domain, via (hyp_id, domain) -> pss.
   hyp_w <- setNames(rep(NA_real_, length(hyps)), hyps)
-  pair_pss <- function(h, dom) NA_real_
+  pair_pss <- .make_pair_pss(hyp_pairs)   # Job A: (hyp_id, domain) -> own PSS
   if (!is.null(hyp_pairs)) {
     for (h in hyps) {
       w <- hyp_pairs$pss_score[hyp_pairs$hyp_id == h]
       if (length(w) && any(is.finite(w))) hyp_w[h] <- mean(w[is.finite(w)])
-    }
-    pair_pss <- function(h, dom) {
-      v <- hyp_pairs$pss_score[hyp_pairs$hyp_id == h & hyp_pairs$pair == dom]
-      v <- v[is.finite(v)]
-      if (length(v)) v[1] else NA_real_
     }
   }
   row_w <- unname(hyp_w[df$hyp_id])
@@ -373,25 +476,26 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   div_pooled   <- .wmean(suppressWarnings(as.numeric(df$mrca_diversity)), row_w)
   core_row_pooled <- .wmean(suppressWarnings(as.numeric(df$core)), row_w)
 
-  # ── derived_agreement (POINT 3): harvest-wide, per-scheme ─────────────────────
+  # ── derived_agreement (POINT 3): harvest-wide, per-scheme, PSS-weighted ───────
   # `derived_agreement` in path_scores.py is a within-hypothesis fraction. Two
-  # FOP hypotheses can each be unanimous yet land on DIFFERENT residues; pooling
-  # their da never sees that. When the raw-residue block is present, recompute da
-  # over the group's DISTINCT changed pairs (one modal residue per mrca_<i> block
-  # — pair-indexed, NOT node-value keyed; see .collect_changed_pairs), per side,
-  # with the EXACT path_scores.py plurality logic, on residues encoded under THIS
-  # row's own scheme. Older inputs (no *_aa columns) keep the per-hypothesis wmean.
-  # NOTE: pair-indexing changed this from the earlier node-value dedup — a pair
-  # that reconstructs to several nodes across hypotheses now counts ONCE, so
-  # da_pooled (and hence CAAS_score) shifts slightly on multi-hypothesis
-  # positions where pairs reconstruct to unequal node counts. This is the
-  # intended "distinct changed pairs" semantics; the node dedup only approximated
-  # it while Voronoi domains resolved 1:1 to nodes.
+  # FOP hypotheses can each be unanimous yet land on DIFFERENT residues in the
+  # SAME Voronoi domain; pooling their da never sees that, and the earlier
+  # MODAL fix (one majority-vote residue per domain, alphabetical tie-break)
+  # collapsed the split back out — its tie-break was load-bearing and either
+  # fabricated or destroyed agreement.
+  #
+  # Now: build a PSS-weighted residue DISTRIBUTION per (domain, side) over the
+  # harvest (`.collect_changed_pair_dists`, weight = that pair's own PSS in the
+  # domain, the Job-A instrument) and take a weighted plurality concentration
+  # (`rebuild_derived_agreement_frac`) on residues encoded under THIS row's own
+  # scheme. A domain unanimous across the harvest is a point mass, so
+  # da == the old modal value exactly (0 movement on runs without split
+  # domains). Older inputs (no *_aa columns) keep the per-hypothesis wmean.
   have_aa_cols <- length(top_aa_cols) > 0 &&
     (any(top_aa_cols %in% names(df)) || any(bot_aa_cols %in% names(df)))
   if (have_aa_cols && !is.na(scheme) && nzchar(scheme)) {
-    cp_group <- .collect_changed_pairs(df, node_cols, top_aa_cols, bot_aa_cols)
-    da_pooled <- rebuild_derived_agreement(cp_group, scheme)
+    dists_group <- .collect_changed_pair_dists(df, node_cols, top_aa_cols, bot_aa_cols, pair_pss)
+    da_pooled   <- rebuild_derived_agreement_frac(dists_group, scheme)
   } else {
     da_pooled <- .wmean(suppressWarnings(as.numeric(df$derived_agreement)), row_w)
   }
@@ -494,12 +598,23 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
 #'         class under those grouping schemes — "chemical convergence, not
 #'         identical" (the informative case; US is absent here by construction).
 #'
-#' Computed across ALL rows of the position (every scheme, every hypothesis),
-#' one modal residue per changed pair (see .collect_changed_pairs — pair-indexed,
-#' matching residue_descriptors.py). Sits OUTSIDE the per-caap_group pooling,
-#' joined back by (Gene, Position). `derived_residues` / `{top,bottom}_residue_support`
-#' are produced upstream (CT_POSTPROC residue_descriptors.py) and only carried here.
-.position_descriptors <- function(sub_df, node_cols, top_aa_cols, bot_aa_cols, tau) {
+#' Computed across ALL rows of the position (every scheme, every hypothesis).
+#' Sits OUTSIDE the per-caap_group pooling, joined back by (Gene, Position).
+#' `derived_residues` / `{top,bottom}_residue_support` are produced upstream
+#' (CT_POSTPROC residue_descriptors.py) and only carried here.
+#'
+#' The `>= 2 changed pairs` gate and the "single exact residue -> US" identity
+#' branch use the MODAL changed-pair set (`.collect_changed_pairs`): they are
+#' structural questions (how many domains changed, is there any disagreement at
+#' all) that a distribution does not sharpen. The GS-list itself is then computed
+#' from the PSS-weighted residue DISTRIBUTION (`rebuild_derived_agreement_frac`,
+#' same instrument as pool_group's da), so a position whose derived residues are
+#' genuinely split under US no longer earns a fabricated GS convergence label.
+#'
+#' @param pair_pss Job-A (hyp_id, domain) -> PSS closure from `.make_pair_pss`;
+#'   default is equal weights.
+.position_descriptors <- function(sub_df, node_cols, top_aa_cols, bot_aa_cols, tau,
+                                  pair_pss = function(h, i) NA_real_) {
   cp <- .collect_changed_pairs(sub_df, node_cols, top_aa_cols, bot_aa_cols)
 
   # Need >= 2 changed pairs on one side for any convergence statement.
@@ -516,10 +631,14 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
     return(data.frame(convergence_schemes = "US", stringsAsFactors = FALSE))
   }
 
-  # >= 2 distinct residues: report the GS grouping schemes that still concentrate
-  # them (US will fail here by definition — the residues are not identical).
+  # >= 2 distinct residues: report the grouping schemes whose PSS-weighted
+  # residue distribution still concentrates to >= tau. US typically fails here
+  # (the residues are not identical) but a lopsided split under strong PSS
+  # weighting, or a low tau, can still admit it — same behaviour as the modal
+  # rule this replaces.
+  dists <- .collect_changed_pair_dists(sub_df, node_cols, top_aa_cols, bot_aa_cols, pair_pss)
   kept <- AA_SCHEME_NAMES[vapply(AA_SCHEME_NAMES, function(sc)
-    isTRUE(rebuild_derived_agreement(cp, sc) >= tau), logical(1))]
+    isTRUE(rebuild_derived_agreement_frac(dists, sc) >= tau), logical(1))]
   data.frame(convergence_schemes = paste(kept, collapse = ","),
              stringsAsFactors = FALSE)
 }
@@ -604,6 +723,7 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
   }
 
   hyp_pairs <- read_hypothesis_pairs(hyp_pairs_path)
+  pair_pss  <- .make_pair_pss(hyp_pairs)  # shared Job-A instrument for convergence_schemes
 
   df <- df %>% arrange(desc(ifelse(is.finite(asr_path_score), asr_path_score, -Inf)))
   df$.grp <- paste(df$Gene, df$Position, df$caap_group, sep = "\r")
@@ -655,7 +775,7 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
   out$convergence_schemes <- NULL
   desc <- df %>%
     group_by(Gene, Position) %>%
-    group_modify(~ .position_descriptors(.x, node_cols, top_aa_cols, bot_aa_cols, tau)) %>%
+    group_modify(~ .position_descriptors(.x, node_cols, top_aa_cols, bot_aa_cols, tau, pair_pss)) %>%
     ungroup()
   out <- dplyr::left_join(out, desc, by = c("Gene", "Position"))
   for (col in c(FOP_CARRIED_DESCRIPTORS, "convergence_schemes")) {

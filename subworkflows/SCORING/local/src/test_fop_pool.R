@@ -202,11 +202,12 @@ check(nrow(res1c) == 1 && approx(res1c$asr_path_score, 0.42),
       "POINT2: single-hyp + conserved cols still a no-op")
 
 # ── POINT 3: harvest-wide, scheme-resolved derived_agreement ───────────────
-# BRCA1/96, 3 hypotheses, K=2 domains. Bottom-side changed pairs land on raw
-# residues {I, V, I, V} across 4 DISTINCT MRCA nodes (p1..p4); H3 re-uses H1's
-# p1 (dedup -> counted once). No top-side change. Ancestral "A" throughout.
-#   US : bot I,V,I,V -> plurality 2/4 = 0.5  -> harvest-wide da = 0.5
-#   GS4: I,V -> both 'h'  -> 4/4 = 1.0        -> harvest-wide da = 1.0
+# BRCA1/96, 3 hypotheses, K=2 domains. Domain 1's pair is I in every hypothesis,
+# domain 2's pair is V in every hypothesis (each domain unanimous across the
+# harvest -> p_i is a point mass -> the fractional rule reduces to the modal
+# plurality exactly). No top-side change. Ancestral "A" throughout.
+#   US : bot {I},{V} -> max_g(sum p_i^enc(g))/2 = 1/2 = 0.5  -> harvest-wide da = 0.5
+#   GS4: I,V -> both 'h'  -> 2/2 = 1.0        -> harvest-wide da = 1.0
 #   GS3: I,V -> both 'l'  -> 1.0
 #   GS1/GS2: I,V split    -> 0.5
 # convergence_schemes @ tau 0.8 -> exactly {GS3, GS4}.
@@ -294,12 +295,97 @@ mk_onepair$mrca_2_top_aa <- ""   # kill the second changed pair
 check(identical(apply_fop_pooling(mk_onepair, NULL)$convergence_schemes, ""),
       "POINT3: <2 changed pairs -> convergence_schemes empty")
 
-# Pair-index (not node) dedup: pair 1 is I under H1/H3 but a stray V under H2 ->
-# modal I wins, so it still reads as identity convergence with pair 2 (also I).
+# convergence_schemes identity gate is MODAL by design (a structural "is there
+# any plurality-level disagreement" question): pair 1 is I under H1/H3 but a
+# stray V under H2 -> modal I wins -> still identity convergence with pair 2.
 mk_hypdisagree <- mk_single()
 mk_hypdisagree$mrca_1_top_aa <- c("I", "V", "I")
 check(identical(apply_fop_pooling(mk_hypdisagree, NULL)$convergence_schemes, "US"),
-      "POINT3: pair-modal residue survives one disagreeing hypothesis")
+      "POINT3: modal identity gate survives one disagreeing hypothesis")
+
+# ── POINT 3 fractional: distribution vs modal ──────────────────────────────────
+# Helper: a K-domain, bottom-only harvest group, one residue vector per domain.
+mk_frac <- function(dom_residues, grp = "US", pss = NULL) {
+  n <- length(dom_residues[[1]])
+  K <- length(dom_residues)
+  d <- data.frame(
+    Gene = "G", Position = 7L, caap_group = grp,
+    hyp_id = paste0("H", seq_len(n)),
+    asr_path_score = rep(0.5, n), independence = 1, mrca_diversity = 0,
+    derived_agreement = 1, conservation_gate = 1, core = 0.5,
+    stringsAsFactors = FALSE
+  )
+  for (i in seq_len(K)) {
+    d[[paste0("mrca_", i, "_path_score")]] <- 0.6
+    d[[paste0("mrca_", i, "_node")]]       <- paste0("n", i)
+    d[[paste0("mrca_", i, "_anc_aa")]]     <- "A"
+    d[[paste0("mrca_", i, "_top_aa")]]     <- ""
+    d[[paste0("mrca_", i, "_bot_aa")]]     <- dom_residues[[i]]
+  }
+  d
+}
+
+# Partial alignment (spec 3.4): p_N={I:1}, p_C={I:1}, p_S={I:0.4, L:0.6} under US
+#   fractional -> (1 + 1 + 0.4) / 3 = 0.80   (modal would tie-break S->L -> 2/3 = 0.667)
+resFa <- apply_fop_pooling(
+  mk_frac(list(rep("I", 5), rep("I", 5), c("I", "I", "L", "L", "L"))), NULL)
+check(approx(resFa$derived_agreement, 0.80),
+      "POINT3 frac: partial alignment -> da == 0.80 (modal gives 0.667)")
+
+# Genuine ambiguity (spec 3.4): p_N={I:1}, p_C={I:0.5,L:0.5}, p_S={L:1} under US
+#   fractional -> (1 + 0.5 [+0.5 for L] ...) max_g(I:1.5, L:1.5)/3 = 0.50
+#   (modal tie-breaks C->I and fabricates {I,I,L} -> 2/3 = 0.667)
+resAmb <- apply_fop_pooling(
+  mk_frac(list(c("I", "I"), c("I", "L"), c("L", "L"))), NULL)
+check(approx(resAmb$derived_agreement, 0.50),
+      "POINT3 frac: genuine ambiguity -> da == 0.50 (modal fabricates 0.667)")
+
+# Byte-identity: every domain unanimous across the harvest -> fractional == modal
+# for every scheme. Both sides change here.
+mk_unanim <- mk_frac(list(rep("I", 3), rep("V", 3)))
+mk_unanim$mrca_1_top_aa <- rep("F", 3); mk_unanim$mrca_2_top_aa <- rep("Y", 3)
+ncU <- grep("^mrca_\\d+_node$", names(mk_unanim), value = TRUE)
+taU <- grep("^mrca_\\d+_top_aa$", names(mk_unanim), value = TRUE)
+baU <- grep("^mrca_\\d+_bot_aa$", names(mk_unanim), value = TRUE)
+cpU    <- .collect_changed_pairs(mk_unanim, ncU, taU, baU)
+distsU <- .collect_changed_pair_dists(mk_unanim, ncU, taU, baU)
+for (sc in AA_SCHEME_NAMES) {
+  check(approx(rebuild_derived_agreement_frac(distsU, sc),
+              rebuild_derived_agreement(cpU, sc)),
+        sprintf("POINT3 frac: byte-identical to modal on unanimous domains (%s)", sc))
+}
+
+# PSS weighting (spec 3.1): domain 1 = H1:"I"(pss 3) / H2:"L"(pss 1) -> {I:0.75, L:0.25};
+# domain 2 = "I" for both. US bottom: max_g(I: 0.75 + 1, L: 0.25) / 2 = 1.75/2 = 0.875.
+# Equal weight -> {I:0.5, L:0.5} -> 1.5/2 = 0.75.
+mk_pssw <- mk_frac(list(c("I", "L"), c("I", "I")))
+hp_pssw <- data.frame(
+  hypothesis_id = c("H1", "H2", "H1", "H2"),
+  pair = c(1L, 1L, 2L, 2L), pss_score = c(3, 1, 2, 2),
+  stringsAsFactors = FALSE)
+hp_pssw_path <- tempfile(fileext = ".tsv")
+write.table(hp_pssw, hp_pssw_path, sep = "\t", quote = FALSE, row.names = FALSE)
+check(approx(apply_fop_pooling(mk_pssw, hp_pssw_path)$derived_agreement, 0.875),
+      "POINT3 frac: PSS-weighted da == 0.875 (I gets 0.75 of domain 1)")
+check(approx(apply_fop_pooling(mk_pssw, NULL)$derived_agreement, 0.75),
+      "POINT3 frac: equal-weight da == 0.75 (same fixture, no PSS file)")
+
+# .position_descriptors picks up the same PSS instrument. domain 1 = I always;
+# domain 2 = V,V,V,I (modal V, so cp is multi-residue {I,V} -> GS-list branch).
+# I/V split under GS1/GS2 but co-encode under GS3/GS4.
+#   equal weight: p_2 = {V:0.75, I:0.25} -> GS1 concentration (1 + 0.25)/2 = 0.625 < tau
+#     -> convergence_schemes == "GS3,GS4"
+#   weight the lone-I hypothesis (H4) x9: p_2 = {I:0.75, V:0.25} -> GS1 concentration
+#     (1 + 0.75)/2 = 0.875 >= tau -> GS1/GS2 also clear.
+mk_cs <- mk_frac(list(rep("I", 4), c("V", "V", "V", "I")))
+ncC <- grep("^mrca_\\d+_node$", names(mk_cs), value = TRUE)
+taC <- grep("^mrca_\\d+_top_aa$", names(mk_cs), value = TRUE)
+baC <- grep("^mrca_\\d+_bot_aa$", names(mk_cs), value = TRUE)
+cs_eq <- .position_descriptors(mk_cs, ncC, taC, baC, tau = 0.8)$convergence_schemes
+cs_wI <- .position_descriptors(mk_cs, ncC, taC, baC, tau = 0.8,
+                               pair_pss = function(h, i) if (h == "H4") 9 else 1)$convergence_schemes
+check(identical(cs_eq, "GS3,GS4") && identical(cs_wI, "US,GS1,GS2,GS3,GS4"),
+      "POINT3 frac: .position_descriptors convergence_schemes responds to pair_pss weighting")
 
 cat("\n", if (ok) "ALL TESTS PASSED" else "SOME TESTS FAILED", "\n", sep = "")
 quit(status = if (ok) 0 else 1)

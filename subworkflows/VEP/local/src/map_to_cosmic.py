@@ -37,16 +37,57 @@ def anc_der_from_descriptor(derived_residues, top_residue_support,
 
     See map_to_primateai.py for the full note. The support columns carry the
     per-clade residue letters (``caas`` left/right convention); ``change_side``
-    picks the derived clade, the other clade is the ancestral state.
+    picks the derived clade, the other clade is the ancestral state. A residue on
+    BOTH clades did not change and is dropped from the derived set (``der - anc``,
+    keep-all safety if that empties it).
     """
     top_set = _support_letters(top_residue_support)
     bot_set = _support_letters(bottom_residue_support)
     cs = str(change_side or "").strip().lower()
     if cs == "top":
-        return bot_set, top_set
-    if cs == "bottom":
-        return top_set, bot_set
-    return set(), top_set | bot_set
+        anc, der = bot_set, top_set
+    elif cs == "bottom":
+        anc, der = top_set, bot_set
+    else:
+        anc, der = set(), top_set | bot_set
+    return anc, (der - anc) or der
+
+
+def load_convergence_skip(position_scores_tsv):
+    """{(gene, int(position))} to SKIP because the fractional FOP rule found the
+    derived residues genuinely disagree (``convergence_schemes`` == "").
+
+    Reads SCORING's position_scores.tsv (optional). None -> gate is a no-op.
+    """
+    if not position_scores_tsv or position_scores_tsv in ("NO_FILE", "-"):
+        print("WARN: no position_scores.tsv given — convergence gate is a no-op.",
+              file=sys.stderr)
+        return None
+    if not os.path.exists(position_scores_tsv) or os.path.getsize(position_scores_tsv) == 0:
+        print(f"WARN: position_scores.tsv '{position_scores_tsv}' missing/empty — "
+              "convergence gate is a no-op.", file=sys.stderr)
+        return None
+    with open(position_scores_tsv) as fh:
+        head = fh.readline().rstrip("\n").split("\t")
+        lc = {n.strip().lower(): i for i, n in enumerate(head)}
+        g_i, p_i, c_i = lc.get("gene"), lc.get("position"), lc.get("convergence_schemes")
+        if g_i is None or p_i is None or c_i is None:
+            print("WARN: position_scores.tsv lacks gene/position/convergence_schemes "
+                  "— convergence gate is a no-op.", file=sys.stderr)
+            return None
+        skip = set()
+        for line in fh:
+            f = line.rstrip("\n").split("\t")
+            if len(f) <= max(g_i, p_i, c_i):
+                continue
+            if f[c_i].strip() == "":
+                try:
+                    skip.add((f[g_i], int(f[p_i])))
+                except ValueError:
+                    continue
+    print(f"  convergence gate: {len(skip)} position(s) will be skipped.", file=sys.stderr)
+    return skip
+
 
 def load_map_file(gene, vep_map_dir):
     pattern = os.path.join(vep_map_dir, f"{gene}.*.map.tsv")
@@ -140,10 +181,13 @@ def write_header_only(output_tsv):
     sys.exit(0)
 
 def main():
-    if len(sys.argv) != 5:
-        sys.exit("Usage: map_to_cosmic.py <caas_file> <vep_map_dir> <cosmic_gz> <output_tsv>")
+    if len(sys.argv) not in (5, 6):
+        sys.exit("Usage: map_to_cosmic.py <caas_file> <vep_map_dir> <cosmic_gz> "
+                 "<output_tsv> [position_scores_tsv]")
 
-    caas_file, vep_map_dir, cosmic_gz, output_tsv = sys.argv[1:]
+    caas_file, vep_map_dir, cosmic_gz, output_tsv = sys.argv[1:5]
+    position_scores_tsv = sys.argv[5] if len(sys.argv) == 6 else None
+    skip_positions = load_convergence_skip(position_scores_tsv)
 
     print("Loading CAAS file ...", file=sys.stderr)
     caas_targets = {}
@@ -195,6 +239,9 @@ def main():
             except ValueError:
                 continue
 
+            if skip_positions is not None and (gene, position) in skip_positions:
+                continue  # fractional FOP rule: derived residues genuinely disagree
+
             tag = fields[tag_col]
             caas_pat = fields[caas_col]
             cside = fields[cside_col] if cside_col is not None else ''
@@ -216,6 +263,7 @@ def main():
                 der_aas = {c for c in raw_top.upper() if c.isalpha()} if cside == 'top' else \
                           ({c for c in raw_bot.upper() if c.isalpha()} if cside == 'bottom' else
                            {c for c in (raw_top + raw_bot).upper() if c.isalpha()})
+                der_aas = (der_aas - anc_aas) or der_aas  # drop unchanged residues
 
             key = (gene, position)
             if key not in caas_targets:

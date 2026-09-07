@@ -183,12 +183,12 @@ def test_point2_conserved_gate_dedup():
 
 
 def test_point3_harvest_wide_da():
-    # Twin of test_fop_pool.R's POINT 3 case. Two null hypotheses, K=2 domains,
-    # bottom-side changed pairs landing on raw {I, V} in domain 1 and {I, V} in
-    # domain 2 (a between-hypothesis split). No node identity on the null, so the
-    # dedup is by (domain, side, raw_aa): 4 distinct changed residues remain.
-    #   US : bot I,V,I,V -> plurality 2/4 = 0.5
-    #   GS4: I,V both 'h' -> 4/4 = 1.0
+    # Twin of test_fop_pool.R's POINT 3 case. Two null hypotheses, K=2 domains.
+    # Domain 1's pair is {I(H1), V(H2)}, domain 2's is {V(H1), I(H2)} — a
+    # between-hypothesis split in BOTH domains. Fractional form: each domain's
+    # distribution is {I:0.5, V:0.5}.
+    #   US : gtot I=1.0, V=1.0 -> max/|D_s| = 1.0/2 = 0.5
+    #   GS4: I,V both 'h'      -> 2.0/2 = 1.0
     recs = [
         {"hyp": "H1", "asr_path_score": 0.5, "independence": 1.0,
          "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
@@ -208,6 +208,55 @@ def test_point3_harvest_wide_da():
     plain = [{k: v for k, v in r.items()
               if k not in ("pair_derived_top", "pair_derived_bot")} for r in recs]
     assert approx(pool_hypotheses(plain, {}, scheme="US")["derived_agreement"], 1.0)
+
+
+def test_point3_no_raw_dedup():
+    # Three null hypotheses, K=2 domains, EVERY hypothesis lands domain 1 on "I"
+    # and domain 2 on "L" (each domain unanimous -> a point mass). Fractional US:
+    # gtot I=1.0, L=1.0 -> 1.0/2 = 0.5. The old (domain,side,raw) dedup would also
+    # give 0.5 here; the point is the count-free distribution never collapses.
+    recs = [
+        {"hyp": f"H{i}", "asr_path_score": 0.5, "independence": 1.0,
+         "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+         "core": 0.5, "pair_scores": {1: 0.7, 2: 0.6},
+         "pair_derived_top": {}, "pair_derived_bot": {1: "I", 2: "L"}}
+        for i in (1, 2, 3)
+    ]
+    assert approx(pool_hypotheses(recs, {}, scheme="US")["derived_agreement"], 0.5)
+    # I and L co-encode under GS3/GS4 -> 1.0.
+    assert approx(pool_hypotheses(recs, {}, scheme="GS4")["derived_agreement"], 1.0)
+
+
+def test_point3_pss_weighting():
+    # domain 1 = H1:"I" / H2:"L"; domain 2 = "I" for both. Bottom side.
+    #   equal weight   -> p_1 = {I:0.5, L:0.5} -> US gtot I=1.5, L=0.5 -> 1.5/2 = 0.75
+    #   pss H1:3 H2:1  -> p_1 = {I:0.75, L:0.25} -> US gtot I=1.75, L=0.25 -> 0.875
+    recs = [
+        {"hyp": "H1", "asr_path_score": 0.5, "independence": 1.0,
+         "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+         "core": 0.5, "pair_scores": {1: 0.7, 2: 0.6},
+         "pair_derived_top": {}, "pair_derived_bot": {1: "I", 2: "I"}},
+        {"hyp": "H2", "asr_path_score": 0.5, "independence": 1.0,
+         "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+         "core": 0.5, "pair_scores": {1: 0.7, 2: 0.6},
+         "pair_derived_top": {}, "pair_derived_bot": {1: "L", 2: "I"}},
+    ]
+    assert approx(pool_hypotheses(recs, {}, scheme="US")["derived_agreement"], 0.75)
+    pss = {("H1", 1): 3.0, ("H2", 1): 1.0, ("H1", 2): 2.0, ("H2", 2): 2.0}
+    assert approx(pool_hypotheses(recs, pss, scheme="US")["derived_agreement"], 0.875)
+
+
+def test_point3_matches_r_oracle():
+    # Same partial-alignment scenario as test_fop_pool.R's frac fixture:
+    # p_N={I:1}, p_C={I:1}, p_S={I:0.4, L:0.6} under US -> (1 + 1 + 0.4)/3 = 0.80.
+    recs = []
+    for i, s3 in enumerate(("I", "I", "L", "L", "L"), start=1):
+        recs.append({
+            "hyp": f"H{i}", "asr_path_score": 0.5, "independence": 1.0,
+            "mrca_diversity": 0.0, "derived_agreement": 1.0, "conservation_gate": 1.0,
+            "core": 0.5, "pair_scores": {1: 0.7, 2: 0.6, 3: 0.6},
+            "pair_derived_top": {}, "pair_derived_bot": {1: "I", 2: "I", 3: s3}})
+    assert approx(pool_hypotheses(recs, {}, scheme="US")["derived_agreement"], 0.80)
 
 
 if __name__ == "__main__":

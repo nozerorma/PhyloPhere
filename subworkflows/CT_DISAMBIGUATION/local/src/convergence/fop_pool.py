@@ -25,9 +25,11 @@ the harvest's globally weakest domain), so the split does two jobs:
 * Job B -- the axis pools (independence / mrca_diversity / derived_agreement /
   conservation_gate): per-hypothesis weight = MEAN pair PSS across its domains.
 
-Residual R/py difference (unchanged, documented in the memory): the null record
-carries no pair identity, so ``c_d`` here has no MRCA-node dedup — it wmean's the
-per-hypothesis domain scores directly. Same weight *scheme*, not bit-identical.
+Residual R/py difference (``c_d`` only): the null record carries no MRCA-node
+identity, so ``c_d`` here has no node dedup — it wmean's the per-hypothesis
+domain scores directly. Same weight *scheme*, not bit-identical. (The POINT 3
+derived_agreement no longer has this gap — R and py both build a PSS-weighted
+residue distribution per (domain, side) with no dedup; see below.)
 
 DIRECTIONAL core (fixed 2026-09-04; mirrors path_scores.py's own
 ``core_top``/``core_bottom`` split and fop_pool.R::pool_group). ``pair_scores``
@@ -46,9 +48,11 @@ SEPARATELY over its own distinct domains and combined the way
 Older records without the directional fields fall back to pooling the
 side-averaged ``pair_scores`` in one undifferentiated ``core`` (the prior,
 known-approximate behaviour) so a stale cache still scores instead of erroring.
-* ``independence`` / ``mrca_diversity`` / ``derived_agreement`` /
-  ``conservation_gate`` are pooled across hypotheses by the same PSS weights
-  (they are carried on the null's PositionAxes record for exactly this);
+* ``independence`` / ``mrca_diversity`` / ``conservation_gate`` are pooled
+  across hypotheses by the same PSS weights (carried on the null's PositionAxes
+  record); ``derived_agreement`` is rebuilt harvest-wide from the PSS-weighted
+  per-(domain, side) residue distribution (POINT 3, ``_domain_side_dists`` +
+  ``_da_frac_from_dists``);
 * recombine with the path_scores.py algebra, verbatim from fop_pool.R::
 
       diversity_mult = 0.75 + 0.25 * mrca_diversity_pooled
@@ -88,16 +92,11 @@ def _encode_aa(aa: Optional[str], scheme: Optional[str]) -> Optional[str]:
 def _rebuild_derived_agreement(
     changed: List[Tuple[str, str]], scheme: Optional[str]
 ) -> float:
-    """Harvest-wide, per-scheme derived_agreement — Python twin of
-    fop_pool.R::rebuild_derived_agreement, for the permulation null.
+    """Legacy MODAL harvest-wide derived_agreement (superseded 2026-09-07 by the
+    PSS-weighted distribution form, ``_domain_side_dists`` + ``_da_frac_from_dists``).
 
-    ``changed`` is a list of ``(side, raw_aa)`` over the null's distinct changed
-    pairs. Residual R/py difference (consistent with the ``c_d`` no-node-dedup
-    caveat): the null record has no MRCA-node identity, so the caller dedups by
-    ``(domain, side, raw_aa)`` instead of ``(node, side)`` — two hypotheses
-    landing a domain's pair on the same raw residue collapse, distinct residues
-    in one domain stay distinct (so a genuine between-hypothesis split is still
-    seen). Same plurality arithmetic as path_scores.py.
+    Kept for reference / older callers. ``changed`` is a list of ``(side, raw_aa)``
+    over the null's changed pairs; plain plurality-count concentration per side.
     """
     concentrations: List[float] = []
     for want_side in ("top", "bot"):
@@ -109,6 +108,72 @@ def _rebuild_derived_agreement(
         for e in enc:
             counts[e] = counts.get(e, 0) + 1
         concentrations.append(max(counts.values()) / len(enc))
+    if not concentrations:
+        return 1.0
+    return sum(concentrations) / len(concentrations)
+
+
+def _domain_side_dists(
+    hyps: List[Dict],
+    pss_by_hyp_domain: Optional[Dict[Tuple[str, int], float]],
+) -> Dict[Tuple[int, str], Dict[str, float]]:
+    """PSS-weighted residue DISTRIBUTION per (Voronoi domain, side) — Python twin
+    of fop_pool.R::.collect_changed_pair_dists, for the permulation null.
+
+    For (domain d, side s): over the hypothesis records that recorded a change at
+    that cell (``pair_derived_top`` / ``pair_derived_bot`` = ``{domain -> raw}``,
+    only the changed side populated), accumulate weight
+    ``pss_by_hyp_domain[(hyp, d)]`` (1.0 when missing/NaN), then normalise to
+    sum 1. No ``(domain, side, raw)`` dedup — every record contributes its weight.
+    """
+    acc: Dict[Tuple[int, str], Dict[str, float]] = {}
+    for r in hyps:
+        h = r.get("hyp")
+        for side, fld in (("top", "pair_derived_top"), ("bot", "pair_derived_bot")):
+            for d, raw in (r.get(fld) or {}).items():
+                if not raw:
+                    continue
+                raw_u = str(raw).strip().upper()
+                if not raw_u or raw_u in ("NA", "NAN", "NONE"):
+                    continue
+                w = pss_by_hyp_domain.get((h, d)) if pss_by_hyp_domain else None
+                if w is None or w != w:  # None or NaN -> equal weight
+                    w = 1.0
+                bucket = acc.setdefault((d, side), {})
+                bucket[raw_u] = bucket.get(raw_u, 0.0) + float(w)
+    out: Dict[Tuple[int, str], Dict[str, float]] = {}
+    for k, resid in acc.items():
+        tot = sum(resid.values())
+        if tot > 0:
+            out[k] = {res: v / tot for res, v in resid.items()}
+    return out
+
+
+def _da_frac_from_dists(
+    dists: Dict[Tuple[int, str], Dict[str, float]], scheme: Optional[str]
+) -> float:
+    """Harvest-wide, per-scheme derived_agreement from PSS-weighted residue
+    distributions — Python twin of fop_pool.R::rebuild_derived_agreement_frac.
+
+        concentration_s = max_g( sum over domains d on side s of p_d^enc(g) ) / |D_s|
+        da              = mean over sides with |D_s| >= 2 (1.0 when none qualify)
+
+    A domain unanimous across the harvest is a point mass, so this equals the
+    old modal plurality exactly on runs without split domains.
+    """
+    if not dists:
+        return 1.0
+    concentrations: List[float] = []
+    for want_side in ("top", "bot"):
+        keys = [k for k in dists if k[1] == want_side]
+        if len(keys) < 2:
+            continue
+        gtot: Dict[Optional[str], float] = {}
+        for k in keys:
+            for res, p in dists[k].items():
+                g = _encode_aa(res, scheme)
+                gtot[g] = gtot.get(g, 0.0) + p
+        concentrations.append(max(gtot.values()) / len(keys))
     if not concentrations:
         return 1.0
     return sum(concentrations) / len(concentrations)
@@ -244,29 +309,20 @@ def pool_hypotheses(
 
     # derived_agreement (POINT 3): recompute HARVEST-WIDE under the null's active
     # scheme when the records carry raw per-side derived residues, mirroring
-    # fop_pool.R::rebuild_derived_agreement. Two null hypotheses can each be
-    # internally unanimous yet land on different residues; pooling their da never
-    # sees that. Fall back to the per-hypothesis wmean when the raw residues are
+    # fop_pool.R::pool_group. Per (domain, side) build a PSS-weighted residue
+    # distribution over the hypotheses and take a weighted plurality
+    # concentration (_domain_side_dists + _da_frac_from_dists). Two null
+    # hypotheses can each be internally unanimous yet land on different residues
+    # in the same domain; a distribution keeps that split visible. A domain
+    # unanimous across the harvest is a point mass -> equals the old modal value
+    # exactly. Fall back to the per-hypothesis wmean when the raw residues are
     # absent (older null records / non-FOP).
     has_raw = any(
         ("pair_derived_top" in r or "pair_derived_bot" in r) for r in hyps
     )
     if has_raw:
-        seen: set = set()
-        changed: List[Tuple[str, str]] = []
-        for r in hyps:
-            for want_side, fld in (("top", "pair_derived_top"),
-                                   ("bot", "pair_derived_bot")):
-                for d, raw in (r.get(fld) or {}).items():
-                    if not raw:
-                        continue
-                    raw_u = str(raw).strip().upper()
-                    key = (d, want_side, raw_u)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    changed.append((want_side, raw_u))
-        da = _rebuild_derived_agreement(changed, scheme)
+        da = _da_frac_from_dists(
+            _domain_side_dists(hyps, pss_by_hyp_domain), scheme)
     else:
         da = _pool("derived_agreement", 1.0)
 

@@ -13,6 +13,7 @@ include { COSMIC_MAP }     from "${baseDir}/subworkflows/VEP/cosmic.nf"
 workflow VEP {
     take:
         caas_input
+        position_scores_input   // SCORING position_scores.tsv (convergence gate); null/absent -> no-op
 
     main:
         // Output channels default to empty when VEP is enabled without any CAAS source.
@@ -42,11 +43,23 @@ workflow VEP {
             assert params.vep_map_dir : "VEP requires --vep_map_dir (directory containing per-gene MAP TSV files)"
             def map_dir_ch = Channel.value(file(params.vep_map_dir))
 
+            // Convergence gate: SCORING position_scores.tsv (optional). Integrated
+            // runs pass a channel; standalone runs may set --vep_position_scores;
+            // otherwise a NO_FILE sentinel makes the gate a no-op.
+            def ps_ch
+            if (position_scores_input) {
+                ps_ch = position_scores_input.collect().map { it ? it[0] : file('NO_FILE') }.ifEmpty(file('NO_FILE'))
+            } else if (params.vep_position_scores) {
+                ps_ch = Channel.value(file(params.vep_position_scores))
+            } else {
+                ps_ch = Channel.value(file('NO_FILE'))
+            }
+
             // ── PrimateAI-3D score mapping (conditional on database existence) ──
             def pai_db_file = params.vep_primateai_db ? file(params.vep_primateai_db) : file('NO_FILE')
             if (pai_db_file.name != 'NO_FILE' && pai_db_file.exists() && pai_db_file.size() > 0) {
                 def pai_db_ch = Channel.value(pai_db_file)
-                def pai_out = PRIMATEAI_MAP(caas_ch, map_dir_ch, pai_db_ch)
+                def pai_out = PRIMATEAI_MAP(caas_ch, map_dir_ch, pai_db_ch, ps_ch)
                 primateai_out = pai_out.primateai_tsv
             } else {
                 log.info "ℹ VEP: PrimateAI-3D database not provided/empty — skipping PrimateAI-3D pathogenicity mapping."
@@ -56,7 +69,7 @@ workflow VEP {
             def cosmic_db_file = params.cosmic_db ? file(params.cosmic_db) : file('NO_FILE')
             if (cosmic_db_file.name != 'NO_FILE' && cosmic_db_file.exists() && cosmic_db_file.size() > 0) {
                 def cosmic_db_ch = Channel.value(cosmic_db_file)
-                COSMIC_MAP(caas_ch, map_dir_ch, cosmic_db_ch)
+                COSMIC_MAP(caas_ch, map_dir_ch, cosmic_db_ch, ps_ch)
                 cosmic_out = COSMIC_MAP.out.cosmic_tsv
             } else {
                 log.info "ℹ VEP: COSMIC database not provided/empty — skipping COSMIC somatic mutation mapping."
