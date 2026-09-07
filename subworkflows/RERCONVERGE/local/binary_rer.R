@@ -100,75 +100,80 @@ message(sprintf(
 res <- correlateWithBinaryPhenotype(
   traitRERw,
   fg_paths,
-  min.sp        = min_sp,
-  min.pos       = min_pos,
-  weighted      = "auto",
-  winsorizeRER  = winR,
-  winsorizeTrait = NULL
+  min.sp         = min_sp,
+  min.pos        = min_pos,
+  weighted       = "auto",
+  winsorizeRER   = winR,
+  winsorizetrait = NULL
 )
 message(sprintf("[RER_BIN] Correlation done: %d genes tested.", nrow(res)))
 
-# ── Permutation statistics (random foreground relabeling null) ────────────────
-# Binary permutations randomly reassign foreground labels among species while
-# preserving the count of foreground species, providing an empirical null.
-# Note: unlike continuous (BM simulation), this uses permutations of labels.
+# ── Permutation statistics (RERconverge binary CC permulation) ────────────────
+# RERconverge::getPermsBinary(permmode = "cc") builds null foreground histories
+# with categoricalPermulations(): an Mk (equal-rates) transition matrix fit on
+# the observed 0/1 trait, then stochastically-mapped null tip/node states whose
+# likelihood is polished per tree. No Brownian-motion simulation and no tree
+# rooting are involved (that path belongs to the older simBinPhenoCC).
+#
+# Requires RERconverge >= 0.3.0 (categoricalPermulations()). Older builds route
+# permmode = "cc" through simBinPhenoCC(), which needs a real `root_sp`
+# (outgroup) that this pipeline does not define — hence the explicit version
+# guard below.
 num_batches     <- as.integer(args[10])
 perms_per_batch <- as.integer(args[11])
 
 if (num_batches > 0 && perms_per_batch > 0) {
   message(sprintf(
-    "[RER_BIN] Permutation testing: %d batches x %d permutations ...",
+    "[RER_BIN] Permutation testing: %d batches x %d permutations (CC null) ...",
     num_batches, perms_per_batch
   ))
 
-  if (!exists("getAllPermsBinary")) {
-    stop(paste0("[RER_BIN] getAllPermsBinary() is not provided by the installed ",
-                "RERconverge build. Binary RER permulations need to be wired to ",
-                "RERconverge::getPermsBinary() (requires sisters_list + root_sp). ",
-                "Set rer_perm_batches = 0 to skip until this is implemented."))
+  if (!exists("getPermsBinary")) {
+    stop("[RER_BIN] RERconverge::getPermsBinary() not found. Update RERconverge.")
+  }
+  if (!exists("categoricalPermulations")) {
+    stop(paste0("[RER_BIN] This RERconverge build routes getPermsBinary(permmode=",
+                "'cc') through simBinPhenoCC(), which needs an outgroup (root_sp) ",
+                "that PhyloPhere does not define. Install RERconverge >= 0.3.0 ",
+                "(provides categoricalPermulations), or set rer_perm_batches = 0."))
   }
 
-  # ── Null master tree ──────────────────────────────────────────────────────
-  # Built standalone for `mastertree=` only. `trees=` stays the ORIGINAL
-  # treesObj so foreground2Paths() inside the null loop keeps producing path
-  # vectors consistent with the RER matrix (see the dimensional guard above).
-  sim_master <- ape::keep.tip(
-    geneTrees$masterTree,
-    intersect(c(fg_sp, bg_sp), geneTrees$masterTree$tip.label)
+  # getPermsBinary()'s CC branch scores every null with correlateWithBinaryPhenotype()
+  # at its defaults — clade = "all" foreground paths, weighted = "auto", NO RER
+  # winsorization, min.sp = 10, min.pos = 2. For permpvalcor() to compare like
+  # with like, the reference observed correlation must be computed the same way.
+  # `res` above (user's rer_binary_clade + winsorizeRER) still carries the
+  # reported Rho / P; only the p.perm reference uses these matched settings.
+  fg_paths_all <- foreground2Paths(fg_sp, geneTrees, clade = "all")
+  res_ref      <- correlateWithBinaryPhenotype(traitRERw, fg_paths_all,
+                                               weighted = "auto")
+
+  run_bin_perm_batch <- function(n) getPermsBinary(
+    numperms        = n,
+    fg_vec          = fg_sp,
+    sisters_list    = NA,          # only consumed when calculateenrich = TRUE
+    root_sp         = NA,          # unused by the categoricalPermulations CC path
+    RERmat          = traitRERw,
+    trees           = geneTrees,   # ORIGINAL treesObj — keeps path length == ncol(RERmat)
+    mastertree      = geneTrees$masterTree,
+    permmode        = "cc",
+    method          = "k",
+    calculateenrich = FALSE
   )
-  if (!ape::is.rooted(sim_master)) {
-    sim_master <- phytools::midpoint.root(sim_master)
-  }
-  sim_master <- ape::multi2di(sim_master)
-  zero_edge  <- sim_master$edge.length <= 0
-  if (any(zero_edge)) {
-    sim_master$edge.length[zero_edge] <- 1e-8
-  }
 
   message(sprintf("  [RER_BIN] Permutation batch 1 / %d", num_batches))
-  perms_combined <- getAllPermsBinary(
-    numperms   = perms_per_batch,
-    fg_sp      = fg_sp,
-    RERmat     = traitRERw,
-    trees      = geneTrees,
-    mastertree = sim_master
-  )
+  perms_combined <- run_bin_perm_batch(perms_per_batch)
 
   if (num_batches > 1) {
     for (i in 2:num_batches) {
       message(sprintf("  [RER_BIN] Permutation batch %d / %d", i, num_batches))
-      batch_i <- getAllPermsBinary(
-        numperms   = perms_per_batch,
-        fg_sp      = fg_sp,
-        RERmat     = traitRERw,
-        trees      = geneTrees,
-        mastertree = sim_master
+      perms_combined <- combinePermData(
+        perms_combined, run_bin_perm_batch(perms_per_batch), enrich = FALSE
       )
-      perms_combined <- combinePermData(perms_combined, batch_i, enrich = FALSE)
     }
   }
 
-  permpvals      <- permpvalcor(res, perms_combined)
+  permpvals      <- permpvalcor(res_ref, perms_combined)
 
   # Apply standard pseudo-count correction (num + 1) / (denom + 1)
   # to prevent exact 0 p-values and properly represent finite empirical probability.
