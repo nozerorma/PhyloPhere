@@ -358,6 +358,112 @@ pin de `install_env.sh` para evitar esta confusión en el futuro.
 calcula una correlación observada de referencia con esos mismos ajustes para `permpvalcor`,
 manteniendo la `res` reportada con el `rer_binary_clade` y `winsorizeRER` del usuario.
 
+**Estado (2026-09-07):** wrapper implementado y probado end-to-end en local contra
+RERconverge `@2bd328f7` (`~/micromamba/envs/phylophere`): `getPermsBinary(permmode="cc",
+sisters_list=NA, root_sp=NA)` corre limpio, `categoricalPermulations` genera las historias
+nulas, y `binary_rer.R` produce `p.perm`/`p.perm.adj` para todos los genes. Se detectó de
+paso que **`permpvalcor` cambió de firma** entre el tag `v0.3.0` (vector con nombre, sin
+pseudo-conteo) y `2bd328f7` (`data.frame(permpval, permstats)` con el pseudo-conteo
+`(num+1)/(denom+1)` ya aplicado y p empírica bi-cola centrada en la mediana). Tanto
+`binary_rer.R` como `continuous_rer.R` asumían la firma vieja y (a) fallaban al indexar el
+`data.frame` con `[rownames(res)]`, (b) doblaban el pseudo-conteo sobre el vector que ya lo
+traía. Corregido en ambos (`commit ca5240a`): rama según `is.data.frame()`.
+
+---
+
+## 5. Cómo se seleccionan las especies con fenotipo binario (selección de contrastes CAAS)
+
+Esto es independiente del null del RER: se refiere a
+[`3.CI-composition.Rmd`](../subworkflows/TRAIT_ANALYSIS/local/3.CI-composition.Rmd) +
+[`selection_algorithm.R::pair_sel.f`](../subworkflows/TRAIT_ANALYSIS/local/src/selection_algorithm.R)
++ [`lean_contrast_selector.R`](../subworkflows/CT/local/scripts/lean_contrast_selector.R),
+que producen los K pares de contraste sobre los que se calcula el estadístico CAAS (y su
+null en `permulations.R`).
+
+### 5.1 Un fenotipo 0/1 se trata como ordinal
+
+`is_ordinal_trait()` ([`stats.R:19`](../subworkflows/TRAIT_ANALYSIS/local/src/stats.R#L19))
+devuelve `TRUE` para cualquier vector de 2–5 niveles enteros → un 0/1 entra por la **rama
+ordinal**:
+
+- **Categorías:** `trait >= nivel_max` → `top` (foreground); `trait <= nivel_min` → `bottom`
+  (background); sin intermedios.
+- **Puerta de tipo (stage 1):** se conservan los pares con un miembro `top` y otro `bottom`
+  → **todos los pares fg–bg**.
+- **Puerta PSS (stage 2):** **se salta** para ordinal (`.continuous_pss_gate == FALSE`,
+  [`3.CI-composition.Rmd:372`](../subworkflows/TRAIT_ANALYSIS/local/3.CI-composition.Rmd#L372)).
+  Todos los pares fg–bg pasan como candidatos. `pss_top_pct` **no tiene ningún efecto** con
+  rasgo binario.
+
+### 5.2 Qué discrimina realmente entre pares fg–bg
+
+Para un 0/1 estricto, en cada par candidato fg–bg:
+
+- `abs_diff = |1 − 0| = 1` para **todos** los pares → clave de desempate **inerte** en
+  `rank_candidates` ([`lean_contrast_selector.R:82`](../subworkflows/CT/local/scripts/lean_contrast_selector.R#L82)).
+- `normalized_difference = trait_difference / max(trait_difference) = 1/1 = 1` para todos →
+  **desaparece** de `FinalScore` en `calculate_pairwise_scores`
+  ([`pss_core.R:224`](../subworkflows/CT/local/scripts/pss_core.R#L224)).
+- Queda `pss_score = FinalScore = s(par) / normalized_patristic(par)`, con
+  `s = 2·Φ(1/√var_modelo) − 1` y `var_modelo` la varianza del contraste predicha por la
+  covarianza BM u OU ajustada.
+
+Es decir: **para un fenotipo binario el `pss_score` es una función monótona de la relación
+filogenética del par** (distancia patrística filtrada por el modelo), sin ninguna
+información del rasgo más allá de "difieren". `s` decrece con la distancia (una diferencia
+de 1 sobre una distancia-modelo grande es poco sorprendente → `s → 0`), y el término
+`1/normalized_patristic` también decrece → **`pss_score` decrece monótonamente con la
+distancia** → el ranking es "primero el par fg–bg filogenéticamente más próximo".
+
+El **criterio efectivo de selección para binario** queda:
+
+> Semilla = el par fg–bg más próximo; después añade greedy los pares fg–bg con mayor Dunn
+> modificado (máx. `distancia al par más cercano / diámetro propio`), manteniendo cada par
+> internamente compacto y mutuamente alejado; para cuando ningún par mantiene Dunn ≥ 1.
+
+### 5.3 Valoración
+
+**No está roto, y en dirección es lo correcto:**
+
+- Diámetro propio pequeño (fg y su bg son parientes cercanos) → la transición de fenotipo es
+  reciente → los cambios de aminoácido en esa rama son más plausiblemente ligados al
+  fenotipo, y menos probable que el estado "convergente" sea en realidad ancestral.
+- Pares mutuamente alejados (Dunn alto) → K orígenes independientes del fenotipo repartidos
+  por el árbol = señal de convergencia genuina, no un clado contado K veces.
+
+**El punto débil:** la *forma* de la preferencia (su pendiente) la fija la elección BM vs OU
+por AIC de phyloq, y **esa comparación no es identificable para datos 0/1** — se está
+comparando por AIC dos modelos gaussianos ajustados a un rasgo Bernoulli. Es una heurística
+con transferencia poco justificada. El resultado cualitativo ("preferir pares cercanos") es
+robusto; el peso exacto que se le da, no.
+
+### 5.4 Opciones
+
+| | Qué | Coste | Riesgo |
+|---|---|---|---|
+| **A. Dejarlo, documentarlo** | Anotar que para binario/ordinal `abs_diff` y `pss_top_pct` son inertes y el `pss_score` colapsa a un ranking de distancia-modelo que (correctamente) prefiere contrastes próximos; el Dunn hace el trabajo de independencia | nulo | nulo |
+| **B. Rankear por distancia patrística ascendente explícita para binario/ordinal** (no adjuntar `pss_score` cuando el rasgo es de niveles enteros) | `rank_candidates` ya hace exactamente ese fallback (`else list(df$distance)`); el cambio es "no unir `pss_df` en la rama ordinal" en `3.CI-composition.Rmd` y `lean_candidate_df` | bajo (≈ 15 líneas, mismo core compartido observado+null) | **cambia la selección observada → regen completo + cotejo contra Tier 1** |
+| **C. Traer la señal de transición del modelo Mk al ranking** (P de que el evento 0→1 esté en la rama terminal del fg, vía `getAncLiks`/ASR) | teóricamente el criterio correcto de "origen independiente" | alto; solapa con la etapa de desambiguación/ASR-path-score que ya pondera convergencia por rama | medio-alto |
+| **D. Rankear por longitud de la rama terminal del fg** (corta = transición reciente) | barato (está en el árbol) | complementa Dunn (que usa patrística) | en árbol no ultramétrico mezcla "reciente" con "tasa"; conflación |
+
+**Recomendación: A ahora, B como experimento controlado.**
+
+- **A** es correcto por defecto: el comportamiento cualitativo es el deseado y el Dunn hace
+  el trabajo sustantivo. Documentar la inercia de `abs_diff`/`pss_top_pct` y la degeneración
+  del `pss_score` a distancia evita que nadie espere que esos parámetros hagan algo.
+- **B** es defendible *mecanísticamente* (el término de modelo del PSS no es identificable
+  para 0/1; una "distancia ascendente" explícita es más transparente y da el mismo
+  comportamiento cualitativo sin fingir que es un score de divergencia basado en modelo).
+  Pero cambia la selección observada de CAAS para binario/ordinal → exige regen + cotejo
+  contra la suite Tier 1 antes de adoptarlo. Confianza **moderada** en que B mejore o al
+  menos no empeore; no demostrable sin la regen.
+- **C/D** son sobre-ingeniería para la etapa de selección de pares: la estructura de clados
+  y la independencia ya se manejan aguas arriba (config fg/bg, parámetro `clade`) y aguas
+  abajo (desambiguación / ASR-path-score).
+
+Nada de esto toca el método de RERconverge; es puramente la selección de contrastes de
+PhyloPhere para CAAS.
+
 ---
 
 ## Anexo — pseudocódigo compacto de `categoricalPermulations` 0.3.0
