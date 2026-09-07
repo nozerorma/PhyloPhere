@@ -173,12 +173,21 @@ if (num_batches > 0 && perms_per_batch > 0) {
     }
   }
 
-  permpvals      <- permpvalcor(res_ref, perms_combined)
-
-  # Apply standard pseudo-count correction (num + 1) / (denom + 1)
-  # to prevent exact 0 p-values and properly represent finite empirical probability.
   n_perms <- num_batches * perms_per_batch
-  permpvals <- (permpvals * n_perms + 1) / (n_perms + 1)
+
+  # permpvalcor()'s return type changed across RERconverge builds:
+  #   * bioconda v0.3.0 tag  -> named numeric vector, raw proportion
+  #     sum(|null| > |obs|) / N. Needs the (x*N + 1)/(N + 1) pseudo-count here.
+  #   * install_env.sh pin (2bd328f7) -> data.frame(permpval, permstats), a
+  #     median-centred two-tailed empirical p with the (num + 1)/(denom + 1)
+  #     pseudo-count ALREADY applied internally. Take permpval as-is.
+  ppc <- permpvalcor(res_ref, perms_combined)
+  if (is.data.frame(ppc)) {
+    permpvals <- setNames(ppc$permpval, rownames(ppc))
+  } else {
+    permpvals <- (as.numeric(ppc) * n_perms + 1) / (n_perms + 1)
+    names(permpvals) <- names(ppc)
+  }
 
   res$p.perm     <- permpvals[rownames(res)]
   # BH-correct the permulation p-values for multiple testing across genes.
