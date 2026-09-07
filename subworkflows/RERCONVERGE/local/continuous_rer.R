@@ -135,17 +135,28 @@ if (transform_type == "ha_logit") {
 # ── Load gene trees ───────────────────────────────────────────────────────────
 geneTrees <- readRDS(args[2])
 
-# Resolve polytomies in the master tree: ratematrix (used by getPermsContinuous
-# internally for BM simulation) requires a rooted, fully dichotomous tree.
-geneTrees_di             <- geneTrees
-geneTrees_di$masterTree  <- ape::multi2di(geneTrees$masterTree)
-
 # ── Convert trait vector to phylogenetic paths ────────────────────────────────
 charpaths <- char2Paths(trait_vector, geneTrees)
 saveRDS(charpaths, args[3])
 
 # ── Load RER matrix ───────────────────────────────────────────────────────────
 traitRERw <- readRDS(args[4])
+
+# ── Dimensional consistency guard ────────────────────────────────────────────
+# char2Paths() derives its length from allPaths(treesObj$masterTree); the RER
+# matrix columns were fixed at getAllResiduals() time from the SAME master tree.
+# If they disagree, every downstream correlation misaligns the trait paths
+# against the RER columns by recycling — which either hard-errors inside
+# getAllCor() ("logical subscript too long") or, depending on the RERconverge
+# build, silently produces meaningless correlations. Fail loudly instead.
+if (length(charpaths) != ncol(traitRERw)) {
+  stop(sprintf(
+    paste0("[RER] Path/RER dimension mismatch: char2Paths produced %d paths but ",
+           "the RER matrix has %d columns. The master tree in this treesObj is ",
+           "inconsistent with the one used to build the RER matrix."),
+    length(charpaths), ncol(traitRERw)
+  ))
+}
 
 # ── Continuous RER correlation ────────────────────────────────────────────────
 message("[RER] Running correlateWithContinuousPhenotype ...")
@@ -171,14 +182,46 @@ if (num_batches > 0 && perms_per_batch > 0) {
     num_batches, perms_per_batch
   ))
 
+  # ── BM-null master tree ────────────────────────────────────────────────────
+  # getPermsContinuous() simulates null phenotypes with geiger::ratematrix() +
+  # geiger::sim.char(), which require a ROOTED, fully dichotomous tree whose
+  # tips match the (complete-case) trait vector. We build such a tree ONLY for
+  # the `mastertree=` argument. Critically, `trees=` must remain the ORIGINAL,
+  # untouched treesObj: splicing a multi2di'd master tree into the treesObj
+  # desyncs its cached $paths / $matIndex / $ap slots from the topology, so
+  # char2Paths() inside the null loop returns a path vector of the wrong length
+  # (see the dimensional guard above). Rooting/dichotomising a standalone tree
+  # for the simulation only sidesteps that entirely.
+  sim_sp     <- intersect(names(trait_vector)[!is.na(trait_vector)],
+                          geneTrees$masterTree$tip.label)
+  sim_trait  <- trait_vector[sim_sp]
+  sim_master <- ape::keep.tip(geneTrees$masterTree, sim_sp)
+  if (!ape::is.rooted(sim_master)) {
+    # No outgroup is declared anywhere in the pipeline; midpoint rooting is the
+    # neutral default. BM simulation is only weakly sensitive to root placement.
+    sim_master <- phytools::midpoint.root(sim_master)
+  }
+  sim_master <- ape::multi2di(sim_master)
+  # multi2di() inserts zero-length edges; nudge them so ratematrix() stays
+  # non-singular.
+  zero_edge <- sim_master$edge.length <= 0
+  if (any(zero_edge)) {
+    sim_master$edge.length[zero_edge] <- 1e-8
+  }
+  message(sprintf(
+    "[RER] BM-null master tree: %d tips (rooted=%s, binary=%s)",
+    length(sim_master$tip.label),
+    ape::is.rooted(sim_master), ape::is.binary(sim_master)
+  ))
+
   message(sprintf("  [RER] Permutation batch 1 / %d", num_batches))
   perms_combined <- getPermsContinuous(
     numperms        = perms_per_batch,
-    traitvec        = trait_vector,
+    traitvec        = sim_trait,
     RERmat          = traitRERw,
     annotlist       = NULL,
-    trees           = geneTrees_di,
-    mastertree      = geneTrees_di$masterTree,
+    trees           = geneTrees,
+    mastertree      = sim_master,
     calculateenrich = FALSE,
     winR            = as.numeric(args[7]),
     winT            = as.numeric(args[8])
@@ -189,11 +232,11 @@ if (num_batches > 0 && perms_per_batch > 0) {
       message(sprintf("  [RER] Permutation batch %d / %d", i, num_batches))
       batch_i <- getPermsContinuous(
         numperms        = perms_per_batch,
-        traitvec        = trait_vector,
+        traitvec        = sim_trait,
         RERmat          = traitRERw,
         annotlist       = NULL,
-        trees           = geneTrees_di,
-        mastertree      = geneTrees_di$masterTree,
+        trees           = geneTrees,
+        mastertree      = sim_master,
         calculateenrich = FALSE,
         winR            = as.numeric(args[7]),
         winT            = as.numeric(args[8])
