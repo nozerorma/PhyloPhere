@@ -16,8 +16,8 @@ the "derived" state already present above the MRCA?*
 To answer it we walk internal nodes bounded by two regions, never the full
 MRCA-to-root path: the pair's own **private segment** (from the node directly
 above its MRCA up to, but excluding, the nearest point where its lineage
-merges with another changed pair's — the LAC), and the **LAC nodes**
-themselves. Nodes above the LAC are not examined. At each node visited, we
+merges with another changed pair's — the LCA), and the **LCA nodes**
+themselves. Nodes above the LCA are not examined. At each node visited, we
 read its ASR posterior directly (no hop weighting — PAML's posterior
 uncertainty already grows toward the root, so depth robustness instead comes
 from bounding the walk to these two regions rather than weighting a longer one).
@@ -56,11 +56,11 @@ Five factors, computed per CAAS position and multiplied together:
 
 * ``independence`` (shared-origin axis): the changed pairs only converged
   *independently* if their shared ancestors did not already carry the derived
-  state. We locate the **LAC** nodes — the merge points of the changed pairs'
+  state. We locate the **LCA** nodes — the merge points of the changed pairs'
   MRCAs (internal nodes of the minimal subtree connecting them, at most n-1) —
   and take ``∏_L (1 - P(derived pool at L))``. If any merge point already shows a
   derived state the pairs below it inherited it rather than converging, and the
-  factor (and score) crater. Because it ranges over the few LAC nodes, not the
+  factor (and score) crater. Because it ranges over the few LCA nodes, not the
   full root paths, the product is **depth-independent**. Read straight from
   ``P(derived)`` — no ancestral term — so a third residue at a node simply lowers
   ``P(derived)`` instead of being misread as ancestral.
@@ -78,11 +78,11 @@ Five factors, computed per CAAS position and multiplied together:
   ``independence`` and ``core`` together form the **replication** tier —
   ``P(shared ancestor clean AND ≥2 private-clean events)``. Multiplying them is
   the correct joint probability, not two independent checks: private-segment
-  nodes and LAC nodes are disjoint, conditionally-independent parts of the
+  nodes and LCA nodes are disjoint, conditionally-independent parts of the
   tree, so ``P(A) · P(B|A) = P(A ∩ B)``.
 
 * ``mrca_diversity`` (parallel axis, continuous): did the changed pairs'
-  private segments (the same MRCA→LAC walks ``core`` scores) pass through
+  private segments (the same MRCA→LCA walks ``core`` scores) pass through
   genuinely different ancestral backgrounds, or does one pair's own MRCA
   state show up somewhere along another pair's walk? For every pair of
   changed pairs, both directions are checked — does A's MRCA state appear
@@ -321,7 +321,7 @@ def node_dist(
 
     PAML posteriors are loaded with integer node ids, but the same map can
     arrive JSON-decoded with string keys. Centralising the fallback here keeps
-    the three call sites (per-node walk, LAC product, MRCA-diversity) consistent
+    the three call sites (per-node walk, LCA product, MRCA-diversity) consistent
     and the ``per_node_dist`` key type honestly ``Any``.
     """
     if node_id is None:
@@ -354,7 +354,7 @@ def find_lca(
 ) -> Optional[int]:
     """Lowest common ancestor of two nodes (the node where their lineages merge).
 
-    Used to locate the **LAC** (last ancestral common) nodes of a set of pair
+    Used to locate the **LCA** (lowest common ancestor) nodes of a set of pair
     MRCAs — the shared merge points where, if the derived state is already
     present, the convergence is not independent across those pairs.
     """
@@ -408,7 +408,7 @@ def side_path_score(
 
     for k, node_id in enumerate(path, start=1):  # k=1 -> parent of MRCA (hop+1)
         if is_changed and stop_at_id is not None and node_id == stop_at_id:
-            break  # reached the shared LAC; stop private segment walk
+            break  # reached the shared LCA; stop private segment walk
 
         dist = node_dist(per_node_dist, node_id)
         p_anc = group_probability(dist, ancestral_enc, scheme)
@@ -524,7 +524,7 @@ def compute_asr_path_score(
     # Conserved pairs (conserved_ids) did not acquire the expected derived amino
     # acid — scored by conservation-to-root and folded into conservation_gate.
     # Changed pairs are collected here (sides not scored yet: the per-pair core
-    # walk needs the LAC merge points computed below to know where to stop).
+    # walk needs the LCA merge points computed below to know where to stop).
     changed: List[Dict[str, Any]] = []  # {pid, mrca_id, anc_enc, sides:[(key,enc)]}
     for pair in pairs:
         pid = pair.get("pair_id")
@@ -580,17 +580,17 @@ def compute_asr_path_score(
             "pair_contaminated": {},
         }
 
-    # ── LAC merge points ─────────────────────────────────────────────────────
-    # The LAC nodes are the merge points of the changed pairs' MRCAs (the
+    # ── LCA merge points ─────────────────────────────────────────────────────
+    # The LCA nodes are the merge points of the changed pairs' MRCAs (the
     # internal nodes of the minimal subtree connecting them). At most n-1 of
-    # them, so a *product* over LAC nodes is depth-independent — unlike a product
+    # them, so a *product* over LCA nodes is depth-independent — unlike a product
     # over the full MRCA→root paths, which would collapse on deep trees.
     changed_mrcas = [c["mrca_id"] for c in changed]
-    lac_nodes: set = set()
+    lca_nodes: set = set()
     for a, b in combinations(changed_mrcas, 2):
-        lac = find_lca(node_index, a, b)
-        if lac is not None:
-            lac_nodes.add(lac)
+        lca = find_lca(node_index, a, b)
+        if lca is not None:
+            lca_nodes.add(lca)
 
     # ── Phase 2: per-pair core isolation (each MRCA → root) ───────────────────
     pair_scores: Dict[int, float] = {}
@@ -602,20 +602,20 @@ def compute_asr_path_score(
     top_pair_scores: Dict[int, float] = {}
     bottom_pair_scores: Dict[int, float] = {}
     # Each pair's own MRCA plus its private-segment node ids (parent-of-MRCA
-    # up to, excluding, its nearest LAC) -- used below by mrca_diversity as
+    # up to, excluding, its nearest LCA) -- used below by mrca_diversity as
     # the set of places another pair's background state might be found. The
-    # MRCA itself must be included: for a "sibling merge" (LAC is directly
+    # MRCA itself must be included: for a "sibling merge" (LCA is directly
     # the MRCA's parent) the private segment is empty, and without the MRCA
     # as a fallback search point, two pairs with IDENTICAL MRCA states would
     # wrongly read as maximally diverse (nothing to find them in) rather than
     # maximally similar.
     diversity_search_nodes: Dict[int, List[int]] = {}
     for c in changed:
-        # Nearest LAC = deepest merge point on this pair's root-path. The private
+        # Nearest LCA = deepest merge point on this pair's root-path. The private
         # segment (below it) is the pair's own, judged by the core walk; the
         # shared segment (at/above it) is judged by the independence product.
         full_path = path_to_root_ids(node_index, c["mrca_id"])
-        stop_at = next((n for n in full_path if n in lac_nodes), None)
+        stop_at = next((n for n in full_path if n in lca_nodes), None)
         private_segment = (
             full_path if stop_at is None else full_path[: full_path.index(stop_at)]
         )
@@ -637,8 +637,8 @@ def compute_asr_path_score(
         pair_contaminated[c["pid"]] = pair_contam
 
     # ── Independence: derived state must be ABSENT at the shared merge points ──
-    # For each LAC node, (1 - P(any residue in derived_pool present there)).
-    # Product across LAC nodes: if any merge point already carries a derived
+    # For each LCA node, (1 - P(any residue in derived_pool present there)).
+    # Product across LCA nodes: if any merge point already carries a derived
     # state, the pairs below it did not converge independently — they
     # inherited it — and the score craters. P(any of derived_pool) uses the
     # same worst-case bound as core (exact for a recorded residue, the
@@ -646,13 +646,13 @@ def compute_asr_path_score(
     # which would double-count the same unknown mass -- for however many of
     # derived_pool aren't the node's recorded state).
     independence = 1.0
-    for lac in lac_nodes:
-        dist = node_dist(per_node_dist, lac)
+    for lca in lca_nodes:
+        dist = node_dist(per_node_dist, lca)
         p_derived = worst_case_any_group_probability(dist, derived_pool, scheme)
         independence *= max(0.0, 1.0 - p_derived)
 
     # Parallel axis (continuous): did the changed pairs' private segments (the
-    # same MRCA->LAC walks core just scored) pass through genuinely different
+    # same MRCA->LCA walks core just scored) pass through genuinely different
     # ancestral backgrounds, or does one pair's own MRCA state show up
     # somewhere along another pair's walk (suggesting a shared background)?
     # For every pair of changed pairs, check both directions -- does pair A's
@@ -727,7 +727,7 @@ def compute_asr_path_score(
 
     # replication: P(shared ancestor clean AND >=2 private-clean events). A
     # genuine joint probability, not two independent checks — private-segment
-    # nodes and LAC nodes are disjoint, conditionally-independent parts of the
+    # nodes and LCA nodes are disjoint, conditionally-independent parts of the
     # tree, so P(A) * P(B|A) = P(A ∩ B).
     replication = independence * core
     # strength: two independent discounts on the quality of a confirmed

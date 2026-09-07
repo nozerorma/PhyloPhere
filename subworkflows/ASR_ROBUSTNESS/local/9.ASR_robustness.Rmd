@@ -133,7 +133,7 @@ save_plot <- function(p, fname, width = 11, height = 6) {
 With the introduction of the continuous `asr_path_score`, the ASR evaluations have fundamentally shifted from binary cut-offs to a holistic score based on a path-to-root walk. This report details the distribution of the `asr_path_score` across evaluated sites and breaks down the final score into its constituent penalty and reward components:
 
 *   **Replication (`core`)**: P(≥2 independent changes) — combinatorial probability that ≥2 pairs changed independently in at least one phenotype direction (top or bottom).
-*   **Independence at shared ancestors (`independence`)**: The probability that the derived state was absent at shared ancestors (LAC nodes).
+*   **Independence at shared ancestors (`independence`)**: The probability that the derived state was absent at shared ancestors (LCA nodes).
 *   **Parallel vs. non-parallel origins (`mrca_diversity`)**: How distinct the ancestral starting states are across participating pairs.
 *   **Convergence agreement (`derived_agreement`)**: Coherence of derived states per phenotype side — penalises divergent derived residues.
 *   **Conserved-pair confirmation (`conservation_gate`)**: Soft gate from conserved pairs: deep conservation confirms the contrast; drifted controls weaken it.

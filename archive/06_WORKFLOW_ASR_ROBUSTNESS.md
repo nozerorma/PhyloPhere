@@ -30,7 +30,7 @@ graph TD
 
     subgraph ScoreDecomposition["2. ASR Path Score Decomposition (9.ASR_robustness.Rmd)"]
         Core["1. Replication Score (core): P(>= 2 Independent Changes)"]
-        Indep["2. Ancestral Independence Score (independence at LAC Nodes)"]
+        Indep["2. Ancestral Independence Score (independence at LCA Nodes)"]
         MRCADiv["3. Origin Diversity (mrca_diversity)"]
         DerivedAgr["4. Convergence Agreement (derived_agreement)"]
         ConsGate["5. Conservation Gate (conservation_gate)"]
@@ -97,8 +97,8 @@ $$S_{\text{core}} = P(\ge 2 \text{ independent changes}) = 1 - P(0 \text{ change
 Where $P(\text{change}_k) = P(A_{\text{anc}}(k) \neq a_{\text{tip}}(k))$ is derived from the posterior marginal probabilities at the pair's MRCA node.
 
 #### 2. Ancestral Independence Score ($S_{\text{independence}}$)
-Penalizes situations where the derived residue was already present at the Lowest Ancestral Clade (LAC) node uniting the contrast pairs, which would indicate a single ancestral substitution inherited by descent rather than true convergence:
-$$S_{\text{independence}} = \prod_{u \in \text{LAC}} \left( 1 - P(X_u = a_{\text{derived}}) \right)$$
+Penalizes situations where the derived residue was already present at the lowest common ancestor (LCA) node uniting the contrast pairs, which would indicate a single ancestral substitution inherited by descent rather than true convergence:
+$$S_{\text{independence}} = \prod_{u \in \text{LCA}} \left( 1 - P(X_u = a_{\text{derived}}) \right)$$
 
 #### 3. MRCA Diversity Score ($S_{\text{mrca\_diversity}}$)
 Quantifies whether convergence originated from identical ancestral states (parallel evolution) or distinct ancestral amino acids (convergent evolution):
