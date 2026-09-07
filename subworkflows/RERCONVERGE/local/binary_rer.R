@@ -51,10 +51,6 @@ if (length(fg_sp) < 3) {
 
 # ── Load gene trees ───────────────────────────────────────────────────────────
 geneTrees <- readRDS(args[2])
-# Resolve polytomies in the master tree: getAllPermsBinary may need a rooted,
-# fully dichotomous tree for proper permutation sampling. Dichotomize for safety.
-geneTrees_di             <- geneTrees
-geneTrees_di$masterTree  <- ape::multi2di(geneTrees$masterTree)
 # ── Build foreground paths (binary equivalent of char2Paths) ─────────────────
 # foreground2Paths assigns branch-state weights using the master tree topology.
 # clade parameter controls which branches get foreground weight:
@@ -69,6 +65,21 @@ message(sprintf("[RER_BIN] Foreground paths computed for %d branches.", length(f
 
 # ── Load RER matrix ───────────────────────────────────────────────────────────
 traitRERw <- readRDS(args[4])
+
+# ── Dimensional consistency guard ────────────────────────────────────────────
+# foreground2Paths() derives its length from the treesObj master tree; the RER
+# matrix columns were fixed against the SAME master tree at getAllResiduals()
+# time. A mismatch means the foreground paths and the RER columns are recycled
+# against each other during correlation — a hard error in some RERconverge
+# builds, silent nonsense in others. Fail loudly.
+if (length(fg_paths) != ncol(traitRERw)) {
+  stop(sprintf(
+    paste0("[RER_BIN] Path/RER dimension mismatch: foreground2Paths produced %d ",
+           "paths but the RER matrix has %d columns. The master tree in this ",
+           "treesObj is inconsistent with the one used to build the RER matrix."),
+    length(fg_paths), ncol(traitRERw)
+  ))
+}
 
 # ── Binary RER correlation ─────────────────────────────────────────────────────
 # Uses Kendall rank correlation (unweighted when clade = "all" / "terminal" with
@@ -110,13 +121,37 @@ if (num_batches > 0 && perms_per_batch > 0) {
     num_batches, perms_per_batch
   ))
 
+  if (!exists("getAllPermsBinary")) {
+    stop(paste0("[RER_BIN] getAllPermsBinary() is not provided by the installed ",
+                "RERconverge build. Binary RER permulations need to be wired to ",
+                "RERconverge::getPermsBinary() (requires sisters_list + root_sp). ",
+                "Set rer_perm_batches = 0 to skip until this is implemented."))
+  }
+
+  # ── Null master tree ──────────────────────────────────────────────────────
+  # Built standalone for `mastertree=` only. `trees=` stays the ORIGINAL
+  # treesObj so foreground2Paths() inside the null loop keeps producing path
+  # vectors consistent with the RER matrix (see the dimensional guard above).
+  sim_master <- ape::keep.tip(
+    geneTrees$masterTree,
+    intersect(c(fg_sp, bg_sp), geneTrees$masterTree$tip.label)
+  )
+  if (!ape::is.rooted(sim_master)) {
+    sim_master <- phytools::midpoint.root(sim_master)
+  }
+  sim_master <- ape::multi2di(sim_master)
+  zero_edge  <- sim_master$edge.length <= 0
+  if (any(zero_edge)) {
+    sim_master$edge.length[zero_edge] <- 1e-8
+  }
+
   message(sprintf("  [RER_BIN] Permutation batch 1 / %d", num_batches))
   perms_combined <- getAllPermsBinary(
     numperms   = perms_per_batch,
     fg_sp      = fg_sp,
     RERmat     = traitRERw,
-    trees      = geneTrees_di,
-    mastertree = geneTrees_di$masterTree
+    trees      = geneTrees,
+    mastertree = sim_master
   )
 
   if (num_batches > 1) {
@@ -126,8 +161,8 @@ if (num_batches > 0 && perms_per_batch > 0) {
         numperms   = perms_per_batch,
         fg_sp      = fg_sp,
         RERmat     = traitRERw,
-        trees      = geneTrees_di,
-        mastertree = geneTrees_di$masterTree
+        trees      = geneTrees,
+        mastertree = sim_master
       )
       perms_combined <- combinePermData(perms_combined, batch_i, enrich = FALSE)
     }
