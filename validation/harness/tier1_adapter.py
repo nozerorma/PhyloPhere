@@ -59,6 +59,27 @@ def _mode(seq: str) -> str:
     return Counter(seq).most_common(1)[0][0] if seq else ""
 
 
+def _top_supported(support: str) -> str:
+    """Most-supported residue from a ``top_residue_support`` string like
+    ``"T:2,I:1"`` (already FOP-domain-pooled in scoring_compute.R). Falls back to
+    the first residue of a bare token. Returns "" on empty/unparseable input."""
+    support = (support or "").strip()
+    if not support:
+        return ""
+    best_aa, best_n = "", -1.0
+    for tok in support.split(","):
+        tok = tok.strip()
+        aa, _, cnt = tok.partition(":")
+        aa = aa.strip()
+        try:
+            n = float(cnt)
+        except ValueError:
+            n = 1.0
+        if aa and n > best_n:
+            best_aa, best_n = aa[0], n
+    return best_aa
+
+
 @dataclass
 class DiscHit:
     pos0: int                       # 0-based alignment column
@@ -236,7 +257,17 @@ def _score_one(site: Site, run: Tier1Run, ref_row: str | None, slop: int,
         if h is None:
             continue
         if know_res:
+            # (1) raw discovery.tab strings pooled across schemes+hypotheses.
             if h.fg_mode == site.alt_aa and h.bg_mode == site.ref_aa:
+                matched, residue_match = cand, True
+                break
+            # (2) FOP-domain-pooled residue support from scoring/position_scores
+            #     (scoring_compute.R already resolves H1..Hn per Voronoi domain,
+            #     so this is the right signal once the harvest is wide — a flat
+            #     mode over all raw hypothesis strings ties or flips).
+            pr = ps.get((site.gene, cand))
+            if pr and _top_supported(pr.get("top_residue_support")) == site.alt_aa \
+                  and _top_supported(pr.get("bottom_residue_support")) == site.ref_aa:
                 matched, residue_match = cand, True
                 break
         elif cand == base:

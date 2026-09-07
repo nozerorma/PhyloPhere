@@ -21,7 +21,13 @@
 suppressPackageStartupMessages({
   library(ape)
   library(geiger)
+  library(parallel)
 })
+
+# Parallel-safe RNG for the forked FOP-mirror workers (section far below). Set
+# unconditionally so the substream kind is consistent whether or not a seed is
+# passed; the seed itself is applied after CLI parsing.
+RNGkind("L'Ecuyer-CMRG")
 
 log_msg <- function(tag, ...) write(paste0("[", tag, "] ", format(Sys.time()), " ", paste0(...)), stdout())
 
@@ -50,7 +56,8 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [include_b0] [pss_top_pct] [max_tries] [pheno_col] ",
-       "[n_col] [c_col] [resample_use_n] [trait_type]")
+       "[n_col] [c_col] [resample_use_n] [trait_type] [fop_null] [max_fop] ",
+       "[n_cpus] [seed]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -74,6 +81,30 @@ resample_use_n     <- tolower(arg_or(14, "true")) %in% c("1", "true", "t", "yes"
 trait_type         <- tolower(arg_or(15, "auto"))
 fop_null           <- tolower(arg_or(16, "false")) %in% c("1", "true", "t", "yes", "y")
 max_fop            <- arg_or(17, 100L, as.integer)
+
+# ── Parallelism + RNG seed ──────────────────────────────────────────────────
+# n_cpus drives the forked FOP-mirror harvest only (the pool harvest stays
+# serial). Fall back to the SLURM allocation, then to a single core; never
+# exceed the physically available cores.
+.detected_cores <- tryCatch(parallel::detectCores(), error = function(e) 1L)
+if (!is.finite(.detected_cores) || .detected_cores < 1L) .detected_cores <- 1L
+n_cpus <- arg_or(18, NA_integer_, as.integer)
+if (is.na(n_cpus)) {
+  .slurm_cpus <- suppressWarnings(as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "")))
+  n_cpus <- if (!is.na(.slurm_cpus) && .slurm_cpus >= 1L) .slurm_cpus else .detected_cores
+}
+n_cpus <- max(1L, min(as.integer(n_cpus), .detected_cores))
+
+# Seed: reproducible parallel streams when supplied (Nextflow passes params.seed,
+# default 1998). Absent -> RNG is left unseeded, matching historical behaviour.
+seed_arg <- arg_or(19, NA_integer_, as.integer)
+if (!is.na(seed_arg)) {
+  set.seed(seed_arg)
+  log_msg("INFO", sprintf("RNG seeded with %d (L'Ecuyer-CMRG); FOP mirror uses %d core(s)",
+                          seed_arg, n_cpus))
+} else {
+  log_msg("INFO", sprintf("RNG unseeded; FOP mirror uses %d core(s)", n_cpus))
+}
 
 if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
   log_msg("WARN", sprintf("Unknown strategy '%s', defaulting to 'auto'", selection.strategy))
@@ -423,40 +454,50 @@ rbind_fast <- function(lst) {
                 stringsAsFactors = FALSE)
 }
 
-rows      <- vector("list", length(pool))
-manifest  <- vector("list", length(pool))
+# Streamed writers: only the current chunk is held in memory, never the whole
+# pool. The resample chunks stay one-file-per-`chunk.size` cycles; the manifest
+# is appended chunk-by-chunk to a single open connection (header written once).
 file.counter <- 1L; chunk.start <- 1L
+chunk_rows     <- list()
+chunk_manifest <- list()
 
-flush_chunk <- function(from, to) {
+man_con <- file(file.path(outdir, "permulation_manifest.tsv"), "w")
+writeLines(paste(c("cycle", "tier", "n_pairs", "dunn_min", "n_below", "mode",
+                   "fg_values", "bg_values"), collapse = "\t"), man_con)
+
+flush_chunk <- function() {
   fp <- file.path(outdir, sprintf("resample_%03d.tab", file.counter))
-  write.table(rbind_fast(rows[from:to]), file = fp, sep = "\t",
+  write.table(rbind_fast(chunk_rows), file = fp, sep = "\t",
               col.names = FALSE, row.names = FALSE, quote = FALSE)
-  file.counter <<- file.counter + 1L
+  write.table(rbind_fast(chunk_manifest), file = man_con, sep = "\t",
+              col.names = FALSE, row.names = FALSE, quote = FALSE)
+  file.counter   <<- file.counter + 1L
+  chunk_rows      <<- list()
+  chunk_manifest  <<- list()
 }
 
+fmt <- function(x) paste(format(x, digits = 15, trim = TRUE), collapse = ",")
 for (b in seq_along(pool)) {
   e <- pool[[b]]
-  rows[[b]] <- data.frame(
+  chunk_rows[[length(chunk_rows) + 1L]] <- data.frame(
     cycle = paste0("b_", b),
     fg    = paste(e$fg, collapse = ","),
     bg    = paste(e$bg, collapse = ","),
     stringsAsFactors = FALSE
   )
-  fmt <- function(x) paste(format(x, digits = 15, trim = TRUE), collapse = ",")
-  manifest[[b]] <- data.frame(cycle = paste0("b_", b), tier = e$tier,
-                              n_pairs = e$n_pairs, dunn_min = e$dunn_min,
-                              n_below = e$n_below, mode = e$mode,
-                              fg_values = fmt(e$fg_values),
-                              bg_values = fmt(e$bg_values),
-                              stringsAsFactors = FALSE)
+  chunk_manifest[[length(chunk_manifest) + 1L]] <- data.frame(
+    cycle = paste0("b_", b), tier = e$tier,
+    n_pairs = e$n_pairs, dunn_min = e$dunn_min,
+    n_below = e$n_below, mode = e$mode,
+    fg_values = fmt(e$fg_values),
+    bg_values = fmt(e$bg_values),
+    stringsAsFactors = FALSE)
   if (b - chunk.start + 1L >= chunk.size || b == length(pool)) {
-    flush_chunk(chunk.start, b)
+    flush_chunk()
     chunk.start <- b + 1L
   }
 }
-
-write.table(rbind_fast(manifest), file = file.path(outdir, "permulation_manifest.tsv"),
-            sep = "\t", row.names = FALSE, quote = FALSE)
+close(man_con)
 
 # ── FOP mirror: per-cycle alternative-hypothesis harvest ─────────────────────
 # Mirrors the observed FOP harvest (selection_algorithm.R::fop_pair_sel.f) for
@@ -466,16 +507,35 @@ write.table(rbind_fast(manifest), file = file.path(outdir, "permulation_manifest
 # drawn from the same Voronoi domains, ranked by min-PSS, capped at max_fop.
 #   fop_labelings.tab         : "<cycle>~H<m>" \t fg_csv \t bg_csv   (fanned discovery input)
 #   fop_pairs.tsv   : cycle, hypothesis_id, pair(domain), species1, species2, pss_score
+#
+# Parallel + streamed: `lean_fop_harvest` re-seeds itself with a constant on every
+# call (lean_contrast_selector.R) and `evaluate_lean_contrast_selection` is
+# RNG-free, so a cycle's harvest is a pure function of its own inputs — forking
+# the loop cannot change any cycle's output, only the interleaving of cycles,
+# which we preserve by consuming worker results in strict pool order. Output is
+# therefore byte-identical to the serial version. Each batch of cycles is
+# harvested with mclapply and its rows appended to open connections, so peak
+# memory is one batch, not the whole (up to max_fop x pool_size) row set.
 if (fop_null) {
-  log_msg("START", sprintf("FOP mirror harvest for %d accepted cycles (max_fop=%d)",
-                           length(pool), max_fop))
-  fop_rows  <- list()
-  pair_rows <- list()
-  n_hyp_tot <- 0L
-  for (b in seq_along(pool)) {
+  FOP_BATCH <- 1000L
+  n_workers <- max(1L, min(n_cpus, length(pool)))
+  log_msg("START", sprintf(
+    "FOP mirror harvest for %d accepted cycles (max_fop=%d, %d worker(s), batch=%d)",
+    length(pool), max_fop, n_workers, FOP_BATCH))
+
+  lab_path  <- file.path(outdir, "fop_labelings.tab")
+  pair_path <- file.path(outdir, "fop_pairs.tsv")
+  lab_con  <- file(lab_path, "w")
+  pair_con <- file(pair_path, "w")
+  writeLines(paste(c("cycle", "hypothesis_id", "pair", "species1", "species2",
+                     "pss_score"), collapse = "\t"), pair_con)
+
+  # One cycle -> its preformatted label rows, pair rows, and hypothesis count.
+  fop_one <- function(b) {
     e <- pool[[b]]
     cyc <- paste0("b_", b)
-    if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg)) next
+    if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg))
+      return(list(lab = NULL, pair = NULL, n_hyp = 0L))
     hv <- tryCatch(
       lean_fop_harvest(
         trait_vec = e$pvec, D = D, target_pairs = target_pairs,
@@ -490,36 +550,73 @@ if (fop_null) {
       error = function(err) { log_msg("WARN", sprintf("FOP harvest %s: %s", cyc, conditionMessage(err))); NULL })
     if (is.null(hv) || length(hv$hypotheses) == 0L) {
       # fall back to H1-only so the cycle still enters the fanned discovery
-      fop_rows[[length(fop_rows) + 1L]] <- data.frame(
-        cycle = paste0(cyc, "~H1"),
-        fg = paste(e$fg, collapse = ","), bg = paste(e$bg, collapse = ","),
-        stringsAsFactors = FALSE)
-      next
+      return(list(
+        lab = data.frame(cycle = paste0(cyc, "~H1"),
+                         fg = paste(e$fg, collapse = ","),
+                         bg = paste(e$bg, collapse = ","),
+                         stringsAsFactors = FALSE),
+        pair = NULL, n_hyp = 0L))
     }
-    for (h_id in names(hv$hypotheses)) {
+    lab_l <- vector("list", length(hv$hypotheses))
+    pair_l <- vector("list", length(hv$hypotheses))
+    for (i in seq_along(hv$hypotheses)) {
+      h_id <- names(hv$hypotheses)[i]
       hd <- hv$hypotheses[[h_id]]
-      fop_rows[[length(fop_rows) + 1L]] <- data.frame(
+      lab_l[[i]] <- data.frame(
         cycle = paste0(cyc, "~", h_id),
         fg = paste(hd$species1, collapse = ","),
         bg = paste(hd$species2, collapse = ","),
         stringsAsFactors = FALSE)
-      pair_rows[[length(pair_rows) + 1L]] <- data.frame(
+      pair_l[[i]] <- data.frame(
         cycle = cyc, hypothesis_id = h_id,
         pair = if ("cluster" %in% names(hd)) as.integer(hd$cluster) else seq_len(nrow(hd)),
         species1 = hd$species1, species2 = hd$species2,
         pss_score = if ("pss_score" %in% names(hd)) hd$pss_score else NA_real_,
         stringsAsFactors = FALSE)
     }
-    n_hyp_tot <- n_hyp_tot + length(hv$hypotheses)
+    list(lab = rbind_fast(lab_l), pair = rbind_fast(pair_l),
+         n_hyp = length(hv$hypotheses))
   }
-  if (length(fop_rows) > 0) {
-    write.table(rbind_fast(fop_rows), file = file.path(outdir, "fop_labelings.tab"),
-                sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE)
+
+  n_hyp_tot <- 0L
+  any_lab   <- FALSE
+  any_pair  <- FALSE
+  for (start in seq(1L, length(pool), by = FOP_BATCH)) {
+    block <- start:min(start + FOP_BATCH - 1L, length(pool))
+    res <- parallel::mclapply(block, fop_one, mc.cores = min(n_workers, length(block)),
+                              mc.preschedule = TRUE)
+    lab_batch  <- vector("list", length(res))
+    pair_batch <- vector("list", length(res))
+    for (i in seq_along(res)) {
+      r <- res[[i]]
+      if (inherits(r, "try-error") || is.null(r)) {
+        log_msg("WARN", sprintf("FOP worker for cycle b_%d failed: %s",
+                                block[i], as.character(r)))
+        next
+      }
+      lab_batch[[i]]  <- r$lab
+      pair_batch[[i]] <- r$pair
+      n_hyp_tot <- n_hyp_tot + r$n_hyp
+    }
+    lab_df  <- rbind_fast(lab_batch)
+    pair_df <- rbind_fast(pair_batch)
+    if (!is.null(lab_df)) {
+      write.table(lab_df, file = lab_con, sep = "\t",
+                  col.names = FALSE, row.names = FALSE, quote = FALSE)
+      any_lab <- TRUE
+    }
+    if (!is.null(pair_df)) {
+      write.table(pair_df, file = pair_con, sep = "\t",
+                  col.names = FALSE, row.names = FALSE, quote = FALSE)
+      any_pair <- TRUE
+    }
+    rm(res, lab_batch, pair_batch, lab_df, pair_df)
   }
-  if (length(pair_rows) > 0) {
-    write.table(rbind_fast(pair_rows), file = file.path(outdir, "fop_pairs.tsv"),
-                sep = "\t", col.names = TRUE, row.names = FALSE, quote = FALSE)
-  }
+  close(lab_con); close(pair_con)
+  # Match the old "only write if there were rows" contract.
+  if (!any_lab)  unlink(lab_path)
+  if (!any_pair) unlink(pair_path)
+
   log_msg("COMPLETE", sprintf("FOP mirror: %d cycles -> %d hypothesis labelings (mean %.1f/cycle) -> fop_labelings.tab",
                               length(pool), n_hyp_tot,
                               if (length(pool)) n_hyp_tot / length(pool) else 0))
