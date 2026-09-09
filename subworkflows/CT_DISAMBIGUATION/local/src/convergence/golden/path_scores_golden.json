@@ -1,0 +1,1795 @@
+[
+  {
+    "expected": {
+      "asr_path_score": 0.0,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.0,
+      "derived_agreement": 1.0,
+      "independence": 1.0,
+      "mrca_diversity": 0.5,
+      "pair_ancestral": {
+        "1": "A"
+      },
+      "pair_contaminated": {
+        "1": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V"
+      },
+      "pair_scores": {
+        "1": 0.8573749999999999
+      },
+      "replication": 0.0,
+      "strength": 0.875,
+      "top_pair_scores": {
+        "1": 0.8573749999999999
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "one pair changes top A->V; core=0, asr=0",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "single_changed_pair",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.5838808560547009,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.8145062499999999,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.018326390624999966,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V"
+      },
+      "pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      },
+      "replication": 0.7737809374999999,
+      "strength": 0.75458159765625,
+      "top_pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "pairs 1 & 2 both change top A->V in separate clades",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "two_same_side_converge",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.0,
+      "bottom_pair_scores": {
+        "2": 0.9025
+      },
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.0,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.018326390624999966,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {
+        "2": "V"
+      },
+      "pair_derived_top": {
+        "1": "V"
+      },
+      "pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      },
+      "replication": 0.0,
+      "strength": 0.75458159765625,
+      "top_pair_scores": {
+        "1": 0.9025
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "pair 1 changes top, pair 2 changes bottom; neither side reaches >=2",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "opposite_sides_only",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "V",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "A"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.5838808560547009,
+      "bottom_pair_scores": {
+        "1": 0.9025
+      },
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.8145062499999999,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.018326390624999966,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {
+        "1": "V"
+      },
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V"
+      },
+      "pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      },
+      "replication": 0.7737809374999999,
+      "strength": 0.75458159765625,
+      "top_pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "pair 1 changes top+bottom to V, pair 2 top-only to V",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "pair_changes_both_sides",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "V",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.5546868132519658,
+      "bottom_pair_scores": {},
+      "conservation_gate": 0.95,
+      "conserved_pair_nodes": {
+        "3": 4
+      },
+      "conserved_pair_scores": {
+        "3": 0.9
+      },
+      "core": 0.8145062499999999,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.018326390624999966,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V"
+      },
+      "pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      },
+      "replication": 0.7737809374999999,
+      "strength": 0.75458159765625,
+      "top_pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      }
+    },
+    "scenario": {
+      "conserved_pair": "3",
+      "doc": "pairs 1 & 2 converge top->V; pair 3 held ancestral (conserved)",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": true,
+      "name": "with_conserved_pair",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 4,
+          "pair_id": 3,
+          "top_tip_mode": "A"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.1836174395061475,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.25721250000000007,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.005787281250000054,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": true,
+        "2": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V"
+      },
+      "pair_scores": {
+        "1": 0.28500000000000003,
+        "2": 0.9025
+      },
+      "replication": 0.24435187500000005,
+      "strength": 0.7514468203125,
+      "top_pair_scores": {
+        "1": 0.28500000000000003,
+        "2": 0.9025
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "derived V already modal at the node above pair-1's MRCA",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "contaminated_hop1",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.3,
+          "V": 0.7
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.5223323838867188,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 1.0,
+      "derived_agreement": 0.75,
+      "independence": 0.81,
+      "mrca_diversity": 0.4392255729166666,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A",
+        "3": "A",
+        "4": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false,
+        "3": false,
+        "4": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V",
+        "3": "V",
+        "4": "T"
+      },
+      "pair_scores": {
+        "1": 0.9025,
+        "2": 1.0,
+        "3": 1.0,
+        "4": 0.95
+      },
+      "replication": 0.81,
+      "strength": 0.644854794921875,
+      "top_pair_scores": {
+        "1": 0.9025,
+        "2": 1.0,
+        "3": 1.0,
+        "4": 0.95
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "4 pairs change top: 3 to V, 1 to T -> derived_agreement 0.75",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ],
+        [
+          0,
+          30
+        ],
+        [
+          30,
+          7
+        ],
+        [
+          30,
+          8
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "n_gt_2_mixed_residues",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6,
+        30,
+        7,
+        8
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 6,
+          "pair_id": 3,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 7,
+          "pair_id": 4,
+          "top_tip_mode": "T"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "30": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        },
+        "7": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "8": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.5826991384114671,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.8145062499999999,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.012217593749999978,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "I"
+      },
+      "pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      },
+      "replication": 0.7737809374999999,
+      "strength": 0.7530543984375,
+      "top_pair_scores": {
+        "1": 0.9025,
+        "2": 0.9025
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "pair 1->V, pair 2->I; disagree under US, both 'l' (agree) under GS3",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "gs3_coencoded_agreement",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 6,
+          "pair_id": 2,
+          "top_tip_mode": "I"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "I": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "GS3"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.17871874999999998,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.25,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.010000000000000009,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V"
+      },
+      "pair_scores": {
+        "1": 0.5,
+        "2": 0.5
+      },
+      "replication": 0.2375,
+      "strength": 0.7525,
+      "top_pair_scores": {
+        "1": 0.5,
+        "2": 0.5
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "both MRCAs are the root; path_to_root empty",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "mrca_at_root",
+      "node_ids": [
+        0,
+        1,
+        2
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 0,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 0,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "2": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.71784375,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 1.0,
+      "derived_agreement": 1.0,
+      "independence": 0.95,
+      "mrca_diversity": 0.022499999999999964,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V"
+      },
+      "pair_scores": {
+        "1": 1.0,
+        "2": 1.0
+      },
+      "replication": 0.95,
+      "strength": 0.755625,
+      "top_pair_scores": {
+        "1": 1.0,
+        "2": 1.0
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "pair MRCAs 3 and 4 share parent 10; private segment empty",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "sibling_merge",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 4,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.0,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.0,
+      "derived_agreement": 0.0,
+      "independence": 1.0,
+      "mrca_diversity": 0.0,
+      "pair_ancestral": {},
+      "pair_contaminated": {},
+      "pair_derived_bot": {},
+      "pair_derived_top": {},
+      "pair_scores": {},
+      "replication": 0.0,
+      "strength": 0.0,
+      "top_pair_scores": {}
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "every pair holds ancestral on both sides",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "no_changed_pairs",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "A"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "A"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "T": 0.05,
+          "V": 0.05
+        },
+        "3": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.85,
+          "V": 0.05
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "asr_path_score": 0.12786841231499999,
+      "bottom_pair_scores": {},
+      "conservation_gate": 1.0,
+      "conserved_pair_nodes": {},
+      "conserved_pair_scores": {},
+      "core": 0.24009999999999998,
+      "derived_agreement": 1.0,
+      "independence": 0.7,
+      "mrca_diversity": 0.04321799999999998,
+      "pair_ancestral": {
+        "1": "A",
+        "2": "A"
+      },
+      "pair_contaminated": {
+        "1": false,
+        "2": false
+      },
+      "pair_derived_bot": {},
+      "pair_derived_top": {
+        "1": "V",
+        "2": "V"
+      },
+      "pair_scores": {
+        "1": 0.48999999999999994,
+        "2": 0.48999999999999994
+      },
+      "replication": 0.16806999999999997,
+      "strength": 0.7608045,
+      "top_pair_scores": {
+        "1": 0.48999999999999994,
+        "2": 0.48999999999999994
+      }
+    },
+    "scenario": {
+      "conserved_pair": "",
+      "doc": "uncertain ASR; independence/core land strictly inside (0,1)",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ]
+      ],
+      "is_conserved_meta": false,
+      "name": "soft_posteriors_midrange",
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        3,
+        4,
+        5,
+        6
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.6,
+          "T": 0.1,
+          "V": 0.3
+        },
+        "1": {
+          "A": 0.6,
+          "T": 0.1,
+          "V": 0.3
+        },
+        "10": {
+          "A": 0.6,
+          "T": 0.1,
+          "V": 0.3
+        },
+        "2": {
+          "A": 0.6,
+          "T": 0.1,
+          "V": 0.3
+        },
+        "20": {
+          "A": 0.6,
+          "T": 0.1,
+          "V": 0.3
+        },
+        "3": {
+          "A": 0.4,
+          "V": 0.6
+        },
+        "4": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        },
+        "5": {
+          "A": 0.45,
+          "V": 0.55
+        },
+        "6": {
+          "A": 0.1,
+          "T": 0.05,
+          "V": 0.85
+        }
+      },
+      "scheme": "US"
+    }
+  }
+]
