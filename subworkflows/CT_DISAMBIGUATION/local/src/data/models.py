@@ -115,10 +115,13 @@ class ConvergenceResult:
     change_top: str = "no_change"
     change_bottom: str = "no_change"
     change_side: str = "none"
-    # T2a: first-class direction key. Passthrough alias of change_side (top /
-    # bottom / both / none) with no cardinality change — a "both" position stays
-    # one row. T3b turns "both" into two rows keyed (Gene, Position, side); until
-    # then side == change_side everywhere.
+    # First-class direction key (top / bottom / none). T2a introduced it as a
+    # passthrough alias of change_side. T3b (feature flag --native_side_split):
+    # when on, a "both" position is emitted as TWO ConvergenceResult rows keyed
+    # (gene, position, side), each carrying that direction's own asr_path_score /
+    # core / derived_agreement / convergence_type; `side` is authoritative and no
+    # longer copied from change_side. Flag off -> legacy single row, side ==
+    # change_side.
     side: str = "none"
 
     # ASR path score (unified replacement for binary ASR gate + convergence +

@@ -11,6 +11,7 @@ Author: Refactored from test_nutm2a_real_caas.py
 Date: 2025-11-24
 """
 
+import dataclasses
 import re
 import sys
 from pathlib import Path
@@ -70,6 +71,45 @@ PositionAxes.__new__.__defaults__ = (
 )
 
 
+def _split_result_by_side(
+    base: ConvergenceResult, split: Dict[str, Dict[str, Any]]
+) -> List[ConvergenceResult]:
+    """Expand one position-level ConvergenceResult into per-side rows (T3b).
+
+    ``split`` is ``compute_asr_path_score(native_side_split=True)``'s
+    ``{"top": row, "bottom": row}``. A row is emitted for each side that has at
+    least one participating (changed) pair; ``side`` becomes the authoritative
+    direction key and the scalar ASR-path fields are taken from that side's row.
+    A position with no changed pair on either side collapses to a single
+    ``side="none"`` row (same cardinality as the legacy path for no-change rows).
+    """
+    sides = [s for s in ("top", "bottom")
+             if int(split.get(s, {}).get("n_participating", 0) or 0) > 0]
+    if not sides:
+        return [dataclasses.replace(
+            base, side="none", asr_path_score=0.0, core=0.0,
+        )]
+
+    rows: List[ConvergenceResult] = []
+    for s in sides:
+        d = split[s]
+        pair_scores = dict(d.get("pair_scores") or {})
+        rows.append(dataclasses.replace(
+            base,
+            side=s,
+            asr_path_score=d.get("asr_path_score", 0.0),
+            core=d.get("core", 0.0),
+            derived_agreement=d.get("derived_agreement"),
+            convergence_type=d.get("convergence_type", base.convergence_type),
+            independence=None,  # T3-doc §13: block independence is retired
+            pair_path_scores=pair_scores or None,
+            pair_path_contaminated=(dict(d.get("pair_contaminated") or {}) or None),
+            pair_top_path_scores=(pair_scores or None) if s == "top" else None,
+            pair_bottom_path_scores=(pair_scores or None) if s == "bottom" else None,
+        ))
+    return rows
+
+
 def _build_per_node_dist(
     posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]],
     paml_site: Optional[int],
@@ -101,8 +141,15 @@ def _position_axes(
     pair_details_list: Optional[List[Dict[str, Any]]],
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     walk_cache: Optional[Dict[Any, Any]] = None,
+    native_side_split: bool = False,
 ) -> Dict[str, Any]:
     """Reduced ASR-path-score kernel shared by the full scorer and the perm replay.
+
+    ``native_side_split`` (scoring_v2 T3b, observed path only): forwarded to
+    :func:`compute_asr_path_score`. When True the return is
+    ``{"top": {...}, "bottom": {...}}`` (one row per phenotype side); when False
+    it is the flat T1-shaped dict. The permulation replay always passes False —
+    the per-side null is T3c.
 
     Builds ``per_node_dist`` for the focal site directly from the posterior map and
     runs :func:`compute_asr_path_score`. This is the ONLY numeric computation the
@@ -140,6 +187,7 @@ def _position_axes(
         conserved_pair=str(getattr(caas_pos, "conserved_pair", "") or "").strip(),
         walk_cache=walk_cache,
         site_key=paml_site,
+        native_side_split=native_side_split,
     )
 
 
@@ -157,7 +205,8 @@ def analyze_caas_position_disambiguation(
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     hypothesis: Optional[str] = None,
     walk_cache: Optional[Dict[Any, Any]] = None,
-) -> ConvergenceResult:
+    native_side_split: bool = False,
+) -> "ConvergenceResult | List[ConvergenceResult]":
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
 
@@ -441,34 +490,63 @@ def analyze_caas_position_disambiguation(
     pair_derived_bot_aa: Dict[int, str] = {}
     pair_top_path_scores: Dict[int, float] = {}
     pair_bottom_path_scores: Dict[int, float] = {}
+    # scoring_v2 T3b: when native_side_split is on we score once per phenotype
+    # side and expand this position into 1-2 rows at the return below.
+    path_split: Optional[Dict[str, Dict[str, Any]]] = None
     try:
         # Single code path with the axes-only perm replay: _position_axes rebuilds
         # per_node_dist from posterior_data exactly as node_posteriors["per_node"]
         # was built above, so the score here stays bit-identical while guaranteeing
         # the perm null scores each position through the same helper.
-        path_result = _position_axes(
-            caas_pos, tree_data, posterior_data, node_index, pair_details_list,
-            per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
-        )
-        asr_path_score = path_result["asr_path_score"]
-        independence = path_result.get("independence", 1.0)
-        derived_agreement = path_result["derived_agreement"]
-        core = path_result.get("core", 0.0)
-        pair_path_scores = path_result["pair_scores"]
-        pair_path_contaminated = path_result["pair_contaminated"]
-        conserved_pair_path_scores = path_result.get("conserved_pair_scores", {}) or {}
-        conserved_pair_path_nodes = path_result.get("conserved_pair_nodes", {}) or {}
-        pair_ancestral_aa = path_result.get("pair_ancestral", {}) or {}
-        pair_derived_top_aa = path_result.get("pair_derived_top", {}) or {}
-        pair_derived_bot_aa = path_result.get("pair_derived_bot", {}) or {}
-        pair_top_path_scores = path_result.get("top_pair_scores", {}) or {}
-        pair_bottom_path_scores = path_result.get("bottom_pair_scores", {}) or {}
+        if native_side_split:
+            path_split = _position_axes(
+                caas_pos, tree_data, posterior_data, node_index, pair_details_list,
+                per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
+                native_side_split=True,
+            )
+            _t, _b = path_split["top"], path_split["bottom"]
+            asr_path_score = max(_t["asr_path_score"], _b["asr_path_score"])
+            core = asr_path_score
+            derived_agreement = None
+            pair_path_scores = {
+                **(_b.get("pair_scores") or {}), **(_t.get("pair_scores") or {})
+            }
+            pair_path_contaminated = {
+                **(_b.get("pair_contaminated") or {}),
+                **(_t.get("pair_contaminated") or {}),
+            }
+            conserved_pair_path_scores = _t.get("conserved_pair_scores", {}) or {}
+            conserved_pair_path_nodes = _t.get("conserved_pair_nodes", {}) or {}
+            pair_ancestral_aa = _t.get("pair_ancestral", {}) or {}
+            pair_derived_top_aa = _t.get("pair_derived_top", {}) or {}
+            pair_derived_bot_aa = _t.get("pair_derived_bot", {}) or {}
+            pair_top_path_scores = _t.get("pair_scores", {}) or {}
+            pair_bottom_path_scores = _b.get("pair_scores", {}) or {}
+        else:
+            path_result = _position_axes(
+                caas_pos, tree_data, posterior_data, node_index, pair_details_list,
+                per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
+            )
+            asr_path_score = path_result["asr_path_score"]
+            independence = path_result.get("independence", 1.0)
+            derived_agreement = path_result["derived_agreement"]
+            core = path_result.get("core", 0.0)
+            pair_path_scores = path_result["pair_scores"]
+            pair_path_contaminated = path_result["pair_contaminated"]
+            conserved_pair_path_scores = path_result.get("conserved_pair_scores", {}) or {}
+            conserved_pair_path_nodes = path_result.get("conserved_pair_nodes", {}) or {}
+            pair_ancestral_aa = path_result.get("pair_ancestral", {}) or {}
+            pair_derived_top_aa = path_result.get("pair_derived_top", {}) or {}
+            pair_derived_bot_aa = path_result.get("pair_derived_bot", {}) or {}
+            pair_top_path_scores = path_result.get("top_pair_scores", {}) or {}
+            pair_bottom_path_scores = path_result.get("bottom_pair_scores", {}) or {}
     except Exception as e:  # never let path scoring break disambiguation
+        path_split = None
         logger.warning(
             f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
         )
 
-    return ConvergenceResult(
+    base_result = ConvergenceResult(
         gene=gene,
         position=caas_pos.position,
         tag=caas_pos.tag,
@@ -526,6 +604,13 @@ def analyze_caas_position_disambiguation(
         recovery_boot=getattr(caas_pos, "recovery_boot", None),
     )
 
+    if native_side_split and path_split is not None:
+        # T3b: "both" position -> two rows keyed (gene, position, side); a
+        # one-sided or no-change position stays a single row. change_side /
+        # change_top / change_bottom are left position-level (T4a retires them).
+        return _split_result_by_side(base_result, path_split)
+    return base_result
+
 
 def analyze_gene_disambiguation(
     gene: str,
@@ -544,6 +629,7 @@ def analyze_gene_disambiguation(
     axes_only: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     build_node_posteriors: bool = False,
+    native_side_split: bool = False,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
@@ -972,12 +1058,16 @@ def analyze_gene_disambiguation(
                 per_site_dist_cache=per_site_dist_cache,
                 hypothesis=_hyp_label,
                 walk_cache=gene_walk_cache,
+                native_side_split=native_side_split,
             )
 
-            results.append(result)
+            # T3b: a "both" position expands to a list of per-side rows.
+            row_list = result if isinstance(result, list) else [result]
+            results.extend(row_list)
             logger.info(
-                f"✓ Analyzed position {pos}: {result.convergence_type} pattern, "
-                f"{result.ancestral}→{result.derived}"
+                f"✓ Analyzed position {pos}: {row_list[0].convergence_type} pattern, "
+                f"{row_list[0].ancestral}→{row_list[0].derived}"
+                + (f" ({len(row_list)} side rows)" if len(row_list) > 1 else "")
             )
 
         except Exception as e:

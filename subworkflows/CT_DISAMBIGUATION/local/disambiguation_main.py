@@ -90,6 +90,13 @@ def parse_arguments():
     parser.add_argument(
         "--taxid-mapping", default=None, help="TaxID to species mapping file"
     )
+    parser.add_argument(
+        "--native-side-split",
+        action="store_true",
+        help="scoring_v2 T3 feature flag: emit two ConvergenceResult rows for a "
+        "'both' CAAS position (one per phenotype side) and score each direction "
+        "independently. Off (default) keeps the legacy single-row path.",
+    )
 
     # Performance
     parser.add_argument(
@@ -263,6 +270,7 @@ def main():
             workers=args.workers,
             max_tasks_per_child=args.max_tasks_per_child,
             run_diagnostics=args.run_diagnostics,
+            native_side_split=args.native_side_split,
             output_dir=output_dir,
             ensembl_genes_file=args.ensembl_genes_file,
             max_codeml=args.codeml_concurrency,

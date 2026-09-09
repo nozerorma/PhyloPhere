@@ -300,6 +300,7 @@ def process_single_gene(
     output_dir: Path,
     db_queue: Optional[Any] = None,
     ensembl_genes: Optional[Set[str]] = None,
+    native_side_split: bool = False,
 ) -> Tuple[str, Optional[Path]]:
 
     try:
@@ -491,6 +492,7 @@ def process_single_gene(
             diagnostics_dir=diag_root,
             convergence_mode=convergence_mode,
             asr_mode=asr_mode,
+            native_side_split=native_side_split,
         )
 
         if not biochem_results:
@@ -637,6 +639,7 @@ def process_all_genes(
     ensembl_genes_file: Optional[str] = None,
     max_tasks_per_child: Optional[int] = None,
     max_codeml: Optional[int] = None,
+    native_side_split: bool = False,
 ) -> Tuple[List[Dict], Optional[Dict]]:
 
     effective_workers, threads_per_gene = plan_concurrency(
@@ -749,6 +752,7 @@ def process_all_genes(
                         output_dir,
                         db_queue,
                         ensembl_genes,
+                        native_side_split,
                     ),
                 )
             )
