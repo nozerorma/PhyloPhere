@@ -62,11 +62,16 @@ def scan_detail(detail_path: Path):
     """
     hist_by_cycle = {}
     n_rows = 0
+    seen_cand = set()  # (cyc, Position, caap_group) — a T3c per-side shard has
+    # two rows per "both" position; the candidate-pool histogram counts it once.
     for row in iter_detail_rows(detail_path):
         cyc = row["cycle"]
         d = int(row["n_detected"])
-        per_cycle = hist_by_cycle.setdefault(cyc, {})
-        per_cycle[d] = per_cycle.get(d, 0) + 1
+        ck = (cyc, str(row.get("Position")), row.get("caap_group"))
+        if ck not in seen_cand:
+            seen_cand.add(ck)
+            per_cycle = hist_by_cycle.setdefault(cyc, {})
+            per_cycle[d] = per_cycle.get(d, 0) + 1
         n_rows += 1
     # Sorted so the emitted gene x cycle rows keep a deterministic column order.
     return sorted(hist_by_cycle), hist_by_cycle, n_rows

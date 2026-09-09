@@ -54,7 +54,8 @@ PositionAxes = namedtuple(
      "derived_agreement", "core",
      "conserved_pair_scores", "conserved_pair_nodes",
      "pair_ancestral", "pair_derived_top", "pair_derived_bot",
-     "pair_top_scores", "pair_bottom_scores"],
+     "pair_top_scores", "pair_bottom_scores",
+     "sides"],
 )
 # All fields after `change_bottom` are optional. Single-contrast perm replay
 # leaves `hypothesis` None and the FOP axis fields None. For the FOP null they
@@ -65,9 +66,15 @@ PositionAxes = namedtuple(
 # `bottom_pair_scores`) that `core` is actually built from — see
 # fop_pool.R/.py, which need them to rebuild core_top/core_bottom instead of
 # collapsing all domains into one direction-blind pool.
+# `sides` (scoring_v2 T3c SC2b): the raw
+# ``compute_asr_path_score(native_side_split=True)`` return
+# ``{"top": <row>, "bottom": <row>}`` for the FOP null's per-side pairwise pooler
+# (``fop_pool.pool_hypotheses_pairwise``). Populated only in the axes-only replay
+# when ``native_side_split`` is on; ``None`` everywhere else.
 PositionAxes.__new__.__defaults__ = (
     "none",
     None, None, None, None, None, None, None, None, None, None, None, None,
+    None,
 )
 
 
@@ -982,6 +989,7 @@ def analyze_gene_disambiguation(
             # would have emitted — not a placeholder.
             if axes_only:
                 cp = tip_level_pattern or {}
+                axes_sides = None
                 try:
                     path_result = _position_axes(
                         caas_pos,
@@ -991,7 +999,20 @@ def analyze_gene_disambiguation(
                         tip_diagnostics.get("pair_details"),
                         per_site_dist_cache=per_site_dist_cache,
                         walk_cache=gene_walk_cache,
+                        native_side_split=native_side_split,
                     )
+                    if native_side_split:
+                        # {"top": row, "bottom": row}. Stash it whole for the FOP
+                        # null's per-side pairwise pooler; collapse the scalar
+                        # fields to the stronger side so a legacy reader still
+                        # gets a sane value.
+                        axes_sides = path_result
+                        _t = path_result.get("top", {}) or {}
+                        _b = path_result.get("bottom", {}) or {}
+                        path_result = _t if (
+                            float(_t.get("asr_path_score", 0.0) or 0.0)
+                            >= float(_b.get("asr_path_score", 0.0) or 0.0)
+                        ) else _b
                     axes_score = path_result.get("asr_path_score", 0.0)
                     axes_pair_scores = path_result.get("pair_scores", None)
                     axes_cons_scores = path_result.get("conserved_pair_scores", None) or None
@@ -1016,6 +1037,7 @@ def analyze_gene_disambiguation(
                     axes_anc = axes_der_top = axes_der_bot = None
                     axes_top_scores = axes_bottom_scores = None
                     axes_extra = {}
+                    axes_sides = None
                 results.append(
                     PositionAxes(
                         position=caas_pos.position,
@@ -1036,6 +1058,7 @@ def analyze_gene_disambiguation(
                         pair_derived_bot=axes_der_bot,
                         pair_top_scores=axes_top_scores,
                         pair_bottom_scores=axes_bottom_scores,
+                        sides=axes_sides,
                     )
                 )
                 logger.debug(
