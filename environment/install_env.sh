@@ -107,14 +107,18 @@ stopifnot(system2("git", c("clone", "--quiet",
   "https://github.com/nclark-lab/RERconverge.git", pkgdir)) == 0L)
 stopifnot(system2("git", c("-C", pkgdir, "checkout", "--quiet", rer_ref)) == 0L)
 
+# NOTE: no regex backslash escapes below (no "\\s", no "\\+"). This block is
+# passed via `Rscript -e ${single-quoted}` and some callers (nested ssh/bash -c,
+# GUI subprocess wrappers) strip one backslash level, turning "\\s" into a bare
+# "\s" that R rejects as an unrecognized escape. fixed=TRUE keeps it literal.
 mv <- file.path(pkgdir, "src", "Makevars")
 for (f in c(mv, paste0(mv, ".win"))) {
   txt <- if (file.exists(f)) readLines(f) else character(0)
-  txt <- grep("^\\s*CXX_STD\\s*=", txt, value = TRUE, invert = TRUE)
+  txt <- txt[!grepl("CXX_STD", txt, fixed = TRUE)]
   writeLines(c(txt, "CXX_STD = CXX17"), f)
 }
 desc <- file.path(pkgdir, "DESCRIPTION")
-writeLines(gsub("C\\+\\+11", "C++17", readLines(desc)), desc)
+writeLines(gsub("C++11", "C++17", readLines(desc), fixed = TRUE), desc)
 
 remotes::install_local(pkgdir, dependencies = NA, upgrade = "never")
 
