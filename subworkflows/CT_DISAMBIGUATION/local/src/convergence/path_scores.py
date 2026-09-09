@@ -522,6 +522,105 @@ def noisy_or(probs) -> float:
     return max(0.0, min(1.0, 1.0 - acc))
 
 
+def aggregate_core_side(
+    participants: List[Dict[str, Any]],
+    n_conserved: int,
+    node_index: Dict[int, Any],
+    per_node_dist: Dict[Any, Dict[str, float]],
+    scheme: Optional[str],
+    iso_override: Optional[Dict[Any, float]] = None,
+    walk_cache: Optional[Dict[Any, Any]] = None,
+    cache_scope: Optional[Tuple[Any, Optional[str]]] = None,
+) -> Dict[str, Any]:
+    """The per-side pairwise ``core_s`` aggregation (T3-doc §5), factored out.
+
+    One ``core_s`` over ``D_s`` = ``participants`` ∪ ``n_conserved`` conserved
+    slots. Each participant is ``{"pid", "mrca_id", "der_enc", "anc_enc"}`` — a
+    pair that changed on this side to encoded residue ``der_enc``.
+
+    * ``iso[pid] = s_c^s`` — private-segment isolation, walk stopped at the
+      nearest same-side LCA merge point. Computed here unless ``iso_override``
+      supplies it (the FOP pooler pools ``s_c^s`` per domain across hypotheses
+      first, then passes it in keyed by ``pid``).
+    * ``contrib(c, d) = iso_c · iso_d · [der_c == der_d]
+      · (1 − P_wc(der_c @ LCA(mrca_c, mrca_d)))`` over same-residue participant
+      pairs; ``score_c = noisy_or`` of a participant's contribs; ``core_s`` =
+      mean of ``score_c`` over ``|participants| + n_conserved``.
+
+    Returns the numeric per-side fields (no position-level conserved/derived
+    maps — the caller attaches those). Bit-identical to the pre-refactor
+    ``_side_result`` inner block.
+    """
+    P = participants
+    n_part = len(P)
+    n = n_part + max(0, int(n_conserved))
+
+    # L_s — merge points of THIS side's participants only (T3-doc §5.2).
+    lca_s: set = set()
+    for a, b in combinations(P, 2):
+        lca = find_lca(node_index, a["mrca_id"], b["mrca_id"])
+        if lca is not None:
+            lca_s.add(lca)
+
+    # s_c^s — private-segment isolation; walk stops at the nearest L_s node.
+    iso: Dict[Any, float] = {}
+    contam: Dict[Any, bool] = {}
+    for p in P:
+        if iso_override is not None and p["pid"] in iso_override:
+            iso[p["pid"]] = float(iso_override[p["pid"]])
+            contam[p["pid"]] = False
+            continue
+        full_path = path_to_root_ids(node_index, p["mrca_id"])
+        stop_at = next((x for x in full_path if x in lca_s), None)
+        sc, ct = side_path_score(
+            node_index, per_node_dist, p["mrca_id"],
+            p["anc_enc"], p["der_enc"], scheme,
+            is_changed=True, stop_at_id=stop_at,
+            walk_cache=walk_cache, cache_scope=cache_scope,
+        )
+        iso[p["pid"]] = sc
+        contam[p["pid"]] = ct
+
+    # contrib(c, d) over unordered same-residue participant pairs.
+    contribs: Dict[Any, List[float]] = {p["pid"]: [] for p in P}
+    for a, b in combinations(P, 2):
+        if a["der_enc"] != b["der_enc"]:
+            continue  # agree == 0 → contrib == 0
+        lca_ab = find_lca(node_index, a["mrca_id"], b["mrca_id"])
+        p_shared = worst_case_group_probability(
+            node_dist(per_node_dist, lca_ab), a["der_enc"], scheme
+        )
+        k = iso[a["pid"]] * iso[b["pid"]] * max(0.0, 1.0 - p_shared)
+        contribs[a["pid"]].append(k)
+        contribs[b["pid"]].append(k)
+
+    partner_scores = {pid: noisy_or(v) for pid, v in contribs.items()}
+    core_s = (sum(partner_scores.values()) / n) if n else 0.0
+    core_s = max(0.0, min(1.0, core_s))
+
+    by_res: Dict[str, int] = {}
+    for p in P:
+        by_res[p["der_enc"]] = by_res.get(p["der_enc"], 0) + 1
+    agree_den = n_part
+    agree_num = max(by_res.values()) if by_res else 0
+    concentration = (agree_num / agree_den) if agree_den else 0.0
+
+    return {
+        "asr_path_score": core_s,
+        "core": core_s,
+        "n_pairs_side": n,
+        "n_participating": n_part,
+        "n_conserved": max(0, int(n_conserved)),
+        "derived_agreement": concentration,
+        "agree_num": agree_num,
+        "agree_den": agree_den,
+        "convergence_type": _convergence_type(agree_num, agree_den),
+        "pair_scores": dict(iso),
+        "pair_partner_scores": partner_scores,
+        "pair_contaminated": contam,
+    }
+
+
 def _convergence_type(agree_num: int, agree_den: int) -> str:
     """Categorical label from the agreement numerator/denominator (T3-doc §7).
 
@@ -693,74 +792,18 @@ def compute_asr_path_score(
     for c in changed:
         for side_key, tip_enc in c["sides"]:
             participants[side_key].append(
-                {"pid": c["pid"], "mrca_id": c["mrca_id"], "der_enc": tip_enc}
+                {"pid": c["pid"], "mrca_id": c["mrca_id"], "der_enc": tip_enc,
+                 "anc_enc": anc_by_pid[c["pid"]]}
             )
 
     def _side_result(side_key: str) -> Dict[str, Any]:
-        P = participants[side_key]
-        n_part = len(P)
-        n = n_part + len(conserved_present)
-
-        # L_s — merge points of THIS side's participants only (T3-doc §5.2).
-        lca_s: set = set()
-        for a, b in combinations(P, 2):
-            lca = find_lca(node_index, a["mrca_id"], b["mrca_id"])
-            if lca is not None:
-                lca_s.add(lca)
-
-        # s_c^s — private-segment isolation, walk stops at the nearest L_s node.
-        iso: Dict[int, float] = {}
-        contam: Dict[int, bool] = {}
-        for p in P:
-            full_path = path_to_root_ids(node_index, p["mrca_id"])
-            stop_at = next((x for x in full_path if x in lca_s), None)
-            sc, ct = side_path_score(
-                node_index, per_node_dist, p["mrca_id"],
-                anc_by_pid[p["pid"]], p["der_enc"], scheme,
-                is_changed=True, stop_at_id=stop_at,
-                walk_cache=walk_cache, cache_scope=(site_key, scheme),
-            )
-            iso[p["pid"]] = sc
-            contam[p["pid"]] = ct
-
-        # contrib(c,d) over unordered participant pairs on the same residue.
-        contribs: Dict[int, List[float]] = {p["pid"]: [] for p in P}
-        for a, b in combinations(P, 2):
-            if a["der_enc"] != b["der_enc"]:
-                continue  # agree == 0 → contrib == 0, skip the rest
-            lca_ab = find_lca(node_index, a["mrca_id"], b["mrca_id"])
-            p_shared = worst_case_group_probability(
-                node_dist(per_node_dist, lca_ab), a["der_enc"], scheme
-            )
-            k = iso[a["pid"]] * iso[b["pid"]] * max(0.0, 1.0 - p_shared)
-            contribs[a["pid"]].append(k)
-            contribs[b["pid"]].append(k)
-
-        partner_scores = {pid: noisy_or(v) for pid, v in contribs.items()}
-        core_s = (sum(partner_scores.values()) / n) if n else 0.0
-        core_s = max(0.0, min(1.0, core_s))
-
-        # concentration_s = agree_num / agree_den (diagnostic; T4a convergence_type)
-        by_res: Dict[str, int] = {}
-        for p in P:
-            by_res[p["der_enc"]] = by_res.get(p["der_enc"], 0) + 1
-        agree_den = n_part
-        agree_num = max(by_res.values()) if by_res else 0
-        concentration = (agree_num / agree_den) if agree_den else 0.0
-
+        agg = aggregate_core_side(
+            participants[side_key], len(conserved_present),
+            node_index, per_node_dist, scheme,
+            walk_cache=walk_cache, cache_scope=(site_key, scheme),
+        )
         return {
-            "asr_path_score": core_s,
-            "core": core_s,
-            "n_pairs_side": n,
-            "n_participating": n_part,
-            "n_conserved": len(conserved_present),
-            "derived_agreement": concentration,
-            "agree_num": agree_num,
-            "agree_den": agree_den,
-            "convergence_type": _convergence_type(agree_num, agree_den),
-            "pair_scores": dict(iso),
-            "pair_partner_scores": partner_scores,
-            "pair_contaminated": contam,
+            **agg,
             "conserved_pair_scores": conserved_pair_scores,
             "conserved_pair_nodes": conserved_pair_nodes,
             "pair_ancestral": pair_ancestral,
