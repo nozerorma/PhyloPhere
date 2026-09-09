@@ -95,7 +95,29 @@ BiocManager::install("data.table", ask = FALSE, update = FALSE)
 # Prevent pkgbuild from throwing missing-toolchain warnings
 options(buildtools.check = function(action) TRUE)
 
-remotes::install_github("nclark-lab/RERconverge@2bd328f7530b4aca9b48c0b3997875c9b77a7026", dependencies = NA, upgrade="never")
+# RERconverge pins CXX_STD = CXX11, but modern RcppArmadillo (>= 12, and the
+# 15.x build in this env) requires at least C++14 and fails compiler_check.hpp.
+# Fetch the pinned commit, bump the C++ standard, and install from the local dir.
+rer_ref <- "2bd328f7530b4aca9b48c0b3997875c9b77a7026"
+tb <- tempfile(fileext = ".tar.gz")
+utils::download.file(
+  sprintf("https://github.com/nclark-lab/RERconverge/archive/%s.tar.gz", rer_ref),
+  tb, quiet = TRUE
+)
+ex <- tempfile(); dir.create(ex)
+utils::untar(tb, exdir = ex)
+pkgdir <- list.files(ex, full.names = TRUE)[1]
+
+mv <- file.path(pkgdir, "src", "Makevars")
+for (f in c(mv, paste0(mv, ".win"))) {
+  txt <- if (file.exists(f)) readLines(f) else character(0)
+  txt <- grep("^\\s*CXX_STD\\s*=", txt, value = TRUE, invert = TRUE)
+  writeLines(c(txt, "CXX_STD = CXX17"), f)
+}
+desc <- file.path(pkgdir, "DESCRIPTION")
+writeLines(gsub("C\\+\\+11", "C++17", readLines(desc)), desc)
+
+remotes::install_local(pkgdir, dependencies = NA, upgrade = "never")
 
 if (!requireNamespace("RERconverge", quietly = TRUE)) {
   stop("RERconverge failed to install")
