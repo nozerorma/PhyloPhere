@@ -618,6 +618,12 @@ def aggregate_core_side(
         "pair_scores": dict(iso),
         "pair_partner_scores": partner_scores,
         "pair_contaminated": contam,
+        # Per-participant structure so a downstream pooler (the FOP null,
+        # SC2b) can rebuild ``participants`` for a fresh ``aggregate_core_side``
+        # call over the node-deduped union of pairs across hypotheses.
+        "pair_mrca": {p["pid"]: p["mrca_id"] for p in P},
+        "pair_der_enc": {p["pid"]: p["der_enc"] for p in P},
+        "pair_anc_enc": {p["pid"]: p["anc_enc"] for p in P},
     }
 
 

@@ -1832,6 +1832,10 @@
         "n_conserved": 1,
         "n_pairs_side": 3,
         "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "3": "A"
+        },
         "pair_ancestral": {
           "1": "A",
           "2": "A",
@@ -1841,6 +1845,10 @@
           "1": false,
           "3": false
         },
+        "pair_der_enc": {
+          "1": "L",
+          "3": "L"
+        },
         "pair_derived_bot": {
           "1": "L",
           "3": "L"
@@ -1848,6 +1856,10 @@
         "pair_derived_top": {
           "1": "V",
           "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "3": 7
         },
         "pair_partner_scores": {
           "1": 0.8145062499999999,
@@ -1874,6 +1886,10 @@
         "n_conserved": 1,
         "n_pairs_side": 3,
         "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
         "pair_ancestral": {
           "1": "A",
           "2": "A",
@@ -1883,6 +1899,10 @@
           "1": false,
           "2": false
         },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
         "pair_derived_bot": {
           "1": "L",
           "3": "L"
@@ -1890,6 +1910,10 @@
         "pair_derived_top": {
           "1": "V",
           "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 5
         },
         "pair_partner_scores": {
           "1": 0.7737809375,
