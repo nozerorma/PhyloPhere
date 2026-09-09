@@ -70,7 +70,21 @@ workflow CT_DISAMBIGUATION {
             file(tree_file_param)
         }
 
-        CT_DISAMBIGUATION_RUN(meta_caas, trait_file, tree_file)
+        // scoring_v2 T3c SC3: contrast_hypotheses_pairs.tsv — per-(hypothesis,
+        // domain) PSS weights for the in-tree FOP pooling (native_side_split).
+        // Only read when the flag is on; absent -> equal-weight node pooling.
+        // Resolution: --ct_disambig_hypotheses_pairs / --scoring_hypotheses_pairs
+        // -> auto-discover in outdir -> NO_HYP_PAIRS sentinel (same convenience
+        // as scoring.nf's resolved_hyp_pairs).
+        def hyp_pairs_file = {
+            def hp = params.ct_disambig_hypotheses_pairs ?: params.scoring_hypotheses_pairs ?: ''
+            if (hp && file(hp).exists()) return file(hp)
+            def auto = "${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv"
+            if (file(auto).exists()) return file(auto)
+            return file('NO_HYP_PAIRS')
+        }()
+
+        CT_DISAMBIGUATION_RUN(meta_caas, trait_file, tree_file, hyp_pairs_file)
 
     emit:
         results_dir = CT_DISAMBIGUATION_RUN.out.results_dir

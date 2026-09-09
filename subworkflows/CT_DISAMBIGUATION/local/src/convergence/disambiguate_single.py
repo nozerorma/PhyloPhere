@@ -732,6 +732,7 @@ def analyze_gene_disambiguation(
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     build_node_posteriors: bool = False,
     native_side_split: bool = False,
+    hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
@@ -1204,12 +1205,14 @@ def analyze_gene_disambiguation(
     if native_side_split and not axes_only and results:
         # T3c SC3: FOP-pool the hypothesis harvest here, in-tree, with the real
         # per-side pairwise core (pool_hypotheses_pairwise) — the same routine
-        # the permulation null uses. scoring_compute.R's fop_pool.R call becomes
-        # a pass-through (SC3b). PSS weighting: equal-weight for now (the
-        # contrast_hypotheses_pairs.tsv plumbing lands in SC3b).
+        # the permulation null uses. scoring_compute.R's fop_pool.R call is
+        # skipped under the flag. PSS weights (contrast_hypotheses_pairs.tsv,
+        # {(hyp, domain): pss}) come from hyp_pairs_pss; None -> equal weight.
         try:
             _n0 = len(results)
-            results = _pool_observed_fop(results, tree_data, posterior_data)
+            results = _pool_observed_fop(
+                results, tree_data, posterior_data, hyp_pairs_pss
+            )
             if len(results) != _n0:
                 logger.info(
                     f"✓ FOP pool (in-tree, per-side): {_n0} -> {len(results)} rows"

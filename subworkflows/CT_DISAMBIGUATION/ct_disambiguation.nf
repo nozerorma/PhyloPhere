@@ -13,6 +13,7 @@ process CT_DISAMBIGUATION_RUN {
     path meta_caas
     path trait_file
     path tree_file
+    path hyp_pairs
 
     output:
     path("ct_disambiguation"), emit: results_dir
@@ -102,6 +103,7 @@ process CT_DISAMBIGUATION_RUN {
       --run-diagnostics \
       --verbose \
       ${params.native_side_split ? "--native-side-split" : ''} \
+      ${hyp_pairs.name.startsWith('NO_') ? '' : "--hypotheses-pairs ${hyp_pairs}"} \
       ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
       ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \
       ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}

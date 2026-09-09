@@ -121,6 +121,21 @@ def test_non_fop_untouched():
     assert out == rows
 
 
+def test_pss_weights_threaded():
+    # H1 carries pair 1 (node 3), H2 carries pair 2 (node 5). Distinct nodes ->
+    # the union has both. PSS is passed straight through to
+    # pool_hypotheses_pairwise; with identical iso the weighting cannot move the
+    # result, so assert it at least runs and stays a valid pooled row.
+    sp1 = _split([PAIRS[0]])
+    sp2 = _split([PAIRS[1]])
+    rows = _rows_for_hyp("H1", sp1, [PAIRS[0]]) + _rows_for_hyp("H2", sp2, [PAIRS[1]])
+    pss = {("H1", 1): 3.0, ("H2", 2): 1.0}
+    out = ds._pool_observed_fop(rows, TREE, POSTERIOR_DATA, pss)
+    by_side = {r.side: r for r in out}
+    assert "top" in by_side and by_side["top"].hypothesis is None
+    assert by_side["top"].asr_path_score > 0.0
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     ok = True

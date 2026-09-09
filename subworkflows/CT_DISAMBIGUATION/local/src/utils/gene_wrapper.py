@@ -301,6 +301,7 @@ def process_single_gene(
     db_queue: Optional[Any] = None,
     ensembl_genes: Optional[Set[str]] = None,
     native_side_split: bool = False,
+    hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
 ) -> Tuple[str, Optional[Path]]:
 
     try:
@@ -493,6 +494,7 @@ def process_single_gene(
             convergence_mode=convergence_mode,
             asr_mode=asr_mode,
             native_side_split=native_side_split,
+            hyp_pairs_pss=hyp_pairs_pss,
         )
 
         if not biochem_results:
@@ -640,7 +642,14 @@ def process_all_genes(
     max_tasks_per_child: Optional[int] = None,
     max_codeml: Optional[int] = None,
     native_side_split: bool = False,
+    hypotheses_pairs_file: Optional[str] = None,
 ) -> Tuple[List[Dict], Optional[Dict]]:
+
+    hyp_pairs_pss = _read_contrast_hyp_pairs(hypotheses_pairs_file) if native_side_split else None
+    if hyp_pairs_pss:
+        logger.info(f"[disambig] FOP PSS weights: {len(hyp_pairs_pss)} (hypothesis, domain) pairs")
+    elif native_side_split:
+        logger.info("[disambig] FOP PSS weights: none (equal-weight node pooling)")
 
     effective_workers, threads_per_gene = plan_concurrency(
         workers, threads_per_gene, logger
@@ -753,6 +762,7 @@ def process_all_genes(
                         db_queue,
                         ensembl_genes,
                         native_side_split,
+                        hyp_pairs_pss,
                     ),
                 )
             )
@@ -881,6 +891,46 @@ def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], float]]:
     except Exception as e:
         logger.warning(f"[perms] could not read FOP pairs file {path}: {e}")
     return out
+
+
+def _read_contrast_hyp_pairs(path: Optional[str]) -> Optional[Dict[Tuple[str, int], float]]:
+    """contrast_hypotheses_pairs.tsv -> {(hypothesis_id, domain): pss_score}.
+
+    The OBSERVED-side twin of :func:`_read_fop_pairs` (which keys the null's
+    per-cycle mirror by base cycle). Header: hypothesis_id, pair, pss_score
+    (+ others). ``pair`` == Voronoi domain id. Mirrors
+    ``fop_pool.R::read_hypothesis_pairs``: the hypothesis id is normalised to its
+    ``H<n>`` token. ``None`` / missing / ``NO_*`` sentinel -> ``None`` (the
+    pooler then weights every node equally).
+    """
+    import csv as _csvmod
+    import re as _re
+
+    if not path or str(path).startswith("NO_") or not Path(path).is_file():
+        return None
+    out: Dict[Tuple[str, int], float] = {}
+    try:
+        with open(path, "r") as f:
+            reader = _csvmod.DictReader(f, delimiter="\t")
+            if not reader.fieldnames or not {
+                "hypothesis_id", "pair", "pss_score"
+            } <= set(reader.fieldnames):
+                return None
+            for row in reader:
+                raw = (row.get("hypothesis_id") or "").strip()
+                m = _re.search(r"H[0-9]+", raw)
+                if not m:
+                    continue
+                try:
+                    domain = int(float(row.get("pair", "")))
+                    pss = float(row.get("pss_score", "nan"))
+                except (TypeError, ValueError):
+                    continue
+                out[(m.group(0), domain)] = pss
+    except Exception as e:
+        logger.warning(f"[disambig] could not read contrast pairs file {path}: {e}")
+        return None
+    return out or None
 
 
 def _write_cycle_trait_file(fg: List[str], bg: List[str], out_path: Path) -> None:
