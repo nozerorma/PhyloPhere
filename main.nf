@@ -283,7 +283,11 @@ workflow {
             def perm_disc_ch = null
             def perm_subset_ch = null
             def perm_fop_pairs_ch = Channel.value(file('NO_FOP_PAIRS'))
-            def perm_tree_ch = ct_results ? ct_results.tree_file : (contrast_out ? contrast_out.tree_file_out : (params.tree ? file(params.tree) : Channel.empty()))
+            // Must stay a channel: CAAS_PERMULATION does tree_file.combine(asr_ready)
+            // on it. ct_results.tree_file / contrast_out.tree_file_out are workflow
+            // emits (already channels); the bare params.tree path needs wrapping or
+            // the .combine() call throws MissingMethodException on sun.nio.fs.UnixPath.
+            def perm_tree_ch = ct_results ? ct_results.tree_file : (contrast_out ? contrast_out.tree_file_out : (params.tree ? Channel.value(file(params.tree)) : Channel.empty()))
 
             if (ct_results && ct_results.caas_perm_discovery && ct_results.caas_resample_subset) {
                 perm_disc_ch = ct_results.caas_perm_discovery
