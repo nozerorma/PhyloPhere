@@ -44,6 +44,7 @@ dependencies:
   - pyyaml
   - jinja2           # HTML report generation (GUI + pipeline)
   - tqdm
+  - pytest           # subworkflow + validation test suites (test_*.py)
 
   # --- python: GUI ---
   - pyside6
@@ -89,6 +90,9 @@ dependencies:
   - r-kableextra
   - r-knitr
   - r-rmarkdown
+  - r-colorspace     # colorspace:: in TRAIT_ANALYSIS Rmds (else only transitive via ggplot2)
+  - r-ragg           # ragg:: PNG device in CI-composition Rmd (else only transitive)
+  - r-base64enc      # base64enc:: image embedding in FCS / posenrich Rmds (else only transitive)
 
   # --- R: trees / enrichment / networks ---
   - bioconductor-ggtree
