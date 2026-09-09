@@ -79,6 +79,7 @@ dependencies:
   - r-ggrepel
   - r-ggnewscale
   - r-ggstar
+  - r-ggimage
   - r-patchwork
   - r-gridextra
   - r-paletteer
