@@ -68,6 +68,23 @@ def get_logger(): pass      # factory used in package __init__ files
 
 def main(): pass            # all main() functions are called by __name__ == "__main__"
 
+# ── Conserved-pair plumbing kept latent by scoring_v2 T1 (roadmap decision G) ──
+# T1 removed the conservation_gate multiplier from the ASR path score, but the
+# conserved-pair machinery below stays wired so a later tier (T3) can fold it
+# into the pairwise core. Guarded by test_conserved_pair_columns_survive.
+
+class _ConservedPairLatent:  # noqa: vulture whitelist stub
+    conserved_pair_scores = None
+    conserved_pair_nodes = None
+    conserved_pair_path_scores = None
+    conserved_pair_path_nodes = None
+    pair_ancestral = None
+    pair_derived_top = None
+    pair_derived_bot = None
+
+def parse_conserved_ids(): pass      # path_scores.py — conserved id string parser
+def _conserved_side_score(): pass    # path_scores.py — conservation-to-root walk
+
 # ── Pytest / unittest hooks (if tests are added) ──────────────────────────────
 
 def setUp(): pass

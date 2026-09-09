@@ -206,7 +206,7 @@ sitio es:
 **`recovery_boot` = `occurrences / total`** — fracción de **labelings fenotípicos
 permulados** (E.1) en los que el CAAS se vuelve a llamar en esa (posición, esquema). Se
 comporta como una p empírica: *baja* = raro bajo re-etiquetado del fenotipo = **distintivo
-del foreground real**. Es la entrada del `phen_score` en el scoring (H.3).
+del foreground real**. Alimenta el `phen_score` diagnóstico (H.3; T1: ya no factor del score).
 
 `gate_all` / `gate_sig` (mencionados en comentarios obsoletos de `scoring_compute.R`) ya
 **no existen**: no hay ningún gate de significación por sitio en el scoring; la
@@ -300,7 +300,7 @@ CAAS; si contiene `H<n>`, la fila **pertenece a la hipótesis n** y se desambigu
 
 > Esto es deliberado. La unión de los pares de todas las hipótesis (`_flattened_fallback`,
 > red de seguridad con warning) **contaminaba** todos los ejes multi-par del ASR path score
-> (puntos de fusión LCA, `independence`, `mrca_diversity`) con contrastes de hipótesis no
+> (puntos de fusión LCA, `independence`, `core`) con contrastes de hipótesis no
 > relacionadas y destruía la independencia Dunn por-hipótesis que el harvest FOP impone.
 
 *Ejemplo:* la fila `(OPN1, 210, US, trait=traitfile_H3.tab)` se desambigua contra los pares
@@ -319,33 +319,36 @@ Recorrido acotado a dos regiones, nunca al camino MRCA→raíz completo:
 - **nodos LCA**: puntos de fusión de los MRCAs de los pares cambiados (≤ n−1), lo que hace
   que un *producto* sobre LCA sea independiente de la profundidad.
 
-Cinco factores multiplicados:
+Tres factores multiplicados (scoring_v2 T1: se eliminaron `mrca_diversity` y
+`conservation_gate` del producto):
 
 | factor | qué mide | cómo |
 |--------|----------|------|
 | **`independence`** | ¿los ancestros compartidos ya llevaban el estado derivado? | `∏_LCA (1 − P(cualquiera del pool derivado en el LCA))`, cota *worst-case* (masa exacta si el residuo está registrado; si no, el remanente no registrado, sumado una vez) |
 | **`core`** (replicación) | `P(≥2 cambios independientes)` | inclusión-exclusión sobre los scores de aislamiento privado por par, **por lado fenotípico**: `core_top`, `core_bottom`, y `core = 1 − (1−core_top)(1−core_bottom)`. Un par que cambia solo en top y otro solo en bottom → `core = 0` |
-| **`mrca_diversity`** (paralelismo) | ¿los segmentos privados pasaron por fondos ancestrales distintos, o el estado del MRCA de A aparece en el recorrido de B? | ambas direcciones por par de pares, unión "encontrado en algún sitio"; `diversity = 1 − media_pairwise(prob. de fondo compartido)` |
 | **`derived_agreement`** (convergencia) | dentro de cada lado con ≥ 2 pares cambiados, ¿qué fracción cae en el residuo derivado de pluralidad? | conteos de pares puros; media sobre lados cualificados; 1.0 si ningún lado tiene ≥ 2 |
-| **`conservation_gate`** | ¿los pares conservados sostienen el contraste? | `0.5 + 0.5·media(conservación-a-raíz de pares conservados)`; **1.0 si no hay pares conservados** (posición novel). Solo confirma/socava, nunca aumenta |
 
 ```
 replication    = independence · core
-strength       = (0.75 + 0.25 · diversity) · derived_agreement
-asr_path_score = replication · strength · conservation_gate            ∈ [0,1]
+asr_path_score = replication · derived_agreement                       ∈ [0,1]
 ```
+
+Los pares conservados se siguen recorriendo y sus scores de conservación-a-raíz
+se emiten en `conserved_pair_scores` / `conserved_pair_nodes` (latente, para que
+un tier posterior los integre en el `core` pareado); T1 no aplica ningún
+multiplicador `conservation_gate` ni descuento de paralelismo `mrca_diversity`.
 
 *Ejemplo — `(OPN1, 210, US)` por hipótesis:*
 
-| hyp | pares cambiados (lado top) | independence | core_top | diversity | derived_agreement | gate | **asr_path_score** |
-|-----|---------------------------|-------------|----------|-----------|-------------------|------|--------------------|
-| H1 | W, W, W (3 orígenes limpios) | 0.92 | 0.88 | 0.86 | **1.00** | 1.0 | **≈ 0.72** |
-| H2 | W, W, W | 0.92 | 0.88 | 0.84 | 1.00 | 1.0 | ≈ 0.71 |
-| H3 | W, W, **F** | 0.90 | 0.85 | 0.82 | **0.67** (2 de 3 en W) | 1.0 | **≈ 0.47** |
-| H4 | W, W, **F** | 0.90 | 0.84 | 0.80 | 0.67 | 1.0 | ≈ 0.46 |
+| hyp | pares cambiados (lado top) | independence | core_top | derived_agreement | **asr_path_score** |
+|-----|---------------------------|-------------|----------|-------------------|--------------------|
+| H1 | W, W, W (3 orígenes limpios) | 0.92 | 0.88 | **1.00** | **≈ 0.81** |
+| H2 | W, W, W | 0.92 | 0.88 | 1.00 | ≈ 0.81 |
+| H3 | W, W, **F** | 0.90 | 0.85 | **0.67** (2 de 3 en W) | **≈ 0.51** |
+| H4 | W, W, **F** | 0.90 | 0.84 | 0.67 | ≈ 0.51 |
 
 Bajo **GS3** (W y F en el mismo grupo aromático) `derived_agreement = 1.0` también en
-H3/H4, así que `asr_path_score ≈ 0.71` en las cuatro.
+H3/H4, así que `asr_path_score ≈ 0.81` en las cuatro.
 
 ### F.4. Bloques columna emitidos (para el pooling FOP)  (`gene_wrapper.py::convert_convergence_result_to_dict`)
 
@@ -357,8 +360,8 @@ Aplanados por par `i` (= dominio de Voronoi por construcción del harvest):
   (para el core direccional del pooling).
 - `mrca_<i>_anc_aa` / `_top_aa` / `_bot_aa` — residuos crudos ancestral y derivado por lado.
 - `conserved_<j>_node` / `_cons` — bloque paralelo de pares conservados, `j` por `pair_id`.
-- escalares: `independence`, `mrca_diversity`, `derived_agreement`, `conservation_gate`,
-  `core`, `convergence_type`, `change_top`, `change_bottom`, `change_side`.
+- escalares: `independence`, `derived_agreement`, `core`, `convergence_type`,
+  `change_top`, `change_bottom`, `change_side`.
 
 Salida: `ct_disambiguation/caas_convergence_master.csv` (una fila por gene × position ×
 esquema × hipótesis).
@@ -451,9 +454,10 @@ hipótesis distinta → *passthrough* (la fila pasa intacta). Con > 1:
   del harvest), y se hace media ponderada por **el PSS propio de ese par en el dominio `i`**
   (`pair_pss(hyp, i)`, máximo sobre filas que comparten nodo). → un escalar `c_i` por
   dominio.
-- **Job B — pool de ejes** (`independence`, `mrca_diversity`, `core` de fila): media
-  ponderada por hipótesis, peso = **media del PSS de los K pares de esa hipótesis** (su
-  credibilidad global, no su eslabón más débil).
+- **Job B — pool de ejes** (`independence`, `core` de fila): media ponderada por
+  hipótesis, peso = **media del PSS de los K pares de esa hipótesis** (su
+  credibilidad global, no su eslabón más débil). `mrca_diversity` / `conservation_gate`
+  se siguen pooleando pero son latentes (T1: fuera del score).
 
 **Paso 3 — core direccional** (`has_side_path`). En vez de poolear el
 `mrca_<i>_path_score` (que ya promedia top/bottom y dejaría que un cambio top en un dominio
@@ -477,16 +481,14 @@ pluralidad de `path_scores.py`**, sobre residuos codificados bajo **el esquema d
 
 **Paso 5 — `conservation_gate`** (`have_cons_cols`): se reconstruye desde los **pares
 conservados distintos** del grupo (dedup por `conserved_<j>_node`):
-`cg = 0.5 + 0.5·wmean(cons, w)`, con `w` = PSS del par en el dominio cuyo `mrca_<i>_node`
-coincide. Sin pares conservados → `cg = 1.0`.
+`cg = 0.5 + 0.5·wmean(cons, w)`. **T1: latente** — se sigue calculando y emitiendo pero
+ya no entra en el score.
 
-**Paso 6 — recombinar** (misma fórmula que F.3):
+**Paso 6 — recombinar** (misma fórmula que F.3, T1 = 3 factores):
 
 ```
-diversity_mult = 0.75 + 0.25 · diversity_pooled
-replication    = independence_pooled · core_pooled
-strength       = diversity_mult · da_pooled
-asr_pooled     = clamp01( replication · strength · cg_pooled )
+replication = independence_pooled · core_pooled
+asr_pooled  = clamp01( replication · da_pooled )
 ```
 
 **Descriptores de posición añadidos aquí** (fuera del pooling por `caap_group`, unidos por
@@ -512,13 +514,12 @@ asr_pooled     = clamp01( replication · strength · cg_pooled )
 
 - `core_top = P(≥2 de {0.85, 0.88, 0.80}) ≈ 0.94`; `core_bottom = 0` (no hay cambios en el
   linaje somero) → `core = 0.94`.
-- `independence_pooled ≈ 0.91`, `diversity_pooled ≈ 0.84` → `diversity_mult ≈ 0.96`.
+- `independence_pooled ≈ 0.91`.
 - `da` harvest-wide **bajo US**: pares cambiados top = {1:W, 2:W, 3: moda(W,W,F,F)}. El par
   3 empata → la moda coge uno; con residuos {W,W,X} la concentración es 2/3 →
   **`da_US ≈ 0.67`**. **Bajo GS3**: W y F → aromático → {a,a,a} → **`da_GS3 = 1.0`**.
-- `cg_pooled = 1.0` (sin pares conservados).
-- **`asr_pooled(US)` ≈ 0.91 · 0.94 · 0.96 · 0.67 · 1.0 ≈ 0.55**.
-  **`asr_pooled(GS3)` ≈ 0.91 · 0.94 · 0.96 · 1.0 · 1.0 ≈ 0.72**.
+- **`asr_pooled(US)` ≈ 0.91 · 0.94 · 0.67 ≈ 0.57**.
+  **`asr_pooled(GS3)` ≈ 0.91 · 0.94 · 1.0 ≈ 0.86**.
 - `convergence_schemes = "GS4,GS3,GS2,GS1"` (2 residuos distintos W/F, todos aromáticos;
   US falla). `derived_residues = "WF/Y"`, `top_residue_support = "W:3,F:1"`.
 
@@ -527,14 +528,14 @@ Tras §2b, la columna 210 de `OPN1` tiene **una fila por esquema**: US, GS4, GS3
 ### H.3. Score de dos ejes por fila (§2f) y null de posición (§2f-bis)
 
 ```
-phen_score = 1 − percent_rank(recovery_boot)      # percentil genome-wide, uniforme en [0,1]
+phen_score = 1 − percent_rank(recovery_boot)      # T1: diagnóstico, ya no factor
 asr_score  = asr_path_score  (= asr_pooled)        # limpieza en el árbol
-caas_row   = phen_score · asr_score               # dos ejes ortogonales
+caas_row   = asr_score                             # T1 decisión E
 ```
 
-`percent_rank` es genome-wide, por eso §2b tuvo que colapsar las hipótesis primero (si no,
-una posición con 4 hipótesis contaría 4 veces en el rango). El `recovery_boot` de la fila
-es el de la hipótesis representativa (mayor asr) tras el colapso.
+`phen_score` se sigue calculando y emitiendo como columna diagnóstica pero ya no multiplica
+a `asr_score` (ni en observado ni en el null). La eliminación total de `recovery_boot` queda
+diferida. `percent_rank` sigue siendo genome-wide, por eso §2b colapsa las hipótesis primero.
 
 `pos_perm_p` (§2f-bis) se une por `(Gene, Position, caap_group)` **antes** del colapso de
 esquemas, para que ride en la misma `mean()` de §2g que los demás ejes.
@@ -542,13 +543,13 @@ esquemas, para que ride en la misma `mean()` de §2g que los demás ejes.
 *Ejemplo:* `recovery_boot(OPN1,210) = 0.075`; su percentil genome-wide es bajo (raro bajo
 permulación) → `percent_rank ≈ 0.08` → **`phen_score ≈ 0.92`**.
 
-| esquema | `asr_score` | `phen_score` | `caas_row` |
-|---------|-------------|--------------|------------|
-| US  | 0.55 | 0.92 | **0.51** |
-| GS4 | 0.63 | 0.92 | 0.58 |
-| GS3 | 0.72 | 0.92 | 0.66 |
-| GS2 | 0.70 | 0.92 | 0.64 |
-| GS1 | 0.64 | 0.92 | 0.59 |
+| esquema | `asr_score` | `phen_score` (diag.) | `caas_row` |
+|---------|-------------|----------------------|------------|
+| US  | 0.57 | 0.92 | **0.57** |
+| GS4 | 0.70 | 0.92 | 0.70 |
+| GS3 | 0.86 | 0.92 | 0.86 |
+| GS2 | 0.82 | 0.92 | 0.82 |
+| GS1 | 0.74 | 0.92 | 0.74 |
 
 ### H.4. Agregación a Gene×Position (§2g)
 
@@ -556,8 +557,8 @@ permulación) → `percent_rank ≈ 0.08` → **`phen_score ≈ 0.92`**.
 
 - **`CAAS_score = mean(caas_row)`** *(no un máximo, no un sum: el nº de esquemas es una
   propiedad bioquímica del cambio, no evidencia)*.
-- `asr_score`, `mrca_diversity`, `derived_agreement`, `conservation_gate`, `core`,
-  `phen_score`, **`pos_perm_p`** = **media** sobre esquemas.
+- `asr_score`, `derived_agreement`, `core`, `phen_score` (diag.), **`pos_perm_p`** =
+  **media** sobre esquemas.
 - `n_schemes`, `scheme_set = "GS1+GS2+GS3+GS4+US"`, `n_hypotheses = 4`,
   `supporting_hypotheses = "H1,H2,H3,H4"` — **descriptores**; la recurrencia **nunca**
   multiplica `CAAS_score`.
@@ -678,11 +679,11 @@ filtradas por `change_side`, ranking sobre posiciones con `CAAS_score > 0`.
 | FOP | 4 hipótesis (H1–H4; alternativas A2 y C2) |
 | Discovery | filas para US/GS4/GS3/GS2/GS1 × H1–H4; patrón `WWW/YYY` (H1,H2), `WWF/YYY` (H3,H4) |
 | `recovery_boot` (D/E.1) | 0.075 (3/40 ciclos base) |
-| ASR por hipótesis (F.3) | asr ≈ 0.72 (H1), 0.47 (H3) bajo US; ≈ 0.71 todas bajo GS3 |
-| FOP pooling (H.2) | `asr_pooled` ≈ 0.55 (US), 0.72 (GS3); `da_US ≈ 0.67`, `da_GS3 = 1.0`; `convergence_schemes = "GS4,GS3,GS2,GS1"` |
-| `caas_row` (H.3) | 0.51 (US) … 0.66 (GS3) |
+| ASR por hipótesis (F.3) | asr ≈ 0.81 (H1), 0.51 (H3) bajo US; ≈ 0.81 todas bajo GS3 |
+| FOP pooling (H.2) | `asr_pooled` ≈ 0.57 (US), 0.86 (GS3); `da_US ≈ 0.67`, `da_GS3 = 1.0`; `convergence_schemes = "GS4,GS3,GS2,GS1"` |
+| `caas_row` (H.3) | = `asr_score`: 0.57 (US) … 0.86 (GS3) |
 | `pos_perm_p` (E.2) | 0.006 |
-| `CAAS_score` posición (H.4) | ≈ 0.60 (media sobre esquemas), `change_side = "top"` |
+| `CAAS_score` posición (H.4) | ≈ 0.74 (media de `asr_score` sobre esquemas), `change_side = "top"` |
 | `gene_caas_score` (H.5) | 0.94^12 ≈ 0.48 |
 | `gene_caas_pperm` (H.6) | ≈ 0.013 |
 | Ejes independientes (H.7) | FADE BF 300, RER p.perm 0.02 (acc), accum CCT p 0.04 — columnas separadas |

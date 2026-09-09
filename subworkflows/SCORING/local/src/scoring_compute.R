@@ -288,31 +288,24 @@ df <- df %>%
   )
 
 # Ensure the diagnostic path-score columns exist even if the input file lacks them.
-if (!"mrca_diversity" %in% names(df)) df$mrca_diversity <- NA_real_
-df$mrca_diversity <- suppressWarnings(as.numeric(df$mrca_diversity))
+# T1: mrca_diversity + conservation_gate dropped from the score and the schema.
 if (!"derived_agreement" %in% names(df)) df$derived_agreement <- NA_real_
 df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
-if (!"conservation_gate" %in% names(df)) df$conservation_gate <- NA_real_
-df$conservation_gate <- suppressWarnings(as.numeric(df$conservation_gate))
 if (!"core" %in% names(df)) df$core <- NA_real_
 df$core <- suppressWarnings(as.numeric(df$core))
 
 
-# ── 2f. Per-row two-way CAAS score ────────────────────────────────────────────
-# caas_row is the product of two orthogonal [0,1] evidence axes, computed per
-# (position, scheme) row:
-#   phen_score = 1 - percent_rank(recovery_boot): permutation confidence.
-#   asr_score  = asr_path_score: the unified ASR signal (section above).
-# The hypergeometric pvalue is not part of this product; it is the significance
+# ── 2f. Per-row CAAS score ────────────────────────────────────────────────────
+# T1 decision E: caas_row = asr_score (the unified ASR path score, section
+# above). The phen_score (permulation percent-rank) factor is dropped from the
+# product on both the observed and null sides. phen_score is still computed as a
+# diagnostic column (recovery_boot removal is deferred to a later change).
+# The hypergeometric pvalue is not part of this either; it is the significance
 # gate (gate_all / gate_sig, section 2h).
-# percent_rank is genome-wide, so it must see each (Gene, Position, scheme)
-# exactly once. §2b already collapsed the FOP hypothesis rows, so recovery_boot
-# here is the representative (highest-asr) hypothesis's permutation p and the
-# rank is undistorted by how many hypotheses a position happened to harvest.
 df <- df %>%
   mutate(
-    phen_score = 1 - dplyr::percent_rank(recovery_boot),
-    caas_row   = phen_score * asr_score
+    phen_score = 1 - dplyr::percent_rank(recovery_boot),  # diagnostic only (T1)
+    caas_row   = asr_score
   )
 
 # ── 2f-bis. Tier 2: position-level calibrated permulation null ──────────────
@@ -391,12 +384,10 @@ pos_scores <- df %>%
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
     n_conserved_pairs      = if ("n_conserved_pairs" %in% names(df)) dplyr::first(n_conserved_pairs) else "",
     convergence_schemes    = if ("convergence_schemes" %in% names(df)) dplyr::first(convergence_schemes) else "",
-    # The per-caap_group factors that build caas_row (asr_score, phen_score) and
-    # the ASR diagnostic axes (core, mrca_diversity, derived_agreement,
-    # conservation_gate, core_perside_pooled) are DELIBERATELY not carried to the
-    # position level: CAAS_score = mean_k(phen_k · asr_k) over schemes, and
-    # mean_k(phen_k) · mean_k(asr_k) does NOT reconstruct it, so a position-level
-    # mean of each factor reads as if it did and hides scheme disagreement (a
+    # The per-caap_group factors (asr_score / caas_row) and the ASR diagnostic
+    # axes (core, derived_agreement, core_perside_pooled) are DELIBERATELY not
+    # carried to the position level: CAAS_score = mean_k(asr_k) over schemes, and
+    # a position-level mean of each sub-factor hides scheme disagreement (a
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
     # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
     # the breakdown (e.g. the §3 stress test aggregates them there directly).

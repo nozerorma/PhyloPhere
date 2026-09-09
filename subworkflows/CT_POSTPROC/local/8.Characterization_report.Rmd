@@ -131,9 +131,9 @@ combo_from_flags <- function(df, cols) {
   })
 }
 
-# The parallel_* axis was retired upstream (superseded by the continuous
-# mrca_diversity axis of the ASR path score), so the convergence label is now the
-# convergence_type alone.
+# The parallel_* axis was retired upstream (the ASR path score's clean-path /
+# independence machinery approximates it; T1 also removed the interim
+# mrca_diversity axis), so the convergence label is now the convergence_type alone.
 make_pattern_parallel_label <- function(convergence_type) {
   pattern_chr <- as.character(convergence_type)
   pattern_chr[is.na(pattern_chr) | pattern_chr == ""] <- "unknown"

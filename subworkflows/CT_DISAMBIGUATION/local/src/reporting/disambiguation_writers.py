@@ -152,9 +152,7 @@ def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str
         # Unified ASR path score (replaces convergence/parallel at scoring time)
         "asr_path_score",
         "independence",
-        "mrca_diversity",
         "derived_agreement",
-        "conservation_gate",
         "core",
         # ASR fields (AT END - only present when ASR available)
         "all_mrca_state",

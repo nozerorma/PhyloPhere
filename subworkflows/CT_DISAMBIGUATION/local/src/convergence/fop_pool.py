@@ -53,12 +53,12 @@ known-approximate behaviour) so a stale cache still scores instead of erroring.
   record); ``derived_agreement`` is rebuilt harvest-wide from the PSS-weighted
   per-(domain, side) residue distribution (POINT 3, ``_domain_side_dists`` +
   ``_da_frac_from_dists``);
-* recombine with the path_scores.py algebra, verbatim from fop_pool.R::
+* recombine with the path_scores.py algebra, verbatim from fop_pool.R (T1: the
+  mrca_diversity and conservation_gate multipliers are gone; ``div`` / ``cg``
+  are still pooled and reported, latent)::
 
-      diversity_mult = 0.75 + 0.25 * mrca_diversity_pooled
-      replication    = independence_pooled * core_pooled
-      strength       = diversity_mult * derived_agreement_pooled
-      asr_pooled     = replication * strength * conservation_gate_pooled
+      replication = independence_pooled * core_pooled
+      asr_pooled  = replication * derived_agreement_pooled
 
 Single hypothesis (or non-FOP) -> the lone ``asr_path_score`` passes through.
 """
@@ -361,8 +361,11 @@ def pool_hypotheses(
         )
         cg = 1.0 if has_cons_cols else _pool("conservation_gate", 1.0)
 
-    diversity_mult = 0.75 + 0.25 * div
-    asr_pooled = max(0.0, min(1.0, indep * core_pooled * diversity_mult * da * cg))
+    # T1 collapse (mirrors path_scores.compute_asr_path_score): drop the
+    # mrca_diversity (diversity_mult) and conservation_gate multipliers.
+    # ``div`` and ``cg`` / ``cons_by_node`` stay computed above — latent, kept
+    # for a later tier and still reported below — but no longer enter the score.
+    asr_pooled = max(0.0, min(1.0, indep * core_pooled * da))
 
     return {
         "asr_path_score": asr_pooled,

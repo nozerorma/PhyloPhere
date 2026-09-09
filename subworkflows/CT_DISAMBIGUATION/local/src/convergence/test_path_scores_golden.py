@@ -72,6 +72,18 @@ def test_conserved_pair_columns_survive():
     assert set(got["conserved_pair_scores"]) == set(got["conserved_pair_nodes"])
 
 
+def test_t1_removed_axes_are_gone():
+    """T1: conservation_gate / mrca_diversity / strength must no longer appear
+    in the return dict, and asr_path_score == independence * core * derived_agreement."""
+    entry = next(e for e in _GOLDEN
+                 if e["scenario"]["name"] == "soft_posteriors_midrange")
+    got = run_scenario(entry["scenario"], ps)
+    for gone in ("conservation_gate", "mrca_diversity", "strength"):
+        assert gone not in got, f"{gone} still emitted after T1"
+    expect = got["independence"] * got["core"] * got["derived_agreement"]
+    assert abs(got["asr_path_score"] - expect) < TOL
+
+
 if __name__ == "__main__":
     fails = []
     for e in _GOLDEN:

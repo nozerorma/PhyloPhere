@@ -244,8 +244,8 @@ if (has_perms) {
 # Position-level null (cycle-stratified sample) + observed (filtered_discovery).
 # The observed side re-derives caas_row exactly as scoring_compute.R section 2f
 # does, so the values plotted here are what the pipeline actually scores on:
-#     phen_score = 1 - percent_rank(recovery_boot)   ranked over filtered_discovery
-#     caas_row   = phen_score * asr_path_score
+#     phen_score = 1 - percent_rank(recovery_boot)   diagnostic only (T1)
+#     caas_row   = asr_path_score                    (T1 decision E: no phen factor)
 # The null side arrives pre-ranked from gene_wrapper.py pass B: null_phen_score is
 # 1 - percent_rank of the leave-one-out null_pvalue_boot within that cycle's
 # genome-wide candidate pool, the null's analogue of the line above.
@@ -280,7 +280,7 @@ if (has_pos_sample && has_filtered) {
               asr_path_score = suppressWarnings(as.numeric(asr_path_score)),
               recovery_boot    = suppressWarnings(as.numeric(recovery_boot)),
               phen_score     = 1 - dplyr::percent_rank(recovery_boot),
-              caas_row       = phen_score * asr_path_score,
+              caas_row       = asr_path_score,
               source = "observed") %>%
     select(-recovery_boot)
   scheme_overlay <- bind_rows(null_pos, obs_pos) %>%
@@ -498,9 +498,9 @@ CAAS Scoring combines a position's convergence and biochemical evidence into one
 ranked score, then rolls that up to a per-gene score comparable against
 independent evolutionary evidence.
 
-1. **Position score (`CAAS_score`)**: the mean of `phen_score x asr_score` over
-   the biochemical schemes that detected the position. `phen_score` is a
-   permutation-based confidence that the pattern is not noise; `asr_score` is a
+1. **Position score (`CAAS_score`)**: the mean of `asr_score` over
+   the biochemical schemes that detected the position (T1 decision E dropped the
+   `phen_score` permutation factor; it is still reported as a diagnostic). `asr_score` is a
    five-factor ancestral-state signal that the convergence reflects independent
    origins, not shared ancestry. See Scoring Methodology below and the
    Biochemistry tab for how the schemes factor in.
@@ -563,25 +563,31 @@ $$\text{phen\_score} = 1 - P_{\text{boot}}$$
 
 #### 2. Position evolution: `asr_path_score` (`asr_score`)
 
-A product of five factors built from the per-node ASR posteriors (full
-definitions in [`docs/ASR_PATH_SCORE.md`](../../docs/ASR_PATH_SCORE.md)):
+A product of three factors built from the per-node ASR posteriors
+(`asr_path_score = independence * core * derived_agreement`; full definitions in
+[`docs/ASR_PATH_SCORE.md`](../../docs/ASR_PATH_SCORE.md)):
 
 | Factor | What it rewards |
 |--------|-----------------|
 | `core` | P(>=2 independent changes): combinatorial replication across directions, from per-pair isolation (the change occurs above the MRCA, not inherited) |
 | `independence` | derived state absent at the pairs' shared ancestors (LCA nodes) |
-| `mrca_diversity` | non-parallel origins (distinct ancestral starting posteriors) |
 | `derived_agreement` | changed pairs landing on the same derived residue per side |
-| `conservation_gate` | conserved pairs holding the ancestral state deeply |
+
+(T1 removed the `mrca_diversity` parallel discount and the `conservation_gate`
+conserved-pair gate. Conserved pairs are still walked and reported, latent.)
 
 #### 3. Combining schemes
 
 A substitution is tested against five biochemical partitions (US, GS1-GS4); a
 scheme "detects" the position if the substitution crosses one of its group
-boundaries. `CAAS_score` is the mean of `phen_score x asr_score` over the
+boundaries. `CAAS_score` is the mean of `asr_score` over the
 schemes that detected the position:
 
-$$\text{caas\_row} = \text{phen\_score} \times \text{asr\_path\_score}$$
+$$\text{caas\_row} = \text{asr\_path\_score}$$
+
+(T1 decision E: the `phen_score` permutation-rank factor was dropped from
+`caas_row` on both the observed and null sides; `phen_score` is still reported
+as a diagnostic column.)
 $$\text{CAAS\_score} = \operatorname{mean}_{s \in \text{detected schemes}} \text{caas\_row}_s$$
 
 `n_schemes` (how many partitions detected the position) and `scheme_set`
@@ -700,7 +706,8 @@ observed pipeline:
 - **`asr_path_score`** - the permuted position-evolution signal (gene null = 0.90-quantile
   over the gene's positions). This axis is not currently wired into any ranking; the
   observed `gene_caas_score` now uses a size-adjusted max instead (see below).
-- **`CAAS_score`** = Σ_scheme `null_phen_score × asr_path_score × 0.2`, where
+- **`CAAS_score`** = mean_scheme `asr_path_score` (T1: the `null_phen_score`
+  factor was dropped; it is still emitted for diagnostics), where
   `null_phen_score = 1 − percent_rank(null_pvalue_boot)` and
   `null_pvalue_boot = (n_detected − 1)/(N − 1)` is the leave-one-out share of the *other*
   cycles that also recovered that position - the null analogue of the observed
@@ -1433,7 +1440,7 @@ if (!is.null(.fd) && all(c("caap_group", "all_mrca_state", "Gene", "Position") %
 
 | Variant | What it represents |
 |---------|---------------------|
-| `CAAS_current` | The production `CAAS_score`: mean of `phen_score` x `asr_score` over the schemes that detected the position. |
+| `CAAS_current` | The production `CAAS_score`: mean of `asr_score` over the schemes that detected the position (T1: no `phen_score` factor). |
 | `CAAS_phen_only` | `phen_score` alone -- drops the ASR axis. |
 | `CAAS_asr_only` | `asr_score` alone -- drops the phenotype axis. |
 | `CAAS_scheme_max` | `max(caas_row)` instead of the mean over detected schemes -- tests the mean-vs-max scheme-aggregation choice (section 2g). |
@@ -1764,7 +1771,8 @@ percentile by that score), cut three ways - `CAAS_score`, `asr_path_score`,
                  levels = c("top100", "top50", "top25", "top10", "top5", "top1")),
   q     = c(0.00, 0.50, 0.75, 0.90, 0.95, 0.99)
 )
-.axis5_cols <- c("core", "independence", "mrca_diversity", "derived_agreement", "conservation_gate")
+# T1: mrca_diversity + conservation_gate removed from the score/schema.
+.axis5_cols <- c("core", "independence", "derived_agreement")
 
 has_convtype <- .file_ok(params$filtered_discovery_file)
 if (has_convtype) {
@@ -1846,10 +1854,11 @@ if (has_convtype) {
 
 ### Axes + scores heatmap {.tabset}
 
-Mean value of each of the five ASR path-score axes, plus `CAAS_score` /
-`asr_path_score` / `phen_score` themselves, per `convergence_type` - shows which
-axis (or score) drives or sinks each geometric class, e.g. parallel labels should
-score low on `mrca_diversity`, divergent ones low on `derived_agreement`.
+Mean value of each ASR path-score axis (`core`, `independence`,
+`derived_agreement`), plus `CAAS_score` / `asr_path_score` / `phen_score`
+themselves, per `convergence_type` - shows which axis (or score) drives or sinks
+each geometric class, e.g. divergent labels should score low on
+`derived_agreement`.
 
 ```{r convtype-heatmap, results='asis', fig.height=6}
 for (dr in c("Global", "Top", "Bottom")) {

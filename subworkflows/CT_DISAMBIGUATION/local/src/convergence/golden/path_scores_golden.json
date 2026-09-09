@@ -3,13 +3,11 @@
     "expected": {
       "asr_path_score": 0.0,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.0,
       "derived_agreement": 1.0,
       "independence": 1.0,
-      "mrca_diversity": 0.5,
       "pair_ancestral": {
         "1": "A"
       },
@@ -24,7 +22,6 @@
         "1": 0.8573749999999999
       },
       "replication": 0.0,
-      "strength": 0.875,
       "top_pair_scores": {
         "1": 0.8573749999999999
       }
@@ -140,15 +137,13 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.5838808560547009,
+      "asr_path_score": 0.7737809374999999,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.8145062499999999,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.018326390624999966,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -167,7 +162,6 @@
         "2": 0.9025
       },
       "replication": 0.7737809374999999,
-      "strength": 0.75458159765625,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -295,13 +289,11 @@
       "bottom_pair_scores": {
         "2": 0.9025
       },
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.0,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.018326390624999966,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -321,7 +313,6 @@
         "2": 0.9025
       },
       "replication": 0.0,
-      "strength": 0.75458159765625,
       "top_pair_scores": {
         "1": 0.9025
       }
@@ -444,17 +435,15 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.5838808560547009,
+      "asr_path_score": 0.7737809374999999,
       "bottom_pair_scores": {
         "1": 0.9025
       },
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.8145062499999999,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.018326390624999966,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -475,7 +464,6 @@
         "2": 0.9025
       },
       "replication": 0.7737809374999999,
-      "strength": 0.75458159765625,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -599,9 +587,8 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.5546868132519658,
+      "asr_path_score": 0.7737809374999999,
       "bottom_pair_scores": {},
-      "conservation_gate": 0.95,
       "conserved_pair_nodes": {
         "3": 4
       },
@@ -611,7 +598,6 @@
       "core": 0.8145062499999999,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.018326390624999966,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -630,7 +616,6 @@
         "2": 0.9025
       },
       "replication": 0.7737809374999999,
-      "strength": 0.75458159765625,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -761,15 +746,13 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.1836174395061475,
+      "asr_path_score": 0.24435187500000005,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.25721250000000007,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.005787281250000054,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -788,7 +771,6 @@
         "2": 0.9025
       },
       "replication": 0.24435187500000005,
-      "strength": 0.7514468203125,
       "top_pair_scores": {
         "1": 0.28500000000000003,
         "2": 0.9025
@@ -911,15 +893,13 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.5223323838867188,
+      "asr_path_score": 0.6075,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 1.0,
       "derived_agreement": 0.75,
       "independence": 0.81,
-      "mrca_diversity": 0.4392255729166666,
       "pair_ancestral": {
         "1": "A",
         "2": "A",
@@ -946,7 +926,6 @@
         "4": 0.95
       },
       "replication": 0.81,
-      "strength": 0.644854794921875,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 1.0,
@@ -1116,15 +1095,13 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.5826991384114671,
+      "asr_path_score": 0.7737809374999999,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.8145062499999999,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.012217593749999978,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1143,7 +1120,6 @@
         "2": 0.9025
       },
       "replication": 0.7737809374999999,
-      "strength": 0.7530543984375,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -1267,15 +1243,13 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.17871874999999998,
+      "asr_path_score": 0.2375,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.25,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.010000000000000009,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1294,7 +1268,6 @@
         "2": 0.5
       },
       "replication": 0.2375,
-      "strength": 0.7525,
       "top_pair_scores": {
         "1": 0.5,
         "2": 0.5
@@ -1358,15 +1331,13 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.71784375,
+      "asr_path_score": 0.95,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 1.0,
       "derived_agreement": 1.0,
       "independence": 0.95,
-      "mrca_diversity": 0.022499999999999964,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1385,7 +1356,6 @@
         "2": 1.0
       },
       "replication": 0.95,
-      "strength": 0.755625,
       "top_pair_scores": {
         "1": 1.0,
         "2": 1.0
@@ -1511,20 +1481,17 @@
     "expected": {
       "asr_path_score": 0.0,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.0,
       "derived_agreement": 0.0,
       "independence": 1.0,
-      "mrca_diversity": 0.0,
       "pair_ancestral": {},
       "pair_contaminated": {},
       "pair_derived_bot": {},
       "pair_derived_top": {},
       "pair_scores": {},
       "replication": 0.0,
-      "strength": 0.0,
       "top_pair_scores": {}
     },
     "scenario": {
@@ -1645,15 +1612,13 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.12786841231499999,
+      "asr_path_score": 0.16806999999999997,
       "bottom_pair_scores": {},
-      "conservation_gate": 1.0,
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.24009999999999998,
       "derived_agreement": 1.0,
       "independence": 0.7,
-      "mrca_diversity": 0.04321799999999998,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1672,7 +1637,6 @@
         "2": 0.48999999999999994
       },
       "replication": 0.16806999999999997,
-      "strength": 0.7608045,
       "top_pair_scores": {
         "1": 0.48999999999999994,
         "2": 0.48999999999999994

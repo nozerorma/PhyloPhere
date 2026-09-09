@@ -71,7 +71,8 @@ def test_fop_two_hypotheses():
     assert out["n_hypotheses"] == 2
     assert approx(out["core"], p_at_least_2([c1, c2])), out["core"]
     assert approx(out["mrca_diversity"], div), out["mrca_diversity"]
-    exp = 1.0 * out["core"] * (0.75 + 0.25 * div) * 1.0 * 1.0
+    # T1: asr = independence * core * derived_agreement (no diversity_mult / gate).
+    exp = 1.0 * out["core"] * 1.0
     assert approx(out["asr_path_score"], exp), (out["asr_path_score"], exp)
     assert 0.20 < out["asr_path_score"] < 0.70
     # Job A pair-PSS-driven: the s=0.9 pair (own pss 10) dominates c_1 even though

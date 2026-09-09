@@ -57,8 +57,8 @@
 #     path_scores.py::compute_asr_path_score:
 #       core        = P(>=2 domains carry a clean change)   [inclusion-exclusion]
 #       replication = independence * core
-#       strength    = (0.75 + 0.25 * diversity) * derived_agreement
-#       asr         = replication * strength * conservation_gate
+#       asr         = replication * derived_agreement        [T1: diversity_mult
+#                     and conservation_gate multipliers dropped; div/cg latent]
 #     independence / diversity / derived_agreement are NOT re-derivable from the
 #     flat TSV (they need the LCA tree structure), so the per-hypothesis values
 #     are pooled by the same PSS weights. Voronoi domains
@@ -557,10 +557,11 @@ pool_group <- function(df, path_cols, node_cols, hyp_pairs = NULL,
   if (!is.finite(da_pooled))    da_pooled    <- 1
   if (!is.finite(cg_pooled))    cg_pooled    <- 1
 
-  diversity_mult <- diversity_floor + (1 - diversity_floor) * div_pooled
+  # T1 collapse (mirrors path_scores.py / fop_pool.py): the mrca_diversity
+  # (diversity_mult) and conservation_gate multipliers are dropped. div_pooled /
+  # cg_pooled stay computed above and reported below (latent) for a later tier.
   replication    <- indep_pooled * core_pooled
-  strength       <- diversity_mult * da_pooled
-  asr_pooled     <- max(0, min(1, replication * strength * cg_pooled))
+  asr_pooled     <- max(0, min(1, replication * da_pooled))
 
   out <- data.frame(
     asr_path_score      = asr_pooled,

@@ -48,8 +48,8 @@ logger = logging.getLogger(__name__)
 PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score", "change_top", "change_bottom",
-     "hypothesis", "pair_scores", "independence", "mrca_diversity",
-     "derived_agreement", "conservation_gate", "core",
+     "hypothesis", "pair_scores", "independence",
+     "derived_agreement", "core",
      "conserved_pair_scores", "conserved_pair_nodes",
      "pair_ancestral", "pair_derived_top", "pair_derived_bot",
      "pair_top_scores", "pair_bottom_scores"],
@@ -65,7 +65,6 @@ PositionAxes = namedtuple(
 # collapsing all domains into one direction-blind pool.
 PositionAxes.__new__.__defaults__ = (
     None, None, None, None, None, None, None, None, None, None, None, None,
-    None, None,
 )
 
 
@@ -429,9 +428,7 @@ def analyze_caas_position_disambiguation(
     # (unsigned conservation). See src/convergence/path_scores.py.
     asr_path_score = 0.0
     independence = 1.0
-    mrca_diversity = 0.0
     derived_agreement = 1.0
-    conservation_gate = 1.0
     core = 0.0
     pair_path_scores: Dict[int, float] = {}
     pair_path_contaminated: Dict[int, bool] = {}
@@ -453,9 +450,7 @@ def analyze_caas_position_disambiguation(
         )
         asr_path_score = path_result["asr_path_score"]
         independence = path_result.get("independence", 1.0)
-        mrca_diversity = path_result["mrca_diversity"]
         derived_agreement = path_result["derived_agreement"]
-        conservation_gate = path_result["conservation_gate"]
         core = path_result.get("core", 0.0)
         pair_path_scores = path_result["pair_scores"]
         pair_path_contaminated = path_result["pair_contaminated"]
@@ -513,9 +508,7 @@ def analyze_caas_position_disambiguation(
         hypothesis=hypothesis,
         asr_path_score=asr_path_score,
         independence=independence,
-        mrca_diversity=mrca_diversity,
         derived_agreement=derived_agreement,
-        conservation_gate=conservation_gate,
         core=core,
         pair_path_scores=pair_path_scores or None,
         pair_path_contaminated=pair_path_contaminated or None,
@@ -921,8 +914,7 @@ def analyze_gene_disambiguation(
                     axes_bottom_scores = path_result.get("bottom_pair_scores", None) or None
                     axes_extra = {
                         k: path_result.get(k)
-                        for k in ("independence", "mrca_diversity",
-                                  "derived_agreement", "conservation_gate", "core")
+                        for k in ("independence", "derived_agreement", "core")
                     }
                 except Exception as e:  # never let path scoring break the replay
                     logger.warning(
@@ -945,9 +937,7 @@ def analyze_gene_disambiguation(
                         hypothesis=_hyp_label,
                         pair_scores=axes_pair_scores,
                         independence=axes_extra.get("independence"),
-                        mrca_diversity=axes_extra.get("mrca_diversity"),
                         derived_agreement=axes_extra.get("derived_agreement"),
-                        conservation_gate=axes_extra.get("conservation_gate"),
                         core=axes_extra.get("core"),
                         conserved_pair_scores=axes_cons_scores,
                         conserved_pair_nodes=axes_cons_nodes,

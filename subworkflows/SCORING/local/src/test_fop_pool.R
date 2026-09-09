@@ -82,7 +82,8 @@ check(approx(resF$pooled_domain_1, c1), "FOP job A: c_1 pair-own-PSS weighted ==
 check(approx(resF$pooled_domain_2, c2), "FOP job A: c_2 (one distinct pair) == 0.8")
 check(approx(resF$core, .p_at_least_2(c(c1, c2))), "FOP: pooled core == p>=2(c_1,c_2)")
 check(approx(resF$mrca_diversity, div), "FOP job B: pooled diversity == 6.5/7.5 (mean-PSS)")
-exp_asr <- 1 * .p_at_least_2(c(c1, c2)) * (0.75 + 0.25 * div) * 1 * 1
+# T1: asr = independence * core * derived_agreement (no diversity_mult / gate).
+exp_asr <- 1 * .p_at_least_2(c(c1, c2)) * 1
 check(approx(resF$asr_path_score, exp_asr), sprintf("FOP: pooled asr == %.5f", exp_asr))
 check(resF$asr_path_score > min(fop$asr_path_score) &&
       resF$asr_path_score < max(fop$asr_path_score),

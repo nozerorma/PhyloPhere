@@ -30,7 +30,7 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.6057777777777779,
+      "asr_path_score": 0.6266666666666667,
       "conservation_gate": 1.0,
       "core": 0.6266666666666667,
       "derived_agreement": 1.0,
@@ -93,7 +93,7 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.41250000000000003,
+      "asr_path_score": 0.44000000000000006,
       "conservation_gate": 1.0,
       "core": 0.44000000000000006,
       "derived_agreement": 1.0,
@@ -189,7 +189,7 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.2125,
+      "asr_path_score": 0.37777777777777777,
       "conservation_gate": 0.75,
       "core": 0.37777777777777777,
       "derived_agreement": 1.0,
@@ -262,7 +262,7 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.15750000000000003,
+      "asr_path_score": 0.21000000000000002,
       "conservation_gate": 1.0,
       "core": 0.42000000000000004,
       "derived_agreement": 0.5,
@@ -314,7 +314,7 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.31500000000000006,
+      "asr_path_score": 0.42000000000000004,
       "conservation_gate": 1.0,
       "core": 0.42000000000000004,
       "derived_agreement": 1.0,

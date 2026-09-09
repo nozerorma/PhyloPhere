@@ -120,9 +120,9 @@ class ConvergenceResult:
     # parallel; computed in src/convergence/path_scores.py)
     asr_path_score: Optional[float] = None
     independence: Optional[float] = None
-    mrca_diversity: Optional[float] = None
+    # T1: mrca_diversity + conservation_gate removed from the score and the model
+    # (asr_path_score = independence * core * derived_agreement).
     derived_agreement: Optional[float] = None
-    conservation_gate: Optional[float] = None
     core: Optional[float] = None
     pair_path_scores: Optional[Dict[int, float]] = None
     pair_path_contaminated: Optional[Dict[int, bool]] = None

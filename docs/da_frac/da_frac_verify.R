@@ -40,7 +40,7 @@ PS_PATH   <- args[[4]]
 GS_PATH   <- args[[5]]
 OUT_DIR   <- args[[6]]
 TAU       <- if (length(args) >= 7) as.numeric(args[[7]]) else 0.8
-DIV_FLOOR <- if (length(args) >= 8) as.numeric(args[[8]]) else 0.75
+# arg 8 (diversity_floor) retired in T1; ignored if still passed.
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 
 source(file.path(SRC_DIR, "aa_grouping.R"))
@@ -156,7 +156,7 @@ da_modal_indep <- function(g, scheme) {
 pooled <- apply_fop_pooling(fd, NULL, tau = TAU)
 pooled$Position <- as.integer(pooled$Position)
 pss_ok <- !is.null(hp)
-stopifnot(all(c("independence", "core", "mrca_diversity", "conservation_gate",
+stopifnot(all(c("independence", "core",
                 "derived_agreement", "asr_path_score", "caap_group") %in% names(pooled)))
 
 # per-(Gene,Position,caap_group) group list from the pre-pool frame
@@ -193,7 +193,6 @@ rows <- lapply(names(grp_split), function(key) {
     Gene = gene, Position = pos, caap_group = scheme,
     n_hyp = nH,
     indep = pr$independence[1], core = pr$core[1],
-    div = pr$mrca_diversity[1], gate = pr$conservation_gate[1],
     da_modal = pr$derived_agreement[1],
     da_modal_indep = da_modal_chk,
     da_frac = da_frac,
@@ -207,26 +206,25 @@ rows <- lapply(names(grp_split), function(key) {
 })
 rowdf <- bind_rows(rows)
 
-# recompute asr with the exact fop_pool.R algebra, swapping ONLY da
-asr_recompute <- function(indep, core, div, da, gate) {
+# recompute asr with the exact fop_pool.R algebra (T1: 3 factors), swapping ONLY da
+asr_recompute <- function(indep, core, da) {
   indep <- ifelse(is.finite(indep), indep, 1)
-  div   <- ifelse(is.finite(div),   div,   0)
   da    <- ifelse(is.finite(da),    da,    1)
-  gate  <- ifelse(is.finite(gate),  gate,  1)
-  pmin(1, pmax(0, (indep * core) * ((DIV_FLOOR + (1 - DIV_FLOOR) * div) * da) * gate))
+  pmin(1, pmax(0, (indep * core) * da))
 }
-rowdf$asr_modal_chk <- asr_recompute(rowdf$indep, rowdf$core, rowdf$div, rowdf$da_modal, rowdf$gate)
-rowdf$asr_frac      <- asr_recompute(rowdf$indep, rowdf$core, rowdf$div, rowdf$da_frac,  rowdf$gate)
-rowdf$asr_frac_pss  <- asr_recompute(rowdf$indep, rowdf$core, rowdf$div, rowdf$da_frac_pss, rowdf$gate)
+rowdf$asr_modal_chk <- asr_recompute(rowdf$indep, rowdf$core, rowdf$da_modal)
+rowdf$asr_frac      <- asr_recompute(rowdf$indep, rowdf$core, rowdf$da_frac)
+rowdf$asr_frac_pss  <- asr_recompute(rowdf$indep, rowdf$core, rowdf$da_frac_pss)
 
 # =============================================================================
 # 4. Propagate to CAAS_score  (scoring_compute.R sections 2f/2g)
+# T1 decision E: caas_row = asr_score (phen_score no longer a factor).
 # =============================================================================
-rowdf$phen_score <- 1 - dplyr::percent_rank(rowdf$recovery_boot)
-rowdf$caas_row_modal     <- rowdf$phen_score * rowdf$asr_modal_chk
-rowdf$caas_row_frac      <- rowdf$phen_score * rowdf$asr_frac
-rowdf$caas_row_frac_pss  <- rowdf$phen_score * rowdf$asr_frac_pss
-rowdf$caas_row_modal_run <- rowdf$phen_score * rowdf$asr_modal_run
+rowdf$phen_score <- 1 - dplyr::percent_rank(rowdf$recovery_boot)  # diagnostic only
+rowdf$caas_row_modal     <- rowdf$asr_modal_chk
+rowdf$caas_row_frac      <- rowdf$asr_frac
+rowdf$caas_row_frac_pss  <- rowdf$asr_frac_pss
+rowdf$caas_row_modal_run <- rowdf$asr_modal_run
 
 pos <- rowdf %>%
   group_by(Gene, Position) %>%
@@ -304,14 +302,14 @@ write.csv(gene_caas, file.path(OUT_DIR, "gene_caas.csv"), row.names = FALSE)
 sink(file.path(OUT_DIR, "REPORT.md"))
 cat("# Modal vs. fractional harvest-wide `derived_agreement` — offline verification\n\n")
 cat(sprintf("Run: `%s`\n\n", normalizePath(FD_PATH)))
-cat(sprintf("Params: `tau=%.2f` (convergence_schemes), `diversity_floor=%.2f`. ", TAU, DIV_FLOOR))
+cat(sprintf("Params: `tau=%.2f` (convergence_schemes). ", TAU))
 cat(sprintf("K=%d Voronoi domains. %d filtered_discovery rows -> %d (Gene,Position,caap_group) rows -> %d scored positions.\n\n",
             K, nrow(fd), nrow(rowdf), nrow(pos)))
 
 cat("## Reconstruction fidelity\n\n")
 cat("| quantity | max \\|Δ\\| vs run |\n|---|---|\n")
 cat(sprintf("| derived_agreement (position mean) | %.2e |\n", v_da))
-cat(sprintf("| CAAS_score (run asr × phen) | %.2e |\n", v_caas))
+cat(sprintf("| CAAS_score (run asr) | %.2e |\n", v_caas))
 cat(sprintf("| CAAS_score (asr algebra re-derived) | %.2e |\n", v_caas2))
 cat(sprintf("| asr_score (position mean) | %.2e |\n", v_asr))
 cat(sprintf("| asr row-level algebra vs stored | %.2e |\n", v_row))
@@ -410,7 +408,7 @@ cat(sprintf("- genes LEAVING top-5%% under frac: %s\n",
 cat("\n## Q7 — 10 rows with the largest |Δda|\n\n")
 top10 <- rowdf[order(-abs(rowdf$dda)), ][seq_len(min(10, nrow(rowdf))), ]
 print(top10[, c("Gene","Position","caap_group","n_hyp","n_split_domains","n_alpha_ties",
-                "indep","core","div","gate","da_modal","da_frac","dda",
+                "indep","core","da_modal","da_frac","dda",
                 "asr_modal_chk","asr_frac")], row.names = FALSE)
 cat("\nPer-domain breakdown of those rows is written to `top10_domain_breakdown.txt`.\n")
 

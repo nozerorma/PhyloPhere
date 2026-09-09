@@ -185,9 +185,8 @@ def convert_convergence_result_to_dict(
     # ASR path score (unified ASR/convergence/parallel signal) + per-pair detail
     result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)
     result_dict["independence"] = getattr(result, "independence", None)
-    result_dict["mrca_diversity"] = getattr(result, "mrca_diversity", None)
+    # T1: mrca_diversity + conservation_gate removed from the score and outputs.
     result_dict["derived_agreement"] = getattr(result, "derived_agreement", None)
-    result_dict["conservation_gate"] = getattr(result, "conservation_gate", None)
     result_dict["core"] = getattr(result, "core", None)
     pair_path_scores = getattr(result, "pair_path_scores", None) or {}
     pair_path_contam = getattr(result, "pair_path_contaminated", None) or {}
@@ -1293,9 +1292,7 @@ def _perms_worker(
                         "pair_top_scores": getattr(r, "pair_top_scores", None) or {},
                         "pair_bottom_scores": getattr(r, "pair_bottom_scores", None) or {},
                         "independence": getattr(r, "independence", None),
-                        "mrca_diversity": getattr(r, "mrca_diversity", None),
                         "derived_agreement": getattr(r, "derived_agreement", None),
-                        "conservation_gate": getattr(r, "conservation_gate", None),
                         "core": getattr(r, "core", None),
                         "conserved_pair_scores": getattr(r, "conserved_pair_scores", None) or {},
                         "conserved_pair_nodes": getattr(r, "conserved_pair_nodes", None) or {},
@@ -1326,9 +1323,7 @@ def _perms_worker(
                         change_bottom="convergent" if cb else "no_change",
                         hypothesis=None, pair_scores=None,
                         independence=pooled.get("independence"),
-                        mrca_diversity=pooled.get("mrca_diversity"),
                         derived_agreement=pooled.get("derived_agreement"),
-                        conservation_gate=pooled.get("conservation_gate"),
                         core=pooled.get("core"),
                     )
                 )
@@ -1469,14 +1464,15 @@ def _perms_worker_wrapper(args):
 
 
 def _null_row_caas(row: Dict[str, Any], rank_lookup: Dict[str, Dict[int, float]]) -> float:
-    """phen x asr for one null detail row (scoring_compute.R's caas_row).
+    """caas_row for one null detail row (mirror of scoring_compute.R §2f).
 
-    Single definition shared by BOTH finalize sub-passes, so the pool that
-    defines the size-adjust reference and the genes scored against it cannot
-    drift apart.
+    T1 decision E: ``caas_row = asr_score`` — the phen_score (permulation
+    percent-rank) factor is dropped from the product on both the observed and
+    null sides. ``rank_lookup`` is kept in the signature so the diagnostic
+    ``null_phen_score`` column can still be emitted, but it no longer scales the
+    score. Single definition shared by BOTH finalize sub-passes.
     """
-    phen = 1.0 - rank_lookup.get(row["cycle"], {}).get(int(row["n_detected"]), 0.0)
-    return phen * float(row["asr_path_score"])
+    return float(row["asr_path_score"])
 
 
 def _sanitize_gene_shard(gene: str) -> str:
@@ -1656,8 +1652,8 @@ def _finalize_perm_scores(
 
     Mirrors scoring_compute.R's observed pipeline term for term:
 
-        null_phen_score = 1 - percent_rank(null_pvalue_boot)   # within cycle i's pool
-        null_row_caas   = null_phen_score * asr
+        null_phen_score = 1 - percent_rank(null_pvalue_boot)   # diagnostic only (T1)
+        null_row_caas   = asr                                  # T1: no phen factor
         position score  = mean(null_row_caas) over that position's schemes
         gene x cycle    = size_adj_max over the cycle's positions, per direction
                           (CAAS axis; the unwired ASR axis stays on q90)
@@ -1778,8 +1774,8 @@ def _finalize_perm_scores(
             asr = float(row["asr_path_score"])
             d = int(row["n_detected"])
 
-            phen = 1.0 - rank_lookup.get(cyc, {}).get(d, 0.0)
-            rc = phen * asr
+            phen = 1.0 - rank_lookup.get(cyc, {}).get(d, 0.0)  # diagnostic only
+            rc = asr  # T1 decision E: caas_row = asr_score (no phen factor)
 
             agg = pos_agg.setdefault((cyc, pos), [0.0, 0, 0.0, 0, 0])
             agg[0] += asr
