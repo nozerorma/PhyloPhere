@@ -391,13 +391,15 @@ pos_scores <- df %>%
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
     n_conserved_pairs      = if ("n_conserved_pairs" %in% names(df)) dplyr::first(n_conserved_pairs) else "",
     convergence_schemes    = if ("convergence_schemes" %in% names(df)) dplyr::first(convergence_schemes) else "",
-    asr_score          = mean(asr_score,          na.rm = TRUE),
-    mrca_diversity     = mean(mrca_diversity,     na.rm = TRUE),
-    derived_agreement  = mean(derived_agreement,  na.rm = TRUE),
-    conservation_gate  = mean(conservation_gate,  na.rm = TRUE),
-    core               = mean(core,               na.rm = TRUE),
-    core_perside_pooled = if ("core_perside_pooled" %in% names(df)) mean(core_perside_pooled, na.rm = TRUE) else NA_real_,
-    phen_score         = mean(phen_score,         na.rm = TRUE),
+    # The per-caap_group factors that build caas_row (asr_score, phen_score) and
+    # the ASR diagnostic axes (core, mrca_diversity, derived_agreement,
+    # conservation_gate, core_perside_pooled) are DELIBERATELY not carried to the
+    # position level: CAAS_score = mean_k(phen_k · asr_k) over schemes, and
+    # mean_k(phen_k) · mean_k(asr_k) does NOT reconstruct it, so a position-level
+    # mean of each factor reads as if it did and hides scheme disagreement (a
+    # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
+    # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
+    # the breakdown (e.g. the §3 stress test aggregates them there directly).
     pos_perm_p         = if (has_caas_pos_pval && any(!is.na(pos_perm_p))) mean(pos_perm_p, na.rm = TRUE) else NA_real_,
     recovery_boot        = first(recovery_boot),
     is_conserved_meta  = first(is_conserved_meta),
@@ -558,22 +560,28 @@ if (stress_enabled) {
 
   # Variants of the ACTUAL production inputs: phen_score, asr_score (the two
   # factors of caas_row, section 2f) and the scheme-aggregation rule (section
-  # 2g). phen_score/asr_score here are pos_scores' own mean-over-schemes
-  # values, identical to what CAAS_score is built from -- no separate decile
-  # transform, no third input.
-  scheme_max <- df %>%
+  # 2g). Aggregated straight from `df` (the per-(Gene, Position, caap_group)
+  # rows), since §2g no longer carries these means to pos_scores -- see the note
+  # there. "phen_only" = CAAS_score with the ASR axis forced to 1
+  # (= mean_k(phen_k · 1) = mean_k(phen_k)); "asr_only" symmetric.
+  scheme_agg <- df %>%
     group_by(Gene, Position) %>%
-    summarise(CAAS_scheme_max = max(caas_row, na.rm = TRUE), .groups = "drop")
-
-  stress_df <- pos_scores %>%
-    select(Gene, Position, phen_score, asr_score, n_schemes, CAAS_current = CAAS_score) %>%
-    left_join(scheme_max, by = c("Gene", "Position")) %>%
-    mutate(
-      CAAS_phen_only = phen_score,  # drop the ASR axis
-      CAAS_asr_only  = asr_score    # drop the phenotype axis
+    summarise(
+      CAAS_scheme_max = max(caas_row, na.rm = TRUE),
+      phen_only       = mean(phen_score, na.rm = TRUE),
+      asr_only        = mean(asr_score, na.rm = TRUE),
+      .groups = "drop"
     )
 
-  analysis_cols <- c("phen_score", "asr_score", "n_schemes")
+  stress_df <- pos_scores %>%
+    select(Gene, Position, n_schemes, CAAS_current = CAAS_score) %>%
+    left_join(scheme_agg, by = c("Gene", "Position")) %>%
+    mutate(
+      CAAS_phen_only = phen_only,  # drop the ASR axis
+      CAAS_asr_only  = asr_only    # drop the phenotype axis
+    )
+
+  analysis_cols <- c("phen_only", "asr_only", "n_schemes")
   composite_cols <- c("CAAS_current", "CAAS_phen_only", "CAAS_asr_only", "CAAS_scheme_max")
 
   stress_correlations <- pairwise_long(stress_df, c(analysis_cols, composite_cols))
@@ -1123,12 +1131,14 @@ if (length(score_cols) >= 2) {
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
-# Position scores
+# Position scores. asr_score / phen_score / core / mrca_diversity /
+# derived_agreement / conservation_gate / core_perside_pooled are intentionally
+# absent: they are per-caap_group factors of caas_row and their scheme-mean does
+# not reconstruct CAAS_score (see §2g note). CAAS_score is the position-level
+# number; the per-scheme breakdown lives upstream in filtered_discovery.tsv.
 pos_out <- pos_scores %>%
   select(Gene, Position, any_of("recovery_boot"),
-         asr_score, any_of(c("mrca_diversity", "derived_agreement", "conservation_gate", "core",
-                             "core_perside_pooled")),
-         any_of("phen_score"), n_schemes, any_of("scheme_set"),
+         n_schemes, any_of("scheme_set"),
          any_of(c("n_hypotheses", "supporting_hypotheses",
                   "derived_residues", "top_residue_support", "bottom_residue_support",
                   "top_residue_support_detail", "bottom_residue_support_detail",
