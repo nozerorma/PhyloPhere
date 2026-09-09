@@ -117,6 +117,92 @@ def _split_result_by_side(
     return rows
 
 
+def _pooled_side_rows(
+    base: ConvergenceResult, pooled: Dict[str, Dict[str, Any]]
+) -> List[ConvergenceResult]:
+    """Build ≤2 per-side ConvergenceResult rows from a pool_hypotheses_pairwise
+    result (T3c SC3). Mirrors :func:`_split_result_by_side` but sources the
+    scalars from the pooled ``{"top": <agg>, "bottom": <agg>}`` instead of a
+    single hypothesis's ``compute_asr_path_score`` split.
+    """
+    sides = [s for s in ("top", "bottom")
+             if int((pooled.get(s) or {}).get("n_participating", 0) or 0) > 0]
+    if not sides:
+        return [dataclasses.replace(
+            base, side="none", asr_path_score=0.0, core=0.0, hypothesis=None,
+        )]
+    out: List[ConvergenceResult] = []
+    for s in sides:
+        d = pooled[s]
+        ps = dict(d.get("pair_scores") or {})
+        out.append(dataclasses.replace(
+            base, side=s, hypothesis=None,
+            asr_path_score=float(d.get("asr_path_score", 0.0) or 0.0),
+            core=float(d.get("core", 0.0) or 0.0),
+            derived_agreement=d.get("derived_agreement"),
+            convergence_type=d.get("convergence_type", base.convergence_type),
+            independence=None,
+            pair_path_scores=ps or None,
+            pair_top_path_scores=(ps or None) if s == "top" else None,
+            pair_bottom_path_scores=(ps or None) if s == "bottom" else None,
+        ))
+    return out
+
+
+def _pool_observed_fop(
+    results: List[ConvergenceResult],
+    tree_data,
+    posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]],
+    pss_by_hyp_domain: Optional[Dict[Tuple[str, int], float]] = None,
+) -> List[ConvergenceResult]:
+    """Collapse a FOP hypothesis harvest to one row per (Gene, Position, scheme,
+    side) using the real per-side pairwise core (T3c SC3).
+
+    Groups ``results`` by ``(position, caap_group)``. A group reached by ≥2
+    distinct hypotheses is pooled with :func:`fop_pool.pool_hypotheses_pairwise`
+    over the node-deduped union of participating pairs — the same routine the
+    permulation null uses (SC2b) — so the observed FOP path and the null hold
+    the identical statistic without ``scoring_compute.R`` ever touching
+    ``fop_pool.R``. Single-hypothesis / non-FOP groups pass through untouched.
+
+    Each row must carry a transient ``.path_split`` (the
+    ``compute_asr_path_score(native_side_split=True)`` return for its
+    hypothesis); rows without one (path scoring failed) are passed through.
+    """
+    from src.convergence.fop_pool import pool_hypotheses_pairwise
+
+    by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
+    for r in results:
+        by_group.setdefault(
+            (getattr(r, "position", None), getattr(r, "caap_group", "US")), []
+        ).append(r)
+
+    node_index: Optional[Dict[int, Any]] = None
+    out: List[ConvergenceResult] = []
+    for (pos, scheme), rows in by_group.items():
+        hyps = {getattr(r, "hypothesis", None) for r in rows}
+        hyps.discard(None)
+        splits_ok = all(getattr(r, "path_split", None) for r in rows)
+        if len(hyps) < 2 or not splits_ok or pos is None:
+            out.extend(rows)
+            continue
+
+        if node_index is None:
+            node_index = build_node_index(getattr(tree_data, "root", None))
+        paml_site = getattr(rows[0], "position_one_based", None) or (int(pos) + 1)
+        per_node_dist = _build_per_node_dist(posterior_data, paml_site)
+
+        by_hyp: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            by_hyp.setdefault(r.hypothesis, r.path_split)  # shared across a hyp's rows
+        hyp_records = [{"hyp": h, "sides": sp} for h, sp in by_hyp.items()]
+        pooled = pool_hypotheses_pairwise(
+            hyp_records, node_index, per_node_dist, pss_by_hyp_domain, scheme
+        )
+        out.extend(_pooled_side_rows(rows[0], pooled))
+    return out
+
+
 def _build_per_node_dist(
     posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]],
     paml_site: Optional[int],
@@ -615,7 +701,16 @@ def analyze_caas_position_disambiguation(
         # T3b: "both" position -> two rows keyed (gene, position, side); a
         # one-sided or no-change position stays a single row. change_side /
         # change_top / change_bottom are left position-level (T4a retires them).
-        return _split_result_by_side(base_result, path_split)
+        rows = _split_result_by_side(base_result, path_split)
+        # T3c SC3: keep the raw {"top","bottom"} split on each row (transient, not
+        # a dataclass field) so analyze_gene_disambiguation can FOP-pool the
+        # hypothesis harvest with pool_hypotheses_pairwise — the real pairwise
+        # core, in-tree, instead of scoring_compute.R's treeless fop_pool.R.
+        for _r in rows:
+            _r.path_split = path_split
+        return rows
+    if native_side_split:
+        base_result.path_split = path_split  # may be None
     return base_result
 
 
@@ -1105,6 +1200,22 @@ def analyze_gene_disambiguation(
         except Exception:
             pass
         logger.info(f"Tip details written to {diagnostics.get('tip_dump_file')}")
+
+    if native_side_split and not axes_only and results:
+        # T3c SC3: FOP-pool the hypothesis harvest here, in-tree, with the real
+        # per-side pairwise core (pool_hypotheses_pairwise) — the same routine
+        # the permulation null uses. scoring_compute.R's fop_pool.R call becomes
+        # a pass-through (SC3b). PSS weighting: equal-weight for now (the
+        # contrast_hypotheses_pairs.tsv plumbing lands in SC3b).
+        try:
+            _n0 = len(results)
+            results = _pool_observed_fop(results, tree_data, posterior_data)
+            if len(results) != _n0:
+                logger.info(
+                    f"✓ FOP pool (in-tree, per-side): {_n0} -> {len(results)} rows"
+                )
+        except Exception as e:  # never let pooling break disambiguation
+            logger.warning(f"[{gene}] in-tree FOP pooling failed, rows left per-hypothesis: {e}")
 
     logger.info(
         f"✓ Completed convergence disambiguation: {len(results)}/{len(caas_entries)} metadata rows"

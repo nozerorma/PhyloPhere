@@ -56,6 +56,14 @@ hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_p
 caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
 caas_pos_pval_file   <- parse_arg("--caas_pos_pval")  # perm_pos_pval.tsv (position-level calibrated null p); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
+# scoring_v2 T3c SC3: when on, the disambiguation subworkflow has already
+# FOP-pooled the hypothesis harvest in-tree (pool_hypotheses_pairwise, the real
+# per-side pairwise core), so the rows arrive one per (Gene, Position, scheme,
+# side) with hypothesis=NA. apply_fop_pooling would then be a no-op EXCEPT its
+# .derive_side_key() would OR change_top/bottom and clobber the authoritative
+# per-side `side`, so skip it entirely.
+native_side_split_raw <- parse_arg("--native_side_split", "false")
+native_side_split     <- tolower(native_side_split_raw) %in% c("true", "1", "yes")
 concordance_tau      <- as.numeric(parse_arg("--concordance_tau", "0.8"))  # POINT 3: da threshold for convergence_schemes
 if (!is.finite(concordance_tau) || concordance_tau <= 0 || concordance_tau > 1) concordance_tau <- 0.8
 stress_enabled_raw        <- parse_arg("--stress", "false")
@@ -255,17 +263,35 @@ cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring sche
 # pools s(p,site) within each Voronoi domain (PSS-weighted mean, weights from
 # contrast_hypotheses_pairs.tsv) and recombines with the path_scores.py algebra.
 # Non-FOP input (single contrast) passes through unchanged.
-.fop_pool_src <- file.path(dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "fop_pool.R")
-if (!file.exists(.fop_pool_src)) .fop_pool_src <- "fop_pool.R"
-source(.fop_pool_src)
-.n_before <- nrow(df)
-df <- apply_fop_pooling(df, hyp_pairs_file, tau = concordance_tau)
-if (nrow(df) != .n_before) {
-  cat(sprintf("  FOP pooling: %d rows -> %d after collapsing hypotheses (max n_hypotheses = %d)\n",
-              .n_before, nrow(df),
-              if ("n_hypotheses" %in% names(df)) max(df$n_hypotheses, na.rm = TRUE) else 0L))
+if (native_side_split) {
+  cat("  FOP pooling: skipped — disambiguation already pooled in-tree per (Gene, Position, scheme, side) [T3c SC3]\n")
+  # Backfill the stable-schema columns apply_fop_pooling would have added so
+  # downstream (§2g display picks, reports) never hits a missing column. The
+  # harvest-wide convergence_schemes / residue-support descriptors are recomputed
+  # in-tree in SC3b; empty is a safe placeholder until then.
+  if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
+  if (!"supporting_hypotheses" %in% names(df)) df$supporting_hypotheses <- ""
+  if (!"core_perside_pooled" %in% names(df))   df$core_perside_pooled <- df$core
+  for (.c in c("convergence_schemes", "derived_residues", "top_residue_support",
+               "bottom_residue_support", "top_residue_support_detail",
+               "bottom_residue_support_detail", "top_species_residues",
+               "bottom_species_residues", "n_top_species", "n_bottom_species",
+               "n_conserved_pairs")) {
+    if (!.c %in% names(df)) df[[.c]] <- ""
+  }
 } else {
-  cat("  FOP pooling: no multi-hypothesis positions (single-contrast run) — pass-through\n")
+  .fop_pool_src <- file.path(dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "fop_pool.R")
+  if (!file.exists(.fop_pool_src)) .fop_pool_src <- "fop_pool.R"
+  source(.fop_pool_src)
+  .n_before <- nrow(df)
+  df <- apply_fop_pooling(df, hyp_pairs_file, tau = concordance_tau)
+  if (nrow(df) != .n_before) {
+    cat(sprintf("  FOP pooling: %d rows -> %d after collapsing hypotheses (max n_hypotheses = %d)\n",
+                .n_before, nrow(df),
+                if ("n_hypotheses" %in% names(df)) max(df$n_hypotheses, na.rm = TRUE) else 0L))
+  } else {
+    cat("  FOP pooling: no multi-hypothesis positions (single-contrast run) — pass-through\n")
+  }
 }
 df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
 
