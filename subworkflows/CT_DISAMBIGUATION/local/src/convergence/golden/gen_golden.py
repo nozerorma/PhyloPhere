@@ -237,6 +237,37 @@ def scenarios():
         scheme="US", is_conserved_meta=False, conserved_pair="",
     ))
 
+    # 13 — T3a: both-sides split into two rows + a conserved pair in D_s of both.
+    # Literal fixture from docs/scoring_v2_T3_core_pareado.md §10.1. Exercises
+    # native_side_split=True: top and bottom are independent rows (no
+    # 1-(1-t)(1-b)), the conserved pair counts in |D_s| on BOTH sides, and
+    # conserved_pair_scores is still emitted without multiplying anything.
+    #   TOP:    D={P1,P2,P4} n=3 -> core_top    = 2*0.77378/3 = 0.51585
+    #   BOTTOM: D={P1,P3,P4} n=3 -> core_bottom = 2*0.81451/3 = 0.54301
+    bs_edges = [(0, 1), (0, 2), (1, 10), (10, 3), (10, 4), (2, 20), (20, 5),
+                (20, 6), (2, 21), (21, 9), (21, 12), (0, 30), (30, 7), (30, 8)]
+    bs_nodes = [0, 1, 2, 10, 20, 21, 30, 3, 4, 5, 6, 9, 12, 7, 8]
+    bs_post = {n: {"A": 0.90, "V": 0.05, "L": 0.05}
+               for n in [0, 1, 2, 10, 20, 21, 30]}
+    out.append(dict(
+        name="both_sides_two_rows",
+        doc="P1 changes both sides to different residues, P2 top-only, P3 "
+            "bottom-only, P4 conserved; native_side_split -> two rows (§10.1)",
+        edges=bs_edges, node_ids=bs_nodes, posteriors=bs_post,
+        pair_details=[
+            {"pair_id": 1, "node_id": 3, "focal_state": "A",
+             "top_tip_mode": "V", "bottom_tip_mode": "L"},
+            {"pair_id": 2, "node_id": 5, "focal_state": "A",
+             "top_tip_mode": "V", "bottom_tip_mode": "A"},
+            {"pair_id": 3, "node_id": 7, "focal_state": "A",
+             "top_tip_mode": "A", "bottom_tip_mode": "L"},
+            {"pair_id": 4, "node_id": 9, "focal_state": "A",
+             "top_tip_mode": "A", "bottom_tip_mode": "A"},
+        ],
+        scheme="US", is_conserved_meta=True, conserved_pair="4",
+        native_side_split=True,
+    ))
+
     return out
 
 

@@ -6,8 +6,9 @@
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.0,
+      "core_bottom": 0.0,
+      "core_top": 0.0,
       "derived_agreement": 1.0,
-      "independence": 1.0,
       "pair_ancestral": {
         "1": "A"
       },
@@ -18,10 +19,12 @@
       "pair_derived_top": {
         "1": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.0
+      },
       "pair_scores": {
         "1": 0.8573749999999999
       },
-      "replication": 0.0,
       "top_pair_scores": {
         "1": 0.8573749999999999
       }
@@ -65,6 +68,7 @@
       ],
       "is_conserved_meta": false,
       "name": "single_changed_pair",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -137,13 +141,14 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.7737809374999999,
+      "asr_path_score": 0.7737809375,
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 0.8145062499999999,
+      "core": 0.7737809375,
+      "core_bottom": 0.0,
+      "core_top": 0.7737809375,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -157,11 +162,14 @@
         "1": "V",
         "2": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.7737809375,
+        "2": 0.7737809375
+      },
       "pair_scores": {
         "1": 0.9025,
         "2": 0.9025
       },
-      "replication": 0.7737809374999999,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -206,6 +214,7 @@
       ],
       "is_conserved_meta": false,
       "name": "two_same_side_converge",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -287,13 +296,14 @@
     "expected": {
       "asr_path_score": 0.0,
       "bottom_pair_scores": {
-        "2": 0.9025
+        "2": 0.8573749999999999
       },
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.0,
+      "core_bottom": 0.0,
+      "core_top": 0.0,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -308,13 +318,16 @@
       "pair_derived_top": {
         "1": "V"
       },
-      "pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
+      "pair_partner_scores": {
+        "1": 0.0,
+        "2": 0.0
       },
-      "replication": 0.0,
+      "pair_scores": {
+        "1": 0.8573749999999999,
+        "2": 0.8573749999999999
+      },
       "top_pair_scores": {
-        "1": 0.9025
+        "1": 0.8573749999999999
       }
     },
     "scenario": {
@@ -356,6 +369,7 @@
       ],
       "is_conserved_meta": false,
       "name": "opposite_sides_only",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -435,15 +449,16 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.7737809374999999,
+      "asr_path_score": 0.7737809375,
       "bottom_pair_scores": {
-        "1": 0.9025
+        "1": 0.8573749999999999
       },
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 0.8145062499999999,
+      "core": 0.7737809375,
+      "core_bottom": 0.0,
+      "core_top": 0.7737809375,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -459,11 +474,14 @@
         "1": "V",
         "2": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.7737809375,
+        "2": 0.7737809375
+      },
       "pair_scores": {
-        "1": 0.9025,
+        "1": 0.8799374999999999,
         "2": 0.9025
       },
-      "replication": 0.7737809374999999,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -508,6 +526,7 @@
       ],
       "is_conserved_meta": false,
       "name": "pair_changes_both_sides",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -587,7 +606,7 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.7737809374999999,
+      "asr_path_score": 0.5158539583333334,
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {
         "3": 4
@@ -595,9 +614,10 @@
       "conserved_pair_scores": {
         "3": 0.9
       },
-      "core": 0.8145062499999999,
+      "core": 0.5158539583333334,
+      "core_bottom": 0.0,
+      "core_top": 0.5158539583333334,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -611,11 +631,14 @@
         "1": "V",
         "2": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.7737809375,
+        "2": 0.7737809375
+      },
       "pair_scores": {
         "1": 0.9025,
         "2": 0.9025
       },
-      "replication": 0.7737809374999999,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -660,6 +683,7 @@
       ],
       "is_conserved_meta": true,
       "name": "with_conserved_pair",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -746,13 +770,14 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.24435187500000005,
+      "asr_path_score": 0.244351875,
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 0.25721250000000007,
+      "core": 0.244351875,
+      "core_bottom": 0.0,
+      "core_top": 0.244351875,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -766,11 +791,14 @@
         "1": "V",
         "2": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.244351875,
+        "2": 0.244351875
+      },
       "pair_scores": {
         "1": 0.28500000000000003,
         "2": 0.9025
       },
-      "replication": 0.24435187500000005,
       "top_pair_scores": {
         "1": 0.28500000000000003,
         "2": 0.9025
@@ -815,6 +843,7 @@
       ],
       "is_conserved_meta": false,
       "name": "contaminated_hop1",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -893,13 +922,14 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.6075,
+      "asr_path_score": 0.74134890234375,
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 1.0,
+      "core": 0.74134890234375,
+      "core_bottom": 0.0,
+      "core_top": 0.74134890234375,
       "derived_agreement": 0.75,
-      "independence": 0.81,
       "pair_ancestral": {
         "1": "A",
         "2": "A",
@@ -919,13 +949,18 @@
         "3": "V",
         "4": "T"
       },
+      "pair_partner_scores": {
+        "1": 0.979658109375,
+        "2": 0.99286875,
+        "3": 0.99286875,
+        "4": 0.0
+      },
       "pair_scores": {
         "1": 0.9025,
         "2": 1.0,
         "3": 1.0,
         "4": 0.95
       },
-      "replication": 0.81,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 1.0,
@@ -984,6 +1019,7 @@
       ],
       "is_conserved_meta": false,
       "name": "n_gt_2_mixed_residues",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1095,13 +1131,14 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.7737809374999999,
+      "asr_path_score": 0.7737809375,
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 0.8145062499999999,
+      "core": 0.7737809375,
+      "core_bottom": 0.0,
+      "core_top": 0.7737809375,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1115,11 +1152,14 @@
         "1": "V",
         "2": "I"
       },
+      "pair_partner_scores": {
+        "1": 0.7737809375,
+        "2": 0.7737809375
+      },
       "pair_scores": {
         "1": 0.9025,
         "2": 0.9025
       },
-      "replication": 0.7737809374999999,
       "top_pair_scores": {
         "1": 0.9025,
         "2": 0.9025
@@ -1164,6 +1204,7 @@
       ],
       "is_conserved_meta": false,
       "name": "gs3_coencoded_agreement",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1243,13 +1284,14 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.2375,
+      "asr_path_score": 0.23750000000000004,
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 0.25,
+      "core": 0.23750000000000004,
+      "core_bottom": 0.0,
+      "core_top": 0.23750000000000004,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1263,11 +1305,14 @@
         "1": "V",
         "2": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.23750000000000004,
+        "2": 0.23750000000000004
+      },
       "pair_scores": {
         "1": 0.5,
         "2": 0.5
       },
-      "replication": 0.2375,
       "top_pair_scores": {
         "1": 0.5,
         "2": 0.5
@@ -1288,6 +1333,7 @@
       ],
       "is_conserved_meta": false,
       "name": "mrca_at_root",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1335,9 +1381,10 @@
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 1.0,
+      "core": 0.95,
+      "core_bottom": 0.0,
+      "core_top": 0.95,
       "derived_agreement": 1.0,
-      "independence": 0.95,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1351,11 +1398,14 @@
         "1": "V",
         "2": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.95,
+        "2": 0.95
+      },
       "pair_scores": {
         "1": 1.0,
         "2": 1.0
       },
-      "replication": 0.95,
       "top_pair_scores": {
         "1": 1.0,
         "2": 1.0
@@ -1400,6 +1450,7 @@
       ],
       "is_conserved_meta": false,
       "name": "sibling_merge",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1484,14 +1535,15 @@
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
       "core": 0.0,
-      "derived_agreement": 0.0,
-      "independence": 1.0,
+      "core_bottom": 0.0,
+      "core_top": 0.0,
+      "derived_agreement": 1.0,
       "pair_ancestral": {},
       "pair_contaminated": {},
       "pair_derived_bot": {},
       "pair_derived_top": {},
+      "pair_partner_scores": {},
       "pair_scores": {},
-      "replication": 0.0,
       "top_pair_scores": {}
     },
     "scenario": {
@@ -1533,6 +1585,7 @@
       ],
       "is_conserved_meta": false,
       "name": "no_changed_pairs",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1612,13 +1665,14 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.16806999999999997,
+      "asr_path_score": 0.16806999999999994,
       "bottom_pair_scores": {},
       "conserved_pair_nodes": {},
       "conserved_pair_scores": {},
-      "core": 0.24009999999999998,
+      "core": 0.16806999999999994,
+      "core_bottom": 0.0,
+      "core_top": 0.16806999999999994,
       "derived_agreement": 1.0,
-      "independence": 0.7,
       "pair_ancestral": {
         "1": "A",
         "2": "A"
@@ -1632,11 +1686,14 @@
         "1": "V",
         "2": "V"
       },
+      "pair_partner_scores": {
+        "1": 0.16806999999999994,
+        "2": 0.16806999999999994
+      },
       "pair_scores": {
         "1": 0.48999999999999994,
         "2": 0.48999999999999994
       },
-      "replication": 0.16806999999999997,
       "top_pair_scores": {
         "1": 0.48999999999999994,
         "2": 0.48999999999999994
@@ -1681,6 +1738,7 @@
       ],
       "is_conserved_meta": false,
       "name": "soft_posteriors_midrange",
+      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1751,6 +1809,244 @@
           "A": 0.1,
           "T": 0.05,
           "V": 0.85
+        }
+      },
+      "scheme": "US"
+    }
+  },
+  {
+    "expected": {
+      "bottom": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.5430041666666666,
+        "conserved_pair_nodes": {
+          "4": 9
+        },
+        "conserved_pair_scores": {
+          "4": 0.9
+        },
+        "convergence_type": "convergent",
+        "core": 0.5430041666666666,
+        "derived_agreement": 1.0,
+        "n_conserved": 1,
+        "n_pairs_side": 3,
+        "n_participating": 2,
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A",
+          "3": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "3": false
+        },
+        "pair_derived_bot": {
+          "1": "L",
+          "3": "L"
+        },
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_partner_scores": {
+          "1": 0.8145062499999999,
+          "3": 0.8145062499999999
+        },
+        "pair_scores": {
+          "1": 0.9025,
+          "3": 0.95
+        }
+      },
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.5158539583333334,
+        "conserved_pair_nodes": {
+          "4": 9
+        },
+        "conserved_pair_scores": {
+          "4": 0.9
+        },
+        "convergence_type": "convergent",
+        "core": 0.5158539583333334,
+        "derived_agreement": 1.0,
+        "n_conserved": 1,
+        "n_pairs_side": 3,
+        "n_participating": 2,
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A",
+          "3": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_derived_bot": {
+          "1": "L",
+          "3": "L"
+        },
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_partner_scores": {
+          "1": 0.7737809375,
+          "2": 0.7737809375
+        },
+        "pair_scores": {
+          "1": 0.9025,
+          "2": 0.9025
+        }
+      }
+    },
+    "scenario": {
+      "conserved_pair": "4",
+      "doc": "P1 changes both sides to different residues, P2 top-only, P3 bottom-only, P4 conserved; native_side_split -> two rows (\u00a710.1)",
+      "edges": [
+        [
+          0,
+          1
+        ],
+        [
+          0,
+          2
+        ],
+        [
+          1,
+          10
+        ],
+        [
+          10,
+          3
+        ],
+        [
+          10,
+          4
+        ],
+        [
+          2,
+          20
+        ],
+        [
+          20,
+          5
+        ],
+        [
+          20,
+          6
+        ],
+        [
+          2,
+          21
+        ],
+        [
+          21,
+          9
+        ],
+        [
+          21,
+          12
+        ],
+        [
+          0,
+          30
+        ],
+        [
+          30,
+          7
+        ],
+        [
+          30,
+          8
+        ]
+      ],
+      "is_conserved_meta": true,
+      "name": "both_sides_two_rows",
+      "native_side_split": true,
+      "node_ids": [
+        0,
+        1,
+        2,
+        10,
+        20,
+        21,
+        30,
+        3,
+        4,
+        5,
+        6,
+        9,
+        12,
+        7,
+        8
+      ],
+      "pair_details": [
+        {
+          "bottom_tip_mode": "L",
+          "focal_state": "A",
+          "node_id": 3,
+          "pair_id": 1,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 5,
+          "pair_id": 2,
+          "top_tip_mode": "V"
+        },
+        {
+          "bottom_tip_mode": "L",
+          "focal_state": "A",
+          "node_id": 7,
+          "pair_id": 3,
+          "top_tip_mode": "A"
+        },
+        {
+          "bottom_tip_mode": "A",
+          "focal_state": "A",
+          "node_id": 9,
+          "pair_id": 4,
+          "top_tip_mode": "A"
+        }
+      ],
+      "posteriors": {
+        "0": {
+          "A": 0.9,
+          "L": 0.05,
+          "V": 0.05
+        },
+        "1": {
+          "A": 0.9,
+          "L": 0.05,
+          "V": 0.05
+        },
+        "10": {
+          "A": 0.9,
+          "L": 0.05,
+          "V": 0.05
+        },
+        "2": {
+          "A": 0.9,
+          "L": 0.05,
+          "V": 0.05
+        },
+        "20": {
+          "A": 0.9,
+          "L": 0.05,
+          "V": 0.05
+        },
+        "21": {
+          "A": 0.9,
+          "L": 0.05,
+          "V": 0.05
+        },
+        "30": {
+          "A": 0.9,
+          "L": 0.05,
+          "V": 0.05
         }
       },
       "scheme": "US"

@@ -50,69 +50,47 @@ was not acquired. It is scored by conservation-to-root and reported in
 ``conserved_pair_scores`` / ``conserved_pair_nodes`` (latent — no longer a
 score multiplier in T1; see Aggregation).
 
-Aggregation
------------
-Three factors, computed per CAAS position and multiplied together
-(``asr_path_score = independence · core · derived_agreement``):
+Aggregation (scoring_v2 T3a — per-side pairwise core)
+----------------------------------------------------
+One ``core_s`` per ``(Gene, Position, scheme, side)``, ``s ∈ {top, bottom}``,
+built as a pairwise aggregation that folds in the former ``independence`` and
+``derived_agreement`` axes per pair instead of as global multipliers (see
+``docs/scoring_v2_T3_core_pareado.md``):
 
-* ``independence`` (shared-origin axis): the changed pairs only converged
-  *independently* if their shared ancestors did not already carry the derived
-  state. We locate the **LCA** nodes — the merge points of the changed pairs'
-  MRCAs (internal nodes of the minimal subtree connecting them, at most n-1) —
-  and take ``∏_L (1 - P(derived pool at L))``. If any merge point already shows a
-  derived state the pairs below it inherited it rather than converging, and the
-  factor (and score) crater. Because it ranges over the few LCA nodes, not the
-  full root paths, the product is **depth-independent**. Read straight from
-  ``P(derived)`` — no ancestral term — so a third residue at a node simply lowers
-  ``P(derived)`` instead of being misread as ancestral.
+* ``D_s`` — the design of the side: pairs that changed on ``s`` (``P_s``) plus
+  the conserved-metadata pairs (``C``, both sides). A pair that changed *only on
+  the other side* is **not** in ``D_s``.
+* ``s_c^s`` — private-segment isolation of pair ``c`` (unchanged primitive:
+  ``∏ (1 − P_wc(derived))`` from the parent of the MRCA up to the nearest
+  same-side LCA merge point).
+* ``contrib(c, d) = s_c^s · s_d^s · [enc(der_c) == enc(der_d)]
+  · (1 − P_wc(enc(der_c) @ LCA(mrca_c, mrca_d)))`` — probability that ``c`` and
+  ``d`` form a genuine convergent pair: both changed for real, at the same
+  encoded residue, with a clean shared ancestor. ``independence`` now enters
+  here, once per pair, keyed to that pair's own merge node and residue.
+* ``score_c = noisy_or_{d ∈ partners(c)} contrib(c, d)`` — best evidence that
+  ``c`` converged with at least one same-residue partner (``0`` with no partner).
+* ``core_s = ( Σ_{c ∈ D_s} score_c ) / |D_s|`` — mean over the whole design.
+  Conserved pairs and orphan-residue pairs contribute ``score_c = 0`` but count
+  in the denominator, so a design of ``n`` pairs where only ``k`` converge scores
+  ``≈ k/n``.
+* ``asr_path_score[side = s] = clamp01(core_s)``. Sides never recombine — a
+  "both" position is two independent rows.
 
-* ``core`` (replication axis): ``P(≥2 independent changes)`` — the combinatorial
-  probability that at least two pairs changed independently in at least one
-  phenotype direction (top or bottom). Computed per side via inclusion-exclusion
-  on the per-pair private-isolation scores (each treated as P(change is
-  genuine)), then combined across directions:
-  ``core = 1 − (1 − core_top)(1 − core_bottom)``. A pair that changed on *both*
-  sides contributes to both halves; opposite-only changes (one pair top-only,
-  another bottom-only) correctly yield ``core = 0`` because neither direction
-  reaches ≥2.
+``agree(c, d)`` is hard 0/1 on the encoded residue; the biochemical gradient is
+supplied later by averaging the five schemes in ``scoring_compute.R`` §2g, not by
+a soft rule here. ``convergence_type`` is derived from
+``(agree_num_s, agree_den_s)`` (see :func:`_convergence_type`), replacing the
+separate categorical classifier.
 
-  ``independence`` and ``core`` together form the **replication** tier —
-  ``P(shared ancestor clean AND ≥2 private-clean events)``. Multiplying them is
-  the correct joint probability, not two independent checks: private-segment
-  nodes and LCA nodes are disjoint, conditionally-independent parts of the
-  tree, so ``P(A) · P(B|A) = P(A ∩ B)``.
+Conserved pairs are still walked (``conserved_pair_scores`` /
+``conserved_pair_nodes`` flow out for diagnostics and the FOP pooler); they no
+longer multiply anything — they are ``score_c = 0`` members of ``D_s``.
 
-* ``derived_agreement`` (convergence axis): within each phenotype side that has
-  at least two changed pairs, what fraction land on the position's single most
-  common (plurality) derived residue? A side with exactly one changed pair has
-  nothing to agree or disagree with and is excluded from the average entirely
-  — "agreement" is a ≥2-observer concept. Computed from plain pair counts, not
-  weighted by any ancestral-reconstruction quantity: this axis is a fact about
-  observed tip residues (directly sequenced, no posterior), and weighting it by
-  a posterior-derived score would make it redundant with ``core``/
-  ``independence``, which already own the ancestral-uncertainty question::
-
-      concentration_s = max_r( count of pairs landing on residue r )
-                         / count of changed pairs on side s          # in (0, 1]
-      derived_agreement = mean over qualifying sides of concentration_s
-
-  ``derived_agreement`` is the single **strength** discount on a confirmed
-  replication event: given ≥2 independent changes, did they land on the same
-  residue?
-
-      replication    = independence * core
-      asr_path_score = replication * derived_agreement
-
-Conserved pairs (both tips retained ancestral) are still walked — their
-conservation-to-root scores and MRCA nodes flow out in
-``conserved_pair_scores`` / ``conserved_pair_nodes`` — but T1 applies **no**
-``conservation_gate`` multiplier and **no** ``mrca_diversity`` parallel
-discount. Parallelism is already approximated by the clean-path / independence
-machinery; the conserved-pair signal is retained latently for a later tier to
-fold into the pairwise ``core`` rather than as a one-sided gate.
-
-A false "S->A & S->V" is penalized on agreement. GS encoding handles
-biochemistry, so agreement is tested on the scheme-encoded residues.
+Return shape: ``native_side_split=True`` → ``{"top": {...}, "bottom": {...}}``.
+Default (feature flag ``--native_side_split`` off) → one flat T1-shaped dict
+whose ``asr_path_score`` is ``max(core_top, core_bottom)`` so ``disambiguate_
+single`` keeps emitting a single row until T3b.
 
 The module is intentionally free of PAML/IO dependencies so it can be unit
 tested with synthetic trees and posteriors.
@@ -532,6 +510,34 @@ def _p_at_least_2(p_list: List[float]) -> float:
     return max(0.0, min(1.0, 1.0 - p0 - p1))
 
 
+def noisy_or(probs) -> float:
+    """``1 - ∏(1 - p_i)`` — probability at least one of independent events fires.
+
+    Empty input returns ``0.0`` (a pair with no same-residue partner has no
+    convergence evidence). Each ``p_i`` is clamped to ``[0, 1]`` first.
+    """
+    acc = 1.0
+    for p in probs:
+        acc *= (1.0 - max(0.0, min(1.0, float(p))))
+    return max(0.0, min(1.0, 1.0 - acc))
+
+
+def _convergence_type(agree_num: int, agree_den: int) -> str:
+    """Categorical label from the agreement numerator/denominator (T3-doc §7).
+
+    ``agree_den`` = number of pairs that changed on the side; ``agree_num`` =
+    size of the largest single-residue group among them. Derived here (not from
+    the separate ``convergence.py`` classifier) so T4a can retire that path.
+    """
+    if agree_den >= 2 and agree_num >= 2:
+        return "convergent"
+    if agree_den >= 2:
+        return "divergent"
+    if agree_den == 1:
+        return "single"
+    return "no_change"
+
+
 # ── Position-level aggregation ───────────────────────────────────────────────
 def compute_asr_path_score(
     pair_details: Optional[List[Dict[str, Any]]],
@@ -542,6 +548,7 @@ def compute_asr_path_score(
     conserved_pair: Optional[str],
     walk_cache: Optional[Dict[Any, Any]] = None,
     site_key: Optional[Any] = None,
+    native_side_split: bool = False,
 ) -> Dict[str, Any]:
     """Compute the unified ASR path score for one CAAS position row.
 
@@ -554,22 +561,31 @@ def compute_asr_path_score(
         is_conserved_meta: whether this position has conserved pairs listed in
             metadata (both tips show potential ancestral state conservation).
         conserved_pair: comma-separated id(s) of the conserved pair(s). These
-            are scored by conservation-to-root and reported latently in
-            ``conserved_pair_scores`` / ``conserved_pair_nodes``; T1 does not
-            fold them into the score.
+            enter ``D_s`` on both sides as ``score_c = 0`` members of the mean's
+            denominator (T3-doc §5.1) and are still reported in
+            ``conserved_pair_scores`` / ``conserved_pair_nodes``.
+        native_side_split: when True return ``{"top": {...}, "bottom": {...}}``
+            — one row per ``(Gene, Position, scheme, side)`` (T3-doc §4). When
+            False (default, feature flag ``--native_side_split`` off) collapse to
+            one flat T1-shaped dict whose ``asr_path_score`` is the stronger
+            side, so ``disambiguate_single`` keeps emitting a single row until
+            T3b wires the two-row plumbing.
 
     Returns:
-        Dict with ``asr_path_score`` (position level, 0-1;
-        ``independence · core · derived_agreement``), ``replication``
-        (independence * core), ``independence``, ``derived_agreement``,
-        ``core``, ``pair_scores`` ({pair_id: score}), ``pair_contaminated``,
-        ``conserved_pair_scores`` ({pair_id: conservation-to-root}) and
-        ``conserved_pair_nodes`` ({pair_id: mrca_node_id}) for the conserved
-        pairs (both empty when none; latent — see above), and
-        ``pair_ancestral`` / ``pair_derived_top`` / ``pair_derived_bot``
-        ({pair_id: raw AA}) — the un-encoded ancestral and per-side derived
-        residues of each changed pair, for the FOP harvest-wide, per-scheme
-        derived_agreement rebuild (POINT 3).
+        ``native_side_split=False``: flat dict — ``asr_path_score`` (=
+        ``max(core_top, core_bottom)``), ``core`` (alias), ``core_top`` /
+        ``core_bottom``, ``derived_agreement`` (diagnostic concentration),
+        ``pair_scores`` / ``top_pair_scores`` / ``bottom_pair_scores`` (per-pair
+        private isolation ``s_c^s``), ``pair_partner_scores`` ({pid: score_c}),
+        ``pair_contaminated``, ``conserved_pair_scores`` / ``conserved_pair_nodes``,
+        ``pair_ancestral`` / ``pair_derived_top`` / ``pair_derived_bot``.
+
+        ``native_side_split=True``: ``{"top": <row>, "bottom": <row>}`` where
+        each ``<row>`` carries ``asr_path_score`` = ``core_s`` = ``clamp01`` of
+        the mean of ``score_c`` (noisy-OR of a pair's same-residue partners) over
+        ``D_s`` = participants ∪ conserved-metadata pairs, plus ``n_pairs_side``,
+        ``n_participating``, ``n_conserved``, ``agree_num`` / ``agree_den``,
+        ``convergence_type``, and the same pair-level / conserved-pair maps.
     """
     pairs = pair_details or []
     n_pairs = len(pairs)
@@ -578,7 +594,6 @@ def compute_asr_path_score(
     )
 
     pair_contaminated: Dict[int, bool] = {}
-    conserved_conservations: List[float] = []  # conservation-to-root of conserved pairs
     # Per-conserved-pair record, analogous to pair_scores / pair_contaminated for
     # changed pairs. Lets the FOP domain-pooler (fop_pool.R / fop_pool.py)
     # reconstruct conservation_gate from the DISTINCT conserved pairs shared
@@ -594,7 +609,6 @@ def compute_asr_path_score(
     derived_by_side: Dict[str, List[Tuple[int, str]]] = {
         "top_tip_mode": [], "bottom_tip_mode": [],
     }
-    derived_pool: set = set()  # all encoded derived states across changed pairs
 
     # Raw (un-encoded) residues per changed pair, kept so the FOP domain-pooler
     # (fop_pool.R / fop_pool.py POINT 3) can recompute derived_agreement
@@ -627,7 +641,6 @@ def compute_asr_path_score(
                 is_changed=False,
                 walk_cache=walk_cache, cache_scope=(site_key, scheme),
             )
-            conserved_conservations.append(cons)
             conserved_pair_scores[pid] = cons
             conserved_pair_nodes[pid] = mrca_id
             continue
@@ -640,7 +653,6 @@ def compute_asr_path_score(
                 continue  # missing or conserved side → not scored
             sides.append((side_key, tip_enc))
             derived_by_side[side_key].append((pid, tip_enc))
-            derived_pool.add(tip_enc)
             raw_tip_u = str(raw_tip).strip().upper()
             if side_key == "top_tip_mode":
                 pair_derived_top[pid] = raw_tip_u
@@ -656,23 +668,99 @@ def compute_asr_path_score(
                 {"pid": pid, "mrca_id": int(mrca_id), "anc_enc": anc_enc, "sides": sides}
             )
 
-    # Conserved pairs (both tips retained ancestral) are kept as a latent axis:
-    # their conservation-to-root scores flow out in ``conserved_pair_scores`` /
-    # ``conserved_pair_nodes`` for a later tier to fold back into the pairwise
-    # core, but T1 no longer applies a ``conservation_gate`` multiplier — the
-    # score is ``independence · core · derived_agreement`` only.
+    # ── T3 per-side pairwise core (T3-doc §5) ────────────────────────────────
+    # One ``core_s`` per (Gene, Position, scheme, side). For side s:
+    #
+    #   D_s   = P_s ∪ C            P_s = pairs that changed on s
+    #                              C   = conserved-metadata pairs (both sides)
+    #   L_s   = { LCA(mrca_a, mrca_b) : a, b ∈ P_s }        merge points of s
+    #   s_c^s = ∏ (1 − P_wc(der_c @ k)) over the private segment below stop_c
+    #   contrib(c,d) = s_c^s · s_d^s · [enc(der_c)==enc(der_d)]
+    #                  · (1 − P_wc(enc(der_c) @ LCA(mrca_c, mrca_d)))
+    #   score_c = noisy_or_{d ∈ partners(c)} contrib(c,d)   0 if no partner
+    #   core_s  = ( Σ_{c ∈ D_s} score_c ) / |D_s|           0 if |D_s| = 0
+    #
+    # Conserved pairs and pairs that landed on an orphan residue contribute
+    # score_c = 0 but still count in the denominator — a design of n pairs where
+    # only k converge scores ≈ k/n (T3-doc §6.1). Lados never mix.
+    anc_by_pid: Dict[int, str] = {c["pid"]: c["anc_enc"] for c in changed}
+    conserved_present: List[int] = list(conserved_pair_scores.keys())
 
-    if not changed:
+    # P_s per side: {pid, mrca_id, der_enc} for each changed side of each pair.
+    participants: Dict[str, List[Dict[str, Any]]] = {
+        "top_tip_mode": [], "bottom_tip_mode": [],
+    }
+    for c in changed:
+        for side_key, tip_enc in c["sides"]:
+            participants[side_key].append(
+                {"pid": c["pid"], "mrca_id": c["mrca_id"], "der_enc": tip_enc}
+            )
+
+    def _side_result(side_key: str) -> Dict[str, Any]:
+        P = participants[side_key]
+        n_part = len(P)
+        n = n_part + len(conserved_present)
+
+        # L_s — merge points of THIS side's participants only (T3-doc §5.2).
+        lca_s: set = set()
+        for a, b in combinations(P, 2):
+            lca = find_lca(node_index, a["mrca_id"], b["mrca_id"])
+            if lca is not None:
+                lca_s.add(lca)
+
+        # s_c^s — private-segment isolation, walk stops at the nearest L_s node.
+        iso: Dict[int, float] = {}
+        contam: Dict[int, bool] = {}
+        for p in P:
+            full_path = path_to_root_ids(node_index, p["mrca_id"])
+            stop_at = next((x for x in full_path if x in lca_s), None)
+            sc, ct = side_path_score(
+                node_index, per_node_dist, p["mrca_id"],
+                anc_by_pid[p["pid"]], p["der_enc"], scheme,
+                is_changed=True, stop_at_id=stop_at,
+                walk_cache=walk_cache, cache_scope=(site_key, scheme),
+            )
+            iso[p["pid"]] = sc
+            contam[p["pid"]] = ct
+
+        # contrib(c,d) over unordered participant pairs on the same residue.
+        contribs: Dict[int, List[float]] = {p["pid"]: [] for p in P}
+        for a, b in combinations(P, 2):
+            if a["der_enc"] != b["der_enc"]:
+                continue  # agree == 0 → contrib == 0, skip the rest
+            lca_ab = find_lca(node_index, a["mrca_id"], b["mrca_id"])
+            p_shared = worst_case_group_probability(
+                node_dist(per_node_dist, lca_ab), a["der_enc"], scheme
+            )
+            k = iso[a["pid"]] * iso[b["pid"]] * max(0.0, 1.0 - p_shared)
+            contribs[a["pid"]].append(k)
+            contribs[b["pid"]].append(k)
+
+        partner_scores = {pid: noisy_or(v) for pid, v in contribs.items()}
+        core_s = (sum(partner_scores.values()) / n) if n else 0.0
+        core_s = max(0.0, min(1.0, core_s))
+
+        # concentration_s = agree_num / agree_den (diagnostic; T4a convergence_type)
+        by_res: Dict[str, int] = {}
+        for p in P:
+            by_res[p["der_enc"]] = by_res.get(p["der_enc"], 0) + 1
+        agree_den = n_part
+        agree_num = max(by_res.values()) if by_res else 0
+        concentration = (agree_num / agree_den) if agree_den else 0.0
+
         return {
-            "asr_path_score": 0.0,
-            "replication": 0.0,
-            "independence": 1.0,
-            "derived_agreement": 0.0,
-            "core": 0.0,
-            "pair_scores": {},
-            "top_pair_scores": {},
-            "bottom_pair_scores": {},
-            "pair_contaminated": {},
+            "asr_path_score": core_s,
+            "core": core_s,
+            "n_pairs_side": n,
+            "n_participating": n_part,
+            "n_conserved": len(conserved_present),
+            "derived_agreement": concentration,
+            "agree_num": agree_num,
+            "agree_den": agree_den,
+            "convergence_type": _convergence_type(agree_num, agree_den),
+            "pair_scores": dict(iso),
+            "pair_partner_scores": partner_scores,
+            "pair_contaminated": contam,
             "conserved_pair_scores": conserved_pair_scores,
             "conserved_pair_nodes": conserved_pair_nodes,
             "pair_ancestral": pair_ancestral,
@@ -680,125 +768,51 @@ def compute_asr_path_score(
             "pair_derived_bot": pair_derived_bot,
         }
 
-    # ── LCA merge points ─────────────────────────────────────────────────────
-    # The LCA nodes are the merge points of the changed pairs' MRCAs (the
-    # internal nodes of the minimal subtree connecting them). At most n-1 of
-    # them, so a *product* over LCA nodes is depth-independent — unlike a product
-    # over the full MRCA→root paths, which would collapse on deep trees.
-    changed_mrcas = [c["mrca_id"] for c in changed]
-    lca_nodes: set = set()
-    for a, b in combinations(changed_mrcas, 2):
-        lca = find_lca(node_index, a, b)
-        if lca is not None:
-            lca_nodes.add(lca)
+    top = _side_result("top_tip_mode")
+    bottom = _side_result("bottom_tip_mode")
 
-    # ── Phase 2: per-pair core isolation (each MRCA → root) ───────────────────
-    pair_scores: Dict[int, float] = {}
-    # Per-side scores: needed for directional core (see below). A pair that
-    # changed only on top contributes to top_pair_scores; one that changed on
-    # both sides contributes to both. This prevents a pair changing top→S and a
-    # different pair changing bottom→T from being counted as "2 convergent
-    # changes" — they are changes in opposite directions.
-    top_pair_scores: Dict[int, float] = {}
-    bottom_pair_scores: Dict[int, float] = {}
+    if native_side_split:
+        # T3-doc §4: one row per (Gene, Position, scheme, side). Downstream
+        # (T3b) decides whether each row is emitted (per change_side).
+        return {"top": top, "bottom": bottom}
+
+    # ── Transitional flat return — feature flag --native_side_split OFF ───────
+    # main and the single-row null still consume one flat T1-shaped dict. The
+    # score collapses to the stronger side (a "both" position is not split into
+    # two rows until T3b). ``independence`` / ``replication`` are dropped
+    # (T3-doc §13); consumers read them with ``.get`` defaults.
+    for pid, ct in top["pair_contaminated"].items():
+        pair_contaminated[pid] = pair_contaminated.get(pid, False) or ct
+    for pid, ct in bottom["pair_contaminated"].items():
+        pair_contaminated[pid] = pair_contaminated.get(pid, False) or ct
+
+    flat_pair_scores: Dict[int, float] = {}
     for c in changed:
-        # Nearest LCA = deepest merge point on this pair's root-path. The private
-        # segment (below it) is the pair's own, judged by the core walk; the
-        # shared segment (at/above it) is judged by the independence product.
-        full_path = path_to_root_ids(node_index, c["mrca_id"])
-        stop_at = next((n for n in full_path if n in lca_nodes), None)
-        side_scores: List[float] = []
-        pair_contam = False
-        for side_key, tip_enc in c["sides"]:
-            score, contam = side_path_score(
-                node_index, per_node_dist, c["mrca_id"], c["anc_enc"], tip_enc,
-                scheme, is_changed=True, stop_at_id=stop_at,
-                walk_cache=walk_cache, cache_scope=(site_key, scheme),
-            )
-            side_scores.append(score)
-            pair_contam = pair_contam or contam
-            if side_key == "top_tip_mode":
-                top_pair_scores[c["pid"]] = score
-            else:
-                bottom_pair_scores[c["pid"]] = score
-        pair_scores[c["pid"]] = sum(side_scores) / len(side_scores)
-        pair_contaminated[c["pid"]] = pair_contam
+        vals = [s[c["pid"]] for s in (top["pair_scores"], bottom["pair_scores"])
+                if c["pid"] in s]
+        if vals:
+            flat_pair_scores[c["pid"]] = sum(vals) / len(vals)
 
-    # ── Independence: derived state must be ABSENT at the shared merge points ──
-    # For each LCA node, (1 - P(any residue in derived_pool present there)).
-    # Product across LCA nodes: if any merge point already carries a derived
-    # state, the pairs below it did not converge independently — they
-    # inherited it — and the score craters. P(any of derived_pool) uses the
-    # same worst-case bound as core (exact for a recorded residue, the
-    # unrecorded remainder added once -- not once per candidate residue,
-    # which would double-count the same unknown mass -- for however many of
-    # derived_pool aren't the node's recorded state).
-    independence = 1.0
-    for lca in lca_nodes:
-        dist = node_dist(per_node_dist, lca)
-        p_derived = worst_case_any_group_probability(dist, derived_pool, scheme)
-        independence *= max(0.0, 1.0 - p_derived)
+    flat_partner: Dict[int, float] = {}
+    for src in (top["pair_partner_scores"], bottom["pair_partner_scores"]):
+        for pid, v in src.items():
+            flat_partner[pid] = max(flat_partner.get(pid, 0.0), v)
 
-    # Convergence axis: within each phenotype side that has at least two
-    # changed pairs, what fraction land on the position's single most common
-    # (plurality) derived residue? A side with exactly one changed pair has
-    # nothing to agree or disagree with and is excluded from the average
-    # entirely — "agreement" is a >=2-observer concept, and crediting a lone
-    # change as trivial (1/1) agreement would dilute a real disagreement
-    # elsewhere on the position. Computed from plain pair counts: this axis is
-    # a fact about observed tip residues (no posterior involved), kept
-    # independent of the ancestral-uncertainty question `core`/`independence`
-    # already own.
-    concentration_by_side: Dict[str, float] = {}
-    for side_key, pid_residues in derived_by_side.items():
-        if len(pid_residues) < 2:
-            continue
-        count_by_residue: Dict[str, int] = {}
-        for _pid, r in pid_residues:
-            count_by_residue[r] = count_by_residue.get(r, 0) + 1
-        total = len(pid_residues)
-        plurality_r = max(count_by_residue, key=count_by_residue.get)
-        concentration_by_side[side_key] = count_by_residue[plurality_r] / total
+    qual = [s["derived_agreement"] for s in (top, bottom) if s["agree_den"] >= 2]
+    derived_agreement = (sum(qual) / len(qual)) if qual else 1.0
 
-    if concentration_by_side:
-        derived_agreement = sum(concentration_by_side.values()) / len(concentration_by_side)
-    else:
-        derived_agreement = 1.0  # no side has >=2 changed pairs to assess agreement on
-
-    # ── Combinatorial Core Score: P(>= 2 independent changes) ──────────────────
-    # Computed *per phenotype side* and then combined via union. This is the
-    # critical directional check: a pair changing only on the top side and a
-    # different pair changing only on the bottom side are changes in opposite
-    # directions — not convergence. Without the per-side split they would both
-    # enter p_list and produce P(≥2) ≈ 1 even though neither direction has ≥2
-    # independent events.
-    core_top = _p_at_least_2(list(top_pair_scores.values()))
-    core_bottom = _p_at_least_2(list(bottom_pair_scores.values()))
-    core = 1.0 - (1.0 - core_top) * (1.0 - core_bottom)
-
-    # replication: P(shared ancestor clean AND >=2 private-clean events). A
-    # genuine joint probability, not two independent checks — private-segment
-    # nodes and LCA nodes are disjoint, conditionally-independent parts of the
-    # tree, so P(A) * P(B|A) = P(A ∩ B).
-    replication = independence * core
-
-    # T1 collapse: the score is the replication tier discounted only by
-    # derived_agreement (did the ≥2 independent changes land on the same
-    # residue). The former mrca_diversity and conservation_gate multipliers are
-    # gone — parallelism is already approximated by the clean-path / independence
-    # machinery, and conserved pairs are carried latently (see above) for a
-    # later tier to fold into the pairwise core rather than as a one-sided gate.
-    asr_path_score = max(0.0, min(1.0, replication * derived_agreement))
+    core = max(top["asr_path_score"], bottom["asr_path_score"])
 
     return {
-        "asr_path_score": asr_path_score,
-        "replication": replication,
-        "independence": independence,
-        "derived_agreement": derived_agreement,
+        "asr_path_score": core,
         "core": core,
-        "pair_scores": pair_scores,
-        "top_pair_scores": top_pair_scores,
-        "bottom_pair_scores": bottom_pair_scores,
+        "core_top": top["asr_path_score"],
+        "core_bottom": bottom["asr_path_score"],
+        "derived_agreement": derived_agreement,
+        "pair_scores": flat_pair_scores,
+        "top_pair_scores": dict(top["pair_scores"]),
+        "bottom_pair_scores": dict(bottom["pair_scores"]),
+        "pair_partner_scores": flat_partner,
         "pair_contaminated": pair_contaminated,
         "conserved_pair_scores": conserved_pair_scores,
         "conserved_pair_nodes": conserved_pair_nodes,

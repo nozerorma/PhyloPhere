@@ -85,6 +85,13 @@ class _ConservedPairLatent:  # noqa: vulture whitelist stub
 def parse_conserved_ids(): pass      # path_scores.py — conserved id string parser
 def _conserved_side_score(): pass    # path_scores.py — conservation-to-root walk
 
+# ── path_scores.py primitives dormant after scoring_v2 T3a ────────────────────
+# The observed pairwise core (T3a) no longer calls these, but the FOP null still
+# mirrors the old P(>=2) / block-independence algebra in fop_pool.{py,R} until
+# T3c rewrites the null per side. Kept here so the twins have one reference.
+def _p_at_least_2(): pass                     # path_scores.py — null still mirrors it
+def worst_case_any_group_probability(): pass  # path_scores.py — block independence (null)
+
 # ── Pytest / unittest hooks (if tests are added) ──────────────────────────────
 
 def setUp(): pass
