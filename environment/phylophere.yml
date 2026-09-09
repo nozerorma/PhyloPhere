@@ -25,7 +25,10 @@ dependencies:
   - r-base=4.4
 
   # --- workflow / external tools ---
-  - nextflow
+  # Pin below 26: Nextflow 26.x makes the strict v2 config parser the default,
+  # which rejects the shebang line and the def helper functions in nextflow.config.
+  # The lock file is on 25.04.6; the 25.x series is the known-good target.
+  - nextflow <26
   - hyphy            # FADE and other selection tests
   - paml             # codeml / ancestral reconstruction
   - domino           # active-module detection
