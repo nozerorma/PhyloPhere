@@ -129,9 +129,9 @@ def _fake_run(tmp: Path) -> Path:
     )
     (rc / "scoring" / "position_scores.tsv").write_text(
         "Gene\tPosition\tpvalue\trecovery_boot\tasr_score\tphen_score\tn_schemes\t"
-        "scheme_set\tCAAS_score\tgate_sig\tchange_side\n"
-        "PEPC\t779\t0.003\t0\t0.75\t1\t2\tGS2+US\t0.75\tTRUE\ttop\n"
-        "PEPC\t620\t0.002\t0\t0.56\t1\t1\tUS\t0.50\tTRUE\ttop\n"
+        "scheme_set\tCAAS_score\tgate_sig\tchange_side\tside\n"
+        "PEPC\t779\t0.003\t0\t0.75\t1\t2\tGS2+US\t0.75\tTRUE\ttop\ttop\n"
+        "PEPC\t620\t0.002\t0\t0.56\t1\t1\tUS\t0.50\tTRUE\ttop\ttop\n"
     )
     (rc / "ct_disambiguation" / "caas_convergence_master.csv").write_text(
         "gene,msa_pos,tag,caas,is_significant,convergence_type,caap_group,asr_path_score\n"

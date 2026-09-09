@@ -149,6 +149,8 @@ def extract_convergence_summary(
         "change_top": result_dict.get("change_top", "no_change"),
         "change_bottom": result_dict.get("change_bottom", "no_change"),
         "change_side": result_dict.get("change_side", "none"),
+        # T2a: first-class direction key (passthrough alias of change_side).
+        "side": result_dict.get("side", result_dict.get("change_side", "none")),
     }
 
     summary["pairs"] = extract_pair_info(result_dict, num_pairs)

@@ -115,6 +115,11 @@ class ConvergenceResult:
     change_top: str = "no_change"
     change_bottom: str = "no_change"
     change_side: str = "none"
+    # T2a: first-class direction key. Passthrough alias of change_side (top /
+    # bottom / both / none) with no cardinality change — a "both" position stays
+    # one row. T3b turns "both" into two rows keyed (Gene, Position, side); until
+    # then side == change_side everywhere.
+    side: str = "none"
 
     # ASR path score (unified replacement for binary ASR gate + convergence +
     # parallel; computed in src/convergence/path_scores.py)

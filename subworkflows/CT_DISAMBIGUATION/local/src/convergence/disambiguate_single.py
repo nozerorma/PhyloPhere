@@ -48,6 +48,7 @@ logger = logging.getLogger(__name__)
 PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score", "change_top", "change_bottom",
+     "side",
      "hypothesis", "pair_scores", "independence",
      "derived_agreement", "core",
      "conserved_pair_scores", "conserved_pair_nodes",
@@ -64,6 +65,7 @@ PositionAxes = namedtuple(
 # fop_pool.R/.py, which need them to rebuild core_top/core_bottom instead of
 # collapsing all domains into one direction-blind pool.
 PositionAxes.__new__.__defaults__ = (
+    "none",
     None, None, None, None, None, None, None, None, None, None, None, None,
 )
 
@@ -501,6 +503,7 @@ def analyze_caas_position_disambiguation(
         change_top=change_top,
         change_bottom=change_bottom,
         change_side=change_side,
+        side=change_side,  # T2a passthrough alias (no "both" split until T3b)
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
@@ -934,6 +937,7 @@ def analyze_gene_disambiguation(
                         asr_path_score=axes_score,
                         change_top=cp.get("change_top", "no_change"),
                         change_bottom=cp.get("change_bottom", "no_change"),
+                        side=cp.get("change_side", "none"),
                         hypothesis=_hyp_label,
                         pair_scores=axes_pair_scores,
                         independence=axes_extra.get("independence"),

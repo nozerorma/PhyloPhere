@@ -181,6 +181,10 @@ def convert_convergence_result_to_dict(
     result_dict["change_top"] = getattr(result, "change_top", "no_change")
     result_dict["change_bottom"] = getattr(result, "change_bottom", "no_change")
     result_dict["change_side"] = getattr(result, "change_side", "none")
+    # T2a: first-class direction key; passthrough alias of change_side.
+    result_dict["side"] = getattr(
+        result, "side", getattr(result, "change_side", "none")
+    )
 
     # ASR path score (unified ASR/convergence/parallel signal) + per-pair detail
     result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)
@@ -1012,6 +1016,19 @@ def _load_gene_asr_context(
 # the two halves of the null computation.
 _CHANGE_STATES = ("convergent", "codivergent", "divergent")
 
+
+def _side_from_flags(ct: bool, cb: bool) -> str:
+    """T2a: OR-ed (change_top, change_bottom) presence -> the first-class `side`
+    label. Byte-identical to scoring_compute.R §2g and fop_pool.R::.derive_side_key
+    so the observed and null sides join 1:1 on (Gene, Position, caap_group, side)."""
+    if ct and cb:
+        return "both"
+    if ct:
+        return "top"
+    if cb:
+        return "bottom"
+    return "none"
+
 # No per-scheme weight any more. scoring_compute.R section 2g aggregates a
 # position's schemes with a MEAN of caas_row, not a 0.2-weighted sum, because the
 # number of detecting schemes is a biochemical-distance property of the
@@ -1321,6 +1338,7 @@ def _perms_worker(
                         asr_path_score=pooled["asr_path_score"],
                         change_top="convergent" if ct else "no_change",
                         change_bottom="convergent" if cb else "no_change",
+                        side=_side_from_flags(ct, cb),
                         hypothesis=None, pair_scores=None,
                         independence=pooled.get("independence"),
                         derived_agreement=pooled.get("derived_agreement"),
@@ -1356,6 +1374,11 @@ def _perms_worker(
         loo_denom = max(n_cycles_total - 1, 1)
 
         n_detected = {}
+        # T2a: OR change_top/change_bottom across a position's cycles+schemes to a
+        # single side label, derived exactly the way scoring_compute.R §2g does.
+        # perm_pos_pval.tsv carries it so §2f-bis can join the null on
+        # (Gene, Position, caap_group, side) 1:1 with the observed side.
+        side_flags: Dict[Tuple[Any, str], Tuple[bool, bool]] = {}
         for cyc, biochem_results in all_cycle_results:
             for r in biochem_results:
                 pos = getattr(r, "position", None)
@@ -1365,6 +1388,11 @@ def _perms_worker(
                     if key not in n_detected:
                         n_detected[key] = set()
                     n_detected[key].add(cyc)
+                    ct_p, cb_p = side_flags.get(key, (False, False))
+                    side_flags[key] = (
+                        ct_p or getattr(r, "change_top", "no_change") in _CHANGE_STATES,
+                        cb_p or getattr(r, "change_bottom", "no_change") in _CHANGE_STATES,
+                    )
 
         n_detected_count = {}
         perm_pos_pval_rows = []
@@ -1372,6 +1400,7 @@ def _perms_worker(
             k = len(cycles_set)
             n_detected_count[key] = k
             perm_pos_pval_rows.append({
+                "side": _side_from_flags(*side_flags.get(key, (False, False))),
                 "Gene": gene,
                 "Position": key[0],
                 "caap_group": key[1],
@@ -1866,13 +1895,21 @@ def _finalize_perm_pos_pval(
     loo_denom = max(n_cycles_total - 1, 1)
 
     seen: Dict[Tuple[str, int, str], int] = {}
+    # T2a: OR the per-row ct/cb flags to a single side label per key, matching
+    # _perms_worker's in-memory derivation and scoring_compute.R §2g.
+    side_flags: Dict[Tuple[str, int, str], Tuple[bool, bool]] = {}
     for row in iter_detail_rows(detail_path):
         key = (row["Gene"], int(row["Position"]), row["caap_group"])
         if key not in seen:
             seen[key] = int(row["n_detected"])
+        ct_p, cb_p = side_flags.get(key, (False, False))
+        side_flags[key] = (
+            ct_p or str(row.get("ct", "0")) == "1",
+            cb_p or str(row.get("cb", "0")) == "1",
+        )
 
     pval_path = Path(output_dir) / "perm_pos_pval.tsv"
-    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles",
+    pval_fields = ["Gene", "Position", "caap_group", "side", "n_detected", "n_cycles",
                    "null_pvalue_boot", "pos_perm_p"]
     with open(pval_path, "w", newline="") as f_pval:
         writer = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
@@ -1880,6 +1917,7 @@ def _finalize_perm_pos_pval(
         for (gene, pos, grp), k in seen.items():
             writer.writerow({
                 "Gene": gene, "Position": pos, "caap_group": grp,
+                "side": _side_from_flags(*side_flags.get((gene, pos, grp), (False, False))),
                 "n_detected": k, "n_cycles": n_cycles_total,
                 "null_pvalue_boot": (k - 1) / loo_denom,
                 "pos_perm_p": (k + 1) / (n_cycles_total + 1),
@@ -1995,7 +2033,7 @@ def process_all_genes_perms(
     detail_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
-    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
+    pval_fields = ["Gene", "Position", "caap_group", "side", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "ct", "cb", "clust"]
 
     # Gap B: CT_POSTPROC filtering of the null candidate pool. Off by default so

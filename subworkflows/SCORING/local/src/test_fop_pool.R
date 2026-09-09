@@ -37,6 +37,27 @@ check(nrow(res1) == 1, "single-hyp: one row out")
 check(approx(res1$asr_path_score, 0.42), "single-hyp: asr_path_score untouched")
 check("n_hypotheses" %in% names(res1) && res1$n_hypotheses == 0, "single-hyp: n_hypotheses == 0")
 
+# ── T2a: side is emitted, derived from change_top/change_bottom (OR) ────────
+side_df <- data.frame(
+  Gene = "G", Position = c(10L, 10L, 11L, 12L), caap_group = "US",
+  hyp_id = c("H1", "H2", NA, NA),
+  asr_path_score = c(0.4, 0.3, 0.5, 0.6), independence = 1,
+  derived_agreement = 1, core = c(0.4, 0.3, 0.5, 0.6),
+  change_top    = c("no_change",  "convergent", "convergent", "no_change"),
+  change_bottom = c("convergent", "no_change",  "no_change",  "no_change"),
+  mrca_1_path_score = 0.8, mrca_1_node = "n1",
+  stringsAsFactors = FALSE
+)
+resSide <- apply_fop_pooling(side_df, NULL)
+check("side" %in% names(resSide), "T2a: side column emitted")
+check(resSide$side[resSide$Position == 10L] == "both",
+      "T2a: pos 10 side == both (H1 bottom OR H2 top)")
+check(resSide$side[resSide$Position == 11L] == "top",   "T2a: pos 11 side == top")
+check(resSide$side[resSide$Position == 12L] == "none",  "T2a: pos 12 side == none")
+check(nrow(resSide) == 3L, "T2a: side is cardinality-neutral (3 positions -> 3 rows)")
+check("side" %in% names(apply_fop_pooling(one, NULL)),
+      "T2a: side present even without change_top/bottom columns")
+
 # ── FOP: two hypotheses, two domains — two-job PSS weighting ───────────────
 # H1 rides a strong domain-1 pair (node a, s=0.9, own pss 10) but a WEAK
 # domain 2 (own pss 1).  H2's domain-1 pair (node b, s=0.2) has own pss 2.

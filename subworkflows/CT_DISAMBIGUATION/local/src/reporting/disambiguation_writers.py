@@ -149,6 +149,8 @@ def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str
         "change_top",
         "change_bottom",
         "change_side",
+        # T2a: first-class direction key (passthrough alias of change_side).
+        "side",
         # Unified ASR path score (replaces convergence/parallel at scoring time)
         "asr_path_score",
         "independence",

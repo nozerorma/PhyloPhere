@@ -654,6 +654,31 @@ FOP_CARRIED_DESCRIPTORS <- c("derived_residues", "top_residue_support",
                              "n_top_species", "n_bottom_species",
                              "n_conserved_pairs")
 
+#' T2a: (re)derive the first-class `side` key per (Gene, Position, caap_group).
+#'
+#' OR of assessable change_top / change_bottom across the group's pooled
+#' hypothesis rows -- byte-identical to scoring_compute.R section 2g and the
+#' permulation null (_perms_worker / _finalize_perm_pos_pval), so the section
+#' 2f-bis null join lands on (Gene, Position, caap_group, side) 1:1. `out` is the
+#' frame to attach `side` to; `src` supplies the per-hypothesis change columns
+#' (the full pre-collapse frame).
+.derive_side_key <- function(out, src) {
+  if (!all(c("change_top", "change_bottom") %in% names(src))) {
+    if (!"side" %in% names(out)) out$side <- "none"
+    return(out)
+  }
+  .assess <- function(x) x %in% c("convergent", "codivergent", "divergent")
+  side_tbl <- src %>%
+    group_by(Gene, Position, caap_group) %>%
+    summarise(.ht = any(.assess(change_top)),
+              .hb = any(.assess(change_bottom)), .groups = "drop") %>%
+    mutate(side = dplyr::case_when(
+      .ht & .hb ~ "both", .ht ~ "top", .hb ~ "bottom", TRUE ~ "none")) %>%
+    select(Gene, Position, caap_group, side)
+  out$side <- NULL
+  dplyr::left_join(out, side_tbl, by = c("Gene", "Position", "caap_group"))
+}
+
 #' Apply domain-pooling across a whole disambiguation data.frame.
 #'
 #' Groups by (Gene, Position, caap_group) and replaces the per-hypothesis
@@ -720,7 +745,7 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
     for (col in c(FOP_CARRIED_DESCRIPTORS, "convergence_schemes")) {
       if (!col %in% names(df)) df[[col]] <- ""
     }
-    return(df)
+    return(.derive_side_key(df, df))
   }
 
   hyp_pairs <- read_hypothesis_pairs(hyp_pairs_path)
@@ -783,5 +808,5 @@ apply_fop_pooling <- function(df, hyp_pairs_path = NULL, tau = 0.8) {
     if (!col %in% names(out)) out[[col]] <- ""
     out[[col]][is.na(out[[col]])] <- ""
   }
-  out
+  .derive_side_key(out, df)
 }

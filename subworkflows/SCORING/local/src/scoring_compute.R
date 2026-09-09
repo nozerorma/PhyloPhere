@@ -321,13 +321,41 @@ has_caas_pos_pval <- file_exists(caas_pos_pval_file)
 if (has_caas_pos_pval) {
   cat("Loading position-level permulation null:", caas_pos_pval_file, "\n")
   pos_pval_df <- read_tsv(caas_pos_pval_file, show_col_types = FALSE) %>%
-    mutate(Position = as.integer(Position)) %>%
-    select(Gene, Position, caap_group, pos_perm_p)
+    mutate(Position = as.integer(Position))
+  .pval_has_side <- "side" %in% names(pos_pval_df) && "side" %in% names(df)
+  pos_pval_df <- pos_pval_df %>%
+    select(Gene, Position, caap_group, any_of("side"), pos_perm_p)
 
   .n_obs_pos <- n_distinct(paste(df$Gene, df$Position))
-  df <- df %>%
-    mutate(Position = as.integer(Position)) %>%
-    left_join(pos_pval_df, by = c("Gene", "Position", "caap_group"))
+  .n_rows_before <- nrow(df)
+  df <- df %>% mutate(Position = as.integer(Position))
+  if (.pval_has_side) {
+    # T2a: side is a first-class join key. Both sides derive it identically (OR
+    # of assessable change_top/change_bottom over the group) so this stays
+    # cardinality-neutral. `pos_perm_p_3key` fills any row whose side label
+    # differs between the observed and null sides; `.n_side_miss` counts them as
+    # a drift check (expected ~0 before T3).
+    pval_3key <- pos_pval_df %>% select(-side) %>%
+      distinct(Gene, Position, caap_group, .keep_all = TRUE) %>%
+      rename(pos_perm_p_3key = pos_perm_p)
+    df <- df %>%
+      left_join(pos_pval_df, by = c("Gene", "Position", "caap_group", "side")) %>%
+      left_join(pval_3key, by = c("Gene", "Position", "caap_group"))
+    .n_side_miss <- sum(is.na(df$pos_perm_p) & !is.na(df$pos_perm_p_3key))
+    df <- df %>%
+      mutate(pos_perm_p = dplyr::coalesce(pos_perm_p, pos_perm_p_3key)) %>%
+      select(-pos_perm_p_3key)
+    if (.n_side_miss > 0) {
+      cat(sprintf(paste0("  NOTE: %d observed rows matched the null only on the ",
+                         "(Gene, Position, caap_group) fallback (side label ",
+                         "differs from the null) -- expected small pre-T3\n"),
+                  .n_side_miss))
+    }
+  } else {
+    df <- df %>% left_join(pos_pval_df %>% select(-any_of("side")),
+                           by = c("Gene", "Position", "caap_group"))
+  }
+  stopifnot(nrow(df) == .n_rows_before)
   .n_matched_pos <- df %>% filter(!is.na(pos_perm_p)) %>%
     distinct(Gene, Position) %>% nrow()
   .match_rate <- if (.n_obs_pos > 0) .n_matched_pos / .n_obs_pos else 0
@@ -410,7 +438,10 @@ pos_scores <- df %>%
       has_change_top                     ~ "top",
       has_change_bottom                  ~ "bottom",
       TRUE                               ~ "none"
-    )
+    ),
+    # T2a: first-class direction key. Same derivation as change_side (which stays
+    # a column through T4b); "both" is one row until T3b splits it.
+    side = change_side
   ) %>%
   select(-has_change_top, -has_change_bottom)
 
@@ -1136,7 +1167,7 @@ pos_out <- pos_scores %>%
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species",
                   "n_conserved_pairs", "convergence_schemes")), CAAS_score,
-         change_side,
+         change_side, side,
          any_of(c("caas", "change_top", "change_bottom")),
          any_of(c("pos_perm_p", "pos_perm_p_adj"))) %>%
   arrange(desc(CAAS_score))
