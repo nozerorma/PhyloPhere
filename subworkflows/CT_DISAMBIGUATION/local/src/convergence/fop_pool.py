@@ -72,6 +72,11 @@ try:  # src on path at runtime (gene_wrapper import); absent under isolated unit
 except Exception:  # pragma: no cover
     _get_grouping_scheme = None
 
+try:  # scoring_v2 T3c SC2b — the real per-side pairwise core for the FOP null
+    from src.convergence.path_scores import aggregate_core_side as _aggregate_core_side
+except Exception:  # pragma: no cover
+    _aggregate_core_side = None
+
 
 def _encode_aa(aa: Optional[str], scheme: Optional[str]) -> Optional[str]:
     """Encode a raw residue in ``scheme`` (mirror of path_scores.encode_aa).
@@ -374,6 +379,119 @@ def pool_hypotheses(
         "mrca_diversity": div,
         "derived_agreement": da,
         "conservation_gate": cg,
+        "n_hypotheses": len(hyps),
+    }
+
+
+def _modal_str(vals: Sequence[Optional[str]]) -> Optional[str]:
+    """Most frequent non-empty string (first-seen breaks ties). Used to settle a
+    node's derived/ancestral residue when several hypotheses reconstruct the same
+    MRCA node (they normally agree — tip residues are labeling-invariant)."""
+    counts: Dict[str, int] = {}
+    order: List[str] = []
+    for v in vals:
+        if not v:
+            continue
+        s = str(v)
+        if s not in counts:
+            order.append(s)
+        counts[s] = counts.get(s, 0) + 1
+    if not order:
+        return None
+    return max(order, key=lambda s: (counts[s], -order.index(s)))
+
+
+def pool_hypotheses_pairwise(
+    hyp_records: List[Dict],
+    node_index: Dict[int, Any],
+    per_node_dist: Dict[Any, Dict[str, float]],
+    pss_by_hyp_domain: Optional[Dict[Tuple[str, int], float]] = None,
+    scheme: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Per-side pairwise ``core_s`` over the FOP hypothesis harvest (T3c SC2b).
+
+    The real pairwise aggregation of ``path_scores.aggregate_core_side``, run over
+    the **node-deduped union** of the harvest's participating pairs — not the
+    ``p_at_least_2`` per-domain approximation of :func:`pool_hypotheses`. Needs
+    the gene's tree (``node_index``) and the focal site's posteriors
+    (``per_node_dist``), both available in ``_perms_worker``.
+
+    Args:
+        hyp_records: one dict per hypothesis for a single
+            ``(base_cycle, Position, scheme)``, each with ``hyp`` and
+            ``sides`` = ``{"top": <side_dict>, "bottom": <side_dict>}`` where a
+            ``<side_dict>`` is a ``compute_asr_path_score(native_side_split=True)``
+            side row (carries ``pair_scores`` = {pid: s_c^s}, ``pair_mrca``,
+            ``pair_der_enc``, ``pair_anc_enc``, ``conserved_pair_nodes``).
+        pss_by_hyp_domain: ``{(hyp, domain) -> pss}``; domain == pid by FOP
+            construction. ``None`` / missing → equal weight.
+
+    Returns:
+        ``{"top": <agg>, "bottom": <agg>, "n_hypotheses": n}`` — each ``<agg>``
+        the full :func:`aggregate_core_side` output for that side (its
+        ``asr_path_score`` is ``core_s``; no ``1-(1-t)(1-b)`` recombination,
+        no ``independence``/``derived_agreement`` multiplier).
+    """
+    hyps = [r for r in hyp_records if r.get("hyp")]
+    if _aggregate_core_side is None:  # pragma: no cover — import guard
+        raise RuntimeError("path_scores.aggregate_core_side unavailable")
+
+    def _side(side: str) -> Dict[str, Any]:
+        # node -> [{der_enc, anc_enc, iso, w}]  over every hypothesis that put a
+        # participating pair on that MRCA node on this side.
+        by_node: Dict[Any, List[Dict[str, Any]]] = {}
+        cons_nodes: set = set()
+        for r in hyps:
+            sd = (r.get("sides") or {}).get(side) or {}
+            iso_map = sd.get("pair_scores") or {}
+            mrca_map = sd.get("pair_mrca") or {}
+            der_map = sd.get("pair_der_enc") or {}
+            anc_map = sd.get("pair_anc_enc") or {}
+            for pid, iso in iso_map.items():
+                node = mrca_map.get(pid)
+                if node is None:
+                    continue
+                w = None
+                if pss_by_hyp_domain:
+                    w = pss_by_hyp_domain.get((r["hyp"], pid))
+                    if w is None:
+                        try:
+                            w = pss_by_hyp_domain.get((r["hyp"], int(pid)))
+                        except (TypeError, ValueError):
+                            w = None
+                by_node.setdefault(node, []).append({
+                    "der_enc": der_map.get(pid), "anc_enc": anc_map.get(pid),
+                    "iso": _num(iso), "w": w,
+                })
+            for cn in (sd.get("conserved_pair_nodes") or {}).values():
+                if cn is not None:
+                    cons_nodes.add(cn)
+
+        participants: List[Dict[str, Any]] = []
+        iso_override: Dict[Any, float] = {}
+        for node in sorted(by_node, key=str):
+            rows = by_node[node]
+            iso = _wmean([x["iso"] for x in rows], [x["w"] for x in rows])
+            der = _modal_str([x["der_enc"] for x in rows])
+            anc = _modal_str([x["anc_enc"] for x in rows])
+            if der is None or anc is None:
+                continue  # cannot score a pair without its residues
+            participants.append(
+                {"pid": node, "mrca_id": node, "der_enc": der, "anc_enc": anc}
+            )
+            iso_override[node] = 0.0 if iso is None else float(iso)
+
+        # A conserved node that also hosts a participating pair on this side is
+        # already counted as a participant — don't double it in the denominator.
+        n_conserved = len(cons_nodes - set(iso_override))
+        return _aggregate_core_side(
+            participants, n_conserved, node_index, per_node_dist, scheme,
+            iso_override=iso_override,
+        )
+
+    return {
+        "top": _side("top"),
+        "bottom": _side("bottom"),
         "n_hypotheses": len(hyps),
     }
 
