@@ -57,6 +57,7 @@ dependencies:
   - r-tidyverse      # dplyr, ggplot2, readr, stringr, tibble, tidyr, purrr, forcats
   - r-data.table
   - r-matrix
+  - r-lme4>=1.1_38   # older builds segfault against Matrix ABI v2 (pulled transitively)
   - r-reshape2
   - r-jsonlite
   - r-httr

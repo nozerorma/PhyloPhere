@@ -99,14 +99,13 @@ options(buildtools.check = function(action) TRUE)
 # 15.x build in this env) requires at least C++14 and fails compiler_check.hpp.
 # Fetch the pinned commit, bump the C++ standard, and install from the local dir.
 rer_ref <- "2bd328f7530b4aca9b48c0b3997875c9b77a7026"
-tb <- tempfile(fileext = ".tar.gz")
-utils::download.file(
-  sprintf("https://github.com/nclark-lab/RERconverge/archive/%s.tar.gz", rer_ref),
-  tb, quiet = TRUE
-)
-ex <- tempfile(); dir.create(ex)
-utils::untar(tb, exdir = ex)
-pkgdir <- list.files(ex, full.names = TRUE)[1]
+pkgdir <- tempfile("RERconverge_")
+# git clone rather than download.file: codeload.github.com tarball fetches time
+# out on some networks where the git protocol still works.
+# system2() bypasses the shell, so pass path args raw (no quoting).
+stopifnot(system2("git", c("clone", "--quiet",
+  "https://github.com/nclark-lab/RERconverge.git", pkgdir)) == 0L)
+stopifnot(system2("git", c("-C", pkgdir, "checkout", "--quiet", rer_ref)) == 0L)
 
 mv <- file.path(pkgdir, "src", "Makevars")
 for (f in c(mv, paste0(mv, ".win"))) {
