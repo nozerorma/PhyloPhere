@@ -6,379 +6,572 @@ a mano los goldens de T0. Cotejado contra
 [`path_scores.py`](../subworkflows/CT_DISAMBIGUATION/local/src/convergence/path_scores.py)
 tras T1 (`b1e8f87`) y contra `path_scores_golden.json` (12 escenarios).
 
-Coordenadas de alineamiento 0-based. `m_s` = nº de pares que cambiaron en el lado
-`s`. `enc(·)` = residuo codificado en el esquema activo (US → residuo crudo; GS →
-etiqueta de grupo).
+Coordenadas 0-based. `enc(x)` = residuo codificado en el esquema activo (US → residuo
+crudo; GS → etiqueta de grupo). `s ∈ {top, bottom}`.
 
 ---
 
-## 1. Qué cambia y por qué
+## 1. Objetivo
 
-El `core` actual (T1) se construye así, por `(Gene, Position, scheme, hypothesis)`:
+Sustituir el producto de tres factores globales de T1
 
 ```
-core_top    = P(≥2)  sobre  { s_c : c cambió en top }          # _p_at_least_2, incl-excl
-core_bottom = P(≥2)  sobre  { s_c : c cambió en bottom }
-core        = 1 − (1 − core_top)(1 − core_bottom)              # unión de lados
-asr         = independence · core · derived_agreement          # independence y da GLOBALES
+asr_path_score = independence · core · derived_agreement          (T1, por posición·esquema·hipótesis)
+core           = 1 − (1 − core_top)(1 − core_bottom)
 ```
 
-con `independence = ∏_{L ∈ LCA} (1 − P_wc(pool_derivado @ L))` un único factor global
-y `derived_agreement` la media, a nivel posición, de la concentración de residuo por
-lado.
+por **un `core` por `(Gene, Position, scheme, side)`**, construido como agregación
+**pareada** que:
 
-Problemas (numeración del roadmap):
-
-| # | Problema | Corrección en T3 |
-|---|----------|------------------|
-| 1 | Doble ponderación del paralelismo (`mrca_diversity` ya se fue en T1; queda la redundancia conceptual entre `independence` global y limpieza de camino privado) | `independence` pasa a **por lado**, sobre los LCA de los pares de ese lado |
-| 2 | `conservation_gate` solo penalizaba y vivía fuera del `core` | par conservado entra como **drag multiplicativo** dentro de la construcción de `core_s` (§5.6) |
-| 3 | Dos heurísticas paralelas (`derived_agreement` continuo vs etiquetas categóricas de `convergence.py`) | el acuerdo entra **por par** dentro de `g_c` (§5.2); `convergence_type` se deriva del numerador/denominador de acuerdo (§5.3), T4a borra la clasificación categórica |
-| 4 | `1 − (1−core_top)(1−core_bottom)` infla las posiciones que cambian en ambos lados | **desaparece**: `side` es clave de primera clase, una posición "both" son dos filas independientes `(Gene, Position, top)` y `(Gene, Position, bottom)` |
-| 5 | (models.py bloat, tests) | fuera de alcance de T3-doc |
-
-Resultado: **un `core_s` por `(Gene, Position, scheme, side)`**, que absorbe
-`independence` y el acuerdo, con los pares conservados empujando a la baja.
-`asr_path_score[·, ·, ·, s] = core_s`. No hay recombinación de lados.
+1. absorbe `independence` (entra en cada pareja, sobre su nodo de fusión concreto y
+   su residuo compartido, no como factor global);
+2. absorbe el acuerdo (entra por pareja: `agree(c,d) ∈ {0,1}`, no como media de
+   posición);
+3. contabiliza los pares conservados **en el denominador** (un diseño de `k` pares
+   donde solo `j` participan en una convergencia puntúa ~`j/k` de lo que puntuaría
+   con `k` participantes) — sin factor de descuento ni constante nueva;
+4. no recombina lados: una posición "both" son dos filas independientes.
 
 ---
 
-## 2. Primitivas reutilizadas (sin primitiva nueva)
+## 2. Qué cambia respecto a T1
 
-Todo lo que sigue se calcula con funciones que ya existen en `path_scores.py`:
+| # (roadmap) | Problema T1 | Corrección T3 |
+|---|---|---|
+| 1 | `independence` global multiplica todo el score con el pool derivado completo en cada nodo LCA | `independence` por pareja: `1 − P_wc(enc(der_c) @ LCA(c,d))` — solo el residuo compartido de esa pareja, solo su nodo de fusión |
+| 2 | `conservation_gate` (T1: ya latente) vivía fuera del `core` y solo penalizaba | par conservado = miembro con `score_c = 0` de `D_s`; entra en el denominador de la media |
+| 3 | dos heurísticas paralelas: `derived_agreement` continuo (score) vs etiquetas categóricas de `convergence.py` (`convergence_type`) | el acuerdo entra por pareja en el score; `convergence_type` se deriva de `(agree_num_s, agree_den_s)` (§7); T4a borra `convergence.py::classify_change_and_parallelism` |
+| 4 | `1 − (1−core_top)(1−core_bottom)` infla las posiciones "both" | eliminado: `side` es clave de primera clase, `"both"` → dos filas `(Gene, Position, top)` y `(Gene, Position, bottom)` |
+| 5 | `models.py` arrastra payloads muertos; sin red de tests numérica por eje | fuera de alcance de T3-doc (T4a / T0) |
 
-- `side_path_score(..., is_changed=True, stop_at_id=LCA)` → `s_c^s`, el score de
-  aislamiento del segmento privado del par `c` en el lado `s` (∏ de `1 − P_wc(derived)`
-  sobre los nodos privados). **Sin cambios.**
-- `_conserved_side_score(...)` → `cons_k`, conservación-a-raíz del par conservado `k`
-  (media de `P(ancestral)` sobre el camino MRCA→raíz). Ya se emite en
-  `conserved_pair_scores`. **Sin cambios.**
-- `worst_case_any_group_probability(dist, pool, scheme)` → `P_wc(pool @ nodo)`.
-- `find_lca`, `path_to_root_ids`, `build_node_index`.
-- `_p_at_least_2(lista)` → inclusión-exclusión exacta `P(≥2 éxitos)` sobre
-  Bernoullis independientes. **Sin cambios.**
-- `encode_aa` / `modal_encoded`.
+**Desaparecen del cálculo:** `derived_agreement` como factor global,
+`_p_at_least_2` / la descomposición `p0/p1/p≥2`, `conservation_gate`,
+`mrca_diversity`, `diversity_floor`, el factor `independence` de bloque, y
+`1 − (1−t)(1−b)`.
 
-La reescritura de T3a es de **agregación**, no de recorridos.
-
----
-
-## 3. Clave de salida
-
-`compute_asr_path_score` deja de devolver un dict plano y devuelve
-`{"top": {...}, "bottom": {...}}` (T3a). Cada sub-dict corresponde a una fila
-`(Gene, Position, scheme, side)`. Un lado sin pares cambiados devuelve el sub-dict
-con `asr_path_score = 0.0` y `n_participating = 0` (no se omite: la fontanería de
-dos filas de T3b decide si se emite o no según `change_side`).
+**Se conserva emitido** (diagnóstico / consumo aguas abajo): `concentration_s`
+(= `agree_num_s / agree_den_s`, la reencarnación por lado de `derived_agreement`),
+`conserved_pair_scores` / `conserved_pair_nodes`, `pair_ancestral` /
+`pair_derived_{top,bot}`.
 
 ---
 
-## 4. Definición: pares participantes y conservados
+## 3. Primitivas reutilizadas (sin primitiva nueva salvo noisy-OR)
 
-Para una posición, esquema y lado `s ∈ {top, bottom}`:
+- `side_path_score(..., is_changed=True, stop_at_id=…)` → `s_c^s`, aislamiento del
+  segmento privado del par `c` en el lado `s`. **Sin cambios.**
+- `worst_case_group_probability(dist, enc, scheme)` → `P_wc(enc @ nodo)`: masa
+  exacta si el residuo está registrado en el posterior; si no, el remanente no
+  registrado (`1 − Σ registrado`) como cota superior.
+- `find_lca`, `path_to_root_ids`, `build_node_index`, `encode_aa`.
+- **noisy-OR** `1 − ∏(1 − x_i)`: función nueva, trivial (§5.5).
 
-- **participantes** `P_s` = pares `c` con `enc(tip_c^s)` definido y `≠ enc(focal_state_c)`
-  (el tip de ese lado divergió del modal en el MRCA del par). Es la clasificación
-  que ya hace la Fase 1 de `compute_asr_path_score`, restringida al lado.
-- **conservados** `C` = pares en `conserved_pair` (metadata), comunes a ambos lados.
-  Un par conservado nunca está en `P_s`.
-
-`m_s = |P_s|`.
+`_p_at_least_2` deja de usarse en el observado (sigue en el null hasta T3c).
 
 ---
 
-## 5. Fórmula per-lado
+## 4. Clave de salida
 
-### 5.1. Éxito por par participante `g_c`
+`compute_asr_path_score` devuelve `{"top": {…}, "bottom": {…}}` (T3a). Cada
+sub-dict es una fila `(Gene, Position, scheme, side)`. Un lado sin pares que
+cambiaron devuelve `asr_path_score = 0.0`, `n = |D_s|`, `n_participating = 0`. La
+fontanería de T3b decide si la fila se emite (según `change_side`).
 
-Para cada `c ∈ P_s`:
+---
 
-```
-plur_s   = argmax_r |{ d ∈ P_s : enc(tip_d^s) = r }|          # residuo codificado de pluralidad
-                                                              # empate → el de mayor s_d (determinista)
-agree_c  = 1  si  enc(tip_c^s) = plur_s   ,   0  en otro caso
-g_c      = s_c^s · agree_c                                     # ∈ [0, 1]
-```
+## 5. Definición del `core` por lado
 
-`s_c^s` es el score de aislamiento privado ya calculado (`side_path_score`,
-`stop_at_id` = LCA más cercano del par en ese lado).
+Para una posición, un esquema y un lado `s`:
 
-`agree_c` es **duro (0/1) sobre residuos codificados**, no una similitud bioquímica
-continua: el esquema GS ya absorbe la bioquímica en `enc(·)`, así que dos residuos
-que co-codifican (p.ej. V/I bajo GS3) dan `agree = 1` automáticamente y bajo US
-dan `agree = 0`. Esto es coherente con la nota del docstring actual ("agreement is
-tested on the scheme-encoded residues").
-
-Consecuencia deliberada: **`m_s = 2` con residuos codificados distintos → `g` = [s₁, 0]
-→ `core_s = 0`**. Dos cambios a cosas distintas, uno cada uno, no son convergencia.
-El acantilado solo ocurre cuando genuinamente no hay dos pares que compartan residuo.
-
-### 5.2. Numerador / denominador de acuerdo (spec para T4a)
+### 5.1. `D_s` — el conjunto de pares del lado
 
 ```
-agree_den_s = m_s
-agree_num_s = |{ c ∈ P_s : enc(tip_c^s) = plur_s }|
-concentration_s = agree_num_s / agree_den_s        si m_s ≥ 1 ,  indefinido si m_s = 0
+P_s = pares que cambiaron en el lado s
+    = { par c : enc(tip_c^s) definido y ≠ enc(focal_state_c) }
+
+C   = pares conservados en metadata (fg y bg AMBOS con el residuo ancestral),
+      definidos en esta posición                                    # conserved_pair
+
+D_s = P_s ∪ C
+n   = |D_s|
 ```
 
-`concentration_s` es la reencarnación **por lado** del antiguo `derived_agreement`
-(que era la media de `concentration` sobre lados cualificados). Se emite como
-columna diagnóstica. T4a deriva de `(agree_num_s, agree_den_s)`:
+**`D_s` NO incluye** los pares que cambiaron **solo en el otro lado**: esos son
+evidencia *a favor* de la convergencia del otro lado, no *en contra* de la de `s`.
+Un par que cambió en top y no en bottom no está en `D_bottom` (salvo que sea
+conservado en metadata, que es otra cosa: fg y bg iguales).
+
+`★ Insight ─────────────────────────────────────`
+- Distinción clave: un **conservado de metadata** (fg = bg = ancestral) SÍ diluye
+  `core_s` — es un linaje con el fenotipo que no hizo la sustitución, evidencia de
+  que la sustitución no es universalmente necesaria. Un **par que cambió solo en
+  el otro lado** NO diluye `core_s` — su señal pertenece al otro lado.
+- Los lados nunca se mezclan. `D_top` y `D_bottom` se construyen y puntúan
+  independientes (decisión A del roadmap).
+`─────────────────────────────────────────────────`
+
+### 5.2. `s_c^s` — aislamiento del segmento privado (sin cambios respecto a T1)
+
+```
+L_s        = { LCA(mrca_a, mrca_b) : a, b ∈ P_s }        # puntos de fusión de los pares del lado
+stop_c     = primer nodo de path_to_root(mrca_c) que está en L_s
+s_c^s      = ∏_{k ∈ path_to_root(mrca_c), antes de stop_c} (1 − P_wc(enc(der_c^s) @ k))
+```
+
+- Segmento privado vacío (fusión de hermanos) → `s_c^s = 1.0`.
+- `path_to_root` vacío (MRCA en la raíz) → `s_c^s = EMPTY_PATH_SCORE = 0.5`.
+- Único cambio vs T1: `L_s` es **por lado** (LCAs entre pares del lado `s`), no el
+  conjunto global sobre ambos lados. Coincide con el global salvo cuando hay un
+  par de un lado cuyo MRCA induce una fusión más cercana en el camino de un par
+  del otro lado; en los 12 goldens de T0 coinciden.
+
+### 5.3. `contrib(c, d)` — fuerza de una pareja convergente
+
+Para cada pareja **no ordenada** `{c, d}` de pares que **cambiaron en `s`**
+(`c, d ∈ P_s`):
+
+```
+agree(c,d)   = 1  si  enc(der_c^s) = enc(der_d^s) ,  0  si no
+contrib(c,d) = s_c^s · s_d^s · agree(c,d) · ( 1 − P_wc(enc(der_c^s) @ LCA(mrca_c, mrca_d)) )
+```
+
+Lectura: probabilidad de que `c` y `d` formen una pareja convergente **genuina**
+(ambos cambiaron de verdad: `s_c·s_d`), **al mismo residuo** (`agree`), con el
+**ancestro compartido limpio** (`1 − P` del residuo en su nodo de fusión).
+
+`contrib(c,d) = 0` si `agree(c,d) = 0` (residuos distintos) — no se calcula el
+resto.
+
+### 5.4. `agree` duro, y de dónde sale la suavidad bioquímica
+
+`agree(c,d) ∈ {0, 1}` sobre residuos **codificados**. Dos residuos distintos bajo
+US dan `0`; dos residuos que co-codifican bajo un esquema GS dan `1`
+automáticamente.
+
+La "media tinta" para residuos distintos-pero-parecidos **no entra aquí**, entra
+en `scoring_compute.R` §2g, que promedia `caas_row` sobre los **5 esquemas**
+(US, GS4, GS3, GS2, GS1):
+
+| par `{V, L}` | US (20 grupos) | GS4 (12) | GS3 (6) | GS2 (7) | GS1 (6) |
+|--------------|------|------|------|------|------|
+| `agree` | 0 | 0 | 0 ó 1 | 1 | 1 |
+| `core_s` | 0 | 0 | … | > 0 | > 0 |
+
+`CAAS_score = mean(0, 0, …, >0, >0)` → un valor intermedio = "en cuántas de las 5
+granularidades bioquímicas V y L son la misma solución". Es una **distancia
+bioquímica discretizada** (nota de `METODOS_CT_SCORING.md` §F.3), no una constante.
+Si V y L difieren en los 5 esquemas → `mean = 0`: soluciones genuinamente
+distintas, cero convergencia.
+
+`★ Insight ─────────────────────────────────────`
+- Dentro de un esquema, `agree` es un hecho crudo: ¿misma clase o no?
+  "Convergencia" = "misma solución"; dos residuos distintos = dos soluciones = `0`
+  natural, no forzado. Añadir un `0.5` sería **añadir una regla** y premiaría la
+  labilidad de sitio (el confundente principal de la hipótesis CAAS: un sitio
+  rápido donde cada linaje hace lo suyo acumularía muchos `0.5`).
+- El gradiente bioquímico existe, cuantizado en 5 niveles, y se aplica al
+  promediar esquemas — no dentro de uno. **Requiere que los 5 esquemas se corran
+  siempre** (hoy `scoring_schemes` en §2a los corre).
+`─────────────────────────────────────────────────`
+
+### 5.5. `score_c` — la mejor evidencia de que `c` converge (noisy-OR)
+
+```
+partners(c) = { d ∈ P_s : d ≠ c , agree(c,d) = 1 }
+
+score_c = 1 − ∏_{d ∈ partners(c)} ( 1 − contrib(c,d) )        # 0 si partners(c) = ∅
+```
+
+**noisy-OR** = probabilidad de que `c` forme una pareja convergente genuina **con
+al menos uno** de sus compañeros del mismo residuo. `∏(1 − contrib)` es "ningún
+compañero convergió con `c`"; `1 −` eso, "al menos uno".
+
+| `partners(c)` | `score_c` |
+|---------------|-----------|
+| `∅` (conservado, o residuo único en el lado) | `0` |
+| `{d}` | `contrib(c,d)` — recupera el valor pareado |
+| `{d, e}`, `contrib` = 0.8, 0.8 | `1 − 0.2·0.2 = 0.96` |
+| `{d, e}`, `contrib` = 0.9, 0.1 | `1 − 0.1·0.9 = 0.91` (el fuerte manda) |
+
+Acotado en `[0,1]`, monótono (añadir compañero nunca baja `score_c`).
+
+**Alternativa (fork, §14):** `score_c = max_{d} contrib(c,d)`. Más simple; no
+premia testigos extra dentro de un grupo de residuo (`3→V` empataría con `2→V`).
+
+### 5.6. `core_s` — media sobre el diseño
+
+```
+core_s = ( Σ_{c ∈ D_s} score_c ) / n            # n = |D_s| ;  core_s = 0 si n = 0
+```
+
+Media de `score_c` sobre **todos** los pares relevantes del lado (participantes +
+conservados). Los conservados y los que cambiaron a un residuo huérfano aportan
+`score_c = 0` y engordan `n`: la media se reparte entre el diseño completo.
+
+### 5.7. Salida
+
+```
+asr_path_score[Gene, Position, scheme, side = s] = clamp01(core_s)
+```
+
+Sin `independence` de bloque, sin `derived_agreement` global, sin drag, sin
+recombinación de lados.
+
+---
+
+## 6. Racional de cada decisión
+
+### 6.1. Por qué media sobre `D_s` y no inclusión-exclusión / unión / `max` global
+
+- **Comparabilidad entre hipótesis (petición del usuario).** Una hipótesis FOP con
+  `k` pares "tiene esos `k` pares y hay que contabilizarlos". Si diseñaste 4
+  contrastes esperando convergencia y solo 2 la produjeron, tu `core` debe ser
+  ~½ del de un 4-de-4. El denominador `n = |D_s|` lo implementa. Unión / `max`
+  global ignoran los pares que no participan.
+- **Penalización lineal, no combinatoria.** Promediar `score_c` **por par** (donde
+  `score_c` ya es el noisy-OR de *sus* compañeros) mete **un** cero por par muerto.
+  Promediar sobre las `C(n,2)` parejas metería `n−1` ceros por par muerto →
+  castigo cuadrático (un conservado entre 2 cambiados → `1/6` del score). Lineal:
+  un par muerto entre `k` que convergen → factor `≈ k/(k+1)`.
+- **Multi-modal.** `AAVV` (dos convergencias, A×2 y V×2): con `agree` por pareja,
+  `{P1,P2}` y `{P3,P4}` tienen `contrib > 0`, las cruzadas `0`. Cada par encuentra
+  su compañero; `core_s` promedia las dos convergencias. Con pluralidad se perdía
+  una entera.
+
+### 6.2. Por qué noisy-OR dentro de `score_c`
+
+`c` puede tener varios compañeros del mismo residuo. `mean` de sus `contrib`
+castiga a `c` por tener un compañero débil aunque tenga uno fuerte; `sum` no está
+acotado; `max` ignora que varias parejas mediocres juntas convencen más. noisy-OR
+= "≥1 pareja genuina, y más compañeros suben la confianza", que es la semántica de
+replicación. Supuesto de independencia entre `contrib(c,d)` y `contrib(c,e)`:
+comparten `s_c` y, si `d` y `e` se fusionan con `c` en el mismo nodo, comparten
+el factor de independencia → doble conteo suave (pesimista) en topología en
+estrella. Aceptable.
+
+### 6.3. Por qué los conservados en el denominador y no un factor de descuento
+
+Un factor `∏(1 − λ_c · cons_k)` necesitaba una constante nueva `λ_c` (justo lo que
+la decisión B del roadmap prohíbe) y su magnitud dependía de combinatoria no
+controlada (un conservado se comía el 70% del score en el ejemplo de trabajo).
+`score_c = 0` en el denominador es "el par conservado sencillamente como un 0"
+(decisión C, lectura de "media ponderada"), sin parámetros, con castigo lineal y
+proporcional al peso del conservado en el diseño.
+
+### 6.4. Por qué `independence` por pareja concreta y no global
+
+En el nodo 1 (fusión de `c` y `d`, **ambos → V**) la pregunta correcta es "¿estaba
+V ya en el nodo 1?" = `P(V @ 1)`, no `P({todo el pool} @ 1)`. Que un tercer par
+`e → L` se fusione más arriba (nodo 0) es irrelevante para si `c` y `d`
+convergieron independientemente. El factor global de T1 aplicaba el pool completo
+en cada nodo LCA y arrastraba nodos ajenos a cada relación. Por pareja: `indep`
+aparece **una vez** por `{c,d}`, keyed a su nodo y su residuo → sin doble conteo,
+y la lectura de probabilidad conjunta se mantiene (segmentos privados y nodos de
+fusión son regiones disjuntas del árbol).
+
+### 6.5. Por qué `agree` duro
+
+Ver §5.4: "misma solución" es binario dentro de un esquema; el gradiente
+bioquímico lo da el promedio de los 5 esquemas en §2g; un `0.5` ad-hoc premiaría
+labilidad de sitio.
+
+---
+
+## 7. `convergence_type` desde `(agree_num_s, agree_den_s)` (spec para T4a)
+
+```
+agree_den_s = |P_s|                                             # nº de líneas que cambiaron en s
+agree_num_s = max_r |{ c ∈ P_s : enc(der_c^s) = r }|            # tamaño del mayor grupo de residuo
+concentration_s = agree_num_s / agree_den_s                     # emitido como `derived_agreement` (diagnóstico)
+```
 
 | condición | `convergence_type` (lado `s`) |
 |-----------|-------------------------------|
 | `agree_den_s ≥ 2` y `agree_num_s ≥ 2` | `convergent` |
-| `agree_den_s ≥ 2` y `agree_num_s < 2` | `divergent` |
+| `agree_den_s ≥ 2` y `agree_num_s < 2` (todas a residuos distintos) | `divergent` |
 | `agree_den_s = 1` | `single` |
 | `agree_den_s = 0` | `no_change` |
 
-(La etiqueta de "lado cambiado" del roadmap decisión B — conteo físico de pares con
-tip ≠ ancestral ≥ 2 — es exactamente `agree_den_s ≥ 2`.)
-
-### 5.3. Probabilidad de replicación `p_ge2`
-
-Inclusión-exclusión exacta sobre los `g_c` (Bernoullis independientes), **solo
-participantes**, conservados excluidos:
-
-```
-p0    = ∏_{c ∈ P_s} (1 − g_c)                                  # P(0 cambios genuinos y de acuerdo)
-p1    = Σ_{c ∈ P_s} [ g_c · ∏_{d ≠ c} (1 − g_d) ]              # P(exactamente 1)
-p_ge2 = max(0, 1 − p0 − p1)                                    # P(≥ 2)
-```
-
-- `m_s < 2` → `p_ge2 = 0` (no puede haber ≥2). Cubre `single_changed_pair`,
-  `opposite_sides_only`, y cualquier lado con un único par.
-- Es literalmente `_p_at_least_2([g_c for c in P_s])`. Sin primitiva nueva.
-- Un par conservado NO entra aquí (entraría como `g = 0`, que en `_p_at_least_2`
-  aporta factor `(1−0) = 1` a cada término: **efecto nulo**, no drag). Los
-  conservados se tratan en §5.4.
-
-### 5.4. Independencia por lado `independence_s`
-
-```
-L_s            = { LCA(a, b) : a, b ∈ MRCAs de P_s }           # puntos de fusión pareados, cada nodo una vez
-pool_derivado_s = { enc(tip_c^s) : c ∈ P_s }
-independence_s = ∏_{L ∈ L_s} (1 − P_wc(pool_derivado_s @ L))
-```
-
-Es el `independence` actual **restringido a los pares del lado** (hoy el pool y los
-LCA mezclan ambos lados). Se mantiene como **un único factor por lado**, no como
-producto por par.
-
-> **Desviación consciente de la decisión C.** La decisión C dice "`independence`
-> entra como producto sobre el/los LCA **de cada pareja concreta**". Tomado al pie
-> de la letra, cada `g_c` llevaría su propio `indep_c`, y en el término `p2` del
-> par `{A, B}` el nodo `LCA(A, B)` aparecería en `g_A` y en `g_B` → **se elevaría
-> al cuadrado**. El nodo de fusión de `{A, B}` debe contar una vez por ese par, no
-> una por cada miembro. Mantener `independence_s` como factor único sobre `L_s`
-> (cada nodo una vez) evita el doble conteo y conserva la lectura de probabilidad
-> conjunta: `p_ge2` vive en los segmentos privados (nodos disjuntos de `L_s`) e
-> `independence_s` en los de fusión, condicionalmente independientes → el producto
-> es `P(≥2 privado-limpio ∩ fusión-limpia)`. **Requiere visto bueno del usuario
-> para cerrar la decisión C con esta forma** (§12).
-
-### 5.5. Drag de pares conservados `conserved_drag_s`
-
-```
-conserved_drag_s = ∏_{k ∈ C} (1 − λ_c · cons_k)
-```
-
-`cons_k ∈ [0, 1]` = conservación-a-raíz del par `k` (`conserved_pair_scores`, ya
-calculada). `λ_c` = constante nueva en `[0, 1]`.
-
-Racional: un par conservado es un contraste fg/bg que **no** adquirió el residuo
-esperado pese al fenotipo. Es evidencia en contra de que la convergencia en los
-pares que sí cambiaron esté guiada por el fenotipo, luego descuenta.
-
-Un par conservado no puede entrar como Bernoulli en `_p_at_least_2` (§5.3): p=0
-tiene efecto nulo, no drag. Por eso entra multiplicativo, análogo al antiguo
-`conservation_gate` pero (i) por lado, (ii) construido con la primitiva pareada
-(`cons_k`), (iii) dentro de `core_s`, no bolted-on fuera.
-
-**`λ_c` — decisión abierta (§12).** Candidatos:
-
-| `λ_c` | efecto de 1 par conservado con `cons_k = 0.9`, `m_s = 2` | comentario |
-|-------|--------------------------------------------------------|------------|
-| `1.0` | `drag = 0.10` | agresivo; un conservado casi anula el lado |
-| `0.5` | `drag = 0.55` | fijo, simple |
-| `m_s / (m_s + 1)` | `m_s=2 → 2/3 → drag = 0.40` ; `m_s=5 → 5/6 → drag = 0.25` | escala con el nº de testigos que sí cambiaron; recomendado |
-
-Recomendación: **`λ_c = m_s / (m_s + 1)`** (un conservado entre muchos cambiados
-pesa poco; entre 2, pesa ~⅔). Es la lectura de "como 0 en una media ponderada" de
-la decisión C trasladada a la forma multiplicativa.
-
-### 5.6. `core_s` y `asr_path_score`
-
-```
-core_s = p_ge2 · independence_s · conserved_drag_s
-asr_path_score[Gene, Position, scheme, side=s] = clamp01(core_s)
-```
-
-Sin `derived_agreement` global (absorbido en `g_c`), sin recombinación de lados,
-sin `mrca_diversity`, sin `conservation_gate` externo.
+`AAVV` → `den = 4`, `num = 2` (max de {A:2, V:2}) → `convergent` (hay una
+convergencia de ≥2 vías). La etiqueta es el **conteo físico** de la decisión B
+(sin umbral de probabilidad, sin parámetro), y **no entra en el score continuo**.
 
 ---
 
-## 6. Comportamiento con `n`
+## 8. Comportamiento con `n` y multi-modal
 
-`p_ge2` sobre `_p_at_least_2` es **monótona creciente en el nº de participantes de
-buena calidad**: cada par adicional con `g_c` alto sube `P(≥2)`. Esto es
-"replicación como existencia de ≥2 testigos", no "calidad media" — es lo correcto
-para un score de replicación y coincide con la semántica actual.
-
-No infla con `n` de baja calidad: `_p_at_least_2` es lineal en cada `g_c`, no
-cuadrática en `C(n,2)`. Un par que discrepa de la pluralidad entra con `g_c = 0` y
-no cuenta.
-
-Se descartaron:
-
-- **unión sobre contribuciones pareadas** `1 − ∏_{A<B}(1 − contrib(A,B))`: el
-  exponente crece `C(n,2)`, satura demasiado rápido, sobre-pondera `n`.
-- **media sobre contribuciones pareadas**: pierde la monotonía en testigos (3
-  pares al 90% dan 0.81 en vez de subir), y no es una probabilidad de conteo, así
-  que la descomposición `p0/p1/p≥2` (necesaria para T4a) no sale de forma natural.
+- **`< 2` pares con residuo compartido en el lado** → todos los `score_c = 0` →
+  `core_s = 0`. El gate "≥2" del roadmap emerge, no se codifica aparte.
+- **`k` pares, todos al mismo residuo, limpios** (`contrib ≈ c`): `score_c =
+  1 − (1−c)^{k−1}` (noisy-OR de `k−1` compañeros) → sube con `k`. `core_s ≈` ese
+  valor. Un 4-de-4 supera a un 2-de-2. Con `max` empatarían (fork §14).
+- **`k` participan de un diseño de `n > k`** (resto conservado o huérfano):
+  `core_s ≈ [convergencia] · k/n`. Comparabilidad lineal.
+- **multi-modal `A×j / V×l`**: cada grupo de residuo se auto-empareja; `core_s`
+  promedia `score_c` de los `j + l` participantes (los de cada grupo con su
+  noisy-OR interno) sobre `n`. Ninguna convergencia se pierde.
 
 ---
 
-## 7. Casos borde
+## 9. Casos borde
 
 | caso | resultado |
 |------|-----------|
-| `m_s = 0` | `asr[·, s] = 0`, `n_participating = 0` |
-| `m_s = 1` | `p_ge2 = 0` → `asr[·, s] = 0` |
-| `m_s ≥ 2`, residuos codificados todos distintos | `plur_s` gana con 1; todos menos uno `agree = 0` → como mucho un `g_c > 0` → `p_ge2 = 0` |
-| MRCA en la raíz (camino privado vacío) | `s_c^s = EMPTY_PATH_SCORE = 0.5` (sin cambios) |
-| fusión de hermanos (segmento privado vacío) | `s_c^s = 1.0` (sin cambios) |
-| `L_s = ∅` (p.ej. `m_s = 1`, ya cae por `p_ge2 = 0`) | `independence_s = 1` (producto vacío) |
-| `C = ∅` | `conserved_drag_s = 1` |
+| `P_s = ∅` y `C = ∅` | `n = 0` → `core_s = 0` |
+| `P_s = {c}`, sin compañero de residuo | `score_c = 0` → `core_s = 0` |
+| `P_s = {c, d}`, `enc(der_c) ≠ enc(der_d)` | ambos `score = 0` → `core_s = 0` (acantilado deliberado: dos soluciones distintas ≠ convergencia; gradiente vía §2g) |
+| MRCA en la raíz | `s_c^s = 0.5` |
+| fusión de hermanos | `s_c^s = 1.0` |
+| `LCA(c,d)` = raíz o nodo sin posterior | `P_wc = 0` → factor `1.0` (o `EMPTY` si procede) |
+| par conservado de metadata | en `D_s`, `score = 0`, cuenta en `n` |
+| par que cambió solo en el otro lado | **no** en `D_s` |
 
 ---
 
-## 8. Recálculo de los 12 goldens de T0
+## 10. Recálculo de los 12 goldens de T0
 
-`independence_s` y `s_c^s` se leen de los valores actuales del golden (los
-recorridos no cambian). `da` global se elimina; entra `agree_c` por par.
-Escenarios todos con pares en `top` salvo donde se indica.
+`s_c^s` e `indep` se leen de los valores actuales del golden (los walks no
+cambian). Todos los escenarios tienen los pares cambiados en `top` salvo donde se
+indica.
 
-| escenario | `P_top` `g_c` | `p_ge2` | `ind_top` | `drag` | **`core_top` (nuevo)** | `asr` T1 | Δ |
-|-----------|---------------|---------|-----------|--------|------------------------|----------|---|
-| `single_changed_pair` | [0.857·1] | 0 (m<2) | — | 1 | **0** | 0 | = |
-| `two_same_side_converge` | [0.902, 0.902] | 0.8145 | 0.95 | 1 | **0.7738** | 0.7738 | = |
-| `opposite_sides_only` | top [0.902], bottom [0.902] | 0 / 0 | — | 1 | **top 0, bottom 0** | 0 | = (ahora 2 filas) |
-| `pair_changes_both_sides` | top [0.902, 0.902], bottom [0.902] | 0.8145 / 0 | 0.95 / — | 1 | **top 0.7738, bottom 0** | 0.7738 | schema: 2 filas; `.pool_bottom` deja de recibir 0.7738 (H5) |
-| `with_conserved_pair` | [0.902, 0.902], `C={3}` `cons₃≈?` | 0.8145 | 0.95 | `1 − λ_c·cons₃` | **0.7738 · drag** | 0.7738 | ↓ por el conservado (magnitud según `λ_c`, `cons₃`) |
-| `contaminated_hop1` | [0.285, 0.902] | 0.2572 | 0.95 | 1 | **0.2444** | 0.2444 | = |
-| `n_gt_2_mixed_residues` | V,V,V,T → `g` = [0.902, 1.0, 1.0, 0] | 1.0 | 0.81 | 1 | **0.81** | 0.6075 | ↑ el par discrepante (→T) se excluye en vez de arrastrar una media a 0.75 |
-| `gs3_coencoded_agreement` | V,I co-codifican bajo GS3 → `agree` = [1, 1] → `g` = [0.902, 0.902] | 0.8145 | 0.95 | 1 | **0.7738** | 0.7738 | = |
-| `mrca_at_root` | [0.5, 0.5] | 0.25 | 0.95 | 1 | **0.2375** | 0.2375 | = |
-| `sibling_merge` | [1.0, 1.0] | 1.0 | 0.95 | 1 | **0.95** | 0.95 | = |
-| `no_changed_pairs` | ∅ | 0 | — | 1 | **0** | 0 | = |
-| `soft_posteriors_midrange` | [0.49, 0.49] | 0.2401 | 0.70 | 1 | **0.1681** | 0.1681 | = |
+| escenario | `D_top` (`n`) | `contrib` / `score_c` | **`core_top` nuevo** | `asr` T1 | Δ |
+|-----------|---------------|-----------------------|----------------------|----------|---|
+| `single_changed_pair` | {P1} (1) | `score_P1 = 0` (sin compañero) | **0** | 0 | = |
+| `two_same_side_converge` | {P1,P2} (2) | `contrib(P1,P2)=0.9025·0.9025·1·0.95=0.7738`; `score` ambos `0.7738` | **0.7738** | 0.7738 | = |
+| `opposite_sides_only` | top {P1} (1), bot {P2} (1) | `score = 0` en cada lado | **top 0 / bot 0** | 0 | = (2 filas) |
+| `pair_changes_both_sides` | top {P1,P2} (2), bot {P1} (1) | top: `contrib=0.7738`; bot: `score_P1=0` | **top 0.7738 / bot 0** | 0.7738 | schema; `.pool_bottom` deja de recibir 0.7738 (H5) |
+| `with_conserved_pair` | {P1,P2,**K3**} (**3**) | `score_P1=score_P2=0.7738`, `score_K3=0` | **`1.5476/3 = 0.5159`** | 0.7738 | **↓** conservado en el denominador (2 de 3) |
+| `contaminated_hop1` | {P1,P2} (2) | `contrib=0.285·0.9025·1·0.95=0.2444` | **0.2444** | 0.2444 | = |
+| `n_gt_2_mixed_residues` | {P1,P2,P3(→V), **P4(→T)**} (**4**) | `contrib(P1,P2)=0.857`, `(P1,P3)=0.857`, `(P2,P3)=0.95`; `score_{P1,P2,P3}≈{0.980, 0.993, 0.993}`, `score_P4=0` | **`2.965/4 = 0.741`** | 0.6075 | **↑** convergencia V fuerte; el par→T solo mete un 0 (no arrastra una media a 0.75) |
+| `gs3_coencoded_agreement` | {P1,P2} (2) | V,I co-encode bajo GS3 → `agree=1` → `contrib=0.7738` | **0.7738** | 0.7738 | = |
+| `mrca_at_root` | {P1,P2} (2) | `s_c=0.5` cada; `contrib=0.5·0.5·1·0.95=0.2375` | **0.2375** | 0.2375 | = |
+| `sibling_merge` | {P1,P2} (2) | `s_c=1.0`; `contrib=1·1·1·0.95=0.95` | **0.95** | 0.95 | = |
+| `no_changed_pairs` | ∅ (0) | — | **0** | 0 | = |
+| `soft_posteriors_midrange` | {P1,P2} (2) | `contrib=0.49·0.49·1·0.70=0.1681` | **0.1681** | 0.1681 | = |
 
-**Se mueven solo 2 valores** (`n_gt_2_mixed_residues` sube, `with_conserved_pair`
-baja) más el cambio de cardinalidad de las posiciones "both". Todos los demás
-goldens son **idénticos** porque, para `n = 2` con residuo unánime y camino limpio,
-`asr_T1 = (s_A·s_B) · independence · 1 = p_ge2 · independence_s · 1 = core_s`.
+**10 de 12 idénticos.** Se mueven `with_conserved_pair` (↓: el conservado ahora
+cuenta) y `n_gt_2_mixed_residues` (↑: la convergencia mayoritaria deja de ser
+castigada por una `derived_agreement` de posición). **Cero constantes nuevas.**
 
-Nota: `_p_at_least_2([p, q]) = p·q` exacto para `n = 2` (≥2 de 2 = ambos), así que
-el `core` de T1 para `n = 2` ya era `s_A·s_B`.
+Razón de que los `n = 2` no se muevan: `contrib(P1,P2) = s_A·s_B·1·(1 − P(V@LCA))`
+es exactamente `core_T1 · independence_T1 · da_T1` cuando hay un solo par de
+pares, un solo nodo LCA y residuo unánime — que es la estructura de esos goldens.
 
-### Golden nuevo que T3a debe añadir
+### Golden nuevo para T3a — `both_sides_two_rows`
 
-`gen_golden.py` gana un escenario `both_sides_two_rows`: una posición con pares
-`{1: top→V, bottom→V}` y `{2: top→V}` y `{3: bottom→V}` → fila `top` con
-`P_top = {1, 2}` (`core_top > 0`) y fila `bottom` con `P_bottom = {1, 3}`
-(`core_bottom > 0`), dos filas con scores independientes. Congela el fin de
-`1 − (1−t)(1−b)`.
+Diseño: `pair 1: top→V, bottom→L`; `pair 2: top→V`; `pair 3: bottom→L`. Árbol con
+3 MRCAs en subclados separados.
+
+- `D_top = {P1, P2}` (`n=2`), ambos → V → `core_top = contrib(P1,P2) > 0`.
+- `D_bottom = {P1, P3}` (`n=2`), ambos → L → `core_bottom = contrib(P1,P3) > 0`.
+
+Dos filas con scores **positivos e independientes**. Congela el fin de
+`1 − (1−t)(1−b)` (T1 habría dado un único `core` combinado). `gen_golden.py`
+fija los números exactos en T3a.
 
 ---
 
-## 9. Deltas esperados a nivel `position_scores.tsv` / `gene_scores.tsv`
+## 11. Deltas esperados en `position_scores.tsv` / `gene_scores.tsv`
 
 1. **Posiciones "both" → 2 filas.** `n_distinct(Gene, Position)` no cambia;
-   `nrow(position_scores)` sube por cada posición "both". Downstream que agrupa por
-   `(Gene, Position, side)` (ya preparado en T2a) lo absorbe.
-2. **`n_gt_2` y análogos suben.** Un residuo minoritario deja de castigar una
-   convergencia mayoritaria real. Efecto: cola alta de `CAAS_score` un poco más
-   poblada.
-3. **Posiciones con par conservado bajan.** Nuevo drag. Magnitud a fijar con `λ_c`.
-4. **`.pool_bottom` / `.pool_top` cambian de composición (hazard H5).** Ver §10.
+   `nrow(position_scores)` sube. Downstream ya agrupa por `(Gene, Position, side)`
+   desde T2a.
+2. **Posiciones con par conservado bajan.** Ahora cuenta en el denominador. Baja
+   proporcional al peso del conservado en el diseño (lineal).
+3. **Posiciones con un residuo minoritario suben un poco.** El minoritario mete un
+   `0` en vez de arrastrar una media de posición (`derived_agreement`) a la baja.
+4. **`.pool_bottom` / `.pool_top` cambian de composición (hazard H5).** Ver §12.
 
-El punto de la validación Tier 1 (PEPC en Marvin2) al cerrar T3d es que estos
-cuatro deltas aparezcan **en la dirección prevista** y ningún otro.
-
----
-
-## 10. Decisión de pooling — nivel lado vs nivel posición (roadmap bullet 7, H5)
-
-Tras el split, `pos_scores` tiene una fila por `(Gene, Position, side)` con su
-`CAAS_score` (media sobre esquemas de `core_s`). Para `gene_caas_score` /
-`.pool_all` / `.pool_top` / `.pool_bottom`:
-
-- **Nivel lado (recomendado).**
-  - `.pool_top` = `CAAS_score` de las filas `side == "top"`.
-  - `.pool_bottom` = `CAAS_score` de las filas `side == "bottom"`.
-  - `.pool_all` = todas las filas-lado. Una posición "both" aporta **2 entradas**
-    (una por dirección), porque tiene dos piezas independientes de evidencia
-    direccional.
-  - `size_adj_max` (`F(max)^n`): `n` = nº de filas-lado del gen. Premia a un gen
-    con muchos eventos de convergencia direccional, que es la intención.
-- **Nivel posición (dedup).** Colapsar las 2 filas-lado a 1 por `(Gene, Position)`
-  (max o media) antes de poolear. Reintroduce el colapso que T3 elimina; solo si
-  la validación muestra que el nivel lado infla `gene_caas_score`.
-
-**Hazard H5 explícito.** Hoy una posición "both" fuerte-en-conjunto pero débil en
-`bottom` entra en `.pool_bottom` con su score combinado (fuerte). Con nivel lado
-entra con su `core_bottom` (débil). Los rankings genome-wide se mueven; es la
-corrección buscada (evidencia unidireccional o de un lado débil deja de hacerse
-pasar por bidireccional). Va al changelog, no es regresión.
-
-`.pool_all` "top/bottom/all" del modo de acumulación (`change_side != 'none'` etc.)
-se simplifica a `side %in% c("top")` / `c("bottom")` / todas — filtro directo sin
-`c(dir, "both")` (previsto en T3d §4a).
+La validación Tier 1 (PEPC en Marvin2) al cerrar T3d comprueba que estos 4 deltas
+aparecen **en la dirección prevista** y ningún otro.
 
 ---
 
-## 11. Columnas emitidas por `(Gene, Position, scheme, side)` (T3a/b)
+## 12. Pooling — nivel lado (roadmap bullet 7, H5)
+
+`pos_scores` tiene una fila por `(Gene, Position, side)` con `CAAS_score` = media
+sobre esquemas de `core_s`.
+
+- `.pool_top` ← filas `side == "top"`; `.pool_bottom` ← `side == "bottom"`;
+  `.pool_all` ← todas las filas-lado (una posición "both" aporta **2 entradas**).
+- `size_adj_max` = `F(max)^n`: `n` = nº de filas-lado del gen. Premia genes con
+  muchos eventos de convergencia direccional.
+- Modo acumulación "top/bottom/all": filtro directo `side %in% c("top")` /
+  `c("bottom")` / todas — sin `c(dir, "both")` (simplificación prevista T3d §4a).
+
+**Hazard H5.** En T1 una posición "both" fuerte-en-conjunto pero débil en un lado
+entraba en `.pool_<ese lado>` con su score combinado. Con nivel lado entra con su
+`core_<lado>` real. Los rankings genome-wide se mueven: es la corrección buscada
+(evidencia de un solo lado o de un lado débil deja de hacerse pasar por
+bidireccional). Changelog, no regresión.
+
+---
+
+## 13. Columnas emitidas por `(Gene, Position, scheme, side)` (T3a/b)
 
 | columna | contenido |
 |---------|-----------|
 | `asr_path_score` | `core_s` |
-| `core` | alias de `asr_path_score` (compat; `core_top`/`core_bottom` como columnas separadas se van con las filas) |
-| `p_ge2` | `P(≥2)` sobre `g_c` (diagnóstico) |
-| `independence` | `independence_s` (diagnóstico) |
-| `conserved_drag` | `conserved_drag_s` (diagnóstico) |
-| `derived_agreement` | `concentration_s` (diagnóstico; num/den del acuerdo) |
-| `agree_num`, `agree_den` | numerador/denominador (T4a `convergence_type`) |
-| `convergence_type` | derivado de `(agree_num, agree_den)` per §5.3 (T4a) |
+| `core` | alias de `asr_path_score` (compat) |
+| `n_pairs_side` | `n = |D_s|` |
+| `n_participating` | `|P_s|` |
+| `n_conserved` | `|C|` |
+| `derived_agreement` | `concentration_s = agree_num_s / agree_den_s` (diagnóstico; num/den para T4a) |
+| `agree_num`, `agree_den` | enteros (T4a `convergence_type`) |
+| `convergence_type` | derivado per §7 (T4a) |
 | `side` | `top` / `bottom` (clave, ya en T2a) |
-| `n_participating` | `m_s` |
-| `pair_scores` / `pair_top_scores` / `pair_bottom_scores` | `{pid: s_c}` del lado |
-| `conserved_pair_scores` / `conserved_pair_nodes` | sin cambios (latente → ahora consumido por `conserved_drag_s`) |
+| `pair_scores` / `pair_top_scores` / `pair_bottom_scores` | `{pid: s_c^s}` del lado |
+| `pair_partner_scores` | `{pid: score_c}` (diagnóstico) |
+| `conserved_pair_scores` / `conserved_pair_nodes` | sin cambios (latente; ya no multiplican, solo informan) |
 | `pair_ancestral` / `pair_derived_{top,bot}` | sin cambios (pooler FOP) |
 
-Se eliminan del dict de retorno: `replication` (= `p_ge2 · independence_s`, se puede
-recomponer), el `core` escalar único combinado de lados.
+Se eliminan del dict de retorno: `replication`, `independence` (de bloque),
+`mrca_diversity`, `conservation_gate`, el `core` escalar combinado de lados.
 
 ---
 
-## 12. Forks abiertos — a cerrar antes de T3a
+## 14. Forks abiertos — a cerrar antes de T3a
 
-1. **`independence` por lado como factor único sobre `L_s`** (§5.4), en vez del
-   "producto por pareja concreta" literal de la decisión C. Recomiendo cerrar la
-   decisión C con la forma de factor único (evita el doble conteo del nodo de
-   fusión). **Necesita OK.**
-2. **`λ_c`** del drag de conservados (§5.5). Recomiendo `λ_c = m_s / (m_s + 1)`.
-   Alternativas: `1.0`, `0.5`. **Necesita elección.**
-3. **`agree_c` duro 0/1 sobre residuo codificado** (§5.1), con el acantilado
-   `m_s = 2` residuos distintos → `core_s = 0`. Recomiendo mantenerlo (coherente
-   con "GS encoding handles biochemistry"). Alternativa: `agree_c = concentration_s`
-   (suave, mismo valor para todos los pares del lado) — reintroduciría una media.
-   **Confirmar.**
-4. **Pooling nivel lado** (§10). Recomiendo nivel lado. **Confirmar antes de T3d.**
-5. **Golden `both_sides_two_rows`** (§8): confirmar el diseño del escenario antes
-   de regenerar `path_scores_golden.json` en T3a.
+| # | fork | recomendación |
+|---|------|---------------|
+| 1 | `score_c` = **noisy-OR** (§5.5) vs `max` | noisy-OR (premia testigos extra dentro de un grupo de residuo) |
+| 2 | `both_sides_two_rows` golden — diseño exacto del escenario (§10) | confirmar árbol y residuos antes de regenerar `path_scores_golden.json` |
+| 3 | Pooling nivel lado (§12) — confirmar antes de T3d | nivel lado |
 
-Cerrados esos cinco puntos, T3a reescribe la sección de agregación de
-`compute_asr_path_score` (retorno `{"top": ..., "bottom": ...}`) y `gen_golden.py`
-regenera los 12 + 1 goldens; el diff debe coincidir con la columna "nuevo" de §8.
+Confirmados en la discusión de diseño (no relitigar): `independence` por pareja
+(§6.4); `agree` duro con gradiente vía §2g (§5.4); `D_s` = participantes ∪
+conservados-metadata, sin los que cambiaron solo en el otro lado (§5.1); lados
+siempre separados; sin factor de drag ni constante nueva (§6.3).
+
+Cerrados esos 3 puntos, T3a reescribe la sección de agregación de
+`compute_asr_path_score` (retorno `{"top": …, "bottom": …}`) y `gen_golden.py`
+regenera los 12 + 1 goldens; el diff debe coincidir con la columna "nuevo" de §10.
+
+---
+
+## Apéndice — walkthrough completo
+
+Un ejemplo que ejerce cada pieza, calculado nodo a nodo.
+
+### A.1. Árbol y entradas
+
+```
+                          root (0)
+                    ┌────────┴────────┐
+                  (1)                 (2)
+             ┌─────┴─────┐       ┌─────┴─────┐
+           (10)        (11)    (20)        (21)
+           ┌─┴─┐       ┌─┴─┐   ┌─┴─┐       ┌─┴─┐
+          3   4       5   6   7   8       9   12
+        MRCA P1     MRCA P2  MRCA P3     MRCA P4
+```
+
+`path_to_root`: P1(3)=`[10,1,0]`, P2(5)=`[11,1,0]`, P3(7)=`[20,2,0]`, P4(9)=`[21,2,0]`.
+
+`focal_state = A` para los 4. Esquema **US**.
+
+| par | `top_tip` | `bottom_tip` | qué es |
+|-----|-----------|--------------|--------|
+| P1 | V | A | cambió solo en top, a V |
+| P2 | V | V | cambió en top y bottom, a V |
+| P3 | L | A | cambió solo en top, a **L** (discrepa) |
+| P4 | A | A | **conservado** (metadata) |
+
+Posteriores del sitio:
+
+| nodo | posterior |
+|------|-----------|
+| 0 | `{A:.90, V:.05, L:.05}` |
+| 1 | `{A:.80, V:.15, L:.05}` |
+| 2 | `{A:.90, V:.05, L:.05}` |
+| 10 | `{A:.70, V:.30}` |
+| 11 | `{A:.95, V:.05}` |
+| 20 | `{A:.90, L:.10}` |
+| 21 | `{A:.98, V:.02}` |
+
+### A.2. Lado TOP
+
+**`D_top`** = `P_top ∪ C` = `{P1, P2, P3}` ∪ `{P4}` = **`{P1, P2, P3, P4}`**, `n = 4`.
+
+**`L_top`** = LCAs entre `{3, 5, 7}`: `LCA(3,5)=1`, `LCA(3,7)=0`, `LCA(5,7)=0` →
+**`{1, 0}`**.
+
+**Walks privados `s_c^top`:**
+
+| par | camino | `stop` (∈ `L_top`) | nodos caminados | factores | `s_c^top` |
+|-----|--------|--------------------|-----------------|----------|-----------|
+| P1 | `[10,1,0]` | 1 | `[10]` | `1−P_wc(V@10)=1−.30=.70` | **0.70** |
+| P2 | `[11,1,0]` | 1 | `[11]` | `1−.05=.95` | **0.95** |
+| P3 | `[20,2,0]` | 0 | `[20,2]` | `(1−P_wc(L@20)=.90)·(1−P_wc(L@2)=.95)` | **0.855** |
+
+**Acuerdo:** P1–P2 (V,V)→1 · P1–P3 (V,L)→0 · P2–P3 (V,L)→0.
+
+**`contrib`:**
+
+```
+contrib(P1,P2) = 0.70 · 0.95 · 1 · (1 − P_wc(V @ LCA(3,5)=1))
+              = 0.70 · 0.95 · 1 · (1 − 0.15)
+              = 0.665 · 0.85 = 0.565
+contrib(P1,P3) = 0        (agree 0)
+contrib(P2,P3) = 0
+```
+
+**`score_c`:**
+
+```
+score_P1 = 1 − (1 − contrib(P1,P2)) = 0.565            partners(P1) = {P2}
+score_P2 = 1 − (1 − contrib(P1,P2)) = 0.565            partners(P2) = {P1}
+score_P3 = 0                                           partners(P3) = ∅  (residuo L huérfano)
+score_P4 = 0                                           partners(P4) = ∅  (conservado)
+```
+
+**`core_top`:**
+
+```
+core_top = (0.565 + 0.565 + 0 + 0) / 4 = 1.130 / 4 = 0.2825
+```
+
+### A.3. Lado BOTTOM
+
+**`D_bottom`** = `{P2}` ∪ `{P4}` = `{P2, P4}`, `n = 2`.
+`partners(P2) = ∅` (ningún otro par cambió en bottom) → `score_P2 = 0`.
+`score_P4 = 0`.
+
+```
+core_bottom = (0 + 0) / 2 = 0
+```
+
+### A.4. Resultado y comparación con T1
+
+| | T1 (una fila) | T3 |
+|---|---------------|-----|
+| filas | 1 | 2 |
+| score | **0.451** | top **0.2825**, bottom **0** |
+
+Descomposición de la diferencia en top (`0.565` de convergencia P1–P2, diluido):
+
+```
+convergencia P1–P2 pura:                      0.565
+· (2 de 4 pares del diseño participan):        · 0.5    →  0.2825
+   ├─ P3 cambió, pero a L (huérfano)  → score 0, en el denominador
+   └─ P4 conservado                   → score 0, en el denominador
+```
+
+T1 daba `0.451` porque: (a) ignoraba P4 por completo; (b) penalizaba P3 con una
+`derived_agreement = 2/3` de posición en vez de un `0` en el denominador; (c) su
+`independence` global `0.72` metía el nodo 0 y el pool `{V,L}` en la relación
+P1–P2, que aquí solo debería ver `P(V @ nodo 1) = 0.15`.
+
+### A.5. Variantes (para intuición)
+
+- **P3 también → V** (`P_top = {P1,P2,P3}` todos V, P4 conservado, `n = 4`):
+  `contrib(P1,P2)=0.565`, `contrib(P1,P3)` y `contrib(P2,P3)` con sus LCAs;
+  `score_P1 = 1−(1−contrib(P1,P2))(1−contrib(P1,P3))` (noisy-OR de 2 compañeros) →
+  sube. `core_top = (score_P1+score_P2+score_P3+0)/4`. Más testigos → cada
+  `score_c` sube; el conservado sigue diluyendo por `1/4`.
+- **`AAVV`** (P1,P2→A, P3,P4→V, sin conservados, `n = 4`): `{P1,P2}` y `{P3,P4}`
+  con `contrib > 0`, cruzadas `0`. `score` de los 4 = su `contrib` intra-grupo.
+  `core_top = (c_AA + c_AA + c_VV + c_VV)/4` — las **dos** convergencias contadas.
+- **Comparabilidad**: hipótesis X = `{P1,P2→V}` (`n=2`) da `core = contrib`;
+  hipótesis Y = `{P1,P2→V, K3,K4 conservados}` (`n=4`) da `core = contrib/2`.
+  Mitad de contrastes efectivos → mitad de score.
