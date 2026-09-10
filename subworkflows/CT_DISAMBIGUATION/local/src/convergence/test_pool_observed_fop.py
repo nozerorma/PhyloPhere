@@ -74,8 +74,6 @@ def _cr(hyp, side, split, pairs):
         caap_group="US", hypothesis=hyp, position_one_based=6,
         pair_details=pairs, side=side,
         asr_path_score=sd.get("asr_path_score", 0.0), core=sd.get("core", 0.0),
-        change_top="convergent" if side == "top" else "no_change",
-        change_bottom="convergent" if side == "bottom" else "no_change",
     )
 
 

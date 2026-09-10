@@ -31,21 +31,13 @@ Data Contracts
 - **PairDetail**: TypedDict for tip-level pair data (pair_id, focal_state, tip residues)
 - **NodeStates**: Dataclass container for key phylogenetic node states
 
-Usage Example
--------------
-::
-
-    from src.convergence.convergence import classify_change_and_parallelism
-
-    pair_details = [
-        {'pair_id': 'pair_1', 'focal_state': 'A',
-         'top_tip_mode': 'V', 'bottom_tip_mode': 'V'},
-        {'pair_id': 'pair_2', 'focal_state': 'A',
-         'top_tip_mode': 'V', 'bottom_tip_mode': 'V'}
-    ]
-    result = classify_change_and_parallelism(pair_details, convergence_mode='focal_clade')
-    print(result['convergence_type'])  # 'convergent_top'
-    print(result['change_top'])    # 'convergent'
+Note
+----
+The categorical ``classify_change_and_parallelism`` classifier was retired in
+scoring_v2 T4a. ``convergence_type`` and the first-class ``side`` key are now
+derived from ``compute_asr_path_score`` (see ``path_scores.py`` and
+``disambiguate_single._split_result_by_side``). This module keeps only the
+tip-residue / node-state collection helpers.
 
 Author
 ------

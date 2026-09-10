@@ -177,14 +177,9 @@ def convert_convergence_result_to_dict(
     # Pattern classification
     result_dict["convergence_type"] = getattr(result, "convergence_type", None)
 
-    # Change tracking
-    result_dict["change_top"] = getattr(result, "change_top", "no_change")
-    result_dict["change_bottom"] = getattr(result, "change_bottom", "no_change")
-    result_dict["change_side"] = getattr(result, "change_side", "none")
-    # T2a: first-class direction key; passthrough alias of change_side.
-    result_dict["side"] = getattr(
-        result, "side", getattr(result, "change_side", "none")
-    )
+    # First-class direction key (top / bottom / none). T4b retired the
+    # change_top/change_bottom/change_side triplet.
+    result_dict["side"] = getattr(result, "side", "none")
 
     # ASR path score (unified ASR/convergence/parallel signal) + per-pair detail
     result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)
@@ -1317,8 +1312,6 @@ def _perms_worker(
         # asr = that side's core_s); a one-sided position one record; no
         # participant one `side="none"` row. The FOP branch below pools the
         # harvest per side FIRST (pool_hypotheses_pairwise), then expands.
-        # change_top/change_bottom are derived from `side` in _expand_sides so
-        # the ct/cb detail columns downstream keep working (T4b drops them).
         _nss_node_index = None
 
         def _nss_per_node_dist(pos0: int):
@@ -1343,8 +1336,6 @@ def _perms_worker(
                 out.append(_PA(
                     position=pos, caap_group=grp,
                     asr_path_score=float(sd.get("asr_path_score", 0.0) or 0.0),
-                    change_top="convergent" if s == "top" else "no_change",
-                    change_bottom="convergent" if s == "bottom" else "no_change",
                     side=s, hypothesis=hyp_label, pair_scores=sd.get("pair_scores"),
                     core=sd.get("core"), derived_agreement=sd.get("derived_agreement"),
                     conserved_pair_scores=sd.get("conserved_pair_scores") or None,
@@ -1355,7 +1346,6 @@ def _perms_worker(
             if not out:
                 out.append(_PA(
                     position=pos, caap_group=grp, asr_path_score=0.0,
-                    change_top="no_change", change_bottom="no_change",
                     side="none", hypothesis=hyp_label,
                 ))
             return out
@@ -1489,10 +1479,9 @@ def _perms_worker(
         # cannot be formed at this level. The parent finalizes it in pass B
         # (see _finalize_perm_scores) once every gene's rows have been counted.
         #
-        # change_top/change_bottom are emitted per scheme row as 0/1 and OR-ed
-        # across a position's schemes in pass B to derive change_side: a position
-        # counts as "top" if ANY of its schemes changed on the top side, "bottom"
-        # likewise, "both" when both hold, "none" otherwise.
+        # Each record is already per-side by the time it reaches here (a "both"
+        # position is two records, each with its own `side` and core_s), so the
+        # detail shard carries `side` directly — no OR-across-schemes step.
         # ── CT_POSTPROC cluster filter (Gap B) ────────────────────────────────
         # Per (base cycle, caap_group) run ctrain over this gene's detected
         # positions, verbatim to filter_caas_clusters-param.py. The `clust` flag

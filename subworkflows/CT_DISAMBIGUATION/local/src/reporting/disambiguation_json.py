@@ -146,11 +146,9 @@ def extract_convergence_summary(
         "amino_encoded": result_dict.get("amino_encoded", ""),
         "is_conserved_meta": bool(result_dict.get("is_conserved_meta", False)),
         "conserved_pair": result_dict.get("conserved_pair", ""),
-        "change_top": result_dict.get("change_top", "no_change"),
-        "change_bottom": result_dict.get("change_bottom", "no_change"),
-        "change_side": result_dict.get("change_side", "none"),
-        # T2a: first-class direction key (passthrough alias of change_side).
-        "side": result_dict.get("side", result_dict.get("change_side", "none")),
+        # First-class direction key (top / bottom / none). T4b retired the
+        # change_top/change_bottom/change_side triplet.
+        "side": result_dict.get("side", "none"),
     }
 
     summary["pairs"] = extract_pair_info(result_dict, num_pairs)

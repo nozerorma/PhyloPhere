@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 # a drop-in for a ConvergenceResult on that path.
 PositionAxes = namedtuple(
     "PositionAxes",
-    ["position", "caap_group", "asr_path_score", "change_top", "change_bottom",
+    ["position", "caap_group", "asr_path_score",
      "side",
      "hypothesis", "pair_scores", "independence",
      "derived_agreement", "core",
@@ -56,8 +56,8 @@ PositionAxes = namedtuple(
      "pair_top_scores", "pair_bottom_scores",
      "sides"],
 )
-# All fields after `change_bottom` are optional. Single-contrast perm replay
-# leaves `hypothesis` None and the FOP axis fields None.
+# All fields after `side` are optional. Single-contrast perm replay leaves
+# `hypothesis` None and the FOP axis fields None.
 # `sides` (scoring_v2 T3c SC2b): the raw ``compute_asr_path_score`` return
 # ``{"top": <row>, "bottom": <row>}`` for the FOP null's per-side pairwise pooler
 # (``fop_pool.pool_hypotheses_pairwise``) and ``gene_wrapper._expand_sides``.
@@ -67,19 +67,6 @@ PositionAxes.__new__.__defaults__ = (
     None, None, None, None, None, None, None, None, None, None, None, None,
     None,
 )
-
-
-def _side_change_labels(s: str) -> Dict[str, str]:
-    """The (transitional) ``change_*`` columns for a per-side row, derived purely
-    from ``side`` — no separate categorical classifier. ``convergence_type`` is
-    carried on the path-score row itself (``_convergence_type``); T4b drops the
-    ``change_*`` columns once every consumer reads ``side``.
-    """
-    return {
-        "change_side": s,
-        "change_top": "convergent" if s == "top" else "no_change",
-        "change_bottom": "convergent" if s == "bottom" else "no_change",
-    }
 
 
 def _split_result_by_side(
@@ -98,7 +85,6 @@ def _split_result_by_side(
     if not sides:
         return [dataclasses.replace(
             base, side="none", asr_path_score=0.0, core=0.0,
-            change_side="none", change_top="no_change", change_bottom="no_change",
             convergence_type="no_change",
         )]
 
@@ -118,7 +104,6 @@ def _split_result_by_side(
             pair_path_contaminated=(dict(d.get("pair_contaminated") or {}) or None),
             pair_top_path_scores=(pair_scores or None) if s == "top" else None,
             pair_bottom_path_scores=(pair_scores or None) if s == "bottom" else None,
-            **_side_change_labels(s),
         ))
     return rows
 
@@ -136,7 +121,6 @@ def _pooled_side_rows(
     if not sides:
         return [dataclasses.replace(
             base, side="none", asr_path_score=0.0, core=0.0, hypothesis=None,
-            change_side="none", change_top="no_change", change_bottom="no_change",
             convergence_type="no_change",
         )]
     out: List[ConvergenceResult] = []
@@ -153,7 +137,6 @@ def _pooled_side_rows(
             pair_path_scores=ps or None,
             pair_top_path_scores=(ps or None) if s == "top" else None,
             pair_bottom_path_scores=(ps or None) if s == "bottom" else None,
-            **_side_change_labels(s),
         ))
     return out
 
@@ -338,14 +321,11 @@ def analyze_caas_position_disambiguation(
     state_source = "unknown"
     tip_pattern_comment = caas_pos.caas or ""
 
-    # change_top / change_bottom / change_side / convergence_type are no longer
-    # produced by a separate categorical classifier — they are derived from
-    # ``side`` per row in :func:`_split_result_by_side` (and ``convergence_type``
-    # comes from ``compute_asr_path_score``'s ``_convergence_type``). These are
-    # placeholders on ``base_result`` for the no-change collapse.
-    change_top = "no_change"
-    change_bottom = "no_change"
-    change_side = "none"
+    # ``side`` / ``convergence_type`` are no longer produced by a separate
+    # categorical classifier — ``side`` is set per row in
+    # :func:`_split_result_by_side` and ``convergence_type`` comes from
+    # ``compute_asr_path_score``'s ``_convergence_type``. This is the placeholder
+    # on ``base_result`` for the no-change collapse.
     convergence_type = "no_change"
 
     # Build per-pair transition status map for annotations
@@ -646,11 +626,7 @@ def analyze_caas_position_disambiguation(
         ),
         node_state_summary=node_summary,
         state_source=state_source,
-        derived_similarity=None,
-        change_top=change_top,
-        change_bottom=change_bottom,
-        change_side=change_side,
-        side=change_side,  # overwritten per-side by _split_result_by_side
+        side="none",  # overwritten per-side by _split_result_by_side
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
@@ -722,14 +698,13 @@ def analyze_gene_disambiguation(
         posterior_data: Optional ASR posterior data
         posterior_threshold: Posterior probability threshold for node state extraction
         axes_only: Reduced-kernel mode for the permulation replay. When True, each
-            position still builds pair_details + the (cheap) change classification,
-            but SKIPS the full per-position scorer (its redundant per-node
-            posterior-map rebuild + the 40-field ConvergenceResult the perm null
-            discards). It emits a
-            lightweight :class:`PositionAxes` per position carrying only
-            asr_path_score + change_top/change_bottom. The asr_path_score is scored
-            by the same :func:`_position_axes` helper as the full path, so it is
-            bit-for-bit identical.
+            position still builds pair_details, but SKIPS the full per-position
+            scorer (its redundant per-node posterior-map rebuild + the 40-field
+            ConvergenceResult the perm null discards). It emits a lightweight
+            :class:`PositionAxes` per position carrying the per-side
+            ``compute_asr_path_score`` return (``.sides``). The asr_path_score is
+            scored by the same :func:`_position_axes` helper as the full path, so
+            it is bit-for-bit identical.
 
     Returns:
         Tuple of (results list, diagnostics dict). In axes_only mode the list holds
@@ -1100,8 +1075,6 @@ def analyze_gene_disambiguation(
                         position=caas_pos.position,
                         caap_group=getattr(caas_pos, "caap_group", "US"),
                         asr_path_score=axes_score,
-                        change_top="no_change",
-                        change_bottom="no_change",
                         side="none",
                         hypothesis=_hyp_label,
                         pair_scores=axes_pair_scores,

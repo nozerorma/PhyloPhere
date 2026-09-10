@@ -53,7 +53,7 @@ def write_caas_convergence_csvs(
     # Export no_change cases for debugging
     no_change_results = [
         r for r in results
-        if r.get("change_top") == "no_change" and r.get("change_bottom") == "no_change"
+        if (r.get("side") or "none") == "none"
     ]
     if no_change_results:
         _write_csv(
@@ -145,11 +145,8 @@ def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str
         "conserved_pair",
         # Discovering hypothesis ("H<n>" for FOP runs; empty otherwise)
         "trait",
-        # Change tracking
-        "change_top",
-        "change_bottom",
-        "change_side",
-        # T2a: first-class direction key (passthrough alias of change_side).
+        # First-class direction key (top / bottom / none). T4b retired the
+        # change_top/change_bottom/change_side triplet.
         "side",
         # Unified ASR path score (replaces convergence/parallel at scoring time)
         "asr_path_score",
@@ -357,7 +354,7 @@ def export_from_db(
             total_positions += 1
             per_gene_counts[gene] = per_gene_counts.get(gene, 0) + 1
 
-            if caas_dict.get("change_top") == "no_change" and caas_dict.get("change_bottom") == "no_change":
+            if (caas_dict.get("side") or "none") == "none":
                 no_change_writer.writerow(
                     {k: serialize_value(caas_dict.get(k)) for k in master_fields}
                 )

@@ -101,9 +101,6 @@ class ConvergenceResult:
     node_state_summary: Optional[Dict[str, Optional[str]]] = None
     state_source: str = "unknown"
 
-    # Derived state analysis
-    derived_similarity: Optional[Dict[str, Any]] = None
-
     # Scoring and quality
     score: Optional[Any] = None
     position_one_based: Optional[int] = None
@@ -112,16 +109,12 @@ class ConvergenceResult:
 
     # Change tracking
     is_focus: bool = False
-    change_top: str = "no_change"
-    change_bottom: str = "no_change"
-    change_side: str = "none"
-    # First-class direction key (top / bottom / none). T2a introduced it as a
-    # passthrough alias of change_side. T3b (feature flag --native_side_split):
-    # when on, a "both" position is emitted as TWO ConvergenceResult rows keyed
-    # (gene, position, side), each carrying that direction's own asr_path_score /
-    # core / derived_agreement / convergence_type; `side` is authoritative and no
-    # longer copied from change_side. Flag off -> legacy single row, side ==
-    # change_side.
+    # First-class direction key (top / bottom / none). T4b retired the
+    # change_top/change_bottom/change_side triplet: a "both" position is always
+    # emitted as TWO ConvergenceResult rows keyed (gene, position, side), each
+    # carrying that direction's own asr_path_score / core / derived_agreement /
+    # convergence_type. A position with no participating pair is one row with
+    # side == "none".
     side: str = "none"
 
     # ASR path score (unified replacement for binary ASR gate + convergence +
