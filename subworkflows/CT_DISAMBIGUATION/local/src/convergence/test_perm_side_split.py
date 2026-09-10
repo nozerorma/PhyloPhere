@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""T3c SC2b-ii: per-side permulation-null aggregation.
+"""Per-side permulation-null aggregation (_build_cycle_score_pools /
+_finalize_perm_scores / _finalize_perm_pos_pval).
 
-Covers the flag-gated branches added to _build_cycle_score_pools /
-_finalize_perm_scores / _finalize_perm_pos_pval:
-  * a legacy shard (no `side` column) is scored byte-identically to before;
-  * a per-side shard (a "both" position = two rows, one core_s each) is scored
-    per direction, and the global pool takes ONE max-deduped entry per position
-    (T3-doc §12), never both side rows.
+A per-side shard (a "both" position = two rows, one core_s each) is scored per
+direction, and the global pool takes ONE max-deduped entry per position
+(T3-doc §12), never both side rows.
 
 Run: python -m pytest test_perm_side_split.py
 """
@@ -46,24 +44,6 @@ def _hist(rows, nd_idx=5, cyc_idx=1, pos_idx=2, grp_idx=3):
         h.setdefault(r[cyc_idx], {}).setdefault(r[nd_idx], 0)
         h[r[cyc_idx]][r[nd_idx]] += 1
     return h
-
-
-def test_legacy_shard_unchanged():
-    # Two genes, one cycle, single scheme. No `side` column -> legacy path.
-    rows_g1 = [("G1", "c1", 10, "US", 0.30, 2, 1, 0, 0),
-               ("G1", "c1", 11, "US", 0.50, 2, 0, 1, 0)]
-    rows_g2 = [("G2", "c1", 20, "US", 0.40, 1, 1, 1, 0)]  # "both" (one legacy row)
-    with tempfile.TemporaryDirectory() as td:
-        d = Path(td) / "perm_pos_detail"
-        d.mkdir()
-        _shard(d, "G1", rows_g1, LEGACY)
-        _shard(d, "G2", rows_g2, LEGACY)
-        rl = gw.build_percent_rank_lookup(_hist(rows_g1 + rows_g2))
-        pools = gw._build_cycle_score_pools(d, rl)
-        # all: 0.30, 0.50, 0.40 ; top: 0.30 (G1) + 0.40 (G2 both) ; bottom: 0.50 + 0.40
-        assert sorted(pools["c1"]["all"]) == [0.30, 0.40, 0.50]
-        assert sorted(pools["c1"]["top"]) == [0.30, 0.40]
-        assert sorted(pools["c1"]["bottom"]) == [0.40, 0.50]
 
 
 def test_sided_shard_max_dedup():

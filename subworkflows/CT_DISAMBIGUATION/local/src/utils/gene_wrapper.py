@@ -300,7 +300,6 @@ def process_single_gene(
     output_dir: Path,
     db_queue: Optional[Any] = None,
     ensembl_genes: Optional[Set[str]] = None,
-    native_side_split: bool = False,
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
 ) -> Tuple[str, Optional[Path]]:
 
@@ -493,7 +492,6 @@ def process_single_gene(
             diagnostics_dir=diag_root,
             convergence_mode=convergence_mode,
             asr_mode=asr_mode,
-            native_side_split=native_side_split,
             hyp_pairs_pss=hyp_pairs_pss,
         )
 
@@ -641,14 +639,13 @@ def process_all_genes(
     ensembl_genes_file: Optional[str] = None,
     max_tasks_per_child: Optional[int] = None,
     max_codeml: Optional[int] = None,
-    native_side_split: bool = False,
     hypotheses_pairs_file: Optional[str] = None,
 ) -> Tuple[List[Dict], Optional[Dict]]:
 
-    hyp_pairs_pss = _read_contrast_hyp_pairs(hypotheses_pairs_file) if native_side_split else None
+    hyp_pairs_pss = _read_contrast_hyp_pairs(hypotheses_pairs_file) if hypotheses_pairs_file else None
     if hyp_pairs_pss:
         logger.info(f"[disambig] FOP PSS weights: {len(hyp_pairs_pss)} (hypothesis, domain) pairs")
-    elif native_side_split:
+    elif hypotheses_pairs_file:
         logger.info("[disambig] FOP PSS weights: none (equal-weight node pooling)")
 
     effective_workers, threads_per_gene = plan_concurrency(
@@ -761,7 +758,6 @@ def process_all_genes(
                         output_dir,
                         db_queue,
                         ensembl_genes,
-                        native_side_split,
                         hyp_pairs_pss,
                     ),
                 )
@@ -1065,24 +1061,6 @@ def _load_gene_asr_context(
     }
 
 
-# Convergence states that count as "this position changed on this side". Shared by
-# the perms worker and the pass-B finalizer so change_side can never drift between
-# the two halves of the null computation.
-_CHANGE_STATES = ("convergent", "codivergent", "divergent")
-
-
-def _side_from_flags(ct: bool, cb: bool) -> str:
-    """T2a: OR-ed (change_top, change_bottom) presence -> the first-class `side`
-    label. Byte-identical to scoring_compute.R §2g and fop_pool.R::.derive_side_key
-    so the observed and null sides join 1:1 on (Gene, Position, caap_group, side)."""
-    if ct and cb:
-        return "both"
-    if ct:
-        return "top"
-    if cb:
-        return "bottom"
-    return "none"
-
 # No per-scheme weight any more. scoring_compute.R section 2g aggregates a
 # position's schemes with a MEAN of caas_row, not a 0.2-weighted sum, because the
 # number of detecting schemes is a biochemical-distance property of the
@@ -1153,7 +1131,6 @@ def _perms_worker(
     postproc_filter: bool = False,
     clust_minlen: int = 3,
     clust_maxcaas: float = 0.7,
-    native_side_split: bool = False,
 ) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Replay N labelings over one gene's cached ASR. One gene = one worker task.
     Performs on-the-fly aggregation inside the worker, avoiding outputting huge files.
@@ -1323,7 +1300,6 @@ def _perms_worker(
                     asr_mode="precomputed",
                     axes_only=axes_only,
                     per_site_dist_cache=per_site_dist_cache,
-                    native_side_split=native_side_split,
                 )
                 if biochem_results:
                     all_cycle_results.append((cyc, biochem_results))
@@ -1335,14 +1311,14 @@ def _perms_worker(
             return (gene, [], [])
 
         # ── scoring_v2 T3c SC2b: per-side pairwise null ──────────────────────────
-        # When native_side_split is on, every scored record carries `.sides` =
-        # {"top": <side_dict>, "bottom": <side_dict>} (the axes replay ran
-        # compute_asr_path_score(native_side_split=True)). A "both" position
-        # becomes two records (side authoritative, asr = that side's core_s); a
-        # one-sided position one record; no participant one `side="none"` row.
-        # The FOP branch below pools the harvest per side FIRST
-        # (pool_hypotheses_pairwise), then expands. change_top/change_bottom are
-        # set so every existing ct/cb derivation downstream keeps working.
+        # Every scored record carries `.sides` = {"top": <side_dict>,
+        # "bottom": <side_dict>} (the axes replay's compute_asr_path_score
+        # return). A "both" position becomes two records (side authoritative,
+        # asr = that side's core_s); a one-sided position one record; no
+        # participant one `side="none"` row. The FOP branch below pools the
+        # harvest per side FIRST (pool_hypotheses_pairwise), then expands.
+        # change_top/change_bottom are derived from `side` in _expand_sides so
+        # the ct/cb detail columns downstream keep working (T4b drops them).
         _nss_node_index = None
 
         def _nss_per_node_dist(pos0: int):
@@ -1390,15 +1366,13 @@ def _perms_worker(
         # worker (and both aggregation passes) see one row per base cycle.
         if fop_pairs is not None:
             from src.convergence.fop_pool import (
-                pool_hypotheses, pool_hypotheses_pairwise, base_cycle as _bc,
+                pool_hypotheses_pairwise, base_cycle as _bc,
             )
-            if native_side_split:
-                from src.convergence.path_scores import build_node_index as _bni
-                _nss_node_index = _bni(getattr(tree_data, "root", None))
+            from src.convergence.path_scores import build_node_index as _bni
+            _nss_node_index = _bni(getattr(tree_data, "root", None))
 
-            # (base_cyc, pos, scheme) -> [ {hyp, asr_path_score, pair_scores, ...} ]
+            # (base_cyc, pos, scheme) -> [ {hyp, sides} ]
             by_pos: Dict[Tuple[str, int, str], List[Dict[str, Any]]] = {}
-            change_by_pos: Dict[Tuple[str, int, str], Tuple[bool, bool]] = {}
             for cyc, results_list in all_cycle_results:
                 base = _bc(cyc)
                 hyp = cyc.split("~", 1)[1] if "~" in cyc else "H1"
@@ -1407,80 +1381,26 @@ def _perms_worker(
                     if pos is None:
                         continue
                     grp = getattr(r, "caap_group", "US")
-                    key = (base, pos, grp)
-                    if native_side_split:
-                        by_pos.setdefault(key, []).append(
-                            {"hyp": hyp, "sides": getattr(r, "sides", None) or {}}
-                        )
-                        ct_prev, cb_prev = change_by_pos.get(key, (False, False))
-                        change_by_pos[key] = (
-                            ct_prev or getattr(r, "change_top", "no_change") in _CHANGE_STATES,
-                            cb_prev or getattr(r, "change_bottom", "no_change") in _CHANGE_STATES,
-                        )
-                        continue
-                    by_pos.setdefault(key, []).append({
-                        "hyp": hyp,
-                        "asr_path_score": getattr(r, "asr_path_score", 0.0) or 0.0,
-                        "pair_scores": getattr(r, "pair_scores", None) or {},
-                        # Directional per-domain scores core_top/core_bottom are
-                        # actually built from (path_scores.py's own
-                        # top_pair_scores/bottom_pair_scores); pair_scores above
-                        # is only their per-pair side-average and cannot rebuild
-                        # a directional core. See fop_pool.py::pool_hypotheses.
-                        "pair_top_scores": getattr(r, "pair_top_scores", None) or {},
-                        "pair_bottom_scores": getattr(r, "pair_bottom_scores", None) or {},
-                        "independence": getattr(r, "independence", None),
-                        "derived_agreement": getattr(r, "derived_agreement", None),
-                        "core": getattr(r, "core", None),
-                        "conserved_pair_scores": getattr(r, "conserved_pair_scores", None) or {},
-                        "conserved_pair_nodes": getattr(r, "conserved_pair_nodes", None) or {},
-                        # POINT 3: raw per-side derived residues per domain, so the
-                        # null recomputes derived_agreement harvest-wide under its
-                        # active scheme (mirrors fop_pool.R). Observed-only
-                        # descriptors (convergence_schemes / residue_support /
-                        # derived_residues) are NOT computed on the null.
-                        "pair_derived_top": getattr(r, "pair_derived_top", None) or {},
-                        "pair_derived_bot": getattr(r, "pair_derived_bot", None) or {},
-                    })
-                    ct_prev, cb_prev = change_by_pos.get(key, (False, False))
-                    change_by_pos[key] = (
-                        ct_prev or getattr(r, "change_top", "no_change") in _CHANGE_STATES,
-                        cb_prev or getattr(r, "change_bottom", "no_change") in _CHANGE_STATES,
+                    by_pos.setdefault((base, pos, grp), []).append(
+                        {"hyp": hyp, "sides": getattr(r, "sides", None) or {}}
                     )
 
             pooled_by_cycle: Dict[str, List[Any]] = {}
             for (base, pos, grp), hyp_recs in by_pos.items():
                 pss_map = fop_pairs.get(base, {})  # {(hyp, domain) -> pss}
-                if native_side_split:
-                    pooled = pool_hypotheses_pairwise(
-                        hyp_recs, _nss_node_index, _nss_per_node_dist(pos),
-                        pss_map, grp,
-                    )
-                    pooled_by_cycle.setdefault(base, []).extend(
-                        _expand_sides(pos, grp, None, pooled)
-                    )
-                    continue
-                pooled = pool_hypotheses(hyp_recs, pss_map, scheme=grp)
-                ct, cb = change_by_pos[(base, pos, grp)]
-                pooled_by_cycle.setdefault(base, []).append(
-                    PositionAxes(
-                        position=pos, caap_group=grp,
-                        asr_path_score=pooled["asr_path_score"],
-                        change_top="convergent" if ct else "no_change",
-                        change_bottom="convergent" if cb else "no_change",
-                        side=_side_from_flags(ct, cb),
-                        hypothesis=None, pair_scores=None,
-                        independence=pooled.get("independence"),
-                        derived_agreement=pooled.get("derived_agreement"),
-                        core=pooled.get("core"),
-                    )
+                pooled = pool_hypotheses_pairwise(
+                    hyp_recs, _nss_node_index, _nss_per_node_dist(pos),
+                    pss_map, grp,
+                )
+                pooled_by_cycle.setdefault(base, []).extend(
+                    _expand_sides(pos, grp, None, pooled)
                 )
             all_cycle_results = list(pooled_by_cycle.items())
             # n_cycles_total below must be the FULL base-cycle universe, not just
             # the ones this gene produced hits for.
             cycle_tags = sorted({_bc(c) for c in cycle_tags})
 
-        elif native_side_split:
+        else:
             # Non-FOP per-side: no pooling, just expand each record's `.sides`
             # into per-side rows (a "both" position -> two records).
             _expanded = []
@@ -1521,15 +1441,10 @@ def _perms_worker(
         loo_denom = max(n_cycles_total - 1, 1)
 
         n_detected = {}
-        # T2a: OR change_top/change_bottom across a position's cycles+schemes to a
-        # single side label, derived exactly the way scoring_compute.R §2g does.
-        # perm_pos_pval.tsv carries it so §2f-bis can join the null on
+        # A "both" position is two records (side="top" / "bottom"); collect the
+        # SET of sides seen so it emits two perm_pos_pval rows (same n_detected,
+        # different side) — the broadcast §2f-bis (SC4) joins the null on
         # (Gene, Position, caap_group, side) 1:1 with the observed side.
-        # T3c SC2b: with native_side_split on, a "both" position is two records
-        # (side="top" / "bottom"); collect the SET of sides seen so it emits two
-        # perm_pos_pval rows (same n_detected, different side) — the broadcast
-        # §2f-bis (SC4) joins on.
-        side_flags: Dict[Tuple[Any, str], Tuple[bool, bool]] = {}
         sides_seen: Dict[Tuple[Any, str], Set[str]] = {}
         for cyc, biochem_results in all_cycle_results:
             for r in biochem_results:
@@ -1540,24 +1455,15 @@ def _perms_worker(
                     if key not in n_detected:
                         n_detected[key] = set()
                     n_detected[key].add(cyc)
-                    ct_p, cb_p = side_flags.get(key, (False, False))
-                    side_flags[key] = (
-                        ct_p or getattr(r, "change_top", "no_change") in _CHANGE_STATES,
-                        cb_p or getattr(r, "change_bottom", "no_change") in _CHANGE_STATES,
-                    )
-                    if native_side_split:
-                        sides_seen.setdefault(key, set()).add(
-                            getattr(r, "side", "none") or "none")
+                    sides_seen.setdefault(key, set()).add(
+                        getattr(r, "side", "none") or "none")
 
         n_detected_count = {}
         perm_pos_pval_rows = []
         for key, cycles_set in n_detected.items():
             k = len(cycles_set)
             n_detected_count[key] = k
-            if native_side_split:
-                row_sides = sorted(sides_seen.get(key, {"none"})) or ["none"]
-            else:
-                row_sides = [_side_from_flags(*side_flags.get(key, (False, False)))]
+            row_sides = sorted(sides_seen.get(key, {"none"})) or ["none"]
             # Tier 2: pos_perm_p is a calibrated position-level permulation p,
             # add-one smoothed (Davison & Hinkley); it is NOT leave-one-out. It
             # is per (Gene, Position, caap_group) — a CAAS is side-agnostic — so
@@ -1623,17 +1529,14 @@ def _perms_worker(
                 asr_val = getattr(r, "asr_path_score", 0.0)
                 if asr_val is None:
                     asr_val = 0.0
-                change_top = getattr(r, "change_top", "no_change")
-                change_bottom = getattr(r, "change_bottom", "no_change")
-                ct = 1 if change_top in _CHANGE_STATES else 0
-                cb = 1 if change_bottom in _CHANGE_STATES else 0
+                side = getattr(r, "side", "none") or "none"
                 # `r` is already FOP-domain-pooled (or a single-contrast record)
-                # by the time we get here, so asr_path_score is the final
-                # per-(base cycle, position, scheme) value. T3c SC2b: with
-                # native_side_split on `r` is already per-side (a "both" position
-                # is two records, each with its own core_s); `side` comes off the
-                # record. Flag off: one row, `side` derived from ct/cb (may be
-                # "both"). ct/cb stay for randomize.py (CT_ACCUMULATION).
+                # and per-side by the time we get here (a "both" position is two
+                # records, each with its own core_s); `side` comes off the record.
+                # ct/cb are derived from `side` and stay for randomize.py
+                # (CT_ACCUMULATION) until T4b rewires it to read `side`.
+                ct = 1 if side == "top" else 0
+                cb = 1 if side == "bottom" else 0
                 row = {
                     "Gene": gene,
                     "cycle": cyc,
@@ -1644,10 +1547,8 @@ def _perms_worker(
                     "ct": ct,
                     "cb": cb,
                     "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
+                    "side": side,
                 }
-                if native_side_split:
-                    # extra column only in this mode -> flag-off shard byte-identical
-                    row["side"] = getattr(r, "side", "none") or "none"
                 detail_rows.append(row)
 
         return (gene, detail_rows, perm_pos_pval_rows)
@@ -1786,25 +1687,11 @@ def _build_cycle_score_pools(
             acc[cyc] = pc
         return pc
 
-    def _bump(cyc: str, score: float, ct: int, cb: int) -> None:
-        pc = _per_cycle(cyc)
-        pc["all"].append(score)
-        if ct:
-            pc["top"].append(score)
-        if cb:
-            pc["bottom"].append(score)
-
-    def _drain_legacy(agg: Dict[Any, List[float]]) -> None:
-        for (cyc, _pos), entry in agg.items():
-            # MEAN over the position's schemes -- mirrors scoring_compute.R 2g.
-            score = entry[0] / entry[1] if entry[1] else 0.0
-            _bump(cyc, score, int(entry[2]), int(entry[3]))
-
     def _drain_side(agg: Dict[Any, List[float]]) -> None:
-        # T3c SC2b: agg keyed (cyc, pos, side). Per (cyc, pos) the directional
-        # pools take that side's mean-over-schemes score directly; the global
-        # pool takes ONE entry per position = its best side (T3-doc §12
-        # max-dedup, so a "both" position is not double-counted).
+        # agg keyed (cyc, pos, side). Per (cyc, pos) the directional pools take
+        # that side's mean-over-schemes score directly; the global pool takes ONE
+        # entry per position = its best side (T3-doc §12 max-dedup, so a "both"
+        # position is not double-counted).
         by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
         for (cyc, pos, side), entry in agg.items():
             score = entry[0] / entry[1] if entry[1] else 0.0
@@ -1819,34 +1706,21 @@ def _build_cycle_score_pools(
 
     current_gene: Optional[str] = None
     pos_agg: Dict[Any, List[float]] = {}
-    has_side: Optional[bool] = None
-    _drain = _drain_legacy
     for row in iter_detail_rows(detail_path):
-        if has_side is None:
-            has_side = "side" in row
-            _drain = _drain_side if has_side else _drain_legacy
         gene = row["Gene"]
         if gene != current_gene:
             if current_gene is not None:
-                _drain(pos_agg)
+                _drain_side(pos_agg)
             current_gene = gene
             pos_agg = {}
         if _rm and (row["cycle"], row["caap_group"], gene) in _rm:
             continue
-        if has_side:
-            key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
-            entry = pos_agg.setdefault(key, [0.0, 0])
-            entry[0] += _null_row_caas(row, rank_lookup)
-            entry[1] += 1
-        else:
-            key = (row["cycle"], int(row["Position"]))
-            entry = pos_agg.setdefault(key, [0.0, 0, 0, 0])
-            entry[0] += _null_row_caas(row, rank_lookup)
-            entry[1] += 1
-            entry[2] |= int(row["ct"])
-            entry[3] |= int(row["cb"])
+        key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
+        entry = pos_agg.setdefault(key, [0.0, 0])
+        entry[0] += _null_row_caas(row, rank_lookup)
+        entry[1] += 1
     if current_gene is not None:
-        _drain(pos_agg)
+        _drain_side(pos_agg)
 
     return {cyc: {k: array.array("d", sorted(v)) for k, v in per_cycle.items()}
             for cyc, per_cycle in acc.items()}
@@ -1923,54 +1797,31 @@ def _finalize_perm_scores(
     logger.info("[perms] pass B1 done: size-adjust reference pools built for %d cycles",
                 len(cycle_pools))
 
-    # T3c SC2b: detail shard carries a `side` column only when the run was
-    # native_side_split. Then a "both" position is two rows (one per side, each
-    # its own core_s); key per (cyc, pos, side) and dedup the global pool by
-    # max(side) per position (T3-doc §12). Flag off -> legacy (cyc, pos) keying,
-    # byte-identical.
-    _has_side = False
-    for _r in iter_detail_rows(detail_path):
-        _has_side = "side" in _r
-        break
+    # The detail shard always carries a `side` column: a "both" position is two
+    # rows (one per side, each its own core_s); key per (cyc, pos, side) and
+    # dedup the global pool by max(side) per position (T3-doc §12).
 
     def _q90(vals) -> float:
         return float(np.percentile(vals, 90)) if vals else 0.0
 
     def _flush(gene: str, pos_agg: Dict[Any, List[float]], writer) -> None:
         by_cycle: Dict[str, List[Tuple[float, float, str]]] = {}
-        if _has_side:
-            # (cyc, pos) -> {side: (asr_score, caas_score)}
-            grouped: Dict[Tuple[str, int], Dict[str, Tuple[float, float]]] = {}
-            for (cyc, pos, side), agg in pos_agg.items():
-                asr_sum, n_schemes, caas_sum = agg
-                grouped.setdefault((cyc, pos), {})[side] = (
-                    asr_sum / n_schemes if n_schemes else 0.0,
-                    caas_sum / n_schemes if n_schemes else 0.0,
-                )
-            for (cyc, _pos), sides in grouped.items():
-                # global row = the position's best side (one entry per position)
-                g_asr = max(v[0] for v in sides.values())
-                g_caas = max(v[1] for v in sides.values())
-                by_cycle.setdefault(cyc, []).append((g_asr, g_caas, "all"))
-                for sd in ("top", "bottom"):
-                    if sd in sides:
-                        by_cycle[cyc].append((sides[sd][0], sides[sd][1], sd))
-        else:
-            for (cyc, _pos), agg in pos_agg.items():
-                asr_sum, n_schemes, caas_sum, ct, cb = agg
-                asr_score = asr_sum / n_schemes if n_schemes else 0.0
-                # Position score = MEAN of caas_row over the schemes that detected
-                # it (scoring_compute.R section 2g); previously a 0.2-weighted sum.
-                caas_score = caas_sum / n_schemes if n_schemes else 0.0
-                if ct and cb:
-                    side = "both"
-                elif ct:
-                    side = "top"
-                elif cb:
-                    side = "bottom"
-                else:
-                    side = "none"
-                by_cycle.setdefault(cyc, []).append((asr_score, caas_score, side))
+        # (cyc, pos) -> {side: (asr_score, caas_score)}
+        grouped: Dict[Tuple[str, int], Dict[str, Tuple[float, float]]] = {}
+        for (cyc, pos, side), agg in pos_agg.items():
+            asr_sum, n_schemes, caas_sum = agg
+            grouped.setdefault((cyc, pos), {})[side] = (
+                asr_sum / n_schemes if n_schemes else 0.0,
+                caas_sum / n_schemes if n_schemes else 0.0,
+            )
+        for (cyc, _pos), sides in grouped.items():
+            # global row = the position's best side (one entry per position)
+            g_asr = max(v[0] for v in sides.values())
+            g_caas = max(v[1] for v in sides.values())
+            by_cycle.setdefault(cyc, []).append((g_asr, g_caas, "all"))
+            for sd in ("top", "bottom"):
+                if sd in sides:
+                    by_cycle[cyc].append((sides[sd][0], sides[sd][1], sd))
 
         rows = []
         for cyc in cycle_tags:
@@ -1984,22 +1835,14 @@ def _finalize_perm_scores(
                              "global_asr": 0.0, "top_asr": 0.0, "bottom_asr": 0.0,
                              "global_caas": 0.0, "top_caas": 0.0, "bottom_caas": 0.0})
                 continue
-            if _has_side:
-                # items are tagged "all" (one per position, its best side),
-                # "top", "bottom" — direction-pure, no "both".
-                asr_g = [i[0] for i in items if i[2] == "all"]
-                asr_t = [i[0] for i in items if i[2] == "top"]
-                asr_b = [i[0] for i in items if i[2] == "bottom"]
-                caas_g = [i[1] for i in items if i[2] == "all"]
-                caas_t = [i[1] for i in items if i[2] == "top"]
-                caas_b = [i[1] for i in items if i[2] == "bottom"]
-            else:
-                asr_g = [i[0] for i in items]
-                asr_t = [i[0] for i in items if i[2] in ("top", "both")]
-                asr_b = [i[0] for i in items if i[2] in ("bottom", "both")]
-                caas_g = [i[1] for i in items]
-                caas_t = [i[1] for i in items if i[2] in ("top", "both")]
-                caas_b = [i[1] for i in items if i[2] in ("bottom", "both")]
+            # items are tagged "all" (one per position, its best side), "top",
+            # "bottom" — direction-pure, no "both".
+            asr_g = [i[0] for i in items if i[2] == "all"]
+            asr_t = [i[0] for i in items if i[2] == "top"]
+            asr_b = [i[0] for i in items if i[2] == "bottom"]
+            caas_g = [i[1] for i in items if i[2] == "all"]
+            caas_t = [i[1] for i in items if i[2] == "top"]
+            caas_b = [i[1] for i in items if i[2] == "bottom"]
             rows.append({
                 "Gene": gene, "cycle": cyc,
                 # ASR axis: not wired into any ranking downstream, so it stays on
@@ -2044,19 +1887,11 @@ def _finalize_perm_scores(
             phen = 1.0 - rank_lookup.get(cyc, {}).get(d, 0.0)  # diagnostic only
             rc = asr  # T1 decision E: caas_row = asr_score (no phen factor)
 
-            if _has_side:
-                agg = pos_agg.setdefault(
-                    (cyc, pos, row.get("side") or "none"), [0.0, 0, 0.0])
-                agg[0] += asr
-                agg[1] += 1
-                agg[2] += rc
-            else:
-                agg = pos_agg.setdefault((cyc, pos), [0.0, 0, 0.0, 0, 0])
-                agg[0] += asr
-                agg[1] += 1
-                agg[2] += rc
-                agg[3] |= int(row["ct"])
-                agg[4] |= int(row["cb"])
+            agg = pos_agg.setdefault(
+                (cyc, pos, row.get("side") or "none"), [0.0, 0, 0.0])
+            agg[0] += asr
+            agg[1] += 1
+            agg[2] += rc
 
             # Reservoir sample stratified by (cycle, scheme): every cycle
             # contributes up to the same K rows regardless of how many detections
@@ -2140,26 +1975,14 @@ def _finalize_perm_pos_pval(
     loo_denom = max(n_cycles_total - 1, 1)
 
     seen: Dict[Tuple[str, int, str], int] = {}
-    # T2a: OR the per-row ct/cb flags to a single side label per key, matching
-    # _perms_worker's in-memory derivation and scoring_compute.R §2g. T3c SC2b:
-    # a per-side shard carries `side` directly -> collect the SET of sides seen
+    # The per-side shard carries `side` directly -> collect the SET of sides seen
     # and emit one pval row per side (same n_detected — a CAAS is side-agnostic).
-    side_flags: Dict[Tuple[str, int, str], Tuple[bool, bool]] = {}
     sides_seen: Dict[Tuple[str, int, str], Set[str]] = {}
-    has_side = False
     for row in iter_detail_rows(detail_path):
-        has_side = "side" in row
         key = (row["Gene"], int(row["Position"]), row["caap_group"])
         if key not in seen:
             seen[key] = int(row["n_detected"])
-        if has_side:
-            sides_seen.setdefault(key, set()).add(row.get("side") or "none")
-        else:
-            ct_p, cb_p = side_flags.get(key, (False, False))
-            side_flags[key] = (
-                ct_p or str(row.get("ct", "0")) == "1",
-                cb_p or str(row.get("cb", "0")) == "1",
-            )
+        sides_seen.setdefault(key, set()).add(row.get("side") or "none")
 
     pval_path = Path(output_dir) / "perm_pos_pval.tsv"
     pval_fields = ["Gene", "Position", "caap_group", "side", "n_detected", "n_cycles",
@@ -2169,10 +1992,7 @@ def _finalize_perm_pos_pval(
         writer = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
         writer.writeheader()
         for (gene, pos, grp), k in seen.items():
-            if has_side:
-                row_sides = sorted(sides_seen.get((gene, pos, grp), {"none"})) or ["none"]
-            else:
-                row_sides = [_side_from_flags(*side_flags.get((gene, pos, grp), (False, False)))]
+            row_sides = sorted(sides_seen.get((gene, pos, grp), {"none"})) or ["none"]
             for row_side in row_sides:
                 writer.writerow({
                     "Gene": gene, "Position": pos, "caap_group": grp,
@@ -2211,7 +2031,6 @@ def process_all_genes_perms(
     iqr_multiplier: float = 3.0,
     extreme_percentile: float = 0.99,
     postproc_filter: bool = False,
-    native_side_split: bool = False,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -2295,12 +2114,11 @@ def process_all_genes_perms(
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
     pval_fields = ["Gene", "Position", "caap_group", "side", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
-    detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score", "n_detected", "ct", "cb", "clust"]
-    if native_side_split:
-        # T3c SC2b: per-side null. `side` ∈ {top,bottom,none}; a "both" position
-        # is two detail rows (one per side, each with its own core_s). Flag off
-        # keeps the exact legacy schema so an existing run is byte-identical.
-        detail_fields = detail_fields + ["side"]
+    # Per-side null. `side` ∈ {top,bottom,none}; a "both" position is two detail
+    # rows (one per side, each with its own core_s). ct/cb are kept until T4b
+    # rewires randomize.py to read `side`.
+    detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
+                     "n_detected", "ct", "cb", "clust", "side"]
 
     # Gap B: CT_POSTPROC filtering of the null candidate pool. Off by default so
     # the non-postproc null path is byte-identical; the nextflow layer flips it
@@ -2323,7 +2141,7 @@ def process_all_genes_perms(
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold, convergence_mode,
          cycle_tags, cycle_trait_files, perm_discovery_file, None, fop_pairs,
-         postproc_filter, clust_minlen, clust_maxcaas, native_side_split)
+         postproc_filter, clust_minlen, clust_maxcaas)
         for gene in genes
     )
 

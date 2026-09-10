@@ -176,7 +176,6 @@ def main():
         iqr_multiplier=args.iqr_multiplier,
         extreme_percentile=args.extreme_percentile,
         postproc_filter=args.postproc_filter,
-        native_side_split=args.native_side_split,
     )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 

@@ -276,7 +276,6 @@ def main():
             workers=args.workers,
             max_tasks_per_child=args.max_tasks_per_child,
             run_diagnostics=args.run_diagnostics,
-            native_side_split=args.native_side_split,
             hypotheses_pairs_file=args.hypotheses_pairs,
             output_dir=output_dir,
             ensembl_genes_file=args.ensembl_genes_file,
