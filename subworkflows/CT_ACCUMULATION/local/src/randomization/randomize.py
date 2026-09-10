@@ -135,12 +135,12 @@ def _remap_caas_df(df):
 
     Source-of-truth columns (tab-separated):
       Gene, Position, tag, caas, recovery_boot, convergence_type, caap_group,
-      amino_encoded, is_conserved_meta, conserved_pair, change_top, change_bottom,
-      change_side, asr_is_conserved, ..., Trait
+      amino_encoded, is_conserved_meta, conserved_pair, side,
+      asr_is_conserved, ..., Trait
 
     Produces internal schema columns:
       gene, msa_pos, tag, convergence_type, caap_group (uppercased),
-      iscaap, change_side, is_conserved_meta, asr_is_conserved
+      iscaap, side, is_conserved_meta, asr_is_conserved
     """
     # Rename Gene→gene, Position→msa_pos (structural keys; concept columns are
     # already in disambiguation's canonical lowercase form).
@@ -465,16 +465,18 @@ def _iter_perm_detail_rows(detail_path):
             yield from _csv.DictReader(f_in, delimiter="\t")
 
 
-def _perm_row_passes_change_side(ct, cb, change_side):
-    """Same semantics as the observed-side change_side filter in main(): 'top'/
-    'bottom' each admit rows tagged with that direction OR 'both' (ct==1 alone, or
-    cb==1 alone, already covers the 'both' case since a both-direction position has
-    ct==1 AND cb==1); the default 'both' admits any row with directional signal."""
-    if change_side == 'top':
-        return ct == 1
-    if change_side == 'bottom':
-        return cb == 1
-    return ct == 1 or cb == 1
+def _perm_row_passes_side(row_side, run_dir):
+    """Same semantics as the observed-side direction filter in main(). The detail
+    shard is per-side (scoring_v2 T4b): each row carries `side` in
+    {top, bottom, none}. A "both" position is two rows. The run-level selector
+    `run_dir` is 'top' / 'bottom' (that direction only) or 'both' (any directional
+    row, i.e. side != 'none')."""
+    s = (row_side or 'none').strip().lower()
+    if run_dir == 'top':
+        return s == 'top'
+    if run_dir == 'bottom':
+        return s == 'bottom'
+    return s in ('top', 'bottom')
 
 
 def _read_authoritative_cycles(gene_cycle_scores_path):
@@ -532,12 +534,7 @@ def run_permulation_null(detail_path, gene_to_id, n_genes, actual_counts, change
         cyc = row.get('cycle')
         all_cycles.add(cyc)
 
-        try:
-            ct = int(row.get('ct', 0) or 0)
-            cb = int(row.get('cb', 0) or 0)
-        except (TypeError, ValueError):
-            ct, cb = 0, 0
-        if not _perm_row_passes_change_side(ct, cb, change_side):
+        if not _perm_row_passes_side(row.get('side'), change_side):
             continue
 
         cat = _PERM_CAT_OF_GROUP.get((row.get('caap_group') or '').strip().upper())
@@ -683,7 +680,7 @@ def main(args):
 
     # Keep only needed columns to save memory
     required_cols = ['gene', 'msa_pos',
-                     'change_side', 'tag', 'convergence_type', 'iscaap', 'caap_group',
+                     'side', 'tag', 'convergence_type', 'iscaap', 'caap_group',
                      'is_conserved_meta']
 
     # Normalise CAAS columns (handles global_meta_caas.tsv or original schema)
@@ -697,28 +694,17 @@ def main(args):
     caas_df = caas_df[available]
     logging.info(f"CAAS df: {len(caas_df)} rows, columns: {available}")
 
-    # One slot per (gene, position, scheme): filtered_discovery.tsv carries one
-    # row per discovering hypothesis under the FOP mirror (`trait` = H1..Hn), so a
-    # single physical (gene, msa_pos, caap_group) CAAS appears n_hypotheses times.
-    # Left-joining that raw table fans every position out by n_hypotheses and
-    # inflates both the observed per-gene counts (bincount over rows) and the
-    # eligible draw pool. Collapse to the physical unit here; `change_side` is a
-    # per-position call, but if hypotheses disagree keep the union ("both") rather
-    # than an arbitrary first.
+    # One slot per (gene, position, scheme, side): filtered_discovery.tsv is
+    # already pooled per (Gene, Position, scheme, side) in-tree (scoring_v2
+    # T3cd), so a "both" position is two physical rows (side top / bottom) and
+    # any residual FOP-hypothesis fan-out is a pure duplicate. Dedup to the
+    # physical unit here.
     if not caas_df.empty and {'gene', 'msa_pos', 'caap_group'}.issubset(caas_df.columns):
         n_before = len(caas_df)
-        if 'change_side' in caas_df.columns:
-            def _resolve_side(s):
-                vals = {str(v).strip().lower() for v in s if str(v).strip()}
-                vals.discard('')
-                vals.discard('none')
-                if {'top', 'bottom'}.issubset(vals) or 'both' in vals:
-                    return 'both'
-                return next(iter(vals)) if vals else 'none'
-            side = (caas_df.groupby(['gene', 'msa_pos', 'caap_group'])['change_side']
-                    .transform(_resolve_side))
-            caas_df = caas_df.assign(change_side=side)
-        caas_df = caas_df.drop_duplicates(['gene', 'msa_pos', 'caap_group'], keep='first')
+        _keys = ['gene', 'msa_pos', 'caap_group']
+        if 'side' in caas_df.columns:
+            _keys = _keys + ['side']
+        caas_df = caas_df.drop_duplicates(_keys, keep='first')
         logging.info(
             f"CAAS df after (gene, position, scheme) dedup: {len(caas_df)} rows "
             f"(collapsed {n_before - len(caas_df)} hypothesis-replay duplicates)")
@@ -861,12 +847,13 @@ def main(args):
     pool_groups = {'US', 'GS1', 'GS2', 'GS3', 'GS4'}
     pool_group_mask = _gu.isin(pool_groups)
     if args.change_side in ('top', 'bottom'):
-        # Include positions with change_side == target direction OR "both"
-        caas_filter = pool_group_mask & merged_df['change_side'].isin([args.change_side, 'both'])
+        # Per-side rows (scoring_v2 T4b): a "both" position is two rows, so the
+        # direction selector is an exact match on `side` (no more c(dir, "both")).
+        caas_filter = pool_group_mask & merged_df['side'].eq(args.change_side)
         logging.info(f"Direction filter '{args.change_side}': {caas_filter.sum()} positions retained")
     else:
         # Default: all positions that have any directional signal
-        caas_filter = pool_group_mask & merged_df['change_side'].fillna('').ne('none')
+        caas_filter = pool_group_mask & merged_df['side'].fillna('').ne('none')
 
     decile_bins = None
     if args.randomization_type == 'cons_decile':
@@ -1074,8 +1061,9 @@ if __name__ == "__main__":
     parser.add_argument('--change-side', dest='change_side', default='both',
                         choices=['top', 'bottom', 'both'],
                         help='Restrict the CAAS position pool to this phenotype direction. '
-                             '"top" and "bottom" each include positions with change_side=="both". '
-                             '"both" (default) retains all non-none positions (original behaviour).')
+                             'The discovery table is per-side (a "both" position is two '
+                             'rows, side=top and side=bottom), so "top"/"bottom" match '
+                             '`side` exactly. "both" (default) retains all non-none rows.')
     parser.add_argument('--log-level', default='INFO')
 
     args = parser.parse_args()
