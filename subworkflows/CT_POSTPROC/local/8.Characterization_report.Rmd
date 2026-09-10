@@ -976,6 +976,17 @@ gene_filter_plot <- gene_filter_flags %>%
   filter(!is.na(filter_combo)) %>%
   mutate(filter_combo = factor(filter_combo, levels = combo_levels))
 
+# Tiny fixtures (a single-gene run) can leave nothing to plot once NA rows are
+# dropped, or a `caap_group` column that is entirely NA -- facet_wrap() then
+# aborts with "Faceting variables must have at least one value" and takes the
+# whole report (and pipeline) down. Skip the panel in that case.
+.have_facet <- "caap_group" %in% names(gene_filter_plot) &&
+  any(!is.na(gene_filter_plot$caap_group))
+if (nrow(gene_filter_plot) == 0 || !.have_facet) {
+  cat("_Not enough filtered genes with a `caap_group` label to plot descriptor",
+      "distributions by filter membership (small fixture)._\n\n")
+} else {
+
 make_descriptor_plot <- function(df, var_name, y_label, log_scale = FALSE) {
   p <- ggplot(df, aes(x = filter_combo, y = .data[[var_name]], fill = filter_combo)) +
     geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.5, alpha = 0.8, show.legend = FALSE) +
@@ -1012,6 +1023,8 @@ desc_grid <- (
 print(desc_grid)
 ggsave(file.path(outliers_dir, "filter_overlap_descriptors.png"),
        desc_grid, width = 14, height = 5.5, dpi = 280)
+
+}  # end .have_facet guard
 ```
 
 ```{r filter_overlap_summary_table, eval=(processing_mode != 'exploratory'), results='asis'}
