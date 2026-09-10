@@ -1521,11 +1521,8 @@ def _perms_worker(
                 side = getattr(r, "side", "none") or "none"
                 # `r` is already FOP-domain-pooled (or a single-contrast record)
                 # and per-side by the time we get here (a "both" position is two
-                # records, each with its own core_s); `side` comes off the record.
-                # ct/cb are derived from `side` and stay for randomize.py
-                # (CT_ACCUMULATION) until T4b rewires it to read `side`.
-                ct = 1 if side == "top" else 0
-                cb = 1 if side == "bottom" else 0
+                # records, each with its own core_s); `side` comes off the record
+                # and is the sole direction key downstream (T4b retired ct/cb).
                 row = {
                     "Gene": gene,
                     "cycle": cyc,
@@ -1533,8 +1530,6 @@ def _perms_worker(
                     "caap_group": group,
                     "asr_path_score": asr_val,
                     "n_detected": n_detected_count.get((pos, group), 1),
-                    "ct": ct,
-                    "cb": cb,
                     "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
                     "side": side,
                 }
@@ -2103,11 +2098,10 @@ def process_all_genes_perms(
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
     pval_fields = ["Gene", "Position", "caap_group", "side", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
-    # Per-side null. `side` ∈ {top,bottom,none}; a "both" position is two detail
-    # rows (one per side, each with its own core_s). ct/cb are kept until T4b
-    # rewires randomize.py to read `side`.
+    # Per-side null. `side` ∈ {top,bottom,none} is the sole direction key; a
+    # "both" position is two detail rows (one per side, each with its own core_s).
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
-                     "n_detected", "ct", "cb", "clust", "side"]
+                     "n_detected", "clust", "side"]
 
     # Gap B: CT_POSTPROC filtering of the null candidate pool. Off by default so
     # the non-postproc null path is byte-identical; the nextflow layer flips it

@@ -20,9 +20,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 import src.utils.gene_wrapper as gw  # noqa: E402
 
-LEGACY = ["Gene", "cycle", "Position", "caap_group",
-          "asr_path_score", "n_detected", "ct", "cb", "clust"]
-SIDED = LEGACY + ["side"]
+SIDED = ["Gene", "cycle", "Position", "caap_group",
+         "asr_path_score", "n_detected", "clust", "side"]
 
 
 def _shard(dir_path: Path, gene: str, rows, fields):
@@ -49,9 +48,9 @@ def _hist(rows, nd_idx=5, cyc_idx=1, pos_idx=2, grp_idx=3):
 def test_sided_shard_max_dedup():
     # G1 pos 10 is "both" -> two rows (top core 0.30, bottom core 0.70).
     # G1 pos 11 is top-only (0.20). One cycle, one scheme.
-    rows = [("G1", "c1", 10, "US", 0.30, 2, 1, 0, 0, "top"),
-            ("G1", "c1", 10, "US", 0.70, 2, 0, 1, 0, "bottom"),
-            ("G1", "c1", 11, "US", 0.20, 1, 1, 0, 0, "top")]
+    rows = [("G1", "c1", 10, "US", 0.30, 2, 0, "top"),
+            ("G1", "c1", 10, "US", 0.70, 2, 0, "bottom"),
+            ("G1", "c1", 11, "US", 0.20, 1, 0, "top")]
     with tempfile.TemporaryDirectory() as td:
         d = Path(td) / "perm_pos_detail"
         d.mkdir()
@@ -82,13 +81,13 @@ def test_sided_shard_max_dedup():
 
 
 def test_sided_perm_pos_pval_two_rows():
-    rows = [("G1", "c1", 10, "US", 0.30, 3, 1, 0, 0, "top"),
-            ("G1", "c1", 10, "US", 0.70, 3, 0, 1, 0, "bottom"),
-            ("G1", "c2", 10, "US", 0.30, 3, 1, 0, 0, "top"),
-            ("G1", "c2", 10, "US", 0.70, 3, 0, 1, 0, "bottom"),
-            ("G1", "c3", 10, "US", 0.30, 3, 1, 0, 0, "top"),
-            ("G1", "c3", 10, "US", 0.70, 3, 0, 1, 0, "bottom"),
-            ("G1", "c1", 11, "US", 0.20, 1, 1, 0, 0, "top")]
+    rows = [("G1", "c1", 10, "US", 0.30, 3, 0, "top"),
+            ("G1", "c1", 10, "US", 0.70, 3, 0, "bottom"),
+            ("G1", "c2", 10, "US", 0.30, 3, 0, "top"),
+            ("G1", "c2", 10, "US", 0.70, 3, 0, "bottom"),
+            ("G1", "c3", 10, "US", 0.30, 3, 0, "top"),
+            ("G1", "c3", 10, "US", 0.70, 3, 0, "bottom"),
+            ("G1", "c1", 11, "US", 0.20, 1, 0, "top")]
     with tempfile.TemporaryDirectory() as td:
         d = Path(td) / "perm_pos_detail"
         d.mkdir()

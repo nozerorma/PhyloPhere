@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 import src.utils.gene_wrapper as gw
 
 DETAIL_FIELDS = ["Gene", "cycle", "Position", "caap_group",
-                 "asr_path_score", "n_detected", "ct", "cb", "clust"]
+                 "asr_path_score", "n_detected", "clust", "side"]
 
 
 def _rows():
@@ -35,11 +35,11 @@ def _rows():
     c2n = {"A": 2, "B": 3, "C": 2, "D": 2}
     for g in ("A", "B", "C", "D"):
         for i in range(c1n[g]):
-            r.append((g, "c1", 100 + i, "US", 0.4 + 0.02 * i, c1n[g], 1, 0, 0))
+            r.append((g, "c1", 100 + i, "US", 0.4 + 0.02 * i, c1n[g], 0, "top"))
         for i in range(c2n[g]):
-            r.append((g, "c2", 100 + i, "US", 0.5 + 0.02 * i, c2n[g], 0, 1, 0))
+            r.append((g, "c2", 100 + i, "US", 0.5 + 0.02 * i, c2n[g], 0, "bottom"))
     for i in range(60):                       # E: c1 count outlier, all clustered
-        r.append(("E", "c1", 500 + i, "US", 0.9, 60, 1, 0, 1))
+        r.append(("E", "c1", 500 + i, "US", 0.9, 60, 1, "top"))
     return r
 
 
@@ -47,8 +47,8 @@ def _write_detail(path, rows):
     with gzip.open(path, "wt", newline="") as f:
         w = csv.DictWriter(f, fieldnames=DETAIL_FIELDS, delimiter="\t")
         w.writeheader()
-        for g, c, p, grp, asr, nd, ct, cb, cl in rows:
-            w.writerow(dict(zip(DETAIL_FIELDS, (g, c, p, grp, asr, nd, ct, cb, cl))))
+        for g, c, p, grp, asr, nd, cl, sd in rows:
+            w.writerow(dict(zip(DETAIL_FIELDS, (g, c, p, grp, asr, nd, cl, sd))))
 
 
 def main():
@@ -81,7 +81,7 @@ def main():
 
         # Recompute the FILTERED c1/all pool and size_adj_max for gene C by hand.
         pool = []
-        for g, c, p, grp, asr, nd, ct, cb, cl in rows:
+        for g, c, p, grp, asr, nd, cl, sd in rows:
             if c != "c1" or (c, grp, g) in removed:
                 continue
             phen = 1.0 - rank_lookup["c1"].get(nd, 0.0)

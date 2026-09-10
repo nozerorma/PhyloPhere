@@ -12,7 +12,7 @@ Rebuilding it from scratch means re-running CAAS_PERMS_DISAMBIGUATE, whose cost
 is the ASR replay across every gene x labeling -- hours. But perm_pos_detail/
 (one gz shard per gene; a legacy run may instead have a single concatenated
 perm_pos_detail.tsv.gz) already holds every (Gene, cycle, Position, caap_group,
-asr_path_score, n_detected, ct, cb) row the aggregation needs, so re-scoring
+asr_path_score, n_detected, side) row the aggregation needs, so re-scoring
 needs no ASR at all (see caas_permulation.nf, which publishes the detail
 shards for exactly this). This script does that re-scoring in minutes.
 
