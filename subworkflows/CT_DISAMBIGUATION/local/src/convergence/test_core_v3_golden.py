@@ -47,7 +47,6 @@ def _run(scn):
     )
 
 
-@pytest.mark.xfail(strict=True, reason="compute_domain_scores lands in V3-1")
 def test_core_v3_golden():
     failures: list[str] = []
     for entry in _GOLDEN:
