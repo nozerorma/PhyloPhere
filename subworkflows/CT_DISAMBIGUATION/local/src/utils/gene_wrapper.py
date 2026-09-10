@@ -783,6 +783,88 @@ def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], float]]:
     return out
 
 
+def _parse_discovery_entries(
+    handle,
+    cycle_tags,
+    gene_filter: Optional[str] = None,
+) -> Dict[str, List[CAASPosition]]:
+    """Parse a bootstrap-discovery TSV stream into ``{cycle_tag: [CAASPosition, ...]}``.
+
+    Shared by ``_perms_worker``'s two input layouts:
+
+      * the single concatenated ``perm_discovery_file`` -- carries a ``gene``
+        column; rows are filtered to ``gene_filter``;
+      * a per-gene shard ``perm_discovery/<gene>.tsv`` -- no ``gene`` column,
+        every row belongs to this gene (``gene_filter=None``).
+
+    Both layouts otherwise share the exact same columns and the same
+    ``CAASPosition`` construction, so keeping one parser here stops the two
+    call-site copies from drifting as the discovery schema changes.
+    """
+    out: Dict[str, List[CAASPosition]] = {}
+    header = handle.readline()
+    if not header:
+        return out
+    cols = header.rstrip("\n").split("\t")
+    col_indices = {col: idx for idx, col in enumerate(cols)}
+    if "cycle" not in col_indices or "position" not in col_indices:
+        return out
+    gene_idx = col_indices.get("gene")
+    if gene_filter is not None and gene_idx is None:
+        return out
+
+    cyc_idx = col_indices["cycle"]
+    pos_idx = col_indices["position"]
+    caas_idx = col_indices.get("caas")
+    ae_idx = col_indices.get("amino_encoded")
+    icm_idx = col_indices.get("is_conserved_meta")
+    cp_idx = col_indices.get("conserved_pair")
+    grp_idx = col_indices.get("caap_group")
+    guard = max(
+        i for i in (cyc_idx, pos_idx, gene_idx if gene_filter is not None else None)
+        if i is not None
+    )
+
+    for line in handle:
+        parts = line.rstrip("\n").split("\t")
+        if len(parts) <= guard:
+            continue
+        if gene_filter is not None and parts[gene_idx].strip() != gene_filter:
+            continue
+        cyc = parts[cyc_idx].strip()
+        if not cyc or cyc not in cycle_tags:
+            continue
+        try:
+            pos0 = int(parts[pos_idx].strip())
+        except ValueError:
+            continue
+
+        caas = parts[caas_idx] if caas_idx is not None and caas_idx < len(parts) else ""
+        parts_caas = caas.split("/") if caas else []
+        trait1 = normalize_amino_list(list(parts_caas[0])) if len(parts_caas) == 2 else []
+        trait0 = normalize_amino_list(list(parts_caas[1])) if len(parts_caas) == 2 else []
+
+        cp = parts[cp_idx].strip() if cp_idx is not None and cp_idx < len(parts) else ""
+        if cp and ":" in cp.split(",")[0]:
+            cp = cp.split(":", 1)[1]
+
+        entry = CAASPosition(
+            position=pos0,
+            position_one_based=pos0 + 1,
+            tag=f"POS{pos0}",
+            caas=caas,
+            trait1_aa=trait1,
+            trait0_aa=trait0,
+            recovery_boot=None,
+            caap_group=parts[grp_idx] if grp_idx is not None and grp_idx < len(parts) else "US",
+            amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
+            is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
+            conserved_pair=cp,
+        )
+        out.setdefault(cyc, []).append(entry)
+    return out
+
+
 def _read_contrast_hyp_pairs(path: Optional[str]) -> Optional[Dict[Tuple[str, int], float]]:
     """contrast_hypotheses_pairs.tsv -> {(hypothesis_id, domain): pss_score}.
 
@@ -1047,126 +1129,24 @@ def _perms_worker(
         axes_only = os.environ.get("CAAS_PERMS_AXES_ONLY", "1") not in ("0", "false", "False")
         per_site_dist_cache: Dict[int, Any] = {} if axes_only else None
 
-        # Load the gene's bootstrap discovery output in memory once
-        cycle_to_entries = {}
-        gene_file = None
+        # Load the gene's bootstrap discovery output in memory once. Two layouts,
+        # one shared parser (_parse_discovery_entries):
+        #   * a single concatenated perm_discovery_file (has a `gene` column)
+        #   * a per-gene shard  perm_discovery/<gene>.tsv  (no `gene` column)
+        cycle_to_entries: Dict[str, List[CAASPosition]] = {}
         disc_path = Path(perm_discovery_file)
         if disc_path.is_file():
             with open(disc_path, "r") as f:
-                header = f.readline()
-                if header:
-                    cols = header.rstrip("\n").split("\t")
-                    col_indices = {col: idx for idx, col in enumerate(cols)}
-                    if "cycle" in col_indices and "gene" in col_indices and "position" in col_indices:
-                        cyc_idx = col_indices["cycle"]
-                        gene_idx = col_indices["gene"]
-                        pos_idx = col_indices["position"]
-                        caas_idx = col_indices.get("caas")
-                        ae_idx = col_indices.get("amino_encoded")
-                        icm_idx = col_indices.get("is_conserved_meta")
-                        cp_idx = col_indices.get("conserved_pair")
-                        pval_idx = col_indices.get("pvalue")
-                        
-                        for line in f:
-                            parts = line.rstrip("\n").split("\t")
-                            if len(parts) <= max(cyc_idx, gene_idx, pos_idx):
-                                continue
-                            if parts[gene_idx].strip() != gene:
-                                continue
-                            cyc = parts[cyc_idx].strip()
-                            if not cyc or cyc not in cycle_tags:
-                                continue
-                            
-                            pos_raw = parts[pos_idx].strip()
-                            try:
-                                pos0 = int(pos_raw)
-                            except ValueError:
-                                continue
-                            
-                            caas = parts[caas_idx] if caas_idx is not None and caas_idx < len(parts) else ""
-                            parts_caas = caas.split("/") if caas else []
-                            trait1 = normalize_amino_list(list(parts_caas[0])) if len(parts_caas) == 2 else []
-                            trait0 = normalize_amino_list(list(parts_caas[1])) if len(parts_caas) == 2 else []
-                            
-                            cp = parts[cp_idx].strip() if cp_idx is not None and cp_idx < len(parts) else ""
-                            if cp and ":" in cp.split(",")[0]:
-                                cp = cp.split(":", 1)[1]
-                                
-                            entry = CAASPosition(
-                                position=pos0,
-                                position_one_based=pos0 + 1,
-                                tag=f"POS{pos0}",
-                                caas=caas,
-                                trait1_aa=trait1,
-                                trait0_aa=trait0,
-                                recovery_boot=None,
-                                caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
-                                amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
-                                is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
-                                conserved_pair=cp,
-                            )
-                            if cyc not in cycle_to_entries:
-                                cycle_to_entries[cyc] = []
-                            cycle_to_entries[cyc].append(entry)
+                cycle_to_entries = _parse_discovery_entries(f, cycle_tags, gene_filter=gene)
         else:
-            for p in disc_path.iterdir():
-                if p.is_file() and p.name.split(".", 1)[0] == gene:
-                    gene_file = p
-                    break
-            if gene_file and gene_file.exists():
+            gene_file = next(
+                (p for p in disc_path.iterdir()
+                 if p.is_file() and p.name.split(".", 1)[0] == gene),
+                None,
+            )
+            if gene_file is not None and gene_file.exists():
                 with open(gene_file, "r") as f:
-                    header = f.readline()
-                    if header:
-                        cols = header.rstrip("\n").split("\t")
-                        col_indices = {col: idx for idx, col in enumerate(cols)}
-                        if "cycle" in col_indices and "position" in col_indices:
-                            cyc_idx = col_indices["cycle"]
-                            pos_idx = col_indices["position"]
-                            caas_idx = col_indices.get("caas")
-                            ae_idx = col_indices.get("amino_encoded")
-                            icm_idx = col_indices.get("is_conserved_meta")
-                            cp_idx = col_indices.get("conserved_pair")
-                            pval_idx = col_indices.get("pvalue")
-                            
-                            for line in f:
-                                parts = line.rstrip("\n").split("\t")
-                                if len(parts) <= max(cyc_idx, pos_idx):
-                                    continue
-                                cyc = parts[cyc_idx].strip()
-                                if not cyc or cyc not in cycle_tags:
-                                    continue
-                                
-                                pos_raw = parts[pos_idx].strip()
-                                try:
-                                    pos0 = int(pos_raw)
-                                except ValueError:
-                                    continue
-                                
-                                caas = parts[caas_idx] if caas_idx is not None and caas_idx < len(parts) else ""
-                                parts_caas = caas.split("/") if caas else []
-                                trait1 = normalize_amino_list(list(parts_caas[0])) if len(parts_caas) == 2 else []
-                                trait0 = normalize_amino_list(list(parts_caas[1])) if len(parts_caas) == 2 else []
-                                
-                                cp = parts[cp_idx].strip() if cp_idx is not None and cp_idx < len(parts) else ""
-                                if cp and ":" in cp.split(",")[0]:
-                                    cp = cp.split(":", 1)[1]
-                                    
-                                entry = CAASPosition(
-                                    position=pos0,
-                                    position_one_based=pos0 + 1,
-                                    tag=f"POS{pos0}",
-                                    caas=caas,
-                                    trait1_aa=trait1,
-                                    trait0_aa=trait0,
-                                    recovery_boot=None,
-                                    caap_group=parts[col_indices["caap_group"]] if "caap_group" in col_indices and col_indices["caap_group"] < len(parts) else "US",
-                                    amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
-                                    is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
-                                    conserved_pair=cp,
-                                )
-                                if cyc not in cycle_to_entries:
-                                    cycle_to_entries[cyc] = []
-                                cycle_to_entries[cyc].append(entry)
+                    cycle_to_entries = _parse_discovery_entries(f, cycle_tags)
 
         all_cycle_results = []
         for cyc in cycle_tags:

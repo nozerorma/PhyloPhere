@@ -9,7 +9,10 @@ Tier 1 PEPC en Marvin2 antes del merge.
 Coordenadas 0-based. `enc(x)` = residuo codificado en el esquema activo (US → residuo crudo;
 GS → etiqueta de grupo). `s ∈ {top, bottom}`. Sin em dashes (estilo de la casa).
 
-**Estado: DRAFT (V3-0).** Se marca `FINALIZED` en V3-6.
+**Estado: FINALIZED (V3-6).** Secuencia `V3-0..V3-6` completa en `scoring_v2`.
+Follow-ups pendientes fuera de esta secuencia, gated en la corrida Tier 1 PEPC de
+v3: flip de headline `pos_perm_p_adj → p.emp_adj` (`docs/scoring_v2_p_emp.md`
+§7.3) y borrado de `null_pvalue_boot` (§7.4).
 
 ---
 
@@ -552,19 +555,25 @@ posiciones se detectan; estructura de la media de 5 esquemas §2g; hipergeométr
 
 ---
 
-## Apéndice D — secuencia de commits
+## Apéndice D — secuencia de commits (COMPLETA)
 
 `V3-0` (este documento + red golden xfail) · `V3-1` (`compute_domain_scores` en
 `path_scores.py`; regen de `core_v3_golden.json` con diff vacío) · `V3-2` (`pool_domains` +
-`disambiguate_single` + `models.py` + writers) · **`V3-3` SHIPPED** (null path:
+`disambiguate_single` + `models.py` + writers) · `V3-3` (null path:
 `gene_wrapper.py::_perms_worker` reescrito sobre `pool_domains`; `_expand_pooled` reemplaza
 `_expand_sides`; se retiran `pool_hypotheses_pairwise` / `_nss_node_index` /
 `_nss_per_node_dist` / `build_node_index` del worker — el pooler null es sin árbol.
 FOP: una llamada `pool_domains` por `(base cycle, pos, scheme)`; no-FOP: `M = 1` por
-record. Detail shard 8-col y `perm_pos_pval.tsv` sin cambios. Test nuevo
+record. Detail shard 8-col y `perm_pos_pval.tsv` sin cambios. Test
 `test_null_domain_pool_wiring.py` fija la identidad observado == null sobre los goldens
 Apéndice B) · `V3-4` (`scoring_compute.R` + `residue_descriptors.py` +
-VEP + schema downstream) · `V3-5` (borrar `fop_pool.R` + poda de huérfanos) · `V3-6`
-(borrar `dunn_modified.R` + unificar parsers TSV + prosa final; marcar este doc `FINALIZED`).
+VEP + schema downstream; + `V3-4a` plumbing de `p.emp`) · `V3-5` (borrar `fop_pool.R` +
+poda de huérfanos + `docs/da_frac/` borrado) · `V3-6` (borrar `dunn_modified.R` +
+`_parse_discovery_entries` unifica los dos parsers TSV de discovery en `_perms_worker` +
+prosa de reportes a core v3 + este doc `FINALIZED`).
+
+Fuera de la secuencia, gated en Tier 1 PEPC: §7.3 flip de headline y §7.4
+`null_pvalue_boot` (ambos en `docs/scoring_v2_p_emp.md`); T4c (clave de dedup del
+pooler FOP, `nodo MRCA → índice de dominio pid`).
 
 `git branch --show-current` antes de cada commit (hazard de worktree concurrente).

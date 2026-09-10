@@ -7,12 +7,10 @@ toca la construcción del `core`.
 
 **Integrado en la secuencia core v3.** El rediseño del `core` de dominio Voronoi
 (`docs/scoring_v3_core.md`, Apéndice D) va por commits `V3-0..V3-6`. Estado:
-`V3-3` **hecho** (`665a0b7`, rewire del null onto `pool_domains`); el usuario
-está por entrar a `V3-4` (`scoring_compute.R` + schema downstream). `V3-3` **no**
-incluyó el plumbing de `p.emp` (reescribió `_expand_sides` → `_expand_pooled`,
-dejó intactos el bloque de detección y los finalizadores). Secuenciación de
-`p.emp` en §7: commit de plumbing del null **ahora, sobre V3-3**; consumidor R
-**dentro de V3-4**; flip de headline **follow-up post-V3-6** con gate PEPC.
+secuencia `V3-0..V3-6` **COMPLETA** en `scoring_v2`. El plumbing del null de
+`p.emp` entró en `V3-4a`; el consumidor R (§2f-ter) en `V3-4`. Queda **solo** el
+flip de headline (§7.3), follow-up post-V3-6 gated en la corrida Tier 1 PEPC de
+v3, más la limpieza de `null_pvalue_boot` (§7.4, sin tramo asignado).
 Core v3 §4 fija como invariante justo lo que `p.emp` asume: `CAAS_score` = media
 §2g de `core_s` sobre los 5 esquemas, `caas_row = asr_path_score = core_s`, shard
 de 8 columnas, esquema de `perm_pos_pval.tsv`. Core v3 cambia los **valores** de

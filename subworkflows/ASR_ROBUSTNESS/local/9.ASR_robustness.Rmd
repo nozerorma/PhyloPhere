@@ -55,9 +55,9 @@ params:
 <!--
   ASR Path Robustness Characterisation — PhyloPhere Pipeline
   ======================================================
-  Evaluates the continuous `asr_path_score` and its subcomponents:
-  (independence, derived_agreement, core) assigned to sites during ASR
-  evaluation. asr_path_score = independence * core * derived_agreement.
+  Evaluates the continuous `asr_path_score` assigned to sites during ASR
+  evaluation. Core v3: asr_path_score == core (the Voronoi-domain convergence
+  score); `derived_agreement` is a retained descriptor, not a score factor.
 
   Author: Miguel Ramon (miguel.ramon@upf.edu)
 -->
@@ -130,13 +130,12 @@ save_plot <- function(p, fname, width = 11, height = 6) {
 
 ## Introduction
 
-With the introduction of the continuous `asr_path_score`, the ASR evaluations have fundamentally shifted from binary cut-offs to a holistic score based on a path-to-root walk. This report details the distribution of the `asr_path_score` across evaluated sites and breaks down the final score (`independence * core * derived_agreement`) into its constituent components:
+With the introduction of the continuous `asr_path_score`, the ASR evaluations have fundamentally shifted from binary cut-offs to a holistic score. Core v3: `asr_path_score == core`, the CAAS convergence score on the pair's Voronoi domain. This report details the distribution of the `asr_path_score` across evaluated sites alongside its retained descriptor:
 
-*   **Replication (`core`)**: P(≥2 independent changes) — combinatorial probability that ≥2 pairs changed independently in at least one phenotype direction (top or bottom).
-*   **Independence at shared ancestors (`independence`)**: The probability that the derived state was absent at shared ancestors (LCA nodes).
-*   **Convergence agreement (`derived_agreement`)**: Coherence of derived states per phenotype side — penalises divergent derived residues.
+*   **Convergence score (`core`)**: PSS-weighted mean over the K fixed Voronoi domains of each domain's noisy-OR agreement with its same-residue partners, discounted by the derived state's probability at the shared LCA.
+*   **Convergence agreement (`derived_agreement`)**: descriptor only — coherence of derived states per phenotype side; penalises divergent derived residues.
 
-(T1: the former `mrca_diversity` parallel discount and `conservation_gate` conserved-pair gate have been removed from the score.)
+(Core v3 removed the pairwise isolation factor and the earlier `independence` / `mrca_diversity` / `conservation_gate` axes from the score.)
 
 ---
 
@@ -162,7 +161,7 @@ if (nrow(score_df) == 0) {
   stop("No ASR path scores found in the provided CSV.")
 }
 
-comp_vars <- c("independence", "derived_agreement", "core")
+comp_vars <- c("core", "derived_agreement")
 available_comps <- intersect(comp_vars, colnames(score_df))
 ```
 
