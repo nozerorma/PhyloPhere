@@ -80,13 +80,6 @@ def parse_arguments():
                    help="CAAS_FILTER_GENES mode (params.gene_filter_mode)")
     p.add_argument("--iqr-multiplier", type=float, default=3.0)
     p.add_argument("--extreme-percentile", type=float, default=0.99)
-    p.add_argument(
-        "--native-side-split", action="store_true",
-        help="scoring_v2 T3c: score the permulation null per phenotype side "
-             "(pairwise core_s), mirroring the observed --native-side-split. A "
-             "'both' position becomes two null rows. Off (default) keeps the "
-             "legacy single-row null.",
-    )
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     return p.parse_args()

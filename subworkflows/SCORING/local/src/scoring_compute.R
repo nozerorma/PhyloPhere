@@ -56,14 +56,10 @@ hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_p
 caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
 caas_pos_pval_file   <- parse_arg("--caas_pos_pval")  # perm_pos_pval.tsv (position-level calibrated null p); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
-# scoring_v2 T3c SC3: when on, the disambiguation subworkflow has already
-# FOP-pooled the hypothesis harvest in-tree (pool_hypotheses_pairwise, the real
-# per-side pairwise core), so the rows arrive one per (Gene, Position, scheme,
-# side) with hypothesis=NA. apply_fop_pooling would then be a no-op EXCEPT its
-# .derive_side_key() would OR change_top/bottom and clobber the authoritative
-# per-side `side`, so skip it entirely.
-native_side_split_raw <- parse_arg("--native_side_split", "false")
-native_side_split     <- tolower(native_side_split_raw) %in% c("true", "1", "yes")
+# The disambiguation subworkflow FOP-pools the hypothesis harvest in-tree
+# (pool_hypotheses_pairwise, the real per-side pairwise core), so rows arrive one
+# per (Gene, Position, scheme, side) with hypothesis=NA and scoring never touches
+# fop_pool.R.
 concordance_tau      <- as.numeric(parse_arg("--concordance_tau", "0.8"))  # POINT 3: da threshold for convergence_schemes
 if (!is.finite(concordance_tau) || concordance_tau <= 0 || concordance_tau > 1) concordance_tau <- 0.8
 stress_enabled_raw        <- parse_arg("--stress", "false")
@@ -263,35 +259,20 @@ cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring sche
 # pools s(p,site) within each Voronoi domain (PSS-weighted mean, weights from
 # contrast_hypotheses_pairs.tsv) and recombines with the path_scores.py algebra.
 # Non-FOP input (single contrast) passes through unchanged.
-if (native_side_split) {
-  cat("  FOP pooling: skipped — disambiguation already pooled in-tree per (Gene, Position, scheme, side) [T3c SC3]\n")
-  # Backfill the stable-schema columns apply_fop_pooling would have added so
-  # downstream (§2g display picks, reports) never hits a missing column. The
-  # harvest-wide convergence_schemes / residue-support descriptors are recomputed
-  # in-tree in SC3b; empty is a safe placeholder until then.
-  if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
-  if (!"supporting_hypotheses" %in% names(df)) df$supporting_hypotheses <- ""
-  if (!"core_perside_pooled" %in% names(df))   df$core_perside_pooled <- df$core
-  for (.c in c("convergence_schemes", "derived_residues", "top_residue_support",
-               "bottom_residue_support", "top_residue_support_detail",
-               "bottom_residue_support_detail", "top_species_residues",
-               "bottom_species_residues", "n_top_species", "n_bottom_species",
-               "n_conserved_pairs")) {
-    if (!.c %in% names(df)) df[[.c]] <- ""
-  }
-} else {
-  .fop_pool_src <- file.path(dirname(sub("^--file=", "", grep("^--file=", commandArgs(FALSE), value = TRUE)[1])), "fop_pool.R")
-  if (!file.exists(.fop_pool_src)) .fop_pool_src <- "fop_pool.R"
-  source(.fop_pool_src)
-  .n_before <- nrow(df)
-  df <- apply_fop_pooling(df, hyp_pairs_file, tau = concordance_tau)
-  if (nrow(df) != .n_before) {
-    cat(sprintf("  FOP pooling: %d rows -> %d after collapsing hypotheses (max n_hypotheses = %d)\n",
-                .n_before, nrow(df),
-                if ("n_hypotheses" %in% names(df)) max(df$n_hypotheses, na.rm = TRUE) else 0L))
-  } else {
-    cat("  FOP pooling: no multi-hypothesis positions (single-contrast run) — pass-through\n")
-  }
+cat("  FOP pooling: done in-tree per (Gene, Position, scheme, side) [T3c SC3]\n")
+# Backfill the stable-schema columns the old apply_fop_pooling used to add so
+# downstream (§2g display picks, reports) never hits a missing column. The
+# harvest-wide convergence_schemes / residue-support descriptors are recomputed
+# in-tree (SC3b leftover); "" is a safe placeholder for any the input lacks.
+if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
+if (!"supporting_hypotheses" %in% names(df)) df$supporting_hypotheses <- ""
+if (!"core_perside_pooled" %in% names(df))   df$core_perside_pooled <- df$core
+for (.c in c("convergence_schemes", "derived_residues", "top_residue_support",
+             "bottom_residue_support", "top_residue_support_detail",
+             "bottom_residue_support_detail", "top_species_residues",
+             "bottom_species_residues", "n_top_species", "n_bottom_species",
+             "n_conserved_pairs")) {
+  if (!.c %in% names(df)) df[[.c]] <- ""
 }
 df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
 
@@ -328,27 +309,19 @@ df$core <- suppressWarnings(as.numeric(df$core))
 # diagnostic column (recovery_boot removal is deferred to a later change).
 # The hypergeometric pvalue is not part of this either; it is the significance
 # gate (gate_all / gate_sig, section 2h).
-if (native_side_split) {
-  # T3d / H4: `df` now carries TWO rows for a "both" position (side top/bottom),
-  # both with the same position-level recovery_boot. Rank over the DISTINCT
-  # (Gene, Position, caap_group) set and broadcast, so the duplicate side rows
-  # do not inflate the percent_rank pool.
-  .phen_key <- df %>%
-    group_by(Gene, Position, caap_group) %>%
-    summarise(.rb = dplyr::first(recovery_boot), .groups = "drop") %>%
-    mutate(phen_score = 1 - dplyr::percent_rank(.rb)) %>%
-    select(Gene, Position, caap_group, phen_score)
-  df <- df %>%
-    select(-dplyr::any_of("phen_score")) %>%
-    left_join(.phen_key, by = c("Gene", "Position", "caap_group")) %>%
-    mutate(caas_row = asr_score)
-} else {
-  df <- df %>%
-    mutate(
-      phen_score = 1 - dplyr::percent_rank(recovery_boot),  # diagnostic only (T1)
-      caas_row   = asr_score
-    )
-}
+# H4: `df` carries TWO rows for a "both" position (side top/bottom), both with
+# the same position-level recovery_boot. Rank over the DISTINCT
+# (Gene, Position, caap_group) set and broadcast, so the duplicate side rows do
+# not inflate the percent_rank pool.
+.phen_key <- df %>%
+  group_by(Gene, Position, caap_group) %>%
+  summarise(.rb = dplyr::first(recovery_boot), .groups = "drop") %>%
+  mutate(phen_score = 1 - dplyr::percent_rank(.rb)) %>%  # diagnostic only (T1)
+  select(Gene, Position, caap_group, phen_score)
+df <- df %>%
+  select(-dplyr::any_of("phen_score")) %>%
+  left_join(.phen_key, by = c("Gene", "Position", "caap_group")) %>%
+  mutate(caas_row = asr_score)
 
 # ── 2f-bis. Tier 2: position-level calibrated permulation null ──────────────
 # perm_pos_pval.tsv (CT_DISAMBIGUATION's CAAS permulation-excess null, see
@@ -426,11 +399,10 @@ if (has_caas_pos_pval) {
 # Priority is display-only and never enters a scored quantity.
 df <- df %>% arrange(desc(scheme_priority))
 
-# T3d: with native_side_split, `side` is a first-class aggregation key -- a
-# "both" position is TWO per-side rows in `df`, each carrying its own core_s, and
-# CAAS_score = mean over the 5 schemes is taken PER SIDE. Flag off -> the legacy
-# (Gene, Position) collapse, side derived from OR-ed change_top/change_bottom.
-.pos_grp_keys <- if (native_side_split) c("Gene", "Position", "side") else c("Gene", "Position")
+# `side` is a first-class aggregation key -- a "both" position is TWO per-side
+# rows in `df`, each carrying its own core_s, and CAAS_score = mean over the 5
+# schemes is taken PER SIDE.
+.pos_grp_keys <- c("Gene", "Position", "side")
 
 pos_scores <- df %>%
   group_by(across(all_of(.pos_grp_keys))) %>%
@@ -481,40 +453,24 @@ pos_scores <- df %>%
     .groups = "drop"
   )
 
-if (native_side_split) {
-  # `side` is already the aggregation key (authoritative, from the per-side rows
-  # emitted by _split_result_by_side / _pool_observed_fop). change_side stays a
-  # descriptor alias for the T4b consumers still reading it.
-  pos_scores <- pos_scores %>%
-    mutate(change_side = side) %>%
-    select(-dplyr::any_of(c("has_change_top", "has_change_bottom")))
-  # T3d per-side diagnostics for the reports (SC5): core == core_s for this
-  # side, phen_score the §2f percent-rank. Scheme means, per direction -- a
-  # legitimate per-side diagnostic (the collapse warned against in the summarise
-  # note is the position-level one that hides scheme disagreement).
-  .side_diag <- df %>%
-    group_by(across(all_of(.pos_grp_keys))) %>%
-    summarise(
-      core       = if ("core" %in% names(df)) mean(suppressWarnings(as.numeric(core)), na.rm = TRUE) else NA_real_,
-      phen_score = if ("phen_score" %in% names(df)) dplyr::first(phen_score) else NA_real_,
-      .groups = "drop"
-    )
-  pos_scores <- pos_scores %>% left_join(.side_diag, by = .pos_grp_keys)
-} else {
-  pos_scores <- pos_scores %>%
-    mutate(
-      change_side = case_when(
-        has_change_top & has_change_bottom ~ "both",
-        has_change_top                     ~ "top",
-        has_change_bottom                  ~ "bottom",
-        TRUE                               ~ "none"
-      ),
-      # T2a: first-class direction key. Same derivation as change_side (which
-      # stays a column through T4b); "both" is one row until T3d splits it.
-      side = change_side
-    ) %>%
-    select(-has_change_top, -has_change_bottom)
-}
+# `side` is already the aggregation key (authoritative, from the per-side rows
+# emitted by _split_result_by_side / _pool_observed_fop). change_side stays a
+# descriptor alias for the T4b consumers still reading it.
+pos_scores <- pos_scores %>%
+  mutate(change_side = side) %>%
+  select(-dplyr::any_of(c("has_change_top", "has_change_bottom")))
+# Per-side diagnostics for the reports (SC5): core == core_s for this side,
+# phen_score the §2f percent-rank. Scheme means, per direction -- a legitimate
+# per-side diagnostic (the collapse warned against in the summarise note is the
+# position-level one that hides scheme disagreement).
+.side_diag <- df %>%
+  group_by(across(all_of(.pos_grp_keys))) %>%
+  summarise(
+    core       = if ("core" %in% names(df)) mean(suppressWarnings(as.numeric(core)), na.rm = TRUE) else NA_real_,
+    phen_score = if ("phen_score" %in% names(df)) dplyr::first(phen_score) else NA_real_,
+    .groups = "drop"
+  )
+pos_scores <- pos_scores %>% left_join(.side_diag, by = .pos_grp_keys)
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
 
@@ -767,85 +723,50 @@ cat("\n─── Gene-level scoring ──────────────�
 # Reference pools are direction-matched: a gene's top-direction positions are
 # ranked against the genome-wide pool of top-direction positions, so each score
 # is calibrated against the distribution it is actually drawn from.
-# T3d (T3-doc §12): two lists kept end to end. `.pool_top` / `.pool_bottom` are
-# PURE by side -- top never sees a bottom score -- so a `side == dir` filter
-# replaces `change_side %in% c(dir, "both")`. `.pool_all` and the undirected
-# gene_caas_score dedup a "both" position to ONE entry = its best side
-# (max over the two side rows), so it is not double-counted; n for size_adj_max
-# is n_distinct(Position). Flag off keeps the legacy `c(dir, "both")` pools.
-if (native_side_split) {
-  .pos_undirected <- pos_scores %>%
-    filter(!is.na(CAAS_score)) %>%
-    group_by(Gene, Position) %>%
-    summarise(CAAS_score = max(CAAS_score), .groups = "drop")
-  .pool_all    <- sort(.pos_undirected$CAAS_score)
-  .pool_top    <- sort(pos_scores$CAAS_score[pos_scores$side == "top"    & !is.na(pos_scores$CAAS_score)])
-  .pool_bottom <- sort(pos_scores$CAAS_score[pos_scores$side == "bottom" & !is.na(pos_scores$CAAS_score)])
-} else {
-  .pool_all    <- sort(pos_scores$CAAS_score[!is.na(pos_scores$CAAS_score)])
-  .pool_top    <- sort(pos_scores$CAAS_score[pos_scores$change_side %in% c("top", "both") &
-                                             !is.na(pos_scores$CAAS_score)])
-  .pool_bottom <- sort(pos_scores$CAAS_score[pos_scores$change_side %in% c("bottom", "both") &
-                                             !is.na(pos_scores$CAAS_score)])
-}
+# T3-doc §12: two lists kept end to end. `.pool_top` / `.pool_bottom` are PURE
+# by side -- top never sees a bottom score. `.pool_all` and the undirected
+# gene_caas_score dedup a "both" position to ONE entry = its best side (max over
+# the two side rows), so it is not double-counted; n for size_adj_max is
+# n_distinct(Position).
+.pos_undirected <- pos_scores %>%
+  filter(!is.na(CAAS_score)) %>%
+  group_by(Gene, Position) %>%
+  summarise(CAAS_score = max(CAAS_score), .groups = "drop")
+.pool_all    <- sort(.pos_undirected$CAAS_score)
+.pool_top    <- sort(pos_scores$CAAS_score[pos_scores$side == "top"    & !is.na(pos_scores$CAAS_score)])
+.pool_bottom <- sort(pos_scores$CAAS_score[pos_scores$side == "bottom" & !is.na(pos_scores$CAAS_score)])
 cat(sprintf("  size-adjust reference pools: all=%d, top=%d, bottom=%d positions\n",
             length(.pool_all), length(.pool_top), length(.pool_bottom)))
 
-if (native_side_split) {
-  .gene_undirected <- .pos_undirected %>%
-    group_by(Gene) %>%
-    summarise(
-      gene_caas_score = size_adj_max(CAAS_score, .pool_all),
-      n_positions     = dplyr::n_distinct(Position),
-      .groups = "drop"
-    )
-  gene_caas <- pos_scores %>%
-    group_by(Gene) %>%
-    summarise(
-      gene_caas_score_top_all    = {
-        vals <- CAAS_score[side == "top" & !is.na(CAAS_score)]
-        if (length(vals) > 0) size_adj_max(vals, .pool_top) else NA_real_
-      },
-      gene_caas_score_bottom_all = {
-        vals <- CAAS_score[side == "bottom" & !is.na(CAAS_score)]
-        if (length(vals) > 0) size_adj_max(vals, .pool_bottom) else NA_real_
-      },
-      n_positions_top    = sum(side == "top",    na.rm = TRUE),
-      n_positions_bottom = sum(side == "bottom", na.rm = TRUE),
-      max_hypotheses     = if ("n_hypotheses" %in% names(pos_scores)) max(n_hypotheses, na.rm = TRUE) else NA_integer_,
-      mean_hypotheses    = if ("n_hypotheses" %in% names(pos_scores)) round(mean(n_hypotheses, na.rm = TRUE), 1) else NA_real_,
-      .groups = "drop"
-    ) %>%
-    left_join(.gene_undirected, by = "Gene") %>%
-    mutate(
-      gene_caas_score_top    = gene_caas_score_top_all,
-      gene_caas_score_bottom = gene_caas_score_bottom_all
-    )
-} else {
-  gene_caas <- pos_scores %>%
-    group_by(Gene) %>%
-    summarise(
-      gene_caas_score            = size_adj_max(CAAS_score, .pool_all),
-      gene_caas_score_top_all    = {
-        vals <- CAAS_score[change_side %in% c("top", "both")]
-        if (length(vals) > 0) size_adj_max(vals, .pool_top) else NA_real_
-      },
-      gene_caas_score_bottom_all = {
-        vals <- CAAS_score[change_side %in% c("bottom", "both")]
-        if (length(vals) > 0) size_adj_max(vals, .pool_bottom) else NA_real_
-      },
-      n_positions        = n(),
-      n_positions_top    = sum(change_side %in% c("top",    "both"), na.rm = TRUE),
-      n_positions_bottom = sum(change_side %in% c("bottom", "both"), na.rm = TRUE),
-      max_hypotheses     = if ("n_hypotheses" %in% names(pos_scores)) max(n_hypotheses, na.rm = TRUE) else NA_integer_,
-      mean_hypotheses    = if ("n_hypotheses" %in% names(pos_scores)) round(mean(n_hypotheses, na.rm = TRUE), 1) else NA_real_,
-      .groups = "drop"
-    ) %>%
-    mutate(
-      gene_caas_score_top    = gene_caas_score_top_all,
-      gene_caas_score_bottom = gene_caas_score_bottom_all
-    )
-}
+.gene_undirected <- .pos_undirected %>%
+  group_by(Gene) %>%
+  summarise(
+    gene_caas_score = size_adj_max(CAAS_score, .pool_all),
+    n_positions     = dplyr::n_distinct(Position),
+    .groups = "drop"
+  )
+gene_caas <- pos_scores %>%
+  group_by(Gene) %>%
+  summarise(
+    gene_caas_score_top_all    = {
+      vals <- CAAS_score[side == "top" & !is.na(CAAS_score)]
+      if (length(vals) > 0) size_adj_max(vals, .pool_top) else NA_real_
+    },
+    gene_caas_score_bottom_all = {
+      vals <- CAAS_score[side == "bottom" & !is.na(CAAS_score)]
+      if (length(vals) > 0) size_adj_max(vals, .pool_bottom) else NA_real_
+    },
+    n_positions_top    = sum(side == "top",    na.rm = TRUE),
+    n_positions_bottom = sum(side == "bottom", na.rm = TRUE),
+    max_hypotheses     = if ("n_hypotheses" %in% names(pos_scores)) max(n_hypotheses, na.rm = TRUE) else NA_integer_,
+    mean_hypotheses    = if ("n_hypotheses" %in% names(pos_scores)) round(mean(n_hypotheses, na.rm = TRUE), 1) else NA_real_,
+    .groups = "drop"
+  ) %>%
+  left_join(.gene_undirected, by = "Gene") %>%
+  mutate(
+    gene_caas_score_top    = gene_caas_score_top_all,
+    gene_caas_score_bottom = gene_caas_score_bottom_all
+  )
 
 cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)\n",
             nrow(gene_caas),
@@ -1339,18 +1260,14 @@ local({
   probe <- chk$Gene[sample.int(nrow(chk), min(25L, nrow(chk)))]
   worst <- 0
   for (g in probe) {
-    if (native_side_split) {
-      # gene_caas_score is size_adj_max over ONE value per Position (its best
-      # side), n = n_distinct(Position) -- must match .gene_undirected + the
-      # null's max-deduped "all" pool (gene_wrapper _build_cycle_score_pools).
-      v <- pos_out %>%
-        dplyr::filter(Gene == g, !is.na(CAAS_score)) %>%
-        dplyr::group_by(Position) %>%
-        dplyr::summarise(s = max(CAAS_score), .groups = "drop") %>%
-        dplyr::pull(s)
-    } else {
-      v <- pos_out$CAAS_score[pos_out$Gene == g]
-    }
+    # gene_caas_score is size_adj_max over ONE value per Position (its best
+    # side), n = n_distinct(Position) -- must match .gene_undirected + the
+    # null's max-deduped "all" pool (gene_wrapper _build_cycle_score_pools).
+    v <- pos_out %>%
+      dplyr::filter(Gene == g, !is.na(CAAS_score)) %>%
+      dplyr::group_by(Position) %>%
+      dplyr::summarise(s = max(CAAS_score), .groups = "drop") %>%
+      dplyr::pull(s)
     re <- size_adj_max(v, .pool_all)
     ob <- chk$gene_caas_score[chk$Gene == g]
     if (is.finite(re) && is.finite(ob)) worst <- max(worst, abs(re - ob))

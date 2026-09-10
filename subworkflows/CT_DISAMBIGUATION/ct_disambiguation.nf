@@ -102,7 +102,6 @@ process CT_DISAMBIGUATION_RUN {
       --max-tasks-per-child ${params.ct_disambig_max_tasks_per_child} \
       --run-diagnostics \
       --verbose \
-      ${params.native_side_split ? "--native-side-split" : ''} \
       ${hyp_pairs.name.startsWith('NO_') ? '' : "--hypotheses-pairs ${hyp_pairs}"} \
       ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
       ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \

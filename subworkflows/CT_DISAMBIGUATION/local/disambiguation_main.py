@@ -91,17 +91,10 @@ def parse_arguments():
         "--taxid-mapping", default=None, help="TaxID to species mapping file"
     )
     parser.add_argument(
-        "--native-side-split",
-        action="store_true",
-        help="scoring_v2 T3 feature flag: emit two ConvergenceResult rows for a "
-        "'both' CAAS position (one per phenotype side) and score each direction "
-        "independently. Off (default) keeps the legacy single-row path.",
-    )
-    parser.add_argument(
         "--hypotheses-pairs", default=None,
-        help="contrast_hypotheses_pairs.tsv (FOP). With --native-side-split its "
-        "per-(hypothesis, domain) pss_score weights the in-tree FOP pooling of "
-        "the hypothesis harvest. Absent -> equal-weight node pooling.",
+        help="contrast_hypotheses_pairs.tsv (FOP). Its per-(hypothesis, domain) "
+        "pss_score weights the in-tree per-side FOP pooling of the hypothesis "
+        "harvest. Absent -> equal-weight node pooling.",
     )
 
     # Performance

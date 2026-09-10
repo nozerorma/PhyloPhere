@@ -71,7 +71,7 @@ workflow CT_DISAMBIGUATION {
         }
 
         // scoring_v2 T3c SC3: contrast_hypotheses_pairs.tsv — per-(hypothesis,
-        // domain) PSS weights for the in-tree FOP pooling (native_side_split).
+        // domain) PSS weights for the in-tree per-side FOP pooling.
         // Only read when the flag is on; absent -> equal-weight node pooling.
         // Resolution: --ct_disambig_hypotheses_pairs / --scoring_hypotheses_pairs
         // -> auto-discover in outdir -> NO_HYP_PAIRS sentinel (same convenience

@@ -280,7 +280,6 @@ process CAAS_PERMS_DISAMBIGUATE {
         --workers ${workers} \\
         --max-tasks-per-child ${max_tasks_per_child} \\
         --asr-cache-dir ${asr_cache_dir} \\
-        ${params.native_side_split ? "--native-side-split" : ''} \\
         ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
         ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     cp caas_perms_out/gene_cycle_scores.tsv gene_cycle_scores.tsv

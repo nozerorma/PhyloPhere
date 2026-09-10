@@ -104,7 +104,6 @@ process SCORING_COMPUTE {
             --caas_perms      '${cp_arg}' \
             --caas_pos_pval   '${cpp_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
-            --native_side_split    '${params.native_side_split ?: false}' \
             --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
@@ -133,7 +132,6 @@ process SCORING_COMPUTE {
             --caas_perms      '${cp_arg}' \
             --caas_pos_pval   '${cpp_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
-            --native_side_split    '${params.native_side_split ?: false}' \
             --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
