@@ -1204,46 +1204,39 @@ def _perms_worker(
         if not all_cycle_results:
             return (gene, [], [])
 
-        # ── scoring_v2 T3c SC2b: per-side pairwise null ──────────────────────────
-        # Every scored record carries `.sides` = {"top": <side_dict>,
-        # "bottom": <side_dict>} (the axes replay's compute_asr_path_score
-        # return). A "both" position becomes two records (side authoritative,
-        # asr = that side's core_s); a one-sided position one record; no
-        # participant one `side="none"` row. The FOP branch below pools the
-        # harvest per side FIRST (pool_hypotheses_pairwise), then expands.
-        _nss_node_index = None
+        # ── scoring_v2 core v3 (V3-3): per-side domain-pooled null ────────────────
+        # Every axes-only record carries `.sides` = the raw compute_domain_scores
+        # return {"top": {...}, "bottom": {...}, "domain_meta": {...}} for one
+        # (position, scheme, hypothesis). fop_pool.pool_domains collapses M >= 1
+        # such records into one score per phenotype side (M == 1 degenerates to
+        # the plain PSS-weighted mean over the K fixed Voronoi domains), holding
+        # the SAME statistic the observed path emits via
+        # disambiguate_single._emit_pooled_side_rows — the observed / null
+        # comparison in the FCS p.perm depends on that identity. treeless: every
+        # tree lookup already happened inside compute_domain_scores.
+        from src.convergence.fop_pool import pool_domains, base_cycle as _bc
 
-        def _nss_per_node_dist(pos0: int):
-            key1 = int(pos0) + 1
-            if isinstance(per_site_dist_cache, dict) and key1 in per_site_dist_cache:
-                return per_site_dist_cache[key1]
-            pnd = {}
-            if full_posteriors:
-                for nid, sites in full_posteriors.items():
-                    sp = sites.get(key1) if sites else None
-                    if sp:
-                        pnd[int(nid)] = dict(sorted(sp.items()))
-            return pnd
-
-        def _expand_sides(pos, grp, hyp_label, sides_dict):
-            from src.convergence.disambiguate_single import PositionAxes as _PA
+        def _expand_pooled(pos, grp, hyp_label, pooled):
+            """pool_domains return -> <= 2 per-side PositionAxes rows (`side`
+            authoritative, `asr_path_score` = that side's core_s). No participating
+            domain on either side -> one `side="none"` row."""
             out = []
             for s in ("top", "bottom"):
-                sd = (sides_dict or {}).get(s) or {}
-                if int(sd.get("n_participating", 0) or 0) <= 0:
+                agg = (pooled or {}).get(s) or {}
+                den = int(agg.get("agree_den", 0) or 0)
+                if int(agg.get("n_participating", 0) or 0) <= 0:
                     continue
-                out.append(_PA(
+                core = agg.get("core", agg.get("asr_path_score", 0.0))
+                out.append(PositionAxes(
                     position=pos, caap_group=grp,
-                    asr_path_score=float(sd.get("asr_path_score", 0.0) or 0.0),
-                    side=s, hypothesis=hyp_label, pair_scores=sd.get("pair_scores"),
-                    core=sd.get("core"), derived_agreement=sd.get("derived_agreement"),
-                    conserved_pair_scores=sd.get("conserved_pair_scores") or None,
-                    conserved_pair_nodes=sd.get("conserved_pair_nodes") or None,
-                    pair_derived_top=sd.get("pair_derived_top") or None,
-                    pair_derived_bot=sd.get("pair_derived_bot") or None,
+                    asr_path_score=float(core or 0.0),
+                    side=s, hypothesis=hyp_label, core=core,
+                    derived_agreement=(
+                        (int(agg.get("agree_num", 0) or 0) / den) if den else None),
+                    domain_scores=(dict(agg.get("domain_scores") or {}) or None),
                 ))
             if not out:
-                out.append(_PA(
+                out.append(PositionAxes(
                     position=pos, caap_group=grp, asr_path_score=0.0,
                     side="none", hypothesis=hyp_label,
                 ))
@@ -1251,16 +1244,10 @@ def _perms_worker(
 
         # ── FOP domain-pooling: collapse the "<base>~H*" replays of each cycle ──
         # into one record per (base cycle, position, scheme), mirroring
-        # scoring_compute.R §2b / fop_pool.R on the observed side. From here the
-        # worker (and both aggregation passes) see one row per base cycle.
+        # scoring_compute.R §2b on the observed side. From here the worker (and
+        # both aggregation passes) see one row per base cycle.
         if fop_pairs is not None:
-            from src.convergence.fop_pool import (
-                pool_hypotheses_pairwise, base_cycle as _bc,
-            )
-            from src.convergence.path_scores import build_node_index as _bni
-            _nss_node_index = _bni(getattr(tree_data, "root", None))
-
-            # (base_cyc, pos, scheme) -> [ {hyp, sides} ]
+            # (base_cyc, pos, scheme) -> [ {hyp, sides} ]; one pool_domains call each.
             by_pos: Dict[Tuple[str, int, str], List[Dict[str, Any]]] = {}
             for cyc, results_list in all_cycle_results:
                 base = _bc(cyc)
@@ -1276,13 +1263,12 @@ def _perms_worker(
 
             pooled_by_cycle: Dict[str, List[Any]] = {}
             for (base, pos, grp), hyp_recs in by_pos.items():
-                pss_map = fop_pairs.get(base, {})  # {(hyp, domain) -> pss}
-                pooled = pool_hypotheses_pairwise(
-                    hyp_recs, _nss_node_index, _nss_per_node_dist(pos),
-                    pss_map, grp,
-                )
+                # _read_fop_pairs already keys by base cycle; pool_domains wants
+                # only {(hyp, domain) -> pss} for this cycle (missing -> equal weight).
+                pss_map = fop_pairs.get(base, {}) or None
+                pooled = pool_domains(hyp_recs, pss_map)
                 pooled_by_cycle.setdefault(base, []).extend(
-                    _expand_sides(pos, grp, None, pooled)
+                    _expand_pooled(pos, grp, None, pooled)
                 )
             all_cycle_results = list(pooled_by_cycle.items())
             # n_cycles_total below must be the FULL base-cycle universe, not just
@@ -1290,8 +1276,8 @@ def _perms_worker(
             cycle_tags = sorted({_bc(c) for c in cycle_tags})
 
         else:
-            # Non-FOP per-side: no pooling, just expand each record's `.sides`
-            # into per-side rows (a "both" position -> two records).
+            # Non-FOP: one hypothesis per record. pool_domains still runs (M == 1)
+            # so observed and null go through the exact same reducer.
             _expanded = []
             for cyc, recs in all_cycle_results:
                 out_recs = []
@@ -1299,9 +1285,13 @@ def _perms_worker(
                     pos = getattr(r, "position", None)
                     if pos is None:
                         continue
-                    out_recs.extend(_expand_sides(
-                        pos, getattr(r, "caap_group", "US"),
-                        getattr(r, "hypothesis", None), getattr(r, "sides", None),
+                    hyp = getattr(r, "hypothesis", None)
+                    pooled = pool_domains(
+                        [{"hyp": hyp or "H1", "sides": getattr(r, "sides", None) or {}}],
+                        None,
+                    )
+                    out_recs.extend(_expand_pooled(
+                        pos, getattr(r, "caap_group", "US"), hyp, pooled,
                     ))
                 _expanded.append((cyc, out_recs))
             all_cycle_results = _expanded

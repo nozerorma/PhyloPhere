@@ -555,8 +555,14 @@ posiciones se detectan; estructura de la media de 5 esquemas §2g; hipergeométr
 
 `V3-0` (este documento + red golden xfail) · `V3-1` (`compute_domain_scores` en
 `path_scores.py`; regen de `core_v3_golden.json` con diff vacío) · `V3-2` (`pool_domains` +
-`disambiguate_single` + `models.py` + writers) · `V3-3` (null path,
-`gene_wrapper.py::_perms_worker`) · `V3-4` (`scoring_compute.R` + `residue_descriptors.py` +
+`disambiguate_single` + `models.py` + writers) · **`V3-3` SHIPPED** (null path:
+`gene_wrapper.py::_perms_worker` reescrito sobre `pool_domains`; `_expand_pooled` reemplaza
+`_expand_sides`; se retiran `pool_hypotheses_pairwise` / `_nss_node_index` /
+`_nss_per_node_dist` / `build_node_index` del worker — el pooler null es sin árbol.
+FOP: una llamada `pool_domains` por `(base cycle, pos, scheme)`; no-FOP: `M = 1` por
+record. Detail shard 8-col y `perm_pos_pval.tsv` sin cambios. Test nuevo
+`test_null_domain_pool_wiring.py` fija la identidad observado == null sobre los goldens
+Apéndice B) · `V3-4` (`scoring_compute.R` + `residue_descriptors.py` +
 VEP + schema downstream) · `V3-5` (borrar `fop_pool.R` + poda de huérfanos) · `V3-6`
 (borrar `dunn_modified.R` + unificar parsers TSV + prosa final; marcar este doc `FINALIZED`).
 
