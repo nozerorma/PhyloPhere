@@ -160,6 +160,22 @@ boot_measure_col <- if ("recovery_boot" %in% names(pos_df)) {
 }
 boot_measure_is_raw  <- identical(boot_measure_col,  "recovery_boot")
 
+# scoring_compute.R §2g stopped carrying the per-scheme factors to the position
+# level in T1 (a position-level mean of asr_score / core hides scheme
+# disagreement). T3d (native_side_split) re-emits `core` / `phen_score` PER SIDE
+# as diagnostics. Alias `asr_score` to whichever is present so the panels below
+# degrade instead of erroring; `has_phen_asr` gates the joint scatter, which is
+# only meaningful with a real per-row phenotype axis.
+if (!"asr_score" %in% names(pos_df)) {
+  pos_df$asr_score <- if ("core" %in% names(pos_df) && any(!is.na(pos_df$core))) {
+    pos_df$core
+  } else {
+    pos_df$CAAS_score
+  }
+}
+has_phen_asr <- all(c("phen_score", "asr_score") %in% names(pos_df)) &&
+  any(!is.na(pos_df$phen_score))
+
 # Provisional detection - overridden in the load-data block after directional scores are computed
 # NOTE: what for then?
 has_rand <- "accum_cct_p" %in% names(gene_df) && any(!is.na(gene_df$accum_cct_p))
@@ -664,7 +680,14 @@ This section displays the distributions of the primary input significance measur
 
 ### Phenotype Evolution vs Ancestral Reconstruction
 
-```{r phen-vs-asr-scatter, fig.height=7, fig.width=8}
+```{r phen-vs-asr-scatter-skip, eval=!has_phen_asr, results='asis'}
+cat("_`phen_score` is not present in `position_scores.tsv` (scoring_compute.R",
+    "§2g does not carry the per-scheme phenotype axis to the position level).",
+    "The joint phen-vs-asr scatter is skipped; `asr_score` here is aliased to",
+    "the per-side `core`._\n")
+```
+
+```{r phen-vs-asr-scatter, fig.height=7, fig.width=8, eval=has_phen_asr}
 joint_df <- pos_df %>%
   filter(!is.na(phen_score), !is.na(asr_score))
 

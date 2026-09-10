@@ -178,7 +178,7 @@ Usage:
 --ct_disambig_convergence_mode        <"focal_clade|mrca">            "focal_clade"
 --ct_disambig_posterior_threshold      <FLOAT 0-1>                     0.1
 --ct_disambig_max_tasks_per_child       <INTEGER>                       50
---native_side_split                     <true|false>                    false  (T3: two rows per "both" position, score each direction)
+--native_side_split                     <true|false>                    true   (T3d: two rows per "both" position, score each direction with the pairwise core)
 --asr_robustness                        <true|false>                    true   (parallel diagnostic report)
 '''
 
