@@ -80,7 +80,9 @@ def test_sided_shard_max_dedup():
         assert abs(float(g["bottom_caas"]) - 1.0) < 1e-12, g
 
 
-def test_sided_perm_pos_pval_two_rows():
+def test_pooled_perm_pos_pval_one_row_per_pos():
+    # V3-4a: perm_pos_pval.tsv is pooled to (Gene, Position, caap_group) -- no
+    # `side` column. A "both" position is still two detail rows but ONE pval row.
     rows = [("G1", "c1", 10, "US", 0.30, 3, 0, "top"),
             ("G1", "c1", 10, "US", 0.70, 3, 0, "bottom"),
             ("G1", "c2", 10, "US", 0.30, 3, 0, "top"),
@@ -93,15 +95,42 @@ def test_sided_perm_pos_pval_two_rows():
         d.mkdir()
         _shard(d, "G1", rows, SIDED)
         gw._finalize_perm_pos_pval(d, Path(td), cycle_tags=["c1", "c2", "c3"])
-        got = {}
         with open(Path(td) / "perm_pos_pval.tsv") as f:
-            for row in csv.DictReader(f, delimiter="\t"):
-                got[(row["Position"], row["side"])] = row
-        # pos 10 "both" -> two rows, same n_detected / pos_perm_p
-        assert ("10", "top") in got and ("10", "bottom") in got
-        assert got[("10", "top")]["n_detected"] == got[("10", "bottom")]["n_detected"] == "3"
-        assert got[("10", "top")]["pos_perm_p"] == got[("10", "bottom")]["pos_perm_p"]
-        assert ("11", "top") in got and ("11", "bottom") not in got
+            rdr = csv.DictReader(f, delimiter="\t")
+            hdr = rdr.fieldnames
+            got = {r["Position"]: r for r in rdr}
+        assert "side" not in hdr
+        assert set(got) == {"10", "11"}
+        assert got["10"]["n_detected"] == "3"
+        assert abs(float(got["10"]["pos_perm_p"]) - 4 / 4) < 1e-12
+        assert got["11"]["n_detected"] == "1"
+
+
+def test_perm_pos_cycle_caas_dump():
+    # V3-4a: _finalize_perm_scores emits perm_pos_cycle_caas.tsv.gz with
+    # per (Gene, Position, side, cycle) caas_sum (priority-ordered) + n_schemes.
+    rows = [("G1", "c1", 10, "US",  0.30, 2, 0, "top"),
+            ("G1", "c1", 10, "GS3", 0.50, 2, 0, "top"),
+            ("G1", "c1", 10, "US",  0.70, 2, 0, "bottom"),
+            ("G1", "c1", 11, "US",  0.20, 1, 0, "top")]
+    with tempfile.TemporaryDirectory() as td:
+        d = Path(td) / "perm_pos_detail"
+        d.mkdir()
+        _shard(d, "G1", rows, SIDED)
+        rl = gw.build_percent_rank_lookup(_hist(rows))
+        gw._finalize_perm_scores(d, Path(td), cycle_tags=["c1"], rank_lookup=rl)
+        got = {}
+        with gzip.open(Path(td) / "perm_pos_cycle_caas.tsv.gz", "rt") as f:
+            for r in csv.DictReader(f, delimiter="\t"):
+                got[(r["Position"], r["side"], r["cycle"])] = r
+        # pos10/top: US(0.30) + GS3(0.50) summed US-first -> 0.80, n_schemes 2
+        assert abs(float(got[("10", "top", "c1")]["caas_sum"]) - 0.80) < 1e-12
+        assert got[("10", "top", "c1")]["n_schemes"] == "2"
+        # pos10/bottom: single scheme
+        assert abs(float(got[("10", "bottom", "c1")]["caas_sum"]) - 0.70) < 1e-12
+        assert got[("10", "bottom", "c1")]["n_schemes"] == "1"
+        # the per-side mean equals _build_cycle_score_pools' side score
+        assert abs(0.80 / 2 - 0.40) < 1e-12
 
 
 if __name__ == "__main__":

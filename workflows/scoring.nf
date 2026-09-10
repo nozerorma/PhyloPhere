@@ -32,6 +32,7 @@ workflow SCORING {
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
         caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm + report
         caas_pos_pval_ch         // Channel<path> or null — LOO null_pvalue_boot per (gene,position,scheme)
+        caas_pos_cycle_caas_ch   // Channel<path> or null — perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator)
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
@@ -154,14 +155,13 @@ workflow SCORING {
         //   3. caas_perms_file    — import as-is; only safe if it was produced by the
         //      current scoring formula.
         def caas_perms_resolved
+        def _rebuild = null
         if (!caas_perms_ch && params.caas_pos_detail_file) {
             def _detail = file(params.caas_pos_detail_file)
             assert _detail.exists() : "SCORING: --caas_pos_detail_file not found: ${params.caas_pos_detail_file}"
             log.info "SCORING: rebuilding CAAS permulation null from ${_detail.name} (no ASR replay)"
-            caas_perms_resolved = CAAS_PERMS_REBUILD(Channel.value(_detail), resolved_background)
-                .perms
-                .collect()
-                .map { it[0] }
+            _rebuild = CAAS_PERMS_REBUILD(Channel.value(_detail), resolved_background)
+            caas_perms_resolved = _rebuild.perms.collect().map { it[0] }
         } else {
             caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
                 .ifEmpty { file(params.caas_perms_file ?: 'NO_FILE') }
@@ -181,6 +181,24 @@ workflow SCORING {
             .collect()
             .map { it[0] }
 
+        // Position-level per-cycle CAAS numerator/denominator (perm_pos_cycle_caas.tsv.gz,
+        // V3-4a). Feeds scoring_compute.R §2f-ter's pooled p.emp. Same
+        // hoist-above-SCORING_COMPUTE + param-fallback pattern as caas_pos_pval.
+        // A --caas_pos_detail_file rebuild (CAAS_PERMS_REBUILD above) regenerates
+        // it too, so prefer that when the live channel is absent.
+        def caas_pos_cycle_caas_resolved
+        if (!caas_pos_cycle_caas_ch && _rebuild != null) {
+            caas_pos_cycle_caas_resolved = _rebuild.pos_cycle_caas
+                .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_CAAS_POS_CYCLE_CAAS') }
+                .collect()
+                .map { it[0] }
+        } else {
+            caas_pos_cycle_caas_resolved = (caas_pos_cycle_caas_ch ?: Channel.empty())
+                .ifEmpty { file(params.caas_pos_cycle_caas_file ?: 'NO_CAAS_POS_CYCLE_CAAS') }
+                .collect()
+                .map { it[0] }
+        }
+
         // ── Run scoring — single pass on full postproc pool ────────────────
         def compute_out = SCORING_COMPUTE(
             resolved_postproc,
@@ -192,7 +210,8 @@ workflow SCORING {
             accum_all_ch,
             resolved_hyp_pairs,
             caas_perms_resolved,
-            caas_pos_pval_resolved
+            caas_pos_pval_resolved,
+            caas_pos_cycle_caas_resolved
         )
 
         // ── Render report ──────────────────────────────────────────────────

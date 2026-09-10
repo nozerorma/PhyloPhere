@@ -1320,46 +1320,38 @@ def _perms_worker(
         loo_denom = max(n_cycles_total - 1, 1)
 
         n_detected = {}
-        # A "both" position is two records (side="top" / "bottom"); collect the
-        # SET of sides seen so it emits two perm_pos_pval rows (same n_detected,
-        # different side) — the broadcast §2f-bis (SC4) joins the null on
-        # (Gene, Position, caap_group, side) 1:1 with the observed side.
-        sides_seen: Dict[Tuple[Any, str], Set[str]] = {}
+        # V3-4a: pos_perm_p (and the R-side p.emp it decomposes) are POOLED to
+        # (Gene, Position): a cycle re-detects the position if it re-detects
+        # EITHER phenotype side, and the pooled statistic is the max-over-sides
+        # "all" axis (mirrors scoring_compute.R .pos_undirected and
+        # _build_cycle_score_pools' pc["all"]). The detail shard still carries
+        # `side` (a "both" position is two rows) for the per-side gene x cycle
+        # scores and the perm_pos_cycle_caas dump; only the position-level p is
+        # side-pooled, so n_detected keys on (pos, caap_group) and emits ONE
+        # perm_pos_pval row per key.
         for cyc, biochem_results in all_cycle_results:
             for r in biochem_results:
                 pos = getattr(r, "position", None)
                 group = getattr(r, "caap_group", "US")
                 if pos is not None:
-                    key = (pos, group)
-                    if key not in n_detected:
-                        n_detected[key] = set()
-                    n_detected[key].add(cyc)
-                    sides_seen.setdefault(key, set()).add(
-                        getattr(r, "side", "none") or "none")
+                    n_detected.setdefault((pos, group), set()).add(cyc)
 
         n_detected_count = {}
         perm_pos_pval_rows = []
         for key, cycles_set in n_detected.items():
             k = len(cycles_set)
             n_detected_count[key] = k
-            row_sides = sorted(sides_seen.get(key, {"none"})) or ["none"]
             # Tier 2: pos_perm_p is a calibrated position-level permulation p,
-            # add-one smoothed (Davison & Hinkley); it is NOT leave-one-out. It
-            # is per (Gene, Position, caap_group) — a CAAS is side-agnostic — so
-            # a "both" position's two side rows carry the SAME n_detected /
-            # pos_perm_p / null_pvalue_boot, differing only in `side` (the
-            # broadcast §2f-bis / SC4 joins on).
-            for row_side in row_sides:
-                perm_pos_pval_rows.append({
-                    "side": row_side,
-                    "Gene": gene,
-                    "Position": key[0],
-                    "caap_group": key[1],
-                    "n_detected": k,
-                    "n_cycles": n_cycles_total,
-                    "null_pvalue_boot": (k - 1) / loo_denom,
-                    "pos_perm_p": (k + 1) / (n_cycles_total + 1),
-                })
+            # add-one smoothed (Davison & Hinkley); it is NOT leave-one-out.
+            perm_pos_pval_rows.append({
+                "Gene": gene,
+                "Position": key[0],
+                "caap_group": key[1],
+                "n_detected": k,
+                "n_cycles": n_cycles_total,
+                "null_pvalue_boot": (k - 1) / loo_denom,
+                "pos_perm_p": (k + 1) / (n_cycles_total + 1),
+            })
 
         # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
         # Scoring itself is deliberately NOT done here. null_row_caas needs
@@ -1650,6 +1642,14 @@ def _finalize_perm_scores(
     scores_path = output_dir / "gene_cycle_scores.tsv"
     sample_path = output_dir / "perm_pos_sample.tsv"
     quant_path = output_dir / "perm_pos_quantiles.tsv"
+    # V3-4a: per-(Gene, Position, side, cycle) numerator/denominator of the
+    # per-cycle CAAS_score, so scoring_compute.R §2f-ter can redo the division
+    # (bitwise §2g parity) and take the max over sides for the pooled p.emp. The
+    # sum is accumulated in §2g scheme-priority order (US > GS4 > GS3 > GS2 >
+    # GS1) so caas_sum / n_schemes equals mean(caas_row) term for term.
+    cycle_caas_path = output_dir / "perm_pos_cycle_caas.tsv.gz"
+    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_sum", "n_schemes"]
+    _SCHEME_PRIORITY = ("US", "GS4", "GS3", "GS2", "GS1")
 
     # Reservoir size per (cycle, scheme). Bounds both the violin sample and the
     # quantile summaries at ~K * n_cycles * 5 rows regardless of run size. The
@@ -1677,7 +1677,21 @@ def _finalize_perm_scores(
     def _q90(vals) -> float:
         return float(np.percentile(vals, 90)) if vals else 0.0
 
-    def _flush(gene: str, pos_agg: Dict[Any, List[float]], writer) -> None:
+    def _flush(gene: str, pos_agg: Dict[Any, List[float]],
+               pos_scheme: Dict[Any, Dict[str, float]], writer) -> None:
+        # V3-4a: dump the per-cycle CAAS numerator/denominator for this gene.
+        if writer_cc is not None:
+            cc_rows = []
+            for (cyc, pos, side), sch in pos_scheme.items():
+                ordered = [sch[g] for g in _SCHEME_PRIORITY if g in sch]
+                ordered += [sch[g] for g in sorted(sch) if g not in _SCHEME_PRIORITY]
+                cc_rows.append({
+                    "Gene": gene, "Position": pos, "side": side, "cycle": cyc,
+                    "caas_sum": sum(ordered), "n_schemes": len(ordered),
+                })
+            if cc_rows:
+                writer_cc.writerows(cc_rows)
+
         by_cycle: Dict[str, List[Tuple[float, float, str]]] = {}
         # (cyc, pos) -> {side: (asr_score, caas_score)}
         grouped: Dict[Tuple[str, int], Dict[str, Tuple[float, float]]] = {}
@@ -1733,21 +1747,26 @@ def _finalize_perm_scores(
         writer.writerows(rows)
 
     n_rows = 0
-    with open(scores_path, "w", newline="") as f_scores:
+    with open(scores_path, "w", newline="") as f_scores, \
+         gzip.open(cycle_caas_path, "wt", newline="") as f_cc:
         reader = iter_detail_rows(detail_path)
         writer_scores = _csv.DictWriter(f_scores, fieldnames=scores_fields, delimiter="\t")
         writer_scores.writeheader()
+        writer_cc = _csv.DictWriter(f_cc, fieldnames=cycle_caas_fields, delimiter="\t")
+        writer_cc.writeheader()
 
         current_gene: Optional[str] = None
         pos_agg: Dict[Tuple[str, int], List[float]] = {}
+        pos_scheme: Dict[Tuple[str, int, str], Dict[str, float]] = {}
 
         for row in reader:
             gene = row["Gene"]
             if gene != current_gene:
                 if current_gene is not None:
-                    _flush(current_gene, pos_agg, writer_scores)
+                    _flush(current_gene, pos_agg, pos_scheme, writer_scores)
                 current_gene = gene
                 pos_agg = {}
+                pos_scheme = {}
 
             cyc = row["cycle"]
             grp = row["caap_group"]
@@ -1760,11 +1779,12 @@ def _finalize_perm_scores(
             phen = 1.0 - rank_lookup.get(cyc, {}).get(d, 0.0)  # diagnostic only
             rc = asr  # T1 decision E: caas_row = asr_score (no phen factor)
 
-            agg = pos_agg.setdefault(
-                (cyc, pos, row.get("side") or "none"), [0.0, 0, 0.0])
+            skey = (cyc, pos, row.get("side") or "none")
+            agg = pos_agg.setdefault(skey, [0.0, 0, 0.0])
             agg[0] += asr
             agg[1] += 1
             agg[2] += rc
+            pos_scheme.setdefault(skey, {})[grp] = rc
 
             # Reservoir sample stratified by (cycle, scheme): every cycle
             # contributes up to the same K rows regardless of how many detections
@@ -1786,7 +1806,7 @@ def _finalize_perm_scores(
             n_rows += 1
 
         if current_gene is not None:
-            _flush(current_gene, pos_agg, writer_scores)
+            _flush(current_gene, pos_agg, pos_scheme, writer_scores)
 
     # ── Sample + quantile summaries ────────────────────────────────────────────
     sample_fields = ["Gene", "Position", "caap_group", "cycle",
@@ -1819,8 +1839,8 @@ def _finalize_perm_scores(
                 writer_quant.writerow(rec)
 
     logger.info(
-        "[perms] pass B done: scored %d rows -> %s; sample=%s quantiles=%s",
-        n_rows, scores_path.name, sample_path.name, quant_path.name,
+        "[perms] pass B done: scored %d rows -> %s; sample=%s quantiles=%s cycle_caas=%s",
+        n_rows, scores_path.name, sample_path.name, quant_path.name, cycle_caas_path.name,
     )
 
 
@@ -1848,33 +1868,29 @@ def _finalize_perm_pos_pval(
     loo_denom = max(n_cycles_total - 1, 1)
 
     seen: Dict[Tuple[str, int, str], int] = {}
-    # The per-side shard carries `side` directly -> collect the SET of sides seen
-    # and emit one pval row per side (same n_detected — a CAAS is side-agnostic).
-    sides_seen: Dict[Tuple[str, int, str], Set[str]] = {}
+    # V3-4a: pos_perm_p is pooled to (Gene, Position, caap_group) — one row per
+    # key, no `side` column (see _perms_worker). n_detected is identical across
+    # every detail row sharing the key.
     for row in iter_detail_rows(detail_path):
         key = (row["Gene"], int(row["Position"]), row["caap_group"])
         if key not in seen:
             seen[key] = int(row["n_detected"])
-        sides_seen.setdefault(key, set()).add(row.get("side") or "none")
 
     pval_path = Path(output_dir) / "perm_pos_pval.tsv"
-    pval_fields = ["Gene", "Position", "caap_group", "side", "n_detected", "n_cycles",
+    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles",
                    "null_pvalue_boot", "pos_perm_p"]
     n_out = 0
     with open(pval_path, "w", newline="") as f_pval:
         writer = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
         writer.writeheader()
         for (gene, pos, grp), k in seen.items():
-            row_sides = sorted(sides_seen.get((gene, pos, grp), {"none"})) or ["none"]
-            for row_side in row_sides:
-                writer.writerow({
-                    "Gene": gene, "Position": pos, "caap_group": grp,
-                    "side": row_side,
-                    "n_detected": k, "n_cycles": n_cycles_total,
-                    "null_pvalue_boot": (k - 1) / loo_denom,
-                    "pos_perm_p": (k + 1) / (n_cycles_total + 1),
-                })
-                n_out += 1
+            writer.writerow({
+                "Gene": gene, "Position": pos, "caap_group": grp,
+                "n_detected": k, "n_cycles": n_cycles_total,
+                "null_pvalue_boot": (k - 1) / loo_denom,
+                "pos_perm_p": (k + 1) / (n_cycles_total + 1),
+            })
+            n_out += 1
     logger.info("[perms] rebuilt %s (%d rows over %d distinct (Gene, Position, caap_group))",
                 pval_path.name, n_out, len(seen))
     return pval_path
@@ -1924,7 +1940,13 @@ def process_all_genes_perms(
       - output_dir/gene_cycle_scores.tsv     (schema unchanged; feeds caas_perms.rds)
       - output_dir/perm_pos_pval.tsv         (LOO null_pvalue_boot crosscheck table,
                                               plus the add-one-smoothed pos_perm_p
-                                              calibrated position-level permulation p)
+                                              calibrated position-level permulation p;
+                                              V3-4a: pooled to (Gene, Position,
+                                              caap_group), no `side` column)
+      - output_dir/perm_pos_cycle_caas.tsv.gz (V3-4a: per (Gene, Position, side,
+                                              cycle) caas_sum / n_schemes; the R
+                                              side divides + takes the max over
+                                              sides for the pooled p.emp)
       - output_dir/perm_pos_detail/<Gene>.tsv.gz  (one shard per gene; re-scoring
                                               needs no ASR replay, and re-aggregation
                                               stays at one-gene peak RAM)
@@ -1986,9 +2008,10 @@ def process_all_genes_perms(
     detail_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
-    pval_fields = ["Gene", "Position", "caap_group", "side", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
-    # Per-side null. `side` ∈ {top,bottom,none} is the sole direction key; a
-    # "both" position is two detail rows (one per side, each with its own core_s).
+    # V3-4a: perm_pos_pval.tsv is pooled to (Gene, Position, caap_group) — no
+    # `side` column. The detail shard keeps `side` (a "both" position is two
+    # detail rows, one per side, each with its own core_s).
+    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
                      "n_detected", "clust", "side"]
 

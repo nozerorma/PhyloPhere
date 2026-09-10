@@ -108,6 +108,10 @@ def main() -> int:
         rank_lookup=rank_lookup,
     )
     logger.info("[reaggregate] wrote %s", args.output_dir / "gene_cycle_scores.tsv")
+    # V3-4a: _finalize_perm_scores also emits perm_pos_cycle_caas.tsv.gz (the
+    # per-cycle CAAS numerator/denominator behind scoring_compute.R's p.emp) --
+    # a rebuild from an existing run's detail shards regenerates it for free.
+    logger.info("[reaggregate] wrote %s", args.output_dir / "perm_pos_cycle_caas.tsv.gz")
 
     # Tier 2: also rebuild perm_pos_pval.tsv (adds pos_perm_p) from the same
     # detail shards -- needed when re-deriving from a run whose original
