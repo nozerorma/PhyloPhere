@@ -55,6 +55,7 @@ accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
 caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
 caas_pos_pval_file   <- parse_arg("--caas_pos_pval")  # perm_pos_pval.tsv (position-level calibrated null p); NO_FILE otherwise
+caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
 # The disambiguation subworkflow FOP-pools the hypothesis harvest in-tree
 # (pool_hypotheses_pairwise, the real per-side pairwise core), so rows arrive one
@@ -267,21 +268,27 @@ cat("  FOP pooling: done in-tree per (Gene, Position, scheme, side) [T3c SC3]\n"
 if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
 if (!"supporting_hypotheses" %in% names(df)) df$supporting_hypotheses <- ""
 if (!"core_perside_pooled" %in% names(df))   df$core_perside_pooled <- df$core
-for (.c in c("convergence_schemes", "derived_residues", "top_residue_support",
+# V3-4 (core v3): convergence_schemes and n_conserved_pairs are retired --
+# convergence_schemes was the scheme-dependent FOP-disagreement flag and
+# n_conserved_pairs counted the dropped conserved_<j>_* block. A domain that
+# does not converge simply scores 0 now.
+for (.c in c("derived_residues", "top_residue_support",
              "bottom_residue_support", "top_residue_support_detail",
              "bottom_residue_support_detail", "top_species_residues",
-             "bottom_species_residues", "n_top_species", "n_bottom_species",
-             "n_conserved_pairs")) {
+             "bottom_species_residues", "n_top_species", "n_bottom_species")) {
   if (!.c %in% names(df)) df[[.c]] <- ""
 }
 df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
 
 # TRUE when a change label indicates an assessable directional event.
 
-# Detect pair-indexed MRCA posterior columns dynamically (mrca_1_posterior, mrca_2_posterior, ...)
-mrca_posterior_cols <- grep("^mrca_\\d+_posterior$", names(df), value = TRUE)
+# Detect the K fixed Voronoi-domain posterior columns (V3-2 renamed
+# mrca_<i>_posterior -> domain_<d>_posterior; keep the old name as a fallback for
+# pre-v3 inputs).
+mrca_posterior_cols <- grep("^(?:mrca|domain)_\\d+_posterior$", names(df),
+                            value = TRUE, perl = TRUE)
 n_pairs <- length(mrca_posterior_cols)
-cat(sprintf("  Detected %d pairs (%s)\n", n_pairs, paste(mrca_posterior_cols, collapse = ", ")))
+cat(sprintf("  Detected %d domains (%s)\n", n_pairs, paste(mrca_posterior_cols, collapse = ", ")))
 
 # ── 2c. ASR score (per-row) ──────────────────────────────────────────────────
 # asr_score sources the unified ASR path score computed upstream in
@@ -334,41 +341,21 @@ df <- df %>%
 has_caas_pos_pval <- file_exists(caas_pos_pval_file)
 if (has_caas_pos_pval) {
   cat("Loading position-level permulation null:", caas_pos_pval_file, "\n")
+  # V3-4a: perm_pos_pval.tsv is pooled to (Gene, Position, caap_group) -- no
+  # `side` column (pos_perm_p, like p.emp, is a position-level pooled statistic).
   pos_pval_df <- read_tsv(caas_pos_pval_file, show_col_types = FALSE) %>%
-    mutate(Position = as.integer(Position))
-  .pval_has_side <- "side" %in% names(pos_pval_df) && "side" %in% names(df)
-  pos_pval_df <- pos_pval_df %>%
-    select(Gene, Position, caap_group, any_of("side"), pos_perm_p)
+    mutate(Position = as.integer(Position)) %>%
+    select(Gene, Position, caap_group, any_of("n_cycles"), pos_perm_p)
+  # Base-cycle count of the null (== §4f's ncol(byrank)); p.emp / p.emp_adj use
+  # the SAME N for structural consistency with pos_perm_p.
+  .perm_n_cycles <- if ("n_cycles" %in% names(pos_pval_df))
+    suppressWarnings(max(as.integer(pos_pval_df$n_cycles), na.rm = TRUE)) else NA_integer_
+  pos_pval_df <- pos_pval_df %>% select(-any_of("n_cycles"))
 
   .n_obs_pos <- n_distinct(paste(df$Gene, df$Position))
   .n_rows_before <- nrow(df)
-  df <- df %>% mutate(Position = as.integer(Position))
-  if (.pval_has_side) {
-    # side is a first-class join key; the observed and null sides both carry it
-    # directly off the per-side rows, so this stays cardinality-neutral.
-    # `pos_perm_p_3key` fills any row whose side label
-    # differs between the observed and null sides; `.n_side_miss` counts them as
-    # a drift check (expected ~0 before T3).
-    pval_3key <- pos_pval_df %>% select(-side) %>%
-      distinct(Gene, Position, caap_group, .keep_all = TRUE) %>%
-      rename(pos_perm_p_3key = pos_perm_p)
-    df <- df %>%
-      left_join(pos_pval_df, by = c("Gene", "Position", "caap_group", "side")) %>%
-      left_join(pval_3key, by = c("Gene", "Position", "caap_group"))
-    .n_side_miss <- sum(is.na(df$pos_perm_p) & !is.na(df$pos_perm_p_3key))
-    df <- df %>%
-      mutate(pos_perm_p = dplyr::coalesce(pos_perm_p, pos_perm_p_3key)) %>%
-      select(-pos_perm_p_3key)
-    if (.n_side_miss > 0) {
-      cat(sprintf(paste0("  NOTE: %d observed rows matched the null only on the ",
-                         "(Gene, Position, caap_group) fallback (side label ",
-                         "differs from the null) -- expected small pre-T3\n"),
-                  .n_side_miss))
-    }
-  } else {
-    df <- df %>% left_join(pos_pval_df %>% select(-any_of("side")),
-                           by = c("Gene", "Position", "caap_group"))
-  }
+  df <- df %>% mutate(Position = as.integer(Position)) %>%
+    left_join(pos_pval_df, by = c("Gene", "Position", "caap_group"))
   stopifnot(nrow(df) == .n_rows_before)
   .n_matched_pos <- df %>% filter(!is.na(pos_perm_p)) %>%
     distinct(Gene, Position) %>% nrow()
@@ -389,6 +376,7 @@ if (has_caas_pos_pval) {
 } else {
   cat("  no --caas_pos_pval provided, skipping pos_perm_p\n")
   df$pos_perm_p <- NA_real_
+  .perm_n_cycles <- NA_integer_
 }
 
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
@@ -429,8 +417,6 @@ pos_scores <- df %>%
     bottom_species_residues = if ("bottom_species_residues" %in% names(df)) dplyr::first(bottom_species_residues) else "",
     n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
-    n_conserved_pairs      = if ("n_conserved_pairs" %in% names(df)) dplyr::first(n_conserved_pairs) else "",
-    convergence_schemes    = if ("convergence_schemes" %in% names(df)) dplyr::first(convergence_schemes) else "",
     # The per-caap_group factors (asr_score / caas_row) and the ASR diagnostic
     # axes (core, derived_agreement, core_perside_pooled) are DELIBERATELY not
     # carried to the position level: CAAS_score = mean_k(asr_k) over schemes, and
@@ -470,6 +456,68 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             median(pos_scores$CAAS_score, na.rm = TRUE),
             max(pos_scores$CAAS_score, na.rm = TRUE)))
 
+# ── 2f-ter. p.emp — position-level "detects AND exceeds" permulation p ────────
+# docs/scoring_v2_p_emp.md §1 + amendment V3-4a. Per (Gene, Position):
+#   k_emp = #{null cycle : re-detects the position on ANY side
+#                          AND  max_side(caas_sum/n_schemes) >= max_side(CAAS_obs)}
+#   p.emp = (k_emp + 1) / (N + 1)                          add-one, right-tailed
+# The pooled statistic is the max-over-sides "all" axis -- identical to
+# .pos_undirected (§4a) on the observed side and _build_cycle_score_pools'
+# pc["all"] on the null. caas_sum/n_schemes is the null's per-side §2g mean;
+# dividing here (not in Python) keeps ONE implementation of that mean, and the
+# emitter accumulated caas_sum in scheme-priority order so it matches
+# mean(caas_row) bit for bit (§6c -- no guard needed).
+pos_scores$p.emp <- NA_real_
+has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
+if (has_caas_pos_cycle_caas) {
+  cat("Loading per-cycle CAAS null (p.emp):", caas_pos_cycle_caas_file, "\n")
+  cyc_caas <- read_tsv(caas_pos_cycle_caas_file, show_col_types = FALSE) %>%
+    mutate(Position = as.integer(Position),
+           caas_sum = suppressWarnings(as.numeric(caas_sum)),
+           n_schemes = suppressWarnings(as.integer(n_schemes))) %>%
+    filter(!is.na(n_schemes) & n_schemes > 0L)
+
+  # per-cycle pooled null statistic = max over detected sides of the scheme-mean
+  cyc_pooled <- cyc_caas %>%
+    mutate(.m = caas_sum / n_schemes) %>%
+    group_by(Gene, Position, cycle) %>%
+    summarise(caas_max = max(.m), .groups = "drop")
+
+  # observed pooled statistic = best side per (Gene, Position) (== .pos_undirected)
+  obs_max <- pos_scores %>%
+    filter(!is.na(CAAS_score)) %>%
+    group_by(Gene, Position) %>%
+    summarise(.obs = max(CAAS_score), .groups = "drop")
+
+  N_emp <- if (!is.na(.perm_n_cycles) && .perm_n_cycles > 0) .perm_n_cycles
+           else dplyr::n_distinct(cyc_pooled$cycle)
+
+  .k_emp <- cyc_pooled %>%
+    inner_join(obs_max, by = c("Gene", "Position")) %>%
+    group_by(Gene, Position) %>%
+    summarise(k_emp = sum(caas_max >= .obs), .groups = "drop") %>%
+    mutate(p.emp = (k_emp + 1) / (N_emp + 1))
+
+  .n_obs_pos_e <- n_distinct(paste(pos_scores$Gene, pos_scores$Position))
+  pos_scores <- pos_scores %>%
+    select(-any_of("p.emp")) %>%
+    left_join(.k_emp %>% select(Gene, Position, p.emp), by = c("Gene", "Position"))
+  .n_matched_e <- pos_scores %>% filter(!is.na(p.emp)) %>%
+    distinct(Gene, Position) %>% nrow()
+  .rate_e <- if (.n_obs_pos_e > 0) .n_matched_e / .n_obs_pos_e else 0
+  cat(sprintf("  p.emp: matched %d/%d positions (%.1f%%), N=%d cycles\n",
+              .n_matched_e, .n_obs_pos_e, 100 * .rate_e, N_emp))
+  if (.rate_e < 0.5) {
+    cat(sprintf(paste0("  WARNING: p.emp join rate %.1f%% < 50%% -- the observed ",
+                       "positions (filtered_discovery.tsv) and the null's ",
+                       "perm_pos_cycle_caas.tsv.gz positions are likely on different ",
+                       "coordinate systems. Treat p.emp/p.emp_adj as unreliable.\n"),
+                100 * .rate_e), file = stderr())
+  }
+} else {
+  cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
+}
+
 # ── 2h. Tier 2: BH-adjust pos_perm_p within the tested set ──────────────────
 # Mirrors the gene_caas_pperm_adj idiom (Tier 1A, section below): BH over
 # exactly the positions that got a null match, so genes/positions absent from
@@ -482,6 +530,19 @@ if (has_caas_pos_pval) {
   }
   cat(sprintf("  pos_perm_p_adj: %d/%d positions BH-adjusted\n",
               sum(.tested), nrow(pos_scores)))
+}
+
+# p.emp_adj: BH over the p.emp-tested rows only. SEPARATE family from
+# pos_perm_p (docs/scoring_v2_p_emp.md §6b -- two hypothesis families; the user
+# picks the headline, so reporting both is not penalised).
+pos_scores$p.emp_adj <- NA_real_
+if (has_caas_pos_cycle_caas) {
+  .tested_e <- !is.na(pos_scores$p.emp)
+  if (any(.tested_e)) {
+    pos_scores$p.emp_adj[.tested_e] <- p.adjust(pos_scores$p.emp[.tested_e], method = "BH")
+  }
+  cat(sprintf("  p.emp_adj: %d/%d position-rows BH-adjusted\n",
+              sum(.tested_e), nrow(pos_scores)))
 }
 
 # ── 2i. FADE (gene-level - see section 4d) ──────────────────────────────────
@@ -1196,13 +1257,16 @@ pos_out <- pos_scores %>%
                   "derived_residues", "top_residue_support", "bottom_residue_support",
                   "top_residue_support_detail", "bottom_residue_support_detail",
                   "top_species_residues", "bottom_species_residues",
-                  "n_top_species", "n_bottom_species",
-                  "n_conserved_pairs", "convergence_schemes")), CAAS_score,
+                  "n_top_species", "n_bottom_species")), CAAS_score,
          side,
          # T3d: per-side diagnostics for the reports (SC5).
          any_of(c("core", "phen_score")),
          any_of("caas"),
-         any_of(c("pos_perm_p", "pos_perm_p_adj"))) %>%
+         # V3-4: p.emp / p.emp_adj are the pooled "detects AND exceeds" position
+         # p (docs/scoring_v2_p_emp.md). pos_perm_p_adj stays the report headline
+         # until the post-V3-6 flip (§7.3); pos_perm_p is diagnostic here and
+         # canonical in perm_pos_pval.tsv.
+         any_of(c("p.emp", "p.emp_adj", "pos_perm_p", "pos_perm_p_adj"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")

@@ -10,11 +10,11 @@ Data model
 ----------
 The ``caas`` string is ``<top>/<bottom>`` and is **positional**: index *i* of the
 top string and index *i* of the bottom string are the two contrasting-phenotype
-members of the same disjoint species pair *i*. A pair whose two members carry the
-same residue is *conserved* and does not contribute to the derived residues
-(``conserved_<j>_cons`` is a numeric conservation score for pair *j*, not a
-residue). The per-pair reconstructed states live in
-``mrca_<i>_{anc,top,bot}_aa`` (empty on a side that did not substitute).
+members of the same disjoint species pair *i*. The per-domain reconstructed
+states live in ``domain_<d>_{anc,top,bot}_aa`` (scoring_v2 core v3; empty on a
+side that did not substitute). V3-4 dropped the ``conserved_<j>_*`` block and the
+``n_conserved_pairs`` descriptor — a domain that does not converge is simply
+``domain_<d>_score = 0``, there is no separate "conserved" concept.
 
 ``side`` (``top`` / ``bottom`` / ``none``) is the disambiguation's authoritative
 call for which clade carries the substantive change. A position changing on both
@@ -31,22 +31,16 @@ Columns produced (one value per ``(Gene, Position)``, broadcast to every row):
     changed pair.
 ``top_residue_support`` / ``bottom_residue_support``
     ``"L:3,S:2"`` — per residue listed on that side, the number of DISTINCT CAAS
-    contrast pairs (``mrca_<i>`` blocks) that carry it, count-descending then
+    contrast pairs (``domain_<d>`` blocks) that carry it, count-descending then
     alphabetical. This is the *actual* support the position has: it is bounded by
     the CAAS's pair count and is NOT inflated by the number of discovering
     hypotheses. ``""`` when that side has no residue.
 ``top_residue_support_detail`` / ``bottom_residue_support_detail``
     Same shape, but counting DISTINCT reconstructed ancestral nodes across every
     discovering hypothesis rather than physical pairs. A single pair can resolve
-    to different ``mrca_<i>_node`` values under different hypotheses, so this
+    to different ``domain_<d>_node`` values under different hypotheses, so this
     number blends pair count with reconstruction/hypothesis multiplicity — kept
     as a secondary, finer-grained view, not an evidence count.
-``n_conserved_pairs``
-    Count of DISTINCT ``conserved_<j>_node`` values across the position's rows
-    (``""`` / ``0`` when the conserved-pair block is absent).
-
-``fop_pool.R`` carries these four columns straight through; it still computes only
-the scheme-dependent ``convergence_schemes`` itself.
 """
 
 from __future__ import annotations
@@ -63,12 +57,11 @@ DESCRIPTOR_COLUMNS = (
     "bottom_residue_support",
     "top_residue_support_detail",
     "bottom_residue_support_detail",
-    "n_conserved_pairs",
 )
 
 _EMPTY = {"derived_residues": "", "top_residue_support": "",
           "bottom_residue_support": "", "top_residue_support_detail": "",
-          "bottom_residue_support_detail": "", "n_conserved_pairs": ""}
+          "bottom_residue_support_detail": ""}
 
 # side -> which side(s) show DERIVED residues (the other shows ancestral).
 _DERIVED_SIDES: Dict[str, Set[str]] = {
@@ -82,16 +75,7 @@ _DERIVED_SIDES: Dict[str, Set[str]] = {
 def _pair_indices(columns) -> List[int]:
     idx = set()
     for col in columns:
-        m = re.fullmatch(r"mrca_(\d+)_node", str(col))
-        if m:
-            idx.add(int(m.group(1)))
-    return sorted(idx)
-
-
-def _conserved_indices(columns) -> List[int]:
-    idx = set()
-    for col in columns:
-        m = re.fullmatch(r"conserved_(\d+)_node", str(col))
+        m = re.fullmatch(r"domain_(\d+)_node", str(col))
         if m:
             idx.add(int(m.group(1)))
     return sorted(idx)
@@ -118,13 +102,13 @@ def _node_str(val) -> str:
 def _collect(group: pd.DataFrame, pair_idx: List[int]):
     """Per side, ``{residue: {support units}}`` for derived changes and ancestral cells.
 
-    A ``mrca_<i>_top_aa`` / ``mrca_<i>_bot_aa`` cell is a *derived* change on that
-    side; ``mrca_<i>_anc_aa`` is the ancestral residue of pair *i*.
+    A ``domain_<d>_top_aa`` / ``domain_<d>_bot_aa`` cell is a *derived* change on
+    that side; ``domain_<d>_anc_aa`` is the ancestral residue of domain *d*.
 
     Returns two (derived, ancestral) pairs of dicts:
-      * ``*_pairs``: support unit = the CAAS contrast pair index *i* (physical
+      * ``*_pairs``: support unit = the Voronoi domain index *d* (physical
         support — bounded by the CAAS's pair count, hypothesis-invariant).
-      * ``*_nodes``: support unit = the distinct reconstructed ``mrca_<i>_node``
+      * ``*_nodes``: support unit = the distinct reconstructed ``domain_<d>_node``
         value (finer, but blends pair count with hypothesis multiplicity because
         one pair can reconstruct to different nodes under different hypotheses).
     """
@@ -138,11 +122,11 @@ def _collect(group: pd.DataFrame, pair_idx: List[int]):
     d_seen: Dict[Tuple[str, str], str] = {}
     a_seen: Dict[str, str] = {}
     for i in pair_idx:
-        ncol = f"mrca_{i}_node"
+        ncol = f"domain_{i}_node"
         if ncol not in group.columns:
             continue
         nodes = list(group[ncol])
-        for side, acol in (("top", f"mrca_{i}_top_aa"), ("bot", f"mrca_{i}_bot_aa")):
+        for side, acol in (("top", f"domain_{i}_top_aa"), ("bot", f"domain_{i}_bot_aa")):
             if acol not in group.columns:
                 continue
             for node_val, aa_val in zip(nodes, group[acol]):
@@ -153,7 +137,7 @@ def _collect(group: pd.DataFrame, pair_idx: List[int]):
                 dp_seen.setdefault((i, side), set()).add(aa)
                 if node:
                     d_seen.setdefault((node, side), aa)
-        acol = f"mrca_{i}_anc_aa"
+        acol = f"domain_{i}_anc_aa"
         if acol in group.columns:
             for node_val, aa_val in zip(nodes, group[acol]):
                 node = _node_str(node_val)
@@ -191,31 +175,12 @@ def _fmt_support(res_nodes: Dict[str, Set[str]]) -> str:
     return ",".join(f"{aa}:{n}" for aa, n in ordered)
 
 
-def _n_conserved(group: pd.DataFrame, cons_idx: List[int]) -> str:
-    if not cons_idx:
-        return ""
-    nodes: Set[str] = set()
-    for j in cons_idx:
-        ncol = f"conserved_{j}_node"
-        if ncol not in group.columns:
-            continue
-        for v in group[ncol]:
-            n = _node_str(v)
-            if n:
-                nodes.add(n)
-    return str(len(nodes))
-
-
-def _descriptors_for_group(group: pd.DataFrame, pair_idx: List[int],
-                           cons_idx: List[int]) -> Dict[str, str]:
+def _descriptors_for_group(group: pd.DataFrame, pair_idx: List[int]) -> Dict[str, str]:
     derived_p, ancestral_p, derived_n, ancestral_n = _collect(group, pair_idx)
-    n_cons = _n_conserved(group, cons_idx)
 
     changed = bool(derived_p["top"]) or bool(derived_p["bot"])
     if not changed:
-        out = dict(_EMPTY)
-        out["n_conserved_pairs"] = n_cons
-        return out
+        return dict(_EMPTY)
 
     # side is a per-(position, direction) call; every row of the group agrees.
     cside = ""
@@ -255,7 +220,6 @@ def _descriptors_for_group(group: pd.DataFrame, pair_idx: List[int],
         "bottom_residue_support": _fmt_support(bot_p),
         "top_residue_support_detail": _fmt_support(top_n),
         "bottom_residue_support_detail": _fmt_support(bot_n),
-        "n_conserved_pairs": n_cons,
     }
 
 
@@ -266,14 +230,13 @@ def add_residue_descriptors(
 ) -> pd.DataFrame:
     """Return ``df`` with ``DESCRIPTOR_COLUMNS`` added (or overwritten).
 
-    No-op-safe: if the raw ``mrca_<i>_node`` / ``mrca_<i>_*_aa`` block is absent,
-    every row gets empty strings so the output schema is stable.
+    No-op-safe: if the raw ``domain_<d>_node`` / ``domain_<d>_*_aa`` block is
+    absent, every row gets empty strings so the output schema is stable.
     """
     out = df.copy()
     pair_idx = _pair_indices(out.columns)
-    cons_idx = _conserved_indices(out.columns)
     have_block = pair_idx and any(
-        f"mrca_{i}_top_aa" in out.columns or f"mrca_{i}_bot_aa" in out.columns
+        f"domain_{i}_top_aa" in out.columns or f"domain_{i}_bot_aa" in out.columns
         for i in pair_idx
     )
     if not have_block or gene_col not in out.columns or position_col not in out.columns:
@@ -282,7 +245,7 @@ def add_residue_descriptors(
         return out
 
     per_group = {
-        key: _descriptors_for_group(g, pair_idx, cons_idx)
+        key: _descriptors_for_group(g, pair_idx)
         for key, g in out.groupby([gene_col, position_col], sort=False)
     }
     keys = list(zip(out[gene_col], out[position_col]))

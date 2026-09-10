@@ -54,39 +54,13 @@ def anc_der_from_descriptor(derived_residues, top_residue_support,
 
 
 def load_convergence_skip(position_scores_tsv):
-    """{(gene, int(position))} to SKIP because the fractional FOP rule found the
-    derived residues genuinely disagree (``convergence_schemes`` == "").
-
-    Reads SCORING's position_scores.tsv (optional). None -> gate is a no-op.
+    """RETIRED in scoring_v2 core v3 (V3-4). The old gate skipped positions whose
+    ``convergence_schemes`` was "" (fractional-FOP disagreement). core v3 dropped
+    ``convergence_schemes`` entirely — a domain that does not converge just scores
+    0 — so there is nothing to gate on. Always a no-op; the optional CLI arg is
+    accepted but ignored for backward compatibility.
     """
-    if not position_scores_tsv or position_scores_tsv in ("NO_FILE", "-"):
-        print("WARN: no position_scores.tsv given — convergence gate is a no-op.",
-              file=sys.stderr)
-        return None
-    if not os.path.exists(position_scores_tsv) or os.path.getsize(position_scores_tsv) == 0:
-        print(f"WARN: position_scores.tsv '{position_scores_tsv}' missing/empty — "
-              "convergence gate is a no-op.", file=sys.stderr)
-        return None
-    with open(position_scores_tsv) as fh:
-        head = fh.readline().rstrip("\n").split("\t")
-        lc = {n.strip().lower(): i for i, n in enumerate(head)}
-        g_i, p_i, c_i = lc.get("gene"), lc.get("position"), lc.get("convergence_schemes")
-        if g_i is None or p_i is None or c_i is None:
-            print("WARN: position_scores.tsv lacks gene/position/convergence_schemes "
-                  "— convergence gate is a no-op.", file=sys.stderr)
-            return None
-        skip = set()
-        for line in fh:
-            f = line.rstrip("\n").split("\t")
-            if len(f) <= max(g_i, p_i, c_i):
-                continue
-            if f[c_i].strip() == "":
-                try:
-                    skip.add((f[g_i], int(f[p_i])))
-                except ValueError:
-                    continue
-    print(f"  convergence gate: {len(skip)} position(s) will be skipped.", file=sys.stderr)
-    return skip
+    return None
 
 
 def load_map_file(gene, vep_map_dir):

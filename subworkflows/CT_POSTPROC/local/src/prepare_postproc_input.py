@@ -37,8 +37,9 @@ def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
 def _collect_removed_rows(cleaned: pd.DataFrame, mrca_threshold: float):
     removed_frames = []
 
+    # scoring_v2 core v3 renamed mrca_<i>_posterior -> domain_<d>_posterior.
     mrca_cols = [
-        col for col in cleaned.columns if re.fullmatch(r"mrca_\d+_posterior", str(col))
+        col for col in cleaned.columns if re.fullmatch(r"(?:mrca|domain)_\d+_posterior", str(col))
     ]
     removed_low_mrca = cleaned.iloc[0:0].copy()
     if mrca_cols:

@@ -47,38 +47,25 @@ def test_both_side_no_ancestral():
     assert der == {"I", "L"}
 
 
-# ── load_convergence_skip ─────────────────────────────────────────────────────
+# ── load_convergence_skip: RETIRED in V3-4, always a no-op ────────────────────
 def _write(p, rows):
     p.write_text("".join("\t".join(map(str, r)) + "\n" for r in rows))
 
 
-def test_gate_collects_empty_convergence(tmp_path):
+def test_gate_retired_is_always_none(tmp_path):
+    assert cosmic.load_convergence_skip(None) is None
+    assert cosmic.load_convergence_skip("NO_FILE") is None
+    # even a well-formed old-style file is ignored now
     ps = tmp_path / "position_scores.tsv"
     _write(ps, [
         ("Gene", "Position", "convergence_schemes", "CAAS_score"),
-        ("BRCA1", "96", "", "0.4"),          # genuine disagreement -> skip
-        ("BRCA1", "97", "GS3,GS4", "0.5"),   # chemical convergence -> keep
-        ("TP53", "10", "US", "0.6"),         # identity -> keep
-        ("TP53", "11", "  ", "0.2"),         # whitespace-only -> skip
+        ("BRCA1", "96", "", "0.4"),
     ])
-    skip = cosmic.load_convergence_skip(str(ps))
-    assert skip == {("BRCA1", 96), ("TP53", 11)}
-
-
-def test_gate_noop_when_absent():
-    assert cosmic.load_convergence_skip(None) is None
-    assert cosmic.load_convergence_skip("NO_FILE") is None
-    assert cosmic.load_convergence_skip("/nonexistent/path.tsv") is None
-
-
-def test_gate_noop_when_column_missing(tmp_path):
-    ps = tmp_path / "ps.tsv"
-    _write(ps, [("Gene", "Position", "CAAS_score"), ("BRCA1", "96", "0.4")])
     assert cosmic.load_convergence_skip(str(ps)) is None
 
 
-# ── primateai.py end to end (subprocess): the 5th arg is accepted + gates ──────
-def _make_inputs(tmp_path, with_skip):
+# ── primateai.py end to end (subprocess): the 5th arg is still accepted ───────
+def _make_inputs(tmp_path):
     caas = tmp_path / "caas.tsv"
     _write(caas, [
         ("tag", "caas", "Gene", "Position", "side", "amino_encoded",
@@ -87,12 +74,8 @@ def _make_inputs(tmp_path, with_skip):
         ("t2", "F/L", "GENE2", "9", "top", "F>L", "US", "F/L", "F:2", "L:2"),
     ])
     ps = tmp_path / "ps.tsv"
-    rows = [("Gene", "Position", "convergence_schemes")]
-    if with_skip:
-        rows += [("GENE1", "5", ""), ("GENE2", "9", "GS4")]
-    else:
-        rows += [("GENE1", "5", "US"), ("GENE2", "9", "GS4")]
-    _write(ps, rows)
+    _write(ps, [("Gene", "Position", "convergence_schemes"),
+                ("GENE1", "5", ""), ("GENE2", "9", "GS4")])
     mapdir = tmp_path / "maps"
     mapdir.mkdir(exist_ok=True)
     db = tmp_path / "pai.gz"
@@ -112,24 +95,14 @@ def _run_primateai(tmp_path, caas, mapdir, db, ps=None):
     return r, (out.read_text() if out.exists() else "")
 
 
-def test_primateai_accepts_optional_position_scores(tmp_path):
-    caas, mapdir, db, ps = _make_inputs(tmp_path, with_skip=True)
-    r, _ = _run_primateai(tmp_path, caas, mapdir, db)              # 4 args (legacy)
-    assert r.returncode == 0, r.stderr
-    assert "convergence gate is a no-op" in r.stderr
-    r, _ = _run_primateai(tmp_path, caas, mapdir, db, ps)          # 5 args (gate)
-    assert r.returncode == 0, r.stderr
-    assert "1 position(s) will be skipped" in r.stderr
-
-
-def test_primateai_gate_drops_target(tmp_path):
-    caas, mapdir, db, ps = _make_inputs(tmp_path, with_skip=True)
-    r, _ = _run_primateai(tmp_path, caas, mapdir, db, ps)
-    # GENE1/5 gated out, GENE2/9 kept -> 1 unique target loaded
-    assert "1 unique (Gene, Position) targets loaded" in r.stderr
-    caas, mapdir, db, ps = _make_inputs(tmp_path, with_skip=False)
-    r, _ = _run_primateai(tmp_path, caas, mapdir, db, ps)
-    assert "2 unique (Gene, Position) targets loaded" in r.stderr
+def test_primateai_gate_retired_keeps_all_targets(tmp_path):
+    caas, mapdir, db, ps = _make_inputs(tmp_path)
+    # 4 args (legacy) and 5 args (arg accepted, ignored) both keep both targets
+    for extra in (None, ps):
+        r, _ = _run_primateai(tmp_path, caas, mapdir, db, extra)
+        assert r.returncode == 0, r.stderr
+        assert "2 unique (Gene, Position) targets loaded" in r.stderr
+        assert "will be skipped" not in r.stderr
 
 
 if __name__ == "__main__":

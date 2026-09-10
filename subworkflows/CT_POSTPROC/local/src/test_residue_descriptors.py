@@ -25,14 +25,14 @@ def _mk_p3() -> pd.DataFrame:
         {
             "Gene": ["BRCA1", "BRCA1", "BRCA1"],
             "Position": [96, 96, 96],
-            "mrca_1_node": ["p1", "p3", "p1"],
-            "mrca_2_node": ["p2", "p4", "p2"],
-            "mrca_1_anc_aa": ["A", "A", "A"],
-            "mrca_2_anc_aa": ["A", "A", "A"],
-            "mrca_1_top_aa": ["", "", ""],
-            "mrca_2_top_aa": ["", "", ""],
-            "mrca_1_bot_aa": ["I", "I", "I"],
-            "mrca_2_bot_aa": ["V", "V", "V"],
+            "domain_1_node": ["p1", "p3", "p1"],
+            "domain_2_node": ["p2", "p4", "p2"],
+            "domain_1_anc_aa": ["A", "A", "A"],
+            "domain_2_anc_aa": ["A", "A", "A"],
+            "domain_1_top_aa": ["", "", ""],
+            "domain_2_top_aa": ["", "", ""],
+            "domain_1_bot_aa": ["I", "I", "I"],
+            "domain_2_bot_aa": ["V", "V", "V"],
         }
     )
 
@@ -47,7 +47,6 @@ def test_point3_top_is_ancestral_bottom_is_derived():
     # _detail = distinct reconstructed nodes (pair1 nodes {p1,p3}, pair2 {p2,p4})
     assert row["top_residue_support_detail"] == "A:4"
     assert row["bottom_residue_support_detail"] == "I:2,V:2"
-    assert row["n_conserved_pairs"] == ""             # no conserved block
     assert (out["derived_residues"] == "A/IV").all()  # broadcast
 
 
@@ -59,10 +58,10 @@ def test_side_top_puts_derived_left_ancestral_right():
             "Gene": ["P", "P", "P"],
             "Position": [539, 539, 539],
             "side": ["top", "top", "top"],
-            "mrca_1_node": ["n90", "n91", "n93"],
-            "mrca_1_anc_aa": ["P", "P", "P"],
-            "mrca_1_top_aa": ["T", "T", "T"],
-            "mrca_1_bot_aa": ["S", "", ""],
+            "domain_1_node": ["n90", "n91", "n93"],
+            "domain_1_anc_aa": ["P", "P", "P"],
+            "domain_1_top_aa": ["T", "T", "T"],
+            "domain_1_bot_aa": ["S", "", ""],
         }
     )
     out = add_residue_descriptors(df)
@@ -79,10 +78,10 @@ def test_side_bottom_puts_derived_right():
             "Gene": ["G"],
             "Position": [1],
             "side": ["bottom"],
-            "mrca_1_node": ["a"],
-            "mrca_1_anc_aa": ["A"],
-            "mrca_1_top_aa": ["W"],   # ignored: side is bottom
-            "mrca_1_bot_aa": ["C"],
+            "domain_1_node": ["a"],
+            "domain_1_anc_aa": ["A"],
+            "domain_1_top_aa": ["W"],   # ignored: side is bottom
+            "domain_1_bot_aa": ["C"],
         }
     )
     out = add_residue_descriptors(df)
@@ -101,10 +100,10 @@ def test_side_none_infers_both_from_data():
             "Gene": ["G", "G"],
             "Position": [1, 1],
             "side": ["none", "none"],
-            "mrca_1_node": ["a", "b"],
-            "mrca_1_anc_aa": ["M", "M"],
-            "mrca_1_top_aa": ["L", "L"],
-            "mrca_1_bot_aa": ["F", "F"],
+            "domain_1_node": ["a", "b"],
+            "domain_1_anc_aa": ["M", "M"],
+            "domain_1_top_aa": ["L", "L"],
+            "domain_1_bot_aa": ["F", "F"],
         }
     )
     out = add_residue_descriptors(df)
@@ -121,10 +120,10 @@ def test_multi_residue_side_sorted():
             "Gene": ["G", "G"],
             "Position": [1, 1],
             "side": ["top", "top"],
-            "mrca_1_node": ["a", "b"],
-            "mrca_1_anc_aa": ["I", "I"],
-            "mrca_1_top_aa": ["S", "M"],
-            "mrca_1_bot_aa": ["", ""],
+            "domain_1_node": ["a", "b"],
+            "domain_1_anc_aa": ["I", "I"],
+            "domain_1_top_aa": ["S", "M"],
+            "domain_1_bot_aa": ["", ""],
         }
     )
     out = add_residue_descriptors(df)
@@ -134,46 +133,25 @@ def test_multi_residue_side_sorted():
     assert out.iloc[0]["top_residue_support_detail"] == "M:1,S:1"
 
 
-def test_n_conserved_pairs_counts_distinct_nodes():
-    df = pd.DataFrame(
-        {
-            "Gene": ["G", "G"],
-            "Position": [1, 1],
-            "side": ["top", "top"],
-            "mrca_1_node": ["a", "a"],
-            "mrca_1_anc_aa": ["I", "I"],
-            "mrca_1_top_aa": ["F", "F"],
-            "mrca_1_bot_aa": ["", ""],
-            "conserved_1_node": ["c1", "c2"],
-            "conserved_1_cons": ["0.9", "0.7"],
-            "conserved_2_node": ["c1", ""],
-            "conserved_2_cons": ["0.8", ""],
-        }
-    )
-    out = add_residue_descriptors(df)
-    assert out.iloc[0]["derived_residues"] == "F/I"
-    assert out.iloc[0]["n_conserved_pairs"] == "2"   # c1, c2
-
-
-def test_no_changed_pairs_all_empty_but_conserved_counted():
+def test_no_changed_pairs_all_empty():
+    # V3-4 dropped the conserved_<j>_* block: a non-converging domain is just
+    # domain_<d>_score = 0, no separate n_conserved_pairs descriptor.
     df = pd.DataFrame(
         {
             "Gene": ["G"],
             "Position": [1],
             "side": ["top"],
-            "mrca_1_node": ["a"],
-            "mrca_1_anc_aa": ["A"],
-            "mrca_1_top_aa": [""],
-            "mrca_1_bot_aa": [""],
-            "conserved_1_node": ["c1"],
-            "conserved_1_cons": ["0.9"],
+            "domain_1_node": ["a"],
+            "domain_1_anc_aa": ["A"],
+            "domain_1_top_aa": [""],
+            "domain_1_bot_aa": [""],
         }
     )
     out = add_residue_descriptors(df)
     assert out.iloc[0]["derived_residues"] == ""
     assert out.iloc[0]["top_residue_support"] == ""
     assert out.iloc[0]["bottom_residue_support"] == ""
-    assert out.iloc[0]["n_conserved_pairs"] == "1"
+    assert "n_conserved_pairs" not in out.columns
 
 
 def test_no_raw_block_stable_schema():
@@ -191,10 +169,10 @@ def test_pair_vs_node_support_diverge():
             "Gene": ["G", "G", "G"],
             "Position": [1, 1, 1],
             "side": ["bottom", "bottom", "bottom"],
-            "mrca_1_node": ["a", "a", "b"],
-            "mrca_1_anc_aa": ["A", "A", "A"],
-            "mrca_1_top_aa": ["", "", ""],
-            "mrca_1_bot_aa": ["L", "L", "L"],
+            "domain_1_node": ["a", "a", "b"],
+            "domain_1_anc_aa": ["A", "A", "A"],
+            "domain_1_top_aa": ["", "", ""],
+            "domain_1_bot_aa": ["L", "L", "L"],
         }
     )
     out = add_residue_descriptors(df)
