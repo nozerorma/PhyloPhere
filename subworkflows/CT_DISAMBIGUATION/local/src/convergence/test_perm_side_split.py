@@ -100,6 +100,7 @@ def test_pooled_perm_pos_pval_one_row_per_pos():
             hdr = rdr.fieldnames
             got = {r["Position"]: r for r in rdr}
         assert "side" not in hdr
+        assert "null_pvalue_boot" not in hdr          # §7.4: column removed
         assert set(got) == {"10", "11"}
         assert got["10"]["n_detected"] == "3"
         assert abs(float(got["10"]["pos_perm_p"]) - 4 / 4) < 1e-12

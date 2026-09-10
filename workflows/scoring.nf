@@ -31,7 +31,7 @@ workflow SCORING {
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
         caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm + report
-        caas_pos_pval_ch         // Channel<path> or null — LOO null_pvalue_boot per (gene,position,scheme)
+        caas_pos_pval_ch         // Channel<path> or null — pos_perm_p per (gene,position,scheme)
         caas_pos_cycle_caas_ch   // Channel<path> or null — perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator)
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape

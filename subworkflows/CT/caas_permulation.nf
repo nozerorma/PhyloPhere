@@ -469,7 +469,7 @@ workflow CAAS_PERMULATION {
 
     emit:
         perms              = agg.perms
-        pos_pval           = agg.pos_pval        // LOO null_pvalue_boot per (gene,position,scheme)
+        pos_pval           = agg.pos_pval        // pos_perm_p per (gene,position,scheme)
         pos_cycle_caas     = agg.pos_cycle_caas  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
         pos_sample         = agg.pos_sample      // cycle-stratified sample for distribution plots
         pos_quantiles      = agg.pos_quantiles   // per (cycle,scheme) distribution shape

@@ -192,7 +192,7 @@ has_scoring_stress <- .file_ok(params$stress_summary_file) &&
   .file_ok(params$stress_variants_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
 has_perms         <- .file_ok(params$caas_perms_file)
-has_pos_pval      <- .file_ok(params$caas_pos_pval_file)      # LOO null_pvalue_boot per (gene,position,scheme)
+has_pos_pval      <- .file_ok(params$caas_pos_pval_file)      # pos_perm_p per (gene,position,scheme)
 has_pos_sample    <- .file_ok(params$caas_pos_sample_file)    # cycle-stratified null sample (asr + phen + row_caas)
 has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score + recovery_boot
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
@@ -264,8 +264,8 @@ if (has_perms) {
 #     phen_score = 1 - percent_rank(recovery_boot)   diagnostic only (T1)
 #     caas_row   = asr_path_score                    (T1 decision E: no phen factor)
 # The null side arrives pre-ranked from gene_wrapper.py pass B: null_phen_score is
-# 1 - percent_rank of the leave-one-out null_pvalue_boot within that cycle's
-# genome-wide candidate pool, the null's analogue of the line above.
+# 1 - percent_rank of n_detected within that cycle's genome-wide candidate pool,
+# the null's analogue of the line above.
 scheme_levels <- c("US", "GS1", "GS2", "GS3", "GS4")
 
 # Schema guard for the permulation sample. The position-level overlays require a
@@ -323,16 +323,17 @@ if (has_pos_quantiles) {
   perm_pos_quant <- NULL
 }
 
-# Full LOO null_pvalue_boot table (small) - the direct observed-vs-null crosscheck
-# for the phenotype axis BEFORE ranking. null_pvalue_boot = (n_detected - 1)/(N - 1)
-# is the null's analogue of the observed recovery_boot = count/cycles: same statistic
-# ("what fraction of resampling cycles recovered this position"), different
-# resampling axis (phenotype relabeling vs species bootstrap).
+# perm_pos_pval.tsv (small) - the direct observed-vs-null crosscheck for the
+# detection axis BEFORE ranking. The null's raw analogue of the observed
+# recovery_boot = count/cycles is n_detected / n_cycles: same statistic ("what
+# fraction of resampling cycles recovered this position"), different resampling
+# axis (phenotype relabeling vs species bootstrap). §7.4 removed the leave-one-out
+# null_pvalue_boot column; pos_perm_p is now the schema marker for the ranked scale.
 .unranked_perm_pval <- FALSE
 if (has_pos_pval) {
   .pval_cols <- names(readr::read_tsv(params$caas_pos_pval_file, n_max = 0,
                                       show_col_types = FALSE))
-  .unranked_perm_pval <- !("null_pvalue_boot" %in% .pval_cols)
+  .unranked_perm_pval <- !("pos_perm_p" %in% .pval_cols)
   if (.unranked_perm_pval) has_pos_pval <- FALSE   # same schema marker as above
 }
 if (has_pos_pval) {
@@ -731,10 +732,10 @@ observed pipeline:
   observed `gene_caas_score` now uses a size-adjusted max instead (see below).
 - **`CAAS_score`** = mean_scheme `asr_path_score` (T1: the `null_phen_score`
   factor was dropped; it is still emitted for diagnostics), where
-  `null_phen_score = 1 − percent_rank(null_pvalue_boot)` and
-  `null_pvalue_boot = (n_detected − 1)/(N − 1)` is the leave-one-out share of the *other*
-  cycles that also recovered that position - the null analogue of the observed
-  `recovery_boot = count/cycles`.
+  `null_phen_score = 1 − percent_rank(n_detected)` ranks each position's detection
+  count within its cycle's genome-wide candidate pool - the null analogue of the
+  observed `phen_score = 1 − percent_rank(recovery_boot)`. (§7.4 removed the
+  leave-one-out `null_pvalue_boot` column, which was numerically inert here.)
 
 > [!IMPORTANT]
 > **Both sides are `percent_rank`ed, and they must be.** The observed
@@ -1193,8 +1194,9 @@ substantially, the two sides are not being built the same way.
 
 ```{r perm-pos-pval, eval=has_pval_pair, fig.height=6, fig.width=10}
 .pval_pair <- dplyr::bind_rows(
-  perm_pos_pval %>% transmute(grp = caap_group, value = null_pvalue_boot, source = "Null"),
-  obs_pos_pval  %>% transmute(grp = caap_group, value = recovery_boot,      source = "Observed")
+  perm_pos_pval %>% transmute(grp = caap_group,
+                              value = n_detected / n_cycles, source = "Null"),
+  obs_pos_pval  %>% transmute(grp = caap_group, value = recovery_boot, source = "Observed")
 )
 knitr::kable(
   .pval_pair %>% group_by(grp, source) %>%
@@ -1202,14 +1204,15 @@ knitr::kable(
               mean = mean(value, na.rm = TRUE),
               q90 = quantile(value, .90, na.rm = TRUE), .groups = "drop"),
   digits = 4,
-  caption = sprintf(paste0("RAW phenotype statistic per scheme. Null `null_pvalue_boot` = ",
-                           "(n_detected-1)/(N-1), leave-one-out over N=%d cycles; observed ",
-                           "`recovery_boot` = count/cycles from the species bootstrap."),
+  caption = sprintf(paste0("RAW detection statistic per scheme. Null `n_detected / n_cycles` ",
+                           "= fraction of the N=%d relabeling cycles that recovered this ",
+                           "position; observed `recovery_boot` = count/cycles from the ",
+                           "species bootstrap."),
                     perm_pos_pval$n_cycles[1]))
 print(.paired_violin(
-  .pval_pair, xlab = "CAAP scheme", ylab = "raw p-value",
-  title = "Phenotype statistic BEFORE ranking: observed vs null",
-  subtitle = "Null: leave-one-out per-cycle statistic. Observed: species-bootstrap statistic.",
+  .pval_pair, xlab = "CAAP scheme", ylab = "raw recovery fraction",
+  title = "Detection statistic BEFORE ranking: observed vs null",
+  subtitle = "Null: per-cycle relabeling recovery fraction. Observed: species-bootstrap statistic.",
   drop_zeros = FALSE))
 ```
 

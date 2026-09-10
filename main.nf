@@ -424,7 +424,7 @@ workflow {
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms
                 scoring_caas_perm_scores_ch = Channel.empty()
-                scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // LOO null_pvalue_boot per (gene,position,scheme)
+                scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // pos_perm_p per (gene,position,scheme)
                 scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // cycle-stratified sample for distribution plots
                 scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles  // per (cycle,scheme) distribution shape
@@ -632,7 +632,7 @@ workflow {
         println "DEBUG: params.traitname = '${params.traitname}'"
 
         // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) + the
-        // lean position-level LOO null_pvalue_boot. Runs whenever caas_permulation_enrichment
+        // lean position-level pos_perm_p detection null. Runs whenever caas_permulation_enrichment
         // is enabled. If live CT ran, consumes ct_results channels; if CT is precomputed
         // (RUN_CAAS=false), resolves precomputed resample + alignment inputs to run
         // CAAS_PERMS_PREP and CAAS_PERMULATION.
@@ -694,7 +694,7 @@ workflow {
                 pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
                 scoring_rer_perms_ch,  // RER permulation RDS → p.perm in centralized RER FCS
                 scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
-                scoring_caas_pos_pval_ch,    // LOO null_pvalue_boot per (gene,position,scheme)
+                scoring_caas_pos_pval_ch,    // pos_perm_p per (gene,position,scheme)
                 scoring_caas_pos_cycle_caas_ch, // per (gene,position,side,cycle) caas_sum/n_schemes → p.emp
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
                 scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape

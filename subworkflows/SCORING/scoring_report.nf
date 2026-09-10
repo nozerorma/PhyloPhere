@@ -49,7 +49,7 @@ process SCORING_REPORT {
     path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
     path caas_perms          // optional: CAAS permulation RDS (asr + caas null) (NO_FILE/NO_CAAS_PERMS sentinel when absent)
-    path caas_pos_pval       // optional: LOO null_pvalue_boot per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
+    path caas_pos_pval       // optional: pos_perm_p per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
     path caas_pos_sample     // optional: cycle-stratified per-scheme sample for distribution plots (NO_CAAS_POS_SAMPLE sentinel)
     path caas_pos_quantiles  // optional: per (cycle,scheme) null distribution shape (NO_CAAS_POS_QUANTILES sentinel)
     path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay

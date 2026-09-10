@@ -1055,11 +1055,11 @@ def build_percent_rank_lookup(hist_by_cycle: Dict[str, Dict[int, int]]) -> Dict[
 
     Each cycle is ranked within its OWN candidate pool, so the pool is the set of
     (gene, position, scheme) triples that cycle discovered. This is what gives the
-    axis per-cycle variation: a position's raw LOO value is fixed, but its rank
-    depends on the composition of the cycle it appears in.
+    axis per-cycle variation: a position's raw detection count is fixed, but its
+    rank depends on the composition of the cycle it appears in.
 
-    `null_pvalue_boot` is monotone in n_detected, so ranking n_detected ranks the
-    p-value identically. That collapses the pool to a per-cycle histogram
+    The detection p-value is monotone in n_detected, so ranking n_detected ranks
+    the p-value identically. That collapses the pool to a per-cycle histogram
     (n_detected -> count), a few MB rather than tens of millions of rows, which is
     what allows the rank to be formed without holding the full detail in memory.
 
@@ -1275,28 +1275,17 @@ def _perms_worker(
                 _expanded.append((cyc, out_recs))
             all_cycle_results = _expanded
 
-        # ── 1. Leave-one-out null_pvalue_boot per (position, scheme) ───────────
-        # This is the null-side analogue of the observed recovery_boot, which
-        # modules/boot.py computes as count/cycles: "of the resampling cycles,
-        # what fraction still recovered THIS position". Here the resampling axis
-        # is phenotype relabeling rather than species bootstrap, but the
-        # statistic is the same shape and its empirical distribution matches
-        # closely (observed mean 0.048 vs null 0.030 on cancer_complete_bm).
-        #
-        # LEAVE-ONE-OUT: when scoring cycle i, cycle i must not count toward its
-        # own replication evidence, or every cycle's score is contaminated by the
-        # very draw it is meant to be an independent sample of. Since a position
-        # is only ever scored in the cycles that detected it, k_{-i} is simply
-        # n_detected - 1 for every such cycle, so the LOO value is one number per
-        # (position, scheme) rather than per (cycle, position, scheme).
-        #
-        # NOTE the LOO correction is numerically inert once the caller applies
-        # percent_rank downstream ((d-1)/(N-1) and d/N are both monotone in d, so
-        # they rank identically). It is kept because perm_pos_pval.tsv is read
-        # directly as an observed-vs-null crosscheck, and a self-inclusive value
-        # would misstate replication there.
+        # ── 1. Detection count -> pos_perm_p per (position, scheme) ────────────
+        # pos_perm_p is the calibrated position-level permulation p: of the
+        # permuted-labeling cycles, how many independently re-detected THIS exact
+        # (Position, caap_group) as a CAAS, add-one smoothed (Davison & Hinkley).
+        # It is the detection-only companion of the R-side p.emp (which adds a
+        # score gate). NOT leave-one-out -- the observed run is not one of the N
+        # cycles, so there is no self-inclusion to correct (docs/scoring_v2_p_emp.md
+        # §6d). The old leave-one-out null_pvalue_boot column was deleted in the
+        # §7.4 pass: it was numerically inert under the downstream percent_rank and
+        # had no external consumer.
         n_cycles_total = len(cycle_tags)
-        loo_denom = max(n_cycles_total - 1, 1)
 
         n_detected = {}
         # V3-4a: pos_perm_p (and the R-side p.emp it decomposes) are POOLED to
@@ -1320,21 +1309,18 @@ def _perms_worker(
         for key, cycles_set in n_detected.items():
             k = len(cycles_set)
             n_detected_count[key] = k
-            # Tier 2: pos_perm_p is a calibrated position-level permulation p,
-            # add-one smoothed (Davison & Hinkley); it is NOT leave-one-out.
             perm_pos_pval_rows.append({
                 "Gene": gene,
                 "Position": key[0],
                 "caap_group": key[1],
                 "n_detected": k,
                 "n_cycles": n_cycles_total,
-                "null_pvalue_boot": (k - 1) / loo_denom,
                 "pos_perm_p": (k + 1) / (n_cycles_total + 1),
             })
 
         # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
-        # Scoring itself is deliberately NOT done here. null_row_caas needs
-        # 1 - percent_rank(null_pvalue_boot) ranked over the cycle's GENOME-WIDE
+        # Scoring itself is deliberately NOT done here. null_phen_score needs
+        # 1 - percent_rank(n_detected) ranked over the cycle's GENOME-WIDE
         # candidate pool, and this worker only ever sees one gene — so the rank
         # cannot be formed at this level. The parent finalizes it in pass B
         # (see _finalize_perm_scores) once every gene's rows have been counted.
@@ -1599,7 +1585,7 @@ def _finalize_perm_scores(
 
     Mirrors scoring_compute.R's observed pipeline term for term:
 
-        null_phen_score = 1 - percent_rank(null_pvalue_boot)   # diagnostic only (T1)
+        null_phen_score = 1 - percent_rank(n_detected)         # diagnostic only (T1)
         null_row_caas   = asr                                  # T1: no phen factor
         position score  = mean(null_row_caas) over that position's schemes
         gene x cycle    = size_adj_max over the cycle's positions, per direction
@@ -1844,7 +1830,6 @@ def _finalize_perm_pos_pval(
     import csv as _csv
 
     n_cycles_total = len(cycle_tags)
-    loo_denom = max(n_cycles_total - 1, 1)
 
     seen: Dict[Tuple[str, int, str], int] = {}
     # V3-4a: pos_perm_p is pooled to (Gene, Position, caap_group) — one row per
@@ -1857,7 +1842,7 @@ def _finalize_perm_pos_pval(
 
     pval_path = Path(output_dir) / "perm_pos_pval.tsv"
     pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles",
-                   "null_pvalue_boot", "pos_perm_p"]
+                   "pos_perm_p"]
     n_out = 0
     with open(pval_path, "w", newline="") as f_pval:
         writer = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
@@ -1866,7 +1851,6 @@ def _finalize_perm_pos_pval(
             writer.writerow({
                 "Gene": gene, "Position": pos, "caap_group": grp,
                 "n_detected": k, "n_cycles": n_cycles_total,
-                "null_pvalue_boot": (k - 1) / loo_denom,
                 "pos_perm_p": (k + 1) / (n_cycles_total + 1),
             })
             n_out += 1
@@ -1917,11 +1901,11 @@ def process_all_genes_perms(
 
     Outputs:
       - output_dir/gene_cycle_scores.tsv     (schema unchanged; feeds caas_perms.rds)
-      - output_dir/perm_pos_pval.tsv         (LOO null_pvalue_boot crosscheck table,
-                                              plus the add-one-smoothed pos_perm_p
-                                              calibrated position-level permulation p;
-                                              V3-4a: pooled to (Gene, Position,
-                                              caap_group), no `side` column)
+      - output_dir/perm_pos_pval.tsv         (the add-one-smoothed pos_perm_p
+                                              calibrated detection-only position-level
+                                              permulation p; V3-4a: pooled to
+                                              (Gene, Position, caap_group), no `side`
+                                              column. §7.4: null_pvalue_boot dropped)
       - output_dir/perm_pos_cycle_caas.tsv.gz (V3-4a: per (Gene, Position, side,
                                               cycle) caas_sum / n_schemes; the R
                                               side divides + takes the max over
@@ -1990,7 +1974,7 @@ def process_all_genes_perms(
     # V3-4a: perm_pos_pval.tsv is pooled to (Gene, Position, caap_group) — no
     # `side` column. The detail shard keeps `side` (a "both" position is two
     # detail rows, one per side, each with its own core_s).
-    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "null_pvalue_boot", "pos_perm_p"]
+    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "pos_perm_p"]
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
                      "n_detected", "clust", "side"]
 
