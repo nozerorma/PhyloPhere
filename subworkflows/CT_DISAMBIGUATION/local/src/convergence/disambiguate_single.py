@@ -707,7 +707,6 @@ def analyze_gene_disambiguation(
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     build_node_posteriors: bool = False,
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
-    native_side_split: bool = True,  # accepted-and-ignored; dropped in T4a(2/3)
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.

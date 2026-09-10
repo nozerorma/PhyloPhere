@@ -88,8 +88,7 @@ Conserved pairs are still walked (``conserved_pair_scores`` /
 longer multiply anything — they are ``score_c = 0`` members of ``D_s``.
 
 Return shape: always ``{"top": {...}, "bottom": {...}}`` — one row per
-``(Gene, Position, scheme, side)`` (T4a retired the flat one-row path and its
-``native_side_split`` flag).
+``(Gene, Position, scheme, side)`` (T4a retired the flat one-row path).
 
 The module is intentionally free of PAML/IO dependencies so it can be unit
 tested with synthetic trees and posteriors.

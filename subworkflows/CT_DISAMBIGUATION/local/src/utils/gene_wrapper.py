@@ -2177,9 +2177,8 @@ def process_all_genes_perms(
                 n_detail_rows += len(detail_rows)
                 # Per-cycle candidate-pool histogram (feeds the diagnostic
                 # null_phen_score rank only — T1 dropped phen from the score). One
-                # count per (cycle, Position, caap_group) candidate: with
-                # native_side_split a "both" position is two detail rows and must
-                # NOT be counted twice.
+                # count per (cycle, Position, caap_group) candidate: a "both"
+                # position is two detail rows and must NOT be counted twice.
                 _hist_seen: Set[Tuple[str, str, str]] = set()
                 for row in detail_rows:
                     hk = (row["cycle"], str(row["Position"]), row["caap_group"])
