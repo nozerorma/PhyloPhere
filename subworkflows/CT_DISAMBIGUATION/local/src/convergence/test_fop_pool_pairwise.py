@@ -73,7 +73,6 @@ def approx(a, b, tol=1e-9):
 def _rec_from_split(hyp, pairs, conserved_pair="", is_conserved_meta=False):
     split = ps.compute_asr_path_score(
         pairs, PND, NODE_INDEX, "US", is_conserved_meta, conserved_pair,
-        native_side_split=True,
     )
     return {"hyp": hyp, "sides": split}, split
 

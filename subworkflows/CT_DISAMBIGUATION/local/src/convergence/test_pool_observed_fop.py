@@ -63,8 +63,7 @@ PAIRS = [
 def _split(pairs):
     pnd = {nid: POSTERIOR_DATA[nid][6] for nid in POSTERIOR_DATA}
     ni = ps.build_node_index(TREE.root)
-    return ps.compute_asr_path_score(pairs, pnd, ni, "US", False, "",
-                                     native_side_split=True)
+    return ps.compute_asr_path_score(pairs, pnd, ni, "US", False, "")
 
 
 def _cr(hyp, side, split, pairs):

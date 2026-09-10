@@ -30,7 +30,6 @@ from src.convergence.convergence import (
     collect_tip_residues,
     extract_tip_residue,
     format_amino_display,
-    classify_change_and_parallelism,
 )
 from src.asr.tree_parser import get_mrca
 from src.data.models import CAASPosition, ConvergenceResult
@@ -58,19 +57,11 @@ PositionAxes = namedtuple(
      "sides"],
 )
 # All fields after `change_bottom` are optional. Single-contrast perm replay
-# leaves `hypothesis` None and the FOP axis fields None. For the FOP null they
-# carry the full compute_asr_path_score output so the aggregation domain-pools
-# with the exact same algebra scoring_compute.R §2b / fop_pool.R use on the
-# observed side. `pair_top_scores` / `pair_bottom_scores` are the per-domain,
-# per-side path scores (compute_asr_path_score's own `top_pair_scores` /
-# `bottom_pair_scores`) that `core` is actually built from — see
-# fop_pool.R/.py, which need them to rebuild core_top/core_bottom instead of
-# collapsing all domains into one direction-blind pool.
-# `sides` (scoring_v2 T3c SC2b): the raw
-# ``compute_asr_path_score(native_side_split=True)`` return
+# leaves `hypothesis` None and the FOP axis fields None.
+# `sides` (scoring_v2 T3c SC2b): the raw ``compute_asr_path_score`` return
 # ``{"top": <row>, "bottom": <row>}`` for the FOP null's per-side pairwise pooler
-# (``fop_pool.pool_hypotheses_pairwise``). Populated only in the axes-only replay
-# when ``native_side_split`` is on; ``None`` everywhere else.
+# (``fop_pool.pool_hypotheses_pairwise``) and ``gene_wrapper._expand_sides``.
+# Populated in the axes-only replay; ``None`` on the full observed path.
 PositionAxes.__new__.__defaults__ = (
     "none",
     None, None, None, None, None, None, None, None, None, None, None, None,
@@ -78,23 +69,37 @@ PositionAxes.__new__.__defaults__ = (
 )
 
 
+def _side_change_labels(s: str) -> Dict[str, str]:
+    """The (transitional) ``change_*`` columns for a per-side row, derived purely
+    from ``side`` — no separate categorical classifier. ``convergence_type`` is
+    carried on the path-score row itself (``_convergence_type``); T4b drops the
+    ``change_*`` columns once every consumer reads ``side``.
+    """
+    return {
+        "change_side": s,
+        "change_top": "convergent" if s == "top" else "no_change",
+        "change_bottom": "convergent" if s == "bottom" else "no_change",
+    }
+
+
 def _split_result_by_side(
     base: ConvergenceResult, split: Dict[str, Dict[str, Any]]
 ) -> List[ConvergenceResult]:
-    """Expand one position-level ConvergenceResult into per-side rows (T3b).
+    """Expand one position-level ConvergenceResult into per-side rows.
 
-    ``split`` is ``compute_asr_path_score(native_side_split=True)``'s
-    ``{"top": row, "bottom": row}``. A row is emitted for each side that has at
-    least one participating (changed) pair; ``side`` becomes the authoritative
-    direction key and the scalar ASR-path fields are taken from that side's row.
-    A position with no changed pair on either side collapses to a single
-    ``side="none"`` row (same cardinality as the legacy path for no-change rows).
+    ``split`` is ``compute_asr_path_score``'s ``{"top": row, "bottom": row}``. A
+    row is emitted for each side that has at least one participating (changed)
+    pair; ``side`` becomes the authoritative direction key and the scalar
+    ASR-path fields are taken from that side's row. A position with no changed
+    pair on either side collapses to a single ``side="none"`` row.
     """
     sides = [s for s in ("top", "bottom")
              if int(split.get(s, {}).get("n_participating", 0) or 0) > 0]
     if not sides:
         return [dataclasses.replace(
             base, side="none", asr_path_score=0.0, core=0.0,
+            change_side="none", change_top="no_change", change_bottom="no_change",
+            convergence_type="no_change",
         )]
 
     rows: List[ConvergenceResult] = []
@@ -113,6 +118,7 @@ def _split_result_by_side(
             pair_path_contaminated=(dict(d.get("pair_contaminated") or {}) or None),
             pair_top_path_scores=(pair_scores or None) if s == "top" else None,
             pair_bottom_path_scores=(pair_scores or None) if s == "bottom" else None,
+            **_side_change_labels(s),
         ))
     return rows
 
@@ -130,6 +136,8 @@ def _pooled_side_rows(
     if not sides:
         return [dataclasses.replace(
             base, side="none", asr_path_score=0.0, core=0.0, hypothesis=None,
+            change_side="none", change_top="no_change", change_bottom="no_change",
+            convergence_type="no_change",
         )]
     out: List[ConvergenceResult] = []
     for s in sides:
@@ -145,6 +153,7 @@ def _pooled_side_rows(
             pair_path_scores=ps or None,
             pair_top_path_scores=(ps or None) if s == "top" else None,
             pair_bottom_path_scores=(ps or None) if s == "bottom" else None,
+            **_side_change_labels(s),
         ))
     return out
 
@@ -165,9 +174,9 @@ def _pool_observed_fop(
     the identical statistic without ``scoring_compute.R`` ever touching
     ``fop_pool.R``. Single-hypothesis / non-FOP groups pass through untouched.
 
-    Each row must carry a transient ``.path_split`` (the
-    ``compute_asr_path_score(native_side_split=True)`` return for its
-    hypothesis); rows without one (path scoring failed) are passed through.
+    Each row must carry a transient ``.path_split`` (the ``compute_asr_path_score``
+    return for its hypothesis); rows without one (path scoring failed) are passed
+    through.
     """
     from src.convergence.fop_pool import pool_hypotheses_pairwise
 
@@ -234,15 +243,11 @@ def _position_axes(
     pair_details_list: Optional[List[Dict[str, Any]]],
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     walk_cache: Optional[Dict[Any, Any]] = None,
-    native_side_split: bool = False,
 ) -> Dict[str, Any]:
     """Reduced ASR-path-score kernel shared by the full scorer and the perm replay.
 
-    ``native_side_split`` (scoring_v2 T3b, observed path only): forwarded to
-    :func:`compute_asr_path_score`. When True the return is
-    ``{"top": {...}, "bottom": {...}}`` (one row per phenotype side); when False
-    it is the flat T1-shaped dict. The permulation replay always passes False —
-    the per-side null is T3c.
+    The return is always ``compute_asr_path_score``'s ``{"top": {...},
+    "bottom": {...}}`` (one row per phenotype side).
 
     Builds ``per_node_dist`` for the focal site directly from the posterior map and
     runs :func:`compute_asr_path_score`. This is the ONLY numeric computation the
@@ -280,7 +285,6 @@ def _position_axes(
         conserved_pair=str(getattr(caas_pos, "conserved_pair", "") or "").strip(),
         walk_cache=walk_cache,
         site_key=paml_site,
-        native_side_split=native_side_split,
     )
 
 
@@ -288,7 +292,6 @@ def analyze_caas_position_disambiguation(
     gene: str,
     caas_pos: CAASPosition,
     tree_data,
-    tip_level_pattern: Optional[dict] = None,
     posterior_data: Optional[dict] = None,
     tip_diagnostics: Optional[Dict[str, Any]] = None,
     posterior_threshold: float = 0.7,
@@ -298,8 +301,7 @@ def analyze_caas_position_disambiguation(
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     hypothesis: Optional[str] = None,
     walk_cache: Optional[Dict[Any, Any]] = None,
-    native_side_split: bool = False,
-) -> "ConvergenceResult | List[ConvergenceResult]":
+) -> "List[ConvergenceResult]":
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
 
@@ -316,12 +318,13 @@ def analyze_caas_position_disambiguation(
         gene: Gene name
         caas_pos: CAAS position information
         tree_data: Tree structure data
-        tip_level_pattern: Pre-computed tip-level pattern analysis
         posterior_data: ASR posterior probabilities
         posterior_threshold: Posterior probability threshold for accepting node states
 
     Returns:
-        ConvergenceResult object with complete analysis
+        List of per-side ConvergenceResult rows (1-2; a "both" position yields
+        one row per participating side, a no-change position one ``side="none"``
+        row).
     """
     logger.info(
         f"Analyzing convergence for {gene} position {caas_pos.position_one_based}"
@@ -335,21 +338,15 @@ def analyze_caas_position_disambiguation(
     state_source = "unknown"
     tip_pattern_comment = caas_pos.caas or ""
 
-    # Extract change/parallelism classification from pre-computed result
-    cp_result = {}
-    if tip_level_pattern and isinstance(tip_level_pattern, dict):
-        cp_result = tip_level_pattern
-    elif tip_diagnostics.get("pair_details"):
-        cp_result = classify_change_and_parallelism(
-            tip_diagnostics["pair_details"],
-            convergence_mode=convergence_mode,
-            grouping_scheme=getattr(caas_pos, "caap_group", None),
-        )
-
-    change_top = cp_result.get("change_top", "no_change")
-    change_bottom = cp_result.get("change_bottom", "no_change")
-    change_side = cp_result.get("change_side", "none")
-    convergence_type = cp_result.get("convergence_type", "no_change")
+    # change_top / change_bottom / change_side / convergence_type are no longer
+    # produced by a separate categorical classifier — they are derived from
+    # ``side`` per row in :func:`_split_result_by_side` (and ``convergence_type``
+    # comes from ``compute_asr_path_score``'s ``_convergence_type``). These are
+    # placeholders on ``base_result`` for the no-change collapse.
+    change_top = "no_change"
+    change_bottom = "no_change"
+    change_side = "none"
+    convergence_type = "no_change"
 
     # Build per-pair transition status map for annotations
     pair_status_map: Dict[str, Dict[str, str]] = {}
@@ -583,56 +580,35 @@ def analyze_caas_position_disambiguation(
     pair_derived_bot_aa: Dict[int, str] = {}
     pair_top_path_scores: Dict[int, float] = {}
     pair_bottom_path_scores: Dict[int, float] = {}
-    # scoring_v2 T3b: when native_side_split is on we score once per phenotype
-    # side and expand this position into 1-2 rows at the return below.
+    # We score once per phenotype side (``compute_asr_path_score`` always returns
+    # ``{"top": row, "bottom": row}``) and expand this position into 1-2 rows at
+    # the return below. ``_position_axes`` rebuilds per_node_dist from
+    # posterior_data exactly as node_posteriors["per_node"] was built above, so
+    # the score stays bit-identical to the perm replay's shared helper.
     path_split: Optional[Dict[str, Dict[str, Any]]] = None
     try:
-        # Single code path with the axes-only perm replay: _position_axes rebuilds
-        # per_node_dist from posterior_data exactly as node_posteriors["per_node"]
-        # was built above, so the score here stays bit-identical while guaranteeing
-        # the perm null scores each position through the same helper.
-        if native_side_split:
-            path_split = _position_axes(
-                caas_pos, tree_data, posterior_data, node_index, pair_details_list,
-                per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
-                native_side_split=True,
-            )
-            _t, _b = path_split["top"], path_split["bottom"]
-            asr_path_score = max(_t["asr_path_score"], _b["asr_path_score"])
-            core = asr_path_score
-            derived_agreement = None
-            pair_path_scores = {
-                **(_b.get("pair_scores") or {}), **(_t.get("pair_scores") or {})
-            }
-            pair_path_contaminated = {
-                **(_b.get("pair_contaminated") or {}),
-                **(_t.get("pair_contaminated") or {}),
-            }
-            conserved_pair_path_scores = _t.get("conserved_pair_scores", {}) or {}
-            conserved_pair_path_nodes = _t.get("conserved_pair_nodes", {}) or {}
-            pair_ancestral_aa = _t.get("pair_ancestral", {}) or {}
-            pair_derived_top_aa = _t.get("pair_derived_top", {}) or {}
-            pair_derived_bot_aa = _t.get("pair_derived_bot", {}) or {}
-            pair_top_path_scores = _t.get("pair_scores", {}) or {}
-            pair_bottom_path_scores = _b.get("pair_scores", {}) or {}
-        else:
-            path_result = _position_axes(
-                caas_pos, tree_data, posterior_data, node_index, pair_details_list,
-                per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
-            )
-            asr_path_score = path_result["asr_path_score"]
-            independence = path_result.get("independence", 1.0)
-            derived_agreement = path_result["derived_agreement"]
-            core = path_result.get("core", 0.0)
-            pair_path_scores = path_result["pair_scores"]
-            pair_path_contaminated = path_result["pair_contaminated"]
-            conserved_pair_path_scores = path_result.get("conserved_pair_scores", {}) or {}
-            conserved_pair_path_nodes = path_result.get("conserved_pair_nodes", {}) or {}
-            pair_ancestral_aa = path_result.get("pair_ancestral", {}) or {}
-            pair_derived_top_aa = path_result.get("pair_derived_top", {}) or {}
-            pair_derived_bot_aa = path_result.get("pair_derived_bot", {}) or {}
-            pair_top_path_scores = path_result.get("top_pair_scores", {}) or {}
-            pair_bottom_path_scores = path_result.get("bottom_pair_scores", {}) or {}
+        path_split = _position_axes(
+            caas_pos, tree_data, posterior_data, node_index, pair_details_list,
+            per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
+        )
+        _t, _b = path_split["top"], path_split["bottom"]
+        asr_path_score = max(_t["asr_path_score"], _b["asr_path_score"])
+        core = asr_path_score
+        derived_agreement = None
+        pair_path_scores = {
+            **(_b.get("pair_scores") or {}), **(_t.get("pair_scores") or {})
+        }
+        pair_path_contaminated = {
+            **(_b.get("pair_contaminated") or {}),
+            **(_t.get("pair_contaminated") or {}),
+        }
+        conserved_pair_path_scores = _t.get("conserved_pair_scores", {}) or {}
+        conserved_pair_path_nodes = _t.get("conserved_pair_nodes", {}) or {}
+        pair_ancestral_aa = _t.get("pair_ancestral", {}) or {}
+        pair_derived_top_aa = _t.get("pair_derived_top", {}) or {}
+        pair_derived_bot_aa = _t.get("pair_derived_bot", {}) or {}
+        pair_top_path_scores = _t.get("pair_scores", {}) or {}
+        pair_bottom_path_scores = _b.get("pair_scores", {}) or {}
     except Exception as e:  # never let path scoring break disambiguation
         path_split = None
         logger.warning(
@@ -674,7 +650,7 @@ def analyze_caas_position_disambiguation(
         change_top=change_top,
         change_bottom=change_bottom,
         change_side=change_side,
-        side=change_side,  # T2a passthrough alias (no "both" split until T3b)
+        side=change_side,  # overwritten per-side by _split_result_by_side
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
@@ -697,10 +673,10 @@ def analyze_caas_position_disambiguation(
         recovery_boot=getattr(caas_pos, "recovery_boot", None),
     )
 
-    if native_side_split and path_split is not None:
-        # T3b: "both" position -> two rows keyed (gene, position, side); a
-        # one-sided or no-change position stays a single row. change_side /
-        # change_top / change_bottom are left position-level (T4a retires them).
+    if path_split is not None:
+        # "both" position -> two rows keyed (gene, position, side); a one-sided
+        # or no-change position stays a single row. change_* columns are derived
+        # from ``side`` (T4b drops them).
         rows = _split_result_by_side(base_result, path_split)
         # T3c SC3: keep the raw {"top","bottom"} split on each row (transient, not
         # a dataclass field) so analyze_gene_disambiguation can FOP-pool the
@@ -709,9 +685,8 @@ def analyze_caas_position_disambiguation(
         for _r in rows:
             _r.path_split = path_split
         return rows
-    if native_side_split:
-        base_result.path_split = path_split  # may be None
-    return base_result
+    base_result.path_split = None
+    return [base_result]
 
 
 def analyze_gene_disambiguation(
@@ -731,8 +706,8 @@ def analyze_gene_disambiguation(
     axes_only: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     build_node_posteriors: bool = False,
-    native_side_split: bool = False,
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
+    native_side_split: bool = True,  # accepted-and-ignored; dropped in T4a(2/3)
 ) -> Tuple[List[ConvergenceResult], Dict[str, Any]]:
     """
     Perform complete convergence/disambiguation analysis for a gene's CAAS positions.
@@ -931,7 +906,6 @@ def analyze_gene_disambiguation(
                 continue
 
             # Perform tip-level convergence analysis across ALL pairs from trait file
-            tip_level_pattern = None
             tip_diagnostics: Dict[str, Any] = {}
             try:
                 if contrast_pairs and taxid_mapping:
@@ -1008,8 +982,7 @@ def analyze_gene_disambiguation(
 
                     mrca_node = _get_mrca_cached(all_taxa)
                     # Populate mrca_contrast in each pair using the global contrast MRCA
-                    # state (MRCA of all taxa). classify_change_and_parallelism uses this
-                    # field as the ancestor when convergence_mode="mrca".
+                    # state (MRCA of all taxa).
                     global_mrca_state, _ = _modal_state(
                         mrca_node.node_id if mrca_node else None
                     )
@@ -1030,11 +1003,6 @@ def analyze_gene_disambiguation(
                         "focal_nodes": [p.get("node_id") for p in pair_details],
                     }
 
-                    tip_level_pattern = classify_change_and_parallelism(
-                        pair_details,
-                        convergence_mode=convergence_mode,
-                        grouping_scheme=getattr(caas_pos, "caap_group", None),
-                    )
                     tip_diagnostics["pair_details"] = pair_details
                     tip_diagnostics["node_mapping"] = node_mapping
             except Exception as e:
@@ -1075,16 +1043,16 @@ def analyze_gene_disambiguation(
                 continue
 
             # ── Axes-only reduced kernel (permulation replay) ──────────────────
-            # The perm null keeps only asr_path_score + the change partition, so we
+            # The perm null keeps only asr_path_score + the per-side split, so we
             # skip the full per-position scorer — whose cost is the redundant per-node
             # posterior-map rebuild (node_posteriors["per_node"]) plus the 40-field
             # ConvergenceResult assembly the null discards — and call the shared
             # _position_axes helper directly (which builds per_node_dist once, cached).
-            # change_top/change_bottom come straight from the (cheap) classification
-            # computed just above, so they are the EXACT categories the full path
-            # would have emitted — not a placeholder.
+            # The `.sides` field carries the whole {"top": row, "bottom": row}
+            # split; gene_wrapper._expand_sides derives per-side change labels from
+            # it. The scalar fields here collapse to the stronger side as a legacy
+            # fallback.
             if axes_only:
-                cp = tip_level_pattern or {}
                 axes_sides = None
                 try:
                     path_result = _position_axes(
@@ -1095,20 +1063,14 @@ def analyze_gene_disambiguation(
                         tip_diagnostics.get("pair_details"),
                         per_site_dist_cache=per_site_dist_cache,
                         walk_cache=gene_walk_cache,
-                        native_side_split=native_side_split,
                     )
-                    if native_side_split:
-                        # {"top": row, "bottom": row}. Stash it whole for the FOP
-                        # null's per-side pairwise pooler; collapse the scalar
-                        # fields to the stronger side so a legacy reader still
-                        # gets a sane value.
-                        axes_sides = path_result
-                        _t = path_result.get("top", {}) or {}
-                        _b = path_result.get("bottom", {}) or {}
-                        path_result = _t if (
-                            float(_t.get("asr_path_score", 0.0) or 0.0)
-                            >= float(_b.get("asr_path_score", 0.0) or 0.0)
-                        ) else _b
+                    axes_sides = path_result
+                    _t = path_result.get("top", {}) or {}
+                    _b = path_result.get("bottom", {}) or {}
+                    path_result = _t if (
+                        float(_t.get("asr_path_score", 0.0) or 0.0)
+                        >= float(_b.get("asr_path_score", 0.0) or 0.0)
+                    ) else _b
                     axes_score = path_result.get("asr_path_score", 0.0)
                     axes_pair_scores = path_result.get("pair_scores", None)
                     axes_cons_scores = path_result.get("conserved_pair_scores", None) or None
@@ -1139,9 +1101,9 @@ def analyze_gene_disambiguation(
                         position=caas_pos.position,
                         caap_group=getattr(caas_pos, "caap_group", "US"),
                         asr_path_score=axes_score,
-                        change_top=cp.get("change_top", "no_change"),
-                        change_bottom=cp.get("change_bottom", "no_change"),
-                        side=cp.get("change_side", "none"),
+                        change_top="no_change",
+                        change_bottom="no_change",
+                        side="none",
                         hypothesis=_hyp_label,
                         pair_scores=axes_pair_scores,
                         independence=axes_extra.get("independence"),
@@ -1163,11 +1125,10 @@ def analyze_gene_disambiguation(
                 continue
 
             # Perform convergence/disambiguation analysis
-            result = analyze_caas_position_disambiguation(
+            row_list = analyze_caas_position_disambiguation(
                 gene,
                 caas_pos,
                 tree_data,
-                tip_level_pattern,
                 posterior_data,
                 tip_diagnostics,
                 posterior_threshold=posterior_threshold,
@@ -1177,11 +1138,9 @@ def analyze_gene_disambiguation(
                 per_site_dist_cache=per_site_dist_cache,
                 hypothesis=_hyp_label,
                 walk_cache=gene_walk_cache,
-                native_side_split=native_side_split,
             )
 
-            # T3b: a "both" position expands to a list of per-side rows.
-            row_list = result if isinstance(result, list) else [result]
+            # A "both" position expands to a list of per-side rows.
             results.extend(row_list)
             logger.info(
                 f"✓ Analyzed position {pos}: {row_list[0].convergence_type} pattern, "
@@ -1202,12 +1161,12 @@ def analyze_gene_disambiguation(
             pass
         logger.info(f"Tip details written to {diagnostics.get('tip_dump_file')}")
 
-    if native_side_split and not axes_only and results:
+    if not axes_only and results:
         # T3c SC3: FOP-pool the hypothesis harvest here, in-tree, with the real
         # per-side pairwise core (pool_hypotheses_pairwise) — the same routine
-        # the permulation null uses. scoring_compute.R's fop_pool.R call is
-        # skipped under the flag. PSS weights (contrast_hypotheses_pairs.tsv,
-        # {(hyp, domain): pss}) come from hyp_pairs_pss; None -> equal weight.
+        # the permulation null uses. scoring_compute.R never touches fop_pool.R.
+        # PSS weights (contrast_hypotheses_pairs.tsv, {(hyp, domain): pss}) come
+        # from hyp_pairs_pss; None -> equal weight.
         try:
             _n0 = len(results)
             results = _pool_observed_fop(

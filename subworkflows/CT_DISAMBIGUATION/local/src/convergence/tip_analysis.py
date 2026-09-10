@@ -2,39 +2,23 @@
 Tip-Level Convergence Analysis
 ===============================
 
-Collects tip residues for contrasts and classifies tip-level convergence patterns.
-Pure helpers expecting alignment data, ASR posteriors, and MRCA lookups from callers.
+Collects tip residues for contrasts. Pure helper expecting alignment data, ASR
+posteriors, and MRCA lookups from callers.
 
 Workflow
 --------
 1. **collect_contrast_tip_residues**: Extract observed residues at tip species for a contrast
-2. **analyze_tip_convergence_patterns**: Classify pattern and populate diagnostics
-
-Diagnostics Structure
----------------------
-The diagnostics dictionary populated by `analyze_tip_convergence_patterns` includes:
-    - pair_details: Enriched pair detail dicts with tip/focal states
-    - pair_transition_summary: Per-pair ancestor→descendant transitions
-    - transition_focus_side: Focus side for classification ('top' or 'bottom')
-    - focus_transition_detail: Human-readable transition summary
 
 Usage Example
 -------------
 ::
 
-    from src.convergence.tip_analysis import collect_contrast_tip_residues, analyze_tip_convergence_patterns
+    from src.convergence.tip_analysis import collect_contrast_tip_residues
 
-    # Collect tip residues
     enriched = collect_contrast_tip_residues(
         contrast, position_info, alignment_data,
         seq_by_id, seq_by_species, mrca_func, node_posteriors
     )
-
-    # Classify pattern
-    diagnostics = {}
-    pattern = analyze_tip_convergence_patterns([enriched], diagnostics)
-    print(pattern['pattern'])  # 'convergent' or 'divergent'
-    print(diagnostics['focus_transition_detail'])  # 'Ancestors=['A'], Descendants=['V']'
 
 Author
 ------
@@ -158,48 +142,3 @@ def collect_contrast_tip_residues(
     return enriched_contrast.__dict__.copy() if hasattr(enriched_contrast, '__dict__') else enriched_contrast
 
 
-def analyze_tip_convergence_patterns(
-    pair_details: List[Dict[str, Any]], diagnostics: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
-    """
-    Classify and annotate tip-level convergence pattern.
-
-    :param pair_details: Enriched pair detail dictionaries (expects tip/focal states)
-    :param diagnostics: Diagnostics dictionary to populate in-place
-    :returns: Pattern dict or ``None`` if insufficient data
-    :rtype: Optional[Dict[str, Any]]
-    """
-    from .patterns import (
-        summarize_pair_transitions,
-        classify_focus_transitions,
-    )
-    from .convergence import classify_change_and_parallelism
-
-    if len(pair_details) < 2:
-        return None
-
-    # Cast to Sequence for type checking (dicts are compatible at runtime)
-    tip_level_pattern = classify_change_and_parallelism(pair_details)  # type: ignore[arg-type]
-    logger.info(f"✓ Tip-level pattern: {tip_level_pattern.get('convergence_type', 'unknown')}")
-
-    diagnostics["pair_details"] = pair_details
-    diagnostics["pair_transition_summary"] = summarize_pair_transitions(pair_details)
-
-    # Determine focus side
-    def _has_changes(side: str) -> bool:
-        for item in diagnostics["pair_transition_summary"]:
-            if (item.get("transitions") or {}).get(side, {}).get("status") == "changed":
-                return True
-        return False
-
-    focus_side = "top"
-    if not _has_changes("top") and _has_changes("bottom"):
-        focus_side = "bottom"
-    diagnostics["transition_focus_side"] = focus_side
-
-    classification, detail = classify_focus_transitions(
-        diagnostics["pair_transition_summary"], focus=focus_side
-    )
-    diagnostics["focus_transition_detail"] = detail
-
-    return tip_level_pattern

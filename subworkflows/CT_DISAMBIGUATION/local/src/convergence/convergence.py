@@ -57,11 +57,10 @@ Date
 2025-12-07
 """
 
-from typing import Dict, List, Optional, Tuple, Any, Sequence, TypedDict, TypeGuard
+from typing import Dict, List, Optional, Tuple, Any, Sequence, TypedDict
 from dataclasses import dataclass, field
 import logging
 
-from ..biochem.grouping import get_grouping_scheme
 from ..utils.amino import normalize_amino_list as _normalize_amino_list
 
 logger = logging.getLogger(__name__)
@@ -354,62 +353,6 @@ def format_amino_display(amino_list: List[str]) -> str:
     return "+".join(amino_list)
 
 
-def compute_derived_state_similarity(
-    derived_states: List[str], grouping_getter
-) -> Dict[str, Any]:
-    """
-    Check if derived states belong to the same biochemical group.
-
-    For divergent/parallel patterns, this measures whether the
-    different derived states are biochemically similar.
-
-    Args:
-        derived_states: List of derived amino acid states
-
-    Returns:
-        Dictionary with per-scheme similarity analysis
-
-    Example:
-        {
-            'GS1': {'derived_groups': ['AGPS', 'CV'], 'convergent': False, ...},
-            ...
-        }
-    """
-    summary: Dict[str, Any] = {}
-
-    if grouping_getter is None or not derived_states:
-        return summary
-
-    for idx in range(5):
-        scheme = f"GS{idx}"
-
-        # Get groups for all derived states
-        groups = []
-        seen = set()
-        for aa in derived_states:
-            group = grouping_getter(aa, scheme)
-            if group and group not in seen:
-                seen.add(group)
-                groups.append(group)
-
-        # Convergent if all derived states in same group
-        convergent = len(groups) == 1 if groups else False
-
-        # Description
-        if convergent:
-            description = f"All in {groups[0]}"
-        else:
-            description = f"Across {len(groups)} groups: {'/'.join(groups)}"
-
-        summary[scheme] = {
-            "derived_groups": groups,
-            "convergent": convergent,
-            "description": description,
-        }
-
-    return summary
-
-
 # =============================================================================
 # NODE-LEVEL ANALYSIS FUNCTIONS (MRCA-based)
 # =============================================================================
@@ -524,173 +467,6 @@ def extract_node_states_from_node_level(
     except Exception as e:
         logger.error(f"Error extracting node states for {gene}:{position}: {e}")
         return None
-
-
-def _validate_pair_details(
-    entries: Sequence[PairDetail],
-) -> Optional[List[PairDetail]]:
-    """Validate and order pair details; return None when insufficient."""
-    if not entries:
-        return None
-
-    usable: List[PairDetail] = []
-    for entry in entries:
-        top_tip = entry.get("top_tip_mode") or entry.get("top_tip_residue")
-        bottom_tip = entry.get("bottom_tip_mode") or entry.get("bottom_tip_residue")
-        if top_tip is None and bottom_tip is None:
-            logger.debug(f"Skipping pair with no tip residues: {entry}")
-            continue
-        usable.append(entry)
-
-    if len(usable) < 2:
-        return None
-
-    indexed = list(enumerate(usable))
-    indexed.sort(
-        key=lambda item: (str(item[1].get("pair_id", "")).lower(), item[0])
-    )
-    return [item[1] for item in indexed]
-
-
-def _classify_side(changed_derived: List[str]) -> str:
-    """
-    Classify the change pattern for one side (top or bottom).
-
-    Returns one of: ``no_change``, ``ambiguous``, ``convergent``,
-    ``divergent``, ``codivergent``.
-    """
-    n_changes = len(changed_derived)
-    if n_changes == 0:
-        return "no_change"
-    if n_changes == 1:
-        return "ambiguous"
-
-    unique = set(changed_derived)
-    if len(unique) == 1:
-        return "convergent"
-
-    from collections import Counter
-    counts = Counter(changed_derived)
-    if any(c > 1 for c in counts.values()):
-        return "codivergent"
-    return "divergent"
-
-
-_SUBSTANTIVE = {"convergent", "divergent", "codivergent"}
-
-
-def _derive_change_side(change_top: str, change_bottom: str) -> str:
-    """Derive ``change_side`` from per-side change labels."""
-    top_sub = change_top in _SUBSTANTIVE
-    bot_sub = change_bottom in _SUBSTANTIVE
-    if top_sub and bot_sub:
-        return "both"
-    if top_sub:
-        return "top"
-    if bot_sub:
-        return "bottom"
-    return "none"
-
-
-def _derive_convergence_type(change_top: str, change_bottom: str) -> str:
-    """Derive conflated ``convergence_type`` from per-side change labels."""
-    top_sub = change_top in _SUBSTANTIVE
-    bot_sub = change_bottom in _SUBSTANTIVE
-    if top_sub and bot_sub:
-        if change_top == change_bottom:
-            return f"{change_top}_both"
-        return f"{change_top}_{change_bottom}"
-    if top_sub:
-        return f"{change_top}_top"
-    if bot_sub:
-        return f"{change_bottom}_bottom"
-    return "no_change"
-
-
-def classify_change_and_parallelism(
-    pair_details: Sequence[PairDetail],
-    convergence_mode: str = "focal_clade",
-    grouping_scheme: Optional[str] = None,
-) -> Dict[str, Any]:
-    """
-    Classify evolutionary change patterns per side (top/bottom).
-
-    Classifies each side independently by collecting derived states across pairs
-    where a substitution occurred:
-
-    - ``no_change``: 0 changes
-    - ``ambiguous``: exactly 1 change
-    - ``convergent``: >=2 changes, all to the same derived state
-    - ``divergent``: >=2 changes, all derived states distinct
-    - ``codivergent``: >=2 changes, >=2 distinct derived states with at least one repeated
-
-    Returns dict with keys: ``change_top``, ``change_bottom``, ``change_side``,
-    ``convergence_type``. (The former parallelism axis — ``parallel_top/bottom/type``
-    — was retired: the continuous ``mrca_diversity`` axis of the ASR path score
-    supersedes it.)
-    """
-    validated_pairs = _validate_pair_details(pair_details)
-    if validated_pairs is None:
-        return {
-            "change_top": "no_change",
-            "change_bottom": "no_change",
-            "change_side": "none",
-            "convergence_type": "no_change",
-        }
-
-    invalid_states = {None, "-", "X", "?"}
-
-    def is_valid(state: Optional[str]) -> TypeGuard[str]:
-        return state not in invalid_states
-
-    def _map_state(state: Optional[str]) -> Optional[str]:
-        if state is None:
-            return None
-        aa = str(state).strip().upper()
-        if not aa:
-            return None
-        if not grouping_scheme or grouping_scheme == "US":
-            return aa
-        mapped = get_grouping_scheme(aa, grouping_scheme)
-        return mapped if mapped else aa
-
-    top_changed_derived: List[str] = []
-    bottom_changed_derived: List[str] = []
-
-    for pair in validated_pairs:
-        focal_state = pair.get("focal_state")
-        mrca_contrast = pair.get("mrca_contrast")
-        ancestor = mrca_contrast if convergence_mode == "mrca" else focal_state
-
-        top_tip = pair.get("top_tip_mode") or pair.get("top_tip_residue")
-        bottom_tip = pair.get("bottom_tip_mode") or pair.get("bottom_tip_residue")
-
-        mapped_ancestor = _map_state(ancestor)
-        mapped_top = _map_state(top_tip)
-        mapped_bottom = _map_state(bottom_tip)
-
-        if is_valid(mapped_ancestor) and is_valid(mapped_top):
-            if mapped_ancestor != mapped_top:
-                top_changed_derived.append(mapped_top)
-
-        if is_valid(mapped_ancestor) and is_valid(mapped_bottom):
-            if mapped_ancestor != mapped_bottom:
-                bottom_changed_derived.append(mapped_bottom)
-
-    # Classify each side independently
-    change_top = _classify_side(top_changed_derived)
-    change_bottom = _classify_side(bottom_changed_derived)
-
-    # Derived columns
-    change_side = _derive_change_side(change_top, change_bottom)
-    convergence_type = _derive_convergence_type(change_top, change_bottom)
-
-    return {
-        "change_top": change_top,
-        "change_bottom": change_bottom,
-        "change_side": change_side,
-        "convergence_type": convergence_type,
-    }
 
 
 def describe_transition(trans: Dict[str, Any]) -> str:
