@@ -299,24 +299,42 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
   else
     as.data.frame(lapply(psz, function(n) sample.int(n, ITER_CAP, replace = TRUE)))
 
-  seen <- list(paste(sort(c(hyps$H1$species1, hyps$H1$species2)), collapse = "|"))
-  harvested <- list(); minpss <- numeric(0)
-  for (it in seq_len(nrow(idx))) {
-    ci <- as.integer(unlist(idx[it, , drop = FALSE], use.names = FALSE))
-    rows <- do.call(rbind, lapply(seq_len(K), function(k) pools[[k]][ci[k], ]))
-    spv <- c(rows$species1, rows$species2)
+  # Hot loop below runs up to ITER_CAP (= max_fop*20) draws per cycle, over up to
+  # perm_pool_size cycles. Its wall time was dominated by two R anti-patterns:
+  # per-iteration data.frame row indexing + do.call(rbind, ...) of K one-row
+  # frames, and linear membership in a growing `seen` list. Materialize the draw
+  # index as an integer matrix and each Voronoi pool as bare species/PSS vectors
+  # once; dedup via a hashed environment. Draw order, selection semantics and
+  # outputs are unchanged (byte-identical fop_labelings.tab / fop_pairs.tsv).
+  idx_mat  <- matrix(as.integer(unlist(idx, use.names = FALSE)), ncol = length(psz))
+  pool_s1  <- lapply(pools, `[[`, "species1")
+  pool_s2  <- lapply(pools, `[[`, "species2")
+  pool_pss <- lapply(pools, `[[`, "pss_score")
+  Kseq <- seq_len(K)
+
+  seen <- new.env(parent = emptyenv())
+  assign(paste(sort(c(hyps$H1$species1, hyps$H1$species2)), collapse = "|"), TRUE, envir = seen)
+  n_it <- nrow(idx_mat)
+  harvested <- vector("list", n_it); minpss <- numeric(n_it); nh <- 0L
+  s1 <- character(K); s2 <- character(K); ps <- numeric(K)
+  for (it in seq_len(n_it)) {
+    ci <- idx_mat[it, ]
+    for (k in Kseq) { r <- ci[k]; s1[k] <- pool_s1[[k]][r]; s2[k] <- pool_s2[[k]][r]; ps[k] <- pool_pss[[k]][r] }
+    spv <- c(s1, s2)
     if (length(unique(spv)) < 2L * K) next
     sig <- paste(sort(spv), collapse = "|")
-    if (sig %in% seen) next
-    seen <- c(seen, sig)
-    mem <- lapply(seq_len(K), function(i) c(rows$species1[i], rows$species2[i]))
+    if (!is.null(seen[[sig]])) next
+    assign(sig, TRUE, envir = seen)
+    mem <- lapply(Kseq, function(i) c(s1[i], s2[i]))
     if (overall_dunn_lean(Dm, mem) >= 1.0) {
-      harvested[[length(harvested) + 1L]] <- add_cluster(
-        rows[, c("species1", "species2", "pss_score"), drop = FALSE])
-      minpss <- c(minpss, suppressWarnings(min(rows$pss_score, na.rm = TRUE)))
+      nh <- nh + 1L
+      harvested[[nh]] <- add_cluster(data.frame(
+        species1 = s1, species2 = s2, pss_score = ps, stringsAsFactors = FALSE))
+      minpss[nh] <- suppressWarnings(min(ps, na.rm = TRUE))
     }
   }
-  if (length(harvested) > 0L) {
+  if (nh > 0L) {
+    harvested <- harvested[seq_len(nh)]; minpss <- minpss[seq_len(nh)]
     ord  <- order(-replace(minpss, is.na(minpss), -Inf))
     keep <- head(ord, max(0L, as.integer(max_fop) - 1L))
     harvested <- harvested[keep]
