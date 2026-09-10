@@ -1,0 +1,210 @@
+[
+  {
+    "name": "m1_passthrough",
+    "doc": "B.0 - M=1, no PSS -> plain mean over K fixed domains == compute_domain_scores.core_s",
+    "pss": [],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.95, "core": 0.95, "domain_scores": {"1": 0.95, "2": 0.95}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 1
+    }
+  },
+  {
+    "name": "m1_pss_shifts_to_d1",
+    "doc": "B.1 - M=1, PSS 0.9/0.9/0.1 pulls core toward the two converging V domains",
+    "pss": [["H1", 1, 0.9], ["H1", 2, 0.9], ["H1", 3, 0.1]],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_der_enc": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_changed": 3, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": "A", "posterior": 0.1}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.9, "core": 0.9, "domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_weights": {"1": 0.9, "2": 0.9, "3": 0.1}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_participating": 3, "convergence_type": "convergent"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0, "3": 0.0}, "domain_weights": {"1": 0.9, "2": 0.9, "3": 0.1}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 1
+    }
+  },
+  {
+    "name": "m2_domain_changed_only_in_H1",
+    "doc": "B.2 - domain changed in 1 of M=2 hypotheses -> s_bar_d = score / 2",
+    "pss": [],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+        }
+      },
+      {
+        "hyp": "H2",
+        "sides": {
+          "top": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.475, "core": 0.475, "domain_scores": {"1": 0.475, "2": 0.475}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 2
+    }
+  },
+  {
+    "name": "m2_asymmetric_pss_same_domain",
+    "doc": "B.3 - per-hypothesis PSS 0.1/0.9 on d1 averages to w_bar_1 = 0.5",
+    "pss": [["H1", 1, 0.1], ["H2", 1, 0.9], ["H1", 2, 0.9], ["H2", 2, 0.9], ["H1", 3, 0.5], ["H2", 3, 0.5]],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_der_enc": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_changed": 3, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": "A", "posterior": 0.1}}
+        }
+      },
+      {
+        "hyp": "H2",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_der_enc": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_changed": 3, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": "A", "posterior": 0.1}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.7, "core": 0.7, "domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_weights": {"1": 0.5, "2": 0.9, "3": 0.5}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_participating": 3, "convergence_type": "convergent"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0, "3": 0.0}, "domain_weights": {"1": 0.5, "2": 0.9, "3": 0.5}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 2
+    }
+  },
+  {
+    "name": "side_none_collapse",
+    "doc": "B.4 - nothing changed on either side -> both aggs core 0 (caller collapses to side=none)",
+    "pss": [],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 1
+    }
+  },
+  {
+    "name": "no_reconstruction_in_denominator",
+    "doc": "B.5 - domain 3 has no reconstruction -> stays in the denominator as a 0, core 1.9/3",
+    "pss": [],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": null, "posterior": 0.0}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.6333333333333333, "core": 0.6333333333333333, "domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0, "3": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0, "3": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0, "3": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 1
+    }
+  },
+  {
+    "name": "m3_split_scheme_resolved_US",
+    "doc": "B.6a - d1 lands on V/I/L across 3 hyps under US -> disagree -> pooled core 0.317",
+    "pss": [],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+        }
+      },
+      {
+        "hyp": "H2",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.0, "2": 0.0}, "domain_der": {"1": "I", "2": "V"}, "domain_der_enc": {"1": "I", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 1, "agree_den": 2, "n_changed": 2, "convergence_type": "divergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+        }
+      },
+      {
+        "hyp": "H3",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.0, "2": 0.0}, "domain_der": {"1": "L", "2": "V"}, "domain_der_enc": {"1": "L", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 1, "agree_den": 2, "n_changed": 2, "convergence_type": "divergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.31666666666666665, "core": 0.31666666666666665, "domain_scores": {"1": 0.31666666666666665, "2": 0.31666666666666665}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 3
+    }
+  },
+  {
+    "name": "m3_split_scheme_resolved_GS3",
+    "doc": "B.6b - same harvest, compute_domain_scores ran under GS3 (V/I/L co-encode 'l') -> pooled core 0.95",
+    "pss": [],
+    "hyp_records": [
+      {
+        "hyp": "H1",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "l", "2": "l"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.15}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.15}}
+        }
+      },
+      {
+        "hyp": "H2",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "I", "2": "V"}, "domain_der_enc": {"1": "l", "2": "l"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.15}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.15}}
+        }
+      },
+      {
+        "hyp": "H3",
+        "sides": {
+          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "L", "2": "V"}, "domain_der_enc": {"1": "l", "2": "l"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
+          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
+          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.15}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.15}}
+        }
+      }
+    ],
+    "expected": {
+      "top": {"asr_path_score": 0.95, "core": 0.95, "domain_scores": {"1": 0.95, "2": 0.95}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
+      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "n_hypotheses": 3
+    }
+  }
+]

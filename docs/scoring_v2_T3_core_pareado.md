@@ -1,3 +1,9 @@
+> **SUPERSEDED (V3-0, `scoring_v2`).** El `core` pareado descrito aquí (T3a–T4b) se
+> reemplaza por **core v3**, que mueve el score al **dominio de Voronoi** como unidad,
+> borra el walk del segmento privado / `s_c^s` / `walk_cache` y deja el pooler FOP sin
+> árbol. Especificación viva: [`scoring_v3_core.md`](scoring_v3_core.md). Este documento
+> se conserva como registro del diseño intermedio; no describe el código tras V3-1.
+
 # scoring_v2 · T3-doc — Diseño del `core` pareado por lado
 
 Rama `scoring_v2`. Entregable de diseño del tramo T3 (sin código). Fija la fórmula

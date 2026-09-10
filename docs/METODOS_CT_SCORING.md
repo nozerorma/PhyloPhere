@@ -310,6 +310,18 @@ Invariantes hoisted por gen (una sola vez, no por posición ni por ciclo): looku
 alineamiento, `node_index`, MRCA de cada par (memoizado), y `gene_walk_cache` que memoiza
 los recorridos MRCA→raíz invariantes al labeling.
 
+> **TODO core v3 (`scoring_v2`, prosa final en V3-4/V3-6).** F.3 y F.4 describen el `core`
+> pareado por par (T1–T4b). **core v3** ([`scoring_v3_core.md`](scoring_v3_core.md)) sustituye
+> la unidad *par* por el **dominio de Voronoi**: `compute_domain_scores` da
+> `score_d^{h,s} = noisy_or` de `contrib_h(d,d') = agree · (1 − P_wc_any(set @ LCA))` sobre
+> compañeros del mismo residuo (**sin factor de aislamiento, sin PSS aquí**);
+> `pool_domains` colapsa la cosecha FOP como **media de medias**
+> `core_s = Σ_d w̄_d·s̄_d / Σ_d w̄_d` sobre los K dominios fijos, con
+> `s̄_d = Σ_h score_d^{h,s} / M`, `w̄_d = Σ_h PSS_d^h / M` (**el PSS entra solo aquí**);
+> `M = 1` degenera a `Σ_d PSS_d·score_d / Σ_d PSS_d`. Los bloques columna F.4 pasan de
+> `mrca_<i>_*` a `domain_<d>_{node,state,posterior,score,anc_aa,top_aa,bot_aa}`; se van
+> `conserved_<j>_*` e `independence`. El gate VEP `convergence_schemes` se retira.
+
 ### F.3. `compute_asr_path_score` — álgebra (por posición, esquema, hipótesis)
 
 Recorrido acotado a dos regiones, nunca al camino MRCA→raíz completo:
@@ -430,6 +442,15 @@ Cinco esquemas de scoring (`US, GS4, GS3, GS2, GS1`). `scheme_priority` (US=5…
 (`H<n>` o `NA`).
 
 ### H.2. Domain-pooling FOP (§2b, `fop_pool.R::apply_fop_pooling`) — **cómo se integran las hipótesis**
+
+> **TODO core v3 (`scoring_v2`, prosa final en V3-4/V3-6).** Los Pasos 1–4 de abajo
+> (dedup por `mrca_<i>_node`, dos trabajos de peso PSS, `p_at_least_2` direccional,
+> `rebuild_derived_agreement`) se sustituyen por `fop_pool.py::pool_domains` **sin árbol**:
+> `core_s = Σ_d w̄_d·s̄_d / Σ_d w̄_d` sobre los K dominios de Voronoi fijos, con
+> `s̄_d` = media sobre las M hipótesis de `score_d^{h,s}` (una hipótesis sin cambio en `d`
+> aporta 0) y `w̄_d` = media sobre M del PSS `(hipótesis, dominio)`. El dedup por nodo (T4c)
+> **se disuelve**: el índice de dominio es la clave. `fop_pool.R` se borra en V3-5;
+> `apply_fop_pooling` desaparece de §2b. Detalle: [`scoring_v3_core.md`](scoring_v3_core.md) §3.
 
 **Objetivo:** colapsar las filas `H1..Hn` de un `(Gene, Position, caap_group)` a **una sola
 fila** con un `asr_path_score` poolado, más los descriptores de posición.
