@@ -19,7 +19,7 @@ from residue_descriptors import (
 
 
 def _mk_p3() -> pd.DataFrame:
-    # test_fop_pool.R mk_p3: 3 hypothesis rows, one (Gene, Position), bottom-side
+    # 3 hypothesis rows, one (Gene, Position), bottom-side
     # change (bot_aa I/V), no side column -> inferred from the data.
     return pd.DataFrame(
         {

@@ -57,12 +57,10 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 caas_pos_pval_file   <- parse_arg("--caas_pos_pval")  # perm_pos_pval.tsv (position-level calibrated null p); NO_FILE otherwise
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
-# The disambiguation subworkflow FOP-pools the hypothesis harvest in-tree
-# (pool_hypotheses_pairwise, the real per-side pairwise core), so rows arrive one
-# per (Gene, Position, scheme, side) with hypothesis=NA and scoring never touches
-# fop_pool.R.
-concordance_tau      <- as.numeric(parse_arg("--concordance_tau", "0.8"))  # POINT 3: da threshold for convergence_schemes
-if (!is.finite(concordance_tau) || concordance_tau <= 0 || concordance_tau > 1) concordance_tau <- 0.8
+# The disambiguation subworkflow domain-pools the hypothesis harvest in-tree
+# (core v3: fop_pool.pool_domains over the K fixed Voronoi domains), so rows
+# arrive one per (Gene, Position, scheme, side) with hypothesis=NA and scoring
+# never pools hypotheses itself.
 stress_enabled_raw        <- parse_arg("--stress", "false")
 stress_top_n              <- as.integer(parse_arg("--stress_top_n", "25"))
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
@@ -244,7 +242,8 @@ df <- df %>%
   mutate(
     scheme_priority = scheme_priority_int[caap_group],
     # FOP discovering-hypothesis tag ("H<n>") or NA for a single-contrast run
-    # (trait == "post_disambiguation" or similar). Only H-tags drive fop_pool.R.
+    # (trait == "post_disambiguation" or similar). Diagnostic only now that the
+    # harvest is domain-pooled in-tree.
     hyp_id = if ("trait" %in% names(df)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), NA_character_) else NA_character_
   ) %>%
   filter(caap_group %in% scoring_schemes)
@@ -256,15 +255,14 @@ cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring sche
 # H1..Hn are overlapping K-pair designs over the same Voronoi domains, NOT
 # independent replicates, so §2g's per-scheme mean must not also average over
 # them uniformly (it would dilute a strong canonical signal and let a position
-# with many harvested hypotheses distort every genome-wide rank). fop_pool.R
-# pools s(p,site) within each Voronoi domain (PSS-weighted mean, weights from
-# contrast_hypotheses_pairs.tsv) and recombines with the path_scores.py algebra.
-# Non-FOP input (single contrast) passes through unchanged.
-cat("  FOP pooling: done in-tree per (Gene, Position, scheme, side) [T3c SC3]\n")
-# Backfill the stable-schema columns the old apply_fop_pooling used to add so
-# downstream (§2g display picks, reports) never hits a missing column. The
-# harvest-wide convergence_schemes / residue-support descriptors are recomputed
-# in-tree (SC3b leftover); "" is a safe placeholder for any the input lacks.
+# with many harvested hypotheses distort every genome-wide rank). core v3
+# (fop_pool.pool_domains) averages the per-hypothesis domain scores over the K
+# fixed Voronoi domains in-tree (PSS-weighted, weights from
+# contrast_hypotheses_pairs.tsv). Non-FOP input (single contrast) degenerates
+# to the plain PSS-weighted domain mean. Scoring receives rows already pooled.
+cat("  FOP pooling: done in-tree per (Gene, Position, scheme, side) [core v3]\n")
+# Backfill the stable-schema columns downstream (§2g display picks, reports)
+# expects so a missing column is never hit.
 if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
 if (!"supporting_hypotheses" %in% names(df)) df$supporting_hypotheses <- ""
 if (!"core_perside_pooled" %in% names(df))   df$core_perside_pooled <- df$core

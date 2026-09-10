@@ -11,8 +11,7 @@
 #
 # These 5 schemes are INDEPENDENT partitions along DIFFERENT physicochemical
 # axes — NOT a nested/hierarchical refinement. Any cross-scheme descriptor built
-# on them (see fop_pool.R::convergence_schemes) must be a SET/PROFILE, never an
-# ordinal "level".
+# on them must be a SET/PROFILE, never an ordinal "level".
 #
 #   US   Classical CAAS. Strict amino-acid identity: each AA is its own group.
 #   GS1  Coarse biochemical recoding, 6 groups. Custom Dayhoff-like partition

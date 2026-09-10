@@ -92,7 +92,7 @@ process SCORING_COMPUTE {
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/fop_pool.R ${local_dir}/aa_grouping.R .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R .
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -107,7 +107,6 @@ process SCORING_COMPUTE {
             --caas_pos_pval   '${cpp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
-            --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
@@ -121,7 +120,7 @@ process SCORING_COMPUTE {
         """
     } else {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/fop_pool.R ${local_dir}/aa_grouping.R .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R .
 
         Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
@@ -136,7 +135,6 @@ process SCORING_COMPUTE {
             --caas_pos_pval   '${cpp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
-            --concordance_tau      ${params.scoring_concordance_tau ?: 0.8} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \

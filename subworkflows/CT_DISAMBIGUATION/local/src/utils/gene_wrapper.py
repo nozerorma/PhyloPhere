@@ -788,9 +788,8 @@ def _read_contrast_hyp_pairs(path: Optional[str]) -> Optional[Dict[Tuple[str, in
 
     The OBSERVED-side twin of :func:`_read_fop_pairs` (which keys the null's
     per-cycle mirror by base cycle). Header: hypothesis_id, pair, pss_score
-    (+ others). ``pair`` == Voronoi domain id. Mirrors
-    ``fop_pool.R::read_hypothesis_pairs``: the hypothesis id is normalised to its
-    ``H<n>`` token. ``None`` / missing / ``NO_*`` sentinel -> ``None`` (the
+    (+ others). ``pair`` == Voronoi domain id. The hypothesis id is normalised
+    to its ``H<n>`` token. ``None`` / missing / ``NO_*`` sentinel -> ``None`` (the
     pooler then weights every node equally).
     """
     import csv as _csvmod

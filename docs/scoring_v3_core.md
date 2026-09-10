@@ -201,9 +201,10 @@ agg = { "asr_path_score": core_s, "core": core_s,        # alias, idénticos
   `domain_scores` / `domain_der_enc` aguas arriba. Un dominio que "se parte" V/I/L entre
   hipótesis bajo US puntúa bajo; bajo GS3 puntúa alto; `pool_domains` solo promedia.
 
-`fop_pool.py` conserva `_modal_str`, `_num`, `base_cycle`, `_wmean`; borra `pool_hypotheses`,
+`fop_pool.py` conserva `_modal_str`, `base_cycle`, `_cands`, `_dget`; borra `pool_hypotheses`,
 `pool_hypotheses_pairwise`, `_domain_side_dists`, `_da_frac_from_dists`,
-`_rebuild_derived_agreement`, `p_at_least_2`, `_encode_aa`.
+`_rebuild_derived_agreement`, `p_at_least_2`, `_encode_aa`, y (V3-5, ya sin caller)
+`_num` / `_wmean`.
 
 ### 3.4. Colapso `side = "none"`
 

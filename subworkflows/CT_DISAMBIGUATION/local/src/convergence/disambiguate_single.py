@@ -954,7 +954,7 @@ def analyze_gene_disambiguation(
         # pool them onto <=2 per-side rows with the treeless mean-of-means pooler
         # (M == 1 degenerates to the plain PSS-weighted mean over the K domains).
         # PSS weights {(hyp, domain): pss} come from hyp_pairs_pss (None -> equal
-        # weight). scoring_compute.R never touches fop_pool.R.
+        # weight). Scoring receives rows already domain-pooled here.
         try:
             by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
             for r in results:

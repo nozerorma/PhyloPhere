@@ -51,25 +51,6 @@ def _modal_str(vals: Sequence[Optional[str]]) -> Optional[str]:
     return max(order, key=lambda s: (counts[s], -order.index(s)))
 
 
-def _num(x) -> Optional[float]:
-    try:
-        f = float(x)
-        return f if f == f else None
-    except (TypeError, ValueError):
-        return None
-
-
-def _wmean(xs: Sequence[float], ws: Sequence[Optional[float]]) -> Optional[float]:
-    pairs = [(x, w) for x, w in zip(xs, ws) if x is not None and x == x]
-    if not pairs:
-        return None
-    xs2 = [x for x, _ in pairs]
-    ws2 = [w if (w is not None and w == w and w > 0) else 0.0 for _, w in pairs]
-    if sum(ws2) <= 0:
-        return sum(xs2) / len(xs2)
-    return sum(x * w for x, w in zip(xs2, ws2)) / sum(ws2)
-
-
 def base_cycle(tag: str) -> str:
     """'b_5~H3' -> 'b_5'; a plain 'b_5' passes through."""
     return tag.split("~", 1)[0]
