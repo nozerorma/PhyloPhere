@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Golden net for compute_asr_path_score (scoring_v2 T3a — per-side pairwise core).
+"""Golden net for compute_asr_path_score (scoring_v2 — per-side pairwise core).
 
 Freezes the FULL return dict of ``compute_asr_path_score`` over the synthetic
-scenarios in ``golden/gen_golden.py``. Twelve scenarios exercise the default
-flat return (feature flag ``--native_side_split`` off); ``both_sides_two_rows``
-exercises ``native_side_split=True`` and freezes the ``{"top": ..., "bottom":
-...}`` shape.
+scenarios in ``golden/gen_golden.py``. Every scenario returns the per-side
+``{"top": <row>, "bottom": <row>}`` shape — T4a retired the flat one-row path
+and its ``native_side_split`` flag.
 
 Expected values live in ``golden/path_scores_golden.json`` and are produced by
 ``golden/gen_golden.py`` — every tier that changes the maths re-runs the
@@ -63,33 +62,29 @@ def test_golden_covers_the_enumerated_cases():
     assert required <= names, f"missing golden scenarios: {required - names}"
 
 
-def test_flat_return_shape():
-    """Feature flag off: one flat T1-shaped dict, asr == max(core_top, core_bottom),
-    and the retired global axes are gone from the return (T3-doc §13)."""
+def test_return_shape_is_always_per_side():
+    """Every scenario returns {"top": row, "bottom": row}; the retired global
+    axes are gone from each row (T3-doc §13)."""
     got = run_scenario(_by_name("with_conserved_pair")["scenario"], ps)
-    assert "top" not in got and "bottom" not in got
-    for gone in ("independence", "replication", "mrca_diversity",
-                 "conservation_gate", "strength"):
-        assert gone not in got, f"{gone} still emitted with the flag off"
-    assert abs(got["asr_path_score"]
-               - max(got["core_top"], got["core_bottom"])) < TOL
+    assert set(got) == {"top", "bottom"}
+    for side in ("top", "bottom"):
+        for gone in ("independence", "replication", "mrca_diversity",
+                     "conservation_gate", "strength", "core_top", "core_bottom"):
+            assert gone not in got[side], f"{gone} still emitted in {side}"
 
 
 def test_native_side_split_returns_two_rows():
-    """Feature flag on: {"top": row, "bottom": row}; sides never recombine
-    (no 1-(1-t)(1-b)); the conserved pair counts in |D_s| on BOTH sides."""
+    """{"top": row, "bottom": row}; sides never recombine (no 1-(1-t)(1-b)); the
+    conserved pair counts in |D_s| on BOTH sides."""
     got = run_scenario(_by_name("both_sides_two_rows")["scenario"], ps)
     assert set(got) == {"top", "bottom"}
     top, bottom = got["top"], got["bottom"]
     assert abs(top["asr_path_score"] - 0.5158540) < 1e-6
     assert abs(bottom["asr_path_score"] - 0.5430045) < 1e-6
-    # conserved pair 4 in the denominator of both sides (D_top and D_bottom = 3)
     assert top["n_pairs_side"] == 3 and bottom["n_pairs_side"] == 3
     assert top["n_conserved"] == 1 and bottom["n_conserved"] == 1
     assert top["n_participating"] == 2 and bottom["n_participating"] == 2
-    # conserved_pair_scores still emitted, still not a multiplier
     assert abs(top["conserved_pair_scores"][4] - 0.90) < 1e-9
-    # not the union of the two sides
     union = 1.0 - (1.0 - top["asr_path_score"]) * (1.0 - bottom["asr_path_score"])
     assert abs(max(top["asr_path_score"], bottom["asr_path_score"]) - union) > 1e-3
 
@@ -100,8 +95,8 @@ def test_t3_core_pareado():
     denominator), both_sides_two_rows splits into two independent rows."""
     wcp = run_scenario(_by_name("with_conserved_pair")["scenario"], ps)
     # 2 converging pairs (0.7737809 each) + 1 conserved (0) over |D_top| = 3
-    assert abs(wcp["core_top"] - (2 * 0.7737809 / 3)) < 1e-6
-    assert wcp["core_bottom"] == 0.0
+    assert abs(wcp["top"]["asr_path_score"] - (2 * 0.7737809 / 3)) < 1e-6
+    assert wcp["bottom"]["asr_path_score"] == 0.0
 
     bs = run_scenario(_by_name("both_sides_two_rows")["scenario"], ps)
     assert abs(bs["top"]["asr_path_score"] - (2 * 0.7737809 / 3)) < 1e-6
@@ -113,18 +108,19 @@ def test_n_gt_2_majority_no_longer_penalised():
     stops dragging a position-wide derived_agreement and instead just adds a 0
     to the denominator."""
     got = run_scenario(_by_name("n_gt_2_mixed_residues")["scenario"], ps)
-    assert abs(got["asr_path_score"] - 0.74135) < 1e-4
+    assert abs(got["top"]["asr_path_score"] - 0.74135) < 1e-4
 
 
 def test_conserved_pair_columns_survive():
     """H2 guard (roadmap decision G): the conserved-pair plumbing must keep
-    emitting its maps in the flat return."""
+    emitting its maps in each per-side row."""
     got = run_scenario(_by_name("with_conserved_pair")["scenario"], ps)
+    top = got["top"]
     for key in ("conserved_pair_scores", "conserved_pair_nodes",
                 "pair_ancestral", "pair_derived_top", "pair_derived_bot"):
-        assert key in got, f"{key} dropped from compute_asr_path_score return"
-    assert got["conserved_pair_scores"], "conserved pair 3 lost its score"
-    assert set(got["conserved_pair_scores"]) == set(got["conserved_pair_nodes"])
+        assert key in top, f"{key} dropped from compute_asr_path_score return"
+    assert top["conserved_pair_scores"], "conserved pair 3 lost its score"
+    assert set(top["conserved_pair_scores"]) == set(top["conserved_pair_nodes"])
 
 
 if __name__ == "__main__":

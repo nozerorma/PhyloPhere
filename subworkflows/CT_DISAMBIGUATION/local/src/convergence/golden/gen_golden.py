@@ -238,10 +238,10 @@ def scenarios():
     ))
 
     # 13 — T3a: both-sides split into two rows + a conserved pair in D_s of both.
-    # Literal fixture from docs/scoring_v2_T3_core_pareado.md §10.1. Exercises
-    # native_side_split=True: top and bottom are independent rows (no
-    # 1-(1-t)(1-b)), the conserved pair counts in |D_s| on BOTH sides, and
-    # conserved_pair_scores is still emitted without multiplying anything.
+    # Literal fixture from docs/scoring_v2_T3_core_pareado.md §10.1: top and
+    # bottom are independent rows (no 1-(1-t)(1-b)), the conserved pair counts in
+    # |D_s| on BOTH sides, and conserved_pair_scores is still emitted without
+    # multiplying anything.
     #   TOP:    D={P1,P2,P4} n=3 -> core_top    = 2*0.77378/3 = 0.51585
     #   BOTTOM: D={P1,P3,P4} n=3 -> core_bottom = 2*0.81451/3 = 0.54301
     bs_edges = [(0, 1), (0, 2), (1, 10), (10, 3), (10, 4), (2, 20), (20, 5),
@@ -265,7 +265,6 @@ def scenarios():
              "top_tip_mode": "A", "bottom_tip_mode": "A"},
         ],
         scheme="US", is_conserved_meta=True, conserved_pair="4",
-        native_side_split=True,
     ))
 
     return out

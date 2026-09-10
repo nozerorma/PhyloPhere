@@ -11,7 +11,7 @@
     "remote_root_dir": "/homes/users/mramon/scratch/"
   },
   "runtime": {
-    "resume": true,
+    "resume": false,
     "toy_mode": true,
     "toy_n": "",
     "runtime_type": "slurm",
@@ -195,7 +195,8 @@
       "scoring_stress": true,
       "scoring_stress_top_n": "25",
       "scoring_stress_rank_metric": "spearman",
-      "scoring_window_size_bp": "1000000"
+      "scoring_window_size_bp": "1000000",
+      "scoring_pos_perm_p_thr": "0.1"
     },
     "enrichment": {
       "enabled": true,
@@ -217,6 +218,9 @@
       "scoring_string": true,
       "scoring_compare_fdr": "0.15",
       "scoring_compare_top_n": "20",
+      "comparison_perm_null": true,
+      "comparison_perm_stat": "spearman",
+      "comparison_perm_topk": "0.05",
       "egg_members_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv",
       "egg_annotations_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv",
       "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz",
@@ -229,7 +233,7 @@
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_final_noprune",
+    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi05_toy",
     "use_ct": false,
     "use_discovery": false,
     "use_resample": false,
@@ -237,7 +241,7 @@
     "use_disambiguation": false,
     "use_postproc": false,
     "use_accumulation": false,
-    "use_rer": false,
+    "use_rer": true,
     "use_fade": false,
     "use_vep": false
   },

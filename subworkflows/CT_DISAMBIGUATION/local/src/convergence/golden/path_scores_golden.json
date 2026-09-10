@@ -1,32 +1,69 @@
 [
   {
     "expected": {
-      "asr_path_score": 0.0,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.0,
-      "core_bottom": 0.0,
-      "core_top": 0.0,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.0
-      },
-      "pair_scores": {
-        "1": 0.8573749999999999
-      },
-      "top_pair_scores": {
-        "1": 0.8573749999999999
+      "top": {
+        "agree_den": 1,
+        "agree_num": 1,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "single",
+        "core": 0.0,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 1,
+        "n_participating": 1,
+        "pair_anc_enc": {
+          "1": "A"
+        },
+        "pair_ancestral": {
+          "1": "A"
+        },
+        "pair_contaminated": {
+          "1": false
+        },
+        "pair_der_enc": {
+          "1": "V"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V"
+        },
+        "pair_mrca": {
+          "1": 3
+        },
+        "pair_partner_scores": {
+          "1": 0.0
+        },
+        "pair_scores": {
+          "1": 0.8573749999999999
+        }
       }
     },
     "scenario": {
@@ -68,7 +105,6 @@
       ],
       "is_conserved_meta": false,
       "name": "single_changed_pair",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -141,38 +177,79 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.7737809375,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.7737809375,
-      "core_bottom": 0.0,
-      "core_top": 0.7737809375,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.7737809375,
-        "2": 0.7737809375
-      },
-      "pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
-      },
-      "top_pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.7737809375,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.7737809375,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 2,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 5
+        },
+        "pair_partner_scores": {
+          "1": 0.7737809375,
+          "2": 0.7737809375
+        },
+        "pair_scores": {
+          "1": 0.9025,
+          "2": 0.9025
+        }
       }
     },
     "scenario": {
@@ -214,7 +291,6 @@
       ],
       "is_conserved_meta": false,
       "name": "two_same_side_converge",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -294,40 +370,87 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.0,
-      "bottom_pair_scores": {
-        "2": 0.8573749999999999
+      "bottom": {
+        "agree_den": 1,
+        "agree_num": 1,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "single",
+        "core": 0.0,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 1,
+        "n_participating": 1,
+        "pair_anc_enc": {
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "2": false
+        },
+        "pair_der_enc": {
+          "2": "V"
+        },
+        "pair_derived_bot": {
+          "2": "V"
+        },
+        "pair_derived_top": {
+          "1": "V"
+        },
+        "pair_mrca": {
+          "2": 5
+        },
+        "pair_partner_scores": {
+          "2": 0.0
+        },
+        "pair_scores": {
+          "2": 0.8573749999999999
+        }
       },
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.0,
-      "core_bottom": 0.0,
-      "core_top": 0.0,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
-      },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {
-        "2": "V"
-      },
-      "pair_derived_top": {
-        "1": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.0,
-        "2": 0.0
-      },
-      "pair_scores": {
-        "1": 0.8573749999999999,
-        "2": 0.8573749999999999
-      },
-      "top_pair_scores": {
-        "1": 0.8573749999999999
+      "top": {
+        "agree_den": 1,
+        "agree_num": 1,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "single",
+        "core": 0.0,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 1,
+        "n_participating": 1,
+        "pair_anc_enc": {
+          "1": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false
+        },
+        "pair_der_enc": {
+          "1": "V"
+        },
+        "pair_derived_bot": {
+          "2": "V"
+        },
+        "pair_derived_top": {
+          "1": "V"
+        },
+        "pair_mrca": {
+          "1": 3
+        },
+        "pair_partner_scores": {
+          "1": 0.0
+        },
+        "pair_scores": {
+          "1": 0.8573749999999999
+        }
       }
     },
     "scenario": {
@@ -369,7 +492,6 @@
       ],
       "is_conserved_meta": false,
       "name": "opposite_sides_only",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -449,42 +571,95 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.7737809375,
-      "bottom_pair_scores": {
-        "1": 0.8573749999999999
+      "bottom": {
+        "agree_den": 1,
+        "agree_num": 1,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "single",
+        "core": 0.0,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 1,
+        "n_participating": 1,
+        "pair_anc_enc": {
+          "1": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false
+        },
+        "pair_der_enc": {
+          "1": "V"
+        },
+        "pair_derived_bot": {
+          "1": "V"
+        },
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3
+        },
+        "pair_partner_scores": {
+          "1": 0.0
+        },
+        "pair_scores": {
+          "1": 0.8573749999999999
+        }
       },
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.7737809375,
-      "core_bottom": 0.0,
-      "core_top": 0.7737809375,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
-      },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {
-        "1": "V"
-      },
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.7737809375,
-        "2": 0.7737809375
-      },
-      "pair_scores": {
-        "1": 0.8799374999999999,
-        "2": 0.9025
-      },
-      "top_pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.7737809375,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.7737809375,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 2,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_derived_bot": {
+          "1": "V"
+        },
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 5
+        },
+        "pair_partner_scores": {
+          "1": 0.7737809375,
+          "2": 0.7737809375
+        },
+        "pair_scores": {
+          "1": 0.9025,
+          "2": 0.9025
+        }
       }
     },
     "scenario": {
@@ -526,7 +701,6 @@
       ],
       "is_conserved_meta": false,
       "name": "pair_changes_both_sides",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -606,42 +780,87 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.5158539583333334,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {
-        "3": 4
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {
+          "3": 4
+        },
+        "conserved_pair_scores": {
+          "3": 0.9
+        },
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 1,
+        "n_pairs_side": 1,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "conserved_pair_scores": {
-        "3": 0.9
-      },
-      "core": 0.5158539583333334,
-      "core_bottom": 0.0,
-      "core_top": 0.5158539583333334,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
-      },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.7737809375,
-        "2": 0.7737809375
-      },
-      "pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
-      },
-      "top_pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.5158539583333334,
+        "conserved_pair_nodes": {
+          "3": 4
+        },
+        "conserved_pair_scores": {
+          "3": 0.9
+        },
+        "convergence_type": "convergent",
+        "core": 0.5158539583333334,
+        "derived_agreement": 1.0,
+        "n_conserved": 1,
+        "n_pairs_side": 3,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 5
+        },
+        "pair_partner_scores": {
+          "1": 0.7737809375,
+          "2": 0.7737809375
+        },
+        "pair_scores": {
+          "1": 0.9025,
+          "2": 0.9025
+        }
       }
     },
     "scenario": {
@@ -683,7 +902,6 @@
       ],
       "is_conserved_meta": true,
       "name": "with_conserved_pair",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -770,38 +988,79 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.244351875,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.244351875,
-      "core_bottom": 0.0,
-      "core_top": 0.244351875,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": true,
-        "2": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.244351875,
-        "2": 0.244351875
-      },
-      "pair_scores": {
-        "1": 0.28500000000000003,
-        "2": 0.9025
-      },
-      "top_pair_scores": {
-        "1": 0.28500000000000003,
-        "2": 0.9025
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.244351875,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.244351875,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 2,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": true,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 5
+        },
+        "pair_partner_scores": {
+          "1": 0.244351875,
+          "2": 0.244351875
+        },
+        "pair_scores": {
+          "1": 0.28500000000000003,
+          "2": 0.9025
+        }
       }
     },
     "scenario": {
@@ -843,7 +1102,6 @@
       ],
       "is_conserved_meta": false,
       "name": "contaminated_hop1",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -922,50 +1180,99 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.74134890234375,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.74134890234375,
-      "core_bottom": 0.0,
-      "core_top": 0.74134890234375,
-      "derived_agreement": 0.75,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A",
-        "3": "A",
-        "4": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A",
+          "3": "A",
+          "4": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V",
+          "3": "V",
+          "4": "T"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": false,
-        "2": false,
-        "3": false,
-        "4": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V",
-        "3": "V",
-        "4": "T"
-      },
-      "pair_partner_scores": {
-        "1": 0.979658109375,
-        "2": 0.99286875,
-        "3": 0.99286875,
-        "4": 0.0
-      },
-      "pair_scores": {
-        "1": 0.9025,
-        "2": 1.0,
-        "3": 1.0,
-        "4": 0.95
-      },
-      "top_pair_scores": {
-        "1": 0.9025,
-        "2": 1.0,
-        "3": 1.0,
-        "4": 0.95
+      "top": {
+        "agree_den": 4,
+        "agree_num": 3,
+        "asr_path_score": 0.74134890234375,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.74134890234375,
+        "derived_agreement": 0.75,
+        "n_conserved": 0,
+        "n_pairs_side": 4,
+        "n_participating": 4,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A",
+          "3": "A",
+          "4": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A",
+          "3": "A",
+          "4": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false,
+          "3": false,
+          "4": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V",
+          "3": "V",
+          "4": "T"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V",
+          "3": "V",
+          "4": "T"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 5,
+          "3": 6,
+          "4": 7
+        },
+        "pair_partner_scores": {
+          "1": 0.979658109375,
+          "2": 0.99286875,
+          "3": 0.99286875,
+          "4": 0.0
+        },
+        "pair_scores": {
+          "1": 0.9025,
+          "2": 1.0,
+          "3": 1.0,
+          "4": 0.95
+        }
       }
     },
     "scenario": {
@@ -1019,7 +1326,6 @@
       ],
       "is_conserved_meta": false,
       "name": "n_gt_2_mixed_residues",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1131,38 +1437,79 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.7737809375,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.7737809375,
-      "core_bottom": 0.0,
-      "core_top": 0.7737809375,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "I"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "I"
-      },
-      "pair_partner_scores": {
-        "1": 0.7737809375,
-        "2": 0.7737809375
-      },
-      "pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
-      },
-      "top_pair_scores": {
-        "1": 0.9025,
-        "2": 0.9025
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.7737809375,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.7737809375,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 2,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "n",
+          "2": "n"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "l",
+          "2": "l"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "I"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 6
+        },
+        "pair_partner_scores": {
+          "1": 0.7737809375,
+          "2": 0.7737809375
+        },
+        "pair_scores": {
+          "1": 0.9025,
+          "2": 0.9025
+        }
       }
     },
     "scenario": {
@@ -1204,7 +1551,6 @@
       ],
       "is_conserved_meta": false,
       "name": "gs3_coencoded_agreement",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1284,38 +1630,79 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.23750000000000004,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.23750000000000004,
-      "core_bottom": 0.0,
-      "core_top": 0.23750000000000004,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.23750000000000004,
-        "2": 0.23750000000000004
-      },
-      "pair_scores": {
-        "1": 0.5,
-        "2": 0.5
-      },
-      "top_pair_scores": {
-        "1": 0.5,
-        "2": 0.5
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.23750000000000004,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.23750000000000004,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 2,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 0,
+          "2": 0
+        },
+        "pair_partner_scores": {
+          "1": 0.23750000000000004,
+          "2": 0.23750000000000004
+        },
+        "pair_scores": {
+          "1": 0.5,
+          "2": 0.5
+        }
       }
     },
     "scenario": {
@@ -1333,7 +1720,6 @@
       ],
       "is_conserved_meta": false,
       "name": "mrca_at_root",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1377,38 +1763,79 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.95,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.95,
-      "core_bottom": 0.0,
-      "core_top": 0.95,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.95,
-        "2": 0.95
-      },
-      "pair_scores": {
-        "1": 1.0,
-        "2": 1.0
-      },
-      "top_pair_scores": {
-        "1": 1.0,
-        "2": 1.0
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.95,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.95,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 2,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 4
+        },
+        "pair_partner_scores": {
+          "1": 0.95,
+          "2": 0.95
+        },
+        "pair_scores": {
+          "1": 1.0,
+          "2": 1.0
+        }
       }
     },
     "scenario": {
@@ -1450,7 +1877,6 @@
       ],
       "is_conserved_meta": false,
       "name": "sibling_merge",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1530,21 +1956,50 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.0,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.0,
-      "core_bottom": 0.0,
-      "core_top": 0.0,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {},
-      "pair_contaminated": {},
-      "pair_derived_bot": {},
-      "pair_derived_top": {},
-      "pair_partner_scores": {},
-      "pair_scores": {},
-      "top_pair_scores": {}
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {},
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {},
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
+      },
+      "top": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {},
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {},
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
+      }
     },
     "scenario": {
       "conserved_pair": "",
@@ -1585,7 +2040,6 @@
       ],
       "is_conserved_meta": false,
       "name": "no_changed_pairs",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1665,38 +2119,79 @@
   },
   {
     "expected": {
-      "asr_path_score": 0.16806999999999994,
-      "bottom_pair_scores": {},
-      "conserved_pair_nodes": {},
-      "conserved_pair_scores": {},
-      "core": 0.16806999999999994,
-      "core_bottom": 0.0,
-      "core_top": 0.16806999999999994,
-      "derived_agreement": 1.0,
-      "pair_ancestral": {
-        "1": "A",
-        "2": "A"
+      "bottom": {
+        "agree_den": 0,
+        "agree_num": 0,
+        "asr_path_score": 0.0,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "no_change",
+        "core": 0.0,
+        "derived_agreement": 0.0,
+        "n_conserved": 0,
+        "n_pairs_side": 0,
+        "n_participating": 0,
+        "pair_anc_enc": {},
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {},
+        "pair_der_enc": {},
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {},
+        "pair_partner_scores": {},
+        "pair_scores": {}
       },
-      "pair_contaminated": {
-        "1": false,
-        "2": false
-      },
-      "pair_derived_bot": {},
-      "pair_derived_top": {
-        "1": "V",
-        "2": "V"
-      },
-      "pair_partner_scores": {
-        "1": 0.16806999999999994,
-        "2": 0.16806999999999994
-      },
-      "pair_scores": {
-        "1": 0.48999999999999994,
-        "2": 0.48999999999999994
-      },
-      "top_pair_scores": {
-        "1": 0.48999999999999994,
-        "2": 0.48999999999999994
+      "top": {
+        "agree_den": 2,
+        "agree_num": 2,
+        "asr_path_score": 0.16806999999999994,
+        "conserved_pair_nodes": {},
+        "conserved_pair_scores": {},
+        "convergence_type": "convergent",
+        "core": 0.16806999999999994,
+        "derived_agreement": 1.0,
+        "n_conserved": 0,
+        "n_pairs_side": 2,
+        "n_participating": 2,
+        "pair_anc_enc": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_ancestral": {
+          "1": "A",
+          "2": "A"
+        },
+        "pair_contaminated": {
+          "1": false,
+          "2": false
+        },
+        "pair_der_enc": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_derived_bot": {},
+        "pair_derived_top": {
+          "1": "V",
+          "2": "V"
+        },
+        "pair_mrca": {
+          "1": 3,
+          "2": 5
+        },
+        "pair_partner_scores": {
+          "1": 0.16806999999999994,
+          "2": 0.16806999999999994
+        },
+        "pair_scores": {
+          "1": 0.48999999999999994,
+          "2": 0.48999999999999994
+        }
       }
     },
     "scenario": {
@@ -1738,7 +2233,6 @@
       ],
       "is_conserved_meta": false,
       "name": "soft_posteriors_midrange",
-      "native_side_split": false,
       "node_ids": [
         0,
         1,
@@ -1988,7 +2482,6 @@
       ],
       "is_conserved_meta": true,
       "name": "both_sides_two_rows",
-      "native_side_split": true,
       "node_ids": [
         0,
         1,

@@ -63,7 +63,6 @@ def scenario_to_json(sc: Dict[str, Any]) -> Dict[str, Any]:
         "scheme": sc["scheme"],
         "is_conserved_meta": sc["is_conserved_meta"],
         "conserved_pair": sc["conserved_pair"],
-        "native_side_split": sc.get("native_side_split", False),
     }
 
 
@@ -77,7 +76,6 @@ def run_scenario(sc: Dict[str, Any], ps) -> Dict[str, Any]:
     return ps.compute_asr_path_score(
         sc["pair_details"], pnd, node_index, sc["scheme"],
         sc["is_conserved_meta"], sc["conserved_pair"],
-        native_side_split=bool(sc.get("native_side_split", False)),
     )
 
 

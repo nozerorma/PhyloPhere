@@ -87,10 +87,9 @@ Conserved pairs are still walked (``conserved_pair_scores`` /
 ``conserved_pair_nodes`` flow out for diagnostics and the FOP pooler); they no
 longer multiply anything — they are ``score_c = 0`` members of ``D_s``.
 
-Return shape: ``native_side_split=True`` → ``{"top": {...}, "bottom": {...}}``.
-Default (feature flag ``--native_side_split`` off) → one flat T1-shaped dict
-whose ``asr_path_score`` is ``max(core_top, core_bottom)`` so ``disambiguate_
-single`` keeps emitting a single row until T3b.
+Return shape: always ``{"top": {...}, "bottom": {...}}`` — one row per
+``(Gene, Position, scheme, side)`` (T4a retired the flat one-row path and its
+``native_side_split`` flag).
 
 The module is intentionally free of PAML/IO dependencies so it can be unit
 tested with synthetic trees and posteriors.
@@ -653,7 +652,6 @@ def compute_asr_path_score(
     conserved_pair: Optional[str],
     walk_cache: Optional[Dict[Any, Any]] = None,
     site_key: Optional[Any] = None,
-    native_side_split: bool = False,
 ) -> Dict[str, Any]:
     """Compute the unified ASR path score for one CAAS position row.
 
@@ -669,28 +667,19 @@ def compute_asr_path_score(
             enter ``D_s`` on both sides as ``score_c = 0`` members of the mean's
             denominator (T3-doc §5.1) and are still reported in
             ``conserved_pair_scores`` / ``conserved_pair_nodes``.
-        native_side_split: when True return ``{"top": {...}, "bottom": {...}}``
-            — one row per ``(Gene, Position, scheme, side)`` (T3-doc §4). When
-            False (default, feature flag ``--native_side_split`` off) collapse to
-            one flat T1-shaped dict whose ``asr_path_score`` is the stronger
-            side, so ``disambiguate_single`` keeps emitting a single row until
-            T3b wires the two-row plumbing.
 
     Returns:
-        ``native_side_split=False``: flat dict — ``asr_path_score`` (=
-        ``max(core_top, core_bottom)``), ``core`` (alias), ``core_top`` /
-        ``core_bottom``, ``derived_agreement`` (diagnostic concentration),
-        ``pair_scores`` / ``top_pair_scores`` / ``bottom_pair_scores`` (per-pair
-        private isolation ``s_c^s``), ``pair_partner_scores`` ({pid: score_c}),
-        ``pair_contaminated``, ``conserved_pair_scores`` / ``conserved_pair_nodes``,
-        ``pair_ancestral`` / ``pair_derived_top`` / ``pair_derived_bot``.
-
-        ``native_side_split=True``: ``{"top": <row>, "bottom": <row>}`` where
-        each ``<row>`` carries ``asr_path_score`` = ``core_s`` = ``clamp01`` of
-        the mean of ``score_c`` (noisy-OR of a pair's same-residue partners) over
-        ``D_s`` = participants ∪ conserved-metadata pairs, plus ``n_pairs_side``,
-        ``n_participating``, ``n_conserved``, ``agree_num`` / ``agree_den``,
-        ``convergence_type``, and the same pair-level / conserved-pair maps.
+        ``{"top": <row>, "bottom": <row>}`` — one row per
+        ``(Gene, Position, scheme, side)`` (T3-doc §4). Each ``<row>`` carries
+        ``asr_path_score`` = ``core_s`` = ``clamp01`` of the mean of ``score_c``
+        (noisy-OR of a pair's same-residue partners) over ``D_s`` = participants
+        ∪ conserved-metadata pairs, plus ``n_pairs_side``, ``n_participating``,
+        ``n_conserved``, ``agree_num`` / ``agree_den``, ``convergence_type``, and
+        the pair-level / conserved-pair maps (``pair_scores`` = per-pair private
+        isolation ``s_c^s``, ``pair_partner_scores`` = ``{pid: score_c}``,
+        ``pair_contaminated``, ``conserved_pair_scores`` /
+        ``conserved_pair_nodes``, ``pair_ancestral`` / ``pair_derived_top`` /
+        ``pair_derived_bot``).
     """
     pairs = pair_details or []
     n_pairs = len(pairs)
@@ -698,7 +687,6 @@ def compute_asr_path_score(
         set(parse_conserved_ids(conserved_pair, n_pairs)) if is_conserved_meta else set()
     )
 
-    pair_contaminated: Dict[int, bool] = {}
     # Per-conserved-pair record, analogous to pair_scores / pair_contaminated for
     # changed pairs. Lets the FOP domain-pooler (fop_pool.R / fop_pool.py)
     # reconstruct conservation_gate from the DISTINCT conserved pairs shared
@@ -817,55 +805,10 @@ def compute_asr_path_score(
             "pair_derived_bot": pair_derived_bot,
         }
 
-    top = _side_result("top_tip_mode")
-    bottom = _side_result("bottom_tip_mode")
-
-    if native_side_split:
-        # T3-doc §4: one row per (Gene, Position, scheme, side). Downstream
-        # (T3b) decides whether each row is emitted (per change_side).
-        return {"top": top, "bottom": bottom}
-
-    # ── Transitional flat return — feature flag --native_side_split OFF ───────
-    # main and the single-row null still consume one flat T1-shaped dict. The
-    # score collapses to the stronger side (a "both" position is not split into
-    # two rows until T3b). ``independence`` / ``replication`` are dropped
-    # (T3-doc §13); consumers read them with ``.get`` defaults.
-    for pid, ct in top["pair_contaminated"].items():
-        pair_contaminated[pid] = pair_contaminated.get(pid, False) or ct
-    for pid, ct in bottom["pair_contaminated"].items():
-        pair_contaminated[pid] = pair_contaminated.get(pid, False) or ct
-
-    flat_pair_scores: Dict[int, float] = {}
-    for c in changed:
-        vals = [s[c["pid"]] for s in (top["pair_scores"], bottom["pair_scores"])
-                if c["pid"] in s]
-        if vals:
-            flat_pair_scores[c["pid"]] = sum(vals) / len(vals)
-
-    flat_partner: Dict[int, float] = {}
-    for src in (top["pair_partner_scores"], bottom["pair_partner_scores"]):
-        for pid, v in src.items():
-            flat_partner[pid] = max(flat_partner.get(pid, 0.0), v)
-
-    qual = [s["derived_agreement"] for s in (top, bottom) if s["agree_den"] >= 2]
-    derived_agreement = (sum(qual) / len(qual)) if qual else 1.0
-
-    core = max(top["asr_path_score"], bottom["asr_path_score"])
-
+    # T3-doc §4: one row per (Gene, Position, scheme, side). Downstream
+    # (disambiguate_single._split_result_by_side) decides which rows are emitted
+    # for a position (per participating side).
     return {
-        "asr_path_score": core,
-        "core": core,
-        "core_top": top["asr_path_score"],
-        "core_bottom": bottom["asr_path_score"],
-        "derived_agreement": derived_agreement,
-        "pair_scores": flat_pair_scores,
-        "top_pair_scores": dict(top["pair_scores"]),
-        "bottom_pair_scores": dict(bottom["pair_scores"]),
-        "pair_partner_scores": flat_partner,
-        "pair_contaminated": pair_contaminated,
-        "conserved_pair_scores": conserved_pair_scores,
-        "conserved_pair_nodes": conserved_pair_nodes,
-        "pair_ancestral": pair_ancestral,
-        "pair_derived_top": pair_derived_top,
-        "pair_derived_bot": pair_derived_bot,
+        "top": _side_result("top_tip_mode"),
+        "bottom": _side_result("bottom_tip_mode"),
     }

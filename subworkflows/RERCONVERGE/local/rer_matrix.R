@@ -49,14 +49,16 @@ if (n_overlap < min_sp) {
         n_overlap, min_sp
     ))
 }
+# RERconverge >= 0.3.0 renamed getAllResiduals() args: weighted -> use.weights,
+# scale=TRUE -> norm="scale" (now the default). Older builds used weighted/scale.
 traitRERw <- tryCatch(
     getAllResiduals(geneTrees, useSpecies=names(trait_vector),
-        transform = "sqrt", weighted = T, scale = T, min.sp = min_sp),
+        transform = "sqrt", use.weights = T, norm = "scale", min.sp = min_sp),
     error = function(e) {
-        message("WARNING: getAllResiduals with weighted=T failed: ", conditionMessage(e))
-        message("Retrying with weighted=F ...")
+        message("WARNING: getAllResiduals with use.weights=T failed: ", conditionMessage(e))
+        message("Retrying with use.weights=F ...")
         getAllResiduals(geneTrees, useSpecies=names(trait_vector),
-            transform = "sqrt", weighted = F, scale = T, min.sp = min_sp)
+            transform = "sqrt", use.weights = F, norm = "scale", min.sp = min_sp)
     }
 )
 
