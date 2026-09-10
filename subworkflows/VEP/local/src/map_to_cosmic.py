@@ -32,18 +32,18 @@ def _support_letters(support_str):
 
 
 def anc_der_from_descriptor(derived_residues, top_residue_support,
-                            bottom_residue_support, change_side):
+                            bottom_residue_support, side):
     """(ancestral_aas, derived_aas) from the upstream position-level descriptor.
 
     See map_to_primateai.py for the full note. The support columns carry the
-    per-clade residue letters (``caas`` left/right convention); ``change_side``
+    per-clade residue letters (``caas`` left/right convention); ``side``
     picks the derived clade, the other clade is the ancestral state. A residue on
     BOTH clades did not change and is dropped from the derived set (``der - anc``,
     keep-all safety if that empties it).
     """
     top_set = _support_letters(top_residue_support)
     bot_set = _support_letters(bottom_residue_support)
-    cs = str(change_side or "").strip().lower()
+    cs = str(side or "").strip().lower()
     if cs == "top":
         anc, der = bot_set, top_set
     elif cs == "bottom":
@@ -205,7 +205,7 @@ def main():
         caas_col = col_lc.get('caas')
         gene_col = col_lc.get('gene')
         pos_col = col_lc.get('position')
-        cside_col = col.get('change_side')
+        cside_col = col.get("side") or col_lc.get("side")
         amino_col = col_lc.get('amino_encoded')
         caap_col = col.get('caap_group') or col_lc.get('caap_group')
         dres_col = col_lc.get('derived_residues')

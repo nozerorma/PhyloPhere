@@ -390,9 +390,9 @@ has_rer <- "rer_min_pval" %in% names(gene_df) &&
            any(!is.na(gene_df$rer_min_pval)) &&
            "rer_rho" %in% names(gene_df)
 
-# ── Directional position subsets (change_side from discovery) ──────────────
-pos_top    <- pos_df %>% filter(change_side %in% c("top",    "both"))
-pos_bottom <- pos_df %>% filter(change_side %in% c("bottom", "both"))
+# ── Directional position subsets (side, from per-side position_scores) ─────
+pos_top    <- pos_df %>% filter(side == "top")
+pos_bottom <- pos_df %>% filter(side == "bottom")
 
 # ── Directional gene CAAS scores ────────────────────────────────────────────
 # Read from gene_scores.tsv (written by scoring_compute.R section 4a), never
@@ -426,7 +426,7 @@ gene_direction_df <- pos_df %>%
   group_by(Gene) %>%
   slice_max(CAAS_score, n = 1, with_ties = FALSE) %>%
   ungroup() %>%
-  select(Gene, gene_direction = change_side)
+  select(Gene, gene_direction = side)
 
 gene_df <- gene_df %>% left_join(gene_direction_df, by = "Gene")
 
@@ -660,8 +660,8 @@ directional subsets:
 
 | Subset | Filter |
 |--------|--------|
-| **top** | Positions / genes where `change_side == "top"` |
-| **bottom** | Positions / genes where `change_side == "bottom"` |
+| **top** | Positions / genes where `side == "top"` |
+| **bottom** | Positions / genes where `side == "bottom"` |
 | **both** | All top-scoring positions / genes regardless of direction |
 
 For **position-level** lists, the threshold is applied to `CAAS_score` and
@@ -767,8 +767,8 @@ dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
 .obs_gene_asr_dist <- pos_df %>%
   group_by(Gene) %>%
   summarise(global = .q90(asr_score),
-            top    = .q90(asr_score[change_side %in% c("top", "both")]),
-            bottom = .q90(asr_score[change_side %in% c("bottom", "both")]),
+            top    = .q90(asr_score[side == "top"]),
+            bottom = .q90(asr_score[side == "bottom"]),
             .groups = "drop") %>%
   tidyr::pivot_longer(c(global, top, bottom), names_to = "direction", values_to = "value")
 .obs_gene_asr <- .obs_gene_asr_dist %>%
@@ -1252,8 +1252,8 @@ knitr::kable(
 # direction (these are observed quantities - the permulation does not permute them).
 .dir_subsets <- list(
   global = pos_df,
-  top    = pos_df %>% filter(change_side %in% c("top", "both")),
-  bottom = pos_df %>% filter(change_side %in% c("bottom", "both"))
+  top    = pos_df %>% filter(side == "top"),
+  bottom = pos_df %>% filter(side == "bottom")
 )
 obs_tbl <- purrr::imap_dfr(.dir_subsets, function(d, dir) {
   tibble::tibble(
@@ -1517,7 +1517,7 @@ display_cols <- c("Gene", "Position", "CAAS_score",
                   "n_schemes", "scheme_set",
                   # how many FOP hypotheses (H1..Hn) recovered this position, and which
                   "n_hypotheses", "supporting_hypotheses",
-                  "change_side",
+                  "side",
                   # raw-AA descriptors (position-level, from position_scores.tsv).
                   # *_support = distinct CAAS contrast pairs carrying the residue
                   # (the actual support); *_support_detail = distinct reconstructed
@@ -1747,7 +1747,7 @@ dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       "n_schemes", "scheme_set",
                       "n_hypotheses", "supporting_hypotheses",
                       "recovery_boot",
-                      "change_side",
+                      "side",
                       "derived_residues", "top_residue_support", "bottom_residue_support",
                       "top_residue_support_detail", "bottom_residue_support_detail",
                       "top_species_residues", "bottom_species_residues",
@@ -1802,7 +1802,7 @@ if (has_convtype) {
   .disc_df <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
     dplyr::select(Gene, Position, convergence_type, any_of(.axis5_cols), any_of("asr_path_score"))
   .conv_df <- pos_df %>%
-    dplyr::select(Gene, Position, CAAS_score, phen_score, any_of("change_side")) %>%
+    dplyr::select(Gene, Position, CAAS_score, phen_score, any_of("side")) %>%
     dplyr::inner_join(.disc_df, by = c("Gene", "Position"))
   has_convtype <- nrow(.conv_df) > 0 && "convergence_type" %in% names(.conv_df)
 }
@@ -1815,7 +1815,7 @@ if (has_convtype) {
   sub <- df %>% dplyr::filter(!is.na(.data[[score_col]]))
   if (dir_label != "Global") {
     side <- tolower(dir_label)
-    sub <- sub %>% dplyr::filter(change_side %in% c(side, "both"))
+    sub <- sub %>% dplyr::filter(side == .env$side)
   }
   if (nrow(sub) == 0) return(NULL)
   purrr::map_dfr(seq_len(nrow(.conv_thr)), function(i) {
@@ -1888,7 +1888,7 @@ for (dr in c("Global", "Top", "Bottom")) {
   cat(sprintf("\n#### %s\n\n", dr))
   if (!has_convtype) { cat("_No `filtered_discovery_file` / `convergence_type` available._\n\n"); next }
   sub <- .conv_df
-  if (dr != "Global") sub <- sub %>% dplyr::filter(change_side %in% c(tolower(dr), "both"))
+  if (dr != "Global") sub <- sub %>% dplyr::filter(side == tolower(dr))
   value_cols <- intersect(c(.axis5_cols, "CAAS_score", "asr_path_score", "phen_score"), names(sub))
   if (length(value_cols) == 0 || nrow(sub) == 0) { cat("_No data for this direction._\n\n"); next }
 
@@ -2108,8 +2108,8 @@ if (length(venn_plots) == 2) {
 .venn_overlap_positions <- function(pos_dir, fade_df, dir_label, thr10, thr5, thr1) {
   if (is.null(pos_dir) || is.null(fade_df)) return(NULL)
   caas_sel <- if ("caas" %in% names(pos_dir))
-    c("Gene", "Position", "CAAS_score", "caas", "change_side") else
-    c("Gene", "Position", "CAAS_score", "change_side")
+    c("Gene", "Position", "CAAS_score", "caas", "side") else
+    c("Gene", "Position", "CAAS_score", "side")
   inner_join(
     pos_dir  %>% select(any_of(caas_sel)),
     fade_df  %>% filter(!is.na(max_site_bf), max_site_bf >= 100) %>%
@@ -2931,7 +2931,7 @@ if (has_fade_pos) {
     if (!is.null(fade_bot_df)) fade_bot_df %>% mutate(fade_direction = "BOTTOM") else NULL
   )
   if (nrow(fade_combined) > 0) {
-    # For positions in both directions (change_side == "both"), take TOP FADE by priority
+    # Per-side rows: a "both" position is two rows; take TOP FADE by priority
     fade_for_join <- fade_combined %>%
       mutate(fade_direction_priority = if_else(fade_direction == "TOP", 1L, 2L)) %>%
       group_by(Gene, Position) %>%

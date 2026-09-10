@@ -114,13 +114,12 @@ format_threshold <- function(x) {
 
 
 
-collapse_change_side <- function(x) {
+collapse_side <- function(x) {
   x <- tolower(as.character(x))
-  x <- x[x %in% c("top", "bottom", "both")]
+  x <- x[x %in% c("top", "bottom")]
   if (length(x) == 0) return("none")
-  if ("both" %in% x) return("both")
   ux <- unique(x)
-  if (all(c("top", "bottom") %in% ux)) return("both")
+  if (all(c("top", "bottom") %in% ux)) return("both")  # two per-side rows for one site
   ux[[1]]
 }
 
@@ -278,9 +277,7 @@ normalize_disambig_schema <- function(df) {
   if ('Position' %in% names(df) && !'position' %in% names(df)) df <- df %>% rename(position = Position)
   if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
   if (!'convergence_type' %in% names(df)) df$convergence_type <- 'unknown'
-  if (!'change_side' %in% names(df)) df$change_side <- 'none'
-  if (!'change_top' %in% names(df)) df$change_top <- 'no_change'
-  if (!'change_bottom' %in% names(df)) df$change_bottom <- 'no_change'
+  if (!'side' %in% names(df)) df$side <- 'none'
   if (!'is_conserved_meta' %in% names(df)) df$is_conserved_meta <- FALSE
 
   df %>%
@@ -289,9 +286,7 @@ normalize_disambig_schema <- function(df) {
       position = suppressWarnings(as.integer(position)),
       caap_group = as.character(caap_group),
       convergence_type = as.character(convergence_type),
-      change_side = tolower(as.character(change_side)),
-      change_top = tolower(as.character(change_top)),
-      change_bottom = tolower(as.character(change_bottom)),
+      side = tolower(as.character(side)),
       is_conserved_meta = as_bool(is_conserved_meta),
       site_id = paste(gene, position, sep = '@')
     )
@@ -371,7 +366,7 @@ raw_discovery <- read_delim(discovery_file, delim = "\t", show_col_types = FALSE
 discovery_std <- normalize_disambig_schema(raw_discovery)
 convergence_plot_df <- discovery_std %>%
   mutate(
-    change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none"),
+    side = if_else(side %in% c("top", "bottom"), side, "none"),
     pattern_parallel = make_pattern_parallel_label(convergence_type),
     pattern_parallel = forcats::fct_infreq(pattern_parallel)
   )
@@ -381,7 +376,7 @@ discovery_df <- discovery_std %>%
     Gene = gene,
     Position = position,
     convergence_type = convergence_type,
-    change_side,
+    side,
     is_conserved_meta,
     site_id
   )
@@ -852,7 +847,7 @@ if (!is.na(removed_precluster_file)) {
   precluster_df <- normalize_disambig_schema(read_delim(removed_precluster_file, delim = "\t", show_col_types = FALSE))
   precluster_events <- precluster_df %>% transmute(
     site_id, gene, position, caap_group, convergence_type,
-    change_top, change_bottom, change_side,
+    side,
     removal_stage = case_when(
       str_detect(removal_reason, "^mrca_posterior_below_") ~ "precluster_mrca_threshold",
       TRUE ~ "precluster_other"
@@ -868,7 +863,7 @@ if (length(cluster_files) > 0) {
     inner_join(cluster_hits, by = c("gene", "position", "caap_group")) %>%
     transmute(
       site_id, gene, position, caap_group, convergence_type,
-      change_top, change_bottom, change_side,
+      side,
       removal_stage = "cluster"
     ) %>%
     distinct()
@@ -891,7 +886,7 @@ if (!is.na(removed_genes_file)) {
     )) %>%
     transmute(
       site_id, gene, position, caap_group, convergence_type,
-      change_top, change_bottom, change_side, removal_stage
+      side, removal_stage
     ) %>%
     distinct()
 }
@@ -1049,20 +1044,20 @@ cat("\n## B.2 Removed positions by `convergence_type`\n\n")
 if (nrow(removal_events) > 0) {
   removal_events_plot <- removal_events %>%
     mutate(
-      change_side = if_else(change_side %in% c("top", "bottom", "both"), change_side, "none"),
+      side = if_else(side %in% c("top", "bottom"), side, "none"),
       pattern_parallel = make_pattern_parallel_label(convergence_type)
     )
 
   by_pattern <- removal_events_plot %>%
-    count(removal_stage, change_side, pattern_parallel, sort = TRUE)
-  kable(by_pattern, caption = "Removed positions by stage, change_side, and pattern/parallel label") %>% kable_styling()
+    count(removal_stage, side, pattern_parallel, sort = TRUE)
+  kable(by_pattern, caption = "Removed positions by stage, side, and pattern/parallel label") %>% kable_styling()
 
   p_rm <- ggplot(
     by_pattern,
     aes(y = forcats::fct_rev(pattern_parallel), x = n, fill = removal_stage)
   ) +
     geom_col(position = position_dodge(width = 0.75), width = 0.7) +
-    facet_wrap(~change_side, scales = "free_y", ncol = 2) +
+    facet_wrap(~side, scales = "free_y", ncol = 2) +
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     scale_y_discrete(labels = format_pattern_parallel_axis) +
     theme_minimal(base_size = 16) +
@@ -1076,7 +1071,7 @@ if (nrow(removal_events) > 0) {
     file.path(disambig_dir, "removed_pattern_parallel_all.png"),
     p_rm,
     n_labels = n_distinct(by_pattern$pattern_parallel),
-    n_facets = n_distinct(by_pattern$change_side),
+    n_facets = n_distinct(by_pattern$side),
     facet_cols = 2,
     base_width = 11,
     base_height = 7.5
@@ -1136,7 +1131,7 @@ cat(
 ```{r global_pattern_sig, eval=(processing_mode != 'exploratory'), results='asis'}
 cat("\n## B.3 Global side-aware convergence characterization\n\n")
 pattern_parallel_by_group <- convergence_plot_df %>%
-  count(change_side, caap_group, pattern_parallel, sort = TRUE)
+  count(side, caap_group, pattern_parallel, sort = TRUE)
 
 write_tsv(pattern_parallel_by_group, file.path(disambig_dir, "pattern_parallel_by_caap_group.tsv"))
 
@@ -1145,7 +1140,7 @@ pg <- ggplot(
   aes(y = forcats::fct_rev(pattern_parallel), x = n, fill = caap_group)
 ) +
   geom_col(position = position_dodge(width = 0.75), width = 0.7) +
-  facet_wrap(~change_side, scales = "free_y", ncol = 2) +
+  facet_wrap(~side, scales = "free_y", ncol = 2) +
   scale_fill_paletteer_d("ggthemes::Tableau_10") +
   scale_y_discrete(labels = format_pattern_parallel_axis) +
   theme_minimal(base_size = 14) +
@@ -1162,7 +1157,7 @@ save_barplot(
   file.path(disambig_dir, "pattern_parallel_by_caap_group.png"),
   pg,
   n_labels = n_distinct(pattern_parallel_by_group$pattern_parallel),
-  n_facets = n_distinct(pattern_parallel_by_group$change_side),
+  n_facets = n_distinct(pattern_parallel_by_group$side),
   facet_cols = 2,
   base_width = 11,
   base_height = 7.5

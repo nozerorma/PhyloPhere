@@ -6,7 +6,7 @@
  * Compute CAAS scores at position-level and gene-level.
  * Integrates outputs from CT_POSTPROC, FADE, RERConverge and CT_ACCUMULATION.
  * Runs once on the full postproc pool; directional characterisation is handled
- * post-scoring via the change_side column.
+ * post-scoring via the side column.
  *
  * Inputs
  * ──────

@@ -76,7 +76,7 @@ stress_enabled        <- tolower(as.character(stress_enabled_raw)) %in% c("true"
 gene_perm_pooled      <- tolower(as.character(gene_perm_pooled_raw)) %in% c("true", "1", "yes")
 if (!is.finite(stress_top_n)      || is.na(stress_top_n)      || stress_top_n < 1)  stress_top_n      <- 25
 # direction removed: scoring always runs on the full postproc pool.
-# Directional characterisation happens post-scoring via change_side column.
+# Directional characterisation happens post-scoring via side column.
 
 file_exists <- function(f) {
   !is.null(f) && f != "" && !grepl("^NO_", basename(f)) && file.exists(f)
@@ -234,7 +234,7 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
 # Priority ONLY for picking a representative scheme's display/gating columns
-# (pvalue, recovery_boot, change_side, caap_group, ...) at the Gene×Position
+# (pvalue, recovery_boot, side, caap_group, ...) at the Gene×Position
 # aggregation below (section 2g). Deliberately separate from the scoring itself,
 # which treats all five schemes symmetrically.
 scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
@@ -277,7 +277,6 @@ for (.c in c("convergence_schemes", "derived_residues", "top_residue_support",
 df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
 
 # TRUE when a change label indicates an assessable directional event.
-assessable_change <- function(x) x %in% c("convergent", "codivergent", "divergent")
 
 # Detect pair-indexed MRCA posterior columns dynamically (mrca_1_posterior, mrca_2_posterior, ...)
 mrca_posterior_cols <- grep("^mrca_\\d+_posterior$", names(df), value = TRUE)
@@ -345,9 +344,9 @@ if (has_caas_pos_pval) {
   .n_rows_before <- nrow(df)
   df <- df %>% mutate(Position = as.integer(Position))
   if (.pval_has_side) {
-    # T2a: side is a first-class join key. Both sides derive it identically (OR
-    # of assessable change_top/change_bottom over the group) so this stays
-    # cardinality-neutral. `pos_perm_p_3key` fills any row whose side label
+    # side is a first-class join key; the observed and null sides both carry it
+    # directly off the per-side rows, so this stays cardinality-neutral.
+    # `pos_perm_p_3key` fills any row whose side label
     # differs between the observed and null sides; `.n_side_miss` counts them as
     # a drift check (expected ~0 before T3).
     pval_3key <- pos_pval_df %>% select(-side) %>%
@@ -395,7 +394,7 @@ if (has_caas_pos_pval) {
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
 # Sort descending by scheme_priority (US > GS4 > GS3 > GS2 > GS1) so first()
 # deterministically picks the US scheme (falling back to GS4..GS1) for
-# display/gating-only columns (pvalue, change_top, asr_is_conserved, etc.).
+# display/gating-only columns (pvalue, asr_is_conserved, etc.).
 # Priority is display-only and never enters a scored quantity.
 df <- df %>% arrange(desc(scheme_priority))
 
@@ -445,20 +444,12 @@ pos_scores <- df %>%
     conserved_pair     = first(conserved_pair),
     all_mrca_posterior = first(all_mrca_posterior),
     across(all_of(mrca_posterior_cols), \(x) first(x)),
-    change_top         = first(change_top),
-    change_bottom      = first(change_bottom),
     caap_group         = first(caap_group),
-    has_change_top     = any(assessable_change(change_top)),
-    has_change_bottom  = any(assessable_change(change_bottom)),
     .groups = "drop"
   )
 
-# `side` is already the aggregation key (authoritative, from the per-side rows
-# emitted by _split_result_by_side / _pool_observed_fop). change_side stays a
-# descriptor alias for the T4b consumers still reading it.
-pos_scores <- pos_scores %>%
-  mutate(change_side = side) %>%
-  select(-dplyr::any_of(c("has_change_top", "has_change_bottom")))
+# `side` (top / bottom / none) is the authoritative aggregation key and the sole
+# direction descriptor downstream -- T4b retired change_top/change_bottom/change_side.
 # Per-side diagnostics for the reports (SC5): core == core_s for this side,
 # phen_score the §2f percent-rank. Scheme means, per direction -- a legitimate
 # per-side diagnostic (the collapse warned against in the summarise note is the
@@ -708,8 +699,8 @@ cat("\n─── Gene-level scoring ──────────────�
 # ── 4a. Gene CAAS Scores: size-adjusted max of CAAS_score per gene ──────────
 # Three scores computed from different position subsets:
 #   gene_caas_score - all positions (full pool)
-#   gene_caas_score_top - positions with change_side in {top, both}
-#   gene_caas_score_bottom - positions with change_side in {bottom, both}
+#   gene_caas_score_top - positions with side == "top"
+#   gene_caas_score_bottom - positions with side == "bottom"
 #
 # Aggregation is size_adj_max (helper at the top of this file): a gene's best
 # position, calibrated for how many positions the gene had a chance to draw
@@ -775,8 +766,8 @@ cat(sprintf("  gene_caas_score: %d genes (%d with top positions, %d with bottom)
 
 # ── 4b. Gene Accumulation Score (optional) ──────────────────────────────────
 # Uses accumulation_<direction>_* files: direction in {all, top, bottom}.
-# "all" = every non-none position pooled (change_side != 'none'); "top"/"bottom"
-# restrict to that direction's positions only (change_side %in% c(dir, 'both')),
+# "all" = every non-none position pooled (side != "none"); "top"/"bottom"
+# restrict to that direction (side == dir),
 # matching how every other cross-module flag (FADE, RER) is direction-aware.
 # ct_accumulation.nf runs Channel.of("top","bottom","all"), so all three
 # accumulation_{top,bottom,all}_<scheme>_aggregated_results.csv files are
@@ -1207,10 +1198,10 @@ pos_out <- pos_scores %>%
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species",
                   "n_conserved_pairs", "convergence_schemes")), CAAS_score,
-         change_side, side,
-         # T3d: per-side diagnostics for the reports (SC5). Absent flag-off.
+         side,
+         # T3d: per-side diagnostics for the reports (SC5).
          any_of(c("core", "phen_score")),
-         any_of(c("caas", "change_top", "change_bottom")),
+         any_of("caas"),
          any_of(c("pos_perm_p", "pos_perm_p_adj"))) %>%
   arrange(desc(CAAS_score))
 
@@ -1466,7 +1457,7 @@ for (slice in slices_def) {
 # gene-level top 5%; both were "correct" under their own re-derivation, just
 # never guaranteed to agree). Mirrors posenrich_enrich.py's direction_scores()
 # + top-frac cutoff exactly (subworkflows/ENRICHMENT/local/src/posenrich_enrich.py):
-# direction filters on change_side (top: {top,both}, bottom: {bottom,both},
+# direction filters on side (top: side=="top", bottom: side=="bottom",
 # global: unfiltered), ranked over positions with CAAS_score > 0 only, cut at
 # round(frac * n_scored), stable sort by (desc score, Gene, Position).
 dir.create("position_lists", showWarnings = FALSE)
@@ -1491,9 +1482,9 @@ for (slice in pos_slices_def) {
   file_name <- sprintf("position_lists/slice_%s.tsv", slice$name)
 
   sub <- if (slice$direction == "top") {
-    pos_out %>% dplyr::filter(change_side %in% c("top", "both"))
+    pos_out %>% dplyr::filter(side == "top")
   } else if (slice$direction == "bottom") {
-    pos_out %>% dplyr::filter(change_side %in% c("bottom", "both"))
+    pos_out %>% dplyr::filter(side == "bottom")
   } else {
     pos_out
   }
@@ -1645,7 +1636,7 @@ if (has_fade_site_data) {
   k_pe            <- 1
 
   for (dir in c("top", "bottom")) {
-    pos_subset <- pos_scores %>% filter(change_side %in% c(dir, "both"))
+    pos_subset <- pos_scores %>% filter(side == dir)
     fade_site  <- if (dir == "top") fade_site_top_df else fade_site_bot_df
     if (nrow(pos_subset) == 0 || nrow(fade_site) == 0) next
 

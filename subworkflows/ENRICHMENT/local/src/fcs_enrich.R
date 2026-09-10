@@ -673,7 +673,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
     #   • CAAS : corperms$corStat_byrank, a named list keyed by ranking name
     #            (global/top/bottom), each a genes×N null matrix. The matching
     #            matrix is selected per ranking - directionality is precomputed
-    #            upstream (each labeling's change_side partitions the directions),
+    #            upstream (each labeling's `side` partitions the directions),
     #            so no corRho transform is needed.
     corStat_byrank <- c(corperms[["corStat_byrank"]], corperms[["caas_corStat_byrank"]])
     # NOTE: `corStat_byrank` keys `*_asr` (global_asr/top_asr/bottom_asr) are

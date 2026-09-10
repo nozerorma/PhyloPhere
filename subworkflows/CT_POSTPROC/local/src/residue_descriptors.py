@@ -16,19 +16,19 @@ same residue is *conserved* and does not contribute to the derived residues
 residue). The per-pair reconstructed states live in
 ``mrca_<i>_{anc,top,bot}_aa`` (empty on a side that did not substitute).
 
-``change_side`` (``top`` / ``bottom`` / ``both`` / ``none``) is the
-disambiguation's authoritative call for which clade carries the substantive
-change. **Side assignment follows ``change_side``, never a heuristic.**
+``side`` (``top`` / ``bottom`` / ``none``) is the disambiguation's authoritative
+call for which clade carries the substantive change. A position changing on both
+clades is TWO per-side rows (side ``top`` and side ``bottom``). **Side assignment
+follows ``side``, never a heuristic.**
 
 Columns produced (one value per ``(Gene, Position)``, broadcast to every row):
 
 ``derived_residues``
     ``"<top>/<bottom>"`` — same left/right convention as ``caas``. The
-    ``change_side``-sanctioned side shows its **derived** residues
+    ``side``-sanctioned side shows its **derived** residues
     (``mrca_*_top_aa`` / ``mrca_*_bot_aa`` at changed pairs); the other side shows
-    the **ancestral** residue (``mrca_*_anc_aa``). ``change_side == "both"`` shows
-    the derived residues on both sides. ``""`` when the position has no changed
-    pair.
+    the **ancestral** residue (``mrca_*_anc_aa``). ``""`` when the position has no
+    changed pair.
 ``top_residue_support`` / ``bottom_residue_support``
     ``"L:3,S:2"`` — per residue listed on that side, the number of DISTINCT CAAS
     contrast pairs (``mrca_<i>`` blocks) that carry it, count-descending then
@@ -70,11 +70,10 @@ _EMPTY = {"derived_residues": "", "top_residue_support": "",
           "bottom_residue_support": "", "top_residue_support_detail": "",
           "bottom_residue_support_detail": "", "n_conserved_pairs": ""}
 
-# change_side -> which side(s) show DERIVED residues (the other shows ancestral).
+# side -> which side(s) show DERIVED residues (the other shows ancestral).
 _DERIVED_SIDES: Dict[str, Set[str]] = {
     "top": {"top"},
     "bottom": {"bot"},
-    "both": {"top", "bot"},
     "none": set(),
     "": set(),
 }
@@ -107,8 +106,8 @@ def _clean_aa(val) -> str:
     return s
 
 
-def _derived_sides_for(change_side) -> Set[str]:
-    return _DERIVED_SIDES.get(str(change_side or "").strip().lower(), set())
+def _derived_sides_for(side) -> Set[str]:
+    return _DERIVED_SIDES.get(str(side or "").strip().lower(), set())
 
 
 def _node_str(val) -> str:
@@ -218,16 +217,16 @@ def _descriptors_for_group(group: pd.DataFrame, pair_idx: List[int],
         out["n_conserved_pairs"] = n_cons
         return out
 
-    # change_side is a per-position call; every row of the group agrees.
+    # side is a per-(position, direction) call; every row of the group agrees.
     cside = ""
-    if "change_side" in group.columns:
-        vals = [str(v).strip().lower() for v in group["change_side"] if _node_str(v)]
+    if "side" in group.columns:
+        vals = [str(v).strip().lower() for v in group["side"] if _node_str(v)]
         if vals:
             cside = vals[0]
     if cside in _DERIVED_SIDES and cside not in ("", "none"):
         der_sides = _DERIVED_SIDES[cside]
     else:
-        # No usable change_side -> infer from which sides actually substituted.
+        # No usable side -> infer from which sides actually substituted.
         der_sides = {s for s in ("top", "bot") if derived_p[s]}
 
     def _side_fields(derived, ancestral):

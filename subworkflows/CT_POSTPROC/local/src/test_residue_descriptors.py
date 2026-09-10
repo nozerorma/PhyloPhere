@@ -2,7 +2,7 @@
 """Tests for residue_descriptors.add_residue_descriptors.
 
 Layout convention: ``derived_residues`` is ``<top>/<bottom>`` (same left/right as
-the ``caas`` string). The ``change_side``-sanctioned side shows derived residues;
+the ``caas`` string). The ``side``-sanctioned side shows derived residues;
 the other side shows the ancestral residue.
 
 Run: ``python3 -m pytest subworkflows/CT_POSTPROC/local/src/test_residue_descriptors.py``
@@ -20,7 +20,7 @@ from residue_descriptors import (
 
 def _mk_p3() -> pd.DataFrame:
     # test_fop_pool.R mk_p3: 3 hypothesis rows, one (Gene, Position), bottom-side
-    # change (bot_aa I/V), no change_side column -> inferred from the data.
+    # change (bot_aa I/V), no side column -> inferred from the data.
     return pd.DataFrame(
         {
             "Gene": ["BRCA1", "BRCA1", "BRCA1"],
@@ -51,14 +51,14 @@ def test_point3_top_is_ancestral_bottom_is_derived():
     assert (out["derived_residues"] == "A/IV").all()  # broadcast
 
 
-def test_change_side_top_puts_derived_left_ancestral_right():
-    # PEPC:539-style — change_side == "top" everywhere; one row also has a stray
-    # bottom residue (n90) which must NOT surface (change_side sanctions top only).
+def test_side_top_puts_derived_left_ancestral_right():
+    # PEPC:539-style — side == "top" everywhere; one row also has a stray
+    # bottom residue (n90) which must NOT surface (side sanctions top only).
     df = pd.DataFrame(
         {
             "Gene": ["P", "P", "P"],
             "Position": [539, 539, 539],
-            "change_side": ["top", "top", "top"],
+            "side": ["top", "top", "top"],
             "mrca_1_node": ["n90", "n91", "n93"],
             "mrca_1_anc_aa": ["P", "P", "P"],
             "mrca_1_top_aa": ["T", "T", "T"],
@@ -73,15 +73,15 @@ def test_change_side_top_puts_derived_left_ancestral_right():
     assert out.iloc[0]["bottom_residue_support_detail"] == "P:3"
 
 
-def test_change_side_bottom_puts_derived_right():
+def test_side_bottom_puts_derived_right():
     df = pd.DataFrame(
         {
             "Gene": ["G"],
             "Position": [1],
-            "change_side": ["bottom"],
+            "side": ["bottom"],
             "mrca_1_node": ["a"],
             "mrca_1_anc_aa": ["A"],
-            "mrca_1_top_aa": ["W"],   # ignored: change_side is bottom
+            "mrca_1_top_aa": ["W"],   # ignored: side is bottom
             "mrca_1_bot_aa": ["C"],
         }
     )
@@ -93,12 +93,14 @@ def test_change_side_bottom_puts_derived_right():
     assert out.iloc[0]["bottom_residue_support_detail"] == "C:1"
 
 
-def test_change_side_both_shows_derived_on_both():
+def test_side_none_infers_both_from_data():
+    # A row whose `side` is unusable ("none") falls back to inferring derived
+    # sides from which clades actually substituted (here: both).
     df = pd.DataFrame(
         {
             "Gene": ["G", "G"],
             "Position": [1, 1],
-            "change_side": ["both", "both"],
+            "side": ["none", "none"],
             "mrca_1_node": ["a", "b"],
             "mrca_1_anc_aa": ["M", "M"],
             "mrca_1_top_aa": ["L", "L"],
@@ -118,7 +120,7 @@ def test_multi_residue_side_sorted():
         {
             "Gene": ["G", "G"],
             "Position": [1, 1],
-            "change_side": ["top", "top"],
+            "side": ["top", "top"],
             "mrca_1_node": ["a", "b"],
             "mrca_1_anc_aa": ["I", "I"],
             "mrca_1_top_aa": ["S", "M"],
@@ -137,7 +139,7 @@ def test_n_conserved_pairs_counts_distinct_nodes():
         {
             "Gene": ["G", "G"],
             "Position": [1, 1],
-            "change_side": ["top", "top"],
+            "side": ["top", "top"],
             "mrca_1_node": ["a", "a"],
             "mrca_1_anc_aa": ["I", "I"],
             "mrca_1_top_aa": ["F", "F"],
@@ -158,7 +160,7 @@ def test_no_changed_pairs_all_empty_but_conserved_counted():
         {
             "Gene": ["G"],
             "Position": [1],
-            "change_side": ["top"],
+            "side": ["top"],
             "mrca_1_node": ["a"],
             "mrca_1_anc_aa": ["A"],
             "mrca_1_top_aa": [""],
@@ -188,7 +190,7 @@ def test_pair_vs_node_support_diverge():
         {
             "Gene": ["G", "G", "G"],
             "Position": [1, 1, 1],
-            "change_side": ["bottom", "bottom", "bottom"],
+            "side": ["bottom", "bottom", "bottom"],
             "mrca_1_node": ["a", "a", "b"],
             "mrca_1_anc_aa": ["A", "A", "A"],
             "mrca_1_top_aa": ["", "", ""],

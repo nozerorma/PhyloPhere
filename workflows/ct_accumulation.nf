@@ -160,7 +160,7 @@ workflow CT_ACCUMULATION {
 
         // ── Phase 2: Randomize — run once per phenotype direction + once for all ──
         // AGGREGATE is direction-agnostic (alignment/conservation data).
-        // RANDOMIZE filters the CAAS pool by change_side and names outputs
+        // RANDOMIZE filters the CAAS pool by direction and names outputs
         // accumulation_{direction}_{cat}_aggregated_results.csv.
         // "all" uses --change-side both (retains all non-none positions) for the
         // global accumulation score used in gene-level significance characterisation.

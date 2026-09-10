@@ -276,7 +276,7 @@ if (!has_res) {
 # Enriched position sets {.tabset .tabset-fade}
 
 Foreground = the top 25 / 10 / 5 / 1% of scored positions by `CAAS_score` in
-that direction (`top`/`bottom` restrict to `change_side` first, matching the
+that direction (`top`/`bottom` restrict to `side` first, matching the
 SCORING module's own percentile convention; no `global` ranking - dropped in
 favour of top/bottom only, consistent with every other report in this
 pipeline). Background = the full honest tested
@@ -1060,8 +1060,8 @@ if (has_pos_char) {
   top5_pct <- 0.05
   top1_pct <- 0.01
 
-  pos_top    <- pos_df %>% dplyr::filter(change_side %in% c("top",    "both"))
-  pos_bottom <- pos_df %>% dplyr::filter(change_side %in% c("bottom", "both"))
+  pos_top    <- pos_df %>% dplyr::filter(side == "top")
+  pos_bottom <- pos_df %>% dplyr::filter(side == "bottom")
 
   # Percentile membership: prefer SCORING's published position_lists/
   # slice_<dir><pct>.tsv (scoring_compute.R), the same canonical top/bottom/
@@ -1155,7 +1155,7 @@ not restricted to the US scheme.
 .glob10 <- test_glob_10(pos_df); .glob5 <- test_glob_5(pos_df); .glob1 <- test_glob_1(pos_df)
 
 pos_score_meta <- pos_df %>%
-  select(Gene, Position, CAAS_score, n_schemes, change_side) %>%
+  select(Gene, Position, CAAS_score, n_schemes, side) %>%
   mutate(
     caas_decile  = dplyr::ntile(CAAS_score, 10),
     in_top_10pct = .glob10,
@@ -1225,8 +1225,8 @@ pos_vep_pai_table_source <- vep_pai_df %>%
 has_vep_primateai <- nrow(pos_vep_pai) > 0
 
 # Directional PAI subsets: top+both and bottom+both
-pos_vep_pai_top    <- pos_vep_pai %>% filter(change_side %in% c("top",    "both"))
-pos_vep_pai_bottom <- pos_vep_pai %>% filter(change_side %in% c("bottom", "both"))
+pos_vep_pai_top    <- pos_vep_pai %>% filter(side == "top")
+pos_vep_pai_bottom <- pos_vep_pai %>% filter(side == "bottom")
 ```
 
 `r if (exists("pos_vep_pai") && nrow(pos_vep_pai) == 0) "> **Note:** PrimateAI-3D inputs were provided, but no scored positions could be matched to the VEP/PAI3D annotations for this direction."`
@@ -1370,13 +1370,13 @@ ggplot(pos_vep_pai_dir, aes(x = phen_score, y = pai_char_score,
 ```{r vep-pai-table, eval=has_vep_primateai}
 pai_table <- pos_vep_pai_table_source %>%
   arrange(desc(CAAS_score)) %>%
-  select(Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change, CAAS_score, change_side, score_PAI3D, percentile_PAI3D, prediction) %>%
+  select(Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change, CAAS_score, side, score_PAI3D, percentile_PAI3D, prediction) %>%
   rename(
     `Ref AA` = hg38_ref_aa,
     `Alt AA(s)` = caas_alt_aas,
     `CAAS Change` = caas_change,
     `CAAS Score` = CAAS_score,
-    `Change Side` = change_side,
+    `Change Side` = side,
     `PAI3D Score` = score_PAI3D,
     `PAI3D Percentile` = percentile_PAI3D,
     `Prediction` = prediction
@@ -1482,7 +1482,7 @@ has_vep_cosmic <- nrow(cosmic_joined) > 0
 
 ```{r vep-cosmic-stats, eval=has_vep_cosmic}
 cosmic_table <- cosmic_joined %>%
-  group_by(Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change, CAAS_score, change_side) %>%
+  group_by(Gene, Position, hg38_ref_aa, caas_alt_aas, caas_change, CAAS_score, side) %>%
   summarise(
     Recurrence = n(),
     `Mutation AA(s)` = paste(unique(MUTATION_AA), collapse = "; "),
@@ -1496,7 +1496,7 @@ cosmic_table <- cosmic_joined %>%
     `Alt AA(s)` = caas_alt_aas,
     `CAAS Change` = caas_change,
     `CAAS Score` = CAAS_score,
-    `Change Side` = change_side,
+    `Change Side` = side,
     `Mutation AA(s)` = `Mutation AA(s)`,
     `Description` = `Description(s)`,
     `Somatic Status` = `Somatic Status(es)`
@@ -1513,8 +1513,8 @@ DT::datatable(
 ```{r vep-cosmic-somatic-bar, eval=has_vep_cosmic, fig.height=5}
 # Count of COSMIC mutations by Somatic Status and direction.
 cosmic_counts <- bind_rows(
-  cosmic_joined %>% filter(change_side %in% c("top",    "both")) %>% mutate(cosmic_direction = "TOP"),
-  cosmic_joined %>% filter(change_side %in% c("bottom", "both")) %>% mutate(cosmic_direction = "BOTTOM")
+  cosmic_joined %>% filter(side == "top") %>% mutate(cosmic_direction = "TOP"),
+  cosmic_joined %>% filter(side == "bottom") %>% mutate(cosmic_direction = "BOTTOM")
 ) %>%
   filter(!is.na(MUTATION_SOMATIC_STATUS) & MUTATION_SOMATIC_STATUS != "") %>%
   count(cosmic_direction, MUTATION_SOMATIC_STATUS)
@@ -1538,8 +1538,8 @@ ggplot(cosmic_counts, aes(x = MUTATION_SOMATIC_STATUS, y = n, fill = cosmic_dire
 pos_cosmic <- pos_cosmic_shared %>%
   mutate(has_cosmic = paste(Gene, Position, sep = "_") %in% paste(vep_cosmic_df$Gene, vep_cosmic_df$Position, sep = "_"))
 
-pos_cosmic_top    <- pos_cosmic %>% filter(change_side %in% c("top",    "both"))
-pos_cosmic_bottom <- pos_cosmic %>% filter(change_side %in% c("bottom", "both"))
+pos_cosmic_top    <- pos_cosmic %>% filter(side == "top")
+pos_cosmic_bottom <- pos_cosmic %>% filter(side == "bottom")
 
 run_cosmic_fisher_dir <- function(df, label) {
   n_all <- nrow(df)
@@ -1606,7 +1606,7 @@ if (has_fade_sites_top || has_fade_sites_bottom) cat("## FADE Site Overlap\n\n")
 # CAAS position set itself (pos_score_meta, already carries in_top_Xpct flags).
 pos_fade_top <- if (has_fade_sites_top) {
   pos_score_meta %>%
-    dplyr::filter(change_side %in% c("top", "both")) %>%
+    dplyr::filter(side == "top") %>%
     dplyr::left_join(
       fade_sites_top_df %>% dplyr::select(Gene, Position, max_bf, target_aa),
       by = c("Gene", "Position")
@@ -1616,7 +1616,7 @@ pos_fade_top <- if (has_fade_sites_top) {
 
 pos_fade_bottom <- if (has_fade_sites_bottom) {
   pos_score_meta %>%
-    dplyr::filter(change_side %in% c("bottom", "both")) %>%
+    dplyr::filter(side == "bottom") %>%
     dplyr::left_join(
       fade_sites_bottom_df %>% dplyr::select(Gene, Position, max_bf, target_aa),
       by = c("Gene", "Position")
@@ -1633,12 +1633,12 @@ fade_table <- dplyr::bind_rows(
   if (!is.null(pos_fade_bottom)) pos_fade_bottom %>% dplyr::filter(has_fade) %>% dplyr::mutate(Direction = "BOTTOM")
 ) %>%
   dplyr::arrange(dplyr::desc(max_bf)) %>%
-  dplyr::select(Gene, Position, Direction, CAAS_score, dplyr::any_of(c("n_hypotheses", "supporting_hypotheses")), change_side, target_aa, max_bf) %>%
+  dplyr::select(Gene, Position, Direction, CAAS_score, dplyr::any_of(c("n_hypotheses", "supporting_hypotheses")), side, target_aa, max_bf) %>%
   dplyr::rename(
     `CAAS Score`        = CAAS_score,
     `N Hypotheses`      = dplyr::any_of("n_hypotheses"),
     `Hypotheses`        = dplyr::any_of("supporting_hypotheses"),
-    `Change Side`       = change_side,
+    `Change Side`       = side,
     `FADE Target AA`    = target_aa,
     `Max Bayes Factor`   = max_bf
   )
@@ -1769,8 +1769,8 @@ if (has_genomic) cat("## Regional Accumulation\n\n")
 }
 
 # pos_genomic already has chr_order and gene_mid; split by direction
-pos_genomic_top <- pos_genomic %>% filter(change_side %in% c("top",    "both"))
-pos_genomic_bot <- pos_genomic %>% filter(change_side %in% c("bottom", "both"))
+pos_genomic_top <- pos_genomic %>% filter(side == "top")
+pos_genomic_bot <- pos_genomic %>% filter(side == "bottom")
 
 pos_region_top <- .build_region_wins(pos_genomic_top, test_top_10, test_top_5, test_top_1,
                                       pos_chr_offsets, "TOP")
@@ -1827,7 +1827,7 @@ readr::write_tsv(region_export,
   across the full ~1.47M position background to build an exact empirical null distribution.
   Normalized Enrichment Score ($\text{NES} = (T_\text{obs} - \mu_\text{null}) / \sigma_\text{null}$)
   and empirical p-values ($p_\text{perm} = \frac{\#\{T_\text{null} \ge T_\text{obs}\} + 1}{N_\text{perms} + 1}$)
-  are computed per term. Run separately for the **global / top / bottom** directions (`change_side`).
+  are computed per term. Run separately for the **global / top / bottom** directions (`side`).
 - **Two background conventions.** Every database above tests against the
   **full honest background** *except* `cosmic_orthogroups` and
   `pai3d_orthogroups`, which test against a **coverage-restricted background**

@@ -40,7 +40,7 @@ import scipy.sparse as sp
 def parse_args():
     p = argparse.ArgumentParser(description="Position-level Path Sum Permulation enrichment.")
     p.add_argument("--obs-scores", required=True,
-                   help="position_scores.tsv (Gene, Position, CAAS_score, change_side)")
+                   help="position_scores.tsv (Gene, Position, CAAS_score, side)")
     p.add_argument("--gmt-dir", required=True)
     p.add_argument("--characterization", default=None,
                    help="characterization_layers.tsv (broad functional layers)")
@@ -173,9 +173,9 @@ def direction_scores(df, direction):
     if direction == "global":
         sub = df
     elif direction == "top":
-        sub = df[df["change_side"].isin(["top", "both"])]
+        sub = df[df["side"] == "top"]
     else:
-        sub = df[df["change_side"].isin(["bottom", "both"])]
+        sub = df[df["side"] == "bottom"]
     return dict(zip(sub["pos_id"], sub["CAAS_score"]))
 
 
@@ -337,7 +337,7 @@ def main():
 
     background = build_background(args.background, universe_genes)
     obs = pd.read_csv(args.obs_scores, sep="\t")
-    for col in ("Gene", "Position", "CAAS_score", "change_side"):
+    for col in ("Gene", "Position", "CAAS_score", "side"):
         if col not in obs.columns:
             sys.exit(f"[posenrich] obs-scores missing column: {col}")
     obs = obs[obs["Gene"].isin(universe_genes)].copy()

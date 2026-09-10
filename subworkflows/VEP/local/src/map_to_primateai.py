@@ -64,13 +64,13 @@ def _support_letters(support_str):
 
 
 def anc_der_from_descriptor(derived_residues, top_residue_support,
-                            bottom_residue_support, change_side):
+                            bottom_residue_support, side):
     """(ancestral_aas, derived_aas) from the upstream position-level descriptor.
 
     The descriptor (built in CT_POSTPROC's residue_descriptors.py) uses the
     ``caas`` left/right convention: ``top_residue_support`` letters are the top
     clade's residues at the position, ``bottom_residue_support`` the bottom
-    clade's. ``change_side`` says which clade carries the derived change; the
+    clade's. ``side`` says which clade carries the derived change; the
     other clade's residues are the ancestral state. Only US rows reach this
     (caap_group filter below), so no GS-grouping handling is needed.
 
@@ -85,12 +85,12 @@ def anc_der_from_descriptor(derived_residues, top_residue_support,
     """
     top_set = _support_letters(top_residue_support)
     bot_set = _support_letters(bottom_residue_support)
-    cs = str(change_side or "").strip().lower()
+    cs = str(side or "").strip().lower()
     if cs == "top":
         anc, der = bot_set, top_set          # ancestral = bottom, derived = top
     elif cs == "bottom":
         anc, der = top_set, bot_set          # ancestral = top, derived = bottom
-    else:                                    # "both" / unknown: both sides derived
+    else:                                    # "none" / unknown: both sides derived
         anc, der = set(), top_set | bot_set
     der = (der - anc) or der
     return anc, der
@@ -272,7 +272,7 @@ with open(caas_file) as fh:
     caas_col = col_lc.get('caas')
     gene_col = col_lc.get('gene')
     pos_col = col_lc.get('position')
-    cside_col = col.get('change_side')
+    cside_col = col.get("side") or col_lc.get("side")
     amino_col = col_lc.get('amino_encoded')
     caap_col = col.get('caap_group') or col_lc.get('caap_group')
     dres_col = col_lc.get('derived_residues')

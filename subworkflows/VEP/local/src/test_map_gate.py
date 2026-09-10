@@ -81,7 +81,7 @@ def test_gate_noop_when_column_missing(tmp_path):
 def _make_inputs(tmp_path, with_skip):
     caas = tmp_path / "caas.tsv"
     _write(caas, [
-        ("tag", "caas", "Gene", "Position", "change_side", "amino_encoded",
+        ("tag", "caas", "Gene", "Position", "side", "amino_encoded",
          "caap_group", "derived_residues", "top_residue_support", "bottom_residue_support"),
         ("t1", "Y/V", "GENE1", "5", "top", "Y>V", "US", "Y/V", "Y:2", "V:2"),
         ("t2", "F/L", "GENE2", "9", "top", "F>L", "US", "F/L", "F:2", "L:2"),

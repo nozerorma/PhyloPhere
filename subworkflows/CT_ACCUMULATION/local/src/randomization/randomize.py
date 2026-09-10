@@ -430,7 +430,7 @@ def _build_caas_payload(merged_df, randomization_type, decile_bins, pool_mask):
 # Unlike 'naive'/'cons_decile', this type does not draw synthetic positions from
 # an eligible pool. The randomised CAAS set for a gene at cycle i IS that gene's
 # actually-detected positions in the CAAS permulation replay (caas_permulation.nf /
-# gene_wrapper.py's run_permulation) at cycle i, subject to the same change_side
+# gene_wrapper.py's run_permulation) at cycle i, subject to the same direction
 # filter the observed pool uses. This holds the phenotype-tree confound (the same
 # thing the permulation null holds everywhere else in the pipeline) but is NOT
 # conservation-decile matched like 'cons_decile' -- a different question, not a

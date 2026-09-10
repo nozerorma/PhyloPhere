@@ -1454,10 +1454,10 @@ per-position coverage as the "was this position checkable at all" reference).
 ```{r interesting_positions_prep, eval=has_position_scores_cmp}
 build_interesting_positions <- function(direction) {
   rk_set    <- switch(direction, Top = c("top", "accelerating"), Bottom = c("bottom", "decelerating"), NULL)
-  side_vals <- switch(direction, Top = c("top", "both"), Bottom = c("bottom", "both"), NULL)
+  side_vals <- switch(direction, Top = "top", Bottom = "bottom", NULL)
 
   base <- position_scores_cmp_df
-  if (!is.null(side_vals)) base <- base %>% dplyr::filter(change_side %in% side_vals)
+  if (!is.null(side_vals)) base <- base %>% dplyr::filter(side %in% side_vals)
   if (nrow(base) == 0) return(base)
 
   base <- .position_pct_flags(base, tolower(direction))
