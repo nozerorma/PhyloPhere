@@ -57,7 +57,7 @@ if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [include_b0] [pss_top_pct] [max_tries] [pheno_col] ",
        "[n_col] [c_col] [resample_use_n] [trait_type] [fop_null] [max_fop] ",
-       "[n_cpus] [seed]")
+       "[n_cpus] [seed] [fop_harvest_cap]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -105,6 +105,17 @@ if (!is.na(seed_arg)) {
 } else {
   log_msg("INFO", sprintf("RNG unseeded; FOP mirror uses %d core(s)", n_cpus))
 }
+
+# FOP mirror harvest cap: the downstream CAAS permulation null replays only
+# `caas_full_perms` base cycles (SUBSET_RESAMPLE_PERMS draws a seeded random
+# subset of the pool), so harvesting alternative hypotheses for the whole pool is
+# wasted work — the FOP mirror is ~quadratic in tree size and the dominant fixed
+# per-phenotype cost. When this is set and smaller than the pool, harvest FOP for
+# a seeded random subsample of that many pool cycles and record which ones in
+# fop_selected_cycles.txt. NA / >= pool size -> harvest the whole pool (historical
+# behaviour). The subsample is a uniform random draw over the exchangeable pool
+# records, statistically equivalent to the gawk draw it replaces.
+fop_harvest_cap <- arg_or(20, NA_integer_, as.integer)
 
 if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
   log_msg("WARN", sprintf("Unknown strategy '%s', defaulting to 'auto'", selection.strategy))
@@ -518,10 +529,21 @@ close(man_con)
 # memory is one batch, not the whole (up to max_fop x pool_size) row set.
 if (fop_null) {
   FOP_BATCH <- 1000L
-  n_workers <- max(1L, min(n_cpus, length(pool)))
+
+  # Restrict the harvest to the cycles the downstream null will actually replay.
+  fop_idx <- seq_along(pool)
+  if (!is.na(fop_harvest_cap) && fop_harvest_cap >= 1L && fop_harvest_cap < length(pool)) {
+    fop_idx <- sort(sample.int(length(pool), fop_harvest_cap))
+    writeLines(paste0("b_", fop_idx), file.path(outdir, "fop_selected_cycles.txt"))
+    log_msg("INFO", sprintf(
+      "FOP mirror capped to %d of %d pool cycles (seeded subsample; caas_full_perms)",
+      length(fop_idx), length(pool)))
+  }
+
+  n_workers <- max(1L, min(n_cpus, length(fop_idx)))
   log_msg("START", sprintf(
     "FOP mirror harvest for %d accepted cycles (max_fop=%d, %d worker(s), batch=%d)",
-    length(pool), max_fop, n_workers, FOP_BATCH))
+    length(fop_idx), max_fop, n_workers, FOP_BATCH))
 
   lab_path  <- file.path(outdir, "fop_labelings.tab")
   pair_path <- file.path(outdir, "fop_pairs.tsv")
@@ -581,8 +603,8 @@ if (fop_null) {
   n_hyp_tot <- 0L
   any_lab   <- FALSE
   any_pair  <- FALSE
-  for (start in seq(1L, length(pool), by = FOP_BATCH)) {
-    block <- start:min(start + FOP_BATCH - 1L, length(pool))
+  for (start in seq(1L, length(fop_idx), by = FOP_BATCH)) {
+    block <- fop_idx[start:min(start + FOP_BATCH - 1L, length(fop_idx))]
     res <- parallel::mclapply(block, fop_one, mc.cores = min(n_workers, length(block)),
                               mc.preschedule = TRUE)
     lab_batch  <- vector("list", length(res))
@@ -618,8 +640,8 @@ if (fop_null) {
   if (!any_pair) unlink(pair_path)
 
   log_msg("COMPLETE", sprintf("FOP mirror: %d cycles -> %d hypothesis labelings (mean %.1f/cycle) -> fop_labelings.tab",
-                              length(pool), n_hyp_tot,
-                              if (length(pool)) n_hyp_tot / length(pool) else 0))
+                              length(fop_idx), n_hyp_tot,
+                              if (length(fop_idx)) n_hyp_tot / length(fop_idx) else 0))
 }
 
 # ── Summary ──────────────────────────────────────────────────────────────────
