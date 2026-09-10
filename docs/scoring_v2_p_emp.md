@@ -8,9 +8,12 @@ toca la construcción del `core`.
 **Integrado en la secuencia core v3.** El rediseño del `core` de dominio Voronoi
 (`docs/scoring_v3_core.md`, Apéndice D) va por commits `V3-0..V3-6`. Estado:
 secuencia `V3-0..V3-6` **COMPLETA** en `scoring_v2`. El plumbing del null de
-`p.emp` entró en `V3-4a`; el consumidor R (§2f-ter) en `V3-4`. Queda **solo** el
-flip de headline (§7.3), follow-up post-V3-6 gated en la corrida Tier 1 PEPC de
-v3, más la limpieza de `null_pvalue_boot` (§7.4, sin tramo asignado).
+`p.emp` entró en `V3-4a`; el consumidor R (§2f-ter) en `V3-4`. El flip de headline
+(§7.3) y el borrado de `null_pvalue_boot` (§7.4) están **HECHOS** (commits
+`p.emp §7.3:` / `p.emp §7.4:`), adelantados por decisión del usuario antes de la
+corrida PEPC — esa corrida pasa de gate a verificación: si la distribución de
+`p.emp` bajo fenotipo nulo-por-construcción se apila en 0, hay que **revertir** el
+§7.3 (volver `pos_perm_p_adj` al headline).
 Core v3 §4 fija como invariante justo lo que `p.emp` asume: `CAAS_score` = media
 §2g de `core_s` sobre los 5 esquemas, `caas_row = asr_path_score = core_s`, shard
 de 8 columnas, esquema de `perm_pos_pval.tsv`. Core v3 cambia los **valores** de
@@ -41,10 +44,10 @@ Coordenadas 0-based. `s ∈ {top, bottom}` es la clave de dirección (T4b: `side
 | `p.emp` | `(k_emp + 1)/(N + 1)`, `k_emp` = ciclos que **re-detectan Y superan** el `CAAS_score` observado, por `(Gene, Position)` — **pooled a posición** (ver amendment V3-4a) |
 | regla de score de la superación | **max sobre lados** de la media §2g por esquema — el eje "all"/`.pos_undirected` (amendment V3-4a; era per-lado) |
 | dónde se computa la media por ciclo | **Opción C**: el null emite `(caas_sum, n_schemes)` por `(Gene, Position, side, cycle)`; R divide y cuenta (§5) |
-| secuenciación | plumbing null: commit sobre V3-3 (hecho) · consumidor R: dentro de V3-4 · flip de headline: post-V3-6, gate PEPC (§7) |
-| headline de posición | `p.emp` / `p.emp_adj` — **sustituye** a `pos_perm_p_adj` |
-| `pos_perm_p` | pasa a **side-consciente** y baja a diagnóstico (`perm_pos_pval.tsv`), fuera del headline |
-| `null_pvalue_boot` | inerte; candidato a borrado en pasada aparte |
+| secuenciación | plumbing null: V3-4a · consumidor R: V3-4 · flip de headline: commit `p.emp §7.3:` (HECHO, verificación PEPC pendiente) · borrado `null_pvalue_boot`: commit `p.emp §7.4:` (HECHO) |
+| headline de posición | `p.emp` / `p.emp_adj` — **sustituye** a `pos_perm_p_adj`; `pos_perm_p` fuera de `position_scores.tsv`, solo en `perm_pos_pval.tsv` |
+| `pos_perm_p` | pooled a `(Gene, Position, caap_group)`; baja a diagnóstico (`perm_pos_pval.tsv`), fuera del headline y de `position_scores.tsv` |
+| `null_pvalue_boot` | **borrado** (commit `p.emp §7.4:`) — inerte bajo el `percent_rank` de aguas abajo, sin consumidor externo |
 | `p.emp_score_only`, `gene_perm_p_detect` | **descartados** (ver §3) |
 | p de gen | sin cambios: `gene_caas_pperm` (§4f, magnitud) + `accum_cct_p` (§4b, conteo) — dos ejes, nunca combinados (§6e) |
 | corrección LOO en `p.emp` | **no** — add-one puro (§6d) |
@@ -93,10 +96,11 @@ cuántos ciclos re-apareció:
   vienen de `_expand_pooled` (V3-3, sustituto de `_expand_sides`), que ya emite
   ≤2 `PositionAxes` por `(cyc, pos, grp)`, cada una con su `side` autoritativo y
   el colapso `side="none"`. Ver §3: pasa a side-consciente por presencia de fila.
-- `null_pvalue_boot = (k − 1) / max(N − 1, 1)` — fracción de replicación
+- ~~`null_pvalue_boot = (k − 1) / max(N − 1, 1)`~~ — **borrado** en el commit
+  `p.emp §7.4:`. Era la fracción de replicación
   leave-one-out, análogo null del `recovery_boot` observado. **Numéricamente
   inerte** bajo el `percent_rank` de aguas abajo —`(k−1)/(N−1)` y `k/N` ordenan
-  igual—; solo sobrevive porque `perm_pos_pval.tsv` se lee como tabla de
+  igual—; solo sobrevivía porque `perm_pos_pval.tsv` se lee como tabla de
   contraste. Candidato a borrado (§3).
 - `pos_perm_p = (k + 1) / (N + 1)` — p permulacional calibrado, add-one, **no**
   LOO. Por `(Gene, Position, caap_group)`.
@@ -490,36 +494,56 @@ per-lado, y no toca R. `perm_pos_cycle_caas.tsv.gz` ya sale con valores core v3
   `perm_pos_pval.tsv`).
 - `scoring_caas_perms.R`, `randomize.py`: sin cambios.
 
-### 7.3 Follow-up post-V3-6 — flip de headline, gated en PEPC
+### 7.3 Flip de headline — HECHO (commit `p.emp §7.3:`)
 
-- Reportes / `gene_lists`: `p.emp_adj` pasa a columna ordenadora headline de
-  posición (hoy `pos_perm_p_adj`).
-- Gate: la corrida Tier 1 PEPC de v3 (la que el usuario hace antes del merge de
-  v3) es también la validación de calibración de `p.emp`. Si la distribución de
-  `p.emp` bajo fenotipo nulo-por-construcción no sale ~uniforme, **no** se
-  flipea: `p.emp` se queda como columna, `pos_perm_p_adj` sigue de headline. Así
-  la calibración de `p.emp` no puede bloquear el merge de v3.
+Adelantado antes de la corrida PEPC por decisión del usuario ("cerrarlo todo ya").
+Cambios:
 
-### 7.4 Limpieza aparte (sin tramo asignado)
+- `scoring_compute.R`: §2f-bis reducido a leer **solo `n_cycles`** de
+  `perm_pos_pval.tsv` (el N del add-one de `p.emp`); el join de `pos_perm_p` a
+  `df` desaparece. §2g deja de agregar `pos_perm_p`. §2h deja de calcular
+  `pos_perm_p_adj`. `pos_out` (§6) escribe `position_scores.tsv` **sin**
+  `pos_perm_p` / `pos_perm_p_adj` — solo `p.emp` / `p.emp_adj` (decisión del
+  usuario: "quitar de position_scores.tsv", resuelve la contradicción §7.2 vs
+  amendment V3-4a a favor de §7.2).
+- `11.Scoring_report.Rmd`: sección headline reescrita sobre `p.emp` / `p.emp_adj`
+  (leídos de `position_scores.tsv`), con nota de que bajo fenotipo nulo debería
+  salir ~uniforme. `pos_perm_p` baja a sub-sección diagnóstica que lee
+  `perm_pos_pval.tsv` directo y BH-ajusta ahí mismo (ya no viene ajustado de
+  aguas arriba). Nuevo param `scoring_p_emp_thr` (default 0.1); `scoring_pos_perm_p_thr`
+  se conserva para la sub-sección diagnóstica.
+- `conf/scoring.config` + `scoring_report.nf`: `scoring_p_emp_thr` cableado.
+- `position_scores.tsv` y `position_lists/` ya ordenaban por `CAAS_score`, no por
+  `pos_perm_p_adj` — no hay reordenación de ficheros que hacer, solo la prosa de
+  reporte y el esquema de columnas.
 
-Borrar `null_pvalue_boot` de `_perms_worker` / `_finalize_perm_pos_pval` /
-esquema de `perm_pos_pval.tsv` (fork 4 §8).
+**Verificación pendiente (NO gate):** la corrida Tier 1 PEPC de v3. Si `p.emp`
+bajo fenotipo nulo-por-construcción se apila en 0 → anticonservador → **revertir**
+este commit (`pos_perm_p_adj` vuelve al headline, `pos_perm_p` vuelve a
+`position_scores.tsv`).
+
+### 7.4 Borrado de `null_pvalue_boot` — HECHO (commit `p.emp §7.4:`)
+
+Confirmado por el usuario que ningún consumidor externo lo lee. Borrado de
+`_perms_worker` (cálculo `(k-1)/loo_denom`), `_finalize_perm_pos_pval`, esquema de
+`perm_pos_pval.tsv` (ahora `Gene, Position, caap_group, n_detected, n_cycles,
+pos_perm_p`), y de la prosa/plots de `11.Scoring_report.Rmd` (el marcador de
+esquema "ranked scale" pasa a mirar `pos_perm_p`; el panel RAW usa
+`n_detected / n_cycles`).
 
 ---
 
 ## 8. Forks abiertos
 
-1. **Flip de headline (§7.3).** `p.emp_adj` sustituye a `pos_perm_p_adj` como
-   columna ordenadora solo si la calibración de `p.emp` sale sana en la corrida
-   Tier 1 PEPC de v3. Decisión de merge, no de diseño.
+1. ~~**Flip de headline (§7.3).**~~ — **HECHO** (commit `p.emp §7.3:`), adelantado
+   antes de la corrida PEPC. Pasa de decisión de merge a verificación: si `p.emp`
+   se apila en 0 bajo fenotipo nulo en la corrida Tier 1 PEPC, se **revierte**.
 2. **Tamaño de `perm_pos_cycle_caas.tsv.gz`** en `caas_full_perms` — medir en el
    primer run real; si molesta, emitir solo `(Gene, Position, side)` detectados
-   alguna vez (no requiere el observado).
-3. ~~`pos_perm_p` side-consciente vs quitarlo~~ — **resuelto por V3-3**.
-   `_expand_pooled` ya emite `PositionAxes` per-lado con `side` autoritativo y el
-   colapso `side="none"`, así que "detecta el lado `s`" = presencia de fila. El
-   cambio en el bloque de detección es contar por `(pos, grp, side)` en vez de
-   `(pos, grp)`; no hay interacción con el pooling (V3-3 lo dejó aguas arriba,
-   una llamada `pool_domains` por `(base, pos, grp)`). Se hace side-consciente.
-4. **Borrado de `null_pvalue_boot`** — confirmar que ningún consumidor externo
-   (crosscheck manual, notebooks) lo lee antes de retirarlo.
+   alguna vez (no requiere el observado). **Único fork que queda; se resuelve con
+   la corrida PEPC, no antes.**
+3. ~~`pos_perm_p` side-consciente vs quitarlo~~ — **resuelto**. Amendment V3-4a lo
+   pooló a `(Gene, Position, caap_group)`; el §7.3 flip lo sacó de
+   `position_scores.tsv` (queda solo en `perm_pos_pval.tsv`, diagnóstico).
+4. ~~**Borrado de `null_pvalue_boot`**~~ — **HECHO** (commit `p.emp §7.4:`).
+   Usuario confirmó que ningún consumidor externo lo lee.

@@ -44,6 +44,7 @@ params:
   caas_pos_detail_dir: NULL
   caas_gene_cycle_scores_file: NULL
   scoring_pos_perm_p_thr: 0.1
+  scoring_p_emp_thr: 0.1
   seed: "1998"
 ---
 
@@ -1029,44 +1030,80 @@ cat("_Neither `perm_pos_detail` nor `gene_cycle_scores.tsv` was supplied to this
 ```
 
 ```{r pos-perm-p-setup}
-# Tier 2: calibrated position-level permulation p. scoring_compute.R joins
-# perm_pos_pval.tsv's pos_perm_p onto position_scores.tsv BEFORE the per-scheme
-# collapse (mean across schemes), then BH-adjusts within the tested set -- so
-# pos_df already carries both columns whenever --caas_pos_pval was supplied to
-# SCORING_COMPUTE. Guard on column presence, same as every other optional
-# section in this report.
-has_pos_perm_p <- "pos_perm_p" %in% names(pos_df) && any(!is.na(pos_df$pos_perm_p))
+# §7.3 flip (docs/scoring_v2_p_emp.md): p.emp / p.emp_adj are the position
+# headline -- the "detects AND exceeds score" permulation p, pooled to
+# (Gene, Position) over the max-over-sides axis. scoring_compute.R §2f-ter/§2h
+# writes both into position_scores.tsv whenever --caas_pos_cycle_caas is set.
+# pos_perm_p (detection only) is no longer in position_scores.tsv; it stays
+# canonical in perm_pos_pval.tsv and is shown below purely as the apples-to-
+# apples decomposition of p.emp (k_emp <= k_det, so p.emp <= pos_perm_p always).
+has_p_emp <- "p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))
+p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
+if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.1
 pos_perm_p_thr <- suppressWarnings(as.numeric(params$scoring_pos_perm_p_thr))
 if (!is.finite(pos_perm_p_thr) || pos_perm_p_thr <= 0 || pos_perm_p_thr > 1) pos_perm_p_thr <- 0.1
+
+# Diagnostic pos_perm_p, straight from perm_pos_pval.tsv (per Gene x Position x
+# scheme), BH-adjusted within the tested set here (it is not adjusted upstream
+# any more). NULL when --caas_pos_pval was not supplied.
+pos_perm_p_diag <- NULL
+if (has_pos_pval && !is.null(perm_pos_pval) && "pos_perm_p" %in% names(perm_pos_pval)) {
+  pos_perm_p_diag <- perm_pos_pval %>%
+    filter(!is.na(pos_perm_p)) %>%
+    mutate(pos_perm_p_adj = p.adjust(pos_perm_p, method = "BH"))
+}
 ```
 
-```{r pos-perm-p-header, eval=has_pos_perm_p, results='asis'}
-cat("#### Position-level calibrated permulation p\n\n")
+```{r p-emp-header, eval=has_p_emp, results='asis'}
+cat("#### Position-level headline p: `p.emp`\n\n")
 cat(sprintf(paste0(
-  "`pos_perm_p` is a genuine per-position empirical p-value (NOT leave-one-out, unlike ",
-  "`null_pvalue_boot` above): of the permuted-labeling cycles, how many independently ",
-  "reproduced this exact (Gene, Position, caap_group) as a CAAS, add-one smoothed. ",
-  "`pos_perm_p_adj` is its BH adjustment within the tested set. %d/%d scored positions ",
-  "have a value; %d (%.1f%%) are significant at `pos_perm_p_adj <= %.3g`.\n\n"),
-  sum(!is.na(pos_df$pos_perm_p)), nrow(pos_df),
-  sum(pos_df$pos_perm_p_adj <= pos_perm_p_thr, na.rm = TRUE),
-  100 * mean(pos_df$pos_perm_p_adj <= pos_perm_p_thr, na.rm = TRUE),
-  pos_perm_p_thr))
+  "`p.emp` counts the permuted-labeling cycles that BOTH re-detect the position ",
+  "(on either phenotype side) AND match or beat its observed `CAAS_score`, add-one ",
+  "smoothed over N cycles. `p.emp_adj` is its BH adjustment within the tested set. ",
+  "%d/%d scored position-rows have a value; %d (%.1f%%) are significant at ",
+  "`p.emp_adj <= %.3g`.\n\n"),
+  sum(!is.na(pos_df$p.emp)), nrow(pos_df),
+  sum(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE),
+  100 * mean(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE),
+  p_emp_thr))
 ```
 
-```{r pos-perm-p-dist, eval=has_pos_perm_p, fig.height=4.5, fig.width=9}
-ggplot(pos_df %>% filter(!is.na(pos_perm_p)), aes(x = pos_perm_p)) +
+```{r p-emp-dist, eval=has_p_emp, fig.height=4.5, fig.width=9}
+ggplot(pos_df %>% filter(!is.na(p.emp)), aes(x = p.emp)) +
   geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
-  geom_vline(xintercept = pos_perm_p_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
-  labs(title = "pos_perm_p distribution across scored positions",
-       subtitle = sprintf("Dashed line: pos_perm_p_adj threshold = %.3g", pos_perm_p_thr),
-       x = "pos_perm_p", y = "positions") +
+  geom_vline(xintercept = p_emp_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
+  labs(title = "p.emp distribution across scored positions",
+       subtitle = sprintf("Dashed line: p.emp_adj threshold = %.3g. Under a null phenotype this should be ~uniform.", p_emp_thr),
+       x = "p.emp", y = "positions") +
   theme_minimal(base_size = 12)
 ```
 
-```{r pos-perm-p-missing, eval=!has_pos_perm_p, results='asis'}
-cat("#### Position-level calibrated permulation p\n\n")
-cat("_No `pos_perm_p` column in `position_scores.tsv` (no `--caas_pos_pval` supplied to",
+```{r pos-perm-p-header, eval=!is.null(pos_perm_p_diag), results='asis'}
+cat("#### Detection-only decomposition: `pos_perm_p` (diagnostic)\n\n")
+cat(sprintf(paste0(
+  "`pos_perm_p` (from `perm_pos_pval.tsv`, per Gene x Position x scheme) is the ",
+  "detection-only companion: of the permuted-labeling cycles, how many independently ",
+  "reproduced this exact CAAS, add-one smoothed, WITHOUT the score gate. Since ",
+  "`k_emp <= k_det`, `p.emp <= pos_perm_p` always -- a position significant on `p.emp` ",
+  "but not here is significant by score alone (a calibration caveat, not a second ",
+  "channel). %d/%d rows significant at `pos_perm_p_adj <= %.3g`.\n\n"),
+  sum(pos_perm_p_diag$pos_perm_p_adj <= pos_perm_p_thr, na.rm = TRUE),
+  nrow(pos_perm_p_diag), pos_perm_p_thr))
+```
+
+```{r pos-perm-p-dist, eval=!is.null(pos_perm_p_diag), fig.height=4.5, fig.width=9}
+ggplot(pos_perm_p_diag, aes(x = pos_perm_p)) +
+  geom_histogram(bins = 40, fill = "grey70", colour = "grey40") +
+  geom_vline(xintercept = pos_perm_p_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
+  labs(title = "pos_perm_p distribution (detection only)",
+       subtitle = sprintf("Dashed line: pos_perm_p_adj threshold = %.3g", pos_perm_p_thr),
+       x = "pos_perm_p", y = "Gene x Position x scheme rows") +
+  theme_minimal(base_size = 12)
+```
+
+```{r p-emp-missing, eval=!has_p_emp, results='asis'}
+cat("#### Position-level headline p: `p.emp`\n\n")
+cat("_No `p.emp` column in `position_scores.tsv` (no `--caas_pos_cycle_caas` supplied to",
     "SCORING_COMPUTE for this run)._\n\n")
 ```
 

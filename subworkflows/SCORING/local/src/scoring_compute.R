@@ -327,57 +327,32 @@ df <- df %>%
   left_join(.phen_key, by = c("Gene", "Position", "caap_group")) %>%
   mutate(caas_row = asr_score)
 
-# ── 2f-bis. Tier 2: position-level calibrated permulation null ──────────────
+# ── 2f-bis. Tier 2: base-cycle count of the position-level permulation null ──
 # perm_pos_pval.tsv (CT_DISAMBIGUATION's CAAS permulation-excess null, see
-# subworkflows/CT_DISAMBIGUATION/local/src/utils/gene_wrapper.py) carries
-# pos_perm_p per (Gene, Position, caap_group) straight off the sharded
-# perm_pos_detail/ output -- no new ASR computation. Joined here, at the same
-# (Gene, Position, caap_group) granularity the observed side is still at,
-# BEFORE §2g's per-position scheme collapse, so pos_perm_p rides through that
-# same mean() aggregation as every other per-scheme axis (phen_score,
-# asr_score, ...) instead of needing its own bespoke collapse rule.
+# subworkflows/CT_DISAMBIGUATION/local/src/utils/gene_wrapper.py) is now a
+# diagnostic-only artefact: pos_perm_p / pos_perm_p_adj are the detection-only
+# decomposition of p.emp and stay canonical in that file (docs/scoring_v2_p_emp.md
+# §7.3 flip -- p.emp_adj is the position headline, pos_perm_p is no longer joined
+# into position_scores.tsv). All this block still needs from the file is N, the
+# base-cycle count (== §4f's ncol(byrank)), which §2f-ter's p.emp uses so its
+# add-one denominator matches the gene-level null.
 has_caas_pos_pval <- file_exists(caas_pos_pval_file)
 if (has_caas_pos_pval) {
-  cat("Loading position-level permulation null:", caas_pos_pval_file, "\n")
-  # V3-4a: perm_pos_pval.tsv is pooled to (Gene, Position, caap_group) -- no
-  # `side` column (pos_perm_p, like p.emp, is a position-level pooled statistic).
-  pos_pval_df <- read_tsv(caas_pos_pval_file, show_col_types = FALSE) %>%
-    mutate(Position = as.integer(Position)) %>%
-    select(Gene, Position, caap_group, any_of("n_cycles"), pos_perm_p)
-  # Base-cycle count of the null (== §4f's ncol(byrank)); p.emp / p.emp_adj use
-  # the SAME N for structural consistency with pos_perm_p.
-  .perm_n_cycles <- if ("n_cycles" %in% names(pos_pval_df))
-    suppressWarnings(max(as.integer(pos_pval_df$n_cycles), na.rm = TRUE)) else NA_integer_
-  pos_pval_df <- pos_pval_df %>% select(-any_of("n_cycles"))
-
-  .n_obs_pos <- n_distinct(paste(df$Gene, df$Position))
-  .n_rows_before <- nrow(df)
-  df <- df %>% mutate(Position = as.integer(Position)) %>%
-    left_join(pos_pval_df, by = c("Gene", "Position", "caap_group"))
-  stopifnot(nrow(df) == .n_rows_before)
-  .n_matched_pos <- df %>% filter(!is.na(pos_perm_p)) %>%
-    distinct(Gene, Position) %>% nrow()
-  .match_rate <- if (.n_obs_pos > 0) .n_matched_pos / .n_obs_pos else 0
-  cat(sprintf("  pos_perm_p: matched %d/%d observed positions (%.1f%%)\n",
-              .n_matched_pos, .n_obs_pos, 100 * .match_rate))
-  if (.match_rate < 0.5) {
-    cat(sprintf(
-      paste0("  WARNING: pos_perm_p join rate %.1f%% is below 50%% -- this usually means the ",
-             "observed positions (alignment-based coordinates from filtered_discovery.tsv) and ",
-             "the null's perm_pos_pval.tsv positions (also meant to be alignment-based -- check ",
-             "disambiguation_perms_main.py against disambiguation_main.py if this fires) are on ",
-             "different coordinate systems. Treat pos_perm_p/pos_perm_p_adj as unreliable until ",
-             "resolved.\n"),
-      100 * .match_rate),
-      file = stderr())
-  }
+  cat("Loading position-level permulation null (N only):", caas_pos_pval_file, "\n")
+  .pp_n <- read_tsv(caas_pos_pval_file, show_col_types = FALSE) %>%
+    select(any_of("n_cycles"))
+  .perm_n_cycles <- if ("n_cycles" %in% names(.pp_n) && nrow(.pp_n) > 0)
+    suppressWarnings(max(as.integer(.pp_n$n_cycles), na.rm = TRUE)) else NA_integer_
 } else {
-  cat("  no --caas_pos_pval provided, skipping pos_perm_p\n")
-  df$pos_perm_p <- NA_real_
+  cat("  no --caas_pos_pval provided; p.emp falls back to its own cycle count\n")
   .perm_n_cycles <- NA_integer_
 }
 
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
+# Position to integer here (the old §2f-bis join used to do this as a side
+# effect): §2f-ter joins pos_scores to the per-cycle null on (Gene, Position),
+# and that side reads Position as integer -- the key types must agree.
+df <- df %>% mutate(Position = suppressWarnings(as.integer(Position)))
 # Sort descending by scheme_priority (US > GS4 > GS3 > GS2 > GS1) so first()
 # deterministically picks the US scheme (falling back to GS4..GS1) for
 # display/gating-only columns (pvalue, asr_is_conserved, etc.).
@@ -422,7 +397,6 @@ pos_scores <- df %>%
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
     # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
     # the breakdown (e.g. the §3 stress test aggregates them there directly).
-    pos_perm_p         = if (has_caas_pos_pval && any(!is.na(pos_perm_p))) mean(pos_perm_p, na.rm = TRUE) else NA_real_,
     recovery_boot        = first(recovery_boot),
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
@@ -516,23 +490,13 @@ if (has_caas_pos_cycle_caas) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 
-# ── 2h. Tier 2: BH-adjust pos_perm_p within the tested set ──────────────────
+# ── 2h. Tier 2: BH-adjust p.emp within the tested set ──────────────────────
 # Mirrors the gene_caas_pperm_adj idiom (Tier 1A, section below): BH over
 # exactly the positions that got a null match, so genes/positions absent from
 # the null's own universe (NA) never enter or dilute the adjustment.
-pos_scores$pos_perm_p_adj <- NA_real_
-if (has_caas_pos_pval) {
-  .tested <- !is.na(pos_scores$pos_perm_p)
-  if (any(.tested)) {
-    pos_scores$pos_perm_p_adj[.tested] <- p.adjust(pos_scores$pos_perm_p[.tested], method = "BH")
-  }
-  cat(sprintf("  pos_perm_p_adj: %d/%d positions BH-adjusted\n",
-              sum(.tested), nrow(pos_scores)))
-}
-
-# p.emp_adj: BH over the p.emp-tested rows only. SEPARATE family from
-# pos_perm_p (docs/scoring_v2_p_emp.md §6b -- two hypothesis families; the user
-# picks the headline, so reporting both is not penalised).
+# §7.3 flip: p.emp_adj is the position headline. pos_perm_p / pos_perm_p_adj are
+# the detection-only decomposition and are BH-adjusted in perm_pos_pval.tsv's own
+# consumers (the SCORING report), not here -- they never reach position_scores.tsv.
 pos_scores$p.emp_adj <- NA_real_
 if (has_caas_pos_cycle_caas) {
   .tested_e <- !is.na(pos_scores$p.emp)
@@ -1260,11 +1224,11 @@ pos_out <- pos_scores %>%
          # T3d: per-side diagnostics for the reports (SC5).
          any_of(c("core", "phen_score")),
          any_of("caas"),
-         # V3-4: p.emp / p.emp_adj are the pooled "detects AND exceeds" position
-         # p (docs/scoring_v2_p_emp.md). pos_perm_p_adj stays the report headline
-         # until the post-V3-6 flip (§7.3); pos_perm_p is diagnostic here and
-         # canonical in perm_pos_pval.tsv.
-         any_of(c("p.emp", "p.emp_adj", "pos_perm_p", "pos_perm_p_adj"))) %>%
+         # §7.3 flip (docs/scoring_v2_p_emp.md): p.emp / p.emp_adj are the pooled
+         # "detects AND exceeds" position p and the position headline. The
+         # detection-only pos_perm_p / pos_perm_p_adj stay canonical in
+         # perm_pos_pval.tsv and are no longer carried here.
+         any_of(c("p.emp", "p.emp_adj"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")

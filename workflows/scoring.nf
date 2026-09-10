@@ -171,8 +171,9 @@ workflow SCORING {
 
         // Position-level calibrated permulation null (perm_pos_pval.tsv, Tier 2).
         // Resolved ONCE here — same hoist-above-SCORING_COMPUTE reasoning as
-        // caas_perms_resolved above — so SCORING_COMPUTE's pos_perm_p/pos_perm_p_adj
-        // columns and the report's permulation section read the SAME file. Fall back
+        // caas_perms_resolved above. Post §7.3 flip this file is diagnostic-only:
+        // SCORING_COMPUTE reads it for N (the p.emp add-one denominator) and the
+        // report's permulation section reads its pos_perm_p column. Fall back
         // to --caas_pos_pval_file so a pass that did not run CAAS_PERMULATION itself
         // (no live CT) can still reuse a prior run's position-level null, mirroring
         // how caas_perms_file is resolved above.

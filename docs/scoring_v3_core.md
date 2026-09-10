@@ -10,9 +10,12 @@ Coordenadas 0-based. `enc(x)` = residuo codificado en el esquema activo (US → 
 GS → etiqueta de grupo). `s ∈ {top, bottom}`. Sin em dashes (estilo de la casa).
 
 **Estado: FINALIZED (V3-6).** Secuencia `V3-0..V3-6` completa en `scoring_v2`.
-Follow-ups pendientes fuera de esta secuencia, gated en la corrida Tier 1 PEPC de
-v3: flip de headline `pos_perm_p_adj → p.emp_adj` (`docs/scoring_v2_p_emp.md`
-§7.3) y borrado de `null_pvalue_boot` (§7.4).
+Follow-ups fuera de esta secuencia, **HECHOS** (adelantados antes de la corrida
+PEPC): flip de headline `pos_perm_p_adj → p.emp_adj` (`docs/scoring_v2_p_emp.md`
+§7.3, commit `p.emp §7.3:`) y borrado de `null_pvalue_boot` (§7.4, commit
+`p.emp §7.4:`). El §7.3 se revierte si `p.emp` sale anticonservador en la corrida
+Tier 1 PEPC. T4c (clave de dedup del pooler FOP) lo maneja el usuario en código,
+fuera de este ciclo.
 
 ---
 
@@ -228,7 +231,8 @@ colapso vive en el caller.
 - `gene_stat == "size_adj_max"`; el guard §4d de consistencia interna (`max|delta| = 0`).
 - Cardinalidad de filas por posición (≤ 2); qué posiciones se detectan (discovery +
   CT_FILTER aguas arriba); hipergeométrico `pvalue` / `gate_all` / `gate_sig`;
-  `null_pvalue_boot` / `pos_perm_p` (detección-only); esquema del detail shard (8 columnas);
+  `pos_perm_p` (detección-only, ahora solo en `perm_pos_pval.tsv`; `null_pvalue_boot`
+  borrado — `docs/scoring_v2_p_emp.md` §7.4); esquema del detail shard (8 columnas);
   esquema de `perm_pos_pval.tsv`.
 
 ---
@@ -550,8 +554,11 @@ arriba; el pooling solo promedia.
 
 **NO cambian:** cardinalidad de filas por posición (≤ 2); asignación de `side`; qué
 posiciones se detectan; estructura de la media de 5 esquemas §2g; hipergeométrico `pvalue` /
-`gate_all` / `gate_sig`; `null_pvalue_boot` / `pos_perm_p`; esquema del detail shard
-(8 columnas); `perm_pos_pval.tsv`; `gene_stat == "size_adj_max"` y el guard §4d; RER / FADE.
+`gate_all` / `gate_sig`; `pos_perm_p` (post §7.3: fuera de `position_scores.tsv`,
+canónico en `perm_pos_pval.tsv`); esquema del detail shard (8 columnas);
+`gene_stat == "size_adj_max"` y el guard §4d; RER / FADE.
+(`null_pvalue_boot` sí cambia: borrado, §7.4. Esquema de `perm_pos_pval.tsv`:
+`Gene, Position, caap_group, n_detected, n_cycles, pos_perm_p`.)
 
 ---
 
@@ -572,8 +579,11 @@ poda de huérfanos + `docs/da_frac/` borrado) · `V3-6` (borrar `dunn_modified.R
 `_parse_discovery_entries` unifica los dos parsers TSV de discovery en `_perms_worker` +
 prosa de reportes a core v3 + este doc `FINALIZED`).
 
-Fuera de la secuencia, gated en Tier 1 PEPC: §7.3 flip de headline y §7.4
-`null_pvalue_boot` (ambos en `docs/scoring_v2_p_emp.md`); T4c (clave de dedup del
-pooler FOP, `nodo MRCA → índice de dominio pid`).
+Fuera de la secuencia, **HECHOS** (adelantados antes de Tier 1 PEPC): commit
+`p.emp §7.3:` (flip de headline) y `p.emp §7.4:` (borrado `null_pvalue_boot`),
+ambos en `docs/scoring_v2_p_emp.md`. El §7.3 se revierte si `p.emp` sale
+anticonservador en la corrida PEPC. T4c (clave de dedup del pooler FOP,
+`nodo MRCA → índice de dominio pid`) lo maneja el usuario en código, fuera de este
+ciclo.
 
 `git branch --show-current` antes de cada commit (hazard de worktree concurrente).
