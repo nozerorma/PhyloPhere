@@ -117,36 +117,26 @@ class ConvergenceResult:
     # side == "none".
     side: str = "none"
 
-    # ASR path score (unified replacement for binary ASR gate + convergence +
-    # parallel; computed in src/convergence/path_scores.py)
+    # CAAS convergence score on the Voronoi domain (scoring_v2 core v3; computed
+    # in src/convergence/path_scores.py + pooled in src/convergence/fop_pool.py).
+    # asr_path_score == core == the per-side pooled domain mean.
     asr_path_score: Optional[float] = None
-    independence: Optional[float] = None
-    # T1: mrca_diversity + conservation_gate removed from the score and the model
-    # (asr_path_score = independence * core * derived_agreement).
+    # Diagnostic only: agree_num / agree_den (largest same-encoded-residue group
+    # over the domains changed in >= 1 hypothesis / count of those domains).
     derived_agreement: Optional[float] = None
     core: Optional[float] = None
-    pair_path_scores: Optional[Dict[int, float]] = None
-    pair_path_contaminated: Optional[Dict[int, bool]] = None
-    # Per-conserved-pair conservation-to-root + MRCA node id, analogous to
-    # pair_path_scores/pair_path_contaminated. Used by the FOP domain-pooler to
-    # rebuild conservation_gate from the DISTINCT conserved pairs shared across
-    # hypotheses (dedup by node) rather than averaging per-hypothesis gates.
-    conserved_pair_path_scores: Optional[Dict[int, float]] = None
-    conserved_pair_path_nodes: Optional[Dict[int, Any]] = None
-    # Raw (un-encoded) ancestral + per-side derived residues per changed pair.
-    # Plumbed to the flat TSV as mrca_<i>_anc_aa / _top_aa / _bot_aa so the FOP
-    # domain-pooler can recompute derived_agreement HARVEST-WIDE and PER SCHEME
-    # (POINT 3) instead of pooling per-hypothesis derived_agreement.
-    pair_ancestral_aa: Optional[Dict[int, Any]] = None
-    pair_derived_top_aa: Optional[Dict[int, str]] = None
-    pair_derived_bot_aa: Optional[Dict[int, str]] = None
-    # Per-domain, per-side path score (path_scores.py's own top_pair_scores /
-    # bottom_pair_scores) — the un-collapsed inputs core_top/core_bottom are
-    # built from. pair_path_scores is their side-average and cannot rebuild the
-    # directional core; these two let the FOP domain-pooler do so (see
-    # fop_pool.R::pool_group / fop_pool.py::pool_hypotheses).
-    pair_top_path_scores: Optional[Dict[int, float]] = None
-    pair_bottom_path_scores: Optional[Dict[int, float]] = None
+    # Per-domain pooled score s̄_d for the emitted side (was pair_path_scores).
+    domain_scores: Optional[Dict[int, float]] = None
+    # Raw (un-encoded) ancestral + per-side derived residues per changed domain,
+    # modal over the harvest. Flattened to domain_<d>_anc_aa / _top_aa / _bot_aa.
+    domain_anc_aa: Optional[Dict[int, Any]] = None
+    domain_der_top_aa: Optional[Dict[int, str]] = None
+    domain_der_bot_aa: Optional[Dict[int, str]] = None
+    # All K domains: {d: {"mrca_id", "state", "posterior"}} — carries the node /
+    # ancestral state / posterior per domain (was the mrca_<i>_node/state/posterior
+    # block sourced from node_mapping). Domains without a reconstruction have
+    # state None, posterior 0.0.
+    domain_meta: Optional[Dict[int, Dict[str, Any]]] = None
 
 
 @dataclass

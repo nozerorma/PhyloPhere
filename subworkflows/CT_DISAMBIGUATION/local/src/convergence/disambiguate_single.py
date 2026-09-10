@@ -35,7 +35,8 @@ from src.asr.tree_parser import get_mrca
 from src.data.models import CAASPosition, ConvergenceResult
 from src.data.loaders import list_gene_caas_entries, parse_trait_pairs
 from src.biochem.grouping import get_grouping_scheme
-from src.convergence.path_scores import build_node_index, compute_asr_path_score
+from src.convergence.path_scores import build_node_index, compute_domain_scores
+from src.convergence.fop_pool import pool_domains
 
 logger = logging.getLogger(__name__)
 
@@ -48,150 +49,67 @@ logger = logging.getLogger(__name__)
 PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score",
-     "side",
-     "hypothesis", "pair_scores", "independence",
-     "derived_agreement", "core",
-     "conserved_pair_scores", "conserved_pair_nodes",
-     "pair_ancestral", "pair_derived_top", "pair_derived_bot",
-     "pair_top_scores", "pair_bottom_scores",
+     "side", "hypothesis", "domain_scores", "derived_agreement", "core",
      "sides"],
 )
-# All fields after `side` are optional. Single-contrast perm replay leaves
-# `hypothesis` None and the FOP axis fields None.
-# `sides` (scoring_v2 T3c SC2b): the raw ``compute_asr_path_score`` return
-# ``{"top": <row>, "bottom": <row>}`` for the FOP null's per-side pairwise pooler
-# (``fop_pool.pool_hypotheses_pairwise``) and ``gene_wrapper._expand_sides``.
-# Populated in the axes-only replay; ``None`` on the full observed path.
-PositionAxes.__new__.__defaults__ = (
-    "none",
-    None, None, None, None, None, None, None, None, None, None, None, None,
-    None,
-)
+# All fields after `side` are optional. `sides` is the raw
+# ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` for the
+# FOP null's treeless pooler (``fop_pool.pool_domains``); populated in the
+# axes-only replay, ``None`` on the full observed path.
+PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None)
 
 
-def _split_result_by_side(
-    base: ConvergenceResult, split: Dict[str, Dict[str, Any]]
+def _emit_pooled_side_rows(
+    base: ConvergenceResult,
+    hyp_rows: List[Dict[str, Any]],
+    hyp_pairs_pss: Optional[Dict[Tuple[str, Any], float]] = None,
 ) -> List[ConvergenceResult]:
-    """Expand one position-level ConvergenceResult into per-side rows.
+    """Pool ``M >= 1`` per-hypothesis ``compute_domain_scores`` records for one
+    ``(Gene, Position, scheme)`` and emit <= 2 per-side ConvergenceResult rows.
 
-    ``split`` is ``compute_asr_path_score``'s ``{"top": row, "bottom": row}``. A
-    row is emitted for each side that has at least one participating (changed)
-    pair; ``side`` becomes the authoritative direction key and the scalar
-    ASR-path fields are taken from that side's row. A position with no changed
-    pair on either side collapses to a single ``side="none"`` row.
+    ``hyp_rows`` = ``[{"hyp": str, "sides": <compute_domain_scores return>}]``.
+    Always calls :func:`fop_pool.pool_domains` (``M == 1`` degenerates to the
+    plain PSS-weighted mean over the K domains). A position with no changed
+    domain on either side across the harvest collapses to one ``side="none"``
+    row. When the harvest carries more than one distinct hypothesis the emitted
+    rows drop the ``hypothesis`` label (a genuine FOP pool); a lone hypothesis
+    keeps it.
     """
-    sides = [s for s in ("top", "bottom")
-             if int(split.get(s, {}).get("n_participating", 0) or 0) > 0]
-    if not sides:
-        return [dataclasses.replace(
-            base, side="none", asr_path_score=0.0, core=0.0,
-            convergence_type="no_change",
-        )]
+    pooled = pool_domains(hyp_rows, hyp_pairs_pss)
+    meta = None
+    for hr in hyp_rows:
+        meta = (hr.get("sides") or {}).get("domain_meta") or meta
+    hyp_labels = {hr.get("hyp") for hr in hyp_rows if hr.get("hyp")}
+    hyp_out = None if len(hyp_labels) > 1 else base.hypothesis
 
-    rows: List[ConvergenceResult] = []
-    for s in sides:
-        d = split[s]
-        pair_scores = dict(d.get("pair_scores") or {})
-        rows.append(dataclasses.replace(
-            base,
-            side=s,
-            asr_path_score=d.get("asr_path_score", 0.0),
-            core=d.get("core", 0.0),
-            derived_agreement=d.get("derived_agreement"),
-            convergence_type=d.get("convergence_type", base.convergence_type),
-            independence=None,  # T3-doc §13: block independence is retired
-            pair_path_scores=pair_scores or None,
-            pair_path_contaminated=(dict(d.get("pair_contaminated") or {}) or None),
-            pair_top_path_scores=(pair_scores or None) if s == "top" else None,
-            pair_bottom_path_scores=(pair_scores or None) if s == "bottom" else None,
-        ))
-    return rows
-
-
-def _pooled_side_rows(
-    base: ConvergenceResult, pooled: Dict[str, Dict[str, Any]]
-) -> List[ConvergenceResult]:
-    """Build ≤2 per-side ConvergenceResult rows from a pool_hypotheses_pairwise
-    result (T3c SC3). Mirrors :func:`_split_result_by_side` but sources the
-    scalars from the pooled ``{"top": <agg>, "bottom": <agg>}`` instead of a
-    single hypothesis's ``compute_asr_path_score`` split.
-    """
     sides = [s for s in ("top", "bottom")
              if int((pooled.get(s) or {}).get("n_participating", 0) or 0) > 0]
     if not sides:
         return [dataclasses.replace(
-            base, side="none", asr_path_score=0.0, core=0.0, hypothesis=None,
-            convergence_type="no_change",
+            base, side="none", hypothesis=hyp_out,
+            asr_path_score=0.0, core=0.0, convergence_type="no_change",
+            domain_scores=None, domain_anc_aa=None,
+            domain_der_top_aa=None, domain_der_bot_aa=None,
+            domain_meta=(dict(meta) if meta else None),
         )]
+
     out: List[ConvergenceResult] = []
     for s in sides:
         d = pooled[s]
-        ps = dict(d.get("pair_scores") or {})
+        den = int(d.get("agree_den", 0) or 0)
+        da = (int(d.get("agree_num", 0) or 0) / den) if den else None
         out.append(dataclasses.replace(
-            base, side=s, hypothesis=None,
+            base, side=s, hypothesis=hyp_out,
             asr_path_score=float(d.get("asr_path_score", 0.0) or 0.0),
             core=float(d.get("core", 0.0) or 0.0),
-            derived_agreement=d.get("derived_agreement"),
+            derived_agreement=da,
             convergence_type=d.get("convergence_type", base.convergence_type),
-            independence=None,
-            pair_path_scores=ps or None,
-            pair_top_path_scores=(ps or None) if s == "top" else None,
-            pair_bottom_path_scores=(ps or None) if s == "bottom" else None,
+            domain_scores=(dict(d.get("domain_scores") or {}) or None),
+            domain_anc_aa=(dict(d.get("domain_anc") or {}) or None),
+            domain_der_top_aa=(dict(d.get("domain_der") or {}) or None) if s == "top" else None,
+            domain_der_bot_aa=(dict(d.get("domain_der") or {}) or None) if s == "bottom" else None,
+            domain_meta=(dict(meta) if meta else None),
         ))
-    return out
-
-
-def _pool_observed_fop(
-    results: List[ConvergenceResult],
-    tree_data,
-    posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]],
-    pss_by_hyp_domain: Optional[Dict[Tuple[str, int], float]] = None,
-) -> List[ConvergenceResult]:
-    """Collapse a FOP hypothesis harvest to one row per (Gene, Position, scheme,
-    side) using the real per-side pairwise core (T3c SC3).
-
-    Groups ``results`` by ``(position, caap_group)``. A group reached by ≥2
-    distinct hypotheses is pooled with :func:`fop_pool.pool_hypotheses_pairwise`
-    over the node-deduped union of participating pairs — the same routine the
-    permulation null uses (SC2b) — so the observed FOP path and the null hold
-    the identical statistic without ``scoring_compute.R`` ever touching
-    ``fop_pool.R``. Single-hypothesis / non-FOP groups pass through untouched.
-
-    Each row must carry a transient ``.path_split`` (the ``compute_asr_path_score``
-    return for its hypothesis); rows without one (path scoring failed) are passed
-    through.
-    """
-    from src.convergence.fop_pool import pool_hypotheses_pairwise
-
-    by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
-    for r in results:
-        by_group.setdefault(
-            (getattr(r, "position", None), getattr(r, "caap_group", "US")), []
-        ).append(r)
-
-    node_index: Optional[Dict[int, Any]] = None
-    out: List[ConvergenceResult] = []
-    for (pos, scheme), rows in by_group.items():
-        hyps = {getattr(r, "hypothesis", None) for r in rows}
-        hyps.discard(None)
-        splits_ok = all(getattr(r, "path_split", None) for r in rows)
-        if len(hyps) < 2 or not splits_ok or pos is None:
-            out.extend(rows)
-            continue
-
-        if node_index is None:
-            node_index = build_node_index(getattr(tree_data, "root", None))
-        paml_site = getattr(rows[0], "position_one_based", None) or (int(pos) + 1)
-        per_node_dist = _build_per_node_dist(posterior_data, paml_site)
-
-        by_hyp: Dict[str, Dict[str, Any]] = {}
-        for r in rows:
-            by_hyp.setdefault(r.hypothesis, r.path_split)  # shared across a hyp's rows
-        hyp_records = [{"hyp": h, "sides": sp} for h, sp in by_hyp.items()]
-        pooled = pool_hypotheses_pairwise(
-            hyp_records, node_index, per_node_dist, pss_by_hyp_domain, scheme
-        )
-        out.extend(_pooled_side_rows(rows[0], pooled))
     return out
 
 
@@ -225,26 +143,20 @@ def _position_axes(
     node_index: Optional[Dict[int, Any]],
     pair_details_list: Optional[List[Dict[str, Any]]],
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
-    walk_cache: Optional[Dict[Any, Any]] = None,
 ) -> Dict[str, Any]:
-    """Reduced ASR-path-score kernel shared by the full scorer and the perm replay.
+    """Reduced domain-score kernel shared by the full scorer and the perm replay.
 
-    The return is always ``compute_asr_path_score``'s ``{"top": {...},
-    "bottom": {...}}`` (one row per phenotype side).
+    The return is always ``compute_domain_scores``'s
+    ``{"top": {...}, "bottom": {...}, "domain_meta": {...}}``.
 
-    Builds ``per_node_dist`` for the focal site directly from the posterior map and
-    runs :func:`compute_asr_path_score`. This is the ONLY numeric computation the
-    permulation null keeps (``asr_path_score`` + its five axes). Extracting it into
-    one helper guarantees the observed (full) path and the axes-only perm path score
-    each position through *identical* code — bit-for-bit — instead of two drifting
-    copies.
+    Builds ``per_node_dist`` for the focal site directly from the posterior map
+    and runs :func:`compute_domain_scores`, so the observed path and the
+    axes-only perm path score each position through identical code.
 
-    ``per_site_dist_cache`` (perm replay only): ``per_node_dist`` depends solely on
-    ``(posterior_data, site)`` — it is invariant to the grouping scheme (applied
-    later inside :func:`compute_asr_path_score`) and to the permuted phenotype. So a
-    site that recurs across schemes within a cycle, or across the N permulation
-    cycles for a gene, is built once and reused. When supplied the map is keyed by
-    ``position_one_based``; the observed path passes ``None`` (each site scored once).
+    ``per_site_dist_cache`` (perm replay only): ``per_node_dist`` depends solely
+    on ``(posterior_data, site)`` — invariant to the grouping scheme and to the
+    permuted phenotype — so a recurring site is built once and reused. Keyed by
+    ``position_one_based``; the observed path passes ``None``.
     """
     paml_site = caas_pos.position_one_based
 
@@ -259,15 +171,11 @@ def _position_axes(
     if node_index is None:  # per-gene invariant; hoisted by the caller when available
         node_index = build_node_index(getattr(tree_data, "root", None))
 
-    return compute_asr_path_score(
+    return compute_domain_scores(
         pair_details=pair_details_list,
         per_node_dist=per_node_dist,
         node_index=node_index,
         scheme=getattr(caas_pos, "caap_group", "US") or "US",
-        is_conserved_meta=bool(getattr(caas_pos, "is_conserved_meta", False)),
-        conserved_pair=str(getattr(caas_pos, "conserved_pair", "") or "").strip(),
-        walk_cache=walk_cache,
-        site_key=paml_site,
     )
 
 
@@ -283,7 +191,6 @@ def analyze_caas_position_disambiguation(
     build_node_posteriors: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     hypothesis: Optional[str] = None,
-    walk_cache: Optional[Dict[Any, Any]] = None,
 ) -> "List[ConvergenceResult]":
     """
     Perform complete convergence/disambiguation analysis for a CAAS position.
@@ -541,56 +448,20 @@ def analyze_caas_position_disambiguation(
     is_cons_meta = bool(getattr(caas_pos, "is_conserved_meta", False))
     conserved_pair = str(getattr(caas_pos, "conserved_pair", "") or "").strip()
 
-    # ── ASR path score ───────────────────────────────────────────────────────
-    # Unified replacement for the legacy binary ASR gate + convergence + parallel
-    # scores. Walks each pair's MRCA up to the root using the per-node posteriors
-    # captured above, scoring how isolated each tip change is from the deeper
-    # background (signed isolation) or how deep the conserved state extends
-    # (unsigned conservation). See src/convergence/path_scores.py.
-    asr_path_score = 0.0
-    independence = 1.0
-    derived_agreement = 1.0
-    core = 0.0
-    pair_path_scores: Dict[int, float] = {}
-    pair_path_contaminated: Dict[int, bool] = {}
-    conserved_pair_path_scores: Dict[int, float] = {}
-    conserved_pair_path_nodes: Dict[int, Any] = {}
-    pair_ancestral_aa: Dict[int, Any] = {}
-    pair_derived_top_aa: Dict[int, str] = {}
-    pair_derived_bot_aa: Dict[int, str] = {}
-    pair_top_path_scores: Dict[int, float] = {}
-    pair_bottom_path_scores: Dict[int, float] = {}
-    # We score once per phenotype side (``compute_asr_path_score`` always returns
-    # ``{"top": row, "bottom": row}``) and expand this position into 1-2 rows at
-    # the return below. ``_position_axes`` rebuilds per_node_dist from
-    # posterior_data exactly as node_posteriors["per_node"] was built above, so
-    # the score stays bit-identical to the perm replay's shared helper.
-    path_split: Optional[Dict[str, Dict[str, Any]]] = None
+    # ── CAAS convergence score (core v3, on the Voronoi domain) ───────────────
+    # ``compute_domain_scores`` returns {"top", "bottom", "domain_meta"} for this
+    # (Gene, Position, scheme, hypothesis). The per-side pooling + the <=2-row
+    # split happen once per (position, scheme) in analyze_gene_disambiguation via
+    # :func:`_emit_pooled_side_rows` (M == 1 degenerates to the plain mean). Here
+    # we only stash the raw record on ``base_result.sides``.
+    domain_split: Optional[Dict[str, Any]] = None
     try:
-        path_split = _position_axes(
+        domain_split = _position_axes(
             caas_pos, tree_data, posterior_data, node_index, pair_details_list,
-            per_site_dist_cache=per_site_dist_cache, walk_cache=walk_cache,
+            per_site_dist_cache=per_site_dist_cache,
         )
-        _t, _b = path_split["top"], path_split["bottom"]
-        asr_path_score = max(_t["asr_path_score"], _b["asr_path_score"])
-        core = asr_path_score
-        derived_agreement = None
-        pair_path_scores = {
-            **(_b.get("pair_scores") or {}), **(_t.get("pair_scores") or {})
-        }
-        pair_path_contaminated = {
-            **(_b.get("pair_contaminated") or {}),
-            **(_t.get("pair_contaminated") or {}),
-        }
-        conserved_pair_path_scores = _t.get("conserved_pair_scores", {}) or {}
-        conserved_pair_path_nodes = _t.get("conserved_pair_nodes", {}) or {}
-        pair_ancestral_aa = _t.get("pair_ancestral", {}) or {}
-        pair_derived_top_aa = _t.get("pair_derived_top", {}) or {}
-        pair_derived_bot_aa = _t.get("pair_derived_bot", {}) or {}
-        pair_top_path_scores = _t.get("pair_scores", {}) or {}
-        pair_bottom_path_scores = _b.get("pair_scores", {}) or {}
     except Exception as e:  # never let path scoring break disambiguation
-        path_split = None
+        domain_split = None
         logger.warning(
             f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
         )
@@ -626,42 +497,29 @@ def analyze_caas_position_disambiguation(
         ),
         node_state_summary=node_summary,
         state_source=state_source,
-        side="none",  # overwritten per-side by _split_result_by_side
+        side="none",  # overwritten per-side by _emit_pooled_side_rows
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
         is_conserved_meta=is_cons_meta,
         conserved_pair=conserved_pair,
         hypothesis=hypothesis,
-        asr_path_score=asr_path_score,
-        independence=independence,
-        derived_agreement=derived_agreement,
-        core=core,
-        pair_path_scores=pair_path_scores or None,
-        pair_path_contaminated=pair_path_contaminated or None,
-        conserved_pair_path_scores=conserved_pair_path_scores or None,
-        conserved_pair_path_nodes=conserved_pair_path_nodes or None,
-        pair_ancestral_aa=pair_ancestral_aa or None,
-        pair_derived_top_aa=pair_derived_top_aa or None,
-        pair_derived_bot_aa=pair_derived_bot_aa or None,
-        pair_top_path_scores=pair_top_path_scores or None,
-        pair_bottom_path_scores=pair_bottom_path_scores or None,
+        asr_path_score=None,
+        derived_agreement=None,
+        core=None,
+        domain_scores=None,
+        domain_anc_aa=None,
+        domain_der_top_aa=None,
+        domain_der_bot_aa=None,
+        domain_meta=(dict(domain_split.get("domain_meta"))
+                     if domain_split and domain_split.get("domain_meta") else None),
         score=None,
         recovery_boot=getattr(caas_pos, "recovery_boot", None),
     )
 
-    if path_split is not None:
-        # "both" position -> two rows keyed (gene, position, side); a one-sided
-        # or no-change position stays a single row. change_* columns are derived
-        # from ``side`` (T4b drops them).
-        rows = _split_result_by_side(base_result, path_split)
-        # T3c SC3: keep the raw {"top","bottom"} split on each row (transient, not
-        # a dataclass field) so analyze_gene_disambiguation can FOP-pool the
-        # hypothesis harvest with pool_hypotheses_pairwise — the real pairwise
-        # core, in-tree, instead of scoring_compute.R's treeless fop_pool.R.
-        for _r in rows:
-            _r.path_split = path_split
-        return rows
-    base_result.path_split = None
+    # Raw compute_domain_scores record for this (position, scheme, hypothesis);
+    # analyze_gene_disambiguation groups these by (position, scheme) and pools
+    # them with _emit_pooled_side_rows.
+    base_result.sides = domain_split
     return [base_result]
 
 
@@ -719,14 +577,6 @@ def analyze_gene_disambiguation(
 
     if per_site_dist_cache is None:
         per_site_dist_cache = {}
-
-    # Memoises the labeling-invariant MRCA->root walks inside compute_asr_path_score
-    # (see path_scores._changed_side_walk). Shared across every position, scheme and
-    # FOP hypothesis of this gene: a candidate pair recurring across hypotheses /
-    # cycles is walked once. Per-node posteriors for a site are content-identical on
-    # every rebuild, so the cache stays valid for the observed path too. Bounded by
-    # (#sites x #schemes x #distinct pair MRCAs x #residues) entries per gene.
-    gene_walk_cache: Dict[Any, Any] = {}
 
     results: List[ConvergenceResult] = []
     diagnostics: Dict[str, Any] = {
@@ -1027,48 +877,26 @@ def analyze_gene_disambiguation(
             # it. The scalar fields here collapse to the stronger side as a legacy
             # fallback.
             if axes_only:
+                # NOTE (scoring_v2 core v3): the permulation-null replay
+                # (_perms_worker) is rewired in V3-3. This branch now only stashes
+                # the raw compute_domain_scores record on ``.sides``; the pooled
+                # scalars are recomputed downstream by pool_domains.
                 axes_sides = None
+                axes_score = 0.0
+                axes_core = None
                 try:
-                    path_result = _position_axes(
+                    axes_sides = _position_axes(
                         caas_pos,
                         tree_data,
                         posterior_data,
                         hoisted_node_index,
                         tip_diagnostics.get("pair_details"),
                         per_site_dist_cache=per_site_dist_cache,
-                        walk_cache=gene_walk_cache,
                     )
-                    axes_sides = path_result
-                    _t = path_result.get("top", {}) or {}
-                    _b = path_result.get("bottom", {}) or {}
-                    path_result = _t if (
-                        float(_t.get("asr_path_score", 0.0) or 0.0)
-                        >= float(_b.get("asr_path_score", 0.0) or 0.0)
-                    ) else _b
-                    axes_score = path_result.get("asr_path_score", 0.0)
-                    axes_pair_scores = path_result.get("pair_scores", None)
-                    axes_cons_scores = path_result.get("conserved_pair_scores", None) or None
-                    axes_cons_nodes = path_result.get("conserved_pair_nodes", None) or None
-                    axes_anc = path_result.get("pair_ancestral", None) or None
-                    axes_der_top = path_result.get("pair_derived_top", None) or None
-                    axes_der_bot = path_result.get("pair_derived_bot", None) or None
-                    axes_top_scores = path_result.get("top_pair_scores", None) or None
-                    axes_bottom_scores = path_result.get("bottom_pair_scores", None) or None
-                    axes_extra = {
-                        k: path_result.get(k)
-                        for k in ("independence", "derived_agreement", "core")
-                    }
                 except Exception as e:  # never let path scoring break the replay
                     logger.warning(
                         f"ASR path scoring failed for {gene}:{caas_pos.position}: {e}"
                     )
-                    axes_score = 0.0
-                    axes_pair_scores = None
-                    axes_cons_scores = None
-                    axes_cons_nodes = None
-                    axes_anc = axes_der_top = axes_der_bot = None
-                    axes_top_scores = axes_bottom_scores = None
-                    axes_extra = {}
                     axes_sides = None
                 results.append(
                     PositionAxes(
@@ -1077,23 +905,13 @@ def analyze_gene_disambiguation(
                         asr_path_score=axes_score,
                         side="none",
                         hypothesis=_hyp_label,
-                        pair_scores=axes_pair_scores,
-                        independence=axes_extra.get("independence"),
-                        derived_agreement=axes_extra.get("derived_agreement"),
-                        core=axes_extra.get("core"),
-                        conserved_pair_scores=axes_cons_scores,
-                        conserved_pair_nodes=axes_cons_nodes,
-                        pair_ancestral=axes_anc,
-                        pair_derived_top=axes_der_top,
-                        pair_derived_bot=axes_der_bot,
-                        pair_top_scores=axes_top_scores,
-                        pair_bottom_scores=axes_bottom_scores,
+                        domain_scores=None,
+                        derived_agreement=None,
+                        core=axes_core,
                         sides=axes_sides,
                     )
                 )
-                logger.debug(
-                    f"✓ Axes-only position {pos}: asr_path_score={axes_score}"
-                )
+                logger.debug(f"✓ Axes-only position {pos}")
                 continue
 
             # Perform convergence/disambiguation analysis
@@ -1109,15 +927,13 @@ def analyze_gene_disambiguation(
                 build_node_posteriors=build_node_posteriors,
                 per_site_dist_cache=per_site_dist_cache,
                 hypothesis=_hyp_label,
-                walk_cache=gene_walk_cache,
             )
 
-            # A "both" position expands to a list of per-side rows.
+            # One base row per (position, scheme, hypothesis); the per-side
+            # split + pooling happens after the loop.
             results.extend(row_list)
             logger.info(
-                f"✓ Analyzed position {pos}: {row_list[0].convergence_type} pattern, "
-                f"{row_list[0].ancestral}→{row_list[0].derived}"
-                + (f" ({len(row_list)} side rows)" if len(row_list) > 1 else "")
+                f"✓ Analyzed position {pos}: {row_list[0].ancestral}→{row_list[0].derived}"
             )
 
         except Exception as e:
@@ -1134,22 +950,30 @@ def analyze_gene_disambiguation(
         logger.info(f"Tip details written to {diagnostics.get('tip_dump_file')}")
 
     if not axes_only and results:
-        # T3c SC3: FOP-pool the hypothesis harvest here, in-tree, with the real
-        # per-side pairwise core (pool_hypotheses_pairwise) — the same routine
-        # the permulation null uses. scoring_compute.R never touches fop_pool.R.
-        # PSS weights (contrast_hypotheses_pairs.tsv, {(hyp, domain): pss}) come
-        # from hyp_pairs_pss; None -> equal weight.
+        # core v3: group the per-hypothesis base rows by (position, scheme) and
+        # pool them onto <=2 per-side rows with the treeless mean-of-means pooler
+        # (M == 1 degenerates to the plain PSS-weighted mean over the K domains).
+        # PSS weights {(hyp, domain): pss} come from hyp_pairs_pss (None -> equal
+        # weight). scoring_compute.R never touches fop_pool.R.
         try:
-            _n0 = len(results)
-            results = _pool_observed_fop(
-                results, tree_data, posterior_data, hyp_pairs_pss
-            )
-            if len(results) != _n0:
-                logger.info(
-                    f"✓ FOP pool (in-tree, per-side): {_n0} -> {len(results)} rows"
+            by_group: Dict[Tuple[Any, str], List[ConvergenceResult]] = {}
+            for r in results:
+                by_group.setdefault(
+                    (getattr(r, "position", None), getattr(r, "caap_group", "US")), []
+                ).append(r)
+            pooled_rows: List[ConvergenceResult] = []
+            for _rows in by_group.values():
+                hyp_rows = [
+                    {"hyp": (getattr(r, "hypothesis", None) or "H1"),
+                     "sides": getattr(r, "sides", None) or {}}
+                    for r in _rows
+                ]
+                pooled_rows.extend(
+                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss)
                 )
+            results = pooled_rows
         except Exception as e:  # never let pooling break disambiguation
-            logger.warning(f"[{gene}] in-tree FOP pooling failed, rows left per-hypothesis: {e}")
+            logger.warning(f"[{gene}] domain pooling failed: {e}")
 
     logger.info(
         f"✓ Completed convergence disambiguation: {len(results)}/{len(caas_entries)} metadata rows"

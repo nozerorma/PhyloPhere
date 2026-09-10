@@ -317,12 +317,12 @@ def insert_result(
                     if count:
                         return int(count)
                 # Last resort: a fully-flattened result dict — count its
-                # mrca_<i>_node columns directly.
+                # domain_<d>_node columns directly.
                 import re as _re
                 idxs = {
                     int(m.group(1))
                     for k in r
-                    if isinstance(k, str) and (m := _re.match(r"^mrca_(\d+)_node$", k))
+                    if isinstance(k, str) and (m := _re.match(r"^domain_(\d+)_node$", k))
                 }
                 return max(idxs) if idxs else 1
 

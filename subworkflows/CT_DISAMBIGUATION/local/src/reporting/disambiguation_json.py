@@ -42,13 +42,13 @@ def extract_pair_info(
     pair_details = result_dict.get("pair_details") or []
 
     for idx in range(1, num_pairs + 1):
-        mrca_state = result_dict.get(f"mrca_{idx}_state")
+        mrca_state = result_dict.get(f"domain_{idx}_state")
 
         pair_info: Dict[str, Any] = {
             "pair_id": idx,
-            "mrca_node": result_dict.get(f"mrca_{idx}_node"),
+            "mrca_node": result_dict.get(f"domain_{idx}_node"),
             "mrca_state": mrca_state,
-            "mrca_posterior": result_dict.get(f"mrca_{idx}_posterior"),
+            "mrca_posterior": result_dict.get(f"domain_{idx}_posterior"),
         }
 
         top_tip: Optional[str] = None
@@ -170,7 +170,7 @@ def detect_max_pairs(results: List[Dict[str, Any]]) -> int:
     max_pairs = 0
     for result in results:
         idx = 1
-        while f"mrca_{idx}_node" in result:
+        while f"domain_{idx}_node" in result:
             max_pairs = max(max_pairs, idx)
             idx += 1
     return max(max_pairs, 1)

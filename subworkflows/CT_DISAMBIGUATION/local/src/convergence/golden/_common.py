@@ -51,34 +51,6 @@ def build_tree(edges: List[Tuple[int, int]], node_ids: List[int]):
     return root, nodes
 
 
-# ── (de)serialisation ────────────────────────────────────────────────────────
-def scenario_to_json(sc: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "name": sc["name"],
-        "doc": sc.get("doc", ""),
-        "node_ids": sc["node_ids"],
-        "edges": sc["edges"],
-        "posteriors": {str(k): v for k, v in sc["posteriors"].items()},
-        "pair_details": sc["pair_details"],
-        "scheme": sc["scheme"],
-        "is_conserved_meta": sc["is_conserved_meta"],
-        "conserved_pair": sc["conserved_pair"],
-    }
-
-
-def run_scenario(sc: Dict[str, Any], ps) -> Dict[str, Any]:
-    """Call compute_asr_path_score for one (json-shaped) scenario dict."""
-    root, node_index_nodes = build_tree(
-        [tuple(e) for e in sc["edges"]], list(sc["node_ids"])
-    )
-    node_index = ps.build_node_index(root)
-    pnd = {int(k): v for k, v in sc["posteriors"].items()}
-    return ps.compute_asr_path_score(
-        sc["pair_details"], pnd, node_index, sc["scheme"],
-        sc["is_conserved_meta"], sc["conserved_pair"],
-    )
-
-
 # ── numeric comparison ───────────────────────────────────────────────────────
 def diff_report(expected: Any, got: Any, tol: float, path: str = "") -> List[str]:
     """Recursively compare nested dict/list/number structures."""

@@ -39,7 +39,6 @@ def _pss_map(rows):
     return {(h, int(dom)): float(w) for h, dom, w in rows} or None
 
 
-@pytest.mark.xfail(strict=True, reason="pool_domains lands in V3-2")
 def test_pool_domains_golden():
     failures: list[str] = []
     for entry in _GOLDEN:

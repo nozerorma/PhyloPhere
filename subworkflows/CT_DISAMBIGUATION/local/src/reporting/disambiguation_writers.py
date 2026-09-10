@@ -85,10 +85,10 @@ def _detect_max_pairs(results: List[Dict]) -> int:
     """
     max_pairs = 0
     for result in results:
-        # Count mrca_N_node columns present in result
+        # Count domain_<d>_node columns present in result
         pair_count = 0
         idx = 1
-        while f"mrca_{idx}_node" in result:
+        while f"domain_{idx}_node" in result:
             pair_count += 1
             idx += 1
         max_pairs = max(max_pairs, pair_count)
@@ -97,25 +97,7 @@ def _detect_max_pairs(results: List[Dict]) -> int:
     return max(max_pairs, 1)
 
 
-def _detect_max_conserved(results: List[Dict]) -> int:
-    """Max number of conserved_<j>_node columns across results (0 if none).
-
-    Mirrors :func:`_detect_max_pairs`; drives the parallel conserved-pair block
-    that lets the FOP domain-pooler rebuild conservation_gate from deduplicated
-    conserved pairs. 0 -> no columns emitted (older inputs, single-contrast).
-    """
-    max_c = 0
-    for result in results:
-        c = 0
-        idx = 1
-        while f"conserved_{idx}_node" in result or f"conserved_{idx}_cons" in result:
-            c += 1
-            idx += 1
-        max_c = max(max_c, c)
-    return max_c
-
-
-def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str]:
+def _generate_dynamic_fields(max_pairs: int) -> List[str]:
     """
     Generate field list with dynamic focal node columns.
 
@@ -148,9 +130,8 @@ def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str
         # First-class direction key (top / bottom / none). T4b retired the
         # change_top/change_bottom/change_side triplet.
         "side",
-        # Unified ASR path score (replaces convergence/parallel at scoring time)
+        # CAAS convergence score on the Voronoi domain (scoring_v2 core v3)
         "asr_path_score",
-        "independence",
         "derived_agreement",
         "core",
         # ASR fields (AT END - only present when ASR available)
@@ -159,35 +140,22 @@ def _generate_dynamic_fields(max_pairs: int, max_conserved: int = 0) -> List[str
         "all_mrca_node",
     ]
 
-    # Add dynamic focal node columns for N pairs (ASR-related, at end)
+    # Per-domain columns for the K fixed Voronoi domains (ASR-related, at end).
     for idx in range(1, max_pairs + 1):
         fields.extend(
             [
-                f"mrca_{idx}_node",
-                f"mrca_{idx}_state",
-                f"mrca_{idx}_posterior",
-                f"mrca_{idx}_path_score",
-                f"mrca_{idx}_contaminated",
-                # Directional path score (core_top/core_bottom's actual inputs,
-                # not their per-pair average): parallel to mrca_<i>_path_score,
-                # empty on the side this domain's pair did not change on. Lets
-                # the FOP domain-pooler rebuild core per side instead of
-                # collapsing all K domains into one direction-blind pool.
-                f"mrca_{idx}_top_path_score",
-                f"mrca_{idx}_bot_path_score",
-                # Raw derived/ancestral residues (POINT 3): parallel to
-                # mrca_<i>_node, feeds the FOP harvest-wide per-scheme
-                # derived_agreement rebuild. _top_aa / _bot_aa empty when that
-                # side did not change.
-                f"mrca_{idx}_anc_aa",
-                f"mrca_{idx}_top_aa",
-                f"mrca_{idx}_bot_aa",
+                f"domain_{idx}_node",
+                f"domain_{idx}_state",
+                f"domain_{idx}_posterior",
+                f"domain_{idx}_score",
+                # Raw derived/ancestral residues (modal over the harvest): feed
+                # the FOP harvest-wide per-scheme derived_agreement rebuild.
+                # _top_aa / _bot_aa empty when that side did not change.
+                f"domain_{idx}_anc_aa",
+                f"domain_{idx}_top_aa",
+                f"domain_{idx}_bot_aa",
             ]
         )
-
-    # Parallel conserved-pair block (j ordered by pair_id ascending upstream).
-    for j in range(1, max_conserved + 1):
-        fields.extend([f"conserved_{j}_node", f"conserved_{j}_cons"])
 
     return fields
 
@@ -211,7 +179,7 @@ def _write_csv(
     max_pairs = max_pairs or _detect_max_pairs(results)
 
     # Generate dynamic field list
-    fields = _generate_dynamic_fields(max_pairs, _detect_max_conserved(results))
+    fields = _generate_dynamic_fields(max_pairs)
 
     # Serialize list fields to strings for CSV
     def serialize_value(val):
@@ -268,24 +236,8 @@ def export_from_db(
             except Exception:
                 max_pairs = 1
 
-        # Cheap scan for the conserved-pair block width (string containment on the
-        # stored JSON; 0 for older / single-contrast runs -> no columns).
-        max_conserved = 0
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT result_json FROM results")
-            for (rj,) in cur.fetchall():
-                if not rj or '"conserved_1_node"' not in rj:
-                    continue
-                k = 1
-                while f'"conserved_{k}_node"' in rj or f'"conserved_{k}_cons"' in rj:
-                    k += 1
-                max_conserved = max(max_conserved, k - 1)
-        except Exception:
-            max_conserved = 0
-
         # Prepare CSV writers (streaming)
-        master_fields = _generate_dynamic_fields(max_pairs, max_conserved)
+        master_fields = _generate_dynamic_fields(max_pairs)
 
         def serialize_value(val):
             if isinstance(val, (list, tuple)):

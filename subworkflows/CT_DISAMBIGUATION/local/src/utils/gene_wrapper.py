@@ -123,155 +123,58 @@ def convert_convergence_result_to_dict(
         or "",
     }
 
-    # Node mapping
+    # Position-level MRCA contrast (node / state / posterior).
     node_mapping = getattr(result, "node_mapping", None) or {}
     if isinstance(node_mapping, dict) and node_mapping:
         result_dict["all_mrca_node"] = node_mapping.get("mrca_contrast")
-
-        focal_nodes = []
-        focal_nodes_raw = node_mapping.get("focal_nodes")
-        if isinstance(focal_nodes_raw, (list, tuple)):
-            focal_nodes = list(focal_nodes_raw)
-        else:
-            # derive from focal_1, focal_2 ...
-            candidates = []
-            for k, v in node_mapping.items():
-                if isinstance(k, str) and k.startswith("focal_"):
-                    try:
-                        idx = int(k.split("_")[1])
-                    except Exception:
-                        idx = 0
-                    candidates.append((idx, v))
-            candidates.sort(key=lambda x: x[0])
-            focal_nodes = [v for _, v in candidates]
-
-        for idx, focal_id in enumerate(focal_nodes, 1):
-            result_dict[f"mrca_{idx}_node"] = focal_id
-
-    # Node state details
     nsd = getattr(result, "node_state_details", None) or {}
     if isinstance(nsd, dict) and nsd:
         result_dict["all_mrca_state"] = nsd.get("mrca_contrast")
         result_dict["all_mrca_posterior"] = nsd.get("mrca_contrast_prob")
 
-        focal_states = nsd.get("focal_states", []) or []
-        focal_probs = nsd.get("focal_probs", []) or []
-        for idx in range(1, len(focal_states) + 1):
-            state = focal_states[idx - 1] if idx - 1 < len(focal_states) else None
-            prob = focal_probs[idx - 1] if idx - 1 < len(focal_probs) else None
-            result_dict[f"mrca_{idx}_state"] = state
-            result_dict[f"mrca_{idx}_posterior"] = prob
-
-    # Round-trip fallback: when this is called a second time on a dict that was
-    # already flattened (the DB exporter re-converts stored results), the
-    # structured node_mapping / node_state_details may be absent but the flat
-    # mrca_<i>_node / _state / _posterior keys are still on the input — carry
-    # them through rather than dropping the per-pair MRCA columns.
-    src_flat = vars(result) if hasattr(result, "__dict__") else {}
-    for k, v in src_flat.items():
-        if isinstance(k, str) and k.startswith("mrca_") and k not in result_dict and (
-            k.endswith("_node") or k.endswith("_state") or k.endswith("_posterior")
-        ):
-            result_dict[k] = v
-
     # Pattern classification
     result_dict["convergence_type"] = getattr(result, "convergence_type", None)
 
-    # First-class direction key (top / bottom / none). T4b retired the
-    # change_top/change_bottom/change_side triplet.
+    # First-class direction key (top / bottom / none).
     result_dict["side"] = getattr(result, "side", "none")
 
-    # ASR path score (unified ASR/convergence/parallel signal) + per-pair detail
+    # CAAS convergence score (core v3): asr_path_score == core == pooled per-side
+    # domain mean; derived_agreement is the diagnostic agree_num/agree_den.
     result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)
-    result_dict["independence"] = getattr(result, "independence", None)
-    # T1: mrca_diversity + conservation_gate removed from the score and outputs.
     result_dict["derived_agreement"] = getattr(result, "derived_agreement", None)
     result_dict["core"] = getattr(result, "core", None)
-    pair_path_scores = getattr(result, "pair_path_scores", None) or {}
-    pair_path_contam = getattr(result, "pair_path_contaminated", None) or {}
-    if pair_path_scores or pair_path_contam:
-        # Fresh ConvergenceResult: per-pair dicts present → flatten to columns.
-        for pid, pscore in pair_path_scores.items():
-            result_dict[f"mrca_{pid}_path_score"] = pscore
-        for pid, contam in pair_path_contam.items():
-            result_dict[f"mrca_{pid}_contaminated"] = bool(contam)
-    else:
-        # Round-trip case (reloaded from aggregation DB): the per-pair scores
-        # were already flattened onto the input as mrca_N_path_score /
-        # mrca_N_contaminated attributes. Carry those flat keys through.
-        src = vars(result) if hasattr(result, "__dict__") else {}
-        for k, v in src.items():
-            if k.startswith("mrca_") and (
-                k.endswith("_path_score") or k.endswith("_contaminated")
-            ):
-                result_dict[k] = v
 
-    # Conserved-pair block (POINT 2): a parallel per-conserved-pair flat block so
-    # the FOP domain-pooler can rebuild conservation_gate from the DISTINCT
-    # conserved pairs shared across hypotheses (dedup by node), symmetric with the
-    # node-deduped mrca_<i>_path_score pool. Emitted as conserved_<j>_node /
-    # conserved_<j>_cons for j = 1..M, j ordered by pair_id ascending.
-    cons_pair_scores = getattr(result, "conserved_pair_path_scores", None) or {}
-    cons_pair_nodes = getattr(result, "conserved_pair_path_nodes", None) or {}
-    if cons_pair_scores or cons_pair_nodes:
-        for j, pid in enumerate(sorted(cons_pair_scores.keys()), 1):
-            result_dict[f"conserved_{j}_node"] = cons_pair_nodes.get(pid)
-            result_dict[f"conserved_{j}_cons"] = cons_pair_scores.get(pid)
+    # ── Per-domain flat block (scoring_v2 core v3) ────────────────────────────
+    # domain_<d>_node / _state / _posterior from domain_meta (all K domains);
+    # domain_<d>_score from domain_scores; domain_<d>_anc_aa / _top_aa / _bot_aa
+    # from the modal harvest residues. The FOP harvest-wide, per-scheme
+    # derived_agreement rebuild (V3-3/V3-4 null side) reads these.
+    domain_meta = getattr(result, "domain_meta", None) or {}
+    domain_scores = getattr(result, "domain_scores", None) or {}
+    anc_aa = getattr(result, "domain_anc_aa", None) or {}
+    der_top_aa = getattr(result, "domain_der_top_aa", None) or {}
+    der_bot_aa = getattr(result, "domain_der_bot_aa", None) or {}
+    if domain_meta or domain_scores or anc_aa or der_top_aa or der_bot_aa:
+        for d, meta in (domain_meta.items() if isinstance(domain_meta, dict) else []):
+            m = meta or {}
+            result_dict[f"domain_{d}_node"] = m.get("mrca_id")
+            result_dict[f"domain_{d}_state"] = m.get("state")
+            result_dict[f"domain_{d}_posterior"] = m.get("posterior")
+        for d, s in domain_scores.items():
+            result_dict[f"domain_{d}_score"] = s
+        for d in set(anc_aa) | set(der_top_aa) | set(der_bot_aa):
+            result_dict[f"domain_{d}_anc_aa"] = anc_aa.get(d)
+            result_dict[f"domain_{d}_top_aa"] = der_top_aa.get(d, "")
+            result_dict[f"domain_{d}_bot_aa"] = der_bot_aa.get(d, "")
     else:
-        # Round-trip: carry any flat conserved_<j>_* keys already on the input.
+        # Round-trip (reloaded from the aggregation DB): carry the flat
+        # domain_<d>_* keys already on the input.
         src = vars(result) if hasattr(result, "__dict__") else {}
         for k, v in src.items():
-            if isinstance(k, str) and k.startswith("conserved_") and (
-                k.endswith("_node") or k.endswith("_cons")
-            ):
-                result_dict[k] = v
-
-    # Raw derived/ancestral residue block (POINT 3): a per-pair flat block
-    # parallel to mrca_<i>_node, so the FOP domain-pooler recomputes
-    # derived_agreement HARVEST-WIDE and PER SCHEME (a position unanimous within
-    # each hypothesis but split BETWEEN them gets a low harvest-wide da under US
-    # and 1.0 under a scheme that co-encodes the residues). Emitted as
-    # mrca_<i>_anc_aa / mrca_<i>_top_aa / mrca_<i>_bot_aa; the _top/_bot cell is
-    # empty when that side did not change.
-    anc_aa = getattr(result, "pair_ancestral_aa", None) or {}
-    der_top_aa = getattr(result, "pair_derived_top_aa", None) or {}
-    der_bot_aa = getattr(result, "pair_derived_bot_aa", None) or {}
-    if anc_aa or der_top_aa or der_bot_aa:
-        for pid in set(anc_aa) | set(der_top_aa) | set(der_bot_aa):
-            result_dict[f"mrca_{pid}_anc_aa"] = anc_aa.get(pid)
-            result_dict[f"mrca_{pid}_top_aa"] = der_top_aa.get(pid, "")
-            result_dict[f"mrca_{pid}_bot_aa"] = der_bot_aa.get(pid, "")
-    else:
-        src = vars(result) if hasattr(result, "__dict__") else {}
-        for k, v in src.items():
-            if isinstance(k, str) and k.startswith("mrca_") and (
-                k.endswith("_anc_aa") or k.endswith("_top_aa") or k.endswith("_bot_aa")
-            ):
-                result_dict[k] = v
-
-    # Directional path-score block: the per-domain, per-side score core_top /
-    # core_bottom are actually built from (path_scores.py's own
-    # top_pair_scores / bottom_pair_scores), parallel to mrca_<i>_path_score
-    # (which is only their per-pair side-average and cannot tell the FOP
-    # domain-pooler which side a domain's change was on). Without this, pooling
-    # H1..Hn treats a top-side change in one domain and a bottom-side change in
-    # another as if they corroborated each other — exactly the failure mode
-    # core_top/core_bottom exist to prevent. Emitted as mrca_<i>_top_path_score
-    # / mrca_<i>_bot_path_score; empty on the side a domain's pair did not
-    # change on.
-    top_scores = getattr(result, "pair_top_path_scores", None) or {}
-    bot_scores = getattr(result, "pair_bottom_path_scores", None) or {}
-    if top_scores or bot_scores:
-        for pid in set(top_scores) | set(bot_scores):
-            if pid in top_scores:
-                result_dict[f"mrca_{pid}_top_path_score"] = top_scores.get(pid)
-            if pid in bot_scores:
-                result_dict[f"mrca_{pid}_bot_path_score"] = bot_scores.get(pid)
-    else:
-        src = vars(result) if hasattr(result, "__dict__") else {}
-        for k, v in src.items():
-            if isinstance(k, str) and k.startswith("mrca_") and (
-                k.endswith("_top_path_score") or k.endswith("_bot_path_score")
+            if isinstance(k, str) and k.startswith("domain_") and (
+                k.endswith("_node") or k.endswith("_state") or k.endswith("_posterior")
+                or k.endswith("_score") or k.endswith("_anc_aa")
+                or k.endswith("_top_aa") or k.endswith("_bot_aa")
             ):
                 result_dict[k] = v
 
@@ -551,18 +454,14 @@ def process_single_gene(
                         ),
                     )
 
-                    # Carry the STRUCTURED per-pair fields alongside the flat
-                    # columns. Without them the DB stores pair_count=1 (so the
-                    # master CSV only gets mrca_1_* columns) and the exporter's
-                    # re-conversion can't rebuild mrca_<i>_node/state/posterior
-                    # (it only emits those from node_mapping / node_state_details).
-                    # disambiguation_db._extract_pair_count and the exporter both
-                    # read these keys off the reloaded dict.
-                    # (deliberately NOT pair_details — its nested tip records
-                    # would bloat every DB row; node_mapping.focal_nodes already
-                    # gives _extract_pair_count the right K.)
+                    # Carry the STRUCTURED per-domain fields alongside the flat
+                    # columns. Without them the DB stores pair_count=1 and the
+                    # exporter's re-conversion can't rebuild the domain_<d>_*
+                    # block. disambiguation_db._extract_pair_count and the
+                    # exporter both read these keys off the reloaded dict.
                     for _k in ("node_mapping", "node_state_details",
-                               "pair_path_scores", "pair_path_contaminated"):
+                               "domain_scores", "domain_meta", "domain_anc_aa",
+                               "domain_der_top_aa", "domain_der_bot_aa"):
                         _v = getattr(r, _k, None)
                         if _v is not None:
                             caas_dict[_k] = _v
