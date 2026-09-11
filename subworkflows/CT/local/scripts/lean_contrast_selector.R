@@ -39,6 +39,32 @@ overall_dunn_lean <- function(D, members) {
   min(vapply(seq_along(members), function(k) mod_dunn_lean(D, members, k), numeric(1)))
 }
 
+# Integer-indexed specialization of overall_dunn_lean for the FOP-mirror hot
+# loop: `pi1`/`pi2` are length-K integer row/col indices into the bare matrix
+# `Dm` (a cluster k is the pair pi1[k]-pi2[k]). Returns the identical numeric
+# min-over-k modified Dunn as overall_dunn_lean(Dm, <same members as names>),
+# but without character subscripting, per-call closure allocation, or building
+# the `members` list. A cluster with zero diameter contributes Inf (skipped),
+# matching mod_dunn_lean's early return.
+overall_dunn_int <- function(Dm, pi1, pi2, K) {
+  best <- Inf
+  for (k in seq_len(K)) {
+    a <- pi1[k]; b <- pi2[k]
+    intra <- Dm[a, b]
+    if (intra == 0) next
+    inter <- Inf
+    for (j in seq_len(K)) {
+      if (j == k) next
+      cc <- pi1[j]; dd <- pi2[j]
+      m <- min(Dm[a, cc], Dm[a, dd], Dm[b, cc], Dm[b, dd])
+      if (m < inter) inter <- m
+    }
+    r <- inter / intra
+    if (r < best) best <- r
+  }
+  best
+}
+
 # PSS scoring is provided by the vendored phyloq engine (src/pss_core.R):
 # analytical_s() and calculate_pairwise_scores(). This file only needs to be
 # sourced alongside it — permulations.R and the report modules stage both.
@@ -312,33 +338,54 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
   pool_pss <- lapply(pools, `[[`, "pss_score")
   Kseq <- seq_len(K)
 
+  # Species -> integer row/col index into Dm, once. Lets the hot loop below do
+  # the Dunn test and the dedup signature on integers instead of character
+  # subscripts (the profiled cost center: mod_dunn_lean's D[c1,c1] / D[c1,c2]
+  # name-indexing was ~35% of lean_fop_harvest's total time).
+  sp_idx  <- setNames(seq_len(nrow(Dm)), rownames(Dm))
+  pool_i1 <- lapply(pool_s1, function(s) sp_idx[s])
+  pool_i2 <- lapply(pool_s2, function(s) sp_idx[s])
+
   seen <- new.env(parent = emptyenv())
-  assign(paste(sort(c(hyps$H1$species1, hyps$H1$species2)), collapse = "|"), TRUE, envir = seen)
+  h1i <- sp_idx[c(hyps$H1$species1, hyps$H1$species2)]
+  assign(paste(sort(h1i), collapse = "|"), TRUE, envir = seen)
   n_it <- nrow(idx_mat)
-  harvested <- vector("list", n_it); minpss <- numeric(n_it); nh <- 0L
+  # Defer building the per-hypothesis data.frame to the final max_fop cut below
+  # (most iterations are duplicates or fail the Dunn gate and never need one) —
+  # stash the plain species/PSS vectors, which is what the profiler showed
+  # data.frame()/add_cluster() spending most of their time re-deriving anyway.
+  harv_s1 <- vector("list", n_it); harv_s2 <- vector("list", n_it)
+  harv_ps <- vector("list", n_it); minpss  <- numeric(n_it); nh <- 0L
   s1 <- character(K); s2 <- character(K); ps <- numeric(K)
+  i1 <- integer(K);   i2 <- integer(K)
   for (it in seq_len(n_it)) {
     ci <- idx_mat[it, ]
-    for (k in Kseq) { r <- ci[k]; s1[k] <- pool_s1[[k]][r]; s2[k] <- pool_s2[[k]][r]; ps[k] <- pool_pss[[k]][r] }
-    spv <- c(s1, s2)
-    if (length(unique(spv)) < 2L * K) next
-    sig <- paste(sort(spv), collapse = "|")
+    for (k in Kseq) {
+      r <- ci[k]
+      s1[k] <- pool_s1[[k]][r]; s2[k] <- pool_s2[[k]][r]; ps[k] <- pool_pss[[k]][r]
+      i1[k] <- pool_i1[[k]][r]; i2[k] <- pool_i2[[k]][r]
+    }
+    spvi <- c(i1, i2)
+    if (anyDuplicated(spvi) > 0L) next
+    sig <- paste(sort.int(spvi), collapse = "|")
     if (!is.null(seen[[sig]])) next
     assign(sig, TRUE, envir = seen)
-    mem <- lapply(Kseq, function(i) c(s1[i], s2[i]))
-    if (overall_dunn_lean(Dm, mem) >= 1.0) {
+    if (overall_dunn_int(Dm, i1, i2, K) >= 1.0) {
       nh <- nh + 1L
-      harvested[[nh]] <- add_cluster(data.frame(
-        species1 = s1, species2 = s2, pss_score = ps, stringsAsFactors = FALSE))
+      harv_s1[[nh]] <- s1; harv_s2[[nh]] <- s2; harv_ps[[nh]] <- ps
       minpss[nh] <- suppressWarnings(min(ps, na.rm = TRUE))
     }
   }
   if (nh > 0L) {
-    harvested <- harvested[seq_len(nh)]; minpss <- minpss[seq_len(nh)]
+    minpss <- minpss[seq_len(nh)]
     ord  <- order(-replace(minpss, is.na(minpss), -Inf))
     keep <- head(ord, max(0L, as.integer(max_fop) - 1L))
-    harvested <- harvested[keep]
-    for (m in seq_along(harvested)) hyps[[paste0("H", m + 1L)]] <- harvested[[m]]
+    for (m in seq_along(keep)) {
+      j <- keep[m]
+      hyps[[paste0("H", m + 1L)]] <- add_cluster(data.frame(
+        species1 = harv_s1[[j]], species2 = harv_s2[[j]], pss_score = harv_ps[[j]],
+        stringsAsFactors = FALSE))
+    }
   }
   list(hypotheses = hyps, K = K)
 }
