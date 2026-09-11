@@ -97,8 +97,7 @@ process RESAMPLE {
         ${params.caas_perms_fop ?: false} \\
         ${params.max_fop ?: 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998} \\
-        ${params.caas_perms_fop ? (params.caas_full_perms ?: "") : ""}
+        ${params.seed ?: 1998}
         """
     } else {
         """
@@ -152,8 +151,7 @@ process RESAMPLE {
         ${params.caas_perms_fop ?: false} \\
         ${params.max_fop ?: 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998} \\
-        ${params.caas_perms_fop ? (params.caas_full_perms ?: "") : ""}
+        ${params.seed ?: 1998}
         """
     }
 }
