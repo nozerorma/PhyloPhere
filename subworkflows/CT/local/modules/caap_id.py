@@ -24,7 +24,7 @@ MODULE NAME:    caap_id
 DESCRIPTION:    Identification of CAAP (Convergent Amino Acid Properties) from MSA.
                 Extends classical CAAS detection by grouping amino acids based on
                 physicochemical properties and detecting convergence at the property level.
-DEPENDENCIES:   pindex, alimport, hyper, caas_id
+DEPENDENCIES:   pindex, alimport, caas_id
 
 
 TABLE OF CONTENTS
@@ -39,8 +39,6 @@ GS4   Fine-grained biochemical (12 groups; textbook-style functional bins)
 
 Functions:
 encode_to_groups()                          Encode amino acid string to group string for a given scheme
-build_group_line_dictionary()               Transform position data to group-level format for p-value calc
-_prepare_reduced_group_line_dict_for_pvalue() Exclude conserved FG/BG pairs from group-level p-value dict
 check_caap_pattern()                        Check if a pattern is CAAP for a given scheme
 fetch_caap()                                Main function: identifies CAAP for all traits at a position
 
@@ -363,8 +361,7 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
     Identify CAAP (Convergent Amino Acid Properties) for all traits at a position.
 
     For each position, checks all 4 grouping schemes (GS1-GS4). When a scheme detects
-    convergence, writes one output row with scheme-specific p-value calculated from
-    group-level diversity.
+    convergence, writes one output row.
 
     Args:
         genename: Gene name
@@ -383,7 +380,7 @@ def fetch_caap(genename: str, position_obj, trait_list: List[str],
         return_results: If True, return list of result lines instead of writing to file
 
     Output columns:
-        gene, mode, caap_group, trait, position, caas, amino_encoded, pvalue, pattern,
+        gene, mode, caap_group, trait, position, caas, amino_encoded, pattern,
         ffgn, fbgn, gfg, gbg, mfg, mbg, ffg, fbg, ms [, is_conserved_meta, conserved_pair]
     """
 

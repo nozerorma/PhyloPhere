@@ -30,7 +30,7 @@ Data Contracts & Validation
 ------------------------------
 1. **CAAS Metadata** (read_caas_metadata_table, get_caas_position_info):
      - Required columns: tag, caas, is_significant, GenePos
-     - Optional columns: pvalue, recovery_boot
+     - Optional columns: recovery_boot
      - FileNotFoundError raised if file missing; ValueError for missing columns
 
 2. **Trait Pairs** (parse_trait_pairs):
@@ -346,7 +346,7 @@ def get_caas_position_info(
         position: Position as recorded in metadata (zero-based).
 
     Returns:
-        Dict with tag, contrast, caas, pvalue, significance, and both
+        Dict with tag, contrast, caas, significance, and both
         zero/one-based positions, or None if not found.
 
     Example:
@@ -383,14 +383,6 @@ def get_caas_position_info(
     info["position_one_based"] = (
         zero_based_pos + 1 if zero_based_pos is not None else None
     )
-
-    # Add pvalue (should always be present)
-    if "pvalue" in row.index:
-        try:
-            info["pvalue"] = float(row["pvalue"])
-        except (ValueError, TypeError):
-            logger.warning("Could not parse pvalue for %s: %s", gene_pos, row["pvalue"])
-            info["pvalue"] = None
 
     # Add recovery_boot if present (optional column)
     if "recovery_boot" in row.index:

@@ -215,7 +215,13 @@ stopifnot(file_exists(postproc_file))
 cat("Loading postproc:", postproc_file, "\n")
 df <- read_tsv(postproc_file, show_col_types = FALSE)
 # filtered_discovery.tsv uses disambiguation's canonical lowercase concept names
-# (caap_group, pvalue, …) - consumed as-is; position_scores.tsv keeps the same lowercase schema.
+# (caap_group, …) - consumed as-is; position_scores.tsv keeps the same lowercase schema.
+# NOTE: `pvalue` / `gate_sig` / `gate_all` are NOT live columns here. The
+# hypergeometric CAAP p-value (subworkflows/CT/local/modules/hyper.py) was
+# deleted in 6448728 ("no greeeedy plus pss", 2026-09-01); caap_id.py no longer
+# emits a `pvalue` field at all, so this and every downstream reference to
+# pvalue/gate_sig/gate_all is structurally NA/FALSE. Cleaned up 2026-09-11 --
+# see git blame if reviving the hypergeometric gate is ever wanted.
 cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
             nrow(df), n_distinct(paste(df$Gene, df$Position))))
 
@@ -233,7 +239,7 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
 # Priority ONLY for picking a representative scheme's display/gating columns
-# (pvalue, recovery_boot, side, caap_group, ...) at the Gene×Position
+# (recovery_boot, side, caap_group, ...) at the Gene×Position
 # aggregation below (section 2g). Deliberately separate from the scoring itself,
 # which treats all five schemes symmetrically.
 scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
@@ -311,8 +317,6 @@ df$core <- suppressWarnings(as.numeric(df$core))
 # above). The phen_score (permulation percent-rank) factor is dropped from the
 # product on both the observed and null sides. phen_score is still computed as a
 # diagnostic column (recovery_boot removal is deferred to a later change).
-# The hypergeometric pvalue is not part of this either; it is the significance
-# gate (gate_all / gate_sig, section 2h).
 # H4: `df` carries TWO rows for a "both" position (side top/bottom), both with
 # the same position-level recovery_boot. Rank over the DISTINCT
 # (Gene, Position, caap_group) set and broadcast, so the duplicate side rows do
@@ -355,7 +359,7 @@ if (has_caas_pos_pval) {
 df <- df %>% mutate(Position = suppressWarnings(as.integer(Position)))
 # Sort descending by scheme_priority (US > GS4 > GS3 > GS2 > GS1) so first()
 # deterministically picks the US scheme (falling back to GS4..GS1) for
-# display/gating-only columns (pvalue, asr_is_conserved, etc.).
+# display/gating-only columns (asr_is_conserved, etc.).
 # Priority is display-only and never enters a scored quantity.
 df <- df %>% arrange(desc(scheme_priority))
 
@@ -1386,9 +1390,10 @@ dir.create("gene_lists", showWarnings = FALSE)
 # granularity: rank genes with a defined score desc, keep the top frac% of
 # THAT ranked set (not the full background) -- same selection axis as
 # 16.Position_enrichment_report.Rmd, just at genes instead of positions.
-# Percentile slices, not a significance gate: gate_sig already reports
-# significance elsewhere, and a significance-gated foreground close to the
-# whole gene universe is a poor input for interaction-density tests.
+# Percentile slices, not a significance gate: a significance-gated foreground
+# close to the whole gene universe is a poor input for interaction-density
+# tests (and the hypergeometric gate_sig/gate_all this note used to point to
+# no longer exists -- see the §1 NOTE near the top of this script).
 #
 # "global" slices (added alongside top/bottom): ranked on gene_caas_score, the
 # undirected 90th-percentile-of-all-positions aggregate -- the gene-level

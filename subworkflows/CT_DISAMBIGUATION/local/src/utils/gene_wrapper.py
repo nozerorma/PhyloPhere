@@ -77,9 +77,6 @@ def convert_convergence_result_to_dict(
             if not hasattr(ns, "position") and "position" in result:
                 ns.position = result.get("position")
 
-            if not hasattr(ns, "pvalue") and "pvalue" in result:
-                ns.pvalue = result.get("pvalue")
-
             if not hasattr(ns, "recovery_boot") and "recovery_boot" in result:
                 ns.recovery_boot = result.get("recovery_boot")
 
@@ -192,7 +189,6 @@ def process_single_gene(
     asr_model: str,
     asr_cache_dir: Optional[str],
     posterior_threshold: float,
-    convergence_mode: str,
     threads_per_gene: int,
     run_diagnostics: bool,
     output_dir: Path,
@@ -388,7 +384,6 @@ def process_single_gene(
             ),
             posterior_threshold=posterior_threshold,
             diagnostics_dir=diag_root,
-            convergence_mode=convergence_mode,
             asr_mode=asr_mode,
             hyp_pairs_pss=hyp_pairs_pss,
         )
@@ -525,7 +520,6 @@ def process_all_genes(
     asr_model: str,
     asr_cache_dir: Optional[str],
     posterior_threshold: float,
-    convergence_mode: str,
     threads_per_gene: int,
     workers: Optional[int],
     run_diagnostics: bool,
@@ -646,7 +640,6 @@ def process_all_genes(
                         asr_model,
                         asr_cache_dir,
                         posterior_threshold,
-                        convergence_mode,
                         threads_per_gene,
                         run_diagnostics,
                         output_dir,
@@ -1097,7 +1090,6 @@ def _perms_worker(
     asr_model: str,
     asr_cache_dir: str,
     posterior_threshold: float,
-    convergence_mode: str,
     cycle_tags: List[str],
     cycle_trait_files: Dict[str, str],
     perm_discovery_file: str,
@@ -1169,7 +1161,6 @@ def _perms_worker(
                     posterior_data=full_posteriors,
                     posterior_threshold=posterior_threshold,
                     diagnostics_dir=None,
-                    convergence_mode=convergence_mode,
                     asr_mode="precomputed",
                     axes_only=axes_only,
                     per_site_dist_cache=per_site_dist_cache,
@@ -1869,7 +1860,6 @@ def process_all_genes_perms(
     asr_model: str,
     asr_cache_dir: str,
     posterior_threshold: float,
-    convergence_mode: str,
     workers: Optional[int],
     output_dir: Path,
     ensembl_genes_file: Optional[str] = None,
@@ -1997,7 +1987,7 @@ def process_all_genes_perms(
     # Generate arguments lazily
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
-         asr_cache_dir, posterior_threshold, convergence_mode,
+         asr_cache_dir, posterior_threshold,
          cycle_tags, cycle_trait_files, perm_discovery_file, None, fop_pairs,
          postproc_filter, clust_minlen, clust_maxcaas)
         for gene in genes

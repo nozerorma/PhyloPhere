@@ -104,7 +104,6 @@ class ConvergenceResult:
     # Scoring and quality
     score: Optional[Any] = None
     position_one_based: Optional[int] = None
-    pvalue: Optional[float] = None
     recovery_boot: Optional[float] = None
 
     # Change tracking
