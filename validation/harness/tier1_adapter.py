@@ -127,10 +127,24 @@ class Tier1Run:
 
     # -- scoring/position_scores.tsv -------------------------------------- #
     def position_scores(self) -> dict[tuple[str, int], dict[str, str]]:
+        # core v3 / T4b: a "both" position is TWO rows (side=top, side=bottom),
+        # each with its own CAAS_score. Keying the dict on (Gene, Position) alone
+        # used to silently keep whichever row DictReader saw LAST -- and since
+        # position_scores.tsv is written sorted desc(CAAS_score) globally, that
+        # was *systematically* the lower-scoring side, not an arbitrary one. Pick
+        # the max-CAAS_score row per (Gene, Position) instead -- the same
+        # max-over-sides ("undirected") pooling the pipeline itself uses for
+        # p.emp / pos_perm_p (scoring_compute.R .pos_undirected).
         if self._pos is None:
             p = self.dir / "scoring" / "position_scores.tsv"
-            self._pos = {(r["Gene"], int(r["Position"])): r
-                         for r in _read_tsv(p)} if p.exists() else {}
+            best: dict[tuple[str, int], dict[str, str]] = {}
+            if p.exists():
+                for r in _read_tsv(p):
+                    key = (r["Gene"], int(r["Position"]))
+                    cur = best.get(key)
+                    if cur is None or _num(r["CAAS_score"]) > _num(cur["CAAS_score"]):
+                        best[key] = r
+            self._pos = best
         return self._pos
 
     def scored_positions(self, gene: str | None = None) -> list[float]:
