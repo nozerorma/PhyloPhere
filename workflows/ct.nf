@@ -31,8 +31,7 @@
 // Import local modules/subworkflows
 include { DISCOVERY; DISCOVERY_BATCHED } from "${baseDir}/subworkflows/CT/ct_discovery"
 include { RESAMPLE } from "${baseDir}/subworkflows/CT/ct_resample"
-include { BOOTSTRAP; BOOTSTRAP_BATCHED } from "${baseDir}/subworkflows/CT/ct_bootstrap"
-include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE; CONCAT_BOOTSTRAP } from "${baseDir}/subworkflows/CT/ct_concat"
+include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE } from "${baseDir}/subworkflows/CT/ct_concat"
 include { CAAS_PERMS_PREP } from "${baseDir}/subworkflows/CT/caas_permulation"
 
 // Main workflow
@@ -71,7 +70,7 @@ workflow CT {
             ? params.ct_tool.split(',').collect { it.trim() }.findAll { it }
             : []
 
-        // Define the alignment channel (used by discovery and bootstrap).
+        // Define the alignment channel (used by discovery and the permulation-excess null).
         // Accepts either a plain directory or a .tar.gz archive.
         // For archives, members are listed at startup and extracted on-demand inside each process.
         // When toy_mode=true, a random subset of toy_n alignments is used.
@@ -81,7 +80,7 @@ workflow CT {
             def n = (params.toy_n ?: 50) as int
             // Seeded (not a bare `Collections.shuffle(allFiles)`) so the same gene subset
             // is picked every run with the same --seed. Without this, -resume is close to
-            // useless for toy_mode runs: DISCOVERY_BATCHED/BOOTSTRAP_BATCHED cache hits
+            // useless for toy_mode runs: DISCOVERY_BATCHED cache hits
             // depend on which specific alignment files a batch contains, and an unseeded
             // shuffle picks a genuinely different random subset on every invocation, so
             // essentially nothing from a prior run's cache ever matches a resume attempt.
@@ -100,10 +99,10 @@ workflow CT {
 
         def discovery_out = Channel.empty()
         def discovery_done = Channel.value(true)
-        // resample_dir_out  → partitioned directory passed to ct bootstrap -s
+        // resample_dir_out  → partitioned directory passed to the permulation-excess null
         // resample_out      → concatenated resample.tab used for reporting / emit
         def resample_out = Channel.empty()
-        def resample_dir_out = Channel.empty()   // directory channel for BOOTSTRAP
+        def resample_dir_out = Channel.empty()   // directory channel for CAAS_PERMS_PREP
         if (params.resample_from) {
             def resample_path = file(params.resample_from)
             if (resample_path.isDirectory()) {
@@ -115,8 +114,6 @@ workflow CT {
                 resample_dir_out = resample_out
             }
         }
-        def bootstrap_out
-
         if (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) {
             log.info "Using contrast selection output for CT analyses."
             trait_file_out = trait_file_in
@@ -127,7 +124,7 @@ workflow CT {
             assert params.caas_config : "CT workflow requires --caas_config."
             trait_file_out = file(params.caas_config)
             tree_file_out = file(params.tree)
-            if (toolsToRun.contains('resample') || toolsToRun.contains('bootstrap')) {
+            if (toolsToRun.contains('resample')) {
                 if (params.my_traits) {
                     trait_val = file(params.my_traits)
                 }
@@ -226,119 +223,15 @@ workflow CT {
             // NOTE: resample_dir_out retains the raw directory so bootstrap receives
             // the partitioned resample_NNN.tab files, not the merged flat file.
         }
-        if (toolsToRun.contains('bootstrap')) {
-            if (toolsToRun.contains('discovery')) {
-                // Use discovery results from the pipeline
-                align_with_discovery = align_tuple
-                        .join(discovery_results)
-                        .map { row -> tuple(row[0], row[1], row[2]) }
-
-                // Hard barrier: bootstrap starts only after full discovery completion
-                align_with_discovery = align_with_discovery
-                        .combine(discovery_done)
-                        .map { row -> tuple(row[0], row[1], row[2]) }
-            } else if (params.discovery_from && params.discovery_from != "none") {
-                // Use external discovery file(s)
-                def discovery_path = file(params.discovery_from)
-                if (discovery_path.isDirectory()) {
-                    def discovery_files = Channel
-                            .fromPath("${params.discovery_from}/*")
-                            .filter { it.isFile() }
-                            .map { file -> tuple(file.baseName, file) }
-
-                    align_with_discovery = align_tuple
-                            .join(discovery_files)
-                            .map { row -> tuple(row[0], row[1], row[2]) }
-                } else {
-                    // Single concatenated discovery.tab:
-                    // Read gene names at plan-time, filter align_tuple to only those
-                    // genes, then pass the full discovery file to bootstrap --discovery.
-                    // Alignment IDs have the form GENE.Homo_sapiens.filter2, so we
-                    // extract the gene name as the token before the first dot.
-                    def caas_genes = discovery_path
-                        .readLines()
-                        .drop(1)                          // skip header
-                        .collect { it.split('\t')[0] }   // Gene column
-                        .toSet()
-
-                    align_with_discovery = align_tuple
-                        .filter { id, f -> caas_genes.contains(id.split('\\.')[0]) }
-                        .map    { id, f -> tuple(id, f, discovery_path) }
-                }
-            } else {
-                // No discovery file - create placeholder for bootstrap process
-                // Use a marker file to indicate no discovery optimization
-                align_with_discovery = align_tuple.map { id, alignmentFile -> 
-                    tuple(id, alignmentFile, file('NO_FILE')) 
-                }
-            }
-
-            // Pass the partitioned resample directory (resample_dir_out), NOT the
-            // concatenated resample.tab, so ct bootstrap -s receives individual
-            // resample_NNN.tab files as expected.
-            bootstrap_in = align_with_discovery
-                    .combine(resample_dir_out)
-                    .map { row -> tuple(row[0], row[1], row[2], row[3]) }
-
-            def ctBootstrapOut
-            def bootstrapBatchSize = (params.ct_bootstrap_batch_size ?: 1) as int
-            if (bootstrapBatchSize > 1) {
-                def bootstrapBatchCounter = 0
-                def bootstrap_batches = bootstrap_in
-                    .toSortedList({ a, b -> a[0] <=> b[0] })
-                    .flatMap()
-                    .collate(bootstrapBatchSize)
-                    .map { batch ->
-                        def batchID = sprintf('bootstrap_batch_%05d', ++bootstrapBatchCounter)
-                        def manifestText = createBatchManifestText(
-                            batch.collect { row -> "${row[0]}\t${row[1].name}\t${row[2].name}" }
-                        )
-                        def alignmentFiles = batch.collect { row -> row[1] }
-                            .unique { file -> file.name }
-                        def discoveryFiles = batch
-                            .collect { row -> row[2] }
-                            .findAll { file -> file.name != 'NO_FILE' }
-                            .unique { file -> file.name }
-                        if (!discoveryFiles) {
-                            // Stage a harmless existing file so the batched process
-                            // still receives a non-empty path input when discovery is disabled.
-                            discoveryFiles = [batch[0][1]]
-                        }
-                        def resampled = batch[0][3]
-
-                        tuple(batchID, batch.size(), manifestText, alignmentFiles, discoveryFiles, resampled)
-                    }
-
-                bootstrap_out = BOOTSTRAP_BATCHED(bootstrap_batches, trait_file_out)
-                ctBootstrapOut = bootstrap_out.bootstrap_out
-                    .flatten()
-                    .map { file ->
-                        def suffix = '.bootstraped.output'
-                        def id = file.name.endsWith(suffix) ? file.name[0..-(suffix.size() + 1)] : file.baseName
-                        tuple(id, file)
-                    }
-            } else {
-                bootstrap_out = BOOTSTRAP(bootstrap_in, trait_file_out)
-                ctBootstrapOut = bootstrap_out.bootstrap_out
-            }
-            
-            // Concatenate all bootstrap outputs - collect actual files for staging
-            ctBootstrapOut
-                .map { id, file -> file }
-                .collect()
-                .ifEmpty([])
-                .set { bootstrap_files }
-            bootstrap_concat_out = CONCAT_BOOTSTRAP(bootstrap_files)
-
-            // CAAS permulation-excess null: a SEPARATE full-pool bootstrap pass over
-            // N permuted labelings (no --discovery, export_perm_discovery ON). Reuses
-            // the sliced per-gene alignments + the resample directory already in scope.
-            if (params.caas_permulation_enrichment) {
-                def perms_prep = CAAS_PERMS_PREP(align_tuple, trait_file_out, resample_dir_out)
-                caas_perm_discovery_out  = perms_prep.perm_discovery
-                caas_resample_subset_out = perms_prep.resample_subset
-                caas_fop_pairs_out       = perms_prep.fop_pairs
-            }
+        // CAAS permulation-excess null: a full-pool pass over N permuted labelings,
+        // replayed through analyze_gene_disambiguation downstream. Only needs
+        // align_tuple/trait_file_out/resample_dir_out, all already in scope from
+        // discovery/resample above — no longer gated on the (now-removed) bootstrap tool.
+        if (params.caas_permulation_enrichment) {
+            def perms_prep = CAAS_PERMS_PREP(align_tuple, trait_file_out, resample_dir_out)
+            caas_perm_discovery_out  = perms_prep.perm_discovery
+            caas_resample_subset_out = perms_prep.resample_subset
+            caas_fop_pairs_out       = perms_prep.fop_pairs
         }
     }
     

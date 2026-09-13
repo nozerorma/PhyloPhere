@@ -79,8 +79,9 @@ contrib_h(d_i, d_j) = agree(i,j) · ( 1 − P_wc_any( set @ LCA(nodo_i^h, nodo_j
 
 `P_wc_any` = `path_scores.worst_case_any_group_probability(dist, set, scheme)`: masa exacta
 registrada para los targets presentes, más el remanente no registrado **una vez** si algún
-target falta. Cuando `agree = 1` el `set` es un singleton `{enc(r)}` y `P_wc_any` coincide
-con `worst_case_group_probability`.
+target falta. Cuando `agree = 1` el `set` es un singleton `{enc(r)}` y `P_wc_any` se reduce
+al caso de un solo target (masa exacta de `enc(r)` si está registrada; si no, el remanente
+`1 − Σ registrado`).
 
 **Sin factor de aislamiento. Sin PSS aquí.** El PSS entra solo en el pooling (§3).
 
@@ -145,10 +146,13 @@ nodos LCA** — no hay walk.
 `compute_domain_scores` **no** recibe args de conservados. Borra de `path_scores.py`:
 `side_path_score`, `_changed_side_walk`, `_apply_changed_stop`, `_conserved_side_score`,
 `EMPTY_PATH_SCORE`, `parse_conserved_ids`, `_p_at_least_2`, `group_probability` (queda
-`encoded_distribution` + `worst_case_*`), `modal_encoded`, `aggregate_core_side`,
-`compute_asr_path_score`. **Conserva** (revividas, ahora en vivo):
-`worst_case_group_probability`, `worst_case_any_group_probability`, `noisy_or`, `find_lca`,
-`path_to_root_ids`, `build_node_index`, `encode_aa`, `encoded_distribution`, `node_dist`.
+`encoded_distribution` + `worst_case_any_group_probability`), `modal_encoded`,
+`aggregate_core_side`, `compute_asr_path_score`. **Conserva** (revividas, ahora en vivo):
+`worst_case_any_group_probability`, `noisy_or`, `find_lca`, `path_to_root_ids`,
+`build_node_index`, `encode_aa`, `encoded_distribution`, `node_dist`.
+(`worst_case_group_probability`, la variante de un solo target, se retiró después: nada la
+llamaba — `domain_meta[d].posterior` usa una consulta directa `encoded_distribution(...).get(
+anc_enc, 0.0)`, no una cota worst-case. Ver `subworkflows/CT_DISAMBIGUATION/local/src/convergence/path_scores.py`.)
 
 ---
 
@@ -256,12 +260,11 @@ Posteriores base: `A = {A:.90, V:.05, T:.05}`, `V_here = {V:.85, A:.10, T:.05}`,
 `T_here = {T:.85, A:.10, V:.05}`, `L_here = {L:.85, A:.10, V:.05}`. Nodos internos
 (0,1,2,10,20,30) → `A` salvo override.
 
-`domain_meta[d].posterior = group_probability(dist@mrca_id, enc(focal_state), scheme)`.
-Con `focal_state = A` y `dist@MRCA` un `*_here` (que lleva `A:.10`): `posterior = 0.10`
-bajo US. Bajo GS3, `enc(A)='n'` y el `*_here` aporta `A:.10 + (T:.05 → 'n')` cuando aplica.
-
-Bajo **US** `worst_case_group_probability(A_dist, "V", US) = 0.05` (V registrada);
-`("L") = 1 − (.90+.05+.05) = 0.0` (no registrada, remanente 0).
+`domain_meta[d].posterior = encoded_distribution(dist@mrca_id, scheme).get(enc(focal_state),
+0.0)` — masa exacta registrada, **no** una cota worst-case (0.0 si `enc(focal_state)` no
+aparece en el posterior, sin remanente). Con `focal_state = A` y `dist@MRCA` un `*_here`
+(que lleva `A:.10`): `posterior = 0.10` bajo US. Bajo GS3, `enc(A)='n'` y el `*_here` aporta
+`A:.10 + (T:.05 → 'n')` cuando aplica.
 
 ---
 

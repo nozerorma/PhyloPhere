@@ -48,6 +48,11 @@ params:
   vep_cosmic_file:       NULL
   fade_sites_top_file:    NULL
   fade_sites_bottom_file: NULL
+  # posenrich's own per-position characterization layers (PFAM domain/clan,
+  # UCR core/flank region + per-position variability, FUBAR selection call),
+  # build_position_gmt.py's position_characterization.tsv - the same GMT-source
+  # layers posenrich tests, flattened for a direct Gene/Position join here.
+  position_characterization_file: NULL
   # SCORING's published percentile slices (scoring_compute.R), when
   # supplied, gene/position 25/10/5/1% membership is read from these
   # directories instead of being re-derived independently in this report (see
@@ -306,6 +311,15 @@ fade_sites_bottom_cmp_df <- if (has_fade_sites_bottom_cmp) {
   readr::read_csv(params$fade_sites_bottom_file, show_col_types = FALSE) %>%
     dplyr::rename(gene = gene, Position = position) %>%
     dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
+} else NULL
+
+# posenrich's per-position PFAM domain/clan, UCR core/flank region + per-position
+# variability, and FUBAR selection call (build_position_gmt.py's
+# position_characterization.tsv) - characterization-only, like COSMIC/PAI3D
+# below, so joined straight in without any percentile/significance gating.
+has_position_char_cmp <- .file_ok(params$position_characterization_file)
+position_char_cmp_df  <- if (has_position_char_cmp) {
+  readr::read_tsv(params$position_characterization_file, show_col_types = FALSE)
 } else NULL
 
 # Per-gene attribute table: percentile flags (from fcs_stats' own score_top/
@@ -1451,6 +1465,23 @@ is `hit` / `no_hit` / `missing` (COSMIC's own file only ever lists positive
 hits, so "checked, no record" is inferred from PrimateAI-3D's exhaustive
 per-position coverage as the "was this position checkable at all" reference).
 
+`Pfam domain`/`Pfam clan`/`UCR region`/`Position variability`/`FUBAR selection`
+are also **EXTRAS**, position-native this time: posenrich's own per-position
+characterization layers (the same PFAM/UCR/FUBAR layers posenrich tests as
+GMTs, see `build_position_gmt.py`), joined straight onto the exact position
+rather than gene-inherited. `UCR region` is `core` / `flank_up` / `flank_down`
+(blank when the position isn't in an ultraconserved region at all - core and
+flank can, by design, both apply to the same position under different
+detection windows, `core` wins when they do); `Position variability` is the
+per-position variability score from the same UCR track (not the coarser
+per-domain-instance variability PFAM's own file carries); `FUBAR selection` is
+`positive` / `negative` / `neutral` for every position FUBAR actually tested,
+blank for positions FUBAR never scored. None of these have PAI3D's
+exhaustive-coverage guarantee, so unlike `COSMIC`/`PAI3D_pathogenic` above
+they stay a plain blank for "not covered by this layer" rather than a 3-state
+tag - there is no reference set here to distinguish "checked, negative" from
+"never checked".
+
 ```{r interesting_positions_prep, eval=has_position_scores_cmp}
 build_interesting_positions <- function(direction) {
   rk_set    <- switch(direction, Top = c("top", "accelerating"), Bottom = c("bottom", "decelerating"), NULL)
@@ -1578,6 +1609,24 @@ build_interesting_positions <- function(direction) {
     dplyr::case_when(.cosmic_hit ~ "hit", .checkable ~ "no_hit", TRUE ~ "missing")
   } else rep("missing", nrow(base))
 
+  # posenrich's own per-position characterization layers - the same PFAM
+  # domain/clan, UCR core/flank region, and FUBAR selection call posenrich
+  # tests as GMTs (see build_position_gmt.py), joined straight in here.
+  # EXTRAS like COSMIC/PAI3D above: characterization only, never in the
+  # Composite score. Blank/NA means "not covered by that layer" (e.g. no PFAM
+  # domain at this position), not "checked and negative" - these layers don't
+  # have PAI3D's exhaustive-coverage guarantee, so no 3-state tag here.
+  if (has_position_char_cmp) {
+    base <- base %>%
+      dplyr::left_join(
+        position_char_cmp_df %>% dplyr::select(gene = Gene, Position, dplyr::any_of(c(
+          "pfam_domain", "pfam_clan", "ucr_region", "position_variability", "fubar_selection"))),
+        by = c("gene", "Position"))
+  }
+  for (.col in c("pfam_domain", "pfam_clan", "ucr_region", "position_variability", "fubar_selection")) {
+    if (!.col %in% names(base)) base[[.col]] <- NA
+  }
+
   all_positions <- base %>%
     dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, RER_dir, Accum_dir,
                                  CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig),
@@ -1622,6 +1671,9 @@ build_interesting_positions <- function(direction) {
                   CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,
                   PE_sig, `PE term(s)`,
                   COSMIC, PAI3D_pathogenic,
+                  `Pfam domain` = pfam_domain, `Pfam clan` = pfam_clan,
+                  `UCR region` = ucr_region, `Position variability` = position_variability,
+                  `FUBAR selection` = fubar_selection,
                   caas_family, rer_family, ami_fade_family, posenrich_family,
                   `N criteria`, `Composite score`) %>%
     head(params$top_n * 3)

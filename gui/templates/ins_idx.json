@@ -97,7 +97,6 @@
       "ct_disambig_asr_mode": "precomputed",
       "ct_disambig_asr_model": "lg",
       "ct_disambig_asr_cache_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/7.ASR_primates",
-      "ct_disambig_convergence_mode": "focal_clade",
       "ct_disambig_posterior_threshold": "0.1",
       "ct_disambig_max_tasks_per_child": "50",
       "asr_robustness": true,

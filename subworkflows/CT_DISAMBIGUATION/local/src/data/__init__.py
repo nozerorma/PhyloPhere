@@ -1,6 +1,6 @@
 """Public exports for data models and data-loading helpers."""
 
-from .models import BiochemResults, CAASPosition, ContrastDefinition, ConvergenceResult
+from .models import BiochemResults, CAASPosition, ConvergenceResult
 from .loaders import (
     build_caas_positions_map,
     get_caas_position_info,
@@ -13,7 +13,6 @@ from .loaders import (
 __all__ = [
     "BiochemResults",
     "CAASPosition",
-    "ContrastDefinition",
     "ConvergenceResult",
     "build_caas_positions_map",
     "get_caas_position_info",

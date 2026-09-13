@@ -162,13 +162,13 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/html_reports/3.CI-composition.html",
                                 "${outdir}/html_reports/4.Independent_contrasts.html"] ],
 
-            // discovery/resample/bootstrap are only published when
-            // --publish_intermediates is set (default false, see conf/ct.config);
-            // caastools/ (from CT_CONCAT) is unconditional and is what actually
-            // drives the "ran" status below.
+            // discovery/resample are only published when --publish_intermediates
+            // is set (default false, see conf/ct.config); caastools/ (from
+            // CT_CONCAT) is unconditional and is what actually drives the "ran"
+            // status below.
             [ id: 'ct',          name: 'CT (convergence)',                type: 'processes', ran: ctx.ct,
               filesDirs: ["${outdir}/caastools", "${outdir}/discovery",
-                          "${outdir}/resample",  "${outdir}/bootstrap"],
+                          "${outdir}/resample"],
               htmlCandidates: [] ],
 
             // NOTE: 7.CT_signification.Rmd only ever creates meta_caas/ (meta_dir <-

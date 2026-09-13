@@ -28,8 +28,6 @@ def _ct_tool_string(caas) -> str:
         parts.append("discovery")
     if caas.ct_tool_resample:
         parts.append("resample")
-    if caas.ct_tool_bootstrap:
-        parts.append("bootstrap")
     return ",".join(parts)
 
 
@@ -71,7 +69,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
     # which is never correct and (for Disambiguation/Accumulation/etc, whose live inputs
     # come from the sibling module that DID get switched off) fails fast on missing
     # upstream input. Enforced here, once, rather than trusted to have happened upstream.
-    caas_enabled = caas.enabled and not (pc.use_discovery or pc.use_resample or pc.use_bootstrap or pc.use_ct)
+    caas_enabled = caas.enabled and not (pc.use_discovery or pc.use_resample or pc.use_ct)
     disambiguation_enabled = disambig.enabled and not pc.use_disambiguation
     ct_postproc_enabled = disambig.enabled and not pc.use_postproc
     accumulation_enabled = project.modules.accumulation.enabled and not pc.use_accumulation

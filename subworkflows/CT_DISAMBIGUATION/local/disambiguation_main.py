@@ -80,13 +80,6 @@ def parse_arguments():
         help="Posterior probability threshold (default: 0.0)",
     )
 
-    # Analysis configuration
-    parser.add_argument(
-        "--convergence-mode",
-        choices=["focal_clade", "mrca"],
-        default="mrca",
-        help="Convergence analysis mode (default: mrca)",
-    )
     parser.add_argument(
         "--taxid-mapping", default=None, help="TaxID to species mapping file"
     )
@@ -264,7 +257,6 @@ def main():
             asr_model=args.asr_model,
             asr_cache_dir=args.asr_cache_dir,
             posterior_threshold=args.posterior_threshold,
-            convergence_mode=args.convergence_mode,
             threads_per_gene=args.threads,
             workers=args.workers,
             max_tasks_per_child=args.max_tasks_per_child,

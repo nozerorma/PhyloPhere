@@ -186,7 +186,6 @@ def analyze_caas_position_disambiguation(
     posterior_data: Optional[dict] = None,
     tip_diagnostics: Optional[Dict[str, Any]] = None,
     posterior_threshold: float = 0.7,
-    convergence_mode: str = "focal_clade",
     node_index: Optional[Dict[int, Any]] = None,
     build_node_posteriors: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
@@ -234,20 +233,6 @@ def analyze_caas_position_disambiguation(
     # ``compute_asr_path_score``'s ``_convergence_type``. This is the placeholder
     # on ``base_result`` for the no-change collapse.
     convergence_type = "no_change"
-
-    # Build per-pair transition status map for annotations
-    pair_status_map: Dict[str, Dict[str, str]] = {}
-    for summary_entry in tip_diagnostics.get("pair_transition_summary") or []:
-        pair_id_raw = summary_entry.get("pair_id")
-        pair_id = str(pair_id_raw) if pair_id_raw is not None else None
-        transitions = summary_entry.get("transitions") or {}
-        statuses: Dict[str, str] = {}
-        for side in ("top", "bottom"):
-            status = (transitions.get(side) or {}).get("status")
-            if status and status != "unknown":
-                statuses[side] = status
-        if pair_id and statuses:
-            pair_status_map[pair_id] = statuses
 
     # Perform node-level convergence analysis using ASR node mapping
     if posterior_data is None:
@@ -479,7 +464,6 @@ def analyze_caas_position_disambiguation(
         trait0_aa=trait0_list,
         tip_pattern_comment=tip_pattern_comment,
         pair_details=tip_diagnostics.get("pair_details"),
-        pair_transition_summary=tip_diagnostics.get("pair_transition_summary"),
         node_mapping=tip_diagnostics.get("node_mapping"),
         asr_ancestral_state=node_state_info.mrca_contrast if node_state_info else None,
         asr_descendant_states=asr_descendants if asr_descendants else None,
@@ -535,7 +519,6 @@ def analyze_gene_disambiguation(
     posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     posterior_threshold: float = 0.7,
     diagnostics_dir: Optional[Path] = None,
-    convergence_mode: str = "focal_state",
     asr_mode: str = "precomputed",
     axes_only: bool = False,
     per_site_dist_cache: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
@@ -805,18 +788,6 @@ def analyze_gene_disambiguation(
                         )
 
                     mrca_node = _get_mrca_cached(all_taxa)
-                    # Populate mrca_contrast in each pair using the global contrast MRCA
-                    # state (MRCA of all taxa).
-                    global_mrca_state, _ = _modal_state(
-                        mrca_node.node_id if mrca_node else None
-                    )
-                    if global_mrca_state is None:
-                        logger.warning(
-                            f"Global MRCA state unavailable for {gene} pos {pos}; "
-                            "mrca convergence_mode will fall back to focal_state per pair"
-                        )
-                    for p in pair_details:
-                        p["mrca_contrast"] = global_mrca_state if global_mrca_state is not None else p.get("focal_state")
                     node_mapping = {
                         "root": (
                             tree_data.root.node_id
@@ -922,7 +893,6 @@ def analyze_gene_disambiguation(
                 posterior_data,
                 tip_diagnostics,
                 posterior_threshold=posterior_threshold,
-                convergence_mode=convergence_mode,
                 node_index=hoisted_node_index,
                 build_node_posteriors=build_node_posteriors,
                 per_site_dist_cache=per_site_dist_cache,

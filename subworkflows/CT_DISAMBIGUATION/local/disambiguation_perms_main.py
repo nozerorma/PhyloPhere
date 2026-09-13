@@ -45,10 +45,6 @@ def parse_arguments():
     p.add_argument("--asr-model", default="lg", help="ASR substitution model (default: lg)")
     p.add_argument("--asr-cache-dir", required=True, help="Precomputed ASR cache dir")
     p.add_argument("--posterior-threshold", type=float, default=0.0)
-    p.add_argument(
-        "--convergence-mode", choices=["focal_clade", "mrca"], default="mrca",
-        help="Convergence analysis mode (must match the real run; default: mrca)",
-    )
     p.add_argument("--taxid-mapping", default=None)
     p.add_argument("--ensembl-genes-file", default=None)
     p.add_argument("--workers", type=int, default=None)
@@ -155,7 +151,6 @@ def main():
         asr_model=args.asr_model,
         asr_cache_dir=args.asr_cache_dir,
         posterior_threshold=args.posterior_threshold,
-        convergence_mode=args.convergence_mode,
         workers=args.workers,
         output_dir=output_dir,
         ensembl_genes_file=args.ensembl_genes_file,

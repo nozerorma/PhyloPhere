@@ -17,8 +17,6 @@
 #     --accum_dir     <directory_with_accumulation_CSVs> \
 #     --top_pct    0.10 \
 #     --gene_top_pct  0.10 \
-#     --stress        false \
-#     --stress_top_n  25 \
 #
 # Outputs (in working directory):
 #   position_scores.tsv - per Gene×Position scores
@@ -27,7 +25,6 @@
 #   gene_threshold_enrichment.tsv - gene-level enrichment curve (OR + Fisher) across CAAS thresholds × tools
 #   pos_threshold_enrichment.tsv - position-level FADE enrichment curve across CAAS thresholds
 #   gene_lists/slice_*.tsv - 8 ranked gene lists (Top/Bottom × 25/10/5/1%) for STRING
-#   position_score_stress_*.tsv - leave-one-axis-out / PCA stress diagnostics (only when --stress true)
 # =============================================================================
 
 suppressPackageStartupMessages({
@@ -61,8 +58,6 @@ gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
 # (core v3: fop_pool.pool_domains over the K fixed Voronoi domains), so rows
 # arrive one per (Gene, Position, scheme, side) with hypothesis=NA and scoring
 # never pools hypotheses itself.
-stress_enabled_raw        <- parse_arg("--stress", "false")
-stress_top_n              <- as.integer(parse_arg("--stress_top_n", "25"))
 top_pct           <- as.numeric(parse_arg("--top_pct",  "0.10"))
 top25_pct         <- 0.25
 top5_pct          <- 0.05
@@ -71,9 +66,7 @@ gene_top_pct      <- as.numeric(parse_arg("--gene_top_pct",  "0.10"))
 gene_top25_pct    <- 0.25
 gene_top5_pct     <- 0.05
 gene_top1_pct     <- 0.01
-stress_enabled        <- tolower(as.character(stress_enabled_raw)) %in% c("true", "1", "yes")
 gene_perm_pooled      <- tolower(as.character(gene_perm_pooled_raw)) %in% c("true", "1", "yes")
-if (!is.finite(stress_top_n)      || is.na(stress_top_n)      || stress_top_n < 1)  stress_top_n      <- 25
 # direction removed: scoring always runs on the full postproc pool.
 # Directional characterisation happens post-scoring via side column.
 
@@ -118,92 +111,6 @@ safe_cor <- function(x, y, method = "pearson") {
   suppressWarnings(cor(x[ok], y[ok], method = method))
 }
 
-safe_top_set <- function(df, score_col, mode = "pct", value = 0.10) {
-  vals <- df[[score_col]]
-  valid <- !is.na(vals)
-  if (!any(valid)) return(character())
-  df_valid <- df[valid, , drop = FALSE]
-  if (mode == "top_n") {
-    n_keep <- min(nrow(df_valid), max(1, as.integer(value)))
-    return(df_valid %>% arrange(desc(.data[[score_col]])) %>% slice_head(n = n_keep) %>%
-             transmute(id = paste(Gene, Position, sep = "::")) %>% pull(id))
-  }
-  thr <- quantile(df_valid[[score_col]], 1 - value, na.rm = TRUE)
-  df_valid %>%
-    filter(.data[[score_col]] >= thr) %>%
-    transmute(id = paste(Gene, Position, sep = "::")) %>%
-    pull(id) %>%
-    unique()
-}
-
-pairwise_long <- function(df, cols) {
-  expand.grid(score_a = cols, score_b = cols, stringsAsFactors = FALSE) %>%
-    filter(score_a < score_b) %>%
-    rowwise() %>%
-    mutate(
-      n_positions = sum(complete.cases(df[[score_a]], df[[score_b]])),
-      pearson_r   = safe_cor(df[[score_a]], df[[score_b]], method = "pearson"),
-      spearman_r  = safe_cor(df[[score_a]], df[[score_b]], method = "spearman")
-    ) %>%
-    ungroup()
-}
-
-make_rank_matrix <- function(df, cols) {
-  out <- expand.grid(score_a = cols, score_b = cols, stringsAsFactors = FALSE) %>%
-    filter(score_a < score_b) %>%
-    rowwise() %>%
-    mutate(
-      n_positions = sum(complete.cases(df[[score_a]], df[[score_b]])),
-      spearman_rank = safe_cor(rank(df[[score_a]], ties.method = "average", na.last = "keep"),
-                               rank(df[[score_b]], ties.method = "average", na.last = "keep"),
-                               method = "pearson")
-    ) %>%
-    ungroup()
-  out
-}
-
-make_top_overlap <- function(df, cols, top_n = 25) {
-  thresholds <- tibble(
-    threshold = c("top10pct", "top5pct", "top1pct", "topN"),
-    mode = c("pct", "pct", "pct", "top_n"),
-    value = c(0.10, 0.05, 0.01, as.numeric(top_n))
-  )
-  pairs <- expand.grid(score_a = cols, score_b = cols, stringsAsFactors = FALSE) %>%
-    filter(score_a < score_b)
-  rows <- list()
-  k <- 1
-  for (i in seq_len(nrow(pairs))) {
-    for (j in seq_len(nrow(thresholds))) {
-      score_a <- pairs$score_a[i]
-      score_b <- pairs$score_b[i]
-      threshold <- thresholds$threshold[j]
-      mode <- thresholds$mode[j]
-      value <- thresholds$value[j]
-      set_a <- safe_top_set(df, score_a, mode, value)
-      set_b <- safe_top_set(df, score_b, mode, value)
-      n_a <- length(set_a)
-      n_b <- length(set_b)
-      n_intersection <- length(intersect(set_a, set_b))
-      n_union <- length(union(set_a, set_b))
-      rows[[k]] <- tibble(
-        score_a = score_a,
-        score_b = score_b,
-        threshold = threshold,
-        mode = mode,
-        value = value,
-        n_a = n_a,
-        n_b = n_b,
-        n_intersection = n_intersection,
-        n_union = n_union,
-        jaccard = ifelse(n_union > 0, n_intersection / n_union, NA_real_),
-        overlap_smaller = ifelse(min(n_a, n_b) > 0, n_intersection / min(n_a, n_b), NA_real_)
-      )
-      k <- k + 1
-    }
-  }
-  bind_rows(rows)
-}
-
 cat("═══════════════════════════════════════════════════════════════\n")
 cat("  CAAS Scoring - Compute\n")
 cat("═══════════════════════════════════════════════════════════════\n\n")
@@ -239,7 +146,7 @@ cat(sprintf("  %d rows, %d unique Gene×Position pairs\n",
 scoring_schemes <- c("US", "GS4", "GS3", "GS2", "GS1")
 
 # Priority ONLY for picking a representative scheme's display/gating columns
-# (recovery_boot, side, caap_group, ...) at the Gene×Position
+# (side, caap_group, ...) at the Gene×Position
 # aggregation below (section 2g). Deliberately separate from the scoring itself,
 # which treats all five schemes symmetrically.
 scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
@@ -314,21 +221,11 @@ df$core <- suppressWarnings(as.numeric(df$core))
 
 # ── 2f. Per-row CAAS score ────────────────────────────────────────────────────
 # T1 decision E: caas_row = asr_score (the unified ASR path score, section
-# above). The phen_score (permulation percent-rank) factor is dropped from the
-# product on both the observed and null sides. phen_score is still computed as a
-# diagnostic column (recovery_boot removal is deferred to a later change).
-# H4: `df` carries TWO rows for a "both" position (side top/bottom), both with
-# the same position-level recovery_boot. Rank over the DISTINCT
-# (Gene, Position, caap_group) set and broadcast, so the duplicate side rows do
-# not inflate the percent_rank pool.
-.phen_key <- df %>%
-  group_by(Gene, Position, caap_group) %>%
-  summarise(.rb = dplyr::first(recovery_boot), .groups = "drop") %>%
-  mutate(phen_score = 1 - dplyr::percent_rank(.rb)) %>%  # diagnostic only (T1)
-  select(Gene, Position, caap_group, phen_score)
+# above). The phen_score (permulation percent-rank of recovery_boot) factor is
+# dropped from the product on both the observed and null sides, and (Phase B of
+# the BOOTSTRAP retirement) is no longer computed at all now that recovery_boot
+# has no producing arm left.
 df <- df %>%
-  select(-dplyr::any_of("phen_score")) %>%
-  left_join(.phen_key, by = c("Gene", "Position", "caap_group")) %>%
   mutate(caas_row = asr_score)
 
 # ── 2f-bis. Tier 2: base-cycle count of the position-level permulation null ──
@@ -400,8 +297,7 @@ pos_scores <- df %>%
     # a position-level mean of each sub-factor hides scheme disagreement (a
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
     # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
-    # the breakdown (e.g. the §3 stress test aggregates them there directly).
-    recovery_boot        = first(recovery_boot),
+    # the breakdown (e.g. the §3 stress test used to aggregate them there directly).
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
     all_mrca_posterior = first(all_mrca_posterior),
@@ -412,15 +308,13 @@ pos_scores <- df %>%
 
 # `side` (top / bottom / none) is the authoritative aggregation key and the sole
 # direction descriptor downstream -- T4b retired change_top/change_bottom/change_side.
-# Per-side diagnostics for the reports (SC5): core == core_s for this side,
-# phen_score the §2f percent-rank. Scheme means, per direction -- a legitimate
-# per-side diagnostic (the collapse warned against in the summarise note is the
-# position-level one that hides scheme disagreement).
+# Per-side diagnostic for the reports (SC5): core == core_s for this side -- a
+# legitimate per-side diagnostic (the collapse warned against in the summarise
+# note is the position-level one that hides scheme disagreement).
 .side_diag <- df %>%
   group_by(across(all_of(.pos_grp_keys))) %>%
   summarise(
-    core       = if ("core" %in% names(df)) mean(suppressWarnings(as.numeric(core)), na.rm = TRUE) else NA_real_,
-    phen_score = if ("phen_score" %in% names(df)) dplyr::first(phen_score) else NA_real_,
+    core = if ("core" %in% names(df)) mean(suppressWarnings(as.numeric(core)), na.rm = TRUE) else NA_real_,
     .groups = "drop"
   )
 pos_scores <- pos_scores %>% left_join(.side_diag, by = .pos_grp_keys)
@@ -618,104 +512,6 @@ if (has_fade_site_bot) {
 
 # Direction filter removed: all positions are retained for scoring.
 # Directional splits (top/bottom) are applied per-analysis after scoring.
-
-# =============================================================================
-# 3. POSITION-LEVEL STRESS TESTS (optional)
-# =============================================================================
-if (stress_enabled) {
-  cat("\n─── Position-level scoring stress test ───────────────────────\n")
-
-  # Variants of the ACTUAL production inputs: phen_score, asr_score (the two
-  # factors of caas_row, section 2f) and the scheme-aggregation rule (section
-  # 2g). Aggregated straight from `df` (the per-(Gene, Position, caap_group)
-  # rows), since §2g no longer carries these means to pos_scores -- see the note
-  # there. "phen_only" = CAAS_score with the ASR axis forced to 1
-  # (= mean_k(phen_k · 1) = mean_k(phen_k)); "asr_only" symmetric.
-  scheme_agg <- df %>%
-    group_by(Gene, Position) %>%
-    summarise(
-      CAAS_scheme_max = max(caas_row, na.rm = TRUE),
-      phen_only       = mean(phen_score, na.rm = TRUE),
-      asr_only        = mean(asr_score, na.rm = TRUE),
-      .groups = "drop"
-    )
-
-  stress_df <- pos_scores %>%
-    select(Gene, Position, n_schemes, CAAS_current = CAAS_score) %>%
-    left_join(scheme_agg, by = c("Gene", "Position")) %>%
-    mutate(
-      CAAS_phen_only = phen_only,  # drop the ASR axis
-      CAAS_asr_only  = asr_only    # drop the phenotype axis
-    )
-
-  analysis_cols <- c("phen_only", "asr_only", "n_schemes")
-  composite_cols <- c("CAAS_current", "CAAS_phen_only", "CAAS_asr_only", "CAAS_scheme_max")
-
-  stress_correlations <- pairwise_long(stress_df, c(analysis_cols, composite_cols))
-  stress_rank_agreement <- make_rank_matrix(stress_df, composite_cols)
-  stress_top_overlap <- make_top_overlap(stress_df, composite_cols, top_n = stress_top_n)
-
-  # Rank of the reference (current) score is constant across variants - compute
-  # once here rather than re-ranking it inside every rowwise cell below.
-  rank_current <- rank(-stress_df$CAAS_current, ties.method = "average", na.last = "keep")
-
-  stress_summary <- tibble(variant = composite_cols) %>%
-    rowwise() %>%
-    mutate(
-      pearson_to_current = safe_cor(stress_df[[variant]], stress_df$CAAS_current, method = "pearson"),
-      spearman_to_current = safe_cor(stress_df[[variant]], stress_df$CAAS_current, method = "spearman"),
-      mean_abs_rank_shift = {
-        r1 <- rank(-stress_df[[variant]], ties.method = "average", na.last = "keep")
-        mean(abs(rank_current - r1), na.rm = TRUE)
-      },
-      median_abs_rank_shift = {
-        r1 <- rank(-stress_df[[variant]], ties.method = "average", na.last = "keep")
-        median(abs(rank_current - r1), na.rm = TRUE)
-      },
-      max_abs_rank_shift = {
-        r1 <- rank(-stress_df[[variant]], ties.method = "average", na.last = "keep")
-        max(abs(rank_current - r1), na.rm = TRUE)
-      },
-      top10_overlap = {
-        a <- safe_top_set(stress_df, "CAAS_current", "pct", 0.10)
-        b <- safe_top_set(stress_df, variant, "pct", 0.10)
-        if (length(union(a, b)) == 0) NA_real_ else length(intersect(a, b)) / length(union(a, b))
-      },
-      top5_overlap = {
-        a <- safe_top_set(stress_df, "CAAS_current", "pct", 0.05)
-        b <- safe_top_set(stress_df, variant, "pct", 0.05)
-        if (length(union(a, b)) == 0) NA_real_ else length(intersect(a, b)) / length(union(a, b))
-      },
-      top1_overlap = {
-        a <- safe_top_set(stress_df, "CAAS_current", "pct", 0.01)
-        b <- safe_top_set(stress_df, variant, "pct", 0.01)
-        if (length(union(a, b)) == 0) NA_real_ else length(intersect(a, b)) / length(union(a, b))
-      },
-      topN_overlap = {
-        a <- safe_top_set(stress_df, "CAAS_current", "top_n", stress_top_n)
-        b <- safe_top_set(stress_df, variant, "top_n", stress_top_n)
-        if (length(union(a, b)) == 0) NA_real_ else length(intersect(a, b)) / length(union(a, b))
-      }
-    ) %>%
-    ungroup()
-
-  for (col in composite_cols) {
-    stress_df[[paste0("rank_", col)]] <- rank(-stress_df[[col]], ties.method = "average", na.last = "keep")
-  }
-  rank_cols <- paste0("rank_", composite_cols)
-  stress_df$rank_spread <- apply(stress_df[, rank_cols, drop = FALSE], 1, function(x) {
-    x <- as.numeric(x[is.finite(x)])
-    if (length(x) == 0) NA_real_ else max(x) - min(x)
-  })
-
-  write_tsv(stress_summary, "position_score_stress_summary.tsv")
-  write_tsv(stress_correlations, "position_score_stress_correlations.tsv")
-  write_tsv(stress_rank_agreement, "position_score_stress_rank_agreement.tsv")
-  write_tsv(stress_top_overlap, "position_score_stress_top_overlap.tsv")
-  write_tsv(stress_df, "position_score_stress_variants.tsv")
-
-  cat(sprintf("  Stress variants: %d columns, %d composite variants\n", ncol(stress_df), length(composite_cols)))
-}
 
 # =============================================================================
 # 4. GENE-LEVEL SCORING
@@ -1211,13 +1007,13 @@ if (length(score_cols) >= 2) {
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
-# Position scores. asr_score / phen_score / core / mrca_diversity /
-# derived_agreement / conservation_gate / core_perside_pooled are intentionally
-# absent: they are per-caap_group factors of caas_row and their scheme-mean does
-# not reconstruct CAAS_score (see §2g note). CAAS_score is the position-level
-# number; the per-scheme breakdown lives upstream in filtered_discovery.tsv.
+# Position scores. asr_score / core / mrca_diversity / derived_agreement /
+# conservation_gate / core_perside_pooled are intentionally absent: they are
+# per-caap_group factors of caas_row and their scheme-mean does not reconstruct
+# CAAS_score (see §2g note). CAAS_score is the position-level number; the
+# per-scheme breakdown lives upstream in filtered_discovery.tsv.
 pos_out <- pos_scores %>%
-  select(Gene, Position, any_of("recovery_boot"),
+  select(Gene, Position,
          n_schemes, any_of("scheme_set"),
          any_of(c("n_hypotheses", "supporting_hypotheses",
                   "derived_residues", "top_residue_support", "bottom_residue_support",
@@ -1225,8 +1021,8 @@ pos_out <- pos_scores %>%
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species")), CAAS_score,
          side,
-         # T3d: per-side diagnostics for the reports (SC5).
-         any_of(c("core", "phen_score")),
+         # T3d: per-side diagnostic for the reports (SC5).
+         any_of("core"),
          any_of("caas"),
          # §7.3 flip (docs/scoring_v2_p_emp.md): p.emp / p.emp_adj are the pooled
          # "detects AND exceeds" position p and the position headline. The

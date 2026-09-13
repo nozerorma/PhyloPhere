@@ -37,6 +37,7 @@ process POSENRICH_BUILD_GMT {
     output:
     path "*.gmt", emit: gmts
     path "characterization_layers.tsv", emit: charset
+    path "position_characterization.tsv", emit: position_char
     path "cosmic_coverage_genes.txt", optional: true, emit: cosmic_coverage
     path "pai3d_coverage_genes.txt", optional: true, emit: pai3d_coverage
 
@@ -315,9 +316,13 @@ workflow POSENRICH {
     )
 
     emit:
-    results               = POSENRICH_RUN.out.results
-    leading_edge          = POSENRICH_RUN.out.leading_edge
-    report                = POSENRICH_REPORT.out.report
-    overall_dotplot       = POSENRICH_REPORT.out.overall_dotplot
-    leading_edge_summary  = POSENRICH_REPORT.out.leading_edge_summary
+    results                  = POSENRICH_RUN.out.results
+    leading_edge             = POSENRICH_RUN.out.leading_edge
+    report                   = POSENRICH_REPORT.out.report
+    overall_dotplot          = POSENRICH_REPORT.out.overall_dotplot
+    leading_edge_summary     = POSENRICH_REPORT.out.leading_edge_summary
+    // Per-position PFAM domain/clan, UCR core/flank region + per-position
+    // variability, and FUBAR selection call, flattened for a direct
+    // Gene/Position join (15.Comparison_report.Rmd's Interesting Positions table).
+    position_characterization = POSENRICH_BUILD_GMT.out.position_char
 }

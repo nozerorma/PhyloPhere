@@ -22,7 +22,7 @@ for is never what you want.
 
 Path templates (relative to base_path/<TRAIT>), verified against each process's
 actual publishDir rather than guessed:
-  CT/CAAS      : caastools/{discovery,resample,bootstrap}.tab, caastools/background_genes.output,
+  CT/CAAS      : caastools/{discovery,resample}.tab, caastools/background_genes.output,
                  caastools/background.output, signification/meta_caas/global_meta_caas.tsv,
                  caas_permulation/caas_perms.rds,
                  caas_permulation/perm_pos_{pval,sample,quantiles}.tsv,
@@ -61,14 +61,13 @@ class PrecomputedConfig:
 
     base_path: str = ""  # per-phenotype dir = base_path/<TRAIT> (no toy/postproc-mode tag)
 
-    # --- CT / CAAS (general + 3 specific, mirroring the CAAS tab's own
-    # discovery/resample/bootstrap checkboxes) ---
+    # --- CT / CAAS (general + 2 specific, mirroring the CAAS tab's own
+    # discovery/resample checkboxes) ---
     use_ct: bool = False  # turns off CAAS; also wires background_input, signification_from,
     # caas_perms_file, posenrich_background_file — all derive from CT's own concat/
-    # permulation outputs, not from any of the 3 specific steps individually.
+    # permulation outputs, not from either of the 2 specific steps individually.
     use_discovery: bool = False  # wires discovery_from
     use_resample: bool = False  # wires resample_from
-    use_bootstrap: bool = False  # wires bootstrap_from
 
     # --- Disambiguation (live ASR/convergence compute) ---
     use_disambiguation: bool = False  # turns off Disambiguation; wires disambiguation_input/_dir
@@ -134,8 +133,6 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
                         os.path.join(perm_dir, "perm_pos_detail"), "dir"))
     if config.use_resample:
         entries.append(("resample_from", os.path.join(outdir, "caastools", "resample.tab"), "file"))
-    if config.use_bootstrap:
-        entries.append(("bootstrap_from", os.path.join(outdir, "caastools", "bootstrap.tab"), "file"))
 
     if config.use_disambiguation:
         entries.append(

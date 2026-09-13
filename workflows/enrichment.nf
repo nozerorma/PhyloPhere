@@ -423,6 +423,8 @@ workflow ENRICHMENT {
             .ifEmpty { file('NO_POSENRICH_LE') }
         def posenrich_le_summary_ch = (posenrich_out ? posenrich_out.leading_edge_summary : Channel.empty())
             .ifEmpty { file('NO_POSENRICH_LE_SUMMARY') }
+        def posenrich_position_char_ch = (posenrich_out ? posenrich_out.position_characterization : Channel.empty())
+            .ifEmpty { file('NO_POSENRICH_POSITION_CHAR') }
         // Interesting Genes/Positions tables reuse the SAME optional gene/position-
         // level inputs POSENRICH's own report already consumes (fcs_stats,
         // position_scores, VEP, FADE sites) -- all workflow-level take: params, so
@@ -458,6 +460,7 @@ workflow ENRICHMENT {
                                               cmp_fcs_stats_ch, cmp_pos_scores_ch,
                                               cmp_vep_pai_ch, cmp_vep_cosmic_ch,
                                               cmp_fade_top_ch, cmp_fade_bot_ch,
+                                              posenrich_position_char_ch,
                                               gene_lists_ch, cmp_position_lists_ch,
                                               caas_perms_resolved, rer_perms_resolved,
                                               cmp_gene_scores_ch)

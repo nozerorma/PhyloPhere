@@ -158,7 +158,7 @@ discovered.
 ### CT_DISAMBIGUATION — convergence classification
 Uses ancestral state reconstruction (ASR) plus significance metadata to
 classify each CAAS as convergent, parallel, or divergent relative to the
-phenotype tree topology (`--ct_disambig_convergence_mode focal_clade|mrca`).
+phenotype tree topology.
 Standalone via `--signification_from` + `--caas_config`/`--tree`.
 
 ### CT_POSTPROC — filtering & characterization
@@ -565,7 +565,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `ct_disambig_asr_mode` | `"precomputed"` | ASR source mode (`"precomputed"` or `"compute"`). |
 | `ct_disambig_asr_model` | `"lg"` | Substitution matrix model used for ASR reconstruction. |
 | `ct_disambig_asr_cache_dir` | `""` | Directory containing precomputed ASR state files. |
-| `ct_disambig_convergence_mode` | `"focal_clade"` | Convergence classification mode (`"focal_clade"` per-pair MRCA vs `"mrca"` all-pairs MRCA). |
 | `ct_disambig_posterior_threshold` | `0.1` | Canonical posterior probability threshold ($\tau = 0.10$). |
 | `ct_disambig_max_tasks_per_child` | `50` | Worker task recycling cap for memory hygiene. |
 | `asr_robustness` | `true` | Enables parallel ASR robustness sensitivity diagnostic module. |

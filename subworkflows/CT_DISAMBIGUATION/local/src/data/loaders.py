@@ -65,7 +65,6 @@ Usage Examples
 References
 -----------
 - CAASPosition dataclass: src.data.models.CAASPosition
-- ContrastDefinition dataclass: src.data.models.ContrastDefinition
 - Amino acid normalization: src.utils.amino.normalize_amino_list()
 
 Author

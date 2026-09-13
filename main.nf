@@ -206,12 +206,11 @@ workflow {
         def ct_tools_ran      = (params.ct_tool instanceof String && params.ct_tool)
                                     ? params.ct_tool.split(',').collect { it.trim() } : []
         def ran_discovery     = ct_tools_ran.contains('discovery')
-        def ran_bootstrap     = ct_tools_ran.contains('bootstrap')
 
-        // Signification always runs downstream of CAAStools when bootstrap produced
-        // permutation output (or a standalone --bootstrap_from directory is supplied).
-        // No separate --ct_signification toggle: it is implied by running bootstrap.
-        def run_signification = ran_bootstrap || params.bootstrap_from
+        // Signification (pattern/caap_group summary + meta_caas.tsv export) runs
+        // downstream of discovery. No separate --ct_signification toggle: it is
+        // implied by running discovery (or a standalone --discovery_from file).
+        def run_signification = ran_discovery || params.discovery_from
 
         def toBool = { val ->
             if (val == null) return false
@@ -235,9 +234,8 @@ workflow {
             // inside CT_SIGNIFICATION correctly detects absence and falls back to params.
             def discovery_ch        = (ct_results && ran_discovery) ? ct_results.discovery_file   : null
             def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes  : null
-            def bootstrap_ch        = (ct_results && ran_bootstrap) ? ct_results.bootstrap_file    : null
 
-            signification_results = CT_SIGNIFICATION(discovery_ch, background_genes_ch, bootstrap_ch)
+            signification_results = CT_SIGNIFICATION(discovery_ch, background_genes_ch)
             ran_any = true
         }
 

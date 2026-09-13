@@ -18,7 +18,6 @@ output:
 params:
   discovery_input: NULL
   background_input: NULL
-  bootstrap_file: NULL
   output_dir: "."
   caap_mode: FALSE
   seed: "1998"
@@ -172,152 +171,22 @@ if (length(missing_cols) > 0) {
 
 ```
 
-## 2. Bootstrap Permutation Integration
-
-Load bootstrap permutation file to calculate empirical p-values.
-
-```{r bootstrap_integration, message=FALSE}
-cat("\n=== Loading Bootstrap File ===\n")
-
-# Load bootstrap file
-if (is.null(params$bootstrap_file)) {
-  stop("Bootstrap file parameter is NULL")
-}
-
-bootstrap_file_path <- params$bootstrap_file
-if (!file.exists(bootstrap_file_path)) {
-  stop("Bootstrap file not found: ", bootstrap_file_path)
-}
-
-cat(sprintf("Loading bootstrap file: %s\n", basename(bootstrap_file_path)))
-
-# Load bootstrap data (headerless expected, but tolerate legacy variants)
-# Supported formats:
-#   5 cols: GenePos caap_group occurrences total recovery_boot
-#   4 cols: GenePos occurrences total recovery_boot   (legacy CAAS)
-bootstrap_raw <- tryCatch({
-  read_tsv(
-    bootstrap_file_path,
-    col_names = FALSE,
-    show_col_types = FALSE
-  )
-}, error = function(e) {
-  stop("Failed to load bootstrap file: ", e$message)
-})
-
-if (ncol(bootstrap_raw) < 4) {
-  stop(sprintf("Bootstrap file has %d columns; expected at least 4", ncol(bootstrap_raw)))
-}
-
-if (ncol(bootstrap_raw) >= 5) {
-  names(bootstrap_raw)[1:5] <- c("GenePos", "caap_group", "occurrences", "total", "recovery_boot")
-} else {
-  names(bootstrap_raw)[1:4] <- c("GenePos", "occurrences", "total", "recovery_boot")
-  bootstrap_raw <- bootstrap_raw %>% mutate(caap_group = "US")
-}
-
-# Drop accidental textual header rows if present
-bootstrap_raw <- bootstrap_raw %>%
-  filter(!is.na(GenePos), GenePos != "gene@position", GenePos != "Gene@Position")
-
-# Normalize types
-bootstrap_raw <- bootstrap_raw %>%
-  mutate(
-    caap_group = if_else(is.na(caap_group) | caap_group == "", "US", caap_group),
-    occurrences = suppressWarnings(as.integer(occurrences)),
-    total = suppressWarnings(as.integer(total)),
-    recovery_boot = suppressWarnings(as.numeric(recovery_boot))
-  )
-
-# Split GenePos into Gene and Position
-bootstrap_df <- bootstrap_raw %>%
-  separate(GenePos, into = c("Gene", "Position"), sep = "@", remove = FALSE) %>%
-  mutate(Position = as.integer(Position))
-
-# Final safeguard for expected columns
-if (!"recovery_boot" %in% names(bootstrap_df)) {
-  stop("Bootstrap integration requires recovery_boot column after normalization")
-}
-
-cat(sprintf("Loaded bootstrap data: %s permutations\n", 
-            format(nrow(bootstrap_df), big.mark = ",")))
-
-# Check if bootstrap has CAAP groups
-bootstrap_has_groups <- 'caap_group' %in% names(bootstrap_df) && 
-                        any(!is.na(bootstrap_df$caap_group))
-
-if (has_caap_group && !bootstrap_has_groups) {
-  warning("Bootstrap file missing caap_group data, but discovery has CAAP mode enabled")
-  warning("Bootstrap results may not be group-aware")
-}
-
-if (bootstrap_has_groups) {
-  boot_groups <- unique(bootstrap_df$caap_group)
-  cat(sprintf("  Bootstrap groups: %s\n", paste(boot_groups, collapse = ", ")))
-}
-
-# Calculate empirical p-values
-cat("\nIntegrating bootstrap p-values...\n")
-
-# Bootstrap file already contains recovery_boot, just need to join
-if (has_caap_group && bootstrap_has_groups) {
-  # Group-aware permutation p-values
-  discovery_with_perm <- discovery_df %>%
-    left_join(
-      bootstrap_df %>%
-        select(Gene, Position, caap_group, recovery_boot, occurrences, total),
-      by = c("Gene", "Position", "caap_group")
-    )
-} else if (has_caap_group && !bootstrap_has_groups) {
-  # Discovery has groups but bootstrap doesn't - join without caap_group
-  warning("Joining bootstrap data without caap_group matching")
-  discovery_with_perm <- discovery_df %>%
-    left_join(
-      bootstrap_df %>%
-        select(Gene, Position, recovery_boot, occurrences, total) %>%
-        distinct(Gene, Position, .keep_all = TRUE),
-      by = c("Gene", "Position")
-    )
-} else {
-  # Standard permutation p-values (no CAAP groups)
-  discovery_with_perm <- discovery_df %>%
-    left_join(
-      bootstrap_df %>%
-        select(Gene, Position, recovery_boot, occurrences, total),
-      by = c("Gene", "Position")
-    )
-}
-
-# Handle missing permutation p-values
-discovery_with_perm <- discovery_with_perm %>%
-  mutate(
-    recovery_boot = if_else(is.na(recovery_boot), 1.0, recovery_boot),
-    occurrences = if_else(is.na(occurrences), 0L, as.integer(occurrences)),
-    total = if_else(is.na(total), 0L, as.integer(total))
-  )
-
-# Normalize optional conserved columns for downstream meta export
-if (!"is_conserved_meta" %in% names(discovery_with_perm)) {
-  discovery_with_perm <- discovery_with_perm %>% mutate(is_conserved_meta = NA)
-}
-if (!"conserved_pair" %in% names(discovery_with_perm)) {
-  discovery_with_perm <- discovery_with_perm %>% mutate(conserved_pair = NA_character_)
-}
-
-cat(sprintf("Integrated bootstrap p-values for %d positions\n", 
-            sum(!is.na(discovery_with_perm$recovery_boot))))
-
-cat("\n=== Bootstrap Integration Complete ===\n")
-```
-
-## 3. Pattern-Based Analysis
+## 2. Pattern-Based Analysis
 
 Analyze CAAS patterns across discovered positions.
 
 ```{r pattern_analysis}
 cat("\n=== Pattern-Based Analysis ===\n")
 
-caas_for_export <- discovery_with_perm
+# Normalize optional conserved columns for downstream meta export
+if (!"is_conserved_meta" %in% names(discovery_df)) {
+  discovery_df <- discovery_df %>% mutate(is_conserved_meta = NA)
+}
+if (!"conserved_pair" %in% names(discovery_df)) {
+  discovery_df <- discovery_df %>% mutate(conserved_pair = NA_character_)
+}
+
+caas_for_export <- discovery_df
 
 # Detect available patterns
 patterns_present <- unique(caas_for_export$pattern)
@@ -388,7 +257,7 @@ if (has_caap_group) {
 }
 ```
 
-## 4. Meta-CAAS Extraction
+## 3. Meta-CAAS Extraction
 
 Export standardized meta-CAAS tables for downstream disambiguation and post-processing.
 
@@ -434,7 +303,6 @@ if (has_caap_group) {
       ) %>%
       select(
         tag, GenePos, Gene, Position, pattern, caap_group,
-        recovery_boot, occurrences, total,
         is_conserved_meta, conserved_pair, caas, amino_encoded,
         dplyr::any_of(c("trait", "hyp_id"))
       )
@@ -462,7 +330,6 @@ if (has_caap_group) {
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern, caap_group,
-      recovery_boot, occurrences, total,
       is_conserved_meta, conserved_pair, caas, amino_encoded,
       dplyr::any_of(c("trait", "hyp_id"))
     )
@@ -488,7 +355,6 @@ if (has_caap_group) {
     ) %>%
     select(
       tag, GenePos, Gene, Position, pattern,
-      recovery_boot, occurrences, total,
       is_conserved_meta, conserved_pair, caas, amino_encoded
     )
 

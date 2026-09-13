@@ -28,7 +28,6 @@ Classification Hierarchy
 
 Data Contracts
 --------------
-- **PairDetail**: TypedDict for tip-level pair data (pair_id, focal_state, tip residues)
 - **NodeStates**: Dataclass container for key phylogenetic node states
 
 Note
@@ -49,26 +48,13 @@ Date
 2025-12-07
 """
 
-from typing import Dict, List, Optional, Tuple, Any, Sequence, TypedDict
+from typing import Dict, List, Optional, Tuple, Any, Sequence
 from dataclasses import dataclass, field
 import logging
 
 from ..utils.amino import normalize_amino_list as _normalize_amino_list
 
 logger = logging.getLogger(__name__)
-
-
-class PairDetail(TypedDict, total=False):
-    """Tip-level pair detail contract used for convergence classification."""
-
-    pair_id: Optional[str]
-    focal_state: Optional[str]
-    mrca_contrast: Optional[str]
-    top_tip_mode: Optional[str]
-    bottom_tip_mode: Optional[str]
-    top_tip_residue: Optional[str]
-    bottom_tip_residue: Optional[str]
-    # Additional diagnostic or probability fields are tolerated
 
 
 @dataclass
@@ -459,27 +445,6 @@ def extract_node_states_from_node_level(
     except Exception as e:
         logger.error(f"Error extracting node states for {gene}:{position}: {e}")
         return None
-
-
-def describe_transition(trans: Dict[str, Any]) -> str:
-    """
-    Format a transition dict as human-readable string.
-
-    Args:
-        trans: Transition dict with 'ancestor', 'descendant', 'status' keys
-
-    Returns:
-        Formatted string (e.g., "A→V (changed)")
-
-    Example:
-        >>> trans = {'ancestor': 'A', 'descendant': 'V', 'status': 'changed'}
-        >>> describe_transition(trans)
-        'A→V (changed)'
-    """
-    ancestor = trans.get("ancestor") or "?"
-    descendant = trans.get("descendant") or "?"
-    status = trans.get("status")
-    return f"{ancestor}→{descendant} ({status})"
 
 
 def build_consolidated_multiset(

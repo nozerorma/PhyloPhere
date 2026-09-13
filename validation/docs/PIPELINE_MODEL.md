@@ -131,7 +131,7 @@ This is the null the DESIGN gate cares about ("KS-uniform p.perm").
 
 `CT_DISAMBIGUATION` re-analyses every discovered CAAS with ancestral state
 reconstruction (codeml, **model = LG** by default — `ct_disambig_asr_model`).
-`convergence_mode` ∈ `focal_clade` | `mrca`. Produces `asr_path_score`
+Produces `asr_path_score`
 (MRCA→root hop-weighted signed isolation/conservation score; see
 `docs/ASR_PATH_SCORE.md` and memory `asr_path_score_axis_redundancy`) plus the
 convergence/divergence/parallel classification. ASR mode `compute` runs codeml;

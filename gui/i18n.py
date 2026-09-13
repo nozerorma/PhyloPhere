@@ -709,15 +709,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "ricampionamento",
         "de": "Neuabtastung",
     },
-    "bootstrap": {
-        "en": "bootstrap",
-        "es": "bootstrap",
-        "ca": "bootstrap",
-        "fr": "bootstrap",
-        "it": "bootstrap",
-        "de": "Bootstrap",
-    },
-
     # --- Module Tab Content (auto-added: titles, blurbs, disclaimers, field labels) ---
     # CAAS / Contrast Selection Tab
     'CAAS / Contrast Selection': {
@@ -728,21 +719,11 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'CAAS / Selezione dei contrasti',
         'de': 'CAAS / Kontrastauswahl',
     },
-    "Runs CAAStools' discovery, resample, and bootstrap steps to find convergent amino-acid substitutions (CAAS) associated with the phenotype.": {
-        'en': "Runs CAAStools' discovery, resample, and bootstrap steps to find convergent amino-acid substitutions (CAAS) associated with the phenotype.",
-        'es': 'Ejecuta los pasos de descubrimiento, remuestreo y bootstrap de CAAStools para encontrar sustituciones de aminoácidos convergentes (CAAS) asociadas al fenotipo.',
-        'ca': "Executa els passos de descobriment, remostreig i bootstrap de CAAStools per trobar substitucions d'aminoàcids convergents (CAAS) associades al fenotip.",
-        'fr': "Exécute les étapes de découverte, rééchantillonnage et bootstrap de CAAStools pour trouver des substitutions d'acides aminés convergentes (CAAS) associées au phénotype.",
-        'it': 'Esegue i passaggi di scoperta, ricampionamento e bootstrap di CAAStools per trovare sostituzioni amminoacidiche convergenti (CAAS) associate al fenotipo.',
-        'de': 'Führt die Discovery-, Resample- und Bootstrap-Schritte von CAAStools aus, um konvergente Aminosäuresubstitutionen (CAAS) zu finden, die mit dem Phänotyp assoziiert sind.',
+    "Runs CAAStools' discovery and resample steps to find convergent amino-acid substitutions (CAAS) associated with the phenotype.": {
+        'en': "Runs CAAStools' discovery and resample steps to find convergent amino-acid substitutions (CAAS) associated with the phenotype.",
     },
-    "Disambiguation and Accumulation need this module's output. Supply discovery_from/resample_from/bootstrap_from on the Precomputed Run tab to feed them precomputed results instead.": {
-        'en': "Disambiguation and Accumulation need this module's output. Supply discovery_from/resample_from/bootstrap_from on the Precomputed Run tab to feed them precomputed results instead.",
-        'es': 'Desambiguación y Acumulación necesitan la salida de este módulo. Proporcione discovery_from/resample_from/bootstrap_from en la pestaña Ejecución Precomputada para alimentarlos con resultados precomputados.',
-        'ca': "Desambiguació i Acumulació necessiten la sortida d'aquest mòdul. Proporcioneu discovery_from/resample_from/bootstrap_from a la pestanya Execució Precomputada per alimentar-los amb resultats precomputats.",
-        'fr': "Désambiguïsation et Accumulation ont besoin de la sortie de ce module. Fournissez discovery_from/resample_from/bootstrap_from dans l'onglet Exécution Précalculée pour leur fournir des résultats précalculés à la place.",
-        'it': "Disambiguazione e Accumulo necessitano dell'output di questo modulo. Fornire discovery_from/resample_from/bootstrap_from nella scheda Esecuzione Precalcolata per alimentarli con risultati precalcolati.",
-        'de': 'Disambiguierung und Akkumulation benötigen die Ausgabe dieses Moduls. Geben Sie stattdessen discovery_from/resample_from/bootstrap_from im Tab „Vorberechneter Lauf“ an, um sie mit vorberechneten Ergebnissen zu versorgen.',
+    "Disambiguation and Accumulation need this module's output. Check Discovery/Resample on the Precomputed Run tab to feed them precomputed results instead.": {
+        'en': "Disambiguation and Accumulation need this module's output. Check Discovery/Resample on the Precomputed Run tab to feed them precomputed results instead.",
     },
     'CAAS config file': {
         'en': 'CAAS config file',
@@ -848,13 +829,8 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Geni di scoperta per attività',
         'de': 'Discovery-Gene pro Aufgabe',
     },
-    'Bootstrap genes per task': {
-        'en': 'Bootstrap genes per task',
-        'es': 'Genes de bootstrap por tarea',
-        'ca': 'Gens de bootstrap per tasca',
-        'fr': 'Gènes de bootstrap par tâche',
-        'it': 'Geni di bootstrap per attività',
-        'de': 'Bootstrap-Gene pro Aufgabe',
+    'Permulation-null replay genes per batch': {
+        'en': 'Permulation-null replay genes per batch',
     },
     'Min divergent fraction': {
         'en': 'Min divergent fraction',
@@ -2247,14 +2223,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Output di ricampionamento',
         'de': 'Resample-Ausgabe',
     },
-    'Bootstrap output': {
-        'en': 'Bootstrap output',
-        'es': 'Salida de bootstrap',
-        'ca': 'Sortida de bootstrap',
-        'fr': 'Sortie de bootstrap',
-        'it': 'Output di bootstrap',
-        'de': 'Bootstrap-Ausgabe',
-    },
     'Signification output': {
         'en': 'Signification output',
         'es': 'Salida de significación',
@@ -2410,14 +2378,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
 
     # --- Precomputed Run tab redesign (auto-added) ---
     # Precomputed Run tab redesign
-    "Disambiguation and Accumulation need this module's output. Check Discovery/Resample/Bootstrap on the Precomputed Run tab to feed them precomputed results instead.": {
-        'en': "Disambiguation and Accumulation need this module's output. Check Discovery/Resample/Bootstrap on the Precomputed Run tab to feed them precomputed results instead.",
-        'es': 'Desambiguación y Acumulación necesitan la salida de este módulo. Marque Discovery/Resample/Bootstrap en la pestaña Ejecución Precomputada para alimentarlos con resultados precomputados.',
-        'ca': "Desambiguació i Acumulació necessiten la sortida d'aquest mòdul. Marqueu Discovery/Resample/Bootstrap a la pestanya Execució Precomputada per alimentar-los amb resultats precomputats.",
-        'fr': "Désambiguïsation et Accumulation ont besoin de la sortie de ce module. Cochez Discovery/Resample/Bootstrap dans l'onglet Exécution Précalculée pour leur fournir des résultats précalculés à la place.",
-        'it': "Disambiguazione e Accumulo necessitano dell'output di questo modulo. Selezionare Discovery/Resample/Bootstrap nella scheda Esecuzione Precalcolata per alimentarli con risultati precalcolati.",
-        'de': 'Disambiguierung und Akkumulation benötigen die Ausgabe dieses Moduls. Aktivieren Sie Discovery/Resample/Bootstrap im Tab „Vorberechneter Lauf“, um sie stattdessen mit vorberechneten Ergebnissen zu versorgen.',
-    },
     "Accumulation and Scoring need this module's output. Check 'Use precomputed Disambiguation output' on the Precomputed Run tab instead.": {
         'en': "Accumulation and Scoring need this module's output. Check 'Use precomputed Disambiguation output' on the Precomputed Run tab instead.",
         'es': "Acumulación y Puntuación necesitan la salida de este módulo. Marque 'Usar salida precomputada de Disambiguation' en la pestaña Ejecución Precomputada.",
@@ -2547,7 +2507,7 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'de': 'Ein einziger Basispfad, wiederverwendet für jede unten aktivierte Checkbox: base_path/<TRAIT>/... (das eigene Unterverzeichnis jedes Phänotyps, passend zur Ausgabestruktur eines zuvor abgeschlossenen Laufs). Aktivieren Sie eine Checkbox, um die bereits berechnete Ausgabe dieser Stufe einzuspeisen, statt sie neu zu berechnen — dies schaltet diese Stufe auch ab.',
     },
 
-    # --- Precomputed tab CT sub-checkboxes (capitalized, distinct from caas_tab's lowercase discovery/resample/bootstrap keys) ---
+    # --- Precomputed tab CT sub-checkboxes (capitalized, distinct from caas_tab's lowercase discovery/resample keys) ---
     "Discovery": {
         "en": "Discovery",
         "es": "Descubrimiento",
@@ -2564,15 +2524,6 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         "it": "Ricampionamento",
         "de": "Neuabtastung",
     },
-    "Bootstrap": {
-        "en": "Bootstrap",
-        "es": "Bootstrap",
-        "ca": "Bootstrap",
-        "fr": "Bootstrap",
-        "it": "Bootstrap",
-        "de": "Bootstrap",
-    },
-
     "Project name": {
         "en": "Project name",
         "es": "Nombre del proyecto",

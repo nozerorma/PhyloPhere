@@ -33,14 +33,13 @@ class ModuleConfigBase:
     extra_flags: str = ""
 
 
-# ── CAAS / CT (contrast selection + discovery/resample/bootstrap) ─────────────
+# ── CAAS / CT (contrast selection + discovery/resample) ───────────────────────
 
 
 @dataclass(kw_only=True)
 class CaasConfig(ModuleConfigBase):
     ct_tool_discovery: bool = True
     ct_tool_resample: bool = True
-    ct_tool_bootstrap: bool = True
     caas_config_path: str = ""  # --caas_config
     patterns: str = "1,2,3"  # --patterns
     perm_pool_size: str = "100000"  # --perm_pool_size
@@ -56,7 +55,7 @@ class CaasConfig(ModuleConfigBase):
     # Discovery/resample fine-tuning (conf/ct.config)
     publish_intermediates: bool = False  # --publish_intermediates
     ct_discovery_batch_size: str = "25"  # --ct_discovery_batch_size
-    ct_bootstrap_batch_size: str = "10"  # --ct_bootstrap_batch_size
+    ct_bootstrap_batch_size: str = "10"  # --ct_bootstrap_batch_size (CAAS permulation-excess null replay batching)
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
     max_bg_gaps_fraction: str = "0.0"  # --max_bg_gaps_fraction
     max_fg_gaps_fraction: str = "0.0"  # --max_fg_gaps_fraction
@@ -91,7 +90,6 @@ class DisambiguationConfig(ModuleConfigBase):
     ct_disambig_asr_mode: str = "precomputed"  # --ct_disambig_asr_mode (precomputed|compute)
     ct_disambig_asr_model: str = "lg"  # --ct_disambig_asr_model
     ct_disambig_asr_cache_dir: str = ""  # --ct_disambig_asr_cache_dir
-    ct_disambig_convergence_mode: str = "focal_clade"  # --ct_disambig_convergence_mode (focal_clade|mrca)
     ct_disambig_posterior_threshold: str = "0.1"  # --ct_disambig_posterior_threshold
     ct_disambig_max_tasks_per_child: str = "50"  # --ct_disambig_max_tasks_per_child
     # Separate ASR Robustness diagnostics report/stage (conf/ct_disambiguation.config).

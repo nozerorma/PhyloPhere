@@ -5,7 +5,7 @@ Same approach as the (demoted) Tier 0 ``build_project.py``: construct the
 ``gui.generation.render`` so the validation runs stay in lockstep with the GUI.
 
 Module set for this stage (MIGUEL: "only fade and caas, not rer"):
-    contrast_selection + CAAS/CAAP(discovery,resample,bootstrap,permulation)
+    contrast_selection + CAAS/CAAP(discovery,resample,permulation)
     + CT_DISAMBIGUATION(+POSTPROC + ASR robustness) + FADE + SCORING
     OFF: RER, accumulation, enrichment/position-FCS (no bespoke position-GMTs),
          VEP, reporting
@@ -80,7 +80,7 @@ def tier1_project(
     # ── CAAS / CAAP ────────────────────────────────────────────────────────
     c = p.modules.caas
     c.enabled = True
-    c.ct_tool_discovery = c.ct_tool_resample = c.ct_tool_bootstrap = True
+    c.ct_tool_discovery = c.ct_tool_resample = True
     c.caas_permulation_enrichment = True
     # FOP multi-hypothesis harvest is on (multi_hypothesis defaults True) and the
     # permulation null mirrors it, so p.perm calibrates the domain-pooled score.
@@ -109,7 +109,6 @@ def tier1_project(
     d.enabled = True
     d.ct_disambig_asr_mode = "compute"       # no precomputed ASR for these fixtures
     d.ct_disambig_asr_model = asr_model
-    d.ct_disambig_convergence_mode = "focal_clade"
     d.asr_robustness = True
     d.gene_filter_mode = "dubious"           # production default; needs gene_ensembl
 

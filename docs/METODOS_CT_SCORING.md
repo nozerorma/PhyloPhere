@@ -288,8 +288,10 @@ Una fila de salida por **(gene, position, esquema, hipótesis)**.
 ### F.1. ASR
 
 `codeml` (modelo empírico `LG`), **una vez por gen**. Por par de contraste se reconstruye
-el MRCA del foreground y el camino de él a la raíz, con posteriors por nodo.
-`convergence_mode = "mrca"`.
+el MRCA del foreground y el camino de él a la raíz, con posteriors por nodo. El ancestro
+de referencia de cada dominio es siempre su propio `focal_state` (MRCA del par); no existe
+un modo de configuración que lo cambie (el antiguo `convergence_mode` fue retirado por no
+tener efecto real en el scorer).
 
 ### F.2. Cada fila de metadata se desambigua SOLO contra los pares de SU hipótesis  (`disambiguate_single.py:630-730`)
 

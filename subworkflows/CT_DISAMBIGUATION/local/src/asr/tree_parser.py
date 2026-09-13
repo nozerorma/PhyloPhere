@@ -247,59 +247,6 @@ def extract_paml_node_range(rst_file: Path) -> Tuple[int, int]:
     return min_id, max_id
 
 
-def extract_paml_tree_structure(rst_file: Path) -> Dict[int, List[int]]:
-    """
-    Extract tree structure from PAML's connection map in RST file.
-
-    The RST contains lines like: "187..188 188..189 189..190 ..."
-    which define parent..child relationships.
-
-    Args:
-        rst_file: Path to PAML RST file
-
-    Returns:
-        Dict mapping parent node ID -> list of child node IDs
-
-    Raises:
-        FileNotFoundError: If RST file doesn't exist
-        ValueError: If connection map not found
-    """
-    if not rst_file.exists():
-        raise FileNotFoundError(f"RST file not found: {rst_file}")
-
-    with open(rst_file, "r") as f:
-        content = f.read()
-
-    # Find the connection map line (comes before "tree with node labels")
-    # Look for pattern like "187..188 188..189 ..."
-
-    # Find the section between the numeric tree and "tree with node labels"
-    tree_marker = "tree with node labels for Rod Page's TreeView"
-    tree_idx = content.find(tree_marker)
-    if tree_idx == -1:
-        raise ValueError(f"Could not find tree marker in {rst_file}")
-
-    # Search backwards from tree marker to find the connection map
-    search_section = content[max(0, tree_idx - 10000) : tree_idx]
-
-    # Find all parent..child pairs
-    connections = re.findall(r"(\d+)\.\.(\d+)", search_section)
-    if not connections:
-        raise ValueError(f"Could not find connection map in {rst_file}")
-
-    # Build parent -> children mapping
-    tree_structure: Dict[int, List[int]] = {}
-    for parent_str, child_str in connections:
-        parent = int(parent_str)
-        child = int(child_str)
-        if parent not in tree_structure:
-            tree_structure[parent] = []
-        tree_structure[parent].append(child)
-
-    logger.debug(f"Extracted tree structure with {len(tree_structure)} parent nodes")
-    return tree_structure
-
-
 def extract_rst_labeled_tree(rst_file: Path) -> str:
     """
     Extract the labeled Newick tree from PAML RST file.

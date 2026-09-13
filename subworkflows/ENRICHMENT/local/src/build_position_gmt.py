@@ -324,7 +324,12 @@ def main():
     print("Compiling PFAM Domains & Clans...")
     pfam_terms = {}
     pfam_clan_terms = {}
-    
+    # Per-position (gene, col) -> (pfam_domain, pfam_clan), feeds
+    # position_characterization.tsv below. A position covered by more than one
+    # domain instance keeps whichever is seen last (rare, no ordering
+    # guarantee needed for a characterization-only field).
+    pfam_char = {}
+
     if os.path.exists(args.domain_variability_file):
         dom_cols = ['gene', 'pfam_id', 'target_name', 'description',
                     'clan_acc', 'clan_name', 'ali_start', 'ali_end']
@@ -360,7 +365,10 @@ def main():
                 if pfam_id not in pfam_terms:
                     pfam_terms[pfam_id] = (f"{target_name} ({desc})", [])
                 pfam_terms[pfam_id][1].extend(members)
-                
+
+                for c in columns:
+                    pfam_char[(gene, c)] = (target_name, clan_name if clan_name and clan_name != 'NA' else '')
+
                 if clan_acc and clan_acc != 'NA':
                     if clan_acc not in pfam_clan_terms:
                         pfam_clan_terms[clan_acc] = (clan_name, [])
@@ -391,12 +399,20 @@ def main():
     print("Loading UCR positions...")
     gene_ucr_core_cols = {}    # region_type == core
     gene_ucr_flank_cols = {}   # region_type in {flank_up, flank_down}
+    # Per-position (gene, col) -> region label ('core'/'flank_up'/'flank_down')
+    # and its per-position `variability` score, feeds position_characterization.tsv
+    # below. 'core' always wins over flank when the same position is both (see
+    # the non-disjoint-by-design note above) - checked unconditionally on every
+    # 'core' row regardless of chunk order, so a flank row seen in an earlier
+    # chunk never sticks once a core row for the same position is seen later.
+    ucr_region_char = {}
+    ucr_variability_char = {}
     if os.path.exists(args.ucr_positions_file):
         # ucr_positions.tsv can be very large (~2 GB): read only the needed
         # columns in chunks and iterate with itertuples (row-wise iterrows over
         # this file is pathologically slow).
         reader = pd.read_csv(args.ucr_positions_file, sep='\t',
-                             usecols=['gene', 'position', 'region_type', 'method'],
+                             usecols=['gene', 'position', 'region_type', 'method', 'variability'],
                              dtype={'gene': str, 'region_type': str, 'method': str},
                              chunksize=500_000)
         for chunk in reader:
@@ -416,15 +432,27 @@ def main():
                 if col is None:
                     continue
                 region = str(row.region_type)
+                key = (gene, col)
                 if region == 'core':
                     gene_ucr_core_cols.setdefault(gene, set()).add(col)
+                    ucr_region_char[key] = 'core'
+                    ucr_variability_char[key] = row.variability
                 elif region in ('flank_up', 'flank_down'):
                     gene_ucr_flank_cols.setdefault(gene, set()).add(col)
+                    if ucr_region_char.get(key) != 'core':
+                        ucr_region_char[key] = region
+                        ucr_variability_char[key] = row.variability
 
     # 3. Load FUBAR Selection Positions per gene, SPLIT by selection sign.
     print("Loading FUBAR selection positions...")
     gene_pos_sel_cols = {}   # positive selection (FDR)
     gene_neg_sel_cols = {}   # purifying selection
+    # Per-position (gene, col) -> 'positive'/'negative'/'neutral', feeds
+    # position_characterization.tsv below. Unlike gene_pos_sel_cols/
+    # gene_neg_sel_cols (hits only), this records EVERY position FUBAR tested,
+    # so "neutral" (tested, not significant) is never conflated with "not in
+    # fubar_sites.tsv at all" (a position simply absent from this dict).
+    fubar_char = {}
     if os.path.exists(args.fubar_sites_file):
         reader = pd.read_csv(args.fubar_sites_file, sep='\t',
                              usecols=['gene', 'is_pos_hit_fdr',
@@ -441,8 +469,6 @@ def main():
                 except (ValueError, TypeError):
                     is_pos, is_neg = 0, 0
 
-                if is_pos != 1 and is_neg != 1:
-                    continue
                 try:
                     pos_residue = int(row.hg38_aa_pos)
                 except (ValueError, TypeError):
@@ -456,8 +482,12 @@ def main():
                     continue
                 if is_pos == 1:
                     gene_pos_sel_cols.setdefault(gene, set()).add(col)
-                if is_neg == 1:
+                    fubar_char[(gene, col)] = 'positive'
+                elif is_neg == 1:
                     gene_neg_sel_cols.setdefault(gene, set()).add(col)
+                    fubar_char[(gene, col)] = 'negative'
+                else:
+                    fubar_char[(gene, col)] = 'neutral'
 
     # 3.5 Load FADE directional selection positions per gene
     print("Loading FADE directional selection positions...")
@@ -648,6 +678,25 @@ def main():
         "FADE_bottom_sig": ("FADE directional selection sites, bottom (BF >= threshold)", _global_positions(gene_fade_bottom_cols)),
     }
     write_gmt(os.path.join(args.output_dir, "characterization_layers.tsv"), char_layers)
+
+    # 6.6 Position characterization: one row per (Gene, Position) carrying the
+    # PFAM domain/clan, UCR region, its per-position variability, and FUBAR
+    # selection call — the same per-position facts used to build the GMTs
+    # above (2f., 3.), but flattened for direct Gene/Position joins instead of
+    # GMT-membership lists. Union of every source's keys: a position missing
+    # from one source (e.g. never covered by a PFAM domain) just gets blanks
+    # for that source's columns, not a dropped row.
+    print("Compiling position characterization table...")
+    char_keys = set(pfam_char) | set(ucr_region_char) | set(fubar_char)
+    with open(os.path.join(args.output_dir, "position_characterization.tsv"), 'w') as f:
+        f.write("Gene\tPosition\tpfam_domain\tpfam_clan\tucr_region\tposition_variability\tfubar_selection\n")
+        for gene, col in sorted(char_keys):
+            pfam_domain, pfam_clan = pfam_char.get((gene, col), ('', ''))
+            ucr_region = ucr_region_char.get((gene, col), '')
+            variability = ucr_variability_char.get((gene, col), '')
+            fubar_selection = fubar_char.get((gene, col), '')
+            f.write(f"{gene}\t{col}\t{pfam_domain}\t{pfam_clan}\t{ucr_region}\t{variability}\t{fubar_selection}\n")
+    print(f"Wrote {len(char_keys)} rows to position_characterization.tsv")
 
     # 7. Custom Features
     if args.custom_marker_file and os.path.exists(args.custom_marker_file):

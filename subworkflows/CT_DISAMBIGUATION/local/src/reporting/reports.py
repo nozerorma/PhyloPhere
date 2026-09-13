@@ -9,7 +9,6 @@ import logging
 from pathlib import Path
 from typing import Optional, List, Dict, Any, cast
 import pandas as pd
-from dataclasses import dataclass
 
 
 from src.reporting.disambiguation_writers import (
@@ -37,15 +36,6 @@ DEBUG_JSON_FIELDS = {
     "node_species",
     "node_mapping_details",
 }
-
-
-@dataclass
-class ReportConfig:
-    gene_name: str
-    output_dir: Path
-    include_plots: bool = True
-    embed_images: bool = False
-    show_detailed_stats: bool = True
 
 
 def load_master_csv(path: Path) -> pd.DataFrame:

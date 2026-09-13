@@ -123,7 +123,6 @@ def tier0_project(
     d.enabled = True
     d.ct_disambig_asr_mode = "compute"      # no precomputed ASR for simulated data
     d.ct_disambig_asr_model = "lg"
-    d.ct_disambig_convergence_mode = "focal_clade"
     d.asr_robustness = True
     # "dubious" = the production default. It needs --gene_ensembl_file (we supply
     # a synthetic one). NOT "none": the process that emits filtered_discovery.tsv

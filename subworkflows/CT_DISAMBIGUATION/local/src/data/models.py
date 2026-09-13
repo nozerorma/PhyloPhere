@@ -4,7 +4,6 @@ Provided classes
 ----------------
 - CAASPosition: tip/position metadata and significance flags.
 - ConvergenceResult: consolidated ASR/convergence results and diagnostics.
-- ContrastDefinition: species/contrast definitions and tip residue holders.
 
 Author
 ------
@@ -20,7 +19,6 @@ __all__ = [
     "CAASPosition",
     "ConvergenceResult",
     "BiochemResults",
-    "ContrastDefinition",
 ]
 
 from dataclasses import dataclass, field
@@ -78,7 +76,6 @@ class ConvergenceResult:
     trait0_aa: List[str] = field(default_factory=list)
     tip_pattern_comment: Optional[str] = None
     pair_details: Optional[List[dict]] = None
-    pair_transition_summary: Optional[List[dict]] = None
     caap_group: str = "US"
     amino_encoded: str = ""
     is_conserved_meta: bool = False
@@ -136,28 +133,6 @@ class ConvergenceResult:
     # block sourced from node_mapping). Domains without a reconstruction have
     # state None, posterior 0.0.
     domain_meta: Optional[Dict[int, Dict[str, Any]]] = None
-
-
-@dataclass
-class ContrastDefinition:
-    """Container for species contrast definitions."""
-
-    pair_id: str
-    top_taxa: List[str]
-    bottom_taxa: List[str]
-    top_species: List[str]
-    bottom_species: List[str]
-    all_taxa: List[str]
-    node_id: Optional[int] = None
-    top_tip_residues: Optional[List[dict]] = None
-    bottom_tip_residues: Optional[List[dict]] = None
-    top_tip_mode: Optional[str] = None
-    bottom_tip_mode: Optional[str] = None
-    top_tip_residue: Optional[str] = None
-    bottom_tip_residue: Optional[str] = None
-    focal_state: Optional[str] = None
-    mrca_contrast: Optional[str] = None
-    mrca_modal_aa: Optional[str] = None
 
 
 # Backward-compatible alias

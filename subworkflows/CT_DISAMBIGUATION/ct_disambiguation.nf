@@ -95,7 +95,6 @@ process CT_DISAMBIGUATION_RUN {
       --output-dir ct_disambiguation \
       --asr-mode ${params.ct_disambig_asr_mode} \
       --asr-model ${params.ct_disambig_asr_model} \
-      --convergence-mode ${params.ct_disambig_convergence_mode} \
       --posterior-threshold ${params.ct_disambig_posterior_threshold} \
       --threads ${threads} \
       --workers ${workers} \

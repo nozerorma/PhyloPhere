@@ -72,7 +72,7 @@ def validate(project: ProjectConfig) -> list[str]:
     # --- Precomputed Run tab: base_path required whenever any reuse box is checked ---
     any_precomp_checked = any(
         [
-            pc.use_discovery, pc.use_resample, pc.use_bootstrap, pc.use_disambiguation,
+            pc.use_discovery, pc.use_resample, pc.use_disambiguation,
             pc.use_postproc, pc.use_accumulation, pc.use_rer, pc.use_fade, pc.use_vep,
         ]
     )
@@ -95,7 +95,7 @@ def validate(project: ProjectConfig) -> list[str]:
     # reachable by standalone non-GUI invocations, which is why the GUI can drive
     # phenotypes purely through --my_traits.
     #
-    # CAAS's own output (discovery/resample/bootstrap) is only ever consumed
+    # CAAS's own output (discovery/resample) is only ever consumed
     # downstream by Disambiguation, via run_signification (main.nf:184-199) — so this
     # is only a real problem when Disambiguation is actually enabled. The more precise
     # version of this same check lives in the `disambig.enabled` branch below; a
@@ -104,9 +104,9 @@ def validate(project: ProjectConfig) -> list[str]:
     caas = project.modules.caas
     disambig = project.modules.disambiguation
     if not caas.enabled and disambig.enabled:
-        if not any([pc.use_discovery, pc.use_resample, pc.use_bootstrap]):
+        if not any([pc.use_discovery, pc.use_resample]):
             errors.append(
-                "CAAS is disabled but no Discovery/Resample/Bootstrap reuse box is checked on "
+                "CAAS is disabled but no Discovery/Resample reuse box is checked on "
                 "the Precomputed Run tab — downstream modules (Disambiguation, Accumulation) "
                 "have no input."
             )
@@ -118,7 +118,7 @@ def validate(project: ProjectConfig) -> list[str]:
                 disambig.ct_disambig_asr_cache_dir,
                 "Disambiguation: ASR cache directory is required when asr_mode=precomputed.",
             )
-        if not caas.enabled and not any([pc.use_discovery, pc.use_resample, pc.use_bootstrap]):
+        if not caas.enabled and not any([pc.use_discovery, pc.use_resample]):
             errors.append(
                 "Disambiguation is enabled but CAAS is disabled with no reuse box checked on "
                 "the Precomputed Run tab."

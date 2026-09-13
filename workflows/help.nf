@@ -44,9 +44,9 @@ Module flag              Description
                           (independent of CAAS discovery).
 --contrast_selection      Prune data and select foreground/background
                           contrasts from a continuous or discrete trait.
---ct_tool <tools>         CAAStools discovery, resample and/or bootstrap
-                          (comma-separated, e.g. "discovery,resample,bootstrap").
-                          See: --help --ct_tool <discovery|resample|bootstrap>
+--ct_tool <tools>         CAAStools discovery and/or resample
+                          (comma-separated, e.g. "discovery,resample").
+                          See: --help --ct_tool <discovery|resample>
 --ct_disambiguation       Classify CAAS as convergent/parallel/divergent via ASR.
 --ct_postproc             Cluster/gene-level filtering + characterization report.
 --ct_accumulation         Permutation test for CAAS accumulation per gene.
@@ -64,7 +64,7 @@ module — see the module-specific help (or the README's Configuration
 Reference) for the relevant "*_from" / "*_input" parameters.
 '''
 
-// ── CT: discovery / resample / bootstrap ────────────────────────────────────
+// ── CT: discovery / resample ─────────────────────────────────────────────────
 
 def discovery_help = '''
 CT Discovery — Help
@@ -95,7 +95,7 @@ NOTE: fractions are resolved to floor(n_pairs * fraction) at runtime.
 def resample_help = '''
 CT Resample — Help
 =============================================
-Resamples virtual phenotypes for CAAS bootstrap analysis.
+Resamples virtual phenotypes for CAAS permutation-based analyses.
 
 Usage:
 --tree                      <"nwtree_file">              null
@@ -118,26 +118,6 @@ Output: directory of resample_*.tab files (one per chunk_size cycles).
 Strategy requirements:
 FGBG                        --fgsize --bgsize
 BM                           --traitvalues
-'''
-
-def bootstrap_help = '''
-CT Bootstrap — Help
-=============================================
-Runs CAAS bootstrap analysis over resampled foreground/background labelings.
-
-Usage:
---resample_from              <"resampleDir|resampleFile">  null
---discovery_from              <"discovery_output_dir">      null   (enables position-filter speedup)
---ct_bootstrap_batch_size     <INTEGER>                     10    (genes per task)
---export_groups               <true|false>                  false  (debug)
---export_perm_discovery       <true|false>                  false  (debug; required for CAAS permulation-excess null)
---alpha_threshold             <FLOAT>                        0.05
-
-# Shares the same alignment/filter parameters as discovery:
---alignment, --caas_config, --ali_format, --patterns,
---min_divergent_fraction, --max_bg_gaps_fraction, --max_fg_gaps_fraction,
---max_gaps_fraction, --max_bg_miss_fraction, --max_fg_miss_fraction,
---max_miss_fraction, --miss_pair, --caap_mode
 '''
 
 // ── Contrast selection ──────────────────────────────────────────────────────
@@ -175,7 +155,6 @@ Usage:
 --ct_disambig_asr_mode            <"precomputed">                "precomputed"
 --ct_disambig_asr_model             <"lg">                          "lg"
 --ct_disambig_asr_cache_dir          <"cache_dir">                   null
---ct_disambig_convergence_mode        <"focal_clade|mrca">            "focal_clade"
 --ct_disambig_posterior_threshold      <FLOAT 0-1>                     0.1
 --ct_disambig_max_tasks_per_child       <INTEGER>                       50
 --asr_robustness                        <true|false>                    true   (parallel diagnostic report)
@@ -371,12 +350,11 @@ workflow HELP {
 
         if (params.contrast_selection)   log.info contrast_selection_help
 
-        // --ct_tool accepts a comma-separated list (e.g. "discovery,resample,bootstrap")
+        // --ct_tool accepts a comma-separated list (e.g. "discovery,resample")
         if (params.ct_tool) {
             def tools = params.ct_tool.toString().split(',').collect { it.trim() }
             if ('discovery' in tools) log.info discovery_help
             if ('resample'  in tools) log.info resample_help
-            if ('bootstrap' in tools) log.info bootstrap_help
         }
 
         if (params.ct_disambiguation)    log.info disambiguation_help

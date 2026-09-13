@@ -105,29 +105,6 @@ def encoded_distribution(
     return enc
 
 
-def worst_case_group_probability(
-    distribution: Optional[Dict[str, float]],
-    target_enc: Optional[str],
-    scheme: Optional[str],
-) -> float:
-    """Upper bound on posterior mass for ``target_enc`` given a possibly
-    incomplete distribution.
-
-    Returns the exact recorded mass if ``target_enc`` is present. Otherwise
-    returns the total *unrecorded* mass (``1 - sum(recorded)``) as a ceiling:
-    everything not accounted for could, in the worst case, belong to
-    ``target_enc``. This requires no assumption about how the unrecorded mass
-    is actually distributed among the residues that aren't recorded, unlike a
-    uniform-fill estimate -- it is a guaranteed bound, not a guess.
-    """
-    if not target_enc:
-        return 0.0
-    enc = encoded_distribution(distribution, scheme)
-    if target_enc in enc:
-        return enc[target_enc]
-    return max(0.0, 1.0 - sum(enc.values()))
-
-
 def worst_case_any_group_probability(
     distribution: Optional[Dict[str, float]],
     target_encs,

@@ -14,10 +14,10 @@ its tab (self._module_tabs / self._postproc_checkbox below), not by poking its
 config field, so the other tab's own enabled-state visuals (its essential/advanced
 groups graying out) stay in sync for free.
 
-CT/CAAS gets a general checkbox + 3 specific ones (discovery/resample/bootstrap),
-mirroring the CAAS tab's own 3-checkbox --ct_tool pattern — ct.nf treats each of
-discovery_from/resample_from/bootstrap_from independently, so partial reuse (e.g.
-discovery + bootstrap precomputed, resample recomputed) is meaningful. Every other
+CT/CAAS gets a general checkbox + 2 specific ones (discovery/resample),
+mirroring the CAAS tab's own 2-checkbox --ct_tool pattern — ct.nf treats each of
+discovery_from/resample_from independently, so partial reuse (e.g.
+discovery precomputed, resample recomputed) is meaningful. Every other
 stage is one checkbox: the actual "which of several files" fan-out (e.g. Disambiguation
 still needing 2 files) is an implementation detail handled entirely in
 gui/generation/templates/run_single.sh.j2's path construction, not exposed here.
@@ -144,12 +144,8 @@ class PrecomputedTab(QWidget):
         self.use_resample = QCheckBox("Resample")
         self.use_resample.setChecked(self._config.use_resample)
         self.use_resample.toggled.connect(lambda v: self._set_bool("use_resample", v))
-        self.use_bootstrap = QCheckBox("Bootstrap")
-        self.use_bootstrap.setChecked(self._config.use_bootstrap)
-        self.use_bootstrap.toggled.connect(lambda v: self._set_bool("use_bootstrap", v))
         form.addRow("", self.use_discovery)
         form.addRow("", self.use_resample)
-        form.addRow("", self.use_bootstrap)
         layout.addLayout(form)
 
         return box
@@ -184,9 +180,9 @@ class PrecomputedTab(QWidget):
         self._set_bool("use_ct", value)
         self._toggle_module("ct", value)
         if value:
-            # Convenience default: checking the general box reuses all 3 files: the
+            # Convenience default: checking the general box reuses both files: the
             # common case is a full precomputed CT stage, not a partial one.
-            for cb in (self.use_discovery, self.use_resample, self.use_bootstrap):
+            for cb in (self.use_discovery, self.use_resample):
                 cb.setChecked(True)
 
     def _on_disambiguation_toggled(self, value: bool) -> None:
@@ -221,5 +217,3 @@ class PrecomputedTab(QWidget):
             self.use_discovery.setText(tr("Discovery", lang))
         if hasattr(self, "use_resample"):
             self.use_resample.setText(tr("Resample", lang))
-        if hasattr(self, "use_bootstrap"):
-            self.use_bootstrap.setText(tr("Bootstrap", lang))

@@ -153,20 +153,11 @@ pos_df  <- read_tsv(params$position_scores_file, show_col_types = FALSE)
 gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
-# CT p-value measures
-boot_measure_col <- if ("recovery_boot" %in% names(pos_df)) {
-  "recovery_boot"
-} else {
-  stop("position_scores.tsv must contain recovery_boot column")
-}
-boot_measure_is_raw  <- identical(boot_measure_col,  "recovery_boot")
-
 # scoring_compute.R §2g stopped carrying the per-scheme factors to the position
 # level in T1 (a position-level mean of asr_score / core hides scheme
-# disagreement). T3d (native_side_split) re-emits `core` / `phen_score` PER SIDE
-# as diagnostics. Alias `asr_score` to whichever is present so the panels below
-# degrade instead of erroring; `has_phen_asr` gates the joint scatter, which is
-# only meaningful with a real per-row phenotype axis.
+# disagreement). T3d (native_side_split) re-emits `core` PER SIDE as a
+# diagnostic. Alias `asr_score` to whichever is present so the panels below
+# degrade instead of erroring.
 if (!"asr_score" %in% names(pos_df)) {
   pos_df$asr_score <- if ("core" %in% names(pos_df) && any(!is.na(pos_df$core))) {
     pos_df$core
@@ -174,8 +165,6 @@ if (!"asr_score" %in% names(pos_df)) {
     pos_df$CAAS_score
   }
 }
-has_phen_asr <- all(c("phen_score", "asr_score") %in% names(pos_df)) &&
-  any(!is.na(pos_df$phen_score))
 
 # Provisional detection - overridden in the load-data block after directional scores are computed
 # NOTE: what for then?
@@ -193,8 +182,7 @@ has_scoring_stress <- .file_ok(params$stress_summary_file) &&
 has_genomic       <- .file_ok(params$genomic_info_file)
 has_perms         <- .file_ok(params$caas_perms_file)
 has_pos_pval      <- .file_ok(params$caas_pos_pval_file)      # pos_perm_p per (gene,position,scheme)
-has_pos_sample    <- .file_ok(params$caas_pos_sample_file)    # cycle-stratified null sample (asr + phen + row_caas)
-has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score + recovery_boot
+has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
 # FADE gene-level data: computed independently by scoring_compute.R from
@@ -258,77 +246,12 @@ if (has_perms) {
   caas_perms_obj <- NULL; perm_null_gene <- NULL
 }
 
-# Position-level null (cycle-stratified sample) + observed (filtered_discovery).
-# The observed side re-derives caas_row exactly as scoring_compute.R section 2f
-# does, so the values plotted here are what the pipeline actually scores on:
-#     phen_score = 1 - percent_rank(recovery_boot)   diagnostic only (T1)
-#     caas_row   = asr_path_score                    (T1 decision E: no phen factor)
-# The null side arrives pre-ranked from gene_wrapper.py pass B: null_phen_score is
-# 1 - percent_rank of n_detected within that cycle's genome-wide candidate pool,
-# the null's analogue of the line above.
 scheme_levels <- c("US", "GS1", "GS2", "GS3", "GS4")
 
-# Schema guard for the permulation sample. The position-level overlays require a
-# null whose phenotype axis is a percent_rank, which the file advertises by
-# carrying a `null_phen_score` column. A sample file without it holds an unranked
-# phenotype axis (mean ~0.97 rather than ~0.50) and is not on the same scale as
-# the ranked observed axis, so overlaying the two would compare quantities that
-# only look comparable. Presence of the column is the schema marker; when it is
-# absent the dependent sections are suppressed and a message is emitted instead.
-.unranked_perm_sample <- FALSE
-if (has_pos_sample) {
-  .sample_cols <- names(readr::read_tsv(params$caas_pos_sample_file, n_max = 0,
-                                        show_col_types = FALSE))
-  .unranked_perm_sample <- !("null_phen_score" %in% .sample_cols)
-  if (.unranked_perm_sample) has_pos_sample <- FALSE
-}
-
-if (has_pos_sample && has_filtered) {
-  null_pos <- readr::read_tsv(params$caas_pos_sample_file, show_col_types = FALSE) %>%
-    transmute(caap_group,
-              cycle          = as.character(cycle),
-              asr_path_score = suppressWarnings(as.numeric(asr_path_score)),
-              caas_row       = suppressWarnings(as.numeric(null_row_caas)),
-              phen_score     = suppressWarnings(as.numeric(null_phen_score)),
-              source = "null")
-  obs_pos <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
-    transmute(caap_group,
-              cycle          = NA_character_,
-              asr_path_score = suppressWarnings(as.numeric(asr_path_score)),
-              recovery_boot    = suppressWarnings(as.numeric(recovery_boot)),
-              phen_score     = 1 - dplyr::percent_rank(recovery_boot),
-              caas_row       = asr_path_score,
-              source = "observed") %>%
-    select(-recovery_boot)
-  scheme_overlay <- bind_rows(null_pos, obs_pos) %>%
-    filter(caap_group %in% scheme_levels) %>%
-    mutate(caap_group = factor(caap_group, levels = scheme_levels),
-           source     = factor(source, levels = c("null", "observed")))
-  has_scheme_overlay <- nrow(scheme_overlay) > 0
-} else {
-  scheme_overlay <- NULL
-  has_scheme_overlay <- FALSE
-}
-
-# Per-(cycle, scheme) null distribution shape. Each cycle is one complete null
-# realisation whose candidate pool is the same order of magnitude as the observed
-# discovered set, so a cycle's distribution is directly comparable to the observed
-# one -- which the pooled union across all cycles is not.
-has_pos_quantiles <- .file_ok(params$caas_pos_quantiles_file)
-if (has_pos_quantiles) {
-  perm_pos_quant <- readr::read_tsv(params$caas_pos_quantiles_file, show_col_types = FALSE) %>%
-    filter(caap_group %in% scheme_levels) %>%
-    mutate(caap_group = factor(caap_group, levels = scheme_levels))
-} else {
-  perm_pos_quant <- NULL
-}
-
-# perm_pos_pval.tsv (small) - the direct observed-vs-null crosscheck for the
-# detection axis BEFORE ranking. The null's raw analogue of the observed
-# recovery_boot = count/cycles is n_detected / n_cycles: same statistic ("what
-# fraction of resampling cycles recovered this position"), different resampling
-# axis (phenotype relabeling vs species bootstrap). §7.4 removed the leave-one-out
-# null_pvalue_boot column; pos_perm_p is now the schema marker for the ranked scale.
+# perm_pos_pval.tsv (small) - the detection-only decomposition of p.emp
+# (docs/scoring_v2_p_emp.md §7.3/§7.4): of the permuted-labeling cycles, how
+# many independently reproduced this exact CAAS, without the score gate.
+# pos_perm_p is the schema marker for the ranked scale.
 .unranked_perm_pval <- FALSE
 if (has_pos_pval) {
   .pval_cols <- names(readr::read_tsv(params$caas_pos_pval_file, n_max = 0,
@@ -343,19 +266,6 @@ if (has_pos_pval) {
 } else {
   perm_pos_pval <- NULL
 }
-
-# Observed recovery_boot per scheme, paired against the null table above.
-if (has_filtered) {
-  obs_pos_pval <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
-    transmute(caap_group,
-              recovery_boot = suppressWarnings(as.numeric(recovery_boot))) %>%
-    filter(caap_group %in% scheme_levels, is.finite(recovery_boot)) %>%
-    mutate(caap_group = factor(caap_group, levels = scheme_levels))
-} else {
-  obs_pos_pval <- NULL
-}
-has_pval_pair <- !is.null(perm_pos_pval) && !is.null(obs_pos_pval) &&
-                 nrow(perm_pos_pval) > 0 && nrow(obs_pos_pval) > 0
 
 accum_scheme_info <- tibble(
   scheme = c("us", "gs4", "gs3", "gs2", "gs1"),
@@ -517,8 +427,7 @@ ranked score, then rolls that up to a per-gene score comparable against
 independent evolutionary evidence.
 
 1. **Position score (`CAAS_score`)**: the mean of `asr_score` over
-   the biochemical schemes that detected the position (T1 decision E dropped the
-   `phen_score` permutation factor; it is still reported as a diagnostic). `asr_score` is the
+   the biochemical schemes that detected the position. `asr_score` is the
    CAAS convergence score on the pair's Voronoi domain (`core` v3): evidence that
    the convergence reflects independent origins, not shared ancestry. See Scoring
    Methodology below and the Biochemistry tab for how the schemes factor in.
@@ -570,16 +479,9 @@ reproduced independently of the pipeline code.
 
 ### Position-Level Score
 
-`CAAS_score` combines two orthogonal evidence axes, each on a continuous [0, 1] scale:
+`CAAS_score` is built from one evidence axis, on a continuous [0, 1] scale:
 
-#### 1. Phenotype evolution: `phen_score`
-
-One minus the permutation p-value (`recovery_boot`), which permutes the phenotype
-on the tree:
-
-$$\text{phen\_score} = 1 - P_{\text{boot}}$$
-
-#### 2. Position evolution: `asr_path_score` (`asr_score`)
+#### 1. Position evolution: `asr_path_score` (`asr_score`)
 
 Core v3: `asr_path_score == core`, the CAAS convergence score on the pair's
 Voronoi domain, built from the per-node ASR posteriors (full definitions in
@@ -593,7 +495,7 @@ Voronoi domain, built from the per-node ASR posteriors (full definitions in
 (Core v3 removed the pairwise isolation factor `s_c^s * s_d^s` and the earlier
 `independence` / `mrca_diversity` / `conservation_gate` axes from the score.)
 
-#### 3. Combining schemes
+#### 2. Combining schemes
 
 A substitution is tested against five biochemical partitions (US, GS1-GS4); a
 scheme "detects" the position if the substitution crosses one of its group
@@ -602,9 +504,9 @@ schemes that detected the position:
 
 $$\text{caas\_row} = \text{asr\_path\_score}$$
 
-(T1 decision E: the `phen_score` permutation-rank factor was dropped from
-`caas_row` on both the observed and null sides; `phen_score` is still reported
-as a diagnostic column.)
+(T1 decision E dropped a permutation-rank phenotype factor from `caas_row` on
+both the observed and null sides; the BOOTSTRAP/recovery_boot null arm that
+factor came from has since been retired entirely.)
 $$\text{CAAS\_score} = \operatorname{mean}_{s \in \text{detected schemes}} \text{caas\_row}_s$$
 
 `n_schemes` (how many partitions detected the position) and `scheme_set`
@@ -675,47 +577,6 @@ direction) and `gene_caas_bot` (BOTTOM direction) independently.
 
 ---
 
-## Input Distributions {.tabset}
-
-This section displays the distributions of the primary input significance measures (Permutation P-values and Phenotype Evolution scores) along with a joint comparison to show how they behave relative to the ancestral reconstruction axis and the final CAAS score.
-
-### Phenotype Evolution vs Ancestral Reconstruction
-
-```{r phen-vs-asr-scatter-skip, eval=!has_phen_asr, results='asis'}
-cat("_`phen_score` is not present in `position_scores.tsv` (scoring_compute.R",
-    "§2g does not carry the per-scheme phenotype axis to the position level).",
-    "The joint phen-vs-asr scatter is skipped; `asr_score` here is aliased to",
-    "the per-side `core`._\n")
-```
-
-```{r phen-vs-asr-scatter, fig.height=7, fig.width=8, eval=has_phen_asr}
-joint_df <- pos_df %>%
-  filter(!is.na(phen_score), !is.na(asr_score))
-
-# safe_cor() returns NA when < 3 complete pairs instead of erroring out
-.r_phen_caas <- round(safe_cor(joint_df$phen_score, joint_df$CAAS_score), 2)
-.r_asr_caas  <- round(safe_cor(joint_df$asr_score,  joint_df$CAAS_score), 2)
-.r_phen_asr  <- round(safe_cor(joint_df$phen_score, joint_df$asr_score), 2)
-
-ggplot(joint_df, aes(x = asr_score, y = phen_score, colour = CAAS_score)) +
-  geom_point(alpha = 0.45, size = 1.6) +
-  scale_colour_gradientn(
-    colours = c("#4E79A7", "#76B7B2", "#EDC948", "#F28E2B", "#E15759"),
-    name    = "CAAS\nscore"
-  ) +
-  annotate("text", x = -Inf, y = Inf,
-           label = sprintf("r(phen, CAAS) = %.2f\nr(asr, CAAS) = %.2f\nr(phen, asr) = %.2f",
-                           .r_phen_caas, .r_asr_caas, .r_phen_asr),
-           hjust = -0.05, vjust = 1.3, size = 3.2, colour = "grey30") +
-  labs(
-    title    = "Orthogonal Evidence Axes: ASR Path Score vs Phenotype Evolution Score",
-    x        = "asr_score (Ancestral State Path Confidence)",
-    y        = "phen_score (1 - percent_rank(recovery_boot))"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-```
-
----
 
 ## CAAS Permulation Null {.tabset}
 
@@ -730,24 +591,9 @@ observed pipeline:
 - **`asr_path_score`** - the permuted position-evolution signal (gene null = 0.90-quantile
   over the gene's positions). This axis is not currently wired into any ranking; the
   observed `gene_caas_score` now uses a size-adjusted max instead (see below).
-- **`CAAS_score`** = mean_scheme `asr_path_score` (T1: the `null_phen_score`
-  factor was dropped; it is still emitted for diagnostics), where
-  `null_phen_score = 1 − percent_rank(n_detected)` ranks each position's detection
-  count within its cycle's genome-wide candidate pool - the null analogue of the
-  observed `phen_score = 1 − percent_rank(recovery_boot)`. (§7.4 removed the
-  leave-one-out `null_pvalue_boot` column, which was numerically inert here.)
-
-> [!IMPORTANT]
-> **Both sides are `percent_rank`ed, and they must be.** The observed
-> `phen_score = 1 − percent_rank(recovery_boot)` is ranked across the whole scored pool;
-> the null's is ranked across that cycle's genome-wide candidate pool. The rank is what
-> escapes the `1/N` resolution floor - the raw statistic is heavily concentrated near 0
-> (observed mean ≈ 0.05), so without ranking the axis collapses to a near-constant ≈ 0.97
-> and the null score inflates well past the observed. Ranking makes both axes uniform on
-> [0, 1] and therefore comparable.
->
-> Because these are **within-run percentile ranks**, absolute score values are *not*
-> comparable across runs or traits - only ranks within a run are meaningful.
+- **`CAAS_score`** = mean_scheme `asr_path_score` (T1: the permutation-rank
+  phenotype factor was dropped from both sides; the BOOTSTRAP/recovery_boot
+  null arm it came from has since been retired entirely).
 
 The formal per-pathway `p.perm` (asr axis) is in the companion **FCS** report.
 
@@ -1108,187 +954,15 @@ cat("_No `p.emp` column in `position_scores.tsv` (no `--caas_pos_cycle_caas` sup
     "SCORING_COMPUTE for this run)._\n\n")
 ```
 
-### Position Level {.tabset}
-
-Per CAAP grouping scheme (`US`, `GS1`–`GS4`): observed overlaid on the permulation null (H0).
-
-```{r perm-pos-scale-mismatch, eval=(.unranked_perm_sample || .unranked_perm_pval), results='asis'}
-cat(paste0(
-  "> [!WARNING]\n",
-  "> **The permulation files for this run are not on the same scale as the observed\n",
-  "> side, so the position-level comparisons below are suppressed.**\n",
-  ">\n",
-  "> These sections require a null whose phenotype axis is a percent_rank, uniform on\n",
-  "> [0, 1] with mean ~0.50 - the scale the observed `phen_score` occupies. The files\n",
-  "> supplied here carry an unranked phenotype axis (`recovery_pval` / `row_caas`,\n",
-  "> mean ~0.97 rather than ~0.50) and no `null_phen_score` column. Plotting the two\n",
-  "> together would show a null sitting above the observed purely because of the scale\n",
-  "> difference, so the panels are withheld rather than shown misleadingly.\n",
-  ">\n",
-  "> Run `CAAS_PERMULATION` for this trait to produce `perm_pos_pval.tsv`,\n",
-  "> `perm_pos_sample.tsv` and `perm_pos_quantiles.tsv` on the ranked scale\n",
-  "> (`caas_perms.rds`, which feeds the FCS `p.perm`, is regenerated alongside them).\n\n"))
-```
-
-```{r perm-pos-na, eval=!has_scheme_overlay && !.unranked_perm_sample && !.unranked_perm_pval, results='asis'}
-cat("_Position-level null overlay unavailable (needs the cycle-stratified perm sample + filtered_discovery)._\n")
-```
-
-```{r perm-pos-setup, eval=has_scheme_overlay}
-src_pal <- c(null = "#BAB0AC", observed = "#E15759")
-.pos_density <- function(value_col, xlab, title) {
-  set.seed(seed_val)
-  nd <- scheme_overlay %>% filter(source == "null") %>% group_by(caap_group) %>%
-        slice_sample(n = 20000) %>% ungroup()
-  od <- scheme_overlay %>% filter(source == "observed")
-  d  <- bind_rows(nd, od) %>% filter(is.finite(.data[[value_col]]))
-  ggplot(d, aes(.data[[value_col]], fill = source, colour = source)) +
-    geom_density(alpha = .45, adjust = 1.1) +
-    facet_wrap(~ caap_group, scales = "free_y", ncol = 3) +
-    scale_fill_manual(values = src_pal) + scale_colour_manual(values = src_pal) +
-    labs(title = title, subtitle = "observed (red) overlaid on permulation null (grey)",
-         x = xlab, y = "density") +
-    theme_minimal(base_size = 12) +
-    theme(
-      legend.position = "top",
-      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
-      axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-      axis.text.x  = element_text(margin = ggplot2::margin(t = 5))
-    )
-}
-.pos_table <- function(value_col) {
-  scheme_overlay %>% group_by(caap_group, source) %>%
-    summarise(
-      n = n(),
-      median = median(.data[[value_col]], na.rm = TRUE),
-      q90    = quantile(.data[[value_col]], .90, na.rm = TRUE),
-      max    = max(.data[[value_col]], na.rm = TRUE),
-      .groups = "drop"
-    )
-}
-```
-
-#### CAAS score
-
-```{r perm-pos-caas, eval=has_scheme_overlay, fig.height=6, fig.width=10}
-knitr::kable(.pos_table("caas_row"), digits = 4,
-  caption = "Per-scheme CAAS contribution phen_score×asr×0.2: permulation null vs observed. Both sides use 1−percent_rank of their own bootstrap/recovery statistic.")
-print(.pos_density("caas_row", "per-scheme CAAS contribution", "CAAS contribution by functional group: observed vs null"))
-```
-
-#### asr_path_score
-
-```{r perm-pos-asr, eval=has_scheme_overlay, fig.height=6, fig.width=10}
-knitr::kable(.pos_table("asr_path_score"), digits = 4,
-  caption = "Per-scheme asr_path_score: permulation null vs observed.")
-print(.pos_density("asr_path_score", "asr_path_score", "asr_path_score by functional group: observed vs null"))
-```
-
-#### Phenotype axis (raw + ranked)
-
-The phenotype axis is the component most at risk of the two sides drifting apart, so it
-gets the same paired-violin treatment as the gene-level scores rather than a null-only
-histogram. **Raw** compares the two bootstrap/recovery statistics before ranking;
-**ranked** compares what actually enters the score. If the ranked pair does not overlap
-substantially, the two sides are not being built the same way.
-
-```{r perm-pos-pval, eval=has_pval_pair, fig.height=6, fig.width=10}
-.pval_pair <- dplyr::bind_rows(
-  perm_pos_pval %>% transmute(grp = caap_group,
-                              value = n_detected / n_cycles, source = "Null"),
-  obs_pos_pval  %>% transmute(grp = caap_group, value = recovery_boot, source = "Observed")
-)
-knitr::kable(
-  .pval_pair %>% group_by(grp, source) %>%
-    summarise(n = dplyr::n(), median = median(value, na.rm = TRUE),
-              mean = mean(value, na.rm = TRUE),
-              q90 = quantile(value, .90, na.rm = TRUE), .groups = "drop"),
-  digits = 4,
-  caption = sprintf(paste0("RAW detection statistic per scheme. Null `n_detected / n_cycles` ",
-                           "= fraction of the N=%d relabeling cycles that recovered this ",
-                           "position; observed `recovery_boot` = count/cycles from the ",
-                           "species bootstrap."),
-                    perm_pos_pval$n_cycles[1]))
-print(.paired_violin(
-  .pval_pair, xlab = "CAAP scheme", ylab = "raw recovery fraction",
-  title = "Detection statistic BEFORE ranking: observed vs null",
-  subtitle = "Null: per-cycle relabeling recovery fraction. Observed: species-bootstrap statistic.",
-  drop_zeros = FALSE))
-```
-
-```{r perm-pos-phen, eval=has_scheme_overlay, fig.height=6, fig.width=10}
-.phen_pair <- scheme_overlay %>%
-  transmute(grp = caap_group, value = phen_score,
-            source = ifelse(source == "null", "Null", "Observed"))
-knitr::kable(.pos_table("phen_score"), digits = 4,
-  caption = paste0("RANKED phenotype axis (phen_score = 1 - percent_rank) per scheme. ",
-                    "Null is ranked within each cycle's candidate pool; observed is ranked across the whole scored pool."))
-print(.paired_violin(
-  .phen_pair, xlab = "CAAP scheme", ylab = "phen_score = 1 - percent_rank",
-  title = "Phenotype axis AFTER ranking: observed vs null",
-  subtitle = "Null: ranked within each cycle's candidate pool. Observed: ranked across the whole scored pool.",
-  drop_zeros = FALSE))
-```
-
-#### Per-cycle null envelope
-
-```{r perm-pos-cycle-na, eval=!has_pos_quantiles, results='asis'}
-cat("_Per-cycle null envelope unavailable (needs `perm_pos_quantiles.tsv` from CAAS_PERMULATION)._\n")
-```
-
-```{r perm-pos-cycle, eval=has_pos_quantiles && has_scheme_overlay, fig.height=6, fig.width=10}
-# Each permulation cycle is a self-contained null realisation whose candidate pool is
-# the same order of magnitude as the observed discovered set, so a cycle's distribution
-# is directly comparable to the observed one. Pooling all cycles into one union (as the
-# older summaries did) is NOT comparable: the union is ~N times larger than any single
-# realisation and mixes positions that no single null run ever discovered together.
-.cyc <- perm_pos_quant %>% filter(metric == "null_row_caas")
-.obs_cyc <- scheme_overlay %>% filter(source == "observed") %>%
-  group_by(caap_group) %>%
-  summarise(q50 = median(caas_row, na.rm = TRUE),
-            q90 = .safe_q(caas_row, .90), .groups = "drop")
-
-if (nrow(.cyc) == 0 || nrow(.obs_cyc) == 0) {
-  cat("_Per-cycle null envelope unavailable (empty null or observed pool ",
-      "- degenerate permulation).\n_")
-} else {
-print(
-  ggplot(.cyc, aes(caap_group)) +
-    geom_violin(aes(y = q50, fill = "Null cycles"), scale = "width",
-                alpha = .65, colour = "grey30") +
-    geom_point(data = .obs_cyc, aes(y = q50, colour = "Observed"), size = 3) +
-    scale_fill_manual(values = c(`Null cycles` = "grey60"), name = NULL) +
-    scale_colour_manual(values = c(Observed = "#E15759"), name = NULL) +
-    labs(title = "Per-cycle null median CAAS contribution vs observed",
-         subtitle = paste0("Each null violin is the spread of per-cycle MEDIANS across the ",
-                           "permulation cycles (one point per cycle);\nthe red point is the ",
-                           "observed median. Observed should sit in or above the null's upper tail."),
-         x = "CAAP scheme", y = "median per-scheme CAAS contribution") +
-    theme_minimal(base_size = 12) +
-    theme(legend.position = "top")
-)
-
-knitr::kable(
-  .cyc %>% group_by(caap_group) %>%
-    summarise(n_cycles = dplyr::n(),
-              `null median (across cycles)` = median(q50, na.rm = TRUE),
-              `null q90 (across cycles)`    = .safe_q(q50, .90),
-              .groups = "drop") %>%
-    left_join(.obs_cyc %>% select(caap_group, `observed median` = q50), by = "caap_group"),
-  digits = 5,
-  caption = "Per-cycle null medians summarised across cycles, against the single observed median.")
-}
-```
-
 ---
 
 ## Position-Level Scores {.tabset}
 
-### Significance gate & p-values (directional)
+### CAAS score by direction
 
 ```{r pos-obs-pval-gate}
-# Observed hypergeometric p-values and significance-gate pass-rates by
-# direction (these are observed quantities - the permulation does not permute them).
+# Observed CAAS scores by direction (an observed quantity - the permulation
+# does not permute it).
 .dir_subsets <- list(
   global = pos_df,
   top    = pos_df %>% filter(side == "top"),
@@ -1298,13 +972,11 @@ obs_tbl <- purrr::imap_dfr(.dir_subsets, function(d, dir) {
   tibble::tibble(
     direction               = dir,
     positions               = nrow(d),
-    `median permutation p`  = if ("recovery_boot" %in% names(d)) median(d$recovery_boot, na.rm = TRUE) else NA_real_,
-    `mean permutation p`    = if ("recovery_boot" %in% names(d)) mean(d$recovery_boot,   na.rm = TRUE) else NA_real_,
     `median CAAS score`     = if ("CAAS_score" %in% names(d))  median(d$CAAS_score,  na.rm = TRUE) else NA_real_
   )
 })
 knitr::kable(obs_tbl, digits = 4,
-  caption = "Observed permutation p-values and CAAS scores by direction.")
+  caption = "Observed CAAS scores by direction.")
 ```
 
 ### CAAS Score Distribution
@@ -1350,9 +1022,8 @@ print(p_combined)
 
 ### Score axis
 
-The two axes whose product is `CAAS_score` (`phen_score` x `asr_score`).
-`asr_score` is the Voronoi-domain convergence score (`core` v3); its per-domain
-build-up is not shown here.
+The single axis `CAAS_score` is built from: `asr_score`, the Voronoi-domain
+convergence score (`core` v3). Its per-domain build-up is not shown here.
 
 ```{r score-axes-dist, fig.height=9}
 .axis_plot <- function(col, title, subtitle, fill, line) {
@@ -1366,10 +1037,7 @@ build-up is not shown here.
 .axis_plots <- Filter(Negate(is.null), list(
   .axis_plot("asr_score", "ASR Path Score (position evolution)",
              "Voronoi-domain convergence score (core v3)",
-             .tableau10[3], .tableau10[4]),
-  .axis_plot("phen_score", "Phenotype Evolution (1 - recovery_boot)",
-             "Permulation evidence",
-             .tableau10[1], .tableau10[2])
+             .tableau10[3], .tableau10[4])
 ))
 if (length(.axis_plots)) gridExtra::grid.arrange(grobs = .axis_plots, ncol = 1)
 ```
@@ -1500,14 +1168,12 @@ if (!is.null(.fd) && all(c("caap_group", "all_mrca_state", "Gene", "Position") %
 
 `r if (!has_scoring_stress) "> **Note:** scoring stress-test outputs are not available for this run."`
 
-| Variant | What it represents |
-|---------|---------------------|
-| `CAAS_current` | The production `CAAS_score`: mean of `asr_score` over the schemes that detected the position (T1: no `phen_score` factor). |
-| `CAAS_phen_only` | `phen_score` alone -- drops the ASR axis. |
-| `CAAS_asr_only` | `asr_score` alone -- drops the phenotype axis. |
-| `CAAS_scheme_max` | `max(caas_row)` instead of the mean over detected schemes -- tests the mean-vs-max scheme-aggregation choice (section 2g). |
-
-A robust run shows consistent Spearman rank correlation with `CAAS_current` across all variants.
+The two-factor (`phen_score` x `asr_score`) sensitivity variants this tab used
+to report were retired alongside `phen_score` itself (BOOTSTRAP/recovery_boot
+arm retirement) -- `caas_row` has had a single factor (`asr_score`) since T1,
+leaving nothing left to stress-test a decomposition against.
+`scoring_compute.R` no longer emits `position_score_stress_*.tsv`, so this tab
+is always empty going forward.
 
 ```{r stress-summary-table, eval=has_scoring_stress}
 DT::datatable(
@@ -1538,11 +1204,10 @@ things and are not expected to agree:
 | `n_top_species` / `n_bottom_species` | foreground / background contrast species with a non-gap residue here | alignment tally |
 
 ```{r top-positions-table}
-# Two-way score axes first (phen_score × asr_score), then the gate tiers, then
-# supplementary diagnostics. any_of() keeps this robust to absent columns.
+# Score axis first, then the gate tiers, then supplementary diagnostics.
+# any_of() keeps this robust to absent columns.
 display_cols <- c("Gene", "Position", "CAAS_score",
-                  "phen_score", "asr_score", "core",
-                  "recovery_boot",
+                  "asr_score", "core",
                   "n_schemes", "scheme_set",
                   # how many FOP hypotheses (H1..Hn) recovered this position, and which
                   "n_hypotheses", "supporting_hypotheses",
@@ -1694,45 +1359,6 @@ gridExtra::grid.arrange(
 )
 ```
 
-### P-Value Distributions
-
-```{r dir-pval-dist, fig.height=9}
-make_dir_pval_panel <- function(df, measure_col, is_raw, dir_label, col) {
-  vals   <- df[[measure_col]]
-  breaks <- quantile(vals, probs = seq(0, 1, 0.1), na.rm = TRUE)
-  plot_x <- if (is_raw) -log10(pmax(vals, 1e-300)) else vals
-  xlab   <- if (is_raw) sprintf("-log10(%s)", measure_col) else measure_col
-  title  <- sprintf("%s - %s", ifelse(is_raw, toupper(measure_col), measure_col), dir_label)
-  df2 <- data.frame(x = plot_x)
-  ggplot(df2, aes(x = x)) +
-    geom_histogram(aes(y = after_stat(density)), bins = 50, fill = col, alpha = 0.65) +
-    geom_density(linewidth = 0.8, colour = col) +
-    geom_vline(
-      xintercept = if (is_raw) -log10(pmax(breaks[2:10], 1e-300)) else breaks[2:10],
-      linetype = "dotted", colour = "grey50", linewidth = 0.3
-    ) +
-    labs(title = title,
-         subtitle = sprintf("n = %s positions | dotted = decile boundaries",
-                            format(nrow(df), big.mark = ",")),
-         x = xlab, y = "Density") +
-    theme(plot.title = element_text(face = "bold", size = 10))
-}
-
-p_boot_top <- make_dir_pval_panel(pos_top,    boot_measure_col, boot_measure_is_raw, "TOP",    .tableau10[1])
-p_boot_bot <- make_dir_pval_panel(pos_bottom, boot_measure_col, boot_measure_is_raw, "BOTTOM", .tableau10[3])
-
-gridExtra::grid.arrange(
-  p_boot_top, p_boot_bot,
-  ncol = 2,
-  top  = grid::textGrob(
-    "Permutation p-value (recovery_boot) distribution by direction",
-    gp = grid::gpar(fontface = "bold", fontsize = 12)
-  )
-)
-```
-
-
-
 ### Score axis
 
 ```{r dir-score-axis-dist, fig.height=9}
@@ -1748,8 +1374,6 @@ make_dir_component_plot <- function(df, col, dir_label, colour) {
 }
 
 dir_axis_plots <- Filter(Negate(is.null), list(
-  make_dir_component_plot(pos_top,    "phen_score", "TOP",    .tableau10[1]),
-  make_dir_component_plot(pos_bottom, "phen_score", "BOTTOM", .tableau10[3]),
   make_dir_component_plot(pos_top,    "asr_score",  "TOP",    .tableau10[5]),
   make_dir_component_plot(pos_bottom, "asr_score",  "BOTTOM", .tableau10[7])
 ))
@@ -1757,7 +1381,7 @@ if (length(dir_axis_plots)) {
   gridExtra::grid.arrange(
     grobs = dir_axis_plots, ncol = 2,
     top = grid::textGrob(
-      "Score axis distributions by direction: phenotype evolution (row 1) and ASR path score (row 2)",
+      "Score axis distribution by direction: ASR path score",
       gp = grid::gpar(fontface = "bold", fontsize = 12)
     )
   )
@@ -1770,11 +1394,10 @@ if (length(dir_axis_plots)) {
 has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
-                      "phen_score", "asr_score", "core",
+                      "asr_score", "core",
                       if (has_caas_col) "caas",
                       "n_schemes", "scheme_set",
                       "n_hypotheses", "supporting_hypotheses",
-                      "recovery_boot",
                       "side",
                       "derived_residues", "top_residue_support", "bottom_residue_support",
                       "top_residue_support_detail", "bottom_residue_support_detail",
@@ -1808,12 +1431,12 @@ DT::datatable(
 ## Geometric convergence vs score thresholds {.tabset}
 
 `convergence_type` (from CT_DISAMBIGUATION) is a **geometric** label - read from tip
-states alone, independent of any score. This section asks: as the CAAS / ASR /
-phenotype score threshold tightens, does the geometric convergence-type composition
+states alone, independent of any score. This section asks: as the CAAS / ASR
+score threshold tightens, does the geometric convergence-type composition
 of the retained positions shift? Same six cumulative thresholds SCORING uses
 everywhere else (`top100` = every scored position, tightening to `top1` = the top
-percentile by that score), cut three ways - `CAAS_score`, `asr_path_score`,
-`phen_score` - plus a combined heatmap against the ASR path-score diagnostics.
+percentile by that score), cut two ways - `CAAS_score`, `asr_path_score`
+- plus a combined heatmap against the ASR path-score diagnostics.
 
 ```{r convtype-setup, include=FALSE}
 .conv_thr <- tibble::tibble(
@@ -1831,7 +1454,7 @@ if (has_convtype) {
   .disc_df <- readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
     dplyr::select(Gene, Position, convergence_type, any_of(.axis_diag_cols), any_of("asr_path_score"))
   .conv_df <- pos_df %>%
-    dplyr::select(Gene, Position, CAAS_score, phen_score, any_of("side")) %>%
+    dplyr::select(Gene, Position, CAAS_score, any_of("side")) %>%
     dplyr::inner_join(.disc_df, by = c("Gene", "Position"))
   has_convtype <- nrow(.conv_df) > 0 && "convergence_type" %in% names(.conv_df)
 }
@@ -1898,16 +1521,10 @@ if (has_convtype) {
 .render_convtype_score_tab("asr_path_score", "ASR path score")
 ```
 
-### Phenotype score {.tabset}
-
-```{r convtype-phen, results='asis', fig.height=5}
-.render_convtype_score_tab("phen_score", "Phenotype score")
-```
-
 ### Axes + scores heatmap {.tabset}
 
 Mean value of each ASR path-score diagnostic (`core`, `derived_agreement`), plus
-`CAAS_score` / `asr_path_score` / `phen_score` themselves, per `convergence_type`
+`CAAS_score` / `asr_path_score` themselves, per `convergence_type`
 - shows which quantity drives or sinks each geometric class, e.g. divergent
 labels should score low on `derived_agreement`.
 
@@ -1917,7 +1534,7 @@ for (dr in c("Global", "Top", "Bottom")) {
   if (!has_convtype) { cat("_No `filtered_discovery_file` / `convergence_type` available._\n\n"); next }
   sub <- .conv_df
   if (dr != "Global") sub <- sub %>% dplyr::filter(side == tolower(dr))
-  value_cols <- intersect(c(.axis_diag_cols, "CAAS_score", "asr_path_score", "phen_score"), names(sub))
+  value_cols <- intersect(c(.axis_diag_cols, "CAAS_score", "asr_path_score"), names(sub))
   if (length(value_cols) == 0 || nrow(sub) == 0) { cat("_No data for this direction._\n\n"); next }
 
   axis_long <- sub %>%

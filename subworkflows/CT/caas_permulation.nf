@@ -276,7 +276,6 @@ process CAAS_PERMS_DISAMBIGUATE {
         --output-dir caas_perms_out \\
         ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} ${postproc_args} \\
         --asr-model ${params.ct_disambig_asr_model} \\
-        --convergence-mode ${params.ct_disambig_convergence_mode} \\
         --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
         --workers ${workers} \\
         --max-tasks-per-child ${max_tasks_per_child} \\

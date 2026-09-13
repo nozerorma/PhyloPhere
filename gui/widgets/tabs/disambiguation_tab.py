@@ -52,12 +52,6 @@ SPEC = ModuleTabSpec(
             choices=("precomputed", "compute"),
         ),
         FieldSpec(name="ct_disambig_asr_model", label="ASR substitution model"),
-        FieldSpec(
-            name="ct_disambig_convergence_mode",
-            label="Convergence mode",
-            kind="choice",
-            choices=("focal_clade", "mrca"),
-        ),
         FieldSpec(name="ct_disambig_posterior_threshold", label="Posterior probability threshold"),
         Section("Post-processing filter parameters (conf/ct_postproc.config)"),
         FieldSpec(name="run_postproc_exploratory", label="Run Exploratory Post-Processing Sweep", kind="bool"),

@@ -11,7 +11,6 @@ workflow CT_SIGNIFICATION {
     take:
         discovery_input_channel
         background_genes_channel
-        bootstrap_input_channel
 
     main:
         // Discovery source
@@ -47,33 +46,6 @@ workflow CT_SIGNIFICATION {
             error "CT signification requires CT background_genes output or --background_input"
         }
 
-        // Bootstrap source
-        def bootstrap_files
-        if (bootstrap_input_channel) {
-            log.info "📥 Using bootstrap file from CT module"
-            bootstrap_files = bootstrap_input_channel.map { file -> file }.collect()
-        } else {
-            assert params.bootstrap_from : "CT signification requires --bootstrap_from when not using CT pipeline"
-
-            def bootstrap_path = file(params.bootstrap_from)
-            assert bootstrap_path.exists() : "Error: bootstrap_from not found: ${params.bootstrap_from}"
-
-            if (bootstrap_path.isDirectory()) {
-                def boot_files = Channel.fromPath("${params.bootstrap_from}/*.{boot,tab}")
-                bootstrap_files = boot_files.collect()
-                def bootstrap_count = file(params.bootstrap_from).list().findAll {
-                    it.endsWith('.boot') || it.endsWith('.tab')
-                }.size()
-                assert bootstrap_count > 0 : "Error: No .boot or .tab files found in directory ${params.bootstrap_from}"
-                log.info "📂 Loading ${bootstrap_count} bootstrap files from directory: ${params.bootstrap_from}"
-            } else {
-                assert bootstrap_path.name.endsWith('.boot') || bootstrap_path.name.endsWith('.tab') :
-                    "Error: bootstrap_from file must have .boot or .tab extension"
-                bootstrap_files = Channel.fromPath(params.bootstrap_from).collect()
-                log.info "📄 Loading single bootstrap file: ${params.bootstrap_from}"
-            }
-        }
-
         // Guard: gracefully stop the pipeline when discovery has header only (no CAAS rows)
         def discovery_with_counts = discovery_file_ch
             .map { f ->
@@ -94,8 +66,7 @@ workflow CT_SIGNIFICATION {
 
         signification_results = CAAS_SIGNIFICATION_REPORT(
             discovery_file_nonempty,
-            global_background_genes,
-            bootstrap_files
+            global_background_genes
         )
 
     emit:

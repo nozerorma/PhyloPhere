@@ -254,6 +254,12 @@ process SCORING_COMPARE_REPORT {
     path vep_cosmic,          stageAs: 'vep_cosmic.tsv'
     path fade_sites_top,      stageAs: 'fade_sites_top.csv'
     path fade_sites_bottom,   stageAs: 'fade_sites_bottom.csv'
+    // posenrich's own per-position PFAM domain/clan, UCR core/flank region +
+    // per-position variability, and FUBAR selection call (build_position_gmt.py's
+    // position_characterization.tsv) -- same layers posenrich tests as GMTs,
+    // flattened for a direct Gene/Position join onto the Interesting Positions
+    // table below.
+    path position_char,       stageAs: 'position_characterization.tsv'
     // SCORING's published percentile slices (scoring_compute.R) -- canonical
     // gene/position 10/5/1% membership, read directly rather than re-derived
     // by this report (see 15.Comparison_report.Rmd's gene_lists_dir/
@@ -290,6 +296,7 @@ process SCORING_COMPARE_REPORT {
     def vep_cosmic_arg     = (vep_cosmic.name =~ /^NO_/)         ? 'NULL' : "'${vep_cosmic}'"
     def fade_sites_top_arg    = (fade_sites_top.name =~ /^NO_/)    ? 'NULL' : "'${fade_sites_top}'"
     def fade_sites_bottom_arg = (fade_sites_bottom.name =~ /^NO_/) ? 'NULL' : "'${fade_sites_bottom}'"
+    def position_char_arg     = (position_char.name =~ /^NO_/)     ? 'NULL' : "'${position_char}'"
     def gene_lists_arg     = (gene_lists.name =~ /^NO_/)     ? 'NULL' : "'${gene_lists}'"
     def position_lists_arg = (position_lists.name =~ /^NO_/) ? 'NULL' : "'${position_lists}'"
     def caas_perms_arg     = (caas_perms.name =~ /^NO_/)      ? 'NULL' : "'${caas_perms}'"
@@ -322,6 +329,7 @@ process SCORING_COMPARE_REPORT {
                     vep_cosmic_file          = ${vep_cosmic_arg},
                     fade_sites_top_file      = ${fade_sites_top_arg},
                     fade_sites_bottom_file   = ${fade_sites_bottom_arg},
+                    position_characterization_file = ${position_char_arg},
                     gene_lists_dir     = ${gene_lists_arg},
                     position_lists_dir = ${position_lists_arg},
                     caas_perms_file       = ${caas_perms_arg},
