@@ -476,12 +476,16 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       )
     )
     
-  contrast_tree_with_labels_all <- dplyr::full_join(contrast_tree_tibble, tree_tip_df_all, by = "species")
-  contrast_tree_data_all <- tidytree::as.treedata(contrast_tree_with_labels_all)
-
-  selected_pairs_tree_all <- ggtree(contrast_tree_data_all, aes(color = contrast_label),
-                                   layout = "fan", open.angle = 25,
-                                   size = tree_line_size) +
+  # Building the base plot from a pre-joined treedata object (tidytree::as.treedata()
+  # on a full_join'd tip+internal-node tibble, as the first `selected_pairs_tree` plot
+  # above does) breaks ggtreeExtra::geom_fruit() later in this environment -- it throws
+  # "replacement has 1 row, data has 0" from deep inside ggtreeExtra:::set_mapping(),
+  # reproducibly, on the treedata object alone (bare, any layout, no other layers).
+  # ggtree's idiomatic %<+% data-attachment onto the plain phylo tree does not trigger
+  # it (verified against this same viz_tree/tree_tip_df_all), so use that instead.
+  selected_pairs_tree_all <- ggtree(viz_tree, layout = "fan", open.angle = 25,
+                                   size = tree_line_size) %<+% tree_tip_df_all +
+    aes(color = contrast_label) +
     geom_tippoint(aes(subset = is_selected), size = tree_line_size * 2.8) +
     geom_tiplab(aes(subset = is_selected, label = display_label),
                 size = tip_label_size, offset = tip_label_offset,
@@ -494,35 +498,69 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       na.value = "grey75"
     )
 
-  # ── Voronoi domain ring: which canonical-pair domain each species falls into ──
+  # ── Voronoi domain highlight: which canonical-pair domain each species falls into ──
   # `species_domain` (fop_pair_sel.f, selection_algorithm.R) assigns EVERY species
   # to its nearest canonical pair by patristic distance — the partition that the
-  # FOP harvest draws H2..Hn from. Domains aren't necessarily monophyletic, so we
-  # can't geom_hilight a clade; instead draw them as an outer per-tip fill ring.
+  # FOP harvest draws H2..Hn from. Domains aren't guaranteed to be single clades, so
+  # one geom_hilight straight off each domain's MRCA could overshoot into whatever
+  # sits between two non-monophyletic members and swallow a neighboring domain's
+  # tips. Instead, decompose each domain into its maximal monophyletic sub-blocks
+  # (recursing from the tips up, stopping the moment a node's full descendant set
+  # would spill outside the domain) and highlight those individually as translucent
+  # "encircle" blobs -- native ggtree, so this sidesteps ggtreeExtra entirely.
   if (exists("species_domain") && !is.null(species_domain) && length(species_domain) > 0) {
-    domain_df <- tibble::tibble(
-      species = names(species_domain),
-      domain = factor(
-        paste0("Domain ", unname(species_domain)),
-        levels = paste0("Domain ", sort(unique(species_domain)))
-      )
-    ) %>%
-      dplyr::filter(species %in% viz_tree$tip.label)
+    domain_in_tree <- species_domain[names(species_domain) %in% viz_tree$tip.label]
 
-    n_domains <- nlevels(domain_df$domain)
-    domain_palette <- setNames(scales::hue_pal()(n_domains), levels(domain_df$domain))
+    if (length(domain_in_tree) > 0) {
+      find_maximal_domain_blocks <- function(tree, sp_domain) {
+        n_tip <- length(tree$tip.label)
+        total_nodes <- n_tip + tree$Nnode
+        children_of <- lapply(seq_len(total_nodes), function(nd) tree$edge[tree$edge[, 1] == nd, 2])
+        desc_cache <- vector("list", total_nodes)
+        get_desc_tips <- function(node) {
+          if (!is.null(desc_cache[[node]])) return(desc_cache[[node]])
+          d <- if (node <= n_tip) node else unlist(lapply(children_of[[node]], get_desc_tips))
+          desc_cache[[node]] <<- d
+          d
+        }
+        parent_of <- setNames(tree$edge[, 1], tree$edge[, 2])
+        domain_ids <- sort(unique(sp_domain))
+        setNames(lapply(domain_ids, function(d) {
+          target_tips <- match(names(sp_domain)[sp_domain == d], tree$tip.label)
+          full_nodes <- Filter(function(node) {
+            dt <- get_desc_tips(node)
+            length(dt) > 0 && all(dt %in% target_tips)
+          }, seq_len(total_nodes))
+          Filter(function(nd) {
+            p <- parent_of[as.character(nd)]
+            is.na(p) || !(p %in% full_nodes)
+          }, full_nodes)
+        }), domain_ids)
+      }
 
-    selected_pairs_tree_all <- selected_pairs_tree_all +
-      ggnewscale::new_scale_fill() +
-      ggtreeExtra::geom_fruit(
-        data = domain_df,
-        geom = geom_tile,
-        mapping = aes(y = species, fill = domain),
-        offset = 0.06,
-        pwidth = 0.08,
-        color = NA
-      ) +
-      scale_fill_manual(name = "Voronoi domain:", values = domain_palette)
+      domain_blocks <- find_maximal_domain_blocks(viz_tree, domain_in_tree)
+      hilight_df <- dplyr::bind_rows(lapply(names(domain_blocks), function(d) {
+        nds <- domain_blocks[[d]]
+        if (length(nds) == 0) return(NULL)
+        tibble::tibble(node = nds, domain = paste0("Domain ", d))
+      }))
+
+      if (!is.null(hilight_df) && nrow(hilight_df) > 0) {
+        domain_levels <- paste0("Domain ", sort(unique(domain_in_tree)))
+        hilight_df$domain <- factor(hilight_df$domain, levels = domain_levels)
+        domain_palette <- setNames(scales::hue_pal()(length(domain_levels)), domain_levels)
+
+        selected_pairs_tree_all <- selected_pairs_tree_all +
+          ggtree::geom_hilight(
+            data = hilight_df,
+            mapping = aes(node = node, fill = domain),
+            alpha = 0.25,
+            type = "encircle",
+            to.bottom = TRUE
+          ) +
+          scale_fill_manual(name = "Voronoi domain:", values = domain_palette)
+      }
+    }
   }
 
   selected_pairs_tree_all <- selected_pairs_tree_all +
