@@ -151,6 +151,7 @@ process SCORING_AMI_REPORT {
                     species             = ${species},
                     domino_network_score_thr = ${net_score},
                     gene_scores_file    = ${gs_arg},
+                    scoring_p_emp_thr   = ${params.scoring_p_emp_thr ?: 0.1},
                     string_db_dir       = '${params.string_db_dir}',
                     domino_network_sif  = '${domino_network_sif}',
                     domino_modules_dir  = '${domino_modules_dir}',
@@ -338,6 +339,7 @@ process SCORING_COMPARE_REPORT {
                     comparison_perm_null  = '${cmp_perm_null}',
                     comparison_perm_stat  = '${cmp_perm_stat}',
                     comparison_perm_topk  = ${cmp_perm_topk},
+                    scoring_p_emp_thr  = ${params.scoring_p_emp_thr ?: 0.1},
                     seed               = '${params.seed ?: 1998}'
                 ),
                 output_file = '15.Comparison_report_${traitname}.html'

@@ -9,7 +9,7 @@
 #
 # When the threshold is NOT met:
 #   • A plain-text sentinel  low_contrasts.skip  is published to ${params.outdir}.
-#   • Neither traitfile nor boot_traitfile is emitted downstream.
+#   • Neither traitfile nor permulation_traitfile is emitted downstream.
 #   • All subsequent CT / signification / disambiguation / … processes are
 #     silently skipped because their input channels never receive a value.
 #   • The Nextflow run exits 0 (no error).
@@ -18,7 +18,7 @@
 #
 # When the threshold IS met:
 #   • Both traitfiles are emitted unchanged (as traitfile_ok.tab /
-#     boot_traitfile_ok.tab) and downstream processing proceeds normally.
+#     permulation_traitfile_ok.tab) and downstream processing proceeds normally.
 #   • No sentinel file is written.
 */
 
@@ -33,14 +33,14 @@ process CHECK_MIN_CONTRASTS {
 
     input:
     path traitfile
-    path boot_traitfile
+    path permulation_traitfile
     path trait_dir, stageAs: 'trait_dir_in'
 
     output:
-    path "traitfile_ok.tab",      emit: traitfile_out,      optional: true
-    path "boot_traitfile_ok.tab", emit: boot_traitfile_out, optional: true
-    path "traitfiles_ok_dir",     emit: trait_dir_out,      optional: true
-    path "low_contrasts.skip",    emit: skip_flag,          optional: true
+    path "traitfile_ok.tab",             emit: traitfile_out,             optional: true
+    path "permulation_traitfile_ok.tab", emit: permulation_traitfile_out, optional: true
+    path "traitfiles_ok_dir",            emit: trait_dir_out,             optional: true
+    path "low_contrasts.skip",           emit: skip_flag,                 optional: true
 
     script:
     def min_n   = params.min_contrasts ?: 3
@@ -55,8 +55,8 @@ process CHECK_MIN_CONTRASTS {
              "in traitfile for trait '${tname}'." \\
              "Minimum ${min_n} required — CT pipeline will be skipped." >&2
     else
-        cp ${traitfile}      traitfile_ok.tab
-        cp ${boot_traitfile} boot_traitfile_ok.tab
+        cp ${traitfile}             traitfile_ok.tab
+        cp ${permulation_traitfile} permulation_traitfile_ok.tab
         mkdir -p traitfiles_ok_dir
         # Copy traitfiles based on params.multi_hypothesis toggle (multi vs single canonical hypothesis mode)
         if [ "${params.multi_hypothesis}" = "true" ] && [ -d "${trait_dir}" ]; then

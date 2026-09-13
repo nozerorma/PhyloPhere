@@ -134,7 +134,7 @@ def _remap_caas_df(df):
     """Normalise a filtered_discovery.tsv DataFrame to the internal column schema.
 
     Source-of-truth columns (tab-separated):
-      Gene, Position, tag, caas, recovery_boot, convergence_type, caap_group,
+      Gene, Position, tag, caas, convergence_type, caap_group,
       amino_encoded, is_conserved_meta, conserved_pair, side,
       asr_is_conserved, ..., Trait
 

@@ -14,7 +14,7 @@ from residue_descriptors import add_residue_descriptors, add_species_tally
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
     # Structural-key normalization only (gene/msa_pos → Gene/Position, used pervasively
     # downstream). Semantic concept columns (caap_group, convergence_type, pvalue, caas,
-    # amino_encoded, is_conserved_meta, conserved_pair, recovery_boot, tag) are kept in
+    # amino_encoded, is_conserved_meta, conserved_pair, tag) are kept in
     # disambiguation's canonical lowercase form end-to-end — no re-capitalization.
     rename_map = {}
     if "gene" in df.columns:

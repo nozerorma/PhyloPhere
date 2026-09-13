@@ -13,13 +13,13 @@ and analysis toolbox
 
 Pair-aware / BLAS implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
-MODULE NAME: boot_vec.py
+MODULE NAME: perm_replay_vec.py
 DESCRIPTION: Vectorized (Level-3 BLAS) reimplementation of the per-cycle CAAS/CAAP
-             counting performed scalarly by modules.boot.caasboot().
+             counting performed scalarly by modules.perm_replay.caas_perm_replay().
 
              The convergence test at a fixed alignment position is a hidden GEMM:
              the amino acid carried by each species is fixed; only the foreground /
-             background labeling changes across the B bootstrap cycles. Encoding
+             background labeling changes across the B perm-replay cycles. Encoding
              species -> group as a one-hot matrix G_p (shared across all cycles),
              "how many fg/bg members fall in each group, per cycle" is exactly
 
@@ -34,17 +34,17 @@ DESCRIPTION: Vectorized (Level-3 BLAS) reimplementation of the per-cycle CAAS/CA
              This mirrors, bit-for-bit, the decision taken by:
                - caas_id.iscaas()                 (classical CAAS / scheme US)
                - caap_id.check_caap_pattern()     (CAAP schemes GS1-GS4)
-               - boot.filter_for_gaps / filter_for_missings
-               - boot.caasboot()'s admitted_patterns substring membership
+               - perm_replay.filter_for_gaps / filter_for_missings
+               - perm_replay.caas_perm_replay()'s admitted_patterns substring membership
 
-             Parity is proven by boot_vec_equivtest.py (run before trusting it).
+             Parity is proven by perm_replay_vec_equivtest.py (run before trusting it).
 
 DEPENDENCIES: numpy, modules.caap_id (group scheme dictionaries)
-CALLED BY:    modules.boot (boot_on_single_alignment, hot counting path)
+CALLED BY:    modules.perm_replay (run_perm_replay_on_alignment, hot counting path)
 
-NOTE ON SCOPE: this path computes the empirical-p COUNTS only (the bootstrap's sole
+NOTE ON SCOPE: this path computes the empirical-p COUNTS only (perm-replay's sole
 product in production). The debug exports (--export_groups / --export_perm_discovery)
-remain on the scalar path in boot.py; the vectorized path is bypassed when they are on.
+remain on the scalar path in perm_replay.py; the vectorized path is bypassed when they are on.
 '''
 
 import numpy as np
@@ -57,7 +57,7 @@ from modules.caap_id import US, GS1, GS2, GS3, GS4
 _AMBIGUOUS_AAS = frozenset({"X", "B", "Z", "J", "U"})
 _GAP_SYMBOLS = frozenset({"-"}) | _AMBIGUOUS_AAS
 
-# Scheme registry, ordered as caasboot emits its per-scheme output lines.
+# Scheme registry, ordered as caas_perm_replay emits its per-scheme output lines.
 _SCHEME_ORDER = ["US", "GS1", "GS2", "GS3", "GS4"]
 _SCHEME_MAP = {"US": US, "GS1": GS1, "GS2": GS2, "GS3": GS3, "GS4": GS4}
 
@@ -77,7 +77,7 @@ def _threshold(value):
 
 
 def _admitted_pattern_flags(admitted_patterns):
-    """Reproduce caasboot's substring membership test for pattern admission.
+    """Reproduce caas_perm_replay's substring membership test for pattern admission.
 
     In the scalar code admitted_patterns is the raw string (e.g. "1,2,3") and the
     test is `check.pattern in admitted_patterns`, i.e. single-character substring
@@ -91,10 +91,10 @@ def _admitted_pattern_flags(admitted_patterns):
     return {k: (str(k) in container) for k in (1, 2, 3, 4)}
 
 
-class VectorizedBootstrap:
+class VectorizedPermReplay:
     """Per-resample-file (per multiconfig) labeling masks, reused across positions.
 
-    The foreground / background membership of each labeling (bootstrap cycle) is
+    The foreground / background membership of each labeling (perm-replay cycle) is
     independent of alignment position, so F and Bg are built once and reused for
     every position in the gene.
     """
@@ -214,13 +214,13 @@ class VectorizedBootstrap:
         """Count CAAS/CAAP hits per (position[, scheme]) across all B labelings.
 
         positions_with_schemes: list of (pos_dict, schemes_set_or_None), the same
-            structure boot.boot_on_single_alignment builds. In caap_mode the
+            structure perm_replay.run_perm_replay_on_alignment builds. In caap_mode the
             schemes_set selects which schemes to test for that position (None or a
             set containing "CAAS" -> all five; otherwise only the named schemes).
 
         collect_hits: when True, ALSO return, per key, the list of labeling (trait)
             names that are CAAS hits — needed to materialize the perm_discovery rows
-            (BOOTSTRAP_PERMS). Hits are gathered in ascending global labeling index.
+            (PERM_REPLAY). Hits are gathered in ascending global labeling index.
 
         Returns:
             collect_hits False:
@@ -278,7 +278,7 @@ class VectorizedBootstrap:
                 col_cursor += ng
 
         # Initialize result with zero counts so positions/schemes with no hits and
-        # the "no valid traits" case both report 0 (matching caasboot).
+        # the "no valid traits" case both report 0 (matching caas_perm_replay).
         if caap_mode:
             results = {}
             for (pi, sname, _s, _e) in jobs:
@@ -384,7 +384,7 @@ class VectorizedBootstrap:
 
     @staticmethod
     def _schemes_to_test(schemes_set):
-        """Mirror caasboot's discovery_schemes -> schemes_to_test resolution."""
+        """Mirror caas_perm_replay's discovery_schemes -> schemes_to_test resolution."""
         if not schemes_set:
             return list(_SCHEME_ORDER)
         if "CAAS" in schemes_set:

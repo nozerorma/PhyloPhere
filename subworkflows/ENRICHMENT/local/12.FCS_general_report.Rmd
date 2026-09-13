@@ -766,7 +766,8 @@ disp_names <- c(
   pct_bottom25 = "bot25%", pct_bottom10 = "bot10%", pct_bottom5 = "bot5%", pct_bottom1 = "bot1%",
   flag_fade = "fade", flag_fade_top = "fade_top", flag_fade_bottom = "fade_bottom",
   flag_rer_acc = "rer_acc", flag_rer_decc = "rer_decc",
-  flag_accum = "accum", flag_accum_top = "accum_top", flag_accum_bottom = "accum_bottom"
+  flag_accum = "accum", flag_accum_top = "accum_top", flag_accum_bottom = "accum_bottom",
+  flag_caas_significant = "caas_sig"
 )
 # Attribute columns shown per ranking (direction-aware). flag_accum (global) is
 # the non-directional accumulation_all_* test; flag_accum_top/flag_accum_bottom
@@ -774,14 +775,17 @@ disp_names <- c(
 # same convention as flag_fade/flag_fade_top/flag_fade_bottom. Percentile
 # quartet (25/10/5/1%), not a trio: 25% is a real, tested tier elsewhere
 # (posenrich's own Fisher test, AMI's DOMINO search), so it belongs here too.
+# flag_caas_significant (gene_caas_pperm_adj <= p_emp_thr, from scoring_compute.R)
+# is non-directional like flag_rer_acc/flag_rer_decc, so it rides along in all
+# three rankings the same way those do.
 cols_by_rk <- list(
   global = c("pct_top25","pct_top10","pct_top5","pct_top1",
              "pct_bottom25","pct_bottom10","pct_bottom5","pct_bottom1",
-             "flag_fade","flag_rer_acc","flag_rer_decc","flag_accum"),
+             "flag_fade","flag_rer_acc","flag_rer_decc","flag_accum","flag_caas_significant"),
   top    = c("pct_top25","pct_top10","pct_top5","pct_top1",
-             "flag_fade_top","flag_rer_acc","flag_rer_decc","flag_accum_top"),
+             "flag_fade_top","flag_rer_acc","flag_rer_decc","flag_accum_top","flag_caas_significant"),
   bottom = c("pct_bottom25","pct_bottom10","pct_bottom5","pct_bottom1",
-             "flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum_bottom")
+             "flag_fade_bottom","flag_rer_acc","flag_rer_decc","flag_accum_bottom","flag_caas_significant")
 )
 
 le_comp_all <- list()  # collect leading-edge composition tables for export

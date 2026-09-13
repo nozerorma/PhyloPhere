@@ -107,6 +107,7 @@ process SCORING_COMPUTE {
             --caas_pos_pval   '${cpp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
+            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.1} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \
@@ -135,6 +136,7 @@ process SCORING_COMPUTE {
             --caas_pos_pval   '${cpp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
+            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.1} \
             --stress               '${params.scoring_stress ?: false}' \
             --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
             --top_pct              ${top_pct} \

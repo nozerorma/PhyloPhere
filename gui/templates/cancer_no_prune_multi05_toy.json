@@ -77,7 +77,7 @@
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_discovery_batch_size": "25",
-      "ct_bootstrap_batch_size": "10",
+      "ct_perm_replay_batch_size": "10",
       "min_divergent_fraction": "0.5",
       "max_bg_gaps_fraction": "0.0",
       "max_fg_gaps_fraction": "0.0",

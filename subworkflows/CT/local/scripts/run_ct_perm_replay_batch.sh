@@ -77,12 +77,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "$batch_id" || -z "$manifest" || -z "$caas_config" || -z "$resampled_path" || -z "$ali_format" || -z "$ct_bin" ]]; then
-    echo "Missing required arguments for bootstrap batch runner" >&2
+    echo "Missing required arguments for perm-replay batch runner" >&2
     exit 1
 fi
 
 if ! [[ "$workers" =~ ^[1-9][0-9]*$ ]]; then
-    echo "Invalid --workers value for bootstrap batch runner: $workers" >&2
+    echo "Invalid --workers value for perm-replay batch runner: $workers" >&2
     exit 1
 fi
 
@@ -96,10 +96,10 @@ fi
 # prefix such as "/usr/local/bin/_entrypoint.sh <path-to-ct>" (container mode).
 declare -a ct_bin_arr
 read -ra ct_bin_arr <<< "$ct_bin"
-declare -a base_cmd=("${ct_bin_arr[@]}" "bootstrap")
+declare -a base_cmd=("${ct_bin_arr[@]}" "perm-replay")
 
 gene_count="$(grep -cve '^[[:space:]]*$' "$manifest" || true)"
-echo "Running batched bootstrap task $batch_id"
+echo "Running batched perm-replay task $batch_id"
 echo "Genes in batch: $gene_count"
 echo "Concurrent workers: $workers"
 
@@ -127,7 +127,7 @@ watchdog_guard() {
         if [[ "$cpu" == "$last_cpu" ]]; then
             same=$((same + 1))
             if [[ "$same" -ge "$max_same" ]]; then
-                echo "[BOOTSTRAP_BATCHED] Worker pid $pid stalled at 0% CPU for ${stall_timeout}s; killing" >&2
+                echo "[PERM_REPLAY_BATCHED] Worker pid $pid stalled at 0% CPU for ${stall_timeout}s; killing" >&2
                 kill -TERM "$pid" 2>/dev/null || true
                 sleep 5
                 kill -KILL "$pid" 2>/dev/null || true
@@ -143,7 +143,7 @@ watchdog_guard() {
 wait_for_slot() {
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -ge "$workers" ]]; do
         if ! wait -n; then
-            echo "[BOOTSTRAP_BATCHED] A child bootstrap job failed; stopping batch $batch_id" >&2
+            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed; stopping batch $batch_id" >&2
             terminate_children
             exit 1
         fi
@@ -153,7 +153,7 @@ wait_for_slot() {
 wait_for_all() {
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -gt 0 ]]; do
         if ! wait -n; then
-            echo "[BOOTSTRAP_BATCHED] A child bootstrap job failed; stopping batch $batch_id" >&2
+            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed; stopping batch $batch_id" >&2
             terminate_children
             exit 1
         fi
@@ -165,7 +165,7 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
     [[ -z "${alignment_id:-}" ]] && continue
     idx=$((idx + 1))
     wait_for_slot
-    echo "[BOOTSTRAP_BATCHED] Launching $alignment_id ($idx/$gene_count)"
+    echo "[PERM_REPLAY_BATCHED] Launching $alignment_id ($idx/$gene_count)"
 
     alignment_path="alignments/$alignment_name"
 
@@ -174,7 +174,7 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
         -a "$alignment_path"
         -t "$caas_config"
         -s "$resampled_path"
-        -o "${alignment_id}.bootstraped.output"
+        -o "${alignment_id}.perm_replay.output"
         --fmt "$ali_format"
     )
 
@@ -185,10 +185,10 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
         cmd+=(--progress_log "${alignment_id}.progress.log")
     fi
     if [[ "$export_groups" == "1" ]]; then
-        cmd+=(--export_groups "${alignment_id}.bootstrap.groups.output")
+        cmd+=(--export_groups "${alignment_id}.perm_replay.groups.output")
     fi
     if [[ "$export_perm_discovery" == "1" ]]; then
-        cmd+=(--export_perm_discovery "${alignment_id}.bootstrap.discovery.output")
+        cmd+=(--export_perm_discovery "${alignment_id}.perm_replay.discovery.output")
     fi
     if [[ "$fop_mode" == "1" ]]; then
         cmd+=(--fop)
@@ -203,7 +203,7 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
         worker_status=0
         wait "$worker_pid" || worker_status=$?
         kill "$watchdog_pid" 2>/dev/null || true
-        echo "[BOOTSTRAP_BATCHED] Completed $alignment_id"
+        echo "[PERM_REPLAY_BATCHED] Completed $alignment_id"
         exit "$worker_status"
     ) </dev/null &
 done <"$manifest"

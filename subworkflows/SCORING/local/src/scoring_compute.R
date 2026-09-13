@@ -54,6 +54,11 @@ caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permul
 caas_pos_pval_file   <- parse_arg("--caas_pos_pval")  # perm_pos_pval.tsv (position-level calibrated null p); NO_FILE otherwise
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
+# p.emp/p.emp_adj significance threshold for flag_caas_significant (fcs_stats.tsv).
+# Mirrors 11.Scoring_report.Rmd's `scoring_p_emp_thr` param (conf/scoring.config:47,
+# default 0.1) - same threshold, reused here so the FCS/POSENRICH/Comparison "%
+# significant" tables agree with what the Scoring report itself calls significant.
+p_emp_thr         <- as.numeric(parse_arg("--p_emp_thr", "0.1"))
 # The disambiguation subworkflow domain-pools the hypothesis harvest in-tree
 # (core v3: fop_pool.pool_domains over the K fixed Voronoi domains), so rows
 # arrive one per (Gene, Position, scheme, side) with hypothesis=NA and scoring
@@ -1123,7 +1128,15 @@ fcs_stats <- tibble(
   flag_rer_decc    = .istrue(.col(gene_scores, "rer_significant")) & grepl("dec", .rer_dir),
   flag_accum        = .istrue(.col(gene_scores, "accum_significant")),
   flag_accum_top    = .istrue(.col(gene_scores, "accum_significant_top")),
-  flag_accum_bottom = .istrue(.col(gene_scores, "accum_significant_bottom"))
+  flag_accum_bottom = .istrue(.col(gene_scores, "accum_significant_bottom")),
+  # CAAS permulation-null significance (gene_caas_pperm_adj <= p_emp_thr). This is
+  # a genuinely separate evidence axis from flag_fade/flag_rer/flag_accum above:
+  # those measure whether OTHER per-module tools (FADE/RERconverge/accumulation)
+  # independently flagged the gene, whereas this measures CAAS's own permutation-
+  # null p-value on its own composite score. Kept as its own flag rather than
+  # folded into any of the others so a reader can still ask "was this gene
+  # CAAS-significant" independently of what FADE/RER/accum said about it.
+  flag_caas_significant = .istrue(.col(gene_scores, "gene_caas_pperm_adj") <= p_emp_thr)
 ) %>%
   mutate(flag_fade = flag_fade_top | flag_fade_bottom)
 write_tsv(fcs_stats, "fcs_stats.tsv")

@@ -77,9 +77,6 @@ def convert_convergence_result_to_dict(
             if not hasattr(ns, "position") and "position" in result:
                 ns.position = result.get("position")
 
-            if not hasattr(ns, "recovery_boot") and "recovery_boot" in result:
-                ns.recovery_boot = result.get("recovery_boot")
-
             if not hasattr(ns, "is_significant") and "is_significant" in result:
                 ns.is_significant = result.get("is_significant")
 
@@ -107,7 +104,6 @@ def convert_convergence_result_to_dict(
         "position": getattr(result, "position", None),
         "tag": getattr(result, "tag", None),
         "caas": getattr(result, "caas", None),
-        "recovery_boot": getattr(result, "recovery_boot", None),
         "caap_group": getattr(result, "caap_group", "US"),
         "amino_encoded": getattr(result, "amino_encoded", ""),
         "is_conserved_meta": bool(getattr(result, "is_conserved_meta", False)),
@@ -781,7 +777,7 @@ def _parse_discovery_entries(
     cycle_tags,
     gene_filter: Optional[str] = None,
 ) -> Dict[str, List[CAASPosition]]:
-    """Parse a bootstrap-discovery TSV stream into ``{cycle_tag: [CAASPosition, ...]}``.
+    """Parse a perm-replay-discovery TSV stream into ``{cycle_tag: [CAASPosition, ...]}``.
 
     Shared by ``_perms_worker``'s two input layouts:
 
@@ -848,7 +844,6 @@ def _parse_discovery_entries(
             caas=caas,
             trait1_aa=trait1,
             trait0_aa=trait0,
-            recovery_boot=None,
             caap_group=parts[grp_idx] if grp_idx is not None and grp_idx < len(parts) else "US",
             amino_encoded=parts[ae_idx] if ae_idx is not None and ae_idx < len(parts) else "",
             is_conserved_meta=parts[icm_idx] in ("TRUE", "True", "1") if icm_idx is not None and icm_idx < len(parts) else False,
@@ -1038,13 +1033,18 @@ def _load_gene_asr_context(
 def build_percent_rank_lookup(hist_by_cycle: Dict[str, Dict[int, int]]) -> Dict[str, Dict[int, float]]:
     """Exact dplyr::percent_rank over each cycle's genome-wide candidate pool.
 
-    The null's phenotype axis is a rank, matching how the observed side builds its
-    own (scoring_compute.R: `1 - percent_rank(recovery_boot)` over the whole scored
-    pool). The rank is what makes the axis usable: the underlying recovery
-    statistic is heavily concentrated near zero (mean ~0.03), so `1 - raw` would be
-    a near-constant ~0.97, whereas `1 - percent_rank` is uniform on [0, 1] with
-    mean 0.50 — the same scale the observed axis occupies, which is the condition
-    for the two being comparable at all.
+    Historical note: this rank used to feed the null's phenotype axis, matching
+    how the observed side built its own (scoring_compute.R: `1 -
+    percent_rank(recovery_boot)` over the whole scored pool) before T1 dropped
+    the phen factor and retired the diagnostic `null_phen_score` column that
+    consumed it. The function and its call site are kept (see `rank_lookup`
+    threading in `_finalize_perm_scores`/`_build_cycle_score_pools`) but the
+    result is no longer used to score anything. The rank was what made the axis
+    usable: the underlying recovery statistic is heavily concentrated near zero
+    (mean ~0.03), so `1 - raw` would be a near-constant ~0.97, whereas `1 -
+    percent_rank` is uniform on [0, 1] with mean 0.50 — the same scale the
+    observed axis occupied, which was the condition for the two being
+    comparable at all.
 
     Each cycle is ranked within its OWN candidate pool, so the pool is the set of
     (gene, position, scheme) triples that cycle discovered. This is what gives the
@@ -1121,7 +1121,7 @@ def _perms_worker(
         axes_only = os.environ.get("CAAS_PERMS_AXES_ONLY", "1") not in ("0", "false", "False")
         per_site_dist_cache: Dict[int, Any] = {} if axes_only else None
 
-        # Load the gene's bootstrap discovery output in memory once. Two layouts,
+        # Load the gene's perm-replay discovery output in memory once. Two layouts,
         # one shared parser (_parse_discovery_entries):
         #   * a single concatenated perm_discovery_file (has a `gene` column)
         #   * a per-gene shard  perm_discovery/<gene>.tsv  (no `gene` column)
@@ -1310,11 +1310,12 @@ def _perms_worker(
             })
 
         # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
-        # Scoring itself is deliberately NOT done here. null_phen_score needs
-        # 1 - percent_rank(n_detected) ranked over the cycle's GENOME-WIDE
-        # candidate pool, and this worker only ever sees one gene — so the rank
-        # cannot be formed at this level. The parent finalizes it in pass B
-        # (see _finalize_perm_scores) once every gene's rows have been counted.
+        # Scoring itself is deliberately NOT done here. size_adj_max calibrates
+        # a gene's score against its cycle's GENOME-WIDE reference pool
+        # (_build_cycle_score_pools), and this worker only ever sees one gene —
+        # so that pool cannot be formed at this level. The parent finalizes it
+        # in pass B (see _finalize_perm_scores) once every gene's rows have
+        # been counted.
         #
         # Each record is already per-side by the time it reaches here (a "both"
         # position is two records, each with its own `side` and core_s), so the
@@ -1387,9 +1388,11 @@ def _null_row_caas(row: Dict[str, Any], rank_lookup: Dict[str, Dict[int, float]]
 
     T1 decision E: ``caas_row = asr_score`` — the phen_score (permulation
     percent-rank) factor is dropped from the product on both the observed and
-    null sides. ``rank_lookup`` is kept in the signature so the diagnostic
-    ``null_phen_score`` column can still be emitted, but it no longer scales the
-    score. Single definition shared by BOTH finalize sub-passes.
+    null sides. ``rank_lookup`` is unused here now that the diagnostic
+    ``null_phen_score`` column has been retired; kept in the signature only to
+    avoid touching the call chain in ``_build_cycle_score_pools``/
+    ``_finalize_perm_scores``. Single definition shared by BOTH finalize
+    sub-passes.
     """
     return float(row["asr_path_score"])
 
@@ -1576,7 +1579,6 @@ def _finalize_perm_scores(
 
     Mirrors scoring_compute.R's observed pipeline term for term:
 
-        null_phen_score = 1 - percent_rank(n_detected)         # diagnostic only (T1)
         null_row_caas   = asr                                  # T1: no phen factor
         position score  = mean(null_row_caas) over that position's schemes
         gene x cycle    = size_adj_max over the cycle's positions, per direction
@@ -1730,9 +1732,7 @@ def _finalize_perm_scores(
                 continue
             pos = int(row["Position"])
             asr = float(row["asr_path_score"])
-            d = int(row["n_detected"])
 
-            phen = 1.0 - rank_lookup.get(cyc, {}).get(d, 0.0)  # diagnostic only
             rc = asr  # T1 decision E: caas_row = asr_score (no phen factor)
 
             skey = (cyc, pos, row.get("side") or "none")
@@ -1752,7 +1752,7 @@ def _finalize_perm_scores(
             key = (cyc, grp)
             seen[key] = seen.get(key, 0) + 1
             res = reservoirs.setdefault(key, [])
-            item = (gene, pos, asr, phen, rc)
+            item = (gene, pos, asr, rc)
             if len(res) < sample_per_cycle_group:
                 res.append(item)
             else:
@@ -1766,15 +1766,15 @@ def _finalize_perm_scores(
 
     # ── Sample + quantile summaries ────────────────────────────────────────────
     sample_fields = ["Gene", "Position", "caap_group", "cycle",
-                     "asr_path_score", "null_phen_score", "null_row_caas"]
+                     "asr_path_score", "null_row_caas"]
     with open(sample_path, "w", newline="") as f_sample:
         writer_sample = _csv.DictWriter(f_sample, fieldnames=sample_fields, delimiter="\t")
         writer_sample.writeheader()
         for (cyc, grp), res in reservoirs.items():
             writer_sample.writerows({
                 "Gene": g, "Position": p, "caap_group": grp, "cycle": cyc,
-                "asr_path_score": a, "null_phen_score": ph, "null_row_caas": rc,
-            } for (g, p, a, ph, rc) in res)
+                "asr_path_score": a, "null_row_caas": rc,
+            } for (g, p, a, rc) in res)
 
     quant_levels = [5, 10, 25, 50, 75, 90, 95]
     quant_fields = (["cycle", "caap_group", "metric", "n_sampled", "n_total", "mean"]
@@ -1785,7 +1785,7 @@ def _finalize_perm_scores(
         for (cyc, grp), res in reservoirs.items():
             if not res:
                 continue
-            for metric, idx in (("asr_path_score", 2), ("null_phen_score", 3), ("null_row_caas", 4)):
+            for metric, idx in (("asr_path_score", 2), ("null_row_caas", 3)):
                 vals = np.asarray([r[idx] for r in res], dtype=float)
                 rec = {"cycle": cyc, "caap_group": grp, "metric": metric,
                        "n_sampled": len(vals), "n_total": seen.get((cyc, grp), len(vals)),
@@ -2023,10 +2023,10 @@ def process_all_genes_perms(
                 manifest_rows.append((_gene, len(detail_rows)))
 
                 n_detail_rows += len(detail_rows)
-                # Per-cycle candidate-pool histogram (feeds the diagnostic
-                # null_phen_score rank only — T1 dropped phen from the score). One
-                # count per (cycle, Position, caap_group) candidate: a "both"
-                # position is two detail rows and must NOT be counted twice.
+                # Per-cycle candidate-pool histogram, used by build_percent_rank_lookup
+                # below and for the pool-size diagnostic log. One count per (cycle,
+                # Position, caap_group) candidate: a "both" position is two detail
+                # rows and must NOT be counted twice.
                 _hist_seen: Set[Tuple[str, str, str]] = set()
                 for row in detail_rows:
                     hk = (row["cycle"], str(row["Position"]), row["caap_group"])
@@ -2060,7 +2060,7 @@ def process_all_genes_perms(
         logger.error(
             "[perms] pass A produced ZERO detail rows — the permulation null is empty. "
             "Downstream caas_perms.rds / FCS p.perm will be degenerate. Check the "
-            "per-cycle bootstrap discovery (export_perm_discovery) and the ASR cache."
+            "per-cycle perm-replay discovery (export_perm_discovery) and the ASR cache."
         )
 
     # ── Pass B: rank within each cycle, score, aggregate ────────────────────────

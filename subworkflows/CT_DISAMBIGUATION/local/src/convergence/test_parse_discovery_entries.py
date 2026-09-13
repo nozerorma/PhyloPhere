@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """`_parse_discovery_entries` — the one parser shared by `_perms_worker`'s two
-bootstrap-discovery layouts (V3-6 consolidation of two near-identical copies).
+perm-replay-discovery layouts (V3-6 consolidation of two near-identical copies).
 
 Run: python -m pytest test_parse_discovery_entries.py
 """

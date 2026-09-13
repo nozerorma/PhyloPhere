@@ -1,0 +1,334 @@
+---
+title: "CAAS Significance Report"
+subtitle: "`r if (exists('params') && !is.null(params$traitname)) paste0('Trait: ', params$traitname) else ''`"
+date: "`r format(Sys.time(), '%d %B %Y')`"
+author: "PhyloPhere pipeline"
+output:
+  html_document:
+    theme: flatly
+    syntax_highlighting: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+    df_print: paged
+    fig_width: 10
+    fig_height: 6
+    self_contained: true
+params:
+  global_meta_input: NULL
+  position_scores_input: NULL
+  gene_scores_input: NULL
+  output_dir: "."
+  p_emp_thr: 0.1
+  seed: "1998"
+---
+
+<!--
+This report is a DISTINCT, LATER pipeline stage than 7.CT_signification.Rmd.
+CT_SIGNIFICATION (which renders 7.CT_signification.Rmd) runs upstream of
+SCORING in the live DAG -- it cannot join position_scores.tsv/gene_scores.tsv
+because those files don't exist yet when it runs. This report re-reads
+CT_SIGNIFICATION's already-published meta_caas output (one row per
+Gene, Position, pattern, caap_group) together with SCORING's published
+position_scores.tsv/gene_scores.tsv to annotate that pattern breakdown with
+the permulation-null significance columns (p.emp/p.emp_adj,
+gene_caas_pperm/gene_caas_pperm_adj) that only exist once SCORING has run.
+See /home/miguel/.claude/projects/-home-miguel-IBE-UPF-PhD-PhyloPhere/memory/project_retire_bootstrap_arm.md
+("Phase C late half") for the history this replaces (the dead recovery_boot
+null join).
+-->
+
+<style type="text/css">
+  body {
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .main-container {
+    max-width: 95% !important;
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .title {
+    font-size: 38px;
+    font-weight: bold;
+    color: #2c3e50;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .subtitle {
+    font-size: 24px;
+    font-weight: normal;
+    color: #7f8c8d;
+    margin-top: 10px;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+  .author, .date {
+    font-size: 16px;
+    color: #7f8c8d;
+    font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+</style>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 10,
+  fig.height = 7
+)
+
+suppressPackageStartupMessages({
+  library(tidyverse)
+  library(knitr)
+  library(scales)
+  library(data.table)
+  library(paletteer)
+})
+
+createDir <- function(path) {
+  if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
+}
+
+# Same house palette as 7.CT_signification.Rmd, for visual continuity.
+tableau_10 <- paletteer_d("ggthemes::Tableau_10")
+names(tableau_10) <- c(
+  "blue", "orange", "vermillion", "bluish_green",
+  "green", "yellow", "reddish_purple", "pink",
+  "brown", "gray"
+)
+
+sig_palette <- c(
+  "Significant"     = tableau_10[["bluish_green"]],
+  "Not significant" = tableau_10[["gray"]]
+)
+
+seed_val <- if (!is.null(params$seed) && nzchar(as.character(params$seed))) as.integer(params$seed) else 1998
+set.seed(seed_val)
+
+p_emp_thr <- suppressWarnings(as.numeric(params$p_emp_thr))
+if (is.na(p_emp_thr)) p_emp_thr <- 0.1
+cat(sprintf("Using p.emp_adj / gene_caas_pperm_adj significance threshold: %s\n", p_emp_thr))
+```
+
+## 1. Data Import
+
+Load CT_SIGNIFICATION's published meta_caas table and SCORING's published
+position/gene score tables, all from the same pipeline run.
+
+```{r data_import}
+if (is.null(params$global_meta_input) || !file.exists(params$global_meta_input)) {
+  stop("global_meta_input (meta_caas / global_meta_caas.tsv) not found: ", params$global_meta_input)
+}
+if (is.null(params$position_scores_input) || !file.exists(params$position_scores_input)) {
+  stop("position_scores_input (position_scores.tsv) not found: ", params$position_scores_input)
+}
+if (is.null(params$gene_scores_input) || !file.exists(params$gene_scores_input)) {
+  stop("gene_scores_input (gene_scores.tsv) not found: ", params$gene_scores_input)
+}
+
+meta_caas <- read_tsv(params$global_meta_input, show_col_types = FALSE)
+position_scores <- read_tsv(params$position_scores_input, show_col_types = FALSE)
+gene_scores <- read_tsv(params$gene_scores_input, show_col_types = FALSE)
+
+cat(sprintf("Loaded meta_caas: %d rows from %s\n", nrow(meta_caas), basename(params$global_meta_input)))
+cat(sprintf("Loaded position_scores: %d rows from %s\n", nrow(position_scores), basename(params$position_scores_input)))
+cat(sprintf("Loaded gene_scores: %d rows from %s\n", nrow(gene_scores), basename(params$gene_scores_input)))
+
+required_meta_cols <- c("Gene", "Position", "pattern")
+missing_meta_cols <- setdiff(required_meta_cols, names(meta_caas))
+if (length(missing_meta_cols) > 0) {
+  stop("Missing required columns in meta_caas: ", paste(missing_meta_cols, collapse = ", "))
+}
+has_caap_group <- "caap_group" %in% names(meta_caas)
+```
+
+## 2. Join SCORING's null-based significance onto the meta_caas rows
+
+### 2a. Position-level: p.emp / p.emp_adj
+
+`position_scores.tsv` carries one row per (Gene, Position, side); `p.emp`/
+`p.emp_adj` are already pooled across sides (max-over-sides "all" axis --
+docs/scoring_v2_p_emp.md amendment V3-4a / scoring_compute.R §2f-ter), so
+both side-rows for a given (Gene, Position) carry the identical p.emp value.
+We deduplicate to one row per (Gene, Position) BEFORE joining -- joining on
+the undeduped table (or on `side`, which meta_caas doesn't have) would
+silently duplicate every meta_caas row once per side.
+
+```{r position_join}
+has_p_emp_cols <- all(c("p.emp", "p.emp_adj") %in% names(position_scores))
+if (!has_p_emp_cols) {
+  warning("position_scores.tsv has no p.emp/p.emp_adj columns -- was it produced by ",
+          "a stale scoring_compute.R build? Significance columns will be all-NA.")
+  pos_dedup <- tibble(Gene = character(), Position = integer(),
+                       p.emp = numeric(), p.emp_adj = numeric())
+} else {
+  pos_dedup <- position_scores %>%
+    mutate(Position = as.integer(Position)) %>%
+    distinct(Gene, Position, p.emp, p.emp_adj)
+  # Guard against a corrupt/undeduped upstream file: if the same (Gene,Position)
+  # carries >1 distinct p.emp value, the pooling assumption above is violated --
+  # surface it loudly rather than silently duplicating rows downstream.
+  n_dupe_keys <- pos_dedup %>% count(Gene, Position) %>% filter(n > 1) %>% nrow()
+  if (n_dupe_keys > 0) {
+    warning(sprintf(paste0("%d (Gene,Position) keys have >1 distinct p.emp value in ",
+                            "position_scores.tsv -- the max-over-sides pooling assumption ",
+                            "this report relies on does not hold for this run. Keeping the ",
+                            "first row per key; p.emp/p.emp_adj may be unreliable."), n_dupe_keys))
+    pos_dedup <- pos_dedup %>% distinct(Gene, Position, .keep_all = TRUE)
+  }
+}
+
+meta_caas <- meta_caas %>%
+  mutate(Position = as.integer(Position)) %>%
+  left_join(pos_dedup, by = c("Gene", "Position")) %>%
+  mutate(position_significant = !is.na(p.emp_adj) & p.emp_adj <= p_emp_thr)
+
+.n_meta_rows <- nrow(meta_caas)
+.n_pos_matched <- meta_caas %>% filter(!is.na(p.emp)) %>% nrow()
+.pos_rate <- if (.n_meta_rows > 0) .n_pos_matched / .n_meta_rows else 0
+cat(sprintf("  p.emp position join: matched %d/%d positions (%.1f%%)\n",
+            .n_pos_matched, .n_meta_rows, 100 * .pos_rate))
+if (.pos_rate < 0.5) {
+  cat(sprintf(paste0("  WARNING: p.emp join rate %.1f%% < 50%% -- the meta_caas positions ",
+                     "and position_scores.tsv positions are likely on different coordinate ",
+                     "systems or from different pipeline runs. Treat position_significant as ",
+                     "unreliable.\n"), 100 * .pos_rate), file = stderr())
+}
+```
+
+### 2b. Gene-level: gene_caas_pperm / gene_caas_pperm_adj
+
+`gene_scores.tsv` already has one row per Gene (no dedup needed). Only the
+global/pooled `gene_caas_pperm`/`gene_caas_pperm_adj` columns are used --
+meta_caas rows carry no side/direction column, so joining the `_top`/
+`_bottom` variants would be meaningless at this join's grain (which
+top/bottom pair would a given meta_caas row match against?).
+
+```{r gene_join}
+has_gene_pperm_cols <- all(c("gene_caas_pperm", "gene_caas_pperm_adj") %in% names(gene_scores))
+if (!has_gene_pperm_cols) {
+  warning("gene_scores.tsv has no gene_caas_pperm/gene_caas_pperm_adj columns -- ",
+          "significance columns will be all-NA.")
+  gene_dedup <- tibble(Gene = character(), gene_caas_pperm = numeric(), gene_caas_pperm_adj = numeric())
+} else {
+  gene_dedup <- gene_scores %>%
+    distinct(Gene, gene_caas_pperm, gene_caas_pperm_adj)
+}
+
+meta_caas <- meta_caas %>%
+  left_join(gene_dedup, by = "Gene") %>%
+  mutate(gene_significant = !is.na(gene_caas_pperm_adj) & gene_caas_pperm_adj <= p_emp_thr)
+
+.n_genes_meta <- n_distinct(meta_caas$Gene)
+.n_genes_matched <- meta_caas %>% filter(!is.na(gene_caas_pperm)) %>% distinct(Gene) %>% nrow()
+.gene_rate <- if (.n_genes_meta > 0) .n_genes_matched / .n_genes_meta else 0
+cat(sprintf("  gene_caas_pperm gene join: matched %d/%d genes (%.1f%%)\n",
+            .n_genes_matched, .n_genes_meta, 100 * .gene_rate))
+if (.gene_rate < 0.5) {
+  cat(sprintf(paste0("  WARNING: gene_caas_pperm join rate %.1f%% < 50%% -- the meta_caas ",
+                     "genes and gene_scores.tsv genes are likely from different pipeline runs. ",
+                     "Treat gene_significant as unreliable.\n"), 100 * .gene_rate), file = stderr())
+}
+```
+
+## 3. Pattern-level prioritization summary
+
+**This is a prioritization summary, not a hypothesis test on the pattern.**
+We deliberately do NOT compute a combined/joint p-value (e.g. Fisher's
+method) across the positions making up a pattern. Positions within a
+pattern -- and within a gene -- are not independent draws: they share ASR
+history, tree topology, and often domain/scheme structure, so a naive joint
+combination would overstate significance. This mirrors the established
+codebase stance (see memory `stats_significance_prioritization.md`):
+ranked top-X% prioritization, not per-element FDR significance claims, is
+the right framing here. Instead we report, per pattern (and per caap_group
+when present), simple descriptive counts driven by the per-position/per-gene
+thresholds already computed above, plus the single most extreme driver
+(`min_p_emp_adj`) -- never a combined test statistic.
+
+```{r pattern_summary}
+group_vars <- if (has_caap_group) c("caap_group", "pattern") else "pattern"
+
+pattern_summary <- meta_caas %>%
+  group_by(across(all_of(group_vars))) %>%
+  summarize(
+    n_positions = n(),
+    n_positions_significant = sum(position_significant, na.rm = TRUE),
+    pct_positions_significant = 100 * n_positions_significant / n_positions,
+    min_p_emp_adj = suppressWarnings(min(p.emp_adj, na.rm = TRUE)),
+    n_genes = n_distinct(Gene),
+    n_genes_significant = n_distinct(Gene[gene_significant %in% TRUE]),
+    pct_genes_significant = 100 * n_genes_significant / n_genes,
+    .groups = "drop"
+  ) %>%
+  mutate(min_p_emp_adj = ifelse(is.infinite(min_p_emp_adj), NA_real_, min_p_emp_adj)) %>%
+  arrange(across(all_of(group_vars)))
+
+print(kable(pattern_summary, digits = 4, format.args = list(big.mark = ",")))
+
+p_pct_sig <- ggplot(pattern_summary, aes(x = factor(pattern), y = pct_positions_significant, fill = factor(pattern))) +
+  geom_bar(stat = "identity") +
+  { if (has_caap_group) facet_wrap(~ caap_group, scales = "free_y") } +
+  theme_minimal() +
+  labs(
+    title = "Percent of Positions Significant by Pattern",
+    subtitle = sprintf("position_significant := p.emp_adj <= %s (prioritization summary, not a joint test)", p_emp_thr),
+    x = "Pattern",
+    y = "% positions significant"
+  ) +
+  theme(
+    axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
+    axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
+    plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
+    axis.text.x = element_text(angle = 0, hjust = 0.5),
+    panel.grid.major = element_line(color = "darkgray", size = 0.5),
+    legend.position = "none"
+  )
+
+print(p_pct_sig)
+```
+
+## 4. Row-level significance table
+
+```{r rowlevel_table}
+print(kable(head(meta_caas, 50), digits = 4, format.args = list(big.mark = ",")))
+cat(sprintf("(showing first 50 of %d rows; full table written to significance/meta_caas_significance.tsv)\n", nrow(meta_caas)))
+```
+
+## 5. Export
+
+```{r export}
+sig_dir <- "significance"
+createDir(sig_dir)
+
+write_tsv(meta_caas, file.path(sig_dir, "meta_caas_significance.tsv"))
+write_tsv(pattern_summary, file.path(sig_dir, "pattern_significance_summary.tsv"))
+
+cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "meta_caas_significance.tsv"), nrow(meta_caas)))
+cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "pattern_significance_summary.tsv"), nrow(pattern_summary)))
+```
+
+---
+
+## Summary
+
+This report annotates the pattern/caap_group breakdown produced by
+CT_SIGNIFICATION with SCORING's permulation-null significance columns
+(`p.emp`/`p.emp_adj` at the position level, `gene_caas_pperm`/
+`gene_caas_pperm_adj` at the gene level), thresholded at
+`p_emp_thr = `r p_emp_thr``. Pattern-level numbers are a prioritization
+summary (counts and rates), not a combined hypothesis test.
+
+---
+
+<details>
+<summary>Session Info</summary>
+```{r session-info}
+sessionInfo()
+```
+</details>
+
+*Generated by PhyloPhere — CT Signification Module (post-SCORING significance annotation)*
+*Date of generation: `r Sys.Date()`*

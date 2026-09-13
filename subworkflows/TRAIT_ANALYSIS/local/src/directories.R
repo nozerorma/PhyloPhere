@@ -33,7 +33,7 @@ ci_dir <- file.path(data_exploration_dir, "5.CI_overlaps")
 # CAAS directories
 caas_dir <- file.path(resultsDir, "2.CT")
 traitfile_dir <- file.path(caas_dir, "1.Traitfiles")
-bootstrap_traitfile_dir <- file.path(caas_dir, "2.Bootstrap_traitfiles")
+permulation_traitfile_dir <- file.path(caas_dir, "2.Permulation_traitfiles")
 
 debug_log("data_exploration_dir = %s", data_exploration_dir)
 debug_log("data_pruning_dir = %s", data_pruning_dir)

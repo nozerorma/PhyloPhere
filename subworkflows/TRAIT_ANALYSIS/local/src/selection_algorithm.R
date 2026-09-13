@@ -189,7 +189,8 @@ fop_pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait, max
     return(list(
       canon_pairs = canon_pairs,
       hypotheses = list(),
-      summary_df = data.frame()
+      summary_df = data.frame(),
+      species_domain = integer(0)
     ))
   }
   
@@ -338,6 +339,7 @@ fop_pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait, max
   list(
     canon_pairs = canon_pairs,
     hypotheses = hypotheses,
-    summary_df = summary_df
+    summary_df = summary_df,
+    species_domain = species_domain
   )
 }

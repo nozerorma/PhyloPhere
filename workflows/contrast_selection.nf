@@ -131,14 +131,14 @@ workflow CONTRAST_SELECTION {
     // outdir and emits nothing — all downstream processes are silently skipped.
     check_out = CHECK_MIN_CONTRASTS(
         contrast_out.trait_file_out,
-        contrast_out.bootstrap_trait_file_out,
+        contrast_out.permulation_trait_file_out,
         contrast_out.trait_dir_out
     )
 
     emit:
-        trait_file_out           = check_out.traitfile_out
-        bootstrap_trait_file_out = check_out.boot_traitfile_out
-        trait_dir_out            = check_out.trait_dir_out
+        trait_file_out             = check_out.traitfile_out
+        permulation_trait_file_out = check_out.permulation_traitfile_out
+        trait_dir_out              = check_out.trait_dir_out
         tree_file_out            = contrast_out.tree_file_out
         stats_file_out           = contrast_stats_file
         // Pre-Dunn candidate fg/bg species pool for FADE (see 3.CI-composition.Rmd).

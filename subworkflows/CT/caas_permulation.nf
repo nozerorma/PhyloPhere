@@ -6,7 +6,7 @@
  * Builds a genome-wide *excess* null for CAAS FCS pathway enrichment:
  *   1. SUBSET_RESAMPLE_PERMS  — take the first N (caas_full_perms) permuted
  *      labelings from the resample output (drop b_0, the real labeling).
- *   2. BOOTSTRAP_PERMS        — full-pool bootstrap (no --discovery) with
+ *   2. PERM_REPLAY            — full-pool perm-replay (no --discovery) with
  *      export_perm_discovery ON → per-gene per-cycle discovery rows.
  *   3. CONCAT_PERM_DISCOVERY  — stitch into one perm_discovery.tab.
  *   4. CAAS_PERMS_DISAMBIGUATE — load ASR once / replay N labelings
@@ -94,18 +94,18 @@ process SUBSET_RESAMPLE_PERMS {
     """
 }
 
-// ── 2. Full-pool bootstrap with perm-discovery export (no --discovery) ───────
-process BOOTSTRAP_PERMS {
+// ── 2. Full-pool perm-replay with perm-discovery export (no --discovery) ─────
+process PERM_REPLAY {
     tag "$alignmentID"
-    label 'process_boot'
-    publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true, pattern: '*.bootstrap.discovery.output'
+    label 'process_perm_replay'
+    publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true, pattern: '*.perm_replay.discovery.output'
 
     input:
     tuple val(alignmentID), path(alignmentFile), path(resampledPath)
     file caas_config
 
     output:
-    tuple val(alignmentID), file("${alignmentID}.bootstrap.discovery.output"), emit: perm_discovery, optional: true
+    tuple val(alignmentID), file("${alignmentID}.perm_replay.discovery.output"), emit: perm_discovery, optional: true
 
     script:
     def pairArgs = """
@@ -127,8 +127,8 @@ _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{prin
 """
     def ct_bin = (params.use_singularity || params.use_apptainer) ? "/usr/local/bin/_entrypoint.sh $baseDir/subworkflows/CT/local/ct" : "$baseDir/subworkflows/CT/local/ct"
     """
-    # Full-pool perms bootstrap now runs the vectorized CAAS kernel
-    # (modules/boot_vec.py): the per-cycle CAAS test is a Level-3 BLAS matmul and
+    # Full-pool perms perm-replay now runs the vectorized CAAS kernel
+    # (modules/perm_replay_vec.py): the per-cycle CAAS test is a Level-3 BLAS matmul and
     # the perm_discovery rows are materialized only for the sparse hits. Size
     # OpenBLAS to the task allocation so those matmuls parallelize; pin MKL/NUMEXPR
     # (unused) and OpenMP to 1. Per-stage only — RER/R stages keep multithreaded
@@ -136,16 +136,16 @@ _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{prin
     export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     ${pairArgs}
     # No --discovery → full position pool; export_perm_discovery forced ON.
-    ${ct_bin} bootstrap \\
+    ${ct_bin} perm-replay \\
         -a ${alignmentFile} \\
         -t ${caas_config} \\
         -s ${resampledPath} \\
-        -o ${alignmentID}.bootstraped.output \\
+        -o ${alignmentID}.perm_replay.output \\
         --fmt ${params.ali_format} \\
         --patterns ${params.patterns} \\
         ${params.miss_pair ? '--miss_pair' : ''} \\
         ${params.caap_mode ? '--caap_mode' : ''} \\
-        --export_perm_discovery ${alignmentID}.bootstrap.discovery.output \\
+        --export_perm_discovery ${alignmentID}.perm_replay.discovery.output \\
         --max_conserved \$_max_conserved \\
         --max_bg_gaps \$_max_bg_gaps \\
         --max_fg_gaps \$_max_fg_gaps \\
@@ -156,19 +156,19 @@ _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{prin
     """
 }
 
-// ── 2b. Batched full-pool bootstrap with perm-discovery export ───────────────
-process BOOTSTRAP_PERMS_BATCHED {
+// ── 2b. Batched full-pool perm-replay with perm-discovery export ─────────────
+process PERM_REPLAY_BATCHED {
     tag "$batchID (${batchSize} genes)"
-    label 'process_boot_batched'
-    publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true, pattern: '*.bootstrap.discovery.output'
+    label 'process_perm_replay_batched'
+    publishDir path: "${params.outdir}/caas_permulation/perm_disc", mode: 'copy', overwrite: true, pattern: '*.perm_replay.discovery.output'
 
     input:
     tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*'), path(resampledPath)
     file caas_config
 
     output:
-    path("*.bootstraped.output"), emit: bootstrap_out, optional: true
-    path("*.bootstrap.discovery.output"), emit: perm_discovery, optional: true
+    path("*.perm_replay.output"), emit: perm_replay_out, optional: true
+    path("*.perm_replay.discovery.output"), emit: perm_discovery, optional: true
 
     script:
     def ctBinary = (params.use_singularity || params.use_apptainer)
@@ -209,9 +209,9 @@ process BOOTSTRAP_PERMS_BATCHED {
     extra_opts+=(--max_fg_miss \$_max_fg_miss)
     extra_opts+=(--max_miss \$_max_miss)
 
-    echo "\${extra_opts[@]}" > .ct_bootstrap_batch_args
+    echo "\${extra_opts[@]}" > .ct_perm_replay_batch_args
 
-    bash $baseDir/subworkflows/CT/local/scripts/run_ct_bootstrap_batch.sh \\
+    bash $baseDir/subworkflows/CT/local/scripts/run_ct_perm_replay_batch.sh \\
         --batch-id ${batchID} \\
         --manifest ${batchID}.manifest.tsv \\
         --caas-config ${caas_config} \\
@@ -222,7 +222,7 @@ process BOOTSTRAP_PERMS_BATCHED {
         --progress-log 0 \\
         --export-groups 0 \\
         --export-perm-discovery 1 \\
-        --extra-args-file .ct_bootstrap_batch_args
+        --extra-args-file .ct_perm_replay_batch_args
     """
 }
 
@@ -404,32 +404,32 @@ workflow CAAS_PERMS_PREP {
         resample_dir       // path (resample_*.tab directory)
 
     main:
-        def bootstrapBatchSize = (params.ct_bootstrap_batch_size ?: 1) as int
+        def permReplayBatchSize = (params.ct_perm_replay_batch_size ?: 1) as int
         def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms ?: 10, params.seed ?: 1998)
-        def boot_in = align_tuple
+        def perm_replay_in = align_tuple
             .map { id, f -> tuple(id, f) }
             .combine(subset.subset)
             .map { id, f, sub -> tuple(id, f, sub) }
 
         def discovery_files
-        if (bootstrapBatchSize > 1) {
-            def bootstrapBatchCounter = 0
-            def bootstrap_batches = boot_in
+        if (permReplayBatchSize > 1) {
+            def permReplayBatchCounter = 0
+            def perm_replay_batches = perm_replay_in
                 .toSortedList({ a, b -> a[0] <=> b[0] })
                 .flatMap()
-                .collate(bootstrapBatchSize)
+                .collate(permReplayBatchSize)
                 .map { batch ->
-                    def batchID = sprintf('bootstrap_perms_batch_%05d', ++bootstrapBatchCounter)
+                    def batchID = sprintf('perm_replay_batch_%05d', ++permReplayBatchCounter)
                     def manifestText = batch.collect { row -> "${row[0]}\t${row[1].name}\tNO_FILE" }.join('\n') + '\n'
                     def alignmentFiles = batch.collect { row -> row[1] }.unique { file -> file.name }
                     def resampled = batch[0][2]
                     tuple(batchID, batch.size(), manifestText, alignmentFiles, resampled)
                 }
-            def boot = BOOTSTRAP_PERMS_BATCHED(bootstrap_batches, caas_config)
-            discovery_files = boot.perm_discovery.flatten().collect()
+            def perm_replay = PERM_REPLAY_BATCHED(perm_replay_batches, caas_config)
+            discovery_files = perm_replay.perm_discovery.flatten().collect()
         } else {
-            def boot = BOOTSTRAP_PERMS(boot_in, caas_config)
-            discovery_files = boot.perm_discovery.map { id, f -> f }.collect()
+            def perm_replay = PERM_REPLAY(perm_replay_in, caas_config)
+            discovery_files = perm_replay.perm_discovery.map { id, f -> f }.collect()
         }
     emit:
         perm_discovery = discovery_files

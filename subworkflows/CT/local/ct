@@ -51,9 +51,8 @@ Tools           Description
 discovery       Detects Convergent Amino Acid Substitutions (CAAS) from
                 a single Multiple Sequence Alignment (MSA).
 
-resample        Resamples virtual phenotypes for CAAS bootstrap analysis.
-
-bootstrap       Runs CAAS bootstrap analysis on a on a single MSA.
+perm-replay     Reruns and rescores resampled labelings for CAAS pattern
+                matches on a single MSA.
 
 '''
 
@@ -80,7 +79,7 @@ if "help" in tool.lower() or tool.lower == "-h":                                
     print(genhelp)                                                      # Print toolbox-wide help
     exit()
 
-if tool.lower() not in ("discovery", "resample", "bootstrap"):          # Check: the user mistyped the name of a tool
+if tool.lower() not in ("discovery", "perm-replay"):          # Check: the user mistyped the name of a tool
     print(application_info)
     print(genhelp)                                                      # Print toolbox-wide help
     print("\n\n****ERROR: no tool named", tool + "\n\n")
@@ -263,215 +262,10 @@ if tool.lower() == "discovery":
 
 
 
-#### TOOL 2. RESAMPLE ######################################################################################################
+#### TOOL 2. PERM-REPLAY ######################################################################################################
 ########################################################################################################################
 
-if tool.lower() == "resample":
-
-    ### 2.1 Init the input parser
-    parser = OptionParser()
-
-    ### 2.2 Inputs and outputs
-
-    #       2.2.1 Phylogeny (phylogenetic tree for permulations)
-    parser.add_option("-p", "--phylogeny", dest="phylogeny_file",
-                    help="The tree of species in newick format. Needed for permulations", default = "none")
-
-    ###     2.2.2 Output file (the table)
-    parser.add_option("-o", "--output", dest="output_file",
-                    help="The output file with resampled traits", default = "none")
-
-    ### 2.3 FG and BG size settings
-
-    #       2.3.1 Template config file (ct discovery -t)
-    parser.add_option("--bytemp", dest="config_file",
-                    help="Fetch the size of FG and BG groups from a ct discovery trait config file.", default = "none")
-
-    #       2.3.2 Size of the foreground group
-    parser.add_option("-f", "--fg_size", dest="fgsize",
-                    help="Number of species in the foreground group. Must be > 0.", default = "notset")
-
-    #       2.3.3 Size of the background group
-    parser.add_option("-b", "--bg_size", dest="bgsize",
-                    help="Number of species in the background group. Must be > 0.", default = "notset")
-
-    ### 2.4 Simulation settings
-
-    ###     2.4.1 Simulation strategy
-    parser.add_option("-m", "--mode", dest="bootstrap_mode",
-                    help="Virtualization strategy. 'random' for random species selection, or 'bm' for brownian motion based selection.", default = "random")
-
-    ###     2.4.2 Simulation strategy options for phylogeny restriction
-    parser.add_option("--limit_by_group", dest="groupfile",
-                    help="Limits random species selections in specific groups. Works with --mode random only and requires a group specification file.", default = "none")
-
-    parser.add_option("--limit_by_patristic_distance", dest="pd_option",
-                    help="Limits random species selections in specific patristic distance intervals. Works with --mode random only. Overridden by --limit_by_group.", default = "NO")
-
-    ###     2.4.3 Simulation strategy options for brownian motion
-
-    parser.add_option("--traitvalues", dest="trait_values",
-                    help="Trait values for brownian motion reshuffling. Mandatory for --mode bm.", default = "none")
-
-    ###     2.4.4 How many bootstrap cycles?
-    parser.add_option("--cycles", dest="cycles",
-                    help="number of cycles", default = "1000")
-
-    ###     2.4.5 Chunk size for file writing
-    parser.add_option("--chunk_size", dest="chunk_size",
-                    help="Number of cycles per output file. Default: 500. Output will be a directory with multiple resample_*.tab files.", default = "500")
-
-    ### 2.5 Usage
-
-    parser.usage = "ct resample -p $phylogenetic_tree (newick format) -f $foreground_size -b $background_size / --bytemp $trait_file -o $output_directory --cycles $N --chunk_size $M\n\nNOTE: to use --mode bm or phylogeny restriction you MUST provide a template (--bytemp)\nNOTE: Output will be a directory containing resample_*.tab files (one file per chunk_size cycles)"
-
-    ### 2.6 Parse the options
-
-    (options, args) = parser.parse_args()
-
-    ### 2.7 Check the mandatory options
-
-    ###     2.7.1 the general input
-
-    missing_option_messages = []
-
-    if options.phylogeny_file == "none":
-        missing_option_messages.append("No input tree file provided")
-
-    if options.output_file == "none":
-        missing_option_messages.append("Output not specified")
-
-    if len(missing_option_messages) > 0:
-        print("\n" + application_info)
-        print("\n\n****ERROR: mandatory i/o information missing:")
-        print("\n".join(missing_option_messages))
-        print("")
-        print(parser.usage)
-        print("")
-        print("For further info: ct resample --help")
-        print("")
-        exit()
-
-    ###     2.7.2 The group size determination
-
-    if options.config_file == "none":
-        if "notset" in [options.fgsize, options.bgsize ]:
-            print("\n\n****ERROR: you need to specify background and foreground size or provide a trait config file as a template")
-            print("")
-            print(parser.usage)
-            print("")
-            exit()
-
-        else:
-            try:
-                bgsize_numeric = int(options.bgsize)
-                fgsize_numeric = int(options.fgsize)
-
-            except:
-                print("\n\n****ERROR: background and/or foreground size in invalid format (must be an integer)" )
-                print("")
-                print(parser.usage)
-                print("")
-                exit()
-
-    else:
-        with open(options.config_file) as cfg_handle:
-            cfg_list = cfg_handle.read().splitlines()
-
-        values = []
-
-        for x in cfg_list:
-            try:
-                c = x.split("\t")
-                values.append(c[1])
-            except:
-                pass
-
-        fgsize_numeric = values.count("1")
-        bgsize_numeric = values.count("0")
-
-    ###     2.7.3 I need a template if you use phylogeny restriction or bm
-
-    if options.bootstrap_mode == "random" and options.pd_option != "NO":
-        if options.config_file == "none":
-            print("\n\n****ERROR: phylogeny restriction in random mode or brownian motion require a config file as a template.")
-            print("")
-            print(parser.usage)
-            print("")
-            exit()
-
-    if options.bootstrap_mode == "random" and options.groupfile != "none":
-        if options.config_file == "none":
-            print("\n\n****ERROR: phylogeny restriction in random mode or brownian motion require a config file as a template.")
-            print("")
-            print(parser.usage)
-            print("")
-            exit()
-
-    if options.bootstrap_mode == "bm" and options.config_file == "none":
-            print("\n\n****ERROR: phylogeny restriction in random mode or brownian motion require a config file as a template.")
-            print("")
-            print(parser.usage)
-            print("")
-            exit()
-
-
-    ### 3 Import the bootstrap initialisation
-
-    from modules.init_bootstrap import *
-
-    normalised_mode = options.bootstrap_mode
-
-    if options.bootstrap_mode == "random" and options.groupfile != "none":
-        normalised_mode = "phylogeny-restricted-byfams"
-
-    if options.bootstrap_mode == "random" and options.pd_option == "YES":
-        normalised_mode = "phylogeny-restricted-bypd"
-
-    print(application_info)
-    print("")
-
-    print("[RESAMPLE TOOL] - Simulating traits...")
-
-
-    w = simtrait(
-        fg_len = fgsize_numeric,
-        bg_len = bgsize_numeric,
-        template = options.config_file,
-        tree_file = options.phylogeny_file,
-        mode = normalised_mode,
-        groupfile = options.groupfile,
-        phenotype_values_file = options.trait_values,
-        cycles = int(options.cycles),
-        simtraits_outfile = options.output_file,
-        chunk_size = int(options.chunk_size)
-    )
-
-    # Output information (recaps the simulation and the settings)
-
-    if normalised_mode == "random":
-        print("\n\nTrait simulation in", options.bootstrap_mode, "mode with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file)
-
-    elif normalised_mode == "phylogeny-restricted-byfams":
-        print("\n\nTrait simulation in", options.bootstrap_mode, "mode, restricted by family information from", options.groupfile, "with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file)
-
-    elif normalised_mode == "phylogeny-restricted-bypd":
-        print("\n\nTrait simulation in", options.bootstrap_mode, "mode, restricted by phylogenetic consistency based on patristic distance intervals", options.groupfile, "with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file)
-
-    elif normalised_mode == "bm":
-        if exists(options.output_file):
-            print("\n\nTrait simulation in", options.bootstrap_mode, "mode, based on", options.groupfile, "template and ", options.trait_values, "trait values with", options.cycles, "cycles is done. Simulation directory is available at:\n\n\t" + options.output_file)
-        else:
-            print("\n\n****ERROR: resampled traits directory not generated. See R interpreter output.\n\n")
-    print("\nThis directory can be used as input for the bootstrap tool\n\n")
-
-
-
-
-#### TOOL 3. BOOTSTRAP ######################################################################################################
-########################################################################################################################
-
-if tool.lower() == "bootstrap":
+if tool.lower() == "perm-replay":
     ### 3.1 Init the input parser
     parser = OptionParser()
 
@@ -495,7 +289,7 @@ if tool.lower() == "bootstrap":
                     fasta-m10, ig, maf, mauve, msf, nexus, phylip, phylip-sequential, phylip-relaxed, stockholm.", default = "clustal")
     ###     3.2.5 Output file (the table)
     parser.add_option("-o", "--output", dest="output_file",
-                    help="The output file, where the bootstrap table will be printed", default = "none")
+                    help="The output file, where the perm-replay table will be printed", default = "none")
 
 
 
@@ -558,12 +352,12 @@ if tool.lower() == "bootstrap":
 
     ###     3.3.8 Discovery file for position filtering (optimization)
     parser.add_option("--discovery", dest="discovery_file",
-                    help="Path to discovery output file. When provided, bootstrap will only test positions that had CAAS in discovery, \
+                    help="Path to discovery output file. When provided, perm-replay will only test positions that had CAAS in discovery, \
                         resulting in massive speedup (typically 100-1000x). Highly recommended for large alignments. Default = test all positions.", default = "none")
 
     ###     3.3.9 Progress logging
     parser.add_option("--progress_log", dest="progress_log",
-                    help="Path to file for logging progress with timestamps and ETA. Especially useful for directory-based bootstrap. Default = stdout only.", default = "none")
+                    help="Path to file for logging progress with timestamps and ETA. Especially useful for directory-based perm-replay. Default = stdout only.", default = "none")
 
     parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
                     help="Enable CAAP (Convergent Amino Acid Properties) mode. \
@@ -572,7 +366,7 @@ if tool.lower() == "bootstrap":
 
     ###     3.3.10 Debug: export permuted groups
     parser.add_option("--export_groups", dest="export_groups",
-                    help="Path to output file for exporting the permuted trait groups used in each bootstrap cycle (DEBUG). Default = disabled.", default = None)
+                    help="Path to output file for exporting the permuted trait groups used in each perm-replay cycle (DEBUG). Default = disabled.", default = None)
 
     ###     3.3.11 Debug: export permuted discovery
     parser.add_option("--export_perm_discovery", dest="export_perm_discovery",
@@ -589,7 +383,7 @@ if tool.lower() == "bootstrap":
 
     ### 3.4 Usage
 
-    parser.usage = "ct bootstrap -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA\nNOTE: Use --export_groups $file to export permuted groups (DEBUG)\nNOTE: Use --export_perm_discovery $file to export permuted discovery results (DEBUG)"
+    parser.usage = "ct perm-replay -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA\nNOTE: Use --export_groups $file to export permuted groups (DEBUG)\nNOTE: Use --export_perm_discovery $file to export permuted discovery results (DEBUG)"
 
     ### 3.5 Parse the options
 
@@ -618,14 +412,14 @@ if tool.lower() == "bootstrap":
         print("")
         print(parser.usage)
         print("")
-        print("For further info: ct bootstrap --help")
+        print("For further info: ct perm-replay --help")
         print("")
         exit()
 
     ### 3.7 Import the modules
 
-    from modules.boot import *
-    from modules.init_bootstrap import simtrait_revive, get_resample_info
+    from modules.perm_replay import *
+    from modules.perm_replay_io import simtrait_revive, get_resample_info
     from modules.runslice import runslice
     import os
 
@@ -634,7 +428,7 @@ if tool.lower() == "bootstrap":
     print(application_info)
     print("")
 
-    print("[BOOTSTRAP TOOL] - Scanning", options.single_alignment, "with phenotype information from", options.config_file + "\n\n")
+    print("[PERM-REPLAY TOOL] - Scanning", options.single_alignment, "with phenotype information from", options.config_file + "\n\n")
 
     ###     3.8.1 - Slice the alignment
 
@@ -644,20 +438,20 @@ if tool.lower() == "bootstrap":
 
     if options.fop_mode:
         # FOP (Gap A): resample source is the single fanned file fop_labelings.tab.
-        # boot_on_single_alignment resolves a directory to fop_labelings.tab inside
+        # run_perm_replay_on_alignment resolves a directory to fop_labelings.tab inside
         # it and does the base-cycle collapse; just pass the path through.
         print(f"[FOP] multi-hypothesis mode: resample source = {options.simtraits}")
-        bootstrap_input = options.simtraits
+        perm_replay_input = options.simtraits
     elif os.path.isdir(options.simtraits):
-        # Directory mode: pass directory path directly, boot_on_single_alignment will handle loading
+        # Directory mode: pass directory path directly, run_perm_replay_on_alignment will handle loading
         print(f"Detected directory-based resampled traits: {options.simtraits}")
-        bootstrap_input = options.simtraits
+        perm_replay_input = options.simtraits
     else:
         # Single file mode: load into memory (backward compatibility)
         print(f"Detected single-file resampled traits: {options.simtraits}")
-        bootstrap_input = simtrait_revive(options.simtraits)
+        perm_replay_input = simtrait_revive(options.simtraits)
 
-    ###     3.8.3 - Boot on the alignment file
+    ###     3.8.3 - Run perm-replay on the alignment file
 
     # Prepare discovery file parameter (None if not provided)
     disambiguation_input = None if options.discovery_file == "none" else options.discovery_file
@@ -665,9 +459,9 @@ if tool.lower() == "bootstrap":
     # Prepare progress log parameter
     progress_log_input = None if options.progress_log == "none" else options.progress_log
 
-    boot_on_single_alignment(
+    run_perm_replay_on_alignment(
                     trait_config_file= options.config_file,
-                    resampled_traits= bootstrap_input,
+                    resampled_traits= perm_replay_input,
                     sliced_object = sliced_alignment,
 
                     max_fg_gaps = options.max_fg_gaps_string,
@@ -692,6 +486,6 @@ if tool.lower() == "bootstrap":
                     )
 
     ###     3.8.4 Final output
-    print("\n\nBootstrap information available in", options.output_file)
+    print("\n\nPerm-replay information available in", options.output_file)
 
 

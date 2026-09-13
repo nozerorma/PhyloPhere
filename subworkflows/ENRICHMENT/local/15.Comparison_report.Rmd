@@ -79,6 +79,13 @@ params:
   comparison_perm_stat:  "spearman"   # "spearman" | "topk_overlap"
   comparison_perm_topk:  0.05         # top-fraction for the topk_overlap statistic
   seed:               "1998"
+  # CAAS permulation-null significance threshold for p.emp_adj (position) /
+  # gene_caas_pperm_adj (gene), same param name + default as 11.Scoring_report.Rmd
+  # (conf/scoring.config:47) - reused so "significant" means the same thing
+  # across reports. Drives the Interesting Positions table's position_significant
+  # column below (flag_caas_significant, the gene-level analogue, arrives
+  # pre-computed via fcs_stats_file and needs no threshold here).
+  scoring_p_emp_thr:  0.1
 ---
 
 <style type="text/css">
@@ -1376,6 +1383,16 @@ build_interesting_genes <- function(direction) {
   # has no direction of its own, so either counts. RER_acc/RER_decc themselves
   # stay in the display below (both are still shown, just not both scored).
   base$RER_dir <- switch(direction, Top = base$RER_acc, Bottom = base$RER_decc, base$RER_acc | base$RER_decc)
+  # CAAS_sig: gene_caas_pperm_adj <= p_emp_thr (flag_caas_significant from
+  # scoring_compute.R), the CAAS permutation-null's OWN significance call on
+  # the gene's composite score. Deliberately kept OUT of .grouped_composite()'s
+  # caas_family sum below (and out of N criteria) - it measures something
+  # different from the percentile-quartet/Accum_dir/evidence-tier signals
+  # already in that family (a calibrated null p-value vs. a rank-based
+  # threshold), and this task does not introduce any new statistical
+  # combination method. Shown as its own plain boolean column instead, non-
+  # directional (same flag for Top/Bottom/Global) like RER_acc/RER_decc.
+  base$CAAS_sig <- .gcol(gene_attr_df, "flag_caas_significant")
 
   all_genes <- base %>%
     dplyr::left_join(.fcs_terms_for(rk_set), by = "gene") %>%
@@ -1397,7 +1414,7 @@ build_interesting_genes <- function(direction) {
 
   out <- all_genes %>%
     dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_dir | Accum_dir | RER_dir |
-                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
+                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig | CAAS_sig)
   if (nrow(out) == 0) return(out)
 
   out <- out %>%
@@ -1416,6 +1433,7 @@ build_interesting_genes <- function(direction) {
   out %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
     dplyr::select(Gene = gene, `25%`, `10%`, `5%`, `1%`, FADE_dir, RER_acc, RER_decc, Accum_dir,
+                  CAAS_sig,
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,
                   CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,
@@ -1503,6 +1521,29 @@ build_interesting_positions <- function(direction) {
       position_scores_cmp_df %>%
         dplyr::transmute(gene = Gene, Position, dplyr::across(dplyr::all_of(.desc_cols))),
       by = c("gene", "Position"))
+  }
+
+  # position_significant: p.emp_adj <= scoring_p_emp_thr, the position-level
+  # CAAS permutation-null significance call (SCORING's position_scores.tsv,
+  # BH-adjusted across positions - see project_retire_bootstrap_arm.md Phase
+  # D). Re-attached the same way as .desc_cols just above, since
+  # .position_pct_flags() transmutes base down and would otherwise drop it.
+  # Computed here rather than pulled from a pre-thresholded flag column
+  # because position_scores.tsv carries the raw p.emp_adj value directly
+  # (unlike fcs_stats.tsv's gene-level flag_caas_significant). Kept as its
+  # own column rather than folded into any evidence-family sum, same
+  # "separate axis" reasoning as CAAS_sig in build_interesting_genes() above:
+  # a calibrated null p-value is a different kind of evidence than the
+  # percentile/FCS/AMI/posenrich criteria already tallied there, and this
+  # task introduces no new statistical combination method.
+  if ("p.emp_adj" %in% names(position_scores_cmp_df)) {
+    base <- base %>% dplyr::left_join(
+      position_scores_cmp_df %>%
+        dplyr::transmute(gene = Gene, Position,
+                          position_significant = !is.na(`p.emp_adj`) & `p.emp_adj` <= params$scoring_p_emp_thr),
+      by = c("gene", "Position"))
+  } else {
+    base$position_significant <- FALSE
   }
 
   # Position-native FADE-site overlap.
@@ -1629,12 +1670,13 @@ build_interesting_positions <- function(direction) {
 
   all_positions <- base %>%
     dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, RER_dir, Accum_dir,
-                                 CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig),
+                                 CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig,
+                                 position_significant),
                                  ~ dplyr::coalesce(.x, FALSE)))
 
   out <- all_positions %>%
     dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | Accum_dir | RER_dir |
-                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig)
+                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig | position_significant)
   if (nrow(out) == 0) return(out)
 
   # Collapsible <details> rendering + grouped composite score, see
@@ -1666,6 +1708,7 @@ build_interesting_positions <- function(direction) {
                   `Hypotheses`,
                   `25%`, `10%`, `5%`, `1%`,
                   FADE_overlap, RER_acc, RER_decc, Accum_dir,
+                  position_significant,
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,
                   CAAS_AMI_net, `CAAS AMI desc(s)`, RER_AMI_net, `RER AMI desc(s)`, FADE_AMI_net, `FADE AMI desc(s)`,

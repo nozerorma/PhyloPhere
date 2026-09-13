@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # =============================================================================
-# boot_vec_perm_equivtest.py — perm_discovery row parity (BOOTSTRAP_PERMS path)
+# perm_replay_vec_perm_equivtest.py — perm_discovery row parity (PERM_REPLAY path)
 # =============================================================================
-# Proves the vectorized perm_discovery emitter reproduces the scalar caasboot
+# Proves the vectorized perm_discovery emitter reproduces the scalar caas_perm_replay
 # perm_discovery output EXACTLY (as a row multiset; row ORDER legitimately
 # differs because scalar iterates hash-ordered set intersections, and the
 # downstream concat→disambiguate treats rows independently). Also checks the
-# count output (.bootstraped.output equivalent) stays byte-identical.
+# count output (.perm_replay.output equivalent) stays byte-identical.
 #
 # Covers: classical + CAAP, max_conserved 0 and >0, gaps/ambiguity/missing,
-# directory mode (what BOOTSTRAP_PERMS uses) and single-file mode.
+# directory mode (what PERM_REPLAY uses) and single-file mode.
 #
 # Run:  micromamba run -n phylophere python \
-#         subworkflows/CT/local/modules/boot_vec_perm_equivtest.py
+#         subworkflows/CT/local/modules/perm_replay_vec_perm_equivtest.py
 # =============================================================================
 
 import os
@@ -70,12 +70,12 @@ def write_resample_file(rng, allsp, cyc, path):
 
 
 def run(vectorize, sliced, resampled, out, perm_out, caap, max_conserved, single):
-    os.environ["CT_BOOTSTRAP_VECTORIZE"] = "1" if vectorize else "0"
-    import modules.boot_vec as bv; importlib.reload(bv)
-    import modules.boot as boot; importlib.reload(boot)
-    from modules.init_bootstrap import simtrait_revive
+    os.environ["CT_PERM_REPLAY_VECTORIZE"] = "1" if vectorize else "0"
+    import modules.perm_replay_vec as bv; importlib.reload(bv)
+    import modules.perm_replay as perm_replay; importlib.reload(perm_replay)
+    from modules.perm_replay_io import simtrait_revive
     res = simtrait_revive(resampled) if single else resampled
-    boot.boot_on_single_alignment(
+    perm_replay.run_perm_replay_on_alignment(
         trait_config_file="DUMMY",
         resampled_traits=res,
         sliced_object=sliced,
@@ -144,8 +144,8 @@ def check(label, **kw):
 
 
 def main():
-    tmp = tempfile.mkdtemp(prefix="boot_vec_perm_")
-    print(f"boot_vec_perm_equivtest — scratch={tmp}\n")
+    tmp = tempfile.mkdtemp(prefix="perm_replay_vec_perm_")
+    print(f"perm_replay_vec_perm_equivtest — scratch={tmp}\n")
     for single in (False, True):
         mode = "single" if single else "dir"
         check(f"classical mc0 {mode}", caap=False, max_conserved=0, single=single, tmp=tmp)

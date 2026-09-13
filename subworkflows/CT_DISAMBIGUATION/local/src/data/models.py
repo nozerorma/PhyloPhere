@@ -39,7 +39,6 @@ class CAASPosition:
     trait0_aa: List[str] = field(
         default_factory=list
     )  # Low phenotype amino acids (trait=0)
-    recovery_boot: Optional[float] = None
     is_focus: bool = False
     caap_group: str = "US"
     amino_encoded: str = ""
@@ -101,7 +100,6 @@ class ConvergenceResult:
     # Scoring and quality
     score: Optional[Any] = None
     position_one_based: Optional[int] = None
-    recovery_boot: Optional[float] = None
 
     # Change tracking
     is_focus: bool = False

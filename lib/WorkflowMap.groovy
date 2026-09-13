@@ -154,11 +154,11 @@ class WorkflowMap {
               htmlCandidates: ["${outdir}/html_reports/2.Phenotype_exploration_complete.html"] ],
 
             // NOTE: directories.R (TRAIT_ANALYSIS) only ever creates 1.Traitfiles and
-            // 2.Bootstrap_traitfiles under 2.CT — there is no 3.Tree subdirectory.
+            // 2.Permulation_traitfiles under 2.CT — there is no 3.Tree subdirectory.
             [ id: 'contrast',    name: 'Contrast selection',              type: 'prepost',   ran: ctx.contrastSel,
               filesDirs: ["${outdir}/data_exploration/2.CT",
                           "${outdir}/data_exploration/2.CT/1.Traitfiles",
-                          "${outdir}/data_exploration/2.CT/2.Bootstrap_traitfiles"],
+                          "${outdir}/data_exploration/2.CT/2.Permulation_traitfiles"],
               htmlCandidates: ["${outdir}/html_reports/3.CI-composition.html",
                                 "${outdir}/html_reports/4.Independent_contrasts.html"] ],
 
@@ -173,7 +173,7 @@ class WorkflowMap {
 
             // NOTE: 7.CT_signification.Rmd only ever creates meta_caas/ (meta_dir <-
             // "meta_caas") — there is no gene_lists subdirectory under signification/.
-            [ id: 'ct_signif',   name: 'CT signification (convergence)',  type: 'reporting', ran: ctx.ctSignif,
+            [ id: 'ct_signif',   name: 'CAAS Pattern Annotation',         type: 'reporting', ran: ctx.ctSignif,
               filesDirs: ["${outdir}/signification",
                           "${outdir}/signification/meta_caas"],
               htmlCandidates: ["${outdir}/html_reports/7.CT_signification.html"] ],
@@ -232,6 +232,16 @@ class WorkflowMap {
                           "${outdir}/scoring/gene_lists"],
               htmlCandidates: ["${outdir}/html_reports/11.Scoring_report.html"] ],
 
+            // CAAS_SIGNIFICANCE_REPORT (16.CAAS_significance_report.Rmd) — a
+            // DISTINCT, LATER stage than ct_signif above: it runs after scoring,
+            // joining ct_signif's already-published meta_caas table against
+            // scoring's position_scores.tsv/gene_scores.tsv (p.emp/p.emp_adj,
+            // gene_caas_pperm/gene_caas_pperm_adj). See ctpp_signification.nf's
+            // CAAS_SIGNIFICANCE_REPORT process and main.nf's post-SCORING call.
+            [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting', ran: ctx.ctSignifSig,
+              filesDirs: ["${outdir}/signification/significance"],
+              htmlCandidates: ["${outdir}/html_reports/16.CAAS_significance_report.html"] ],
+
             // The main ENRICHMENT workflow (workflows/enrichment.nf) runs downstream of
             // --scoring when --enrichment is also set. It only ever runs per-module FCS
             // for CAAS ('fcs') and RER ('scoring/rer') — FADE and accumulation no longer
@@ -281,7 +291,7 @@ class WorkflowMap {
 
         def chainIds = ['prune','dataset_rep','pheno_rep','contrast','ct','ct_signif',
                         'ct_disambig','asr_robustness','ct_postproc','ct_acc','vep','rer','fade',
-                        'scoring','fcs','ami','posenrich','compare']
+                        'scoring','ct_signif_sig','fcs','ami','posenrich','compare']
         def rows = []
         chainIds.eachWithIndex { sid, idx ->
             def st = stages.find { it.id == sid }
@@ -422,6 +432,7 @@ class WorkflowMap {
         'rer': 'rer',
         'fade': 'fade',
         'scoring': 'scoring',
+        'ct_signif_sig': 'ct_signif_sig',
         'fcs': 'fcs',
         'ami': 'ami',
         'compare': 'compare',
@@ -493,7 +504,7 @@ class WorkflowMap {
         'pheno_rep': 'Phenotype reporting',
         'contrast': 'Contrast selection',
         'ct': 'CT (convergence)',
-        'ct_signif': 'CT signification (convergence)',
+        'ct_signif': 'CAAS Pattern Annotation',
         'ct_disambig': 'CT disambiguation (convergence)',
         'asr_robustness': 'ASR Robustness',
         'ct_postproc': 'CT post-processing',
@@ -502,6 +513,7 @@ class WorkflowMap {
         'rer': 'RERconverge (RER)',
         'fade': 'FADE (selection)',
         'scoring': 'CAAS Scoring',
+        'ct_signif_sig': 'CT significance (post-scoring)',
         'fcs': 'Functional enrichment (FCS)',
         'ami': 'AMI (DOMINO active modules)',
         'compare': 'Cross-module comparison',
@@ -526,6 +538,7 @@ class WorkflowMap {
         'rer': '#F97316',
         'fade': '#F97316',
         'scoring': '#7C3AED',
+        'ct_signif_sig': '#7C3AED',
         'fcs': '#7C3AED',
         'ami': '#7C3AED',
         'compare': '#7C3AED',
@@ -557,6 +570,7 @@ class WorkflowMap {
             rer          : ['rerconverge', 'rerconverge/rer_results'],
             fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
             scoring      : ['scoring'],
+            ct_signif_sig: ['signification/significance'],
             fcs          : ['fcs', 'scoring/rer'],
             ami          : ['ami', 'rerconverge/ami',
                             'selection/fade/top/ami', 'selection/fade/bottom/ami',
@@ -631,6 +645,7 @@ class WorkflowMap {
             rer           : scanResults.rer ?: false,
             fade          : scanResults.fade ?: false,
             scoring       : scanResults.scoring ?: false,
+            ctSignifSig   : scanResults.ct_signif_sig ?: false,
             fcs           : scanResults.fcs ?: false,
             ami           : scanResults.ami ?: false,
             compare       : scanResults.compare ?: false,

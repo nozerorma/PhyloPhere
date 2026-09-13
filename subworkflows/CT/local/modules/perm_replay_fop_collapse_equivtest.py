@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
 # =============================================================================
-# boot_fop_collapse_equivtest.py — FOP (Gap A) base-cycle collapse
+# perm_replay_fop_collapse_equivtest.py — FOP (Gap A) base-cycle collapse
 # =============================================================================
-# Under params.caas_perms_fop the OBSERVED bootstrap resamples over
+# Under params.caas_perms_fop the OBSERVED perm-replay resamples over
 # fop_labelings.tab, whose cycle tags are "<base>~H<m>" (one row per null cycle
 # and fanned Dunn-independent alternative hypothesis). recovery_boot must be
 # reported in BASE-CYCLE units: a base cycle HITS an observed (Gene@Position,
 # scheme) iff ANY of its ~H<m> labelings calls a CAAS there.
 #
 # Part 1: unit test of collapse_fop_hits_by_base() in isolation.
-# Part 2: end-to-end ct-bootstrap-equivalent invocation over a hand-built
+# Part 2: end-to-end ct-perm-replay-equivalent invocation over a hand-built
 #         fop_labelings.tab + toy alignment; asserts the collapsed count is
 #         3/4 (base cycles b_1,b_2,b_4 hit; b_3 does not) — NOT 4/12.
 #
 # Run:  micromamba run -n phylophere python \
-#         subworkflows/CT/local/modules/boot_fop_collapse_equivtest.py
+#         subworkflows/CT/local/modules/perm_replay_fop_collapse_equivtest.py
 # =============================================================================
 
 import os
@@ -26,7 +26,7 @@ _LOCAL = os.path.dirname(_HERE)
 if _LOCAL not in sys.path:
     sys.path.insert(0, _LOCAL)
 
-from modules.boot import collapse_fop_hits_by_base, boot_on_single_alignment
+from modules.perm_replay import collapse_fop_hits_by_base, run_perm_replay_on_alignment
 
 FAILS = 0
 
@@ -73,17 +73,17 @@ def test_collapse_unit():
 
 
 # --------------------------------------------------------------------------
-# Part 2 — end-to-end through boot_on_single_alignment(fop_mode=True)
+# Part 2 — end-to-end through run_perm_replay_on_alignment(fop_mode=True)
 # --------------------------------------------------------------------------
 def test_end_to_end(vectorize):
-    os.environ["CT_BOOTSTRAP_VECTORIZE"] = "1" if vectorize else "0"
+    os.environ["CT_PERM_REPLAY_VECTORIZE"] = "1" if vectorize else "0"
     import importlib
-    import modules.boot_vec as bv
-    import modules.boot as boot
+    import modules.perm_replay_vec as bv
+    import modules.perm_replay as perm_replay
     importlib.reload(bv)
-    importlib.reload(boot)
+    importlib.reload(perm_replay)
 
-    tmp = tempfile.mkdtemp(prefix="boot_fop_")
+    tmp = tempfile.mkdtemp(prefix="perm_replay_fop_")
     # s1..s4 carry 'A' at position 10 ; s5..s8 carry 'W'.
     species = [f"s{i}" for i in range(1, 9)]
     pos = {sp: ("A@10" if int(sp[1:]) <= 4 else "W@10") for sp in species}
@@ -111,7 +111,7 @@ def test_end_to_end(vectorize):
         fh.write("b_1\ts1,s2\ts3,s4\n")
 
     out = os.path.join(tmp, "fop.out")
-    boot.boot_on_single_alignment(
+    perm_replay.run_perm_replay_on_alignment(
         trait_config_file="DUMMY",
         resampled_traits=resample_dir,           # directory -> redirected to fop_labelings.tab
         sliced_object=sliced,

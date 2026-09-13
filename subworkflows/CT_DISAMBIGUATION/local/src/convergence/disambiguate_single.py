@@ -497,7 +497,6 @@ def analyze_caas_position_disambiguation(
         domain_meta=(dict(domain_split.get("domain_meta"))
                      if domain_split and domain_split.get("domain_meta") else None),
         score=None,
-        recovery_boot=getattr(caas_pos, "recovery_boot", None),
     )
 
     # Raw compute_domain_scores record for this (position, scheme, hypothesis);

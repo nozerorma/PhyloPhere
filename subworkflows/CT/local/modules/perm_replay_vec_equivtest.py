@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 # =============================================================================
-# boot_vec_equivtest.py - numerical equivalence test for the vectorized kernel
+# perm_replay_vec_equivtest.py - numerical equivalence test for the vectorized kernel
 # =============================================================================
-# Proves VectorizedBootstrap.count() reproduces the scalar caasboot() counting
+# Proves VectorizedPermReplay.count() reproduces the scalar caas_perm_replay() counting
 # loop EXACTLY (the path it replaces), across: clean data, gaps, ambiguity codes,
 # missing species, conserved-pair tolerance (max_conserved>0), every admitted-
 # pattern subset, all five grouping schemes (US/GS1-GS4), discovery-scheme
 # subsetting, exotic non-standard symbols, and "NO" vs numeric gap/miss
-# thresholds. If this passes, the bootstrap empirical-p produced by the
+# thresholds. If this passes, the perm-replay empirical-p produced by the
 # vectorized path is identical to the old loop (calibration is preserved).
 #
 # Run:  micromamba run -n phylophere python \
-#         subworkflows/CT/local/modules/boot_vec_equivtest.py
-# (or from subworkflows/CT/local:  python modules/boot_vec_equivtest.py)
+#         subworkflows/CT/local/modules/perm_replay_vec_equivtest.py
+# (or from subworkflows/CT/local:  python modules/perm_replay_vec_equivtest.py)
 # =============================================================================
 
 import os
@@ -26,9 +26,9 @@ if _LOCAL not in sys.path:
     sys.path.insert(0, _LOCAL)
 
 from modules.caas_id import process_position
-from modules.boot import caasboot
-from modules.init_bootstrap import simtrait_revive
-from modules.boot_vec import VectorizedBootstrap
+from modules.perm_replay import caas_perm_replay
+from modules.perm_replay_io import simtrait_revive
+from modules.perm_replay_vec import VectorizedPermReplay
 
 TOTAL_FAILS = 0
 STD_AAS = "ACDEFGHIKLMNPQRSTVWY"
@@ -85,7 +85,7 @@ def make_resample(rng, all_species, n_cycles, fg_size, bg_size, path):
 
 
 # ----------------------------------------------------------------------------
-# Scalar reference: run caasboot per position, parse counts
+# Scalar reference: run caas_perm_replay per position, parse counts
 # ----------------------------------------------------------------------------
 
 def scalar_counts(positions_with_schemes, genename, cfg, align_species,
@@ -95,7 +95,7 @@ def scalar_counts(positions_with_schemes, genename, cfg, align_species,
     for pos_dict, schemes in positions_with_schemes:
         processed = process_position(pos_dict, multiconfig=cfg,
                                      species_in_alignment=align_species)
-        line_output = caasboot(
+        line_output = caas_perm_replay(
             processed,
             genename=genename,
             list_of_traits=cfg.alltraits,
@@ -145,7 +145,7 @@ def check_case(label, rng, *, n_cycles=400, caap_mode=False,
     truth = scalar_counts(pos_with_schemes, genename, cfg, align_species,
                           thresholds, max_conserved, patterns, caap_mode)
 
-    vb = VectorizedBootstrap(cfg, align_species)
+    vb = VectorizedPermReplay(cfg, align_species)
     (g_fg, g_bg, g_all, m_fg, m_bg, m_all) = thresholds
     vec = vb.count(
         pos_with_schemes, genename,
@@ -190,8 +190,8 @@ def check_case(label, rng, *, n_cycles=400, caap_mode=False,
 
 def main():
     import tempfile
-    tmpdir = tempfile.mkdtemp(prefix="boot_vec_equivtest_")
-    print(f"boot_vec_equivtest — scratch={tmpdir}\n")
+    tmpdir = tempfile.mkdtemp(prefix="perm_replay_vec_equivtest_")
+    print(f"perm_replay_vec_equivtest — scratch={tmpdir}\n")
 
     # Each case gets its own seeded RNG so failures are reproducible.
     def rng(seed):

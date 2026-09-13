@@ -30,7 +30,6 @@ Data Contracts & Validation
 ------------------------------
 1. **CAAS Metadata** (read_caas_metadata_table, get_caas_position_info):
      - Required columns: tag, caas, is_significant, GenePos
-     - Optional columns: recovery_boot
      - FileNotFoundError raised if file missing; ValueError for missing columns
 
 2. **Trait Pairs** (parse_trait_pairs):
@@ -175,7 +174,7 @@ def read_caas_metadata_table(
     metadata_file: Path, gene_name: Optional[str] = None
 ) -> pd.DataFrame:
     """
-    Load CAAS metadata (tag, caas, is_significant, optional recovery_boot).
+    Load CAAS metadata (tag, caas, is_significant).
 
     - Tries comma-separated first, falls back to tab-separated.
     - Returns a filtered DataFrame if `gene_name` is provided.
@@ -316,11 +315,6 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             caas=caas,
             trait1_aa=trait1,
             trait0_aa=trait0,
-            recovery_boot=(
-                float(row["recovery_boot"])
-                if "recovery_boot" in row and pd.notna(row["recovery_boot"])
-                else None
-            ),
             caap_group=str(row.get("caap_group", "US") or "US"),
             amino_encoded=str(row.get("amino_encoded", "") or ""),
             is_conserved_meta=_b(row.get("is_conserved_meta")),
@@ -383,20 +377,6 @@ def get_caas_position_info(
         zero_based_pos + 1 if zero_based_pos is not None else None
     )
 
-    # Add recovery_boot if present (optional column)
-    if "recovery_boot" in row.index:
-        try:
-            recovery_boot = row["recovery_boot"]
-            if pd.notna(recovery_boot):
-                info["recovery_boot"] = float(recovery_boot)
-            else:
-                info["recovery_boot"] = None
-        except (ValueError, TypeError):
-            logger.warning(
-                "Could not parse recovery_boot for %s: %s", gene_pos, row["recovery_boot"]
-            )
-            info["recovery_boot"] = None
-
     logger.debug(
         "Found CAAS info for %s: tag=%s, significant=%s",
         gene_pos,
@@ -438,7 +418,6 @@ def build_caas_positions_map(
                     caas=info.get("caas", ""),
                     trait1_aa=[],
                     trait0_aa=[],
-                    recovery_boot=info.get("recovery_boot"),
                 )
 
                 # Parse amino acid conversion string

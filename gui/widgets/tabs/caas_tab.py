@@ -89,7 +89,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="miss_pair", label="Enforce missing pairs", kind="bool"),
         Section("Batching logic (performance)"),
         FieldSpec(name="ct_discovery_batch_size", label="Discovery genes per task"),
-        FieldSpec(name="ct_bootstrap_batch_size", label="Permulation-null replay genes per batch"),
+        FieldSpec(name="ct_perm_replay_batch_size", label="Permulation-null replay genes per batch"),
         Section("Publishing norms (debug)"),
         FieldSpec(name="publish_intermediates", label="Publish intermediate files", kind="bool"),
         FieldSpec(name="export_groups", label="Export groups (DEBUG)", kind="bool"),

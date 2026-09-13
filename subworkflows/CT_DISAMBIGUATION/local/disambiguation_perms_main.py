@@ -2,7 +2,7 @@
 """CLI for the CAAS permulation-excess null (genome-wide *excess* null for FCS).
 
 Loads each gene's precomputed ASR posteriors ONCE and replays N permuted phenotype
-labelings (the full-pool `export_perm_discovery` from a bootstrap run + the matching
+labelings (the full-pool `export_perm_discovery` from a perm-replay run + the matching
 `resample_*.tab` labelings) over the cached posteriors, scoring each via
 analyze_gene_disambiguation / compute_asr_path_score VERBATIM. Emits a long
 per-(gene, cycle, position, scheme) asr_path_score table that
@@ -102,9 +102,9 @@ def _genes_from_export(perm_discovery_path: Path) -> list:
                     if g:
                         genes.add(g)
     else:
-        # Directory mode: filenames are "<alignmentID>.bootstrap.discovery.output",
+        # Directory mode: filenames are "<alignmentID>.perm_replay.discovery.output",
         # where alignmentID = Nextflow's f.baseName on the alignment file (e.g.
-        # "GENE.Homo_sapiens.fa" -> "GENE.Homo_sapiens"). Splitting on ".bootstrap"
+        # "GENE.Homo_sapiens.fa" -> "GENE.Homo_sapiens"). Splitting on ".perm_replay"
         # left the species suffix attached ("GENE.Homo_sapiens"), which then never
         # matches the bare "GENE" symbols used everywhere else (ensembl_genes,
         # find_gene_alignment's own prefix match, meta_caas "Gene" column) --

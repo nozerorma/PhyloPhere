@@ -116,7 +116,7 @@ def tier0_project(
     c.min_contrasts = "3"
     c.min_divergent_fraction = min_divergent_fraction
     c.ct_discovery_batch_size = ct_batch_size
-    c.ct_bootstrap_batch_size = ct_batch_size
+    c.ct_perm_replay_batch_size = ct_batch_size
 
     # ── Disambiguation (+ postproc + ASR robustness) ────────────────────────
     d = p.modules.disambiguation

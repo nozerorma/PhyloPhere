@@ -1342,31 +1342,6 @@ ggplot(pai_pathogenic_counts, aes(x = pathogenic, y = n, fill = pai_direction)) 
   theme(plot.title = element_text(face = "bold"))
 ```
 
-```{r vep-pai-phenaxis-scatter, eval=has_vep_primateai && "phen_score" %in% names(pos_vep_pai_top), fig.height=5}
-.pai_phen_r_top <- safe_cor(
-  rank(pos_vep_pai_top$phen_score,      na.last = "keep") / sum(!is.na(pos_vep_pai_top$phen_score)),
-  rank(pos_vep_pai_top$pai_char_score,  na.last = "keep") / sum(!is.na(pos_vep_pai_top$pai_char_score))
-)
-.pai_phen_r_bot <- safe_cor(
-  rank(pos_vep_pai_bottom$phen_score,      na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$phen_score)),
-  rank(pos_vep_pai_bottom$pai_char_score,  na.last = "keep") / sum(!is.na(pos_vep_pai_bottom$pai_char_score))
-)
-
-ggplot(pos_vep_pai_dir, aes(x = phen_score, y = pai_char_score,
-                             colour = pai_direction)) +
-  geom_point(alpha = 0.35, size = 0.8) +
-  geom_smooth(method = "lm", se = TRUE, linewidth = 0.8, alpha = 0.15) +
-  scale_colour_manual(values = c("TOP" = .tableau10[1], "BOTTOM" = .tableau10[3]),
-                      name = "Direction") +
-  labs(
-    title    = "Phenotype Evolution Score vs PrimateAI-3D Score by Direction",
-    subtitle = sprintf("Pearson r (rank-norm): TOP = %.3f | BOTTOM = %.3f",
-                       .pai_phen_r_top, .pai_phen_r_bot),
-    x = "phen_score", y = "PrimateAI-3D Score"
-  ) +
-  theme(plot.title = element_text(face = "bold"))
-```
-
 ```{r vep-pai-table, eval=has_vep_primateai}
 pai_table <- pos_vep_pai_table_source %>%
   arrange(desc(CAAS_score)) %>%

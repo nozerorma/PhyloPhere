@@ -416,7 +416,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "min_contrasts": "${MIN_CONTRASTS:-3}",
   "publish_intermediates": {{ run_defaults.publish_intermediates }},
   "ct_discovery_batch_size": "${CT_DISCOVERY_BATCH_SIZE:-25}",
-  "ct_bootstrap_batch_size": "${CT_BOOTSTRAP_BATCH_SIZE:-10}",
+  "ct_perm_replay_batch_size": "${CT_PERM_REPLAY_BATCH_SIZE:-10}",
   "min_divergent_fraction": "${MIN_DIVERGENT_FRACTION:-0.5}",
   "max_bg_gaps_fraction": "${MAX_BG_GAPS_FRACTION:-0.0}",
   "max_fg_gaps_fraction": "${MAX_FG_GAPS_FRACTION:-0.0}",

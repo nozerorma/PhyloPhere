@@ -39,7 +39,7 @@ include { CAAS_PERMS_PREP } from "${baseDir}/subworkflows/CT/caas_permulation"
 workflow CT {
     take:
         trait_file_in
-        bootstrap_trait_file_in
+        permulation_trait_file_in
         tree_file_in
     main:
         def createBatchManifestText = { List<String> rows ->
@@ -53,10 +53,9 @@ workflow CT {
         def background_concat_out = Channel.empty()
         def background_raw_out = Channel.empty()
         def background_genes_out = Channel.empty()
-        def bootstrap_concat_out = Channel.empty()
         def trait_file_emit = Channel.empty()
         // CAAS permulation-excess null (full-pool perm-discovery export). Populated
-        // only when --caas_permulation_enrichment is set and bootstrap+resample run.
+        // only when --caas_permulation_enrichment is set and perm-replay+resample run.
         def caas_perm_discovery_out = Channel.empty()
         def caas_resample_subset_out = Channel.empty()
         def caas_fop_pairs_out = Channel.value(file('NO_FOP_PAIRS'))
@@ -93,7 +92,7 @@ workflow CT {
 
         // Initialize variables
         def trait_file_out
-        def bootstrap_trait_file_out
+        def permulation_trait_file_out
         def discovery_results = Channel.empty()
         def background_results = Channel.empty()
 
@@ -114,10 +113,10 @@ workflow CT {
                 resample_dir_out = resample_out
             }
         }
-        if (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) {
+        if (params.contrast_selection && trait_file_in && permulation_trait_file_in) {
             log.info "Using contrast selection output for CT analyses."
             trait_file_out = trait_file_in
-            trait_val = bootstrap_trait_file_in
+            trait_val = permulation_trait_file_in
             tree_file_out = tree_file_in
         } else {
             log.info "No contrast selection output provided for CT analyses."
@@ -132,8 +131,8 @@ workflow CT {
         }
 
         // Normalize trait/tree output channels for downstream modules
-        trait_file_emit = (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) ? trait_file_out : Channel.value(trait_file_out)
-        tree_file_emit  = (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) ? tree_file_out  : Channel.value(tree_file_out)
+        trait_file_emit = (params.contrast_selection && trait_file_in && permulation_trait_file_in) ? trait_file_out : Channel.value(trait_file_out)
+        tree_file_emit  = (params.contrast_selection && trait_file_in && permulation_trait_file_in) ? tree_file_out  : Channel.value(tree_file_out)
 
         if (toolsToRun.contains('discovery')) {
             def discoveryBatchSize = (params.ct_discovery_batch_size ?: 1) as int
@@ -190,7 +189,7 @@ workflow CT {
             def resample_trigger = discovery_done
 
             // Handle channels differently based on whether they come from contrast_selection
-            if (params.contrast_selection && trait_file_in && bootstrap_trait_file_in) {
+            if (params.contrast_selection && trait_file_in && permulation_trait_file_in) {
                 // tree_file_out, trait_file_out, and trait_val are already channels from CONTRAST_SELECTION.
                 // Combine with resample_trigger to enforce discovery → resample ordering.
                 // File-staging collisions are prevented by stageAs aliases in the RESAMPLE process.
@@ -220,13 +219,13 @@ workflow CT {
             // Concatenate the partitioned directory into a single resample.tab for reporting
             CONCAT_RESAMPLE(resample_dir_out)
             resample_out = CONCAT_RESAMPLE.out.resample_concat
-            // NOTE: resample_dir_out retains the raw directory so bootstrap receives
+            // NOTE: resample_dir_out retains the raw directory so perm-replay receives
             // the partitioned resample_NNN.tab files, not the merged flat file.
         }
         // CAAS permulation-excess null: a full-pool pass over N permuted labelings,
         // replayed through analyze_gene_disambiguation downstream. Only needs
         // align_tuple/trait_file_out/resample_dir_out, all already in scope from
-        // discovery/resample above — no longer gated on the (now-removed) bootstrap tool.
+        // discovery/resample above — no longer gated on the (now-removed) resample CLI tool.
         if (params.caas_permulation_enrichment) {
             def perms_prep = CAAS_PERMS_PREP(align_tuple, trait_file_out, resample_dir_out)
             caas_perm_discovery_out  = perms_prep.perm_discovery
@@ -240,7 +239,6 @@ workflow CT {
         background_file_raw = background_raw_out
         background_file = background_concat_out
         background_genes = background_genes_out
-        bootstrap_file = bootstrap_concat_out
         trait_file = trait_file_emit
         tree_file = tree_file_emit
         // CAAS permulation-excess: full-pool perm-discovery + the N-cycle resample

@@ -114,7 +114,7 @@ process {
         memory = { 4.GB }
         time   = { 4.h * task.attempt }
     }
-    withLabel:process_boot {
+    withLabel:process_perm_replay {
         cpus   = { 1 }
         memory = { 12.GB }
         time   = { 72.h * task.attempt }
@@ -136,7 +136,7 @@ process {
         memory = { 12.GB * task.attempt }
         time   = { 128.h * task.attempt }
     }
-    withLabel:process_boot_batched {
+    withLabel:process_perm_replay_batched {
         cpus   = { 6 }
         memory = { 12.GB * task.attempt }
         time   = { 128.h * task.attempt }

@@ -39,7 +39,6 @@ workflow CT_POSTPROC {
         disambiguation_input_channel      // Post-disambiguation master CSV (optional, can use --disambiguation_input instead)
         background_files_channel     // Raw background files from CT module (optional)
         background_genes_channel     // Global background genes file from CT module (preferred)
-        bootstrap_input_channel      // kept for API compatibility (unused)
         disambiguation_dir_channel   // Full ct_disambiguation/ directory for ASR robustness diagnostics (optional)
     
     main:

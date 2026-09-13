@@ -149,7 +149,7 @@ capitalized_trait <- tools::toTitleCase(gsub("_", " ", trait)) # Capitalized and
 capitalized_clade <- tools::toTitleCase(gsub("_", " ", clade_name)) # Capitalized and deconvoluted clade name
 
 createDir(traitfile_dir)
-createDir(bootstrap_traitfile_dir)
+createDir(permulation_traitfile_dir)
 
 ```
 
@@ -206,6 +206,7 @@ fop_results <- fop_pair_sel.f(
 selected_pairs <- fop_results$canon_pairs
 hypotheses <- fop_results$hypotheses
 summary_df <- fop_results$summary_df
+species_domain <- fop_results$species_domain
 
 cat("Selected", nrow(selected_pairs), "canonical independent pairs\n")
 cat("Harvested", length(hypotheses), "FOP parallel independent hypotheses\n")
@@ -491,7 +492,40 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       values = c("Top/High" = "red", "Bottom/Low" = "forestgreen", "Not selected" = "grey75"),
       breaks = c("Top/High", "Bottom/Low", "Not selected"),
       na.value = "grey75"
-    ) +
+    )
+
+  # ── Voronoi domain ring: which canonical-pair domain each species falls into ──
+  # `species_domain` (fop_pair_sel.f, selection_algorithm.R) assigns EVERY species
+  # to its nearest canonical pair by patristic distance — the partition that the
+  # FOP harvest draws H2..Hn from. Domains aren't necessarily monophyletic, so we
+  # can't geom_hilight a clade; instead draw them as an outer per-tip fill ring.
+  if (exists("species_domain") && !is.null(species_domain) && length(species_domain) > 0) {
+    domain_df <- tibble::tibble(
+      species = names(species_domain),
+      domain = factor(
+        paste0("Domain ", unname(species_domain)),
+        levels = paste0("Domain ", sort(unique(species_domain)))
+      )
+    ) %>%
+      dplyr::filter(species %in% viz_tree$tip.label)
+
+    n_domains <- nlevels(domain_df$domain)
+    domain_palette <- setNames(scales::hue_pal()(n_domains), levels(domain_df$domain))
+
+    selected_pairs_tree_all <- selected_pairs_tree_all +
+      ggnewscale::new_scale_fill() +
+      ggtreeExtra::geom_fruit(
+        data = domain_df,
+        geom = geom_tile,
+        mapping = aes(y = species, fill = domain),
+        offset = 0.06,
+        pwidth = 0.08,
+        color = NA
+      ) +
+      scale_fill_manual(name = "Voronoi domain:", values = domain_palette)
+  }
+
+  selected_pairs_tree_all <- selected_pairs_tree_all +
     labs(
       title = paste("All Selected Species Across", total_hypotheses, "Parallel Hypotheses for Trait:", capitalized_trait),
       subtitle = "Includes selection frequency across FOP non-replacement hypotheses"
@@ -518,44 +552,44 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
 
 ```
 
-## 5. Bootstrap Trait Files for Permutation Analysis
+## 5. Permulation Trait Files for Permutation Analysis
 
 
-This section extracts species  for use in bootstrap/permutation testing.
-```{r bootstrap_traitfiles, message=FALSE, warning=FALSE}
+This section extracts species  for use in permulation testing.
+```{r permulation_traitfiles, message=FALSE, warning=FALSE}
 
-# Extract bootstrap traitfile, retaining count columns (n_trait/c_trait) if present
-boot_cols <- c("species", trait)
+# Extract permulation traitfile, retaining count columns (n_trait/c_trait) if present
+perm_cols <- c("species", trait)
 if (exists("n_trait", inherits = TRUE) && nzchar(n_trait) && n_trait %in% names(trait_df)) {
-  boot_cols <- c(boot_cols, n_trait)
+  perm_cols <- c(perm_cols, n_trait)
 }
 if (exists("c_trait", inherits = TRUE) && nzchar(c_trait) && c_trait %in% names(trait_df)) {
-  boot_cols <- c(boot_cols, c_trait)
+  perm_cols <- c(perm_cols, c_trait)
 }
 
-bootstrap_traitfile <- trait_df %>%
-  dplyr::select(all_of(boot_cols)) %>%
+permulation_traitfile <- trait_df %>%
+  dplyr::select(all_of(perm_cols)) %>%
   dplyr::filter(!is.na(.data[[trait]]))
 
-cat("Removed", nrow(trait_df) - nrow(bootstrap_traitfile), "species with NA trait values from bootstrap traitfile\n")
+cat("Removed", nrow(trait_df) - nrow(permulation_traitfile), "species with NA trait values from permulation traitfile\n")
 
-# Save bootstrap traitfile with headers so permulations.R can auto-detect count columns
-boot_path <- file.path(bootstrap_traitfile_dir)
-createDir(boot_path)
+# Save permulation traitfile with headers so permulations.R can auto-detect count columns
+perm_path <- file.path(permulation_traitfile_dir)
+createDir(perm_path)
 write.table(
-  bootstrap_traitfile, 
-  file.path(boot_path, "boot_traitfile.tab"), 
-  quote = FALSE, 
-  row.names = FALSE, 
-  col.names = TRUE, 
+  permulation_traitfile,
+  file.path(perm_path, "permulation_traitfile.tab"),
+  quote = FALSE,
+  row.names = FALSE,
+  col.names = TRUE,
   sep = "\t"
 )
 
 # Display summary
-cat("Bootstrap traitfile:", nrow(bootstrap_traitfile), "species\n")
+cat("Permulation traitfile:", nrow(permulation_traitfile), "species\n")
 
 # Preview
-head(bootstrap_traitfile)
+head(permulation_traitfile)
 
 ```
 

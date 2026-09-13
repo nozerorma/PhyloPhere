@@ -543,8 +543,6 @@ def _signification_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "ct_disambiguation/caas_convergence_master.csv", "**/*discovery*.csv")),
         _slot("background_input", "Background genes file", True,
               _first_match(outdir, "**/*background_genes*")),
-        _slot("bootstrap_file", "Bootstrap file (.boot/.tab)", True,
-              _first_match(outdir, "**/*.boot", "**/*bootstrap*.tab")),
     ]
 
 
@@ -556,7 +554,6 @@ def _signification_build_script(report: DetectedReport, repo_dir: Path, use_sing
         [
             f"discovery_input = '{s['discovery_input']}'",
             f"background_input = '{s['background_input']}'",
-            f"bootstrap_file = '{s['bootstrap_file']}'",
             "output_dir = '.'",
             "caap_mode = FALSE",
             "seed = '1998'",
@@ -571,6 +568,53 @@ def _signification_build_script(report: DetectedReport, repo_dir: Path, use_sing
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent.parent / "signification", report.html_path.parent],
+        use_singularity=use_singularity,
+    )
+
+
+# ── CAAS_SIGNIFICANCE (post-SCORING; distinct from CT_SIGNIFICATION above) ──
+# Joins CT_SIGNIFICATION's published meta_caas/global_meta_caas.tsv against
+# SCORING's published position_scores.tsv/gene_scores.tsv. Runs at a later
+# DAG position than "signification" above (after scoring, not after CT).
+
+def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
+    scoring = outdir / "scoring"
+    slots = list(_signification_find_slots(outdir))
+    slots.append(
+        _slot("global_meta_input", "Global/meta CAAS TSV", True,
+              _first_match(outdir, "signification/meta_caas/global_meta_caas.tsv", "**/*global_meta_caas.tsv")
+              or _first_match(outdir, "signification/meta_caas/meta_caas.tsv", "**/*meta_caas.tsv"))
+    )
+    slots.append(_slot("position_scores_input", "Position scores TSV", True,
+                        _first_match(scoring, "position_scores.tsv")))
+    slots.append(_slot("gene_scores_input", "Gene scores TSV", True,
+                        _first_match(scoring, "gene_scores.tsv")))
+    return slots
+
+
+def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
+    s = {slot.key: slot.path for slot in report.slots}
+    output_file = "16.CAAS_significance_report.html"
+    render = _render_call(
+        "16.CAAS_significance_report.Rmd",
+        [
+            f"global_meta_input = '{s['global_meta_input']}'",
+            f"position_scores_input = '{s['position_scores_input']}'",
+            f"gene_scores_input = '{s['gene_scores_input']}'",
+            "output_dir = '.'",
+            "p_emp_thr = 0.1",
+            "seed = '1998'",
+        ],
+        output_file,
+    )
+    return _wrap_script(
+        header_comment="CAAS_SIGNIFICANCE — 16.CAAS_significance_report.Rmd",
+        repo_dir=repo_dir,
+        local_dir="subworkflows/CT_SIGNIFICATION/local",
+        pre_lines=[],
+        render_block=render,
+        output_file=output_file,
+        publish_targets=[report.html_path.parent.parent / "signification" / "significance", report.html_path.parent],
         use_singularity=use_singularity,
     )
 
@@ -765,6 +809,7 @@ def _ami_build_script(report: DetectedReport, repo_dir: Path, use_singularity: b
             "species             = 9606",
             "domino_network_score_thr = 700",
             f"gene_scores_file    = {_r_arg(s['gene_scores'])}",
+            "scoring_p_emp_thr   = 0.1",
             "string_db_dir       = NULL",
             f"domino_network_sif  = '{s['domino_network_sif']}'",
             f"domino_modules_dir  = '{s['domino_modules_dir']}'",
@@ -1155,10 +1200,17 @@ REPORTS: list[ReportSpec] = [
     ),
     ReportSpec(
         id="signification",
-        display_name="CT_SIGNIFICATION — Signification report",
+        display_name="CT_SIGNIFICATION — CAAS Pattern Annotation",
         html_regex=re.compile(r"^7\.CT_signification\.html$"),
         find_slots=_signification_find_slots,
         build_script=_signification_build_script,
+    ),
+    ReportSpec(
+        id="signif_significance",
+        display_name="CT_SIGNIFICATION — CAAS significance report (post-scoring)",
+        html_regex=re.compile(r"^16\.CAAS_significance_report\.html$"),
+        find_slots=_signif_significance_find_slots,
+        build_script=_signif_significance_build_script,
     ),
     ReportSpec(
         id="asr_robustness",

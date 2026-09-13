@@ -19,15 +19,15 @@ Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
 
 Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
 
-MODULE NAME: boot.py
-DESCRIPTION: bootstrap function
+MODULE NAME: perm_replay.py
+DESCRIPTION: reruns and rescores resampled labelings for CAAS pattern matches
 DEPENDENCIES: alimport.py, caas_id.py, pindex.py
 CALLED BY: ct
 
 '''
 
 
-from modules.init_bootstrap import *
+from modules.perm_replay_io import *
 from modules.disco import process_position
 from modules.caas_id import iscaas
 from modules.caap_id import check_caap_pattern, encode_to_groups, US, GS1, GS2, GS3, GS4
@@ -41,7 +41,7 @@ from datetime import datetime
 
 # ---------------------------------------------------------------------------
 # FOP multi-hypothesis (Gap A) — base-cycle collapse of the fanned observed
-# bootstrap. Under params.caas_perms_fop the observed bootstrap resamples over
+# perm-replay. Under params.caas_perms_fop the observed perm-replay resamples over
 # fop_labelings.tab, whose cycle tags are "<base>~H<m>" (one row per null cycle
 # and fanned Dunn-independent alternative hypothesis). recovery_boot must be
 # reported in BASE-CYCLE units: a base cycle HITS an observed (Gene@Position,
@@ -78,17 +78,17 @@ def collapse_fop_hits_by_base(per_key_hits, all_labelings):
 
 # ---------------------------------------------------------------------------
 # Vectorized (Level-3 BLAS) counting kernel. Optional: if numpy / the module is
-# unavailable we fall back to the scalar caasboot loop transparently. The kernel
-# is proven bit-for-bit equivalent to caasboot by modules/boot_vec_equivtest.py
-# (counts) and modules/boot_vec_perm_equivtest.py (perm_discovery rows).
+# unavailable we fall back to the scalar caas_perm_replay loop transparently. The kernel
+# is proven bit-for-bit equivalent to caas_perm_replay by modules/perm_replay_vec_equivtest.py
+# (counts) and modules/perm_replay_vec_perm_equivtest.py (perm_discovery rows).
 # ---------------------------------------------------------------------------
 try:
-    from modules.boot_vec import VectorizedBootstrap
-except Exception as _boot_vec_err:  # pragma: no cover - defensive import guard
-    VectorizedBootstrap = None
-    print(f"[BOOTSTRAP] vectorized kernel unavailable ({_boot_vec_err}); using scalar path")
+    from modules.perm_replay_vec import VectorizedPermReplay
+except Exception as _perm_replay_vec_err:  # pragma: no cover - defensive import guard
+    VectorizedPermReplay = None
+    print(f"[PERM-REPLAY] vectorized kernel unavailable ({_perm_replay_vec_err}); using scalar path")
 
-_VECTORIZE_BOOTSTRAP = os.environ.get("CT_BOOTSTRAP_VECTORIZE", "1") not in ("0", "false", "False")
+_VECTORIZE_PERM_REPLAY = os.environ.get("CT_PERM_REPLAY_VECTORIZE", "1") not in ("0", "false", "False")
 
 # Ambiguity codes count as gaps (no resolved amino acid), exactly as
 # caas_id.process_position() does; "-" is the literal gap.
@@ -115,7 +115,7 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions_with_sch
     accumulates into position_counts; when collect_hits is True also returns the
     per-key list of hit labeling (trait) names for perm_discovery emission.
     """
-    vb = VectorizedBootstrap(cfg, sliced_object.species)
+    vb = VectorizedPermReplay(cfg, sliced_object.species)
     return vb.count(
         positions_with_schemes,
         genename,
@@ -133,10 +133,10 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
     """Materialize perm_discovery rows for the vectorized hits.
 
     The kernel identifies WHICH (position, scheme, labeling) are CAAS; each rare
-    hit's row is then rebuilt by calling the SAME functions caasboot uses
+    hit's row is then rebuilt by calling the SAME functions caas_perm_replay uses
     (iscaas / check_caap_pattern / encode_to_groups) with the SAME inputs, so the
     emitted fields are byte-identical to the scalar perm_discovery_out. Species
-    sort by pair id via the same _pair_sort_key caasboot uses (alphabetical
+    sort by pair id via the same _pair_sort_key caas_perm_replay uses (alphabetical
     fallback for pairless species), so the substitution / tag strings reproduce
     exactly.
     """
@@ -153,7 +153,7 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
         # Sort by pair id so FG[i] and BG[i] are the two members of the same pair —
         # this is what makes the positional comparison inside check_caap_pattern
         # (and iscaas) report WHICH pairs are conserved. The resample cfg now carries
-        # per-cycle pairs (init_bootstrap.simtrait_revive), recovered from the
+        # per-cycle pairs (perm_replay_io.simtrait_revive), recovered from the
         # matched FG/BG ordering permulations.R writes. _pair_sort_key falls back to
         # alphabetical for any species without a pair, which reproduces the previous
         # behaviour for legacy/hand-written resample files.
@@ -408,8 +408,8 @@ def filter_for_missings(max_m_bg, max_m_fg, max_m_all, mfg, mbg):
 
 
 
-def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all, cycles, multiconfig, miss_pair=False, max_conserved=0, admitted_patterns=["1","2","3"], chunk_size=1000, caap_mode=False, discovery_schemes=None, debug_rejects=False, groups_out=None, perm_discovery_out=None, base_collapse=0):
-    """Chunked bootstrap - processes traits in batches to handle large resample files
+def caas_perm_replay(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all, cycles, multiconfig, miss_pair=False, max_conserved=0, admitted_patterns=["1","2","3"], chunk_size=1000, caap_mode=False, discovery_schemes=None, debug_rejects=False, groups_out=None, perm_discovery_out=None, base_collapse=0):
+    """Chunked perm-replay - processes traits in batches to handle large resample files
 
     Args:
         caap_mode: If True, test CAAP grouping schemes instead of classical CAAS
@@ -439,7 +439,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
     
     if len(valid_traits) == 0:
         if debug_rejects:
-            print(f"[BOOTSTRAP DEBUG] {genename}@{processed_position.position} rejected: no valid traits after presence check (fg keys={len(processed_position.trait2aas_fg)}, bg keys={len(processed_position.trait2aas_bg)})")
+            print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} rejected: no valid traits after presence check (fg keys={len(processed_position.trait2aas_fg)}, bg keys={len(processed_position.trait2aas_bg)})")
         position_name = genename + "@" + str(processed_position.position)
         if caap_mode:
             # Return one line per scheme with zero counts
@@ -469,7 +469,7 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             
             if not filter_for_gaps(maxgaps_bg, maxgaps_fg, maxgaps_all, gfg, gbg):
                 if debug_rejects:
-                    print(f"[BOOTSTRAP DEBUG] {genename}@{processed_position.position} trait {trait} rejected: gaps gfg={gfg} gbg={gbg} max_fg={maxgaps_fg} max_bg={maxgaps_bg} max_all={maxgaps_all}")
+                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: gaps gfg={gfg} gbg={gbg} max_fg={maxgaps_fg} max_bg={maxgaps_bg} max_all={maxgaps_all}")
                 continue
             
             # Filter for missings
@@ -478,13 +478,13 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
             
             if not filter_for_missings(maxmiss_bg, maxmiss_fg, maxmiss_all, mfg, mbg):
                 if debug_rejects:
-                    print(f"[BOOTSTRAP DEBUG] {genename}@{processed_position.position} trait {trait} rejected: missings mfg={mfg} mbg={mbg} max_fg={maxmiss_fg} max_bg={maxmiss_bg} max_all={maxmiss_all}")
+                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: missings mfg={mfg} mbg={mbg} max_fg={maxmiss_fg} max_bg={maxmiss_bg} max_all={maxmiss_all}")
                 continue
             
             filtered_traits.append(trait)
         
         if debug_rejects and len(filtered_traits) == 0:
-            print(f"[BOOTSTRAP DEBUG] {genename}@{processed_position.position} rejected: all traits filtered out by gaps/missings")
+            print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} rejected: all traits filtered out by gaps/missings")
         
         # Pattern check
         if caap_mode:
@@ -588,11 +588,11 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                             "is_caap": is_caap,
                         }
                 if debug_rejects and not any_match:
-                    print(f"[BOOTSTRAP DEBUG] {genename}@{processed_position.position} trait {trait} rejected: no CAAP match (patterns={pattern_by_scheme})")
+                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: no CAAP match (patterns={pattern_by_scheme})")
                     for scheme_name in sorted(debug_by_scheme.keys()):
                         info = debug_by_scheme[scheme_name]
                         print(
-                            f"[BOOTSTRAP DEBUG] {genename}@{processed_position.position} {scheme_name} "
+                            f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} {scheme_name} "
                             f"fg={info['fg_groups']} bg={info['bg_groups']} "
                             f"overlap={info['overlap']} non_fg={info['non_fg']} non_bg={info['non_bg']} "
                             f"is_caap={info['is_caap']}"
@@ -656,18 +656,18 @@ def caasboot(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_b
                             ])
                         perm_discovery_out.write("\t".join(output_fields) + "\n")
                 elif debug_rejects:
-                    print(f"[BOOTSTRAP DEBUG] {genename}@{processed_position.position} trait {trait} rejected: caas={check.caas} pattern={check.pattern} admitted={admitted_patterns}")
+                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: caas={check.caas} pattern={check.pattern} admitted={admitted_patterns}")
             
             # Return aggregated result
             position_name = genename + "@" + str(processed_position.position)
             return _emit_count(total_output_traits, position_name, "US")
 
-# FUNCTION boot_on_single_alignment()
-# Launches the bootstrap in several lines. Returns a dictionary gene@position --> pvalue
+# FUNCTION run_perm_replay_on_alignment()
+# Launches perm-replay in several lines. Returns a dictionary gene@position --> pvalue
 
-def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None, fop_mode=False):
+def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None, fop_mode=False):
     """
-    Run bootstrap analysis on a single alignment.
+    Run perm-replay on a single alignment.
 
     fop_mode (Gap A): resample source is the single fanned file fop_labelings.tab
     (cycle tags "<base>~H<m>"). Per-labeling CAAS hits are collapsed to base-cycle
@@ -693,14 +693,14 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
     # FOP (Gap A): fop_labelings.tab is a single file. If a directory was passed,
     # redirect to the fanned file inside it; degrade to a normal run if absent.
     if fop_mode:
-        from modules.init_bootstrap import simtrait_revive
+        from modules.perm_replay_io import simtrait_revive
         if isinstance(resampled_traits, str) and os.path.isdir(resampled_traits):
             _fop_file = os.path.join(resampled_traits, "fop_labelings.tab")
             if os.path.exists(_fop_file):
                 print(f"[FOP] base-cycle collapse over {_fop_file}")
                 resampled_traits = simtrait_revive(_fop_file)
             else:
-                print(f"[FOP] WARNING: {_fop_file} not found; running standard bootstrap")
+                print(f"[FOP] WARNING: {_fop_file} not found; running standard perm-replay")
                 fop_mode = False
         elif isinstance(resampled_traits, str) and os.path.isfile(resampled_traits):
             print(f"[FOP] base-cycle collapse over {resampled_traits}")
@@ -742,12 +742,12 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
         perm_discovery_handle.write("\t".join(header_fields) + "\n")
 
     # Vectorized BLAS path. It produces the empirical-p COUNTS and (when
-    # perm_discovery is requested, e.g. BOOTSTRAP_PERMS) the per-hit perm_discovery
+    # perm_discovery is requested, e.g. PERM_REPLAY) the per-hit perm_discovery
     # ROWS. Only the rarer per-cycle groups debug export (--export_groups) still
     # needs the scalar per-trait walk.
     use_vectorized = (
-        VectorizedBootstrap is not None
-        and _VECTORIZE_BOOTSTRAP
+        VectorizedPermReplay is not None
+        and _VECTORIZE_PERM_REPLAY
         and groups_handle is None
     )
     # FOP mode needs per-labeling hit identity to collapse to base cycles, even
@@ -759,7 +759,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
         if isinstance(resampled_traits, str) and os.path.isdir(resampled_traits):
             # Directory mode: sequential processing
             print(f"\n{'='*80}")
-            print(f"DIRECTORY-BASED BOOTSTRAP MODE")
+            print(f"DIRECTORY-BASED PERM-REPLAY MODE")
             print(f"{'='*80}\n")
             
             resample_dir = resampled_traits
@@ -845,8 +845,8 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                     # Process position
                     processed_pos = process_position(pos_dict, multiconfig=file_config, species_in_alignment=sliced_object.species)
 
-                    # Run bootstrap with position-specific schemes
-                    line_output = caasboot(
+                    # Run perm-replay with position-specific schemes
+                    line_output = caas_perm_replay(
                         processed_pos,
                         genename=the_genename,
                         list_of_traits=file_config.alltraits,
@@ -918,7 +918,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                         print(outline, file=ooout)
             
             total_elapsed = time.time() - start_time
-            print(f"✓ Bootstrap complete in {format_time(total_elapsed)}")
+            print(f"✓ Perm-replay complete in {format_time(total_elapsed)}")
             print(f"✓ Results written to {output_file}\n")
         
         else:
@@ -1009,7 +1009,7 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 ooout.close()
                 print(f"Results written to {output_file}")
             else:
-              # Step 3 & 4: process positions with their specific schemes and run bootstrap
+              # Step 3 & 4: process positions with their specific schemes and run perm-replay
               _fop_base_total = (len({_fop_base_cycle(t) for t in resampled_traits_obj.alltraits})
                                  if fop_mode else 0)
               output_lines = []
@@ -1017,8 +1017,8 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
                 # Process position
                 processed_pos = process_position(pos_dict, multiconfig=resampled_traits_obj, species_in_alignment=sliced_object.species)
 
-                # Run bootstrap with position-specific schemes
-                line_output = caasboot(
+                # Run perm-replay with position-specific schemes
+                line_output = caas_perm_replay(
                     processed_pos,
                     list_of_traits=resampled_traits_obj.alltraits,
                     genename=the_genename,
@@ -1066,8 +1066,8 @@ def boot_on_single_alignment(trait_config_file, resampled_traits, sliced_object,
 # FUNCTION pval()
 # Returns a dictionary with the pvalue
 
-def pval(bootstrap_result):
-    with open(bootstrap_result) as h:
+def pval(perm_replay_result):
+    with open(perm_replay_result) as h:
         thelist = h.read().splitlines()
     
     d = {}

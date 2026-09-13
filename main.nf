@@ -77,6 +77,7 @@ include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
 include {VEP as VEP_STANDALONE}      from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
+include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_SIGNIFICATION/ctpp_signification.nf'
 include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
@@ -156,13 +157,13 @@ workflow {
                 }
 
                 def trait_input_for_ct = (contrast_out && contrast_out.trait_dir_out) ? contrast_out.trait_dir_out : contrast_out.trait_file_out
-                ct_results = CT(trait_input_for_ct, contrast_out.bootstrap_trait_file_out, contrast_out.tree_file_out)
+                ct_results = CT(trait_input_for_ct, contrast_out.permulation_trait_file_out, contrast_out.tree_file_out)
 
             } else {
                 def trait_file_in = null
-                def bootstrap_trait_file_in = null
+                def permulation_trait_file_in = null
                 def tree_file_in = null
-                ct_results = CT (trait_file_in, bootstrap_trait_file_in, tree_file_in)
+                ct_results = CT (trait_file_in, permulation_trait_file_in, tree_file_in)
             }
             ran_any = true
         }
@@ -320,20 +321,25 @@ workflow {
                         if (rf && rf.exists()) { subset_f = rf; break }
                     }
 
-                    // 2. Discovery / Bootstrap permulation files resolution
-                    // NOTE: Must be per-cycle *.bootstrap.discovery.output files. Summary bootstrap.tab
-                    // lacks the per-cycle 'cycle' column needed by disambiguation_perms_main.py.
+                    // 2. Discovery / perm-replay permulation files resolution
+                    // NOTE: Must be per-cycle *.perm_replay.discovery.output files (legacy runs:
+                    // *.bootstrap.discovery.output). Summary bootstrap.tab lacks the per-cycle
+                    // 'cycle' column needed by disambiguation_perms_main.py.
                     def disc_candidates = []
                     def disc_dir = file("${base_dir}/caas_permulation/perm_disc")
                     def runtime_boot_dir = file("${base_dir}/runtime/filter/bootstrap")
                     def caas_boot_dir = file("${base_dir}/caastools/bootstrap")
 
-                    if (disc_dir.exists() && file("${disc_dir}/*.bootstrap.discovery.output")) {
+                    if (disc_dir.exists() && file("${disc_dir}/*.perm_replay.discovery.output")) {
+                        disc_candidates = file("${disc_dir}/*.perm_replay.discovery.output")
+                    } else if (disc_dir.exists() && file("${disc_dir}/*.bootstrap.discovery.output")) {
                         disc_candidates = file("${disc_dir}/*.bootstrap.discovery.output")
                     } else if (runtime_boot_dir.exists() && file("${runtime_boot_dir}/*.bootstrap.discovery.output")) {
                         disc_candidates = file("${runtime_boot_dir}/*.bootstrap.discovery.output")
                     } else if (caas_boot_dir.exists() && file("${caas_boot_dir}/*.bootstrap.discovery.output")) {
                         disc_candidates = file("${caas_boot_dir}/*.bootstrap.discovery.output")
+                    } else if (file("${base_dir}/caas_permulation/*.perm_replay.discovery.output")) {
+                        disc_candidates = file("${base_dir}/caas_permulation/*.perm_replay.discovery.output")
                     } else if (file("${base_dir}/caas_permulation/*.bootstrap.discovery.output")) {
                         disc_candidates = file("${base_dir}/caas_permulation/*.bootstrap.discovery.output")
                     } else if (file("${base_dir}/caastools/*.bootstrap.discovery.output")) {
@@ -443,11 +449,10 @@ workflow {
             // null/Channel.empty() so CT_POSTPROC falls back to --background_input param.
             def background_ch       = (ct_results && ran_discovery) ? ct_results.background_file_raw : Channel.empty()
             def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
-            def bootstrap_ch = Channel.empty() // retained for CT_POSTPROC signature compatibility
             // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
             def disambiguation_dir_ch = disambiguation_results ? disambiguation_results.results_dir : null
 
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, bootstrap_ch, disambiguation_dir_ch)
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, disambiguation_dir_ch)
             ran_any = true
 
             // Capture postproc outputs as reusable references.
@@ -701,6 +706,49 @@ workflow {
                 scoring_caas_gene_cycle_scores_ch    // gene_cycle_scores.tsv — report FPR calibration figure
             )
             ran_any = true
+
+            // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
+            // CAAS_SIGNIFICATION_REPORT (run above inside the run_signification
+            // block). It must run after SCORING because it joins
+            // position_scores.tsv (p.emp/p.emp_adj) and gene_scores.tsv
+            // (gene_caas_pperm/gene_caas_pperm_adj) onto CT_SIGNIFICATION's
+            // already-published meta_caas table -- neither SCORING output exists
+            // yet at the point CT_SIGNIFICATION itself runs. Gated on
+            // run_signification && signification_results (signification
+            // actually produced a meta_caas table) && params.scoring (SCORING
+            // actually ran, so SCORING.out.position_scores/gene_scores exist).
+            if (run_signification && signification_results && params.scoring) {
+                // Same "prefer global_meta_caas.tsv, fall back to per-group
+                // meta_caas.tsv" single-file resolution CT_DISAMBIGUATION uses
+                // for meta_for_disambiguation (workflows/ct_disambiguation.nf).
+                def signif_meta_upstream = signification_results.signification_global_meta
+                    .mix(signification_results.signification_meta_caas)
+                    .flatten()
+                    .filter { f ->
+                        def p = f.toString().toLowerCase()
+                        p.endsWith('global_meta_caas.tsv') ||
+                        p.contains('meta_caas/global_meta_caas.tsv') ||
+                        p.endsWith('meta_caas.tsv') ||
+                        p.contains('meta_caas/meta_caas.tsv')
+                    }
+                    .collect()
+                    .map { files ->
+                        if (!files) return null
+                        def preferred = files.find { f ->
+                            def p = f.toString().toLowerCase()
+                            p.endsWith('global_meta_caas.tsv') || p.contains('meta_caas/global_meta_caas.tsv')
+                        }
+                        preferred ?: files[0]
+                    }
+                    .filter { it != null }
+
+                CAAS_SIGNIFICANCE_REPORT(
+                    signif_meta_upstream,
+                    SCORING.out.position_scores,
+                    SCORING.out.gene_scores
+                )
+                ran_any = true
+            }
 
             // VEP after SCORING: the convergence_schemes gate reads position_scores.tsv.
             if (params.vep) {

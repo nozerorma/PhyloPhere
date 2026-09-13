@@ -102,7 +102,7 @@ def tier1_project(
         c.pss_top_pct = pss_top_pct
     c.min_divergent_fraction = min_divergent_fraction
     c.ct_discovery_batch_size = ct_batch_size
-    c.ct_bootstrap_batch_size = ct_batch_size
+    c.ct_perm_replay_batch_size = ct_batch_size
 
     # ── Disambiguation (+ postproc + ASR robustness) ───────────────────────
     d = p.modules.disambiguation
