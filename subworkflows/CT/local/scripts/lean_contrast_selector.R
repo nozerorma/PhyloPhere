@@ -326,7 +326,7 @@ lean_fop_harvest <- function(trait_vec, D, target_pairs,
     as.data.frame(lapply(psz, function(n) sample.int(n, ITER_CAP, replace = TRUE)))
 
   # Hot loop below runs up to ITER_CAP (= max_fop*20) draws per cycle, over up to
-  # perm_pool_size cycles. Its wall time was dominated by two R anti-patterns:
+  # caas_full_perms cycles. Its wall time was dominated by two R anti-patterns:
   # per-iteration data.frame row indexing + do.call(rbind, ...) of K one-row
   # frames, and linear membership in a growing `seen` list. Materialize the draw
   # index as an integer matrix and each Voronoi pool as bare species/PSS vectors

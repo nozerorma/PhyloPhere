@@ -108,10 +108,9 @@ Usage:
 --chunk_size                  <INTEGER>                    500
 --include_b0                  <true|false>                 false
 
-Permulation sizing (three distinct quantities):
+Permulation sizing:
 --max_tries                  <INTEGER>                    1000000 (draw budget; raised 50% up to twice if the pool is short, then fails)
---perm_pool_size             <INTEGER>                    100000  (accepted permulations harvested; the position-level null)
---caas_full_perms            <INTEGER>                    1000    (drawn from the pool for the CAAS FCS null)
+--caas_full_perms            <INTEGER>                    1000    (accepted permulations harvested AND replayed through the CAAS FCS null)
 
 Output: directory of resample_*.tab files (one per chunk_size cycles).
 

@@ -46,7 +46,6 @@ def tier1_project(
     asr_model: str = "lg",                    # lg | jtt | wag  (ASR-robustness control)
     clade_name: str = "tier1",
     seed: int = 1998,
-    perm_pool_size: str = "1000",
     caas_full_perms: str = "200",
     max_tries: str = "200000",
     ct_batch_size: str = "25",
@@ -93,8 +92,7 @@ def tier1_project(
     c.caap_mode = True                       # US + GS1..GS4 encodings
     c.patterns = "1,2,3"
     c.perm_strategy = "auto"                 # best-fit BM vs OU by AICc
-    # env overrides for quick smoke runs (small pool + few null draws)
-    c.perm_pool_size = os.environ.get("PERM_POOL_SIZE", perm_pool_size)
+    # env override for quick smoke runs (small harvest + few null draws)
     c.caas_full_perms = os.environ.get("CAAS_FULL_PERMS", caas_full_perms)
     c.max_tries = os.environ.get("MAX_TRIES", max_tries)
     c.min_contrasts = "3"

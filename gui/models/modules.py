@@ -42,7 +42,6 @@ class CaasConfig(ModuleConfigBase):
     ct_tool_resample: bool = True
     caas_config_path: str = ""  # --caas_config
     patterns: str = "1,2,3"  # --patterns
-    perm_pool_size: str = "100000"  # --perm_pool_size
     caas_full_perms: str = "1000"  # --caas_full_perms
     caas_permulation_enrichment: bool = True  # --caas_permulation_enrichment
 

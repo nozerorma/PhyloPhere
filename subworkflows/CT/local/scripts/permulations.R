@@ -425,12 +425,12 @@ if (n1 >= number.of.cycles) {
   diag <- if (final_rate >= MIN_VIABLE_TIER1_RATE) sprintf(
       paste0("Tier-1 acceptance was healthy (%.1f%%) — the run was DRAW-STARVED and hit ",
              "the hard cap (%d). Raise --max_tries / MAX_TRIES (>= ~%d for this pool) or ",
-             "lower --perm_pool_size."),
+             "lower --caas_full_perms."),
       100 * final_rate, as.integer(hard_cap),
       as.integer(ceiling(number.of.cycles / final_rate * BUDGET_HEADROOM)))
     else sprintf(
       paste0("Tier-1 acceptance was only %.1f%% — this trait's Dunn geometry cannot ",
-             "realistically fill a pool this size; lower --perm_pool_size or relax the ",
+             "realistically fill a pool this size; lower --caas_full_perms or relax the ",
              "contrast-selection strategy."),
       100 * final_rate)
   stop(sprintf(

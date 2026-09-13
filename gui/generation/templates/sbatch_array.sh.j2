@@ -56,14 +56,14 @@ if [ "{{ run_defaults.toy_mode }}" = true ]; then
     export TAG="_toy"
     export TOY_MODE=true
     export TOY_N="{{ runtime.toy_n }}"
-    export PERM_POOL_SIZE="1000"
     export CAAS_FULL_PERMS="100"
-    # The draw budget must scale with the toy pool, not stay at the full-run value:
-    # toy_mode subsamples alignments, never species, so the permulation step still
-    # works on the full tree at the full acceptance rate. 1000 accepted needs ~3k
-    # draws under lambda and ~7k under BM, so 20k is ample — and it caps a run that
-    # CANNOT fill the pool at ~1 min instead of grinding through 1M draws plus two
-    # escalations before failing, which would defeat the point of a smoke test.
+    # The draw budget must scale with the toy harvest target, not stay at the
+    # full-run value: toy_mode subsamples alignments, never species, so the
+    # permulation step still works on the full tree at the full acceptance
+    # rate. 100 accepted needs well under 1k draws even under BM, so 20k is
+    # generous headroom — and it caps a run that CANNOT fill the pool at ~1 min
+    # instead of grinding through 1M draws plus two escalations before failing,
+    # which would defeat the point of a smoke test.
     export MAX_TRIES="20000"
     export N_RANDOMIZATIONS="1000"
     export RER_PERM_BATCHES="10"
@@ -72,7 +72,6 @@ else
     export TAG=""
     export TOY_MODE=false
     export TOY_N=""
-    export PERM_POOL_SIZE="{{ modules.caas.perm_pool_size }}"
     export CAAS_FULL_PERMS="${CAAS_FULL_PERMS:-{{ modules.caas.caas_full_perms }}}"
     export MAX_TRIES="{{ modules.caas.max_tries }}"
     export N_RANDOMIZATIONS="{{ modules.accumulation.accumulation_n_randomizations }}"
@@ -135,7 +134,7 @@ export MAX_BG_MISS_FRACTION="{{ modules.caas.max_bg_miss_fraction }}"
 export MAX_FG_MISS_FRACTION="{{ modules.caas.max_fg_miss_fraction }}"
 export MAX_MISS_FRACTION="{{ modules.caas.max_miss_fraction }}"
 export PERM_STRATEGY="{{ modules.caas.perm_strategy }}"
-# MAX_TRIES is set in the toy_mode branch above, alongside PERM_POOL_SIZE it has to track.
+# MAX_TRIES is set in the toy_mode branch above, alongside CAAS_FULL_PERMS it has to track.
 export CHUNK_SIZE="{{ modules.caas.chunk_size }}"
 export MAX_FOP="{{ modules.caas.max_fop }}"
 export PRECOMP_BASE_PATH="{{ precomputed.base_path }}"

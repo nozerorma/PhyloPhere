@@ -52,14 +52,9 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="resample_use_n", label="Use sample size counts (n/c)", kind="bool"),
         FieldSpec(name="perm_strategy", label="Permutation strategy", kind="choice", choices=("auto", "OU", "BM")),
         FieldSpec(
-            name="perm_pool_size",
-            label="Permulation pool size",
-            placeholder="accepted permulations to harvest (position-level null)",
-        ),
-        FieldSpec(
             name="caas_full_perms",
-            label="Full-pool permulations",
-            placeholder="drawn from the pool for the CAAS FCS null",
+            label="Permulations",
+            placeholder="accepted permulations to harvest AND replay for the CAAS FCS null",
         ),
         FieldSpec(
             name="max_tries",

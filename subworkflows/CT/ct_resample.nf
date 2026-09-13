@@ -81,7 +81,7 @@ process RESAMPLE {
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "${caas_config}" \\
-        ${params.perm_pool_size} \\
+        ${params.caas_full_perms} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
@@ -135,7 +135,7 @@ process RESAMPLE {
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
         "\$actual_caas_config" \\
-        ${params.perm_pool_size} \\
+        ${params.caas_full_perms} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
