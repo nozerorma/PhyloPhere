@@ -1109,11 +1109,29 @@ if (isTRUE(has.secondary)) {
 
 # tree_plot_step1
 
+# geom_fruit sizes the trait-bar ring(s) to `fruit_pwidth` and scales bar
+# height against `axis.params$limits`, but a bar can still render past that
+# nominal band (an outlier value, the axis tick-label text itself under
+# text.angle=270, ...) -- randomly, dataset to dataset, since it depends on
+# where the actual data sits relative to the declared limits. Rather than
+# guess a fixed safety margin (which is exactly what broke before: a bare
+# `+ 0.10` tuned to one dataset), measure where the ring stack really ends,
+# the same way fan_label_offsets() already does for the family-label ring,
+# and only add whatever the taxa ring's nominal offset doesn't already cover.
+trait_ring_measure <- fan_label_offsets(tree_plot_step1, labels = character(), ring_gap = 0, image_gap = 0)
+trait_ring_span_fraction <- if (trait_ring_measure$tip_radius > 0) {
+  (trait_ring_measure$outer_radius - trait_ring_measure$tip_radius) / trait_ring_measure$tip_radius
+} else {
+  tree_profile$fruit_pwidth
+}
+taxa_bar_offset_effective <- tree_profile$taxa_bar_offset +
+  max(0, trait_ring_span_fraction - tree_profile$fruit_pwidth)
+
 # Add taxa membership indicator bars
 tree_plot_step2 <- tree_plot_step1 +
-  geom_fruit(geom = geom_col, 
+  geom_fruit(geom = geom_col,
              mapping = aes(y = species, x = 1, fill = taxa),
-             pwidth = tree_profile$taxa_bar_pwidth, color = "black", linewidth = 0.5, offset = tree_profile$taxa_bar_offset)
+             pwidth = tree_profile$taxa_bar_pwidth, color = "black", linewidth = 0.5, offset = taxa_bar_offset_effective)
 
 if (!is.null(palette_values) && length(palette_values) > 0) {
   tree_plot_step2 <- tree_plot_step2 + scale_fill_manual(values = palette_values, breaks = 0)
