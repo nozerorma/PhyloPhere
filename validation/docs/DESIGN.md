@@ -23,7 +23,7 @@ makes tier *n+1* uninterpretable. Live run order: **3 → 1 → 2**.
 | ~~0~~ (demoted) | CAAS permulation/bootstrap null, RER permulation, FADE calibration, ASR path-score edge cases, SCORING degradation paths | ~~KS uniformity of null p-values; type-I error within MC error; monotone power curves; zero crashes on pathological tree~~ — demoted (D-DIR-01) |
 | 1 | CAAS/CAAP position calls, position-FCS, FADE sites, CT_DISAMBIGUATION, position→gene aggregation | externally-validated convergent genes/sites recovered at default threshold and in the top decile of the position score (recovery only — no null calibration at Tier 1) |
 | 2 | full DAG incl. SCORING joins, per-module FCS universes, ENRICHMENT (FCS/STRING/DOMINO) | rank concordance vs RERconverge/CSUBST (Spearman ρ > 0.3); consensus biology in top enrichment; per-module gene counts correct; subsampled null still ~uniform |
-| 3 | CAAS discovery + signification (anchor 1); RER module (anchor 2) | CAAS calls on the CAAStools lifespan `/test` set overlap the reference at Jaccard ≥ 0.9 after matching settings; RER accelerated-gene lists overlap published lists; eye/lens genes rank high in subterranean run |
+| 3 | CAAS discovery + meta_caas (anchor 1); RER module (anchor 2) | CAAS calls on the CAAStools lifespan `/test` set overlap the reference at Jaccard ≥ 0.9 after matching settings; RER accelerated-gene lists overlap published lists; eye/lens genes rank high in subterranean run |
 
 ## Datasets
 

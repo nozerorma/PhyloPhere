@@ -303,6 +303,21 @@ pos_scores <- df %>%
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
     # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
     # the breakdown (e.g. the §3 stress test used to aggregate them there directly).
+    # `is_conserved_meta` / `conserved_pair` are genuinely scheme-dependent
+    # (verified against caap_id.py's per-scheme computation); these siblings
+    # capture every scheme's value so a display-hidden disagreement is never
+    # silently lost. MUST be computed before the first()-collapsed columns
+    # below: summarise() evaluates sequentially and `is_conserved_meta =
+    # first(is_conserved_meta)` would otherwise shadow the per-row vector with
+    # the already-collapsed scalar for every expression that follows it.
+    is_conserved_meta_by_scheme = paste(
+      sort(unique(paste0(as.character(caap_group), ":", as.character(is_conserved_meta)))),
+      collapse = ","
+    ),
+    conserved_pair_by_scheme = paste(
+      sort(unique(paste0(as.character(caap_group), ":", conserved_pair)[nzchar(conserved_pair)])),
+      collapse = ","
+    ),
     is_conserved_meta  = first(is_conserved_meta),
     conserved_pair     = first(conserved_pair),
     all_mrca_posterior = first(all_mrca_posterior),

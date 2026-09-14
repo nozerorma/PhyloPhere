@@ -114,6 +114,14 @@ def convert_convergence_result_to_dict(
         "trait": getattr(result, "hypothesis", None)
         or getattr(result, "trait", "")
         or "",
+        # Hypotheses that drove >= 1 changed domain on this side (never nulled
+        # by a multi-hypothesis collision, unlike `trait`).
+        "participating_hypotheses": getattr(result, "participating_hypotheses", None) or "",
+        # Cross-hypothesis support tallies for the arbitrary first-row
+        # passthrough fields above (tag/caas/amino_encoded stay as-is).
+        "tag_support": getattr(result, "tag_support", "") or "",
+        "caas_support": getattr(result, "caas_support", "") or "",
+        "amino_encoded_support": getattr(result, "amino_encoded_support", "") or "",
     }
 
     # Position-level MRCA contrast (node / state / posterior).
@@ -147,6 +155,9 @@ def convert_convergence_result_to_dict(
     anc_aa = getattr(result, "domain_anc_aa", None) or {}
     der_top_aa = getattr(result, "domain_der_top_aa", None) or {}
     der_bot_aa = getattr(result, "domain_der_bot_aa", None) or {}
+    der_support_top_aa = getattr(result, "domain_der_support_top_aa", None) or {}
+    der_support_bot_aa = getattr(result, "domain_der_support_bot_aa", None) or {}
+    anc_support_aa = getattr(result, "domain_anc_support_aa", None) or {}
     if domain_meta or domain_scores or anc_aa or der_top_aa or der_bot_aa:
         for d, meta in (domain_meta.items() if isinstance(domain_meta, dict) else []):
             m = meta or {}
@@ -159,6 +170,10 @@ def convert_convergence_result_to_dict(
             result_dict[f"domain_{d}_anc_aa"] = anc_aa.get(d)
             result_dict[f"domain_{d}_top_aa"] = der_top_aa.get(d, "")
             result_dict[f"domain_{d}_bot_aa"] = der_bot_aa.get(d, "")
+        for d in set(anc_support_aa) | set(der_support_top_aa) | set(der_support_bot_aa):
+            result_dict[f"domain_{d}_anc_aa_support"] = anc_support_aa.get(d, "")
+            result_dict[f"domain_{d}_top_aa_support"] = der_support_top_aa.get(d, "")
+            result_dict[f"domain_{d}_bot_aa_support"] = der_support_bot_aa.get(d, "")
     else:
         # Round-trip (reloaded from the aggregation DB): carry the flat
         # domain_<d>_* keys already on the input.
@@ -168,8 +183,17 @@ def convert_convergence_result_to_dict(
                 k.endswith("_node") or k.endswith("_state") or k.endswith("_posterior")
                 or k.endswith("_score") or k.endswith("_anc_aa")
                 or k.endswith("_top_aa") or k.endswith("_bot_aa")
+                or k.endswith("_anc_aa_support") or k.endswith("_top_aa_support")
+                or k.endswith("_bot_aa_support")
             ):
                 result_dict[k] = v
+
+    # Union across pooled hypotheses of the same-residue domain pairs driving
+    # `core` (see path_scores.score_domains_side); debug-tree plotting only.
+    pair_lca = getattr(result, "pair_lca", None) or []
+    result_dict["pairwise_lca"] = "|".join(
+        f"{a}-{b}:{lca}:{contrib:.4f}" for a, b, lca, contrib in pair_lca
+    )
 
     return result_dict
 

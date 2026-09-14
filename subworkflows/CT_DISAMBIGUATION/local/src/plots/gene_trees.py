@@ -389,18 +389,23 @@ def create_gene_tree_state_plot(
     # Build mapping from node_id -> role; handle scalar and list (focal_nodes) values
     node_roles_by_id = {}
     focal_nodes = []
+    pairwise_lca_nodes = []
     for role, node_id in node_mapping.items():
         if isinstance(node_id, int):
             node_roles_by_id[node_id] = role
         elif isinstance(node_id, list):
-            # Capture focal_nodes so we can annotate and attach states below
+            # Capture focal_nodes / pairwise_lca_nodes so we can annotate and
+            # attach states/roles below
             if role == "focal_nodes":
                 focal_nodes = node_id
+            elif role == "pairwise_lca_nodes":
+                pairwise_lca_nodes = node_id
 
     role_colors = {
         "root": "#2f1b9e",
         "mrca_contrast": "#be66b2",
         "focal_nodes": "#7570b3",
+        "pairwise_lca_nodes": "#d95f02",
     }
 
     # Prepare tip residue lookup tables from both pairs (JSON) and tip_details (legacy)
@@ -502,6 +507,16 @@ def create_gene_tree_state_plot(
         if state:
             state_by_node[node_id] = (state, prob)
 
+    # Pairwise LCA nodes (core v3 `contrib` merge points, union over the pooled
+    # hypotheses). Assigned only where a node has no role yet, so they render
+    # alongside -- never replacing -- a coincident root/mrca_contrast/focal_N
+    # marker (e.g. the coarse, position-level all_mrca_node/MRCA_ALL).
+    for idx, node_id in enumerate(pairwise_lca_nodes, start=1):
+        if node_id is None or node_id in node_roles_by_id:
+            continue
+        role_colors[f"pairwise_lca_{idx}"] = role_colors["pairwise_lca_nodes"]
+        node_roles_by_id[node_id] = f"pairwise_lca_{idx}"
+
     # Fallback from pair_details for MRCA modal AA at the specific pair node
     for pair in pair_details:
         node_id = pair.get("node_id")
@@ -575,6 +590,12 @@ def create_gene_tree_state_plot(
                 try:
                     idx = int(role.split("_")[1])
                     display_role = f"MRCA_{idx}"
+                except Exception:
+                    display_role = role
+            elif role.startswith("pairwise_lca_"):
+                try:
+                    idx = int(role.rsplit("_", 1)[1])
+                    display_role = f"LCA_{idx}"
                 except Exception:
                     display_role = role
             label_lines.append(display_role)

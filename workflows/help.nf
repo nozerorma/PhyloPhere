@@ -150,7 +150,7 @@ Classifies each discovered CAAS as convergent, parallel or divergent using
 ancestral state reconstruction (ASR) relative to the phenotype tree topology.
 
 Usage:
---signification_from            <"signification_output">     null  (standalone entry)
+--meta_caas_from                <"meta_caas_output">          null  (standalone entry; --signification_from still accepted as a deprecated alias)
 --ct_disambig_asr_mode            <"precomputed">                "precomputed"
 --ct_disambig_asr_model             <"lg">                          "lg"
 --ct_disambig_asr_cache_dir          <"cache_dir">                   null

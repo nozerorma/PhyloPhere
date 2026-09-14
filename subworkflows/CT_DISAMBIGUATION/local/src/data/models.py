@@ -22,7 +22,7 @@ __all__ = [
 ]
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass
@@ -82,6 +82,17 @@ class ConvergenceResult:
     # Discovering hypothesis (FOP: "H<n>"; single-contrast run: None). One
     # ConvergenceResult is emitted per (position, scheme, hypothesis).
     hypothesis: Optional[str] = None
+    # Hypotheses (across the harvest) that drove >= 1 changed domain on this
+    # side, comma-joined. Unlike `hypothesis`/`trait`, this is never nulled by
+    # a multi-hypothesis pool -- it always reflects the pooled contributors.
+    participating_hypotheses: Optional[str] = None
+    # Cross-hypothesis support tallies for fields that otherwise silently pass
+    # through an arbitrary first-hypothesis-in-file-order row (see
+    # `_emit_pooled_side_rows`). Kept alongside the status-quo passthrough
+    # fields, not replacing them.
+    tag_support: str = ""
+    caas_support: str = ""
+    amino_encoded_support: str = ""
 
     # Node mapping and state tracking
     node_mapping: Optional[Dict[str, int]] = None
@@ -126,11 +137,22 @@ class ConvergenceResult:
     domain_anc_aa: Optional[Dict[int, Any]] = None
     domain_der_top_aa: Optional[Dict[int, str]] = None
     domain_der_bot_aa: Optional[Dict[int, str]] = None
+    # Cross-hypothesis support tallies (e.g. "I:1,V:1") for the modal residues
+    # above -- siblings, not replacements: domain_N_top_aa/bot_aa/anc_aa stay
+    # the modal winner CT_POSTPROC's residue_descriptors.py reads directly.
+    domain_der_support_top_aa: Optional[Dict[Any, str]] = None
+    domain_der_support_bot_aa: Optional[Dict[Any, str]] = None
+    domain_anc_support_aa: Optional[Dict[Any, str]] = None
     # All K domains: {d: {"mrca_id", "state", "posterior"}} — carries the node /
     # ancestral state / posterior per domain (was the mrca_<i>_node/state/posterior
     # block sourced from node_mapping). Domains without a reconstruction have
     # state None, posterior 0.0.
     domain_meta: Optional[Dict[int, Dict[str, Any]]] = None
+    # Union across pooled hypotheses of (domain_a, domain_b, lca_node_id,
+    # contrib) for the same-residue domain pairs that drove this side's `core`
+    # (see path_scores.score_domains_side); duplicate (a, b, lca) triples across
+    # hypotheses are averaged on `contrib`. Debug-tree visualization only.
+    pair_lca: Optional[List[Tuple[Any, Any, int, float]]] = None
 
 
 # Backward-compatible alias

@@ -60,7 +60,7 @@ include {CT} from './workflows/ct.nf'
 include {RER_MAIN} from './workflows/rerconverge.nf'
 include {REPORTING} from './workflows/reporting.nf'
 include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
-include {CT_SIGNIFICATION} from './workflows/ct_signification.nf'
+include {CT_META_CAAS} from './workflows/ct_meta_caas.nf'
 include {CT_POSTPROC} from './workflows/ct_postproc.nf'
 include {CT_DISAMBIGUATION} from './workflows/ct_disambiguation.nf'
 include {CT_ACCUMULATION} from './workflows/ct_accumulation.nf'
@@ -77,7 +77,7 @@ include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
 include {VEP as VEP_STANDALONE}      from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
-include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_SIGNIFICATION/ctpp_signification.nf'
+include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
 include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
@@ -193,7 +193,7 @@ workflow {
             }
             ran_any = true
         }
-        def signification_results = null
+        def meta_caas_results = null
         def disambiguation_results = null
         def postproc_results = null
 
@@ -208,10 +208,10 @@ workflow {
                                     ? params.ct_tool.split(',').collect { it.trim() } : []
         def ran_discovery     = ct_tools_ran.contains('discovery')
 
-        // Signification (pattern/caap_group summary + meta_caas.tsv export) runs
-        // downstream of discovery. No separate --ct_signification toggle: it is
+        // CT_META_CAAS (pattern/caap_group summary + meta_caas.tsv export) runs
+        // downstream of discovery. No separate --ct_meta_caas toggle: it is
         // implied by running discovery (or a standalone --discovery_from file).
-        def run_signification = ran_discovery || params.discovery_from
+        def run_meta_caas = ran_discovery || params.discovery_from
 
         def toBool = { val ->
             if (val == null) return false
@@ -220,7 +220,7 @@ workflow {
             return (boolean) val
         }
 
-        def run_ct_disambiguation = toBool(params.ct_disambiguation) && (run_signification || params.signification_from || params.disambiguation_input)
+        def run_ct_disambiguation = toBool(params.ct_disambiguation) && (run_meta_caas || params.meta_caas_from || params.disambiguation_input)
         def run_ct_postproc       = toBool(params.ct_postproc) && (run_ct_disambiguation || params.disambiguation_input)
         def run_ct_accumulation   = toBool(params.ct_accumulation) && (run_ct_postproc || params.accumulation_background_input)
         def run_caas_permulation  = run_ct_disambiguation || (toBool(params.enrichment) && toBool(params.caas_permulation_enrichment))
@@ -229,14 +229,14 @@ workflow {
         // Populated inside the ct_postproc block when --ct_postproc is enabled.
         def pp_cleaned_bg     = null   // cleaned_background_main (single file, value channel)
 
-        if (run_signification) {
+        if (run_meta_caas) {
             // Only pass CT channels when the corresponding tool actually ran.
             // Pass null (not Channel.empty()) when absent so the if(channel) guard
-            // inside CT_SIGNIFICATION correctly detects absence and falls back to params.
+            // inside CT_META_CAAS correctly detects absence and falls back to params.
             def discovery_ch        = (ct_results && ran_discovery) ? ct_results.discovery_file   : null
             def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes  : null
 
-            signification_results = CT_SIGNIFICATION(discovery_ch, background_genes_ch)
+            meta_caas_results = CT_META_CAAS(discovery_ch, background_genes_ch)
             ran_any = true
         }
 
@@ -251,11 +251,11 @@ workflow {
         def caas_perm_out = null
 
         if (run_ct_disambiguation) {
-            // Forward both possible signification metadata artifacts; CT_DISAMBIGUATION
+            // Forward both possible CT_META_CAAS metadata artifacts; CT_DISAMBIGUATION
             // will prefer global_meta_caas.tsv when present and otherwise accept
             // the per-run meta_caas.tsv fallback.
-            def meta_for_disambiguation = signification_results
-                ? signification_results.signification_global_meta.mix(signification_results.signification_meta_caas)
+            def meta_for_disambiguation = meta_caas_results
+                ? meta_caas_results.global_meta_caas.mix(meta_caas_results.meta_caas)
                 : null
             // Disambiguation needs the fg/bg trait file(s) that defined the contrasts the
             // CAAS were discovered under. Two suppliers, in order of preference:
@@ -303,7 +303,7 @@ workflow {
                 if (params.disambiguation_input)    candidate_base_dirs.add(file(params.disambiguation_input).parent.parent)
                 if (params.discovery_from)         candidate_base_dirs.add(file(params.discovery_from).parent.parent)
                 if (params.background_input)        candidate_base_dirs.add(file(params.background_input).parent.parent)
-                if (params.signification_from)     candidate_base_dirs.add(file(params.signification_from).parent.parent)
+                if (params.meta_caas_from)          candidate_base_dirs.add(file(params.meta_caas_from).parent.parent)
                 candidate_base_dirs.add(file(params.outdir))
 
                 for (base_dir in candidate_base_dirs) {
@@ -443,7 +443,7 @@ workflow {
             // Post-processing is downstream from disambiguation; consume disambiguation master CSV when available
             // Pass null (not Channel.empty()) when there is no upstream result so that the
             // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
-            // to --disambiguation_input / --background_input params (same pattern as CT_SIGNIFICATION).
+            // to --disambiguation_input / --background_input params (same pattern as CT_META_CAAS).
             def disambiguation_ch = disambiguation_results ? disambiguation_results.master_csv : null
             // Only wire raw background channels when discovery actually ran; otherwise pass
             // null/Channel.empty() so CT_POSTPROC falls back to --background_input param.
@@ -728,21 +728,21 @@ workflow {
             ran_any = true
 
             // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
-            // CAAS_SIGNIFICATION_REPORT (run above inside the run_signification
+            // CAAS_META_CAAS_REPORT (run above inside the run_meta_caas
             // block). It must run after SCORING because it joins
             // position_scores.tsv (p.emp/p.emp_adj) and gene_scores.tsv
-            // (gene_caas_pperm/gene_caas_pperm_adj) onto CT_SIGNIFICATION's
+            // (gene_caas_pperm/gene_caas_pperm_adj) onto CT_META_CAAS's
             // already-published meta_caas table -- neither SCORING output exists
-            // yet at the point CT_SIGNIFICATION itself runs. Gated on
-            // run_signification && signification_results (signification
+            // yet at the point CT_META_CAAS itself runs. Gated on
+            // run_meta_caas && meta_caas_results (CT_META_CAAS
             // actually produced a meta_caas table) && params.scoring (SCORING
             // actually ran, so SCORING.out.position_scores/gene_scores exist).
-            if (run_signification && signification_results && params.scoring) {
+            if (run_meta_caas && meta_caas_results && params.scoring) {
                 // Same "prefer global_meta_caas.tsv, fall back to per-group
                 // meta_caas.tsv" single-file resolution CT_DISAMBIGUATION uses
                 // for meta_for_disambiguation (workflows/ct_disambiguation.nf).
-                def signif_meta_upstream = signification_results.signification_global_meta
-                    .mix(signification_results.signification_meta_caas)
+                def signif_meta_upstream = meta_caas_results.global_meta_caas
+                    .mix(meta_caas_results.meta_caas)
                     .flatten()
                     .filter { f ->
                         def p = f.toString().toLowerCase()

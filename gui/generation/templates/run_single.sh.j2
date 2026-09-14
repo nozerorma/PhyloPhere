@@ -156,8 +156,12 @@ PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}"
 
 if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     DISCOVERY_FROM="${PRECOMP_OUTDIR}/caastools/discovery.tab"
-    SIGNIFICATION_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/global_meta_caas.tsv"
-    [ -f "$SIGNIFICATION_FROM" ] || SIGNIFICATION_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/meta_caas.tsv"
+    # meta_caas/ is the current CT_META_CAAS publishDir; signification/ is the
+    # pre-rename layout still on disk for outdirs from older runs.
+    META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/global_meta_caas.tsv"
+    [ -f "$META_CAAS_FROM" ] || META_CAAS_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/global_meta_caas.tsv"
+    [ -f "$META_CAAS_FROM" ] || META_CAAS_FROM="${PRECOMP_OUTDIR}/meta_caas/meta_caas/meta_caas.tsv"
+    [ -f "$META_CAAS_FROM" ] || META_CAAS_FROM="${PRECOMP_OUTDIR}/signification/meta_caas/meta_caas.tsv"
     BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
     POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
     # These only exist if the source run had --caas_permulation_enrichment on.
@@ -449,7 +453,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ct_disambig_asr_cache_dir": "$ASR_CACHE_DIR",
   "ct_disambig_posterior_threshold": "${POSTERIOR_THRESHOLD:-0.1}",
   "ct_disambig_max_tasks_per_child": "${MAX_TASKS_PER_CHILD:-50}",
-  "signification_from": "${SIGNIFICATION_FROM:-}",
+  "meta_caas_from": "${META_CAAS_FROM:-}",
   "disambiguation_input": "${DISAMBIGUATION_INPUT:-}",
   "disambiguation_dir": "${DISAMBIGUATION_DIR:-}",
   "background_input": "${BACKGROUND_INPUT:-}",

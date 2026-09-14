@@ -245,10 +245,16 @@ def score_domains_side(
     ``score_d = noisy_or`` over a domain's partner contributions (``0`` with no
     partner).
 
-    Returns ``{domain_scores, agree_num, agree_den, n_changed}`` — ``agree_den``
-    and ``n_changed`` are both ``len(domains)``.
+    Returns ``{domain_scores, agree_num, agree_den, n_changed, pair_lca}`` —
+    ``agree_den`` and ``n_changed`` are both ``len(domains)``. ``pair_lca`` is
+    ``list[(domain_a, domain_b, lca_node_id, contrib)]`` for every same-residue
+    domain pair, capturing the node whose posterior actually drove ``contrib``
+    (discarded otherwise — used only for debug-tree visualization).
     """
     contribs: Dict[Any, List[float]] = {dm["d"]: [] for dm in domains}
+    # List-of-lists (not tuples): keeps the in-memory shape identical to the
+    # JSON round-trip shape used by callers/golden fixtures.
+    pair_lca: List[List[Any]] = []
     for a, b in combinations(domains, 2):
         if a["der_enc"] != b["der_enc"]:
             continue  # agree == 0 → no contribution
@@ -259,6 +265,7 @@ def score_domains_side(
         contrib = max(0.0, 1.0 - p_shared)
         contribs[a["d"]].append(contrib)
         contribs[b["d"]].append(contrib)
+        pair_lca.append([a["d"], b["d"], lca, contrib])
 
     domain_scores = {d: noisy_or(v) for d, v in contribs.items()}
 
@@ -272,6 +279,7 @@ def score_domains_side(
         "agree_num": agree_num,
         "agree_den": agree_den,
         "n_changed": len(domains),
+        "pair_lca": pair_lca,
     }
 
 
@@ -361,6 +369,7 @@ def compute_domain_scores(
             "agree_den": sc["agree_den"],
             "n_changed": sc["n_changed"],
             "convergence_type": _convergence_type(sc["agree_num"], sc["agree_den"]),
+            "pair_lca": sc["pair_lca"],
         }
     out["domain_meta"] = domain_meta
     return out

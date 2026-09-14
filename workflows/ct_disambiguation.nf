@@ -14,8 +14,8 @@ workflow CT_DISAMBIGUATION {
         tree_file_in
 
     main:
-        // Disambiguation prefers signification's global metadata table, but older
-        // or non-grouped signification runs may only emit meta_caas.tsv.
+        // Disambiguation prefers CT_META_CAAS's global metadata table, but older
+        // or non-grouped meta_caas runs may only emit meta_caas.tsv.
         def meta_from_upstream = (meta_caas_in ?: Channel.empty())
             .flatten()
             .filter { f ->
@@ -41,13 +41,16 @@ workflow CT_DISAMBIGUATION {
             .filter { it != null }
 
         def meta_caas = meta_from_upstream.ifEmpty {
-            if (params.signification_from) {
-                def f = file(params.signification_from)
-                assert f.exists() : "Error: signification_from file not found: ${params.signification_from}"
-                log.info "📄 Loading standalone disambiguation metadata: ${params.signification_from}"
+            // meta_caas_from is the current flag; signification_from is kept as a
+            // fallback alias for scripts/configs still using the pre-rename name.
+            def standalone_meta_from = params.meta_caas_from ?: params.signification_from
+            if (standalone_meta_from) {
+                def f = file(standalone_meta_from)
+                assert f.exists() : "Error: meta_caas_from file not found: ${standalone_meta_from}"
+                log.info "📄 Loading standalone disambiguation metadata: ${standalone_meta_from}"
                 return f
             }
-            error "CT disambiguation requires signification meta file or --signification_from"
+            error "CT disambiguation requires a CT_META_CAAS meta file or --meta_caas_from"
         }
 
         // Prefer upstream CT-resolved trait/tree for integrated runs; fall back to params for standalone runs

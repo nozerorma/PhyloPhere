@@ -96,7 +96,7 @@ def validate(project: ProjectConfig) -> list[str]:
     # phenotypes purely through --my_traits.
     #
     # CAAS's own output (discovery/resample) is only ever consumed
-    # downstream by Disambiguation, via run_signification (main.nf:184-199) — so this
+    # downstream by Disambiguation, via run_meta_caas (main.nf:184-199) — so this
     # is only a real problem when Disambiguation is actually enabled. The more precise
     # version of this same check lives in the `disambig.enabled` branch below; a
     # phenotype/reporting-only run (main.nf:155's standalone --contrast_selection path,

@@ -110,7 +110,7 @@ class DisambiguationConfig(ModuleConfigBase):
     extreme_threshold: str = "0.99"  # --extreme_threshold
     iqr_multiplier: str = "3.0"  # --iqr_multiplier
 
-    # NOTE: signification_from/disambiguation_input/disambiguation_dir/background_input
+    # NOTE: meta_caas_from/disambiguation_input/disambiguation_dir/background_input
     # moved to gui/models/precomputed.py::PrecomputedConfig.
 
 

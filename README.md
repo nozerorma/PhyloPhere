@@ -88,7 +88,7 @@ re-rendered without re-running the whole chain.
 flowchart TD
     A[REPORTING\ndataset / phenotype exploration] --> B[CONTRAST_SELECTION\nprune + pick extremes]
     B --> C[CT\ndiscovery / resample / bootstrap]
-    C --> D[CT_SIGNIFICATION\ngenome-wide characterization of hypergeometric significance. Metafile production.]
+    C --> D[CT_META_CAAS\ngenome-wide characterization of hypergeometric significance. Metafile production.]
     D --> E[CT_DISAMBIGUATION\nASR: convergent/parallel/divergent]
     E --> E2[ASR_ROBUSTNESS\nposterior sensitivity, parallel diagnostic]
     E --> F[CT_POSTPROC\ncluster/gene filtering + characterization]
@@ -111,7 +111,7 @@ Execution order as wired in `main.nf`:
 1. **REPORTING** (`--reporting`) — optional preliminary trait/tree exploration reports; skipped if `--contrast_selection` is also set (it produces its own reports).
 2. **CONTRAST_SELECTION** (`--contrast_selection`) — pruning + independent-contrasts extreme selection; aborts cleanly via `--min_contrasts` if too few foreground pairs exist.
 3. **CT** (`--ct_tool discovery,resample,bootstrap`) — CAAStools discovery/resample/bootstrap.
-4. **CT_SIGNIFICATION** — genome-wide significance/FDR of discovered CAAS (runs whenever bootstrap ran, or standalone via `--bootstrap_from`).
+4. **CT_META_CAAS** — genome-wide significance/FDR of discovered CAAS (runs whenever bootstrap ran, or standalone via `--bootstrap_from`).
 5. **CT_DISAMBIGUATION** (`--ct_disambiguation`) — ASR-based convergent/parallel/divergent classification.
 6. **CT_POSTPROC** (`--ct_postproc`) — cluster/gene filtering, background cleanup, characterization report; also fans out **ASR_ROBUSTNESS** in parallel as an independent posterior-confidence diagnostic.
 7. **CT_ACCUMULATION** (`--ct_accumulation`), **VEP** (`--vep`), **FADE** (`--fade`), **RER_MAIN** (`--rer_tool`) — four largely independent evidence-generating stages that can run in any combination.
@@ -149,7 +149,7 @@ traits (`--n_trait`/`--c_trait`), or a direct foreground/background split for
 binary and ordinal-code traits (`--trait_type ordinal`, auto-detected for 2–5
 integer levels). Enforces `--min_contrasts` before letting CT run.
 
-### CT_SIGNIFICATION — genome-wide significance
+### CT_META_CAAS — genome-wide significance
 Computes FDR-corrected statistical significance of discovered CAAS from the
 bootstrap permutation output. Can run standalone from `--discovery_from` +
 `--background_input` + `--bootstrap_from`; exits cleanly if zero CAAS were
@@ -159,7 +159,7 @@ discovered.
 Uses ancestral state reconstruction (ASR) plus significance metadata to
 classify each CAAS as convergent, parallel, or divergent relative to the
 phenotype tree topology.
-Standalone via `--signification_from` + `--caas_config`/`--tree`.
+Standalone via `--meta_caas_from` + `--caas_config`/`--tree`.
 
 ### CT_POSTPROC — filtering & characterization
 Applies cluster/gene-level filtering (`--caas_postproc_mode filter|exploratory`),
@@ -561,7 +561,7 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 
 | Parameter | Default | Purpose |
 |---|---|---|
-| `signification_from` | `""` | Standalone signification output directory input. |
+| `meta_caas_from` | `""` | Standalone CT_META_CAAS output directory input. |
 | `ct_disambig_asr_mode` | `"precomputed"` | ASR source mode (`"precomputed"` or `"compute"`). |
 | `ct_disambig_asr_model` | `"lg"` | Substitution matrix model used for ASR reconstruction. |
 | `ct_disambig_asr_cache_dir` | `""` | Directory containing precomputed ASR state files. |

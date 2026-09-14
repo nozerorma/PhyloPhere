@@ -7,35 +7,258 @@
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.95, "core": 0.95, "domain_scores": {"1": 0.95, "2": 0.95}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.95,
+        "core": 0.95,
+        "domain_scores": {
+          "1": 0.95,
+          "2": 0.95
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {
+          "1": "V",
+          "2": "V"
+        },
+        "domain_anc": {
+          "1": "A",
+          "2": "A"
+        },
+        "domain_der_support": {
+          "1": "V:1",
+          "2": "V:1"
+        },
+        "domain_anc_support": {
+          "1": "A:1",
+          "2": "A:1"
+        },
+        "agree_num": 2,
+        "agree_den": 2,
+        "n_participating": 2,
+        "convergence_type": "convergent",
+        "participating_hyps": [
+          "H1"
+        ]
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 1
     }
   },
   {
     "name": "m1_pss_shifts_to_d1",
     "doc": "B.1 - M=1, PSS 0.9/0.9/0.1 pulls core toward the two converging V domains",
-    "pss": [["H1", 1, 0.9], ["H1", 2, 0.9], ["H1", 3, 0.1]],
+    "pss": [
+      [
+        "H1",
+        1,
+        0.9
+      ],
+      [
+        "H1",
+        2,
+        0.9
+      ],
+      [
+        "H1",
+        3,
+        0.1
+      ]
+    ],
     "hyp_records": [
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_der_enc": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_changed": 3, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95,
+              "3": 0.0
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V",
+              "3": "L"
+            },
+            "domain_der_enc": {
+              "1": "V",
+              "2": "V",
+              "3": "L"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A",
+              "3": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 3,
+            "n_changed": 3,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "3": {
+              "mrca_id": 7,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.9, "core": 0.9, "domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_weights": {"1": 0.9, "2": 0.9, "3": 0.1}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_participating": 3, "convergence_type": "convergent"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0, "3": 0.0}, "domain_weights": {"1": 0.9, "2": 0.9, "3": 0.1}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.8999999999999999,
+        "core": 0.8999999999999999,
+        "domain_scores": {
+          "1": 0.95,
+          "2": 0.95,
+          "3": 0.0
+        },
+        "domain_weights": {
+          "1": 0.9,
+          "2": 0.9,
+          "3": 0.1
+        },
+        "domain_der": {
+          "1": "V",
+          "2": "V",
+          "3": "L"
+        },
+        "domain_anc": {
+          "1": "A",
+          "2": "A",
+          "3": "A"
+        },
+        "domain_der_support": {
+          "1": "V:1",
+          "2": "V:1",
+          "3": "L:1"
+        },
+        "domain_anc_support": {
+          "1": "A:1",
+          "2": "A:1",
+          "3": "A:1"
+        },
+        "agree_num": 2,
+        "agree_den": 3,
+        "n_participating": 3,
+        "convergence_type": "convergent",
+        "participating_hyps": [
+          "H1"
+        ]
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0,
+          "3": 0.0
+        },
+        "domain_weights": {
+          "1": 0.9,
+          "2": 0.9,
+          "3": 0.1
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 1
     }
   },
@@ -47,51 +270,369 @@
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       },
       {
         "hyp": "H2",
         "sides": {
-          "top": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.475, "core": 0.475, "domain_scores": {"1": 0.475, "2": 0.475}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.475,
+        "core": 0.475,
+        "domain_scores": {
+          "1": 0.475,
+          "2": 0.475
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {
+          "1": "V",
+          "2": "V"
+        },
+        "domain_anc": {
+          "1": "A",
+          "2": "A"
+        },
+        "domain_der_support": {
+          "1": "V:1",
+          "2": "V:1"
+        },
+        "domain_anc_support": {
+          "1": "A:1",
+          "2": "A:1"
+        },
+        "agree_num": 2,
+        "agree_den": 2,
+        "n_participating": 2,
+        "convergence_type": "convergent",
+        "participating_hyps": [
+          "H1"
+        ]
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 2
     }
   },
   {
     "name": "m2_asymmetric_pss_same_domain",
     "doc": "B.3 - per-hypothesis PSS 0.1/0.9 on d1 averages to w_bar_1 = 0.5",
-    "pss": [["H1", 1, 0.1], ["H2", 1, 0.9], ["H1", 2, 0.9], ["H2", 2, 0.9], ["H1", 3, 0.5], ["H2", 3, 0.5]],
+    "pss": [
+      [
+        "H1",
+        1,
+        0.1
+      ],
+      [
+        "H2",
+        1,
+        0.9
+      ],
+      [
+        "H1",
+        2,
+        0.9
+      ],
+      [
+        "H2",
+        2,
+        0.9
+      ],
+      [
+        "H1",
+        3,
+        0.5
+      ],
+      [
+        "H2",
+        3,
+        0.5
+      ]
+    ],
     "hyp_records": [
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_der_enc": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_changed": 3, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95,
+              "3": 0.0
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V",
+              "3": "L"
+            },
+            "domain_der_enc": {
+              "1": "V",
+              "2": "V",
+              "3": "L"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A",
+              "3": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 3,
+            "n_changed": 3,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "3": {
+              "mrca_id": 7,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       },
       {
         "hyp": "H2",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_der_enc": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_changed": 3, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95,
+              "3": 0.0
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V",
+              "3": "L"
+            },
+            "domain_der_enc": {
+              "1": "V",
+              "2": "V",
+              "3": "L"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A",
+              "3": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 3,
+            "n_changed": 3,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "3": {
+              "mrca_id": 7,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.7, "core": 0.7, "domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_weights": {"1": 0.5, "2": 0.9, "3": 0.5}, "domain_der": {"1": "V", "2": "V", "3": "L"}, "domain_anc": {"1": "A", "2": "A", "3": "A"}, "agree_num": 2, "agree_den": 3, "n_participating": 3, "convergence_type": "convergent"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0, "3": 0.0}, "domain_weights": {"1": 0.5, "2": 0.9, "3": 0.5}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.7000000000000001,
+        "core": 0.7000000000000001,
+        "domain_scores": {
+          "1": 0.95,
+          "2": 0.95,
+          "3": 0.0
+        },
+        "domain_weights": {
+          "1": 0.5,
+          "2": 0.9,
+          "3": 0.5
+        },
+        "domain_der": {
+          "1": "V",
+          "2": "V",
+          "3": "L"
+        },
+        "domain_anc": {
+          "1": "A",
+          "2": "A",
+          "3": "A"
+        },
+        "domain_der_support": {
+          "1": "V:2",
+          "2": "V:2",
+          "3": "L:2"
+        },
+        "domain_anc_support": {
+          "1": "A:2",
+          "2": "A:2",
+          "3": "A:2"
+        },
+        "agree_num": 2,
+        "agree_den": 3,
+        "n_participating": 3,
+        "convergence_type": "convergent",
+        "participating_hyps": [
+          "H1",
+          "H2"
+        ]
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0,
+          "3": 0.0
+        },
+        "domain_weights": {
+          "1": 0.5,
+          "2": 0.9,
+          "3": 0.5
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 2
     }
   },
@@ -103,15 +644,84 @@
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 1
     }
   },
@@ -123,15 +733,119 @@
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}, "3": {"mrca_id": 7, "state": null, "posterior": 0.0}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "3": {
+              "mrca_id": 7,
+              "state": null,
+              "posterior": 0.0
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.6333333333333333, "core": 0.6333333333333333, "domain_scores": {"1": 0.95, "2": 0.95, "3": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0, "3": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0, "3": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0, "3": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.6333333333333333,
+        "core": 0.6333333333333333,
+        "domain_scores": {
+          "1": 0.95,
+          "2": 0.95,
+          "3": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0,
+          "3": 1.0
+        },
+        "domain_der": {
+          "1": "V",
+          "2": "V"
+        },
+        "domain_anc": {
+          "1": "A",
+          "2": "A"
+        },
+        "domain_der_support": {
+          "1": "V:1",
+          "2": "V:1"
+        },
+        "domain_anc_support": {
+          "1": "A:1",
+          "2": "A:1"
+        },
+        "agree_num": 2,
+        "agree_den": 2,
+        "n_participating": 2,
+        "convergence_type": "convergent",
+        "participating_hyps": [
+          "H1"
+        ]
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0,
+          "3": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0,
+          "3": 1.0
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 1
     }
   },
@@ -143,31 +857,210 @@
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       },
       {
         "hyp": "H2",
         "sides": {
-          "top": {"domain_scores": {"1": 0.0, "2": 0.0}, "domain_der": {"1": "I", "2": "V"}, "domain_der_enc": {"1": "I", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 1, "agree_den": 2, "n_changed": 2, "convergence_type": "divergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.0,
+              "2": 0.0
+            },
+            "domain_der": {
+              "1": "I",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "I",
+              "2": "V"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 1,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "divergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       },
       {
         "hyp": "H3",
         "sides": {
-          "top": {"domain_scores": {"1": 0.0, "2": 0.0}, "domain_der": {"1": "L", "2": "V"}, "domain_der_enc": {"1": "L", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 1, "agree_den": 2, "n_changed": 2, "convergence_type": "divergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.1}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.1}}
+          "top": {
+            "domain_scores": {
+              "1": 0.0,
+              "2": 0.0
+            },
+            "domain_der": {
+              "1": "L",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "L",
+              "2": "V"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 1,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "divergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.1
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.1
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.31666666666666665, "core": 0.31666666666666665, "domain_scores": {"1": 0.31666666666666665, "2": 0.31666666666666665}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.31666666666666665,
+        "core": 0.31666666666666665,
+        "domain_scores": {
+          "1": 0.31666666666666665,
+          "2": 0.31666666666666665
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {
+          "1": "V",
+          "2": "V"
+        },
+        "domain_anc": {
+          "1": "A",
+          "2": "A"
+        },
+        "domain_der_support": {
+          "1": "I:1,L:1,V:1",
+          "2": "V:3"
+        },
+        "domain_anc_support": {
+          "1": "A:3",
+          "2": "A:3"
+        },
+        "agree_num": 2,
+        "agree_den": 2,
+        "n_participating": 2,
+        "convergence_type": "convergent",
+        "participating_hyps": [
+          "H1",
+          "H2",
+          "H3"
+        ]
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 3
     }
   },
@@ -179,31 +1072,210 @@
       {
         "hyp": "H1",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "V", "2": "V"}, "domain_der_enc": {"1": "l", "2": "l"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.15}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.15}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95
+            },
+            "domain_der": {
+              "1": "V",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "l",
+              "2": "l"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.15
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.15
+            }
+          }
         }
       },
       {
         "hyp": "H2",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "I", "2": "V"}, "domain_der_enc": {"1": "l", "2": "l"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.15}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.15}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95
+            },
+            "domain_der": {
+              "1": "I",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "l",
+              "2": "l"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.15
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.15
+            }
+          }
         }
       },
       {
         "hyp": "H3",
         "sides": {
-          "top": {"domain_scores": {"1": 0.95, "2": 0.95}, "domain_der": {"1": "L", "2": "V"}, "domain_der_enc": {"1": "l", "2": "l"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_changed": 2, "convergence_type": "convergent"},
-          "bottom": {"domain_scores": {}, "domain_der": {}, "domain_der_enc": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_changed": 0, "convergence_type": "no_change"},
-          "domain_meta": {"1": {"mrca_id": 3, "state": "A", "posterior": 0.15}, "2": {"mrca_id": 5, "state": "A", "posterior": 0.15}}
+          "top": {
+            "domain_scores": {
+              "1": 0.95,
+              "2": 0.95
+            },
+            "domain_der": {
+              "1": "L",
+              "2": "V"
+            },
+            "domain_der_enc": {
+              "1": "l",
+              "2": "l"
+            },
+            "domain_anc": {
+              "1": "A",
+              "2": "A"
+            },
+            "agree_num": 2,
+            "agree_den": 2,
+            "n_changed": 2,
+            "convergence_type": "convergent"
+          },
+          "bottom": {
+            "domain_scores": {},
+            "domain_der": {},
+            "domain_der_enc": {},
+            "domain_anc": {},
+            "agree_num": 0,
+            "agree_den": 0,
+            "n_changed": 0,
+            "convergence_type": "no_change"
+          },
+          "domain_meta": {
+            "1": {
+              "mrca_id": 3,
+              "state": "A",
+              "posterior": 0.15
+            },
+            "2": {
+              "mrca_id": 5,
+              "state": "A",
+              "posterior": 0.15
+            }
+          }
         }
       }
     ],
     "expected": {
-      "top": {"asr_path_score": 0.95, "core": 0.95, "domain_scores": {"1": 0.95, "2": 0.95}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {"1": "V", "2": "V"}, "domain_anc": {"1": "A", "2": "A"}, "agree_num": 2, "agree_den": 2, "n_participating": 2, "convergence_type": "convergent"},
-      "bottom": {"asr_path_score": 0.0, "core": 0.0, "domain_scores": {"1": 0.0, "2": 0.0}, "domain_weights": {"1": 1.0, "2": 1.0}, "domain_der": {}, "domain_anc": {}, "agree_num": 0, "agree_den": 0, "n_participating": 0, "convergence_type": "no_change"},
+      "top": {
+        "asr_path_score": 0.9499999999999998,
+        "core": 0.9499999999999998,
+        "domain_scores": {
+          "1": 0.9499999999999998,
+          "2": 0.9499999999999998
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {
+          "1": "V",
+          "2": "V"
+        },
+        "domain_anc": {
+          "1": "A",
+          "2": "A"
+        },
+        "domain_der_support": {
+          "1": "I:1,L:1,V:1",
+          "2": "V:3"
+        },
+        "domain_anc_support": {
+          "1": "A:3",
+          "2": "A:3"
+        },
+        "agree_num": 2,
+        "agree_den": 2,
+        "n_participating": 2,
+        "convergence_type": "convergent",
+        "participating_hyps": [
+          "H1",
+          "H2",
+          "H3"
+        ]
+      },
+      "bottom": {
+        "asr_path_score": 0.0,
+        "core": 0.0,
+        "domain_scores": {
+          "1": 0.0,
+          "2": 0.0
+        },
+        "domain_weights": {
+          "1": 1.0,
+          "2": 1.0
+        },
+        "domain_der": {},
+        "domain_anc": {},
+        "domain_der_support": {},
+        "domain_anc_support": {},
+        "agree_num": 0,
+        "agree_den": 0,
+        "n_participating": 0,
+        "convergence_type": "no_change",
+        "participating_hyps": []
+      },
       "n_hypotheses": 3
     }
   }

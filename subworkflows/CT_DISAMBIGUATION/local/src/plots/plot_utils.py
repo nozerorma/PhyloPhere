@@ -55,8 +55,8 @@ def build_result_from_row(row: pd.Series) -> Optional[Dict[str, Any]]:
 
     focal_nodes: list[int] = []
     idx = 1
-    while f"mrca_{idx}_node" in row:
-        node_val = row.get(f"mrca_{idx}_node")
+    while f"domain_{idx}_node" in row:
+        node_val = row.get(f"domain_{idx}_node")
         if node_val is not None and not pd.isna(node_val):
             try:
                 node_id = int(node_val)
@@ -67,6 +67,21 @@ def build_result_from_row(row: pd.Series) -> Optional[Dict[str, Any]]:
         idx += 1
     if focal_nodes:
         node_mapping["focal_nodes"] = focal_nodes
+
+    pairwise_lca_raw = row.get("pairwise_lca") if hasattr(row, "get") else None
+    if pairwise_lca_raw is not None and not pd.isna(pairwise_lca_raw) and str(pairwise_lca_raw):
+        lca_ids: list[int] = []
+        for entry in str(pairwise_lca_raw).split("|"):
+            entry = entry.strip()
+            if not entry:
+                continue
+            try:
+                lca_id = int(entry.split(":")[1])
+            except Exception:
+                continue
+            lca_ids.append(lca_id)
+        if lca_ids:
+            node_mapping["pairwise_lca_nodes"] = sorted(set(lca_ids))
 
     node_state_details: Dict[str, Any] = {}
     all_mrca_state = row.get("all_mrca_state") if hasattr(row, "get") else None
@@ -82,8 +97,8 @@ def build_result_from_row(row: pd.Series) -> Optional[Dict[str, Any]]:
     focal_states: list[str] = []
     focal_probs: list[float] = []
     for idx, node_id in enumerate(focal_nodes, start=1):
-        state = row.get(f"mrca_{idx}_state") if hasattr(row, "get") else None
-        prob = row.get(f"mrca_{idx}_posterior") if hasattr(row, "get") else None
+        state = row.get(f"domain_{idx}_state") if hasattr(row, "get") else None
+        prob = row.get(f"domain_{idx}_posterior") if hasattr(row, "get") else None
         if state is not None and not pd.isna(state):
             focal_states.append(str(state))
         if prob is not None and not pd.isna(prob):

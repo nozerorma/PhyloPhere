@@ -200,7 +200,7 @@ GS1}` × `trait ∈ {traitfile_H1..H4}` (las que superen la regla en cada esquem
 
 ## D. Significación  (`7.CAAS_pattern_annotation.Rmd`) — **solo bootstrap**
 
-`signification/meta_caas/<scheme>_meta_caas.tsv`. La única cantidad de significación por
+`meta_caas/meta_caas/<scheme>_meta_caas.tsv`. La única cantidad de significación por
 sitio es:
 
 **`recovery_boot` = `occurrences / total`** — fracción de **labelings fenotípicos
@@ -725,7 +725,8 @@ filtradas por `change_side`, ranking sobre posiciones con `CAAS_score > 0`.
   genome-wide; en un fixture de 1–3 genes no lleva señal.
 - El gate PSS continuo por defecto es un percentil de rango que escala con el tamaño del
   árbol, no con la señal (cuestión de diseño abierta).
-- Comentarios obsoletos en el código (`ctpp_signification.nf:2` "hypergeometric and
-  permutation", `scoring_compute.R` "gate_all / gate_sig", docstring de
+- Comentarios obsoletos en el código (`scoring_compute.R` "gate_all / gate_sig", docstring de
   `caap_id.py::fetch_caap` con `pvalue`) NO reflejan el comportamiento actual: no hay test
-  hipergeométrico ni gate de significación por sitio.
+  hipergeométrico ni gate de significación por sitio. (El comentario desactualizado en
+  `ctpp_signification.nf:2` ya no aplica: el fichero se renombró a `ctpp_meta_caas.nf`
+  durante el rename CT_SIGNIFICATION → CT_META_CAAS y el comentario se corrigió de paso.)

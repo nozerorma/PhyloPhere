@@ -10,7 +10,7 @@
 # When the threshold is NOT met:
 #   • A plain-text sentinel  low_contrasts.skip  is published to ${params.outdir}.
 #   • Neither traitfile nor permulation_traitfile is emitted downstream.
-#   • All subsequent CT / signification / disambiguation / … processes are
+#   • All subsequent CT / meta_caas / disambiguation / … processes are
 #     silently skipped because their input channels never receive a value.
 #   • The Nextflow run exits 0 (no error).
 #   • The bash orchestrators (run_phenotypes.sh, test_stress.sh) detect the

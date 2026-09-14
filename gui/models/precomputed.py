@@ -23,7 +23,8 @@ for is never what you want.
 Path templates (relative to base_path/<TRAIT>), verified against each process's
 actual publishDir rather than guessed:
   CT/CAAS      : caastools/{discovery,resample}.tab, caastools/background_genes.output,
-                 caastools/background.output, signification/meta_caas/global_meta_caas.tsv,
+                 caastools/background.output, meta_caas/meta_caas/global_meta_caas.tsv
+                 (older outdirs: signification/meta_caas/global_meta_caas.tsv),
                  caas_permulation/caas_perms.rds,
                  caas_permulation/perm_pos_{pval,sample,quantiles}.tsv,
                  caas_permulation/perm_pos_detail/  (one gz shard per gene; triggers CAAS_PERMS_REBUILD:
@@ -63,7 +64,7 @@ class PrecomputedConfig:
 
     # --- CT / CAAS (general + 2 specific, mirroring the CAAS tab's own
     # discovery/resample checkboxes) ---
-    use_ct: bool = False  # turns off CAAS; also wires background_input, signification_from,
+    use_ct: bool = False  # turns off CAAS; also wires background_input, meta_caas_from,
     # caas_perms_file, posenrich_background_file — all derive from CT's own concat/
     # permulation outputs, not from either of the 2 specific steps individually.
     use_discovery: bool = False  # wires discovery_from
@@ -107,10 +108,17 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
 
     if config.use_discovery:
         entries.append(("discovery_from", os.path.join(outdir, "caastools", "discovery.tab"), "file"))
-        sig = os.path.join(outdir, "signification", "meta_caas", "global_meta_caas.tsv")
-        if not os.path.isfile(sig):
-            sig = os.path.join(outdir, "signification", "meta_caas", "meta_caas.tsv")
-        entries.append(("signification_from", sig, "file"))
+        # meta_caas/ is the current CT_META_CAAS publishDir; signification/ is
+        # the pre-rename layout still on disk for outdirs from older runs.
+        # Try the current path first, then each fallback in turn.
+        sig_candidates = [
+            os.path.join(outdir, "meta_caas", "meta_caas", "global_meta_caas.tsv"),
+            os.path.join(outdir, "signification", "meta_caas", "global_meta_caas.tsv"),
+            os.path.join(outdir, "meta_caas", "meta_caas", "meta_caas.tsv"),
+            os.path.join(outdir, "signification", "meta_caas", "meta_caas.tsv"),
+        ]
+        sig = next((c for c in sig_candidates if os.path.isfile(c)), sig_candidates[0])
+        entries.append(("meta_caas_from", sig, "file"))
         entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
         entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
         # The permulation outputs travel together: caas_perms.rds alone feeds the

@@ -1,9 +1,14 @@
-// CT Signification Processes
-// Perform significance testing via hypergeometric and permutation analysis
+// CT Meta-CAAS Processes
+// Pattern/caap_group annotation of discovered CAAS (meta_caas.tsv export),
+// plus the later join against SCORING's permulation-null significance.
 
-process CAAS_SIGNIFICATION_REPORT {
+process CAAS_META_CAAS_REPORT {
     label 'process_reporting'
-    publishDir path: "${params.outdir}/signification", mode: 'copy', overwrite: true, pattern: '{CAAS_signification_files/**,meta_caas/**}'
+    // meta_caas/ used to be called signification/ -- kept as a fallback read
+    // path in gui/models/precomputed.py and run_single.sh.j2 for outdirs
+    // published by older pipeline versions, but every run from here on
+    // publishes under meta_caas/.
+    publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: '{CAAS_pattern_annotation_files/**,meta_caas/**}'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
@@ -12,14 +17,14 @@ process CAAS_SIGNIFICATION_REPORT {
 
     output:
     path "*.html", emit: report
-    path "CAAS_signification_files/**", emit: assets, optional: true
+    path "CAAS_pattern_annotation_files/**", emit: assets, optional: true
     path "meta_caas/**", emit: meta_caas, optional: true
     path "meta_caas/global_meta_caas.tsv", emit: global_meta_caas, optional: true
 
     script:
     def caap_mode_r = params.caap_mode ? 'TRUE' : 'FALSE'
-    def local_dir = "${baseDir}/subworkflows/CT_SIGNIFICATION/local"
-    def outdir = "${params.outdir}/signification"
+    def local_dir = "${baseDir}/subworkflows/CT_META_CAAS/local"
+    def outdir = "${params.outdir}/meta_caas"
 
 
     if (params.use_singularity | params.use_apptainer) {
@@ -63,11 +68,11 @@ process CAAS_SIGNIFICATION_REPORT {
     }
 }
 
-// CAAS_SIGNIFICANCE_REPORT (note: SIGNIFICANCE, not SIGNIFICATION -- do not
-// confuse with CAAS_SIGNIFICATION_REPORT above).
+// CAAS_SIGNIFICANCE_REPORT (note: SIGNIFICANCE, not the CT_META_CAAS process
+// above -- do not confuse the two).
 //
-// A distinct, LATER pipeline stage than CAAS_SIGNIFICATION_REPORT. It must
-// run AFTER SCORING: it joins CT_SIGNIFICATION's already-published
+// A distinct, LATER pipeline stage than CAAS_META_CAAS_REPORT. It must
+// run AFTER SCORING: it joins CT_META_CAAS's already-published
 // global_meta_caas.tsv/meta_caas.tsv (pattern/caap_group breakdown, written
 // upstream of SCORING in the live DAG) against SCORING's published
 // position_scores.tsv (p.emp/p.emp_adj) and gene_scores.tsv
@@ -76,7 +81,7 @@ process CAAS_SIGNIFICATION_REPORT {
 // stand in for. See 16.CAAS_significance_report.Rmd for the join logic.
 process CAAS_SIGNIFICANCE_REPORT {
     label 'process_reporting'
-    publishDir path: "${params.outdir}/signification", mode: 'copy', overwrite: true, pattern: '{significance/**}'
+    publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: '{significance/**}'
     publishDir path: "${params.outdir}/html_reports", mode: 'copy', overwrite: true, pattern: '*.html'
 
     input:
@@ -91,8 +96,8 @@ process CAAS_SIGNIFICANCE_REPORT {
     path "significance/pattern_significance_summary.tsv", emit: pattern_significance_summary, optional: true
 
     script:
-    def local_dir = "${baseDir}/subworkflows/CT_SIGNIFICATION/local"
-    def outdir = "${params.outdir}/signification/significance"
+    def local_dir = "${baseDir}/subworkflows/CT_META_CAAS/local"
+    def outdir = "${params.outdir}/meta_caas/significance"
 
     if (params.use_singularity | params.use_apptainer) {
         """

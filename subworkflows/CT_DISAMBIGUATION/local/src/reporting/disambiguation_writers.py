@@ -122,10 +122,19 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         # Metadata-driven convergence context
         "caap_group",
         "amino_encoded",
+        # Cross-hypothesis support tallies for tag/caas/amino_encoded above --
+        # those three stay an arbitrary first-hypothesis passthrough; these
+        # tallies show whether the pooled hypotheses actually agreed.
+        "tag_support",
+        "caas_support",
+        "amino_encoded_support",
         "is_conserved_meta",
         "conserved_pair",
         # Discovering hypothesis ("H<n>" for FOP runs; empty otherwise)
         "trait",
+        # Hypotheses that drove >= 1 changed domain on this side -- unlike
+        # `trait`, never nulled by a genuine multi-hypothesis pool.
+        "participating_hypotheses",
         # First-class direction key (top / bottom / none). T4b retired the
         # change_top/change_bottom/change_side triplet.
         "side",
@@ -137,6 +146,10 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         "all_mrca_state",
         "all_mrca_posterior",
         "all_mrca_node",
+        # Union across pooled hypotheses of the same-residue domain pairs that
+        # drove `core` (see path_scores.score_domains_side); debug-tree
+        # visualization only. "a-b:lca:contrib|a2-b2:lca2:contrib2".
+        "pairwise_lca",
     ]
 
     # Per-domain columns for the K fixed Voronoi domains (ASR-related, at end).
@@ -153,6 +166,10 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
                 f"domain_{idx}_anc_aa",
                 f"domain_{idx}_top_aa",
                 f"domain_{idx}_bot_aa",
+                # Cross-hypothesis support tallies for the modal residues above.
+                f"domain_{idx}_anc_aa_support",
+                f"domain_{idx}_top_aa_support",
+                f"domain_{idx}_bot_aa_support",
             ]
         )
 

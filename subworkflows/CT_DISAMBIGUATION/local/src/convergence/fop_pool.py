@@ -31,6 +31,7 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.convergence.path_scores import _convergence_type
+from src.convergence.support_fmt import fmt_support
 
 
 def _modal_str(vals: Sequence[Optional[str]]) -> Optional[str]:
@@ -49,6 +50,17 @@ def _modal_str(vals: Sequence[Optional[str]]) -> Optional[str]:
     if not order:
         return None
     return max(order, key=lambda s: (counts[s], -order.index(s)))
+
+
+def _support_str(vals: Sequence[Optional[str]]) -> str:
+    """'L:3,S:2'-style tally over a domain's per-hypothesis raw residues."""
+    counts: Dict[str, int] = {}
+    for v in vals:
+        if not v:
+            continue
+        s = str(v)
+        counts[s] = counts.get(s, 0) + 1
+    return fmt_support(counts)
 
 
 def base_cycle(tag: str) -> str:
@@ -144,10 +156,12 @@ def pool_domains(
         der_enc: Dict[str, List[str]] = {}
         der_raw: Dict[str, List[str]] = {}
         anc_raw: Dict[str, List[str]] = {}
+        hyp_ids_by_domain: Dict[str, List[str]] = {}
         for r in hyps:
             srow = (r.get("sides") or {}).get(side) or {}
             for dd, e in (srow.get("domain_der_enc") or {}).items():
                 der_enc.setdefault(str(dd), []).append(e)
+                hyp_ids_by_domain.setdefault(str(dd), []).append(r["hyp"])
             for dd, e in (srow.get("domain_der") or {}).items():
                 der_raw.setdefault(str(dd), []).append(e)
             for dd, e in (srow.get("domain_anc") or {}).items():
@@ -168,10 +182,13 @@ def pool_domains(
             "domain_weights": dict(w_bar),
             "domain_der": {rep.get(sd, sd): _modal_str(der_raw.get(sd, [])) for sd in changed},
             "domain_anc": {rep.get(sd, sd): _modal_str(anc_raw.get(sd, [])) for sd in changed},
+            "domain_der_support": {rep.get(sd, sd): _support_str(der_raw.get(sd, [])) for sd in changed},
+            "domain_anc_support": {rep.get(sd, sd): _support_str(anc_raw.get(sd, [])) for sd in changed},
             "agree_num": agree_num,
             "agree_den": agree_den,
             "n_participating": agree_den,
             "convergence_type": _convergence_type(agree_num, agree_den),
+            "participating_hyps": sorted({h for hs in hyp_ids_by_domain.values() for h in hs}),
         }
 
     return {"top": _agg("top"), "bottom": _agg("bottom"), "n_hypotheses": M}

@@ -57,7 +57,7 @@ one bg tip per pair. Real example (neoplasia): 4 pairs, 8 species total. Also
 pruned tree.
 
 **`CHECK_MIN_CONTRASTS`**: if fewer than `min_contrasts` (default 3) foreground
-tips survive, it writes `low_contrasts.skip` and the **entire CT/signification/
+tips survive, it writes `low_contrasts.skip` and the **entire CT/meta_caas/
 disambiguation chain is silently skipped**, run exits 0. Tier 0 must count how
 often this fires.
 

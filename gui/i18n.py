@@ -1002,13 +1002,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Risolve la direzione di convergenza CAAS tramite ricostruzione dello stato ancestrale (ASR) e gestisce il post-processing dei cluster CAAS e a livello genico.',
         'de': 'Löst die CAAS-Konvergenzrichtung mittels Ancestral-State-Reconstruction (ASR) auf und verwaltet die CAAS-Cluster- und Gen-Ebene-Nachbearbeitung.',
     },
-    "Accumulation and Scoring need this module's output. Supply signification_from/disambiguation_input/disambiguation_dir/background_input on the Precomputed Run tab instead.": {
-        'en': "Accumulation and Scoring need this module's output. Supply signification_from/disambiguation_input/disambiguation_dir/background_input on the Precomputed Run tab instead.",
-        'es': 'Acumulación y Puntuación necesitan la salida de este módulo. Proporcione signification_from/disambiguation_input/disambiguation_dir/background_input en la pestaña Ejecución Precomputada.',
-        'ca': "Acumulació i Puntuació necessiten la sortida d'aquest mòdul. Proporcioneu signification_from/disambiguation_input/disambiguation_dir/background_input a la pestanya Execució Precomputada.",
-        'fr': "Accumulation et Score ont besoin de la sortie de ce module. Fournissez signification_from/disambiguation_input/disambiguation_dir/background_input dans l'onglet Exécution Précalculée.",
-        'it': "Accumulo e Punteggio necessitano dell'output di questo modulo. Fornire signification_from/disambiguation_input/disambiguation_dir/background_input nella scheda Esecuzione Precalcolata.",
-        'de': 'Akkumulation und Bewertung benötigen die Ausgabe dieses Moduls. Geben Sie stattdessen signification_from/disambiguation_input/disambiguation_dir/background_input im Tab „Vorberechneter Lauf“ an.',
+    "Accumulation and Scoring need this module's output. Supply meta_caas_from/disambiguation_input/disambiguation_dir/background_input on the Precomputed Run tab instead.": {
+        'en': "Accumulation and Scoring need this module's output. Supply meta_caas_from/disambiguation_input/disambiguation_dir/background_input on the Precomputed Run tab instead.",
+        'es': 'Acumulación y Puntuación necesitan la salida de este módulo. Proporcione meta_caas_from/disambiguation_input/disambiguation_dir/background_input en la pestaña Ejecución Precomputada.',
+        'ca': "Acumulació i Puntuació necessiten la sortida d'aquest mòdul. Proporcioneu meta_caas_from/disambiguation_input/disambiguation_dir/background_input a la pestanya Execució Precomputada.",
+        'fr': "Accumulation et Score ont besoin de la sortie de ce module. Fournissez meta_caas_from/disambiguation_input/disambiguation_dir/background_input dans l'onglet Exécution Précalculée.",
+        'it': "Accumulo e Punteggio necessitano dell'output di questo modulo. Fornire meta_caas_from/disambiguation_input/disambiguation_dir/background_input nella scheda Esecuzione Precalcolata.",
+        'de': 'Akkumulation und Bewertung benötigen die Ausgabe dieses Moduls. Geben Sie stattdessen meta_caas_from/disambiguation_input/disambiguation_dir/background_input im Tab „Vorberechneter Lauf“ an.',
     },
     'ASR mode': {
         'en': 'ASR mode',
@@ -2223,13 +2223,13 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Output di ricampionamento',
         'de': 'Resample-Ausgabe',
     },
-    'Signification output': {
-        'en': 'Signification output',
-        'es': 'Salida de significación',
-        'ca': 'Sortida de significació',
-        'fr': 'Sortie de signification',
-        'it': 'Output di significazione',
-        'de': 'Signification-Ausgabe',
+    'Meta-CAAS output': {
+        'en': 'Meta-CAAS output',
+        'es': 'Salida de meta-CAAS',
+        'ca': 'Sortida de meta-CAAS',
+        'fr': 'Sortie de méta-CAAS',
+        'it': 'Output di meta-CAAS',
+        'de': 'Meta-CAAS-Ausgabe',
     },
     'Disambiguation input file': {
         'en': 'Disambiguation input file',

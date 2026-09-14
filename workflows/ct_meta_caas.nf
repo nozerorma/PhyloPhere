@@ -1,13 +1,13 @@
 #!/usr/bin/env nextflow
 
 /*
- * CT signification workflow
- * Runs CT signification independently (upstream of disambiguation).
+ * CT meta-CAAS workflow
+ * Runs CT pattern annotation / meta_caas generation independently (upstream of disambiguation).
  */
 
-include { CAAS_SIGNIFICATION_REPORT } from "${baseDir}/subworkflows/CT_SIGNIFICATION/ctpp_signification"
+include { CAAS_META_CAAS_REPORT } from "${baseDir}/subworkflows/CT_META_CAAS/ctpp_meta_caas"
 
-workflow CT_SIGNIFICATION {
+workflow CT_META_CAAS {
     take:
         discovery_input_channel
         background_genes_channel
@@ -16,10 +16,10 @@ workflow CT_SIGNIFICATION {
         // Discovery source
         def discovery_file_ch
         if (discovery_input_channel) {
-            log.info "📥 Using discovery file from CT module for signification"
+            log.info "📥 Using discovery file from CT module for meta_caas"
             discovery_file_ch = discovery_input_channel
         } else {
-            assert params.discovery_from : "CT signification requires CT discovery output or --discovery_from"
+            assert params.discovery_from : "CT_META_CAAS requires CT discovery output or --discovery_from"
             def discovery_file_obj = file(params.discovery_from)
             assert discovery_file_obj.exists() : "Error: discovery_from file not found: ${params.discovery_from}"
             assert discovery_file_obj.isFile() : "Error: discovery_from must be a file"
@@ -30,7 +30,7 @@ workflow CT_SIGNIFICATION {
         def global_background_genes
         if (background_genes_channel) {
             global_background_genes = background_genes_channel
-            log.info "📥 Using global background genes from CT module for signification"
+            log.info "📥 Using global background genes from CT module for meta_caas"
         } else if (params.background_input) {
             def bg_path = file(params.background_input)
             assert bg_path.exists() : "Error: background_input file/directory not found: ${params.background_input}"
@@ -43,7 +43,7 @@ workflow CT_SIGNIFICATION {
                 log.info "📄 Loading global background genes file: ${params.background_input}"
             }
         } else {
-            error "CT signification requires CT background_genes output or --background_input"
+            error "CT_META_CAAS requires CT background_genes output or --background_input"
         }
 
         // Guard: gracefully stop the pipeline when discovery has header only (no CAAS rows)
@@ -64,13 +64,13 @@ workflow CT_SIGNIFICATION {
             }
             .map { f, row_count -> f }
 
-        signification_results = CAAS_SIGNIFICATION_REPORT(
+        meta_caas_results = CAAS_META_CAAS_REPORT(
             discovery_file_nonempty,
             global_background_genes
         )
 
     emit:
-        signification_report = signification_results.report
-        signification_meta_caas = signification_results.meta_caas
-        signification_global_meta = signification_results.global_meta_caas
+        report = meta_caas_results.report
+        meta_caas = meta_caas_results.meta_caas
+        global_meta_caas = meta_caas_results.global_meta_caas
 }

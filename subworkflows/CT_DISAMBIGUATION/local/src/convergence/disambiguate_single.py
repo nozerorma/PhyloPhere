@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 import logging
-from collections import Counter, namedtuple
+from collections import Counter, defaultdict, namedtuple
 
 # Add src to path
 project_root = Path(__file__).parent.parent
@@ -37,6 +37,7 @@ from src.data.loaders import list_gene_caas_entries, parse_trait_pairs
 from src.biochem.grouping import get_grouping_scheme
 from src.convergence.path_scores import build_node_index, compute_domain_scores
 from src.convergence.fop_pool import pool_domains
+from src.convergence.support_fmt import fmt_support
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +60,27 @@ PositionAxes = namedtuple(
 PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None)
 
 
+def _pooled_pair_lca(hyp_rows: List[Dict[str, Any]], side: str) -> Optional[List[Tuple[Any, Any, int, float]]]:
+    """Union across pooled hypotheses of one side's ``(a, b, lca, contrib)``
+    triples, dedup'd by ``(a, b, lca)`` (average ``contrib`` across duplicates —
+    the same domain pair can recur across hypotheses with a slightly different
+    ``contrib`` if the domains' ``mrca_id`` differs by hypothesis)."""
+    acc: Dict[Tuple[Any, Any, int], List[float]] = defaultdict(list)
+    for hr in hyp_rows:
+        for a, b, lca, contrib in ((hr.get("sides") or {}).get(side) or {}).get("pair_lca", []) or []:
+            if lca is None:
+                continue
+            acc[(a, b, lca)].append(contrib)
+    if not acc:
+        return None
+    return [(a, b, lca, sum(cs) / len(cs)) for (a, b, lca), cs in acc.items()]
+
+
 def _emit_pooled_side_rows(
     base: ConvergenceResult,
     hyp_rows: List[Dict[str, Any]],
     hyp_pairs_pss: Optional[Dict[Tuple[str, Any], float]] = None,
+    all_rows: Optional[List[ConvergenceResult]] = None,
 ) -> List[ConvergenceResult]:
     """Pool ``M >= 1`` per-hypothesis ``compute_domain_scores`` records for one
     ``(Gene, Position, scheme)`` and emit <= 2 per-side ConvergenceResult rows.
@@ -73,7 +91,11 @@ def _emit_pooled_side_rows(
     domain on either side across the harvest collapses to one ``side="none"``
     row. When the harvest carries more than one distinct hypothesis the emitted
     rows drop the ``hypothesis`` label (a genuine FOP pool); a lone hypothesis
-    keeps it.
+    keeps it. ``all_rows`` (the raw per-hypothesis ``ConvergenceResult`` list,
+    same length/order as ``hyp_rows``) is used only for the position-level
+    ``tag``/``caas``/``amino_encoded`` support tallies -- these live on the
+    result itself, not inside ``sides``, so they cannot be recovered from
+    ``hyp_rows`` alone.
     """
     pooled = pool_domains(hyp_rows, hyp_pairs_pss)
     meta = None
@@ -82,15 +104,31 @@ def _emit_pooled_side_rows(
     hyp_labels = {hr.get("hyp") for hr in hyp_rows if hr.get("hyp")}
     hyp_out = None if len(hyp_labels) > 1 else base.hypothesis
 
+    def _tally(attr: str) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for r in (all_rows or []):
+            v = getattr(r, attr, None)
+            if v:
+                counts[str(v)] = counts.get(str(v), 0) + 1
+        return counts
+
+    tag_support = fmt_support(_tally("tag"))
+    caas_support = fmt_support(_tally("caas"))
+    amino_encoded_support = fmt_support(_tally("amino_encoded"))
+
     sides = [s for s in ("top", "bottom")
              if int((pooled.get(s) or {}).get("n_participating", 0) or 0) > 0]
     if not sides:
         return [dataclasses.replace(
-            base, side="none", hypothesis=hyp_out,
+            base, side="none", hypothesis=hyp_out, participating_hypotheses=None,
             asr_path_score=0.0, core=0.0, convergence_type="no_change",
             domain_scores=None, domain_anc_aa=None,
             domain_der_top_aa=None, domain_der_bot_aa=None,
+            domain_der_support_top_aa=None, domain_der_support_bot_aa=None,
+            domain_anc_support_aa=None, pair_lca=None,
             domain_meta=(dict(meta) if meta else None),
+            tag_support=tag_support, caas_support=caas_support,
+            amino_encoded_support=amino_encoded_support,
         )]
 
     out: List[ConvergenceResult] = []
@@ -100,6 +138,7 @@ def _emit_pooled_side_rows(
         da = (int(d.get("agree_num", 0) or 0) / den) if den else None
         out.append(dataclasses.replace(
             base, side=s, hypothesis=hyp_out,
+            participating_hypotheses=(",".join(d.get("participating_hyps") or []) or None),
             asr_path_score=float(d.get("asr_path_score", 0.0) or 0.0),
             core=float(d.get("core", 0.0) or 0.0),
             derived_agreement=da,
@@ -108,7 +147,13 @@ def _emit_pooled_side_rows(
             domain_anc_aa=(dict(d.get("domain_anc") or {}) or None),
             domain_der_top_aa=(dict(d.get("domain_der") or {}) or None) if s == "top" else None,
             domain_der_bot_aa=(dict(d.get("domain_der") or {}) or None) if s == "bottom" else None,
+            domain_der_support_top_aa=(dict(d.get("domain_der_support") or {}) or None) if s == "top" else None,
+            domain_der_support_bot_aa=(dict(d.get("domain_der_support") or {}) or None) if s == "bottom" else None,
+            domain_anc_support_aa=(dict(d.get("domain_anc_support") or {}) or None),
+            pair_lca=_pooled_pair_lca(hyp_rows, s),
             domain_meta=(dict(meta) if meta else None),
+            tag_support=tag_support, caas_support=caas_support,
+            amino_encoded_support=amino_encoded_support,
         ))
     return out
 
@@ -933,12 +978,12 @@ def analyze_gene_disambiguation(
             pooled_rows: List[ConvergenceResult] = []
             for _rows in by_group.values():
                 hyp_rows = [
-                    {"hyp": (getattr(r, "hypothesis", None) or "H1"),
+                    {"hyp": (getattr(r, "hypothesis", None) or f"_H_UNRESOLVED_{i}"),
                      "sides": getattr(r, "sides", None) or {}}
-                    for r in _rows
+                    for i, r in enumerate(_rows)
                 ]
                 pooled_rows.extend(
-                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss)
+                    _emit_pooled_side_rows(_rows[0], hyp_rows, hyp_pairs_pss, all_rows=_rows)
                 )
             results = pooled_rows
         except Exception as e:  # never let pooling break disambiguation

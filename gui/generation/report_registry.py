@@ -547,10 +547,10 @@ def _postproc_build_script(report: DetectedReport, repo_dir: Path, use_singulari
     )
 
 
-# ── CT_SIGNIFICATION ─────────────────────────────────────────────────────
+# ── CT_META_CAAS ─────────────────────────────────────────────────────────
 
-def _signification_find_slots(outdir: Listing) -> list[InputSlot]:
-    # CAAS_SIGNIFICATION_REPORT (workflows/ct_signification.nf) takes CT's own
+def _meta_caas_find_slots(outdir: Listing) -> list[InputSlot]:
+    # CAAS_META_CAAS_REPORT (workflows/ct_meta_caas.nf) takes CT's own
     # discovery.tab directly -- it runs upstream of CT_DISAMBIGUATION in the
     # live DAG and never sees caas_convergence_master.csv (that belongs to a
     # different, later report). The old glob here looked for that CSV and,
@@ -564,7 +564,7 @@ def _signification_find_slots(outdir: Listing) -> list[InputSlot]:
     ]
 
 
-def _signification_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
+def _meta_caas_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
     output_file = "7.CAAS_pattern_annotation.html"
     render = _render_call(
@@ -579,29 +579,39 @@ def _signification_build_script(report: DetectedReport, repo_dir: Path, use_sing
         output_file,
     )
     return _wrap_script(
-        header_comment="CT_SIGNIFICATION — 7.CAAS_pattern_annotation.Rmd",
+        header_comment="CT_META_CAAS — 7.CAAS_pattern_annotation.Rmd",
         repo_dir=repo_dir,
-        local_dir="subworkflows/CT_SIGNIFICATION/local",
+        local_dir="subworkflows/CT_META_CAAS/local",
         pre_lines=[],
         render_block=render,
         output_file=output_file,
-        publish_targets=[report.html_path.parent.parent / "signification", report.html_path.parent],
+        # meta_caas/ used to be called signification/ -- publish under the
+        # current name; older outdirs on disk keep their signification/ tree
+        # untouched (this only affects where THIS regeneration writes).
+        publish_targets=[report.html_path.parent.parent / "meta_caas", report.html_path.parent],
         use_singularity=use_singularity,
     )
 
 
-# ── CAAS_SIGNIFICANCE (post-SCORING; distinct from CT_SIGNIFICATION above) ──
-# Joins CT_SIGNIFICATION's published meta_caas/global_meta_caas.tsv against
+# ── CAAS_SIGNIFICANCE (post-SCORING; distinct from CT_META_CAAS above) ──
+# Joins CT_META_CAAS's published meta_caas/global_meta_caas.tsv against
 # SCORING's published position_scores.tsv/gene_scores.tsv. Runs at a later
-# DAG position than "signification" above (after scoring, not after CT).
+# DAG position than "meta_caas" above (after scoring, not after CT).
 
 def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
-    slots = list(_signification_find_slots(outdir))
+    slots = list(_meta_caas_find_slots(outdir))
     slots.append(
         _slot("global_meta_input", "Global/meta CAAS TSV", True,
-              _first_match(outdir, "signification/meta_caas/global_meta_caas.tsv", "**/*global_meta_caas.tsv")
-              or _first_match(outdir, "signification/meta_caas/meta_caas.tsv", "**/*meta_caas.tsv"))
+              # meta_caas/ is current; signification/ is the pre-rename layout
+              # still present in outdirs from older runs -- try both specific
+              # paths before the "**/*" fallback (whichever tree it's under).
+              _first_match(outdir, "meta_caas/meta_caas/global_meta_caas.tsv",
+                            "signification/meta_caas/global_meta_caas.tsv",
+                            "**/*global_meta_caas.tsv")
+              or _first_match(outdir, "meta_caas/meta_caas/meta_caas.tsv",
+                               "signification/meta_caas/meta_caas.tsv",
+                               "**/*meta_caas.tsv"))
     )
     slots.append(_slot("position_scores_input", "Position scores TSV", True,
                         _first_match(scoring, "position_scores.tsv")))
@@ -628,11 +638,11 @@ def _signif_significance_build_script(report: DetectedReport, repo_dir: Path, us
     return _wrap_script(
         header_comment="CAAS_SIGNIFICANCE — 16.CAAS_significance_report.Rmd",
         repo_dir=repo_dir,
-        local_dir="subworkflows/CT_SIGNIFICATION/local",
+        local_dir="subworkflows/CT_META_CAAS/local",
         pre_lines=[],
         render_block=render,
         output_file=output_file,
-        publish_targets=[report.html_path.parent.parent / "signification" / "significance", report.html_path.parent],
+        publish_targets=[report.html_path.parent.parent / "meta_caas" / "significance", report.html_path.parent],
         use_singularity=use_singularity,
     )
 
@@ -1229,20 +1239,20 @@ REPORTS: list[ReportSpec] = [
         build_script=_postproc_build_script,
     ),
     ReportSpec(
-        id="signification",
-        display_name="CT_SIGNIFICATION — CAAS Pattern Annotation",
+        id="meta_caas",
+        display_name="CT_META_CAAS — CAAS Pattern Annotation",
         # Matches the current filename plus two earlier ones seen in
         # production outdirs (7.CT_signification.html from before the
         # 2026-09 rename, and 7.CT_Pattern_Annotation.html from an even
         # earlier interim naming), so "Regenerate HTML Reports" still finds
         # this report regardless of which era produced the outdir.
         html_regex=re.compile(r"^7\.(?:CT_signification|CAAS_pattern_annotation|CT_Pattern_Annotation)\.html$"),
-        find_slots=_signification_find_slots,
-        build_script=_signification_build_script,
+        find_slots=_meta_caas_find_slots,
+        build_script=_meta_caas_build_script,
     ),
     ReportSpec(
         id="signif_significance",
-        display_name="CT_SIGNIFICATION — CAAS significance report (post-scoring)",
+        display_name="CT_META_CAAS — CAAS significance report (post-scoring)",
         html_regex=re.compile(r"^16\.CAAS_significance_report\.html$"),
         find_slots=_signif_significance_find_slots,
         build_script=_signif_significance_build_script,

@@ -22,3 +22,11 @@ scratch de cada cluster:
 - correfoc: `~/scratch/0.Phylophere/.tmp`
 
 Crear el subdirectorio si no existe antes de usarlo.
+
+## Gestión de versiones en el cluster
+
+Nunca modificar archivos de código/config directamente en el cluster (Marvin2,
+correfoc) por ssh. La gestión de versiones (commits, push, pull, merges) la
+hace el usuario manualmente en su propio flujo de git. Cualquier cambio de
+código debe hacerse en el repo local y llegar al cluster a través de su propio
+proceso de sincronización/git, no editando archivos remotos directamente.
