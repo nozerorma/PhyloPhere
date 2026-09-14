@@ -274,6 +274,8 @@ _GAP_CHARS = set("-.")
 
 
 def _read_species_list(path) -> List[str]:
+    if not path:
+        return []
     try:
         with open(path) as fh:
             return [ln.strip() for ln in fh if ln.strip() and ln.strip() != "species"]

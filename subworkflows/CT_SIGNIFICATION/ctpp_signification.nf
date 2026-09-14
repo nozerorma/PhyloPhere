@@ -29,7 +29,7 @@ process CAAS_SIGNIFICATION_REPORT {
         # Render R Markdown report
         /usr/local/bin/_entrypoint.sh Rscript -e "
             rmarkdown::render(
-                '7.CT_signification.Rmd',
+                '7.CAAS_pattern_annotation.Rmd',
                 params = list(
                     discovery_input = '${discovery_input}',
                     background_input = '${background_input}',
@@ -37,7 +37,7 @@ process CAAS_SIGNIFICATION_REPORT {
                     caap_mode = ${caap_mode_r},
                     seed = '${params.seed ?: 1998}'
                 ),
-                output_file = '7.CT_signification.html'
+                output_file = '7.CAAS_pattern_annotation.html'
             )
         "
         """
@@ -48,7 +48,7 @@ process CAAS_SIGNIFICATION_REPORT {
         # Render R Markdown report
         Rscript -e "
             rmarkdown::render(
-                '7.CT_signification.Rmd',
+                '7.CAAS_pattern_annotation.Rmd',
                 params = list(
                     discovery_input = '${discovery_input}',
                     background_input = '${background_input}',
@@ -56,7 +56,7 @@ process CAAS_SIGNIFICATION_REPORT {
                     caap_mode = ${caap_mode_r},
                     seed = '${params.seed ?: 1998}'
                 ),
-                output_file = '7.CT_signification.html'
+                output_file = '7.CAAS_pattern_annotation.html'
             )
         "
         """

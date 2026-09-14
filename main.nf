@@ -605,8 +605,28 @@ workflow {
             def precomp_bottom_jsons = params.fade_json_dir_bottom
                 ? Channel.fromPath("${params.fade_json_dir_bottom}/*.FADE.json").collect().ifEmpty([])
                 : Channel.value([])
-            fade_precomp_top_out = FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, file('NO_FG_LIST'))
-            fade_precomp_bot_out = FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, file('NO_FG_LIST'))
+            // The GUI's Precomputed Run tab points fade_json_dir_{top,bottom} at
+            // <outdir>/selection/fade/<direction>/json (see run_single.sh.j2's
+            // PRECOMP_OUTDIR block). EXTRACT_EXTREME_SPECIES published that same
+            // prior run's foreground list as a sibling under the same selection/
+            // root: <outdir>/selection/species_sets/<direction>_species.txt.
+            // Without this, 6.FADE_report.Rmd always got the NO_FG_LIST sentinel
+            // here (unconditionally, unlike the live path a few lines above,
+            // which wires SELECTION_PREP's channel straight through) and printed
+            // "Foreground species list not provided to this report" even though
+            // the source run had one. Best-effort: falls back to the sentinel
+            // when the derived path doesn't resolve (e.g. --fade_json_dir_top
+            // pointed somewhere outside this layout).
+            def resolve_fg_species = { json_dir, filename ->
+                if (!json_dir) return file('NO_FG_LIST')
+                def selection_dir = file(json_dir).parent?.parent?.parent
+                def candidate = selection_dir ? selection_dir.resolve("species_sets/${filename}") : null
+                (candidate && candidate.exists()) ? candidate : file('NO_FG_LIST')
+            }
+            def fg_top_precomp    = resolve_fg_species(params.fade_json_dir_top,    'top_species.txt')
+            def fg_bottom_precomp = resolve_fg_species(params.fade_json_dir_bottom, 'bottom_species.txt')
+            fade_precomp_top_out = FADE_REPORT_PRECOMP_TOP(Channel.value('top'), precomp_top_jsons, fg_top_precomp)
+            fade_precomp_bot_out = FADE_REPORT_PRECOMP_BOTTOM(Channel.value('bottom'), precomp_bottom_jsons, fg_bottom_precomp)
             // Position-level FADE-site CSV -- posenrich's Position
             // Characterisation FADE-overlap check needs this (gene,position,
             // max_bf,target_aa), a different file than summary_tsv/site_tsv

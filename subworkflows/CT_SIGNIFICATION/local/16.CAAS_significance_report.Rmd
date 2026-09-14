@@ -25,8 +25,8 @@ params:
 ---
 
 <!--
-This report is a DISTINCT, LATER pipeline stage than 7.CT_signification.Rmd.
-CT_SIGNIFICATION (which renders 7.CT_signification.Rmd) runs upstream of
+This report is a DISTINCT, LATER pipeline stage than 7.CAAS_pattern_annotation.Rmd.
+CT_SIGNIFICATION (which renders 7.CAAS_pattern_annotation.Rmd) runs upstream of
 SCORING in the live DAG -- it cannot join position_scores.tsv/gene_scores.tsv
 because those files don't exist yet when it runs. This report re-reads
 CT_SIGNIFICATION's already-published meta_caas output (one row per
@@ -91,7 +91,7 @@ createDir <- function(path) {
   if (!dir.exists(path)) dir.create(path, recursive = TRUE, showWarnings = FALSE)
 }
 
-# Same house palette as 7.CT_signification.Rmd, for visual continuity.
+# Same house palette as 7.CAAS_pattern_annotation.Rmd, for visual continuity.
 tableau_10 <- paletteer_d("ggthemes::Tableau_10")
 names(tableau_10) <- c(
   "blue", "orange", "vermillion", "bluish_green",

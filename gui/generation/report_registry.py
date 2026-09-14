@@ -168,15 +168,22 @@ def _entrypoint_prefix(use_singularity: bool) -> str:
     return "/usr/local/bin/_entrypoint.sh " if use_singularity else ""
 
 
-def _render_call(rmd_filename: str, param_lines: list[str], output_file: str) -> str:
+def _render_call(rmd_filename: str, param_lines: list[str], output_file: str, extra_arg: str = "") -> str:
+    """extra_arg, when given, is a top-level rmarkdown::render() argument
+    (e.g. "envir = new.env()") added alongside output_file -- NOT appended
+    after this function's return value. A caller that instead does
+    `render += ",\\n envir = new.env()"` tacks it on AFTER the closing `)`
+    this already emits, producing `...)\\n, envir = new.env()` -- a stray
+    top-level comma R's parser rejects outright ("unexpected ','")."""
     params = ",\n                ".join(param_lines)
+    extra = f",\n            {extra_arg}" if extra_arg else ""
     return (
         f"rmarkdown::render(\n"
         f"            '{rmd_filename}',\n"
         f"            params = list(\n"
         f"                {params}\n"
         f"            ),\n"
-        f"            output_file = '{output_file}'\n"
+        f"            output_file = '{output_file}'{extra}\n"
         f"        )"
     )
 
@@ -397,7 +404,12 @@ def _make_fade_spec(direction: str) -> ReportSpec:
     def build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
         s = {slot.key: slot.path for slot in report.slots}
         output_file = f"6.FADE_report_{direction}.html"
-        pre_lines = [f'cp "{s["json_dir"]}"/*.FADE.json . 2>/dev/null || true']
+        # Symlink rather than copy: a full CAAS run's *.FADE.json set can run
+        # into the tens of GB, and this scratch workdir is torn down right
+        # after the render reads it -- copying that much data in just to
+        # read it once needlessly doubles disk use (and, run concurrently
+        # for several directions/traits, can exhaust /tmp outright).
+        pre_lines = [f'ln -sf "{s["json_dir"]}"/*.FADE.json . 2>/dev/null || true']
         render = _render_call(
             "6.FADE_report.Rmd",
             [
@@ -538,9 +550,15 @@ def _postproc_build_script(report: DetectedReport, repo_dir: Path, use_singulari
 # ── CT_SIGNIFICATION ─────────────────────────────────────────────────────
 
 def _signification_find_slots(outdir: Listing) -> list[InputSlot]:
+    # CAAS_SIGNIFICATION_REPORT (workflows/ct_signification.nf) takes CT's own
+    # discovery.tab directly -- it runs upstream of CT_DISAMBIGUATION in the
+    # live DAG and never sees caas_convergence_master.csv (that belongs to a
+    # different, later report). The old glob here looked for that CSV and,
+    # failing that, a "*discovery*.csv" that doesn't exist either (the real
+    # file is a .tab), so this slot never resolved against a real outdir.
     return [
-        _slot("discovery_input", "Discovery input CSV", True,
-              _first_match(outdir, "ct_disambiguation/caas_convergence_master.csv", "**/*discovery*.csv")),
+        _slot("discovery_input", "Discovery input TSV", True,
+              _first_match(outdir, "caastools/discovery.tab", "**/discovery.tab", "**/*discovery*.tab")),
         _slot("background_input", "Background genes file", True,
               _first_match(outdir, "**/*background_genes*")),
     ]
@@ -548,9 +566,9 @@ def _signification_find_slots(outdir: Listing) -> list[InputSlot]:
 
 def _signification_build_script(report: DetectedReport, repo_dir: Path, use_singularity: bool) -> str:
     s = {slot.key: slot.path for slot in report.slots}
-    output_file = "7.CT_signification.html"
+    output_file = "7.CAAS_pattern_annotation.html"
     render = _render_call(
-        "7.CT_signification.Rmd",
+        "7.CAAS_pattern_annotation.Rmd",
         [
             f"discovery_input = '{s['discovery_input']}'",
             f"background_input = '{s['background_input']}'",
@@ -561,7 +579,7 @@ def _signification_build_script(report: DetectedReport, repo_dir: Path, use_sing
         output_file,
     )
     return _wrap_script(
-        header_comment="CT_SIGNIFICATION — 7.CT_signification.Rmd",
+        header_comment="CT_SIGNIFICATION — 7.CAAS_pattern_annotation.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/CT_SIGNIFICATION/local",
         pre_lines=[],
@@ -985,8 +1003,8 @@ def _ta_data_prune_build_script(report: DetectedReport, repo_dir: Path, use_sing
             "max_contrasts = '0'",
         ],
         output_file,
+        extra_arg="envir = new.env()",
     )
-    render += ",\n        envir = new.env()"
     return _wrap_script(
         header_comment="TRAIT_ANALYSIS — 0.Data_pruning.Rmd",
         repo_dir=repo_dir,
@@ -1026,8 +1044,8 @@ def _ta_dataset_exploration_build_script(report: DetectedReport, repo_dir: Path,
             "pss_top_pct = '0.05'", "perm_strategy = 'best_model'",
         ],
         output_file,
+        extra_arg="envir = new.env()",
     )
-    render += ",\n        envir = new.env()"
     return _wrap_script(
         header_comment="TRAIT_ANALYSIS — 1.Dataset_exploration.Rmd",
         repo_dir=repo_dir,
@@ -1066,8 +1084,8 @@ def _ta_phenotype_exploration_build_script(report: DetectedReport, repo_dir: Pat
             "max_contrasts = '0'",
         ],
         output_file,
+        extra_arg="envir = new.env()",
     )
-    render += ",\n        envir = new.env()"
     return _wrap_script(
         header_comment="TRAIT_ANALYSIS — 2.Phenotype_exploration.Rmd (regeneration always applies the "
                         "singularity branch's results_dir merge step, fixing a bare-mode asymmetry in "
@@ -1106,8 +1124,8 @@ def _ta_ci_build_script(report: DetectedReport, repo_dir: Path, use_singularity:
             "pss_top_pct = '0.05'", "perm_strategy = 'best_model'",
         ],
         output_file,
+        extra_arg="envir = new.env()",
     )
-    render += ",\n        envir = new.env()"
     return _wrap_script(
         header_comment="TRAIT_ANALYSIS — 3.CI-composition.Rmd",
         repo_dir=repo_dir,
@@ -1145,17 +1163,29 @@ def _ta_contrast_build_script(report: DetectedReport, repo_dir: Path, use_singul
             "max_contrasts = '0'",
         ],
         output_file,
+        extra_arg="envir = new.env()",
     )
-    render += ",\n        envir = new.env()"
     post_lines = [
         f'mkdir -p "{s["results_dir"]}/2.CT/3.Tree"',
         f'cp "{s["tree_file"]}" "{s["results_dir"]}/2.CT/3.Tree/pruned_tree_file.nwk"',
+    ]
+    # selection_algorithm.R (sourced by 4.Independent_contrasts.Rmd) reaches
+    # outside its own local/ dir for the shared rank_candidates()/greedy_
+    # dunn_select() core, via a relative path assuming the full repo tree
+    # sits around it (../../CT/local/scripts/lean_contrast_selector.R). The
+    # regeneration workdir only ever gets subworkflows/TRAIT_ANALYSIS/local/
+    # staged into it (see _wrap_script), so that relative path -- and every
+    # other candidate selection_algorithm.R tries -- resolves to nothing.
+    # Stage it at the first candidate it checks (./src/, i.e. this workdir's
+    # own src/) instead of trying to reproduce the surrounding tree.
+    pre_lines = [
+        f'cp "{repo_dir}/subworkflows/CT/local/scripts/lean_contrast_selector.R" src/',
     ]
     return _wrap_script(
         header_comment="TRAIT_ANALYSIS — 4.Independent_contrasts.Rmd",
         repo_dir=repo_dir,
         local_dir="subworkflows/TRAIT_ANALYSIS/local",
-        pre_lines=[],
+        pre_lines=pre_lines,
         render_block=render,
         output_file=output_file,
         publish_targets=[report.html_path.parent],
@@ -1201,7 +1231,12 @@ REPORTS: list[ReportSpec] = [
     ReportSpec(
         id="signification",
         display_name="CT_SIGNIFICATION — CAAS Pattern Annotation",
-        html_regex=re.compile(r"^7\.CT_signification\.html$"),
+        # Matches the current filename plus two earlier ones seen in
+        # production outdirs (7.CT_signification.html from before the
+        # 2026-09 rename, and 7.CT_Pattern_Annotation.html from an even
+        # earlier interim naming), so "Regenerate HTML Reports" still finds
+        # this report regardless of which era produced the outdir.
+        html_regex=re.compile(r"^7\.(?:CT_signification|CAAS_pattern_annotation|CT_Pattern_Annotation)\.html$"),
         find_slots=_signification_find_slots,
         build_script=_signification_build_script,
     ),

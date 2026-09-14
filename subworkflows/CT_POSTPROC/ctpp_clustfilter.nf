@@ -22,9 +22,27 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     // read from selection's own publish path (same idiom as selection_prep.nf's
     // candidate_species.tab fallback). All optional -- the script no-ops the
     // top/bottom_species_residues + n_top/bottom_species columns when absent.
+    //
+    // Live --fade publishes species_sets/ under THIS run's own outdir (via
+    // SELECTION_PREP -> EXTRACT_EXTREME_SPECIES). The precomputed-FADE path
+    // (--fade_json_dir_top/_bottom, no live --fade) never runs SELECTION_PREP
+    // in this invocation, so species_sets/ only exists under the SOURCE run's
+    // outdir that the JSONs were read from. Derive that source dir the same
+    // way main.nf's resolve_fg_species does for FADE_REPORT_PRECOMP_*
+    // (.../selection/fade/<direction>/json -> .../selection/), falling back to
+    // this run's own dir when neither resolves (script.python side no-ops the
+    // species-tally columns when the files aren't there).
+    def own_sp_dir = file("${params.outdir}/selection/species_sets")
+    def resolve_source_sp_dir = { json_dir ->
+        if (!json_dir) return null
+        def selection_dir = file(json_dir).parent?.parent?.parent
+        selection_dir ? selection_dir.resolve('species_sets') : null
+    }
+    def source_sp_dir = resolve_source_sp_dir(params.fade_json_dir_top) ?:
+                         resolve_source_sp_dir(params.fade_json_dir_bottom)
+    def sp_dir   = own_sp_dir.exists() ? own_sp_dir : (source_sp_dir?.exists() ? source_sp_dir : own_sp_dir)
     def ali_dir  = params.alignment ?: ''
     def ali_fmt  = params.ali_format ?: 'fasta'
-    def sp_dir   = "${params.outdir}/selection/species_sets"
     def ali_flag = ali_dir ? "--alignment '${ali_dir}' --alignment-format '${ali_fmt}'" : ''
     """
     FG="${sp_dir}/top_species.txt"

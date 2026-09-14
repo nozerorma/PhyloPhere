@@ -430,8 +430,13 @@ selected_pairs_tree <- ggtree(contrast_tree_data, aes(color = contrast_label),
     na.value = "grey75"
   ) +
   labs(title = paste("Selected contrast pairs for trait:", capitalized_trait)) +
-  hexpand(0.35) +
-  vexpand(0.35) +
+  # Bumped from 0.35 -- the tree itself (not the tip labels/points) was eating
+  # too much of the canvas, leaving selected species' labels cramped against
+  # the panel edge. hexpand/vexpand pad the coordinate system around the
+  # tree's own bounding box; since only branches+tips are in that box, more
+  # padding shrinks just the branches' footprint, leaving more room for labels.
+  hexpand(0.55) +
+  vexpand(0.55) +
   theme(
     legend.position = "bottom",
     legend.title = element_text(size = 15, face = "bold"),
@@ -568,8 +573,8 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
       title = paste("All Selected Species Across", total_hypotheses, "Parallel Hypotheses for Trait:", capitalized_trait),
       subtitle = "Includes selection frequency across FOP non-replacement hypotheses"
     ) +
-    hexpand(0.35) +
-    vexpand(0.35) +
+    hexpand(0.55) +
+    vexpand(0.55) +
     theme(
       legend.position = "bottom",
       legend.title = element_text(size = 15, face = "bold"),
@@ -587,6 +592,158 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
 
   selected_pairs_tree_all
 }
+
+```
+
+## 4c. Contrast & Violin Plots — Selected Pairs Highlighted
+
+This reproduces the trait-distribution plots from `2.Phenotype_exploration.Rmd`, adding a highlight for the species actually chosen as Top/High or Bottom/Low contrast pairs in `4b.` above -- placing the observed distribution and the resulting contrast set side by side, rather than having to cross-reference two separate reports.
+
+```{r contrast_violin_highlighted, fig.height=10, fig.width=15, message=FALSE, warning=FALSE, dev='png', dpi=320}
+
+# stats_df above stays in its raw (un-melted) column-name form for
+# fop_pair_sel.f / the trait-file generation in section 4 -- build a melted
+# copy here instead of mutating it in place, mirroring 2.Phenotype_
+# exploration.Rmd's own trait_import chunk, and join in this section's
+# contrast assignment (traits_res) so the highlight below shows WHERE the
+# selected pairs actually sit in the distribution.
+stats_df_hl <- stats_df %>%
+  dplyr::mutate(
+    value = .data[[trait]],
+    taxa = .data[[taxon_of_interest]]
+  ) %>%
+  dplyr::left_join(
+    traits_res %>% dplyr::select(species, contrast_group),
+    by = "species"
+  ) %>%
+  dplyr::mutate(
+    contrast_label = dplyr::case_when(
+      contrast_group == 1 ~ "Top/High",
+      contrast_group == 0 ~ "Bottom/Low",
+      TRUE ~ "Not selected"
+    ),
+    is_selected = contrast_label != "Not selected"
+  )
+
+ordered_species_hl <- tidytree::as_tibble(pruned_tree) %>%
+  dplyr::arrange(desc(.data$node)) %>%
+  dplyr::filter(!is.na(.data$label)) %>%
+  dplyr::pull(.data$label)
+stats_df_hl$species <- factor(stats_df_hl$species, levels = ordered_species_hl)
+
+ordered_taxa_hl <- ordered_species_hl %>%
+  sapply(function(sp) {
+    idx <- which(stats_df_hl$species == sp)
+    if (length(idx) == 0) return(NA_character_)
+    stats_df_hl$taxa[idx[1]]
+  }) %>%
+  unname() %>%
+  na.omit() %>%
+  unique()
+
+contrast_fill_values <- c("Top/High" = "red", "Bottom/Low" = "forestgreen")
+
+### 1. Contrast plot, highlighted --------------------------------------------
+contrast_plot_highlighted.f <- function(df, ordered_taxa) {
+  plot_profile <- species_plot_profile(
+    n_species = dplyr::n_distinct(df$species),
+    n_taxa = dplyr::n_distinct(df$taxa)
+  )
+  contrast_dims <- plot_profile$contrast
+  global_median <- df$g_median[1]
+
+  ggplot2::ggplot(df, ggplot2::aes(x = value, y = taxa)) +
+    ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
+    ggplot2::geom_point(ggplot2::aes(color = taxa), shape = 16, size = contrast_dims$point_size, alpha = 0.30) +
+    ggplot2::scale_color_discrete(guide = "none") +
+    ggplot2::geom_point(
+      data = subset(df, is_selected),
+      ggplot2::aes(fill = contrast_label),
+      shape = 21, color = "black", stroke = 1.1, size = contrast_dims$point_size * 1.8
+    ) +
+    ggplot2::scale_fill_manual(name = "Contrast group:", values = contrast_fill_values) +
+    ggplot2::geom_vline(xintercept = global_median, linetype = "longdash", linewidth = 1.2, color = "grey30") +
+    ggplot2::labs(x = capitalized_trait,
+                  y = paste(capitalized_taxon, "-", capitalized_clade),
+                  title = paste("Trait distribution with selected contrast pairs highlighted:", capitalized_trait),
+                  caption = "Global median: longdash grey line. Outlined points: species selected as Top/High or Bottom/Low contrast pairs.") +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      plot.title = ggplot2::element_text(size = contrast_dims$title_size, hjust = 0, margin = ggplot2::margin(t = 20, b = 6), face = "bold"),
+      axis.text.y = ggplot2::element_text(size = contrast_dims$axis_text_y),
+      axis.title.x = ggplot2::element_text(size = contrast_dims$axis_title, margin = ggplot2::margin(t = 12)),
+      axis.title.y = ggplot2::element_text(size = contrast_dims$axis_title, angle = 90, margin = ggplot2::margin(l = 20, r = 20)),
+      plot.caption = ggplot2::element_text(size = contrast_dims$caption_size, hjust = 0, margin = ggplot2::margin(t = 20)),
+      legend.text = ggplot2::element_text(size = 15),
+      legend.position = "bottom"
+    )
+}
+
+contrast_hl_graph <- contrast_plot_highlighted.f(stats_df_hl, ordered_taxa_hl)
+contrast_hl_dims <- species_plot_profile(
+  n_species = dplyr::n_distinct(stats_df_hl$species),
+  n_taxa = dplyr::n_distinct(stats_df_hl$taxa)
+)$contrast
+knitr::opts_current$set(fig.width = contrast_hl_dims$width, fig.height = contrast_hl_dims$height)
+ggplot2::ggsave(
+  file.path(traitfile_dir, paste0(trait, "_contrast_plot_highlighted.png")),
+  contrast_hl_graph, device = "png", width = contrast_hl_dims$width, height = contrast_hl_dims$height, dpi = "retina"
+)
+contrast_hl_graph
+
+```
+
+```{r violin_highlighted, fig.height=10, fig.width=8, message=FALSE, warning=FALSE, dev='png', dpi=320}
+
+### 2. Violin plot, highlighted -----------------------------------------------
+violin_highlighted.f <- function(df, ordered_taxa) {
+  plot_profile <- species_plot_profile(
+    n_species = dplyr::n_distinct(df$species),
+    n_taxa = dplyr::n_distinct(df$taxa)
+  )
+  violin_dims <- plot_profile$violin
+  median_value <- median(df$value, na.rm = TRUE)
+
+  ggplot2::ggplot(df, ggplot2::aes(x = value, y = taxa)) +
+    ggplot2::scale_y_discrete(limits = rev(ordered_taxa)) +
+    ggplot2::geom_violin(ggplot2::aes(fill = taxa), color = "black", width = 0.5, trim = TRUE, scale = "width", alpha = 0.15) +
+    ggplot2::scale_fill_discrete(guide = "none") +
+    ggplot2::geom_point(
+      ggplot2::aes(color = taxa), shape = 16, size = violin_dims$point_size, alpha = 0.30,
+      position = ggplot2::position_jitter(height = violin_dims$jitter_height)
+    ) +
+    ggplot2::scale_color_discrete(guide = "none") +
+    ggnewscale::new_scale_fill() +
+    ggplot2::geom_point(
+      data = subset(df, is_selected),
+      ggplot2::aes(fill = contrast_label),
+      shape = 21, color = "black", stroke = 1.1, size = violin_dims$point_size * 1.8,
+      position = ggplot2::position_jitter(height = violin_dims$jitter_height)
+    ) +
+    ggplot2::scale_fill_manual(name = "Contrast group:", values = contrast_fill_values) +
+    ggplot2::geom_vline(ggplot2::aes(xintercept = median_value), linewidth = 1, color = "grey30", alpha = 0.5) +
+    ggplot2::labs(x = capitalized_trait) +
+    ggplot2::theme_minimal() +
+    ggplot2::theme(
+      axis.text.y = ggplot2::element_text(size = violin_dims$axis_text_y, hjust = 0.5, face = "bold"),
+      axis.title.x = ggplot2::element_text(size = violin_dims$axis_title, face = "bold", margin = ggplot2::margin(t = 12)),
+      axis.title.y = ggplot2::element_blank(),
+      legend.text = ggplot2::element_text(size = 15),
+      legend.position = "bottom"
+    )
+}
+
+violin_hl_graph <- violin_highlighted.f(stats_df_hl, ordered_taxa_hl)
+violin_hl_dims <- species_plot_profile(
+  n_species = dplyr::n_distinct(stats_df_hl$species),
+  n_taxa = dplyr::n_distinct(stats_df_hl$taxa)
+)$violin
+knitr::opts_current$set(fig.width = violin_hl_dims$width, fig.height = violin_hl_dims$height)
+ggplot2::ggsave(
+  file.path(traitfile_dir, paste0(trait, "_violin_plot_highlighted.png")),
+  violin_hl_graph, device = "png", width = violin_hl_dims$width, height = violin_hl_dims$height, dpi = "retina"
+)
+violin_hl_graph
 
 ```
 

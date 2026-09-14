@@ -7,7 +7,7 @@ Documento de métodos, cotejado línea a línea con el código de la rama `nongr
 > **Nota sobre el test hipergeométrico.** El p-valor hipergeométrico **por sitio** que
 > tenía CAAStools clásico está **completamente eliminado** de la cadena CT. `discovery.tab`
 > ya no emite columna `pvalue` (cabeceras reales en [`disco.py:211-249`](../subworkflows/CT/local/modules/disco.py)),
-> y `7.CT_signification.Rmd` **solo** integra el bootstrap. Las referencias a `pvalue` que
+> y `7.CAAS_pattern_annotation.Rmd` **solo** integra el bootstrap. Las referencias a `pvalue` que
 > aún aparecen en el código de desambiguación son ramas defensivas muertas. El único
 > hipergeométrico que sobrevive en todo el pipeline está a nivel de *conjunto de genes*, no
 > de sitio: la **Parte 1 del test de Lachenbruch** en FCS (Fisher exacto = cola superior
@@ -198,7 +198,7 @@ GS1}` × `trait ∈ {traitfile_H1..H4}` (las que superen la regla en cada esquem
 
 ---
 
-## D. Significación  (`7.CT_signification.Rmd`) — **solo bootstrap**
+## D. Significación  (`7.CAAS_pattern_annotation.Rmd`) — **solo bootstrap**
 
 `signification/meta_caas/<scheme>_meta_caas.tsv`. La única cantidad de significación por
 sitio es:
