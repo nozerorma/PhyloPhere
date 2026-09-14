@@ -47,9 +47,21 @@ product in production). The debug exports (--export_groups / --export_perm_disco
 remain on the scalar path in perm_replay.py; the vectorized path is bypassed when they are on.
 '''
 
+import os
+
 import numpy as np
 
 from modules.caap_id import US, GS1, GS2, GS3, GS4
+
+
+# Target peak memory for the chunk buffers inside count()'s GEMM loop (Fc, Bc,
+# C_fg_all, C_bg_all -- see _default_b_chunk). Fixed at 20000 rows this was fine
+# under the old ~1000-labeling resample regime, but FOP multi-hypothesis mode
+# (caas_full_perms x max_fop, up to ~1e5 labelings) can push a single chunk's
+# buffers into the tens of GB and OOM-kill the worker. Overridable per-process
+# (e.g. scaled to task.memory/task.cpus in the Nextflow process) rather than
+# hardcoded, so callers with a tighter per-worker memory budget can bound it.
+_CHUNK_MEM_BUDGET_MB = float(os.environ.get("CT_PERM_REPLAY_CHUNK_MEM_MB", "512"))
 
 
 # Ambiguity codes are treated as gaps (no resolved amino acid), exactly as
@@ -204,13 +216,29 @@ class VectorizedPermReplay:
                 block[i, col_index[g]] = 1.0
         return block
 
+    def _default_b_chunk(self, total_groups):
+        """Chunk width (rows of F/Bg per GEMM iteration) that keeps this call's
+        chunk buffers -- Fc, Bc (bc x n_sp each) and C_fg_all, C_bg_all (bc x
+        total_groups each) -- under _CHUNK_MEM_BUDGET_MB, float32 (4 bytes/elem).
+
+        Previously this was a flat 20000-row constant, sized for the ~1000-
+        labeling regime where B never came close to it. FOP multi-hypothesis mode
+        (caas_full_perms x max_fop) can push B into the tens of thousands, so a
+        fixed chunk width no longer bounds memory -- it just stops mattering
+        (B < 20000) or, once B exceeds it, saturates at a width picked for a
+        much smaller total_groups. Scale it to both B and total_groups instead.
+        """
+        bytes_per_row = max(1, 2 * (self.n_sp + total_groups) * 4)
+        budget_bytes = _CHUNK_MEM_BUDGET_MB * 1024 * 1024
+        return max(1, min(self.B, int(budget_bytes // bytes_per_row)))
+
     # -- main counting --------------------------------------------------------
 
     def count(self, positions_with_schemes, genename,
               maxgaps_fg, maxgaps_bg, maxgaps_all,
               maxmiss_fg, maxmiss_bg, maxmiss_all,
               max_conserved, admitted_patterns, caap_mode,
-              b_chunk=20000, collect_hits=False):
+              b_chunk=None, collect_hits=False):
         """Count CAAS/CAAP hits per (position[, scheme]) across all B labelings.
 
         positions_with_schemes: list of (pos_dict, schemes_set_or_None), the same
@@ -294,6 +322,9 @@ class VectorizedPermReplay:
             return (results, hits) if collect_hits else results
 
         G_concat = np.hstack(blocks) if blocks else np.zeros((self.n_sp, 0), np.float32)
+
+        if b_chunk is None:
+            b_chunk = self._default_b_chunk(col_cursor)
 
         # ---- Stream over cycles (B) in chunks to bound memory ----
         for start in range(0, self.B, b_chunk):

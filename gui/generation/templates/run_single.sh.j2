@@ -22,16 +22,11 @@ source ~/.bashrc
 conda deactivate
 conda activate phylophere
 
-# Setup unique Nextflow home directory to avoid file lock collisions on history database
-export NXF_HOME="$WORK_BASE/.nextflow/.nextflow_${TRAIT}"
-mkdir -p "$NXF_HOME"
-ln -sfn "{{ general.nextflow_plugins_dir }}" "$NXF_HOME/plugins"
-
-# Create and cd into a unique run directory to prevent Nextflow session/cache database lock collisions
-RUN_DIR="$WORK_BASE/${TRAIT}_nxf_run"
-mkdir -p "$RUN_DIR"
-cd "$RUN_DIR"
-
+# Postproc mode determines RUN_TAG ("_exploratory"/"_complete"/"") first, so the
+# pre-run Nextflow home/session/work directories below can key on ${TRAIT}${RUN_TAG}
+# the same way RESULTS_BASE does -- otherwise the exploratory and complete passes for
+# the same trait would share one NXF_HOME/RUN_DIR/WORK_DIR and reintroduce the exact
+# history-database/session-cache lock collisions this setup exists to avoid.
 if [ "${POSTPROC_MODE:-}" = "exploratory" ]; then
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}_exploratory"
     RUN_TAG="_exploratory"
@@ -136,7 +131,18 @@ else
     RESULTS_BASE="${CAAS_OUTBASE}/${TRAIT}${TAG}"
     RUN_TAG=""
 fi
-WORK_DIR="${WORK_BASE}/${TRAIT}${TAG}"
+
+# Setup unique Nextflow home directory to avoid file lock collisions on history database
+export NXF_HOME="$WORK_BASE/.nextflow/.nextflow_${TRAIT}${RUN_TAG}"
+mkdir -p "$NXF_HOME"
+ln -sfn "{{ general.nextflow_plugins_dir }}" "$NXF_HOME/plugins"
+
+# Create and cd into a unique run directory to prevent Nextflow session/cache database lock collisions
+RUN_DIR="$WORK_BASE/${TRAIT}${RUN_TAG}_nxf_run"
+mkdir -p "$RUN_DIR"
+cd "$RUN_DIR"
+
+WORK_DIR="${WORK_BASE}/${TRAIT}${TAG}${RUN_TAG}"
 mkdir -p "${RESULTS_BASE}" "${WORK_DIR}"
 
 # --- PRECOMPUTED REUSE (Precomputed Run tab) ---
@@ -173,9 +179,6 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
 fi
 if [ "${PRECOMP_USE_RESAMPLE:-false}" = true ]; then
     RESAMPLE_FROM="${PRECOMP_OUTDIR}/caastools/resample.tab"
-fi
-if [ "${PRECOMP_USE_BOOTSTRAP:-false}" = true ]; then
-    BOOTSTRAP_FROM="${PRECOMP_OUTDIR}/caastools/bootstrap.tab"
 fi
 
 if [ "${PRECOMP_USE_DISAMBIGUATION:-false}" = true ]; then
@@ -437,7 +440,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "export_perm_discovery": {{ run_defaults.export_perm_discovery }},
   "discovery_from": "${DISCOVERY_FROM:-}",
   "resample_from": "${RESAMPLE_FROM:-}",
-  "bootstrap_from": "${BOOTSTRAP_FROM:-}",
 
   "ct_disambiguation": $_RUN_DISAMBIGUATION,
   "ct_postproc": $_RUN_CT_POSTPROC,

@@ -178,6 +178,13 @@ process PERM_REPLAY_BATCHED {
     # Pin BLAS/OpenMP to 1 thread: the concurrency comes from the worker pool
     # running multiple genes in parallel; multi-threading would oversubscribe.
     export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+
+    # Bounds perm_replay_vec.py's per-call GEMM chunk buffers to a fraction of
+    # this worker's share of task.memory (task.cpus workers run concurrently,
+    # see run_ct_perm_replay_batch.sh's --workers). A quarter, not the whole
+    # share, because F/Bg/gapmat/missmat/G_concat/results/the alignment itself
+    # are held alongside the chunk buffers for the same worker's lifetime.
+    export CT_PERM_REPLAY_CHUNK_MEM_MB=\$(( ${task.memory.toMega()} / ${task.cpus} / 4 ))
     cat > ${batchID}.manifest.tsv <<'EOF'
 """ + batchManifestText + """EOF
 

@@ -142,20 +142,28 @@ watchdog_guard() {
 
 wait_for_slot() {
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -ge "$workers" ]]; do
-        if ! wait -n; then
-            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed; stopping batch $batch_id" >&2
+        # Preserve the reaped job's real exit status (e.g. 137 on an OOM SIGKILL)
+        # instead of collapsing it to a hardcoded 1 -- Nextflow's errorStrategy
+        # for this process retries on 137/140/143 with more memory, but only if
+        # that code survives to become this script's own exit status.
+        local status=0
+        wait -n || status=$?
+        if [[ "$status" -ne 0 ]]; then
+            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
             terminate_children
-            exit 1
+            exit "$status"
         fi
     done
 }
 
 wait_for_all() {
     while [[ "$(jobs -pr | wc -l | tr -d ' ')" -gt 0 ]]; do
-        if ! wait -n; then
-            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed; stopping batch $batch_id" >&2
+        local status=0
+        wait -n || status=$?
+        if [[ "$status" -ne 0 ]]; then
+            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
             terminate_children
-            exit 1
+            exit "$status"
         fi
     done
 }
