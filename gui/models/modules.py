@@ -276,6 +276,7 @@ class EnrichmentConfig(ModuleConfigBase):
     fcs_fdr: str = "0.15"  # --fcs_fdr
     fcs_pperm_thr: str = "0.025"  # --fcs_pperm_thr
     fcs_top_n: str = "20"  # --fcs_top_n
+    fcs_batch_size: str = "4"  # --fcs_batch_size (GMTs per FCS_COMPUTE_BATCHED task)
     # NOTE: caas_permulation_enrichment lives on CaasConfig, not here -- it's one
     # param (conf/enrichment.config) but also gates whether CT's own
     # CAAS_PERMULATION subworkflow runs (see main.nf), so its one true home is the
@@ -321,6 +322,7 @@ class EnrichmentConfig(ModuleConfigBase):
     posenrich_min_size: str = "5"  # --posenrich_min_size
     posenrich_max_size: str = "0"  # --posenrich_max_size
     posenrich_padj_thr: str = "0.15"  # --posenrich_padj_thr
+    posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
 
     # NOTE: posenrich_background_file (CT's own background.output — used when CT
     # is off) is derived per phenotype via PrecomputedConfig.use_discovery, not a

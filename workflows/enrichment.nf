@@ -9,6 +9,11 @@
 include { SCORING_AMI_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/scoring_enrichment.nf"
 include { SCORING_FCS_REPORT }                            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { RER_FCS_REPORT  as MODULE_FCS_RER }             from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+// FCS_COMPUTE (GMT-batched fcs_run_all(), see fcs.nf) is called once per FCS
+// report below, each against a different stats/universe -- distinct aliases
+// for the same DuplicateProcessInvocation reason as DOMINO_MODULES below.
+include { FCS_COMPUTE as FCS_COMPUTE_SCORING }            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+include { FCS_COMPUTE as FCS_COMPUTE_RER }                from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { POSENRICH }                                      from "${baseDir}/subworkflows/ENRICHMENT/posenrich.nf"
 // Nextflow forbids invoking the same process/subworkflow more than once in one workflow
 // scope without a distinct alias per call site (DuplicateProcessInvocation) -- DOMINO_MODULES
@@ -166,7 +171,9 @@ workflow ENRICHMENT {
         // SCORING_FCS_REPORT's gene_lists_dir param needs it too.
         def gene_lists_ch = gene_lists.ifEmpty { file('NO_GENE_LISTS') }
 
-        def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch)
+        def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved)
+        def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch,
+                                          scoring_fcs_compute.enrich_file)
 
         def annot_ch = fcs_stats
         def trait_lbl = params.traitname ?: 'trait'
@@ -176,10 +183,11 @@ workflow ENRICHMENT {
             .collect()
             .map { it[0] }
 
+        def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved)
         def rer_fcs = MODULE_FCS_RER(
             Channel.value('scoring/rer'),   fcs_stats_rer,
             rer_universe_ch, Channel.value("12.FCS_rer_${trait_lbl}"),
-            rer_perms_resolved, annot_ch)
+            rer_perms_resolved, annot_ch, rer_fcs_compute.enrich_file)
 
         // FADE and RER each have their own gene universe (verified to differ
         // meaningfully from CAAS's cleaned_background and from each other on

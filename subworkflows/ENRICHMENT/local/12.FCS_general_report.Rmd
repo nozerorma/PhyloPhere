@@ -41,6 +41,9 @@ params:
   traitname:    "trait"
   perms_file:   "NO_FILE"
   n_perms_sum:  10000          # permulation replicates for Path Sum Permulation (p-value floor = 1/(n+1))
+  enrich_file:  NULL          # pre-computed, GMT-batch-merged fcs_run_all() output (see fcs_compute.R /
+                              # FCS_COMPUTE_BATCHED+FCS_CONCAT in fcs.nf). When NULL, falls back to running
+                              # fcs_run_all() here directly (unbatched path, e.g. ad-hoc/manual rendering)
   annot_file:   "NO_FILE"     # optional cross-module annotation overlay (SCORING fcs_stats.tsv):
                               # supplies flag_* + CAAS score_top/score_bottom for the leading edge.
                               # When NO_FILE, annotation falls back to the stats file itself.
@@ -267,21 +270,33 @@ its own right - the evidence tier, not `evidence_score`, is what carries the
 actual significance claim.
 
 ```{r run, include=FALSE}
-# One zero-floored ranking vector per score_<ranking> column.
-rankings <- list()
-for (sc in score_cols) {
-  rk <- sub("^score_", "", sc)
-  rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
+# fcs_run_all() over every GMT database is the expensive step - Nextflow can run
+# it as N independent batched tasks (fcs_compute.R, one per GMT-file subset) and
+# hand back the merged (row-concatenated) result here via enrich_file, instead of
+# this Rmd running it in one monolithic pass. See fcs_compute.R's own header for
+# why a plain concat across GMT-file batches is exact (BH is scoped per database
+# throughout fcs_enrich.R). enrich_file = NULL keeps the original unbatched path
+# for any caller that renders this Rmd directly rather than through fcs.nf.
+if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(params$enrich_file)) {
+  enrich <- readr::read_tsv(params$enrich_file, show_col_types = FALSE)
+} else {
+  # One zero-floored ranking vector per score_<ranking> column.
+  rankings <- list()
+  for (sc in score_cols) {
+    rk <- sub("^score_", "", sc)
+    rankings[[rk]] <- fcs_build_vals(setNames(stats[[sc]], stats$gene), universe)
+  }
+  enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g,
+                                         max_g        = params$max_g,
+                                         perms_file   = params$perms_file,
+                                         fdr_thr      = params$fdr_thr,
+                                         fdr_wilcoxon    = params$fdr_wilcoxon    %||% params$fdr_thr,
+                                         fdr_lachenbruch = params$fdr_lachenbruch %||% params$fdr_thr,
+                                         fdr_permsum     = params$fdr_permsum     %||% params$fdr_thr,
+                                         p_perm_thr   = params$pperm_thr,
+                                         n_perms_sum  = params$n_perms_sum %||% 10000))
 }
-enrich <- suppressMessages(fcs_run_all(rankings, gmts, num_g = params$num_g,
-                                       max_g        = params$max_g,
-                                       perms_file   = params$perms_file,
-                                       fdr_thr      = params$fdr_thr,
-                                       fdr_wilcoxon    = params$fdr_wilcoxon    %||% params$fdr_thr,
-                                       fdr_lachenbruch = params$fdr_lachenbruch %||% params$fdr_thr,
-                                       fdr_permsum     = params$fdr_permsum     %||% params$fdr_thr,
-                                       p_perm_thr   = params$pperm_thr,
-                                       n_perms_sum  = params$n_perms_sum %||% 10000)) %>%
+enrich <- enrich %>%
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%
   dplyr::mutate(description = dplyr::coalesce(description, pathway))
 

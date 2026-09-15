@@ -529,6 +529,14 @@ def main():
         write_gene_list(os.path.join(args.output_dir, "pai3d_coverage_genes.txt"),
                          gene_pai3d_coverage.keys())
 
+    # `genomic_to_pos` is the single largest structure the script builds (one
+    # (chrom, nt_pos) -> {(gene, col)} entry per codon position across the
+    # WHOLE background universe) and is never read again past this point —
+    # both scan_external_positions calls above were its only consumers. Drop
+    # it explicitly rather than let it ride in memory through everything that
+    # follows (orthogroup GMTs, characterization_layers, position_characterization).
+    genomic_to_pos = None
+
     # 5. Genomic Locations (1 Mbp Chromosome Bins)
     print("Compiling Genomic Locations (1 Mbp bins)...")
     gen_terms = {}
@@ -656,6 +664,17 @@ def main():
 
         if args.pai3d_db and os.path.exists(args.pai3d_db):
             write_gmt(os.path.join(args.output_dir, "pai3d_orthogroups.gmt"), ortho_pai3d_terms)
+
+    # `map_cache` (per-gene selected_cols/col_to_genomic/residue_to_col for the
+    # WHOLE background universe -- comparable in size to genomic_to_pos above)
+    # and the ortho_*_terms / per-gene coverage dicts above are all written out
+    # already and never read again below (char_layers only reuses
+    # gene_ucr_*_cols / gene_*_sel_cols / gene_fade_*_cols, not these).
+    map_cache = None
+    ortho_terms = ortho_ucr_core_terms = ortho_ucr_flank_terms = None
+    ortho_pos_sel_terms = ortho_neg_sel_terms = None
+    ortho_cosmic_terms = ortho_pai3d_terms = ortho_descs = None
+    gene_cosmic_cols = gene_pai3d_cols = gene_pai3d_coverage = None
 
     # 6.5 Characterization layers — global functional layers for the report's
     #     hypergeometric/Fisher overlap test (NOT ranked by FCS: they are far too

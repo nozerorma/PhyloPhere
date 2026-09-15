@@ -553,6 +553,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fcs_fdr": "${FCS_FDR:-0.15}",
   "fcs_pperm_thr": "${FCS_PPERM_THR:-0.025}",
   "fcs_top_n": "${FCS_TOP_N:-20}",
+  "fcs_batch_size": "${FCS_BATCH_SIZE:-4}",
   "string_db_dir": "${STRING_DB_DIR:-}",
   "string_species": "${STRING_SPECIES:-9606}",
   "scoring_ami": {{ run_defaults.scoring_ami }},
@@ -576,6 +577,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "posenrich_min_size": "${POSENRICH_MIN_SIZE:-5}",
   "posenrich_max_size": "${POSENRICH_MAX_SIZE:-0}",
   "posenrich_padj_thr": "${POSENRICH_PADJ_THR:-0.15}",
+  "posenrich_batch_size": "${POSENRICH_BATCH_SIZE:-4}",
   "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}"
 }
 PARAMS_EOF

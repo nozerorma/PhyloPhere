@@ -17,6 +17,17 @@ selector block) — see gui/generation/templates' own comment about keeping thes
 files' shape in sync. Brace-depth tracked explicitly rather than assumed, so a
 selector block closes when depth returns to where it opened, not on the first
 bare "}" line.
+
+`memory` captures the FULL closure body, not just the leading `N.GB` — several
+presets use `memory = { N.GB * task.attempt }` so a retry (see errorStrategy in
+conf/resources.config) gets more memory on each attempt. An earlier version of
+this regex captured only the numeric+unit prefix, silently truncating
+`* task.attempt` off every scaled entry; since these rows get rendered verbatim
+into a `-c`-loaded override config that is generated once per run and never
+revisited, that truncation permanently pinned every overridden process at its
+attempt-1 memory for the life of the project, defeating retry-with-more-memory
+without any error or warning (a real production incident, not a hypothetical:
+`POSENRICH_BUILD_GMT` OOM'd on attempt 1 and kept OOMing identically on retry).
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -36,7 +47,9 @@ PRESET_FILES = {
 
 _SELECTOR_RE = re.compile(r"with(Name|Label):?\s*'?([A-Za-z0-9_]+)'?\s*\{")
 _CPUS_RE = re.compile(r"cpus\s*=\s*\{\s*(\d+)\s*\}")
-_MEM_RE = re.compile(r"memory\s*=\s*\{\s*(\d+(?:\.\d+)?)\.(GB|MB)")
+# Full closure body (e.g. "16.GB * task.attempt"), not just the leading
+# numeric+unit — see module docstring.
+_MEM_RE = re.compile(r"memory\s*=\s*\{\s*([^}]+?)\s*\}")
 
 
 def load_preset(name: str) -> list[ProcessResourceOverride]:
@@ -60,7 +73,7 @@ def load_preset(name: str) -> list[ProcessResourceOverride]:
                 current.cpus = m.group(1)
             m = _MEM_RE.search(line)
             if m:
-                current.memory = f"{m.group(1)}.{m.group(2)}"
+                current.memory = m.group(1)
         depth += line.count("{") - line.count("}")
         if current is not None and depth == open_depth:
             if current.cpus or current.memory:  # skip errorStrategy-only labels

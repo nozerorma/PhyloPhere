@@ -140,6 +140,93 @@ process POSENRICH_RUN {
     """
 }
 
+process POSENRICH_RUN_BATCHED {
+    tag "$batchID (${batchSize} GMTs)"
+    label 'process_posenrich_batched'
+
+    publishDir path: "${params.outdir}/posenrich/batches",
+               mode: 'copy', overwrite: true,
+               enabled: params.publish_intermediates
+
+    input:
+    tuple val(batchID), val(batchSize), val(includeCharacterization), path(gmtFiles, stageAs: 'gmts/*')
+    path characterization_layers
+    path caas_file
+    path universe
+    path background_output
+    path annot_file
+    path cosmic_coverage
+    path pai3d_coverage
+    val min_size
+    val max_size
+    path position_lists_dir
+
+    output:
+    path "posenrich_characterization.tsv", emit: results
+    path "posenrich_leading_edge.tsv", emit: leading_edge
+
+    script:
+    def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
+    def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
+    def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
+    // The characterization layer (Pfam/UCR/FUBAR/...) is one source shared
+    // across the whole run, not split per GMT file — passing it to every batch
+    // would re-run and re-append it N times once POSENRICH_CONCAT merges the
+    // batches. Only the designated batch (includeCharacterization=true) gets it;
+    // posenrich_enrich.py's read_charset() already treats a missing/omitted
+    // --characterization as "no characterization layer" for every other batch.
+    def char_arg = includeCharacterization ? "--characterization ${characterization_layers}" : ""
+    """
+    python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_enrich.py \
+        --obs-scores ${caas_file} \
+        --gmt-dir gmts \
+        ${char_arg} \
+        --universe ${universe} \
+        --background ${background_output} \
+        ${annot_arg} \
+        ${cosmic_cov_arg} \
+        ${pai3d_cov_arg} \
+        --position-lists-dir ${position_lists_dir} \
+        --min-size ${min_size} \
+        --max-size ${max_size} \
+        --n-perms ${params.posenrich_n_perms ?: 10000} \
+        --seed ${params.seed ?: 1998} \
+        --padj-thr ${params.posenrich_padj_thr} \
+        --output-dir .
+    """
+}
+
+process POSENRICH_CONCAT {
+    tag "Concatenating POSENRICH batch outputs"
+    publishDir "${params.outdir}/posenrich", mode: 'copy', overwrite: true
+
+    input:
+    path(characterization_files, stageAs: "characterization_*")
+    path(leading_edge_files, stageAs: "leading_edge_*")
+
+    output:
+    path "posenrich_characterization.tsv", emit: results
+    path "posenrich_leading_edge.tsv", emit: leading_edge
+
+    script:
+    """
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    mapfile -t char_files < <(find . -maxdepth 1 -name "characterization_*" ! -name ".*" | sort)
+    cat "\${char_files[0]}" > posenrich_characterization.tsv
+    for ((i=1; i<\${#char_files[@]}; i++)); do
+        tail -n +2 "\${char_files[\$i]}" >> posenrich_characterization.tsv
+    done
+
+    mapfile -t le_files < <(find . -maxdepth 1 -name "leading_edge_*" ! -name ".*" | sort)
+    cat "\${le_files[0]}" > posenrich_leading_edge.tsv
+    for ((i=1; i<\${#le_files[@]}; i++)); do
+        tail -n +2 "\${le_files[\$i]}" >> posenrich_leading_edge.tsv
+    done
+    """
+}
+
 process POSENRICH_REPORT {
     tag "posenrich_report|${params.traitname ?: 'unknown_trait'}"
     label 'process_reporting'
@@ -286,23 +373,68 @@ workflow POSENRICH {
     def cosmic_coverage_ch = POSENRICH_BUILD_GMT.out.cosmic_coverage.ifEmpty { file('NO_FILE_COSMIC_COV') }
     def pai3d_coverage_ch  = POSENRICH_BUILD_GMT.out.pai3d_coverage.ifEmpty { file('NO_FILE_PAI3D_COV') }
 
-    POSENRICH_RUN(
-        caas_file,
-        POSENRICH_BUILD_GMT.out.gmts,
-        POSENRICH_BUILD_GMT.out.charset,
-        cleaned_background,
-        background_output,
-        annot_file,
-        cosmic_coverage_ch,
-        pai3d_coverage_ch,
-        min_size,
-        max_size,
-        position_lists_file
-    )
+    // Batch by GMT/db source: posenrich_enrich.py already scopes BH correction
+    // per (direction, db) group, so splitting the GMT-file loop across
+    // independent Nextflow tasks (one SLURM job each, its own memory ceiling
+    // and its own retry) changes nothing statistically. batch_size=1 keeps the
+    // original monolithic POSENRICH_RUN path untouched.
+    def posenrichBatchSize = (params.posenrich_batch_size ?: 1) as int
+    def posenrich_results_ch
+    def posenrich_leading_edge_ch
+    if (posenrichBatchSize > 1) {
+        def posenrichBatchCounter = 0
+        def posenrich_batches = POSENRICH_BUILD_GMT.out.gmts
+            .flatten()
+            .collate(posenrichBatchSize)
+            .map { batch ->
+                def idx = ++posenrichBatchCounter
+                def batchID = sprintf('posenrich_batch_%05d', idx)
+                tuple(batchID, batch.size(), idx == 1, batch)
+            }
+
+        POSENRICH_RUN_BATCHED(
+            posenrich_batches,
+            POSENRICH_BUILD_GMT.out.charset,
+            caas_file,
+            cleaned_background,
+            background_output,
+            annot_file,
+            cosmic_coverage_ch,
+            pai3d_coverage_ch,
+            min_size,
+            max_size,
+            position_lists_file
+        )
+
+        POSENRICH_CONCAT(
+            POSENRICH_RUN_BATCHED.out.results.collect(),
+            POSENRICH_RUN_BATCHED.out.leading_edge.collect()
+        )
+
+        posenrich_results_ch = POSENRICH_CONCAT.out.results
+        posenrich_leading_edge_ch = POSENRICH_CONCAT.out.leading_edge
+    } else {
+        POSENRICH_RUN(
+            caas_file,
+            POSENRICH_BUILD_GMT.out.gmts,
+            POSENRICH_BUILD_GMT.out.charset,
+            cleaned_background,
+            background_output,
+            annot_file,
+            cosmic_coverage_ch,
+            pai3d_coverage_ch,
+            min_size,
+            max_size,
+            position_lists_file
+        )
+
+        posenrich_results_ch = POSENRICH_RUN.out.results
+        posenrich_leading_edge_ch = POSENRICH_RUN.out.leading_edge
+    }
 
     POSENRICH_REPORT(
-        POSENRICH_RUN.out.results,
-        POSENRICH_RUN.out.leading_edge,
+        posenrich_results_ch,
+        posenrich_leading_edge_ch,
         caas_file,
         gene_scores_file,
         vep_primateai_file,
@@ -316,8 +448,8 @@ workflow POSENRICH {
     )
 
     emit:
-    results                  = POSENRICH_RUN.out.results
-    leading_edge             = POSENRICH_RUN.out.leading_edge
+    results                  = posenrich_results_ch
+    leading_edge             = posenrich_leading_edge_ch
     report                   = POSENRICH_REPORT.out.report
     overall_dotplot          = POSENRICH_REPORT.out.overall_dotplot
     leading_edge_summary     = POSENRICH_REPORT.out.leading_edge_summary

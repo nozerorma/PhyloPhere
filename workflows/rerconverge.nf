@@ -41,6 +41,7 @@ include { RER_BIN }            from "${baseDir}/subworkflows/RERCONVERGE/rer_bin
 include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
 include { RER_GENE_LISTS }    from "${baseDir}/subworkflows/RERCONVERGE/rer_gene_lists.nf"
 include { RER_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+include { FCS_COMPUTE }    from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 
 // Main workflow
 workflow RER_MAIN {
@@ -191,13 +192,15 @@ workflow RER_MAIN {
         // runs: it renders the annotated, centralized RER FCS (with p.perm +
         // cross-module flags). Avoids per-tool + centralized duplication.
         if (params.enrichment && !params.scoring) {
+            def rer_fcs_compute = FCS_COMPUTE(rer_lists.fcs_stats, rer_bg_ch, perms_file_ch)
             RER_FCS_REPORT(
                 Channel.value('rerconverge'),
                 rer_lists.fcs_stats,
                 rer_bg_ch,
                 Channel.value("12.FCS_rer_${params.traitname}"),
                 perms_file_ch,
-                Channel.value(file('NO_FILE'))   // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
+                Channel.value(file('NO_FILE')),  // annot_file: in-branch report uses its own stats (+ optional rer_gene_scores join)
+                rer_fcs_compute.enrich_file
             )
         }
 
