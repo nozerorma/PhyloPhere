@@ -29,7 +29,16 @@ process CT_DISAMBIGUATION_RUN {
     def asr_mode = params.ct_disambig_asr_mode
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
     def task_cpus = task.cpus ?: 1
-    def threads = task_cpus
+    // threads_per_gene ONLY matters in asr_mode=compute (per-gene codeml
+    // threading) -- in asr_mode=precomputed (the common case) it is inert
+    // for the biology but NOT inert for concurrency: gene_wrapper.py's
+    // plan_concurrency() computes max_workers = available_cpu // threads,
+    // so threads=task_cpus collapses the mp.Pool to exactly 1 worker
+    // regardless of task_cpus, silently serializing every gene through one
+    // process. Keep threads=1 (matches the OPENBLAS/OMP pin below anyway --
+    // disambiguation is a pure-Python tree walk, no Level-3 BLAS) so the
+    // ${workers} figure in the comment above is what actually runs.
+    def threads = 1
     def workers = task_cpus
 
     """
@@ -156,7 +165,16 @@ process CT_DISAMBIGUATION_RUN_BATCHED {
 
     def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
     def task_cpus = task.cpus ?: 1
-    def threads = task_cpus
+    // threads_per_gene ONLY matters in asr_mode=compute (per-gene codeml
+    // threading) -- in asr_mode=precomputed (the common case) it is inert
+    // for the biology but NOT inert for concurrency: gene_wrapper.py's
+    // plan_concurrency() computes max_workers = available_cpu // threads,
+    // so threads=task_cpus collapses the mp.Pool to exactly 1 worker
+    // regardless of task_cpus, silently serializing every gene through one
+    // process. Keep threads=1 (matches the OPENBLAS/OMP pin below anyway --
+    // disambiguation is a pure-Python tree walk, no Level-3 BLAS) so the
+    // ${workers} figure in the comment above is what actually runs.
+    def threads = 1
     def workers = task_cpus
 
     """
