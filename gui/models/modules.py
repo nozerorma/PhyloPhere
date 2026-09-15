@@ -92,6 +92,7 @@ class DisambiguationConfig(ModuleConfigBase):
     ct_disambig_asr_cache_dir: str = ""  # --ct_disambig_asr_cache_dir
     ct_disambig_posterior_threshold: str = "0.1"  # --ct_disambig_posterior_threshold
     ct_disambig_max_tasks_per_child: str = "50"  # --ct_disambig_max_tasks_per_child
+    ct_disambig_batch_size: str = "1"  # --ct_disambig_batch_size (CT_DISAMBIGUATION_RUN gene-batch chunking; 1 = unbatched)
     # Separate ASR Robustness diagnostics report/stage (conf/ct_disambiguation.config).
     asr_robustness: bool = True  # --asr_robustness
 

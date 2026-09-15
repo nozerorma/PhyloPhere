@@ -107,3 +107,147 @@ process CT_DISAMBIGUATION_RUN {
       ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     """
 }
+
+// ── Batched by gene: split the metadata table into N gene subsets and run one
+//    CT_DISAMBIGUATION_RUN-equivalent Nextflow task per subset, so one bad
+//    batch (OOM, a pathological gene) retries on its own instead of
+//    re-running the whole ~16k-gene sweep. See CT_DISAMBIGUATION_SPLIT_GENES
+//    for how the metadata table is partitioned and CT_DISAMBIGUATION_MERGE
+//    for how the batches' outputs are recombined.
+process CT_DISAMBIGUATION_SPLIT_GENES {
+    tag "split_by_gene (batch_size=${batchSize})"
+    label 'process_low'
+
+    input:
+    path meta_caas
+    val batchSize
+
+    output:
+    path("batch_*.meta_caas.tsv"), emit: batches
+
+    script:
+    def scripts_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local/scripts"
+    """
+    python3 ${scripts_dir}/split_meta_caas_by_genes.py \
+      --meta-caas ${meta_caas} \
+      --batch-size ${batchSize} \
+      --outdir .
+    """
+}
+
+process CT_DISAMBIGUATION_RUN_BATCHED {
+    tag "$meta_caas_batch"
+    label 'process_resample'
+
+    input:
+    path meta_caas_batch
+    path trait_file
+    path tree_file
+    path hyp_pairs
+
+    output:
+    path("ct_disambiguation"), emit: results_dir
+
+    script:
+    def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
+    def align_dir = params.alignment
+    def taxid_mapping = params.tax_id ?: ''
+    def ensembl_file = params.gene_ensembl_file ?: ''
+
+    def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
+    def task_cpus = task.cpus ?: 1
+    def threads = task_cpus
+    def workers = task_cpus
+
+    """
+    export OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    mkdir -p ct_disambiguation
+    cp -R ${local_dir}/* .
+    find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
+    find . -name '*.pyc' -delete 2>/dev/null || true
+
+    if [ -z "${asr_cache_dir}" ]; then
+      echo "ERROR: ct_disambig_asr_cache_dir must be set (current asr_mode: '${params.ct_disambig_asr_mode}')" >&2
+      exit 1
+    fi
+
+    python3 ./disambiguation_main.py \
+      --alignment-dir ${align_dir} \
+      --tree ${tree_file} \
+      --caas-metadata ${meta_caas_batch} \
+      --trait-file ${trait_file} \
+      --output-dir ct_disambiguation \
+      --asr-mode ${params.ct_disambig_asr_mode} \
+      --asr-model ${params.ct_disambig_asr_model} \
+      --posterior-threshold ${params.ct_disambig_posterior_threshold} \
+      --threads ${threads} \
+      --workers ${workers} \
+      --max-tasks-per-child ${params.ct_disambig_max_tasks_per_child} \
+      --run-diagnostics \
+      --verbose \
+      ${hyp_pairs.name.startsWith('NO_') ? '' : "--hypotheses-pairs ${hyp_pairs}"} \
+      ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
+      ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \
+      ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
+    """
+}
+
+// Batches partition genes disjointly (CT_DISAMBIGUATION_SPLIT_GENES assigns
+// each gene to exactly one batch), so every piece here is a plain row-concat
+// or directory union -- see merge_disambiguation_batches.py's module
+// docstring for why no cross-gene aggregation is needed (unlike
+// CAAS_PERMS_MERGE_DETAIL's downstream CAAS_PERMS_REBUILD step).
+process CT_DISAMBIGUATION_MERGE {
+    tag "ct_disambiguation_merge"
+    label 'process_medium'
+    publishDir path: "${params.outdir}", mode: 'copy', overwrite: true
+
+    input:
+    path batchDirs, stageAs: 'batch_*'
+
+    output:
+    path("ct_disambiguation"), emit: results_dir
+    path("ct_disambiguation/caas_convergence_master.csv"), emit: master_csv
+
+    script:
+    def scripts_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local/scripts"
+    """
+    python3 ${scripts_dir}/merge_disambiguation_batches.py \
+      --batch-dirs batch_*/ \
+      --output-dir ct_disambiguation
+    """
+}
+
+// Regenerates plots/ once against the merged master CSV. Each batch's own
+// disambiguation_main.py run already generated a (batch-local, incomplete)
+// plots/ directory as a side effect of CT_DISAMBIGUATION_RUN_BATCHED --
+// CT_DISAMBIGUATION_MERGE does not carry those through, so this replaces
+// them with one run over the full, merged data.
+process CT_DISAMBIGUATION_PLOTS {
+    tag "ct_disambiguation_plots"
+    label 'process_reporting'
+    publishDir path: "${params.outdir}/ct_disambiguation", mode: 'copy', overwrite: true, pattern: 'plots/**'
+
+    input:
+    path merged_dir
+
+    output:
+    path("plots"), emit: plots, optional: true
+
+    script:
+    def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
+    def scripts_dir = "${local_dir}/scripts"
+    def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
+    def ensembl_file = params.gene_ensembl_file ?: ''
+    """
+    cp -R ${local_dir}/* .
+    find . -name '*.pyc' -delete 2>/dev/null || true
+
+    python3 ${scripts_dir}/regenerate_disambiguation_plots.py \
+      --caas-csv ${merged_dir}/caas_convergence_master.csv \
+      --output-dir . \
+      ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
+      --node-dumps-root ${merged_dir}/diagnostics/node_dumps \
+      ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
+    """
+}

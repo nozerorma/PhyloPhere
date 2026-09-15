@@ -265,6 +265,7 @@ def main():
             output_dir=output_dir,
             ensembl_genes_file=args.ensembl_genes_file,
             max_codeml=args.codeml_concurrency,
+            max_pairs=max_pairs,
         )
         # process_all_genes now returns (caas_results, export_info)
         if isinstance(proc_res, tuple) and len(proc_res) == 2:

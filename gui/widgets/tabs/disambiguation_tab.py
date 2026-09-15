@@ -70,6 +70,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="asr_robustness", label="Run ASR Robustness diagnostics report", kind="bool"),
         Section("Performance and batching"),
         FieldSpec(name="ct_disambig_max_tasks_per_child", label="Max tasks per worker child"),
+        FieldSpec(name="ct_disambig_batch_size", label="Disambiguation genes per batch"),
         FieldSpec(name="ct_disambig_asr_cache_dir", label="ASR cache directory", kind="path_dir"),
         Section("Exploratory parameter sweep values (conf/ct_postproc.config)"),
         FieldSpec(name="minlen_values", label="Cluster min length sweep (exploratory mode)"),

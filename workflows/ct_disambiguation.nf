@@ -6,6 +6,10 @@
  */
 
 include { CT_DISAMBIGUATION_RUN } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
+include { CT_DISAMBIGUATION_SPLIT_GENES } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
+include { CT_DISAMBIGUATION_RUN_BATCHED } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
+include { CT_DISAMBIGUATION_MERGE } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
+include { CT_DISAMBIGUATION_PLOTS } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
 
 workflow CT_DISAMBIGUATION {
     take:
@@ -87,9 +91,29 @@ workflow CT_DISAMBIGUATION {
             return file('NO_HYP_PAIRS')
         }()
 
-        CT_DISAMBIGUATION_RUN(meta_caas, trait_file, tree_file, hyp_pairs_file)
+        def disambigBatchSize = (params.ct_disambig_batch_size ?: 1) as int
+
+        def results_dir_ch
+        def master_csv_ch
+
+        if (disambigBatchSize > 1) {
+            def split = CT_DISAMBIGUATION_SPLIT_GENES(meta_caas, disambigBatchSize)
+            def batched = CT_DISAMBIGUATION_RUN_BATCHED(
+                split.batches.flatten(), trait_file, tree_file, hyp_pairs_file
+            )
+            def merged = CT_DISAMBIGUATION_MERGE(batched.results_dir.collect())
+            CT_DISAMBIGUATION_PLOTS(merged.results_dir)
+
+            results_dir_ch = merged.results_dir
+            master_csv_ch = merged.master_csv
+        } else {
+            CT_DISAMBIGUATION_RUN(meta_caas, trait_file, tree_file, hyp_pairs_file)
+
+            results_dir_ch = CT_DISAMBIGUATION_RUN.out.results_dir
+            master_csv_ch = CT_DISAMBIGUATION_RUN.out.master_csv
+        }
 
     emit:
-        results_dir = CT_DISAMBIGUATION_RUN.out.results_dir
-        master_csv = CT_DISAMBIGUATION_RUN.out.master_csv
+        results_dir = results_dir_ch
+        master_csv = master_csv_ch
 }

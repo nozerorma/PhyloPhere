@@ -555,6 +555,7 @@ def process_all_genes(
     max_tasks_per_child: Optional[int] = None,
     max_codeml: Optional[int] = None,
     hypotheses_pairs_file: Optional[str] = None,
+    max_pairs: Optional[int] = None,
 ) -> Tuple[List[Dict], Optional[Dict]]:
 
     hyp_pairs_pss = _read_contrast_hyp_pairs(hypotheses_pairs_file) if hypotheses_pairs_file else None
@@ -721,7 +722,13 @@ def process_all_genes(
 
     from src.reporting.disambiguation_writers import export_from_db
 
-    caas_files, summary_json = export_from_db(db_path, output_dir)
+    # max_pairs is computed once from the (shared, unpartitioned) trait file by
+    # disambiguation_main.py, so every batch/run derives the identical schema
+    # instead of each auto-detecting MAX(pair_count) over whatever subset of
+    # genes landed in its own DB -- two batches could otherwise see different
+    # max pair counts and emit caas_convergence_master.csv files with a
+    # different number of domain_N_* columns, which is not concatenable.
+    caas_files, summary_json = export_from_db(db_path, output_dir, max_pairs=max_pairs)
 
     export_info = {
         "db_path": str(db_path),
