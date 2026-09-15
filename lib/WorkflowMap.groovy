@@ -171,12 +171,13 @@ class WorkflowMap {
                           "${outdir}/resample"],
               htmlCandidates: [] ],
 
-            // NOTE: 7.CT_signification.Rmd only ever creates meta_caas/ (meta_dir <-
-            // "meta_caas") — there is no gene_lists subdirectory under signification/.
+            // NOTE: 7.CAAS_pattern_annotation.Rmd (CAAS_META_CAAS_REPORT) publishes
+            // under meta_caas/ (renamed from signification/ in f274b35) — there is
+            // no gene_lists subdirectory under it.
             [ id: 'ct_signif',   name: 'CAAS Pattern Annotation',         type: 'reporting', ran: ctx.ctSignif,
-              filesDirs: ["${outdir}/signification",
-                          "${outdir}/signification/meta_caas"],
-              htmlCandidates: ["${outdir}/html_reports/7.CT_signification.html"] ],
+              filesDirs: ["${outdir}/meta_caas",
+                          "${outdir}/meta_caas/meta_caas"],
+              htmlCandidates: ["${outdir}/html_reports/7.CAAS_pattern_annotation.html"] ],
 
             [ id: 'ct_disambig', name: 'CT disambiguation (convergence)', type: 'processes', ran: ctx.ctDisambig,
               filesDirs: ["${outdir}/ct_disambiguation"],
@@ -236,10 +237,10 @@ class WorkflowMap {
             // DISTINCT, LATER stage than ct_signif above: it runs after scoring,
             // joining ct_signif's already-published meta_caas table against
             // scoring's position_scores.tsv/gene_scores.tsv (p.emp/p.emp_adj,
-            // gene_caas_pperm/gene_caas_pperm_adj). See ctpp_signification.nf's
+            // gene_caas_pperm/gene_caas_pperm_adj). See ctpp_meta_caas.nf's
             // CAAS_SIGNIFICANCE_REPORT process and main.nf's post-SCORING call.
             [ id: 'ct_signif_sig', name: 'CT significance (post-scoring)', type: 'reporting', ran: ctx.ctSignifSig,
-              filesDirs: ["${outdir}/signification/significance"],
+              filesDirs: ["${outdir}/meta_caas/significance"],
               htmlCandidates: ["${outdir}/html_reports/16.CAAS_significance_report.html"] ],
 
             // The main ENRICHMENT workflow (workflows/enrichment.nf) runs downstream of
@@ -561,7 +562,7 @@ class WorkflowMap {
             pheno_rep    : ['data_exploration'],
             contrast     : ['data_exploration/2.CT', 'data_exploration/2.CT/1.Traitfiles'],
             ct           : ['caastools', 'discovery'],
-            ct_signif    : ['signification', 'signification/meta_caas'],
+            ct_signif    : ['meta_caas', 'meta_caas/meta_caas'],
             ct_disambig  : ['ct_disambiguation'],
             asr_robustness : ['asr_robustness'],
             ct_postproc  : ['postproc', 'postproc/preprocessed'],
@@ -570,7 +571,7 @@ class WorkflowMap {
             rer          : ['rerconverge', 'rerconverge/rer_results'],
             fade         : ['selection/fade', 'selection/fade/top', 'selection/fade/bottom'],
             scoring      : ['scoring'],
-            ct_signif_sig: ['signification/significance'],
+            ct_signif_sig: ['meta_caas/significance'],
             fcs          : ['fcs', 'scoring/rer'],
             ami          : ['ami', 'rerconverge/ami',
                             'selection/fade/top/ami', 'selection/fade/bottom/ami',
