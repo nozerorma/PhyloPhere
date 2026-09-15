@@ -117,6 +117,13 @@ def convert_convergence_result_to_dict(
         # Hypotheses that drove >= 1 changed domain on this side (never nulled
         # by a multi-hypothesis collision, unlike `trait`).
         "participating_hypotheses": getattr(result, "participating_hypotheses", None) or "",
+        # Harvest size (M) and the real discovering-hypothesis labels for this
+        # (position, scheme) pool -- SCORING's pos_scores aggregation already
+        # consumes these by name (max(n_hypotheses), union-split
+        # supporting_hypotheses); previously always defaulted (1 / "") since no
+        # producer ever populated them.
+        "n_hypotheses": getattr(result, "n_hypotheses", None),
+        "supporting_hypotheses": getattr(result, "supporting_hypotheses", None) or "",
         # Cross-hypothesis support tallies for the arbitrary first-row
         # passthrough fields above (tag/caas/amino_encoded stay as-is).
         "tag_support": getattr(result, "tag_support", "") or "",

@@ -135,6 +135,13 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         # Hypotheses that drove >= 1 changed domain on this side -- unlike
         # `trait`, never nulled by a genuine multi-hypothesis pool.
         "participating_hypotheses",
+        # Harvest size (M) and the real discovering-hypothesis labels for this
+        # (position, scheme) pool, unlike `participating_hypotheses` not
+        # per-side. SCORING's pos_scores summarise (scoring_compute.R) already
+        # aggregates these by name (max / union-split) -- previously always
+        # saw its own backfilled defaults since no producer emitted them.
+        "n_hypotheses",
+        "supporting_hypotheses",
         # First-class direction key (top / bottom / none). T4b retired the
         # change_top/change_bottom/change_side triplet.
         "side",

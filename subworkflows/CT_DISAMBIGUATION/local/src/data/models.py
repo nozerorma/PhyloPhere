@@ -86,6 +86,16 @@ class ConvergenceResult:
     # side, comma-joined. Unlike `hypothesis`/`trait`, this is never nulled by
     # a multi-hypothesis pool -- it always reflects the pooled contributors.
     participating_hypotheses: Optional[str] = None
+    # Harvest size (M, from fop_pool.pool_domains) and the real discovering
+    # hypothesis labels for this (position, scheme) pool -- position/scheme
+    # level, identical on both emitted side rows. Unlike `participating_hypotheses`
+    # this is not per-side and excludes unresolved-row placeholders. SCORING's
+    # pos_scores aggregation (scoring_compute.R) already consumes these by name
+    # (max(n_hypotheses), union-split supporting_hypotheses) -- it previously
+    # only ever saw its own backfilled defaults (1 / "") since nothing upstream
+    # populated real values.
+    n_hypotheses: Optional[int] = None
+    supporting_hypotheses: Optional[str] = None
     # Cross-hypothesis support tallies for fields that otherwise silently pass
     # through an arbitrary first-hypothesis-in-file-order row (see
     # `_emit_pooled_side_rows`). Kept alongside the status-quo passthrough

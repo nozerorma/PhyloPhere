@@ -28,10 +28,6 @@ from collections import defaultdict
 # Helpers
 # --------------------------
 
-def _as_bool(x):
-    return str(x).strip().lower() in {'true', 't', '1', 'yes', 'y'}
-
-
 def natural_sort_key(chromosome):
     if not chromosome:
         return (9999, '')
@@ -154,8 +150,8 @@ def read_metadata_caas(metadata_file):
     """Read CAAS metadata from a filtered_discovery.tsv file.
 
     Reads the disambiguation-canonical columns Gene, Position, tag, caas,
-    convergence_type, caap_group, amino_encoded, is_conserved_meta,
-    asr_is_conserved. No fallback to legacy formats.
+    convergence_type, caap_group, amino_encoded, is_conserved_meta.
+    No fallback to legacy formats.
 
     Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas}
     Only the (group, gene, msa_pos) keys are consumed downstream.
@@ -184,8 +180,6 @@ def read_metadata_caas(metadata_file):
         convergence_idx   = h.index('convergence_type')
         amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
         group_idx         = h.index('caap_group')
-        conserved_idx     = h.index('is_conserved_meta') if 'is_conserved_meta' in h else None
-        asr_conserved_idx = h.index('asr_is_conserved') if 'asr_is_conserved' in h else None
         for line in f:
             line = line.strip()
             if not line:
@@ -203,13 +197,6 @@ def read_metadata_caas(metadata_file):
             except (IndexError, ValueError) as e:
                 logging.warning(f"Skipping malformed meta_caas line: {line[:120]} — {e}")
                 continue
-
-            # Exclude dubious-conserved positions: is_conserved_meta=TRUE but asr_is_conserved=FALSE.
-            if conserved_idx is not None and asr_conserved_idx is not None:
-                _is_cons = _as_bool(parts[conserved_idx]) if conserved_idx < len(parts) else False
-                _is_asr  = _as_bool(parts[asr_conserved_idx]) if asr_conserved_idx < len(parts) else True
-                if _is_cons and not _is_asr:
-                    continue
 
             metadata[group][gene][msa_pos] = {
                 'tag': tag,

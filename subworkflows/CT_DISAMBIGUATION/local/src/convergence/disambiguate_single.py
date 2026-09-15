@@ -116,6 +116,16 @@ def _emit_pooled_side_rows(
     caas_support = fmt_support(_tally("caas"))
     amino_encoded_support = fmt_support(_tally("amino_encoded"))
 
+    # Harvest size (M) and the real discovering-hypothesis labels for this
+    # (position, scheme) pool -- distinct from `participating_hypotheses`
+    # (per-side, only hypotheses that had a changed domain). Placeholder labels
+    # from unresolved/non-FOP rows (see the call site's `_H_UNRESOLVED_{i}`)
+    # never represent a real discovering hypothesis, so they're excluded here.
+    n_hypotheses = int(pooled.get("n_hypotheses", 0) or 0)
+    supporting_hypotheses = ",".join(
+        sorted(h for h in hyp_labels if h and not str(h).startswith("_H_UNRESOLVED_"))
+    ) or None
+
     sides = [s for s in ("top", "bottom")
              if int((pooled.get(s) or {}).get("n_participating", 0) or 0) > 0]
     if not sides:
@@ -129,6 +139,7 @@ def _emit_pooled_side_rows(
             domain_meta=(dict(meta) if meta else None),
             tag_support=tag_support, caas_support=caas_support,
             amino_encoded_support=amino_encoded_support,
+            n_hypotheses=n_hypotheses, supporting_hypotheses=supporting_hypotheses,
         )]
 
     out: List[ConvergenceResult] = []
@@ -154,6 +165,7 @@ def _emit_pooled_side_rows(
             domain_meta=(dict(meta) if meta else None),
             tag_support=tag_support, caas_support=caas_support,
             amino_encoded_support=amino_encoded_support,
+            n_hypotheses=n_hypotheses, supporting_hypotheses=supporting_hypotheses,
         ))
     return out
 
