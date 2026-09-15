@@ -298,6 +298,89 @@ process CAAS_PERMS_DISAMBIGUATE {
     """
 }
 
+// ── 4b. Batched null-mode disambiguation: same replay as (4), but over only a
+//    gene subset per Nextflow task, so one bad batch (OOM, a pathological
+//    gene) retries on its own instead of re-replaying every gene. Only
+//    perm_pos_detail/ is kept: gene_cycle_scores.tsv, perm_pos_sample.tsv and
+//    perm_pos_quantiles.tsv all depend on a genome-wide percent_rank histogram
+//    (build_percent_rank_lookup) or a genome-wide reservoir sample, so a
+//    per-batch copy of those would silently score against the wrong pool.
+//    CAAS_PERMS_REBUILD (6) re-derives all of them from the merged
+//    perm_pos_detail/ shards below (see 4c), at one-gene peak RAM, with no ASR
+//    replay needed — exactly the path it already serves for cached reruns.
+process CAAS_PERMS_DISAMBIGUATE_BATCHED {
+    tag "$batchID (${batchSize} genes)"
+    label 'process_resample'
+
+    input:
+    tuple val(batchID), val(batchSize), path(permDiscFiles, stageAs: 'perm_disc/*')
+    path resample_subset
+    path tree_file
+    path fop_pairs   // fop_pairs.tsv (FOP mirror) or NO_FOP_PAIRS sentinel
+    path gene_lengths // gene_ensembl_file (Gap B CT_POSTPROC filter) or NO_FILE
+
+    output:
+    path "perm_pos_detail", emit: pos_detail   // dir: one gz shard per gene in this batch
+
+    script:
+    def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
+    def align_dir = params.alignment
+    def asr_cache_dir = params.ct_disambig_asr_cache_dir ?: ''
+    def taxid_mapping = params.tax_id ?: ''
+    def ensembl_file = params.gene_ensembl_file ?: ''
+    def workers = task.cpus ?: 1
+    def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
+    def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
+    def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
+    def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
+    def do_postproc = _pp_on && !(gene_lengths.name =~ /^NO_/)
+    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}" : ""
+    """
+    export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
+    cp -R ${local_dir}/* .
+    find . -name '*.pyc' -delete 2>/dev/null || true
+    mkdir -p caas_perms_out
+    ${run} ./disambiguation_perms_main.py \\
+        --alignment-dir ${align_dir} \\
+        --tree ${tree_file} \\
+        --perm-discovery perm_disc \\
+        --resample-dir . \\
+        --output-dir caas_perms_out \\
+        ${fop_pairs.name =~ /^NO_/ ? '' : "--fop-pairs ${fop_pairs}"} ${postproc_args} \\
+        --asr-model ${params.ct_disambig_asr_model} \\
+        --posterior-threshold ${params.ct_disambig_posterior_threshold} \\
+        --workers ${workers} \\
+        --max-tasks-per-child ${max_tasks_per_child} \\
+        --asr-cache-dir ${asr_cache_dir} \\
+        ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
+        ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
+    cp -R caas_perms_out/perm_pos_detail perm_pos_detail
+    """
+}
+
+// ── 4c. Merge batched perm_pos_detail/ shard directories ─────────────────────
+// Batches partition genes disjointly (each gene's perm_replay.discovery.output
+// lands in exactly one batch), so this is a plain directory union — no
+// aggregation logic, just copying each batch's per-gene shards into one dir.
+process CAAS_PERMS_MERGE_DETAIL {
+    tag "caas_perms_merge_detail"
+    label 'process_medium'
+
+    input:
+    path batchDetailDirs, stageAs: 'batch_*'
+
+    output:
+    path "perm_pos_detail", emit: pos_detail
+
+    script:
+    """
+    mkdir -p perm_pos_detail
+    for d in batch_*/; do
+        cp -R "\$d"* perm_pos_detail/
+    done
+    """
+}
+
 // ── 5. Aggregate to genes×N null matrices → caas_perms.rds ────────────────────
 process CAAS_PERMS_AGGREGATE {
     tag "caas_perms_aggregate"
@@ -363,7 +446,7 @@ process CAAS_PERMS_REBUILD {
     tag "caas_perms_rebuild"
     label 'process_medium'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true,
-               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz}'
+               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_pval.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz}'
 
     input:
     path perm_pos_detail, stageAs: 'input_perm_pos_detail'   // dir (current) or legacy .tsv.gz file
@@ -372,6 +455,7 @@ process CAAS_PERMS_REBUILD {
     output:
     path "caas_perms.rds",            emit: perms
     path "gene_cycle_scores.tsv",     emit: gene_cycle_scores
+    path "perm_pos_pval.tsv",         emit: pos_pval,       optional: true
     path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas, optional: true
     path "perm_pos_sample.tsv",       emit: pos_sample,    optional: true
     path "perm_pos_quantiles.tsv",    emit: pos_quantiles, optional: true
@@ -469,16 +553,57 @@ workflow CAAS_PERMULATION {
         def gated_tree = tree_file
             .combine(asr_ready)
             .map { t, _ready -> t }
-        def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree, fop_pairs, gene_lengths)
-        def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_cycle_caas,
-                                       scores.pos_sample, scores.pos_quantiles, scores.pos_detail, universe)
+
+        def disambigBatchSize = (params.ct_disambig_perms_batch_size ?: 1) as int
+
+        def perms_ch
+        def pos_pval_ch
+        def pos_cycle_caas_ch
+        def pos_sample_ch
+        def pos_quantiles_ch
+        def pos_detail_ch
+        def gene_cycle_scores_ch
+
+        if (disambigBatchSize > 1) {
+            def disambigBatchCounter = 0
+            def perm_disc_batches = perm_discovery
+                .flatMap { files -> files.sort { it.name } }
+                .collate(disambigBatchSize)
+                .map { batch ->
+                    def batchID = sprintf('caas_perms_disambig_batch_%05d', ++disambigBatchCounter)
+                    tuple(batchID, batch.size(), batch)
+                }
+            def batched = CAAS_PERMS_DISAMBIGUATE_BATCHED(perm_disc_batches, resample_subset, gated_tree, fop_pairs, gene_lengths)
+            def merged = CAAS_PERMS_MERGE_DETAIL(batched.pos_detail.collect())
+            def rebuilt = CAAS_PERMS_REBUILD(merged.pos_detail, universe)
+
+            perms_ch             = rebuilt.perms
+            pos_pval_ch          = rebuilt.pos_pval.ifEmpty(file('NO_CAAS_POS_PVAL'))
+            pos_cycle_caas_ch    = rebuilt.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))
+            pos_sample_ch        = rebuilt.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))
+            pos_quantiles_ch     = rebuilt.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))
+            pos_detail_ch        = merged.pos_detail
+            gene_cycle_scores_ch = rebuilt.gene_cycle_scores
+        } else {
+            def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree, fop_pairs, gene_lengths)
+            def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_cycle_caas,
+                                           scores.pos_sample, scores.pos_quantiles, scores.pos_detail, universe)
+
+            perms_ch             = agg.perms
+            pos_pval_ch          = agg.pos_pval
+            pos_cycle_caas_ch    = agg.pos_cycle_caas
+            pos_sample_ch        = agg.pos_sample
+            pos_quantiles_ch     = agg.pos_quantiles
+            pos_detail_ch        = agg.pos_detail
+            gene_cycle_scores_ch = agg.gene_cycle_scores
+        }
 
     emit:
-        perms              = agg.perms
-        pos_pval           = agg.pos_pval        // pos_perm_p per (gene,position,scheme)
-        pos_cycle_caas     = agg.pos_cycle_caas  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
-        pos_sample         = agg.pos_sample      // cycle-stratified sample for distribution plots
-        pos_quantiles      = agg.pos_quantiles   // per (cycle,scheme) distribution shape
-        pos_detail         = agg.pos_detail      // full per-cycle detail (sharded dir); re-scoring needs no ASR replay
-        gene_cycle_scores  = agg.gene_cycle_scores // genes x cycles raw scores; feeds the report's FPR calibration figure
+        perms              = perms_ch
+        pos_pval           = pos_pval_ch        // pos_perm_p per (gene,position,scheme)
+        pos_cycle_caas     = pos_cycle_caas_ch  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
+        pos_sample         = pos_sample_ch      // cycle-stratified sample for distribution plots
+        pos_quantiles      = pos_quantiles_ch   // per (cycle,scheme) distribution shape
+        pos_detail         = pos_detail_ch      // full per-cycle detail (sharded dir); re-scoring needs no ASR replay
+        gene_cycle_scores  = gene_cycle_scores_ch // genes x cycles raw scores; feeds the report's FPR calibration figure
 }

@@ -55,6 +55,7 @@ class CaasConfig(ModuleConfigBase):
     publish_intermediates: bool = False  # --publish_intermediates
     ct_discovery_batch_size: str = "25"  # --ct_discovery_batch_size
     ct_perm_replay_batch_size: str = "10"  # --ct_perm_replay_batch_size (CAAS permulation-excess null replay batching)
+    ct_disambig_perms_batch_size: str = "1"  # --ct_disambig_perms_batch_size (CAAS_PERMS_DISAMBIGUATE gene-batch chunking; 1 = unbatched)
     min_divergent_fraction: str = "0.5"  # --min_divergent_fraction
     max_bg_gaps_fraction: str = "0.0"  # --max_bg_gaps_fraction
     max_fg_gaps_fraction: str = "0.0"  # --max_fg_gaps_fraction
