@@ -49,5 +49,16 @@ class ResourcesConfig:
     slurm_max_memory: str = "128.GB"
     slurm_max_time: str = "960.h"
 
+    # SLURM executor knobs (nextflow.config's executor.$slurm block) -- no local
+    # equivalent, since the local executor has no submission queue to throttle.
+    # Defaults mirror that block's own comment: the lab account's SLURM QOS caps
+    # concurrent CPUs at 100 cluster-wide, shared across everything the lab runs,
+    # so queueSize/submitRateLimit are deliberately conservative -- raising them
+    # without also checking that ceiling risks the QOSMaxCpuPerUserLimit rejection
+    # storm documented there.
+    slurm_queue_size: str = "8"
+    slurm_submit_rate_limit: str = "30/1min"
+    slurm_exit_read_timeout: str = "4h"
+
     # Per-process cpus/memory overrides (see module docstring above).
     process_overrides: list[ProcessResourceOverride] = field(default_factory=list)

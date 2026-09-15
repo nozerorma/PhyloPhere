@@ -35,6 +35,7 @@ class ResourcesTab(QWidget):
         layout.addWidget(self.top_note)
         layout.addWidget(self._build_group("Local defaults", "local"))
         layout.addWidget(self._build_group("SLURM defaults", "slurm"))
+        layout.addWidget(self._build_slurm_executor_group())
 
         self.overrides_note = QLabel(
             "Advanced: per-process cpus/memory overrides, rendered into a config file "
@@ -81,6 +82,45 @@ class ResourcesTab(QWidget):
 
         return box
 
+    def _build_slurm_executor_group(self) -> QGroupBox:
+        box = QGroupBox("SLURM executor (job submission)")
+        form = QFormLayout(box)
+
+        note = QLabel(
+            "Throttles how many/fast Nextflow submits SLURM jobs and how long it "
+            "waits on a job before treating it as failed. The lab QOS caps "
+            "concurrent CPUs cluster-wide (see nextflow.config's executor.$slurm "
+            "comment) — raise queue size only after checking that ceiling."
+        )
+        note.setWordWrap(True)
+        form.addRow(note)
+
+        queue_size_field = QLineEdit(self._config.slurm_queue_size)
+        queue_size_field.textChanged.connect(lambda v: self._on_changed("slurm_queue_size", v))
+        queue_size_lbl = QLabel("Queue size (--slurm_queue_size)")
+        form.addRow(queue_size_lbl, queue_size_field)
+
+        rate_limit_field = QLineEdit(self._config.slurm_submit_rate_limit)
+        rate_limit_field.textChanged.connect(lambda v: self._on_changed("slurm_submit_rate_limit", v))
+        rate_limit_lbl = QLabel("Submit rate limit (--slurm_submit_rate_limit)")
+        form.addRow(rate_limit_lbl, rate_limit_field)
+
+        timeout_field = QLineEdit(self._config.slurm_exit_read_timeout)
+        timeout_field.textChanged.connect(lambda v: self._on_changed("slurm_exit_read_timeout", v))
+        timeout_lbl = QLabel("Exit read timeout (--slurm_exit_read_timeout)")
+        form.addRow(timeout_lbl, timeout_field)
+
+        self.slurm_executor_box = box
+        self.slurm_executor_note = note
+        self.slurm_queue_size_lbl = queue_size_lbl
+        self.slurm_rate_limit_lbl = rate_limit_lbl
+        self.slurm_timeout_lbl = timeout_lbl
+        self.slurm_queue_size_field = queue_size_field
+        self.slurm_rate_limit_field = rate_limit_field
+        self.slurm_timeout_field = timeout_field
+
+        return box
+
     def _on_changed(self, attr: str, value: str) -> None:
         setattr(self._config, attr, value)
         self.changed.emit()
@@ -101,6 +141,22 @@ class ResourcesTab(QWidget):
             time_lbl = getattr(self, f"{prefix}_time_lbl", None)
             if time_lbl:
                 time_lbl.setText(tr("Max time (--max_time)", lang))
+        if hasattr(self, "slurm_executor_box"):
+            self.slurm_executor_box.setTitle(tr("SLURM executor (job submission)", lang))
+        if hasattr(self, "slurm_executor_note"):
+            self.slurm_executor_note.setText(tr(
+                "Throttles how many/fast Nextflow submits SLURM jobs and how long it "
+                "waits on a job before treating it as failed. The lab QOS caps "
+                "concurrent CPUs cluster-wide (see nextflow.config's executor.$slurm "
+                "comment) — raise queue size only after checking that ceiling.",
+                lang,
+            ))
+        if hasattr(self, "slurm_queue_size_lbl"):
+            self.slurm_queue_size_lbl.setText(tr("Queue size (--slurm_queue_size)", lang))
+        if hasattr(self, "slurm_rate_limit_lbl"):
+            self.slurm_rate_limit_lbl.setText(tr("Submit rate limit (--slurm_submit_rate_limit)", lang))
+        if hasattr(self, "slurm_timeout_lbl"):
+            self.slurm_timeout_lbl.setText(tr("Exit read timeout (--slurm_exit_read_timeout)", lang))
         if hasattr(self, "overrides_table"):
             self.overrides_table.retranslate(lang)
         if hasattr(self, "top_note"):

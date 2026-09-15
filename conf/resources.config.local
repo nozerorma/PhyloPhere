@@ -209,6 +209,8 @@ process {
     }
 
     // ── CT Disambiguation (increased memory for large metadata; scales on retry) ──
+    // Phase 4 -- CT_DISAMBIGUATION_RUN gene-batch chunking. See
+    // conf/resources.config's own Phase 4 section for the full rationale.
     withName: 'CT_DISAMBIGUATION_RUN' {
         cpus   = { 12 }
         memory = { 8.GB * task.attempt }
@@ -216,12 +218,49 @@ process {
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
+    withName: 'CT_DISAMBIGUATION_SPLIT_GENES' {
+        cpus   = { 1 }
+        memory = { 2.GB * task.attempt }
+        time   = { 30.m * task.attempt }
+    }
+    // Sized down from the monolithic task above; not yet profiled.
+    withName: 'CT_DISAMBIGUATION_RUN_BATCHED' {
+        cpus   = { 4 }
+        memory = { 3.GB * task.attempt }
+        time   = { 2.h  * task.attempt }
+        errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
+        maxRetries    = 3
+    }
+    withName: 'CT_DISAMBIGUATION_MERGE' {
+        cpus   = { 2 }
+        memory = { 4.GB * task.attempt }
+        time   = { 1.h  * task.attempt }
+    }
+    withName: 'CT_DISAMBIGUATION_PLOTS' {
+        cpus   = { 8 }
+        memory = { 8.GB * task.attempt }
+        time   = { 4.h  * task.attempt }
+    }
+    // Phase 3 -- CAAS_PERMS_DISAMBIGUATE gene-batch chunking (permulation-null
+    // ASR replay). See conf/resources.config's own Phase 3 section.
     withName: 'CAAS_PERMS_DISAMBIGUATE' {
         cpus   = { 16 }
         memory = { 16.GB * task.attempt }
         time   = { 24.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
+    }
+    withName: 'CAAS_PERMS_DISAMBIGUATE_BATCHED' {
+        cpus   = { 8 }
+        memory = { 6.GB * task.attempt }
+        time   = { 8.h  * task.attempt }
+        errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
+        maxRetries    = 3
+    }
+    withName: 'CAAS_PERMS_MERGE_DETAIL' {
+        cpus   = { 2 }
+        memory = { 4.GB * task.attempt }
+        time   = { 2.h  * task.attempt }
     }
     withName: 'CAAS_PERMS_AGGREGATE' {
         cpus   = { 1 }
@@ -413,7 +452,10 @@ process {
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
-    // ── FCS ────────────────────────────────
+    // Phase 2 -- FCS enrichment stats chunking by GMT database (see
+    // conf/resources.config's own Phase 2 section). process_fcs_batched is
+    // NOT yet mirrored into this preset (pre-existing gap) -- falls through
+    // to conf/resources.config's own value if this preset is selected.
     withName: 'SCORING_FCS_REPORT' {
         cpus          = { 12 }
         memory        = { 16.GB * task.attempt }
@@ -440,7 +482,10 @@ process {
         memory = { 16.GB * task.attempt }
         time   = { 4.h * task.attempt }
     }
-    // ── POSENRICH ────────────────────────────────
+    // Phase 1 -- POSENRICH_RUN chunking by GMT/db source (see
+    // conf/resources.config's own Phase 1 section). process_posenrich_batched
+    // is NOT yet mirrored into this preset (pre-existing gap) -- falls
+    // through to conf/resources.config's own value if this preset is selected.
     withName: 'POSENRICH_BUILD_GMT' {
         cpus   = { 8 }
         memory = { 16.GB * task.attempt }

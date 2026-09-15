@@ -391,6 +391,9 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "taxon_of_interest": "${TAXON_OF_INTEREST:-family}",
   "tax_id": "${INPUT_TAX_ID:-}",
   "slurm_queue": "${SLURM_QUEUE:-haswell}",
+  "slurm_queue_size": "{{ resources.slurm_queue_size }}",
+  "slurm_submit_rate_limit": "{{ resources.slurm_submit_rate_limit }}",
+  "slurm_exit_read_timeout": "{{ resources.slurm_exit_read_timeout }}",
 
   "my_traits": "$_MY_TRAITS",
   "traitname": "$TRAIT",
