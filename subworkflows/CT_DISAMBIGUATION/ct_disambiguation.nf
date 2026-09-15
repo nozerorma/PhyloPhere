@@ -259,9 +259,18 @@ process CT_DISAMBIGUATION_PLOTS {
     def ensembl_file = params.gene_ensembl_file ?: ''
     """
     cp -R ${local_dir}/* .
+    # Remove stale .pyc / __pycache__ dirs so Python always compiles from source
+    find . -name '__pycache__' -type d -exec rm -rf {} + 2>/dev/null || true
     find . -name '*.pyc' -delete 2>/dev/null || true
 
-    python3 ${scripts_dir}/regenerate_disambiguation_plots.py \
+    # Run the LOCAL copy (./scripts/..., not \${scripts_dir}/...): this script
+    # imports src.plots.plotter, and importing straight from the shared
+    # baseDir path (like every other CT_DISAMBIGUATION_* process avoids by
+    # running its own cp -R'd copy) races other concurrently-running
+    # pipeline instances writing .pyc bytecode into that same shared
+    # __pycache__ over NFS -- confirmed as the cause of a
+    # "ModuleNotFoundError: No module named 'src.plots'" on a live run.
+    python3 ./scripts/regenerate_disambiguation_plots.py \
       --caas-csv ${merged_dir}/caas_convergence_master.csv \
       --output-dir . \
       ${asr_cache_dir ? "--asr-cache-dir ${asr_cache_dir}" : ''} \
