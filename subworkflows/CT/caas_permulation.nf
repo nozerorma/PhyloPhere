@@ -553,6 +553,26 @@ workflow CAAS_PERMULATION {
         def gated_tree = tree_file
             .combine(asr_ready)
             .map { t, _ready -> t }
+            .first()
+
+        // resample_subset/fop_pairs/gene_lengths each come from a single task
+        // (or a Channel.value/.ifEmpty fallback), so they carry exactly one
+        // item -- but unless a channel is a genuine Nextflow "value channel"
+        // (only auto-inferred for a raw single-task process .emit, lost when
+        // re-exported across a subworkflow take:/emit: boundary the way these
+        // are here via CAAS_PERMS_PREP -> CT -> main.nf), Nextflow pairs
+        // multiple process inputs positionally: the process stops the moment
+        // ANY one input channel runs out. With the disambigBatchSize>1 branch
+        // below pairing these one-item channels against a many-item batch
+        // channel, that silently truncated CAAS_PERMS_DISAMBIGUATE_BATCHED to
+        // exactly ONE batch (confirmed live: 9688 genes upstream, only the
+        // first 20-gene batch alphabetically ever ran) instead of erroring.
+        // .first() turns each into a proper reusable/broadcastable channel
+        // regardless of how it arrived -- a no-op for the unbatched branch
+        // below, which already only ever sees one batch item anyway.
+        def resample_subset_bc = resample_subset.first()
+        def fop_pairs_bc       = fop_pairs.first()
+        def gene_lengths_bc    = gene_lengths.first()
 
         def disambigBatchSize = (params.ct_disambig_perms_batch_size ?: 1) as int
 
@@ -573,7 +593,7 @@ workflow CAAS_PERMULATION {
                     def batchID = sprintf('caas_perms_disambig_batch_%05d', ++disambigBatchCounter)
                     tuple(batchID, batch.size(), batch)
                 }
-            def batched = CAAS_PERMS_DISAMBIGUATE_BATCHED(perm_disc_batches, resample_subset, gated_tree, fop_pairs, gene_lengths)
+            def batched = CAAS_PERMS_DISAMBIGUATE_BATCHED(perm_disc_batches, resample_subset_bc, gated_tree, fop_pairs_bc, gene_lengths_bc)
             def merged = CAAS_PERMS_MERGE_DETAIL(batched.pos_detail.collect())
             def rebuilt = CAAS_PERMS_REBUILD(merged.pos_detail, universe)
 
@@ -585,7 +605,7 @@ workflow CAAS_PERMULATION {
             pos_detail_ch        = merged.pos_detail
             gene_cycle_scores_ch = rebuilt.gene_cycle_scores
         } else {
-            def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset, gated_tree, fop_pairs, gene_lengths)
+            def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset_bc, gated_tree, fop_pairs_bc, gene_lengths_bc)
             def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_cycle_caas,
                                            scores.pos_sample, scores.pos_quantiles, scores.pos_detail, universe)
 
