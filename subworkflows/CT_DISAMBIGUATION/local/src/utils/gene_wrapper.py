@@ -1124,7 +1124,30 @@ def build_percent_rank_lookup(hist_by_cycle: Dict[str, Dict[int, int]]) -> Dict[
     return lookup
 
 
-def _perms_worker(
+def _chunk_gene_cycles(cycle_tags: List[str], target_chunk_size: int) -> List[List[str]]:
+    """Split cycle_tags into sub-chunks of ~target_chunk_size, never splitting one
+    base cycle's "<base>~H*" variants across chunks -- required because
+    _perms_worker_replay's FOP domain-pooling needs all of a base cycle's
+    hypothesis variants together (see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md
+    Stage 2). Order-preserving; a target_chunk_size >= the input's own base-cycle
+    count returns a single chunk holding all of cycle_tags."""
+    from src.convergence.fop_pool import base_cycle as _bc
+    groups: Dict[str, List[str]] = {}
+    for tag in cycle_tags:
+        groups.setdefault(_bc(tag), []).append(tag)
+    chunks: List[List[str]] = []
+    cur: List[str] = []
+    for tags in groups.values():
+        cur.extend(tags)
+        if len(cur) >= target_chunk_size:
+            chunks.append(cur)
+            cur = []
+    if cur:
+        chunks.append(cur)
+    return chunks or [[]]
+
+
+def _perms_worker_replay(
     gene: str,
     alignment_dir: str,
     tree_file: str,
@@ -1137,12 +1160,22 @@ def _perms_worker(
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
-    postproc_filter: bool = False,
-    clust_minlen: int = 3,
-    clust_maxcaas: float = 0.7,
-) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Replay N labelings over one gene's cached ASR. One gene = one worker task.
-    Performs on-the-fly aggregation inside the worker, avoiding outputting huge files.
+) -> Tuple[str, List[Tuple[str, List[Any]]]]:
+    """Phase A of a chunked gene replay (see _perms_worker_finalize for phase B).
+
+    Loads the gene's cached ASR context and replays ONLY the given cycle_tags --
+    either a gene's full cycle set (one task per gene, the pre-Stage-2 shape) or
+    one base-cycle-respecting sub-chunk of it (process_all_genes_perms splits a
+    large gene's replay across multiple workers to bound both wall time behind
+    the single largest gene and peak per-worker memory, which used to hold one
+    gene's ENTIRE multi-thousand-cycle result set at once -- see
+    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md Stage 2). FOP domain-pooling of
+    "<base>~H*" variants down to one record per base cycle is safe to do per-chunk
+    because a chunk boundary (via _chunk_gene_cycles) never splits one base
+    cycle's variants. Returns the gene name and this chunk's pooled
+    (cycle_or_base, records) pairs; _perms_worker_finalize does the cross-chunk
+    whole-gene reduction (n_detected, clustering, detail rows) once every chunk
+    for a gene has arrived.
     """
     try:
         ctx = _load_gene_asr_context(
@@ -1153,7 +1186,7 @@ def _perms_worker(
             # _load_gene_asr_context now computes ASR on a cache miss, so ctx is
             # None only means the alignment could not be found or codeml/parse
             # failed for this one gene (already warned inside). Skip it.
-            return (gene, [], [])
+            return (gene, [])
 
         alignment_data = ctx["alignment_data"]
         tree_data = ctx["tree_data"]
@@ -1220,7 +1253,7 @@ def _perms_worker(
                 continue
 
         if not all_cycle_results:
-            return (gene, [], [])
+            return (gene, [])
 
         # ── scoring_v2 core v3 (V3-3): per-side domain-pooled null ────────────────
         # Every axes-only record carries `.sides` = the raw compute_domain_scores
@@ -1289,9 +1322,6 @@ def _perms_worker(
                     _expand_pooled(pos, grp, None, pooled)
                 )
             all_cycle_results = list(pooled_by_cycle.items())
-            # n_cycles_total below must be the FULL base-cycle universe, not just
-            # the ones this gene produced hits for.
-            cycle_tags = sorted({_bc(c) for c in cycle_tags})
 
         else:
             # Non-FOP: one hypothesis per record. pool_domains still runs (M == 1)
@@ -1314,117 +1344,184 @@ def _perms_worker(
                 _expanded.append((cyc, out_recs))
             all_cycle_results = _expanded
 
-        # ── 1. Detection count -> pos_perm_p per (position, scheme) ────────────
-        # pos_perm_p is the calibrated position-level permulation p: of the
-        # permuted-labeling cycles, how many independently re-detected THIS exact
-        # (Position, caap_group) as a CAAS, add-one smoothed (Davison & Hinkley).
-        # It is the detection-only companion of the R-side p.emp (which adds a
-        # score gate). NOT leave-one-out -- the observed run is not one of the N
-        # cycles, so there is no self-inclusion to correct (docs/scoring_v2_p_emp.md
-        # §6d). The old leave-one-out null_pvalue_boot column was deleted in the
-        # §7.4 pass: it was numerically inert under the downstream percent_rank and
-        # had no external consumer.
-        n_cycles_total = len(cycle_tags)
-
-        n_detected = {}
-        # V3-4a: pos_perm_p (and the R-side p.emp it decomposes) are POOLED to
-        # (Gene, Position): a cycle re-detects the position if it re-detects
-        # EITHER phenotype side, and the pooled statistic is the max-over-sides
-        # "all" axis (mirrors scoring_compute.R .pos_undirected and
-        # _build_cycle_score_pools' pc["all"]). The detail shard still carries
-        # `side` (a "both" position is two rows) for the per-side gene x cycle
-        # scores and the perm_pos_cycle_caas dump; only the position-level p is
-        # side-pooled, so n_detected keys on (pos, caap_group) and emits ONE
-        # perm_pos_pval row per key.
-        for cyc, biochem_results in all_cycle_results:
-            for r in biochem_results:
-                pos = getattr(r, "position", None)
-                group = getattr(r, "caap_group", "US")
-                if pos is not None:
-                    n_detected.setdefault((pos, group), set()).add(cyc)
-
-        n_detected_count = {}
-        perm_pos_pval_rows = []
-        for key, cycles_set in n_detected.items():
-            k = len(cycles_set)
-            n_detected_count[key] = k
-            perm_pos_pval_rows.append({
-                "Gene": gene,
-                "Position": key[0],
-                "caap_group": key[1],
-                "n_detected": k,
-                "n_cycles": n_cycles_total,
-                "pos_perm_p": (k + 1) / (n_cycles_total + 1),
-            })
-
-        # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
-        # Scoring itself is deliberately NOT done here. size_adj_max calibrates
-        # a gene's score against its cycle's GENOME-WIDE reference pool
-        # (_build_cycle_score_pools), and this worker only ever sees one gene —
-        # so that pool cannot be formed at this level. The parent finalizes it
-        # in pass B (see _finalize_perm_scores) once every gene's rows have
-        # been counted.
-        #
-        # Each record is already per-side by the time it reaches here (a "both"
-        # position is two records, each with its own `side` and core_s), so the
-        # detail shard carries `side` directly — no OR-across-schemes step.
-        # ── CT_POSTPROC cluster filter (Gap B) ────────────────────────────────
-        # Per (base cycle, caap_group) run ctrain over this gene's detected
-        # positions, verbatim to filter_caas_clusters-param.py. The `clust` flag
-        # is emitted per detail row (0/1) and, like the observed CT_FILTER step,
-        # it does NOT drop the position from scoring — pass B's cycle-aware gene
-        # filter (dubious mode) is its only consumer. No-op unless
-        # postproc_filter is on (keeps the non-postproc null path unchanged).
-        clust_by: Dict[Tuple[str, str], set] = {}
-        if postproc_filter:
-            from src.convergence.null_postproc import clustering_discards
-            pos_by_cycgrp: Dict[Tuple[str, str], set] = {}
-            for cyc, biochem_results in all_cycle_results:
-                for r in biochem_results:
-                    p = getattr(r, "position", None)
-                    if p is None:
-                        continue
-                    pos_by_cycgrp.setdefault(
-                        (cyc, getattr(r, "caap_group", "US")), set()).add(int(p))
-            by_cyc: Dict[str, Dict[str, set]] = {}
-            for (cyc, grp), pset in pos_by_cycgrp.items():
-                by_cyc.setdefault(cyc, {})[grp] = pset
-            for cyc, pbg in by_cyc.items():
-                for grp, disc in clustering_discards(
-                        pbg, clust_maxcaas, clust_minlen).items():
-                    clust_by[(cyc, grp)] = disc
-
-        detail_rows = []
-        for cyc, biochem_results in all_cycle_results:
-            for r in biochem_results:
-                pos = getattr(r, "position", None)
-                if pos is None:
-                    continue
-                group = getattr(r, "caap_group", "US")
-                asr_val = getattr(r, "asr_path_score", 0.0)
-                if asr_val is None:
-                    asr_val = 0.0
-                side = getattr(r, "side", "none") or "none"
-                # `r` is already FOP-domain-pooled (or a single-contrast record)
-                # and per-side by the time we get here (a "both" position is two
-                # records, each with its own core_s); `side` comes off the record
-                # and is the sole direction key downstream (T4b retired ct/cb).
-                row = {
-                    "Gene": gene,
-                    "cycle": cyc,
-                    "Position": pos,
-                    "caap_group": group,
-                    "asr_path_score": asr_val,
-                    "n_detected": n_detected_count.get((pos, group), 1),
-                    "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
-                    "side": side,
-                }
-                detail_rows.append(row)
-
-        return (gene, detail_rows, perm_pos_pval_rows)
+        return (gene, all_cycle_results)
     except Exception as e:
-        logger.error(f"[perms] worker failed for {gene}: {e}", exc_info=True)
+        logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
+        return (gene, [])
+
+
+def _perms_worker_replay_wrapper(args):
+    return _perms_worker_replay(*args)
+
+
+def _perms_worker_finalize(
+    gene: str,
+    all_cycle_results: List[Tuple[str, List[Any]]],
+    n_cycles_total: int,
+    postproc_filter: bool = False,
+    clust_minlen: int = 3,
+    clust_maxcaas: float = 0.7,
+) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Phase B of a chunked gene replay: the true whole-gene reduction over a
+    gene's merged, already FOP-pooled chunk results from _perms_worker_replay --
+    n_detected/pos_perm_p (needs the gene's FULL detected-cycle set),
+    the CT_POSTPROC cluster filter, and detail-row emission. Verbatim to the tail
+    of the pre-Stage-2 monolithic _perms_worker, so output is unchanged no matter
+    how many replay chunks fed into it -- n_cycles_total is passed in rather than
+    derived from `all_cycle_results` because it must be the gene's (or, under FOP
+    pooling, the whole run's) full cycle-tag/base-cycle universe, not just the
+    subset this gene happened to detect hits in.
+    """
+    if not all_cycle_results:
         return (gene, [], [])
+
+    # ── 1. Detection count -> pos_perm_p per (position, scheme) ────────────
+    # pos_perm_p is the calibrated position-level permulation p: of the
+    # permuted-labeling cycles, how many independently re-detected THIS exact
+    # (Position, caap_group) as a CAAS, add-one smoothed (Davison & Hinkley).
+    # It is the detection-only companion of the R-side p.emp (which adds a
+    # score gate). NOT leave-one-out -- the observed run is not one of the N
+    # cycles, so there is no self-inclusion to correct (docs/scoring_v2_p_emp.md
+    # §6d). The old leave-one-out null_pvalue_boot column was deleted in the
+    # §7.4 pass: it was numerically inert under the downstream percent_rank and
+    # had no external consumer.
+    n_detected = {}
+    # V3-4a: pos_perm_p (and the R-side p.emp it decomposes) are POOLED to
+    # (Gene, Position): a cycle re-detects the position if it re-detects
+    # EITHER phenotype side, and the pooled statistic is the max-over-sides
+    # "all" axis (mirrors scoring_compute.R .pos_undirected and
+    # _build_cycle_score_pools' pc["all"]). The detail shard still carries
+    # `side` (a "both" position is two rows) for the per-side gene x cycle
+    # scores and the perm_pos_cycle_caas dump; only the position-level p is
+    # side-pooled, so n_detected keys on (pos, caap_group) and emits ONE
+    # perm_pos_pval row per key.
+    for cyc, biochem_results in all_cycle_results:
+        for r in biochem_results:
+            pos = getattr(r, "position", None)
+            group = getattr(r, "caap_group", "US")
+            if pos is not None:
+                n_detected.setdefault((pos, group), set()).add(cyc)
+
+    n_detected_count = {}
+    perm_pos_pval_rows = []
+    for key, cycles_set in n_detected.items():
+        k = len(cycles_set)
+        n_detected_count[key] = k
+        perm_pos_pval_rows.append({
+            "Gene": gene,
+            "Position": key[0],
+            "caap_group": key[1],
+            "n_detected": k,
+            "n_cycles": n_cycles_total,
+            "pos_perm_p": (k + 1) / (n_cycles_total + 1),
+        })
+
+    # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
+    # Scoring itself is deliberately NOT done here. size_adj_max calibrates
+    # a gene's score against its cycle's GENOME-WIDE reference pool
+    # (_build_cycle_score_pools), and this worker only ever sees one gene —
+    # so that pool cannot be formed at this level. The parent finalizes it
+    # in pass B (see _finalize_perm_scores) once every gene's rows have
+    # been counted.
+    #
+    # Each record is already per-side by the time it reaches here (a "both"
+    # position is two records, each with its own `side` and core_s), so the
+    # detail shard carries `side` directly — no OR-across-schemes step.
+    # ── CT_POSTPROC cluster filter (Gap B) ────────────────────────────────
+    # Per (base cycle, caap_group) run ctrain over this gene's detected
+    # positions, verbatim to filter_caas_clusters-param.py. The `clust` flag
+    # is emitted per detail row (0/1) and, like the observed CT_FILTER step,
+    # it does NOT drop the position from scoring — pass B's cycle-aware gene
+    # filter (dubious mode) is its only consumer. No-op unless
+    # postproc_filter is on (keeps the non-postproc null path unchanged).
+    clust_by: Dict[Tuple[str, str], set] = {}
+    if postproc_filter:
+        from src.convergence.null_postproc import clustering_discards
+        pos_by_cycgrp: Dict[Tuple[str, str], set] = {}
+        for cyc, biochem_results in all_cycle_results:
+            for r in biochem_results:
+                p = getattr(r, "position", None)
+                if p is None:
+                    continue
+                pos_by_cycgrp.setdefault(
+                    (cyc, getattr(r, "caap_group", "US")), set()).add(int(p))
+        by_cyc: Dict[str, Dict[str, set]] = {}
+        for (cyc, grp), pset in pos_by_cycgrp.items():
+            by_cyc.setdefault(cyc, {})[grp] = pset
+        for cyc, pbg in by_cyc.items():
+            for grp, disc in clustering_discards(
+                    pbg, clust_maxcaas, clust_minlen).items():
+                clust_by[(cyc, grp)] = disc
+
+    detail_rows = []
+    for cyc, biochem_results in all_cycle_results:
+        for r in biochem_results:
+            pos = getattr(r, "position", None)
+            if pos is None:
+                continue
+            group = getattr(r, "caap_group", "US")
+            asr_val = getattr(r, "asr_path_score", 0.0)
+            if asr_val is None:
+                asr_val = 0.0
+            side = getattr(r, "side", "none") or "none"
+            # `r` is already FOP-domain-pooled (or a single-contrast record)
+            # and per-side by the time we get here (a "both" position is two
+            # records, each with its own core_s); `side` comes off the record
+            # and is the sole direction key downstream (T4b retired ct/cb).
+            row = {
+                "Gene": gene,
+                "cycle": cyc,
+                "Position": pos,
+                "caap_group": group,
+                "asr_path_score": asr_val,
+                "n_detected": n_detected_count.get((pos, group), 1),
+                "clust": 1 if int(pos) in clust_by.get((cyc, group), ()) else 0,
+                "side": side,
+            }
+            detail_rows.append(row)
+
+    return (gene, detail_rows, perm_pos_pval_rows)
+
+
+def _perms_worker(
+    gene: str,
+    alignment_dir: str,
+    tree_file: str,
+    taxid_mapping_path: Optional[str],
+    asr_model: str,
+    asr_cache_dir: str,
+    posterior_threshold: float,
+    cycle_tags: List[str],
+    cycle_labelings: Dict[str, Tuple[List[str], List[str]]],
+    perm_discovery_file: str,
+    ensembl_genes: Optional[Set[str]] = None,
+    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
+    postproc_filter: bool = False,
+    clust_minlen: int = 3,
+    clust_maxcaas: float = 0.7,
+) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Replay N labelings over one gene's cached ASR, one gene = one worker task
+    (unchunked). Composes _perms_worker_replay + _perms_worker_finalize with a
+    single whole-gene chunk, so behavior is identical to the pre-Stage-2 monolithic
+    worker. Kept for callers that still want one call per gene (small batches,
+    direct-call debugging/profiling scripts); process_all_genes_perms itself now
+    dispatches via the split functions so a large gene's replay can be spread
+    across multiple workers -- see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md
+    Stage 2.
+    """
+    _, pooled = _perms_worker_replay(
+        gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
+        asr_cache_dir, posterior_threshold, cycle_tags, cycle_labelings,
+        perm_discovery_file, ensembl_genes, fop_pairs,
+    )
+    if fop_pairs is not None:
+        from src.convergence.fop_pool import base_cycle as _bc
+        n_cycles_total = len({_bc(c) for c in cycle_tags})
+    else:
+        n_cycles_total = len(cycle_tags)
+    return _perms_worker_finalize(
+        gene, pooled, n_cycles_total, postproc_filter, clust_minlen, clust_maxcaas,
+    )
 
 
 def _perms_worker_wrapper(args):
@@ -1921,6 +2018,9 @@ def process_all_genes_perms(
     iqr_multiplier: float = 3.0,
     extreme_percentile: float = 0.99,
     postproc_filter: bool = False,
+    gene_sizes: Optional[Dict[str, int]] = None,
+    chunk_threshold: Optional[int] = None,
+    chunk_target_size: Optional[int] = None,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -2032,13 +2132,56 @@ def process_all_genes_perms(
             logger.warning(f"[perms] could not load gene lengths ({exc}); "
                            "extreme-gene filter disabled")
 
-    # Generate arguments lazily
+    # n_cycles_total is the SAME for every gene: all genes replay the same global
+    # cycle pool (cycle_tags/cycle_labelings above), so it's computed once here
+    # rather than re-derived per gene/chunk in _perms_worker_finalize.
+    if fop_pairs is not None:
+        from src.convergence.fop_pool import base_cycle as _bc_global
+        n_cycles_total = len({_bc_global(c) for c in cycle_tags})
+    else:
+        n_cycles_total = len(cycle_tags)
+
+    if chunk_threshold is None:
+        chunk_threshold = int(os.environ.get("CAAS_PERMS_CHUNK_THRESHOLD", "5000"))
+    if chunk_target_size is None:
+        chunk_target_size = int(os.environ.get("CAAS_PERMS_CHUNK_TARGET_SIZE", "2000"))
+
+    # Stage 2 (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md): split a gene's
+    # replay into base-cycle-respecting sub-chunks, each dispatched as its own
+    # worker task, when its LPT size proxy (gene_sizes, the row-count tally
+    # disambiguation_perms_main.py's _genes_from_export already computes for LPT
+    # ordering) exceeds chunk_threshold. This bounds both wall time behind a
+    # single oversized gene AND per-worker memory, which previously held one
+    # gene's entire multi-thousand-cycle result set at once regardless of size
+    # (the OOM this Stage was built to fix). Below threshold (or with no
+    # gene_sizes given), a gene gets exactly one chunk -- its full cycle_tags --
+    # matching the pre-Stage-2 one-task-per-gene dispatch exactly. All genes
+    # replay the same global cycle_tags, so the split points are identical
+    # across every chunked gene and computed once, not per gene.
+    big_chunks = None
+    if gene_sizes and any(gene_sizes.get(g, 0) > chunk_threshold for g in genes):
+        big_chunks = _chunk_gene_cycles(cycle_tags, chunk_target_size)
+
+    tasks: List[Tuple[str, List[str], float]] = []  # (gene, chunk_cycle_tags, est_workload)
+    chunks_per_gene: Dict[str, int] = {}
+    for gene in genes:
+        size = (gene_sizes or {}).get(gene, 0)
+        use_chunks = big_chunks if (big_chunks and size > chunk_threshold) else [cycle_tags]
+        chunks_per_gene[gene] = len(use_chunks)
+        for chunk in use_chunks:
+            tasks.append((gene, chunk, size / len(use_chunks)))
+
+    # LPT: dispatch the largest-estimated-workload chunk first. `genes` already
+    # arrives LPT-ordered (largest gene first) from _genes_from_export; sorting
+    # the flattened per-chunk task list preserves that property when a gene has
+    # been split into several chunks of roughly equal size.
+    tasks.sort(key=lambda t: -t[2])
+
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold,
-         cycle_tags, cycle_labelings, perm_discovery_file, None, fop_pairs,
-         postproc_filter, clust_minlen, clust_maxcaas)
-        for gene in genes
+         chunk, cycle_labelings, perm_discovery_file, None, fop_pairs)
+        for gene, chunk, _est in tasks
     )
 
     # ── Pass A: replay labelings, stream detail, count per-cycle candidate pools ─
@@ -2051,10 +2194,17 @@ def process_all_genes_perms(
     n_genes = 0
     n_detail_rows = 0
     manifest_rows: List[Tuple[str, int]] = []
+    # Chunk bookkeeping: a gene's pooled per-chunk results accumulate here until
+    # every one of its chunks (chunks_per_gene[gene]) has arrived, at which point
+    # _perms_worker_finalize runs once and the entry is dropped -- so at most a
+    # handful of genes (bounded by effective_workers, since that's how many
+    # chunks can be in flight at once) are ever partially resident here.
+    pending_pooled: Dict[str, List[Tuple[str, List[Any]]]] = {}
+    received: Dict[str, int] = {}
     try:
-        # chunksize=1: each item here is one gene's full multi-cycle replay (many
-        # real seconds of work), not the many-cheap-tasks shape chunksize>1 is for.
-        # A chunksize >= len(genes) bundles ALL genes into ONE chunk handed to a
+        # chunksize=1: each item here is one gene-cycle-chunk's replay (real
+        # seconds of work), not the many-cheap-tasks shape chunksize>1 is for.
+        # A chunksize >= len(tasks) bundles ALL tasks into ONE chunk handed to a
         # SINGLE worker — the other `effective_workers - 1` workers never receive
         # any work at all for the whole batch. Confirmed via real-data timing
         # (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, multi-worker contention
@@ -2069,13 +2219,24 @@ def process_all_genes_perms(
         # regression from bf92df7 (2026-07-16), which replaced a per-gene
         # apply_async dispatch (no chunking, so no such cap existed) with
         # imap_unordered.
-        results_iterator = pool.imap_unordered(_perms_worker_wrapper, args_generator, chunksize=1)
+        results_iterator = pool.imap_unordered(_perms_worker_replay_wrapper, args_generator, chunksize=1)
 
         with open(pval_path, "w", newline="") as f_pval:
             writer_pval = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
             writer_pval.writeheader()
 
-            for _gene, detail_rows, pval_rows in results_iterator:
+            for _gene, chunk_pooled in results_iterator:
+                pending_pooled.setdefault(_gene, []).extend(chunk_pooled)
+                received[_gene] = received.get(_gene, 0) + 1
+                if received[_gene] < chunks_per_gene.get(_gene, 1):
+                    continue  # more chunks still in flight for this gene
+
+                gene_pooled = pending_pooled.pop(_gene)
+                received.pop(_gene, None)
+                _gene, detail_rows, pval_rows = _perms_worker_finalize(
+                    _gene, gene_pooled, n_cycles_total,
+                    postproc_filter, clust_minlen, clust_maxcaas,
+                )
                 if not detail_rows:
                     continue
                 writer_pval.writerows(pval_rows)

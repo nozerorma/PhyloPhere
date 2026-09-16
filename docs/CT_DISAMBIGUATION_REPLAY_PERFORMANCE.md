@@ -540,6 +540,70 @@ function directly" technique that found Tier 3's `get_mrca` bottleneck.
 
 ---
 
+## Load-imbalance follow-up: LPT reordering (Stage 1) + chunked replay (Stage 2), 2026-09-16
+
+With `chunksize=1` landed, a second, deeper problem surfaced on real production data: genes vary in
+real workload by ~125x (a real batch: cycle counts per gene ranged 337–42,121, driven by how many of
+the null-replay's cycles actually produced a CAAS hit for that gene — see `cycle_to_entries.get(cyc,
+[])` in `_perms_worker`/`_perms_worker_replay`). Since the old design dispatched one indivisible task
+per gene, the single largest gene bounded the whole batch's wall time no matter how many workers were
+free.
+
+**Stage 1 — LPT (Longest-Processing-Time-first) dispatch order**, implemented in `disambiguation_perms_main.py`'s `_genes_from_export`
+(now returns `(genes_sorted_largest_first, {gene: size_proxy})`, using per-gene row count/file-size as
+a free-to-compute workload proxy) and mirrored on the observed path in `gene_wrapper.py::process_all_genes`
+(pre-pass over `caas_metadata_path` counting CAAS rows per gene). Pure reordering, zero correctness
+risk, no regression test needed beyond the sort itself.
+
+**Real-data verification (2026-09-16)**: re-ran the exact batch this investigation profiled earlier
+(`malignant_prevalence_complete/11/cd95136f75aee6a7dc34e6490edba5`, 20 genes / 48,442 cycles / 8
+workers) on `correfoc` with both `chunksize=1` and LPT synced. `.command.log` confirmed all 8 workers
+engaged (8/8 "TAXONOMY CONFLICT" startup lines, vs. 1-2/8 pre-fix) and 17/20 gene shards completed in
+33 minutes. **But the job was OOM-killed** (SLURM: 2 oom_kill events, exit 143) before finishing — the
+3 missing shards are consistent with the outlier gene (ABCB1, ~42K cycles) still running when memory
+ran out. `CAAS_PERMS_DISAMBIGUATE_BATCHED` is provisioned at `cpus=8, memory=6.GB * task.attempt`
+(`conf/resources.config`) — sized for the old effectively-serial (1-2 active workers) behavior. Fixing
+the scheduling bug made real 8-way concurrent memory use happen for the first time, exposing a
+resource-sizing gap the bug had been accidentally masking. Comparison against `subworkflows/CT/local/scripts/permulations.R`'s
+FOP-mirror harvest (RESAMPLE stage, flat `memory=4.GB`, no `task.attempt` scaling, handles a
+structurally similar-scale workload) pinned the real cause: `mclapply` forks share memory copy-on-write
+and stream results to disk in fixed-size batches then discard them, while `_perms_worker` held
+`all_cycle_results` — the FULL gene's raw per-cycle result set, unbounded, up to 42K cycles' worth —
+resident in one worker's memory for that worker's entire lifetime.
+
+**Stage 2 — chunked replay + two-phase reduction**, implemented same day. `_perms_worker` split into
+`_perms_worker_replay` (phase A: load ASR context, replay ONLY the given cycle_tags — a gene's full
+set, or one base-cycle-respecting sub-chunk of it via the new `_chunk_gene_cycles` — and FOP-pool
+"<base>~H*" variants down to one record per base cycle; safe per-chunk because a chunk boundary never
+splits one base cycle's hypothesis variants) and `_perms_worker_finalize` (phase B: the true whole-gene
+reduction — `n_detected`/`pos_perm_p`, the CT_POSTPROC cluster filter, detail-row emission — run once
+per gene after every one of its chunks has arrived; verbatim to the old worker's tail, so output is
+unchanged regardless of chunk count). `process_all_genes_perms` now splits a gene's replay into
+`_chunk_gene_cycles(cycle_tags, chunk_target_size)` sub-chunks (env `CAAS_PERMS_CHUNK_TARGET_SIZE`,
+default 2000) whenever its LPT size proxy (`gene_sizes`, threaded through from `_genes_from_export`)
+exceeds `chunk_threshold` (env `CAAS_PERMS_CHUNK_THRESHOLD`, default 5000); the flattened per-chunk
+task list is LPT-sorted the same way genes were. Parent-side bookkeeping (`pending_pooled`/`received`
+dicts, keyed by gene) accumulates a gene's chunk results as they arrive via `imap_unordered` and calls
+`_perms_worker_finalize` once complete, bounding how many genes are ever partially resident at once to
+roughly `effective_workers`. `_perms_worker` itself is kept as a thin single-chunk wrapper
+(`_perms_worker_replay` + `_perms_worker_finalize` composed) for callers that still want one call per
+gene (direct-call debugging/profiling scripts, small batches) — this doubles as the safety net: with no
+`gene_sizes` given, every gene gets exactly one chunk and dispatch is byte-identical to pre-Stage-2.
+
+Regression net: `subworkflows/CT_DISAMBIGUATION/local/src/utils/test_perms_chunking.py` (6 tests) —
+`_chunk_gene_cycles` never splits a base cycle's hypothesis variants and respects the target size;
+`_perms_worker_finalize` is invariant to how its input is partitioned/ordered across chunks; and an
+end-to-end test drives the REAL `_perms_worker_replay` (with `_load_gene_asr_context` and
+`analyze_gene_disambiguation` faked out) across a forced multi-chunk split and asserts byte-identical
+`(detail_rows, pval_rows)` against the unchunked `_perms_worker` call on the same synthetic gene. All
+pass, plus the full existing `src/` suite (44/44) unaffected.
+
+**Not yet done**: real-data re-verification on `correfoc` (re-run the same OOM'd batch with Stage 2
+synced, confirm it completes without hitting the memory ceiling, and that `perm_pos_pval.tsv`/detail
+shards match a pre-Stage-2 golden run bit-for-bit) — pending sync + a fresh SLURM submission.
+
+---
+
 ## Not prioritized (flagged, not scheduled)
 
 - `mp.Manager()` subprocess spawn/join overhead (~0.44s per job in the Tier-0 `strace` run, 3 `wait4`

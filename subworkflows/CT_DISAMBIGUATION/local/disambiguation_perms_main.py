@@ -17,6 +17,7 @@ import argparse
 import logging
 import time
 from pathlib import Path
+from typing import Tuple
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
@@ -81,24 +82,27 @@ def parse_arguments():
     return p.parse_args()
 
 
-def _genes_from_export(perm_discovery_path: Path) -> list:
+def _genes_from_export(perm_discovery_path: Path) -> Tuple[list, dict]:
     """Genes that produced ≥1 CAAS in any cycle (the only genes worth replaying),
     ordered largest-workload-first (LPT scheduling: dispatching the biggest gene
     first keeps it from starting late and stranding idle workers behind it — see
     docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). Row count (file mode) / file
     size (directory mode) is a free-to-compute proxy for a gene's cycle workload,
-    already available from the same iteration that discovers the gene names."""
+    already available from the same iteration that discovers the gene names.
+    Returns (genes_sorted_largest_first, {gene: size_proxy}) -- the sizes dict is
+    reused downstream (process_all_genes_perms' gene_sizes) to decide which genes
+    are big enough to split their replay across multiple workers (Stage 2)."""
     sizes: dict = {}
     if perm_discovery_path.is_file():
         with open(perm_discovery_path, "r") as f:
             header = f.readline()
             if not header:
-                return []
+                return [], {}
             cols = header.rstrip("\n").split("\t")
             try:
                 gene_idx = cols.index("gene")
             except ValueError:
-                return []
+                return [], {}
             for line in f:
                 # gene is column 2 (index 1), splitting maxsplit=2 avoids splitting remaining columns
                 parts = line.split("\t", maxsplit=2)
@@ -119,7 +123,8 @@ def _genes_from_export(perm_discovery_path: Path) -> list:
             if p.is_file() and not p.name.startswith("."):
                 name = p.name.split(".", 1)[0]
                 sizes[name] = sizes.get(name, 0) + p.stat().st_size
-    return [g for g, _ in sorted(sizes.items(), key=lambda kv: (-kv[1], kv[0]))]
+    genes = [g for g, _ in sorted(sizes.items(), key=lambda kv: (-kv[1], kv[0]))]
+    return genes, sizes
 
 
 
@@ -136,7 +141,7 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    genes = _genes_from_export(Path(args.perm_discovery))
+    genes, gene_sizes = _genes_from_export(Path(args.perm_discovery))
     logger.info(f"Genes with CAAS hits across cycles: {len(genes)}")
     if not genes:
         logger.warning("No genes in export_perm_discovery; writing empty null table")
@@ -169,6 +174,7 @@ def main():
         iqr_multiplier=args.iqr_multiplier,
         extreme_percentile=args.extreme_percentile,
         postproc_filter=args.postproc_filter,
+        gene_sizes=gene_sizes,
     )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 
