@@ -18,6 +18,7 @@ import os
 import random
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import List, Dict, Tuple, Optional, Set, Any
 
@@ -1178,9 +1179,23 @@ def _perms_worker_replay(
     for a gene has arrived.
     """
     try:
+        _t_ctx0 = time.perf_counter()
         ctx = _load_gene_asr_context(
             gene, alignment_dir, tree_file, taxid_mapping_path,
             asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
+        )
+        _t_ctx1 = time.perf_counter()
+        # Chunk-sizing diagnostic (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md
+        # Stage 2): _load_gene_asr_context's cost is paid once PER CHUNK now
+        # (was once per gene, pre-Stage-2), so chunk_target_size needs this
+        # number to pick a chunk size where that fixed cost stays a small
+        # fraction of the chunk's real replay work. Cheap (one perf_counter call
+        # per chunk); left in permanently rather than removed after the first
+        # measurement, since chunk_target_size may need revisiting per-cluster
+        # or per-dataset (ASR cache file size varies with gene/species count).
+        logger.info(
+            f"[perms] {gene}: ctx load {_t_ctx1 - _t_ctx0:.3f}s "
+            f"(chunk of {len(cycle_tags)} cycle-tags)"
         )
         if ctx is None:
             # _load_gene_asr_context now computes ASR on a cache miss, so ctx is
@@ -2144,7 +2159,7 @@ def process_all_genes_perms(
     if chunk_threshold is None:
         chunk_threshold = int(os.environ.get("CAAS_PERMS_CHUNK_THRESHOLD", "5000"))
     if chunk_target_size is None:
-        chunk_target_size = int(os.environ.get("CAAS_PERMS_CHUNK_TARGET_SIZE", "2000"))
+        chunk_target_size = int(os.environ.get("CAAS_PERMS_CHUNK_TARGET_SIZE", "1000"))
 
     # Stage 2 (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md): split a gene's
     # replay into base-cycle-respecting sub-chunks, each dispatched as its own

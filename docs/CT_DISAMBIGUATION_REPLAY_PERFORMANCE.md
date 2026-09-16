@@ -580,8 +580,14 @@ reduction — `n_detected`/`pos_perm_p`, the CT_POSTPROC cluster filter, detail-
 per gene after every one of its chunks has arrived; verbatim to the old worker's tail, so output is
 unchanged regardless of chunk count). `process_all_genes_perms` now splits a gene's replay into
 `_chunk_gene_cycles(cycle_tags, chunk_target_size)` sub-chunks (env `CAAS_PERMS_CHUNK_TARGET_SIZE`,
-default 2000) whenever its LPT size proxy (`gene_sizes`, threaded through from `_genes_from_export`)
-exceeds `chunk_threshold` (env `CAAS_PERMS_CHUNK_THRESHOLD`, default 5000); the flattened per-chunk
+default 1000 — a reasoned starting point, not a measured one: `_load_gene_asr_context`'s fixed cost is
+now paid once PER CHUNK rather than once per gene, and at 1000 cycles/chunk (~3.5s of real replay work
+at the ~3.5ms/cycle rate measured in the Tier-1 closure above) that fixed cost needs to stay under
+~1s for overhead to stay under ~25%; `_perms_worker_replay` now logs `ctx load {s}s (chunk of {n}
+cycle-tags)` per chunk specifically so the next real run gives an actual number to check this against,
+rather than leaving it as a permanent guess) whenever its LPT size proxy (`gene_sizes`, threaded
+through from `_genes_from_export`) exceeds `chunk_threshold` (env `CAAS_PERMS_CHUNK_THRESHOLD`, default
+5000, also unmeasured); the flattened per-chunk
 task list is LPT-sorted the same way genes were. Parent-side bookkeeping (`pending_pooled`/`received`
 dicts, keyed by gene) accumulates a gene's chunk results as they arrive via `imap_unordered` and calls
 `_perms_worker_finalize` once complete, bounding how many genes are ever partially resident at once to
