@@ -31,7 +31,7 @@ from src.convergence.convergence import (
     extract_tip_residue,
     format_amino_display,
 )
-from src.asr.tree_parser import get_mrca
+from src.asr.tree_parser import get_mrca, build_name_taxid_index
 from src.data.models import CAASPosition, ConvergenceResult
 from src.data.loaders import list_gene_caas_entries, parse_trait_pairs
 from src.biochem.grouping import get_grouping_scheme
@@ -727,6 +727,17 @@ def analyze_gene_disambiguation(
             alignment_data.alignment, alignment_data.taxid_to_species
         )
     hoisted_node_index = build_node_index(getattr(tree_data, "root", None))
+    # get_mrca's tip lookups (find_node_by_name/find_node_by_taxid) are an
+    # unindexed O(tree size) recursive search each; confirmed via real-data
+    # cProfile as ~42% of total replay wall time (see
+    # docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, Tier 3) since the null
+    # replay calls this once per cycle over a tree that never changes. Building
+    # the index is itself a single O(tree size) pass, so even rebuilding it on
+    # every call here (unavoidable without threading it in from the per-gene
+    # caller) turns many O(tree size) lookups into one.
+    _name_index, _taxid_index = (
+        build_name_taxid_index(tree_data.root) if getattr(tree_data, "root", None) else ({}, {})
+    )
     _mrca_cache: Dict[tuple, Any] = {}
 
     def _get_mrca_cached(taxa: List[str]):
@@ -734,7 +745,10 @@ def analyze_gene_disambiguation(
             return None
         key = tuple(sorted(taxa))
         if key not in _mrca_cache:
-            _mrca_cache[key] = get_mrca(tree_data.root, list(taxa))
+            _mrca_cache[key] = get_mrca(
+                tree_data.root, list(taxa),
+                name_index=_name_index, taxid_index=_taxid_index,
+            )
         return _mrca_cache[key]
 
     for idx, caas_pos in enumerate(caas_entries):

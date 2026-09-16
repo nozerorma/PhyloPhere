@@ -439,7 +439,44 @@ def find_node_by_taxid(root: TreeNode, taxid: str) -> Optional[TreeNode]:
     return None
 
 
-def get_mrca(root: TreeNode, tip_names: List[str]) -> Optional[TreeNode]:
+def build_name_taxid_index(
+    root: TreeNode,
+) -> Tuple[Dict[str, TreeNode], Dict[str, TreeNode]]:
+    """One DFS pass building the two lookups `find_node_by_name`/`find_node_by_taxid`
+    otherwise re-derive by re-walking the whole tree on every call.
+
+    `name_index` covers every node (matching `find_node_by_name`'s search-all
+    semantics); `taxid_index` covers only leaves, keyed by the taxid suffix of a
+    'lineage_taxid'-formatted tip label (matching `find_node_by_taxid`'s
+    leaf-only, split-on-last-underscore semantics). The tree is fixed once a
+    gene's ASR context is loaded, so this index is safe to build once and reuse
+    across every cycle's MRCA lookups (see `get_mrca`'s `name_index`/
+    `taxid_index` params) instead of walking the tree per lookup.
+
+    On a name/taxid collision, first DFS visit wins — same as the recursive
+    search's first-match order.
+    """
+    name_index: Dict[str, TreeNode] = {}
+    taxid_index: Dict[str, TreeNode] = {}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.name is not None and node.name not in name_index:
+            name_index[node.name] = node
+        if node.is_leaf() and node.name:
+            tip_taxid = node.name.strip().split("_")[-1]
+            if tip_taxid not in taxid_index:
+                taxid_index[tip_taxid] = node
+        stack.extend(reversed(node.children))
+    return name_index, taxid_index
+
+
+def get_mrca(
+    root: TreeNode,
+    tip_names: List[str],
+    name_index: Optional[Dict[str, TreeNode]] = None,
+    taxid_index: Optional[Dict[str, TreeNode]] = None,
+) -> Optional[TreeNode]:
     """
     Find most recent common ancestor (MRCA) of given tip nodes.
 
@@ -450,6 +487,14 @@ def get_mrca(root: TreeNode, tip_names: List[str]) -> Optional[TreeNode]:
     Args:
         root: Root node of tree
         tip_names: List of tip labels or taxids to find MRCA for
+        name_index: Optional pre-built `{name: node}` index from
+            `build_name_taxid_index(root)`. When given, used instead of
+            `find_node_by_name`'s O(tree size) recursive search — the
+            permulation-null replay calls `get_mrca` many times per cycle over
+            the same fixed tree, so an O(1) dict lookup instead of re-walking
+            the whole tree per tip name is the dominant real-data cost this
+            avoids (see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, Tier 3).
+        taxid_index: Optional pre-built `{taxid: leaf node}` index, same source.
 
     Returns:
         MRCA node, or None if not found
@@ -458,11 +503,14 @@ def get_mrca(root: TreeNode, tip_names: List[str]) -> Optional[TreeNode]:
     tip_nodes = []
     for name in tip_names:
         name_str = str(name).strip()
-        # Try exact match first
-        node = find_node_by_name(root, name_str)
-        if not node:
-            # Try taxid match (for PAML trees with 'lineage_taxid' format)
-            node = find_node_by_taxid(root, name_str)
+        if name_index is not None or taxid_index is not None:
+            node = (name_index or {}).get(name_str) or (taxid_index or {}).get(name_str)
+        else:
+            # Try exact match first
+            node = find_node_by_name(root, name_str)
+            if not node:
+                # Try taxid match (for PAML trees with 'lineage_taxid' format)
+                node = find_node_by_taxid(root, name_str)
         if node:
             tip_nodes.append(node)
 

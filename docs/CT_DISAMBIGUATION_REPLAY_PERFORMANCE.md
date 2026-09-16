@@ -223,20 +223,104 @@ measured wall-time reduction (not just a theoretical one).
 
 ---
 
+## Tier 1 closure — real-data verification, 2026-09-16
+
+Ran on `correfoc` against the live (git-synced, commit `6caca24`) code, staged separately from the
+Nextflow production work dir so as not to touch it: same 3 genes/cycle sets as the Tier-0 addendum.
+
+| Test | Pre-Tier-1 | Post-Tier-1 | Golden diff |
+|---|---|---|---|
+| ABCB10, 1 worker, 300 cyc | real 4.819s | real 4.396s | `perm_pos_pval.tsv`/`gene_cycle_scores.tsv`/`perm_pos_detail` bit-identical |
+| ABCC5, 1 worker, 300 cyc | real 5.849s | real 3.971s | bit-identical |
+| ABCC8, 1 worker, 300 cyc | real 5.133s | real 23.147s* | bit-identical |
+| combined3, 3 workers, 900 cyc | real 19.053s | real 19.273s | bit-identical |
+
+\* ABCC8's post-Tier-1 wall time is an outlier driven by transient cluster/NFS load (its CPU time,
+user+sys=2.0s, is in line with the other runs) — not a regression; correctness is unaffected regardless.
+
+**Correctness**: confirmed bit-identical across every test. **Performance**: real but modest on the
+single-worker path (~9-31% faster depending on gene/noise), and **essentially flat on the
+multi-worker path that dominates real production cost** — the per-cycle trait-file round-trip Tier 1
+removed was A cost, not THE cost. Syscall counts (single-gene, 300 cyc): `stat` 23,475→22,611 (-3.7%),
+`openat` 4,049→3,482 (-14%). Exit criterion met (golden diff clean, measured wall-time improvement on
+≥1 gene) but the result reframes what Tier 2/3 are actually chasing — see below.
+
+### Unplanned finding: the "stat storm" is mostly one-time process-startup import scanning, not per-cycle work
+
+Path-level `strace` (`-e trace=stat,newfstatat,openat`, no `-c` aggregation, so filenames are kept) on a
+fresh 20-cycle ABCB10 run shows that after excluding paths under `micromamba/envs/phylophere/lib` and
+this session's own test-staging path, **no remaining real-data path is touched more than ~15 times in a
+20-cycle run** — the ASR cache (`asr_ABCB10/rst`, `tree_paml.nwk`), the alignment FASTA, the taxid
+mapping, and the discovery file are each read a small constant number of times (once per gene-load, as
+`_load_gene_asr_context` intends), never once per cycle. **There is no per-cycle filesystem probing left
+to hoist — Tier 2, as originally scoped, is already closed by Tier 1.**
+
+What *does* dominate raw syscall volume in an isolated single-process test is Python's own import
+machinery scanning `site-packages` (pandas, numpy, Bio, pyarrow, multiprocessing) over NFS at process
+startup — in this 20-cycle sample, ~38% of all `stat`/`newfstatat`/`openat` calls matched an
+import-machinery or module-search path (this figure is inflated by this session's own nested
+`.tmp/tier1_verify/src` staging path specifically — not representative of production's shallower
+staging path — but the qualitative point holds regardless of the exact percentage). **This cost is
+one-time per *worker process*, not per cycle or even per gene** — in production, `mp.Pool` reuses each
+worker across up to `max_tasks_per_child` (50) gene-tasks, so it should be negligible amortized over a
+single 20-gene batch's thousands of cycles.
+
+**But it plausibly explains the multi-worker contention finding from the Tier-0 addendum**: `combined3`
+(3 fresh worker processes launched concurrently by `mp.Pool`, one per gene) showed wall time *increase*
+under parallelism (19.05s→19.27s) despite 3x the CPU allocation. Three freshly-spawned interpreters
+each independently re-scanning the same NFS-hosted `site-packages` tree at roughly the same moment is a
+plausible, structural explanation for why concurrency makes things *worse* here rather than hiding
+per-worker latency — and it would recur **once per Nextflow batch** in production (a new `python3`
+process + a new `mp.Pool` of 8 workers is spawned per `CAAS_PERMS_DISAMBIGUATE_BATCHED` task, i.e. once
+per ~750+ batches in the full run), not just once for the whole run. This is *not proven* — it's an
+inference from where the syscall volume concentrates, not an isolated measurement of import time under
+concurrent NFS load specifically. It is flagged here as a candidate explanation worth a decision, not
+folded into Tier 2/3 as scoped, since fixing it (e.g. reducing per-task interpreter/pool startup
+overhead, or an architectural change to worker lifetime across batches) is a different kind of change
+than either tier's original target.
+
+---
+
+### Import-storm hypothesis — tested directly, 2026-09-16: real but NOT the dominant cause
+
+The flagged hypothesis above (concurrent fresh interpreters contending over NFS `site-packages` scans
+explains the multi-worker slowdown) was tested directly rather than left as an inference. A probe script
+imports the real `src.utils.gene_wrapper` module (the actual import graph the pipeline pays at every
+worker spawn) and times only the import, launched solo vs. N concurrent copies via `srun`:
+
+| Concurrency (N) | Mean import time | vs. solo |
+|---|---|---|
+| 1 (solo baseline) | 0.667s | — |
+| 3 concurrent | 0.795s | +19% |
+| 8 concurrent | 0.877s | +31% |
+
+There is a real, measurable NFS-contention effect on import time under concurrency (+19-31%), but its
+absolute magnitude is small: at N=8 the total *extra* wasted time across all 8 processes combined is
+~1.7s. This cannot explain hours of sustained ~1-2% aggregate utilization in live production jobs, nor
+the multi-second wall-time inflation seen in the `combined3` test — those need an effect roughly two to
+three orders of magnitude larger than what import-time NFS contention alone produces. **Verdict: the
+import-storm hypothesis is rejected as the dominant explanation.** It is a real, minor, structural cost
+(worth remembering if `max_tasks_per_child` or batch sizing ever changes enough to make pool-spawn
+frequency dominant), but the true source of the multi-worker contention found in the Tier-0 addendum
+remains open. Given Tier 2 is otherwise closed (no per-cycle I/O left) and this dead end has been ruled
+out, **Tier 3's real-data cProfile (genuine per-cycle CPU-bound compute) is the best-supported remaining
+lever** — proceed there next rather than continuing to chase filesystem-level explanations.
+
+---
+
 ## Tier 2 — Cut redundant `stat()` calls (secondary, contingent on Tier 1's residual profile)
 
-The ~78 `stat()` calls/cycle and ~12.5 `openat()`/cycle (19% failing) measured in Tier 0 partly reflect
-the trait-file round-trip Tier 1 removes — but not necessarily all of it (there may be other per-cycle
-filesystem probing, e.g. in `find_gene_alignment`-style candidate-path checks, that Tier 1 doesn't touch).
+**STATUS: CLOSED, no action needed, 2026-09-16.** See "Tier 1 closure" above — path-level `strace`
+confirms zero meaningful per-cycle filesystem probing remains after Tier 1. The ~78 stat/cycle figure
+from the original Tier 0 measurement was inflated by one-time process-startup import scanning divided
+across the cycle count, not a genuine per-cycle cost; Tier 1 already removed the one genuine per-cycle
+file round-trip that existed. Nothing further to hoist at this tier.
 
-1. **Re-run the `strace -c` profile from Tier 0 on the post-Tier-1 code.** If the stat/openat counts have
-   dropped to near-zero per cycle, this tier is likely already resolved — stop here, don't chase further.
-2. If a meaningful stat/openat count remains, trace it to its source (likely candidate-path probing
-   somewhere in the gene/alignment lookup path, re-executed per cycle when it should be per-gene) and
-   hoist it out of the per-cycle loop, same pattern as Tier 1.
-
-Exit criterion: either "already resolved by Tier 1, no further action" or a second measured fix with its
-own before/after timing.
+*(Original scoping, kept for record: the ~78 `stat()`/cycle and ~12.5 `openat()`/cycle measured in Tier
+0 were suspected to partly reflect other per-cycle filesystem probing beyond the trait-file round-trip —
+e.g. candidate-path checks re-executed per cycle when they should be per-gene. The path-level trace
+above ruled this out: no real-data path is touched with per-cycle multiplicity anywhere in the traced
+run. Exit criterion — "already resolved by Tier 1, no further action" — is met.)*
 
 ---
 
@@ -275,6 +359,59 @@ enough to actually do** (previously impractical at cold-cache NFS speeds).
 
 Exit criterion: a real-data cProfile confirming or revising the original percentage, and a go/no-go
 decision on the GEMM implementation based on that — not the synthetic number.
+
+---
+
+## Tier 3 real-data profile, 2026-09-16 — original hypothesis REJECTED, real bottleneck found
+
+**Methodology fix first**: `cProfile` wrapping the CLI entry point only profiles the *main* process; with
+any `--workers` value `mp.Pool` still spawns the actual work into a subprocess, so the first attempt at
+this measured 2s of IPC-wait (`_recv_bytes`/`select.poll`) in the parent and nothing about real compute.
+Fixed by calling `_perms_worker` directly, in-process, no `mp.Pool` (it's a plain function — nothing
+about it requires a subprocess) — see `profile_worker_direct.py` in the reproduction recipe. This is a
+cheap trap worth remembering for any future profiling of this codebase: check whether the profiled call
+crosses a process boundary before trusting the numbers.
+
+Real gene (ABCB10), real 300 cycles, real ASR cache, single process, `cProfile`. Total: 3.582s.
+
+**The original hypothesis is rejected**: `encode_aa` (0.047s cumtime, 23,127 calls) and
+`compute_domain_scores` (0.125s cumtime, 1,381 calls) together account for **~4.8% of total time**, not
+the ~72% guessed from the synthetic profile. The GEMM precompute designed for Tier 3 would optimize a
+function that isn't the bottleneck.
+
+**What actually dominates**: of the 3.582s, ~1.175s (33%) is `_load_gene_asr_context` — genuinely
+one-time per-gene setup (ASR cache parse, alignment load, taxid mapping) that amortizes away at
+production scale (thousands of cycles/gene, not 300) — and ~0.383s (11%) is `_parse_discovery_entries`,
+also one-time per gene. Excluding both one-time costs, the remaining ~2.0s of genuine per-cycle work is
+overwhelmingly `get_mrca` (`tree_parser.py:442`, called 1,500 times, **1.523s cumtime — 76% of the
+per-cycle remainder, 42% of total wall time**), via its helpers `find_node_by_taxid` (0.641s tottime,
+1.25M calls) and `find_node_by_name` (0.448s tottime, 2.19M calls, `tree_parser.py:391-410`).
+
+**Root cause**: `find_node_by_name`/`find_node_by_taxid` are recursive full-tree DFS searches — no
+index, O(tree size) per call — invoked once per tip name inside `get_mrca`'s lookup loop
+(`tree_parser.py:457-462`), for a tree that is fixed per gene and shared across every cycle. `_perms_worker`
+already memoizes `get_mrca` results by sorted-taxa key (`disambiguate_single.py:723-731`,
+`_get_mrca_cached`/`_mrca_cache`, ~4.6x hit rate here: 6,905 lookups → 1,500 real `get_mrca` calls) but
+every cache *miss* still pays the full O(tree size) linear search per tip name, and there's no name/taxid
+→ node index to make even a single lookup fast. Notably, `path_scores.py:135`'s `build_node_index`
+already builds an O(1) id-keyed index for a different purpose — the same pattern isn't applied to
+`get_mrca`'s name/taxid lookups.
+
+**Proposed fix (not yet implemented, pending decision)**: build a `name → node` and `taxid → node` dict
+once per gene — inside `_load_gene_asr_context` or alongside `hoisted_node_index` in
+`disambiguate_single.py:722` (both already hoist other per-gene/tree invariants out of the per-cycle
+loop, the same pattern) — and have `get_mrca` use dict lookups instead of recursive search. This turns
+an O(tree size) per-tip-name lookup into O(1), directly targeting the ~42% of real wall time this profile
+identifies, with a well-understood, low-risk fix shape (same as Tier 1's hoisting pattern, applied to a
+different invariant). Scope check before implementing: confirm `find_node_by_name`/`find_node_by_taxid`
+have no other callers whose behavior would change (e.g. relying on first-match-in-traversal-order
+semantics that a dict wouldn't preserve if names/taxids aren't unique) — not yet done.
+
+Exit criterion for this finding: real-data cProfile obtained (done), original % revised (done, rejected),
+go/no-go decision on GEMM implementation = **no, don't build it**. A *different*, better-supported fix
+(MRCA lookup indexing) is proposed in its place — this needs its own go/no-go from the user before
+implementation, since it touches shared tree-traversal code (`tree_parser.py`) used outside this replay
+path too, a larger blast radius than Tier 1's isolated I/O change.
 
 ---
 
