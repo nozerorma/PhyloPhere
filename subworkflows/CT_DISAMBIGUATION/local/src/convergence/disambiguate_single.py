@@ -571,6 +571,7 @@ def analyze_gene_disambiguation(
     caas_entries: Optional[List[CAASPosition]] = None,
     caas_metadata_path: Optional[Path] = None,
     trait_file_path: Optional[Path] = None,
+    trait_pairs: Optional[Dict[int, List[Tuple[str, str]]]] = None,
     taxid_mapping: Optional[Dict[str, str]] = None,
     posterior_data: Optional[Dict[int, Dict[int, Dict[str, float]]]] = None,
     posterior_threshold: float = 0.7,
@@ -591,6 +592,10 @@ def analyze_gene_disambiguation(
         caas_positions: List of CAAS positions to analyze
         caas_metadata_path: Optional path to CAAS metadata
         trait_file_path: Optional path to trait file
+        trait_pairs: Optional pre-parsed {contrast: [(high_species, low_species), ...]},
+            the exact return shape of parse_trait_pairs. Takes precedence over
+            trait_file_path when given, skipping the file write+reparse round-trip
+            the permulation-null replay would otherwise do per cycle.
         taxid_mapping: Optional species to taxid mapping
         posterior_data: Optional ASR posterior data
         posterior_threshold: Posterior probability threshold for node state extraction
@@ -661,7 +666,9 @@ def analyze_gene_disambiguation(
     # unrelated hypotheses, and discarded the per-hypothesis Dunn independence
     # the FOP harvest enforces.
     trait_pairs_all: Dict[int, List[Tuple[str, str]]] = {}
-    if trait_file_path:
+    if trait_pairs is not None:
+        trait_pairs_all = trait_pairs
+    elif trait_file_path:
         trait_pairs_all = parse_trait_pairs(Path(trait_file_path))
 
     def _dedup_pairs(pairs: List[Tuple[str, str]]) -> List[Tuple[str, str]]:

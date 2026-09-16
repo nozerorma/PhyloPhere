@@ -930,49 +930,28 @@ def _read_contrast_hyp_pairs(path: Optional[str]) -> Optional[Dict[Tuple[str, in
     return out or None
 
 
-def _write_cycle_trait_file(fg: List[str], bg: List[str], out_path: Path) -> None:
-    """Write a cycle's labeling as a 3-col trait file (species, trait, pair).
-
-    trait=1 (high/top) for FG, trait=0 (low/bottom) for BG; pair index = position in
-    the resample lists. Consumed verbatim by parse_trait_pairs in disambiguation.
-    """
-    with open(out_path, "w") as f:
-        for k, sp in enumerate(fg, start=1):
-            f.write(f"{sp}\t1\t{k}\n")
-        for k, sp in enumerate(bg, start=1):
-            f.write(f"{sp}\t0\t{k}\n")
-
-
 def build_cycle_inputs(
     perm_discovery_path: str,
     resample_dir: str,
-    work_dir: Path,
     cycles: Optional[List[str]] = None,
-) -> Tuple[List[str], Dict[str, str], Dict[str, str]]:
-    """Materialize per-cycle trait + caas-metadata files from the resample labelings.
-    Skips writing metadata split files to disk since workers read gene files directly.
+) -> Tuple[List[str], Dict[str, Tuple[List[str], List[str]]]]:
+    """Resolve the (fg, bg) labeling for each cycle to replay.
+
+    Returns the cycles in-memory, straight from `_read_resample_labelings` — no
+    per-cycle trait file is written to disk. `_perms_worker` used to serialize
+    each cycle's labeling to a trait file and immediately re-read+re-parse it via
+    `parse_trait_pairs`; that round-trip was pure NFS overhead (confirmed via
+    `sstat` against live 8-worker production jobs, ~1.75% aggregate CPU
+    utilization — see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, Tier 1) since
+    the (fg, bg) lists are already available here before any file would be
+    written.
     """
-    work_dir.mkdir(parents=True, exist_ok=True)
-    trait_dir = work_dir / "cycle_traits"
-    trait_dir.mkdir(exist_ok=True)
-
     labelings = _read_resample_labelings(resample_dir)
-    cycle_trait_files: Dict[str, str] = {}
-    cycle_meta_files: Dict[str, str] = {}
-
     target_cycles = cycles if cycles else sorted(labelings.keys())
-
-    for c in target_cycles:
-        if c in labelings:
-            fg, bg = labelings[c]
-            trait_path = trait_dir / f"trait_{c}.tab"
-            if not trait_path.exists():
-                _write_cycle_trait_file(fg, bg, trait_path)
-            cycle_trait_files[c] = str(trait_path)
-            cycle_meta_files[c] = ""
+    cycle_labelings = {c: labelings[c] for c in target_cycles if c in labelings}
 
     logger.info(f"[perms] prepared trait inputs for {len(target_cycles)} cycles")
-    return target_cycles, cycle_trait_files, cycle_meta_files
+    return target_cycles, cycle_labelings
 
 
 
@@ -1129,7 +1108,7 @@ def _perms_worker(
     asr_cache_dir: str,
     posterior_threshold: float,
     cycle_tags: List[str],
-    cycle_trait_files: Dict[str, str],
+    cycle_labelings: Dict[str, Tuple[List[str], List[str]]],
     perm_discovery_file: str,
     ensembl_genes: Optional[Set[str]] = None,
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
@@ -1180,12 +1159,18 @@ def _perms_worker(
 
         all_cycle_results = []
         for cyc in cycle_tags:
-            trait_path = cycle_trait_files.get(cyc)
-            if not trait_path:
+            labeling = cycle_labelings.get(cyc)
+            if not labeling:
                 continue
             caas_entries = cycle_to_entries.get(cyc, [])
             if not caas_entries:
                 continue
+            fg, bg = labeling
+            # Single-contrast shape parse_trait_pairs would return for a plain
+            # (non-FOP) trait file; the contrast key's literal value is never
+            # inspected downstream when there's exactly one contrast (see
+            # _resolve_contrast in disambiguate_single.py).
+            trait_pairs = {1: list(zip(fg, bg))}
             try:
                 biochem_results, _ = analyze_gene_disambiguation(
                     gene=gene,
@@ -1194,7 +1179,7 @@ def _perms_worker(
                     caas_positions=[],
                     caas_entries=caas_entries,
                     caas_metadata_path=Path("dummy_path"),
-                    trait_file_path=Path(trait_path),
+                    trait_pairs=trait_pairs,
                     taxid_mapping=alignment_data.species_to_taxid,
                     posterior_data=full_posteriors,
                     posterior_threshold=posterior_threshold,
@@ -1965,16 +1950,16 @@ def process_all_genes_perms(
 
     # FOP mirror: when resample_fop_pairs.tsv is present the resample dir carries
     # "<base>~H<m>" hypothesis labelings (resample_fop.tab) instead of / alongside
-    # the plain resample_*.tab. build_cycle_inputs writes one trait file per
-    # hypothesis labeling; _perms_worker then domain-pools them back to one score
+    # the plain resample_*.tab. build_cycle_inputs resolves one labeling per
+    # hypothesis tag; _perms_worker then domain-pools them back to one score
     # per base cycle. Parse the per-(hypothesis, domain) PSS weights once here.
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None
     if fop_pairs_file and Path(fop_pairs_file).exists():
         fop_pairs = _read_fop_pairs(fop_pairs_file)
         logger.info(f"[perms] FOP mirror ON: PSS weights for {len(fop_pairs)} base cycles")
 
-    cycle_tags, cycle_trait_files, cycle_meta_files = build_cycle_inputs(
-        perm_discovery_file, resample_dir, output_dir / "cycle_inputs", cycles
+    cycle_tags, cycle_labelings = build_cycle_inputs(
+        perm_discovery_file, resample_dir, cycles
     )
     if not cycle_tags:
         raise RuntimeError("[perms] no usable cycles (check export_perm_discovery + resample dir)")
@@ -2026,7 +2011,7 @@ def process_all_genes_perms(
     args_generator = (
         (gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
          asr_cache_dir, posterior_threshold,
-         cycle_tags, cycle_trait_files, perm_discovery_file, None, fop_pairs,
+         cycle_tags, cycle_labelings, perm_discovery_file, None, fop_pairs,
          postproc_filter, clust_minlen, clust_maxcaas)
         for gene in genes
     )
