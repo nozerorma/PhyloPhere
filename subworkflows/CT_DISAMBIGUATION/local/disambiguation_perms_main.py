@@ -82,8 +82,13 @@ def parse_arguments():
 
 
 def _genes_from_export(perm_discovery_path: Path) -> list:
-    """Genes that produced ≥1 CAAS in any cycle (the only genes worth replaying)."""
-    genes = set()
+    """Genes that produced ≥1 CAAS in any cycle (the only genes worth replaying),
+    ordered largest-workload-first (LPT scheduling: dispatching the biggest gene
+    first keeps it from starting late and stranding idle workers behind it — see
+    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). Row count (file mode) / file
+    size (directory mode) is a free-to-compute proxy for a gene's cycle workload,
+    already available from the same iteration that discovers the gene names."""
+    sizes: dict = {}
     if perm_discovery_path.is_file():
         with open(perm_discovery_path, "r") as f:
             header = f.readline()
@@ -100,7 +105,7 @@ def _genes_from_export(perm_discovery_path: Path) -> list:
                 if len(parts) > gene_idx:
                     g = parts[gene_idx].strip()
                     if g:
-                        genes.add(g)
+                        sizes[g] = sizes.get(g, 0) + 1
     else:
         # Directory mode: filenames are "<alignmentID>.perm_replay.discovery.output",
         # where alignmentID = Nextflow's f.baseName on the alignment file (e.g.
@@ -113,8 +118,8 @@ def _genes_from_export(perm_discovery_path: Path) -> list:
         for p in perm_discovery_path.iterdir():
             if p.is_file() and not p.name.startswith("."):
                 name = p.name.split(".", 1)[0]
-                genes.add(name)
-    return sorted(genes)
+                sizes[name] = sizes.get(name, 0) + p.stat().st_size
+    return [g for g, _ in sorted(sizes.items(), key=lambda kv: (-kv[1], kv[0]))]
 
 
 

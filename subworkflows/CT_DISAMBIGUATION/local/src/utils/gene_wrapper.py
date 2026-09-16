@@ -35,7 +35,13 @@ from src.asr.asr_single import (
 
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
 from src.utils.concurrency import plan_concurrency, init_worker, codeml_slot
-from src.data.loaders import list_gene_caas_positions, list_gene_caas_entries, normalize_amino_list
+from src.data.loaders import (
+    list_gene_caas_positions,
+    list_gene_caas_entries,
+    normalize_amino_list,
+    read_caas_metadata_table,
+    _parse_gene_pos_token,
+)
 from src.utils.io_utils import find_gene_alignment
 from src.data.models import CAASPosition
 
@@ -585,6 +591,25 @@ def process_all_genes(
             logger.info(f"Loaded {len(ensembl_genes)} genes from {ensembl_genes_file}")
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning(f"Failed to load Ensembl genes from {ensembl_genes_file}: {exc}")
+
+    # LPT scheduling: dispatch the largest-workload gene first so it doesn't start
+    # late and strand idle workers behind it once every other gene has finished
+    # (see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md). CAAS-row count per gene
+    # from caas_metadata_path is a free-to-compute proxy for a gene's position
+    # count, which dominates process_single_gene's per-gene cost.
+    try:
+        meta_df = read_caas_metadata_table(Path(caas_metadata_path))
+        if "Gene" in meta_df.columns:
+            gene_counts = meta_df["Gene"].astype(str).value_counts().to_dict()
+        else:
+            gene_counts = {}
+            for gp in meta_df["GenePos"]:
+                g, _ = _parse_gene_pos_token(gp)
+                if g:
+                    gene_counts[g] = gene_counts.get(g, 0) + 1
+        genes = sorted(genes, key=lambda g: (-gene_counts.get(g, 0), g))
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.warning(f"[disambig] LPT gene-size pre-pass failed, using original order: {exc}")
 
     # Optional gate to limit concurrent codeml runs
     codeml_sem = None
