@@ -413,6 +413,131 @@ go/no-go decision on GEMM implementation = **no, don't build it**. A *different*
 implementation, since it touches shared tree-traversal code (`tree_parser.py`) used outside this replay
 path too, a larger blast radius than Tier 1's isolated I/O change.
 
+### MRCA-index fix — implemented and verified, 2026-09-16 (commit `4f0b57a`)
+
+Implemented as designed: `build_name_taxid_index(root)` (new, `tree_parser.py`) does one DFS building
+`{name: node}` (all nodes) and `{taxid: leaf node}` (leaves only, same `lineage_taxid` split-on-`_`
+convention as `find_node_by_taxid`); `get_mrca` gained optional `name_index`/`taxid_index` params, using
+O(1) dict lookups when given and falling back to the original recursive search otherwise (so
+`node_identification.py`'s one other caller is untouched). `disambiguate_single.py` builds the index
+once per `analyze_gene_disambiguation` call, alongside the pre-existing `hoisted_node_index`, and threads
+it into `_get_mrca_cached`. Regression net:
+`subworkflows/CT_DISAMBIGUATION/local/src/asr/test_get_mrca_indexed.py` (5 tests) proves indexed and
+unindexed lookups agree on name queries, taxid queries, cross-subtree queries, and that the
+no-index-given path is byte-for-byte the pre-fix behavior.
+
+**Real-data verification**: golden diff bit-identical across ABCB10/ABCC5/ABCC8 (`perm_pos_pval.tsv`,
+300 cycles each, single worker) against the Tier-1 baseline. **Timing — methodology matters here**: the
+first attempt (full CLI through `mp.Pool`, `--workers 1`, comparing user+sys wall-clock) showed no
+measurable change on ABCB10 (1.55s → 1.62s) — misleading, because at this small a cycle count the fixed
+cost of `mp.Pool` spawning a subprocess (paying Python/conda-env import cost *twice*, once per process)
+dominates and swamps a real per-cycle win. Rerun as a clean in-process A/B (same technique as the
+cProfile fix earlier in this tier: call `_perms_worker` directly, no `mp.Pool`, but this time with plain
+`time.perf_counter()`, no `cProfile` instrumentation either, 3 repeats each side, pre-fix and post-fix
+code run back-to-back in the same `srun` allocation to cancel out cluster-load drift):
+
+| | Mean (3 runs) | Min |
+|---|---|---|
+| Pre-fix (Tier 1 only, commit `4f0b57a`'s parent) | 1.263s | 1.241s |
+| Post-fix (Tier 1+3, commit `4f0b57a`) | 1.004s | 0.967s |
+| **Improvement** | **20.5%** | **22.1%** |
+
+This confirms a real, meaningful win — but notably smaller than the ~42% the `cProfile`-based profile
+suggested. Reconciling the two: `cProfile`'s per-call instrumentation overhead is not uniform across
+code shapes — it disproportionately inflates functions with very high call counts (the recursive
+`find_node_by_name`/`find_node_by_taxid` were called 1.25M and 2.19M times respectively in the profiled
+run), so their *share* of profiled time overstates their share of true unprofiled time. **Lesson for any
+future profiling in this codebase**: `cProfile`'s relative percentages are trustworthy for finding *where*
+to look (which is what correctly redirected this tier away from the GEMM precompute), but the absolute
+improvement from fixing what it points at should always be confirmed with a clean, uninstrumented timing
+comparison before being quoted as the expected real-world gain — this is the second such methodological
+trap this tier hit (the first being `mp.Pool`'s IPC-wait time masquerading as worker compute time).
+
+Exit criterion met: golden diff clean, real (uninstrumented, controlled A/B) timing improvement
+confirmed at ~20-22% on a 300-cycle single-gene run — expected to matter more at production scale, where
+thousands of cycles per gene amortize away the one-time per-gene setup cost that this fix doesn't touch,
+increasing the fixed-per-cycle savings' share of total time.
+
+---
+
+## Multi-worker contention mystery — SOLVED, 2026-09-16 (commit pending)
+
+The Tier-0 addendum found real 8-way (and 3-way) production parallelism performing *worse* than
+sequential single-worker execution, and the import-storm hypothesis (tested in a follow-up session) was
+real but far too small (~1.7s total at 8-way) to explain it. This section documents the actual root
+cause, found by chasing the mystery to ground truth on real data.
+
+### Dead ends ruled out first
+
+- **Shared-cluster noise**: re-tested by running a hand-built direct `mp.Pool` reproduction and the real
+  full-CLI invocation *back to back on the same node in the same `srun` allocation* — the direct
+  reproduction consistently took ~3.1-3.3s (3 repeats) while the real CLI took ~15.7-16.5s for the
+  identical 3-gene/582-cycle workload. Same node, same moment: not noise.
+- **`postproc_filter`'s `clustering_discards` step**: re-tested with it enabled in the direct
+  reproduction — no meaningful difference (3.14s → 3.26s).
+- **`mp.Pool`/`forkserver` overhead**: Python 3.14 (confirmed via `mp.get_start_method()`) defaults to
+  `forkserver`, not `fork`, on this system — a genuine CPython default change worth knowing about for any
+  future multiprocessing work here, and a real hazard (any ad hoc profiling script needs
+  `if __name__ == "__main__":` or forkserver crashes re-importing the launching script — production's
+  `disambiguation_perms_main.py` already has this guard, confirmed). But measured directly, `mp.Pool`
+  creation + task dispatch overhead was ~0.08s — negligible, not the cause.
+
+### Root cause: `chunksize=10` starves the worker pool for typical batch sizes
+
+`process_all_genes_perms`'s `pool.imap_unordered(_perms_worker_wrapper, args_generator, chunksize=10)`
+(`gene_wrapper.py`, was line 2030) hands `imap_unordered` a fixed `chunksize=10`. `chunksize` controls how
+many iterable items get bundled into ONE task dispatched atomically to ONE worker — it exists to amortize
+IPC overhead for workloads with MANY CHEAP tasks. Here each task is one gene's full multi-cycle replay
+(several real seconds of work), the opposite shape. **Whenever the number of genes in a batch is `<=
+chunksize`, every single gene gets bundled into one chunk sent to one worker — every other worker in the
+pool receives zero work for the entire batch, no matter how many are allocated.**
+
+Confirmed directly: reproducing the exact combined3 workload (3 genes) with `chunksize=10` showed only
+ONE worker's startup log line fired (`_load_gene_asr_context`'s "TAXONOMY CONFLICT" warning, normally one
+per worker — expected 3, got 1), and wall time was ~1.7x worse (5.62s) than the same workload with
+`chunksize=1` (3.2s, all 3 workers active, confirmed by 3 log lines). Real production batches are 20
+genes with 8 allocated workers: `20 // 10 = 2` chunks, so **only 2 of the 8 allocated workers ever run
+per batch, regardless of pool size** — mechanically capping utilization at 25% before any other
+inefficiency stacks on top, fully consistent with the ~1-2% aggregate CPU utilization measured on live
+production jobs in Tier 0.
+
+This is a genuine regression, not an original design choice: commit `bf92df7` (2026-07-16,
+"Chronological report renumbering + retire XL-mHG...") replaced a per-gene `pool.apply_async(...)`
+dispatch (one task per gene, no chunking concept — every worker always had access to work) with
+`imap_unordered(..., chunksize=10)`, silently introducing this cap as a side effect of an unrelated
+refactor.
+
+**Fix**: `chunksize=1` (implemented, `gene_wrapper.py`). Pure scheduling change — `imap_unordered`'s
+result order was already unspecified before this fix (nothing in Pass A's aggregation depends on arrival
+order), and `chunksize` never affects *which* results are produced, only how work is distributed across
+workers — so no golden-diff regression test is meaningful here (output is provably identical regardless
+of chunksize; only wall-clock parallelism efficiency changes). Real-data timing verification pending
+sync to cluster.
+
+### Direct confirmation from live production data (2026-09-16)
+
+While this fix was being written, the user pointed at a real production batch
+(`CAAS_PERMULATION:CAAS_PERMS_DISAMBIGUATE_BATCHED`, `malignant_prevalence_complete/b4/2883ac6...`,
+reported as "batch 29 of 804" from a run that was since killed — the batch itself had already completed
+successfully before being checked, not caught mid-execution). Its `.command.log` shows `workers=8` and
+`"replaying 48442 cycles over 13 genes with 8 workers"`, but the per-worker `"TAXONOMY CONFLICT"` startup
+warning (fires once inside `_load_gene_asr_context`, i.e. once per worker that actually receives a task)
+appears **exactly twice** — not eight times. `ceil(13 genes / chunksize=10) = 2` chunks, so exactly 2
+workers ran and 6 sat idle for the whole batch, precisely matching the mechanism above with zero
+synthetic reproduction needed. That batch took 699.4s total (Pass A alone: 11:08:46 → 11:17:43 = ~537s)
+with only 2 of 8 allocated CPUs ever doing anything — this is the single clearest piece of evidence in
+the whole investigation, since it's a real completed production batch's own log, not a reconstruction.
+
+### Reproduction recipe for this specific investigation
+
+Direct `mp.Pool` reproduction script + phase-timing script live in
+`~/scratch/0.Phylophere/.tmp/tier1_verify/{time_mp_pool2.py,time_worker_phases.py}` on `correfoc` (not
+committed — investigation scaffolding, reusable for the next multi-worker question). Key technique: call
+`_perms_worker`/`_perms_worker_wrapper` directly against a real `mp.Pool` built the same way
+`process_all_genes_perms` does, rather than going through the full CLI, to isolate Pool-level effects
+from Pass A/B and CLI-argument-parsing overhead — the same "bypass the outer machinery, call the real
+function directly" technique that found Tier 3's `get_mrca` bottleneck.
+
 ---
 
 ## Not prioritized (flagged, not scheduled)

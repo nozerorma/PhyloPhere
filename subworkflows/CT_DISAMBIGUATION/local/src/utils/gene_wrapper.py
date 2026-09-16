@@ -2027,7 +2027,24 @@ def process_all_genes_perms(
     n_detail_rows = 0
     manifest_rows: List[Tuple[str, int]] = []
     try:
-        results_iterator = pool.imap_unordered(_perms_worker_wrapper, args_generator, chunksize=10)
+        # chunksize=1: each item here is one gene's full multi-cycle replay (many
+        # real seconds of work), not the many-cheap-tasks shape chunksize>1 is for.
+        # A chunksize >= len(genes) bundles ALL genes into ONE chunk handed to a
+        # SINGLE worker — the other `effective_workers - 1` workers never receive
+        # any work at all for the whole batch. Confirmed via real-data timing
+        # (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, multi-worker contention
+        # investigation): with chunksize=10 and 3 genes queued, only 1 of 3
+        # workers ever ran (only one gene's "TAXONOMY CONFLICT" log line fired,
+        # instead of one per worker) and wall time was ~1.7x worse than
+        # chunksize=1's genuinely-parallel 3-worker run. In production, 20 genes
+        # / chunksize=10 = exactly 2 chunks, so only 2 of the 8 allocated workers
+        # ever ran per batch regardless of pool size — mechanically capping
+        # utilization at 25% before any other inefficiency, matching the ~1-2%
+        # aggregate CPU utilization measured on live production jobs. This was a
+        # regression from bf92df7 (2026-07-16), which replaced a per-gene
+        # apply_async dispatch (no chunking, so no such cap existed) with
+        # imap_unordered.
+        results_iterator = pool.imap_unordered(_perms_worker_wrapper, args_generator, chunksize=1)
 
         with open(pval_path, "w", newline="") as f_pval:
             writer_pval = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
