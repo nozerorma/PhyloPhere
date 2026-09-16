@@ -288,7 +288,19 @@ workflow FCS_COMPUTE {
             tuple(batchID, batch.size(), batch)
         }
 
-    FCS_COMPUTE_BATCHED(batches, stats_file, universe_file, perms_file)
+    // stats_file/universe_file/perms_file are take: params -- each carries
+    // exactly one item, but crossing this subworkflow's take: boundary loses
+    // any value-channel inference Nextflow might have applied upstream (see
+    // caas_permulation.nf's CAAS_PERMS_DISAMBIGUATE_BATCHED fix for the full
+    // mechanism). Paired positionally against the many-item batches channel,
+    // any one of them would silently truncate FCS_COMPUTE_BATCHED to its
+    // first batch once exhausted. .first() makes each reusable/broadcastable;
+    // no-op if it was already a value channel.
+    def stats_file_bc   = stats_file.first()
+    def universe_file_bc = universe_file.first()
+    def perms_file_bc    = perms_file.first()
+
+    FCS_COMPUTE_BATCHED(batches, stats_file_bc, universe_file_bc, perms_file_bc)
     FCS_CONCAT(FCS_COMPUTE_BATCHED.out.partial.collect())
 
     emit:

@@ -297,6 +297,19 @@ top25_pct <- 0.25
 top5_pct  <- 0.05
 top1_pct  <- 0.01
 
+# A "Top X" table is meant to show the tier flags already computed upstream,
+# not the whole genome-/gene-wide scan re-sorted -- DT embeds every row of a
+# static (non-Shiny) datatable into the knitted HTML regardless of pageLength,
+# so an unfiltered "top" table scales with dataset size and can OOM the
+# self-contained pandoc conversion on traits with many scored positions/genes.
+# Falls back to the untouched df when the flag columns aren't present.
+.top_tier_filter <- function(df, flag_cols) {
+  present <- intersect(flag_cols, names(df))
+  if (length(present) == 0) return(df)
+  mask <- Reduce(`|`, lapply(present, function(cn) tidyr::replace_na(df[[cn]], FALSE)))
+  df[mask, , drop = FALSE]
+}
+
 # ── RERConverge availability ────────────────────────────────────────────────
 has_rer <- "rer_min_pval" %in% names(gene_df) &&
            any(!is.na(gene_df$rer_min_pval)) &&
@@ -1225,8 +1238,10 @@ display_cols <- c("Gene", "Position", "CAAS_score",
                   "is_top_10pct", "is_top_5pct", "is_top_1pct",
                   "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
 
+pos_df_top_tier <- .top_tier_filter(pos_df, c("is_top_10pct", "is_bot_10pct"))
+
 DT::datatable(
-  pos_df %>%
+  pos_df_top_tier %>%
     arrange(desc(CAAS_score)) %>%
     select(any_of(display_cols)) %>%
     mutate(across(where(is.numeric), ~round(., 4))),
@@ -1235,7 +1250,8 @@ DT::datatable(
   options   = list(pageLength = 25, scrollX = TRUE),
   caption   = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Position-level CAAS scores | Trait: %s", params$traitname)
+    sprintf("Position-level CAAS scores, top/bottom %.0f%% by tier | Trait: %s | %d of %d scored positions shown (full table in position_scores.tsv)",
+            top_pct * 100, params$traitname, nrow(pos_df_top_tier), nrow(pos_df))
   )
 )
 ```
@@ -1407,8 +1423,8 @@ dir_display_cols <- c("Gene", "Position", "CAAS_score",
                       "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
 
 dir_pos_tbl <- bind_rows(
-  pos_top    %>% mutate(.direction = "TOP"),
-  pos_bottom %>% mutate(.direction = "BOTTOM")
+  .top_tier_filter(pos_top,    "is_top_10pct") %>% mutate(.direction = "TOP"),
+  .top_tier_filter(pos_bottom, "is_bot_10pct") %>% mutate(.direction = "BOTTOM")
 ) %>%
   arrange(.direction, desc(CAAS_score)) %>%
   select(Direction = .direction, any_of(dir_display_cols)) %>%
@@ -1421,7 +1437,8 @@ DT::datatable(
   options  = list(pageLength = 25, scrollX = TRUE),
   caption  = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Top-scoring positions by direction | Trait: %s", params$traitname)
+    sprintf("Top %.0f%% positions by direction | Trait: %s | %d rows (full table in position_scores.tsv)",
+            top_pct * 100, params$traitname, nrow(dir_pos_tbl))
   )
 )
 ```
@@ -2243,15 +2260,18 @@ if (has_fade_gene && "fade_top_max_bf" %in% names(top_genes_df))
                          "fade_top_max_bf", "fade_top_sig",
                          "fade_bot_max_bf", "fade_bot_sig")
 
+top_genes_df_tier <- .top_tier_filter(top_genes_df, c("in_top_10pct", "in_bot_10pct"))
+
 DT::datatable(
-  top_genes_df %>%
+  top_genes_df_tier %>%
     select(any_of(gene_display_cols)) %>%
     mutate(across(where(is.numeric) & !matches("n_positions"), ~round(., 4))),
   filter = "top", rownames = FALSE,
   options = list(pageLength = 25, scrollX = TRUE),
   caption = htmltools::tags$caption(
     style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Gene-level scores | Trait: %s | sorted by gene_caas_score", params$traitname)
+    sprintf("Gene-level scores, top/bottom %.0f%% by tier | Trait: %s | %d of %d genes shown (full table in gene_scores.tsv)",
+            params$gene_top_pct * 100, params$traitname, nrow(top_genes_df_tier), nrow(top_genes_df))
   )
 )
 ```

@@ -392,18 +392,36 @@ workflow POSENRICH {
                 tuple(batchID, batch.size(), idx == 1, batch)
             }
 
+        // caas_file/cleaned_background/background_output/annot_file/
+        // position_lists_file are take: params (single item, but plain queue
+        // channels, not genuine Nextflow value channels -- see
+        // caas_permulation.nf's CAAS_PERMS_DISAMBIGUATE_BATCHED fix for the
+        // full mechanism); cosmic_coverage_ch/pai3d_coverage_ch are similarly
+        // one-item channels rebuilt via .ifEmpty() above. Paired positionally
+        // against the many-item posenrich_batches channel, any of these would
+        // silently truncate POSENRICH_RUN_BATCHED to its first batch once
+        // exhausted. .first() makes each a proper reusable/broadcastable
+        // channel; no-op for anything that was already a value channel.
+        def caas_file_bc           = caas_file.first()
+        def cleaned_background_bc  = cleaned_background.first()
+        def background_output_bc   = background_output.first()
+        def annot_file_bc          = annot_file.first()
+        def cosmic_coverage_bc     = cosmic_coverage_ch.first()
+        def pai3d_coverage_bc      = pai3d_coverage_ch.first()
+        def position_lists_file_bc = position_lists_file.first()
+
         POSENRICH_RUN_BATCHED(
             posenrich_batches,
             POSENRICH_BUILD_GMT.out.charset,
-            caas_file,
-            cleaned_background,
-            background_output,
-            annot_file,
-            cosmic_coverage_ch,
-            pai3d_coverage_ch,
+            caas_file_bc,
+            cleaned_background_bc,
+            background_output_bc,
+            annot_file_bc,
+            cosmic_coverage_bc,
+            pai3d_coverage_bc,
             min_size,
             max_size,
-            position_lists_file
+            position_lists_file_bc
         )
 
         POSENRICH_CONCAT(
