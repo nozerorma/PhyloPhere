@@ -253,7 +253,12 @@ process {
         maxRetries    = 2
     }
     withName: 'CAAS_PERMS_DISAMBIGUATE_BATCHED' {
-        cpus   = { 8 }
+        // cpus 8 -> 4, 2026-09-17: see conf/resources.config's matching comment --
+        // measured via sacct that with 2 concurrent phenotype instances, cpus=8
+        // demanded ~192 cpus against the lab's 100-cpu SLURM QOS, causing up to
+        // 9.5 minutes of pure queue wait per job. Halving restores the same
+        // margin the original single-instance tuning assumed.
+        cpus   = { 4 }
         memory = { 6.GB * task.attempt }
         time   = { 8.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }

@@ -14,7 +14,11 @@ from gui.widgets.common.specs import FieldSpec, ModuleTabSpec, Section
 SPEC = ModuleTabSpec(
     title="FADE",
     blurb=(
-        "Directional selection analysis (HyPhy FADE) across the phylogeny."
+        "Directional selection analysis (HyPhy FADE) across the phylogeny. "
+        "Choose which extreme direction(s) to test, what counts as the "
+        "background branch set, and optionally supply your own foreground/"
+        "background species assignment instead of the automatic contrast "
+        "selection."
     ),
     disclaimer=(
         "Scoring needs this module's output when it's off. Check 'Use precomputed "
@@ -22,6 +26,24 @@ SPEC = ModuleTabSpec(
         "from one base path, no per-row entry needed."
     ),
     essential_fields=(
+        Section("Direction and background"),
+        FieldSpec(
+            name="fade_direction",
+            label="Foreground direction(s)",
+            kind="choice",
+            choices=("both", "top", "bottom"),
+        ),
+        FieldSpec(
+            name="fade_background_scope",
+            label="Background scope",
+            kind="choice",
+            choices=("all", "opposite"),
+        ),
+        FieldSpec(
+            name="fade_species_file",
+            label="Custom fg/bg species file (optional)",
+            kind="path_file",
+        ),
         Section("Selection parameters"),
         FieldSpec(
             name="fade_model",

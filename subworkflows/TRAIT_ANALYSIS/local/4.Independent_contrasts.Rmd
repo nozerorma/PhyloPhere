@@ -22,6 +22,7 @@ params:
   seed: ""
   clade_name: "clade"
   taxon_of_interest: "family"
+  sp_colname: "species"
   traitname: "trait"
   max_fop: 100
   n_trait: ""

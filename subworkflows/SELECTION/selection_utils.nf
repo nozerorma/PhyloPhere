@@ -127,7 +127,7 @@ process ANNOTATE_TREE_FG {
     tag "${gene_id}_${direction}"
 
     input:
-    tuple val(gene_id), val(direction), path(fasta), path(fg_species_file), path(tree)
+    tuple val(gene_id), val(direction), path(fasta), path(fg_species_file), path(tree), path(bg_species_file)
 
     output:
     tuple val(gene_id), val(direction), path("${gene_id}_${direction}_fg.nwk"), emit: annotated_tree, optional: true
@@ -135,10 +135,15 @@ process ANNOTATE_TREE_FG {
 
     script:
     def local_dir = "${baseDir}/subworkflows/SELECTION/local/src"
+    // bg_species_file is the NO_FILE sentinel whenever fade_background_scope
+    // == 'all' (the default) -- omit the flag entirely in that case, which
+    // reproduces annotate_tree_fg.py's pre-existing pruning behavior unchanged.
+    def bgArg = (bg_species_file?.name && bg_species_file.name != 'NO_FILE') ? "--bg-species-file \"${bg_species_file}\"" : ""
     if (params.use_singularity || params.use_apptainer) {
         """
         /usr/local/bin/_entrypoint.sh python ${local_dir}/annotate_tree_fg.py \
             --species-file "${fg_species_file}" \
+            ${bgArg} \
             --tree      "${tree}" \
             --fasta     "${fasta}" \
             --fasta_out "${gene_id}_${direction}.fa" \
@@ -148,6 +153,7 @@ process ANNOTATE_TREE_FG {
         """
         python ${local_dir}/annotate_tree_fg.py \
             --species-file "${fg_species_file}" \
+            ${bgArg} \
             --tree      "${tree}" \
             --fasta     "${fasta}" \
             --fasta_out "${gene_id}_${direction}.fa" \
@@ -164,12 +170,13 @@ process ANNOTATE_TREE_FG {
 // task using bash job control.
 //
 // Manifest format (tab-separated, one gene per line):
-//   gene_id <TAB> direction <TAB> fasta_filename <TAB> tree_filename <TAB> species_file_filename
+//   gene_id <TAB> direction <TAB> fasta_filename <TAB> tree_filename <TAB> species_file_filename <TAB> bg_species_file_filename
 //
 // Files are staged under:
 //   fastas/<fasta_filename>
 //   trees/<tree_filename>
 //   species_files/<species_file_filename>
+//   bg_species_files/<bg_species_file_filename>
 // Output files: <gene_id>_<direction>_fg.nwk and <gene_id>_<direction>.fa
 // ─────────────────────────────────────────────────────────────────────────────
 process ANNOTATE_TREE_FG_BATCHED {
@@ -179,7 +186,8 @@ process ANNOTATE_TREE_FG_BATCHED {
     tuple val(batchID), val(batchSize), val(manifestText),
           path(fastas, stageAs: 'fastas/*'),
           path(trees, stageAs: 'trees/*'),
-          path(species_files, stageAs: 'species_files/*')
+          path(species_files, stageAs: 'species_files/*'),
+          path(bg_species_files, stageAs: 'bg_species_files/*')
 
     output:
     path "*_fg.nwk",            emit: annotated_trees, optional: true

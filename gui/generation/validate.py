@@ -245,6 +245,7 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("RERconverge: gene trees", m.rer.gene_trees, "file"),
         ("RERconverge: tested-gene universe file", m.rer.rer_universe_file, "file"),
         ("RERconverge: cross-module gene scores", m.rer.rer_gene_scores, "file"),
+        ("FADE: custom fg/bg species file", m.fade.fade_species_file, "file"),
         ("FADE: gene-set top genes", m.fade.fade_postproc_top, "file"),
         ("FADE: gene-set bottom genes", m.fade.fade_postproc_bottom, "file"),
         ("FADE: LG substitution matrix", m.fade.lg_dat_path, "file"),

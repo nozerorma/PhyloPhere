@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 """
 Annotate a Newick tree with `{Foreground}` labels using a plain species list.
+
+Optionally (--bg-species-file, fade_background_scope=opposite) prunes the
+tree/alignment down to foreground + background species only, since HyPhy
+FADE has no explicit "Background" tag -- any branch not tagged {Foreground}
+already counts as background, so restricting the background set to a
+specific group requires physically removing every other species from the
+tree before HyPhy sees it.
 """
 
 import argparse
@@ -81,6 +88,18 @@ def main():
         help="FASTA alignment; if provided the tree is pruned to only taxa present in the alignment before annotation.",
     )
     parser.add_argument(
+        "--bg-species-file",
+        default=None,
+        help=(
+            "Optional background species list (fade_background_scope=opposite). "
+            "When given, retained tree/alignment taxa are additionally restricted "
+            "to (foreground species | background species) only, so species in "
+            "neither list are pruned out entirely rather than left unlabeled -- "
+            "unlabeled branches would otherwise still count as HyPhy's implicit "
+            "background."
+        ),
+    )
+    parser.add_argument(
         "--fasta_out",
         default=None,
         help="If provided, write a FASTA filtered to only sequences present in the (pruned) tree.",
@@ -108,17 +127,33 @@ def main():
     except Exception as exc:
         sys.exit(f"ERROR annotate_tree_fg: cannot parse tree: {exc}")
 
+    # Determine which taxa to retain: intersection of (alignment taxa, when
+    # --fasta given) and (foreground | background species, when
+    # --bg-species-file given). Either constraint alone is a no-op filter for
+    # the other, matching prior behavior when only --fasta was supplied.
+    taxa_to_retain_labels = None
     if args.fasta:
-        fasta_taxa = parse_fasta_taxa(args.fasta)
+        taxa_to_retain_labels = parse_fasta_taxa(args.fasta)
+
+    bg_species = set()
+    if args.bg_species_file:
+        bg_species = parse_species_file(args.bg_species_file)
+        allowed = fg_species | bg_species
+        taxa_to_retain_labels = (
+            allowed if taxa_to_retain_labels is None else (taxa_to_retain_labels & allowed)
+        )
+
+    if taxa_to_retain_labels is not None:
         tree_taxa_all = {leaf.taxon.label for leaf in tree.leaf_node_iter()}
-        taxa_to_prune = tree_taxa_all - fasta_taxa
+        taxa_to_prune = tree_taxa_all - taxa_to_retain_labels
         if taxa_to_prune:
             sys.stderr.write(
                 f"INFO annotate_tree_fg: pruning {len(taxa_to_prune)} tip(s) not present "
-                f"in the FASTA alignment (tree: {len(tree_taxa_all)}, fasta: {len(fasta_taxa)}).\n"
+                f"in the retained taxon set (tree: {len(tree_taxa_all)}, "
+                f"retained: {len(taxa_to_retain_labels)}).\n"
             )
             taxa_to_retain = dendropy.TaxonNamespace(
-                [t for t in tree.taxon_namespace if t.label in fasta_taxa]
+                [t for t in tree.taxon_namespace if t.label in taxa_to_retain_labels]
             )
             tree.retain_taxa(taxa_to_retain)
             tree.purge_taxon_namespace()

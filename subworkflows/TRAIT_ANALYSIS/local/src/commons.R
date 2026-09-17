@@ -105,8 +105,15 @@ trait_df[] <- lapply(trait_df, function(col) {
 debug_log("trait_df rows = %d, cols = %d", nrow(trait_df), ncol(trait_df))
 debug_log("trait_df columns: %s", paste(names(trait_df), collapse = ", "))
 
-if (!"species" %in% names(trait_df)) {
-  stop("Trait file must include a 'species' column.")
+sp_colname <- if (exists("params") && !is.null(params$sp_colname) && nzchar(params$sp_colname)) params$sp_colname else "species"
+debug_log("sp_colname = %s", sp_colname)
+
+if (!sp_colname %in% names(trait_df)) {
+  stop(sprintf("Trait file must include a '%s' column (sp_colname). Available columns: %s",
+               sp_colname, paste(names(trait_df), collapse = ", ")))
+}
+if (sp_colname != "species") {
+  trait_df$species <- trait_df[[sp_colname]]
 }
 debug_log("trait_df species unique = %d", length(unique(trait_df$species)))
 

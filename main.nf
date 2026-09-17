@@ -185,8 +185,10 @@ workflow {
         // 4.Independent_contrasts.Rmd. When FADE runs standalone (no --ct_tool,
         // no --contrast_selection) trigger CONTRAST_SELECTION here, the same way
         // --ct_tool does — FADE stays independently runnable, the user only
-        // passes --fade.
-        if (params.fade && !contrast_out) {
+        // passes --fade. Skipped entirely when --fade_species_file supplies the
+        // fg/bg partition directly (candidate_species.tab format), since that
+        // bypasses PSS/Dunn contrast selection for FADE.
+        if (params.fade && !contrast_out && !params.fade_species_file) {
             contrast_out = CONTRAST_SELECTION()
             contrast_out.low_contrasts_skip.view { skip_file ->
                 exit 0, "Minimum contrast threshold not met for trait '${params.traitname ?: 'unknown'}' (flag: ${skip_file}). Stopping pipeline gracefully."
@@ -529,19 +531,25 @@ workflow {
             // These channels are now consumed by a single SELECTION_PREP call
             // (instead of being split separately for FADE).
 
-            // Foreground/background pool for FADE: the PRE-Dunn candidate species
-            // from 3.CI-composition.Rmd (candidate_species.tab, traitfile format).
-            // FADE tests directional selection on foreground branches and does not
-            // need mutually-independent pairs, so it uses the full candidate pool
-            // rather than the Dunn-composited canonical set that CAAS uses.
-            // contrast_out is always populated here — the block above triggers
-            // CONTRAST_SELECTION for standalone --fade.
-            def species_source_ch = contrast_out
-                ? contrast_out.candidate_species_out
-                : Channel.empty()
+            // Foreground/background pool for FADE: either a user-supplied
+            // --fade_species_file (same candidate_species.tab format: species
+            // <TAB> contrast_group [<TAB> pair, ignored] — contrast_group==1
+            // -> top/fg-eligible, ==0 -> bottom/fg-eligible — parsed as-is by
+            // EXTRACT_EXTREME_SPECIES/extract_extreme_species.py, no new
+            // parser needed), or the PRE-Dunn candidate species from
+            // 3.CI-composition.Rmd. FADE tests directional selection on
+            // foreground branches and does not need mutually-independent
+            // pairs, so it uses the full candidate pool rather than the
+            // Dunn-composited canonical set that CAAS uses. contrast_out is
+            // null when --fade_species_file bypassed CONTRAST_SELECTION above.
+            def species_source_ch = params.fade_species_file
+                ? Channel.fromPath(params.fade_species_file, checkIfExists: true)
+                : (contrast_out ? contrast_out.candidate_species_out : Channel.empty())
 
             // Tree: CT-pruned tree from contrast_selection; otherwise
-            // SELECTION_PREP falls back to params.tree via its .ifEmpty {} guard.
+            // SELECTION_PREP falls back to params.tree via its .ifEmpty {} guard
+            // (required when --fade_species_file is used standalone, since no
+            // CT-pruned tree exists in that path).
             def tree_source_ch = contrast_out
                 ? contrast_out.tree_file_out
                 : Channel.empty()

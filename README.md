@@ -180,10 +180,27 @@ parameter is empty.
 
 ### FADE — directional selection
 Runs HyPhy FADE, a Bayesian branch-site model, to detect accelerated or
-decelerated amino-acid selection on phenotype-extreme branches — always both
-"top" and "bottom" directions. Alignment prep is shared once across both
-directions (`SELECTION_PREP`). A precomputed-JSON path
-(`--fade_json_dir_top`/`bottom`) renders the report without rerunning HyPhy.
+decelerated amino-acid selection on phenotype-extreme branches. Alignment
+prep is shared once across both directions (`SELECTION_PREP`). A
+precomputed-JSON path (`--fade_json_dir_top`/`bottom`) renders the report
+without rerunning HyPhy.
+
+Three controls govern which comparison(s) actually run:
+- `--fade_direction` (`top`|`bottom`|`both`, default `both`) — which
+  foreground direction(s) to test.
+- `--fade_background_scope` (`all`|`opposite`, default `all`) — `all` is
+  HyPhy's own implicit behavior (every non-foreground branch is background);
+  `opposite` prunes the tree and alignment down to foreground + the
+  opposite extreme group only, excluding "middle" (non-extreme) species
+  entirely — HyPhy FADE has no explicit background-label flag, so this is
+  the only way to make the comparison a true two-group FG-vs-BG test. With
+  `--fade_direction both`, `opposite` runs each extreme group against the
+  other (top-vs-bottom and bottom-vs-top).
+- `--fade_species_file` (optional path) — a user-supplied foreground/
+  background species assignment, in the same format as `candidate_species.tab`
+  (`species<TAB>contrast_group[<TAB>pair]`, pair ignored, `1`→top, `0`→bottom).
+  When set, this bypasses automatic PSS/Dunn contrast selection for FADE
+  entirely; `--tree` must be supplied explicitly in that case.
 
 ### RER_MAIN (RERconverge) — relative evolutionary rate
 Computes branch-length deviations correlated with the trait, auto-routing to
@@ -468,6 +485,9 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | Parameter | Default | Purpose & Description |
 |---|---|---|
 | `fade_model` | `"LG"` | Protein substitution matrix used by HyPhy FADE (default `LG`, matching ASR). |
+| `fade_direction` | `"both"` | Which foreground direction(s) to run (`"top"`, `"bottom"`, `"both"`). |
+| `fade_background_scope` | `"all"` | Background branch set: `"all"` (HyPhy's own implicit background) or `"opposite"` (prune tree+alignment to foreground + opposite-extreme species only). |
+| `fade_species_file` | `""` | Optional user-supplied foreground/background species file (same format as `candidate_species.tab`); bypasses automatic contrast selection for FADE when set. |
 
 #### Advanced Parameters
 

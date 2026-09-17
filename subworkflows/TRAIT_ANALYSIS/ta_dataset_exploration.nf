@@ -33,6 +33,7 @@ process DATASET_EXPLORATION {
     def seed = params.seed ?: ''
     def clade = params.clade_name ?: ''
     def taxon = params.taxon_of_interest ?: ''
+    def sp_colname = params.sp_colname ?: 'species'
     def trait = params.traitname ?: ''
     def n_trait = params.n_trait ?: ''
     def c_trait = params.c_trait ?: ''
@@ -63,6 +64,7 @@ process DATASET_EXPLORATION {
                     seed = '${seed}',
                     clade_name = '${clade}',
                     taxon_of_interest = '${taxon}',
+                    sp_colname = '${sp_colname}',
                     traitname = '${trait}',
                     n_trait = '${n_trait}',
                     c_trait = '${c_trait}',
@@ -97,6 +99,7 @@ process DATASET_EXPLORATION {
                     seed = '${seed}',
                     clade_name = '${clade}',
                     taxon_of_interest = '${taxon}',
+                    sp_colname = '${sp_colname}',
                     traitname = '${trait}',
                     n_trait = '${n_trait}',
                     c_trait = '${c_trait}',

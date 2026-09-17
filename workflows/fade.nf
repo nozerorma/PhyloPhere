@@ -14,9 +14,18 @@
 # Tests foreground branches (defined by trait_stats.csv extremes) for
 # directional amino-acid selection using HyPhy FADE.
 #
-# Two directions are always run in parallel:
+# Direction(s) tested is controlled by --fade_direction ('top' | 'bottom' |
+# 'both', default 'both'):
 #   top    → global_label == high_extreme species as foreground
 #   bottom → global_label == low_extreme species as foreground
+#
+# What counts as HyPhy's implicit background set is controlled by
+# --fade_background_scope ('all' | 'opposite', default 'all'):
+#   all      → every non-foreground branch (HyPhy's own default behavior)
+#   opposite → tree/alignment pruned to foreground + the opposite extreme
+#              group only, excluding "middle" (non-extreme) species. With
+#              --fade_direction both, this produces two runs that test each
+#              extreme group against the other (top-vs-bottom, bottom-vs-top).
 #
 # Alignment preparation (PHYLIP→FASTA conversion, tree-filtering, and species
 # extraction) is handled upstream by SELECTION_PREP (called once in main.nf)
@@ -62,27 +71,54 @@ workflow FADE {
 
     main:
 
+        assert params.fade_direction in ['top', 'bottom', 'both'] :
+            "fade_direction must be 'top', 'bottom', or 'both' (got: ${params.fade_direction})"
+        assert params.fade_background_scope in ['all', 'opposite'] :
+            "fade_background_scope must be 'all' or 'opposite' (got: ${params.fade_background_scope})"
+
         // ── LG model dat file ────────────────────────────────────────────────
         def lg_dat_ch = Channel.value(file(params.lg_dat_path))
+
+        // ── Background-scope species file per direction ─────────────────────
+        // 'opposite' restricts background to the other extreme group only
+        // (ANNOTATE_TREE_FG prunes non-fg/bg species out entirely); 'all'
+        // (default) passes the NO_FILE sentinel, reproducing HyPhy's own
+        // implicit background-is-everything-else behavior unchanged.
+        def no_bg_file   = Channel.value(file('NO_FILE'))
+        def top_bg_ch    = (params.fade_background_scope == 'opposite') ? bottom_species_ch : no_bg_file
+        def bottom_bg_ch = (params.fade_background_scope == 'opposite') ? top_species_ch    : no_bg_file
 
         // ── Annotate tree with {Foreground} labels ───────────────────────────
         // Introduce direction labels and combine with the species/tree files.
         // ANNOTATE_TREE_FG also prunes the tree and FASTA to mutual taxa,
         // preventing HyPhy tip-count / sequence-count mismatches.
         //
-        // Input tuple: (gene_id, direction, fasta, fg_species_file, tree)
+        // Input tuple: (gene_id, direction, fasta, fg_species_file, tree, bg_species_file)
         def top_annotate_ch = fasta_top_ch
             .map    { gid, fa -> tuple(gid, 'top', fa) }
             .combine(top_species_ch)
             .combine(tree_ch)
+            .combine(top_bg_ch)
 
         def bottom_annotate_ch = fasta_bottom_ch
             .map    { gid, fa -> tuple(gid, 'bottom', fa) }
             .combine(bottom_species_ch)
             .combine(tree_ch)
+            .combine(bottom_bg_ch)
+
+        // ── Direction gating (--fade_direction) ──────────────────────────────
+        // A single upstream filter starves every downstream _TOP/_BOTTOM branch
+        // for a skipped direction (no tasks scheduled) without restructuring
+        // any of the branch{}/process-call wiring below, mirroring how
+        // CT_ACCUMULATION's 'all' direction is handled as a filter, not a new
+        // contrast scheme.
+        def wanted_directions = (params.fade_direction == 'both')
+            ? ['top', 'bottom']
+            : [params.fade_direction]
 
         def annotate_input_ch = top_annotate_ch.mix(bottom_annotate_ch)
-            // → (gene_id, direction, fasta, fg_species_file, tree)
+            .filter { row -> wanted_directions.contains(row[1]) }
+            // → (gene_id, direction, fasta, fg_species_file, tree, bg_species_file)
 
         def annotBatchSize = (params.fade_batch_size ?: 1) as int
         def annotated_ch
@@ -103,21 +139,26 @@ workflow FADE {
                     .collate(annotBatchSize)
                     .map { batch ->
                         def batchID = sprintf('annotate_batch_%s_%05d', dir, ++batchCounter)
+                        // row[5] (bg_species_file) is legitimately NO_FILE whenever
+                        // fade_background_scope == 'all' -- only rows 2/3/4 (fasta,
+                        // fg species, tree) are required to be real files.
                         def validRows = batch.findAll { row ->
                             row[2]?.name != 'NO_FILE' && row[3]?.name != 'NO_FILE' && row[4]?.name != 'NO_FILE'
                         }
                         if (!validRows) return null
                         def manifestText = createBatchManifestText(
-                            validRows.collect { row -> "${row[0]}\t${row[1]}\t${row[2].name}\t${row[4].name}\t${row[3].name}" }
+                            validRows.collect { row -> "${row[0]}\t${row[1]}\t${row[2].name}\t${row[4].name}\t${row[3].name}\t${row[5].name}" }
                         )
-                        // Tree and FG list are shared within a direction batch;
-                        // deduplicate to avoid Nextflow stageAs filename collisions.
+                        // Tree, FG list, and BG list are shared within a direction
+                        // batch; deduplicate to avoid Nextflow stageAs filename collisions.
                         def uniqTrees = validRows.collect { row -> row[4] }.unique { it.name }
                         def uniqSpecies = validRows.collect { row -> row[3] }.unique { it.name }
+                        def uniqBgSpecies = validRows.collect { row -> row[5] }.unique { it.name }
                         tuple(batchID, validRows.size(), manifestText,
                               validRows.collect { row -> row[2] },   // fastas
                               uniqTrees,                          // trees
-                              uniqSpecies)                        // species files
+                              uniqSpecies,                        // fg species files
+                              uniqBgSpecies)                      // bg species files
                     }
                     .filter { it != null }
             }

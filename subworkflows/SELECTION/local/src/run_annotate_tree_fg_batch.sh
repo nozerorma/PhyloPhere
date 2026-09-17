@@ -7,12 +7,17 @@
 # and skipped) so the overall batch task always succeeds.
 #
 # Manifest format (tab-separated, one gene per line):
-#   gene_id <TAB> direction <TAB> fasta_filename <TAB> tree_filename <TAB> species_file_filename
+#   gene_id <TAB> direction <TAB> fasta_filename <TAB> tree_filename <TAB> species_file_filename <TAB> bg_species_file_filename
 #
 # Files are staged by Nextflow into:
 #   fastas/<fasta_filename>
 #   trees/<tree_filename>
 #   species_files/<species_file_filename>
+#   bg_species_files/<bg_species_file_filename>
+#
+# bg_species_file_filename is the literal sentinel "NO_FILE" whenever
+# fade_background_scope == 'all' (the default) -- --bg-species-file is
+# omitted from the annotate_tree_fg.py call in that case.
 # ───────────────────────────────────────────────────────────────────────────
 set -uo pipefail  # NOT -e: individual gene failures must not abort the batch
 
@@ -70,7 +75,7 @@ wait_for_all() {
 
 # ── Process each gene ────────────────────────────────────────────────────────
 idx=0
-while IFS=$'\t' read -r gene_id direction fasta_name tree_name species_file_name; do
+while IFS=$'\t' read -r gene_id direction fasta_name tree_name species_file_name bg_species_file_name; do
     [[ -z "${gene_id:-}" ]] && continue
     idx=$((idx + 1))
     wait_for_slot
@@ -80,12 +85,18 @@ while IFS=$'\t' read -r gene_id direction fasta_name tree_name species_file_name
     tree_path="trees/${tree_name}"
     species_file_path="species_files/${species_file_name}"
 
+    bg_arg=()
+    if [[ -n "${bg_species_file_name:-}" && "${bg_species_file_name}" != "NO_FILE" ]]; then
+        bg_arg=(--bg-species-file "bg_species_files/${bg_species_file_name}")
+    fi
+
     out_tree="${gene_id}_${direction}_fg.nwk"
     out_fasta="${gene_id}_${direction}.fa"
 
     (
         ${PY_BIN} "${ANNOTATE_TREE}" \
             --species-file "${species_file_path}" \
+            "${bg_arg[@]}" \
             --tree         "${tree_path}" \
             --fasta        "${fasta_path}" \
             --fasta_out    "${out_fasta}" \

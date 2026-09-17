@@ -189,6 +189,12 @@ class RerConfig(ModuleConfigBase):
 class FadeConfig(ModuleConfigBase):
     # Off by default — matches RUN_FADE=false in the reference scripts.
     enabled: bool = False
+
+    # Direction and background scope
+    fade_direction: str = "both"  # --fade_direction (top|bottom|both)
+    fade_background_scope: str = "all"  # --fade_background_scope (all|opposite)
+    fade_species_file: str = ""  # --fade_species_file (optional user-supplied fg/bg species file, candidate_species.tab format)
+
     # Shared alignment-prep / FADE-run batching (SLURM/Seqera scheduler overhead).
     selection_prep_batch_size: str = "500"  # --selection_prep_batch_size
     fade_batch_size: str = "200"  # --fade_batch_size
