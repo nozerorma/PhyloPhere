@@ -670,11 +670,42 @@ vs ABCB10), and the expensive scan (`Path.glob`/`Path.iterdir`, monkeypatched wi
 genuinely runs exactly once across repeated lookups. Full suite (48/48, incl. Stage 1/2's existing 6)
 green.
 
-**Not yet done**: real-cluster timing verification (the user killed the 17h run to retest with this fix
-+ the concurrency-ceiling decision) — `strace -p <pid> -f -tt -T` on a live worker (fallback since
-`py-spy` isn't installed on `correfoc`) still needed to confirm this was the dominant driver and rule out
-`run_asr_pipeline`'s cache-hit cost or `mp.Manager()` queue overhead as additional contributors, per the
-plan's Step 1.
+### Retest, same day: the NFS-scan fix alone wasn't enough — real driver found via the (now-working) logs
+
+The user resubmitted with the above fix synced and reported "behaviour is the same." Checked a fresh
+work dir (`malignant_prevalence_complete/e2/6167b7fae79d376823a019387f3fe3`) directly: the fix WAS
+present and running, and the logging fix worked dramatically (14,284 log lines in 10 minutes vs. 61
+lines across 4+ hours pre-fix) — but the per-chunk `"ctx load {s}s"` diagnostic line
+(`_perms_worker_replay`, added the day before) showed **82-100 seconds per chunk**, unchanged whether it
+was a worker's first or a REPEAT call (Worker-1's first chunk: 82.4s; its second, later chunk: 84.7s) —
+proving the NFS-directory-scan fix above was NOT the dominant cost (that would have collapsed toward
+zero on a repeat call within the same cached process). Something else inside `_load_gene_asr_context`
+costs ~85-100s every single time, uncacheable by directory memoization.
+
+Traced it to `run_asr_pipeline`/`load_precomputed_asr` (`src/asr/asr_single.py`): both call
+`parse_paml_rst_node_level` (parses per-node posteriors — its output IS consumed downstream) AND
+`parse_paml_rst` (parses "site-level" posteriors into `ASRResults.posteriors_site`) on **every** call,
+unconditionally. A full-repo grep for `.posteriors_site` found it assigned in exactly 2 places and read
+in **zero** — dead computation, re-parsing the same `rst` file a second time with a pure-Python
+per-site/per-token loop (`posterior.py:18-200`, no vectorization, builds a nested dict token-by-token)
+for a result nothing ever uses. Removed both calls, replaced with `posteriors_site = {}` (matches the
+non-Optional `Dict[int, Dict[str, float]]` field type, zero behavior change since nothing reads the
+value) — commit `8f7a37e`. This affects BOTH arms (`load_precomputed_asr` is the observed arm's loader
+too) and every call regardless of chunking, though its cost was only multiplicatively exposed by Stage
+2's per-chunk dispatch.
+
+`parse_paml_rst_node_level` itself (the parser whose output IS used) was left untouched — it does real,
+necessary work (a tree parse via `build_node_mapping` plus per-node posterior extraction). Whether its
+remaining cost alone still dominates wall time is unmeasured; the plan's Step 1 `strace` diagnostic
+(still not run — needs a live job) would settle whether further work here (e.g., loading a gene's ASR
+context once in the parent process and passing it to all of that gene's chunks, instead of reloading per
+chunk) is warranted, or whether dropping the dead parse already closes most of the gap.
+
+**Not yet done**: real-cluster timing verification of THIS fix (resubmit needed) — direct before/after on
+real `"ctx load"` numbers, and `strace -p <pid> -f -tt -T` on a live worker (fallback since `py-spy`
+isn't installed on `correfoc`) to confirm `parse_paml_rst_node_level`'s remaining cost isn't itself still
+the bottleneck, per the plan's Step 1. Also still open: the concurrency-ceiling rebalance (plan Step 2 —
+`cpus`/`queueSize`/SBATCH `%N`), deliberately not touched pending a go/no-go with the user.
 
 ---
 
