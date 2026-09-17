@@ -704,8 +704,42 @@ chunk) is warranted, or whether dropping the dead parse already closes most of t
 **Not yet done**: real-cluster timing verification of THIS fix (resubmit needed) — direct before/after on
 real `"ctx load"` numbers, and `strace -p <pid> -f -tt -T` on a live worker (fallback since `py-spy`
 isn't installed on `correfoc`) to confirm `parse_paml_rst_node_level`'s remaining cost isn't itself still
-the bottleneck, per the plan's Step 1. Also still open: the concurrency-ceiling rebalance (plan Step 2 —
-`cpus`/`queueSize`/SBATCH `%N`), deliberately not touched pending a go/no-go with the user.
+the bottleneck, per the plan's Step 1.
+
+### Step 2 implemented: concurrency-ceiling rebalance, measured then applied, 2026-09-17
+
+The user reported the compute-time fix helped a lot but noticed later-submitted batches taking
+noticeably longer in total *duration* despite similar *realtime* once running — exactly the queue-wait
+signature Step 2 predicted, now with hard numbers instead of an estimate. Pulled `sacct` (after clearing
+a stale SSH `ControlMaster` socket that was hanging every new connection) for a burst of
+`CAAS_PERMS_DISAMBIGUATE_BATCHED` jobs submitted within ~20s of each other:
+
+| Job | Submit | Start | Queue wait | Run time |
+|---|---|---|---|---|
+| 6737411 | 12:53:01 | 12:53:02 | 1s | 5m03s |
+| 6737420 | 12:53:06 | 12:53:07 | 1s | 10m03s |
+| 6737426 | 12:53:11 | 12:57:17 | 4m06s | 3m12s |
+| 6737429 | 12:53:13 | 12:58:37 | 5m24s | 8m12s |
+| 6737433 | 12:53:18 | 13:02:46 | **9m28s** | 4m31s |
+
+Queue wait climbed from ~1s to 9m28s purely as a function of submission order within one burst; run
+time (once started) stayed flat at a few minutes throughout — confirming compute is no longer the
+bottleneck, the SLURM QOS cap is. Root cause matches finding 2 from the ground-up rework: two
+phenotypes run concurrently (`SBATCH --array=1-2%2`, kept as-is by the user's choice), each an
+independent Nextflow instance with its own `slurm_queue_size` budget — old `cpus=8 x
+slurm_queue_size=12 x 2 instances` demanded ~192 cpus against the lab's 100-cpu ceiling.
+
+**Fix**: `CAAS_PERMS_DISAMBIGUATE_BATCHED`'s `cpus` halved 8 → 4 (`conf/resources.config`) — since
+`--workers` is `task.cpus` (`caas_permulation.nf`), this also halves intra-batch worker parallelism, a
+deliberate moderate tradeoff rather than cutting straight to 1-2. `2 instances × slurm_queue_size(12) ×
+cpus(4) = 96`, back under 100 with the same margin the original single-instance tuning reasoned about —
+no `slurm_queue_size` change needed, since 12 already happens to fit once `cpus` is halved. Matching
+comments added in both `conf/resources.config` and `nextflow.config`'s executor block. `CT_DISAMBIGUATION_RUN_BATCHED`
+(observed arm) deliberately left untouched — no measurement of its own yet, per the plan's Step 4.
+
+**Not yet done**: real-cluster verification that queue wait actually collapses at the new `cpus=4` (repeat
+the `sacct` burst-timing check on a fresh submission) and that per-batch realtime doesn't regress
+unacceptably from the halved worker count.
 
 ---
 
