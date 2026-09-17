@@ -610,6 +610,74 @@ shards match a pre-Stage-2 golden run bit-for-bit) — pending sync + a fresh SL
 
 ---
 
+## Ground-up rework — still unbearably slow after Stage 1/2, 2026-09-17
+
+A live run 17h+ in, ~halfway through 804 null-replay batches, prompted a full re-investigation (3
+parallel Explore agents + live SSH diagnostics on `correfoc`) rather than another incremental tier. Full
+plan: `/home/miguel/.claude/plans/speed-is-still-unbareable-bubbly-salamander.md`.
+
+**Redirected diagnosis**: the per-cycle algorithm is NOT the bottleneck (measured ~3.3ms/cycle, Tier 3
+closure above — a 48,232-cycle batch should take ~20-25s on 8 workers) but real batches take 1.2-4+
+hours, a 700-900x gap. Confirmed live via `srun --jobid=<job> --overlap ps -u mramon -o
+pid,ppid,pcpu,stat,etime,comm` on a job running 4h12m: all 8 `forkserver` workers alive and pooled, every
+one in `S` state at 0.0-0.3% CPU, having burned only tens of CPU-seconds each over 3+ hours — I confirmed
+this specific job WAS running current Stage-2 code (grepped its work-dir `gene_wrapper.py` copy). Two
+separate, independently-actionable problems, not one:
+
+1. **Per-task efficiency** — workers spend nearly all wall time blocked, not computing.
+2. **Cross-task concurrency ceiling** — `nextflow.config:247-264`'s `queueSize`(default 8, template sets
+   12) × `cpus`(8 for `CAAS_PERMS_DISAMBIGUATE_BATCHED`) is deliberately tuned against the lab's 100-cpu
+   SLURM QOS, but this run's SBATCH array launches 2 phenotypes concurrently, each an independent
+   Nextflow instance with its own budget — together demanding ~192 cpus, 2x the ceiling
+   (`nextflow.config`'s own comment already warns about exactly this case). `squeue` confirmed only ~14
+   RUNNING + 12 PENDING of 805 total batches; at ~2.2h mean/batch that alone explains the multi-day
+   runtime (805/14 × 2.2h ≈ 127h). Not yet acted on — needs a go/no-go with the user on `cpus`/
+   `queueSize`/SBATCH `%N` before touching production config.
+
+### Root cause of (1), found and fixed same day: NFS directory-scan storm, multiplied by Stage 2
+
+`find_gene_alignment` (`src/utils/io_utils.py:44`) ran `alignment_dir.glob("**/*")` — a full recursive
+scan + per-entry `is_file()` stat of the ~16,100-file alignment directory — on **every single call**,
+not once per run. Pre-Stage-2 this ran once per gene (~16K scans/batch-run, already wasteful); Stage 2
+calls `_load_gene_asr_context` (and therefore this) once per CHUNK, so a large gene split into ~40 chunks
+(at `CAAS_PERMS_CHUNK_TARGET_SIZE=1000`) re-scans the whole NFS directory 40 times. This is exactly the
+"S state, ~0% CPU, blocked for hours" signature measured live — an NFS readdir+stat storm, not compute.
+The observed arm's `process_single_gene` calls the same function once per gene, so it shares the
+inefficiency at 1x-per-gene scale (still real, just not multiplied by chunking).
+
+`_perms_worker_replay`'s directory-mode discovery lookup (`gene_wrapper.py`, `disc_path.iterdir()` +
+`next(...)` linear scan for the matching per-gene shard) had the identical shape of bug, same
+Stage-2-multiplied exposure.
+
+**Fix**: both memoized via `functools.lru_cache`, keyed by directory — `_scan_alignment_dir`
+(`io_utils.py`) and `_scan_perm_discovery_dir` (`gene_wrapper.py`) each do the expensive scan once per
+worker process and serve every subsequent lookup as an O(1) dict hit, preserving the original
+first-match-in-scan-order semantics exactly (proven in the regression net). Turns N-calls×O(N_files)
+into O(N_files)-once + N-calls×O(1).
+
+**Also fixed same day**: worker-subprocess logging was completely dark in production — a
+`forkserver`-spawned worker never inherits the parent's `configure_logging()` call (it runs after the
+forkserver already started), so every `logger.info` a worker made, including yesterday's `"ctx load
+...s"` per-chunk diagnostic, was silently dropped; confirmed live (zero occurrences across 4+ hours of a
+real `.command.log`). `init_worker` (`src/utils/concurrency.py:78`) now calls `configure_logging()`,
+and `process_all_genes_perms`'s pool (previously built with NO initializer at all) now uses it
+(`gene_wrapper.py:2208`) — matching the observed arm's pool, which already had `initializer=init_worker`
+but without the logging call either.
+
+Regression net: `subworkflows/CT_DISAMBIGUATION/local/src/utils/test_alignment_discovery_scan_cache.py`
+(4 tests) — correct lookup + `FileNotFoundError` behavior preserved, prefix-exactness preserved (ABCB1
+vs ABCB10), and the expensive scan (`Path.glob`/`Path.iterdir`, monkeypatched with a call counter)
+genuinely runs exactly once across repeated lookups. Full suite (48/48, incl. Stage 1/2's existing 6)
+green.
+
+**Not yet done**: real-cluster timing verification (the user killed the 17h run to retest with this fix
++ the concurrency-ceiling decision) — `strace -p <pid> -f -tt -T` on a live worker (fallback since
+`py-spy` isn't installed on `correfoc`) still needed to confirm this was the dominant driver and rule out
+`run_asr_pipeline`'s cache-hit cost or `mp.Manager()` queue overhead as additional contributors, per the
+plan's Step 1.
+
+---
+
 ## Not prioritized (flagged, not scheduled)
 
 - `mp.Manager()` subprocess spawn/join overhead (~0.44s per job in the Tier-0 `strace` run, 3 `wait4`

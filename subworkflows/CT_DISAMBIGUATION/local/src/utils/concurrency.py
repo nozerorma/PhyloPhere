@@ -76,10 +76,18 @@ def plan_concurrency(
 
 
 def init_worker(threads_per_gene: int, codeml_sem=None) -> None:
-    """Initializer for worker processes to set thread env and optional gate.
+    """Initializer for worker processes to set thread env, logging, and an
+    optional codeml gate.
 
-    Side effects: sets the OMP_NUM_THREADS environment variable and may set
-    the module-global semaphore used by :func:`codeml_slot`.
+    Side effects: sets the OMP_NUM_THREADS environment variable, configures
+    root logging (a forkserver-spawned worker starts with NO logging
+    configuration at all -- the parent's `configure_logging()` call in `main()`
+    runs after the pool's forkserver already started, so it is never inherited;
+    every `logger.info(...)` a worker makes was previously silently dropped,
+    confirmed in production where a per-chunk diagnostic log line never once
+    appeared across 4+ hours of a real run's .command.log -- see
+    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md), and may set the
+    module-global semaphore used by :func:`codeml_slot`.
 
     :param threads_per_gene: Number of threads each worker should use.
     :type threads_per_gene: int
@@ -91,6 +99,9 @@ def init_worker(threads_per_gene: int, codeml_sem=None) -> None:
     os.environ["OMP_NUM_THREADS"] = str(max(1, threads_per_gene))
     global _CODEML_SEM
     _CODEML_SEM = codeml_sem
+
+    from src.utils.logger import configure_logging
+    configure_logging()
 
 
 @contextmanager

@@ -11,6 +11,7 @@ Date: 2025-12-03 (revised 2025-12-09)
 """
 
 import bisect
+import functools
 import gzip
 import logging
 import multiprocessing as mp
@@ -1125,6 +1126,26 @@ def build_percent_rank_lookup(hist_by_cycle: Dict[str, Dict[int, int]]) -> Dict[
     return lookup
 
 
+@functools.lru_cache(maxsize=8)
+def _scan_perm_discovery_dir(disc_path: Path) -> Dict[str, Path]:
+    """One-time directory listing of a per-gene perm-discovery shard directory,
+    memoized per directory. `_perms_worker_replay`'s directory-mode branch used
+    to re-run `disc_path.iterdir()` (an O(N_files) NFS directory scan, ~16,100
+    genes in production) on EVERY call -- once per gene pre-Stage-2, once per
+    CHUNK of a gene after it (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md),
+    multiplying the same NFS metadata-call cost `find_gene_alignment`
+    (io_utils.py) had -- see `_scan_alignment_dir` there for the matching fix
+    and full rationale. Caching turns N calls x O(N_files) into O(N_files)
+    once + N calls x O(1) dict lookup.
+    """
+    by_prefix: Dict[str, Path] = {}
+    for p in disc_path.iterdir():
+        if p.is_file():
+            prefix = p.name.split(".", 1)[0]
+            by_prefix.setdefault(prefix, p)
+    return by_prefix
+
+
 def _chunk_gene_cycles(cycle_tags: List[str], target_chunk_size: int) -> List[List[str]]:
     """Split cycle_tags into sub-chunks of ~target_chunk_size, never splitting one
     base cycle's "<base>~H*" variants across chunks -- required because
@@ -1221,11 +1242,7 @@ def _perms_worker_replay(
             with open(disc_path, "r") as f:
                 cycle_to_entries = _parse_discovery_entries(f, cycle_tags, gene_filter=gene)
         else:
-            gene_file = next(
-                (p for p in disc_path.iterdir()
-                 if p.is_file() and p.name.split(".", 1)[0] == gene),
-                None,
-            )
+            gene_file = _scan_perm_discovery_dir(disc_path).get(gene)
             if gene_file is not None and gene_file.exists():
                 with open(gene_file, "r") as f:
                     cycle_to_entries = _parse_discovery_entries(f, cycle_tags)
@@ -2205,7 +2222,10 @@ def process_all_genes_perms(
     # n_cycles^2 counters (~1000x1000 ints, a few MB) no matter how many rows the
     # detail file holds.
     hist_by_cycle: Dict[str, Dict[int, int]] = {}
-    pool = mp.Pool(processes=effective_workers, maxtasksperchild=maxtasks)
+    pool = mp.Pool(
+        processes=effective_workers, maxtasksperchild=maxtasks,
+        initializer=init_worker, initargs=(1, None),
+    )
     n_genes = 0
     n_detail_rows = 0
     manifest_rows: List[Tuple[str, int]] = []

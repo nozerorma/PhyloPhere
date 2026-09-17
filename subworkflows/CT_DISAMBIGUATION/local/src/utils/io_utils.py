@@ -14,8 +14,9 @@ Date
 2025-12-09
 """
 
+import functools
 from pathlib import Path
-from typing import Optional, Set
+from typing import Dict, Optional, Set
 import logging
 
 from Bio import AlignIO
@@ -27,6 +28,33 @@ logger = logging.getLogger(__name__)
 def _is_supported_alignment_path(path: Path) -> bool:
     suffix = path.suffix.lower()
     return suffix in {".phy", ".phylip", ".aln", ".fa", ".fasta", ""} and path.is_file()
+
+
+@functools.lru_cache(maxsize=32)
+def _scan_alignment_dir(alignment_dir: Path) -> Dict[str, Path]:
+    """One-time recursive scan of `alignment_dir`, memoized per directory.
+
+    `find_gene_alignment` used to re-run this `glob("**/*")` + per-entry
+    `is_file()` stat sweep on EVERY call -- an O(N_files) NFS readdir+stat
+    storm (~16,100 alignment files in production) repeated once per gene, and
+    (since the CT_DISAMBIGUATION_RUN_BATCHED/null-replay Stage 2 chunking,
+    docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md) once per CHUNK of a gene --
+    multiplying real NFS latency by up to ~40x for a large gene split into many
+    chunks. Confirmed live: workers spend nearly all wall-clock time in `S`
+    state at ~0% CPU, the exact signature of NFS metadata-call blocking, not
+    compute. Caching the scan per worker process turns N calls x O(N_files)
+    into O(N_files) once + N calls x O(1) dict lookup.
+    """
+    candidates = sorted(
+        path for path in alignment_dir.glob("**/*") if _is_supported_alignment_path(path)
+    )
+    by_prefix: Dict[str, Path] = {}
+    for path in candidates:
+        prefix = path.name.split(".", 1)[0]
+        # First match in sorted order wins -- matches the pre-cache linear scan's
+        # "return the first candidates[] hit" behavior exactly.
+        by_prefix.setdefault(prefix, path)
+    return by_prefix
 
 
 def infer_alignment_format(alignment_file: Path, format: str = "auto") -> str:
@@ -66,13 +94,9 @@ def find_gene_alignment(
 
     if alignment_dir and alignment_dir.exists():
         # Require exact prefix match before the first dot to avoid partials (e.g., MHS1 vs MHS12)
-        candidates = sorted(
-            path for path in alignment_dir.glob("**/*") if _is_supported_alignment_path(path)
-        )
-        for path in candidates:
-            prefix = path.name.split(".", 1)[0]
-            if prefix == gene:
-                return path
+        path = _scan_alignment_dir(alignment_dir).get(gene)
+        if path is not None:
+            return path
 
     raise FileNotFoundError(f"No alignment file found for gene {gene}")
 
