@@ -30,7 +30,7 @@ sys.path.insert(0, str(project_root / "src"))
 # Core imports
 from src.utils.io_utils import read_alignment
 from src.asr.reconstruct import ASRReconstructor, ASRConfig
-from src.asr.posterior import parse_paml_rst, parse_paml_rst_node_level
+from src.asr.posterior import parse_paml_rst_node_level
 from src.asr.tree_parser import (
     get_tip_labels,
     parse_newick,
@@ -376,13 +376,19 @@ def run_asr_pipeline(
         posteriors_node = None
         node_id_map = None
 
-    # Always parse site-level for backward compatibility
-    posteriors_site = parse_paml_rst(rst_file)
+    # `posteriors_site` (parse_paml_rst) is set on ASRResults below but has no
+    # reader anywhere in the codebase (confirmed by a full-repo grep for
+    # `.posteriors_site` -- only ever assigned, never read). It re-parses the
+    # WHOLE rst file a second time (parse_paml_rst_node_level above already
+    # parsed it, node-aware) with a pure-Python per-site/per-token loop that
+    # measured ~85-100s per call in production (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md,
+    # 2026-09-17 rework) -- paid on EVERY chunked replay call since Stage 2, the
+    # dominant cost behind the "workers blocked, ~0% CPU" symptom. Skipped.
+    posteriors_site: Dict[int, Dict[str, float]] = {}
 
     logger.debug(
         "Posteriors parsed "
-        f"(node-level: {len(posteriors_node) if isinstance(posteriors_node, dict) else 0} nodes, "
-        f"site-level: {len(posteriors_site)} sites)"
+        f"(node-level: {len(posteriors_node) if isinstance(posteriors_node, dict) else 0} nodes)"
     )
 
     return ASRResults(
@@ -432,8 +438,10 @@ def load_precomputed_asr(
 
     logger.debug(f"Found RST file at: {rst_file}")
 
-    # Parse posteriors
-    posteriors_site = parse_paml_rst(rst_file)
+    # See run_asr_pipeline's matching comment: posteriors_site has no reader
+    # anywhere in the codebase, and re-parsing the whole rst file for it a
+    # second time measured ~85-100s per call in production. Skipped.
+    posteriors_site: Dict[int, Dict[str, float]] = {}
 
     posteriors_node = None
     node_id_map = None
