@@ -57,7 +57,7 @@ process FADE_REPORT {
         """
         cp -R ${local_dir}/* .
 
-        n_json=\$(ls *.FADE.json 2>/dev/null | wc -l)
+        n_json=\$(find . -maxdepth 1 -name "*.FADE.json" 2>/dev/null | wc -l)
         echo "[FADE_REPORT] direction=${direction} | JSON files found: \${n_json}"
         if [ "\${n_json}" -eq 0 ]; then
             echo "[FADE_REPORT] WARNING: No *.FADE.json files found for direction '${direction}'. "\
@@ -91,7 +91,7 @@ process FADE_REPORT {
         """
         cp -R ${local_dir}/* .
 
-        n_json=\$(ls *.FADE.json 2>/dev/null | wc -l)
+        n_json=\$(find . -maxdepth 1 -name "*.FADE.json" 2>/dev/null | wc -l)
         echo "[FADE_REPORT] direction=${direction} | JSON files found: \${n_json}"
         if [ "\${n_json}" -eq 0 ]; then
             echo "[FADE_REPORT] WARNING: No *.FADE.json files found for direction '${direction}'. "\

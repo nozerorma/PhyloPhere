@@ -59,4 +59,4 @@ run_phenotype_*.sh
 *.log
 /res/*.tsv
 /res/*.tsv.gz
-
+papers

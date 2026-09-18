@@ -201,15 +201,23 @@ workflow ENRICHMENT {
         // it derives scoring_fade_top_ch/scoring_fade_bot_ch), mirroring how
         // rer_ran already treats rer_continuous_file as equivalent to rer_tool.
         def fade_ran = (params.fade || params.fade_json_dir_top || params.fade_json_dir_bottom) as boolean
+        def fade_has_top    = params.fade ? ((params.fade_direction ?: 'both') in ['top', 'both']) : (params.fade_json_dir_top as boolean)
+        def fade_has_bottom = params.fade ? ((params.fade_direction ?: 'both') in ['bottom', 'both']) : (params.fade_json_dir_bottom as boolean)
         // rer_ran already hoisted above (needed earlier for rer_universe_ch).
 
         def fade_union_bg_ch
         def fade_union_sig_ch
-        if (fade_ran) {
+        if (fade_has_top && fade_has_bottom) {
             def fade_union_bg  = FADE_UNION_BACKGROUND(fade_bg_top_r, fade_bg_bottom_r)
             def fade_union_sig = FADE_UNION_SIGNIFICANT(fade_sig_top_r, fade_sig_bottom_r)
             fade_union_bg_ch  = fade_union_bg.background
             fade_union_sig_ch = fade_union_sig.significant
+        } else if (fade_has_top) {
+            fade_union_bg_ch  = fade_bg_top_r
+            fade_union_sig_ch = fade_sig_top_r
+        } else if (fade_has_bottom) {
+            fade_union_bg_ch  = fade_bg_bottom_r
+            fade_union_sig_ch = fade_sig_bottom_r
         } else {
             fade_union_bg_ch  = Channel.value(file('NO_FADE_BACKGROUND'))
             fade_union_sig_ch = Channel.value(file('NO_FADE_SIGNIFICANT'))
@@ -252,10 +260,11 @@ workflow ENRICHMENT {
             def fade_domino_modules_arg
             def fade_domino_edges_arg
             if (fade_ran) {
-                def fade_gene_lists_final_ch = fade_sig_top_r
-                    .mix(fade_sig_bottom_r)
-                    .mix(fade_union_sig_ch)
-                    .collect()
+                def fade_sig_mix = Channel.empty()
+                if (fade_has_top)    fade_sig_mix = fade_sig_mix.mix(fade_sig_top_r)
+                if (fade_has_bottom) fade_sig_mix = fade_sig_mix.mix(fade_sig_bottom_r)
+                if (fade_has_top && fade_has_bottom) fade_sig_mix = fade_sig_mix.mix(fade_union_sig_ch)
+                def fade_gene_lists_final_ch = fade_sig_mix.collect()
                 def fade_domino_out = DOMINO_MODULES_FADE(
                     fade_union_bg_ch,
                     fade_gene_lists_final_ch,

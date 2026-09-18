@@ -240,19 +240,6 @@ workflow FADE {
             top:    it[1] == 'top'
             bottom: it[1] == 'bottom'
         }
-        def top_jsons    = branched.top.map    { it[2] }.collect().ifEmpty([])
-        def bottom_jsons = branched.bottom.map { it[2] }.collect().ifEmpty([])
-
-        def fg_top_ch    = top_species_ch.ifEmpty    { file('NO_FG_LIST') }
-        def fg_bottom_ch = bottom_species_ch.ifEmpty { file('NO_FG_LIST') }
-
-        fade_report_top    = FADE_REPORT_TOP(Channel.value('top'),       top_jsons,    fg_top_ch   )
-        fade_report_bottom = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons, fg_bottom_ch)
-
-        // ── Position-level site CSV (always runs — posenrich's FADE evidence
-        // layer, independent of --enrichment) ──────────────────────────────
-        def fade_sites_top    = FADE_JSON_TO_CSV_TOP(Channel.value('top'),       top_jsons)
-        def fade_sites_bottom = FADE_JSON_TO_CSV_BOTTOM(Channel.value('bottom'), bottom_jsons)
 
         // ── Gene list extraction per direction (always automatic) ─────────
         // FADE no longer runs its own FCS ranking (see fcs.nf/scoring_enrichment.nf —
@@ -270,23 +257,63 @@ workflow FADE {
             [bg: bg_ch, interest: interest_ch]
         }
 
-        def top_lists    = run_fade_enrich('top',    fade_report_top.summary_tsv,    { d, s -> FADE_GENE_LISTS_TOP(d, s) })
-        def bottom_lists = run_fade_enrich('bottom', fade_report_bottom.summary_tsv, { d, s -> FADE_GENE_LISTS_BOTTOM(d, s) })
-        def fade_gene_lists_bg_top_out     = top_lists.bg
-        def fade_gene_lists_sig_top_out    = top_lists.interest
-        def fade_gene_lists_bg_bottom_out  = bottom_lists.bg
-        def fade_gene_lists_sig_bottom_out = bottom_lists.interest
+        def run_top    = wanted_directions.contains('top')
+        def run_bottom = wanted_directions.contains('bottom')
+
+        def report_top_ch                  = Channel.empty()
+        def summary_top_ch                 = Channel.empty()
+        def site_tsv_top_ch                = Channel.empty()
+        def sites_csv_top_ch               = Channel.empty()
+        def fade_gene_lists_bg_top_out     = Channel.empty()
+        def fade_gene_lists_sig_top_out    = Channel.empty()
+
+        if (run_top) {
+            def top_jsons    = branched.top.map { it[2] }.collect().ifEmpty([])
+            def fg_top_ch    = top_species_ch.ifEmpty { file('NO_FG_LIST') }
+            def rep_top      = FADE_REPORT_TOP(Channel.value('top'), top_jsons, fg_top_ch)
+            report_top_ch    = rep_top.report
+            summary_top_ch   = rep_top.summary_tsv
+            site_tsv_top_ch  = rep_top.site_tsv
+
+            sites_csv_top_ch = FADE_JSON_TO_CSV_TOP(Channel.value('top'), top_jsons).sites_csv
+
+            def top_lists    = run_fade_enrich('top', summary_top_ch, { d, s -> FADE_GENE_LISTS_TOP(d, s) })
+            fade_gene_lists_bg_top_out  = top_lists.bg
+            fade_gene_lists_sig_top_out = top_lists.interest
+        }
+
+        def report_bottom_ch                  = Channel.empty()
+        def summary_bottom_ch                 = Channel.empty()
+        def site_tsv_bottom_ch                = Channel.empty()
+        def sites_csv_bottom_ch               = Channel.empty()
+        def fade_gene_lists_bg_bottom_out     = Channel.empty()
+        def fade_gene_lists_sig_bottom_out    = Channel.empty()
+
+        if (run_bottom) {
+            def bottom_jsons    = branched.bottom.map { it[2] }.collect().ifEmpty([])
+            def fg_bottom_ch    = bottom_species_ch.ifEmpty { file('NO_FG_LIST') }
+            def rep_bottom      = FADE_REPORT_BOTTOM(Channel.value('bottom'), bottom_jsons, fg_bottom_ch)
+            report_bottom_ch    = rep_bottom.report
+            summary_bottom_ch   = rep_bottom.summary_tsv
+            site_tsv_bottom_ch  = rep_bottom.site_tsv
+
+            sites_csv_bottom_ch = FADE_JSON_TO_CSV_BOTTOM(Channel.value('bottom'), bottom_jsons).sites_csv
+
+            def bottom_lists    = run_fade_enrich('bottom', summary_bottom_ch, { d, s -> FADE_GENE_LISTS_BOTTOM(d, s) })
+            fade_gene_lists_bg_bottom_out  = bottom_lists.bg
+            fade_gene_lists_sig_bottom_out = bottom_lists.interest
+        }
 
     emit:
-        report_top     = fade_report_top.report
-        report_bottom  = fade_report_bottom.report
-        summary_top    = fade_report_top.summary_tsv
-        summary_bottom = fade_report_bottom.summary_tsv
-        site_tsv_top    = fade_report_top.site_tsv
-        site_tsv_bottom = fade_report_bottom.site_tsv
+        report_top     = report_top_ch
+        report_bottom  = report_bottom_ch
+        summary_top    = summary_top_ch
+        summary_bottom = summary_bottom_ch
+        site_tsv_top    = site_tsv_top_ch
+        site_tsv_bottom = site_tsv_bottom_ch
         json_results   = fade_results_ch
-        sites_csv_top    = fade_sites_top.sites_csv
-        sites_csv_bottom = fade_sites_bottom.sites_csv
+        sites_csv_top    = sites_csv_top_ch
+        sites_csv_bottom = sites_csv_bottom_ch
         // FADE's own per-direction gene universe (background.txt) + its
         // significant-gene list -- feeds the unified 13.AMI_analysis.Rmd's
         // FADE section (Top/Bottom tabs; Global = union of both, built in
