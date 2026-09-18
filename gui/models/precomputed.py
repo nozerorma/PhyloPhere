@@ -104,6 +104,8 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
     if not config.base_path or not trait:
         return []
     outdir = os.path.join(config.base_path, trait)
+    if not os.path.isdir(outdir) and os.path.isdir(f"{outdir}_complete"):
+        outdir = f"{outdir}_complete"
     entries: list[tuple[str, str, str]] = []
 
     if config.use_discovery:

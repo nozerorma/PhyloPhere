@@ -153,6 +153,11 @@ mkdir -p "${RESULTS_BASE}" "${WORK_DIR}"
 # so RUN_* above already reflects it) — this block only supplies the *value* each
 # module's existing precomputed-fallback branch (below) was already able to consume.
 PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}"
+if [ ! -d "$PRECOMP_OUTDIR" ] && [ -d "${PRECOMP_BASE_PATH:-}/${TRAIT}_complete" ]; then
+    PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}_complete"
+elif [ ! -d "$PRECOMP_OUTDIR" ] && [ -n "${TAG:-}${RUN_TAG:-}" ] && [ -d "${PRECOMP_BASE_PATH:-}/${TRAIT}${TAG:-}${RUN_TAG:-}" ]; then
+    PRECOMP_OUTDIR="${PRECOMP_BASE_PATH:-}/${TRAIT}${TAG:-}${RUN_TAG:-}"
+fi
 
 if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     DISCOVERY_FROM="${PRECOMP_OUTDIR}/caastools/discovery.tab"
