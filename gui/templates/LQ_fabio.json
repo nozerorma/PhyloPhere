@@ -11,7 +11,7 @@
     "remote_root_dir": "/homes/users/mramon/scratch/"
   },
   "runtime": {
-    "resume": true,
+    "resume": false,
     "toy_mode": false,
     "toy_n": "1000",
     "runtime_type": "slurm",

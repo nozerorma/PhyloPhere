@@ -253,8 +253,16 @@ process {
         maxRetries    = 2
     }
     withName: 'CAAS_PERMS_DISAMBIGUATE_BATCHED' {
+        // Base memory 6GB -> 10GB (2026-09-18): see conf/resources.config's
+        // matching comment -- batch_00580 (20 genes) OOM'd identically in both
+        // malignant_prevalence and neoplasia_prevalence at attempt 1 (6GB),
+        // each running ~8h before the kill (GC thrashing near the cgroup
+        // limit, not a fast failure), then completed cleanly in ~31min at
+        // attempt 2 (12GB). Kept at parity with the slurm/local presets rather
+        // than the usual lowspec discount, since 6GB was already shared
+        // across all three presets pre-fix.
         cpus   = { 4 }
-        memory = { 6.GB * task.attempt }
+        memory = { 10.GB * task.attempt }
         time   = { 8.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 3
@@ -268,6 +276,22 @@ process {
         cpus   = { 1 }
         memory = { 12.GB * task.attempt }
         time   = { 4.h   * task.attempt }
+        errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
+        maxRetries    = 2
+    }
+    // Was falling back to bare process_medium (flat 4GB, no OOM retry) on the
+    // stale assumption that this re-derives outputs "at one-gene peak RAM" --
+    // no longer true once gene_cycle_scores.tsv is genome-wide x n_cycles.
+    // Confirmed OOM'd (exit 137, no retry configured -> whole run terminated)
+    // against a live 1.18GB / 15.2M-row gene_cycle_scores.tsv (2026-09-18);
+    // scoring_caas_perms.R reads it via readr then does 6 sequential
+    // select()+pivot_wider() passes over the full table (one per
+    // global/top/bottom x asr/caas column). 18GB here keeps the same 0.75x
+    // ratio this preset already uses on CAAS_PERMS_AGGREGATE vs the other two.
+    withName: 'CAAS_PERMS_REBUILD' {
+        cpus          = { 2 }
+        memory        = { 18.GB * task.attempt }
+        time          = { 6.h   * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
