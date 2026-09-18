@@ -36,7 +36,8 @@ gene_trees <- read.tree(geneTreesPath)
 # Prune trees for species in trait file
 # Load traitfile
 ## File must have a multi-column structure with at least a "species" and "trait" column
-ori_traits <- read.csv(args[2])
+traitfile_sep <- if (endsWith(args[2], ".tsv")) "\t" else ","
+ori_traits <- read.csv(args[2], sep = traitfile_sep)
 sp_colname <- args[3]
 
 print(sp_colname)
