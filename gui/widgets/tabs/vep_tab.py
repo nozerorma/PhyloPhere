@@ -31,9 +31,54 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         Section("Variant effect prediction databases"),
-        FieldSpec(name="vep_primateai_db", label="PrimateAI-3D database", kind="path_file"),
-        FieldSpec(name="cosmic_db", label="COSMIC database", kind="path_file"),
-        FieldSpec(name="vep_map_dir", label="Per-gene MAP directory", kind="path_dir"),
+        FieldSpec(
+            name="vep_primateai_db",
+            label="PrimateAI-3D database (optional)",
+            kind="path_file",
+            help="Illumina-licensed; redistribution isn't permitted, so this stays "
+                 "a file you supply yourself — there's no vendoring or auto-download "
+                 "path for it.",
+        ),
+        FieldSpec(
+            name="cosmic_db",
+            label="COSMIC database (optional)",
+            kind="path_file",
+            help="License terms for redistribution haven't been confirmed yet, so "
+                 "this stays external for now (same treatment as PrimateAI-3D) "
+                 "pending that check.",
+        ),
+        FieldSpec(
+            name="vep_map_dir",
+            label="Per-gene MAP directory",
+            kind="path_dir",
+            help="Cannot be generated in-house: maps each alignment codon column "
+                 "to its real hg38 genomic/protein coordinate, which needs the full "
+                 "alignment-to-protein pipeline, not just the alignment plus a "
+                 "public DB. See github.com/nozerorma/ortholog_characterizator. "
+                 "Required whenever any annotation source on this tab is used.",
+        ),
+        Section("Ensembl VEP (independent of the databases above)"),
+        FieldSpec(
+            name="vep_ensembl",
+            label="Enable Ensembl VEP consequence annotation",
+            kind="bool",
+            help="Runs the official Ensembl VEP CLI for consequence prediction — "
+                 "works even when neither PrimateAI-3D nor COSMIC is supplied. "
+                 "Needs a pre-downloaded offline cache (below).",
+        ),
+    ),
+    advanced_fields=(
+        FieldSpec(
+            name="vep_cache_dir",
+            label="Ensembl VEP cache directory",
+            kind="path_dir",
+            help="Local offline VEP cache. Multi-GB, not auto-downloaded — "
+                 "populate once with: vep_install -a cf -s <species> -y <assembly> "
+                 "-c <this dir> --NO_HTSLIB, then reuse across runs. Required when "
+                 "'Enable Ensembl VEP consequence annotation' is checked.",
+        ),
+        FieldSpec(name="vep_species", label="Ensembl VEP species"),
+        FieldSpec(name="vep_assembly", label="Ensembl VEP assembly"),
     ),
 )
 

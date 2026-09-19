@@ -9,6 +9,7 @@
 
 include { PRIMATEAI_MAP } from "${baseDir}/subworkflows/VEP/primateai.nf"
 include { COSMIC_MAP }     from "${baseDir}/subworkflows/VEP/cosmic.nf"
+include { ENSEMBL_VEP_ANNOTATE } from "${baseDir}/subworkflows/VEP/ensembl_vep.nf"
 
 workflow VEP {
     take:
@@ -19,6 +20,7 @@ workflow VEP {
         // Output channels default to empty when VEP is enabled without any CAAS source.
         def primateai_out = Channel.empty()
         def cosmic_out = Channel.empty()
+        def ensembl_vep_out = Channel.empty()
 
         // Resolve CAAS input: integrated runs pass a channel; standalone runs use
         // --vep_caas_input.
@@ -74,6 +76,20 @@ workflow VEP {
             } else {
                 log.info "ℹ VEP: COSMIC database not provided/empty — skipping COSMIC somatic mutation mapping."
             }
+
+            // ── Ensembl VEP consequence annotation (independent of the DBs above) ──
+            if (params.vep_ensembl) {
+                assert params.gene_ensembl_file : "VEP: --vep_ensembl requires --gene_ensembl_file (for human_protein_id -> HGVS lookup)."
+                def cache_dir_file = params.vep_cache_dir ? file(params.vep_cache_dir) : file('NO_FILE')
+                if (cache_dir_file.name != 'NO_FILE' && cache_dir_file.exists()) {
+                    def cache_dir_ch = Channel.value(cache_dir_file)
+                    def ensembl_file_ch = Channel.value(file(params.gene_ensembl_file))
+                    def ensembl_out = ENSEMBL_VEP_ANNOTATE(caas_ch, map_dir_ch, ensembl_file_ch, cache_dir_ch)
+                    ensembl_vep_out = ensembl_out.ensembl_vep_tsv
+                } else {
+                    log.warn "VEP: --vep_ensembl is set but --vep_cache_dir is missing/empty — skipping Ensembl VEP annotation."
+                }
+            }
         } else {
             log.warn "VEP requested but no CAAS input was available from CT_POSTPROC and --vep_caas_input was not provided. Skipping VEP."
         }
@@ -81,4 +97,5 @@ workflow VEP {
     emit:
         primateai_tsv = primateai_out
         cosmic_tsv = cosmic_out
+        ensembl_vep_tsv = ensembl_vep_out
 }

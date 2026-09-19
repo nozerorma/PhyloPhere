@@ -199,14 +199,24 @@ Usage:
 def vep_help = '''
 VEP Characterization — Help
 =============================================
-Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores and
-COSMIC somatic-mutation evidence (each skipped if its DB param is empty).
+Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores,
+COSMIC somatic-mutation evidence, and/or Ensembl VEP consequence prediction
+(each source skipped independently if its param is empty/unset).
+
+--vep_map_dir has no in-house generation path: it maps each alignment codon
+column to its real hg38 genomic/protein coordinate, which needs the full
+alignment-to-protein pipeline, not just the alignment plus a public DB.
+Generate it with: https://github.com/nozerorma/ortholog_characterizator
 
 Usage:
 --vep_caas_input               <"caas_input">          null  (standalone entry)
---vep_map_dir                    <"map_dir">              null  (required when --vep is set)
+--vep_map_dir                    <"map_dir">              null  (required when --vep is set; see github.com/nozerorma/ortholog_characterizator)
 --vep_primateai_db                 <"primateai_db">          null
 --cosmic_db                          <"cosmic_db">              null
+--vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above)
+--vep_cache_dir                        <"vep_cache_dir">          null  (required when --vep_ensembl is set; populate with vep_install)
+--vep_species                            <"species">                "homo_sapiens"
+--vep_assembly                             <"assembly">               "GRCh38"
 '''
 
 // ── FADE ─────────────────────────────────────────────────────────────────────

@@ -165,6 +165,12 @@ def validate(project: ProjectConfig) -> list[str]:
     vep = project.modules.vep
     if vep.enabled:
         require(vep.vep_map_dir, "VEP: per-gene MAP directory is required when VEP is enabled.")
+        if vep.vep_ensembl:
+            require(
+                vep.vep_cache_dir,
+                "VEP: Ensembl VEP cache directory is required when Ensembl VEP "
+                "consequence annotation is enabled.",
+            )
 
     # --- Scoring ---
     if scoring.enabled:
@@ -248,6 +254,7 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("VEP: PrimateAI-3D database", m.vep.vep_primateai_db, "file"),
         ("VEP: MAP directory", m.vep.vep_map_dir, "dir"),
         ("VEP: COSMIC database", m.vep.cosmic_db, "file"),
+        ("VEP: Ensembl VEP cache directory", m.vep.vep_cache_dir, "dir"),
         ("Scoring: gene-Ensembl file", m.scoring.gene_ensembl_file, "file"),
         ("Enrichment: GMT directory", m.enrichment.gmt_dir, "dir"),
         ("Enrichment: STRING database directory", m.enrichment.string_db_dir, "dir"),

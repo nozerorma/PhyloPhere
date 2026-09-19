@@ -214,6 +214,10 @@ export PRECOMP_USE_FADE="{{ 'true' if precomputed.use_fade else 'false' }}"
 export VEP_PRIMATEAI_DB="{{ modules.vep.vep_primateai_db }}"
 export MAP_DIR="{{ modules.vep.vep_map_dir }}"
 export COSMIC_DB="{{ modules.vep.cosmic_db }}"
+export VEP_ENSEMBL="{{ 'true' if modules.vep.vep_ensembl else 'false' }}"
+export VEP_CACHE_DIR="{{ modules.vep.vep_cache_dir }}"
+export VEP_SPECIES="{{ modules.vep.vep_species }}"
+export VEP_ASSEMBLY="{{ modules.vep.vep_assembly }}"
 export PRECOMP_USE_VEP="{{ 'true' if precomputed.use_vep else 'false' }}"
 
 # --- SCORING ---

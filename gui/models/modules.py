@@ -237,6 +237,10 @@ class VepConfig(ModuleConfigBase):
     # scoring_vep_cosmic *scores* fallback (see PrecomputedConfig), which is a
     # separate param workflows/vep.nf never reads.
     cosmic_db: str = ""  # --cosmic_db
+    vep_ensembl: bool = False  # --vep_ensembl
+    vep_cache_dir: str = ""  # --vep_cache_dir
+    vep_species: str = "homo_sapiens"  # --vep_species
+    vep_assembly: str = "GRCh38"  # --vep_assembly
 
     # NOTE: vep_caas_input moved to gui/models/precomputed.py::PrecomputedConfig.
 

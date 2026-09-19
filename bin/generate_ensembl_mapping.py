@@ -95,7 +95,13 @@ def main():
         df = pd.read_csv(cache_file, sep="\t")
     else:
         print(f"Querying Ensembl BioMart for {len(genes)} genes...", file=sys.stderr)
-        df = query_biomart(genes)
+        try:
+            df = query_biomart(genes)
+        except Exception as exc:
+            print(f"Error: Ensembl BioMart query failed ({exc}). The service may be "
+                  "temporarily unavailable — retry later, or supply --gene_ensembl_file "
+                  "directly.", file=sys.stderr)
+            sys.exit(1)
         df.to_csv(cache_file, sep="\t", index=False)
 
     df = df.drop_duplicates(subset="gene", keep="first")

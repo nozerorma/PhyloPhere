@@ -32,6 +32,7 @@ dependencies:
   - hyphy            # FADE and other selection tests
   - paml             # codeml / ancestral reconstruction
   - domino           # active-module detection
+  - ensembl-vep      # optional consequence annotation (--vep_ensembl); needs a separately-downloaded offline cache
 
   # --- python: scientific stack ---
   - numpy
