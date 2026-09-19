@@ -16,7 +16,7 @@
 #    - params.caas_config      : traitfile fallback (3-col, no header: species trait pair)
 */
 
-include { CT_ACCUMULATION_AGGREGATE; CT_ACCUMULATION_RANDOMIZE } from "${baseDir}/subworkflows/CT_ACCUMULATION/ctacc_run"
+include { CT_ACCUMULATION_AGGREGATE; CT_ACCUMULATION_RANDOMIZE; COMPUTE_ALIGNMENT_ENTROPY } from "${baseDir}/subworkflows/CT_ACCUMULATION/ctacc_run"
 include { ACCUMULATION_REPORT } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_report"
 include { ACCUMULATION_GENE_LISTS } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_gene_lists.nf"
 
@@ -148,6 +148,24 @@ workflow CT_ACCUMULATION {
         log.info "   Rand type      : ${params.accumulation_randomization_type ?: 'naive'}"
         log.info "   Randomizations : ${params.accumulation_n_randomizations   ?: 10000}"
 
+        // Auto-generate Valdar variability files (bin/compute_alignment_entropy.py,
+        // a verbatim port of ortholog_characterizator's compute_variability.py) when
+        // left blank. Unlike tax_id/gene_ensembl_file (main.nf), entropy_dir flows
+        // through this one channel-wired call site rather than being re-read from
+        // params.* elsewhere, so a real Nextflow process works here without the
+        // params-reassignment problem documented in main.nf.
+        def entropy_dir_val
+        if (params.accumulation_entropy_dir) {
+            entropy_dir_val = Channel.value(params.accumulation_entropy_dir)
+        } else if (params.tax_id) {
+            log.info "[CT_ACCUMULATION] accumulation_entropy_dir not set — auto-generating Valdar variability from the alignment."
+            COMPUTE_ALIGNMENT_ENTROPY(alignment_dir_val.map { file(it, type: 'dir') }, Channel.value(file(params.tax_id)))
+            entropy_dir_val = COMPUTE_ALIGNMENT_ENTROPY.out.entropy_dir.map { it.toString() }
+        } else {
+            log.warn "[CT_ACCUMULATION] accumulation_entropy_dir not set and params.tax_id is empty — compute_variability.py requires --taxid_tsv, so entropy auto-generation is skipped. Falling back to raw majority-residue conservation."
+            entropy_dir_val = Channel.value("")
+        }
+
         // ── Phase 1: Aggregate ────────────────────────────────────────────────
         aggregate_out = CT_ACCUMULATION_AGGREGATE(
             alignment_dir_val,
@@ -155,7 +173,7 @@ workflow CT_ACCUMULATION {
             species_list_val,
             meta_caas_val,
             background_val,
-            params.accumulation_entropy_dir ?: ""
+            entropy_dir_val
         )
 
         // ── Phase 2: Randomize — run once per phenotype direction + once for all ──

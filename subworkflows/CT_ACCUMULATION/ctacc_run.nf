@@ -4,6 +4,28 @@
 #  CT Accumulation: Aggregate and Randomize processes
 */
 
+process COMPUTE_ALIGNMENT_ENTROPY {
+    tag "auto-generate accumulation entropy"
+    label 'process_medium'
+
+    publishDir "${params.outdir}/core_inputs", mode: 'copy', overwrite: true
+
+    input:
+    path alignment_dir
+    path taxid_tsv
+
+    output:
+    path "entropy_dir", emit: entropy_dir
+
+    script:
+    """
+    python3 ${baseDir}/bin/compute_alignment_entropy.py \\
+        --alignment-dir "${alignment_dir}" \\
+        --output-dir entropy_dir \\
+        --taxid-tsv "${taxid_tsv}"
+    """
+}
+
 process CT_ACCUMULATION_AGGREGATE {
     tag "ct_accumulation_aggregate"
     label 'process_long_compute'

@@ -139,10 +139,13 @@ def validate(project: ProjectConfig) -> list[str]:
     accum = project.modules.accumulation
     scoring = project.modules.scoring
     if accum.enabled:
-        require(
-            accum.accumulation_entropy_dir,
-            "Accumulation: entropy directory is required when Accumulation is enabled.",
-        )
+        # No longer a hard requirement: leaving it blank auto-generates Valdar
+        # variability files from the alignment (bin/compute_alignment_entropy.py,
+        # a verbatim port of ortholog_characterizator's compute_variability.py) —
+        # that needs --tax_id, which is itself optional (auto-generated from the
+        # tree, §1) — and if tax_id ultimately isn't available either, Accumulation
+        # falls back to a coarser raw-conservation measure computed straight from
+        # the alignment, not an error.
         if not disambig.enabled and not pc.use_postproc:
             errors.append(
                 "Accumulation is enabled but Post-processing is disabled with no "
