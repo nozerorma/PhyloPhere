@@ -80,7 +80,6 @@ include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
 include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
-include {CORE_INPUTS}     from './subworkflows/CORE_INPUTS/core_inputs.nf'
 
 // Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
 
@@ -128,31 +127,19 @@ workflow {
     if (params.help) {
         HELP ()
     } else {
-        // Auto-generate core reference files left blank by the user (tax_id,
-        // gene_ensembl_file) before anything downstream reads params.tax_id /
-        // params.gene_ensembl_file directly. Blocking on .val here is
-        // deliberate: these are single lightweight lookups, run once, and
-        // every downstream subworkflow reads the plain params.* string
-        // rather than a channel, so resolution must complete synchronously
-        // at this point in the DAG.
-        if (!params.tax_id || !params.gene_ensembl_file) {
-            def tree_ch      = params.tree ? Channel.value(file(params.tree)) : null
-            def alignment_ch = params.alignment ? Channel.value(file(params.alignment, type: 'dir')) : null
-            CORE_INPUTS(tree_ch, alignment_ch)
-            if (!params.tax_id) {
-                def generated_tax_id = CORE_INPUTS.out.tax_id_file.val
-                if (generated_tax_id.name != 'NO_FILE') {
-                    params.tax_id = generated_tax_id.toString()
-                    log.info "[CORE_INPUTS] Auto-generated tax_id map: ${params.tax_id}"
-                }
-            }
-            if (!params.gene_ensembl_file) {
-                def generated_ensembl = CORE_INPUTS.out.gene_ensembl_file.val
-                if (generated_ensembl.name != 'NO_FILE') {
-                    params.gene_ensembl_file = generated_ensembl.toString()
-                    log.info "[CORE_INPUTS] Auto-generated gene_ensembl_file: ${params.gene_ensembl_file}"
-                }
-            }
+        // tax_id / gene_ensembl_file auto-generation (bin/resolve_core_inputs.py)
+        // happens BEFORE this pipeline is invoked, not here: Nextflow enforces
+        // single-assignment on params keys, so a params.tax_id = ... here would
+        // be silently ignored once conf/common.config's own params.tax_id =
+        // params.tax_id ?: "" has already run ("`params.tax_id` is defined
+        // multiple times -- Assignments following the first are ignored",
+        // confirmed empirically). See bin/resolve_core_inputs.py's docstring;
+        // the GUI's generated run scripts call it automatically.
+        if (!params.tax_id) {
+            log.warn "params.tax_id is empty. To auto-generate it, run bin/resolve_core_inputs.py before this pipeline (see its docstring) — it cannot be generated from inside main.nf."
+        }
+        if (!params.gene_ensembl_file) {
+            log.warn "params.gene_ensembl_file is empty. To auto-generate it, run bin/resolve_core_inputs.py before this pipeline (see its docstring) — it cannot be generated from inside main.nf."
         }
 
         // Run any combination of tools requested

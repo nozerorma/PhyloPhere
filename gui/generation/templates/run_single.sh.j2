@@ -379,6 +379,18 @@ fi
 # cannot be empty" the first time a run left the LG matrix path at its default). Bake
 # the real default into the bash fallback for any such param instead of leaving it "".
 
+# Auto-generate tax_id / gene_ensembl_file when left blank (bin/resolve_core_inputs.py).
+# Must happen here, in the invocation layer, not inside main.nf: Nextflow enforces
+# single-assignment on params keys, so a params.tax_id = ... set after
+# conf/common.config's own default has already run is silently ignored.
+if [[ -z "${INPUT_TAX_ID:-}" || -z "${GENE_ENSEMBL_FILE:-}" ]]; then
+    _CORE_INPUTS_RESOLVED="$(python3 "$REPO_DIR/bin/resolve_core_inputs.py" \
+        --outdir "$RESULTS_BASE" --tree "$TREE_FILE" --alignment "$ALI_DIR" \
+        --tax-id "${INPUT_TAX_ID:-}" --gene-ensembl-file "${GENE_ENSEMBL_FILE:-}")"
+    INPUT_TAX_ID="$(echo "$_CORE_INPUTS_RESOLVED" | grep '^TAX_ID=' | cut -d= -f2-)"
+    GENE_ENSEMBL_FILE="$(echo "$_CORE_INPUTS_RESOLVED" | grep '^GENE_ENSEMBL_FILE=' | cut -d= -f2-)"
+fi
+
 PARAMS_JSON="$RUN_DIR/params.json"
 cat > "$PARAMS_JSON" <<PARAMS_EOF
 {
