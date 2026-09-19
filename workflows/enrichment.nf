@@ -15,6 +15,7 @@ include { RER_FCS_REPORT  as MODULE_FCS_RER }             from "${baseDir}/subwo
 include { FCS_COMPUTE as FCS_COMPUTE_SCORING }            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { FCS_COMPUTE as FCS_COMPUTE_RER }                from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
 include { POSENRICH }                                      from "${baseDir}/subworkflows/ENRICHMENT/posenrich.nf"
+include { UCR_GENERATION }                                  from "${baseDir}/subworkflows/ENRICHMENT/ucr_generation.nf"
 // Nextflow forbids invoking the same process/subworkflow more than once in one workflow
 // scope without a distinct alias per call site (DuplicateProcessInvocation) -- DOMINO_MODULES
 // is called up to 3 times below (main/CAAS, FADE, RER), each against a different
@@ -337,7 +338,20 @@ workflow ENRICHMENT {
         if (params.posenrich) {
             def pos_gene_ensembl_ch = Channel.fromPath(params.gene_ensembl_file).ifEmpty { file('NO_FILE') }
             def pos_domain_variability_ch = Channel.fromPath(params.domain_variability_file).ifEmpty { file('NO_FILE') }
-            def pos_ucr_positions_ch = Channel.fromPath(params.ucr_positions_file).ifEmpty { file('NO_FILE') }
+            def pos_ucr_positions_ch
+            if (params.ucr_positions_file) {
+                pos_ucr_positions_ch = Channel.fromPath(params.ucr_positions_file).ifEmpty { file('NO_FILE') }
+            } else if (params.tax_id && params.alignment) {
+                log.info "[ENRICHMENT] ucr_positions_file not set — auto-generating from the alignment (Valdar variability + UCR detection)."
+                UCR_GENERATION(
+                    Channel.value(file(params.alignment, type: 'dir')),
+                    Channel.value(file(params.tax_id)),
+                )
+                pos_ucr_positions_ch = UCR_GENERATION.out.ucr_positions_file
+            } else {
+                log.warn "[ENRICHMENT] ucr_positions_file not set and params.tax_id/params.alignment unavailable — skipping UCR auto-generation."
+                pos_ucr_positions_ch = file('NO_FILE')
+            }
             def pos_fubar_sites_ch = Channel.fromPath(params.fubar_sites_file).ifEmpty { file('NO_FILE') }
             // Each of these is independently optional, and several can be absent
             // in the same run (e.g. no COSMIC/PrimateAI-3D DBs and no FADE run).

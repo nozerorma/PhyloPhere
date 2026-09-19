@@ -208,10 +208,13 @@ def validate(project: ProjectConfig) -> list[str]:
             ("egg_members_file", "eggNOG members file"),
             ("egg_annotations_file", "eggNOG annotations file"),
             ("domain_variability_file", "domain variability file"),
-            ("ucr_positions_file", "UCR positions file"),
             ("fubar_sites_file", "FUBAR sites file"),
         ]:
             require(getattr(enrichment, field_name), f"POSENRICH: {label} is required.")
+        # ucr_positions_file is no longer required: leaving it blank auto-generates
+        # it from the alignment (Valdar variability + verbatim-ported UCR detection,
+        # subworkflows/ENRICHMENT/ucr_generation.nf) — needs runtime.tax_id, itself
+        # optional (auto-generated from the tree, §1).
 
     return errors
 
