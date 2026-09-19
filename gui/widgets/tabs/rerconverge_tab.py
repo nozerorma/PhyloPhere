@@ -57,10 +57,20 @@ SPEC = ModuleTabSpec(
             kind="choice",
             choices=("p.perm", "p.adj"),
         ),
+        FieldSpec(
+            name="gene_trees",
+            label="Gene trees file",
+            kind="path_file",
+            help=(
+                "Per-gene phylogenetic trees (one per alignment), required whenever "
+                "RERconverge runs. No in-house generation path: building per-gene "
+                "trees is a separate phylogenetics task outside this pipeline's scope "
+                "— supply one built with your own tree-inference tool of choice."
+            ),
+        ),
     ),
     advanced_fields=(
         Section("Gene tree and matrix output paths"),
-        FieldSpec(name="gene_trees", label="Gene trees file", kind="path_file"),
         FieldSpec(name="trait_out", label="Trait output path (build_trait)"),
         FieldSpec(name="trees_out", label="Trees output path (build_tree)"),
         FieldSpec(name="matrix_out", label="Matrix output path (build_matrix)"),
