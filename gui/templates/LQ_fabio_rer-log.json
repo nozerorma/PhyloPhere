@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "LQ_fabio",
+    "project_name": "LQ_fabio_rer-log",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -16,9 +16,9 @@
     "toy_n": "1000",
     "runtime_type": "slurm",
     "batched": true,
-    "script_base_name": "LQ_fabio",
-    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_LQ_fabio",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/LQ_fabio",
+    "script_base_name": "LQ_fabio_log",
+    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_LQ_fabio_log",
+    "results_dir": "/homes/users/mramon/scratch/2.Primates/LQ_fabio_log",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
     "sbatch_partition": "high-cpu",
@@ -40,7 +40,7 @@
     "phenotype_rows": [
       {
         "trait_class": 2,
-        "trait": "LQ_mammal",
+        "trait": "log_LQ_mammal",
         "secondary": "",
         "n_trait": "",
         "c_trait": "",
@@ -143,7 +143,7 @@
       "rer_gene_scores": ""
     },
     "fade": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "fade_direction": "top",
       "fade_background_scope": "opposite",

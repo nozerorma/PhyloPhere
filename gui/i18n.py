@@ -1942,6 +1942,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Soglia del valore p corretto POSENRICH',
         'de': 'POSENRICH-adjustierter-P-Schwellenwert',
     },
+    'POSENRICH CAAS-null p.perm threshold': {
+        'en': 'POSENRICH CAAS-null p.perm threshold',
+        'es': 'Umbral de p.perm (nulo CAAS) de POSENRICH',
+        'ca': 'Llindar de p.perm (nul CAAS) de POSENRICH',
+        'fr': 'Seuil de p.perm (nul CAAS) POSENRICH',
+        'it': 'Soglia p.perm (nullo CAAS) POSENRICH',
+        'de': 'POSENRICH-p.perm-Schwellenwert (CAAS-Null)',
+    },
     'POSENRICH fold-enrichment threshold': {
         'en': 'POSENRICH fold-enrichment threshold',
         'es': 'Umbral de enriquecimiento de plegado de POSENRICH',

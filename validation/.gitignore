@@ -1,30 +1,40 @@
 # Heavy / derived fixture content — never committed.
 # Specs and per-fixture READMEs ARE tracked (they are small and describe how to
 # rebuild everything else).
-fixtures/**/align/
-fixtures/**/aln/
-fixtures/**/*.nwk
-fixtures/**/*.fasta
-fixtures/**/*.fa
-fixtures/**/*.phy
-fixtures/**/*.aln
-fixtures/**/*.newick
-fixtures/**/*.nwk
-fixtures/**/*.nh
-fixtures/**/*.tree
-fixtures/**/*.tre
-fixtures/**/*.tsv
-fixtures/**/*.txt
-fixtures/**/*.phyml_tree*
+tier1/input/**/align/
+tier1/input/**/aln/
+tier1/input/**/gene_trees/
+tier1/input/**/*.nwk
+tier1/input/**/*.fasta
+tier1/input/**/*.fa
+tier1/input/**/*.phy
+tier1/input/**/*.aln
+tier1/input/**/*.newick
+tier1/input/**/*.nh
+tier1/input/**/*.tree
+tier1/input/**/*.tre
+tier1/input/**/*.tsv
+tier1/input/**/*.txt
+tier1/input/**/*.phyml_tree*
 # fetched raw inputs (build.py re-fetches); keep build.py + README + *.spec.json
-fixtures/**/*.coor_*
-fixtures/**/*.nex
-fixtures/**/*.gb
-fixtures/**/*.gbk
-fixtures/**/*.genbank
-!fixtures/**/README.md
-!fixtures/**/build.py
-!fixtures/**/*.spec.json
+tier1/input/**/*.coor_*
+tier1/input/**/*.nex
+tier1/input/**/*.gb
+tier1/input/**/*.gbk
+tier1/input/**/*.genbank
+tier1/input/**/*.iqtree.log
+tier1/input/**/gene_trees_oc/
+tier1/input/**/align_cds/
+!tier1/input/**/README.md
+!tier1/input/**/build.py
+!tier1/input/**/build_cds.py
+!tier1/input/**/*.spec.json
+!tier1/input/fixture-tools.yml
+!tier1/input/**/positive_selection/*.tsv
+
+# Local GUI run outputs — never committed.
+tier1/output/**
+!tier1/output/.gitkeep
 
 # Pipeline outputs
 runs/**

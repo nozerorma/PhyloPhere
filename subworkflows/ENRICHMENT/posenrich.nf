@@ -89,6 +89,7 @@ process POSENRICH_RUN {
     val min_size
     val max_size
     path position_lists_dir
+    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -97,8 +98,10 @@ process POSENRICH_RUN {
     script:
     // Position-Level Path Sum Permulation (posenrich_enrich.py): raw CAAS score
     // magnitudes are summed per term and compared against a label-permuted null
-    // built from posenrich_n_perms permutations. Significance is p_adj <
-    // posenrich_padj_thr with NES > 0 (no separate fold-enrichment gate).
+    // built from posenrich_n_perms permutations, AND (when caas_cycle_null is
+    // supplied) against the CAAS permulation null's real cycles -> p.perm.
+    // Significance is p_adj < posenrich_padj_thr with NES > 0, additionally
+    // gated on p.perm < posenrich_p_perm_thr whenever p.perm is available.
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
     // cosmic_orthogroups/pai3d_orthogroups are GMTs derived from external,
     // incompletely-covered databases; restricting their background to genes
@@ -107,6 +110,7 @@ process POSENRICH_RUN {
     // file comment). Every other GMT keeps the full honest background.
     def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
+    def caas_null_arg  = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : ""
     // SCORING's own published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv
     // (scoring_compute.R) is posenrich's SOLE foreground source, SCORING is a
     // mandatory upstream dependency, never optional, so this is passed
@@ -134,6 +138,9 @@ process POSENRICH_RUN {
         --min-size ${min_size} \
         --max-size ${max_size} \
         --n-perms ${params.posenrich_n_perms ?: 10000} \
+        --perm-chunk-size ${params.posenrich_perm_chunk_size ?: 1000} \
+        ${caas_null_arg} \
+        --p-perm-thr ${params.posenrich_p_perm_thr ?: 0.025} \
         --seed ${params.seed ?: 1998} \
         --padj-thr ${params.posenrich_padj_thr} \
         --output-dir .
@@ -160,6 +167,7 @@ process POSENRICH_RUN_BATCHED {
     val min_size
     val max_size
     path position_lists_dir
+    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -169,6 +177,7 @@ process POSENRICH_RUN_BATCHED {
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
     def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
+    def caas_null_arg  = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : ""
     // The characterization layer (Pfam/UCR/FUBAR/...) is one source shared
     // across the whole run, not split per GMT file — passing it to every batch
     // would re-run and re-append it N times once POSENRICH_CONCAT merges the
@@ -190,6 +199,9 @@ process POSENRICH_RUN_BATCHED {
         --min-size ${min_size} \
         --max-size ${max_size} \
         --n-perms ${params.posenrich_n_perms ?: 10000} \
+        --perm-chunk-size ${params.posenrich_perm_chunk_size ?: 1000} \
+        ${caas_null_arg} \
+        --p-perm-thr ${params.posenrich_p_perm_thr ?: 0.025} \
         --seed ${params.seed ?: 1998} \
         --padj-thr ${params.posenrich_padj_thr} \
         --output-dir .
@@ -353,6 +365,7 @@ workflow POSENRICH {
     genomic_info_file       // optional: gene genomic coords TSV (Position Characterisation)
     fade_sites_top_file     // optional: fade_sites_top.csv (FADE_top_sig position group)
     fade_sites_bottom_file  // optional: fade_sites_bottom.csv (FADE_bottom_sig position group)
+    caas_cycle_null_file    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm
 
     main:
     POSENRICH_BUILD_GMT(
@@ -409,6 +422,7 @@ workflow POSENRICH {
         def cosmic_coverage_bc     = cosmic_coverage_ch.first()
         def pai3d_coverage_bc      = pai3d_coverage_ch.first()
         def position_lists_file_bc = position_lists_file.first()
+        def caas_cycle_null_bc     = caas_cycle_null_file.first()
 
         POSENRICH_RUN_BATCHED(
             posenrich_batches,
@@ -421,7 +435,8 @@ workflow POSENRICH {
             pai3d_coverage_bc,
             min_size,
             max_size,
-            position_lists_file_bc
+            position_lists_file_bc,
+            caas_cycle_null_bc
         )
 
         POSENRICH_CONCAT(
@@ -443,7 +458,8 @@ workflow POSENRICH {
             pai3d_coverage_ch,
             min_size,
             max_size,
-            position_lists_file
+            position_lists_file,
+            caas_cycle_null_file
         )
 
         posenrich_results_ch = POSENRICH_RUN.out.results

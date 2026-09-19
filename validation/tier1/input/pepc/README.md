@@ -7,7 +7,7 @@ multi-contrast structure CAAS needs.
 ## Build
 
 ```bash
-python3 validation/fixtures/tier1/pepc/build.py
+python3 validation/tier1/input/pepc/build.py
 ```
 
 Fetches the raw inputs (gitignored) and writes the pipeline-shaped fixture:
@@ -58,3 +58,17 @@ Worth running both as a sensitivity analysis.
 - Only positions **780** (kinetics) and **665** (folding/activity) are
   functionally demonstrated. The rest are selection inferences — recall on them
   is a soft number, report with a CI.
+
+## GUI template wiring (`../../../../gui/templates/tier1_pepc.json`)
+
+- `taxid.tsv` / `gene_ensembl.tsv` in this directory are `build.py`'s synthetic
+  placeholders (fake genomic coordinates; the PEPC `human_protein_id` is
+  maize's own UniProt id, not a real human ortholog). The template leaves
+  `tax_id_file` / `gene_ensembl_file` blank, so PhyloPhere generates them
+  itself.
+- `gene_trees.nwk` (gitignored) is IQ-TREE output from `ortholog_characterizator`
+  (`PHYLOGENY` workflow, ModelFinder `MFP` restricted to the LG family + 1000
+  UFBoot; `LG+I+R2` selected by BIC), run against `align/PEPC.fasta` directly
+  (`--prot_dir`, quality/translation stages off). Raw output kept in
+  `gene_trees_oc/` (gitignored). RER on a single gene has essentially no
+  cross-gene power — see `../../reports/pepc_c4.md`.

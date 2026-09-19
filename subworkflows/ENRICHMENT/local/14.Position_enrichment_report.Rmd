@@ -321,6 +321,14 @@ if (!has_res) {
                       NES = round(perm_nes, 3), Direction = direction,
                       `p (Perm)` = signif(p_value, 3),
                       `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
+          # p.perm: the CAAS permulation-null term sum, a second signal
+          # alongside p (Perm)'s own label-shuffle null (see fcs_enrich.R's
+          # p.perm for the gene-level analogue). NA/absent when POSENRICH ran
+          # without the CAAS null supplied.
+          if ("p.perm" %in% names(tf_src) && !all(is.na(tf_src$`p.perm`))) {
+            tf_df <- tf_df %>%
+              tibble::add_column(`p.perm (CAAS-null)` = signif(tf_src$`p.perm`, 3), .before = "p.adj")
+          }
         } else {
           tf_df <- tf_src %>%
             transmute(Pathway = pathway, Description = description,
@@ -770,6 +778,7 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     present_flags <- intersect(want, names(rk_sig_raw))
     has_nes <- "perm_nes" %in% names(rk_sig_raw)
     .has_tf <- "top_frac" %in% names(rk_sig_raw) && !all(is.na(rk_sig_raw$top_frac))
+    has_pperm <- "p.perm" %in% names(rk_sig_raw) && !all(is.na(rk_sig_raw$`p.perm`))
 
     # Collapse to one row per pathway: best (min) p.adj, strongest (max)
     # NES/fold across the cutoffs it recurred at, cutoff flags averaged
@@ -782,6 +791,7 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
         p_adj = min(p_adj, na.rm = TRUE),
         perm_nes = if (has_nes) { v <- stats::na.omit(perm_nes); if (length(v)) max(v) else NA_real_ } else NA_real_,
         fold_enrichment = if (!has_nes) { v <- stats::na.omit(fold_enrichment); if (length(v)) max(v) else NA_real_ } else NA_real_,
+        `p.perm` = if (has_pperm) { v <- stats::na.omit(`p.perm`); if (length(v)) min(v) else NA_real_ } else NA_real_,
         n_occurrences = if (.has_tf) dplyr::n_distinct(top_frac, na.rm = TRUE) else 1L,
         `Cutoffs` = if (.has_tf) paste(sort(100 * unique(na.omit(top_frac)), decreasing = TRUE), "%", sep = "", collapse = ", ") else "N/A",
         dplyr::across(dplyr::all_of(present_flags), ~round(mean(.x, na.rm = TRUE), 1)),
@@ -799,6 +809,10 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
         transmute(Database = database, Pathway = pathway, Description = description,
                   NES = round(perm_nes, 3), Direction = direction,
                   `p.adj` = signif(p_adj, 3), `N cutoffs` = n_occurrences, Cutoffs)
+      if (has_pperm) {
+        le_df <- le_df %>%
+          tibble::add_column(`p.perm (CAAS-null)` = signif(rk_sig$`p.perm`, 3), .after = "p.adj")
+      }
     } else {
       le_df <- rk_sig %>%
         transmute(Database = database, Pathway = pathway, Description = description,
@@ -1815,15 +1829,13 @@ readr::write_tsv(region_export,
   the broad `characterization` layers (UCR core/flank, FUBAR
   positive/purifying). `min`/`max` set-size filtering applies only to the GMT-style databases.
 - **`p.adj`**: BH-adjusted per (ranking, database).
-- **Significance**: `p.adj < `r PADJ`` and `NES > 0`.
-- **No permulation (`p.perm`) at position level.** The CAAS permulation null is a
-  *naive random relabeling*: when the phenotype is permuted, the fg/bg species are
-  paired at **random across the tree**, not as the observed **matched sister
-  pairs** - so pair MRCAs are deep and the ASR path-score's isolation/independence
-  geometry differs from the observed. That null therefore tests "phenotype + a
-  broken matched-pair design" jointly rather than isolating the phenotype, and it
-  is anti-conservative on the MRCA axes. The **gene-level FCS** still uses
-  `p.perm`; see its report for the same pairing caveat.
+- **`p.perm`**: the same term sum compared against real cycles of the CAAS
+  permulation null (`perm_pos_cycle_caas.tsv.gz`), a second signal alongside
+  `p (Perm)`'s own label-shuffle null — same construction as gene-level FCS's
+  `p.perm` (`12.FCS_general_report.Rmd`). Present only when POSENRICH was run
+  with the CAAS null supplied; absent otherwise.
+- **Significance**: `p.adj < `r PADJ`` and `NES > 0`, additionally gated on
+  `p.perm < posenrich_p_perm_thr` whenever `p.perm` is available.
 
 *Report generated `r Sys.time()`.*
 

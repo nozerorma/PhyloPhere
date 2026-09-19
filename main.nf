@@ -874,6 +874,7 @@ workflow {
                     scoring_caas_perm_scores_ch,
                     scoring_caas_pos_pval_ch,
                     scoring_caas_pos_sample_ch,
+                    scoring_caas_pos_cycle_caas_ch,
                     position_scores_ch,
                     position_lists_ch,
                     posenrich_background_ch,

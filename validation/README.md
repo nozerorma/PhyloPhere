@@ -88,8 +88,13 @@ validation/
   harness/               — shared, tier-agnostic code
   truthsets/             — curated known-positive tables (version controlled, small)
     tier1/
-  fixtures/              — alignments + trees (NOT committed; built/fetched, see each tier's README)
-  tier1/                 — site-level truth sets: PEPC C4, RH1 spectral tuning, echolocation
+  tier1/                 — site-level truth sets, GUI-driven local runs: PEPC C4, Hb altitude
+    input/                 per-dataset alignment/tree/traits (NOT committed; built via each
+                           dataset's build.py, see its README)
+    output/                local GUI run outputs (NOT committed)
+    templates/              → actual GUI project files live in gui/templates/tier1_*.json
+    reports/                data source / scope / procedure / results per dataset
+    references/             papers + repos the input data and truth sites came from
   runs/                  — pipeline outputs (NOT committed)
   .demoted/              — Tier 0 (simulation): demoted, unmaintained (D-DIR-01)
 ```

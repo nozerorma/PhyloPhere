@@ -335,6 +335,7 @@ class EnrichmentConfig(ModuleConfigBase):
     posenrich_min_size: str = "5"  # --posenrich_min_size
     posenrich_max_size: str = "0"  # --posenrich_max_size
     posenrich_padj_thr: str = "0.15"  # --posenrich_padj_thr
+    posenrich_p_perm_thr: str = "0.025"  # --posenrich_p_perm_thr (CAAS permulation-null term-sum p.perm; dual-gates sig alongside posenrich_padj_thr when the CAAS null is available)
     posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
 
     # NOTE: posenrich_background_file (CT's own background.output — used when CT

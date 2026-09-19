@@ -90,6 +90,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="posenrich_min_size", label="POSENRICH min set size"),
         FieldSpec(name="posenrich_max_size", label="POSENRICH max set size (0 = uncapped)"),
         FieldSpec(name="posenrich_padj_thr", label="POSENRICH adjusted p threshold"),
+        FieldSpec(name="posenrich_p_perm_thr", label="POSENRICH CAAS-null p.perm threshold"),
         FieldSpec(name="posenrich_batch_size", label="POSENRICH GMTs per task (1 = no batching)"),
         FieldSpec(name="domain_variability_file", label="Domain variability file", kind="path_file"),
         FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file"),

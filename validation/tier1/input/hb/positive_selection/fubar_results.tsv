@@ -1,0 +1,4 @@
+gene	n_pos_sites	n_neg_sites	max_posterior	mean_posterior
+HBA	6	5	0.975088	0.414929
+HBD	4	3	0.998669	0.419201
+HBB	1	15	0.993261	0.347805

@@ -1,76 +1,77 @@
-# Tier 1 — site-level truth sets
+# Tier 1 — site-level truth sets (GUI-driven local runs)
 
-**Question:** on compact, well-studied datasets with a curated list of supported
-convergent sites, does PhyloPhere recover them and where do they rank?
+**Question:** on compact, well-studied datasets with a curated list of externally
+validated convergent sites, does PhyloPhere recover them, and where do they rank?
 
-**Gate:** validated positives recovered at the default significance threshold and
-sitting in the top decile of the position score.
+Two real datasets, each with its own input/output split, a ready-to-load GUI
+project template, a narrative report, and the literature/data provenance behind
+it.
 
-Tier 1 is deliberately simple: take datasets where a published study demonstrated
-convergence and *externally validated* specific genes / sites (mutagenesis,
-kinetics, expression assays), run the pipeline unchanged, and check we recover
-them and where they rank. No null-calibration or genome-wide-inflation analysis
-here — that debate (Thomas & Hahn 2015, Zou & Zhang 2015) lives in the CAAP
-comparison track, not Tier 1.
+`../harness/`, `../truthsets/`, `../docs/DESIGN.md` are the separate formal
+metrics toolkit (precision/recall/rank-of-known-positive, null calibration) for
+turning a completed run into a scored benchmark. Nothing here depends on them.
 
-## Datasets and the trait cells they fill
+## Layout
 
-| dataset | spec | type | count | grouping |
-|---------|------|------|-------|----------|
-| PEPC / C4 | `fixtures/tier1/pepc/pepc.spec.json` | categorical | single | direct (+ genotypic/phenotypic → n_trait=2) |
-| **Hb / high altitude** | `fixtures/tier1/hb_altitude/hb_altitude.spec.json` | **continuous** + categorical | single | direct + percentilized |
-
-Two fixtures, each anchored by mutagenesis-validated convergent sites — **PEPC**
-780/665, **Hb** αA34T/αA119A — and each with real contrast headroom (23 C4
-origins / ~5 independent high-altitude tit lineages).
-
-**Hb / high altitude** (Zhu et al. 2018, Sino-Himalayan tits; D-DIR-03) fills the
-continuous cells — elevational-range midpoint as a metric trait, then top/bottom-q
-percentilized — and also `categorical · single · direct` via a 2500 m H/L cut.
-The `n_trait=2` code path is exercised by **PEPC's genotypic vs phenotypic C4
-annotation** (two real trait columns, Task 4 runs both), not a separate fixture.
-
-Dropped from Tier 1: the fish-RH1 fixture (D-DIR-04 — Otophysi all-freshwater, a
-paired-contrast method reaches only ~4 of ~23 F261Y origins); echolocation
-(D-DIR-05 — 3 origins, at the `min_contrasts` floor, no accessible 3-origin
-dataset); the `echo_marine` n_trait=2 fixture (redundant with Tier 2). Echo +
-low-origin convergence revisited when Tier 2 is scoped, via explicit branch
-pairs. `../truthsets/tier1/echolocation.*.tsv` kept parked for that.
-
-## Fixtures (not committed — build or fetch)
-
-Each `fixtures/tier1/<name>/` needs: `align/` (codon-aware CDS alignment, one file
-per gene, tips = species), `tree.nwk` (species tree with branch lengths, same
-tips), `<name>.spec.json` (the `PhenotypeSpec`; commit this — it is small).
-
-| dataset | alignment source | tree |
-|---------|------------------|------|
-| PEPC | PCOC repo `data/` (sedge PEPC alignment, Besnard 2009); or realign the Besnard 2009 supplement with MACSE | gene tree from the alignment (IQ-TREE) |
-| RH1 | Hauser et al. 2017 supplementary alignment; or realign fish RH1 CDS from NCBI with MACSE | species tree (fish ToL / actinopt) pruned to tips |
-| echolocation | Parker et al. 2013 alignments (Dryad); the two reanalyses use the same set | mammal species tree pruned to the ~22 taxa |
-
-Put a `bovine_RHO` / `maize_PEPC` reference row in the respective alignment so
-`truthset.map_site_to_alignment` can place the truth-set coordinates.
-
-## Run
-
-```bash
-# 1. emit the trait matrix from the spec
-python -m validation.harness.cli emit \
-    validation/fixtures/tier1/rh1/rh1.spec.json \
-    --out validation/runs/tier1/rh1/traits
-
-# 2. run PhyloPhere per trait cell (categorical -> CAAS+FADE, continuous -> RER+CAAS/BM)
-#    model runner scripts on run_scripts/run_integrated_toy.sh; one invocation per
-#    cell under runs/tier1/rh1/traits/**. TODO: tier1/run_rh1.sh
-
-# 3. score
-python -m validation.harness.cli score \
-    --truth validation/truthsets/tier1/rh1_spectral.sites.tsv \
-    --run   validation/runs/tier1/rh1/<cell>/ \
-    --ref-row bovine_RHO
+```
+tier1/
+  input/        one subdirectory per dataset: alignment, tree(s), trait table,
+                 species-name/gene-tree auxiliary files, build.py + README
+                 (provenance). Built fixture content is gitignored — rebuild via
+                 each dataset's build.py; only build.py/README/*.spec.json are
+                 tracked, per validation/.gitignore.
+  output/        local GUI run outputs land here (work_dir/results_dir per the
+                 templates below). Gitignored.
+  templates/     hard copies of the GUI project files below, for version
+                 tracking. The GUI itself loads from gui/templates/ (its "Load
+                 template" dialog opens there) — keep both copies in sync.
+  reports/       one concise report per dataset: data source, scope, procedure,
+                 results/conclusions.
+  references/    papers + repositories the input data and truth sites came from.
 ```
 
-`harness/cli.py` is a TODO stub — the `emit` path is wired, `score` needs the
-PhyloPhere-output adapter (which output table, which column is the position, which
-the score). Fill it once the first real run exists so the adapter matches reality.
+## Datasets
+
+| dataset | `input/` | trait(s) | genes | template |
+|---------|----------|----------|-------|----------|
+| PEPC / C4 photosynthesis (Cyperaceae) | `input/pepc/` | `c4` (categorical) | PEPC (1) | `gui/templates/tier1_pepc.json` |
+| Haemoglobin / high-altitude adaptation (Sino-Himalayan tits) | `input/hb/` | `elev_mid` (continuous) + `altitude` (categorical) | HBA, HBD, HBB (3) | `gui/templates/tier1_hb.json` |
+
+Four genes total across both datasets — see each `input/<dataset>/README.md` for
+full provenance and truth-site detail.
+
+## What each template runs
+
+CAAS (discovery+resample) → CT_DISAMBIGUATION (`asr_mode=compute`) →
+RERconverge → FADE → Accumulation → Enrichment (FCS gene-set enrichment +
+STRING/DOMINO AMI) → SCORING. **VEP is off** — it needs per-gene alignment-to-protein
+MAP files (`vep_map_dir`), which require a codon-level CDS alignment neither
+dataset has. **POSENRICH is off** — it needs an eggNOG members/annotations file
+and a FUBAR sites file, neither generated in-house yet.
+
+Every other file-based input is left blank so PhyloPhere generates or fetches it
+itself: `tax_id_file`, `gene_ensembl_file`, `accumulation_entropy_dir`, `gmt_dir`,
+`string_db_dir`/`string_cache_dir`, `domain_variability_file`,
+`ucr_positions_file`. The fixtures' own synthetic `taxid.tsv`/`gene_ensembl.tsv`
+stay in `input/<dataset>/` for reference but aren't wired into the templates.
+
+Both templates run `runtime_type: "local"`, resources set to the
+`local_lowspec` preset (`conf/resources.config.local_lowspec`: 8 cpu / 16 GB /
+5 day ceiling, per-process overrides loaded via
+`gui/resource_presets.load_preset("local_lowspec")`).
+
+## Gene trees (RER)
+
+RER's `--gene_trees` file (`input/pepc/gene_trees.nwk`, `input/hb/gene_trees.nwk`)
+is IQ-TREE output from `ortholog_characterizator`'s `PHYLOGENY` workflow
+(ModelFinder `MFP` restricted to the LG family, 1000 UFBoot), run directly
+against each dataset's existing protein alignment (`--prot_dir`, quality/
+translation stages off — neither dataset has a codon-level CDS alignment for
+those stages to consume). Raw per-gene output kept in
+`input/<dataset>/gene_trees_oc/` (gitignored).
+
+## Running
+
+Open Phylophere's GUI → File → Load template → `tier1_pepc.json` or
+`tier1_hb.json` → Generate Scripts → run. Or point the CLI runner directly at
+the same JSON.

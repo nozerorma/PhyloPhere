@@ -1,58 +1,58 @@
 {
   "schema_version": 1,
-  "flavor": "primates",
+  "flavor": "tier1_pepc",
   "general": {
-    "project_name": "LQ_fabio",
+    "project_name": "tier1_pepc_c4",
     "seed": "1998",
     "reporting": true,
-    "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
-    "nextflow_plugins_dir": "/homes/users/mramon/.nextflow/plugins",
-    "remote_host": "mramon@correfoc-vs.s.upf.edu",
-    "remote_root_dir": "/homes/users/mramon/scratch/"
+    "repo_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere",
+    "nextflow_plugins_dir": "/home/miguel/.nextflow/plugins",
+    "remote_host": "",
+    "remote_root_dir": ""
   },
   "runtime": {
-    "resume": false,
+    "resume": true,
     "toy_mode": false,
-    "toy_n": "1000",
-    "runtime_type": "slurm",
-    "batched": true,
-    "script_base_name": "LQ_fabio",
-    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_LQ_fabio",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/LQ_fabio",
-    "use_tower": true,
-    "sbatch_job_name": "phylophere",
-    "sbatch_partition": "high-cpu",
-    "sbatch_time": "144:00:00",
-    "sbatch_mail_user": "miguel.ramon@upf.edu",
+    "toy_n": "",
+    "runtime_type": "local",
+    "batched": false,
+    "script_base_name": "tier1_pepc",
+    "work_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/output/pepc/work",
+    "results_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/output/pepc/results",
+    "use_tower": false,
+    "sbatch_job_name": "",
+    "sbatch_partition": "",
+    "sbatch_time": "",
+    "sbatch_mail_user": "",
     "sbatch_array_concurrency": "",
-    "alignment_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge",
+    "alignment_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/align",
     "ali_format": "fasta",
-    "tree_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/science.abn7829_data_s4.nex.tree",
+    "tree_file": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/tree.nwk",
     "trait_file": "",
-    "simple_trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/LQ_fabio/longevity_quotient.tsv",
+    "simple_trait_file": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/my_traits.tsv",
     "prune_dir": "",
     "branch_trait": "",
-    "ali_sp_names": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ali_sp_names.txt",
-    "tax_id_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/taxid_species_family_primates.tsv",
-    "sp_colname": "accepted_tree_tip",
-    "clade_name": "primates",
+    "ali_sp_names": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/ali_sp_names.txt",
+    "tax_id_file": "",
+    "sp_colname": "species",
+    "clade_name": "pepc_c4",
     "taxon_of_interest": "family",
     "phenotype_rows": [
       {
         "trait_class": 2,
-        "trait": "LQ_mammal",
+        "trait": "c4",
         "secondary": "",
         "n_trait": "",
         "c_trait": "",
         "prune": "",
         "prune_secondary": "",
-        "trait_type": ""
+        "trait_type": "ordinal"
       }
     ]
   },
   "modules": {
     "caas": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "ct_tool_discovery": true,
       "ct_tool_resample": true,
@@ -61,7 +61,7 @@
       "caas_full_perms": "1000",
       "caas_permulation_enrichment": true,
       "pss_top_pct": "0.05",
-      "max_contrasts": "3",
+      "max_contrasts": "0",
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_discovery_batch_size": "25",
@@ -76,7 +76,7 @@
       "max_miss_fraction": "0.0",
       "miss_pair": true,
       "caap_mode": true,
-      "perm_strategy": "BM",
+      "perm_strategy": "auto",
       "max_tries": "1000000",
       "chunk_size": "500",
       "include_b0": false,
@@ -88,16 +88,16 @@
       "export_perm_discovery": false
     },
     "disambiguation": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
-      "ct_disambig_asr_mode": "precomputed",
+      "ct_disambig_asr_mode": "compute",
       "ct_disambig_asr_model": "lg",
-      "ct_disambig_asr_cache_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/7.ASR_primates",
+      "ct_disambig_asr_cache_dir": "",
       "ct_disambig_posterior_threshold": "0.1",
       "ct_disambig_max_tasks_per_child": "50",
       "ct_disambig_batch_size": "1",
       "asr_robustness": true,
-      "run_postproc_exploratory": false,
+      "run_postproc_exploratory": true,
       "run_postproc_filter": true,
       "caas_postproc_mode": "filter",
       "filter_minlen": "3",
@@ -109,11 +109,11 @@
       "iqr_multiplier": "3.0"
     },
     "accumulation": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
-      "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
+      "accumulation_entropy_dir": "",
       "accumulation_fdr": "0.1"
     },
     "rer": {
@@ -123,7 +123,7 @@
       "rer_tool_build_tree": true,
       "rer_tool_build_matrix": true,
       "rer_tool_continuous": true,
-      "gene_trees": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/3.Gene_trees/Gene_trees/ALL_FEB23_geneTrees.txt",
+      "gene_trees": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/gene_trees.nwk",
       "rer_perm_batches": "10",
       "rer_perms_per_batch": "100",
       "trait_out": "",
@@ -132,22 +132,22 @@
       "rer_minsp": "15",
       "winsorize_rer": "3",
       "winsorize_trait": "3",
-      "rer_trait_mode": "continuous",
+      "rer_trait_mode": "auto",
       "rer_binary_clade": "all",
       "rer_min_pos": "2",
       "rer_pval_threshold": "0.05",
       "rer_pval_column": "p.perm",
       "rer_top_n_labels": "20",
-      "rer_transform": "none",
+      "rer_transform": "ha_logit",
       "rer_universe_file": "",
       "rer_gene_scores": ""
     },
     "fade": {
       "enabled": true,
       "extra_flags": "",
-      "fade_direction": "top",
-      "fade_background_scope": "opposite",
-      "fade_species_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/LQ_fabio/longevity.full-pools.cfg",
+      "fade_direction": "both",
+      "fade_background_scope": "all",
+      "fade_species_file": "",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
       "fade_bf_threshold": "100",
@@ -167,11 +167,11 @@
       "enabled": false,
       "extra_flags": "",
       "vep_primateai_db": "",
-      "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
+      "vep_map_dir": "",
       "cosmic_db": ""
     },
     "scoring": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "scoring_gene_top_pct": "0.10",
       "scoring_position_top_pct": "0.10",
@@ -179,7 +179,7 @@
       "scoring_weight_rer": "1.0",
       "scoring_weight_fade": "1.0",
       "scoring_rer_direction": "both",
-      "gene_ensembl_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ensembl_genes.output",
+      "gene_ensembl_file": "",
       "scoring_ami": true,
       "scoring_string": true,
       "scoring_compare_fdr": "0.1",
@@ -193,15 +193,16 @@
     "enrichment": {
       "enabled": true,
       "extra_flags": "",
-      "posenrich_enabled": true,
-      "gmt_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/GMTs",
+      "posenrich_enabled": false,
+      "gmt_dir": "",
       "fcs_min_genes": "5",
-      "fcs_max_genes": "1000",
+      "fcs_max_genes": "500",
       "fcs_fdr": "0.15",
       "fcs_pperm_thr": "0.025",
       "fcs_top_n": "20",
       "fcs_batch_size": "4",
-      "string_db_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/STRING",
+      "string_db_dir": "",
+      "string_cache_dir": "",
       "string_species": "9606",
       "domino_network_score_thr": "700",
       "domino_slice_thr": "0.3",
@@ -214,12 +215,12 @@
       "comparison_perm_null": true,
       "comparison_perm_stat": "spearman",
       "comparison_perm_topk": "0.05",
-      "egg_members_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv",
-      "egg_annotations_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv",
+      "egg_members_file": "",
+      "egg_annotations_file": "",
       "cosmic_db": "",
-      "domain_variability_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/domain_variability.tsv",
-      "ucr_positions_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/ucr_positions.tsv",
-      "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
+      "domain_variability_file": "",
+      "ucr_positions_file": "",
+      "fubar_sites_file": "",
       "posenrich_min_size": "5",
       "posenrich_max_size": "0",
       "posenrich_padj_thr": "0.15",
@@ -227,7 +228,7 @@
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/LQ_fabio",
+    "base_path": "",
     "use_ct": false,
     "use_discovery": false,
     "use_resample": false,
@@ -240,7 +241,7 @@
   },
   "resources": {
     "local_max_cpus": "8",
-    "local_max_memory": "12.GB",
+    "local_max_memory": "16.GB",
     "local_max_time": "5.day",
     "slurm_max_cpus": "128",
     "slurm_max_memory": "128.GB",
@@ -265,73 +266,73 @@
         "selector_type": "withLabel",
         "selector": "process_long_compute",
         "cpus": "1",
-        "memory": "4.GB"
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withLabel",
         "selector": "process_reporting",
-        "cpus": "8",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "6.GB * task.attempt"
       },
       {
         "selector_type": "withLabel",
         "selector": "process_reporting_phenotype",
-        "cpus": "10",
-        "memory": "6.GB"
+        "cpus": "6",
+        "memory": "6.GB * task.attempt"
       },
       {
         "selector_type": "withLabel",
         "selector": "process_reporting_dataset",
         "cpus": "4",
-        "memory": "4.GB"
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "DATASET_PRUNE",
         "cpus": "4",
-        "memory": "16.GB"
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withLabel",
         "selector": "process_contrast_selection",
-        "cpus": "8",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "PHENOTYPE_EXPLORATION",
-        "cpus": "10",
-        "memory": "6.GB"
+        "cpus": "6",
+        "memory": "6.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "DATASET_EXPLORATION",
         "cpus": "4",
-        "memory": "4.GB"
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CONTRAST_ALGORITHM",
-        "cpus": "8",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CI_COMPOSITION_REPORT",
-        "cpus": "8",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "DERIVE_ALI_SP_NAMES",
         "cpus": "2",
-        "memory": "4.GB"
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "TREE_CLEANUP",
         "cpus": "1",
-        "memory": "500.MB"
+        "memory": "500.MB * task.attempt"
       },
       {
         "selector_type": "withLabel",
@@ -342,344 +343,386 @@
       {
         "selector_type": "withLabel",
         "selector": "process_resample",
-        "cpus": "12",
+        "cpus": "6",
         "memory": "4.GB"
       },
       {
         "selector_type": "withLabel",
-        "selector": "process_boot",
+        "selector": "process_perm_replay",
         "cpus": "1",
-        "memory": "16.GB"
+        "memory": "12.GB"
       },
       {
         "selector_type": "withName",
         "selector": "DISCOVERY_BATCHED",
         "cpus": "4",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withLabel",
         "selector": "process_discovery_batched",
         "cpus": "4",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "BOOTSTRAP_BATCHED",
-        "cpus": "8",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withLabel",
-        "selector": "process_boot_batched",
-        "cpus": "8",
-        "memory": "16.GB"
+        "selector": "process_perm_replay_batched",
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CONCAT_DISCOVERY",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CONCAT_BACKGROUND",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CONCAT_RESAMPLE",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CONCAT_BOOTSTRAP",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CHECK_MIN_CONTRASTS",
         "cpus": "1",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CT_FILTER",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withLabel",
         "selector": "CT_FILTER",
         "cpus": "2",
-        "memory": "4.GB"
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CAAS_FILTER_GENES",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CAAS_BACKGROUND_CLEANUP",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CT_FILTER_SUMMARY",
         "cpus": "2",
-        "memory": "4.GB"
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CT_POSTPROC_REPORT",
-        "cpus": "12",
-        "memory": "6.GB"
+        "cpus": "6",
+        "memory": "6.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CAAS_SIGNIFICATION_REPORT",
-        "cpus": "12",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CT_DISAMBIGUATION_RUN",
-        "cpus": "12",
-        "memory": "8.GB"
+        "cpus": "6",
+        "memory": "8.GB * task.attempt"
+      },
+      {
+        "selector_type": "withName",
+        "selector": "CT_DISAMBIGUATION_SPLIT_GENES",
+        "cpus": "1",
+        "memory": "2.GB * task.attempt"
+      },
+      {
+        "selector_type": "withName",
+        "selector": "CT_DISAMBIGUATION_RUN_BATCHED",
+        "cpus": "4",
+        "memory": "3.GB * task.attempt"
+      },
+      {
+        "selector_type": "withName",
+        "selector": "CT_DISAMBIGUATION_MERGE",
+        "cpus": "2",
+        "memory": "4.GB * task.attempt"
+      },
+      {
+        "selector_type": "withName",
+        "selector": "CT_DISAMBIGUATION_PLOTS",
+        "cpus": "4",
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CAAS_PERMS_DISAMBIGUATE",
-        "cpus": "16",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
+      },
+      {
+        "selector_type": "withName",
+        "selector": "CAAS_PERMS_DISAMBIGUATE_BATCHED",
+        "cpus": "4",
+        "memory": "20.GB * task.attempt"
+      },
+      {
+        "selector_type": "withName",
+        "selector": "CAAS_PERMS_MERGE_DETAIL",
+        "cpus": "2",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CAAS_PERMS_AGGREGATE",
         "cpus": "1",
-        "memory": "16.GB"
+        "memory": "12.GB * task.attempt"
+      },
+      {
+        "selector_type": "withName",
+        "selector": "CAAS_PERMS_REBUILD",
+        "cpus": "2",
+        "memory": "18.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "EXTRACT_DISAMBIG_DIR",
         "cpus": "2",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "ASR_ROBUSTNESS_REPORT",
-        "cpus": "8",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CT_ACCUMULATION_AGGREGATE",
-        "cpus": "16",
-        "memory": "8.GB"
+        "cpus": "6",
+        "memory": "8.GB  * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "CT_ACCUMULATION_RANDOMIZE",
-        "cpus": "12",
-        "memory": "24.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "ACCUMULATION_REPORT",
-        "cpus": "8",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "ACCUMULATION_GENE_LISTS",
         "cpus": "1",
-        "memory": "500.MB"
+        "memory": "500.MB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "EXTRACT_EXTREME_SPECIES",
         "cpus": "1",
-        "memory": "1.GB"
+        "memory": "1.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "FILTER_FASTA_TO_TREE",
         "cpus": "1",
-        "memory": "1.GB"
+        "memory": "1.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "PREP_ALIGNMENTS",
         "cpus": "1",
-        "memory": "500.MB"
+        "memory": "500.MB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "PREP_ALIGNMENTS_BATCHED",
-        "cpus": "10",
-        "memory": "2.GB"
+        "cpus": "6",
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "PHYLIP_TO_FASTA",
         "cpus": "1",
-        "memory": "2.GB"
+        "memory": "2.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "ANNOTATE_TREE_FG",
-        "cpus": "8",
-        "memory": "4.GB"
+        "cpus": "6",
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "ANNOTATE_TREE_FG_BATCHED",
-        "cpus": "8",
-        "memory": "8.GB"
+        "cpus": "6",
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "FADE_BATCHED",
-        "cpus": "8",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "COLLECT_GENE_SETS",
         "cpus": "2",
-        "memory": "4.GB"
+        "memory": "4.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "FADE_RUN",
-        "cpus": "12",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB  * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "FADE_REPORT",
-        "cpus": "12",
-        "memory": "8.GB"
+        "cpus": "6",
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "FADE_GENE_LISTS",
         "cpus": "1",
-        "memory": "500.MB"
+        "memory": "500.MB * task.attempt"
       },
       {
         "selector_type": "withLabel",
         "selector": "process_vep",
         "cpus": "4",
-        "memory": "8.GB"
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "PRIMATEAI_MAP",
         "cpus": "2",
-        "memory": "16.GB"
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "COSMIC_MAP",
         "cpus": "2",
-        "memory": "8.GB"
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_TRAIT",
         "cpus": "1",
-        "memory": "500.MB"
+        "memory": "500.MB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_TREES",
-        "cpus": "8",
-        "memory": "32.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_MATRIX",
-        "cpus": "8",
-        "memory": "32.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_CONT",
-        "cpus": "8",
-        "memory": "32.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_BIN",
         "cpus": "4",
-        "memory": "32.GB"
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_REPORT",
-        "cpus": "8",
-        "memory": "8.GB"
+        "cpus": "6",
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_GENE_LISTS",
         "cpus": "1",
-        "memory": "500.MB"
+        "memory": "500.MB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "SCORING_COMPUTE",
-        "cpus": "8",
-        "memory": "8.GB"
+        "cpus": "6",
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "SCORING_REPORT",
-        "cpus": "8",
-        "memory": "8.GB"
+        "cpus": "6",
+        "memory": "8.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "SCORING_FCS_REPORT",
-        "cpus": "12",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "RER_FCS_REPORT",
-        "cpus": "8",
-        "memory": "32.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "SCORING_COMPARE_REPORT",
-        "cpus": "12",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "SCORING_AMI_REPORT",
-        "cpus": "12",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "POSENRICH_BUILD_GMT",
-        "cpus": "8",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
         "selector": "POSENRICH_RUN",
-        "cpus": "8",
-        "memory": "16.GB"
+        "cpus": "6",
+        "memory": "12.GB * task.attempt"
       }
     ]
   }

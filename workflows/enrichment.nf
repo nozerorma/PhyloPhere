@@ -115,6 +115,7 @@ workflow ENRICHMENT {
         caas_perm_scores_ch
         caas_pos_pval_ch
         caas_pos_sample_ch
+        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_sum,n_schemes) -> POSENRICH's p.perm
         position_scores
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
         background_output_ch
@@ -416,6 +417,12 @@ workflow ENRICHMENT {
             def pos_fade_sites_top_ch    = (fade_sites_top_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_FADE_TOP') }
             def pos_fade_sites_bottom_ch = (fade_sites_bottom_ch ?: Channel.empty()).ifEmpty { file('NO_FILE_FADE_BOTTOM') }
 
+            // CAAS permulation null (perm_pos_cycle_caas.tsv.gz), for POSENRICH's
+            // p.perm -- absent whenever CAAS_PERMULATION didn't run this
+            // invocation (--caas_permulation_enrichment off, or CT skipped).
+            def pos_caas_cycle_null_ch = (caas_pos_cycle_caas_ch ?: Channel.empty())
+                .ifEmpty { file('NO_FILE_CAAS_CYCLE_NULL') }
+
             posenrich_out = POSENRICH(
                 pos_gene_ensembl_ch,
                 pos_domain_variability_ch,
@@ -438,7 +445,8 @@ workflow ENRICHMENT {
                 pos_vep_cosmic_ch,
                 pos_gene_ensembl_ch,
                 pos_fade_sites_top_ch,
-                pos_fade_sites_bottom_ch
+                pos_fade_sites_bottom_ch,
+                pos_caas_cycle_null_ch
             )
             final_reports = final_reports.mix(posenrich_out.report)
         }

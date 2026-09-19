@@ -253,16 +253,16 @@ process {
         maxRetries    = 2
     }
     withName: 'CAAS_PERMS_DISAMBIGUATE_BATCHED' {
-        // Base memory 6GB -> 10GB (2026-09-18): see conf/resources.config's
-        // matching comment -- batch_00580 (20 genes) OOM'd identically in both
-        // malignant_prevalence and neoplasia_prevalence at attempt 1 (6GB),
-        // each running ~8h before the kill (GC thrashing near the cgroup
-        // limit, not a fast failure), then completed cleanly in ~31min at
-        // attempt 2 (12GB). Kept at parity with the slurm/local presets rather
-        // than the usual lowspec discount, since 6GB was already shared
-        // across all three presets pre-fix.
+        // Base memory sized for batches containing genes with heavy
+        // FOP-hypothesis fanout: such a gene's replay splits into many chunks
+        // (gene_wrapper.py's _perms_worker_replay, "ctx load"), and the
+        // per-chunk ASR-context reload cost degrades sharply under memory
+        // pressure. 20GB keeps that reload cheap even for the heaviest
+        // batches. Kept at parity with the slurm/local presets rather than
+        // the usual lowspec discount, since the high-cpu partition's
+        // 1.43TB/node RAM makes this a non-issue regardless of preset.
         cpus   = { 4 }
-        memory = { 10.GB * task.attempt }
+        memory = { 20.GB * task.attempt }
         time   = { 8.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 3
@@ -279,15 +279,12 @@ process {
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 2
     }
-    // Was falling back to bare process_medium (flat 4GB, no OOM retry) on the
-    // stale assumption that this re-derives outputs "at one-gene peak RAM" --
-    // no longer true once gene_cycle_scores.tsv is genome-wide x n_cycles.
-    // Confirmed OOM'd (exit 137, no retry configured -> whole run terminated)
-    // against a live 1.18GB / 15.2M-row gene_cycle_scores.tsv (2026-09-18);
-    // scoring_caas_perms.R reads it via readr then does 6 sequential
-    // select()+pivot_wider() passes over the full table (one per
-    // global/top/bottom x asr/caas column). 18GB here keeps the same 0.75x
-    // ratio this preset already uses on CAAS_PERMS_AGGREGATE vs the other two.
+    // gene_cycle_scores.tsv is genome-wide x n_cycles; scoring_caas_perms.R
+    // reads it via readr then does 6 sequential select()+pivot_wider() passes
+    // over the full table (one per global/top/bottom x asr/caas column), so
+    // this needs real headroom rather than process_medium's default. 18GB
+    // keeps the same 0.75x ratio this preset already uses on
+    // CAAS_PERMS_AGGREGATE vs the other two.
     withName: 'CAAS_PERMS_REBUILD' {
         cpus          = { 2 }
         memory        = { 18.GB * task.attempt }
