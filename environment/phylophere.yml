@@ -41,6 +41,8 @@ dependencies:
   - matplotlib
   - biopython
   - dendropy
+  - ete3              # NCBI taxonomy lookups (bin/generate_taxid_map.py)
+  - pybiomart         # Ensembl BioMart queries (bin/generate_ensembl_mapping.py)
   - pyyaml
   - jinja2           # HTML report generation (GUI + pipeline)
   - tqdm

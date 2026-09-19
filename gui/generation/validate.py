@@ -126,16 +126,11 @@ def validate(project: ProjectConfig) -> list[str]:
         # Post-processing's characterization report step always runs alongside
         # Disambiguation now (no separate --ct_postproc toggle; see
         # gui/models/modules.py's DisambiguationConfig) and needs gene_ensembl_file
-        # regardless of whether Scoring itself is enabled — checked here too (not
-        # just under Scoring below) since exploratory-sweep runs force Scoring off
-        # but still hit this requirement.
-        if not project.modules.scoring.gene_ensembl_file:
-            errors.append(
-                "Disambiguation: Post-processing runs alongside it, so Scoring's gene-Ensembl "
-                "mapping file is required for its characterization reports (and for gene "
-                "filtering too, unless Gene filter mode is set to 'none') — fill it in on "
-                "the Scoring tab even if Scoring itself is disabled."
-            )
+        # for its characterization reports and gene filtering. No longer a hard
+        # requirement here: leaving it blank auto-generates it from the alignment
+        # gene list via an Ensembl BioMart query (bin/generate_ensembl_mapping.py) —
+        # rt.alignment_dir is already required above, so the fallback source is
+        # always available.
     # else: Disambiguation disabled means Post-processing is too (they're no longer
     # independently toggleable) — Accumulation/Scoring's own checks below already
     # cover the case where they still need Post-processing's output via pc.use_postproc.

@@ -33,7 +33,7 @@ SPEC = ModuleTabSpec(
             kind="choice",
             choices=("both", "accelerated", "decelerated"),
         ),
-        FieldSpec(name="gene_ensembl_file", label="Gene-Ensembl mapping file", kind="path_file"),
+        FieldSpec(name="gene_ensembl_file", label="Gene-Ensembl mapping file (optional — auto-generated via BioMart if blank)", kind="path_file"),
     ),
     advanced_fields=(
         Section("Downstream characterization and active modules"),

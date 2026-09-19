@@ -237,6 +237,11 @@ class RuntimeTab(QWidget):
         self.tax_id_file.set_text(self._config.tax_id_file)
         self.tax_id_file.textChanged.connect(self._on_tax_id_file_changed)
         self.tax_id_file_label = QLabel("Taxonomy ID mapping (optional)")
+        self.tax_id_file.setToolTip(
+            "Leave blank to auto-generate from the species tree's tip labels via "
+            "NCBI taxonomy (exact-name matches only; unresolved species are "
+            "reported in tax_id_unresolved.tsv rather than guessed)."
+        )
         form.addRow(self.tax_id_file_label, self.tax_id_file)
 
         self.sp_colname = QLineEdit(self._config.sp_colname)
