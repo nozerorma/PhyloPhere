@@ -150,6 +150,8 @@ class ModuleTabWidget(QWidget):
             widget.setCurrentText(str(current_value))
             widget.currentTextChanged.connect(lambda v, name=f.name: self._set_field(name, v))
             label_lbl = QLabel(f.label)
+            if f.help:
+                label_lbl.setToolTip(f.help)
             form.addRow(label_lbl, widget)
             self._label_widgets.append((label_lbl, f.label))
         elif f.kind in ("path_file", "path_dir"):
@@ -157,6 +159,8 @@ class ModuleTabWidget(QWidget):
             widget.set_text(str(current_value))
             widget.textChanged.connect(lambda v, name=f.name: self._set_field(name, v))
             label_lbl = QLabel(f.label)
+            if f.help:
+                label_lbl.setToolTip(f.help)
             form.addRow(label_lbl, widget)
             self._label_widgets.append((label_lbl, f.label))
         else:  # "str"
@@ -164,9 +168,13 @@ class ModuleTabWidget(QWidget):
             widget.setPlaceholderText(f.placeholder)
             widget.textChanged.connect(lambda v, name=f.name: self._set_field(name, v))
             label_lbl = QLabel(f.label)
+            if f.help:
+                label_lbl.setToolTip(f.help)
             form.addRow(label_lbl, widget)
             self._label_widgets.append((label_lbl, f.label))
 
+        if f.help:
+            widget.setToolTip(f.help)
         self._field_widgets[f.name] = widget
 
     def retranslate(self, lang: str = "en") -> None:

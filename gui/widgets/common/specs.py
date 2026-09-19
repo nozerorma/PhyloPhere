@@ -23,6 +23,7 @@ class FieldSpec:
     kind: FieldKind = "str"
     choices: tuple[str, ...] = ()  # only used when kind == "choice"
     placeholder: str = ""
+    help: str = ""  # tooltip text; shown on both the label and the input widget
 
 
 def Section(label: str) -> FieldSpec:

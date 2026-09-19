@@ -64,6 +64,7 @@ process CT_DISAMBIGUATION_RUN {
       echo "ERROR: ct_disambig_asr_cache_dir must be set (current asr_mode: '${params.ct_disambig_asr_mode}')" >&2
       exit 1
     fi
+    mkdir -p "${asr_cache_dir}"
 
     if [ ! -s "${meta_caas}" ]; then
       echo "ERROR: metadata file is missing or empty: ${meta_caas}" >&2
@@ -188,6 +189,7 @@ process CT_DISAMBIGUATION_RUN_BATCHED {
       echo "ERROR: ct_disambig_asr_cache_dir must be set (current asr_mode: '${params.ct_disambig_asr_mode}')" >&2
       exit 1
     fi
+    mkdir -p "${asr_cache_dir}"
 
     python3 ./disambiguation_main.py \
       --alignment-dir ${align_dir} \
