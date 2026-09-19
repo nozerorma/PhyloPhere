@@ -153,6 +153,7 @@ process SCORING_AMI_REPORT {
                     gene_scores_file    = ${gs_arg},
                     scoring_p_emp_thr   = ${params.scoring_p_emp_thr ?: 0.1},
                     string_db_dir       = '${params.string_db_dir}',
+                    string_cache_dir    = '${params.string_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/string"}',
                     domino_network_sif  = '${domino_network_sif}',
                     domino_modules_dir  = '${domino_modules_dir}',
                     domino_edge_scores_file = '${domino_edge_scores}',

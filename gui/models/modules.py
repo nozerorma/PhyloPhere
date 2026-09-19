@@ -298,6 +298,7 @@ class EnrichmentConfig(ModuleConfigBase):
     # STRING (ID mapping + per-DOMINO-module functional labelling only —
     # module-finding is DOMINO's job; no standalone STRING term-enrichment report)
     string_db_dir: str = ""  # --string_db_dir
+    string_cache_dir: str = ""  # --string_cache_dir
     string_species: str = "9606"  # --string_species
 
     # DOMINO active-module identification (replaces STRING's walktrap clustering)

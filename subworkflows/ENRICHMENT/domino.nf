@@ -45,6 +45,13 @@ process DOMINO_BUILD_NETWORK {
 
     script:
     def db_dir_arg = string_db_dir ? "--string-db-dir ${string_db_dir}" : ""
+    // build_domino_network.py's own --cache-dir default ("string_cache", relative
+    // to the process's own work dir) is NOT persistent across runs -- every task
+    // gets a fresh Nextflow work dir, so without an explicit override this
+    // silently re-downloads STRING's links/info files on every single run,
+    // defeating "cache once, reuse" entirely. Point it at a real persistent
+    // location instead, same pattern as the Pfam-A/VEP caches.
+    def string_cache_dir = params.string_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/string"
     """
     bg_name=\$(basename ${background_file})
     if [ ! -f "${background_file}" ] || [[ "\${bg_name}" == NO_* ]]; then
@@ -55,6 +62,7 @@ process DOMINO_BUILD_NETWORK {
             --cleaned-background ${background_file} \
             --score-threshold ${score_threshold} \
             ${db_dir_arg} \
+            --cache-dir "${string_cache_dir}" \
             --output-dir .
 
         slicer -n network.sif -o slices.txt

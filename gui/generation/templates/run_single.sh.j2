@@ -391,6 +391,15 @@ if [[ -z "${INPUT_TAX_ID:-}" || -z "${GENE_ENSEMBL_FILE:-}" ]]; then
     GENE_ENSEMBL_FILE="$(echo "$_CORE_INPUTS_RESOLVED" | grep '^GENE_ENSEMBL_FILE=' | cut -d= -f2-)"
 fi
 
+# Resolve --gmt_dir when left blank: fetches current GO/Reactome/WikiPathways
+# GMTs, falling back per-file to the vendored copies in assets/gmt/ when
+# offline (bin/resolve_gmts.py). Same invocation-layer reasoning as above.
+if [[ -z "${GMT_DIR:-}" ]]; then
+    _GMT_RESOLVED="$(python3 "$REPO_DIR/bin/resolve_gmts.py" \
+        --output-dir "$RESULTS_BASE/core_inputs/gmt" --gmt-dir "${GMT_DIR:-}")"
+    GMT_DIR="$(echo "$_GMT_RESOLVED" | grep '^GMT_DIR=' | cut -d= -f2-)"
+fi
+
 PARAMS_JSON="$RUN_DIR/params.json"
 cat > "$PARAMS_JSON" <<PARAMS_EOF
 {
@@ -584,6 +593,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fcs_top_n": "${FCS_TOP_N:-20}",
   "fcs_batch_size": "${FCS_BATCH_SIZE:-4}",
   "string_db_dir": "${STRING_DB_DIR:-}",
+  "string_cache_dir": "${STRING_CACHE_DIR:-}",
   "string_species": "${STRING_SPECIES:-9606}",
   "scoring_ami": {{ run_defaults.scoring_ami }},
   "scoring_string": {{ run_defaults.scoring_string }},

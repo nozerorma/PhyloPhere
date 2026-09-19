@@ -33,11 +33,40 @@ SPEC = ModuleTabSpec(
     disclaimer="This is the final module in the pipeline — nothing downstream depends on it.",
     essential_fields=(
         Section("STRING DB & GMT Resources"),
-        FieldSpec(name="string_db_dir", label="STRING database directory", kind="path_dir"),
-        FieldSpec(name="gmt_dir", label="GMT pathway directory", kind="path_dir"),
+        FieldSpec(
+            name="string_db_dir",
+            label="STRING database directory (optional)",
+            kind="path_dir",
+            help=(
+                "Pre-downloaded STRING files, checked before downloading. Leave "
+                "blank to auto-download+cache instead (see STRING cache directory, "
+                "Advanced) — no need to pre-populate this by hand."
+            ),
+        ),
+        FieldSpec(
+            name="gmt_dir",
+            label="GMT pathway directory (optional)",
+            kind="path_dir",
+            help=(
+                "Custom GMT gene-set files. Leave blank to auto-fetch the default "
+                "GO Biological Process/Molecular Function + Reactome + WikiPathways "
+                "set (fetches current copies; falls back to vendored assets/gmt/ "
+                "if offline)."
+            ),
+        ),
         FieldSpec(name="string_species", label="STRING species (NCBI taxid)"),
     ),
     advanced_fields=(
+        Section("Caching"),
+        FieldSpec(
+            name="string_cache_dir",
+            label="STRING cache directory",
+            help=(
+                "Where auto-downloaded STRING links/info files are cached across "
+                "runs. Defaults to ~/.cache/phylophere/string — override only to "
+                "share a cache location across users/clusters."
+            ),
+        ),
         Section("FCS (Wilcoxon-AUC) gene-set enrichment parameters"),
         FieldSpec(name="fcs_min_genes", label="FCS minimum genes per set"),
         FieldSpec(name="fcs_max_genes", label="FCS maximum genes per set (0 = uncapped)"),

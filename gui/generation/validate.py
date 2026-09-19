@@ -198,8 +198,9 @@ def validate(project: ProjectConfig) -> list[str]:
 
     # --- Enrichment (+ POSENRICH) ---
     enrichment = project.modules.enrichment
-    if enrichment.enabled:
-        require(enrichment.gmt_dir, "Enrichment: GMT directory is required when Enrichment is enabled.")
+    # gmt_dir is no longer required: leaving it blank auto-fetches the default
+    # GO/Reactome/WikiPathways set (bin/resolve_gmts.py), falling back to the
+    # vendored copies in assets/gmt/ if offline.
     if enrichment.posenrich_enabled:
         # cosmic_db is NOT required: workflows/enrichment.nf and subworkflows/VEP/cosmic.nf
         # both fall back to a NO_FILE sentinel and skip the COSMIC overlap section
