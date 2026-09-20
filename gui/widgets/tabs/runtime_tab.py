@@ -102,16 +102,18 @@ class RuntimeTab(QWidget):
         self.script_base_name_label = QLabel("Generated script name")
         form.addRow(self.script_base_name_label, self.script_base_name)
 
-        self.work_dir = PathField(mode="dir")
+        self.work_dir = PathField(mode="dir", required=True)
         self.work_dir.set_text(self._config.work_dir)
         self.work_dir.textChanged.connect(self._on_work_dir_changed)
-        self.work_dir_label = QLabel("Work directory")
+        self.work_dir_label = QLabel("Work directory *")
+        self.work_dir_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.work_dir_label, self.work_dir)
 
-        self.results_dir = PathField(mode="dir")
+        self.results_dir = PathField(mode="dir", required=True)
         self.results_dir.set_text(self._config.results_dir)
         self.results_dir.textChanged.connect(self._on_results_dir_changed)
-        self.results_dir_label = QLabel("Results directory")
+        self.results_dir_label = QLabel("Results directory *")
+        self.results_dir_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.results_dir_label, self.results_dir)
 
         self.sbatch_job_name = QLineEdit(self._config.sbatch_job_name)
@@ -168,27 +170,36 @@ class RuntimeTab(QWidget):
         self.dataset_box = QGroupBox("Dataset paths (shared across every phenotype in this batch)")
         form = QFormLayout(self.dataset_box)
 
-        self.alignment_dir = PathField(mode="dir")
+        self.alignment_dir = PathField(mode="dir", required=True)
         self.alignment_dir.set_text(self._config.alignment_dir)
         self.alignment_dir.textChanged.connect(self._on_alignment_dir_changed)
-        self.alignment_label = QLabel("Alignments (--alignment)")
+        self.alignment_label = QLabel("Alignments (--alignment) *")
+        self.alignment_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.alignment_label, self.alignment_dir)
 
-        self.ali_format = QLineEdit(self._config.ali_format)
-        self.ali_format.textChanged.connect(self._on_ali_format_changed)
+        self.ali_format = QComboBox()
+        self.ali_format.addItems(["fasta", "clustal", "phylip", "stockholm", "nexus"])
+        self.ali_format.setCurrentText(self._config.ali_format or "fasta")
+        self.ali_format.currentTextChanged.connect(self._on_ali_format_changed)
         self.ali_format_label = QLabel("Alignment format (--ali_format)")
+        self.ali_format.setToolTip(
+            "Biopython AlignIO format. Every fixture and default in this pipeline uses "
+            "fasta — the others are Biopython-supported but not exercised end-to-end here."
+        )
         form.addRow(self.ali_format_label, self.ali_format)
 
-        self.tree_file = PathField(mode="file")
+        self.tree_file = PathField(mode="file", required=True)
         self.tree_file.set_text(self._config.tree_file)
         self.tree_file.textChanged.connect(self._on_tree_file_changed)
-        self.tree_file_label = QLabel("Species tree (--tree)")
+        self.tree_file_label = QLabel("Species tree (--tree) *")
+        self.tree_file_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.tree_file_label, self.tree_file)
 
-        self.trait_file = PathField(mode="file")
+        self.trait_file = PathField(mode="file", required=True)
         self.trait_file.set_text(self._config.trait_file)
         self.trait_file.textChanged.connect(self._on_trait_file_changed)
-        self.trait_file_label = QLabel("Trait file (--my_traits)")
+        self.trait_file_label = QLabel("Trait file (--my_traits) *")
+        self.trait_file_label.setStyleSheet("QLabel { font-weight: 600; color: #b91c1c; }")
         form.addRow(self.trait_file_label, self.trait_file)
 
         self.prune_dir = PathField(mode="dir")
@@ -389,9 +400,9 @@ class RuntimeTab(QWidget):
         if hasattr(self, "runtime_type_label"):
             self.runtime_type_label.setText(tr("Runtime", lang))
         if hasattr(self, "work_dir_label"):
-            self.work_dir_label.setText(tr("Work directory", lang))
+            self.work_dir_label.setText(f'{tr("Work directory", lang)} *')
         if hasattr(self, "results_dir_label"):
-            self.results_dir_label.setText(tr("Results directory", lang))
+            self.results_dir_label.setText(f'{tr("Results directory", lang)} *')
         if hasattr(self, "job_name_label"):
             self.job_name_label.setText(tr("SBATCH job name", lang))
         if hasattr(self, "partition_label"):
@@ -421,13 +432,13 @@ class RuntimeTab(QWidget):
         if hasattr(self, "script_base_name_label"):
             self.script_base_name_label.setText(tr("Generated script name", lang))
         if hasattr(self, "alignment_label"):
-            self.alignment_label.setText(tr("Alignments (--alignment)", lang))
+            self.alignment_label.setText(f'{tr("Alignments (--alignment)", lang)} *')
         if hasattr(self, "ali_format_label"):
             self.ali_format_label.setText(tr("Alignment format (--ali_format)", lang))
         if hasattr(self, "tree_file_label"):
-            self.tree_file_label.setText(tr("Species tree (--tree)", lang))
+            self.tree_file_label.setText(f'{tr("Species tree (--tree)", lang)} *')
         if hasattr(self, "trait_file_label"):
-            self.trait_file_label.setText(tr("Trait file (--my_traits)", lang))
+            self.trait_file_label.setText(f'{tr("Trait file (--my_traits)", lang)} *')
         if hasattr(self, "prune_dir_label"):
             self.prune_dir_label.setText(tr("Prune-list directory", lang))
         if hasattr(self, "prune_note"):

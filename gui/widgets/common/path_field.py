@@ -12,6 +12,9 @@ from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLineEdit, QPushButton, 
 from gui.widgets.common import remote_context
 
 
+_MISSING_TINT = "rgb(255, 210, 210)"  # matches gui/widgets/phenotype_table/model.py's _MISSING_TINT
+
+
 class PathField(QWidget):
     """A text field paired with a file/directory browse button.
 
@@ -20,19 +23,26 @@ class PathField(QWidget):
     SSH-backed RemoteBrowseDialog instead of the local QFileDialog (see
     remote_context.py for why this is read at click time rather than construction
     time).
+
+    `required`: when True, the line edit gets a red background while empty,
+    live-updating as the user types/browses (see set_required() to toggle it
+    after construction). Mirrors the phenotype table's existing red-tint pattern
+    for missing-but-required cells.
     """
 
     textChanged = Signal(str)
 
-    def __init__(self, mode: str = "file", placeholder: str = "", parent=None):
+    def __init__(self, mode: str = "file", placeholder: str = "", required: bool = False, parent=None):
         super().__init__(parent)
         if mode not in ("file", "dir"):
             raise ValueError(f"mode must be 'file' or 'dir', got {mode!r}")
         self._mode = mode
+        self._required = required
 
         self.line_edit = QLineEdit(self)
         self.line_edit.setPlaceholderText(placeholder)
         self.line_edit.textChanged.connect(self.textChanged)
+        self.line_edit.textChanged.connect(self._update_required_style)
 
         browse_btn = QPushButton("Browse...", self)
         browse_btn.clicked.connect(self._browse)
@@ -41,6 +51,18 @@ class PathField(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.line_edit, stretch=1)
         layout.addWidget(browse_btn)
+
+        self._update_required_style()
+
+    def set_required(self, required: bool) -> None:
+        self._required = required
+        self._update_required_style()
+
+    def _update_required_style(self, *_args) -> None:
+        if self._required and not self.line_edit.text().strip():
+            self.line_edit.setStyleSheet(f"QLineEdit {{ background-color: {_MISSING_TINT}; }}")
+        else:
+            self.line_edit.setStyleSheet("")
 
     def _browse(self) -> None:
         host = remote_context.get_remote_host()

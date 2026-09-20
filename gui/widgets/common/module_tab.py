@@ -41,8 +41,42 @@ from PySide6.QtWidgets import (
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.modules import ModuleConfigBase
 from gui.widgets.common.collapsible import CollapsibleSection
+from gui.widgets.common.multichoice_field import MultiChoiceField
+from gui.widgets.common.choice_with_other_field import ChoiceWithOtherField
 from gui.widgets.common.path_field import PathField
 from gui.widgets.common.specs import FieldSpec, ModuleTabSpec
+
+# Label decoration per FieldSpec.importance tier (see specs.py's Importance docstring).
+# "required" gets a red asterisk + bold label; "default" gets a tooltip nudge only
+# (no visual noise on every fine-tuning knob); "optional" gets a muted label color.
+_IMPORTANCE_LABEL_STYLE = {
+    "required": "QLabel { font-weight: 600; color: #b91c1c; }",
+    "default": "",
+    "optional": "QLabel { color: #6b7280; }",
+}
+_IMPORTANCE_TOOLTIP_PREFIX = {
+    "required": "Required — the pipeline hard-fails without this.\n\n",
+    "default": "Recommended default — change only if you understand the implications.\n\n",
+    "optional": "",
+}
+
+
+def _compose_tooltip(f: FieldSpec) -> str:
+    prefix = _IMPORTANCE_TOOLTIP_PREFIX.get(f.importance, "")
+    if prefix:
+        return prefix + f.help if f.help else prefix.rstrip("\n")
+    return f.help
+
+
+def _decorate_label(label_lbl: QLabel, f: FieldSpec) -> None:
+    style = _IMPORTANCE_LABEL_STYLE.get(f.importance, "")
+    if style:
+        label_lbl.setStyleSheet(style)
+    if f.importance == "required":
+        label_lbl.setText(f"{f.label} *")
+    tooltip = _compose_tooltip(f)
+    if tooltip:
+        label_lbl.setToolTip(tooltip)
 
 
 class ModuleTabWidget(QWidget):
@@ -114,7 +148,7 @@ class ModuleTabWidget(QWidget):
         layout.addStretch(1)
 
         self._field_widgets: dict[str, QWidget] = {}
-        self._label_widgets: list[tuple[QLabel, str]] = []
+        self._label_widgets: list[tuple[QLabel | QCheckBox, FieldSpec]] = []
         for f in spec.essential_fields:
             self._add_field(self._essential_form, f)
         for f in spec.advanced_fields:
@@ -133,7 +167,7 @@ class ModuleTabWidget(QWidget):
                 "QLabel { font-weight: bold; color: #475569; padding-top: 10px; padding-bottom: 2px; border-bottom: 1px solid rgba(0,0,0,0.12); margin-top: 4px; }"
             )
             form.addRow(header_lbl)
-            self._label_widgets.append((header_lbl, f"// {f.label}"))
+            self._label_widgets.append((header_lbl, f))
             return
 
         current_value = getattr(self._config, f.name)
@@ -142,39 +176,56 @@ class ModuleTabWidget(QWidget):
             widget = QCheckBox(f.label)
             widget.setChecked(bool(current_value))
             widget.toggled.connect(lambda v, name=f.name: self._set_field(name, v))
+            _decorate_label(widget, f)
             form.addRow(widget)
-            self._label_widgets.append((widget, f.label))
+            self._label_widgets.append((widget, f))
         elif f.kind == "choice":
             widget = QComboBox()
             widget.addItems(list(f.choices))
+            widget.setEditable(f.editable)
             widget.setCurrentText(str(current_value))
             widget.currentTextChanged.connect(lambda v, name=f.name: self._set_field(name, v))
             label_lbl = QLabel(f.label)
-            if f.help:
-                label_lbl.setToolTip(f.help)
+            _decorate_label(label_lbl, f)
             form.addRow(label_lbl, widget)
-            self._label_widgets.append((label_lbl, f.label))
+            self._label_widgets.append((label_lbl, f))
+        elif f.kind == "multichoice":
+            widget = MultiChoiceField(f.choices)
+            widget.set_text(str(current_value))
+            widget.valueChanged.connect(lambda v, name=f.name: self._set_field(name, v))
+            label_lbl = QLabel(f.label)
+            _decorate_label(label_lbl, f)
+            form.addRow(label_lbl, widget)
+            self._label_widgets.append((label_lbl, f))
+        elif f.kind == "choice_with_other":
+            widget = ChoiceWithOtherField(f.choices, f.choice_other_values)
+            widget.set_text(str(current_value))
+            widget.valueChanged.connect(lambda v, name=f.name: self._set_field(name, v))
+            label_lbl = QLabel(f.label)
+            _decorate_label(label_lbl, f)
+            form.addRow(label_lbl, widget)
+            self._label_widgets.append((label_lbl, f))
         elif f.kind in ("path_file", "path_dir"):
-            widget = PathField(mode="file" if f.kind == "path_file" else "dir")
+            widget = PathField(mode="file" if f.kind == "path_file" else "dir",
+                                required=(f.importance == "required"))
             widget.set_text(str(current_value))
             widget.textChanged.connect(lambda v, name=f.name: self._set_field(name, v))
             label_lbl = QLabel(f.label)
-            if f.help:
-                label_lbl.setToolTip(f.help)
+            _decorate_label(label_lbl, f)
             form.addRow(label_lbl, widget)
-            self._label_widgets.append((label_lbl, f.label))
+            self._label_widgets.append((label_lbl, f))
         else:  # "str"
             widget = QLineEdit(str(current_value))
             widget.setPlaceholderText(f.placeholder)
             widget.textChanged.connect(lambda v, name=f.name: self._set_field(name, v))
             label_lbl = QLabel(f.label)
-            if f.help:
-                label_lbl.setToolTip(f.help)
+            _decorate_label(label_lbl, f)
             form.addRow(label_lbl, widget)
-            self._label_widgets.append((label_lbl, f.label))
+            self._label_widgets.append((label_lbl, f))
 
-        if f.help:
-            widget.setToolTip(f.help)
+        tooltip = _compose_tooltip(f)
+        if tooltip:
+            widget.setToolTip(tooltip)
         self._field_widgets[f.name] = widget
 
     def retranslate(self, lang: str = "en") -> None:
@@ -190,11 +241,21 @@ class ModuleTabWidget(QWidget):
             self.advanced_section.set_title(f"{tr('Advanced parameters', lang)} ({len(self._spec.advanced_fields)})")
         if hasattr(self, "fallback_group") and self.fallback_group:
             self.fallback_group.setTitle(tr("Precomputed input (used when disabled)", lang))
-        for label_widget, orig_text in getattr(self, "_label_widgets", []):
-            if isinstance(label_widget, QCheckBox):
-                label_widget.setText(tr(orig_text, lang))
-            elif isinstance(label_widget, QLabel):
-                label_widget.setText(tr(orig_text, lang))
+        for label_widget, f in getattr(self, "_label_widgets", []):
+            if f.kind == "section":
+                label_widget.setText(f"// {tr(f.label, lang)}")
+                continue
+            translated_label = tr(f.label, lang)
+            if f.importance == "required":
+                translated_label = f"{translated_label} *"
+            label_widget.setText(translated_label)
+            # Note: the importance-tier prefix (see _IMPORTANCE_TOOLTIP_PREFIX) stays in
+            # English regardless of `lang` — only the field's own help text is translated.
+            prefix = _IMPORTANCE_TOOLTIP_PREFIX.get(f.importance, "")
+            translated_help = tr(f.help, lang) if f.help else ""
+            tooltip = prefix + translated_help if prefix else translated_help
+            if tooltip:
+                label_widget.setToolTip(tooltip)
 
     def _set_field(self, name: str, value) -> None:
         setattr(self._config, name, value)

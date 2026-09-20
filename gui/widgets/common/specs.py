@@ -12,8 +12,18 @@ this is the mechanism that keeps ~90% of module-tab structure shared.
 
 # ── Standard library ──────────────────────────────────────────────────────────
 from dataclasses import dataclass, field
+from typing import Literal
 
-FieldKind = str  # "bool" | "str" | "path_file" | "path_dir" | "choice" | "section"
+FieldKind = str  # "bool" | "str" | "path_file" | "path_dir" | "choice" | "multichoice" | "choice_with_other" | "section"
+
+# required: no graceful default exists downstream and the pipeline hard-fails
+#   without it (validate.py is the ground truth for this tier).
+# default: has a working default, but changing it affects statistical/scientific
+#   validity in a way that needs real understanding (seed, FDR thresholds,
+#   permulation counts, model-selection parameters, ...).
+# optional: auxiliary paths, standalone/precomputed overrides, cosmetic/report
+#   parameters — safe to leave blank or default with no scientific consequence.
+Importance = Literal["required", "default", "optional"]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -21,7 +31,15 @@ class FieldSpec:
     name: str = ""  # attribute name on the module's config dataclass (empty for sections)
     label: str
     kind: FieldKind = "str"
-    choices: tuple[str, ...] = ()  # only used when kind == "choice"
+    importance: Importance = "optional"  # see Importance above; default keeps existing tabs compiling
+    choices: tuple[str, ...] = ()  # "choice"/"multichoice": raw stored values. "choice_with_other":
+    # display labels, with the LAST entry being the free-text "other" sentinel (see choice_other_values).
+    choice_other_values: tuple[str, ...] = ()  # "choice_with_other" only: stored value for each of
+    # `choices` except the last (the "other" sentinel) — index-aligned with choices[:-1]. The stored
+    # value when "other" is picked is whatever the user types in the revealed free-text field.
+    editable: bool = False  # "choice" only: render as an editable QComboBox pre-populated with
+    # `choices` as presets, but still accepting free numeric/text entry (e.g. min_divergent_fraction)
+    # instead of a strict closed dropdown.
     placeholder: str = ""
     help: str = ""  # tooltip text; shown on both the label and the input widget
 
