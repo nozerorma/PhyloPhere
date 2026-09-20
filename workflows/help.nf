@@ -341,13 +341,12 @@ POSENRICH (position-level):
 --posenrich_max_size                   <INTEGER>                0    (0 = no cap)
 --posenrich_padj_thr                     <FLOAT 0-1>              0.15
 --posenrich_background_file                  <"background_file">      null
---domain_variability_file, --ucr_positions_file, --fubar_sites_file,
---egg_members_file, --egg_annotations_file   (position-level annotation sources;
-                                              blank domain_variability_file/ucr_positions_file
-                                              auto-generate from the alignment, blank
-                                              egg_members_file/egg_annotations_file
-                                              auto-fetch eggNOG5, fubar_sites_file is the
-                                              only one still required)
+--domain_variability_file, --ucr_positions_file      (position-level annotation
+                                              sources; leave blank to auto-generate
+                                              from the alignment)
+--egg_members_file, --egg_annotations_file   (leave blank to auto-fetch eggNOG5)
+--fubar_sites_file                           (required; cannot be generated in-house
+                                              -- see github.com/nozerorma/ortholog_characterizator)
 '''
 
 workflow HELP {

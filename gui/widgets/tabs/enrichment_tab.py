@@ -94,7 +94,16 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="posenrich_batch_size", label="POSENRICH GMTs per task (1 = no batching)"),
         FieldSpec(name="domain_variability_file", label="Domain variability file", kind="path_file"),
         FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file"),
-        FieldSpec(name="fubar_sites_file", label="FUBAR sites file", kind="path_file"),
+        FieldSpec(
+            name="fubar_sites_file",
+            label="FUBAR sites file",
+            kind="path_file",
+            help="Cannot be generated in-house: HyPhy's per-site FUBAR fit needs "
+                 "the full phylogeny + codon alignment + MCMC/VB inference, not "
+                 "just the alignment plus a public DB. See "
+                 "github.com/nozerorma/ortholog_characterizator. Required for "
+                 "POSENRICH.",
+        ),
         FieldSpec(
             name="egg_members_file",
             label="eggNOG members file (optional)",
