@@ -422,6 +422,16 @@ process {
         memory = { 8.GB * task.attempt }
         time   = { 8.h  * task.attempt }
     }
+    withName: 'ENSEMBL_VEP_ANNOTATE' {
+        // First use per species/assembly populates a multi-GB offline VEP
+        // cache via vep_install (network download + local indexing) before
+        // annotating; process_medium's default 4h is too tight for that
+        // one-time cost. Cache is persistent (see ensembl_vep.nf), so later
+        // runs against the same cache only need the annotation step itself.
+        cpus   = { 2 }
+        memory = { 4.GB  * task.attempt }
+        time   = { 6.h   * task.attempt }
+    }
 
     // ── RERconverge ─────────────────────────────────────────────────────────
     withName: 'RER_TRAIT' {

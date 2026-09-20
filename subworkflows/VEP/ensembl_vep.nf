@@ -15,11 +15,16 @@
  * external pathogenicity database's bundled reference annotation — so this
  * doesn't introduce a new external reference-proteome dependency.
  *
- * Requires a local, pre-downloaded VEP cache (--vep_cache_dir): VEP's offline
- * per-species/assembly cache is multi-GB, the same "cache large, don't commit"
- * pattern used for STRING/eggNOG/Pfam-A elsewhere in this pipeline. Populate
- * it once with:
+ * Uses a local VEP cache (--vep_cache_dir): VEP's offline per-species/assembly
+ * cache is multi-GB, the same "cache large, don't commit" pattern used for
+ * STRING/eggNOG/Pfam-A elsewhere in this pipeline. Left empty/unset, it
+ * defaults to a persistent, species/assembly-scoped location under
+ * ~/.cache/phylophere/vep/ and is populated automatically on first use (fetch-
+ * first, cache-once — mirrors ensure_string_cache() in 13.AMI_analysis.Rmd)
+ * via:
  *   vep_install -a cf -s <species> -y <assembly> -c <vep_cache_dir> --NO_HTSLIB
+ * Point --vep_cache_dir at an already-populated cache to reuse/share one
+ * instead.
  */
 
 process ENSEMBL_VEP_ANNOTATE {
@@ -35,7 +40,7 @@ process ENSEMBL_VEP_ANNOTATE {
     path caas_file
     path vep_map_dir
     path gene_ensembl_file
-    path vep_cache_dir
+    val vep_cache_dir
 
     output:
     path "ensembl_vep_mapped.tsv", emit: ensembl_vep_tsv
@@ -52,11 +57,14 @@ process ENSEMBL_VEP_ANNOTATE {
     """
     cp ${local_dir}/build_vep_hgvs.py ${local_dir}/join_vep_output.py ${local_dir}/vep_common.py .
 
-    if [[ ! -d "${vep_cache_dir}" || -z "\$(ls -A "${vep_cache_dir}" 2>/dev/null)" ]]; then
-        echo "WARN Missing/empty VEP cache directory: ${vep_cache_dir}. Skipping Ensembl VEP annotation." >&2
-        echo "WARN Populate it once with: vep_install -a cf -s ${species} -y ${assembly} -c ${vep_cache_dir} --NO_HTSLIB" >&2
-        printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
-        exit 0
+    mkdir -p "${vep_cache_dir}"
+    if [[ -z "\$(ls -A "${vep_cache_dir}" 2>/dev/null)" ]]; then
+        echo "INFO VEP cache empty at ${vep_cache_dir} -- populating once via vep_install (${species}/${assembly})." >&2
+        if ! vep_install -a cf -s ${species} -y ${assembly} -c "${vep_cache_dir}" --NO_HTSLIB --NO_UPDATE --NO_TEST --QUIET; then
+            echo "WARN vep_install failed for ${species}/${assembly} in ${vep_cache_dir} -- skipping Ensembl VEP annotation." >&2
+            printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
+            exit 0
+        fi
     fi
 
     python3 build_vep_hgvs.py "${caas_file}" "${vep_map_dir}" "${gene_ensembl_file}" hgvs_ids.txt id_map.tsv

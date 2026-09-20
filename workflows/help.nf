@@ -214,7 +214,7 @@ Usage:
 --vep_primateai_db                 <"primateai_db">          null
 --cosmic_db                          <"cosmic_db">              null
 --vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above)
---vep_cache_dir                        <"vep_cache_dir">          null  (required when --vep_ensembl is set; populate with vep_install)
+--vep_cache_dir                        <"vep_cache_dir">          null  (optional; blank auto-populates ~/.cache/phylophere/vep/<species>_<assembly> via vep_install on first use)
 --vep_species                            <"species">                "homo_sapiens"
 --vep_assembly                             <"assembly">               "GRCh38"
 '''

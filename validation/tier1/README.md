@@ -35,7 +35,7 @@ tier1/
 | dataset | `input/` | trait(s) | genes | template |
 |---------|----------|----------|-------|----------|
 | PEPC / C4 photosynthesis (Cyperaceae) | `input/pepc/` | `c4` (categorical) | PEPC (1) | `gui/templates/tier1_pepc.json` |
-| Haemoglobin / high-altitude adaptation (Sino-Himalayan tits) | `input/hb/` | `elev_mid` (continuous) + `altitude` (categorical) | HBA, HBD, HBB (3) | `gui/templates/tier1_hb.json` |
+| Haemoglobin / high-altitude adaptation (Sino-Himalayan tits) | `input/hb/` | `elev_mid` (continuous) + `altitude` (categorical) | HBA, HBD, HBB (3) | `gui/templates/tier1_hb_altitude.json` |
 
 Four genes total across both datasets — see each `input/<dataset>/README.md` for
 full provenance and truth-site detail.
@@ -73,5 +73,5 @@ those stages to consume). Raw per-gene output kept in
 ## Running
 
 Open Phylophere's GUI → File → Load template → `tier1_pepc.json` or
-`tier1_hb.json` → Generate Scripts → run. Or point the CLI runner directly at
+`tier1_hb_altitude.json` → Generate Scripts → run. Or point the CLI runner directly at
 the same JSON.

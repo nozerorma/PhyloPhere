@@ -70,22 +70,21 @@ SPEC = ModuleTabSpec(
             kind="bool",
             help="Runs the official Ensembl VEP CLI for consequence prediction — "
                  "works even when neither PrimateAI-3D nor COSMIC is supplied. "
-                 "Needs a pre-downloaded offline cache (below).",
+                 "Populates its own offline cache on first use (below).",
             importance="optional",
         ),
     ),
     advanced_fields=(
-        # validate.py: require(vep.vep_cache_dir, ...) conditionally, only when
-        # vep.vep_ensembl is checked — required within that branch, not globally.
         FieldSpec(
             name="vep_cache_dir",
             label="Ensembl VEP cache directory",
             kind="path_dir",
-            help="Local offline VEP cache. Multi-GB, not auto-downloaded — "
-                 "populate once with: vep_install -a cf -s <species> -y <assembly> "
-                 "-c <this dir> --NO_HTSLIB, then reuse across runs. Required when "
-                 "'Enable Ensembl VEP consequence annotation' is checked.",
-            importance="required",
+            help="Local offline VEP cache. Left blank, defaults to a persistent "
+                 "~/.cache/phylophere/vep/<species>_<assembly> location and is "
+                 "populated automatically on first use (vep_install -a cf -s "
+                 "<species> -y <assembly> -c <dir> --NO_HTSLIB), then reused across "
+                 "runs. Set this only to reuse/share an already-populated cache.",
+            importance="default",
         ),
         # Borderline default/optional: not in validate.py and has a working
         # default ("homo_sapiens"/"GRCh38"), but silently mismatching your actual

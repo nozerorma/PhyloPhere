@@ -29,7 +29,6 @@
     "ali_format": "fasta",
     "tree_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/science.abn7829_data_s4.nex.tree",
     "trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/1.Cancer_data/Neoplasia_species360/cancer_traits_processed-LQ.csv",
-    "simple_trait_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/maria_caas/Datos_fenotipos/diet_traitfile_comma.csv",
     "prune_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/1.Cancer_data/Neoplasia_species360/ZAK-CLEANUP",
     "branch_trait": "LQ",
     "ali_sp_names": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/2.Alignments/ali_sp_names.txt",
@@ -39,7 +38,6 @@
     "taxon_of_interest": "family",
     "phenotype_rows": [
       {
-        "trait_class": 1,
         "trait": "neoplasia_prevalence",
         "secondary": "malignant_prevalence",
         "n_trait": "adult_necropsy_count",
@@ -49,7 +47,6 @@
         "trait_type": ""
       },
       {
-        "trait_class": 1,
         "trait": "malignant_prevalence",
         "secondary": "neoplasia_prevalence",
         "n_trait": "adult_necropsy_count",
@@ -178,7 +175,11 @@
       "extra_flags": "",
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
-      "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz"
+      "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz",
+      "vep_ensembl": false,
+      "vep_cache_dir": "",
+      "vep_species": "homo_sapiens",
+      "vep_assembly": "GRCh38"
     },
     "scoring": {
       "enabled": true,
@@ -212,6 +213,7 @@
       "fcs_top_n": "30",
       "fcs_batch_size": "4",
       "string_db_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/STRING",
+      "string_cache_dir": "",
       "string_species": "9606",
       "domino_network_score_thr": "700",
       "domino_slice_thr": "0.3",
@@ -233,6 +235,7 @@
       "posenrich_min_size": "5",
       "posenrich_max_size": "0",
       "posenrich_padj_thr": "0.15",
+      "posenrich_p_perm_thr": "0.025",
       "posenrich_batch_size": "4"
     }
   },

@@ -33,7 +33,7 @@ CT_DISAMBIGUATION → FADE → SCORING. RER/accumulation/enrichment/VEP off.
 had the PSS top-quantile gate **disabled outright** (pipeline default 0.05
 left ~6/256 candidate pairs eligible on this tree).
 
-**Current template** (`../../../gui/templates/tier1_hb.json`): same
+**Current template** (`../../../gui/templates/tier1_hb_altitude.json`): same
 CAAS/CT_DISAMBIGUATION/FADE chain plus **RER** (3 genes — enough for a
 minimally meaningful cross-gene comparison, unlike PEPC), accumulation/VEP/
 enrichment off, `local_lowspec` resource preset. Deviates from pipeline

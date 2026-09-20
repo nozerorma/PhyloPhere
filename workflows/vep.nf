@@ -80,15 +80,17 @@ workflow VEP {
             // ── Ensembl VEP consequence annotation (independent of the DBs above) ──
             if (params.vep_ensembl) {
                 assert params.gene_ensembl_file : "VEP: --vep_ensembl requires --gene_ensembl_file (for human_protein_id -> HGVS lookup)."
-                def cache_dir_file = params.vep_cache_dir ? file(params.vep_cache_dir) : file('NO_FILE')
-                if (cache_dir_file.name != 'NO_FILE' && cache_dir_file.exists()) {
-                    def cache_dir_ch = Channel.value(cache_dir_file)
-                    def ensembl_file_ch = Channel.value(file(params.gene_ensembl_file))
-                    def ensembl_out = ENSEMBL_VEP_ANNOTATE(caas_ch, map_dir_ch, ensembl_file_ch, cache_dir_ch)
-                    ensembl_vep_out = ensembl_out.ensembl_vep_tsv
-                } else {
-                    log.warn "VEP: --vep_ensembl is set but --vep_cache_dir is missing/empty — skipping Ensembl VEP annotation."
-                }
+                // Not user-required: an empty --vep_cache_dir resolves to a
+                // persistent, species/assembly-scoped default that
+                // ENSEMBL_VEP_ANNOTATE populates itself on first use via
+                // vep_install (see subworkflows/VEP/ensembl_vep.nf).
+                def species = params.vep_species ?: 'homo_sapiens'
+                def assembly = params.vep_assembly ?: 'GRCh38'
+                def resolved_cache_dir = params.vep_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/vep/${species}_${assembly}"
+                def cache_dir_ch = Channel.value(resolved_cache_dir)
+                def ensembl_file_ch = Channel.value(file(params.gene_ensembl_file))
+                def ensembl_out = ENSEMBL_VEP_ANNOTATE(caas_ch, map_dir_ch, ensembl_file_ch, cache_dir_ch)
+                ensembl_vep_out = ensembl_out.ensembl_vep_tsv
             }
         } else {
             log.warn "VEP requested but no CAAS input was available from CT_POSTPROC and --vep_caas_input was not provided. Skipping VEP."

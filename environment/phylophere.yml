@@ -32,7 +32,7 @@ dependencies:
   - hyphy            # FADE and other selection tests
   - paml             # codeml / ancestral reconstruction
   - domino           # active-module detection
-  - ensembl-vep      # optional consequence annotation (--vep_ensembl); needs a separately-downloaded offline cache
+  - ensembl-vep      # optional consequence annotation (--vep_ensembl); offline cache auto-populated on first use via vep_install (see subworkflows/VEP/ensembl_vep.nf)
   - hmmer            # hmmscan/hmmpress for domain-variability auto-generation (bin/compute_domain_variability.py)
 
   # --- python: scientific stack ---

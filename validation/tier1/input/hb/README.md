@@ -145,7 +145,7 @@ data (Thr34 for *Sylviparus modestus*), not Fig. S4's table.
   additional independent origins — separate fixture-scope decision, not
   started.
 
-## GUI template wiring (`../../../../gui/templates/tier1_hb.json`)
+## GUI template wiring (`../../../../gui/templates/tier1_hb_altitude.json`)
 
 - `taxid.tsv` / `gene_ensembl.tsv` in this directory are `build.py`'s synthetic
   placeholders (fake genomic coordinates, no real Ensembl gene ids for these

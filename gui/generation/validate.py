@@ -160,12 +160,10 @@ def validate(project: ProjectConfig) -> list[str]:
     vep = project.modules.vep
     if vep.enabled:
         require(vep.vep_map_dir, "VEP: per-gene MAP directory is required when VEP is enabled.")
-        if vep.vep_ensembl:
-            require(
-                vep.vep_cache_dir,
-                "VEP: Ensembl VEP cache directory is required when Ensembl VEP "
-                "consequence annotation is enabled.",
-            )
+        # vep_cache_dir is NOT required even when vep_ensembl is checked: left
+        # blank, ENSEMBL_VEP_ANNOTATE resolves a persistent default location
+        # and populates it itself via vep_install on first use (see
+        # subworkflows/VEP/ensembl_vep.nf).
 
     # --- Scoring ---
     if scoring.enabled:
