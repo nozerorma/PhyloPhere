@@ -44,9 +44,17 @@ fi
 module load Miniconda3 2>/dev/null || module load Miniconda3/25.7.0-2 2>/dev/null || true
 {% endif %}
 
-source ~/.bashrc
-conda deactivate
-conda activate phylophere
+# --- ENV ACTIVATION ---
+set +u
+if command -v micromamba >/dev/null 2>&1; then
+    eval "$(micromamba shell hook --shell bash)"
+    micromamba activate phylophere
+elif [ -n "${CONDA_EXE:-}" ] || command -v conda >/dev/null 2>&1; then
+    __base="$(conda info --base 2>/dev/null || dirname "$(dirname "${CONDA_EXE:-}")")"
+    [ -f "$__base/etc/profile.d/conda.sh" ] && . "$__base/etc/profile.d/conda.sh"
+    conda activate phylophere
+fi
+set -u
 
 # --- GLOBAL RUN CONFIG ---
 export RESUME="${RESUME:-{{ "1" if runtime.resume else "0" }}}"

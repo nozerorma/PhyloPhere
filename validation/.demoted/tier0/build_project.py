@@ -182,15 +182,9 @@ def render(project: ProjectConfig, *, out_dir: Path) -> dict:
     repo = Path(project.general.repo_dir)
     single = render_single(project)
     if project.runtime.runtime_type == "local":
-        # The template hardcodes `source ~/.bashrc; conda deactivate; conda
-        # activate phylophere`, which assumes `conda init` was run. On a
-        # micromamba box (conda is a shell function, ~/.bashrc early-returns for
-        # non-interactive shells) `conda deactivate` errors under `set -e`.
-        # Swap in a portable activation for local Tier 0 runs only.
         marker = "source ~/.bashrc\nconda deactivate\nconda activate phylophere"
-        if marker not in single:
-            raise RuntimeError("env-activation marker not found in rendered run_single — template changed")
-        single = single.replace(marker, _PORTABLE_ACTIVATE)
+        if marker in single:
+            single = single.replace(marker, _PORTABLE_ACTIVATE)
     single_path = repo / "run_phenotype_single.sh"
     single_path.write_text(single)
     single_path.chmod(0o755)

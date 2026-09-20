@@ -17,9 +17,16 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 timestamp=$(date +%Y%m%d_%H%M%S)
 
 # --- ENV ACTIVATION ---
-source ~/.bashrc
-conda deactivate
-conda activate phylophere
+set +u
+if command -v micromamba >/dev/null 2>&1; then
+    eval "$(micromamba shell hook --shell bash)"
+    micromamba activate phylophere
+elif [ -n "${CONDA_EXE:-}" ] || command -v conda >/dev/null 2>&1; then
+    __base="$(conda info --base 2>/dev/null || dirname "$(dirname "${CONDA_EXE:-}")")"
+    [ -f "$__base/etc/profile.d/conda.sh" ] && . "$__base/etc/profile.d/conda.sh"
+    conda activate phylophere
+fi
+set -u
 
 # Postproc mode determines RUN_TAG ("_exploratory"/"_complete"/"") first, so the
 # pre-run Nextflow home/session/work directories below can key on ${TRAIT}${RUN_TAG}

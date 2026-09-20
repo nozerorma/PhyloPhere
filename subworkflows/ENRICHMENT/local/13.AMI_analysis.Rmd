@@ -26,6 +26,7 @@ params:
   gene_scores_file: NULL
   scoring_p_emp_thr: 0.1  # gene_caas_pperm_adj threshold for CAAS-significance node highlight (thick border); mirrors Phase D's param elsewhere
   string_db_dir: NULL
+  string_cache_dir: NULL
   min_cluster_genes: 3
   domino_network_sif: NULL
   domino_modules_dir: NULL
@@ -338,7 +339,7 @@ ami_root <- "."
 ami_results_dir <- "ami_results"
 ami_summary_dir <- "ami_summary"
 ami_plots_dir   <- "ami_plots"
-string_cache_dir   <- "string_cache"
+string_cache_dir   <- if (!is.null(params$string_cache_dir) && nzchar(params$string_cache_dir)) params$string_cache_dir else "string_cache"
 
 createDir(ami_results_dir)
 createDir(ami_summary_dir)

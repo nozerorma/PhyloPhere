@@ -29,7 +29,7 @@ Example (manual CLI use)
     eval "$(python3 bin/resolve_core_inputs.py --outdir out --tree tree.nwk --alignment align/)"
     nextflow main.nf ... --tax_id "$TAX_ID" --gene_ensembl_file "$GENE_ENSEMBL_FILE"
 
-A generation failure (missing ete3/pybiomart, network outage, no exact
+A generation failure (missing ete3/requests, network outage, no exact
 matches) leaves the corresponding line empty rather than aborting — the
 pipeline's own required-file checks then report it the same as if the user
 had left the flag blank.

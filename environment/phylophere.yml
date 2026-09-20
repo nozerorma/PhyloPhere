@@ -44,7 +44,8 @@ dependencies:
   - biopython
   - dendropy
   - ete3              # NCBI taxonomy lookups (bin/generate_taxid_map.py)
-  - pybiomart         # Ensembl BioMart queries (bin/generate_ensembl_mapping.py)
+  - legacy-cgi        # required by ete3 on Python >= 3.13 (PEP 594 removed cgi)
+  - requests          # Ensembl BioMart queries (bin/generate_ensembl_mapping.py)
   - pyyaml
   - jinja2           # HTML report generation (GUI + pipeline)
   - tqdm

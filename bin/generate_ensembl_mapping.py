@@ -9,8 +9,8 @@ external_gene_name are returned; genes with no BioMart hit are reported to
 --unresolved and are simply absent from the output (only 'gene' and
 'length' are hard-required downstream, per filter_caas_genes.py).
 
-Model: extract_bg.py (Malignancy_Primates/Scripts/AdHoc-Scripts), which uses
-the same pybiomart Dataset.query pattern.
+Model: extract_bg.py (Malignancy_Primates/Scripts/AdHoc-Scripts), using direct
+Ensembl BioMart XML queries via requests.
 
 Output (--output) schema, per validation/fixtures/tier1/pepc/build.py:
     gene  chr  start  end  strand  length  human_protein_id
@@ -24,22 +24,14 @@ repeated runs against the same gene list don't re-hit Ensembl.
 
 import argparse
 import hashlib
+from io import StringIO
 import os
 import sys
 
 import pandas as pd
-from pybiomart import Dataset
+import requests
 
 _COLUMNS = ["gene", "chr", "start", "end", "strand", "length", "human_protein_id"]
-
-_ATTRIBUTES = [
-    "external_gene_name",
-    "chromosome_name",
-    "start_position",
-    "end_position",
-    "strand",
-    "ensembl_peptide_id",
-]
 
 
 def load_gene_list(path: str) -> list:
@@ -56,18 +48,43 @@ def cache_key(genes: list) -> str:
     return hashlib.sha256("\n".join(genes).encode("utf-8")).hexdigest()
 
 
-def query_biomart(genes: list) -> pd.DataFrame:
-    dataset = Dataset(name="hsapiens_gene_ensembl", host="http://www.ensembl.org")
-    df = dataset.query(attributes=_ATTRIBUTES, filters={"external_gene_name": genes})
-    df = df.rename(columns={
-        "Gene name": "gene",
-        "Chromosome/scaffold name": "chr",
-        "Gene start (bp)": "start",
-        "Gene end (bp)": "end",
-        "Strand": "strand",
-        "Protein stable ID": "human_protein_id",
-    })
-    return df
+def query_biomart(genes: list, chunk_size: int = 500) -> pd.DataFrame:
+    url = "http://www.ensembl.org/biomart/martservice"
+    frames = []
+    for i in range(0, len(genes), chunk_size):
+        chunk = genes[i : i + chunk_size]
+        gene_list_str = ",".join(chunk)
+        query_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE Query>
+<Query virtualSchemaName="default" formatter="TSV" header="1" uniqueRows="1" datasetConfigVersion="0.6">
+    <Dataset name="hsapiens_gene_ensembl" interface="default">
+        <Filter name="external_gene_name" value="{gene_list_str}"/>
+        <Attribute name="external_gene_name"/>
+        <Attribute name="chromosome_name"/>
+        <Attribute name="start_position"/>
+        <Attribute name="end_position"/>
+        <Attribute name="strand"/>
+        <Attribute name="ensembl_peptide_id"/>
+    </Dataset>
+</Query>"""
+        resp = requests.get(url, params={"query": query_xml}, timeout=120)
+        resp.raise_for_status()
+        if "Query ERROR" in resp.text:
+            raise RuntimeError(resp.text.strip())
+        chunk_df = pd.read_csv(StringIO(resp.text), sep="\t")
+        chunk_df = chunk_df.rename(columns={
+            "Gene name": "gene",
+            "Chromosome/scaffold name": "chr",
+            "Gene start (bp)": "start",
+            "Gene end (bp)": "end",
+            "Strand": "strand",
+            "Protein stable ID": "human_protein_id",
+        })
+        frames.append(chunk_df)
+
+    if not frames:
+        return pd.DataFrame(columns=["gene", "chr", "start", "end", "strand", "human_protein_id"])
+    return pd.concat(frames, ignore_index=True)
 
 
 def main():

@@ -33,6 +33,15 @@ print(geneTreesPath)
 # Load trees into gene_trees object
 gene_trees <- read.tree(geneTreesPath)
 
+# read.tree() on a plain multi-Newick file (one tree per line, no gene-name
+# prefix) returns an unnamed multiPhylo -- names(gene_trees) is then character(0),
+# so the pruning loop below (which iterates over names(gene_trees)) silently runs
+# zero times, producing an empty pruned-trees file with no error at this stage.
+# Fall back to positional names so every tree still gets pruned and written.
+if (is.null(names(gene_trees)) || !any(nzchar(names(gene_trees)))) {
+  names(gene_trees) <- paste0("gene", seq_along(gene_trees))
+}
+
 # Prune trees for species in trait file
 # Load traitfile
 ## File must have a multi-column structure with at least a "species" and "trait" column
