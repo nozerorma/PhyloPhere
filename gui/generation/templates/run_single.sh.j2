@@ -463,7 +463,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "asr_robustness": $_ASR_ROBUSTNESS,
   "ct_disambig_asr_mode": "$ASR_MODE",
   "ct_disambig_asr_model": "${ASR_MODEL:-lg}",
-  "ct_disambig_asr_cache_dir": "$ASR_CACHE_DIR",
+  "ct_disambig_asr_cache_dir": "${ASR_CACHE_DIR:-$REPO_DIR/caches/.asr_cache}",
   "ct_disambig_posterior_threshold": "${POSTERIOR_THRESHOLD:-0.1}",
   "ct_disambig_max_tasks_per_child": "${MAX_TASKS_PER_CHILD:-50}",
   "ct_disambig_batch_size": "${DISAMBIG_BATCH_SIZE:-1}",

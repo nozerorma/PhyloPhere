@@ -55,18 +55,31 @@ SPEC = ModuleTabSpec(
             label="ASR mode",
             kind="choice",
             choices=("precomputed", "compute"),
+            importance="default",
         ),
-        FieldSpec(name="ct_disambig_asr_model", label="ASR substitution model"),
+        FieldSpec(
+            name="ct_disambig_asr_model",
+            label="ASR substitution model",
+            kind="choice",
+            # Ground truth is subworkflows/CT_DISAMBIGUATION/local/src/asr/reconstruct.py's
+            # MODEL->aa_rate_file map (dayhoff/jtt/wag/lg via PAML codeml) — the 3-way
+            # set in earlier task notes omitted "dayhoff", which the code does accept.
+            choices=("dayhoff", "jtt", "wag", "lg"),
+            importance="default",
+        ),
         FieldSpec(
             name="ct_disambig_asr_cache_dir",
-            label="ASR cache directory",
+            label="ASR cache directory (optional)",
             kind="path_dir",
+            importance="optional",
             help=(
-                "Required in both ASR modes — this doubles as the ASR result cache, "
-                "not just a place to point at precomputed states. Defaults to "
-                "caches/.asr_cache under the run directory (created automatically); "
-                "override only to reuse a cache from a previous run or share one "
-                "across runs."
+                "This doubles as the ASR result cache in both ASR modes, not just a "
+                "place to point at precomputed states — but leaving it blank auto-"
+                "generates a working default (repo_dir/caches/.asr_cache, created "
+                "automatically; see gui/generation/templates/run_single.sh.j2's bash "
+                "fallback). Override only to reuse a cache from a previous run or "
+                "share one across runs — cache location has no effect on statistical "
+                "validity."
             ),
         ),
         Section("Post-processing mode (conf/ct_postproc.config)"),
@@ -74,6 +87,7 @@ SPEC = ModuleTabSpec(
             name="run_postproc_exploratory",
             label="Run Exploratory Post-Processing Sweep",
             kind="bool",
+            importance="optional",
             help=(
                 "Grid-searches Cluster min length x Cluster max CAAS value across the "
                 "sweep ranges below (Advanced) instead of a single pass. Writes to "
@@ -85,6 +99,7 @@ SPEC = ModuleTabSpec(
             name="run_postproc_filter",
             label="Run Filtering Production Post-Processing",
             kind="bool",
+            importance="optional",
             help=(
                 "Single filtering pass using the fixed Cluster min length / Cluster "
                 "max CAAS value thresholds below (Advanced). Writes to ${OUTDIR}_final/ "
@@ -96,6 +111,7 @@ SPEC = ModuleTabSpec(
         FieldSpec(
             name="ct_disambig_posterior_threshold",
             label="Posterior probability threshold",
+            importance="default",
             help=(
                 "Minimum ASR posterior probability for an ancestral state call to be "
                 "trusted; calls below this are treated as ambiguous. Statistical "
@@ -107,12 +123,14 @@ SPEC = ModuleTabSpec(
         FieldSpec(
             name="filter_minlen",
             label="Cluster min length (filter mode)",
+            importance="default",
             help="Minimum CAAS cluster length to keep. Used by Production Filtering; "
                  "ignored when Exploratory Sweep is selected instead.",
         ),
         FieldSpec(
             name="filter_maxcaas",
             label="Cluster max CAAS value (filter mode)",
+            importance="default",
             help="Maximum per-cluster CAAS fraction to keep (0-1). Used by Production "
                  "Filtering; ignored when Exploratory Sweep is selected instead.",
         ),
@@ -121,6 +139,7 @@ SPEC = ModuleTabSpec(
             label="Gene filter mode",
             kind="choice",
             choices=("none", "extreme", "dubious", "both"),
+            importance="default",
             help=(
                 "'extreme' drops genes whose CAAS count is a statistical outlier "
                 "(Extreme-gene quantile threshold, below). 'dubious' drops genes "
@@ -130,20 +149,31 @@ SPEC = ModuleTabSpec(
             ),
         ),
         Section("Sensitivity and robustness testing"),
-        FieldSpec(name="asr_robustness", label="Run ASR Robustness diagnostics report", kind="bool"),
+        FieldSpec(
+            name="asr_robustness",
+            label="Run ASR Robustness diagnostics report",
+            kind="bool",
+            importance="optional",
+        ),
         Section("Performance and batching"),
-        FieldSpec(name="ct_disambig_max_tasks_per_child", label="Max tasks per worker child"),
-        FieldSpec(name="ct_disambig_batch_size", label="Disambiguation genes per batch"),
+        FieldSpec(name="ct_disambig_max_tasks_per_child", label="Max tasks per worker child", importance="optional"),
+        FieldSpec(name="ct_disambig_batch_size", label="Disambiguation genes per batch", importance="optional"),
         Section("Exploratory parameter sweep values (conf/ct_postproc.config)"),
+        # Borderline default/optional: these only shape the diagnostic sweep grid
+        # (Exploratory mode), not the production filter thresholds above that
+        # actually gate what ships — so a wrong sweep range wastes a diagnostic
+        # run rather than compromising a committed result.
         FieldSpec(
             name="minlen_values",
             label="Cluster min length sweep (exploratory mode)",
+            importance="optional",
             help="Comma-separated Cluster min length values to grid-search. Used only "
                  "when Exploratory Sweep is selected.",
         ),
         FieldSpec(
             name="maxcaas_values",
             label="Cluster max CAAS sweep (exploratory mode)",
+            importance="optional",
             help="Comma-separated Cluster max CAAS value values to grid-search. Used "
                  "only when Exploratory Sweep is selected.",
         ),
@@ -151,12 +181,14 @@ SPEC = ModuleTabSpec(
         FieldSpec(
             name="extreme_threshold",
             label="Extreme-gene quantile threshold",
+            importance="default",
             help="Quantile above which a gene's CAAS count is considered an outlier. "
                  "Only used when Gene filter mode is 'extreme' or 'both'.",
         ),
         FieldSpec(
             name="iqr_multiplier",
             label="Dubious-gene IQR multiplier",
+            importance="default",
             help="IQR multiplier for the cluster-based dubious-gene screen. Only used "
                  "when Gene filter mode is 'dubious' or 'both' (needs a cluster file).",
         ),

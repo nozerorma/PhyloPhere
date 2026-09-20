@@ -30,14 +30,18 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         Section("Randomization and burden parameters"),
+        # Choice of null model for the burden test — directly determines what
+        # the accumulation p-values mean (uniform vs conservation-matched vs
+        # permulation-derived null); a model-selection parameter.
         FieldSpec(
             name="accumulation_randomization_type",
             label="Randomization type",
             kind="choice",
             choices=("cons_decile", "naive", "permulation"),
+            importance="default",
         ),
-        FieldSpec(name="accumulation_n_randomizations", label="Randomizations"),
-        FieldSpec(name="accumulation_fdr", label="FDR threshold"),
+        FieldSpec(name="accumulation_n_randomizations", label="Randomizations", importance="default"),
+        FieldSpec(name="accumulation_fdr", label="FDR threshold", importance="default"),
     ),
     advanced_fields=(
         Section("Entropy and standalone inputs"),
@@ -54,6 +58,7 @@ SPEC = ModuleTabSpec(
                 "computed straight from the alignment (no external file needed either "
                 "way, just a coarser conservation measure)."
             ),
+            importance="optional",
         ),
     ),
 )

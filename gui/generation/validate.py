@@ -169,14 +169,12 @@ def validate(project: ProjectConfig) -> list[str]:
 
     # --- Scoring ---
     if scoring.enabled:
-        if not disambig.enabled:
-            # Already reported above (Disambiguation section) when Disambiguation
-            # (and therefore Post-processing) is on, so this doesn't duplicate that
-            # message for the same missing field.
-            require(
-                scoring.gene_ensembl_file,
-                "Scoring: gene-Ensembl mapping file is required when Scoring is enabled.",
-            )
+        # gene_ensembl_file is no longer a hard requirement here either (same
+        # relaxation as the Disambiguation section above): leaving it blank
+        # auto-generates it from the alignment gene list via an Ensembl BioMart
+        # query (bin/generate_ensembl_mapping.py), unconditionally, regardless of
+        # whether Disambiguation is enabled — rt.alignment_dir is already required
+        # above, so the fallback source is always available.
         if not disambig.enabled and not pc.use_postproc:
             errors.append(
                 "Scoring is enabled but Post-processing is disabled with no 'Use precomputed "

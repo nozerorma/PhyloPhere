@@ -39,24 +39,36 @@ SPEC = ModuleTabSpec(
     ),
     essential_fields=(
         Section("RER trait analysis"),
+        # Routes which statistical model applies to the trait (continuous vs
+        # binary RERconverge machinery) — model-selection parameter.
         FieldSpec(
             name="rer_trait_mode",
             label="Trait type routing",
             kind="choice",
             choices=("auto", "continuous", "binary"),
+            importance="default",
         ),
+        # Transform choice directly affects the RER-trait correlation's
+        # statistical validity (comparable to a model-selection parameter).
         FieldSpec(
             name="rer_transform",
             label="Trait transform",
             kind="choice",
             choices=("ha_logit", "auto", "logit", "arcsin", "log10", "none"),
+            importance="default",
         ),
+        # p.perm (raw permutation p) vs p.adj (BH-adjusted) changes what
+        # "significant" means downstream — an FDR/p-value-threshold-like choice.
         FieldSpec(
             name="rer_pval_column",
             label="Report p-value column",
             kind="choice",
             choices=("p.perm", "p.adj"),
+            importance="default",
         ),
+        # validate.py: require(rer.gene_trees, ...) whenever rer.enabled; also
+        # user-supplied with no in-house generation path (promoted from advanced
+        # to essential per commit history) — a strong "required" field.
         FieldSpec(
             name="gene_trees",
             label="Gene trees file",
@@ -67,33 +79,35 @@ SPEC = ModuleTabSpec(
                 "trees is a separate phylogenetics task outside this pipeline's scope "
                 "— supply one built with your own tree-inference tool of choice."
             ),
+            importance="required",
         ),
     ),
     advanced_fields=(
         Section("Gene tree and matrix output paths"),
-        FieldSpec(name="trait_out", label="Trait output path (build_trait)"),
-        FieldSpec(name="trees_out", label="Trees output path (build_tree)"),
-        FieldSpec(name="matrix_out", label="Matrix output path (build_matrix)"),
+        FieldSpec(name="trait_out", label="Trait output path (build_trait)", importance="optional"),
+        FieldSpec(name="trees_out", label="Trees output path (build_tree)", importance="optional"),
+        FieldSpec(name="matrix_out", label="Matrix output path (build_matrix)", importance="optional"),
         Section("Quality thresholds and winsorization"),
-        FieldSpec(name="rer_minsp", label="Minimum species per gene"),
-        FieldSpec(name="winsorize_rer", label="Winsorize RER threshold"),
-        FieldSpec(name="winsorize_trait", label="Winsorize trait threshold"),
+        FieldSpec(name="rer_minsp", label="Minimum species per gene", importance="default"),
+        FieldSpec(name="winsorize_rer", label="Winsorize RER threshold", importance="default"),
+        FieldSpec(name="winsorize_trait", label="Winsorize trait threshold", importance="default"),
         Section("Permutation null calibration"),
-        FieldSpec(name="rer_perm_batches", label="Permutation batches"),
-        FieldSpec(name="rer_perms_per_batch", label="Permutations per batch"),
+        FieldSpec(name="rer_perm_batches", label="Permutation batches", importance="default"),
+        FieldSpec(name="rer_perms_per_batch", label="Permutations per batch", importance="default"),
         Section("Binary mode options"),
         FieldSpec(
             name="rer_binary_clade",
             label="Binary foreground clade",
             kind="choice",
             choices=("all", "ancestral", "terminal"),
+            importance="default",
         ),
-        FieldSpec(name="rer_min_pos", label="Min independent foreground lineages"),
+        FieldSpec(name="rer_min_pos", label="Min independent foreground lineages", importance="default"),
         Section("Reporting and visualization thresholds"),
-        FieldSpec(name="rer_pval_threshold", label="Report p-value threshold"),
-        FieldSpec(name="rer_top_n_labels", label="Top-N labels on correlation plot"),
-        FieldSpec(name="rer_universe_file", label="RER tested-gene universe file", kind="path_file"),
-        FieldSpec(name="rer_gene_scores", label="Cross-module gene scores (fcs_stats.tsv)", kind="path_file"),
+        FieldSpec(name="rer_pval_threshold", label="Report p-value threshold", importance="default"),
+        FieldSpec(name="rer_top_n_labels", label="Top-N labels on correlation plot", importance="optional"),
+        FieldSpec(name="rer_universe_file", label="RER tested-gene universe file", kind="path_file", importance="optional"),
+        FieldSpec(name="rer_gene_scores", label="Cross-module gene scores (fcs_stats.tsv)", kind="path_file", importance="optional"),
     ),
 )
 

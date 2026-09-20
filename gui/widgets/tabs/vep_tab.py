@@ -38,6 +38,7 @@ SPEC = ModuleTabSpec(
             help="Illumina-licensed; redistribution isn't permitted, so this stays "
                  "a file you supply yourself — there's no vendoring or auto-download "
                  "path for it.",
+            importance="optional",
         ),
         FieldSpec(
             name="cosmic_db",
@@ -46,7 +47,11 @@ SPEC = ModuleTabSpec(
             help="License terms for redistribution haven't been confirmed yet, so "
                  "this stays external for now (same treatment as PrimateAI-3D) "
                  "pending that check.",
+            importance="optional",
         ),
+        # validate.py: require(vep.vep_map_dir, ...) unconditionally whenever
+        # vep.enabled — matches this field's own help text ("required whenever
+        # any annotation source on this tab is used").
         FieldSpec(
             name="vep_map_dir",
             label="Per-gene MAP directory",
@@ -56,6 +61,7 @@ SPEC = ModuleTabSpec(
                  "alignment-to-protein pipeline, not just the alignment plus a "
                  "public DB. See github.com/nozerorma/ortholog_characterizator. "
                  "Required whenever any annotation source on this tab is used.",
+            importance="required",
         ),
         Section("Ensembl VEP (independent of the databases above)"),
         FieldSpec(
@@ -65,9 +71,12 @@ SPEC = ModuleTabSpec(
             help="Runs the official Ensembl VEP CLI for consequence prediction — "
                  "works even when neither PrimateAI-3D nor COSMIC is supplied. "
                  "Needs a pre-downloaded offline cache (below).",
+            importance="optional",
         ),
     ),
     advanced_fields=(
+        # validate.py: require(vep.vep_cache_dir, ...) conditionally, only when
+        # vep.vep_ensembl is checked — required within that branch, not globally.
         FieldSpec(
             name="vep_cache_dir",
             label="Ensembl VEP cache directory",
@@ -76,9 +85,14 @@ SPEC = ModuleTabSpec(
                  "populate once with: vep_install -a cf -s <species> -y <assembly> "
                  "-c <this dir> --NO_HTSLIB, then reuse across runs. Required when "
                  "'Enable Ensembl VEP consequence annotation' is checked.",
+            importance="required",
         ),
-        FieldSpec(name="vep_species", label="Ensembl VEP species"),
-        FieldSpec(name="vep_assembly", label="Ensembl VEP assembly"),
+        # Borderline default/optional: not in validate.py and has a working
+        # default ("homo_sapiens"/"GRCh38"), but silently mismatching your actual
+        # reference data produces wrong annotations rather than an obvious error —
+        # treated as "default" so changing it prompts a second look.
+        FieldSpec(name="vep_species", label="Ensembl VEP species", importance="default"),
+        FieldSpec(name="vep_assembly", label="Ensembl VEP assembly", importance="default"),
     ),
 )
 
