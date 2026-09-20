@@ -328,6 +328,8 @@ class EnrichmentConfig(ModuleConfigBase):
     egg_annotations_file: str = ""  # --egg_annotations_file
     cosmic_db: str = ""  # --cosmic_db (also read by VEP; see VepConfig.cosmic_db)
     domain_variability_file: str = ""  # --domain_variability_file
+    domain_ref_species: str = ""  # --domain_ref_species (blank -> pipeline default "Homo_sapiens";
+    # set this when the alignment has no human sequence, e.g. a non-primate clade)
     ucr_positions_file: str = ""  # --ucr_positions_file
     fubar_sites_file: str = ""  # --fubar_sites_file
 

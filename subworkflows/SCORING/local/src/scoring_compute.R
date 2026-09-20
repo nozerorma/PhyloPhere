@@ -180,7 +180,10 @@ cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring sche
 # to the plain PSS-weighted domain mean. Scoring receives rows already pooled.
 cat("  FOP pooling: done in-tree per (Gene, Position, scheme, side) [core v3]\n")
 # Backfill the stable-schema columns downstream (§2g display picks, reports)
-# expects so a missing column is never hit.
+# expects so a missing column is never hit. `core` itself (CAAS_FILTER_GENES'
+# gene-level filter score) is absent when gene_filter_mode=="none" skips that
+# module entirely, so its own NA fallback must run before this line reads it.
+if (!"core" %in% names(df))                  df$core <- NA_real_
 if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
 if (!"supporting_hypotheses" %in% names(df)) df$supporting_hypotheses <- ""
 if (!"core_perside_pooled" %in% names(df))   df$core_perside_pooled <- df$core
@@ -220,7 +223,6 @@ df <- df %>%
 # T1: mrca_diversity + conservation_gate dropped from the score and the schema.
 if (!"derived_agreement" %in% names(df)) df$derived_agreement <- NA_real_
 df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
-if (!"core" %in% names(df)) df$core <- NA_real_
 df$core <- suppressWarnings(as.numeric(df$core))
 
 

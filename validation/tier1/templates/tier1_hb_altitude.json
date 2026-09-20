@@ -236,7 +236,8 @@
       "posenrich_max_size": "0",
       "posenrich_padj_thr": "0.15",
       "posenrich_p_perm_thr": "0.025",
-      "posenrich_batch_size": "4"
+      "posenrich_batch_size": "4",
+      "domain_ref_species": "Aegithalos_bonvaloti"
     }
   },
   "precomputed": {

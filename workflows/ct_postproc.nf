@@ -206,9 +206,19 @@ workflow CT_POSTPROC {
             
             log.info "Cleaned background files: ${params.outdir}/postproc/cleaned_backgrounds"
         } else {
-            // No gene filtering, no cleaned backgrounds
+            // No gene-level filtering: the cluster-filtered result (CT_FILTER,
+            // which always runs above) IS the final discovery -- SCORING and
+            // other downstream consumers still need *a* filtered_discovery
+            // input, so pass that through rather than emitting nothing. Using
+            // the same "first cluster file" selection as the gene-filtering
+            // branch's own `cluster_file` above, for consistency.
             gene_filter_results = null
-            filtered_discovery_ch = Channel.empty()
+            filtered_discovery_ch = filter_results.filtered_files
+                .collect()
+                .map { files ->
+                    assert files && files.size() > 0 : "Error: CT_FILTER produced no cluster files"
+                    files[0]
+                }
             cleaned_background_main_ch = Channel.empty()
         }
         
