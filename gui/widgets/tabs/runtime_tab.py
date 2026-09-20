@@ -188,26 +188,8 @@ class RuntimeTab(QWidget):
         self.trait_file = PathField(mode="file")
         self.trait_file.set_text(self._config.trait_file)
         self.trait_file.textChanged.connect(self._on_trait_file_changed)
-        self.trait_file_label = QLabel("CLASS 1 trait file")
+        self.trait_file_label = QLabel("Trait file (--my_traits)")
         form.addRow(self.trait_file_label, self.trait_file)
-
-        self.simple_trait_file = PathField(mode="file")
-        self.simple_trait_file.set_text(self._config.simple_trait_file)
-        self.simple_trait_file.textChanged.connect(self._on_simple_trait_file_changed)
-        self.simple_trait_file_label = QLabel("CLASS 2 trait file")
-        form.addRow(self.simple_trait_file_label, self.simple_trait_file)
-
-        self.class_note = QLabel(
-            "CLASS 1 = trait file has n_trait/c_trait columns (sample size + observed-case "
-            "counts, e.g. disease prevalence) — contrast selection uses a Jeffreys "
-            "confidence interval on the proportion, and supports a secondary trait + prune "
-            "lists. CLASS 2 = a single index value per species with no n/c columns — "
-            "contrast selection picks divergent species pairs via the Phylogenetic Shift "
-            "Score (PSS, OU/BM), or coded foreground/background levels when the trait is "
-            "ordinal (see TRAIT_TYPE). Each phenotype row below picks its own CLASS."
-        )
-        self.class_note.setWordWrap(True)
-        form.addRow("", self.class_note)
 
         self.prune_dir = PathField(mode="dir")
         self.prune_dir.set_text(self._config.prune_dir)
@@ -215,9 +197,9 @@ class RuntimeTab(QWidget):
         self.prune_dir_label = QLabel("Prune-list directory")
         form.addRow(self.prune_dir_label, self.prune_dir)
         self.prune_note = QLabel(
-            "Pruning is per phenotype, not a separate toggle: a CLASS 1 row with its PRUNE "
+            "Pruning is per phenotype, not a separate toggle: a row with its PRUNE "
             "column filled in (joined with this directory) is pruned automatically; a row "
-            "with PRUNE left blank runs unpruned. CLASS 2 rows don't prune."
+            "with PRUNE left blank runs unpruned."
         )
         self.prune_note.setWordWrap(True)
         form.addRow("", self.prune_note)
@@ -360,10 +342,6 @@ class RuntimeTab(QWidget):
         self._config.trait_file = value
         self.changed.emit()
 
-    def _on_simple_trait_file_changed(self, value: str) -> None:
-        self._config.simple_trait_file = value
-        self.changed.emit()
-
     def _on_prune_dir_changed(self, value: str) -> None:
         self._config.prune_dir = value
         self.changed.emit()
@@ -449,27 +427,14 @@ class RuntimeTab(QWidget):
         if hasattr(self, "tree_file_label"):
             self.tree_file_label.setText(tr("Species tree (--tree)", lang))
         if hasattr(self, "trait_file_label"):
-            self.trait_file_label.setText(tr("CLASS 1 trait file", lang))
-        if hasattr(self, "simple_trait_file_label"):
-            self.simple_trait_file_label.setText(tr("CLASS 2 trait file", lang))
-        if hasattr(self, "class_note"):
-            self.class_note.setText(tr(
-                "CLASS 1 = trait file has n_trait/c_trait columns (sample size + observed-case "
-                "counts, e.g. disease prevalence) — contrast selection uses a Jeffreys "
-                "confidence interval on the proportion, and supports a secondary trait + prune "
-                "lists. CLASS 2 = a single index value per species with no n/c columns — "
-                "contrast selection picks divergent species pairs via the Phylogenetic Shift "
-                "Score (PSS, OU/BM), or coded foreground/background levels when the trait is "
-                "ordinal (see TRAIT_TYPE). Each phenotype row below picks its own CLASS.",
-                lang,
-            ))
+            self.trait_file_label.setText(tr("Trait file (--my_traits)", lang))
         if hasattr(self, "prune_dir_label"):
             self.prune_dir_label.setText(tr("Prune-list directory", lang))
         if hasattr(self, "prune_note"):
             self.prune_note.setText(tr(
-                "Pruning is per phenotype, not a separate toggle: a CLASS 1 row with its PRUNE "
+                "Pruning is per phenotype, not a separate toggle: a row with its PRUNE "
                 "column filled in (joined with this directory) is pruned automatically; a row "
-                "with PRUNE left blank runs unpruned. CLASS 2 rows don't prune.",
+                "with PRUNE left blank runs unpruned.",
                 lang,
             ))
         if hasattr(self, "branch_trait_label"):

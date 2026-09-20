@@ -25,14 +25,13 @@ from dataclasses import dataclass, field
 class PhenotypeRow:
     """One arm of the generated `case $SLURM_ARRAY_TASK_ID in ... esac` block."""
 
-    trait_class: int = 1  # CLASS 1 (full trait config) or CLASS 2 (simple discrete trait)
     trait: str = ""  # TRAIT / --traitname
-    secondary: str = ""  # SECONDARY / --secondary_trait (CLASS 1 only)
-    n_trait: str = ""  # NTRAIT / --n_trait (CLASS 1 only)
-    c_trait: str = ""  # CTRAIT / --c_trait (CLASS 1 only)
-    prune: str = ""  # PRUNE filename, joined with runtime.prune_dir (CLASS 1 only)
-    prune_secondary: str = ""  # PRUNE_SEC filename (CLASS 1 only)
-    trait_type: str = ""  # TRAIT_TYPE / --trait_type (CLASS 2, optional): "" = auto-infer,
+    secondary: str = ""  # SECONDARY / --secondary_trait, optional
+    n_trait: str = ""  # NTRAIT / --n_trait, optional (sample size; paired with c_trait)
+    c_trait: str = ""  # CTRAIT / --c_trait, optional (observed cases; paired with n_trait)
+    prune: str = ""  # PRUNE filename, joined with runtime.prune_dir, optional
+    prune_secondary: str = ""  # PRUNE_SEC filename, optional
+    trait_type: str = ""  # TRAIT_TYPE / --trait_type, optional: "" = auto-infer,
     # "ordinal" = coded fg/bg (highest level FG, lowest BG), "continuous" = force the
     # Phylogenetic Shift Score (PSS) pair-selection path. The fg/bg partition itself is
     # produced by 4.Independent_contrasts.Rmd, not by a quantile cut.
@@ -77,8 +76,7 @@ class RuntimeConfig:
     alignment_dir: str = ""  # --alignment (ALI_DIR)
     ali_format: str = "fasta"  # --ali_format
     tree_file: str = ""  # --tree (TREE_FILE)
-    trait_file: str = ""  # CLASS 1's --my_traits (TRAIT_FILE)
-    simple_trait_file: str = ""  # CLASS 2's --my_traits (SIMPLE_TRAIT_FILE)
+    trait_file: str = ""  # --my_traits (TRAIT_FILE)
     prune_dir: str = ""  # PRUNE_DIR, joined with each row's prune/prune_secondary filename
     branch_trait: str = "LQ"  # --branch_trait
     ali_sp_names: str = ""  # --ali_sp_names (optional)

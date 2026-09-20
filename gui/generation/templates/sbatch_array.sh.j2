@@ -81,8 +81,8 @@ fi
 
 # --- INDIVIDUAL TOOL TOGGLES ---
 # NOTE: no RUN_PRUNE here — pruning is per-phenotype-row now, triggered by that
-# row's own PRUNE_FILE being set (see run_single.sh.j2's CLASS-1 branch), not a
-# separate global toggle.
+# row's own PRUNE_FILE being set (see run_single.sh.j2), not a separate global
+# toggle.
 export RUN_REPORTING={{ run_defaults.reporting }}
 export RUN_CAAS={{ run_defaults.caas }}
 export RUN_DISAMBIGUATION={{ run_defaults.disambiguation }}
@@ -109,7 +109,6 @@ export ALI_DIR="{{ runtime.alignment_dir }}"
 export ALI_FORMAT="{{ runtime.ali_format }}"
 export TREE_FILE="{{ runtime.tree_file }}"
 export TRAIT_FILE="{{ runtime.trait_file }}"
-export SIMPLE_TRAIT_FILE="{{ runtime.simple_trait_file }}"
 export PRUNE_DIR="{{ runtime.prune_dir }}"
 export BRANCH_TRAIT="{{ runtime.branch_trait }}"
 export ALI_SP_NAMES="{{ runtime.ali_sp_names }}"
@@ -269,7 +268,7 @@ dispatch_phenotype() {
     local task_id="$1"
     case "$task_id" in
 {% for row in runtime.phenotype_rows %}
-    {{ loop.index }}) CLASS={{ row.trait_class }}; TRAIT="{{ row.trait }}"; SECONDARY="{{ row.secondary }}"; NTRAIT="{{ row.n_trait }}"; CTRAIT="{{ row.c_trait }}"; PRUNE="{{ row.prune }}"; PRUNE_SEC="{{ row.prune_secondary }}"; TRAIT_TYPE="{{ row.trait_type }}"
+    {{ loop.index }}) TRAIT="{{ row.trait }}"; SECONDARY="{{ row.secondary }}"; NTRAIT="{{ row.n_trait }}"; CTRAIT="{{ row.c_trait }}"; PRUNE="{{ row.prune }}"; PRUNE_SEC="{{ row.prune_secondary }}"; TRAIT_TYPE="{{ row.trait_type }}"
         ;;
 {% endfor %}
     *)
@@ -280,10 +279,10 @@ dispatch_phenotype() {
 
     echo "======================================================"
     echo " TASK ID       : $task_id"
-    echo " TRAIT         : $TRAIT  [CLASS $CLASS]"
+    echo " TRAIT         : $TRAIT"
     echo "======================================================"
 
-    bash "$SINGLE_RUNNER" "$CLASS" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$TRAIT_TYPE"
+    bash "$SINGLE_RUNNER" "$TRAIT" "$SECONDARY" "$NTRAIT" "$CTRAIT" "$PRUNE" "$PRUNE_SEC" "$TRAIT_TYPE"
 }
 
 {% if profile == 'slurm' %}

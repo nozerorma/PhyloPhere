@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# validate.py — Pre-render validation: required fields per enabled module, CLASS rules.
+# validate.py — Pre-render validation: required fields per enabled module.
 # PhyloPhere | gui/generation/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
@@ -48,21 +48,13 @@ def validate(project: ProjectConfig) -> list[str]:
     if not rt.phenotype_rows:
         errors.append("Runtime: the phenotype catalogue must have at least one row.")
 
-    has_class1 = any(row.trait_class == 1 for row in rt.phenotype_rows)
-    has_class2 = any(row.trait_class == 2 for row in rt.phenotype_rows)
-    if has_class1:
-        require(rt.trait_file, "Runtime: trait file is required (a CLASS 1 phenotype row exists).")
-        require(rt.prune_dir, "Runtime: prune directory is required (a CLASS 1 phenotype row exists).")
-    if has_class2:
-        require(
-            rt.simple_trait_file,
-            "Runtime: simple trait file is required (a CLASS 2 phenotype row exists).",
-        )
+    require(rt.trait_file, "Runtime: trait file is required.")
+    any_pruned = any(row.prune.strip() or row.prune_secondary.strip() for row in rt.phenotype_rows)
+    if any_pruned:
+        require(rt.prune_dir, "Runtime: prune directory is required (a phenotype row has PRUNE/PRUNE_SEC set).")
 
     for i, row in enumerate(rt.phenotype_rows, start=1):
         require(row.trait, f"Phenotype row {i}: trait name is required.")
-        if row.trait_class not in (1, 2):
-            errors.append(f"Phenotype row {i}: CLASS must be 1 or 2, got {row.trait_class!r}.")
         if str(row.trait_type).strip().lower() not in ("", "auto", "ordinal", "continuous"):
             errors.append(
                 f"Phenotype row {i}: TRAIT_TYPE must be blank, auto, ordinal, or continuous "
@@ -243,8 +235,7 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Runtime: results directory", runtime.results_dir, "dir"),
         ("Runtime: alignment directory", runtime.alignment_dir, "dir"),
         ("Runtime: species tree", runtime.tree_file, "file"),
-        ("Runtime: CLASS 1 trait file", runtime.trait_file, "file"),
-        ("Runtime: CLASS 2 trait file", runtime.simple_trait_file, "file"),
+        ("Runtime: trait file", runtime.trait_file, "file"),
         ("Runtime: prune directory", runtime.prune_dir, "dir"),
         ("Runtime: alignment species names", runtime.ali_sp_names, "file"),
         ("Runtime: taxonomy ID mapping", runtime.tax_id_file, "file"),
