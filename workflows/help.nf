@@ -342,7 +342,12 @@ POSENRICH (position-level):
 --posenrich_padj_thr                     <FLOAT 0-1>              0.15
 --posenrich_background_file                  <"background_file">      null
 --domain_variability_file, --ucr_positions_file, --fubar_sites_file,
---egg_members_file, --egg_annotations_file   (position-level annotation sources)
+--egg_members_file, --egg_annotations_file   (position-level annotation sources;
+                                              blank domain_variability_file/ucr_positions_file
+                                              auto-generate from the alignment, blank
+                                              egg_members_file/egg_annotations_file
+                                              auto-fetch eggNOG5, fubar_sites_file is the
+                                              only one still required)
 '''
 
 workflow HELP {

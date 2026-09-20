@@ -17,6 +17,7 @@ include { FCS_COMPUTE as FCS_COMPUTE_RER }                from "${baseDir}/subwo
 include { POSENRICH }                                      from "${baseDir}/subworkflows/ENRICHMENT/posenrich.nf"
 include { UCR_GENERATION }                                  from "${baseDir}/subworkflows/ENRICHMENT/ucr_generation.nf"
 include { DOMAIN_VARIABILITY_GENERATION }                   from "${baseDir}/subworkflows/ENRICHMENT/domain_variability_generation.nf"
+include { EGGNOG_RESOLUTION }                                from "${baseDir}/subworkflows/ENRICHMENT/eggnog_resolution.nf"
 // Nextflow forbids invoking the same process/subworkflow more than once in one workflow
 // scope without a distinct alias per call site (DuplicateProcessInvocation) -- DOMINO_MODULES
 // is called up to 3 times below (main/CAAS, FADE, RER), each against a different
@@ -373,8 +374,17 @@ workflow ENRICHMENT {
             // ("input file name collision"). Every sentinel below is unique but
             // keeps the 'NO_FILE' prefix so the `=~ /^NO_FILE/` checks in
             // posenrich.nf still recognize it as absent.
-            def pos_egg_members_ch = params.egg_members_file ? Channel.fromPath(params.egg_members_file).ifEmpty { file('NO_FILE_EGG_MEMBERS') } : file('NO_FILE_EGG_MEMBERS')
-            def pos_egg_annotations_ch = params.egg_annotations_file ? Channel.fromPath(params.egg_annotations_file).ifEmpty { file('NO_FILE_EGG_ANNOT') } : file('NO_FILE_EGG_ANNOT')
+            def pos_egg_members_ch
+            def pos_egg_annotations_ch
+            if (params.egg_members_file && params.egg_annotations_file) {
+                pos_egg_members_ch = Channel.fromPath(params.egg_members_file).ifEmpty { file('NO_FILE_EGG_MEMBERS') }
+                pos_egg_annotations_ch = Channel.fromPath(params.egg_annotations_file).ifEmpty { file('NO_FILE_EGG_ANNOT') }
+            } else {
+                log.info "[ENRICHMENT] egg_members_file/egg_annotations_file not set — auto-fetching eggNOG5 Primates orthogroups (bin/resolve_eggnog.py)."
+                EGGNOG_RESOLUTION()
+                pos_egg_members_ch = EGGNOG_RESOLUTION.out.egg_members_file
+                pos_egg_annotations_ch = EGGNOG_RESOLUTION.out.egg_annotations_file
+            }
             def pos_map_dir_ch = params.vep_map_dir ? Channel.fromPath(params.vep_map_dir).ifEmpty { file('NO_FILE_MAP_DIR') } : file('NO_FILE_MAP_DIR')
             def pos_cosmic_db_ch = params.cosmic_db ? Channel.fromPath(params.cosmic_db).ifEmpty { file('NO_FILE_COSMIC_DB') } : file('NO_FILE_COSMIC_DB')
             def pos_pai3d_db_ch = params.vep_primateai_db ? Channel.fromPath(params.vep_primateai_db).ifEmpty { file('NO_FILE_PAI3D_DB') } : file('NO_FILE_PAI3D_DB')

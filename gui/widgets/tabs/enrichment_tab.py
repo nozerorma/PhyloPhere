@@ -95,8 +95,25 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="domain_variability_file", label="Domain variability file", kind="path_file"),
         FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file"),
         FieldSpec(name="fubar_sites_file", label="FUBAR sites file", kind="path_file"),
-        FieldSpec(name="egg_members_file", label="eggNOG members file", kind="path_file"),
-        FieldSpec(name="egg_annotations_file", label="eggNOG annotations file", kind="path_file"),
+        FieldSpec(
+            name="egg_members_file",
+            label="eggNOG members file (optional)",
+            kind="path_file",
+            help=(
+                "eggNOG5 Primates orthogroup members. Leave blank to auto-fetch "
+                "(falls back to the vendored human-subset copy in assets/eggnog/ "
+                "if offline)."
+            ),
+        ),
+        FieldSpec(
+            name="egg_annotations_file",
+            label="eggNOG annotations file (optional)",
+            kind="path_file",
+            help=(
+                "eggNOG5 Primates orthogroup annotations, paired with the members "
+                "file above. Leave blank to auto-fetch alongside it."
+            ),
+        ),
     ),
 )
 

@@ -205,12 +205,11 @@ def validate(project: ProjectConfig) -> list[str]:
         # cosmic_db is NOT required: workflows/enrichment.nf and subworkflows/VEP/cosmic.nf
         # both fall back to a NO_FILE sentinel and skip the COSMIC overlap section
         # gracefully rather than failing when it's absent.
-        for field_name, label in [
-            ("egg_members_file", "eggNOG members file"),
-            ("egg_annotations_file", "eggNOG annotations file"),
-            ("fubar_sites_file", "FUBAR sites file"),
-        ]:
-            require(getattr(enrichment, field_name), f"POSENRICH: {label} is required.")
+        require(enrichment.fubar_sites_file, "POSENRICH: FUBAR sites file is required.")
+        # egg_members_file / egg_annotations_file are no longer required either:
+        # leaving both blank auto-fetches the eggNOG5 Primates orthogroup pair,
+        # falling back to the vendored copy in assets/eggnog/ if offline
+        # (subworkflows/ENRICHMENT/eggnog_resolution.nf).
         # ucr_positions_file / domain_variability_file are no longer required:
         # leaving either blank auto-generates it from the alignment
         # (subworkflows/ENRICHMENT/{ucr_generation,domain_variability_generation}.nf)
