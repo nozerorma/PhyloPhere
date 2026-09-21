@@ -527,10 +527,10 @@ process {
         time   = { 4.h * task.attempt }
     }
     // Phase 1 -- POSENRICH_RUN chunking by GMT/db source (see
-    // conf/resources.config's own Phase 1 section). process_posenrich_batched and
-    // POSENRICH_PREP_NULL are NOT yet mirrored into this preset (pre-existing
-    // gap) -- fall through to conf/resources.config's own value if this preset
-    // is selected.
+    // conf/resources.config's own Phase 1 section, including the 2026-09-21
+    // process_posenrich_batched sizing note -- a "batch" is the full
+    // monolithic footprint whenever a run produces <= posenrich_batch_size
+    // GMTs, which is the common case).
     withName: 'POSENRICH_BUILD_GMT' {
         cpus   = { 8 }
         memory = { 16.GB * task.attempt }
@@ -540,5 +540,15 @@ process {
         cpus   = { 8 }
         memory = { 16.GB * task.attempt }
         time   = { 8.h  * task.attempt }
+    }
+    withLabel:process_posenrich_batched {
+        cpus   = { 8 }
+        memory = { 20.GB * task.attempt }
+        time   = { 8.h  * task.attempt }
+    }
+    withName: 'POSENRICH_PREP_NULL' {
+        cpus   = { 4 }
+        memory = { 12.GB * task.attempt }
+        time   = { 2.h  * task.attempt }
     }
 }
