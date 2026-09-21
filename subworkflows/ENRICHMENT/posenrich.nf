@@ -147,6 +147,31 @@ process POSENRICH_RUN {
     """
 }
 
+process POSENRICH_PREP_NULL {
+    label 'process_posenrich_prep_null'
+    publishDir path: "${params.outdir}/posenrich",
+               mode: 'copy', overwrite: true,
+               enabled: params.publish_intermediates
+
+    input:
+    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm; NO_FILE* sentinel to skip
+
+    output:
+    path "caas_null_prepped.pkl", emit: prepped
+
+    script:
+    // perm_pos_cycle_caas.tsv.gz is broadcast identically to every
+    // POSENRICH_RUN_BATCHED task (same null, only the GMT term sets differ
+    // per batch) -- parsing it once here, instead of once per batch task,
+    // is the whole point of this process. See posenrich_prep_caas_null.py.
+    def caas_null_arg = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : "--caas-cycle-null NO_FILE"
+    """
+    python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/posenrich_prep_caas_null.py \
+        ${caas_null_arg} \
+        --output caas_null_prepped.pkl
+    """
+}
+
 process POSENRICH_RUN_BATCHED {
     tag "$batchID (${batchSize} GMTs)"
     label 'process_posenrich_batched'
@@ -167,7 +192,7 @@ process POSENRICH_RUN_BATCHED {
     val min_size
     val max_size
     path position_lists_dir
-    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm
+    path caas_null_prepped    // caas_null_prepped.pkl from POSENRICH_PREP_NULL -> p.perm (parsed once for the whole run, not once per batch)
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -177,7 +202,7 @@ process POSENRICH_RUN_BATCHED {
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
     def cosmic_cov_arg = !(cosmic_coverage.name =~ /^NO_FILE/) ? "--cosmic-coverage ${cosmic_coverage}" : ""
     def pai3d_cov_arg  = !(pai3d_coverage.name =~ /^NO_FILE/) ? "--pai3d-coverage ${pai3d_coverage}" : ""
-    def caas_null_arg  = !(caas_cycle_null.name =~ /^NO_FILE/) ? "--caas-cycle-null ${caas_cycle_null}" : ""
+    def caas_null_arg  = "--caas-null-prepped ${caas_null_prepped}"
     // The characterization layer (Pfam/UCR/FUBAR/...) is one source shared
     // across the whole run, not split per GMT file — passing it to every batch
     // would re-run and re-append it N times once POSENRICH_CONCAT merges the
@@ -422,7 +447,11 @@ workflow POSENRICH {
         def cosmic_coverage_bc     = cosmic_coverage_ch.first()
         def pai3d_coverage_bc      = pai3d_coverage_ch.first()
         def position_lists_file_bc = position_lists_file.first()
-        def caas_cycle_null_bc     = caas_cycle_null_file.first()
+
+        // Parsed once for the whole run here, instead of once per batch task
+        // inside POSENRICH_RUN_BATCHED -- see POSENRICH_PREP_NULL / posenrich_prep_caas_null.py.
+        POSENRICH_PREP_NULL(caas_cycle_null_file)
+        def caas_null_prepped_bc = POSENRICH_PREP_NULL.out.prepped.first()
 
         POSENRICH_RUN_BATCHED(
             posenrich_batches,
@@ -436,7 +465,7 @@ workflow POSENRICH {
             min_size,
             max_size,
             position_lists_file_bc,
-            caas_cycle_null_bc
+            caas_null_prepped_bc
         )
 
         POSENRICH_CONCAT(

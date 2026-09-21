@@ -631,6 +631,33 @@ fcs_resolve_corstat_rk <- function(rk, corStat_byrank, base_corStat, base_corRho
 }
 
 # rankings: named list of named-numeric vectors (already zero-floored).
+# Column types for enrich_df/fcs_enrich_merged.tsv, shared between
+# fcs_run_all()'s own empty-result tibble below and the batched-run caller
+# (12.FCS_general_report.Rmd's `enrich_file` path), which re-reads a
+# row-concatenated TSV of per-GMT-batch outputs. A header-only TSV (every
+# batch found zero enrichment hits, plausible on a small gene universe) has
+# no data for readr to infer types from, so every column would otherwise
+# come back `logical` -- breaking arithmetic/joins downstream that expect
+# `stat` etc. to be numeric. Passing this spec to read_tsv keeps the file
+# round-trip type-stable regardless of row count.
+fcs_enrich_col_types <- function() {
+  readr::cols(
+    ranking = readr::col_character(), database = readr::col_character(),
+    pathway = readr::col_character(), stat = readr::col_double(),
+    pval = readr::col_double(), p.adj = readr::col_double(), p.perm = readr::col_double(),
+    num.genes = readr::col_double(), gene.vals = readr::col_character(),
+    lach_pval = readr::col_double(), lach_p.adj = readr::col_double(),
+    lach_chi_binary = readr::col_double(), lach_chi_nonzero = readr::col_double(),
+    lach_chi_total = readr::col_double(), lach_frac_magnitude = readr::col_double(),
+    lach_p.perm = readr::col_double(),
+    perm_pval = readr::col_double(), perm_p.adj = readr::col_double(), perm_nes = readr::col_double(),
+    sig_wilcoxon = readr::col_logical(), sig_lachenbruch = readr::col_logical(),
+    sig_permulation = readr::col_logical(),
+    evidence_count = readr::col_integer(), evidence_label = readr::col_character(),
+    .default = readr::col_guess()
+  )
+}
+
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "NO_FILE",
                         fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000,
                         fdr_wilcoxon = fdr_thr, fdr_lachenbruch = fdr_thr,
@@ -858,13 +885,20 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
 # ── Leading-edge annotation ──────────────────────────────────────────────────
 fcs_annotate_leading_edge <- function(enrich_df, attr_df = NULL) {
   if (nrow(enrich_df) == 0) {
-    cols <- c("ranking", "database", "pathway", "stat", "p.adj", "gene", "gene_rank")
+    # matrix(ncol=, nrow=0) defaults every column to logical, so an all-empty
+    # `gene` here would fail a later left_join against a real character `gene`
+    # column (incompatible types). Type each column explicitly instead;
+    # attr_df's own columns keep their real types via a 0-row slice.
+    base_df <- tibble::tibble(
+      ranking = character(0), database = character(0), pathway = character(0),
+      stat = numeric(0), p.adj = numeric(0),
+      gene = character(0), gene_rank = numeric(0)
+    )
     if (!is.null(attr_df)) {
-      cols <- unique(c(cols, names(attr_df)))
+      extra_cols <- setdiff(names(attr_df), names(base_df))
+      base_df <- dplyr::bind_cols(base_df, attr_df[0, extra_cols, drop = FALSE])
     }
-    empty_df <- as.data.frame(matrix(ncol = length(cols), nrow = 0))
-    colnames(empty_df) <- cols
-    return(tibble::as_tibble(empty_df))
+    return(base_df)
   }
   le <- enrich_df %>%
     dplyr::filter(!is.na(gene.vals) & nzchar(gene.vals)) %>%
@@ -882,10 +916,18 @@ fcs_annotate_leading_edge <- function(enrich_df, attr_df = NULL) {
 fcs_leading_edge_summary <- function(le, attr_cols) {
   present <- intersect(attr_cols, names(le))
   if (nrow(le) == 0) {
-    cols <- c("ranking", "database", "pathway", "stat", "p.adj", "n_le", present)
-    empty_df <- as.data.frame(matrix(ncol = length(cols), nrow = 0))
-    colnames(empty_df) <- cols
-    return(tibble::as_tibble(empty_df))
+    # Same matrix()-defaults-to-logical trap as fcs_annotate_leading_edge's
+    # empty case above -- database/pathway must stay character so the
+    # downstream left_join against term_order/sig_terms_rk (real character
+    # columns) doesn't fail on incompatible types.
+    base_df <- tibble::tibble(
+      ranking = character(0), database = character(0), pathway = character(0),
+      stat = numeric(0), p.adj = numeric(0), n_le = integer(0)
+    )
+    if (length(present) > 0) {
+      base_df <- dplyr::bind_cols(base_df, le[0, present, drop = FALSE])
+    }
+    return(base_df)
   }
   
   res_df <- le %>%

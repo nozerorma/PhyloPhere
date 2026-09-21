@@ -164,71 +164,57 @@ workflow CT_POSTPROC {
             filter_results.filtered_files.collect()
         )
         
-        // Run gene-level filtering if enabled
-        def gene_filter_results = null
+        // Run gene-level filtering (always -- see note below)
         def characterization_results = null
-        def filtered_discovery_ch = Channel.empty()
-        def cleaned_background_main_ch = Channel.empty()
 
-        if (params.gene_filter_mode != 'none') {
-            assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required for gene filtering"
-            
-            def gene_ensembl_file = file(params.gene_ensembl_file)
-            assert gene_ensembl_file.exists() : "Error: gene_ensembl_file not found: ${params.gene_ensembl_file}"
-            
-            log.info "🧬 Running gene-level filtering (mode: ${params.gene_filter_mode})..."
-            log.info "   (Gene-level statistics will be calculated per caap_group)"
-            
-            // Select appropriate cluster file based on mode
-            // Use first cluster file from results without `.first()` to avoid
-            // value-channel operator warnings.
-            def cluster_file = filter_results.filtered_files
-                .collect()
-                .map { files ->
-                    assert files && files.size() > 0 : "Error: CT_FILTER produced no cluster files"
-                    files[0]
-                }
-            
-            gene_filter_results = CAAS_FILTER_GENES(
-                prepared_discovery_ch,
-                gene_ensembl_file,
-                cluster_file
-            )
-            
-            // Run background cleanup (always when gene filtering is enabled)            
-            cleaned_backgrounds = CAAS_BACKGROUND_CLEANUP(
-                global_background_genes,
-                gene_filter_results.removed_genes
-            )
+        // CAAS_FILTER_GENES always runs -- filter_caas_genes.py's own
+        // mode='none' path (apply_gene_filter, mode='none') is a pure
+        // passthrough of discovery_df, so this is the one code path that
+        // correctly preserves the full discovery schema (asr_path_score,
+        // core, ...) for every gene_filter_mode, 'none' included. An earlier
+        // version special-cased 'none' to skip this process and reuse
+        // CT_FILTER's own output instead, but that file only ever carries
+        // Gene/Position/clustering_flag (see filter_caas_clusters-param.py's
+        // docstring) -- not the annotated columns SCORING needs.
+        assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required for gene filtering"
 
-            filtered_discovery_ch = gene_filter_results.filtered_discovery
-            cleaned_background_main_ch = cleaned_backgrounds.cleaned_background_main
-            
-            log.info "Cleaned background files: ${params.outdir}/postproc/cleaned_backgrounds"
-        } else {
-            // No gene-level filtering: the cluster-filtered result (CT_FILTER,
-            // which always runs above) IS the final discovery -- SCORING and
-            // other downstream consumers still need *a* filtered_discovery
-            // input, so pass that through rather than emitting nothing. Using
-            // the same "first cluster file" selection as the gene-filtering
-            // branch's own `cluster_file` above, for consistency.
-            gene_filter_results = null
-            filtered_discovery_ch = filter_results.filtered_files
-                .collect()
-                .map { files ->
-                    assert files && files.size() > 0 : "Error: CT_FILTER produced no cluster files"
-                    files[0]
-                }
-            cleaned_background_main_ch = Channel.empty()
-        }
+        def gene_ensembl_file = file(params.gene_ensembl_file)
+        assert gene_ensembl_file.exists() : "Error: gene_ensembl_file not found: ${params.gene_ensembl_file}"
+
+        log.info "🧬 Running gene-level filtering (mode: ${params.gene_filter_mode})..."
+        log.info "   (Gene-level statistics will be calculated per caap_group)"
+
+        // Select appropriate cluster file based on mode
+        // Use first cluster file from results without `.first()` to avoid
+        // value-channel operator warnings.
+        def cluster_file = filter_results.filtered_files
+            .collect()
+            .map { files ->
+                assert files && files.size() > 0 : "Error: CT_FILTER produced no cluster files"
+                files[0]
+            }
+
+        def gene_filter_results = CAAS_FILTER_GENES(
+            prepared_discovery_ch,
+            gene_ensembl_file,
+            cluster_file
+        )
+
+        // Run background cleanup (always -- a no-op removed_genes_summary in
+        // 'none' mode just yields an unchanged background)
+        cleaned_backgrounds = CAAS_BACKGROUND_CLEANUP(
+            global_background_genes,
+            gene_filter_results.removed_genes
+        )
+
+        def filtered_discovery_ch = gene_filter_results.filtered_discovery
+        def cleaned_background_main_ch = cleaned_backgrounds.cleaned_background_main
+
+        log.info "Cleaned background files: ${params.outdir}/postproc/cleaned_backgrounds"
         
         // Run characterization if reports are enabled
         if (true) {  // characterization reports always run
-            assert params.gene_ensembl_file : "Error: --gene_ensembl_file is required for characterization reports"
-            
-            def gene_ensembl_file = file(params.gene_ensembl_file)
-            assert gene_ensembl_file.exists() : "Error: gene_ensembl_file not found: ${params.gene_ensembl_file}"
-            
+            // gene_ensembl_file already resolved and validated above.
             log.info "📊 CT characterization reports..."
             
             // Pass the filter_ch output directory path instead of individual files

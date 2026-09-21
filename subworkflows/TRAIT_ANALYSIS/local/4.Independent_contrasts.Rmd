@@ -628,7 +628,11 @@ stats_df_hl <- stats_df %>%
 
 ordered_species_hl <- tidytree::as_tibble(pruned_tree) %>%
   dplyr::arrange(desc(.data$node)) %>%
-  dplyr::filter(!is.na(.data$label)) %>%
+  # Tip nodes are numbered 1..Ntip (ape convention); `!is.na(label)` alone
+  # would also admit internal-node bootstrap-support labels, which repeat
+  # across nodes on a real ML tree and can hand factor(levels=) duplicates
+  # (see 2.Phenotype_exploration.Rmd's identical fix).
+  dplyr::filter(.data$node <= length(pruned_tree$tip.label)) %>%
   dplyr::pull(.data$label)
 stats_df_hl$species <- factor(stats_df_hl$species, levels = ordered_species_hl)
 

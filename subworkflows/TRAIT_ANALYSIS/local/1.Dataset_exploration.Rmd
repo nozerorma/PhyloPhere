@@ -119,8 +119,10 @@ taxa_distribution <- trait_df_ori %>%
 # Ensure species order matches phylogeny
 ordered_species <-  tidytree::as_tibble(pruned_tree) %>%
   dplyr::arrange(desc(.data$node)) %>%
-  # Remove internal nodes by filtering only rows where label is not NA
-  dplyr::filter(!is.na(.data$label)) %>%
+  # Tip nodes are numbered 1..Ntip (ape convention); `!is.na(label)` alone
+  # would also admit internal-node bootstrap-support labels, which repeat
+  # across nodes on a real ML tree and can hand factor(levels=) duplicates.
+  dplyr::filter(.data$node <= length(pruned_tree$tip.label)) %>%
   dplyr::pull(.data$label)
 
 # print(ordered_species)

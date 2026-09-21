@@ -326,7 +326,14 @@ fade_sites_bottom_cmp_df <- if (has_fade_sites_bottom_cmp) {
 # below, so joined straight in without any percentile/significance gating.
 has_position_char_cmp <- .file_ok(params$position_characterization_file)
 position_char_cmp_df  <- if (has_position_char_cmp) {
-  readr::read_tsv(params$position_characterization_file, show_col_types = FALSE)
+  # A header-only file (no gene tested any position, plausible on a small
+  # universe) gives readr nothing to infer types from, so every column -
+  # Position included - comes back character; force it back to integer so
+  # the later left_join by c("gene", "Position") against position_scores_cmp_df's
+  # numeric Position doesn't fail on incompatible types (same fix already
+  # applied to fade_sites_top/bottom_cmp_df above for the same reason).
+  readr::read_tsv(params$position_characterization_file, show_col_types = FALSE) %>%
+    dplyr::mutate(Position = suppressWarnings(as.integer(Position)))
 } else NULL
 
 # Per-gene attribute table: percentile flags (from fcs_stats' own score_top/

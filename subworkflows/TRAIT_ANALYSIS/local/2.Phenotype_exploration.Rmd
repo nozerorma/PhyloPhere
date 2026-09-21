@@ -199,10 +199,16 @@ if(isTRUE(has.n)){
 }
 
 # Ensure species order matches phylogeny
+# Tip nodes are numbered 1..Ntip (ape convention, preserved by tidytree), so
+# `node <= Ntip` is the reliable tip filter. `!is.na(label)` alone is NOT
+# enough: a tree with bootstrap-support internal-node labels (e.g. from a
+# real ML tree, unlike an unsupported synthetic one) has plenty of non-NA
+# internal labels too, and those values repeat across nodes (many clades
+# share the same support value), so filtering on non-NA alone can hand
+# `factor(levels=)` a level list with duplicates.
 ordered_species <-  tidytree::as_tibble(pruned_tree) %>%
   dplyr::arrange(desc(.data$node)) %>%
-  # Remove internal nodes by filtering only rows where label is not NA
-  dplyr::filter(!is.na(.data$label)) %>%
+  dplyr::filter(.data$node <= length(pruned_tree$tip.label)) %>%
   dplyr::pull(.data$label)
 
 # print(ordered_species)

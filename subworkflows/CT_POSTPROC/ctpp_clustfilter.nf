@@ -113,10 +113,7 @@ process CAAS_FILTER_GENES {
     tag "gene_filter:${params.gene_filter_mode}"
     label 'CT_FILTER'
     publishDir "${params.outdir}/postproc/gene_filtering", mode: 'copy', overwrite: true
-    
-    when:
-    params.gene_filter_mode != 'none'
-    
+
     input:
     path(discovery_file)
     path(gene_ensembl_file)

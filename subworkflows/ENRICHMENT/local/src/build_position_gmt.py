@@ -455,7 +455,7 @@ def main():
     fubar_char = {}
     if os.path.exists(args.fubar_sites_file):
         reader = pd.read_csv(args.fubar_sites_file, sep='\t',
-                             usecols=['gene', 'is_pos_hit_fdr',
+                             usecols=['gene', 'is_pos_hit',
                                       'is_neg_hit', 'hg38_aa_pos'],
                              dtype={'gene': str}, chunksize=500_000)
         for chunk in reader:
@@ -464,7 +464,7 @@ def main():
                 if gene not in active_genes:
                     continue
                 try:
-                    is_pos = int(row.is_pos_hit_fdr)
+                    is_pos = int(row.is_pos_hit)
                     is_neg = int(row.is_neg_hit)
                 except (ValueError, TypeError):
                     is_pos, is_neg = 0, 0
@@ -538,10 +538,14 @@ def main():
     genomic_to_pos = None
 
     # 5. Genomic Locations (1 Mbp Chromosome Bins)
+    # Requires actual genomic coordinates, so this is a no-op without a
+    # map_dir. active_genes falls back to universe_genes/ensp_to_gene when
+    # map_cache is empty (see above), so it can contain genes map_cache has
+    # no entry for at all -- iterate map_cache directly instead.
     print("Compiling Genomic Locations (1 Mbp bins)...")
     gen_terms = {}
-    for gene in active_genes:
-        col_to_genomic = map_cache[gene]['col_to_genomic']
+    for gene, entry in map_cache.items():
+        col_to_genomic = entry['col_to_genomic']
         for col, genomic in col_to_genomic.items():
             match = re.match(r'(chr[0-9XYM]+):(\d+)', genomic)
             if match:
@@ -614,7 +618,10 @@ def main():
                     pai3d_members = []
 
                     for g in og_genes:
-                        for col in map_cache[g]['selected_cols']:
+                        g_entry = map_cache.get(g)
+                        if not g_entry:
+                            continue
+                        for col in g_entry['selected_cols']:
                             pos_id = f"{g}:{col}"
                             full_members.append(pos_id)
                             if col in gene_ucr_core_cols.get(g, set()):

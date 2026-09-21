@@ -38,6 +38,7 @@
 import os
 import sys
 import glob
+import pickle
 import argparse
 import numpy as np
 import pandas as pd
@@ -74,7 +75,14 @@ def parse_args():
                         "side, cycle, caas_sum, n_schemes) - the CAAS permulation null, "
                         "reused here for a second p.perm signal alongside this script's own "
                         "label-shuffle p_value, mirroring fcs_enrich.R's p.perm. Omit or pass "
-                        "a NO_FILE* sentinel to skip (p.perm stays NA, sig unchanged).")
+                        "a NO_FILE* sentinel to skip (p.perm stays NA, sig unchanged). Ignored "
+                        "when --caas-null-prepped is given.")
+    p.add_argument("--caas-null-prepped", default=None,
+                   help="caas_null_prepped.pkl from POSENRICH_PREP_NULL (posenrich_prep_caas_null.py) "
+                        "- the same CAAS permulation null as --caas-cycle-null, already parsed and "
+                        "split by direction once for the whole batched run instead of once per batch "
+                        "task. Takes precedence over --caas-cycle-null when both are given. Omit or "
+                        "pass a NO_FILE* sentinel to skip (p.perm stays NA, sig unchanged).")
     p.add_argument("--p-perm-thr", type=float, default=0.025,
                    help="p.perm significance threshold, folded into sig as a dual gate "
                         "alongside --padj-thr when --caas-cycle-null is supplied "
@@ -226,6 +234,28 @@ def load_caas_cycle_null(path):
     df["score"] = (df["caas_sum"] / df["n_schemes"].replace(0, np.nan)).fillna(0.0)
     all_cycle_levels = np.sort(df["cycle"].unique())
     return df[["pos_id", "side", "cycle", "score"]], all_cycle_levels
+
+
+def load_prepped_caas_null(path):
+    """Load caas_null_prepped.pkl from POSENRICH_PREP_NULL: the same CAAS
+    permulation null load_caas_cycle_null() reads, except the parse and the
+    per-direction split/dedup (null_direction_subset's job) were already done
+    once for the whole run instead of once per POSENRICH_RUN_BATCHED task.
+    Returns (by_direction, all_cycle_levels) where by_direction is a dict
+    {"global"/"top"/"bottom": DataFrame[pos_id, cycle, score]}, mirroring
+    what null_direction_subset(long_df, direction) would return for each
+    direction. Returns (None, None) if path is missing, a NO_FILE* sentinel,
+    doesn't exist, or the artifact itself is empty (no CAAS null was supplied
+    upstream) -- same contract as load_caas_cycle_null().
+    """
+    if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
+        return None, None
+    with open(path, "rb") as fh:
+        prepped = pickle.load(fh)
+    if prepped.get("cycle_levels") is None:
+        return None, None
+    by_direction = {d: prepped[d] for d in ("global", "top", "bottom")}
+    return by_direction, prepped["cycle_levels"]
 
 
 def null_direction_subset(long_df, direction):
@@ -501,12 +531,22 @@ def main():
     hyp_dict = dict(zip(obs["pos_id"], obs["n_hypotheses"])) if "n_hypotheses" in obs.columns else {}
     supp_dict = dict(zip(obs["pos_id"], obs["supporting_hypotheses"])) if "supporting_hypotheses" in obs.columns else {}
 
-    caas_null_long, caas_null_cycles = load_caas_cycle_null(args.caas_cycle_null)
-    if caas_null_long is not None:
-        print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
-              f"loaded from {args.caas_cycle_null} -> p.perm enabled", flush=True)
+    caas_null_by_direction = None
+    if args.caas_null_prepped:
+        caas_null_by_direction, caas_null_cycles = load_prepped_caas_null(args.caas_null_prepped)
+        caas_null_long = None
+        if caas_null_by_direction is not None:
+            print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
+                  f"loaded (prepped) from {args.caas_null_prepped} -> p.perm enabled", flush=True)
+        else:
+            print("[posenrich] no CAAS permulation null supplied -> p.perm stays NA", flush=True)
     else:
-        print("[posenrich] no CAAS permulation null supplied -> p.perm stays NA", flush=True)
+        caas_null_long, caas_null_cycles = load_caas_cycle_null(args.caas_cycle_null)
+        if caas_null_long is not None:
+            print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
+                  f"loaded from {args.caas_cycle_null} -> p.perm enabled", flush=True)
+        else:
+            print("[posenrich] no CAAS permulation null supplied -> p.perm stays NA", flush=True)
 
     directions = ["global", "top", "bottom"]
     rows = []
@@ -518,8 +558,12 @@ def main():
             continue
         print(f"[posenrich] {direction}: {n_scored} scored positions | running Path Sum Permulation (N_perms={args.n_perms})...", flush=True)
 
-        null_sub = (null_direction_subset(caas_null_long, direction)
-                    if caas_null_long is not None else None)
+        if caas_null_by_direction is not None:
+            null_sub = caas_null_by_direction.get(direction)
+        elif caas_null_long is not None:
+            null_sub = null_direction_subset(caas_null_long, direction)
+        else:
+            null_sub = None
 
         for db, (terms, descs, apply_size_filter) in sources.items():
             db_bg = coverage_restricted_bg.get(db, background)

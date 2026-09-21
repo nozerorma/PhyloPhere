@@ -278,7 +278,8 @@ actual significance claim.
 # throughout fcs_enrich.R). enrich_file = NULL keeps the original unbatched path
 # for any caller that renders this Rmd directly rather than through fcs.nf.
 if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(params$enrich_file)) {
-  enrich <- readr::read_tsv(params$enrich_file, show_col_types = FALSE)
+  enrich <- readr::read_tsv(params$enrich_file, show_col_types = FALSE,
+                             col_types = fcs_enrich_col_types())
 } else {
   # One zero-floored ranking vector per score_<ranking> column.
   rankings <- list()

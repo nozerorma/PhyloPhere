@@ -3,7 +3,7 @@
 # scoring_caas_perms.R — CAAS permulation-excess null → genes×N matrices
 # =============================================================================
 suppressPackageStartupMessages({
-  library(readr); library(dplyr); library(tidyr); library(tibble)
+  library(readr)
 })
 
 # ── minimal flag parser ──────────────────────────────────────────────────────
@@ -50,37 +50,44 @@ if (!is.null(universe_file) && universe_file != "NO_FILE" && file.exists(univers
   if (length(u)) universe <- sort(unique(c(u, perm_genes)))
 }
 
-# ── Build a genes×N matrix for one direction (absent gene/cycle → 0 = no signal)
-build_matrix <- function(df, col) {
-  m <- df %>%
-    select(Gene, cycle, !!col := dplyr::all_of(col)) %>%
-    tidyr::pivot_wider(names_from = cycle, values_from = !!col)
-  
+# ── Build genes×N matrices for all six direction columns in one pass over the
+# long table (absent gene/cycle → 0 = no signal). Each build_matrix() call
+# used to be its own select()+tidyr::pivot_wider() reshape of the full
+# genome-wide x n_cycles table -- six full wide intermediates for what is,
+# for each column, just "look up (Gene, cycle) -> (row, col) and write a
+# value". gene_idx/cycle_idx/valid are computed once and reused across all
+# six columns; the value assignment itself is a single vectorized linear-index
+# write per matrix, so the long table (gcs) is read once instead of six times
+# and no wide intermediate is ever materialized.
+gene_idx  <- match(gcs$Gene, universe)
+cycle_idx <- match(gcs$cycle, cycle_levels)
+valid     <- !is.na(gene_idx) & !is.na(cycle_idx)
+gene_idx  <- gene_idx[valid]
+cycle_idx <- cycle_idx[valid]
+lin_idx   <- gene_idx + (cycle_idx - 1L) * length(universe)
+
+value_cols <- c("global_asr", "top_asr", "bottom_asr",
+                 "global_caas", "top_caas", "bottom_caas")
+stopifnot(all(value_cols %in% names(gcs)))
+
+build_matrix <- function(col) {
   mat <- matrix(0.0, nrow = length(universe), ncol = n_perms,
                 dimnames = list(universe, cycle_levels))
-  if (nrow(m) > 0) {
-    rn <- m$Gene
-    sub <- as.matrix(m[, setdiff(names(m), "Gene"), drop = FALSE])
-    sub[is.na(sub)] <- 0.0
-    common_cols <- intersect(colnames(sub), cycle_levels)
-    common_rows <- intersect(rn, universe)
-    if (length(common_rows) && length(common_cols)) {
-      ri <- match(common_rows, rn)
-      mat[common_rows, common_cols] <- sub[ri, common_cols, drop = FALSE]
-    }
-  }
+  v <- gcs[[col]][valid]
+  v[is.na(v)] <- 0.0
+  mat[lin_idx] <- v
   mat
 }
 
 corStat_byrank <- list(
-  global_asr = build_matrix(gcs, "global_asr"),
-  top_asr    = build_matrix(gcs, "top_asr"),
-  bottom_asr = build_matrix(gcs, "bottom_asr")
+  global_asr = build_matrix("global_asr"),
+  top_asr    = build_matrix("top_asr"),
+  bottom_asr = build_matrix("bottom_asr")
 )
 caas_corStat_byrank <- list(
-  global = build_matrix(gcs, "global_caas"),
-  top    = build_matrix(gcs, "top_caas"),
-  bottom = build_matrix(gcs, "bottom_caas")
+  global = build_matrix("global_caas"),
+  top    = build_matrix("top_caas"),
+  bottom = build_matrix("bottom_caas")
 )
 
 saveRDS(list(corStat_byrank = corStat_byrank,
