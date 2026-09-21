@@ -52,11 +52,18 @@ def main():
         print(f"[posenrich_prep] no CAAS null supplied -> wrote empty {args.output}", flush=True)
         return
 
+    # `cycle` is a tag, not necessarily numeric (e.g. base-cycle labels like
+    # "b_1000" from the FOP-mirror replay-tag collapse -- see gene_wrapper.py),
+    # so it's read as category rather than coerced to a numeric dtype.
+    # caas_sum/n_schemes are left at pandas' own inferred dtype (float64/int64,
+    # matching posenrich_enrich.py's load_caas_cycle_null exactly) so `score`
+    # is computed at the same precision as before -- only the repetitive
+    # string columns (Gene, side, cycle, pos_id) are switched to category,
+    # which is where the actual memory cost was.
     df = pd.read_csv(
         path, sep="\t",
         usecols=["Gene", "Position", "side", "cycle", "caas_sum", "n_schemes"],
-        dtype={"Gene": "category", "side": "category", "cycle": "int32",
-               "caas_sum": "float32", "n_schemes": "int32"},
+        dtype={"Gene": "category", "side": "category", "cycle": "category"},
     )
     if df.empty:
         write_empty(args.output)
@@ -68,8 +75,11 @@ def main():
     # codes over its (much smaller) set of distinct positions.
     pos_id = (df["Gene"].astype(str) + ":" + df["Position"].astype(str)).astype("category")
     df["pos_id"] = pos_id
-    df["score"] = (df["caas_sum"] / df["n_schemes"].replace(0, np.nan)).fillna(0.0).astype("float32")
-    cycle_levels = np.sort(df["cycle"].unique())
+    df["score"] = (df["caas_sum"] / df["n_schemes"].replace(0, np.nan)).fillna(0.0)
+    # cycle's category codes already are exactly its unique values (built from
+    # what read_csv observed), so this is a lookup over the categories, not a
+    # pass over all ~27M rows.
+    cycle_levels = np.sort(np.asarray(df["cycle"].cat.categories, dtype=object))
 
     long_df = df[["pos_id", "side", "cycle", "score"]]
 
