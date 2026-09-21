@@ -44,7 +44,7 @@ process PRIMATEAI_MAP {
     script:
     def local_dir = "${baseDir}/subworkflows/VEP/local/src"
     """
-    cp ${local_dir}/map_to_primateai.py .
+    cp ${local_dir}/map_to_primateai.py ${local_dir}/vep_common.py .
 
     if [[ ! -f "${primateai_db}" ]]; then
         echo "WARN Missing PrimateAI database: ${primateai_db}. Skipping PrimateAI mapping." >&2

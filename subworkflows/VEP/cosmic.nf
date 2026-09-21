@@ -32,7 +32,7 @@ process COSMIC_MAP {
     script:
     def local_dir = "${baseDir}/subworkflows/VEP/local/src"
     """
-    cp ${local_dir}/map_to_cosmic.py .
+    cp ${local_dir}/map_to_cosmic.py ${local_dir}/vep_common.py .
 
     if [[ ! -f "${cosmic_db}" ]]; then
         echo "WARN Missing COSMIC database: ${cosmic_db}. Skipping COSMIC mapping." >&2
