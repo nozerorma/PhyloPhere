@@ -1,0 +1,16 @@
+Aegithalos_bonvaloti
+Aegithalos_fuliginosus
+Cyanistes_cyanus
+Lophophanes_dichrous
+Machlolophus_spilonotus
+Pardaliparus_venustulus
+Parus_minor
+Parus_monticolus
+Periparus_ater_aemodius
+Periparus_ater_pekinensis
+Periparus_rubidiventris
+Poecile_davidi
+Poecile_montanus
+Poecile_palustris
+Pseudopodoces_humilis
+Sylviparus_modestus

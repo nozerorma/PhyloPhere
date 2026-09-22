@@ -61,7 +61,8 @@ def resolve_tax_id(outdir: str, tree: str) -> str:
     return output
 
 
-def resolve_gene_ensembl_file(outdir: str, alignment_dir: str) -> str:
+def resolve_gene_ensembl_file(outdir: str, alignment_dir: str,
+                              dataset: str = "", ref_species: str = "") -> str:
     core_dir = os.path.join(outdir, "core_inputs")
     os.makedirs(core_dir, exist_ok=True)
     genes = sorted({
@@ -78,11 +79,16 @@ def resolve_gene_ensembl_file(outdir: str, alignment_dir: str) -> str:
         fh.write("\n".join(genes) + "\n")
     output = os.path.join(core_dir, "gene_ensembl_generated.tsv")
     unresolved = os.path.join(core_dir, "gene_ensembl_unresolved.txt")
-    result = subprocess.run(
-        [sys.executable, os.path.join(BIN_DIR, "generate_ensembl_mapping.py"),
-         "--gene-list", gene_list_file, "--output", output, "--unresolved", unresolved],
-        stderr=subprocess.PIPE, text=True,
-    )
+    cmd = [
+        sys.executable, os.path.join(BIN_DIR, "generate_ensembl_mapping.py"),
+        "--gene-list", gene_list_file, "--output", output, "--unresolved", unresolved,
+    ]
+    if dataset:
+        cmd.extend(["--dataset", dataset])
+    if ref_species:
+        cmd.extend(["--ref-species", ref_species])
+
+    result = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
     sys.stderr.write(result.stderr)
     if result.returncode != 0 or not os.path.exists(output):
         print("Warning: gene_ensembl_file auto-generation failed; leaving "
@@ -99,6 +105,12 @@ def main():
     parser.add_argument("--tax-id", default="", help="Existing --tax_id value, if any")
     parser.add_argument("--gene-ensembl-file", default="",
                          help="Existing --gene_ensembl_file value, if any")
+    parser.add_argument("--auto-generate-ensembl", action="store_true", default=False,
+                         help="Allow auto-generating gene_ensembl_file via BioMart if not provided")
+    parser.add_argument("--ensembl-dataset", default="",
+                         help="BioMart dataset name")
+    parser.add_argument("--ref-species", default="Homo_sapiens",
+                         help="Reference species name")
     args = parser.parse_args()
 
     tax_id = args.tax_id
@@ -106,8 +118,11 @@ def main():
         tax_id = resolve_tax_id(args.outdir, args.tree)
 
     gene_ensembl_file = args.gene_ensembl_file
-    if not gene_ensembl_file and args.alignment:
-        gene_ensembl_file = resolve_gene_ensembl_file(args.outdir, args.alignment)
+    if not gene_ensembl_file and args.alignment and args.auto_generate_ensembl:
+        gene_ensembl_file = resolve_gene_ensembl_file(
+            args.outdir, args.alignment,
+            dataset=args.ensembl_dataset, ref_species=args.ref_species
+        )
 
     print(f"TAX_ID={tax_id}")
     print(f"GENE_ENSEMBL_FILE={gene_ensembl_file}")

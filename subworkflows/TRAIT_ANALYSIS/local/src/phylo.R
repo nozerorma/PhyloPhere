@@ -25,11 +25,59 @@ if (endsWith(tax_id_file, ".csv")) {
   sep_char <- ","
 }
 
+# Resolve tax_ids shared by more than one species (e.g. several GenBank
+# accessions of the same organism as distinct tree tips). Mirrors the
+# synthetic tax_id assignment in
+# CT_DISAMBIGUATION/local/src/phylo/species_mapping.py: the first species
+# (alphabetically) keeps the original tax_id, every other one is reassigned
+# tax_id+i (probing forward on collision). Without this, a tax_id shared by
+# N tips causes every trait_df row for those tips to be remapped onto a
+# single arbitrarily-chosen tip further downstream, producing duplicate
+# `species` rows (with possibly conflicting trait values) that crash PSS
+# computation and the CI heatmap.
+resolve_duplicate_taxids <- function(df) {
+  dup_taxids <- df$tax_id[duplicated(df$tax_id)]
+  if (length(dup_taxids) == 0) return(df)
+
+  all_existing <- as.character(unique(df$tax_id))
+  resolved <- df
+
+  for (tid in unique(dup_taxids)) {
+    species_list <- sort(df$species[df$tax_id == tid])
+    kept <- species_list[1]
+    duplicates <- species_list[-1]
+
+    debug_log("TAXONOMY CONFLICT: tax_id %s shared by: %s. Assigning synthetic tax_ids to duplicates.",
+              tid, paste(species_list, collapse = ", "))
+
+    for (i in seq_along(duplicates)) {
+      dup_sp <- duplicates[i]
+      synthetic_tid <- as.character(as.integer(tid) + i)
+      attempts <- 0
+      while (synthetic_tid %in% all_existing && attempts < 1000) {
+        synthetic_tid <- as.character(as.integer(synthetic_tid) + 1)
+        attempts <- attempts + 1
+      }
+      if (attempts >= 1000) {
+        stop(sprintf("Could not find unused synthetic tax_id for %s (tried 1000 IDs)", dup_sp))
+      }
+      resolved$tax_id[resolved$species == dup_sp] <- synthetic_tid
+      all_existing <- c(all_existing, synthetic_tid)
+      debug_log("Synthetic tax_id %s assigned to '%s' (original: %s, kept: %s)",
+                synthetic_tid, dup_sp, tid, kept)
+    }
+  }
+
+  resolved
+}
+
 if (nzchar(tax_id_file) && file.exists(tax_id_file)) {
   tax_id_df <- read.csv(tax_id_file, sep = sep_char, stringsAsFactors = FALSE) %>%
     dplyr::mutate(across(everything(), ~ if(is.character(.)) trimws(.) else .))
   if ("tax_id" %in% names(tax_id_df) && "species" %in% names(tax_id_df)) {
     tax_id_df <- tax_id_df %>% dplyr::select(tax_id, species) %>% dplyr::distinct()
+    tax_id_df$tax_id <- as.character(tax_id_df$tax_id)
+    tax_id_df <- resolve_duplicate_taxids(tax_id_df)
     has.TAX_ID <- TRUE
     debug_log("tax_id_df rows = %d, distinct taxa = %d", nrow(tax_id_df), length(unique(tax_id_df$tax_id)))
   } else {

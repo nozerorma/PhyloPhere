@@ -321,14 +321,6 @@ if (!has_res) {
                       NES = round(perm_nes, 3), Direction = direction,
                       `p (Perm)` = signif(p_value, 3),
                       `p.adj` = signif(p_adj, 3), Sig = ifelse(sig, "*", ""))
-          # p.perm: the CAAS permulation-null term sum, a second signal
-          # alongside p (Perm)'s own label-shuffle null (see fcs_enrich.R's
-          # p.perm for the gene-level analogue). NA/absent when POSENRICH ran
-          # without the CAAS null supplied.
-          if ("p.perm" %in% names(tf_src) && !all(is.na(tf_src$`p.perm`))) {
-            tf_df <- tf_df %>%
-              tibble::add_column(`p.perm (CAAS-null)` = signif(tf_src$`p.perm`, 3), .before = "p.adj")
-          }
         } else {
           tf_df <- tf_src %>%
             transmute(Pathway = pathway, Description = description,
@@ -778,7 +770,6 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
     present_flags <- intersect(want, names(rk_sig_raw))
     has_nes <- "perm_nes" %in% names(rk_sig_raw)
     .has_tf <- "top_frac" %in% names(rk_sig_raw) && !all(is.na(rk_sig_raw$top_frac))
-    has_pperm <- "p.perm" %in% names(rk_sig_raw) && !all(is.na(rk_sig_raw$`p.perm`))
 
     # Collapse to one row per pathway: best (min) p.adj, strongest (max)
     # NES/fold across the cutoffs it recurred at, cutoff flags averaged
@@ -791,7 +782,6 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
         p_adj = min(p_adj, na.rm = TRUE),
         perm_nes = if (has_nes) { v <- stats::na.omit(perm_nes); if (length(v)) max(v) else NA_real_ } else NA_real_,
         fold_enrichment = if (!has_nes) { v <- stats::na.omit(fold_enrichment); if (length(v)) max(v) else NA_real_ } else NA_real_,
-        `p.perm` = if (has_pperm) { v <- stats::na.omit(`p.perm`); if (length(v)) min(v) else NA_real_ } else NA_real_,
         n_occurrences = if (.has_tf) dplyr::n_distinct(top_frac, na.rm = TRUE) else 1L,
         `Cutoffs` = if (.has_tf) paste(sort(100 * unique(na.omit(top_frac)), decreasing = TRUE), "%", sep = "", collapse = ", ") else "N/A",
         dplyr::across(dplyr::all_of(present_flags), ~round(mean(.x, na.rm = TRUE), 1)),
@@ -809,10 +799,6 @@ if (!has_res || !any(res$sig, na.rm = TRUE)) {
         transmute(Database = database, Pathway = pathway, Description = description,
                   NES = round(perm_nes, 3), Direction = direction,
                   `p.adj` = signif(p_adj, 3), `N cutoffs` = n_occurrences, Cutoffs)
-      if (has_pperm) {
-        le_df <- le_df %>%
-          tibble::add_column(`p.perm (CAAS-null)` = signif(rk_sig$`p.perm`, 3), .after = "p.adj")
-      }
     } else {
       le_df <- rk_sig %>%
         transmute(Database = database, Pathway = pathway, Description = description,
@@ -1811,12 +1797,18 @@ readr::write_tsv(region_export,
 # Methods
 
 - **Test**: Position-Level Path Sum Permulation test. Raw CAAS score magnitude
-  is summed for every position in a set ($T_\text{obs} = \sum_{p \in \text{term}} s_p$).
-  The non-zero position scores ($K \approx 3{,}000$) are randomly permuted $N_\text{perms} = 2,000$ times
-  across the full ~1.47M position background to build an exact empirical null distribution.
-  Normalized Enrichment Score ($\text{NES} = (T_\text{obs} - \mu_\text{null}) / \sigma_\text{null}$)
-  and empirical p-values ($p_\text{perm} = \frac{\#\{T_\text{null} \ge T_\text{obs}\} + 1}{N_\text{perms} + 1}$)
-  are computed per term. Run separately for the **global / top / bottom** directions (`side`).
+  is summed for every position in a set ($T_\text{obs} = \sum_{p \in \text{term}} s_p$),
+  and compared against a null built from the real cycles of the CAAS
+  permulation null (`perm_pos_cycle_caas.tsv.gz`) when supplied — same
+  preference gene-level FCS's Path Sum Permulation test gives that null
+  (`12.FCS_general_report.Rmd`) — falling back to a label shuffle of the
+  non-zero position scores ($K \approx 3{,}000$), randomly permuted
+  $N_\text{perms} = 2,000$ times across the full ~1.47M position background,
+  only when no CAAS null is supplied. Normalized Enrichment Score
+  ($\text{NES} = (T_\text{obs} - \mu_\text{null}) / \sigma_\text{null}$) and
+  empirical p-values ($p = \frac{\#\{T_\text{null} \ge T_\text{obs}\} + 1}{N_\text{draws} + 1}$)
+  are computed per term against whichever null was used. Run separately for
+  the **global / top / bottom** directions (`side`).
 - **Two background conventions.** Every database above tests against the
   **full honest background** *except* `cosmic_orthogroups` and
   `pai3d_orthogroups`, which test against a **coverage-restricted background**
@@ -1829,13 +1821,7 @@ readr::write_tsv(region_export,
   the broad `characterization` layers (UCR core/flank, FUBAR
   positive/purifying). `min`/`max` set-size filtering applies only to the GMT-style databases.
 - **`p.adj`**: BH-adjusted per (ranking, database).
-- **`p.perm`**: the same term sum compared against real cycles of the CAAS
-  permulation null (`perm_pos_cycle_caas.tsv.gz`), a second signal alongside
-  `p (Perm)`'s own label-shuffle null — same construction as gene-level FCS's
-  `p.perm` (`12.FCS_general_report.Rmd`). Present only when POSENRICH was run
-  with the CAAS null supplied; absent otherwise.
-- **Significance**: `p.adj < `r PADJ`` and `NES > 0`, additionally gated on
-  `p.perm < posenrich_p_perm_thr` whenever `p.perm` is available.
+- **Significance**: `p.adj < `r PADJ`` and `NES > 0`.
 
 *Report generated `r Sys.time()`.*
 

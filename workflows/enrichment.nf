@@ -170,28 +170,51 @@ workflow ENRICHMENT {
             .collect()
             .map { it[0] }
 
-        // SCORING's own published gene_lists/ (scoring_compute.R) -- hoisted
-        // here (rather than only inside the run_ami block below) since
-        // SCORING_FCS_REPORT's gene_lists_dir param needs it too.
-        def gene_lists_ch = gene_lists.ifEmpty { file('NO_GENE_LISTS') }
-
-        def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved)
-        def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch,
-                                          scoring_fcs_compute.enrich_file)
-
-        def annot_ch = fcs_stats
-        def trait_lbl = params.traitname ?: 'trait'
-
         def rer_perms_resolved = (rer_perms_ch ?: Channel.empty())
             .ifEmpty { file(params.rer_perms_file ?: 'NO_FILE') }
             .collect()
             .map { it[0] }
 
-        def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved)
-        def rer_fcs = MODULE_FCS_RER(
-            Channel.value('scoring/rer'),   fcs_stats_rer,
-            rer_universe_ch, Channel.value("12.FCS_rer_${trait_lbl}"),
-            rer_perms_resolved, annot_ch, rer_fcs_compute.enrich_file)
+        // SCORING's own published gene_lists/ (scoring_compute.R) -- hoisted
+        // here (rather than only inside the run_ami block below) since
+        // SCORING_FCS_REPORT's gene_lists_dir param needs it too.
+        def gene_lists_ch = gene_lists.ifEmpty { file('NO_GENE_LISTS') }
+
+        // FCS ranked-Wilcoxon enrichment (gated by params.fcs_enabled)
+        def run_fcs = (params.fcs_enabled != null) ? params.fcs_enabled : true
+        def fcs_out_report = Channel.empty()
+        def rer_fcs_report = Channel.empty()
+        def caas_all = Channel.value(file('NO_FCS_ALL'))
+        def rer_all  = Channel.value(file('NO_FCS_ALL'))
+        def caas_le  = Channel.value(file('NO_LEADING_EDGE'))
+        def rer_le   = Channel.value(file('NO_LEADING_EDGE'))
+        def caas_le_comp = Channel.value(file('NO_LEADING_EDGE_COMPOSITION'))
+        def rer_le_comp  = Channel.value(file('NO_LEADING_EDGE_COMPOSITION'))
+
+        def annot_ch = fcs_stats
+        def trait_lbl = params.traitname ?: 'trait'
+
+        if (run_fcs) {
+            def scoring_fcs_compute = FCS_COMPUTE_SCORING(fcs_stats, fcs_universe_ch, caas_perms_resolved)
+            def fcs_out = SCORING_FCS_REPORT(fcs_stats, fcs_universe_ch, caas_perms_resolved, gene_lists_ch,
+                                              scoring_fcs_compute.enrich_file)
+            fcs_out_report = fcs_out.report
+            caas_all = fcs_out.fcs_all_results.ifEmpty { file('NO_FCS_ALL') }
+            caas_le  = fcs_out.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
+            caas_le_comp = fcs_out.fcs_leading_edge_composition.ifEmpty { file('NO_LEADING_EDGE_COMPOSITION') }
+
+            if (rer_ran) {
+                def rer_fcs_compute = FCS_COMPUTE_RER(fcs_stats_rer, rer_universe_ch, rer_perms_resolved)
+                def rer_fcs = MODULE_FCS_RER(
+                    Channel.value('scoring/rer'),   fcs_stats_rer,
+                    rer_universe_ch, Channel.value("12.FCS_rer_${trait_lbl}"),
+                    rer_perms_resolved, annot_ch, rer_fcs_compute.enrich_file)
+                rer_fcs_report = rer_fcs.report
+                rer_all  = rer_fcs.fcs_all_results.ifEmpty  { file('NO_FCS_ALL') }
+                rer_le   = rer_fcs.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
+                rer_le_comp  = rer_fcs.fcs_leading_edge_composition.ifEmpty  { file('NO_LEADING_EDGE_COMPOSITION') }
+            }
+        }
 
         // FADE and RER each have their own gene universe (verified to differ
         // meaningfully from CAAS's cleaned_background and from each other on
@@ -330,8 +353,7 @@ workflow ENRICHMENT {
             )
         }
 
-        def final_reports = fcs_out.report
-            .mix(rer_fcs.report)
+        def final_reports = fcs_out_report.mix(rer_fcs_report)
         if (run_ami) {
             final_reports = final_reports.mix(ami_out.report)
         }
@@ -341,7 +363,9 @@ workflow ENRICHMENT {
         if (params.posenrich) {
             def pos_gene_ensembl_ch = Channel.fromPath(params.gene_ensembl_file).ifEmpty { file('NO_FILE') }
             def pos_domain_variability_ch
-            if (params.domain_variability_file) {
+            if (!params.posenrich_domains) {
+                pos_domain_variability_ch = file('NO_FILE')
+            } else if (params.domain_variability_file) {
                 pos_domain_variability_ch = Channel.fromPath(params.domain_variability_file).ifEmpty { file('NO_FILE') }
             } else if (params.alignment) {
                 log.info "[ENRICHMENT] domain_variability_file not set — auto-generating via cached Pfam-A + hmmscan."
@@ -352,7 +376,9 @@ workflow ENRICHMENT {
                 pos_domain_variability_ch = file('NO_FILE')
             }
             def pos_ucr_positions_ch
-            if (params.ucr_positions_file) {
+            if (!params.posenrich_ucr) {
+                pos_ucr_positions_ch = file('NO_FILE')
+            } else if (params.ucr_positions_file) {
                 pos_ucr_positions_ch = Channel.fromPath(params.ucr_positions_file).ifEmpty { file('NO_FILE') }
             } else if (params.tax_id && params.alignment) {
                 log.info "[ENRICHMENT] ucr_positions_file not set — auto-generating from the alignment (Valdar variability + UCR detection)."
@@ -376,11 +402,14 @@ workflow ENRICHMENT {
             // posenrich.nf still recognize it as absent.
             def pos_egg_members_ch
             def pos_egg_annotations_ch
-            if (params.egg_members_file && params.egg_annotations_file) {
+            if (!params.posenrich_eggnog) {
+                pos_egg_members_ch = file('NO_FILE_EGG_MEMBERS')
+                pos_egg_annotations_ch = file('NO_FILE_EGG_ANNOT')
+            } else if (params.egg_members_file && params.egg_annotations_file) {
                 pos_egg_members_ch = Channel.fromPath(params.egg_members_file).ifEmpty { file('NO_FILE_EGG_MEMBERS') }
                 pos_egg_annotations_ch = Channel.fromPath(params.egg_annotations_file).ifEmpty { file('NO_FILE_EGG_ANNOT') }
             } else {
-                log.info "[ENRICHMENT] egg_members_file/egg_annotations_file not set — auto-fetching eggNOG5 Primates orthogroups (bin/resolve_eggnog.py)."
+                log.info "[ENRICHMENT] egg_members_file/egg_annotations_file not set — auto-fetching eggNOG5 orthogroups (bin/resolve_eggnog.py)."
                 EGGNOG_RESOLUTION()
                 pos_egg_members_ch = EGGNOG_RESOLUTION.out.egg_members_file
                 pos_egg_annotations_ch = EGGNOG_RESOLUTION.out.egg_annotations_file
@@ -464,14 +493,6 @@ workflow ENRICHMENT {
         // ── Comparison report — pulls in CAAS/RER FCS, plus (when available) AMI's
         // module descriptions and posenrich's position-level results, all called
         // above so their outputs exist as real objects by this point in the DAG. ──
-        def caas_all = fcs_out.fcs_all_results.ifEmpty { file('NO_FCS_ALL') }
-        def rer_all  = rer_fcs.fcs_all_results.ifEmpty  { file('NO_FCS_ALL') }
-        // Leading-edge tables feed the Comparison report's Per-module
-        // significance / Interesting Genes-Positions tables.
-        def caas_le  = fcs_out.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
-        def rer_le   = rer_fcs.fcs_leading_edge.ifEmpty { file('NO_LEADING_EDGE') }
-        def caas_le_comp = fcs_out.fcs_leading_edge_composition.ifEmpty { file('NO_LEADING_EDGE_COMPOSITION') }
-        def rer_le_comp  = rer_fcs.fcs_leading_edge_composition.ifEmpty  { file('NO_LEADING_EDGE_COMPOSITION') }
 
         def ami_module_desc_ch = (run_ami ? ami_out.module_descriptions : Channel.empty())
             .ifEmpty { file('NO_AMI_MODULE_DESC') }

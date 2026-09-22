@@ -165,10 +165,12 @@ kbl_html <- function(df, height = NULL, escape = TRUE, caption = NULL, ...) {
 # evidence_label_caas/evidence_label_rer in Interesting Genes/Positions), so
 # the same tier always reads the same colour everywhere. Any table using
 # .evidence_badge() must be rendered via kbl_html(..., escape = FALSE).
+.exploratory_labels <- c("Exploratory", "Exploratory (relative)", "Exploratory (phylogenetic)")
 .evidence_weight_of <- function(lbl) dplyr::case_when(
-  lbl == "Hard evidence" ~ 3L, lbl == "Supported" ~ 2L, lbl == "Exploratory" ~ 1L, TRUE ~ 0L)
+  lbl == "Hard evidence" ~ 3L, lbl == "Supported" ~ 2L, lbl %in% .exploratory_labels ~ 1L, TRUE ~ 0L)
 .evidence_colours <- c("Hard evidence" = "#27ae60", "Supported" = "#e67e22",
-                       "Exploratory" = "#7f8c8d", "None" = "#dcdcdc")
+                       "Exploratory" = "#7f8c8d", "Exploratory (relative)" = "#7f8c8d",
+                       "Exploratory (phylogenetic)" = "#9b59b6", "None" = "#dcdcdc")
 .evidence_badge <- function(x) {
   x <- dplyr::coalesce(x, "None")
   kableExtra::cell_spec(x, "html",
@@ -622,7 +624,7 @@ for (dr in c("Global", "Top", "Bottom")) {
 # directly, since older exports may predate them.
 thr <- params$fdr_thr
 .evidence_rank_of <- function(lbl) dplyr::case_when(
-  lbl == "Hard evidence" ~ 1L, lbl == "Supported" ~ 2L, lbl == "Exploratory" ~ 3L, TRUE ~ 4L)
+  lbl == "Hard evidence" ~ 1L, lbl == "Supported" ~ 2L, lbl %in% .exploratory_labels ~ 3L, TRUE ~ 4L)
 
 if (!"evidence_label" %in% names(fcs_dir_mod)) fcs_dir_mod$evidence_label <- NA_character_
 for (cl in c("lach_frac_magnitude", "perm_nes")) {

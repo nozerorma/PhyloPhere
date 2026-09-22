@@ -280,7 +280,8 @@ workflow FCS_COMPUTE {
     main:
     def batchSize = (params.fcs_batch_size ?: 4) as int
     def counter = 0
-    def batches = Channel.fromPath("${params.gmt_dir}/*.gmt")
+    def gmt_dir_resolved = params.gmt_dir ?: "${baseDir}/assets/gmt"
+    def batches = Channel.fromPath("${gmt_dir_resolved}/*.gmt")
         .collate(batchSize)
         .map { batch ->
             def idx = ++counter
@@ -294,11 +295,11 @@ workflow FCS_COMPUTE {
     // caas_permulation.nf's CAAS_PERMS_DISAMBIGUATE_BATCHED fix for the full
     // mechanism). Paired positionally against the many-item batches channel,
     // any one of them would silently truncate FCS_COMPUTE_BATCHED to its
-    // first batch once exhausted. .first() makes each reusable/broadcastable;
-    // no-op if it was already a value channel.
-    def stats_file_bc   = stats_file.first()
-    def universe_file_bc = universe_file.first()
-    def perms_file_bc    = perms_file.first()
+    // first batch once exhausted. .collect().map { it[0] } makes each reusable/
+    // broadcastable without .first()'s warning on value channels.
+    def stats_file_bc    = stats_file.collect().map { it[0] }
+    def universe_file_bc = universe_file.collect().map { it[0] }
+    def perms_file_bc    = perms_file.collect().map { it[0] }
 
     FCS_COMPUTE_BATCHED(batches, stats_file_bc, universe_file_bc, perms_file_bc)
     FCS_CONCAT(FCS_COMPUTE_BATCHED.out.partial.collect())

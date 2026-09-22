@@ -17,7 +17,7 @@ model = 3                        * models for codons:
                        * 0:poisson, 1:proportional, 2:Empirical, 3:Empirical+F
                        * 6:FromCodon, 7:AAClasses, 8:REVaa_0, 9:REVaa(nr=189)
 aaDist = 0  *  0:equal, +:geometric; -:linear, 1-6:G1974,Miyata,c,p,v,a        
-aaRatefile = /home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/output/pepc/work/c4_complete/98/8b691df47e09cc76f0cf1d4e558f92/dat/lg.dat * only used for aa seqs with model=empirical(_F)
+aaRatefile = /home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/output/pepc/work/c4_complete/ba/3bca76bc9973e130f453703fc8093d/dat/lg.dat * only used for aa seqs with model=empirical(_F)
                    * dayhoff.dat, jones.dat, wag.dat, mtmam.dat, or your own
 
 NSsites = 0  * 0:one w;1:neutral;2:selection; 3:discrete;4:freqs;

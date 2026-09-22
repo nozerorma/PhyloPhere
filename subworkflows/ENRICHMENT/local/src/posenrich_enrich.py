@@ -17,22 +17,22 @@
 #     T_obs = sum_{p in term} s_p
 #   The ~99.8% zero-scoring positions contribute 0 to the pathway sum.
 #   Permuting the non-zero scores randomly across the ~1.47M background pool
-#   N_perms times yields an exact, magnitude-weighted empirical null distribution.
+#   N_perms times yields an exact, magnitude-weighted empirical null distribution
+#   -- UNLESS the CAAS permulation null (perm_pos_cycle_caas.tsv.gz) is supplied,
+#   in which case its real permulation cycles REPLACE the label shuffle as the
+#   null (same preference fcs_enrich.R's fcs_run_permulation gives FCS's own
+#   Permsum test): a naive label shuffle treats every position's score as an
+#   independent draw, ignoring the phylogenetic non-independence the CAAS null
+#   corrects for, so it isn't kept as a second, independent gate once the valid
+#   null is available -- it's simply superseded by it.
 #
 # Output:
 #   posenrich_characterization.tsv : ranking, database, pathway, description,
 #                                    layer_size, n_pos_with_score, obs_sum,
 #                                    null_mean, null_sd, perm_nes, p_value,
-#                                    p_adj, p.perm, direction, background_n,
+#                                    p_adj, direction, background_n,
 #                                    n_scored, sig
 #   posenrich_leading_edge.tsv     : gene:position driver members for significant terms
-#
-# p.perm:
-#   A second, independent significance signal alongside p_value/perm_nes above:
-#   the same T_obs term sum compared against real permulation cycles from the
-#   CAAS permulation null (perm_pos_cycle_caas.tsv.gz), rather than the label
-#   shuffles this script generates itself. NA when no null file is supplied.
-#   Mirrors fcs_enrich.R's p.perm/sig_wilcoxon dual-gate pattern exactly.
 # =============================================================================
 
 import os
@@ -72,21 +72,18 @@ def parse_args():
                         "for pai3d_orthogroups")
     p.add_argument("--caas-cycle-null", default=None,
                    help="perm_pos_cycle_caas.tsv.gz from CAAS_PERMULATION (Gene, Position, "
-                        "side, cycle, caas_sum, n_schemes) - the CAAS permulation null, "
-                        "reused here for a second p.perm signal alongside this script's own "
-                        "label-shuffle p_value, mirroring fcs_enrich.R's p.perm. Omit or pass "
-                        "a NO_FILE* sentinel to skip (p.perm stays NA, sig unchanged). Ignored "
-                        "when --caas-null-prepped is given.")
+                        "side, cycle, caas_sum, n_schemes) - the CAAS permulation null. When "
+                        "supplied, its real cycles REPLACE this script's own label shuffle as "
+                        "the null for p_value/p_adj/perm_nes, mirroring fcs_enrich.R's "
+                        "fcs_run_permulation null_mat preference. Omit or pass a NO_FILE* "
+                        "sentinel to fall back to the private label shuffle. Ignored when "
+                        "--caas-null-prepped is given.")
     p.add_argument("--caas-null-prepped", default=None,
                    help="caas_null_prepped.pkl from POSENRICH_PREP_NULL (posenrich_prep_caas_null.py) "
                         "- the same CAAS permulation null as --caas-cycle-null, already parsed and "
                         "split by direction once for the whole batched run instead of once per batch "
                         "task. Takes precedence over --caas-cycle-null when both are given. Omit or "
-                        "pass a NO_FILE* sentinel to skip (p.perm stays NA, sig unchanged).")
-    p.add_argument("--p-perm-thr", type=float, default=0.025,
-                   help="p.perm significance threshold, folded into sig as a dual gate "
-                        "alongside --padj-thr when --caas-cycle-null is supplied "
-                        "(default 0.025, matching fcs_enrich.R's p_perm_thr)")
+                        "pass a NO_FILE* sentinel to fall back to the private label shuffle.")
     p.add_argument("--output-dir", required=True)
     p.add_argument("--min-size", type=int, default=5,
                    help="min positions per set in background (GMT sources only)")
@@ -210,8 +207,8 @@ def direction_scores(df, direction):
     return dict(zip(sub["pos_id"], sub["CAAS_score"]))
 
 
-# ── CAAS permulation-null p.perm (second signal alongside the label-shuffle
-# null above; mirrors fcs_enrich.R's p.perm) ──────────────────────────────────
+# ── CAAS permulation-null (preferred as the PRIMARY null when supplied;
+# see run_permulation_for_terms) ──────────────────────────────────────────────
 def load_caas_cycle_null(path):
     """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_sum,
     n_schemes) once for the whole run. Returns (long_df, all_cycle_levels) with
@@ -222,7 +219,7 @@ def load_caas_cycle_null(path):
     on one side still counts as a real null draw contributing 0 to that side's
     term sums (not a missing cycle). Returns (None, None) if path is missing,
     a NO_FILE* sentinel, or doesn't exist -- callers must treat that as "no
-    CAAS null available" and leave p.perm as NA.
+    CAAS null available" and fall back to the private label shuffle.
     """
     if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
         return None, None
@@ -272,15 +269,14 @@ def null_direction_subset(long_df, direction):
     return sub.drop_duplicates(subset=["pos_id", "cycle"], keep="last")
 
 
-def compute_caas_pperm(M_mat, obs_sums, bg_idx_map, N, null_sub, all_cycle_levels):
-    """p.perm: obs_sums compared against real CAAS-permulation-cycle term sums,
-    reusing the same term indicator matrix M_mat the label-shuffle null uses
-    (mirrors fcs_enrich.R's p.perm / fcs_permpvalenrich_vectorized -- same
-    add-one formula). Cycle columns span ALL_cycle_levels (every real null
-    cycle from the whole file), not just cycles with a nonzero row in this
-    direction/background, so a cycle with zero hits still counts as a real
-    null draw contributing 0 rather than being silently dropped. Returns None
-    (p.perm stays NA for every term) when no CAAS null was supplied.
+def caas_null_term_sums(M_mat, bg_idx_map, N, null_sub, all_cycle_levels):
+    """Term sums under the real CAAS-permulation-cycle null, reusing the same
+    term indicator matrix M_mat the label-shuffle null uses. Cycle columns
+    span ALL_cycle_levels (every real null cycle from the whole file), not
+    just cycles with a nonzero row in this direction/background, so a cycle
+    with zero hits still counts as a real null draw contributing 0 rather
+    than being silently dropped. Returns None when no CAAS null was supplied,
+    in which case the caller falls back to a private label shuffle.
     """
     if null_sub is None or len(all_cycle_levels) == 0:
         return None
@@ -293,9 +289,7 @@ def compute_caas_pperm(M_mat, obs_sums, bg_idx_map, N, null_sub, all_cycle_level
         (sub["score"].to_numpy(dtype=np.float32), (row_idx, col_idx)),
         shape=(N, n_cycles)
     )
-    null_cycle_sums = M_mat.dot(null_mat).toarray()  # (n_terms x n_cycles)
-    counts = np.sum(null_cycle_sums >= obs_sums[:, None], axis=1)
-    return (counts + 1.0) / (n_cycles + 1.0)
+    return M_mat.dot(null_mat).toarray()  # (n_terms x n_cycles)
 
 
 def annotate_overlap(overlap, annot, flag_names):
@@ -389,74 +383,92 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
 
     obs_sums = M_mat.dot(V_obs)
 
-    # p.perm: independent of the label-shuffle null below, only needs M_mat +
-    # obs_sums, so compute it once here and reuse in both the K==0 early
-    # return and the main path.
-    p_perm = compute_caas_pperm(M_mat, obs_sums, bg_idx_map, N, caas_null_sub, caas_null_cycles)
+    # 3. Null source. Prefer the shared CAAS/RER phylogenetic permulation null
+    # over a private label shuffle -- same preference fcs_run_permulation
+    # gives FCS's own Permsum test, and for the same reason: a naive
+    # position-label shuffle treats every position's score as an independent
+    # draw, ignoring the phylogenetic non-independence the CAAS null corrects
+    # for (see fcs_enrich.R's fcs_run_permulation docstring). When the CAAS
+    # null is available it REPLACES the private shuffle as the primary null
+    # rather than gating alongside it -- a label shuffle known to be
+    # anti-conservative isn't independent evidence to AND against, it's just
+    # a weaker test. No separate p.perm column: p_value/p_adj already reflect
+    # whichever null was used.
+    null_cycle_sums = caas_null_term_sums(M_mat, bg_idx_map, N, caas_null_sub, caas_null_cycles)
 
-    # 3. Sparse permutation matrix P (N x n_perms)
-    nz_idx = np.where(V_obs > 0)[0]
-    nz_vals = V_obs[nz_idx]
-    K = len(nz_idx)
+    if null_cycle_sums is not None:
+        n_draws = null_cycle_sums.shape[1]
+        null_mu = null_cycle_sums.mean(axis=1)
+        null_var = np.maximum(np.square(null_cycle_sums).mean(axis=1) - null_mu**2, 0.0)
+        null_sd = np.sqrt(null_var)
+        null_sd_safe = np.where(null_sd == 0, 1.0, null_sd)
+        perm_nes = (obs_sums - null_mu) / null_sd_safe
+        counts = np.sum(null_cycle_sums >= obs_sums[:, None], axis=1)
+        pvals = (counts + 1.0) / (n_draws + 1.0)
+    else:
+        # Fallback: private label shuffle of this direction's own nonzero
+        # scores across the background, chunked -- see docstring.
+        nz_idx = np.where(V_obs > 0)[0]
+        nz_vals = V_obs[nz_idx]
+        K = len(nz_idx)
 
-    if K == 0:
-        # All scores 0 -> no signal
-        out = []
-        for i, (term, desc, m_bg) in enumerate(valid_terms):
-            row = dict(
-                pathway=term, description=desc, layer_size=len(m_bg),
-                n_pos_with_score=0, obs_sum=0.0, null_mean=0.0, null_sd=0.0,
-                perm_nes=0.0, p_value=1.0,
-                **{"p.perm": (float(p_perm[i]) if p_perm is not None else np.nan)},
-                direction="depleted", background_n=N,
-                _overlap=set()
-            )
-            row.update(annotate_overlap(set(), annot or {}, flag_names or []))
-            out.append(row)
-        return out
+        if K == 0:
+            # All scores 0 -> no signal
+            out = []
+            for i, (term, desc, m_bg) in enumerate(valid_terms):
+                row = dict(
+                    pathway=term, description=desc, layer_size=len(m_bg),
+                    n_pos_with_score=0, obs_sum=0.0, null_mean=0.0, null_sd=0.0,
+                    perm_nes=0.0, p_value=1.0,
+                    direction="depleted", background_n=N,
+                    _overlap=set()
+                )
+                row.update(annotate_overlap(set(), annot or {}, flag_names or []))
+                out.append(row)
+            return out
 
-    rng = np.random.default_rng(seed)
+        rng = np.random.default_rng(seed)
 
-    # 4. Chunked sparse permutation matrix + multiply, folded into running
-    # accumulators -- see docstring. Each chunk is independent (its own
-    # p_rows/p_cols/p_vals/P_chunk/null_chunk), so peak memory is bounded by
-    # perm_chunk_size regardless of n_perms.
-    sum_null = np.zeros(n_terms, dtype=np.float64)
-    sumsq_null = np.zeros(n_terms, dtype=np.float64)
-    counts = np.zeros(n_terms, dtype=np.int64)
+        # Chunked sparse permutation matrix + multiply, folded into running
+        # accumulators -- see docstring. Each chunk is independent (its own
+        # p_rows/p_cols/p_vals/P_chunk/null_chunk), so peak memory is bounded
+        # by perm_chunk_size regardless of n_perms.
+        sum_null = np.zeros(n_terms, dtype=np.float64)
+        sumsq_null = np.zeros(n_terms, dtype=np.float64)
+        counts = np.zeros(n_terms, dtype=np.int64)
 
-    done = 0
-    while done < n_perms:
-        chunk = min(perm_chunk_size, n_perms - done)
+        done = 0
+        while done < n_perms:
+            chunk = min(perm_chunk_size, n_perms - done)
 
-        p_rows = np.empty(K * chunk, dtype=np.int32)
-        p_cols = np.empty(K * chunk, dtype=np.int32)
-        p_vals = np.tile(nz_vals, chunk)
-        for j in range(chunk):
-            rnd_idx = rng.choice(N, size=K, replace=False)
-            p_rows[j*K : (j+1)*K] = rnd_idx
-            p_cols[j*K : (j+1)*K] = j
+            p_rows = np.empty(K * chunk, dtype=np.int32)
+            p_cols = np.empty(K * chunk, dtype=np.int32)
+            p_vals = np.tile(nz_vals, chunk)
+            for j in range(chunk):
+                rnd_idx = rng.choice(N, size=K, replace=False)
+                p_rows[j*K : (j+1)*K] = rnd_idx
+                p_cols[j*K : (j+1)*K] = j
 
-        P_chunk = sp.csr_matrix((p_vals, (p_rows, p_cols)), shape=(N, chunk))
-        null_chunk = M_mat.dot(P_chunk).toarray()  # (n_terms x chunk)
+            P_chunk = sp.csr_matrix((p_vals, (p_rows, p_cols)), shape=(N, chunk))
+            null_chunk = M_mat.dot(P_chunk).toarray()  # (n_terms x chunk)
 
-        sum_null += null_chunk.sum(axis=1)
-        sumsq_null += np.square(null_chunk).sum(axis=1)
-        counts += np.sum(null_chunk >= obs_sums[:, None], axis=1)
+            sum_null += null_chunk.sum(axis=1)
+            sumsq_null += np.square(null_chunk).sum(axis=1)
+            counts += np.sum(null_chunk >= obs_sums[:, None], axis=1)
 
-        done += chunk
+            done += chunk
 
-    null_mu = sum_null / n_perms
-    # Population variance from sum-of-squares (matches np.std's default ddof=0);
-    # clip at 0 to guard float round-off pushing a near-zero variance negative.
-    null_var = np.maximum(sumsq_null / n_perms - null_mu**2, 0.0)
-    null_sd = np.sqrt(null_var)
-    null_sd_safe = np.where(null_sd == 0, 1.0, null_sd)
+        null_mu = sum_null / n_perms
+        # Population variance from sum-of-squares (matches np.std's default ddof=0);
+        # clip at 0 to guard float round-off pushing a near-zero variance negative.
+        null_var = np.maximum(sumsq_null / n_perms - null_mu**2, 0.0)
+        null_sd = np.sqrt(null_var)
+        null_sd_safe = np.where(null_sd == 0, 1.0, null_sd)
 
-    perm_nes = (obs_sums - null_mu) / null_sd_safe
-    pvals = (counts + 1.0) / (n_perms + 1.0)
+        perm_nes = (obs_sums - null_mu) / null_sd_safe
+        pvals = (counts + 1.0) / (n_perms + 1.0)
 
-    # 5. Format results
+    # 4. Format results
     out = []
     for i, (term, desc, m_bg) in enumerate(valid_terms):
         driver_positions = {p for p in m_bg if obs_scores_dict.get(p, 0.0) > 0}
@@ -470,7 +482,6 @@ def run_permulation_for_terms(terms, descs, obs_scores_dict, background, min_siz
             null_sd=float(null_sd[i]),
             perm_nes=float(perm_nes[i]),
             p_value=float(pvals[i]),
-            **{"p.perm": (float(p_perm[i]) if p_perm is not None else np.nan)},
             direction=("enriched" if perm_nes[i] > 0 else "depleted"),
             background_n=N,
             _overlap=driver_positions
@@ -537,16 +548,16 @@ def main():
         caas_null_long = None
         if caas_null_by_direction is not None:
             print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
-                  f"loaded (prepped) from {args.caas_null_prepped} -> p.perm enabled", flush=True)
+                  f"loaded (prepped) from {args.caas_null_prepped} -> used as the primary null", flush=True)
         else:
-            print("[posenrich] no CAAS permulation null supplied -> p.perm stays NA", flush=True)
+            print("[posenrich] no CAAS permulation null supplied -> falling back to label shuffle", flush=True)
     else:
         caas_null_long, caas_null_cycles = load_caas_cycle_null(args.caas_cycle_null)
         if caas_null_long is not None:
             print(f"[posenrich] CAAS permulation null: {len(caas_null_cycles)} cycles "
-                  f"loaded from {args.caas_cycle_null} -> p.perm enabled", flush=True)
+                  f"loaded from {args.caas_cycle_null} -> used as the primary null", flush=True)
         else:
-            print("[posenrich] no CAAS permulation null supplied -> p.perm stays NA", flush=True)
+            print("[posenrich] no CAAS permulation null supplied -> falling back to label shuffle", flush=True)
 
     directions = ["global", "top", "bottom"]
     rows = []
@@ -583,11 +594,7 @@ def main():
             for i, r in enumerate(res):
                 r["p_adj"] = padj[i]
                 r["n_scored"] = n_scored
-                # p.perm is NA when no CAAS null was supplied, in which case
-                # this gate reduces to the FDR+direction check alone -- same
-                # graceful-degrade shape as fcs_enrich.R's sig_wilcoxon.
-                p_perm_ok = pd.isna(r["p.perm"]) or r["p.perm"] < args.p_perm_thr
-                r["sig"] = bool(r["p_adj"] < args.padj_thr and r["perm_nes"] > 0 and p_perm_ok)
+                r["sig"] = bool(r["p_adj"] < args.padj_thr and r["perm_nes"] > 0)
                 overlap = r.pop("_overlap")
                 if r["sig"]:
                     for pos_id in sorted(overlap):
@@ -603,7 +610,7 @@ def main():
 
     result_cols = (
         ["ranking", "database", "pathway", "description", "layer_size", "n_pos_with_score",
-         "obs_sum", "null_mean", "null_sd", "perm_nes", "p_value", "p_adj", "p.perm",
+         "obs_sum", "null_mean", "null_sd", "perm_nes", "p_value", "p_adj",
          "direction", "background_n"]
         + [f"pct_{f[len('flag_'):]}" for f in flag_names]
         + ["n_scored", "sig"]

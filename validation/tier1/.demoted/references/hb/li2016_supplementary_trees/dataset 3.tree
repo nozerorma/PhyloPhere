@@ -1,0 +1,22 @@
+#NEXUS
+
+Begin trees;  
+	Translate
+		1 Parus_cyanus,
+		2 Parus_major_1,
+		3 Parus_monticolus_1,
+		4 Parus_palustris,
+		5 Parus_spilonotus,
+		6 Parus_dichrous,
+		7 Parus_montanus,
+		8 Parus_montanus_baicalensis,
+		9 Parus_major_2,
+		10 Parus_monticolus_2,
+		11 Pseudopoduses_humilis,
+		12 Parus_ater,
+		13 Sylviparus_modestus,
+		14 Parus_venustulus,
+		15 Remiz_consobrinus
+		;
+tree con_all_compat = (15:0.061812,(13:0.020228,((1:0.014414,((((4:0.001651,7:0.000988)1.00:0.001006,8:0.002991)1.00:0.012857,6:0.009534)0.88:0.001513,(12:0.007754,14:0.009667)1.00:0.004988)1.00:0.001554)0.99:0.001454,((((2:0.001679,9:0.001660)1.00:0.004805,(3:0.002532,10:0.001761)1.00:0.006284)1.00:0.004723,11:0.010329)1.00:0.002269,5:0.009873)1.00:0.002000)1.00:0.011205));
+end;

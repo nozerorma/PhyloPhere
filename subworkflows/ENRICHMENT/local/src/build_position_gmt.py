@@ -31,38 +31,19 @@ def open_maybe_gz(path, mode="rt"):
 
 
 def validate_required_inputs(args):
-    """Fail loudly (non-zero exit) if any REQUIRED input is missing or a dangling
-    symlink, listing every offender at once. Optional inputs (cosmic, background,
-    custom markers) are only warned about. Resolves `.gz` siblings in place so
-    downstream code can open the returned paths directly.
-
-    Rationale: the builder previously guarded every database with a silent
-    `if os.path.exists(...)`, so a broken stage-in produced a partial GMT set
-    (e.g. only genomic_locations) with exit code 0 — indistinguishable from a
-    deliberately omitted input. Required inputs must break the run visibly."""
-    required = {
+    """Resolve inputs, checking optional files and resolving .gz siblings."""
+    optional = {
         "--gene_ensembl_file": "gene_ensembl_file",
         "--domain_variability_file": "domain_variability_file",
         "--ucr_positions_file": "ucr_positions_file",
         "--fubar_sites_file": "fubar_sites_file",
         "--egg_members_file": "egg_members_file",
         "--egg_annotations_file": "egg_annotations_file",
-    }
-    optional = {
         "--cosmic_db": "cosmic_db",
         "--pai3d_db": "pai3d_db",
         "--cleaned_background": "cleaned_background",
         "--custom_marker_file": "custom_marker_file",
     }
-
-    missing = []
-    for flag, attr in required.items():
-        given = getattr(args, attr)
-        resolved = resolve_path(given)
-        if resolved is None:
-            missing.append(f"  {flag} {given}")
-        else:
-            setattr(args, attr, resolved)
 
     # map_dir is an optional directory for genomic coordinate mapping
     if args.map_dir:
@@ -71,7 +52,10 @@ def validate_required_inputs(args):
             args.map_dir = None
 
     for flag, attr in optional.items():
-        given = getattr(args, attr)
+        given = getattr(args, attr, None)
+        if given and (str(given).startswith("NO_FILE") or str(given) == "None"):
+            setattr(args, attr, None)
+            continue
         if given:
             resolved = resolve_path(given)
             if resolved is None:
@@ -81,32 +65,22 @@ def validate_required_inputs(args):
             else:
                 setattr(args, attr, resolved)
 
-    if missing:
-        print("ERROR: the following REQUIRED position-GMT inputs are missing or "
-              "are dangling symlinks:", file=sys.stderr)
-        for m in missing:
-            print(m, file=sys.stderr)
-        print("Refusing to build a partial GMT set. Check that these paths exist "
-              "on the machine running the job (a symlink to an HPC-only path is "
-              "dangling here).", file=sys.stderr)
-        sys.exit(1)
-
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Build position-level GMT files for FCS enrichment analysis.")
-    parser.add_argument("--gene_ensembl_file", required=True, help="Path to ensembl_genes.output containing human_protein_id column")
-    parser.add_argument("--domain_variability_file", required=True, help="Path to domain_variability.tsv")
-    parser.add_argument("--ucr_positions_file", required=True, help="Path to ucr_positions.tsv")
-    parser.add_argument("--fubar_sites_file", required=True, help="Path to fubar_sites.tsv")
-    parser.add_argument("--egg_members_file", required=True, help="Path to 9443_members.tsv")
-    parser.add_argument("--egg_annotations_file", required=True, help="Path to 9443_annotations.tsv")
-    parser.add_argument("--map_dir", required=False, help="Optional directory containing <GENE>*.map.tsv files")
-    parser.add_argument("--cosmic_db", required=False, help="Path to Cosmic_MutantCensus_v104_GRCh38.tsv.gz")
-    parser.add_argument("--pai3d_db", required=False, help="Path to PrimateAI-3D.hg38.txt.gz")
-    parser.add_argument("--cleaned_background", required=False, help="Optional list of genes tested (universe filter)")
-    parser.add_argument("--custom_marker_file", required=False, help="Optional custom marker file (gene, position, term, desc)")
-    parser.add_argument("--fade_sites_top_file", required=False, help="Optional fade_sites_top.csv (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV")
-    parser.add_argument("--fade_sites_bottom_file", required=False, help="Optional fade_sites_bottom.csv (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV")
+    parser.add_argument("--gene_ensembl_file", required=False, default=None, help="Path to ensembl_genes.output containing human_protein_id column")
+    parser.add_argument("--domain_variability_file", required=False, default=None, help="Path to domain_variability.tsv")
+    parser.add_argument("--ucr_positions_file", required=False, default=None, help="Path to ucr_positions.tsv")
+    parser.add_argument("--fubar_sites_file", required=False, default=None, help="Path to fubar_sites.tsv")
+    parser.add_argument("--egg_members_file", required=False, default=None, help="Path to eggNOG members.tsv")
+    parser.add_argument("--egg_annotations_file", required=False, default=None, help="Path to eggNOG annotations.tsv")
+    parser.add_argument("--map_dir", required=False, default=None, help="Optional directory containing <GENE>*.map.tsv files")
+    parser.add_argument("--cosmic_db", required=False, default=None, help="Path to Cosmic_MutantCensus_v104_GRCh38.tsv.gz")
+    parser.add_argument("--pai3d_db", required=False, default=None, help="Path to PrimateAI-3D.hg38.txt.gz")
+    parser.add_argument("--cleaned_background", required=False, default=None, help="Optional list of genes tested (universe filter)")
+    parser.add_argument("--custom_marker_file", required=False, default=None, help="Optional custom marker file (gene, position, term, desc)")
+    parser.add_argument("--fade_sites_top_file", required=False, default=None, help="Optional fade_sites_top.csv (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV")
+    parser.add_argument("--fade_sites_bottom_file", required=False, default=None, help="Optional fade_sites_bottom.csv (gene,position,max_bf,target_aa) from FADE_JSON_TO_CSV")
     parser.add_argument("--output_dir", required=True, help="Output directory for generated GMT files")
     return parser.parse_args()
 
@@ -123,6 +97,9 @@ def load_universe_genes(cleaned_background_path):
     return genes
 
 def load_ensembl_mapping(gene_ensembl_file):
+    if not gene_ensembl_file or not os.path.exists(gene_ensembl_file):
+        print("No valid gene_ensembl_file provided; skipping Ensembl mapping.")
+        return {}, {}
     # Only the two columns we need; vectorized split beats row-wise iteration.
     df = pd.read_csv(gene_ensembl_file, sep='\t',
                      usecols=['gene', 'human_protein_id'], dtype=str)
@@ -580,14 +557,14 @@ def main():
     
     # Load descriptions
     ortho_descs = {}
-    if os.path.exists(args.egg_annotations_file):
+    if args.egg_annotations_file and os.path.exists(args.egg_annotations_file):
         with open_maybe_gz(args.egg_annotations_file, 'rt') as f:
             for line in f:
                 fields = line.strip().split('\t')
                 if len(fields) >= 4:
                     ortho_descs[fields[1]] = fields[3]
 
-    if os.path.exists(args.egg_members_file):
+    if args.egg_members_file and os.path.exists(args.egg_members_file):
         with open_maybe_gz(args.egg_members_file, 'rt') as f:
             for line in f:
                 fields = line.strip().split('\t')
@@ -600,13 +577,12 @@ def main():
                 # Identify member genes
                 og_genes = []
                 for m in members_list:
-                    if m.startswith('9606.ENSP'):
-                        parts = m.split('.')
-                        if len(parts) >= 2:
-                            ensp_id = parts[1]
-                            gene = ensp_to_gene.get(ensp_id)
-                            if gene and gene in active_genes:
-                                og_genes.append(gene)
+                    parts = m.split('.', 1)
+                    if len(parts) >= 2:
+                        ensp_id = parts[1]
+                        gene = ensp_to_gene.get(ensp_id)
+                        if gene and gene in active_genes:
+                            og_genes.append(gene)
                 
                 if og_genes:
                     full_members = []

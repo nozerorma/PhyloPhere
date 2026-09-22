@@ -1,0 +1,4 @@
+gene	chr	start	end	strand	length	human_protein_id
+HBA	chr1	100000	100423	+	141	.
+HBD	chr2	100000	100423	+	141	.
+HBB	chr3	100000	100438	+	146	.

@@ -36,8 +36,19 @@ SPEC = ModuleTabSpec(
         ),
         FieldSpec(
             name="gene_ensembl_file",
-            label="Gene-Ensembl mapping file (optional — auto-generated via BioMart if blank)",
+            label="Gene-Ensembl mapping file",
             kind="path_file",
+            importance="optional",
+        ),
+        FieldSpec(
+            name="auto_generate_ensembl",
+            label="Auto-generate Ensembl mapping via BioMart if unset",
+            kind="bool",
+            importance="optional",
+        ),
+        FieldSpec(
+            name="ensembl_dataset",
+            label="Ensembl BioMart dataset (optional)",
             importance="optional",
         ),
     ),

@@ -48,7 +48,7 @@ def cache_key(genes: list) -> str:
     return hashlib.sha256("\n".join(genes).encode("utf-8")).hexdigest()
 
 
-def query_biomart(genes: list, chunk_size: int = 500) -> pd.DataFrame:
+def query_biomart(genes: list, dataset: str = "hsapiens_gene_ensembl", chunk_size: int = 500) -> pd.DataFrame:
     url = "http://www.ensembl.org/biomart/martservice"
     frames = []
     for i in range(0, len(genes), chunk_size):
@@ -57,7 +57,7 @@ def query_biomart(genes: list, chunk_size: int = 500) -> pd.DataFrame:
         query_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE Query>
 <Query virtualSchemaName="default" formatter="TSV" header="1" uniqueRows="1" datasetConfigVersion="0.6">
-    <Dataset name="hsapiens_gene_ensembl" interface="default">
+    <Dataset name="{dataset}" interface="default">
         <Filter name="external_gene_name" value="{gene_list_str}"/>
         <Attribute name="external_gene_name"/>
         <Attribute name="chromosome_name"/>
@@ -87,6 +87,14 @@ def query_biomart(genes: list, chunk_size: int = 500) -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True)
 
 
+def derive_dataset(ref_species: str) -> str:
+    """e.g. 'Homo_sapiens' -> 'hsapiens_gene_ensembl'"""
+    parts = ref_species.strip().lower().split("_")
+    if len(parts) >= 2:
+        return f"{parts[0][0]}{parts[1]}_gene_ensembl"
+    return "hsapiens_gene_ensembl"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--gene-list", required=True,
@@ -94,9 +102,15 @@ def main():
     parser.add_argument("--output", required=True, help="Output TSV")
     parser.add_argument("--unresolved", required=True,
                          help="Output file listing genes with no BioMart hit")
+    parser.add_argument("--dataset", default="",
+                         help="BioMart dataset name (e.g. hsapiens_gene_ensembl)")
+    parser.add_argument("--ref-species", default="Homo_sapiens",
+                         help="Reference species name for dataset derivation (default: Homo_sapiens)")
     parser.add_argument("--cache-dir", default=None,
                          help="Directory to cache raw BioMart responses (default: alongside --output)")
     args = parser.parse_args()
+
+    dataset = args.dataset or derive_dataset(args.ref_species)
 
     genes = load_gene_list(args.gene_list)
     if not genes:
@@ -105,15 +119,15 @@ def main():
 
     cache_dir = args.cache_dir or os.path.join(os.path.dirname(os.path.abspath(args.output)), ".cache", "biomart")
     os.makedirs(cache_dir, exist_ok=True)
-    cache_file = os.path.join(cache_dir, f"{cache_key(genes)}.tsv")
+    cache_file = os.path.join(cache_dir, f"{cache_key(genes)}_{dataset}.tsv")
 
     if os.path.exists(cache_file):
         print(f"Using cached BioMart response: {cache_file}", file=sys.stderr)
         df = pd.read_csv(cache_file, sep="\t")
     else:
-        print(f"Querying Ensembl BioMart for {len(genes)} genes...", file=sys.stderr)
+        print(f"Querying Ensembl BioMart ({dataset}) for {len(genes)} genes...", file=sys.stderr)
         try:
-            df = query_biomart(genes)
+            df = query_biomart(genes, dataset=dataset)
         except Exception as exc:
             print(f"Error: Ensembl BioMart query failed ({exc}). The service may be "
                   "temporarily unavailable — retry later, or supply --gene_ensembl_file "

@@ -553,7 +553,8 @@ workflow CAAS_PERMULATION {
         def gated_tree = tree_file
             .combine(asr_ready)
             .map { t, _ready -> t }
-            .first()
+            .collect()
+            .map { it[0] }
 
         // resample_subset/fop_pairs/gene_lengths each come from a single task
         // (or a Channel.value/.ifEmpty fallback), so they carry exactly one
@@ -567,12 +568,11 @@ workflow CAAS_PERMULATION {
         // channel, that silently truncated CAAS_PERMS_DISAMBIGUATE_BATCHED to
         // exactly ONE batch (confirmed live: 9688 genes upstream, only the
         // first 20-gene batch alphabetically ever ran) instead of erroring.
-        // .first() turns each into a proper reusable/broadcastable channel
-        // regardless of how it arrived -- a no-op for the unbatched branch
-        // below, which already only ever sees one batch item anyway.
-        def resample_subset_bc = resample_subset.first()
-        def fop_pairs_bc       = fop_pairs.first()
-        def gene_lengths_bc    = gene_lengths.first()
+        // .collect().map { it[0] } turns each into a proper reusable/broadcastable
+        // value channel (without .first()'s warning on value channels).
+        def resample_subset_bc = resample_subset.collect().map { it[0] }
+        def fop_pairs_bc       = fop_pairs.collect().map { it[0] }
+        def gene_lengths_bc    = gene_lengths.collect().map { it[0] }
 
         def disambigBatchSize = (params.ct_disambig_perms_batch_size ?: 1) as int
 

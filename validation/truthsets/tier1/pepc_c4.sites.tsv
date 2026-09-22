@@ -1,39 +1,60 @@
-# PEPC (phosphoenolpyruvate carboxylase, ppc-1E1c / "ppc") C4-associated sites — Tier 1
+# PEPC (phosphoenolpyruvate carboxylase, ppc-1 gene lineage) C3/C4-associated
+# sites — Tier 1 truth set
 #
-# Phenotype: C3 vs C4 photosynthesis in Cyperaceae (sedges). Fixture =
-# validation/fixtures/tier1/pepc/ (79 tips, 23 "genotypic" C4 by the A780S
-# determinant, from Besnard et al. 2009 via the PCOC / ConDor test data).
+# Phenotype: C3 vs C4 photosynthesis in Cyperaceae (sedges). Fixture:
+# validation/tier1/input/pepc/ (78 tips: 23 genotypic-C4 by the A780S
+# determinant, 55 C3).
 #
-# Numbering: maize C4 PEPC1 (UniProt P04711, 970 aa). The fixture alignment is
-# projected onto maize coordinates and is exactly 970 columns, so
-#   ref position N  ==  alignment column N   (1:1, no ref row needed).
+# Numbering: Besnard et al. 2009 number every codon on maize PEPC1 (EMBL/ENA
+# CAA33317, 970 aa). The fixture alignment (align/PEPC.fasta) is exactly 970
+# columns with no reference row, so position N == alignment column N (1:1).
 #
 # Evidence tiers (column `tier`):
-#   mutagenesis  : residue change functionally demonstrated (kinetics / folding)
-#   selection    : Besnard 2009 BEB positive selection on C4 branches AND
-#                  recovered by >=1 reanalysis (PCOC / ConDor / FADE, Morel 2024)
-#   parallel     : Besnard 2009 positive-selection site with a parallel change
-#                  also reported in grass / eudicot C4 PEPC (cross-family)
-#   weak         : Besnard 2009 candidate, <3 independent emergences in the
-#                  ConDor reanalysis, not otherwise confirmed
+#   mutagenesis : site-directed/recombinant mutagenesis (or ancestral-protein
+#                 resurrection) directly demonstrated a kinetic/functional
+#                 effect of this exact substitution.
+#   selection   : one of Besnard 2009's 16 BEB-positive-selection codons
+#                 (posterior >0.999, sedge ppc-1 branches), independently
+#                 recovered as a true positive by Morel et al.'s ConDor
+#                 reanalysis (genotypic annotation).
+#   parallel    : Besnard 2009 codon detected as under positive selection in
+#                 both sedges and grasses (Christin et al. 2007).
+#   weak        : Besnard 2009 BEB-positive-selection codon with neither of
+#                 the above corroborations; single-source call.
 #
-# Sources: Blasing2000 (780 kinetics); Paulus2013 / Engelmann2002 (665 folding/
-#   activity); Besnard2009 (MBE 26:1909, 16 positive-selection codons);
-#   Christin2007 (Curr Biol, grass PEPC parallel codons); Morel2024 (ConDor,
-#   GBE, doi:10.1093/gbe/evae040 — 5 TP: M749T P540T E572Q A780S H665N).
+# 780 A->S: functionally demonstrated kinetic effect (Blasing et al. 2000;
+#   Christin et al. 2007). 22/23 genotypic-C4 tips carry S, 55/55 C3 tips
+#   carry A.
+# 665 H->N: functionally demonstrated effect on folding/catalytic activity
+#   (Svensson et al. 2003; Christin et al. 2007, via Morel et al. 2024).
+#   23/23 C4 tips carry N, 54/56 C3 tips carry H.
+# 540 P->T, 572 E->Q: Besnard 2009 positive selection; both also true
+#   positives in Morel et al.'s ConDor reanalysis (genotypic annotation).
+# 733 F->V, 761 S->A: Besnard 2009 positive selection, detected in parallel
+#   in grass PEPC (Christin et al. 2007). Fixture: 733 — 19/23 C4 tips retain
+#   F (2 V, 1 M); 761 — 14/23 C4 tips carry A.
+# 749 L->T: Besnard 2009 positive selection (weak tier). Derived T restricted
+#   to the Fimbristylis C4 clade.
+# 505 F->L, 573 A->N, 731 I->V: Besnard 2009 positive selection (weak tier,
+#   transcribed from Fig. 3's ancestral/derived panel).
 #
-# NOTE: Besnard 2009 lists 16 positive-selection codons; only the subset below is
-# transcribed with confidence. The remaining ~7 need the Besnard 2009 Table 1 /
-# Christin 2007 Table 1 PDFs before recall is quoted as a headline fraction.
+# Sources: Blasing2000 (Bläsing OE, Westhoff P, Svensson P. 2000. J Biol
+#   Chem 275:27917-27923); Besnard2009 (MBE 26(8):1909-1919,
+#   doi:10.1093/molbev/msp103, validation/tier1/references/pepc/msp103.pdf);
+#   Christin2007 (Curr Biol 17:1241-1247, cited via Besnard 2009 Table 2, not
+#   available locally); Morel2024 (Genome Biol Evol 16(4),
+#   doi:10.1093/gbe/evae040, read via its bioRxiv preprint,
+#   validation/tier1/references/pepc/condor_morel2021_biorxiv.pdf);
+#   Svensson2003 (cited by Morel et al. for the 665 functional claim, not
+#   available locally).
 gene	ref_seq	position	ref_aa	alt_aa	tier	source
-PEPC	maize_P04711	780	A	S	mutagenesis	Blasing2000
-PEPC	maize_P04711	665	H	N	mutagenesis	Paulus2013
-PEPC	maize_P04711	540	P	T	selection	Besnard2009;Morel2024
-PEPC	maize_P04711	572	E	Q	selection	Besnard2009;Morel2024
-PEPC	maize_P04711	749	M	T	selection	Besnard2009;Morel2024
-PEPC	maize_P04711	733	F	V	parallel	Besnard2009;Christin2007
-PEPC	maize_P04711	761	S	A	parallel	Besnard2009;Christin2007
-PEPC	maize_P04711	770	.	.	weak	Besnard2009
-PEPC	maize_P04711	810	.	.	weak	Besnard2009
-PEPC	maize_P04711	839	.	.	weak	Besnard2009
-PEPC	maize_P04711	906	.	.	weak	Besnard2009
+PEPC	maize_CAA33317	780	A	S	mutagenesis	Blasing2000
+PEPC	maize_CAA33317	665	H	N	mutagenesis	Svensson2003;Christin2007
+PEPC	maize_CAA33317	540	P	T	selection	Besnard2009;Morel2024
+PEPC	maize_CAA33317	572	E	Q	selection	Besnard2009;Morel2024
+PEPC	maize_CAA33317	733	F	V	parallel	Besnard2009;Christin2007
+PEPC	maize_CAA33317	761	S	A	parallel	Besnard2009;Christin2007
+PEPC	maize_CAA33317	749	L	T	weak	Besnard2009
+PEPC	maize_CAA33317	505	F	L	weak	Besnard2009
+PEPC	maize_CAA33317	573	A	N	weak	Besnard2009
+PEPC	maize_CAA33317	731	I	V	weak	Besnard2009

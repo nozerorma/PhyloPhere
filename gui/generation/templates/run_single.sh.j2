@@ -373,20 +373,29 @@ fi
 # Must happen here, in the invocation layer, not inside main.nf: Nextflow enforces
 # single-assignment on params keys, so a params.tax_id = ... set after
 # conf/common.config's own default has already run is silently ignored.
-if [[ -z "${INPUT_TAX_ID:-}" || -z "${GENE_ENSEMBL_FILE:-}" ]]; then
+if [[ -z "${INPUT_TAX_ID:-}" || ( -z "${GENE_ENSEMBL_FILE:-}" && "${AUTO_GENERATE_ENSEMBL:-false}" == "true" ) ]]; then
     _CORE_INPUTS_RESOLVED="$(python3 "$REPO_DIR/bin/resolve_core_inputs.py" \
         --outdir "$RESULTS_BASE" --tree "$TREE_FILE" --alignment "$ALI_DIR" \
-        --tax-id "${INPUT_TAX_ID:-}" --gene-ensembl-file "${GENE_ENSEMBL_FILE:-}")"
+        --tax-id "${INPUT_TAX_ID:-}" --gene-ensembl-file "${GENE_ENSEMBL_FILE:-}" \
+        $([ "${AUTO_GENERATE_ENSEMBL:-false}" == "true" ] && echo "--auto-generate-ensembl") \
+        --ensembl-dataset "${ENSEMBL_DATASET:-}" \
+        --ref-species "${REF_SPECIES_NAME:-Homo_sapiens}")"
     INPUT_TAX_ID="$(echo "$_CORE_INPUTS_RESOLVED" | grep '^TAX_ID=' | cut -d= -f2-)"
     GENE_ENSEMBL_FILE="$(echo "$_CORE_INPUTS_RESOLVED" | grep '^GENE_ENSEMBL_FILE=' | cut -d= -f2-)"
 fi
 
 # Resolve --gmt_dir when left blank: fetches current GO/Reactome/WikiPathways
-# GMTs, falling back per-file to the vendored copies in assets/gmt/ when
-# offline (bin/resolve_gmts.py). Same invocation-layer reasoning as above.
+# GMTs if AUTO_FETCH_GMT is true, falling back per-file to vendored copies in assets/gmt/
+# (or copies vendored copies without network calls when false via --no-fetch).
 if [[ -z "${GMT_DIR:-}" ]]; then
+    _NO_FETCH_ARG=""
+    if [[ "${AUTO_FETCH_GMT:-false}" != "true" ]]; then
+        _NO_FETCH_ARG="--no-fetch"
+    fi
     _GMT_RESOLVED="$(python3 "$REPO_DIR/bin/resolve_gmts.py" \
-        --output-dir "$RESULTS_BASE/core_inputs/gmt" --gmt-dir "${GMT_DIR:-}")"
+        --output-dir "$RESULTS_BASE/core_inputs/gmt" \
+        --gmt-dir "${GMT_DIR:-}" \
+        $_NO_FETCH_ARG)"
     GMT_DIR="$(echo "$_GMT_RESOLVED" | grep '^GMT_DIR=' | cut -d= -f2-)"
 fi
 
@@ -404,7 +413,10 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "max_time": "$MAX_TIME",
   "sp_colname": "${SP_COLNAME:-species}",
   "clade_name": "${CLADE_NAME:-primates}",
+  "clade_taxid": "${CLADE_TAXID:-9443}",
   "taxon_of_interest": "${TAXON_OF_INTEREST:-family}",
+  "ref_species_name": "${REF_SPECIES_NAME:-Homo_sapiens}",
+  "ref_species_taxid": "${REF_SPECIES_TAXID:-9606}",
   "tax_id": "${INPUT_TAX_ID:-}",
   "slurm_queue": "${SLURM_QUEUE:-haswell}",
   "slurm_queue_size": "{{ resources.slurm_queue_size }}",
@@ -488,6 +500,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "extreme_threshold": "${POSTPROC_EXTREME_THRESHOLD:-0.99}",
   "iqr_multiplier": "${POSTPROC_IQR_MULTIPLIER:-3.0}",
   "gene_ensembl_file": "${GENE_ENSEMBL_FILE:-}",
+  "auto_generate_ensembl": ${AUTO_GENERATE_ENSEMBL:-false},
+  "ensembl_dataset": "${ENSEMBL_DATASET:-}",
 
   "ct_accumulation": $_RUN_ACCUMULATION,
   "accumulation_n_randomizations": "$N_RANDOMIZATIONS",
@@ -575,6 +589,8 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "vep_assembly": "${VEP_ASSEMBLY:-GRCh38}",
 
   "enrichment": $_RUN_ENRICHMENT,
+  "fcs_enabled": ${FCS_ENABLED:-true},
+  "auto_fetch_gmt": ${AUTO_FETCH_GMT:-false},
   "gmt_dir": "${GMT_DIR:-}",
   "fcs_min_genes": "${FCS_MIN_GENES:-5}",
   "fcs_max_genes": "${FCS_MAX_GENES:-500}",
@@ -598,16 +614,19 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "comparison_perm_topk": "${COMPARISON_PERM_TOPK:-0.05}",
 
   "posenrich": $_RUN_POSENRICH,
-  "egg_members_file": "${EGG_MEMBERS_FILE:-}",
-  "egg_annotations_file": "${EGG_ANNOTATIONS_FILE:-}",
+  "posenrich_domains": ${POSENRICH_DOMAINS:-true},
   "domain_variability_file": "${DOMAIN_VARIABILITY_FILE:-}",
   "domain_ref_species": "${DOMAIN_REF_SPECIES:-}",
+  "posenrich_ucr": ${POSENRICH_UCR:-true},
   "ucr_positions_file": "${UCR_POSITIONS_FILE:-}",
+  "posenrich_eggnog": ${POSENRICH_EGGNOG:-false},
+  "eggnog_taxid": "${EGGNOG_TAXID:-}",
+  "egg_members_file": "${EGG_MEMBERS_FILE:-}",
+  "egg_annotations_file": "${EGG_ANNOTATIONS_FILE:-}",
   "fubar_sites_file": "${FUBAR_SITES_FILE:-}",
   "posenrich_min_size": "${POSENRICH_MIN_SIZE:-5}",
   "posenrich_max_size": "${POSENRICH_MAX_SIZE:-0}",
-  "posenrich_padj_thr": "${POSENRICH_PADJ_THR:-0.15}",
-  "posenrich_p_perm_thr": "${POSENRICH_P_PERM_THR:-0.025}",
+  "posenrich_padj_thr": "${POSENRICH_PADJ_THR:-0.05}",
   "posenrich_batch_size": "${POSENRICH_BATCH_SIZE:-4}",
   "posenrich_background_file": "${POSENRICH_BACKGROUND_FILE:-}"
 }

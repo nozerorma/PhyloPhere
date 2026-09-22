@@ -205,32 +205,48 @@ tibble::tibble(
 # Methods
 
 This report tests every gene set in every GMT database with **three
-complementary methods**, each sensitive to a different way a pathway can show
-signal in the ranking:
+methods that ask two different kinds of question**:
+
+**Wilcoxon-AUC and Lachenbruch require passing a *relative* test: is this
+pathway higher than the OTHER GENES in this same ranking?** - and, when a
+phylogenetic permulation null is available, ALSO require that this holds up
+against a null built by randomly reassigning the phenotype across species on
+the real tree (`W.perm`/`L.perm`, gated at `r params$pperm_thr`). Both
+conditions must hold; the relative comparison is the primary test, the
+phylogenetic one is an additional requirement on top of it.
 
 * **Wilcoxon-AUC FCS** (`RERconverge::fastwilcoxGMTall`) - a rank-sum test:
-  do this pathway's genes sit systematically higher in the ranking than the
-  rest of the universe? Its statistic, **AUC** (`W.AUC`, `stat + 0.5`, range
-  0–1), is the probability that a random pathway gene outranks a random
+  do this pathway's genes sit systematically higher in the ranking than every
+  other gene in the universe? Its statistic, **AUC** (`W.AUC`, `stat + 0.5`,
+  range 0–1), is the probability that a random pathway gene outranks a random
   background gene; 0.5 = no shift. Significance is BH-adjusted p (`W.adj`)
   below the threshold, and - when permulations are available - permulation p
   (`W.perm`) below `r params$pperm_thr` as well.
 * **Lachenbruch Two-Part** - built for the zero-inflated shape of these
   rankings, where most genes carry no signal at all (score = 0). It splits
   the question in two: a Fisher exact test on *prevalence* (are pathway genes
-  over-represented among the genes that scored above zero at all?) and a
-  Wilcoxon test on *magnitude* (among only the genes that scored above zero,
-  do pathway genes score higher?), combined into one χ²(df=2) p-value
-  (`L.adj`). Its statistic, **`L.frac_mag`**, is the fraction of that
-  combined signal coming from the magnitude half rather than the prevalence
-  half - a set near 1 is driven by a few strongly-scoring genes, a set near 0
-  by many weakly-scoring ones.
-* **Path Sum Permulation** - a label-permutation test on the raw summed
-  pathway score: the genes' score labels are shuffled `r params$n_perms_sum %||% 10000`
-  times to build a null distribution for the pathway's total score, and the
-  observed sum is compared against it. Its statistic, **NES**, is a z-score
-  (`(observed − null mean) / null sd`); significance is BH-adjusted p
-  (`P.adj`) below the threshold with `NES > 0`.
+  over-represented among the genes that scored above zero at all, relative to
+  every other gene?) and a Wilcoxon test on *magnitude* (among only the genes
+  that scored above zero, do pathway genes score higher than other scoring
+  genes?), combined into one χ²(df=2) p-value (`L.adj`). Its statistic,
+  **`L.frac_mag`**, is the fraction of that combined signal coming from the
+  magnitude half rather than the prevalence half - a set near 1 is driven by
+  a few strongly-scoring genes, a set near 0 by many weakly-scoring ones.
+
+**Path Sum Permulation requires ONLY the phylogenetic test: does this
+pathway's real total score exceed what it would be if the phenotype labels
+had been randomly reassigned across species?** It sums the pathway's genes'
+real scores, then compares that sum against `r params$n_perms_sum %||% 10000`
+sums computed the same way after randomly relabeling which species carry the
+phenotype (or, when a precomputed CAAS/RER permulation null is supplied, the
+matching per-gene null draws from that null instead of a fresh relabeling).
+Its statistic, **NES**, is a z-score (`(observed − null mean) / null sd`);
+significance is BH-adjusted p (`P.adj`) below the threshold with `NES > 0`.
+Unlike Wilcoxon and Lachenbruch, it carries no relative-to-other-genes
+requirement at all: a pathway can pass here purely on phylogeny-robust signal
+even when it does not rank higher than other genes in this ranking - a claim
+the other two tests would not make, since standing out against the rest of
+the ranking is a required part of what they test.
 
 Each method casts one vote (its own FDR gate, plus direction where
 applicable); a set passing **3/3** is labelled **Hard evidence**, **2/3**
@@ -238,14 +254,6 @@ applicable); a set passing **3/3** is labelled **Hard evidence**, **2/3**
 Lachenbruch and Permulation only run for non-negative (zero-floored)
 rankings - a signed ranking (e.g. RER's two-sided global statistic) is
 Wilcoxon-only, since "score > 0" carries no "has signal" meaning there.
-
-Running all three matters because each fails differently: Wilcoxon alone can
-be diluted by the many zero-floored background genes in a large universe;
-Lachenbruch's split exposes *why* a set is significant (a handful of extreme
-genes vs. broad participation) but is exact/analytic rather than
-permutation-based; Permulation is a direct simulation check that doesn't rely
-on Wilcoxon's asymptotic approximation. A term that all three agree on is
-much harder to explain away than one resting on a single test.
 
 **Ranking convention.** Wherever this report ranks or orders significant
 terms - the Multi-Method Evidence table, the per-database Enriched gene set
@@ -374,7 +382,7 @@ enrich <- enrich %>%
     evidence_rank = dplyr::case_when(
       evidence_label == "Hard evidence" ~ 1L,
       evidence_label == "Supported"     ~ 2L,
-      evidence_label == "Exploratory"   ~ 3L,
+      evidence_label %in% c("Exploratory (relative)", "Exploratory (phylogenetic)") ~ 3L,
       TRUE                              ~ 4L
     ),
     evidence_score = dplyr::if_else(sig_wilcoxon %in% TRUE,    dplyr::coalesce(.auc_pct, 0), 0) +
@@ -409,15 +417,18 @@ direction. Columns: `W.AUC` (Wilcoxon effect size), `W.adj` (Wilcoxon BH p), `W.
 `L.adj` (Lachenbruch BH p), `L.frac_mag` (fraction of Lachenbruch signal from
 magnitude vs prevalence), `P.adj` (Path Sum Permulation BH p), `NES` (Permulation
 normalised enrichment score). NA = test not applicable (signed ranking) or
-not run. Green = Hard evidence (3/3), orange = Supported (2/3), grey = Exploratory (1/3).
+not run. Green = Hard evidence (3/3), orange = Supported (2/3), grey =
+Exploratory (1/3) - "(relative)" when the lone pass is Wilcoxon or
+Lachenbruch, "(phylogenetic)" when it is Permulation alone (see Methods).
 Rows follow the ranking convention from Methods above: evidence tier, then
 mean(`W.AUC`, `L.frac_mag`, `NES`), then alphabetical.
 
 ```{r evidence_table, results='asis'}
 evidence_colours <- c(
-  "Hard evidence" = "#27ae60",
-  "Supported"     = "#e67e22",
-  "Exploratory"   = "#7f8c8d"
+  "Hard evidence"              = "#27ae60",
+  "Supported"                  = "#e67e22",
+  "Exploratory (relative)"     = "#7f8c8d",
+  "Exploratory (phylogenetic)" = "#9b59b6"
 )
 for (rk in ranking_names) {
   cat(sprintf("\n## %s\n\n", rk))
@@ -540,13 +551,15 @@ colour family, darker meaning a larger statistic among the terms shown. Faint
 gate for that term. The **tip marker** sits at the term's single
 most-significant arm, drawn in a dark, saturated shade of that arm's colour
 family (bigger than the arm dots) so the strongest single piece of evidence
-per term is immediately visible; its shape encodes the evidence tier
-(circle = Hard, triangle = Supported, square = Exploratory) and its size the
-gene-set size.
+per term is immediately visible; its shape encodes the evidence tier (circle
+= Hard, triangle = Supported, square = Exploratory (relative) - a lone
+Wilcoxon or Lachenbruch pass, diamond = Exploratory (phylogenetic) - a lone
+Permulation pass, see Methods) and its size the gene-set size.
 
 ```{r overall_dotplot_prep, include=FALSE}
 DIR_MAP <- c(top = "top", accelerating = "top", bottom = "bottom", decelerating = "bottom")
-evidence_shapes <- c("Hard evidence" = 16, "Supported" = 17, "Exploratory" = 15)
+evidence_shapes <- c("Hard evidence" = 16, "Supported" = 17,
+                     "Exploratory (relative)" = 15, "Exploratory (phylogenetic)" = 18)
 
 # Darkens a hex colour toward black by `amount` (0-1), used so the tip
 # marker reads as "this arm's own colour, just deeper" rather than jumping to
@@ -707,7 +720,8 @@ for (dr in c("global", "top", "bottom")) {
     dplyr::slice_min(test_p_adj, n = 1, with_ties = FALSE) %>%
     dplyr::ungroup() %>%
     dplyr::mutate(tip_colour = .darken_hex(arm_colour),
-                  ev_shape = factor(evidence_label, levels = c("Hard evidence", "Supported", "Exploratory")))
+                  ev_shape = factor(evidence_label, levels = c("Hard evidence", "Supported",
+                                                               "Exploratory (relative)", "Exploratory (phylogenetic)")))
 
   p <- ggplot(line_df, aes(y = y)) +
     geom_segment(aes(x = 0, xend = test_signal, yend = y, colour = arm_colour, alpha = test_sig),

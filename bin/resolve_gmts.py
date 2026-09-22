@@ -71,7 +71,7 @@ _DEFAULT_VENDORED_DIR = os.path.join(
 )
 
 
-def resolve_gmts(output_dir: str, vendored_dir: str, timeout: int) -> None:
+def resolve_gmts(output_dir: str, vendored_dir: str, timeout: int, no_fetch: bool = False) -> None:
     os.makedirs(output_dir, exist_ok=True)
 
     vendored_files = {
@@ -79,26 +79,27 @@ def resolve_gmts(output_dir: str, vendored_dir: str, timeout: int) -> None:
         if f.endswith(".gmt") and os.path.isfile(os.path.join(vendored_dir, f))
     } if os.path.isdir(vendored_dir) else set()
 
-    all_fnames = vendored_files | set(_SOURCES) | {"wikipathways.gmt"}
+    all_fnames = vendored_files if no_fetch else (vendored_files | set(_SOURCES) | {"wikipathways.gmt"})
     for fname in sorted(all_fnames):
         dest = os.path.join(output_dir, fname)
-        if fname == "wikipathways.gmt":
-            url = _resolve_wikipathways_url(timeout)
-        else:
-            url = _SOURCES.get(fname)
         fetched = False
-        if url:
-            try:
-                with urllib.request.urlopen(url, timeout=timeout) as resp:
-                    data = resp.read()
-                if data and data.lstrip().startswith(b"<") is False and len(data) > 100:
-                    with open(dest, "wb") as fh:
-                        fh.write(data)
-                    fetched = True
-                    print(f"Fetched {fname} from {url}", file=sys.stderr)
-            except Exception as exc:
-                print(f"WARN: fetch failed for {fname} ({exc}); "
-                      "falling back to the vendored copy.", file=sys.stderr)
+        if not no_fetch:
+            if fname == "wikipathways.gmt":
+                url = _resolve_wikipathways_url(timeout)
+            else:
+                url = _SOURCES.get(fname)
+            if url:
+                try:
+                    with urllib.request.urlopen(url, timeout=timeout) as resp:
+                        data = resp.read()
+                    if data and data.lstrip().startswith(b"<") is False and len(data) > 100:
+                        with open(dest, "wb") as fh:
+                            fh.write(data)
+                        fetched = True
+                        print(f"Fetched {fname} from {url}", file=sys.stderr)
+                except Exception as exc:
+                    print(f"WARN: fetch failed for {fname} ({exc}); "
+                          "falling back to the vendored copy.", file=sys.stderr)
 
         if not fetched:
             vendored_src = os.path.join(vendored_dir, fname)
@@ -115,6 +116,7 @@ def main():
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--vendored-dir", default=_DEFAULT_VENDORED_DIR)
     parser.add_argument("--gmt-dir", default="", help="Existing --gmt_dir value, if any")
+    parser.add_argument("--no-fetch", action="store_true", help="Do not attempt network downloads; use vendored copies only")
     parser.add_argument("--timeout", type=int, default=30)
     args = parser.parse_args()
 
@@ -122,7 +124,7 @@ def main():
         print(f"GMT_DIR={args.gmt_dir}")
         return
 
-    resolve_gmts(args.output_dir, args.vendored_dir, args.timeout)
+    resolve_gmts(args.output_dir, args.vendored_dir, args.timeout, no_fetch=args.no_fetch)
     print(f"GMT_DIR={args.output_dir}")
 
 

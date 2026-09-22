@@ -9,7 +9,10 @@
 #   3. Path Sum Permulation - label-permutation test on raw pathway score
 #      accumulation. Zero-safe; NES is a z-score vs permuted null.
 # Each method casts one vote (FDR < fdr_thr + direction check); terms are
-# classified Hard evidence (3/3) / Supported (2/3) / Exploratory (1/3).
+# classified Hard evidence (3/3) / Supported (2/3) / Exploratory (1/3, split
+# into "(relative)" - lone Wilcoxon or Lachenbruch pass - and "(phylogenetic)"
+# - lone Permulation pass, since Permulation alone carries no relative-to-
+# other-genes claim, unlike the other two).
 # Methods 2 & 3 only run for non-negative (zero-floored) rankings; signed
 # RER rankings (two.sided alternative) use Wilcoxon only.
 # STRING handles the network/set question.
@@ -873,7 +876,13 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
       evidence_label  = dplyr::case_when(
         evidence_count == 3L ~ "Hard evidence",
         evidence_count == 2L ~ "Supported",
-        evidence_count == 1L ~ "Exploratory",
+        # Permulation carries no relative-to-other-genes requirement (unlike
+        # Wilcoxon/Lachenbruch, which both require it in addition to their own
+        # p.perm/lach_p.perm phylogenetic gate) - a lone Permulation pass is a
+        # different kind of claim than a lone Wilcoxon or Lachenbruch pass, so
+        # it gets its own label rather than sharing plain "Exploratory".
+        evidence_count == 1L & sig_permulation ~ "Exploratory (phylogenetic)",
+        evidence_count == 1L                   ~ "Exploratory (relative)",
         TRUE                 ~ "Not significant"
       )
     )

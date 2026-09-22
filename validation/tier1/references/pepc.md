@@ -23,9 +23,18 @@
 - `github.com/evolbioinfo/condor` — `test_data/` (ConDor's own copy, incl.
   the genotypic C4 annotation `besnard2009_convergent_species.txt`)
 
-## Background (not a data source, context for the truth-site tiers)
+## Cited but not locally available
 
 - Christin, P.-A. et al. 2007. Evolutionary switch and genetic convergence on
-  rbcS at the C3/C4 boundary. *Genetics* 177(3):1791–1808 (Table 1 — the PDF
-  source for the "weak" tier's remaining, untranscribed sites; see
-  `../input/pepc/README.md`'s Caveats).
+  rbcS at the C3/C4 boundary. *Genetics* 177(3):1791–1808. Not present under
+  `references/pepc/` and not read directly for this fixture; every claim
+  attributed to it in `../../truthsets/tier1/pepc_c4.sites.tsv` traces
+  through Besnard 2009's own Table 2, which cites it for the grass-side data
+  — see that TSV's header for exactly what is and isn't independently
+  verified.
+- Bläsing OE, Westhoff P, Svensson P. 2000. J Biol Chem 275:27917–27923 (the
+  position-780 kinetics paper) and Svensson P et al. 2003 (cited by Morel et
+  al. 2024 for the position-665 functional claim). Neither is present under
+  `references/pepc/`; both claims are corroborated only through their being
+  cited by a paper that *is* available (Besnard 2009 and Morel et al. 2024
+  respectively) — see `../../truthsets/tier1/pepc_c4.sites.tsv`.

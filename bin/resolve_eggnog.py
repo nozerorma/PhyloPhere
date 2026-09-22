@@ -70,25 +70,27 @@ def _fetch(url: str, timeout: int) -> bytes:
 
 
 def _filter_and_write(members_raw: bytes, annotations_raw: bytes,
-                       members_dest: str, annotations_dest: str) -> None:
-    human_ogs = set()
+                       members_dest: str, annotations_dest: str,
+                       ref_taxid: str = "9606") -> None:
+    matched_ogs = set()
     members_lines = []
+    prefix = f"{ref_taxid}."
     for line in gzip.decompress(members_raw).decode("utf-8", errors="replace").splitlines():
         fields = line.split("\t")
         if len(fields) < 5:
             continue
-        human_members = [m for m in fields[4].split(",") if m.startswith("9606.ENSP")]
-        if human_members:
-            human_ogs.add(fields[1])
+        matched_members = [m for m in fields[4].split(",") if m.startswith(prefix)]
+        if matched_members:
+            matched_ogs.add(fields[1])
             members_lines.append("\t".join([fields[0], fields[1], fields[2], fields[3],
-                                             ",".join(human_members)]))
+                                             ",".join(matched_members)]))
 
     annotations_lines = []
     for line in gzip.decompress(annotations_raw).decode("utf-8", errors="replace").splitlines():
         fields = line.split("\t")
         if len(fields) < 4:
             continue
-        if fields[1] in human_ogs:
+        if fields[1] in matched_ogs:
             annotations_lines.append("\t".join(fields[:4]))
 
     with gzip.open(members_dest, "wt") as fh:
@@ -97,30 +99,42 @@ def _filter_and_write(members_raw: bytes, annotations_raw: bytes,
         fh.write("\n".join(annotations_lines) + "\n")
 
 
-def resolve_eggnog(output_dir: str, vendored_dir: str, timeout: int) -> tuple:
+def resolve_eggnog(output_dir: str, vendored_dir: str, timeout: int,
+                   tax_level: str = "9443", ref_taxid: str = "9606") -> tuple:
     os.makedirs(output_dir, exist_ok=True)
-    members_dest = os.path.join(output_dir, _MEMBERS_FNAME)
-    annotations_dest = os.path.join(output_dir, _ANNOTATIONS_FNAME)
+    members_fname = f"{tax_level}_members_{ref_taxid}.tsv.gz"
+    annotations_fname = f"{tax_level}_annotations_{ref_taxid}.tsv.gz"
+    members_dest = os.path.join(output_dir, members_fname)
+    annotations_dest = os.path.join(output_dir, annotations_fname)
+
+    members_url = f"http://eggnog5.embl.de/download/eggnog_5.0/per_tax_level/{tax_level}/{tax_level}_members.tsv.gz"
+    annotations_url = f"http://eggnog5.embl.de/download/eggnog_5.0/per_tax_level/{tax_level}/{tax_level}_annotations.tsv.gz"
 
     fetched = False
     try:
-        members_raw = _fetch(_MEMBERS_URL, timeout)
-        annotations_raw = _fetch(_ANNOTATIONS_URL, timeout)
-        _filter_and_write(members_raw, annotations_raw, members_dest, annotations_dest)
+        members_raw = _fetch(members_url, timeout)
+        annotations_raw = _fetch(annotations_url, timeout)
+        _filter_and_write(members_raw, annotations_raw, members_dest, annotations_dest, ref_taxid=ref_taxid)
         fetched = True
-        print(f"Fetched and filtered eggNOG 9443 members/annotations from {_MEMBERS_URL}",
+        print(f"Fetched and filtered eggNOG {tax_level} members/annotations from {members_url}",
               file=sys.stderr)
     except Exception as exc:
         print(f"WARN: eggNOG fetch/filter failed ({exc}); "
-              "falling back to the vendored copy.", file=sys.stderr)
+              "falling back to vendored copy.", file=sys.stderr)
 
     if not fetched:
-        vendored_members = os.path.join(vendored_dir, _MEMBERS_FNAME)
-        vendored_annotations = os.path.join(vendored_dir, _ANNOTATIONS_FNAME)
+        vendored_members = os.path.join(vendored_dir, members_fname)
+        vendored_annotations = os.path.join(vendored_dir, annotations_fname)
+        if not (os.path.isfile(vendored_members) and os.path.isfile(vendored_annotations)):
+            # Check legacy primate fallback
+            if tax_level == "9443" and ref_taxid == "9606":
+                vendored_members = os.path.join(vendored_dir, _MEMBERS_FNAME)
+                vendored_annotations = os.path.join(vendored_dir, _ANNOTATIONS_FNAME)
+
         if os.path.isfile(vendored_members) and os.path.isfile(vendored_annotations):
             shutil.copy(vendored_members, members_dest)
             shutil.copy(vendored_annotations, annotations_dest)
-            print("Using vendored copy of eggNOG 9443 members/annotations", file=sys.stderr)
+            print(f"Using vendored copy of eggNOG {tax_level} members/annotations", file=sys.stderr)
         else:
             print("WARN: no vendored eggNOG fallback found; leaving files unresolved.",
                   file=sys.stderr)
@@ -134,6 +148,8 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--vendored-dir", default=_DEFAULT_VENDORED_DIR)
+    parser.add_argument("--tax-level", default="9443", help="eggNOG clade taxon ID (default: 9443)")
+    parser.add_argument("--ref-taxid", default="9606", help="Reference species NCBI taxon ID (default: 9606)")
     parser.add_argument("--egg-members-file", default="", help="Existing --egg_members_file value, if any")
     parser.add_argument("--egg-annotations-file", default="", help="Existing --egg_annotations_file value, if any")
     parser.add_argument("--timeout", type=int, default=30)
@@ -144,7 +160,8 @@ def main():
         print(f"EGG_ANNOTATIONS_FILE={args.egg_annotations_file}")
         return
 
-    members_file, annotations_file = resolve_eggnog(args.output_dir, args.vendored_dir, args.timeout)
+    members_file, annotations_file = resolve_eggnog(args.output_dir, args.vendored_dir, args.timeout,
+                                                    tax_level=args.tax_level, ref_taxid=args.ref_taxid)
     print(f"EGG_MEMBERS_FILE={members_file}")
     print(f"EGG_ANNOTATIONS_FILE={annotations_file}")
 

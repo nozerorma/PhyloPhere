@@ -4,7 +4,6 @@ Hard copies of the two Tier 1 GUI project files, kept here for version
 tracking:
 
 - [`tier1_pepc.json`](tier1_pepc.json) — PEPC / C4, categorical
-- [`tier1_hb_altitude.json`](tier1_hb_altitude.json) — Hb / high altitude, continuous + categorical
 
 The versions Phylophere's GUI actually loads live in `gui/templates/` (its
 "Load template" dialog opens there) — update both copies together. See

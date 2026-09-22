@@ -247,10 +247,25 @@ class RuntimeTab(QWidget):
         self.clade_name_label = QLabel("Clade name (--clade_name)")
         form.addRow(self.clade_name_label, self.clade_name)
 
+        self.clade_taxid = QLineEdit(self._config.clade_taxid)
+        self.clade_taxid.textChanged.connect(self._on_clade_taxid_changed)
+        self.clade_taxid_label = QLabel("Clade NCBI TaxID")
+        form.addRow(self.clade_taxid_label, self.clade_taxid)
+
         self.taxon_of_interest = QLineEdit(self._config.taxon_of_interest)
         self.taxon_of_interest.textChanged.connect(self._on_taxon_of_interest_changed)
         self.taxon_of_interest_label = QLabel("Taxonomic level of interest (--taxon_of_interest)")
         form.addRow(self.taxon_of_interest_label, self.taxon_of_interest)
+
+        self.ref_species_name = QLineEdit(self._config.ref_species_name)
+        self.ref_species_name.textChanged.connect(self._on_ref_species_name_changed)
+        self.ref_species_name_label = QLabel("Reference species name")
+        form.addRow(self.ref_species_name_label, self.ref_species_name)
+
+        self.ref_species_taxid = QLineEdit(self._config.ref_species_taxid)
+        self.ref_species_taxid.textChanged.connect(self._on_ref_species_taxid_changed)
+        self.ref_species_taxid_label = QLabel("Reference species NCBI TaxID")
+        form.addRow(self.ref_species_taxid_label, self.ref_species_taxid)
 
         return self.dataset_box
 
@@ -381,8 +396,20 @@ class RuntimeTab(QWidget):
         self._config.clade_name = value
         self.changed.emit()
 
+    def _on_clade_taxid_changed(self, value: str) -> None:
+        self._config.clade_taxid = value
+        self.changed.emit()
+
     def _on_taxon_of_interest_changed(self, value: str) -> None:
         self._config.taxon_of_interest = value
+        self.changed.emit()
+
+    def _on_ref_species_name_changed(self, value: str) -> None:
+        self._config.ref_species_name = value
+        self.changed.emit()
+
+    def _on_ref_species_taxid_changed(self, value: str) -> None:
+        self._config.ref_species_taxid = value
         self.changed.emit()
 
     def retranslate(self, lang: str = "en") -> None:
@@ -458,5 +485,11 @@ class RuntimeTab(QWidget):
             self.sp_colname_label.setText(tr("Species column name (--sp_colname)", lang))
         if hasattr(self, "clade_name_label"):
             self.clade_name_label.setText(tr("Clade name (--clade_name)", lang))
+        if hasattr(self, "clade_taxid_label"):
+            self.clade_taxid_label.setText(tr("Clade NCBI TaxID", lang))
         if hasattr(self, "taxon_of_interest_label"):
             self.taxon_of_interest_label.setText(tr("Taxonomic level of interest (--taxon_of_interest)", lang))
+        if hasattr(self, "ref_species_name_label"):
+            self.ref_species_name_label.setText(tr("Reference species name", lang))
+        if hasattr(self, "ref_species_taxid_label"):
+            self.ref_species_taxid_label.setText(tr("Reference species NCBI TaxID", lang))

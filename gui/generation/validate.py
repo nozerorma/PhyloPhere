@@ -190,14 +190,10 @@ def validate(project: ProjectConfig) -> list[str]:
     # GO/Reactome/WikiPathways set (bin/resolve_gmts.py), falling back to the
     # vendored copies in assets/gmt/ if offline.
     if enrichment.posenrich_enabled:
-        # cosmic_db is NOT required: workflows/enrichment.nf and subworkflows/VEP/cosmic.nf
-        # both fall back to a NO_FILE sentinel and skip the COSMIC overlap section
-        # gracefully rather than failing when it's absent.
-        require(
-            enrichment.fubar_sites_file,
-            "POSENRICH: FUBAR sites file is required (cannot be generated in-house; "
-            "see github.com/nozerorma/ortholog_characterizator).",
-        )
+        # cosmic_db and fubar_sites_file are NOT required: workflows/enrichment.nf
+        # and subworkflows/ENRICHMENT/posenrich.nf both fall back to NO_FILE sentinels
+        # and skip those layers gracefully when absent.
+        pass
         # egg_members_file / egg_annotations_file are no longer required either:
         # leaving both blank auto-fetches the eggNOG5 Primates orthogroup pair,
         # falling back to the vendored copy in assets/eggnog/ if offline

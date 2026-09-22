@@ -85,7 +85,10 @@ class RuntimeConfig:
     # --- Reporting / contrast-selection dataset shape (conf/common.config) ---
     sp_colname: str = "species"  # --sp_colname
     clade_name: str = "primates"  # --clade_name
+    clade_taxid: str = "9443"  # Clade-level NCBI TaxID (e.g. for eggNOG orthogroups)
     taxon_of_interest: str = "family"  # --taxon_of_interest
+    ref_species_name: str = "Homo_sapiens"  # Reference species name (in alignments / annotations)
+    ref_species_taxid: str = "9606"  # Reference species NCBI TaxID (e.g. for STRING / BioMart)
 
     # --- Phenotype catalogue ---
     phenotype_rows: list[PhenotypeRow] = field(default_factory=list)

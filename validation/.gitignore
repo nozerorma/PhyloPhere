@@ -23,7 +23,7 @@ tier1/input/**/*.gb
 tier1/input/**/*.gbk
 tier1/input/**/*.genbank
 tier1/input/**/*.iqtree.log
-tier1/input/**/gene_trees_oc/
+tier1/input/**/oc_run/
 tier1/input/**/align_cds/
 !tier1/input/**/README.md
 !tier1/input/**/build.py

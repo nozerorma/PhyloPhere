@@ -7,8 +7,11 @@
  * COSMIC, UCR core/flank, positive/purifying selection) plus the broad
  * functional characterization layers, and tests them with Position-Level Path
  * Sum Permulation (posenrich_enrich.py): raw CAAS score magnitudes are summed
- * per term and compared against a label-permuted null across the full honest
- * ~1.47M position background, per direction (global/top/bottom). Replaces an
+ * per term and compared against a null across the full honest ~1.47M position
+ * background, per direction (global/top/bottom). The null is the real CAAS
+ * permulation cycles (perm_pos_cycle_caas.tsv.gz) when supplied -- same
+ * preference fcs_enrich.R gives FCS's own Permsum test -- falling back to a
+ * private label shuffle only when no CAAS null is available. Replaces an
  * earlier fixed-cutoff Fisher-exact design, which had power to flag
  * biologically negligible deviations as significant at that background size.
  * Significance is p_adj < posenrich_padj_thr with NES > 0.
@@ -47,6 +50,12 @@ process POSENRICH_BUILD_GMT {
     // staging two path inputs under the identical filename in one task directory
     // is a Nextflow "input file name collision", which is exactly what happens
     // if two or more of these optional inputs are absent in the same run.
+    def ensembl_arg = !(gene_ensembl_file.name =~ /^NO_FILE/) ? "--gene_ensembl_file ${gene_ensembl_file}" : ""
+    def domain_arg  = !(domain_variability_file.name =~ /^NO_FILE/) ? "--domain_variability_file ${domain_variability_file}" : ""
+    def ucr_arg     = !(ucr_positions_file.name =~ /^NO_FILE/) ? "--ucr_positions_file ${ucr_positions_file}" : ""
+    def fubar_arg   = !(fubar_sites_file.name =~ /^NO_FILE/) ? "--fubar_sites_file ${fubar_sites_file}" : ""
+    def egg_mem_arg = !(egg_members_file.name =~ /^NO_FILE/) ? "--egg_members_file ${egg_members_file}" : ""
+    def egg_ann_arg = !(egg_annotations_file.name =~ /^NO_FILE/) ? "--egg_annotations_file ${egg_annotations_file}" : ""
     def cosmic_arg = !(cosmic_db.name =~ /^NO_FILE/) ? "--cosmic_db ${cosmic_db}" : ""
     def pai3d_arg  = !(pai3d_db.name =~ /^NO_FILE/) ? "--pai3d_db ${pai3d_db}" : ""
     def bg_arg     = !(cleaned_background.name =~ /^NO_FILE/) ? "--cleaned_background ${cleaned_background}" : ""
@@ -57,12 +66,12 @@ process POSENRICH_BUILD_GMT {
     def fade_bottom_arg = !(fade_sites_bottom_file.name =~ /^NO_FILE/) ? "--fade_sites_bottom_file ${fade_sites_bottom_file}" : ""
     """
     python3 ${baseDir}/subworkflows/ENRICHMENT/local/src/build_position_gmt.py \
-        --gene_ensembl_file ${gene_ensembl_file} \
-        --domain_variability_file ${domain_variability_file} \
-        --ucr_positions_file ${ucr_positions_file} \
-        --fubar_sites_file ${fubar_sites_file} \
-        --egg_members_file ${egg_members_file} \
-        --egg_annotations_file ${egg_annotations_file} \
+        ${ensembl_arg} \
+        ${domain_arg} \
+        ${ucr_arg} \
+        ${fubar_arg} \
+        ${egg_mem_arg} \
+        ${egg_ann_arg} \
         --map_dir ${map_dir} \
         ${cosmic_arg} \
         ${pai3d_arg} \
@@ -89,7 +98,7 @@ process POSENRICH_RUN {
     val min_size
     val max_size
     path position_lists_dir
-    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm
+    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> primary null
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -97,11 +106,11 @@ process POSENRICH_RUN {
 
     script:
     // Position-Level Path Sum Permulation (posenrich_enrich.py): raw CAAS score
-    // magnitudes are summed per term and compared against a label-permuted null
-    // built from posenrich_n_perms permutations, AND (when caas_cycle_null is
-    // supplied) against the CAAS permulation null's real cycles -> p.perm.
-    // Significance is p_adj < posenrich_padj_thr with NES > 0, additionally
-    // gated on p.perm < posenrich_p_perm_thr whenever p.perm is available.
+    // magnitudes are summed per term and compared against a null. When
+    // caas_cycle_null is supplied, its real permulation cycles are used AS
+    // the null (same preference fcs_enrich.R gives FCS's own Permsum test);
+    // otherwise a private label shuffle of posenrich_n_perms permutations is
+    // used instead. Significance is p_adj < posenrich_padj_thr with NES > 0.
     def annot_arg = annot_file.name != 'NO_FILE' ? "--annot-file ${annot_file}" : ""
     // cosmic_orthogroups/pai3d_orthogroups are GMTs derived from external,
     // incompletely-covered databases; restricting their background to genes
@@ -140,7 +149,6 @@ process POSENRICH_RUN {
         --n-perms ${params.posenrich_n_perms ?: 10000} \
         --perm-chunk-size ${params.posenrich_perm_chunk_size ?: 1000} \
         ${caas_null_arg} \
-        --p-perm-thr ${params.posenrich_p_perm_thr ?: 0.025} \
         --seed ${params.seed ?: 1998} \
         --padj-thr ${params.posenrich_padj_thr} \
         --output-dir .
@@ -154,7 +162,7 @@ process POSENRICH_PREP_NULL {
                enabled: params.publish_intermediates
 
     input:
-    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm; NO_FILE* sentinel to skip
+    path caas_cycle_null    // optional: perm_pos_cycle_caas.tsv.gz -> primary null; NO_FILE* sentinel to skip
 
     output:
     path "caas_null_prepped.pkl", emit: prepped
@@ -192,7 +200,7 @@ process POSENRICH_RUN_BATCHED {
     val min_size
     val max_size
     path position_lists_dir
-    path caas_null_prepped    // caas_null_prepped.pkl from POSENRICH_PREP_NULL -> p.perm (parsed once for the whole run, not once per batch)
+    path caas_null_prepped    // caas_null_prepped.pkl from POSENRICH_PREP_NULL (parsed once for the whole run, not once per batch)
 
     output:
     path "posenrich_characterization.tsv", emit: results
@@ -226,7 +234,6 @@ process POSENRICH_RUN_BATCHED {
         --n-perms ${params.posenrich_n_perms ?: 10000} \
         --perm-chunk-size ${params.posenrich_perm_chunk_size ?: 1000} \
         ${caas_null_arg} \
-        --p-perm-thr ${params.posenrich_p_perm_thr ?: 0.025} \
         --seed ${params.seed ?: 1998} \
         --padj-thr ${params.posenrich_padj_thr} \
         --output-dir .
@@ -390,7 +397,7 @@ workflow POSENRICH {
     genomic_info_file       // optional: gene genomic coords TSV (Position Characterisation)
     fade_sites_top_file     // optional: fade_sites_top.csv (FADE_top_sig position group)
     fade_sites_bottom_file  // optional: fade_sites_bottom.csv (FADE_bottom_sig position group)
-    caas_cycle_null_file    // optional: perm_pos_cycle_caas.tsv.gz -> p.perm
+    caas_cycle_null_file    // optional: perm_pos_cycle_caas.tsv.gz -> primary null
 
     main:
     POSENRICH_BUILD_GMT(
@@ -438,20 +445,20 @@ workflow POSENRICH {
         // one-item channels rebuilt via .ifEmpty() above. Paired positionally
         // against the many-item posenrich_batches channel, any of these would
         // silently truncate POSENRICH_RUN_BATCHED to its first batch once
-        // exhausted. .first() makes each a proper reusable/broadcastable
-        // channel; no-op for anything that was already a value channel.
-        def caas_file_bc           = caas_file.first()
-        def cleaned_background_bc  = cleaned_background.first()
-        def background_output_bc   = background_output.first()
-        def annot_file_bc          = annot_file.first()
-        def cosmic_coverage_bc     = cosmic_coverage_ch.first()
-        def pai3d_coverage_bc      = pai3d_coverage_ch.first()
-        def position_lists_file_bc = position_lists_file.first()
+        // exhausted. .collect().map { it[0] } makes each a proper reusable/
+        // broadcastable value channel without .first()'s warning on value channels.
+        def caas_file_bc           = caas_file.collect().map { it[0] }
+        def cleaned_background_bc  = cleaned_background.collect().map { it[0] }
+        def background_output_bc   = background_output.collect().map { it[0] }
+        def annot_file_bc          = annot_file.collect().map { it[0] }
+        def cosmic_coverage_bc     = cosmic_coverage_ch.collect().map { it[0] }
+        def pai3d_coverage_bc      = pai3d_coverage_ch.collect().map { it[0] }
+        def position_lists_file_bc = position_lists_file.collect().map { it[0] }
 
         // Parsed once for the whole run here, instead of once per batch task
         // inside POSENRICH_RUN_BATCHED -- see POSENRICH_PREP_NULL / posenrich_prep_caas_null.py.
         POSENRICH_PREP_NULL(caas_cycle_null_file)
-        def caas_null_prepped_bc = POSENRICH_PREP_NULL.out.prepped.first()
+        def caas_null_prepped_bc = POSENRICH_PREP_NULL.out.prepped.collect().map { it[0] }
 
         POSENRICH_RUN_BATCHED(
             posenrich_batches,

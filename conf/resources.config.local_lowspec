@@ -133,11 +133,6 @@ process {
         time   = { 3.h * task.attempt }
     }
 
-    withName: 'BOOTSTRAP_BATCHED' {
-        cpus   = { 6 }
-        memory = { 12.GB * task.attempt }
-        time   = { 128.h * task.attempt }
-    }
     withLabel:process_perm_replay_batched {
         cpus   = { 6 }
         memory = { 12.GB * task.attempt }
@@ -156,11 +151,6 @@ process {
         time   = { 1.h * task.attempt }
     }
     withName: 'CONCAT_RESAMPLE' {
-        cpus   = { 2 }
-        memory = { 2.GB * task.attempt }
-        time   = { 1.h * task.attempt }
-    }
-    withName: 'CONCAT_BOOTSTRAP' {
         cpus   = { 2 }
         memory = { 2.GB * task.attempt }
         time   = { 1.h * task.attempt }
@@ -203,8 +193,8 @@ process {
         time   = { 4.h * task.attempt }
     }
 
-    // ── CT Signification ──────────────────────────────────────────────────
-    withName: 'CAAS_SIGNIFICATION_REPORT' {
+    // ── CT Significance ───────────────────────────────────────────────────
+    withName: 'CAAS_SIGNIFICANCE_REPORT' {
         cpus   = { 6 }
         memory = { 4.GB * task.attempt }
         time   = { 2.h * task.attempt }

@@ -32,7 +32,27 @@ SPEC = ModuleTabSpec(
     ),
     disclaimer="This is the final module in the pipeline — nothing downstream depends on it.",
     essential_fields=(
-        Section("STRING DB & GMT Resources"),
+        Section("FCS & Pathway Resources"),
+        FieldSpec(name="fcs_enabled", label="Run FCS gene-set enrichment", kind="bool", importance="optional"),
+        FieldSpec(
+            name="auto_fetch_gmt",
+            label="Auto-fetch WikiPathways GMTs if directory is unset",
+            kind="bool",
+            importance="optional",
+        ),
+        FieldSpec(
+            name="gmt_dir",
+            label="GMT pathway directory (optional)",
+            kind="path_dir",
+            importance="optional",
+            help=(
+                "Custom GMT gene-set files. Leave blank to auto-fetch the default "
+                "GO Biological Process/Molecular Function + Reactome + WikiPathways "
+                "set if auto-fetch is enabled, falling back to vendored assets/gmt/ "
+                "if offline."
+            ),
+        ),
+        Section("STRING DB Resources"),
         FieldSpec(
             name="string_db_dir",
             label="STRING database directory (optional)",
@@ -45,21 +65,10 @@ SPEC = ModuleTabSpec(
             ),
         ),
         FieldSpec(
-            name="gmt_dir",
-            label="GMT pathway directory (optional)",
-            kind="path_dir",
-            importance="optional",
-            help=(
-                "Custom GMT gene-set files. Leave blank to auto-fetch the default "
-                "GO Biological Process/Molecular Function + Reactome + WikiPathways "
-                "set (fetches current copies; falls back to vendored assets/gmt/ "
-                "if offline)."
-            ),
+            name="string_species",
+            label="STRING species (NCBI taxid; blank = reference species taxid)",
+            importance="default",
         ),
-        # Determines which species' STRING/GO background is queried (default 9606 =
-        # human) — changing it changes what the enrichment background *means*
-        # scientifically, not just where files are cached.
-        FieldSpec(name="string_species", label="STRING species (NCBI taxid)", importance="default"),
     ),
     advanced_fields=(
         Section("Caching"),
@@ -118,30 +127,26 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="comparison_perm_topk", label="COMPARE concordance top-k fraction", importance="default"),
         Section("POSENRICH position-wise enrichment parameters"),
         FieldSpec(name="posenrich_enabled", label="Run POSENRICH", kind="bool", importance="optional"),
-        FieldSpec(name="posenrich_min_size", label="POSENRICH min set size", importance="default"),
-        FieldSpec(name="posenrich_max_size", label="POSENRICH max set size (0 = uncapped)", importance="default"),
-        FieldSpec(name="posenrich_padj_thr", label="POSENRICH adjusted p threshold", importance="default"),
-        FieldSpec(name="posenrich_p_perm_thr", label="POSENRICH CAAS-null p.perm threshold", importance="default"),
-        FieldSpec(
-            name="posenrich_batch_size",
-            label="POSENRICH GMTs per task (1 = no batching)",
-            importance="optional",
-        ),
+        FieldSpec(name="posenrich_domains", label="Run Pfam domain variability analysis", kind="bool", importance="optional"),
         FieldSpec(name="domain_variability_file", label="Domain variability file", kind="path_file", importance="optional"),
-        FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file", importance="optional"),
-        # validate.py's Enrichment section requires this whenever POSENRICH is
-        # enabled (require(enrichment.fubar_sites_file, ...)) — it's the one
-        # POSENRICH input with no auto-generation fallback.
         FieldSpec(
-            name="fubar_sites_file",
-            label="FUBAR sites file",
-            kind="path_file",
-            importance="required",
-            help="Cannot be generated in-house: HyPhy's per-site FUBAR fit needs "
-                 "the full phylogeny + codon alignment + MCMC/VB inference, not "
-                 "just the alignment plus a public DB. See "
-                 "github.com/nozerorma/ortholog_characterizator. Required for "
-                 "POSENRICH.",
+            name="domain_ref_species",
+            label="Domain reference species (blank = reference species name)",
+            placeholder="Homo_sapiens",
+            importance="optional",
+            help=(
+                "Reference species name in alignment headers used to extract "
+                "sequences for Pfam hmmscan (default: reference species name). Specify "
+                "this when running non-human/non-primate alignments."
+            ),
+        ),
+        FieldSpec(name="posenrich_ucr", label="Run UCR analysis", kind="bool", importance="optional"),
+        FieldSpec(name="ucr_positions_file", label="UCR positions file", kind="path_file", importance="optional"),
+        FieldSpec(name="posenrich_eggnog", label="Run eggNOG ortholog position mapping", kind="bool", importance="optional"),
+        FieldSpec(
+            name="eggnog_taxid",
+            label="eggNOG clade TaxID (blank = clade TaxID)",
+            importance="optional",
         ),
         FieldSpec(
             name="egg_members_file",
@@ -149,8 +154,8 @@ SPEC = ModuleTabSpec(
             kind="path_file",
             importance="optional",
             help=(
-                "eggNOG5 Primates orthogroup members. Leave blank to auto-fetch "
-                "(falls back to the vendored human-subset copy in assets/eggnog/ "
+                "eggNOG orthogroup members. Leave blank to auto-fetch "
+                "(falls back to vendored copy in assets/eggnog/ "
                 "if offline)."
             ),
         ),
@@ -160,9 +165,27 @@ SPEC = ModuleTabSpec(
             kind="path_file",
             importance="optional",
             help=(
-                "eggNOG5 Primates orthogroup annotations, paired with the members "
+                "eggNOG orthogroup annotations, paired with the members "
                 "file above. Leave blank to auto-fetch alongside it."
             ),
+        ),
+        FieldSpec(
+            name="fubar_sites_file",
+            label="FUBAR sites file (optional)",
+            kind="path_file",
+            importance="optional",
+            help="Cannot be generated in-house: HyPhy's per-site FUBAR fit needs "
+                 "the full phylogeny + codon alignment + MCMC/VB inference, not "
+                 "just the alignment plus a public DB. See "
+                 "github.com/nozerorma/ortholog_characterizator.",
+        ),
+        FieldSpec(name="posenrich_min_size", label="POSENRICH min set size", importance="default"),
+        FieldSpec(name="posenrich_max_size", label="POSENRICH max set size (0 = uncapped)", importance="default"),
+        FieldSpec(name="posenrich_padj_thr", label="POSENRICH adjusted p threshold", importance="default"),
+        FieldSpec(
+            name="posenrich_batch_size",
+            label="POSENRICH GMTs per task (1 = no batching)",
+            importance="optional",
         ),
     ),
 )

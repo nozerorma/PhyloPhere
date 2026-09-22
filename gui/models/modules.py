@@ -257,6 +257,8 @@ class ScoringConfig(ModuleConfigBase):
     scoring_weight_fade: str = "1.0"  # --scoring_weight_fade
     scoring_rer_direction: str = "both"  # --scoring_rer_direction (both|accelerated|decelerated)
     gene_ensembl_file: str = ""  # --gene_ensembl_file
+    auto_generate_ensembl: bool = False  # Generate gene_ensembl_file via BioMart if unset
+    ensembl_dataset: str = ""  # Ensembl BioMart dataset (e.g. hsapiens_gene_ensembl); blank -> derived from ref_species_name
 
     # Advanced parameters (conf/scoring.config)
     scoring_ami: bool = True  # --scoring_ami
@@ -280,7 +282,9 @@ class ScoringConfig(ModuleConfigBase):
 @dataclass(kw_only=True)
 class EnrichmentConfig(ModuleConfigBase):
     posenrich_enabled: bool = True  # RUN_POSENRICH -> --posenrich
+    fcs_enabled: bool = True  # Gate FCS (ranked-Wilcoxon) enrichment
     gmt_dir: str = ""  # --gmt_dir
+    auto_fetch_gmt: bool = False  # Auto-download WikiPathways GMTs if gmt_dir is unset
 
     # FCS (ranked-Wilcoxon) enrichment
     fcs_min_genes: str = "5"  # --fcs_min_genes
@@ -299,7 +303,7 @@ class EnrichmentConfig(ModuleConfigBase):
     # module-finding is DOMINO's job; no standalone STRING term-enrichment report)
     string_db_dir: str = ""  # --string_db_dir
     string_cache_dir: str = ""  # --string_cache_dir
-    string_species: str = "9606"  # --string_species
+    string_species: str = ""  # --string_species (blank -> fallback to RuntimeConfig.ref_species_taxid)
 
     # DOMINO active-module identification (replaces STRING's walktrap clustering)
     domino_network_score_thr: str = "700"  # --domino_network_score_thr
@@ -323,21 +327,26 @@ class EnrichmentConfig(ModuleConfigBase):
     comparison_perm_stat: str = "spearman"  # --comparison_perm_stat ("spearman" | "topk_overlap")
     comparison_perm_topk: str = "0.05"  # --comparison_perm_topk
 
-    # POSENRICH data files (conf/enrichment.config).
+    # POSENRICH component toggles & data files (conf/enrichment.config).
+    posenrich_domains: bool = True  # Run Pfam domain variability analysis
+    domain_variability_file: str = ""  # --domain_variability_file
+    domain_ref_species: str = ""  # --domain_ref_species (blank -> fallback to RuntimeConfig.ref_species_name)
+
+    posenrich_ucr: bool = True  # Run ultraconserved regions (UCR) analysis
+    ucr_positions_file: str = ""  # --ucr_positions_file
+
+    posenrich_eggnog: bool = False  # Run eggNOG ortholog position mapping
+    eggnog_taxid: str = ""  # eggNOG taxon level (blank -> fallback to RuntimeConfig.clade_taxid)
     egg_members_file: str = ""  # --egg_members_file
     egg_annotations_file: str = ""  # --egg_annotations_file
+
     cosmic_db: str = ""  # --cosmic_db (also read by VEP; see VepConfig.cosmic_db)
-    domain_variability_file: str = ""  # --domain_variability_file
-    domain_ref_species: str = ""  # --domain_ref_species (blank -> pipeline default "Homo_sapiens";
-    # set this when the alignment has no human sequence, e.g. a non-primate clade)
-    ucr_positions_file: str = ""  # --ucr_positions_file
     fubar_sites_file: str = ""  # --fubar_sites_file
 
     # POSENRICH thresholds (position-wise Path Sum Permulation, not the gene FCS above)
     posenrich_min_size: str = "5"  # --posenrich_min_size
     posenrich_max_size: str = "0"  # --posenrich_max_size
-    posenrich_padj_thr: str = "0.15"  # --posenrich_padj_thr
-    posenrich_p_perm_thr: str = "0.025"  # --posenrich_p_perm_thr (CAAS permulation-null term-sum p.perm; dual-gates sig alongside posenrich_padj_thr when the CAAS null is available)
+    posenrich_padj_thr: str = "0.05"  # --posenrich_padj_thr (Permsum-family test: no independent analytic estimate to dual-gate against, same 0.05 fdr_permsum uses in FCS)
     posenrich_batch_size: str = "4"  # --posenrich_batch_size (GMTs per POSENRICH_RUN_BATCHED task; 1 = no batching)
 
     # NOTE: posenrich_background_file (CT's own background.output — used when CT
