@@ -144,8 +144,6 @@ def extract_convergence_summary(
         "caas": result_dict.get("caas", ""),
         "caap_group": result_dict.get("caap_group", "US"),
         "amino_encoded": result_dict.get("amino_encoded", ""),
-        "is_conserved_meta": bool(result_dict.get("is_conserved_meta", False)),
-        "conserved_pair": result_dict.get("conserved_pair", ""),
         # First-class direction key (top / bottom / none). T4b retired the
         # change_top/change_bottom/change_side triplet.
         "side": result_dict.get("side", "none"),

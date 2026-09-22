@@ -115,46 +115,39 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         # Core identification (stable structure)
         "gene",
         "msa_pos",
-        "tag",
         "caas",
         # Pattern classification
         "convergence_type",
         # Metadata-driven convergence context
         "caap_group",
         "amino_encoded",
-        # Cross-hypothesis support tallies for tag/caas/amino_encoded above --
-        # those three stay an arbitrary first-hypothesis passthrough; these
-        # tallies show whether the pooled hypotheses actually agreed.
+        # `caas`/`amino_encoded` above are the union of divergent (non-conserved)
+        # residues across every pooled hypothesis, not one hypothesis's raw
+        # pattern (see disambiguate_single._derive_convergent_call). These
+        # tallies carry the full per-hypothesis breakdown; `tag_support` also
+        # stands in for the row identifier no longer carried as its own column.
         "tag_support",
         "caas_support",
         "amino_encoded_support",
-        "is_conserved_meta",
-        "conserved_pair",
-        # Discovering hypothesis ("H<n>" for FOP runs; empty otherwise)
-        "trait",
-        # Hypotheses that drove >= 1 changed domain on this side -- unlike
-        # `trait`, never nulled by a genuine multi-hypothesis pool.
+        # Hypotheses that drove >= 1 changed domain on THIS SIDE -- the sole
+        # hypothesis-provenance column, side-aware (top/bottom rows for the
+        # same position can legitimately differ); SCORING's pos_scores
+        # aggregation consumes it by name.
         "participating_hypotheses",
-        # Harvest size (M) and the real discovering-hypothesis labels for this
-        # (position, scheme) pool, unlike `participating_hypotheses` not
-        # per-side. SCORING's pos_scores summarise (scoring_compute.R) already
-        # aggregates these by name (max / union-split) -- previously always
-        # saw its own backfilled defaults since no producer emitted them.
+        # Harvest size (M) for this (position, scheme) pool, not per-side.
         "n_hypotheses",
-        "supporting_hypotheses",
         # First-class direction key (top / bottom / none). T4b retired the
         # change_top/change_bottom/change_side triplet.
         "side",
         # CAAS convergence score on the Voronoi domain (scoring_v2 core v3)
         "asr_path_score",
         "derived_agreement",
-        "core",
         # ASR fields (AT END - only present when ASR available)
         "all_mrca_state",
         "all_mrca_posterior",
         "all_mrca_node",
         # Union across pooled hypotheses of the same-residue domain pairs that
-        # drove `core` (see path_scores.score_domains_side); debug-tree
+        # drove `asr_path_score` (see path_scores.score_domains_side); debug-tree
         # visualization only. "a-b:lca:contrib|a2-b2:lca2:contrib2".
         "pairwise_lca",
     ]

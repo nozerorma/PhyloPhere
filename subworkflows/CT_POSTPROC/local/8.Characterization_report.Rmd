@@ -278,7 +278,6 @@ normalize_disambig_schema <- function(df) {
   if (!'caap_group' %in% names(df)) df$caap_group <- 'US'
   if (!'convergence_type' %in% names(df)) df$convergence_type <- 'unknown'
   if (!'side' %in% names(df)) df$side <- 'none'
-  if (!'is_conserved_meta' %in% names(df)) df$is_conserved_meta <- FALSE
 
   df %>%
     mutate(
@@ -287,7 +286,6 @@ normalize_disambig_schema <- function(df) {
       caap_group = as.character(caap_group),
       convergence_type = as.character(convergence_type),
       side = tolower(as.character(side)),
-      is_conserved_meta = as_bool(is_conserved_meta),
       site_id = paste(gene, position, sep = '@')
     )
 }
@@ -377,7 +375,6 @@ discovery_df <- discovery_std %>%
     Position = position,
     convergence_type = convergence_type,
     side,
-    is_conserved_meta,
     site_id
   )
 
@@ -406,34 +403,6 @@ cat(
   "\n  Loaded CT positions:", nrow(discovery_df), "\n",
   "  Unique genes with length annotation:", n_distinct(discovery_df$Gene), "\n"
 )
-```
-
-## Conserved metadata composition of retained positions
-
-```{r conserved_meta_composition}
-rows_retained <- nrow(discovery_std)
-
-conserved_status_burden <- tibble(
-  scenario = c("retained_positions", "retained_conserved_meta", "retained_meta_not_conserved"),
-  description = c(
-    "Positions retained after precluster hard filters",
-    "Retained positions where is_conserved_meta = TRUE",
-    "Retained positions where is_conserved_meta = FALSE"
-  ),
-  rows = c(
-    rows_retained,
-    sum(discovery_std$is_conserved_meta, na.rm = TRUE),
-    sum(!discovery_std$is_conserved_meta, na.rm = TRUE)
-  )
-) %>%
-  mutate(fraction_of_total = if (rows_retained > 0) rows / rows_retained else NA_real_)
-
-write_tsv(conserved_status_burden, file.path(disambig_dir, "conserved_status_burden.tsv"))
-
-kable(
-  conserved_status_burden %>% mutate(fraction_of_total = percent(fraction_of_total, accuracy = 0.1)),
-  caption = "Conserved-status composition of retained CT positions"
-) %>% kable_styling()
 ```
 
 ## Outlier Gene Detection

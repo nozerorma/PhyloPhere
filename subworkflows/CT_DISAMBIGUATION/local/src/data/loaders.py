@@ -10,10 +10,9 @@ Workflow
 --------
 1. **read_caas_metadata_table**: Load CAAS metadata from file, normalize columns, filter by gene if specified
 2. **list_gene_caas_positions**: Extract all CAAS positions for a gene from metadata
-3. **get_caas_position_info**: Retrieve metadata for a single CAAS position
-4. **build_caas_positions_map**: Build CAASPosition objects for selected positions
-5. **parse_trait_pairs**: Parse trait file into species pairs grouped by contrast
-6. **load_ensembl_genes**: Load Ensembl gene names from file
+3. **list_gene_caas_entries**: Load CAAS metadata rows for a gene as CAASPosition entries
+4. **parse_trait_pairs**: Parse trait file into species pairs grouped by contrast
+5. **load_ensembl_genes**: Load Ensembl gene names from file
 
 Position Indexing Convention
 ------------------------------
@@ -28,7 +27,7 @@ This dual indexing prevents off-by-one errors in cross-consumer pipelines.
 
 Data Contracts & Validation
 ------------------------------
-1. **CAAS Metadata** (read_caas_metadata_table, get_caas_position_info):
+1. **CAAS Metadata** (read_caas_metadata_table, list_gene_caas_entries):
      - Required columns: tag, caas, is_significant, GenePos
      - FileNotFoundError raised if file missing; ValueError for missing columns
 
@@ -52,9 +51,9 @@ Usage Examples
 
         # Load CAAS metadata for a gene
         meta_file = Path('data/meta_caas.output')
-        caas_positions = build_caas_positions_map(meta_file, gene='NUTM2A', positions=[85, 141])
-        for pos_idx, caas_pos in caas_positions.items():
-                print(f"{caas_pos.tag}: {caas_pos.trait1_aa} (significant: {caas_pos.is_significant})")
+        caas_entries = list_gene_caas_entries(meta_file, gene='NUTM2A')
+        for caas_pos in caas_entries:
+                print(f"{caas_pos.tag}: {caas_pos.trait1_aa}")
 
         # Load trait pairs with validation
         trait_file = Path('data/trait_pairs.txt')
@@ -325,119 +324,6 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
 
     logger.info("Loaded %d metadata rows for %s", len(entries), gene)
     return entries
-
-
-def get_caas_position_info(
-    metadata_file: Path, gene_name: str, position: int
-) -> Optional[Dict[str, Any]]:
-    """
-    Get metadata for a single CAAS position (zero-based index).
-
-    Args:
-        metadata_file: Path to CAAS metadata file
-        gene_name: Gene name (e.g., "NUTM2A")
-        position: Position as recorded in metadata (zero-based).
-
-    Returns:
-        Dict with tag, contrast, caas, significance, and both
-        zero/one-based positions, or None if not found.
-
-    Example:
-        >>> info = get_caas_position_info(meta_file, "NUTM2A", 85)
-        >>> print(f"Contrast: {info['contrast']}, Significant: {info['is_significant']}")
-        Contrast: 2, Significant: False
-    """
-    df = read_caas_metadata_table(metadata_file, gene_name)
-
-    # Construct gene_pos identifier
-    gene_pos = f"{gene_name}_{position}"
-
-    # Find matching row
-    matching = df[df["GenePos"] == gene_pos]
-
-    if len(matching) == 0:
-        logger.warning("No CAAS metadata found for %s", gene_pos)
-        return None
-
-    if len(matching) > 1:
-        logger.warning("Multiple CAAS entries found for %s, using first", gene_pos)
-
-    row = matching.iloc[0]
-
-    # Extract core information (always present)
-    info = {
-        "gene_pos": str(row["GenePos"]),
-        "tag": str(row["tag"]),
-        "caas": str(row["caas"]),
-    }
-
-    _, zero_based_pos = _parse_gene_pos_token(str(info["gene_pos"]))
-    info["position"] = zero_based_pos
-    info["position_one_based"] = (
-        zero_based_pos + 1 if zero_based_pos is not None else None
-    )
-
-    logger.debug(
-        "Found CAAS info for %s: tag=%s, significant=%s",
-        gene_pos,
-        info["tag"],
-        info["is_significant"],
-    )
-
-    return info
-
-
-def build_caas_positions_map(
-    caas_metadata_path, gene: str, positions: List[int]
-) -> Dict[int, CAASPosition]:
-    """
-    Load CAAS metadata for selected positions and return CAASPosition objects.
-
-    Parses caas into normalized trait1/trait0 amino lists when present.
-    Missing positions are skipped with a warning.
-    """
-    # Ensure we have a Path object
-    caas_metadata_path = Path(caas_metadata_path)
-
-    caas_positions: Dict[int, CAASPosition] = {}
-
-    if not caas_metadata_path.exists():
-        logger.warning("CAAS metadata file not found: %s", caas_metadata_path)
-        return caas_positions
-
-    for pos in positions:
-        try:
-            info = get_caas_position_info(
-                caas_metadata_path, gene_name=gene, position=pos
-            )
-            if info:
-                caas_pos = CAASPosition(
-                    position=pos,
-                    position_one_based=info.get("position_one_based", pos + 1),
-                    tag=info.get("tag", f"POS{pos}"),
-                    caas=info.get("caas", ""),
-                    trait1_aa=[],
-                    trait0_aa=[],
-                )
-
-                # Parse amino acid conversion string
-                parts = caas_pos.caas.split("/")
-                if len(parts) == 2:
-                    caas_pos.trait1_aa = normalize_amino_list(
-                        list(parts[0])
-                    )  # High trait
-                    caas_pos.trait0_aa = normalize_amino_list(
-                        list(parts[1])
-                    )  # Low trait
-
-                caas_positions[pos] = caas_pos
-
-        except Exception as e:
-            logger.warning("Failed to load metadata for position %d: %s", pos, e)
-            continue
-
-    logger.info("✓ Loaded metadata for %d CAAS positions", len(caas_positions))
-    return caas_positions
 
 
 # -- Functions for Trait Pair and Contrast Definition Loading --#

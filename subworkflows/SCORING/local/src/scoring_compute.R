@@ -158,11 +158,7 @@ scheme_priority_int <- c(US = 5, GS4 = 4, GS3 = 3, GS2 = 2, GS1 = 1)
 
 df <- df %>%
   mutate(
-    scheme_priority = scheme_priority_int[caap_group],
-    # FOP discovering-hypothesis tag ("H<n>") or NA for a single-contrast run
-    # (trait == "post_disambiguation" or similar). Diagnostic only now that the
-    # harvest is domain-pooled in-tree.
-    hyp_id = if ("trait" %in% names(df)) ifelse(grepl("H[0-9]+", trait), sub(".*(H[0-9]+).*", "\\1", trait), NA_character_) else NA_character_
+    scheme_priority = scheme_priority_int[caap_group]
   ) %>%
   filter(caap_group %in% scoring_schemes)
 cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring schemes\n",
@@ -180,13 +176,9 @@ cat(sprintf("  %d rows across %d scoring schemes after dropping non-scoring sche
 # to the plain PSS-weighted domain mean. Scoring receives rows already pooled.
 cat("  FOP pooling: done in-tree per (Gene, Position, scheme, side) [core v3]\n")
 # Backfill the stable-schema columns downstream (§2g display picks, reports)
-# expects so a missing column is never hit. `core` itself (CAAS_FILTER_GENES'
-# gene-level filter score) is absent when gene_filter_mode=="none" skips that
-# module entirely, so its own NA fallback must run before this line reads it.
-if (!"core" %in% names(df))                  df$core <- NA_real_
+# expects so a missing column is never hit.
 if (!"n_hypotheses" %in% names(df))          df$n_hypotheses <- 1L
-if (!"supporting_hypotheses" %in% names(df)) df$supporting_hypotheses <- ""
-if (!"core_perside_pooled" %in% names(df))   df$core_perside_pooled <- df$core
+if (!"participating_hypotheses" %in% names(df)) df$participating_hypotheses <- ""
 # V3-4 (core v3): convergence_schemes and n_conserved_pairs are retired --
 # convergence_schemes was the scheme-dependent FOP-disagreement flag and
 # n_conserved_pairs counted the dropped conserved_<j>_* block. A domain that
@@ -223,7 +215,6 @@ df <- df %>%
 # T1: mrca_diversity + conservation_gate dropped from the score and the schema.
 if (!"derived_agreement" %in% names(df)) df$derived_agreement <- NA_real_
 df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
-df$core <- suppressWarnings(as.numeric(df$core))
 
 
 # ── 2f. Per-row CAAS score ────────────────────────────────────────────────────
@@ -282,9 +273,9 @@ pos_scores <- df %>%
     n_hypotheses       = if ("n_hypotheses" %in% names(df)) {
       .nh <- n_hypotheses[is.finite(n_hypotheses)]; if (length(.nh)) max(.nh) else 0L
     } else 0L,
-    supporting_hypotheses = if ("supporting_hypotheses" %in% names(df)) {
-      .sh <- unique(supporting_hypotheses[!is.na(supporting_hypotheses) & nzchar(supporting_hypotheses)])
-      if (length(.sh)) paste(sort(unique(unlist(strsplit(.sh, ",")))), collapse = ",") else ""
+    participating_hypotheses = if ("participating_hypotheses" %in% names(df)) {
+      .ph <- unique(participating_hypotheses[!is.na(participating_hypotheses) & nzchar(participating_hypotheses)])
+      if (length(.ph)) paste(sort(unique(unlist(strsplit(.ph, ",")))), collapse = ",") else ""
     } else "",
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
@@ -299,29 +290,12 @@ pos_scores <- df %>%
     n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
     # The per-caap_group factors (asr_score / caas_row) and the ASR diagnostic
-    # axes (core, derived_agreement, core_perside_pooled) are DELIBERATELY not
+    # axes (asr_path_score, derived_agreement) are DELIBERATELY not
     # carried to the position level: CAAS_score = mean_k(asr_k) over schemes, and
     # a position-level mean of each sub-factor hides scheme disagreement (a
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
     # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
     # the breakdown (e.g. the §3 stress test used to aggregate them there directly).
-    # `is_conserved_meta` / `conserved_pair` are genuinely scheme-dependent
-    # (verified against caap_id.py's per-scheme computation); these siblings
-    # capture every scheme's value so a display-hidden disagreement is never
-    # silently lost. MUST be computed before the first()-collapsed columns
-    # below: summarise() evaluates sequentially and `is_conserved_meta =
-    # first(is_conserved_meta)` would otherwise shadow the per-row vector with
-    # the already-collapsed scalar for every expression that follows it.
-    is_conserved_meta_by_scheme = paste(
-      sort(unique(paste0(as.character(caap_group), ":", as.character(is_conserved_meta)))),
-      collapse = ","
-    ),
-    conserved_pair_by_scheme = paste(
-      sort(unique(paste0(as.character(caap_group), ":", conserved_pair)[nzchar(conserved_pair)])),
-      collapse = ","
-    ),
-    is_conserved_meta  = first(is_conserved_meta),
-    conserved_pair     = first(conserved_pair),
     all_mrca_posterior = first(all_mrca_posterior),
     across(all_of(mrca_posterior_cols), \(x) first(x)),
     caap_group         = first(caap_group),
@@ -330,13 +304,15 @@ pos_scores <- df %>%
 
 # `side` (top / bottom / none) is the authoritative aggregation key and the sole
 # direction descriptor downstream -- T4b retired change_top/change_bottom/change_side.
-# Per-side diagnostic for the reports (SC5): core == core_s for this side -- a
-# legitimate per-side diagnostic (the collapse warned against in the summarise
-# note is the position-level one that hides scheme disagreement).
+# Per-side diagnostic for the reports (SC5): the mean asr_path_score for this
+# side -- a legitimate per-side diagnostic (the collapse warned against in the
+# summarise note above is the position-level one that hides scheme disagreement).
+# (Formerly re-emitted under a separate `core` column, bit-identical to
+# asr_path_score at every stage upstream -- retired as pure duplication.)
 .side_diag <- df %>%
   group_by(across(all_of(.pos_grp_keys))) %>%
   summarise(
-    core = if ("core" %in% names(df)) mean(suppressWarnings(as.numeric(core)), na.rm = TRUE) else NA_real_,
+    asr_path_score = mean(suppressWarnings(as.numeric(asr_path_score)), na.rm = TRUE),
     .groups = "drop"
   )
 pos_scores <- pos_scores %>% left_join(.side_diag, by = .pos_grp_keys)
@@ -1029,22 +1005,23 @@ if (length(score_cols) >= 2) {
 
 cat("\n─── Writing outputs ───────────────────────────────────────────\n")
 
-# Position scores. asr_score / core / mrca_diversity / derived_agreement /
-# conservation_gate / core_perside_pooled are intentionally absent: they are
+# Position scores. asr_score (the per-row factor of caas_row) / mrca_diversity /
+# derived_agreement / conservation_gate are intentionally absent: they are
 # per-caap_group factors of caas_row and their scheme-mean does not reconstruct
 # CAAS_score (see §2g note). CAAS_score is the position-level number; the
-# per-scheme breakdown lives upstream in filtered_discovery.tsv.
+# per-scheme breakdown lives upstream in filtered_discovery.tsv. `asr_path_score`
+# below is the .side_diag per-side mean (SC5), not the per-row factor.
 pos_out <- pos_scores %>%
   select(Gene, Position,
          n_schemes, any_of("scheme_set"),
-         any_of(c("n_hypotheses", "supporting_hypotheses",
+         any_of(c("n_hypotheses", "participating_hypotheses",
                   "derived_residues", "top_residue_support", "bottom_residue_support",
                   "top_residue_support_detail", "bottom_residue_support_detail",
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species")), CAAS_score,
          side,
          # T3d: per-side diagnostic for the reports (SC5).
-         any_of("core"),
+         any_of("asr_path_score"),
          any_of("caas"),
          # §7.3 flip (docs/scoring_v2_p_emp.md): p.emp / p.emp_adj are the pooled
          # "detects AND exceeds" position p and the position headline. The

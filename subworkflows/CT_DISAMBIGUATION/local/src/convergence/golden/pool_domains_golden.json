@@ -57,7 +57,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.95,
-        "core": 0.95,
         "domain_scores": {
           "1": 0.95,
           "2": 0.95
@@ -92,7 +91,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0
@@ -197,7 +195,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.8999999999999999,
-        "core": 0.8999999999999999,
         "domain_scores": {
           "1": 0.95,
           "2": 0.95,
@@ -238,7 +235,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0,
@@ -357,7 +353,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.475,
-        "core": 0.475,
         "domain_scores": {
           "1": 0.475,
           "2": 0.475
@@ -392,7 +387,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0
@@ -570,7 +564,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.7000000000000001,
-        "core": 0.7000000000000001,
         "domain_scores": {
           "1": 0.95,
           "2": 0.95,
@@ -612,7 +605,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0,
@@ -682,7 +674,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0
@@ -703,7 +694,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0
@@ -788,7 +778,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.6333333333333333,
-        "core": 0.6333333333333333,
         "domain_scores": {
           "1": 0.95,
           "2": 0.95,
@@ -825,7 +814,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0,
@@ -1005,7 +993,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.31666666666666665,
-        "core": 0.31666666666666665,
         "domain_scores": {
           "1": 0.31666666666666665,
           "2": 0.31666666666666665
@@ -1042,7 +1029,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0
@@ -1220,7 +1206,6 @@
     "expected": {
       "top": {
         "asr_path_score": 0.9499999999999998,
-        "core": 0.9499999999999998,
         "domain_scores": {
           "1": 0.9499999999999998,
           "2": 0.9499999999999998
@@ -1257,7 +1242,6 @@
       },
       "bottom": {
         "asr_path_score": 0.0,
-        "core": 0.0,
         "domain_scores": {
           "1": 0.0,
           "2": 0.0

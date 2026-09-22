@@ -114,24 +114,14 @@ def convert_convergence_result_to_dict(
         "caas": getattr(result, "caas", None),
         "caap_group": getattr(result, "caap_group", "US"),
         "amino_encoded": getattr(result, "amino_encoded", ""),
-        "is_conserved_meta": bool(getattr(result, "is_conserved_meta", False)),
-        "conserved_pair": getattr(result, "conserved_pair", ""),
         "multi_hypothesis": multi_hypothesis,
-        # Discovering hypothesis (FOP: "H<n>"); empty for single-contrast runs.
-        # Read downstream as `trait` (scoring_compute.R derives hyp_id from it).
-        "trait": getattr(result, "hypothesis", None)
-        or getattr(result, "trait", "")
-        or "",
-        # Hypotheses that drove >= 1 changed domain on this side (never nulled
-        # by a multi-hypothesis collision, unlike `trait`).
+        # Hypotheses that drove >= 1 changed domain on THIS SIDE -- the sole
+        # hypothesis-provenance column downstream reads (SCORING's pos_scores
+        # aggregation consumes it by name); never nulled by a multi-hypothesis
+        # collision, unlike the retired `hypothesis`-derived `trait` column.
         "participating_hypotheses": getattr(result, "participating_hypotheses", None) or "",
-        # Harvest size (M) and the real discovering-hypothesis labels for this
-        # (position, scheme) pool -- SCORING's pos_scores aggregation already
-        # consumes these by name (max(n_hypotheses), union-split
-        # supporting_hypotheses); previously always defaulted (1 / "") since no
-        # producer ever populated them.
+        # Harvest size (M) for this (position, scheme) pool.
         "n_hypotheses": getattr(result, "n_hypotheses", None),
-        "supporting_hypotheses": getattr(result, "supporting_hypotheses", None) or "",
         # Cross-hypothesis support tallies for the arbitrary first-row
         # passthrough fields above (tag/caas/amino_encoded stay as-is).
         "tag_support": getattr(result, "tag_support", "") or "",
@@ -154,11 +144,10 @@ def convert_convergence_result_to_dict(
     # First-class direction key (top / bottom / none).
     result_dict["side"] = getattr(result, "side", "none")
 
-    # CAAS convergence score (core v3): asr_path_score == core == pooled per-side
-    # domain mean; derived_agreement is the diagnostic agree_num/agree_den.
+    # CAAS convergence score (core v3): pooled per-side domain mean;
+    # derived_agreement is the diagnostic agree_num/agree_den.
     result_dict["asr_path_score"] = getattr(result, "asr_path_score", None)
     result_dict["derived_agreement"] = getattr(result, "derived_agreement", None)
-    result_dict["core"] = getattr(result, "core", None)
 
     # ── Per-domain flat block (scoring_v2 core v3) ────────────────────────────
     # domain_<d>_node / _state / _posterior from domain_meta (all K domains);
@@ -1309,11 +1298,11 @@ def _perms_worker_replay(
                 den = int(agg.get("agree_den", 0) or 0)
                 if int(agg.get("n_participating", 0) or 0) <= 0:
                     continue
-                core = agg.get("core", agg.get("asr_path_score", 0.0))
+                asr_score = agg.get("asr_path_score", 0.0)
                 out.append(PositionAxes(
                     position=pos, caap_group=grp,
-                    asr_path_score=float(core or 0.0),
-                    side=s, hypothesis=hyp_label, core=core,
+                    asr_path_score=float(asr_score or 0.0),
+                    side=s, hypothesis=hyp_label,
                     derived_agreement=(
                         (int(agg.get("agree_num", 0) or 0) / den) if den else None),
                     domain_scores=(dict(agg.get("domain_scores") or {}) or None),

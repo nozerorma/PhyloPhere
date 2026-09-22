@@ -32,13 +32,13 @@ def _pss_map(rows):
 
 
 def _null_expand(pooled):
-    """Mirror of ``_perms_worker._expand_pooled``: pooled -> {side: core}, or
-    {"none": 0.0} when no domain participates on either side."""
+    """Mirror of ``_perms_worker._expand_pooled``: pooled -> {side: asr_path_score},
+    or {"none": 0.0} when no domain participates on either side."""
     out = {}
     for s in ("top", "bottom"):
         agg = pooled.get(s) or {}
         if int(agg.get("n_participating", 0) or 0) > 0:
-            out[s] = float(agg.get("core", agg.get("asr_path_score", 0.0)) or 0.0)
+            out[s] = float(agg.get("asr_path_score", 0.0) or 0.0)
     return out or {"none": 0.0}
 
 
@@ -55,7 +55,7 @@ def test_null_and_observed_agree_per_scenario():
         null_sides = _null_expand(pooled)
 
         obs_rows = _emit_pooled_side_rows(base, entry["hyp_records"], pss)
-        obs_sides = {r.side: float(r.core or 0.0) for r in obs_rows}
+        obs_sides = {r.side: float(r.asr_path_score or 0.0) for r in obs_rows}
 
         if set(obs_sides) != set(null_sides):
             failures.append(f"{name}: side sets differ obs={set(obs_sides)} "
@@ -63,14 +63,8 @@ def test_null_and_observed_agree_per_scenario():
             continue
         for s in obs_sides:
             if abs(obs_sides[s] - null_sides[s]) > TOL:
-                failures.append(f"{name}/{s}: obs core {obs_sides[s]} != "
-                                f"null core {null_sides[s]}")
-            # observed rows also carry asr_path_score == core
-            for r in obs_rows:
-                if r.side == s and abs(float(r.asr_path_score or 0.0)
-                                      - null_sides[s]) > TOL:
-                    failures.append(f"{name}/{s}: observed asr_path_score "
-                                    f"{r.asr_path_score} != core {null_sides[s]}")
+                failures.append(f"{name}/{s}: obs asr_path_score {obs_sides[s]} != "
+                                f"null asr_path_score {null_sides[s]}")
     assert not failures, "\n".join(failures)
 
 

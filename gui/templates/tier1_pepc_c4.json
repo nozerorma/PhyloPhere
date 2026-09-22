@@ -42,7 +42,7 @@
     "phenotype_rows": [
       {
         "trait": "c4",
-        "secondary": "",
+        "secondary": "c4_phenotypic",
         "n_trait": "",
         "c_trait": "",
         "prune": "",
@@ -51,7 +51,7 @@
       },
       {
         "trait": "c4_phenotypic",
-        "secondary": "",
+        "secondary": "c4",
         "n_trait": "",
         "c_trait": "",
         "prune": "eleocharis_intermediate.txt",

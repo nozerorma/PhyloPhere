@@ -77,25 +77,18 @@ class ConvergenceResult:
     pair_details: Optional[List[dict]] = None
     caap_group: str = "US"
     amino_encoded: str = ""
-    is_conserved_meta: bool = False
-    conserved_pair: str = ""
     # Discovering hypothesis (FOP: "H<n>"; single-contrast run: None). One
     # ConvergenceResult is emitted per (position, scheme, hypothesis).
     hypothesis: Optional[str] = None
-    # Hypotheses (across the harvest) that drove >= 1 changed domain on this
-    # side, comma-joined. Unlike `hypothesis`/`trait`, this is never nulled by
-    # a multi-hypothesis pool -- it always reflects the pooled contributors.
+    # Hypotheses (across the harvest) that drove >= 1 changed domain on THIS
+    # SIDE, comma-joined -- the sole hypothesis-provenance field downstream
+    # consumes (SCORING's pos_scores aggregation reads it by name). Per-side,
+    # so top/bottom rows for the same position can legitimately differ; never
+    # nulled by a multi-hypothesis pool (unlike `hypothesis`).
     participating_hypotheses: Optional[str] = None
-    # Harvest size (M, from fop_pool.pool_domains) and the real discovering
-    # hypothesis labels for this (position, scheme) pool -- position/scheme
-    # level, identical on both emitted side rows. Unlike `participating_hypotheses`
-    # this is not per-side and excludes unresolved-row placeholders. SCORING's
-    # pos_scores aggregation (scoring_compute.R) already consumes these by name
-    # (max(n_hypotheses), union-split supporting_hypotheses) -- it previously
-    # only ever saw its own backfilled defaults (1 / "") since nothing upstream
-    # populated real values.
+    # Harvest size (M, from fop_pool.pool_domains) for this (position, scheme)
+    # pool -- position/scheme level, identical on both emitted side rows.
     n_hypotheses: Optional[int] = None
-    supporting_hypotheses: Optional[str] = None
     # Cross-hypothesis support tallies for fields that otherwise silently pass
     # through an arbitrary first-hypothesis-in-file-order row (see
     # `_emit_pooled_side_rows`). Kept alongside the status-quo passthrough
@@ -127,19 +120,19 @@ class ConvergenceResult:
     # First-class direction key (top / bottom / none). T4b retired the
     # change_top/change_bottom/change_side triplet: a "both" position is always
     # emitted as TWO ConvergenceResult rows keyed (gene, position, side), each
-    # carrying that direction's own asr_path_score / core / derived_agreement /
+    # carrying that direction's own asr_path_score / derived_agreement /
     # convergence_type. A position with no participating pair is one row with
     # side == "none".
     side: str = "none"
 
     # CAAS convergence score on the Voronoi domain (scoring_v2 core v3; computed
     # in src/convergence/path_scores.py + pooled in src/convergence/fop_pool.py).
-    # asr_path_score == core == the per-side pooled domain mean.
+    # The per-side pooled domain mean (formerly duplicated onto a `core` field --
+    # retired since it was always bit-identical to this one).
     asr_path_score: Optional[float] = None
     # Diagnostic only: agree_num / agree_den (largest same-encoded-residue group
     # over the domains changed in >= 1 hypothesis / count of those domains).
     derived_agreement: Optional[float] = None
-    core: Optional[float] = None
     # Per-domain pooled score s̄_d for the emitted side (was pair_path_scores).
     domain_scores: Optional[Dict[int, float]] = None
     # Raw (un-encoded) ancestral + per-side derived residues per changed domain,
@@ -159,8 +152,8 @@ class ConvergenceResult:
     # state None, posterior 0.0.
     domain_meta: Optional[Dict[int, Dict[str, Any]]] = None
     # Union across pooled hypotheses of (domain_a, domain_b, lca_node_id,
-    # contrib) for the same-residue domain pairs that drove this side's `core`
-    # (see path_scores.score_domains_side); duplicate (a, b, lca) triples across
+    # contrib) for the same-residue domain pairs that drove this side's
+    # `asr_path_score` (see path_scores.score_domains_side); duplicate (a, b, lca) triples across
     # hypotheses are averaged on `contrib`. Debug-tree visualization only.
     pair_lca: Optional[List[Tuple[Any, Any, int, float]]] = None
 

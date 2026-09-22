@@ -105,11 +105,10 @@ def pool_domains(
 
     Returns:
         ``{"top": <agg>, "bottom": <agg>, "n_hypotheses": M}`` where ``<agg>`` is
-        ``{asr_path_score, core, domain_scores, domain_weights, domain_der,
-        domain_anc, agree_num, agree_den, n_participating, convergence_type}``;
-        ``core == asr_path_score``. ``domain_der`` / ``domain_anc`` carry only
-        domains changed in >= 1 hypothesis (modal residue); ``agree_den ==
-        n_participating``.
+        ``{asr_path_score, domain_scores, domain_weights, domain_der,
+        domain_anc, agree_num, agree_den, n_participating, convergence_type}``.
+        ``domain_der`` / ``domain_anc`` carry only domains changed in >= 1
+        hypothesis (modal residue); ``agree_den == n_participating``.
     """
     hyps = [r for r in hyp_records if r.get("hyp")]
     M = len(hyps)
@@ -177,7 +176,6 @@ def pool_domains(
 
         return {
             "asr_path_score": core,
-            "core": core,
             "domain_scores": dict(s_bar),
             "domain_weights": dict(w_bar),
             "domain_der": {rep.get(sd, sd): _modal_str(der_raw.get(sd, [])) for sd in changed},

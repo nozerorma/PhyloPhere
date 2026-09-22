@@ -50,14 +50,46 @@ logger = logging.getLogger(__name__)
 PositionAxes = namedtuple(
     "PositionAxes",
     ["position", "caap_group", "asr_path_score",
-     "side", "hypothesis", "domain_scores", "derived_agreement", "core",
+     "side", "hypothesis", "domain_scores", "derived_agreement",
      "sides"],
 )
 # All fields after `side` are optional. `sides` is the raw
 # ``compute_domain_scores`` return ``{"top", "bottom", "domain_meta"}`` for the
 # FOP null's treeless pooler (``fop_pool.pool_domains``); populated in the
 # axes-only replay, ``None`` on the full observed path.
-PositionAxes.__new__.__defaults__ = ("none", None, None, None, None, None)
+PositionAxes.__new__.__defaults__ = ("none", None, None, None, None)
+
+
+def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
+    """Pool one side's per-hypothesis ``caas``/``amino_encoded`` fg/bg strings into a
+    single "<derived>/<ancestral>" call: exclude each pair index where fg==bg
+    (conserved -- caap_id.py's own conserved-pair check is this same per-index
+    group-equality test, so the two are equivalent; no metadata lookup needed),
+    then union the surviving divergent residues per side across every pooled
+    hypothesis.
+
+    Replaces the old arbitrary-first-hypothesis passthrough for these two
+    columns: the union of divergent residues, across every hypothesis in the
+    pool, is a genuine summary rather than one hypothesis's raw pattern.
+    """
+    fg_chars: set = set()
+    bg_chars: set = set()
+    for r in all_rows or []:
+        val = str(getattr(r, attr, "") or "")
+        parts = val.split("/")
+        if len(parts) != 2:
+            continue
+        fg, bg = parts
+        if len(fg) != len(bg):
+            continue
+        for f, b in zip(fg, bg):
+            if f == b:
+                continue
+            fg_chars.add(f)
+            bg_chars.add(b)
+    if not fg_chars and not bg_chars:
+        return ""
+    return "".join(sorted(fg_chars)) + "/" + "".join(sorted(bg_chars))
 
 
 def _pooled_pair_lca(hyp_rows: List[Dict[str, Any]], side: str) -> Optional[List[Tuple[Any, Any, int, float]]]:
@@ -93,7 +125,7 @@ def _emit_pooled_side_rows(
     rows drop the ``hypothesis`` label (a genuine FOP pool); a lone hypothesis
     keeps it. ``all_rows`` (the raw per-hypothesis ``ConvergenceResult`` list,
     same length/order as ``hyp_rows``) is used only for the position-level
-    ``tag``/``caas``/``amino_encoded`` support tallies -- these live on the
+    ``tag_support``/``caas``/``amino_encoded`` derivation -- these live on the
     result itself, not inside ``sides``, so they cannot be recovered from
     ``hyp_rows`` alone.
     """
@@ -115,31 +147,35 @@ def _emit_pooled_side_rows(
     tag_support = fmt_support(_tally("tag"))
     caas_support = fmt_support(_tally("caas"))
     amino_encoded_support = fmt_support(_tally("amino_encoded"))
+    # `caas`/`amino_encoded` are no longer an arbitrary first-hypothesis
+    # passthrough: derive them as the union of divergent (non-conserved)
+    # residues across every pooled hypothesis (see _derive_convergent_call).
+    # Fall back to the first-hypothesis passthrough only if no divergent
+    # residue survived exclusion (e.g. every row's harvest fully agrees with
+    # its own background) -- never emit a blank caas/amino_encoded.
+    derived_caas = _derive_convergent_call(all_rows or [], "caas") or base.caas
+    derived_amino_encoded = (
+        _derive_convergent_call(all_rows or [], "amino_encoded") or base.amino_encoded
+    )
 
-    # Harvest size (M) and the real discovering-hypothesis labels for this
-    # (position, scheme) pool -- distinct from `participating_hypotheses`
-    # (per-side, only hypotheses that had a changed domain). Placeholder labels
-    # from unresolved/non-FOP rows (see the call site's `_H_UNRESOLVED_{i}`)
-    # never represent a real discovering hypothesis, so they're excluded here.
+    # Harvest size (M) for this (position, scheme) pool.
     n_hypotheses = int(pooled.get("n_hypotheses", 0) or 0)
-    supporting_hypotheses = ",".join(
-        sorted(h for h in hyp_labels if h and not str(h).startswith("_H_UNRESOLVED_"))
-    ) or None
 
     sides = [s for s in ("top", "bottom")
              if int((pooled.get(s) or {}).get("n_participating", 0) or 0) > 0]
     if not sides:
         return [dataclasses.replace(
             base, side="none", hypothesis=hyp_out, participating_hypotheses=None,
-            asr_path_score=0.0, core=0.0, convergence_type="no_change",
+            asr_path_score=0.0, convergence_type="no_change",
             domain_scores=None, domain_anc_aa=None,
             domain_der_top_aa=None, domain_der_bot_aa=None,
             domain_der_support_top_aa=None, domain_der_support_bot_aa=None,
             domain_anc_support_aa=None, pair_lca=None,
             domain_meta=(dict(meta) if meta else None),
+            caas=derived_caas, amino_encoded=derived_amino_encoded,
             tag_support=tag_support, caas_support=caas_support,
             amino_encoded_support=amino_encoded_support,
-            n_hypotheses=n_hypotheses, supporting_hypotheses=supporting_hypotheses,
+            n_hypotheses=n_hypotheses,
         )]
 
     out: List[ConvergenceResult] = []
@@ -151,7 +187,6 @@ def _emit_pooled_side_rows(
             base, side=s, hypothesis=hyp_out,
             participating_hypotheses=(",".join(d.get("participating_hyps") or []) or None),
             asr_path_score=float(d.get("asr_path_score", 0.0) or 0.0),
-            core=float(d.get("core", 0.0) or 0.0),
             derived_agreement=da,
             convergence_type=d.get("convergence_type", base.convergence_type),
             domain_scores=(dict(d.get("domain_scores") or {}) or None),
@@ -163,9 +198,10 @@ def _emit_pooled_side_rows(
             domain_anc_support_aa=(dict(d.get("domain_anc_support") or {}) or None),
             pair_lca=_pooled_pair_lca(hyp_rows, s),
             domain_meta=(dict(meta) if meta else None),
+            caas=derived_caas, amino_encoded=derived_amino_encoded,
             tag_support=tag_support, caas_support=caas_support,
             amino_encoded_support=amino_encoded_support,
-            n_hypotheses=n_hypotheses, supporting_hypotheses=supporting_hypotheses,
+            n_hypotheses=n_hypotheses,
         ))
     return out
 
@@ -486,10 +522,6 @@ def analyze_caas_position_disambiguation(
         for idx, state in enumerate(node_state_info.focal_states, 1):
             node_summary[f"focal_{idx}"] = state
 
-    # Conserved-pair logic driven by metadata row
-    is_cons_meta = bool(getattr(caas_pos, "is_conserved_meta", False))
-    conserved_pair = str(getattr(caas_pos, "conserved_pair", "") or "").strip()
-
     # ── CAAS convergence score (core v3, on the Voronoi domain) ───────────────
     # ``compute_domain_scores`` returns {"top", "bottom", "domain_meta"} for this
     # (Gene, Position, scheme, hypothesis). The per-side pooling + the <=2-row
@@ -541,12 +573,9 @@ def analyze_caas_position_disambiguation(
         side="none",  # overwritten per-side by _emit_pooled_side_rows
         caap_group=getattr(caas_pos, "caap_group", "US"),
         amino_encoded=getattr(caas_pos, "amino_encoded", ""),
-        is_conserved_meta=is_cons_meta,
-        conserved_pair=conserved_pair,
         hypothesis=hypothesis,
         asr_path_score=None,
         derived_agreement=None,
-        core=None,
         domain_scores=None,
         domain_anc_aa=None,
         domain_der_top_aa=None,
@@ -931,7 +960,6 @@ def analyze_gene_disambiguation(
                 # scalars are recomputed downstream by pool_domains.
                 axes_sides = None
                 axes_score = 0.0
-                axes_core = None
                 try:
                     axes_sides = _position_axes(
                         caas_pos,
@@ -955,7 +983,6 @@ def analyze_gene_disambiguation(
                         hypothesis=_hyp_label,
                         domain_scores=None,
                         derived_agreement=None,
-                        core=axes_core,
                         sides=axes_sides,
                     )
                 )

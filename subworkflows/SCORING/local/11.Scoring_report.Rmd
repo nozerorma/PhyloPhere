@@ -154,13 +154,14 @@ gene_df <- read_tsv(params$gene_scores_file, show_col_types = FALSE)
 corr_df <- read_tsv(params$gene_corr_file, show_col_types = FALSE)
 
 # scoring_compute.R §2g stopped carrying the per-scheme factors to the position
-# level in T1 (a position-level mean of asr_score / core hides scheme
-# disagreement). T3d (native_side_split) re-emits `core` PER SIDE as a
-# diagnostic. Alias `asr_score` to whichever is present so the panels below
+# level in T1 (a position-level mean of asr_score hides scheme disagreement).
+# T3d (native_side_split) re-emits `asr_path_score` PER SIDE as a diagnostic
+# (formerly duplicated onto a separate `core` column, retired as pure
+# duplication). Alias `asr_score` to whichever is present so the panels below
 # degrade instead of erroring.
 if (!"asr_score" %in% names(pos_df)) {
-  pos_df$asr_score <- if ("core" %in% names(pos_df) && any(!is.na(pos_df$core))) {
-    pos_df$core
+  pos_df$asr_score <- if ("asr_path_score" %in% names(pos_df) && any(!is.na(pos_df$asr_path_score))) {
+    pos_df$asr_path_score
   } else {
     pos_df$CAAS_score
   }
@@ -496,13 +497,13 @@ reproduced independently of the pipeline code.
 
 #### 1. Position evolution: `asr_path_score` (`asr_score`)
 
-Core v3: `asr_path_score == core`, the CAAS convergence score on the pair's
+Core v3: `asr_path_score`, the CAAS convergence score on the pair's
 Voronoi domain, built from the per-node ASR posteriors (full definitions in
 [`docs/scoring_v3_core.md`](../../docs/scoring_v3_core.md)):
 
 | Quantity | What it rewards |
 |--------|-----------------|
-| `core` | PSS-weighted mean over the K fixed Voronoi domains of each domain's noisy-OR agreement with its same-residue partners, discounted by the derived state's probability at the shared LCA |
+| `asr_path_score` | PSS-weighted mean over the K fixed Voronoi domains of each domain's noisy-OR agreement with its same-residue partners, discounted by the derived state's probability at the shared LCA |
 | `derived_agreement` | retained descriptor (not a score factor): changed pairs landing on the same derived residue per side |
 
 (Core v3 removed the pairwise isolation factor `s_c^s * s_d^s` and the earlier
@@ -1210,7 +1211,7 @@ things and are not expected to agree:
 | column | question it answers | stage |
 |---|---|---|
 | `n_schemes` / `scheme_set` | which AA-grouping schemes **discovery** emitted a row for (US = exact identity, GS1–4 = physico-chemical classes) | CAAStools discovery |
-| `n_hypotheses` / `supporting_hypotheses` | how many independent FOP contrast-pair samplings (H1..Hn) recovered this position | FOP mirror |
+| `n_hypotheses` / `participating_hypotheses` | how many independent FOP contrast-pair samplings (H1..Hn) recovered this position (`participating_hypotheses` is side-specific: only hypotheses that drove a changed domain on this side) | FOP mirror |
 | `top_residue_support` / `bottom_residue_support` | how many distinct CAAS contrast **pairs** carry each residue on that side — bounded by the contrast's pair count (~2–5), so small by design | descriptor |
 | `*_residue_support_detail` | same but counting distinct reconstructed ancestral **nodes** across all hypotheses (finer, inflated by hypothesis count) | descriptor |
 | `top_species_residues` / `bottom_species_residues` | the residues actually carried by the **foreground / background contrast species** at this alignment column, `AA:count` (e.g. `N:15,A:8` = 15 of the foreground species have Asn) — the "X of N species" check, hypothesis-independent | alignment tally |
@@ -1220,10 +1221,10 @@ things and are not expected to agree:
 # Score axis first, then the gate tiers, then supplementary diagnostics.
 # any_of() keeps this robust to absent columns.
 display_cols <- c("Gene", "Position", "CAAS_score",
-                  "asr_score", "core",
+                  "asr_score", "asr_path_score",
                   "n_schemes", "scheme_set",
                   # how many FOP hypotheses (H1..Hn) recovered this position, and which
-                  "n_hypotheses", "supporting_hypotheses",
+                  "n_hypotheses", "participating_hypotheses",
                   "side",
                   # raw-AA descriptors (position-level, from position_scores.tsv).
                   # *_support = distinct CAAS contrast pairs carrying the residue
@@ -1410,10 +1411,10 @@ if (length(dir_axis_plots)) {
 has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
-                      "asr_score", "core",
+                      "asr_score", "asr_path_score",
                       if (has_caas_col) "caas",
                       "n_schemes", "scheme_set",
-                      "n_hypotheses", "supporting_hypotheses",
+                      "n_hypotheses", "participating_hypotheses",
                       "side",
                       "derived_residues", "top_residue_support", "bottom_residue_support",
                       "top_residue_support_detail", "bottom_residue_support_detail",
