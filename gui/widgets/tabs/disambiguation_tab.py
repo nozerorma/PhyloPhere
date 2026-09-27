@@ -64,7 +64,7 @@ SPEC = ModuleTabSpec(
             # Ground truth is subworkflows/CT_DISAMBIGUATION/local/src/asr/reconstruct.py's
             # MODEL->aa_rate_file map (dayhoff/jtt/wag/lg via PAML codeml) — the 3-way
             # set in earlier task notes omitted "dayhoff", which the code does accept.
-            choices=("dayhoff", "jtt", "wag", "lg"),
+            choices=("lg", "wag", "jtt", "dayhoff"),
             importance="default",
         ),
         FieldSpec(
@@ -146,6 +146,17 @@ SPEC = ModuleTabSpec(
                 "flagged by cluster-based IQR screening (Dubious-gene IQR multiplier, "
                 "below; needs a cluster file). 'both' applies both filters; 'none' "
                 "disables gene-level filtering entirely."
+            ),
+        ),
+        FieldSpec(
+            name="remove_caas_clusters",
+            label="Remove CAAS spatial clusters",
+            kind="bool",
+            importance="default",
+            help=(
+                "Discard individual positions flagged as spatial CAAS clusters from the "
+                "discovery dataset. Decoupled from gene-level filtering: when enabled, "
+                "spatial clusters are removed even if Gene filter mode is set to 'none'."
             ),
         ),
         Section("Sensitivity and robustness testing"),

@@ -66,9 +66,11 @@ def _resolve_wikipathways_url(timeout: int):
         return None
     return _WIKIPATHWAYS_INDEX + match.group(0)
 
-_DEFAULT_VENDORED_DIR = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "gmt"
-)
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_ENRICHMENT_DAT_DIR = os.path.join(_REPO_ROOT, "subworkflows", "ENRICHMENT", "dat")
+_ASSETS_GMT_DIR = os.path.join(_REPO_ROOT, "assets", "gmt")
+_DEFAULT_VENDORED_DIR = _ENRICHMENT_DAT_DIR if os.path.isdir(_ENRICHMENT_DAT_DIR) else _ASSETS_GMT_DIR
+
 
 
 def resolve_gmts(output_dir: str, vendored_dir: str, timeout: int, no_fetch: bool = False) -> None:

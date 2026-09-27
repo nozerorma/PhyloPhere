@@ -63,7 +63,7 @@ PositionAxes.__new__.__defaults__ = ("none", None, None, None, None)
 def _derive_convergent_call(all_rows: List["ConvergenceResult"], attr: str) -> str:
     """Pool one side's per-hypothesis ``caas``/``amino_encoded`` fg/bg strings into a
     single "<derived>/<ancestral>" call: exclude each pair index where fg==bg
-    (conserved -- caap_id.py's own conserved-pair check is this same per-index
+    (conserved -- caas_id.py's own conserved-pair check is this same per-index
     group-equality test, so the two are equivalent; no metadata lookup needed),
     then union the surviving divergent residues per side across every pooled
     hypothesis.
@@ -171,7 +171,7 @@ def _emit_pooled_side_rows(
             domain_der_top_aa=None, domain_der_bot_aa=None,
             domain_der_support_top_aa=None, domain_der_support_bot_aa=None,
             domain_anc_support_aa=None, pair_lca=None,
-            domain_meta=(dict(meta) if meta else None),
+            domain_meta=None,
             caas=derived_caas, amino_encoded=derived_amino_encoded,
             tag_support=tag_support, caas_support=caas_support,
             amino_encoded_support=amino_encoded_support,
@@ -197,7 +197,7 @@ def _emit_pooled_side_rows(
             domain_der_support_bot_aa=(dict(d.get("domain_der_support") or {}) or None) if s == "bottom" else None,
             domain_anc_support_aa=(dict(d.get("domain_anc_support") or {}) or None),
             pair_lca=_pooled_pair_lca(hyp_rows, s),
-            domain_meta=(dict(meta) if meta else None),
+            domain_meta=None,
             caas=derived_caas, amino_encoded=derived_amino_encoded,
             tag_support=tag_support, caas_support=caas_support,
             amino_encoded_support=amino_encoded_support,
@@ -1022,6 +1022,85 @@ def analyze_gene_disambiguation(
         except Exception:
             pass
         logger.info(f"Tip details written to {diagnostics.get('tip_dump_file')}")
+
+    # Write unmerged ASR and domain node diagnostics to caas_hypothesis_domain_asr.tsv
+    # before hypothesis pooling if diagnostics_dir is provided.
+    if diagnostics_dir and not axes_only and results:
+        try:
+            asr_tsv_dir = Path(diagnostics_dir)
+            asr_tsv_dir.mkdir(parents=True, exist_ok=True)
+            asr_tsv_path = asr_tsv_dir / "caas_hypothesis_domain_asr.tsv"
+            write_header = not asr_tsv_path.exists() or asr_tsv_path.stat().st_size == 0
+            with open(asr_tsv_path, "a", encoding="utf-8") as f:
+                if write_header:
+                    f.write(
+                        "gene\tposition\thypothesis\tcaap_group\tdomain\t"
+                        "mrca_node\tmrca_state\tmrca_posterior\t"
+                        "top_species\tbottom_species\ttop_tip_aa\tbottom_tip_aa\t"
+                        "domain_score\tpairwise_lca\n"
+                    )
+                for r in results:
+                    r_gene = getattr(r, "gene", gene)
+                    r_pos = getattr(r, "position", "")
+                    r_hyp = getattr(r, "hypothesis", "") or ""
+                    r_group = getattr(r, "caap_group", "US") or "US"
+                    r_sides = getattr(r, "sides", None) or {}
+                    d_meta = r_sides.get("domain_meta") or {}
+                    top_side = r_sides.get("top") or {}
+                    bot_side = r_sides.get("bottom") or {}
+                    top_scores = top_side.get("domain_scores") or {}
+                    bot_scores = bot_side.get("domain_scores") or {}
+
+                    # Pair details from unpooled base row
+                    pair_map = {}
+                    for p in (getattr(r, "pair_details", None) or []):
+                        if isinstance(p, dict) and p.get("pair_id") is not None:
+                            pair_map[p["pair_id"]] = p
+
+                    # Pairwise LCA strings from top/bottom
+                    lca_parts = []
+                    for s in (top_side, bot_side):
+                        for a, b, lca_id, contrib in (s.get("pair_lca") or []):
+                            if lca_id is not None:
+                                lca_parts.append(f"{a}-{b}:{lca_id}:{contrib:.4f}")
+                    pairwise_lca_str = "|".join(lca_parts)
+
+                    # Determine all domains present
+                    all_domains = sorted(
+                        set(d_meta.keys()) | set(pair_map.keys()) | set(top_scores.keys()) | set(bot_scores.keys()),
+                        key=lambda x: int(x) if str(x).isdigit() else str(x),
+                    )
+                    for d in all_domains:
+                        m = d_meta.get(d) or {}
+                        p = pair_map.get(d) or {}
+                        mrca_node = m.get("mrca_id") if m.get("mrca_id") is not None else p.get("node_id", "")
+                        mrca_state = m.get("state") if m.get("state") is not None else p.get("focal_state", "")
+                        mrca_prob = m.get("posterior") if m.get("posterior") is not None else p.get("focal_prob", "")
+                        prob_str = f"{float(mrca_prob):.4f}" if mrca_prob not in (None, "") else ""
+
+                        top_sp = ",".join(str(x) for x in (p.get("top_species") or []))
+                        bot_sp = ",".join(str(x) for x in (p.get("bottom_species") or []))
+                        top_tip = p.get("top_tip_mode") or p.get("top_tip_residue") or ""
+                        bot_tip = p.get("bottom_tip_mode") or p.get("bottom_tip_residue") or ""
+
+                        # Domain score (max of top and bottom score for this domain, or empty if neither scored)
+                        d_score_val = None
+                        if d in top_scores and d in bot_scores:
+                            d_score_val = max(top_scores[d], bot_scores[d])
+                        elif d in top_scores:
+                            d_score_val = top_scores[d]
+                        elif d in bot_scores:
+                            d_score_val = bot_scores[d]
+                        score_str = f"{float(d_score_val):.4f}" if d_score_val is not None else ""
+
+                        f.write(
+                            f"{r_gene}\t{r_pos}\t{r_hyp}\t{r_group}\t{d}\t"
+                            f"{mrca_node}\t{mrca_state}\t{prob_str}\t"
+                            f"{top_sp}\t{bot_sp}\t{top_tip}\t{bot_tip}\t"
+                            f"{score_str}\t{pairwise_lca_str}\n"
+                        )
+        except Exception as e:
+            logger.warning(f"[{gene}] Failed to write caas_hypothesis_domain_asr.tsv: {e}")
 
     if not axes_only and results:
         # core v3: group the per-hypothesis base rows by (position, scheme) and

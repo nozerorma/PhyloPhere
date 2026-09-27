@@ -182,7 +182,7 @@ if (!is.null(params$annot_file) && file.exists(params$annot_file) &&
 }
 flag_cols <- grep("^flag_", names(annot), value = TRUE)
 
-gmt_dir <- params$gmt_dir %||% file.path(this_dir, "..", "dat")
+gmt_dir <- if (!is.null(params$gmt_dir) && nzchar(params$gmt_dir)) params$gmt_dir else file.path(this_dir, "..", "dat")
 invisible(capture.output(suppressMessages(gmts <- fcs_load_gmts(gmt_dir))))
 desc_map <- suppressMessages(fcs_load_descriptions(gmt_dir))
 ```

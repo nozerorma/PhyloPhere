@@ -37,7 +37,7 @@ process ENSEMBL_VEP_ANNOTATE {
                pattern: 'ensembl_vep_mapped.tsv'
 
     input:
-    path caas_file
+    path position_scores
     path vep_map_dir
     path gene_ensembl_file
     val vep_cache_dir
@@ -67,7 +67,7 @@ process ENSEMBL_VEP_ANNOTATE {
         fi
     fi
 
-    python3 build_vep_hgvs.py "${caas_file}" "${vep_map_dir}" "${gene_ensembl_file}" hgvs_ids.txt id_map.tsv
+    python3 build_vep_hgvs.py "${position_scores}" "${vep_map_dir}" "${gene_ensembl_file}" hgvs_ids.txt id_map.tsv
 
     if [[ ! -s hgvs_ids.txt ]]; then
         echo "WARN No HGVS identifiers resolved (missing MAP files or protein IDs) — skipping Ensembl VEP call." >&2

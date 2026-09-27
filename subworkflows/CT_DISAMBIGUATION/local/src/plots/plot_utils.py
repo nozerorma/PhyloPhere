@@ -112,8 +112,60 @@ def build_result_from_row(row: pd.Series) -> Optional[Dict[str, Any]]:
     if focal_probs:
         node_state_details["focal_probs"] = focal_probs
 
-    if not node_mapping or not node_state_details:
-        return None
+    # If node columns are not present in row, attempt to load them from diagnostics/caas_hypothesis_domain_asr.tsv
+    if (not node_mapping or not node_state_details) and "gene" in row:
+        gene_name = str(row["gene"])
+        asr_tsv_candidates = [
+            Path.cwd() / "diagnostics" / "caas_hypothesis_domain_asr.tsv",
+            Path.cwd() / "ct_disambiguation" / "diagnostics" / "caas_hypothesis_domain_asr.tsv",
+        ]
+        for cand in asr_tsv_candidates:
+            if cand.exists():
+                try:
+                    df_asr = pd.read_csv(cand, sep="\t")
+                    sub = df_asr[(df_asr["gene"].astype(str) == gene_name) & (df_asr["position"].astype(str) == str(pos0))]
+                    if sub.empty:
+                        sub = df_asr[(df_asr["gene"].astype(str) == gene_name) & (df_asr["position"].astype(str) == str(pos1))]
+                    if not sub.empty:
+                        focal_nodes = []
+                        focal_states = []
+                        focal_probs = []
+                        lca_ids = []
+                        for _, asr_r in sub.iterrows():
+                            d_idx = asr_r.get("domain")
+                            m_node = asr_r.get("mrca_node")
+                            m_state = asr_r.get("mrca_state")
+                            m_prob = asr_r.get("mrca_posterior")
+                            p_lca = asr_r.get("pairwise_lca")
+                            if pd.notna(m_node) and str(m_node).isdigit():
+                                nid = int(m_node)
+                                focal_nodes.append(nid)
+                                if pd.notna(d_idx):
+                                    node_mapping[f"focal_{d_idx}"] = nid
+                            if pd.notna(m_state):
+                                focal_states.append(str(m_state))
+                            if pd.notna(m_prob):
+                                try:
+                                    focal_probs.append(float(m_prob))
+                                except Exception:
+                                    pass
+                            if pd.notna(p_lca) and str(p_lca):
+                                for entry in str(p_lca).split("|"):
+                                    try:
+                                        lca_ids.append(int(entry.split(":")[1]))
+                                    except Exception:
+                                        pass
+                        if focal_nodes:
+                            node_mapping["focal_nodes"] = focal_nodes
+                        if lca_ids:
+                            node_mapping["pairwise_lca_nodes"] = sorted(set(lca_ids))
+                        if focal_states:
+                            node_state_details["focal_states"] = focal_states
+                        if focal_probs:
+                            node_state_details["focal_probs"] = focal_probs
+                        break
+                except Exception:
+                    pass
 
     return {
         # `position` is canonical 0-based index used across plotting code

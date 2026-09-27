@@ -24,7 +24,7 @@ params:
   project_name: "AMI_Analysis"
   species: 9606
   gene_scores_file: NULL
-  scoring_p_emp_thr: 0.1  # gene_caas_pperm_adj threshold for CAAS-significance node highlight (thick border); mirrors Phase D's param elsewhere
+  scoring_p_emp_thr: 0.05  # gene_caas_pperm_adj threshold for CAAS-significance node highlight (thick border)
   string_db_dir: NULL
   string_cache_dir: NULL
   min_cluster_genes: 3
@@ -728,7 +728,7 @@ plot_cluster_network <- function(net, clusters_df, title, id_to_gene = NULL,
   if (!is.null(sig_genes)) {
     encoding_lines <- c(encoding_lines,
       paste0("Thick border = CAAS-significant gene (gene_caas_pperm_adj <= ",
-             if (exists("params") && !is.null(params$scoring_p_emp_thr)) params$scoring_p_emp_thr else 0.1,
+             if (exists("params") && !is.null(params$scoring_p_emp_thr)) params$scoring_p_emp_thr else 0.05,
              ")"))
   }
   if (!is.null(igraph::E(net)$combined_score)) {
@@ -958,7 +958,7 @@ prepare_gene_attributes <- function(df) {
   # Phase-D threshold/column used for the FCS leading-edge tables and the
   # Comparison report; read directly from params since this function has only
   # one call site (.attr_df_global below), no need to thread it as an argument.
-  p_emp_thr  <- params$scoring_p_emp_thr %||% 0.1
+  p_emp_thr  <- params$scoring_p_emp_thr %||% 0.05
   pperm_adj  <- suppressWarnings(as.numeric(.col("gene_caas_pperm_adj")))
   out$flag_caas_significant <- !is.na(pperm_adj) & pperm_adj <= p_emp_thr
 

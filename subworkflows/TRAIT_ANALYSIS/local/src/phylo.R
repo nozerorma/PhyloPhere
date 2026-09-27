@@ -112,9 +112,12 @@ if (has.TAX_ID && !"tax_id" %in% names(trait_df)) {
   tax_id_cols <- intersect(c("tax_id.x", "tax_id.y"), names(trait_df))
   if (length(tax_id_cols) > 0) {
     if (length(tax_id_cols) == 1) {
-      trait_df$tax_id <- trait_df[[tax_id_cols[1]]]
+      trait_df$tax_id <- as.character(trait_df[[tax_id_cols[1]]])
     } else {
-      trait_df$tax_id <- dplyr::coalesce(trait_df[[tax_id_cols[1]]], trait_df[[tax_id_cols[2]]])
+      trait_df$tax_id <- dplyr::coalesce(
+        as.character(trait_df[[tax_id_cols[1]]]),
+        as.character(trait_df[[tax_id_cols[2]]])
+      )
     }
     trait_df <- trait_df %>% dplyr::select(-dplyr::all_of(tax_id_cols))
     debug_log("normalized tax_id from merged columns, missing tax_id = %d", sum(is.na(trait_df$tax_id)))

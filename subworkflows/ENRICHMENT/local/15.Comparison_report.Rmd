@@ -85,7 +85,7 @@ params:
   # across reports. Drives the Interesting Positions table's position_significant
   # column below (flag_caas_significant, the gene-level analogue, arrives
   # pre-computed via fcs_stats_file and needs no threshold here).
-  scoring_p_emp_thr:  0.1
+  scoring_p_emp_thr:  0.05
 ---
 
 <style type="text/css">
@@ -1186,6 +1186,19 @@ direction of its own, so either side counts there).
   }, character(1), USE.NAMES = FALSE)
 }
 
+.collapsible_hypotheses <- function(joined) {
+  vapply(joined, function(x) {
+    if (is.na(x) || !nzchar(x)) return("")
+    items <- unlist(strsplit(as.character(x), "[,;]\\s*"))
+    items <- items[nzchar(items)]
+    if (length(items) == 0) return("")
+    summary_txt <- if (length(items) == 1) .html_escape(items[1]) else sprintf("%d hypotheses", length(items))
+    sprintf("<details><summary>%s</summary>%s</details>",
+            summary_txt,
+            paste(sprintf("<div>%s</div>", .html_escape(items)), collapse = ""))
+  }, character(1), USE.NAMES = FALSE)
+}
+
 # Per-gene best evidence tier per module (Hard=3/Supported=2/Exploratory=1/
 # none=0), alongside the existing term-description text, evidence_label_caas/
 # evidence_label_rer surface in Interesting Genes/Positions below as their own
@@ -1345,15 +1358,15 @@ direction of its own, so either side counts there).
   if (!is.null(pub25) && !is.null(pub10) && !is.null(pub5) && !is.null(pub1)) {
     ids <- paste(base$Gene, base$Position)
     base %>%
-      dplyr::transmute(gene = Gene, Position, CAAS_score,
-                        `25%` = ids %in% pub25, `10%` = ids %in% pub10,
-                        `5%` = ids %in% pub5, `1%` = ids %in% pub1)
+      dplyr::mutate(gene = Gene,
+                    `25%` = ids %in% pub25, `10%` = ids %in% pub10,
+                    `5%` = ids %in% pub5, `1%` = ids %in% pub1)
   } else {
     thr <- quantile(base$CAAS_score, c(0.75, 0.90, 0.95, 0.99), na.rm = TRUE)
     base %>%
-      dplyr::transmute(gene = Gene, Position, CAAS_score,
-                        `25%` = CAAS_score >= thr[1], `10%` = CAAS_score >= thr[2],
-                        `5%` = CAAS_score >= thr[3], `1%` = CAAS_score >= thr[4])
+      dplyr::mutate(gene = Gene,
+                    `25%` = CAAS_score >= thr[1], `10%` = CAAS_score >= thr[2],
+                    `5%` = CAAS_score >= thr[3], `1%` = CAAS_score >= thr[4])
   }
 }
 
@@ -1515,45 +1528,46 @@ build_interesting_positions <- function(direction) {
   side_vals <- switch(direction, Top = "top", Bottom = "bottom", NULL)
 
   base <- position_scores_cmp_df
-  if (!is.null(side_vals)) base <- base %>% dplyr::filter(side %in% side_vals)
+  if (direction == "Top") {
+    base <- base %>% dplyr::filter(side == "top")
+  } else if (direction == "Bottom") {
+    base <- base %>% dplyr::filter(side == "bottom")
+  } else {
+    # Global: one row per (Gene, Position). If a position appears in both sides,
+    # pick the dominant side by CAAS_score (and hypothesis count if tied).
+    base <- base %>%
+      dplyr::arrange(
+        dplyr::desc(CAAS_score),
+        dplyr::desc(if ("n_hypotheses" %in% names(.)) n_hypotheses else 0)
+      ) %>%
+      dplyr::distinct(Gene, Position, .keep_all = TRUE)
+  }
   if (nrow(base) == 0) return(base)
+
+  # Harmonize hypothesis column names from position_scores.tsv / upstream discovery
+  if (!"participating_hypotheses" %in% names(base) && "supporting_hypotheses" %in% names(base)) {
+    base$participating_hypotheses <- base$supporting_hypotheses
+  }
+  if (!"supporting_hypotheses" %in% names(base) && "participating_hypotheses" %in% names(base)) {
+    base$supporting_hypotheses <- base$participating_hypotheses
+  }
+  if (!"n_hypotheses" %in% names(base) && "supporting_hypotheses" %in% names(base)) {
+    base$n_hypotheses <- vapply(strsplit(as.character(base$supporting_hypotheses), "[,;]\\s*"), function(x) length(x[nzchar(x)]), integer(1))
+  }
 
   base <- .position_pct_flags(base, tolower(direction))
 
-  # .position_pct_flags transmutes base down to gene/Position/CAAS_score/pcts, so
-  # re-attach the raw-AA descriptors (position_scores.tsv carries them per position).
-  .desc_cols <- intersect(
-    c("derived_residues", "top_residue_support", "bottom_residue_support"),
-    names(position_scores_cmp_df))
-  if (length(.desc_cols)) {
-    base <- base %>% dplyr::left_join(
-      position_scores_cmp_df %>%
-        dplyr::transmute(gene = Gene, Position, dplyr::across(dplyr::all_of(.desc_cols))),
-      by = c("gene", "Position"))
-  }
+  # Ensure Gene and Position are deduplicated
+  base <- base %>% dplyr::distinct(gene, Position, .keep_all = TRUE)
 
-  # position_significant: p.emp_adj <= scoring_p_emp_thr, the position-level
-  # CAAS permutation-null significance call (SCORING's position_scores.tsv,
-  # BH-adjusted across positions - see project_retire_bootstrap_arm.md Phase
-  # D). Re-attached the same way as .desc_cols just above, since
-  # .position_pct_flags() transmutes base down and would otherwise drop it.
-  # Computed here rather than pulled from a pre-thresholded flag column
-  # because position_scores.tsv carries the raw p.emp_adj value directly
-  # (unlike fcs_stats.tsv's gene-level flag_caas_significant). Kept as its
-  # own column rather than folded into any evidence-family sum, same
-  # "separate axis" reasoning as CAAS_sig in build_interesting_genes() above:
-  # a calibrated null p-value is a different kind of evidence than the
-  # percentile/FCS/AMI/posenrich criteria already tallied there, and this
-  # task introduces no new statistical combination method.
-  if ("p.emp_adj" %in% names(position_scores_cmp_df)) {
-    base <- base %>% dplyr::left_join(
-      position_scores_cmp_df %>%
-        dplyr::transmute(gene = Gene, Position,
-                          position_significant = !is.na(`p.emp_adj`) & `p.emp_adj` <= params$scoring_p_emp_thr),
-      by = c("gene", "Position"))
-  } else {
-    base$position_significant <- FALSE
-  }
+  # position_significant: p.emp_adj <= scoring_p_emp_thr, computed directly on base
+  has_pe_raw <- "p.emp" %in% names(base)
+  has_pe_adj <- "p.emp_adj" %in% names(base)
+  p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
+  if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.05
+  base$position_significant_raw <- if (has_pe_raw) !is.na(base$`p.emp`) & base$`p.emp` <= p_emp_thr else FALSE
+  base$position_significant_adj <- if (has_pe_adj) !is.na(base$`p.emp_adj`) & base$`p.emp_adj` <= p_emp_thr else FALSE
+  base$position_significant     <- base$position_significant_adj
 
   # Position-native FADE-site overlap.
   fade_df <- switch(direction,
@@ -1564,10 +1578,6 @@ build_interesting_positions <- function(direction) {
   } else FALSE
 
   # Gene-inherited flags (every position in a flagged gene shares its value).
-  # gene_attr_df can be NULL here even when has_position_scores_cmp is TRUE --
-  # the two gates (fcs_stats_file vs position_scores_file) are independent, so
-  # this table must degrade gracefully (RER/Accum flags just come back FALSE
-  # via .gcol) rather than assume fcs_stats_file was also supplied.
   if (!is.null(gene_attr_df)) {
     base <- base %>%
       dplyr::left_join(gene_attr_df %>% dplyr::select(gene, dplyr::any_of(c(
@@ -1576,9 +1586,6 @@ build_interesting_positions <- function(direction) {
   }
   base$RER_acc  <- .gcol(base, "flag_rer_acc")
   base$RER_decc <- .gcol(base, "flag_rer_decc")
-  # RER_dir: direction-matching flag only, same reasoning as
-  # build_interesting_genes() above (a Bottom position never gets credit for
-  # an unrelated acceleration call, and vice versa).
   base$RER_dir <- switch(direction, Top = base$RER_acc, Bottom = base$RER_decc, base$RER_acc | base$RER_decc)
   base$Accum_dir <- switch(direction,
     Top = .gcol(base, "flag_accum_top"), Bottom = .gcol(base, "flag_accum_bottom"), .gcol(base, "flag_accum"))
@@ -1615,16 +1622,6 @@ build_interesting_positions <- function(direction) {
   base$PE_sig <- !is.na(base$pe_terms) & nzchar(base$pe_terms)
 
   # EXTRAS, characterisation only, never in the score (see section text).
-  # Both reported as 3-state tags (not TRUE/FALSE) so "checked, negative" is
-  # never conflated with "never checked":
-  #   PAI3D_pathogenic: "pathogenic" / "benign" / "missing"
-  #   COSMIC:           "hit" / "no_hit" / "missing"
-
-  # PrimateAI-3D's own table is exhaustive (one row per position it scored,
-  # `prediction` always benign/pathogenic), a position simply absent from it
-  # was never scored by PrimateAI at all, a genuine "missing", not a benign
-  # call. Also doubles as the "was this position even checkable" reference for
-  # COSMIC below (COSMIC's own file is hits-only, see there).
   .pai_pos <- NULL
   if (has_vep_primateai_cmp) {
     .pai <- vep_primateai_cmp_df
@@ -1641,36 +1638,22 @@ build_interesting_positions <- function(direction) {
     dplyr::case_when(is.na(.m$.patho) ~ "missing", .m$.patho ~ "pathogenic", TRUE ~ "benign")
   } else rep("missing", nrow(base))
 
-  # COSMIC's own file (cosmic_scores.tsv) is HITS-ONLY, every row IS a
-  # documented COSMIC mutation, unlike PrimateAI's exhaustive per-position
-  # table. A position absent from it could mean either "checked, no COSMIC
-  # record" (a real negative) or "never genomically checkable at all" (e.g.
-  # liftover/coordinate mapping failed), the file alone can't tell the two
-  # apart. PrimateAI-3D's own position set is used as the "was this position
-  # checkable" reference instead (verified against real data: 116/118 COSMIC
-  # hits also appear in PrimateAI's set, i.e. the two databases draw from
-  # essentially the same genomically-mapped position universe).
   base$COSMIC <- if (has_vep_cosmic_cmp) {
     .cosmic <- if ("caap_group" %in% names(vep_cosmic_cmp_df)) dplyr::filter(vep_cosmic_cmp_df, caap_group == "US") else vep_cosmic_cmp_df
     .cosmic_hit <- paste(base$gene, base$Position) %in% paste(.cosmic$Gene, .cosmic$Position)
     .checkable <- if (!is.null(.pai_pos)) {
       paste(base$gene, base$Position) %in% paste(.pai_pos$Gene, .pai_pos$Position)
-    } else rep(TRUE, nrow(base))  # no PrimateAI reference available, can't distinguish no_hit from missing
+    } else rep(TRUE, nrow(base))
     dplyr::case_when(.cosmic_hit ~ "hit", .checkable ~ "no_hit", TRUE ~ "missing")
   } else rep("missing", nrow(base))
 
-  # posenrich's own per-position characterization layers - the same PFAM
-  # domain/clan, UCR core/flank region, and FUBAR selection call posenrich
-  # tests as GMTs (see build_position_gmt.py), joined straight in here.
-  # EXTRAS like COSMIC/PAI3D above: characterization only, never in the
-  # Composite score. Blank/NA means "not covered by that layer" (e.g. no PFAM
-  # domain at this position), not "checked and negative" - these layers don't
-  # have PAI3D's exhaustive-coverage guarantee, so no 3-state tag here.
   if (has_position_char_cmp) {
     base <- base %>%
       dplyr::left_join(
-        position_char_cmp_df %>% dplyr::select(gene = Gene, Position, dplyr::any_of(c(
-          "pfam_domain", "pfam_clan", "ucr_region", "position_variability", "fubar_selection"))),
+        position_char_cmp_df %>%
+          dplyr::distinct(Gene, Position, .keep_all = TRUE) %>%
+          dplyr::select(gene = Gene, Position, dplyr::any_of(c(
+            "pfam_domain", "pfam_clan", "ucr_region", "position_variability", "fubar_selection"))),
         by = c("gene", "Position"))
   }
   for (.col in c("pfam_domain", "pfam_clan", "ucr_region", "position_variability", "fubar_selection")) {
@@ -1680,22 +1663,20 @@ build_interesting_positions <- function(direction) {
   all_positions <- base %>%
     dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, RER_dir, Accum_dir,
                                  CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig,
-                                 position_significant),
+                                 position_significant, position_significant_raw, position_significant_adj),
                                  ~ dplyr::coalesce(.x, FALSE)))
 
   out <- all_positions %>%
     dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | Accum_dir | RER_dir |
-                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig | position_significant)
+                  CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig |
+                  position_significant | position_significant_raw)
   if (nrow(out) == 0) return(out)
 
-  # Collapsible <details> rendering + grouped composite score, see
-  # build_interesting_genes() above (same four-family sum, "FADE_overlap"
-  # here vs "FADE_dir" there is the only difference). interesting_positions_tabs
-  # below must render this table with escape = FALSE.
   out <- out %>%
     .grouped_composite(fade_col = "FADE_overlap") %>%
     dplyr::mutate(
-      `Hypotheses`          = if ("supporting_hypotheses" %in% names(.)) .collapsible_list(supporting_hypotheses) else NA_character_,
+      `N Hypotheses`        = if ("n_hypotheses" %in% names(.)) as.integer(n_hypotheses) else NA_integer_,
+      `Hypotheses`          = if ("supporting_hypotheses" %in% names(.)) .collapsible_hypotheses(supporting_hypotheses) else "",
       `CAAS FCS term(s)`    = .collapsible_list(caas_fcs_terms),
       `RER FCS term(s)`     = .collapsible_list(rer_fcs_terms),
       `CAAS AMI desc(s)`    = .collapsible_list(caas_ami_desc),
@@ -1704,19 +1685,20 @@ build_interesting_positions <- function(direction) {
       `PE term(s)`          = .collapsible_list(pe_terms),
       `CAAS evidence`       = .evidence_badge(evidence_label_caas),
       `RER evidence`        = .evidence_badge(evidence_label_rer),
-      `Top support`         = if ("top_residue_support" %in% names(.)) top_residue_support else NA_character_,
-      `Bottom support`      = if ("bottom_residue_support" %in% names(.)) bottom_residue_support else NA_character_
+      `Top species residues`    = if ("top_species_residues" %in% names(.)) top_species_residues else NA_character_,
+      `Bottom species residues` = if ("bottom_species_residues" %in% names(.)) bottom_species_residues else NA_character_
     )
 
   out %>%
     dplyr::arrange(dplyr::desc(`Composite score`)) %>%
     dplyr::select(Gene = gene, Position, `CAAS Score` = CAAS_score,
-                  `Top/Bottom residues` = dplyr::any_of("derived_residues"),
-                  `Top support`, `Bottom support`,
-                  `N Hypotheses` = dplyr::any_of("n_hypotheses"),
+                  `Top species residues`, `Bottom species residues`,
+                  `N Hypotheses`,
                   `Hypotheses`,
                   `25%`, `10%`, `5%`, `1%`,
                   FADE_overlap, RER_acc, RER_decc, Accum_dir,
+                  `Pos sig (uncorrected)` = position_significant_raw,
+                  `Pos sig (adjusted)` = position_significant_adj,
                   position_significant,
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,

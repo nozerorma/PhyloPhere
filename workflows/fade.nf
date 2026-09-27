@@ -76,8 +76,10 @@ workflow FADE {
         assert params.fade_background_scope in ['all', 'opposite'] :
             "fade_background_scope must be 'all' or 'opposite' (got: ${params.fade_background_scope})"
 
-        // ── LG model dat file ────────────────────────────────────────────────
-        def lg_dat_ch = Channel.value(file(params.lg_dat_path))
+        // ── Model dat file ───────────────────────────────────────────────────
+        def model_name = (params.fade_model ?: 'LG').toLowerCase()
+        def model_dat_file = params.lg_dat_path ?: "${projectDir}/subworkflows/SELECTION/local/dat/${model_name}.dat"
+        def lg_dat_ch = Channel.value(file(model_dat_file))
 
         // ── Background-scope species file per direction ─────────────────────
         // 'opposite' restricts background to the other extreme group only

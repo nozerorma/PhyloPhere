@@ -11,11 +11,6 @@
  *   position_scores      : path — position_scores.tsv
  *   gene_scores          : path — gene_scores.tsv
  *   gene_correlations    : path — gene_correlations.tsv
- *   stress_summary       : path — position_score_stress_summary.tsv (or NO_SCORING_STRESS_SUMMARY sentinel)
- *   stress_correlations  : path — position_score_stress_correlations.tsv (or NO_SCORING_STRESS_CORR sentinel)
- *   stress_rank_agreement: path — position_score_stress_rank_agreement.tsv (or NO_SCORING_STRESS_RANK sentinel)
- *   stress_top_overlap   : path — position_score_stress_top_overlap.tsv (or NO_SCORING_STRESS_OVERLAP sentinel)
- *   stress_variants      : path — position_score_stress_variants.tsv (or NO_SCORING_STRESS_VARIANTS sentinel)
  *   fade_site_top_file   : path — per-site FADE BF TSV top direction (or NO_FADE_SITE_TOP sentinel)
  *   fade_site_bot_file   : path — per-site FADE BF TSV bottom direction (or NO_FADE_SITE_BOT sentinel)
  *   genomic_info         : path — gene genomic coords TSV (or NO_GENOMIC_INFO sentinel)
@@ -40,22 +35,14 @@ process SCORING_REPORT {
     path position_scores
     path gene_scores
     path gene_correlations
-    path stress_summary
-    path stress_correlations
-    path stress_rank_agreement
-    path stress_top_overlap
-    path stress_variants
     path fade_site_top_file  // optional: per-site FADE BF TSV top direction  (NO_FADE_SITE sentinel when absent)
     path fade_site_bot_file  // optional: per-site FADE BF TSV bottom direction (NO_FADE_SITE sentinel when absent)
     path genomic_info        // optional: gene genomic coords TSV (NO_GENOMIC_INFO sentinel when absent)
     path caas_perms          // optional: CAAS permulation RDS (asr + caas null) (NO_FILE/NO_CAAS_PERMS sentinel when absent)
-    path caas_pos_pval       // optional: pos_perm_p per (gene,position,scheme) (NO_CAAS_POS_PVAL sentinel)
     path caas_pos_sample     // optional: cycle-stratified per-scheme sample for distribution plots (NO_CAAS_POS_SAMPLE sentinel)
     path caas_pos_quantiles  // optional: per (cycle,scheme) null distribution shape (NO_CAAS_POS_QUANTILES sentinel)
     path filtered_discovery  // observed per-(gene,position,scheme) asr_path_score (filtered_discovery.tsv) for the null overlay
     path background_file
-    path caas_pos_detail          // optional: perm_pos_detail/ shard dir (or legacy .tsv.gz) — FPR calibration figure (NO_CAAS_POS_DETAIL sentinel)
-    path caas_gene_cycle_scores   // optional: gene_cycle_scores.tsv — gene-level FPR calibration (NO_CAAS_GENE_CYCLE_SCORES sentinel)
 
     output:
     path "11.Scoring_report_${params.traitname ?: 'unknown_trait'}.html", emit: report
@@ -67,23 +54,15 @@ process SCORING_REPORT {
     def top_pct        = params.scoring_position_top_pct   ?: 0.10
     def g_top_pct      = params.scoring_gene_top_pct       ?: 0.10
     // Resolve optional sentinel files: pass 'NULL' (R NULL) when no real file is staged
-    def stress_summary_arg = (stress_summary.name =~ /^NO_SCORING_STRESS_SUMMARY/) ? 'NULL' : "'${stress_summary}'"
-    def stress_corr_arg = (stress_correlations.name =~ /^NO_SCORING_STRESS_CORR/) ? 'NULL' : "'${stress_correlations}'"
-    def stress_rank_arg = (stress_rank_agreement.name =~ /^NO_SCORING_STRESS_RANK/) ? 'NULL' : "'${stress_rank_agreement}'"
-    def stress_overlap_arg = (stress_top_overlap.name =~ /^NO_SCORING_STRESS_OVERLAP/) ? 'NULL' : "'${stress_top_overlap}'"
-    def stress_variants_arg = (stress_variants.name =~ /^NO_SCORING_STRESS_VARIANTS/) ? 'NULL' : "'${stress_variants}'"
     def fs_top_arg = (fade_site_top_file.name =~ /^NO_FADE_SITE_TOP/) ? 'NULL' : "'${fade_site_top_file}'"
     def fs_bot_arg = (fade_site_bot_file.name =~ /^NO_FADE_SITE_BOT/) ? 'NULL' : "'${fade_site_bot_file}'"
 
     def gi_arg  = (genomic_info.name  =~ /^NO_GENOMIC_INFO/)  ? 'NULL' : "'${genomic_info}'"
     def perms_arg = (caas_perms.name =~ /^NO_CAAS_PERMS|^NO_FILE/) ? 'NULL' : "'${caas_perms}'"
-    def pos_pval_arg = (caas_pos_pval.name =~ /^NO_CAAS_POS_PVAL|^NO_FILE/) ? 'NULL' : "'${caas_pos_pval}'"
     def pos_sample_arg = (caas_pos_sample.name =~ /^NO_CAAS_POS_SAMPLE|^NO_FILE/) ? 'NULL' : "'${caas_pos_sample}'"
     def pos_quantiles_arg = (caas_pos_quantiles.name =~ /^NO_CAAS_POS_QUANTILES|^NO_FILE/) ? 'NULL' : "'${caas_pos_quantiles}'"
     def filt_disc_arg = (filtered_discovery.name =~ /^NO_POSTPROC|^NO_FILE/) ? 'NULL' : "'${filtered_discovery}'"
     def bg_file_arg = (background_file.name =~ /^NO_BACKGROUND|^NO_FILE/) ? 'NULL' : "'${background_file}'"
-    def pos_detail_arg = (caas_pos_detail.name =~ /^NO_CAAS_POS_DETAIL|^NO_FILE/) ? 'NULL' : "'${caas_pos_detail}'"
-    def gcs_arg = (caas_gene_cycle_scores.name =~ /^NO_CAAS_GENE_CYCLE_SCORES|^NO_FILE/) ? 'NULL' : "'${caas_gene_cycle_scores}'"
     def win_size = params.scoring_window_size_bp ?: 1000000
 
     if (params.use_singularity || params.use_apptainer) {
@@ -101,24 +80,15 @@ process SCORING_REPORT {
                     output_dir           = '${outdir}',
                     top_pct              = ${top_pct},
                     gene_top_pct         = ${g_top_pct},
-                    stress_summary_file  = ${stress_summary_arg},
-                    stress_corr_file     = ${stress_corr_arg},
-                    stress_rank_file     = ${stress_rank_arg},
-                    stress_overlap_file  = ${stress_overlap_arg},
-                    stress_variants_file = ${stress_variants_arg},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     genomic_info_file    = ${gi_arg},
                     caas_perms_file      = ${perms_arg},
-                    caas_pos_pval_file   = ${pos_pval_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
                     caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
-                    caas_pos_detail_dir  = ${pos_detail_arg},
-                    caas_gene_cycle_scores_file = ${gcs_arg},
-                    scoring_pos_perm_p_thr = ${params.scoring_pos_perm_p_thr ?: 0.1},
-                    scoring_p_emp_thr    = ${params.scoring_p_emp_thr ?: 0.1},
+                    scoring_p_emp_thr    = ${params.scoring_p_emp_thr ?: 0.05},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'
@@ -142,24 +112,15 @@ process SCORING_REPORT {
                     output_dir           = '${outdir}',
                     top_pct              = ${top_pct},
                     gene_top_pct         = ${g_top_pct},
-                    stress_summary_file  = ${stress_summary_arg},
-                    stress_corr_file     = ${stress_corr_arg},
-                    stress_rank_file     = ${stress_rank_arg},
-                    stress_overlap_file  = ${stress_overlap_arg},
-                    stress_variants_file = ${stress_variants_arg},
                     fade_site_top_file   = ${fs_top_arg},
                     fade_site_bot_file   = ${fs_bot_arg},
                     genomic_info_file    = ${gi_arg},
                     caas_perms_file      = ${perms_arg},
-                    caas_pos_pval_file   = ${pos_pval_arg},
                     caas_pos_sample_file = ${pos_sample_arg},
                     caas_pos_quantiles_file = ${pos_quantiles_arg},
                     filtered_discovery_file = ${filt_disc_arg},
                     background_file      = ${bg_file_arg},
-                    caas_pos_detail_dir  = ${pos_detail_arg},
-                    caas_gene_cycle_scores_file = ${gcs_arg},
-                    scoring_pos_perm_p_thr = ${params.scoring_pos_perm_p_thr ?: 0.1},
-                    scoring_p_emp_thr    = ${params.scoring_p_emp_thr ?: 0.1},
+                    scoring_p_emp_thr    = ${params.scoring_p_emp_thr ?: 0.05},
                     window_size_bp       = ${win_size},
                     direction            = 'combined',
                     seed                 = '${params.seed ?: 1998}'

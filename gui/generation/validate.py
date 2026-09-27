@@ -186,9 +186,8 @@ def validate(project: ProjectConfig) -> list[str]:
 
     # --- Enrichment (+ POSENRICH) ---
     enrichment = project.modules.enrichment
-    # gmt_dir is no longer required: leaving it blank auto-fetches the default
-    # GO/Reactome/WikiPathways set (bin/resolve_gmts.py), falling back to the
-    # vendored copies in assets/gmt/ if offline.
+    # gmt_dir is no longer required: leaving it blank defaults to the curated
+    # GMT set in subworkflows/ENRICHMENT/dat/ (or auto-fetches via bin/resolve_gmts.py).
     if enrichment.posenrich_enabled:
         # cosmic_db and fubar_sites_file are NOT required: workflows/enrichment.nf
         # and subworkflows/ENRICHMENT/posenrich.nf both fall back to NO_FILE sentinels
@@ -232,16 +231,13 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("Runtime: alignment species names", runtime.ali_sp_names, "file"),
         ("Runtime: taxonomy ID mapping", runtime.tax_id_file, "file"),
         ("CAAS: config file", m.caas.caas_config_path, "file"),
-        ("CAAS: trait values file", m.caas.traitvalues, "file"),
         ("Disambiguation: ASR cache directory", m.disambiguation.ct_disambig_asr_cache_dir, "dir"),
         ("Accumulation: entropy directory", m.accumulation.accumulation_entropy_dir, "dir"),
         ("RERconverge: gene trees", m.rer.gene_trees, "file"),
         ("RERconverge: tested-gene universe file", m.rer.rer_universe_file, "file"),
         ("RERconverge: cross-module gene scores", m.rer.rer_gene_scores, "file"),
         ("FADE: custom fg/bg species file", m.fade.fade_species_file, "file"),
-        ("FADE: gene-set top genes", m.fade.fade_postproc_top, "file"),
-        ("FADE: gene-set bottom genes", m.fade.fade_postproc_bottom, "file"),
-        ("FADE: LG substitution matrix", m.fade.lg_dat_path, "file"),
+        ("FADE: Substitution matrix", m.fade.lg_dat_path, "file"),
         ("FADE: tested-gene universe file", m.fade.fade_universe_file, "file"),
         ("VEP: PrimateAI-3D database", m.vep.vep_primateai_db, "file"),
         ("VEP: MAP directory", m.vep.vep_map_dir, "dir"),

@@ -1,7 +1,7 @@
 """Amino-acid grouping schemes used for convergence typing.
 
 Definitions are aligned with the paired CAAP implementation in
-``subworkflows/CT/local/modules/caap_id.py`` and include:
+``subworkflows/CT/local/modules/caas_id.py`` and include:
 US, GS1, GS2, GS3, GS4.
 """
 

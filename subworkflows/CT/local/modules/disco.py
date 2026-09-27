@@ -109,88 +109,50 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
     results_to_write = []
     tested_positions = set()
 
-    # Step 5: extract the raw caas or caap
-    if caap_mode:
-        # Import caap_id module for CAAP mode
-        from modules.caap_id import fetch_caap
-        
-        # CAAP mode: detect property-based convergence
-        for position in processed_positions:
-            valid_traits = _valid_traits_for_position(
-                position,
-                trait_object.alltraits,
-                trait_object,
-                max_fg_gaps,
-                max_bg_gaps,
-                max_overall_gaps,
-                max_fg_miss,
-                max_bg_miss,
-                max_overall_miss,
-                miss_pair
-            )
-            if valid_traits:
-                tested_positions.add(position.position)
-            caap_results = fetch_caap( genename = p.genename,
-                        position_obj = position,
-                        trait_list = trait_object.alltraits,
-                        
-                        max_fg_gaps = int(max_fg_gaps) if max_fg_gaps != "NO" else 999999,
-                        max_bg_gaps = int(max_bg_gaps) if max_bg_gaps != "NO" else 999999,
-                        max_overall_gaps = int(max_overall_gaps) if max_overall_gaps != "NO" else 999999,
-                        
-                        max_fg_miss = int(max_fg_miss) if max_fg_miss != "NO" else 999999,
-                        max_bg_miss = int(max_bg_miss) if max_bg_miss != "NO" else 999999,
-                        max_overall_miss = int(max_overall_miss) if max_overall_miss != "NO" else 999999,
-                        
-                        output_file = None,  # Don't write yet
-                        miss_pair = miss_pair,
-                        max_conserved = max_conserved,
-                        species_in_alignment = p.species,
-                        allowed_patterns = admitted_patterns,
-                        multiconfig = trait_object,
-                        return_results = True  # Get results instead of writing
-                        )
-            if caap_results:
-                results_to_write.extend(caap_results)
-    else:
-        # CAAS mode: classical detection
-        for position in processed_positions:
-            valid_traits = _valid_traits_for_position(
-                position,
-                trait_object.alltraits,
-                trait_object,
-                max_fg_gaps,
-                max_bg_gaps,
-                max_overall_gaps,
-                max_fg_miss,
-                max_bg_miss,
-                max_overall_miss,
-                miss_pair
-            )
-            if valid_traits:
-                tested_positions.add(position.position)
-            caas_results = fetch_caas( p.genename,
-                        position,
-                        trait_object.alltraits,
+    # Step 5: extract convergent mutations/properties across selected schemes
+    # In caap_mode (default), all 5 schemes (US, GS1-GS4) are tested.
+    # When caap_mode is disabled, only the ungrouped scheme (US) is tested.
+    schemes_to_test = SCHEMES if caap_mode else {"US": US}
 
-                        maxgaps_bg= max_bg_gaps,
-                        maxgaps_fg= max_fg_gaps,
-                        maxgaps_all= max_overall_gaps,
+    for position in processed_positions:
+        valid_traits = _valid_traits_for_position(
+            position,
+            trait_object.alltraits,
+            trait_object,
+            max_fg_gaps,
+            max_bg_gaps,
+            max_overall_gaps,
+            max_fg_miss,
+            max_bg_miss,
+            max_overall_miss,
+            miss_pair
+        )
+        if valid_traits:
+            tested_positions.add(position.position)
+        caas_results = fetch_caas(
+            genename = p.genename,
+            position_obj = position,
+            trait_list = trait_object.alltraits,
 
-                        maxmiss_bg= max_bg_miss,
-                        maxmiss_fg= max_fg_miss,
-                        maxmiss_all= max_overall_miss,
-                        
-                        multiconfig= trait_object,
-                        miss_pair= miss_pair,
-                        max_conserved= max_conserved,
+            max_fg_gaps = int(max_fg_gaps) if max_fg_gaps != "NO" else 999999,
+            max_bg_gaps = int(max_bg_gaps) if max_bg_gaps != "NO" else 999999,
+            max_overall_gaps = int(max_overall_gaps) if max_overall_gaps != "NO" else 999999,
 
-                        admitted_patterns=admitted_patterns,
-                        output_file = None,  # Don't write yet
-                        return_results = True  # Get results instead of writing
-                        )
-            if caas_results:
-                results_to_write.extend(caas_results)
+            max_fg_miss = int(max_fg_miss) if max_fg_miss != "NO" else 999999,
+            max_bg_miss = int(max_bg_miss) if max_bg_miss != "NO" else 999999,
+            max_overall_miss = int(max_overall_miss) if max_overall_miss != "NO" else 999999,
+
+            output_file = None,
+            miss_pair = miss_pair,
+            max_conserved = max_conserved,
+            species_in_alignment = p.species,
+            admitted_patterns = admitted_patterns,
+            multiconfig = trait_object,
+            schemes = schemes_to_test,
+            return_results = True
+        )
+        if caas_results:
+            results_to_write.extend(caas_results)
     
     # Step 6: Write background coverage file (positions tested)
     if background_output_file:
@@ -207,46 +169,25 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
         if exists(output_file):
             os.system("rm -r " + output_file)
         
-        # Determine header based on mode
-        if caap_mode:
-            header_fields = [
-                "gene",
-                "mode",
-                "caap_group",
-                "trait",
-                "position",
-                "caas",
-                "amino_encoded",
-                "pattern",
-                "ffgn",
-                "fbgn",
-                "gfg",
-                "gbg",
-                "mfg",
-                "mbg",
-                "ffg",
-                "fbg",
-                "ms"
-            ]
-        else:
-            header_fields = [
-                "gene",
-                "mode",
-                "caap_group",
-                "trait",
-                "position",
-                "caas",
-                "pattern",
-                "ffgn",
-                "fbgn",
-                "gfg",
-                "gbg",
-                "mfg",
-                "mbg",
-                "ffg",
-                "fbg",
-                "ms"
-            ]
+        header_fields = [
+            "gene",
+            "mode",
+            "caap_group",
+            "trait",
+            "position",
+            "caas",
+            "amino_encoded",
+            "pattern",
+            "ffgn",
+            "fbgn",
+            "gfg",
+            "gbg",
+            "mfg",
+            "mbg",
+            "ffg",
+            "fbg",
+            "ms"
+        ]
         
         # Add conserved-pair columns when overlap tolerance is enabled
         if max_conserved > 0:
@@ -258,13 +199,6 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
         with open(output_file, "w") as outf:
             outf.write(header + "\n")
             for result_line in results_to_write:
-                if not caap_mode:
-                    fields = result_line.split("\t")
-                    if len(fields) >= 3 and fields[1] == "CAAS":
-                        # Avoid duplicating if already normalized
-                        if len(fields) < 4 or fields[2] not in ["US", "GS1", "GS2", "GS3", "GS4"]:
-                            fields.insert(2, "US")
-                            result_line = "\t".join(fields)
                 outf.write(result_line + "\n")
         
         print(f"Discovery complete: {len(results_to_write)} CAAS/CAAP found in {p.genename}")

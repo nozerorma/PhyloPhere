@@ -25,26 +25,17 @@ params:
   output_dir: "."
   top_pct: 0.10
   gene_top_pct: 0.10
-  stress_summary_file: NULL
-  stress_corr_file: NULL
-  stress_rank_file: NULL
-  stress_overlap_file: NULL
-  stress_variants_file: NULL
   fade_site_top_file: NULL
   fade_site_bot_file: NULL
   genomic_info_file: NULL
   caas_perms_file: NULL
-  caas_pos_pval_file: NULL
   caas_pos_sample_file: NULL
   caas_pos_quantiles_file: NULL
   filtered_discovery_file: NULL
   window_size_bp: 1000000
   direction: "combined"
   background_file: NULL
-  caas_pos_detail_dir: NULL
-  caas_gene_cycle_scores_file: NULL
-  scoring_pos_perm_p_thr: 0.1
-  scoring_p_emp_thr: 0.1
+  scoring_p_emp_thr: 0.05
   seed: "1998"
 ---
 
@@ -175,14 +166,8 @@ has_rer  <- "rer_min_pval"    %in% names(gene_df) && any(!is.na(gene_df$rer_min_
 
 .file_ok <- function(p) !is.null(p) && !is.na(p) && nchar(p) > 0 && file.exists(p)
 
-has_scoring_stress <- .file_ok(params$stress_summary_file) &&
-  .file_ok(params$stress_corr_file) &&
-  .file_ok(params$stress_rank_file) &&
-  .file_ok(params$stress_overlap_file) &&
-  .file_ok(params$stress_variants_file)
 has_genomic       <- .file_ok(params$genomic_info_file)
 has_perms         <- .file_ok(params$caas_perms_file)
-has_pos_pval      <- .file_ok(params$caas_pos_pval_file)      # pos_perm_p per (gene,position,scheme)
 has_filtered      <- .file_ok(params$filtered_discovery_file) # observed per-scheme asr_path_score
 # FADE site (position-level) data: use top direction if available, otherwise try bottom
 has_fade_pos      <- .file_ok(params$fade_site_top_file) || .file_ok(params$fade_site_bot_file)
@@ -249,25 +234,6 @@ if (has_perms) {
 
 scheme_levels <- c("US", "GS1", "GS2", "GS3", "GS4")
 
-# perm_pos_pval.tsv (small) - the detection-only decomposition of p.emp
-# (docs/scoring_v2_p_emp.md §7.3/§7.4): of the permuted-labeling cycles, how
-# many independently reproduced this exact CAAS, without the score gate.
-# pos_perm_p is the schema marker for the ranked scale.
-.unranked_perm_pval <- FALSE
-if (has_pos_pval) {
-  .pval_cols <- names(readr::read_tsv(params$caas_pos_pval_file, n_max = 0,
-                                      show_col_types = FALSE))
-  .unranked_perm_pval <- !("pos_perm_p" %in% .pval_cols)
-  if (.unranked_perm_pval) has_pos_pval <- FALSE   # same schema marker as above
-}
-if (has_pos_pval) {
-  perm_pos_pval <- readr::read_tsv(params$caas_pos_pval_file, show_col_types = FALSE) %>%
-    filter(caap_group %in% scheme_levels) %>%
-    mutate(caap_group = factor(caap_group, levels = scheme_levels))
-} else {
-  perm_pos_pval <- NULL
-}
-
 accum_scheme_info <- tibble(
   scheme = c("us", "gs4", "gs3", "gs2", "gs1"),
   label = c("US", "GS4", "GS3", "GS2", "GS1"),
@@ -277,20 +243,6 @@ accum_scheme_info <- tibble(
   weighted_col = paste0("accum_weighted_", c("us", "gs4", "gs3", "gs2", "gs1"))
 ) %>%
   filter(pval_col %in% names(gene_df))
-
-if (has_scoring_stress) {
-  stress_summary_df <- read_tsv(params$stress_summary_file, show_col_types = FALSE)
-  stress_corr_df <- read_tsv(params$stress_corr_file, show_col_types = FALSE)
-  stress_rank_df <- read_tsv(params$stress_rank_file, show_col_types = FALSE)
-  stress_overlap_df <- read_tsv(params$stress_overlap_file, show_col_types = FALSE)
-  stress_variants_df <- read_tsv(params$stress_variants_file, show_col_types = FALSE)
-} else {
-  stress_summary_df <- NULL
-  stress_corr_df <- NULL
-  stress_rank_df <- NULL
-  stress_overlap_df <- NULL
-  stress_variants_df <- NULL
-}
 
 # Thresholds
 top_pct   <- params$top_pct
@@ -440,11 +392,11 @@ CAAS Scoring combines a position's convergence and biochemical evidence into one
 ranked score, then rolls that up to a per-gene score comparable against
 independent evolutionary evidence.
 
-1. **Position score (`CAAS_score`)**: the mean of `asr_score` over
-   the biochemical schemes that detected the position. `asr_score` is the
-   CAAS convergence score on the pair's Voronoi domain (`core` v3): evidence that
-   the convergence reflects independent origins, not shared ancestry. See Scoring
-   Methodology below and the Biochemistry tab for how the schemes factor in.
+1. **Position score (`CAAS_score`)**: the CAAS convergence score on the pair's
+   Voronoi domain, averaged over the biochemical schemes that detected the
+   position. Evidence that the convergence reflects independent origins, not
+   shared ancestry. See Scoring Methodology below and the Biochemistry tab
+   for how the schemes factor in.
 
 2. **Gene score (`gene_caas_score_top` / `_bottom`)**: the gene's strongest
    position, adjusted for how many positions the gene has, so genes are not
@@ -594,22 +546,14 @@ direction) and `gene_caas_bot` (BOTTOM direction) independently.
 
 ## CAAS Permulation Null {.tabset}
 
-NOTE: This must be overhawled
+The permulation re-labels the phylogeny `N` times and re-runs discovery and ASR
+scoring under each null labeling. Each cycle is one complete null realisation:
+the positions it discovers are its candidate set, exactly as the real run's
+discovered set is the observed candidate set. The gene-level null and the
+position-level `p.emp` below are both built term-for-term like the observed
+pipeline, from the same `N` cycles.
 
-The permulation re-labels the phylogeny `N` times and re-runs discovery + ASR scoring
-under each null labeling. Each cycle is **one complete null realisation**: the positions
-that cycle discovered are its candidate set, exactly as the real run's discovered set is
-the observed candidate set. Both null quantities are built term-for-term like the
-observed pipeline:
-
-- **`asr_path_score`** - the permuted position-evolution signal (gene null = 0.90-quantile
-  over the gene's positions). This axis is not currently wired into any ranking; the
-  observed `gene_caas_score` now uses a size-adjusted max instead (see below).
-- **`CAAS_score`** = mean_scheme `asr_path_score` (T1: the permutation-rank
-  phenotype factor was dropped from both sides; the BOOTSTRAP/recovery_boot
-  null arm it came from has since been retired entirely).
-
-The formal per-pathway `p.perm` (asr axis) is in the companion **FCS** report.
+The formal per-pathway `p.perm` (ASR axis) is in the companion **FCS** report.
 
 ```{r perm-gene-obs-setup}
 dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
@@ -634,11 +578,6 @@ dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
   tidyr::pivot_longer(c(global, top, bottom), names_to = "direction", values_to = "value")
 .obs_gene_asr <- .obs_gene_asr_dist %>%
   group_by(direction) %>% summarise(obs_median = median(value, na.rm = TRUE), .groups = "drop")
-
-# caas_cs (caas_corStat_byrank) can be missing from caas_perms.rds even when the asr
-# null (asr_cs) is present - flag that separately so the CAAS-score tab can show a
-# warning instead of an empty plot.
-has_caas_null <- has_perms && !is.null(perm_null_gene) && any(perm_null_gene$metric == "caas_score", na.rm = TRUE)
 
 .gene_null_table <- function(metric_name, obs_df) {
   # Both metrics are exactly 0 whenever a permulated labeling produced zero
@@ -667,8 +606,10 @@ has_caas_null <- has_perms && !is.null(perm_null_gene) && any(perm_null_gene$met
 # `combined` must carry columns: grp (x axis), value, source in {"Null","Observed"}.
 .paired_violin <- function(combined, xlab, ylab, title, subtitle,
                            drop_zeros = TRUE) {
+  grp_levels <- if (is.factor(combined$grp)) levels(combined$grp) else unique(combined$grp)
   combined <- combined %>%
-    mutate(source = factor(source, levels = c("Null", "Observed"))) %>%
+    mutate(source = factor(source, levels = c("Null", "Observed")),
+           grp    = factor(grp, levels = grp_levels)) %>%
     filter(is.finite(value))
 
   # A violin's density estimate is dominated by any point mass at a boundary:
@@ -687,32 +628,98 @@ has_caas_null <- has_perms && !is.null(perm_null_gene) && any(perm_null_gene$met
     dat <- combined
   }
 
-  p <- ggplot(dat, aes(grp, value, fill = source)) +
-    geom_violin(scale = "width", alpha = .7, colour = "grey30",
-                position = position_dodge(width = 0.8)) +
-    scale_fill_manual(values = c(Null = "grey60", Observed = "#E15759"), name = NULL) +
+  dat_null <- dat %>% filter(source == "Null")
+  dat_obs  <- dat %>% filter(source == "Observed")
+
+  # Split observed by directions with >= 5 points (violin) vs < 5 points (dots)
+  obs_counts <- dat_obs %>% group_by(grp) %>% summarise(n = n(), .groups = "drop")
+  grp_violin <- obs_counts %>% filter(n >= 5) %>% pull(grp)
+  grp_points <- obs_counts %>% filter(n < 5)  %>% pull(grp)
+
+  dat_obs_violin <- dat_obs %>% filter(grp %in% grp_violin)
+  dat_obs_points <- dat_obs %>% filter(grp %in% grp_points)
+
+  p <- ggplot()
+
+  # 1. Null violins (always present from permulation null sample)
+  if (nrow(dat_null) > 0) {
+    p <- p + geom_violin(
+      data = dat_null,
+      aes(x = as.numeric(grp) - 0.2, y = value, group = grp, fill = "Null"),
+      width = 0.35, scale = "width", alpha = .7, colour = "grey30"
+    )
+  }
+
+  # 2. Observed violins (for directions with >= 5 points)
+  if (nrow(dat_obs_violin) > 0) {
+    p <- p + geom_violin(
+      data = dat_obs_violin,
+      aes(x = as.numeric(grp) + 0.2, y = value, group = grp, fill = "Observed"),
+      width = 0.35, scale = "width", alpha = .7, colour = "grey30"
+    )
+  }
+
+  # 3. Observed points (for directions with < 5 points, e.g. single-gene runs like PEPC)
+  if (nrow(dat_obs_points) > 0) {
+    has_multi <- any((dat_obs_points %>% count(grp))$n > 1)
+    if (has_multi) {
+      set.seed(42)
+      p <- p + geom_jitter(
+        data = dat_obs_points,
+        aes(x = as.numeric(grp) + 0.2, y = value, fill = "Observed"),
+        width = 0.08, height = 0, size = 3.5, shape = 21, stroke = 1.1, colour = "grey20"
+      )
+    } else {
+      p <- p + geom_point(
+        data = dat_obs_points,
+        aes(x = as.numeric(grp) + 0.2, y = value, fill = "Observed"),
+        size = 3.5, shape = 21, stroke = 1.1, colour = "grey20"
+      )
+    }
+  }
+
+  p <- p +
+    scale_fill_manual(
+      values = c(Null = "grey60", Observed = "#E15759"),
+      limits = c("Null", "Observed"),
+      name = NULL
+    ) +
+    scale_x_continuous(
+      breaks = seq_along(grp_levels),
+      labels = grp_levels,
+      limits = c(0.4, length(grp_levels) + 0.6)
+    ) +
     labs(title = title, subtitle = subtitle, x = xlab, y = ylab) +
     theme_minimal(base_size = 12) +
     theme(
       axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
       axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
-      axis.text.x  = element_text(margin = ggplot2::margin(t = 5))
+      axis.text.x  = element_text(margin = ggplot2::margin(t = 5)),
+      legend.position = "right"
     )
+
   if (!is.null(zero_frac)) {
-    p <- p + geom_text(data = zero_frac,
-                       aes(x = grp, y = -Inf, label = pct_zero, group = source),
-                       position = position_dodge(width = 0.8), vjust = -0.6,
-                       size = 3, colour = "grey40")
+    zero_frac <- zero_frac %>%
+      mutate(x_pos = as.numeric(factor(grp, levels = grp_levels)) + if_else(source == "Null", -0.2, 0.2))
+    p <- p + geom_text(
+      data = zero_frac,
+      aes(x = x_pos, y = -Inf, label = pct_zero),
+      vjust = -0.6, size = 3, colour = "grey40"
+    )
   }
   p
 }
 
-.gene_null_plot <- function(metric_name, obs_dist_df, ylab, title) {
+.gene_null_plot <- function(metric_name, obs_dist_df, ylab, title, show_observed = TRUE) {
   nd <- perm_null_gene %>% filter(metric == metric_name, is.finite(null_score)) %>%
     transmute(grp = as.character(direction), value = null_score, source = "Null")
-  od <- obs_dist_df %>% transmute(grp = as.character(direction), value, source = "Observed") %>%
-    filter(is.finite(value))
-  combined <- dplyr::bind_rows(nd, od) %>%
+  combined <- nd
+  if (show_observed) {
+    od <- obs_dist_df %>% transmute(grp = as.character(direction), value, source = "Observed") %>%
+      filter(is.finite(value))
+    combined <- dplyr::bind_rows(nd, od)
+  }
+  combined <- combined %>%
     mutate(grp = factor(grp, levels = c("global", "top", "bottom")))
 
   .paired_violin(
@@ -730,203 +737,54 @@ cat("**Observed statistics summary** (no permulation null to compare against):\n
 print(knitr::kable(
   dplyr::bind_rows(
     .obs_gene_caas %>% mutate(metric = "gene CAAS_score"),
-    .obs_gene_asr  %>% mutate(metric = "gene asr_path_score (q90 over positions)")
+    .obs_gene_asr  %>% mutate(metric = "gene CAAS Score (q90 over positions)")
   ) %>% dplyr::select(metric, direction, obs_median),
   digits = 4, caption = "Observed gene-level medians by direction"
 ))
 ```
 
-```{r gene-level-header, eval=has_perms, results='asis'}
-cat(r"(### Gene Level {.tabset}
-)")
-```
-
 ```{r caas-score-header, eval=has_perms, results='asis'}
-if (has_caas_null) cat("#### CAAS score\n\n")
-```
-
-```{r perm-gene-caas, eval=has_caas_null, fig.height=5, fig.width=10}
-knitr::kable(.gene_null_table("caas_score", .obs_gene_caas), digits = 4,
-  caption = sprintf("Gene-level null CAAS_score by direction (q90 over positions; %d genes × %d cycles). obs_median = observed gene CAAS_score.",
-                    perm_n_genes, perm_n_cycles))
-print(.gene_null_plot("caas_score", .obs_gene_caas_dist, "CAAS_score", "Gene-level null vs observed CAAS_score"))
-```
-
-```{r caas-null-missing, eval=has_perms && !has_caas_null, results='asis'}
-cat("#### CAAS score\n\n")
-cat("_CAAS score permulation null unavailable for this run (`caas_corStat_byrank` missing from `caas_perms.rds`)._\n\n")
-```
-
-```{r asr-score-header, eval=has_perms, results='asis'}
-cat("#### asr_path_score\n\n")
+cat("### CAAS Score\n\n")
 ```
 
 ```{r perm-gene-asr, eval=has_perms, fig.height=5, fig.width=10}
 knitr::kable(.gene_null_table("asr_path_score", .obs_gene_asr), digits = 4,
-  caption = "Gene-level null asr_path_score by direction (q90 over positions). obs_median = observed q90(asr_score).")
-print(.gene_null_plot("asr_path_score", .obs_gene_asr_dist, "asr_path_score (q90)", "Gene-level null vs observed asr_path_score"))
-```
-
-```{r fpr-calib-setup, include=FALSE}
-# ── FPR / threshold calibration (Tier 1C) ──────────────────────────────────
-# Two genome-wide count calibrations against the SAME permulation cycles as
-# the gene/position p.perm above, at NO extra ASR cost (reuses the already-
-# staged detail shards / gene_cycle_scores.tsv). This is a check on the
-# CURRENT thresholds only (caas_perms_postproc / gap_fraction / etc. as they
-# stood when the null was built) -- not a threshold sweep; a changed
-# postproc setting needs the null rebuilt, not just re-plotted.
-has_gcs         <- .file_ok(params$caas_gene_cycle_scores_file)
-has_pos_detail  <- .file_ok(params$caas_pos_detail_dir)
-
-# Position-level: per cycle, genome-wide count of distinct (Gene, Position,
-# caap_group) candidate triples. One shard == one gene, so "distinct
-# (Position, caap_group)" WITHIN a shard is already gene-disambiguated --
-# summing each shard's per-cycle counts gives the true genome-wide total
-# without ever holding more than one shard in memory at a time.
-.count_per_cycle_from_detail <- function(detail_path) {
-  shards <- if (dir.exists(detail_path)) {
-    sort(list.files(detail_path, pattern = "\\.tsv\\.gz$", full.names = TRUE))
-  } else {
-    detail_path
-  }
-  if (length(shards) == 0) return(tibble::tibble(cycle = character(), n_triples = integer()))
-  per_shard <- vector("list", length(shards))
-  for (i in seq_along(shards)) {
-    df <- tryCatch(
-      readr::read_tsv(shards[i],
-        col_types = readr::cols_only(cycle = "c", Position = "i", caap_group = "c"),
-        show_col_types = FALSE),
-      error = function(e) NULL)
-    per_shard[[i]] <- if (is.null(df) || nrow(df) == 0) NULL else
-      df %>% dplyr::distinct(cycle, Position, caap_group) %>% dplyr::count(cycle, name = "n")
-  }
-  dplyr::bind_rows(per_shard) %>% dplyr::group_by(cycle) %>%
-    dplyr::summarise(n_triples = sum(n), .groups = "drop")
-}
-
-if (has_pos_detail) {
-  pos_cycle_counts <- .count_per_cycle_from_detail(params$caas_pos_detail_dir)
-  obs_pos_triples <- if (has_filtered) {
-    readr::read_tsv(params$filtered_discovery_file, show_col_types = FALSE) %>%
-      dplyr::distinct(Gene, Position, caap_group) %>% nrow()
-  } else NA_integer_
-  pos_calib_p <- if (nrow(pos_cycle_counts) > 0 && !is.na(obs_pos_triples)) {
-    (sum(pos_cycle_counts$n_triples >= obs_pos_triples) + 1) / (nrow(pos_cycle_counts) + 1)
-  } else NA_real_
-} else {
-  pos_cycle_counts <- tibble::tibble(cycle = character(), n_triples = integer())
-  obs_pos_triples <- NA_integer_
-  pos_calib_p <- NA_real_
-}
-
-# Gene-level: per cycle, count of genes with a nonzero global_caas hit
-# (gene_wrapper.py writes an explicit 0.0 row for a cycle that scored
-# nothing, so this is a real "no hit" count, not missing data).
-if (has_gcs) {
-  gcs_raw <- readr::read_tsv(params$caas_gene_cycle_scores_file, show_col_types = FALSE)
-  gene_cycle_counts <- gcs_raw %>% dplyr::group_by(cycle) %>%
-    dplyr::summarise(n_genes_hit = sum(global_caas > 0, na.rm = TRUE), .groups = "drop")
-  obs_genes_hit <- sum(gene_df$gene_caas_score > 0, na.rm = TRUE)
-  gene_calib_p <- if (nrow(gene_cycle_counts) > 0) {
-    (sum(gene_cycle_counts$n_genes_hit >= obs_genes_hit) + 1) / (nrow(gene_cycle_counts) + 1)
-  } else NA_real_
-} else {
-  gene_cycle_counts <- tibble::tibble(cycle = character(), n_genes_hit = integer())
-  obs_genes_hit <- NA_integer_
-  gene_calib_p <- NA_real_
-}
-
-.calib_hist <- function(counts_df, count_col, obs_val, xlab, title) {
-  ggplot(counts_df, aes(x = .data[[count_col]])) +
-    geom_histogram(bins = min(40, max(5, length(unique(counts_df[[count_col]])))),
-                    fill = "grey60", colour = "grey30") +
-    { if (is.finite(obs_val)) geom_vline(xintercept = obs_val, colour = "#E15759", linewidth = 1) } +
-    labs(title = title, x = xlab, y = sprintf("cycles (N=%d)", nrow(counts_df)),
-         subtitle = if (is.finite(obs_val)) sprintf("Observed = %s (red line)", format(obs_val, big.mark = ",")) else NULL) +
-    theme_minimal(base_size = 12)
-}
-```
-
-```{r fpr-calib-header, eval=has_gcs || has_pos_detail, results='asis'}
-cat("#### FPR calibration\n\n")
-cat("How large would the observed genome-wide CAAS discovery look if it were pure",
-    "phenotype-tree-confound noise? Each histogram is the genome-wide count over",
-    sprintf("N=%d permuted-labeling cycles", max(nrow(pos_cycle_counts), nrow(gene_cycle_counts))),
-    "at the SAME thresholds this run used; the red line is the observed count.",
-    "This calibrates the current thresholds only -- it is not a threshold sweep,",
-    "and if `--caas_perms_postproc` differed between when this null was built and",
-    "this run's `filtered_discovery.tsv`, the two sides are not distribution-matched",
-    "and this figure should not be read literally (rebuild the null instead).\n\n")
-```
-
-```{r fpr-calib-pos, eval=has_pos_detail, results='asis', fig.height=4.5, fig.width=9}
-if (nrow(pos_cycle_counts) > 0) {
-  cat(sprintf("**Position-level** (Gene, Position, scheme) candidate triples per cycle. p = %s\n\n",
-              if (is.na(pos_calib_p)) "NA (no `filtered_discovery.tsv` to compare against)" else sprintf("%.4g", pos_calib_p)))
-  print(.calib_hist(pos_cycle_counts, "n_triples", obs_pos_triples,
-                     "Genome-wide candidate triples / cycle",
-                     "Position-level FPR calibration"))
-} else {
-  cat("_No cycles recovered from `perm_pos_detail`._\n\n")
-}
-```
-
-```{r fpr-calib-gene, eval=has_gcs, results='asis', fig.height=4.5, fig.width=9}
-if (nrow(gene_cycle_counts) > 0) {
-  cat(sprintf("**Gene-level** genes with a nonzero CAAS hit per cycle. p = %s\n\n",
-              if (is.na(gene_calib_p)) "NA" else sprintf("%.4g", gene_calib_p)))
-  print(.calib_hist(gene_cycle_counts, "n_genes_hit", obs_genes_hit,
-                     "Genes with CAAS_score > 0 / cycle",
-                     "Gene-level FPR calibration"))
-} else {
-  cat("_No cycles recovered from `gene_cycle_scores.tsv`._\n\n")
-}
-```
-
-```{r fpr-calib-missing, eval=!has_gcs && !has_pos_detail, results='asis'}
-cat("#### FPR calibration\n\n")
-cat("_Neither `perm_pos_detail` nor `gene_cycle_scores.tsv` was supplied to this run",
-    "(pass `--caas_pos_detail_file` / `--caas_gene_cycle_scores_file`, or rerun with",
-    "`--caas_permulation_enrichment`)._\n\n")
+  caption = "Gene-level null CAAS Score by direction (q90 over positions). obs_median = observed q90(CAAS Score).")
+print(.gene_null_plot("asr_path_score", .obs_gene_asr_dist, "CAAS Score (q90)",
+                       "Gene-level CAAS Score (Observed vs Null)", show_observed = TRUE))
 ```
 
 ```{r pos-perm-p-setup}
-# §7.3 flip (docs/scoring_v2_p_emp.md): p.emp / p.emp_adj are the position
-# headline -- the "detects AND exceeds score" permulation p, pooled to
-# (Gene, Position) over the max-over-sides axis. scoring_compute.R §2f-ter/§2h
-# writes both into position_scores.tsv whenever --caas_pos_cycle_caas is set.
-# pos_perm_p (detection only) is no longer in position_scores.tsv; it stays
-# canonical in perm_pos_pval.tsv and is shown below purely as the apples-to-
-# apples decomposition of p.emp (k_emp <= k_det, so p.emp <= pos_perm_p always).
+# p.emp / p.emp_adj are the sole position-level permulation p: the "detects
+# AND exceeds score" permulation p, pooled to (Gene, Position) over the
+# max-over-sides axis. scoring_compute.R writes both into position_scores.tsv
+# whenever --caas_pos_cycle_caas is set. scoring_p_emp_thr also gates
+# gene_caas_pperm_adj and the significance report, so it is one parameter
+# across all three.
 has_p_emp <- "p.emp" %in% names(pos_df) && any(!is.na(pos_df$p.emp))
 p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
-if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.1
-pos_perm_p_thr <- suppressWarnings(as.numeric(params$scoring_pos_perm_p_thr))
-if (!is.finite(pos_perm_p_thr) || pos_perm_p_thr <= 0 || pos_perm_p_thr > 1) pos_perm_p_thr <- 0.1
-
-# Diagnostic pos_perm_p, straight from perm_pos_pval.tsv (per Gene x Position x
-# scheme), BH-adjusted within the tested set here (it is not adjusted upstream
-# any more). NULL when --caas_pos_pval was not supplied.
-pos_perm_p_diag <- NULL
-if (has_pos_pval && !is.null(perm_pos_pval) && "pos_perm_p" %in% names(perm_pos_pval)) {
-  pos_perm_p_diag <- perm_pos_pval %>%
-    filter(!is.na(pos_perm_p)) %>%
-    mutate(pos_perm_p_adj = p.adjust(pos_perm_p, method = "BH"))
-}
+if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.05
 ```
 
 ```{r p-emp-header, eval=has_p_emp, results='asis'}
-cat("#### Position-level headline p: `p.emp`\n\n")
+cat("### p.emp\n\n")
+n_val <- sum(!is.na(pos_df$p.emp))
+n_tot <- nrow(pos_df)
+n_sig_raw <- sum(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
+pct_sig_raw <- 100 * mean(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
+n_sig_adj <- sum(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE)
+pct_sig_adj <- 100 * mean(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE)
+
 cat(sprintf(paste0(
   "`p.emp` counts the permuted-labeling cycles that BOTH re-detect the position ",
   "(on either phenotype side) AND match or beat its observed `CAAS_score`, add-one ",
-  "smoothed over N cycles. `p.emp_adj` is its BH adjustment within the tested set. ",
-  "%d/%d scored position-rows have a value; %d (%.1f%%) are significant at ",
-  "`p.emp_adj <= %.3g`.\n\n"),
-  sum(!is.na(pos_df$p.emp)), nrow(pos_df),
-  sum(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE),
-  100 * mean(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE),
-  p_emp_thr))
+  "smoothed over N cycles. `p.emp_adj` is its BH adjustment within the tested set.\n\n",
+  "- **Scored positions with p.emp**: %d/%d (%.1f%%)\n",
+  "- **Significant at uncorrected p.emp <= %.3g**: %d/%d (%.1f%%)\n",
+  "- **Significant at BH-adjusted p.emp_adj <= %.3g**: %d/%d (%.1f%%)\n\n"),
+  n_val, n_tot, 100 * n_val / max(1, n_tot),
+  p_emp_thr, n_sig_raw, n_tot, pct_sig_raw,
+  p_emp_thr, n_sig_adj, n_tot, pct_sig_adj))
 ```
 
 ```{r p-emp-dist, eval=has_p_emp, fig.height=4.5, fig.width=9}
@@ -934,36 +792,14 @@ ggplot(pos_df %>% filter(!is.na(p.emp)), aes(x = p.emp)) +
   geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
   geom_vline(xintercept = p_emp_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
   labs(title = "p.emp distribution across scored positions",
-       subtitle = sprintf("Dashed line: p.emp_adj threshold = %.3g. Under a null phenotype this should be ~uniform.", p_emp_thr),
+       subtitle = sprintf("Dashed line: uncorrected p.emp threshold = %.3g (%d positions significant; %d significant after BH adjustment).",
+                          p_emp_thr, n_sig_raw, n_sig_adj),
        x = "p.emp", y = "positions") +
   theme_minimal(base_size = 12)
 ```
 
-```{r pos-perm-p-header, eval=!is.null(pos_perm_p_diag), results='asis'}
-cat("#### Detection-only decomposition: `pos_perm_p` (diagnostic)\n\n")
-cat(sprintf(paste0(
-  "`pos_perm_p` (from `perm_pos_pval.tsv`, per Gene x Position x scheme) is the ",
-  "detection-only companion: of the permuted-labeling cycles, how many independently ",
-  "reproduced this exact CAAS, add-one smoothed, WITHOUT the score gate. Since ",
-  "`k_emp <= k_det`, `p.emp <= pos_perm_p` always -- a position significant on `p.emp` ",
-  "but not here is significant by score alone (a calibration caveat, not a second ",
-  "channel). %d/%d rows significant at `pos_perm_p_adj <= %.3g`.\n\n"),
-  sum(pos_perm_p_diag$pos_perm_p_adj <= pos_perm_p_thr, na.rm = TRUE),
-  nrow(pos_perm_p_diag), pos_perm_p_thr))
-```
-
-```{r pos-perm-p-dist, eval=!is.null(pos_perm_p_diag), fig.height=4.5, fig.width=9}
-ggplot(pos_perm_p_diag, aes(x = pos_perm_p)) +
-  geom_histogram(bins = 40, fill = "grey70", colour = "grey40") +
-  geom_vline(xintercept = pos_perm_p_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
-  labs(title = "pos_perm_p distribution (detection only)",
-       subtitle = sprintf("Dashed line: pos_perm_p_adj threshold = %.3g", pos_perm_p_thr),
-       x = "pos_perm_p", y = "Gene x Position x scheme rows") +
-  theme_minimal(base_size = 12)
-```
-
 ```{r p-emp-missing, eval=!has_p_emp, results='asis'}
-cat("#### Position-level headline p: `p.emp`\n\n")
+cat("### p.emp\n\n")
 cat("_No `p.emp` column in `position_scores.tsv` (no `--caas_pos_cycle_caas` supplied to",
     "SCORING_COMPUTE for this run)._\n\n")
 ```
@@ -1034,28 +870,6 @@ p_combined <- ggplot(pos_df, aes(x = CAAS_score)) +
 print(p_combined)
 ```
 
-### Score axis
-
-The single axis `CAAS_score` is built from: `asr_score`, the Voronoi-domain
-convergence score (`core` v3). Its per-domain build-up is not shown here.
-
-```{r score-axes-dist, fig.height=9}
-.axis_plot <- function(col, title, subtitle, fill, line) {
-  if (!col %in% names(pos_df)) return(NULL)
-  ggplot(pos_df, aes(x = .data[[col]])) +
-    geom_histogram(aes(y = after_stat(density)), bins = 30, fill = fill, alpha = 0.7) +
-    geom_density(linewidth = 0.8, colour = line) +
-    labs(title = title, subtitle = subtitle, x = col, y = "Density") +
-    theme(plot.title = element_text(face = "bold"))
-}
-.axis_plots <- Filter(Negate(is.null), list(
-  .axis_plot("asr_score", "ASR Path Score (position evolution)",
-             "Voronoi-domain convergence score (core v3)",
-             .tableau10[3], .tableau10[4])
-))
-if (length(.axis_plots)) gridExtra::grid.arrange(grobs = .axis_plots, ncol = 1)
-```
-
 ### Biochemistry
 
 Every candidate substitution is tested against five schemes: `US` (exact amino
@@ -1120,7 +934,7 @@ if ("scheme_set" %in% names(pos_df) && any(!is.na(pos_df$scheme_set))) {
 ```
 
 ```{r biochem-group-size, echo=FALSE, fig.width=11, fig.height=4.5, warning=FALSE, message=FALSE}
-# Group definitions mirror src/biochem/grouping.py / CT/local/modules/caap_id.py.
+# Group definitions mirror src/biochem/grouping.py / CT/local/modules/caas_id.py.
 .aa_groups <- list(
   GS1 = list("CV", "AGPS", "NDQE", "RHK", "ILMFWY", "T"),
   GS2 = list("C", "AGV", "DE", "NQHW", "RK", "ILFP", "YMTS"),
@@ -1176,85 +990,6 @@ if (!is.null(.fd) && all(c("caap_group", "all_mrca_state", "Gene", "Position") %
 } else {
   cat("_filtered_discovery with `all_mrca_state` not available; skipping the group-size diagnostic._\n")
 }
-```
-
-### Stress Test
-
-`r if (!has_scoring_stress) "> **Note:** scoring stress-test outputs are not available for this run."`
-
-The two-factor (`phen_score` x `asr_score`) sensitivity variants this tab used
-to report were retired alongside `phen_score` itself (BOOTSTRAP/recovery_boot
-arm retirement) -- `caas_row` has had a single factor (`asr_score`) since T1,
-leaving nothing left to stress-test a decomposition against.
-`scoring_compute.R` no longer emits `position_score_stress_*.tsv`, so this tab
-is always empty going forward.
-
-```{r stress-summary-table, eval=has_scoring_stress}
-DT::datatable(
-  stress_summary_df %>%
-    arrange(desc(spearman_to_current), mean_abs_rank_shift) %>%
-    mutate(across(where(is.numeric), ~round(., 4))),
-  rownames = FALSE,
-  options = list(pageLength = 20, scrollX = TRUE),
-  caption = htmltools::tags$caption(
-    style = "caption-side: top; text-align: left; font-weight: bold;",
-    "Assumption sensitivity summary for alternative position-level score variants"
-  )
-)
-```
-
-### Top Positions
-
-**Reading the scheme / hypothesis / support columns** — these describe *different*
-things and are not expected to agree:
-
-| column | question it answers | stage |
-|---|---|---|
-| `n_schemes` / `scheme_set` | which AA-grouping schemes **discovery** emitted a row for (US = exact identity, GS1–4 = physico-chemical classes) | CAAStools discovery |
-| `n_hypotheses` / `participating_hypotheses` | how many independent FOP contrast-pair samplings (H1..Hn) recovered this position (`participating_hypotheses` is side-specific: only hypotheses that drove a changed domain on this side) | FOP mirror |
-| `top_residue_support` / `bottom_residue_support` | how many distinct CAAS contrast **pairs** carry each residue on that side — bounded by the contrast's pair count (~2–5), so small by design | descriptor |
-| `*_residue_support_detail` | same but counting distinct reconstructed ancestral **nodes** across all hypotheses (finer, inflated by hypothesis count) | descriptor |
-| `top_species_residues` / `bottom_species_residues` | the residues actually carried by the **foreground / background contrast species** at this alignment column, `AA:count` (e.g. `N:15,A:8` = 15 of the foreground species have Asn) — the "X of N species" check, hypothesis-independent | alignment tally |
-| `n_top_species` / `n_bottom_species` | foreground / background contrast species with a non-gap residue here | alignment tally |
-
-```{r top-positions-table}
-# Score axis first, then the gate tiers, then supplementary diagnostics.
-# any_of() keeps this robust to absent columns.
-display_cols <- c("Gene", "Position", "CAAS_score",
-                  "asr_score", "asr_path_score",
-                  "n_schemes", "scheme_set",
-                  # how many FOP hypotheses (H1..Hn) recovered this position, and which
-                  "n_hypotheses", "participating_hypotheses",
-                  "side",
-                  # raw-AA descriptors (position-level, from position_scores.tsv).
-                  # *_support = distinct CAAS contrast pairs carrying the residue
-                  # (the actual support); *_support_detail = distinct reconstructed
-                  # ancestral nodes across hypotheses (finer, hypothesis-inflated).
-                  "derived_residues", "top_residue_support", "bottom_residue_support",
-                  "top_residue_support_detail", "bottom_residue_support_detail",
-                  # extant-species tally: actual residues carried by the fg/bg
-                  # contrast species at this column ("X of N species")
-                  "top_species_residues", "bottom_species_residues",
-                  "n_top_species", "n_bottom_species",
-                  "is_top_10pct", "is_top_5pct", "is_top_1pct",
-                  "is_bot_10pct", "is_bot_5pct", "is_bot_1pct")
-
-pos_df_top_tier <- .top_tier_filter(pos_df, c("is_top_10pct", "is_bot_10pct"))
-
-DT::datatable(
-  pos_df_top_tier %>%
-    arrange(desc(CAAS_score)) %>%
-    select(any_of(display_cols)) %>%
-    mutate(across(where(is.numeric), ~round(., 4))),
-  filter    = "top",
-  rownames  = FALSE,
-  options   = list(pageLength = 25, scrollX = TRUE),
-  caption   = htmltools::tags$caption(
-    style = "caption-side: top; text-align: left; font-weight: bold;",
-    sprintf("Position-level CAAS scores, top/bottom %.0f%% by tier | Trait: %s | %d of %d scored positions shown (full table in position_scores.tsv)",
-            top_pct * 100, params$traitname, nrow(pos_df_top_tier), nrow(pos_df))
-  )
-)
 ```
 
 ### CAAS Score Manhattan (Position Level)
@@ -1376,48 +1111,17 @@ gridExtra::grid.arrange(
 )
 ```
 
-### Score axis
-
-```{r dir-score-axis-dist, fig.height=9}
-make_dir_component_plot <- function(df, col, dir_label, colour) {
-  if (!col %in% names(df)) return(NULL)
-  ggplot(df, aes(x = .data[[col]])) +
-    geom_histogram(aes(y = after_stat(density)), bins = 40, fill = colour, alpha = 0.65) +
-    geom_density(linewidth = 0.8, colour = colour) +
-    labs(title    = sprintf("%s - %s", col, dir_label),
-         subtitle = sprintf("n = %s positions", format(nrow(df), big.mark = ",")),
-         x = col, y = "Density") +
-    theme(plot.title = element_text(face = "bold", size = 10))
-}
-
-dir_axis_plots <- Filter(Negate(is.null), list(
-  make_dir_component_plot(pos_top,    "asr_score",  "TOP",    .tableau10[5]),
-  make_dir_component_plot(pos_bottom, "asr_score",  "BOTTOM", .tableau10[7])
-))
-if (length(dir_axis_plots)) {
-  gridExtra::grid.arrange(
-    grobs = dir_axis_plots, ncol = 2,
-    top = grid::textGrob(
-      "Score axis distribution by direction: ASR path score",
-      gp = grid::gpar(fontface = "bold", fontsize = 12)
-    )
-  )
-}
-```
-
 ### Top Positions by Direction
 
 ```{r dir-top-positions-table}
 has_caas_col <- "caas" %in% names(pos_df)
 
 dir_display_cols <- c("Gene", "Position", "CAAS_score",
-                      "asr_score", "asr_path_score",
                       if (has_caas_col) "caas",
                       "n_schemes", "scheme_set",
                       "n_hypotheses", "participating_hypotheses",
                       "side",
-                      "derived_residues", "top_residue_support", "bottom_residue_support",
-                      "top_residue_support_detail", "bottom_residue_support_detail",
+                      "derived_residues",
                       "top_species_residues", "bottom_species_residues",
                       "n_top_species", "n_bottom_species",
                       "is_top_10pct", "is_top_5pct", "is_top_1pct",
@@ -1644,10 +1348,15 @@ has_fade_bot <- !is.null(pos_fade_bot) && any(pos_fade_bot$fade_sig, na.rm = TRU
 has_fade_any <- has_fade_top || has_fade_bot
 
 # Helper: draw 2-set Venn diagram using base ggplot2 (no extra packages).
-# Circle labels are placed outside and above each circle to avoid overlapping
-# with the count annotations inside.
+# Circle labels are placed below each circle to avoid overlapping with count annotations.
 .draw_venn2 <- function(n_only_A, n_only_B, n_AB, n_universe,
                          label_A, label_B, title_str) {
+  # Clean tags if direction or "only" is appended
+  clean_A <- sub("\\s*\\((top|bottom|trait)\\)$", "", label_A, ignore.case = TRUE)
+  clean_A <- sub("\\s*only$", "", clean_A, ignore.case = TRUE)
+  clean_B <- sub("\\s*\\((top|bottom|trait)\\)$", "", label_B, ignore.case = TRUE)
+  clean_B <- sub("\\s*only$", "", clean_B, ignore.case = TRUE)
+
   theta <- seq(0, 2 * pi, length.out = 300)
   r <- 1.7; dx <- 1.05
   ciA <- data.frame(x = -dx + r * cos(theta), y = r * sin(theta))
@@ -1657,24 +1366,26 @@ has_fade_any <- has_fade_top || has_fade_bot
     geom_polygon(data = ciB, aes(x, y), fill = .tableau10[3], alpha = 0.22, colour = NA) +
     geom_path(data = ciA, aes(x, y), colour = .tableau10[1], linewidth = 1.4) +
     geom_path(data = ciB, aes(x, y), colour = .tableau10[3], linewidth = 1.4) +
-    annotate("text", x = -2.6, y = 0,
-             label = paste0(label_A, " only\n", scales::comma(n_only_A)),
-             size = 4.2, colour = .tableau10[1], fontface = "bold") +
+    # Counts inside the circles
+    annotate("text", x = -1.8, y = 0,
+             label = scales::comma(n_only_A),
+             size = 6, colour = .tableau10[1], fontface = "bold") +
     annotate("text", x = 0, y = 0,
              label = paste0("Both\n", scales::comma(n_AB)),
-             size = 4.2, colour = "grey20", fontface = "bold") +
-    annotate("text", x = 2.6, y = 0,
-             label = paste0(label_B, " only\n", scales::comma(n_only_B)),
-             size = 4.2, colour = .tableau10[3], fontface = "bold") +
-    # Circle titles: pushed to x = -3.5 and +3.5 (outside the overlap zone)
-    annotate("text", x = -3.5, y = 2.8, label = label_A, size = 4.5,
+             size = 4.8, colour = "grey20", fontface = "bold") +
+    annotate("text", x = 1.8, y = 0,
+             label = scales::comma(n_only_B),
+             size = 6, colour = .tableau10[3], fontface = "bold") +
+    # Circle tags placed below each circle
+    annotate("text", x = -1.5, y = -2.15, label = clean_A, size = 4.5,
              colour = .tableau10[1], fontface = "bold", hjust = 0.5) +
-    annotate("text", x =  3.5, y = 2.8, label = label_B, size = 4.5,
+    annotate("text", x =  1.5, y = -2.15, label = clean_B, size = 4.5,
              colour = .tableau10[3], fontface = "bold", hjust = 0.5) +
-    annotate("text", x = 0, y = -2.6,
+    # Universe below tags
+    annotate("text", x = 0, y = -2.85,
              label = sprintf("Universe: %s positions", scales::comma(n_universe)),
              size = 3.5, colour = "grey50") +
-    coord_fixed(xlim = c(-5.5, 5.5), ylim = c(-3.2, 3.5)) +
+    coord_fixed(xlim = c(-4.5, 4.5), ylim = c(-3.2, 2.2)) +
     labs(title = title_str) +
     theme_void() +
     theme(plot.title = element_text(face = "bold", hjust = 0, size = 12, margin = ggplot2::margin(b = 6)))
@@ -1712,14 +1423,14 @@ venn_plots <- list()
 if (!is.null(vc_top)) {
   venn_plots[["top"]] <- .draw_venn2(
     vc_top$n_only_A, vc_top$n_only_B, vc_top$n_AB, vc_top$n_universe,
-    "CAAS (top)", "FADE BF\u2265100 (top)",
+    "CAAS", "FADE BF\u2265100",
     "TOP direction: CAAS vs FADE-significant positions"
   )
 }
 if (!is.null(vc_bot)) {
   venn_plots[["bot"]] <- .draw_venn2(
     vc_bot$n_only_A, vc_bot$n_only_B, vc_bot$n_AB, vc_bot$n_universe,
-    "CAAS (bottom)", "FADE BF\u2265100 (bottom)",
+    "CAAS", "FADE BF\u2265100",
     "BOTTOM direction: CAAS vs FADE-significant positions"
   )
 }
@@ -2167,7 +1878,7 @@ matches or exceeds this gene's observed `gene_caas_score`), `gene_caas_pperm_adj
 its BH adjustment across genes. At the pipeline's typical
 `caas_full_perms` this floors around 1/(N+1) (~1e-3 at N=1000), so treat it as a
 **prioritisation** signal with FDR context, not by itself a genome-wide-significant
-call — a gene at the floor is "no cycle beat it", which does not distinguish
+call: a gene at the floor is "no cycle beat it", which does not distinguish
 between genes that all cleared every cycle. Blank when no CAAS permulation null
 was supplied to this run.
 

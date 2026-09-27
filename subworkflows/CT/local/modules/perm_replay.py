@@ -29,15 +29,20 @@ CALLED BY: ct
 
 from modules.perm_replay_io import *
 from modules.disco import process_position
-from modules.caas_id import iscaas
-from modules.caap_id import check_caap_pattern, encode_to_groups, US, GS1, GS2, GS3, GS4
+from modules.caas_id import (
+    US, GS1, GS2, GS3, GS4, SCHEMES,
+    check_pattern, check_caap_pattern, iscaas,
+    encode_to_groups, _pair_sort_key
+)
 from modules.alimport import *
 
+import os
 from os.path import exists
 import functools
 import re
 import time
 from datetime import datetime
+import numpy as np
 
 # ---------------------------------------------------------------------------
 # FOP multi-hypothesis (Gap A) — base-cycle collapse of the fanned observed
@@ -62,7 +67,7 @@ def collapse_fop_hits_by_base(per_key_hits, all_labelings):
 
     Args:
         per_key_hits: {key: [labeling_tag, ...]} — the labeling-unit hits the
-            kernel (or scalar loop) produced. key is a position_name (classical)
+            kernel produces. key is a position_name (classical)
             or (position_name, scheme_name) (caap_mode); tag is "<base>~H<m>".
         all_labelings: iterable of every labeling tag present in fop_labelings.tab
             (used for the denominator = number of distinct base cycles).
@@ -77,23 +82,298 @@ def collapse_fop_hits_by_base(per_key_hits, all_labelings):
     return collapsed, base_total
 
 # ---------------------------------------------------------------------------
-# Vectorized (Level-3 BLAS) counting kernel. Optional: if numpy / the module is
-# unavailable we fall back to the scalar caas_perm_replay loop transparently. The kernel
-# is proven bit-for-bit equivalent to caas_perm_replay by modules/perm_replay_vec_equivtest.py
-# (counts) and modules/perm_replay_vec_perm_equivtest.py (perm_discovery rows).
+# Vectorized (Level-3 BLAS) counting kernel.
 # ---------------------------------------------------------------------------
-try:
-    from modules.perm_replay_vec import VectorizedPermReplay
-except Exception as _perm_replay_vec_err:  # pragma: no cover - defensive import guard
-    VectorizedPermReplay = None
-    print(f"[PERM-REPLAY] vectorized kernel unavailable ({_perm_replay_vec_err}); using scalar path")
 
-_VECTORIZE_PERM_REPLAY = os.environ.get("CT_PERM_REPLAY_VECTORIZE", "1") not in ("0", "false", "False")
+_CHUNK_MEM_BUDGET_MB = float(os.environ.get("CT_PERM_REPLAY_CHUNK_MEM_MB", "512"))
 
 # Ambiguity codes count as gaps (no resolved amino acid), exactly as
 # caas_id.process_position() does; "-" is the literal gap.
-_VEC_GAP_SYMBOLS = frozenset({"-", "X", "B", "Z", "J", "U"})
-_VEC_SCHEME_MAP = {"US": US, "GS1": GS1, "GS2": GS2, "GS3": GS3, "GS4": GS4}
+_AMBIGUOUS_AAS = frozenset({"X", "B", "Z", "J", "U"})
+_GAP_SYMBOLS = frozenset({"-"}) | _AMBIGUOUS_AAS
+_VEC_GAP_SYMBOLS = _GAP_SYMBOLS
+
+_SCHEME_ORDER = ["US", "GS1", "GS2", "GS3", "GS4"]
+_SCHEME_MAP = {"US": US, "GS1": GS1, "GS2": GS2, "GS3": GS3, "GS4": GS4}
+_VEC_SCHEME_MAP = _SCHEME_MAP
+
+
+def _threshold(value):
+    """Mirror the scalar 'NO' / int-string threshold convention.
+
+    Returns None when no filter applies, otherwise the integer cap.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        if value == "NO":
+            return None
+        return int(value)
+    return int(value)
+
+
+def _admitted_pattern_flags(admitted_patterns):
+    """Reproduce substring membership test for pattern admission.
+
+    Precomputes, for each pattern label 1..4, whether it is admitted.
+    Pattern 'null' is never admitted.
+    """
+    if admitted_patterns is None:
+        container = ["1", "2", "3"]
+    else:
+        container = admitted_patterns  # str or list; `in` works for both
+    return {k: (str(k) in container) for k in (1, 2, 3, 4)}
+
+
+class VectorizedPermReplay:
+    """Per-resample-file (per multiconfig) labeling masks, reused across positions.
+
+    The foreground / background membership of each labeling (perm-replay cycle) is
+    independent of alignment position, so F and Bg are built once and reused for
+    every position in the gene.
+    """
+
+    def __init__(self, cfg, species_in_alignment):
+        species = set(species_in_alignment)
+        for t in cfg.alltraits:
+            species.update(cfg.trait2fg.get(t, ()))
+            species.update(cfg.trait2bg.get(t, ()))
+        self.species = sorted(species)
+        self.sp_index = {sp: i for i, sp in enumerate(self.species)}
+        self.n_sp = len(self.species)
+
+        # Deduplicate trait order exactly like simtrait_revive (preserves order).
+        self.alltraits = list(dict.fromkeys(cfg.alltraits))
+        self.B = len(self.alltraits)
+
+        # Labeling membership masks (B x species), float32 so the matmuls hit BLAS.
+        self.F = np.zeros((self.B, self.n_sp), dtype=np.float32)
+        self.Bg = np.zeros((self.B, self.n_sp), dtype=np.float32)
+        for b, t in enumerate(self.alltraits):
+            for sp in cfg.trait2fg.get(t, ()):
+                j = self.sp_index.get(sp)
+                if j is not None:
+                    self.F[b, j] = 1.0
+            for sp in cfg.trait2bg.get(t, ()):
+                j = self.sp_index.get(sp)
+                if j is not None:
+                    self.Bg[b, j] = 1.0
+
+        # Species present in this gene's alignment (others are 'missing').
+        self.in_alignment = np.zeros(self.n_sp, dtype=bool)
+        for sp in species_in_alignment:
+            j = self.sp_index.get(sp)
+            if j is not None:
+                self.in_alignment[j] = True
+
+    # -- per-position encoding ------------------------------------------------
+
+    def _position_symbols(self, pos_dict):
+        """Return (symbols, gapvec, missvec) over the species universe for a position."""
+        symbols = [None] * self.n_sp
+        gapvec = np.zeros(self.n_sp, dtype=np.float32)
+        missvec = np.zeros(self.n_sp, dtype=np.float32)
+
+        present = np.zeros(self.n_sp, dtype=bool)
+        for sp, val in pos_dict.items():
+            j = self.sp_index.get(sp)
+            if j is None:
+                continue
+            present[j] = True
+            aa = val.split("@")[0].upper()
+            if aa in _GAP_SYMBOLS:
+                gapvec[j] = 1.0
+            else:
+                symbols[j] = aa
+
+        missvec[~present] = 1.0
+        return symbols, gapvec, missvec
+
+    @staticmethod
+    def _group_block(symbols, scheme_dict):
+        """Build a one-hot (species x groups) block for one position under one scheme."""
+        n_sp = len(symbols)
+        group_labels = [None] * n_sp
+        for i, aa in enumerate(symbols):
+            if aa is None:
+                continue
+            if scheme_dict is None:
+                group_labels[i] = aa  # identity: each symbol is its own group
+            else:
+                g = scheme_dict.get(aa)
+                if g is not None:
+                    group_labels[i] = g
+
+        cols = sorted({g for g in group_labels if g is not None})
+        if not cols:
+            return np.zeros((n_sp, 0), dtype=np.float32)
+        col_index = {g: k for k, g in enumerate(cols)}
+        block = np.zeros((n_sp, len(cols)), dtype=np.float32)
+        for i, g in enumerate(group_labels):
+            if g is not None:
+                block[i, col_index[g]] = 1.0
+        return block
+
+    def _default_b_chunk(self, total_groups):
+        bytes_per_row = max(1, 2 * (self.n_sp + total_groups) * 4)
+        budget_bytes = _CHUNK_MEM_BUDGET_MB * 1024 * 1024
+        return max(1, min(self.B, int(budget_bytes // bytes_per_row)))
+
+    # -- main counting --------------------------------------------------------
+
+    def count(self, positions_with_schemes, genename,
+              maxgaps_fg, maxgaps_bg, maxgaps_all,
+              maxmiss_fg, maxmiss_bg, maxmiss_all,
+              max_conserved, admitted_patterns, caap_mode,
+              b_chunk=None, collect_hits=False):
+        """Count CAAS/CAAP hits per (position[, scheme]) across all B labelings."""
+        adm = _admitted_pattern_flags(admitted_patterns)
+        g_fg = _threshold(maxgaps_fg)
+        g_bg = _threshold(maxgaps_bg)
+        g_all = _threshold(maxgaps_all)
+        m_fg = _threshold(maxmiss_fg)
+        m_bg = _threshold(maxmiss_bg)
+        m_all = _threshold(maxmiss_all)
+
+        n_pos = len(positions_with_schemes)
+        gapmat = np.zeros((self.n_sp, n_pos), dtype=np.float32)
+        missmat = np.zeros((self.n_sp, n_pos), dtype=np.float32)
+        position_names = []
+
+        jobs = []
+        blocks = []
+        col_cursor = 0
+
+        for pi, (pos_dict, schemes_set) in enumerate(positions_with_schemes):
+            symbols, gapvec, missvec = self._position_symbols(pos_dict)
+            gapmat[:, pi] = gapvec
+            missmat[:, pi] = missvec
+
+            pos_num = None
+            for v in pos_dict.values():
+                parts = v.split("@")
+                if len(parts) > 1:
+                    pos_num = parts[1]
+                    break
+            position_names.append(f"{genename}@{pos_num}")
+
+            if caap_mode:
+                scheme_names = self._schemes_to_test(schemes_set)
+            else:
+                scheme_names = [None]
+
+            for sname in scheme_names:
+                scheme_dict = None if sname is None else _SCHEME_MAP[sname]
+                block = self._group_block(symbols, scheme_dict)
+                ng = block.shape[1]
+                blocks.append(block)
+                jobs.append((pi, sname, col_cursor, col_cursor + ng))
+                col_cursor += ng
+
+        if caap_mode:
+            results = {}
+            for (pi, sname, _s, _e) in jobs:
+                results[(position_names[pi], sname)] = 0
+        else:
+            results = {position_names[pi]: 0 for pi in range(n_pos)}
+
+        hits = {key: [] for key in results} if collect_hits else None
+
+        if self.B == 0 or col_cursor == 0:
+            return (results, hits) if collect_hits else results
+
+        G_concat = np.hstack(blocks) if blocks else np.zeros((self.n_sp, 0), np.float32)
+
+        if b_chunk is None:
+            b_chunk = self._default_b_chunk(col_cursor)
+
+        for start in range(0, self.B, b_chunk):
+            end = min(start + b_chunk, self.B)
+            Fc = self.F[start:end]
+            Bc = self.Bg[start:end]
+
+            C_fg_all = Fc @ G_concat
+            C_bg_all = Bc @ G_concat
+
+            gaps_fg = Fc @ gapmat
+            gaps_bg = Bc @ gapmat
+            miss_fg = Fc @ missmat
+            miss_bg = Bc @ missmat
+
+            for (pi, sname, cs, ce) in jobs:
+                C_fg = C_fg_all[:, cs:ce]
+                C_bg = C_bg_all[:, cs:ce]
+
+                gfg = gaps_fg[:, pi]
+                gbg = gaps_bg[:, pi]
+                mfg = miss_fg[:, pi]
+                mbg = miss_bg[:, pi]
+                valid = np.ones(C_fg.shape[0], dtype=bool)
+                if g_all is not None:
+                    valid &= (gfg + gbg) <= g_all
+                if g_fg is not None:
+                    valid &= gfg <= g_fg
+                if g_bg is not None:
+                    valid &= gbg <= g_bg
+                if m_all is not None:
+                    valid &= (mfg + mbg) <= m_all
+                if m_fg is not None:
+                    valid &= mfg <= m_fg
+                if m_bg is not None:
+                    valid &= mbg <= m_bg
+
+                if ce == cs:
+                    continue
+
+                present_fg = C_fg > 0
+                present_bg = C_bg > 0
+                nfg_unique = present_fg.sum(axis=1)
+                nbg_unique = present_bg.sum(axis=1)
+
+                shared = present_fg & present_bg
+                shared_fg = (C_fg * shared).sum(axis=1)
+                shared_bg = (C_bg * shared).sum(axis=1)
+                overlap = np.minimum(shared_fg, shared_bg)
+                non_fg = (C_fg * ~present_bg).sum(axis=1)
+                non_bg = (C_bg * ~present_fg).sum(axis=1)
+
+                caas = (overlap <= max_conserved) & ((non_fg >= 2) | (non_bg >= 2))
+
+                is_null = (nfg_unique == 0) | (nbg_unique == 0)
+                p1 = (nfg_unique == 1) & (nbg_unique == 1)
+                p2 = (nfg_unique == 1) & (nbg_unique != 1)
+                p3 = (nfg_unique != 1) & (nbg_unique == 1)
+                p4 = (nfg_unique != 1) & (nbg_unique != 1)
+                admitted = np.zeros(C_fg.shape[0], dtype=bool)
+                if adm[1]:
+                    admitted |= p1
+                if adm[2]:
+                    admitted |= p2
+                if adm[3]:
+                    admitted |= p3
+                if adm[4]:
+                    admitted |= p4
+                admitted &= ~is_null
+
+                hit = valid & caas & admitted
+                count = int(hit.sum())
+
+                key = (position_names[pi], sname) if caap_mode else position_names[pi]
+                results[key] += count
+
+                if collect_hits and count:
+                    local_idx = np.nonzero(hit)[0]
+                    hits[key].extend(self.alltraits[start + int(i)] for i in local_idx)
+
+        return (results, hits) if collect_hits else results
+
+    @staticmethod
+    def _schemes_to_test(schemes_set):
+        if not schemes_set:
+            return list(_SCHEME_ORDER)
+        if "CAAS" in schemes_set:
+            return list(_SCHEME_ORDER)
+        return [s for s in _SCHEME_ORDER if s in schemes_set]
 
 
 def _posnum_from_posdict(pos_dict):
@@ -128,19 +408,30 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions_with_sch
     )
 
 
+def _emit_groups_rows(groups_out, genename, hits, caap_mode):
+    """Materialize per-cycle groups debug rows from hit coordinates."""
+    if not hits or not groups_out:
+        return
+    for key, trait_names in hits.items():
+        if not trait_names:
+            continue
+        if caap_mode:
+            position_name, scheme_name = key
+        else:
+            position_name, scheme_name = key, "US"
+        posnum = position_name.split("@", 1)[1] if "@" in position_name else position_name
+        for trait in trait_names:
+            groups_out.write(f"{trait}\t{genename}\t{posnum}\tCAAP\t{scheme_name}\n")
+
+
 def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_schemes,
                               hits, caap_mode, max_conserved):
     """Materialize perm_discovery rows for the vectorized hits.
 
-    The kernel identifies WHICH (position, scheme, labeling) are CAAS; each rare
-    hit's row is then rebuilt by calling the SAME functions caas_perm_replay uses
-    (iscaas / check_caap_pattern / encode_to_groups) with the SAME inputs, so the
-    emitted fields are byte-identical to the scalar perm_discovery_out. Species
-    sort by pair id via the same _pair_sort_key caas_perm_replay uses (alphabetical
-    fallback for pairless species), so the substitution / tag strings reproduce
-    exactly.
+    The kernel identifies WHICH (position, scheme, labeling) are CAAS/CAAP; each hit's row
+    is reconstructed with exact pair-ordered substitution strings and group encodings.
     """
-    if not hits:
+    if not hits or not perm_discovery_out:
         return
     posname_to_posdict = {}
     for pos_dict, _schemes in positions_with_schemes:
@@ -150,13 +441,6 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
     def _ungapped_sorted(species_iter, pos_dict, trait=None):
         keep = [sp for sp in species_iter
                 if sp in pos_dict and pos_dict[sp].split("@")[0].upper() not in _VEC_GAP_SYMBOLS]
-        # Sort by pair id so FG[i] and BG[i] are the two members of the same pair —
-        # this is what makes the positional comparison inside check_caap_pattern
-        # (and iscaas) report WHICH pairs are conserved. The resample cfg now carries
-        # per-cycle pairs (perm_replay_io.simtrait_revive), recovered from the
-        # matched FG/BG ordering permulations.R writes. _pair_sort_key falls back to
-        # alphabetical for any species without a pair, which reproduces the previous
-        # behaviour for legacy/hand-written resample files.
         keep.sort(key=lambda sp: _pair_sort_key(cfg, sp, trait))
         return keep
 
@@ -165,10 +449,12 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
             continue
         if caap_mode:
             position_name, scheme_name = key
-            scheme_dict = _VEC_SCHEME_MAP[scheme_name]
+            scheme_dict = _VEC_SCHEME_MAP.get(scheme_name, US)
         else:
-            position_name, scheme_name, scheme_dict = key, None, None
-        pos_dict = posname_to_posdict[position_name]
+            position_name, scheme_name, scheme_dict = key, "US", US
+        pos_dict = posname_to_posdict.get(position_name)
+        if not pos_dict:
+            continue
         posnum = position_name.split("@", 1)[1]
 
         for trait in trait_names:
@@ -177,38 +463,19 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
             fg_aas = "".join(pos_dict[sp].split("@")[0] for sp in fg)
             bg_aas = "".join(pos_dict[sp].split("@")[0] for sp in bg)
 
-            if caap_mode:
-                is_caap, pattern, substitution, conserved_pairs = check_caap_pattern(
-                    fg_aas, bg_aas, scheme_dict, max_conserved, cfg, fg, bg, trait
-                )
-                encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
-                fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
-                          substitution, encoded, pattern]
-                if max_conserved > 0:
-                    oc = conserved_pairs.split(":")[0] if conserved_pairs else "0"
-                    pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
-                    fields.extend(["TRUE" if int(oc) > 0 else "FALSE", f"{oc}:{pl}"])
-            else:
-                tag = "/".join([fg_aas, bg_aas])
-                check = iscaas(tag, cfg, pos_dict, max_conserved, trait, fg, bg)
-                fields = [trait, genename, "CAAS", "US", trait, str(posnum),
-                          tag, f"pattern{check.pattern}"]
-                if max_conserved > 0:
-                    ci = getattr(check, "conserved_pairs", "0:")
-                    cc = ci.split(":")[0] if ci else "0"
-                    cl = ci.split(":")[1] if ":" in ci else ""
-                    fields.extend(["TRUE" if int(cc) > 0 else "FALSE", f"{cc}:{cl}"])
+            is_match, pattern, substitution, conserved_pairs = check_pattern(
+                fg_aas, bg_aas, scheme_dict=scheme_dict,
+                max_conserved=max_conserved, multiconfig=cfg,
+                fg_species_list=fg, bg_species_list=bg, trait=trait
+            )
+            encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
+            fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
+                      substitution, encoded, pattern]
+            if max_conserved > 0:
+                oc = conserved_pairs.split(":")[0] if conserved_pairs else "0"
+                pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
+                fields.extend(["TRUE" if int(oc) > 0 else "FALSE", f"{oc}:{pl}"])
             perm_discovery_out.write("\t".join(fields) + "\n")
-
-
-def _pair_sort_key(multiconfig, sp, trait=None):
-    pair_id = multiconfig.get_pair(sp, trait) if trait is not None else multiconfig.get_pair(sp)
-    if pair_id:
-        try:
-            return (int(pair_id), sp)
-        except (ValueError, TypeError):
-            return (float('inf'), sp)
-    return (float('inf'), sp)
 
 
 # UTILITY FUNCTIONS for progress tracking
@@ -365,302 +632,12 @@ def parse_discovery_positions(discovery_file, genename):
         return None
 
 
-# FUNCTION filter_for_gaps()
-# filters a trait for its gaps
-
-def filter_for_gaps(max_bg, max_fg, max_all, gfg, gbg):
-
-    out = True
-
-    all_g = gfg + gbg
-    
-    if max_all != "NO" and all_g > int(max_all):
-        out = False
-
-    elif max_fg != "NO" and gfg > int(max_fg):
-        out = False
-
-    elif max_bg != "NO" and gbg > int(max_bg):
-        out = False
-
-    return out
-
-
-# FUNCTION filter_for_missing()
-# filters a trait for missing species
-
-def filter_for_missings(max_m_bg, max_m_fg, max_m_all, mfg, mbg):
-
-    out = True
-
-    all_m = mfg + mbg
-    
-    if max_m_all != "NO" and all_m > int(max_m_all):
-        out = False
-
-    elif max_m_fg != "NO" and mfg > int(max_m_fg):
-        out = False
-
-    elif max_m_bg != "NO" and mbg > int(max_m_bg):
-        out = False
-
-    return out
 
 
 
-def caas_perm_replay(processed_position, genename, list_of_traits, maxgaps_fg, maxgaps_bg, maxgaps_all, maxmiss_fg, maxmiss_bg, maxmiss_all, cycles, multiconfig, miss_pair=False, max_conserved=0, admitted_patterns=["1","2","3"], chunk_size=1000, caap_mode=False, discovery_schemes=None, debug_rejects=False, groups_out=None, perm_discovery_out=None, base_collapse=0):
-    """Chunked perm-replay - processes traits in batches to handle large resample files
 
-    Args:
-        caap_mode: If True, test CAAP grouping schemes instead of classical CAAS
-        discovery_schemes: Set of grouping schemes found in discovery for this position (US, GS1-GS4, or CAAS)
-                          If None, test all schemes. If provided, only test those schemes.
-        base_collapse: FOP (Gap A) — when > 0, collapse the hit traits to
-                          "<base>~H<m>" base cycles: the returned count is the
-                          number of DISTINCT base cycles with >=1 hit and the
-                          denominator field is base_collapse (the number of
-                          distinct base cycles). When 0 (default) the count is
-                          the plain per-labeling hit count over `cycles`.
-    """
-    def _emit_count(hit_traits, position_name, scheme_name):
-        if base_collapse:
-            n = len({_fop_base_cycle(t) for t in hit_traits})
-            denom = base_collapse
-        else:
-            n = len(hit_traits)
-            denom = cycles
-        return "\t".join([position_name, scheme_name, str(n), str(denom),
-                          str(n / denom if denom else 0.0)])
 
-    a = set(list_of_traits)
-    b = set(processed_position.trait2aas_fg.keys())
-    c = set(processed_position.trait2aas_bg.keys())
-    valid_traits = list(a.intersection(b).intersection(c))
-    
-    if len(valid_traits) == 0:
-        if debug_rejects:
-            print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} rejected: no valid traits after presence check (fg keys={len(processed_position.trait2aas_fg)}, bg keys={len(processed_position.trait2aas_bg)})")
-        position_name = genename + "@" + str(processed_position.position)
-        if caap_mode:
-            # Return one line per scheme with zero counts
-            schemes = [("US", US), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
-            outlines = []
-            for scheme_name, _ in schemes:
-                outlines.append(_emit_count([], position_name, scheme_name))
-            return "\n".join(outlines)
-        else:
-            return _emit_count([], position_name, "US")
-    
-    # Process traits in chunks to avoid memory issues with large files
-    total_output_traits = []
-    n_traits = len(valid_traits)
-    n_chunks = (n_traits + chunk_size - 1) // chunk_size  # Ceiling division
-    
-    for chunk_idx in range(n_chunks):
-        start_idx = chunk_idx * chunk_size
-        end_idx = min(start_idx + chunk_size, n_traits)
-        chunk_traits = valid_traits[start_idx:end_idx]
-        
-        # Filter for gaps
-        filtered_traits = []
-        for trait in chunk_traits:
-            gfg = processed_position.trait2gaps_fg[trait]
-            gbg = processed_position.trait2gaps_bg[trait]
-            
-            if not filter_for_gaps(maxgaps_bg, maxgaps_fg, maxgaps_all, gfg, gbg):
-                if debug_rejects:
-                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: gaps gfg={gfg} gbg={gbg} max_fg={maxgaps_fg} max_bg={maxgaps_bg} max_all={maxgaps_all}")
-                continue
-            
-            # Filter for missings
-            mfg = processed_position.trait2miss_fg[trait]
-            mbg = processed_position.trait2miss_bg[trait]
-            
-            if not filter_for_missings(maxmiss_bg, maxmiss_fg, maxmiss_all, mfg, mbg):
-                if debug_rejects:
-                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: missings mfg={mfg} mbg={mbg} max_fg={maxmiss_fg} max_bg={maxmiss_bg} max_all={maxmiss_all}")
-                continue
-            
-            filtered_traits.append(trait)
-        
-        if debug_rejects and len(filtered_traits) == 0:
-            print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} rejected: all traits filtered out by gaps/missings")
-        
-        # Pattern check
-        if caap_mode:
-            # CAAP mode: test grouping schemes
-            # If discovery_schemes provided, only test those schemes for this position
-            # Otherwise test all schemes
-            scheme_counts = {"US": [], "GS1": [], "GS2": [], "GS3": [], "GS4": []}
-            
-            # Determine which schemes to test
-            if discovery_schemes:
-                # Only test schemes found in discovery for this position
-                schemes_to_test = []
-                
-                if "CAAS" in discovery_schemes:
-                    # Classical CAAS mode - test all schemes
-                    schemes_to_test = [("US", US), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
-                else:
-                    # CAAP mode - only test discovered schemes
-                    scheme_map = {"US": US, "GS1": GS1, "GS2": GS2, "GS3": GS3, "GS4": GS4}
-                    for scheme_name in discovery_schemes:
-                        if scheme_name in scheme_map:
-                            schemes_to_test.append((scheme_name, scheme_map[scheme_name]))
-            else:
-                # No discovery info - test all schemes
-                schemes_to_test = [("US", US), ("GS1", GS1), ("GS2", GS2), ("GS3", GS3), ("GS4", GS4)]
 
-            for trait in filtered_traits:
-                fg_species = processed_position.trait2ungapped_fg[trait][:]
-                bg_species = processed_position.trait2ungapped_bg[trait][:]
-
-                # Always sort by pair number (mandatory paired mode)
-                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
-                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
-
-                # Extract amino acids per species
-                fg_aas = "".join([(processed_position.d[sp].split("@")[0] or "") for sp in fg_species])
-                bg_aas = "".join([(processed_position.d[sp].split("@")[0] or "") for sp in bg_species])
-
-                # Test only the schemes found in discovery (or all if no discovery)
-                any_match = False
-                pattern_by_scheme = {}
-                debug_by_scheme = {}
-                for scheme_name, scheme_dict in schemes_to_test:
-                    is_caap, pattern, substitution, conserved_pairs = check_caap_pattern(
-                        fg_aas, bg_aas, scheme_dict, max_conserved,
-                        multiconfig, fg_species, bg_species, trait
-                    )
-                    pattern_by_scheme[scheme_name] = pattern
-                    if is_caap and pattern in admitted_patterns:
-                        any_match = True
-                        scheme_counts[scheme_name].append(trait)
-                        if groups_out:
-                            groups_out.write(f"{trait}\t{genename}\t{processed_position.position}\tCAAP\t{scheme_name}\n")
-                        if perm_discovery_out:
-                            fg_species_str = ",".join(fg_species) if fg_species else "NA"
-                            bg_species_str = ",".join(bg_species) if bg_species else "NA"
-                            miss_species = processed_position.trait2missings.get(trait, [])
-                            miss_species_str = ",".join(miss_species) if miss_species else "NA"
-                            encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
-                            output_fields = [
-                                trait,
-                                genename,
-                                "CAAP",
-                                scheme_name,
-                                trait,
-                                str(processed_position.position),
-                                substitution,
-                                encoded,
-                                pattern,
-                            ]
-                            if max_conserved > 0:
-                                overlap_count = conserved_pairs.split(":")[0] if conserved_pairs else "0"
-                                pair_list = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
-                                output_fields.extend([
-                                    "TRUE" if int(overlap_count) > 0 else "FALSE",
-                                    f"{overlap_count}:{pair_list}"
-                                ])
-                            perm_discovery_out.write("\t".join(output_fields) + "\n")
-                    if debug_rejects:
-                        # Mirror CAAP overlap/change logic for debug
-                        standard_aas = set("ACDEFGHIKLMNPQRSTVWY")
-                        fg_filtered = [aa for aa in fg_aas if aa in standard_aas]
-                        bg_filtered = [aa for aa in bg_aas if aa in standard_aas]
-                        fg_groups = [scheme_dict.get(aa) for aa in fg_filtered if scheme_dict.get(aa) is not None]
-                        bg_groups = [scheme_dict.get(aa) for aa in bg_filtered if scheme_dict.get(aa) is not None]
-                        fg_unique = set(fg_groups)
-                        bg_unique = set(bg_groups)
-                        shared_types = fg_unique.intersection(bg_unique)
-                        shared_fg = sum(1 for g in fg_groups if g in shared_types)
-                        shared_bg = sum(1 for g in bg_groups if g in shared_types)
-                        overlap = min(shared_fg, shared_bg)
-                        non_overlapping_fg = sum(1 for g in fg_groups if g not in bg_unique)
-                        non_overlapping_bg = sum(1 for g in bg_groups if g not in fg_unique)
-                        debug_by_scheme[scheme_name] = {
-                            "pattern": pattern,
-                            "overlap": overlap,
-                            "non_fg": non_overlapping_fg,
-                            "non_bg": non_overlapping_bg,
-                            "fg_groups": "".join(fg_groups),
-                            "bg_groups": "".join(bg_groups),
-                            "is_caap": is_caap,
-                        }
-                if debug_rejects and not any_match:
-                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: no CAAP match (patterns={pattern_by_scheme})")
-                    for scheme_name in sorted(debug_by_scheme.keys()):
-                        info = debug_by_scheme[scheme_name]
-                        print(
-                            f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} {scheme_name} "
-                            f"fg={info['fg_groups']} bg={info['bg_groups']} "
-                            f"overlap={info['overlap']} non_fg={info['non_fg']} non_bg={info['non_bg']} "
-                            f"is_caap={info['is_caap']}"
-                        )
-            
-            # Return one line per tested scheme
-            position_name = genename + "@" + str(processed_position.position)
-            outlines = []
-            scheme_set = {name for name, _ in schemes_to_test}
-            ordered_schemes = [name for name in ["US", "GS1", "GS2", "GS3", "GS4"] if name in scheme_set]
-            for scheme_name in ordered_schemes:
-                outlines.append(_emit_count(scheme_counts[scheme_name], position_name, scheme_name))
-
-            return "\n".join(outlines)
-        else:
-            # Classical CAAS mode
-            for trait in filtered_traits:
-                fg_species = processed_position.trait2ungapped_fg[trait][:]
-                bg_species = processed_position.trait2ungapped_bg[trait][:]
-
-                # Always sort by pair number (mandatory paired mode)
-                fg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
-                bg_species.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
-                
-                aa_tag_fg = "".join([processed_position.d[sp].split("@")[0] for sp in fg_species])
-                aa_tag_bg = "".join([processed_position.d[sp].split("@")[0] for sp in bg_species])
-                tag = "/".join([aa_tag_fg, aa_tag_bg])
-                
-                check = iscaas(tag, multiconfig, processed_position.d, max_conserved, trait, fg_species, bg_species)
-                if check.caas == True and check.pattern in admitted_patterns:
-                    total_output_traits.append(trait)
-                    if groups_out:
-                        groups_out.write(f"{trait}\t{genename}\t{processed_position.position}\tCAAS\tCAAS\n")
-                    if perm_discovery_out:
-                        fg_species_number = str(len(processed_position.trait2ungapped_fg[trait]))
-                        bg_species_number = str(len(processed_position.trait2ungapped_bg[trait]))
-                        fg_ungapped = processed_position.trait2ungapped_fg[trait][:]
-                        bg_ungapped = processed_position.trait2ungapped_bg[trait][:]
-                        fg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
-                        bg_ungapped.sort(key=lambda sp: _pair_sort_key(multiconfig, sp, trait))
-                        missings = "-"
-                        if len(processed_position.trait2missings.get(trait, [])) > 0:
-                            missings = ",".join(processed_position.trait2missings[trait])
-                        output_fields = [
-                            trait,
-                            genename,
-                            "CAAS",
-                            "US",
-                            trait,
-                            str(processed_position.position),
-                            tag,
-                            f"pattern{check.pattern}",
-                        ]
-                        if max_conserved > 0:
-                            conserved_info = getattr(check, "conserved_pairs", "0:")
-                            conserved_count = conserved_info.split(":")[0] if conserved_info else "0"
-                            conserved_pairs_list = conserved_info.split(":")[1] if ":" in conserved_info else ""
-                            output_fields.extend([
-                                "TRUE" if int(conserved_count) > 0 else "FALSE",
-                                f"{conserved_count}:{conserved_pairs_list}"
-                            ])
-                        perm_discovery_out.write("\t".join(output_fields) + "\n")
-                elif debug_rejects:
-                    print(f"[PERM-REPLAY DEBUG] {genename}@{processed_position.position} trait {trait} rejected: caas={check.caas} pattern={check.pattern} admitted={admitted_patterns}")
-            
-            # Return aggregated result
-            position_name = genename + "@" + str(processed_position.position)
-            return _emit_count(total_output_traits, position_name, "US")
 
 # FUNCTION run_perm_replay_on_alignment()
 # Launches perm-replay in several lines. Returns a dictionary gene@position --> pvalue
@@ -714,45 +691,23 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
     perm_discovery_handle = None
     if export_perm_discovery:
         perm_discovery_handle = open(export_perm_discovery, "w")
-        if caap_mode:
-            header_fields = [
-                "cycle",
-                "gene",
-                "mode",
-                "caap_group",
-                "trait",
-                "position",
-                "caas",
-                "amino_encoded",
-                "pattern"
-            ]
-        else:
-            header_fields = [
-                "cycle",
-                "gene",
-                "mode",
-                "caap_group",
-                "trait",
-                "position",
-                "caas",
-                "pattern"
-            ]
+        header_fields = [
+            "cycle",
+            "gene",
+            "mode",
+            "caap_group",
+            "trait",
+            "position",
+            "caas",
+            "amino_encoded",
+            "pattern"
+        ]
         if max_conserved > 0:
             header_fields.extend(["is_conserved_meta", "conserved_pair"])
         perm_discovery_handle.write("\t".join(header_fields) + "\n")
 
-    # Vectorized BLAS path. It produces the empirical-p COUNTS and (when
-    # perm_discovery is requested, e.g. PERM_REPLAY) the per-hit perm_discovery
-    # ROWS. Only the rarer per-cycle groups debug export (--export_groups) still
-    # needs the scalar per-trait walk.
-    use_vectorized = (
-        VectorizedPermReplay is not None
-        and _VECTORIZE_PERM_REPLAY
-        and groups_handle is None
-    )
-    # FOP mode needs per-labeling hit identity to collapse to base cycles, even
-    # when no perm_discovery export was requested.
-    collect_hits = perm_discovery_handle is not None or fop_mode
+    # Vectorized BLAS path.
+    collect_hits = perm_discovery_handle is not None or groups_handle is not None or fop_mode
 
     try:
         # Detect if resampled_traits is a directory path or a multicfg object
@@ -816,81 +771,31 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                 
                 is_b0 = os.path.basename(file_path) == "resample_000.tab"
 
-                if use_vectorized:
-                    # BLAS path: one set of batched matmuls for the whole file.
-                    if collect_hits:
-                        file_counts, file_hits = _vectorized_position_counts(
-                            file_config, sliced_object, the_genename, positions_with_schemes,
-                            max_fg_gaps, max_bg_gaps, max_overall_gaps,
-                            max_fg_miss, max_bg_miss, max_overall_miss,
-                            max_conserved, the_admitted_patterns, caap_mode,
-                            collect_hits=True,
-                        )
+                # BLAS path: one set of batched matmuls for the whole file.
+                if collect_hits:
+                    file_counts, file_hits = _vectorized_position_counts(
+                        file_config, sliced_object, the_genename, positions_with_schemes,
+                        max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                        max_fg_miss, max_bg_miss, max_overall_miss,
+                        max_conserved, the_admitted_patterns, caap_mode,
+                        collect_hits=True,
+                    )
+                    if perm_discovery_handle is not None:
                         _emit_perm_discovery_rows(
                             perm_discovery_handle, file_config, the_genename,
                             positions_with_schemes, file_hits, caap_mode, max_conserved,
                         )
-                    else:
-                        file_counts = _vectorized_position_counts(
-                            file_config, sliced_object, the_genename, positions_with_schemes,
-                            max_fg_gaps, max_bg_gaps, max_overall_gaps,
-                            max_fg_miss, max_bg_miss, max_overall_miss,
-                            max_conserved, the_admitted_patterns, caap_mode,
-                        )
-                    for key, count in file_counts.items():
-                        position_counts[key] = position_counts.get(key, 0) + count
+                    if groups_handle is not None:
+                        _emit_groups_rows(groups_handle, the_genename, file_hits, caap_mode)
                 else:
-                  # Process each position with its specific schemes
-                  for pos_dict, schemes in positions_with_schemes:
-                    # Process position
-                    processed_pos = process_position(pos_dict, multiconfig=file_config, species_in_alignment=sliced_object.species)
-
-                    # Run perm-replay with position-specific schemes
-                    line_output = caas_perm_replay(
-                        processed_pos,
-                        genename=the_genename,
-                        list_of_traits=file_config.alltraits,
-                        maxgaps_fg=max_fg_gaps,
-                        maxgaps_bg=max_bg_gaps,
-                        maxgaps_all=max_overall_gaps,
-                        maxmiss_fg=max_fg_miss,
-                        maxmiss_bg=max_bg_miss,
-                        maxmiss_all=max_overall_miss,
-                        multiconfig=file_config,
-                        miss_pair=miss_pair,
-                        max_conserved=max_conserved,
-                        admitted_patterns=the_admitted_patterns,
-                        cycles=file_config.cycles,
-                    caap_mode=caap_mode,
-                    discovery_schemes=schemes,
-                    debug_rejects=is_b0,
-                    groups_out=groups_handle,
-                    perm_discovery_out=perm_discovery_handle
-                )
-
-                    # Accumulate counts for this position
-                    # In CAAP mode, each position returns multiple lines (one per scheme)
-                    if caap_mode:
-                        # Multiple lines separated by newline
-                        for line in line_output.split("\n"):
-                            parts = line.split("\t")
-                            position_name = parts[0]
-                            scheme_name = parts[1]
-                            count = int(parts[2])
-
-                            key = (position_name, scheme_name)
-                            if key not in position_counts:
-                                position_counts[key] = 0
-                            position_counts[key] += count
-                    else:
-                        # Single line per position
-                        parts = line_output.split("\t")
-                        position_name = parts[0]
-                        count = int(parts[2])
-
-                        if position_name not in position_counts:
-                            position_counts[position_name] = 0
-                        position_counts[position_name] += count
+                    file_counts = _vectorized_position_counts(
+                        file_config, sliced_object, the_genename, positions_with_schemes,
+                        max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                        max_fg_miss, max_bg_miss, max_overall_miss,
+                        max_conserved, the_admitted_patterns, caap_mode,
+                    )
+                for key, count in file_counts.items():
+                    position_counts[key] = position_counts.get(key, 0) + count
 
                 file_elapsed = time.time() - file_start
                 print(f"  → File completed in {format_time(file_elapsed)}\n")
@@ -966,97 +871,49 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                 # No discovery file - test all positions with all schemes
                 positions_with_schemes = [(pos, None) for pos in positions_list]
 
-            if use_vectorized:
-                # BLAS path: batched matmuls over the whole resample object, then
-                # emit the same per-(position[, scheme]) lines the scalar loop does,
-                # plus perm_discovery rows when requested.
-                if collect_hits:
-                    counts, hits = _vectorized_position_counts(
-                        resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,
-                        max_fg_gaps, max_bg_gaps, max_overall_gaps,
-                        max_fg_miss, max_bg_miss, max_overall_miss,
-                        max_conserved, the_admitted_patterns, caap_mode,
-                        collect_hits=True,
+            # BLAS path: batched matmuls over the whole resample object, then
+            # emit the same per-(position[, scheme]) lines the scalar loop does,
+            # plus perm_discovery rows and groups rows when requested.
+            if collect_hits:
+                counts, hits = _vectorized_position_counts(
+                    resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,
+                    max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                    max_fg_miss, max_bg_miss, max_overall_miss,
+                    max_conserved, the_admitted_patterns, caap_mode,
+                    collect_hits=True,
+                )
+                if perm_discovery_handle is not None:
+                    _emit_perm_discovery_rows(
+                        perm_discovery_handle, resampled_traits_obj, the_genename,
+                        positions_with_schemes, hits, caap_mode, max_conserved,
                     )
-                    if perm_discovery_handle is not None:
-                        _emit_perm_discovery_rows(
-                            perm_discovery_handle, resampled_traits_obj, the_genename,
-                            positions_with_schemes, hits, caap_mode, max_conserved,
-                        )
-                else:
-                    counts = _vectorized_position_counts(
-                        resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,
-                        max_fg_gaps, max_bg_gaps, max_overall_gaps,
-                        max_fg_miss, max_bg_miss, max_overall_miss,
-                        max_conserved, the_admitted_patterns, caap_mode,
-                    )
-                if fop_mode:
-                    # Gap A: collapse per-labeling hits to base-cycle units.
-                    collapsed, cyc = collapse_fop_hits_by_base(hits, resampled_traits_obj.alltraits)
-                    counts = collapsed
-                    print(f"[FOP] {len(resampled_traits_obj.alltraits)} labelings -> {cyc} base cycles")
-                else:
-                    cyc = resampled_traits_obj.cycles
-                ooout = open(output_file, "w")
-                if caap_mode:
-                    for (position_name, scheme_name), count in counts.items():
-                        empval = str(count / cyc)
-                        print("\t".join([position_name, scheme_name, str(count), str(cyc), empval]), file=ooout)
-                else:
-                    for position_name, count in counts.items():
-                        empval = str(count / cyc)
-                        print("\t".join([position_name, "US", str(count), str(cyc), empval]), file=ooout)
-                ooout.close()
-                print(f"Results written to {output_file}")
+                if groups_handle is not None:
+                    _emit_groups_rows(groups_handle, the_genename, hits, caap_mode)
             else:
-              # Step 3 & 4: process positions with their specific schemes and run perm-replay
-              _fop_base_total = (len({_fop_base_cycle(t) for t in resampled_traits_obj.alltraits})
-                                 if fop_mode else 0)
-              output_lines = []
-              for pos_dict, schemes in positions_with_schemes:
-                # Process position
-                processed_pos = process_position(pos_dict, multiconfig=resampled_traits_obj, species_in_alignment=sliced_object.species)
-
-                # Run perm-replay with position-specific schemes
-                line_output = caas_perm_replay(
-                    processed_pos,
-                    list_of_traits=resampled_traits_obj.alltraits,
-                    genename=the_genename,
-                    maxgaps_fg=max_fg_gaps,
-                    maxgaps_bg=max_bg_gaps,
-                    maxgaps_all=max_overall_gaps,
-                    maxmiss_fg=max_fg_miss,
-                    maxmiss_bg=max_bg_miss,
-                    maxmiss_all=max_overall_miss,
-                    multiconfig=resampled_traits_obj,
-                    miss_pair=miss_pair,
-                    max_conserved=max_conserved,
-                    admitted_patterns=the_admitted_patterns,
-                    cycles=resampled_traits_obj.cycles,
-                caap_mode=caap_mode,
-                discovery_schemes=schemes,
-                debug_rejects=False,
-                groups_out=groups_handle,
-                perm_discovery_out=perm_discovery_handle,
-                base_collapse=_fop_base_total,
-            )
-                output_lines.append(line_output)
-
-              ooout = open(output_file, "w")
-
-              if caap_mode:
-                # Each line may contain multiple scheme results separated by newlines
-                for line_output in output_lines:
-                    for line in line_output.split("\n"):
-                        print(line, file=ooout)
-              else:
-                # Classical CAAS mode
-                for line in output_lines:
-                    print(line, file=ooout)
-
-              ooout.close()
-
-              print(f"Results written to {output_file}")
+                counts = _vectorized_position_counts(
+                    resampled_traits_obj, sliced_object, the_genename, positions_with_schemes,
+                    max_fg_gaps, max_bg_gaps, max_overall_gaps,
+                    max_fg_miss, max_bg_miss, max_overall_miss,
+                    max_conserved, the_admitted_patterns, caap_mode,
+                )
+            if fop_mode:
+                # Gap A: collapse per-labeling hits to base-cycle units.
+                collapsed, cyc = collapse_fop_hits_by_base(hits, resampled_traits_obj.alltraits)
+                counts = collapsed
+                print(f"[FOP] {len(resampled_traits_obj.alltraits)} labelings -> {cyc} base cycles")
+            else:
+                cyc = resampled_traits_obj.cycles
+            ooout = open(output_file, "w")
+            if caap_mode:
+                for (position_name, scheme_name), count in counts.items():
+                    empval = str(count / cyc)
+                    print("\t".join([position_name, scheme_name, str(count), str(cyc), empval]), file=ooout)
+            else:
+                for position_name, count in counts.items():
+                    empval = str(count / cyc)
+                    print("\t".join([position_name, "US", str(count), str(cyc), empval]), file=ooout)
+            ooout.close()
+            print(f"Results written to {output_file}")
     finally:
         if groups_handle:
             groups_handle.close()

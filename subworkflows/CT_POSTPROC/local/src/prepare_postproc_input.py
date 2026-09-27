@@ -8,7 +8,7 @@ import sys
 
 import pandas as pd
 
-from residue_descriptors import add_residue_descriptors, add_species_tally
+from residue_descriptors import add_species_tally
 
 
 def _normalize_schema(df: pd.DataFrame) -> pd.DataFrame:
@@ -59,12 +59,6 @@ def main() -> int:
     )
     parser.add_argument("--input", required=True, help="Disambiguation master CSV/TSV")
     parser.add_argument(
-        "--mrca-threshold",
-        required=True,
-        type=float,
-        help="Canonical posterior threshold for mrca_*_posterior filtering",
-    )
-    parser.add_argument(
         "--output",
         default="postproc_disambiguation_input.tsv",
         help="Normalized output TSV",
@@ -98,16 +92,8 @@ def main() -> int:
         if col not in df.columns:
             raise ValueError(f"Required column missing after normalization: {col}")
 
-    cleaned, removed_frames, removed_low_mrca, mrca_cols = (
-        _collect_removed_rows(df.copy(), args.mrca_threshold)
-    )
-
+    cleaned = df.copy()
     cleaned["Position"] = pd.to_numeric(cleaned["Position"], errors="raise").astype(int)
-
-    # Position-level raw-AA descriptors (derived_residues, {top,bottom}_residue_support).
-    # Computed here, upstream of the filtered_discovery.tsv fork, so SCORING and VEP
-    # share one canonical column set. See residue_descriptors.py.
-    cleaned = add_residue_descriptors(cleaned)
 
     # Extant-species residue tally (no-op when the alignment / species lists are
     # not supplied -- e.g. standalone --disambiguation_input runs).
@@ -121,24 +107,13 @@ def main() -> int:
         ali_format=args.alignment_format,
     )
 
-    if removed_frames:
-        removed = pd.concat(removed_frames, ignore_index=True)
-        if "Position" in removed.columns:
-            removed["Position"] = pd.to_numeric(removed["Position"], errors="coerce")
-    else:
-        removed = pd.DataFrame(columns=[*df.columns, "removal_reason"])
+    removed = pd.DataFrame(columns=[*df.columns, "removal_reason"])
 
     cleaned.to_csv(args.output, sep="\t", index=False)
     removed.to_csv(args.removed_output, sep="\t", index=False)
 
     print(f"Input rows: {len(df)}")
-    if mrca_cols:
-        print(
-            f"Removed low MRCA posterior (< {args.mrca_threshold}): {len(removed_low_mrca)}"
-        )
-        print(f"MRCA posterior columns used: {', '.join(mrca_cols)}")
-    else:
-        print("No mrca_*_posterior columns found; MRCA posterior pruning skipped")
+    print("Precluster MRCA posterior pruning retired; all input rows kept for postproc filtering")
     print(f"Rows kept for postproc filtering: {len(cleaned)}")
 
     return 0

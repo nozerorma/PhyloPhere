@@ -31,13 +31,10 @@ workflow SCORING {
         cleaned_background_ch    // Channel<path> or null — cleaned_background_main.txt (FCS universe)
         rer_perms_ch             // Channel<path> or null — RER permulation RDS (corStat) for RER FCS p.perm
         caas_perms_ch            // Channel<path> or null — CAAS permulation RDS (asr + caas null) for FCS p.perm + report
-        caas_pos_pval_ch         // Channel<path> or null — pos_perm_p per (gene,position,scheme)
         caas_pos_cycle_caas_ch   // Channel<path> or null — perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator)
         caas_pos_sample_ch       // Channel<path> or null — cycle-stratified per-scheme sample for report distribution plots
         caas_pos_quantiles_ch    // Channel<path> or null — per (cycle,scheme) null distribution shape
         hypotheses_pairs_ch      // Channel<path> or null — contrast_hypotheses_pairs.tsv (FOP domain-pool weights)
-        caas_pos_detail_ch       // Channel<path> or null — perm_pos_detail/ shard dir (report FPR calibration figure)
-        caas_gene_cycle_scores_ch // Channel<path> or null — gene_cycle_scores.tsv (report FPR calibration figure)
 
     main:
         assert params.traitname : "SCORING requires --traitname"
@@ -46,7 +43,7 @@ workflow SCORING {
 
         def resolved_postproc
         if (postproc_ch) {
-            // .first() → broadcastable value channel: filtered_discovery is consumed
+            // Broadcastable value channel: filtered_discovery is consumed
             // by BOTH SCORING_COMPUTE and the report's functional-group overlay tab.
             resolved_postproc = postproc_ch
         } else if (params.scoring_postproc_input) {
@@ -169,24 +166,12 @@ workflow SCORING {
                 .map { it[0] }
         }
 
-        // Position-level calibrated permulation null (perm_pos_pval.tsv, Tier 2).
-        // Resolved ONCE here — same hoist-above-SCORING_COMPUTE reasoning as
-        // caas_perms_resolved above. Post §7.3 flip this file is diagnostic-only:
-        // SCORING_COMPUTE reads it for N (the p.emp add-one denominator) and the
-        // report's permulation section reads its pos_perm_p column. Fall back
-        // to --caas_pos_pval_file so a pass that did not run CAAS_PERMULATION itself
-        // (no live CT) can still reuse a prior run's position-level null, mirroring
-        // how caas_perms_file is resolved above.
-        def caas_pos_pval_resolved = (caas_pos_pval_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_pos_pval_file ?: 'NO_CAAS_POS_PVAL') }
-            .collect()
-            .map { it[0] }
-
-        // Position-level per-cycle CAAS numerator/denominator (perm_pos_cycle_caas.tsv.gz,
-        // V3-4a). Feeds scoring_compute.R §2f-ter's pooled p.emp. Same
-        // hoist-above-SCORING_COMPUTE + param-fallback pattern as caas_pos_pval.
-        // A --caas_pos_detail_file rebuild (CAAS_PERMS_REBUILD above) regenerates
-        // it too, so prefer that when the live channel is absent.
+        // Position-level per-cycle CAAS numerator/denominator (perm_pos_cycle_caas.tsv.gz).
+        // Feeds scoring_compute.R §2f-ter's pooled p.emp, the sole position-level
+        // permulation p. Resolved ONCE here — same hoist-above-SCORING_COMPUTE
+        // reasoning as caas_perms_resolved above. A --caas_pos_detail_file rebuild
+        // (CAAS_PERMS_REBUILD above) regenerates it too, so prefer that when the
+        // live channel is absent.
         def caas_pos_cycle_caas_resolved
         if (!caas_pos_cycle_caas_ch && _rebuild != null) {
             caas_pos_cycle_caas_resolved = _rebuild.pos_cycle_caas
@@ -211,7 +196,6 @@ workflow SCORING {
             accum_all_ch,
             resolved_hyp_pairs,
             caas_perms_resolved,
-            caas_pos_pval_resolved,
             caas_pos_cycle_caas_resolved
         )
 
@@ -230,20 +214,6 @@ workflow SCORING {
             .collect()
             .map { it[0] }
 
-        // Report-only FPR calibration inputs (Tier 1C): the sharded detail dir +
-        // the raw gene x cycle scores table. Neither is consumed by SCORING_COMPUTE,
-        // only by the report, so they are resolved independently of caas_perms_resolved
-        // above (which may have been REBUILT and so already points at a detail dir --
-        // but this fallback also covers a caas_perms_file-only run with no detail at all).
-        def caas_pos_detail_resolved = (caas_pos_detail_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_pos_detail_file ?: 'NO_CAAS_POS_DETAIL') }
-            .collect()
-            .map { it[0] }
-        def caas_gene_cycle_scores_resolved = (caas_gene_cycle_scores_ch ?: Channel.empty())
-            .ifEmpty { file(params.caas_gene_cycle_scores_file ?: 'NO_CAAS_GENE_CYCLE_SCORES') }
-            .collect()
-            .map { it[0] }
-
         // filtered_discovery (resolved_postproc, a value channel) = the observed
         // per-(gene,position,scheme) asr_path_score overlaid on the per-scheme null;
         // when scoring runs it is always present (same condition as position_scores).
@@ -251,22 +221,14 @@ workflow SCORING {
             compute_out.position_scores,
             compute_out.gene_scores,
             compute_out.gene_correlations,
-            _opt(compute_out.stress_summary,         'NO_SCORING_STRESS_SUMMARY'),
-            _opt(compute_out.stress_correlations,    'NO_SCORING_STRESS_CORR'),
-            _opt(compute_out.stress_rank_agreement,  'NO_SCORING_STRESS_RANK'),
-            _opt(compute_out.stress_top_overlap,     'NO_SCORING_STRESS_OVERLAP'),
-            _opt(compute_out.stress_variants,        'NO_SCORING_STRESS_VARIANTS'),
             resolved_fade_site_top_ch,
             resolved_fade_site_bot_ch,
             resolved_genomic_info,
             caas_perms_resolved,
-            caas_pos_pval_resolved,
             caas_pos_sample_resolved,
             caas_pos_quantiles_resolved,
             resolved_postproc,
-            resolved_background,
-            caas_pos_detail_resolved,
-            caas_gene_cycle_scores_resolved
+            resolved_background
         )
 
         def final_reports = report_out.report

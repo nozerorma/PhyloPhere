@@ -46,10 +46,9 @@ SPEC = ModuleTabSpec(
             kind="path_dir",
             importance="optional",
             help=(
-                "Custom GMT gene-set files. Leave blank to auto-fetch the default "
-                "GO Biological Process/Molecular Function + Reactome + WikiPathways "
-                "set if auto-fetch is enabled, falling back to vendored assets/gmt/ "
-                "if offline."
+                "Custom GMT gene-set files. Leave blank to use the curated default "
+                "pathway sets in subworkflows/ENRICHMENT/dat/ (or auto-fetch if "
+                "enabled)."
             ),
         ),
         Section("STRING DB Resources"),

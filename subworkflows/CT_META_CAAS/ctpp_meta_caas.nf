@@ -112,7 +112,7 @@ process CAAS_SIGNIFICANCE_REPORT {
                     position_scores_input = '${position_scores}',
                     gene_scores_input = '${gene_scores}',
                     output_dir = '${outdir}',
-                    p_emp_thr = ${params.scoring_p_emp_thr ?: 0.1},
+                    p_emp_thr = ${params.scoring_p_emp_thr ?: 0.05},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '16.CAAS_significance_report.html'
@@ -132,7 +132,7 @@ process CAAS_SIGNIFICANCE_REPORT {
                     position_scores_input = '${position_scores}',
                     gene_scores_input = '${gene_scores}',
                     output_dir = '${outdir}',
-                    p_emp_thr = ${params.scoring_p_emp_thr ?: 0.1},
+                    p_emp_thr = ${params.scoring_p_emp_thr ?: 0.05},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '16.CAAS_significance_report.html'

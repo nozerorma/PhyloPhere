@@ -592,7 +592,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   node_ci <- ace_res$CI95
   node_df <- data.frame(
     node = node_indices,
-    estimate = as.numeric(node_est[as.character(node_indices)]),
+    estimate = as.numeric(node_est),
     ci_lower = as.numeric(node_ci[,1]),
     ci_upper = as.numeric(node_ci[,2]),
     stringsAsFactors = FALSE
@@ -701,8 +701,11 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   tip_meta$node <- seq_len(Ntip_rescaled)
   tip_meta$is_up <- !is.na(tip_meta$direction) & tip_meta$direction == "up"
   tip_meta$is_down <- !is.na(tip_meta$direction) & tip_meta$direction == "down"
-  tip_meta$tip_value_label <- ifelse(tip_meta$immediate_parent %in% TRUE,
-                                      sprintf("%.2f", tip_meta$estimate), NA_character_)
+  tip_meta$species_annotated <- ifelse(
+    tip_meta$immediate_parent %in% TRUE,
+    sprintf("plain(%s)~bold(\"[%.2f]\")", vapply(tip_meta$tip, deparse, character(1)), tip_meta$estimate),
+    sprintf("plain(%s)", vapply(tip_meta$tip, deparse, character(1)))
+  )
 
   # Collect parent nodes that have derived tips (same test as before). Folded
   # into plot_df (below) rather than passed as a separate data= frame to
@@ -718,7 +721,7 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
 
   plot_df <- dplyr::left_join(
     all_vals,
-    tip_meta[, c("node", "is_up", "is_down", "cumulative_derived", "tip_value_label")],
+    tip_meta[, c("node", "is_up", "is_down", "cumulative_derived", "species_annotated")],
     by = "node"
   )
   plot_df$is_up[is.na(plot_df$is_up)] <- FALSE
@@ -737,7 +740,6 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   tip_lab_size   <- max(2.2, 4.5 - 0.008 * Ntip_rescaled)
   symbol_size    <- max(2.5, 5.0 - 0.008 * Ntip_rescaled)
   node_lab_size  <- max(2.0, 4.0 - 0.008 * Ntip_rescaled)
-  tip_value_size <- max(2.0, 3.6 - 0.007 * Ntip_rescaled)
 
   vermillion_col <- as.character(tableau_10["vermillion"])
   # "green", not "bluish_green" -- the latter is this palette's teal/cyan
@@ -756,9 +758,17 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
 
   p <- gg_base +
     ggtree::geom_tree(ggplot2::aes(color = estimate), linewidth = 0.7) +
-    ggplot2::scale_color_gradient(low = "white", high = vermillion_col,
-                                   name = paste0(trait, " (", model_used, ")")) +
-    ggtree::geom_tiplab(size = tip_lab_size, offset = 0.045 * tree_depth, color = "black") +
+    ggplot2::scale_color_gradient(
+      low = "white", high = vermillion_col,
+      name = paste0(trait, " (", model_used, ")"),
+      guide = ggplot2::guide_colorbar(
+        barwidth = ggplot2::unit(20, "lines"),
+        barheight = ggplot2::unit(1.2, "lines"),
+        title.position = "top",
+        title.hjust = 0.5
+      )
+    ) +
+    ggtree::geom_tiplab(ggplot2::aes(label = species_annotated), parse = TRUE, size = tip_lab_size, offset = 0.08 * tree_depth, color = "black") +
     ggtree::theme_tree2() +
     # hexpand(direction=1): pads the x-range beyond the tree's own bounding
     # box on the label side only. Canvas size (asr_dims$width, fixed inches)
@@ -766,11 +776,11 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
     # of it -- shrinking the branches' footprint and freeing room on the
     # right for tip labels/values/symbols that were previously getting
     # clipped at the panel edge.
-    ggtree::hexpand(0.18, direction = 1) +
+    ggtree::hexpand(0.28, direction = 1) +
     ggplot2::theme(
       legend.position = "none",  # re-added below the caption via cowplot
       plot.margin = ggplot2::margin(10, 60, 10, 10),
-      plot.subtitle = ggplot2::element_text(size = 16, color = "black"),
+      plot.subtitle = ggplot2::element_text(size = 16, color = "black", face = "bold"),
       plot.caption = ggplot2::element_text(size = 13, color = "black", hjust = 0.35),
       axis.text = ggplot2::element_text(size = 12, color = "black")
     ) +
@@ -781,37 +791,32 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
                         "parent node values shown for derived tips.")
     )
 
-  # Derivation symbols sit just BELOW the tip row and the phenotype value
-  # just ABOVE it, both at the tip's own x (y-nudge only) -- centered on the
-  # leaf instead of trailing further out along the branch axis, where the
-  # old x-offset/position_nudge scheme let the value label (offset = 0.10 *
-  # tree_depth) run into the species name (offset = 0.045 * tree_depth).
-  # Up/down (mutually exclusive) and cumulative-derived are independent
-  # tests and can both be true for the same tip, so cumulative gets a larger
-  # downward nudge to avoid landing on top of the triangle.
+  # Derivation symbols sit along the tip row (y = tip y) shifted to the right of the tip.
+  # Up/down triangle sits at first offset; cumulative-derived square sits next to it
+  # (second offset if a triangle is also present, first offset otherwise).
+  sym_offset1 <- 0.025 * tree_depth
+  sym_offset2 <- 0.052 * tree_depth
+  has_tri <- tip_data$is_up | tip_data$is_down
+  tip_data$sq_x <- ifelse(has_tri, tip_data$x + sym_offset2, tip_data$x + sym_offset1)
+
   if (any(tip_data$is_up)) {
     p <- p + ggplot2::geom_point(data = subset(tip_data, is_up),
-                                  ggplot2::aes(x = x, y = y - 0.30),
+                                  ggplot2::aes(x = x + sym_offset1, y = y),
                                   shape = 24, fill = vermillion_col, color = "black", size = symbol_size)
   }
   if (any(tip_data$is_down)) {
     p <- p + ggplot2::geom_point(data = subset(tip_data, is_down),
-                                  ggplot2::aes(x = x, y = y - 0.30),
+                                  ggplot2::aes(x = x + sym_offset1, y = y),
                                   shape = 25, fill = green_col, color = "black", size = symbol_size)
   }
   if (any(tip_data$cumulative_derived)) {
     p <- p + ggplot2::geom_point(data = subset(tip_data, cumulative_derived),
-                                  ggplot2::aes(x = x, y = y - 0.58),
+                                  ggplot2::aes(x = sq_x, y = y),
                                   shape = 22, fill = blue_col, color = "black", size = symbol_size)
-  }
-  if (any(!is.na(tip_data$tip_value_label))) {
-    p <- p + ggplot2::geom_text(data = subset(tip_data, !is.na(tip_value_label)),
-                                 ggplot2::aes(x = x, y = y + 0.32, label = tip_value_label),
-                                 size = tip_value_size, color = "black")
   }
   if (any(!is.na(plot_df$node_label))) {
     p <- p + ggtree::geom_nodelab(ggplot2::aes(subset = !is.na(node_label), label = node_label),
-                                   size = node_lab_size, hjust = -0.1, color = "black")
+                                   size = node_lab_size, fontface = "bold", hjust = -0.1, color = "black")
   }
 
   # Legend (the ASR trait-estimate colour bar) is pulled from p with
@@ -820,11 +825,13 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   # ggplot2's native legend.position="bottom" sandwiches the legend between
   # the panel and the caption instead, which is not what was asked for here.
   legend_grob <- cowplot::get_legend(
-    p + ggplot2::theme(legend.position = "bottom",
-                        legend.title = ggplot2::element_text(size = 14, color = "black"),
-                        legend.text = ggplot2::element_text(size = 12, color = "black"))
+    p + ggplot2::theme(
+      legend.position = "bottom",
+      legend.title = ggplot2::element_text(size = 14, color = "black", margin = ggplot2::margin(b = 6)),
+      legend.text = ggplot2::element_text(size = 12, color = "black")
+    )
   )
-  p <- cowplot::plot_grid(p, legend_grob, ncol = 1, rel_heights = c(1, 0.05))
+  p <- cowplot::plot_grid(p, legend_grob, ncol = 1, rel_heights = c(1, 0.06))
 
   # --- Return ---
   list(

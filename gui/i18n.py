@@ -1074,6 +1074,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'it': 'Modalità filtro geni',
         'de': 'Genfiltermodus',
     },
+    'Remove CAAS spatial clusters': {
+        'en': 'Remove CAAS spatial clusters',
+        'es': 'Eliminar clústeres espaciales de CAAS',
+        'ca': 'Eliminar clústers espacials de CAAS',
+        'fr': 'Supprimer les clusters spatiaux de CAAS',
+        'it': 'Rimuovi cluster spaziali di CAAS',
+        'de': 'Räumliche CAAS-Cluster entfernen',
+    },
     'ASR substitution model': {
         'en': 'ASR substitution model',
         'es': 'Modelo de sustitución ASR',
@@ -1519,6 +1527,14 @@ TRANSLATIONS: Dict[str, Dict[str, str]] = {
         'fr': 'Chemin de la matrice de substitution LG',
         'it': 'Percorso della matrice di sostituzione LG',
         'de': 'Pfad zur LG-Substitutionsmatrix',
+    },
+    'Substitution matrix path (optional)': {
+        'en': 'Substitution matrix path (optional)',
+        'es': 'Ruta de la matriz de sustitución (opcional)',
+        'ca': 'Ruta de la matriu de substitució (opcional)',
+        'fr': 'Chemin de la matrice de substitution (optionnel)',
+        'it': 'Percorso della matrice di sostituzione (opzionale)',
+        'de': 'Pfad zur Substitutionsmatrix (optional)',
     },
     'Inference method': {
         'en': 'Inference method',

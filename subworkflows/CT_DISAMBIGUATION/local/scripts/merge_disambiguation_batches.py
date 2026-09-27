@@ -31,7 +31,7 @@ def parse_args():
     return parser.parse_args()
 
 
-def _concat_csv(batch_dirs, relpath, out_path):
+def _concat_csv(batch_dirs, relpath, out_path, delimiter=","):
     header = None
     out_path.parent.mkdir(parents=True, exist_ok=True)
     n_rows = 0
@@ -42,14 +42,14 @@ def _concat_csv(batch_dirs, relpath, out_path):
             if not src.exists():
                 continue
             with open(src, "r", newline="") as in_f:
-                reader = csv.reader(in_f)
+                reader = csv.reader(in_f, delimiter=delimiter)
                 rows = list(reader)
             if not rows:
                 continue
             batch_header, batch_rows = rows[0], rows[1:]
             if header is None:
                 header = batch_header
-                writer = csv.writer(out_f)
+                writer = csv.writer(out_f, delimiter=delimiter)
                 writer.writerow(header)
             elif batch_header != header:
                 raise ValueError(
@@ -170,6 +170,11 @@ def main():
         batch_dirs, "diagnostics/no_change_debug.csv", out_dir / "diagnostics" / "no_change_debug.csv"
     )
     print(f"[merge_disambiguation_batches] diagnostics/no_change_debug.csv: {n_no_change} rows")
+
+    n_asr = _concat_csv(
+        batch_dirs, "diagnostics/caas_hypothesis_domain_asr.tsv", out_dir / "diagnostics" / "caas_hypothesis_domain_asr.tsv", delimiter="\t"
+    )
+    print(f"[merge_disambiguation_batches] diagnostics/caas_hypothesis_domain_asr.tsv: {n_asr} rows")
 
     n_json = _union_dir(batch_dirs, "json_summaries", out_dir / "json_summaries")
     print(f"[merge_disambiguation_batches] json_summaries/: {n_json} files")

@@ -54,7 +54,6 @@ process SCORING_COMPUTE {
     path accum_files
     path hypotheses_pairs   // optional: contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS sentinel otherwise
     path caas_perms         // optional: caas_perms.rds (CAAS permulation-excess null); NO_FILE sentinel otherwise
-    path caas_pos_pval      // optional: perm_pos_pval.tsv (position-level calibrated null p); NO_FILE sentinel otherwise
     path caas_pos_cycle_caas // optional: perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE sentinel otherwise
 
     output:
@@ -65,11 +64,6 @@ process SCORING_COMPUTE {
     path "fcs_stats_fade.tsv",                         optional: true, emit: fcs_stats_fade
     path "fcs_stats_accum.tsv",                        optional: true, emit: fcs_stats_accum
     path "gene_correlations.tsv",                            emit: gene_correlations
-    path "position_score_stress_summary.tsv",         optional: true, emit: stress_summary
-    path "position_score_stress_correlations.tsv",    optional: true, emit: stress_correlations
-    path "position_score_stress_rank_agreement.tsv",  optional: true, emit: stress_rank_agreement
-    path "position_score_stress_top_overlap.tsv",     optional: true, emit: stress_top_overlap
-    path "position_score_stress_variants.tsv",        optional: true, emit: stress_variants
     path "gene_lists",                                 optional: true, emit: gene_lists
     path "position_lists",                             optional: true, emit: position_lists
     path "gene_threshold_enrichment.tsv",             optional: true, emit: gene_threshold_enrichment
@@ -86,7 +80,6 @@ process SCORING_COMPUTE {
     def fs_bot_arg        = fade_site_bot.name =~ /^NO_FADE_SITE_BOT/ ? 'NO_FADE_SITE_BOT' : "${fade_site_bot}"
     def hp_arg            = hypotheses_pairs.name =~ /^NO_/ ? 'NO_HYP_PAIRS' : "${hypotheses_pairs}"
     def cp_arg            = caas_perms.name =~ /^NO_/ ? 'NO_FILE' : "${caas_perms}"
-    def cpp_arg           = caas_pos_pval.name =~ /^NO_/ ? 'NO_FILE' : "${caas_pos_pval}"
     def cpcc_arg          = caas_pos_cycle_caas.name =~ /^NO_/ ? 'NO_FILE' : "${caas_pos_cycle_caas}"
     def gene_perm_pooled  = params.scoring_gene_perm_pooled ?: false
 
@@ -104,12 +97,9 @@ process SCORING_COMPUTE {
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
-            --caas_pos_pval   '${cpp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
-            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.1} \
-            --stress               '${params.scoring_stress ?: false}' \
-            --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
+            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.05} \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \
@@ -133,12 +123,9 @@ process SCORING_COMPUTE {
             --accum_dir      '${accum_arg}' \
             --hypotheses_pairs '${hp_arg}' \
             --caas_perms      '${cp_arg}' \
-            --caas_pos_pval   '${cpp_arg}' \
             --caas_pos_cycle_caas '${cpcc_arg}' \
             --gene_perm_pooled '${gene_perm_pooled}' \
-            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.1} \
-            --stress               '${params.scoring_stress ?: false}' \
-            --stress_top_n         ${params.scoring_stress_top_n ?: 25} \
+            --p_emp_thr             ${params.scoring_p_emp_thr ?: 0.05} \
             --top_pct              ${top_pct} \
             --top25_pct            0.25 \
             --top5_pct             0.05 \

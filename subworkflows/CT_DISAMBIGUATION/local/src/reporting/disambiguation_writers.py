@@ -85,10 +85,10 @@ def _detect_max_pairs(results: List[Dict]) -> int:
     """
     max_pairs = 0
     for result in results:
-        # Count domain_<d>_node columns present in result
+        # Count domain_<d>_score / domain_<d>_posterior columns present in result
         pair_count = 0
         idx = 1
-        while f"domain_{idx}_node" in result:
+        while f"domain_{idx}_score" in result or f"domain_{idx}_posterior" in result:
             pair_count += 1
             idx += 1
         max_pairs = max(max_pairs, pair_count)
@@ -99,11 +99,7 @@ def _detect_max_pairs(results: List[Dict]) -> int:
 
 def _generate_dynamic_fields(max_pairs: int) -> List[str]:
     """
-    Generate field list with dynamic focal node columns.
-
-    **DYNAMIC PAIR SUPPORT (2025-12-05)**:
-    ASR-related fields moved to END to maintain core CSV structure.
-    Only extends schema when ASR data available.
+    Generate field list with dynamic per-domain columns.
 
     Args:
         max_pairs: Maximum number of pairs to generate columns for
@@ -142,22 +138,12 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
         # CAAS convergence score on the Voronoi domain (scoring_v2 core v3)
         "asr_path_score",
         "derived_agreement",
-        # ASR fields (AT END - only present when ASR available)
-        "all_mrca_state",
-        "all_mrca_posterior",
-        "all_mrca_node",
-        # Union across pooled hypotheses of the same-residue domain pairs that
-        # drove `asr_path_score` (see path_scores.score_domains_side); debug-tree
-        # visualization only. "a-b:lca:contrib|a2-b2:lca2:contrib2".
-        "pairwise_lca",
     ]
 
-    # Per-domain columns for the K fixed Voronoi domains (ASR-related, at end).
+    # Per-domain columns for the K fixed Voronoi domains (at end).
     for idx in range(1, max_pairs + 1):
         fields.extend(
             [
-                f"domain_{idx}_node",
-                f"domain_{idx}_state",
                 f"domain_{idx}_posterior",
                 f"domain_{idx}_score",
                 # Raw derived/ancestral residues (modal over the harvest): feed

@@ -13,55 +13,33 @@ include { ENSEMBL_VEP_ANNOTATE } from "${baseDir}/subworkflows/VEP/ensembl_vep.n
 
 workflow VEP {
     take:
-        caas_input
-        position_scores_input   // SCORING position_scores.tsv (convergence gate); null/absent -> no-op
+        position_scores_input   // SCORING position_scores.tsv
 
     main:
-        // Output channels default to empty when VEP is enabled without any CAAS source.
+        // Output channels default to empty when VEP is enabled without databases.
         def primateai_out = Channel.empty()
         def cosmic_out = Channel.empty()
         def ensembl_vep_out = Channel.empty()
 
-        // Resolve CAAS input: integrated runs pass a channel; standalone runs use
-        // --vep_caas_input.
-        def caas_source = null
-        if (caas_input) {
-            caas_source = caas_input
-        } else if (params.vep_caas_input) {
-            def f = file(params.vep_caas_input)
-            assert f.exists() : "VEP: CAAS input not found: ${params.vep_caas_input}"
-            caas_source = Channel.value(f)
-        }
-
-        if (caas_source) {
-            // .collect() + .map() converts to a value channel so the file can be
-            // forwarded to downstream processes.
-            def caas_ch = caas_source
+        // Resolve position_scores channel
+        def ps_ch = null
+        if (position_scores_input) {
+            ps_ch = position_scores_input
                 .collect()
                 .filter { files -> files && files.size() > 0 }
                 .map { files -> files[0] }
+        }
 
+        if (ps_ch) {
             // MAP files directory (upstream)
             assert params.vep_map_dir : "VEP requires --vep_map_dir (directory containing per-gene MAP TSV files)"
             def map_dir_ch = Channel.value(file(params.vep_map_dir))
-
-            // Convergence gate: SCORING position_scores.tsv (optional). Integrated
-            // runs pass a channel; standalone runs may set --vep_position_scores;
-            // otherwise a NO_FILE sentinel makes the gate a no-op.
-            def ps_ch
-            if (position_scores_input) {
-                ps_ch = position_scores_input.collect().map { it ? it[0] : file('NO_FILE') }.ifEmpty(file('NO_FILE'))
-            } else if (params.vep_position_scores) {
-                ps_ch = Channel.value(file(params.vep_position_scores))
-            } else {
-                ps_ch = Channel.value(file('NO_FILE'))
-            }
 
             // ── PrimateAI-3D score mapping (conditional on database existence) ──
             def pai_db_file = params.vep_primateai_db ? file(params.vep_primateai_db) : file('NO_FILE')
             if (pai_db_file.name != 'NO_FILE' && pai_db_file.exists() && pai_db_file.size() > 0) {
                 def pai_db_ch = Channel.value(pai_db_file)
-                def pai_out = PRIMATEAI_MAP(caas_ch, map_dir_ch, pai_db_ch, ps_ch)
+                def pai_out = PRIMATEAI_MAP(ps_ch, map_dir_ch, pai_db_ch)
                 primateai_out = pai_out.primateai_tsv
             } else {
                 log.info "ℹ VEP: PrimateAI-3D database not provided/empty — skipping PrimateAI-3D pathogenicity mapping."
@@ -71,7 +49,7 @@ workflow VEP {
             def cosmic_db_file = params.cosmic_db ? file(params.cosmic_db) : file('NO_FILE')
             if (cosmic_db_file.name != 'NO_FILE' && cosmic_db_file.exists() && cosmic_db_file.size() > 0) {
                 def cosmic_db_ch = Channel.value(cosmic_db_file)
-                COSMIC_MAP(caas_ch, map_dir_ch, cosmic_db_ch, ps_ch)
+                COSMIC_MAP(ps_ch, map_dir_ch, cosmic_db_ch)
                 cosmic_out = COSMIC_MAP.out.cosmic_tsv
             } else {
                 log.info "ℹ VEP: COSMIC database not provided/empty — skipping COSMIC somatic mutation mapping."
@@ -89,11 +67,11 @@ workflow VEP {
                 def resolved_cache_dir = params.vep_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/vep/${species}_${assembly}"
                 def cache_dir_ch = Channel.value(resolved_cache_dir)
                 def ensembl_file_ch = Channel.value(file(params.gene_ensembl_file))
-                def ensembl_out = ENSEMBL_VEP_ANNOTATE(caas_ch, map_dir_ch, ensembl_file_ch, cache_dir_ch)
+                def ensembl_out = ENSEMBL_VEP_ANNOTATE(ps_ch, map_dir_ch, ensembl_file_ch, cache_dir_ch)
                 ensembl_vep_out = ensembl_out.ensembl_vep_tsv
             }
         } else {
-            log.warn "VEP requested but no CAAS input was available from CT_POSTPROC and --vep_caas_input was not provided. Skipping VEP."
+            log.warn "VEP requested but position_scores input was empty. Skipping VEP."
         }
 
     emit:

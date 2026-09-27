@@ -16,10 +16,9 @@ process COSMIC_MAP {
                pattern: 'cosmic_scores.tsv'
 
     input:
-    path caas_file
+    path position_scores
     path vep_map_dir
     path cosmic_db
-    path position_scores
 
     output:
     path "cosmic_scores.tsv", emit: cosmic_tsv
@@ -40,16 +39,10 @@ process COSMIC_MAP {
         exit 0
     fi
 
-    PS_ARG=""
-    if [[ -s "${position_scores}" && "${position_scores}" != "NO_FILE" ]]; then
-        PS_ARG="${position_scores}"
-    fi
-
     python3 map_to_cosmic.py \
-        "${caas_file}" \
+        "${position_scores}" \
         "${vep_map_dir}" \
         "${cosmic_db}" \
-        cosmic_scores.tsv \
-        \$PS_ARG
+        cosmic_scores.tsv
     """
 }

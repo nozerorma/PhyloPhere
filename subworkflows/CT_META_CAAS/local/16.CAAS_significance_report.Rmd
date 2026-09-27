@@ -20,7 +20,7 @@ params:
   position_scores_input: NULL
   gene_scores_input: NULL
   output_dir: "."
-  p_emp_thr: 0.1
+  p_emp_thr: 0.05
   seed: "1998"
 ---
 
@@ -82,6 +82,7 @@ knitr::opts_chunk$set(
 suppressPackageStartupMessages({
   library(tidyverse)
   library(knitr)
+  library(kableExtra)
   library(scales)
   library(data.table)
   library(paletteer)
@@ -108,7 +109,7 @@ seed_val <- if (!is.null(params$seed) && nzchar(as.character(params$seed))) as.i
 set.seed(seed_val)
 
 p_emp_thr <- suppressWarnings(as.numeric(params$p_emp_thr))
-if (is.na(p_emp_thr)) p_emp_thr <- 0.1
+if (is.na(p_emp_thr)) p_emp_thr <- 0.05
 cat(sprintf("Using p.emp_adj / gene_caas_pperm_adj significance threshold: %s\n", p_emp_thr))
 ```
 
@@ -136,12 +137,20 @@ cat(sprintf("Loaded meta_caas: %d rows from %s\n", nrow(meta_caas), basename(par
 cat(sprintf("Loaded position_scores: %d rows from %s\n", nrow(position_scores), basename(params$position_scores_input)))
 cat(sprintf("Loaded gene_scores: %d rows from %s\n", nrow(gene_scores), basename(params$gene_scores_input)))
 
-required_meta_cols <- c("Gene", "Position", "pattern")
+required_meta_cols <- c("Gene", "Position")
 missing_meta_cols <- setdiff(required_meta_cols, names(meta_caas))
 if (length(missing_meta_cols) > 0) {
   stop("Missing required columns in meta_caas: ", paste(missing_meta_cols, collapse = ", "))
 }
 has_caap_group <- "caap_group" %in% names(meta_caas)
+type_col <- if ("convergence_type" %in% names(meta_caas)) {
+  "convergence_type"
+} else if ("pattern" %in% names(meta_caas)) {
+  "pattern"
+} else {
+  NULL
+}
+type_label <- if (identical(type_col, "convergence_type")) "Convergence Type" else if (identical(type_col, "pattern")) "Pattern" else "Classification"
 ```
 
 ## 2. Join SCORING's null-based significance onto the meta_caas rows
@@ -183,14 +192,20 @@ if (!has_p_emp_cols) {
 meta_caas <- meta_caas %>%
   mutate(Position = as.integer(Position)) %>%
   left_join(pos_dedup, by = c("Gene", "Position")) %>%
-  mutate(position_significant = !is.na(p.emp_adj) & p.emp_adj <= p_emp_thr)
+  mutate(
+    position_significant_raw = !is.na(p.emp) & p.emp <= p_emp_thr,
+    position_significant_adj = !is.na(p.emp_adj) & p.emp_adj <= p_emp_thr,
+    position_significant     = position_significant_adj
+  )
 
 .n_meta_rows <- nrow(meta_caas)
 .n_pos_matched <- meta_caas %>% filter(!is.na(p.emp)) %>% nrow()
+.n_unique_pos <- n_distinct(meta_caas$Position)
+.n_unique_pos_matched <- meta_caas %>% filter(!is.na(p.emp)) %>% distinct(Position) %>% nrow()
 .pos_rate <- if (.n_meta_rows > 0) .n_pos_matched / .n_meta_rows else 0
-cat(sprintf("  p.emp position join: matched %d/%d positions (%.1f%%)\n",
-            .n_pos_matched, .n_meta_rows, 100 * .pos_rate))
-if (.pos_rate < 0.5) {
+cat(sprintf("  p.emp position join: matched %d/%d rows (%d/%d unique positions, %.1f%%)\n",
+            .n_pos_matched, .n_meta_rows, .n_unique_pos_matched, .n_unique_pos, 100 * .pos_rate))
+if (.pos_rate < 0.5 && !("convergence_type" %in% names(meta_caas))) {
   cat(sprintf(paste0("  WARNING: p.emp join rate %.1f%% < 50%% -- the meta_caas positions ",
                      "and position_scores.tsv positions are likely on different coordinate ",
                      "systems or from different pipeline runs. Treat position_significant as ",
@@ -219,7 +234,11 @@ if (!has_gene_pperm_cols) {
 
 meta_caas <- meta_caas %>%
   left_join(gene_dedup, by = "Gene") %>%
-  mutate(gene_significant = !is.na(gene_caas_pperm_adj) & gene_caas_pperm_adj <= p_emp_thr)
+  mutate(
+    gene_significant_raw = !is.na(gene_caas_pperm) & gene_caas_pperm <= p_emp_thr,
+    gene_significant_adj = !is.na(gene_caas_pperm_adj) & gene_caas_pperm_adj <= p_emp_thr,
+    gene_significant     = gene_significant_adj
+  )
 
 .n_genes_meta <- n_distinct(meta_caas$Gene)
 .n_genes_matched <- meta_caas %>% filter(!is.na(gene_caas_pperm)) %>% distinct(Gene) %>% nrow()
@@ -233,68 +252,124 @@ if (.gene_rate < 0.5) {
 }
 ```
 
-## 3. Pattern-level prioritization summary
+## 3. Prioritization summary by `r type_label`
 
-**This is a prioritization summary, not a hypothesis test on the pattern.**
-We deliberately do NOT compute a combined/joint p-value (e.g. Fisher's
-method) across the positions making up a pattern. Positions within a
-pattern -- and within a gene -- are not independent draws: they share ASR
-history, tree topology, and often domain/scheme structure, so a naive joint
-combination would overstate significance. This mirrors the established
-codebase stance (see memory `stats_significance_prioritization.md`):
-ranked top-X% prioritization, not per-element FDR significance claims, is
-the right framing here. Instead we report, per pattern (and per caap_group
-when present), simple descriptive counts driven by the per-position/per-gene
-thresholds already computed above, plus the single most extreme driver
-(`min_p_emp_adj`) -- never a combined test statistic.
+**This is a prioritization summary, not a hypothesis test.**
+We report, per `r tolower(type_label)` (and per caap_group when present), simple descriptive
+counts driven by both uncorrected (`p.emp <= `r p_emp_thr``, `gene_caas_pperm <= `r p_emp_thr``)
+and FDR-adjusted (`p.emp_adj <= `r p_emp_thr``, `gene_caas_pperm_adj <= `r p_emp_thr``) thresholds,
+along with the single most extreme drivers (`min_p_emp`, `min_p_emp_adj`) -- never a combined test statistic.
 
-```{r pattern_summary}
-group_vars <- if (has_caap_group) c("caap_group", "pattern") else "pattern"
+```{r pattern_summary_table, results='asis'}
+group_vars <- c()
+if (has_caap_group) group_vars <- c(group_vars, "caap_group")
+if (!is.null(type_col)) group_vars <- c(group_vars, type_col)
+if (length(group_vars) == 0) group_vars <- "Gene"
 
 pattern_summary <- meta_caas %>%
   group_by(across(all_of(group_vars))) %>%
   summarize(
     n_positions = n(),
-    n_positions_significant = sum(position_significant, na.rm = TRUE),
-    pct_positions_significant = 100 * n_positions_significant / n_positions,
+    n_positions_significant_raw = sum(position_significant_raw, na.rm = TRUE),
+    pct_positions_significant_raw = 100 * n_positions_significant_raw / n_positions,
+    n_positions_significant_adj = sum(position_significant_adj, na.rm = TRUE),
+    pct_positions_significant_adj = 100 * n_positions_significant_adj / n_positions,
+    min_p_emp = suppressWarnings(min(p.emp, na.rm = TRUE)),
     min_p_emp_adj = suppressWarnings(min(p.emp_adj, na.rm = TRUE)),
     n_genes = n_distinct(Gene),
-    n_genes_significant = n_distinct(Gene[gene_significant %in% TRUE]),
-    pct_genes_significant = 100 * n_genes_significant / n_genes,
+    n_genes_significant_raw = n_distinct(Gene[gene_significant_raw %in% TRUE]),
+    pct_genes_significant_raw = 100 * n_genes_significant_raw / n_genes,
+    n_genes_significant_adj = n_distinct(Gene[gene_significant_adj %in% TRUE]),
+    pct_genes_significant_adj = 100 * n_genes_significant_adj / n_genes,
     .groups = "drop"
   ) %>%
-  mutate(min_p_emp_adj = ifelse(is.infinite(min_p_emp_adj), NA_real_, min_p_emp_adj)) %>%
+  mutate(
+    min_p_emp = ifelse(is.infinite(min_p_emp), NA_real_, min_p_emp),
+    min_p_emp_adj = ifelse(is.infinite(min_p_emp_adj), NA_real_, min_p_emp_adj)
+  ) %>%
   arrange(across(all_of(group_vars)))
 
-print(kable(pattern_summary, digits = 4, format.args = list(big.mark = ",")))
+kable(pattern_summary, digits = 4, format.args = list(big.mark = ",")) %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"), full_width = FALSE)
+```
 
-p_pct_sig <- ggplot(pattern_summary, aes(x = factor(pattern), y = pct_positions_significant, fill = factor(pattern))) +
-  geom_bar(stat = "identity") +
-  { if (has_caap_group) facet_wrap(~ caap_group, scales = "free_y") } +
+```{r pattern_summary_plot}
+x_col <- if (!is.null(type_col)) type_col else "Gene"
+
+plot_df_stacked <- pattern_summary %>%
+  mutate(
+    n_nonsig_raw = n_positions - n_positions_significant_raw,
+    n_nonsig_adj = n_positions - n_positions_significant_adj
+  ) %>%
+  select(
+    all_of(group_vars),
+    `Uncorrected (p.emp): Significant` = n_positions_significant_raw,
+    `Uncorrected (p.emp): Non-significant` = n_nonsig_raw,
+    `Adjusted (p.emp_adj): Significant` = n_positions_significant_adj,
+    `Adjusted (p.emp_adj): Non-significant` = n_nonsig_adj
+  ) %>%
+  pivot_longer(
+    cols = -all_of(group_vars),
+    names_to = c("correction", "status"),
+    names_sep = ": ",
+    values_to = "n_positions_count"
+  ) %>%
+  mutate(
+    status = factor(status, levels = c("Non-significant", "Significant")),
+    correction = factor(correction, levels = c("Uncorrected (p.emp)", "Adjusted (p.emp_adj)"))
+  )
+
+p_counts_sig <- ggplot(plot_df_stacked, aes(x = factor(.data[[x_col]]), y = n_positions_count, fill = status)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.7) +
+  facet_grid(if (has_caap_group) caap_group ~ correction else ~ correction, scales = "free_y") +
+  scale_fill_manual(values = c("Significant" = "#59A14F", "Non-significant" = "#BAB0AC")) +
   theme_minimal() +
   labs(
-    title = "Percent of Positions Significant by Pattern",
-    subtitle = sprintf("position_significant := p.emp_adj <= %s (prioritization summary, not a joint test)", p_emp_thr),
-    x = "Pattern",
-    y = "% positions significant"
+    title = sprintf("Position Significance Counts by %s", type_label),
+    subtitle = sprintf("Comparison of uncorrected (p.emp <= %s) vs BH-adjusted (p.emp_adj <= %s) showing significant and non-significant counts", p_emp_thr, p_emp_thr),
+    x = type_label,
+    y = "Number of positions",
+    fill = "Status"
   ) +
   theme(
     axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
     axis.title.x = element_text(margin = ggplot2::margin(t = 12)),
     plot.title = element_text(face = "bold", hjust = 0, margin = ggplot2::margin(b = 6)),
     axis.text.x = element_text(angle = 0, hjust = 0.5),
-    panel.grid.major = element_line(color = "darkgray", size = 0.5),
-    legend.position = "none"
+    panel.grid.major = element_line(color = "darkgray", linewidth = 0.3),
+    legend.position = "bottom"
   )
 
-print(p_pct_sig)
+print(p_counts_sig)
 ```
 
 ## 4. Row-level significance table
 
 ```{r rowlevel_table}
-print(kable(head(meta_caas, 50), digits = 4, format.args = list(big.mark = ",")))
-cat(sprintf("(showing first 50 of %d rows; full table written to significance/meta_caas_significance.tsv)\n", nrow(meta_caas)))
+key_cols <- intersect(
+  c("Gene", "Position", "caap_group", "convergence_type", "pattern", "side",
+    "p.emp", "p.emp_adj", "position_significant", "gene_caas_pperm", "gene_caas_pperm_adj"),
+  names(meta_caas)
+)
+other_cols <- setdiff(names(meta_caas), key_cols)
+meta_caas_display <- meta_caas %>%
+  select(all_of(c(key_cols, other_cols))) %>%
+  mutate(across(where(is.numeric), ~ round(., 4)))
+
+if (requireNamespace("DT", quietly = TRUE)) {
+  DT::datatable(
+    meta_caas_display,
+    rownames = FALSE,
+    filter = "top",
+    options = list(pageLength = 15, scrollX = TRUE, autoWidth = TRUE),
+    caption = htmltools::tags$caption(
+      style = "caption-side: top; text-align: left; font-weight: bold;",
+      sprintf("Row-level CAAS significance annotations (%d total positions; full table exported to significance/meta_caas_significance.tsv)", nrow(meta_caas))
+    )
+  )
+} else {
+  meta_caas_display
+}
 ```
 
 ## 5. Export
@@ -314,11 +389,10 @@ cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "pattern_significance_sum
 
 ## Summary
 
-This report annotates the pattern/caap_group breakdown produced by
-CT_META_CAAS with SCORING's permulation-null significance columns
-(`p.emp`/`p.emp_adj` at the position level, `gene_caas_pperm`/
-`gene_caas_pperm_adj` at the gene level), thresholded at
-`p_emp_thr = `r p_emp_thr``. Pattern-level numbers are a prioritization
+This report annotates the CAAS positions evaluated by SCORING with
+permulation-null significance columns, reporting both uncorrected (`p.emp`,
+`gene_caas_pperm`) and BH-adjusted (`p.emp_adj`, `gene_caas_pperm_adj`) p-values
+thresholded at `p_emp_thr = `r p_emp_thr``. Group-level numbers are a prioritization
 summary (counts and rates), not a combined hypothesis test.
 
 ---

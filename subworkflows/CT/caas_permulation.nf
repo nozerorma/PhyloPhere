@@ -248,7 +248,6 @@ process CAAS_PERMS_DISAMBIGUATE {
 
     output:
     path "gene_cycle_scores.tsv",        emit: gene_cycle_scores
-    path "perm_pos_pval.tsv",            emit: pos_pval
     path "perm_pos_cycle_caas.tsv.gz",   emit: pos_cycle_caas   // p.emp numerator/denominator
     path "perm_pos_sample.tsv",          emit: pos_sample
     path "perm_pos_quantiles.tsv",       emit: pos_quantiles
@@ -290,7 +289,6 @@ process CAAS_PERMS_DISAMBIGUATE {
         ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
         ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     cp caas_perms_out/gene_cycle_scores.tsv gene_cycle_scores.tsv
-    cp caas_perms_out/perm_pos_pval.tsv perm_pos_pval.tsv
     cp caas_perms_out/perm_pos_cycle_caas.tsv.gz perm_pos_cycle_caas.tsv.gz
     cp caas_perms_out/perm_pos_sample.tsv perm_pos_sample.tsv
     cp caas_perms_out/perm_pos_quantiles.tsv perm_pos_quantiles.tsv
@@ -392,7 +390,6 @@ process CAAS_PERMS_AGGREGATE {
 
     input:
     path gene_cycle_scores
-    path perm_pos_pval, stageAs: 'input_perm_pos_pval.tsv'
     path perm_pos_cycle_caas, stageAs: 'input_perm_pos_cycle_caas.tsv.gz'
     path perm_pos_sample, stageAs: 'input_perm_pos_sample.tsv'
     path perm_pos_quantiles, stageAs: 'input_perm_pos_quantiles.tsv'
@@ -401,7 +398,6 @@ process CAAS_PERMS_AGGREGATE {
 
     output:
     path "caas_perms.rds",            emit: perms
-    path "perm_pos_pval.tsv",         emit: pos_pval
     path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas
     path "perm_pos_sample.tsv",       emit: pos_sample
     path "perm_pos_quantiles.tsv",    emit: pos_quantiles
@@ -413,7 +409,6 @@ process CAAS_PERMS_AGGREGATE {
     def universe_arg = universe.name != 'NO_FILE' ? "--universe ${universe}" : ""
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     """
-    cp ${perm_pos_pval} perm_pos_pval.tsv
     cp ${perm_pos_cycle_caas} perm_pos_cycle_caas.tsv.gz
     cp ${perm_pos_sample} perm_pos_sample.tsv
     cp ${perm_pos_quantiles} perm_pos_quantiles.tsv
@@ -446,7 +441,7 @@ process CAAS_PERMS_REBUILD {
     tag "caas_perms_rebuild"
     label 'process_medium'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true,
-               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_pval.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz}'
+               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz}'
 
     input:
     path perm_pos_detail, stageAs: 'input_perm_pos_detail'   // dir (current) or legacy .tsv.gz file
@@ -455,7 +450,6 @@ process CAAS_PERMS_REBUILD {
     output:
     path "caas_perms.rds",            emit: perms
     path "gene_cycle_scores.tsv",     emit: gene_cycle_scores
-    path "perm_pos_pval.tsv",         emit: pos_pval,       optional: true
     path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas, optional: true
     path "perm_pos_sample.tsv",       emit: pos_sample,    optional: true
     path "perm_pos_quantiles.tsv",    emit: pos_quantiles, optional: true
@@ -577,7 +571,6 @@ workflow CAAS_PERMULATION {
         def disambigBatchSize = (params.ct_disambig_perms_batch_size ?: 1) as int
 
         def perms_ch
-        def pos_pval_ch
         def pos_cycle_caas_ch
         def pos_sample_ch
         def pos_quantiles_ch
@@ -598,7 +591,6 @@ workflow CAAS_PERMULATION {
             def rebuilt = CAAS_PERMS_REBUILD(merged.pos_detail, universe)
 
             perms_ch             = rebuilt.perms
-            pos_pval_ch          = rebuilt.pos_pval.ifEmpty(file('NO_CAAS_POS_PVAL'))
             pos_cycle_caas_ch    = rebuilt.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))
             pos_sample_ch        = rebuilt.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))
             pos_quantiles_ch     = rebuilt.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))
@@ -606,11 +598,10 @@ workflow CAAS_PERMULATION {
             gene_cycle_scores_ch = rebuilt.gene_cycle_scores
         } else {
             def scores = CAAS_PERMS_DISAMBIGUATE(perm_discovery, resample_subset_bc, gated_tree, fop_pairs_bc, gene_lengths_bc)
-            def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_pval, scores.pos_cycle_caas,
+            def agg = CAAS_PERMS_AGGREGATE(scores.gene_cycle_scores, scores.pos_cycle_caas,
                                            scores.pos_sample, scores.pos_quantiles, scores.pos_detail, universe)
 
             perms_ch             = agg.perms
-            pos_pval_ch          = agg.pos_pval
             pos_cycle_caas_ch    = agg.pos_cycle_caas
             pos_sample_ch        = agg.pos_sample
             pos_quantiles_ch     = agg.pos_quantiles
@@ -620,7 +611,6 @@ workflow CAAS_PERMULATION {
 
     emit:
         perms              = perms_ch
-        pos_pval           = pos_pval_ch        // pos_perm_p per (gene,position,scheme)
         pos_cycle_caas     = pos_cycle_caas_ch  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
         pos_sample         = pos_sample_ch      // cycle-stratified sample for distribution plots
         pos_quantiles      = pos_quantiles_ch   // per (cycle,scheme) distribution shape

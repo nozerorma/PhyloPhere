@@ -28,10 +28,9 @@ process PRIMATEAI_MAP {
                pattern: 'primateai_mapped.tsv'
 
     input:
-    path caas_file
+    path position_scores
     path vep_map_dir
     path primateai_db
-    path position_scores
 
     output:
     path "primateai_mapped.tsv", emit: primateai_tsv
@@ -52,16 +51,10 @@ process PRIMATEAI_MAP {
         exit 0
     fi
 
-    PS_ARG=""
-    if [[ -s "${position_scores}" && "${position_scores}" != "NO_FILE" ]]; then
-        PS_ARG="${position_scores}"
-    fi
-
     python3 map_to_primateai.py \
-        "${caas_file}" \
+        "${position_scores}" \
         "${vep_map_dir}" \
         "${primateai_db}" \
-        primateai_mapped.tsv \
-        \$PS_ARG
+        primateai_mapped.tsv
     """
 }

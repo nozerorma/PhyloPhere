@@ -65,20 +65,12 @@ def main():
         amino_col = col_lc.get('amino_encoded')
         caap_col = col.get('caap_group') or col_lc.get('caap_group')
         dres_col = col_lc.get('derived_residues')
-        top_sup_col = col_lc.get('top_residue_support')
-        bot_sup_col = col_lc.get('bottom_residue_support')
+        top_sup_col = col_lc.get('top_species_residues') or col_lc.get('top_residue_support')
+        bot_sup_col = col_lc.get('bottom_species_residues') or col_lc.get('bottom_residue_support')
 
-        if any(c is None for c in [tag_col, caas_col, gene_col, pos_col]):
-            print("Missing required columns in CAAS file header.", file=sys.stderr)
+        if any(c is None for c in [gene_col, pos_col]):
+            print("Missing required columns (Gene, Position) in CAAS / position_scores file header.", file=sys.stderr)
             write_header_only(output_tsv)
-
-        if dres_col is None:
-            print(
-                "WARN: `derived_residues` column absent from CAAS file — regenerate "
-                "filtered_discovery.tsv through CT_POSTPROC. Falling back to raw "
-                "`caas` pattern letters for this run.",
-                file=sys.stderr,
-            )
 
         for line in fh:
             fields = line.rstrip('\n').split('\t')
@@ -98,28 +90,22 @@ def main():
             if skip_positions is not None and (gene, position) in skip_positions:
                 continue  # fractional FOP rule: derived residues genuinely disagree
 
-            tag = fields[tag_col]
-            caas_pat = fields[caas_col]
+            tag = fields[tag_col] if tag_col is not None else f"{gene}_{position}"
+            caas_pat = fields[caas_col] if caas_col is not None else ''
             cside = fields[cside_col] if cside_col is not None else ''
             amino_enc = fields[amino_col] if amino_col is not None else ''
-            caas_change = amino_enc
+            caas_change = amino_enc if amino_enc else caas_pat
             weight = SCHEME_WEIGHTS.get(caap_grp, 1.0)
 
-            if dres_col is not None:
-                anc_aas, der_aas = anc_der_from_descriptor(
-                    fields[dres_col],
-                    fields[top_sup_col] if top_sup_col is not None else '',
-                    fields[bot_sup_col] if bot_sup_col is not None else '',
-                    cside,
-                )
-            else:
-                raw_top, _, raw_bot = caas_pat.partition('/')
-                anc_aas = {c for c in raw_bot.upper() if c.isalpha()} if cside == 'top' else \
-                          ({c for c in raw_top.upper() if c.isalpha()} if cside == 'bottom' else set())
-                der_aas = {c for c in raw_top.upper() if c.isalpha()} if cside == 'top' else \
-                          ({c for c in raw_bot.upper() if c.isalpha()} if cside == 'bottom' else
-                           {c for c in (raw_top + raw_bot).upper() if c.isalpha()})
-                der_aas = (der_aas - anc_aas) or der_aas  # drop unchanged residues
+            top_sup = fields[top_sup_col] if top_sup_col is not None else ''
+            bot_sup = fields[bot_sup_col] if bot_sup_col is not None else ''
+
+            anc_aas, der_aas = anc_der_from_descriptor(
+                top_sup,
+                bot_sup,
+                cside,
+                caas=caas_pat,
+            )
 
             key = (gene, position)
             if key not in caas_targets:

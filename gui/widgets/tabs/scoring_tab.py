@@ -58,7 +58,6 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="scoring_string", label="Enable STRING DB integration", kind="bool", importance="optional"),
         FieldSpec(name="scoring_compare_fdr", label="Cross-tool comparison FDR cutoff", importance="default"),
         FieldSpec(name="scoring_compare_top_n", label="Cross-tool comparison top-N genes", importance="optional"),
-        Section("Robustness and stress testing"),
         FieldSpec(name="scoring_stress", label="Run stress-enrichment analysis", kind="bool", importance="optional"),
         FieldSpec(name="scoring_stress_top_n", label="Stress-enrichment top-N", importance="optional"),
         FieldSpec(
@@ -66,12 +65,12 @@ SPEC = ModuleTabSpec(
             label="Stress-enrichment rank metric",
             kind="choice",
             choices=("spearman", "pearson"),
-            importance="default",
+            importance="optional",
         ),
         FieldSpec(name="scoring_window_size_bp", label="Genomic window size (bp)", importance="optional"),
         FieldSpec(
-            name="scoring_pos_perm_p_thr",
-            label="Position-level permulation p (BH) threshold",
+            name="scoring_p_emp_thr",
+            label="Position-level permulation p.emp_adj threshold",
             importance="default",
         ),
     ),

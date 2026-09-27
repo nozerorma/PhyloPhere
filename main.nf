@@ -75,7 +75,6 @@ include {FADE_GENE_LISTS as FADE_GENE_LISTS_PRECOMP_TOP; FADE_GENE_LISTS as FADE
 include {FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_PRECOMP_BOTTOM} from './subworkflows/FADE/fade_json_to_csv.nf'
 include {SELECTION_PREP} from './subworkflows/SELECTION/selection_prep.nf'
 include {VEP}                       from './workflows/vep.nf'
-include {VEP as VEP_STANDALONE}      from './workflows/vep.nf'
 include {SCORING}        from './workflows/scoring.nf'
 include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_caas.nf'
 include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
@@ -259,12 +258,11 @@ workflow {
 
         def scoring_caas_perms_ch = null
         def scoring_caas_perm_scores_ch = null
-        def scoring_caas_pos_pval_ch = null
         def scoring_caas_pos_cycle_caas_ch = null   // perm_pos_cycle_caas.tsv.gz — p.emp numerator/denominator
         def scoring_caas_pos_sample_ch = null
         def scoring_caas_pos_quantiles_ch = null
-        def scoring_caas_pos_detail_ch = null        // sharded perm_pos_detail dir — report FPR calibration figure (Tier 1C)
-        def scoring_caas_gene_cycle_scores_ch = null // gene_cycle_scores.tsv — report FPR calibration figure (Tier 1C)
+        def scoring_caas_pos_detail_ch = null        // sharded perm_pos_detail dir — CT_ACCUMULATION permulation null (Tier 3E)
+        def scoring_caas_gene_cycle_scores_ch = null // gene_cycle_scores.tsv — CT_ACCUMULATION permulation null (Tier 3E)
         def caas_perm_out = null
 
         if (run_ct_disambiguation) {
@@ -445,7 +443,6 @@ workflow {
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms
                 scoring_caas_perm_scores_ch = Channel.empty()
-                scoring_caas_pos_pval_ch = caas_perm_out.pos_pval      // pos_perm_p per (gene,position,scheme)
                 scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // cycle-stratified sample for distribution plots
                 scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles  // per (cycle,scheme) distribution shape
@@ -468,8 +465,15 @@ workflow {
             def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
             // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
             def disambiguation_dir_ch = disambiguation_results ? disambiguation_results.results_dir : null
+            // Gene-level filtering (CAAS_FILTER_GENES) needs the per-hypothesis metadata
+            // table for extreme/dubious outlier detection -- same "prefer
+            // global_meta_caas.tsv, fall back to meta_caas.tsv" resolution used for
+            // CT_DISAMBIGUATION above; CT_POSTPROC falls back to --meta_caas_from when null.
+            def meta_for_postproc = meta_caas_results
+                ? meta_caas_results.global_meta_caas.mix(meta_caas_results.meta_caas)
+                : null
 
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, disambiguation_dir_ch)
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, disambiguation_dir_ch, meta_for_postproc)
             ran_any = true
 
             // Capture postproc outputs as reusable references.
@@ -536,10 +540,8 @@ workflow {
 
         }
 
-        // VEP is invoked further down: with --scoring it runs AFTER SCORING so it
-        // can consume position_scores.tsv for the convergence_schemes gate
-        // (SCORING -> VEP -> ENRICHMENT); without --scoring it runs standalone
-        // via VEP_STANDALONE after the scoring block. See both call sites below.
+        // VEP is invoked further down after SCORING: it consumes position_scores.tsv
+        // directly from SCORING (SCORING -> VEP -> ENRICHMENT).
 
         if (params.fade) {
             // Resolve upstream channel sources for SELECTION_PREP.
@@ -675,8 +677,9 @@ workflow {
         println "DEBUG: params.traitname = '${params.traitname}'"
 
         // CAAS permulation-excess null → genes×N matrices (caas_perms.rds) + the
-        // lean position-level pos_perm_p detection null. Runs whenever caas_permulation_enrichment
-        // is enabled. If live CT ran, consumes ct_results channels; if CT is precomputed
+        // per-cycle position-level null (perm_pos_cycle_caas.tsv.gz, feeds p.emp).
+        // Runs whenever caas_permulation_enrichment is enabled. If live CT ran,
+        // consumes ct_results channels; if CT is precomputed
         // (RUN_CAAS=false), resolves precomputed resample + alignment inputs to run
         // CAAS_PERMS_PREP and CAAS_PERMULATION.
 
@@ -688,7 +691,9 @@ workflow {
 
             // Wire upstream outputs into SCORING. Pass null (not Channel.empty())
             // when a module didn't run so if(channel) guards detect absence correctly.
-            def scoring_postproc_ch      = postproc_results ? postproc_results.filtered_discovery : null
+            def scoring_postproc_ch      = postproc_results
+                ? postproc_results.filtered_discovery.collect().map { it[0] }
+                : (params.scoring_postproc_input ? Channel.value(file(params.scoring_postproc_input)) : null)
             // Precomputed FADE JSONs (--fade_json_dir_top/_bottom, no --fade this run)
             // feed the exact same summary_tsv/site_tsv SCORING needs, via
             // fade_precomp_{top,bot}_out captured above — so a --scoring run against a
@@ -737,13 +742,10 @@ workflow {
                 pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
                 scoring_rer_perms_ch,  // RER permulation RDS → p.perm in centralized RER FCS
                 scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
-                scoring_caas_pos_pval_ch,    // pos_perm_p per (gene,position,scheme)
                 scoring_caas_pos_cycle_caas_ch, // per (gene,position,side,cycle) caas_sum/n_schemes → p.emp
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
                 scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
-                scoring_hyp_pairs_ch,          // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
-                scoring_caas_pos_detail_ch,          // sharded perm_pos_detail dir — report FPR calibration figure
-                scoring_caas_gene_cycle_scores_ch    // gene_cycle_scores.tsv — report FPR calibration figure
+                scoring_hyp_pairs_ch           // contrast_hypotheses_pairs.tsv — FOP domain-pool weights
             )
             ran_any = true
 
@@ -751,49 +753,47 @@ workflow {
             // CAAS_META_CAAS_REPORT (run above inside the run_meta_caas
             // block). It must run after SCORING because it joins
             // position_scores.tsv (p.emp/p.emp_adj) and gene_scores.tsv
-            // (gene_caas_pperm/gene_caas_pperm_adj) onto CT_META_CAAS's
-            // already-published meta_caas table -- neither SCORING output exists
-            // yet at the point CT_META_CAAS itself runs. Gated on
-            // run_meta_caas && meta_caas_results (CT_META_CAAS
-            // actually produced a meta_caas table) && params.scoring (SCORING
-            // actually ran, so SCORING.out.position_scores/gene_scores exist).
-            if (run_meta_caas && meta_caas_results && params.scoring) {
-                // Same "prefer global_meta_caas.tsv, fall back to per-group
-                // meta_caas.tsv" single-file resolution CT_DISAMBIGUATION uses
-                // for meta_for_disambiguation (workflows/ct_disambiguation.nf).
-                def signif_meta_upstream = meta_caas_results.global_meta_caas
-                    .mix(meta_caas_results.meta_caas)
-                    .flatten()
-                    .filter { f ->
-                        def p = f.toString().toLowerCase()
-                        p.endsWith('global_meta_caas.tsv') ||
-                        p.contains('meta_caas/global_meta_caas.tsv') ||
-                        p.endsWith('meta_caas.tsv') ||
-                        p.contains('meta_caas/meta_caas.tsv')
-                    }
-                    .collect()
-                    .map { files ->
-                        if (!files) return null
-                        def preferred = files.find { f ->
+            // (gene_caas_pperm/gene_caas_pperm_adj) onto the postproc-filtered
+            // discovery table (the exact pooled dataset evaluated by SCORING),
+            // with fallback to CT_META_CAAS's global_meta_caas.tsv when standalone.
+            if (params.scoring) {
+                def signif_caas_upstream = scoring_postproc_ch
+                if (!signif_caas_upstream && meta_caas_results) {
+                    signif_caas_upstream = meta_caas_results.global_meta_caas
+                        .mix(meta_caas_results.meta_caas)
+                        .flatten()
+                        .filter { f ->
                             def p = f.toString().toLowerCase()
-                            p.endsWith('global_meta_caas.tsv') || p.contains('meta_caas/global_meta_caas.tsv')
+                            p.endsWith('global_meta_caas.tsv') ||
+                            p.contains('meta_caas/global_meta_caas.tsv') ||
+                            p.endsWith('meta_caas.tsv') ||
+                            p.contains('meta_caas/meta_caas.tsv')
                         }
-                        preferred ?: files[0]
-                    }
-                    .filter { it != null }
+                        .collect()
+                        .map { files ->
+                            if (!files) return null
+                            def preferred = files.find { f ->
+                                def p = f.toString().toLowerCase()
+                                p.endsWith('global_meta_caas.tsv') || p.contains('meta_caas/global_meta_caas.tsv')
+                            }
+                            preferred ?: files[0]
+                        }
+                        .filter { it != null }
+                }
 
-                CAAS_SIGNIFICANCE_REPORT(
-                    signif_meta_upstream,
-                    SCORING.out.position_scores,
-                    SCORING.out.gene_scores
-                )
-                ran_any = true
+                if (signif_caas_upstream) {
+                    CAAS_SIGNIFICANCE_REPORT(
+                        signif_caas_upstream,
+                        SCORING.out.position_scores,
+                        SCORING.out.gene_scores
+                    )
+                    ran_any = true
+                }
             }
 
-            // VEP after SCORING: the convergence_schemes gate reads position_scores.tsv.
+            // VEP after SCORING: fed directly by position_scores.tsv.
             if (params.vep) {
-                def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : null
-                VEP(vep_caas_ch, SCORING.out.position_scores)
+                VEP(SCORING.out.position_scores)
             }
 
             if (params.enrichment) {
@@ -872,7 +872,6 @@ workflow {
                     scoring_rer_perms_ch,
                     caas_perms_for_enrich,
                     scoring_caas_perm_scores_ch,
-                    scoring_caas_pos_pval_ch,
                     scoring_caas_pos_sample_ch,
                     scoring_caas_pos_cycle_caas_ch,
                     position_scores_ch,
@@ -892,13 +891,9 @@ workflow {
             }
         }
 
-        // Standalone VEP (no --scoring this run): the convergence gate then falls
-        // back to --vep_position_scores, or is a no-op. The --scoring path runs
-        // VEP inside the scoring block above with SCORING.out.position_scores.
+        // Standalone VEP is retired: VEP strictly depends on SCORING and is fed by position_scores.tsv.
         if (params.vep && !params.scoring) {
-            def vep_caas_ch = postproc_results ? postproc_results.filtered_discovery : null
-            VEP_STANDALONE(vep_caas_ch, null)
-            ran_any = true
+            error "VEP requires --scoring: standalone VEP has been retired. VEP depends on SCORING and is fed directly by position_scores.tsv."
         }
 
         if (!ran_any) {

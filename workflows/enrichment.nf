@@ -114,7 +114,6 @@ workflow ENRICHMENT {
         rer_perms_ch
         caas_perms_ch
         caas_perm_scores_ch
-        caas_pos_pval_ch
         caas_pos_sample_ch
         caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_sum,n_schemes) -> POSENRICH's p.perm
         position_scores

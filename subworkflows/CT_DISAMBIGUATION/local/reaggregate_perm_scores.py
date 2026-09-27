@@ -44,7 +44,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from src.utils.gene_wrapper import (  # noqa: E402
     build_percent_rank_lookup,
     _finalize_perm_scores,
-    _finalize_perm_pos_pval,
     iter_detail_rows,
 )
 
@@ -112,17 +111,6 @@ def main() -> int:
     # per-cycle CAAS numerator/denominator behind scoring_compute.R's p.emp) --
     # a rebuild from an existing run's detail shards regenerates it for free.
     logger.info("[reaggregate] wrote %s", args.output_dir / "perm_pos_cycle_caas.tsv.gz")
-
-    # Tier 2: also rebuild perm_pos_pval.tsv (adds pos_perm_p) from the same
-    # detail shards -- needed when re-deriving from a run whose original
-    # perm_pos_pval.tsv predates the pos_perm_p column, since that file is
-    # otherwise only ever written by process_all_genes_perms's pass A.
-    _finalize_perm_pos_pval(
-        detail_path=args.detail,
-        output_dir=args.output_dir,
-        cycle_tags=cycle_tags,
-    )
-    logger.info("[reaggregate] wrote %s", args.output_dir / "perm_pos_pval.tsv")
     return 0
 
 

@@ -1155,13 +1155,17 @@ not restricted to the US scheme.
 .glob10 <- test_glob_10(pos_df); .glob5 <- test_glob_5(pos_df); .glob1 <- test_glob_1(pos_df)
 
 pos_score_meta <- pos_df %>%
-  select(Gene, Position, CAAS_score, n_schemes, side) %>%
+  select(Gene, Position, CAAS_score, n_schemes, side,
+         any_of(c("n_hypotheses", "participating_hypotheses", "supporting_hypotheses"))) %>%
   mutate(
     caas_decile  = dplyr::ntile(CAAS_score, 10),
     in_top_10pct = .glob10,
     in_top_5pct  = .glob5,
     in_top_1pct  = .glob1
   )
+if (!"supporting_hypotheses" %in% names(pos_score_meta) && "participating_hypotheses" %in% names(pos_score_meta)) {
+  pos_score_meta$supporting_hypotheses <- pos_score_meta$participating_hypotheses
+}
 
 has_background <- .file_ok(params$universe_file)
 if (has_background) {

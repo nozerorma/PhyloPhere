@@ -35,6 +35,7 @@ MODEL_SPECS: Dict[str, ModelSpec] = {
     "proportional": {"paml_model": 1, "aa_rate_file": None},
     "dayhoff": {"paml_model": 3, "aa_rate_file": "dayhoff.dat"},
     "jtt": {"paml_model": 3, "aa_rate_file": "jtt.dat"},
+    "jones": {"paml_model": 3, "aa_rate_file": "jtt.dat"},  # alias
     "wag": {"paml_model": 3, "aa_rate_file": "wag.dat"},
     "lg": {"paml_model": 3, "aa_rate_file": "lg.dat"},
 }

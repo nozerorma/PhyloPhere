@@ -16,7 +16,6 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     path "removed_patterns_precluster.tsv", emit: removed_patterns
 
     script:
-    def mrca_threshold = params.ct_disambig_posterior_threshold
     // Optional extant-species residue tally: needs the alignment dir + the full
     // contrast species lists. params.alignment is a global; the species lists are
     // read from selection's own publish path (same idiom as selection_prep.nf's
@@ -54,7 +53,6 @@ process CAAS_PREPARE_POSTPROC_INPUT {
 
     python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/prepare_postproc_input.py \
         --input ${disambiguation_input} \
-        --mrca-threshold ${mrca_threshold} \
         --output postproc_disambiguation_input.tsv \
         --removed-output removed_patterns_precluster.tsv \
         ${ali_flag} \$SP_FLAGS
@@ -116,21 +114,25 @@ process CAAS_FILTER_GENES {
 
     input:
     path(discovery_file)
+    path(meta_caas_file)
     path(gene_ensembl_file)
     path(cluster_file)
-    
+
     output:
     path "filtered_discovery.tsv", emit: filtered_discovery
     path "removed_genes_summary.tsv", emit: removed_genes
     path "gene_stats.tsv", emit: gene_stats, optional: true
-    
+
     script:
-    def cluster_arg = (params.gene_filter_mode in ['dubious', 'both']) ? "-c ${cluster_file}" : ""
+    def cluster_arg = cluster_file ? "-c ${cluster_file}" : ""
+    def remove_clusters_flag = params.remove_caas_clusters ? "--remove-clusters" : ""
     """
     python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/filter_caas_genes.py \
         -i ${discovery_file} \
+        -e ${meta_caas_file} \
         -l ${gene_ensembl_file} \
         ${cluster_arg} \
+        ${remove_clusters_flag} \
         -m ${params.gene_filter_mode} \
         --extreme-percentile ${params.extreme_threshold} \
         --iqr-multiplier ${params.iqr_multiplier} \

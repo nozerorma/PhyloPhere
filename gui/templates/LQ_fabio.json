@@ -188,7 +188,7 @@
       "scoring_stress_top_n": "25",
       "scoring_stress_rank_metric": "spearman",
       "scoring_window_size_bp": "1000000",
-      "scoring_pos_perm_p_thr": "0.1"
+      "scoring_p_emp_thr": "0.1"
     },
     "enrichment": {
       "enabled": true,

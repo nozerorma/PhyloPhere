@@ -92,7 +92,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "fade": _bool_str(fade_enabled),
         "vep": _bool_str(vep_enabled),
         "scoring": _bool_str(scoring.enabled),
-        "scoring_stress": _bool_str(scoring.scoring_stress),
+        "scoring_stress": _bool_str(getattr(scoring, 'scoring_stress', False)),
         "enrichment": _bool_str(enrichment.enabled),
         "posenrich": _bool_str(enrichment.posenrich_enabled),
         "scoring_ami": _bool_str(getattr(enrichment, 'scoring_ami', enrichment.scoring_string)),

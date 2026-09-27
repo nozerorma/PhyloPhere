@@ -109,6 +109,7 @@ class DisambiguationConfig(ModuleConfigBase):
     minlen_values: str = "2,3,4,10"  # --minlen_values
     maxcaas_values: str = "0.6,0.7,0.8"  # --maxcaas_values
     gene_filter_mode: str = "dubious"  # --gene_filter_mode (none|extreme|dubious|both)
+    remove_caas_clusters: bool = True  # --remove_caas_clusters (discard spatial clusters)
     extreme_threshold: str = "0.99"  # --extreme_threshold
     iqr_multiplier: str = "3.0"  # --iqr_multiplier
 
@@ -265,11 +266,11 @@ class ScoringConfig(ModuleConfigBase):
     scoring_string: bool = True  # --scoring_string
     scoring_compare_fdr: str = "0.1"  # --scoring_compare_fdr
     scoring_compare_top_n: str = "20"  # --scoring_compare_top_n
-    scoring_stress: bool = True  # RUN_SCORING_STRESS -> --scoring_stress
+    scoring_stress: bool = False  # --scoring_stress (leave-one-axis-out stress test)
     scoring_stress_top_n: str = "25"  # --scoring_stress_top_n
     scoring_stress_rank_metric: str = "spearman"  # --scoring_stress_rank_metric (spearman|pearson)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
-    scoring_pos_perm_p_thr: str = "0.1"  # --scoring_pos_perm_p_thr (position-level CAAS permulation p, Tier 2)
+    scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.emp_adj; also gates gene_caas_pperm_adj)
 
     # NOTE: scoring_postproc_input/scoring_accum_dir/scoring_vep_primateai/
     # scoring_background_input/caas_perms_file/scoring_fade_site_top/bottom moved

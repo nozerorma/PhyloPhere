@@ -229,32 +229,7 @@ save_plot(p_comps, "asr_path_components_density.png", width = 10, height = 8)
 
 ---
 
-## 3. Subcomponent Influence on Final Score
-
-To visualize how each subcomponent influences the final `asr_path_score`, we plot their pairwise scatter plots. A linear model (red dashed line) is fitted to highlight global trends.
-
-```{r plot-comp-scatters, fig.height=9, fig.width=11, fig.cap="Scatter plots comparing individual component values against the final ASR Path Score."}
-scatter_list <- lapply(available_comps, function(comp) {
-  ggplot(score_df, aes(x = .data[[comp]], y = asr_path_score)) +
-    geom_jitter(alpha = 0.3, color = .tableau10[1], width = 0.01, height = 0) +
-    geom_smooth(method = "lm", color = .tableau10[7], se = FALSE, linetype = "dashed", formula = y ~ x) +
-    theme_bw(base_size = 11) +
-    labs(x = comp, y = "Final Path Score")
-})
-
-p_scatter <- wrap_plots(scatter_list, ncol = 2) +
-  plot_annotation(
-    title = "Influence of Components on Final ASR Path Score",
-    theme = theme(plot.title = element_text(size = 14, face = "bold"))
-  )
-
-print(p_scatter)
-save_plot(p_scatter, "asr_path_components_scatter.png", width = 11, height = 9)
-```
-
----
-
-## 4. Summary Statistics
+## 3. Summary Statistics
 
 The table below lists the summary statistics for the final path score and each of its continuous subcomponents across all scored positions.
 

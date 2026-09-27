@@ -129,15 +129,6 @@ def convert_convergence_result_to_dict(
         "amino_encoded_support": getattr(result, "amino_encoded_support", "") or "",
     }
 
-    # Position-level MRCA contrast (node / state / posterior).
-    node_mapping = getattr(result, "node_mapping", None) or {}
-    if isinstance(node_mapping, dict) and node_mapping:
-        result_dict["all_mrca_node"] = node_mapping.get("mrca_contrast")
-    nsd = getattr(result, "node_state_details", None) or {}
-    if isinstance(nsd, dict) and nsd:
-        result_dict["all_mrca_state"] = nsd.get("mrca_contrast")
-        result_dict["all_mrca_posterior"] = nsd.get("mrca_contrast_prob")
-
     # Pattern classification
     result_dict["convergence_type"] = getattr(result, "convergence_type", None)
 
@@ -150,7 +141,6 @@ def convert_convergence_result_to_dict(
     result_dict["derived_agreement"] = getattr(result, "derived_agreement", None)
 
     # ── Per-domain flat block (scoring_v2 core v3) ────────────────────────────
-    # domain_<d>_node / _state / _posterior from domain_meta (all K domains);
     # domain_<d>_score from domain_scores; domain_<d>_anc_aa / _top_aa / _bot_aa
     # from the modal harvest residues. The FOP harvest-wide, per-scheme
     # derived_agreement rebuild (V3-3/V3-4 null side) reads these.
@@ -165,8 +155,6 @@ def convert_convergence_result_to_dict(
     if domain_meta or domain_scores or anc_aa or der_top_aa or der_bot_aa:
         for d, meta in (domain_meta.items() if isinstance(domain_meta, dict) else []):
             m = meta or {}
-            result_dict[f"domain_{d}_node"] = m.get("mrca_id")
-            result_dict[f"domain_{d}_state"] = m.get("state")
             result_dict[f"domain_{d}_posterior"] = m.get("posterior")
         for d, s in domain_scores.items():
             result_dict[f"domain_{d}_score"] = s
@@ -184,20 +172,13 @@ def convert_convergence_result_to_dict(
         src = vars(result) if hasattr(result, "__dict__") else {}
         for k, v in src.items():
             if isinstance(k, str) and k.startswith("domain_") and (
-                k.endswith("_node") or k.endswith("_state") or k.endswith("_posterior")
+                k.endswith("_posterior")
                 or k.endswith("_score") or k.endswith("_anc_aa")
                 or k.endswith("_top_aa") or k.endswith("_bot_aa")
                 or k.endswith("_anc_aa_support") or k.endswith("_top_aa_support")
                 or k.endswith("_bot_aa_support")
             ):
                 result_dict[k] = v
-
-    # Union across pooled hypotheses of the same-residue domain pairs driving
-    # `core` (see path_scores.score_domains_side); debug-tree plotting only.
-    pair_lca = getattr(result, "pair_lca", None) or []
-    result_dict["pairwise_lca"] = "|".join(
-        f"{a}-{b}:{lca}:{contrib:.4f}" for a, b, lca, contrib in pair_lca
-    )
 
     return result_dict
 
@@ -478,9 +459,19 @@ def process_single_gene(
                     # exporter's re-conversion can't rebuild the domain_<d>_*
                     # block. disambiguation_db._extract_pair_count and the
                     # exporter both read these keys off the reloaded dict.
+                    # (domain_der_support_*/domain_anc_support_aa/pair_lca were
+                    # missing here: their flat/serialized columns computed by
+                    # the first convert_convergence_result_to_dict call above
+                    # were correct, but export_from_db's re-conversion of the
+                    # DB round-trip only rebuilds domain_<d>_* from these
+                    # structured keys -- absent, it silently emitted "" for
+                    # every _anc_aa_support/_top_aa_support/_bot_aa_support and
+                    # pairwise_lca column instead of the round-trip fallback.)
                     for _k in ("node_mapping", "node_state_details",
                                "domain_scores", "domain_meta", "domain_anc_aa",
-                               "domain_der_top_aa", "domain_der_bot_aa"):
+                               "domain_der_top_aa", "domain_der_bot_aa",
+                               "domain_der_support_top_aa", "domain_der_support_bot_aa",
+                               "domain_anc_support_aa", "pair_lca"):
                         _v = getattr(r, _k, None)
                         if _v is not None:
                             caas_dict[_k] = _v
@@ -1382,10 +1373,10 @@ def _perms_worker_finalize(
     postproc_filter: bool = False,
     clust_minlen: int = 3,
     clust_maxcaas: float = 0.7,
-) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> Tuple[str, List[Dict[str, Any]]]:
     """Phase B of a chunked gene replay: the true whole-gene reduction over a
     gene's merged, already FOP-pooled chunk results from _perms_worker_replay --
-    n_detected/pos_perm_p (needs the gene's FULL detected-cycle set),
+    n_detected (needs the gene's FULL detected-cycle set),
     the CT_POSTPROC cluster filter, and detail-row emission. Verbatim to the tail
     of the pre-Stage-2 monolithic _perms_worker, so output is unchanged no matter
     how many replay chunks fed into it -- n_cycles_total is passed in rather than
@@ -1394,28 +1385,17 @@ def _perms_worker_finalize(
     subset this gene happened to detect hits in.
     """
     if not all_cycle_results:
-        return (gene, [], [])
+        return (gene, [])
 
-    # ── 1. Detection count -> pos_perm_p per (position, scheme) ────────────
-    # pos_perm_p is the calibrated position-level permulation p: of the
-    # permuted-labeling cycles, how many independently re-detected THIS exact
-    # (Position, caap_group) as a CAAS, add-one smoothed (Davison & Hinkley).
-    # It is the detection-only companion of the R-side p.emp (which adds a
-    # score gate). NOT leave-one-out -- the observed run is not one of the N
-    # cycles, so there is no self-inclusion to correct (docs/scoring_v2_p_emp.md
-    # §6d). The old leave-one-out null_pvalue_boot column was deleted in the
-    # §7.4 pass: it was numerically inert under the downstream percent_rank and
-    # had no external consumer.
+    # ── 1. Detection count per (position, scheme) ──────────────────────────
+    # n_detected counts, per (Position, caap_group), how many of the
+    # permuted-labeling cycles independently re-detected that exact CAAS.
+    # It feeds the detail row's own `n_detected` column (used for the
+    # candidate-pool histogram / percent_rank calibration below), not a
+    # position-level p-value in its own right -- p.emp (scoring_compute.R,
+    # from perm_pos_cycle_caas.tsv.gz) is the sole position-level permulation
+    # p downstream.
     n_detected = {}
-    # V3-4a: pos_perm_p (and the R-side p.emp it decomposes) are POOLED to
-    # (Gene, Position): a cycle re-detects the position if it re-detects
-    # EITHER phenotype side, and the pooled statistic is the max-over-sides
-    # "all" axis (mirrors scoring_compute.R .pos_undirected and
-    # _build_cycle_score_pools' pc["all"]). The detail shard still carries
-    # `side` (a "both" position is two rows) for the per-side gene x cycle
-    # scores and the perm_pos_cycle_caas dump; only the position-level p is
-    # side-pooled, so n_detected keys on (pos, caap_group) and emits ONE
-    # perm_pos_pval row per key.
     for cyc, biochem_results in all_cycle_results:
         for r in biochem_results:
             pos = getattr(r, "position", None)
@@ -1423,19 +1403,7 @@ def _perms_worker_finalize(
             if pos is not None:
                 n_detected.setdefault((pos, group), set()).add(cyc)
 
-    n_detected_count = {}
-    perm_pos_pval_rows = []
-    for key, cycles_set in n_detected.items():
-        k = len(cycles_set)
-        n_detected_count[key] = k
-        perm_pos_pval_rows.append({
-            "Gene": gene,
-            "Position": key[0],
-            "caap_group": key[1],
-            "n_detected": k,
-            "n_cycles": n_cycles_total,
-            "pos_perm_p": (k + 1) / (n_cycles_total + 1),
-        })
+    n_detected_count = {key: len(cycles_set) for key, cycles_set in n_detected.items()}
 
     # ── 2. Emit raw per-(cycle, position, scheme) detail ──────────────────
     # Scoring itself is deliberately NOT done here. size_adj_max calibrates
@@ -1501,7 +1469,7 @@ def _perms_worker_finalize(
             }
             detail_rows.append(row)
 
-    return (gene, detail_rows, perm_pos_pval_rows)
+    return (gene, detail_rows)
 
 
 def _perms_worker(
@@ -1520,7 +1488,7 @@ def _perms_worker(
     postproc_filter: bool = False,
     clust_minlen: int = 3,
     clust_maxcaas: float = 0.7,
-) -> Tuple[str, List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> Tuple[str, List[Dict[str, Any]]]:
     """Replay N labelings over one gene's cached ASR, one gene = one worker task
     (unchunked). Composes _perms_worker_replay + _perms_worker_finalize with a
     single whole-gene chunk, so behavior is identical to the pre-Stage-2 monolithic
@@ -1966,56 +1934,6 @@ def _finalize_perm_scores(
     )
 
 
-def _finalize_perm_pos_pval(
-    detail_path: Path,
-    output_dir: Path,
-    cycle_tags: List[str],
-) -> Path:
-    """Rebuild perm_pos_pval.tsv from perm_pos_detail/ shards alone.
-
-    Tier 2 companion to _finalize_perm_scores: process_all_genes_perms's pass A
-    writes perm_pos_pval.tsv straight from _perms_worker's in-memory per-gene
-    result (it already replayed every cycle for that gene, so n_detected per
-    (Position, caap_group) is final the moment the worker returns). A rebuild
-    from an EXISTING run's detail shards -- e.g. reaggregate_perm_scores.py,
-    used when perm_pos_pval.tsv predates the pos_perm_p column and re-running
-    the ASR replay is not worth it -- has no such worker result, but does not
-    need one: each detail row already carries n_detected finalized by that
-    row's own worker, and it is identical across every row that shares the
-    same (Gene, Position, caap_group), so one streaming pass suffices.
-    """
-    import csv as _csv
-
-    n_cycles_total = len(cycle_tags)
-
-    seen: Dict[Tuple[str, int, str], int] = {}
-    # V3-4a: pos_perm_p is pooled to (Gene, Position, caap_group) — one row per
-    # key, no `side` column (see _perms_worker). n_detected is identical across
-    # every detail row sharing the key.
-    for row in iter_detail_rows(detail_path):
-        key = (row["Gene"], int(row["Position"]), row["caap_group"])
-        if key not in seen:
-            seen[key] = int(row["n_detected"])
-
-    pval_path = Path(output_dir) / "perm_pos_pval.tsv"
-    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles",
-                   "pos_perm_p"]
-    n_out = 0
-    with open(pval_path, "w", newline="") as f_pval:
-        writer = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
-        writer.writeheader()
-        for (gene, pos, grp), k in seen.items():
-            writer.writerow({
-                "Gene": gene, "Position": pos, "caap_group": grp,
-                "n_detected": k, "n_cycles": n_cycles_total,
-                "pos_perm_p": (k + 1) / (n_cycles_total + 1),
-            })
-            n_out += 1
-    logger.info("[perms] rebuilt %s (%d rows over %d distinct (Gene, Position, caap_group))",
-                pval_path.name, n_out, len(seen))
-    return pval_path
-
-
 def process_all_genes_perms(
     genes: List[str],
     alignment_dir: str,
@@ -2059,16 +1977,12 @@ def process_all_genes_perms(
         per-(gene, cycle) q90.
 
     Outputs:
-      - output_dir/gene_cycle_scores.tsv     (schema unchanged; feeds caas_perms.rds)
-      - output_dir/perm_pos_pval.tsv         (the add-one-smoothed pos_perm_p
-                                              calibrated detection-only position-level
-                                              permulation p; V3-4a: pooled to
-                                              (Gene, Position, caap_group), no `side`
-                                              column. §7.4: null_pvalue_boot dropped)
-      - output_dir/perm_pos_cycle_caas.tsv.gz (V3-4a: per (Gene, Position, side,
-                                              cycle) caas_sum / n_schemes; the R
-                                              side divides + takes the max over
-                                              sides for the pooled p.emp)
+      - output_dir/gene_cycle_scores.tsv     (feeds caas_perms.rds)
+      - output_dir/perm_pos_cycle_caas.tsv.gz (per (Gene, Position, side, cycle)
+                                              caas_sum / n_schemes; the R side
+                                              divides + takes the max over sides
+                                              for the pooled p.emp, the sole
+                                              position-level permulation p)
       - output_dir/perm_pos_detail/<Gene>.tsv.gz  (one shard per gene; re-scoring
                                               needs no ASR replay, and re-aggregation
                                               stays at one-gene peak RAM)
@@ -2119,7 +2033,6 @@ def process_all_genes_perms(
     else:
         maxtasks = int(os.environ.get("CAAS_MAX_TASKS_PER_CHILD", "50"))
 
-    pval_path = output_dir / "perm_pos_pval.tsv"
     # One gz shard per gene rather than one monolithic file: Pass A already
     # iterates gene-by-gene (imap_unordered yields one gene's complete row list
     # at a time), so this is a writer-only change. Keeps every downstream
@@ -2130,10 +2043,8 @@ def process_all_genes_perms(
     detail_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = output_dir / "perm_pos_detail.manifest.tsv"
 
-    # V3-4a: perm_pos_pval.tsv is pooled to (Gene, Position, caap_group) — no
-    # `side` column. The detail shard keeps `side` (a "both" position is two
-    # detail rows, one per side, each with its own core_s).
-    pval_fields = ["Gene", "Position", "caap_group", "n_detected", "n_cycles", "pos_perm_p"]
+    # The detail shard carries `side` (a "both" position is two detail rows,
+    # one per side, each with its own core_s).
     detail_fields = ["Gene", "cycle", "Position", "caap_group", "asr_path_score",
                      "n_detected", "clust", "side"]
 
@@ -2245,48 +2156,43 @@ def process_all_genes_perms(
         # imap_unordered.
         results_iterator = pool.imap_unordered(_perms_worker_replay_wrapper, args_generator, chunksize=1)
 
-        with open(pval_path, "w", newline="") as f_pval:
-            writer_pval = _csv.DictWriter(f_pval, fieldnames=pval_fields, delimiter="\t")
-            writer_pval.writeheader()
+        for _gene, chunk_pooled in results_iterator:
+            pending_pooled.setdefault(_gene, []).extend(chunk_pooled)
+            received[_gene] = received.get(_gene, 0) + 1
+            if received[_gene] < chunks_per_gene.get(_gene, 1):
+                continue  # more chunks still in flight for this gene
 
-            for _gene, chunk_pooled in results_iterator:
-                pending_pooled.setdefault(_gene, []).extend(chunk_pooled)
-                received[_gene] = received.get(_gene, 0) + 1
-                if received[_gene] < chunks_per_gene.get(_gene, 1):
-                    continue  # more chunks still in flight for this gene
+            gene_pooled = pending_pooled.pop(_gene)
+            received.pop(_gene, None)
+            _gene, detail_rows = _perms_worker_finalize(
+                _gene, gene_pooled, n_cycles_total,
+                postproc_filter, clust_minlen, clust_maxcaas,
+            )
+            if not detail_rows:
+                continue
 
-                gene_pooled = pending_pooled.pop(_gene)
-                received.pop(_gene, None)
-                _gene, detail_rows, pval_rows = _perms_worker_finalize(
-                    _gene, gene_pooled, n_cycles_total,
-                    postproc_filter, clust_minlen, clust_maxcaas,
-                )
-                if not detail_rows:
+            shard_path = detail_dir / f"{_sanitize_gene_shard(_gene)}.tsv.gz"
+            with gzip.open(shard_path, "wt", newline="") as f_detail:
+                writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t")
+                writer_detail.writeheader()
+                writer_detail.writerows(detail_rows)
+            manifest_rows.append((_gene, len(detail_rows)))
+
+            n_detail_rows += len(detail_rows)
+            # Per-cycle candidate-pool histogram, used by build_percent_rank_lookup
+            # below and for the pool-size diagnostic log. One count per (cycle,
+            # Position, caap_group) candidate: a "both" position is two detail
+            # rows and must NOT be counted twice.
+            _hist_seen: Set[Tuple[str, str, str]] = set()
+            for row in detail_rows:
+                hk = (row["cycle"], str(row["Position"]), row["caap_group"])
+                if hk in _hist_seen:
                     continue
-                writer_pval.writerows(pval_rows)
-
-                shard_path = detail_dir / f"{_sanitize_gene_shard(_gene)}.tsv.gz"
-                with gzip.open(shard_path, "wt", newline="") as f_detail:
-                    writer_detail = _csv.DictWriter(f_detail, fieldnames=detail_fields, delimiter="\t")
-                    writer_detail.writeheader()
-                    writer_detail.writerows(detail_rows)
-                manifest_rows.append((_gene, len(detail_rows)))
-
-                n_detail_rows += len(detail_rows)
-                # Per-cycle candidate-pool histogram, used by build_percent_rank_lookup
-                # below and for the pool-size diagnostic log. One count per (cycle,
-                # Position, caap_group) candidate: a "both" position is two detail
-                # rows and must NOT be counted twice.
-                _hist_seen: Set[Tuple[str, str, str]] = set()
-                for row in detail_rows:
-                    hk = (row["cycle"], str(row["Position"]), row["caap_group"])
-                    if hk in _hist_seen:
-                        continue
-                    _hist_seen.add(hk)
-                    cyc_hist = hist_by_cycle.setdefault(row["cycle"], {})
-                    d = row["n_detected"]
-                    cyc_hist[d] = cyc_hist.get(d, 0) + 1
-                n_genes += 1
+                _hist_seen.add(hk)
+                cyc_hist = hist_by_cycle.setdefault(row["cycle"], {})
+                d = row["n_detected"]
+                cyc_hist[d] = cyc_hist.get(d, 0) + 1
+            n_genes += 1
     finally:
         pool.close()
         pool.join()

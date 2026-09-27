@@ -385,19 +385,23 @@ if [[ -z "${INPUT_TAX_ID:-}" || ( -z "${GENE_ENSEMBL_FILE:-}" && "${AUTO_GENERAT
 fi
 
 # Resolve --gmt_dir when left blank: fetches current GO/Reactome/WikiPathways
-# GMTs if AUTO_FETCH_GMT is true, falling back per-file to vendored copies in assets/gmt/
-# (or copies vendored copies without network calls when false via --no-fetch).
+# GMTs if AUTO_FETCH_GMT is true, falling back to subworkflows/ENRICHMENT/dat/
+# (or directly falls back to subworkflows/ENRICHMENT/dat/ without network calls when false).
 if [[ -z "${GMT_DIR:-}" ]]; then
-    _NO_FETCH_ARG=""
-    if [[ "${AUTO_FETCH_GMT:-false}" != "true" ]]; then
-        _NO_FETCH_ARG="--no-fetch"
+    if [[ "${AUTO_FETCH_GMT:-false}" == "true" ]]; then
+        _GMT_RESOLVED="$(python3 "$REPO_DIR/bin/resolve_gmts.py" \
+            --output-dir "$RESULTS_BASE/core_inputs/gmt" \
+            --gmt-dir "${GMT_DIR:-}")"
+        GMT_DIR="$(echo "$_GMT_RESOLVED" | grep '^GMT_DIR=' | cut -d= -f2-)"
+    else
+        GMT_DIR="$REPO_DIR/subworkflows/ENRICHMENT/dat"
     fi
-    _GMT_RESOLVED="$(python3 "$REPO_DIR/bin/resolve_gmts.py" \
-        --output-dir "$RESULTS_BASE/core_inputs/gmt" \
-        --gmt-dir "${GMT_DIR:-}" \
-        $_NO_FETCH_ARG)"
-    GMT_DIR="$(echo "$_GMT_RESOLVED" | grep '^GMT_DIR=' | cut -d= -f2-)"
 fi
+
+# Resolve substitution matrix for FADE when left blank
+_FADE_MODEL_NORM="${FADE_MODEL:-LG}"
+_FADE_MODEL_LOWER="$(echo "$_FADE_MODEL_NORM" | tr '[:upper:]' '[:lower:]')"
+
 
 PARAMS_JSON="$RUN_DIR/params.json"
 cat > "$PARAMS_JSON" <<PARAMS_EOF
@@ -495,6 +499,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "filter_minlen": "$POSTPROC_MINLEN",
   "filter_maxcaas": "$POSTPROC_MAXCAAS",
   "gene_filter_mode": "$POSTPROC_GENE_FILTER_MODE",
+  "remove_caas_clusters": ${POSTPROC_REMOVE_CLUSTERS:-true},
   "minlen_values": "${POSTPROC_MINLEN_VALUES:-2,3,4,10}",
   "maxcaas_values": "${POSTPROC_MAXCAAS_VALUES:-0.6,0.7,0.8}",
   "extreme_threshold": "${POSTPROC_EXTREME_THRESHOLD:-0.99}",
@@ -549,7 +554,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "fade_samples": "${FADE_SAMPLES:-1000}",
   "fade_concentration": "${FADE_CONCENTRATION:-0.5}",
   "fade_min_genes_for_heatmap": "${FADE_MIN_GENES_FOR_HEATMAP:-2}",
-  "lg_dat_path": "${LG_DAT_PATH:-$REPO_DIR/subworkflows/SELECTION/local/dat/lg.dat}",
+  "lg_dat_path": "${LG_DAT_PATH:-$REPO_DIR/subworkflows/SELECTION/local/dat/${_FADE_MODEL_LOWER}.dat}",
   "fade_universe_file": "${FADE_UNIVERSE_FILE:-}",
   "fade_json_dir_top": "${FADE_JSON_DIR_TOP:-}",
   "fade_json_dir_bottom": "${FADE_JSON_DIR_BOTTOM:-}",
@@ -561,7 +566,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_stress_rank_metric": "${SCORING_STRESS_RANK_METRIC:-spearman}",
   "scoring_position_top_pct": "${SCORING_POSITION_TOP_PCT:-0.10}",
   "scoring_gene_top_pct": "${SCORING_GENE_TOP_PCT:-0.10}",
-  "scoring_pos_perm_p_thr": "${SCORING_POS_PERM_P_THR:-0.1}",
+  "scoring_p_emp_thr": "${SCORING_P_EMP_THR:-0.05}",
   "scoring_postproc_input": "${SCORING_POSTPROC_INPUT:-}",
   "scoring_accum_dir": "${SCORING_ACCUM_DIR:-}",
   "scoring_vep_primateai": "${SCORING_VEP_PRIMATEAI:-}",
@@ -591,7 +596,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "enrichment": $_RUN_ENRICHMENT,
   "fcs_enabled": ${FCS_ENABLED:-true},
   "auto_fetch_gmt": ${AUTO_FETCH_GMT:-false},
-  "gmt_dir": "${GMT_DIR:-}",
+  "gmt_dir": "${GMT_DIR:-$REPO_DIR/subworkflows/ENRICHMENT/dat}",
   "fcs_min_genes": "${FCS_MIN_GENES:-5}",
   "fcs_max_genes": "${FCS_MAX_GENES:-500}",
   "fcs_fdr": "${FCS_FDR:-0.15}",

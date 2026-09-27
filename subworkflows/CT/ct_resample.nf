@@ -89,7 +89,7 @@ process RESAMPLE {
         ${params.include_b0} \\
         ${params.pss_top_pct ?: 0.05} \\
         ${params.max_tries ?: 1000000} \\
-        "${params.traitname ?: (params.trait ?: '')}" \\
+        "${params.traitname ?: ''}" \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
@@ -143,7 +143,7 @@ process RESAMPLE {
         ${params.include_b0} \\
         ${params.pss_top_pct ?: 0.05} \\
         ${params.max_tries ?: 1000000} \\
-        "${params.traitname ?: (params.trait ?: '')}" \\
+        "${params.traitname ?: ''}" \\
         "${params.n_trait ?: ''}" \\
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\

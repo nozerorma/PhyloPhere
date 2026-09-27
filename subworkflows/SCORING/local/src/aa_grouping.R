@@ -5,7 +5,7 @@
 # =============================================================================
 # Verbatim transcription of the 5 partitions in
 #   subworkflows/CT_DISAMBIGUATION/local/src/biochem/grouping.py
-# (the source of truth; byte-identical to subworkflows/CT/local/modules/caap_id.py,
+# (the source of truth; byte-identical to subworkflows/CT/local/modules/caas_id.py,
 # both following Chen & Zou 2025, Mol Ecol Resour 25(1):e70052,
 # doi:10.1111/1755-0998.70052).
 #

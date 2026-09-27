@@ -51,14 +51,14 @@ rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
 caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
-caas_pos_pval_file   <- parse_arg("--caas_pos_pval")  # perm_pos_pval.tsv (position-level calibrated null p); NO_FILE otherwise
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
-# p.emp/p.emp_adj significance threshold for flag_caas_significant (fcs_stats.tsv).
-# Mirrors 11.Scoring_report.Rmd's `scoring_p_emp_thr` param (conf/scoring.config:47,
-# default 0.1) - same threshold, reused here so the FCS/POSENRICH/Comparison "%
-# significant" tables agree with what the Scoring report itself calls significant.
-p_emp_thr         <- as.numeric(parse_arg("--p_emp_thr", "0.1"))
+# p.emp/p.emp_adj significance threshold for flag_caas_significant (fcs_stats.tsv)
+# and gene_caas_pperm_adj. Mirrors 11.Scoring_report.Rmd's `scoring_p_emp_thr`
+# param (conf/scoring.config) - one threshold, reused here so the
+# FCS/POSENRICH/Comparison "% significant" tables agree with what the Scoring
+# report itself calls significant.
+p_emp_thr         <- as.numeric(parse_arg("--p_emp_thr", "0.05"))
 # The disambiguation subworkflow domain-pools the hypothesis harvest in-tree
 # (core v3: fop_pool.pool_domains over the K fixed Voronoi domains), so rows
 # arrive one per (Gene, Position, scheme, side) with hypothesis=NA and scoring
@@ -130,7 +130,7 @@ df <- read_tsv(postproc_file, show_col_types = FALSE)
 # (caap_group, …) - consumed as-is; position_scores.tsv keeps the same lowercase schema.
 # NOTE: `pvalue` / `gate_sig` / `gate_all` are NOT live columns here. The
 # hypergeometric CAAP p-value (subworkflows/CT/local/modules/hyper.py) was
-# deleted in 6448728 ("no greeeedy plus pss", 2026-09-01); caap_id.py no longer
+# deleted in 6448728 ("no greeeedy plus pss", 2026-09-01); caas_id.py no longer
 # emits a `pvalue` field at all, so this and every downstream reference to
 # pvalue/gate_sig/gate_all is structurally NA/FALSE. Cleaned up 2026-09-11 --
 # see git blame if reviving the hypergeometric gate is ever wanted.
@@ -183,10 +183,8 @@ if (!"participating_hypotheses" %in% names(df)) df$participating_hypotheses <- "
 # convergence_schemes was the scheme-dependent FOP-disagreement flag and
 # n_conserved_pairs counted the dropped conserved_<j>_* block. A domain that
 # does not converge simply scores 0 now.
-for (.c in c("derived_residues", "top_residue_support",
-             "bottom_residue_support", "top_residue_support_detail",
-             "bottom_residue_support_detail", "top_species_residues",
-             "bottom_species_residues", "n_top_species", "n_bottom_species")) {
+for (.c in c("top_species_residues", "bottom_species_residues",
+             "n_top_species", "n_bottom_species")) {
   if (!.c %in% names(df)) df[[.c]] <- ""
 }
 df$asr_path_score <- suppressWarnings(as.numeric(df$asr_path_score))
@@ -226,27 +224,6 @@ df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
 df <- df %>%
   mutate(caas_row = asr_score)
 
-# ── 2f-bis. Tier 2: base-cycle count of the position-level permulation null ──
-# perm_pos_pval.tsv (CT_DISAMBIGUATION's CAAS permulation-excess null, see
-# subworkflows/CT_DISAMBIGUATION/local/src/utils/gene_wrapper.py) is now a
-# diagnostic-only artefact: pos_perm_p / pos_perm_p_adj are the detection-only
-# decomposition of p.emp and stay canonical in that file (docs/scoring_v2_p_emp.md
-# §7.3 flip -- p.emp_adj is the position headline, pos_perm_p is no longer joined
-# into position_scores.tsv). All this block still needs from the file is N, the
-# base-cycle count (== §4f's ncol(byrank)), which §2f-ter's p.emp uses so its
-# add-one denominator matches the gene-level null.
-has_caas_pos_pval <- file_exists(caas_pos_pval_file)
-if (has_caas_pos_pval) {
-  cat("Loading position-level permulation null (N only):", caas_pos_pval_file, "\n")
-  .pp_n <- read_tsv(caas_pos_pval_file, show_col_types = FALSE) %>%
-    select(any_of("n_cycles"))
-  .perm_n_cycles <- if ("n_cycles" %in% names(.pp_n) && nrow(.pp_n) > 0)
-    suppressWarnings(max(as.integer(.pp_n$n_cycles), na.rm = TRUE)) else NA_integer_
-} else {
-  cat("  no --caas_pos_pval provided; p.emp falls back to its own cycle count\n")
-  .perm_n_cycles <- NA_integer_
-}
-
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
 # Position to integer here (the old §2f-bis join used to do this as a side
 # effect): §2f-ter joins pos_scores to the per-cycle null on (Gene, Position),
@@ -280,15 +257,11 @@ pos_scores <- df %>%
     n_schemes          = dplyr::n(),
     scheme_set         = paste(sort(unique(as.character(caap_group))), collapse = "+"),
     # POINT 3 descriptors: position-level after §2b pooling -> first() carries them.
-    derived_residues       = if ("derived_residues" %in% names(df)) dplyr::first(derived_residues) else "",
-    top_residue_support    = if ("top_residue_support" %in% names(df)) dplyr::first(top_residue_support) else "",
-    bottom_residue_support = if ("bottom_residue_support" %in% names(df)) dplyr::first(bottom_residue_support) else "",
-    top_residue_support_detail    = if ("top_residue_support_detail" %in% names(df)) dplyr::first(top_residue_support_detail) else "",
-    bottom_residue_support_detail = if ("bottom_residue_support_detail" %in% names(df)) dplyr::first(bottom_residue_support_detail) else "",
     top_species_residues    = if ("top_species_residues" %in% names(df)) dplyr::first(top_species_residues) else "",
     bottom_species_residues = if ("bottom_species_residues" %in% names(df)) dplyr::first(bottom_species_residues) else "",
     n_top_species           = if ("n_top_species" %in% names(df)) dplyr::first(n_top_species) else "",
     n_bottom_species        = if ("n_bottom_species" %in% names(df)) dplyr::first(n_bottom_species) else "",
+    caas                    = if ("caas" %in% names(df)) dplyr::first(caas) else "",
     # The per-caap_group factors (asr_score / caas_row) and the ASR diagnostic
     # axes (asr_path_score, derived_agreement) are DELIBERATELY not
     # carried to the position level: CAAS_score = mean_k(asr_k) over schemes, and
@@ -296,8 +269,6 @@ pos_scores <- df %>%
     # split V->{I,L} shows derived_agreement ~ 0.9 when US strongly disagrees).
     # They stay per-(Gene, Position, caap_group) in `df` for anything that needs
     # the breakdown (e.g. the §3 stress test used to aggregate them there directly).
-    all_mrca_posterior = first(all_mrca_posterior),
-    across(all_of(mrca_posterior_cols), \(x) first(x)),
     caap_group         = first(caap_group),
     .groups = "drop"
   )
@@ -357,8 +328,7 @@ if (has_caas_pos_cycle_caas) {
     group_by(Gene, Position) %>%
     summarise(.obs = max(CAAS_score), .groups = "drop")
 
-  N_emp <- if (!is.na(.perm_n_cycles) && .perm_n_cycles > 0) .perm_n_cycles
-           else dplyr::n_distinct(cyc_pooled$cycle)
+  N_emp <- dplyr::n_distinct(cyc_pooled$cycle)
 
   .k_emp <- cyc_pooled %>%
     inner_join(obs_max, by = c("Gene", "Position")) %>%
@@ -386,13 +356,11 @@ if (has_caas_pos_cycle_caas) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 
-# ── 2h. Tier 2: BH-adjust p.emp within the tested set ──────────────────────
+# ── 2h. BH-adjust p.emp within the tested set ───────────────────────────────
 # Mirrors the gene_caas_pperm_adj idiom (Tier 1A, section below): BH over
 # exactly the positions that got a null match, so genes/positions absent from
-# the null's own universe (NA) never enter or dilute the adjustment.
-# §7.3 flip: p.emp_adj is the position headline. pos_perm_p / pos_perm_p_adj are
-# the detection-only decomposition and are BH-adjusted in perm_pos_pval.tsv's own
-# consumers (the SCORING report), not here -- they never reach position_scores.tsv.
+# the null's own universe (NA) never enter or dilute the adjustment. p.emp_adj
+# is the sole position-level permulation p.
 pos_scores$p.emp_adj <- NA_real_
 if (has_caas_pos_cycle_caas) {
   .tested_e <- !is.na(pos_scores$p.emp)
@@ -1010,23 +978,23 @@ cat("\n─── Writing outputs ───────────────�
 # per-caap_group factors of caas_row and their scheme-mean does not reconstruct
 # CAAS_score (see §2g note). CAAS_score is the position-level number; the
 # per-scheme breakdown lives upstream in filtered_discovery.tsv. `asr_path_score`
-# below is the .side_diag per-side mean (SC5), not the per-row factor.
+# (the .side_diag per-side mean, SC5) is dropped here too: since core v3
+# caas_row == asr_path_score row-for-row, its (Gene, Position, side) mean is
+# bit-identical to CAAS_score, so carrying it is pure duplication.
+# derived_residues / top_residue_support / bottom_residue_support (+ _detail)
+# are gone entirely (residue_descriptors.py): top_species_residues /
+# bottom_species_residues (alignment-based, hypothesis-independent) is the
+# sole raw-AA descriptor now.
 pos_out <- pos_scores %>%
   select(Gene, Position,
          n_schemes, any_of("scheme_set"),
          any_of(c("n_hypotheses", "participating_hypotheses",
-                  "derived_residues", "top_residue_support", "bottom_residue_support",
-                  "top_residue_support_detail", "bottom_residue_support_detail",
                   "top_species_residues", "bottom_species_residues",
                   "n_top_species", "n_bottom_species")), CAAS_score,
          side,
-         # T3d: per-side diagnostic for the reports (SC5).
-         any_of("asr_path_score"),
          any_of("caas"),
-         # §7.3 flip (docs/scoring_v2_p_emp.md): p.emp / p.emp_adj are the pooled
-         # "detects AND exceeds" position p and the position headline. The
-         # detection-only pos_perm_p / pos_perm_p_adj stay canonical in
-         # perm_pos_pval.tsv and are no longer carried here.
+         # p.emp / p.emp_adj: the pooled "detects AND exceeds" position p,
+         # the sole position-level permulation p.
          any_of(c("p.emp", "p.emp_adj"))) %>%
   arrange(desc(CAAS_score))
 

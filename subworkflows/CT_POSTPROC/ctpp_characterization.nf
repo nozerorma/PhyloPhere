@@ -42,6 +42,7 @@ process CT_POSTPROC_REPORT {
     def extreme_thresh = params.extreme_threshold
     def iqr_mult = params.iqr_multiplier
     def gene_filter = params.gene_filter_mode
+    def remove_clusters = params.remove_caas_clusters ? 'TRUE' : 'FALSE'
 
 
     if (params.use_singularity | params.use_apptainer) {
@@ -67,6 +68,7 @@ process CT_POSTPROC_REPORT {
                     extreme_threshold = ${extreme_thresh},
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
+                    remove_caas_clusters = ${remove_clusters},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '8.Characterization_report.html'
@@ -96,6 +98,7 @@ process CT_POSTPROC_REPORT {
                     extreme_threshold = ${extreme_thresh},
                     iqr_multiplier = ${iqr_mult},
                     gene_filter_mode = '${gene_filter}',
+                    remove_caas_clusters = ${remove_clusters},
                     seed = '${params.seed ?: 1998}'
                 ),
                 output_file = '8.Characterization_report.html'

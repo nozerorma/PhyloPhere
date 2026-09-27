@@ -50,7 +50,7 @@ process SCORING_FCS_REPORT {
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
     def traitname = params.traitname ?: 'unknown_trait'
-    def gmt_dir   = params.gmt_dir
+    def gmt_dir   = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
@@ -134,7 +134,7 @@ process RER_FCS_REPORT {
 
     script:
     def local_dir = "${baseDir}/subworkflows/ENRICHMENT/local"
-    def gmt_dir   = params.gmt_dir
+    def gmt_dir   = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
     def num_g     = params.fcs_min_genes
     def max_g     = params.fcs_max_genes ?: 0
     def fdr_thr   = params.fcs_fdr
@@ -280,7 +280,7 @@ workflow FCS_COMPUTE {
     main:
     def batchSize = (params.fcs_batch_size ?: 4) as int
     def counter = 0
-    def gmt_dir_resolved = params.gmt_dir ?: "${baseDir}/assets/gmt"
+    def gmt_dir_resolved = params.gmt_dir ?: "${baseDir}/subworkflows/ENRICHMENT/dat"
     def batches = Channel.fromPath("${gmt_dir_resolved}/*.gmt")
         .collate(batchSize)
         .map { batch ->

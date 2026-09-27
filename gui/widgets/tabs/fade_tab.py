@@ -58,7 +58,7 @@ SPEC = ModuleTabSpec(
             name="fade_model",
             label="Substitution model",
             kind="choice",
-            choices=("LG", "JTT", "WAG", "Blosum62", "GTR"),
+            choices=("LG", "WAG", "JTT", "Dayhoff"),
             importance="default",
         ),
         FieldSpec(name="fade_bf_threshold", label="Bayes Factor threshold", importance="default"),
@@ -78,7 +78,17 @@ SPEC = ModuleTabSpec(
         FieldSpec(name="fade_burn_in", label="MCMC burn-in", importance="default"),
         FieldSpec(name="fade_samples", label="MCMC samples", importance="default"),
         FieldSpec(name="fade_concentration", label="Dirichlet concentration prior", importance="default"),
-        FieldSpec(name="lg_dat_path", label="LG substitution matrix path", kind="path_file", importance="optional"),
+        FieldSpec(
+            name="lg_dat_path",
+            label="Substitution matrix path (optional)",
+            kind="path_file",
+            importance="optional",
+            help=(
+                "Path to substitution matrix (.dat) file. When left blank, "
+                "automatically resolves to the matching model file in "
+                "subworkflows/SELECTION/local/dat/."
+            ),
+        ),
         Section("Batching and performance"),
         FieldSpec(name="selection_prep_batch_size", label="Alignment-prep genes per task", importance="optional"),
         FieldSpec(name="fade_batch_size", label="FADE genes per task", importance="optional"),

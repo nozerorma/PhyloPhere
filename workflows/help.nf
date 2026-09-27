@@ -174,6 +174,7 @@ Usage:
 --maxcaas_values                        <"0.6,0.7,0.8">                     (exploratory mode)
 --filter_minlen                          <INTEGER>                            3     (filter mode)
 --filter_maxcaas                          <FLOAT 0-1>                          0.7   (filter mode)
+--remove_caas_clusters                      <BOOLEAN>                            true  (discard spatial clusters)
 --gene_filter_mode                          <"none|extreme|dubious|both">        "dubious"
 --extreme_threshold                           <FLOAT 0-1>                          0.99
 --iqr_multiplier                                <FLOAT>                              3.0
@@ -209,7 +210,6 @@ alignment-to-protein pipeline, not just the alignment plus a public DB.
 Generate it with: https://github.com/nozerorma/ortholog_characterizator
 
 Usage:
---vep_caas_input               <"caas_input">          null  (standalone entry)
 --vep_map_dir                    <"map_dir">              null  (required when --vep is set; see github.com/nozerorma/ortholog_characterizator)
 --vep_primateai_db                 <"primateai_db">          null
 --cosmic_db                          <"cosmic_db">              null
@@ -282,9 +282,6 @@ Usage:
 --scoring_string             <true|false>            true    (legacy alias for --scoring_ami)
 --scoring_compare_fdr          <FLOAT 0-1>             0.15
 --scoring_compare_top_n           <INTEGER>               20
---scoring_stress                   <true|false>            true
---scoring_stress_top_n                <INTEGER>               25
---scoring_stress_rank_metric            <"spearman|pearson">    "spearman"
 --scoring_position_top_pct                <FLOAT 0-1>             0.10
 --scoring_gene_top_pct                       <FLOAT 0-1>             0.10
 --scoring_gene_perm_pooled                <true|false>            false  (opt-in n-stratified pooled-null variant of gene_caas_pperm, higher resolution than the per-gene-row floor -- valid only within an n_positions stratum)

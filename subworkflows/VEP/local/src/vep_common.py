@@ -16,50 +16,66 @@ import glob
 
 
 def _support_letters(support_str):
-    """Raw AA letters from a `{top,bottom}_residue_support` cell.
+    """Raw AA letters from `{top,bottom}_species_residues` or `{top,bottom}_residue_support`.
 
-    "L:3,S:2" -> {'L', 'S'}. Empty / malformed -> set().
+    "L:3,S:2" -> {'L', 'S'}. "L:3, S:2" -> {'L', 'S'}. "L, S" -> {'L', 'S'}.
+    Empty / malformed -> set().
     """
     out = set()
     for tok in str(support_str or "").split(","):
         tok = tok.strip()
-        if not tok or ":" not in tok:
+        if not tok:
             continue
-        aa = tok.split(":", 1)[0].strip().upper()
-        if aa:
-            out.add(aa)
+        if ":" in tok:
+            aa = tok.split(":", 1)[0].strip().upper()
+        else:
+            aa = tok.strip().upper()
+        for char in aa:
+            if char.isalpha():
+                out.add(char)
     return out
 
 
-def anc_der_from_descriptor(derived_residues, top_residue_support,
-                            bottom_residue_support, side):
-    """(ancestral_aas, derived_aas) from the upstream position-level descriptor.
+def anc_der_from_descriptor(*args, **kwargs):
+    """(ancestral_aas, derived_aas) from position-level residues and side.
 
-    The descriptor (built in CT_POSTPROC's residue_descriptors.py) uses the
-    ``caas`` left/right convention: ``top_residue_support`` letters are the top
-    clade's residues at the position, ``bottom_residue_support`` the bottom
-    clade's. ``side`` says which clade carries the derived change; the
-    other clade's residues are the ancestral state. Only US rows reach this
-    (caap_group filter below), so no GS-grouping handling is needed.
+    Accepts:
+      anc_der_from_descriptor(top_residues, bottom_residues, side, caas="")
+    or legacy 4-arg signature:
+      anc_der_from_descriptor(derived_residues, top_residues, bottom_residues, side, caas="")
 
-    `derived_residues` itself is not parsed — the support columns already carry
-    the per-side residue letters unambiguously.
-
-    Conservation logic: a residue present on BOTH clades did not change, so it is
-    dropped from the derived set (``der - anc``). The support columns should
-    already exclude it — residue_descriptors.py only fills ``mrca_<i>_<side>_aa``
-    for a genuine substitution — but this keeps the filter honest if one leaks.
-    A keep-all safety applies if the subtraction empties the set.
+    Extracts ancestral and derived alleles from top/bottom residues and side.
+    Falls back to caas pattern (e.g. "G/K") if species residues are empty.
     """
-    top_set = _support_letters(top_residue_support)
-    bot_set = _support_letters(bottom_residue_support)
+    caas = kwargs.get("caas", "")
+    if len(args) == 4:
+        # Legacy: (derived_residues, top_residues, bottom_residues, side)
+        _, top_res, bot_res, side = args
+    elif len(args) == 3:
+        top_res, bot_res, side = args
+    elif len(args) >= 5:
+        _, top_res, bot_res, side = args[:4]
+        caas = args[4]
+    else:
+        raise ValueError(f"anc_der_from_descriptor expected 3-5 arguments, got {len(args)}")
+
+    top_set = _support_letters(top_res)
+    bot_set = _support_letters(bot_res)
     cs = str(side or "").strip().lower()
+
+    if not top_set and not bot_set and caas:
+        # Fallback to caas pattern (e.g. "G/K" -> raw_top/raw_bot)
+        raw_top, _, raw_bot = str(caas).partition("/")
+        top_set = {c for c in raw_top.upper() if c.isalpha()}
+        bot_set = {c for c in raw_bot.upper() if c.isalpha()}
+
     if cs == "top":
         anc, der = bot_set, top_set          # ancestral = bottom, derived = top
     elif cs == "bottom":
         anc, der = top_set, bot_set          # ancestral = top, derived = bottom
     else:                                    # "none" / unknown: both sides derived
         anc, der = set(), top_set | bot_set
+
     der = (der - anc) or der
     return anc, der
 

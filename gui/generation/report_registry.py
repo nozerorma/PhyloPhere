@@ -278,10 +278,6 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "postproc/postproc_inputs/*", "**/*genomic_info*.tsv", "**/*genomic*coords*.tsv")),
         _slot("caas_perms", "CAAS permulation RDS", False,
               _first_match(outdir, "**/*caas*perm*.rds")),
-        # published under caas_permulation/ as perm_pos_*.tsv — the filename
-        # itself doesn't contain "caas".
-        _slot("caas_pos_pval", "CAAS position p-value TSV", False,
-              _first_match(outdir, "caas_permulation/perm_pos_pval.tsv", "**/*pos*pval*.tsv")),
         _slot("caas_pos_sample", "CAAS position sample TSV", False,
               _first_match(outdir, "caas_permulation/perm_pos_sample.tsv", "**/*pos*sample*.tsv")),
         _slot("caas_pos_quantiles", "CAAS position quantiles TSV", False,
@@ -290,12 +286,6 @@ def _scoring_find_slots(outdir: Listing) -> list[InputSlot]:
               _first_match(outdir, "**/filtered_discovery.tsv")),
         _slot("background_file", "Background gene list", False,
               _first_match(outdir, "**/cleaned_background*.txt", "**/*background*.txt")),
-        # perm_pos_detail is a directory (one gz shard per gene) since PR-0s;
-        # _first_match's underlying glob() matches directories as well as files.
-        _slot("caas_pos_detail", "CAAS perm_pos_detail directory (FPR calibration)", False,
-              _first_match(outdir, "caas_permulation/perm_pos_detail", "**/perm_pos_detail")),
-        _slot("caas_gene_cycle_scores", "CAAS gene_cycle_scores TSV (FPR calibration)", False,
-              _first_match(outdir, "caas_permulation/gene_cycle_scores.tsv", "**/gene_cycle_scores.tsv")),
     ]
 
 
@@ -321,13 +311,11 @@ def _scoring_build_script(report: DetectedReport, repo_dir: Path, use_singularit
             f"fade_site_bot_file   = {_r_arg(s['fade_site_bot'])}",
             f"genomic_info_file    = {_r_arg(s['genomic_info'])}",
             f"caas_perms_file      = {_r_arg(s['caas_perms'])}",
-            f"caas_pos_pval_file   = {_r_arg(s['caas_pos_pval'])}",
             f"caas_pos_sample_file = {_r_arg(s['caas_pos_sample'])}",
             f"caas_pos_quantiles_file = {_r_arg(s['caas_pos_quantiles'])}",
             f"filtered_discovery_file = {_r_arg(s['filtered_discovery'])}",
             f"background_file      = {_r_arg(s['background_file'])}",
-            f"caas_pos_detail_dir  = {_r_arg(s['caas_pos_detail'])}",
-            f"caas_gene_cycle_scores_file = {_r_arg(s['caas_gene_cycle_scores'])}",
+            "scoring_p_emp_thr    = 0.05",
             "window_size_bp       = 1000000",
             "direction            = 'combined'",
             "seed                 = '1998'",
@@ -602,11 +590,10 @@ def _signif_significance_find_slots(outdir: Listing) -> list[InputSlot]:
     scoring = outdir / "scoring"
     slots = list(_meta_caas_find_slots(outdir))
     slots.append(
-        _slot("global_meta_input", "Global/meta CAAS TSV", True,
-              # meta_caas/ is current; signification/ is the pre-rename layout
-              # still present in outdirs from older runs -- try both specific
-              # paths before the "**/*" fallback (whichever tree it's under).
-              _first_match(outdir, "meta_caas/meta_caas/global_meta_caas.tsv",
+        _slot("global_meta_input", "Filtered discovery / CAAS TSV", True,
+              _first_match(outdir, "postproc/gene_filtering/filtered_discovery.tsv",
+                            "**/*filtered_discovery.tsv",
+                            "meta_caas/meta_caas/global_meta_caas.tsv",
                             "signification/meta_caas/global_meta_caas.tsv",
                             "**/*global_meta_caas.tsv")
               or _first_match(outdir, "meta_caas/meta_caas/meta_caas.tsv",

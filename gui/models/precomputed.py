@@ -129,7 +129,6 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         # PRECOMP_USE_DISCOVERY block -- keep both in sync.
         perm_dir = os.path.join(outdir, "caas_permulation")
         entries.append(("caas_perms_file", os.path.join(perm_dir, "caas_perms.rds"), "file"))
-        entries.append(("caas_pos_pval_file", os.path.join(perm_dir, "perm_pos_pval.tsv"), "file"))
         entries.append(("caas_pos_sample_file", os.path.join(perm_dir, "perm_pos_sample.tsv"), "file"))
         entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
         # caas_pos_detail_file makes SCORING REBUILD the null (CAAS_PERMS_REBUILD)

@@ -325,8 +325,15 @@ def compute_domain_scores(
 
     for pair in pairs:
         d = pair.get("pair_id")
+        if d is None:
+            continue
         mrca_id = pair.get("node_id")
-        if d is None or mrca_id is None:
+        if mrca_id is None:
+            domain_meta[d] = {
+                "mrca_id": None,
+                "state": None,
+                "posterior": 0.0,
+            }
             continue
         focal_raw = pair.get("focal_state")
         anc_enc = encode_aa(focal_raw, scheme)

@@ -74,30 +74,36 @@ def load_caas_targets(caas_file: str) -> dict:
     targets = {}
     with open(caas_file, newline="") as fh:
         reader = csv.DictReader(fh, delimiter="\t")
+        if not reader.fieldnames:
+            return targets
         reader.fieldnames = [c.strip() for c in reader.fieldnames]
-        required = {"Gene", "Position", "derived_residues"}
-        if not required.issubset(reader.fieldnames):
+        col_lc = {c.lower(): c for c in reader.fieldnames}
+        gene_col = col_lc.get("gene")
+        pos_col = col_lc.get("position")
+        if not gene_col or not pos_col:
             sys.exit(
-                f"Error: {caas_file} is missing required columns {sorted(required)}; "
-                "the Ensembl VEP annotation source needs the modern CT_POSTPROC "
-                "descriptor output (derived_residues/top_residue_support/"
-                "bottom_residue_support/caap_group/caas_side)."
+                f"Error: {caas_file} is missing required columns 'Gene' and 'Position'."
             )
+        top_col = col_lc.get("top_species_residues") or col_lc.get("top_residue_support")
+        bot_col = col_lc.get("bottom_species_residues") or col_lc.get("bottom_residue_support")
+        side_col = col_lc.get("side")
+        caas_col = col_lc.get("caas")
+        caap_col = col_lc.get("caap_group")
+
         for row in reader:
-            caap_group = row.get("caap_group", "US") or "US"
+            caap_group = (row.get(caap_col, "US") if caap_col else "US") or "US"
             if caap_group != "US":
                 continue
-            gene = row["Gene"]
+            gene = row[gene_col]
             try:
-                position = int(row["Position"])
+                position = int(row[pos_col])
             except ValueError:
                 continue
-            anc_aas, der_aas = anc_der_from_descriptor(
-                row.get("derived_residues", ""),
-                row.get("top_residue_support", ""),
-                row.get("bottom_residue_support", ""),
-                row.get("side", ""),
-            )
+            top_res = row.get(top_col, "") if top_col else ""
+            bot_res = row.get(bot_col, "") if bot_col else ""
+            side = row.get(side_col, "") if side_col else ""
+            caas = row.get(caas_col, "") if caas_col else ""
+            anc_aas, der_aas = anc_der_from_descriptor(top_res, bot_res, side, caas=caas)
             if not anc_aas or not der_aas:
                 continue
             targets.setdefault((gene, position), []).append({
