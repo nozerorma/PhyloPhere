@@ -162,8 +162,11 @@ def match_tree_alignment_by_taxid(
 
     logger.info("Matching tree and alignment species using tax_id mapping...")
 
-    tree_species = {tip.name for tip in tree.get_terminals()}
-    aln_species = {rec.id for rec in alignment}
+    # Sorted so every mapping below (and the synthetic tax_ids assigned to
+    # shared-tax_id species) is independent of set iteration order, i.e. of
+    # PYTHONHASHSEED.
+    tree_species = sorted({tip.name for tip in tree.get_terminals()})
+    aln_species = sorted({rec.id for rec in alignment})
 
     tree_sp_to_taxid: Dict[str, str] = {}
     tree_taxid_to_sp: Dict[str, str] = {}
@@ -279,6 +282,13 @@ def match_tree_alignment_by_taxid(
 
         kept = species_list[0]
         duplicates = species_list[1:]
+        # The shared tax_id belongs to `kept`; every duplicate moves to a
+        # synthetic tax_id below. Without this reassignment the original tax_id
+        # would keep pointing at whichever duplicate was seen first, and `kept`
+        # would be absent from the inverted species -> tax_id map.
+        aln_taxid_to_sp[taxid] = kept
+        if kept in tree_sp_to_taxid:
+            tree_taxid_to_sp[taxid] = kept
 
         for i, dup_sp in enumerate(duplicates, start=1):
             synthetic_taxid = str(int(taxid) + i)

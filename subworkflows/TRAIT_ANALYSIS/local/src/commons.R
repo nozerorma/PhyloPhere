@@ -241,8 +241,6 @@ debug_log("trait_type = %s, pss_top_pct = %.4f, perm_strategy = %s", trait_type,
 # Maximum contrasts for the contrast selection algorithm (0 or Inf = dynamic discovery)
 max_contrasts <- if (exists("params") && !is.null(params$max_contrasts) && nzchar(as.character(params$max_contrasts)) && as.integer(params$max_contrasts) > 0L) {
   as.integer(params$max_contrasts)
-} else if (exists("params") && !is.null(params$contrast_max_iter) && nzchar(as.character(params$contrast_max_iter)) && as.integer(params$contrast_max_iter) > 0L) {
-  as.integer(params$contrast_max_iter)
 } else {
   Inf
 }

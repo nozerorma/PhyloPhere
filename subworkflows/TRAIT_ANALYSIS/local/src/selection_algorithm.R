@@ -1,18 +1,13 @@
 # ----------------------------------------
 # Phylogenetic Selection Algorithm for Independent Contrast Pairs
 # ----------------------------------------
-# Unified Phylogeny-Aware Pair Selection Engine
-# 1. Calculates patristic distances between species
-# 2. Selects species pairs that maximize trait differences while minimizing phylogenetic distance
-# 3. Uses modified Dunn index to ensure phylogenetic independence between selected pairs
+# Observed-trait entry point to the shared contrast-selection core
+# (subworkflows/CT/local/scripts/lean_contrast_selector.R, staged into src/).
+# The permulation null (permulations.R) selects through the same core, so the
+# null run on the real labeling reproduces this selection exactly.
 # ----------------------------------------
 
-suppressPackageStartupMessages({
-  library(ape)
-  library(dplyr)
-  library(tidyr)
-  library(tibble)
-})
+suppressPackageStartupMessages(library(ape))
 
 if (!exists("debug_log", inherits = TRUE)) {
   debug_log <- function(...) {
@@ -21,7 +16,7 @@ if (!exists("debug_log", inherits = TRUE)) {
   }
 }
 
-# Source the lean contrast selector engine
+# Source the shared contrast selector core
 selector_script_path <- {
   this_ofile <- tryCatch(sys.frame(1)$ofile, error = function(e) NULL)
   this_dir <- if (!is.null(this_ofile)) dirname(this_ofile) else ""
@@ -30,8 +25,7 @@ selector_script_path <- {
     file.path(getwd(), "..", "..", "CT", "local", "scripts", "lean_contrast_selector.R"),
     file.path(getwd(), "subworkflows", "CT", "local", "scripts", "lean_contrast_selector.R"),
     file.path(this_dir, "lean_contrast_selector.R"),
-    file.path(this_dir, "..", "..", "CT", "local", "scripts", "lean_contrast_selector.R"),
-    "/home/miguel/IBE-UPF/PhD/PhyloPhere/subworkflows/CT/local/scripts/lean_contrast_selector.R"
+    file.path(this_dir, "..", "..", "CT", "local", "scripts", "lean_contrast_selector.R")
   )
   found <- cand_paths[nzchar(cand_paths) & file.exists(cand_paths)]
   if (length(found)) found[1] else ""
@@ -41,305 +35,78 @@ if (nzchar(selector_script_path) && file.exists(selector_script_path)) {
   source(selector_script_path)
 } else {
   stop("selection_algorithm.R: could not locate lean_contrast_selector.R ",
-       "(the shared rank_candidates() / greedy_dunn_select() / mod_dunn_lean() ",
-       "core). Looked in: ", paste(cand_paths, collapse = " ; "))
+       "(the shared contrast-selection core). Looked in: ",
+       paste(cand_paths, collapse = " ; "))
 }
 
-# Calculate patristic distances between species in a phylogenetic tree
-calculate_patristic_distances <- function(tree, df) {
-  species_list <- df$species
-  debug_log("calculate_patristic_distances species = %d", length(species_list))
-  
-  species_in_tree <- intersect(species_list, tree$tip.label)
-  if (length(species_in_tree) == 0) {
-    stop("No species from data found in phylogenetic tree")
-  }
-  
-  if (length(species_in_tree) < length(species_list)) {
-    missing <- setdiff(species_list, tree$tip.label)
-    warning(paste("Species not in tree:", paste(missing, collapse = ", ")))
-    debug_log("calculate_patristic_distances missing in tree = %d", length(missing))
-  }
-  
-  subtree <- ape::drop.tip(tree, setdiff(tree$tip.label, species_in_tree))
-  debug_log("calculate_patristic_distances subtree tips = %d", length(subtree$tip.label))
-  
-  as.data.frame(as.matrix(ape::cophenetic.phylo(subtree)))
-}
-
-# Backward-compatible mod_dunn wrapper
-mod_dunn <- function(distance = NULL, clusters, Data = NULL, method = "euclidean", 
-                     selected_cluster, verbose = FALSE) {
-  if (is.null(distance) & is.null(Data)) stop("One of 'distance' or 'Data' is required")
-  if (is.null(distance)) distance <- as.matrix(dist(Data, method = method))
-  if ("dist" %in% class(distance)) distance <- as.matrix(distance)
-  
-  sp_names <- rownames(distance)
-  members <- lapply(sort(unique(clusters)), function(cl) sp_names[clusters == cl])
-  mod_dunn_lean(distance, members, selected_cluster)
-}
-
-# Unified Canonical Contrast Selection
-pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait) {
-  mat <- as.matrix(distance_matrix)
-  
-  trait_df <- traits_df %>% dplyr::filter(trait == my_trait)
-  if (has.n) {
-    trait_df <- trait_df %>% dplyr::select(species, trait, value, n_data = n_trait)
-  } else {
-    trait_df <- trait_df %>% dplyr::select(species, trait, value)
-  }
-
-  distance_df <- as.data.frame(mat) %>%
-    rownames_to_column(var = "species1") %>%
-    gather(key = "species2", value = "distance", -species1) %>%
-    dplyr::filter(distance != 0) %>%
-    left_join(trait_df, by = c("species1" = "species")) %>%
-    dplyr::rename(value1 = value) %>%
-    left_join(trait_df, by = c("species2" = "species")) %>%
-    dplyr::rename(value2 = value) %>%
-    {
-      if (has.n) {
-        dplyr::rename(., n1 = n_data.x, n2 = n_data.y) %>%
-          dplyr::mutate(pair_n = ifelse(is.na(n1) | is.na(n2), NA_real_, n1 + n2))
-      } else {
-        .
-      }
-    }
-
-  distance_df <- distance_df %>%
-    left_join(overlap_df, by = c("species1", "species2")) %>%
-    mutate(distance = round(distance, 4),
-           diff = round(trait_diff, 4),
-           abs_diff = round(abs(trait_diff), 4)) %>%
-    dplyr::filter(!is.na(diff) & diff > 0)
-
-  if (!"pss_score" %in% names(distance_df)) {
-    distance_df$pss_score <- rep(NA_real_, nrow(distance_df))
-  } else {
-    distance_df$pss_score <- round(distance_df$pss_score, 4)
-  }
-
-  # Unified candidate ranking (shared with the permulation null):
-  #   PSS score desc when available (continuous, count, ordinal all carry an
-  #   OU/BM PSS from 3.CI-composition.Rmd), else patristic distance asc; ties
-  #   broken by |trait difference| then combined pair sample size.
-  distance_df <- distance_df %>% filter(!is.na(abs_diff))
-  distance_df <- rank_candidates(as.data.frame(distance_df)) %>%
-    {
-      cols <- c("species1", "species2", "distance", "abs_diff", "pss_score")
-      if (has.n) cols <- c(cols, "pair_n")
-      dplyr::select(., dplyr::any_of(cols))
-    }
-
-  debug_log("pair_sel.f candidate pairs = %d", nrow(distance_df))
-
-  if (nrow(distance_df) == 0) {
-    warning("pair_sel.f: no candidate contrast pairs. Returning 0 pairs.")
-    empty_pairs <- data.frame(species1 = character(), species2 = character(), stringsAsFactors = FALSE)
-    return(list(
-      dunn_results = empty_pairs,
-      selected_pairs = empty_pairs,
-      dunn_result_cummulative = data.frame(),
-      distance_df = distance_df,
-      distance_matrix = distance_matrix
-    ))
-  }
-
-  max_cap <- if (exists("max_contrasts", inherits = TRUE) &&
-                !is.null(max_contrasts) &&
-                !is.na(suppressWarnings(as.integer(max_contrasts))) &&
-                as.integer(max_contrasts) > 0L) {
-    as.integer(max_contrasts)
-  } else if (exists("contrast_max_iter", inherits = TRUE) &&
-             !is.null(contrast_max_iter) &&
-             !is.na(suppressWarnings(as.integer(contrast_max_iter))) &&
-             as.integer(contrast_max_iter) > 0L) {
-    as.integer(contrast_max_iter) + 1L
-  } else {
-    Inf
-  }
-
-  # Greedy Dunn-gated assembly via the shared core (stop when overall Dunn < 1).
-  sel <- greedy_dunn_select(as.data.frame(distance_df), mat,
-                            target = max_cap, enforce_dunn = TRUE)
-  selected_pairs <- sel$selected
-  dunn_results <- if (nrow(selected_pairs) > 1L) selected_pairs[-1L, , drop = FALSE] else selected_pairs[0L, , drop = FALSE]
-
-  list(
-    dunn_results = dunn_results,
-    selected_pairs = selected_pairs,
-    dunn_result_cummulative = dunn_results,
-    distance_df = distance_df,
-    distance_matrix = distance_matrix
+# FOP multi-hypothesis contrast selection for the observed trait.
+#
+# Canonical contrast (H1): the shared candidate gate/rank (lean_candidate_df)
+# and greedy Dunn-gated assembly, stopping when no candidate keeps the overall
+# modified Dunn index >= 1 or at `max_contrasts`. H2..Hn: the shared FOP
+# harvest (lean_fop_harvest) around H1, seeded with the pipeline seed.
+#
+# @param ctx           selection_context() for the observed trait.
+# @param ci_lb,ci_ub   per-species Jeffreys bounds (count traits), else NULL.
+# @param n_vec         per-species sample sizes (count traits), else NULL.
+# @param ordinal       TRUE/FALSE ordinal level gate (NULL = auto).
+# @param top_pct       continuous-trait PSS gate (params.pss_top_pct).
+# @param max_contrasts cap on canonical pairs (Inf = until Dunn stops it).
+# @param max_fop       cap on hypotheses (H1 included).
+# @param seed          pipeline seed (params.seed).
+# @return list(canon_pairs, hypotheses, summary_df, species_domain)
+fop_pair_sel.f <- function(ctx, ci_lb = NULL, ci_ub = NULL, n_vec = NULL,
+                           ordinal = NULL, top_pct, max_contrasts = Inf,
+                           max_fop = 100L, seed) {
+  empty <- list(
+    canon_pairs = data.frame(species1 = character(), species2 = character(),
+                             stringsAsFactors = FALSE),
+    hypotheses = list(), summary_df = data.frame(), species_domain = integer(0)
   )
-}
 
-# FOP Parallel Multi-Hypothesis Selection with Voronoi Domain Partitioning
-fop_pair_sel.f <- function(distance_matrix, overlap_df, traits_df, my_trait, max_fop = 100, seed = 42) {
-  set.seed(seed)
-  mat <- as.matrix(distance_matrix)
-  
-  # Step 1: Canonical greedy baseline (H1)
-  canon_res <- pair_sel.f(distance_matrix, overlap_df, traits_df, my_trait)
-  canon_pairs <- canon_res$selected_pairs
+  cc <- lean_candidate_df(ctx$trait_vec, ctx$D, 1L, ctx$tree, ctx$cov_bm, ctx$cov_ou,
+                          ctx$selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec)
+  if (is.null(cc$cand_df) || nrow(cc$cand_df) == 0) {
+    warning("fop_pair_sel.f: no candidate contrast pairs (", cc$reason, "). Returning 0 pairs.")
+    return(empty)
+  }
+  debug_log("fop_pair_sel.f: %d candidate pairs (gate: %s)", nrow(cc$cand_df), cc$mode)
+
+  canon <- greedy_dunn_select(cc$cand_df, ctx$D, target = max_contrasts, enforce_dunn = TRUE)
+  canon_pairs <- canon$selected
   K <- nrow(canon_pairs)
-  
-  if (K == 0) {
-    return(list(
-      canon_pairs = canon_pairs,
-      hypotheses = list(),
-      summary_df = data.frame(),
-      species_domain = integer(0)
-    ))
-  }
-  
-  canon_members <- lapply(seq_len(K), function(i) c(canon_pairs$species1[i], canon_pairs$species2[i]))
-  
-  # Step 2: Voronoi Clade Domain Partitioning
-  all_species <- rownames(mat)
-  species_domain <- setNames(integer(length(all_species)), all_species)
-  for (sp in all_species) {
-    dists_to_canon <- sapply(seq_len(K), function(k) {
-      min(mat[sp, canon_members[[k]][1]], mat[sp, canon_members[[k]][2]])
-    })
-    species_domain[sp] <- which.min(dists_to_canon)
-  }
-  
-  # Step 3: Domain Pools from valid candidates
-  cand_df <- canon_res$distance_df
-  alt_pools <- list()
-  for (k in seq_len(K)) {
-    dom_sp <- names(species_domain)[species_domain == k]
-    alt_pools[[k]] <- cand_df %>%
-      dplyr::filter(species1 %in% dom_sp & species2 %in% dom_sp)
-  }
-  
-  # Step 4: Harvest non-replacement parallel hypotheses
-  hypotheses <- list(H1 = canon_pairs)
-  seen_sigs <- list(paste(sort(c(canon_pairs$species1, canon_pairs$species2)), collapse = "|"))
-  summary_rows <- list()
-  
-  canon_dunn <- overall_dunn_lean(mat, canon_members)
-  h1_mean_pss <- if ("pss_score" %in% names(canon_pairs)) round(mean(canon_pairs$pss_score, na.rm = TRUE), 4) else NA_real_
-  summary_rows[[1]] <- data.frame(
-    hypothesis_id = "H1",
-    is_canonical = TRUE,
-    num_pairs = K,
-    min_dunn = round(canon_dunn, 4),
-    mean_distance = round(mean(canon_pairs$distance), 4),
-    mean_abs_diff = round(mean(canon_pairs$abs_diff), 4),
-    mean_pss_score = h1_mean_pss,
-    min_pss_score = if ("pss_score" %in% names(canon_pairs) && any(is.finite(canon_pairs$pss_score)))
-                      round(min(canon_pairs$pss_score, na.rm = TRUE), 4) else NA_real_,
-    jaccard_to_h1 = 1.0,
-    pair_composition = paste(paste(canon_pairs$species1, canon_pairs$species2, sep = "~"), collapse = "; "),
-    stringsAsFactors = FALSE
-  )
-  
-  # ── Combinatorial harvest across Voronoi domains ────────────────────────────
-  # Hard-bounded on every axis:
-  #   * iterations  <= min(total_combos, ITER_CAP)   (ITER_CAP = max_fop * 20)
-  #   * harvested   <= iterations
-  #   * returned Hm <= max_fop - 1, selected AFTER ranking (quality truncation)
-  # Spaces no larger than ITER_CAP are swept exhaustively (expand.grid); only
-  # larger spaces fall back to capped random draws. A Voronoi domain with no
-  # in-domain candidate pair makes the harvest unsatisfiable, so abort it up
-  # front instead of burning the whole budget on NA draws.
-  pool_sizes <- vapply(alt_pools, nrow, integer(1))
-  ITER_CAP   <- as.integer(max_fop) * 20L
-  harvested  <- list()   # each: list(df =, dunn =)
+  if (K == 0) return(empty)
 
-  if (any(pool_sizes == 0L)) {
-    debug_log("FOP: Voronoi domain(s) [%s] have no in-domain candidate pair; no parallel hypotheses harvested",
-              paste(which(pool_sizes == 0L), collapse = ","))
-  } else if (prod(as.numeric(pool_sizes)) > 1) {
-    total_combos <- prod(as.numeric(pool_sizes))
-    enumerate    <- total_combos <= ITER_CAP
+  hv <- lean_fop_harvest(ctx$trait_vec, ctx$D, K, ctx$tree, ctx$cov_bm, ctx$cov_ou,
+                         ctx$selected_model, ci_lb, ci_ub, top_pct, ordinal, n_vec,
+                         max_fop = max_fop, seed = seed, canon_pairs = canon_pairs)
+  hypotheses <- hv$hypotheses
+  debug_log("fop_pair_sel.f: K=%d canonical pairs, %d hypotheses", K, length(hypotheses))
 
-    idx_iter <- if (enumerate) {
-      do.call(expand.grid, c(lapply(pool_sizes, seq_len), list(KEEP.OUT.ATTRS = FALSE)))
-    } else {
-      as.data.frame(lapply(pool_sizes, function(n) sample.int(n, ITER_CAP, replace = TRUE)))
-    }
-    n_iter <- nrow(idx_iter)
-    debug_log("FOP harvest: K=%d pools=[%s] total_combos=%.3g mode=%s iters=%d",
-              K, paste(pool_sizes, collapse = ","), total_combos,
-              if (enumerate) "enumerate" else "sample", n_iter)
+  h1_sp <- c(canon_pairs$species1, canon_pairs$species2)
+  .agg <- function(p, f) if (all(is.na(p))) NA_real_ else round(f(p, na.rm = TRUE), 4)
+  summary_df <- do.call(rbind, lapply(names(hypotheses), function(h_id) {
+    hdf <- hypotheses[[h_id]]
+    all_sp <- c(hdf$species1, hdf$species2)
+    data.frame(
+      hypothesis_id    = h_id,
+      is_canonical     = identical(h_id, "H1"),
+      num_pairs        = nrow(hdf),
+      min_dunn         = round(hv$dunn[[h_id]], 4),
+      mean_distance    = round(mean(hdf$distance), 4),
+      mean_abs_diff    = round(mean(hdf$abs_diff), 4),
+      mean_pss_score   = .agg(hdf$pss_score, mean),
+      min_pss_score    = .agg(hdf$pss_score, min),
+      jaccard_to_h1    = round(length(intersect(h1_sp, all_sp)) / length(union(h1_sp, all_sp)), 4),
+      pair_composition = paste(paste(hdf$species1, hdf$species2, sep = "~"), collapse = "; "),
+      stringsAsFactors = FALSE
+    )
+  }))
 
-    for (iter in seq_len(n_iter)) {
-      chosen_idx <- as.integer(unlist(idx_iter[iter, , drop = FALSE], use.names = FALSE))
-      cand_h_df  <- do.call(rbind, lapply(seq_len(K), function(k) alt_pools[[k]][chosen_idx[k], ]))
-
-      all_sp <- c(cand_h_df$species1, cand_h_df$species2)
-      if (length(unique(all_sp)) < 2L * K) next
-
-      sig <- paste(sort(all_sp), collapse = "|")
-      if (sig %in% seen_sigs) next
-      seen_sigs <- c(seen_sigs, sig)   # also dedups repeat draws in sample mode
-
-      h_members <- lapply(seq_len(K), function(i) c(cand_h_df$species1[i], cand_h_df$species2[i]))
-      h_dunn <- overall_dunn_lean(mat, h_members)
-      if (h_dunn >= 1.0) {
-        harvested[[length(harvested) + 1L]] <- list(df = cand_h_df, dunn = h_dunn)
-      }
-    }
-  }
-
-  # ── Rank the harvested hypotheses, then keep the top (max_fop - 1) ──────────
-  # Priority key (all descending): min PSS across the K pairs (a hypothesis is
-  # only as strong as its weakest contrast), then mean PSS, then overall Dunn.
-  # Makes the post-H1 numbering a quality order rather than a discovery order,
-  # and turns the max_fop cap into a quality truncation.
-  .pss_agg <- function(df, f) {
-    p <- suppressWarnings(as.numeric(df$pss_score))
-    if (all(is.na(p))) NA_real_ else f(p, na.rm = TRUE)
-  }
-  if (length(harvested) > 0L) {
-    min_pss  <- vapply(harvested, function(h) .pss_agg(h$df, min),  numeric(1))
-    mean_pss <- vapply(harvested, function(h) .pss_agg(h$df, mean), numeric(1))
-    dunn_v   <- vapply(harvested, `[[`, numeric(1), "dunn")
-    n_valid  <- length(harvested)
-    ord <- order(-replace(min_pss,  is.na(min_pss),  -Inf),
-                 -replace(mean_pss, is.na(mean_pss), -Inf),
-                 -dunn_v)
-    harvested <- harvested[ord]
-    keep_n <- min(n_valid, as.integer(max_fop) - 1L)
-    harvested <- if (keep_n > 0L) harvested[seq_len(keep_n)] else list()
-
-    h1_sp <- c(canon_pairs$species1, canon_pairs$species2)
-    for (m in seq_along(harvested)) {
-      hdf <- harvested[[m]]$df
-      hdf$cluster <- seq_len(K)
-      h_id <- paste0("H", m + 1L)
-      hypotheses[[h_id]] <- hdf
-
-      all_sp  <- c(hdf$species1, hdf$species2)
-      jaccard <- length(intersect(h1_sp, all_sp)) / length(union(h1_sp, all_sp))
-      summary_rows[[length(summary_rows) + 1L]] <- data.frame(
-        hypothesis_id  = h_id,
-        is_canonical   = FALSE,
-        num_pairs      = K,
-        min_dunn       = round(harvested[[m]]$dunn, 4),
-        mean_distance  = round(mean(hdf$distance), 4),
-        mean_abs_diff  = round(mean(hdf$abs_diff), 4),
-        mean_pss_score = round(.pss_agg(hdf, mean), 4),
-        min_pss_score  = round(.pss_agg(hdf, min), 4),
-        jaccard_to_h1  = round(jaccard, 4),
-        pair_composition = paste(paste(hdf$species1, hdf$species2, sep = "~"), collapse = "; "),
-        stringsAsFactors = FALSE
-      )
-    }
-    debug_log("FOP: %d distinct Dunn-valid hypotheses harvested, kept top %d after PSS ranking",
-              n_valid, length(harvested))
-  }
-
-  summary_df <- do.call(rbind, summary_rows)
-  
   list(
     canon_pairs = canon_pairs,
     hypotheses = hypotheses,
     summary_df = summary_df,
-    species_domain = species_domain
+    species_domain = hv$species_domain
   )
 }

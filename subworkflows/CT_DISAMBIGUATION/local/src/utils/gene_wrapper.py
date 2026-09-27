@@ -1419,10 +1419,11 @@ def _perms_worker_finalize(
     # ── CT_POSTPROC cluster filter (Gap B) ────────────────────────────────
     # Per (base cycle, caap_group) run ctrain over this gene's detected
     # positions, verbatim to filter_caas_clusters-param.py. The `clust` flag
-    # is emitted per detail row (0/1) and, like the observed CT_FILTER step,
-    # it does NOT drop the position from scoring — pass B's cycle-aware gene
-    # filter (dubious mode) is its only consumer. No-op unless
-    # postproc_filter is on (keeps the non-postproc null path unchanged).
+    # is emitted per detail row (0/1) and mirrors CT_FILTER's clustering_flag:
+    # observed rows flagged "Discarded" never reach SCORING, so pass B1/B2
+    # skip clust == 1 rows (_is_clustered), while pass B0's cycle-aware gene
+    # filter still reads them. No-op unless postproc_filter is on (keeps the
+    # non-postproc null path unchanged).
     clust_by: Dict[Tuple[str, str], set] = {}
     if postproc_filter:
         from src.convergence.null_postproc import clustering_discards
@@ -1536,6 +1537,13 @@ def _sanitize_gene_shard(gene: str) -> str:
     clean in practice (Ensembl ids / HGNC symbols); this only neutralises path
     separators so a stray one cannot escape the shard directory."""
     return gene.replace(os.sep, "__").replace("/", "__").replace("\\", "__").strip() or "_"
+
+
+def _is_clustered(row: Dict[str, Any]) -> bool:
+    """True for a detail row flagged by the CT_POSTPROC cluster filter mirror.
+    The observed side drops these rows before SCORING, so every scored null
+    statistic (passes B1/B2) excludes them too."""
+    return int(row.get("clust", 0) or 0) == 1
 
 
 def iter_detail_rows(detail_path: Path):
@@ -1672,6 +1680,8 @@ def _build_cycle_score_pools(
             current_gene = gene
             pos_agg = {}
         if _rm and (row["cycle"], row["caap_group"], gene) in _rm:
+            continue
+        if _is_clustered(row):
             continue
         key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
         entry = pos_agg.setdefault(key, [0.0, 0])
@@ -1863,6 +1873,8 @@ def _finalize_perm_scores(
             cyc = row["cycle"]
             grp = row["caap_group"]
             if _rm and (cyc, grp, gene) in _rm:
+                continue
+            if _is_clustered(row):
                 continue
             pos = int(row["Position"])
             asr = float(row["asr_path_score"])

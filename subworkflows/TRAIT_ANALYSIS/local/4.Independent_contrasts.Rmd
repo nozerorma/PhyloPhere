@@ -89,7 +89,7 @@ params:
 # Independent Contrast Selection for Neoplasia Analysis in Primates
 This document outlines the process of selecting phylogenetically independent species pairs for trait analysis using CAASTools-paired.
 
-The eligible candidate pairs and their **Phylogenetic Shift Score (PSS)** are produced upstream in `3.CI-composition.Rmd`: each pair carries a `pss_score` computed under the AIC-selected OU/BM model (Fabio Barteri's phyloq engine, vendored in `src/pss_core.R`); for continuous traits only the top `pss_top_pct` slice of hi>lo pairs is kept unless `pss_top_pct` is set outside `(0,1)`, which disables the slice and keeps every hi>lo pair (PSS then ranks only). This report consumes that `pairwise_data.csv` and uses the PSS as the **primary ranking key** for the greedy Dunn selection below; patristic distance is only the fallback when no finite PSS is available (e.g. the model fit failed upstream).
+Contrast selection runs through the shared selection core (`src/lean_contrast_selector.R`), the same code the CAAS permulation null uses. Candidate pairs pass the trait-type gate (count: non-overlapping Jeffreys intervals; ordinal: top level vs bottom level; continuous: the top `pss_top_pct` of hi>lo pairs by **Phylogenetic Shift Score (PSS)**, disabled when `pss_top_pct` is outside `(0,1)`) and are ranked by PSS under the AIC-selected OU/BM model (Fabio Barteri's phyloq engine, vendored in `src/pss_core.R`); patristic distance is the fallback key when no finite PSS is available. Per-species trait values and Jeffreys intervals come from `3.CI-composition.Rmd` (`pairwise_data.csv`).
 
 
 ## Setup and Directory Configuration
@@ -154,19 +154,33 @@ createDir(permulation_traitfile_dir)
 
 ```
 
-## 2. Patristic Distance Calculation
+## 2. Selection Context
 
-This section calculates evolutionary distances between species using the phylogenetic tree. Patristic distance represents the sum of branch lengths separating two species.
+The tree is pruned to the species with a trait value and dichotomised (zero-length edges set to 1e-8); patristic distances and the AIC-selected OU/BM model are computed on it once by `selection_context()`. Patristic distance is the sum of branch lengths separating two species.
 
-```{r patristic_distances, message=FALSE, warning=FALSE}
+```{r selection_context, message=FALSE, warning=FALSE}
 
-# Calculate patristic distances using pruned tree
-distance_matrix <- calculate_patristic_distances(
-  tree = pruned_tree, 
-  df = trait_df
-)
+# Per-species trait values, Jeffreys intervals and sample sizes from the
+# CI-composition step (pairwise_data.csv carries them per species1).
+pairwise_path <- file.path(ci_dir, "pairwise_data.csv")
+if (!file.exists(pairwise_path)) {
+  stop("Missing pairwise data file: ", pairwise_path)
+}
+pairwise_all <- read.csv(pairwise_path, stringsAsFactors = FALSE)
+sp_tab <- pairwise_all[!duplicated(pairwise_all$species1), ]
+sel_trait <- setNames(as.numeric(sp_tab$trait1), sp_tab$species1)
 
-# Display distance matrix preview
+use_count_data <- has.n && has.c
+sel_ci_lb <- if (use_count_data) setNames(as.numeric(sp_tab$trait_ci_lb1), sp_tab$species1) else NULL
+sel_ci_ub <- if (use_count_data) setNames(as.numeric(sp_tab$trait_ci_ub1), sp_tab$species1) else NULL
+sel_n     <- if (use_count_data) setNames(as.numeric(sp_tab$n_population1), sp_tab$species1) else NULL
+sel_ordinal <- !use_count_data && is_ordinal_trait(sel_trait, trait_type)
+
+force_model <- if (tolower(perm_strategy) %in% c("bm", "ou")) toupper(perm_strategy) else NULL
+sel_ctx <- selection_context(sel_trait, pruned_tree, force_model = force_model)
+distance_matrix <- sel_ctx$D
+
+cat("Evolutionary model:", sel_ctx$selected_model, "\n")
 cat("Distance matrix dimensions:", dim(distance_matrix), "\n")
 head(distance_matrix[, 1:5])
 
@@ -174,9 +188,9 @@ head(distance_matrix[, 1:5])
 
 ## 3. Independent Contrast Pair Selection
 
-This section selects phylogenetically independent species pairs for CAAS analysis. Candidates are ranked by **Phylogenetic Shift Score (PSS) descending** (the per-pair trait-divergence signal under the AIC-selected OU/BM model, carried over from `3.CI-composition.Rmd`); when no finite PSS is available the ranking falls back to smallest patristic distance. The shared `rank_candidates()` / `greedy_dunn_select()` core then walks that ranked list, admitting a pair only if it keeps the selected set phylogenetically independent (Dunn index above threshold).
+This section selects phylogenetically independent species pairs for CAAS analysis. Candidates are ranked by **PSS descending** (smallest patristic distance when no finite PSS is available), and `greedy_dunn_select()` walks that ranked list, admitting a pair only if it keeps the selected set phylogenetically independent (modified Dunn index ≥ 1).
 
-Tie-breaking after the PSS (or distance) key: highest absolute trait difference (`abs_diff`) → highest combined pair `n` (population size, when a numeric `p`/`n` column is present) → incoming order.
+Tie-breaking after the PSS (or distance) key: highest absolute trait difference (`abs_diff`) → highest combined pair `n` (count traits) → species names. PSS is compared at 4 decimals, so floating-point noise never decides a tie.
 
 ```{r pair_selection, message=FALSE, warning=FALSE}
 
@@ -187,21 +201,18 @@ if (!file.exists(stats_path)) {
 }
 stats_df <- read.csv(stats_path, stringsAsFactors = FALSE)
 
-# Load pairwise overlap data from CI-composition step
-pairwise_path <- file.path(ci_dir, "pairwise_data.csv")
-if (!file.exists(pairwise_path)) {
-  stop("Missing pairwise overlap file: ", pairwise_path)
+# Canonical greedy selection and FOP parallel hypotheses (shared core)
+if (is.na(suppressWarnings(as.integer(seed_val)))) {
+  stop("4.Independent_contrasts.Rmd: params$seed is required (the FOP harvest draws are seeded with it).")
 }
-pairwise_data <- read.csv(pairwise_path, stringsAsFactors = FALSE) %>%
-  dplyr::filter(trait_overlap == FALSE)
-
-# Run pair selection for both canonical greedy and FOP parallel hypotheses
 fop_results <- fop_pair_sel.f(
-  distance_matrix = distance_matrix,
-  overlap_df = pairwise_data,
-  traits_df = stats_df,
-  my_trait = trait,
-  max_fop = { .mf <- suppressWarnings(as.integer(params$max_fop)); if (is.na(.mf) || .mf < 1) 100L else .mf }
+  ctx = sel_ctx,
+  ci_lb = sel_ci_lb, ci_ub = sel_ci_ub, n_vec = sel_n,
+  ordinal = sel_ordinal,
+  top_pct = pss_top_pct,
+  max_contrasts = max_contrasts,
+  max_fop = { .mf <- suppressWarnings(as.integer(params$max_fop)); if (is.na(.mf) || .mf < 1) 100L else .mf },
+  seed = as.integer(seed_val)
 )
 
 selected_pairs <- fop_results$canon_pairs
@@ -221,7 +232,7 @@ print(selected_pairs)
 
 This section generates trait files in the format required for CAAS discovery, assigning contrast groups (high/low extremes) to each species across all harvested parallel hypotheses.
 
-`fop_pair_sel.f` partitions the species into one Voronoi domain per canonical pair and harvests alternative Dunn-independent K-pair configurations from those domains. When the domain product is small the space is swept exhaustively; larger spaces fall back to capped random draws. The harvested hypotheses are then ranked and `H2 … Hn` are numbered by **decreasing minimum PSS across their K pairs** (then mean PSS, then overall Dunn), so the post-`H1` order is a quality order and the `max_fop` cap is a quality truncation. `contrast_hypotheses_summary.tsv` carries both `min_pss_score` and `mean_pss_score` per hypothesis.
+`fop_pair_sel.f` partitions the species into one Voronoi domain per canonical pair and harvests alternative Dunn-independent K-pair configurations from those domains. When the domain product is small the space is swept exhaustively; larger spaces fall back to capped random draws seeded with the pipeline seed. The harvested hypotheses are then ranked and `H2 … Hn` are numbered by **decreasing minimum PSS across their K pairs** (then mean PSS, then overall Dunn, then species composition), so the post-`H1` order is a quality order and the `max_fop` cap is a quality truncation. `contrast_hypotheses_summary.tsv` carries both `min_pss_score` and `mean_pss_score` per hypothesis.
 
 ```{r traitfile_generation, message=FALSE, warning=FALSE}
 

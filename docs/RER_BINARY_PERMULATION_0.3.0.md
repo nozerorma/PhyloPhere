@@ -211,7 +211,7 @@ e <- evaluate_lean_contrast_selection(pvec, D, target_pairs = K, cov_bm, cov_ou,
 ```
 
 `evaluate_lean_contrast_selection` (idéntico en política de candidatos al selector observado
-`selection_algorithm.R::pair_sel.f`, vía el core compartido `rank_candidates` /
+`selection_algorithm.R::fop_pair_sel.f`, vía el core compartido `rank_candidates` /
 `greedy_dunn_select`):
 
 ```
@@ -375,7 +375,7 @@ traía. Corregido en ambos (`commit ca5240a`): rama según `is.data.frame()`.
 
 Esto es independiente del null del RER: se refiere a
 [`3.CI-composition.Rmd`](../subworkflows/TRAIT_ANALYSIS/local/3.CI-composition.Rmd) +
-[`selection_algorithm.R::pair_sel.f`](../subworkflows/TRAIT_ANALYSIS/local/src/selection_algorithm.R)
+[`selection_algorithm.R::fop_pair_sel.f`](../subworkflows/TRAIT_ANALYSIS/local/src/selection_algorithm.R)
 + [`lean_contrast_selector.R`](../subworkflows/CT/local/scripts/lean_contrast_selector.R),
 que producen los K pares de contraste sobre los que se calcula el estadístico CAAS (y su
 null en `permulations.R`).

@@ -340,8 +340,8 @@ leading <- fcs_annotate_leading_edge(enrich, attr_df) %>%
 #
 #   Pairing design: each permulation cycle pairs fg/bg species using the SAME
 #   candidate gate + ranking + greedy pair assembly as the observed selector
-#   (rank_candidates() / greedy_dunn_select(), shared verbatim with
-#   selection_algorithm.R::pair_sel.f - see
+#   (lean_candidate_df() / greedy_dunn_select(), shared with
+#   selection_algorithm.R::fop_pair_sel.f - see
 #   lean_contrast_selector.R::evaluate_lean_contrast_selection), applied to the
 #   permuted trait vector. Cycles are graded: Tier 1 = every pair meets modified
 #   Dunn >= 1 (fully independent, same standard as the observed contrast); Tier

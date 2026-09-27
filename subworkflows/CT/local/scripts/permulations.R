@@ -106,6 +106,10 @@ if (!is.na(seed_arg)) {
   log_msg("INFO", sprintf("RNG unseeded; FOP mirror uses %d core(s)", n_cpus))
 }
 
+if (fop_null && is.na(seed_arg)) {
+  stop("permulations.R: the FOP harvest needs the pipeline seed (argument 19, params.seed).")
+}
+
 # match_fop: keep only null cycles whose FOP harvest yields at least as many
 # hypotheses as the observed harvest (see "Design matching" below).
 match_fop <- tolower(arg_or(20, "true")) %in% c("1", "true", "t", "yes", "y")
@@ -234,14 +238,31 @@ if (use_ci) keep <- keep & is.finite(phenotype.df$ci_lb) & is.finite(phenotype.d
 phenotype.df <- phenotype.df[keep, , drop = FALSE]
 if (nrow(phenotype.df) == 0) stop("No valid phenotype rows remain after NA filtering")
 
-# ── Tree ─────────────────────────────────────────────────────────────────────
-tree.o <- read.tree(tree.path)
-starting.values <- setNames(phenotype.df$value, phenotype.df$species)
+# ── Vendored phyloq engine + shared selector ────────────────────────────────
+pss_core_script <- file.path(script_dir, "pss_core.R")
+for (.f in c(lean_script, pss_core_script)) {
+  if (!file.exists(.f)) stop(basename(.f), " not found next to permulations.R (looked in '", script_dir, "').")
+}
+source(pss_core_script)   # fit_models / covariances_from_fits / select_model / calculate_pairwise_scores
+source(lean_script)       # selection_context + shared selection core
+log_msg("INFO", "Shared contrast selector + phyloq PSS loaded from ", script_dir)
 
-pruned.tree <- drop.tip(tree.o, setdiff(tree.o$tip.label, names(starting.values)))
-pruned.tree <- multi2di(pruned.tree, random = FALSE)
-pruned.tree$edge.length[pruned.tree$edge.length <= 0] <- 1e-8
-starting.values <- starting.values[pruned.tree$tip.label]
+# ── Selection context: tree, distances and evolutionary model, fitted once on
+#    the observed trait by the same selection_context() the observed selector
+#    uses. Covariances are held fixed across all permulation draws.
+.force_model <- if (selection.strategy %in% c("bm", "ou")) toupper(selection.strategy) else NULL
+ctx <- selection_context(setNames(phenotype.df$value, phenotype.df$species),
+                         read.tree(tree.path), force_model = .force_model)
+pruned.tree     <- ctx$tree
+starting.values <- ctx$trait_vec
+D               <- ctx$D
+obs_fits        <- ctx$fits
+selected_model  <- ctx$selected_model
+cov_bm          <- ctx$cov_bm
+cov_ou          <- ctx$cov_ou
+log_msg("INFO", sprintf("Evolutionary model: %s (AIC BM = %.3f, OU = %.3f; delta = %.3f)",
+                        selected_model, fit_aic(obs_fits$BM), fit_aic(obs_fits$OU),
+                        fit_aic(obs_fits$BM) - fit_aic(obs_fits$OU)))
 
 # ── Ultrametric check (warn-only) ───────────────────────────────────────────
 # KEEP IN SYNC with subworkflows/TRAIT_ANALYSIS/local/src/commons.R. Contrast
@@ -253,29 +274,6 @@ if (!is.ultrametric(pruned.tree, tol = 1e-6)) {
   log_msg("WARN", "permulation tree is NOT ultrametric (phylogram); contrast ",
           "independence assumes a time tree. Supply a dated species tree.")
 }
-
-D <- cophenetic(pruned.tree)
-
-# ── Vendored phyloq engine + lean selector ──────────────────────────────────
-pss_core_script <- file.path(script_dir, "pss_core.R")
-for (.f in c(lean_script, pss_core_script)) {
-  if (!file.exists(.f)) stop(basename(.f), " not found next to permulations.R (looked in '", script_dir, "').")
-}
-source(pss_core_script)   # fit_models / covariances_from_fits / select_model / calculate_pairwise_scores
-source(lean_script)       # evaluate_lean_contrast_selection + shared Dunn core
-log_msg("INFO", "Lean contrast filtering + phyloq PSS enabled from ", script_dir)
-
-# ── Evolutionary model: phyloq's fit + AIC selection (verbatim), once, on the
-#    observed trait. Covariances are held fixed across all permulation draws.
-.force_model <- if (selection.strategy %in% c("bm", "ou")) toupper(selection.strategy) else NULL
-obs_fits       <- fit_models(pruned.tree, starting.values)
-selected_model <- select_model(obs_fits, force_model = .force_model)
-obs_cov        <- covariances_from_fits(pruned.tree, obs_fits)
-cov_bm         <- obs_cov$BM
-cov_ou         <- obs_cov$OU
-log_msg("INFO", sprintf("Evolutionary model: %s (AIC BM = %.3f, OU = %.3f; delta = %.3f)",
-                        selected_model, fit_aic(obs_fits$BM), fit_aic(obs_fits$OU),
-                        fit_aic(obs_fits$BM) - fit_aic(obs_fits$OU)))
 
 # Simulation tree for the rank-match null: OU-rescaled when OU is selected.
 if (selected_model == "OU") {
@@ -341,10 +339,10 @@ lowrate_escalations <- 0L
 escalations         <- 0L         # kept for the "filled after N escalation(s)" log below
 
 # ── FOP harvest helpers (design matching + FOP mirror) ──────────────────────
-# `lean_fop_harvest` re-seeds itself with a constant on every call and
-# `evaluate_lean_contrast_selection` is RNG-free, so a cycle's harvest is a pure
-# function of its own inputs: counting it here and re-harvesting it in the FOP
-# mirror below yields the same hypotheses.
+# `lean_fop_harvest` seeds its draws with the pipeline seed (restoring the
+# caller's RNG state afterwards) and `evaluate_lean_contrast_selection` is
+# RNG-free, so a cycle's harvest is a pure function of its own inputs: counting
+# it here and re-harvesting it in the FOP mirror below yields the same hypotheses.
 fop_hypotheses <- function(e, label) {
   if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg)) return(NULL)
   tryCatch(
@@ -353,7 +351,7 @@ fop_hypotheses <- function(e, label) {
       tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
       selected_model = selected_model,
       ci_lb = e$ci_lb_draw, ci_ub = e$ci_ub_draw, n_vec = e$n_draw,
-      top_pct = pss_top_pct, max_fop = max_fop,
+      top_pct = pss_top_pct, max_fop = max_fop, seed = seed_arg,
       ordinal = if (trait_type == "ordinal") TRUE
                 else if (trait_type == "continuous") FALSE else NULL,
       canon_pairs = data.frame(species1 = e$fg, species2 = e$bg,
@@ -622,13 +620,13 @@ close(man_con)
 # every accepted permulation cycle, so the null holds the SAME domain-pooled
 # statistic scoring_compute.R §2b builds on the observed data. H1 is the cycle's
 # already-accepted canonical contrast; H2..Hn are Dunn-independent alternatives
-# drawn from the same Voronoi domains, ranked by min-PSS, capped at max_fop.
+# drawn from the same Voronoi domains, ranked by min/mean PSS then Dunn, capped at max_fop.
 #   fop_labelings.tab         : "<cycle>~H<m>" \t fg_csv \t bg_csv   (fanned discovery input)
 #   fop_pairs.tsv   : cycle, hypothesis_id, pair(domain), species1, species2, pss_score
 #
-# Parallel + streamed: `lean_fop_harvest` re-seeds itself with a constant on every
-# call (lean_contrast_selector.R) and `evaluate_lean_contrast_selection` is
-# RNG-free, so a cycle's harvest is a pure function of its own inputs — forking
+# Parallel + streamed: `lean_fop_harvest` seeds its draws with the pipeline seed
+# (lean_contrast_selector.R) and `evaluate_lean_contrast_selection` is RNG-free,
+# so a cycle's harvest is a pure function of its own inputs — forking
 # the loop cannot change any cycle's output, only the interleaving of cycles,
 # which we preserve by consuming worker results in strict pool order. Output is
 # therefore byte-identical to the serial version. Each batch of cycles is
