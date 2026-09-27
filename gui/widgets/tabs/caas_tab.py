@@ -93,6 +93,12 @@ SPEC = ModuleTabSpec(
             kind="bool",
             importance="default",
         ),
+        FieldSpec(
+            name="caas_perms_match_fop",
+            label="Match null cycles to the observed FOP hypothesis count",
+            kind="bool",
+            importance="default",
+        ),
     ),
     advanced_fields=(
         Section("Missingness parameters in discovery mode and otherwise"),

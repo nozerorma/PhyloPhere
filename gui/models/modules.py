@@ -73,6 +73,7 @@ class CaasConfig(ModuleConfigBase):
     multi_hypothesis: bool = True  # --multi_hypothesis
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)
     caas_perms_fop: bool = False  # --caas_perms_fop (mirror FOP harvest in the permulation null)
+    caas_perms_match_fop: bool = True  # --caas_perms_match_fop (null cycles must reach the observed FOP hypothesis count)
 
     # Debug-only (conf/ct.config warns: don't run these unless needed).
     export_groups: bool = False  # --export_groups

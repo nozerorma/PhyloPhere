@@ -17,7 +17,7 @@ Both traits are columns of `input/pepc/my_traits.tsv`; sourcing of the phenotypi
 
 Columns: `Gene, Position, n_schemes, scheme_set, n_hypotheses, participating_hypotheses, top_species_residues, bottom_species_residues, n_top_species, n_bottom_species, CAAS_score, side, caas, p.emp, p.emp_adj`. One row per (Position, side); a position detected on both sides has two rows with identical `p.emp`/`p.emp_adj` (verified: ≤ 1 distinct value per position in both runs).
 
-`p.emp` is the pooled "detects AND exceeds" permulation p (`subworkflows/SCORING/local/src/scoring_compute.R` §2f-ter): `(k_emp + 1)/(N + 1)`, where `k_emp` counts null cycles that re-detect the position on any side with max-over-sides CAAS ≥ the observed max. `p.emp_adj` is BH over position-rows. Significance: `p.emp_adj < 0.1` (`scoring_p_emp_thr`).
+`p.emp` is the pooled "detects AND exceeds" permulation p (`subworkflows/SCORING/local/src/scoring_compute.R` §2f-ter): `(k_emp + 1)/(N + 1)`, where `k_emp` counts null cycles that re-detect the position on any side with max-over-sides CAAS ≥ the observed max. `p.emp_adj` is BH over position-rows. Significance: `p.emp_adj < 0.1` (`scoring_p_emp_thr`). Raw `p.emp` is reported alongside throughout. Raw p-values in this candidate set are not uniform under the null (they are capped by each position's null detection rate), so raw-p counts overstate evidence; see `pepc_genotypic_vs_phenotypic.md` §6 for the choice of correction family.
 
 Note for ad hoc pandas reads: the `caas` value `N/A` (maize 573, both runs) is parsed as missing under pandas defaults; read with `keep_default_na=False`.
 
@@ -27,6 +27,8 @@ Note for ad hoc pandas reads: the `caas` value `N/A` (maize 573, both runs) is p
 | unique positions (candidate set) | 61 | 51 |
 | null cycles `N` | 999 | 1000 |
 | minimum attainable `p.emp` | 0.001 | 0.000999 |
+| positions with raw `p.emp < 0.05` | 9 | 10 |
+| positions with raw `p.emp < 0.1` | 18 | 16 |
 | positions with `p.emp_adj < 0.1` | 3 | 1 |
 
 ## Method 1: OC / FUBAR
@@ -103,7 +105,9 @@ Closest non-significant non-truth position under the genotypic trait: 818 (`E:21
 
 | | FUBAR | PhyloPhere, genotypic | PhyloPhere, phenotypic |
 |---|---|---|---|
-| Truth positions significant | 0/10 | 3/10 | 0/10 |
+| Truth positions with raw p < 0.05 (`p.emp`; FUBAR has no frequentist p) | n/a | 5/10 (780, 665, 540, 731, 572) | 5/10 (540, 780, 665, 572, 731) |
+| Non-truth positions with raw p < 0.05 | n/a | 4 (818, 620, 588, 584) | 5 (859, 625, 751, 626, 460) |
+| Truth positions significant (`p.emp_adj < 0.1`) | 0/10 | 3/10 | 0/10 |
 | Present, not significant | 10/10 | 6/10 | 9/10 |
 | Absent from method's output | 0/10 | 1/10 (733) | 1/10 (733) |
 | Both mutagenesis sites (780, 665) significant | no | yes | no |

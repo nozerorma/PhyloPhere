@@ -57,7 +57,7 @@ if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [include_b0] [pss_top_pct] [max_tries] [pheno_col] ",
        "[n_col] [c_col] [resample_use_n] [trait_type] [fop_null] [max_fop] ",
-       "[n_cpus] [seed]")
+       "[n_cpus] [seed] [match_fop]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -106,6 +106,10 @@ if (!is.na(seed_arg)) {
   log_msg("INFO", sprintf("RNG unseeded; FOP mirror uses %d core(s)", n_cpus))
 }
 
+# match_fop: keep only null cycles whose FOP harvest yields at least as many
+# hypotheses as the observed harvest (see "Design matching" below).
+match_fop <- tolower(arg_or(20, "true")) %in% c("1", "true", "t", "yes", "y")
+
 if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
   log_msg("WARN", sprintf("Unknown strategy '%s', defaulting to 'auto'", selection.strategy))
   selection.strategy <- "auto"
@@ -145,6 +149,25 @@ if (n_fg != target_pairs || n_bg != target_pairs) {
     n_fg, n_bg, target_pairs, target_pairs))
 }
 log_msg("INFO", sprintf("Observed independent pair count from config V3: N_pairs_obs = %d", target_pairs))
+
+# Observed FOP hypothesis count: the number of hypotheses the observed harvest
+# actually produced (<= max_fop), read from contrast_hypotheses_pairs.tsv next to
+# the discovery config. It is the design size every null cycle is matched to.
+n_hyp_obs <- 0L
+if (fop_null && match_fop) {
+  .cfg_dir <- if (dir.exists(config.file)) config.file else dirname(config.file)
+  .hp_file <- file.path(.cfg_dir, "contrast_hypotheses_pairs.tsv")
+  if (file.exists(.hp_file)) {
+    .hp <- read.delim(.hp_file, stringsAsFactors = FALSE)
+    if ("hypothesis_id" %in% names(.hp)) n_hyp_obs <- length(unique(.hp$hypothesis_id))
+  }
+  if (n_hyp_obs > 0L) {
+    log_msg("INFO", sprintf("Observed FOP harvest: %d hypotheses; null cycles must reach >= %d", n_hyp_obs, n_hyp_obs))
+  } else {
+    log_msg("WARN", "match_fop requested but no observed contrast_hypotheses_pairs.tsv next to the config; null cycles are not design-matched")
+  }
+}
+match_fop <- fop_null && match_fop && n_hyp_obs > 0L
 
 first_line <- readLines(phenotypes, n = 1L, warn = FALSE)
 delim_char <- if (grepl(",", first_line) && !grepl("\t", first_line)) "," else "\t"
@@ -307,140 +330,235 @@ reject_reasons <- character(0)
 #     going, bounded only by HARVEST_HARD_CAP x pool_size;
 #   * if it is genuinely poor, bump modestly, count it, and give up after
 #     MAX_LOWRATE_ESCALATIONS with a diagnostic that names the acceptance rate.
-HARVEST_HARD_CAP        <- 50L    # x number.of.cycles — absolute draw ceiling
+HARVEST_HARD_CAP        <- 50L    # x candidate target — absolute draw ceiling
 MIN_VIABLE_TIER1_RATE   <- 0.05   # below this the trait cannot realistically fill the pool
 MAX_LOWRATE_ESCALATIONS <- 3L
 LOWRATE_FACTOR          <- 1.5
 BUDGET_HEADROOM         <- 1.15   # over the point estimate of draws still needed
 
-hard_cap            <- max(as.numeric(max_tries), HARVEST_HARD_CAP * number.of.cycles)
 budget              <- max_tries
 lowrate_escalations <- 0L
 escalations         <- 0L         # kept for the "filled after N escalation(s)" log below
 
-repeat {
-  while (n1 < number.of.cycles && total_draws < budget) {
-    total_draws <- total_draws + 1L
-
-    sim_v <- simulatevec(starting.values, simulation_tree)
-    sim_ord <- order(sim_v)
-    
-    pvec <- setNames(rec_value[order(sim_ord)], names(sim_v))
-
-    ci_lb_draw <- NULL; ci_ub_draw <- NULL; n_draw <- NULL
-    if (use_ci) {
-      ci_lb_draw <- setNames(rec_lb[order(sim_ord)], names(sim_v))
-      ci_ub_draw <- setNames(rec_ub[order(sim_ord)], names(sim_v))
-      n_draw     <- setNames(rec_n[order(sim_ord)], names(sim_v))
-    }
-
-    e <- tryCatch(
-      evaluate_lean_contrast_selection(
-        trait_vec = pvec, D = D, target_pairs = target_pairs,
-        tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
-        selected_model = selected_model,
-        ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
-        top_pct = pss_top_pct, n_vec = n_draw,
-        ordinal = if (trait_type == "ordinal") TRUE
-                  else if (trait_type == "continuous") FALSE
-                  else NULL
-      ),
-      error = function(err) list(tier = 0L, n_pairs = 0L, dunn_min = 0,
-                                 n_below = NA_integer_, fg = NULL, bg = NULL,
-                                 reason = paste0("error: ", conditionMessage(err)))
-    )
-
-    # Retain the permuted vector (+ CI/n draws) on accepted cycles so the FOP
-    # mirror can harvest alternative hypotheses around this exact labeling after
-    # the pool is assembled.
-    if (fop_null && e$tier %in% c(1L, 2L)) {
-      e$pvec <- pvec
-      e$ci_lb_draw <- ci_lb_draw; e$ci_ub_draw <- ci_ub_draw; e$n_draw <- n_draw
-    }
-
-    if (e$tier == 1L) {
-      n1 <- n1 + 1L; tier1[[n1]] <- e
-    } else if (e$tier == 2L && n2 < number.of.cycles) {
-      n2 <- n2 + 1L; tier2[[n2]] <- e
-    } else if (e$tier == 0L) {
-      reject_reasons <- c(reject_reasons, e$reason)
-    }
-
-    if (total_draws %% 5000 == 0 || n1 == number.of.cycles) {
-      el <- as.numeric(difftime(Sys.time(), start.time, units = "secs"))
-      log_msg("PROGRESS", sprintf("draws=%d/%d | Tier1=%d/%d | Tier2=%d | %.0f draws/s | %.1f min",
-                                  total_draws, budget, n1, number.of.cycles, n2,
-                                  total_draws / el, el / 60))
-    }
-  }
-
-  if (n1 >= number.of.cycles) break
-
-  tier1_rate <- (n1 + 1) / (total_draws + 1)
-
-  if (tier1_rate >= MIN_VIABLE_TIER1_RATE) {
-    # Draw-starved, not rejection-bound: extend the budget toward the projected
-    # finish. Does NOT count against the low-acceptance abort counter.
-    proj       <- total_draws + ceiling((number.of.cycles - n1) / tier1_rate * BUDGET_HEADROOM)
-    new_budget <- min(max(proj, ceiling(budget * 1.25)), hard_cap)
-    if (new_budget <= budget) break   # already at the hard cap and still short
-    log_msg("INFO", sprintf(
-      paste0("Pool %d/%d after %d draws at %.1f%% Tier-1 acceptance — draw-starved, not ",
-             "rejection-bound; extending budget %d -> %d (hard cap %d)"),
-      n1, number.of.cycles, total_draws, 100 * tier1_rate,
-      as.integer(budget), as.integer(new_budget), as.integer(hard_cap)))
-    budget <- new_budget
-  } else {
-    if (lowrate_escalations >= MAX_LOWRATE_ESCALATIONS) break
-    lowrate_escalations <- lowrate_escalations + 1L
-    escalations         <- escalations + 1L
-    new_budget <- min(ceiling(budget * LOWRATE_FACTOR), hard_cap)
-    if (new_budget <= budget) break
-    budget <- new_budget
-    log_msg("WARN", sprintf(
-      paste0("Pool not filled from Tier 1 (%d/%d) after %d draws at only %.1f%% Tier-1 ",
-             "acceptance — escalating budget to %d (escalation %d of %d)"),
-      n1, number.of.cycles, total_draws, 100 * tier1_rate,
-      as.integer(budget), lowrate_escalations, MAX_LOWRATE_ESCALATIONS))
-  }
+# ── FOP harvest helpers (design matching + FOP mirror) ──────────────────────
+# `lean_fop_harvest` re-seeds itself with a constant on every call and
+# `evaluate_lean_contrast_selection` is RNG-free, so a cycle's harvest is a pure
+# function of its own inputs: counting it here and re-harvesting it in the FOP
+# mirror below yields the same hypotheses.
+fop_hypotheses <- function(e, label) {
+  if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg)) return(NULL)
+  tryCatch(
+    lean_fop_harvest(
+      trait_vec = e$pvec, D = D, target_pairs = target_pairs,
+      tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
+      selected_model = selected_model,
+      ci_lb = e$ci_lb_draw, ci_ub = e$ci_ub_draw, n_vec = e$n_draw,
+      top_pct = pss_top_pct, max_fop = max_fop,
+      ordinal = if (trait_type == "ordinal") TRUE
+                else if (trait_type == "continuous") FALSE else NULL,
+      canon_pairs = data.frame(species1 = e$fg, species2 = e$bg,
+                               stringsAsFactors = FALSE)),
+    error = function(err) { log_msg("WARN", sprintf("FOP harvest %s: %s", label, conditionMessage(err))); NULL })
+}
+# Hypotheses a cycle contributes; an empty harvest falls back to H1 only.
+fop_count <- function(e) {
+  hv <- fop_hypotheses(e, paste0("draw ", e$draw_id))
+  if (is.null(hv)) 1L else max(1L, length(hv$hypotheses))
 }
 
-# ── Assemble the pool: Tier 1 first, Tier 2 only to fill a shortfall ─────────
-if (n1 >= number.of.cycles) {
-  pool <- tier1[seq_len(number.of.cycles)]
-  log_msg("INFO", sprintf("Pool filled entirely from Tier 1 (%d/%d) in %d draws%s",
-                          number.of.cycles, number.of.cycles, total_draws,
-                          if (escalations) sprintf(" after %d escalation(s)", escalations) else ""))
-} else if (n1 + n2 >= number.of.cycles) {
-  use2 <- number.of.cycles - n1
-  pool <- c(tier1[seq_len(n1)], tier2[seq_len(use2)])
-  log_msg("WARN", sprintf(
-    "Tier 1 exhausted after %d draws: topping up with Tier 2. %d Tier-1 + %d Tier-2 = %d/%d records",
-    n1, use2, length(pool), number.of.cycles))
-} else {
-  tab <- sort(table(reject_reasons), decreasing = TRUE)
-  top <- seq_len(min(3, length(tab)))
-  final_rate <- (n1 + 1) / (total_draws + 1)
-  # Name the failure mode so the fix is obvious from the log alone.
-  diag <- if (final_rate >= MIN_VIABLE_TIER1_RATE) sprintf(
-      paste0("Tier-1 acceptance was healthy (%.1f%%) — the run was DRAW-STARVED and hit ",
-             "the hard cap (%d). Raise --max_tries / MAX_TRIES (>= ~%d for this pool) or ",
-             "lower --caas_full_perms."),
-      100 * final_rate, as.integer(hard_cap),
-      as.integer(ceiling(number.of.cycles / final_rate * BUDGET_HEADROOM)))
-    else sprintf(
-      paste0("Tier-1 acceptance was only %.1f%% — this trait's Dunn geometry cannot ",
-             "realistically fill a pool this size; lower --caas_full_perms or relax the ",
-             "contrast-selection strategy."),
-      100 * final_rate)
-  stop(sprintf(
-    paste0("Permulation pool could not be filled: %d Tier-1 + %d Tier-2 = %d of the requested %d ",
-           "after %d draws and %d low-acceptance escalation(s) (final budget %d, hard cap %d).\n",
-           "  %s\n",
-           "  Top rejection reasons: %s"),
-    n1, n2, n1 + n2, number.of.cycles, total_draws, escalations,
-    as.integer(budget), as.integer(hard_cap), diag,
-    if (length(tab)) paste(sprintf("%s (%d)", names(tab)[top], as.integer(tab)[top]), collapse = "; ") else "none recorded"))
+# ── Design matching ─────────────────────────────────────────────────────────
+# The observed statistic is pooled over the observed FOP harvest (n_hyp_obs
+# hypotheses). A null cycle with fewer hypotheses has fewer chances to re-detect
+# a position (p.emp biased low); one with more has more chances (biased high).
+# With match_fop, each candidate is harvested with the same max_fop (hence the
+# same search budget) as the observed harvest, the pool keeps only candidates
+# whose harvest reaches n_hyp_obs, in draw order, and the FOP mirror below keeps
+# each kept cycle's top n_hyp_obs hypotheses;
+# when too few qualify, the candidate target is extended from the observed
+# match rate and harvesting resumes. If the rate is below MIN_MATCH_RATE or the
+# target reaches MATCH_HARD_CAP x pool size, the shortfall is filled with the
+# largest-harvest remaining candidates and the gap is logged.
+MIN_MATCH_RATE <- 0.05
+MATCH_HARD_CAP <- 20L
+pool_target <- number.of.cycles
+nhyp_cache  <- integer(0)   # draw_id -> FOP hypothesis count
+
+repeat {
+  hard_cap <- max(as.numeric(max_tries), HARVEST_HARD_CAP * pool_target)
+  repeat {
+    while (n1 < pool_target && total_draws < budget) {
+      total_draws <- total_draws + 1L
+
+      sim_v <- simulatevec(starting.values, simulation_tree)
+      sim_ord <- order(sim_v)
+      
+      pvec <- setNames(rec_value[order(sim_ord)], names(sim_v))
+
+      ci_lb_draw <- NULL; ci_ub_draw <- NULL; n_draw <- NULL
+      if (use_ci) {
+        ci_lb_draw <- setNames(rec_lb[order(sim_ord)], names(sim_v))
+        ci_ub_draw <- setNames(rec_ub[order(sim_ord)], names(sim_v))
+        n_draw     <- setNames(rec_n[order(sim_ord)], names(sim_v))
+      }
+
+      e <- tryCatch(
+        evaluate_lean_contrast_selection(
+          trait_vec = pvec, D = D, target_pairs = target_pairs,
+          tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
+          selected_model = selected_model,
+          ci_lb = ci_lb_draw, ci_ub = ci_ub_draw,
+          top_pct = pss_top_pct, n_vec = n_draw,
+          ordinal = if (trait_type == "ordinal") TRUE
+                    else if (trait_type == "continuous") FALSE
+                    else NULL
+        ),
+        error = function(err) list(tier = 0L, n_pairs = 0L, dunn_min = 0,
+                                   n_below = NA_integer_, fg = NULL, bg = NULL,
+                                   reason = paste0("error: ", conditionMessage(err)))
+      )
+
+      # Retain the permuted vector (+ CI/n draws) on accepted cycles so the FOP
+      # mirror can harvest alternative hypotheses around this exact labeling after
+      # the pool is assembled.
+      if (fop_null && e$tier %in% c(1L, 2L)) {
+        e$draw_id <- total_draws
+        e$pvec <- pvec
+        e$ci_lb_draw <- ci_lb_draw; e$ci_ub_draw <- ci_ub_draw; e$n_draw <- n_draw
+      }
+
+      if (e$tier == 1L) {
+        n1 <- n1 + 1L; tier1[[n1]] <- e
+      } else if (e$tier == 2L && n2 < pool_target) {
+        n2 <- n2 + 1L; tier2[[n2]] <- e
+      } else if (e$tier == 0L) {
+        reject_reasons <- c(reject_reasons, e$reason)
+      }
+
+      if (total_draws %% 5000 == 0 || n1 == pool_target) {
+        el <- as.numeric(difftime(Sys.time(), start.time, units = "secs"))
+        log_msg("PROGRESS", sprintf("draws=%d/%d | Tier1=%d/%d | Tier2=%d | %.0f draws/s | %.1f min",
+                                    total_draws, budget, n1, pool_target, n2,
+                                    total_draws / el, el / 60))
+      }
+    }
+
+    if (n1 >= pool_target) break
+
+    tier1_rate <- (n1 + 1) / (total_draws + 1)
+
+    if (tier1_rate >= MIN_VIABLE_TIER1_RATE) {
+      # Draw-starved, not rejection-bound: extend the budget toward the projected
+      # finish. Does NOT count against the low-acceptance abort counter.
+      proj       <- total_draws + ceiling((pool_target - n1) / tier1_rate * BUDGET_HEADROOM)
+      new_budget <- min(max(proj, ceiling(budget * 1.25)), hard_cap)
+      if (new_budget <= budget) break   # already at the hard cap and still short
+      log_msg("INFO", sprintf(
+        paste0("Pool %d/%d after %d draws at %.1f%% Tier-1 acceptance — draw-starved, not ",
+               "rejection-bound; extending budget %d -> %d (hard cap %d)"),
+        n1, pool_target, total_draws, 100 * tier1_rate,
+        as.integer(budget), as.integer(new_budget), as.integer(hard_cap)))
+      budget <- new_budget
+    } else {
+      if (lowrate_escalations >= MAX_LOWRATE_ESCALATIONS) break
+      lowrate_escalations <- lowrate_escalations + 1L
+      escalations         <- escalations + 1L
+      new_budget <- min(ceiling(budget * LOWRATE_FACTOR), hard_cap)
+      if (new_budget <= budget) break
+      budget <- new_budget
+      log_msg("WARN", sprintf(
+        paste0("Pool not filled from Tier 1 (%d/%d) after %d draws at only %.1f%% Tier-1 ",
+               "acceptance — escalating budget to %d (escalation %d of %d)"),
+        n1, pool_target, total_draws, 100 * tier1_rate,
+        as.integer(budget), lowrate_escalations, MAX_LOWRATE_ESCALATIONS))
+    }
+  }
+
+  # ── Assemble the candidate pool: Tier 1 first, Tier 2 only to fill a shortfall
+  if (n1 >= pool_target) {
+    cands <- tier1[seq_len(pool_target)]
+    log_msg("INFO", sprintf("Pool filled entirely from Tier 1 (%d/%d) in %d draws%s",
+                            pool_target, pool_target, total_draws,
+                            if (escalations) sprintf(" after %d escalation(s)", escalations) else ""))
+  } else if (n1 + n2 >= pool_target) {
+    use2 <- pool_target - n1
+    cands <- c(tier1[seq_len(n1)], tier2[seq_len(use2)])
+    log_msg("WARN", sprintf(
+      "Tier 1 exhausted after %d draws: topping up with Tier 2. %d Tier-1 + %d Tier-2 = %d/%d records",
+      n1, use2, length(cands), pool_target))
+  } else if (n1 + n2 >= number.of.cycles) {
+    # A design-matching extension ran out of draws: keep every candidate drawn.
+    cands <- c(tier1[seq_len(n1)], tier2[seq_len(n2)])
+    log_msg("WARN", sprintf(
+      "Design-matching extension stopped at %d of %d candidates after %d draws",
+      length(cands), pool_target, total_draws))
+  } else {
+    tab <- sort(table(reject_reasons), decreasing = TRUE)
+    top <- seq_len(min(3, length(tab)))
+    final_rate <- (n1 + 1) / (total_draws + 1)
+    # Name the failure mode so the fix is obvious from the log alone.
+    diag <- if (final_rate >= MIN_VIABLE_TIER1_RATE) sprintf(
+        paste0("Tier-1 acceptance was healthy (%.1f%%) — the run was DRAW-STARVED and hit ",
+               "the hard cap (%d). Raise --max_tries / MAX_TRIES (>= ~%d for this pool) or ",
+               "lower --caas_full_perms."),
+        100 * final_rate, as.integer(hard_cap),
+        as.integer(ceiling(number.of.cycles / final_rate * BUDGET_HEADROOM)))
+      else sprintf(
+        paste0("Tier-1 acceptance was only %.1f%% — this trait's Dunn geometry cannot ",
+               "realistically fill a pool this size; lower --caas_full_perms or relax the ",
+               "contrast-selection strategy."),
+        100 * final_rate)
+    stop(sprintf(
+      paste0("Permulation pool could not be filled: %d Tier-1 + %d Tier-2 = %d of the requested %d ",
+             "after %d draws and %d low-acceptance escalation(s) (final budget %d, hard cap %d).\n",
+             "  %s\n",
+             "  Top rejection reasons: %s"),
+      n1, n2, n1 + n2, number.of.cycles, total_draws, escalations,
+      as.integer(budget), as.integer(hard_cap), diag,
+      if (length(tab)) paste(sprintf("%s (%d)", names(tab)[top], as.integer(tab)[top]), collapse = "; ") else "none recorded"))
+  }
+
+  if (!match_fop) {
+    pool <- cands[seq_len(number.of.cycles)]
+    break
+  }
+
+  # ── Design matching: count each new candidate's FOP harvest ────────────────
+  cand_ids <- vapply(cands, function(e) as.integer(e$draw_id), integer(1))
+  new_i <- which(!(as.character(cand_ids) %in% names(nhyp_cache)))
+  if (length(new_i)) {
+    nh_new <- parallel::mclapply(cands[new_i], fop_count,
+                                 mc.cores = max(1L, min(n_cpus, length(new_i))),
+                                 mc.preschedule = TRUE)
+    nh_new <- vapply(nh_new, function(x) if (is.numeric(x)) as.integer(x) else 1L, integer(1))
+    nhyp_cache[as.character(cand_ids[new_i])] <- nh_new
+  }
+  nh_c <- unname(nhyp_cache[as.character(cand_ids)])
+  qual <- which(nh_c >= n_hyp_obs)
+  match_rate <- length(qual) / length(cands)
+  log_msg("INFO", sprintf("Design matching: %d/%d candidates reach >= %d FOP hypotheses (%.1f%%)",
+                          length(qual), length(cands), n_hyp_obs, 100 * match_rate))
+
+  if (length(qual) >= number.of.cycles) {
+    pool <- cands[qual[seq_len(number.of.cycles)]]
+    break
+  }
+  if (length(cands) < pool_target || match_rate < MIN_MATCH_RATE ||
+      pool_target >= MATCH_HARD_CAP * number.of.cycles) {
+    rest <- setdiff(seq_along(cands), qual)
+    rest <- rest[order(-nh_c[rest], rest)]
+    fill <- rest[seq_len(min(length(rest), number.of.cycles - length(qual)))]
+    pool <- cands[sort(c(qual, fill))]
+    log_msg("WARN", sprintf(
+      paste0("Design matching incomplete: %d cycles reach the observed %d FOP hypotheses; ",
+             "%d filled with the largest remaining harvests (min %d hypotheses); match rate %.1f%%"),
+      length(qual), n_hyp_obs, length(fill),
+      if (length(fill)) min(nh_c[fill]) else NA_integer_, 100 * match_rate))
+    break
+  }
+  pool_target <- as.integer(min(
+    ceiling(length(cands) + (number.of.cycles - length(qual)) / match_rate * BUDGET_HEADROOM),
+    MATCH_HARD_CAP * number.of.cycles))
+  log_msg("INFO", sprintf("Design matching: extending the candidate target to %d", pool_target))
 }
 
 # ── Write resample chunks + a tier/Dunn manifest ─────────────────────────────
@@ -536,18 +654,11 @@ if (fop_null) {
     cyc <- paste0("b_", b)
     if (is.null(e$pvec) || is.null(e$fg) || is.null(e$bg))
       return(list(lab = NULL, pair = NULL, n_hyp = 0L))
-    hv <- tryCatch(
-      lean_fop_harvest(
-        trait_vec = e$pvec, D = D, target_pairs = target_pairs,
-        tree = pruned.tree, cov_bm = cov_bm, cov_ou = cov_ou,
-        selected_model = selected_model,
-        ci_lb = e$ci_lb_draw, ci_ub = e$ci_ub_draw, n_vec = e$n_draw,
-        top_pct = pss_top_pct, max_fop = max_fop,
-        ordinal = if (trait_type == "ordinal") TRUE
-                  else if (trait_type == "continuous") FALSE else NULL,
-        canon_pairs = data.frame(species1 = e$fg, species2 = e$bg,
-                                 stringsAsFactors = FALSE)),
-      error = function(err) { log_msg("WARN", sprintf("FOP harvest %s: %s", cyc, conditionMessage(err))); NULL })
+    hv <- fop_hypotheses(e, cyc)
+    # Design matching: a matched cycle carries exactly the observed number of
+    # hypotheses, its top n_hyp_obs in harvest order (H1, then by min-PSS).
+    if (match_fop && !is.null(hv) && length(hv$hypotheses) > n_hyp_obs)
+      hv$hypotheses <- hv$hypotheses[seq_len(n_hyp_obs)]
     if (is.null(hv) || length(hv$hypotheses) == 0L) {
       # fall back to H1-only so the cycle still enters the fanned discovery
       return(list(

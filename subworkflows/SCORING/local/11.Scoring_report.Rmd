@@ -778,7 +778,9 @@ pct_sig_adj <- 100 * mean(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE)
 cat(sprintf(paste0(
   "`p.emp` counts the permuted-labeling cycles that BOTH re-detect the position ",
   "(on either phenotype side) AND match or beat its observed `CAAS_score`, add-one ",
-  "smoothed over N cycles. `p.emp_adj` is its BH adjustment within the tested set.\n\n",
+  "smoothed over N cycles. `p.emp_adj` is its BH adjustment over one test per position, ",
+  "across every position the null can detect (null-detectable positions not detected in the ",
+  "observed data enter at p = 1).\n\n",
   "- **Scored positions with p.emp**: %d/%d (%.1f%%)\n",
   "- **Significant at uncorrected p.emp <= %.3g**: %d/%d (%.1f%%)\n",
   "- **Significant at BH-adjusted p.emp_adj <= %.3g**: %d/%d (%.1f%%)\n\n"),

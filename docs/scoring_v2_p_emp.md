@@ -332,8 +332,16 @@ para cada (Gene, Position, s) de pos_scores con CAAS_score_obs no-NA:
 
 ### 6b. `p.adjust` en §2h
 
-`p.emp_adj = p.adjust(p.emp[tested], "BH")`, `tested = !is.na(p.emp)`, mismo
-patrón que `pos_perm_p_adj`. Cada `(Gene, Position, side)` es un test. `p.emp` y
+`p.emp_adj = p.adjust(p.emp[familia], "BH")` con un test por `(Gene, Position)`
+(las filas top/bottom comparten el `p.emp` agrupado y entran una sola vez). La
+familia es la unión de las posiciones observadas con `p.emp` y todas las
+posiciones que re-detecta al menos un ciclo nulo; estas últimas, si no están en
+el observado, entran con p = 1 (el estadístico es "CAAS_score si detectado, -Inf
+si no", así que filtrar la familia a lo observado selecciona sobre el propio
+estadístico). Las posiciones que ningún ciclo nulo detecta quedan fuera: p = 1
+bajo cualquier etiquetado. `N` es el roster de ciclos de `caas_perms.rds`
+(incluye ciclos sin detecciones); una posición observada que ningún ciclo
+re-detecta recibe `k = 0`, salvo con el guard de match < 50 %, donde queda NA. `p.emp` y
 `pos_perm_p` se BH-ajustan **por separado** (dos familias de hipótesis; el
 usuario elige headline, no se penaliza por reportar ambas). Sin
 `p.emp_score_only` (§3).
@@ -488,7 +496,7 @@ per-lado, y no toca R. `perm_pos_cycle_caas.tsv.gz` ya sale con valores core v3
 - Nueva §2f-ter (tras §2g): cargar `perm_pos_cycle_caas.tsv.gz`, join a
   `pos_scores` por `(Gene, Position, side)` con fallback 3-key, `k`-loop →
   `p.emp`. Guard de tasa de match análogo a §2f-bis.
-- §2h: `p.emp_adj` vía `p.adjust("BH")` sobre tested; BH separado de `pos_perm_p`.
+- §2h: `p.emp_adj` vía `p.adjust("BH")` sobre la familia de §6b; BH separado de `pos_perm_p`.
 - Escritura de `position_scores.tsv`: añadir `p.emp`, `p.emp_adj`; **quitar**
   `pos_perm_p` / `pos_perm_p_adj` de esa tabla (pasan a vivir solo en
   `perm_pos_pval.tsv`).

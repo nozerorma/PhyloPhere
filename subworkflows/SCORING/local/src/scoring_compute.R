@@ -308,6 +308,9 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 # mean(caas_row) bit for bit (§6c -- no guard needed).
 pos_scores$p.emp <- NA_real_
 has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
+# caas_perms.rds is loaded here when present (its columns are the cycle roster
+# for N below) and reused by the gene-level p.perm in §4.
+caas_perms <- NULL
 if (has_caas_pos_cycle_caas) {
   cat("Loading per-cycle CAAS null (p.emp):", caas_pos_cycle_caas_file, "\n")
   cyc_caas <- read_tsv(caas_pos_cycle_caas_file, show_col_types = FALSE) %>%
@@ -321,6 +324,7 @@ if (has_caas_pos_cycle_caas) {
     mutate(.m = caas_sum / n_schemes) %>%
     group_by(Gene, Position, cycle) %>%
     summarise(caas_max = max(.m), .groups = "drop")
+  rm(cyc_caas)
 
   # observed pooled statistic = best side per (Gene, Position) (== .pos_undirected)
   obs_max <- pos_scores %>%
@@ -328,47 +332,86 @@ if (has_caas_pos_cycle_caas) {
     group_by(Gene, Position) %>%
     summarise(.obs = max(CAAS_score), .groups = "drop")
 
-  N_emp <- dplyr::n_distinct(cyc_pooled$cycle)
+  # N = cycles replayed, not cycles present in the file: a cycle that re-detects
+  # no position emits no rows. The replay roster is the column set of
+  # caas_perms.rds (one column per cycle, zero-detection cycles included). It is
+  # used only if it contains every cycle present in the file; otherwise N falls
+  # back to the cycles present, which can only make p.emp larger.
+  N_present <- dplyr::n_distinct(cyc_pooled$cycle)
+  N_emp     <- N_present
+  if (file_exists(caas_perms_file)) {
+    caas_perms <- tryCatch(readRDS(caas_perms_file), error = function(e) NULL)
+    .roster <- colnames(caas_perms[["caas_corStat_byrank"]][["global"]])
+    if (!is.null(.roster) && all(unique(cyc_pooled$cycle) %in% .roster)) {
+      N_emp <- length(.roster)
+    } else {
+      cat("  WARNING: caas_perms.rds cycle roster missing or inconsistent with ",
+          "perm_pos_cycle_caas.tsv.gz; N = cycles present in the null file\n",
+          file = stderr())
+    }
+  }
 
-  .k_emp <- cyc_pooled %>%
-    inner_join(obs_max, by = c("Gene", "Position")) %>%
+  # An observed position that no null cycle re-detects has k_emp = 0 (its
+  # null statistic is -Inf in every cycle), hence the left join from obs_max.
+  .k_emp <- obs_max %>%
+    left_join(cyc_pooled, by = c("Gene", "Position")) %>%
     group_by(Gene, Position) %>%
-    summarise(k_emp = sum(caas_max >= .obs), .groups = "drop") %>%
+    summarise(k_emp    = sum(caas_max >= .obs, na.rm = TRUE),
+              null_hit = any(!is.na(caas_max)),
+              .groups  = "drop") %>%
     mutate(p.emp = (k_emp + 1) / (N_emp + 1))
 
-  .n_obs_pos_e <- n_distinct(paste(pos_scores$Gene, pos_scores$Position))
-  pos_scores <- pos_scores %>%
-    select(-any_of("p.emp")) %>%
-    left_join(.k_emp %>% select(Gene, Position, p.emp), by = c("Gene", "Position"))
-  .n_matched_e <- pos_scores %>% filter(!is.na(p.emp)) %>%
-    distinct(Gene, Position) %>% nrow()
+  .n_obs_pos_e <- nrow(.k_emp)
+  .n_matched_e <- sum(.k_emp$null_hit)
   .rate_e <- if (.n_obs_pos_e > 0) .n_matched_e / .n_obs_pos_e else 0
-  cat(sprintf("  p.emp: matched %d/%d positions (%.1f%%), N=%d cycles\n",
-              .n_matched_e, .n_obs_pos_e, 100 * .rate_e, N_emp))
+  cat(sprintf("  p.emp: %d/%d observed positions re-detected by the null (%.1f%%), N=%d cycles (%d with detections)\n",
+              .n_matched_e, .n_obs_pos_e, 100 * .rate_e, N_emp, N_present))
   if (.rate_e < 0.5) {
+    # Low overlap means the two tables are on different coordinate systems, not
+    # that the unmatched positions are strong: leave them untested (NA).
+    .k_emp$p.emp[!.k_emp$null_hit] <- NA_real_
     cat(sprintf(paste0("  WARNING: p.emp join rate %.1f%% < 50%% -- the observed ",
                        "positions (filtered_discovery.tsv) and the null's ",
                        "perm_pos_cycle_caas.tsv.gz positions are likely on different ",
-                       "coordinate systems. Treat p.emp/p.emp_adj as unreliable.\n"),
+                       "coordinate systems. Unmatched positions left NA; treat ",
+                       "p.emp/p.emp_adj as unreliable.\n"),
                 100 * .rate_e), file = stderr())
   }
+  pos_scores <- pos_scores %>%
+    select(-any_of("p.emp")) %>%
+    left_join(.k_emp %>% select(Gene, Position, p.emp), by = c("Gene", "Position"))
 } else {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 
-# ── 2h. BH-adjust p.emp within the tested set ───────────────────────────────
-# Mirrors the gene_caas_pperm_adj idiom (Tier 1A, section below): BH over
-# exactly the positions that got a null match, so genes/positions absent from
-# the null's own universe (NA) never enter or dilute the adjustment. p.emp_adj
-# is the sole position-level permulation p.
+# ── 2h. BH-adjust p.emp over the permutation family ─────────────────────────
+# One test per (Gene, Position): the side rows of a position share one pooled
+# p.emp and enter BH once. The family is every position the null can detect
+# (>= 1 null cycle) plus every observed position with a p.emp. p.emp's
+# statistic is "max-side CAAS_score if detected, -Inf otherwise", so a
+# null-detectable position the observed data did not detect is a tested
+# position with p = 1; restricting BH to observed-detected positions would
+# select on the statistic itself. Positions no null cycle detects are p = 1
+# under every labelling, carry no permutation information, and are left out.
+# p.emp_adj is the sole position-level permulation p.
 pos_scores$p.emp_adj <- NA_real_
 if (has_caas_pos_cycle_caas) {
-  .tested_e <- !is.na(pos_scores$p.emp)
-  if (any(.tested_e)) {
-    pos_scores$p.emp_adj[.tested_e] <- p.adjust(pos_scores$p.emp[.tested_e], method = "BH")
+  .fam_e <- cyc_pooled %>%
+    distinct(Gene, Position) %>%
+    full_join(.k_emp %>% filter(!is.na(p.emp)) %>% select(Gene, Position, p.emp),
+              by = c("Gene", "Position")) %>%
+    mutate(observed = !is.na(p.emp),
+           p.emp    = coalesce(p.emp, 1))
+  if (nrow(.fam_e) > 0) {
+    .fam_e$p.emp_adj <- p.adjust(.fam_e$p.emp, method = "BH")
+    pos_scores <- pos_scores %>%
+      select(-p.emp_adj) %>%
+      left_join(.fam_e %>% filter(observed) %>% select(Gene, Position, p.emp_adj),
+                by = c("Gene", "Position"))
   }
-  cat(sprintf("  p.emp_adj: %d/%d position-rows BH-adjusted\n",
-              sum(.tested_e), nrow(pos_scores)))
+  cat(sprintf("  p.emp_adj: BH over %d positions (%d observed, %d null-only at p = 1)\n",
+              nrow(.fam_e), sum(.fam_e$observed), sum(!.fam_e$observed)))
+  rm(cyc_pooled)
 }
 
 # ── 2i. FADE (gene-level - see section 4d) ──────────────────────────────────
@@ -827,7 +870,7 @@ if (gene_perm_pooled) {
 if (!file_exists(caas_perms_file)) {
   cat("  no --caas_perms provided, skipping gene p.perm\n")
 } else {
-  caas_perms <- tryCatch(readRDS(caas_perms_file), error = function(e) NULL)
+  if (is.null(caas_perms)) caas_perms <- tryCatch(readRDS(caas_perms_file), error = function(e) NULL)
   if (is.null(caas_perms) || is.null(caas_perms[["caas_corStat_byrank"]])) {
     cat("  CAAS permulation null unreadable or missing caas_corStat_byrank, skipping gene p.perm\n")
   } else {

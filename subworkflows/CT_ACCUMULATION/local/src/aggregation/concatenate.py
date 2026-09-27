@@ -110,24 +110,34 @@ def read_genomic_info(genomic_file):
     logging.info(f"Reading genomic info from {genomic_file}")
     genes = []
     with open(genomic_file) as f:
-        headers = f.readline().strip().split('\t')
+        headers = [c.strip().lower() for c in f.readline().strip().split('\t')]
         gene_idx = headers.index('gene')
         chr_idx  = headers.index('chr')
         start_idx = headers.index('start')
         end_idx   = headers.index('end')
         msa_length_idx = headers.index('length')
         for line in f:
-            parts = line.strip().split('\t')
+            line_str = line.strip()
+            if not line_str:
+                continue
+            parts = line_str.split('\t')
+            if len(parts) <= max(gene_idx, chr_idx, start_idx, end_idx, msa_length_idx):
+                continue
+            start_str = parts[start_idx].strip()
+            end_str = parts[end_idx].strip()
+            if not start_str or not end_str:
+                logging.debug(f"Skipping unlocalized gene in genomic info (no coordinates): {parts[gene_idx]}")
+                continue
             try:
                 genes.append({
                     'gene': parts[gene_idx],
                     'chr':  parts[chr_idx],
-                    'start': int(float(parts[start_idx])),
-                    'end':   int(float(parts[end_idx])),
+                    'start': int(float(start_str)),
+                    'end':   int(float(end_str)),
                     'msa_length': int(float(parts[msa_length_idx]))
                 })
             except (ValueError, IndexError) as e:
-                logging.warning(f"Skipping malformed line in genomic info: {line.strip()[:100]} — {e}")
+                logging.warning(f"Skipping malformed line in genomic info: {line_str[:100]} — {e}")
                 continue
     sorted_genes = sorted(genes, key=lambda x: (natural_sort_key(x['chr']), x['start']))
     logging.info(f"Processed {len(sorted_genes)} genes from genomic info")
@@ -149,9 +159,9 @@ def read_bg_info(bg_file):
 def read_metadata_caas(metadata_file):
     """Read CAAS metadata from a filtered_discovery.tsv file.
 
-    Reads the disambiguation-canonical columns Gene, Position, tag, caas,
-    convergence_type, caap_group, amino_encoded, is_conserved_meta.
-    No fallback to legacy formats.
+    Reads the disambiguation-canonical columns Gene, Position, tag (or tag_support),
+    caas, convergence_type, caap_group, amino_encoded.
+    Robust to missing or alternate column names.
 
     Returns: dict[group][gene][msa_pos] = {tag, convergence_type, caas}
     Only the (group, gene, msa_pos) keys are consumed downstream.
@@ -168,30 +178,46 @@ def read_metadata_caas(metadata_file):
             logging.warning(f"Metadata CAAS file is empty: {metadata_file} — skipping")
             return metadata
         sep = '\t' if '\t' in raw_header else ','
-        h = raw_header.split(sep)
+        h = [c.strip() for c in raw_header.split(sep)]
 
-        if 'Gene' not in h:
+        col_map = {col.lower(): idx for idx, col in enumerate(h)}
+
+        gene_idx = col_map.get('gene')
+        if gene_idx is None:
             logging.warning(f"Metadata CAAS file has no 'Gene' column (header: {raw_header[:120]}) — skipping")
             return metadata
 
-        gene_idx          = h.index('Gene')
-        pos_idx           = h.index('Position')
-        tag_idx           = h.index('tag')
-        convergence_idx   = h.index('convergence_type')
-        amino_idx         = h.index('amino_encoded') if 'amino_encoded' in h else None
-        group_idx         = h.index('caap_group')
+        pos_idx = col_map.get('position')
+        if pos_idx is None:
+            pos_idx = col_map.get('msa_pos')
+        if pos_idx is None:
+            logging.warning(f"Metadata CAAS file has no 'Position' column (header: {raw_header[:120]}) — skipping")
+            return metadata
+
+        tag_idx = col_map.get('tag')
+        if tag_idx is None:
+            tag_idx = col_map.get('tag_support')
+
+        convergence_idx = col_map.get('convergence_type')
+        amino_idx = col_map.get('amino_encoded')
+        group_idx = col_map.get('caap_group')
+        if group_idx is None:
+            group_idx = col_map.get('caap')
+        if group_idx is None:
+            group_idx = col_map.get('group')
+
         for line in f:
             line = line.strip()
             if not line:
                 continue
             parts = line.split(sep)
             try:
-                gene      = parts[gene_idx].strip()
-                msa_pos   = int(float(parts[pos_idx].strip()))
-                tag       = parts[tag_idx].strip()
-                convergence   = parts[convergence_idx].strip()
-                amino_conv = parts[amino_idx].strip() if amino_idx is not None else ''
-                group = parts[group_idx].strip()
+                gene = parts[gene_idx].strip()
+                msa_pos = int(float(parts[pos_idx].strip()))
+                tag = parts[tag_idx].strip() if tag_idx is not None and tag_idx < len(parts) else ''
+                convergence = parts[convergence_idx].strip() if convergence_idx is not None and convergence_idx < len(parts) else ''
+                amino_conv = parts[amino_idx].strip() if amino_idx is not None and amino_idx < len(parts) else ''
+                group = parts[group_idx].strip() if group_idx is not None and group_idx < len(parts) else '1'
                 if not group or group in ('NA', 'na', 'N/A'):
                     group = '1'
             except (IndexError, ValueError) as e:

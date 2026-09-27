@@ -144,16 +144,42 @@ def _remap_caas_df(df):
     """
     # Rename Gene→gene, Position→msa_pos (structural keys; concept columns are
     # already in disambiguation's canonical lowercase form).
-    df = df.rename(columns={'Gene': 'gene', 'Position': 'msa_pos'})
+    df = df.rename(columns={'Gene': 'gene', 'Position': 'msa_pos', 'position': 'msa_pos'})
 
     _bool = lambda x: str(x).strip().lower() in {'true', 't', '1', 'yes', 'y'}
 
-    # Coerce conserved-state columns to bool
-    df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
+    # Coerce conserved-state columns to bool (optional in modern filtered_discovery.tsv)
+    if 'is_conserved_meta' in df.columns:
+        df['is_conserved_meta'] = df['is_conserved_meta'].map(_bool)
+    else:
+        df['is_conserved_meta'] = False
+
+    # tag: fallback to tag_support if tag not present
+    if 'tag' not in df.columns:
+        if 'tag_support' in df.columns:
+            df['tag'] = df['tag_support']
+        else:
+            df['tag'] = ''
+
+    # side: fallback to change_side or 'both' if not present
+    if 'side' not in df.columns:
+        if 'change_side' in df.columns:
+            df['side'] = df['change_side']
+        else:
+            df['side'] = 'both'
+
     # convergence_type is already canonical in filtered_discovery.tsv — no remap needed.
 
     # caap_group: normalise casing of the raw label (GS1–GS4, US)
-    df['caap_group'] = df['caap_group'].astype(str).str.strip().str.upper()
+    if 'caap_group' not in df.columns:
+        for alt in ('caap', 'group'):
+            if alt in df.columns:
+                df['caap_group'] = df[alt]
+                break
+    if 'caap_group' in df.columns:
+        df['caap_group'] = df['caap_group'].astype(str).str.strip().str.upper()
+    else:
+        df['caap_group'] = 'US'
 
     # iscaap: any labelled group other than 'US' (includes GS1–GS4)
     df['iscaap'] = df['caap_group'].apply(lambda x: x != 'US')
@@ -527,14 +553,15 @@ def run_permulation_null(detail_path, gene_to_id, n_genes, actual_counts, change
     n_group_unrecognised = 0
 
     for row in _iter_perm_detail_rows(detail_path):
-        gid = gene_to_id.get(row.get('Gene'))
+        gid = gene_to_id.get(row.get('Gene') or row.get('gene'))
         if gid is None:
             n_gene_missing += 1
             continue
         cyc = row.get('cycle')
         all_cycles.add(cyc)
 
-        if not _perm_row_passes_side(row.get('side'), change_side):
+        side_val = row.get('side') or row.get('change_side')
+        if not _perm_row_passes_side(side_val, change_side):
             continue
 
         cat = _PERM_CAT_OF_GROUP.get((row.get('caap_group') or '').strip().upper())
@@ -929,7 +956,7 @@ def main(args):
                 d[name] = d.get(name, 0) + 1
 
         position_to_tag = dict(zip(merged_df['position'].to_numpy(),
-                                   merged_df['tag'].astype(str).fillna('').to_numpy()))
+                                   merged_df['tag'].astype(str).fillna('').to_numpy() if 'tag' in merged_df.columns else np.array([''] * len(merged_df))))
 
         # Parallel plan
         total_rands = int(args.n_randomizations)

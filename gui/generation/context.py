@@ -111,6 +111,7 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "include_b0": _bool_str(caas.include_b0),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),
         "caas_perms_fop": _bool_str(getattr(caas, 'caas_perms_fop', False)),
+        "caas_perms_match_fop": _bool_str(getattr(caas, 'caas_perms_match_fop', True)),
         "publish_intermediates": _bool_str(caas.publish_intermediates),
         "export_groups": _bool_str(caas.export_groups),
         "export_perm_discovery": _bool_str(caas.export_perm_discovery),
