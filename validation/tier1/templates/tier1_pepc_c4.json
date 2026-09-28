@@ -42,7 +42,7 @@
     "phenotype_rows": [
       {
         "trait": "c4",
-        "secondary": "",
+        "secondary": "c4_phenotypic",
         "n_trait": "",
         "c_trait": "",
         "prune": "",
@@ -51,11 +51,11 @@
       },
       {
         "trait": "c4_phenotypic",
-        "secondary": "",
+        "secondary": "c4",
         "n_trait": "",
         "c_trait": "",
         "prune": "eleocharis_intermediate.txt",
-        "prune_secondary": "",
+        "prune_secondary": "eleocharis_intermediate.txt",
         "trait_type": "ordinal"
       }
     ]
@@ -94,6 +94,7 @@
       "multi_hypothesis": true,
       "max_fop": "100",
       "caas_perms_fop": true,
+      "caas_perms_match_fop": true,
       "export_groups": false,
       "export_perm_discovery": false
     },
@@ -115,6 +116,7 @@
       "minlen_values": "2,3,4,10",
       "maxcaas_values": "0.6,0.7,0.8",
       "gene_filter_mode": "none",
+      "remove_caas_clusters": true,
       "extreme_threshold": "0.99",
       "iqr_multiplier": "3.0"
     },
@@ -156,7 +158,8 @@
       "enabled": true,
       "extra_flags": "",
       "fade_direction": "top",
-      "fade_background_scope": "opposite",
+      "fade_background_scope": "all",
+      "fade_internal_nodes": "all_descendants",
       "fade_species_file": "",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
@@ -200,21 +203,21 @@
       "scoring_string": false,
       "scoring_compare_fdr": "0.1",
       "scoring_compare_top_n": "20",
-      "scoring_stress": true,
+      "scoring_stress": false,
       "scoring_stress_top_n": "25",
       "scoring_stress_rank_metric": "spearman",
       "scoring_window_size_bp": "1000000",
-      "scoring_pos_perm_p_thr": "0.05"
+      "scoring_p_emp_thr": "0.05"
     },
     "enrichment": {
       "enabled": true,
       "extra_flags": "",
       "posenrich_enabled": false,
-      "fcs_enabled": true,
+      "fcs_enabled": false,
       "gmt_dir": "",
       "auto_fetch_gmt": false,
       "fcs_min_genes": "5",
-      "fcs_max_genes": "500",
+      "fcs_max_genes": "1000",
       "fcs_fdr": "0.15",
       "fcs_pperm_thr": "0.025",
       "fcs_top_n": "20",
@@ -229,14 +232,14 @@
       "scoring_ami": false,
       "scoring_string": false,
       "scoring_compare_fdr": "0.15",
-      "scoring_compare_top_n": "20",
+      "scoring_compare_top_n": "25",
       "comparison_perm_null": true,
       "comparison_perm_stat": "spearman",
       "comparison_perm_topk": "0.05",
       "posenrich_domains": false,
       "domain_variability_file": "",
       "domain_ref_species": "Carex_phleoides",
-      "posenrich_ucr": true,
+      "posenrich_ucr": false,
       "ucr_positions_file": "",
       "posenrich_eggnog": false,
       "eggnog_taxid": "",
