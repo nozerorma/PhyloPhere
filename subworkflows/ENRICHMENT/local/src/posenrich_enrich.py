@@ -196,15 +196,34 @@ def load_annot(path):
 
 
 # ── observed scores ──────────────────────────────────────────────────────────
-def direction_scores(df, direction):
-    """Return {pos_id: CAAS_score} for a direction (global/top/bottom)."""
+def direction_rows(df, direction):
+    """One row per pos_id for a direction (global/top/bottom). "top"/"bottom"
+    keep that side's row; "global" keeps the best side (max CAAS_score), the
+    same max-over-sides collapse SCORING uses for its undirected axis
+    (.pos_undirected, p.emp) and the CAAS null uses for its "all" pool."""
     if direction == "global":
         sub = df
     elif direction == "top":
         sub = df[df["side"] == "top"]
     else:
         sub = df[df["side"] == "bottom"]
+    if sub.empty:
+        return sub
+    return sub.loc[sub.groupby("pos_id", sort=False)["CAAS_score"].idxmax()]
+
+
+def direction_scores(df, direction):
+    """Return {pos_id: CAAS_score} for a direction (global/top/bottom)."""
+    sub = direction_rows(df, direction)
     return dict(zip(sub["pos_id"], sub["CAAS_score"]))
+
+
+def collapse_null_sides(sub):
+    """Reduce a (pos_id, side, cycle, score) null subset to one score per
+    (pos_id, cycle) = max over sides, mirroring direction_rows() on the
+    observed side."""
+    return (sub.groupby(["pos_id", "cycle"], observed=True, sort=False)["score"]
+               .max().reset_index())
 
 
 # ── CAAS permulation-null (preferred as the PRIMARY null when supplied;
@@ -257,16 +276,15 @@ def load_prepped_caas_null(path):
 
 def null_direction_subset(long_df, direction):
     """Direction-filtered view of load_caas_cycle_null's long_df, with the
-    SAME side-handling and duplicate-(pos_id, cycle) resolution direction_scores()
-    uses for observed data (last row wins for "global", matching dict(zip(...))'s
-    overwrite semantics on a both-direction position)."""
+    same side-handling direction_rows() uses for observed data: one score per
+    (pos_id, cycle), the max over sides for "global"."""
     if direction == "global":
         sub = long_df
     elif direction == "top":
         sub = long_df[long_df["side"] == "top"]
     else:
         sub = long_df[long_df["side"] == "bottom"]
-    return sub.drop_duplicates(subset=["pos_id", "cycle"], keep="last")
+    return collapse_null_sides(sub)
 
 
 def caas_null_term_sums(M_mat, bg_idx_map, N, null_sub, all_cycle_levels):
@@ -539,8 +557,12 @@ def main():
         sources["characterization"] = (char_terms, char_descs, False)
     print(f"[posenrich] sources: {len(sources)} ({', '.join(sources)})", flush=True)
 
-    hyp_dict = dict(zip(obs["pos_id"], obs["n_hypotheses"])) if "n_hypotheses" in obs.columns else {}
-    supp_dict = dict(zip(obs["pos_id"], obs["supporting_hypotheses"])) if "supporting_hypotheses" in obs.columns else {}
+    # Hypothesis descriptors are read per direction from the row direction_rows()
+    # keeps, so a leading-edge entry describes the same side that set its score.
+    # position_scores.tsv carries the hypothesis list as participating_hypotheses;
+    # it is written out here under the leading-edge schema's supporting_hypotheses.
+    has_hyp = "n_hypotheses" in obs.columns
+    supp_col = next((c for c in ("participating_hypotheses", "supporting_hypotheses") if c in obs.columns), None)
 
     caas_null_by_direction = None
     if args.caas_null_prepped:
@@ -563,7 +585,11 @@ def main():
     rows = []
     leading_edge_rows = []
     for direction in directions:
-        obs_scores = direction_scores(obs, direction)
+        dir_rows = direction_rows(obs, direction)
+        obs_scores = dict(zip(dir_rows["pos_id"], dir_rows["CAAS_score"]))
+        hyp_dict = dict(zip(dir_rows["pos_id"], dir_rows["n_hypotheses"])) if has_hyp else {}
+        supp_dict = (dict(zip(dir_rows["pos_id"], dir_rows[supp_col].fillna("").astype(str)))
+                     if supp_col else {})
         n_scored = sum(1 for s in obs_scores.values() if s > 0)
         if n_scored == 0:
             continue
@@ -623,7 +649,7 @@ def main():
     print(f"[posenrich] wrote {out_path} ({len(results)} rows)", flush=True)
 
     leading_edge_cols = ["ranking", "database", "pathway", "gene", "gene_position", "CAAS_score"]
-    if hyp_dict:
+    if has_hyp:
         leading_edge_cols.extend(["n_hypotheses", "supporting_hypotheses"])
     leading_edge = pd.DataFrame(
         leading_edge_rows,

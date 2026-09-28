@@ -260,10 +260,39 @@ process FCS_CONCAT {
     set -euo pipefail
 
     mapfile -t files < <(find . -maxdepth 1 -name "partial_*" ! -name ".*" | sort)
-    cat "\${files[0]}" > fcs_enrich_merged.tsv
-    for ((i=1; i<\${#files[@]}; i++)); do
-        tail -n +2 "\${files[\$i]}" >> fcs_enrich_merged.tsv
+
+    # Batches can write their columns in different orders (a zero-hit batch
+    # emits fcs_run_all()'s empty-result schema), so rows are merged by column
+    # name onto the header of the first batch that has data rows.
+    ref="\${files[0]}"
+    for f in "\${files[@]}"; do
+        if [ "\$(wc -l < "\$f")" -gt 1 ]; then ref="\$f"; break; fi
     done
+
+    awk -F'\\t' -v OFS='\\t' '
+        FNR == 1 {
+            delete src
+            for (i = 1; i <= NF; i++) src[\$i] = i
+            if (NR == 1) {
+                n = NF
+                for (i = 1; i <= NF; i++) { canon[i] = \$i; want[\$i] = 1 }
+                print; next
+            }
+            for (c in src) if (!(c in want)) {
+                printf "FCS_CONCAT: column %s in %s not in reference header\\n", c, FILENAME > "/dev/stderr"
+                exit 1
+            }
+            next
+        }
+        {
+            line = ""
+            for (i = 1; i <= n; i++) {
+                v = (canon[i] in src) ? \$(src[canon[i]]) : "NA"
+                line = (i == 1) ? v : line OFS v
+            }
+            print line
+        }
+    ' "\$ref" \$(printf '%s\\n' "\${files[@]}" | grep -vxF "\$ref" || true) > fcs_enrich_merged.tsv
     """
 }
 

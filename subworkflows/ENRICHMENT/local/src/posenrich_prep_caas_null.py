@@ -15,9 +15,8 @@
 # pickle (categorical Gene/pos_id, int32 cycle, float32 score) that every
 # batch task then just loads. The per-direction subsetting mirrors
 # posenrich_enrich.py's load_caas_cycle_null()/null_direction_subset() exactly
-# (same side-handling, same drop_duplicates(subset=["pos_id","cycle"],
-# keep="last") resolution) -- this is a reduction of redundant work, not a
-# change in what is computed.
+# (same side-handling, one score per (pos_id, cycle) = max over sides) -- this
+# is a reduction of redundant work, not a change in what is computed.
 # =============================================================================
 
 import argparse
@@ -91,7 +90,8 @@ def main():
             sub = long_df[long_df["side"] == "top"]
         else:
             sub = long_df[long_df["side"] == "bottom"]
-        sub = sub.drop_duplicates(subset=["pos_id", "cycle"], keep="last")[["pos_id", "cycle", "score"]].copy()
+        sub = (sub.groupby(["pos_id", "cycle"], observed=True, sort=False)["score"]
+                  .max().reset_index())
         sub["pos_id"] = sub["pos_id"].astype("category")
         sub = sub.reset_index(drop=True)
         out[direction] = sub

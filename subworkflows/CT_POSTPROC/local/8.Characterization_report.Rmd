@@ -972,7 +972,19 @@ gene_filter_flags <- gene_filter_flags %>%
 
 # --- 2. Membership summary table --------------------------------------------
 
-total_analyzed_genes <- n_distinct(discovery_df$Gene)
+# gene_filter_flags has one row per (caap_group, Gene); the totals below are
+# per unique gene, flagged if any of its CAAP groups is flagged.
+gene_level_flags <- gene_filter_flags %>%
+  group_by(Gene) %>%
+  summarise(
+    Extreme         = any(Extreme, na.rm = TRUE),
+    Dubious         = any(Dubious, na.rm = TRUE),
+    Cluster_removed = any(Cluster_removed, na.rm = TRUE),
+    .groups         = "drop"
+  ) %>%
+  mutate(any_flag = Extreme | Dubious | Cluster_removed)
+
+total_analyzed_genes <- n_distinct(c(discovery_df$Gene, gene_level_flags$Gene))
 
 membership_counts <- gene_filter_flags %>%
   count(caap_group, filter_combo, .drop = FALSE) %>%
@@ -983,12 +995,12 @@ nonzero_membership <- membership_counts %>% filter(n > 0)
 filter_totals_msg <- sprintf(
   "\nFilter-specific totals across all analyzed genes (%d unique genes):\n  Extreme only or combined : %d genes\n  Dubious only or combined : %d genes\n  Cluster only or combined : %d genes\n  Any filter flagged       : %d / %d genes (%.1f%%)\n",
   total_analyzed_genes,
-  sum(gene_filter_flags$Extreme, na.rm = TRUE),
-  sum(gene_filter_flags$Dubious, na.rm = TRUE),
-  sum(gene_filter_flags$Cluster_removed, na.rm = TRUE),
-  sum(gene_filter_flags$filter_combo != "None"),
+  sum(gene_level_flags$Extreme),
+  sum(gene_level_flags$Dubious),
+  sum(gene_level_flags$Cluster_removed),
+  sum(gene_level_flags$any_flag),
   total_analyzed_genes,
-  100 * (sum(gene_filter_flags$filter_combo != "None") / max(1, total_analyzed_genes))
+  100 * (sum(gene_level_flags$any_flag) / max(1, total_analyzed_genes))
 )
 
 cat(filter_totals_msg, "\n")
@@ -1108,8 +1120,9 @@ if (nrow(removal_events) > 0) {
     scale_fill_paletteer_d("ggthemes::Tableau_10") +
     scale_y_discrete(labels = format_pattern_parallel_axis) +
     theme_minimal(base_size = 16) +
-    labs(title = "Removed positions by convergence label", x = "n", y = "convergence label (convergence_type)") +
+    labs(title = "Removed positions by convergence label", x = "n", y = "convergence label") +
     theme(
+      axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
       axis.text.y = element_text(size = 10, lineheight = 0.95),
       strip.text = element_text(face = "bold")
     )
@@ -1253,6 +1266,7 @@ if (!"chr" %in% names(gene_ensembl)) {
         plot.title = element_text(face = "bold", size = 28),
         plot.subtitle = element_text(size = 20),
         axis.title = element_text(size = 22),
+        axis.title.y = element_text(margin = ggplot2::margin(l = 20, r = 20)),
         axis.text = element_text(size = 18),
         panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
