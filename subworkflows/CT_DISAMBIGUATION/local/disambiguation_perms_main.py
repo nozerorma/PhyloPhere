@@ -77,6 +77,8 @@ def parse_arguments():
                    help="CAAS_FILTER_GENES mode (params.gene_filter_mode)")
     p.add_argument("--iqr-multiplier", type=float, default=3.0)
     p.add_argument("--extreme-percentile", type=float, default=0.99)
+    p.add_argument("--seed", type=int, default=1998,
+                   help="Pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
     p.add_argument("--verbose", "-v", action="store_true")
     p.add_argument("--log-file", type=Path, default=None)
     return p.parse_args()
@@ -175,6 +177,7 @@ def main():
         extreme_percentile=args.extreme_percentile,
         postproc_filter=args.postproc_filter,
         gene_sizes=gene_sizes,
+        seed=args.seed,
     )
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 

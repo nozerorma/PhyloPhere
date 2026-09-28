@@ -230,6 +230,7 @@ decelerated amino-acid selection on phenotype-extreme branches.
 Usage:
 --fade_direction                         <"top"|"bottom"|"both">   "both"  (which foreground direction(s) to run)
 --fade_background_scope                  <"all"|"opposite">        "all"   ("opposite" prunes the tree+alignment to foreground + opposite-extreme species only, excluding "middle" species entirely; "all" is HyPhy's own implicit background-is-everything-else behavior. With --fade_direction both, "opposite" runs each extreme group against the other.)
+--fade_internal_nodes                    <"all_descendants"|"none"> "all_descendants" ("all_descendants" labels every internal branch whose descendant tips are all foreground, so all branches of a foreground clade, its stem included, are tested (HyPhy LabelTrees default); "none" tests foreground terminal branches only)
 --fade_species_file                      <"path">                  null    (optional user-supplied fg/bg species file, candidate_species.tab format: species<TAB>contrast_group[<TAB>pair]; contrast_group==1 -> top, ==0 -> bottom; bypasses contrast selection for FADE when set. Requires --tree when used standalone.)
 --selection_prep_batch_size          <INTEGER>                500
 --fade_batch_size                      <INTEGER>                200

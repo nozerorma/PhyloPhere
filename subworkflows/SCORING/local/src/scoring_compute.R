@@ -53,7 +53,7 @@ hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_p
 caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
-# p.emp/p.emp_adj significance threshold for flag_caas_significant (fcs_stats.tsv)
+# Gene-level permulation significance threshold for flag_caas_significant (fcs_stats.tsv)
 # and gene_caas_pperm_adj. Mirrors 11.Scoring_report.Rmd's `scoring_p_emp_thr`
 # param (conf/scoring.config) - one threshold, reused here so the
 # FCS/POSENRICH/Comparison "% significant" tables agree with what the Scoring
@@ -366,7 +366,17 @@ if (has_caas_pos_cycle_caas) {
   .rate_e <- if (.n_obs_pos_e > 0) .n_matched_e / .n_obs_pos_e else 0
   cat(sprintf("  p.emp: %d/%d observed positions re-detected by the null (%.1f%%), N=%d cycles (%d with detections)\n",
               .n_matched_e, .n_obs_pos_e, 100 * .rate_e, N_emp, N_present))
-  if (.rate_e < 0.5) {
+  # The overlap rate only diagnoses a coordinate mismatch when there are enough
+  # observed positions to estimate it. Below P_EMP_GUARD_MIN_POS an unmatched
+  # position is taken at face value: no null cycle re-detects it, so k_emp = 0.
+  P_EMP_GUARD_MIN_POS <- 10L
+  if (.n_obs_pos_e < P_EMP_GUARD_MIN_POS && .n_matched_e < .n_obs_pos_e) {
+    cat(sprintf(paste0("  p.emp: %d of %d observed position(s) never re-detected by the ",
+                       "null; scored at k_emp = 0 (too few positions for the ",
+                       "coordinate-mismatch check)\n"),
+                .n_obs_pos_e - .n_matched_e, .n_obs_pos_e))
+  }
+  if (.n_obs_pos_e >= P_EMP_GUARD_MIN_POS && .rate_e < 0.5) {
     # Low overlap means the two tables are on different coordinate systems, not
     # that the unmatched positions are strong: leave them untested (NA).
     .k_emp$p.emp[!.k_emp$null_hit] <- NA_real_
@@ -374,7 +384,7 @@ if (has_caas_pos_cycle_caas) {
                        "positions (filtered_discovery.tsv) and the null's ",
                        "perm_pos_cycle_caas.tsv.gz positions are likely on different ",
                        "coordinate systems. Unmatched positions left NA; treat ",
-                       "p.emp/p.emp_adj as unreliable.\n"),
+                       "p.emp/p.adj_bh/p.adj_sam as unreliable.\n"),
                 100 * .rate_e), file = stderr())
   }
   pos_scores <- pos_scores %>%
@@ -384,17 +394,27 @@ if (has_caas_pos_cycle_caas) {
   cat("  no --caas_pos_cycle_caas provided, skipping p.emp\n")
 }
 
-# ── 2h. BH-adjust p.emp over the permutation family ─────────────────────────
-# One test per (Gene, Position): the side rows of a position share one pooled
-# p.emp and enter BH once. The family is every position the null can detect
-# (>= 1 null cycle) plus every observed position with a p.emp. p.emp's
-# statistic is "max-side CAAS_score if detected, -Inf otherwise", so a
-# null-detectable position the observed data did not detect is a tested
-# position with p = 1; restricting BH to observed-detected positions would
-# select on the statistic itself. Positions no null cycle detects are p = 1
-# under every labelling, carry no permutation information, and are left out.
-# p.emp_adj is the sole position-level permulation p.
-pos_scores$p.emp_adj <- NA_real_
+# ── 2h. Position-level multiple testing: p.adj_bh and p.adj_sam ─────────────
+# p.adj_bh: BH over the permutation family, one test per (Gene, Position) (the
+# side rows of a position share one pooled p.emp and enter BH once). The
+# family is every position the null detects in >= 1 cycle plus every observed
+# position with a p.emp. p.emp's statistic is "max-side CAAS_score if detected,
+# -Inf otherwise", so a null-detectable position the observed data did not
+# detect is a tested position with p = 1; restricting BH to observed-detected
+# positions would select on the statistic itself. Positions detected neither
+# by the null nor by the observed data are left out, so m counts only columns
+# the finite null sample happened to reach.
+#
+# p.adj_sam: permutation FDR (SAM-style, Tusher et al. 2001) on the pooled
+# max-over-sides score. For a threshold t,
+#   FDR(t) = [#(cycle, position) null pairs with score >= t] / N
+#            / #{observed positions with score >= t},
+# with pi0 = 1; a position's value is the minimum FDR(t) over thresholds t at or
+# below its own score. The expected null count is taken over every position
+# each cycle detects, so it needs no family definition and counts columns the
+# observed data did not detect.
+pos_scores$p.adj_bh  <- NA_real_
+pos_scores$p.adj_sam <- NA_real_
 if (has_caas_pos_cycle_caas) {
   .fam_e <- cyc_pooled %>%
     distinct(Gene, Position) %>%
@@ -403,14 +423,36 @@ if (has_caas_pos_cycle_caas) {
     mutate(observed = !is.na(p.emp),
            p.emp    = coalesce(p.emp, 1))
   if (nrow(.fam_e) > 0) {
-    .fam_e$p.emp_adj <- p.adjust(.fam_e$p.emp, method = "BH")
+    .fam_e$p.adj_bh <- p.adjust(.fam_e$p.emp, method = "BH")
     pos_scores <- pos_scores %>%
-      select(-p.emp_adj) %>%
-      left_join(.fam_e %>% filter(observed) %>% select(Gene, Position, p.emp_adj),
+      select(-p.adj_bh) %>%
+      left_join(.fam_e %>% filter(observed) %>% select(Gene, Position, p.adj_bh),
                 by = c("Gene", "Position"))
   }
-  cat(sprintf("  p.emp_adj: BH over %d positions (%d observed, %d null-only at p = 1)\n",
+  cat(sprintf("  p.adj_bh: BH over %d positions (%d observed, %d null-only at p = 1)\n",
               nrow(.fam_e), sum(.fam_e$observed), sum(!.fam_e$observed)))
+
+  .sam <- obs_max %>%
+    semi_join(.k_emp %>% filter(!is.na(p.emp)), by = c("Gene", "Position"))
+  if (nrow(.sam) > 0) {
+    .null_sorted <- sort(cyc_pooled$caas_max)
+    .s   <- .sam$.obs
+    .ord <- order(.s, decreasing = TRUE)
+    .s_d <- .s[.ord]
+    # null pairs with score >= t, per cycle; observed positions with score >= t
+    .exp_null <- (length(.null_sorted) -
+                    findInterval(.s_d, .null_sorted, left.open = TRUE)) / N_emp
+    .n_obs    <- vapply(.s_d, function(t) sum(.s >= t), numeric(1))
+    .fdr      <- pmin(1, .exp_null / .n_obs)
+    .q        <- rev(cummin(rev(.fdr)))
+    .sam$p.adj_sam <- NA_real_
+    .sam$p.adj_sam[.ord] <- .q
+    pos_scores <- pos_scores %>%
+      select(-p.adj_sam) %>%
+      left_join(.sam %>% select(Gene, Position, p.adj_sam), by = c("Gene", "Position"))
+  }
+  cat(sprintf("  p.adj_sam: permutation FDR over %d observed positions, %d null (cycle, position) pairs, N=%d\n",
+              nrow(.sam), nrow(cyc_pooled), N_emp))
   rm(cyc_pooled)
 }
 
@@ -1036,9 +1078,9 @@ pos_out <- pos_scores %>%
                   "n_top_species", "n_bottom_species")), CAAS_score,
          side,
          any_of("caas"),
-         # p.emp / p.emp_adj: the pooled "detects AND exceeds" position p,
-         # the sole position-level permulation p.
-         any_of(c("p.emp", "p.emp_adj"))) %>%
+         # p.emp: the pooled "detects AND exceeds" position p; p.adj_bh and
+         # p.adj_sam: its BH and permutation-FDR adjustments (§2h).
+         any_of(c("p.emp", "p.adj_bh", "p.adj_sam"))) %>%
   arrange(desc(CAAS_score))
 
 write_tsv(pos_out, "position_scores.tsv")
@@ -1083,8 +1125,7 @@ cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
 local({
   chk <- gene_caas %>% dplyr::filter(!is.na(gene_caas_score))
   if (nrow(chk) == 0) return(invisible())
-  set.seed(1L)
-  probe <- chk$Gene[sample.int(nrow(chk), min(25L, nrow(chk)))]
+  probe <- chk$Gene[unique(round(seq(1, nrow(chk), length.out = min(25L, nrow(chk)))))]
   worst <- 0
   for (g in probe) {
     # gene_caas_score is size_adj_max over ONE value per Position (its best

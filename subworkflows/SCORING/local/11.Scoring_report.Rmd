@@ -663,7 +663,7 @@ dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
   if (nrow(dat_obs_points) > 0) {
     has_multi <- any((dat_obs_points %>% count(grp))$n > 1)
     if (has_multi) {
-      set.seed(42)
+      set.seed(seed_val)
       p <- p + geom_jitter(
         data = dat_obs_points,
         aes(x = as.numeric(grp) + 0.2, y = value, fill = "Observed"),
@@ -755,9 +755,10 @@ print(.gene_null_plot("asr_path_score", .obs_gene_asr_dist, "CAAS Score (q90)",
 ```
 
 ```{r pos-perm-p-setup}
-# p.emp / p.emp_adj are the sole position-level permulation p: the "detects
-# AND exceeds score" permulation p, pooled to (Gene, Position) over the
-# max-over-sides axis. scoring_compute.R writes both into position_scores.tsv
+# p.emp is the position-level permulation p: the "detects AND exceeds score"
+# permulation p, pooled to (Gene, Position) over the max-over-sides axis, with
+# its BH (p.adj_bh) and permutation-FDR (p.adj_sam) adjustments.
+# scoring_compute.R writes all three into position_scores.tsv
 # whenever --caas_pos_cycle_caas is set. scoring_p_emp_thr also gates
 # gene_caas_pperm_adj and the significance report, so it is one parameter
 # across all three.
@@ -772,21 +773,29 @@ n_val <- sum(!is.na(pos_df$p.emp))
 n_tot <- nrow(pos_df)
 n_sig_raw <- sum(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
 pct_sig_raw <- 100 * mean(pos_df$p.emp <= p_emp_thr, na.rm = TRUE)
-n_sig_adj <- sum(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE)
-pct_sig_adj <- 100 * mean(pos_df$p.emp_adj <= p_emp_thr, na.rm = TRUE)
+n_sig_bh <- sum(pos_df$p.adj_bh <= p_emp_thr, na.rm = TRUE)
+pct_sig_bh <- 100 * mean(pos_df$p.adj_bh <= p_emp_thr, na.rm = TRUE)
+has_sam <- "p.adj_sam" %in% names(pos_df)
+n_sig_sam <- if (has_sam) sum(pos_df$p.adj_sam <= p_emp_thr, na.rm = TRUE) else NA_integer_
+pct_sig_sam <- if (has_sam) 100 * mean(pos_df$p.adj_sam <= p_emp_thr, na.rm = TRUE) else NA_real_
 
 cat(sprintf(paste0(
   "`p.emp` counts the permuted-labeling cycles that BOTH re-detect the position ",
   "(on either phenotype side) AND match or beat its observed `CAAS_score`, add-one ",
-  "smoothed over N cycles. `p.emp_adj` is its BH adjustment over one test per position, ",
-  "across every position the null can detect (null-detectable positions not detected in the ",
-  "observed data enter at p = 1).\n\n",
+  "smoothed over N cycles. `p.adj_bh` is its BH adjustment over one test per position, ",
+  "across every position the null detects (null-detected positions not detected in the ",
+  "observed data enter at p = 1). `p.adj_sam` is the permutation FDR on the pooled score: ",
+  "at each score threshold, the mean number of positions per null cycle at or above it over ",
+  "the number of observed positions at or above it.\n\n",
   "- **Scored positions with p.emp**: %d/%d (%.1f%%)\n",
   "- **Significant at uncorrected p.emp <= %.3g**: %d/%d (%.1f%%)\n",
-  "- **Significant at BH-adjusted p.emp_adj <= %.3g**: %d/%d (%.1f%%)\n\n"),
+  "- **Significant at BH-adjusted p.adj_bh <= %.3g**: %d/%d (%.1f%%)\n",
+  "- **Significant at permutation-FDR p.adj_sam <= %.3g**: %s/%d (%s)\n\n"),
   n_val, n_tot, 100 * n_val / max(1, n_tot),
   p_emp_thr, n_sig_raw, n_tot, pct_sig_raw,
-  p_emp_thr, n_sig_adj, n_tot, pct_sig_adj))
+  p_emp_thr, n_sig_bh, n_tot, pct_sig_bh,
+  p_emp_thr, if (has_sam) as.character(n_sig_sam) else "NA", n_tot,
+  if (has_sam) sprintf("%.1f%%", pct_sig_sam) else "NA"))
 ```
 
 ```{r p-emp-dist, eval=has_p_emp, fig.height=4.5, fig.width=9}
@@ -794,8 +803,9 @@ ggplot(pos_df %>% filter(!is.na(p.emp)), aes(x = p.emp)) +
   geom_histogram(bins = 40, fill = "grey60", colour = "grey30") +
   geom_vline(xintercept = p_emp_thr, colour = "#E15759", linewidth = 1, linetype = "dashed") +
   labs(title = "p.emp distribution across scored positions",
-       subtitle = sprintf("Dashed line: uncorrected p.emp threshold = %.3g (%d positions significant; %d significant after BH adjustment).",
-                          p_emp_thr, n_sig_raw, n_sig_adj),
+       subtitle = sprintf("Dashed line: uncorrected p.emp threshold = %.3g (%d positions significant; %d after BH (p.adj_bh), %s after permutation FDR (p.adj_sam)).",
+                          p_emp_thr, n_sig_raw, n_sig_bh,
+                          if (has_sam) as.character(n_sig_sam) else "NA"),
        x = "p.emp", y = "positions") +
   theme_minimal(base_size = 12)
 ```

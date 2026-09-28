@@ -6,19 +6,34 @@
 #   fabio/primate.traits/scripts/pss.core.R
 #   (+ fit_models / covariances_from_fits from parametric_bootstrap_chunk.R)
 #
-# Local additions are minimal and marked "PHYLOPHERE:":
+# Local additions are marked "PHYLOPHERE:":
 #   - `force_model` arg on phylogenetic_shift_score() / select_model() to honour
 #     an explicit --perm_strategy (ou|bm) instead of the AIC rule.
-# The BM/OU fit, validation (validate_fit), and model selection
-# (select_model: OU iff AIC_OU + 2 < AIC_BM, otherwise BM — plain AIC) MUST stay
-# identical to upstream so PhyloPhere's PSS ranking matches phyloq's.
+#   - OU fits use an alpha upper bound scaled to tree height (ou_alpha_bounds);
+#     geiger's default bound is absolute and truncates the fit on short trees.
+# Validation (validate_fit) and model selection (select_model: OU iff
+# AIC_OU + 2 < AIC_BM, otherwise BM — plain AIC) are identical to upstream so
+# PhyloPhere's PSS ranking matches phyloq's.
 ################################################################################
 
-# PHYLOPHERE: fit both models + validate (verbatim from parametric_bootstrap_chunk.R)
+# PHYLOPHERE: OU alpha search interval scaled to tree height. geiger's default
+# upper bound, exp(1), is absolute: on a unit-height chronogram (e.g. ape::chronos
+# output) it corresponds to a half-life of 0.25 tree heights and truncates fits
+# of weakly structured traits, while the same data on a tree in Myr are fitted
+# freely. An upper bound of 100 / height puts the shortest admissible half-life
+# at under 1% of the tree height, i.e. effectively independent tips.
+ou_alpha_bounds <- function(tree) {
+  height <- max(ape::node.depth.edgelength(tree))
+  c(exp(-500), 100 / height)
+}
+
+# PHYLOPHERE: fit both models + validate (parametric_bootstrap_chunk.R, with the
+# tree-scaled OU alpha bounds above)
 fit_models <- function(tree, values) {
   fits <- list(
     BM = suppressWarnings(geiger::fitContinuous(tree, values, model = "BM", ncores = 1)),
-    OU = suppressWarnings(geiger::fitContinuous(tree, values, model = "OU", ncores = 1))
+    OU = suppressWarnings(geiger::fitContinuous(tree, values, model = "OU", ncores = 1,
+                                                bounds = list(alpha = ou_alpha_bounds(tree))))
   )
   validate_fit(fits$BM, "BM")
   validate_fit(fits$OU, "OU")
@@ -54,7 +69,8 @@ phylogenetic_shift_score <- function(data, tree, trait,
   say("Fitting BM and OU.")
   fits <- list(
     BM = geiger::fitContinuous(phy, values, model = "BM", ncores = 1),
-    OU = geiger::fitContinuous(phy, values, model = "OU", ncores = 1)
+    OU = geiger::fitContinuous(phy, values, model = "OU", ncores = 1,
+                               bounds = list(alpha = ou_alpha_bounds(phy)))
   )
   validate_fit(fits$BM, "BM")
   validate_fit(fits$OU, "OU")
@@ -176,15 +192,6 @@ select_model <- function(fits, force_model = NULL) {
   if (!is.null(force_model) && nzchar(force_model)) {
     fm <- toupper(force_model)
     if (fm %in% c("BM", "OU")) return(fm)
-  }
-  # PHYLOPHERE: never AIC-select an OU fit whose alpha optimised to a bound.
-  # geiger 2.0.11 fitContinuous() clamps OU alpha to [exp(-500), exp(1)]; a fit
-  # sitting on the upper bound is non-identified (typical on non-ultrametric or
-  # near-star trees) and its AIC/lnL are not trustworthy. Treat OU as unavailable
-  # and fall back to BM. `force_model = "OU"` above still overrides this.
-  ou_alpha <- fits$OU$opt$alpha
-  if (is.null(ou_alpha) || !is.finite(ou_alpha) || ou_alpha >= exp(1) - 1e-8) {
-    return("BM")
   }
   bm <- fit_aic(fits$BM)
   ou <- fit_aic(fits$OU)

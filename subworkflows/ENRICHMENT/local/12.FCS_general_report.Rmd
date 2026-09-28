@@ -303,7 +303,8 @@ if (!is.null(params$enrich_file) && nzchar(params$enrich_file) && file.exists(pa
                                          fdr_lachenbruch = params$fdr_lachenbruch %||% params$fdr_thr,
                                          fdr_permsum     = params$fdr_permsum     %||% params$fdr_thr,
                                          p_perm_thr   = params$pperm_thr,
-                                         n_perms_sum  = params$n_perms_sum %||% 10000))
+                                         n_perms_sum  = params$n_perms_sum %||% 10000,
+                                         seed         = seed_val))
 }
 enrich <- enrich %>%
   dplyr::left_join(desc_map, by = c("database", "pathway")) %>%

@@ -79,7 +79,7 @@ params:
   comparison_perm_stat:  "spearman"   # "spearman" | "topk_overlap"
   comparison_perm_topk:  0.05         # top-fraction for the topk_overlap statistic
   seed:               "1998"
-  # CAAS permulation-null significance threshold for p.emp_adj (position) /
+  # CAAS permulation-null significance threshold for p.adj_bh / p.adj_sam (position) /
   # gene_caas_pperm_adj (gene), same param name + default as 11.Scoring_report.Rmd
   # (conf/scoring.config:47) - reused so "significant" means the same thing
   # across reports. Drives the Interesting Positions table's position_significant
@@ -1560,14 +1560,17 @@ build_interesting_positions <- function(direction) {
   # Ensure Gene and Position are deduplicated
   base <- base %>% dplyr::distinct(gene, Position, .keep_all = TRUE)
 
-  # position_significant: p.emp_adj <= scoring_p_emp_thr, computed directly on base
+  # position_significant: p.adj_bh <= scoring_p_emp_thr, computed directly on base;
+  # the permutation-FDR call (p.adj_sam) is shown alongside
   has_pe_raw <- "p.emp" %in% names(base)
-  has_pe_adj <- "p.emp_adj" %in% names(base)
+  has_pe_bh  <- "p.adj_bh" %in% names(base)
+  has_pe_sam <- "p.adj_sam" %in% names(base)
   p_emp_thr <- suppressWarnings(as.numeric(params$scoring_p_emp_thr))
   if (!is.finite(p_emp_thr) || p_emp_thr <= 0 || p_emp_thr > 1) p_emp_thr <- 0.05
   base$position_significant_raw <- if (has_pe_raw) !is.na(base$`p.emp`) & base$`p.emp` <= p_emp_thr else FALSE
-  base$position_significant_adj <- if (has_pe_adj) !is.na(base$`p.emp_adj`) & base$`p.emp_adj` <= p_emp_thr else FALSE
-  base$position_significant     <- base$position_significant_adj
+  base$position_significant_bh  <- if (has_pe_bh) !is.na(base$`p.adj_bh`) & base$`p.adj_bh` <= p_emp_thr else FALSE
+  base$position_significant_sam <- if (has_pe_sam) !is.na(base$`p.adj_sam`) & base$`p.adj_sam` <= p_emp_thr else FALSE
+  base$position_significant     <- base$position_significant_bh
 
   # Position-native FADE-site overlap.
   fade_df <- switch(direction,
@@ -1663,13 +1666,14 @@ build_interesting_positions <- function(direction) {
   all_positions <- base %>%
     dplyr::mutate(dplyr::across(c(`25%`, `10%`, `5%`, `1%`, FADE_overlap, RER_acc, RER_decc, RER_dir, Accum_dir,
                                  CAAS_FCS_sig, RER_FCS_sig, CAAS_AMI_net, RER_AMI_net, FADE_AMI_net, PE_sig,
-                                 position_significant, position_significant_raw, position_significant_adj),
+                                 position_significant, position_significant_raw, position_significant_bh,
+                                 position_significant_sam),
                                  ~ dplyr::coalesce(.x, FALSE)))
 
   out <- all_positions %>%
     dplyr::filter(`25%` | `10%` | `5%` | `1%` | FADE_overlap | Accum_dir | RER_dir |
                   CAAS_FCS_sig | RER_FCS_sig | CAAS_AMI_net | RER_AMI_net | FADE_AMI_net | PE_sig |
-                  position_significant | position_significant_raw)
+                  position_significant | position_significant_raw | position_significant_sam)
   if (nrow(out) == 0) return(out)
 
   out <- out %>%
@@ -1698,7 +1702,8 @@ build_interesting_positions <- function(direction) {
                   `25%`, `10%`, `5%`, `1%`,
                   FADE_overlap, RER_acc, RER_decc, Accum_dir,
                   `Pos sig (uncorrected)` = position_significant_raw,
-                  `Pos sig (adjusted)` = position_significant_adj,
+                  `Pos sig (p.adj_bh)` = position_significant_bh,
+                  `Pos sig (p.adj_sam)` = position_significant_sam,
                   position_significant,
                   CAAS_FCS_sig, `CAAS FCS term(s)`, `CAAS evidence`,
                   RER_FCS_sig, `RER FCS term(s)`, `RER evidence`,

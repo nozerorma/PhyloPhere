@@ -45,7 +45,7 @@ Coordenadas 0-based. `s ∈ {top, bottom}` es la clave de dirección (T4b: `side
 | regla de score de la superación | **max sobre lados** de la media §2g por esquema — el eje "all"/`.pos_undirected` (amendment V3-4a; era per-lado) |
 | dónde se computa la media por ciclo | **Opción C**: el null emite `(caas_sum, n_schemes)` por `(Gene, Position, side, cycle)`; R divide y cuenta (§5) |
 | secuenciación | plumbing null: V3-4a · consumidor R: V3-4 · flip de headline: commit `p.emp §7.3:` (HECHO, verificación PEPC pendiente) · borrado `null_pvalue_boot`: commit `p.emp §7.4:` (HECHO) |
-| headline de posición | `p.emp` / `p.emp_adj` — **sustituye** a `pos_perm_p_adj`; `pos_perm_p` fuera de `position_scores.tsv`, solo en `perm_pos_pval.tsv` |
+| headline de posición | `p.emp`, ajustado como `p.adj_bh` (BH) y `p.adj_sam` (FDR por permutación, §6b) — **sustituye** a `pos_perm_p_adj`; `pos_perm_p` fuera de `position_scores.tsv`, solo en `perm_pos_pval.tsv` |
 | `pos_perm_p` | pooled a `(Gene, Position, caap_group)`; baja a diagnóstico (`perm_pos_pval.tsv`), fuera del headline y de `position_scores.tsv` |
 | `null_pvalue_boot` | **borrado** (commit `p.emp §7.4:`) — inerte bajo el `percent_rank` de aguas abajo, sin consumidor externo |
 | `p.emp_score_only`, `gene_perm_p_detect` | **descartados** (ver §3) |
@@ -163,7 +163,7 @@ detección+score}.
 
 | | solo detección / conteo | detección + score |
 |---|---|---|
-| **posición** | `pos_perm_p` (side-consciente, diagnóstico) | **`p.emp` / `p.emp_adj`** (headline) |
+| **posición** | `pos_perm_p` (side-consciente, diagnóstico) | **`p.emp` / `p.adj_bh` / `p.adj_sam`** (headline) |
 | **gen** | `accum_cct_p` / `accum_fdr` (§4b) | `gene_caas_pperm(_adj)` (§4f) |
 
 Tres de las cuatro celdas **ya están pobladas**. El diseño puebla una nueva
@@ -332,16 +332,31 @@ para cada (Gene, Position, s) de pos_scores con CAAS_score_obs no-NA:
 
 ### 6b. `p.adjust` en §2h
 
-`p.emp_adj = p.adjust(p.emp[familia], "BH")` con un test por `(Gene, Position)`
+`p.adj_bh = p.adjust(p.emp[familia], "BH")` con un test por `(Gene, Position)`
 (las filas top/bottom comparten el `p.emp` agrupado y entran una sola vez). La
 familia es la unión de las posiciones observadas con `p.emp` y todas las
 posiciones que re-detecta al menos un ciclo nulo; estas últimas, si no están en
 el observado, entran con p = 1 (el estadístico es "CAAS_score si detectado, -Inf
 si no", así que filtrar la familia a lo observado selecciona sobre el propio
-estadístico). Las posiciones que ningún ciclo nulo detecta quedan fuera: p = 1
-bajo cualquier etiquetado. `N` es el roster de ciclos de `caas_perms.rds`
-(incluye ciclos sin detecciones); una posición observada que ningún ciclo
-re-detecta recibe `k = 0`, salvo con el guard de match < 50 %, donde queda NA. `p.emp` y
+estadístico). Las posiciones que no detectan ni el nulo ni el observado quedan
+fuera, así que m cuenta sólo las columnas que la muestra finita del nulo alcanzó:
+una columna que el nulo nunca detecta pero el observado sí entra con
+p = 1/(N + 1) en una familia que no incluye las demás columnas raras
+(`validation/tier1/reports/pepc_genotypic_vs_phenotypic.md` §6e, control nc13).
+`N` es el roster de ciclos de `caas_perms.rds` (incluye ciclos sin
+detecciones); una posición observada que ningún ciclo re-detecta recibe
+`k = 0`. El guard de match < 50 % (posiciones sin match a NA, por desajuste de
+coordenadas) sólo se aplica con ≥ 10 posiciones observadas.
+
+`p.adj_sam` es el FDR por permutación (Tusher et al. 2001) sobre el score
+agrupado (max sobre lados): para un umbral t,
+`FDR(t) = [#pares (ciclo, posición) nulos con score ≥ t] / N / #{posiciones observadas con score ≥ t}`,
+con π0 = 1, y el valor de una posición es el mínimo de `FDR(t)` sobre los
+umbrales t ≤ su score. El conteo nulo esperado recorre todas las posiciones que
+detecta cada ciclo, así que no necesita definir familia. En PEPC y en 20
+controles negativos está calibrado a nivel nominal (§6c-§6e del informe de
+tier1). `scoring_p_emp_thr` se aplica a los dos; `position_significant` sigue a
+`p.adj_bh`. `p.emp` y
 `pos_perm_p` se BH-ajustan **por separado** (dos familias de hipótesis; el
 usuario elige headline, no se penaliza por reportar ambas). Sin
 `p.emp_score_only` (§3).
@@ -435,7 +450,7 @@ solo-score, descartado (§3).
 > - **score del ciclo**: `max_lado( Σ_esquemas asr / n_esquemas )` — la media §2g
 >   por lado, y luego el máximo sobre los lados que ese ciclo detectó.
 > - **score observado**: `max_lado( CAAS_score )` = `.pos_undirected`.
-> - `p.emp` / `p.emp_adj` se **broadcastean idénticos** a las dos filas de lado de
+> - `p.emp` / `p.adj_bh` / `p.adj_sam` se **broadcastean idénticos** a las dos filas de lado de
 >   una posición "both" en `position_scores.tsv`.
 > - `perm_pos_pval.tsv` **pierde la columna `side`** (una fila por
 >   `(Gene, Position, caap_group)`); `pos_perm_p` sigue per-`(pos, group)` (ya lo

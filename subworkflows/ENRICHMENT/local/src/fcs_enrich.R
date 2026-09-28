@@ -664,7 +664,7 @@ fcs_enrich_col_types <- function() {
 fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "NO_FILE",
                         fdr_thr = 0.15, p_perm_thr = 0.025, n_perms_sum = 10000,
                         fdr_wilcoxon = fdr_thr, fdr_lachenbruch = fdr_thr,
-                        fdr_permsum = fdr_thr) {
+                        fdr_permsum = fdr_thr, seed = 1998) {
   # Always defined (even with no perms file) so the Lachenbruch/path-sum loop
   # below — which runs unconditionally, unlike the Wilcoxon loop — can look up
   # corStat_byrk without an "object not found" error. Overwritten below with
@@ -823,7 +823,7 @@ fcs_run_all <- function(rankings, gmts, num_g = 10, max_g = 500, perms_file = "N
                          if (!is.null(corStat_rk)) ncol(corStat_rk) else n_perms_sum))
     perm_rk <- tryCatch(
       fcs_run_permulation(vals_rk, gmts, num_g = num_g, max_g = max_g, n_perms = n_perms_sum,
-                          null_mat = corStat_rk),
+                          seed = seed, null_mat = corStat_rk),
       error = function(e) {
         fcs_progress(sprintf("  Permulation failed [%s]: %s", rk, e$message))
         tibble::tibble()

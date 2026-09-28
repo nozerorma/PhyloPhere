@@ -2,6 +2,13 @@
 """
 Annotate a Newick tree with `{Foreground}` labels using a plain species list.
 
+Internal branches are labelled according to --internal-nodes:
+  all_descendants  an internal node whose descendant tips are all foreground is
+                   labelled, so every branch of a foreground clade (its stem
+                   branch included) is tested; equivalent to HyPhy LabelTrees'
+                   default "All descendants" strategy.
+  none             only the foreground tips' terminal branches are labelled.
+
 Optionally (--bg-species-file, fade_background_scope=opposite) prunes the
 tree/alignment down to foreground + background species only, since HyPhy
 FADE has no explicit "Background" tag -- any branch not tagged {Foreground}
@@ -46,6 +53,24 @@ def annotate_newick(newick_str: str, fg_species: set, label: str) -> tuple:
         total_subs += n
 
     return annotated, total_subs
+
+
+def label_internal_nodes(tree, fg_species: set) -> int:
+    """Name every non-root internal node whose descendant tips are all foreground.
+
+    Each such node gets a placeholder label FGNode<k>; the caller appends the
+    HyPhy branch tag after serialisation. HyPhy applies an internal node's tag
+    to the branch leading to that node, so the stem branch of each foreground
+    clade is included. Returns the number of nodes labelled.
+    """
+    n = 0
+    for nd in tree.postorder_internal_node_iter():
+        if nd.parent_node is None:
+            continue
+        if all(leaf.taxon.label in fg_species for leaf in nd.leaf_iter()):
+            n += 1
+            nd.label = f"FGNode{n}"
+    return n
 
 
 def parse_fasta_taxa(path: str) -> set:
@@ -103,6 +128,16 @@ def main():
         "--fasta_out",
         default=None,
         help="If provided, write a FASTA filtered to only sequences present in the (pruned) tree.",
+    )
+    parser.add_argument(
+        "--internal-nodes",
+        choices=("all_descendants", "none"),
+        default="all_descendants",
+        help=(
+            "Internal-branch labelling: 'all_descendants' labels every internal "
+            "node whose descendant tips are all foreground (HyPhy LabelTrees "
+            "default); 'none' labels foreground terminal branches only."
+        ),
     )
     parser.add_argument(
         "--label",
@@ -193,6 +228,15 @@ def main():
         )
         return
 
+    n_internal = 0
+    if args.internal_nodes == "all_descendants":
+        n_internal = label_internal_nodes(tree, fg_in_tree)
+        if n_internal:
+            newick_str = tree.as_string(schema="newick", suppress_rooting=True).strip()
+            newick_str = re.sub(
+                r"'?(FGNode\d+)'?(?=[:,);\s])", r"\1{" + args.label + "}", newick_str
+            )
+
     annotated, n_subs = annotate_newick(newick_str, fg_in_tree, args.label)
     if n_subs == 0:
         sys.stderr.write(
@@ -211,8 +255,9 @@ def main():
             fh.write("\n")
 
     sys.stderr.write(
-        f"INFO annotate_tree_fg: annotated {n_subs} foreground branches "
-        f"with label '{{{args.label}}}'\n"
+        f"INFO annotate_tree_fg: annotated {n_subs} foreground terminal and "
+        f"{n_internal} internal branches with label '{{{args.label}}}' "
+        f"(internal nodes: {args.internal_nodes})\n"
     )
 
 

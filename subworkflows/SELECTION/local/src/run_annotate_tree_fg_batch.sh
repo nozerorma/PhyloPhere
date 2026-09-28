@@ -26,6 +26,7 @@ manifest=""
 workers="1"
 runner_mode=""
 local_dir=""
+internal_nodes="all_descendants"
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -34,6 +35,7 @@ while [[ $# -gt 0 ]]; do
         --workers)     workers="$2";     shift 2 ;;
         --runner-mode) runner_mode="$2"; shift 2 ;;
         --local-dir)   local_dir="$2";   shift 2 ;;
+        --internal-nodes) internal_nodes="$2"; shift 2 ;;
         *) echo "Unknown argument: $1" >&2; exit 1 ;;
     esac
 done
@@ -100,6 +102,7 @@ while IFS=$'\t' read -r gene_id direction fasta_name tree_name species_file_name
             --tree         "${tree_path}" \
             --fasta        "${fasta_path}" \
             --fasta_out    "${out_fasta}" \
+            --internal-nodes "${internal_nodes}" \
             --output       "${out_tree}" \
             || echo "[ANNOTATE_TREE_FG_BATCHED] annotate_tree_fg failed for ${gene_id} (${direction}), skipping"
 

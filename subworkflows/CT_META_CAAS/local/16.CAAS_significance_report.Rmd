@@ -32,7 +32,7 @@ because those files don't exist yet when it runs. This report re-reads
 CT_META_CAAS's already-published meta_caas output (one row per
 Gene, Position, pattern, caap_group) together with SCORING's published
 position_scores.tsv/gene_scores.tsv to annotate that pattern breakdown with
-the permulation-null significance columns (p.emp/p.emp_adj,
+the permulation-null significance columns (p.emp/p.adj_bh/p.adj_sam,
 gene_caas_pperm/gene_caas_pperm_adj) that only exist once SCORING has run.
 See /home/miguel/.claude/projects/-home-miguel-IBE-UPF-PhD-PhyloPhere/memory/project_retire_bootstrap_arm.md
 ("Phase C late half") for the history this replaces (the dead recovery_boot
@@ -110,7 +110,7 @@ set.seed(seed_val)
 
 p_emp_thr <- suppressWarnings(as.numeric(params$p_emp_thr))
 if (is.na(p_emp_thr)) p_emp_thr <- 0.05
-cat(sprintf("Using p.emp_adj / gene_caas_pperm_adj significance threshold: %s\n", p_emp_thr))
+cat(sprintf("Using p.adj_bh / p.adj_sam / gene_caas_pperm_adj significance threshold: %s\n", p_emp_thr))
 ```
 
 ## 1. Data Import
@@ -155,10 +155,11 @@ type_label <- if (identical(type_col, "convergence_type")) "Convergence Type" el
 
 ## 2. Join SCORING's null-based significance onto the meta_caas rows
 
-### 2a. Position-level: p.emp / p.emp_adj
+### 2a. Position-level: p.emp / p.adj_bh / p.adj_sam
 
-`position_scores.tsv` carries one row per (Gene, Position, side); `p.emp`/
-`p.emp_adj` are already pooled across sides (max-over-sides "all" axis --
+`position_scores.tsv` carries one row per (Gene, Position, side); `p.emp` and
+its adjustments `p.adj_bh` (BH over the permutation family) and `p.adj_sam`
+(permutation FDR) are already pooled across sides (max-over-sides "all" axis --
 docs/scoring_v2_p_emp.md amendment V3-4a / scoring_compute.R §2f-ter), so
 both side-rows for a given (Gene, Position) carry the identical p.emp value.
 We deduplicate to one row per (Gene, Position) BEFORE joining -- joining on
@@ -166,16 +167,16 @@ the undeduped table (or on `side`, which meta_caas doesn't have) would
 silently duplicate every meta_caas row once per side.
 
 ```{r position_join}
-has_p_emp_cols <- all(c("p.emp", "p.emp_adj") %in% names(position_scores))
+has_p_emp_cols <- all(c("p.emp", "p.adj_bh", "p.adj_sam") %in% names(position_scores))
 if (!has_p_emp_cols) {
-  warning("position_scores.tsv has no p.emp/p.emp_adj columns -- was it produced by ",
+  warning("position_scores.tsv has no p.emp/p.adj_bh/p.adj_sam columns -- was it produced by ",
           "a stale scoring_compute.R build? Significance columns will be all-NA.")
   pos_dedup <- tibble(Gene = character(), Position = integer(),
-                       p.emp = numeric(), p.emp_adj = numeric())
+                       p.emp = numeric(), p.adj_bh = numeric(), p.adj_sam = numeric())
 } else {
   pos_dedup <- position_scores %>%
     mutate(Position = as.integer(Position)) %>%
-    distinct(Gene, Position, p.emp, p.emp_adj)
+    distinct(Gene, Position, p.emp, p.adj_bh, p.adj_sam)
   # Guard against a corrupt/undeduped upstream file: if the same (Gene,Position)
   # carries >1 distinct p.emp value, the pooling assumption above is violated --
   # surface it loudly rather than silently duplicating rows downstream.
@@ -184,7 +185,7 @@ if (!has_p_emp_cols) {
     warning(sprintf(paste0("%d (Gene,Position) keys have >1 distinct p.emp value in ",
                             "position_scores.tsv -- the max-over-sides pooling assumption ",
                             "this report relies on does not hold for this run. Keeping the ",
-                            "first row per key; p.emp/p.emp_adj may be unreliable."), n_dupe_keys))
+                            "first row per key; p.emp/p.adj_bh/p.adj_sam may be unreliable."), n_dupe_keys))
     pos_dedup <- pos_dedup %>% distinct(Gene, Position, .keep_all = TRUE)
   }
 }
@@ -194,8 +195,9 @@ meta_caas <- meta_caas %>%
   left_join(pos_dedup, by = c("Gene", "Position")) %>%
   mutate(
     position_significant_raw = !is.na(p.emp) & p.emp <= p_emp_thr,
-    position_significant_adj = !is.na(p.emp_adj) & p.emp_adj <= p_emp_thr,
-    position_significant     = position_significant_adj
+    position_significant_bh  = !is.na(p.adj_bh) & p.adj_bh <= p_emp_thr,
+    position_significant_sam = !is.na(p.adj_sam) & p.adj_sam <= p_emp_thr,
+    position_significant     = position_significant_bh
   )
 
 .n_meta_rows <- nrow(meta_caas)
@@ -257,8 +259,10 @@ if (.gene_rate < 0.5) {
 **This is a prioritization summary, not a hypothesis test.**
 We report, per `r tolower(type_label)` (and per caap_group when present), simple descriptive
 counts driven by both uncorrected (`p.emp <= `r p_emp_thr``, `gene_caas_pperm <= `r p_emp_thr``)
-and FDR-adjusted (`p.emp_adj <= `r p_emp_thr``, `gene_caas_pperm_adj <= `r p_emp_thr``) thresholds,
-along with the single most extreme drivers (`min_p_emp`, `min_p_emp_adj`) -- never a combined test statistic.
+and FDR-adjusted thresholds: BH (`p.adj_bh <= `r p_emp_thr``, `gene_caas_pperm_adj <= `r p_emp_thr``)
+and, for positions, permutation FDR (`p.adj_sam <= `r p_emp_thr``), along with the single most
+extreme drivers (`min_p_emp`, `min_p_adj_bh`, `min_p_adj_sam`) -- never a combined test statistic.
+`position_significant` follows BH.
 
 ```{r pattern_summary_table, results='asis'}
 group_vars <- c()
@@ -272,10 +276,13 @@ pattern_summary <- meta_caas %>%
     n_positions = n(),
     n_positions_significant_raw = sum(position_significant_raw, na.rm = TRUE),
     pct_positions_significant_raw = 100 * n_positions_significant_raw / n_positions,
-    n_positions_significant_adj = sum(position_significant_adj, na.rm = TRUE),
-    pct_positions_significant_adj = 100 * n_positions_significant_adj / n_positions,
+    n_positions_significant_bh = sum(position_significant_bh, na.rm = TRUE),
+    pct_positions_significant_bh = 100 * n_positions_significant_bh / n_positions,
+    n_positions_significant_sam = sum(position_significant_sam, na.rm = TRUE),
+    pct_positions_significant_sam = 100 * n_positions_significant_sam / n_positions,
     min_p_emp = suppressWarnings(min(p.emp, na.rm = TRUE)),
-    min_p_emp_adj = suppressWarnings(min(p.emp_adj, na.rm = TRUE)),
+    min_p_adj_bh = suppressWarnings(min(p.adj_bh, na.rm = TRUE)),
+    min_p_adj_sam = suppressWarnings(min(p.adj_sam, na.rm = TRUE)),
     n_genes = n_distinct(Gene),
     n_genes_significant_raw = n_distinct(Gene[gene_significant_raw %in% TRUE]),
     pct_genes_significant_raw = 100 * n_genes_significant_raw / n_genes,
@@ -285,7 +292,8 @@ pattern_summary <- meta_caas %>%
   ) %>%
   mutate(
     min_p_emp = ifelse(is.infinite(min_p_emp), NA_real_, min_p_emp),
-    min_p_emp_adj = ifelse(is.infinite(min_p_emp_adj), NA_real_, min_p_emp_adj)
+    min_p_adj_bh = ifelse(is.infinite(min_p_adj_bh), NA_real_, min_p_adj_bh),
+    min_p_adj_sam = ifelse(is.infinite(min_p_adj_sam), NA_real_, min_p_adj_sam)
   ) %>%
   arrange(across(all_of(group_vars)))
 
@@ -299,14 +307,17 @@ x_col <- if (!is.null(type_col)) type_col else "Gene"
 plot_df_stacked <- pattern_summary %>%
   mutate(
     n_nonsig_raw = n_positions - n_positions_significant_raw,
-    n_nonsig_adj = n_positions - n_positions_significant_adj
+    n_nonsig_bh = n_positions - n_positions_significant_bh,
+    n_nonsig_sam = n_positions - n_positions_significant_sam
   ) %>%
   select(
     all_of(group_vars),
     `Uncorrected (p.emp): Significant` = n_positions_significant_raw,
     `Uncorrected (p.emp): Non-significant` = n_nonsig_raw,
-    `Adjusted (p.emp_adj): Significant` = n_positions_significant_adj,
-    `Adjusted (p.emp_adj): Non-significant` = n_nonsig_adj
+    `BH (p.adj_bh): Significant` = n_positions_significant_bh,
+    `BH (p.adj_bh): Non-significant` = n_nonsig_bh,
+    `Permutation FDR (p.adj_sam): Significant` = n_positions_significant_sam,
+    `Permutation FDR (p.adj_sam): Non-significant` = n_nonsig_sam
   ) %>%
   pivot_longer(
     cols = -all_of(group_vars),
@@ -316,7 +327,8 @@ plot_df_stacked <- pattern_summary %>%
   ) %>%
   mutate(
     status = factor(status, levels = c("Non-significant", "Significant")),
-    correction = factor(correction, levels = c("Uncorrected (p.emp)", "Adjusted (p.emp_adj)"))
+    correction = factor(correction, levels = c("Uncorrected (p.emp)", "BH (p.adj_bh)",
+                                               "Permutation FDR (p.adj_sam)"))
   )
 
 p_counts_sig <- ggplot(plot_df_stacked, aes(x = factor(.data[[x_col]]), y = n_positions_count, fill = status)) +
@@ -326,7 +338,7 @@ p_counts_sig <- ggplot(plot_df_stacked, aes(x = factor(.data[[x_col]]), y = n_po
   theme_minimal() +
   labs(
     title = sprintf("Position Significance Counts by %s", type_label),
-    subtitle = sprintf("Comparison of uncorrected (p.emp <= %s) vs BH-adjusted (p.emp_adj <= %s) showing significant and non-significant counts", p_emp_thr, p_emp_thr),
+    subtitle = sprintf("Uncorrected (p.emp <= %s), BH-adjusted (p.adj_bh <= %s) and permutation-FDR (p.adj_sam <= %s) significant and non-significant counts", p_emp_thr, p_emp_thr, p_emp_thr),
     x = type_label,
     y = "Number of positions",
     fill = "Status"
@@ -348,7 +360,7 @@ print(p_counts_sig)
 ```{r rowlevel_table}
 key_cols <- intersect(
   c("Gene", "Position", "caap_group", "convergence_type", "pattern", "side",
-    "p.emp", "p.emp_adj", "position_significant", "gene_caas_pperm", "gene_caas_pperm_adj"),
+    "p.emp", "p.adj_bh", "p.adj_sam", "position_significant", "gene_caas_pperm", "gene_caas_pperm_adj"),
   names(meta_caas)
 )
 other_cols <- setdiff(names(meta_caas), key_cols)
@@ -391,8 +403,8 @@ cat(sprintf("Wrote %s (%d rows)\n", file.path(sig_dir, "pattern_significance_sum
 
 This report annotates the CAAS positions evaluated by SCORING with
 permulation-null significance columns, reporting both uncorrected (`p.emp`,
-`gene_caas_pperm`) and BH-adjusted (`p.emp_adj`, `gene_caas_pperm_adj`) p-values
-thresholded at `p_emp_thr = `r p_emp_thr``. Group-level numbers are a prioritization
+`gene_caas_pperm`), BH-adjusted (`p.adj_bh`, `gene_caas_pperm_adj`) and, for positions,
+permutation-FDR (`p.adj_sam`) values thresholded at `p_emp_thr = `r p_emp_thr``. Group-level numbers are a prioritization
 summary (counts and rates), not a combined hypothesis test.
 
 ---

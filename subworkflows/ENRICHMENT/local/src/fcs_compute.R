@@ -87,6 +87,6 @@ enrich <- fcs_run_all(rankings, gmts, num_g = num_g, max_g = max_g,
                       perms_file = perms_file, fdr_thr = fdr_thr,
                       fdr_wilcoxon = fdr_wilcoxon, fdr_lachenbruch = fdr_lachenbruch,
                       fdr_permsum = fdr_permsum, p_perm_thr = pperm_thr,
-                      n_perms_sum = n_perms_sum)
+                      n_perms_sum = n_perms_sum, seed = seed_val)
 
 readr::write_tsv(enrich, out_file)

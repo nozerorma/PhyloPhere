@@ -61,8 +61,19 @@ process RESAMPLE {
             ls -la >&2
             exit 1
         fi
-        if [ ! -f "${caas_config}" ]; then
-            echo "[ERROR] Missing caas config input: ${caas_config}" >&2
+        # multi_hypothesis mode passes a directory of traitfile_H*.tab; b_0 and the
+        # observed pair count come from the canonical hypothesis H1.
+        if [ -d "${caas_config}" ]; then
+            if [ -f "${caas_config}/traitfile_H1.tab" ]; then
+                actual_caas_config="${caas_config}/traitfile_H1.tab"
+            else
+                actual_caas_config=\$(find -L "${caas_config}" -type f -name '*.tab' | sort | head -n 1)
+            fi
+        else
+            actual_caas_config="${caas_config}"
+        fi
+        if [ ! -f "\$actual_caas_config" ]; then
+            echo "[ERROR] Missing caas config input: \$actual_caas_config" >&2
             echo "[DEBUG] workdir:" >&2
             pwd >&2
             ls -la >&2
@@ -80,7 +91,7 @@ process RESAMPLE {
         /usr/local/bin/_entrypoint.sh Rscript \\
         '$baseDir/subworkflows/CT/local/scripts/permulations.R' \\
         "${nw_tree}" \\
-        "${caas_config}" \\
+        "\$actual_caas_config" \\
         ${params.caas_full_perms} \\
         ${params.perm_strategy} \\
         "${trait_val}" \\
@@ -111,8 +122,14 @@ process RESAMPLE {
             ls -la >&2
             exit 1
         fi
+        # multi_hypothesis mode passes a directory of traitfile_H*.tab; b_0 and the
+        # observed pair count come from the canonical hypothesis H1.
         if [ -d "${caas_config}" ]; then
-            actual_caas_config=\$(find -L "${caas_config}" -type f -name '*.tab' | head -n 1)
+            if [ -f "${caas_config}/traitfile_H1.tab" ]; then
+                actual_caas_config="${caas_config}/traitfile_H1.tab"
+            else
+                actual_caas_config=\$(find -L "${caas_config}" -type f -name '*.tab' | sort | head -n 1)
+            fi
         else
             actual_caas_config="${caas_config}"
         fi

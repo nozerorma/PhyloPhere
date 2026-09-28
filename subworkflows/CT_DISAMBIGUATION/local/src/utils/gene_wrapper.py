@@ -1718,6 +1718,7 @@ def _finalize_perm_scores(
     rank_lookup: Dict[str, Dict[int, float]],
     sample_per_cycle_group: Optional[int] = None,
     removed: Optional[Set[Tuple[str, str, str]]] = None,
+    seed: int = 1998,
 ) -> None:
     """Pass B: rank within each cycle, score, and aggregate to gene x cycle stats.
 
@@ -1762,7 +1763,7 @@ def _finalize_perm_scores(
     scores_fields = ["Gene", "cycle", "global_asr", "top_asr", "bottom_asr",
                      "global_caas", "top_caas", "bottom_caas"]
 
-    rng = random.Random(1998)
+    rng = random.Random(seed)
     reservoirs: Dict[Tuple[str, str], List[Tuple[str, int, float, float, float]]] = {}
     seen: Dict[Tuple[str, str], int] = {}
     _rm = removed or set()
@@ -1972,6 +1973,7 @@ def process_all_genes_perms(
     gene_sizes: Optional[Dict[str, int]] = None,
     chunk_threshold: Optional[int] = None,
     chunk_target_size: Optional[int] = None,
+    seed: int = 1998,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -2276,6 +2278,7 @@ def process_all_genes_perms(
         cycle_tags=finalize_cycle_tags,
         rank_lookup=rank_lookup,
         removed=removed,
+        seed=seed,
     )
 
     logger.info(f"[perms] successfully aggregated {n_genes} genes to summaries inside {output_dir}")

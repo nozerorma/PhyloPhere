@@ -75,7 +75,7 @@ process CAAS_META_CAAS_REPORT {
 // run AFTER SCORING: it joins CT_META_CAAS's already-published
 // global_meta_caas.tsv/meta_caas.tsv (pattern/caap_group breakdown, written
 // upstream of SCORING in the live DAG) against SCORING's published
-// position_scores.tsv (p.emp/p.emp_adj) and gene_scores.tsv
+// position_scores.tsv (p.emp/p.adj_bh/p.adj_sam) and gene_scores.tsv
 // (gene_caas_pperm/gene_caas_pperm_adj) to annotate that breakdown with the
 // permulation-null significance the dead recovery_boot arm used to (badly)
 // stand in for. See 16.CAAS_significance_report.Rmd for the join logic.

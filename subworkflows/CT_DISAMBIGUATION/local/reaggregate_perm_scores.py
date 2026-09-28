@@ -85,6 +85,8 @@ def main() -> int:
                          "CAAS_PERMS_DISAMBIGUATE run")
     ap.add_argument("--output-dir", required=True, type=Path,
                     help="directory to write gene_cycle_scores.tsv (and the sample/quantile files)")
+    ap.add_argument("--seed", type=int, default=1998,
+                    help="pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
     args = ap.parse_args()
 
     if not (args.detail.is_dir() or args.detail.is_file()):
@@ -105,6 +107,7 @@ def main() -> int:
         output_dir=args.output_dir,
         cycle_tags=cycle_tags,
         rank_lookup=rank_lookup,
+        seed=args.seed,
     )
     logger.info("[reaggregate] wrote %s", args.output_dir / "gene_cycle_scores.tsv")
     # V3-4a: _finalize_perm_scores also emits perm_pos_cycle_caas.tsv.gz (the

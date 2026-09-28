@@ -47,6 +47,15 @@ SPEC = ModuleTabSpec(
             choices=("all", "opposite"),
             importance="default",
         ),
+        # Which branches of a foreground clade are tested: every branch of an
+        # all-foreground clade (stem included) or the terminal branches only.
+        FieldSpec(
+            name="fade_internal_nodes",
+            label="Foreground internal branches",
+            kind="choice",
+            choices=("all_descendants", "none"),
+            importance="default",
+        ),
         FieldSpec(
             name="fade_species_file",
             label="Custom fg/bg species file (optional)",

@@ -502,7 +502,11 @@ asr_tree.f <- function(df, tree, trait, taxon_of_interest) {
   fit_model <- function(tree, trait, model = c("BM", "OU")) {
     model <- match.arg(model)
     fit <- if (model == "OU") {
-      suppressWarnings(geiger::fitContinuous(tree, trait, model = "OU", ncores = 1))
+      # alpha upper bound scaled to tree height, as in pss_core.R::ou_alpha_bounds
+      suppressWarnings(geiger::fitContinuous(
+        tree, trait, model = "OU", ncores = 1,
+        bounds = list(alpha = c(exp(-500), 100 / max(ape::node.depth.edgelength(tree))))
+      ))
     } else {
       suppressWarnings(geiger::fitContinuous(tree, trait, model = "BM", ncores = 1))
     }

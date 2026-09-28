@@ -147,6 +147,7 @@ process ANNOTATE_TREE_FG {
             --tree      "${tree}" \
             --fasta     "${fasta}" \
             --fasta_out "${gene_id}_${direction}.fa" \
+            --internal-nodes "${params.fade_internal_nodes ?: 'all_descendants'}" \
             --output    "${gene_id}_${direction}_fg.nwk"
         """
     } else {
@@ -157,6 +158,7 @@ process ANNOTATE_TREE_FG {
             --tree      "${tree}" \
             --fasta     "${fasta}" \
             --fasta_out "${gene_id}_${direction}.fa" \
+            --internal-nodes "${params.fade_internal_nodes ?: 'all_descendants'}" \
             --output    "${gene_id}_${direction}_fg.nwk"
         """
     }
@@ -206,7 +208,8 @@ ${manifestText}MANIFEST_EOF
         --manifest    "${batchID}.manifest.tsv" \\
         --workers     "${workers}" \\
         --runner-mode "${runnerMode}" \\
-        --local-dir   "${local_dir}"
+        --local-dir   "${local_dir}" \\
+        --internal-nodes "${params.fade_internal_nodes ?: 'all_descendants'}"
     """
 }
 

@@ -752,7 +752,7 @@ workflow {
             // CAAS_SIGNIFICANCE_REPORT: a DISTINCT, LATER stage than
             // CAAS_META_CAAS_REPORT (run above inside the run_meta_caas
             // block). It must run after SCORING because it joins
-            // position_scores.tsv (p.emp/p.emp_adj) and gene_scores.tsv
+            // position_scores.tsv (p.emp/p.adj_bh/p.adj_sam) and gene_scores.tsv
             // (gene_caas_pperm/gene_caas_pperm_adj) onto the postproc-filtered
             // discovery table (the exact pooled dataset evaluated by SCORING),
             // with fallback to CT_META_CAAS's global_meta_caas.tsv when standalone.

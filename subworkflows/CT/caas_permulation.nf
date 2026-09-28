@@ -112,7 +112,7 @@ process PERM_REPLAY {
 # multi_hypothesis mode passes a directory of traitfile_H*.tab (all share the
 # same pair count K) — resolve it to one .tab so the awk reads a real file.
 if [ -d "${caas_config}" ]; then
-    _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+    _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | sort | head -n 1)
 else
     _cfg_file="${caas_config}"
 fi
@@ -191,7 +191,7 @@ process PERM_REPLAY_BATCHED {
     # multi_hypothesis mode passes a directory of traitfile_H*.tab (same K) —
     # resolve to one .tab so awk reads a real file, not a directory.
     if [ -d "${caas_config}" ]; then
-        _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+        _cfg_file=\$(find -L ${caas_config} -type f -name '*.tab' | sort | head -n 1)
     else
         _cfg_file="${caas_config}"
     fi
@@ -286,6 +286,7 @@ process CAAS_PERMS_DISAMBIGUATE {
         --workers ${workers} \\
         --max-tasks-per-child ${max_tasks_per_child} \\
         --asr-cache-dir ${asr_cache_dir} \\
+        --seed ${params.seed ?: 1998} \\
         ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
         ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     cp caas_perms_out/gene_cycle_scores.tsv gene_cycle_scores.tsv
@@ -350,6 +351,7 @@ process CAAS_PERMS_DISAMBIGUATE_BATCHED {
         --workers ${workers} \\
         --max-tasks-per-child ${max_tasks_per_child} \\
         --asr-cache-dir ${asr_cache_dir} \\
+        --seed ${params.seed ?: 1998} \\
         ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
         ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     cp -R caas_perms_out/perm_pos_detail perm_pos_detail
@@ -471,7 +473,8 @@ process CAAS_PERMS_REBUILD {
 
     ${py} ./reaggregate_perm_scores.py \\
         --detail input_perm_pos_detail \\
-        --output-dir .
+        --output-dir . \\
+        --seed ${params.seed ?: 1998}
 
     ${rs} ${scoring_local}/src/scoring_caas_perms.R \\
         --gene-cycle-scores gene_cycle_scores.tsv \\

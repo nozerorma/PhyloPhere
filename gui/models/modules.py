@@ -195,6 +195,7 @@ class FadeConfig(ModuleConfigBase):
     # Direction and background scope
     fade_direction: str = "both"  # --fade_direction (top|bottom|both)
     fade_background_scope: str = "all"  # --fade_background_scope (all|opposite)
+    fade_internal_nodes: str = "all_descendants"  # --fade_internal_nodes (all_descendants|none)
     fade_species_file: str = ""  # --fade_species_file (optional user-supplied fg/bg species file, candidate_species.tab format)
 
     # Shared alignment-prep / FADE-run batching (SLURM/Seqera scheduler overhead).
@@ -271,7 +272,7 @@ class ScoringConfig(ModuleConfigBase):
     scoring_stress_top_n: str = "25"  # --scoring_stress_top_n
     scoring_stress_rank_metric: str = "spearman"  # --scoring_stress_rank_metric (spearman|pearson)
     scoring_window_size_bp: str = "1000000"  # --scoring_window_size_bp
-    scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.emp_adj; also gates gene_caas_pperm_adj)
+    scoring_p_emp_thr: str = "0.05"  # --scoring_p_emp_thr (position-level CAAS permulation p.adj_bh / p.adj_sam; also gates gene_caas_pperm_adj)
 
     # NOTE: scoring_postproc_input/scoring_accum_dir/scoring_vep_primateai/
     # scoring_background_input/caas_perms_file/scoring_fade_site_top/bottom moved

@@ -157,7 +157,7 @@
       "enabled": true,
       "extra_flags": "",
       "fade_direction": "top",
-      "fade_background_scope": "opposite",
+      "fade_background_scope": "all",
       "fade_species_file": "",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",

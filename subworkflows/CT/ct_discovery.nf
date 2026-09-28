@@ -51,7 +51,7 @@ process DISCOVERY {
 
     def pairArgs = """
 if [ -d "${caas_config}" ]; then
-    sample_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+    sample_file=\$(find -L ${caas_config} -type f -name '*.tab' | sort | head -n 1)
     n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$sample_file" | sort -nu | wc -l | tr -d ' ')
 else
     n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
@@ -148,7 +148,7 @@ ${args.replaceAll('\n', ' ')}
 EOF
 
 if [ -d "${caas_config}" ]; then
-    sample_file=\$(find -L ${caas_config} -type f -name '*.tab' | head -n 1)
+    sample_file=\$(find -L ${caas_config} -type f -name '*.tab' | sort | head -n 1)
     n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' "\$sample_file" | sort -nu | wc -l | tr -d ' ')
 else
     n_pairs=\$(awk '\$3~/^[0-9]+\$/{print \$3}' ${caas_config} | sort -nu | wc -l | tr -d ' ')
