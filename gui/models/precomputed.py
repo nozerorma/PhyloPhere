@@ -123,12 +123,14 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("meta_caas_from", sig, "file"))
         entries.append(("background_input", os.path.join(outdir, "caastools", "background_genes.output"), "file"))
         entries.append(("posenrich_background_file", os.path.join(outdir, "caastools", "background.output"), "file"))
-        # The permulation outputs travel together: caas_perms.rds alone feeds the
-        # FCS p.perm but leaves the report's position-level permulation section empty,
-        # which is gated on the per-position files. Mirrors run_single.sh.j2's
-        # PRECOMP_USE_DISCOVERY block -- keep both in sync.
+        # The permulation outputs travel together: caas_perms.rds feeds the FCS
+        # p.perm, perm_pos_cycle_caas.tsv.gz the position-level p.emp (used when
+        # SCORING does not rebuild the null from perm_pos_detail), and the
+        # sample/quantile files the report's position-level null plots. Mirrors
+        # run_single.sh.j2's PRECOMP_USE_DISCOVERY block -- keep both in sync.
         perm_dir = os.path.join(outdir, "caas_permulation")
         entries.append(("caas_perms_file", os.path.join(perm_dir, "caas_perms.rds"), "file"))
+        entries.append(("caas_pos_cycle_caas_file", os.path.join(perm_dir, "perm_pos_cycle_caas.tsv.gz"), "file"))
         entries.append(("caas_pos_sample_file", os.path.join(perm_dir, "perm_pos_sample.tsv"), "file"))
         entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
         # caas_pos_detail_file makes SCORING REBUILD the null (CAAS_PERMS_REBUILD)

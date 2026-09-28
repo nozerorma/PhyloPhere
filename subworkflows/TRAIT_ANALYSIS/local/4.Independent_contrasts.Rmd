@@ -525,11 +525,14 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
   # (recursing from the tips up, stopping the moment a node's full descendant set
   # would spill outside the domain) and highlight those individually as translucent
   # "encircle" blobs -- native ggtree, so this sidesteps ggtreeExtra entirely.
+  # Blocks whose tips were never selected in any hypothesis are not drawn: the
+  # Voronoi assignment still places them in a domain, but they carry no contrast
+  # species, so shading them would suggest a domain presence the harvest never used.
   if (exists("species_domain") && !is.null(species_domain) && length(species_domain) > 0) {
     domain_in_tree <- species_domain[names(species_domain) %in% viz_tree$tip.label]
 
     if (length(domain_in_tree) > 0) {
-      find_maximal_domain_blocks <- function(tree, sp_domain) {
+      find_maximal_domain_blocks <- function(tree, sp_domain, keep_tips) {
         n_tip <- length(tree$tip.label)
         total_nodes <- n_tip + tree$Nnode
         children_of <- lapply(seq_len(total_nodes), function(nd) tree$edge[tree$edge[, 1] == nd, 2])
@@ -550,12 +553,14 @@ if (exists("fop_master_df") && !is.null(fop_master_df) && nrow(fop_master_df) > 
           }, seq_len(total_nodes))
           Filter(function(nd) {
             p <- parent_of[as.character(nd)]
-            is.na(p) || !(p %in% full_nodes)
+            (is.na(p) || !(p %in% full_nodes)) && any(get_desc_tips(nd) %in% keep_tips)
           }, full_nodes)
         }), domain_ids)
       }
 
-      domain_blocks <- find_maximal_domain_blocks(viz_tree, domain_in_tree)
+      selected_tip_idx <- match(tree_tip_df_all$species[tree_tip_df_all$is_selected],
+                                viz_tree$tip.label)
+      domain_blocks <- find_maximal_domain_blocks(viz_tree, domain_in_tree, selected_tip_idx)
       hilight_df <- dplyr::bind_rows(lapply(names(domain_blocks), function(d) {
         nds <- domain_blocks[[d]]
         if (length(nds) == 0) return(NULL)

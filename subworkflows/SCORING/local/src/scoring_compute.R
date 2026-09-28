@@ -296,7 +296,7 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
             max(pos_scores$CAAS_score, na.rm = TRUE)))
 
 # ── 2f-ter. p.emp — position-level "detects AND exceeds" permulation p ────────
-# docs/scoring_v2_p_emp.md §1 + amendment V3-4a. Per (Gene, Position):
+# docs/scoring_v2_p_emp.md §1-§2. Per (Gene, Position):
 #   k_emp = #{null cycle : re-detects the position on ANY side
 #                          AND  max_side(caas_sum/n_schemes) >= max_side(CAAS_obs)}
 #   p.emp = (k_emp + 1) / (N + 1)                          add-one, right-tailed

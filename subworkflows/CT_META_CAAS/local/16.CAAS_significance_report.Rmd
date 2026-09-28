@@ -160,7 +160,7 @@ type_label <- if (identical(type_col, "convergence_type")) "Convergence Type" el
 `position_scores.tsv` carries one row per (Gene, Position, side); `p.emp` and
 its adjustments `p.adj_bh` (BH over the permutation family) and `p.adj_sam`
 (permutation FDR) are already pooled across sides (max-over-sides "all" axis --
-docs/scoring_v2_p_emp.md amendment V3-4a / scoring_compute.R §2f-ter), so
+docs/scoring_v2_p_emp.md §1 / scoring_compute.R §2f-ter), so
 both side-rows for a given (Gene, Position) carry the identical p.emp value.
 We deduplicate to one row per (Gene, Position) BEFORE joining -- joining on
 the undeduped table (or on `side`, which meta_caas doesn't have) would

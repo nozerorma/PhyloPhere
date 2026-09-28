@@ -16,6 +16,7 @@ workflow CT_DISAMBIGUATION {
         meta_caas_in
         trait_file_in
         tree_file_in
+        hyp_pairs_in   // Channel<path> or null: contrast_hypotheses_pairs.tsv of this run's contrast selection
 
     main:
         // Disambiguation prefers CT_META_CAAS's global metadata table, but older
@@ -77,19 +78,25 @@ workflow CT_DISAMBIGUATION {
             file(tree_file_param)
         }
 
-        // scoring_v2 T3c SC3: contrast_hypotheses_pairs.tsv — per-(hypothesis,
-        // domain) PSS weights for the in-tree per-side FOP pooling.
-        // Only read when the flag is on; absent -> equal-weight node pooling.
-        // Resolution: --ct_disambig_hypotheses_pairs / --scoring_hypotheses_pairs
-        // -> auto-discover in outdir -> NO_HYP_PAIRS sentinel (same convenience
-        // as scoring.nf's resolved_hyp_pairs).
-        def hyp_pairs_file = {
-            def hp = params.ct_disambig_hypotheses_pairs ?: params.scoring_hypotheses_pairs ?: ''
-            if (hp && file(hp).exists()) return file(hp)
-            def auto = "${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv"
-            if (file(auto).exists()) return file(auto)
-            return file('NO_HYP_PAIRS')
-        }()
+        // contrast_hypotheses_pairs.tsv: per-(hypothesis, domain) PSS weights for
+        // the in-tree per-side FOP pooling; absent -> equal-weight node pooling.
+        // The permulation null takes the same weights from this run's resample
+        // (fop_pairs), so the observed path must use this run's file too.
+        // Resolution:
+        //   1. --ct_disambig_hypotheses_pairs / --scoring_hypotheses_pairs;
+        //   2. integrated run (hyp_pairs_in given): the file emitted by this run's
+        //      contrast selection, or NO_HYP_PAIRS for a single-hypothesis run;
+        //   3. standalone run: auto-discover in outdir, else NO_HYP_PAIRS.
+        def hp_param = params.ct_disambig_hypotheses_pairs ?: params.scoring_hypotheses_pairs ?: ''
+        def hyp_pairs_file
+        if (hp_param && file(hp_param).exists()) {
+            hyp_pairs_file = Channel.value(file(hp_param))
+        } else if (hyp_pairs_in != null) {
+            hyp_pairs_file = hyp_pairs_in.ifEmpty(file('NO_HYP_PAIRS')).first()
+        } else {
+            def auto = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
+            hyp_pairs_file = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))
+        }
 
         def disambigBatchSize = (params.ct_disambig_batch_size ?: 1) as int
 

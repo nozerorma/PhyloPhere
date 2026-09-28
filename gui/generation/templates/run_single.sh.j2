@@ -77,10 +77,10 @@ elif [ "${POSTPROC_MODE:-}" = "filter" ]; then
     # and the report's position-level permulation section silently come out empty
     # even though the (expensive) permulation null was already computed.
     CAAS_PERMS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/caas_perms.rds"
-    CAAS_POS_PVAL_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_pval.tsv"
+    CAAS_POS_CYCLE_CAAS_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${EXPLORATORY_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
-    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_PVAL_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
+    for _f in "$CAAS_PERMS_FILE" "$CAAS_POS_CYCLE_CAAS_FILE" "$CAAS_POS_SAMPLE_FILE" "$CAAS_POS_QUANTILES_FILE"; do
         [ -f "$_f" ] || echo "[WARN] expected permulation output missing, p.perm will be empty: $_f" >&2
     done
     # When set, SCORING REBUILDS the null from this instead of importing caas_perms.rds
@@ -174,12 +174,13 @@ if [ "${PRECOMP_USE_DISCOVERY:-false}" = true ]; then
     BACKGROUND_INPUT="${PRECOMP_OUTDIR}/caastools/background_genes.output"
     POSENRICH_BACKGROUND_FILE="${PRECOMP_OUTDIR}/caastools/background.output"
     # These only exist if the source run had --caas_permulation_enrichment on.
-    # All four must be wired together: caas_perms.rds alone gives the FCS p.perm but
-    # leaves the report's entire position-level permulation section empty, since that
-    # section is gated on the per-position files. The reuse_exploratory branch above
-    # sets the same four -- keep the two lists in sync.
+    # All four must be wired together: caas_perms.rds alone gives the FCS p.perm;
+    # perm_pos_cycle_caas.tsv.gz carries the position-level p.emp null (used when
+    # SCORING does not rebuild the null from perm_pos_detail); the sample and
+    # quantile files feed the report's position-level null plots. The
+    # reuse_exploratory branch above sets the same four -- keep the two lists in sync.
     CAAS_PERMS_FILE="${PRECOMP_OUTDIR}/caas_permulation/caas_perms.rds"
-    CAAS_POS_PVAL_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_pval.tsv"
+    CAAS_POS_CYCLE_CAAS_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_cycle_caas.tsv.gz"
     CAAS_POS_SAMPLE_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_sample.tsv"
     CAAS_POS_QUANTILES_FILE="${PRECOMP_OUTDIR}/caas_permulation/perm_pos_quantiles.tsv"
     # Triggers CAAS_PERMS_REBUILD in SCORING -- see the reuse_exploratory branch for why.
@@ -580,7 +581,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "scoring_fade_site_bottom": "${SCORING_FADE_SITE_BOTTOM:-}",
   "scoring_vep_cosmic": "${SCORING_VEP_COSMIC:-}",
   "caas_perms_file": "${CAAS_PERMS_FILE:-}",
-  "caas_pos_pval_file": "${CAAS_POS_PVAL_FILE:-}",
+  "caas_pos_cycle_caas_file": "${CAAS_POS_CYCLE_CAAS_FILE:-}",
   "caas_pos_sample_file": "${CAAS_POS_SAMPLE_FILE:-}",
   "caas_pos_quantiles_file": "${CAAS_POS_QUANTILES_FILE:-}",
   "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",

@@ -288,7 +288,18 @@ workflow {
                 ? ct_results.tree_file
                 : (contrast_out ? contrast_out.tree_file_out : Channel.empty())
 
-            disambiguation_results = CT_DISAMBIGUATION(meta_for_disambiguation, trait_for_disambiguation, tree_for_disambiguation)
+            // FOP pair weights from the same trait supplier: in multi-hypothesis
+            // mode the trait channel is a directory (traitfiles_ok_dir /
+            // Traitfiles) holding contrast_hypotheses_pairs.tsv.
+            def hyp_pairs_for_disambiguation = (ct_results || contrast_out)
+                ? trait_for_disambiguation.map { d ->
+                      def f = file("${d}/contrast_hypotheses_pairs.tsv")
+                      (file(d).isDirectory() && f.exists()) ? f : file('NO_HYP_PAIRS')
+                  }
+                : null
+
+            disambiguation_results = CT_DISAMBIGUATION(meta_for_disambiguation, trait_for_disambiguation,
+                                                       tree_for_disambiguation, hyp_pairs_for_disambiguation)
             ran_any = true
         }
 
@@ -718,16 +729,15 @@ workflow {
             // FOP per-pair PSS weights (contrast_hypotheses_pairs.tsv) for
             // domain-pooled scoring. Written by 4.Independent_contrasts.Rmd into
             // the Traitfiles dir and carried through CHECK_MIN_CONTRASTS's
-            // traitfiles_ok_dir. Emit ONLY when the file is actually present so
-            // that an empty channel lets scoring.nf's fallback chain
-            // (--scoring_hypotheses_pairs -> outdir auto-discovery) engage;
-            // emitting a NO_HYP_PAIRS sentinel here would short-circuit it.
-            // Absent on CT-live / single-contrast runs -> scoring_compute.R then
-            // treats every position as one hypothesis.
+            // traitfiles_ok_dir. When contrast selection ran, this channel is
+            // authoritative: it emits the file, or NO_HYP_PAIRS for a
+            // single-hypothesis run, and scoring.nf does not look in outdir.
             def scoring_hyp_pairs_ch = contrast_out
                 ? (contrast_out.trait_dir_out ?: Channel.empty())
-                      .map { d -> d ? file("${d}/contrast_hypotheses_pairs.tsv") : null }
-                      .filter { f -> f && f.exists() }
+                      .map { d ->
+                          def f = d ? file("${d}/contrast_hypotheses_pairs.tsv") : null
+                          (f && f.exists()) ? f : file('NO_HYP_PAIRS')
+                      }
                 : null
 
             SCORING(

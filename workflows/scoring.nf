@@ -118,21 +118,24 @@ workflow SCORING {
             .map { it && it.size() > 0 ? it[0] : file('NO_BACKGROUND') }
 
         // FOP per-pair PSS weights for domain-pooled scoring (contrast_hypotheses_pairs.tsv).
-        // Absent for single-contrast runs -> NO_HYP_PAIRS sentinel, scoring_compute.R
-        // then treats every position as single-hypothesis (pass-through).
-        // Resolution order: live channel -> --scoring_hypotheses_pairs -> auto-discover
-        // in the prior run's outdir (so a bare `--scoring --outdir <run>` re-run keeps
-        // PSS weighting without an extra flag, same convenience as scoring_accum_dir).
-        def resolved_hyp_pairs = (hypotheses_pairs_ch ?: Channel.empty())
-            .collect()
-            .ifEmpty {
-                def hp = params.scoring_hypotheses_pairs ?: ''
-                if (hp && file(hp).exists()) return [file(hp)]
-                def auto = "${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv"
-                if (file(auto).exists()) return [file(auto)]
-                [file('NO_HYP_PAIRS')]
-            }
-            .map { it && it.size() > 0 ? it[0] : file('NO_HYP_PAIRS') }
+        // NO_HYP_PAIRS -> scoring_compute.R treats every position as single-hypothesis.
+        // Resolution:
+        //   1. --scoring_hypotheses_pairs;
+        //   2. integrated run (hypotheses_pairs_ch given): the file emitted by this
+        //      run's contrast selection, or NO_HYP_PAIRS for a single-hypothesis run;
+        //   3. standalone scoring re-run: auto-discover in outdir, else NO_HYP_PAIRS.
+        // An integrated run never reads outdir, so a file published by an earlier
+        // run cannot stand in for this run's contrast selection.
+        def hp_param = params.scoring_hypotheses_pairs ?: ''
+        def resolved_hyp_pairs
+        if (hp_param && file(hp_param).exists()) {
+            resolved_hyp_pairs = Channel.value(file(hp_param))
+        } else if (hypotheses_pairs_ch != null) {
+            resolved_hyp_pairs = hypotheses_pairs_ch.ifEmpty(file('NO_HYP_PAIRS')).first()
+        } else {
+            def auto = file("${params.outdir}/data_exploration/2.CT/1.Traitfiles/contrast_hypotheses_pairs.tsv")
+            resolved_hyp_pairs = Channel.value(auto.exists() ? auto : file('NO_HYP_PAIRS'))
+        }
 
         // CAAS permulation null (corStat_byrank rds) — resolved ONCE, before
         // SCORING_COMPUTE, so both it (Tier 1A per-gene p.perm) and the scoring

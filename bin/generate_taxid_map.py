@@ -18,12 +18,18 @@ shorter, deterministically-derived candidate name -- not fuzzy/synonym
 matching -- and multiple tips correctly collapsing to the same species-level
 tax_id is expected in that case (they *are* the same species).
 
-Resolution source: live NCBI eutils first (always current), falling back to
-ete3's local cached NCBI taxonomy dump only if eutils itself can't be
-reached at all (network outage / NCBI down) -- not merely because a
-particular name didn't resolve. The local dump is a point-in-time snapshot
-and can disagree with live NCBI for recently-updated names (observed for
-e.g. "Machaerina articulata"), so it's the fallback, not the primary source.
+Resolution source: live NCBI eutils, queried one name at a time in three
+tiers, so a transient failure on one name never affects the others:
+  1. each name is retried up to LIVE_ATTEMPTS times with exponential backoff
+     on network errors, timeouts, HTTP errors (429/5xx) or malformed replies;
+  2. names still failing are retried once more as a group after
+     SECOND_PASS_PAUSE seconds (rate limiting, short NCBI outages);
+  3. only names that never got a live answer fall back to ete3's local cached
+     NCBI taxonomy dump, and each is reported on stderr.
+A live answer of "no exact match" is final and is not retried. The local dump
+is a point-in-time snapshot and can disagree with live NCBI for
+recently-updated names (observed for e.g. "Machaerina articulata"), so it is
+the last resort, per name.
 
 Output (--output): TSV with columns tax_id, species — the exact schema
 required by subworkflows/TRAIT_ANALYSIS/local/src/phylo.R and
@@ -45,6 +51,11 @@ import urllib.request
 import dendropy
 
 _EUTILS_ESEARCH = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+LIVE_ATTEMPTS = 3          # tier 1: attempts per name
+BACKOFF_BASE_S = 1.0       # tier 1: waits of 1, 2, 4 ... seconds between attempts
+SECOND_PASS_PAUSE = 30.0   # tier 2: pause before re-querying the names that failed
+RATE_LIMIT_S = 0.34        # eutils default rate limit, no API key configured
+_TRANSIENT = (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError)
 
 
 def normalize_label(label: str) -> str:
@@ -64,20 +75,40 @@ def load_tip_labels(tree_path: str) -> list:
     return unique
 
 
-def _resolve_names_live(names: list[str]) -> dict[str, int]:
-    """One eutils esearch per name, exact scientific-name match. Raises
-    (urllib.error.URLError, TimeoutError, OSError) if NCBI can't be reached
-    at all -- the caller decides whether to fall back to the local dump."""
+def _esearch_once(name: str) -> list[str]:
+    """One eutils esearch, exact scientific-name match. Raises one of
+    _TRANSIENT when NCBI gives no usable answer (network error, timeout, HTTP
+    error, malformed JSON)."""
+    term = urllib.parse.quote(f"{name}[Scientific Name]")
+    with urllib.request.urlopen(f"{_EUTILS_ESEARCH}?db=taxonomy&retmode=json&term={term}",
+                                 timeout=15) as r:
+        return json.load(r)["esearchresult"]["idlist"]
+
+
+def _resolve_names_live(names: list[str], attempts: int = LIVE_ATTEMPTS
+                        ) -> tuple[dict[str, int], list[str]]:
+    """Tier 1: live eutils per name with retries. Returns (resolved, failed):
+    `failed` holds the names for which NCBI never gave a usable answer; a name
+    NCBI answered without a unique exact match is in neither."""
     out: dict[str, int] = {}
+    failed: list[str] = []
     for name in names:
-        term = urllib.parse.quote(f"{name}[Scientific Name]")
-        with urllib.request.urlopen(f"{_EUTILS_ESEARCH}?db=taxonomy&retmode=json&term={term}",
-                                     timeout=15) as r:
-            ids = json.load(r)["esearchresult"]["idlist"]
-        if len(ids) == 1:
-            out[name] = int(ids[0])
-        time.sleep(0.34)  # eutils default rate limit, no API key configured
-    return out
+        for attempt in range(attempts):
+            try:
+                ids = _esearch_once(name)
+            except _TRANSIENT as exc:
+                if attempt + 1 < attempts:
+                    time.sleep(BACKOFF_BASE_S * 2 ** attempt)
+                    continue
+                print(f"  NCBI eutils failed for {name!r} after {attempts} attempts ({exc})",
+                      file=sys.stderr)
+                failed.append(name)
+                break
+            if len(ids) == 1:
+                out[name] = int(ids[0])
+            break
+        time.sleep(RATE_LIMIT_S)
+    return out, failed
 
 
 def _resolve_names_local(names: list[str]) -> dict[str, int]:
@@ -90,25 +121,36 @@ def _resolve_names_local(names: list[str]) -> dict[str, int]:
     return {name: hits[0] for name, hits in name2taxid.items() if hits}
 
 
-def resolve_taxids(labels: list[str]) -> tuple[dict[str, int], list[str]]:
-    """label -> NCBI tax_id, live NCBI eutils first, falling back to ete3's
-    local taxonomy dump only if NCBI itself can't be reached (network/API
-    failure, not just an unresolved name). Within whichever source is used,
-    tries the full label first, then the genus+species fallback described
-    above for multi-token labels. Returns (resolved, unresolved).
-    """
-    query_names = {label: label.replace("_", " ") for label in labels}
+def _resolve_names(names: list[str]) -> dict[str, int]:
+    """Three-tier resolution of `names` (see module docstring)."""
+    resolved, failed = _resolve_names_live(names)
+    if failed:
+        print(f"  {len(failed)} name(s) without a live NCBI answer; retrying in "
+              f"{SECOND_PASS_PAUSE:.0f} s", file=sys.stderr)
+        time.sleep(SECOND_PASS_PAUSE)
+        second, failed = _resolve_names_live(failed)
+        resolved.update(second)
+    if failed:
+        try:
+            local = _resolve_names_local(failed)
+        except Exception as exc:  # ete3 missing or its dump unavailable
+            print(f"  local ete3 taxonomy unavailable ({exc}); "
+                  f"{len(failed)} name(s) left unresolved", file=sys.stderr)
+            local = {}
+        for name in failed:
+            if name in local:
+                print(f"  resolved from local ete3 dump (no live NCBI answer): {name!r} -> "
+                      f"{local[name]}", file=sys.stderr)
+        resolved.update(local)
+    return resolved
 
-    try:
-        resolve_fn = _resolve_names_live
-        name2taxid = resolve_fn(list(query_names.values()))
-        source = "live NCBI"
-    except (urllib.error.URLError, TimeoutError, OSError) as exc:
-        print(f"NCBI eutils unreachable ({exc}) -- falling back to local ete3 taxonomy",
-              file=sys.stderr)
-        resolve_fn = _resolve_names_local
-        name2taxid = resolve_fn(list(query_names.values()))
-        source = "local ete3"
+
+def resolve_taxids(labels: list[str]) -> tuple[dict[str, int], list[str]]:
+    """label -> NCBI tax_id via _resolve_names, full label first, then the
+    genus+species fallback described above for multi-token labels. Returns
+    (resolved, unresolved)."""
+    query_names = {label: label.replace("_", " ") for label in labels}
+    name2taxid = _resolve_names(list(query_names.values()))
 
     resolved: dict[str, int] = {}
     fallback_query: dict[str, str] = {}
@@ -122,13 +164,13 @@ def resolve_taxids(labels: list[str]) -> tuple[dict[str, int], list[str]]:
             fallback_query[label] = " ".join(tokens[:2])
 
     if fallback_query:
-        fb2taxid = resolve_fn(list(set(fallback_query.values())))
+        fb2taxid = _resolve_names(list(set(fallback_query.values())))
         for label, fb_name in fallback_query.items():
             tax_id = fb2taxid.get(fb_name)
             if tax_id:
                 resolved[label] = tax_id
-                print(f"  resolved via genus+species fallback ({source}): "
-                      f"{label!r} -> {fb_name!r}", file=sys.stderr)
+                print(f"  resolved via genus+species fallback: {label!r} -> {fb_name!r}",
+                      file=sys.stderr)
 
     unresolved = [label for label in labels if label not in resolved]
     return resolved, unresolved

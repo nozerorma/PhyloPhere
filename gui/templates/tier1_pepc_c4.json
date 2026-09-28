@@ -32,7 +32,7 @@
     "prune_dir": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/prune",
     "branch_trait": "",
     "ali_sp_names": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/ali_sp_names.txt",
-    "tax_id_file": "",
+    "tax_id_file": "/home/miguel/IBE-UPF/PhD/PhyloPhere/validation/tier1/input/pepc/taxid.tsv",
     "sp_colname": "species",
     "clade_name": "pepc_c4",
     "clade_taxid": "4479",
