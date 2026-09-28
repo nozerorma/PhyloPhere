@@ -24,7 +24,7 @@
     "sbatch_partition": "high-cpu",
     "sbatch_time": "144:00:00",
     "sbatch_mail_user": "miguel.ramon@upf.edu",
-    "sbatch_array_concurrency": "2",
+    "sbatch_array_concurrency": "1",
     "alignment_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT/bmge",
     "ali_format": "fasta",
     "tree_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/5.Phylogeny/science.abn7829_data_s4.nex.tree",
@@ -94,6 +94,7 @@
       "multi_hypothesis": true,
       "max_fop": "50",
       "caas_perms_fop": true,
+      "caas_perms_match_fop": true,
       "export_groups": true,
       "export_perm_discovery": false
     },
@@ -115,6 +116,7 @@
       "minlen_values": "2,3,4,10",
       "maxcaas_values": "0.6,0.7,0.8",
       "gene_filter_mode": "dubious",
+      "remove_caas_clusters": true,
       "extreme_threshold": "0.99",
       "iqr_multiplier": "3.0"
     },
@@ -124,10 +126,10 @@
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
       "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
-      "accumulation_fdr": "0.15"
+      "accumulation_fdr": "0.1"
     },
     "rer": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,
@@ -147,16 +149,17 @@
       "rer_min_pos": "2",
       "rer_pval_threshold": "0.05",
       "rer_pval_column": "p.perm",
-      "rer_top_n_labels": "20",
+      "rer_top_n_labels": "25",
       "rer_transform": "ha_logit",
       "rer_universe_file": "",
       "rer_gene_scores": ""
     },
     "fade": {
-      "enabled": false,
+      "enabled": true,
       "extra_flags": "",
       "fade_direction": "both",
       "fade_background_scope": "all",
+      "fade_internal_nodes": "all_descendants",
       "fade_species_file": "",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
@@ -179,7 +182,7 @@
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz",
-      "vep_ensembl": false,
+      "vep_ensembl": true,
       "vep_cache_dir": "",
       "vep_species": "homo_sapiens",
       "vep_assembly": "GRCh38"
@@ -198,13 +201,13 @@
       "ensembl_dataset": "",
       "scoring_ami": true,
       "scoring_string": true,
-      "scoring_compare_fdr": "0.1",
-      "scoring_compare_top_n": "20",
+      "scoring_compare_fdr": "0.15",
+      "scoring_compare_top_n": "25",
       "scoring_stress": true,
       "scoring_stress_top_n": "25",
       "scoring_stress_rank_metric": "spearman",
       "scoring_window_size_bp": "1000000",
-      "scoring_p_emp_thr": "0.1"
+      "scoring_p_emp_thr": "0.15"
     },
     "enrichment": {
       "enabled": true,
@@ -214,7 +217,7 @@
       "gmt_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/GMTs",
       "auto_fetch_gmt": false,
       "fcs_min_genes": "5",
-      "fcs_max_genes": "500",
+      "fcs_max_genes": "1000",
       "fcs_fdr": "0.15",
       "fcs_pperm_thr": "0.025",
       "fcs_top_n": "30",
@@ -238,7 +241,7 @@
       "domain_ref_species": "",
       "posenrich_ucr": true,
       "ucr_positions_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/variability/ucr_positions.tsv",
-      "posenrich_eggnog": false,
+      "posenrich_eggnog": true,
       "eggnog_taxid": "",
       "egg_members_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_members.tsv",
       "egg_annotations_file": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/eggNOG/9443_annotations.tsv",
@@ -258,8 +261,8 @@
     "use_disambiguation": false,
     "use_postproc": false,
     "use_accumulation": false,
-    "use_rer": true,
-    "use_fade": true,
+    "use_rer": false,
+    "use_fade": false,
     "use_vep": false
   },
   "resources": {
