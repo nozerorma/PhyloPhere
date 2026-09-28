@@ -9,7 +9,18 @@ Two PhyloPhere runs on the shared PEPC fixture (`validation/tier1/input/pepc/`),
 
 ## Run configuration
 
-`output/pepc/work/<run>_nxf_run/params.json`, compared key by key. Besides run-scoped paths (`outdir`, `gmt_dir`, `tax_id`) the two runs differ only in the trait (`traitname` / `secondary_trait` swapped) and the pruning parameters (`prune_data`, `prune_list`, `prune_list_secondary`: off vs the *Eleocharis* list). Shared settings relevant to the results: `seed` 1998, `caas_full_perms` 1000, `max_fop` 100, `min_contrasts` 3, `filter_minlen` 3, `filter_maxcaas` 0.7, `scoring_p_emp_thr` 0.05, `fade_direction` top, `fade_background_scope` all, `fade_internal_nodes` all_descendants (from `conf/fade.config`; not written to `params.json` by the runner), `fcs_enabled` false.
+`output/pepc/work/<run>_nxf_run/params.json`, compared key by key. Besides run-scoped paths (`outdir`, `gmt_dir`) the two runs differ only in the trait (`traitname` / `secondary_trait` swapped) and the pruning parameters (`prune_data`, `prune_list`, `prune_list_secondary`: off vs the *Eleocharis* list).
+
+| setting | value |
+|---|---|
+| `seed` | 1998 |
+| `caas_full_perms` (null cycles) | 1000 |
+| `max_fop` / `min_contrasts` | 100 / 3 |
+| `filter_minlen` / `filter_maxcaas` | 3 / 0.7 |
+| `scoring_p_emp_thr` | 0.05 |
+| `tax_id` | `input/pepc/taxid.tsv` (fixture table; no NCBI lookup) |
+| `fade_direction` / `fade_background_scope` / `fade_internal_nodes` | top / all / all_descendants |
+| `fcs_enabled` | false |
 
 ## System
 
@@ -18,21 +29,21 @@ Two PhyloPhere runs on the shared PEPC fixture (`validation/tier1/input/pepc/`),
 | CPU | 13th Gen Intel Core i5-1335U, 10 cores (2P+8E) / 12 threads, 1 socket, 400 to 4600 MHz |
 | RAM | 14 GiB |
 | Swap | 21 GiB |
-| Disk (`/home`) | 232 GB total, 55 GB available |
+| Disk (`/home`) | 232 GB total, 54 GB available |
 | Nextflow | 25.10.4, `-profile local`, env `phylophere` |
 
-RAM, swap and disk are a snapshot at report time.
+RAM, swap and disk are a snapshot at report time. The two runs were the only pipeline runs on the machine; load from other processes was not recorded.
 
 ## PhyloPhere runs: totals
 
-Both runs executed every task (`cachedCount=0`), sequentially, while the negative-control batch (`output/pepc_negctrl/`, one Nextflow run at a time, up to 8 CPUs) was running on the same machine. Wall times and %CPU below therefore include contention and are an upper bound on the pipeline's own cost.
+Both runs executed every task (`cachedCount=0`), sequentially.
 
 | | genotypic | phenotypic |
 |---|---|---|
-| Nextflow run name | `c4_complete_8a176b39` | `c4_phenotypic_complete_97c9f7ca` |
-| Launch → completion (`.nextflow.log`) | 2026-09-27 23:14:53 → 23:32:35 (17m 42s) | 2026-09-27 23:33:40 → 23:51:26 (17m 46s) |
+| Nextflow run name | `c4_complete_0431ed9d` | `c4_phenotypic_complete_4cd1fe06` |
+| Launch → completion (`.nextflow.log`) | 2026-09-28 19:01:16 → 19:13:15 (11m 59s) | 2026-09-28 19:13:18 → 19:23:13 (9m 55s) |
 | Processes succeeded / failed | 37 / 0 | 37 / 0 |
-| Nextflow `succeedDuration` (cumulative task time) | 2h 20m 52s | 2h 11m 43s |
+| Nextflow `succeedDuration` (cumulative task time) | 1h 26m 13s | 1h 13m 28s |
 | `peakRunning` / `peakCpus` | 5 / 26 | 5 / 26 |
 | `peakMemory` (requested, not resident) | 28 GB | 28 GB |
 | Largest single-task `peak_rss` | 3.0 GB (`CAAS_PERMS_DISAMBIGUATE`) | 2.4 GB (`CAAS_PERMS_DISAMBIGUATE`) |
@@ -44,31 +55,33 @@ Both runs executed every task (`cachedCount=0`), sequentially, while the negativ
 
 | process | genotypic | phenotypic | reason |
 |---|---|---|---|
-| `CONTRAST_SELECTION:DATASET_PRUNE` | not run | 1m 5s, 1.9 GB | `prune_data=true` |
+| `CONTRAST_SELECTION:DATASET_PRUNE` | not run | 34.4 s, 1.9 GB | `prune_data=true` |
 | `CONTRAST_SELECTION:DATASET_EXPLORATION`, `:PHENOTYPE_EXPLORATION` | not run | run | pruning path |
 | `CONTRAST_SELECTION:REPORTING:{DATASET_EXPLORATION, PHENOTYPE_EXPLORATION, NAME_CURATION:TREE_CLEANUP}` | run | not run | non-pruning path |
+
+Process count is 37 in both: the pruning and non-pruning paths contribute three processes each.
 
 ## Dominant cost centres
 
 | process | genotypic realtime | %cpu | phenotypic realtime | %cpu |
 |---|---|---|---|---|
-| `CT:RESAMPLE` | 7m | 377.3 % | 5m 9s | 412.5 % |
-| `CAAS_PERMULATION:CAAS_PERMS_DISAMBIGUATE` | 5m 11s | 22.1 % | 6m 1s | 19.3 % |
-| `FADE:FADE_BATCHED` | 3m 47s | 77.1 % | 3m 13s | 79.7 % |
-| `CT:CAAS_PERMS_PREP:PERM_REPLAY_BATCHED` | 1m 14s | 101.0 % | 1m 35s | 100.5 % |
-| `CT_DISAMBIGUATION:CT_DISAMBIGUATION_RUN` | 1m 13s | 74.3 % | 41.9 s | 77.9 % |
-| `CT_POSTPROC:CT_POSTPROC_REPORT` | 1m 8s | 72.2 % | 1m 19s | 65.5 % |
+| `CAAS_PERMULATION:CAAS_PERMS_DISAMBIGUATE` | 4m 28s | 24.9 % | 3m 1s | 30.5 % |
+| `CT:RESAMPLE` | 4m 16s | 446.2 % | 3m 15s | 483.9 % |
+| `FADE:FADE_BATCHED` | 1m 40s | 100.8 % | 1m 49s | 98.8 % |
+| `CT:CAAS_PERMS_PREP:PERM_REPLAY_BATCHED` | 46.2 s | 101.5 % | 43.8 s | 101.8 % |
+| `CT_DISAMBIGUATION:CT_DISAMBIGUATION_RUN` | 38.7 s | 83.0 % | 25.3 s | 87.7 % |
+| `CT_POSTPROC:CT_POSTPROC_REPORT` | 36.8 s | 100.7 % | 51 s | 97.6 % |
 
-- **`CAAS_PERMS_DISAMBIGUATE` runs at about 20 % CPU** in both runs: most of its wall time is not spent computing. Whether this is I/O, worker start-up or contention with the concurrent negative-control batch was not profiled.
+- **`CAAS_PERMS_DISAMBIGUATE` runs at 25 to 31 % CPU**: most of its wall time is not spent computing on the requested cores. Whether the gap is I/O or worker start-up was not profiled.
 - **`CT:RESAMPLE` breakdown** (from its `.command.log`):
 
 | phase | genotypic | phenotypic |
 |---|---|---|
-| pool harvest, 1000 Tier-1 cycles | 1m 24s (1012 draws) | 26 s (1002 draws) |
-| design matching: FOP harvest of every candidate | 2m 27s + 27 s top-up (1147 candidates, 89.0 % reach 100 hypotheses) | 2m 11s + 12 s (1066 candidates, 94.4 %) |
-| FOP mirror, 1000 cycles × 100 hypotheses, 6 workers | 2m 32s | 2m 16s |
+| pool harvest, 1000 Tier-1 cycles | 45 s (1012 draws) | 21 s (1002 draws) |
+| design matching: FOP harvest of every candidate | 1m 33s + 15 s top-up (1147 candidates, 89.0 % reach 100 hypotheses) | 1m 17s + 5 s (1066 candidates, 94.4 %) |
+| FOP mirror, 1000 cycles × 100 hypotheses, 6 workers | 1m 38s | 1m 27s |
 
-Design matching harvests each candidate cycle's FOP hypotheses once to count them and again in the mirror; together they are the largest share of `RESAMPLE` in both runs. Differences between the runs combine the 4-pair vs 3-pair design, the tip set, the lower genotypic match rate (more candidates to harvest) and machine contention; they were not separated.
+Design matching harvests each candidate cycle's FOP hypotheses once to count them and again in the mirror; together they are the largest share of `RESAMPLE` in both runs. The genotypic run harvests more candidates (lower match rate) with 4 rather than 3 pairs per hypothesis; the two contributions were not separated.
 
 ## Per-process trace, side by side
 
@@ -76,46 +89,46 @@ Sources: `results/<run>/pipeline_info/execution_trace.txt`. Rows ordered by geno
 
 | process | geno realtime | geno %cpu | geno peak_rss | pheno realtime | pheno %cpu | pheno peak_rss |
 |---|---|---|---|---|---|---|
-| `CONTRAST_SELECTION:NAME_CURATION:TREE_CLEANUP` | 313ms | 71.5% | 28 MB | 149ms | 87.4% | 26.9 MB |
-| `CONTRAST_SELECTION:REPORTING:NAME_CURATION:TREE_CLEANUP` | 304ms | 70.8% | 28.6 MB | not run | |  |
-| `CONTRAST_SELECTION:REPORTING:DATASET_EXPLORATION` | 12.9s | 71.5% | 432.8 MB | not run | |  |
-| `CONTRAST_SELECTION:REPORTING:PHENOTYPE_EXPLORATION` | 1m 7s | 96.8% | 2 GB | not run | |  |
-| `CONTRAST_SELECTION:CI_COMPOSITION_REPORT` | 20.9s | 94.2% | 902.6 MB | 13.9s | 102.8% | 903.5 MB |
-| `SELECTION_PREP:EXTRACT_EXTREME_SPECIES` | 95ms | 83.3% | 3.8 MB | 106ms | 74.5% | 18.2 MB |
-| `CONTRAST_SELECTION:CONTRAST_ALGORITHM` | 55.5s | 90.8% | 1.2 GB | 35.1s | 100.9% | 1.2 GB |
-| `CONTRAST_SELECTION:CHECK_MIN_CONTRASTS` | 56ms | 60.0% | 0 | 32ms | 65.5% | 0 |
-| `SELECTION_PREP:PREP_ALIGNMENTS_BATCHED` | 289ms | 88.6% | 7.9 MB | 446ms | 65.3% | 7.9 MB |
-| `FADE:ANNOTATE_TREE_FG_BATCHED` | 215ms | 94.6% | 7.9 MB | 172ms | 98.6% | 8 MB |
-| `CT:DISCOVERY_BATCHED` | 3.2s | 84.6% | 68.3 MB | 2.1s | 99.2% | 68 MB |
-| `FADE:FADE_BATCHED` | 3m 47s | 77.1% | 477.9 MB | 3m 13s | 79.7% | 484.6 MB |
-| `CT:CONCAT_BACKGROUND` | 84ms | 43.8% | 0 | 45ms | 64.9% | 0 |
-| `CT:CONCAT_DISCOVERY` | 78ms | 30.2% | 0 | 26ms | 100.0% | 0 |
-| `CT:RESAMPLE` | 7m | 377.3% | 2.1 GB | 5m 9s | 412.5% | 2 GB |
-| `CT_META_CAAS:CAAS_META_CAAS_REPORT` | 15.7s | 46.5% | 250.1 MB | 5.1s | 113.0% | 249.3 MB |
-| `CT_DISAMBIGUATION:CT_DISAMBIGUATION_RUN` | 1m 13s | 74.3% | 1.2 GB | 41.9s | 77.9% | 1.1 GB |
-| `CT_POSTPROC:ASR_ROBUSTNESS:ASR_ROBUSTNESS_REPORT` | 14.3s | 54.0% | 323.5 MB | 15s | 50.9% | 325.7 MB |
-| `CT_POSTPROC:CAAS_PREPARE_POSTPROC_INPUT` | 2.6s | 58.2% | 105.2 MB | 2.8s | 52.4% | 132.4 MB |
-| `CT_POSTPROC:CT_FILTER` | 1.8s | 67.4% | 121.2 MB | 1.8s | 70.2% | 122.4 MB |
-| `CT_POSTPROC:CT_FILTER_SUMMARY` | 1.4s | 78.0% | 24.7 MB | 3.9s | 30.3% | 118.3 MB |
-| `CT_POSTPROC:CAAS_FILTER_GENES` | 5s | 70.5% | 129.1 MB | 6.2s | 60.0% | 126.5 MB |
-| `CT_POSTPROC:CAAS_BACKGROUND_CLEANUP` | 1.4s | 79.6% | 24.8 MB | 2.2s | 52.6% | 96.9 MB |
-| `CT_POSTPROC:CT_POSTPROC_REPORT` | 1m 8s | 72.2% | 781.1 MB | 1m 19s | 65.5% | 773.6 MB |
-| `FADE:FADE_JSON_TO_CSV_TOP` | 1.3s | 58.4% | 35.1 MB | 678ms | 133.3% | 30.4 MB |
-| `FADE:FADE_REPORT_TOP` | 8.3s | 55.0% | 241.5 MB | 5.5s | 82.6% | 240.9 MB |
-| `FADE:FADE_GENE_LISTS_TOP` | 363ms | 138.7% | 41.2 MB | 486ms | 107.9% | 28.8 MB |
-| `ENRICHMENT:PUBLISH_UNIVERSES` | 39ms | 55.2% | 0 | 47ms | 37.9% | 0 |
-| `CT:CONCAT_RESAMPLE` | 37ms | 107.1% | 0 | 83ms | 45.8% | 4.4 MB |
-| `CT:CAAS_PERMS_PREP:SUBSET_RESAMPLE_PERMS` | 1.3s | 101.6% | 4 MB | 1.2s | 94.8% | 3.9 MB |
-| `CT:CAAS_PERMS_PREP:PERM_REPLAY_BATCHED` | 1m 14s | 101.0% | 1.8 GB | 1m 35s | 100.5% | 1.7 GB |
-| `CAAS_PERMULATION:CAAS_PERMS_DISAMBIGUATE` | 5m 11s | 22.1% | 3 GB | 6m 1s | 19.3% | 2.4 GB |
-| `CAAS_PERMULATION:CAAS_PERMS_AGGREGATE` | 753ms | 195.2% | 3.9 MB | 2.1s | 75.2% | 81.5 MB |
-| `SCORING:SCORING_COMPUTE` | 1.7s | 153.6% | 142.3 MB | 3.9s | 80.5% | 139.9 MB |
-| `CAAS_SIGNIFICANCE_REPORT` | 4.5s | 113.9% | 254.1 MB | 9.7s | 67.2% | 376.8 MB |
-| `SCORING:SCORING_REPORT` | 12.1s | 104.8% | 462.5 MB | 25.5s | 78.2% | 461.5 MB |
-| `ENRICHMENT:SCORING_COMPARE_REPORT` | 4.7s | 116.1% | 374.2 MB | 11.6s | 67.5% | 394.1 MB |
-| `CONTRAST_SELECTION:DATASET_EXPLORATION` | not run | |  | 7s | 105.1% | 431.4 MB |
-| `CONTRAST_SELECTION:DATASET_PRUNE` | not run | |  | 1m 5s | 99.5% | 1.9 GB |
-| `CONTRAST_SELECTION:PHENOTYPE_EXPLORATION` | not run | |  | 51.9s | 99.6% | 2 GB |
+| `CONTRAST_SELECTION:NAME_CURATION:TREE_CLEANUP` | 245ms | 76.5% | 16.6 MB | 142ms | 85.7% | 17.9 MB |
+| `CONTRAST_SELECTION:REPORTING:NAME_CURATION:TREE_CLEANUP` | 222ms | 87.6% | 17.7 MB | not run | |  |
+| `CONTRAST_SELECTION:REPORTING:DATASET_EXPLORATION` | 5.5s | 99.6% | 433.6 MB | not run | |  |
+| `CONTRAST_SELECTION:REPORTING:PHENOTYPE_EXPLORATION` | 36.9s | 100.4% | 2 GB | not run | |  |
+| `CONTRAST_SELECTION:CI_COMPOSITION_REPORT` | 9.7s | 107.8% | 1 GB | 8.6s | 114.2% | 897.9 MB |
+| `SELECTION_PREP:EXTRACT_EXTREME_SPECIES` | 98ms | 74.4% | 15.3 MB | 45ms | 109.1% | 3.9 MB |
+| `CONTRAST_SELECTION:CONTRAST_ALGORITHM` | 21.7s | 105.3% | 1.2 GB | 21.3s | 106.1% | 1.2 GB |
+| `SELECTION_PREP:PREP_ALIGNMENTS_BATCHED` | 245ms | 84.3% | 7.9 MB | 125ms | 96.9% | 7.8 MB |
+| `CONTRAST_SELECTION:CHECK_MIN_CONTRASTS` | 25ms | 126.3% | 0 | 15ms | 80.0% | 0 |
+| `CT:DISCOVERY_BATCHED` | 1.3s | 95.3% | 68.3 MB | 1.1s | 102.8% | 4 MB |
+| `FADE:ANNOTATE_TREE_FG_BATCHED` | 125ms | 113.2% | 8 MB | 110ms | 100.7% | 8 MB |
+| `FADE:FADE_BATCHED` | 1m 40s | 100.8% | 499.8 MB | 1m 49s | 98.8% | 513.3 MB |
+| `CT:CONCAT_DISCOVERY` | 24ms | 83.7% | 0 | 21ms | 105.9% | 0 |
+| `CT:CONCAT_BACKGROUND` | 21ms | 123.1% | 0 | 24ms | 117.1% | 0 |
+| `CT:RESAMPLE` | 4m 16s | 446.2% | 2.2 GB | 3m 15s | 483.9% | 2.1 GB |
+| `CT_META_CAAS:CAAS_META_CAAS_REPORT` | 5.4s | 116.8% | 249.6 MB | 3.5s | 118.5% | 361.6 MB |
+| `CT_DISAMBIGUATION:CT_DISAMBIGUATION_RUN` | 38.7s | 83.0% | 1.1 GB | 25.3s | 87.7% | 1.1 GB |
+| `CT_POSTPROC:ASR_ROBUSTNESS:ASR_ROBUSTNESS_REPORT` | 6.6s | 97.5% | 323.2 MB | 8.9s | 87.5% | 324.9 MB |
+| `CT_POSTPROC:CAAS_PREPARE_POSTPROC_INPUT` | 1.2s | 127.4% | 17.7 MB | 1.7s | 93.9% | 124.4 MB |
+| `CT_POSTPROC:CT_FILTER` | 734ms | 202.5% | 24.8 MB | 1.8s | 89.5% | 123.1 MB |
+| `CT_POSTPROC:CT_FILTER_SUMMARY` | 669ms | 192.8% | 28.4 MB | 1s | 104.1% | 27.3 MB |
+| `CT_POSTPROC:CAAS_FILTER_GENES` | 1.5s | 142.3% | 139.2 MB | 2.4s | 109.9% | 132 MB |
+| `CT_POSTPROC:CAAS_BACKGROUND_CLEANUP` | 792ms | 163.6% | 27 MB | 1.1s | 110.7% | 27.5 MB |
+| `CT_POSTPROC:CT_POSTPROC_REPORT` | 36.8s | 100.7% | 929.9 MB | 51s | 97.6% | 779.3 MB |
+| `FADE:FADE_JSON_TO_CSV_TOP` | 691ms | 148.9% | 41.2 MB | 620ms | 131.2% | 28.7 MB |
+| `FADE:FADE_REPORT_TOP` | 4.4s | 105.2% | 241.5 MB | 5.1s | 91.2% | 313.7 MB |
+| `FADE:FADE_GENE_LISTS_TOP` | 234ms | 307.1% | 45.4 MB | 324ms | 247.7% | 35.2 MB |
+| `ENRICHMENT:PUBLISH_UNIVERSES` | 16ms | 72.7% | 0 | 17ms | 94.7% | 0 |
+| `CT:CONCAT_RESAMPLE` | 48ms | 94.7% | 0 | 28ms | 106.7% | 0 |
+| `CT:CAAS_PERMS_PREP:SUBSET_RESAMPLE_PERMS` | 646ms | 103.8% | 8.1 MB | 566ms | 103.3% | 8.2 MB |
+| `CT:CAAS_PERMS_PREP:PERM_REPLAY_BATCHED` | 46.2s | 101.5% | 1.8 GB | 43.8s | 101.8% | 1.7 GB |
+| `CAAS_PERMULATION:CAAS_PERMS_DISAMBIGUATE` | 4m 28s | 24.9% | 3 GB | 3m 1s | 30.5% | 2.4 GB |
+| `CAAS_PERMULATION:CAAS_PERMS_AGGREGATE` | 570ms | 273.1% | 3.9 MB | 551ms | 262.8% | 3.9 MB |
+| `SCORING:SCORING_COMPUTE` | 1.3s | 175.6% | 143 MB | 1.1s | 192.8% | 24.2 MB |
+| `CAAS_SIGNIFICANCE_REPORT` | 3.8s | 116.4% | 376.3 MB | 3.6s | 119.6% | 379.1 MB |
+| `SCORING:SCORING_REPORT` | 9.8s | 107.6% | 473.6 MB | 8.7s | 107.9% | 465.2 MB |
+| `ENRICHMENT:SCORING_COMPARE_REPORT` | 4.9s | 119.3% | 371.5 MB | 3.9s | 120.7% | 360.9 MB |
+| `CONTRAST_SELECTION:DATASET_PRUNE` | not run | |  | 34.4s | 101.4% | 1.9 GB |
+| `CONTRAST_SELECTION:DATASET_EXPLORATION` | not run | |  | 3.9s | 125.6% | 429.4 MB |
+| `CONTRAST_SELECTION:PHENOTYPE_EXPLORATION` | not run | |  | 32.5s | 102.8% | 1.8 GB |
 
 `peak_vmem` values near 1 TB on Rmd-render steps in the raw traces are shared-library mmap accounting, not resident memory.
 
