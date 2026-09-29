@@ -26,15 +26,49 @@ from pathlib import Path
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Merge batched ct_disambiguation/ output directories.")
-    parser.add_argument("--batch-dirs", nargs="+", required=True, help="Batch ct_disambiguation/ directories, in order")
+    parser.add_argument("--batch-dirs", nargs="+", required=True,
+                        help="Batch ct_disambiguation/ directories (any order: they are put in gene order)")
     parser.add_argument("--output-dir", required=True, help="Merged ct_disambiguation/ output directory")
     return parser.parse_args()
 
 
-def _concat_csv(batch_dirs, relpath, out_path, delimiter=","):
+def _first_gene(bdir):
+    """Alphabetically first gene a batch processed (batches hold disjoint genes), for a canonical batch order."""
+    src = bdir / "caas_convergence_summary.json"
+    try:
+        genes = json.load(open(src, encoding="utf-8")).get("by_gene_counts", {})
+    except (OSError, ValueError):
+        genes = {}
+    return (min(genes) if genes else "", bdir.name)
+
+
+def _canonical_order(batch_dirs):
+    """Nextflow stages the batches in the order they finish; the merged outputs must not depend on that."""
+    return sorted(batch_dirs, key=_first_gene)
+
+
+def _row_key(header, sort_cols):
+    """Sort key over the named columns (a numeric column sorts numerically, an empty one first)."""
+    idx = [header.index(c) for c in sort_cols]
+
+    def num_or_text(cell):
+        try:
+            return (1, int(cell), "")
+        except ValueError:
+            return (0, -1, cell) if cell == "" else (1, 0, cell)
+
+    return lambda row: tuple(num_or_text(row[i]) if c != "gene" else (0, 0, row[i])
+                             for i, c in zip(idx, sort_cols))
+
+
+def _concat_csv(batch_dirs, relpath, out_path, delimiter=",", sort_cols=None):
+    """Row-concat the batches. With sort_cols the merged rows are ordered (stably) by those columns, so the
+    result equals what an unbatched run writes; a gene's rows all come from one batch, so ties keep the
+    order in which they were produced."""
     header = None
     out_path.parent.mkdir(parents=True, exist_ok=True)
     n_rows = 0
+    all_rows = []
     with open(out_path, "w", newline="") as out_f:
         writer = None
         for bdir in batch_dirs:
@@ -57,9 +91,12 @@ def _concat_csv(batch_dirs, relpath, out_path, delimiter=","):
                     f"{batch_header}, expected {header} (see max_pairs fix "
                     f"in disambiguation_main.py/gene_wrapper.py)"
                 )
-            for row in batch_rows:
-                writer.writerow(row)
-                n_rows += 1
+            all_rows.extend(batch_rows)
+        if writer is not None:
+            if sort_cols:
+                all_rows.sort(key=_row_key(header, sort_cols))
+            writer.writerows(all_rows)
+            n_rows = len(all_rows)
     if header is None:
         # No batch produced this file -- leave nothing behind, matching the
         # unbatched path where an empty result still writes a header-only file.
@@ -159,20 +196,23 @@ def _merge_summary_json(batch_dirs, out_path):
 
 def main():
     args = parse_args()
-    batch_dirs = [Path(p) for p in args.batch_dirs]
+    batch_dirs = _canonical_order([Path(p) for p in args.batch_dirs])
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    n_master = _concat_csv(batch_dirs, "caas_convergence_master.csv", out_dir / "caas_convergence_master.csv")
+    n_master = _concat_csv(batch_dirs, "caas_convergence_master.csv", out_dir / "caas_convergence_master.csv",
+                           sort_cols=("gene", "msa_pos"))
     print(f"[merge_disambiguation_batches] caas_convergence_master.csv: {n_master} rows")
 
     n_no_change = _concat_csv(
-        batch_dirs, "diagnostics/no_change_debug.csv", out_dir / "diagnostics" / "no_change_debug.csv"
+        batch_dirs, "diagnostics/no_change_debug.csv", out_dir / "diagnostics" / "no_change_debug.csv",
+        sort_cols=("gene", "msa_pos"),
     )
     print(f"[merge_disambiguation_batches] diagnostics/no_change_debug.csv: {n_no_change} rows")
 
     n_asr = _concat_csv(
-        batch_dirs, "diagnostics/caas_hypothesis_domain_asr.tsv", out_dir / "diagnostics" / "caas_hypothesis_domain_asr.tsv", delimiter="\t"
+        batch_dirs, "diagnostics/caas_hypothesis_domain_asr.tsv", out_dir / "diagnostics" / "caas_hypothesis_domain_asr.tsv", delimiter="\t",
+        sort_cols=("gene",),
     )
     print(f"[merge_disambiguation_batches] diagnostics/caas_hypothesis_domain_asr.tsv: {n_asr} rows")
 
