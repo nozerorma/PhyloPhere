@@ -57,3 +57,20 @@ One implementation of cluster trains and gene removal serves the observed chain
 - Not exercised by any fixture: a gene actually removed at scale, genes without a length, and the effect of
   moving the observed gene removal from hypothesis to labeling grain (toy hypotheses share one position set,
   PEPC has one gene).
+
+## Scores (`core/scores.py`)
+
+Position score, side collapse and gene score are defined once and called by the null (pass B of
+`gene_wrapper.py`); the observed side adopts them in the scoring step.
+
+- Position score: mean of `caas_row` (= `asr_path_score`) over the schemes that scored it, per side. The sum is
+  `math.fsum` (correctly rounded, independent of scheme order).
+- Directions: `top` / `bottom` use only that side; `all` keeps one entry per position, its best side.
+- Gene score: `(#{pool <= max} / |pool|) ** n`. It is None (written NA) when the gene has no scored position in
+  the direction or the pool is empty. `scoring_caas_perms.R` fills those cells with 0 when it builds the dense
+  genes x cycles matrix, so `caas_perms.rds` and the FCS null do not change; only `gene_cycle_scores.tsv` shows
+  NA where it used to show 0.0.
+- Checked: `size_adj_max` reproduces `gene_caas_score{,_top,_bottom}` written by the R pipeline (PEPC golden and
+  toy, abs 1e-12). On the stored toy `b_0` detail, pass B outputs equal the previous ones (delta 0) except 10
+  cells that went from 0 to NA (8 top, 2 bottom). The position score differs from R's `mean()` in the last bit
+  on 46 of 165 rows (1.2e-16); it disappears once the observed consumes these scores.

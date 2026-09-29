@@ -10,7 +10,6 @@ Author: ASR Integration
 Date: 2025-12-03 (revised 2025-12-09)
 """
 
-import bisect
 import functools
 import gzip
 import logging
@@ -46,6 +45,7 @@ from src.data.loaders import (
 )
 from src.utils.io_utils import find_gene_alignment
 from src.core.driver import pool_labelings, score_labelings
+from src.core.scores import DIRECTIONS, collapse_sides, direction_values, gene_scores, position_score, position_sum
 from src.data.models import CAASPosition
 
 from src.utils.disambiguation_db import (
@@ -1301,25 +1301,23 @@ def _build_cycle_score_pools(
             acc[cyc] = pc
         return pc
 
-    def _drain_side(agg: Dict[Any, List[float]]) -> None:
-        # agg keyed (cyc, pos, side). Per (cyc, pos) the directional pools take
-        # that side's mean-over-schemes score directly; the global pool takes ONE
-        # entry per position = its best side (T3-doc §12 max-dedup, so a "both"
-        # position is not double-counted).
+    def _drain_side(agg: Dict[Any, Dict[str, float]]) -> None:
+        # agg keyed (cyc, pos, side) -> {caap_group: caas_row}. core.scores turns each
+        # into the position's score per side, then into one entry per direction: the
+        # directional pools take that side's score, the global pool ONE entry per
+        # position = its best side (a "both" position is not double-counted).
         by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
-        for (cyc, pos, side), entry in agg.items():
-            score = entry[0] / entry[1] if entry[1] else 0.0
-            by_pos.setdefault((cyc, pos), {})[side] = score
+        for (cyc, pos, side), schemes in agg.items():
+            score = position_score(schemes)
+            if score is not None:
+                by_pos.setdefault((cyc, pos), {})[side] = score
         for (cyc, pos), sides in by_pos.items():
             pc = _per_cycle(cyc)
-            pc["all"].append(max(sides.values()))
-            if "top" in sides:
-                pc["top"].append(sides["top"])
-            if "bottom" in sides:
-                pc["bottom"].append(sides["bottom"])
+            for d, v in collapse_sides(sides).items():
+                pc[d].append(v)
 
     current_gene: Optional[str] = None
-    pos_agg: Dict[Any, List[float]] = {}
+    pos_agg: Dict[Any, Dict[str, float]] = {}
     for row in iter_detail_rows(detail_path):
         gene = row["Gene"]
         if gene != current_gene:
@@ -1332,31 +1330,12 @@ def _build_cycle_score_pools(
         if remove_clusters and _is_clustered(row):
             continue
         key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
-        entry = pos_agg.setdefault(key, [0.0, 0])
-        entry[0] += _null_row_caas(row)
-        entry[1] += 1
+        pos_agg.setdefault(key, {})[row["caap_group"]] = _null_row_caas(row)
     if current_gene is not None:
         _drain_side(pos_agg)
 
     return {cyc: {k: array.array("d", sorted(v)) for k, v in per_cycle.items()}
             for cyc, per_cycle in acc.items()}
-
-
-def _size_adj_max_null(vals: List[float], cyc: str, direction: str,
-                       pools: Dict[str, Dict[str, Any]]) -> float:
-    """F_cycle(max)^n -- the null mirror of scoring_compute.R's size_adj_max()."""
-    if not vals:
-        return 0.0
-    per_cycle = pools.get(cyc)
-    if per_cycle is None:
-        return 0.0
-    pool = per_cycle[direction]
-    n_pool = len(pool)
-    if n_pool == 0:
-        return 0.0
-    # bisect_right gives #{pool <= m}, matching findInterval() on the observed
-    # side; both count ties at m as below-or-equal so the two agree exactly.
-    return (bisect.bisect_right(pool, max(vals)) / n_pool) ** len(vals)
 
 
 def _finalize_perm_scores(
@@ -1393,14 +1372,13 @@ def _finalize_perm_scores(
     scores_path = output_dir / "gene_cycle_scores.tsv"
     sample_path = output_dir / "perm_pos_sample.tsv"
     quant_path = output_dir / "perm_pos_quantiles.tsv"
-    # V3-4a: per-(Gene, Position, side, cycle) numerator/denominator of the
-    # per-cycle CAAS_score, so scoring_compute.R §2f-ter can redo the division
-    # (bitwise §2g parity) and take the max over sides for the pooled p.emp. The
-    # sum is accumulated in §2g scheme-priority order (US > GS4 > GS3 > GS2 >
-    # GS1) so caas_sum / n_schemes equals mean(caas_row) term for term.
+    # Per-(Gene, Position, side, cycle) numerator/denominator of the per-cycle
+    # CAAS_score, so scoring_compute.R §2f-ter can redo the division and take the
+    # max over sides for the pooled p.emp. core.scores.position_sum adds the schemes
+    # in a fixed priority order, so caas_sum / n_schemes is the position score used
+    # everywhere else.
     cycle_caas_path = output_dir / "perm_pos_cycle_caas.tsv.gz"
     cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_sum", "n_schemes"]
-    _SCHEME_PRIORITY = ("US", "GS4", "GS3", "GS2", "GS1")
 
     # Reservoir size per (cycle, scheme). Bounds both the violin sample and the
     # quantile summaries at ~K * n_cycles * 5 rows regardless of run size. The
@@ -1428,72 +1406,43 @@ def _finalize_perm_scores(
     def _q90(vals) -> float:
         return float(np.percentile(vals, 90)) if vals else 0.0
 
-    def _flush(gene: str, pos_agg: Dict[Any, List[float]],
-               pos_scheme: Dict[Any, Dict[str, float]], writer) -> None:
-        # V3-4a: dump the per-cycle CAAS numerator/denominator for this gene.
-        if writer_cc is not None:
-            cc_rows = []
-            for (cyc, pos, side), sch in pos_scheme.items():
-                ordered = [sch[g] for g in _SCHEME_PRIORITY if g in sch]
-                ordered += [sch[g] for g in sorted(sch) if g not in _SCHEME_PRIORITY]
-                cc_rows.append({
-                    "Gene": gene, "Position": pos, "side": side, "cycle": cyc,
-                    "caas_sum": sum(ordered), "n_schemes": len(ordered),
-                })
-            if cc_rows:
-                writer_cc.writerows(cc_rows)
+    def _na(x) -> Any:
+        return "NA" if x is None else x
 
-        by_cycle: Dict[str, List[Tuple[float, float, str]]] = {}
-        # (cyc, pos) -> {side: (asr_score, caas_score)}
-        grouped: Dict[Tuple[str, int], Dict[str, Tuple[float, float]]] = {}
-        for (cyc, pos, side), agg in pos_agg.items():
-            asr_sum, n_schemes, caas_sum = agg
-            grouped.setdefault((cyc, pos), {})[side] = (
-                asr_sum / n_schemes if n_schemes else 0.0,
-                caas_sum / n_schemes if n_schemes else 0.0,
-            )
-        for (cyc, _pos), sides in grouped.items():
-            # global row = the position's best side (one entry per position)
-            g_asr = max(v[0] for v in sides.values())
-            g_caas = max(v[1] for v in sides.values())
-            by_cycle.setdefault(cyc, []).append((g_asr, g_caas, "all"))
-            for sd in ("top", "bottom"):
-                if sd in sides:
-                    by_cycle[cyc].append((sides[sd][0], sides[sd][1], sd))
+    def _flush(gene: str, pos_scheme: Dict[Any, Dict[str, float]], writer) -> None:
+        # pos_scheme keyed (cyc, pos, side) -> {caap_group: caas_row}. Per-cycle CAAS
+        # numerator/denominator first (scoring_compute.R p.emp redoes the division).
+        by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
+        cc_rows = []
+        for (cyc, pos, side), schemes in pos_scheme.items():
+            total, n = position_sum(schemes)
+            cc_rows.append({"Gene": gene, "Position": pos, "side": side, "cycle": cyc,
+                            "caas_sum": total, "n_schemes": n})
+            if n:
+                by_pos.setdefault((cyc, pos), {})[side] = total / n
+        if writer_cc is not None and cc_rows:
+            writer_cc.writerows(cc_rows)
 
+        positions_by_cycle: Dict[str, List[Dict[str, float]]] = {}
+        for (cyc, _pos), sides in by_pos.items():
+            positions_by_cycle.setdefault(cyc, []).append(sides)
+
+        no_pool = {d: () for d in DIRECTIONS}
         rows = []
         for cyc in cycle_tags:
-            items = by_cycle.get(cyc, [])
-            if not items:
-                # A permuted labeling that produced no hit anywhere in this gene is
-                # a structural zero, not missing data -- keep the explicit 0.0 row so
-                # the genes x N null matrix stays dense (scoring_caas_perms.R and the
-                # report's p_zero diagnostics both rely on this).
-                rows.append({"Gene": gene, "cycle": cyc,
-                             "global_asr": 0.0, "top_asr": 0.0, "bottom_asr": 0.0,
-                             "global_caas": 0.0, "top_caas": 0.0, "bottom_caas": 0.0})
-                continue
-            # items are tagged "all" (one per position, its best side), "top",
-            # "bottom" — direction-pure, no "both".
-            asr_g = [i[0] for i in items if i[2] == "all"]
-            asr_t = [i[0] for i in items if i[2] == "top"]
-            asr_b = [i[0] for i in items if i[2] == "bottom"]
-            caas_g = [i[1] for i in items if i[2] == "all"]
-            caas_t = [i[1] for i in items if i[2] == "top"]
-            caas_b = [i[1] for i in items if i[2] == "bottom"]
+            positions = positions_by_cycle.get(cyc, [])
+            vals = direction_values(positions)
+            caas = gene_scores(positions, cycle_pools.get(cyc, no_pool))
+            # The ASR axis is not wired into any ranking downstream; it stays on q90
+            # (0 when empty), like the observed gene_caas_asr_* columns. asr_path_score
+            # is the caas_row, so it shares the position scores.
+            # The CAAS axis is what FCS consumes (caas_corStat_byrank). A cycle with no
+            # scored position in a direction has no score there (NA); scoring_caas_perms.R
+            # fills those cells with 0 when it builds the dense genes x cycles matrix.
             rows.append({
                 "Gene": gene, "cycle": cyc,
-                # ASR axis: not wired into any ranking downstream, so it stays on
-                # q90 -- matching the observed gene_caas_asr_* columns, which are
-                # also still q90. The two must move together if ever wired up.
-                "global_asr": _q90(asr_g), "top_asr": _q90(asr_t), "bottom_asr": _q90(asr_b),
-                # CAAS axis: this is what FCS actually consumes (as
-                # caas_corStat_byrank), so it MUST match scoring_compute.R's
-                # size_adj_max term for term or p.perm compares two different
-                # statistics and silently goes wrong.
-                "global_caas": _size_adj_max_null(caas_g, cyc, "all",    cycle_pools),
-                "top_caas":    _size_adj_max_null(caas_t, cyc, "top",    cycle_pools),
-                "bottom_caas": _size_adj_max_null(caas_b, cyc, "bottom", cycle_pools),
+                "global_asr": _q90(vals["all"]), "top_asr": _q90(vals["top"]), "bottom_asr": _q90(vals["bottom"]),
+                "global_caas": _na(caas["all"]), "top_caas": _na(caas["top"]), "bottom_caas": _na(caas["bottom"]),
             })
         writer.writerows(rows)
 
@@ -1507,16 +1456,14 @@ def _finalize_perm_scores(
         writer_cc.writeheader()
 
         current_gene: Optional[str] = None
-        pos_agg: Dict[Tuple[str, int], List[float]] = {}
         pos_scheme: Dict[Tuple[str, int, str], Dict[str, float]] = {}
 
         for row in reader:
             gene = row["Gene"]
             if gene != current_gene:
                 if current_gene is not None:
-                    _flush(current_gene, pos_agg, pos_scheme, writer_scores)
+                    _flush(current_gene, pos_scheme, writer_scores)
                 current_gene = gene
-                pos_agg = {}
                 pos_scheme = {}
 
             cyc = row["cycle"]
@@ -1531,10 +1478,6 @@ def _finalize_perm_scores(
             rc = asr  # T1 decision E: caas_row = asr_score (no phen factor)
 
             skey = (cyc, pos, row.get("side") or "none")
-            agg = pos_agg.setdefault(skey, [0.0, 0, 0.0])
-            agg[0] += asr
-            agg[1] += 1
-            agg[2] += rc
             pos_scheme.setdefault(skey, {})[grp] = rc
 
             # Reservoir sample stratified by (cycle, scheme): every cycle
@@ -1557,7 +1500,7 @@ def _finalize_perm_scores(
             n_rows += 1
 
         if current_gene is not None:
-            _flush(current_gene, pos_agg, pos_scheme, writer_scores)
+            _flush(current_gene, pos_scheme, writer_scores)
 
     # ── Sample + quantile summaries ────────────────────────────────────────────
     sample_fields = ["Gene", "Position", "caap_group", "cycle",

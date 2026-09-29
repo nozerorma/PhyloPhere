@@ -146,6 +146,8 @@ Usage:
 --prune_data                        <true|false>                   false  (requires --reporting)
 --prune_list                         <"species_list">               null
 --prune_list_secondary                 <"species_list">               null
+--toy_mode                           <true|false>                    false  (smoke test on a random subset of alignments; species are never subsampled)
+--toy_n                               <INTEGER>                      200    (alignments kept in --toy_mode: the first N of a shuffle seeded by --seed; an empty value or 0 falls back to 50)
 '''
 }
 

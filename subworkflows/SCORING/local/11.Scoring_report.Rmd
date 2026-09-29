@@ -581,9 +581,9 @@ dir_pal <- c(global = "#4E79A7", top = "#E15759", bottom = "#59A14F")
 
 .gene_null_table <- function(metric_name, obs_df) {
   # Both metrics are exactly 0 whenever a permulated labeling produced zero
-  # CAAS/CAAP hits anywhere in the gene that cycle (gene_wrapper.py writes an
-  # explicit 0.0 row, not NA, when there is nothing to aggregate over) - a
-  # structural point mass, not sampling noise. At >=75% zero (typical here) the
+  # CAAS/CAAP hits anywhere in the gene that cycle (gene_cycle_scores.tsv holds NA
+  # there and scoring_caas_perms.R fills the dense genes x cycles matrix with 0) -
+  # a structural point mass, not sampling noise. At >=75% zero (typical here) the
   # unconditional median/IQR are both 0 and say nothing; p_zero plus the
   # nonzero-conditional median/IQR are what actually separates directions/runs.
   # null_q90 is kept because a tail quantile stays informative even under heavy
