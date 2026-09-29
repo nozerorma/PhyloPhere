@@ -74,7 +74,7 @@ process {
 
     // ── Trait Exploration ───────────────────────────────────────────────────
     withName: 'PHENOTYPE_EXPLORATION' {
-        cpus   = { 10 }
+        cpus   = { 2 }
         memory = { 6.GB * task.attempt }
         time   = { 2.h  * task.attempt }
     }
@@ -84,12 +84,12 @@ process {
         time   = { 2.h  * task.attempt }
     }
     withName: 'CONTRAST_ALGORITHM' {
-        cpus   = { 8 }
+        cpus   = { 2 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
     withName: 'CI_COMPOSITION_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 2 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
@@ -125,18 +125,18 @@ process {
     withName: 'DISCOVERY_BATCHED' {
         cpus   = { 4 }
         memory = { 2.GB * task.attempt }
-        time   = { 3.h * task.attempt }
+        time   = { 1.h * task.attempt }
     }
     withLabel:process_discovery_batched {
         cpus   = { 4 }
         memory = { 2.GB * task.attempt }
-        time   = { 3.h * task.attempt }
+        time   = { 1.h * task.attempt }
     }
 
     withLabel:process_perm_replay_batched {
         cpus   = { 8 }
         memory = { 16.GB * task.attempt }
-        time   = { 128.h * task.attempt }
+        time   = { 4.h * task.attempt }
     }
 
     // ── CT Concat ──────────────────────────────────────────────────────────
@@ -188,14 +188,14 @@ process {
         time   = { 10.m * task.attempt }
     }
     withName: 'CT_POSTPROC_REPORT' {
-        cpus   = { 12 }
+        cpus   = { 2 }
         memory = { 6.GB * task.attempt }
         time   = { 4.h * task.attempt }
     }
 
     // ── CT Significance ───────────────────────────────────────────────────
     withName: 'CAAS_SIGNIFICANCE_REPORT' {
-        cpus   = { 12 }
+        cpus   = { 2 }
         memory = { 4.GB * task.attempt }
         time   = { 2.h * task.attempt }
     }
@@ -219,7 +219,7 @@ process {
     withName: 'CT_DISAMBIGUATION_RUN_BATCHED' {
         cpus   = { 4 }
         memory = { 3.GB * task.attempt }
-        time   = { 2.h  * task.attempt }
+        time   = { 1.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 3
     }
@@ -229,7 +229,7 @@ process {
         time   = { 1.h  * task.attempt }
     }
     withName: 'CT_DISAMBIGUATION_PLOTS' {
-        cpus   = { 8 }
+        cpus   = { 2 }
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
@@ -259,7 +259,7 @@ process {
         // shared-QOS constraint, see comment above).
         cpus   = { 4 }
         memory = { 20.GB * task.attempt }
-        time   = { 8.h  * task.attempt }
+        time   = { 2.h  * task.attempt }
         errorStrategy = { task.exitStatus in [137, 140, 143] ? 'retry' : 'terminate' }
         maxRetries    = 3
     }
@@ -294,7 +294,7 @@ process {
         time   = { 1.h * task.attempt }
     }
     withName: 'ASR_ROBUSTNESS_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 2 }
         memory = { 4.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
@@ -470,12 +470,12 @@ process {
     // ── FCS, STRING and POSENRICH ────────────────────────────────
     // ── SCORING ────────────────────────────────
     withName: 'SCORING_COMPUTE' {
-        cpus   = { 8 }
+        cpus   = { 2 }
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
     withName: 'SCORING_REPORT' {
-        cpus   = { 8 }
+        cpus   = { 2 }
         memory = { 8.GB * task.attempt }
         time   = { 4.h  * task.attempt }
     }
