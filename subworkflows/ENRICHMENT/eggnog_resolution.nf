@@ -23,17 +23,17 @@ process RESOLVE_EGGNOG {
     path "*_members_*.tsv.gz", emit: egg_members_file
     path "*_annotations_*.tsv.gz", emit: egg_annotations_file
 
-    stub:
-    """
-    echo '' | gzip > 9443_members_human.tsv.gz
-    echo '' | gzip > 9443_annotations_human.tsv.gz
-    """
-
     script:
     def tax_level = params.eggnog_taxid ?: (params.clade_taxid ?: "9443")
     def ref_taxid = params.ref_species_taxid ?: "9606"
     """
     python3 ${baseDir}/bin/resolve_eggnog.py --output-dir . --tax-level "${tax_level}" --ref-taxid "${ref_taxid}"
+    """
+
+    stub:
+    """
+    echo '' | gzip > 9443_members_human.tsv.gz
+    echo '' | gzip > 9443_annotations_human.tsv.gz
     """
 }
 

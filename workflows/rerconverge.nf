@@ -33,15 +33,15 @@
  */
 
 // Import local modules/subworkflows
-include { RER_TRAIT }          from "${baseDir}/subworkflows/RERCONVERGE/rer_trait"
-include { RER_TREES }          from "${baseDir}/subworkflows/RERCONVERGE/rer_trees"
-include { RER_MATRIX }         from "${baseDir}/subworkflows/RERCONVERGE/rer_matrix"
-include { RER_CONT }           from "${baseDir}/subworkflows/RERCONVERGE/rer_cont"
-include { RER_BIN }            from "${baseDir}/subworkflows/RERCONVERGE/rer_bin"
-include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from "${baseDir}/subworkflows/RERCONVERGE/rer_report.nf"
-include { RER_GENE_LISTS }    from "${baseDir}/subworkflows/RERCONVERGE/rer_gene_lists.nf"
-include { RER_FCS_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
-include { FCS_COMPUTE }    from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+include { RER_TRAIT }          from '../subworkflows/RERCONVERGE/rer_trait'
+include { RER_TREES }          from '../subworkflows/RERCONVERGE/rer_trees'
+include { RER_MATRIX }         from '../subworkflows/RERCONVERGE/rer_matrix'
+include { RER_CONT }           from '../subworkflows/RERCONVERGE/rer_cont'
+include { RER_BIN }            from '../subworkflows/RERCONVERGE/rer_bin'
+include { RER_REPORT as RER_REPORT_CONT; RER_REPORT as RER_REPORT_BIN } from '../subworkflows/RERCONVERGE/rer_report.nf'
+include { RER_GENE_LISTS }    from '../subworkflows/RERCONVERGE/rer_gene_lists.nf'
+include { RER_FCS_REPORT } from '../subworkflows/ENRICHMENT/fcs.nf'
+include { FCS_COMPUTE }    from '../subworkflows/ENRICHMENT/fcs.nf'
 
 // Main workflow
 workflow RER_MAIN {

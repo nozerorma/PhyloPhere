@@ -5,11 +5,11 @@
  * Runs the CT convergence-type disambiguation stage using metadata + ASR.
  */
 
-include { CT_DISAMBIGUATION_RUN } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
-include { CT_DISAMBIGUATION_SPLIT_GENES } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
-include { CT_DISAMBIGUATION_RUN_BATCHED } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
-include { CT_DISAMBIGUATION_MERGE } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
-include { CT_DISAMBIGUATION_PLOTS } from "${baseDir}/subworkflows/CT_DISAMBIGUATION/ct_disambiguation"
+include { CT_DISAMBIGUATION_RUN } from '../subworkflows/CT_DISAMBIGUATION/ct_disambiguation'
+include { CT_DISAMBIGUATION_SPLIT_GENES } from '../subworkflows/CT_DISAMBIGUATION/ct_disambiguation'
+include { CT_DISAMBIGUATION_RUN_BATCHED } from '../subworkflows/CT_DISAMBIGUATION/ct_disambiguation'
+include { CT_DISAMBIGUATION_MERGE } from '../subworkflows/CT_DISAMBIGUATION/ct_disambiguation'
+include { CT_DISAMBIGUATION_PLOTS } from '../subworkflows/CT_DISAMBIGUATION/ct_disambiguation'
 
 workflow CT_DISAMBIGUATION {
     take:

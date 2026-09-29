@@ -26,7 +26,8 @@
 */
 
 // General help message
-def general_help = '''
+def general_help() {
+    return '''
 PHYLOPHERE Nextflow pipeline
 =============================================
 A complete set of phylogenetic comparative tools for Phenome-Genome studies:
@@ -63,10 +64,12 @@ Each module can also run standalone from a precomputed input of an upstream
 module — see the module-specific help (or the README's Configuration
 Reference) for the relevant "*_from" / "*_input" parameters.
 '''
+}
 
 // ── CT: discovery / resample ─────────────────────────────────────────────────
 
-def discovery_help = '''
+def discovery_help() {
+    return '''
 CT Discovery — Help
 =============================================
 Detects Candidate Amino Acid Substitutions (CAAS) from Multiple Sequence
@@ -91,8 +94,10 @@ Usage:
 
 NOTE: fractions are resolved to floor(n_pairs * fraction) at runtime.
 '''
+}
 
-def resample_help = '''
+def resample_help() {
+    return '''
 CT Resample — Help
 =============================================
 Resamples virtual phenotypes for CAAS permutation-based analyses.
@@ -119,10 +124,12 @@ Strategy requirements:
 FGBG                        --fgsize --bgsize
 BM                           --traitvalues
 '''
+}
 
 // ── Contrast selection ──────────────────────────────────────────────────────
 
-def contrast_selection_help = '''
+def contrast_selection_help() {
+    return '''
 Contrast Selection — Help
 =============================================
 Prunes the trait/tree pair and selects foreground/background extremes via
@@ -141,10 +148,12 @@ Usage:
 --prune_list                         <"species_list">               null
 --prune_list_secondary                 <"species_list">               null
 '''
+}
 
 // ── CT disambiguation / post-processing / accumulation ─────────────────────
 
-def disambiguation_help = '''
+def disambiguation_help() {
+    return '''
 CT Disambiguation — Help
 =============================================
 Classifies each discovered CAAS as convergent, parallel or divergent using
@@ -159,8 +168,10 @@ Usage:
 --ct_disambig_max_tasks_per_child       <INTEGER>                       50
 --asr_robustness                        <true|false>                    true   (parallel diagnostic report)
 '''
+}
 
-def postproc_help = '''
+def postproc_help() {
+    return '''
 CT Post-processing — Help
 =============================================
 Cluster/gene-level filtering of disambiguated CAAS, background cleanup, and
@@ -180,8 +191,10 @@ Usage:
 --extreme_threshold                           <FLOAT 0-1>                          0.99
 --iqr_multiplier                                <FLOAT>                              3.0
 '''
+}
 
-def accumulation_help = '''
+def accumulation_help() {
+    return '''
 CT Accumulation — Help
 =============================================
 Permutation test for whether a gene accumulates more CAAS than expected by
@@ -195,10 +208,12 @@ Usage:
 --accumulation_n_randomizations              <INTEGER>                      1000000
 --accumulation_fdr                               <FLOAT 0-1>                    0.1
 '''
+}
 
 // ── VEP ──────────────────────────────────────────────────────────────────────
 
-def vep_help = '''
+def vep_help() {
+    return '''
 VEP Characterization — Help
 =============================================
 Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores,
@@ -219,10 +234,12 @@ Usage:
 --vep_species                            <"species">                "homo_sapiens"
 --vep_assembly                             <"assembly">               "GRCh38"
 '''
+}
 
 // ── FADE ─────────────────────────────────────────────────────────────────────
 
-def fade_help = '''
+def fade_help() {
+    return '''
 FADE (directional selection) — Help
 =============================================
 Runs HyPhy FADE, a Bayesian branch-site model, to detect accelerated or
@@ -245,10 +262,12 @@ Usage:
 --fade_universe_file                              <"gene_list">            null  (else falls back to cleaned background)
 --fade_json_dir_top / --fade_json_dir_bottom        <"dir/of/*.FADE.json">   null  (render report from precomputed JSON)
 '''
+}
 
 // ── RERconverge ──────────────────────────────────────────────────────────────
 
-def rer_help = '''
+def rer_help() {
+    return '''
 RERconverge (RER) — Help
 =============================================
 Computes Relative Evolutionary Rate — branch-length deviation correlated with
@@ -269,10 +288,12 @@ Usage:
 --rer_continuous_file                               <"trait.continuous.output">                          null  (render report from precomputed RDS)
 --rer_perms_file                                      <"trait.continuous.perms.rds">                        null
 '''
+}
 
 // ── Scoring ──────────────────────────────────────────────────────────────────
 
-def scoring_help = """
+def scoring_help() {
+    return """
 CAAS Scoring — Help
 =============================================
 Computes composite CAAS scores at position-level and gene-level, integrating
@@ -306,10 +327,12 @@ Standalone mode (provide inputs directly):
 Position-level components: biochem, ASR, convergence, parallel, [FADE]
 Gene-level scores: gene_caas, [gene_rer], [gene_fade], gene_composite
 """
+}
 
 // ── Enrichment ───────────────────────────────────────────────────────────────
 
-def enrichment_help = '''
+def enrichment_help() {
+    return '''
 Enrichment (FCS / DOMINO-STRING / POSENRICH) — Help
 =============================================
 Ranked gene-set enrichment (FCS, Wilcoxon-AUC on GMT gene sets) run
@@ -347,6 +370,7 @@ POSENRICH (position-level):
 --fubar_sites_file                           (required; cannot be generated in-house
                                               -- see github.com/nozerorma/ortholog_characterizator)
 '''
+}
 
 workflow HELP {
     // Check if --help is provided
@@ -360,25 +384,25 @@ workflow HELP {
         // To see only the overview, explicitly disable the modules you don't need
         // (e.g. --ct_tool "" --ct_disambiguation false --ct_postproc false
         // --ct_accumulation false --vep false --help).
-        log.info general_help
+        log.info general_help()
 
-        if (params.contrast_selection)   log.info contrast_selection_help
+        if (params.contrast_selection)   log.info contrast_selection_help()
 
         // --ct_tool accepts a comma-separated list (e.g. "discovery,resample")
         if (params.ct_tool) {
             def tools = params.ct_tool.toString().split(',').collect { it.trim() }
-            if ('discovery' in tools) log.info discovery_help
-            if ('resample'  in tools) log.info resample_help
+            if ('discovery' in tools) log.info discovery_help()
+            if ('resample'  in tools) log.info resample_help()
         }
 
-        if (params.ct_disambiguation)    log.info disambiguation_help
-        if (params.ct_postproc)          log.info postproc_help
-        if (params.ct_accumulation)      log.info accumulation_help
-        if (params.vep)                  log.info vep_help
-        if (params.fade)                 log.info fade_help
-        if (params.rer_tool)             log.info rer_help
-        if (params.scoring)              log.info scoring_help
-        if (params.enrichment)           log.info enrichment_help
+        if (params.ct_disambiguation)    log.info disambiguation_help()
+        if (params.ct_postproc)          log.info postproc_help()
+        if (params.ct_accumulation)      log.info accumulation_help()
+        if (params.vep)                  log.info vep_help()
+        if (params.fade)                 log.info fade_help()
+        if (params.rer_tool)             log.info rer_help()
+        if (params.scoring)              log.info scoring_help()
+        if (params.enrichment)           log.info enrichment_help()
 
         exit 1
     }

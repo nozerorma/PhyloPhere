@@ -29,10 +29,10 @@
  */
 
 // Import local modules/subworkflows
-include { DISCOVERY; DISCOVERY_BATCHED } from "${baseDir}/subworkflows/CT/ct_discovery"
-include { RESAMPLE } from "${baseDir}/subworkflows/CT/ct_resample"
-include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE } from "${baseDir}/subworkflows/CT/ct_concat"
-include { CAAS_PERMS_PREP } from "${baseDir}/subworkflows/CT/caas_permulation"
+include { DISCOVERY; DISCOVERY_BATCHED } from '../subworkflows/CT/ct_discovery'
+include { RESAMPLE } from '../subworkflows/CT/ct_resample'
+include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE } from '../subworkflows/CT/ct_concat'
+include { CAAS_PERMS_PREP } from '../subworkflows/CT/caas_permulation'
 
 // Main workflow
 
@@ -141,7 +141,7 @@ workflow CT {
                 def discovery_batches = align_tuple
                     .collate(discoveryBatchSize)
                     .map { batch ->
-                        def batchID = sprintf('discovery_batch_%05d', ++discoveryBatchCounter)
+                        def batchID = String.format('discovery_batch_%05d', ++discoveryBatchCounter)
                         def manifestText = createBatchManifestText(
                             batch.collect { row -> "${row[0]}\t${row[1].name}" }
                         )

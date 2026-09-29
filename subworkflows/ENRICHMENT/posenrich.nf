@@ -433,7 +433,7 @@ workflow POSENRICH {
             .collate(posenrichBatchSize)
             .map { batch ->
                 def idx = ++posenrichBatchCounter
-                def batchID = sprintf('posenrich_batch_%05d', idx)
+                def batchID = String.format('posenrich_batch_%05d', idx)
                 tuple(batchID, batch.size(), idx == 1, batch)
             }
 

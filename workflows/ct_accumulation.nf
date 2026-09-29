@@ -16,9 +16,9 @@
 #    - params.caas_config      : traitfile fallback (3-col, no header: species trait pair)
 */
 
-include { CT_ACCUMULATION_AGGREGATE; CT_ACCUMULATION_RANDOMIZE; COMPUTE_ALIGNMENT_ENTROPY } from "${baseDir}/subworkflows/CT_ACCUMULATION/ctacc_run"
-include { ACCUMULATION_REPORT } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_report"
-include { ACCUMULATION_GENE_LISTS } from "${baseDir}/subworkflows/CT_ACCUMULATION/accum_gene_lists.nf"
+include { CT_ACCUMULATION_AGGREGATE; CT_ACCUMULATION_RANDOMIZE; COMPUTE_ALIGNMENT_ENTROPY } from '../subworkflows/CT_ACCUMULATION/ctacc_run'
+include { ACCUMULATION_REPORT } from '../subworkflows/CT_ACCUMULATION/accum_report'
+include { ACCUMULATION_GENE_LISTS } from '../subworkflows/CT_ACCUMULATION/accum_gene_lists.nf'
 
 workflow CT_ACCUMULATION {
     take:

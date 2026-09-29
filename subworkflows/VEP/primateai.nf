@@ -35,11 +35,6 @@ process PRIMATEAI_MAP {
     output:
     path "primateai_mapped.tsv", emit: primateai_tsv
 
-    stub:
-    """
-    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaap_group\tscheme_weight\tchr\tpos\tref_aa\talt_aa\tscore_PAI3D\tpercentile_PAI3D\n' > primateai_mapped.tsv
-    """
-
     script:
     def local_dir = "${baseDir}/subworkflows/VEP/local/src"
     """
@@ -56,5 +51,10 @@ process PRIMATEAI_MAP {
         "${vep_map_dir}" \
         "${primateai_db}" \
         primateai_mapped.tsv
+    """
+
+    stub:
+    """
+    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaap_group\tscheme_weight\tchr\tpos\tref_aa\talt_aa\tscore_PAI3D\tpercentile_PAI3D\n' > primateai_mapped.tsv
     """
 }

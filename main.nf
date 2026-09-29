@@ -233,7 +233,7 @@ workflow {
             if (val == null) return false
             if (val instanceof Boolean) return val
             if (val instanceof String) return !(val.trim().toLowerCase() in ['false', '0', 'no', 'f', ''])
-            return (boolean) val
+            return val as boolean
         }
 
         def run_ct_disambiguation = toBool(params.ct_disambiguation) && (run_meta_caas || params.meta_caas_from || params.disambiguation_input)

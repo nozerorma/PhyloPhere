@@ -6,25 +6,25 @@
  * Runs gene-set and position-level functional enrichment analyses (FCS, AMI).
  */
 
-include { SCORING_AMI_REPORT; SCORING_COMPARE_REPORT } from "${baseDir}/subworkflows/ENRICHMENT/scoring_enrichment.nf"
-include { SCORING_FCS_REPORT }                            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
-include { RER_FCS_REPORT  as MODULE_FCS_RER }             from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
+include { SCORING_AMI_REPORT; SCORING_COMPARE_REPORT } from '../subworkflows/ENRICHMENT/scoring_enrichment.nf'
+include { SCORING_FCS_REPORT }                            from '../subworkflows/ENRICHMENT/fcs.nf'
+include { RER_FCS_REPORT  as MODULE_FCS_RER }             from '../subworkflows/ENRICHMENT/fcs.nf'
 // FCS_COMPUTE (GMT-batched fcs_run_all(), see fcs.nf) is called once per FCS
 // report below, each against a different stats/universe -- distinct aliases
 // for the same DuplicateProcessInvocation reason as DOMINO_MODULES below.
-include { FCS_COMPUTE as FCS_COMPUTE_SCORING }            from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
-include { FCS_COMPUTE as FCS_COMPUTE_RER }                from "${baseDir}/subworkflows/ENRICHMENT/fcs.nf"
-include { POSENRICH }                                      from "${baseDir}/subworkflows/ENRICHMENT/posenrich.nf"
-include { UCR_GENERATION }                                  from "${baseDir}/subworkflows/ENRICHMENT/ucr_generation.nf"
-include { DOMAIN_VARIABILITY_GENERATION }                   from "${baseDir}/subworkflows/ENRICHMENT/domain_variability_generation.nf"
-include { EGGNOG_RESOLUTION }                                from "${baseDir}/subworkflows/ENRICHMENT/eggnog_resolution.nf"
+include { FCS_COMPUTE as FCS_COMPUTE_SCORING }            from '../subworkflows/ENRICHMENT/fcs.nf'
+include { FCS_COMPUTE as FCS_COMPUTE_RER }                from '../subworkflows/ENRICHMENT/fcs.nf'
+include { POSENRICH }                                      from '../subworkflows/ENRICHMENT/posenrich.nf'
+include { UCR_GENERATION }                                  from '../subworkflows/ENRICHMENT/ucr_generation.nf'
+include { DOMAIN_VARIABILITY_GENERATION }                   from '../subworkflows/ENRICHMENT/domain_variability_generation.nf'
+include { EGGNOG_RESOLUTION }                                from '../subworkflows/ENRICHMENT/eggnog_resolution.nf'
 // Nextflow forbids invoking the same process/subworkflow more than once in one workflow
 // scope without a distinct alias per call site (DuplicateProcessInvocation) -- DOMINO_MODULES
 // is called up to 3 times below (main/CAAS, FADE, RER), each against a different
 // gene-list/universe/background, so each needs its own imported name.
-include { DOMINO_MODULES as DOMINO_MODULES_MAIN }          from "${baseDir}/subworkflows/ENRICHMENT/domino.nf"
-include { DOMINO_MODULES as DOMINO_MODULES_FADE }          from "${baseDir}/subworkflows/ENRICHMENT/domino.nf"
-include { DOMINO_MODULES as DOMINO_MODULES_RER }           from "${baseDir}/subworkflows/ENRICHMENT/domino.nf"
+include { DOMINO_MODULES as DOMINO_MODULES_MAIN }          from '../subworkflows/ENRICHMENT/domino.nf'
+include { DOMINO_MODULES as DOMINO_MODULES_FADE }          from '../subworkflows/ENRICHMENT/domino.nf'
+include { DOMINO_MODULES as DOMINO_MODULES_RER }           from '../subworkflows/ENRICHMENT/domino.nf'
 
 // ── FADE Global background/gene-list union ──────────────────────────────────
 // FADE's AMI network is built once per trait (not once per direction) against

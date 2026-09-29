@@ -23,11 +23,6 @@ process COSMIC_MAP {
     output:
     path "cosmic_scores.tsv", emit: cosmic_tsv
 
-    stub:
-    """
-    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tcaap_group\tscheme_weight\tCHROMOSOME\tGENOME_START\tGENOMIC_WT_ALLELE\tGENOMIC_MUT_ALLELE\tMUTATION_AA\tMUTATION_DESCRIPTION\tMUTATION_SOMATIC_STATUS\n' > cosmic_scores.tsv
-    """
-
     script:
     def local_dir = "${baseDir}/subworkflows/VEP/local/src"
     """
@@ -44,5 +39,10 @@ process COSMIC_MAP {
         "${vep_map_dir}" \
         "${cosmic_db}" \
         cosmic_scores.tsv
+    """
+
+    stub:
+    """
+    printf 'Gene\tPosition\thg38_ref_aa\tcaas_alt_aas\tcaas_change\tcaap_group\tscheme_weight\tCHROMOSOME\tGENOME_START\tGENOMIC_WT_ALLELE\tGENOMIC_MUT_ALLELE\tMUTATION_AA\tMUTATION_DESCRIPTION\tMUTATION_SOMATIC_STATUS\n' > cosmic_scores.tsv
     """
 }

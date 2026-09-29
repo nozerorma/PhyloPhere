@@ -45,11 +45,6 @@ process ENSEMBL_VEP_ANNOTATE {
     output:
     path "ensembl_vep_mapped.tsv", emit: ensembl_vep_tsv
 
-    stub:
-    """
-    printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
-    """
-
     script:
     def local_dir = "${baseDir}/subworkflows/VEP/local/src"
     def species = params.vep_species ?: 'homo_sapiens'
@@ -89,5 +84,10 @@ process ENSEMBL_VEP_ANNOTATE {
         --no_stats
 
     python3 join_vep_output.py vep_tab_output.txt id_map.tsv ensembl_vep_mapped.tsv
+    """
+
+    stub:
+    """
+    printf 'Gene\tPosition\tcaap_group\tUploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence\n' > ensembl_vep_mapped.tsv
     """
 }

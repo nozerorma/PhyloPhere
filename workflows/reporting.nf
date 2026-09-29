@@ -28,10 +28,10 @@
  */
 
 // Import local modules/subworkflows
-include { DATASET_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration"
-include { PHENOTYPE_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration"
-include { DATASET_PRUNE } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_data_prune"
-include { NAME_CURATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_name_curation"
+include { DATASET_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration'
+include { PHENOTYPE_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration'
+include { DATASET_PRUNE } from '../subworkflows/TRAIT_ANALYSIS/ta_data_prune'
+include { NAME_CURATION } from '../subworkflows/TRAIT_ANALYSIS/ta_name_curation'
 
 workflow REPORTING {
     assert params.my_traits : "Reporting workflow requires --my_traits."

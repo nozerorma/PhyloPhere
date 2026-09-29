@@ -5,7 +5,7 @@
  * Runs CT pattern annotation / meta_caas generation independently (upstream of disambiguation).
  */
 
-include { CAAS_META_CAAS_REPORT } from "${baseDir}/subworkflows/CT_META_CAAS/ctpp_meta_caas"
+include { CAAS_META_CAAS_REPORT } from '../subworkflows/CT_META_CAAS/ctpp_meta_caas'
 
 workflow CT_META_CAAS {
     take:

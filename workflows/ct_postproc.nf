@@ -30,9 +30,9 @@
  */
 
 // Import local processes from subworkflows
-include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP } from "${baseDir}/subworkflows/CT_POSTPROC/ctpp_clustfilter"
-include { CT_POSTPROC_REPORT } from "${baseDir}/subworkflows/CT_POSTPROC/ctpp_characterization"
-include { ASR_ROBUSTNESS } from "${baseDir}/workflows/asr_robustness"
+include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP } from '../subworkflows/CT_POSTPROC/ctpp_clustfilter'
+include { CT_POSTPROC_REPORT } from '../subworkflows/CT_POSTPROC/ctpp_characterization'
+include { ASR_ROBUSTNESS } from './asr_robustness'
 
 workflow CT_POSTPROC {
     take:

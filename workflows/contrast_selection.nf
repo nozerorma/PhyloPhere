@@ -28,14 +28,14 @@
  */
 
 // Import local modules/subworkflows
-include { DATASET_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration"
-include { PHENOTYPE_EXPLORATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration"
-include { DATASET_PRUNE } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_data_prune"
-include { REPORTING } from "${baseDir}/workflows/reporting"
-include { CI_COMPOSITION_REPORT } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ct_ci"
-include { CONTRAST_ALGORITHM } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ct_independent-contrasts"
-include { CHECK_MIN_CONTRASTS } from "${baseDir}/subworkflows/CT/ct_check_min_contrasts"
-include { NAME_CURATION } from "${baseDir}/subworkflows/TRAIT_ANALYSIS/ta_name_curation"
+include { DATASET_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_dataset_exploration'
+include { PHENOTYPE_EXPLORATION } from '../subworkflows/TRAIT_ANALYSIS/ta_phenotype_exploration'
+include { DATASET_PRUNE } from '../subworkflows/TRAIT_ANALYSIS/ta_data_prune'
+include { REPORTING } from './reporting'
+include { CI_COMPOSITION_REPORT } from '../subworkflows/TRAIT_ANALYSIS/ct_ci'
+include { CONTRAST_ALGORITHM } from '../subworkflows/TRAIT_ANALYSIS/ct_independent-contrasts'
+include { CHECK_MIN_CONTRASTS } from '../subworkflows/CT/ct_check_min_contrasts'
+include { NAME_CURATION } from '../subworkflows/TRAIT_ANALYSIS/ta_name_curation'
 
 workflow CONTRAST_SELECTION {
     assert params.my_traits : "Contrast selection workflow requires --my_traits."

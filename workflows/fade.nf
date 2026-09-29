@@ -34,12 +34,12 @@
 # File: workflows/fade.nf
 */
 
-include { ANNOTATE_TREE_FG; ANNOTATE_TREE_FG_BATCHED } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
-include { FADE_RUN; FADE_BATCHED  } from "${baseDir}/subworkflows/FADE/fade_run.nf"
-include { FADE_REPORT as FADE_REPORT_TOP    } from "${baseDir}/subworkflows/FADE/fade_report.nf"
-include { FADE_REPORT as FADE_REPORT_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_report.nf"
-include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_gene_lists.nf"
-include { FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_BOTTOM } from "${baseDir}/subworkflows/FADE/fade_json_to_csv.nf"
+include { ANNOTATE_TREE_FG; ANNOTATE_TREE_FG_BATCHED } from '../subworkflows/SELECTION/selection_utils.nf'
+include { FADE_RUN; FADE_BATCHED  } from '../subworkflows/FADE/fade_run.nf'
+include { FADE_REPORT as FADE_REPORT_TOP    } from '../subworkflows/FADE/fade_report.nf'
+include { FADE_REPORT as FADE_REPORT_BOTTOM } from '../subworkflows/FADE/fade_report.nf'
+include { FADE_GENE_LISTS as FADE_GENE_LISTS_TOP; FADE_GENE_LISTS as FADE_GENE_LISTS_BOTTOM } from '../subworkflows/FADE/fade_gene_lists.nf'
+include { FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_TOP; FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_BOTTOM } from '../subworkflows/FADE/fade_json_to_csv.nf'
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -140,7 +140,7 @@ workflow FADE {
                     .flatMap()
                     .collate(annotBatchSize)
                     .map { batch ->
-                        def batchID = sprintf('annotate_batch_%s_%05d', dir, ++batchCounter)
+                        def batchID = String.format('annotate_batch_%s_%05d', dir, ++batchCounter)
                         // row[5] (bg_species_file) is legitimately NO_FILE whenever
                         // fade_background_scope == 'all' -- only rows 2/3/4 (fasta,
                         // fg species, tree) are required to be real files.
@@ -212,7 +212,7 @@ workflow FADE {
                     .flatMap()
                     .collate(fadeBatchSize)
                     .map { batch ->
-                        def batchID = sprintf('fade_batch_%s_%05d', dir, ++batchCounter)
+                        def batchID = String.format('fade_batch_%s_%05d', dir, ++batchCounter)
                         def manifestText = createBatchManifestText(
                             batch.collect { row -> "${row[0]}\t${row[2].name}\t${row[3].name}" }
                         )

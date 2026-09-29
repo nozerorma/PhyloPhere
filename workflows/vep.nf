@@ -7,9 +7,9 @@
  * Uses upstream MAP files directly.
  */
 
-include { PRIMATEAI_MAP } from "${baseDir}/subworkflows/VEP/primateai.nf"
-include { COSMIC_MAP }     from "${baseDir}/subworkflows/VEP/cosmic.nf"
-include { ENSEMBL_VEP_ANNOTATE } from "${baseDir}/subworkflows/VEP/ensembl_vep.nf"
+include { PRIMATEAI_MAP } from '../subworkflows/VEP/primateai.nf'
+include { COSMIC_MAP }     from '../subworkflows/VEP/cosmic.nf'
+include { ENSEMBL_VEP_ANNOTATE } from '../subworkflows/VEP/ensembl_vep.nf'
 
 workflow VEP {
     take:

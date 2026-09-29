@@ -26,7 +26,7 @@
  * Not worth a cross-module cache for a single redundant computation.
  */
 
-include { COMPUTE_ALIGNMENT_ENTROPY } from "${baseDir}/subworkflows/CT_ACCUMULATION/ctacc_run.nf"
+include { COMPUTE_ALIGNMENT_ENTROPY } from '../CT_ACCUMULATION/ctacc_run.nf'
 
 process RUN_UCR_DETECTION {
     tag "auto-generate UCR windows"

@@ -32,10 +32,8 @@ process DISCOVERY {
     tag "$alignmentID"
     label 'process_discovery'
 
-    publishDir = [
-        [ path: { "${params.outdir}/discovery" },  pattern: "*.output",         mode: 'copy', enabled: params.publish_intermediates ],
-        [ path: { "${params.outdir}/background" }, pattern: "*.background.tsv", mode: 'copy', enabled: params.publish_intermediates ]
-    ]
+    publishDir path: { "${params.outdir}/discovery" },  pattern: "*.output",         mode: 'copy', enabled: params.publish_intermediates
+    publishDir path: { "${params.outdir}/background" }, pattern: "*.background.tsv", mode: 'copy', enabled: params.publish_intermediates
 
     input:
     tuple val(alignmentID), file(alignmentFile)
@@ -117,10 +115,8 @@ process DISCOVERY_BATCHED {
     tag "$batchID (${batchSize} genes)"
     label 'process_discovery_batched'
 
-    publishDir = [
-        [ path: { "${params.outdir}/discovery" },  pattern: "*.output",         mode: 'copy', enabled: params.publish_intermediates ],
-        [ path: { "${params.outdir}/background" }, pattern: "*.background.tsv", mode: 'copy', enabled: params.publish_intermediates ]
-    ]
+    publishDir path: { "${params.outdir}/discovery" },  pattern: "*.output",         mode: 'copy', enabled: params.publish_intermediates
+    publishDir path: { "${params.outdir}/background" }, pattern: "*.background.tsv", mode: 'copy', enabled: params.publish_intermediates
 
     input:
     tuple val(batchID), val(batchSize), val(batchManifestText), path(alignmentFiles, stageAs: 'alignments/*')

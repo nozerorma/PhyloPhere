@@ -47,7 +47,7 @@
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 
-include { ASR_ROBUSTNESS_REPORT } from "${baseDir}/subworkflows/ASR_ROBUSTNESS/asr_robustness"
+include { ASR_ROBUSTNESS_REPORT } from '../subworkflows/ASR_ROBUSTNESS/asr_robustness'
 
 // Utility: extract a .tar.gz archive to a work-dir subdirectory.
 // Used only when --disambiguation_dir points to a .tar.gz file.

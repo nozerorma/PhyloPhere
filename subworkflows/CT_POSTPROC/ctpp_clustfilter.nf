@@ -4,6 +4,13 @@
 #  CT Post-Processing: Cluster filtering (parameter sweep or single filter)
 */
 
+// .../selection/fade/<direction>/json -> .../selection/species_sets, or null when it does not resolve
+def resolveSourceSpDir(json_dir) {
+    if (!json_dir) return null
+    def selection_dir = file(json_dir).parent?.parent?.parent
+    return selection_dir ? selection_dir.resolve('species_sets') : null
+}
+
 process CAAS_PREPARE_POSTPROC_INPUT {
     tag "prepare_postproc_input"
     publishDir "${params.outdir}/postproc/preprocessed", mode: 'copy', overwrite: true
@@ -32,13 +39,8 @@ process CAAS_PREPARE_POSTPROC_INPUT {
     // this run's own dir when neither resolves (script.python side no-ops the
     // species-tally columns when the files aren't there).
     def own_sp_dir = file("${params.outdir}/selection/species_sets")
-    def resolve_source_sp_dir = { json_dir ->
-        if (!json_dir) return null
-        def selection_dir = file(json_dir).parent?.parent?.parent
-        selection_dir ? selection_dir.resolve('species_sets') : null
-    }
-    def source_sp_dir = resolve_source_sp_dir(params.fade_json_dir_top) ?:
-                         resolve_source_sp_dir(params.fade_json_dir_bottom)
+    def source_sp_dir = resolveSourceSpDir(params.fade_json_dir_top) ?:
+                         resolveSourceSpDir(params.fade_json_dir_bottom)
     def sp_dir   = own_sp_dir.exists() ? own_sp_dir : (source_sp_dir?.exists() ? source_sp_dir : own_sp_dir)
     def ali_dir  = params.alignment ?: ''
     def ali_fmt  = params.ali_format ?: 'fasta'

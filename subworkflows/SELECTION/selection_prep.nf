@@ -23,7 +23,7 @@
  * File: subworkflows/SELECTION/selection_prep.nf
  */
 
-include { EXTRACT_EXTREME_SPECIES } from "${baseDir}/subworkflows/SELECTION/selection_utils.nf"
+include { EXTRACT_EXTREME_SPECIES } from './selection_utils.nf'
 
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -250,7 +250,7 @@ workflow SELECTION_PREP {
                 .flatMap()
                 .collate(prepBatchSize)
                 .map { batch ->
-                    def batchID = sprintf('prep_batch_%05d', ++prepBatchCounter)
+                    def batchID = String.format('prep_batch_%05d', ++prepBatchCounter)
                     def manifestText = createBatchManifestText(
                         batch.collect { row -> "${row[0]}\t${row[1].name}" }
                     )

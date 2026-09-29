@@ -29,15 +29,6 @@ process COMPUTE_DOMAIN_VARIABILITY {
     output:
     path "domain_variability.tsv", emit: domain_variability_file
 
-    stub:
-    // Explicit stub: the script block downloads a ~1.5GB Pfam-A cache on first
-    // use, which -stub-run must never trigger implicitly (no stub: means
-    // Nextflow falls back to running the real script block even under
-    // -stub-run).
-    """
-    printf 'gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\n' > domain_variability.tsv
-    """
-
     script:
     def cache_dir = params.pfam_cache_dir ?: "${System.properties['user.home']}/.cache/phylophere/pfam"
     def ref_species = params.domain_ref_species ?: 'Homo_sapiens'
@@ -47,6 +38,15 @@ process COMPUTE_DOMAIN_VARIABILITY {
         --output-dir . \\
         --cache-dir "${cache_dir}" \\
         --ref-species "${ref_species}"
+    """
+
+    stub:
+    // Explicit stub: the script block downloads a ~1.5GB Pfam-A cache on first
+    // use, which -stub-run must never trigger implicitly (no stub: means
+    // Nextflow falls back to running the real script block even under
+    // -stub-run).
+    """
+    printf 'gene\tpfam_id\ttarget_name\tdescription\tclan_acc\tclan_name\tali_start\tali_end\n' > domain_variability.tsv
     """
 }
 

@@ -314,7 +314,7 @@ workflow FCS_COMPUTE {
         .collate(batchSize)
         .map { batch ->
             def idx = ++counter
-            def batchID = sprintf('fcs_batch_%03d', idx)
+            def batchID = String.format('fcs_batch_%03d', idx)
             tuple(batchID, batch.size(), batch)
         }
 
