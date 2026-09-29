@@ -120,3 +120,27 @@ differ by <= 1.7e-15 and every other cell is identical, so `test_observed_pepc.p
   |delta| <= 1e-12).
 - E requires the NA pattern of the gene scores to match: a gene with no scored position in a direction is NA on both
   sides. A null that writes 0 there fails.
+
+## Cluster trains: union versus per hypothesis (`trains_grain.py`, measurement only)
+
+`ctrain` flags every position of an interval with density count/span >= maxcaas (span >= minlen). The train
+universe can be the positions of all hypotheses pooled per (gene, caap_group) ("union") or the positions of each
+hypothesis separately. Adding positions only raises the density of an interval, so hypothesis flags are contained
+in the union's. `trains_grain.py --discovery <discovery.tab> --name <fixture> --sizes ... --reps ...` reports, for
+random subsets of H hypotheses, the flagged fraction of positions, the records a grain would remove (a flagged union
+position removes the records of every hypothesis that detects it; a per-hypothesis flag removes one record), and the
+fraction of (gene, caap_group) units with at least one train (the input of the `dubious` gene test).
+Parameters minlen 3, maxcaas 0.7:
+
+| fixture | H | positions flagged, union | per hypothesis | records removed, union | per hypothesis | units with a train, union | per hypothesis |
+|---|---|---|---|---|---|---|---|
+| toy (28 genes) | 12 | 5.1 % | 5.1 % | 2.6 % | 2.6 % | 4.1 % | 4.1 % |
+| cancer, 8372 genes (919 747 records) | 1 | 1.88 % | 1.88 % | 1.88 % | 1.88 % | 0.55 % | 0.55 % |
+| cancer | 6 | 2.18 % | 2.08 % | 1.78 % | 1.51 % | 0.94 % | 0.85 % |
+| cancer | 12 | 2.23 % | 2.12 % | 1.79 % | 1.49 % | 1.00 % | 0.91 % |
+| PEPC (1 gene, 5 schemes) | 12 | 5.8 % | 3.6 % | 5.1 % | 0.7 % | 45 % | 30 % |
+| PEPC | 100 | 12.6 % | 7.6 % | 12.6 % | 0.8 % | 80 % | 60 % |
+
+Positions flagged only by the union: cancer 147 of 132 709 at H = 12 (0.11 %); PEPC 10 of 198 at H = 100.
+Per-hypothesis flags outside the union's: 0 in every subset, as expected. What the table does not say is which grain
+finds real alignment problems; that needs an independent alignment-quality reference.
