@@ -16,9 +16,9 @@
     "toy_n": "",
     "runtime_type": "slurm",
     "batched": true,
-    "script_base_name": "cancer_no_prune_multi_toy",
-    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_no_prune_multi_def_toy",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi_def_toy",
+    "script_base_name": "cancer_b0_toy",
+    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_b0_toy",
+    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_b0_toy",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
     "sbatch_partition": "high-cpu",
@@ -85,6 +85,8 @@
       "multi_hypothesis": true,
       "max_fop": "50",
       "caas_perms_fop": true,
+      "caas_b0_diagnostic": true,
+      "caas_perms_match_fop": true,
       "export_groups": true,
       "export_perm_discovery": false
     },
@@ -111,7 +113,7 @@
       "iqr_multiplier": "3.0"
     },
     "accumulation": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
@@ -149,6 +151,7 @@
       "extra_flags": "",
       "fade_direction": "both",
       "fade_background_scope": "all",
+      "fade_internal_nodes": "all_descendants",
       "fade_species_file": "",
       "selection_prep_batch_size": "500",
       "fade_batch_size": "200",
@@ -166,7 +169,7 @@
       "fade_universe_file": ""
     },
     "vep": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
@@ -199,7 +202,7 @@
       "scoring_p_emp_thr": "0.15"
     },
     "enrichment": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "posenrich_enabled": true,
       "fcs_enabled": true,
@@ -243,15 +246,15 @@
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_final_noprune",
+    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi_def",
     "use_ct": false,
     "use_discovery": false,
     "use_resample": false,
     "use_disambiguation": false,
     "use_postproc": false,
     "use_accumulation": false,
-    "use_rer": true,
-    "use_fade": true,
+    "use_rer": false,
+    "use_fade": false,
     "use_vep": false
   },
   "resources": {
