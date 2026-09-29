@@ -125,3 +125,70 @@ def test_batch_wrapper_omits_the_partition_line_when_empty_and_keeps_the_next_di
     empty = render_batch(_project("", batched=True))
     assert "#SBATCH --partition" not in empty and "#SBATCH -t 144:00:00" in empty
     assert "#SBATCH --partition=high-cpu" in render_batch(_project("high-cpu", batched=True))
+
+
+# ── processes sized from a full-genome run (11.8k genes, 12 hypotheses x 1000 cycles) ──
+#
+# RESAMPLE peaked at 3.0-3.5 GB, PERM_REPLAY_BATCHED had six of 804 batches taking 42-179 min
+# at 8 cpus (the four longest averaged 5.5 busy cores) with a 14.6 GB peak, and SCORING_COMPUTE
+# peaked at 23.5 GB. A request below these makes an attempt fail or the slowest batch time out.
+
+_SIZED = """
+process RESAMPLE { label 'process_resample'
+  script:
+  \"\"\"
+  echo "RESAMPLE ${task.attempt} ${task.cpus} ${task.memory.toGiga()} ${task.time.toMinutes()}" >> ${params.out}
+  if [ ${task.attempt} -lt 2 ]; then exit 137; fi
+  \"\"\" }
+process PERM_REPLAY_BATCHED { label 'process_perm_replay_batched'
+  script:
+  \"\"\"
+  echo "PERM_REPLAY_BATCHED ${task.attempt} ${task.cpus} ${task.memory.toGiga()} ${task.time.toMinutes()}" >> ${params.out}
+  if [ ${task.attempt} -lt 2 ]; then exit 137; fi
+  \"\"\" }
+process SCORING_COMPUTE { label 'error_retry'
+  script:
+  \"\"\"
+  echo "SCORING_COMPUTE ${task.attempt} ${task.cpus} ${task.memory.toGiga()} ${task.time.toMinutes()}" >> ${params.out}
+  if [ ${task.attempt} -lt 2 ]; then exit 137; fi
+  \"\"\" }
+workflow { RESAMPLE(); PERM_REPLAY_BATCHED(); SCORING_COMPUTE() }
+"""
+
+
+@pytest.fixture(scope="module")
+def sized(tmp_path_factory):
+    if shutil.which("nextflow") is None:
+        pytest.skip("nextflow not on PATH")
+    d = tmp_path_factory.mktemp("sized")
+    (d / "main.nf").write_text(_SIZED)
+    (d / "big.config").write_text("executor { cpus = 64; memory = 512.GB }\n")
+    out = d / "out.txt"
+    r = subprocess.run(["nextflow", "run", "main.nf", "-c", str(CONF), "-c", "big.config", "--out", str(out)],
+                       cwd=d, capture_output=True, text=True, timeout=300)
+    seen = {}
+    for line in out.read_text().splitlines() if out.exists() else []:
+        name, attempt, cpus, mem, minutes = line.split()
+        seen[(name, int(attempt))] = dict(cpus=int(cpus), mem=int(mem), minutes=int(minutes))
+    assert seen, r.stderr[-500:]
+    return seen
+
+
+def test_resample_keeps_its_large_request_and_retries_with_more(sized):
+    first, second = sized[("RESAMPLE", 1)], sized[("RESAMPLE", 2)]
+    assert (first["cpus"], first["mem"], first["minutes"]) == (12, 24, 12 * 60)
+    assert second["mem"] == 2 * first["mem"] and second["minutes"] == 2 * first["minutes"]
+
+
+def test_perm_replay_batches_have_the_cpus_and_time_the_slowest_batch_needs(sized):
+    first = sized[("PERM_REPLAY_BATCHED", 1)]
+    assert first["cpus"] >= 8              # the slowest batches are cpu-bound: 4.7-6.5 busy cores of 8
+    assert first["minutes"] >= 12 * 60     # 179 min at 8 cpus, and more at fewer
+    assert first["mem"] >= 16              # 14.6 GB peak
+    assert sized[("PERM_REPLAY_BATCHED", 2)]["mem"] > first["mem"]
+
+
+def test_scoring_compute_starts_above_its_measured_peak_and_still_escalates(sized):
+    first, second = sized[("SCORING_COMPUTE", 1)], sized[("SCORING_COMPUTE", 2)]
+    assert first["mem"] >= 24              # 23.5 GB peak
+    assert second["mem"] > first["mem"]
