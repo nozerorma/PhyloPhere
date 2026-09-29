@@ -46,7 +46,7 @@ import numpy as np
 
 # ---------------------------------------------------------------------------
 # FOP multi-hypothesis (Gap A) — base-cycle collapse of the fanned observed
-# perm-replay. Under params.caas_perms_fop the observed perm-replay resamples over
+# perm-replay. Under params.multi_hypothesis the null perm-replay resamples over
 # fop_labelings.tab, whose cycle tags are "<base>~H<m>" (one row per null cycle
 # and fanned Dunn-independent alternative hypothesis). recovery_boot must be
 # reported in BASE-CYCLE units: a base cycle HITS an observed (Gene@Position,

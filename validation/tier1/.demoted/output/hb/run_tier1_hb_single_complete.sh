@@ -677,7 +677,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "include_b0": false,
   "multi_hypothesis": true,
   "max_fop": "${MAX_FOP:-100}",
-  "caas_perms_fop": true,
   "export_groups": false,
   "export_perm_discovery": false,
   "discovery_from": "${DISCOVERY_FROM:-}",

@@ -105,11 +105,10 @@ process RESAMPLE {
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
         "${params.trait_type ?: 'auto'}" \\
-        ${params.caas_perms_fop ?: false} \\
+        ${params.multi_hypothesis ?: false} \\
         ${params.max_fop ?: 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998} \\
-        ${params.caas_perms_match_fop != null ? params.caas_perms_match_fop : true}
+        ${params.seed ?: 1998}
         """
     } else {
         """
@@ -166,11 +165,10 @@ process RESAMPLE {
         "${params.c_trait ?: ''}" \\
         ${params.resample_use_n != null ? params.resample_use_n : true} \\
         "${params.trait_type ?: 'auto'}" \\
-        ${params.caas_perms_fop ?: false} \\
+        ${params.multi_hypothesis ?: false} \\
         ${params.max_fop ?: 100} \\
         ${task.cpus} \\
-        ${params.seed ?: 1998} \\
-        ${params.caas_perms_match_fop != null ? params.caas_perms_match_fop : true}
+        ${params.seed ?: 1998}
         """
     }
 }

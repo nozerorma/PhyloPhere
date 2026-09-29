@@ -88,22 +88,10 @@ SPEC = ModuleTabSpec(
             importance="optional",
         ),
         FieldSpec(
-            name="caas_perms_fop",
-            label="Mirror FOP harvest in the CAAS permulation null",
-            kind="bool",
-            importance="default",
-        ),
-        FieldSpec(
             name="caas_b0_diagnostic",
             label="Replay b_0 through the null path (validation)",
             kind="bool",
             importance="optional",
-        ),
-        FieldSpec(
-            name="caas_perms_match_fop",
-            label="Match null cycles to the observed FOP hypothesis count",
-            kind="bool",
-            importance="default",
         ),
     ),
     advanced_fields=(

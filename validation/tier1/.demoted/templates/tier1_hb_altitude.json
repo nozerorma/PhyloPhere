@@ -90,7 +90,6 @@
       "resample_use_n": true,
       "multi_hypothesis": true,
       "max_fop": "100",
-      "caas_perms_fop": true,
       "export_groups": false,
       "export_perm_discovery": false
     },

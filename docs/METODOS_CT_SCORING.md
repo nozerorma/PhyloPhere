@@ -229,7 +229,7 @@ permulado** (cada "ciclo" es un vector fg/bg del pool). `F` (ciclos × especies)
 máscara de foreground por ciclo. `recovery_boot` = (nº de ciclos que llaman CAAS en esa
 posición/esquema) / (nº de ciclos).
 
-**Con FOP** (`params.caas_perms_fop && params.multi_hypothesis`, `ct_bootstrap.nf:54`): el
+**Con FOP** (`params.multi_hypothesis`): el
 pool de remuestreo es `fop_labelings.tab` (etiquetas `<base>~H<m>`) y los aciertos se
 **colapsan a unidades de ciclo base** (`collapse_fop_hits_by_base`): un ciclo base cuenta
 sii **cualquiera** de sus `~H<m>` (hipótesis alternativas de ese ciclo nulo) llama un CAAS

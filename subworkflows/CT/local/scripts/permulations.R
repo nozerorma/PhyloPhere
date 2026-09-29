@@ -56,8 +56,8 @@ args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
        "[chunk_size] [include_b0] [pss_top_pct] [max_tries] [pheno_col] ",
-       "[n_col] [c_col] [resample_use_n] [trait_type] [fop_null] [max_fop] ",
-       "[n_cpus] [seed] [match_fop]")
+       "[n_col] [c_col] [resample_use_n] [trait_type] [multi_hypothesis] [max_fop] ",
+       "[n_cpus] [seed]")
 }
 
 arg_or <- function(i, default, cast = as.character) {
@@ -79,6 +79,8 @@ n_col              <- arg_or(12, "")   # denominator column (e.g. adult_necropsy
 c_col              <- arg_or(13, "")   # numerator column   (e.g. malignant_count)
 resample_use_n     <- tolower(arg_or(14, "true")) %in% c("1", "true", "t", "yes", "y")
 trait_type         <- tolower(arg_or(15, "auto"))
+# The null mirrors the observed design: with multi_hypothesis every accepted cycle also gets a FOP
+# hypothesis harvest (fop_labelings.tab / fop_pairs.tsv) so it is pooled like the observed data.
 fop_null           <- tolower(arg_or(16, "false")) %in% c("1", "true", "t", "yes", "y")
 max_fop            <- arg_or(17, 100L, as.integer)
 
@@ -110,9 +112,9 @@ if (fop_null && is.na(seed_arg)) {
   stop("permulations.R: the FOP harvest needs the pipeline seed (argument 19, params.seed).")
 }
 
-# match_fop: keep only null cycles whose FOP harvest yields at least as many
-# hypotheses as the observed harvest (see "Design matching" below).
-match_fop <- tolower(arg_or(20, "true")) %in% c("1", "true", "t", "yes", "y")
+# Design matching: keep only null cycles whose FOP harvest yields at least as many
+# hypotheses as the observed harvest (see "Design matching" below). Always on.
+match_fop <- TRUE
 
 if (!selection.strategy %in% c("auto", "best_model", "ou", "bm")) {
   log_msg("WARN", sprintf("Unknown strategy '%s', defaulting to 'auto'", selection.strategy))
@@ -158,7 +160,7 @@ log_msg("INFO", sprintf("Observed independent pair count from config V3: N_pairs
 # actually produced (<= max_fop), read from contrast_hypotheses_pairs.tsv next to
 # the discovery config. It is the design size every null cycle is matched to.
 n_hyp_obs <- 0L
-if (fop_null && match_fop) {
+if (fop_null) {
   .cfg_dir <- if (dir.exists(config.file)) config.file else dirname(config.file)
   .hp_file <- file.path(.cfg_dir, "contrast_hypotheses_pairs.tsv")
   if (file.exists(.hp_file)) {
@@ -168,7 +170,7 @@ if (fop_null && match_fop) {
   if (n_hyp_obs > 0L) {
     log_msg("INFO", sprintf("Observed FOP harvest: %d hypotheses; null cycles must reach >= %d", n_hyp_obs, n_hyp_obs))
   } else {
-    log_msg("WARN", "match_fop requested but no observed contrast_hypotheses_pairs.tsv next to the config; null cycles are not design-matched")
+    log_msg("WARN", "no observed contrast_hypotheses_pairs.tsv next to the config; null cycles are not design-matched")
   }
 }
 match_fop <- fop_null && match_fop && n_hyp_obs > 0L

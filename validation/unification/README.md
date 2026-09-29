@@ -24,10 +24,12 @@ python validation/unification/compare_b0.py --run <results_dir> [--out report.js
 | Fixture | A discovery | B survivors | C asr_path_score | D CAAS_score | E gene score |
 |---|---|---|---|---|---|
 | PEPC, FOP (100 hyp, 1 gene) | pass | pass | pass (max delta 1.1e-16) | pass (1.1e-16) | pass |
-| PEPC, plain (`caas_perms_fop=false`) | pass (H1 only) | fail | fail | fail | fail |
+| PEPC, plain null (H1 only) against the FOP-pooled observed | pass (H1 only) | fail | fail | fail | fail |
 | Cancer toy, FOP (12 hyp, 28 genes, batched) | pass | pass | pass (1.1e-16) | pass (1.2e-16) | pass |
 
 - PEPC plain fails by design: the observed score pools 100 hypotheses, the plain null replays H1 only.
+  That configuration (`caas_perms_fop=false` with `multi_hypothesis=true`) no longer exists: the null now
+  mirrors the observed design, following `multi_hypothesis`; the row is kept as the historical baseline.
 - What the fixtures do not exercise: gene removal (no gene was removed on either side; M6),
   `remove_caas_clusters=false` (M7), and, if the alignments have no missing data, `miss_pair` (M1).
   Clusters are exercised (23 positions, one gene, identical on both sides).

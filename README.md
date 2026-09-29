@@ -383,7 +383,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `perms_cycles` | `"100"` | Number of resampling cycles used to evaluate significance. |
 | `caas_full_perms` | `1000` | Number of full-pool permulations generated for the CAAS FCS null. |
 | `max_fop` | `100` | Maximum FOP alternative hypotheses (`H1..Hn`) harvested per contrast, applied identically to the observed selection and the permulation null. |
-| `caas_perms_fop` | `false` | Mirror the FOP multi-hypothesis harvest inside the CAAS permulation null so `p.perm` calibrates the domain-pooled score. Requires `multi_hypothesis = true`. |
 | `fgsize` / `bgsize` | `"6"` / `"6"` | Foreground and background species sizes when using random strategy. |
 | `traitvalues` | `""` | Path to trait values file when using Brownian Motion (`BM`) permutation strategy. |
 
