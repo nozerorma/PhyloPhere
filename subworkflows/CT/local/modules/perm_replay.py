@@ -170,10 +170,15 @@ class VectorizedPermReplay:
     # -- per-position encoding ------------------------------------------------
 
     def _position_symbols(self, pos_dict):
-        """Return (symbols, gapvec, missvec) over the species universe for a position."""
+        """Return (symbols, gapvec, missvec, ndvec) over the species universe for a position.
+
+        ndvec flags species carrying any symbol other than '-' (ambiguity codes count): the
+        scalar path registers a trait's fg/bg side (trait2aas_fg/bg) only through those.
+        """
         symbols = [None] * self.n_sp
         gapvec = np.zeros(self.n_sp, dtype=np.float32)
         missvec = np.zeros(self.n_sp, dtype=np.float32)
+        ndvec = np.zeros(self.n_sp, dtype=np.float32)
 
         present = np.zeros(self.n_sp, dtype=bool)
         for sp, val in pos_dict.items():
@@ -182,13 +187,15 @@ class VectorizedPermReplay:
                 continue
             present[j] = True
             aa = val.split("@")[0].upper()
+            if aa != "-":
+                ndvec[j] = 1.0
             if aa in _GAP_SYMBOLS:
                 gapvec[j] = 1.0
             else:
                 symbols[j] = aa
 
         missvec[~present] = 1.0
-        return symbols, gapvec, missvec
+        return symbols, gapvec, missvec, ndvec
 
     @staticmethod
     def _group_block(symbols, scheme_dict):
@@ -238,6 +245,14 @@ class VectorizedPermReplay:
         sbg = set(self.bg_pair[b][on & (self.bg_pair[b] > 0)].tolist())
         return bool(sfg and sbg and sfg != sbg)
 
+    def _pair_ok(self, b, pi, gap_check, miss_check, gapmat, missmat, gfg, gbg, mfg, mbg, li):
+        """miss_pair verdict for labeling b at position pi: False = the scalar path discards it."""
+        if gap_check and gfg[li] > 0 and gbg[li] > 0 and self._pair_sets_differ(b, gapmat[:, pi]):
+            return False
+        if miss_check and mfg[li] > 0 and mbg[li] > 0 and self._pair_sets_differ(b, missmat[:, pi]):
+            return False
+        return True
+
     def _default_b_chunk(self, total_groups):
         bytes_per_row = max(1, 2 * (self.n_sp + total_groups) * 4)
         budget_bytes = _CHUNK_MEM_BUDGET_MB * 1024 * 1024
@@ -249,12 +264,18 @@ class VectorizedPermReplay:
               maxgaps_fg, maxgaps_bg, maxgaps_all,
               maxmiss_fg, maxmiss_bg, maxmiss_all,
               max_conserved, admitted_patterns, caap_mode,
-              b_chunk=None, collect_hits=False, miss_pair=False):
+              b_chunk=None, collect_hits=False, miss_pair=False,
+              background_sink=None, background_base="b_0"):
         """Count CAAS/CAAP hits per (position[, scheme]) across all B labelings.
 
         miss_pair mirrors the scalar path (caas_id.fetch_caas / disco.py): when the fg and bg
         thresholds are equal, a labeling whose fg and bg sides both have gapped (or missing)
         species, but in different pairs, is discarded.
+
+        background_sink (a set) collects the positions 'tested' by the labelings whose base cycle is
+        `background_base`, as the scalar path's background.output does: a position is tested when at
+        least one such labeling passes the gap/missing thresholds, has a symbol other than '-' on both
+        sides and survives miss_pair, whether or not it yields a CAAS.
         """
         adm = _admitted_pattern_flags(admitted_patterns)
         g_fg = _threshold(maxgaps_fg)
@@ -278,6 +299,7 @@ class VectorizedPermReplay:
         n_pos = len(positions_with_schemes)
         gapmat = np.zeros((self.n_sp, n_pos), dtype=np.float32)
         missmat = np.zeros((self.n_sp, n_pos), dtype=np.float32)
+        ndmat = np.zeros((self.n_sp, n_pos), dtype=np.float32)
         position_names = []
 
         jobs = []
@@ -285,9 +307,10 @@ class VectorizedPermReplay:
         col_cursor = 0
 
         for pi, (pos_dict, schemes_set) in enumerate(positions_with_schemes):
-            symbols, gapvec, missvec = self._position_symbols(pos_dict)
+            symbols, gapvec, missvec, ndvec = self._position_symbols(pos_dict)
             gapmat[:, pi] = gapvec
             missmat[:, pi] = missvec
+            ndmat[:, pi] = ndvec
 
             pos_num = None
             for v in pos_dict.values():
@@ -327,6 +350,11 @@ class VectorizedPermReplay:
         if b_chunk is None:
             b_chunk = self._default_b_chunk(col_cursor)
 
+        track = None
+        tested_pi = set()
+        if background_sink is not None:
+            track = np.array([_fop_base_cycle(t) == background_base for t in self.alltraits], dtype=bool)
+
         for start in range(0, self.B, b_chunk):
             end = min(start + b_chunk, self.B)
             Fc = self.F[start:end]
@@ -339,6 +367,8 @@ class VectorizedPermReplay:
             gaps_bg = Bc @ gapmat
             miss_fg = Fc @ missmat
             miss_bg = Bc @ missmat
+            has_fg = (Fc @ ndmat) > 0
+            has_bg = (Bc @ ndmat) > 0
 
             for (pi, sname, cs, ce) in jobs:
                 C_fg = C_fg_all[:, cs:ce]
@@ -361,6 +391,13 @@ class VectorizedPermReplay:
                     valid &= mfg <= m_fg
                 if m_bg is not None:
                     valid &= mbg <= m_bg
+
+                if track is not None and pi not in tested_pi:
+                    for li in np.nonzero(valid & has_fg[:, pi] & has_bg[:, pi] & track[start:end])[0]:
+                        if self._pair_ok(start + int(li), pi, gap_pair_check, miss_pair_check,
+                                         gapmat, missmat, gfg, gbg, mfg, mbg, li):
+                            tested_pi.add(pi)
+                            break
 
                 if ce == cs:
                     continue
@@ -397,15 +434,10 @@ class VectorizedPermReplay:
 
                 hit = valid & caas & admitted
                 if gap_pair_check or miss_pair_check:
-                    # Sparse: only labelings that are already hits and have the tested
-                    # condition on both sides can be discarded here.
+                    # Sparse: only labelings that are already hits can be discarded here.
                     for li in np.nonzero(hit)[0]:
-                        b = start + int(li)
-                        if gap_pair_check and gfg[li] > 0 and gbg[li] > 0 and \
-                                self._pair_sets_differ(b, gapmat[:, pi]):
-                            hit[li] = False
-                        elif miss_pair_check and mfg[li] > 0 and mbg[li] > 0 and \
-                                self._pair_sets_differ(b, missmat[:, pi]):
+                        if not self._pair_ok(start + int(li), pi, gap_pair_check, miss_pair_check,
+                                             gapmat, missmat, gfg, gbg, mfg, mbg, li):
                             hit[li] = False
                 count = int(hit.sum())
 
@@ -415,6 +447,9 @@ class VectorizedPermReplay:
                 if collect_hits and count:
                     local_idx = np.nonzero(hit)[0]
                     hits[key].extend(self.alltraits[start + int(i)] for i in local_idx)
+
+        if background_sink is not None:
+            background_sink.update(position_names[pi].split("@", 1)[1] for pi in tested_pi)
 
         return (results, hits) if collect_hits else results
 
@@ -439,7 +474,7 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions_with_sch
                                 max_fg_gaps, max_bg_gaps, max_overall_gaps,
                                 max_fg_miss, max_bg_miss, max_overall_miss,
                                 max_conserved, admitted_patterns, caap_mode,
-                                collect_hits=False, miss_pair=False):
+                                collect_hits=False, miss_pair=False, background_sink=None):
     """Run the vectorized kernel for one resample multiconfig.
 
     Returns the same per-(position[, scheme]) count mapping the scalar loop
@@ -457,6 +492,7 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions_with_sch
         caap_mode=caap_mode,
         collect_hits=collect_hits,
         miss_pair=miss_pair,
+        background_sink=background_sink,
     )
 
 
@@ -694,7 +730,7 @@ def parse_discovery_positions(discovery_file, genename):
 # FUNCTION run_perm_replay_on_alignment()
 # Launches perm-replay in several lines. Returns a dictionary gene@position --> pvalue
 
-def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None, fop_mode=False):
+def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_gaps, max_fg_miss, max_bg_miss, max_overall_miss, the_admitted_patterns, output_file, miss_pair=False, max_conserved=0, discovery_file=None, progress_log=None, caap_mode=False, export_groups=None, export_perm_discovery=None, fop_mode=False, export_b0_background=None):
     """
     Run perm-replay on a single alignment.
 
@@ -734,6 +770,9 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
         elif isinstance(resampled_traits, str) and os.path.isfile(resampled_traits):
             print(f"[FOP] base-cycle collapse over {resampled_traits}")
             resampled_traits = simtrait_revive(resampled_traits)
+
+    # positions tested by the b_0 labelings (see VectorizedPermReplay.count), one line per gene
+    bg_sink = set() if export_b0_background else None
 
     groups_handle = None
     if export_groups:
@@ -830,7 +869,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                         max_fg_gaps, max_bg_gaps, max_overall_gaps,
                         max_fg_miss, max_bg_miss, max_overall_miss,
                         max_conserved, the_admitted_patterns, caap_mode,
-                        collect_hits=True, miss_pair=miss_pair,
+                        collect_hits=True, miss_pair=miss_pair, background_sink=bg_sink,
                     )
                     if perm_discovery_handle is not None:
                         _emit_perm_discovery_rows(
@@ -845,7 +884,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                         max_fg_gaps, max_bg_gaps, max_overall_gaps,
                         max_fg_miss, max_bg_miss, max_overall_miss,
                         max_conserved, the_admitted_patterns, caap_mode,
-                        miss_pair=miss_pair,
+                        miss_pair=miss_pair, background_sink=bg_sink,
                     )
                 for key, count in file_counts.items():
                     position_counts[key] = position_counts.get(key, 0) + count
@@ -933,7 +972,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                     max_fg_gaps, max_bg_gaps, max_overall_gaps,
                     max_fg_miss, max_bg_miss, max_overall_miss,
                     max_conserved, the_admitted_patterns, caap_mode,
-                    collect_hits=True, miss_pair=miss_pair,
+                    collect_hits=True, miss_pair=miss_pair, background_sink=bg_sink,
                 )
                 if perm_discovery_handle is not None:
                     _emit_perm_discovery_rows(
@@ -948,7 +987,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                     max_fg_gaps, max_bg_gaps, max_overall_gaps,
                     max_fg_miss, max_bg_miss, max_overall_miss,
                     max_conserved, the_admitted_patterns, caap_mode,
-                    miss_pair=miss_pair,
+                    miss_pair=miss_pair, background_sink=bg_sink,
                 )
             if fop_mode:
                 # Gap A: collapse per-labeling hits to base-cycle units.
@@ -973,6 +1012,11 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
             groups_handle.close()
         if perm_discovery_handle:
             perm_discovery_handle.close()
+
+    if export_b0_background:
+        tested = ",".join(sorted(bg_sink, key=int)) if bg_sink else "NULL"
+        with open(export_b0_background, "w") as bkg:
+            bkg.write(f"{the_genename}\t{tested}\n")
 
 # FUNCTION pval()
 # Returns a dictionary with the pvalue

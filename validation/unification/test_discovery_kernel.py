@@ -28,7 +28,10 @@ def _run(cmd, cwd):
 
 
 def _discover(tmp, seqs, thresholds, miss_pair):
-    """-> (scalar rows, kernel rows), each a set of (caap_group, position, caas)."""
+    """-> (scalar rows, kernel rows, scalar background, kernel background).
+
+    Rows are sets of (caap_group, position, caas); a background is the set of positions tested.
+    """
     _fasta(tmp / "G1.fasta", seqs)
     (tmp / "traits.tab").write_text(TRAITS)
     (tmp / "b0.tab").write_text(f"b_0\t{FG}\t{BG}\n")
@@ -38,12 +41,17 @@ def _discover(tmp, seqs, thresholds, miss_pair):
     _run([str(CT), "discovery", *common, "-o", "scalar.out", "--background_output", "scalar.bg"], tmp)
     _run([str(CT), "perm-replay", "-a", "G1.fasta", "-t", "traits.tab", "-s", "b0.tab", "-o", "kernel.out",
           "--fmt", "fasta", "--patterns", "1,2,3", "--caap_mode", "--max_conserved", "1", *thresholds, *flag,
-          "--export_perm_discovery", "kernel.disc"], tmp)
+          "--export_perm_discovery", "kernel.disc", "--export_b0_background", "kernel.bg"], tmp)
     key = ["caap_group", "position", "caas"]
     # a run that keeps no position writes no output file: that is the empty set
     rows = lambda f: set(map(tuple, pd.read_csv(tmp / f, sep="\t")[key].astype(str).itertuples(index=False, name=None))) \
         if (tmp / f).is_file() else set()
-    return rows("scalar.out"), rows("kernel.disc")
+    def background(f):
+        gene, tested = (tmp / f).read_text().rstrip("\n").split("\t")
+        assert gene == "G1"
+        return set() if tested == "NULL" else {int(x) for x in tested.split(",")}
+
+    return rows("scalar.out"), rows("kernel.disc"), background("scalar.bg"), background("kernel.bg")
 
 
 def _positions(rows):
@@ -75,3 +83,7 @@ def test_kernel_matches_scalar(tmp_path, name, aln, thr, dropped):
     # non-vacuous: miss_pair changes the scalar result, and only where expected
     assert without[0] != with_mp[0]
     assert dropped not in _positions(with_mp[0]) and dropped in _positions(without[0])
+    # background.output equivalent: the tested positions match too, and miss_pair also shrinks them
+    assert with_mp[2] == with_mp[3], f"{name}: kernel background != scalar with miss_pair"
+    assert without[2] == without[3], f"{name}: kernel background != scalar without miss_pair"
+    assert with_mp[2] != without[2]

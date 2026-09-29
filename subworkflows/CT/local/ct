@@ -372,6 +372,10 @@ if tool.lower() == "perm-replay":
     parser.add_option("--export_perm_discovery", dest="export_perm_discovery",
                     help="Path to output file for exporting the per-cycle permuted discovery results (DEBUG). Default = disabled.", default = None)
 
+    ###     3.3.11b b_0 background (positions tested by the real labeling)
+    parser.add_option("--export_b0_background", dest="export_b0_background",
+                    help="Path to output file for the positions tested by the b_0 labeling(s): '<gene>\\t<pos,pos,...|NULL>', same as discovery's background output. Default = disabled.", default = None)
+
     ###     3.3.12 FOP multi-hypothesis mode (Gap A)
     parser.add_option("--fop", dest="fop_mode", action="store_true",
                     help="FOP multi-hypothesis mode. Use fop_labelings.tab (fanned '<base>~H<m>' labelings, \
@@ -482,7 +486,8 @@ if tool.lower() == "perm-replay":
                     caap_mode = options.caap_mode,
                     export_groups = options.export_groups,
                     export_perm_discovery = options.export_perm_discovery,
-                    fop_mode = options.fop_mode
+                    fop_mode = options.fop_mode,
+                    export_b0_background = options.export_b0_background
                     )
 
     ###     3.8.4 Final output
