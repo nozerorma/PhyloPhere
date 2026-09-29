@@ -77,3 +77,19 @@ Position score, side collapse and gene score are defined once and called by the 
   toy, abs 1e-12). On the stored toy `b_0` detail, pass B outputs equal the previous ones (delta 0) except 10
   cells that went from 0 to NA (8 top, 2 bottom). The position score differs from R's `mean()` in the last bit
   on 46 of 165 rows (1.2e-16); it disappears once the observed consumes these scores.
+
+## Observed scores (`observed_core_scores.py`, `scoring_compute.R`)
+
+The observed position and gene scores are the `b_0` slice of the same functions as the null.
+`SCORING_COMPUTE` runs `observed_core_scores.py` (stdlib + `core/scores.py`) on `filtered_discovery.tsv`, then
+`scoring_compute.R` reads `core_positions.tsv` / `core_genes.tsv` and integrates them (FADE, RER, accumulation,
+`p.emp`, BH, SAM). R no longer computes `mean(caas_row)` or `size_adj_max`.
+
+- `p.emp` and SAM count null values within `TIE_TOL` of the observed score as ties (`>=`); the constant is defined in
+  `core/scores.py` and repeated in `scoring_compute.R` (a test keeps them equal).
+- The observed chain reads floats exactly (`float_precision="round_trip"` in `prepare_postproc_input.py`,
+  `filter_caas_genes.py`); the pandas default alters ~1/3 of doubles by an ulp. On the local toy, positions
+  differing from `b_0` in the last bit went from 50 to 16 of 165. The remainder appears only in rows pooled over
+  several hypotheses (`n_hypotheses` >= 3); its origin (PSS weights of the null's `b_0`) was not traced.
+- Checked: `scoring_compute.R` on the toy (50 genes) gives position and gene tables equal to the previous script
+  (Δ <= 1.1e-16, `p.emp` and `p.adj_*` unchanged). Not checked with a null that has ties at scale (toy 1000 genes).

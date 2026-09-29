@@ -51,6 +51,8 @@ rer_file             <- parse_arg("--rer")
 accum_dir            <- parse_arg("--accum_dir")
 hyp_pairs_file       <- parse_arg("--hypotheses_pairs")  # contrast_hypotheses_pairs.tsv (FOP); NO_HYP_PAIRS otherwise
 caas_perms_file      <- parse_arg("--caas_perms")  # caas_perms.rds (CAAS permulation-excess null); NO_FILE otherwise
+core_positions_file  <- parse_arg("--core_positions")  # observed_core_scores.py: CAAS_score per (Gene, Position, side)
+core_genes_file      <- parse_arg("--core_genes")      # observed_core_scores.py: size-adjusted gene CAAS scores
 caas_pos_cycle_caas_file <- parse_arg("--caas_pos_cycle_caas")  # perm_pos_cycle_caas.tsv.gz (p.emp numerator/denominator); NO_FILE otherwise
 gene_perm_pooled_raw <- parse_arg("--gene_perm_pooled", "false")
 # Gene-level permulation significance threshold for flag_caas_significant (fcs_stats.tsv)
@@ -79,36 +81,15 @@ file_exists <- function(f) {
   !is.null(f) && f != "" && !grepl("^NO_", basename(f)) && file.exists(f)
 }
 
-# ── Helper: size-adjusted maximum (0–1 scale) ────────────────────────────────
-# max(x), like any upper quantile, grows with length(x) as a pure order-
-# statistic artifact: more draws from the same distribution push the observed
-# extremum further into the tail. Two genes with identical per-position evidence
-# therefore score differently if one merely has more detected positions
-# (measured on real output: Spearman(n_positions, raw max) = +0.47; see
-# section 4a for how gene_caas_score uses this).
+# Position and gene CAAS scores are computed once, by core.scores (observed_core_scores.py for
+# this run, gene_wrapper.py for the permulation null), and read back here. This script
+# integrates them with FADE / RER / accumulation and tests the observed position score
+# against the null.
 #
-# size_adj_max compares a gene's observed max against the distribution of the
-# max of n draws from the genome-wide position pool, n being that gene's own
-# position count. For iid draws that reference distribution is exact and needs
-# no resampling, since P(max of n <= m) = F(m)^n with F the pool ECDF:
-#
-#     size_adj_max(x) = F(max(x)) ^ length(x)
-#
-# Two properties matter downstream:
-#   * Monotone in max(x) at fixed n, so genes with the SAME n keep their exact
-#     relative order - the transform only makes different-n genes comparable,
-#     it does not reshuffle within a size class.
-#   * n-neutral: Spearman(n_positions, .) = -0.09 on real output.
-# Validated against a 4000-draw resampled reference (Spearman 0.995, top-1%
-# overlap 55/58); the closed form is used because it is exact and seed-free.
-#
-# pool_sorted MUST be sorted ascending - findInterval then counts pool <= m in
-# O(log N) rather than O(N) per gene.
-size_adj_max <- function(x, pool_sorted) {
-  x <- x[!is.na(x)]
-  if (length(x) == 0 || length(pool_sorted) == 0) return(NA_real_)
-  (findInterval(max(x), pool_sorted) / length(pool_sorted)) ^ length(x)
-}
+# Ties: position scores are means of a few values, so scores that are equal in exact
+# arithmetic can differ by rounding noise. Comparisons against the null count values within
+# TIE_TOL as ties (same constant as core.scores.TIE_TOL).
+TIE_TOL <- 1e-12
 
 safe_cor <- function(x, y, method = "pearson") {
   ok <- complete.cases(x, y)
@@ -124,6 +105,8 @@ cat("═════════════════════════
 # 1. LOAD POSTPROC DATA (mandatory)
 # =============================================================================
 stopifnot(file_exists(postproc_file))
+stopifnot("--core_positions and --core_genes (observed_core_scores.py) are required" =
+            file_exists(core_positions_file) && file_exists(core_genes_file))
 cat("Loading postproc:", postproc_file, "\n")
 df <- read_tsv(postproc_file, show_col_types = FALSE)
 # filtered_discovery.tsv uses disambiguation's canonical lowercase concept names
@@ -216,13 +199,8 @@ df$derived_agreement <- suppressWarnings(as.numeric(df$derived_agreement))
 
 
 # ── 2f. Per-row CAAS score ────────────────────────────────────────────────────
-# T1 decision E: caas_row = asr_score (the unified ASR path score, section
-# above). The phen_score (permulation percent-rank of recovery_boot) factor is
-# dropped from the product on both the observed and null sides, and (Phase B of
-# the BOOTSTRAP retirement) is no longer computed at all now that recovery_boot
-# has no producing arm left.
-df <- df %>%
-  mutate(caas_row = asr_score)
+# A row's CAAS score is its asr_path_score (the unified ASR path score computed upstream);
+# the position score aggregating rows is computed by core.scores (section 2g).
 
 # ── 2g. Aggregate to Gene×Position ───────────────────────────────────────────
 # Position to integer here (the old §2f-bis join used to do this as a side
@@ -243,7 +221,7 @@ df <- df %>% arrange(desc(scheme_priority))
 pos_scores <- df %>%
   group_by(across(all_of(.pos_grp_keys))) %>%
   summarise(
-    CAAS_score         = mean(caas_row, na.rm = TRUE),
+    CAAS_score         = NA_real_,  # filled from the core table below
     # FOP descriptors: §2b already pooled H1..Hn, so these are per-position
     # columns now, not a re-count over rows. Recurrence stays descriptor-only —
     # it never multiplies CAAS_score.
@@ -273,20 +251,26 @@ pos_scores <- df %>%
     .groups = "drop"
   )
 
+# CAAS_score = mean of asr_path_score over the schemes that scored the (Gene, Position, side),
+# computed by core.scores.
+core_pos <- read_tsv(core_positions_file, show_col_types = FALSE,
+                     col_types = cols(Gene = col_character(), Position = col_integer(),
+                                      side = col_character(), CAAS_score = col_double()))
+.pk  <- function(g, p, sd) paste(g, p, sd, sep = "\r")
+.hit <- match(.pk(pos_scores$Gene, pos_scores$Position, pos_scores$side),
+              .pk(core_pos$Gene, core_pos$Position, core_pos$side))
+if (anyNA(.hit) || nrow(core_pos) != nrow(pos_scores)) {
+  stop(sprintf("core positions (%d) and scored positions (%d) disagree: observed_core_scores.py and this script read different rows",
+               nrow(core_pos), nrow(pos_scores)))
+}
+pos_scores$CAAS_score <- core_pos$CAAS_score[.hit]
+rm(core_pos, .hit)
+
 # `side` (top / bottom / none) is the authoritative aggregation key and the sole
 # direction descriptor downstream -- T4b retired change_top/change_bottom/change_side.
-# Per-side diagnostic for the reports (SC5): the mean asr_path_score for this
-# side -- a legitimate per-side diagnostic (the collapse warned against in the
-# summarise note above is the position-level one that hides scheme disagreement).
-# (Formerly re-emitted under a separate `core` column, bit-identical to
-# asr_path_score at every stage upstream -- retired as pure duplication.)
-.side_diag <- df %>%
-  group_by(across(all_of(.pos_grp_keys))) %>%
-  summarise(
-    asr_path_score = mean(suppressWarnings(as.numeric(asr_path_score)), na.rm = TRUE),
-    .groups = "drop"
-  )
-pos_scores <- pos_scores %>% left_join(.side_diag, by = .pos_grp_keys)
+# Per-side diagnostic for the reports (SC5): the mean asr_path_score of this side, which is
+# CAAS_score itself (caas_row is the row's asr_path_score).
+pos_scores <- pos_scores %>% mutate(asr_path_score = CAAS_score)
 
 cat(sprintf("  %d unique positions after aggregation\n", nrow(pos_scores)))
 
@@ -303,9 +287,8 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 # The pooled statistic is the max-over-sides "all" axis -- identical to
 # .pos_undirected (§4a) on the observed side and _build_cycle_score_pools'
 # pc["all"] on the null. caas_sum/n_schemes is the null's per-side §2g mean;
-# dividing here (not in Python) keeps ONE implementation of that mean, and the
-# emitter accumulated caas_sum in scheme-priority order so it matches
-# mean(caas_row) bit for bit (§6c -- no guard needed).
+# the null's scheme-mean is caas_sum / n_schemes, the same value core.scores gives the
+# observed position. Values within TIE_TOL of the observed score count as ties (>=).
 pos_scores$p.emp <- NA_real_
 has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
 # caas_perms.rds is loaded here when present (its columns are the cycle roster
@@ -356,7 +339,7 @@ if (has_caas_pos_cycle_caas) {
   .k_emp <- obs_max %>%
     left_join(cyc_pooled, by = c("Gene", "Position")) %>%
     group_by(Gene, Position) %>%
-    summarise(k_emp    = sum(caas_max >= .obs, na.rm = TRUE),
+    summarise(k_emp    = sum(caas_max >= .obs - TIE_TOL, na.rm = TRUE),
               null_hit = any(!is.na(caas_max)),
               .groups  = "drop") %>%
     mutate(p.emp = (k_emp + 1) / (N_emp + 1))
@@ -441,8 +424,8 @@ if (has_caas_pos_cycle_caas) {
     .s_d <- .s[.ord]
     # null pairs with score >= t, per cycle; observed positions with score >= t
     .exp_null <- (length(.null_sorted) -
-                    findInterval(.s_d, .null_sorted, left.open = TRUE)) / N_emp
-    .n_obs    <- vapply(.s_d, function(t) sum(.s >= t), numeric(1))
+                    findInterval(.s_d - TIE_TOL, .null_sorted, left.open = TRUE)) / N_emp
+    .n_obs    <- vapply(.s_d, function(t) sum(.s >= t - TIE_TOL), numeric(1))
     .fdr      <- pmin(1, .exp_null / .n_obs)
     .q        <- rev(cummin(rev(.fdr)))
     .sam$p.adj_sam <- NA_real_
@@ -576,51 +559,33 @@ cat("\n─── Gene-level scoring ──────────────�
 #   gene_caas_score_top - positions with side == "top"
 #   gene_caas_score_bottom - positions with side == "bottom"
 #
-# Aggregation is size_adj_max (helper at the top of this file): a gene's best
-# position, calibrated for how many positions the gene had a chance to draw
-# from. Any fixed quantile of a gene's positions (including the 90th) grows
-# with the gene's own position count at equal per-position evidence, since a
-# higher quantile from more draws pushes further into the tail of the same
-# distribution; size_adj_max removes that by comparing the observed max against
-# the distribution of the max of n draws from the genome-wide pool, n being the
-# gene's own position count.
-#
-# Reference pools are direction-matched: a gene's top-direction positions are
-# ranked against the genome-wide pool of top-direction positions, so each score
-# is calibrated against the distribution it is actually drawn from.
-# T3-doc §12: two lists kept end to end. `.pool_top` / `.pool_bottom` are PURE
-# by side -- top never sees a bottom score. `.pool_all` and the undirected
-# gene_caas_score dedup a "both" position to ONE entry = its best side (max over
-# the two side rows), so it is not double-counted; n for size_adj_max is
-# n_distinct(Position).
+# The scores (size_adj_max, direction-matched reference pools, a "both" position counted
+# once in the undirected score) come from core.scores via observed_core_scores.py; NA when
+# the gene has no scored position in the direction. n_positions* are descriptors.
+core_gene <- read_tsv(core_genes_file, show_col_types = FALSE,
+                      col_types = cols(Gene = col_character(), .default = col_double()))
+.core_gene <- function(col, g) core_gene[[col]][match(g, core_gene$Gene)]
 .pos_undirected <- pos_scores %>%
   filter(!is.na(CAAS_score)) %>%
   group_by(Gene, Position) %>%
   summarise(CAAS_score = max(CAAS_score), .groups = "drop")
-.pool_all    <- sort(.pos_undirected$CAAS_score)
-.pool_top    <- sort(pos_scores$CAAS_score[pos_scores$side == "top"    & !is.na(pos_scores$CAAS_score)])
-.pool_bottom <- sort(pos_scores$CAAS_score[pos_scores$side == "bottom" & !is.na(pos_scores$CAAS_score)])
 cat(sprintf("  size-adjust reference pools: all=%d, top=%d, bottom=%d positions\n",
-            length(.pool_all), length(.pool_top), length(.pool_bottom)))
+            nrow(.pos_undirected),
+            sum(pos_scores$side == "top"    & !is.na(pos_scores$CAAS_score)),
+            sum(pos_scores$side == "bottom" & !is.na(pos_scores$CAAS_score))))
 
 .gene_undirected <- .pos_undirected %>%
   group_by(Gene) %>%
   summarise(
-    gene_caas_score = size_adj_max(CAAS_score, .pool_all),
+    gene_caas_score = .core_gene("gene_caas_score", dplyr::first(Gene)),
     n_positions     = dplyr::n_distinct(Position),
     .groups = "drop"
   )
 gene_caas <- pos_scores %>%
   group_by(Gene) %>%
   summarise(
-    gene_caas_score_top_all    = {
-      vals <- CAAS_score[side == "top" & !is.na(CAAS_score)]
-      if (length(vals) > 0) size_adj_max(vals, .pool_top) else NA_real_
-    },
-    gene_caas_score_bottom_all = {
-      vals <- CAAS_score[side == "bottom" & !is.na(CAAS_score)]
-      if (length(vals) > 0) size_adj_max(vals, .pool_bottom) else NA_real_
-    },
+    gene_caas_score_top_all    = .core_gene("gene_caas_score_top_all",    dplyr::first(Gene)),
+    gene_caas_score_bottom_all = .core_gene("gene_caas_score_bottom_all", dplyr::first(Gene)),
     n_positions_top    = sum(side == "top",    na.rm = TRUE),
     n_positions_bottom = sum(side == "bottom", na.rm = TRUE),
     max_hypotheses     = if ("n_hypotheses" %in% names(pos_scores)) max(n_hypotheses, na.rm = TRUE) else NA_integer_,
@@ -1113,44 +1078,6 @@ gene_out <- gene_scores %>%
 
 write_tsv(gene_out, "gene_scores.tsv")
 cat(sprintf("  gene_scores.tsv: %d rows\n", nrow(gene_out)))
-
-# ── 4d. Numeric invariant guard (cross-tier break-point #1/#11) ───────────────
-# The CAAS permulation null aggregates each cycle's per-position scores with
-# gene_wrapper.py `_size_adj_max_null`, which must stay bit-compatible with the
-# observed `size_adj_max` above (F(max)^n amplifies ~1e-16 accumulation drift).
-# There is no shared implementation, so re-derive gene_caas_score for a handful
-# of genes straight from the written position_scores rows + the direction pools
-# and assert an exact match. A failure here means the observed formula moved and
-# the null must be rebuilt (or the null's own recompute will silently disagree).
-local({
-  chk <- gene_caas %>% dplyr::filter(!is.na(gene_caas_score))
-  if (nrow(chk) == 0) return(invisible())
-  probe <- chk$Gene[unique(round(seq(1, nrow(chk), length.out = min(25L, nrow(chk)))))]
-  worst <- 0
-  for (g in probe) {
-    # gene_caas_score is size_adj_max over ONE value per Position (its best
-    # side), n = n_distinct(Position) -- must match .gene_undirected + the
-    # null's max-deduped "all" pool (gene_wrapper _build_cycle_score_pools).
-    v <- pos_out %>%
-      dplyr::filter(Gene == g, !is.na(CAAS_score)) %>%
-      dplyr::group_by(Position) %>%
-      dplyr::summarise(s = max(CAAS_score), .groups = "drop") %>%
-      dplyr::pull(s)
-    re <- size_adj_max(v, .pool_all)
-    ob <- chk$gene_caas_score[chk$Gene == g]
-    if (is.finite(re) && is.finite(ob)) worst <- max(worst, abs(re - ob))
-  }
-  if (worst > 1e-6) {
-    stop(sprintf(paste0(
-      "size_adj_max invariant violated: gene_scores.tsv vs. a fresh recompute ",
-      "from position_scores disagree by %.3g (> 1e-6). The observed gene CAAS ",
-      "aggregator changed - rebuild the permulation null (scoring_caas_perms.R / ",
-      "reaggregate_perm_scores.py) so `_size_adj_max_null` matches, and bump the ",
-      "gene_stat stamp if the formula (not just an impl detail) changed."), worst))
-  }
-  cat(sprintf("  size_adj_max invariant guard: OK (%d genes, max|delta|=%.2g)\n",
-              length(probe), worst))
-})
 
 # ── FCS stats table (consumed by FCS_general.Rmd) ─────────────────────────────
 # Generic contract: gene + score_<ranking> (zero-floored downstream over the

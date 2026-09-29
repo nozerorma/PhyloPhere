@@ -71,6 +71,7 @@ process SCORING_COMPUTE {
 
     script:
     def local_dir       = "${baseDir}/subworkflows/SCORING/local/src"
+    def core_dir        = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local/src/core"
     def top_pct         = params.scoring_position_top_pct    ?: 0.10
     def g_top_pct       = params.scoring_gene_top_pct        ?: 0.10
     def accum_arg         = (accum_files instanceof List
@@ -85,10 +86,18 @@ process SCORING_COMPUTE {
 
     if (params.use_singularity || params.use_apptainer) {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/observed_core_scores.py .
+        mkdir -p src/core && cp ${core_dir}/scores.py src/core/ && touch src/__init__.py src/core/__init__.py
+
+        /usr/local/bin/_entrypoint.sh python3 observed_core_scores.py \
+            --input '${postproc_file}' \
+            --positions-out core_positions.tsv \
+            --genes-out core_genes.tsv
 
         /usr/local/bin/_entrypoint.sh Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
+            --core_positions core_positions.tsv \
+            --core_genes     core_genes.tsv \
             --fade_top       '${fade_summary_top}' \
             --fade_bottom    '${fade_summary_bottom}' \
             --fade_site_top  '${fs_top_arg}' \
@@ -111,10 +120,18 @@ process SCORING_COMPUTE {
         """
     } else {
         """
-        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R .
+        cp ${local_dir}/scoring_compute.R ${local_dir}/aa_grouping.R ${local_dir}/observed_core_scores.py .
+        mkdir -p src/core && cp ${core_dir}/scores.py src/core/ && touch src/__init__.py src/core/__init__.py
+
+        python3 observed_core_scores.py \
+            --input '${postproc_file}' \
+            --positions-out core_positions.tsv \
+            --genes-out core_genes.tsv
 
         Rscript scoring_compute.R \
             --postproc       '${postproc_file}' \
+            --core_positions core_positions.tsv \
+            --core_genes     core_genes.tsv \
             --fade_top       '${fade_summary_top}' \
             --fade_bottom    '${fade_summary_bottom}' \
             --fade_site_top  '${fs_top_arg}' \
