@@ -102,3 +102,13 @@ the null cycle (empty when no scheme scored it), written once by `_finalize_perm
 without `caas_score` (an earlier null) is rejected with a message to regenerate it. `readr` misparses ~13 % of
 17-digit doubles by an ulp, so R reads `caas_score` as text and converts with `as.numeric`; pandas readers use
 `float_precision="round_trip"`.
+
+## Order-independent pooling (`fop_pool.pool_domains`)
+
+The hypothesis and domain sums in `pool_domains` use `math.fsum`, so the pooled score is the same whatever order
+the hypotheses arrive in (the null feeds them in labeling arrival order, the observed in its own order). A naive
+sum of M >= 3 terms depends on that order; with M = 2 it does not, which matches where observed and null `b_0`
+differed in the last bit (rows pooled over >= 3 hypotheses). `test_pool_domains_order.py` shuffles the hypotheses
+(M = 3, 12, 100) and requires identical bits. Against the frozen PEPC master (100 hypotheses) the float columns now
+differ by <= 1.7e-15 and every other cell is identical, so `test_observed_pepc.py` compares floats with a
+1e-12 tolerance. Whether observed and `b_0` now agree bit for bit is checked on the next cluster run.
