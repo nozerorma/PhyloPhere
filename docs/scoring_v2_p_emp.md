@@ -59,13 +59,14 @@ p.emp = (k_emp + 1) / (N + 1)          add-one, cola derecha
 
 | columna | contenido |
 |---|---|
-| `caas_sum` | suma de los scores por esquema del ciclo en ese lado |
-| `n_schemes` | número de esquemas detectados (> 0) |
+| `caas_score` | score de posición del ciclo en ese lado (`core.scores`); vacío si ningún esquema lo puntuó |
+| `n_schemes` | número de esquemas que puntuaron la posición |
 
-`caas_sum` se acumula en el orden de prioridad de §2g (`US > GS4 > GS3 > GS2 >
-GS1`), de modo que `caas_sum / n_schemes` reproduce bit a bit
-`mean(caas_row)` del observado. La media se calcula una sola vez, en R; no hay
-una segunda implementación que deba mantenerse sincronizada. Con el espejo
+`caas_score` es la media de los scores por esquema, con suma correctamente
+redondeada (`math.fsum`), la misma función que da el `CAAS_score` observado. Se
+calcula una sola vez, en Python; R y el enriquecimiento de posiciones lo leen sin
+recalcularlo, y un fichero anterior sin esa columna se rechaza (hay que regenerar
+el nulo). Con el espejo
 FOP, las etiquetas `<ciclo>~H*` se colapsan al ciclo base antes de agregar.
 `reaggregate_perm_scores.py` regenera el fichero desde los shards
 `perm_pos_detail/` sin volver a la ASR.
@@ -77,11 +78,14 @@ El fichero llega a SCORING como `--caas_pos_cycle_caas` (desde
 ### 2.2 Consumo en R (§2f-ter)
 
 1. Score nulo agrupado por `(Gene, Position, cycle)`: máximo sobre lados de
-   `caas_sum / n_schemes`.
+   `caas_score`.
 2. Score observado agrupado por `(Gene, Position)`: máximo sobre lados de
    `CAAS_score`.
 3. `k_emp` por posición mediante `left_join` desde lo observado, de modo que
    las posiciones no re-detectadas quedan con `k_emp = 0`.
+   La comparación `>=` cuenta como empate lo que difiere menos de
+   `TIE_TOL = 1e-12` (la misma constante que `core.scores`): las medias iguales en
+   aritmética exacta pueden diferir en 1 ulp según cómo se sumaron o se leyeron.
 4. `N` es el roster de ciclos de `caas_perms.rds` (incluye los ciclos que no
    detectan nada), siempre que contenga todos los ciclos presentes en el
    fichero; si no, `N` = ciclos presentes, lo que sólo puede aumentar `p.emp`.

@@ -56,7 +56,7 @@ def test_null_values_within_rounding_noise_of_the_observed_score_count_as_ties(t
     core = pd.read_csv(tmp_path / "core_pos.tsv", sep="\t", **NA)
     row = core[core.CAAS_score > 0].iloc[0]
     null = pd.DataFrame([{"Gene": row.Gene, "Position": row.Position, "side": row.side, "cycle": f"c{i}",
-                          "caas_sum": (row.CAAS_score - 1e-15) * 2, "n_schemes": 2} for i in range(3)])
+                          "caas_score": row.CAAS_score - 1e-15, "n_schemes": 2} for i in range(3)])
     null.to_csv(tmp_path / "null.tsv.gz", sep="\t", index=False)
     r = _r(tmp_path, "--caas_pos_cycle_caas", str(tmp_path / "null.tsv.gz"))
     assert r.returncode == 0, r.stderr[-800:]
@@ -71,3 +71,13 @@ def test_tie_tolerance_is_the_same_constant_in_r_and_python():
     from src.core.scores import TIE_TOL
     m = re.search(r"^TIE_TOL <- ([0-9.eE+-]+)", (SRC / "scoring_compute.R").read_text(), re.M)
     assert m and float(m.group(1)) == TIE_TOL
+
+
+def test_a_null_without_caas_score_is_rejected(tmp_path):
+    _stage(tmp_path)
+    core = pd.read_csv(tmp_path / "core_pos.tsv", sep="\t", **NA)
+    row = core[core.CAAS_score > 0].iloc[0]
+    pd.DataFrame([{"Gene": row.Gene, "Position": row.Position, "side": row.side, "cycle": "c1",
+                   "caas_sum": 0.5, "n_schemes": 1}]).to_csv(tmp_path / "old.tsv.gz", sep="\t", index=False)
+    r = _r(tmp_path, "--caas_pos_cycle_caas", str(tmp_path / "old.tsv.gz"))
+    assert r.returncode != 0 and "caas_score" in r.stderr

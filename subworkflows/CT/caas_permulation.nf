@@ -647,7 +647,7 @@ workflow CAAS_PERMULATION {
 
     emit:
         perms              = perms_ch
-        pos_cycle_caas     = pos_cycle_caas_ch  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
+        pos_cycle_caas     = pos_cycle_caas_ch  // per (gene,position,side,cycle) caas_score -> p.emp
         pos_sample         = pos_sample_ch      // cycle-stratified sample for distribution plots
         pos_quantiles      = pos_quantiles_ch   // per (cycle,scheme) distribution shape
         pos_detail         = pos_detail_ch      // full per-cycle detail (sharded dir); re-scoring needs no ASR replay

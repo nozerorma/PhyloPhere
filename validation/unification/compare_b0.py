@@ -135,8 +135,8 @@ def checkpoint_C(run, b0_dir, tol):
 def checkpoint_D(run, b0_dir, tol):
     ps = pd.read_csv(Path(run) / "scoring" / "position_scores.tsv", sep="\t", usecols=["Gene", "Position", "side", "CAAS_score"])
     pc = Path(b0_dir) / "perm_pos_cycle_caas.tsv.gz"
-    d = pd.read_csv(pc, sep="\t")
-    d = d.assign(caas_row=d["caas_sum"] / d["n_schemes"])
+    d = pd.read_csv(pc, sep="\t", float_precision="round_trip")
+    d = d.assign(caas_row=d["caas_score"])
     return compare_values(ps, d[["Gene", "Position", "side", "caas_row"]], ["Gene", "Position", "side"],
                           ["CAAS_score"], ["caas_row"], tol)
 

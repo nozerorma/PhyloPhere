@@ -282,13 +282,12 @@ cat(sprintf("\nPosition-level CAAS_score: min=%.3f, median=%.3f, max=%.3f\n",
 # ── 2f-ter. p.emp — position-level "detects AND exceeds" permulation p ────────
 # docs/scoring_v2_p_emp.md §1-§2. Per (Gene, Position):
 #   k_emp = #{null cycle : re-detects the position on ANY side
-#                          AND  max_side(caas_sum/n_schemes) >= max_side(CAAS_obs)}
+#                          AND  max_side(caas_score) >= max_side(CAAS_obs)}
 #   p.emp = (k_emp + 1) / (N + 1)                          add-one, right-tailed
 # The pooled statistic is the max-over-sides "all" axis -- identical to
 # .pos_undirected (§4a) on the observed side and _build_cycle_score_pools'
-# pc["all"] on the null. caas_sum/n_schemes is the null's per-side §2g mean;
-# the null's scheme-mean is caas_sum / n_schemes, the same value core.scores gives the
-# observed position. Values within TIE_TOL of the observed score count as ties (>=).
+# pc["all"] on the null. The null's per-cycle score is the caas_score column, the same core.scores value the
+# observed position gets. Values within TIE_TOL of the observed score count as ties (>=).
 pos_scores$p.emp <- NA_real_
 has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
 # caas_perms.rds is loaded here when present (its columns are the cycle roster
@@ -296,17 +295,23 @@ has_caas_pos_cycle_caas <- file_exists(caas_pos_cycle_caas_file)
 caas_perms <- NULL
 if (has_caas_pos_cycle_caas) {
   cat("Loading per-cycle CAAS null (p.emp):", caas_pos_cycle_caas_file, "\n")
-  cyc_caas <- read_tsv(caas_pos_cycle_caas_file, show_col_types = FALSE) %>%
+  # caas_score is read as text and converted with as.numeric: readr's own double parser
+  # is off by an ulp for ~13% of 17-digit values.
+  cyc_caas <- read_tsv(caas_pos_cycle_caas_file, show_col_types = FALSE,
+                       col_types = cols(.default = col_guess(), caas_score = col_character()))
+  if (!"caas_score" %in% names(cyc_caas)) {
+    stop("perm_pos_cycle_caas.tsv.gz has no caas_score column: it predates the shared position score. ",
+         "Regenerate the CAAS permulation null.")
+  }
+  cyc_caas <- cyc_caas %>%
     mutate(Position = as.integer(Position),
-           caas_sum = suppressWarnings(as.numeric(caas_sum)),
-           n_schemes = suppressWarnings(as.integer(n_schemes))) %>%
-    filter(!is.na(n_schemes) & n_schemes > 0L)
+           caas_score = suppressWarnings(as.numeric(caas_score))) %>%
+    filter(!is.na(caas_score))
 
   # per-cycle pooled null statistic = max over detected sides of the scheme-mean
   cyc_pooled <- cyc_caas %>%
-    mutate(.m = caas_sum / n_schemes) %>%
     group_by(Gene, Position, cycle) %>%
-    summarise(caas_max = max(.m), .groups = "drop")
+    summarise(caas_max = max(caas_score), .groups = "drop")
   rm(cyc_caas)
 
   # observed pooled statistic = best side per (Gene, Position) (== .pos_undirected)

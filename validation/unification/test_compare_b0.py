@@ -48,7 +48,7 @@ def run(tmp_path):
                           "n_detected": 1, "clust": c, "side": side} for p, s, c in rows]),
            b0 / f"perm_pos_detail/{g}.tsv.gz", gz=True)
     _w(pd.DataFrame({"Gene": ["G1", "G2"], "Position": [10, 5], "side": ["top", "bottom"], "cycle": "b_0",
-                     "caas_sum": [0.5, 0.75], "n_schemes": 1}), b0 / "perm_pos_cycle_caas.tsv.gz", gz=True)
+                     "caas_score": [0.5, 0.75], "n_schemes": 1}), b0 / "perm_pos_cycle_caas.tsv.gz", gz=True)
     _w(pd.DataFrame({"Gene": ["G1", "G2"], "cycle": "b_0", "global_asr": 0.0, "top_asr": 0.0, "bottom_asr": 0.0,
                      "global_caas": [0.4, 0.9], "top_caas": [0.4, 0.0], "bottom_caas": [0.0, 0.9]}),
        b0 / "gene_cycle_scores.tsv")

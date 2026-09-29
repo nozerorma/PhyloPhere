@@ -31,7 +31,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Pre-reduce the CAAS permulation null for POSENRICH_RUN_BATCHED.")
     p.add_argument("--caas-cycle-null", required=True,
                    help="perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, "
-                        "caas_sum, n_schemes). Omit or pass a NO_FILE* sentinel to "
+                        "caas_score, n_schemes). Omit or pass a NO_FILE* sentinel to "
                         "write an empty artifact (p.perm stays NA downstream).")
     p.add_argument("--output", default="caas_null_prepped.pkl")
     return p.parse_args()
@@ -54,15 +54,18 @@ def main():
     # `cycle` is a tag, not necessarily numeric (e.g. base-cycle labels like
     # "b_1000" from the FOP-mirror replay-tag collapse -- see gene_wrapper.py),
     # so it's read as category rather than coerced to a numeric dtype.
-    # caas_sum/n_schemes are left at pandas' own inferred dtype (float64/int64,
-    # matching posenrich_enrich.py's load_caas_cycle_null exactly) so `score`
-    # is computed at the same precision as before -- only the repetitive
-    # string columns (Gene, side, cycle, pos_id) are switched to category,
-    # which is where the actual memory cost was.
+    # caas_score is read exactly (round_trip); only the repetitive string columns
+    # (Gene, side, cycle, pos_id) are switched to category, which is where the actual
+    # memory cost was.
+    header = pd.read_csv(path, sep="\t", nrows=0).columns
+    if "caas_score" not in header:
+        raise ValueError(f"{path} has no caas_score column: it predates the shared position score. "
+                         "Regenerate the CAAS permulation null.")
     df = pd.read_csv(
         path, sep="\t",
-        usecols=["Gene", "Position", "side", "cycle", "caas_sum", "n_schemes"],
+        usecols=["Gene", "Position", "side", "cycle", "caas_score"],
         dtype={"Gene": "category", "side": "category", "cycle": "category"},
+        float_precision="round_trip",
     )
     if df.empty:
         write_empty(args.output)
@@ -74,7 +77,7 @@ def main():
     # codes over its (much smaller) set of distinct positions.
     pos_id = (df["Gene"].astype(str) + ":" + df["Position"].astype(str)).astype("category")
     df["pos_id"] = pos_id
-    df["score"] = (df["caas_sum"] / df["n_schemes"].replace(0, np.nan)).fillna(0.0)
+    df["score"] = df["caas_score"].fillna(0.0)
     # cycle's category codes already are exactly its unique values (built from
     # what read_csv observed), so this is a lookup over the categories, not a
     # pass over all ~27M rows.

@@ -72,7 +72,7 @@ def parse_args():
                         "for pai3d_orthogroups")
     p.add_argument("--caas-cycle-null", default=None,
                    help="perm_pos_cycle_caas.tsv.gz from CAAS_PERMULATION (Gene, Position, "
-                        "side, cycle, caas_sum, n_schemes) - the CAAS permulation null. When "
+                        "side, cycle, caas_score, n_schemes) - the CAAS permulation null. When "
                         "supplied, its real cycles REPLACE this script's own label shuffle as "
                         "the null for p_value/p_adj/perm_nes, mirroring fcs_enrich.R's "
                         "fcs_run_permulation null_mat preference. Omit or pass a NO_FILE* "
@@ -229,11 +229,11 @@ def collapse_null_sides(sub):
 # ── CAAS permulation-null (preferred as the PRIMARY null when supplied;
 # see run_permulation_for_terms) ──────────────────────────────────────────────
 def load_caas_cycle_null(path):
-    """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_sum,
+    """Load perm_pos_cycle_caas.tsv.gz (Gene, Position, side, cycle, caas_score,
     n_schemes) once for the whole run. Returns (long_df, all_cycle_levels) with
-    long_df columns (pos_id, side, cycle, score) where score = caas_sum /
-    n_schemes (the position's per-side CAAS score for that null cycle, in the
-    same units as position_scores.tsv's CAAS_score). all_cycle_levels is every
+    long_df columns (pos_id, side, cycle, score) where score = caas_score (the
+    position's per-side CAAS score for that null cycle, in the same units as
+    position_scores.tsv's CAAS_score; 0 when no scheme scored it). all_cycle_levels is every
     distinct cycle in the file, independent of side, so a cycle with zero hits
     on one side still counts as a real null draw contributing 0 to that side's
     term sums (not a missing cycle). Returns (None, None) if path is missing,
@@ -242,12 +242,16 @@ def load_caas_cycle_null(path):
     """
     if not path or os.path.basename(path).startswith("NO_FILE") or not os.path.exists(path):
         return None, None
-    df = pd.read_csv(path, sep="\t", usecols=["Gene", "Position", "side", "cycle",
-                                               "caas_sum", "n_schemes"])
+    header = pd.read_csv(path, sep="\t", nrows=0).columns
+    if "caas_score" not in header:
+        raise ValueError(f"{path} has no caas_score column: it predates the shared position score. "
+                         "Regenerate the CAAS permulation null.")
+    df = pd.read_csv(path, sep="\t", usecols=["Gene", "Position", "side", "cycle", "caas_score"],
+                     float_precision="round_trip")
     if df.empty:
         return None, None
     df["pos_id"] = df["Gene"].astype(str) + ":" + df["Position"].astype(str)
-    df["score"] = (df["caas_sum"] / df["n_schemes"].replace(0, np.nan)).fillna(0.0)
+    df["score"] = df["caas_score"].fillna(0.0)
     all_cycle_levels = np.sort(df["cycle"].unique())
     return df[["pos_id", "side", "cycle", "score"]], all_cycle_levels
 

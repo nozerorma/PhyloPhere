@@ -93,3 +93,12 @@ The observed position and gene scores are the `b_0` slice of the same functions 
   several hypotheses (`n_hypotheses` >= 3); its origin (PSS weights of the null's `b_0`) was not traced.
 - Checked: `scoring_compute.R` on the toy (50 genes) gives position and gene tables equal to the previous script
   (Δ <= 1.1e-16, `p.emp` and `p.adj_*` unchanged). Not checked with a null that has ties at scale (toy 1000 genes).
+
+## Null per-cycle position scores (`perm_pos_cycle_caas.tsv.gz`)
+
+Columns: `Gene, Position, side, cycle, caas_score, n_schemes`. `caas_score` is the `core.scores` position score of
+the null cycle (empty when no scheme scored it), written once by `_finalize_perm_scores`. `scoring_compute.R`
+(`p.emp`, SAM), `posenrich_enrich.py` and `posenrich_prep_caas_null.py` read it and no longer divide. A file
+without `caas_score` (an earlier null) is rejected with a message to regenerate it. `readr` misparses ~13 % of
+17-digit doubles by an ulp, so R reads `caas_score` as text and converts with `as.numeric`; pandas readers use
+`float_precision="round_trip"`.

@@ -143,6 +143,13 @@ def test_null_gene_cycle_scores_use_core_scores_and_na_for_empty_cells(tmp_path)
         for d_, col in (("all", "global_caas"), ("top", "top_caas"), ("bottom", "bottom_caas")):
             v = got.loc[(g, "c1"), col]
             assert (pd.isna(v) and want[d_] is None) or v == pytest.approx(want[d_], abs=1e-12), (g, col)
+    # per-cycle position scores: one column, the core position score, exact
+    cc = pd.read_csv(tmp_path / "out/perm_pos_cycle_caas.tsv.gz", sep="\t", float_precision="round_trip")
+    assert list(cc.columns) == ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes"]
+    want_cc = {("gA", 1): position_score({"US": 0.2, "GS4": 0.4}), ("gA", 2): 0.8, ("gB", 1): 0.6,
+               ("gB", 5): position_score({"US": 0.3, "GS4": 0.5, "GS3": 0.7})}
+    for r in cc.itertuples():
+        assert r.caas_score == want_cc[(r.Gene, r.Position)]
     assert pd.isna(got.loc[("gA", "c1"), "top_caas"])           # gA has no top position
     assert got.loc[("gA", "c2"), ["global_caas", "top_caas", "bottom_caas"]].isna().all()   # empty cycle
     assert (got.loc[("gA", "c2"), ["global_asr", "top_asr", "bottom_asr"]] == 0).all()
