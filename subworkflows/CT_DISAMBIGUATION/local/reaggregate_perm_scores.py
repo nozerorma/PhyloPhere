@@ -43,8 +43,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.utils.gene_wrapper import (  # noqa: E402
     build_percent_rank_lookup,
+    _cycle_gene_removal_from_detail,
     _finalize_perm_scores,
     iter_detail_rows,
+    write_removed_units,
 )
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -87,6 +89,13 @@ def main() -> int:
                     help="directory to write gene_cycle_scores.tsv (and the sample/quantile files)")
     ap.add_argument("--seed", type=int, default=1998,
                     help="pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
+    # Gene removal is genome-wide (per-cycle IQR / density thresholds over all genes), so it
+    # can only be computed here, on the merged detail, never inside a per-batch worker.
+    ap.add_argument("--gene-lengths", default=None,
+                    help="gene annotation TSV (gene, length ...); enables the dubious/extreme gene removal")
+    ap.add_argument("--gene-filter-mode", default="none", choices=["none", "extreme", "dubious", "both"])
+    ap.add_argument("--iqr-multiplier", type=float, default=3.0)
+    ap.add_argument("--extreme-percentile", type=float, default=0.99)
     args = ap.parse_args()
 
     if not (args.detail.is_dir() or args.detail.is_file()):
@@ -101,12 +110,23 @@ def main() -> int:
         logger.error("no cycles found in detail file; nothing to do")
         return 1
 
+    removed = set()
+    if args.gene_lengths and args.gene_filter_mode != "none":
+        from src.convergence.null_postproc import load_gene_lengths
+        removed = _cycle_gene_removal_from_detail(
+            args.detail, load_gene_lengths(args.gene_lengths), args.gene_filter_mode,
+            args.iqr_multiplier, args.extreme_percentile)
+        write_removed_units(args.output_dir / "removed_units.tsv", removed)
+        logger.info("[reaggregate] gene removal (%s): %d (cycle, group, gene) units",
+                    args.gene_filter_mode, len(removed))
+
     rank_lookup = build_percent_rank_lookup(hist_by_cycle)
     _finalize_perm_scores(
         detail_path=args.detail,
         output_dir=args.output_dir,
         cycle_tags=cycle_tags,
         rank_lookup=rank_lookup,
+        removed=removed,
         seed=args.seed,
     )
     logger.info("[reaggregate] wrote %s", args.output_dir / "gene_cycle_scores.tsv")

@@ -1611,6 +1611,17 @@ def _cycle_gene_removal_from_detail(
                               extreme_percentile=extreme_percentile)
 
 
+def write_removed_units(path: Path, removed: Set[Tuple[str, str, str]]) -> None:
+    """Persist the (cycle, caap_group, Gene) units dropped by gene removal, so a
+    labeling's removal can be audited (compare_b0.py checkpoint B)."""
+    import csv as _csv
+
+    with open(path, "w", newline="") as f_rm:
+        w = _csv.writer(f_rm, delimiter="\t")
+        w.writerow(["cycle", "caap_group", "Gene"])
+        w.writerows(sorted(removed))
+
+
 def _build_cycle_score_pools(
     detail_path: Path,
     rank_lookup: Dict[str, Dict[int, float]],
@@ -2254,11 +2265,7 @@ def process_all_genes_perms(
         logger.info("[perms] pass B0: %d (cycle, group, gene) units removed "
                     "(mode=%s) — mirrors CAAS_FILTER_GENES on the null pool",
                     len(removed), gene_filter_mode)
-        # Persisted so a labeling's gene removal can be audited (compare_b0.py checkpoint B).
-        with open(output_dir / "removed_units.tsv", "w", newline="") as f_rm:
-            w_rm = _csv.writer(f_rm, delimiter="\t")
-            w_rm.writerow(["cycle", "caap_group", "Gene"])
-            w_rm.writerows(sorted(removed))
+        write_removed_units(output_dir / "removed_units.tsv", removed)
 
     # _finalize_perm_scores aggregates the base-cycle-keyed detail shards. Under
     # the FOP mirror, build_cycle_inputs' `cycle_tags` are the "<base>~H<m>"

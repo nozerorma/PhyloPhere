@@ -367,6 +367,9 @@ process CAAS_PERMS_DISAMBIGUATE_BATCHED {
         ${taxid_mapping ? "--taxid-mapping ${taxid_mapping}" : ''} \\
         ${ensembl_file ? "--ensembl-genes-file ${ensembl_file}" : ''}
     cp -R caas_perms_out/perm_pos_detail perm_pos_detail
+    # b_0 (caas_b0_diagnostic): only its per-gene shards are kept, in a subdirectory the null
+    # readers never glob; its genome-wide scores are rebuilt from the merged shards in REBUILD.
+    if [ -d caas_perms_out/b0/perm_pos_detail ]; then cp -R caas_perms_out/b0/perm_pos_detail perm_pos_detail/b0; fi
     """
 }
 
@@ -455,13 +458,15 @@ process CAAS_PERMS_REBUILD {
     tag "caas_perms_rebuild"
     label 'process_medium'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true,
-               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz}'
+               pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz,removed_units.tsv,b0}'
 
     input:
     path perm_pos_detail, stageAs: 'input_perm_pos_detail'   // dir (current) or legacy .tsv.gz file
     path universe
+    path gene_lengths   // gene_ensembl_file (gene removal) or NO_FILE
 
     output:
+    path "b0",                        emit: b0, optional: true   // caas_b0_diagnostic: the real labeling rebuilt like the null
     path "caas_perms.rds",            emit: perms
     path "gene_cycle_scores.tsv",     emit: gene_cycle_scores
     path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas, optional: true
@@ -476,6 +481,10 @@ process CAAS_PERMS_REBUILD {
     def universe_arg   = universe.name.startsWith('NO_') ? "" : "--universe ${universe}"
     def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
+    // Same gene removal as the unbatched worker's pass B0 (needs the annotation file).
+    def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
+    def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
+    def removal_args = (_pp_on && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own
@@ -486,7 +495,16 @@ process CAAS_PERMS_REBUILD {
     ${py} ./reaggregate_perm_scores.py \\
         --detail input_perm_pos_detail \\
         --output-dir . \\
-        --seed ${params.seed ?: 1998}
+        --seed ${params.seed ?: 1998} ${removal_args}
+
+    # b_0 rebuilt from its merged shards as a one-labeling run: same code, own rank/size pools.
+    if [ -d input_perm_pos_detail/b0 ]; then
+        mkdir -p b0
+        ${py} ./reaggregate_perm_scores.py \\
+            --detail input_perm_pos_detail/b0 \\
+            --output-dir b0 \\
+            --seed ${params.seed ?: 1998} ${removal_args}
+    fi
 
     ${rs} ${scoring_local}/src/scoring_caas_perms.R \\
         --gene-cycle-scores gene_cycle_scores.tsv \\
@@ -593,9 +611,6 @@ workflow CAAS_PERMULATION {
         def gene_cycle_scores_ch
 
         if (disambigBatchSize > 1) {
-            if (params.caas_b0_diagnostic) {
-                error "caas_b0_diagnostic needs ct_disambig_perms_batch_size = 1 (the batched null skips gene removal and the b_0 shards are not merged)"
-            }
             def disambigBatchCounter = 0
             def perm_disc_batches = perm_discovery
                 .flatMap { files -> files.sort { it.name } }
@@ -606,7 +621,7 @@ workflow CAAS_PERMULATION {
                 }
             def batched = CAAS_PERMS_DISAMBIGUATE_BATCHED(perm_disc_batches, resample_subset_bc, gated_tree, fop_pairs_bc, gene_lengths_bc)
             def merged = CAAS_PERMS_MERGE_DETAIL(batched.pos_detail.collect())
-            def rebuilt = CAAS_PERMS_REBUILD(merged.pos_detail, universe)
+            def rebuilt = CAAS_PERMS_REBUILD(merged.pos_detail, universe, gene_lengths_bc)
 
             perms_ch             = rebuilt.perms
             pos_cycle_caas_ch    = rebuilt.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))

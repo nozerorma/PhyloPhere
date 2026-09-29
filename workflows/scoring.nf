@@ -160,7 +160,7 @@ workflow SCORING {
             def _detail = file(params.caas_pos_detail_file)
             assert _detail.exists() : "SCORING: --caas_pos_detail_file not found: ${params.caas_pos_detail_file}"
             log.info "SCORING: rebuilding CAAS permulation null from ${_detail.name} (no ASR replay)"
-            _rebuild = CAAS_PERMS_REBUILD(Channel.value(_detail), resolved_background)
+            _rebuild = CAAS_PERMS_REBUILD(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')))
             caas_perms_resolved = _rebuild.perms.collect().map { it[0] }
         } else {
             caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
