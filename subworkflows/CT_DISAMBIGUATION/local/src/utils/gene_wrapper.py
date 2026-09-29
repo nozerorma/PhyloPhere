@@ -557,7 +557,7 @@ def process_all_genes(
     max_codeml: Optional[int] = None,
     hypotheses_pairs_file: Optional[str] = None,
     max_pairs: Optional[int] = None,
-) -> Tuple[List[Dict], Optional[Dict]]:
+) -> Dict[str, Any]:
 
     if max_pairs is None:
         raise ValueError(
@@ -767,7 +767,7 @@ def process_all_genes(
     n_master = write_master_csv(master_rows_all, master_path, master_fields)
     logger.info(f"Wrote {n_master} rows to {master_path.name}")
     # The database now only feeds the decoration outputs (no_change debug, per-gene JSONs, summary).
-    caas_files, summary_json = export_from_db(db_path, output_dir, max_pairs=max_pairs, write_master=False)
+    caas_files, summary_json = export_from_db(db_path, output_dir, max_pairs=max_pairs)
     caas_files = [master_path] + list(caas_files)
 
     export_info = {
@@ -776,7 +776,7 @@ def process_all_genes(
         "summary_json": str(summary_json),
     }
 
-    return [], export_info
+    return export_info
 
 
 # ═════════════════════════════════════════════════════════════════════════════

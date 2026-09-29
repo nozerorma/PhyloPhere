@@ -27,76 +27,6 @@ from src.utils.gene_wrapper import convert_convergence_result_to_dict
 logger = logging.getLogger(__name__)
 
 
-def write_caas_convergence_csvs(
-    results: List[Dict], output_dir: Path, max_pairs: Optional[int] = None
-) -> List[Path]:
-    """
-    Write master, ambiguous, and no_change debug CAAS convergence CSVs.
-
-    Args:
-        results: List of CAAS result dictionaries
-        output_dir: Output directory for CSV files
-        max_pairs: Maximum number of pairs (auto-detected if None)
-
-    Returns:
-        List of paths to written files
-    """
-    logger.info(f"Writing CAAS convergence CSVs to {output_dir}")
-
-    master_filename = output_dir / "caas_convergence_master.csv"
-    diag_dir = output_dir / "diagnostics"
-    diag_dir.mkdir(parents=True, exist_ok=True)
-    no_change_filename = diag_dir / "no_change_debug.csv"
-
-    _write_csv(results, master_filename, max_pairs=max_pairs)
-
-    # Export no_change cases for debugging
-    no_change_results = [
-        r for r in results
-        if (r.get("side") or "none") == "none"
-    ]
-    if no_change_results:
-        _write_csv(
-            no_change_results,
-            no_change_filename,
-            max_pairs=max_pairs,
-        )
-        logger.info(
-            f"  Wrote {len(no_change_results)} no_change debug cases to {no_change_filename}"
-        )
-
-    logger.info(f"  Wrote {len(results)} results to {master_filename}")
-    return (
-        [master_filename, no_change_filename]
-        if no_change_results
-        else [master_filename]
-    )
-
-
-def _detect_max_pairs(results: List[Dict]) -> int:
-    """
-    Detect maximum number of focal pairs across all results.
-
-    Args:
-        results: List of CAAS result dictionaries
-
-    Returns:
-        Maximum number of pairs found (minimum 1)
-    """
-    max_pairs = 0
-    for result in results:
-        # Count domain_<d>_score / domain_<d>_posterior columns present in result
-        pair_count = 0
-        idx = 1
-        while f"domain_{idx}_score" in result or f"domain_{idx}_posterior" in result:
-            pair_count += 1
-            idx += 1
-        max_pairs = max(max_pairs, pair_count)
-
-    # Minimum of 1 for backward compatibility
-    return max(max_pairs, 1)
-
-
 def _generate_dynamic_fields(max_pairs: int) -> List[str]:
     """
     Generate field list with dynamic per-domain columns.
@@ -162,57 +92,14 @@ def _generate_dynamic_fields(max_pairs: int) -> List[str]:
     return fields
 
 
-def _write_csv(
-    results: List[Dict],
-    filename: Path,
-    max_pairs: Optional[int] = None,
-) -> None:
-    """
-    Write results to CSV with dynamic field generation.
-
-    Args:
-        results: List of result dictionaries
-        filename: Output file path
-    """
-    if not results:
-        logger.warning(f"No results to write to {filename}; writing header only")
-
-    # Detect maximum number of pairs in results if not supplied
-    max_pairs = max_pairs or _detect_max_pairs(results)
-
-    # Generate dynamic field list
-    fields = _generate_dynamic_fields(max_pairs)
-
-    # Serialize list fields to strings for CSV
-    def serialize_value(val):
-        if isinstance(val, (list, tuple)):
-            return ",".join(str(v) for v in val)
-        elif isinstance(val, bool):
-            return str(val)
-        elif val is None:
-            return ""
-        return str(val)
-
-    with open(filename, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fields, extrasaction="ignore")
-        writer.writeheader()
-
-        # Serialize list values
-        for result in results:
-            serialized = {k: serialize_value(result.get(k)) for k in fields}
-            writer.writerow(serialized)
-
-    logger.debug(f"Wrote {len(results)} rows with {len(fields)} fields to {filename}")
-
-
 def export_from_db(
-    db_path: Path, output_dir: Path, max_pairs: Optional[int] = None, write_master: bool = True
+    db_path: Path, output_dir: Path, max_pairs: Optional[int] = None
 ) -> Tuple[List[Path], Path]:
     """
-    Export CAAS convergence master CSV, no_change debug CSV, and per-gene JSONs directly from the aggregation SQLite DB.
+    Export the decoration outputs (no_change debug CSV, per-gene JSONs, summary JSON) from the aggregation SQLite DB.
 
-    Streams rows from DB to avoid loading all results into memory. With write_master=False the master CSV is
-    left to the caller (core.master writes it from the workers' rows) and only the decoration outputs are made.
+    The master CSV is not written here: core.master writes it from the workers' rows.
+    Streams rows from DB to avoid loading all results into memory.
 
     Returns:
         (list_of_caas_files, summary_json)
@@ -220,7 +107,6 @@ def export_from_db(
     logger.info(f"Exporting CAAS convergence outputs from DB: {db_path}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    master_filename = output_dir / "caas_convergence_master.csv"
     diag_dir = output_dir / "diagnostics"
     diag_dir.mkdir(parents=True, exist_ok=True)
     no_change_filename = diag_dir / "no_change_debug.csv"
@@ -239,18 +125,10 @@ def export_from_db(
             except Exception:
                 max_pairs = 1
 
-        # Prepare CSV writers (streaming)
+        # The no_change rows keep the master's column schema
         master_fields = _generate_dynamic_fields(max_pairs)
 
         from src.core.master import serialize_value
-
-        master_f = master_writer = None
-        if write_master:
-            master_f = open(master_filename, "w", newline="")
-            master_writer = csv.DictWriter(
-                master_f, fieldnames=master_fields, extrasaction="ignore"
-            )
-            master_writer.writeheader()
 
         no_change_f = open(no_change_filename, "w", newline="")
         no_change_writer = csv.DictWriter(
@@ -298,10 +176,6 @@ def export_from_db(
                 taxid_to_species=taxid_to_species,
             )
 
-            if master_writer is not None:
-                master_writer.writerow(
-                    {k: serialize_value(caas_dict.get(k)) for k in master_fields}
-                )
             total_positions += 1
             per_gene_counts[gene] = per_gene_counts.get(gene, 0) + 1
 
@@ -339,8 +213,6 @@ def export_from_db(
             gene_file.close()
 
         # close files
-        if master_f is not None:
-            master_f.close()
         no_change_f.close()
         # Write aggregated summary JSON (compact)
         summary_path = output_dir / "caas_convergence_summary.json"
@@ -359,11 +231,9 @@ def export_from_db(
     finally:
         conn.close()
 
-    caas_files = [master_filename] if write_master else []
+    caas_files = []
     if Path(no_change_filename).exists():
         caas_files.append(no_change_filename)
 
-    logger.info(
-        f"Exported CAAS master CSV: {master_filename}; JSON summary: {summary_path}"
-    )
+    logger.info(f"Exported no_change debug CSV and per-gene JSONs; JSON summary: {summary_path}")
     return caas_files, summary_path

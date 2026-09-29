@@ -19,8 +19,6 @@ from .disambiguation_db import (
     insert_gene_alignment,
     insert_result,
     fetch_alignment_for_gene,
-    iter_group_keys,
-    iter_results_for_group,
 )
 
 
@@ -65,8 +63,6 @@ __all__ = [
     "insert_gene_alignment",
     "insert_result",
     "fetch_alignment_for_gene",
-    "iter_group_keys",
-    "iter_results_for_group",
     "convert_convergence_result_to_dict",
     "convert_biochem_result_to_dict",
     "process_single_gene",

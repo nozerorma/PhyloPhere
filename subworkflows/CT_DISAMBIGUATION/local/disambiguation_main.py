@@ -12,13 +12,6 @@ sys.path.insert(0, str(Path(__file__).parent / "src"))
 
 from src.data.loaders import read_caas_metadata_table
 from src.utils.gene_wrapper import process_all_genes
-from src.reporting.disambiguation_writers import (
-    write_caas_convergence_csvs,
-)
-from src.reporting.disambiguation_json import (
-    export_aggregated_convergence_json,
-    export_gene_summaries_json,
-)
 from src.plots.plotter import generate_bulk_plots
 from src.utils.logger import configure_logging
 
@@ -248,7 +241,7 @@ def main():
     process_start = time.time()
 
     try:
-        proc_res = process_all_genes(
+        export_info = process_all_genes(
             genes=unique_genes,
             alignment_dir=args.alignment_dir,
             tree_file=args.tree,
@@ -269,62 +262,25 @@ def main():
             max_codeml=args.codeml_concurrency,
             max_pairs=max_pairs,
         )
-        # process_all_genes now returns (caas_results, export_info)
-        if isinstance(proc_res, tuple) and len(proc_res) == 2:
-            caas_results, export_info = proc_res
-        else:
-            caas_results = proc_res
-            export_info = None
     except Exception as e:
         logger.error(f"Gene processing failed: {e}")
         raise
 
     process_time = time.time() - process_start
     logger.info(f"Gene processing completed in {process_time:.2f}s")
-    logger.info(f"  CAAS results: {len(caas_results)}")
     logger.info("  Conserved-pair ASR flags carried in master CSV rows")
 
     # Write output CSVs
     logger.info("Writing output files...")
     write_start = time.time()
     try:
-        # If process returned export_info (DB-backed), skip writing CSVs again
-        if export_info:
-            caas_files = [Path(p) for p in export_info.get("caas_files", [])]
-            logger.info(
-                f"  Skipping CSV generation; files produced by DB exporter: {caas_files}"
-            )
-            # If exporter produced a summary JSON, log it
-            summary_json = export_info.get("summary_json")
-            if summary_json:
-                logger.info(f"  Aggregated JSON summary: {summary_json}")
-        else:
-            caas_files = write_caas_convergence_csvs(
-                results=caas_results,
-                output_dir=output_dir,
-                max_pairs=max_pairs,
-            )
-            logger.info(f"  CAAS convergence CSVs: {len(caas_files)} files")
-            # Export aggregated convergence JSON
-            try:
-                if caas_results:
-                    json_file = export_aggregated_convergence_json(
-                        caas_results=caas_results,
-                        output_path=output_dir / "caas_convergence_summary.json",
-                    )
-                    logger.info(f"  Convergence JSON: {json_file}")
-
-                    # Per-gene JSON summaries
-                    json_dir = output_dir / "json_summaries"
-                    gene_jsons = export_gene_summaries_json(
-                        caas_results=caas_results,
-                        output_dir=json_dir,
-                    )
-                    logger.info(
-                        f"  Per-gene JSONs: {len(gene_jsons)} files in {json_dir}"
-                    )
-            except Exception as e:
-                logger.warning(f"JSON export skipped: {e}")
+        # The master CSV is written by process_all_genes (core.master); the database exporter made the
+        # decoration outputs (no_change debug, per-gene JSONs, summary).
+        caas_files = [Path(p) for p in export_info.get("caas_files", [])]
+        logger.info(f"  Master CSV and decoration outputs: {[p.name for p in caas_files]}")
+        summary_json = export_info.get("summary_json")
+        if summary_json:
+            logger.info(f"  Aggregated JSON summary: {summary_json}")
 
         asr_root = (
             Path(args.asr_cache_dir) if args.asr_cache_dir else output_dir / "asr"
