@@ -134,6 +134,7 @@ class VectorizedPermReplay:
     """
 
     def __init__(self, cfg, species_in_alignment):
+        self._cfg = cfg
         species = set(species_in_alignment)
         for t in cfg.alltraits:
             species.update(cfg.trait2fg.get(t, ()))
@@ -214,6 +215,29 @@ class VectorizedPermReplay:
                 block[i, col_index[g]] = 1.0
         return block
 
+    def _ensure_pair_index(self):
+        """Pair id of every species in every labeling (0 = not in that side), built on demand."""
+        if getattr(self, "fg_pair", None) is not None:
+            return
+        self.fg_pair = np.zeros((self.B, self.n_sp), dtype=np.int16)
+        self.bg_pair = np.zeros((self.B, self.n_sp), dtype=np.int16)
+        ids = {}
+        for b, t in enumerate(self.alltraits):
+            for side, arr in ((self._cfg.trait2fg, self.fg_pair), (self._cfg.trait2bg, self.bg_pair)):
+                for sp in side.get(t, ()):
+                    j = self.sp_index.get(sp)
+                    pair = self._cfg.get_pair(sp, t)
+                    if j is not None and pair:  # like the scalar path, a falsy pair is ignored
+                        arr[b, j] = ids.setdefault(pair, len(ids) + 1)
+
+    def _pair_sets_differ(self, b, flag):
+        """True when the fg and bg species flagged in `flag` (gap or missing) sit in different
+        pair sets, both non-empty (the scalar path's `set_fg and set_bg and set_fg != set_bg`)."""
+        on = flag > 0
+        sfg = set(self.fg_pair[b][on & (self.fg_pair[b] > 0)].tolist())
+        sbg = set(self.bg_pair[b][on & (self.bg_pair[b] > 0)].tolist())
+        return bool(sfg and sbg and sfg != sbg)
+
     def _default_b_chunk(self, total_groups):
         bytes_per_row = max(1, 2 * (self.n_sp + total_groups) * 4)
         budget_bytes = _CHUNK_MEM_BUDGET_MB * 1024 * 1024
@@ -225,8 +249,13 @@ class VectorizedPermReplay:
               maxgaps_fg, maxgaps_bg, maxgaps_all,
               maxmiss_fg, maxmiss_bg, maxmiss_all,
               max_conserved, admitted_patterns, caap_mode,
-              b_chunk=None, collect_hits=False):
-        """Count CAAS/CAAP hits per (position[, scheme]) across all B labelings."""
+              b_chunk=None, collect_hits=False, miss_pair=False):
+        """Count CAAS/CAAP hits per (position[, scheme]) across all B labelings.
+
+        miss_pair mirrors the scalar path (caas_id.fetch_caas / disco.py): when the fg and bg
+        thresholds are equal, a labeling whose fg and bg sides both have gapped (or missing)
+        species, but in different pairs, is discarded.
+        """
         adm = _admitted_pattern_flags(admitted_patterns)
         g_fg = _threshold(maxgaps_fg)
         g_bg = _threshold(maxgaps_bg)
@@ -234,6 +263,17 @@ class VectorizedPermReplay:
         m_fg = _threshold(maxmiss_fg)
         m_bg = _threshold(maxmiss_bg)
         m_all = _threshold(maxmiss_all)
+
+        # Thresholds are 'equal' as in the scalar path: both sides capped at the same value,
+        # or both uncapped with an overall cap.
+        gap_pair_check = miss_pair and (
+            (g_fg is not None and g_bg is not None and g_fg == g_bg)
+            or (g_fg is None and g_bg is None and g_all is not None))
+        miss_pair_check = miss_pair and (
+            (m_fg is not None and m_bg is not None and m_fg == m_bg)
+            or (m_fg is None and m_bg is None and m_all is not None))
+        if gap_pair_check or miss_pair_check:
+            self._ensure_pair_index()
 
         n_pos = len(positions_with_schemes)
         gapmat = np.zeros((self.n_sp, n_pos), dtype=np.float32)
@@ -356,6 +396,17 @@ class VectorizedPermReplay:
                 admitted &= ~is_null
 
                 hit = valid & caas & admitted
+                if gap_pair_check or miss_pair_check:
+                    # Sparse: only labelings that are already hits and have the tested
+                    # condition on both sides can be discarded here.
+                    for li in np.nonzero(hit)[0]:
+                        b = start + int(li)
+                        if gap_pair_check and gfg[li] > 0 and gbg[li] > 0 and \
+                                self._pair_sets_differ(b, gapmat[:, pi]):
+                            hit[li] = False
+                        elif miss_pair_check and mfg[li] > 0 and mbg[li] > 0 and \
+                                self._pair_sets_differ(b, missmat[:, pi]):
+                            hit[li] = False
                 count = int(hit.sum())
 
                 key = (position_names[pi], sname) if caap_mode else position_names[pi]
@@ -388,7 +439,7 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions_with_sch
                                 max_fg_gaps, max_bg_gaps, max_overall_gaps,
                                 max_fg_miss, max_bg_miss, max_overall_miss,
                                 max_conserved, admitted_patterns, caap_mode,
-                                collect_hits=False):
+                                collect_hits=False, miss_pair=False):
     """Run the vectorized kernel for one resample multiconfig.
 
     Returns the same per-(position[, scheme]) count mapping the scalar loop
@@ -405,6 +456,7 @@ def _vectorized_position_counts(cfg, sliced_object, genename, positions_with_sch
         admitted_patterns=admitted_patterns,
         caap_mode=caap_mode,
         collect_hits=collect_hits,
+        miss_pair=miss_pair,
     )
 
 
@@ -778,7 +830,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                         max_fg_gaps, max_bg_gaps, max_overall_gaps,
                         max_fg_miss, max_bg_miss, max_overall_miss,
                         max_conserved, the_admitted_patterns, caap_mode,
-                        collect_hits=True,
+                        collect_hits=True, miss_pair=miss_pair,
                     )
                     if perm_discovery_handle is not None:
                         _emit_perm_discovery_rows(
@@ -793,6 +845,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                         max_fg_gaps, max_bg_gaps, max_overall_gaps,
                         max_fg_miss, max_bg_miss, max_overall_miss,
                         max_conserved, the_admitted_patterns, caap_mode,
+                        miss_pair=miss_pair,
                     )
                 for key, count in file_counts.items():
                     position_counts[key] = position_counts.get(key, 0) + count
@@ -880,7 +933,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                     max_fg_gaps, max_bg_gaps, max_overall_gaps,
                     max_fg_miss, max_bg_miss, max_overall_miss,
                     max_conserved, the_admitted_patterns, caap_mode,
-                    collect_hits=True,
+                    collect_hits=True, miss_pair=miss_pair,
                 )
                 if perm_discovery_handle is not None:
                     _emit_perm_discovery_rows(
@@ -895,6 +948,7 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                     max_fg_gaps, max_bg_gaps, max_overall_gaps,
                     max_fg_miss, max_bg_miss, max_overall_miss,
                     max_conserved, the_admitted_patterns, caap_mode,
+                    miss_pair=miss_pair,
                 )
             if fop_mode:
                 # Gap A: collapse per-labeling hits to base-cycle units.
