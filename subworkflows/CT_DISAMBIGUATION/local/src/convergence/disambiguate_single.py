@@ -37,6 +37,7 @@ from src.data.loaders import list_gene_caas_entries, parse_trait_pairs
 from src.biochem.grouping import get_grouping_scheme
 from src.convergence.path_scores import build_node_index, compute_domain_scores
 from src.convergence.fop_pool import pool_domains
+from src.core.pooling import pooled_sides
 from src.convergence.support_fmt import fmt_support
 
 logger = logging.getLogger(__name__)
@@ -161,8 +162,7 @@ def _emit_pooled_side_rows(
     # Harvest size (M) for this (position, scheme) pool.
     n_hypotheses = int(pooled.get("n_hypotheses", 0) or 0)
 
-    sides = [s for s in ("top", "bottom")
-             if int((pooled.get(s) or {}).get("n_participating", 0) or 0) > 0]
+    sides = pooled_sides(pooled)
     if not sides:
         return [dataclasses.replace(
             base, side="none", hypothesis=hyp_out, participating_hypotheses=None,
@@ -179,23 +179,21 @@ def _emit_pooled_side_rows(
         )]
 
     out: List[ConvergenceResult] = []
-    for s in sides:
-        d = pooled[s]
-        den = int(d.get("agree_den", 0) or 0)
-        da = (int(d.get("agree_num", 0) or 0) / den) if den else None
+    for sd in sides:
+        s = sd["side"]
         out.append(dataclasses.replace(
             base, side=s, hypothesis=hyp_out,
-            participating_hypotheses=(",".join(d.get("participating_hyps") or []) or None),
-            asr_path_score=float(d.get("asr_path_score", 0.0) or 0.0),
-            derived_agreement=da,
-            convergence_type=d.get("convergence_type", base.convergence_type),
-            domain_scores=(dict(d.get("domain_scores") or {}) or None),
-            domain_anc_aa=(dict(d.get("domain_anc") or {}) or None),
-            domain_der_top_aa=(dict(d.get("domain_der") or {}) or None) if s == "top" else None,
-            domain_der_bot_aa=(dict(d.get("domain_der") or {}) or None) if s == "bottom" else None,
-            domain_der_support_top_aa=(dict(d.get("domain_der_support") or {}) or None) if s == "top" else None,
-            domain_der_support_bot_aa=(dict(d.get("domain_der_support") or {}) or None) if s == "bottom" else None,
-            domain_anc_support_aa=(dict(d.get("domain_anc_support") or {}) or None),
+            participating_hypotheses=sd["participating_hyps"],
+            asr_path_score=sd["asr_path_score"],
+            derived_agreement=sd["derived_agreement"],
+            convergence_type=sd.get("convergence_type", base.convergence_type),
+            domain_scores=sd["domain_scores"],
+            domain_anc_aa=sd["domain_anc"],
+            domain_der_top_aa=sd["domain_der"] if s == "top" else None,
+            domain_der_bot_aa=sd["domain_der"] if s == "bottom" else None,
+            domain_der_support_top_aa=sd["domain_der_support"] if s == "top" else None,
+            domain_der_support_bot_aa=sd["domain_der_support"] if s == "bottom" else None,
+            domain_anc_support_aa=sd["domain_anc_support"],
             pair_lca=_pooled_pair_lca(hyp_rows, s),
             domain_meta=None,
             caas=derived_caas, amino_encoded=derived_amino_encoded,

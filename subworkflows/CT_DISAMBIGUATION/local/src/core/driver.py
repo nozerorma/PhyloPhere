@@ -14,6 +14,7 @@ from src.asr.asr_single import load_alignment_and_mappings, load_and_match_tree,
 from src.convergence.disambiguate_single import PositionAxes, analyze_gene_disambiguation
 from src.convergence.fop_pool import base_cycle, pool_domains
 from src.core.labelings import hyp_id, trait_pairs_from
+from src.core.pooling import pooled_sides
 from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
 from src.utils.io_utils import find_gene_alignment
 
@@ -161,24 +162,18 @@ def score_labelings(
 
 
 def _expand_pooled(pos, grp, hyp_label, pooled):
-    """pool_domains return -> <= 2 per-side PositionAxes rows (`side` authoritative,
-    `asr_path_score` = that side's core_s). No participating domain on either side -> one
-    `side="none"` row."""
-    out = []
-    for s in ("top", "bottom"):
-        agg = (pooled or {}).get(s) or {}
-        den = int(agg.get("agree_den", 0) or 0)
-        if int(agg.get("n_participating", 0) or 0) <= 0:
-            continue
-        asr_score = agg.get("asr_path_score", 0.0)
-        out.append(PositionAxes(
+    """pool_domains return -> <= 2 per-side PositionAxes rows (`side` authoritative, `asr_path_score` =
+    that side's core_s). No participating domain on either side -> one `side="none"` row."""
+    out = [
+        PositionAxes(
             position=pos, caap_group=grp,
-            asr_path_score=float(asr_score or 0.0),
-            side=s, hypothesis=hyp_label,
-            derived_agreement=(
-                (int(agg.get("agree_num", 0) or 0) / den) if den else None),
-            domain_scores=(dict(agg.get("domain_scores") or {}) or None),
-        ))
+            asr_path_score=sd["asr_path_score"],
+            side=sd["side"], hypothesis=hyp_label,
+            derived_agreement=sd["derived_agreement"],
+            domain_scores=sd["domain_scores"],
+        )
+        for sd in pooled_sides(pooled)
+    ]
     if not out:
         out.append(PositionAxes(
             position=pos, caap_group=grp, asr_path_score=0.0,
