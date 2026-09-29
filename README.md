@@ -401,7 +401,6 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 | `max_bg_miss_fraction` / `max_fg_miss_fraction` / `max_miss_fraction` | `0.0` | Missing-data tolerance fractions allowed. |
 | `miss_pair` | `true` | Enforces missing-pair matching in paired mode. |
 | `chunk_size` | `"500"` | Maximum number of resampled groups per output file. |
-| `include_b0` | `false` | Includes the main hypothesis ($B_0$) in output tables. |
 | `discovery_from` / `resample_from` / `bootstrap_from` | `""` | Input directory paths to resume execution from a precomputed CT stage. |
 | `alpha_threshold` | `0.05` | Alpha level for statistical significance tests. |
 | `export_groups` / `export_perm_discovery` | `false` | Debug options to export raw group structures or permuted discovery tables. |

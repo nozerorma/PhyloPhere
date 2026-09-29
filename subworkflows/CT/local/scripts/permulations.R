@@ -55,7 +55,7 @@ simpermvec <- function(namedvec, treewithbranchlengths) {
 args <- commandArgs(trailingOnly = TRUE)
 if (length(args) < 6) {
   stop("usage: permulations.R <tree> <config> <cycles> <strategy> <phenotypes> <outdir> ",
-       "[chunk_size] [include_b0] [pss_top_pct] [max_tries] [pheno_col] ",
+       "[chunk_size] [pss_top_pct] [max_tries] [pheno_col] ",
        "[n_col] [c_col] [resample_use_n] [trait_type] [multi_hypothesis] [max_fop] ",
        "[n_cpus] [seed]")
 }
@@ -71,18 +71,17 @@ selection.strategy <- tolower(args[4])      # "ou" | "bm"
 phenotypes         <- args[5]
 outdir             <- args[6]
 chunk.size         <- arg_or(7,  500L,       as.integer)
-include.b0         <- tolower(arg_or(8, "true")) %in% c("1", "true", "t", "yes", "y")
-pss_top_pct        <- arg_or(9,  0.01,       as.numeric)
-max_tries          <- arg_or(10, 1000000L,   as.integer)
-pheno_col_name     <- arg_or(11, "")
-n_col              <- arg_or(12, "")   # denominator column (e.g. adult_necropsy_count)
-c_col              <- arg_or(13, "")   # numerator column   (e.g. malignant_count)
-resample_use_n     <- tolower(arg_or(14, "true")) %in% c("1", "true", "t", "yes", "y")
-trait_type         <- tolower(arg_or(15, "auto"))
+pss_top_pct        <- arg_or(8,  0.01,       as.numeric)
+max_tries          <- arg_or(9,  1000000L,   as.integer)
+pheno_col_name     <- arg_or(10, "")
+n_col              <- arg_or(11, "")   # denominator column (e.g. adult_necropsy_count)
+c_col              <- arg_or(12, "")   # numerator column   (e.g. malignant_count)
+resample_use_n     <- tolower(arg_or(13, "true")) %in% c("1", "true", "t", "yes", "y")
+trait_type         <- tolower(arg_or(14, "auto"))
 # The null mirrors the observed design: with multi_hypothesis every accepted cycle also gets a FOP
 # hypothesis harvest (fop_labelings.tab / fop_pairs.tsv) so it is pooled like the observed data.
-fop_null           <- tolower(arg_or(16, "false")) %in% c("1", "true", "t", "yes", "y")
-max_fop            <- arg_or(17, 100L, as.integer)
+fop_null           <- tolower(arg_or(15, "false")) %in% c("1", "true", "t", "yes", "y")
+max_fop            <- arg_or(16, 100L, as.integer)
 
 # ── Parallelism + RNG seed ──────────────────────────────────────────────────
 # n_cpus drives the forked FOP-mirror harvest only (the pool harvest stays
@@ -90,7 +89,7 @@ max_fop            <- arg_or(17, 100L, as.integer)
 # exceed the physically available cores.
 .detected_cores <- tryCatch(parallel::detectCores(), error = function(e) 1L)
 if (!is.finite(.detected_cores) || .detected_cores < 1L) .detected_cores <- 1L
-n_cpus <- arg_or(18, NA_integer_, as.integer)
+n_cpus <- arg_or(17, NA_integer_, as.integer)
 if (is.na(n_cpus)) {
   .slurm_cpus <- suppressWarnings(as.integer(Sys.getenv("SLURM_CPUS_PER_TASK", "")))
   n_cpus <- if (!is.na(.slurm_cpus) && .slurm_cpus >= 1L) .slurm_cpus else .detected_cores
@@ -99,7 +98,7 @@ n_cpus <- max(1L, min(as.integer(n_cpus), .detected_cores))
 
 # Seed: reproducible parallel streams when supplied (Nextflow passes params.seed,
 # default 1998). Absent -> RNG is left unseeded, matching historical behaviour.
-seed_arg <- arg_or(19, NA_integer_, as.integer)
+seed_arg <- arg_or(18, NA_integer_, as.integer)
 if (!is.na(seed_arg)) {
   set.seed(seed_arg)
   log_msg("INFO", sprintf("RNG seeded with %d (L'Ecuyer-CMRG); FOP mirror uses %d core(s)",
@@ -109,7 +108,7 @@ if (!is.na(seed_arg)) {
 }
 
 if (fop_null && is.na(seed_arg)) {
-  stop("permulations.R: the FOP harvest needs the pipeline seed (argument 19, params.seed).")
+  stop("permulations.R: the FOP harvest needs the pipeline seed (argument 18, params.seed).")
 }
 
 # Design matching: keep only null cycles whose FOP harvest yields at least as many
@@ -283,17 +282,6 @@ if (selected_model == "OU") {
   simulation_tree$edge.length[simulation_tree$edge.length <= 0] <- 1e-8
 } else {
   simulation_tree <- pruned.tree
-}
-
-# ── b_0: the real labeling ───────────────────────────────────────────────────
-if (include.b0) {
-  write.table(
-    data.frame("b_0", paste(foreground.species, collapse = ","),
-               paste(background.species, collapse = ",")),
-    file = file.path(outdir, "resample_000.tab"),
-    sep = "\t", col.names = FALSE, row.names = FALSE, quote = FALSE
-  )
-  log_msg("INFO", "Wrote b_0 (original trait configuration) to resample_000.tab")
 }
 
 # ── Harvest ──────────────────────────────────────────────────────────────────

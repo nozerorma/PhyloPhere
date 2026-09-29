@@ -695,7 +695,6 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "perm_strategy": "${PERM_STRATEGY:-BM}",
   "max_tries": "${MAX_TRIES:-1000000}",
   "chunk_size": "${CHUNK_SIZE:-500}",
-  "include_b0": false,
   "multi_hypothesis": true,
   "max_fop": "${MAX_FOP:-100}",
   "export_groups": false,

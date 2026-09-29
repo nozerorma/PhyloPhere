@@ -68,7 +68,6 @@ class CaasConfig(ModuleConfigBase):
     perm_strategy: str = "auto"  # --perm_strategy (auto|OU|BM)
     max_tries: str = "1000000"  # --max_tries
     chunk_size: str = "500"  # --chunk_size
-    include_b0: bool = False  # --include_b0
     resample_use_n: bool = True  # --resample_use_n
     multi_hypothesis: bool = True  # --multi_hypothesis
     max_fop: str = "100"  # --max_fop (max FOP alternative hypotheses H1..Hn per contrast)

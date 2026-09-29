@@ -95,7 +95,6 @@ process RESAMPLE {
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
-        ${params.include_b0} \\
         ${params.pss_top_pct ?: 0.05} \\
         ${params.max_tries ?: 1000000} \\
         "${params.traitname ?: ''}" \\
@@ -155,7 +154,6 @@ process RESAMPLE {
         "${trait_val}" \\
         ${nw_tree.baseName}.resampled.output \\
         ${params.chunk_size} \\
-        ${params.include_b0} \\
         ${params.pss_top_pct ?: 0.05} \\
         ${params.max_tries ?: 1000000} \\
         "${params.traitname ?: ''}" \\

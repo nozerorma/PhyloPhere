@@ -872,8 +872,6 @@ def run_perm_replay_on_alignment(trait_config_file, resampled_traits, sliced_obj
                 log_progress(file_idx, resample_info['num_files'], start_time, 
                             log_file=progress_log, prefix=f"Processing file {os.path.basename(file_path)}")
                 
-                is_b0 = os.path.basename(file_path) == "resample_000.tab"
-
                 # BLAS path: one set of batched matmuls for the whole file.
                 if collect_hits:
                     file_counts, file_hits = _vectorized_position_counts(

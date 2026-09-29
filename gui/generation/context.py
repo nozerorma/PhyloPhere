@@ -108,7 +108,6 @@ def build_context(project: ProjectConfig) -> dict[str, Any]:
         "miss_pair": _bool_str(caas.miss_pair),
         "caap_mode": _bool_str(caas.caap_mode),
         "resample_use_n": _bool_str(getattr(caas, 'resample_use_n', True)),
-        "include_b0": _bool_str(caas.include_b0),
         "multi_hypothesis": _bool_str(getattr(caas, 'multi_hypothesis', True)),
         "caas_b0_diagnostic": _bool_str(getattr(caas, 'caas_b0_diagnostic', False)),
         "publish_intermediates": _bool_str(caas.publish_intermediates),

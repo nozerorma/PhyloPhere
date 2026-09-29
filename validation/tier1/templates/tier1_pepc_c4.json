@@ -89,7 +89,6 @@
       "perm_strategy": "auto",
       "max_tries": "100000",
       "chunk_size": "500",
-      "include_b0": false,
       "resample_use_n": true,
       "multi_hypothesis": true,
       "max_fop": "100",

@@ -111,7 +111,6 @@ Usage:
 --traitvalues                 <"traitvalues_file">          null   (required for BM/lambda)
 --perm_pheno_col             <STRING>                     ""     (trait column in --traitvalues; empty = auto-detect)
 --chunk_size                  <INTEGER>                    500
---include_b0                  <true|false>                 false
 
 Permulation sizing:
 --max_tries                  <INTEGER>                    1000000 (draw budget; raised 50% up to twice if the pool is short, then fails)

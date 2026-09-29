@@ -62,7 +62,6 @@ SPEC = ModuleTabSpec(
         ),
         Section("Resample / permulation params"),
         FieldSpec(name="chunk_size", label="Resampled groups per output file", importance="optional"),
-        FieldSpec(name="include_b0", label="Include main hypothesis (b0)", kind="bool", importance="default"),
         FieldSpec(name="resample_use_n", label="Use sample size counts (n/c)", kind="bool", importance="default"),
         FieldSpec(
             name="perm_strategy",

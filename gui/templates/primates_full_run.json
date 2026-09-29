@@ -99,7 +99,6 @@
       "perm_strategy": "BM",
       "traitvalues": "",
       "chunk_size": "500",
-      "include_b0": false,
       "alpha_threshold": "0.05",
       "export_groups": false,
       "export_perm_discovery": false
