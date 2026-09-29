@@ -1,8 +1,8 @@
 #!/bin/bash
 {% if profile == 'slurm' %}
 #SBATCH --job-name={{ runtime.sbatch_job_name }}
-#SBATCH --partition={{ runtime.sbatch_partition }}
-#SBATCH -t {{ runtime.sbatch_time }}
+{% if runtime.sbatch_partition %}#SBATCH --partition={{ runtime.sbatch_partition }}
+{% endif %}#SBATCH -t {{ runtime.sbatch_time }}
 #SBATCH -N 1
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=8G

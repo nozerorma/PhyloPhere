@@ -423,7 +423,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "ref_species_name": "${REF_SPECIES_NAME:-Homo_sapiens}",
   "ref_species_taxid": "${REF_SPECIES_TAXID:-9606}",
   "tax_id": "${INPUT_TAX_ID:-}",
-  "slurm_queue": "${SLURM_QUEUE:-haswell}",
+  "slurm_queue": "${SLURM_QUEUE:-{{ runtime.sbatch_partition }}}",
   "slurm_queue_size": "{{ resources.slurm_queue_size }}",
   "slurm_submit_rate_limit": "{{ resources.slurm_submit_rate_limit }}",
   "slurm_exit_read_timeout": "{{ resources.slurm_exit_read_timeout }}",

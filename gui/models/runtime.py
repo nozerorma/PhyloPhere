@@ -67,7 +67,7 @@ class RuntimeConfig:
 
     # --- SBATCH array-job wrapper (slurm + batched only) ---
     sbatch_job_name: str = "phylophere"
-    sbatch_partition: str = "haswell"
+    sbatch_partition: str = ""  # SLURM partition; "" = the cluster default
     sbatch_time: str = "144:00:00"
     sbatch_mail_user: str = ""
     sbatch_array_concurrency: str = ""  # the "%C" in --array=1-N%C; "" = uncapped
