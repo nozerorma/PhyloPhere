@@ -1074,6 +1074,18 @@ def _perms_worker_replay(
         return (gene, [])
 
 
+def _merge_gene_chunks(chunk_results: List[Tuple[str, List[Any]]]) -> List[Tuple[str, List[Any]]]:
+    """Concatenated chunk results of one gene, in canonical (cycle tag) order.
+
+    Chunks come back from the worker pool as they finish (imap_unordered), so their arrival order
+    varies between runs. Everything written downstream follows this order (the detail shard, the
+    per-cycle CAAS table, the reservoir behind perm_pos_sample.tsv), so it is fixed here. The sort
+    is stable: the records of one cycle keep the order their chunk produced, and a gene replayed in
+    a single chunk is left as it was (cycle tags are replayed in sorted order).
+    """
+    return sorted(chunk_results, key=lambda item: item[0])
+
+
 def _perms_worker_replay_wrapper(args):
     return _perms_worker_replay(*args)
 
@@ -1899,7 +1911,7 @@ def process_all_genes_perms(
             if received[_gene] < chunks_per_gene.get(_gene, 1):
                 continue  # more chunks still in flight for this gene
 
-            gene_pooled = pending_pooled.pop(_gene)
+            gene_pooled = _merge_gene_chunks(pending_pooled.pop(_gene))
             received.pop(_gene, None)
             _gene, detail_rows = _perms_worker_finalize(
                 _gene, gene_pooled, n_cycles_total,
