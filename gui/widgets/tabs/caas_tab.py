@@ -94,6 +94,12 @@ SPEC = ModuleTabSpec(
             importance="default",
         ),
         FieldSpec(
+            name="caas_b0_diagnostic",
+            label="Replay b_0 through the null path (validation)",
+            kind="bool",
+            importance="optional",
+        ),
+        FieldSpec(
             name="caas_perms_match_fop",
             label="Match null cycles to the observed FOP hypothesis count",
             kind="bool",

@@ -5,7 +5,9 @@
  * ────────────────────────────
  * Builds a genome-wide *excess* null for CAAS FCS pathway enrichment:
  *   1. SUBSET_RESAMPLE_PERMS  — take the first N (caas_full_perms) permuted
- *      labelings from the resample output (drop b_0, the real labeling).
+ *      labelings in cycle order (b_0, the real labeling, is never part of the null;
+ *      with caas_b0_diagnostic it is rebuilt from the observed design and replayed
+ *      alongside, written to caas_permulation/b0/).
  *   2. PERM_REPLAY            — full-pool perm-replay (no --discovery) with
  *      export_perm_discovery ON → per-gene per-cycle discovery rows.
  *   3. CONCAT_PERM_DISCOVERY  — stitch into one perm_discovery.tab.
@@ -21,7 +23,7 @@
  * Author: Miguel Ramon (miguel.ramon@upf.edu)
  */
 
-// ── 1. Subset the resample to N permuted labelings (drop b_0) ────────────────
+// ── 1. Collect the first N permuted labelings in cycle order (+ optional b_0) ─
 process SUBSET_RESAMPLE_PERMS {
     tag "caas_perms_subset|N=${n_perms}"
     label 'process_low'
@@ -30,39 +32,38 @@ process SUBSET_RESAMPLE_PERMS {
     input:
     path resample_dir
     val  n_perms
-    val  seed
+    path caas_config   // observed design: trait file or multi-hypothesis dir (source of b_0)
 
     output:
     path "resample_perms.tab", emit: subset
     path "fop_pairs.tsv", emit: fop_pairs, optional: true
 
     script:
+    def b0 = params.caas_b0_diagnostic ? true : false
+    def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     """
-    # Concatenate all resample cycles (-L: the resample dir is staged as a symlink,
-    # so follow it). Drop the original labeling (b_0), then take a SEEDED RANDOM
-    # sample of N labelings (not the first N — those are not exchangeable with an
-    # arbitrary null draw). gawk's srand(seed) is deterministic, so the same seed
-    # reproduces the same subset. We tag each candidate with a seeded rand() key,
-    # sort by it, write to a file, then awk-limit by reading that FILE and exit-ing
-    # early — avoids the SIGPIPE that `sort | head` triggers under pipefail.
+    # Deterministic collect: cycles are ordered by their numeric id and the first N are
+    # kept, so a resample reused with more cycles than N yields the same null every time.
+    # (-L: the resample dir is staged as a symlink.) The real labeling b_0 is never part
+    # of the null; with caas_b0_diagnostic it is rebuilt from the observed design and
+    # prepended, so it is replayed through the same path and split off downstream.
     FOP_TAB=""
     if [ -d "${resample_dir}" ]; then
         FOP_TAB=\$(find -L ${resample_dir} -name 'fop_labelings.tab' | head -n 1)
     fi
+    # numeric cycle id of a row's tag: "b_12~H3" -> 12
+    CYC='{b=\$1; sub(/^b_/,"",b); sub(/~.*/,"",b); print b"\\t"\$0}'
 
     if [ -n "\$FOP_TAB" ]; then
-        # ── FOP mirror: labelings are "<base>~H<m>". Sample N distinct BASE
-        #    cycles and keep ALL their hypothesis rows together, plus the
-        #    matching fop_pairs.tsv rows (PSS weights for domain pooling).
+        # FOP mirror: labelings are "<base>~H<m>". Keep ALL hypothesis rows of the first N
+        # base cycles, plus the matching fop_pairs.tsv rows (PSS weights for pooling).
         FOP_PAIRS=\$(find -L ${resample_dir} -name 'fop_pairs.tsv' | head -n 1)
-        awk -F'\\t' 'NF>=3 && \$1!="b_0"' "\$FOP_TAB" > candidates.tab
-        awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u > base_all.txt
-        awk -v seed=${seed} 'BEGIN{srand(seed)} {print rand()"\\t"\$0}' base_all.txt \\
-            | sort -k1,1g > base_shuffled.tab
-        awk -v n=${n_perms} '{sub(/^[^\\t]*\\t/,""); print; if(++c>=n) exit}' \\
-            base_shuffled.tab > keep_base.txt
+        awk -F'\\t' 'NF>=3 && \$1!~/^b_0(~|\$)/' "\$FOP_TAB" > candidates.tab
+        awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' candidates.tab | sort -u \\
+            | awk '{b=\$1; sub(/^b_/,"",b); print b"\\t"\$1}' | sort -k1,1n | cut -f2 > base_all.txt
+        awk -v n=${n_perms} '{print; if(++c>=n) exit}' base_all.txt > keep_base.txt
         awk -F'\\t' 'NR==FNR{k[\$1]=1; next} {b=\$1; sub(/~.*/,"",b); if(b in k) print}' \\
-            keep_base.txt candidates.tab > resample_perms.tab
+            keep_base.txt candidates.tab | awk -F'\\t' "\$CYC" | sort -s -k1,1n | cut -f2- > resample_perms.tab
         if [ -n "\$FOP_PAIRS" ]; then
             awk -F'\\t' 'NR==FNR{k[\$1]=1; next} FNR==1{if(!seen){print; seen=1}; next} (\$1 in k){print}' \\
                 keep_base.txt "\$FOP_PAIRS" > fop_pairs.tsv
@@ -70,8 +71,15 @@ process SUBSET_RESAMPLE_PERMS {
         n=\$(awk -F'\\t' '{b=\$1; sub(/~.*/,"",b); print b}' resample_perms.tab | sort -u | wc -l)
         rows=\$(wc -l < resample_perms.tab)
         avail=\$(wc -l < base_all.txt)
-        echo "[caas_perms] FOP mirror seed=${seed}: \$n of \$avail base cycles (\$rows hypothesis labelings)"
+        echo "[caas_perms] FOP mirror: first \$n of \$avail base cycles in cycle order (\$rows hypothesis labelings; requested ${n_perms})"
         if [ "\$rows" -eq 0 ]; then echo "ERROR: no FOP labelings selected" >&2; exit 1; fi
+        if $b0; then
+            ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --fop \\
+                --labelings-out b0_labelings.tab --pairs-out b0_pairs.tsv
+            cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
+            if [ ! -f fop_pairs.tsv ]; then echo "ERROR: b_0 needs fop_pairs.tsv" >&2; exit 1; fi
+            cat b0_pairs.tsv >> fop_pairs.tsv
+        fi
         exit 0
     fi
 
@@ -82,15 +90,16 @@ process SUBSET_RESAMPLE_PERMS {
     else
         echo "ERROR: resample input not found: ${resample_dir}" >&2; exit 1
     fi
-    awk -F'\\t' 'NF>=3 && \$1!="b_0"' all_resamples.tab > candidates.tab
-    awk -v seed=${seed} 'BEGIN{srand(seed)} {print rand()"\\t"\$0}' candidates.tab \\
-        | sort -k1,1g > shuffled.tab
-    awk -v n=${n_perms} '{sub(/^[^\\t]*\\t/,""); print; if(++c>=n) exit}' \\
-        shuffled.tab > resample_perms.tab
+    awk -F'\\t' 'NF>=3 && \$1!="b_0"' all_resamples.tab | awk -F'\\t' "\$CYC" | sort -s -k1,1n | cut -f2- > candidates.tab
+    awk -v n=${n_perms} '{print; if(++c>=n) exit}' candidates.tab > resample_perms.tab
     n=\$(wc -l < resample_perms.tab)
     avail=\$(wc -l < candidates.tab)
-    echo "[caas_perms] seed=${seed}: sampled \$n of \$avail permuted labelings (requested ${n_perms})"
+    echo "[caas_perms] first \$n of \$avail permuted labelings in cycle order (requested ${n_perms})"
     if [ "\$n" -eq 0 ]; then echo "ERROR: no permuted labelings selected" >&2; exit 1; fi
+    if $b0; then
+        ${run} $baseDir/subworkflows/CT/local/scripts/build_b0_labelings.py --config ${caas_config} --labelings-out b0_labelings.tab
+        cat b0_labelings.tab resample_perms.tab > resample_perms.tmp && mv resample_perms.tmp resample_perms.tab
+    fi
     """
 }
 
@@ -238,6 +247,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     tag "caas_perms_disambiguate"
     label 'process_resample'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'gene_cycle_scores.tsv'
+    publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true, pattern: 'b0'
 
     input:
     path "perm_disc/*"
@@ -252,6 +262,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     path "perm_pos_sample.tsv",          emit: pos_sample
     path "perm_pos_quantiles.tsv",       emit: pos_quantiles
     path "perm_pos_detail",              emit: pos_detail   // dir: one gz shard per gene
+    path "b0",                           emit: b0, optional: true   // caas_b0_diagnostic: the real labeling scored by this same run (never in the null)
 
     script:
     def local_dir = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
@@ -294,6 +305,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     cp caas_perms_out/perm_pos_sample.tsv perm_pos_sample.tsv
     cp caas_perms_out/perm_pos_quantiles.tsv perm_pos_quantiles.tsv
     cp -R caas_perms_out/perm_pos_detail perm_pos_detail
+    if [ -d caas_perms_out/b0 ]; then cp -R caas_perms_out/b0 b0; fi
     """
 }
 
@@ -493,7 +505,7 @@ workflow CAAS_PERMS_PREP {
 
     main:
         def permReplayBatchSize = (params.ct_perm_replay_batch_size ?: 1) as int
-        def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms ?: 10, params.seed ?: 1998)
+        def subset = SUBSET_RESAMPLE_PERMS(resample_dir, params.caas_full_perms ?: 10, caas_config)
         def perm_replay_in = align_tuple
             .map { id, f -> tuple(id, f) }
             .combine(subset.subset)
@@ -581,6 +593,9 @@ workflow CAAS_PERMULATION {
         def gene_cycle_scores_ch
 
         if (disambigBatchSize > 1) {
+            if (params.caas_b0_diagnostic) {
+                error "caas_b0_diagnostic needs ct_disambig_perms_batch_size = 1 (the batched null skips gene removal and the b_0 shards are not merged)"
+            }
             def disambigBatchCounter = 0
             def perm_disc_batches = perm_discovery
                 .flatMap { files -> files.sort { it.name } }

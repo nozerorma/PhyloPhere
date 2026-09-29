@@ -21,7 +21,8 @@ from typing import Tuple
 
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 
-from src.utils.gene_wrapper import process_all_genes_perms
+from src.utils.gene_wrapper import process_all_genes_perms, _read_resample_labelings
+from src.convergence.fop_pool import base_cycle
 from src.utils.logger import configure_logging
 
 logger = logging.getLogger(__name__)
@@ -152,33 +153,49 @@ def main():
     if args.cycles:
         cycles = [c.strip() for c in args.cycles.split(",") if c.strip()]
 
+    # The real labeling (b_0, present only under caas_b0_diagnostic) is replayed as its
+    # own single-labeling run into <output-dir>/b0: it goes through the identical code
+    # but must never enter the null (n_detected, percent-rank pools and gene removal are
+    # all computed over the cycles of one call).
+    all_tags = cycles if cycles else sorted(_read_resample_labelings(args.resample_dir))
+    b0_tags = [c for c in all_tags if base_cycle(c) == "b_0"]
+    null_tags = [c for c in all_tags if base_cycle(c) != "b_0"]
+
+    def run(run_cycles, run_dir):
+        return process_all_genes_perms(
+            genes=genes,
+            alignment_dir=args.alignment_dir,
+            tree_file=args.tree,
+            perm_discovery_file=args.perm_discovery,
+            resample_dir=args.resample_dir,
+            taxid_mapping_path=args.taxid_mapping,
+            asr_model=args.asr_model,
+            asr_cache_dir=args.asr_cache_dir,
+            posterior_threshold=args.posterior_threshold,
+            workers=args.workers,
+            output_dir=run_dir,
+            ensembl_genes_file=args.ensembl_genes_file,
+            cycles=run_cycles,
+            max_tasks_per_child=args.max_tasks_per_child,
+            fop_pairs_file=args.fop_pairs,
+            gene_lengths_file=args.gene_lengths,
+            clust_minlen=args.clust_minlen,
+            clust_maxcaas=args.clust_maxcaas,
+            gene_filter_mode=args.gene_filter_mode,
+            iqr_multiplier=args.iqr_multiplier,
+            extreme_percentile=args.extreme_percentile,
+            postproc_filter=args.postproc_filter,
+            gene_sizes=gene_sizes,
+            seed=args.seed,
+        )
+
     t0 = time.time()
-    out_path = process_all_genes_perms(
-        genes=genes,
-        alignment_dir=args.alignment_dir,
-        tree_file=args.tree,
-        perm_discovery_file=args.perm_discovery,
-        resample_dir=args.resample_dir,
-        taxid_mapping_path=args.taxid_mapping,
-        asr_model=args.asr_model,
-        asr_cache_dir=args.asr_cache_dir,
-        posterior_threshold=args.posterior_threshold,
-        workers=args.workers,
-        output_dir=output_dir,
-        ensembl_genes_file=args.ensembl_genes_file,
-        cycles=cycles,
-        max_tasks_per_child=args.max_tasks_per_child,
-        fop_pairs_file=args.fop_pairs,
-        gene_lengths_file=args.gene_lengths,
-        clust_minlen=args.clust_minlen,
-        clust_maxcaas=args.clust_maxcaas,
-        gene_filter_mode=args.gene_filter_mode,
-        iqr_multiplier=args.iqr_multiplier,
-        extreme_percentile=args.extreme_percentile,
-        postproc_filter=args.postproc_filter,
-        gene_sizes=gene_sizes,
-        seed=args.seed,
-    )
+    if not null_tags:
+        raise RuntimeError("[perms] no permuted labelings to replay (only b_0 or nothing was found)")
+    out_path = run(null_tags, output_dir)
+    if b0_tags:
+        logger.info(f"b_0 diagnostic: replaying {len(b0_tags)} b_0 labeling(s) -> {output_dir / 'b0'}")
+        run(b0_tags, output_dir / "b0")
     logger.info(f"Done in {time.time() - t0:.1f}s → {out_path}")
 
 
