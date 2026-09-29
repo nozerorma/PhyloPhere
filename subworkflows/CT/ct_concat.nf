@@ -44,14 +44,18 @@ process CONCAT_DISCOVERY {
     echo "Line count: \$(wc -l < "\${discovery_files[0]}")"
     echo ""
     
-    # Copy first file completely (header + data)
-    cat "\${discovery_files[0]}" > discovery.tab
-    
-    # Append remaining files without their headers
-    for ((i=1; i<\${#discovery_files[@]}; i++)); do
+    # One header, then every file's rows ordered by gene. The staged files come in the order the per-gene
+    # (or per-batch) discovery tasks finished, and everything downstream numbers rows (meta_caas assigns its
+    # seeded CAAS_ ids by row position), so the order must not depend on it. The sort is stable: a gene's
+    # rows all come from one file and keep the order they were written in. -T . keeps sort out of /tmp.
+    head -n 1 "\${discovery_files[0]}" > discovery.tab
+    : > discovery_body.tmp
+    for ((i=0; i<\${#discovery_files[@]}; i++)); do
         echo "Appending file \$((i+1))/\${#discovery_files[@]}: \${discovery_files[\$i]} (\$(wc -l < "\${discovery_files[\$i]}") lines)"
-        tail -n +2 "\${discovery_files[\$i]}" >> discovery.tab
+        tail -n +2 "\${discovery_files[\$i]}" >> discovery_body.tmp
     done
+    LC_ALL=C sort -s -t \$'\t' -k1,1 -T . discovery_body.tmp >> discovery.tab
+    rm -f discovery_body.tmp
     
     echo ""
     echo "Discovery concatenation complete: \$(wc -l < discovery.tab) lines (full multi-hypothesis set preserved)."
@@ -103,8 +107,9 @@ process CONCAT_BACKGROUND {
     echo "Line count: \$(wc -l < "\${background_files[0]}")"
     echo ""
 
-    # Concatenate all background files (no headers to strip)
-    cat "\${background_files[@]}" > background.output
+    # Concatenate all background files (no headers to strip), ordered by gene: the staged order is the order
+    # the tasks finished. -s keeps the order of equal genes, -T . keeps sort out of /tmp.
+    cat "\${background_files[@]}" | LC_ALL=C sort -s -t \$'\t' -k1,1 -T . > background.output
 
     echo "Final background file line count: \$(wc -l < background.output)"
     echo "Final file preview:"
@@ -113,7 +118,7 @@ process CONCAT_BACKGROUND {
     # Generate background_genes.output: unique gene list where Position is not empty
     echo ""
     echo "Generating background_genes.output..."
-    awk -F'\t' 'NF >= 2 && \$2 != "" && \$2 != "Position" && \$2 != "NULL" {print \$1}' background.output | sort -u > background_genes.output
+    awk -F'\t' 'NF >= 2 && \$2 != "" && \$2 != "Position" && \$2 != "NULL" {print \$1}' background.output | LC_ALL=C sort -u -T . > background_genes.output
     echo "Unique genes with positions: \$(wc -l < background_genes.output)"
     """
 }
