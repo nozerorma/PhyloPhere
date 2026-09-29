@@ -25,8 +25,7 @@ Pipe the output back through scoring_caas_perms.R to regenerate caas_perms.rds:
         --gene-cycle-scores <run>/caas_permulation/gene_cycle_scores.tsv \\
         --output            <run>/caas_permulation/caas_perms.rds
 
-IMPORTANT: this deliberately calls gene_wrapper's own build_percent_rank_lookup
-and _finalize_perm_scores rather than reimplementing the aggregation. The gene
+IMPORTANT: this deliberately calls gene_wrapper's own _finalize_perm_scores rather than reimplementing the aggregation. The gene
 score is F(max)^n over a pool of heavily tied values, so a difference of 1e-16 in
 how the per-position sum is accumulated can flip a tie boundary, and the ^n then
 amplifies it -- a pandas reimplementation was measured drifting up to 5.9e-3 from
@@ -42,7 +41,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from src.utils.gene_wrapper import (  # noqa: E402
-    build_percent_rank_lookup,
     _cycle_gene_removal_from_detail,
     _finalize_perm_scores,
     iter_detail_rows,
@@ -54,28 +52,17 @@ logger = logging.getLogger(__name__)
 
 
 def scan_detail(detail_path: Path):
-    """One pass over the detail file (or shard directory) for the two things pass A
-    would have produced.
+    """One pass over the detail file (or shard directory): the cycles present and the row count.
 
-    Returns (cycle_tags, hist_by_cycle) where hist_by_cycle[cycle][n_detected] is
-    the count of (gene, position, scheme) candidates that cycle discovered at that
-    replication level -- the input build_percent_rank_lookup expects.
+    Returns (cycle_tags, n_rows); cycle_tags is sorted so the emitted gene x cycle rows keep a deterministic
+    column order.
     """
-    hist_by_cycle = {}
+    cycles = set()
     n_rows = 0
-    seen_cand = set()  # (cyc, Position, caap_group) — a T3c per-side shard has
-    # two rows per "both" position; the candidate-pool histogram counts it once.
     for row in iter_detail_rows(detail_path):
-        cyc = row["cycle"]
-        d = int(row["n_detected"])
-        ck = (cyc, str(row.get("Position")), row.get("caap_group"))
-        if ck not in seen_cand:
-            seen_cand.add(ck)
-            per_cycle = hist_by_cycle.setdefault(cyc, {})
-            per_cycle[d] = per_cycle.get(d, 0) + 1
+        cycles.add(row["cycle"])
         n_rows += 1
-    # Sorted so the emitted gene x cycle rows keep a deterministic column order.
-    return sorted(hist_by_cycle), hist_by_cycle, n_rows
+    return sorted(cycles), n_rows
 
 
 def main() -> int:
@@ -104,7 +91,7 @@ def main() -> int:
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("[reaggregate] scanning %s", args.detail)
-    cycle_tags, hist_by_cycle, n_rows = scan_detail(args.detail)
+    cycle_tags, n_rows = scan_detail(args.detail)
     logger.info("[reaggregate] %d rows across %d cycles", n_rows, len(cycle_tags))
     if not cycle_tags:
         logger.error("no cycles found in detail file; nothing to do")
@@ -120,12 +107,10 @@ def main() -> int:
         logger.info("[reaggregate] gene removal (%s): %d (cycle, group, gene) units",
                     args.gene_filter_mode, len(removed))
 
-    rank_lookup = build_percent_rank_lookup(hist_by_cycle)
     _finalize_perm_scores(
         detail_path=args.detail,
         output_dir=args.output_dir,
         cycle_tags=cycle_tags,
-        rank_lookup=rank_lookup,
         removed=removed,
         seed=args.seed,
     )

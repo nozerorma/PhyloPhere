@@ -931,58 +931,6 @@ from src.core.driver import load_gene_context as _load_gene_asr_context  # noqa:
 # substitution rather than evidence strength. The null mirrors that exactly.
 
 
-def build_percent_rank_lookup(hist_by_cycle: Dict[str, Dict[int, int]]) -> Dict[str, Dict[int, float]]:
-    """Exact dplyr::percent_rank over each cycle's genome-wide candidate pool.
-
-    Historical note: this rank used to feed the null's phenotype axis, matching
-    how the observed side built its own (scoring_compute.R: `1 -
-    percent_rank(recovery_boot)` over the whole scored pool) before T1 dropped
-    the phen factor and retired the diagnostic `null_phen_score` column that
-    consumed it. The function and its call site are kept (see `rank_lookup`
-    threading in `_finalize_perm_scores`/`_build_cycle_score_pools`) but the
-    result is no longer used to score anything. The rank was what made the axis
-    usable: the underlying recovery statistic is heavily concentrated near zero
-    (mean ~0.03), so `1 - raw` would be a near-constant ~0.97, whereas `1 -
-    percent_rank` is uniform on [0, 1] with mean 0.50 — the same scale the
-    observed axis occupied, which was the condition for the two being
-    comparable at all.
-
-    Each cycle is ranked within its OWN candidate pool, so the pool is the set of
-    (gene, position, scheme) triples that cycle discovered. This is what gives the
-    axis per-cycle variation: a position's raw detection count is fixed, but its
-    rank depends on the composition of the cycle it appears in.
-
-    The detection p-value is monotone in n_detected, so ranking n_detected ranks
-    the p-value identically. That collapses the pool to a per-cycle histogram
-    (n_detected -> count), a few MB rather than tens of millions of rows, which is
-    what allows the rank to be formed without holding the full detail in memory.
-
-    dplyr defines percent_rank(x) = (rank(x, ties="min") - 1) / (n - 1), i.e. the
-    fraction of the pool STRICTLY BELOW x. A cumulative sweep over the histogram
-    reproduces that exactly, ties included.
-
-    Returns {cycle: {n_detected: percent_rank}}.
-    """
-    lookup: Dict[str, Dict[int, float]] = {}
-    for cycle, hist in hist_by_cycle.items():
-        total = sum(hist.values())
-        # dplyr yields NaN for a single-element vector; a lone candidate has
-        # nothing to be ranked against, so treat it as the bottom of its pool
-        # (percent_rank 0 -> phen_score 1), consistent with the strictly-below
-        # definition.
-        if total <= 1:
-            lookup[cycle] = {d: 0.0 for d in hist}
-            continue
-        denom = float(total - 1)
-        cum_below = 0
-        per_cycle: Dict[int, float] = {}
-        for d in sorted(hist):
-            per_cycle[d] = cum_below / denom
-            cum_below += hist[d]
-        lookup[cycle] = per_cycle
-    return lookup
-
-
 @functools.lru_cache(maxsize=8)
 def _scan_perm_discovery_dir(disc_path: Path) -> Dict[str, Path]:
     """One-time directory listing of a per-gene perm-discovery shard directory,
@@ -1146,8 +1094,8 @@ def _perms_worker_finalize(
     # ── 1. Detection count per (position, scheme) ──────────────────────────
     # n_detected counts, per (Position, caap_group), how many of the
     # permuted-labeling cycles independently re-detected that exact CAAS.
-    # It feeds the detail row's own `n_detected` column (used for the
-    # candidate-pool histogram / percent_rank calibration below), not a
+    # It fills the detail row's own `n_detected` column (a per-position
+    # replication count kept in the shards), not a
     # position-level p-value in its own right -- p.emp (scoring_compute.R,
     # from perm_pos_cycle_caas.tsv.gz) is the sole position-level permulation
     # p downstream.
@@ -1229,61 +1177,11 @@ def _perms_worker_finalize(
     return (gene, detail_rows)
 
 
-def _perms_worker(
-    gene: str,
-    alignment_dir: str,
-    tree_file: str,
-    taxid_mapping_path: Optional[str],
-    asr_model: str,
-    asr_cache_dir: str,
-    posterior_threshold: float,
-    cycle_tags: List[str],
-    cycle_labelings: Dict[str, Tuple[List[str], List[str]]],
-    perm_discovery_file: str,
-    ensembl_genes: Optional[Set[str]] = None,
-    fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None,
-    postproc_filter: bool = False,
-    clust_minlen: int = 3,
-    clust_maxcaas: float = 0.7,
-) -> Tuple[str, List[Dict[str, Any]]]:
-    """Replay N labelings over one gene's cached ASR, one gene = one worker task
-    (unchunked). Composes _perms_worker_replay + _perms_worker_finalize with a
-    single whole-gene chunk, so behavior is identical to the pre-Stage-2 monolithic
-    worker. Kept for callers that still want one call per gene (small batches,
-    direct-call debugging/profiling scripts); process_all_genes_perms itself now
-    dispatches via the split functions so a large gene's replay can be spread
-    across multiple workers -- see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md
-    Stage 2.
-    """
-    _, pooled = _perms_worker_replay(
-        gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
-        asr_cache_dir, posterior_threshold, cycle_tags, cycle_labelings,
-        perm_discovery_file, ensembl_genes, fop_pairs,
-    )
-    if fop_pairs is not None:
-        from src.convergence.fop_pool import base_cycle as _bc
-        n_cycles_total = len({_bc(c) for c in cycle_tags})
-    else:
-        n_cycles_total = len(cycle_tags)
-    return _perms_worker_finalize(
-        gene, pooled, n_cycles_total, postproc_filter, clust_minlen, clust_maxcaas,
-    )
-
-
-def _perms_worker_wrapper(args):
-    return _perms_worker(*args)
-
-
-def _null_row_caas(row: Dict[str, Any], rank_lookup: Dict[str, Dict[int, float]]) -> float:
+def _null_row_caas(row: Dict[str, Any]) -> float:
     """caas_row for one null detail row (mirror of scoring_compute.R §2f).
 
-    T1 decision E: ``caas_row = asr_score`` — the phen_score (permulation
-    percent-rank) factor is dropped from the product on both the observed and
-    null sides. ``rank_lookup`` is unused here now that the diagnostic
-    ``null_phen_score`` column has been retired; kept in the signature only to
-    avoid touching the call chain in ``_build_cycle_score_pools``/
-    ``_finalize_perm_scores``. Single definition shared by BOTH finalize
-    sub-passes.
+    T1 decision E: ``caas_row = asr_score`` (no permulation percent-rank factor, on both the observed and
+    null sides). Single definition shared by BOTH finalize sub-passes.
     """
     return float(row["asr_path_score"])
 
@@ -1380,7 +1278,6 @@ def write_removed_units(path: Path, removed: Set[Tuple[str, str, str]]) -> None:
 
 def _build_cycle_score_pools(
     detail_path: Path,
-    rank_lookup: Dict[str, Dict[int, float]],
     removed: Optional[Set[Tuple[str, str, str]]] = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Sub-pass B1: per-cycle, per-direction pool of position-level null scores.
@@ -1388,8 +1285,8 @@ def _build_cycle_score_pools(
     The gene-level null statistic is size_adj_max = F(max)^n, mirroring
     scoring_compute.R section 4a. F must be the ECDF of the pool the gene's
     positions were actually drawn from, so every cycle needs its OWN pool --
-    exactly as the observed side calibrates against the pool it discovered, and
-    as build_percent_rank_lookup already does for the phen axis. Without this the
+    exactly as the observed side calibrates against the pool it discovered.
+    Without this the
     null would be calibrated against a different reference than the observed
     score and the FCS p.perm comparison would be invalid.
 
@@ -1452,7 +1349,7 @@ def _build_cycle_score_pools(
             continue
         key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
         entry = pos_agg.setdefault(key, [0.0, 0])
-        entry[0] += _null_row_caas(row, rank_lookup)
+        entry[0] += _null_row_caas(row)
         entry[1] += 1
     if current_gene is not None:
         _drain_side(pos_agg)
@@ -1482,12 +1379,11 @@ def _finalize_perm_scores(
     detail_path: Path,
     output_dir: Path,
     cycle_tags: List[str],
-    rank_lookup: Dict[str, Dict[int, float]],
     sample_per_cycle_group: Optional[int] = None,
     removed: Optional[Set[Tuple[str, str, str]]] = None,
     seed: int = 1998,
 ) -> None:
-    """Pass B: rank within each cycle, score, and aggregate to gene x cycle stats.
+    """Pass B: score and aggregate to gene x cycle stats.
 
     Mirrors scoring_compute.R's observed pipeline term for term:
 
@@ -1536,7 +1432,7 @@ def _finalize_perm_scores(
     _rm = removed or set()
 
     # ── Sub-pass B1: per-cycle reference pools for the size-adjusted max ──────
-    cycle_pools = _build_cycle_score_pools(detail_path, rank_lookup, removed=_rm)
+    cycle_pools = _build_cycle_score_pools(detail_path, removed=_rm)
     logger.info("[perms] pass B1 done: size-adjust reference pools built for %d cycles",
                 len(cycle_pools))
 
@@ -1745,17 +1641,16 @@ def process_all_genes_perms(
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
 
-    Two passes, because the null's phenotype axis is a percent_rank over each
-    cycle's genome-wide candidate pool while workers only ever see a single gene:
+    Two passes, because each gene's score is calibrated against its cycle's genome-wide pool of position
+    scores while workers only ever see a single gene:
 
       Pass A (parallel, one gene per worker) replays the labelings and streams raw
         per-(gene, cycle, position, scheme) detail to perm_pos_detail/<Gene>.tsv.gz
         (one gz shard per gene, since each worker result is one gene's complete
-        row list), accumulating a per-cycle histogram of n_detected as rows go by.
-      Pass B (single process, streaming) turns those histograms into exact
-        per-cycle percent_rank lookups, re-reads the detail shards via
-        iter_detail_rows(), and derives null_row_caas -> position scores ->
-        per-(gene, cycle) q90.
+        row list).
+      Pass B (single process, streaming) re-reads the detail shards via
+        iter_detail_rows(), builds each cycle's pool of position scores and derives
+        null_row_caas -> position scores -> per-(gene, cycle) size-adjusted max.
 
     Outputs:
       - output_dir/gene_cycle_scores.tsv     (feeds caas_perms.rds)
@@ -1897,12 +1792,8 @@ def process_all_genes_perms(
         for gene, chunk, _est in tasks
     )
 
-    # ── Pass A: replay labelings, stream detail, count per-cycle candidate pools ─
-    # hist_by_cycle[cycle][n_detected] = how many (gene, position, scheme)
-    # candidates that cycle discovered at that replication level. Bounded by
-    # n_cycles^2 counters (~1000x1000 ints, a few MB) no matter how many rows the
-    # detail file holds.
-    hist_by_cycle: Dict[str, Dict[int, int]] = {}
+    # ── Pass A: replay labelings and stream the per-gene detail shards ──────────
+    cycles_seen: Set[str] = set()
     pool = mp.Pool(
         processes=effective_workers, maxtasksperchild=maxtasks,
         initializer=init_worker, initargs=(1, None),
@@ -1960,19 +1851,7 @@ def process_all_genes_perms(
             manifest_rows.append((_gene, len(detail_rows)))
 
             n_detail_rows += len(detail_rows)
-            # Per-cycle candidate-pool histogram, used by build_percent_rank_lookup
-            # below and for the pool-size diagnostic log. One count per (cycle,
-            # Position, caap_group) candidate: a "both" position is two detail
-            # rows and must NOT be counted twice.
-            _hist_seen: Set[Tuple[str, str, str]] = set()
-            for row in detail_rows:
-                hk = (row["cycle"], str(row["Position"]), row["caap_group"])
-                if hk in _hist_seen:
-                    continue
-                _hist_seen.add(hk)
-                cyc_hist = hist_by_cycle.setdefault(row["cycle"], {})
-                d = row["n_detected"]
-                cyc_hist[d] = cyc_hist.get(d, 0) + 1
+            cycles_seen.update(row["cycle"] for row in detail_rows)
             n_genes += 1
     finally:
         pool.close()
@@ -1985,7 +1864,7 @@ def process_all_genes_perms(
 
     logger.info(
         f"[perms] pass A done: {n_genes} genes, {n_detail_rows} (gene,cycle,position,scheme) "
-        f"rows across {len(hist_by_cycle)} cycles -> {detail_dir.name}/ ({n_genes} shards)"
+        f"rows across {len(cycles_seen)} cycles -> {detail_dir.name}/ ({n_genes} shards)"
     )
     if n_genes < len(genes):
         logger.info(
@@ -2000,16 +1879,7 @@ def process_all_genes_perms(
             "per-cycle perm-replay discovery (export_perm_discovery) and the ASR cache."
         )
 
-    # ── Pass B: rank within each cycle, score, aggregate ────────────────────────
-    rank_lookup = build_percent_rank_lookup(hist_by_cycle)
-    pool_sizes = {c: sum(h.values()) for c, h in hist_by_cycle.items()}
-    if pool_sizes:
-        sizes = sorted(pool_sizes.values())
-        logger.info(
-            "[perms] per-cycle candidate pool size: min=%d median=%d max=%d "
-            "(observed side ranks over its own discovered pool the same way)",
-            sizes[0], sizes[len(sizes) // 2], sizes[-1],
-        )
+    # ── Pass B: score each cycle against its own pool, aggregate ────────────────
 
     # ── Sub-pass B0 (Gap B): cycle-aware dubious/extreme gene removal ──────────
     removed: Set[Tuple[str, str, str]] = set()
@@ -2044,7 +1914,6 @@ def process_all_genes_perms(
         detail_path=detail_dir,
         output_dir=output_dir,
         cycle_tags=finalize_cycle_tags,
-        rank_lookup=rank_lookup,
         removed=removed,
         seed=seed,
     )
