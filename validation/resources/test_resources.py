@@ -130,8 +130,9 @@ def test_batch_wrapper_omits_the_partition_line_when_empty_and_keeps_the_next_di
 # ── processes sized from a full-genome run (11.8k genes, 12 hypotheses x 1000 cycles) ──
 #
 # RESAMPLE peaked at 3.0-3.5 GB, PERM_REPLAY_BATCHED had six of 804 batches taking 42-179 min
-# at 8 cpus (the four longest averaged 5.5 busy cores) with a 14.6 GB peak, and SCORING_COMPUTE
-# peaked at 23.5 GB. A request below these makes an attempt fail or the slowest batch time out.
+# at 8 cpus (the four longest averaged 5.5 busy cores; 8.9-14.6 GB peak depending on whether Slurm
+# or Nextflow's trace measures it), and SCORING_COMPUTE peaked at 22.5-23.5 GB. A request below
+# these makes an attempt fail or the slowest batch time out.
 
 _SIZED = """
 process RESAMPLE { label 'process_resample'
@@ -184,11 +185,11 @@ def test_perm_replay_batches_have_the_cpus_and_time_the_slowest_batch_needs(size
     first = sized[("PERM_REPLAY_BATCHED", 1)]
     assert first["cpus"] >= 8              # the slowest batches are cpu-bound: 4.7-6.5 busy cores of 8
     assert first["minutes"] >= 12 * 60     # 179 min at 8 cpus, and more at fewer
-    assert first["mem"] >= 16              # 14.6 GB peak
+    assert first["mem"] >= 16              # up to 14.6 GB by the trace, 8.9 GB by Slurm
     assert sized[("PERM_REPLAY_BATCHED", 2)]["mem"] > first["mem"]
 
 
 def test_scoring_compute_starts_above_its_measured_peak_and_still_escalates(sized):
     first, second = sized[("SCORING_COMPUTE", 1)], sized[("SCORING_COMPUTE", 2)]
-    assert first["mem"] >= 24              # 23.5 GB peak
+    assert first["mem"] >= 32              # 22.5 GB by Slurm, 23.5 GB by the trace, plus margin
     assert second["mem"] > first["mem"]
