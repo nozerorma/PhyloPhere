@@ -7,6 +7,9 @@
 * Gene score: ``size_adj_max(x) = F(max(x)) ** len(x)`` with F the ECDF of the reference
   pool of the same direction (and, in the null, of the same labeling). It is None when the
   gene has no scored position in that direction or the pool is empty: no positions, no score.
+  F counts pool values up to ``max + TIE_TOL``: position scores are means of a few values in
+  [0, 1], so means that are equal in exact arithmetic can differ by rounding noise (~1e-16),
+  and the pool is heavily tied. The tolerance makes those ties deterministic.
 
 Pure Python. Sums are correctly rounded (``math.fsum``), so the result does not depend on
 the order the schemes were filled in and the same inputs give the same bits wherever the
@@ -19,10 +22,14 @@ import bisect
 import math
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-__all__ = ["DIRECTIONS", "position_sum", "position_score", "collapse_sides",
+__all__ = ["DIRECTIONS", "TIE_TOL", "position_sum", "position_score", "collapse_sides",
            "direction_values", "size_adj_max", "gene_scores"]
 
 DIRECTIONS = ("all", "top", "bottom")
+
+# Absolute; scores lie in [0, 1]. Rounding noise of a mean of <= 5 values is ~1e-16, and real
+# differences between position scores are orders of magnitude larger.
+TIE_TOL = 1e-12
 
 
 def _is_value(x) -> bool:
@@ -68,12 +75,13 @@ def direction_values(positions: Iterable[Mapping[str, float]]) -> Dict[str, List
 def size_adj_max(values: Sequence[float], pool_sorted: Sequence[float]) -> Optional[float]:
     """``(#{pool <= max(values)} / len(pool)) ** len(values)``; None if either input is empty.
 
-    ``pool_sorted`` must be ascending. Ties at the maximum count as below-or-equal.
+    ``pool_sorted`` must be ascending. Pool values within ``TIE_TOL`` above the maximum are
+    ties and count as below-or-equal.
     """
     xs = [v for v in values if _is_value(v)]
     if not xs or len(pool_sorted) == 0:
         return None
-    return (bisect.bisect_right(pool_sorted, max(xs)) / len(pool_sorted)) ** len(xs)
+    return (bisect.bisect_right(pool_sorted, max(xs) + TIE_TOL) / len(pool_sorted)) ** len(xs)
 
 
 def gene_scores(

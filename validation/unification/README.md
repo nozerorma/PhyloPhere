@@ -66,7 +66,10 @@ Position score, side collapse and gene score are defined once and called by the 
 - Position score: mean of `caas_row` (= `asr_path_score`) over the schemes that scored it, per side. The sum is
   `math.fsum` (correctly rounded, independent of scheme order).
 - Directions: `top` / `bottom` use only that side; `all` keeps one entry per position, its best side.
-- Gene score: `(#{pool <= max} / |pool|) ** n`. It is None (written NA) when the gene has no scored position in
+- Gene score: `(#{pool <= max + 1e-12} / |pool|) ** n`. The tolerance (`TIE_TOL`) makes ties deterministic: position
+  scores are means of a few values and the pool is heavily tied (toy, 1000 genes: 3016 rows, ~887 distinct values),
+  so means equal in exact arithmetic that differ by an ulp would otherwise move the count by several positions.
+  On that toy the gaps between distinct scores were either ~1e-17 or >= 1e-7. It is None (written NA) when the gene has no scored position in
   the direction or the pool is empty. `scoring_caas_perms.R` fills those cells with 0 when it builds the dense
   genes x cycles matrix, so `caas_perms.rds` and the FCS null do not change; only `gene_cycle_scores.tsv` shows
   NA where it used to show 0.0.

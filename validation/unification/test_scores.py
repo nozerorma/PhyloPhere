@@ -146,3 +146,25 @@ def test_null_gene_cycle_scores_use_core_scores_and_na_for_empty_cells(tmp_path)
     assert pd.isna(got.loc[("gA", "c1"), "top_caas"])           # gA has no top position
     assert got.loc[("gA", "c2"), ["global_caas", "top_caas", "bottom_caas"]].isna().all()   # empty cycle
     assert (got.loc[("gA", "c2"), ["global_asr", "top_asr", "bottom_asr"]] == 0).all()
+
+
+# ── ties at the maximum ──────────────────────────────────────────────────────
+
+def test_size_adj_max_counts_values_within_rounding_noise_of_the_maximum_as_ties():
+    """Means that are equal in exact arithmetic can differ by an ulp; they must count as ties."""
+    m = 0.3
+    pool = sorted([0.1, m - 3e-17, m, math.nextafter(m, 1.0), math.nextafter(math.nextafter(m, 1.0), 1.0), 0.9])
+    assert size_adj_max([m], pool) == pytest.approx(5 / 6)   # the three near-ties and 0.1 are <= max, 0.9 is not
+
+
+def test_size_adj_max_keeps_real_differences_apart():
+    pool = [0.1, 0.3, 0.3 + 1e-9, 0.9]
+    assert size_adj_max([0.3], pool) == pytest.approx(2 / 4)
+
+
+def test_size_adj_max_is_invariant_to_ulp_noise_in_the_inputs():
+    rng = random.Random(4)
+    base = [round(rng.random(), 3) for _ in range(300)]
+    noisy = [math.nextafter(v, 1.0) if rng.random() < .5 else v for v in base]
+    for m in base[:40]:
+        assert size_adj_max([m], sorted(base)) == size_adj_max([m], sorted(noisy))
