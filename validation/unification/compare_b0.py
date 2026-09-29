@@ -55,11 +55,14 @@ def compare_sets(a, b, label_a="observed", label_b="b_0", n_examples=5):
     }
 
 
-def compare_values(df_a, df_b, key, cols_a, cols_b, tol, n_examples=5):
-    """Inner-join two tables on `key`; report set differences and value deltas."""
+def compare_values(df_a, df_b, key, cols_a, cols_b, tol, n_examples=5, bitwise=False):
+    """Inner-join two tables on `key`; report set differences and value deltas.
+
+    With `bitwise`, also report how many compared values differ in any bit (informational: only
+    meaningful when both tables were read and written without rounding)."""
     res = compare_sets(_keyset(df_a, key), _keyset(df_b, key))
     m = df_a.merge(df_b, on=key, suffixes=("_obs", "_b0"))
-    worst, n_bad, ex = 0.0, 0, []
+    worst, n_bad, n_bits, ex = 0.0, 0, 0, []
     for ca, cb in zip(cols_a, cols_b):
         x = pd.to_numeric(m[ca if ca != cb else ca + "_obs"], errors="coerce").to_numpy(float)
         y = pd.to_numeric(m[cb if ca != cb else cb + "_b0"], errors="coerce").to_numpy(float)
@@ -67,11 +70,14 @@ def compare_values(df_a, df_b, key, cols_a, cols_b, tol, n_examples=5):
         d = np.where(both_nan, 0.0, np.abs(x - y))  # one-sided NaN -> nan -> counted as bad
         bad = ~(d <= tol)
         n_bad += int(bad.sum())
+        n_bits += int((~both_nan & (x != y)).sum())
         if len(d):
             worst = max(worst, float(np.nanmax(np.where(np.isnan(d), np.inf, d))))
         for i in np.flatnonzero(bad)[:n_examples]:
             ex.append({**{k: str(m[k].iloc[i]) for k in key}, "col": ca, "observed": x[i], "b_0": y[i]})
     res.update(n_compared=len(m), n_value_mismatch=n_bad, max_abs_delta=worst, examples_value=ex[:n_examples])
+    if bitwise:
+        res["n_bitwise_different"] = n_bits
     res["pass"] = res["only_observed"] == 0 and res["only_b_0"] == 0 and n_bad == 0
     return res
 
@@ -81,7 +87,7 @@ def read_detail(b0_dir):
     shards = sorted(glob.glob(str(Path(b0_dir) / "perm_pos_detail" / "*.tsv.gz")))
     if not shards:
         sys.exit(f"ERROR: no b_0 detail shards under {b0_dir}/perm_pos_detail (run with --caas_b0_diagnostic true)")
-    return pd.concat((pd.read_csv(s, sep="\t") for s in shards), ignore_index=True)
+    return pd.concat((pd.read_csv(s, sep="\t", float_precision="round_trip") for s in shards), ignore_index=True)
 
 
 def checkpoint_A(run, b0_dir, tol, perm_disc=None):
@@ -124,12 +130,12 @@ def checkpoint_B(run, b0_dir, tol):
 
 def checkpoint_C(run, b0_dir, tol):
     m = pd.read_csv(Path(run) / "ct_disambiguation" / "caas_convergence_master.csv",
-                    usecols=["gene", "msa_pos", "caap_group", "side", "asr_path_score"])
+                    usecols=["gene", "msa_pos", "caap_group", "side", "asr_path_score"], float_precision="round_trip")
     m = m.rename(columns={"gene": "Gene", "msa_pos": "Position"})
     d = read_detail(b0_dir)
     return compare_values(m, d[["Gene", "Position", "caap_group", "side", "asr_path_score"]],
                           ["Gene", "Position", "caap_group", "side"],
-                          ["asr_path_score"], ["asr_path_score"], tol)
+                          ["asr_path_score"], ["asr_path_score"], tol, bitwise=True)
 
 
 def checkpoint_D(run, b0_dir, tol):
@@ -147,21 +153,19 @@ def checkpoint_E(run, b0_dir, tol):
     g0 = pd.read_csv(Path(b0_dir) / "gene_cycle_scores.tsv", sep="\t",
                      usecols=["Gene", "global_caas", "top_caas", "bottom_caas"])
     pairs = [("gene_caas_score", "global_caas"), ("gene_caas_score_top_all", "top_caas"), ("gene_caas_score_bottom_all", "bottom_caas")]
-    # Empty-gene convention: b_0 writes 0 (or omits the gene), the observed side writes NA.
+    # A gene with no scored position in a direction is NA on both sides.
     genes = sorted(set(gs["Gene"]) | set(g0["Gene"]))
     gs, g0 = gs.set_index("Gene").reindex(genes), g0.set_index("Gene").reindex(genes)
-    n_empty, bad, worst, ex = 0, 0, 0.0, []
+    bad, worst, ex = 0, 0.0, []
     for co, cb in pairs:
-        x, y = gs[co].to_numpy(float), g0[cb].fillna(0.0).to_numpy(float)
-        empty = np.isnan(x) & (y == 0.0)
-        n_empty += int(empty.sum())
-        d = np.where(empty, 0.0, np.abs(x - y))
+        x, y = gs[co].to_numpy(float), g0[cb].to_numpy(float)
+        d = np.where(np.isnan(x) & np.isnan(y), 0.0, np.abs(x - y))  # one-sided NaN -> nan -> bad
         b = ~(d <= tol)
         bad += int(b.sum())
         worst = max(worst, float(np.max(np.where(np.isnan(d), np.inf, d))) if len(d) else 0.0)
         ex += [{"Gene": genes[i], "col": co, "observed": x[i], "b_0": y[i]} for i in np.flatnonzero(b)[:5]]
     return {"n_genes": len(genes), "n_value_mismatch": bad, "max_abs_delta": worst,
-            "n_empty_convention": n_empty, "examples_value": ex[:5], "pass": bad == 0}
+            "examples_value": ex[:5], "pass": bad == 0}
 
 
 FUNCS = {"A": checkpoint_A, "B": checkpoint_B, "C": checkpoint_C, "D": checkpoint_D, "E": checkpoint_E}

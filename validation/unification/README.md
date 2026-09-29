@@ -112,3 +112,11 @@ differed in the last bit (rows pooled over >= 3 hypotheses). `test_pool_domains_
 (M = 3, 12, 100) and requires identical bits. Against the frozen PEPC master (100 hypotheses) the float columns now
 differ by <= 1.7e-15 and every other cell is identical, so `test_observed_pepc.py` compares floats with a
 1e-12 tolerance. Whether observed and `b_0` now agree bit for bit is checked on the next cluster run.
+
+## Harness details (`compare_b0.py`)
+
+- C reads with `float_precision="round_trip"` and reports `n_bitwise_different` (informational: rows whose
+  `asr_path_score` differs in any bit between the observed master and the `b_0` detail; the pass criterion stays
+  |delta| <= 1e-12).
+- E requires the NA pattern of the gene scores to match: a gene with no scored position in a direction is NA on both
+  sides. A null that writes 0 there fails.
