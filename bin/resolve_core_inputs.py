@@ -5,7 +5,7 @@ Nextflow, auto-generating whichever is left blank.
 
 Why this runs outside main.nf: Nextflow (25.x) enforces single-assignment on
 each params key — a params.tax_id = ... inside workflow{} that runs after
-conf/common.config's own params.tax_id = params.tax_id ?: "" is silently
+conf/common.config's own params.tax_id = "" default is silently
 ignored ("`params.tax_id` is defined multiple times -- Assignments following
 the first are ignored"), confirmed empirically, not assumed. So auto-
 generation can't happen invisibly inside the pipeline for the ~15 places

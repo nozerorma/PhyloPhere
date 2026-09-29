@@ -34,6 +34,15 @@ include { RESAMPLE } from '../subworkflows/CT/ct_resample'
 include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE } from '../subworkflows/CT/ct_concat'
 include { CAAS_PERMS_PREP } from '../subworkflows/CT/caas_permulation'
 
+/**
+ * Render a list of TSV row strings into a heredoc-safe manifest block.
+ */
+def createBatchManifestText(List<String> rows) {
+    return rows
+        .collect { row -> row.replaceFirst(/^\s+/, '') }
+        .join(System.lineSeparator()) + System.lineSeparator()
+}
+
 // Main workflow
 
 workflow CT {
@@ -42,12 +51,6 @@ workflow CT {
         permulation_trait_file_in
         tree_file_in
     main:
-        def createBatchManifestText = { List<String> rows ->
-            rows
-                .collect { row -> row.replaceFirst(/^\s+/, '') }
-                .join(System.lineSeparator()) + System.lineSeparator()
-        }
-
         // Output channels for emit block - must be defined at workflow level
         def discovery_concat_out = Channel.empty()
         def background_concat_out = Channel.empty()
@@ -196,17 +199,17 @@ workflow CT {
                 nw_tree = tree_file_out
                     .combine(resample_trigger)
                     .map { row ->
-                        (row instanceof List || row instanceof Object[]) ? row[0] : row
+                        (row instanceof List || row?.getClass()?.isArray()) ? row[0] : row
                     }
                 caas_config = trait_file_out
                     .combine(resample_trigger)
                     .map { row ->
-                        (row instanceof List || row instanceof Object[]) ? row[0] : row
+                        (row instanceof List || row?.getClass()?.isArray()) ? row[0] : row
                     }
                 trait_values = trait_val
                     .combine(resample_trigger)
                     .map { row ->
-                        (row instanceof List || row instanceof Object[]) ? row[0] : row
+                        (row instanceof List || row?.getClass()?.isArray()) ? row[0] : row
                     }
             } else {
                 // tree_file_out, trait_file_out, and trait_val are file objects that need to be channelized

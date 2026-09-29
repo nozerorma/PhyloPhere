@@ -47,10 +47,78 @@ include { FADE_JSON_TO_CSV as FADE_JSON_TO_CSV_TOP; FADE_JSON_TO_CSV as FADE_JSO
 /**
  * Render a list of TSV row strings into a heredoc-safe manifest block.
  */
-def createBatchManifestText = { List<String> rows ->
-    rows
+def createBatchManifestText(List<String> rows) {
+    return rows
         .collect { row -> row.replaceFirst(/^\s+/, '') }
         .join(System.lineSeparator()) + System.lineSeparator()
+}
+
+/**
+ * Batch the (gene_id, direction, fasta, fg_species, tree, bg_species) rows of one
+ * direction into ANNOTATE_TREE_FG_BATCHED inputs of `batch_size` genes each.
+ */
+def make_annotate_batches(branch_ch, dir, batch_size) {
+    def batchCounter = 0
+    return branch_ch
+        .toSortedList({ a, b -> a[0] <=> b[0] })
+        .flatMap()
+        .collate(batch_size)
+        .map { batch ->
+            def batchID = String.format('annotate_batch_%s_%05d', dir, ++batchCounter)
+            // row[5] (bg_species_file) is legitimately NO_FILE whenever
+            // fade_background_scope == 'all' -- only rows 2/3/4 (fasta,
+            // fg species, tree) are required to be real files.
+            def validRows = batch.findAll { row ->
+                row[2]?.name != 'NO_FILE' && row[3]?.name != 'NO_FILE' && row[4]?.name != 'NO_FILE'
+            }
+            if (!validRows) return null
+            def manifestText = createBatchManifestText(
+                validRows.collect { row -> "${row[0]}\t${row[1]}\t${row[2].name}\t${row[4].name}\t${row[3].name}\t${row[5].name}" }
+            )
+            // Tree, FG list, and BG list are shared within a direction
+            // batch; deduplicate to avoid Nextflow stageAs filename collisions.
+            def uniqTrees = validRows.collect { row -> row[4] }.unique { it.name }
+            def uniqSpecies = validRows.collect { row -> row[3] }.unique { it.name }
+            def uniqBgSpecies = validRows.collect { row -> row[5] }.unique { it.name }
+            tuple(batchID, validRows.size(), manifestText,
+                  validRows.collect { row -> row[2] },   // fastas
+                  uniqTrees,                          // trees
+                  uniqSpecies,                        // fg species files
+                  uniqBgSpecies)                      // bg species files
+        }
+        .filter { it != null }
+}
+
+/**
+ * Batch the (gene_id, direction, filtered_fasta, annotated_tree) rows of one
+ * direction into FADE_BATCHED inputs of `batch_size` genes each.
+ */
+def make_fade_batches(branch_ch, dir, batch_size) {
+    def batchCounter = 0
+    return branch_ch
+        .toSortedList({ a, b -> a[0] <=> b[0] })
+        .flatMap()
+        .collate(batch_size)
+        .map { batch ->
+            def batchID = String.format('fade_batch_%s_%05d', dir, ++batchCounter)
+            def manifestText = createBatchManifestText(
+                batch.collect { row -> "${row[0]}\t${row[2].name}\t${row[3].name}" }
+            )
+            tuple(batchID, dir, batch.size(), manifestText,
+                  batch.collect { row -> row[2] },   // filtered fastas
+                  batch.collect { row -> row[3] })   // annotated trees
+        }
+}
+
+/**
+ * Split a FADE_GENE_LISTS `gene_lists` channel into the direction's background
+ * universe (background.txt) and its interest lists (every other file).
+ */
+def split_gene_lists(gene_lists_ch) {
+    return [
+        bg:       gene_lists_ch.flatten().filter { it.name == 'background.txt' }.collect(),
+        interest: gene_lists_ch.flatten().filter { it.name != 'background.txt' }.collect()
+    ]
 }
 
 
@@ -133,40 +201,8 @@ workflow FADE {
                 bottom: it[1] == 'bottom'
             }
 
-            def make_annotate_batches = { branch_ch, dir ->
-                def batchCounter = 0
-                branch_ch
-                    .toSortedList({ a, b -> a[0] <=> b[0] })
-                    .flatMap()
-                    .collate(annotBatchSize)
-                    .map { batch ->
-                        def batchID = String.format('annotate_batch_%s_%05d', dir, ++batchCounter)
-                        // row[5] (bg_species_file) is legitimately NO_FILE whenever
-                        // fade_background_scope == 'all' -- only rows 2/3/4 (fasta,
-                        // fg species, tree) are required to be real files.
-                        def validRows = batch.findAll { row ->
-                            row[2]?.name != 'NO_FILE' && row[3]?.name != 'NO_FILE' && row[4]?.name != 'NO_FILE'
-                        }
-                        if (!validRows) return null
-                        def manifestText = createBatchManifestText(
-                            validRows.collect { row -> "${row[0]}\t${row[1]}\t${row[2].name}\t${row[4].name}\t${row[3].name}\t${row[5].name}" }
-                        )
-                        // Tree, FG list, and BG list are shared within a direction
-                        // batch; deduplicate to avoid Nextflow stageAs filename collisions.
-                        def uniqTrees = validRows.collect { row -> row[4] }.unique { it.name }
-                        def uniqSpecies = validRows.collect { row -> row[3] }.unique { it.name }
-                        def uniqBgSpecies = validRows.collect { row -> row[5] }.unique { it.name }
-                        tuple(batchID, validRows.size(), manifestText,
-                              validRows.collect { row -> row[2] },   // fastas
-                              uniqTrees,                          // trees
-                              uniqSpecies,                        // fg species files
-                              uniqBgSpecies)                      // bg species files
-                    }
-                    .filter { it != null }
-            }
-
-            def batches_ch = make_annotate_batches(annotate_branched.top,    'top')
-                .mix(make_annotate_batches(annotate_branched.bottom, 'bottom'))
+            def batches_ch = make_annotate_batches(annotate_branched.top,    'top',    annotBatchSize)
+                .mix(make_annotate_batches(annotate_branched.bottom, 'bottom', annotBatchSize))
 
             def batched_out = ANNOTATE_TREE_FG_BATCHED(batches_ch)
             
@@ -205,25 +241,8 @@ workflow FADE {
                 bottom: it[1] == 'bottom'
             }
 
-            def make_fade_batches = { branch_ch, dir ->
-                def batchCounter = 0
-                branch_ch
-                    .toSortedList({ a, b -> a[0] <=> b[0] })
-                    .flatMap()
-                    .collate(fadeBatchSize)
-                    .map { batch ->
-                        def batchID = String.format('fade_batch_%s_%05d', dir, ++batchCounter)
-                        def manifestText = createBatchManifestText(
-                            batch.collect { row -> "${row[0]}\t${row[2].name}\t${row[3].name}" }
-                        )
-                        tuple(batchID, dir, batch.size(), manifestText,
-                              batch.collect { row -> row[2] },   // filtered fastas
-                              batch.collect { row -> row[3] })   // annotated trees
-                    }
-            }
-
-            def batches_ch = make_fade_batches(fade_branched.top,    'top')
-                .mix(make_fade_batches(fade_branched.bottom, 'bottom'))
+            def batches_ch = make_fade_batches(fade_branched.top,    'top',    fadeBatchSize)
+                .mix(make_fade_batches(fade_branched.bottom, 'bottom', fadeBatchSize))
 
             def batched_out = FADE_BATCHED(batches_ch, lg_dat_ch).fade_json
             fade_results_ch = batched_out
@@ -252,13 +271,6 @@ workflow FADE {
         // flag anymore. FADE's own gene lists/background per direction are always
         // computed automatically and feed the unified 13.AMI_analysis.Rmd
         // (ENRICHMENT workflow) via gene_lists_bg_*/gene_lists_sig_* below.
-        def run_fade_enrich = { direction, summary_tsv_ch, gene_lists_proc ->
-            def lists_out    = gene_lists_proc(Channel.value(direction), summary_tsv_ch)
-            def bg_ch        = lists_out.gene_lists.flatten().filter { it.name == 'background.txt' }.collect()
-            def interest_ch  = lists_out.gene_lists.flatten().filter { it.name != 'background.txt' }.collect()
-            [bg: bg_ch, interest: interest_ch]
-        }
-
         def run_top    = wanted_directions.contains('top')
         def run_bottom = wanted_directions.contains('bottom')
 
@@ -279,7 +291,8 @@ workflow FADE {
 
             sites_csv_top_ch = FADE_JSON_TO_CSV_TOP(Channel.value('top'), top_jsons).sites_csv
 
-            def top_lists    = run_fade_enrich('top', summary_top_ch, { d, s -> FADE_GENE_LISTS_TOP(d, s) })
+            def top_lists_out = FADE_GENE_LISTS_TOP(Channel.value('top'), summary_top_ch)
+            def top_lists    = split_gene_lists(top_lists_out.gene_lists)
             fade_gene_lists_bg_top_out  = top_lists.bg
             fade_gene_lists_sig_top_out = top_lists.interest
         }
@@ -301,7 +314,8 @@ workflow FADE {
 
             sites_csv_bottom_ch = FADE_JSON_TO_CSV_BOTTOM(Channel.value('bottom'), bottom_jsons).sites_csv
 
-            def bottom_lists    = run_fade_enrich('bottom', summary_bottom_ch, { d, s -> FADE_GENE_LISTS_BOTTOM(d, s) })
+            def bottom_lists_out = FADE_GENE_LISTS_BOTTOM(Channel.value('bottom'), summary_bottom_ch)
+            def bottom_lists    = split_gene_lists(bottom_lists_out.gene_lists)
             fade_gene_lists_bg_bottom_out  = bottom_lists.bg
             fade_gene_lists_sig_bottom_out = bottom_lists.interest
         }

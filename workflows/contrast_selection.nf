@@ -38,6 +38,7 @@ include { CHECK_MIN_CONTRASTS } from '../subworkflows/CT/ct_check_min_contrasts'
 include { NAME_CURATION } from '../subworkflows/TRAIT_ANALYSIS/ta_name_curation'
 
 workflow CONTRAST_SELECTION {
+    main:
     assert params.my_traits : "Contrast selection workflow requires --my_traits."
     assert params.tree : "Contrast selection workflow requires --tree."
 

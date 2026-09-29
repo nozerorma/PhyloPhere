@@ -102,6 +102,11 @@ process PUBLISH_UNIVERSES {
     """
 }
 
+// Channel of a `.collect()`-wrapped single-element List<Path> -> channel of the bare Path.
+def unwrap1(ch) {
+    return ch.map { it instanceof List ? it[0] : it }
+}
+
 workflow ENRICHMENT {
     take:
         fcs_stats
@@ -140,7 +145,6 @@ workflow ENRICHMENT {
         // chain there; normalize to a single Path here so every downstream use
         // (stageAs, DOMINO_MODULES' background arg, PUBLISH_UNIVERSES) sees one
         // consistent shape regardless of whether the tool ran this invocation.
-        def unwrap1 = { ch -> ch.map { it instanceof List ? it[0] : it } }
         def rer_bg_r         = unwrap1(rer_gene_lists_bg_ch)
         def fade_bg_top_r    = unwrap1(fade_gene_lists_bg_top_ch)
         def fade_bg_bottom_r = unwrap1(fade_gene_lists_bg_bottom_ch)

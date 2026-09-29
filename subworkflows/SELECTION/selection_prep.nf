@@ -31,8 +31,8 @@ include { EXTRACT_EXTREME_SPECIES } from './selection_utils.nf'
 /**
  * Render a list of TSV row strings into a heredoc-safe manifest block.
  */
-def createBatchManifestText = { List<String> rows ->
-    rows
+def createBatchManifestText(List<String> rows) {
+    return rows
         .collect { row -> row.replaceFirst(/^\s+/, '') }
         .join(System.lineSeparator()) + System.lineSeparator()
 }

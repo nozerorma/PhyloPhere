@@ -34,6 +34,7 @@ include { DATASET_PRUNE } from '../subworkflows/TRAIT_ANALYSIS/ta_data_prune'
 include { NAME_CURATION } from '../subworkflows/TRAIT_ANALYSIS/ta_name_curation'
 
 workflow REPORTING {
+    main:
     assert params.my_traits : "Reporting workflow requires --my_traits."
     assert params.tree : "Reporting workflow requires --tree."
 

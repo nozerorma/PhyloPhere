@@ -2,7 +2,7 @@
   "schema_version": 1,
   "flavor": "primates",
   "general": {
-    "project_name": "cancer_no_prune_multi",
+    "project_name": "cancer_no_prune_multi_toy",
     "seed": "1998",
     "reporting": true,
     "repo_dir": "/homes/users/mramon/scratch/0.Phylophere",
@@ -11,14 +11,14 @@
     "remote_root_dir": "/homes/users/mramon/scratch/"
   },
   "runtime": {
-    "resume": true,
-    "toy_mode": false,
+    "resume": false,
+    "toy_mode": true,
     "toy_n": "",
     "runtime_type": "slurm",
     "batched": true,
-    "script_base_name": "cancer_no_prune_multi",
-    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_no_prune_multi_def",
-    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi_def",
+    "script_base_name": "cancer_b0_toy",
+    "work_dir": "/homes/users/mramon/scratch/3.Work_dirs_cancer_b0_toy",
+    "results_dir": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_b0_toy",
     "use_tower": true,
     "sbatch_job_name": "phylophere",
     "sbatch_partition": "high-cpu",
@@ -45,15 +45,6 @@
         "secondary": "malignant_prevalence",
         "n_trait": "adult_necropsy_count",
         "c_trait": "neoplasia_necropsy",
-        "prune": "",
-        "prune_secondary": "",
-        "trait_type": ""
-      },
-      {
-        "trait": "malignant_prevalence",
-        "secondary": "neoplasia_prevalence",
-        "n_trait": "adult_necropsy_count",
-        "c_trait": "malignant_count",
         "prune": "",
         "prune_secondary": "",
         "trait_type": ""
@@ -92,6 +83,7 @@
       "resample_use_n": true,
       "multi_hypothesis": true,
       "max_fop": "50",
+      "caas_b0_diagnostic": true,
       "export_groups": true,
       "export_perm_discovery": false
     },
@@ -118,15 +110,15 @@
       "iqr_multiplier": "3.0"
     },
     "accumulation": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "accumulation_n_randomizations": "1000000",
       "accumulation_randomization_type": "cons_decile",
       "accumulation_entropy_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/PROT_VAR_RAW",
-      "accumulation_fdr": "0.1"
+      "accumulation_fdr": "0.15"
     },
     "rer": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "rer_tool_build_trait": true,
       "rer_tool_build_tree": true,
@@ -146,13 +138,13 @@
       "rer_min_pos": "2",
       "rer_pval_threshold": "0.05",
       "rer_pval_column": "p.perm",
-      "rer_top_n_labels": "25",
+      "rer_top_n_labels": "20",
       "rer_transform": "ha_logit",
       "rer_universe_file": "",
       "rer_gene_scores": ""
     },
     "fade": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "fade_direction": "both",
       "fade_background_scope": "all",
@@ -174,7 +166,7 @@
       "fade_universe_file": ""
     },
     "vep": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
       "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
@@ -200,14 +192,14 @@
       "scoring_string": true,
       "scoring_compare_fdr": "0.15",
       "scoring_compare_top_n": "25",
-      "scoring_stress": true,
+      "scoring_stress": false,
       "scoring_stress_top_n": "25",
       "scoring_stress_rank_metric": "spearman",
       "scoring_window_size_bp": "1000000",
       "scoring_p_emp_thr": "0.15"
     },
     "enrichment": {
-      "enabled": true,
+      "enabled": false,
       "extra_flags": "",
       "posenrich_enabled": true,
       "fcs_enabled": true,
@@ -217,7 +209,7 @@
       "fcs_max_genes": "1000",
       "fcs_fdr": "0.15",
       "fcs_pperm_thr": "0.025",
-      "fcs_top_n": "30",
+      "fcs_top_n": "25",
       "fcs_batch_size": "4",
       "string_db_dir": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/STRING",
       "string_cache_dir": "",
@@ -229,7 +221,7 @@
       "scoring_ami": true,
       "scoring_string": true,
       "scoring_compare_fdr": "0.15",
-      "scoring_compare_top_n": "20",
+      "scoring_compare_top_n": "25",
       "comparison_perm_null": true,
       "comparison_perm_stat": "spearman",
       "comparison_perm_topk": "0.05",
@@ -246,12 +238,12 @@
       "fubar_sites_file": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/reports/positive_selection/fubar_sites.tsv",
       "posenrich_min_size": "5",
       "posenrich_max_size": "0",
-      "posenrich_padj_thr": "0.15",
+      "posenrich_padj_thr": "0.1",
       "posenrich_batch_size": "4"
     }
   },
   "precomputed": {
-    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_final_noprune",
+    "base_path": "/homes/users/mramon/scratch/2.Primates/2.Primates_results/CAAS_RESULTS/cancer_no_prune_multi_def",
     "use_ct": false,
     "use_discovery": false,
     "use_resample": false,

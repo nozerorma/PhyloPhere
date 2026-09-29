@@ -33,22 +33,6 @@
 
 nextflow.enable.dsl = 2
 
-version = "2.0.0"
-
-// Display input parameters
-log.info """
-
-PHYLOPHERE - NF PIPELINE  ~  version ${version}
-=============================================
-
-PHYLOPHERE: A Nextflow pipeline including a complete set
-of phylogenetic comparative tools and analyses for Phenome-Genome studies
-
-Author:         Miguel Ramon (miguel.ramon@upf.edu)
-
-
-"""
-
 /*
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  *  NAMED WORKFLOW FOR PIPELINE: This section includes the main workflows.
@@ -80,38 +64,21 @@ include {CAAS_SIGNIFICANCE_REPORT} from './subworkflows/CT_META_CAAS/ctpp_meta_c
 include {CAAS_PERMULATION; CAAS_PERMS_PREP} from './subworkflows/CT/caas_permulation.nf'
 include {ENRICHMENT}      from './workflows/enrichment.nf'
 
-// Workflow-map helper logic lives in lib/WorkflowMap.groovy (auto-loaded by Nextflow)
+// Coerce a param that may arrive as Boolean, String ("false", "0", ...) or null into a Boolean.
+def toBool(val) {
+    if (val == null) return false
+    if (val instanceof Boolean) return val
+    if (val instanceof String) return !(val.trim().toLowerCase() in ['false', '0', 'no', 'f', ''])
+    return val as boolean
+}
 
-// Post-completion: write workflow_map.html again after all publishDir copies are done.
-workflow.onComplete {
-    try {
-        // Resolve to an absolute canonical path so the file is always written
-        // to the correct location regardless of JVM working directory at hook time.
-        def outdirRaw = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/out"
-        def outdirAbs = new File(outdirRaw).canonicalPath
-        def ctx = WorkflowMap.buildCtx(outdirAbs, params, workflow)
-        def outdirFile = new File(outdirAbs)
-        if (!outdirFile.exists()) outdirFile.mkdirs()
-        def html = WorkflowMap.buildWorkflowMapHtml(ctx)
-
-        // Primary artifact name
-        def mapTarget = new File(outdirFile, 'workflow_map.html')
-        log.info "[FINAL_HTML] Workflow map target: ${mapTarget.absolutePath}"
-        mapTarget.text = html
-
-        // Explicit completion marker so users can quickly verify final HTML generation.
-        def markerTarget = new File(outdirFile, 'workflow_html.done')
-        markerTarget.text = """status=ok
-workflow_map=${mapTarget.absolutePath}
-generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
-"""
-
-        log.info "[FINAL_HTML] Workflow map generated: ${mapTarget.absolutePath}"
-        log.info "[FINAL_HTML] Completion marker generated: ${markerTarget.absolutePath}"
-    } catch (Throwable t) {
-        log.warn "Could not generate final workflow map HTML: [${t.class.simpleName}] ${t.message ?: '(null message)'}"
-        t.printStackTrace()
-    }
+// Foreground species list published next to a precomputed FADE json dir
+// (<selection>/species_sets/<filename>); falls back to the NO_FG_LIST sentinel.
+def resolve_fg_species(json_dir, filename) {
+    if (!json_dir) return file('NO_FG_LIST')
+    def selection_dir = file(json_dir).parent?.parent?.parent
+    def candidate = selection_dir ? selection_dir.resolve("species_sets/${filename}") : null
+    return (candidate && candidate.exists()) ? candidate : file('NO_FG_LIST')
 }
 
 /*
@@ -122,6 +89,55 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
 workflow {
 
+    def version = "2.0.0"
+
+    // Display input parameters
+    log.info """
+
+PHYLOPHERE - NF PIPELINE  ~  version ${version}
+=============================================
+
+PHYLOPHERE: A Nextflow pipeline including a complete set
+of phylogenetic comparative tools and analyses for Phenome-Genome studies
+
+Author:         Miguel Ramon (miguel.ramon@upf.edu)
+
+
+"""
+
+    // Post-completion: write workflow_map.html again after all publishDir copies are done.
+    // WorkflowMap lives in lib/WorkflowMap.groovy (compiled and loaded by Nextflow).
+    workflow.onComplete {
+        try {
+            // Resolve to an absolute canonical path so the file is always written
+            // to the correct location regardless of JVM working directory at hook time.
+            def outdirRaw = params.outdir ? params.outdir.toString() : "${workflow.projectDir}/out"
+            def outdirAbs = new File(outdirRaw).canonicalPath
+            def ctx = WorkflowMap.buildCtx(outdirAbs, params, workflow)
+            def outdirFile = new File(outdirAbs)
+            if (!outdirFile.exists()) outdirFile.mkdirs()
+            def html = WorkflowMap.buildWorkflowMapHtml(ctx)
+
+            // Primary artifact name
+            def mapTarget = new File(outdirFile, 'workflow_map.html')
+            log.info "[FINAL_HTML] Workflow map target: ${mapTarget.absolutePath}"
+            mapTarget.text = html
+
+            // Explicit completion marker so users can quickly verify final HTML generation.
+            def markerTarget = new File(outdirFile, 'workflow_html.done')
+            markerTarget.text = """status=ok
+workflow_map=${mapTarget.absolutePath}
+generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
+"""
+
+            log.info "[FINAL_HTML] Workflow map generated: ${mapTarget.absolutePath}"
+            log.info "[FINAL_HTML] Completion marker generated: ${markerTarget.absolutePath}"
+        } catch (Throwable t) {
+            log.warn "Could not generate final workflow map HTML: [${t.class.simpleName}] ${t.message ?: '(null message)'}"
+            t.printStackTrace()
+        }
+    }
+
     // Check if --help is provided
     if (params.help) {
         HELP ()
@@ -129,8 +145,8 @@ workflow {
         // tax_id / gene_ensembl_file auto-generation (bin/resolve_core_inputs.py)
         // happens BEFORE this pipeline is invoked, not here: Nextflow enforces
         // single-assignment on params keys, so a params.tax_id = ... here would
-        // be silently ignored once conf/common.config's own params.tax_id =
-        // params.tax_id ?: "" has already run ("`params.tax_id` is defined
+        // be silently ignored once conf/common.config's own params.tax_id = ""
+        // default has already run ("`params.tax_id` is defined
         // multiple times -- Assignments following the first are ignored",
         // confirmed empirically). See bin/resolve_core_inputs.py's docstring;
         // the GUI's generated run scripts call it automatically.
@@ -229,13 +245,6 @@ workflow {
         // implied by running discovery (or a standalone --discovery_from file).
         def run_meta_caas = ran_discovery || params.discovery_from
 
-        def toBool = { val ->
-            if (val == null) return false
-            if (val instanceof Boolean) return val
-            if (val instanceof String) return !(val.trim().toLowerCase() in ['false', '0', 'no', 'f', ''])
-            return val as boolean
-        }
-
         def run_ct_disambiguation = toBool(params.ct_disambiguation) && (run_meta_caas || params.meta_caas_from || params.disambiguation_input)
         def run_ct_postproc       = toBool(params.ct_postproc) && (run_ct_disambiguation || params.disambiguation_input)
         def run_ct_accumulation   = toBool(params.ct_accumulation) && (run_ct_postproc || params.accumulation_background_input)
@@ -332,20 +341,18 @@ workflow {
                 if (params.meta_caas_from)          candidate_base_dirs.add(file(params.meta_caas_from).parent.parent)
                 candidate_base_dirs.add(file(params.outdir))
 
-                for (base_dir in candidate_base_dirs) {
-                    if (!base_dir || !base_dir.exists()) continue
+                // First candidate dir holding both a resample file and per-cycle discovery files wins.
+                def precomp_found = candidate_base_dirs.findResult { base_dir ->
+                    if (!base_dir || !base_dir.exists()) return null
 
                     // 1. Resample file resolution
-                    def subset_f = null
                     def resample_candidates = [
                         file("${base_dir}/caas_permulation/resample_perms.tab"),
                         file("${base_dir}/caastools/resample.tab"),
                         file("${base_dir}/caastools/resample"),
                         params.resample_from ? file(params.resample_from) : null
                     ]
-                    for (rf in resample_candidates) {
-                        if (rf && rf.exists()) { subset_f = rf; break }
-                    }
+                    def subset_f = resample_candidates.find { rf -> rf && rf.exists() }
 
                     // 2. Discovery / perm-replay permulation files resolution
                     // NOTE: Must be per-cycle *.perm_replay.discovery.output files (legacy runs:
@@ -372,12 +379,10 @@ workflow {
                         disc_candidates = file("${base_dir}/caastools/*.bootstrap.discovery.output")
                     }
 
-                    if (disc_candidates && subset_f) {
-                        precomp_disc_files = disc_candidates
-                        precomp_subset_file = subset_f
-                        break
-                    }
+                    return (disc_candidates && subset_f) ? [disc: disc_candidates, subset: subset_f] : null
                 }
+                precomp_disc_files = precomp_found?.disc
+                precomp_subset_file = precomp_found?.subset
 
                 if (precomp_disc_files && precomp_subset_file) {
                     log.info "[CAAS_PERMULATION] Reusing precomputed permulation discovery (${precomp_disc_files.size()} file(s)) + resample file (${precomp_subset_file.name}) for ASR re-disambiguation"
@@ -401,12 +406,8 @@ workflow {
                     candidate_resamples.add("${params.outdir}/caastools/resample.tab")
                     candidate_resamples.add("${params.outdir}/caastools/resample")
 
-                    for (cp in candidate_resamples) {
-                        if (cp && file(cp).exists()) {
-                            resample_src = file(cp)
-                            break
-                        }
-                    }
+                    def resample_hit = candidate_resamples.find { cp -> cp && file(cp).exists() }
+                    if (resample_hit) resample_src = file(resample_hit)
 
                     if (resample_src && params.alignment) {
                         def align_dir_f = file(params.alignment)
@@ -647,13 +648,6 @@ workflow {
             // the source run had one. Best-effort: falls back to the sentinel
             // when the derived path doesn't resolve (e.g. --fade_json_dir_top
             // pointed somewhere outside this layout).
-            def resolve_fg_species = { json_dir, filename ->
-                if (!json_dir) return file('NO_FG_LIST')
-                def selection_dir = file(json_dir).parent?.parent?.parent
-                def candidate = selection_dir ? selection_dir.resolve("species_sets/${filename}") : null
-                (candidate && candidate.exists()) ? candidate : file('NO_FG_LIST')
-            }
-
             if (params.fade_json_dir_top) {
                 def precomp_top_jsons = Channel.fromPath("${params.fade_json_dir_top}/*.FADE.json").collect().ifEmpty([])
                 def fg_top_precomp    = resolve_fg_species(params.fade_json_dir_top, 'top_species.txt')
