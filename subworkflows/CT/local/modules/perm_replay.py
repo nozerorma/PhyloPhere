@@ -518,9 +518,14 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
 
     The kernel identifies WHICH (position, scheme, labeling) are CAAS/CAAP; each hit's row
     is reconstructed with exact pair-ordered substitution strings and group encodings.
+
+    check_pattern is the scalar path's own verdict on the same fg/bg residues. A hit it rejects
+    means the kernel and the scalar CAAS test disagree; that must not pass silently, so it is
+    counted and raised once every row of the call has been written.
     """
     if not hits or not perm_discovery_out:
         return
+    disagreements = []
     posname_to_posdict = {}
     for pos_dict, _schemes in positions_with_schemes:
         pn = genename + "@" + str(_posnum_from_posdict(pos_dict))
@@ -557,6 +562,8 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
                 fg_species_list=fg, bg_species_list=bg, trait=trait
             )
             encoded = encode_to_groups(fg_aas, scheme_dict) + "/" + encode_to_groups(bg_aas, scheme_dict)
+            if not is_match:
+                disagreements.append((trait, genename, scheme_name, posnum))
             fields = [trait, genename, "CAAP", scheme_name, trait, str(posnum),
                       substitution, encoded, pattern]
             if max_conserved > 0:
@@ -564,6 +571,11 @@ def _emit_perm_discovery_rows(perm_discovery_out, cfg, genename, positions_with_
                 pl = conserved_pairs.split(":")[1] if conserved_pairs and ":" in conserved_pairs else ""
                 fields.extend(["TRUE" if int(oc) > 0 else "FALSE", f"{oc}:{pl}"])
             perm_discovery_out.write("\t".join(fields) + "\n")
+
+    if disagreements:
+        raise RuntimeError(
+            f"vectorized kernel and check_pattern disagree on {len(disagreements)} hit(s) "
+            f"(labeling, gene, scheme, position), first: {disagreements[:5]}")
 
 
 # UTILITY FUNCTIONS for progress tracking

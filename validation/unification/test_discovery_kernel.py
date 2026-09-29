@@ -27,7 +27,7 @@ def _run(cmd, cwd):
     assert p.returncode == 0, p.stdout + p.stderr
 
 
-def _discover(tmp, seqs, thresholds, miss_pair):
+def _discover(tmp, seqs, thresholds, miss_pair, caap=True):
     """-> (scalar rows, kernel rows, scalar background, kernel background).
 
     Rows are sets of (caap_group, position, caas); a background is the set of positions tested.
@@ -36,11 +36,12 @@ def _discover(tmp, seqs, thresholds, miss_pair):
     (tmp / "traits.tab").write_text(TRAITS)
     (tmp / "b0.tab").write_text(f"b_0\t{FG}\t{BG}\n")
     flag = ["--miss_pair"] if miss_pair else []
-    common = ["-a", "G1.fasta", "-t", "traits.tab", "--fmt", "fasta", "--patterns", "1,2,3", "--caap_mode",
+    caap_flag = ["--caap_mode"] if caap else []
+    common = ["-a", "G1.fasta", "-t", "traits.tab", "--fmt", "fasta", "--patterns", "1,2,3", *caap_flag,
               "--max_conserved", "1", *thresholds, *flag]
     _run([str(CT), "discovery", *common, "-o", "scalar.out", "--background_output", "scalar.bg"], tmp)
     _run([str(CT), "perm-replay", "-a", "G1.fasta", "-t", "traits.tab", "-s", "b0.tab", "-o", "kernel.out",
-          "--fmt", "fasta", "--patterns", "1,2,3", "--caap_mode", "--max_conserved", "1", *thresholds, *flag,
+          "--fmt", "fasta", "--patterns", "1,2,3", *caap_flag, "--max_conserved", "1", *thresholds, *flag,
           "--export_perm_discovery", "kernel.disc", "--export_b0_background", "kernel.bg"], tmp)
     key = ["caap_group", "position", "caas"]
     # a run that keeps no position writes no output file: that is the empty set
@@ -87,3 +88,38 @@ def test_kernel_matches_scalar(tmp_path, name, aln, thr, dropped):
     assert with_mp[2] == with_mp[3], f"{name}: kernel background != scalar with miss_pair"
     assert without[2] == without[3], f"{name}: kernel background != scalar without miss_pair"
     assert with_mp[2] != without[2]
+
+
+def test_non_caap_mode_matches_scalar(tmp_path):
+    """Without --caap_mode both paths report the US scheme only, also for a symbol the US
+    dictionary does not contain ('O'), where an identity scheme could have behaved differently."""
+    aln = {"f1": "DDD", "b1": "KKK", "f2": "DDD", "b2": "OKO", "f3": "DDD", "b3": "OKK"}
+    thr = ["--max_fg_gaps", "0", "--max_bg_gaps", "0", "--max_gaps", "0",
+           "--max_fg_miss", "0", "--max_bg_miss", "0", "--max_miss", "0"]
+    scalar, kernel, bg_s, bg_k = _discover(tmp_path, aln, thr, miss_pair=True, caap=False)
+    assert scalar == kernel and len(scalar) == 3
+    assert {g for g, _p, _c in scalar} == {"US"}
+    assert bg_s == bg_k == {0, 1, 2}
+
+
+def test_emit_raises_when_check_pattern_rejects_a_kernel_hit(tmp_path, monkeypatch):
+    """The kernel's hit list and check_pattern must agree; a hit check_pattern rejects is an error."""
+    import io
+    import sys
+
+    monkeypatch.syspath_prepend(str(CT.parent))
+    from modules import perm_replay as pr
+    from modules.perm_replay_io import simtrait_revive
+
+    (tmp_path / "b0.tab").write_text(f"b_0\t{FG}\t{BG}\n")
+    cfg = simtrait_revive(str(tmp_path / "b0.tab"))
+    pos = {"f1": "D@0", "b1": "K@0", "f2": "D@0", "b2": "K@0", "f3": "D@0", "b3": "K@0"}
+    hits = {("G1@0", "US"): ["b_0"]}
+
+    out = io.StringIO()  # agreement: one row, no error
+    pr._emit_perm_discovery_rows(out, cfg, "G1", [(pos, None)], hits, True, 1)
+    assert out.getvalue().count("\n") == 1
+
+    monkeypatch.setattr(pr, "check_pattern", lambda *a, **k: (False, "1", "D/K", "0:"))
+    with pytest.raises(RuntimeError, match="disagree on 1 hit"):
+        pr._emit_perm_discovery_rows(io.StringIO(), cfg, "G1", [(pos, None)], hits, True, 1)
