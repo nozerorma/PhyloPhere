@@ -18,10 +18,14 @@ key the PSS weights identically.
 from __future__ import annotations
 
 import csv
+import logging
 import re
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
 
 OBSERVED_CYCLE = "b_0"
 
@@ -91,33 +95,172 @@ def read_labelings(path) -> Dict[str, Labeling]:
 
 
 def read_design(path, cycle: str = OBSERVED_CYCLE) -> Dict[str, Labeling]:
-    """The observed labelings: one per traitfile_H<n>.tab of a directory, or the single trait file.
-
-    A directory yields `b_0~H<n>` for each hypothesis file; a single file yields the plain `b_0`.
-    Pairs are ordered by pair id and take the first species of each side, as the disambiguation's
-    trait-file parser does.
-    """
+    """The observed labelings: one per traitfile_H<n>.tab of a directory (`b_0~H<n>`), or the single trait
+    file (`b_0`). Built on :func:`read_trait_pairs`, so it visits the hypotheses in the same order as the
+    observed disambiguation and takes the same first species of each side per pair."""
     p = Path(path)
-    if p.is_dir():
-        files = sorted(p.glob("traitfile_H*.tab"), key=lambda f: int(hyp_id(f.name)[1:]))
-        tagged = [(f, f"{cycle}~{hyp_id(f.name)}") for f in files]
-    else:
-        tagged = [(p, cycle)]
     out: Dict[str, Labeling] = {}
-    for f, tag in tagged:
-        fg: Dict[int, str] = {}
-        bg: Dict[int, str] = {}
-        with open(f, newline="", encoding="utf-8-sig") as fh:
-            for row in csv.reader(fh, delimiter="\t"):
-                if len(row) != 3 or not row[2].strip().isdigit():
-                    continue
-                side = fg if row[1].strip() == "1" else bg if row[1].strip() == "0" else None
-                if side is not None:
-                    side.setdefault(int(row[2]), row[0].strip())
-        pairs = sorted(set(fg) & set(bg))
-        if pairs:
-            out[tag] = Labeling(tag, tuple(fg[k] for k in pairs), tuple(bg[k] for k in pairs))
+    for contrast, pairs in read_trait_pairs(p).items():
+        if not pairs:
+            continue
+        tag = f"{cycle}~H{contrast}" if p.is_dir() else cycle
+        out[tag] = Labeling(tag, tuple(f for f, _ in pairs), tuple(b for _, b in pairs))
     return out
+
+
+def read_trait_pairs(
+    trait_file_path: Path,
+) -> Dict[int, List[Tuple[str, str]]]:
+    """
+    Parse trait file or directory of trait files and return species pairs grouped by contrast.
+
+    Expected tab-separated format (only supported format):
+    - No header
+    - Exactly 3 columns per row: species, trait, pair
+    - Returns {contrast: [(high_species, low_species), ...]} with pairs sorted by
+      numeric pair_id where possible
+    - Ignores rows with missing fields or invalid trait values
+    - If a directory is provided, all *.tab files are parsed with contrast derived
+      from filename (e.g. traitfile_H5.tab -> contrast 5) or sequential index.
+
+    Contrasts come back in file-name order (H1, H10, H100, H11, ...), not numeric order: the order in which
+    hypotheses are visited enters floating-point sums downstream, so it is part of the result.
+    """
+    files_to_read: List[Path] = []
+    if trait_file_path.is_dir():
+        # Specifically match H_n hypothesis files (traitfile_H1.tab, traitfile_H2.tab, ...)
+        h_files = sorted(trait_file_path.glob("traitfile_H*.tab"))
+        if h_files:
+            files_to_read = h_files
+        else:
+            files_to_read = [
+                f for f in sorted(trait_file_path.glob("*.tab"))
+                if f.name != "traitfile_fop.tab"
+            ]
+        if not files_to_read:
+            files_to_read = [f for f in sorted(trait_file_path.glob("*")) if f.is_file()]
+    else:
+        files_to_read = [trait_file_path]
+
+    if not files_to_read:
+        logger.warning("No trait files found in %s", trait_file_path)
+        return {}
+
+    import re
+
+    # Structure: contrast -> pair_id -> {'high': [species], 'low': [species]}
+    by_contrast_and_pair: Dict[int, Dict[str, Dict[str, list]]] = defaultdict(
+        lambda: defaultdict(lambda: {"high": [], "low": []})
+    )
+
+    def _to_int(value: str) -> Optional[int]:
+        try:
+            return int(str(value).strip())
+        except (ValueError, TypeError):
+            return None
+
+    try:
+        for file_idx, fpath in enumerate(files_to_read, start=1):
+            h_match = re.search(r"H(\d+)", fpath.name)
+            default_contrast = int(h_match.group(1)) if h_match else file_idx
+
+            with open(fpath, "r", encoding="utf-8-sig") as f:
+                reader = csv.reader(f, delimiter="\t")
+                rows_seen = 0
+
+                def _consume_row(cells: List[str], row_num: int, contrast_num: int) -> None:
+                    if not cells or all(not str(c).strip() for c in cells):
+                        return
+
+                    if len(cells) != 3:
+                        logger.debug(
+                            "Skipping malformed trait row %d in %s (expected 3 columns): %s",
+                            row_num,
+                            fpath.name,
+                            cells,
+                        )
+                        return
+
+                    species = cells[0].strip()
+                    trait_val = _to_int(cells[1])
+                    pair_id = cells[2].strip()
+
+                    if not species or trait_val is None or not pair_id:
+                        logger.debug(
+                            "Skipping malformed trait row %d in %s: %s",
+                            row_num,
+                            fpath.name,
+                            cells,
+                        )
+                        return
+
+                    if trait_val == 1:
+                        by_contrast_and_pair[contrast_num][pair_id]["high"].append(species)
+                    elif trait_val == 0:
+                        by_contrast_and_pair[contrast_num][pair_id]["low"].append(species)
+                    else:
+                        logger.debug(
+                            "Skipping row %d in %s with non-binary trait value (%s): %s",
+                            row_num,
+                            fpath.name,
+                            trait_val,
+                            cells,
+                        )
+
+                for row_num, row in enumerate(reader, start=1):
+                    rows_seen += 1
+                    _consume_row(row, row_num, default_contrast)
+
+        # Build final structure: contrast -> list of pairs
+        contrast_to_pairs = {}
+        for contrast_num, pairs_dict in by_contrast_and_pair.items():
+            pairs_list = []
+            # Sort by pair_id numerically to maintain order (pair 1, pair 2, pair 3)
+            for pair_id in sorted(
+                pairs_dict.keys(), key=lambda x: int(x) if x.isdigit() else x
+            ):
+                group = pairs_dict[pair_id]
+                high_species = group["high"]
+                low_species = group["low"]
+
+                if high_species and low_species:
+                    # Take first species from each side
+                    pairs_list.append((high_species[0], low_species[0]))
+
+                    if len(high_species) > 1 or len(low_species) > 1:
+                        logger.warning(
+                            "Contrast %d, pair %s has multiple species per side: "
+                            "high=%s, low=%s. Using first from each.",
+                            contrast_num,
+                            pair_id,
+                            high_species,
+                            low_species,
+                        )
+                else:
+                    logger.debug(
+                        "Skipping incomplete pair %s in contrast %d: high=%s, low=%s",
+                        pair_id,
+                        contrast_num,
+                        high_species,
+                        low_species,
+                    )
+
+            contrast_to_pairs[contrast_num] = pairs_list
+            logger.debug("Contrast %d: %d pairs loaded", contrast_num, len(pairs_list))
+
+        total_pairs = sum(len(p) for p in contrast_to_pairs.values())
+        logger.info(
+            "Loaded %d contrasts with %d total pairs across %d traitfile(s) from %s",
+            len(contrast_to_pairs),
+            total_pairs,
+            len(files_to_read),
+            trait_file_path,
+        )
+        return contrast_to_pairs
+
+    except Exception as e:
+        logger.error("Failed to load trait pairs: %s", e, exc_info=True)
+        return {}
 
 
 PssMap = Dict[str, Dict[Tuple[str, int], float]]

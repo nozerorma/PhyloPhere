@@ -36,15 +36,27 @@ def _traitfile(path, pairs):
     path.write_text("".join(f"{f}\t1\t{k}\n{b}\t0\t{k}\n" for k, (f, b) in pairs))
 
 
-def test_read_design_orders_pairs_and_hypotheses_numerically(tmp_path):
+def test_read_design_orders_pairs_numerically_and_hypotheses_by_file_name(tmp_path):
     _traitfile(tmp_path / "traitfile_H10.tab", [(2, ("f2", "b2")), (1, ("f1", "b1"))])  # pair ids out of order
     _traitfile(tmp_path / "traitfile_H2.tab", [(1, ("g1", "c1"))])
     (tmp_path / "traitfile_fop.tab").write_text("x\t1\t1\ny\t0\t1\n")  # not a hypothesis file
     got = L.read_design(tmp_path)
-    assert list(got) == ["b_0~H2", "b_0~H10"]
-    assert got["b_0~H10"].fg == ("f1", "f2") and got["b_0~H10"].bg == ("b1", "b2")
+    # hypotheses in file-name order (H10 before H2), as the observed disambiguation has always visited them:
+    # the order enters floating-point sums downstream
+    assert list(got) == ["b_0~H10", "b_0~H2"]
+    assert got["b_0~H10"].fg == ("f1", "f2") and got["b_0~H10"].bg == ("b1", "b2")  # pairs by pair id
     single = L.read_design(tmp_path / "traitfile_H2.tab")
     assert list(single) == ["b_0"] and single["b_0"].fg == ("g1",)
+
+
+def test_parse_trait_pairs_is_the_core_reader(tmp_path):
+    from src.data.loaders import parse_trait_pairs
+    _traitfile(tmp_path / "traitfile_H1.tab", [(1, ("f1", "b1")), (2, ("f2", "b2"))])
+    _traitfile(tmp_path / "traitfile_H3.tab", [(1, ("g1", "c1"))])
+    assert parse_trait_pairs(tmp_path) == L.read_trait_pairs(tmp_path) == {
+        1: [("f1", "b1"), ("f2", "b2")], 3: [("g1", "c1")]}
+    with pytest.raises(FileNotFoundError):
+        parse_trait_pairs(tmp_path / "missing")
 
 
 def test_read_pss_both_formats_and_sentinels(tmp_path):
