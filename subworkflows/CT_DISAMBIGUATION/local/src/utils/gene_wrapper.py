@@ -45,6 +45,7 @@ from src.data.loaders import (
     _parse_gene_pos_token,
 )
 from src.utils.io_utils import find_gene_alignment
+from src.core.driver import pool_labelings, score_labelings
 from src.data.models import CAASPosition
 
 from src.utils.disambiguation_db import (
@@ -888,89 +889,8 @@ def build_cycle_inputs(
 
 
 
-def _load_gene_asr_context(
-    gene: str,
-    alignment_dir: str,
-    tree_file: str,
-    taxid_mapping_path: Optional[str],
-    asr_model: str,
-    asr_cache_dir: str,
-    posterior_threshold: float,
-    ensembl_genes: Optional[Set[str]] = None,
-) -> Optional[Dict[str, Any]]:
-    """Load alignment + tree + precomputed ASR posteriors for one gene ONCE.
-
-    Mirrors the precomputed-ASR load path of process_single_gene (the
-    phenotype-invariant part), including the PAML tree rebuild for node alignment.
-    Returns a context dict, or None if alignment/ASR unavailable.
-    """
-    alignment_path = find_gene_alignment(Path(alignment_dir), gene, ensembl_genes)
-    if not alignment_path:
-        return None
-
-    alignment_data = load_alignment_and_mappings(
-        alignment_path,
-        Path(taxid_mapping_path) if taxid_mapping_path else None,
-        gene_name=gene,
-    )
-    tree_data = load_and_match_tree(
-        Path(tree_file), alignment_data,
-        Path(taxid_mapping_path) if taxid_mapping_path else None,
-    )
-
-    from src.asr.asr_single import SingleGeneASRConfig, run_asr_pipeline
-
-    asr_config = SingleGeneASRConfig(
-        alignment_path=alignment_path,
-        tree_path=Path(tree_file),
-        taxid_path=Path(taxid_mapping_path) if taxid_mapping_path else None,
-        model=asr_model,
-        posterior_threshold=posterior_threshold,
-        output_dir=Path(asr_cache_dir),
-    )
-    # run_asr_pipeline loads the cached ASR when present (rst + rst1) and COMPUTES
-    # it into asr_cache_dir on a miss. This makes the permulation replay robust to
-    # genes that appear only under a null labeling — never in the observed run, so
-    # never cached by CT_DISAMBIGUATION_RUN — which in asr_mode=compute would
-    # otherwise be silently dropped from the null. Observed-significant genes are
-    # already cached by the time this runs (the asr_ready gate in
-    # caas_permulation.nf), so this only computes the null-only tail.
-    try:
-        node_posteriors = run_asr_pipeline(
-            gene, asr_config, skip_if_exists=True,
-            alignment_data=alignment_data, tree_data=tree_data,
-        )
-    except Exception as exc:  # noqa: BLE001 — codeml / parse failure for this one gene
-        logger.warning(f"[perms] ASR unavailable for {gene} ({exc}) — excluded from the null")
-        return None
-    if not node_posteriors:
-        return None
-
-    rst_file = getattr(node_posteriors, "rst_file", None)
-    paml_tree_file = getattr(node_posteriors, "tree_file", None)
-    if rst_file and paml_tree_file and Path(paml_tree_file).exists():
-        try:
-            ordered_nodes, id_mapping = build_tree_node_mapping(
-                tree_file=Path(paml_tree_file), rst_file=Path(rst_file)
-            )
-            tree_data.nodes = ordered_nodes
-            tree_data.root = ordered_nodes[-1]
-            tree_data.node_mapping = id_mapping
-
-            def _tip_taxid(label: str) -> str:
-                return label.split("_")[-1] if "_" in label else label
-
-            tree_data.tip_set = {
-                _tip_taxid(lbl) for lbl in extract_tip_labels(tree_data.root)
-            }
-        except Exception as e:
-            logger.warning(f"[perms] {gene}: could not rebuild tree_data from PAML tree: {e}")
-
-    return {
-        "alignment_data": alignment_data,
-        "tree_data": tree_data,
-        "node_posteriors": node_posteriors,
-    }
+# Moved to core/driver.py (shared with the observed labeling); kept under its old name for callers.
+from src.core.driver import load_gene_context as _load_gene_asr_context  # noqa: E402
 
 
 # No per-scheme weight any more. scoring_compute.R section 2g aggregates a
@@ -1129,14 +1049,6 @@ def _perms_worker_replay(
             # failed for this one gene (already warned inside). Skip it.
             return (gene, [])
 
-        alignment_data = ctx["alignment_data"]
-        tree_data = ctx["tree_data"]
-        node_posteriors = ctx["node_posteriors"]
-        full_posteriors = getattr(node_posteriors, "posteriors_node", None)
-
-        axes_only = os.environ.get("CAAS_PERMS_AXES_ONLY", "1") not in ("0", "false", "False")
-        per_site_dist_cache: Dict[int, Any] = {} if axes_only else None
-
         # Load the gene's perm-replay discovery output in memory once. Two layouts,
         # one shared parser (_parse_discovery_entries):
         #   * a single concatenated perm_discovery_file (has a `gene` column)
@@ -1152,133 +1064,11 @@ def _perms_worker_replay(
                 with open(gene_file, "r") as f:
                     cycle_to_entries = _parse_discovery_entries(f, cycle_tags)
 
-        all_cycle_results = []
-        for cyc in cycle_tags:
-            labeling = cycle_labelings.get(cyc)
-            if not labeling:
-                continue
-            caas_entries = cycle_to_entries.get(cyc, [])
-            if not caas_entries:
-                continue
-            fg, bg = labeling
-            from src.core.labelings import trait_pairs_from
-            trait_pairs = trait_pairs_from(fg, bg)
-            try:
-                biochem_results, _ = analyze_gene_disambiguation(
-                    gene=gene,
-                    alignment_data=alignment_data,
-                    tree_data=tree_data,
-                    caas_positions=[],
-                    caas_entries=caas_entries,
-                    caas_metadata_path=Path("dummy_path"),
-                    trait_pairs=trait_pairs,
-                    taxid_mapping=alignment_data.species_to_taxid,
-                    posterior_data=full_posteriors,
-                    posterior_threshold=posterior_threshold,
-                    diagnostics_dir=None,
-                    asr_mode="precomputed",
-                    axes_only=axes_only,
-                    per_site_dist_cache=per_site_dist_cache,
-                )
-                if biochem_results:
-                    all_cycle_results.append((cyc, biochem_results))
-            except Exception as e:
-                logger.debug(f"[perms] {gene} cycle {cyc} failed: {e}")
-                continue
-
+        all_cycle_results = score_labelings(
+            ctx, gene, cycle_tags, cycle_labelings, cycle_to_entries, posterior_threshold)
         if not all_cycle_results:
             return (gene, [])
-
-        # ── scoring_v2 core v3 (V3-3): per-side domain-pooled null ────────────────
-        # Every axes-only record carries `.sides` = the raw compute_domain_scores
-        # return {"top": {...}, "bottom": {...}, "domain_meta": {...}} for one
-        # (position, scheme, hypothesis). fop_pool.pool_domains collapses M >= 1
-        # such records into one score per phenotype side (M == 1 degenerates to
-        # the plain PSS-weighted mean over the K fixed Voronoi domains), holding
-        # the SAME statistic the observed path emits via
-        # disambiguate_single._emit_pooled_side_rows — the observed / null
-        # comparison in the FCS p.perm depends on that identity. treeless: every
-        # tree lookup already happened inside compute_domain_scores.
-        from src.convergence.fop_pool import pool_domains, base_cycle as _bc
-
-        def _expand_pooled(pos, grp, hyp_label, pooled):
-            """pool_domains return -> <= 2 per-side PositionAxes rows (`side`
-            authoritative, `asr_path_score` = that side's core_s). No participating
-            domain on either side -> one `side="none"` row."""
-            out = []
-            for s in ("top", "bottom"):
-                agg = (pooled or {}).get(s) or {}
-                den = int(agg.get("agree_den", 0) or 0)
-                if int(agg.get("n_participating", 0) or 0) <= 0:
-                    continue
-                asr_score = agg.get("asr_path_score", 0.0)
-                out.append(PositionAxes(
-                    position=pos, caap_group=grp,
-                    asr_path_score=float(asr_score or 0.0),
-                    side=s, hypothesis=hyp_label,
-                    derived_agreement=(
-                        (int(agg.get("agree_num", 0) or 0) / den) if den else None),
-                    domain_scores=(dict(agg.get("domain_scores") or {}) or None),
-                ))
-            if not out:
-                out.append(PositionAxes(
-                    position=pos, caap_group=grp, asr_path_score=0.0,
-                    side="none", hypothesis=hyp_label,
-                ))
-            return out
-
-        # ── FOP domain-pooling: collapse the "<base>~H*" replays of each cycle ──
-        # into one record per (base cycle, position, scheme), mirroring
-        # scoring_compute.R §2b on the observed side. From here the worker (and
-        # both aggregation passes) see one row per base cycle.
-        if fop_pairs is not None:
-            # (base_cyc, pos, scheme) -> [ {hyp, sides} ]; one pool_domains call each.
-            by_pos: Dict[Tuple[str, int, str], List[Dict[str, Any]]] = {}
-            for cyc, results_list in all_cycle_results:
-                base = _bc(cyc)
-                hyp = cyc.split("~", 1)[1] if "~" in cyc else "H1"
-                for r in results_list:
-                    pos = getattr(r, "position", None)
-                    if pos is None:
-                        continue
-                    grp = getattr(r, "caap_group", "US")
-                    by_pos.setdefault((base, pos, grp), []).append(
-                        {"hyp": hyp, "sides": getattr(r, "sides", None) or {}}
-                    )
-
-            pooled_by_cycle: Dict[str, List[Any]] = {}
-            for (base, pos, grp), hyp_recs in by_pos.items():
-                # _read_fop_pairs already keys by base cycle; pool_domains wants
-                # only {(hyp, domain) -> pss} for this cycle (missing -> equal weight).
-                pss_map = fop_pairs.get(base, {}) or None
-                pooled = pool_domains(hyp_recs, pss_map)
-                pooled_by_cycle.setdefault(base, []).extend(
-                    _expand_pooled(pos, grp, None, pooled)
-                )
-            all_cycle_results = list(pooled_by_cycle.items())
-
-        else:
-            # Non-FOP: one hypothesis per record. pool_domains still runs (M == 1)
-            # so observed and null go through the exact same reducer.
-            _expanded = []
-            for cyc, recs in all_cycle_results:
-                out_recs = []
-                for r in recs:
-                    pos = getattr(r, "position", None)
-                    if pos is None:
-                        continue
-                    hyp = getattr(r, "hypothesis", None)
-                    pooled = pool_domains(
-                        [{"hyp": hyp or "H1", "sides": getattr(r, "sides", None) or {}}],
-                        None,
-                    )
-                    out_recs.extend(_expand_pooled(
-                        pos, getattr(r, "caap_group", "US"), hyp, pooled,
-                    ))
-                _expanded.append((cyc, out_recs))
-            all_cycle_results = _expanded
-
-        return (gene, all_cycle_results)
+        return (gene, pool_labelings(all_cycle_results, fop_pairs))
     except Exception as e:
         logger.error(f"[perms] replay worker failed for {gene}: {e}", exc_info=True)
         return (gene, [])
