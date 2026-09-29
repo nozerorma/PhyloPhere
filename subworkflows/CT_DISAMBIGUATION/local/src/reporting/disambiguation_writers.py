@@ -206,12 +206,13 @@ def _write_csv(
 
 
 def export_from_db(
-    db_path: Path, output_dir: Path, max_pairs: Optional[int] = None
+    db_path: Path, output_dir: Path, max_pairs: Optional[int] = None, write_master: bool = True
 ) -> Tuple[List[Path], Path]:
     """
     Export CAAS convergence master CSV, no_change debug CSV, and per-gene JSONs directly from the aggregation SQLite DB.
 
-    Streams rows from DB to avoid loading all results into memory.
+    Streams rows from DB to avoid loading all results into memory. With write_master=False the master CSV is
+    left to the caller (core.master writes it from the workers' rows) and only the decoration outputs are made.
 
     Returns:
         (list_of_caas_files, summary_json)
@@ -241,20 +242,15 @@ def export_from_db(
         # Prepare CSV writers (streaming)
         master_fields = _generate_dynamic_fields(max_pairs)
 
-        def serialize_value(val):
-            if isinstance(val, (list, tuple)):
-                return ",".join(str(v) for v in val)
-            elif isinstance(val, bool):
-                return str(val)
-            elif val is None:
-                return ""
-            return str(val)
+        from src.core.master import serialize_value
 
-        master_f = open(master_filename, "w", newline="")
-        master_writer = csv.DictWriter(
-            master_f, fieldnames=master_fields, extrasaction="ignore"
-        )
-        master_writer.writeheader()
+        master_f = master_writer = None
+        if write_master:
+            master_f = open(master_filename, "w", newline="")
+            master_writer = csv.DictWriter(
+                master_f, fieldnames=master_fields, extrasaction="ignore"
+            )
+            master_writer.writeheader()
 
         no_change_f = open(no_change_filename, "w", newline="")
         no_change_writer = csv.DictWriter(
@@ -302,9 +298,10 @@ def export_from_db(
                 taxid_to_species=taxid_to_species,
             )
 
-            master_writer.writerow(
-                {k: serialize_value(caas_dict.get(k)) for k in master_fields}
-            )
+            if master_writer is not None:
+                master_writer.writerow(
+                    {k: serialize_value(caas_dict.get(k)) for k in master_fields}
+                )
             total_positions += 1
             per_gene_counts[gene] = per_gene_counts.get(gene, 0) + 1
 
@@ -342,7 +339,8 @@ def export_from_db(
             gene_file.close()
 
         # close files
-        master_f.close()
+        if master_f is not None:
+            master_f.close()
         no_change_f.close()
         # Write aggregated summary JSON (compact)
         summary_path = output_dir / "caas_convergence_summary.json"
@@ -361,7 +359,7 @@ def export_from_db(
     finally:
         conn.close()
 
-    caas_files = [master_filename]
+    caas_files = [master_filename] if write_master else []
     if Path(no_change_filename).exists():
         caas_files.append(no_change_filename)
 

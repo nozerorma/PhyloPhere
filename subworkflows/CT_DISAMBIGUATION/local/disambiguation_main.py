@@ -238,8 +238,10 @@ def main():
         max_pairs = _compute_max_pairs_from_trait(Path(args.trait_file))
         logger.info(f"Detected max_pairs={max_pairs} from trait file")
     except Exception as e:
+        # The master CSV schema (domain_<d>_* columns) is fixed by the trait file so that every batch
+        # writes a concatenable table; without it the run cannot produce a valid master.
         logger.error(f"Failed to compute max_pairs from trait file: {e}")
-        max_pairs = None
+        raise
 
     # Process all genes
     logger.info(f"Processing {len(unique_genes)} genes...")

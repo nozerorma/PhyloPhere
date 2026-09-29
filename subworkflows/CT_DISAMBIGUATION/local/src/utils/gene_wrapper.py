@@ -201,7 +201,14 @@ def process_single_gene(
     db_queue: Optional[Any] = None,
     ensembl_genes: Optional[Set[str]] = None,
     hyp_pairs_pss: Optional[Dict[Tuple[str, int], float]] = None,
-) -> Tuple[str, Optional[Path]]:
+    master_fields: Optional[List[str]] = None,
+) -> Tuple[str, Optional[List[Tuple[Any, Dict[str, str]]]]]:
+    """Analyze one gene and stream its records to the database (decoration outputs).
+
+    Returns (gene, [(msa_pos, master row), ...]) when master_fields is given: the rows of
+    caas_convergence_master.csv for this gene, serialized here so the caller can write the master without
+    going back to the database. (gene, None) when the gene produced nothing.
+    """
 
     try:
         alignment_path = find_gene_alignment(Path(alignment_dir), gene, ensembl_genes)
@@ -435,6 +442,7 @@ def process_single_gene(
             },
         }
 
+        master_rows: List[Tuple[Any, Dict[str, str]]] = []
         if db_queue is not None:
             try:
                 db_queue.put(
@@ -486,6 +494,10 @@ def process_single_gene(
                             "result": caas_dict,
                         }
                     )
+                    if master_fields:
+                        from src.core.master import master_row
+
+                        master_rows.append((msa_pos, master_row(caas_dict, master_fields)))
 
             except Exception as e:
                 logger.warning(f"Failed to enqueue results for {gene}: {e}")
@@ -515,7 +527,7 @@ def process_single_gene(
         except Exception:
             pass
 
-        return (gene, None)
+        return (gene, master_rows or None)
 
     except FileNotFoundError:
         return (gene, None)
@@ -546,6 +558,15 @@ def process_all_genes(
     hypotheses_pairs_file: Optional[str] = None,
     max_pairs: Optional[int] = None,
 ) -> Tuple[List[Dict], Optional[Dict]]:
+
+    if max_pairs is None:
+        raise ValueError(
+            "process_all_genes needs max_pairs (from the trait file): the master CSV schema must be the "
+            "same for every batch, so it cannot be auto-detected per run"
+        )
+    from src.reporting.disambiguation_writers import _generate_dynamic_fields
+
+    master_fields = _generate_dynamic_fields(max_pairs)
 
     hyp_pairs_pss = _read_contrast_hyp_pairs(hypotheses_pairs_file) if hypotheses_pairs_file else None
     if hyp_pairs_pss:
@@ -682,15 +703,19 @@ def process_all_genes(
                         db_queue,
                         ensembl_genes,
                         hyp_pairs_pss,
+                        master_fields,
                     ),
                 )
             )
 
-        # Force retrieval to surface errors early
+        # Force retrieval to surface errors early; keep each gene's master rows
+        master_rows_all: List[Tuple[str, Any, Dict[str, str]]] = []
         for idx, async_res in enumerate(async_results):
             gene = genes[idx]
             try:
-                async_res.get()
+                _gene, gene_rows = async_res.get()
+                for msa_pos, row in gene_rows or ():
+                    master_rows_all.append((gene, msa_pos, row))
             except Exception as e:
                 logger.error(f"Gene {gene} failed: {e}", exc_info=True)
 
@@ -736,7 +761,14 @@ def process_all_genes(
     # genes landed in its own DB -- two batches could otherwise see different
     # max pair counts and emit caas_convergence_master.csv files with a
     # different number of domain_N_* columns, which is not concatenable.
-    caas_files, summary_json = export_from_db(db_path, output_dir, max_pairs=max_pairs)
+    from src.core.master import write_master_csv
+
+    master_path = output_dir / "caas_convergence_master.csv"
+    n_master = write_master_csv(master_rows_all, master_path, master_fields)
+    logger.info(f"Wrote {n_master} rows to {master_path.name}")
+    # The database now only feeds the decoration outputs (no_change debug, per-gene JSONs, summary).
+    caas_files, summary_json = export_from_db(db_path, output_dir, max_pairs=max_pairs, write_master=False)
+    caas_files = [master_path] + list(caas_files)
 
     export_info = {
         "db_path": str(db_path),
