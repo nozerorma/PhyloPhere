@@ -952,10 +952,10 @@ def analyze_gene_disambiguation(
             # it. The scalar fields here collapse to the stronger side as a legacy
             # fallback.
             if axes_only:
-                # NOTE (scoring_v2 core v3): the permulation-null replay
-                # (_perms_worker) is rewired in V3-3. This branch now only stashes
-                # the raw compute_domain_scores record on ``.sides``; the pooled
-                # scalars are recomputed downstream by pool_domains.
+                # NOTE: the permulation-null replay (core.driver.score_labelings)
+                # takes this branch. It only stashes the raw compute_domain_scores
+                # record on ``.sides``; the pooled scalars are computed downstream
+                # by pool_domains.
                 axes_sides = None
                 axes_score = 0.0
                 try:

@@ -813,7 +813,7 @@ def _parse_discovery_entries(
 ) -> Dict[str, List[CAASPosition]]:
     """Parse a perm-replay-discovery TSV stream into ``{cycle_tag: [CAASPosition, ...]}``.
 
-    Shared by ``_perms_worker``'s two input layouts:
+    Shared by ``_perms_worker_replay``'s two input layouts:
 
       * the single concatenated ``perm_discovery_file`` -- carries a ``gene``
         column; rows are filtered to ``gene_filter``;
@@ -902,14 +902,9 @@ def build_cycle_inputs(
 ) -> Tuple[List[str], Dict[str, Tuple[List[str], List[str]]]]:
     """Resolve the (fg, bg) labeling for each cycle to replay.
 
-    Returns the cycles in-memory, straight from `_read_resample_labelings` — no
-    per-cycle trait file is written to disk. `_perms_worker` used to serialize
-    each cycle's labeling to a trait file and immediately re-read+re-parse it via
-    `parse_trait_pairs`; that round-trip was pure NFS overhead (confirmed via
-    `sstat` against live 8-worker production jobs, ~1.75% aggregate CPU
-    utilization — see docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md, Tier 1) since
-    the (fg, bg) lists are already available here before any file would be
-    written.
+    Returns the cycles in-memory, straight from `_read_resample_labelings`: the
+    (fg, bg) lists are already available here, so no per-cycle trait file is
+    written to disk.
     """
     labelings = _read_resample_labelings(resample_dir)
     target_cycles = cycles if cycles else sorted(labelings.keys())
@@ -1081,9 +1076,8 @@ def _perms_worker_finalize(
     """Phase B of a chunked gene replay: the true whole-gene reduction over a
     gene's merged, already FOP-pooled chunk results from _perms_worker_replay --
     n_detected (needs the gene's FULL detected-cycle set),
-    the CT_POSTPROC cluster filter, and detail-row emission. Verbatim to the tail
-    of the pre-Stage-2 monolithic _perms_worker, so output is unchanged no matter
-    how many replay chunks fed into it -- n_cycles_total is passed in rather than
+    the CT_POSTPROC cluster filter, and detail-row emission. The output does not
+    depend on how many replay chunks fed into it. n_cycles_total is passed in rather than
     derived from `all_cycle_results` because it must be the gene's (or, under FOP
     pooling, the whole run's) full cycle-tag/base-cycle universe, not just the
     subset this gene happened to detect hits in.
@@ -1687,7 +1681,7 @@ def process_all_genes_perms(
     # FOP mirror: when resample_fop_pairs.tsv is present the resample dir carries
     # "<base>~H<m>" hypothesis labelings (resample_fop.tab) instead of / alongside
     # the plain resample_*.tab. build_cycle_inputs resolves one labeling per
-    # hypothesis tag; _perms_worker then domain-pools them back to one score
+    # hypothesis tag; _perms_worker_replay then domain-pools them back to one score
     # per base cycle. Parse the per-(hypothesis, domain) PSS weights once here.
     fop_pairs: Optional[Dict[str, Dict[Tuple[str, int], float]]] = None
     if fop_pairs_file and Path(fop_pairs_file).exists():
@@ -1895,7 +1889,7 @@ def process_all_genes_perms(
 
     # _finalize_perm_scores aggregates the base-cycle-keyed detail shards. Under
     # the FOP mirror, build_cycle_inputs' `cycle_tags` are the "<base>~H<m>"
-    # hypothesis-replay tags, but _perms_worker domain-pools those down to ONE
+    # hypothesis-replay tags, but _perms_worker_replay domain-pools those down to ONE
     # record per base cycle before it writes any detail row (see the "FOP
     # domain-pooling" block above; it also does `cycle_tags = {_bc(c) ...}`
     # locally). Pass the base-collapsed list here too, or _flush's

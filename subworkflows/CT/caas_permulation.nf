@@ -313,8 +313,8 @@ process CAAS_PERMS_DISAMBIGUATE {
 //    gene subset per Nextflow task, so one bad batch (OOM, a pathological
 //    gene) retries on its own instead of re-replaying every gene. Only
 //    perm_pos_detail/ is kept: gene_cycle_scores.tsv, perm_pos_sample.tsv and
-//    perm_pos_quantiles.tsv all depend on a genome-wide percent_rank histogram
-//    (build_percent_rank_lookup) or a genome-wide reservoir sample, so a
+//    perm_pos_quantiles.tsv all depend on genome-wide pools (each cycle's pool of
+//    position scores, or a genome-wide reservoir sample), so a
 //    per-batch copy of those would silently score against the wrong pool.
 //    CAAS_PERMS_REBUILD (6) re-derives all of them from the merged
 //    perm_pos_detail/ shards below (see 4c), at one-gene peak RAM, with no ASR

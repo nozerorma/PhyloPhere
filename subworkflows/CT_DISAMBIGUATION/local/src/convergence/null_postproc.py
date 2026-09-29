@@ -10,10 +10,10 @@ per-cycle null CAAS candidate pool is filtered the SAME way the observed
 * :func:`cycle_gene_removal` — the dubious + extreme gene logic of
   ``CT_POSTPROC/local/src/filter_caas_genes.py``, with the base-cycle tag playing
   the role the observed side gives to ``trait`` (one calibration per cycle,
-  matching ``build_percent_rank_lookup`` / ``_build_cycle_score_pools``).
+  matching ``_build_cycle_score_pools``).
 
 None of these touch ASR. They operate on the stacked
-``perm_pos_detail`` table (+ per-cycle position lists inside ``_perms_worker``).
+``perm_pos_detail`` table (+ per-cycle position lists inside ``_perms_worker_finalize``).
 
 Author: PhyloPhere pipeline (Gap B)
 """
