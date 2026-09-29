@@ -84,7 +84,13 @@ def main() -> int:
     # keep_default_na=False + na_values=[""]: the disambiguation master has
     # categorical amino-acid columns (caas, amino_encoded, mrca_*_aa) that can
     # equal NA-sentinel strings; only an empty cell means missing here.
-    df = pd.read_csv(args.input, sep=None, engine="python",
+    # The C engine with float_precision="round_trip" keeps every bit of the float columns
+    # (asr_path_score feeds a gene score that compares values exactly); the python engine
+    # that autodetects the separator does not. The separator is read off the header line.
+    with open(args.input, newline="") as fh:
+        header = fh.readline()
+    sep = "\t" if header.count("\t") > header.count(",") else ","
+    df = pd.read_csv(args.input, sep=sep, engine="c", float_precision="round_trip",
                      keep_default_na=False, na_values=["", "nan", "NaN"])
     df = _normalize_schema(df)
 

@@ -32,7 +32,8 @@ from src.core.postproc import GeneUnit, gene_removal, gene_unit_stats, load_gene
 # "N/A" is Asn on the changed side against Ala -- and pandas' default NA parsing
 # would silently blank them (this is exactly how derived_residues was being lost).
 # Only a truly empty cell is missing data in these files.
-_CAAS_READ_KW = dict(keep_default_na=False, na_values=["", "nan", "NaN"])
+# float_precision="round_trip": float columns (asr_path_score) must keep every bit.
+_CAAS_READ_KW = dict(keep_default_na=False, na_values=["", "nan", "NaN"], float_precision="round_trip")
 
 # Label of the observed slice in core.postproc units, and the hyp_id shown in gene_stats.tsv.
 OBSERVED = "b_0"
