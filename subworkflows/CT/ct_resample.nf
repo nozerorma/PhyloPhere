@@ -34,12 +34,10 @@ process RESAMPLE {
     // Uncomment the following lines to assign workload priority.
     label 'process_resample'
 
-    publishDir = [
-        path: { "${params.outdir}/resample" },
-        mode: 'copy',
-        saveAs: { filename -> filename.equals('versions.yml') ? null : filename },
-        enabled: params.publish_intermediates
-    ]
+    publishDir path: { "${params.outdir}/resample" },
+               mode: 'copy',
+               saveAs: { filename -> filename.equals('versions.yml') ? null : filename },
+               enabled: params.publish_intermediates
 
     input:
     path nw_tree,     stageAs: 'nw_tree.nwk'

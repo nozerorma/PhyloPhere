@@ -540,7 +540,7 @@ workflow CAAS_PERMS_PREP {
                 .flatMap()
                 .collate(permReplayBatchSize)
                 .map { batch ->
-                    def batchID = sprintf('perm_replay_batch_%05d', ++permReplayBatchCounter)
+                    def batchID = String.format('perm_replay_batch_%05d', ++permReplayBatchCounter)
                     def manifestText = batch.collect { row -> "${row[0]}\t${row[1].name}\tNO_FILE" }.join('\n') + '\n'
                     def alignmentFiles = batch.collect { row -> row[1] }.unique { file -> file.name }
                     def resampled = batch[0][2]
@@ -619,7 +619,7 @@ workflow CAAS_PERMULATION {
                 .flatMap { files -> files.sort { it.name } }
                 .collate(disambigBatchSize)
                 .map { batch ->
-                    def batchID = sprintf('caas_perms_disambig_batch_%05d', ++disambigBatchCounter)
+                    def batchID = String.format('caas_perms_disambig_batch_%05d', ++disambigBatchCounter)
                     tuple(batchID, batch.size(), batch)
                 }
             def batched = CAAS_PERMS_DISAMBIGUATE_BATCHED(perm_disc_batches, resample_subset_bc, gated_tree, fop_pairs_bc, gene_lengths_bc)

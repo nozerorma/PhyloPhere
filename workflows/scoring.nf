@@ -12,9 +12,9 @@
  * File: workflows/scoring.nf
  */
 
-include { SCORING_COMPUTE }                                                           from "${baseDir}/subworkflows/SCORING/scoring_compute.nf"
-include { SCORING_REPORT }                                                            from "${baseDir}/subworkflows/SCORING/scoring_report.nf"
-include { CAAS_PERMS_REBUILD }                                                        from "${baseDir}/subworkflows/CT/caas_permulation.nf"
+include { SCORING_COMPUTE }                                                           from '../subworkflows/SCORING/scoring_compute.nf'
+include { SCORING_REPORT }                                                            from '../subworkflows/SCORING/scoring_report.nf'
+include { CAAS_PERMS_REBUILD }                                                        from '../subworkflows/CT/caas_permulation.nf'
 
 
 workflow SCORING {
