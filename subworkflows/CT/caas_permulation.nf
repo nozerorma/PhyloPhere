@@ -469,6 +469,7 @@ process CAAS_PERMS_REBUILD {
     path "b0",                        emit: b0, optional: true   // caas_b0_diagnostic: the real labeling rebuilt like the null
     path "caas_perms.rds",            emit: perms
     path "gene_cycle_scores.tsv",     emit: gene_cycle_scores
+    path "removed_units.tsv",         emit: removed_units, optional: true   // null gene removal (only when a gene annotation was given)
     path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas, optional: true
     path "perm_pos_sample.tsv",       emit: pos_sample,    optional: true
     path "perm_pos_quantiles.tsv",    emit: pos_quantiles, optional: true
@@ -504,6 +505,8 @@ process CAAS_PERMS_REBUILD {
             --detail input_perm_pos_detail/b0 \\
             --output-dir b0 \\
             --seed ${params.seed ?: 1998} ${removal_args}
+        # keep b_0's own per-gene shards next to its scores: compare_b0.py reads them (checkpoints B, C)
+        cp -RL input_perm_pos_detail/b0 b0/perm_pos_detail
     fi
 
     ${rs} ${scoring_local}/src/scoring_caas_perms.R \\

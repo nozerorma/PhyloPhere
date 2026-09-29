@@ -1,0 +1,56 @@
+{
+  "A": {
+    "n_observed": 3495,
+    "n_b_0": 3495,
+    "only_observed": 0,
+    "only_b_0": 0,
+    "examples_only_observed": [],
+    "examples_only_b_0": [],
+    "pass": true,
+    "hypotheses_compared": 12
+  },
+  "B": {
+    "n_observed": 473,
+    "n_b_0": 473,
+    "only_observed": 0,
+    "only_b_0": 0,
+    "examples_only_observed": [],
+    "examples_only_b_0": [],
+    "pass": true,
+    "n_removed_units_b0": 0
+  },
+  "C": {
+    "n_observed": 496,
+    "n_b_0": 496,
+    "only_observed": 0,
+    "only_b_0": 0,
+    "examples_only_observed": [],
+    "examples_only_b_0": [],
+    "n_compared": 496,
+    "n_value_mismatch": 0,
+    "max_abs_delta": 1.1102230246251565e-16,
+    "examples_value": [],
+    "pass": true
+  },
+  "D": {
+    "n_observed": 165,
+    "n_b_0": 165,
+    "only_observed": 0,
+    "only_b_0": 0,
+    "examples_only_observed": [],
+    "examples_only_b_0": [],
+    "n_compared": 165,
+    "n_value_mismatch": 0,
+    "max_abs_delta": 1.1796119636642288e-16,
+    "examples_value": [],
+    "pass": true
+  },
+  "E": {
+    "n_genes": 28,
+    "n_value_mismatch": 0,
+    "max_abs_delta": 0.0,
+    "n_empty_convention": 10,
+    "examples_value": [],
+    "pass": true
+  }
+}
