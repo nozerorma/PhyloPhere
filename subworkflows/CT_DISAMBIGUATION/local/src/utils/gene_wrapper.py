@@ -45,7 +45,7 @@ from src.data.loaders import (
 )
 from src.utils.io_utils import find_gene_alignment
 from src.core.driver import pool_labelings, score_labelings
-from src.core.scores import DIRECTIONS, collapse_sides, direction_values, gene_scores, position_score, position_sum
+from src.core.scores import DIRECTIONS, collapse_sides, direction_values, gene_scores, position_score
 from src.data.models import CAASPosition
 
 from src.utils.disambiguation_db import (
@@ -1372,13 +1372,11 @@ def _finalize_perm_scores(
     scores_path = output_dir / "gene_cycle_scores.tsv"
     sample_path = output_dir / "perm_pos_sample.tsv"
     quant_path = output_dir / "perm_pos_quantiles.tsv"
-    # Per-(Gene, Position, side, cycle) numerator/denominator of the per-cycle
-    # CAAS_score, so scoring_compute.R §2f-ter can redo the division and take the
-    # max over sides for the pooled p.emp. core.scores.position_sum adds the schemes
-    # in a fixed priority order, so caas_sum / n_schemes is the position score used
-    # everywhere else.
+    # Per-(Gene, Position, side, cycle) position score of the null cycle (core.scores), the
+    # one definition every consumer reads: scoring_compute.R p.emp / SAM and the position
+    # enrichment. Empty when no scheme scored the position.
     cycle_caas_path = output_dir / "perm_pos_cycle_caas.tsv.gz"
-    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_sum", "n_schemes"]
+    cycle_caas_fields = ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes"]
 
     # Reservoir size per (cycle, scheme). Bounds both the violin sample and the
     # quantile summaries at ~K * n_cycles * 5 rows regardless of run size. The
@@ -1415,11 +1413,11 @@ def _finalize_perm_scores(
         by_pos: Dict[Tuple[str, int], Dict[str, float]] = {}
         cc_rows = []
         for (cyc, pos, side), schemes in pos_scheme.items():
-            total, n = position_sum(schemes)
+            score = position_score(schemes)
             cc_rows.append({"Gene": gene, "Position": pos, "side": side, "cycle": cyc,
-                            "caas_sum": total, "n_schemes": n})
-            if n:
-                by_pos.setdefault((cyc, pos), {})[side] = total / n
+                            "caas_score": score, "n_schemes": len(schemes)})
+            if score is not None:
+                by_pos.setdefault((cyc, pos), {})[side] = score
         if writer_cc is not None and cc_rows:
             writer_cc.writerows(cc_rows)
 
@@ -1584,10 +1582,11 @@ def process_all_genes_perms(
     Outputs:
       - output_dir/gene_cycle_scores.tsv     (feeds caas_perms.rds)
       - output_dir/perm_pos_cycle_caas.tsv.gz (per (Gene, Position, side, cycle)
-                                              caas_sum / n_schemes; the R side
-                                              divides + takes the max over sides
-                                              for the pooled p.emp, the sole
-                                              position-level permulation p)
+                                              caas_score, the core.scores position
+                                              score of the cycle; the R side takes
+                                              the max over sides for the pooled
+                                              p.emp, the sole position-level
+                                              permulation p)
       - output_dir/perm_pos_detail/<Gene>.tsv.gz  (one shard per gene; re-scoring
                                               needs no ASR replay, and re-aggregation
                                               stays at one-gene peak RAM)

@@ -120,7 +120,7 @@ workflow ENRICHMENT {
         caas_perms_ch
         caas_perm_scores_ch
         caas_pos_sample_ch
-        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_sum,n_schemes) -> POSENRICH's p.perm
+        caas_pos_cycle_caas_ch  // perm_pos_cycle_caas.tsv.gz (Gene,Position,side,cycle,caas_score,n_schemes) -> POSENRICH's p.perm
         position_scores
         position_lists       // SCORING's published position_lists/slice_{top,bottom,global}{25,10,5,1}.tsv dir
         background_output_ch

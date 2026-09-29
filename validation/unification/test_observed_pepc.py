@@ -48,13 +48,31 @@ def _golden():
     return pd.read_csv(GOLD / "caas_convergence_master.csv", keep_default_na=False)
 
 
+def _assert_same_up_to_float_noise(got, gold, tol=1e-12):
+    """Every cell equal, except float columns, which may differ by summation rounding (<= tol).
+
+    The pooled scores add M hypothesis scores; the sum is correctly rounded now, so a pool of many
+    hypotheses can differ from the naive sum of the frozen run in the last bits.
+    """
+    worst = 0.0
+    for c in gold.columns:
+        if gold[c].dtype.kind == "f":
+            d = (got[c] - gold[c]).abs()
+            assert (got[c].isna() == gold[c].isna()).all(), c
+            worst = max(worst, float(d.max(skipna=True) or 0.0))
+        else:
+            assert got[c].equals(gold[c]), c
+    print(f"max float difference to the frozen run: {worst:.2e}")
+    assert worst <= tol
+
+
 def test_master_csv_matches_the_frozen_pipeline_run(inputs, tmp_path):
     got = _run(inputs, tmp_path / "out")
     gold = _golden()
     assert len(gold) == 217 and list(got.columns) == list(gold.columns) and len(gold.columns) == 46
-    assert got.equals(gold)
+    _assert_same_up_to_float_noise(got, gold)
 
 
 @pytest.mark.skipif(not os.environ.get("RUN_SLOW"), reason="decoration costs ~80 s; set RUN_SLOW=1")
 def test_decoration_does_not_change_the_master_csv(inputs, tmp_path):
-    assert _run(inputs, tmp_path / "out", "--run-diagnostics", "--verbose").equals(_golden())
+    _assert_same_up_to_float_noise(_run(inputs, tmp_path / "out", "--run-diagnostics", "--verbose"), _golden())

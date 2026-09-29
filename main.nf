@@ -455,7 +455,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 )
                 scoring_caas_perms_ch = caas_perm_out.perms
                 scoring_caas_perm_scores_ch = Channel.empty()
-                scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas  // per (gene,position,side,cycle) caas_sum/n_schemes -> p.emp
+                scoring_caas_pos_cycle_caas_ch = caas_perm_out.pos_cycle_caas  // per (gene,position,side,cycle) caas_score -> p.emp
                 scoring_caas_pos_sample_ch = caas_perm_out.pos_sample  // cycle-stratified sample for distribution plots
                 scoring_caas_pos_quantiles_ch = caas_perm_out.pos_quantiles  // per (cycle,scheme) distribution shape
                 scoring_caas_pos_detail_ch = caas_perm_out.pos_detail                   // sharded perm_pos_detail dir
@@ -738,7 +738,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 pp_cleaned_bg,         // cleaned_background_main.txt — FCS universe
                 scoring_rer_perms_ch,  // RER permulation RDS → p.perm in centralized RER FCS
                 scoring_caas_perms_ch, // CAAS permulation RDS (asr+caas null) → FCS p.perm + report
-                scoring_caas_pos_cycle_caas_ch, // per (gene,position,side,cycle) caas_sum/n_schemes → p.emp
+                scoring_caas_pos_cycle_caas_ch, // per (gene,position,side,cycle) caas_score → p.emp
                 scoring_caas_pos_sample_ch,  // cycle-stratified sample for report distribution plots
                 scoring_caas_pos_quantiles_ch, // per (cycle,scheme) null distribution shape
                 scoring_hyp_pairs_ch           // contrast_hypotheses_pairs.tsv — FOP domain-pool weights

@@ -28,6 +28,7 @@ hand-worked golden arithmetic.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from src.convergence.path_scores import _convergence_type
@@ -133,21 +134,22 @@ def pool_domains(
     def _agg(side: str) -> Dict[str, Any]:
         s_bar: Dict[Any, float] = {}
         w_bar: Dict[Any, float] = {}
+        # Sums are correctly rounded (math.fsum): the pooled score does not depend on the
+        # order the hypotheses or the domains arrive in.
         for sd, d in rep.items():
-            num = 0.0
-            for r in hyps:
-                scores = ((r.get("sides") or {}).get(side) or {}).get("domain_scores")
-                num += float(_dget(scores, d, 0.0) or 0.0)
+            num = math.fsum(
+                float(_dget(((r.get("sides") or {}).get(side) or {}).get("domain_scores"), d, 0.0) or 0.0)
+                for r in hyps
+            )
             s_bar[d] = (num / M) if M else 0.0
-            wsum = 0.0
-            for r in hyps:
-                w = _pss(r["hyp"], d)
-                wsum += 1.0 if w is None else float(w)
+            wsum = math.fsum(
+                1.0 if (w := _pss(r["hyp"], d)) is None else float(w) for r in hyps
+            )
             w_bar[d] = (wsum / M) if M else 0.0
 
-        denom = sum(w_bar.values())
+        denom = math.fsum(w_bar.values())
         core = (
-            sum(w_bar[d] * s_bar[d] for d in w_bar) / denom if denom > 0 else 0.0
+            math.fsum(w_bar[d] * s_bar[d] for d in w_bar) / denom if denom > 0 else 0.0
         )
         core = max(0.0, min(1.0, core))
 

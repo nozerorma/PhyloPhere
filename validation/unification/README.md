@@ -66,7 +66,10 @@ Position score, side collapse and gene score are defined once and called by the 
 - Position score: mean of `caas_row` (= `asr_path_score`) over the schemes that scored it, per side. The sum is
   `math.fsum` (correctly rounded, independent of scheme order).
 - Directions: `top` / `bottom` use only that side; `all` keeps one entry per position, its best side.
-- Gene score: `(#{pool <= max} / |pool|) ** n`. It is None (written NA) when the gene has no scored position in
+- Gene score: `(#{pool <= max + 1e-12} / |pool|) ** n`. The tolerance (`TIE_TOL`) makes ties deterministic: position
+  scores are means of a few values and the pool is heavily tied (toy, 1000 genes: 3016 rows, ~887 distinct values),
+  so means equal in exact arithmetic that differ by an ulp would otherwise move the count by several positions.
+  On that toy the gaps between distinct scores were either ~1e-17 or >= 1e-7. It is None (written NA) when the gene has no scored position in
   the direction or the pool is empty. `scoring_caas_perms.R` fills those cells with 0 when it builds the dense
   genes x cycles matrix, so `caas_perms.rds` and the FCS null do not change; only `gene_cycle_scores.tsv` shows
   NA where it used to show 0.0.
@@ -74,3 +77,46 @@ Position score, side collapse and gene score are defined once and called by the 
   toy, abs 1e-12). On the stored toy `b_0` detail, pass B outputs equal the previous ones (delta 0) except 10
   cells that went from 0 to NA (8 top, 2 bottom). The position score differs from R's `mean()` in the last bit
   on 46 of 165 rows (1.2e-16); it disappears once the observed consumes these scores.
+
+## Observed scores (`observed_core_scores.py`, `scoring_compute.R`)
+
+The observed position and gene scores are the `b_0` slice of the same functions as the null.
+`SCORING_COMPUTE` runs `observed_core_scores.py` (stdlib + `core/scores.py`) on `filtered_discovery.tsv`, then
+`scoring_compute.R` reads `core_positions.tsv` / `core_genes.tsv` and integrates them (FADE, RER, accumulation,
+`p.emp`, BH, SAM). R no longer computes `mean(caas_row)` or `size_adj_max`.
+
+- `p.emp` and SAM count null values within `TIE_TOL` of the observed score as ties (`>=`); the constant is defined in
+  `core/scores.py` and repeated in `scoring_compute.R` (a test keeps them equal).
+- The observed chain reads floats exactly (`float_precision="round_trip"` in `prepare_postproc_input.py`,
+  `filter_caas_genes.py`); the pandas default alters ~1/3 of doubles by an ulp. On the local toy, positions
+  differing from `b_0` in the last bit went from 50 to 16 of 165. The remainder appears only in rows pooled over
+  several hypotheses (`n_hypotheses` >= 3); its origin (PSS weights of the null's `b_0`) was not traced.
+- Checked: `scoring_compute.R` on the toy (50 genes) gives position and gene tables equal to the previous script
+  (Δ <= 1.1e-16, `p.emp` and `p.adj_*` unchanged). Not checked with a null that has ties at scale (toy 1000 genes).
+
+## Null per-cycle position scores (`perm_pos_cycle_caas.tsv.gz`)
+
+Columns: `Gene, Position, side, cycle, caas_score, n_schemes`. `caas_score` is the `core.scores` position score of
+the null cycle (empty when no scheme scored it), written once by `_finalize_perm_scores`. `scoring_compute.R`
+(`p.emp`, SAM), `posenrich_enrich.py` and `posenrich_prep_caas_null.py` read it and no longer divide. A file
+without `caas_score` (an earlier null) is rejected with a message to regenerate it. `readr` misparses ~13 % of
+17-digit doubles by an ulp, so R reads `caas_score` as text and converts with `as.numeric`; pandas readers use
+`float_precision="round_trip"`.
+
+## Order-independent pooling (`fop_pool.pool_domains`)
+
+The hypothesis and domain sums in `pool_domains` use `math.fsum`, so the pooled score is the same whatever order
+the hypotheses arrive in (the null feeds them in labeling arrival order, the observed in its own order). A naive
+sum of M >= 3 terms depends on that order; with M = 2 it does not, which matches where observed and null `b_0`
+differed in the last bit (rows pooled over >= 3 hypotheses). `test_pool_domains_order.py` shuffles the hypotheses
+(M = 3, 12, 100) and requires identical bits. Against the frozen PEPC master (100 hypotheses) the float columns now
+differ by <= 1.7e-15 and every other cell is identical, so `test_observed_pepc.py` compares floats with a
+1e-12 tolerance. Whether observed and `b_0` now agree bit for bit is checked on the next cluster run.
+
+## Harness details (`compare_b0.py`)
+
+- C reads with `float_precision="round_trip"` and reports `n_bitwise_different` (informational: rows whose
+  `asr_path_score` differs in any bit between the observed master and the `b_0` detail; the pass criterion stays
+  |delta| <= 1e-12).
+- E requires the NA pattern of the gene scores to match: a gene with no scored position in a direction is NA on both
+  sides. A null that writes 0 there fails.

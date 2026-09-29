@@ -143,6 +143,35 @@ def test_null_gene_cycle_scores_use_core_scores_and_na_for_empty_cells(tmp_path)
         for d_, col in (("all", "global_caas"), ("top", "top_caas"), ("bottom", "bottom_caas")):
             v = got.loc[(g, "c1"), col]
             assert (pd.isna(v) and want[d_] is None) or v == pytest.approx(want[d_], abs=1e-12), (g, col)
+    # per-cycle position scores: one column, the core position score, exact
+    cc = pd.read_csv(tmp_path / "out/perm_pos_cycle_caas.tsv.gz", sep="\t", float_precision="round_trip")
+    assert list(cc.columns) == ["Gene", "Position", "side", "cycle", "caas_score", "n_schemes"]
+    want_cc = {("gA", 1): position_score({"US": 0.2, "GS4": 0.4}), ("gA", 2): 0.8, ("gB", 1): 0.6,
+               ("gB", 5): position_score({"US": 0.3, "GS4": 0.5, "GS3": 0.7})}
+    for r in cc.itertuples():
+        assert r.caas_score == want_cc[(r.Gene, r.Position)]
     assert pd.isna(got.loc[("gA", "c1"), "top_caas"])           # gA has no top position
     assert got.loc[("gA", "c2"), ["global_caas", "top_caas", "bottom_caas"]].isna().all()   # empty cycle
     assert (got.loc[("gA", "c2"), ["global_asr", "top_asr", "bottom_asr"]] == 0).all()
+
+
+# ── ties at the maximum ──────────────────────────────────────────────────────
+
+def test_size_adj_max_counts_values_within_rounding_noise_of_the_maximum_as_ties():
+    """Means that are equal in exact arithmetic can differ by an ulp; they must count as ties."""
+    m = 0.3
+    pool = sorted([0.1, m - 3e-17, m, math.nextafter(m, 1.0), math.nextafter(math.nextafter(m, 1.0), 1.0), 0.9])
+    assert size_adj_max([m], pool) == pytest.approx(5 / 6)   # the three near-ties and 0.1 are <= max, 0.9 is not
+
+
+def test_size_adj_max_keeps_real_differences_apart():
+    pool = [0.1, 0.3, 0.3 + 1e-9, 0.9]
+    assert size_adj_max([0.3], pool) == pytest.approx(2 / 4)
+
+
+def test_size_adj_max_is_invariant_to_ulp_noise_in_the_inputs():
+    rng = random.Random(4)
+    base = [round(rng.random(), 3) for _ in range(300)]
+    noisy = [math.nextafter(v, 1.0) if rng.random() < .5 else v for v in base]
+    for m in base[:40]:
+        assert size_adj_max([m], sorted(base)) == size_adj_max([m], sorted(noisy))

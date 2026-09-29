@@ -48,9 +48,9 @@ def run(tmp_path):
                           "n_detected": 1, "clust": c, "side": side} for p, s, c in rows]),
            b0 / f"perm_pos_detail/{g}.tsv.gz", gz=True)
     _w(pd.DataFrame({"Gene": ["G1", "G2"], "Position": [10, 5], "side": ["top", "bottom"], "cycle": "b_0",
-                     "caas_sum": [0.5, 0.75], "n_schemes": 1}), b0 / "perm_pos_cycle_caas.tsv.gz", gz=True)
+                     "caas_score": [0.5, 0.75], "n_schemes": 1}), b0 / "perm_pos_cycle_caas.tsv.gz", gz=True)
     _w(pd.DataFrame({"Gene": ["G1", "G2"], "cycle": "b_0", "global_asr": 0.0, "top_asr": 0.0, "bottom_asr": 0.0,
-                     "global_caas": [0.4, 0.9], "top_caas": [0.4, 0.0], "bottom_caas": [0.0, 0.9]}),
+                     "global_caas": [0.4, 0.9], "top_caas": [0.4, None], "bottom_caas": [None, 0.9]}),
        b0 / "gene_cycle_scores.tsv")
     return r
 
@@ -89,3 +89,19 @@ def test_removed_unit_changes_survivors_b(run):
        run / "caas_permulation/b0/removed_units.tsv")
     rc, out = _run(run)
     assert rc == 1 and "[B] FAIL" in out
+
+
+def test_a_zero_where_the_observed_gene_score_is_na_fails_e(run):
+    g = pd.read_csv(run / "caas_permulation/b0/gene_cycle_scores.tsv", sep="\t")
+    g["top_caas"] = g["top_caas"].fillna(0.0)          # the null's earlier convention for an empty direction
+    g.to_csv(run / "caas_permulation/b0/gene_cycle_scores.tsv", sep="\t", index=False)
+    rc, out = _run(run)
+    assert rc == 1 and "[E] FAIL" in out and out.count("PASS") == 4
+
+
+def test_c_reports_bitwise_differences(run):
+    m = pd.read_csv(run / "ct_disambiguation/caas_convergence_master.csv")
+    m.loc[0, "asr_path_score"] = 0.5 + 1e-16          # within tolerance, not the same bits
+    m.to_csv(run / "ct_disambiguation/caas_convergence_master.csv", index=False)
+    rc, out = _run(run)
+    assert rc == 0 and '"n_bitwise_different": 1' in out
