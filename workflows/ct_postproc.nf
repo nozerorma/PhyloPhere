@@ -40,10 +40,6 @@ workflow CT_POSTPROC {
         background_files_channel     // Raw background files from CT module (optional)
         background_genes_channel     // Global background genes file from CT module (preferred)
         disambiguation_dir_channel   // Full ct_disambiguation/ directory for ASR robustness diagnostics (optional)
-        meta_caas_channel            // CT_META_CAAS global_meta_caas.tsv/meta_caas.tsv (optional, can use --meta_caas_from instead)
-                                      // Metadata-only: carries the per-hypothesis (hyp_id) grouping the
-                                      // disambiguated discovery no longer has, needed for gene-level
-                                      // extreme/dubious outlier detection in CAAS_FILTER_GENES.
 
     main:
         def filter_dir_ch = Channel.value("${params.outdir}/postproc")
@@ -90,43 +86,6 @@ workflow CT_POSTPROC {
         prepared_inputs = CAAS_PREPARE_POSTPROC_INPUT(discovery_file_ch)
         def prepared_discovery_ch = prepared_inputs.prepared_discovery
         def precluster_removed_ch = prepared_inputs.removed_patterns
-
-        // Resolve the CT_META_CAAS metadata table used by CAAS_FILTER_GENES for
-        // outlier detection: prefer global_meta_caas.tsv, fall back to per-group
-        // meta_caas.tsv, then to --meta_caas_from for standalone runs. Same
-        // resolution CT_DISAMBIGUATION uses for the same files (ct_disambiguation.nf).
-        def meta_from_upstream = (meta_caas_channel ?: Channel.empty())
-            .flatten()
-            .filter { f ->
-                def p = f.toString().toLowerCase()
-                p.endsWith('global_meta_caas.tsv') ||
-                p.contains('meta_caas/global_meta_caas.tsv') ||
-                p.endsWith('meta_caas.tsv') ||
-                p.contains('meta_caas/meta_caas.tsv')
-            }
-            .collect()
-            .map { files ->
-                if (!files) {
-                    return null
-                }
-                def preferred = files.find { f ->
-                    def p = f.toString().toLowerCase()
-                    p.endsWith('global_meta_caas.tsv') || p.contains('meta_caas/global_meta_caas.tsv')
-                }
-                preferred ?: files[0]
-            }
-            .filter { it != null }
-
-        def meta_caas_ch = meta_from_upstream.ifEmpty {
-            def standalone_meta_from = params.meta_caas_from ?: params.signification_from
-            if (standalone_meta_from) {
-                def f = file(standalone_meta_from)
-                assert f.exists() : "Error: meta_caas_from file not found: ${standalone_meta_from}"
-                log.info "📄 Loading standalone gene-filtering metadata: ${standalone_meta_from}"
-                return f
-            }
-            error "CT Post-Processing gene filtering requires a CT_META_CAAS meta file or --meta_caas_from"
-        }
 
         log.info "📂 Post-processing input normalized from disambiguation master CSV"
         log.info "⛔ Precluster hard filter retained: low MRCA posterior"
@@ -237,7 +196,6 @@ workflow CT_POSTPROC {
 
         def gene_filter_results = CAAS_FILTER_GENES(
             prepared_discovery_ch,
-            meta_caas_ch,
             gene_ensembl_file,
             cluster_file
         )

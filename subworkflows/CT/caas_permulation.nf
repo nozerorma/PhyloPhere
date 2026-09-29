@@ -279,7 +279,7 @@ process CAAS_PERMS_DISAMBIGUATE {
     def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
     def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
     def do_postproc = _pp_on && !(gene_lengths.name =~ /^NO_/)
-    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}" : ""
+    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cp -R ${local_dir}/* .
@@ -345,7 +345,7 @@ process CAAS_PERMS_DISAMBIGUATE_BATCHED {
     def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
     def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
     def do_postproc = _pp_on && !(gene_lengths.name =~ /^NO_/)
-    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}" : ""
+    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cp -R ${local_dir}/* .
@@ -485,7 +485,7 @@ process CAAS_PERMS_REBUILD {
     // Same gene removal as the unbatched worker's pass B0 (needs the annotation file).
     def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
     def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
-    def removal_args = (_pp_on && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold}" : ""
+    def removal_args = (_pp_on && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own

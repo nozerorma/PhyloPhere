@@ -36,3 +36,24 @@ python validation/unification/compare_b0.py --run <results_dir> [--out report.js
 - Local test of the train (ctrain) grain, minlen 3 / maxcaas 0.7 on `discovery.tab`: toy, union and per-hypothesis
   flag the same 23 positions (all hypotheses share one position set); PEPC (100 hyp), union flags 25 and
   per-hypothesis 15, with 10 positions flagged only on the union.
+
+## Post-processing (`core/postproc.py`)
+
+One implementation of cluster trains and gene removal serves the observed chain
+(`filter_caas_clusters-param.py`, `filter_caas_genes.py`) and the null (`gene_wrapper.py`, passes A and B).
+
+- Trains: `train_flags` files positions under a key (the null uses `(cycle, caap_group)` per gene; the observed
+  scripts use `(caap_group)` per gene over the pooled rows). This is the single switch point for the train grain.
+- Gene removal: per labeling and `caap_group`, over the pooled scored rows, with no per-hypothesis grain.
+  `dubious` = distinct positions above `Q3 + k*IQR` and at least one train position, calibrated over all units;
+  `extreme` = density above the percentile, calibrated over units whose gene has a positive length.
+- `remove_caas_clusters=false` reaches the null as `--keep-clusters`: train positions stay in the scored pool and
+  still count for the dubious test.
+- Tests: `test_postproc.py` (units, pandas oracle for the thresholds, mutation-sensitive boundaries) and
+  `test_postproc_wiring.py` (observed script and null pass B agree with the core).
+- Checked on the toy (stored code-before outputs): `clust` recomputed on 451 `b_0` positions, 0 mismatches;
+  pass B (`reaggregate_perm_scores.py`) reproduces `gene_cycle_scores`, `perm_pos_quantiles`, `perm_pos_sample`
+  and `perm_pos_cycle_caas` exactly; `filtered_discovery.tsv` reproduced byte for byte.
+- Not exercised by any fixture: a gene actually removed at scale, genes without a length, and the effect of
+  moving the observed gene removal from hypothesis to labeling grain (toy hypotheses share one position set,
+  PEPC has one gene).

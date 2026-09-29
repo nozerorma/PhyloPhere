@@ -116,7 +116,6 @@ process CAAS_FILTER_GENES {
 
     input:
     path(discovery_file)
-    path(meta_caas_file)
     path(gene_ensembl_file)
     path(cluster_file)
 
@@ -131,7 +130,6 @@ process CAAS_FILTER_GENES {
     """
     python3 ${baseDir}/subworkflows/CT_POSTPROC/local/src/filter_caas_genes.py \
         -i ${discovery_file} \
-        -e ${meta_caas_file} \
         -l ${gene_ensembl_file} \
         ${cluster_arg} \
         ${remove_clusters_flag} \

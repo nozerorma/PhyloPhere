@@ -2,9 +2,15 @@
 """
 CAAS Gene-Level Filtering Module
 
-Implements dual filtering strategy for CAAS discovery results:
-1. Extreme genes: Top percentile by CAAS density (n_CAAS/length)
-2. Dubious genes: IQR outliers (Q3 + k*IQR) with clustered positions
+Filters the pooled CAAS discovery table by gene-level outlier criteria, using the same
+implementation (core.postproc) as the permulation null:
+1. Extreme genes: density (distinct positions / gene length) above a percentile.
+2. Dubious genes: IQR outliers (Q3 + k*IQR) in distinct positions that also carry a
+   cluster-train position.
+
+Thresholds are calibrated within each caap_group over the pooled rows (the observed
+labeling), with no per-hypothesis grain. Cluster positions are dropped only with
+--remove-clusters.
 
 Author: PhyloPhere Pipeline
 License: GPL-3.0
@@ -13,7 +19,13 @@ License: GPL-3.0
 import argparse
 import sys
 from pathlib import Path
+
 import pandas as pd
+
+# core.postproc lives with the disambiguation core; it is the single implementation of
+# trains and gene removal for the observed and null chains.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
+from src.core.postproc import GeneUnit, gene_removal, gene_unit_stats, load_gene_lengths  # noqa: E402
 
 # The CAAS table carries categorical amino-acid columns (caas, amino_encoded,
 # derived_residues) whose values can legitimately equal NA-sentinel strings --
@@ -22,491 +34,78 @@ import pandas as pd
 # Only a truly empty cell is missing data in these files.
 _CAAS_READ_KW = dict(keep_default_na=False, na_values=["", "nan", "NaN"])
 
-
-def detect_extreme_genes(meta_df, gene_length_df, percentile=0.99, trait_col="hyp_id"):
-    """
-    Identify genes in the top percentile by CAAS density.
-
-    Thresholds are calculated per hypothesis (trait_col) and, when present,
-    per caap_group -- a gene's density is only compared against genes
-    evaluated under the same hypothesis/scheme.
-
-    Args:
-        meta_df: CT_META_CAAS global_meta_caas.tsv DataFrame with columns
-            [Gene, Position, trait_col, ...] and optional caap_group. This is
-            metadata-only: it carries the per-hypothesis grouping the
-            disambiguated discovery file no longer has, and is used purely to
-            decide which (Gene, caap_group) units are outliers.
-        gene_length_df: DataFrame with columns [Gene, length]
-        percentile: Threshold percentile (default 0.99 for top 1%)
-        trait_col: Name of the hypothesis-id column in meta_df
-
-    Returns:
-        DataFrame with columns [trait_col, Gene, n_CAAS, length, n_CAAS_per_length, category] and optional caap_group
-    """
-    # Check if CAAP mode (caap_group column present)
-    has_caap_group = 'caap_group' in meta_df.columns
-    groupby_cols = [trait_col, 'caap_group'] if has_caap_group else [trait_col]
-
-    # Group-aware thresholds are always calculated per caap_group when present
-    discovery_for_removal = meta_df.copy()
-    if has_caap_group:
-        print(f"CAAP mode detected: calculating extreme gene thresholds per group", file=sys.stderr)
-    
-    # Merge gene lengths
-    discovery_with_len = discovery_for_removal.merge(
-        gene_length_df[['Gene', 'length']], 
-        on='Gene', 
-        how='left'
-    )
-    
-    # Check for missing lengths
-    missing_len = discovery_with_len['length'].isna().sum()
-    if missing_len > 0:
-        print(f"Warning: {missing_len} CAAS positions lack gene length annotation", file=sys.stderr)
-        discovery_with_len = discovery_with_len.dropna(subset=['length'])
-    
-    # Count unique CAAS positions per gene per trait (and group if CAAP mode)
-    groupby_summary = groupby_cols + ['Gene', 'Position']
-    gene_summary = (
-        discovery_with_len
-        .groupby(groupby_summary)
-        .first()  # Keep only one occurrence of each position
-        .reset_index()
-        .groupby(groupby_cols + ['Gene', 'length'])
-        .size()
-        .reset_index(name='n_CAAS')
-    )
-    
-    # Calculate CAAS density (percentage)
-    gene_summary['n_CAAS_per_length'] = (gene_summary['n_CAAS'] / gene_summary['length']) * 100
-    
-    # Calculate threshold per trait (and per group if CAAP mode)
-    thresholds = (
-        gene_summary
-        .groupby(groupby_cols)['n_CAAS_per_length']
-        .quantile(percentile)
-        .reset_index(name='threshold')
-    )
-    
-    # Flag extreme genes
-    gene_summary = gene_summary.merge(thresholds, on=groupby_cols)
-    extreme_genes = gene_summary[gene_summary['n_CAAS_per_length'] > gene_summary['threshold']].copy()
-    extreme_genes['category'] = 'Extreme'
-    extreme_genes = extreme_genes.drop(columns=['threshold'])
-    
-    if has_caap_group:
-        group_counts = extreme_genes.groupby('caap_group').size()
-        print(f"Detected {len(extreme_genes)} extreme genes (top {100*(1-percentile):.1f}% by density per group):", file=sys.stderr)
-        for group, count in group_counts.items():
-            print(f"  {group}: {count} genes", file=sys.stderr)
-    else:
-        print(f"Detected {len(extreme_genes)} extreme genes (top {100*(1-percentile):.1f}% by density)", file=sys.stderr)
-    
-    return extreme_genes
+# Label of the observed slice in core.postproc units, and the hyp_id shown in gene_stats.tsv.
+OBSERVED = "b_0"
+POOL_ID = "ALL"
 
 
-def detect_dubious_genes(meta_df, gene_length_df, cluster_file, iqr_multiplier=3.0, trait_col="hyp_id"):
-    """
-    Identify IQR outlier genes that contain clustered CAAS positions.
-
-    IQR thresholds are calculated per hypothesis (trait_col) and, when present,
-    per caap_group -- a gene's density is only compared against genes
-    evaluated under the same hypothesis/scheme.
-
-    Args:
-        meta_df: CT_META_CAAS global_meta_caas.tsv DataFrame with columns
-            [Gene, Position, trait_col, ...] and optional caap_group. Same
-            metadata-only role as in detect_extreme_genes.
-        gene_length_df: DataFrame with columns [Gene, length]
-        cluster_file: Path to cluster filtering output (*.filtered.*.tsv)
-        iqr_multiplier: IQR multiplier for outlier threshold (default 3.0)
-        trait_col: Name of the hypothesis-id column in meta_df
-
-    Returns:
-        DataFrame with columns [trait_col, Gene, n_CAAS, length, n_CAAS_per_length, category] and optional caap_group
-    """
-    # Check if CAAP mode (caap_group column present)
-    has_caap_group = 'caap_group' in meta_df.columns
-    groupby_cols = [trait_col, 'caap_group'] if has_caap_group else [trait_col]
-
-    # Group-aware thresholds are always calculated per caap_group when present
-    discovery_for_removal = meta_df.copy()
-    if has_caap_group:
-        print(f"CAAP mode detected: calculating IQR thresholds per group", file=sys.stderr)
-    
-    # Merge gene lengths
-    discovery_with_len = discovery_for_removal.merge(
-        gene_length_df[['Gene', 'length']], 
-        on='Gene', 
-        how='left'
-    )
-    
-    # Check for missing lengths
-    missing_len = discovery_with_len['length'].isna().sum()
-    if missing_len > 0:
-        print(f"Warning: {missing_len} CAAS positions lack gene length annotation", file=sys.stderr)
-        discovery_with_len = discovery_with_len.dropna(subset=['length'])
-    
-    # Count unique CAAS positions per gene per trait (and group if CAAP mode)
-    groupby_summary = groupby_cols + ['Gene', 'Position']
-    gene_summary = (
-        discovery_with_len
-        .groupby(groupby_summary)
-        .first()  # Keep only one occurrence of each position
-        .reset_index()
-        .groupby(groupby_cols + ['Gene', 'length'])
-        .size()
-        .reset_index(name='n_CAAS')
-    )
-    
-    # Calculate per-trait (and per-group if CAAP) IQR thresholds
-    def calc_iqr_threshold(series, multiplier):
-        q1 = series.quantile(0.25)
-        q3 = series.quantile(0.75)
-        iqr = q3 - q1
-        return q3 + multiplier * iqr
-    
-    thresholds = (
-        gene_summary
-        .groupby(groupby_cols)['n_CAAS']
-        .apply(lambda x: calc_iqr_threshold(x, iqr_multiplier))
-        .reset_index(name='iqr_threshold')
-    )
-    
-    # Flag IQR outliers
-    gene_summary = gene_summary.merge(thresholds, on=groupby_cols)
-    iqr_outliers = gene_summary[gene_summary['n_CAAS'] > gene_summary['iqr_threshold']].copy()
-    
-    if has_caap_group:
-        if len(iqr_outliers) > 0:
-            group_counts = iqr_outliers.groupby('caap_group').size()
-            print(f"Detected {len(iqr_outliers)} IQR outlier genes ({iqr_multiplier}×IQR threshold per group):", file=sys.stderr)
-            for group, count in group_counts.items():
-                print(f"  {group}: {count} genes", file=sys.stderr)
-        else:
-            print(f"Detected 0 IQR outlier genes ({iqr_multiplier}×IQR threshold per group)", file=sys.stderr)
-    else:
-        print(f"Detected {len(iqr_outliers)} IQR outlier genes ({iqr_multiplier}×IQR threshold)", file=sys.stderr)
-    
-    # Early exit if no IQR outliers found
-    if len(iqr_outliers) == 0:
-        empty_cols = groupby_cols + ['Gene', 'n_CAAS', 'length', 'n_CAAS_per_length', 'category']
-        print(f"No dubious genes detected (no IQR outliers to check for clusters)", file=sys.stderr)
-        return pd.DataFrame(columns=empty_cols)
-    
-    # Load cluster filtering results
-    if not Path(cluster_file).exists():
-        print(f"Warning: Cluster file {cluster_file} not found. Cannot identify dubious genes.", file=sys.stderr)
-        empty_cols = groupby_cols + ['Gene', 'n_CAAS', 'length', 'n_CAAS_per_length', 'category']
-        return pd.DataFrame(columns=empty_cols)
-    
-    cluster_df = pd.read_csv(cluster_file, sep='\t', **_CAAS_READ_KW)
-    
-    # Check required columns
-    required_cols = ['Gene', 'Position', 'clustering_flag']
-    if not all(col in cluster_df.columns for col in required_cols):
-        print(f"Error: Cluster file missing required columns: {required_cols}", file=sys.stderr)
+def read_discarded(cluster_file):
+    """Cluster file to the set of (Gene, Position, caap_group) flagged Discarded."""
+    cluster_df = pd.read_csv(cluster_file, sep="\t", **_CAAS_READ_KW)
+    required = ["Gene", "Position", "clustering_flag"]
+    if not all(c in cluster_df.columns for c in required):
+        print(f"Error: Cluster file missing required columns: {required}", file=sys.stderr)
         sys.exit(1)
-    
-    # Identify genes with discarded (clustered) positions
-    # If CAAP mode, only consider clusters within the same CAAP group
-    if has_caap_group and 'caap_group' in cluster_df.columns:
-        # Build set of (Gene, caap_group) tuples with clusters
-        genes_with_clusters = set(
-            cluster_df[cluster_df['clustering_flag'] == 'Discarded']
-            [['Gene', 'caap_group']]
-            .itertuples(index=False, name=None)
-        )
-        # Filter iqr_outliers: keep only those with matching (Gene, caap_group) in clusters
-        dubious_genes = iqr_outliers[
-            iqr_outliers.apply(lambda row: (row['Gene'], row['caap_group']) in genes_with_clusters, axis=1)
-        ].copy()
-    else:
-        # Standard mode: just check gene presence
-        genes_with_clusters = cluster_df[cluster_df['clustering_flag'] == 'Discarded']['Gene'].unique()
-        dubious_genes = iqr_outliers[iqr_outliers['Gene'].isin(genes_with_clusters)].copy()
-    
-    # Drop iqr_threshold column if it exists (present regardless of dubious count)
-    if 'iqr_threshold' in dubious_genes.columns:
-        dubious_genes = dubious_genes.drop(columns=['iqr_threshold'])
-
-    if len(dubious_genes) > 0:
-        dubious_genes['category'] = 'Dubious'
-        dubious_genes['n_CAAS_per_length'] = (dubious_genes['n_CAAS'] / dubious_genes['length']) * 100
-    else:
-        # Ensure required columns are always present even when result is empty
-        dubious_genes['category'] = pd.Series(dtype='object')
-        dubious_genes['n_CAAS_per_length'] = pd.Series(dtype='float64')
-    
-    if has_caap_group:
-        group_counts = dubious_genes.groupby('caap_group').size()
-        print(f"Detected {len(dubious_genes)} dubious genes (IQR outliers with clusters per group):", file=sys.stderr)
-        for group, count in group_counts.items():
-            print(f"  {group}: {count} genes", file=sys.stderr)
-    else:
-        print(f"Detected {len(dubious_genes)} dubious genes (IQR outliers with clusters)", file=sys.stderr)
-    
-    return dubious_genes
+    if "caap_group" not in cluster_df.columns:
+        cluster_df["caap_group"] = "US"
+    d = cluster_df[cluster_df["clustering_flag"] == "Discarded"]
+    return set(d[["Gene", "Position", "caap_group"]].itertuples(index=False, name=None))
 
 
-def apply_gene_filter(discovery_df, removed_genes_df, mode='both'):
-    """
-    Remove flagged genes from discovery dataset.
-    
-    Args:
-        discovery_df: Original CAAS discovery DataFrame
-        removed_genes_df: DataFrame of genes to remove with category column
-        mode: Filter mode ('none', 'extreme', 'dubious', 'both')
-    
-    Returns:
-        Filtered discovery DataFrame
-    """
-    if mode == 'none':
-        print("Filter mode 'none': No gene-level filtering applied", file=sys.stderr)
-        return discovery_df
-    
-    # Filter removed_genes_df by mode
-    if mode == 'extreme':
-        genes_to_remove = removed_genes_df[removed_genes_df['category'] == 'Extreme']
-    elif mode == 'dubious':
-        genes_to_remove = removed_genes_df[removed_genes_df['category'] == 'Dubious']
-    elif mode == 'both':
-        genes_to_remove = removed_genes_df
-    else:
-        print(f"Error: Invalid filter mode '{mode}'. Use: none, extreme, dubious, both", file=sys.stderr)
-        sys.exit(1)
-    
-    # Remove genes (group-aware when caap_group is present)
+def build_units(discovery_df, discarded):
+    """One core.postproc unit per (caap_group, Gene) of the pooled table."""
+    clustered = {(grp, gene) for gene, _pos, grp in discarded}
+    counts = discovery_df.groupby(["caap_group", "Gene"])["Position"].nunique()
+    return [GeneUnit(OBSERVED, str(grp), str(gene), int(n), (str(grp), str(gene)) in clustered)
+            for (grp, gene), n in counts.items()]
+
+
+def gene_stats_table(stats, removal):
+    """gene_stats.tsv: one row per (caap_group, Gene) with a length; category is the removal verdict."""
+    rows = []
+    for s in stats:
+        if s["density"] is None:
+            continue
+        cat = removal.get((s["labeling"], s["caap_group"], s["Gene"]), "Normal")
+        rows.append({
+            "hyp_id": POOL_ID, "caap_group": s["caap_group"], "Gene": s["Gene"],
+            "length": s["length"], "n_CAAS": s["n_caas"], "n_CAAS_per_length": s["density"],
+            "threshold_extreme": s["threshold_extreme"], "threshold_dubious": s["threshold_dubious"],
+            "category": cat,
+        })
+    cols = ["hyp_id", "caap_group", "Gene", "length", "n_CAAS", "n_CAAS_per_length",
+            "threshold_extreme", "threshold_dubious", "category"]
+    return pd.DataFrame(rows, columns=cols)
+
+
+def apply_gene_filter(discovery_df, removed_genes_df):
+    """Remove the flagged (Gene, caap_group) units from the discovery table."""
     n_before = len(discovery_df)
-
-    if 'caap_group' in discovery_df.columns and 'caap_group' in genes_to_remove.columns:
-        remove_keys = set(
-            genes_to_remove[['Gene', 'caap_group']]
-            .dropna()
-            .itertuples(index=False, name=None)
-        )
-        filtered_df = discovery_df[
-            ~discovery_df.apply(lambda row: (row['Gene'], row['caap_group']) in remove_keys, axis=1)
-        ].copy()
-        n_gene_units = len(remove_keys)
-    else:
-        gene_list = genes_to_remove['Gene'].unique()
-        filtered_df = discovery_df[~discovery_df['Gene'].isin(gene_list)].copy()
-        n_gene_units = len(gene_list)
-
+    remove_keys = set(removed_genes_df[["Gene", "caap_group"]].itertuples(index=False, name=None))
+    keys = pd.Series(list(zip(discovery_df["Gene"], discovery_df["caap_group"])), index=discovery_df.index)
+    filtered_df = discovery_df[~keys.isin(remove_keys)].copy()
     n_after = len(filtered_df)
-    n_removed = n_before - n_after
-    
-    print(f"Removed {n_removed} CAAS positions from {n_gene_units} gene/group units (mode: {mode})", file=sys.stderr)
+    print(f"Removed {n_before - n_after} CAAS positions from {len(remove_keys)} gene/group units", file=sys.stderr)
     pct = (100 * n_after / n_before) if n_before > 0 else 100.0
     print(f"Remaining: {n_after}/{n_before} positions ({pct:.1f}%)", file=sys.stderr)
-    
     return filtered_df
 
 
-def apply_cluster_filter(discovery_df, cluster_file):
-    """
-    Remove individual CAAS positions flagged as Discarded by cluster filtering.
-
-    Args:
-        discovery_df: CAAS discovery DataFrame
-        cluster_file: Path to cluster filtering output (*.filtered.*.tsv)
-
-    Returns:
-        Filtered discovery DataFrame with clustered positions removed
-    """
-    if not cluster_file or not Path(cluster_file).exists():
-        print(f"Warning: Cluster file '{cluster_file}' not found. Cannot remove clustered positions.", file=sys.stderr)
-        return discovery_df
-
-    cluster_df = pd.read_csv(cluster_file, sep='\t', **_CAAS_READ_KW)
-    if 'clustering_flag' not in cluster_df.columns:
-        print(f"Warning: 'clustering_flag' column missing in cluster file. Skipping cluster removal.", file=sys.stderr)
-        return discovery_df
-
-    discarded_df = cluster_df[cluster_df['clustering_flag'] == 'Discarded']
-    if discarded_df.empty:
+def apply_cluster_filter(discovery_df, discarded):
+    """Remove individual CAAS positions flagged as Discarded by cluster filtering."""
+    if not discarded:
         print("Cluster filtering: 0 positions flagged as Discarded", file=sys.stderr)
         return discovery_df
-
     n_before = len(discovery_df)
-    has_caap_group = 'caap_group' in discovery_df.columns and 'caap_group' in discarded_df.columns
-
-    if has_caap_group:
-        discarded_keys = set(
-            discarded_df[['Gene', 'Position', 'caap_group']]
-            .dropna()
-            .itertuples(index=False, name=None)
-        )
-        filtered_df = discovery_df[
-            ~discovery_df.apply(lambda row: (row['Gene'], row['Position'], row['caap_group']) in discarded_keys, axis=1)
-        ].copy()
-    else:
-        discarded_keys = set(
-            discarded_df[['Gene', 'Position']]
-            .dropna()
-            .itertuples(index=False, name=None)
-        )
-        filtered_df = discovery_df[
-            ~discovery_df.apply(lambda row: (row['Gene'], row['Position']) in discarded_keys, axis=1)
-        ].copy()
-
+    keys = pd.Series(list(zip(discovery_df["Gene"], discovery_df["Position"], discovery_df["caap_group"])),
+                     index=discovery_df.index)
+    filtered_df = discovery_df[~keys.isin(discarded)].copy()
     n_after = len(filtered_df)
-    n_removed = n_before - n_after
-    print(f"Cluster filtering: Removed {n_removed} clustered positions ({len(discarded_keys)} unique cluster events)", file=sys.stderr)
+    print(f"Cluster filtering: Removed {n_before - n_after} clustered positions "
+          f"({len(discarded)} unique cluster events)", file=sys.stderr)
     pct = (100 * n_after / n_before) if n_before > 0 else 100.0
     print(f"Remaining after cluster filter: {n_after}/{n_before} positions ({pct:.1f}%)", file=sys.stderr)
-
     return filtered_df
-
-
-def build_full_gene_stats(meta_df, gene_length_df, removed_genes_df, extreme_percentile=0.99, iqr_multiplier=3.0, trait_col="hyp_id"):
-    """
-    Build complete gene statistics for all genes with thresholds and categories.
-
-    Stats stay at (hyp_id, caap_group, Gene) grain -- mirroring the per-hypothesis
-    detection in detect_extreme_genes/detect_dubious_genes -- but the removal
-    verdict joined in is the rolled-up (Gene, caap_group) one, since removal is
-    a single binary decision per gene/scheme applied to the pooled disambiguated
-    discovery file, not per hypothesis.
-
-    Args:
-        meta_df: CT_META_CAAS global_meta_caas.tsv DataFrame with columns
-            [Gene, Position, trait_col, ...] and optional caap_group
-        gene_length_df: DataFrame with columns [Gene, length]
-        removed_genes_df: Rolled-up DataFrame of flagged (Gene, caap_group) units with category column
-        extreme_percentile: Threshold percentile for extreme genes
-        iqr_multiplier: IQR multiplier for dubious gene threshold
-        trait_col: Name of the hypothesis-id column in meta_df
-
-    Returns:
-        DataFrame with all genes, their stats, thresholds, and categories
-    """
-    # Check if CAAP mode (caap_group column present)
-    has_caap_group = 'caap_group' in meta_df.columns
-    groupby_cols = [trait_col, 'caap_group'] if has_caap_group else [trait_col]
-
-    # Merge gene lengths
-    discovery_with_len = meta_df.merge(
-        gene_length_df[['Gene', 'length']],
-        on='Gene',
-        how='left'
-    )
-    
-    # Drop rows without gene length annotation
-    discovery_with_len = discovery_with_len.dropna(subset=['length'])
-    
-    # Count unique CAAS positions per gene per trait (and group if CAAP mode)
-    groupby_summary = groupby_cols + ['Gene', 'Position']
-    gene_summary = (
-        discovery_with_len
-        .groupby(groupby_summary)
-        .first()  # Keep only one occurrence of each position
-        .reset_index()
-        .groupby(groupby_cols + ['Gene', 'length'])
-        .size()
-        .reset_index(name='n_CAAS')
-    )
-    
-    # Calculate CAAS density (percentage)
-    gene_summary['n_CAAS_per_length'] = (gene_summary['n_CAAS'] / gene_summary['length']) * 100
-    
-    # Calculate extreme threshold per trait (and per group if CAAP mode)
-    extreme_thresholds = (
-        gene_summary
-        .groupby(groupby_cols)['n_CAAS_per_length']
-        .quantile(extreme_percentile)
-        .reset_index(name='threshold_extreme')
-    )
-    
-    # Calculate IQR thresholds per trait (and per group if CAAP mode)
-    def calc_iqr_threshold(series, multiplier):
-        q1 = series.quantile(0.25)
-        q3 = series.quantile(0.75)
-        iqr = q3 - q1
-        return q3 + multiplier * iqr
-    
-    iqr_thresholds = (
-        gene_summary
-        .groupby(groupby_cols)['n_CAAS']
-        .apply(lambda x: calc_iqr_threshold(x, iqr_multiplier))
-        .reset_index(name='threshold_dubious')
-    )
-    
-    # Join thresholds to gene summary
-    gene_summary = gene_summary.merge(extreme_thresholds, on=groupby_cols)
-    gene_summary = gene_summary.merge(iqr_thresholds, on=groupby_cols)
-    
-    # Initialize all genes as Normal
-    gene_summary['category'] = 'Normal'
-    
-    # Apply categories from removed_genes_df if available. removed_genes_df is
-    # rolled up to (Gene, caap_group) -- not trait_col -- so every hyp_id row
-    # for a given (Gene, caap_group) gets the same final removal verdict.
-    if not removed_genes_df.empty:
-        # Determine merge columns
-        merge_cols = ['caap_group', 'Gene'] if has_caap_group else ['Gene']
-        # Only merge if removed_genes_df has the required columns
-        if all(col in removed_genes_df.columns for col in merge_cols):
-            category_mapping = removed_genes_df[merge_cols + ['category']].drop_duplicates()
-            gene_summary = gene_summary.merge(
-                category_mapping, 
-                on=merge_cols, 
-                how='left', 
-                suffixes=('', '_removed')
-            )
-            # Update categories for flagged genes
-            gene_summary['category'] = gene_summary['category_removed'].fillna(gene_summary['category'])
-            gene_summary = gene_summary.drop(columns=['category_removed'])
-    
-    return gene_summary
-
-
-def rollup_removed_genes(removed_genes_df, trait_col):
-    """
-    Collapse a per-hypothesis removed_genes_df down to one row per (Gene,
-    caap_group) unit -- the grain apply_gene_filter and cleanup_background.py
-    actually key on, since a position's inclusion in the pooled disambiguated
-    discovery file no longer distinguishes which hypothesis flagged it.
-
-    A gene/scheme is flagged if outlier in ANY hypothesis. category is the
-    union of categories seen across hypotheses ('Both' if both Extreme and
-    Dubious occur, whether from the same or different hypotheses).
-
-    Args:
-        removed_genes_df: hyp-level DataFrame with columns [trait_col, Gene,
-            category, ...] and optional caap_group
-        trait_col: name of the hypothesis-id column to roll up over
-
-    Returns:
-        DataFrame with columns [Gene, category, n_hyp_flagged] and optional caap_group
-    """
-    if removed_genes_df.empty:
-        keep_cols = [c for c in removed_genes_df.columns if c not in (trait_col, 'n_CAAS', 'length', 'n_CAAS_per_length')]
-        empty = removed_genes_df[keep_cols].copy()
-        empty['n_hyp_flagged'] = pd.Series(dtype='int64')
-        return empty
-
-    has_caap_group = 'caap_group' in removed_genes_df.columns
-    key_cols = ['caap_group', 'Gene'] if has_caap_group else ['Gene']
-
-    def combine_categories(cats):
-        cats = set(cats)
-        if len(cats) > 1 or 'Both' in cats:
-            return 'Both'
-        return next(iter(cats))
-
-    rolled = (
-        removed_genes_df
-        .groupby(key_cols)
-        .agg(
-            category=('category', combine_categories),
-            n_hyp_flagged=(trait_col, 'nunique'),
-        )
-        .reset_index()
-    )
-    return rolled
 
 
 def main():
@@ -517,26 +116,21 @@ def main():
 Examples:
   # Remove both extreme and dubious genes
   python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv -m both -o filtered.tsv
-  
+
   # Remove only extreme genes (top 1% density)
   python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -m extreme -o filtered.tsv
-  
+
   # Custom thresholds
-  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv \
+  python filter_caas_genes.py -i discovery.tsv -l gene_lengths.tsv -c clusters.tsv \\
     --extreme-percentile 0.95 --iqr-multiplier 4.0 -o filtered.tsv
 """
     )
-    
+
     # Input files
     parser.add_argument('-i', '--disambiguation-input', required=True,
-                        help='CAAS disambiguation file (TSV with Gene, Position columns; the pooled, '
-                             'per-hypothesis discovery this script actually filters)')
-    parser.add_argument('-e', '--meta-caas-file', required=True,
-                        help='CT_META_CAAS global_meta_caas.tsv (TSV with Gene, Position, hyp_id columns; '
-                             'metadata-only source used to decide which genes are outliers, since the '
-                             'disambiguation input no longer carries per-hypothesis grouping)')
+                        help='Pooled CAAS discovery file (TSV with Gene, Position and, optionally, caap_group)')
     parser.add_argument('-l', '--gene-ensembl-file', required=True,
-                        help='Gene annotation file (TSV with Gene, Chr, Start, End, Strand, length columns)')
+                        help='Gene annotation file (TSV with gene and length columns)')
     parser.add_argument('-c', '--cluster-file', default=None,
                         help='Cluster filtering output (required for dubious gene detection)')
 
@@ -551,9 +145,7 @@ Examples:
                         help='Density percentile for extreme genes (default: 0.99 = top 1%%)')
     parser.add_argument('--iqr-multiplier', type=float, default=3.0,
                         help='IQR multiplier for dubious gene threshold (default: 3.0)')
-    parser.add_argument('--hyp-col', dest='trait_col', default='hyp_id',
-                        help='Name of the hypothesis-id column in the meta-caas file (default: hyp_id)')
-    
+
     # Output files
     parser.add_argument('-o', '--output', required=True,
                         help='Filtered discovery output file')
@@ -561,175 +153,70 @@ Examples:
                         help='Removed genes summary file (optional)')
     parser.add_argument('-g', '--gene-stats-output', default=None,
                         help='Full gene statistics output file (optional)')
-    
+
     args = parser.parse_args()
-    
-    # Validate inputs
-    if not Path(args.disambiguation_input).exists():
-        print(f"Error: Disambiguation file not found: {args.disambiguation_input}", file=sys.stderr)
-        sys.exit(1)
 
-    if not Path(args.meta_caas_file).exists():
-        print(f"Error: Meta-CAAS file not found: {args.meta_caas_file}", file=sys.stderr)
-        sys.exit(1)
+    for label, path in (("Disambiguation file", args.disambiguation_input),
+                        ("Gene ensembl file", args.gene_ensembl_file)):
+        if not Path(path).exists():
+            print(f"Error: {label} not found: {path}", file=sys.stderr)
+            sys.exit(1)
 
-    if not Path(args.gene_ensembl_file).exists():
-        print(f"Error: Gene ensembl file not found: {args.gene_ensembl_file}", file=sys.stderr)
-        sys.exit(1)
-    
-    if (args.remove_clusters or args.filter_mode in ['dubious', 'both']) and args.cluster_file is None:
+    needs_clusters = args.remove_clusters or args.filter_mode in ['dubious', 'both']
+    if needs_clusters and args.cluster_file is None:
         print("Error: --cluster-file required when --remove-clusters is set or for 'dubious'/'both' filter modes", file=sys.stderr)
         sys.exit(1)
-    
-    # Load data
+    if needs_clusters and not Path(args.cluster_file).exists():
+        print(f"Error: Cluster file not found: {args.cluster_file}", file=sys.stderr)
+        sys.exit(1)
+
     print(f"Loading disambiguation data: {args.disambiguation_input}", file=sys.stderr)
     discovery_df = pd.read_csv(args.disambiguation_input, sep='\t', **_CAAS_READ_KW)
-    # CAAP-awareness keys on the canonical lowercase 'caap_group' column emitted
-    # by the disambiguation/postproc input (see has_caap_group checks below).
-    # discovery_df is what actually gets filtered and written back out -- it has
-    # no per-hypothesis grouping (trait/hyp_id), by design (disambiguation pools
-    # across hypotheses). meta_df below supplies that grouping for outlier
-    # detection only; it never itself flows into the output.
+    if 'caap_group' not in discovery_df.columns:
+        discovery_df['caap_group'] = 'US'
 
-    print(f"Loading meta-CAAS data: {args.meta_caas_file}", file=sys.stderr)
-    meta_df = pd.read_csv(args.meta_caas_file, sep='\t', **_CAAS_READ_KW)
-    if args.trait_col not in meta_df.columns:
-        # Non-CAAP-mode CT_META_CAAS runs emit a minimal meta_caas.tsv with no
-        # per-hypothesis column at all (see 7.CAAS_pattern_annotation.Rmd's
-        # has_caap_group==FALSE branch) -- there is genuinely no hypothesis
-        # grouping to detect outliers within, so treat everything as one pool.
-        print(f"Meta-CAAS file has no '{args.trait_col}' column -- no per-hypothesis grouping available, treating as a single pool", file=sys.stderr)
-        meta_df[args.trait_col] = 'ALL'
+    gene_lengths = load_gene_lengths(args.gene_ensembl_file)
+    if not gene_lengths:
+        print("Error: Gene ensembl file must have 'gene' and 'length' columns", file=sys.stderr)
+        sys.exit(1)
 
-    print(f"Loading gene lengths: {args.gene_ensembl_file}", file=sys.stderr)
-    gene_length_df = pd.read_csv(args.gene_ensembl_file, sep='\t')
-    
-    # Validate required columns - handle both old format and new ensembl format
-    # Old format: Gene, length
-    # New format: gene, chr, start, end, strand, length (case insensitive)
-    
-    # Normalize column names to lowercase for case-insensitive matching
-    gene_length_df.columns = gene_length_df.columns.str.lower()
-    
-    if 'gene' not in gene_length_df.columns:
-        print("Error: Gene ensembl file must have 'gene' column", file=sys.stderr)
-        sys.exit(1)
-    
-    if 'length' not in gene_length_df.columns:
-        print("Error: Gene ensembl file must have 'length' column", file=sys.stderr)
-        sys.exit(1)
-    
-    # Rename to standard format for processing (capitalize first letter)
-    gene_length_df.rename(columns={'gene': 'Gene', 'length': 'length'}, inplace=True)
-    
+    discarded = read_discarded(args.cluster_file) if needs_clusters else set()
     print(f"Loaded {len(discovery_df)} CAAS positions across {discovery_df['Gene'].nunique()} genes", file=sys.stderr)
-    
-    # Detect extreme genes
-    removed_genes_list = []
-    
-    if args.filter_mode in ['extreme', 'both']:
-        extreme_genes = detect_extreme_genes(
-            meta_df,
-            gene_length_df,
-            percentile=args.extreme_percentile,
-            trait_col=args.trait_col
-        )
-        removed_genes_list.append(extreme_genes)
 
-    # Detect dubious genes
-    if args.filter_mode in ['dubious', 'both']:
-        dubious_genes = detect_dubious_genes(
-            meta_df,
-            gene_length_df,
-            args.cluster_file,
-            iqr_multiplier=args.iqr_multiplier,
-            trait_col=args.trait_col
-        )
-        removed_genes_list.append(dubious_genes)
+    units = build_units(discovery_df, discarded)
+    removal = gene_removal(units, gene_lengths, args.filter_mode, args.iqr_multiplier, args.extreme_percentile)
+    removed_genes_df = pd.DataFrame(
+        sorted((grp, gene, cat) for (_lab, grp, gene), cat in removal.items()),
+        columns=['caap_group', 'Gene', 'category'])
 
-    # Combine removed genes (still per-hypothesis grain at this point)
-    if removed_genes_list:
-        removed_genes_df = pd.concat(removed_genes_list, ignore_index=True)
+    filtered_df = apply_gene_filter(discovery_df, removed_genes_df)
 
-        # Determine groupby columns for duplicate detection
-        has_caap_group = 'caap_group' in removed_genes_df.columns
-        dup_cols = [args.trait_col, 'caap_group', 'Gene'] if has_caap_group else [args.trait_col, 'Gene']
-
-        # Handle genes flagged by both criteria within the same hypothesis/group
-        duplicate_genes = removed_genes_df[removed_genes_df.duplicated(subset=dup_cols, keep=False)]
-        if len(duplicate_genes) > 0:
-            dup_count = len(duplicate_genes)//2
-            if has_caap_group:
-                print(f"Found {dup_count} gene-group-hypothesis combinations flagged as both Extreme and Dubious", file=sys.stderr)
-            else:
-                print(f"Found {dup_count} gene-hypothesis combinations flagged as both Extreme and Dubious", file=sys.stderr)
-            # Mark as "Both" and deduplicate
-            removed_genes_df.loc[
-                removed_genes_df.duplicated(subset=dup_cols, keep=False),
-                'category'
-            ] = 'Both'
-            removed_genes_df = removed_genes_df.drop_duplicates(subset=dup_cols, keep='first')
-    else:
-        # Create empty DataFrame with appropriate columns
-        has_caap_group = 'caap_group' in meta_df.columns
-        base_cols = [args.trait_col, 'Gene', 'n_CAAS', 'length', 'n_CAAS_per_length', 'category']
-        cols = [args.trait_col, 'caap_group'] + base_cols[1:] if has_caap_group else base_cols
-        removed_genes_df = pd.DataFrame(columns=cols)
-
-    # Roll up to (Gene, caap_group): the grain the disambiguated discovery file
-    # and apply_gene_filter/cleanup_background.py actually key on. A gene/scheme
-    # flagged by any hypothesis is removed everywhere it appears in the pooled file.
-    removed_genes_rolled = rollup_removed_genes(removed_genes_df, args.trait_col)
-
-    # Apply gene filtering
-    filtered_df = apply_gene_filter(discovery_df, removed_genes_rolled, mode=args.filter_mode)
-
-    # Apply cluster position filtering (decoupled from gene filtering)
     if args.remove_clusters:
-        if args.cluster_file:
-            print("Applying cluster position removal (--remove-clusters enabled)...", file=sys.stderr)
-            filtered_df = apply_cluster_filter(filtered_df, args.cluster_file)
-        else:
-            print("Warning: --remove-clusters was requested but no --cluster-file was provided. Skipping cluster removal.", file=sys.stderr)
+        print("Applying cluster position removal (--remove-clusters enabled)...", file=sys.stderr)
+        filtered_df = apply_cluster_filter(filtered_df, discarded)
     else:
         print("Cluster position removal: disabled (cluster positions retained unless removed by gene filter)", file=sys.stderr)
 
-    # If filtered_df lost all columns somehow (edge case: empty input), restore columns from discovery_df
-    if filtered_df.empty and len(filtered_df.columns) == 0 and not discovery_df.empty:
-        filtered_df = pd.DataFrame(columns=discovery_df.columns)
-
-    # Write outputs
     print(f"Writing filtered discovery: {args.output}", file=sys.stderr)
     filtered_df.to_csv(args.output, sep='\t', index=False)
-    
+
     if args.summary:
         print(f"Writing removed genes summary: {args.summary}", file=sys.stderr)
-        removed_genes_rolled.to_csv(args.summary, sep='\t', index=False)
+        removed_genes_df.to_csv(args.summary, sep='\t', index=False)
 
-    # Generate and export full gene statistics if requested
     if args.gene_stats_output:
-        print(f"Building full gene statistics...", file=sys.stderr)
-        gene_stats_df = build_full_gene_stats(
-            meta_df,
-            gene_length_df,
-            removed_genes_rolled,
-            extreme_percentile=args.extreme_percentile,
-            iqr_multiplier=args.iqr_multiplier,
-            trait_col=args.trait_col
-        )
+        stats = gene_unit_stats(units, gene_lengths, args.iqr_multiplier, args.extreme_percentile)
         print(f"Writing gene statistics: {args.gene_stats_output}", file=sys.stderr)
-        gene_stats_df.to_csv(args.gene_stats_output, sep='\t', index=False)
-    
-    # Summary statistics (rolled-up Gene/caap_group grain -- what was actually removed)
+        gene_stats_table(stats, removal).to_csv(args.gene_stats_output, sep='\t', index=False)
+
     print("\n=== Post-Processing Filtering Summary ===", file=sys.stderr)
     print(f"Gene filter mode: {args.filter_mode}", file=sys.stderr)
     print(f"Cluster removal: {'enabled' if args.remove_clusters else 'disabled'}", file=sys.stderr)
-    print(f"Removed gene/scheme units flagged by {len(removed_genes_df[args.trait_col].unique()) if not removed_genes_df.empty else 0} hypotheses, by category:", file=sys.stderr)
     for category in ['Extreme', 'Dubious', 'Both']:
-        count = len(removed_genes_rolled[removed_genes_rolled['category'] == category])
+        count = int((removed_genes_df['category'] == category).sum())
         if count > 0:
             print(f"  {category}: {count}", file=sys.stderr)
-    print(f"Total removed gene/scheme units: {len(removed_genes_rolled)}", file=sys.stderr)
+    print(f"Total removed gene/scheme units: {len(removed_genes_df)}", file=sys.stderr)
     pct_str = f"{100*len(filtered_df)/len(discovery_df):.2f}%" if len(discovery_df) > 0 else "N/A"
     print(f"Positions retained: {len(filtered_df)}/{len(discovery_df)} ({pct_str})", file=sys.stderr)
 

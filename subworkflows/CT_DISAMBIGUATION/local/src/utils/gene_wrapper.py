@@ -1114,17 +1114,15 @@ def _perms_worker_finalize(
     # Each record is already per-side by the time it reaches here (a "both"
     # position is two records, each with its own `side` and core_s), so the
     # detail shard carries `side` directly — no OR-across-schemes step.
-    # ── CT_POSTPROC cluster filter (Gap B) ────────────────────────────────
-    # Per (base cycle, caap_group) run ctrain over this gene's detected
-    # positions, verbatim to filter_caas_clusters-param.py. The `clust` flag
-    # is emitted per detail row (0/1) and mirrors CT_FILTER's clustering_flag:
-    # observed rows flagged "Discarded" never reach SCORING, so pass B1/B2
-    # skip clust == 1 rows (_is_clustered), while pass B0's cycle-aware gene
-    # filter still reads them. No-op unless postproc_filter is on (keeps the
-    # non-postproc null path unchanged).
+    # ── CT_POSTPROC cluster trains ────────────────────────────────────────
+    # Per (base cycle, caap_group) core.postproc.train_flags flags this gene's
+    # detected positions. The `clust` flag is emitted per detail row (0/1): pass
+    # B0 reads it for the dubious-gene test, and passes B1/B2 skip clust == 1
+    # rows (_is_clustered) when the trains are removed. No-op unless
+    # postproc_filter is on.
     clust_by: Dict[Tuple[str, str], set] = {}
     if postproc_filter:
-        from src.convergence.null_postproc import clustering_discards
+        from src.core.postproc import train_flags
         pos_by_cycgrp: Dict[Tuple[str, str], set] = {}
         for cyc, biochem_results in all_cycle_results:
             for r in biochem_results:
@@ -1133,13 +1131,7 @@ def _perms_worker_finalize(
                     continue
                 pos_by_cycgrp.setdefault(
                     (cyc, getattr(r, "caap_group", "US")), set()).add(int(p))
-        by_cyc: Dict[str, Dict[str, set]] = {}
-        for (cyc, grp), pset in pos_by_cycgrp.items():
-            by_cyc.setdefault(cyc, {})[grp] = pset
-        for cyc, pbg in by_cyc.items():
-            for grp, disc in clustering_discards(
-                    pbg, clust_maxcaas, clust_minlen).items():
-                clust_by[(cyc, grp)] = disc
+        clust_by = train_flags(pos_by_cycgrp, clust_maxcaas, clust_minlen)
 
     detail_rows = []
     for cyc, biochem_results in all_cycle_results:
@@ -1188,9 +1180,7 @@ def _sanitize_gene_shard(gene: str) -> str:
 
 
 def _is_clustered(row: Dict[str, Any]) -> bool:
-    """True for a detail row flagged by the CT_POSTPROC cluster filter mirror.
-    The observed side drops these rows before SCORING, so every scored null
-    statistic (passes B1/B2) excludes them too."""
+    """True for a detail row whose position lies in a cluster train (`clust` = 1)."""
     return int(row.get("clust", 0) or 0) == 1
 
 
@@ -1228,16 +1218,15 @@ def _cycle_gene_removal_from_detail(
     iqr_multiplier: float,
     extreme_percentile: float,
 ) -> Set[Tuple[str, str, str]]:
-    """Sub-pass B0 (Gap B): cycle-aware dubious/extreme gene filter.
+    """Sub-pass B0: dubious/extreme gene removal per labeling (cycle).
 
     One streaming read of perm_pos_detail.tsv.gz. Per (cycle, caap_group, Gene)
-    accumulate the distinct detected Position count and whether any row is
-    ctrain-flagged (`clust`), then apply filter_caas_genes.py's IQR + density
-    logic per (cycle, caap_group) — the base cycle standing in for `trait`.
+    accumulate the distinct detected Position count and whether any row lies in
+    a train (`clust`), then apply core.postproc.gene_removal, which calibrates
+    within each (cycle, caap_group) pool.
     Returns the (cycle, caap_group, Gene) units to drop from the null pool.
     """
-    import csv as _csv
-    from src.convergence.null_postproc import cycle_gene_removal
+    from src.core.postproc import GeneUnit, gene_removal
 
     if (mode or "none").lower() == "none":
         return set()
@@ -1250,13 +1239,13 @@ def _cycle_gene_removal_from_detail(
         if int(row.get("clust", 0) or 0):
             has_clust[key] = True
 
-    rows = (
-        (cyc, grp, gene, len(pset), has_clust.get((cyc, grp, gene), False))
+    units = (
+        GeneUnit(cyc, grp, gene, len(pset), has_clust.get((cyc, grp, gene), False))
         for (cyc, grp, gene), pset in seen_pos.items()
     )
-    return cycle_gene_removal(rows, gene_lengths, mode=mode,
-                              iqr_multiplier=iqr_multiplier,
-                              extreme_percentile=extreme_percentile)
+    return set(gene_removal(units, gene_lengths, mode=mode,
+                            iqr_multiplier=iqr_multiplier,
+                            extreme_percentile=extreme_percentile))
 
 
 def write_removed_units(path: Path, removed: Set[Tuple[str, str, str]]) -> None:
@@ -1273,6 +1262,7 @@ def write_removed_units(path: Path, removed: Set[Tuple[str, str, str]]) -> None:
 def _build_cycle_score_pools(
     detail_path: Path,
     removed: Optional[Set[Tuple[str, str, str]]] = None,
+    remove_clusters: bool = True,
 ) -> Dict[str, Dict[str, Any]]:
     """Sub-pass B1: per-cycle, per-direction pool of position-level null scores.
 
@@ -1339,7 +1329,7 @@ def _build_cycle_score_pools(
             pos_agg = {}
         if _rm and (row["cycle"], row["caap_group"], gene) in _rm:
             continue
-        if _is_clustered(row):
+        if remove_clusters and _is_clustered(row):
             continue
         key = (row["cycle"], int(row["Position"]), row.get("side") or "none")
         entry = pos_agg.setdefault(key, [0.0, 0])
@@ -1376,6 +1366,7 @@ def _finalize_perm_scores(
     sample_per_cycle_group: Optional[int] = None,
     removed: Optional[Set[Tuple[str, str, str]]] = None,
     seed: int = 1998,
+    remove_clusters: bool = True,
 ) -> None:
     """Pass B: score and aggregate to gene x cycle stats.
 
@@ -1426,7 +1417,7 @@ def _finalize_perm_scores(
     _rm = removed or set()
 
     # ── Sub-pass B1: per-cycle reference pools for the size-adjusted max ──────
-    cycle_pools = _build_cycle_score_pools(detail_path, removed=_rm)
+    cycle_pools = _build_cycle_score_pools(detail_path, removed=_rm, remove_clusters=remove_clusters)
     logger.info("[perms] pass B1 done: size-adjust reference pools built for %d cycles",
                 len(cycle_pools))
 
@@ -1532,7 +1523,7 @@ def _finalize_perm_scores(
             grp = row["caap_group"]
             if _rm and (cyc, grp, gene) in _rm:
                 continue
-            if _is_clustered(row):
+            if remove_clusters and _is_clustered(row):
                 continue
             pos = int(row["Position"])
             asr = float(row["asr_path_score"])
@@ -1631,6 +1622,7 @@ def process_all_genes_perms(
     chunk_threshold: Optional[int] = None,
     chunk_target_size: Optional[int] = None,
     seed: int = 1998,
+    remove_clusters: bool = True,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -1725,7 +1717,7 @@ def process_all_genes_perms(
     gene_lengths: Dict[str, float] = {}
     if postproc_filter and gene_lengths_file:
         try:
-            from src.convergence.null_postproc import load_gene_lengths
+            from src.core.postproc import load_gene_lengths
             gene_lengths = load_gene_lengths(gene_lengths_file)
             logger.info(f"[perms] CT_POSTPROC filter ON: {len(gene_lengths)} gene lengths, "
                         f"cluster minlen={clust_minlen} maxcaas={clust_maxcaas}, "
@@ -1910,6 +1902,7 @@ def process_all_genes_perms(
         cycle_tags=finalize_cycle_tags,
         removed=removed,
         seed=seed,
+        remove_clusters=remove_clusters,
     )
 
     logger.info(f"[perms] successfully aggregated {n_genes} genes to summaries inside {output_dir}")

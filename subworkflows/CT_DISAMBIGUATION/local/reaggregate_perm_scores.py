@@ -81,6 +81,8 @@ def main() -> int:
     ap.add_argument("--gene-lengths", default=None,
                     help="gene annotation TSV (gene, length ...); enables the dubious/extreme gene removal")
     ap.add_argument("--gene-filter-mode", default="none", choices=["none", "extreme", "dubious", "both"])
+    ap.add_argument("--keep-clusters", action="store_true",
+                    help="keep cluster-train positions in the scored pool (params.remove_caas_clusters false)")
     ap.add_argument("--iqr-multiplier", type=float, default=3.0)
     ap.add_argument("--extreme-percentile", type=float, default=0.99)
     args = ap.parse_args()
@@ -99,7 +101,7 @@ def main() -> int:
 
     removed = set()
     if args.gene_lengths and args.gene_filter_mode != "none":
-        from src.convergence.null_postproc import load_gene_lengths
+        from src.core.postproc import load_gene_lengths
         removed = _cycle_gene_removal_from_detail(
             args.detail, load_gene_lengths(args.gene_lengths), args.gene_filter_mode,
             args.iqr_multiplier, args.extreme_percentile)
@@ -113,6 +115,7 @@ def main() -> int:
         cycle_tags=cycle_tags,
         removed=removed,
         seed=args.seed,
+        remove_clusters=not args.keep_clusters,
     )
     logger.info("[reaggregate] wrote %s", args.output_dir / "gene_cycle_scores.tsv")
     # V3-4a: _finalize_perm_scores also emits perm_pos_cycle_caas.tsv.gz (the

@@ -35,7 +35,10 @@ import argparse
 import logging
 import sys
 from pathlib import Path
-import numpy as np
+
+# core.postproc is the single implementation of trains for the observed and null chains.
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
+from src.core.postproc import ctrain  # noqa: E402
 
 # ============================================================================
 # Argument Parsing
@@ -106,76 +109,6 @@ def setup_logger(input_path: Path, maxcaas: float, minlen: int, verbose: bool):
     ch.setFormatter(logging.Formatter('%(levelname)s - %(message)s'))
     logger.addHandler(ch)
     return logger
-
-# ============================================================================
-# CAAS Clustering Detection Algorithm
-# ============================================================================
-
-def ctrain(position_list, maxcaas=0.5, minlen=10, logger=None):
-    """
-    Identify CAAS positions within high-density clusters ("trains").
-    
-    This function evaluates all possible intervals of CAAS positions within a gene,
-    identifying those where the density (positions per span) exceeds the threshold.
-    Positions in any high-density interval are marked for removal.
-    
-    Algorithm:
-    ----------
-    1. Sort and extract unique positions
-    2. For each pair of positions (l, r):
-       - Calculate interval span: end - start + 1
-       - Calculate density: position_count / span
-       - If density ≥ maxcaas and span ≥ minlen, mark all positions in [l, r] as bad
-    3. Return sorted list of bad positions
-    
-    Args:
-        position_list: List of integer positions for a single gene
-        maxcaas: Maximum allowed density threshold (0.0 to 1.0)
-        minlen: Minimum interval length to consider
-        logger: Optional logger for debug output
-        
-    Returns:
-        Sorted list of positions to discard (empty list if none found)
-        
-    Example:
-        Positions: [10, 11, 12, 50]
-        With maxcaas=0.7, minlen=3:
-        - Interval [10, 12]: span=3, count=3, density=1.0 > 0.7 → discard [10, 11, 12]
-        - Interval [10, 50]: span=41, count=4, density=0.098 < 0.7 → keep
-    """
-    unique = np.sort(np.unique(position_list))
-    n = len(unique)
-    
-    # Early exit if not enough positions to form a cluster
-    if n < minlen:
-        return []
-    
-    bad_positions = set()
-    
-    # Evaluate all position pairs (l, r) where l ≤ r
-    for r in range(n):
-        for l in range(r + 1):
-            start, end = unique[l], unique[r]
-            span = end - start + 1
-            
-            # Skip intervals shorter than minimum length
-            if span < minlen:
-                continue
-            
-            count = r - l + 1
-            density = count / span
-            
-            if logger:
-                logger.debug(
-                    f"Interval [{start}, {end}]: "
-                    f"count={count}, span={span}, density={density:.3f}"
-                )
-            
-            # Flag positions in high-density intervals
-            if density >= maxcaas:
-                bad_positions.update(unique[l:r+1].tolist())
-    
-    return sorted(bad_positions)
 
 # ============================================================================
 # Main Filtering Function
@@ -284,7 +217,7 @@ def filterCAAS(infile, maxcaas, minlen, logger):
                 )
                 
                 # Find discarded positions for this gene-group combination
-                group_discarded = ctrain(positions, maxcaas, minlen, logger)
+                group_discarded = ctrain(positions, maxcaas, minlen)
                 
                 if group_discarded:
                     logger.info(
@@ -308,7 +241,7 @@ def filterCAAS(infile, maxcaas, minlen, logger):
             )
             
             # Find discarded positions
-            gene_discarded = ctrain(positions, maxcaas, minlen, logger)
+            gene_discarded = ctrain(positions, maxcaas, minlen)
             
             if gene_discarded:
                 logger.info(

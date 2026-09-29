@@ -73,6 +73,9 @@ def parse_arguments():
                    help="CT_FILTER minlen (params.filter_minlen; default 3)")
     p.add_argument("--clust-maxcaas", type=float, default=0.7,
                    help="CT_FILTER maxcaas density (params.filter_maxcaas; default 0.7)")
+    p.add_argument("--keep-clusters", action="store_true",
+                   help="Keep cluster-train positions in the scored pool (params.remove_caas_clusters "
+                        "false); they still count for the dubious-gene test.")
     p.add_argument("--gene-filter-mode", default="none",
                    choices=["none", "extreme", "dubious", "both"],
                    help="CAAS_FILTER_GENES mode (params.gene_filter_mode)")
@@ -185,6 +188,7 @@ def main():
             iqr_multiplier=args.iqr_multiplier,
             extreme_percentile=args.extreme_percentile,
             postproc_filter=args.postproc_filter,
+            remove_clusters=not args.keep_clusters,
             gene_sizes=gene_sizes,
             seed=args.seed,
         )

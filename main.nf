@@ -477,15 +477,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
             // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
             def disambiguation_dir_ch = disambiguation_results ? disambiguation_results.results_dir : null
-            // Gene-level filtering (CAAS_FILTER_GENES) needs the per-hypothesis metadata
-            // table for extreme/dubious outlier detection -- same "prefer
-            // global_meta_caas.tsv, fall back to meta_caas.tsv" resolution used for
-            // CT_DISAMBIGUATION above; CT_POSTPROC falls back to --meta_caas_from when null.
-            def meta_for_postproc = meta_caas_results
-                ? meta_caas_results.global_meta_caas.mix(meta_caas_results.meta_caas)
-                : null
-
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, disambiguation_dir_ch, meta_for_postproc)
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, disambiguation_dir_ch)
             ran_any = true
 
             // Capture postproc outputs as reusable references.
