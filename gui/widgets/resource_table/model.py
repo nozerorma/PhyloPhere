@@ -95,7 +95,7 @@ class ResourceOverrideTableModel(QAbstractTableModel):
         return True
 
     def replace_all(self, new_rows: list[ProcessResourceOverride]) -> None:
-        """Wholesale swap used by the preset-loading buttons."""
+        """Wholesale swap used by the load-defaults button."""
         self.beginResetModel()
         self._rows[:] = new_rows
         self.endResetModel()

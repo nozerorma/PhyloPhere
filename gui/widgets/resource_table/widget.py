@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-# widget.py — QTableView + add/remove/preset controls for per-process resource overrides.
+# widget.py — QTableView + add/remove/load-defaults controls for per-process resource overrides.
 # PhyloPhere | gui/widgets/resource_table/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
 
 """
-The 3 preset buttons wholesale-replace every row from one of the checked-in
-conf/resources.config.{slurm,local,local_lowspec} files (see
-gui/resource_presets.py) — a starting point to hand-tune from, not a locked
-choice. Selector Type is edited via a combo box delegate rather than free text,
+The table starts empty: conf/resources.config is the only source of defaults and
+a row is a deliberate deviation from it. The button replaces every row with the
+current conf defaults (see gui/resource_defaults.py) as a starting point to edit.
+Selector Type is edited via a combo box delegate rather than free text,
 since it only has two legal values (see ResourceOverrideTableModel.setData).
 """
 
@@ -25,15 +25,11 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal
 
 # ── Local ─────────────────────────────────────────────────────────────────────
-from gui import resource_presets
+from gui import resource_defaults
 from gui.models.resources import ProcessResourceOverride
 from gui.widgets.resource_table.model import ResourceOverrideTableModel
 
-_PRESET_BUTTONS = [
-    ("slurm", "Load SLURM defaults"),
-    ("local", "Load local defaults (32cpu/64GB)"),
-    ("local_lowspec", "Load local low-spec defaults (8cpu/16GB)"),
-]
+_DEFAULTS_BUTTON = "Load conf defaults into the table"
 
 
 class SelectorTypeDelegate(QStyledItemDelegate):
@@ -50,7 +46,7 @@ class SelectorTypeDelegate(QStyledItemDelegate):
 
 
 class ResourceOverrideTableWidget(QWidget):
-    """QTableView + Add row / Remove row / 3 preset-loading buttons."""
+    """QTableView + Add row / Remove row / load-conf-defaults button."""
 
     changed = Signal()
 
@@ -78,17 +74,14 @@ class ResourceOverrideTableWidget(QWidget):
         button_row.addWidget(self.remove_btn)
         button_row.addStretch(1)
 
-        preset_row = QHBoxLayout()
-        self.preset_btns: list[tuple[QPushButton, str, str]] = []
-        for name, label in _PRESET_BUTTONS:
-            btn = QPushButton(label)
-            btn.clicked.connect(lambda _checked=False, n=name: self._load_preset(n))
-            preset_row.addWidget(btn)
-            self.preset_btns.append((btn, name, label))
-        preset_row.addStretch(1)
+        defaults_row = QHBoxLayout()
+        self.defaults_btn = QPushButton(_DEFAULTS_BUTTON)
+        self.defaults_btn.clicked.connect(self._load_defaults)
+        defaults_row.addWidget(self.defaults_btn)
+        defaults_row.addStretch(1)
 
         layout = QVBoxLayout(self)
-        layout.addLayout(preset_row)
+        layout.addLayout(defaults_row)
         layout.addLayout(button_row)
         layout.addWidget(self.table)
 
@@ -98,8 +91,8 @@ class ResourceOverrideTableWidget(QWidget):
             self.add_btn.setText(tr("Add row", lang))
         if hasattr(self, "remove_btn"):
             self.remove_btn.setText(tr("Remove selected", lang))
-        for btn, name, orig_label in getattr(self, "preset_btns", []):
-            btn.setText(tr(orig_label, lang))
+        if hasattr(self, "defaults_btn"):
+            self.defaults_btn.setText(tr(_DEFAULTS_BUTTON, lang))
 
     def _add_row(self) -> None:
         self.model.insertRows(self.model.rowCount(), 1)
@@ -109,5 +102,5 @@ class ResourceOverrideTableWidget(QWidget):
         for index in sorted((i.row() for i in indexes), reverse=True):
             self.model.removeRows(index, 1)
 
-    def _load_preset(self, name: str) -> None:
-        self.model.replace_all(resource_presets.load_preset(name))
+    def _load_defaults(self) -> None:
+        self.model.replace_all(resource_defaults.load_defaults())

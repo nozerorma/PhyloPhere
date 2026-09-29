@@ -619,11 +619,12 @@ These parameters govern Candidate Amino Acid Substitution (CAAS) discovery and r
 `conf/resources.config` sets per-process CPU/memory/time via Nextflow
 `withLabel` blocks (generic labels like `process_low`, `process_medium`,
 `process_reporting`) and `withName` blocks (process-specific overrides, e.g.
-`RER_TREES`, `FADE_BATCHED`). Root-level caps — `params.max_memory` (64 GB),
-`params.max_cpus` (64), `params.max_time` (5 days) — clamp any request that
-exceeds them via `check_max()` in `nextflow.config`; the `slurm` profile
-raises these to 128 GB / 128 cpus / 960 h, the `local` profile lowers them to
-12 GB / 8 cpus / 5 days.
+`RER_TREES`, `FADE_BATCHED`). `conf/resources.config` is the only place these
+values live. The ceilings `--max_cpus`, `--max_memory` and `--max_time` clamp every
+request that exceeds them, retries included, through `process.resourceLimits` in
+the `slurm` (128 cpus / 128 GB / 960 h) and `local` (32 cpus / 64 GB / 5 days)
+profiles. To fit a smaller machine, lower those three ceilings; do not copy the
+per-process blocks.
 
 ```groovy
 withLabel:process_low {

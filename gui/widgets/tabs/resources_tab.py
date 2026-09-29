@@ -40,9 +40,10 @@ class ResourcesTab(QWidget):
         self.overrides_note = QLabel(
             "Advanced: per-process cpus/memory overrides, rendered into a config file "
             "loaded via `-c` alongside the generated run scripts (see run_single.sh.j2) — "
-            "Nextflow only reads these from a config file, never from --flags. Start from "
-            "a preset below and hand-edit as needed; conf/resources.config's own defaults "
-            "apply to any process left out of this table."
+            "Nextflow only reads these from a config file, never from --flags. The table "
+            "starts empty: conf/resources.config is the only source of defaults and applies "
+            "to every process left out of it, so add a row only to deviate on purpose. To fit "
+            "a smaller machine, lower the max cpus/memory/time ceilings above instead."
         )
         layout.addWidget(self.overrides_note)
         self.overrides_table = ResourceOverrideTableWidget(config.process_overrides)
@@ -169,8 +170,9 @@ class ResourcesTab(QWidget):
             self.overrides_note.setText(tr(
                 "Advanced: per-process cpus/memory overrides, rendered into a config file "
                 "loaded via `-c` alongside the generated run scripts (see run_single.sh.j2) — "
-                "Nextflow only reads these from a config file, never from --flags. Start from "
-                "a preset below and hand-edit as needed; conf/resources.config's own defaults "
-                "apply to any process left out of this table.",
+                "Nextflow only reads these from a config file, never from --flags. The table "
+                "starts empty: conf/resources.config is the only source of defaults and applies "
+                "to every process left out of it, so add a row only to deviate on purpose. To fit "
+                "a smaller machine, lower the max cpus/memory/time ceilings above instead.",
                 lang,
             ))

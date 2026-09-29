@@ -11,16 +11,14 @@ these are the profile-level knobs, exposed as --max_cpus/--max_memory/--max_time
 overrides on the generated `nextflow run` invocation.
 
 process_overrides is a different, finer-grained knob: per-process cpus/memory
-overrides (was previously considered pipeline-internal and out of scope — see
-conf/resources.config's ~50 withName/withLabel blocks — but per-run tuning turned
-out to matter across very different machines: the shared Marvin SLURM cluster vs.
-a 32cpu/64GB workstation vs. an 8cpu/16GB laptop). The three checked-in presets
-(conf/resources.config.{slurm,local,local_lowspec}) are loaded wholesale via the
-Resources tab's three preset buttons (see gui/resource_presets.py) into this list,
-then freely hand-edited per row. Rendered into a `-c`-loaded override config
-generated alongside the run scripts (see run_single.sh.j2) rather than as
---flags, since Nextflow only reads per-process resource directives from a config
-file, never from the command line.
+overrides, empty by default. conf/resources.config is the only source of per-process
+values, so a row here is a deliberate deviation from it. The Resources tab's button
+loads the current conf defaults into this list (see gui/resource_defaults.py) to edit.
+Machine size is not expressed per process: local_max_* / slurm_max_* are ceilings that
+Nextflow enforces on every request (process.resourceLimits), retries included.
+Overrides are rendered into a `-c`-loaded config generated alongside the run scripts
+(see run_single.sh.j2) rather than as --flags, since Nextflow only reads per-process
+resource directives from a config file, never from the command line.
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────

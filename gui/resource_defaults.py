@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-# resource_presets.py — Parses conf/resources.config.{slurm,local,local_lowspec}
-# into ProcessResourceOverride rows for the Resources tab's preset buttons.
+# resource_defaults.py — Parses conf/resources.config into ProcessResourceOverride
+# rows for the Resources tab's "load conf defaults" button.
 # PhyloPhere | gui/
 #
 # Author: Miguel Ramon (miguel.ramon@upf.edu)
@@ -18,16 +18,19 @@ files' shape in sync. Brace-depth tracked explicitly rather than assumed, so a
 selector block closes when depth returns to where it opened, not on the first
 bare "}" line.
 
+conf/resources.config is the only source of per-process defaults. The override
+table starts empty and a row is a deliberate deviation from it; this parser only
+fills the table with the current defaults as a starting point to edit. A block
+whose selector is an alternation (`withName: 'A|B'`) is not a row and is skipped.
+
 `memory` captures the FULL closure body, not just the leading `N.GB` — several
-presets use `memory = { N.GB * task.attempt }` so a retry (see errorStrategy in
+entries use `memory = { N.GB * task.attempt }` so a retry (see errorStrategy in
 conf/resources.config) gets more memory on each attempt. An earlier version of
 this regex captured only the numeric+unit prefix, silently truncating
 `* task.attempt` off every scaled entry; since these rows get rendered verbatim
 into a `-c`-loaded override config that is generated once per run and never
 revisited, that truncation permanently pinned every overridden process at its
-attempt-1 memory for the life of the project, defeating retry-with-more-memory
-without any error or warning (a real production incident, not a hypothetical:
-`POSENRICH_BUILD_GMT` OOM'd on attempt 1 and kept OOMing identically on retry).
+attempt-1 memory, defeating retry-with-more-memory without any error or warning.
 """
 
 # ── Standard library ──────────────────────────────────────────────────────────
@@ -39,11 +42,7 @@ from gui.models.resources import ProcessResourceOverride
 
 CONF_DIR = Path(__file__).resolve().parent.parent / "conf"
 
-PRESET_FILES = {
-    "slurm": CONF_DIR / "resources.config.slurm",
-    "local": CONF_DIR / "resources.config.local",
-    "local_lowspec": CONF_DIR / "resources.config.local_lowspec",
-}
+DEFAULTS_FILE = CONF_DIR / "resources.config"
 
 _SELECTOR_RE = re.compile(r"with(Name|Label):?\s*'?([A-Za-z0-9_]+)'?\s*\{")
 _CPUS_RE = re.compile(r"cpus\s*=\s*\{\s*(\d+)\s*\}")
@@ -52,9 +51,8 @@ _CPUS_RE = re.compile(r"cpus\s*=\s*\{\s*(\d+)\s*\}")
 _MEM_RE = re.compile(r"memory\s*=\s*\{\s*([^}]+?)\s*\}")
 
 
-def load_preset(name: str) -> list[ProcessResourceOverride]:
-    """Parses one of the three bundled presets into a fresh list of override rows."""
-    path = PRESET_FILES[name]
+def load_defaults(path: Path = DEFAULTS_FILE) -> list[ProcessResourceOverride]:
+    """Parses conf/resources.config into a fresh list of override rows."""
     rows: list[ProcessResourceOverride] = []
     current: ProcessResourceOverride | None = None
     depth = 0
