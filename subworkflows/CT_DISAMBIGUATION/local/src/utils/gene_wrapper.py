@@ -760,61 +760,17 @@ def process_all_genes(
 
 
 def _read_resample_labelings(resample_dir: str) -> Dict[str, Tuple[List[str], List[str]]]:
-    """Index every resample cycle → (fg_species, bg_species) by its cycle tag.
+    """Every resample labeling -> (fg_species, bg_species) by cycle tag (core.labelings.read_labelings)."""
+    from src.core.labelings import read_labelings
 
-    resample_*.tab is 3-col, no header: cycle_tag, fg_csv, bg_csv (permulations.R).
-    A file may hold many cycles (chunk_size rows). Pairing is by index: fg[k] ↔ bg[k]
-    is pair k+1 — exactly how the original trait file encodes pairs.
-    """
-    import csv
-
-    labelings: Dict[str, Tuple[List[str], List[str]]] = {}
-    # fop_labelings.tab (FOP mirror: "<base>~H<m>" tags) takes precedence over the
-    # plain resample_*.tab chunks when present.
-    _tabs = sorted(Path(resample_dir).glob("fop_labelings.tab")) or \
-            sorted(Path(resample_dir).glob("resample_*.tab"))
-    for tab in _tabs:
-        try:
-            with open(tab, "r") as f:
-                for row in csv.reader(f, delimiter="\t"):
-                    if len(row) < 3:
-                        continue
-                    tag = row[0].strip()
-                    fg = [s for s in row[1].split(",") if s.strip()]
-                    bg = [s for s in row[2].split(",") if s.strip()]
-                    if tag and fg and bg:
-                        labelings[tag] = (fg, bg)
-        except Exception as e:
-            logger.warning(f"[perms] failed to read {tab}: {e}")
-    return labelings
+    return {t: (list(l.fg), list(l.bg)) for t, l in read_labelings(resample_dir).items()}
 
 
 def _read_fop_pairs(path: str) -> Dict[str, Dict[Tuple[str, int], float]]:
-    """resample_fop_pairs.tsv -> {base_cycle: {(hypothesis_id, domain): pss_score}}.
+    """fop_pairs.tsv -> {base_cycle: {(H<n>, domain): pss_score}} (core.labelings.read_pss)."""
+    from src.core.labelings import read_pss
 
-    Header: cycle, hypothesis_id, pair, species1, species2, pss_score
-    (permulations.R FOP mirror). `pair` == Voronoi domain id.
-    """
-    import csv as _csvmod
-
-    out: Dict[str, Dict[Tuple[str, int], float]] = {}
-    try:
-        with open(path, "r") as f:
-            reader = _csvmod.DictReader(f, delimiter="\t")
-            for row in reader:
-                cyc = (row.get("cycle") or "").strip()
-                hyp = (row.get("hypothesis_id") or "").strip()
-                if not cyc or not hyp:
-                    continue
-                try:
-                    domain = int(float(row.get("pair", "")))
-                    pss = float(row.get("pss_score", "nan"))
-                except (TypeError, ValueError):
-                    continue
-                out.setdefault(cyc, {})[(hyp, domain)] = pss
-    except Exception as e:
-        logger.warning(f"[perms] could not read FOP pairs file {path}: {e}")
-    return out
+    return read_pss(path)
 
 
 def _parse_discovery_entries(
@@ -899,42 +855,11 @@ def _parse_discovery_entries(
 
 
 def _read_contrast_hyp_pairs(path: Optional[str]) -> Optional[Dict[Tuple[str, int], float]]:
-    """contrast_hypotheses_pairs.tsv -> {(hypothesis_id, domain): pss_score}.
+    """contrast_hypotheses_pairs.tsv -> {(H<n>, domain): pss_score} of the observed cycle, or None
+    (missing file / NO_* sentinel / no weights: the pooler then weights every node equally)."""
+    from src.core.labelings import observed_pss
 
-    The OBSERVED-side twin of :func:`_read_fop_pairs` (which keys the null's
-    per-cycle mirror by base cycle). Header: hypothesis_id, pair, pss_score
-    (+ others). ``pair`` == Voronoi domain id. The hypothesis id is normalised
-    to its ``H<n>`` token. ``None`` / missing / ``NO_*`` sentinel -> ``None`` (the
-    pooler then weights every node equally).
-    """
-    import csv as _csvmod
-    import re as _re
-
-    if not path or str(path).startswith("NO_") or not Path(path).is_file():
-        return None
-    out: Dict[Tuple[str, int], float] = {}
-    try:
-        with open(path, "r") as f:
-            reader = _csvmod.DictReader(f, delimiter="\t")
-            if not reader.fieldnames or not {
-                "hypothesis_id", "pair", "pss_score"
-            } <= set(reader.fieldnames):
-                return None
-            for row in reader:
-                raw = (row.get("hypothesis_id") or "").strip()
-                m = _re.search(r"H[0-9]+", raw)
-                if not m:
-                    continue
-                try:
-                    domain = int(float(row.get("pair", "")))
-                    pss = float(row.get("pss_score", "nan"))
-                except (TypeError, ValueError):
-                    continue
-                out[(m.group(0), domain)] = pss
-    except Exception as e:
-        logger.warning(f"[disambig] could not read contrast pairs file {path}: {e}")
-        return None
-    return out or None
+    return observed_pss(path)
 
 
 def build_cycle_inputs(
@@ -1236,11 +1161,8 @@ def _perms_worker_replay(
             if not caas_entries:
                 continue
             fg, bg = labeling
-            # Single-contrast shape parse_trait_pairs would return for a plain
-            # (non-FOP) trait file; the contrast key's literal value is never
-            # inspected downstream when there's exactly one contrast (see
-            # _resolve_contrast in disambiguate_single.py).
-            trait_pairs = {1: list(zip(fg, bg))}
+            from src.core.labelings import trait_pairs_from
+            trait_pairs = trait_pairs_from(fg, bg)
             try:
                 biochem_results, _ = analyze_gene_disambiguation(
                     gene=gene,

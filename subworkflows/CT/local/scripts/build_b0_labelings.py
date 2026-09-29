@@ -17,39 +17,13 @@ import csv
 import sys
 from pathlib import Path
 
-
-def read_traitfile(path):
-    """traitfile*.tab -> (fg, bg) ordered by pair id."""
-    fg, bg = {}, {}
-    with open(path) as fh:
-        for row in csv.reader(fh, delimiter="\t"):
-            if len(row) < 3 or not row[2].strip().lstrip("-").isdigit():
-                continue
-            (fg if row[1].strip() == "1" else bg)[int(row[2])] = row[0].strip()
-    pairs = sorted(set(fg) & set(bg))
-    return [fg[p] for p in pairs], [bg[p] for p in pairs]
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
+from src.core.labelings import read_design  # noqa: E402  (the one reader of the observed design)
 
 
-def canonical_traitfile(cfg):
-    """A directory of traitfile_H*.tab resolves to H1 (the canonical contrast)."""
-    cfg = Path(cfg)
-    if cfg.is_dir():
-        h1 = cfg / "traitfile_H1.tab"
-        return h1 if h1.is_file() else sorted(cfg.glob("*.tab"))[0]
-    return cfg
-
-
-def read_hypotheses(pairs_path):
-    """contrast_hypotheses_pairs.tsv -> ({hyp: (fg, bg)} in file order, raw rows)."""
-    rows = list(csv.DictReader(open(pairs_path), delimiter="\t"))
-    hyps = {}
-    for r in rows:
-        hyps.setdefault(r["hypothesis_id"], []).append(r)
-    labelings = {}
-    for h, rs in hyps.items():
-        rs = sorted(rs, key=lambda r: int(float(r["pair"])))
-        labelings[h] = ([r["species1"] for r in rs], [r["species2"] for r in rs])
-    return labelings, rows
+def pair_rows(pairs_path):
+    """contrast_hypotheses_pairs.tsv rows, as written to fop_pairs.tsv (they carry the species and PSS)."""
+    return list(csv.DictReader(open(pairs_path), delimiter="\t"))
 
 
 def main():
@@ -60,27 +34,25 @@ def main():
     ap.add_argument("--pairs-out", help="fop_pairs rows (no header); FOP mode only")
     a = ap.parse_args()
 
-    if a.fop:
-        pairs_path = Path(a.config) / "contrast_hypotheses_pairs.tsv"
-        if not pairs_path.is_file():
-            sys.exit(f"ERROR: FOP b_0 needs {pairs_path}")
-        labelings, rows = read_hypotheses(pairs_path)
-        with open(a.labelings_out, "w") as out:
-            for h, (fg, bg) in labelings.items():
-                out.write(f"b_0~{h}\t{','.join(fg)}\t{','.join(bg)}\n")
-        if a.pairs_out:
-            with open(a.pairs_out, "w") as out:
-                for r in rows:  # columns as in fop_pairs.tsv: cycle, hypothesis_id, pair, species1, species2, pss_score
-                    out.write("\t".join(["b_0", r["hypothesis_id"], r["pair"], r["species1"],
-                                         r["species2"], r["pss_score"]]) + "\n")
-        print(f"[b_0] FOP: {len(labelings)} hypotheses")
-    else:
-        fg, bg = read_traitfile(canonical_traitfile(a.config))
-        if not fg:
-            sys.exit("ERROR: no fg/bg pairs read from the observed trait file")
-        with open(a.labelings_out, "w") as out:
-            out.write(f"b_0\t{','.join(fg)}\t{','.join(bg)}\n")
-        print(f"[b_0] plain: {len(fg)} pairs")
+    labelings = read_design(a.config)
+    if not labelings:
+        sys.exit("ERROR: no fg/bg pairs read from the observed design")
+    with open(a.labelings_out, "w") as out:
+        if a.fop:
+            for tag, lab in labelings.items():
+                out.write(f"{tag}\t{','.join(lab.fg)}\t{','.join(lab.bg)}\n")
+        else:
+            # plain mode is the canonical contrast: the single trait file, or H1 of a directory
+            lab = labelings.get("b_0") or labelings.get("b_0~H1")
+            if lab is None:
+                sys.exit("ERROR: the observed design has no canonical (H1) contrast")
+            out.write(f"b_0\t{','.join(lab.fg)}\t{','.join(lab.bg)}\n")
+    if a.fop and a.pairs_out:
+        rows = pair_rows(Path(a.config) / "contrast_hypotheses_pairs.tsv")
+        with open(a.pairs_out, "w") as out:
+            for r in rows:  # columns as in fop_pairs.tsv: cycle, hypothesis_id, pair, species1, species2, pss_score
+                out.write("\t".join(["b_0", r["hypothesis_id"], r["pair"], r["species1"], r["species2"], r["pss_score"]]) + "\n")
+    print(f"[b_0] {'FOP: ' + str(len(labelings)) + ' hypotheses' if a.fop else 'plain'}")
 
 
 if __name__ == "__main__":
