@@ -144,3 +144,21 @@ Parameters minlen 3, maxcaas 0.7:
 Positions flagged only by the union: cancer 147 of 132 709 at H = 12 (0.11 %); PEPC 10 of 198 at H = 100.
 Per-hypothesis flags outside the union's: 0 in every subset, as expected. What the table does not say is which grain
 finds real alignment problems; that needs an independent alignment-quality reference.
+
+### Trains and alignment quality (`trains_quality.py`, measurement only)
+
+`trains_quality.py` compares the positions flagged only by the union ("only_union") with positions flagged under both
+grains ("both") and with discovered positions that are not flagged ("none"), on alignment-quality measures from
+optional sources; only `--discovery` is required. `--entropy-dir` (per-gene `entropy.tsv` of `compute_variability.py`)
+gives `g` (fraction of `-` or `X` in the column), its mean over +-3 trimmed columns and `variability`. `--map-dir`
+(per-gene MAP of the trimmer: `status` selected/removed and `prot_ali_col`) gives `n_removed_flank`, the removed
+columns within +-3 untrimmed columns. `--raw-dir` (untrimmed codon alignment, needs `--map-dir`) gives `gap_pre`, the
+fraction of sequences with a non-ACGT character in the codon, at the column and averaged over the window. Metrics are
+averaged per gene inside each class and classes are compared across the genes that have both (paired Wilcoxon), so
+between-gene differences do not enter the contrast. The discovery position is the 0-based trimmed column; the entropy
+position and `prot_ali_col` are 1-based, so they join on `position + 1`. Per gene the script asserts that the column
+counts agree and that `g` equals the raw gap fraction on the selected columns (tolerance 1e-5, the precision of the
+table); a gene that fails is skipped and listed. `variability` mixes biology and quality and is context only. Power is
+limited by the number of genes with union-only positions, so a null result bounds the detectable effect and does not
+show that the grains are equivalent. The script imports `trains_grain.py` and `core.postproc`, so it runs from a
+checkout and not from stdin.
