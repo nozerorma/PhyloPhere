@@ -124,7 +124,7 @@ if [ "${RUN_VEP:-true}" = true ]; then
     NF_FLAGS+=(
         --vep
         --vep_primateai_db "${VEP_PRIMATEAI_DB}"
-        --vep_map_dir "${MAP_DIR}"
+        --caas_map_dir "${MAP_DIR}"
         --scoring_vep_cosmic "${SCORING_VEP_COSMIC:-}"
     )
 fi

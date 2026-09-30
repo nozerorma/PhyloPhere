@@ -73,8 +73,7 @@ workflow CT {
             : []
 
         // Define the alignment channel (used by discovery and the permulation-excess null).
-        // Accepts either a plain directory or a .tar.gz archive.
-        // For archives, members are listed at startup and extracted on-demand inside each process.
+        // params.alignment is a directory of per-gene alignment files.
         // When toy_mode=true, a random subset of toy_n alignments is used.
         def alignParam = params.alignment as String
         def allFiles = file(alignParam).listFiles()?.findAll { it.isFile() && !it.name.matches('.*\\.txt$|.*\\.tsv$|.*\\.csv$|.*\\.log$|.*\\.map$') } ?: []
@@ -228,7 +227,7 @@ workflow CT {
         // CAAS permulation-excess null: a full-pool pass over N permuted labelings,
         // replayed through analyze_gene_disambiguation downstream. Only needs
         // align_tuple/trait_file_out/resample_dir_out, all already in scope from
-        // discovery/resample above — no longer gated on the (now-removed) resample CLI tool.
+        // discovery/resample above, not gated on params.ct_tool.
         if (params.caas_permulation_enrichment) {
             def perms_prep = CAAS_PERMS_PREP(align_tuple, trait_file_out, resample_dir_out)
             caas_perm_discovery_out  = perms_prep.perm_discovery

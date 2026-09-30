@@ -112,6 +112,7 @@
       "caas_postproc_mode": "filter",
       "filter_minlen": "3",
       "filter_maxcaas": "0.7",
+      "caas_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "minlen_values": "2,3,4,10",
       "maxcaas_values": "0.6,0.7,0.8",
       "gene_filter_mode": "dubious",
@@ -174,7 +175,6 @@
       "enabled": true,
       "extra_flags": "",
       "vep_primateai_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/PAI3D/PrimateAI-3D.hg38.txt.gz",
-      "vep_map_dir": "/homes/users/mramon/scratch/4.Generate_alignments_from_codons/results_ppga/20260615_200027/MAP",
       "cosmic_db": "/homes/users/mramon/scratch/2.Primates/1.Primates_data/4.External_DBs/COSMIC/Cosmic_MutantCensus_v104_GRCh38.tsv.gz"
     },
     "scoring": {

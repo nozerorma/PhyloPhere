@@ -61,6 +61,13 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
             f"Unsupported project schema_version={version!r}; "
             f"this build only supports version {SCHEMA_VERSION}."
         )
+    # The per-gene MAP directory moved from the VEP module (vep_map_dir) to post-processing (caas_map_dir).
+    modules = data.get("modules")
+    if isinstance(modules, dict):
+        old = (modules.get("vep") or {}).pop("vep_map_dir", None)
+        disambiguation = modules.get("disambiguation")
+        if old and isinstance(disambiguation, dict) and not disambiguation.get("caas_map_dir"):
+            disambiguation["caas_map_dir"] = old
     return data
 
 

@@ -32,8 +32,8 @@ workflow VEP {
 
         if (ps_ch) {
             // MAP files directory (upstream)
-            assert params.vep_map_dir : "VEP requires --vep_map_dir (directory containing per-gene MAP TSV files)"
-            def map_dir_ch = Channel.value(file(params.vep_map_dir))
+            assert params.caas_map_dir : "VEP requires --caas_map_dir (directory containing per-gene MAP TSV files)"
+            def map_dir_ch = Channel.value(file(params.caas_map_dir))
 
             // ── PrimateAI-3D score mapping (conditional on database existence) ──
             def pai_db_file = params.vep_primateai_db ? file(params.vep_primateai_db) : file('NO_FILE')

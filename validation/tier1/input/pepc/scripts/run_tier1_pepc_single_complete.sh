@@ -799,7 +799,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",
 
   "vep": $_RUN_VEP,
-  "vep_map_dir": "${MAP_DIR:-}",
+  "caas_map_dir": "${MAP_DIR:-}",
   "vep_primateai_db": "${VEP_PRIMATEAI_DB:-}",
   "cosmic_db": "${COSMIC_DB:-}",
   "vep_caas_input": "${VEP_CAAS_INPUT:-}",

@@ -4,17 +4,20 @@
  * CAAS permulation-excess null
  * ────────────────────────────
  * Builds a genome-wide *excess* null for CAAS FCS pathway enrichment:
- *   1. SUBSET_RESAMPLE_PERMS  — take the first N (caas_full_perms) permuted
+ *   1. SUBSET_RESAMPLE_PERMS: take the first N (caas_full_perms) permuted
  *      labelings in cycle order (b_0, the real labeling, is never part of the null;
  *      with caas_b0_diagnostic it is rebuilt from the observed design and replayed
  *      alongside, written to caas_permulation/b0/).
- *   2. PERM_REPLAY            — full-pool perm-replay (no --discovery) with
- *      export_perm_discovery ON → per-gene per-cycle discovery rows.
- *   3. CONCAT_PERM_DISCOVERY  — stitch into one perm_discovery.tab.
- *   4. CAAS_PERMS_DISAMBIGUATE — load ASR once / replay N labelings
- *      (disambiguation_perms_main.py) → caas_perm_scores.tsv.
- *   5. CAAS_PERMS_AGGREGATE   — genes×N null matrices (scoring_caas_perms.R)
- *      → caas_perms.rds (corStat_byrank: global_asr/top_asr/bottom_asr).
+ *   2. PERM_REPLAY / PERM_REPLAY_BATCHED: full-pool perm-replay (no --discovery) with
+ *      export_perm_discovery ON → per-gene per-cycle discovery rows (batched when
+ *      ct_perm_replay_batch_size > 1).
+ *   3. CAAS_PERMS_DISAMBIGUATE / CAAS_PERMS_DISAMBIGUATE_BATCHED: load ASR once per gene and
+ *      replay the N labelings (disambiguation_perms_main.py) → per-gene perm_pos_detail shards
+ *      (batched when ct_disambig_perms_batch_size > 1).
+ *   4. Unbatched: CAAS_PERMS_AGGREGATE builds the genes×N null matrices (scoring_caas_perms.R) →
+ *      caas_perms.rds (corStat_byrank: global_asr/top_asr/bottom_asr).
+ *      Batched: CAAS_PERMS_MERGE_DETAIL unions the batches' shards and CAAS_PERMS_REBUILD
+ *      derives the genome-wide tables and caas_perms.rds from them.
  *
  * The aggregate RDS feeds the existing FCS p.perm path (fcs_enrich.R), giving
  * the CAAS scoring FCS report a permulation-corrected p.perm — exactly like RER.
@@ -22,6 +25,22 @@
  *
  * Author: Miguel Ramon (miguel.ramon@upf.edu)
  */
+
+// True unless params.caas_perms_postproc is off (Boolean false, or the strings false / 0 / no).
+def caasPostprocOn() {
+    def raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
+    return (raw instanceof Boolean) ? raw : !(raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
+}
+
+// CLI arguments that give disambiguation_perms_main.py the observed CT_POSTPROC filters (cluster trains and
+// gene removal) for the per-cycle null pool. Empty when the filters are off or the gene annotation file is a
+// NO_* sentinel. With params.caas_map_dir the trains measure their span in untrimmed columns, as the observed
+// CT_FILTER does.
+def caasPostprocArgs(gene_lengths) {
+    if (!caasPostprocOn() || gene_lengths.name =~ /^NO_/) return ""
+    def map_arg = params.caas_map_dir ? "--train-map-dir ${params.caas_map_dir}" : ""
+    return "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'} ${map_arg}"
+}
 
 // ── 1. Collect the first N permuted labelings in cycle order (+ optional b_0) ─
 process SUBSET_RESAMPLE_PERMS {
@@ -273,13 +292,9 @@ process CAAS_PERMS_DISAMBIGUATE {
     def workers = task.cpus ?: 1
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
-    // Gap B: mirror the observed CT_POSTPROC cluster + gene filters on the null
-    // per-cycle CAAS pool. Opt-in via params.caas_perms_postproc (default true);
-    // needs the gene annotation file for the extreme-gene density test.
-    def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
-    def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
-    def do_postproc = _pp_on && !(gene_lengths.name =~ /^NO_/)
-    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
+    // Mirror the observed CT_POSTPROC cluster + gene filters on the null per-cycle CAAS pool
+    // (params.caas_perms_postproc, default true; needs the gene annotation file).
+    def postproc_args = caasPostprocArgs(gene_lengths)
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cp -R ${local_dir}/* .
@@ -342,10 +357,7 @@ process CAAS_PERMS_DISAMBIGUATE_BATCHED {
     def workers = task.cpus ?: 1
     def max_tasks_per_child = params.ct_disambig_max_tasks_per_child ?: 50
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
-    def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
-    def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
-    def do_postproc = _pp_on && !(gene_lengths.name =~ /^NO_/)
-    def postproc_args = do_postproc ? "--postproc-filter --gene-lengths ${gene_lengths} --clust-minlen ${params.filter_minlen} --clust-maxcaas ${params.filter_maxcaas} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
+    def postproc_args = caasPostprocArgs(gene_lengths)
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     cp -R ${local_dir}/* .
@@ -423,7 +435,7 @@ process CAAS_PERMS_AGGREGATE {
 
     script:
     def local_dir = "${baseDir}/subworkflows/SCORING/local"
-    def universe_arg = universe.name != 'NO_FILE' ? "--universe ${universe}" : ""
+    def universe_arg = universe.name.startsWith('NO_') ? "" : "--universe ${universe}"
     def run = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript' : 'Rscript'
     """
     cp ${perm_pos_cycle_caas} perm_pos_cycle_caas.tsv.gz
@@ -483,9 +495,7 @@ process CAAS_PERMS_REBUILD {
     def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
     // Same gene removal as the unbatched worker's pass B0 (needs the annotation file).
-    def _pp_raw = params.containsKey('caas_perms_postproc') ? params.caas_perms_postproc : true
-    def _pp_on = (_pp_raw instanceof Boolean) ? _pp_raw : !(_pp_raw?.toString()?.toLowerCase() in ['false', '0', 'no'])
-    def removal_args = (_pp_on && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
+    def removal_args = (caasPostprocOn() && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own
