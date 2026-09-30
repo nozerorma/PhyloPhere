@@ -1061,6 +1061,26 @@ def _merge_gene_chunks(chunk_results: List[Tuple[str, List[Any]]]) -> List[Tuple
     return sorted(chunk_results, key=lambda item: item[0])
 
 
+def _gene_train_columns(
+    train_map_index: Optional[Dict[str, Optional[str]]],
+    gene: str,
+    suffix: str,
+    genes_without_map: List[str],
+) -> Optional[Dict[int, int]]:
+    """The gene's position -> untrimmed column map, or None to keep trimmed coordinates.
+
+    None when no MAP directory was given or the gene has no MAP file; in the second case the gene is
+    appended to ``genes_without_map``. A gene with an ambiguous or inconsistent MAP raises.
+    """
+    if train_map_index is None:
+        return None
+    from src.core.columns import gene_columns
+    cols = gene_columns(train_map_index, gene, suffix)
+    if cols is None:
+        genes_without_map.append(gene)
+    return cols
+
+
 def _perms_worker_replay_wrapper(args):
     return _perms_worker_replay(*args)
 
@@ -1072,6 +1092,7 @@ def _perms_worker_finalize(
     postproc_filter: bool = False,
     clust_minlen: int = 3,
     clust_maxcaas: float = 0.7,
+    train_columns: Optional[Dict[int, int]] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """Phase B of a chunked gene replay: the true whole-gene reduction over a
     gene's merged, already FOP-pooled chunk results from _perms_worker_replay --
@@ -1131,7 +1152,7 @@ def _perms_worker_finalize(
                     continue
                 pos_by_cycgrp.setdefault(
                     (cyc, getattr(r, "caap_group", "US")), set()).add(int(p))
-        clust_by = train_flags(pos_by_cycgrp, clust_maxcaas, clust_minlen)
+        clust_by = train_flags(pos_by_cycgrp, clust_maxcaas, clust_minlen, train_columns)
 
     detail_rows = []
     for cyc, biochem_results in all_cycle_results:
@@ -1564,6 +1585,8 @@ def process_all_genes_perms(
     chunk_target_size: Optional[int] = None,
     seed: int = 1998,
     remove_clusters: bool = True,
+    train_map_dir: Optional[str] = None,
+    train_map_suffix: str = ".map.tsv",
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -1668,6 +1691,15 @@ def process_all_genes_perms(
             logger.warning(f"[perms] could not load gene lengths ({exc}); "
                            "extreme-gene filter disabled")
 
+    # Optional untrimmed-coordinate trains: with a MAP directory, each gene's cluster trains measure their span
+    # in untrimmed alignment columns (core.columns). A gene without a MAP file keeps the trimmed coordinates.
+    train_map_index: Optional[Dict[str, Optional[str]]] = None
+    genes_without_map: List[str] = []
+    if postproc_filter and train_map_dir:
+        from src.core.columns import index_files
+        train_map_index = index_files(train_map_dir, train_map_suffix)
+        logger.info(f"[perms] cluster trains in untrimmed coordinates: {len(train_map_index)} MAP files in {train_map_dir}")
+
     # n_cycles_total is the SAME for every gene: all genes replay the same global
     # cycle pool (cycle_tags/cycle_labelings above), so it's computed once here
     # rather than re-derived per gene/chunk in _perms_worker_finalize.
@@ -1767,6 +1799,7 @@ def process_all_genes_perms(
             _gene, detail_rows = _perms_worker_finalize(
                 _gene, gene_pooled, n_cycles_total,
                 postproc_filter, clust_minlen, clust_maxcaas,
+                _gene_train_columns(train_map_index, _gene, train_map_suffix, genes_without_map),
             )
             if not detail_rows:
                 continue
@@ -1800,6 +1833,9 @@ def process_all_genes_perms(
             f"{len(genes) - n_genes} contributed nothing (no CAAS survived any replayed "
             f"labeling, or the alignment / ASR failed for that gene)."
         )
+    if train_map_index is not None and genes_without_map:
+        logger.warning(f"[perms] {len(genes_without_map)} genes have no MAP file and keep trimmed-coordinate "
+                       f"trains, e.g. {sorted(genes_without_map)[:5]}")
     if n_detail_rows == 0:
         logger.error(
             "[perms] pass A produced ZERO detail rows — the permulation null is empty. "

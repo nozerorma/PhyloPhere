@@ -39,7 +39,6 @@ Usage:
 """
 
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -49,6 +48,7 @@ import pandas as pd
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "subworkflows/CT_DISAMBIGUATION/local"))
+from src.core.columns import find_file, index_files, read_map  # noqa: E402
 from src.core.postproc import ctrain  # noqa: E402
 from trains_grain import Sweep, load  # noqa: E402
 
@@ -71,26 +71,10 @@ def read_fasta(path):
     return ["".join(s) for s in seqs]
 
 
-def index_files(directory, tail):
-    """Gene key (file name before the first '.') -> path for the files ending in `tail`.
-
-    A key that several files share maps to None.
-    """
-    out = {}
-    for name in os.listdir(directory):
-        if name.endswith(tail):
-            key = name[: -len(tail)].split(".")[0]
-            out[key] = None if key in out else os.path.join(directory, name)
-    return out
-
-
-def find_file(index, gene, tail):
-    path = index.get(gene, False)
-    if path is False:
-        raise FileNotFoundError(f"no file ending in {tail} for {gene}")
-    if path is None:
-        raise ValueError(f"several files ending in {tail} for {gene}")
-    return path
+def load_map(path):
+    """core.columns.read_map with the removed flags as a boolean array."""
+    removed, ori_of_prot = read_map(path)
+    return np.asarray(removed, dtype=bool), ori_of_prot
 
 
 def load_entropy(path):
@@ -99,21 +83,6 @@ def load_entropy(path):
     if t["position"].tolist() != list(range(1, len(t) + 1)):
         raise ValueError("entropy positions are not 1..n")
     return t.set_index("position")
-
-
-def load_map(path):
-    """Removed flag per untrimmed column (index 0 = column 1) and trimmed column -> untrimmed column."""
-    m = pd.read_csv(path, sep="\t", usecols=["ori_codon_col", "status", "prot_ali_col"])
-    if m["ori_codon_col"].tolist() != list(range(1, len(m) + 1)):
-        raise ValueError("ori_codon_col is not 1..n")
-    if not m["status"].isin(["selected", "removed"]).all():
-        raise ValueError("status outside {selected, removed}")
-    removed = (m["status"] == "removed").to_numpy()
-    sel = m.loc[~removed, "prot_ali_col"].astype(int).tolist()
-    if sel != list(range(1, len(sel) + 1)):
-        raise ValueError("prot_ali_col of the selected columns is not 1..n in order")
-    ori_of_prot = {p: c for c, p in zip(m.loc[~removed, "ori_codon_col"], sel)}
-    return removed, ori_of_prot
 
 
 def codon_gap_fraction(seqs):

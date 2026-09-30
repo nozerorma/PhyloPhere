@@ -4,7 +4,8 @@ One implementation of the two CT_POSTPROC filters, applied per labeling to the p
 scored rows (observed = labeling ``b_0``):
 
 * Cluster trains: :func:`ctrain` flags every position that lies in an interval whose
-  density ``count / span`` reaches ``maxcaas`` (``span >= minlen``). :func:`train_flags`
+  density ``count / span`` reaches ``maxcaas`` (``span >= minlen``), with the span measured
+  in the positions or, given a column map, in untrimmed alignment columns. :func:`train_flags`
   is the single entry point that decides over which positions a train is computed.
 * Gene removal: :func:`gene_removal` drops (labeling, caap_group, gene) units by
   ``dubious`` (IQR outlier in distinct positions AND at least one train position) and
@@ -26,21 +27,39 @@ Unit = Tuple[str, str, str]  # (labeling, caap_group, gene)
 
 # ── Cluster trains ───────────────────────────────────────────────────────────
 
-def ctrain(positions: Sequence[int], maxcaas: float = 0.7, minlen: int = 3) -> List[int]:
+def ctrain(
+    positions: Sequence[int],
+    maxcaas: float = 0.7,
+    minlen: int = 3,
+    columns: Optional[Mapping[int, int]] = None,
+) -> List[int]:
     """Sorted positions inside a high-density interval.
 
     For the sorted unique positions, every interval ``[l, r]`` (indices) with
     ``span = end - start + 1 >= minlen`` and ``count / span >= maxcaas`` flags all of its
-    positions.
+    positions. ``columns`` maps each position to the column the span is measured in (see
+    :mod:`core.columns`): with it, columns that lie between two positions and hold none (the ones
+    the trimmer removed) count towards the span; without it the positions themselves are the
+    coordinates. A unit with fewer than ``minlen`` positions has no train either way.
     """
     uniq = sorted({int(p) for p in positions})
+    if columns is None:
+        coords = uniq
+    else:
+        missing = [p for p in uniq if p not in columns]
+        if missing:
+            raise ValueError(f"position {missing[0]} has no column in the map")
+        uniq = sorted(uniq, key=columns.__getitem__)
+        coords = [columns[p] for p in uniq]
+        if len(set(coords)) != len(coords):
+            raise ValueError("two positions share a column")
     n = len(uniq)
     if n < minlen:
         return []
     bad: Set[int] = set()
     for r in range(n):
         for l in range(r + 1):
-            span = uniq[r] - uniq[l] + 1
+            span = coords[r] - coords[l] + 1
             if span >= minlen and (r - l + 1) / span >= maxcaas:
                 bad.update(uniq[l:r + 1])
     return sorted(bad)
@@ -50,14 +69,17 @@ def train_flags(
     pos_by_key: Mapping[Hashable, Iterable[int]],
     maxcaas: float = 0.7,
     minlen: int = 3,
+    columns: Optional[Mapping[int, int]] = None,
 ) -> Dict[Hashable, Set[int]]:
     """Train positions per key, for one gene.
 
     The key names what a train is computed over, e.g. ``(labeling, caap_group)``: the
     positions filed under one key form one train universe. Callers choose the grain by
-    how they file positions; this is the only place trains are computed.
+    how they file positions; this is the only place trains are computed. ``columns`` is the
+    gene's position -> untrimmed column map (:func:`ctrain`), or None to measure in the
+    positions themselves.
     """
-    return {key: set(ctrain(list(pos), maxcaas, minlen)) for key, pos in pos_by_key.items()}
+    return {key: set(ctrain(list(pos), maxcaas, minlen, columns)) for key, pos in pos_by_key.items()}
 
 
 # ── Gene removal ─────────────────────────────────────────────────────────────

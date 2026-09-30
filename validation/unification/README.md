@@ -177,3 +177,16 @@ flagged positions linked by overlapping qualifying intervals. With maxcaas above
 are a subset of the trimmed ones, because the span can only grow and a qualifying window already holds at least minlen
 positions; below that, positions can be flagged only in untrimmed coordinates. `ctrain` returns nothing for a unit with
 fewer than minlen positions, and the components follow the same rule. Genes without a usable MAP are skipped and counted.
+
+#### Untrimmed-coordinate trains as an option (`core/columns.py`, off by default)
+
+`ctrain(positions, maxcaas, minlen, columns)` and `train_flags(..., columns)` accept a position -> untrimmed-column map
+(`core.columns.column_map`, read from the trimmer's MAP table: position p is at untrimmed column `ori_of_prot[p + 1]`).
+With it, removed columns between two positions count towards the span; without it the result is what it was (checked
+byte for byte against the previous filter on the toy and on PEPC for four parameter pairs). Both chains take the same
+option and resolve a gene's MAP by the part of the file name before the first `.`: the observed filter
+(`filter_caas_clusters-param.py --map-dir DIR [--map-suffix .map.tsv]`) and the null
+(`disambiguation_perms_main.py --train-map-dir DIR [--train-map-suffix .map.tsv]`, with `--postproc-filter`). They must
+be given the same directory: with the option on in only one of them, observed and null trains are measured in different
+coordinates. A gene without a MAP file keeps trimmed coordinates and is logged; a gene with several MAP files or an
+inconsistent one raises. The Nextflow processes do not pass the option yet, so a pipeline run is unchanged.

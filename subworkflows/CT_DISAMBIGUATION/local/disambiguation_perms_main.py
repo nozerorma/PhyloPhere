@@ -76,6 +76,12 @@ def parse_arguments():
     p.add_argument("--keep-clusters", action="store_true",
                    help="Keep cluster-train positions in the scored pool (params.remove_caas_clusters "
                         "false); they still count for the dubious-gene test.")
+    p.add_argument("--train-map-dir", default=None,
+                   help="Directory of the trimmer's per-gene MAP tables. Cluster trains then measure their span "
+                        "in untrimmed alignment columns (a gene without a MAP keeps trimmed coordinates). "
+                        "Needs --postproc-filter; the observed filter must use the same directory.")
+    p.add_argument("--train-map-suffix", default=".map.tsv",
+                   help="File-name tail of the MAP tables (default .map.tsv)")
     p.add_argument("--gene-filter-mode", default="none",
                    choices=["none", "extreme", "dubious", "both"],
                    help="CAAS_FILTER_GENES mode (params.gene_filter_mode)")
@@ -189,6 +195,8 @@ def main():
             extreme_percentile=args.extreme_percentile,
             postproc_filter=args.postproc_filter,
             remove_clusters=not args.keep_clusters,
+            train_map_dir=args.train_map_dir,
+            train_map_suffix=args.train_map_suffix,
             gene_sizes=gene_sizes,
             seed=args.seed,
         )

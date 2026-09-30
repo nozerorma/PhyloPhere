@@ -38,6 +38,7 @@ from pathlib import Path
 
 # core.postproc is the single implementation of trains for the observed and null chains.
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "CT_DISAMBIGUATION" / "local"))
+from src.core.columns import gene_columns, index_files  # noqa: E402
 from src.core.postproc import ctrain  # noqa: E402
 
 # ============================================================================
@@ -63,6 +64,20 @@ def parse_args():
         type=int,
         default=3,
         help="Minimum interval length (>=1)"
+    )
+    parser.add_argument(
+        "--map-dir",
+        type=str,
+        default=None,
+        help="Directory of the trimmer's per-gene MAP tables. Trains then measure their span in untrimmed "
+             "alignment columns; a gene without a MAP keeps trimmed coordinates. The permulation null must "
+             "use the same directory (--train-map-dir)."
+    )
+    parser.add_argument(
+        "--map-suffix",
+        type=str,
+        default=".map.tsv",
+        help="File-name tail of the MAP tables"
     )
     parser.add_argument(
         "--verbose", "-v",
@@ -114,7 +129,7 @@ def setup_logger(input_path: Path, maxcaas: float, minlen: int, verbose: bool):
 # Main Filtering Function
 # ============================================================================
 
-def filterCAAS(infile, maxcaas, minlen, logger):
+def filterCAAS(infile, maxcaas, minlen, logger, map_dir=None, map_suffix=".map.tsv"):
     """
     Filter CAAS positions by identifying and marking high-density clusters.
     
@@ -126,6 +141,8 @@ def filterCAAS(infile, maxcaas, minlen, logger):
         maxcaas: Maximum density threshold (0.0 to 1.0)
         minlen: Minimum interval length for clustering detection
         logger: Configured logger instance
+        map_dir: optional directory of MAP tables; with it, spans are measured in untrimmed columns
+        map_suffix: file-name tail of the MAP tables
         
     Returns:
         Path object to the output filtered file
@@ -171,6 +188,10 @@ def filterCAAS(infile, maxcaas, minlen, logger):
         sys.exit(1)
 
     discarded = []
+    map_index = index_files(map_dir, map_suffix) if map_dir else None
+    genes_without_map = []
+    if map_index is not None:
+        logger.info(f"Untrimmed-coordinate trains: {len(map_index)} MAP files in {map_dir}")
     genes = df["Gene"].unique()
     total_genes = len(genes)
     
@@ -198,6 +219,9 @@ def filterCAAS(infile, maxcaas, minlen, logger):
     # Process each gene independently
     for i, gene in enumerate(genes, 1):
         gene_df = df[gene_col == gene]
+        columns = gene_columns(map_index, gene, map_suffix) if map_index is not None else None
+        if map_index is not None and columns is None:
+            genes_without_map.append(gene)
         
         if has_caap_group:
             # Process each CAAP group within the gene independently
@@ -217,7 +241,7 @@ def filterCAAS(infile, maxcaas, minlen, logger):
                 )
                 
                 # Find discarded positions for this gene-group combination
-                group_discarded = ctrain(positions, maxcaas, minlen)
+                group_discarded = ctrain(positions, maxcaas, minlen, columns)
                 
                 if group_discarded:
                     logger.info(
@@ -241,7 +265,7 @@ def filterCAAS(infile, maxcaas, minlen, logger):
             )
             
             # Find discarded positions
-            gene_discarded = ctrain(positions, maxcaas, minlen)
+            gene_discarded = ctrain(positions, maxcaas, minlen, columns)
             
             if gene_discarded:
                 logger.info(
@@ -252,6 +276,12 @@ def filterCAAS(infile, maxcaas, minlen, logger):
                 for pos in gene_discarded:
                     discarded.append((gene, pos, None))
     
+    if genes_without_map:
+        logger.warning(
+            f"{len(genes_without_map)} of {total_genes} genes have no MAP file and keep trimmed coordinates, "
+            f"e.g. {sorted(genes_without_map)[:5]}"
+        )
+
     # Create output dataframe with flagging
     out = df.copy()
     
@@ -313,7 +343,9 @@ if __name__ == "__main__":
             args.inputfile, 
             args.maxcaas, 
             args.minlen, 
-            logger
+            logger,
+            args.map_dir,
+            args.map_suffix
         )
         logger.info("✓ Clustering analysis completed successfully")
         print(f"\nFiltered output: {output_path}")

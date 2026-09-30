@@ -36,7 +36,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "subworkflows/CT_DISAMBIGUATION/local"))
 from src.core.postproc import ctrain  # noqa: E402
 from trains_grain import load  # noqa: E402
-from trains_quality import find_file, index_files, load_map  # noqa: E402
+from src.core.columns import find_file, index_files, read_map as load_map  # noqa: E402
 
 BINS = (("2", 2, 2), ("3", 3, 3), ("4", 4, 4), ("5-9", 5, 9), ("10+", 10, 10 ** 9))
 TOTALS = ["units", "positions", "flagged_trimmed", "flagged_untrimmed", "only_trimmed", "only_untrimmed", "records",
