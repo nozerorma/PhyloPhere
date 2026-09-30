@@ -78,3 +78,23 @@ def test_the_single_run_script_falls_back_to_the_config_and_model_defaults():
     assert strategy == CaasConfig().perm_strategy == _conf_default("ct.config", "perm_strategy")
     assert posterior == DisambiguationConfig().ct_disambig_posterior_threshold == _conf_default(
         "ct_disambiguation.config", "ct_disambig_posterior_threshold")
+
+
+def _tab_field_names(tab_file, group):
+    """Names of the FieldSpec entries in a tab's `essential_fields` or `advanced_fields` (read from the source, without Qt)."""
+    import ast
+    tree = ast.parse((ROOT / "gui/widgets/tabs" / tab_file).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "ModuleTabSpec":
+            for kw in node.keywords:
+                if kw.arg == group:
+                    return [e.keywords[0].value.value for e in kw.value.elts
+                            if isinstance(e, ast.Call) and getattr(e.func, "id", "") == "FieldSpec"
+                            and e.keywords and e.keywords[0].arg == "name"]
+    raise AssertionError(f"{group} not found in {tab_file}")
+
+
+def test_the_map_directory_is_visible_in_the_main_group_of_the_disambiguation_tab():
+    assert "caas_map_dir" in _tab_field_names("disambiguation_tab.py", "essential_fields")
+    assert "caas_map_dir" not in _tab_field_names("disambiguation_tab.py", "advanced_fields")
+    assert "vep_map_dir" not in _tab_field_names("vep_tab.py", "essential_fields") + _tab_field_names("vep_tab.py", "advanced_fields")
