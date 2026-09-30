@@ -85,7 +85,7 @@ def test_measure_counts_components_by_size_and_outcome_and_skips_genes_without_a
     rows += [("B", "US", "H1", p) for p in (0, 1, 2)]                       # no map
     df = pd.DataFrame(rows, columns=["gene", "caap_group", "trait", "position"])
     ori_a = list(range(1, 10)) + [10, 14, 20]
-    comps, tot, skipped = tc.measure(df, {"A": _map(ori_a)})
+    comps, tot, skipped = tc.measure(tc.load_units(df), {"A": _map(ori_a)})
     got = {(r.caap_group, r.bin): r.status for r in comps.itertuples()}
     assert got == {("US", "3"): "lost", ("GS1", "4"): "whole"}
     assert tot["flagged_trimmed"] == 7 and tot["flagged_untrimmed"] == 4 and tot["only_untrimmed"] == 0
@@ -101,4 +101,39 @@ def test_command_line_finds_a_map_named_for_another_reference_species(tmp_path, 
     monkeypatch.setattr(sys, "argv", ["x", "--discovery", str(tmp_path / "d.tsv"), "--map-dir", str(tmp_path)])
     tc.main()
     out = capsys.readouterr().out
-    assert "genes with a map: 1" in out and "flagged positions: trimmed 3  untrimmed 3" in out
+    assert "genes with a map: 1" in out
+    row = [l.split() for l in out.splitlines() if l.split()[:2] == ["3", "0.7"]][0]
+    assert row[4:8] == ["3", "3", "0", "0"]      # flagged trimmed and untrimmed, only trimmed, only untrimmed
+
+
+def test_components_apply_the_same_entry_condition_as_ctrain():
+    # 3 positions, minlen 4: ctrain returns nothing for n < minlen even though 2 of 4 reaches maxcaas 0.5
+    pos = [1, 4, 40]
+    assert ctrain(pos, 0.5, 4) == [] and tc.train_components(pos, 0.5, 4) == []
+    # with a fourth position the unit enters and the interval 1..4 (2 of 4) qualifies
+    assert tc.train_components(pos + [90], 0.5, 4) == [[1, 4]] and ctrain(pos + [90], 0.5, 4) == [1, 4]
+
+
+def test_the_grid_reports_each_combination_with_hand_computed_counts():
+    rows = [("A", "US", "H1", p) for p in (0, 1, 50)] + [("A", "US", "H2", p) for p in (2, 3)]
+    df = pd.DataFrame(rows, columns=["gene", "caap_group", "trait", "position"])
+    # trimmed columns 0, 1, 2, 3 sit at untrimmed 1, 3, 10, 11: the pair (0, 1) has a removed column between
+    ori = [1, 3, 10, 11] + list(range(100, 147))
+    g, comps, skipped = tc.grid(tc.load_units(df), {"A": _map(ori)}, [2, 3], [0.6, 0.7])
+    assert skipped == 0 and list(zip(g.minlen, g.maxcaas)) == [(2, 0.6), (2, 0.7), (3, 0.6), (3, 0.7)]
+    got = g.set_index(["minlen", "maxcaas"])[["flagged_trimmed", "flagged_untrimmed", "only_trimmed", "only_untrimmed"]]
+    assert got.loc[(2, 0.6)].tolist() == [4, 4, 0, 0]     # untrimmed 1..3 is 2 of 3 = 0.67 >= 0.6
+    assert got.loc[(2, 0.7)].tolist() == [4, 2, 2, 0]     # 0.67 < 0.7: only the pair at 10, 11 stays
+    assert got.loc[(3, 0.6)].tolist() == [4, 2, 2, 0]     # the pair at 10, 11 has span 2 < minlen 3
+    assert got.loc[(3, 0.7)].tolist() == [4, 0, 4, 0]
+    lost = comps[(comps.minlen == 3) & (comps.maxcaas == 0.7)].set_index(["bin", "status"])["n"]
+    assert lost.to_dict() == {("4", "lost"): 1}
+
+
+def test_grid_with_a_lower_maxcaas_can_flag_positions_only_in_untrimmed_coordinates():
+    # two CAAS with a removed column between, plus a distant third position so the unit enters ctrain
+    df = pd.DataFrame([("A", "US", "H1", p) for p in (0, 1, 50)], columns=["gene", "caap_group", "trait", "position"])
+    ori = [1, 3] + list(range(10, 59))
+    g, _, skipped = tc.grid(tc.load_units(df), {"A": _map(ori)}, [3], [0.6, 0.7])
+    by = g.set_index("maxcaas")
+    assert skipped == 0 and by.loc[0.6, "only_untrimmed"] == 2 and by.loc[0.7, "only_untrimmed"] == 0

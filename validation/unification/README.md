@@ -168,11 +168,12 @@ checkout and not from stdin.
 `ctrain` measures span and density between columns of the trimmed alignment. A column the trimmer removed cannot hold a
 CAAS, so on the untrimmed alignment it adds to the span and not to the count: CAAS that are adjacent only because
 columns between them were removed are further apart than the trimmed coordinates say. `trains_coordinates.py --discovery
-<discovery.tab> --map-dir <MAP dir>` recomputes the trains of every (gene, caap_group) unit over the positions of all
-hypotheses in untrimmed coordinates (positions mapped through `prot_ali_col`) and compares them with the trimmed ones:
-flagged positions, records removed, units with a train, and train components by size (3, 4, 5-9, 10+) kept whole, partly
-lost or fully lost. A component is a set of flagged positions linked by overlapping qualifying intervals. With the
-default parameters (minlen 3, maxcaas 0.7) the untrimmed flags are a subset of the trimmed ones, because the span can
-only grow and a qualifying window already holds at least three positions; with a lower maxcaas positions can be flagged
-only in untrimmed coordinates and are counted separately. `ctrain` returns nothing for a unit with fewer than minlen
-positions, which matters only when maxcaas <= (minlen - 1) / minlen. Genes without a usable MAP are skipped and counted.
+<discovery.tab> --map-dir <MAP dir> --minlen-values 2,3,4,10 --maxcaas-values 0.6,0.7,0.8` recomputes, for every
+combination of the exploratory post-processing grid (defaults 3 and 0.7), the trains of every (gene, caap_group) unit over
+the positions of all hypotheses in untrimmed coordinates (positions mapped through `prot_ali_col`) and compares them with
+the trimmed ones: flagged positions, positions flagged in only one of the two coordinates, records removed, units with a
+train, and train components by size (2, 3, 4, 5-9, 10+) kept whole, partly lost or fully lost. A component is a set of
+flagged positions linked by overlapping qualifying intervals. With maxcaas above (minlen - 1) / minlen the untrimmed flags
+are a subset of the trimmed ones, because the span can only grow and a qualifying window already holds at least minlen
+positions; below that, positions can be flagged only in untrimmed coordinates. `ctrain` returns nothing for a unit with
+fewer than minlen positions, and the components follow the same rule. Genes without a usable MAP are skipped and counted.
