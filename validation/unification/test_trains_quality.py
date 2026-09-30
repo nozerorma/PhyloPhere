@@ -174,3 +174,31 @@ def test_pepc_with_the_entropy_table_alone(tmp_path):
     assert r["g"] == pytest.approx(direct, abs=1e-6)
     s = tq.summarize(rows)
     assert set(s["metric"]) == {"g", "g_win", "variability"} and (s["n_genes"] <= 1).all()
+
+
+def test_files_are_found_by_gene_whatever_the_reference_species_or_version(tmp_path):
+    for n in ("A.Homo_sapiens.prot.entropy.tsv", "B.Lemur_catta.prot.entropy.tsv", "C.1.Homo_sapiens.prot.entropy.tsv",
+              "D.Homo_sapiens.prot.entropy.tsv", "D.Papio_anubis.prot.entropy.tsv", "A.Homo_sapiens.prot.clade_entropy.tsv"):
+        (tmp_path / n).write_text("")
+    idx = tq.index_files(tmp_path, ".prot.entropy.tsv")
+    assert set(idx) == {"A", "B", "C", "D"}
+    assert idx["A"].endswith("A.Homo_sapiens.prot.entropy.tsv") and idx["B"].endswith("B.Lemur_catta.prot.entropy.tsv")
+    assert idx["C"].endswith("C.1.Homo_sapiens.prot.entropy.tsv") and idx["D"] is None
+    with pytest.raises(FileNotFoundError):
+        tq.find_file(idx, "Z", ".prot.entropy.tsv")
+    with pytest.raises(ValueError, match="several files"):
+        tq.find_file(idx, "D", ".prot.entropy.tsv")
+
+
+def test_collect_annotates_a_gene_whose_files_carry_another_species_and_skips_ambiguous_ones(tmp_path):
+    _write_gene(tmp_path, gene="G")
+    for ext in ("entropy.tsv", "map.tsv"):
+        (tmp_path / f"G.{ext}").rename(tmp_path / f"G.Lemur_catta.{ext}")
+    (tmp_path / "raw" / "G.fa").rename(tmp_path / "raw" / "G.Lemur_catta.fa")
+    (tmp_path / "raw" / "G.Papio_anubis.fa").write_text("")          # two raw files for G
+    d = pd.DataFrame([("G", "US", "H1", p) for p in (0, 1, 2)], columns=["gene", "caap_group", "trait", "position"])
+    rows, skipped = tq.collect(d, **_sources(tmp_path), window=1)
+    assert rows.empty and "several files" in skipped["G"]
+    (tmp_path / "raw" / "G.Papio_anubis.fa").unlink()
+    rows, skipped = tq.collect(d, **_sources(tmp_path), window=1)
+    assert not skipped and rows["gap_pre"].notna().all()

@@ -149,7 +149,7 @@ finds real alignment problems; that needs an independent alignment-quality refer
 
 `trains_quality.py` compares the positions flagged only by the union ("only_union") with positions flagged under both
 grains ("both") and with discovered positions that are not flagged ("none"), on alignment-quality measures from
-optional sources; only `--discovery` is required. `--entropy-dir` (per-gene `entropy.tsv` of `compute_variability.py`)
+optional sources; only `--discovery` is required. `--entropy-dir` (per-gene `entropy.tsv` of `compute_variability.py`; files are named `<gene>[.<version>].<species><suffix>` and a gene is found by the part of the name before the first `.`, whatever its reference species; a gene with several files in one directory is skipped)
 gives `g` (fraction of `-` or `X` in the column), its mean over +-3 trimmed columns and `variability`. `--map-dir`
 (per-gene MAP of the trimmer: `status` selected/removed and `prot_ali_col`) gives `n_removed_flank`, the removed
 columns within +-3 untrimmed columns. `--raw-dir` (untrimmed codon alignment, needs `--map-dir`) gives `gap_pre`, the

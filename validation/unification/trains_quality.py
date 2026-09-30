@@ -9,15 +9,17 @@ in worse alignment regions than the rest of the discovered positions. Nothing in
 Coordinates: discovery.tab `position` is the 0-based column of the trimmed (BMGE) alignment, so the
 1-based trimmed column is position + 1. That column is `entropy.position` and `MAP.prot_ali_col`.
 
-Inputs (only --discovery is required; each measure is computed when its source is given):
+Inputs (only --discovery is required; each measure is computed when its source is given). Files are
+named <gene>[.<version>].<species><tail>; a gene is found by the part of the name before the first '.',
+whatever its reference species, and a gene with several files in one directory is skipped:
 
-* --entropy-dir   <gene><entropy-suffix>: per-column table with `position`, `g`, `variability`
+* --entropy-dir   files ending in --entropy-suffix: per-column table with `position`, `g`, `variability`
                   (bin/compute_variability.py). g is the fraction of '-' or 'X' in the column.
                   Gives g, variability and g_win (mean g over +-window trimmed columns).
-* --map-dir       <gene><map-suffix>: one row per column of the untrimmed alignment with `status`
+* --map-dir       files ending in --map-suffix: one row per column of the untrimmed alignment with `status`
                   (selected | removed) and `prot_ali_col`. Gives n_removed_flank: removed columns
                   within +-window untrimmed columns of the position.
-* --raw-dir       <gene><raw-suffix>: the untrimmed codon alignment (FASTA). Needs --map-dir.
+* --raw-dir       files ending in --raw-suffix: the untrimmed codon alignment (FASTA). Needs --map-dir.
                   Gives gap_pre and gap_pre_win: fraction of sequences whose codon has a character
                   outside ACGT, at the column and averaged over +-window untrimmed columns
                   (removed columns included).
@@ -37,6 +39,7 @@ Usage:
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -66,6 +69,28 @@ def read_fasta(path):
         elif line:
             seqs[-1].append(line)
     return ["".join(s) for s in seqs]
+
+
+def index_files(directory, tail):
+    """Gene key (file name before the first '.') -> path for the files ending in `tail`.
+
+    A key that several files share maps to None.
+    """
+    out = {}
+    for name in os.listdir(directory):
+        if name.endswith(tail):
+            key = name[: -len(tail)].split(".")[0]
+            out[key] = None if key in out else os.path.join(directory, name)
+    return out
+
+
+def find_file(index, gene, tail):
+    path = index.get(gene, False)
+    if path is False:
+        raise FileNotFoundError(f"no file ending in {tail} for {gene}")
+    if path is None:
+        raise ValueError(f"several files ending in {tail} for {gene}")
+    return path
 
 
 def load_entropy(path):
@@ -166,20 +191,21 @@ def classify(df, maxcaas=0.7, minlen=3):
     return pd.DataFrame(out, columns=["gene", "caap_group", "position", "cls"])
 
 
-def collect(df, entropy_dir=None, map_dir=None, raw_dir=None, entropy_suffix=".Homo_sapiens.prot.entropy.tsv",
-            map_suffix=".Homo_sapiens.map.tsv", raw_suffix=".Homo_sapiens.fa", window=3, maxcaas=0.7,
-            minlen=3):
+def collect(df, entropy_dir=None, map_dir=None, raw_dir=None, entropy_suffix=".prot.entropy.tsv",
+            map_suffix=".map.tsv", raw_suffix=".fa", window=3, maxcaas=0.7, minlen=3):
     """Classified positions with their quality measures; genes with missing or inconsistent inputs are skipped."""
     cls = classify(df, maxcaas, minlen)
+    idx = {k: index_files(d, t) for k, d, t in (("entropy", entropy_dir, entropy_suffix), ("map", map_dir, map_suffix),
+                                               ("raw", raw_dir, raw_suffix)) if d}
     pieces, skipped = [], {}
     for gene, sub in cls.groupby("gene", observed=True):
         try:
-            ent = load_entropy(Path(entropy_dir) / f"{gene}{entropy_suffix}") if entropy_dir else None
+            ent = load_entropy(find_file(idx["entropy"], gene, entropy_suffix)) if entropy_dir else None
             removed = ori = gap = None
             if map_dir:
-                removed, ori = load_map(Path(map_dir) / f"{gene}{map_suffix}")
+                removed, ori = load_map(find_file(idx["map"], gene, map_suffix))
             if raw_dir:
-                gap = codon_gap_fraction(read_fasta(Path(raw_dir) / f"{gene}{raw_suffix}"))
+                gap = codon_gap_fraction(read_fasta(find_file(idx["raw"], gene, raw_suffix)))
             pos = sorted(sub["position"].unique())
             q = annotate_gene(pos, ent, removed, ori, gap, window)
         except (OSError, ValueError, KeyError) as e:
@@ -216,9 +242,9 @@ def main():
     ap.add_argument("--entropy-dir")
     ap.add_argument("--map-dir")
     ap.add_argument("--raw-dir")
-    ap.add_argument("--entropy-suffix", default=".Homo_sapiens.prot.entropy.tsv")
-    ap.add_argument("--map-suffix", default=".Homo_sapiens.map.tsv")
-    ap.add_argument("--raw-suffix", default=".Homo_sapiens.fa")
+    ap.add_argument("--entropy-suffix", default=".prot.entropy.tsv")
+    ap.add_argument("--map-suffix", default=".map.tsv")
+    ap.add_argument("--raw-suffix", default=".fa")
     ap.add_argument("--window", type=int, default=3)
     ap.add_argument("--maxcaas", type=float, default=0.7)
     ap.add_argument("--minlen", type=int, default=3)
@@ -234,8 +260,11 @@ def main():
     pd.set_option("display.width", 220)
     d = rows.drop_duplicates(["gene", "position", "cls"])
     print(f"genes annotated: {d['gene'].nunique()}  skipped: {len(skipped)}")
-    for g, why in list(skipped.items())[:20]:
-        print(f"  skipped {g}: {why}")
+    kinds = {}
+    for g, why in skipped.items():
+        kinds.setdefault(why.split(":")[0], []).append((g, why))
+    for kind, items in kinds.items():
+        print(f"  {kind}: {len(items)} genes; first: {items[0][1][:160]}")
     print("positions per class:", d["cls"].value_counts().reindex(CLASSES, fill_value=0).to_dict())
     s = summarize(rows)
     print(s.round(4).to_string(index=False))

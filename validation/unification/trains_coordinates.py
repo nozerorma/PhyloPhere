@@ -17,7 +17,7 @@ kept whole, partly lost or fully lost when the untrimmed coordinates are used. P
 in untrimmed coordinates are counted separately (none with the default parameters).
 
 Usage:
-  python trains_coordinates.py --discovery discovery.tab[.gz] --map-dir DIR [--map-suffix .Homo_sapiens.map.tsv]
+  python trains_coordinates.py --discovery discovery.tab[.gz] --map-dir DIR [--map-suffix .map.tsv]
       [--maxcaas 0.7 --minlen 3 --out-tsv components.tsv]
 """
 
@@ -33,7 +33,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1] / "subworkflows/CT_DISAMBIGUATION/local"))
 from src.core.postproc import ctrain  # noqa: E402
 from trains_grain import Sweep, load  # noqa: E402
-from trains_quality import load_map  # noqa: E402
+from trains_quality import find_file, index_files, load_map  # noqa: E402
 
 BINS = (("3", 3, 3), ("4", 4, 4), ("5-9", 5, 9), ("10+", 10, 10 ** 9))
 
@@ -117,16 +117,17 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--discovery", required=True)
     ap.add_argument("--map-dir", required=True)
-    ap.add_argument("--map-suffix", default=".Homo_sapiens.map.tsv")
+    ap.add_argument("--map-suffix", default=".map.tsv")
     ap.add_argument("--maxcaas", type=float, default=0.7)
     ap.add_argument("--minlen", type=int, default=3)
     ap.add_argument("--out-tsv")
     a = ap.parse_args()
     df = load(a.discovery)
+    idx = index_files(a.map_dir, a.map_suffix)
     maps, bad = {}, collections.Counter()
     for g in df["gene"].unique():
         try:
-            maps[g] = load_map(Path(a.map_dir) / f"{g}{a.map_suffix}")[1]
+            maps[g] = load_map(find_file(idx, g, a.map_suffix))[1]
         except (OSError, ValueError) as e:
             bad[type(e).__name__] += 1
     comps, tot, skipped = measure(df, maps, a.maxcaas, a.minlen)

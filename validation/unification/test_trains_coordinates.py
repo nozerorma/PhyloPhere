@@ -92,3 +92,13 @@ def test_measure_counts_components_by_size_and_outcome_and_skips_genes_without_a
     assert tot["records_removed_trimmed"] == 7 and tot["records_removed_untrimmed"] == 4
     assert tot["units_with_train_trimmed"] == 2 and tot["units_with_train_untrimmed"] == 1
     assert dict(skipped) == {"B": 1}
+
+
+def test_command_line_finds_a_map_named_for_another_reference_species(tmp_path, capsys, monkeypatch):
+    (tmp_path / "G.Lemur_catta.map.tsv").write_text(
+        "ori_codon_col\tstatus\ttrim_codon_col\tprot_ali_col\n" + "".join(f"{c}\tselected\t{c}\t{c}\n" for c in range(1, 8)))
+    (tmp_path / "d.tsv").write_text("gene\tcaap_group\ttrait\tposition\n" + "".join(f"G\tUS\tH1\t{p}\n" for p in (1, 2, 3)))
+    monkeypatch.setattr(sys, "argv", ["x", "--discovery", str(tmp_path / "d.tsv"), "--map-dir", str(tmp_path)])
+    tc.main()
+    out = capsys.readouterr().out
+    assert "genes with a map: 1" in out and "flagged positions: trimmed 3  untrimmed 3" in out
