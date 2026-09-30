@@ -7,7 +7,7 @@ real labeling (`b_0`). Spec: the "Unified CAAS core" plan.
   C (`asr_path_score`), D (`caas_row`/`CAAS_score`), E (gene score). Exact key-set equality, |delta| <= 1e-12.
   `test_compare_b0.py` is its plumbing test (synthetic run).
 - `--caas_b0_diagnostic true` makes the pipeline write the `b_0` slice to `<outdir>/caas_permulation/b0/`
-  (never part of the null). Needs `ct_disambig_perms_batch_size = 1`.
+  (never part of the null). Works with the batched and the unbatched null.
 - `golden/pepc_c4_complete/`: frozen observed outputs of the Tier 1 PEPC genotypic run
   (`validation/tier1/output/pepc/results/c4_complete`, code at 7892848).
 - `baseline/`: harness reports on the code before unification (see below).

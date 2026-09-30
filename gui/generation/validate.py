@@ -159,7 +159,8 @@ def validate(project: ProjectConfig) -> list[str]:
     # --- VEP ---
     vep = project.modules.vep
     if vep.enabled:
-        require(vep.vep_map_dir, "VEP: per-gene MAP directory is required when VEP is enabled.")
+        require(project.modules.disambiguation.caas_map_dir,
+                "VEP: per-gene MAP directory (Disambiguation, post-processing) is required when VEP is enabled.")
         # vep_cache_dir is NOT required even when vep_ensembl is checked: left
         # blank, ENSEMBL_VEP_ANNOTATE resolves a persistent default location
         # and populates it itself via vep_install on first use (see
@@ -240,7 +241,7 @@ def path_entries(project: ProjectConfig) -> list[tuple[str, str, str]]:
         ("FADE: Substitution matrix", m.fade.lg_dat_path, "file"),
         ("FADE: tested-gene universe file", m.fade.fade_universe_file, "file"),
         ("VEP: PrimateAI-3D database", m.vep.vep_primateai_db, "file"),
-        ("VEP: MAP directory", m.vep.vep_map_dir, "dir"),
+        ("Post-processing: MAP directory", m.disambiguation.caas_map_dir, "dir"),
         ("VEP: COSMIC database", m.vep.cosmic_db, "file"),
         ("VEP: Ensembl VEP cache directory", m.vep.vep_cache_dir, "dir"),
         ("Scoring: gene-Ensembl file", m.scoring.gene_ensembl_file, "file"),

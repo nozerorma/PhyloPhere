@@ -312,6 +312,42 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             ran_any = true
         }
 
+        // CT_POSTPROC is resolved before the permulation null so that the null receives the real
+        // cleaned background as its gene universe (dataflow, not call order, decides when tasks run).
+        if (run_ct_postproc) {
+            // Post-processing is downstream from disambiguation; consume disambiguation master CSV when available
+            // Pass null (not Channel.empty()) when there is no upstream result so that the
+            // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
+            // to --disambiguation_input / --background_input params (same pattern as CT_META_CAAS).
+            def disambiguation_ch = disambiguation_results ? disambiguation_results.master_csv : null
+            // Only wire the background genes when discovery actually ran; otherwise pass null so
+            // CT_POSTPROC falls back to the --background_input param.
+            def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
+            // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
+            def disambiguation_dir_ch = disambiguation_results ? disambiguation_results.results_dir : null
+            postproc_results = CT_POSTPROC(disambiguation_ch, background_genes_ch, disambiguation_dir_ch)
+            ran_any = true
+
+            // Capture postproc outputs as reusable references.
+            // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
+            pp_cleaned_bg = postproc_results.cleaned_background
+        }
+
+        // Fallback resolution for precomputed / standalone runs where --ct_postproc did not run live
+        if (!pp_cleaned_bg) {
+            def bg_candidate = params.background_input ?: (params.scoring_background_input ?: (params.accumulation_background_input ?: ''))
+            if (!bg_candidate && params.scoring_postproc_input) {
+                def pfile = file(params.scoring_postproc_input)
+                def pdir = pfile ? pfile.parent : null
+                if (pdir && file("${pdir}/cleaned_background_main.txt").exists()) {
+                    bg_candidate = "${pdir}/cleaned_background_main.txt"
+                }
+            }
+            if (bg_candidate && file(bg_candidate).exists()) {
+                pp_cleaned_bg = Channel.value(file(bg_candidate))
+            }
+        }
+
         if (run_caas_permulation) {
 
 
@@ -464,41 +500,6 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             }
         }
 
-
-        if (run_ct_postproc) {
-            // Post-processing is downstream from disambiguation; consume disambiguation master CSV when available
-            // Pass null (not Channel.empty()) when there is no upstream result so that the
-            // if(channel) guard inside CT_POSTPROC correctly detects absence and falls back
-            // to --disambiguation_input / --background_input params (same pattern as CT_META_CAAS).
-            def disambiguation_ch = disambiguation_results ? disambiguation_results.master_csv : null
-            // Only wire raw background channels when discovery actually ran; otherwise pass
-            // null/Channel.empty() so CT_POSTPROC falls back to --background_input param.
-            def background_ch       = (ct_results && ran_discovery) ? ct_results.background_file_raw : Channel.empty()
-            def background_genes_ch = (ct_results && ran_discovery) ? ct_results.background_genes    : null
-            // Pass full ct_disambiguation/ directory for ASR robustness diagnostics (null = standalone mode)
-            def disambiguation_dir_ch = disambiguation_results ? disambiguation_results.results_dir : null
-            postproc_results = CT_POSTPROC(disambiguation_ch, background_ch, background_genes_ch, disambiguation_dir_ch)
-            ran_any = true
-
-            // Capture postproc outputs as reusable references.
-            // cleaned_background is already a value channel (single file from CAAS_BACKGROUND_CLEANUP).
-            pp_cleaned_bg = postproc_results.cleaned_background
-        }
-
-        // Fallback resolution for precomputed / standalone runs where --ct_postproc did not run live
-        if (!pp_cleaned_bg) {
-            def bg_candidate = params.background_input ?: (params.scoring_background_input ?: (params.accumulation_background_input ?: ''))
-            if (!bg_candidate && params.scoring_postproc_input) {
-                def pfile = file(params.scoring_postproc_input)
-                def pdir = pfile ? pfile.parent : null
-                if (pdir && file("${pdir}/cleaned_background_main.txt").exists()) {
-                    bg_candidate = "${pdir}/cleaned_background_main.txt"
-                }
-            }
-            if (bg_candidate && file(bg_candidate).exists()) {
-                pp_cleaned_bg = Channel.value(file(bg_candidate))
-            }
-        }
 
         def accum_results = null
 

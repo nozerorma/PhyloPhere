@@ -30,14 +30,13 @@
  */
 
 // Import local processes from subworkflows
-include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP } from '../subworkflows/CT_POSTPROC/ctpp_clustfilter'
+include { CAAS_PREPARE_POSTPROC_INPUT; CT_FILTER; CT_FILTER_SUMMARY; CAAS_FILTER_GENES; CAAS_BACKGROUND_CLEANUP; clusterParameterGrid; clusterFileSuffix } from '../subworkflows/CT_POSTPROC/ctpp_clustfilter'
 include { CT_POSTPROC_REPORT } from '../subworkflows/CT_POSTPROC/ctpp_characterization'
 include { ASR_ROBUSTNESS } from './asr_robustness'
 
 workflow CT_POSTPROC {
     take:
         disambiguation_input_channel      // Post-disambiguation master CSV (optional, can use --disambiguation_input instead)
-        background_files_channel     // Raw background files from CT module (optional)
         background_genes_channel     // Global background genes file from CT module (preferred)
         disambiguation_dir_channel   // Full ct_disambiguation/ directory for ASR robustness diagnostics (optional)
 
@@ -85,10 +84,8 @@ workflow CT_POSTPROC {
         // precluster hard filters used by CT post-processing.
         prepared_inputs = CAAS_PREPARE_POSTPROC_INPUT(discovery_file_ch)
         def prepared_discovery_ch = prepared_inputs.prepared_discovery
-        def precluster_removed_ch = prepared_inputs.removed_patterns
 
         log.info "📂 Post-processing input normalized from disambiguation master CSV"
-        log.info "⛔ Precluster hard filter retained: low MRCA posterior"
         
         // Handle global background genes source for cleanup
         def global_background_genes
@@ -112,36 +109,29 @@ workflow CT_POSTPROC {
             error "CT Post-Processing requires CT background_genes output or --background_input (global genes)"
         }
         
+        // The parameter pair of the production filter. params.filter_minlen/filter_maxcaas may arrive as
+        // plain Strings (JSON/CLI params), and CT_FILTER's script does `(maxcaas * 100).toInteger()`, where
+        // `*` on a String repeats it ("0.7" * 100 is "0.70.7..."), so both are cast to numbers here.
+        def filter_minlen_val = params.filter_minlen.toInteger()
+        def filter_maxcaas_val = params.filter_maxcaas.toDouble()
+
         // Determine processing mode and create parameter combinations channel
         if (params.caas_postproc_mode == 'exploratory') {
-            // Parameter sweep: generate cartesian product of all parameter combinations
+            // Parameter sweep over minlen_values x maxcaas_values (plus the selected pair when it is outside the grid)
             def minlen_list = params.minlen_values.split(',').collect { it.trim().toInteger() }
             def maxcaas_list = params.maxcaas_values.split(',').collect { it.trim().toDouble() }
-            
-            // Create channel with all parameter combinations
-            // Combine parameters with discovery file channel
+            def combos = clusterParameterGrid(minlen_list, maxcaas_list, filter_minlen_val, filter_maxcaas_val)
+
             param_combinations = Channel
-                .from(minlen_list)
-                .combine(Channel.from(maxcaas_list))
+                .fromList(combos)
                 .combine(prepared_discovery_ch)
-                .map { minlen, maxcaas, disc_file -> 
-                    tuple('exploratory', minlen, maxcaas, disc_file)
-                }
-            
-            log.info "🔍 Exploratory mode: testing ${minlen_list.size()} × ${maxcaas_list.size()} = ${minlen_list.size() * maxcaas_list.size()} parameter combinations"
+                .map { combo, disc_file -> tuple('exploratory', combo[0], combo[1], disc_file) }
+
+            log.info "🔍 Exploratory mode: testing ${combos.size()} parameter combinations"
             log.info "   (Cluster filtering will respect caap_group boundaries)"
-            
+
         } else if (params.caas_postproc_mode == 'filter') {
-            // Single filter run: use provided minlen and maxcaas.
-            // Cast to numeric here, same as the exploratory branch's minlen_list/
-            // maxcaas_list above — params.filter_minlen/filter_maxcaas arrive as plain
-            // Strings (JSON/CLI params are always Strings), and CT_FILTER's script does
-            // `(maxcaas * 100).toInteger()`. Groovy's `*` on a String is repetition, not
-            // multiplication ("0.7" * 100 -> "0.70.70.7..." repeated 100 times, not 70),
-            // so leaving maxcaas as a String there made every _complete/filter-mode run
-            // crash with "For input string: '0.70.70.7...'" the moment CT_FILTER ran.
-            def filter_minlen_val = params.filter_minlen.toInteger()
-            def filter_maxcaas_val = params.filter_maxcaas.toDouble()
+            // Single filter run: the selected minlen and maxcaas.
             param_combinations = Channel
                 .of(tuple('filter', filter_minlen_val, filter_maxcaas_val))
                 .combine(prepared_discovery_ch)
@@ -184,14 +174,15 @@ workflow CT_POSTPROC {
         log.info "🧬 Running gene-level filtering (mode: ${params.gene_filter_mode})..."
         log.info "   (Gene-level statistics will be calculated per caap_group)"
 
-        // Select appropriate cluster file based on mode
-        // Use first cluster file from results without `.first()` to avoid
-        // value-channel operator warnings.
+        // The gene filter uses the cluster file of the selected pair (filter_minlen, filter_maxcaas),
+        // in filter mode and in exploratory mode alike. The name follows CT_FILTER's output naming.
+        def selected_cluster_suffix = clusterFileSuffix(filter_minlen_val, filter_maxcaas_val)
         def cluster_file = filter_results.filtered_files
             .collect()
             .map { files ->
-                assert files && files.size() > 0 : "Error: CT_FILTER produced no cluster files"
-                files[0]
+                def hit = files.flatten().find { it.name.endsWith(selected_cluster_suffix) }
+                assert hit : "Error: CT_FILTER produced no cluster file ending in ${selected_cluster_suffix}"
+                hit
             }
 
         def gene_filter_results = CAAS_FILTER_GENES(
@@ -212,32 +203,28 @@ workflow CT_POSTPROC {
 
         log.info "Cleaned background files: ${params.outdir}/postproc/cleaned_backgrounds"
         
-        // Run characterization if reports are enabled
-        if (true) {  // characterization reports always run
-            // gene_ensembl_file already resolved and validated above.
-            log.info "📊 CT characterization reports..."
-            
-            // Pass the filter_ch output directory path instead of individual files
-            def filter_output_dir = params.caas_postproc_mode == 'exploratory' ? 
-                "${params.outdir}/postproc/filter_${params.caas_postproc_mode}" :
-                "${params.outdir}/postproc/filter_selected"
-            
-            characterization_results = CT_POSTPROC_REPORT(
-                prepared_discovery_ch,
-                filter_summary_results.summary,
-                filter_output_dir,
-                gene_ensembl_file,
-                gene_filter_results ? gene_filter_results.gene_stats : Channel.empty()
-            )
+        // Characterization reports always run (gene_ensembl_file is already resolved and validated above).
+        log.info "📊 CT characterization reports..."
 
-            log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"
-        }
+        // The report reads the published cluster files of the filter mode's directory
+        def filter_output_dir = params.caas_postproc_mode == 'exploratory' ?
+            "${params.outdir}/postproc/filter_${params.caas_postproc_mode}" :
+            "${params.outdir}/postproc/filter_selected"
+
+        characterization_results = CT_POSTPROC_REPORT(
+            prepared_discovery_ch,
+            filter_summary_results.summary,
+            filter_output_dir,
+            gene_ensembl_file,
+            gene_filter_results.gene_stats
+        )
+
+        log.info "Post-processing reports generated in: ${params.outdir}/postproc/reports"
     
     emit:
         filter_summary = filter_summary_results.summary  // filter_summary.tsv (rows=params, cols=groups)
         discarded_summary = filter_summary_results.discarded_summary  // discarded_summary.tsv (old format for compatibility)
         filter_dir = filter_dir_ch
-        precluster_removed_patterns = precluster_removed_ch
         filtered_discovery = filtered_discovery_ch
         cleaned_background = cleaned_background_main_ch
 }

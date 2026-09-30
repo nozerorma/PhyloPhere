@@ -49,20 +49,9 @@ SPEC = ModuleTabSpec(
                  "pending that check.",
             importance="optional",
         ),
-        # validate.py: require(vep.vep_map_dir, ...) unconditionally whenever
-        # vep.enabled — matches this field's own help text ("required whenever
-        # any annotation source on this tab is used").
-        FieldSpec(
-            name="vep_map_dir",
-            label="Per-gene MAP directory",
-            kind="path_dir",
-            help="Cannot be generated in-house: maps each alignment codon column "
-                 "to its real hg38 genomic/protein coordinate, which needs the full "
-                 "alignment-to-protein pipeline, not just the alignment plus a "
-                 "public DB. See github.com/nozerorma/ortholog_characterizator. "
-                 "Required whenever any annotation source on this tab is used.",
-            importance="required",
-        ),
+        # validate.py requires disambiguation.caas_map_dir whenever vep.enabled: the per-gene
+        # MAP directory is a post-processing parameter that VEP reuses.
+        Section("Per-gene MAP directory: set under Disambiguation, post-processing (required by VEP)"),
         Section("Ensembl VEP (independent of the databases above)"),
         FieldSpec(
             name="vep_ensembl",

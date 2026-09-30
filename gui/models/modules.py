@@ -104,6 +104,8 @@ class DisambiguationConfig(ModuleConfigBase):
     # Filter-mode (single run) thresholds.
     filter_minlen: str = "3"  # --filter_minlen
     filter_maxcaas: str = "0.7"  # --filter_maxcaas
+    # Trimmer MAP tables (--caas_map_dir): cluster trains in untrimmed columns, observed and null; VEP reads it too.
+    caas_map_dir: str = ""  # --caas_map_dir
     # Exploratory-mode (parameter sweep) threshold lists.
     minlen_values: str = "2,3,4,10"  # --minlen_values
     maxcaas_values: str = "0.6,0.7,0.8"  # --maxcaas_values
@@ -233,7 +235,7 @@ class FadeConfig(ModuleConfigBase):
 @dataclass(kw_only=True)
 class VepConfig(ModuleConfigBase):
     vep_primateai_db: str = ""  # --vep_primateai_db
-    vep_map_dir: str = ""  # --vep_map_dir
+    # The per-gene MAP directory is DisambiguationConfig.caas_map_dir (--caas_map_dir); VEP reads it from there.
     # VEP's own COSMIC database (conf/vep.config) — distinct from Scoring's
     # scoring_vep_cosmic *scores* fallback (see PrecomputedConfig), which is a
     # separate param workflows/vep.nf never reads.

@@ -135,6 +135,19 @@ SPEC = ModuleTabSpec(
                  "Filtering; ignored when Exploratory Sweep is selected instead.",
         ),
         FieldSpec(
+            name="caas_map_dir",
+            label="Per-gene MAP directory (optional)",
+            kind="path_dir",
+            help="Directory of the trimmer's per-gene MAP tables. When set, cluster "
+                 "trains measure their span in untrimmed alignment columns (columns the "
+                 "trimmer removed cannot hold a CAAS), in the observed filter and in the "
+                 "permulation null alike; a gene without a MAP file keeps trimmed "
+                 "coordinates. VEP maps positions with the same tables and requires it. "
+                 "Cannot be generated in-house: see "
+                 "github.com/nozerorma/ortholog_characterizator.",
+            importance="optional",
+        ),
+        FieldSpec(
             name="gene_filter_mode",
             label="Gene filter mode",
             kind="choice",

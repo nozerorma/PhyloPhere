@@ -187,6 +187,7 @@ Usage:
 --maxcaas_values                        <"0.6,0.7,0.8">                     (exploratory mode)
 --filter_minlen                          <INTEGER>                            3     (filter mode)
 --filter_maxcaas                          <FLOAT 0-1>                          0.7   (filter mode)
+--caas_map_dir                              <"map_dir">                          ""    (trimmer MAP tables: trains in untrimmed columns, observed and null; required by --vep)
 --remove_caas_clusters                      <BOOLEAN>                            true  (discard spatial clusters)
 --gene_filter_mode                          <"none|extreme|dubious|both">        "dubious"
 --extreme_threshold                           <FLOAT 0-1>                          0.99
@@ -221,13 +222,13 @@ Annotates filtered CAAS positions with PrimateAI-3D pathogenicity scores,
 COSMIC somatic-mutation evidence, and/or Ensembl VEP consequence prediction
 (each source skipped independently if its param is empty/unset).
 
---vep_map_dir has no in-house generation path: it maps each alignment codon
+VEP reads the per-gene MAP directory from --caas_map_dir (post-processing parameter).
+It has no in-house generation path: it maps each alignment codon
 column to its real hg38 genomic/protein coordinate, which needs the full
 alignment-to-protein pipeline, not just the alignment plus a public DB.
 Generate it with: https://github.com/nozerorma/ortholog_characterizator
 
 Usage:
---vep_map_dir                    <"map_dir">              null  (required when --vep is set; see github.com/nozerorma/ortholog_characterizator)
 --vep_primateai_db                 <"primateai_db">          null
 --cosmic_db                          <"cosmic_db">              null
 --vep_ensembl                         <BOOLEAN>                 false (runs the official Ensembl VEP CLI, independent of the two DBs above)

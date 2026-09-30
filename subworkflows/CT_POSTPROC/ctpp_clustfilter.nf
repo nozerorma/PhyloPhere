@@ -4,6 +4,22 @@
 #  CT Post-Processing: Cluster filtering (parameter sweep or single filter)
 */
 
+// (minlen, maxcaas) pairs of the exploratory sweep: minlen_values x maxcaas_values, plus the selected pair
+// (filter_minlen, filter_maxcaas) when the grid does not contain it, so the gene filter always has its cluster file.
+def clusterParameterGrid(minlens, maxcaases, selected_minlen, selected_maxcaas) {
+    def combos = []
+    minlens.each { l -> maxcaases.each { c -> combos << [l, c] } }
+    if (!combos.any { it[0] == selected_minlen && it[1] == selected_maxcaas }) {
+        combos << [selected_minlen, selected_maxcaas]
+    }
+    return combos
+}
+
+// Suffix of the cluster file that filter_caas_clusters-param.py writes for a (minlen, maxcaas) pair.
+def clusterFileSuffix(minlen, maxcaas) {
+    return ".filtered.minlen${minlen}.maxcaas${(maxcaas * 100).toInteger()}.tsv"
+}
+
 // .../selection/fade/<direction>/json -> .../selection/species_sets, or null when it does not resolve
 def resolveSourceSpDir(json_dir) {
     if (!json_dir) return null
@@ -84,6 +100,7 @@ process CT_FILTER {
         -i ${discovery_file} \
         -l ${minlen} \
         -c ${maxcaas} \
+        ${params.caas_map_dir ? "--map-dir '${params.caas_map_dir}'" : ''} \
         --verbose
     """
 }

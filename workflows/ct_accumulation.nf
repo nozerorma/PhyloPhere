@@ -6,7 +6,7 @@
 #  permutation-based randomization.
 #
 #  Inputs (dual-mode: integrated pipeline OR standalone params):
-#    - meta_caas_channel   : global_meta_caas.tsv from CT_META_CAAS
+#    - caas_channel        : filtered_discovery.tsv from CT_POSTPROC (gene_filtering)
 #    - background_channel  : cleaned_background_main.txt from CT_POSTPROC
 #    - trait_file_channel  : traitfile emitted by CT (pruned when contrast_selection is on)
 #

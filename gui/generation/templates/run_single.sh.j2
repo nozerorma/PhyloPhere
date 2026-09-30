@@ -470,7 +470,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "miss_pair": {{ run_defaults.miss_pair }},
   "caap_mode": {{ run_defaults.caap_mode }},
   "resample_use_n": {{ run_defaults.resample_use_n }},
-  "perm_strategy": "${PERM_STRATEGY:-BM}",
+  "perm_strategy": "${PERM_STRATEGY:-auto}",
   "max_tries": "${MAX_TRIES:-1000000}",
   "chunk_size": "${CHUNK_SIZE:-500}",
   "multi_hypothesis": {{ run_defaults.multi_hypothesis }},
@@ -585,7 +585,7 @@ cat > "$PARAMS_JSON" <<PARAMS_EOF
   "caas_pos_detail_file": "${CAAS_POS_DETAIL_FILE:-}",
 
   "vep": $_RUN_VEP,
-  "vep_map_dir": "${MAP_DIR:-}",
+  "caas_map_dir": "${MAP_DIR:-}",
   "vep_primateai_db": "${VEP_PRIMATEAI_DB:-}",
   "cosmic_db": "${COSMIC_DB:-}",
   "vep_caas_input": "${VEP_CAAS_INPUT:-}",

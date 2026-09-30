@@ -417,7 +417,7 @@ workflow ENRICHMENT {
                 pos_egg_members_ch = EGGNOG_RESOLUTION.out.egg_members_file
                 pos_egg_annotations_ch = EGGNOG_RESOLUTION.out.egg_annotations_file
             }
-            def pos_map_dir_ch = params.vep_map_dir ? Channel.fromPath(params.vep_map_dir).ifEmpty { file('NO_FILE_MAP_DIR') } : file('NO_FILE_MAP_DIR')
+            def pos_map_dir_ch = params.caas_map_dir ? Channel.fromPath(params.caas_map_dir).ifEmpty { file('NO_FILE_MAP_DIR') } : file('NO_FILE_MAP_DIR')
             def pos_cosmic_db_ch = params.cosmic_db ? Channel.fromPath(params.cosmic_db).ifEmpty { file('NO_FILE_COSMIC_DB') } : file('NO_FILE_COSMIC_DB')
             def pos_pai3d_db_ch = params.vep_primateai_db ? Channel.fromPath(params.vep_primateai_db).ifEmpty { file('NO_FILE_PAI3D_DB') } : file('NO_FILE_PAI3D_DB')
             def pos_cleaned_background_ch = cleaned_background_ch ? cleaned_background_ch : file('NO_FILE_BACKGROUND')
