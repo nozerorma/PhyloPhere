@@ -90,6 +90,7 @@ Usage:
 --miss_pair                 <true|false>                 true
 --caap_mode                 <true|false>                 true
 --ct_discovery_batch_size   <INTEGER>                    25    (genes per task)
+--ct_core_batch_size        <INTEGER>                    20    (permulation null: genes per replay + ASR replay task; 1 = one task per gene)
 --publish_intermediates     <true|false>                 false
 
 NOTE: fractions are resolved to floor(n_pairs * fraction) at runtime.

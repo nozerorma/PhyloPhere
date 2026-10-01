@@ -129,7 +129,7 @@ def test_batch_wrapper_omits_the_partition_line_when_empty_and_keeps_the_next_di
 
 # ── processes sized from a full-genome run (11.8k genes, 12 hypotheses x 1000 cycles) ──
 #
-# RESAMPLE peaked at 3.0-3.5 GB, PERM_REPLAY_BATCHED had six of 804 batches taking 42-179 min
+# RESAMPLE peaked at 3.0-3.5 GB, the perm-replay step of CAAS_CORE_BATCHED had six of 804 batches taking 42-179 min
 # at 8 cpus (the four longest averaged 5.5 busy cores; 8.9-14.6 GB peak depending on whether Slurm
 # or Nextflow's trace measures it), and SCORING_COMPUTE peaked at 22.5-23.5 GB. A request below
 # these makes an attempt fail or the slowest batch time out.
@@ -141,10 +141,10 @@ process RESAMPLE { label 'process_resample'
   echo "RESAMPLE ${task.attempt} ${task.cpus} ${task.memory.toGiga()} ${task.time.toMinutes()}" >> ${params.out}
   if [ ${task.attempt} -lt 2 ]; then exit 137; fi
   \"\"\" }
-process PERM_REPLAY_BATCHED { label 'process_perm_replay_batched'
+process CAAS_CORE_BATCHED { label 'process_resample'
   script:
   \"\"\"
-  echo "PERM_REPLAY_BATCHED ${task.attempt} ${task.cpus} ${task.memory.toGiga()} ${task.time.toMinutes()}" >> ${params.out}
+  echo "CAAS_CORE_BATCHED ${task.attempt} ${task.cpus} ${task.memory.toGiga()} ${task.time.toMinutes()}" >> ${params.out}
   if [ ${task.attempt} -lt 2 ]; then exit 137; fi
   \"\"\" }
 process SCORING_COMPUTE { label 'error_retry'
@@ -153,7 +153,7 @@ process SCORING_COMPUTE { label 'error_retry'
   echo "SCORING_COMPUTE ${task.attempt} ${task.cpus} ${task.memory.toGiga()} ${task.time.toMinutes()}" >> ${params.out}
   if [ ${task.attempt} -lt 2 ]; then exit 137; fi
   \"\"\" }
-workflow { RESAMPLE(); PERM_REPLAY_BATCHED(); SCORING_COMPUTE() }
+workflow { RESAMPLE(); CAAS_CORE_BATCHED(); SCORING_COMPUTE() }
 """
 
 
@@ -181,12 +181,12 @@ def test_resample_keeps_its_large_request_and_retries_with_more(sized):
     assert second["mem"] == 2 * first["mem"] and second["minutes"] == 2 * first["minutes"]
 
 
-def test_perm_replay_batches_have_the_cpus_and_time_the_slowest_batch_needs(sized):
-    first = sized[("PERM_REPLAY_BATCHED", 1)]
+def test_core_batches_have_the_cpus_and_time_the_slowest_batch_needs(sized):
+    first = sized[("CAAS_CORE_BATCHED", 1)]
     assert first["cpus"] >= 4              # 4 shortens the toy stage; the slowest full-scale batches averaged 5.5 of 8 cores
     assert first["minutes"] >= 12 * 60     # 179 min at 8 cpus, and more at 4
     assert first["mem"] >= 16              # up to 14.6 GB by the trace, 8.9 GB by Slurm
-    assert sized[("PERM_REPLAY_BATCHED", 2)]["mem"] > first["mem"]
+    assert sized[("CAAS_CORE_BATCHED", 2)]["mem"] > first["mem"]
 
 
 def test_scoring_compute_starts_above_its_measured_peak_and_still_escalates(sized):

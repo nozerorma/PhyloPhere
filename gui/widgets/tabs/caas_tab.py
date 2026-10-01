@@ -112,13 +112,8 @@ SPEC = ModuleTabSpec(
         Section("Batching logic (performance)"),
         FieldSpec(name="ct_discovery_batch_size", label="Discovery genes per task", importance="optional"),
         FieldSpec(
-            name="ct_perm_replay_batch_size",
-            label="Permulation-null replay genes per batch",
-            importance="optional",
-        ),
-        FieldSpec(
-            name="ct_disambig_perms_batch_size",
-            label="Permulation-null disambiguation genes per batch",
+            name="ct_core_batch_size",
+            label="Permulation-null genes per task (replay + ASR replay)",
             importance="optional",
         ),
         Section("Publishing norms (debug)"),

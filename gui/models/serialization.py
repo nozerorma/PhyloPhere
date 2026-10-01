@@ -17,11 +17,17 @@ so a future schema change doesn't require a breaking rewrite of project_io.py.
 
 # ── Standard library ──────────────────────────────────────────────────────────
 import dataclasses
+import logging
 import typing
 from typing import Any
 
 # ── Local ─────────────────────────────────────────────────────────────────────
 from gui.models.project import SCHEMA_VERSION, ProjectConfig
+
+logger = logging.getLogger(__name__)
+
+# Batch-size parameters of the permulation null that ct_core_batch_size replaced; their values are not carried over.
+_RETIRED_CAAS_FIELDS = ("ct_perm_replay_batch_size", "ct_disambig_perms_batch_size")
 
 
 def to_dict(project: ProjectConfig) -> dict[str, Any]:
@@ -68,6 +74,12 @@ def migrate(data: dict[str, Any]) -> dict[str, Any]:
         disambiguation = modules.get("disambiguation")
         if old and isinstance(disambiguation, dict) and not disambiguation.get("caas_map_dir"):
             disambiguation["caas_map_dir"] = old
+        caas = modules.get("caas")
+        if isinstance(caas, dict):
+            dropped = [k for k in _RETIRED_CAAS_FIELDS if caas.pop(k, None) is not None]
+            if dropped:
+                logger.warning("project parameters %s were replaced by ct_core_batch_size; the project uses its value (%s)",
+                               ", ".join(dropped), caas.get("ct_core_batch_size", "default"))
     return data
 
 

@@ -11,7 +11,6 @@ ct_bin=""
 progress_log="0"
 export_groups="0"
 export_perm_discovery="0"
-fop_mode="0"
 extra_args_file=""
 stall_timeout="1800"
 
@@ -55,10 +54,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --export-perm-discovery)
             export_perm_discovery="$2"
-            shift 2
-            ;;
-        --fop)
-            fop_mode="$2"
             shift 2
             ;;
         --extra-args-file)
@@ -127,7 +122,7 @@ watchdog_guard() {
         if [[ "$cpu" == "$last_cpu" ]]; then
             same=$((same + 1))
             if [[ "$same" -ge "$max_same" ]]; then
-                echo "[PERM_REPLAY_BATCHED] Worker pid $pid stalled at 0% CPU for ${stall_timeout}s; killing" >&2
+                echo "[perm-replay batch] Worker pid $pid stalled at 0% CPU for ${stall_timeout}s; killing" >&2
                 kill -TERM "$pid" 2>/dev/null || true
                 sleep 5
                 kill -KILL "$pid" 2>/dev/null || true
@@ -149,7 +144,7 @@ wait_for_slot() {
         local status=0
         wait -n || status=$?
         if [[ "$status" -ne 0 ]]; then
-            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
+            echo "[perm-replay batch] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
             terminate_children
             exit "$status"
         fi
@@ -161,7 +156,7 @@ wait_for_all() {
         local status=0
         wait -n || status=$?
         if [[ "$status" -ne 0 ]]; then
-            echo "[PERM_REPLAY_BATCHED] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
+            echo "[perm-replay batch] A child perm-replay job failed (exit $status); stopping batch $batch_id" >&2
             terminate_children
             exit "$status"
         fi
@@ -169,14 +164,15 @@ wait_for_all() {
 }
 
 idx=0
-while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
+while IFS=$'\t' read -r alignment_id alignment_name _; do
     [[ -z "${alignment_id:-}" ]] && continue
     idx=$((idx + 1))
     wait_for_slot
-    echo "[PERM_REPLAY_BATCHED] Launching $alignment_id ($idx/$gene_count)"
+    echo "[perm-replay batch] Launching $alignment_id ($idx/$gene_count)"
 
     alignment_path="alignments/$alignment_name"
 
+    # -o: the counts file that `ct perm-replay` still requires; nothing reads it.
     declare -a cmd=(
         "${base_cmd[@]}"
         -a "$alignment_path"
@@ -186,9 +182,6 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
         --fmt "$ali_format"
     )
 
-    if [[ "$discovery_name" != "NO_FILE" ]]; then
-        cmd+=(--discovery "discovery/$discovery_name")
-    fi
     if [[ "$progress_log" == "1" ]]; then
         cmd+=(--progress_log "${alignment_id}.progress.log")
     fi
@@ -197,9 +190,6 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
     fi
     if [[ "$export_perm_discovery" == "1" ]]; then
         cmd+=(--export_perm_discovery "${alignment_id}.perm_replay.discovery.output")
-    fi
-    if [[ "$fop_mode" == "1" ]]; then
-        cmd+=(--fop)
     fi
 
     (
@@ -211,7 +201,7 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
         worker_status=0
         wait "$worker_pid" || worker_status=$?
         kill "$watchdog_pid" 2>/dev/null || true
-        echo "[PERM_REPLAY_BATCHED] Completed $alignment_id"
+        echo "[perm-replay batch] Completed $alignment_id"
         exit "$worker_status"
     ) </dev/null &
 done <"$manifest"

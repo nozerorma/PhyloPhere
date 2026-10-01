@@ -75,8 +75,7 @@
       "min_contrasts": "3",
       "publish_intermediates": false,
       "ct_discovery_batch_size": "25",
-      "ct_perm_replay_batch_size": "10",
-      "ct_disambig_perms_batch_size": "1",
+      "ct_core_batch_size": "20",
       "min_divergent_fraction": "0.5",
       "max_bg_gaps_fraction": "0.0",
       "max_fg_gaps_fraction": "0.0",
@@ -370,12 +369,6 @@
         "memory": "4.GB"
       },
       {
-        "selector_type": "withLabel",
-        "selector": "process_perm_replay",
-        "cpus": "1",
-        "memory": "12.GB"
-      },
-      {
         "selector_type": "withName",
         "selector": "DISCOVERY_BATCHED",
         "cpus": "4",
@@ -386,12 +379,6 @@
         "selector": "process_discovery_batched",
         "cpus": "4",
         "memory": "2.GB * task.attempt"
-      },
-      {
-        "selector_type": "withLabel",
-        "selector": "process_perm_replay_batched",
-        "cpus": "6",
-        "memory": "12.GB * task.attempt"
       },
       {
         "selector_type": "withName",
@@ -488,36 +475,6 @@
         "selector": "CT_DISAMBIGUATION_PLOTS",
         "cpus": "4",
         "memory": "8.GB * task.attempt"
-      },
-      {
-        "selector_type": "withName",
-        "selector": "CAAS_PERMS_DISAMBIGUATE",
-        "cpus": "6",
-        "memory": "12.GB * task.attempt"
-      },
-      {
-        "selector_type": "withName",
-        "selector": "CAAS_PERMS_DISAMBIGUATE_BATCHED",
-        "cpus": "4",
-        "memory": "20.GB * task.attempt"
-      },
-      {
-        "selector_type": "withName",
-        "selector": "CAAS_PERMS_MERGE_DETAIL",
-        "cpus": "2",
-        "memory": "4.GB * task.attempt"
-      },
-      {
-        "selector_type": "withName",
-        "selector": "CAAS_PERMS_AGGREGATE",
-        "cpus": "1",
-        "memory": "12.GB * task.attempt"
-      },
-      {
-        "selector_type": "withName",
-        "selector": "CAAS_PERMS_REBUILD",
-        "cpus": "2",
-        "memory": "18.GB * task.attempt"
       },
       {
         "selector_type": "withName",
