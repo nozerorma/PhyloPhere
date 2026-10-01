@@ -8,7 +8,7 @@ the same formula as the observed side (scoring_compute.R), or the FCS p.perm in
 fcs_enrich.R compares two different quantities and silently goes wrong. So any
 change to the scoring formula obliges a rebuild of caas_perms.rds.
 
-Rebuilding it from scratch means re-running CAAS_PERMS_DISAMBIGUATE, whose cost
+Rebuilding it from scratch means re-running the ASR replay (CAAS_CORE_BATCHED), whose cost
 is the ASR replay across every gene x labeling -- hours. But perm_pos_detail/
 (one gz shard per gene; a legacy run may instead have a single concatenated
 perm_pos_detail.tsv.gz) already holds every (Gene, cycle, Position, caap_group,
@@ -71,7 +71,7 @@ def main() -> int:
     ap.add_argument("--detail", required=True, type=Path,
                     help="perm_pos_detail/ shard directory (current layout) or a legacy "
                          "concatenated perm_pos_detail.tsv.gz, from a previous "
-                         "CAAS_PERMS_DISAMBIGUATE run")
+                         "CAAS_CORE_BATCHED run")
     ap.add_argument("--output-dir", required=True, type=Path,
                     help="directory to write gene_cycle_scores.tsv (and the sample/quantile files)")
     ap.add_argument("--seed", type=int, default=1998,

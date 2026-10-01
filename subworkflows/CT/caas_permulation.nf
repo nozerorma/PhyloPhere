@@ -262,7 +262,11 @@ workflow CAAS_CORE {
                 def id = String.format('caas_core_reuse_batch_%05d', ++reuseCounter)
                 tuple(id, batch.size(), '', file('NO_ALIGNMENTS'), batch)
             }
-        // Single-item inputs become value channels so every batch pairs with them.
+        // The single-item inputs (resample subset, FOP pairs, gene lengths, trait file, tree) are queue channels
+        // once they have crossed a take:/emit: boundary, not Nextflow value channels. A process pairs its input
+        // channels positionally and stops when any one runs out, so paired against the many-item batch channel
+        // each of them would end CAAS_CORE_BATCHED after its first batch. .collect().map { items -> items[0] }
+        // makes each a value channel that every batch can read.
         def subset_bc = resample_subset.collect().map { items -> items[0] }
         def fop_bc    = fop_pairs.collect().map { items -> items[0] }
         def lengths_bc = gene_lengths.collect().map { items -> items[0] }

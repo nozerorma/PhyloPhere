@@ -440,7 +440,7 @@ workflow POSENRICH {
         // caas_file/cleaned_background/background_output/annot_file/
         // position_lists_file are take: params (single item, but plain queue
         // channels, not genuine Nextflow value channels -- see
-        // caas_permulation.nf's CAAS_PERMS_DISAMBIGUATE_BATCHED fix for the
+        // caas_permulation.nf's CAAS_CORE workflow for the
         // full mechanism); cosmic_coverage_ch/pai3d_coverage_ch are similarly
         // one-item channels rebuilt via .ifEmpty() above. Paired positionally
         // against the many-item posenrich_batches channel, any of these would

@@ -4,7 +4,7 @@
 Each Nextflow batch task (CT_DISAMBIGUATION_RUN_BATCHED) processes a disjoint
 gene subset of the same run, so every piece here is either a straight
 row-concat or a directory union -- no gene-level aggregation logic, because no
-output here is computed across genes (unlike CAAS_PERMS_DISAMBIGUATE's
+output here is computed across genes (unlike the permulation null's
 genome-wide gene_cycle_scores.tsv/perm_pos_sample.tsv/perm_pos_quantiles.tsv,
 which is why that stage needs CAAS_CORE_MERGE's pass B instead of a plain merge).
 

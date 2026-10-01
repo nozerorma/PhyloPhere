@@ -321,7 +321,7 @@ workflow FCS_COMPUTE {
     // stats_file/universe_file/perms_file are take: params -- each carries
     // exactly one item, but crossing this subworkflow's take: boundary loses
     // any value-channel inference Nextflow might have applied upstream (see
-    // caas_permulation.nf's CAAS_PERMS_DISAMBIGUATE_BATCHED fix for the full
+    // caas_permulation.nf's CAAS_CORE workflow for the full
     // mechanism). Paired positionally against the many-item batches channel,
     // any one of them would silently truncate FCS_COMPUTE_BATCHED to its
     // first batch once exhausted. .collect().map { it[0] } makes each reusable/
