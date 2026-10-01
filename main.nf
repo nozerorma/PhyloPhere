@@ -41,6 +41,7 @@ nextflow.enable.dsl = 2
 
 include {HELP} from './workflows/help.nf'
 include {CT} from './workflows/ct.nf'
+include {listAlignmentFiles; sampleAlignmentFiles} from './subworkflows/CT/ct_alignment_files.nf'
 include {RER_MAIN} from './workflows/rerconverge.nf'
 include {REPORTING} from './workflows/reporting.nf'
 include {CONTRAST_SELECTION} from './workflows/contrast_selection.nf'
@@ -449,13 +450,11 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                     if (resample_hit) resample_src = file(resample_hit)
 
                     if (resample_src && params.alignment) {
-                        def align_dir_f = file(params.alignment)
-                        def all_ali_files = align_dir_f.exists() ? (align_dir_f.listFiles()?.findAll { it.isFile() && !it.name.matches('.*\\.txt$|.*\\.tsv$|.*\\.csv$|.*\\.log$|.*\\.map$') } ?: []) : []
+                        def all_ali_files = listAlignmentFiles(params.alignment)
                         if (all_ali_files) {
                             if (params.toy_mode) {
                                 def n = (params.toy_n ?: 50) as int
-                                Collections.shuffle(all_ali_files, new Random((params.seed ?: 1998) as long))
-                                all_ali_files = all_ali_files.take(n)
+                                all_ali_files = sampleAlignmentFiles(all_ali_files, n, params.seed ?: 1998)
                             }
                             def align_tuple_standalone = Channel.fromList(all_ali_files.collect { f -> tuple(f.baseName, f) })
                             def caas_cfg_standalone = contrast_out ? contrast_out.trait_file_out : (params.caas_config ? file(params.caas_config) : (ct_results ? ct_results.trait_file : Channel.empty()))

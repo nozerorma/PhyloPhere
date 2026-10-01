@@ -31,6 +31,7 @@
 // Import local modules/subworkflows
 include { DISCOVERY; DISCOVERY_BATCHED } from '../subworkflows/CT/ct_discovery'
 include { RESAMPLE } from '../subworkflows/CT/ct_resample'
+include { listAlignmentFiles; sampleAlignmentFiles } from '../subworkflows/CT/ct_alignment_files'
 include { CONCAT_DISCOVERY; CONCAT_BACKGROUND; CONCAT_RESAMPLE } from '../subworkflows/CT/ct_concat'
 include { CAAS_PERMS_PREP } from '../subworkflows/CT/caas_permulation'
 
@@ -74,19 +75,12 @@ workflow CT {
 
         // Define the alignment channel (used by discovery and the permulation-excess null).
         // params.alignment is a directory of per-gene alignment files.
-        // When toy_mode=true, a random subset of toy_n alignments is used.
-        def alignParam = params.alignment as String
-        def allFiles = file(alignParam).listFiles()?.findAll { it.isFile() && !it.name.matches('.*\\.txt$|.*\\.tsv$|.*\\.csv$|.*\\.log$|.*\\.map$') } ?: []
+        // When toy_mode=true, a seeded random subset of toy_n alignments is used (the same one for the same
+        // --seed), which also keeps the batches of DISCOVERY_BATCHED, and so -resume cache hits, stable.
+        def allFiles = listAlignmentFiles(params.alignment)
         if (params.toy_mode) {
             def n = (params.toy_n ?: 50) as int
-            // Seeded (not a bare `Collections.shuffle(allFiles)`) so the same gene subset
-            // is picked every run with the same --seed. Without this, -resume is close to
-            // useless for toy_mode runs: DISCOVERY_BATCHED cache hits
-            // depend on which specific alignment files a batch contains, and an unseeded
-            // shuffle picks a genuinely different random subset on every invocation, so
-            // essentially nothing from a prior run's cache ever matches a resume attempt.
-            Collections.shuffle(allFiles, new Random(params.seed as long))
-            allFiles = allFiles.take(n)
+            allFiles = sampleAlignmentFiles(allFiles, n, params.seed ?: 1998)
             log.info "[toy_mode] CT: using ${allFiles.size()} randomly sampled alignments from directory (seed=${params.seed})"
         }
         align_tuple = Channel
