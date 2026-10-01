@@ -333,12 +333,7 @@ process CAAS_CORE_MERGE {
         DETAIL="\${entries[0]}"
     else
         # Hard links when the first shard can be linked from here, copies otherwise.
-        LINK=l
-        probe=\$(find -L batch_* -type f -name '*.tsv.gz' | head -n 1)
-        if [ -n "\$probe" ] && ! ln -L "\$probe" .link_probe 2>/dev/null; then LINK=""; fi
-        rm -f .link_probe
-        mkdir -p perm_pos_detail
-        for d in "\${entries[@]}"; do cp -a\${LINK}L "\$d"/. perm_pos_detail/; done
+        bash $baseDir/subworkflows/CT/local/scripts/union_shards.sh perm_pos_detail "\${entries[@]}"
         DETAIL=perm_pos_detail
     fi
 
