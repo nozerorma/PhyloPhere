@@ -1587,6 +1587,7 @@ def process_all_genes_perms(
     remove_clusters: bool = True,
     train_map_dir: Optional[str] = None,
     train_map_suffix: str = ".map.tsv",
+    detail_only: bool = False,
 ) -> Path:
     """Genome-wide CAAS permulation null: load ASR once per gene, replay N permuted
     labelings, and score them the same way the observed pipeline scores itself.
@@ -1616,6 +1617,9 @@ def process_all_genes_perms(
       - output_dir/perm_pos_detail.manifest.tsv   (Gene, n_rows per shard)
       - output_dir/perm_pos_quantiles.tsv    (per (cycle, scheme) distribution shape)
       - output_dir/perm_pos_sample.tsv       (cycle-stratified sample for violins)
+
+    With detail_only the run stops after pass A: only perm_pos_detail/ and its manifest are written, for
+    a caller that scores the union of several runs' shards in one later pass B.
     """
     import csv as _csv
 
@@ -1842,6 +1846,9 @@ def process_all_genes_perms(
             "Downstream caas_perms.rds / FCS p.perm will be degenerate. Check the "
             "per-cycle perm-replay discovery (export_perm_discovery) and the ASR cache."
         )
+
+    if detail_only:
+        return output_dir
 
     # ── Pass B: score each cycle against its own pool, aggregate ────────────────
 

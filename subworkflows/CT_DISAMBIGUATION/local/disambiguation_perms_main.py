@@ -87,6 +87,9 @@ def parse_arguments():
                    help="CAAS_FILTER_GENES mode (params.gene_filter_mode)")
     p.add_argument("--iqr-multiplier", type=float, default=3.0)
     p.add_argument("--extreme-percentile", type=float, default=0.99)
+    p.add_argument("--detail-only", action="store_true",
+                   help="Stop after pass A: write only perm_pos_detail/ (pass B scores against genome-wide pools, "
+                        "so it runs once over the union of the shards).")
     p.add_argument("--seed", type=int, default=1998,
                    help="Pipeline seed (params.seed): perm_pos_sample.tsv reservoir sampling")
     p.add_argument("--verbose", "-v", action="store_true")
@@ -199,6 +202,7 @@ def main():
             train_map_suffix=args.train_map_suffix,
             gene_sizes=gene_sizes,
             seed=args.seed,
+            detail_only=args.detail_only,
         )
 
     t0 = time.time()
