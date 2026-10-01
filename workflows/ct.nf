@@ -59,7 +59,7 @@ workflow CT {
         def trait_file_emit = Channel.empty()
         // CAAS permulation-excess null (full-pool perm-discovery export). Populated
         // only when --caas_permulation_enrichment is set and perm-replay+resample run.
-        def caas_perm_discovery_out = Channel.empty()
+        def caas_align_tuple_out = Channel.empty()
         def caas_resample_subset_out = Channel.empty()
         def caas_fop_pairs_out = Channel.value(file('NO_FOP_PAIRS'))
         def tree_file_emit = Channel.empty()
@@ -224,13 +224,12 @@ workflow CT {
             // NOTE: resample_dir_out retains the raw directory so perm-replay receives
             // the partitioned resample_NNN.tab files, not the merged flat file.
         }
-        // CAAS permulation-excess null: a full-pool pass over N permuted labelings,
-        // replayed through analyze_gene_disambiguation downstream. Only needs
-        // align_tuple/trait_file_out/resample_dir_out, all already in scope from
-        // discovery/resample above, not gated on params.ct_tool.
+        // CAAS permulation-excess null: the first N permuted labelings are subset here; CAAS_PERMULATION
+        // (main.nf) replays them over the alignments in align_tuple. Needs trait_file_out and
+        // resample_dir_out, in scope from discovery/resample above, not gated on params.ct_tool.
         if (params.caas_permulation_enrichment) {
-            def perms_prep = CAAS_PERMS_PREP(align_tuple, trait_file_out, resample_dir_out)
-            caas_perm_discovery_out  = perms_prep.perm_discovery
+            def perms_prep = CAAS_PERMS_PREP(trait_file_out, resample_dir_out)
+            caas_align_tuple_out     = align_tuple
             caas_resample_subset_out = perms_prep.resample_subset
             caas_fop_pairs_out       = perms_prep.fop_pairs
         }
@@ -243,9 +242,9 @@ workflow CT {
         background_genes = background_genes_out
         trait_file = trait_file_emit
         tree_file = tree_file_emit
-        // CAAS permulation-excess: full-pool perm-discovery + the N-cycle resample
+        // CAAS permulation-excess: the alignments to replay + the N-cycle resample
         // subset, consumed downstream by CAAS_PERMULATION (main.nf) → caas_perms.rds.
-        caas_perm_discovery = caas_perm_discovery_out
+        caas_align_tuple = caas_align_tuple_out
         caas_resample_subset = caas_resample_subset_out
         caas_fop_pairs = caas_fop_pairs_out
 }

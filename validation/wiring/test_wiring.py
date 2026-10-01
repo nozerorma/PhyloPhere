@@ -59,8 +59,8 @@ def _preview(tmp_path, **overrides):
               "tree": str(tmp_path / "tree.nwk"), "my_traits": str(tmp_path / "values.tab"),
               "caas_config": str(tmp_path / "traits"), "gene_ensembl_file": str(tmp_path / "genes.tsv"),
               "ct_tool": "discovery,resample", "ct_disambiguation": True, "ct_postproc": True,
-              "caas_permulation_enrichment": True, "ct_discovery_batch_size": "25", "ct_perm_replay_batch_size": "10",
-              "ct_disambig_perms_batch_size": "20", "ct_disambig_batch_size": "20", "caas_full_perms": "10",
+              "caas_permulation_enrichment": True, "ct_discovery_batch_size": "25", "ct_core_batch_size": "20",
+              "ct_disambig_batch_size": "20", "caas_full_perms": "10",
               "seed": "1998"}
     params.update(overrides)
     (tmp_path / "params.json").write_text(json.dumps(params))
@@ -95,15 +95,58 @@ def test_the_null_universe_is_the_cleaned_background_when_the_null_is_batched(tm
 
 @needs_nextflow
 def test_the_null_universe_is_the_cleaned_background_when_the_null_is_not_batched(tmp_path):
-    edges = _preview(tmp_path, ct_discovery_batch_size="1", ct_perm_replay_batch_size="1",
-                     ct_disambig_perms_batch_size="1", ct_disambig_batch_size="1")
-    assert ("CAAS_BACKGROUND_CLEANUP", "CAAS_PERMS_AGGREGATE") in edges
+    edges = _preview(tmp_path, ct_discovery_batch_size="1", ct_core_batch_size="1", ct_disambig_batch_size="1")
+    assert ("CAAS_BACKGROUND_CLEANUP", "CAAS_PERMS_REBUILD") in edges
 
 
-def test_both_null_aggregators_treat_any_no_prefixed_universe_as_absent():
+_NULL_ONLY = dict(ct_tool="", enrichment=True, caas_permulation_enrichment=True, ct_disambiguation=False, ct_postproc=False)
+_OLD_NULL_PROCESSES = ("PERM_REPLAY", "PERM_REPLAY_BATCHED", "CAAS_PERMS_DISAMBIGUATE", "CAAS_PERMS_DISAMBIGUATE_BATCHED",
+                       "CAAS_PERMS_AGGREGATE")
+
+
+@needs_nextflow
+def test_the_live_null_replays_and_disambiguates_in_one_process_family(tmp_path):
+    edges = _preview(tmp_path)
+    nodes = {n for e in edges for n in e}
+    assert not nodes & set(_OLD_NULL_PROCESSES)
+    assert {("SUBSET_RESAMPLE_PERMS", "CAAS_CORE_BATCHED"), ("Channel.fromList", "CAAS_CORE_BATCHED"),
+            ("CAAS_CORE_BATCHED", "CAAS_PERMS_MERGE_DETAIL"), ("CAAS_PERMS_MERGE_DETAIL", "CAAS_PERMS_REBUILD")} <= edges
+
+
+@needs_nextflow
+def test_perm_discovery_exports_that_already_exist_go_to_the_same_process(tmp_path):
+    pub = tmp_path / "out/caas_permulation"
+    (pub / "perm_disc").mkdir(parents=True)
+    (pub / "resample_perms.tab").write_text("b_1\ta\tb\n")
+    (pub / "perm_disc/G.perm_replay.discovery.output").write_text("x\n")
+    edges = _preview(tmp_path, **_NULL_ONLY)
+    assert ("Channel.fromPath", "CAAS_CORE_BATCHED") in edges and ("Channel.fromList", "CAAS_CORE_BATCHED") not in edges
+    assert not {n for e in edges for n in e} & ({"SUBSET_RESAMPLE_PERMS"} | set(_OLD_NULL_PROCESSES))
+
+
+@needs_nextflow
+def test_the_standalone_null_subsets_the_resample_and_replays_the_alignments(tmp_path):
+    (tmp_path / "out/caastools").mkdir(parents=True)
+    (tmp_path / "out/caastools/resample.tab").write_text("b_1\ta\tb\n")
+    edges = _preview(tmp_path, **_NULL_ONLY)
+    assert {("caas_config", "SUBSET_RESAMPLE_PERMS"), ("SUBSET_RESAMPLE_PERMS", "CAAS_CORE_BATCHED"),
+            ("Channel.fromList", "CAAS_CORE_BATCHED"), ("caas_config", "CAAS_CORE_BATCHED")} <= edges
+
+
+def test_main_sends_each_source_of_the_null_to_its_own_input_of_caas_permulation():
+    """Source-level check: the DAG collapses which input of CAAS_CORE_BATCHED a channel feeds."""
+    text = (ROOT / "main.nf").read_text()
+    for line in ("perm_align_ch = ct_results.caas_align_tuple", "perm_reuse_ch = Channel.fromPath(precomp_disc_files).collect()",
+                 "perm_align_ch = align_tuple_standalone"):
+        assert line in text, line
+    call = text[text.index("caas_perm_out = CAAS_PERMULATION("):].split(")")[0]
+    assert [a.strip() for a in call.split("(")[1].split(",")][:3] == ["perm_align_ch", "perm_reuse_ch", "perm_cfg_ch"]
+
+
+def test_the_null_rebuild_treats_any_no_prefixed_universe_as_absent():
     text = (ROOT / "subworkflows/CT/caas_permulation.nf").read_text()
     assert "universe.name != 'NO_FILE'" not in text
-    assert len(re.findall(r"universe\.name\.startsWith\('NO_'\)", text)) == 2
+    assert len(re.findall(r"universe\.name\.startsWith\('NO_'\)", text)) == 1
 
 
 # ── defaults and the MAP parameter ───────────────────────────────────────────

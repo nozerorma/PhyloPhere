@@ -125,6 +125,9 @@ def test_the_shards_do_not_depend_on_the_batch_size_and_equal_a_direct_run(tmp_p
     for d in dirs_one + dirs_two:  # pass B scores genome-wide pools; a batch only writes its shards
         assert (d.parent / "caas_perms_out/perm_pos_detail").is_dir()
         assert not (d.parent / "caas_perms_out/gene_cycle_scores.tsv").exists()
+    batches = sorted([l for l in (d.parent / ".command.sh").read_text().split("<<'EOF'\n")[1].split("EOF")[0].splitlines()]
+                     for d in dirs_two)
+    assert batches == [["NOHIT\tNOHIT.fa", "PEPC\tPEPC.fa"], ["PEPD\tPEPD.fa"]]  # two-column manifests, gene-name order
     one, two = _shards(dirs_one), _shards(dirs_two)
     ref = _direct(tmp_path / "ref", inp, genes)
     assert set(ref) == {"PEPC.tsv.gz", "PEPD.tsv.gz"} and len(ref["PEPC.tsv.gz"]) > 1000  # NOHIT contributes nothing

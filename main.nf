@@ -351,7 +351,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
         if (run_caas_permulation) {
 
 
-            def perm_disc_ch = null
+            def perm_align_ch = Channel.empty()   // alignments to replay
+            def perm_reuse_ch = Channel.empty()   // perm-discovery exports that already exist
+            def perm_cfg_ch = Channel.value(file('NO_CONFIG'))
             def perm_subset_ch = null
             def perm_fop_pairs_ch = Channel.value(file('NO_FOP_PAIRS'))
             // Must stay a channel: CAAS_PERMULATION does tree_file.combine(asr_ready)
@@ -360,9 +362,10 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
             // the .combine() call throws MissingMethodException on sun.nio.fs.UnixPath.
             def perm_tree_ch = ct_results ? ct_results.tree_file : (contrast_out ? contrast_out.tree_file_out : (params.tree ? Channel.value(file(params.tree)) : Channel.empty()))
 
-            if (ct_results && ct_results.caas_perm_discovery && ct_results.caas_resample_subset) {
-                perm_disc_ch = ct_results.caas_perm_discovery
+            if (ct_results && ct_results.caas_align_tuple && ct_results.caas_resample_subset) {
+                perm_align_ch = ct_results.caas_align_tuple
                 perm_subset_ch = ct_results.caas_resample_subset
+                perm_cfg_ch = ct_results.trait_file
                 if (ct_results.caas_fop_pairs) perm_fop_pairs_ch = ct_results.caas_fop_pairs
             } else {
                 // 1. Check if precomputed permulation discovery outputs already exist from exploratory pass:
@@ -422,7 +425,7 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
 
                 if (precomp_disc_files && precomp_subset_file) {
                     log.info "[CAAS_PERMULATION] Reusing precomputed permulation discovery (${precomp_disc_files.size()} file(s)) + resample file (${precomp_subset_file.name}) for ASR re-disambiguation"
-                    perm_disc_ch = Channel.fromPath(precomp_disc_files).collect()
+                    perm_reuse_ch = Channel.fromPath(precomp_disc_files).collect()
                     perm_subset_ch = Channel.value(precomp_subset_file)
                 } else {
                     // 2. Precomputed CAAStools run without precomputed perm_disc: check if resample source is available for CAAS_PERMS_PREP
@@ -457,8 +460,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                             def align_tuple_standalone = Channel.fromList(all_ali_files.collect { f -> tuple(f.baseName, f) })
                             def caas_cfg_standalone = contrast_out ? contrast_out.trait_file_out : (params.caas_config ? file(params.caas_config) : (ct_results ? ct_results.trait_file : Channel.empty()))
 
-                            def perms_prep = CAAS_PERMS_PREP(align_tuple_standalone, caas_cfg_standalone, resample_src)
-                            perm_disc_ch = perms_prep.perm_discovery
+                            def perms_prep = CAAS_PERMS_PREP(caas_cfg_standalone, resample_src)
+                            perm_align_ch = align_tuple_standalone
+                            perm_cfg_ch = (caas_cfg_standalone instanceof java.nio.file.Path) ? Channel.value(caas_cfg_standalone) : caas_cfg_standalone
                             perm_subset_ch = perms_prep.resample_subset
                             perm_fop_pairs_ch = perms_prep.fop_pairs
                         }
@@ -466,11 +470,11 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 }
             }
 
-            if (perm_disc_ch && perm_subset_ch) {
+            if (perm_subset_ch) {
                 def caas_universe_ch = (pp_cleaned_bg ?: Channel.empty()).ifEmpty { file('NO_FILE') }
                 // In asr_mode=compute the live CT_DISAMBIGUATION_RUN writes the
-                // shared ASR cache that CAAS_PERMS_DISAMBIGUATE reads — gate the
-                // replay on it completing (its master_csv is written only after
+                // shared ASR cache that CAAS_CORE_BATCHED reads — gate the
+                // batches on it completing (its master_csv is written only after
                 // every gene's ASR is cached). No gate when ASR is precomputed
                 // (cache already on disk) or disambiguation didn't run live.
                 def asr_gate_ch = (params.ct_disambiguation
@@ -481,7 +485,9 @@ generated_at=${new Date().format("yyyy-MM-dd'T'HH:mm:ssXXX")}
                 def caas_gene_lengths_ch = Channel.value(
                     params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE'))
                 caas_perm_out = CAAS_PERMULATION(
-                    perm_disc_ch,
+                    perm_align_ch,
+                    perm_reuse_ch,
+                    perm_cfg_ch,
                     perm_subset_ch,
                     perm_tree_ch,
                     caas_universe_ch,
