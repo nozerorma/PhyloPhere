@@ -1667,7 +1667,7 @@ def process_all_genes_perms(
     # One gz shard per gene rather than one monolithic file: Pass A already
     # iterates gene-by-gene (imap_unordered yields one gene's complete row list
     # at a time), so this is a writer-only change. Keeps every downstream
-    # re-aggregation (CAAS_PERMS_REBUILD, this same finalizer) at one-gene peak
+    # re-aggregation (CAAS_CORE_MERGE, this same finalizer) at one-gene peak
     # RAM instead of streaming a single multi-GB file, and lets consumers read
     # shard-by-shard. `iter_detail_rows()` is the matching reader.
     detail_dir = output_dir / "perm_pos_detail"

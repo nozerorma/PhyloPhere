@@ -6,7 +6,7 @@ gene subset of the same run, so every piece here is either a straight
 row-concat or a directory union -- no gene-level aggregation logic, because no
 output here is computed across genes (unlike CAAS_PERMS_DISAMBIGUATE's
 genome-wide gene_cycle_scores.tsv/perm_pos_sample.tsv/perm_pos_quantiles.tsv,
-which is why that stage needs CAAS_PERMS_REBUILD instead of a plain merge).
+which is why that stage needs CAAS_CORE_MERGE's pass B instead of a plain merge).
 
 caas_convergence_master.csv/no_change_debug.csv column schemas are identical
 across batches by construction: max_pairs is computed once from the shared,

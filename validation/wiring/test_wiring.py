@@ -90,18 +90,18 @@ def _mini(tmp_path, script, *params):
 @needs_nextflow
 def test_the_null_universe_is_the_cleaned_background_when_the_null_is_batched(tmp_path):
     edges = _preview(tmp_path)
-    assert ("CAAS_BACKGROUND_CLEANUP", "CAAS_PERMS_REBUILD") in edges
+    assert ("CAAS_BACKGROUND_CLEANUP", "CAAS_CORE_MERGE") in edges
 
 
 @needs_nextflow
 def test_the_null_universe_is_the_cleaned_background_when_the_null_is_not_batched(tmp_path):
     edges = _preview(tmp_path, ct_discovery_batch_size="1", ct_core_batch_size="1", ct_disambig_batch_size="1")
-    assert ("CAAS_BACKGROUND_CLEANUP", "CAAS_PERMS_REBUILD") in edges
+    assert ("CAAS_BACKGROUND_CLEANUP", "CAAS_CORE_MERGE") in edges
 
 
 _NULL_ONLY = dict(ct_tool="", enrichment=True, caas_permulation_enrichment=True, ct_disambiguation=False, ct_postproc=False)
 _OLD_NULL_PROCESSES = ("PERM_REPLAY", "PERM_REPLAY_BATCHED", "CAAS_PERMS_DISAMBIGUATE", "CAAS_PERMS_DISAMBIGUATE_BATCHED",
-                       "CAAS_PERMS_AGGREGATE")
+                       "CAAS_PERMS_AGGREGATE", "CAAS_PERMS_MERGE_DETAIL", "CAAS_PERMS_REBUILD")
 
 
 @needs_nextflow
@@ -110,7 +110,7 @@ def test_the_live_null_replays_and_disambiguates_in_one_process_family(tmp_path)
     nodes = {n for e in edges for n in e}
     assert not nodes & set(_OLD_NULL_PROCESSES)
     assert {("SUBSET_RESAMPLE_PERMS", "CAAS_CORE_BATCHED"), ("Channel.fromList", "CAAS_CORE_BATCHED"),
-            ("CAAS_CORE_BATCHED", "CAAS_PERMS_MERGE_DETAIL"), ("CAAS_PERMS_MERGE_DETAIL", "CAAS_PERMS_REBUILD")} <= edges
+            ("CAAS_CORE_BATCHED", "CAAS_CORE_MERGE"), ("CAAS_CORE_MERGE", "CT_ACCUMULATION_RANDOMIZE")} <= edges
 
 
 @needs_nextflow
@@ -143,7 +143,16 @@ def test_main_sends_each_source_of_the_null_to_its_own_input_of_caas_permulation
     assert [a.strip() for a in call.split("(")[1].split(",")][:3] == ["perm_align_ch", "perm_reuse_ch", "perm_cfg_ch"]
 
 
-def test_the_null_rebuild_treats_any_no_prefixed_universe_as_absent():
+def test_the_standalone_scoring_route_rebuilds_the_null_with_the_merge_process():
+    """Source-level check (the scoring route needs inputs `-preview` does not accept); the process itself is run by
+    test_core_batched.py on one shard directory, the shape this route passes."""
+    text = (ROOT / "workflows/scoring.nf").read_text()
+    assert "include { CAAS_CORE_MERGE }" in text
+    assert "_rebuild = CAAS_CORE_MERGE(Channel.value(_detail), resolved_background," in text
+    assert "CAAS_PERMS_REBUILD" not in text
+
+
+def test_the_null_merge_treats_any_no_prefixed_universe_as_absent():
     text = (ROOT / "subworkflows/CT/caas_permulation.nf").read_text()
     assert "universe.name != 'NO_FILE'" not in text
     assert len(re.findall(r"universe\.name\.startsWith\('NO_'\)", text)) == 1

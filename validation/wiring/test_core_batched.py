@@ -1,4 +1,4 @@
-"""CAAS_CORE_BATCHED on PEPC with precomputed ASR: the shards do not depend on the batch layout.
+"""CAAS_CORE_BATCHED and CAAS_CORE_MERGE on PEPC with precomputed ASR: the shards do not depend on the batch layout, and the merge equals a copy union followed by the same pass B.
 
 Three genes: PEPC, PEPD (the same alignment and cached ASR under another name) and NOHIT (identical sequences, no
 CAAS in any cycle, so `ct perm-replay` exports nothing). Nextflow runs the real process; the reference is the same two
@@ -56,7 +56,9 @@ def inp(tmp_path_factory):
     p = subprocess.run(["python3", str(tw.ROOT / "subworkflows/CT/local/scripts/build_b0_labelings.py"), "--config", str(cfg),
                         "--fop", "--labelings-out", "b0.tab", "--pairs-out", "/dev/null"], cwd=d, capture_output=True, text=True)
     assert p.returncode == 0, p.stderr
-    (d / "resample_perms.tab").write_text((d / "b0.tab").read_text().replace("b_0~", "b_1~"))
+    # the real labeling (b_0) and three cycles with the labelings of the real one: the plumbing does not depend on the labels
+    b0 = (d / "b0.tab").read_text()
+    (d / "resample_perms.tab").write_text(b0 + "".join(b0.replace("b_0~", f"b_{k}~") for k in (1, 2, 3)))
     return d
 
 
@@ -150,3 +152,120 @@ def test_reused_exports_give_the_same_shards_as_the_replay(tmp_path, inp):
     reused = _shards(_nf(reused_dir, inp, 2, reuse=published))
     assert reused == live and live
     assert list((reused_dir / "out/caas_permulation/perm_disc").glob("*")) == []  # reused exports are not published again
+
+
+# ── CAAS_CORE_MERGE ──────────────────────────────────────────────────────────
+
+_FILTER = ["--gene_filter_mode", "extreme", "--iqr_multiplier", "3.0", "--extreme_threshold", "0.99", "--remove_caas_clusters", "true"]
+_TABLES = ["gene_cycle_scores.tsv", "perm_pos_sample.tsv", "perm_pos_quantiles.tsv", "removed_units.tsv"]
+
+
+def _merge_nf(tmp_path, inp, details, *extra):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    r = tw._mini(tmp_path, "mini_core_merge.nf", "--mini_details", ",".join(str(d) for d in details),
+                 "--mini_lengths", str(inp / "observed_inputs/gene_ensembl.tsv"), "--outdir", str(tmp_path / "out"),
+                 "--seed", "1998", *_FILTER, *extra)
+    out = tmp_path / "out/caas_permulation"
+    assert (out / "caas_perms.rds").exists(), r.stdout[-1200:] + r.stderr[-1200:]
+    listing = tmp_path / "out/pos_detail_dir.txt"
+    return out, (Path(listing.read_text().strip()) if listing.exists() else None)
+
+
+def _reference_merge(tmp_path, inp, details):
+    """A plain copy union of the shard directories, then the same pass B, b_0 rebuild and R step."""
+    i = inp / "observed_inputs"
+    tmp_path.mkdir(parents=True)
+    union = tmp_path / "union"
+    union.mkdir()
+    for d in details:
+        subprocess.run(["cp", "-RL", f"{d}/.", str(union)], check=True)
+    shutil.copytree(LOCAL, tmp_path / "code", dirs_exist_ok=True)
+    rem = ["--gene-lengths", str(i / "gene_ensembl.tsv"), "--gene-filter-mode", "extreme", "--iqr-multiplier", "3.0",
+           "--extreme-percentile", "0.99"]
+    re_ = str(tmp_path / "code/reaggregate_perm_scores.py")
+    out = tmp_path / "out"
+    out.mkdir()
+    subprocess.run([sys.executable, re_, "--detail", str(union), "--output-dir", str(out), "--seed", "1998", *rem], check=True, capture_output=True)
+    (out / "b0").mkdir()
+    subprocess.run([sys.executable, re_, "--detail", str(union / "b0"), "--output-dir", str(out / "b0"), "--seed", "1998", *rem], check=True, capture_output=True)
+    shutil.copytree(union / "b0", out / "b0/perm_pos_detail")  # the b_0 shards sit next to its scores
+    subprocess.run(["Rscript", str(tw.ROOT / "subworkflows/SCORING/local/src/scoring_caas_perms.R"), "--gene-cycle-scores",
+                    str(out / "gene_cycle_scores.tsv"), "--output", str(out / "caas_perms.rds")], check=True, capture_output=True)
+    return out, union
+
+
+def _same_rds(a, b):
+    r = subprocess.run(["Rscript", "-e", f'q(status = !identical(readRDS("{a}"), readRDS("{b}")))'], capture_output=True)
+    return r.returncode == 0
+
+
+def _assert_same_outputs(got, ref, with_b0=True):
+    for name in _TABLES + ["perm_pos_cycle_caas.tsv.gz"]:
+        opener = gzip.open if name.endswith(".gz") else open
+        assert opener(got / name, "rt").read() == opener(ref / name, "rt").read(), name
+    assert _same_rds(got / "caas_perms.rds", ref / "caas_perms.rds")
+    if with_b0:
+        for name in _TABLES[:3] + ["removed_units.tsv", "perm_pos_cycle_caas.tsv.gz"]:
+            opener = gzip.open if name.endswith(".gz") else open
+            assert opener(got / "b0" / name, "rt").read() == opener(ref / "b0" / name, "rt").read(), f"b0/{name}"
+        assert _shards([got / "b0/perm_pos_detail"]) == _shards([ref / "b0/perm_pos_detail"]) and _shards([ref / "b0/perm_pos_detail"])
+    else:
+        assert not (got / "b0").exists()
+
+
+@pytest.fixture(scope="module")
+def shard_batches(tmp_path_factory, inp):
+    """The shard directories of two one-gene batches (PEPC, PEPD), as CAAS_CORE_BATCHED writes them, with their b_0 shards."""
+    dirs = _nf(tmp_path_factory.mktemp("batches"), inp, 1, ["PEPC", "PEPD"])
+    assert len(dirs) == 2 and all((d / "b0").is_dir() for d in dirs)
+    return dirs
+
+
+@tw.needs_nextflow
+def test_the_merge_equals_a_copy_union_followed_by_the_same_pass_b_and_links_the_shards(tmp_path, inp, shard_batches):
+    ref, _ = _reference_merge(tmp_path / "ref", inp, shard_batches)
+    out, merged = _merge_nf(tmp_path / "nf", inp, shard_batches)
+    _assert_same_outputs(out, ref)
+    assert sorted(p.name for p in merged.glob("*.tsv.gz")) == ["PEPC.tsv.gz", "PEPD.tsv.gz"] and (merged / "b0").is_dir()
+    for d in shard_batches:  # the union holds the batches' own files, not copies
+        for f in d.glob("*.tsv.gz"):
+            assert os.stat(merged / f.name).st_ino == os.stat(f).st_ino
+
+
+@tw.needs_nextflow
+def test_the_merge_copies_the_shards_when_hard_links_are_refused(tmp_path, inp, shard_batches):
+    fake = tmp_path / "bin"
+    fake.mkdir()
+    # symbolic links (how Nextflow stages inputs) work; hard links fail, as across filesystems
+    (fake / "ln").write_text('#!/usr/bin/env bash\nfor a in "$@"; do case "$a" in -*s*) exec /bin/ln "$@";; esac; done\nexit 1\n')
+    (fake / "ln").chmod(0o755)
+    (tmp_path / "path.config").write_text(f"env {{ PATH = '{fake}:' + System.getenv('PATH') }}\n")
+    ref, _ = _reference_merge(tmp_path / "ref", inp, shard_batches)
+    out, merged = _merge_nf(tmp_path / "nf", inp, shard_batches, "-c", str(tmp_path / "path.config"))
+    _assert_same_outputs(out, ref)
+    for d in shard_batches:
+        for f in d.glob("*.tsv.gz"):
+            assert os.stat(merged / f.name).st_ino != os.stat(f).st_ino
+
+
+@tw.needs_nextflow
+def test_the_merge_takes_one_shard_directory_as_the_standalone_route_gives_it(tmp_path, inp, shard_batches):
+    ref, union = _reference_merge(tmp_path / "ref", inp, shard_batches)
+    out, _ = _merge_nf(tmp_path / "nf", inp, [union])
+    _assert_same_outputs(out, ref)
+
+
+@tw.needs_nextflow
+def test_the_merge_reads_a_legacy_concatenated_detail_file(tmp_path, inp, shard_batches):
+    rows, header = [], None
+    for f in sorted((f for d in shard_batches for f in d.glob("*.tsv.gz")), key=lambda f: f.name):  # shard order, as a directory is read
+        lines = gzip.open(f, "rt").read().splitlines()
+        header = header or lines[0]
+        rows += lines[1:]
+    legacy = tmp_path / "perm_pos_detail.tsv.gz"
+    with gzip.open(legacy, "wt") as fh:
+        fh.write("\n".join([header] + rows) + "\n")
+    ref, _ = _reference_merge(tmp_path / "ref", inp, shard_batches)
+    out, merged = _merge_nf(tmp_path / "nf", inp, [legacy])
+    _assert_same_outputs(out, ref, with_b0=False)  # the legacy file holds the null cycles only
+    assert merged is None

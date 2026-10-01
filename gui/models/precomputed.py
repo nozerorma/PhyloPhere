@@ -27,7 +27,7 @@ actual publishDir rather than guessed:
                  (older outdirs: signification/meta_caas/global_meta_caas.tsv),
                  caas_permulation/caas_perms.rds,
                  caas_permulation/perm_pos_{pval,sample,quantiles}.tsv,
-                 caas_permulation/perm_pos_detail/  (one gz shard per gene; triggers CAAS_PERMS_REBUILD:
+                 caas_permulation/perm_pos_detail/  (one gz shard per gene; triggers CAAS_CORE_MERGE:
                    SCORING re-derives the null from this rather than trusting the cached
                    caas_perms.rds, which is only valid while it holds the same gene-level
                    statistic as the observed score)
@@ -133,7 +133,7 @@ def derive_paths(config: "PrecomputedConfig", trait: str) -> list[tuple[str, str
         entries.append(("caas_pos_cycle_caas_file", os.path.join(perm_dir, "perm_pos_cycle_caas.tsv.gz"), "file"))
         entries.append(("caas_pos_sample_file", os.path.join(perm_dir, "perm_pos_sample.tsv"), "file"))
         entries.append(("caas_pos_quantiles_file", os.path.join(perm_dir, "perm_pos_quantiles.tsv"), "file"))
-        # caas_pos_detail_file makes SCORING REBUILD the null (CAAS_PERMS_REBUILD)
+        # caas_pos_detail_file makes SCORING rebuild the null (CAAS_CORE_MERGE)
         # instead of importing caas_perms.rds as a cached artifact. That matters
         # because a cached null is only valid while it holds the same gene-level
         # statistic as the observed score; rebuilding guarantees it by construction,

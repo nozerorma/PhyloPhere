@@ -12,8 +12,8 @@
  *      perm-replay with export_perm_discovery, then the ASR replay of the same genes
  *      (disambiguation_perms_main.py --detail-only) → per-gene perm_pos_detail shards.
  *      Perm-discovery exports that already exist are disambiguated without a replay.
- *   3. CAAS_PERMS_MERGE_DETAIL unions the batches' shards and CAAS_PERMS_REBUILD
- *      derives the genome-wide tables and caas_perms.rds from them.
+ *   3. CAAS_CORE_MERGE unions the batches' shards and derives the genome-wide tables
+ *      and caas_perms.rds from them.
  *
  * The aggregate RDS feeds the existing FCS p.perm path (fcs_enrich.R), giving
  * the CAAS scoring FCS report a permulation-corrected p.perm — exactly like RER.
@@ -275,58 +275,32 @@ workflow CAAS_CORE {
         perm_discovery = core.perm_discovery
 }
 
-// ── 3. Merge the batches' perm_pos_detail/ shard directories ─────────────────
-// Batches partition genes disjointly (each gene's perm_replay.discovery.output
-// lands in exactly one batch), so this is a plain directory union — no
-// aggregation logic, just copying each batch's per-gene shards into one dir.
-process CAAS_PERMS_MERGE_DETAIL {
-    tag "caas_perms_merge_detail"
-    label 'process_medium'
-
-    input:
-    path batchDetailDirs, stageAs: 'batch_*'
-
-    output:
-    path "perm_pos_detail", emit: pos_detail
-
-    script:
-    """
-    mkdir -p perm_pos_detail
-    for d in batch_*/; do
-        cp -R "\$d"* perm_pos_detail/
-    done
-    """
-}
-
-// ── 4. Rebuild the null from an existing detail file (no ASR replay) ─────────
-// The gene-level null must hold the SAME statistic as the observed gene score, or
-// the FCS p.perm compares two different quantities. A caas_perms.rds imported from
-// a previous run is a cached artifact with no such guarantee — it was built with
-// whatever formula was current then.
+// ── 3. Merge the batches' shards and derive the genome-wide null (no ASR replay) ──────────────────────
+// Batches partition genes disjointly, so the shard directories are united with hard links (copies where the
+// filesystem refuses them) into perm_pos_detail/, which CT_ACCUMULATION also reads. A single legacy
+// perm_pos_detail.tsv.gz is read as it is.
 //
-// Re-deriving it does NOT need the expensive part: perm_pos_detail/ (one gz shard
-// per gene) already holds every (Gene, cycle, Position, caap_group,
-// asr_path_score, n_detected, ct, cb) row, so only pass B (the aggregation) has
-// to re-run. That is minutes against the hours of the ASR
-// replay. A legacy single perm_pos_detail.tsv.gz file also still works.
-//
-// Deliberately reuses gene_wrapper.py's own aggregation via
-// reaggregate_perm_scores.py rather than reimplementing: the gene statistic is
-// F(max)^n over heavily tied values, so a 1e-16 difference in how the per-position
-// sum accumulates can flip a tie and the ^n amplifies it.
-process CAAS_PERMS_REBUILD {
-    tag "caas_perms_rebuild"
+// Each gene's score is calibrated against its cycle's genome-wide pool of position scores, so pass B runs once
+// over the union, through reaggregate_perm_scores.py (gene_wrapper.py's own aggregation, not a second
+// implementation: the gene statistic is F(max)^n over heavily tied values, so a 1e-16 difference in how the
+// per-position sum accumulates can flip a tie and the ^n amplifies it). Pass B costs minutes against the hours
+// of the ASR replay, which is why a caas_perms.rds imported from an earlier run is never trusted: it holds
+// whatever gene statistic was current when it was built, and the null must hold the same statistic as the
+// observed gene score or the FCS p.perm compares two different quantities.
+process CAAS_CORE_MERGE {
+    tag "caas_core_merge"
     label 'process_medium'
     publishDir path: "${params.outdir}/caas_permulation", mode: 'copy', overwrite: true,
                pattern: '{caas_perms.rds,gene_cycle_scores.tsv,perm_pos_sample.tsv,perm_pos_quantiles.tsv,perm_pos_cycle_caas.tsv.gz,removed_units.tsv,b0}'
 
     input:
-    path perm_pos_detail, stageAs: 'input_perm_pos_detail'   // dir (current) or legacy .tsv.gz file
+    path batchDetail, stageAs: 'batch_*'   // batch shard directories, or one legacy perm_pos_detail.tsv.gz
     path universe
     path gene_lengths   // gene_ensembl_file (gene removal) or NO_FILE
 
     output:
-    path "b0",                        emit: b0, optional: true   // caas_b0_diagnostic: the real labeling rebuilt like the null
+    path "perm_pos_detail",           emit: pos_detail, optional: true   // the union of the batches' shards (absent for a legacy file)
+    path "b0",                        emit: b0, optional: true   // the real labeling rebuilt like the null
     path "caas_perms.rds",            emit: perms
     path "gene_cycle_scores.tsv",     emit: gene_cycle_scores
     path "removed_units.tsv",         emit: removed_units, optional: true   // null gene removal (only when a gene annotation was given)
@@ -342,29 +316,42 @@ process CAAS_PERMS_REBUILD {
     def universe_arg   = universe.name.startsWith('NO_') ? "" : "--universe ${universe}"
     def py = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh python3' : 'python3'
     def rs = (params.use_singularity || params.use_apptainer) ? '/usr/local/bin/_entrypoint.sh Rscript'  : 'Rscript'
-    // Same gene removal as the unbatched worker's pass B0 (needs the annotation file).
+    // Gene removal needs the annotation file.
     def removal_args = (caasPostprocOn() && !gene_lengths.name.startsWith('NO_')) ? "--gene-lengths ${gene_lengths} --gene-filter-mode ${params.gene_filter_mode} --iqr-multiplier ${params.iqr_multiplier} --extreme-percentile ${params.extreme_threshold} ${params.remove_caas_clusters ? '' : '--keep-clusters'}" : ""
     """
     export OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
-    # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own
-    # location, so stage the disambiguation local tree exactly as CAAS_PERMS_DISAMBIGUATE does.
+    # reaggregate_perm_scores.py imports src.utils.gene_wrapper relative to its own location.
     cp -R ${disambig_local}/* .
     find . -name '*.pyc' -delete 2>/dev/null || true
 
+    entries=(batch_*)
+    if [ "\${#entries[@]}" -eq 1 ] && [ -f "\${entries[0]}" ]; then
+        DETAIL="\${entries[0]}"
+    else
+        # Hard links when the first shard can be linked from here, copies otherwise.
+        LINK=l
+        probe=\$(find -L batch_* -type f -name '*.tsv.gz' | head -n 1)
+        if [ -n "\$probe" ] && ! ln -L "\$probe" .link_probe 2>/dev/null; then LINK=""; fi
+        rm -f .link_probe
+        mkdir -p perm_pos_detail
+        for d in "\${entries[@]}"; do cp -a\${LINK}L "\$d"/. perm_pos_detail/; done
+        DETAIL=perm_pos_detail
+    fi
+
     ${py} ./reaggregate_perm_scores.py \\
-        --detail input_perm_pos_detail \\
+        --detail "\$DETAIL" \\
         --output-dir . \\
         --seed ${params.seed ?: 1998} ${removal_args}
 
     # b_0 rebuilt from its merged shards as a one-labeling run: same code, own rank/size pools.
-    if [ -d input_perm_pos_detail/b0 ]; then
+    if [ -d "\$DETAIL/b0" ]; then
         mkdir -p b0
         ${py} ./reaggregate_perm_scores.py \\
-            --detail input_perm_pos_detail/b0 \\
+            --detail "\$DETAIL/b0" \\
             --output-dir b0 \\
             --seed ${params.seed ?: 1998} ${removal_args}
         # keep b_0's own per-gene shards next to its scores: compare_b0.py reads them (checkpoints B, C)
-        cp -RL input_perm_pos_detail/b0 b0/perm_pos_detail
+        cp -RL "\$DETAIL/b0" b0/perm_pos_detail
     fi
 
     ${rs} ${scoring_local}/src/scoring_caas_perms.R \\
@@ -416,14 +403,13 @@ workflow CAAS_PERMULATION {
 
         def core = CAAS_CORE(align_tuple, reuse_disc, caas_config, resample_subset, gated_tree, fop_pairs, gene_lengths)
         def gene_lengths_bc = gene_lengths.collect().map { items -> items[0] }
-        def merged = CAAS_PERMS_MERGE_DETAIL(core.pos_detail.collect())
-        def rebuilt = CAAS_PERMS_REBUILD(merged.pos_detail, universe, gene_lengths_bc)
+        def merged = CAAS_CORE_MERGE(core.pos_detail.collect(), universe, gene_lengths_bc)
 
     emit:
-        perms              = rebuilt.perms
-        pos_cycle_caas     = rebuilt.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
-        pos_sample         = rebuilt.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))          // cycle-stratified sample for distribution plots
-        pos_quantiles      = rebuilt.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))    // per (cycle,scheme) distribution shape
+        perms              = merged.perms
+        pos_cycle_caas     = merged.pos_cycle_caas.ifEmpty(file('NO_CAAS_POS_CYCLE_CAAS'))  // per (gene,position,side,cycle) caas_score -> p.emp
+        pos_sample         = merged.pos_sample.ifEmpty(file('NO_CAAS_POS_SAMPLE'))          // cycle-stratified sample for distribution plots
+        pos_quantiles      = merged.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))    // per (cycle,scheme) distribution shape
         pos_detail         = merged.pos_detail      // full per-cycle detail (sharded dir); re-scoring needs no ASR replay
-        gene_cycle_scores  = rebuilt.gene_cycle_scores // genes x cycles raw scores; feeds the report's FPR calibration figure
+        gene_cycle_scores  = merged.gene_cycle_scores // genes x cycles raw scores; feeds the report's FPR calibration figure
 }

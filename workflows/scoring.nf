@@ -14,7 +14,7 @@
 
 include { SCORING_COMPUTE }                                                           from '../subworkflows/SCORING/scoring_compute.nf'
 include { SCORING_REPORT }                                                            from '../subworkflows/SCORING/scoring_report.nf'
-include { CAAS_PERMS_REBUILD }                                                        from '../subworkflows/CT/caas_permulation.nf'
+include { CAAS_CORE_MERGE }                                                           from '../subworkflows/CT/caas_permulation.nf'
 
 
 workflow SCORING {
@@ -146,7 +146,7 @@ workflow SCORING {
         // Three ways to get here, in precedence order:
         //   1. caas_perms_ch      — CAAS_PERMULATION ran live in this pass; always valid.
         //   2. caas_pos_detail_file — no live null, but a prior run's raw per-cycle
-        //      detail is available: REBUILD rather than import a cached RDS. The null
+        //      detail is available: CAAS_CORE_MERGE rebuilds it rather than importing a cached RDS. The null
         //      must hold the same gene-level statistic as the observed gene score
         //      (see scoring_compute.R section 4a); a cached caas_perms.rds carries no
         //      such guarantee, and rebuilding costs minutes because no ASR replay is
@@ -160,7 +160,7 @@ workflow SCORING {
             def _detail = file(params.caas_pos_detail_file)
             assert _detail.exists() : "SCORING: --caas_pos_detail_file not found: ${params.caas_pos_detail_file}"
             log.info "SCORING: rebuilding CAAS permulation null from ${_detail.name} (no ASR replay)"
-            _rebuild = CAAS_PERMS_REBUILD(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')))
+            _rebuild = CAAS_CORE_MERGE(Channel.value(_detail), resolved_background, Channel.value(params.gene_ensembl_file ? file(params.gene_ensembl_file) : file('NO_FILE')))
             caas_perms_resolved = _rebuild.perms.collect().map { it[0] }
         } else {
             caas_perms_resolved = (caas_perms_ch ?: Channel.empty())
@@ -173,7 +173,7 @@ workflow SCORING {
         // Feeds scoring_compute.R §2f-ter's pooled p.emp, the sole position-level
         // permulation p. Resolved ONCE here — same hoist-above-SCORING_COMPUTE
         // reasoning as caas_perms_resolved above. A --caas_pos_detail_file rebuild
-        // (CAAS_PERMS_REBUILD above) regenerates it too, so prefer that when the
+        // (CAAS_CORE_MERGE above) regenerates it too, so prefer that when the
         // live channel is absent.
         def caas_pos_cycle_caas_resolved
         if (!caas_pos_cycle_caas_ch && _rebuild != null) {

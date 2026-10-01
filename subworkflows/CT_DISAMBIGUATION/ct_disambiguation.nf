@@ -216,7 +216,7 @@ process CT_DISAMBIGUATION_RUN_BATCHED {
 // each gene to exactly one batch), so every piece here is a plain row-concat
 // or directory union -- see merge_disambiguation_batches.py's module
 // docstring for why no cross-gene aggregation is needed (unlike
-// CAAS_PERMS_MERGE_DETAIL's downstream CAAS_PERMS_REBUILD step).
+// CAAS_CORE_MERGE's genome-wide pass B).
 process CT_DISAMBIGUATION_MERGE {
     tag "ct_disambiguation_merge"
     label 'process_medium'
