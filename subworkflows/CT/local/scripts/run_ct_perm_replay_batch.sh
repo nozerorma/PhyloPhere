@@ -11,7 +11,6 @@ ct_bin=""
 progress_log="0"
 export_groups="0"
 export_perm_discovery="0"
-fop_mode="0"
 extra_args_file=""
 stall_timeout="1800"
 
@@ -55,10 +54,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --export-perm-discovery)
             export_perm_discovery="$2"
-            shift 2
-            ;;
-        --fop)
-            fop_mode="$2"
             shift 2
             ;;
         --extra-args-file)
@@ -169,7 +164,7 @@ wait_for_all() {
 }
 
 idx=0
-while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
+while IFS=$'\t' read -r alignment_id alignment_name _; do
     [[ -z "${alignment_id:-}" ]] && continue
     idx=$((idx + 1))
     wait_for_slot
@@ -177,6 +172,7 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
 
     alignment_path="alignments/$alignment_name"
 
+    # -o: the counts file that `ct perm-replay` still requires; nothing reads it.
     declare -a cmd=(
         "${base_cmd[@]}"
         -a "$alignment_path"
@@ -186,9 +182,6 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
         --fmt "$ali_format"
     )
 
-    if [[ "$discovery_name" != "NO_FILE" ]]; then
-        cmd+=(--discovery "discovery/$discovery_name")
-    fi
     if [[ "$progress_log" == "1" ]]; then
         cmd+=(--progress_log "${alignment_id}.progress.log")
     fi
@@ -197,9 +190,6 @@ while IFS=$'\t' read -r alignment_id alignment_name discovery_name; do
     fi
     if [[ "$export_perm_discovery" == "1" ]]; then
         cmd+=(--export_perm_discovery "${alignment_id}.perm_replay.discovery.output")
-    fi
-    if [[ "$fop_mode" == "1" ]]; then
-        cmd+=(--fop)
     fi
 
     (

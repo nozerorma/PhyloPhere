@@ -8,7 +8,7 @@
  *      labelings in cycle order (b_0, the real labeling, is never part of the null;
  *      with caas_b0_diagnostic it is rebuilt from the observed design and replayed
  *      alongside, written to caas_permulation/b0/).
- *   2. PERM_REPLAY / PERM_REPLAY_BATCHED: full-pool perm-replay (no --discovery) with
+ *   2. PERM_REPLAY / PERM_REPLAY_BATCHED: full-pool perm-replay with
  *      export_perm_discovery ON → per-gene per-cycle discovery rows (batched when
  *      ct_perm_replay_batch_size > 1).
  *   3. CAAS_PERMS_DISAMBIGUATE / CAAS_PERMS_DISAMBIGUATE_BATCHED: load ASR once per gene and
@@ -122,7 +122,7 @@ process SUBSET_RESAMPLE_PERMS {
     """
 }
 
-// ── 2. Full-pool perm-replay with perm-discovery export (no --discovery) ─────
+// ── 2. Full-pool perm-replay with perm-discovery export ──────────────────────
 process PERM_REPLAY {
     tag "$alignmentID"
     label 'process_perm_replay'
@@ -163,7 +163,7 @@ _max_miss=\$(awk -v n="\$n_pairs" -v f="${params.max_miss_fraction}" 'BEGIN{prin
     # BLAS, so this must never go in nextflow.config env{}. See docs/CAAS_PERMULATION_RUNTIME.md.
     export OPENBLAS_NUM_THREADS=${task.cpus} OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 NUMEXPR_NUM_THREADS=1
     ${pairArgs}
-    # No --discovery → full position pool; export_perm_discovery forced ON.
+    # Full position pool; export_perm_discovery forced ON.
     ${ct_bin} perm-replay \\
         -a ${alignmentFile} \\
         -t ${caas_config} \\
@@ -195,7 +195,6 @@ process PERM_REPLAY_BATCHED {
     file caas_config
 
     output:
-    path("*.perm_replay.output"), emit: perm_replay_out, optional: true
     path("*.perm_replay.discovery.output"), emit: perm_discovery, optional: true
 
     script:
@@ -551,7 +550,7 @@ workflow CAAS_PERMS_PREP {
                 .collate(permReplayBatchSize)
                 .map { batch ->
                     def batchID = String.format('perm_replay_batch_%05d', ++permReplayBatchCounter)
-                    def manifestText = batch.collect { row -> "${row[0]}\t${row[1].name}\tNO_FILE" }.join('\n') + '\n'
+                    def manifestText = batch.collect { row -> "${row[0]}\t${row[1].name}" }.join('\n') + '\n'
                     def alignmentFiles = batch.collect { row -> row[1] }.unique { file -> file.name }
                     def resampled = batch[0][2]
                     tuple(batchID, batch.size(), manifestText, alignmentFiles, resampled)
