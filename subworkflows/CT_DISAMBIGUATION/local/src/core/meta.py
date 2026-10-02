@@ -26,6 +26,14 @@ def caas_id(gene, position, hypothesis, caap_group, caas, amino_encoded, pattern
     return ID_PREFIX + digest[:hex_chars].upper()
 
 
+def row_id(gene, row) -> str:
+    """Id of a discovery.tab row given as a mapping (position, trait, caap_group, caas, amino_encoded, pattern);
+    an empty or missing field counts as the empty string, and a missing caap_group as 'US'."""
+    pattern = row.get("pattern")
+    return caas_id(gene, row["position"], row.get("trait") or "", row.get("caap_group") or "US",
+                   row.get("caas") or "", row.get("amino_encoded") or "", "" if pattern is None else pattern)
+
+
 def assign_ids(rows: Iterable[Tuple], hex_chars: int = ID_HEX_CHARS) -> List[str]:
     """Ids of (gene, position, hypothesis, caap_group, caas, amino_encoded, pattern) rows, in the order given.
 

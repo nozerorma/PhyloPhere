@@ -82,3 +82,22 @@ def test_a_directory_without_b0_hits_writes_nothing(inp, tmp_path):
     p = _run(inp, tmp_path / "out", b0=str(tmp_path / "empty"))
     assert p.returncode == 0, p.stderr[-800:]
     assert list((tmp_path / "out").iterdir()) == []
+
+
+def test_the_ids_of_the_master_are_those_of_the_meta_tables_at_the_same_position_and_scheme(inp, tmp_path):
+    sys.path.insert(0, str(ROOT / "subworkflows/CT_DISAMBIGUATION/local"))
+    from src.core import contract
+    p = _run(inp, tmp_path / "out", "--fop-pairs", str(inp / "fop_pairs.tsv"))
+    assert p.returncode == 0, p.stderr[-800:]
+    contract.write_meta(inp / "b0/PEPC.b0.discovery.tsv", tmp_path / "meta")
+    ids = {}
+    for line in (tmp_path / "meta/global_meta_caas.tsv").read_text().splitlines()[1:]:
+        c = line.split("\t")
+        ids.setdefault((int(c[3]), c[5]), set()).add(c[0])
+    master = pd.read_csv(tmp_path / "out/PEPC.master.csv.gz", keep_default_na=False)
+    checked = 0
+    for r in master.itertuples():
+        for item in str(r.tag_support).split(","):
+            assert item.rsplit(":", 1)[0] in ids[(r.msa_pos, r.caap_group)]
+            checked += 1
+    assert checked > 200

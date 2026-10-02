@@ -14,7 +14,9 @@
  *      observed labeling (b_0) as full records (observed_b0_main.py) → b0_observed/.
  *      Perm-discovery exports that already exist are disambiguated without a replay.
  *   3. CAAS_CORE_MERGE unions the batches' shards and derives the genome-wide tables
- *      and caas_perms.rds from them.
+ *      and caas_perms.rds from them, and writes the observed contract files (discovery.tab,
+ *      background.output, background_genes.output, meta_caas/, caas_convergence_master.csv)
+ *      from the batches' b_0 slices.
  *
  * The aggregate RDS feeds the existing FCS p.perm path (fcs_enrich.R), giving
  * the CAAS scoring FCS report a permulation-corrected p.perm — exactly like RER.
@@ -303,6 +305,10 @@ workflow CAAS_CORE {
 // filesystem refuses them) into perm_pos_detail/, which CT_ACCUMULATION also reads. A single legacy
 // perm_pos_detail.tsv.gz is read as it is.
 //
+// The observed contract files are written here too, from the b0_observed/ directories of the batches
+// (contract_main.py): the tables hold every gene in name order, whatever order the batches finished in.
+// A route that has no batches (the standalone scoring rebuild) passes a NO_B0_OBSERVED sentinel and gets none.
+//
 // Each gene's score is calibrated against its cycle's genome-wide pool of position scores, so pass B runs once
 // over the union, through reaggregate_perm_scores.py (gene_wrapper.py's own aggregation, not a second
 // implementation: the gene statistic is F(max)^n over heavily tied values, so a 1e-16 difference in how the
@@ -320,6 +326,8 @@ process CAAS_CORE_MERGE {
     path batchDetail, stageAs: 'batch_*'   // batch shard directories, or one legacy perm_pos_detail.tsv.gz
     path universe
     path gene_lengths   // gene_ensembl_file (gene removal) or NO_FILE
+    path b0Observed, stageAs: 'b0obs_*'   // b0_observed directories of the batches, or a NO_B0_OBSERVED sentinel
+    path design         // observed design (the master columns come from it) or a NO_DESIGN sentinel
 
     output:
     path "perm_pos_detail",           emit: pos_detail, optional: true   // the union of the batches' shards (absent for a legacy file)
@@ -330,6 +338,12 @@ process CAAS_CORE_MERGE {
     path "perm_pos_cycle_caas.tsv.gz", emit: pos_cycle_caas, optional: true
     path "perm_pos_sample.tsv",       emit: pos_sample,    optional: true
     path "perm_pos_quantiles.tsv",    emit: pos_quantiles, optional: true
+    path "discovery.tab",             emit: discovery, optional: true          // observed contract files, from the b_0 slices
+    path "background.output",         emit: background, optional: true
+    path "background_genes.output",   emit: background_genes, optional: true
+    path "caas_convergence_master.csv", emit: master, optional: true
+    path "meta_caas",                 emit: meta_caas, optional: true
+    path "meta_caas/global_meta_caas.tsv", emit: global_meta_caas, optional: true
 
     script:
     def disambig_local = "${baseDir}/subworkflows/CT_DISAMBIGUATION/local"
@@ -376,6 +390,15 @@ process CAAS_CORE_MERGE {
         --gene-cycle-scores gene_cycle_scores.tsv \\
         ${universe_arg} \\
         --output caas_perms.rds
+
+    # The observed contract files from the b_0 slices of the batches (a sentinel is not a directory).
+    b0dirs=()
+    for e in b0obs_*; do
+        if [ -d "\$e" ]; then b0dirs+=("\$e"); fi
+    done
+    if [ "\${#b0dirs[@]}" -gt 0 ]; then
+        ${py} ./contract_main.py --b0-dirs "\${b0dirs[@]}" --design ${design} --output-dir .
+    fi
     """
 }
 
@@ -421,7 +444,9 @@ workflow CAAS_PERMULATION {
 
         def core = CAAS_CORE(align_tuple, reuse_disc, caas_config, resample_subset, gated_tree, fop_pairs, gene_lengths)
         def gene_lengths_bc = gene_lengths.collect().map { items -> items[0] }
-        def merged = CAAS_CORE_MERGE(core.pos_detail.collect(), universe, gene_lengths_bc)
+        def b0_dirs = core.b0_observed.collect()
+        def design_bc = caas_config.collect().map { items -> items[0] }
+        def merged = CAAS_CORE_MERGE(core.pos_detail.collect(), universe, gene_lengths_bc, b0_dirs, design_bc)
 
     emit:
         perms              = merged.perms
@@ -430,4 +455,10 @@ workflow CAAS_PERMULATION {
         pos_quantiles      = merged.pos_quantiles.ifEmpty(file('NO_CAAS_POS_QUANTILES'))    // per (cycle,scheme) distribution shape
         pos_detail         = merged.pos_detail      // full per-cycle detail (sharded dir); re-scoring needs no ASR replay
         gene_cycle_scores  = merged.gene_cycle_scores // genes x cycles raw scores; feeds the report's FPR calibration figure
+        discovery          = merged.discovery         // observed contract files, written from the b_0 slice of the batches
+        background         = merged.background
+        background_genes   = merged.background_genes
+        master             = merged.master
+        meta_caas          = merged.meta_caas
+        global_meta_caas   = merged.global_meta_caas
 }

@@ -15,7 +15,7 @@ import re
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from src.convergence.disambiguate_single import analyze_gene_disambiguation
-from src.core.meta import caas_id
+from src.core.meta import row_id
 from src.data.loaders import _parse_conserved_pair, as_bool, normalize_amino_list
 from src.data.models import CAASPosition
 
@@ -23,7 +23,7 @@ from src.data.models import CAASPosition
 def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosition]:
     """CAAS entries of one gene from its discovery rows (mappings with position, trait, caap_group, caas,
     amino_encoded, pattern and, when present, is_conserved_meta and conserved_pair), in the order given.
-    The tag of an entry is the content id of its row (`core.meta.caas_id`)."""
+    The tag of an entry is the content id of its row (`core.meta.row_id`)."""
     entries: List[CAASPosition] = []
     for row in rows:
         pos0 = int(row["position"])
@@ -35,7 +35,7 @@ def observed_entries(gene: str, rows: Iterable[Dict[str, Any]]) -> List[CAASPosi
         entries.append(CAASPosition(
             position=pos0,
             position_one_based=pos0 + 1,
-            tag=caas_id(gene, pos0, trait, group, caas, amino, row.get("pattern", "")),
+            tag=row_id(gene, row),
             caas=caas,
             trait1_aa=normalize_amino_list(list(parts[0])) if len(parts) == 2 else [],
             trait0_aa=normalize_amino_list(list(parts[1])) if len(parts) == 2 else [],

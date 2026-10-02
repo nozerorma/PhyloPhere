@@ -343,3 +343,81 @@ def test_a_batch_that_reuses_exports_has_no_b0_slice(tmp_path, inp, fop_pairs):
     _nf(tmp_path / "reuse", inp, 2, reuse=published, fop_pairs=fop_pairs)
     dirs = _b0_dirs(tmp_path / "reuse")
     assert len(dirs) == 1 and list(dirs[0].iterdir()) == []
+
+
+# ── CAAS_CORE_MERGE: the observed contract files ─────────────────────────────
+
+@pytest.fixture(scope="module")
+def b0_batches(tmp_path_factory, inp, fop_pairs):
+    """Shard and b_0 directories of two one-gene batches (PEPC, PEPD), as CAAS_CORE_BATCHED leaves them."""
+    root = tmp_path_factory.mktemp("b0batches")
+    details = _nf(root, inp, 1, ["PEPC", "PEPD"], fop_pairs=fop_pairs)
+    return details, _b0_dirs(root)
+
+
+def _contract(tmp_path, inp, details, b0_dirs):
+    out, _ = _merge_nf(tmp_path, inp, details, "--mini_b0", ",".join(str(d) for d in b0_dirs), "--mini_design", str(inp / "cfg"))
+    paths = [Path(p) for p in (tmp_path / "out/contract_paths.txt").read_text().split()]
+    got = {}
+    for p in paths:
+        if p.is_dir():
+            got.update({f"meta_caas/{f.name}": f.read_text() for f in p.glob("*.tsv")})
+        else:
+            got[p.name] = p.read_text()
+    return got
+
+
+@tw.needs_nextflow
+def test_the_merge_writes_the_contract_files_from_the_b0_slices_in_any_batch_order(tmp_path, inp, b0_batches):
+    details, b0_dirs = b0_batches
+    assert len(b0_dirs) == 2
+    forward = _contract(tmp_path / "fwd", inp, details, b0_dirs)
+    backward = _contract(tmp_path / "bwd", inp, details, b0_dirs[::-1])
+    assert forward == backward
+    # the same files as the command line gives on the same directories
+    direct = tmp_path / "direct"
+    subprocess.run([sys.executable, str(LOCAL / "contract_main.py"), "--b0-dirs", *map(str, b0_dirs), "--design", str(inp / "cfg"),
+                    "--output-dir", str(direct)], check=True, capture_output=True)
+    expect = {f.name: f.read_text() for f in direct.iterdir() if f.is_file()}
+    expect.update({f"meta_caas/{f.name}": f.read_text() for f in (direct / "meta_caas").glob("*.tsv")})
+    assert forward == expect
+    genes = [l.split("\t")[0] for l in forward["discovery.tab"].splitlines()[1:]]
+    assert genes == sorted(genes) and set(genes) == {"PEPC", "PEPD"}
+    assert forward["background_genes.output"] == "PEPC\nPEPD\n" and forward["background.output"].count("\n") == 2  # one line per gene of the batches
+    assert len(forward["caas_convergence_master.csv"].splitlines()) == 1 + 2 * 217
+    assert set(forward) >= {"meta_caas/global_meta_caas.tsv", "meta_caas/US_meta_caas.tsv"}
+
+
+@tw.needs_nextflow
+def test_the_merge_without_b0_slices_writes_no_contract_file(tmp_path, inp, shard_batches):
+    _merge_nf(tmp_path, inp, shard_batches)
+    assert not (tmp_path / "out/contract_paths.txt").exists()
+
+
+def test_the_standalone_scoring_route_passes_distinct_sentinels_for_the_inputs_the_merge_gets_there_without_a_batch():
+    call = next(l for l in (tw.ROOT / "workflows/scoring.nf").read_text().splitlines() if "CAAS_CORE_MERGE(" in l and "_rebuild" in l)
+    assert "file('NO_B0_OBSERVED')" in call and "file('NO_DESIGN')" in call
+    assert call.count("file('NO_FILE')") <= 1  # two inputs named NO_FILE would collide when staged
+
+
+def _permulation(tmp_path, inp, fop_pairs, genes):
+    i = inp / "observed_inputs"
+    r = tw._mini(tmp_path, "mini_permulation.nf", "--mini_cfg", str(inp / "cfg"), "--mini_resample", str(inp / "resample_perms.tab"),
+                 "--mini_tree", str(i / "pruned_tree_file.nwk"), "--mini_fop_pairs", str(fop_pairs), "--mini_lengths", str(i / "gene_ensembl.tsv"),
+                 "--mini_alignments", ",".join(str(inp / "ali" / f"{g}.fa") for g in genes), "--outdir", str(tmp_path / "out"),
+                 "--alignment", str(inp / "ali"), "--ct_core_batch_size", "1", "--ct_disambig_asr_cache_dir", str(i / "asr_cache"),
+                 "--tax_id", str(i / "taxid.tsv"), "--gene_ensembl_file", str(i / "gene_ensembl.tsv"), "--ct_disambig_posterior_threshold", "0.1",
+                 "--ct_disambig_asr_model", "lg", "--ali_format", "fasta", "--patterns", "1,2,3", "--miss_pair", "true", "--caap_mode", "true",
+                 "--min_divergent_fraction", "0.5", "--seed", "1998")
+    listing = tmp_path / "out/contract_paths.txt"
+    assert listing.exists(), r.stdout[-1500:] + r.stderr[-1500:]
+    return {Path(p).name: Path(p).read_text() for p in listing.read_text().split()}
+
+
+@tw.needs_nextflow
+def test_the_permulation_workflow_hands_the_b0_slices_of_its_batches_to_the_merge(tmp_path, inp, fop_pairs):
+    files = _permulation(tmp_path, inp, fop_pairs, ("PEPC", "PEPD"))
+    assert sorted(files) == ["background.output", "background_genes.output", "caas_convergence_master.csv", "discovery.tab", "global_meta_caas.tsv"]
+    assert len(files["caas_convergence_master.csv"].splitlines()) == 1 + 2 * 217
+    assert {l.split("\t")[0] for l in files["discovery.tab"].splitlines()[1:]} == {"PEPC", "PEPD"}
+
