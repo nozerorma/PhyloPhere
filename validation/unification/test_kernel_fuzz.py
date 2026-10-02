@@ -3,7 +3,7 @@
 Each seed draws a random alignment (gaps, ambiguity codes, species absent from the alignment),
 a few random hypotheses over a species pool, random gap/missing thresholds (often equal fg/bg,
 which is what activates miss_pair), max_conserved, and caap_mode / miss_pair on or off. The scalar
-`ct discovery` runs on the hypotheses as traitfile_H<m>.tab; the kernel replays them as the
+the scalar discovery runs on the hypotheses as traitfile_H<m>.tab; the kernel replays them as the
 labelings b_0~H<m>. Rows and the tested-position list must be identical.
 
 Unlike the fixture goldens this checks both directions (a CAAS the kernel misses, one it
@@ -12,6 +12,7 @@ invents) and the branches real fixtures do not reach (missing species, asymmetri
 import os
 import random
 import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -19,6 +20,7 @@ import pytest
 
 # CT_BIN lets the mutation check below point the test at a modified copy of `ct`
 CT = Path(os.environ.get("CT_BIN", Path(__file__).resolve().parents[2] / "subworkflows/CT/local/ct"))
+REF = Path(__file__).resolve().parent / "reference_discovery.py"  # the scalar discovery
 KEY = ["caap_group", "hyp", "position", "caas", "amino_encoded"]
 
 
@@ -83,8 +85,8 @@ def _background(path):
 def test_kernel_equals_scalar_on_random_input(tmp_path, seed):
     rng = random.Random(seed)
     thr, flags = _case(rng, tmp_path)
-    _run([CT, "discovery", "-a", "G1.fasta", "-t", "cfg", "-o", "s.out", "--background_output", "s.bg", "--fmt", "fasta", *flags, *thr], tmp_path)
-    _run([CT, "perm-replay", "-a", "G1.fasta", "-t", "cfg", "-s", "b0.tab", "-o", "k.out", "--fmt", "fasta", *flags, *thr,
+    _run([sys.executable, str(REF), "-a", "G1.fasta", "-t", "cfg", "-o", "s.out", "--background_output", "s.bg", "--fmt", "fasta", *flags, *thr], tmp_path)
+    _run([CT, "perm-replay", "-a", "G1.fasta", "-t", "cfg", "-s", "b0.tab", "--fmt", "fasta", *flags, *thr,
           "--export_perm_discovery", "k.disc", "--export_b0_background", "k.bg"], tmp_path)
     scalar, kernel = _rows(tmp_path / "s.out", "trait"), _rows(tmp_path / "k.disc", "cycle")
     ctx = f"seed={seed} flags={flags} thr={thr}"

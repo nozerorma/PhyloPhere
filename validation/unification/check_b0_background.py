@@ -84,7 +84,7 @@ def main():
             missing.append(g)
             continue
         p = subprocess.run([str(ct), "perm-replay", "-a", str(aln), "-t", str(cfg), "-s", str(work / "b0.tab"),
-                            "-o", str(work / f"{g}.out"), "--fmt", a.fmt, "--patterns", a.patterns, *flags, *thr,
+                            "--fmt", a.fmt, "--patterns", a.patterns, *flags, *thr,
                             "--export_perm_discovery", str(work / f"{g}.disc"), "--export_b0_background", str(work / f"{g}.bg")],
                            capture_output=True, text=True)
         if p.returncode != 0:

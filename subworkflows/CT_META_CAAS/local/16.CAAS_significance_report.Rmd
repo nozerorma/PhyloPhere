@@ -34,9 +34,6 @@ Gene, Position, pattern, caap_group) together with SCORING's published
 position_scores.tsv/gene_scores.tsv to annotate that pattern breakdown with
 the permulation-null significance columns (p.emp/p.adj_bh/p.adj_sam,
 gene_caas_pperm/gene_caas_pperm_adj) that only exist once SCORING has run.
-See /home/miguel/.claude/projects/-home-miguel-IBE-UPF-PhD-PhyloPhere/memory/project_retire_bootstrap_arm.md
-("Phase C late half") for the history this replaces (the dead recovery_boot
-null join).
 -->
 
 <style type="text/css">

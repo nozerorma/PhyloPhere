@@ -6,12 +6,14 @@ that rule changes the result and check that the scalar path and the kernel agree
 and that the rule is not vacuous (the scalar path itself differs with and without it).
 """
 import subprocess
+import sys
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 CT = Path(__file__).resolve().parents[2] / "subworkflows/CT/local/ct"
+REF = Path(__file__).resolve().parent / "reference_discovery.py"  # the scalar discovery
 
 # three pairs: (f1,b1) (f2,b2) (f3,b3); fg residues D, bg residues K
 TRAITS = "f1\t1\t1\nb1\t0\t1\nf2\t1\t2\nb2\t0\t2\nf3\t1\t3\nb3\t0\t3\n"
@@ -39,8 +41,8 @@ def _discover(tmp, seqs, thresholds, miss_pair, caap=True):
     caap_flag = ["--caap_mode"] if caap else []
     common = ["-a", "G1.fasta", "-t", "traits.tab", "--fmt", "fasta", "--patterns", "1,2,3", *caap_flag,
               "--max_conserved", "1", *thresholds, *flag]
-    _run([str(CT), "discovery", *common, "-o", "scalar.out", "--background_output", "scalar.bg"], tmp)
-    _run([str(CT), "perm-replay", "-a", "G1.fasta", "-t", "traits.tab", "-s", "b0.tab", "-o", "kernel.out",
+    _run([sys.executable, str(REF), *common, "-o", "scalar.out", "--background_output", "scalar.bg"], tmp)
+    _run([str(CT), "perm-replay", "-a", "G1.fasta", "-t", "traits.tab", "-s", "b0.tab", 
           "--fmt", "fasta", "--patterns", "1,2,3", *caap_flag, "--max_conserved", "1", *thresholds, *flag,
           "--export_perm_discovery", "kernel.disc", "--export_b0_background", "kernel.bg"], tmp)
     key = ["caap_group", "position", "caas"]

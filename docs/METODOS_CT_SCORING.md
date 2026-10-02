@@ -6,8 +6,8 @@ Documento de métodos, cotejado línea a línea con el código de la rama `nongr
 
 > **Nota sobre el test hipergeométrico.** El p-valor hipergeométrico **por sitio** que
 > tenía CAAStools clásico está **completamente eliminado** de la cadena CT. `discovery.tab`
-> ya no emite columna `pvalue` (cabeceras reales en [`disco.py:211-249`](../subworkflows/CT/local/modules/disco.py)),
-> y `7.CAAS_pattern_annotation.Rmd` **solo** integra el bootstrap. Las referencias a `pvalue` que
+> ya no emite columna `pvalue` (cabeceras reales en `_B0_DISCOVERY_HEADER` de [`perm_replay.py`](../subworkflows/CT/local/modules/perm_replay.py)),
+> y `7.CAAS_pattern_annotation.Rmd` solo describe los patrones y esquemas hallados. Las referencias a `pvalue` que
 > aún aparecen en el código de desambiguación son ramas defensivas muertas. El único
 > hipergeométrico que sobrevive en todo el pipeline está a nivel de *conjunto de genes*, no
 > de sitio: la **Parte 1 del test de Lachenbruch** en FCS (Fisher exacto = cola superior
@@ -152,7 +152,7 @@ dominio canónico) y **corte `max_fop`**.
 
 ---
 
-## C. Discovery CAAS/CAAP con hipótesis múltiples  (`caas_id.py`, `caap_id.py`, `disco.py`)
+## C. Discovery CAAS/CAAP con hipótesis múltiples  (`caas_id.py`, `caap_id.py`, `perm_replay.py`)
 
 Una fila de `caastools/discovery.tab` por **(gene, position, esquema, hipótesis)**.
 Cabeceras reales: `gene, mode, caap_group, trait, position, caas, [amino_encoded],
@@ -198,47 +198,20 @@ GS1}` × `trait ∈ {traitfile_H1..H4}` (las que superen la regla en cada esquem
 
 ---
 
-## D. Significación  (`7.CAAS_pattern_annotation.Rmd`) — **solo bootstrap**
-
-`meta_caas/meta_caas/<scheme>_meta_caas.tsv`. La única cantidad de significación por
-sitio es:
-
-**`recovery_boot` = `occurrences / total`** — fracción de **labelings fenotípicos
-permulados** (E.1) en los que el CAAS se vuelve a llamar en esa (posición, esquema). Se
-comporta como una p empírica: *baja* = raro bajo re-etiquetado del fenotipo = **distintivo
-del foreground real**. Alimenta el `phen_score` diagnóstico (H.3; T1: ya no factor del score).
+## D. Significación por sitio
 
 `gate_all` / `gate_sig` (mencionados en comentarios obsoletos de `scoring_compute.R`) ya
 **no existen**: no hay ningún gate de significación por sitio en el scoring; la
-priorización por sitio la dan `phen_score`, `pos_perm_p` y (a nivel gen) `gene_caas_pperm`.
+priorización por sitio la dan `pos_perm_p` y (a nivel gen) `gene_caas_pperm`.
 
 ---
 
-## E. Bootstrap con FOP + null de permulación
+## E. Null de permulación con FOP
 
-**Dos cosas distintas, ambas construidas sobre el mismo pool de permulaciones de fenotipo**
-generado por `permulations.R` (`RESAMPLE` en `ct_resample.nf` — no hay remuestreo de
-columnas ni de especies al azar; el modo `random` de `init_bootstrap.py` es legado y no
-está cableado).
+El null se construye sobre el pool de permulaciones de fenotipo generado por `permulations.R`
+(`RESAMPLE` en `ct_resample.nf`; no hay remuestreo de columnas ni de especies al azar).
 
-### E.1. Bootstrap sobre labelings permulados → `recovery_boot`  (`boot.py`, `boot_vec.py`)
-
-El kernel vectorizado (`VectorizedBootstrap`, BLAS, bit-idéntico al bucle escalar
-`caasboot`) fija la columna del alineamiento y **reevalúa la regla CAAS bajo cada labeling
-permulado** (cada "ciclo" es un vector fg/bg del pool). `F` (ciclos × especies) es la
-máscara de foreground por ciclo. `recovery_boot` = (nº de ciclos que llaman CAAS en esa
-posición/esquema) / (nº de ciclos).
-
-**Con FOP** (`params.multi_hypothesis`): el
-pool de remuestreo es `fop_labelings.tab` (etiquetas `<base>~H<m>`) y los aciertos se
-**colapsan a unidades de ciclo base** (`collapse_fop_hits_by_base`): un ciclo base cuenta
-sii **cualquiera** de sus `~H<m>` (hipótesis alternativas de ese ciclo nulo) llama un CAAS
-ahí. Es un OR a nivel discovery — sin ASR, sin pooling.
-
-*Ejemplo:* con 40 ciclos base, la columna 210 de `OPN1` recibe un CAAS `W/Y` en 3 de ellos
-(alguna hipótesis `~H<m>` lo llama) → **`recovery_boot(OPN1,210,US) = 3/40 = 0.075`**.
-
-### E.2. Permulación de fenotipo → *foreground-specificity null*  (`permulations.R`)
+### E.1. Permulación de fenotipo → *foreground-specificity null*  (`permulations.R`)
 
 Responde: *"¿el rasgo observado apunta a estos linajes más de lo que lo haría un rasgo
 aleatorio filogenéticamente emparejado?"*
@@ -274,10 +247,6 @@ aleatorio filogenéticamente emparejado?"*
      el `gene_caas_pperm` (H.6) y los tres tests de FCS (I.2). Sello `gene_stat =
      "size_adj_max"` (si no coincide con el observado, el consumidor deja `p.perm = NA` y
      pide reconstruir).
-
-**Diferencia clave `recovery_boot` vs `pos_perm_p`:** mismo pool de permulación; el
-primero es un OR a nivel discovery (barato, sin ASR), el segundo es el replay ASR completo
-y domain-pooled por hipótesis.
 
 ---
 
@@ -548,31 +517,23 @@ asr_pooled  = clamp01( replication · da_pooled )
 
 Tras §2b, la columna 210 de `OPN1` tiene **una fila por esquema**: US, GS4, GS3, GS2, GS1.
 
-### H.3. Score de dos ejes por fila (§2f) y null de posición (§2f-bis)
+### H.3. Score por fila (§2f) y null de posición (§2f-bis)
 
 ```
-phen_score = 1 − percent_rank(recovery_boot)      # T1: diagnóstico, ya no factor
 asr_score  = asr_path_score  (= asr_pooled)        # limpieza en el árbol
-caas_row   = asr_score                             # T1 decisión E
+caas_row   = asr_score
 ```
-
-`phen_score` se sigue calculando y emitiendo como columna diagnóstica pero ya no multiplica
-a `asr_score` (ni en observado ni en el null). La eliminación total de `recovery_boot` queda
-diferida. `percent_rank` sigue siendo genome-wide, por eso §2b colapsa las hipótesis primero.
 
 `pos_perm_p` (§2f-bis) se une por `(Gene, Position, caap_group)` **antes** del colapso de
 esquemas, para que ride en la misma `mean()` de §2g que los demás ejes.
 
-*Ejemplo:* `recovery_boot(OPN1,210) = 0.075`; su percentil genome-wide es bajo (raro bajo
-permulación) → `percent_rank ≈ 0.08` → **`phen_score ≈ 0.92`**.
-
-| esquema | `asr_score` | `phen_score` (diag.) | `caas_row` |
-|---------|-------------|----------------------|------------|
-| US  | 0.57 | 0.92 | **0.57** |
-| GS4 | 0.70 | 0.92 | 0.70 |
-| GS3 | 0.86 | 0.92 | 0.86 |
-| GS2 | 0.82 | 0.92 | 0.82 |
-| GS1 | 0.74 | 0.92 | 0.74 |
+| esquema | `asr_score` = `caas_row` |
+|---------|--------------------------|
+| US  | **0.57** |
+| GS4 | 0.70 |
+| GS3 | 0.86 |
+| GS2 | 0.82 |
+| GS1 | 0.74 |
 
 ### H.4. Agregación a Gene×Position (§2g)
 
@@ -580,7 +541,7 @@ permulación) → `percent_rank ≈ 0.08` → **`phen_score ≈ 0.92`**.
 
 - **`CAAS_score = mean(caas_row)`** *(no un máximo, no un sum: el nº de esquemas es una
   propiedad bioquímica del cambio, no evidencia)*.
-- `asr_score`, `derived_agreement`, `core`, `phen_score` (diag.), **`pos_perm_p`** =
+- `asr_score`, `derived_agreement`, `core`, **`pos_perm_p`** =
   **media** sobre esquemas.
 - `n_schemes`, `scheme_set = "GS1+GS2+GS3+GS4+US"`, `n_hypotheses = 4`,
   `supporting_hypotheses = "H1,H2,H3,H4"` — **descriptores**; la recurrencia **nunca**
@@ -655,7 +616,7 @@ La tabla se ordena por `gene_caas_score`; **los ejes NO se funden en un compuest
 - Nivel posición: `pos_perm_p` / `pos_perm_p_adj` en `position_scores.tsv`.
 - Nivel gen: `gene_caas_pperm{,_top,_bottom}` + `_adj` en `gene_scores.tsv`.
 
-Ambos del **replay ASR verbatim** de la permulación de fenotipo (E.2) → misma escala que el
+Ambos del **replay ASR verbatim** de la permulación de fenotipo (E.1) → misma escala que el
 score observado.
 
 ### I.2. En los enriquecimientos FCS — `p.perm` en los **3 tests**  (`fcs_enrich.R::fcs_run_all`)
@@ -701,11 +662,10 @@ filtradas por `change_side`, ranking sobre posiciones con `CAAS_score > 0`.
 | Selección | K = 3 pares (H1: A\|A, B\|B, C\|C) |
 | FOP | 4 hipótesis (H1–H4; alternativas A2 y C2) |
 | Discovery | filas para US/GS4/GS3/GS2/GS1 × H1–H4; patrón `WWW/YYY` (H1,H2), `WWF/YYY` (H3,H4) |
-| `recovery_boot` (D/E.1) | 0.075 (3/40 ciclos base) |
 | ASR por hipótesis (F.3) | asr ≈ 0.81 (H1), 0.51 (H3) bajo US; ≈ 0.81 todas bajo GS3 |
 | FOP pooling (H.2) | `asr_pooled` ≈ 0.57 (US), 0.86 (GS3); `da_US ≈ 0.67`, `da_GS3 = 1.0`; `convergence_schemes = "GS4,GS3,GS2,GS1"` |
 | `caas_row` (H.3) | = `asr_score`: 0.57 (US) … 0.86 (GS3) |
-| `pos_perm_p` (E.2) | 0.006 |
+| `pos_perm_p` (E.1) | 0.006 |
 | `CAAS_score` posición (H.4) | ≈ 0.74 (media de `asr_score` sobre esquemas), `change_side = "top"` |
 | `gene_caas_score` (H.5) | 0.94^12 ≈ 0.48 |
 | `gene_caas_pperm` (H.6) | ≈ 0.013 |

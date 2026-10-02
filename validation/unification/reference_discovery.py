@@ -1,37 +1,28 @@
-#                      _              _     
-#                     | |            | |    
-#   ___ __ _  __ _ ___| |_ ___   ___ | |___ 
-#  / __/ _` |/ _` / __| __/ _ \ / _ \| / __|
-# | (_| (_| | (_| \__ \ || (_) | (_) | \__ \
-#  \___\__,_|\__,_|___/\__\___/ \___/|_|___/
+#!/usr/bin/env python3
+"""The scalar CAAStools discovery of one alignment: a test-only reference, not part of the pipeline.
 
-__version__ = "2.0.0-paired"
+The pipeline finds the observed CAAS with the vectorized kernel of `ct perm-replay` (the b_0 labeling of the permulation
+core). This is the position-by-position implementation that kernel is checked against (test_discovery_kernel.py,
+test_kernel_fuzz.py, test_b0_discovery.py, check_b0_background.py): same options as the former `ct discovery`, same
+discovery.tab columns, same background file.
 
-'''
-A Convergent Amino Acid Substitution identification 
-and analysis toolbox
-
-Author:         Fabio Barteri (fabio.barteri@upf.edu)
-
-Contributors:   Alejandro Valenzuela (alejandro.valenzuela@upf.edu)
-                Xavier Farré (xfarrer@igtp.cat),
-                David de Juan (david.juan@upf.edu).
-
-Pair-aware implementation: Miguel Ramon (miguel.ramon@upf.edu)
-
-MODULE NAME: disco.py
-DESCRIPTION: runs the caas discovery on one single alignment. Returns non-validated caas candidate positions.
-DEPENDENCIES: alimport.py, caas_id.py, pindex.py
-CALLED BY: CT.
-
-'''
-
-
-from modules.caas_id import *
-from modules.alimport import *
-from modules.pindex import *
+    python3 reference_discovery.py -a G.fasta -t traits.tab -o discovery.tab --fmt fasta [--background_output bg] [filters]
+"""
+import functools
 import os
+import sys
+from optparse import OptionParser
 from os.path import exists
+from pathlib import Path
+
+CT_LOCAL = Path(os.environ.get("PHYLOPHERE_ROOT", Path(__file__).resolve().parents[2])) / "subworkflows/CT/local"
+sys.path.insert(0, str(CT_LOCAL))
+
+from modules.caas_id import *  # noqa: E402,F401,F403
+from modules.alimport import *  # noqa: E402,F401,F403
+from modules.pindex import *  # noqa: E402,F401,F403
+from modules.runslice import runslice  # noqa: E402
+
 
 ### FUNCTION discovery()
 ### Scans one single alignment to identify the CAAS or CAAP
@@ -204,3 +195,47 @@ def discovery(input_cfg, sliced_object, max_fg_gaps, max_bg_gaps, max_overall_ga
         print(f"Discovery complete: {len(results_to_write)} CAAS/CAAP found in {p.genename}")
     else:
         print(f"Discovery complete: No CAAS/CAAP found in {p.genename} - output file not created")
+
+
+def main(argv=None):
+    parser = OptionParser()
+    parser.add_option("-a", "--alignment", dest="single_alignment", default="none")
+    parser.add_option("--fmt", dest="ali_format", default="clustal")
+    parser.add_option("-t", "--traitfile", dest="config_file", default="none")
+    parser.add_option("-o", "--output", dest="output_file", default="none")
+    parser.add_option("--background_output", dest="background_output", default="background.output")
+    parser.add_option("--patterns", dest="patterns_string", default="1,2,3")
+    parser.add_option("--max_bg_gaps", dest="max_bg_gaps_string", default="NO")
+    parser.add_option("--max_fg_gaps", dest="max_fg_gaps_string", default="NO")
+    parser.add_option("--max_gaps", dest="max_gaps_string", default="NO")
+    parser.add_option("--max_gaps_per_position", dest="max_gaps_pos_string", default="0.5")
+    parser.add_option("--max_bg_miss", dest="max_bg_miss_string", default="NO")
+    parser.add_option("--max_fg_miss", dest="max_fg_miss_string", default="NO")
+    parser.add_option("--max_miss", dest="max_miss_string", default="NO")
+    parser.add_option("--miss_pair", dest="miss_pair", action="store_true", default=False)
+    parser.add_option("--max_conserved", dest="max_conserved", default="0")
+    parser.add_option("--caap_mode", dest="caap_mode", action="store_true", default=False)
+    options, _ = parser.parse_args(argv)
+    if "none" in (options.single_alignment, options.config_file, options.output_file):
+        parser.error("-a, -t and -o are required")
+
+    discovery(
+        input_cfg=options.config_file,
+        sliced_object=runslice(options),
+        max_fg_gaps=options.max_fg_gaps_string,
+        max_bg_gaps=options.max_bg_gaps_string,
+        max_overall_gaps=options.max_gaps_string,
+        max_fg_miss=options.max_fg_miss_string,
+        max_bg_miss=options.max_bg_miss_string,
+        max_overall_miss=options.max_miss_string,
+        miss_pair=options.miss_pair,
+        max_conserved=int(options.max_conserved),
+        caap_mode=options.caap_mode,
+        admitted_patterns=options.patterns_string,
+        output_file=options.output_file,
+        background_output_file=options.background_output,
+    )
+
+
+if __name__ == "__main__":
+    main()

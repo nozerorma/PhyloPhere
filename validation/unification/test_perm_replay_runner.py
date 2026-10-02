@@ -1,4 +1,4 @@
-"""run_ct_perm_replay_batch.sh: two-column manifest, no discovery filter, no FOP option.
+"""run_ct_perm_replay_batch.sh: two-column manifest, no discovery filter, no FOP option, no counts file.
 
 One test runs the batch runner with a stand-in `ct` that records its arguments; the other runs it with the real `ct`
 on the PEPC alignment and compares the exported perm-discovery rows with a direct `ct perm-replay` call.
@@ -42,6 +42,7 @@ def test_the_runner_passes_no_discovery_filter_and_no_fop_option(tmp_path):
     assert len(calls) == 2
     for c in calls:
         assert "--discovery" not in c and "--fop" not in c.split()
+        assert "-o" not in c.split() and "--progress_log" not in c  # no counts file, no progress log
         assert "--export_perm_discovery" in c
     assert _runner(tmp_path, fake, "G1\tG1.fa\n", "cfg", "lab.tab", "--fop", "1").returncode != 0  # the option is gone
 
@@ -68,7 +69,7 @@ def test_the_runner_with_the_real_ct_exports_what_a_direct_call_exports(tmp_path
     cfg, lab = _pepc_inputs(tmp_path)
     r = _runner(tmp_path, CT, "PEPC\tPEPC.fa\n", cfg, lab)
     assert r.returncode == 0, r.stdout + r.stderr
-    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), "-o", "d.out",
+    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), 
                              "--fmt", "fasta", *ARGS, "--export_perm_discovery", "d.disc"],
                             cwd=tmp_path, capture_output=True, text=True)
     assert direct.returncode == 0, direct.stdout + direct.stderr
@@ -94,7 +95,7 @@ def test_the_runner_b0_export_equals_a_direct_call(tmp_path):
     cfg, lab = _pepc_inputs(tmp_path)
     r = _runner(tmp_path, CT, "PEPC\tPEPC.fa\n", cfg, lab, "--export-b0", "1")
     assert r.returncode == 0, r.stdout + r.stderr
-    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), "-o", "d.out",
+    direct = subprocess.run([str(CT), "perm-replay", "-a", "alignments/PEPC.fa", "-t", str(cfg), "-s", str(lab), 
                              "--fmt", "fasta", *ARGS, "--export_b0_discovery", "d.b0", "--export_b0_background", "d.bg"],
                             cwd=tmp_path, capture_output=True, text=True)
     assert direct.returncode == 0, direct.stdout + direct.stderr

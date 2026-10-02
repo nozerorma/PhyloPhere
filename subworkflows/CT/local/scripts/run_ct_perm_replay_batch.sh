@@ -8,7 +8,6 @@ resampled_path=""
 workers="1"
 ali_format=""
 ct_bin=""
-progress_log="0"
 export_groups="0"
 export_perm_discovery="0"
 export_b0="0"
@@ -43,10 +42,6 @@ while [[ $# -gt 0 ]]; do
             ;;
         --ct-bin)
             ct_bin="$2"
-            shift 2
-            ;;
-        --progress-log)
-            progress_log="$2"
             shift 2
             ;;
         --export-groups)
@@ -177,19 +172,14 @@ while IFS=$'\t' read -r alignment_id alignment_name _; do
 
     alignment_path="alignments/$alignment_name"
 
-    # -o: the counts file that `ct perm-replay` still requires; nothing reads it.
     declare -a cmd=(
         "${base_cmd[@]}"
         -a "$alignment_path"
         -t "$caas_config"
         -s "$resampled_path"
-        -o "${alignment_id}.perm_replay.output"
         --fmt "$ali_format"
     )
 
-    if [[ "$progress_log" == "1" ]]; then
-        cmd+=(--progress_log "${alignment_id}.progress.log")
-    fi
     if [[ "$export_groups" == "1" ]]; then
         cmd+=(--export_groups "${alignment_id}.perm_replay.groups.output")
     fi

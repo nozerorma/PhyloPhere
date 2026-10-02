@@ -193,7 +193,6 @@ process CAAS_CORE_BATCHED {
             --workers ${task.cpus} \\
             --ali-format ${params.ali_format} \\
             --ct-bin ${ctBinary} \\
-            --progress-log 0 \\
             --export-groups 0 \\
             --export-perm-discovery 1 \\
             --export-b0 1 \\

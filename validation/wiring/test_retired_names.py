@@ -46,3 +46,22 @@ def test_no_tracked_file_names_a_process_of_the_former_observed_chain():
             continue
         hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED_OBSERVED.search(line)]
     assert not hits, "\n".join(hits)
+
+
+ALLOWED_KERNEL = ("archive/", "validation/", "style/", "docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md")
+RETIRED_KERNEL = re.compile(r"modules\.disco\b|\bdisco\.py\b|\bct discovery\b|perm_replay\.output|collapse_fop_hits_by_base|parse_discovery_positions"
+                            r"|recovery_boot|simtrait_revive_from_dir|--progress[-_]log")
+
+
+def test_no_tracked_file_names_the_scalar_discovery_or_the_perm_replay_counts_path():
+    files = subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split("\0")
+    hits = []
+    for name in filter(None, files):
+        if name.startswith(ALLOWED_KERNEL):
+            continue
+        try:
+            text = (ROOT / name).read_text()
+        except (UnicodeDecodeError, FileNotFoundError, IsADirectoryError):
+            continue
+        hits += [f"{name}:{n}: {line.strip()[:100]}" for n, line in enumerate(text.splitlines(), 1) if RETIRED_KERNEL.search(line)]
+    assert not hits, "\n".join(hits)

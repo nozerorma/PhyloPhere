@@ -26,7 +26,7 @@ DISCOVERY_SUFFIX = ".b0.discovery.tsv"
 BACKGROUND_SUFFIX = ".b0.background"
 MASTER_SUFFIX = ".master.csv.gz"
 
-# the columns of `ct discovery`, with the two conserved-pair columns: what an empty discovery.tab carries
+# the columns of discovery.tab, with the two conserved-pair columns: what an empty discovery.tab carries
 EMPTY_DISCOVERY_HEADER = ["gene", "mode", "caap_group", "trait", "position", "caas", "amino_encoded", "pattern",
                           "ffgn", "fbgn", "gfg", "gbg", "mfg", "mbg", "ffg", "fbg", "ms", "is_conserved_meta", "conserved_pair"]
 

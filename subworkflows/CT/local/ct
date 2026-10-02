@@ -48,11 +48,9 @@ Help for single tool:   > ct [tool] --help
 Tools           Description
 --------        -------------------------------------------------
 
-discovery       Detects Convergent Amino Acid Substitutions (CAAS) from
-                a single Multiple Sequence Alignment (MSA).
-
-perm-replay     Reruns and rescores resampled labelings for CAAS pattern
-                matches on a single MSA.
+perm-replay     Replays labelings (the real one, b_0, and resampled ones) over
+                a single Multiple Sequence Alignment (MSA) and finds the CAAS
+                of each.
 
 '''
 
@@ -79,7 +77,7 @@ if "help" in tool.lower() or tool.lower == "-h":                                
     print(genhelp)                                                      # Print toolbox-wide help
     exit()
 
-if tool.lower() not in ("discovery", "perm-replay"):          # Check: the user mistyped the name of a tool
+if tool.lower() != "perm-replay":          # Check: the user mistyped the name of a tool
     print(application_info)
     print(genhelp)                                                      # Print toolbox-wide help
     print("\n\n****ERROR: no tool named", tool + "\n\n")
@@ -88,181 +86,7 @@ if tool.lower() not in ("discovery", "perm-replay"):          # Check: the user 
 
 
 
-#### TOOL 1. DISCOVERY ######################################################################################################
-########################################################################################################################
-
-if tool.lower() == "discovery":
-
-    ### 1.1 Init the input parser
-    parser = OptionParser()
-
-
-    ### 1.2 The mandatory inputs
-
-    ###     1.2.1 Input alignment
-    parser.add_option("-a", "--alignment", dest="single_alignment",
-                    help="Multiple Sequence Alignment (MSA) file.", default = "none")
-    ###     1.2.2 Alignment format
-    parser.add_option("--fmt", dest="ali_format",
-                    help="File format of the MSA file. Default: clustal. Accepted: clustal, emboss, fasta, \
-                    fasta-m10, ig, maf, mauve, msf, nexus, phylip, phylip-sequential, phylip-relaxed, stockholm.", default = "clustal")
-    ###     1.2.3 Config file
-    parser.add_option("-t", "--traitfile", dest="config_file",
-                    help="The trait config file (read documentation for file formatting)", default = "none")
-
-    ###     1.2.4 Output file (the table)
-    parser.add_option("-o", "--output", dest="output_file",
-                    help="The output file, where the CAAS discovery table will be printed", default = "none")
-    ###     1.2.5 Background coverage output
-    parser.add_option("--background_output", dest="background_output",
-                    help="Output file with tested positions per gene (background coverage)", default = "background.output")
-
-
-
-    ### 1.3 Optional and filtering inputs
-
-    ###     1.3.1 limit output to pattern (default: all patterns)
-
-    # Which patterns to be included
-    parser.add_option("--patterns", dest="patterns_string",
-                    help="Limit the result to some CAAS patterns. Patterns are indicated with numbers from 1 to 3 and must \
-                        be provided as comma separated (e.g.: -s 1,2,3). See documentation for more details on the patterns", default = "1,2,3")
-
-    ###     1.3.2 filter per gaps
-
-    # Max background gaps
-    parser.add_option("--max_bg_gaps", dest="max_bg_gaps_string",
-                    help="Filter by number of gaps in the background\
-                        e.g. --max_bg_gaps 3 will accept positions with less than 3 gaps in bg. Default = nofilter (all gaps accepted).", default = "NO")
-
-    # Max foreground gaps
-    parser.add_option("--max_fg_gaps", dest="max_fg_gaps_string",
-                    help="Filter by number of gaps in the foreground.\
-                        e.g. --max_bg_gaps 3 will accept positions with less than 3 gaps in fg. Default = nofilter (all gaps accepted).", default = "NO")
-
-    # Max overall gaps (fg + bg)
-    parser.add_option("--max_gaps", dest="max_gaps_string",
-                    help="Filter by number of gaps in foreground and background.\
-                        e.g. --max_bg_gaps 3 will accept positions with less than 3 gaps in fg and bg. Default = nofilter (all gaps accepted).", default = "NO")
-
-    # Max gaps per position
-    parser.add_option("--max_gaps_per_position", dest="max_gaps_pos_string",
-                    help="Max gap ratio admitted in a single alignment position.", default = "0.5")
-
-    ###     1.3.3 filter for missing species
-
-    # Max background missing species
-    parser.add_option("--max_bg_miss", dest="max_bg_miss_string",
-                    help="Filter by number of miss in the background\
-                        e.g. --max_bg_miss 3 will accept positions with less than 3 miss in bg. Default = nofilter (all miss accepted).", default = "NO")
-
-    ###     1.3.4 Max foreground missing species
-    parser.add_option("--max_fg_miss", dest="max_fg_miss_string",
-                    help="Filter by number of miss in the foreground.\
-                        e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg. Default = nofilter (all miss accepted).", default = "NO")
-
-    ###     1.3.5 Max overall missing species (fg + bg)
-    parser.add_option("--max_miss", dest="max_miss_string",
-                    help="Filter by number of miss in foreground and background.\
-                        e.g. --max_bg_miss 3 will accept positions with less than 3 miss in fg and bg. Default = nofilter (all miss accepted).", default = "NO")
-
-    ###     1.3.6 Pair-aware missing/gap filtering
-    parser.add_option("--miss_pair", dest="miss_pair", action="store_true",
-                    help="Enable pair-aware missing/gap filtering (paired mode is mandatory). \
-                        When enabled and max thresholds are equal, validates that missing/gapped species come from matching pairs. Default = disabled.", default = False)
-
-    ###     1.3.7 Conserved pair tolerance
-    parser.add_option("--max_conserved", dest="max_conserved",
-                    help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
-                        Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
-
-    ###     1.3.8 CAAP mode (detect property-based convergence)
-    parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
-                    help="Enable CAAP (Convergent Amino Acid Properties) mode. \
-                        Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
-                        Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
-
-
-    ### 1.4 Usage
-
-    parser.usage = "ct discoevery -a $alignment_file -t $trait_file -o $output_file --fmt $alignment_format (default:clustal)"
-
-    ### 1.5 Parse the options
-
-    (options, args) = parser.parse_args()
-
-    ### 1.6 Check the options
-
-    missing_option_messages = []
-
-    if options.single_alignment == "none":
-        missing_option_messages.append("No input MSA file provided")
-
-    if options.config_file == "none":
-        missing_option_messages.append("No config file provided")
-
-    if options.output_file == "none":
-        missing_option_messages.append("Output not specified")
-
-    if len(missing_option_messages) > 0:
-        print("\n" + application_info)
-        print("\n\n****ERROR: mandatory i/o information missing:")
-        print("\n".join(missing_option_messages))
-        print("")
-        print(parser.usage)
-        print("")
-        print("For further info: ct discovery --help")
-        print("")
-        exit()
-
-
-    ### 1.7 Import the modules
-
-    from modules.disco import *
-    from modules.runslice import runslice
-
-    ### 1.8 PROCEDURE Step 1- Slice the alignment
-
-    sliced_alignment = runslice(options)
-
-    ### 1.9 PROCEDURE Step 2- Run the discovery
-
-    print(application_info)
-    print("")
-
-    print("[DISCOVERY TOOL] - Scanning", options.single_alignment, "with phenotype information from", options.config_file + "\n\n")
-
-
-    discovery(
-                input_cfg = options.config_file,
-                sliced_object = sliced_alignment,
-
-                max_fg_gaps = options.max_fg_gaps_string,
-                max_bg_gaps = options.max_bg_gaps_string,
-                max_overall_gaps = options.max_gaps_string,
-
-                max_fg_miss = options.max_fg_miss_string,
-                max_bg_miss = options.max_bg_miss_string,
-                max_overall_miss = options.max_miss_string,
-
-                miss_pair = options.miss_pair,
-                max_conserved = int(options.max_conserved),
-
-                caap_mode = options.caap_mode,
-
-                admitted_patterns = options.patterns_string,
-                output_file = options.output_file,
-                background_output_file = options.background_output)
-
-    if exists(options.output_file):
-        print("\n\nDone. CAAS discovery table is available at:\n\n\t" + options.output_file + "\n\n")
-    else:
-        print("\n\nWarning: No CAAS Found, CAAStools generated no output file.\n")
-
-
-
-
-#### TOOL 2. PERM-REPLAY ######################################################################################################
+#### TOOL 1. PERM-REPLAY ######################################################################################################
 ########################################################################################################################
 
 if tool.lower() == "perm-replay":
@@ -287,10 +111,6 @@ if tool.lower() == "perm-replay":
     parser.add_option("--fmt", dest="ali_format",
                     help="File format of the MSA file. Default: clustal. Accepted: clustal, emboss, fasta, \
                     fasta-m10, ig, maf, mauve, msf, nexus, phylip, phylip-sequential, phylip-relaxed, stockholm.", default = "clustal")
-    ###     3.2.5 Output file (the table)
-    parser.add_option("-o", "--output", dest="output_file",
-                    help="The output file, where the perm-replay table will be printed", default = "none")
-
 
 
     ### 3.3 Optional and filtering inputs
@@ -350,48 +170,27 @@ if tool.lower() == "perm-replay":
                     help="Maximum number of pairs allowed to share the same amino acid between FG and BG. \
                         Enables relaxed CAAS identification. Default = 0 (strict mode).", default = "0")
 
-    ###     3.3.8 Discovery file for position filtering (optimization)
-    parser.add_option("--discovery", dest="discovery_file",
-                    help="Path to discovery output file. When provided, perm-replay will only test positions that had CAAS in discovery, \
-                        resulting in massive speedup (typically 100-1000x). Highly recommended for large alignments. Default = test all positions.", default = "none")
-
-    ###     3.3.9 Progress logging
-    parser.add_option("--progress_log", dest="progress_log",
-                    help="Path to file for logging progress with timestamps and ETA. Especially useful for directory-based perm-replay. Default = stdout only.", default = "none")
-
     parser.add_option("--caap_mode", dest="caap_mode", action="store_true",
                     help="Enable CAAP (Convergent Amino Acid Properties) mode. \
                         Detects convergence based on physicochemical properties using 5 grouping schemes (GS0-GS4). \
                         Each position generates one row per matching scheme with scheme-specific p-values. Default = disabled.", default = False)
 
-    ###     3.3.10 Debug: export permuted groups
+    ###     3.3.8 Exports (at least one is required)
     parser.add_option("--export_groups", dest="export_groups",
-                    help="Path to output file for exporting the permuted trait groups used in each perm-replay cycle (DEBUG). Default = disabled.", default = None)
+                    help="Path to output file for exporting the permuted trait groups used in each cycle (DEBUG). Default = disabled.", default = None)
 
-    ###     3.3.11 Debug: export permuted discovery
     parser.add_option("--export_perm_discovery", dest="export_perm_discovery",
-                    help="Path to output file for exporting the per-cycle permuted discovery results (DEBUG). Default = disabled.", default = None)
+                    help="Path to output file for the per-labeling discovery results (the CAAS found under each labeling). Default = disabled.", default = None)
 
-    ###     3.3.11b b_0 background (positions tested by the real labeling)
-    ###     3.3.11c b_0 discovery rows (the discovery.tab rows of the real labeling)
     parser.add_option("--export_b0_discovery", dest="export_b0_discovery",
-                    help="Path to output file for the discovery.tab rows of the b_0 labeling(s), with the columns of `ct discovery`, named by the traits of -t and in discovery.tab order. Needs -s to be a single resample file. Written only when there is a row. Default = disabled.", default = None)
+                    help="Path to output file for the discovery.tab rows of the b_0 labeling(s), named by the traits of -t and in discovery.tab order. Written only when there is a row. Default = disabled.", default = None)
 
     parser.add_option("--export_b0_background", dest="export_b0_background",
-                    help="Path to output file for the positions tested by the b_0 labeling(s): '<gene>\\t<pos,pos,...|NULL>', same as discovery's background output. Default = disabled.", default = None)
-
-    ###     3.3.12 FOP multi-hypothesis mode (Gap A)
-    parser.add_option("--fop", dest="fop_mode", action="store_true",
-                    help="FOP multi-hypothesis mode. Use fop_labelings.tab (fanned '<base>~H<m>' labelings, \
-                        one per null cycle x Dunn-independent alternative hypothesis) as the resample source \
-                        instead of resample_*.tab, and collapse CAAS hits to base-cycle units: a base cycle \
-                        counts once iff ANY of its ~H<m> labelings is a CAAS at that (position, scheme). \
-                        pvalue_boot = base-cycles-with-a-hit / n_distinct_base_cycles. When -s is a directory, \
-                        fop_labelings.tab is looked up inside it. Default = disabled.", default = False)
+                    help="Path to output file for the positions tested by the b_0 labeling(s): '<gene>\\t<pos,pos,...|NULL>'. Default = disabled.", default = None)
 
     ### 3.4 Usage
 
-    parser.usage = "ct perm-replay -a $alignment_file -t $trait_config_file -s $resampled_traits_directory -o $output_file --fmt $alignment_format (default:clustal)\n\nNOTE: -s can accept either a directory (recommended, contains resample_*.tab files) or a legacy single file\nNOTE: Use --discovery $discovery_file for massive speedup (only tests positions with CAAS in discovery)\nNOTE: Use --progress_log $file to track progress with timestamps and ETA\nNOTE: Use --export_groups $file to export permuted groups (DEBUG)\nNOTE: Use --export_perm_discovery $file to export permuted discovery results (DEBUG)"
+    parser.usage = "ct perm-replay -a $alignment_file -t $trait_config_file -s $labelings_file --fmt $alignment_format (default:clustal) [--export_perm_discovery $file] [--export_b0_discovery $file] [--export_b0_background $file] [--export_groups $file]\n\nNOTE: -s is one labelings file: tag, foreground species, background species (tab-separated, no header)\nNOTE: at least one export is required"
 
     ### 3.5 Parse the options
 
@@ -408,10 +207,10 @@ if tool.lower() == "perm-replay":
         missing_option_messages.append("You must provide a trait config file")
 
     if options.simtraits == "none":
-        missing_option_messages.append("No config file provided")
+        missing_option_messages.append("No labelings file provided")
 
-    if options.output_file == "none":
-        missing_option_messages.append("Output not specified")
+    if not (options.export_groups or options.export_perm_discovery or options.export_b0_discovery or options.export_b0_background):
+        missing_option_messages.append("No export requested (--export_perm_discovery, --export_b0_discovery, --export_b0_background or --export_groups)")
 
     if len(missing_option_messages) > 0:
         print("\n" + application_info)
@@ -422,12 +221,12 @@ if tool.lower() == "perm-replay":
         print("")
         print("For further info: ct perm-replay --help")
         print("")
-        exit()
+        exit(1)
 
     ### 3.7 Import the modules
 
     from modules.perm_replay import *
-    from modules.perm_replay_io import simtrait_revive, get_resample_info
+    from modules.perm_replay_io import simtrait_revive
     from modules.runslice import runslice
     import os
 
@@ -442,30 +241,14 @@ if tool.lower() == "perm-replay":
 
     sliced_alignment = runslice(options)
 
-    ###     3.8.2 - Detect if input is directory or file, load accordingly
+    ###     3.8.2 - Load the labelings
 
-    if options.fop_mode:
-        # FOP (Gap A): resample source is the single fanned file fop_labelings.tab.
-        # run_perm_replay_on_alignment resolves a directory to fop_labelings.tab inside
-        # it and does the base-cycle collapse; just pass the path through.
-        print(f"[FOP] multi-hypothesis mode: resample source = {options.simtraits}")
-        perm_replay_input = options.simtraits
-    elif os.path.isdir(options.simtraits):
-        # Directory mode: pass directory path directly, run_perm_replay_on_alignment will handle loading
-        print(f"Detected directory-based resampled traits: {options.simtraits}")
-        perm_replay_input = options.simtraits
-    else:
-        # Single file mode: load into memory (backward compatibility)
-        print(f"Detected single-file resampled traits: {options.simtraits}")
-        perm_replay_input = simtrait_revive(options.simtraits)
+    if os.path.isdir(options.simtraits):
+        print(f"\n****ERROR: -s must be one labelings file, not a directory: {options.simtraits}\n")
+        exit(1)
+    perm_replay_input = simtrait_revive(options.simtraits)
 
-    ###     3.8.3 - Run perm-replay on the alignment file
-
-    # Prepare discovery file parameter (None if not provided)
-    disambiguation_input = None if options.discovery_file == "none" else options.discovery_file
-
-    # Prepare progress log parameter
-    progress_log_input = None if options.progress_log == "none" else options.progress_log
+    ###     3.8.3 - Replay the labelings over the alignment
 
     run_perm_replay_on_alignment(
                     trait_config_file= options.config_file,
@@ -483,19 +266,15 @@ if tool.lower() == "perm-replay":
                     miss_pair = options.miss_pair,
                     max_conserved = int(options.max_conserved),
 
-                    the_admitted_patterns = options.patterns_string,
-                    output_file = options.output_file,
-                    discovery_file = disambiguation_input,
-                    progress_log = progress_log_input,
+    the_admitted_patterns = options.patterns_string,
                     caap_mode = options.caap_mode,
                     export_groups = options.export_groups,
                     export_perm_discovery = options.export_perm_discovery,
-                    fop_mode = options.fop_mode,
                     export_b0_background = options.export_b0_background,
                     export_b0_discovery = options.export_b0_discovery
                     )
 
     ###     3.8.4 Final output
-    print("\n\nPerm-replay information available in", options.output_file)
+    print("\n\nPerm-replay done.")
 
 

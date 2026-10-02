@@ -256,10 +256,7 @@ characterization is a separate evidence line handled by ENRICHMENT
 
 For each alignment position, `CAAS_score` is the mean of `caas_row` across the
 biochemical schemes (US, GS1-GS4) that detected the substitution. `caas_row`
-is the product of two orthogonal `[0,1]` evidence axes:
-
-1. **Phenotype evolution axis**: `phen_score = 1 - recovery_boot` (permutation evidence; lower p means stronger signal).
-2. **Position evolution axis**: `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score.
+is `asr_score`/`asr_path_score`, the ancestral-state-reconstruction path score of the row.
 
 How many of the five schemes detect a position (`n_schemes`) and which ones
 (`scheme_set`) are reported as descriptors, not inputs to the score: a
@@ -283,7 +280,7 @@ inflate the score independently of evidence strength.
 
 ### Key output columns
 
-**`position_scores.tsv`**: `CAAS_score`, `phen_score`, `asr_score`, `pvalue`,
+**`position_scores.tsv`**: `CAAS_score`, `asr_score`, `pvalue`,
 `change_side`, `gate_sig`, `n_schemes`, `scheme_set`.
 
 **`gene_scores.tsv`**: `gene_caas_score` (+ `_top`/`_bottom`), `accum_cct_p`

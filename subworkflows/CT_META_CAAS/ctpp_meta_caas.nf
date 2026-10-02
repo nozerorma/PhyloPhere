@@ -64,8 +64,7 @@ process CAAS_META_CAAS_REPORT {
 // upstream of SCORING in the live DAG) against SCORING's published
 // position_scores.tsv (p.emp/p.adj_bh/p.adj_sam) and gene_scores.tsv
 // (gene_caas_pperm/gene_caas_pperm_adj) to annotate that breakdown with the
-// permulation-null significance the dead recovery_boot arm used to (badly)
-// stand in for. See 16.CAAS_significance_report.Rmd for the join logic.
+// permulation-null significance. See 16.CAAS_significance_report.Rmd for the join logic.
 process CAAS_SIGNIFICANCE_REPORT {
     label 'process_reporting'
     publishDir path: "${params.outdir}/meta_caas", mode: 'copy', overwrite: true, pattern: '{significance/**}'

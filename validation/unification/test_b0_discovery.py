@@ -1,7 +1,7 @@
 """`ct perm-replay --export_b0_discovery`: the discovery.tab rows of the b_0 labelings, from the kernel.
 
 The kernel decides which (position, hypothesis, scheme) are CAAS; the rows carry the 17 or 19 columns of
-`ct discovery` (the scalar CAAStools output), named by the real traitfiles of the design and in a fixed
+the scalar discovery (reference_discovery.py), named by the real traitfiles of the design and in a fixed
 order (position, then trait by file name, then scheme). The scalar's own row order inside a position follows the
 glob order of the trait directory, which is the filesystem's, so both sides are sorted by that key before they are
 compared. `ms` (missing species) is compared as a set: the scalar builds it from a Python set, so its order changes
@@ -27,6 +27,7 @@ from test_kernel_fuzz import _case  # noqa: E402
 
 ROOT = Path(os.environ.get("PHYLOPHERE_ROOT", HERE.parents[1]))
 CT = ROOT / "subworkflows/CT/local/ct"
+REF = Path(__file__).resolve().parent / "reference_discovery.py"  # the scalar discovery
 GOLD = HERE / "golden/pepc_c4_complete"
 B0_SCRIPT = ROOT / "subworkflows/CT/local/scripts/build_b0_labelings.py"
 
@@ -83,7 +84,7 @@ PEPC_ARGS = ["--patterns", "1,2,3", "--miss_pair", "--caap_mode", "--max_conserv
 
 
 def test_the_pepc_b0_rows_equal_the_frozen_discovery_on_all_19_columns(pepc):
-    _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "b0.tab", "-o", "k.out", "--fmt", "fasta", *PEPC_ARGS,
+    _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "b0.tab", "--fmt", "fasta", *PEPC_ARGS,
           "--export_b0_discovery", "b0.discovery"], pepc)
     got = _table(pepc / "b0.discovery")
     want = pd.read_csv(gzip.open(GOLD / "discovery.tab.gz", "rt"), sep="\t", dtype=str, keep_default_na=False)
@@ -95,9 +96,9 @@ def test_the_pepc_b0_rows_equal_the_frozen_discovery_on_all_19_columns(pepc):
 def test_only_the_b0_labelings_are_exported_when_permuted_labelings_are_in_the_file(pepc):
     b0 = (pepc / "b0.tab").read_text()
     (pepc / "mixed.tab").write_text(b0 + b0.replace("b_0~", "b_1~") + b0.replace("b_0~", "b_2~"))
-    _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "b0.tab", "-o", "a.out", "--fmt", "fasta", *PEPC_ARGS,
+    _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "b0.tab", "--fmt", "fasta", *PEPC_ARGS,
           "--export_b0_discovery", "alone.discovery"], pepc)
-    _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "mixed.tab", "-o", "m.out", "--fmt", "fasta", *PEPC_ARGS,
+    _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "mixed.tab", "--fmt", "fasta", *PEPC_ARGS,
           "--export_b0_discovery", "m.discovery", "--export_perm_discovery", "m.disc"], pepc)
     assert {c.split("~")[0] for c in _table(pepc / "m.disc")["cycle"]} == {"b_0", "b_1", "b_2"}  # the null labelings do hit
     mixed, alone = _table(pepc / "m.discovery"), _table(pepc / "alone.discovery")
@@ -109,8 +110,8 @@ def test_only_the_b0_labelings_are_exported_when_permuted_labelings_are_in_the_f
 def test_the_b0_rows_equal_the_scalar_discovery_on_random_input(tmp_path, seed):
     rng = random.Random(seed)
     thr, flags = _case(rng, tmp_path)
-    _run([CT, "discovery", "-a", "G1.fasta", "-t", "cfg", "-o", "s.out", "--fmt", "fasta", *flags, *thr], tmp_path)
-    _run([CT, "perm-replay", "-a", "G1.fasta", "-t", "cfg", "-s", "b0.tab", "-o", "k.out", "--fmt", "fasta", *flags, *thr,
+    _run([sys.executable, str(REF), "-a", "G1.fasta", "-t", "cfg", "-o", "s.out", "--fmt", "fasta", *flags, *thr], tmp_path)
+    _run([CT, "perm-replay", "-a", "G1.fasta", "-t", "cfg", "-s", "b0.tab", "--fmt", "fasta", *flags, *thr,
           "--export_b0_discovery", "k.discovery"], tmp_path)
     scalar = tmp_path / "s.out"
     if not scalar.is_file():
@@ -140,7 +141,7 @@ def test_the_missing_species_column_does_not_depend_on_the_hash_seed(tmp_path):
             "--max_fg_miss", "9", "--max_bg_miss", "9", "--max_miss", "9"]
     outs = []
     for hs in ("1", "2", "3", "4", "5"):
-        _run([CT, "perm-replay", "-a", "G1.fasta", "-t", "cfg", "-s", "b0.tab", "-o", "k.out", "--fmt", "fasta", *args,
+        _run([CT, "perm-replay", "-a", "G1.fasta", "-t", "cfg", "-s", "b0.tab", "--fmt", "fasta", *args,
               "--export_b0_discovery", f"k{hs}.discovery"], tmp_path, env={"PYTHONHASHSEED": hs})
         outs.append((tmp_path / f"k{hs}.discovery").read_bytes())
     rows = [line.split("\t") for line in outs[0].decode().splitlines()[1:]]
@@ -150,6 +151,6 @@ def test_the_missing_species_column_does_not_depend_on_the_hash_seed(tmp_path):
 
 
 def test_the_export_needs_a_resample_file(pepc):
-    p = _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "cfg", "-o", "d.out", "--fmt", "fasta", *PEPC_ARGS,
+    p = _run([CT, "perm-replay", "-a", "PEPC.fasta", "-t", "cfg", "-s", "cfg", "--fmt", "fasta", *PEPC_ARGS,
               "--export_b0_discovery", "d.discovery"], pepc, ok=False)
     assert p.returncode != 0
