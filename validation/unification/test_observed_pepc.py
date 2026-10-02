@@ -73,6 +73,11 @@ def test_master_csv_matches_the_frozen_pipeline_run(inputs, tmp_path):
     _assert_same_up_to_float_noise(got, gold)
 
 
+def test_precomputed_asr_mode_reproduces_the_same_master(inputs, tmp_path):
+    """The cache holds PEPC's ASR, so reading it must give exactly what computing (cache hit) gave."""
+    _assert_same_up_to_float_noise(_run(inputs, tmp_path / "out", "--asr-mode", "precomputed"), _golden())
+
+
 @pytest.mark.skipif(not os.environ.get("RUN_SLOW"), reason="decoration costs ~80 s; set RUN_SLOW=1")
 def test_decoration_does_not_change_the_master_csv(inputs, tmp_path):
     _assert_same_up_to_float_noise(_run(inputs, tmp_path / "out", "--run-diagnostics", "--verbose"), _golden())

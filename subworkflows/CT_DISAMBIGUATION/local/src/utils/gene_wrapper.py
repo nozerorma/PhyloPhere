@@ -27,15 +27,7 @@ sys.path.insert(0, str(project_root / "single_gene_pipeline"))
 sys.path.insert(0, str(project_root / "src"))
 
 from src.convergence.disambiguate_single import analyze_gene_disambiguation, PositionAxes
-from src.asr.asr_single import (
-    load_alignment_and_mappings,
-    load_and_match_tree,
-    run_asr_pipeline,
-    load_precomputed_asr,
-)
-
-from src.phylo.tree_utils import build_tree_node_mapping, extract_tip_labels
-from src.utils.concurrency import plan_concurrency, init_worker, codeml_slot
+from src.utils.concurrency import plan_concurrency, init_worker
 from src.data.loaders import (
     list_gene_caas_positions,
     list_gene_caas_entries,
@@ -44,7 +36,7 @@ from src.data.loaders import (
     _parse_gene_pos_token,
 )
 from src.utils.io_utils import find_gene_alignment
-from src.core.driver import pool_labelings, score_labelings
+from src.core.driver import load_gene_context, pool_labelings, score_labelings
 from src.core.scores import DIRECTIONS, collapse_sides, direction_values, gene_scores, position_score
 from src.data.models import CAASPosition
 
@@ -223,88 +215,16 @@ def process_single_gene(
 
         logger.debug(f"Processing gene: {gene} ({len(caas_positions)} CAAS positions)")
 
-        alignment_data = load_alignment_and_mappings(
-            alignment_path,
-            Path(taxid_mapping_path) if taxid_mapping_path else None,
-            gene_name=gene,
+        ctx = load_gene_context(
+            gene, alignment_dir, tree_file, taxid_mapping_path, asr_model,
+            asr_cache_dir or str(output_dir / "asr"), posterior_threshold,
+            ensembl_genes=ensembl_genes, threads=threads_per_gene,
         )
-
-        tree_data = load_and_match_tree(
-            Path(tree_file),
-            alignment_data,
-            Path(taxid_mapping_path) if taxid_mapping_path else None,
-        )
-
-        node_posteriors = None
-        rst_file = None
-        paml_tree_file = None
-
-        if asr_mode == "precomputed" and asr_cache_dir:
-            from src.asr.asr_single import SingleGeneASRConfig
-
-            asr_config = SingleGeneASRConfig(
-                alignment_path=alignment_path,
-                tree_path=Path(tree_file),
-                model=asr_model,
-                posterior_threshold=posterior_threshold,
-                output_dir=Path(asr_cache_dir),
-            )
-            try:
-                node_posteriors = load_precomputed_asr(gene, asr_config, alignment_data)
-                if node_posteriors:
-                    rst_file = getattr(node_posteriors, "rst_file", None)
-                    paml_tree_file = getattr(node_posteriors, "tree_file", None)
-            except FileNotFoundError as e:
-                logger.debug(f"Precomputed ASR not found for {gene}: {e}")
-
-        elif asr_mode == "compute":
-            gene_output_dir = Path(asr_cache_dir) if asr_cache_dir else output_dir / "asr"
-            gene_output_dir.mkdir(parents=True, exist_ok=True)
-
-            from src.asr.asr_single import SingleGeneASRConfig
-
-            asr_config = SingleGeneASRConfig(
-                alignment_path=alignment_path,
-                tree_path=Path(tree_file),
-                model=asr_model,
-                posterior_threshold=posterior_threshold,
-                output_dir=gene_output_dir,
-                threads=threads_per_gene,
-            )
-
-            with codeml_slot():
-                node_posteriors = run_asr_pipeline(
-                    gene,
-                    asr_config,
-                    skip_if_exists=True,
-                    alignment_data=alignment_data,
-                    tree_data=tree_data,
-                )
-            if node_posteriors:
-                rst_file = getattr(node_posteriors, "rst_file", None)
-                paml_tree_file = getattr(node_posteriors, "tree_file", None)
-
-        # Rebuild tree_data with PAML-labeled tree to align node IDs
-        if rst_file and paml_tree_file and Path(paml_tree_file).exists():
-            try:
-                ordered_nodes, id_mapping = build_tree_node_mapping(
-                    tree_file=Path(paml_tree_file), rst_file=Path(rst_file)
-                )
-                tree_data.nodes = ordered_nodes
-                tree_data.root = ordered_nodes[-1]
-                tree_data.node_mapping = id_mapping
-
-                def _tip_taxid(label: str) -> str:
-                    return label.split("_")[-1] if "_" in label else label
-
-                tree_data.tip_set = {
-                    _tip_taxid(lbl) for lbl in extract_tip_labels(tree_data.root)
-                }
-                logger.debug(
-                    "Updated tree_data from PAML tree for node/posterior alignment"
-                )
-            except Exception as e:
-                logger.warning(f"Could not rebuild tree_data from PAML tree: {e}")
+        if ctx is None:
+            logger.warning(f"{gene}: alignment or ASR unavailable, skipping")
+            return (gene, None)
+        alignment_data, tree_data, node_posteriors = ctx["alignment_data"], ctx["tree_data"], ctx["node_posteriors"]
+        paml_tree_file = getattr(node_posteriors, "tree_file", None)
 
         diag_root = output_dir / "diagnostics" if run_diagnostics else None
         posterior_dump_jsonl = None
@@ -916,10 +836,6 @@ def build_cycle_inputs(
 
 
 
-# Moved to core/driver.py (shared with the observed labeling); kept under its old name for callers.
-from src.core.driver import load_gene_context as _load_gene_asr_context  # noqa: E402
-
-
 # No per-scheme weight any more. scoring_compute.R section 2g aggregates a
 # position's schemes with a MEAN of caas_row, not a 0.2-weighted sum, because the
 # number of detecting schemes is a biochemical-distance property of the
@@ -1001,13 +917,13 @@ def _perms_worker_replay(
     """
     try:
         _t_ctx0 = time.perf_counter()
-        ctx = _load_gene_asr_context(
+        ctx = load_gene_context(
             gene, alignment_dir, tree_file, taxid_mapping_path,
             asr_model, asr_cache_dir, posterior_threshold, ensembl_genes,
         )
         _t_ctx1 = time.perf_counter()
         # Chunk-sizing diagnostic (docs/CT_DISAMBIGUATION_REPLAY_PERFORMANCE.md
-        # Stage 2): _load_gene_asr_context's cost is paid once PER CHUNK now
+        # Stage 2): load_gene_context's cost is paid once PER CHUNK now
         # (was once per gene, pre-Stage-2), so chunk_target_size needs this
         # number to pick a chunk size where that fixed cost stays a small
         # fraction of the chunk's real replay work. Cheap (one perf_counter call
@@ -1019,9 +935,9 @@ def _perms_worker_replay(
             f"(chunk of {len(cycle_tags)} cycle-tags)"
         )
         if ctx is None:
-            # _load_gene_asr_context now computes ASR on a cache miss, so ctx is
-            # None only means the alignment could not be found or codeml/parse
-            # failed for this one gene (already warned inside). Skip it.
+            # load_gene_context computes ASR on a cache miss, so ctx is None only
+            # when the alignment could not be found or codeml/parse failed for
+            # this one gene (already warned inside). Skip it.
             return (gene, [])
 
         # Load the gene's perm-replay discovery output in memory once. Two layouts,
