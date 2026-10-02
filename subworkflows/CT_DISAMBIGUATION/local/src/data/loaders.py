@@ -267,6 +267,15 @@ def list_gene_caas_positions(caas_metadata_path: Path, gene: str) -> List[int]:
     return sorted(set(positions))
 
 
+def as_bool(v: Any) -> bool:
+    """A metadata cell as a boolean: True/1/yes/y in any case; None and everything else False."""
+    if isinstance(v, bool):
+        return v
+    if v is None:
+        return False
+    return str(v).strip().lower() in {"true", "1", "yes", "y"}
+
+
 def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosition]:
     """
     Load CAAS metadata rows for a gene as independent CAASPosition entries.
@@ -276,13 +285,6 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
     """
     logger.info(f"Loading CAAS entries for {gene} from {caas_metadata_path}")
     df = read_caas_metadata_table(caas_metadata_path, gene)
-
-    def _b(v: Any) -> bool:
-        if isinstance(v, bool):
-            return v
-        if v is None:
-            return False
-        return str(v).strip().lower() in {"true", "1", "yes", "y"}
 
     entries: List[CAASPosition] = []
     # ``to_dict("records")`` once is far cheaper than ``iterrows()`` + per-column
@@ -316,7 +318,7 @@ def list_gene_caas_entries(caas_metadata_path: Path, gene: str) -> List[CAASPosi
             trait0_aa=trait0,
             caap_group=str(row.get("caap_group", "US") or "US"),
             amino_encoded=str(row.get("amino_encoded", "") or ""),
-            is_conserved_meta=_b(row.get("is_conserved_meta")),
+            is_conserved_meta=as_bool(row.get("is_conserved_meta")),
             conserved_pair=_parse_conserved_pair(str(row.get("conserved_pair", "") or "")),
             trait=str(row.get("trait", "") or ""),
         )
